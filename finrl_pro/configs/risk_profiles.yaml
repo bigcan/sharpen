@@ -1,0 +1,11 @@
+profiles:
+  - profile_id: default
+    name: Default Research
+    max_capital_at_risk: 0.10         # fraction of capital at risk (0-1]
+    max_drawdown_pct: 0.20            # max allowed drawdown as fraction (0-1]
+    leverage_cap: 2.0                 # max portfolio leverage
+    sandbox_required: true            # require sandbox before promotion
+    approved_by: Research Lead        # approver name/role
+    effective_date: 2025-01-01        # ISO date
+    fallback_agent: null              # optional fallback agent
+

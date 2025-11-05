@@ -19,6 +19,8 @@ inside the `finrl_pro/` namespace so upstream code remains untouched.
 
 ## Environment Setup
 
+Requires Python 3.11.
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
@@ -34,7 +36,22 @@ Configure MLflow and DVC endpoints before running pipelines:
 cp conf/finrl_pro.env.example conf/finrl_pro.env
 dvc remote add -d finrlpro-s3 s3://finrl-pro-artifacts
 dvc remote modify finrlpro-s3 endpointurl <S3_ENDPOINT>
-export $(grep -v '^#' conf/finrl_pro.env | xargs -0)
+# Bash/Zsh: export variables from .env safely
+set -a; source conf/finrl_pro.env; set +a
+```
+
+Windows PowerShell equivalent:
+
+```powershell
+Copy-Item conf/finrl_pro.env.example conf/finrl_pro.env
+python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -e .[dev]
+# Load env vars from file (ignores comments and blanks)
+Get-Content conf/finrl_pro.env | ForEach-Object {
+  if ($_ -and -not $_.StartsWith('#')) {
+    $name,$value = $_ -split '=',2
+    [System.Environment]::SetEnvironmentVariable($name,$value)
+  }
+}
 ```
 
 ## Core Workflows
@@ -98,7 +115,17 @@ under `reports/<fingerprint_id>/` with SHAP diagnostics and variance analysis.
 ## Risk & Observability Guardrails
 
 - Define capital exposure thresholds in `finrl_pro/configs/risk_profiles.yaml`
-  and load them through `RiskControlPolicy` before training.
+  and load them with the helper in `finrl_pro.mlops.risk_profiles` before training.
+
+  Example:
+
+  ```python
+  from pathlib import Path
+  from finrl_pro.mlops.risk_profiles import load_risk_profile, RiskControlPolicy
+
+  profile = load_risk_profile(Path("finrl_pro/configs/risk_profiles.yaml"), "default")
+  policy = RiskControlPolicy(profile)
+  ```
 - Structured logs flow through `finrl_pro.mlops.logger.MLOpsLogger`, emitting
   JSON payloads suitable for centralized observability tooling.
 - Risk alerts are routed by `finrl_pro.mlops.alerting.RiskAlertDispatcher` and
