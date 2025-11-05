@@ -1,12 +1,20 @@
-"""Module: shap_analysis
-Purpose: Prepare SHAP-based explainability workflows for FinRL Pro."""
+"""SHAP explainability helpers for FinRL Pro."""
 
 from __future__ import annotations
 
+from typing import Mapping
+
 
 class ShapAnalysis:
-    """Placeholder for SHAP value computation and visualization."""
+    """Compute lightweight SHAP summaries for evaluation reporting."""
 
-    def summarize(self) -> None:
-        """Produce SHAP summaries when implemented."""
-        raise NotImplementedError("SHAP analysis will be defined in future specs.")
+    def summarize(self, feature_scores: Mapping[str, float]) -> dict[str, float]:
+        """Return normalized feature contributions for reporting."""
+        if not feature_scores:
+            return {}
+
+        total = sum(abs(value) for value in feature_scores.values()) or 1.0
+        return {
+            feature: abs(value) / total
+            for feature, value in feature_scores.items()
+        }

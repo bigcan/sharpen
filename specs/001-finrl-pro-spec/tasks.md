@@ -86,12 +86,12 @@
 
 **Independent Test**: Simulate drawdown and data quality breaches; confirm training halts, alerts fire, and logs capture correlation metadata.
 
-- [ ] T024 [US3] Implement `RiskControlProfile` dataclass and validation in `finrl_pro/mlops/risk_profiles.py`
-- [ ] T025 [US3] Enforce risk thresholds and sandbox toggles during runs in `finrl_pro/training/trainer.py`
-- [ ] T026 [US3] Add drawdown and anomaly logging hooks in `finrl_pro/mlops/logger.py`
-- [ ] T027 [US3] Create alert routing utilities for risk events in `finrl_pro/mlops/alerting.py`
-- [ ] T028 [US3] Add integration test simulating risk breaches in `tests/integration/test_risk_controls.py`
-- [ ] T029 [US3] Extend API client with `/risk-profiles` operations in `finrl_pro/mlops/api_client.py`
+- [X] T024 [US3] Implement `RiskControlProfile` dataclass and validation in `finrl_pro/mlops/risk_profiles.py`
+- [X] T025 [US3] Enforce risk thresholds and sandbox toggles during runs in `finrl_pro/training/trainer.py`
+- [X] T026 [US3] Add drawdown and anomaly logging hooks in `finrl_pro/mlops/logger.py`
+- [X] T027 [US3] Create alert routing utilities for risk events in `finrl_pro/mlops/alerting.py`
+- [X] T028 [US3] Add integration test simulating risk breaches in `tests/integration/test_risk_controls.py`
+- [X] T029 [US3] Extend API client with `/risk-profiles` operations in `finrl_pro/mlops/api_client.py`
 
 **Checkpoint**: Risk breaches trigger automated mitigations with full observability coverage.
 
@@ -103,14 +103,14 @@
 
 **Independent Test**: Produce a walk-forward report that includes benchmark metrics, SHAP diagnostics, and links to stored fingerprints and datasets.
 
-- [ ] T030 [US4] Implement `BenchmarkCatalogEntry` dataclass and validation in `finrl_pro/eval/benchmark_catalog.py`
-- [ ] T031 [US4] Persist benchmark catalog store helpers in `finrl_pro/eval/benchmark_catalog.py`
-- [ ] T032 [US4] Seed baseline benchmark manifest in `finrl_pro/configs/benchmarks.yaml`
-- [ ] T033 [US4] Complete walk-forward evaluation pipeline with benchmark catalog integration in `finrl_pro/eval/walk_forward.py`
-- [ ] T034 [US4] Integrate SHAP explainability outputs into reports in `finrl_pro/explainability/shap_analysis.py`
-- [ ] T035 [US4] Build compliance report orchestration pipeline in `finrl_pro/eval/report_pipeline.py`
-- [ ] T036 [US4] Add evaluation reporting integration test in `tests/integration/test_reporting.py`
-- [ ] T037 [US4] Implement `/reports` API client coverage in `finrl_pro/mlops/api_client.py`
+- [X] T030 [US4] Implement `BenchmarkCatalogEntry` dataclass and validation in `finrl_pro/eval/benchmark_catalog.py`
+- [X] T031 [US4] Persist benchmark catalog store helpers in `finrl_pro/eval/benchmark_catalog.py`
+- [X] T032 [US4] Seed baseline benchmark manifest in `finrl_pro/configs/benchmarks.yaml`
+- [X] T033 [US4] Complete walk-forward evaluation pipeline with benchmark catalog integration in `finrl_pro/eval/walk_forward.py`
+- [X] T034 [US4] Integrate SHAP explainability outputs into reports in `finrl_pro/explainability/shap_analysis.py`
+- [X] T035 [US4] Build compliance report orchestration pipeline in `finrl_pro/eval/report_pipeline.py`
+- [X] T036 [US4] Add evaluation reporting integration test in `tests/integration/test_reporting.py`
+- [X] T037 [US4] Implement `/reports` API client coverage in `finrl_pro/mlops/api_client.py`
 
 **Checkpoint**: Compliance analysts can review standardized reports with traceable metrics and diagnostics.
 

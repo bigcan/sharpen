@@ -53,6 +53,25 @@ class MLOpsLogger:
         )
         self._logger.log(level, envelope.to_payload())
 
+    def log_drawdown_breach(self, drawdown: float, threshold: float) -> None:
+        """Log a drawdown breach event."""
+        self.log_event(
+            "finrl_pro.risk.drawdown_breach",
+            level=logging.WARNING,
+            context={"drawdown": drawdown, "threshold": threshold},
+        )
+
+    def log_data_anomaly(self, issue: str, *, details: Mapping[str, Any] | None = None) -> None:
+        """Log a data anomaly detected during training or evaluation."""
+        context = {"issue": issue}
+        if details:
+            context.update(details)
+        self.log_event(
+            "finrl_pro.data.anomaly_detected",
+            level=logging.WARNING,
+            context=context,
+        )
+
     def _build_context(
         self, context: Mapping[str, Any] | None
     ) -> dict[str, Any]:

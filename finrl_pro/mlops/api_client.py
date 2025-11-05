@@ -49,3 +49,19 @@ class FinRLProAPIClient:
     def create_evaluation(self, payload: Mapping[str, Any]) -> MutableMapping[str, Any]:
         """Launch an evaluation campaign using the benchmark catalog."""
         return self._request("POST", "/evaluations", json_payload=payload)
+
+    def upsert_risk_profile(self, payload: Mapping[str, Any]) -> MutableMapping[str, Any]:
+        """Create or update a risk control profile."""
+        return self._request("POST", "/risk-profiles", json_payload=payload)
+
+    def get_risk_profile(self, profile_id: str) -> MutableMapping[str, Any]:
+        """Fetch a risk control profile by identifier."""
+        return self._request("GET", f"/risk-profiles/{profile_id}")
+
+    def create_report(self, payload: Mapping[str, Any]) -> MutableMapping[str, Any]:
+        """Publish a compliance-ready performance report."""
+        return self._request("POST", "/reports", json_payload=payload)
+
+    def get_report(self, report_id: str) -> MutableMapping[str, Any]:
+        """Retrieve report metadata and approval status."""
+        return self._request("GET", f"/reports/{report_id}")

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Dict, Iterable, Mapping
+import logging
+from typing import Iterable, Mapping
 from uuid import uuid4
 
 from finrl_pro.configs.fingerprint_store import FingerprintStore
+from finrl_pro.mlops.alerting import RiskAlertDispatcher
+from finrl_pro.mlops.risk_controls import RiskControlPolicy
 from finrl_pro.mlops.fingerprint import ExperimentFingerprint
 from finrl_pro.mlops.logger import MLOpsLogger
 
@@ -18,9 +20,13 @@ class Trainer:
         self,
         fingerprint_store: FingerprintStore,
         logger: MLOpsLogger | None = None,
+        risk_policy: RiskControlPolicy | None = None,
+        alert_dispatcher: RiskAlertDispatcher | None = None,
     ) -> None:
         self._fingerprints = fingerprint_store
         self._logger = logger or MLOpsLogger()
+        self._risk_policy = risk_policy
+        self._alert_dispatcher = alert_dispatcher or RiskAlertDispatcher()
 
     def run(
         self,
@@ -32,8 +38,12 @@ class Trainer:
         metrics: Mapping[str, float],
         artifact_uris: Iterable[str],
         baseline_reference: str,
+        sandbox_enabled: bool = False,
     ) -> ExperimentFingerprint:
         """Execute the training workflow and persist fingerprint metadata."""
+        metrics_snapshot = dict(metrics)
+        self._enforce_risk(metrics_snapshot, sandbox_enabled=sandbox_enabled)
+
         fingerprint = ExperimentFingerprint(
             fingerprint_id=str(uuid4()),
             config_path=config_path,
@@ -43,7 +53,7 @@ class Trainer:
             artifact_uris=list(artifact_uris),
             baseline_reference=baseline_reference,
             module_versions=dict(module_versions),
-            metrics_snapshot=dict(metrics),
+            metrics_snapshot=metrics_snapshot,
         )
         fingerprint.validate()
 
@@ -74,6 +84,104 @@ class Trainer:
             },
         )
         return fingerprint
+
+    def _enforce_risk(
+        self,
+        metrics: Mapping[str, float],
+        *,
+        sandbox_enabled: bool,
+    ) -> None:
+        if not self._risk_policy:
+            return
+
+        profile = self._risk_policy.profile
+        breaches: list[str] = []
+
+        if profile.sandbox_required and not sandbox_enabled:
+            message = "Sandbox execution required before production promotion."
+            breaches.append(message)
+            self._emit_risk_alert("sandbox_required", message, {})
+
+        capital = metrics.get("capital_at_risk")
+        if capital is not None and capital > profile.max_capital_at_risk:
+            message = (
+                f"Capital at risk {capital:.4f} exceeds limit "
+                f"{profile.max_capital_at_risk:.4f}."
+            )
+            breaches.append(message)
+            self._emit_risk_alert(
+                "capital_breach",
+                message,
+                {
+                    "capital_at_risk": f"{capital:.6f}",
+                    "limit": f"{profile.max_capital_at_risk:.6f}",
+                },
+            )
+            self._logger.log_event(
+                "finrl_pro.risk.capital_breach",
+                level=logging.WARNING,
+                context={
+                    "capital_at_risk": capital,
+                    "limit": profile.max_capital_at_risk,
+                },
+            )
+
+        drawdown = metrics.get("max_drawdown")
+        if drawdown is not None and drawdown > profile.max_drawdown_pct:
+            message = (
+                f"Drawdown {drawdown:.4f} exceeds limit "
+                f"{profile.max_drawdown_pct:.4f}."
+            )
+            breaches.append(message)
+            self._emit_risk_alert(
+                "drawdown_breach",
+                message,
+                {
+                    "drawdown": f"{drawdown:.6f}",
+                    "limit": f"{profile.max_drawdown_pct:.6f}",
+                },
+            )
+            self._logger.log_drawdown_breach(drawdown, profile.max_drawdown_pct)
+
+        leverage = metrics.get("leverage")
+        if leverage is not None and leverage > profile.leverage_cap:
+            message = (
+                f"Leverage {leverage:.4f} exceeds cap "
+                f"{profile.leverage_cap:.4f}."
+            )
+            breaches.append(message)
+            self._emit_risk_alert(
+                "leverage_breach",
+                message,
+                {
+                    "leverage": f"{leverage:.6f}",
+                    "cap": f"{profile.leverage_cap:.6f}",
+                },
+            )
+            self._logger.log_event(
+                "finrl_pro.risk.leverage_breach",
+                level=logging.WARNING,
+                context={
+                    "leverage": leverage,
+                    "cap": profile.leverage_cap,
+                },
+            )
+
+        if breaches:
+            raise RuntimeError("; ".join(breaches))
+
+    def _emit_risk_alert(
+        self,
+        alert_type: str,
+        message: str,
+        details: Mapping[str, str],
+    ) -> None:
+        if self._alert_dispatcher:
+            self._alert_dispatcher.emit(
+                level=alert_type,
+                message=message,
+                details=dict(details),
+            )
 
     def _log_mlflow_run(
         self,
