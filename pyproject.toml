@@ -8,12 +8,20 @@ version = "0.1.0"
 description = "FinRL Pro scaffold extending FinRL Podracer with modular components."
 authors = [{ name = "FinRL Contributors" }]
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "torch>=2.2.0",
+    "pandas>=2.1.0",
+    "mlflow>=2.9.0",
+    "dvc[s3]>=3.0.0",
+]
 readme = "README.md"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=7.0",
+    "ruff>=0.1.8",
+    "black>=23.12",
+    "mypy>=1.7",
 ]
 
 [project.urls]

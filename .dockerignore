@@ -1,0 +1,34 @@
+# Git metadata
+.git
+.gitignore
+
+# Python artifacts
+__pycache__/
+*.py[cod]
+*.so
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.env
+.env*/
+.venv/
+venv/
+
+# Logs & reports
+*.log
+*.coverage*
+coverage/
+.pytest_cache/
+
+# Local data & secrets
+*.dvc
+.dvc/
+*.env
+.idea/
+.vscode/
+
+# Docker related
+Dockerfile*
+.dockerignore

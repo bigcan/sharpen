@@ -23,10 +23,10 @@
 
 **Purpose**: Align runtime and tooling dependencies for the FinRL Pro stack.
 
-- [ ] T001 Add PyTorch, pandas, MLflow, and DVC runtime dependencies in `pyproject.toml`
-- [ ] T002 Expand dev extras with ruff, black, and mypy tooling in `pyproject.toml`
-- [ ] T003 [P] Create MLflow and DVC environment sample configuration in `conf/finrl_pro.env.example`
-- [ ] T004 Update container toolchain with FinRL Pro dependencies in `docker/rlsmartagent-dev.df`
+- [X] T001 Add PyTorch, pandas, MLflow, and DVC runtime dependencies in `pyproject.toml`
+- [X] T002 Expand dev extras with ruff, black, and mypy tooling in `pyproject.toml`
+- [X] T003 [P] Create MLflow and DVC environment sample configuration in `conf/finrl_pro.env.example`
+- [X] T004 Update container toolchain with FinRL Pro dependencies in `docker/rlsmartagent-dev.df`
 
 ---
 
@@ -34,11 +34,11 @@
 
 **Purpose**: Establish constitutional safeguards and shared infrastructure before story work.
 
-- [ ] T005 Add extension boundary pytest guard in `tests/guards/test_extension_boundary.py`
-- [ ] T006 Implement fingerprint manifest store skeleton in `finrl_pro/configs/fingerprint_store.py`
-- [ ] T007 [P] Scaffold risk control base contracts in `finrl_pro/mlops/risk_controls.py`
-- [ ] T008 [P] Define evaluation harness base interface in `finrl_pro/eval/base.py`
-- [ ] T009 Expand structured observability baseline in `finrl_pro/mlops/logger.py`
+- [X] T005 Add extension boundary pytest guard in `tests/guards/test_extension_boundary.py`
+- [X] T006 Implement fingerprint manifest store skeleton in `finrl_pro/configs/fingerprint_store.py`
+- [X] T007 [P] Scaffold risk control base contracts in `finrl_pro/mlops/risk_controls.py`
+- [X] T008 [P] Define evaluation harness base interface in `finrl_pro/eval/base.py`
+- [X] T009 Expand structured observability baseline in `finrl_pro/mlops/logger.py`
 
 **Checkpoint**: Foundation complete—user story phases can execute independently.
 
@@ -50,12 +50,12 @@
 
 **Independent Test**: Run the scaffolder to generate a new agent under `finrl_pro/agents/` and confirm the diff touches only FinRL Pro directories while registering the module metadata.
 
-- [ ] T010 [US1] Implement `FinRLProModule` dataclass and registry operations in `finrl_pro/utils/module_registry.py`
-- [ ] T011 [US1] Seed module manifest with change-control metadata in `finrl_pro/configs/modules.yaml`
-- [ ] T012 [US1] Build module scaffolding utility for FinRL Pro namespaces in `finrl_pro/utils/module_scaffolder.py`
-- [ ] T013 [US1] Wire CLI entrypoint for module scaffolding in `finrl_pro/__main__.py`
-- [ ] T014 [US1] Add scaffolder guard test ensuring FinRL-only diffs in `tests/guards/test_module_scaffolder.py`
-- [ ] T015 [P] [US1] Document module extension workflow and constitutional checks in `docs/module_scaffolding.md`
+- [X] T010 [US1] Implement `FinRLProModule` dataclass and registry operations in `finrl_pro/utils/module_registry.py`
+- [X] T011 [US1] Seed module manifest with change-control metadata in `finrl_pro/configs/modules.yaml`
+- [X] T012 [US1] Build module scaffolding utility for FinRL Pro namespaces in `finrl_pro/utils/module_scaffolder.py`
+- [X] T013 [US1] Wire CLI entrypoint for module scaffolding in `finrl_pro/__main__.py`
+- [X] T014 [US1] Add scaffolder guard test ensuring FinRL-only diffs in `tests/guards/test_module_scaffolder.py`
+- [X] T015 [P] [US1] Document module extension workflow and constitutional checks in `docs/module_scaffolding.md`
 
 **Checkpoint**: FinRL Pro contributors can safely scaffold modules with automated boundary enforcement.
 
@@ -164,4 +164,3 @@
 - Team B: Picks up US2 once Foundational completes; coordinates API client work across T021–T023.
 - Team C: Focuses on US3 risk monitoring; assist with observability in T026–T027.
 - Team D: Handles US4 reporting, including benchmark catalog tasks T030–T032 and final polish items T038–T040 after upstream stories stabilize.
-

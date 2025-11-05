@@ -1,0 +1,7 @@
+modules:
+  - dotted_path: finrl_pro.agents.ensemble_agent
+    owner_team: research-core
+    change_control_id: null
+  - dotted_path: finrl_pro.training.trainer
+    owner_team: training-platform
+    change_control_id: null

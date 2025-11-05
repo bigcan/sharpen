@@ -10,7 +10,9 @@
 
 [CmdletBinding()]
 param(
-    [switch]$Json
+    [switch]$Json,
+    [switch]$RequireTasks,
+    [switch]$IncludeTasks
 )
 
 Set-StrictMode -Version Latest
