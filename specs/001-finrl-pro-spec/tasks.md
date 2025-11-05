@@ -67,14 +67,14 @@
 
 **Independent Test**: Execute `finrl_pro.training.reproduce` with a stored fingerprint and verify regenerated metrics fall within the ±2% baseline variance.
 
-- [ ] T016 [US2] Implement `ExperimentFingerprint` dataclass with validation in `finrl_pro/mlops/fingerprint.py`
-- [ ] T017 [US2] Persist fingerprints and config hashes via manifest updates in `finrl_pro/configs/fingerprint_store.py`
-- [ ] T018 [US2] Instrument trainer to log MLflow runs, DVC artifacts, and fingerprint metadata in `finrl_pro/training/trainer.py`
-- [ ] T019 [US2] Add reproducibility integration test covering fingerprint replay in `tests/integration/test_reproducibility.py`
-- [ ] T020 [US2] Create reproducibility CLI command for pipeline replays in `finrl_pro/training/commands/reproduce.py`
-- [ ] T021 [US2] Implement `/experiments` API client wrappers in `finrl_pro/mlops/api_client.py`
-- [ ] T022 [US2] Implement `/evaluations` API client wrappers in `finrl_pro/mlops/api_client.py`
-- [ ] T023 [US2] Add evaluation scheduling integration test hitting `/evaluations` in `tests/integration/test_evaluation_requests.py`
+- [X] T016 [US2] Implement `ExperimentFingerprint` dataclass with validation in `finrl_pro/mlops/fingerprint.py`
+- [X] T017 [US2] Persist fingerprints and config hashes via manifest updates in `finrl_pro/configs/fingerprint_store.py`
+- [X] T018 [US2] Instrument trainer to log MLflow runs, DVC artifacts, and fingerprint metadata in `finrl_pro/training/trainer.py`
+- [X] T019 [US2] Add reproducibility integration test covering fingerprint replay in `tests/integration/test_reproducibility.py`
+- [X] T020 [US2] Create reproducibility CLI command for pipeline replays in `finrl_pro/training/commands/reproduce.py`
+- [X] T021 [US2] Implement `/experiments` API client wrappers in `finrl_pro/mlops/api_client.py`
+- [X] T022 [US2] Implement `/evaluations` API client wrappers in `finrl_pro/mlops/api_client.py`
+- [X] T023 [US2] Add evaluation scheduling integration test hitting `/evaluations` in `tests/integration/test_evaluation_requests.py`
 
 **Checkpoint**: Experiment execution and replay flows generate deterministic fingerprints and verification tests pass.
 
