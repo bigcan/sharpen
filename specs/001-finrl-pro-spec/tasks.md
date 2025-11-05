@@ -118,9 +118,9 @@
 
 ## Final Phase: Polish & Cross-Cutting Concerns
 
-- [ ] T038 [P] Update top-level usage guidance and commands in `README.md`
-- [ ] T039 [P] Capture compliance and reproducibility runbook in `docs/compliance_playbook.md`
-- [ ] T040 Add end-to-end pipeline regression test for fingerprint-to-report flow in `tests/integration/test_end_to_end_pipeline.py`
+- [X] T038 [P] Update top-level usage guidance and commands in `README.md`
+- [X] T039 [P] Capture compliance and reproducibility runbook in `docs/compliance_playbook.md`
+- [X] T040 Add end-to-end pipeline regression test for fingerprint-to-report flow in `tests/integration/test_end_to_end_pipeline.py`
 
 ---
 
