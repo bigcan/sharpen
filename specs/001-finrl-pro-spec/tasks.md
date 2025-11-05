@@ -7,9 +7,9 @@
 
 - Extension boundary: T005 enforces FinRL Pro-only changes via pytest guard in `tests/guards/test_extension_boundary.py`.
 - Reproducibility assets: T006 and T017 establish fingerprint storage in `finrl_pro/configs/fingerprint_store.py`.
-- Risk controls: T007 and T022 define and enforce risk profiles via `finrl_pro/mlops/risk_controls.py` and `finrl_pro/training/trainer.py`.
-- Evaluation harness: T008 and T029 implement walk-forward evaluators in `finrl_pro/eval/base.py` and `finrl_pro/eval/walk_forward.py`.
-- Observability: T009 and T024 expand structured logging and alerting in `finrl_pro/mlops/logger.py` and `finrl_pro/mlops/alerting.py`.
+- Risk controls: T007 and T024 define and enforce risk profiles via `finrl_pro/mlops/risk_controls.py` and `finrl_pro/training/trainer.py`.
+- Evaluation harness: T008 and T033 implement walk-forward evaluators in `finrl_pro/eval/base.py` and `finrl_pro/eval/walk_forward.py`.
+- Observability: T009 and T026 expand structured logging and alerting in `finrl_pro/mlops/logger.py` and `finrl_pro/mlops/alerting.py`.
 
 ## Format: `[ID] [P?] [Story] Description`
 
@@ -73,6 +73,8 @@
 - [ ] T019 [US2] Add reproducibility integration test covering fingerprint replay in `tests/integration/test_reproducibility.py`
 - [ ] T020 [US2] Create reproducibility CLI command for pipeline replays in `finrl_pro/training/commands/reproduce.py`
 - [ ] T021 [US2] Implement `/experiments` API client wrappers in `finrl_pro/mlops/api_client.py`
+- [ ] T022 [US2] Implement `/evaluations` API client wrappers in `finrl_pro/mlops/api_client.py`
+- [ ] T023 [US2] Add evaluation scheduling integration test hitting `/evaluations` in `tests/integration/test_evaluation_requests.py`
 
 **Checkpoint**: Experiment execution and replay flows generate deterministic fingerprints and verification tests pass.
 
@@ -84,12 +86,12 @@
 
 **Independent Test**: Simulate drawdown and data quality breaches; confirm training halts, alerts fire, and logs capture correlation metadata.
 
-- [ ] T022 [US3] Implement `RiskControlProfile` dataclass and validation in `finrl_pro/mlops/risk_profiles.py`
-- [ ] T023 [US3] Enforce risk thresholds and sandbox toggles during runs in `finrl_pro/training/trainer.py`
-- [ ] T024 [US3] Add drawdown and anomaly logging hooks in `finrl_pro/mlops/logger.py`
-- [ ] T025 [US3] Create alert routing utilities for risk events in `finrl_pro/mlops/alerting.py`
-- [ ] T026 [US3] Add integration test simulating risk breaches in `tests/integration/test_risk_controls.py`
-- [ ] T027 [US3] Extend API client with `/risk-profiles` operations in `finrl_pro/mlops/api_client.py`
+- [ ] T024 [US3] Implement `RiskControlProfile` dataclass and validation in `finrl_pro/mlops/risk_profiles.py`
+- [ ] T025 [US3] Enforce risk thresholds and sandbox toggles during runs in `finrl_pro/training/trainer.py`
+- [ ] T026 [US3] Add drawdown and anomaly logging hooks in `finrl_pro/mlops/logger.py`
+- [ ] T027 [US3] Create alert routing utilities for risk events in `finrl_pro/mlops/alerting.py`
+- [ ] T028 [US3] Add integration test simulating risk breaches in `tests/integration/test_risk_controls.py`
+- [ ] T029 [US3] Extend API client with `/risk-profiles` operations in `finrl_pro/mlops/api_client.py`
 
 **Checkpoint**: Risk breaches trigger automated mitigations with full observability coverage.
 
@@ -101,12 +103,14 @@
 
 **Independent Test**: Produce a walk-forward report that includes benchmark metrics, SHAP diagnostics, and links to stored fingerprints and datasets.
 
-- [ ] T028 [US4] Implement `PerformanceReport` dataclass and validation in `finrl_pro/eval/reporting.py`
-- [ ] T029 [US4] Complete walk-forward evaluation pipeline with benchmark catalog integration in `finrl_pro/eval/walk_forward.py`
-- [ ] T030 [US4] Integrate SHAP explainability outputs into reports in `finrl_pro/explainability/shap_analysis.py`
-- [ ] T031 [US4] Build compliance report orchestration pipeline in `finrl_pro/eval/report_pipeline.py`
-- [ ] T032 [US4] Add evaluation reporting integration test in `tests/integration/test_reporting.py`
-- [ ] T033 [US4] Implement `/reports` API client coverage in `finrl_pro/mlops/api_client.py`
+- [ ] T030 [US4] Implement `BenchmarkCatalogEntry` dataclass and validation in `finrl_pro/eval/benchmark_catalog.py`
+- [ ] T031 [US4] Persist benchmark catalog store helpers in `finrl_pro/eval/benchmark_catalog.py`
+- [ ] T032 [US4] Seed baseline benchmark manifest in `finrl_pro/configs/benchmarks.yaml`
+- [ ] T033 [US4] Complete walk-forward evaluation pipeline with benchmark catalog integration in `finrl_pro/eval/walk_forward.py`
+- [ ] T034 [US4] Integrate SHAP explainability outputs into reports in `finrl_pro/explainability/shap_analysis.py`
+- [ ] T035 [US4] Build compliance report orchestration pipeline in `finrl_pro/eval/report_pipeline.py`
+- [ ] T036 [US4] Add evaluation reporting integration test in `tests/integration/test_reporting.py`
+- [ ] T037 [US4] Implement `/reports` API client coverage in `finrl_pro/mlops/api_client.py`
 
 **Checkpoint**: Compliance analysts can review standardized reports with traceable metrics and diagnostics.
 
@@ -114,9 +118,9 @@
 
 ## Final Phase: Polish & Cross-Cutting Concerns
 
-- [ ] T034 [P] Update top-level usage guidance and commands in `README.md`
-- [ ] T035 [P] Capture compliance and reproducibility runbook in `docs/compliance_playbook.md`
-- [ ] T036 Add end-to-end pipeline regression test for fingerprint-to-report flow in `tests/integration/test_end_to_end_pipeline.py`
+- [ ] T038 [P] Update top-level usage guidance and commands in `README.md`
+- [ ] T039 [P] Capture compliance and reproducibility runbook in `docs/compliance_playbook.md`
+- [ ] T040 Add end-to-end pipeline regression test for fingerprint-to-report flow in `tests/integration/test_end_to_end_pipeline.py`
 
 ---
 
@@ -125,8 +129,8 @@
 - **Setup (Phase 1)** → unlocks foundational safeguards.
 - **Foundational (Phase 2)** → required before any user story; guards and shared services must pass CI.
 - **User Story Order**: US1 (P1) → US2 (P1) → US3 (P2) → US4 (P3); later stories depend on artifacts from earlier ones but remain independently testable.
-- **API Client sequencing**: T021 precedes T027 and T033 to share connection utilities in `finrl_pro/mlops/api_client.py`.
-- **Tests**: Story-specific integration tests (T014, T019, T026, T032) validate increments before proceeding.
+- **API Client sequencing**: T021 and T022 land before T029 and T037 so shared client utilities evolve incrementally.
+- **Tests**: Story-specific integration tests (T014, T019, T023, T028, T036, T040) validate increments before proceeding.
 
 ---
 
@@ -134,9 +138,9 @@
 
 - After T002, run T003 and T007 in parallel—they touch distinct files (`conf/finrl_pro.env.example`, `finrl_pro/mlops/risk_controls.py`).
 - Within US1, T015 can proceed while T012–T014 finalize since it documents `docs/module_scaffolding.md`.
-- During US2, T020 can start once T018 stabilizes, while T021 can run concurrently with T019.
-- In US3, T025 and T024 can run in parallel once T022 lands because they target separate files (`finrl_pro/mlops/alerting.py`, `finrl_pro/mlops/logger.py`).
-- Final polish tasks T034 and T035 can proceed simultaneously with T036 queued afterward to validate the combined workflow.
+- During US2, T020 can start once T018 stabilizes, while T022–T023 execute alongside T021 because they expand the same client/test suite.
+- In US3, T027 and T026 can run in parallel once T024 lands because they target separate files (`finrl_pro/mlops/alerting.py`, `finrl_pro/mlops/logger.py`).
+- Final polish tasks T038 and T039 can proceed simultaneously with T040 queued afterward to validate the combined workflow.
 
 ---
 
@@ -150,14 +154,14 @@
 
 ### Incremental Delivery
 
-1. Add US2 reproducibility features and confirm T019 passes using stored fingerprints.
+1. Add US2 reproducibility features and confirm T019 passes using stored fingerprints; use T023 to verify evaluation job scheduling.
 2. Layer US3 risk governance to enforce thresholds and emit alerts.
-3. Conclude with US4 reporting to unlock compliance-ready outputs.
+3. Conclude with US4 reporting to unlock compliance-ready outputs backed by benchmark catalog tasks T030–T032.
 
 ### Parallel Team Allocation
 
 - Team A: Setup + Foundational, then US1 ownership.
-- Team B: Picks up US2 once Foundational completes; coordinates API client work with Team C.
-- Team C: Focuses on US3 risk monitoring; assist with observability in T024/T025.
-- Team D: Handles US4 reporting and final polish tasks (T034–T036) after upstream stories stabilize.
+- Team B: Picks up US2 once Foundational completes; coordinates API client work across T021–T023.
+- Team C: Focuses on US3 risk monitoring; assist with observability in T026–T027.
+- Team D: Handles US4 reporting, including benchmark catalog tasks T030–T032 and final polish items T038–T040 after upstream stories stabilize.
 
