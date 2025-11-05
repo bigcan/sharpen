@@ -1,6 +1,6 @@
 # Feature Specification: FinRL Pro Platform Kickoff
 
-**Feature Branch**: `1-finrl-pro-spec`  
+**Feature Branch**: `001-finrl-pro-spec`  
 **Created**: 2025-11-05  
 **Status**: Draft  
 **Input**: User description: "FinRL-Pro-Spec.md , use the doc as the guideline"
@@ -115,4 +115,3 @@ A compliance analyst reviews standardized reports measuring strategy uplift agai
 - Finalized FinRL Pro Constitution v1.0.0 for governance alignment.
 - Spec-Kit automation commands for generating plans, specs, and tasks compliant with constitutional gates.
 - Access to institutional data sources and credentialed storage for experiment artifacts.
-

@@ -2,7 +2,7 @@
 
 **Purpose**: Validate specification completeness and quality before proceeding to planning
 **Created**: 2025-11-05
-**Feature**: [specs/1-finrl-pro-spec/spec.md](../spec.md)
+**Feature**: [specs/001-finrl-pro-spec/spec.md](../spec.md)
 
 ## Content Quality
 
@@ -32,4 +32,3 @@
 ## Notes
 
 - Checklist verified against specification on 2025-11-05; no outstanding issues identified.
-

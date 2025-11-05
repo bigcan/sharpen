@@ -6,5 +6,6 @@
   ],
   "python.testing.unittestEnabled": false,
   "editor.formatOnSave": true,
-  "python.analysis.typeCheckingMode": "basic"
+  "python.analysis.typeCheckingMode": "basic",
+  "files.autoSave": "afterDelay"
 }
