@@ -1,0 +1,11 @@
+# Module: config
+# Purpose: Centralize configuration defaults for FinRL Pro components.
+
+finrl_pro:
+  metadata:
+    version: 0.1.0
+    description: Placeholder configuration for FinRL Pro scaffold.
+  training:
+    enabled: false
+  evaluation:
+    enabled: false
