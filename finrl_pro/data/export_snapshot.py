@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Iterable
 
 from finrl_pro.data.db import DatabaseClient
+from finrl_pro.mlops.logger import MLOpsLogger
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -27,10 +28,17 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     dsn = os.getenv("FINRL_PRO_DB_DSN", "")
     db = DatabaseClient(dsn=dsn)
+    logger = MLOpsLogger()
+    logger.log_event("finrl_pro.snapshot.export_start", context={"snapshot_id": args.id, "format": args.format})
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path = out_dir / f"{args.id}.{args.format}"
-    path = db.export_snapshot(args.id, fmt=args.format, out_path=str(out_path))
+    try:
+        path = db.export_snapshot(args.id, fmt=args.format, out_path=str(out_path))
+    except Exception as e:  # noqa: BLE001
+        logger.log_event("finrl_pro.snapshot.export_error", context={"error": str(e)})
+        raise
+    logger.log_event("finrl_pro.snapshot.export_success", context={"path": str(path)})
     print(json.dumps({"snapshot_id": args.id, "path": path, "format": args.format}, indent=2, sort_keys=True))
 
 

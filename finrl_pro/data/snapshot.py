@@ -11,12 +11,14 @@ import json
 import os
 import subprocess
 from uuid import uuid4
+import time
 from typing import Iterable
 
 import pandas as pd
 
 from finrl_pro.data.db import DatabaseClient, MarketBar
 from finrl_pro.data.yahoo_loader import YahooLoader
+from finrl_pro.mlops.logger import MLOpsLogger
 
 
 def _git_commit_hash() -> str:
@@ -37,6 +39,29 @@ def _lib_versions(provider: str) -> dict[str, str]:
 
         versions["yfinance"] = getattr(yf, "__version__", "unknown")
     return versions
+
+
+def _fetch_with_retry(loader: YahooLoader, *, tickers: list[str], start: str, end: str, interval: str, max_retries: int = 3, base_delay: float = 1.0, logger: MLOpsLogger | None = None) -> pd.DataFrame:
+    attempt = 0
+    while True:
+        try:
+            df = loader.fetch(tickers=tickers, start=start, end=end, interval=interval)
+            if logger:
+                logger.log_event(
+                    "finrl_pro.snapshot.fetch_success",
+                    context={"rows": int(df.shape[0]), "tickers": tickers, "interval": interval},
+                )
+            return df
+        except Exception as e:  # noqa: BLE001
+            attempt += 1
+            if logger:
+                logger.log_event(
+                    "finrl_pro.snapshot.fetch_error",
+                    context={"attempt": attempt, "error": str(e)},
+                )
+            if attempt > max_retries:
+                raise
+            time.sleep(base_delay * (2 ** (attempt - 1)))
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -61,7 +86,21 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     # Fetch data
     loader = YahooLoader()
-    df = loader.fetch(tickers=tickers, start=args.start, end=args.end, interval=args.interval)
+    logger = MLOpsLogger()
+    logger.log_event(
+        "finrl_pro.snapshot.start",
+        context={"provider": args.provider, "tickers": tickers, "start": args.start, "end": args.end, "interval": args.interval},
+    )
+    df = _fetch_with_retry(
+        loader,
+        tickers=tickers,
+        start=args.start,
+        end=args.end,
+        interval=args.interval,
+        max_retries=3,
+        base_delay=0.1,
+        logger=logger,
+    )
     if df.empty:
         raise SystemExit("No data returned for given parameters")
 
@@ -85,7 +124,12 @@ def main(argv: Iterable[str] | None = None) -> None:
     snapshot_id = str(uuid4())
     dsn = os.getenv("FINRL_PRO_DB_DSN", "")
     db = DatabaseClient(dsn=dsn)
-    inserted = db.upsert_bars(bars)
+    try:
+        inserted = db.upsert_bars(bars)
+    except Exception as e:  # noqa: BLE001
+        logger.log_event("finrl_pro.snapshot.db_upsert_error", context={"error": str(e), "rows": len(bars)})
+        raise
+    logger.log_event("finrl_pro.snapshot.db_upsert", context={"rows": inserted})
 
     params = {
         "tickers": tickers,
@@ -94,15 +138,20 @@ def main(argv: Iterable[str] | None = None) -> None:
         "interval": args.interval,
     }
     libs = _lib_versions(args.provider)
-    db.insert_snapshot(
-        snapshot_id=snapshot_id,
-        provider=args.provider,
-        params_json=json.dumps(params, sort_keys=True),
-        code_hash=_git_commit_hash(),
-        lib_versions_json=json.dumps(libs, sort_keys=True),
-        tickers=tickers,
-        row_count=inserted,
-    )
+    try:
+        db.insert_snapshot(
+            snapshot_id=snapshot_id,
+            provider=args.provider,
+            params_json=json.dumps(params, sort_keys=True),
+            code_hash=_git_commit_hash(),
+            lib_versions_json=json.dumps(libs, sort_keys=True),
+            tickers=tickers,
+            row_count=inserted,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.log_event("finrl_pro.snapshot.db_snapshot_insert_error", context={"error": str(e)})
+        raise
+    logger.log_event("finrl_pro.snapshot.db_snapshot_inserted", context={"snapshot_id": snapshot_id, "row_count": inserted})
 
     print(
         json.dumps(
