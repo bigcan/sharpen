@@ -14,6 +14,7 @@ from finrl_pro.mlops.risk_profiles import load_risk_profile
 from finrl_pro.mlops.risk_controls import RiskControlPolicy
 from finrl_pro.mlops.logger import MLOpsLogger
 from finrl_pro.training.trainer import Trainer
+from finrl_pro.data.loader import DataLoader
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -50,6 +51,22 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     tcfg = cfg["training"]
+
+    # Optional dataset resolution check for snapshot-backed datasets
+    ds_hash = str(tcfg.get("dataset_hash", ""))
+    if ds_hash.startswith("snapshot://"):
+        try:
+            df = DataLoader.resolve_dataset(ds_hash)
+            logger.log_event(
+                "finrl_pro.training.dataset_resolved",
+                context={"dataset_hash": ds_hash, "rows": int(df.shape[0])},
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.log_event(
+                "finrl_pro.training.dataset_resolve_error",
+                context={"dataset_hash": ds_hash, "error": str(e)},
+            )
+            raise
     fingerprint = trainer.run(
         config_path=str(tcfg["config_path"]),
         dataset_hash=str(tcfg["dataset_hash"]),
@@ -70,4 +87,3 @@ def main(argv: Iterable[str] | None = None) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-
