@@ -13,11 +13,11 @@ Prerequisites: TimescaleDB/PostgreSQL available; provider creds in `conf/finrl_p
  - [x] T102 Upsert/batch insert utilities for OHLCV bars in `finrl_pro/data/db.py`
  - [x] T103 Snapshot CLI in `finrl_pro/data/snapshot.py` (yfinance complete; Alpaca pending) (fetch → DB upsert → insert into `snapshots`/`snapshot_assets` → print JSON)
  - [x] T104 Export CLI in `finrl_pro/data/export_snapshot.py` (DB → DataFrame → Parquet/CSV with checksum)
-- [ ] T105 Loader resolution in `finrl_pro/data/loader.py` for `snapshot://<snapshot_id>`
+ - [x] T105 Loader resolution in `finrl_pro/data/loader.py` for `snapshot://<snapshot_id>`
  - [x] T106 Trainer integration (no change to interface; ensure fingerprints preserve snapshot URI)
  - [x] T107 README docs: snapshot workflow and commands
-- [ ] T108 Unit tests: schema creation, resolver plumbing (mocks)
-- [ ] T109 Integration test: snapshot → export → load flow (provider mocked)
+ - [x] T108 Unit tests: schema creation, resolver plumbing (mocks)
+ - [x] T109 Integration test: snapshot → export → load flow (provider mocked)
 - [ ] T110 Error handling: empty window, rate limits, retries, structured logs
 
 ## Execution Order
