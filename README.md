@@ -108,6 +108,27 @@ Get-Content conf/finrl_pro.env | ForEach-Object {
   print(report.summary_location)
   ```
 
+## Data Snapshots (DB-backed)
+
+FinRL Pro is adding database-backed data snapshots to keep the database as the system of record and export files only when needed (see specs/001-db-snapshots/spec.md:1).
+
+- Create a snapshot (stubbed CLI until DB plumbing lands):
+  ```bash
+  python -m finrl_pro.data.snapshot --provider yahoo \
+    --tickers SPY,AAPL --start 2020-01-01 --end 2024-01-01 --interval 1d
+  ```
+
+- Export a snapshot to a file (stubbed):
+  ```bash
+  python -m finrl_pro.data.export_snapshot --id <snapshot_id> --out data/snapshots --format parquet
+  ```
+
+- Use a snapshot in experiments by setting:
+  ```yaml
+  dataset_hash: snapshot://<snapshot_id>
+  ```
+  Resolution is planned in `finrl_pro/data/loader.py` and will query the DB for the requested slice.
+
 Each pipeline emits fingerprints to
 `finrl_pro/configs/fingerprints.yaml`, logs MLflow telemetry, and writes reports
 under `reports/<fingerprint_id>/` with SHAP diagnostics and variance analysis.
