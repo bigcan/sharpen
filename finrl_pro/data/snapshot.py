@@ -18,6 +18,7 @@ import pandas as pd
 
 from finrl_pro.data.db import DatabaseClient, MarketBar
 from finrl_pro.data.yahoo_loader import YahooLoader
+from finrl_pro.data.alpaca_loader import AlpacaLoader
 from finrl_pro.mlops.logger import MLOpsLogger
 
 
@@ -82,10 +83,16 @@ def main(argv: Iterable[str] | None = None) -> None:
         raise SystemExit("No tickers provided")
 
     if args.provider == "alpaca":
-        raise SystemExit("Alpaca provider not implemented yet")
+        api_key = os.getenv("ALPACA_API_KEY_ID")
+        api_secret = os.getenv("ALPACA_API_SECRET_KEY")
+        if not api_key or not api_secret:
+            raise SystemExit("Alpaca credentials not set (ALPACA_API_KEY_ID/ALPACA_API_SECRET_KEY)")
 
     # Fetch data
-    loader = YahooLoader()
+    if args.provider == "yahoo":
+        loader = YahooLoader()
+    else:
+        loader = AlpacaLoader(api_key=api_key, api_secret=api_secret)  # type: ignore[name-defined]
     logger = MLOpsLogger()
     logger.log_event(
         "finrl_pro.snapshot.start",

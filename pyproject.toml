@@ -18,6 +18,7 @@ dependencies = [
     "psycopg[binary]>=3.2.0",
     "yfinance>=0.2.40",
     "pyarrow>=14.0.0",
+    "alpaca-py>=0.23.0",
 ]
 readme = "README.md"
 
