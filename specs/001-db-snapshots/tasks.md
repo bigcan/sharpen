@@ -18,7 +18,7 @@ Prerequisites: TimescaleDB/PostgreSQL available; provider creds in `conf/finrl_p
  - [x] T107 README docs: snapshot workflow and commands
  - [x] T108 Unit tests: schema creation, resolver plumbing (mocks)
  - [x] T109 Integration test: snapshot → export → load flow (provider mocked)
-- [ ] T110 Error handling: empty window, rate limits, retries, structured logs
+ - [x] T110 Error handling: empty window, rate limits, retries, structured logs
 
 ## Execution Order
 - Schema (T101) → Upsert (T102) → Snapshot CLI (T103)
