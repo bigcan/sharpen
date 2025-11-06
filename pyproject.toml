@@ -15,6 +15,9 @@ dependencies = [
     "dvc[s3]>=3.0.0",
     "pyyaml>=6.0",
     "requests>=2.31.0",
+    "psycopg[binary]>=3.2.0",
+    "yfinance>=0.2.40",
+    "pyarrow>=14.0.0",
 ]
 readme = "README.md"
 
