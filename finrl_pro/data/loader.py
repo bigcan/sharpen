@@ -2,12 +2,19 @@
 Purpose: Define data ingestion and preprocessing scaffolds for FinRL Pro.
 
 Adds a resolver for dataset references. If a reference uses the
-`snapshot://<snapshot_id>` scheme, it is intended to be resolved via
-the database-backed snapshots per specs/001-db-snapshots.
+`snapshot://<snapshot_id>` scheme, it is resolved via the
+database-backed snapshots per specs/001-db-snapshots.
 """
 
 from __future__ import annotations
 
+
+from typing import Optional, Iterable
+import os
+
+import pandas as pd
+
+from finrl_pro.data.db import DatabaseClient
 
 SNAPSHOT_SCHEME = "snapshot://"
 
@@ -20,16 +27,28 @@ class DataLoader:
         raise NotImplementedError("Data loading pipeline not yet implemented.")
 
     @staticmethod
-    def resolve_dataset(dataset_hash: str):
+    def resolve_dataset(dataset_hash: str, *, client: Optional[DatabaseClient] = None) -> pd.DataFrame:
         """Resolve a dataset reference to a concrete source.
 
         Supported:
-        - snapshot://<snapshot_id> → load from DB (not yet implemented)
+        - snapshot://<snapshot_id> → load from DB
         - dvc://... or file paths → to be implemented as needed
         """
         if dataset_hash.startswith(SNAPSHOT_SCHEME):
             snapshot_id = dataset_hash[len(SNAPSHOT_SCHEME) :]
-            raise NotImplementedError(
-                f"Snapshot resolution not implemented yet for id '{snapshot_id}'."
-            )
+            db = client or DatabaseClient(dsn=os.getenv("FINRL_PRO_DB_DSN", ""))
+            bars = db.load_snapshot(snapshot_id)
+            if not bars:
+                raise ValueError(f"No data found for snapshot '{snapshot_id}'")
+            rows = []
+            for b in bars:  # accept dataclass or mapping
+                if hasattr(b, "__dict__"):
+                    rows.append({**getattr(b, "__dict__")})
+                else:
+                    rows.append(dict(b))
+            df = pd.DataFrame(rows)
+            # ensure logical column ordering when present
+            cols = ["timestamp", "ticker", "open", "high", "low", "close", "volume", "source", "vendor_rev"]
+            present = [c for c in cols if c in df.columns]
+            return df[present]
         raise NotImplementedError(f"Unknown dataset reference: {dataset_hash}")
