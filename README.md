@@ -129,6 +129,36 @@ FinRL Pro is adding database-backed data snapshots to keep the database as the s
   ```
   Resolution is planned in `finrl_pro/data/loader.py` and will query the DB for the requested slice.
 
+### Database Quick Start (Timescale/PostgreSQL)
+
+- Run TimescaleDB locally via Docker:
+  ```bash
+  docker run --name finrl-timescale -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d timescale/timescaledb:latest-pg16
+  # Create database (first time):
+  docker exec -it finrl-timescale psql -U postgres -c 'CREATE DATABASE finrl_pro;'
+  ```
+- Set DSN in your environment (or `conf/finrl_pro.env`):
+  ```bash
+  export FINRL_PRO_DB_DSN=postgresql://postgres:postgres@localhost:5432/finrl_pro
+  ```
+- Schema is initialized automatically by `DatabaseClient.init_schema()` the first time snapshot/export is invoked (will try `CREATE EXTENSION timescaledb` if available).
+
+### Providers
+
+- Yahoo Finance (no keys required):
+  ```bash
+  python -m finrl_pro.data.snapshot --provider yahoo --tickers SPY,AAPL \
+    --start 2020-01-01 --end 2024-01-01 --interval 1d
+  ```
+
+- Alpaca Market Data (set keys first):
+  ```bash
+  export ALPACA_API_KEY_ID=YOUR_KEY
+  export ALPACA_API_SECRET_KEY=YOUR_SECRET
+  python -m finrl_pro.data.snapshot --provider alpaca --tickers SPY,AAPL \
+    --start 2020-01-01 --end 2024-01-01 --interval 1d
+  ```
+
 Each pipeline emits fingerprints to
 `finrl_pro/configs/fingerprints.yaml`, logs MLflow telemetry, and writes reports
 under `reports/<fingerprint_id>/` with SHAP diagnostics and variance analysis.
