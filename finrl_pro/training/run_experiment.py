@@ -81,6 +81,8 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     # Optional: assemble features from DB and log feature_set_id (snapshot datasets only)
     ds_hash = str(tcfg.get("dataset_hash", ""))
+    use_pro_env = bool(tcfg.get("use_pro_env", False))
+    mv["features.env_mode"] = "B" if use_pro_env else "A"
     if ds_hash.startswith("snapshot://") and feat_cfg:
         try:
             snapshot_id = ds_hash.split("//", 1)[1]
