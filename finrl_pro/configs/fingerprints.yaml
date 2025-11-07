@@ -1,0 +1,31 @@
+fingerprints:
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d56ec949-4479-4f04-a33e-11a8c9d5c72e
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 90b5fc59d0fb4ad7bcc1addc10f1a076
+  module_versions:
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: snapshot://80cbef63-af98-4b88-adef-c1c1e2c03ae6
+  fingerprint_id: bb691857-d93b-40c6-bf80-4390c7c6d5a9
+  metrics_snapshot:
+    capital_at_risk: 0.06
+    leverage: 1.1
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.22
+  mlflow_run_id: 48c092405ddc44cda5db662610c6e92a
+  module_versions:
+    finrl_pro.training.trainer: 001-db-snapshots
+  seed: 123
