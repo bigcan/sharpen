@@ -30,7 +30,12 @@ class MarketBar:
 
 
 class DatabaseClient:
-    """Placeholder DB client for TimescaleDB interactions."""
+    """DB client for TimescaleDB/PostgreSQL interactions.
+
+    Provides snapshot storage, OHLCV upserts, and a simple feature store API
+    for custom engineered features keyed by a cache key and linked to a base
+    data snapshot.
+    """
 
     def __init__(self, dsn: str | None = None, *, connect: Callable[..., Any] | None = None) -> None:
         self._dsn = dsn or os.getenv("FINRL_PRO_DB_DSN") or ""
@@ -120,6 +125,135 @@ class DatabaseClient:
                 cur.executemany(sql, payloads)
             conn.commit()
             return len(payloads)
+
+    # ----------------------------- Feature Store -----------------------------
+
+    def init_feature_store(self) -> None:
+        """Initialize feature store tables: feature_sets and feature_values."""
+        stmts = [
+            """
+            CREATE TABLE IF NOT EXISTS feature_sets (
+              feature_set_id UUID PRIMARY KEY,
+              snapshot_id UUID NOT NULL REFERENCES snapshots(snapshot_id) ON DELETE CASCADE,
+              cache_key TEXT NOT NULL,
+              config_json JSONB NOT NULL,
+              code_hash TEXT NOT NULL,
+              lib_versions_json JSONB NOT NULL,
+              created_ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              CONSTRAINT feature_sets_uniq UNIQUE (snapshot_id, cache_key)
+            )
+            """,
+            """
+            CREATE TABLE IF NOT EXISTS feature_values (
+              timestamp TIMESTAMPTZ NOT NULL,
+              ticker TEXT NOT NULL,
+              feature_set_id UUID NOT NULL REFERENCES feature_sets(feature_set_id) ON DELETE CASCADE,
+              name TEXT NOT NULL,
+              value DOUBLE PRECISION NOT NULL,
+              PRIMARY KEY (timestamp, ticker, feature_set_id, name)
+            )
+            """,
+            # If Timescale is available, convert feature_values to hypertable
+            "SELECT 1 FROM create_hypertable('feature_values', by_range('timestamp'), if_not_exists => TRUE)",
+        ]
+        with self._connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                for stmt in stmts:
+                    try:
+                        cur.execute(stmt)
+                    except Exception:
+                        conn.rollback()
+                        continue
+                conn.commit()
+
+    def get_feature_set(self, *, snapshot_id: str, cache_key: str) -> str | None:
+        """Return feature_set_id if present for (snapshot_id, cache_key)."""
+        with self._connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT feature_set_id FROM feature_sets WHERE snapshot_id=%s AND cache_key=%s",
+                    (snapshot_id, cache_key),
+                )
+                row = cur.fetchone()
+                return row[0] if row else None
+
+    def insert_feature_set(
+        self,
+        *,
+        feature_set_id: str,
+        snapshot_id: str,
+        cache_key: str,
+        config_json: str,
+        code_hash: str,
+        lib_versions_json: str,
+    ) -> None:
+        """Insert a feature set record if not existing."""
+        with self._connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO feature_sets (feature_set_id, snapshot_id, cache_key, config_json, code_hash, lib_versions_json)
+                    VALUES (%s, %s, %s, %s::jsonb, %s, %s::jsonb)
+                    ON CONFLICT (snapshot_id, cache_key) DO NOTHING
+                    """,
+                    (feature_set_id, snapshot_id, cache_key, config_json, code_hash, lib_versions_json),
+                )
+            conn.commit()
+
+    def upsert_feature_values(self, feature_set_id: str, rows: Iterable[Mapping[str, object]], *, batch: int = 5000) -> int:
+        """Upsert feature values (timestamp,ticker,feature_set_id,name,value)."""
+        total = 0
+        with self._connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                sql = (
+                    "INSERT INTO feature_values (timestamp, ticker, feature_set_id, name, value) "
+                    "VALUES (%(timestamp)s, %(ticker)s, %(feature_set_id)s, %(name)s, %(value)s) "
+                    "ON CONFLICT (timestamp, ticker, feature_set_id, name) DO UPDATE SET value=EXCLUDED.value"
+                )
+                batch_rows: list[Mapping[str, object]] = []
+                for r in rows:
+                    batch_rows.append(r)
+                    if len(batch_rows) >= batch:
+                        cur.executemany(sql, batch_rows)
+                        total += len(batch_rows)
+                        batch_rows.clear()
+                if batch_rows:
+                    cur.executemany(sql, batch_rows)
+                    total += len(batch_rows)
+            conn.commit()
+        return total
+
+    def fetch_features(
+        self,
+        *,
+        feature_set_id: str,
+        tickers: Sequence[str],
+        start: str | None = None,
+        end: str | None = None,
+    ) -> pd.DataFrame:
+        """Fetch feature values for a set of tickers and optional date range."""
+        placeholders = ",".join(["%s"] * len(tickers))
+        where = ["ticker IN (" + placeholders + ")", "feature_set_id = %s"]
+        args: list[object] = [*tickers, feature_set_id]
+        if start:
+            where.append("timestamp >= %s")
+            args.append(start)
+        if end:
+            where.append("timestamp <= %s")
+            args.append(end)
+        sql = (
+            "SELECT timestamp, ticker, name, value FROM feature_values WHERE "
+            + " AND ".join(where)
+            + " ORDER BY timestamp ASC, ticker ASC"
+        )
+        with self._connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, args)
+                rows = cur.fetchall()
+        if not rows:
+            return pd.DataFrame(columns=["timestamp", "tic", "name", "value"])
+        df = pd.DataFrame(rows, columns=["timestamp", "tic", "name", "value"])
+        return df
 
     def insert_snapshot(
         self,
