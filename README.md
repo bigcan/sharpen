@@ -127,7 +127,7 @@ FinRL Pro is adding database-backed data snapshots to keep the database as the s
   ```yaml
   dataset_hash: snapshot://<snapshot_id>
   ```
-  Resolution is planned in `finrl_pro/data/loader.py` and will query the DB for the requested slice.
+  For training, the Pro loader (`finrl_pro/data/loader_pro.py`) queries the DB and assembles arrays for the env.
 
 ### Database Quick Start (Timescale/PostgreSQL)
 
@@ -162,6 +162,54 @@ FinRL Pro is adding database-backed data snapshots to keep the database as the s
 Each pipeline emits fingerprints to
 `finrl_pro/configs/fingerprints.yaml`, logs MLflow telemetry, and writes reports
 under `reports/<fingerprint_id>/` with SHAP diagnostics and variance analysis.
+
+## Feature Engineering (Pro) and Dynamic Env
+
+- Configure features per experiment in `finrl_pro/configs/experiments/*.yaml`:
+  ```yaml
+  features:
+    enable_custom: true
+    use_turbulence: true
+    families: { trend: true, momentum: true, vol: true, volume: false }
+    advanced:
+      fracdiff: { enable: true, cols: [close], d: 0.5, window: 256 }
+      wavelet:  { enable: false, cols: [close], wavelet: db4, level: 3, window: 256 }
+  ```
+- Assemble arrays from a snapshot and create a dynamic env (arbitrary `tech_dim`):
+  ```python
+  from finrl_pro.data.loader_pro import ProFeatureAssembler
+  from finrl_pro.envs.factory import make_pro_env
+
+  asm = ProFeatureAssembler(dsn=os.getenv("FINRL_PRO_DB_DSN")).assemble_from_snapshot(
+      snapshot_id="<uuid>", features_cfg=YOUR_FEATURES_CFG)
+  env = make_pro_env(asm)
+  ```
+- Reuses features via the DB feature store keyed by `features.cache_key`.
+
+## Feature Store CLI
+
+- Register features computed offline (wide Parquet) for a snapshot/config:
+  ```bash
+  python -m finrl_pro.data.feature_store build \
+    --snapshot <uuid> \
+    --config finrl_pro/configs/experiments/spy_snapshot.yaml \
+    --from-parquet data/features.parquet
+  ```
+- Export feature values:
+  ```bash
+  python -m finrl_pro.data.feature_store export \
+    --feature-set <uuid> --fmt parquet --out data/export/features.parquet
+  ```
+
+## AutoML Feature Ablation (Optuna)
+
+- Run a small study over families and advanced toggles (walk‑forward hook ready):
+  ```bash
+  python -m finrl_pro.automl.feature_search \
+    --experiment finrl_pro/configs/experiments/spy_snapshot.yaml \
+    --trials 10 --study-name demo-ablation
+  ```
+  Reuses precomputed features via the feature store; logs `features.cache_key` and `features.feature_set_id`.
 
 ## Risk & Observability Guardrails
 
