@@ -76,12 +76,14 @@ cython_debug/
 # Poetry
 poetry.lock
 
-# DVC
-*.dvc
-.dvc/
+# DVC (track .dvc files and .dvc dir)
+#!*.dvc
+#!.dvc/
 
-# Local data
+# Local data (ignore raw but keep DVC pointers)
 /data/
+!data/*.dvc
+!data/**/*.dvc
 finrl_pro/data/raw/
 finrl_pro/data/processed/
 

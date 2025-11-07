@@ -6,13 +6,10 @@ with columns: timestamp, ticker, open, high, low, close, volume.
 
 from __future__ import annotations
 
-from typing import Iterable
-
 import pandas as pd
 
 
 def _standardize(df: pd.DataFrame) -> pd.DataFrame:
-    cols = {c.lower(): c for c in df.columns}
     rename = {}
     for k in ["open", "high", "low", "close", "volume"]:
         # find matching column ignoring case

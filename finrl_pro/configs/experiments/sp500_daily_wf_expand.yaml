@@ -1,4 +1,4 @@
-﻿experiment_id: sp500_daily_demo
+﻿experiment_id: sp500_daily_wf_expand
 fingerprint_manifest: finrl_pro/configs/fingerprints.yaml
 risk_profile_file: finrl_pro/configs/risk_profiles.yaml
 risk_profile_id: default
@@ -45,4 +45,8 @@ features:
   cache:
     enabled: true
     dir: finrl_pro/data/processed
+
+# Note: Walk-forward split parameters are handled by the evaluation stage (finrl_pro/eval/walk_forward.py).
+# This training config mirrors the baseline and is intended to be paired with a walk-forward evaluator.
+
 

@@ -9,7 +9,7 @@ database-backed snapshots per specs/001-db-snapshots.
 from __future__ import annotations
 
 
-from typing import Optional, Iterable
+from typing import Optional
 from dataclasses import asdict, is_dataclass
 import os
 

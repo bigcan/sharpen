@@ -1,4 +1,4 @@
-﻿experiment_id: sp500_daily_demo
+experiment_id: sp500_multi_longonly
 fingerprint_manifest: finrl_pro/configs/fingerprints.yaml
 risk_profile_file: finrl_pro/configs/risk_profiles.yaml
 risk_profile_id: default
@@ -6,17 +6,23 @@ sandbox_enabled: true
 
 training:
   config_path: finrl_pro/configs/config.yaml
-  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  dataset_hash: dvc://datasets/sp500_multi_2016_2025
   seed: 42
   use_pro_env: false
   module_versions:
     finrl_pro.training.trainer: "FinRL-Pro-Research-1"
+    agent: PPO
+    action.space: ALLOCATION_VECTOR_LONG_ONLY
+    action.sum_to_one: true
+    reward.position_norm_penalty: 0.01
+    reward.turnover_penalty: 0.001
+    risk.sector_caps_soft: true
   metrics:
     sharpe_ratio: 1.10
-    max_drawdown: 0.15
+    max_drawdown: 0.20
     volatility: 0.25
     capital_at_risk: 0.08
-    leverage: 1.2
+    leverage: 1.0
   artifact_uris: []
   baseline_reference: benchmarks:sp500_rolling_1y
 

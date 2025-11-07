@@ -13,7 +13,7 @@ optional `turbulence_ary`.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Mapping, Sequence
+from typing import List, Mapping, Sequence
 
 import numpy as np
 import pandas as pd

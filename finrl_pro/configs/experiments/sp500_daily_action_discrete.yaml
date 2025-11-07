@@ -1,4 +1,4 @@
-﻿experiment_id: sp500_daily_demo
+﻿experiment_id: sp500_daily_action_discrete
 fingerprint_manifest: finrl_pro/configs/fingerprints.yaml
 risk_profile_file: finrl_pro/configs/risk_profiles.yaml
 risk_profile_id: default
@@ -11,6 +11,8 @@ training:
   use_pro_env: false
   module_versions:
     finrl_pro.training.trainer: "FinRL-Pro-Research-1"
+    agent: PPO
+    action.space: DISCRETE_{-1,0,+1}
   metrics:
     sharpe_ratio: 1.10
     max_drawdown: 0.15
@@ -45,4 +47,5 @@ features:
   cache:
     enabled: true
     dir: finrl_pro/data/processed
+
 
