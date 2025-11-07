@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Iterable, List
+from typing import Dict, List
 from uuid import uuid4
 
 from finrl_pro.eval.walk_forward import EvaluationResult

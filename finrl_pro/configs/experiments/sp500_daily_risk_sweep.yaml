@@ -1,7 +1,7 @@
-﻿experiment_id: sp500_daily_demo
+﻿experiment_id: sp500_daily_risk_sweep
 fingerprint_manifest: finrl_pro/configs/fingerprints.yaml
 risk_profile_file: finrl_pro/configs/risk_profiles.yaml
-risk_profile_id: default
+risk_profile_id: default  # change to conservative|balanced|aggressive to run per-profile
 sandbox_enabled: true
 
 training:
@@ -45,4 +45,9 @@ features:
   cache:
     enabled: true
     dir: finrl_pro/data/processed
+
+# Optional sweep metadata for external orchestrators (ignored by run_experiment):
+sweep:
+  risk_profile_ids: [conservative, balanced, aggressive]
+
 

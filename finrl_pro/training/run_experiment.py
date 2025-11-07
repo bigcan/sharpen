@@ -89,7 +89,7 @@ def main(argv: Iterable[str] | None = None) -> None:
             assembler = ProFeatureAssembler()
             asm = assembler.assemble_from_snapshot(snapshot_id=snapshot_id, features_cfg=feat_cfg)
             mv["features.feature_set_id"] = asm.feature_set_id
-        except Exception as e:  # noqa: BLE001
+        except Exception:  # noqa: BLE001
             # Non-fatal: continue without feature_set_id if assembly not available
             pass
 

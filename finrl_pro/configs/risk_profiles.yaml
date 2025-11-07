@@ -9,3 +9,32 @@ profiles:
     effective_date: 2025-01-01        # ISO date
     fallback_agent: null              # optional fallback agent
 
+  - profile_id: conservative
+    name: Conservative Risk
+    max_capital_at_risk: 0.05
+    max_drawdown_pct: 0.12
+    leverage_cap: 1.1
+    sandbox_required: true
+    approved_by: Risk Officer
+    effective_date: 2025-01-01
+    fallback_agent: null
+
+  - profile_id: balanced
+    name: Balanced Risk
+    max_capital_at_risk: 0.10
+    max_drawdown_pct: 0.20
+    leverage_cap: 1.5
+    sandbox_required: true
+    approved_by: Risk Officer
+    effective_date: 2025-01-01
+    fallback_agent: null
+
+  - profile_id: aggressive
+    name: Aggressive Risk
+    max_capital_at_risk: 0.20
+    max_drawdown_pct: 0.30
+    leverage_cap: 3.0
+    sandbox_required: true
+    approved_by: Research Lead
+    effective_date: 2025-01-01
+    fallback_agent: null

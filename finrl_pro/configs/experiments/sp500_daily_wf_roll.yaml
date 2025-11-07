@@ -1,4 +1,4 @@
-﻿experiment_id: sp500_daily_demo
+﻿experiment_id: sp500_daily_wf_roll
 fingerprint_manifest: finrl_pro/configs/fingerprints.yaml
 risk_profile_file: finrl_pro/configs/risk_profiles.yaml
 risk_profile_id: default
@@ -45,4 +45,7 @@ features:
   cache:
     enabled: true
     dir: finrl_pro/data/processed
+
+# Note: Rolling vs. expanding logic belongs to the evaluation step. This config matches training inputs.
+
 

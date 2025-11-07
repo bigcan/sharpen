@@ -7,7 +7,7 @@ without editing upstream code.
 
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Mapping, Sequence
+from typing import Dict, List, Mapping, Sequence
 
 
 # Baseline mapping aligned with defaults in FinRLPodracer/finrl/StockTrading.py

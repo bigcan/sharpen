@@ -29,3 +29,5154 @@ fingerprints:
   module_versions:
     finrl_pro.training.trainer: 001-db-snapshots
   seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 2786d550-851c-4f0b-93be-1744b0251359
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 08eb8e48a20a494087115e54fa5c1d4b
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 4efd4e5e-9f60-46be-9030-1c090e88767f
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 98b3c50707df491f94ca89abe606a1d6
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d07b7b3d-bbd2-4adc-b8d5-53ae08c025d5
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5ce08348eb344c5ba1e9d98b89527a7c
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a7957519-39ef-4b64-922a-dcca8b21bbbb
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: bac981003d174976b136bdf042afccbc
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 92068810-78f0-44b8-945e-5c6a892196de
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: e36199d7e22e448588404b9a0e32c5b9
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 42de2508-8b1c-416b-a60a-c719517c3e98
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 1345cd8f2b7f494c80c85ee31f33b88d
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 82694300-db61-4364-a642-836ce3e22876
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5d570fd912e94eea99b4a9c4f0a663bf
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 0a163349-2396-45d6-92a9-a6d2b3517604
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 47020f47e2f64c85a9a2dde17739424e
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: 7d662903-1c5b-4696-8ceb-720e5ef13254
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: f8192d736f224fe7ae3287f7d4259335
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: 59234f2a-fe0e-4c81-8160-21f378657269
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: 52db0ffdb15f45fb907249e9ddac6a1e
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: b10c30ed-2623-41ff-897b-c716f0a73ef2
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: fb23537167894da9b678748820a8437a
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 3bc5c3d2-9ba2-4d55-89a8-47cc0c09eb5a
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.1
+    volatility: 0.26
+  mlflow_run_id: 5cf7dd642aef43a78c127f4a2485a74d
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 2025
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: ac02cc53-2594-45e1-8097-710ce36bae41
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 2c3b0ff89ff84acc96cf46f5f665b72d
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 11
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2022_2025
+  fingerprint_id: 7bbdbb7b-ca97-4072-b343-9a91fbb37d30
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.06
+    volatility: 0.23
+  mlflow_run_id: a14de23ab0424787bb465e5d93761e94
+  module_versions:
+    agent: PPO
+    features.cache_key: ace933a63ae65ff49ac95574fda1926099d95229f0b2f57f57e855bbc6274a2e
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 314
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 79f1f3b4-97eb-4e52-87b7-415e3fdebe76
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 44978022f0af40b1ac9afaed098ebe6e
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 8
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_1h_2021_2025
+  fingerprint_id: 8eb4b482-4e54-453e-9cd5-2c07be918109
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.5
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.3
+  mlflow_run_id: a03e2dcf47c34957b0452b4caead51fc
+  module_versions:
+    agent: PPO
+    features.cache_key: 42310dff3b7874962eccb2b878ba61f2f94a3965d34266142b793144c8b531d1
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: e1a7df76-e45d-44e0-ac3f-81dbf497199d
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: d9ea004f81494b8693d63dc05e9d07d6
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: b70feb7d-f096-4c3d-ad89-dd53f6cb9944
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 4fea5f2c3db14325b4afdec5c9fc6d31
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 82241101-97da-40bb-8b45-c013427e4749
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: f7e2ba68ae7f4cfd93e5d6676b398385
+  module_versions:
+    agent: SAC
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: bda64891-29b4-4284-8f25-fc6737cfd9aa
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: e5aa216e5cbb4a4abd4769a812c10a35
+  module_versions:
+    agent: A2C
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: dd985a69-6be8-4fca-8768-824807518c07
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.14
+    sharpe_ratio: 1.14
+    volatility: 0.24
+  mlflow_run_id: 11af7f11a7714032815e3de2c40a6225
+  module_versions:
+    agent: ENSEMBLE
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 777
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 9289f04e-b9e8-4acf-ab3e-08b66c6e3fe8
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 0426e5bed5f34cfcbff504b80e6536f3
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: f380578b-455b-4ea5-948d-0e18324ae429
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 11d355a09a82428aba02e6fd51d3ebde
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 82167854-e97e-4ce4-a8c9-e18a83284762
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: a86a3094b87149eca7cb0bd675692106
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 0097562b-6a13-43c4-87b4-394562cf816e
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 152dc3b05ab2442bb44211d7da92d9d3
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: ab88ae58-9732-4e69-8a95-6ba8f3e61d3f
+  metrics_snapshot:
+    capital_at_risk: 0.1
+    leverage: 1.3
+    max_drawdown: 0.2
+    sharpe_ratio: 1.0
+    volatility: 0.27
+  mlflow_run_id: 4dfaf0c9497c4e16b6c42644371337c5
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 99
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: 59f1a55a-b6ed-4868-bade-fca407229ca9
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: 8134172e34d84af9a788ebd7c89f43cf
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 8631ca61-a62c-47da-950c-8e6b7e529d7e
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.1
+    volatility: 0.26
+  mlflow_run_id: 412e0a13880a4bf199716de5169852ec
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 2025
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 8aa0f74a-f048-462a-b7b0-c78fe3c4baf3
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 8f88145569914f39b321243c953757bd
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 11
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2022_2025
+  fingerprint_id: 3260560c-d45f-4681-91db-cb79089b47a3
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.06
+    volatility: 0.23
+  mlflow_run_id: e28249182ccb40a9b16e143427166009
+  module_versions:
+    agent: PPO
+    features.cache_key: ace933a63ae65ff49ac95574fda1926099d95229f0b2f57f57e855bbc6274a2e
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 314
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: b47ccecb-afb3-455b-9be2-2dbc75b9b972
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 7730de32b8a948d6ac96004adc81c2f5
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 8
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_1h_2021_2025
+  fingerprint_id: 0a513a79-71f9-4048-870f-d9ad3658478f
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.5
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.3
+  mlflow_run_id: 9e3bc9ecfce04fcfb5d06c5430607c29
+  module_versions:
+    agent: PPO
+    features.cache_key: 42310dff3b7874962eccb2b878ba61f2f94a3965d34266142b793144c8b531d1
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: e3701d28-56ad-48d9-9846-63ac3f694170
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: b43a5b13bcbd4672a7ccabdbfad7e9a1
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 9b2f50c6-26e0-40b5-800e-b6b487df2107
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 1044cf3aecef4a8bae6e180771b4d102
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 94a0a0cf-5b44-4ea1-abfa-47e2c47782ac
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 01db0a01ebf946518bc0b454d5cc1647
+  module_versions:
+    agent: SAC
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 1be5b243-f096-45d6-9101-05a08ed929c4
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: fbd02b07aac84435ac3a0f0dabc4ec73
+  module_versions:
+    agent: A2C
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 1e0dd612-f9ca-45e8-b09b-896688af84bc
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.14
+    sharpe_ratio: 1.14
+    volatility: 0.24
+  mlflow_run_id: 8ac7d6af46554273b6430c5f0d7276d6
+  module_versions:
+    agent: ENSEMBLE
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 777
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 3596d1c3-781f-45ae-a944-4355e0f35957
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 23cd5cf925704cf0a069bee505f90cbe
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: ea1517c0-1bbc-4488-bd72-ec779aeff617
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: da08c418524a49a5a046e270251300c0
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 333e6eb9-7378-4dea-880f-1505df550504
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 3d8b43bcae2247f7a65cadddda63ce8f
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 3381a835-8a6d-41f0-abd4-0eb69319430c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 3d2c8c54ff804359a3dcc488cd6dbbf7
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 97f5d47e-a493-439b-9765-3a1d75ccbff0
+  metrics_snapshot:
+    capital_at_risk: 0.1
+    leverage: 1.3
+    max_drawdown: 0.2
+    sharpe_ratio: 1.0
+    volatility: 0.27
+  mlflow_run_id: 5604d93e47f64b8784559c1f049dc61d
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 99
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: 86d5c9c3-d96f-4255-aa8b-a8fbbc07c74d
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: 3e6935dd6fe84d62a52de0305c6c42b1
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 69ead371-b92e-4d25-a46a-3f3dc89769a6
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.1
+    volatility: 0.26
+  mlflow_run_id: 32cafb46343146fe879d0d87bdd47611
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 2025
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: eb699e3e-bea3-40c4-926a-102b52a47a17
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 4a41cbe47eef4425933d2e90f1588a95
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 11
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2022_2025
+  fingerprint_id: 212d3ea9-c371-40c7-b619-0e335cda40d6
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.06
+    volatility: 0.23
+  mlflow_run_id: 61c053e4a4574b87bf228b301dc37aa5
+  module_versions:
+    agent: PPO
+    features.cache_key: ace933a63ae65ff49ac95574fda1926099d95229f0b2f57f57e855bbc6274a2e
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 314
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 8731b46a-b851-4cd5-a0af-ab62949f594b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 8b09a216c3054c2a915ddb31c57c7b92
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 8
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_1h_2021_2025
+  fingerprint_id: d00d1020-295f-40bf-a4fe-37f9ae9b5a03
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.5
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.3
+  mlflow_run_id: c9abc1c06626468dbf29daac27fb8b69
+  module_versions:
+    agent: PPO
+    features.cache_key: 42310dff3b7874962eccb2b878ba61f2f94a3965d34266142b793144c8b531d1
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 4a99dbe7-d340-40a2-9132-245b930e7b21
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: f565c5354e094f039ac2ecad8093d884
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: dfeaed2b-5d86-4e6c-b2f4-78f98ab74fa5
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: f2f82426a314423c942e9121a0cdc35a
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 986524c2-9aee-48cf-84f5-5847495e023c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: d504415ea0f94e13b189d4689ca477a6
+  module_versions:
+    agent: SAC
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: bdbf669b-ad0d-4112-8c6f-c6015a201c5c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: e569f17b75cc4c9180fd163a51d4852a
+  module_versions:
+    agent: A2C
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d715b144-1821-424b-954d-7f01f0fd3f1e
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.14
+    sharpe_ratio: 1.14
+    volatility: 0.24
+  mlflow_run_id: 435144af618242c9b2e7adc7914586f6
+  module_versions:
+    agent: ENSEMBLE
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 777
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 20c97bc0-46a9-4cbd-ab12-c22dbe2edc87
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: aa1dd14bf12943e492ce4c51a9ea75ce
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 2bfc47ab-52d6-4ef6-b0a8-be336c7d694c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: f317ba7616574c478753bbff356ac7b4
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: fa992893-a4c3-42bf-9573-f45e42b7a015
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: aef0dad9fb67438aaaea9084ca285104
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 2ada8abc-d4e6-43bb-ba16-73e175d51a60
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5df7455bfe504e029fdfb0e01b22ac41
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 2336f8e3-64de-43ac-8d46-7a81f3e185bd
+  metrics_snapshot:
+    capital_at_risk: 0.1
+    leverage: 1.3
+    max_drawdown: 0.2
+    sharpe_ratio: 1.0
+    volatility: 0.27
+  mlflow_run_id: 278dc26ffbcd4510a25b139173999cd3
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 99
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: 35ffb52d-b17e-412f-b88d-2f6c35479f81
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: 99974853aa3945b0ab37104502d3da00
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d6455dfe-ceae-4ce5-9eee-7ffebcf59935
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.1
+    volatility: 0.26
+  mlflow_run_id: 9d8834763c0e4997b7ed188f62e7ad19
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 2025
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 12d6e0a6-09ec-444d-8942-94e2700a7e51
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: d8c71075bf5b406da2651dcd9908b301
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 11
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2022_2025
+  fingerprint_id: c180943c-9f9b-4031-bbbe-34e6eea0655e
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.06
+    volatility: 0.23
+  mlflow_run_id: 89f3078a2ccf40a0b52fa5a75666ecd5
+  module_versions:
+    agent: PPO
+    features.cache_key: ace933a63ae65ff49ac95574fda1926099d95229f0b2f57f57e855bbc6274a2e
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 314
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: f2e4c71b-8419-4bd0-82e1-6b7857888d09
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 0b421bab32aa44a7824706ca2a75c433
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 8
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_1h_2021_2025
+  fingerprint_id: 1b3511c3-5f70-44b5-8044-55122da1f56d
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.5
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.3
+  mlflow_run_id: ea1f9569014747ee808291cec767eb8e
+  module_versions:
+    agent: PPO
+    features.cache_key: 42310dff3b7874962eccb2b878ba61f2f94a3965d34266142b793144c8b531d1
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 53a14ab3-6514-4e0e-bccd-8f565f70fa6d
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 35fb8feef8d84e56bf5828a7a4542419
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 0af10ab3-f4a9-42dc-b692-c848c290bf01
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 9e8a10c8b57c478da2291ac21276bb16
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 59edca35-9963-4095-b9df-6772ddd7fc93
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 17c2b15feb7e4df0bed1adeb714408af
+  module_versions:
+    agent: SAC
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a81e9678-249b-4a63-becb-c94a2ef70536
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: dc10be44be1f4f3a981d3228170dbfb6
+  module_versions:
+    agent: A2C
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 8fc2843f-5bdc-42b5-a954-4dd388b087ae
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.14
+    sharpe_ratio: 1.14
+    volatility: 0.24
+  mlflow_run_id: da1797f939454d31aaacf355f6d77be7
+  module_versions:
+    agent: ENSEMBLE
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 777
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 9c4128c4-a6ea-4f46-ad29-681ffc3fcf39
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 78df25b4f3c840ac91840dcabf34381f
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 399677d7-2b9c-4808-9f03-1df65b7c2d31
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 6cb1a33a7fd84798a0cbaa73f7cdc41b
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 86cbcc5c-ff0d-43de-9d87-e7993ec49bde
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 60b6a838db3e4e369bd376b0b206cc1d
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: f3a93d02-da02-4994-acc9-0b99ecbb56a9
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: f701727e2cde4fa8a5ca4a10c4f82aee
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 09f6f5d0-037c-4d24-84e7-2c8003ebde4d
+  metrics_snapshot:
+    capital_at_risk: 0.1
+    leverage: 1.3
+    max_drawdown: 0.2
+    sharpe_ratio: 1.0
+    volatility: 0.27
+  mlflow_run_id: 7a5dc29f77e2453db488e856393e5494
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 99
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: 50f94d0d-7aee-496a-ab24-498a7d3f2e96
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: 9a9d48c4bddb44eea2a97aa29e7e1b0c
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: dceb0f9a-e897-47b5-b7cf-b5bb41196601
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.1
+    volatility: 0.26
+  mlflow_run_id: 98e9aa64f61247d4aee0987c2f531368
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 2025
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 7f8e277d-233d-4fba-8eb0-1f64d72b5f73
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: f81b1cb8034944ce949b26a40caccaae
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 11
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2022_2025
+  fingerprint_id: 3a6b5d4c-04b1-45e9-97cb-d14b5dd88529
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.06
+    volatility: 0.23
+  mlflow_run_id: 500d165a82e34c1ea6be7bf80d7e0191
+  module_versions:
+    agent: PPO
+    features.cache_key: ace933a63ae65ff49ac95574fda1926099d95229f0b2f57f57e855bbc6274a2e
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 314
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: b10bab96-a27e-4125-af47-7fa73baab09e
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: e3971eb9cf7f47a19ed2d1aeb3ade2eb
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 8
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_1h_2021_2025
+  fingerprint_id: f936a932-890a-4198-a447-8425273a8130
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.5
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.3
+  mlflow_run_id: 2a3feffbb5a14332b53a5569e92630be
+  module_versions:
+    agent: PPO
+    features.cache_key: 42310dff3b7874962eccb2b878ba61f2f94a3965d34266142b793144c8b531d1
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: b6476946-376a-4eca-bf80-3f57c47bd66d
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 76a74ee9f877462b975980a6ecf17bb9
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: bbc3ff7c-374f-4d5b-ac83-d164b700fb31
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: de7536c3d7f845f1bbf098a6dcec283f
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: b153be78-7b7a-41a0-99df-239b8939d225
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 82c4ecfd47f54f96939d06400fbac562
+  module_versions:
+    agent: SAC
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 2da736b3-44a2-4b34-a03a-4b4ec57a04a2
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 4040c8632ffc44a8bad33dc05a971208
+  module_versions:
+    agent: A2C
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: ab583992-1cd2-4b4e-8e1d-9bfdd5dd6047
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.14
+    sharpe_ratio: 1.14
+    volatility: 0.24
+  mlflow_run_id: 690f7a39c2014ff8a1209fcb465094e0
+  module_versions:
+    agent: ENSEMBLE
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 777
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: ad06e0be-d64c-4b32-9020-f6c6cd3dd9d8
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 89e17e0f05bb45b19cf4b8764e768750
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 41f1b34c-0fb7-43e5-96cb-766108f60b50
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 77b70dc6d56848588fb01ee0b3c8a5f3
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 0fc21f38-1440-46c5-93ff-15d4c532582f
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 9ffc3cf188624854ada50f4e913dda3c
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 71f4a2d2-9231-4278-8b7b-ae9174abd01c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 1daeb1e7efad489cbdd16b70de5ff476
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a4113375-41bb-4816-b76b-fc7681007aa1
+  metrics_snapshot:
+    capital_at_risk: 0.1
+    leverage: 1.3
+    max_drawdown: 0.2
+    sharpe_ratio: 1.0
+    volatility: 0.27
+  mlflow_run_id: a437fbae990d4240a3e8598a08a15d78
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 99
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: 4f734a19-2dfd-49f0-9ff3-9530a59f0eb8
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: b1aa789c36b3437a9c710937a6af83a6
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a6702717-fa7b-448a-a38e-cfd0e826765f
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.1
+    volatility: 0.26
+  mlflow_run_id: db765f1a386445ee96bf860899f9f187
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 2025
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 6fa0ab78-bad5-4cb3-aa21-d0a89aa43aff
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: c07283b2b52d49a8a2251aa03f25968f
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 11
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2022_2025
+  fingerprint_id: dcb44d16-1c53-4964-8ace-0d25bfb2d6e6
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.06
+    volatility: 0.23
+  mlflow_run_id: 070978fda16e4b5eaa3eeb312a690d0f
+  module_versions:
+    agent: PPO
+    features.cache_key: ace933a63ae65ff49ac95574fda1926099d95229f0b2f57f57e855bbc6274a2e
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 314
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: ce311d89-7e18-4dfa-b5c7-47c773c6ae0f
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 6053184b7c3c4116966ef95bfb3a160d
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 8
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_1h_2021_2025
+  fingerprint_id: 01616527-6100-4487-9263-d0bb95d1a018
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.5
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.3
+  mlflow_run_id: bdd961927d904cc2ae58f75aeb8caf94
+  module_versions:
+    agent: PPO
+    features.cache_key: 42310dff3b7874962eccb2b878ba61f2f94a3965d34266142b793144c8b531d1
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 95cd363f-e1ab-40d8-b904-c00897792a90
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 45495c0cde054867b6f5850a34273af5
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: b34ba42a-53df-48c8-81e8-f160f5c51020
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 14f0ef16b57346b0bae02757e0f09f47
+  module_versions:
+    action.space: CONTINUOUS_[-1,+1]
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 46f85397-57ae-4cc7-9715-2c9e1a2a1fec
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: d1d44d2d2e28449491831f27a3774d5c
+  module_versions:
+    action.space: DISCRETE_{-1,0,+1}
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: c797cbc7-b13d-4687-9f15-568879662d18
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: e904a802a6cb4b9f8adbe92a265a5be0
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d4137146-b3ee-40bf-a693-a83c9c9fc85d
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 73579a6cd76e417eb8d716a229d9236a
+  module_versions:
+    agent: SAC
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 652938de-c7b3-474c-9bd5-f2d9955907c8
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: dc47844195b847c09c9efefbe78e2931
+  module_versions:
+    agent: A2C
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: ab61c68b-3e16-4458-b3d3-bd513587c3d8
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 9f8bba1bda6e46b9a8f659114fc7bc6d
+  module_versions:
+    agent: PPO
+    costs.bps: 10
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 1ca5025b-f495-4a5b-9c08-f83576960cb4
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: e2072fa0ef054fc79290a00786cfef84
+  module_versions:
+    agent: PPO
+    costs.bps: 1
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 8c167e82-912b-4fa2-9176-a09b7973da6a
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 0667f1d3f5e74515b0ddca4f90587026
+  module_versions:
+    agent: PPO
+    costs.bps: 5
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 0c2e6e17-efe7-440e-9c64-85c6a876d4a0
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.14
+    sharpe_ratio: 1.14
+    volatility: 0.24
+  mlflow_run_id: 1037f2094b754903b4e12b2a0dc7707d
+  module_versions:
+    agent: ENSEMBLE
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 777
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 128f78cc-e8bb-4a7c-bb50-5749566eb76b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 856c7982c0e7418dbcdc9217eb1f6d30
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 2
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 8f030549-b951-434c-a04a-f0604d33b685
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 826927491df84323ad3b94db4dbfe67b
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 4
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 9a0a3751-8c76-4845-9ddf-a2a03988e336
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5947d8c302ce45289d22fc6a89dff335
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 6
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 8f9002f9-ea43-4483-8001-8041263c799d
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 573a801509dc4b8fbe344077d82aa8e9
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.type: logR
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 7e83bb86-b7c8-4c5f-8a87-0fdd6b157a9e
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: a0c36aa240334679acbdde1c9cf28fd5
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.1
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 0c9160f9-111b-4db5-bd37-b670f1c53382
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 32c5a784e1144b8bb22d0f9948d11385
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.2
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 42d9b370-281b-4c2e-9a5a-5df252f35454
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: db682d1061d34e28b235014e9cb2bacc
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.3
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a99de954-a079-4de9-932a-f7c428a7515a
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: a8dac71d5c4641df808d13e313d49942
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: be8fda7e-4226-46da-891b-ff7e4077b917
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 1c2afda449a14b729eb546cc71492091
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 88838186-d5f9-4188-8be6-ad42bf0fdd58
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: b9bbe1a7ede140ef868a3c324d5437e3
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 2100cf55-451c-4033-92f4-abec4ae3f169
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5880ea6570c64cec90341da376510dc4
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 187eb843-e727-490f-832f-34685a8566bf
+  metrics_snapshot:
+    capital_at_risk: 0.1
+    leverage: 1.3
+    max_drawdown: 0.2
+    sharpe_ratio: 1.0
+    volatility: 0.27
+  mlflow_run_id: 27d5f8875525428197cec64136b21a32
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 99
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: 47e263ff-16ed-4f9b-aec4-2483bcce206c
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: b76819e98ec249859969af07184efc2e
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 74e13dd3-0c25-4830-9e3e-0300cd2b28fc
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.1
+    volatility: 0.26
+  mlflow_run_id: e70187b9270a4aa6bda623f0ffe00368
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 2025
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a6aca5c9-19ad-4c27-9304-f721c8831917
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 3fba3fe59f404bf59217fc045e9a28ac
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 11
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2022_2025
+  fingerprint_id: 6fa4cccd-f720-42e5-8860-fd092c41549c
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.06
+    volatility: 0.23
+  mlflow_run_id: fa69c88072d54b738d62bafebe5aa993
+  module_versions:
+    agent: PPO
+    features.cache_key: ace933a63ae65ff49ac95574fda1926099d95229f0b2f57f57e855bbc6274a2e
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 314
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d1c0014f-5aa6-466e-90f7-c182c3d30977
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 791a5d4f60cc4382aafa89a868e6bc55
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 8
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_1h_2021_2025
+  fingerprint_id: faea2c99-883b-4376-b254-7bcbcc5b587a
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.5
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.3
+  mlflow_run_id: 0c54cee693fc4ad58c6c45ac71b79690
+  module_versions:
+    agent: PPO
+    features.cache_key: 42310dff3b7874962eccb2b878ba61f2f94a3965d34266142b793144c8b531d1
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 5bd3b6dd-0141-476d-828a-22481ebd97e2
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 87ee5af0b3b7400eb30e768a2b9b4bec
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 126a783b-6e3a-4023-9dca-d77d70d10603
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 29cc9eadd7ab40b3a762ff70a584f39b
+  module_versions:
+    action.space: CONTINUOUS_[-1,+1]
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 7e33d4c3-0dd7-4478-ae8f-16cd3a930d0b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: de424ef945804857be95e0552a06598b
+  module_versions:
+    action.space: DISCRETE_{-1,0,+1}
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 3cf122e8-180a-4d82-b1a5-b3db9d505aa5
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 004c91d2225e420f9337953b8f979cee
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 220f11d3-d073-4cef-bffc-0e2bce262b4f
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 37703f0214fa4c4083c6ba1952c0bbb5
+  module_versions:
+    agent: SAC
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 19ef3a98-62b6-436a-b2d7-0ee98997128c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 17e879e20ce24e90ab6047bebc37d35a
+  module_versions:
+    agent: A2C
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: f3e2f33c-f8f9-423c-8c34-493339c90e26
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 98f2cc9c5cfc4e8781544f8d04caddaa
+  module_versions:
+    agent: PPO
+    costs.bps: 10
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 75af9a3f-cb3a-49db-85b0-4a57229f4d85
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: ba3f2bc4a7b94347a66308f98aab4019
+  module_versions:
+    agent: PPO
+    costs.bps: 1
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 923b1798-221b-4054-a3f9-e13da82fce6c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 15c8ae77fed64d459b38533b2b7f5c90
+  module_versions:
+    agent: PPO
+    costs.bps: 5
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: fa120adc-b42a-40c1-98f4-89a80ef0021a
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.14
+    sharpe_ratio: 1.14
+    volatility: 0.24
+  mlflow_run_id: 3e3405098a9a42d08589d749742a5521
+  module_versions:
+    agent: ENSEMBLE
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 777
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 3ef2beb3-8a91-4724-ae0f-188ac4363643
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 642feea0fb8e4679964ad5b0df61f696
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    features.set: baseline
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 78214334-375c-4698-9a2b-ee4d56b4848b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: c3a00e5327c94206ac20d4321a77f4b3
+  module_versions:
+    agent: PPO
+    features.cache_key: 4664870aa937ccb009f806ac7651fc36f9dd59a5e696e7c574b371299f19752f
+    features.env_mode: A
+    features.set: fracdiff_0.2
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 60966eb4-d8c1-4e97-a982-fe16d6a2a7c4
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 498512fec4274a6c8a24e91c3d02cbb5
+  module_versions:
+    agent: PPO
+    features.cache_key: d4beac4d4feaa448c2a734e507db42e9d50e54c65bb774a2d1bcf98f9184f67a
+    features.env_mode: A
+    features.set: fracdiff_0.3
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 7f29af47-8dc3-4232-858d-4e6312fd95c8
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: d12c1260439748b98082ee825fea7166
+  module_versions:
+    agent: PPO
+    features.cache_key: 0c9f297aa2d3b4af1894d50324c04a14a94092036d657620702176f0e1a6dc94
+    features.env_mode: A
+    features.set: fracdiff_0.4
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 2f687ffb-4aa2-44b3-8ef6-328cdd23739e
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: a06ca1939ddc4c88a9556daa65c119cd
+  module_versions:
+    agent: PPO
+    features.cache_key: ce5e437479158bf7a3c3bd3a6315724dcfceebe613f427e698c5796a7e1b4d05
+    features.env_mode: A
+    features.set: momvol
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 7aee7b60-32d5-45f3-a79b-d6c80606dd58
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: ae7ebdc6fa9e413495530dff154f6323
+  module_versions:
+    agent: PPO
+    features.cache_key: d5e8bc4a5c1546e6e5bf0ec62615a3982c2c600dbea29370022313ec0f9a1ace
+    features.env_mode: A
+    features.set: wavelet
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 77fa8687-db39-498d-98fb-87380d6013ee
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: fe348c9b35dd404ebb9f07ef15253544
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 2
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 56b0e608-28bd-48b9-aca3-7bbb5952260c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 57d8186e23d241f7b8222296f47af345
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 4
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d2d01eee-8b4d-4bac-aea4-4fe5e61457d4
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 7dffb05e2c604f8eaac33b327c378e19
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 6
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 64b85646-7a4d-49a7-b804-924fab1be3e4
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: bd6cee48947c4a5ebb204d6b5d8510f1
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.type: logR
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: cab01bf3-9856-4a2e-836a-bfacd7fbdb77
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: dc90c45e3b16459cb052e60c155a85e1
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.1
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 9207f29a-0813-4355-b1fb-ae1d33de862a
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 20c0737beb984c97a6a3617a09eca7fd
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.2
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 002ae527-87de-4935-869a-3b60900b116b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: fd9c9362d5d5419daa3cc895c03881f1
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.3
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 045d9cb7-b0da-4175-8410-1fe02ec68cbd
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 43a2da6636dc4a55b4440c8c3e4a2d85
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 1a851b62-0d54-4ad4-9c2f-7dc03fcea30e
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: cb385e2ace744c2f9bebfd052255973d
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: dc950e80-4349-4db6-a840-d4e8c6b72a30
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 238a31fbd5b54b84b16238ac07eb407c
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 87c15996-3c10-45e2-bfa9-3b838630a328
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 09558762f7a948d999f7d72e1e8ea443
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 8d28ccf8-00b3-4a15-b5bd-86f67cb94eb8
+  metrics_snapshot:
+    capital_at_risk: 0.1
+    leverage: 1.3
+    max_drawdown: 0.2
+    sharpe_ratio: 1.0
+    volatility: 0.27
+  mlflow_run_id: e366f6ab57ba4aefb19738354950bc70
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 99
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: 58a2b685-d696-4300-8d8a-a6058ad9132c
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: 79cb8b0b160744cab5dbdae0a680e1c7
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a4450a02-5c42-41af-9c8a-3caeefe079bc
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.1
+    volatility: 0.26
+  mlflow_run_id: 3fcf99d6187a4875843fddbde510797c
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 2025
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 1a78070d-4309-48df-b340-df18cdce6cd9
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 225bb6f4e0934695aed524781e458a32
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 11
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2022_2025
+  fingerprint_id: 93c94957-16e8-4641-8246-b0b829b16527
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.06
+    volatility: 0.23
+  mlflow_run_id: a200f2895e944ee5b5327f058aacf62b
+  module_versions:
+    agent: PPO
+    features.cache_key: ace933a63ae65ff49ac95574fda1926099d95229f0b2f57f57e855bbc6274a2e
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 314
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 96595c13-0398-42b0-8e71-3ab823c50edb
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 394d7c4b11874f3b8aafe19246f7b7a5
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 8
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_1h_2021_2025
+  fingerprint_id: ea47c59d-b2f3-4110-a44a-11c739cd27bd
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.5
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.3
+  mlflow_run_id: 19b1c64c32f14a789732ae4639f2f112
+  module_versions:
+    agent: PPO
+    features.cache_key: 42310dff3b7874962eccb2b878ba61f2f94a3965d34266142b793144c8b531d1
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 46ef3d32-58b8-4e5e-98b7-c0ce8cac2e71
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5a84f5d45f604bdaa087687143f9be62
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 3ec25892-3b97-4020-beb6-550996c46923
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 0763ebcf577842958d58b99a25cea97c
+  module_versions:
+    action.space: CONTINUOUS_[-1,+1]
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 8592667c-8f6e-45a6-a085-fcc660992797
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 3283d810858144ecbc4ffaa44ee3a56d
+  module_versions:
+    action.space: DISCRETE_{-1,0,+1}
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a70a933d-9467-4330-ad76-50e01e644267
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 7176b307e7bf486c83ba066288d13772
+  module_versions:
+    agent: A2C
+    agent.gamma: 0.99
+    agent.lr: 0.0003
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a93f3830-c979-44a9-a724-ffef9ff7cd83
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: b950e613d5004aa99447c8da96921368
+  module_versions:
+    agent: PPO
+    agent.entropy_coef: 0.0
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: e66a993f-b3b9-4775-8eb5-6728053e0415
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: e9c0d24def384b4a9c11ea7209e31364
+  module_versions:
+    agent: SAC
+    agent.gamma: 0.99
+    agent.lr: 0.0003
+    agent.policy_width: 256
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 0dc18664-d8ce-462d-a8d2-5881f9866072
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: a7859feac33c42ee8e5bc580496c2ee1
+  module_versions:
+    agent: TD3
+    agent.gamma: 0.99
+    agent.lr: 0.0003
+    agent.tau: 0.005
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 537e145a-9391-487f-b9ea-e6e5d6d99703
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: b0dd6a12f7ee4a57962cd442b13e4e18
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 9994550e-59c5-412d-a475-054878b1a475
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: bb744a38d41f4a0f8ea5f815eb9b3029
+  module_versions:
+    agent: SAC
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 624b5226-bfcb-4b75-97b0-ed5384c42b71
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: eda0d3681910494db828f2281528a6b3
+  module_versions:
+    agent: A2C
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a45a870d-ef89-44a8-bc11-d19d724c1f17
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 94b288648a9c44579a23544881d9f47d
+  module_versions:
+    agent: PPO
+    costs.bps: 10
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 2c31f715-0c98-4cb8-9832-8fecb09cc4c1
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: e2dc302941cf4552adcdfca7ec462f5f
+  module_versions:
+    agent: PPO
+    costs.bps: 1
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 67210571-c19f-4caa-80c7-b71426393088
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 2f64521d3dd044c3831abe03fbd45be1
+  module_versions:
+    agent: PPO
+    costs.bps: 5
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 001b8b94-ad6f-48ef-a92f-88b3338fa197
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.14
+    sharpe_ratio: 1.14
+    volatility: 0.24
+  mlflow_run_id: 8d5bba006a004e38a5af8605acedd699
+  module_versions:
+    agent: ENSEMBLE
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 777
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 9f4a0778-9883-4722-b83d-8e9c9e7fb70d
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 8038cef03ca64191a5df7aeb4acefe5c
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    features.set: baseline
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 447c2af0-2344-4166-83d9-02d1958da85c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: ffa1fd83384c4d66b6a70b407540a36c
+  module_versions:
+    agent: PPO
+    features.cache_key: 4664870aa937ccb009f806ac7651fc36f9dd59a5e696e7c574b371299f19752f
+    features.env_mode: A
+    features.set: fracdiff_0.2
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 983544a4-2312-4779-84f2-962932258e88
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 7415c296670443009bc94d64bf9b05cf
+  module_versions:
+    agent: PPO
+    features.cache_key: d4beac4d4feaa448c2a734e507db42e9d50e54c65bb774a2d1bcf98f9184f67a
+    features.env_mode: A
+    features.set: fracdiff_0.3
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d278aa70-ca5a-4d3a-b793-cf273c68e94b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 733ff86d7035455d92433ae9cc4c8c53
+  module_versions:
+    agent: PPO
+    features.cache_key: 0c9f297aa2d3b4af1894d50324c04a14a94092036d657620702176f0e1a6dc94
+    features.env_mode: A
+    features.set: fracdiff_0.4
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 166fd32d-9227-4c6d-9cdc-6ca93a84f694
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 9ea542d040c94061811e430975365260
+  module_versions:
+    agent: PPO
+    features.cache_key: ce5e437479158bf7a3c3bd3a6315724dcfceebe613f427e698c5796a7e1b4d05
+    features.env_mode: A
+    features.set: momvol
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 676aa14e-4529-4df9-a590-b01a5c65f088
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: a496edb64d244dcfa993f0da33d9c76d
+  module_versions:
+    agent: PPO
+    features.cache_key: d5e8bc4a5c1546e6e5bf0ec62615a3982c2c600dbea29370022313ec0f9a1ace
+    features.env_mode: A
+    features.set: wavelet
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: ca95f83d-6010-40cf-956e-143bdd0587e8
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 4d4dabfd3ca3424d864caa0a22c06aae
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 2
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 156999b6-4cf8-4ccb-87d8-ba64d33d2354
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5fb3b4167e8d409189c728119b5c7fcb
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 4
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 2e90f9c6-4bfa-4cd4-aaf9-246d6c69041a
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: bf0bc50bdc2947708774fcab88fe1a64
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 6
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 07aa82eb-fe2d-4183-98e6-c24f02c0a879
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: b94bd08512644316af240ef9cff0411e
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.type: logR
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d204bfd4-18d3-4b08-90d3-cfdcc244c318
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: f3018e6a9b4e4ad1866cd434e701de3a
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.1
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 5666e869-5d01-4cbb-bc0f-6a95f641d6f7
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: a83ef7e82fc34cc5b4761ddeacdb6451
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.2
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 77214e08-ce77-4893-bea1-444e19ad27e2
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 9653f3b813f84803acb020b9f3d9b392
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.3
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 3effd792-5117-43b9-8126-eb0a6e492937
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 19b8c80368c04e089527ab7d1ea2c635
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d52cd161-ed99-4f03-a008-81db2b4a5509
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 20688a807a134305b3b725fa788b9ed8
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d43f2220-f100-4696-9424-57b33a663777
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5dfae9deacf74a5ca364b52bf0ff4b88
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 094dedb1-deb8-4d5e-afd8-d1d65188a5e7
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 02d335d04956473db451435edba4ce0e
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 5dc87268-2e81-4da7-bace-3d7adc5181b8
+  metrics_snapshot:
+    capital_at_risk: 0.1
+    leverage: 1.3
+    max_drawdown: 0.2
+    sharpe_ratio: 1.0
+    volatility: 0.27
+  mlflow_run_id: ea02f830477c4bb4b3b2093bc3e520d3
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 99
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: 92629c1d-a9e1-4a14-ad91-d1a34a6451b2
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: cfd0481bb256436aa5c01d629d21652a
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 3274e9b8-54b6-4be2-b440-5c858d7edc80
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.1
+    volatility: 0.26
+  mlflow_run_id: 002e4b6327934df8a2cd889ef09d2669
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 2025
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 4a358e90-0090-4c30-9431-0d98f85ad4e5
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 8317b61461bf4988a1d79778970327ad
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 11
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2022_2025
+  fingerprint_id: 0d82f422-7d08-4f96-a747-b5408eeb601a
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.06
+    volatility: 0.23
+  mlflow_run_id: dda72e657abe4642a5b2682a3fb06cca
+  module_versions:
+    agent: PPO
+    features.cache_key: ace933a63ae65ff49ac95574fda1926099d95229f0b2f57f57e855bbc6274a2e
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 314
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 161a6a70-27b2-459f-abeb-28ea0ebb4ef7
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 903d89c851894d7da797be911ad78af1
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 8
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_1h_2021_2025
+  fingerprint_id: 5e1950ae-52e1-496f-bdd8-9c8502d1f087
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.5
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.3
+  mlflow_run_id: 8b82cbc7ecbd478fa5d9d2c094853a82
+  module_versions:
+    agent: PPO
+    features.cache_key: 42310dff3b7874962eccb2b878ba61f2f94a3965d34266142b793144c8b531d1
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: ffd957bd-6e94-46cb-8a05-1e1eb8a9c87a
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 25bb206dd1964128a70b94ab30cbb684
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 86daf940-c052-4ad9-bdae-1cdd151942a8
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 01e109f1d97e4a49ad479d15e0d6ac1d
+  module_versions:
+    action.space: CONTINUOUS_[-1,+1]
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: ca1f7bea-3576-491e-bf86-34c7a2cf380a
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 47cee3394d674c7a8a3fab152b7aff34
+  module_versions:
+    action.space: DISCRETE_{-1,0,+1}
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: f37c0d5c-5655-4b66-b08c-9a300563c437
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 9c26d4c16db3442fa4b96f9068b742ab
+  module_versions:
+    agent: A2C
+    agent.gamma: 0.99
+    agent.lr: 0.0003
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: afe0fe8e-534e-40e0-91be-c1214387f402
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: df695a0cc759484e89d031b1500a52fe
+  module_versions:
+    agent: PPO
+    agent.entropy_coef: 0.0
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: abb5a611-7d87-43f8-b1ae-526ee68d87c8
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 8f4cca4ca2f44efab0b7d011f7495a1c
+  module_versions:
+    agent: SAC
+    agent.gamma: 0.99
+    agent.lr: 0.0003
+    agent.policy_width: 256
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 09c866b3-5896-4f3e-94c6-24065b02d804
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 090289d374bf495282f4c5be8757a8e9
+  module_versions:
+    agent: TD3
+    agent.gamma: 0.99
+    agent.lr: 0.0003
+    agent.tau: 0.005
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 4780ea4e-d92d-4d1e-a376-a13c695b3f58
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 66afb6cf065642f5b20fff66e823b9e8
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: db4853b5-3e45-462a-a6a3-14d05b56a55e
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: d9793b6535264fed8151a22322be7a9e
+  module_versions:
+    agent: SAC
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: e2e66205-32f4-4e93-b578-d08409856881
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 8933a2081f3548238a4821633da6881c
+  module_versions:
+    agent: A2C
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 193a6880-aaf0-48e1-b853-8451351d972f
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: bf1bd520cef0424f92bf8dc5c854a8bf
+  module_versions:
+    agent: PPO
+    costs.bps: 10
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 294fae69-f156-4265-b525-37fe2e83076f
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: f41949350f5047958431af7953c68fc6
+  module_versions:
+    agent: PPO
+    costs.bps: 1
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: b0437c4c-276b-412f-9489-9949194c45df
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: e54a7e2343484f53b6af407debb7ea8b
+  module_versions:
+    agent: PPO
+    costs.bps: 5
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: b67b6a2a-83c4-402b-bf8d-8a90d3106349
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.14
+    sharpe_ratio: 1.14
+    volatility: 0.24
+  mlflow_run_id: ae36d81267f54fc08e8f26cd2fe1f8b7
+  module_versions:
+    agent: ENSEMBLE
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 777
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: b0cb44b5-194d-4e6c-8a10-51713b8b9575
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: b607b686bde04f51bf0cd898fe69d08b
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    features.set: baseline
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 082925a3-385c-4fdc-b285-2cf9993a250a
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 1731a2d451da405ab41be5f8ab8585c2
+  module_versions:
+    agent: PPO
+    features.cache_key: 4664870aa937ccb009f806ac7651fc36f9dd59a5e696e7c574b371299f19752f
+    features.env_mode: A
+    features.set: fracdiff_0.2
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: acff2aef-cd9a-4f83-a0e7-875ed2a11a4f
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: b18e2fc9591c49bd8b9f897b0a10d220
+  module_versions:
+    agent: PPO
+    features.cache_key: d4beac4d4feaa448c2a734e507db42e9d50e54c65bb774a2d1bcf98f9184f67a
+    features.env_mode: A
+    features.set: fracdiff_0.3
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 47e5f604-2955-47e4-b117-929ce7586304
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 08524122007a401c8d9969971c311ef9
+  module_versions:
+    agent: PPO
+    features.cache_key: 0c9f297aa2d3b4af1894d50324c04a14a94092036d657620702176f0e1a6dc94
+    features.env_mode: A
+    features.set: fracdiff_0.4
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 357f18c9-b3f1-40e8-ad3c-cca42e092198
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 855e4547ac4b402e964737152244233f
+  module_versions:
+    agent: PPO
+    features.cache_key: ce5e437479158bf7a3c3bd3a6315724dcfceebe613f427e698c5796a7e1b4d05
+    features.env_mode: A
+    features.set: momvol
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 0186b284-49b5-4ce4-885a-b594b685fe06
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: ec17e5ec883342d0a3b1c5e0093b6afb
+  module_versions:
+    agent: PPO
+    features.cache_key: d5e8bc4a5c1546e6e5bf0ec62615a3982c2c600dbea29370022313ec0f9a1ace
+    features.env_mode: A
+    features.set: wavelet
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: c739df49-9ef6-472c-bf0d-1b8913f3263e
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 0065737d12af499fb859cbc25244ffe0
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 2
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 01ba7178-e72a-42d8-a782-390917227ef3
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 4d5d54d4e5aa45e481abf0ffc3c28811
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 4
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: e957e31d-4469-4b78-be78-28489a349c6b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 0e972117fb84469d82e3512c7a5111d2
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 6
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 71bf2f56-ad6b-4f68-8d2a-5cd46b6e9039
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: ab7bd8dcfbca467089a2664abfc193b7
+  module_versions:
+    agent: PPO
+    agent.clip_range: 0.2
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: b7aba3dd-46b8-470d-89f4-2df9dfb8b1d6
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 442015d0639d4a78b08a1d7c18a9ac0a
+  module_versions:
+    agent: PPO
+    agent.gae_lambda: 0.9
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: f62913be-9416-4943-9787-a2f1460ba3c4
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 176145b5bd604ab0bc51a24451a8bbc7
+  module_versions:
+    agent: PPO
+    agent.gamma: 0.95
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: daced53b-119e-448b-b402-ef452ead4157
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5b248b9786824703ab9be5850fe5b987
+  module_versions:
+    agent: PPO
+    agent.entropy_coef: 0.01
+    agent.learning_rate: 0.0001
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: d3d897ab-5641-4e9f-b5ea-7c2d4528e69f
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 43a52dcc50ad4ab1b7e8d616271a48e9
+  module_versions:
+    agent: PPO
+    agent.entropy_coef: 0.0
+    agent.learning_rate: 0.0003
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: a04c295e-3ba2-4e31-81a8-71e75c025afe
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: bbbe5af018f6483287ea552230535119
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.type: logR
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 19c4e3f8-2727-415a-8cec-dab62b767840
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 4627afb16eef48aea03039ef9edcc719
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.1
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: f2f59d05-fb42-45d1-8a44-ffebe76f60ba
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: f3bc7970509c4150a0eab8a173c89193
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.2
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: f9daa176-7d16-48d0-9493-f7b359d5baa8
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: bc2b6d8d554e4c87872b74ae42fe8db0
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.3
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: edd1af38-ed89-413d-886e-d420bfb5a71b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: b73165ac34ae4817b38fad1b7473b9ca
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 07b8562e-cb8e-413a-a2d3-f797ba8f69de
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 746db4ff0e674103a2a5e0789d4639ec
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: bac42d1b-4f33-411d-9bf1-4f9e181606b0
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 654b6e971f994711ac56a855363e4bd8
+  module_versions:
+    agent: SAC
+    agent.learning_rate: 0.0001
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 5cff48c9-a60f-4926-b90d-41d822236f93
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 9686bbddb00949919be54d37913448c5
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 105cfde4-3753-4796-85f4-9dbe9456ca24
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: ee9be840843a40858a68df6b4e6a002d
+  module_versions:
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2020_2025
+  fingerprint_id: 2b66bd57-8367-40df-9b80-2d918bf0c182
+  metrics_snapshot:
+    capital_at_risk: 0.1
+    leverage: 1.3
+    max_drawdown: 0.2
+    sharpe_ratio: 1.0
+    volatility: 0.27
+  mlflow_run_id: b962fc8bac4f4509a8fc6a83b0615373
+  module_versions:
+    agent: PPO
+    features.cache_key: 755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 99
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/futures_daily_2018_2025
+  fingerprint_id: e6850565-d80e-496c-919f-50cbcd20620b
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.4
+    max_drawdown: 0.19
+    sharpe_ratio: 1.08
+    volatility: 0.28
+  mlflow_run_id: 94221c6489c04c00ba7cf4b018339663
+  module_versions:
+    agent: A2C
+    features.cache_key: 2bd9d2f04da6ee3cd5224444fac3401eb4752c9c8b77d3f68a9a921499bba128
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 21
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 29a325ee-ea67-4944-845d-0256bf76c0ab
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.1
+    volatility: 0.26
+  mlflow_run_id: a6fc2585ccd6468498e4e1721a0f315c
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 2025
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 668048ac-649f-48f6-9db9-f305bc4063cf
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 384f6010d62145bdb25afa03798e40c0
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 11
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2022_2025
+  fingerprint_id: eab85775-9c3c-4013-b9ec-e4856731ebf1
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.3
+    max_drawdown: 0.18
+    sharpe_ratio: 1.06
+    volatility: 0.23
+  mlflow_run_id: 469c1005331040d59f94734144fc92d7
+  module_versions:
+    agent: PPO
+    features.cache_key: ace933a63ae65ff49ac95574fda1926099d95229f0b2f57f57e855bbc6274a2e
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 314
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 2a41246f-895f-45a2-ae47-e22c46458c33
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.17
+    sharpe_ratio: 1.12
+    volatility: 0.24
+  mlflow_run_id: 5584c84bba5143f0b5db2a7abe5b70dd
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 8
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_1h_2021_2025
+  fingerprint_id: b88e97cc-47db-43e3-9b50-da7e5e35a2be
+  metrics_snapshot:
+    capital_at_risk: 0.09
+    leverage: 1.5
+    max_drawdown: 0.18
+    sharpe_ratio: 1.05
+    volatility: 0.3
+  mlflow_run_id: b0519a624f114eaa900fd83dc1262b68
+  module_versions:
+    agent: PPO
+    features.cache_key: 42310dff3b7874962eccb2b878ba61f2f94a3965d34266142b793144c8b531d1
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 123
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 4cf7c449-242c-486a-ae74-d8b24780a03b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: ea643ce41aff4ac49c47e08af131362e
+  module_versions:
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 762a0324-d789-48a5-90f8-a9ce931913c2
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 7e65397176ac4737894a83145522e3ac
+  module_versions:
+    action.space: CONTINUOUS_[-1,+1]
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: ca698c74-f31e-410c-8249-c7b84e2af6d0
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 36b54a26c30648e594b95084447559ed
+  module_versions:
+    action.space: DISCRETE_{-1,0,+1}
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: fbeef51a-79d7-4cf5-ac21-3cfe6ea181ab
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 8f062e77b7eb4e7db280682651327a61
+  module_versions:
+    agent: A2C
+    agent.gamma: 0.99
+    agent.lr: 0.0003
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 9d1a0c60-00f1-45f9-a324-fb22e78662ac
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5601fae6a23c4631b791ffee2de3fbe2
+  module_versions:
+    agent: PPO
+    agent.entropy_coef: 0.0
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: d9a2106f-43f6-4140-96d4-c234455f5213
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 4ef0f2f50f464f949a31116cd8741f57
+  module_versions:
+    agent: SAC
+    agent.gamma: 0.99
+    agent.lr: 0.0003
+    agent.policy_width: 256
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 4ff5544a-5a6c-48f0-9a11-46f7e60f8f6f
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: fbd4789308b948eda9446f3e58453a6c
+  module_versions:
+    agent: TD3
+    agent.gamma: 0.99
+    agent.lr: 0.0003
+    agent.tau: 0.005
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: eb7080fe-ec95-48c5-b8e9-25127024dca1
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 63e4570b231e49399fcea78dc9e794d7
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 41aa5729-e0ba-412a-bdab-caf5e136a29b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 703502727bea4a67a8d28565dcca6d41
+  module_versions:
+    agent: SAC
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 7e50495c-c4d2-4757-95ad-01bc72efec02
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 91f819fe22d04a5e9fc18934552aa290
+  module_versions:
+    agent: A2C
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 07485b53-524d-49cf-adcb-879bbaca8dd1
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 591cb5f53bd343a79c93a70ff1d4e18e
+  module_versions:
+    agent: PPO
+    costs.bps: 10
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 5712e910-8e62-424b-8e96-8ea92450cf64
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 2961b66e9a7c4c398429f52ab51b2a27
+  module_versions:
+    agent: PPO
+    costs.bps: 1
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 44c19fb5-154c-43c3-b277-1eba18d4fa6c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 6ff9348902264e97a2e0e35d9b3aefb5
+  module_versions:
+    agent: PPO
+    costs.bps: 5
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 5a892112-097e-4626-8fbf-515f7155a788
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.14
+    sharpe_ratio: 1.14
+    volatility: 0.24
+  mlflow_run_id: 5ef3cdd93a2749288313f86ecb93ddfb
+  module_versions:
+    agent: ENSEMBLE
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 777
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 6aa9ea48-7e30-4885-8364-5caa4aeb4e58
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: d2b1efc547c44f6983440312b719aa2d
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    features.set: baseline
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: fc645caa-4e75-46ea-a596-869c53cfb0e6
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: feffa29a8b8f47db8be23964e0e9496f
+  module_versions:
+    agent: PPO
+    features.cache_key: b70942b8124a0448350fb34d43cb1aa5bd5886356ebbca842a49fa411a17fa3b
+    features.env_mode: A
+    features.set: fracdiff_0.2
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 585d8bec-159f-436e-b7e2-25c7325b32df
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 28eaa5afb74c4412870ed3dc23180905
+  module_versions:
+    agent: PPO
+    features.cache_key: 3c75d9b8f2de3efa065cc75a0c475ad22de15dfe25d42d21105c286b5c44e88e
+    features.env_mode: A
+    features.set: fracdiff_0.3
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: cc616b73-2706-4913-90d5-fff34396deb7
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 4b26f16af61a492d99e4a1cb62895033
+  module_versions:
+    agent: PPO
+    features.cache_key: 545c3297e4aa92395512e8bbcb8dc90a1bbbf08ee3612dd9ec9399d708843efd
+    features.env_mode: A
+    features.set: fracdiff_0.4
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: f74266e9-d572-4f3d-8b16-ac33b1ff6210
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: acd024c3ed4e4dc8a73ee47ae522d8fc
+  module_versions:
+    agent: PPO
+    features.cache_key: 4f53ec7f5760a190771cb2515371bdb3cc70964f2a210f60880e95fd69962f01
+    features.env_mode: A
+    features.set: momvol
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 86ad2263-8d99-4e10-841c-f6d34e0a069d
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 25f5517e1f6247b2b664dd2b831ffe11
+  module_versions:
+    agent: PPO
+    features.cache_key: 6dd7b85a65cfd9755c20aed00a7c164a9113a89a6777a927cec4d1b756028d49
+    features.env_mode: A
+    features.set: wavelet
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: e2e9f0e7-9078-41fd-b33a-640ac6b51879
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5fc231d07c3744bca3062f6a4545a312
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 2
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 99d24728-a71c-4a79-ac70-6170bbfd7c8b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: a8ace245304849a3bd71183111ce3d9b
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 4
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: c01bb1e8-eabe-4907-8f4c-95b4614aa5ec
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 8cb2946e4b874594aa47a8ae2aa936fc
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 6
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 9fa95a06-00eb-4d8f-8be9-8a9166554f70
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 0461079473ae42e980ba4ab2c72c1358
+  module_versions:
+    agent: PPO
+    agent.clip_range: 0.2
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: dccad285-dc7a-4bca-91eb-c6c655274222
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 5c4f57eaccde4edb90c9ed3f8d77ea99
+  module_versions:
+    agent: PPO
+    agent.gae_lambda: 0.9
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: a06cc462-1707-4166-aeef-aaacb462aa0b
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 4e253201966c429e99465405c36ffd78
+  module_versions:
+    agent: PPO
+    agent.gamma: 0.95
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: f9234eac-7311-4172-9df0-c293d9473c7f
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 6d56583647614259bd7d3463c884bc98
+  module_versions:
+    agent: PPO
+    agent.entropy_coef: 0.01
+    agent.learning_rate: 0.0001
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 1c7a7ad4-c8d4-48fd-8fdc-ff78eadc5407
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: f50251519bcf4bdfbe4b5eb7b5b7200c
+  module_versions:
+    agent: PPO
+    agent.entropy_coef: 0.0
+    agent.learning_rate: 0.0003
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 6d82129c-12d6-4144-94ef-c2fed9884b65
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 3f418115f3df4103b1e3d8289e797879
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.type: logR
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 0e20dbb1-e6d6-4f31-825d-1714a2ed1c91
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: ab4b6af328a7482a8abe44ca704655c2
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.1
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 5956260f-81df-4d3c-8695-2c80357b30a5
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: cc2d7cf7e308412c9a0384eb06fb2a54
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.2
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: d5800e48-ffcb-494c-b641-0ea71a222b91
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: eb8fc7d89fe647fd96960714bc747532
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.lambda_vol: 0.3
+    reward.type: logR_minus_lambda_vol
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 047726e3-ccd6-4b71-b99c-acd6a8c0ea85
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: a1547f61b67645bc98903506a294f346
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: b735d8e0-0578-4f61-98c6-9830c9c30af2
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: fff1652b98dc4c92805ae56a93881133
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: c15a0882-aebf-4efb-84ca-2c6cd1e0fa8c
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 509d08555d1540b1acc3fc8b263aff4d
+  module_versions:
+    agent: SAC
+    agent.learning_rate: 0.0001
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 7ffedf4d-a9f3-47b3-92b5-c9cb92bbab46
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 923794da0c8b4a3289a823cd0e11cc39
+  module_versions:
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: ef0a8786-3b50-4f9d-9114-deb524d27811
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: e2c7db7ab090472d8aaedd32e76dc138
+  module_versions:
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_multi_2016_2025
+  fingerprint_id: 98fb3ea8-de82-4a91-a9f4-02ec2955af70
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.0
+    max_drawdown: 0.2
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: a2b1977adee74abc9b2b9c41be61bfad
+  module_versions:
+    action.space: LONG_OR_FLAT_PER_ASSET
+    agent: PPO
+    features.cache_key: 114e61b2743133bdc2672677b5aac1f9e544f1f67dcd2b360de9b5530ce3ad83
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.turnover_penalty: 0.001
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_multi_2016_2025
+  fingerprint_id: 992776de-c624-4a94-b7dd-31f879f56749
+  metrics_snapshot:
+    capital_at_risk: 0.08
+    leverage: 1.0
+    max_drawdown: 0.2
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  mlflow_run_id: 4547c453895d4174a7e9e7d369cba613
+  module_versions:
+    action.space: ALLOCATION_VECTOR_LONG_ONLY
+    action.sum_to_one: true
+    agent: PPO
+    features.cache_key: 114e61b2743133bdc2672677b5aac1f9e544f1f67dcd2b360de9b5530ce3ad83
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.position_norm_penalty: 0.01
+    reward.turnover_penalty: 0.001
+    risk.sector_caps_soft: true
+  seed: 42
+- artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: f19803e8-baec-43e5-bab1-ead931e32e7b
+  metrics_snapshot:
+    capital_at_risk: 0.1
+    leverage: 1.3
+    max_drawdown: 0.2
+    sharpe_ratio: 1.0
+    volatility: 0.27
+  mlflow_run_id: 56006790e40c4279bb755e68b173d91e
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 99
