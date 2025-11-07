@@ -19,3 +19,28 @@ training:
   artifact_uris: []
   baseline_reference: benchmarks:sp500_rolling_1y
 
+features:
+  enable_custom: false
+  use_turbulence: false
+  families:
+    trend: true
+    momentum: true
+    vol: true
+    volume: false
+  stockstats_overrides: []
+  advanced:
+    fracdiff:
+      enable: false
+      cols: [close]
+      d: 0.5
+      window: 256
+      min_weight: 1.0e-5
+    wavelet:
+      enable: false
+      cols: [close]
+      wavelet: db4
+      level: 3
+      window: 256
+  cache:
+    enabled: true
+    dir: finrl_pro/data/processed

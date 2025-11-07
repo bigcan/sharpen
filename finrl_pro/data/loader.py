@@ -10,6 +10,7 @@ from __future__ import annotations
 
 
 from typing import Optional, Iterable
+from dataclasses import asdict, is_dataclass
 import os
 
 import pandas as pd
@@ -42,10 +43,23 @@ class DataLoader:
                 raise ValueError(f"No data found for snapshot '{snapshot_id}'")
             rows = []
             for b in bars:  # accept dataclass or mapping
-                if hasattr(b, "__dict__"):
-                    rows.append({**getattr(b, "__dict__")})
+                if is_dataclass(b):
+                    rows.append(asdict(b))
                 else:
-                    rows.append(dict(b))
+                    try:
+                        rows.append(dict(b))
+                    except Exception:
+                        rows.append({
+                            'timestamp': getattr(b, 'timestamp'),
+                            'ticker': getattr(b, 'ticker'),
+                            'open': getattr(b, 'open'),
+                            'high': getattr(b, 'high'),
+                            'low': getattr(b, 'low'),
+                            'close': getattr(b, 'close'),
+                            'volume': getattr(b, 'volume'),
+                            'source': getattr(b, 'source'),
+                            'vendor_rev': getattr(b, 'vendor_rev'),
+                        })
             df = pd.DataFrame(rows)
             # ensure logical column ordering when present
             cols = ["timestamp", "ticker", "open", "high", "low", "close", "volume", "source", "vendor_rev"]

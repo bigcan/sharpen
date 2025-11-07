@@ -14,6 +14,7 @@ from finrl_pro.mlops.risk_profiles import load_risk_profile
 from finrl_pro.mlops.risk_controls import RiskControlPolicy
 from finrl_pro.mlops.logger import MLOpsLogger
 from finrl_pro.training.trainer import Trainer
+from finrl_pro.data.cache import feature_cache_key
 from finrl_pro.data.loader import DataLoader
 
 
@@ -67,11 +68,21 @@ def main(argv: Iterable[str] | None = None) -> None:
                 context={"dataset_hash": ds_hash, "error": str(e)},
             )
             raise
+    # Compose module versions with feature cache key for reproducibility
+    mv = dict(tcfg.get("module_versions", {}))
+    feat_cfg = cfg.get("features", {})
+    try:
+        fkey = feature_cache_key(str(tcfg.get("dataset_hash", "")), feat_cfg)
+        mv["features.cache_key"] = fkey
+    except Exception:
+        # Keep going if features block is malformed
+        pass
+
     fingerprint = trainer.run(
         config_path=str(tcfg["config_path"]),
         dataset_hash=str(tcfg["dataset_hash"]),
         seed=int(tcfg.get("seed", 0)),
-        module_versions=dict(tcfg.get("module_versions", {})),
+        module_versions=mv,
         metrics={k: float(v) for k, v in dict(tcfg.get("metrics", {})).items()},
         artifact_uris=list(tcfg.get("artifact_uris", [])),
         baseline_reference=str(tcfg["baseline_reference"]),
