@@ -15,6 +15,7 @@ from finrl_pro.mlops.risk_controls import RiskControlPolicy
 from finrl_pro.mlops.logger import MLOpsLogger
 from finrl_pro.training.trainer import Trainer
 from finrl_pro.data.cache import feature_cache_key
+from finrl_pro.data.loader_pro import ProFeatureAssembler
 from finrl_pro.data.loader import DataLoader
 
 
@@ -77,6 +78,18 @@ def main(argv: Iterable[str] | None = None) -> None:
     except Exception:
         # Keep going if features block is malformed
         pass
+
+    # Optional: assemble features from DB and log feature_set_id (snapshot datasets only)
+    ds_hash = str(tcfg.get("dataset_hash", ""))
+    if ds_hash.startswith("snapshot://") and feat_cfg:
+        try:
+            snapshot_id = ds_hash.split("//", 1)[1]
+            assembler = ProFeatureAssembler()
+            asm = assembler.assemble_from_snapshot(snapshot_id=snapshot_id, features_cfg=feat_cfg)
+            mv["features.feature_set_id"] = asm.feature_set_id
+        except Exception as e:  # noqa: BLE001
+            # Non-fatal: continue without feature_set_id if assembly not available
+            pass
 
     fingerprint = trainer.run(
         config_path=str(tcfg["config_path"]),

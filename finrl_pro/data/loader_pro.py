@@ -135,6 +135,7 @@ class Assembly:
     tickers: List[str]
     dates: List[pd.Timestamp]
     feature_list: List[str]
+    feature_set_id: str
 
 
 class ProFeatureAssembler:
@@ -288,5 +289,5 @@ class ProFeatureAssembler:
             tickers=tickers,
             dates=dates,
             feature_list=tech7,
+            feature_set_id=fs_id,
         )
-
