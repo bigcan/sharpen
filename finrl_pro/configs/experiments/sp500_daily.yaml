@@ -8,6 +8,7 @@ training:
   config_path: finrl_pro/configs/config.yaml
   dataset_hash: dvc://datasets/sp500_daily_2020_2025
   seed: 42
+  use_pro_env: false
   module_versions:
     finrl_pro.training.trainer: "FinRL-Pro-Research-1"
   metrics:
