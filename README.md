@@ -108,9 +108,108 @@ Get-Content conf/finrl_pro.env | ForEach-Object {
   print(report.summary_location)
   ```
 
+## Data Snapshots (DB-backed)
+
+FinRL Pro is adding database-backed data snapshots to keep the database as the system of record and export files only when needed (see specs/001-db-snapshots/spec.md:1).
+
+- Create a snapshot (stubbed CLI until DB plumbing lands):
+  ```bash
+  python -m finrl_pro.data.snapshot --provider yahoo \
+    --tickers SPY,AAPL --start 2020-01-01 --end 2024-01-01 --interval 1d
+  ```
+
+- Export a snapshot to a file (stubbed):
+  ```bash
+  python -m finrl_pro.data.export_snapshot --id <snapshot_id> --out data/snapshots --format parquet
+  ```
+
+- Use a snapshot in experiments by setting:
+  ```yaml
+  dataset_hash: snapshot://<snapshot_id>
+  ```
+  For training, the Pro loader (`finrl_pro/data/loader_pro.py`) queries the DB and assembles arrays for the env.
+
+### Database Quick Start (Timescale/PostgreSQL)
+
+- Run TimescaleDB locally via Docker:
+  ```bash
+  docker run --name finrl-timescale -e POSTGRES_PASSWORD=postgres -p 5432:5432 -d timescale/timescaledb:latest-pg16
+  # Create database (first time):
+  docker exec -it finrl-timescale psql -U postgres -c 'CREATE DATABASE finrl_pro;'
+  ```
+- Set DSN in your environment (or `conf/finrl_pro.env`):
+  ```bash
+  export FINRL_PRO_DB_DSN=postgresql://postgres:postgres@localhost:5432/finrl_pro
+  ```
+- Schema is initialized automatically by `DatabaseClient.init_schema()` the first time snapshot/export is invoked (will try `CREATE EXTENSION timescaledb` if available).
+
+### Providers
+
+- Yahoo Finance (no keys required):
+  ```bash
+  python -m finrl_pro.data.snapshot --provider yahoo --tickers SPY,AAPL \
+    --start 2020-01-01 --end 2024-01-01 --interval 1d
+  ```
+
+- Alpaca Market Data (set keys first):
+  ```bash
+  export ALPACA_API_KEY_ID=YOUR_KEY
+  export ALPACA_API_SECRET_KEY=YOUR_SECRET
+  python -m finrl_pro.data.snapshot --provider alpaca --tickers SPY,AAPL \
+    --start 2020-01-01 --end 2024-01-01 --interval 1d
+  ```
+
 Each pipeline emits fingerprints to
 `finrl_pro/configs/fingerprints.yaml`, logs MLflow telemetry, and writes reports
 under `reports/<fingerprint_id>/` with SHAP diagnostics and variance analysis.
+
+## Feature Engineering (Pro) and Dynamic Env
+
+- Configure features per experiment in `finrl_pro/configs/experiments/*.yaml`:
+  ```yaml
+  features:
+    enable_custom: true
+    use_turbulence: true
+    families: { trend: true, momentum: true, vol: true, volume: false }
+    advanced:
+      fracdiff: { enable: true, cols: [close], d: 0.5, window: 256 }
+      wavelet:  { enable: false, cols: [close], wavelet: db4, level: 3, window: 256 }
+  ```
+- Assemble arrays from a snapshot and create a dynamic env (arbitrary `tech_dim`):
+  ```python
+  from finrl_pro.data.loader_pro import ProFeatureAssembler
+  from finrl_pro.envs.factory import make_pro_env
+
+  asm = ProFeatureAssembler(dsn=os.getenv("FINRL_PRO_DB_DSN")).assemble_from_snapshot(
+      snapshot_id="<uuid>", features_cfg=YOUR_FEATURES_CFG)
+  env = make_pro_env(asm)
+  ```
+- Reuses features via the DB feature store keyed by `features.cache_key`.
+
+## Feature Store CLI
+
+- Register features computed offline (wide Parquet) for a snapshot/config:
+  ```bash
+  python -m finrl_pro.data.feature_store build \
+    --snapshot <uuid> \
+    --config finrl_pro/configs/experiments/spy_snapshot.yaml \
+    --from-parquet data/features.parquet
+  ```
+- Export feature values:
+  ```bash
+  python -m finrl_pro.data.feature_store export \
+    --feature-set <uuid> --fmt parquet --out data/export/features.parquet
+  ```
+
+## AutoML Feature Ablation (Optuna)
+
+- Run a small study over families and advanced toggles (walk‑forward hook ready):
+  ```bash
+  python -m finrl_pro.automl.feature_search \
+    --experiment finrl_pro/configs/experiments/spy_snapshot.yaml \
+    --trials 10 --study-name demo-ablation
+  ```
+  Reuses precomputed features via the feature store; logs `features.cache_key` and `features.feature_set_id`.
 
 ## Risk & Observability Guardrails
 

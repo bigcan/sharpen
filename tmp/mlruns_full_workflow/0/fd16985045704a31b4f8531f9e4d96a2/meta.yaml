@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL Pro V2.0/FinRL_Podracer/tmp/mlruns_full_workflow/0/fd16985045704a31b4f8531f9e4d96a2/artifacts
+end_time: 1762321685463
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: fd16985045704a31b4f8531f9e4d96a2
+run_name: invincible-snipe-890
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762321685067
+status: 3
+tags: []
+user_id: bigcan
