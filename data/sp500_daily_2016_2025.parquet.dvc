@@ -1,0 +1,5 @@
+outs:
+- md5: c0cabe5b4f030581659ec68b8a5806e4
+  size: 143316
+  hash: md5
+  path: sp500_daily_2016_2025.parquet
