@@ -1,0 +1,34 @@
+{
+  "benchmark_label": "S&P 500 Rolling 1Y",
+  "report": {
+    "approval_status": "Draft",
+    "author": "mlflow_enabled",
+    "benchmark_id": "sp500_rolling_1y",
+    "fingerprint_id": "cca91b3f-701a-41a7-94d5-846aae9e9318",
+    "generated_at": "2025-11-05T05:34:33.477871+00:00",
+    "metrics": {
+      "max_drawdown": 0.19999999999999998,
+      "sharpe_ratio": 1.07,
+      "volatility": 0.24
+    },
+    "report_id": "841a261b-981c-4b8a-afa7-ba308570e427",
+    "shap_summary": {
+      "max_drawdown": 0.3333333333333332,
+      "sharpe_ratio": 0.33333333333333365,
+      "volatility": 0.3333333333333332
+    },
+    "statistical_tests": [
+      {
+        "alpha": 0.05,
+        "name": "variance_vs_baseline",
+        "p_value": 0.03
+      }
+    ],
+    "summary_location": "tmp/pipeline_run_mlflow/reports/cca91b3f-701a-41a7-94d5-846aae9e9318/841a261b-981c-4b8a-afa7-ba308570e427.json",
+    "variance_vs_baseline": {
+      "max_drawdown": 0.01999999999999999,
+      "sharpe_ratio": 0.020000000000000018,
+      "volatility": 0.01999999999999999
+    }
+  }
+}

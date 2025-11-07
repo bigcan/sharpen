@@ -101,6 +101,7 @@ class DatabaseClient:
         if not bars:
             return 0
         with self._connect(self._dsn) as conn:
+            from dataclasses import asdict
             with conn.cursor() as cur:
                 sql = (
                     "INSERT INTO market_bars (timestamp, ticker, open, high, low, close, volume, source, vendor_rev) "
@@ -109,9 +110,16 @@ class DatabaseClient:
                     "open=EXCLUDED.open, high=EXCLUDED.high, low=EXCLUDED.low, close=EXCLUDED.close, "
                     "volume=EXCLUDED.volume, source=EXCLUDED.source, vendor_rev=EXCLUDED.vendor_rev"
                 )
-                cur.executemany(sql, [bar.__dict__ for bar in bars])
+                payloads = []
+                for bar in bars:
+                    try:
+                        payloads.append(asdict(bar))
+                    except Exception:
+                        # Fallback if already a Mapping-like
+                        payloads.append(dict(bar))
+                cur.executemany(sql, payloads)
             conn.commit()
-            return len(list(bars))
+            return len(payloads)
 
     def insert_snapshot(
         self,
@@ -151,22 +159,26 @@ class DatabaseClient:
                 if not row:
                     return []
                 params = row[0]
-                start = params.get("start")
-                end = params.get("end")
+                start = params.get("start") if isinstance(params, dict) else None
+                end = params.get("end") if isinstance(params, dict) else None
                 cur.execute("SELECT ticker FROM snapshot_assets WHERE snapshot_id=%s", (snapshot_id,))
                 tickers = [r[0] for r in cur.fetchall()]
                 if not tickers:
                     return []
                 placeholders = ",".join(["%s"] * len(tickers))
-                cur.execute(
-                    f"""
-                    SELECT timestamp, ticker, open, high, low, close, volume, source, vendor_rev
-                    FROM market_bars
-                    WHERE ticker IN ({placeholders}) AND timestamp >= %s AND timestamp <= %s
-                    ORDER BY timestamp ASC, ticker ASC
-                    """,
-                    (*tickers, start, end),
+                where = [f"ticker IN ({placeholders})"]
+                args = [*tickers]
+                if start:
+                    where.append("timestamp >= %s")
+                    args.append(start)
+                if end:
+                    where.append("timestamp <= %s")
+                    args.append(end)
+                sql = (
+                    "SELECT timestamp, ticker, open, high, low, close, volume, source, vendor_rev "
+                    "FROM market_bars WHERE " + " AND ".join(where) + " ORDER BY timestamp ASC, ticker ASC"
                 )
+                cur.execute(sql, args)
                 results = []
                 for r in cur.fetchall():
                     results.append(
@@ -189,7 +201,28 @@ class DatabaseClient:
         bars = self.load_snapshot(snapshot_id)
         if not bars:
             raise ValueError(f"No bars found for snapshot {snapshot_id}")
-        df = pd.DataFrame([b.__dict__ for b in bars])
+        from dataclasses import asdict, is_dataclass
+        rows = []
+        for b in bars:
+            if is_dataclass(b):
+                rows.append(asdict(b))
+            else:
+                try:
+                    rows.append(dict(b))
+                except Exception:
+                    # Fallback: attribute access
+                    rows.append({
+                        'timestamp': getattr(b, 'timestamp'),
+                        'ticker': getattr(b, 'ticker'),
+                        'open': getattr(b, 'open'),
+                        'high': getattr(b, 'high'),
+                        'low': getattr(b, 'low'),
+                        'close': getattr(b, 'close'),
+                        'volume': getattr(b, 'volume'),
+                        'source': getattr(b, 'source'),
+                        'vendor_rev': getattr(b, 'vendor_rev'),
+                    })
+        df = pd.DataFrame(rows)
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         if fmt == "parquet":
             df.to_parquet(out_path)

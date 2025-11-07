@@ -187,3 +187,7 @@ Replay: reproduce <fingerprint_id>
 ## When In Doubt
 
 - Prefer safety: respect extension boundary, add tests, and document the change in README or specs if behavior changes.
+
+## Recent Changes
+- 001-db-snapshots: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+- 001-db-snapshots: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]

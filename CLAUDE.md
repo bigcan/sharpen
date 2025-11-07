@@ -229,3 +229,6 @@ Dataset hashes must correspond to DVC-tracked artifacts.
 3. **Skipping Risk Checks**: All training must enforce risk profiles - no bypass allowed
 4. **Incomplete Fingerprints**: Ensure all required metrics (sharpe_ratio, max_drawdown, volatility) are included
 5. **Non-DVC Datasets**: Dataset hashes must reference DVC-tracked artifacts for audit compliance
+
+## Recent Changes
+- 001-db-snapshots: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
