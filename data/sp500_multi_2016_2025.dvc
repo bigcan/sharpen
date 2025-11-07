@@ -1,0 +1,6 @@
+outs:
+- md5: 53c0d986e1fa9863b8aea3b159369a31.dir
+  size: 1433388
+  nfiles: 11
+  hash: md5
+  path: sp500_multi_2016_2025

@@ -1,0 +1,8 @@
+datasets:
+  sp500_daily_2016_2025:
+    uri: dvc://datasets/sp500_daily_2016_2025
+    description: SPY daily OHLCV, 2016-01-01 to 2025-12-31, adjusted closes.
+  sp500_multi_2016_2025:
+    uri: dvc://datasets/sp500_multi_2016_2025
+    description: S&P 10–50 names daily OHLCV, 2016-01-01 to 2025-12-31.
+
