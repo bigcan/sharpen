@@ -88,9 +88,11 @@ Owner: Research Lead
 Promotion Gate 3.0: Select algorithm with highest PSR and acceptable turnover/max drawdown; document trade-offs and stability.
 
 Goal
-- Compare PPO, TD3, SAC variants under identical splits/costs.
+- Compare PPO, TD3, SAC variants under identical splits/costs using the Phase 2 carry-forward stack (action_continuous + reward_logr + fracdiff d=0.5 features).
+- Configs ready under `finrl_pro/configs/experiments/phase3/` with seeds {41, 42, 43}: `ppo_fracdiff_d_0_5.yaml`, `td3_fracdiff_d_0_5.yaml`, `sac_fracdiff_d_0_5.yaml`.
 
 Checklist
+- [x] Scaffold PPO/TD3/SAC configs with fracdiff d=0.5, log-return rewards, and seed sweeps.
 - [ ] Grid key hyper-knobs minimally (clip, GAE lambda; policy noise, tau; SAC alpha auto-tune).
 - [ ] Fix seeds; report averages; track instability.
 
@@ -98,7 +100,7 @@ Acceptance Criteria
 - Select algorithm with highest PSR and acceptable turnover/max drawdown; document trade-offs.
 
 Specs
-- 120-phases/3xx-phase3-algorithms.md
+- 120-phases/3xx-phase3-algorithms.md (new)
 
 ### Phase 4 ??Risk, Costs, Robustness
 Owner: Risk Lead
