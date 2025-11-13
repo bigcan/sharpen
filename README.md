@@ -108,6 +108,10 @@ Get-Content conf/finrl_pro.env | ForEach-Object {
   print(report.summary_location)
   ```
 
+## Research Roadmap
+
+- See `research_roadmap.md` for the current multi‑phase research plan, milestones, and success criteria. It also lists commands to regenerate the matrix, leaderboard, and per‑phase summaries.
+
 ## Data Snapshots (DB-backed)
 
 FinRL Pro is adding database-backed data snapshots to keep the database as the system of record and export files only when needed (see specs/001-db-snapshots/spec.md:1).
