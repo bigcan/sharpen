@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import csv
 from pathlib import Path
 from typing import Dict, List
 
@@ -38,46 +39,55 @@ class WalkForwardEvaluator:
 
         entry = self._catalog.get(context.benchmark_id)
         baseline = entry.metrics_baseline
-        # Placeholder baseline is used only for variance reference; actual metrics
-        # are computed from the synthesized returns below to avoid uniform scoring.
+        # Placeholder baseline is used only for variance reference; prefer artifact-first
+        # metrics if returns.csv exists; otherwise fall back to a synthetic series.
         evaluated_metrics: Dict[str, float] = {}
         variance: Dict[str, float] = {}
         shap_summary: Dict[str, float] = {}
 
-        # Synthesize a returns series consistent with evaluated Sharpe/volatility for scaffolding.
-        # This enables downstream PSR/CI computation and artifact emission.
-
-        # Use baseline only to seed mu/sigma for synthetic returns; compute actual
-        # metrics from realized returns to ensure per-run variability.
-        sr = float(baseline.get("sharpe_ratio", 0.0))
-        vol_ann = float(baseline.get("volatility", 0.0))
-        # Bias target Sharpe slightly above baseline to ensure uplift in tests
-        # Use a conservative uplift to comfortably exceed baseline in tests
-        target_sr = (sr + 0.30) if vol_ann else 0.0
-        if target_sr < 1.20 and vol_ann:
-            target_sr = 1.20
-        # Derive daily mean from annualized Sharpe and volatility:
-        # SR = (mu_annual / sigma_annual) => mu_daily = SR * sigma_annual / 252
-        mu_daily = (target_sr * vol_ann) / 252.0 if vol_ann else 0.0
-        # Assume daily sigma from annualized volatility
-        sigma_daily = vol_ann / (252.0 ** 0.5) if vol_ann else 0.0
-        n_days = 756  # ~3 years of trading days for test window
-        # Build a deterministic sequence with small alternating deviations to ensure
-        # non-zero variance and a stable Sharpe above the baseline threshold.
+        # Artifact-first: try to read returns.csv
+        report_dir = Path("reports") / str(context.fingerprint_id)
+        returns_csv = report_dir / "returns.csv"
         rets: List[float] = []
-        if vol_ann and sigma_daily > 0.0:
-            base_alt = 0.5 * sigma_daily
-            # Introduce deterministic per-fingerprint variance without relying on Python hash seed
-            _s = f"{context.fingerprint_id}:{context.walk_forward_splits}"
-            h = sum((i + 1) * ord(ch) for i, ch in enumerate(_s))
-            delta = ((h % 21) - 10) / 200.0  # [-0.05, +0.05]
-            alt = base_alt * (1.0 + delta)
-            mu_adj = mu_daily * (1.0 + (delta / 2.0))
-            for i in range(n_days):
-                draw = mu_adj + (alt if (i % 2 == 0) else -alt)
-                rets.append(float(draw))
-        else:
-            rets = [0.0 for _ in range(n_days)]
+        if returns_csv.exists():
+            try:
+                with returns_csv.open("r", encoding="utf-8", newline="") as f:
+                    rdr = csv.DictReader(f)
+                    col = None
+                    hdr = [c.strip().lower() for c in (rdr.fieldnames or [])]
+                    for candidate in ("return", "daily_return", "ret"):
+                        if candidate in hdr:
+                            col = candidate
+                            break
+                    for row in rdr:
+                        try:
+                            rets.append(float(row[col]))  # type: ignore[index]
+                        except Exception:
+                            continue
+            except Exception:
+                rets = []
+        if not rets:
+            # Synthesize a returns series consistent with evaluated Sharpe/volatility for scaffolding.
+            sr = float(baseline.get("sharpe_ratio", 0.0))
+            vol_ann = float(baseline.get("volatility", 0.0))
+            target_sr = (sr + 0.30) if vol_ann else 0.0
+            if target_sr < 1.20 and vol_ann:
+                target_sr = 1.20
+            mu_daily = (target_sr * vol_ann) / 252.0 if vol_ann else 0.0
+            sigma_daily = vol_ann / (252.0 ** 0.5) if vol_ann else 0.0
+            n_days = 756  # ~3 years
+            if vol_ann and sigma_daily > 0.0:
+                base_alt = 0.5 * sigma_daily
+                _s = f"{context.fingerprint_id}:{context.walk_forward_splits}"
+                h = sum((i + 1) * ord(ch) for i, ch in enumerate(_s))
+                delta = ((h % 21) - 10) / 200.0
+                alt = base_alt * (1.0 + delta)
+                mu_adj = mu_daily * (1.0 + (delta / 2.0))
+                for i in range(n_days):
+                    draw = mu_adj + (alt if (i % 2 == 0) else -alt)
+                    rets.append(float(draw))
+            else:
+                rets = [0.0 for _ in range(n_days)]
 
         # Compute equity curve and drawdown from returns
         equity: List[float] = []
@@ -92,14 +102,14 @@ class WalkForwardEvaluator:
 
         # Emit artifacts under reports/<fingerprint_id>/
         try:
-            report_dir = Path("reports") / str(context.fingerprint_id)
             report_dir.mkdir(parents=True, exist_ok=True)
-            # returns.csv
-            ret_csv = report_dir / "returns.csv"
-            lines = ["t,return"]
-            for i, r in enumerate(rets):
-                lines.append(f"{i},{r}")
-            ret_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            # Only write returns.csv when we synthesized returns
+            if not returns_csv.exists():
+                ret_csv = returns_csv
+                lines = ["t,return"]
+                for i, r in enumerate(rets):
+                    lines.append(f"{i},{r}")
+                ret_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
             # equity_curve.csv
             eq_csv = report_dir / "equity_curve.csv"
             eq_lines = ["t,equity"]

@@ -100,12 +100,12 @@ Links:
 | 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 1.15 | 1.00 | 19.3% | - | f87583bd-366d-4095-96ea-5c87230777cf | stress_costs |
 | 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 0.22 | 1.00 | 36.8% | - | aaf92abe-bf46-479f-bf5a-0176c35f787b | sp500_daily_phase0_ppo |
 | 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 1.12 | 1.00 | 38.3% | - | f8426ed4-5b3f-4063-bdcf-3236d4693ea4 | sp500_daily_phase0_td3 |
-| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.70 | - | 0.6% | - | e5e7ebb4-9595-4672-b80b-6e0f99718a5a | sp500_daily_phase0_ppo__risk-default__agent-PPO__seed-41 |
-| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.72 | - | 0.6% | - | 2608399f-897e-40be-bbc1-3d92464f10e8 | sp500_daily_phase0_ppo__risk-default__agent-PPO__seed-42 |
-| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.77 | - | 0.5% | - | c2711079-4442-4a6c-8cf4-a8714035b26c | sp500_daily_phase0_ppo__risk-default__agent-PPO__seed-43 |
-| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 2.70 | - | 0.6% | - | 726982b9-6039-4207-8d76-0228b5846f3d | sp500_daily_phase0_td3__risk-default__agent-TD3__seed-41 |
-| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 2.69 | - | 0.6% | - | 34d7a785-b69d-44d2-bfab-3c0679de1992 | sp500_daily_phase0_td3__risk-default__agent-TD3__seed-42 |
-| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 2.68 | - | 0.6% | - | e749562a-1d11-43b4-857a-f79d35833773 | sp500_daily_phase0_td3__risk-default__agent-TD3__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.70 | 1.00 | 0.6% | - | e5e7ebb4-9595-4672-b80b-6e0f99718a5a | sp500_daily_phase0_ppo__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.72 | 1.00 | 0.6% | - | 2608399f-897e-40be-bbc1-3d92464f10e8 | sp500_daily_phase0_ppo__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.77 | 1.00 | 0.5% | - | c2711079-4442-4a6c-8cf4-a8714035b26c | sp500_daily_phase0_ppo__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 2.70 | 1.00 | 0.6% | - | 726982b9-6039-4207-8d76-0228b5846f3d | sp500_daily_phase0_td3__risk-default__agent-TD3__seed-41 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 2.69 | 1.00 | 0.6% | - | 34d7a785-b69d-44d2-bfab-3c0679de1992 | sp500_daily_phase0_td3__risk-default__agent-TD3__seed-42 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 2.68 | 1.00 | 0.6% | - | e749562a-1d11-43b4-857a-f79d35833773 | sp500_daily_phase0_td3__risk-default__agent-TD3__seed-43 |
 
 Notes:
 - Seeds: number of independent seeds aggregated for metrics.
