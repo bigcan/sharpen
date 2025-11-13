@@ -12,6 +12,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
+import hashlib
 
 import yaml
 
@@ -121,6 +122,7 @@ def _evaluate_fingerprints(records: Iterable[RunRecord], *, splits: int, benchma
     wf = WalkForwardEvaluator(catalog)
 
     evaluations: list[dict[str, Any]] = []
+    seen_digests: dict[str, str] = {}
     for rec in records:
         fp = trainer.reproduce(rec.fingerprint_id)
         ref = fp.baseline_reference or ""
@@ -131,6 +133,22 @@ def _evaluate_fingerprints(records: Iterable[RunRecord], *, splits: int, benchma
             walk_forward_splits=int(splits),
         )
         res = wf.evaluate(ctx)
+        # Duplicate artifact guard: mark evaluations that reuse identical returns.csv
+        dup_flag = False
+        dup_of = None
+        try:
+            rpath = Path("reports") / fp.fingerprint_id / "returns.csv"
+            if rpath.exists():
+                data = rpath.read_bytes()
+                digest = hashlib.sha256(data).hexdigest()
+                if digest in seen_digests:
+                    dup_flag = True
+                    dup_of = seen_digests[digest]
+                else:
+                    seen_digests[digest] = fp.fingerprint_id
+        except Exception:
+            pass
+
         evaluations.append(
             {
                 "fingerprint_id": fp.fingerprint_id,
@@ -140,6 +158,8 @@ def _evaluate_fingerprints(records: Iterable[RunRecord], *, splits: int, benchma
                 "variance_vs_baseline": res.variance_vs_baseline,
                 "shap_summary": res.shap_summary,
                 "walk_forward_splits": res.walk_forward_splits,
+                "duplicate_returns": dup_flag,
+                "duplicate_of": dup_of or "",
             }
         )
     return evaluations

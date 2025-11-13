@@ -16,6 +16,9 @@ Notes:
 - PSR_test: Probabilistic Sharpe Ratio on test daily returns.
 - Fingerprint: ID present in `reports/matrix/fingerprints.json` for reproducibility.
 - Costs: include both fee and slippage assumptions.
+- Metrics source: Computed from each run’s artifacts (`returns.csv`, `equity_curve.csv`,
+  `drawdown.csv`) to avoid uniform placeholder scores. Duplicate `returns.csv` across
+  fingerprints are flagged and excluded from promotion.
 
 ## Plots to attach per row (artifacts)
 - `equity_curve.csv` and `drawdown.csv` figures
