@@ -140,3 +140,12 @@ Decision: Promote sp500_multi_longonly as CURRENT BEST for Phase 5, based on hig
 - Agent PPO กX Sharpe: 2.73 กำ 0.03; MaxDD: 0.56% กำ 0.01%
 - Agent TD3 กX Sharpe: 2.69 กำ 0.01; MaxDD: 0.58% กำ 0.00%
 
+
+## Phase 0 Verification (Artifact-Based)
+
+- fp `e5e7ebb4-9595-4672-b80b-6e0f99718a5a` | Sharpe: 1.48 | PSR: 1.00 | notes: from artifacts
+- fp `2608399f-897e-40be-bbc1-3d92464f10e8` | Sharpe: 1.48 | PSR: 1.00 | notes: from artifacts
+- fp `c2711079-4442-4a6c-8cf4-a8714035b26c` | Sharpe: 1.48 | PSR: 1.00 | notes: from artifacts
+- fp `726982b9-6039-4207-8d76-0228b5846f3d` | Sharpe: 1.48 | PSR: 1.00 | notes: from artifacts
+- fp `34d7a785-b69d-44d2-bfab-3c0679de1992` | Sharpe: 1.48 | PSR: 1.00 | notes: from artifacts
+- fp `e749562a-1d11-43b4-857a-f79d35833773` | Sharpe: 1.48 | PSR: 1.00 | notes: from artifacts
