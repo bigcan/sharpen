@@ -53,8 +53,8 @@ Quantify whether PPO, TD3, or SAC delivers the best risk-adjusted performance wh
 - Spot-check PSR computation via `python -m finrl_pro.eval.statistics --returns reports/<fp>/returns.csv`.
 
 ## Tuning Notes (2025-11-13)
-- Added PPO clip-range sweeps (0.15, 0.30) and GAE λ = 0.98 to probe bias/variance trade-offs under fracdiff d=0.5.
-- Added TD3 policy noise sweeps (0.10, 0.25) to evaluate stability vs. exploration.
+- Added PPO clip-range sweeps (0.15, 0.30), GAE λ = 0.98, and entropy coefficients (ent_coef ∈ {0.005, 0.02}) to probe bias/variance and exploration pressure.
+- Added TD3 policy noise sweeps (0.10, 0.25) and SAC alpha modes (auto-tune vs. fixed α ∈ {0.05, 0.20}) to evaluate stability vs. exploration.
 - Results recorded in `reports/matrix_phase3/` and leaderboard.
 
 ## Tasks
