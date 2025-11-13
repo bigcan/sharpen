@@ -113,7 +113,7 @@ Goal
 
 Checklist
 - [x] Scaffold PPO/TD3/SAC configs with fracdiff d=0.5, log-return rewards, and seed sweeps.
-- [x] Grid key hyper-knobs minimally (clip/GAE λ for PPO; policy noise for TD3). SAC alpha tuning pending.
+- [x] Grid key hyper-knobs minimally (PPO clip 0.15/0.30, GAE λ=0.98, entropy coeffs {0.005,0.02}; TD3 policy noise {0.10,0.25}; SAC alpha auto vs fixed {0.05,0.20}).
 - [x] Fix seeds; report averages; track instability (`reports/matrix_phase3/eval_report.json`).
 
 Acceptance Criteria

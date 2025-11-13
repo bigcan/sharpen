@@ -191,6 +191,42 @@ Links:
 | 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | -0.87 | 0.00 | 18.3% | - | 0d48048c-5a61-4c49-8cb3-4b50143313a8 | td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-41 |
 | 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | -2.78 | 0.00 | 18.2% | - | f5728333-2a9b-4b0a-a8f2-f9927e0422f9 | td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-42 |
 | 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 0.42 | 1.00 | 18.1% | - | a4f9e819-bcb1-4c35-8ad1-f1bc43f026f1 | td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -0.44 | 0.00 | 18.2% | - | 60be88fd-18bc-45e6-89eb-c8d12d5fba55 | ppo_clip_0_15_fracdiff_d_0_5__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 0.23 | 1.00 | 18.3% | - | 7e02afe6-158c-4dd9-abf9-66e8abca9a4b | ppo_clip_0_15_fracdiff_d_0_5__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -0.20 | 0.00 | 18.2% | - | 7218c64b-8d77-4d38-9b3e-9d1de863d3c9 | ppo_clip_0_15_fracdiff_d_0_5__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -0.65 | 0.00 | 18.2% | - | 6046dfd4-1838-434e-96f0-8f9066ec780a | ppo_clip_0_30_fracdiff_d_0_5__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -1.15 | 0.00 | 18.4% | - | 31685f3e-296d-41a5-b5bf-96bd1876a592 | ppo_clip_0_30_fracdiff_d_0_5__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -0.30 | 0.00 | 18.4% | - | 6dd9ba25-1aa3-4f85-a50b-c917d5128a21 | ppo_clip_0_30_fracdiff_d_0_5__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 0.74 | 1.00 | 18.2% | - | 073f2162-d041-4786-aa6c-a2c482051039 | ppo_entropy_0_005_fracdiff_d_0_5__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -0.42 | 0.00 | 18.1% | - | 99faaac2-5bab-4649-9466-59b41cd53ade | ppo_entropy_0_005_fracdiff_d_0_5__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -0.74 | 0.00 | 18.3% | - | 7cb37b71-cdd6-401d-b345-dba0ea1fd763 | ppo_entropy_0_005_fracdiff_d_0_5__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 0.26 | 1.00 | 18.4% | - | a64d3637-5872-47d6-ba59-011ed0df600f | ppo_entropy_0_020_fracdiff_d_0_5__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 0.03 | 0.75 | 18.1% | - | 8c3eeb47-42cc-4341-8290-546c499e3be2 | ppo_entropy_0_020_fracdiff_d_0_5__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -1.13 | 0.00 | 18.7% | - | e8b630d0-65b0-40eb-9bfa-80037e76e65b | ppo_entropy_0_020_fracdiff_d_0_5__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 0.65 | 1.00 | 15.2% | - | f1f2d2dc-fa0f-41c6-9956-a8968b67b472 | ppo_fracdiff_d_0_5__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -3.14 | 0.00 | 15.3% | - | 7a837ee3-7d21-43f3-8f4c-4e591cd1163e | ppo_fracdiff_d_0_5__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -1.70 | 0.00 | 15.1% | - | 09b302d5-b4a5-4aac-ad9f-b51c6f8ec1e8 | ppo_fracdiff_d_0_5__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -0.24 | 0.00 | 18.3% | - | 167c006d-6e3b-4977-a05b-1a30b3b00344 | ppo_gae_0_98_fracdiff_d_0_5__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -1.51 | 0.00 | 18.1% | - | b02b5bcd-0c24-46ff-9d6b-dc9d868d9e1b | ppo_gae_0_98_fracdiff_d_0_5__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | -0.51 | 0.00 | 18.6% | - | e61280f7-df54-42fc-a1e1-a8a93f55c9c6 | ppo_gae_0_98_fracdiff_d_0_5__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | SAC | - | - | - | - | - | - | 0.65 | 1.00 | 18.1% | - | 4c0e76fd-8702-4aa9-85a3-2d93fa95c9c4 | sac_alpha_fixed_0_05_fracdiff_d_0_5__risk-default__agent-SAC__seed-41 |
+| 2025-11-13 | - | - | SAC | - | - | - | - | - | - | 0.88 | 1.00 | 18.1% | - | a000dd28-3fd5-445e-82cd-6e1623aeeb6d | sac_alpha_fixed_0_05_fracdiff_d_0_5__risk-default__agent-SAC__seed-42 |
+| 2025-11-13 | - | - | SAC | - | - | - | - | - | - | -0.40 | 0.00 | 18.5% | - | 29447e57-c5e9-4136-a269-a65bc399ca28 | sac_alpha_fixed_0_05_fracdiff_d_0_5__risk-default__agent-SAC__seed-43 |
+| 2025-11-13 | - | - | SAC | - | - | - | - | - | - | -2.71 | 0.00 | 18.3% | - | 1b75b2e5-cf9f-423c-ad5c-4b30a5ccc729 | sac_alpha_fixed_0_20_fracdiff_d_0_5__risk-default__agent-SAC__seed-41 |
+| 2025-11-13 | - | - | SAC | - | - | - | - | - | - | 0.32 | 1.00 | 18.2% | - | 846977af-e495-4176-8e3d-6127f404754c | sac_alpha_fixed_0_20_fracdiff_d_0_5__risk-default__agent-SAC__seed-42 |
+| 2025-11-13 | - | - | SAC | - | - | - | - | - | - | -2.04 | 0.00 | 18.1% | - | 4425a807-9822-4ccc-811f-07f45dfedbed | sac_alpha_fixed_0_20_fracdiff_d_0_5__risk-default__agent-SAC__seed-43 |
+| 2025-11-13 | - | - | SAC | - | - | - | - | - | - | -0.12 | 0.00 | 15.8% | - | 275b6c8b-2ec7-49b9-8e87-e78c064c0718 | sac_fracdiff_d_0_5__risk-default__agent-SAC__seed-41 |
+| 2025-11-13 | - | - | SAC | - | - | - | - | - | - | -0.03 | 0.22 | 15.9% | - | ebbb8d1d-5a2f-41f2-a52f-921335407b3a | sac_fracdiff_d_0_5__risk-default__agent-SAC__seed-42 |
+| 2025-11-13 | - | - | SAC | - | - | - | - | - | - | -0.03 | 0.24 | 15.2% | - | 65eb322f-3c03-4947-bc8a-89dff13d3f61 | sac_fracdiff_d_0_5__risk-default__agent-SAC__seed-43 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | -0.22 | 0.00 | 15.1% | - | 65ad4e9c-6cc8-4e82-a853-7806c9f40200 | td3_fracdiff_d_0_5__risk-default__agent-TD3__seed-41 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | -0.72 | 0.00 | 15.6% | - | 4cdbddff-1d4b-45a3-9a68-06943bde0e97 | td3_fracdiff_d_0_5__risk-default__agent-TD3__seed-42 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 0.11 | 1.00 | 15.2% | - | f257008d-d25b-4e11-9e6f-5b852990ccdb | td3_fracdiff_d_0_5__risk-default__agent-TD3__seed-43 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | -2.27 | 0.00 | 18.2% | - | 5d701f87-80d5-43db-b09b-61016ff5ace6 | td3_policy_noise_0_10_fracdiff_d_0_5__risk-default__agent-TD3__seed-41 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | -2.00 | 0.00 | 18.1% | - | 7bc478ba-490a-4256-a646-eca626cda94c | td3_policy_noise_0_10_fracdiff_d_0_5__risk-default__agent-TD3__seed-42 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | -2.11 | 0.00 | 18.1% | - | edf297b7-a1b3-46f7-a31e-6abbeea06416 | td3_policy_noise_0_10_fracdiff_d_0_5__risk-default__agent-TD3__seed-43 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | -0.87 | 0.00 | 18.3% | - | d25fe7b7-cad0-4ab9-b502-161e68c6ae8f | td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-41 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | -2.78 | 0.00 | 18.2% | - | a3a1fe43-0bb0-4d52-8b7a-adb5d9f26907 | td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-42 |
+| 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 0.42 | 1.00 | 18.1% | - | 2d8826f2-8a7d-4008-9511-d29443f26544 | td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-43 |
 
 Notes:
 - Seeds: number of independent seeds aggregated for metrics.

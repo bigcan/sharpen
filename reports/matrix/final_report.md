@@ -47,7 +47,7 @@ Links
 
 ### Phase 3 — Algorithm Exploration
 - Candidates: PPO, TD3, SAC with fracdiff d=0.5 baseline, seeds 41–43 (`reports/matrix_phase3/`).
-- Result: Baseline PPO seed 41 still leads (Sharpe 0.65, MaxDD 0.15), but new sweeps show PPO clip 0.15 producing consistently small positive Sharpe (mean -0.14, best 0.23) and TD3 policy_noise 0.25 reaching Sharpe 0.42 at MaxDD 0.18. Despite these improvements, cross-algorithm averages remain ≤0 due to instability across seeds, so Gate 3.0 stays in-progress pending deeper knob tuning (clip, λ, noise, SAC α).
+- Result: Baseline PPO seed 41 still leads (Sharpe 0.65, MaxDD 0.15), but entropy sweeps surfaced PPO `ent_coef=0.005` seed 41 at Sharpe 0.74 / MaxDD 0.18 and SAC (fixed α=0.05) seed 42 at Sharpe 0.88 / MaxDD 0.18 while respecting risk caps. TD3 policy_noise 0.25 hit Sharpe 0.42 / MaxDD 0.18. Averages remain ≤0 because other seeds drift negative, so Gate 3.0 stays in-progress pending additional entropy/alpha refinement and stability analysis (see `reports/matrix_phase3/cov_review.md`).
 
 ### Phase 4 — Robustness & Leakage
 - Walk‑forward expand/roll configs executed; uniform metrics reported; PIT checks pass.
@@ -80,10 +80,10 @@ Links
 - **Phase 0 (MVP)**: Sharpe range [-0.80, 0.94], MaxDD ≈0.19, Vol 0.05–0.13; PPO seed 42 is the most stable configuration under the risk caps.
 - **Phase 1 (Action/Reward)**: Mean Sharpe ≈ -0.32 across 12 runs; reward_logr seed 43 peaks at Sharpe 1.15 / MaxDD 0.15 but average uplift < 0.20.
 - **Phase 2 (Features)**: Fracdiff variants yield Sharpe [-1.36, 0.34], MaxDD ≈0.15; no ladder clears the PSR gain target, so d=0.5 remains the neutral stack.
-- **Phase 3 (Algorithms)**: PPO/TD3/SAC sweeps span Sharpe [-3.14, 0.65] with MaxDD ≈0.15; PPO seed 41 leads yet instability persists across algorithms.
+- **Phase 3 (Algorithms)**: Extended grid spans Sharpe [-3.14, 0.88] with MaxDD ≈0.15–0.19; best performers are PPO `ent_coef=0.005` (Sharpe 0.74) and SAC α=0.05 (Sharpe 0.88) though cross-seed averages remain ≤0.
 
 ## Gate Status
 - **Gate 0.0 (MVP)**: PASS — all Phase 0 fingerprints satisfy MaxDD ≤20% and capital_at_risk ≤10% while emitting full artifacts.
 - **Gate 1.0 (Action/Reward)**: NOT MET — no action/reward pair delivers average PSR uplift ≥0.20; action_continuous + reward_logr carried forward.
 - **Gate 2.0 (Features)**: NOT MET — fracdiff ladder fails to add ≥0.15 PSR vs. baseline; d=0.5 retained pending future feature work.
-- **Gate 3.0 (Algorithms)**: IN PROGRESS — artifact-backed comparisons exist, but PPO/TD3/SAC remain too volatile; clip/λ/noise sweeps scheduled next.
+- **Gate 3.0 (Algorithms)**: IN PROGRESS — artifact-backed comparisons exist, but PPO/TD3/SAC remain too volatile; latest COV/adversarial review (`reports/matrix_phase3/cov_review.md`) confirms no risk-policy breaches or leakage, yet averages stay ≤0, so additional tuning/validation is required before promotion.
