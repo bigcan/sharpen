@@ -149,3 +149,14 @@ Decision: Promote sp500_multi_longonly as CURRENT BEST for Phase 5, based on hig
 - fp `726982b9-6039-4207-8d76-0228b5846f3d` | Sharpe: 1.48 | PSR: 1.00 | notes: from artifacts
 - fp `34d7a785-b69d-44d2-bfab-3c0679de1992` | Sharpe: 1.48 | PSR: 1.00 | notes: from artifacts
 - fp `e749562a-1d11-43b4-857a-f79d35833773` | Sharpe: 1.48 | PSR: 1.00 | notes: from artifacts
+
+## Phase 1 ¡X Actions/Reward Ablations
+
+- Gate 1.0: PSR gain ? 0.20 vs Phase 0; turnover £G ? 5%
+- Summary (Sharpe ¡Ó variability proxy across seeds):
+  - action_continuous: ~2.72¡V2.75; MaxDD ~0.55%
+  - action_discrete: ~2.65¡V2.73; MaxDD ~0.60%
+  - reward_logr: ~2.67¡V2.76; MaxDD ~0.55¡V0.59%
+  - reward_logr_lambda_sweep: ~2.63¡V2.77; MaxDD ~0.54¡V0.61%
+
+- Decision: Reward=logR with tuned lambda shows the best tail (seed-43) but mean uplift vs Phase 0 is not ? 0.20; Gate 1.0 NOT MET. Promote none; carry best pair (action_continuous + reward_logr) forward to Phase 2.

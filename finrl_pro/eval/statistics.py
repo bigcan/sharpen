@@ -102,7 +102,10 @@ def probabilistic_sharpe_ratio(
     # Adjusted standard error of SR (Lopez de Prado formula)
     g1 = skewness(r)
     g2 = excess_kurtosis(r)
-    se = sqrt((1 + (g2 / 4.0) - (g1 * sr) + ((sr ** 2) * (g2 / 2.0))) / max(1, n - 1))
+    se_sq = (1 + (g2 / 4.0) - (g1 * sr) + ((sr ** 2) * (g2 / 2.0))) / max(1, n - 1)
+    if se_sq <= 0.0:
+        se_sq = 1e-12
+    se = sqrt(se_sq)
     if se == 0.0:
         return 0.0
     z = (sr - sr_b) / se
