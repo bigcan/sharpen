@@ -10,6 +10,7 @@ Links:
 | Date | Phase | Roll (Train?al?est) | Agent | Action | Reward | Features | Costs (bps) | Seeds | Sharpe_val | Sharpe_test | PSR_test | MaxDD_test | Turnover_test | Fingerprint | Notes |
 |------|-------|------------------------|-------|--------|--------|----------|-------------|-------|------------|-------------|----------|------------|---------------|-------------|-------|
 | 2025-11-07 | 0 | 2016-2021->2022->2023-2025 | PPO | Continuous [-1,1] | logR | baseline | 1 | 3 | - | 0.46 | 1 | 33.9% | - | b6476946-376a-4eca-bf80-3f57c47bd66d | sp500_daily_demo; risk_profile=default |
+| 2025-11-13 | 0 | 2016-2021->2022->2023-2025 | PPO | Continuous [-1,1] | logR | baseline | 1 | 1 | - | 2.93 | 1.00 | 14.0% | - | 2bb41301-ab40-4e7c-8fe4-67c7a27162f9 | sp500_daily_reward_logr; CURRENT BEST |
 
 Notes:
 - Seeds: number of independent seeds aggregated for metrics.
