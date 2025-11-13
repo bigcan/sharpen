@@ -26,9 +26,9 @@ Last updated: 2025-11-13
 ## Spec Kit Index (planned)
 - 100-program/000-program-governance.md ??governance, roles, cadence
 - 110-eval/001-nonuniform-evaluator.md ??DONE; per-run metrics from artifacts
-- 120-phases/0xx-phase0-mvp.md ??Phase 0 spec
-- 120-phases/1xx-phase1-actions.md ??Phase 1 spec
-- 120-phases/2xx-phase2-features.md ??Phase 2 spec
+- 120-phases/0xx-phase0-mvp.md ??DONE; Phase 0 spec
+- 120-phases/1xx-phase1-actions.md ??DONE; Phase 1 spec
+- 120-phases/2xx-phase2-features.md ??DONE; Phase 2 spec
 - 120-phases/3xx-phase3-algorithms.md ??Phase 3 spec
 - 120-phases/4xx-phase4-robustness.md ??Phase 4 spec
 - 120-phases/5xx-phase5-multiasset.md ??Phase 5 spec
@@ -64,18 +64,38 @@ Acceptance Criteria
 Specs
 - 120-phases/0xx-phase0-mvp.md
 
- param($m) $pre=$m.Groups[1].Value; $block=$m.Groups[2].Value; $block = ($block -replace "\[ \] Action space","[x] Action space") -replace "\[ \] Reward shaping","[x] Reward shaping" -replace "\[ \] Seeds","[x] Seeds"; return $pre + $block 
+### Phase 1 ??Action/Reward Ablations
+Owner: Research Lead
+Promotion Gate 1.0: PSR gain ≥ 0.20 vs. Phase 0 with turnover within budget and MaxDD ≤ 1.1× baseline.
+
+Goal
+- Compare continuous vs. discrete actions plus reward variants (logR, logR_lambda) while carrying forward Phase 0 datasets/costs.
+- Require artifact-backed `returns.csv` for every run; evaluations no longer fall back to synthesized metrics.
+
+Checklist
+- [x] Define action/reward experiment YAMLs with seed sweeps under `finrl_pro/configs/experiments/phase1/`.
+- [ ] Run matrix with real training outputs (returns, equity, drawdown CSVs per fingerprint).
+- [ ] Aggregate seed metrics, evaluate PSR uplift, and document Gate 1.0 decision with evidence.
+- [ ] Adversarial review for turnover spikes, risk breaches, and data leakage.
+
+Acceptance Criteria
+- Gate 1.0 PASSES only if PSR uplift ≥ 0.20 vs. Phase 0 and all risk constraints hold; otherwise mark NOT MET and declare carry-forward combo (currently action_continuous + reward_logr).
+
+Specs
+- 120-phases/1xx-phase1-actions.md
+
 ### Phase 2 ??Feature Engineering
 Owner: Research Lead
 Promotion Gate 2.0: Best feature variant improves PSR >= 0.15 vs. baseline with max drawdown within 1.1x of baseline and no risk alerts.
 
 Goal
-- Evaluate PIT-safe feature ladders that materially improve PSR under risk caps.
+- Evaluate PIT-safe feature ladders (fracdiff, momentum/vol, wavelets) under the Phase 1 carry-forward configuration with artifact-backed evaluations.
 
 Checklist
-- [ ] Fracdiff grid over d in {0.2, 0.4, 0.6}; wavelets (db4, levels 2??).
-- [ ] Momentum/vol composites; turbulence index; validate no leakage.
-- [ ] Cache feature sets; hash to `features.cache_key`.
+- [x] Author fracdiff configs for d ∈ {0.4, 0.5, 0.6} with seeds {41, 42, 43}.
+- [ ] Produce real training artifacts (`returns.csv`) for each fingerprint; evaluator now fails fast if missing.
+- [ ] Run PIT validator + cache hash checks for every enabled ladder.
+- [ ] Summarize Gate 2.0 metrics and carry-forward selection in final report/roadmap.
 
 Acceptance Criteria
 - Best feature variant improves PSR by >= 0.15 with max drawdown within 1.1x of baseline.
@@ -89,12 +109,12 @@ Promotion Gate 3.0: Select algorithm with highest PSR and acceptable turnover/ma
 
 Goal
 - Compare PPO, TD3, SAC variants under identical splits/costs using the Phase 2 carry-forward stack (action_continuous + reward_logr + fracdiff d=0.5 features).
-- Configs ready under `finrl_pro/configs/experiments/phase3/` with seeds {41, 42, 43}: `ppo_fracdiff_d_0_5.yaml`, `td3_fracdiff_d_0_5.yaml`, `sac_fracdiff_d_0_5.yaml`.
+- Configs ready under `finrl_pro/configs/experiments/phase3/` with seeds {41, 42, 43}: `ppo_fracdiff_d_0_5.yaml`, `td3_fracdiff_d_0_5.yaml`, `sac_fracdiff_d_0_5.yaml`, plus new tuning variants (`ppo_clip_0_15/0_30`, `ppo_gae_0_98`, `td3_policy_noise_0_10/0_25`).
 
 Checklist
 - [x] Scaffold PPO/TD3/SAC configs with fracdiff d=0.5, log-return rewards, and seed sweeps.
-- [ ] Grid key hyper-knobs minimally (clip, GAE lambda; policy noise, tau; SAC alpha auto-tune).
-- [ ] Fix seeds; report averages; track instability.
+- [x] Grid key hyper-knobs minimally (clip/GAE λ for PPO; policy noise for TD3). SAC alpha tuning pending.
+- [x] Fix seeds; report averages; track instability (`reports/matrix_phase3/eval_report.json`).
 
 Acceptance Criteria
 - Select algorithm with highest PSR and acceptable turnover/max drawdown; document trade-offs.
