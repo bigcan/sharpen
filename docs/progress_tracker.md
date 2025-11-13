@@ -1,5 +1,7 @@
 ﻿# FinRL Pro - Research Program Progress Tracker
 
+Quick link: See the root-level esearch_roadmap.md for the live research plan, milestones, and success criteria.
+
 > Purpose: Track progress across phases with explicit gates, risk checks, and deliverables. Use GitHub task lists; one run = one seed. Keep the test set frozen.
 
 Owner: <YOUR_NAME>  
@@ -233,6 +235,7 @@ Goal: Move to multi-asset with risk constraints; prepare for paper trading.
 - Phase 3 sign-off: __________________  Date: ______
 - Phase 4 sign-off: __________________  Date: ______
 - Phase 5 sign-off: __________________  Date: ______
+
 
 
 
