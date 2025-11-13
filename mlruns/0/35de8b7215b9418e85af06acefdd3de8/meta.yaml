@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/35de8b7215b9418e85af06acefdd3de8/artifacts
+end_time: 1763014822494
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 35de8b7215b9418e85af06acefdd3de8
+run_name: persistent-shrew-97
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763014822439
+status: 3
+tags: []
+user_id: bigca

@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/5faca9b8d4174d4195e9969697bbafc9/artifacts
+end_time: 1763014824689
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 5faca9b8d4174d4195e9969697bbafc9
+run_name: youthful-mare-232
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763014824635
+status: 3
+tags: []
+user_id: bigca

@@ -48,3 +48,7 @@ features:
     enabled: true
     dir: finrl_pro/data/processed
 
+
+# Seed sweep for stability
+sweep:
+  seeds: [41, 42, 43]

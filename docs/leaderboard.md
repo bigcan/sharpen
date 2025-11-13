@@ -106,6 +106,22 @@ Links:
 | 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 2.70 | 1.00 | 0.6% | - | 726982b9-6039-4207-8d76-0228b5846f3d | sp500_daily_phase0_td3__risk-default__agent-TD3__seed-41 |
 | 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 2.69 | 1.00 | 0.6% | - | 34d7a785-b69d-44d2-bfab-3c0679de1992 | sp500_daily_phase0_td3__risk-default__agent-TD3__seed-42 |
 | 2025-11-13 | - | - | TD3 | - | - | - | - | - | - | 2.68 | 1.00 | 0.6% | - | e749562a-1d11-43b4-857a-f79d35833773 | sp500_daily_phase0_td3__risk-default__agent-TD3__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.64 | - | 0.6% | - | d5cdaa6d-f200-4aaf-bcf5-50364688b3fc | action_continuous |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.63 | - | 0.6% | - | 4442776e-671e-43a5-bd45-a382941952bf | action_discrete |
+| 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.63 | - | 0.6% | - | 1b7e40a6-ca86-4168-8704-7e9bc6f4f5f7 | reward_logr |
+| 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.63 | - | 0.6% | - | a94da34c-be4e-45b8-9158-80535a35724a | reward_logr_lambda_sweep |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.75 | 1.00 | 0.5% | - | b6c10954-cd89-486a-92d9-cd6fae2cd7a0 | action_continuous__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.73 | 1.00 | 0.6% | - | 42ad424e-f3b9-4e39-83cb-6ff2b398f43d | action_continuous__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.68 | 1.00 | 0.6% | - | 748fa76f-32d1-4c86-bf0b-0e1892af2d5f | action_continuous__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.73 | 1.00 | 0.6% | - | bc31fab5-9e6b-4e2c-87a7-405df6e407a2 | action_discrete__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.65 | 1.00 | 0.6% | - | a9d75b86-1077-4aa2-8b09-1a2d7fc73587 | action_discrete__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.68 | 1.00 | 0.6% | - | 31c557a4-e419-4e91-b32d-8718b7bd5014 | action_discrete__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.76 | 1.00 | 0.5% | - | 6ffb9571-adde-4a3c-a07f-e45536c634dc | reward_logr__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.75 | 1.00 | 0.5% | - | 39f12dfa-c453-43cd-a3fa-b741b713e4c8 | reward_logr__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.67 | 1.00 | 0.6% | - | 58f492b9-6bae-435b-9331-ec0f853b11ed | reward_logr__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.74 | 1.00 | 0.6% | - | 2c699cee-1c08-4871-992d-07c4eeab643a | reward_logr_lambda_sweep__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.63 | 1.00 | 0.6% | - | 8f790043-500b-4546-a957-d7d17d0f83e5 | reward_logr_lambda_sweep__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.77 | 1.00 | 0.5% | - | 55453c8d-9ffb-4086-942d-b948213e0475 | reward_logr_lambda_sweep__risk-default__agent-PPO__seed-43 |
 
 Notes:
 - Seeds: number of independent seeds aggregated for metrics.

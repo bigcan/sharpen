@@ -54,4 +54,4 @@ sweep:
   trials: 6
   search_space:
     reward.lambda: [0.0, 0.05, 0.10, 0.15, 0.20, 0.30]
-
+  seeds: [41, 42, 43]

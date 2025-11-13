@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/65c3facfc92446d4b5de7627f34b0f5f/artifacts
+end_time: 1763014818087
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 65c3facfc92446d4b5de7627f34b0f5f
+run_name: vaunted-vole-871
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763014818031
+status: 3
+tags: []
+user_id: bigca
