@@ -1,0 +1,140 @@
+[
+  {
+    "benchmark_id": "sp500_rolling_1y",
+    "duplicate_of": "",
+    "duplicate_returns": false,
+    "evaluated_metrics": {
+      "max_drawdown": 0.18703905164390122,
+      "sharpe_ratio": -0.8007411855992849,
+      "volatility": 0.05043255754964281
+    },
+    "fingerprint_id": "ea8e4e70-50d7-4bfd-b03e-3287cde01c94",
+    "mlflow_run_id": "mlflow-unavailable",
+    "shap_summary": {
+      "max_drawdown": 0.003472049572160835,
+      "sharpe_ratio": 0.912887909724022,
+      "volatility": 0.08364004070381713
+    },
+    "variance_vs_baseline": {
+      "max_drawdown": 0.0070390516439012285,
+      "sharpe_ratio": -1.850741185599285,
+      "volatility": -0.16956744245035718
+    },
+    "walk_forward_splits": 5
+  },
+  {
+    "benchmark_id": "sp500_rolling_1y",
+    "duplicate_of": "",
+    "duplicate_returns": false,
+    "evaluated_metrics": {
+      "max_drawdown": 0.1813179548744559,
+      "sharpe_ratio": 0.7743138449939063,
+      "volatility": 0.12539268829222897
+    },
+    "fingerprint_id": "43dcd694-d826-48dc-bde6-3bd064dad6ed",
+    "mlflow_run_id": "mlflow-unavailable",
+    "shap_summary": {
+      "max_drawdown": 0.0035465940977346118,
+      "sharpe_ratio": 0.7418667430289722,
+      "volatility": 0.25458666287329323
+    },
+    "variance_vs_baseline": {
+      "max_drawdown": 0.0013179548744559066,
+      "sharpe_ratio": -0.2756861550060937,
+      "volatility": -0.09460731170777104
+    },
+    "walk_forward_splits": 5
+  },
+  {
+    "benchmark_id": "sp500_rolling_1y",
+    "duplicate_of": "",
+    "duplicate_returns": false,
+    "evaluated_metrics": {
+      "max_drawdown": 0.18981749289354088,
+      "sharpe_ratio": -0.17499945635475977,
+      "volatility": 0.11216441074724001
+    },
+    "fingerprint_id": "38a3034d-6ddc-4336-a577-b9a8cc443860",
+    "mlflow_run_id": "mlflow-unavailable",
+    "shap_summary": {
+      "max_drawdown": 0.007312013057749964,
+      "sharpe_ratio": 0.9123726513207587,
+      "volatility": 0.08031533562149133
+    },
+    "variance_vs_baseline": {
+      "max_drawdown": 0.009817492893540891,
+      "sharpe_ratio": -1.2249994563547597,
+      "volatility": -0.10783558925275999
+    },
+    "walk_forward_splits": 5
+  },
+  {
+    "benchmark_id": "sp500_rolling_1y",
+    "duplicate_of": "",
+    "duplicate_returns": false,
+    "evaluated_metrics": {
+      "max_drawdown": 0.19342277924027795,
+      "sharpe_ratio": 0.3580715436088481,
+      "volatility": 0.07237698143935531
+    },
+    "fingerprint_id": "a4549eca-0e98-4ff2-8c8e-7677a4687806",
+    "mlflow_run_id": "mlflow-unavailable",
+    "shap_summary": {
+      "max_drawdown": 0.015736441251666886,
+      "sharpe_ratio": 0.81119500734115,
+      "volatility": 0.17306855140718305
+    },
+    "variance_vs_baseline": {
+      "max_drawdown": 0.01342277924027796,
+      "sharpe_ratio": -0.691928456391152,
+      "volatility": -0.1476230185606447
+    },
+    "walk_forward_splits": 5
+  },
+  {
+    "benchmark_id": "sp500_rolling_1y",
+    "duplicate_of": "",
+    "duplicate_returns": false,
+    "evaluated_metrics": {
+      "max_drawdown": 0.19394945338159686,
+      "sharpe_ratio": -0.7516916980193111,
+      "volatility": 0.0625843404731738
+    },
+    "fingerprint_id": "596e54d6-8846-4593-89a4-80d0aa9a048d",
+    "mlflow_run_id": "mlflow-unavailable",
+    "shap_summary": {
+      "max_drawdown": 0.0070699704663029,
+      "sharpe_ratio": 0.913147400541474,
+      "volatility": 0.07978262899222305
+    },
+    "variance_vs_baseline": {
+      "max_drawdown": 0.013949453381596866,
+      "sharpe_ratio": -1.8016916980193112,
+      "volatility": -0.1574156595268262
+    },
+    "walk_forward_splits": 5
+  },
+  {
+    "benchmark_id": "sp500_rolling_1y",
+    "duplicate_of": "",
+    "duplicate_returns": false,
+    "evaluated_metrics": {
+      "max_drawdown": 0.19153350034817473,
+      "sharpe_ratio": 0.9396043434489062,
+      "volatility": 0.12751392372091527
+    },
+    "fingerprint_id": "4b992b28-9835-4137-8ac6-dd3b2bda0763",
+    "mlflow_run_id": "mlflow-unavailable",
+    "shap_summary": {
+      "max_drawdown": 0.053790489496522986,
+      "sharpe_ratio": 0.5148685329613001,
+      "volatility": 0.43134097754217693
+    },
+    "variance_vs_baseline": {
+      "max_drawdown": 0.011533500348174741,
+      "sharpe_ratio": -0.11039565655109385,
+      "volatility": -0.09248607627908473
+    },
+    "walk_forward_splits": 5
+  }
+]

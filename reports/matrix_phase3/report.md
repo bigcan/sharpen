@@ -1,0 +1,53 @@
+# FinRL Pro Matrix Report
+
+## Runs
+- config: `tmp/matrix_inputs/ppo_clip_0_15_fracdiff_d_0_5__risk-default__agent-PPO__seed-41.yaml` — fingerprint: `4fc348a0-fdcf-45ee-ad8d-fb47560c34c5` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_clip_0_15_fracdiff_d_0_5__risk-default__agent-PPO__seed-42.yaml` — fingerprint: `69cfba0f-ce39-407f-829d-70419b571b90` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_clip_0_15_fracdiff_d_0_5__risk-default__agent-PPO__seed-43.yaml` — fingerprint: `87de45f4-6075-47db-97f2-0f919465f8f3` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_clip_0_30_fracdiff_d_0_5__risk-default__agent-PPO__seed-41.yaml` — fingerprint: `dcdab954-3350-457e-be04-87d506fdb19a` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_clip_0_30_fracdiff_d_0_5__risk-default__agent-PPO__seed-42.yaml` — fingerprint: `0e5b1fab-67a7-42a5-abf1-852d29738bba` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_clip_0_30_fracdiff_d_0_5__risk-default__agent-PPO__seed-43.yaml` — fingerprint: `363f61a3-3462-406c-9d78-272d144e2f30` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_fracdiff_d_0_5__risk-default__agent-PPO__seed-41.yaml` — fingerprint: `ea2c6aee-c305-4eab-aa00-48ebdd634552` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_fracdiff_d_0_5__risk-default__agent-PPO__seed-42.yaml` — fingerprint: `ceb4b25c-002c-47e4-82f0-1ad3c3a0e04e` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_fracdiff_d_0_5__risk-default__agent-PPO__seed-43.yaml` — fingerprint: `e7399e51-30e9-4f11-bfd6-1d10da9ceb42` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_gae_0_98_fracdiff_d_0_5__risk-default__agent-PPO__seed-41.yaml` — fingerprint: `deafee7a-98b1-4345-942b-d40f93f64180` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_gae_0_98_fracdiff_d_0_5__risk-default__agent-PPO__seed-42.yaml` — fingerprint: `9a87fd82-dbe0-473d-8c14-97ed48c0ff67` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/ppo_gae_0_98_fracdiff_d_0_5__risk-default__agent-PPO__seed-43.yaml` — fingerprint: `15f1cce6-baaa-4a89-a2af-1063db046bbb` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/sac_fracdiff_d_0_5__risk-default__agent-SAC__seed-41.yaml` — fingerprint: `f911a5ce-ef55-498d-8296-15dc72898cc7` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/sac_fracdiff_d_0_5__risk-default__agent-SAC__seed-42.yaml` — fingerprint: `c21022a6-01b4-4c00-972d-02a9c9c68546` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/sac_fracdiff_d_0_5__risk-default__agent-SAC__seed-43.yaml` — fingerprint: `31fb763b-0344-4de6-a3dc-97839c07853a` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/td3_fracdiff_d_0_5__risk-default__agent-TD3__seed-41.yaml` — fingerprint: `35a5fdf0-bd3a-49b1-a044-b34d704a1149` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/td3_fracdiff_d_0_5__risk-default__agent-TD3__seed-42.yaml` — fingerprint: `78f62d5f-638a-4936-957c-ca9ef9d27087` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/td3_fracdiff_d_0_5__risk-default__agent-TD3__seed-43.yaml` — fingerprint: `0c387d4e-e090-4d5e-87c3-040ece239e94` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/td3_policy_noise_0_10_fracdiff_d_0_5__risk-default__agent-TD3__seed-41.yaml` — fingerprint: `f8285eaf-ae80-4ab7-a564-d8ad0d611b29` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/td3_policy_noise_0_10_fracdiff_d_0_5__risk-default__agent-TD3__seed-42.yaml` — fingerprint: `c6e0c2e1-3093-4d06-9e8a-bdfb1f74f41e` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/td3_policy_noise_0_10_fracdiff_d_0_5__risk-default__agent-TD3__seed-43.yaml` — fingerprint: `f96fc127-4499-4afd-b50f-e19ec5d5671d` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-41.yaml` — fingerprint: `0d48048c-5a61-4c49-8cb3-4b50143313a8` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-42.yaml` — fingerprint: `f5728333-2a9b-4b0a-a8f2-f9927e0422f9` — manifest: `finrl_pro/configs/fingerprints.yaml`
+- config: `tmp/matrix_inputs/td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-43.yaml` — fingerprint: `a4f9e819-bcb1-4c35-8ad1-f1bc43f026f1` — manifest: `finrl_pro/configs/fingerprints.yaml`
+
+## Evaluations (Walk-Forward)
+- fp `4fc348a0-fdcf-45ee-ad8d-fb47560c34c5` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.44 | MaxDD 0.18 | Vol 0.08
+- fp `69cfba0f-ce39-407f-829d-70419b571b90` | bench `sp500_rolling_1y` | splits 5 | Sharpe 0.23 | MaxDD 0.18 | Vol 0.07
+- fp `87de45f4-6075-47db-97f2-0f919465f8f3` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.20 | MaxDD 0.18 | Vol 0.08
+- fp `dcdab954-3350-457e-be04-87d506fdb19a` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.65 | MaxDD 0.18 | Vol 0.08
+- fp `0e5b1fab-67a7-42a5-abf1-852d29738bba` | bench `sp500_rolling_1y` | splits 5 | Sharpe -1.15 | MaxDD 0.18 | Vol 0.05
+- fp `363f61a3-3462-406c-9d78-272d144e2f30` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.30 | MaxDD 0.18 | Vol 0.06
+- fp `ea2c6aee-c305-4eab-aa00-48ebdd634552` | bench `sp500_rolling_1y` | splits 5 | Sharpe 0.65 | MaxDD 0.15 | Vol 0.07
+- fp `ceb4b25c-002c-47e4-82f0-1ad3c3a0e04e` | bench `sp500_rolling_1y` | splits 5 | Sharpe -3.14 | MaxDD 0.15 | Vol 0.02
+- fp `e7399e51-30e9-4f11-bfd6-1d10da9ceb42` | bench `sp500_rolling_1y` | splits 5 | Sharpe -1.70 | MaxDD 0.15 | Vol 0.03
+- fp `deafee7a-98b1-4345-942b-d40f93f64180` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.24 | MaxDD 0.18 | Vol 0.07
+- fp `9a87fd82-dbe0-473d-8c14-97ed48c0ff67` | bench `sp500_rolling_1y` | splits 5 | Sharpe -1.51 | MaxDD 0.18 | Vol 0.03
+- fp `15f1cce6-baaa-4a89-a2af-1063db046bbb` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.51 | MaxDD 0.19 | Vol 0.05
+- fp `f911a5ce-ef55-498d-8296-15dc72898cc7` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.12 | MaxDD 0.16 | Vol 0.04
+- fp `c21022a6-01b4-4c00-972d-02a9c9c68546` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.03 | MaxDD 0.16 | Vol 0.04
+- fp `31fb763b-0344-4de6-a3dc-97839c07853a` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.03 | MaxDD 0.15 | Vol 0.07
+- fp `35a5fdf0-bd3a-49b1-a044-b34d704a1149` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.22 | MaxDD 0.15 | Vol 0.08
+- fp `78f62d5f-638a-4936-957c-ca9ef9d27087` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.72 | MaxDD 0.16 | Vol 0.04
+- fp `0c387d4e-e090-4d5e-87c3-040ece239e94` | bench `sp500_rolling_1y` | splits 5 | Sharpe 0.11 | MaxDD 0.15 | Vol 0.06
+- fp `f8285eaf-ae80-4ab7-a564-d8ad0d611b29` | bench `sp500_rolling_1y` | splits 5 | Sharpe -2.27 | MaxDD 0.18 | Vol 0.03
+- fp `c6e0c2e1-3093-4d06-9e8a-bdfb1f74f41e` | bench `sp500_rolling_1y` | splits 5 | Sharpe -2.00 | MaxDD 0.18 | Vol 0.03
+- fp `f96fc127-4499-4afd-b50f-e19ec5d5671d` | bench `sp500_rolling_1y` | splits 5 | Sharpe -2.11 | MaxDD 0.18 | Vol 0.03
+- fp `0d48048c-5a61-4c49-8cb3-4b50143313a8` | bench `sp500_rolling_1y` | splits 5 | Sharpe -0.87 | MaxDD 0.18 | Vol 0.06
+- fp `f5728333-2a9b-4b0a-a8f2-f9927e0422f9` | bench `sp500_rolling_1y` | splits 5 | Sharpe -2.78 | MaxDD 0.18 | Vol 0.02
+- fp `a4f9e819-bcb1-4c35-8ad1-f1bc43f026f1` | bench `sp500_rolling_1y` | splits 5 | Sharpe 0.42 | MaxDD 0.18 | Vol 0.09
