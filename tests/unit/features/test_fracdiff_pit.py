@@ -33,7 +33,8 @@ def test_fracdiff_is_pit_safe():
         # Compute naive dot at t using future info (incorrect) and ensure mismatch at t
         # More robustly: ensure original signal at t does not equal feature constructed w/ unshifted data
         shifted_equals_current = (g["close"].values[1:] == g["close"].shift(1).values[1:]).all()
-        assert shifted_equals_current is False  # sanity
+        # Use boolean truth comparison for portability (numpy.bool_ vs bool)
+        assert not bool(shifted_equals_current)  # sanity
         # Feature must be NaN or finite; and number of non-nans should be len- (window)
         assert g[feature_col].notna().sum() <= max(len(g) - cfg.window, 0)
 

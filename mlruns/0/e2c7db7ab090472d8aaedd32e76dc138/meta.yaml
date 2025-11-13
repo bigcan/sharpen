@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/e2c7db7ab090472d8aaedd32e76dc138/artifacts
+end_time: 1762522539924
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: e2c7db7ab090472d8aaedd32e76dc138
+run_name: bittersweet-worm-779
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762522539864
+status: 3
+tags: []
+user_id: bigca

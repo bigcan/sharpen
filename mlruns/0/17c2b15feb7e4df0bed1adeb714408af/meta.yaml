@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/17c2b15feb7e4df0bed1adeb714408af/artifacts
+end_time: 1762516838105
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 17c2b15feb7e4df0bed1adeb714408af
+run_name: loud-fowl-987
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762516838055
+status: 3
+tags: []
+user_id: bigca

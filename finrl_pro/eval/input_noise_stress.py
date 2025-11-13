@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-from math import sqrt
 from pathlib import Path
 from typing import List, Tuple
 
@@ -140,4 +139,3 @@ def main(argv: List[str] | None = None) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

@@ -15,7 +15,7 @@ import pandas as pd
 import psycopg
 
 
-@dataclass(slots=True)
+@dataclass
 class MarketBar:
     timestamp: str
     ticker: str

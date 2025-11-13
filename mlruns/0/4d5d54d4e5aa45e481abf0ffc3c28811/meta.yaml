@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/4d5d54d4e5aa45e481abf0ffc3c28811/artifacts
+end_time: 1762520612339
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 4d5d54d4e5aa45e481abf0ffc3c28811
+run_name: abrasive-hound-391
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762520612285
+status: 3
+tags: []
+user_id: bigca

@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/5dfae9deacf74a5ca364b52bf0ff4b88/artifacts
+end_time: 1762519299216
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 5dfae9deacf74a5ca364b52bf0ff4b88
+run_name: vaunted-colt-596
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762519299159
+status: 3
+tags: []
+user_id: bigca

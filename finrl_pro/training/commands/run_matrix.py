@@ -45,14 +45,16 @@ def _expand_sweeps(base_path: Path, cfg: dict[str, Any]) -> List[tuple[Path, dic
     Supported keys under `sweep`:
       - risk_profile_ids: list[str]
       - agents: list[str] (written to training.module_versions.agent)
+      - seeds: list[int] (written to training.seed)
     """
     variants: List[tuple[Path, dict[str, Any]]] = []
     sweep = dict(cfg.get("sweep", {}) or {})
     risk_ids: List[str] = list(sweep.get("risk_profile_ids", []) or [])
     agents: List[str] = list(sweep.get("agents", []) or [])
+    seeds: List[int] = list(sweep.get("seeds", []) or [])
 
     # If no sweep keys, return original
-    if not risk_ids and not agents:
+    if not risk_ids and not agents and not seeds:
         return [(base_path, cfg)]
 
     # Build cartesian over present dimensions (only those provided)
@@ -66,17 +68,20 @@ def _expand_sweeps(base_path: Path, cfg: dict[str, Any]) -> List[tuple[Path, dic
             .get("agent", "PPO")
         )
         agents = [str(agent_cur)]
+    if not seeds:
+        seeds = [int(cfg.get("training", {}).get("seed", 42))]
 
     for rid in risk_ids:
         for agent in agents:
-            clone = json.loads(json.dumps(cfg))  # deep copy via JSON
-            clone["risk_profile_id"] = rid
-            clone.setdefault("training", {}).setdefault("module_versions", {})[
-                "agent"
-            ] = str(agent)
-            # synthesize filename
-            name = base_path.stem + f"__risk-{rid}__agent-{agent}.yaml"
-            variants.append((base_path.with_name(name), clone))
+            for seed in seeds:
+                clone = json.loads(json.dumps(cfg))  # deep copy via JSON
+                clone["risk_profile_id"] = rid
+                t = clone.setdefault("training", {})
+                t.setdefault("module_versions", {})["agent"] = str(agent)
+                t["seed"] = int(seed)
+                # synthesize filename
+                name = base_path.stem + f"__risk-{rid}__agent-{agent}__seed-{seed}.yaml"
+                variants.append((base_path.with_name(name), clone))
     return variants
 
 
@@ -281,6 +286,25 @@ def main(argv: Iterable[str] | None = None) -> None:
         encoding="utf-8",
     )
     _write_markdown_report(out_dir / "report.md", runs=run_records, evals=evaluations)
+
+    # Best-effort: update leaderboard from the newly generated matrix artifacts
+    try:
+        subprocess.run(
+            [
+                "python",
+                "-m",
+                "finrl_pro.eval.update_leaderboard",
+                "--matrix-dir",
+                str(out_dir),
+                "--leaderboard",
+                "docs/leaderboard.md",
+            ],
+            check=True,
+            text=True,
+        )
+    except Exception:
+        # Non-fatal if leaderboard update fails
+        pass
 
     print(json.dumps({
         "runs": str((out_dir / "runs.json").as_posix()),

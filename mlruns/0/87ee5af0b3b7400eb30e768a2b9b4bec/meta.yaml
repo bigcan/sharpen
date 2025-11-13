@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/87ee5af0b3b7400eb30e768a2b9b4bec/artifacts
+end_time: 1762518911685
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 87ee5af0b3b7400eb30e768a2b9b4bec
+run_name: mysterious-bird-62
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762518911634
+status: 3
+tags: []
+user_id: bigca

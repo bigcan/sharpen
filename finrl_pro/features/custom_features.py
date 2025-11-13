@@ -96,9 +96,9 @@ def add_fracdiff_features(df: pd.DataFrame, cfg: FracDiffConfig | None = None) -
             name = f"{cfg.prefix}_{col}_d{str(cfg.d).replace('.', 'p')}_w{cfg.window}"
             g[name] = out_arr
 
-        g = g.ffill()
-        g = g.dropna().reset_index(drop=True)
-        return g
+        # Preserve NaNs for initial windows to reflect PIT safety; do not forward-fill
+        # or drop rows here so callers/tests can validate windowing explicitly.
+        return g.reset_index(drop=True)
 
     return out.groupby("tic", group_keys=False).apply(per_tic)
 

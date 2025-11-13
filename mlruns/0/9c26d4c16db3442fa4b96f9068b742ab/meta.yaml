@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/9c26d4c16db3442fa4b96f9068b742ab/artifacts
+end_time: 1762520576246
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 9c26d4c16db3442fa4b96f9068b742ab
+run_name: adaptable-flea-402
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762520576197
+status: 3
+tags: []
+user_id: bigca

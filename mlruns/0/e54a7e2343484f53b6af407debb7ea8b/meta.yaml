@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/e54a7e2343484f53b6af407debb7ea8b/artifacts
+end_time: 1762520594325
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: e54a7e2343484f53b6af407debb7ea8b
+run_name: beautiful-gnu-609
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762520594275
+status: 3
+tags: []
+user_id: bigca

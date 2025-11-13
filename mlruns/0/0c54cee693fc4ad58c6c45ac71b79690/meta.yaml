@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/0c54cee693fc4ad58c6c45ac71b79690/artifacts
+end_time: 1762518909795
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 0c54cee693fc4ad58c6c45ac71b79690
+run_name: omniscient-flea-824
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762518909744
+status: 3
+tags: []
+user_id: bigca

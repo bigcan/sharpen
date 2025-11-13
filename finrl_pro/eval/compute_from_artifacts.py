@@ -12,7 +12,7 @@ import csv
 import json
 from math import sqrt
 from pathlib import Path
-from typing import Tuple
+ 
 
 
 def _read_series(path: Path, value_col: str) -> list[float]:
@@ -94,4 +94,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

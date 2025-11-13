@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/9d8834763c0e4997b7ed188f62e7ad19/artifacts
+end_time: 1762516825462
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 9d8834763c0e4997b7ed188f62e7ad19
+run_name: wistful-fowl-305
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762516825414
+status: 3
+tags: []
+user_id: bigca

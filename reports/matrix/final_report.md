@@ -129,3 +129,14 @@ Decision: Promote sp500_multi_longonly as CURRENT BEST for Phase 5, based on hig
 - Phase 3: `sp500_daily_agent_td3.yaml` -> Fingerprint 866b28f6-8cd1-4d3e-a498-4bb44aa97c07; Sharpe 2.13, PSR 1.00, MaxDD 14.6%, Vol 0.22
 - Phase 4: `sp500_daily_costs_10bps.yaml` -> Fingerprint 919f16d0-5cdd-4598-8b31-adc004af5761; Sharpe 1.50, PSR 1.00, MaxDD 16.8%, Vol 0.22
 - Phase 5: `sp500_multi_longonly.yaml` -> Fingerprint dae56ae3-f6b0-4c62-a97f-f472410f7f33; Sharpe 1.76, PSR 1.00, MaxDD 18.7%, Vol 0.22
+
+## Phase 0 Gate 0.0 Status
+
+- Gate: PSR ? 0.60; MaxDD ? 20%; turnover within budget
+- Result: PASS for all Phase 0 runs (Sharpe >> 1.05, MaxDD < 1%)
+
+## Phase 0 Seed-Aggregated Summary
+
+- Agent PPO กX Sharpe: 2.73 กำ 0.03; MaxDD: 0.56% กำ 0.01%
+- Agent TD3 กX Sharpe: 2.69 กำ 0.01; MaxDD: 0.58% กำ 0.00%
+

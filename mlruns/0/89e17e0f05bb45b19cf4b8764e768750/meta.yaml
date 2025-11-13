@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/89e17e0f05bb45b19cf4b8764e768750/artifacts
+end_time: 1762517180154
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 89e17e0f05bb45b19cf4b8764e768750
+run_name: adorable-roo-975
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762517180098
+status: 3
+tags: []
+user_id: bigca

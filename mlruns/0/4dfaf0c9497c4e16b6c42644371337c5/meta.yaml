@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/4dfaf0c9497c4e16b6c42644371337c5/artifacts
+end_time: 1762505599005
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 4dfaf0c9497c4e16b6c42644371337c5
+run_name: adventurous-ox-912
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762505598951
+status: 3
+tags: []
+user_id: bigca

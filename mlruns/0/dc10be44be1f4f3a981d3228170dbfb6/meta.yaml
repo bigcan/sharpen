@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/dc10be44be1f4f3a981d3228170dbfb6/artifacts
+end_time: 1762516839975
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: dc10be44be1f4f3a981d3228170dbfb6
+run_name: smiling-shark-124
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762516839919
+status: 3
+tags: []
+user_id: bigca

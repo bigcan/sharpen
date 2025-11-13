@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/47cee3394d674c7a8a3fab152b7aff34/artifacts
+end_time: 1762520574317
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 47cee3394d674c7a8a3fab152b7aff34
+run_name: chill-crane-357
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762520574264
+status: 3
+tags: []
+user_id: bigca

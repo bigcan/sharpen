@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/38b83c2d3a4b4d67be3e0f62177de16d/artifacts
+end_time: 1763003190254
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 38b83c2d3a4b4d67be3e0f62177de16d
+run_name: adventurous-auk-653
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763003190192
+status: 3
+tags: []
+user_id: bigca

@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/4187b42b41a44d4886392c76241e9cc3/artifacts
+end_time: 1763003113176
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 4187b42b41a44d4886392c76241e9cc3
+run_name: bold-dolphin-251
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763003113104
+status: 3
+tags: []
+user_id: bigca

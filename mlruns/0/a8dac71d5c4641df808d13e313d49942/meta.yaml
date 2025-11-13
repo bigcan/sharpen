@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/a8dac71d5c4641df808d13e313d49942/artifacts
+end_time: 1762518044827
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: a8dac71d5c4641df808d13e313d49942
+run_name: unruly-auk-292
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762518044777
+status: 3
+tags: []
+user_id: bigca

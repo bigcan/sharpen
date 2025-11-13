@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/8f88145569914f39b321243c953757bd/artifacts
+end_time: 1762505621106
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 8f88145569914f39b321243c953757bd
+run_name: salty-foal-980
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762505621056
+status: 3
+tags: []
+user_id: bigca

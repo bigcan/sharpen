@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/36b54a26c30648e594b95084447559ed/artifacts
+end_time: 1762522458234
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 36b54a26c30648e594b95084447559ed
+run_name: casual-stork-454
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762522458169
+status: 3
+tags: []
+user_id: bigca

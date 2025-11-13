@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/1037f2094b754903b4e12b2a0dc7707d/artifacts
+end_time: 1762518028861
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 1037f2094b754903b4e12b2a0dc7707d
+run_name: invincible-dove-653
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762518028810
+status: 3
+tags: []
+user_id: bigca

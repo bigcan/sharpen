@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/642feea0fb8e4679964ad5b0df61f696/artifacts
+end_time: 1762518931134
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 642feea0fb8e4679964ad5b0df61f696
+run_name: carefree-stag-548
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762518931080
+status: 3
+tags: []
+user_id: bigca

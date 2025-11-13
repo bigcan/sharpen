@@ -45,13 +45,12 @@ Establish a risk‑compliant single‑asset baseline (SPY daily) to anchor subse
 - Sanity: `compute_psr` on returns.csv yields PSR > 0 for selected run
 
 ## Tasks (Checklist)
-- [ ] Freeze splits; configure embargo (done: )
-- [ ] Configure costs and execution model (done: )
-- [ ] Add PPO + TD3 configs under phase0 (done: )
-- [ ] Run matrix for phase0; verify artifacts (done: )
-- [ ] Update leaderboard with MVP row (done: )
+- [x] Freeze splits; configure embargo (done)
+- [x] Configure costs and execution model (done)
+- [x] Add PPO + TD3 configs under phase0 (done)
+- [x] Run matrix for phase0; verify artifacts (done)
+- [x] Update leaderboard with MVP row (done)
 
 ## Artifacts
 - `reports/matrix/*` (filtered to Phase 0 when running phase0 dir)
 - `docs/leaderboard.md` updated
-

@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/2961b66e9a7c4c398429f52ab51b2a27/artifacts
+end_time: 1762522479435
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 2961b66e9a7c4c398429f52ab51b2a27
+run_name: dazzling-mare-312
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762522479367
+status: 3
+tags: []
+user_id: bigca
