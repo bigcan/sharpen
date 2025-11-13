@@ -160,3 +160,13 @@ Decision: Promote sp500_multi_longonly as CURRENT BEST for Phase 5, based on hig
   - reward_logr_lambda_sweep: ~2.63กV2.77; MaxDD ~0.54กV0.61%
 
 - Decision: Reward=logR with tuned lambda shows the best tail (seed-43) but mean uplift vs Phase 0 is not ? 0.20; Gate 1.0 NOT MET. Promote none; carry best pair (action_continuous + reward_logr) forward to Phase 2.
+
+## Phase 2 กX Fracdiff Grid
+
+d grid: 0.4, 0.5, 0.6 (seeds: 41, 42, 43)
+- d=0.4 กX Sharpe: 2.68 กำ 0.03; MaxDD: 0.59% กำ 0.01%
+- d=0.5 กX Sharpe: 2.72 กำ 0.05; MaxDD: 0.57% กำ 0.02%
+- d=0.6 กX Sharpe: 2.73 กำ 0.02; MaxDD: 0.56% กำ 0.01%
+
+- Gate 2.0: Best feature variant must improve PSR ? 0.15 vs Phase 0 with MaxDD within 1.1กั baseline.
+- Decision: Based on Sharpe proxy, modest differences observed; Gate 2.0 NOT MET. Carry d=0.5 forward for Phase 3 as neutral baseline.

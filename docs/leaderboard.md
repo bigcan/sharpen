@@ -122,6 +122,15 @@ Links:
 | 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.74 | 1.00 | 0.6% | - | 2c699cee-1c08-4871-992d-07c4eeab643a | reward_logr_lambda_sweep__risk-default__agent-PPO__seed-41 |
 | 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.63 | 1.00 | 0.6% | - | 8f790043-500b-4546-a957-d7d17d0f83e5 | reward_logr_lambda_sweep__risk-default__agent-PPO__seed-42 |
 | 2025-11-13 | - | - | PPO | - | logR | - | - | - | - | 2.77 | 1.00 | 0.5% | - | 55453c8d-9ffb-4086-942d-b948213e0475 | reward_logr_lambda_sweep__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.65 | 1.00 | 0.6% | - | b7af2ff8-2853-4b3c-84e5-d787fae6e40d | fracdiff_d_0.4__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.72 | 1.00 | 0.6% | - | 53fed6e3-1be5-45c5-b669-0cd0956deee0 | fracdiff_d_0.4__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.67 | 1.00 | 0.6% | - | 1a0ef979-4646-4d80-8219-3dc4efa6bc99 | fracdiff_d_0.4__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.77 | 1.00 | 0.5% | - | 7be1ba4d-1a7b-481e-9b3b-19807c9f7a80 | fracdiff_d_0.5__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.73 | 1.00 | 0.6% | - | dd3b4f0e-01d4-4fbf-bb46-84c25593043c | fracdiff_d_0.5__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.66 | 1.00 | 0.6% | - | 90c95942-131e-4963-b769-aa05ca917443 | fracdiff_d_0.5__risk-default__agent-PPO__seed-43 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.75 | 1.00 | 0.6% | - | c2f96e36-9588-4b33-a25c-c090f6fa3f84 | fracdiff_d_0.6__risk-default__agent-PPO__seed-41 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.74 | 1.00 | 0.6% | - | 6933c899-11d1-44d6-82b6-30fa2641612b | fracdiff_d_0.6__risk-default__agent-PPO__seed-42 |
+| 2025-11-13 | - | - | PPO | - | - | - | - | - | - | 2.70 | 1.00 | 0.6% | - | b4b9137b-a555-4204-9a76-511c4daa5012 | fracdiff_d_0.6__risk-default__agent-PPO__seed-43 |
 
 Notes:
 - Seeds: number of independent seeds aggregated for metrics.

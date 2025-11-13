@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/b46f48f2e78a442fb84e3a8478b442e5/artifacts
+end_time: 1763015229469
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: b46f48f2e78a442fb84e3a8478b442e5
+run_name: honorable-bee-258
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763015229416
+status: 3
+tags: []
+user_id: bigca
