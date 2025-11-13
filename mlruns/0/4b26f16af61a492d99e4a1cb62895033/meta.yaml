@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/4b26f16af61a492d99e4a1cb62895033/artifacts
+end_time: 1762522493627
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 4b26f16af61a492d99e4a1cb62895033
+run_name: illustrious-gull-280
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762522493559
+status: 3
+tags: []
+user_id: bigca

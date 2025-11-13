@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/394d7c4b11874f3b8aafe19246f7b7a5/artifacts
+end_time: 1762519230301
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 394d7c4b11874f3b8aafe19246f7b7a5
+run_name: vaunted-mink-658
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762519230243
+status: 3
+tags: []
+user_id: bigca

@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/f61c696511f14892893f538857194bd2/artifacts
+end_time: 1763004483520
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: f61c696511f14892893f538857194bd2
+run_name: hilarious-koi-11
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763004483456
+status: 3
+tags: []
+user_id: bigca

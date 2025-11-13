@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/dd90e98055ee43feb25718ff0edf235a/artifacts
+end_time: 1763004465009
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: dd90e98055ee43feb25718ff0edf235a
+run_name: selective-snake-925
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763004464945
+status: 3
+tags: []
+user_id: bigca

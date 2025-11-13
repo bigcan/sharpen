@@ -9,9 +9,8 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 
 def _read_returns(path: Path) -> List[float]:
@@ -122,4 +121,3 @@ def main(argv: List[str] | None = None) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/915c08e8d2314211ae2bc415c1e84eed/artifacts
+end_time: 1763003135777
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 915c08e8d2314211ae2bc415c1e84eed
+run_name: bustling-moose-304
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763003135710
+status: 3
+tags: []
+user_id: bigca

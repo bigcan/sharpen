@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/b0519a624f114eaa900fd83dc1262b68/artifacts
+end_time: 1762522451410
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: b0519a624f114eaa900fd83dc1262b68
+run_name: silent-mule-724
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762522451346
+status: 3
+tags: []
+user_id: bigca

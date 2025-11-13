@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/a200f2895e944ee5b5327f058aacf62b/artifacts
+end_time: 1762519228129
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: a200f2895e944ee5b5327f058aacf62b
+run_name: rebellious-hound-382
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762519228071
+status: 3
+tags: []
+user_id: bigca

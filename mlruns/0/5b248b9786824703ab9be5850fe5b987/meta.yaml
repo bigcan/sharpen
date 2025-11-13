@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/5b248b9786824703ab9be5850fe5b987/artifacts
+end_time: 1762520622241
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 5b248b9786824703ab9be5850fe5b987
+run_name: redolent-asp-422
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762520622183
+status: 3
+tags: []
+user_id: bigca

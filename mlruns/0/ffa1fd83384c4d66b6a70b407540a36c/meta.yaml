@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/ffa1fd83384c4d66b6a70b407540a36c/artifacts
+end_time: 1762519268005
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: ffa1fd83384c4d66b6a70b407540a36c
+run_name: peaceful-eel-562
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762519267954
+status: 3
+tags: []
+user_id: bigca

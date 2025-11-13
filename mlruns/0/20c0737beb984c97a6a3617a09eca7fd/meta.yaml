@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/20c0737beb984c97a6a3617a09eca7fd/artifacts
+end_time: 1762518951985
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 20c0737beb984c97a6a3617a09eca7fd
+run_name: respected-moose-886
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762518951932
+status: 3
+tags: []
+user_id: bigca

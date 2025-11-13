@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/ae7ebdc6fa9e413495530dff154f6323/artifacts
+end_time: 1762518940490
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: ae7ebdc6fa9e413495530dff154f6323
+run_name: bustling-snipe-496
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762518940439
+status: 3
+tags: []
+user_id: bigca

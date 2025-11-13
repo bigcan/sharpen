@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/bf8648a2fa934af894974f47204a018a/artifacts
+end_time: 1763003119169
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: bf8648a2fa934af894974f47204a018a
+run_name: sneaky-ape-245
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763003119095
+status: 3
+tags: []
+user_id: bigca

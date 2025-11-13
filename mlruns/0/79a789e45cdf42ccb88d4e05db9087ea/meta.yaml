@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/79a789e45cdf42ccb88d4e05db9087ea/artifacts
+end_time: 1763004467667
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 79a789e45cdf42ccb88d4e05db9087ea
+run_name: adorable-wasp-823
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763004467602
+status: 3
+tags: []
+user_id: bigca

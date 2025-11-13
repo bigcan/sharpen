@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/f2f82426a314423c942e9121a0cdc35a/artifacts
+end_time: 1762514322366
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: f2f82426a314423c942e9121a0cdc35a
+run_name: exultant-goat-781
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762514322316
+status: 3
+tags: []
+user_id: bigca

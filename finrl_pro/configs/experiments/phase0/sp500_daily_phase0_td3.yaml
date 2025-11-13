@@ -31,3 +31,6 @@ features:
     wavelet:  { enable: false, cols: [close], wavelet: db4, level: 3, window: 256 }
   cache: { enabled: true, dir: finrl_pro/data/processed }
 
+# Sweep over seeds to ensure stability statistics
+sweep:
+  seeds: [41, 42, 43]

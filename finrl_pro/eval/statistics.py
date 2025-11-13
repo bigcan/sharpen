@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import sqrt
-from typing import Iterable, Sequence, Tuple
+from typing import Iterable, Sequence
 
 
 def _to_list(x: Iterable[float]) -> list[float]:
@@ -147,4 +147,3 @@ def bootstrap_sharpe_ci(
     lo_idx = max(0, min(lo_idx, len(stats) - 1))
     hi_idx = max(0, min(hi_idx, len(stats) - 1))
     return SharpeCI(lower=stats[lo_idx], upper=stats[hi_idx])
-

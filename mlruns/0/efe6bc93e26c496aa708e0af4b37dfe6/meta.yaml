@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/efe6bc93e26c496aa708e0af4b37dfe6/artifacts
+end_time: 1763003149512
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: efe6bc93e26c496aa708e0af4b37dfe6
+run_name: zealous-mouse-686
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763003149439
+status: 3
+tags: []
+user_id: bigca

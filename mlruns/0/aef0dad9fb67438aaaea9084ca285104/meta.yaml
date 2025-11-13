@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/aef0dad9fb67438aaaea9084ca285104/artifacts
+end_time: 1762514334501
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: aef0dad9fb67438aaaea9084ca285104
+run_name: secretive-deer-163
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762514334442
+status: 3
+tags: []
+user_id: bigca

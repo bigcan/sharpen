@@ -10,7 +10,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
-from typing import List, Tuple
+from typing import List
 
 
 def _read_returns(path: Path) -> List[float]:
@@ -118,4 +118,3 @@ def main(argv: List[str] | None = None) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

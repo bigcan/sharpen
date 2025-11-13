@@ -9,7 +9,7 @@ import argparse
 import csv
 import json
 from pathlib import Path
-from typing import Iterable
+ 
 
 from finrl_pro.eval.statistics import (
     SharpeCI,
@@ -99,4 +99,3 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-

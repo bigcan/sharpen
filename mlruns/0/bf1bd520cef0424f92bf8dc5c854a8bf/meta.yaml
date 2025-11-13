@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/bf1bd520cef0424f92bf8dc5c854a8bf/artifacts
+end_time: 1762520590405
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: bf1bd520cef0424f92bf8dc5c854a8bf
+run_name: wistful-fish-97
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762520590354
+status: 3
+tags: []
+user_id: bigca

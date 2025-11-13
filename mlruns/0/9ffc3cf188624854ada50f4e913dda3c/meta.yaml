@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/9ffc3cf188624854ada50f4e913dda3c/artifacts
+end_time: 1762517184588
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 9ffc3cf188624854ada50f4e913dda3c
+run_name: awesome-bass-92
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762517184534
+status: 3
+tags: []
+user_id: bigca

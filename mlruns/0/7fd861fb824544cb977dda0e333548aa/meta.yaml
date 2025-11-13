@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/7fd861fb824544cb977dda0e333548aa/artifacts
+end_time: 1763003126330
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 7fd861fb824544cb977dda0e333548aa
+run_name: ambitious-frog-574
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763003126245
+status: 3
+tags: []
+user_id: bigca

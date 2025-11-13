@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/2a3feffbb5a14332b53a5569e92630be/artifacts
+end_time: 1762517166648
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 2a3feffbb5a14332b53a5569e92630be
+run_name: mercurial-gull-279
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762517166593
+status: 3
+tags: []
+user_id: bigca

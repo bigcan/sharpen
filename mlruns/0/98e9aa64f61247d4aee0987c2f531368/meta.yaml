@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/98e9aa64f61247d4aee0987c2f531368/artifacts
+end_time: 1762517157807
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 98e9aa64f61247d4aee0987c2f531368
+run_name: invincible-stag-722
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1762517157751
+status: 3
+tags: []
+user_id: bigca

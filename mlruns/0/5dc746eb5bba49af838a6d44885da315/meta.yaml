@@ -1,0 +1,14 @@
+artifact_uri: file:///mnt/c/FinRL/FinRL%20Pro%20V2.0/FinRL_Podracer/mlruns/0/5dc746eb5bba49af838a6d44885da315/artifacts
+end_time: 1763004472840
+entry_point_name: ''
+experiment_id: '0'
+lifecycle_stage: active
+run_id: 5dc746eb5bba49af838a6d44885da315
+run_name: incongruous-lynx-205
+source_name: ''
+source_type: 4
+source_version: ''
+start_time: 1763004472766
+status: 3
+tags: []
+user_id: bigca
