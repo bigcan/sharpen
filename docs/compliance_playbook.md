@@ -21,8 +21,8 @@ before each release candidate.
 
 ## 2. Register Risk Control Profiles
 
-- Define profiles in `finrl_pro/configs/risk_profiles.yaml` with capital, drawdown,
-  leverage, sandbox, and fallback parameters.
+- Define profiles in `finrl_pro/configs/risk_profiles.yaml` with exposure,
+  turnover/cost, sandbox, and fallback parameters.
 - Log profiles to the control plane using the API client:
   ```python
   from finrl_pro.mlops.api_client import FinRLProAPIClient
@@ -64,6 +64,8 @@ before each release candidate.
        approved_by="risk_officer",
        effective_date=date(2025, 1, 1),
        fallback_agent="finrl_pro.agents.baseline",
+       max_avg_turnover=0.15,
+       max_transaction_costs_bps=175,
    )
    trainer = Trainer(
        fingerprint_store=store,

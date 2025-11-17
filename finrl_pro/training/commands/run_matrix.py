@@ -7,12 +7,12 @@ reproduces + evaluates each fingerprint to produce a consolidated JSON and Markd
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
-import hashlib
 
 import yaml
 
@@ -20,6 +20,7 @@ from finrl_pro.configs.fingerprint_store import FingerprintStore
 from finrl_pro.eval.base import EvaluationContext
 from finrl_pro.eval.benchmark_catalog import BenchmarkCatalog
 from finrl_pro.eval.walk_forward import WalkForwardEvaluator
+from finrl_pro.eval.statistics import probabilistic_sharpe_ratio
 from finrl_pro.training.trainer import Trainer
 
 
@@ -118,8 +119,16 @@ def _run_experiment(config_path: Path) -> RunRecord:
     )
 
 
-def _evaluate_fingerprints(records: Iterable[RunRecord], *, splits: int, benchmarks_path: Path) -> list[dict[str, Any]]:
-    store = FingerprintStore(manifest_path=Path(next(iter(records)).manifest))
+def _evaluate_fingerprints(
+    records: List[RunRecord],
+    *,
+    splits: int,
+    benchmarks_path: Path,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    if not records:
+        return [], []
+
+    store = FingerprintStore(manifest_path=Path(records[0].manifest))
     store.load()
     trainer = Trainer(fingerprint_store=store)
     catalog = BenchmarkCatalog(benchmarks_path)
@@ -128,6 +137,7 @@ def _evaluate_fingerprints(records: Iterable[RunRecord], *, splits: int, benchma
 
     evaluations: list[dict[str, Any]] = []
     seen_digests: dict[str, str] = {}
+    telemetry: list[dict[str, Any]] = []
     for rec in records:
         fp = trainer.reproduce(rec.fingerprint_id)
         ref = fp.baseline_reference or ""
@@ -138,6 +148,7 @@ def _evaluate_fingerprints(records: Iterable[RunRecord], *, splits: int, benchma
             walk_forward_splits=int(splits),
         )
         res = wf.evaluate(ctx)
+        psr = probabilistic_sharpe_ratio(res.returns) if res.returns else None
         # Duplicate artifact guard: mark evaluations that reuse identical returns.csv
         dup_flag = False
         dup_of = None
@@ -154,10 +165,18 @@ def _evaluate_fingerprints(records: Iterable[RunRecord], *, splits: int, benchma
         except Exception:
             pass
 
+        risk_metrics = {
+            "avg_turnover": fp.metrics_snapshot.get("avg_turnover"),
+            "total_turnover": fp.metrics_snapshot.get("total_turnover"),
+            "transaction_costs_bps": fp.metrics_snapshot.get("transaction_costs_bps"),
+        }
+
         evaluations.append(
             {
+                "config": rec.config,
                 "fingerprint_id": fp.fingerprint_id,
                 "mlflow_run_id": fp.mlflow_run_id,
+                "seed": fp.seed,
                 "benchmark_id": bench_id,
                 "evaluated_metrics": res.evaluated_metrics,
                 "variance_vs_baseline": res.variance_vs_baseline,
@@ -165,9 +184,19 @@ def _evaluate_fingerprints(records: Iterable[RunRecord], *, splits: int, benchma
                 "walk_forward_splits": res.walk_forward_splits,
                 "duplicate_returns": dup_flag,
                 "duplicate_of": dup_of or "",
+                "psr": psr,
+                "risk_metrics": risk_metrics,
             }
         )
-    return evaluations
+        telemetry.append(
+            {
+                "fingerprint_id": fp.fingerprint_id,
+                "config": rec.config,
+                "seed": fp.seed,
+                "metrics_snapshot": dict(fp.metrics_snapshot),
+            }
+        )
+    return evaluations, telemetry
 
 
 def _write_markdown_report(path: Path, *, runs: list[RunRecord], evals: list[dict[str, Any]]) -> None:
@@ -184,11 +213,85 @@ def _write_markdown_report(path: Path, *, runs: list[RunRecord], evals: list[dic
     lines.append("## Evaluations (Walk-Forward)")
     for ev in evals:
         em = ev["evaluated_metrics"]
+        psr = ev.get("psr")
+        psr_str = f"{psr:.2f}" if isinstance(psr, (int, float)) else "n/a"
         lines.append(
             f"- fp `{ev['fingerprint_id']}` | bench `{ev['benchmark_id']}` | splits {ev['walk_forward_splits']} "
-            f"| Sharpe {em.get('sharpe_ratio'):.2f} | MaxDD {em.get('max_drawdown'):.2f} | Vol {em.get('volatility'):.2f}"
+            f"| Sharpe {em.get('sharpe_ratio'):.2f} | MaxDD {em.get('max_drawdown'):.2f} "
+            f"| Vol {em.get('volatility'):.2f} | PSR {psr_str}"
         )
+        risk = ev.get("risk_metrics") or {}
+        avg_turn = risk.get("avg_turnover")
+        total_turn = risk.get("total_turnover")
+        cost_bps = risk.get("transaction_costs_bps")
+        if any(value is not None for value in (avg_turn, total_turn, cost_bps)):
+            avg_str = f"{avg_turn:.4f}" if isinstance(avg_turn, (int, float)) else "n/a"
+            total_str = f"{total_turn:.2f}" if isinstance(total_turn, (int, float)) else "n/a"
+            cost_str = f"{cost_bps:.1f}" if isinstance(cost_bps, (int, float)) else "n/a"
+            lines.append(
+                f"  ↳ turnover(avg {avg_str}, total {total_str}) | costs {cost_str} bps"
+            )
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _config_base(config_path: str) -> str:
+    stem = Path(config_path).stem
+    return stem.split("__", 1)[0]
+
+
+def _mean(values: Iterable[float | None]) -> float | None:
+    data = [float(v) for v in values if isinstance(v, (int, float))]
+    if not data:
+        return None
+    return sum(data) / len(data)
+
+
+def _write_summary_report(path: Path, evals: list[dict[str, Any]]) -> None:
+    summary: dict[str, dict[str, Any]] = {}
+    for ev in evals:
+        cfg = _config_base(ev["config"])
+        bucket = summary.setdefault(
+            cfg,
+            {
+                "runs": [],
+            },
+        )
+        bucket["runs"].append(ev)
+
+    payload: dict[str, Any] = {}
+    for cfg, rows in summary.items():
+        runs = rows["runs"]
+        payload[cfg] = {
+            "count": len(runs),
+            "mean_sharpe": _mean(r["evaluated_metrics"].get("sharpe_ratio") for r in runs),
+            "mean_psr": _mean(r.get("psr") for r in runs),
+            "mean_maxdd": _mean(r["evaluated_metrics"].get("max_drawdown") for r in runs),
+            "mean_avg_turnover": _mean(
+                (r.get("risk_metrics") or {}).get("avg_turnover") for r in runs
+            ),
+            "mean_total_turnover": _mean(
+                (r.get("risk_metrics") or {}).get("total_turnover") for r in runs
+            ),
+            "mean_transaction_costs_bps": _mean(
+                (r.get("risk_metrics") or {}).get("transaction_costs_bps") for r in runs
+            ),
+            "runs": [
+                {
+                    "fingerprint_id": r["fingerprint_id"],
+                    "seed": r.get("seed"),
+                    "config": r["config"],
+                    "sharpe_ratio": r["evaluated_metrics"].get("sharpe_ratio"),
+                    "max_drawdown": r["evaluated_metrics"].get("max_drawdown"),
+                    "psr": r.get("psr"),
+                    "avg_turnover": (r.get("risk_metrics") or {}).get("avg_turnover"),
+                    "total_turnover": (r.get("risk_metrics") or {}).get("total_turnover"),
+                    "transaction_costs_bps": (r.get("risk_metrics") or {}).get("transaction_costs_bps"),
+                }
+                for r in runs
+            ],
+        }
+
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -272,13 +375,13 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     # Reproduce and evaluate
-    evaluations = _evaluate_fingerprints(
+    evaluations, telemetry = _evaluate_fingerprints(
         run_records,
         splits=int(args.walk_forward_splits),
         benchmarks_path=Path(args.benchmarks),
     )
     (out_dir / "fingerprints.json").write_text(
-        json.dumps(run_dicts, indent=2, sort_keys=True),
+        json.dumps(telemetry, indent=2, sort_keys=True),
         encoding="utf-8",
     )
     (out_dir / "eval_report.json").write_text(
@@ -286,6 +389,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         encoding="utf-8",
     )
     _write_markdown_report(out_dir / "report.md", runs=run_records, evals=evaluations)
+    _write_summary_report(out_dir / "risk_summary.json", evaluations)
 
     # Best-effort: update leaderboard from the newly generated matrix artifacts
     try:
@@ -311,6 +415,7 @@ def main(argv: Iterable[str] | None = None) -> None:
         "fingerprints": str((out_dir / "fingerprints.json").as_posix()),
         "evaluations": str((out_dir / "eval_report.json").as_posix()),
         "markdown": str((out_dir / "report.md").as_posix()),
+        "risk_summary": str((out_dir / "risk_summary.json").as_posix()),
     }, indent=2, sort_keys=True))
 
 

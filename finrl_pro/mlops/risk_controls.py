@@ -49,4 +49,26 @@ class RiskControlPolicy:
             violations.append(
                 f"Leverage {leverage:.4f} exceeds cap {self._profile.leverage_cap:.4f}."
             )
+
+        avg_turnover = telemetry.get("avg_turnover")
+        if (
+            avg_turnover is not None
+            and self._profile.max_avg_turnover is not None
+            and avg_turnover > self._profile.max_avg_turnover
+        ):
+            violations.append(
+                f"Avg turnover {avg_turnover:.4f} exceeds limit "
+                f"{self._profile.max_avg_turnover:.4f}."
+            )
+
+        txn_bps = telemetry.get("transaction_costs_bps")
+        if (
+            txn_bps is not None
+            and self._profile.max_transaction_costs_bps is not None
+            and txn_bps > self._profile.max_transaction_costs_bps
+        ):
+            violations.append(
+                f"Transaction costs {txn_bps:.2f}bps exceed cap "
+                f"{self._profile.max_transaction_costs_bps:.2f}bps."
+            )
         return violations
