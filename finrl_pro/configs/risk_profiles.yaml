@@ -8,6 +8,8 @@ profiles:
     approved_by: Research Lead        # approver name/role
     effective_date: 2025-01-01        # ISO date
     fallback_agent: null              # optional fallback agent
+    max_avg_turnover: 0.20            # avg |delta position| per step
+    max_transaction_costs_bps: 250    # cumulative transaction cost cap in bps
 
   - profile_id: conservative
     name: Conservative Risk
@@ -18,6 +20,8 @@ profiles:
     approved_by: Risk Officer
     effective_date: 2025-01-01
     fallback_agent: null
+    max_avg_turnover: 0.10
+    max_transaction_costs_bps: 150
 
   - profile_id: balanced
     name: Balanced Risk
@@ -28,6 +32,8 @@ profiles:
     approved_by: Risk Officer
     effective_date: 2025-01-01
     fallback_agent: null
+    max_avg_turnover: 0.15
+    max_transaction_costs_bps: 200
 
   - profile_id: aggressive
     name: Aggressive Risk
@@ -38,3 +44,5 @@ profiles:
     approved_by: Research Lead
     effective_date: 2025-01-01
     fallback_agent: null
+    max_avg_turnover: 0.35
+    max_transaction_costs_bps: 400

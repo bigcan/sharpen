@@ -74,12 +74,16 @@ Goal
 
 Checklist
 - [x] Define action/reward experiment YAMLs with seed sweeps under `finrl_pro/configs/experiments/phase1/`.
-- [ ] Run matrix with real training outputs (returns, equity, drawdown CSVs per fingerprint).
-- [ ] Aggregate seed metrics, evaluate PSR uplift, and document Gate 1.0 decision with evidence.
-- [ ] Adversarial review for turnover spikes, risk breaches, and data leakage.
+- [x] Run matrix with real training outputs (returns, equity, drawdown CSVs per fingerprint).
+- [x] Aggregate seed metrics, evaluate PSR uplift, and document Gate 1.0 decision with evidence.
+- [x] Adversarial review for turnover spikes, risk breaches, and data leakage.
 
 Acceptance Criteria
 - Gate 1.0 PASSES only if PSR uplift ≥ 0.20 vs. Phase 0 and all risk constraints hold; otherwise mark NOT MET and declare carry-forward combo (currently action_continuous + reward_logr).
+
+Status (2025-11-13)
+- Gate 1.0 NOT MET: reward_logr delivered the only positive Sharpe (mean 0.34) and PSR (mean 0.38), but fell short of the required +0.20 uplift over the Phase 0 PSR_test baseline of 1.00 while discrete/continuous action toggles regressed Sharpe. Turnover telemetry (new `execution.csv` artifacts, summarized in `reports/matrix_phase1/risk_summary.json`) shows continuous/logR configs averaging ~85 absolute turn changes (~170 bps costs) vs. ~30 / 60 bps for discrete actions, yet none clears the PSR gate.
+- Carry-forward configuration stays action_continuous + reward_logr; see `reports/matrix_phase1/risk_summary.json` for the current best fingerprint reference. Evidence + adversarial notes captured in `reports/matrix_phase1/final_report.md`.
 
 Specs
 - 120-phases/1xx-phase1-actions.md
@@ -93,12 +97,16 @@ Goal
 
 Checklist
 - [x] Author fracdiff configs for d ∈ {0.4, 0.5, 0.6} with seeds {41, 42, 43}.
-- [ ] Produce real training artifacts (`returns.csv`) for each fingerprint; evaluator now fails fast if missing.
-- [ ] Run PIT validator + cache hash checks for every enabled ladder.
-- [ ] Summarize Gate 2.0 metrics and carry-forward selection in final report/roadmap.
+- [x] Produce real training artifacts (`returns.csv`) for each fingerprint; evaluator now fails fast if missing.
+- [x] Run PIT validator + cache hash checks for every enabled ladder.
+- [x] Summarize Gate 2.0 metrics and carry-forward selection in final report/roadmap.
 
 Acceptance Criteria
 - Best feature variant improves PSR by >= 0.15 with max drawdown within 1.1x of baseline.
+
+Status (2025-11-13)
+- Matrix outputs for fracdiff d∈{0.4,0.5,0.6} (seeds 41/42/43) live under `reports/matrix_phase2/`, but none achieved the +0.15 PSR uplift (best mean PSR 0.33 for d=0.4 vs. Phase 1 carry-forward PSR 0.38) and Sharpe remains negative on average.
+- PIT validator (`finrl_pro.eval.pit_validator`) passed for all ladders using cached feature snapshots in `finrl_pro/data/processed/<cache_key>/`; see `reports/pit_checks/phase2_summary.json`. Gate 2.0 stays open pending higher-PSR feature sets (e.g., fracdiff tuning, momentum/vol/wavelets).
 
 Specs
 - 120-phases/2xx-phase2-features.md

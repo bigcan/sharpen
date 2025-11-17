@@ -27,6 +27,8 @@ class RiskControlProfile:
     approved_by: str
     effective_date: date
     fallback_agent: str | None = None
+    max_avg_turnover: float | None = None
+    max_transaction_costs_bps: float | None = None
 
     def validate(self) -> None:
         """Validate the profile constraints."""
@@ -44,6 +46,13 @@ class RiskControlProfile:
             raise ValueError("approved_by is required.")
         if not isinstance(self.effective_date, date):
             raise ValueError("effective_date must be a date instance.")
+        if self.max_avg_turnover is not None and self.max_avg_turnover <= 0:
+            raise ValueError("max_avg_turnover must be > 0 when provided.")
+        if (
+            self.max_transaction_costs_bps is not None
+            and self.max_transaction_costs_bps <= 0
+        ):
+            raise ValueError("max_transaction_costs_bps must be > 0 when provided.")
 
 
 def _coerce_date(value: object) -> date:
@@ -88,6 +97,16 @@ def load_risk_profiles(path: Path) -> Dict[str, RiskControlProfile]:
             approved_by=str(item["approved_by"]),
             effective_date=_coerce_date(item["effective_date"]),
             fallback_agent=item.get("fallback_agent"),
+            max_avg_turnover=(
+                float(item["max_avg_turnover"])
+                if item.get("max_avg_turnover") is not None
+                else None
+            ),
+            max_transaction_costs_bps=(
+                float(item["max_transaction_costs_bps"])
+                if item.get("max_transaction_costs_bps") is not None
+                else None
+            ),
         )
         profile.validate()
         profiles[profile.profile_id] = profile

@@ -230,6 +230,9 @@ under `reports/<fingerprint_id>/` with SHAP diagnostics and variance analysis.
   profile = load_risk_profile(Path("finrl_pro/configs/risk_profiles.yaml"), "default")
   policy = RiskControlPolicy(profile)
   ```
+- `RiskControlPolicy` enforces drawdown/capital/leverage plus the optional
+  turnover (`max_avg_turnover`) and transaction-cost (`max_transaction_costs_bps`)
+  budgets so PSR gains cannot come from unchecked churn.
 - Structured logs flow through `finrl_pro.mlops.logger.MLOpsLogger`, emitting
   JSON payloads suitable for centralized observability tooling.
 - Risk alerts are routed by `finrl_pro.mlops.alerting.RiskAlertDispatcher` and

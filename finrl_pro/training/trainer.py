@@ -167,6 +167,62 @@ class Trainer:
                 },
             )
 
+        avg_turnover = metrics.get("avg_turnover")
+        if (
+            avg_turnover is not None
+            and profile.max_avg_turnover is not None
+            and avg_turnover > profile.max_avg_turnover
+        ):
+            message = (
+                f"Avg turnover {avg_turnover:.4f} exceeds limit "
+                f"{profile.max_avg_turnover:.4f}."
+            )
+            breaches.append(message)
+            self._emit_risk_alert(
+                "turnover_breach",
+                message,
+                {
+                    "avg_turnover": f"{avg_turnover:.6f}",
+                    "limit": f"{profile.max_avg_turnover:.6f}",
+                },
+            )
+            self._logger.log_event(
+                "finrl_pro.risk.turnover_breach",
+                level=logging.WARNING,
+                context={
+                    "avg_turnover": avg_turnover,
+                    "limit": profile.max_avg_turnover,
+                },
+            )
+
+        txn_bps = metrics.get("transaction_costs_bps")
+        if (
+            txn_bps is not None
+            and profile.max_transaction_costs_bps is not None
+            and txn_bps > profile.max_transaction_costs_bps
+        ):
+            message = (
+                f"Transaction costs {txn_bps:.2f}bps exceed cap "
+                f"{profile.max_transaction_costs_bps:.2f}bps."
+            )
+            breaches.append(message)
+            self._emit_risk_alert(
+                "transaction_cost_breach",
+                message,
+                {
+                    "transaction_costs_bps": f"{txn_bps:.4f}",
+                    "cap_bps": f"{profile.max_transaction_costs_bps:.4f}",
+                },
+            )
+            self._logger.log_event(
+                "finrl_pro.risk.transaction_cost_breach",
+                level=logging.WARNING,
+                context={
+                    "transaction_costs_bps": txn_bps,
+                    "cap_bps": profile.max_transaction_costs_bps,
+                },
+            )
+
         if breaches:
             raise RuntimeError("; ".join(breaches))
 

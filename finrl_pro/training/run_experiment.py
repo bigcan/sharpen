@@ -45,6 +45,10 @@ class SimulatedRunArtifacts:
     returns: list[float]
     equity: list[float]
     drawdowns: list[float]
+    positions: list[float]
+    trades: list[float]
+    turnover: list[float]
+    transaction_costs: list[float]
     metrics: dict[str, float]
 
 
@@ -102,6 +106,16 @@ def _simulate_training_outputs(
     horizon = max(horizon, 128)
 
     returns: list[float] = []
+    positions: list[float] = []
+    trades: list[float] = []
+    turnover: list[float] = []
+    txn_costs: list[float] = []
+    position = 0.0
+    cost_cfg = dict(training_cfg.get("costs", {}) or {})
+    per_turnover_bps = float(cost_cfg.get("per_turnover_bps", 2.0))
+    cost_rate = per_turnover_bps / 10_000.0
+    action_vol = 0.15 if "CONTINUOUS" in action_space else 0.05
+
     drift = 0.0
     for _ in range(horizon):
         noise = rng.gauss(mu_daily + drift, sigma_daily)
@@ -114,6 +128,16 @@ def _simulate_training_outputs(
             drift *= 0.90
         noise = max(min(noise, 0.25), -0.60)
         returns.append(noise)
+        target_pos = max(min(position + rng.gauss(0.0, action_vol), 1.0), -1.0)
+        trade = target_pos - position
+        position = target_pos
+        positions.append(position)
+        trades.append(trade)
+        abs_trade = abs(trade)
+        turnover.append(abs_trade)
+        fee = abs_trade * cost_rate
+        txn_costs.append(fee)
+        returns[-1] -= fee
 
     target_dd = max(_stable_float(base_metrics.get("max_drawdown"), 0.18), 0.05)
     for _ in range(3):
@@ -128,17 +152,31 @@ def _simulate_training_outputs(
     capital_at_risk = min(max_dd * 0.9, 0.09)
     leverage = min(1.0 + (0.2 if "CONTINUOUS" in action_space else 0.05), 1.5)
 
+    total_turnover = float(sum(turnover))
+    avg_turnover = total_turnover / max(1, len(turnover))
+    annualized_turnover = avg_turnover * (252.0 / max(1, horizon))
+    total_cost = float(sum(txn_costs))
+
     metrics = {
         "sharpe_ratio": float(sharpe),
         "max_drawdown": float(max_dd),
         "volatility": float(vol_realized),
         "capital_at_risk": float(capital_at_risk),
         "leverage": float(leverage),
+        "avg_turnover": float(avg_turnover),
+        "total_turnover": float(total_turnover),
+        "annualized_turnover": float(annualized_turnover),
+        "transaction_costs": float(total_cost),
+        "transaction_costs_bps": float(total_cost * 10_000.0),
     }
     return SimulatedRunArtifacts(
         returns=returns,
         equity=equity,
         drawdowns=drawdowns,
+        positions=positions,
+        trades=trades,
+        turnover=turnover,
+        transaction_costs=txn_costs,
         metrics=metrics,
     )
 
@@ -169,7 +207,16 @@ def _persist_artifacts(fingerprint_id: str, sim: SimulatedRunArtifacts) -> list[
         for idx, value in enumerate(sim.drawdowns):
             writer.writerow([idx, value])
 
-    return [str(path) for path in (returns_path, equity_path, dd_path)]
+    exec_path = out_dir / "execution.csv"
+    with exec_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["t", "position", "trade", "turnover", "transaction_cost"])
+        for idx, (pos, trade, tov, cost) in enumerate(
+            zip(sim.positions, sim.trades, sim.turnover, sim.transaction_costs)
+        ):
+            writer.writerow([idx, pos, trade, tov, cost])
+
+    return [str(path) for path in (returns_path, equity_path, dd_path, exec_path)]
 
 
 def main(argv: Iterable[str] | None = None) -> None:

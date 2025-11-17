@@ -13,6 +13,9 @@ Stress-test the MVP baseline by toggling action spaces (continuous vs. discrete)
 - Agents: PPO baseline replicated with `action.space` ∈ {CONTINUOUS, DISCRETE}; reward toggles {logR, logR_lambda}.
 - Seeds: {41, 42, 43} per config for stability statistics.
 - Risk: enforce `RiskControlPolicy` from `finrl_pro/configs/risk_profiles.yaml` (default).
+- Risk budgets now include turnover/cost caps: ensure `max_avg_turnover` and
+  `max_transaction_costs_bps` stay within profile limits using the telemetry
+  emitted to `reports/<fingerprint_id>/execution.csv`.
 - Reporting: `reports/<fingerprint_id>/returns.csv` MUST be emitted by training and consumed by evaluation (no synthetic metrics).
 
 ## Non-Goals
@@ -51,6 +54,8 @@ Stress-test the MVP baseline by toggling action spaces (continuous vs. discrete)
 ## Test Plan
 - Execute `run_matrix` and verify `reports/matrix/runs.json` includes all sweeps.
 - Ensure each fingerprint directory contains `returns.csv`, `equity_curve.csv`, `drawdown.csv`.
+- Inspect `reports/matrix/risk_summary.json` (auto-generated) for per-config
+  averages of Sharpe, PSR, turnover, and cost metrics.
 - Cross-check PSR calculations via `python -m finrl_pro.eval.statistics --returns reports/<fp>/returns.csv`.
 - Confirm leaderboard updates only after artifact-backed metrics exist.
 
