@@ -82,8 +82,16 @@ class ProStockEnv(gym.Env, ABC):
         self.episode_return = 0.0
         self.gamma_reward = 0.0
 
-        self.observation_space = gym.spaces.Box(low=-500, high=500, shape=(self.state_dim,), dtype=np.float32)
-        self.action_space = gym.spaces.Box(low=-1, high=1, shape=(self.action_dim,), dtype=np.float32)
+        self.observation_space = gym.spaces.Box(
+            low=np.array([-np.inf] * self.state_dim, dtype=np.float32), # Use -np.inf for more generic bounds
+            high=np.array([np.inf] * self.state_dim, dtype=np.float32), # Use np.inf for more generic bounds
+            dtype=np.float32,
+        )
+        self.action_space = gym.spaces.Box(
+            low=np.array([-1] * self.action_dim, dtype=np.float32),
+            high=np.array([1] * self.action_dim, dtype=np.float32),
+            dtype=np.float32,
+        )
 
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed) # Important for Gymnasium API
