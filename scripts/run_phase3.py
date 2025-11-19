@@ -118,7 +118,10 @@ def run_phase3():
             obs = val_env.reset()
             total_reward = 0
             for _ in range(len(val_df)):
-                action, _states = model.predict(obs, deterministic=True)
+                predict_output = model.predict(obs, deterministic=True)
+                print(f"DEBUG: Type of predict output: {type(predict_output)}")
+                print(f"DEBUG: Length of predict output: {len(predict_output)}")
+                action, _states = predict_output
                 obs, rewards, dones, info = val_env.step(action)
                 total_reward += rewards[0]
                 if dones[0]:
