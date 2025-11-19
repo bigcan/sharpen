@@ -1,7 +1,7 @@
 """Module: wrappers
 Purpose: Gym wrappers for risk management and realistic execution (slippage, costs)."""
 
-import gym
+import gymnasium as gym
 import numpy as np
 from finrl_pro.mlops.risk import RiskControlPolicy
 
