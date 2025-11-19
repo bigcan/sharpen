@@ -135,7 +135,7 @@ Goal: Hold winning features/action/reward fixed; change the agent and lightly tu
   - [x] CQL Agent (Phase 3.5)
 - Tuning budget
   - [x] Light manual sweep executed (lr, entropy, gamma, clip, gae_lambda)
-  - [ ] 30-50 trials/agent (Optuna/Ray Tune)
+  - [x] 30-50 trials/agent (Optuna/Ray Tune)
   - [ ] Top-5 configs re-evaluated with 3 seeds
   - [ ] Track sample efficiency and seed variance
 - Decision
