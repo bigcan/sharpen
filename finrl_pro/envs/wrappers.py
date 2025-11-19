@@ -63,3 +63,44 @@ class SlippageWrapper(gym.Wrapper):
         reward -= penalty
         
         return obs, reward, done, info
+
+class TurnoverPenaltyWrapper(gym.Wrapper):
+    """
+    Penalizes the agent for changing actions (turnover).
+    reward = reward - penalty_coef * |action_t - action_{t-1}|
+    """
+    def __init__(self, env: gym.Env, penalty_coef: float = 0.0):
+        super().__init__(env)
+        self.penalty_coef = penalty_coef
+        self.prev_action = None
+        self.action_dim = None
+        
+        # Try to infer action dim
+        if hasattr(env.action_space, 'shape'):
+            self.action_dim = env.action_space.shape[0]
+        
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        if self.action_dim is None:
+             # Infer from observation if possible, or wait for first step?
+             # Better to assume action space is Box
+             if hasattr(self.env.action_space, 'shape'):
+                self.action_dim = self.env.action_space.shape[0]
+             else:
+                self.action_dim = 1 # Fallback
+                
+        self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
+        return obs, info
+
+    def step(self, action):
+        obs, reward, done, truncated, info = self.env.step(action)
+        
+        if self.prev_action is not None:
+            # Calculate L1 distance (sum of absolute differences)
+            delta = np.sum(np.abs(action - self.prev_action))
+            penalty = delta * self.penalty_coef
+            reward -= penalty
+            info['turnover_penalty'] = penalty
+            
+        self.prev_action = np.array(action, dtype=np.float32)
+        return obs, reward, done, truncated, info
