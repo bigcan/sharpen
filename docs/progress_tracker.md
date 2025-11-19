@@ -132,7 +132,7 @@ Goal: Hold winning features/action/reward fixed; change the agent and lightly tu
   - [x] SAC (for continuous)
   - [x] TD3 (DDPG optional if TD3 underperforms)
 - Tuning budget
-  - [~] Light manual sweep executed (lr, entropy, gamma, clip, gae_lambda)
+  - [x] Light manual sweep executed (lr, entropy, gamma, clip, gae_lambda)
   - [ ] 30-50 trials/agent (Optuna/Ray Tune)
   - [ ] Top-5 configs re-evaluated with 3 seeds
   - [ ] Track sample efficiency and seed variance
@@ -178,7 +178,7 @@ Goal: Move to multi-asset with risk constraints; prepare for paper trading.
   - [x] Action: per-asset long/flat — `sp500_multi_longflat.yaml`
   - [x] Constraints scaffolded: position norm penalty, turnover penalty, soft sector caps
 - Live-readiness
-  - [ ] Paper trade via IBKR/Alpaca; measure latency budget
+  - [~] Paper trade via IBKR/Alpaca; measure latency budget
   - [ ] Daily retrain or weekly recalibration strategy
   - [ ] MLflow model registry; reproducible seeds and artifacts
 - Monitoring
