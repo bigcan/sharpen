@@ -7,7 +7,7 @@ Quick link: See the root-level esearch_roadmap.md for the live research plan, m
 Owner: <YOUR_NAME>  
 Start: <YYYY-MM-DD>  
 Target MVP (Phase 0) date: 2025-11-07  
-Repo commit: cb421b16db3a02c3ef0b274de86d093000b1c089  
+Repo commit: 60dd9a71625bcffa33678e2ae6e13e3bddd13bf4  
 Dataset hash: dvc://datasets/sp500_daily_2020_2025  
 Config: `finrl_pro/configs/experiments/sp500_daily.yaml:1`  
 Fingerprints index: `reports/matrix/fingerprints.json:1`  
@@ -131,6 +131,8 @@ Goal: Hold winning features/action/reward fixed; change the agent and lightly tu
   - [x] A2C
   - [x] SAC (for continuous)
   - [x] TD3 (DDPG optional if TD3 underperforms)
+  - [x] DDPG Agent
+  - [x] CQL Agent (Phase 3.5)
 - Tuning budget
   - [x] Light manual sweep executed (lr, entropy, gamma, clip, gae_lambda)
   - [ ] 30-50 trials/agent (Optuna/Ray Tune)
@@ -185,6 +187,18 @@ Goal: Move to multi-asset with risk constraints; prepare for paper trading.
   - [x] Drift detection (PSI/pop stats) — `python -m finrl_pro.mlops.monitoring --fingerprint <fp>`
   - [ ] Rolling performance attribution
   - [ ] Alerts on drawdown/turnover spikes
+
+---
+
+## General Project Tasks
+- [ ] Codebase Review
+- [ ] Implement Ensemble Logic
+- [~] Implement Explainability Layer
+  - [~] Implement SHAP Analysis
+  - [ ] Implement Integrated Gradients
+- [~] Integration Testing
+  - [~] Create End-to-End Training Test
+
 
 ---
 
