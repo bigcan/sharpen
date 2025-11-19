@@ -137,7 +137,7 @@ class ProStockEnv(gym.Env, ABC):
 
         done = self.day == self.max_step
         state = self._get_state(price)
-        return state, reward, done, False, {}
+        return state, reward, done, {}
 
     def _get_state(self, price_row: np.ndarray) -> np.ndarray:
         amount_scaled = np.array(max(self.amount, 1e4) * (2 ** -12), dtype=np.float32)
