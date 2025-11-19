@@ -55,19 +55,19 @@ def run_agent(agent_name, train_env, val_env, total_timesteps=30000):
     eval_callback = EvalCallback(val_env, eval_freq=1000, callback_after_eval=stop_train_callback, verbose=0)
     
     if agent_name == "PPO":
-        agent = PPO("MlpPolicy", train_env, verbose=0, seed=42)
+        agent = PPO("MlpPolicy", train_env, verbose=0, seed=42, device='cpu')
     elif agent_name == "A2C":
-        agent = A2C("MlpPolicy", train_env, verbose=0, seed=42)
+        agent = A2C("MlpPolicy", train_env, verbose=0, seed=42, device='cpu')
     elif agent_name == "SAC":
-        agent = SAC("MlpPolicy", train_env, verbose=0, seed=42)
+        agent = SAC("MlpPolicy", train_env, verbose=0, seed=42, device='cpu')
     elif agent_name == "TD3":
         n_actions = train_env.action_space.shape[-1]
         action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.1 * np.ones(n_actions))
-        agent = TD3("MlpPolicy", train_env, action_noise=action_noise, verbose=0, seed=42)
+        agent = TD3("MlpPolicy", train_env, action_noise=action_noise, verbose=0, seed=42, device='cpu')
     elif agent_name == "DDPG":
         n_actions = train_env.action_space.shape[-1]
         action_noise = NormalActionNoise(mean=np.zeros(n_actions), sigma=0.1 * np.ones(n_actions))
-        agent = DDPG("MlpPolicy", train_env, action_noise=action_noise, verbose=0, seed=42)
+        agent = DDPG("MlpPolicy", train_env, action_noise=action_noise, verbose=0, seed=42, device='cpu')
     else:
         raise ValueError(f"Unknown agent: {agent_name}")
         
