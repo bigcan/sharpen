@@ -98,7 +98,7 @@ class FeatureEngineer:
         df = df.sort_values(['tic', 'date'])
         
         # 1. Log Returns
-        df['log_return'] = df.groupby('tic')['close'].apply(lambda x: np.log(x / x.shift(1)))
+        df['log_return'] = df.groupby('tic')['close'].transform(lambda x: np.log(x / x.shift(1)))
         
         # 2. Rolling Z-Score on Close (Price)
         window = 20
