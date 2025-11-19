@@ -192,7 +192,7 @@ Goal: Move to multi-asset with risk constraints; prepare for paper trading.
 
 ## General Project Tasks
 - [ ] Codebase Review
-- [ ] Implement Ensemble Logic
+- [x] Implement Ensemble Logic
 - [~] Implement Explainability Layer
   - [~] Implement SHAP Analysis
   - [ ] Implement Integrated Gradients
