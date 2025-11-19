@@ -105,7 +105,7 @@ class ProStockEnv(gym.Env, ABC):
         self.initial_total_asset = self.total_asset
         self.gamma_reward = 0.0
         self.episode_return = 0.0
-        return self._get_state(price)
+        return self._get_state(price), {}
 
     def step(self, actions):
         actions = (np.asarray(actions, dtype=np.float32) * self.max_stock).astype(np.int32)
