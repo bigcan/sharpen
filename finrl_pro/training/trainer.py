@@ -85,6 +85,25 @@ class Trainer:
         )
         return fingerprint
 
+    def register_model(self, run_id: str, model_name: str) -> None:
+        """Register the model from the given run_id to the Model Registry."""
+        try:
+            import mlflow
+            model_uri = f"runs:/{run_id}/model"
+            mlflow.register_model(model_uri, model_name)
+            self._logger.log_event(
+                "finrl_pro.training.model_registered",
+                context={"run_id": run_id, "model_name": model_name},
+            )
+        except ImportError:
+            self._logger.log_event("finrl_pro.training.mlflow_unavailable", level=30)
+        except Exception as e:
+            self._logger.log_event(
+                "finrl_pro.training.model_registration_failed",
+                level=40,
+                context={"run_id": run_id, "error": str(e)},
+            )
+
     def _enforce_risk(
         self,
         metrics: Mapping[str, float],
