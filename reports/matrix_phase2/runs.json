@@ -1,47 +1,47 @@
 [
   {
     "config": "tmp/matrix_inputs/fracdiff_d_0.4__risk-default__agent-PPO__seed-41.yaml",
-    "fingerprint_id": "23e1f1b4-bf3d-4154-a112-40ce77a44cf9",
+    "fingerprint_id": "ebb5a872-ac17-4b69-a54f-fff0f370f51e",
     "manifest": "finrl_pro/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/fracdiff_d_0.4__risk-default__agent-PPO__seed-42.yaml",
-    "fingerprint_id": "f6f2439e-ecf4-45d6-8bf8-34e3a24ee916",
+    "fingerprint_id": "c45b0810-7997-48f4-8cf6-378f1f2c359e",
     "manifest": "finrl_pro/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/fracdiff_d_0.4__risk-default__agent-PPO__seed-43.yaml",
-    "fingerprint_id": "0f3d8469-87b0-45fe-acda-f2cf613a6dc9",
+    "fingerprint_id": "1a2f9750-8cb2-4de3-aada-07640abf0280",
     "manifest": "finrl_pro/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/fracdiff_d_0.5__risk-default__agent-PPO__seed-41.yaml",
-    "fingerprint_id": "a3fc5cf8-2f4c-44b1-a834-2d6198c03ed4",
+    "fingerprint_id": "a3e84ec2-e092-4fc5-a9d3-52fd9607c990",
     "manifest": "finrl_pro/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/fracdiff_d_0.5__risk-default__agent-PPO__seed-42.yaml",
-    "fingerprint_id": "b3e7570a-fbdc-48e3-862b-992c31aaea71",
+    "fingerprint_id": "ae06adcc-751b-4d51-88df-23a4de9264fa",
     "manifest": "finrl_pro/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/fracdiff_d_0.5__risk-default__agent-PPO__seed-43.yaml",
-    "fingerprint_id": "285e2761-efb0-48ee-a774-8605565b391f",
+    "fingerprint_id": "94adb760-ac2c-427d-8574-3505baf353bc",
     "manifest": "finrl_pro/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/fracdiff_d_0.6__risk-default__agent-PPO__seed-41.yaml",
-    "fingerprint_id": "9631a7da-178d-4f77-8459-d1b2f72a87a2",
+    "fingerprint_id": "122df368-32c1-4db0-8cdf-4cc4899f0c28",
     "manifest": "finrl_pro/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/fracdiff_d_0.6__risk-default__agent-PPO__seed-42.yaml",
-    "fingerprint_id": "69f1ebb7-9169-407f-a8a5-7e8050bd8425",
+    "fingerprint_id": "000349c1-5d73-4559-bed9-76208c9dca3b",
     "manifest": "finrl_pro/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/fracdiff_d_0.6__risk-default__agent-PPO__seed-43.yaml",
-    "fingerprint_id": "22a79775-77dc-4014-bcb4-ff8bec41ecdd",
+    "fingerprint_id": "a15f39b4-fa81-4086-9afc-69651335749c",
     "manifest": "finrl_pro/configs/fingerprints.yaml"
   }
 ]

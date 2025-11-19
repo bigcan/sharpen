@@ -1,0 +1,10 @@
+{
+  "features": {
+    "ma20_lag": {
+      "pit_pass": true,
+      "violations": 0
+    }
+  },
+  "price_col": "close",
+  "window": 20
+}

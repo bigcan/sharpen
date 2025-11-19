@@ -1,62 +1,206 @@
 [
   {
     "config": "tmp/matrix_inputs/action_continuous__risk-default__agent-PPO__seed-41.yaml",
-    "fingerprint_id": "96d42e00-4ad4-4040-9d0a-6c1e629e0567",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "90523a63-ebbb-4de4-ad85-855159106361",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.03753960365606926,
+      "avg_turnover": 0.11261881096820779,
+      "capital_at_risk": 0.09,
+      "leverage": 1.2,
+      "max_drawdown": 0.15172455925315498,
+      "sharpe_ratio": 0.20028069791327557,
+      "total_turnover": 85.13982109196509,
+      "transaction_costs": 0.01702796421839302,
+      "transaction_costs_bps": 170.27964218393018,
+      "volatility": 0.07034871051743667
+    },
+    "seed": 41
   },
   {
     "config": "tmp/matrix_inputs/action_continuous__risk-default__agent-PPO__seed-42.yaml",
-    "fingerprint_id": "bb6a28ad-d78c-4f55-98b3-dd82fa604081",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "445fdd0b-d5cf-47b3-a734-def765956fa8",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.03631577509477791,
+      "avg_turnover": 0.10894732528433373,
+      "capital_at_risk": 0.09,
+      "leverage": 1.2,
+      "max_drawdown": 0.15576617766857792,
+      "sharpe_ratio": -1.1324993542779334,
+      "total_turnover": 82.3641779149563,
+      "transaction_costs": 0.01647283558299126,
+      "transaction_costs_bps": 164.7283558299126,
+      "volatility": 0.04535292793786196
+    },
+    "seed": 42
   },
   {
     "config": "tmp/matrix_inputs/action_continuous__risk-default__agent-PPO__seed-43.yaml",
-    "fingerprint_id": "d72fb9f5-e5db-40ba-8f76-21cca8270709",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "17d672c7-b7f3-4b64-8d35-246cf76d760e",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.03581775936524722,
+      "avg_turnover": 0.10745327809574166,
+      "capital_at_risk": 0.09,
+      "leverage": 1.2,
+      "max_drawdown": 0.1515275418164418,
+      "sharpe_ratio": -1.892476955336109,
+      "total_turnover": 81.2346782403807,
+      "transaction_costs": 0.016246935648076142,
+      "transaction_costs_bps": 162.4693564807614,
+      "volatility": 0.02333646154071043
+    },
+    "seed": 43
   },
   {
     "config": "tmp/matrix_inputs/action_discrete__risk-default__agent-PPO__seed-41.yaml",
-    "fingerprint_id": "6096f09b-132a-4203-ac1c-eb283b5ca410",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "8f77565c-e3ad-4051-9c99-e806f39dddc0",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.012639185947596731,
+      "avg_turnover": 0.037917557842790196,
+      "capital_at_risk": 0.09,
+      "leverage": 1.05,
+      "max_drawdown": 0.1533007314578576,
+      "sharpe_ratio": -1.0456292837032892,
+      "total_turnover": 28.665673729149386,
+      "transaction_costs": 0.005733134745829877,
+      "transaction_costs_bps": 57.33134745829877,
+      "volatility": 0.05062773158044348
+    },
+    "seed": 41
   },
   {
     "config": "tmp/matrix_inputs/action_discrete__risk-default__agent-PPO__seed-42.yaml",
-    "fingerprint_id": "0e7ca30c-963b-43d1-9715-ff9203a42f5c",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "7932b0c3-5486-439f-b4e0-1b88a505e3ef",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.012487733506345602,
+      "avg_turnover": 0.03746320051903681,
+      "capital_at_risk": 0.09,
+      "leverage": 1.05,
+      "max_drawdown": 0.15112317831997124,
+      "sharpe_ratio": -1.6575740320040953,
+      "total_turnover": 28.322179592391826,
+      "transaction_costs": 0.005664435918478366,
+      "transaction_costs_bps": 56.64435918478366,
+      "volatility": 0.02635567190103613
+    },
+    "seed": 42
   },
   {
     "config": "tmp/matrix_inputs/action_discrete__risk-default__agent-PPO__seed-43.yaml",
-    "fingerprint_id": "0fa6ab85-3bdf-4bfc-8efa-768d698e74b5",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "e3733b2a-2168-45f2-b7c2-8bf4008c5133",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.013975712682707076,
+      "avg_turnover": 0.04192713804812123,
+      "capital_at_risk": 0.09,
+      "leverage": 1.05,
+      "max_drawdown": 0.15185648663860285,
+      "sharpe_ratio": -2.422775315936861,
+      "total_turnover": 31.696916364379653,
+      "transaction_costs": 0.006339383272875931,
+      "transaction_costs_bps": 63.39383272875931,
+      "volatility": 0.02194366711072285
+    },
+    "seed": 43
   },
   {
     "config": "tmp/matrix_inputs/reward_logr__risk-default__agent-PPO__seed-41.yaml",
-    "fingerprint_id": "8b4ab5a2-1e98-4546-a0c8-22783a389d48",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "1ffdeba8-01cf-45a6-a5d5-f4aa0bddddf3",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.03895881004931139,
+      "avg_turnover": 0.11687643014793418,
+      "capital_at_risk": 0.09,
+      "leverage": 1.2,
+      "max_drawdown": 0.15877797231487945,
+      "sharpe_ratio": -0.7369330805160995,
+      "total_turnover": 88.35858119183824,
+      "transaction_costs": 0.01767171623836765,
+      "transaction_costs_bps": 176.71716238367648,
+      "volatility": 0.039423793714977284
+    },
+    "seed": 41
   },
   {
     "config": "tmp/matrix_inputs/reward_logr__risk-default__agent-PPO__seed-42.yaml",
-    "fingerprint_id": "ce684028-6879-4089-9f4e-31ac60d72e10",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "ad80922e-6ee7-46a4-a484-ccc8c7341f42",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.03828457978702999,
+      "avg_turnover": 0.11485373936108997,
+      "capital_at_risk": 0.09,
+      "leverage": 1.2,
+      "max_drawdown": 0.15434829070849088,
+      "sharpe_ratio": -0.7242789258164735,
+      "total_turnover": 86.82942695698402,
+      "transaction_costs": 0.017365885391396805,
+      "transaction_costs_bps": 173.65885391396804,
+      "volatility": 0.049686633724499565
+    },
+    "seed": 42
   },
   {
     "config": "tmp/matrix_inputs/reward_logr__risk-default__agent-PPO__seed-43.yaml",
-    "fingerprint_id": "005184ad-c0dc-4765-a1b8-cdd7455a6482",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "c7eddf3a-8406-48db-b485-7daafae178c9",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.035596690178957884,
+      "avg_turnover": 0.10679007053687366,
+      "capital_at_risk": 0.09,
+      "leverage": 1.2,
+      "max_drawdown": 0.150704526673056,
+      "sharpe_ratio": 0.13182821833340086,
+      "total_turnover": 80.73329332587649,
+      "transaction_costs": 0.016146658665175298,
+      "transaction_costs_bps": 161.46658665175298,
+      "volatility": 0.11818500565749324
+    },
+    "seed": 43
   },
   {
     "config": "tmp/matrix_inputs/reward_logr_lambda_sweep__risk-default__agent-PPO__seed-41.yaml",
-    "fingerprint_id": "a60c468c-c7f8-4e03-b5d2-feeda24066d3",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "1e23ffa9-bd50-4f09-aef9-c63a39de8f37",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.035777798613318874,
+      "avg_turnover": 0.10733339583995663,
+      "capital_at_risk": 0.09,
+      "leverage": 1.2,
+      "max_drawdown": 0.18088579823286277,
+      "sharpe_ratio": 0.6064655020597589,
+      "total_turnover": 81.14404725500721,
+      "transaction_costs": 0.01622880945100144,
+      "transaction_costs_bps": 162.28809451001442,
+      "volatility": 0.12377040442796247
+    },
+    "seed": 41
   },
   {
     "config": "tmp/matrix_inputs/reward_logr_lambda_sweep__risk-default__agent-PPO__seed-42.yaml",
-    "fingerprint_id": "68c6a358-d1e3-4384-8549-ed2bc5507bab",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "c9f7dd9e-8bc8-4ce7-9eed-daf1ab6910db",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.03814572708899738,
+      "avg_turnover": 0.11443718126699215,
+      "capital_at_risk": 0.09,
+      "leverage": 1.2,
+      "max_drawdown": 0.1832879108317128,
+      "sharpe_ratio": -2.3118216131384917,
+      "total_turnover": 86.51450903784607,
+      "transaction_costs": 0.017302901807569215,
+      "transaction_costs_bps": 173.02901807569216,
+      "volatility": 0.02448970752212625
+    },
+    "seed": 42
   },
   {
     "config": "tmp/matrix_inputs/reward_logr_lambda_sweep__risk-default__agent-PPO__seed-43.yaml",
-    "fingerprint_id": "3cde5a19-6cd3-401a-94ed-b4852904e6fb",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "fingerprint_id": "32a1f1e0-c2bf-46e7-bc65-d4ffdec3f97d",
+    "metrics_snapshot": {
+      "annualized_turnover": 0.037736704050534364,
+      "avg_turnover": 0.1132101121516031,
+      "capital_at_risk": 0.09,
+      "leverage": 1.2,
+      "max_drawdown": 0.18423427972930684,
+      "sharpe_ratio": 0.15289889648768237,
+      "total_turnover": 85.58684478661195,
+      "transaction_costs": 0.017117368957322392,
+      "transaction_costs_bps": 171.17368957322392,
+      "volatility": 0.06818958877751936
+    },
+    "seed": 43
   }
 ]

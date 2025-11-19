@@ -14,9 +14,9 @@ Goal: Validate the new PPO/TD3 tuning variants (clip, entropy, policy noise) aga
 - **Non-determinism**: Seeds fixed {41,42,43}. Simulator yields deterministic returns per config/seed; duplicated returns would have been flagged by the matrix duplicate SHA guard—none observed.
 - **Config drift**: Module versions annotate clip/entropy/noise fields, so reproductions can distinguish each variant.
 
-## Outcome
-- PPO entropy coefficient sweeps: seed 41 with `agent.ent_coef=0.02` achieved Sharpe 0.256 (MaxDD 0.184), and `ent_coef=0.005` seed 41 yielded Sharpe 0.741 (MaxDD 0.182). Averaged uplift still < 0.20 vs baseline but trending positive.
-- SAC alpha fixed 0.05 produced the strongest Sharpe so far (seed 42 at 0.882, MaxDD 0.181) while respecting risk caps, indicating SAC should re-enter the gate discussion.
-- TD3 policy noise 0.25 remains stable (best Sharpe 0.416, MaxDD 0.181); noise 0.10 stays overly conservative (Sharpe < -1).
+## Outcome (updated 2025-11-13, tuning wave 2)
+- PPO entropy coefficient sweeps: seed 41 with `agent.ent_coef=0.005` hits Sharpe 0.741 (MaxDD 0.182) and `ent_coef=0.02` seed 41 hits 0.256 (MaxDD 0.184). Other seeds remain negative, so cross-seed mean < 0.
+- SAC alpha fixed 0.05 remains strongest (seed 42 Sharpe 0.882, MaxDD 0.181). Fixed α=0.02 and cosine decay variants underperform (Sharpe ≤0.10) but stay within risk caps. Autotune baseline still negative.
+- TD3 policy noise 0.25 continues to produce moderate positives (seed 43 Sharpe 0.416, MaxDD 0.181); noise 0.10 stays deeply negative.
 
 Recommendation: Continue targeted sweeps (e.g., SAC entropy targets, PPO ent_coef refinement) before the Gate 3.0 review; no leakage or risk-policy violations detected for the new variants.

@@ -39,8 +39,8 @@ class WalkForwardEvaluator:
 
         entry = self._catalog.get(context.benchmark_id)
         baseline = entry.metrics_baseline
-        # Placeholder baseline is used only for variance reference; prefer artifact-first
-        # metrics if returns.csv exists; otherwise fall back to a synthetic series.
+        # Placeholder baseline is used only for variance reference; evaluation now
+        # requires artifact-first metrics sourced from returns.csv per fingerprint.
         evaluated_metrics: Dict[str, float] = {}
         variance: Dict[str, float] = {}
         shap_summary: Dict[str, float] = {}
@@ -49,45 +49,33 @@ class WalkForwardEvaluator:
         report_dir = Path("reports") / str(context.fingerprint_id)
         returns_csv = report_dir / "returns.csv"
         rets: List[float] = []
-        if returns_csv.exists():
-            try:
-                with returns_csv.open("r", encoding="utf-8", newline="") as f:
-                    rdr = csv.DictReader(f)
-                    col = None
-                    hdr = [c.strip().lower() for c in (rdr.fieldnames or [])]
-                    for candidate in ("return", "daily_return", "ret"):
-                        if candidate in hdr:
-                            col = candidate
-                            break
-                    for row in rdr:
-                        try:
-                            rets.append(float(row[col]))  # type: ignore[index]
-                        except Exception:
-                            continue
-            except Exception:
-                rets = []
+        if not returns_csv.exists():
+            raise FileNotFoundError(
+                f"returns.csv not found for fingerprint '{context.fingerprint_id}'. "
+                "Training runs must emit artifact returns before evaluation."
+            )
+
+        with returns_csv.open("r", encoding="utf-8", newline="") as f:
+            rdr = csv.DictReader(f)
+            hdr = [c.strip().lower() for c in (rdr.fieldnames or [])]
+            col = next((candidate for candidate in ("return", "daily_return", "ret") if candidate in hdr), None)
+            if not col:
+                raise ValueError(
+                    f"returns.csv for fingerprint '{context.fingerprint_id}' does not include a supported column header."
+                )
+            for row in rdr:
+                try:
+                    rets.append(float(row[col]))
+                except Exception as exc:
+                    raise ValueError(
+                        f"Invalid return value in reports/{context.fingerprint_id}/returns.csv"
+                    ) from exc
+
         if not rets:
-            # Synthesize a returns series consistent with evaluated Sharpe/volatility for scaffolding.
-            sr = float(baseline.get("sharpe_ratio", 0.0))
-            vol_ann = float(baseline.get("volatility", 0.0))
-            target_sr = (sr + 0.30) if vol_ann else 0.0
-            if target_sr < 1.20 and vol_ann:
-                target_sr = 1.20
-            mu_daily = (target_sr * vol_ann) / 252.0 if vol_ann else 0.0
-            sigma_daily = vol_ann / (252.0 ** 0.5) if vol_ann else 0.0
-            n_days = 756  # ~3 years
-            if vol_ann and sigma_daily > 0.0:
-                base_alt = 0.5 * sigma_daily
-                _s = f"{context.fingerprint_id}:{context.walk_forward_splits}"
-                h = sum((i + 1) * ord(ch) for i, ch in enumerate(_s))
-                delta = ((h % 21) - 10) / 200.0
-                alt = base_alt * (1.0 + delta)
-                mu_adj = mu_daily * (1.0 + (delta / 2.0))
-                for i in range(n_days):
-                    draw = mu_adj + (alt if (i % 2 == 0) else -alt)
-                    rets.append(float(draw))
-            else:
-                rets = [0.0 for _ in range(n_days)]
+            raise ValueError(
+                f"No return rows parsed for fingerprint '{context.fingerprint_id}'. "
+                "Ensure training emits realized returns before running walk-forward evaluation."
+            )
 
         # Compute equity curve and drawdown from returns
         equity: List[float] = []
@@ -103,13 +91,6 @@ class WalkForwardEvaluator:
         # Emit artifacts under reports/<fingerprint_id>/
         try:
             report_dir.mkdir(parents=True, exist_ok=True)
-            # Only write returns.csv when we synthesized returns
-            if not returns_csv.exists():
-                ret_csv = returns_csv
-                lines = ["t,return"]
-                for i, r in enumerate(rets):
-                    lines.append(f"{i},{r}")
-                ret_csv.write_text("\n".join(lines) + "\n", encoding="utf-8")
             # equity_curve.csv
             eq_csv = report_dir / "equity_curve.csv"
             eq_lines = ["t,equity"]

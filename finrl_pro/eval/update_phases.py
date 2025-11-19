@@ -16,6 +16,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from finrl_pro.eval.statistics import probabilistic_sharpe_ratio
+from finrl_pro.eval.risk_summary_gate import (
+    enforce_turnover_cost_limits,
+    load_risk_summary_runs,
+    normalize_config_key,
+)
 
 
 @dataclass(slots=True)
@@ -27,6 +32,8 @@ class RunEval:
     vol: Optional[float]
     psr: Optional[float]
     duplicate: bool
+    avg_turnover: Optional[float]
+    transaction_costs_bps: Optional[float]
 
 
 def _load_json(path: Path) -> Any:
@@ -49,9 +56,9 @@ def _read_returns(path: Path) -> list[float]:
 
 def _classify_phase(config_path: str) -> Optional[int]:
     stem = Path(config_path).stem.lower()
-    if "multi" in stem:
+    if any(tag in stem for tag in ("multi", "basket", "multiasset")):
         return 5
-    if "cost" in stem or "ope" in stem or "paper" in stem:
+    if any(tag in stem for tag in ("cost", "ope", "paper", "stress", "robust", "robustness", "slippage")):
         return 4
     if "agent_" in stem:
         return 3
@@ -68,6 +75,7 @@ def _collect(matrix_dir: Path) -> Dict[Optional[int], List[RunEval]]:
     runs = _load_json(matrix_dir / "runs.json")
     evals = _load_json(matrix_dir / "eval_report.json")
     eval_by_fp: Dict[str, Dict[str, Any]] = {str(e["fingerprint_id"]): e for e in evals}
+    risk_runs = load_risk_summary_runs(matrix_dir / "risk_summary.json")
     grouped: Dict[Optional[int], List[RunEval]] = {}
     for r in runs:
         fp = str(r.get("fingerprint_id"))
@@ -90,6 +98,7 @@ def _collect(matrix_dir: Path) -> Dict[Optional[int], List[RunEval]]:
             psr = float(probabilistic_sharpe_ratio(rets)) if rets else None
         except Exception:
             psr = None
+        telemetry = risk_runs.get(normalize_config_key(cfg))
         rec = RunEval(
             fingerprint=fp,
             config=cfg,
@@ -98,6 +107,8 @@ def _collect(matrix_dir: Path) -> Dict[Optional[int], List[RunEval]]:
             vol=vol,
             psr=psr,
             duplicate=dup,
+            avg_turnover=telemetry.avg_turnover if telemetry else None,
+            transaction_costs_bps=telemetry.transaction_costs_bps if telemetry else None,
         )
         grouped.setdefault(phase, []).append(rec)
     return grouped
@@ -113,8 +124,8 @@ def _write_phase_files(out_dir: Path, phase: int, rows: List[RunEval]) -> Tuple[
     runs_lines: List[str] = []
     runs_lines.append(f"# Phase {phase} Runs")
     runs_lines.append("")
-    runs_lines.append("| Fingerprint | Config | Sharpe | PSR | MaxDD | Vol | Duplicate |")
-    runs_lines.append("|-------------|--------|--------|-----|-------|-----|-----------|")
+    runs_lines.append("| Fingerprint | Config | Sharpe | PSR | MaxDD | Vol | AvgTurn | Cost (bps) | Duplicate |")
+    runs_lines.append("|-------------|--------|--------|-----|-------|-----|---------|-----------|-----------|")
     best: Optional[RunEval] = None
     for r in rows:
         if best is None or (r.sharpe or float("-inf")) > (best.sharpe or float("-inf")):
@@ -123,7 +134,9 @@ def _write_phase_files(out_dir: Path, phase: int, rows: List[RunEval]) -> Tuple[
             f"| {r.fingerprint} | `{Path(r.config).name}` | "
             f"{(f'{r.sharpe:.2f}' if r.sharpe is not None else '-')} | "
             f"{(f'{r.psr:.2f}' if r.psr is not None else '-')} | "
-            f"{_fmt_pct(r.maxdd)} | {(f'{r.vol:.2f}' if r.vol is not None else '-')} | {str(r.duplicate)} |"
+            f"{_fmt_pct(r.maxdd)} | {(f'{r.vol:.2f}' if r.vol is not None else '-')} | "
+            f"{(f'{r.avg_turnover:.4f}' if r.avg_turnover is not None else '-')} | "
+            f"{(f'{r.transaction_costs_bps:.1f}' if r.transaction_costs_bps is not None else '-')} | {str(r.duplicate)} |"
         )
     runs_md.write_text("\n".join(runs_lines) + "\n", encoding="utf-8")
 
@@ -142,6 +155,11 @@ def _write_phase_files(out_dir: Path, phase: int, rows: List[RunEval]) -> Tuple[
             f"- Sharpe {best.sharpe:.2f} | PSR {(best.psr if best.psr is not None else 0.0):.2f} | "
             f"MaxDD {_fmt_pct(best.maxdd)} | Vol {(best.vol if best.vol is not None else 0.0):.2f}"
         )
+        if best.avg_turnover is not None or best.transaction_costs_bps is not None:
+            summ_lines.append(
+                f"- Avg Turnover {(best.avg_turnover if best.avg_turnover is not None else 0.0):.4f} | "
+                f"Costs {(best.transaction_costs_bps if best.transaction_costs_bps is not None else 0.0):.1f} bps"
+            )
     else:
         summ_lines.append("No runs classified for this phase.")
     summ_md.write_text("\n".join(summ_lines) + "\n", encoding="utf-8")
@@ -175,7 +193,9 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
     ap.add_argument("--final-report", default="reports/matrix/final_report.md", help="Path to append re-run updates")
     args = ap.parse_args(list(argv) if argv is not None else None)
 
-    grouped = _collect(Path(args.matrix_dir))
+    matrix_dir = Path(args.matrix_dir)
+    enforce_turnover_cost_limits(matrix_dir)
+    grouped = _collect(matrix_dir)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     bests: Dict[int, Optional[RunEval]] = {}
@@ -191,4 +211,3 @@ def main(argv: Optional[Iterable[str]] = None) -> None:
 
 if __name__ == "__main__":  # pragma: no cover
     main()
-
