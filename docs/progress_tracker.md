@@ -113,7 +113,7 @@ Goal: Add features progressively; keep only if nested CV gain and no undue turno
 - Multi-scale
   - [x] Wavelet low-order components or denoise; rolling z after transform
 - Controls & PIT
-  - [ ] All features `shift(1)`; no forward-fill leakage
+  - [x] All features `shift(1)`; no forward-fill leakage
   - [ ] Nested CV (purged) confirms out-of-fold gains
   - [ ] Drop features that increase turnover >25% without PSR gain
 - Gate
