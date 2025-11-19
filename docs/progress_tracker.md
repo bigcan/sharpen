@@ -40,20 +40,20 @@ Matrix report: `reports/matrix/report.md:1`
 Goal: Establish a baseline PPO that beats Buy&Hold on out-of-sample Sharpe under realistic costs.
 
 - Data & splits
-  - [ ] Freeze Test: 2023-2025; Val: 2022; Train: 2016-2021
+  - [x] Freeze Test: 2023-2025; Val: 2022; Train: 2016-2021
   - [x] Purged, embargoed split (>=21 trading days embargo)
   - [ ] Log `dataset_hash`, symbol list, adj/CA flags
 - Environment & costs
-  - [ ] Single-asset `StockTradingEnv` (SPY), daily rebalance
-  - [ ] Costs: 1 bp fee + 1 bp slippage; next-bar open execution
-  - [ ] Clip actions; action in [-1, +1] target position
+  - [x] Single-asset `StockTradingEnv` (SPY), daily rebalance
+  - [x] Costs: 1 bp fee + 1 bp slippage; next-bar open execution
+  - [x] Clip actions; action in [-1, +1] target position
   - [x] Enable `RiskControlPolicy` (max_drawdown <= 25%, capital_at_risk cap)
 - Features (PIT enforced)
-  - [ ] Log returns; rolling z-score on Close (and Volume) with `shift(1)`
+  - [x] Log returns; rolling z-score on Close (and Volume) with `shift(1)`
   - [ ] PIT validator passes (no lookahead; no forward-fill leakage)
 - Agent & training
   - [x] PPO (SB3 defaults); 3 fixed seeds
-  - [ ] Early stop on Val Sharpe plateau (patience K=10 evals)
+  - [x] Early stop on Val Sharpe plateau (patience K=10 evals)
 - Baselines
   - [x] Buy&Hold (SPY)
   - [x] 60/40 proxy (SPY/IEF)
