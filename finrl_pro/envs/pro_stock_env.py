@@ -11,7 +11,7 @@ from __future__ import annotations
 from abc import ABC
 from typing import Optional
 
-import gym
+import gymnasium as gym
 import numpy as np
 
 
