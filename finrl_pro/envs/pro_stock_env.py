@@ -66,8 +66,9 @@ class ProStockEnv(gym.Env, ABC):
         self.turbulence_bool = (self.turbulence_raw > self.turbulence_thresh).astype(np.float32)
         self.turbulence_ary = (_sigmoid_sign(self.turbulence_raw, self.turbulence_thresh) * 2 ** -5).astype(np.float32)
 
-        # State composition - Temporarily simplified for debugging
-        self.state_dim = 1 # Only amount_scaled for now
+        # State composition
+        # amount + (turbulence, turbulence_bool) + (price, stock, stock_cd)*stock_dim + tech_flat
+        self.state_dim = 1 + 2 + 3 * self.stock_dim + self.tech_ary.shape[1]
         self.action_dim = self.stock_dim
         self.if_discrete = False
 
@@ -140,17 +141,17 @@ class ProStockEnv(gym.Env, ABC):
 
     def _get_state(self, price_row: np.ndarray) -> np.ndarray:
         amount_scaled = np.array(max(self.amount, 1e4) * (2 ** -12), dtype=np.float32)
-        # Temporarily return a very simple state for debugging
-        # In a real scenario, this would be the full observation
+        scale = np.array(2 ** -6, dtype=np.float32)
+        tech_flat = self.tech_ary[self.day]
         return np.hstack(
             (
                 amount_scaled,
-                # self.turbulence_ary[self.day],
-                # self.turbulence_bool[self.day],
-                # price_row * scale,
-                # self.stocks * scale,
-                # self.stocks_cd,
-                # tech_flat,
+                self.turbulence_ary[self.day],
+                self.turbulence_bool[self.day],
+                price_row * scale,
+                self.stocks * scale,
+                self.stocks_cd,
+                tech_flat,
             )
         ).astype(np.float32)
 
