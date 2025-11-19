@@ -1,17 +1,17 @@
-﻿# FinRL Pro - Research Program Progress Tracker
+# FinRL Pro - Research Program Progress Tracker
 
-Quick link: See the root-level esearch_roadmap.md for the live research plan, milestones, and success criteria.
+See `docs/research_roadmap.md` for the live research plan, milestones, and success criteria.
 
 > Purpose: Track progress across phases with explicit gates, risk checks, and deliverables. Use GitHub task lists; one run = one seed. Keep the test set frozen.
 
-Owner: <YOUR_NAME>  
-Start: <YYYY-MM-DD>  
-Target MVP (Phase 0) date: 2025-11-07  
-Repo commit: 60dd9a71625bcffa33678e2ae6e13e3bddd13bf4  
-Dataset hash: dvc://datasets/sp500_daily_2020_2025  
-Config: `finrl_pro/configs/experiments/sp500_daily.yaml:1`  
-Fingerprints index: `reports/matrix/fingerprints.json:1`  
-Leaderboard: `docs/leaderboard.md:1`  
+Owner: <YOUR_NAME>
+Start: <YYYY-MM-DD>
+Target MVP (Phase 0) date: 2025-11-07
+Repo commit: 60dd9a71625bcffa33678e2ae6e13e3bddd13bf4
+Dataset hash: dvc://datasets/sp500_daily_2020_2025
+Config: `finrl_pro/configs/experiments/sp500_daily.yaml:1`
+Fingerprints index: `reports/matrix/fingerprints.json:1`
+Leaderboard: `docs/leaderboard.md:1`
 Matrix report: `reports/matrix/report.md:1`
 
 ---
@@ -30,8 +30,8 @@ Matrix report: `reports/matrix/report.md:1`
 ---
 
 ## Legend
-- [ ] pending  
-- [x] done  
+- [ ] pending
+- [x] done
 - [~] in progress (optional)
 
 ---
@@ -59,7 +59,7 @@ Goal: Establish a baseline PPO that beats Buy&Hold on out-of-sample Sharpe under
   - [x] 60/40 proxy (SPY/IEF)
   - [x] SMA(20/50) crossover
 - Evaluation & metrics
-  - [x] Expanding walk-forward: Train?al?est with embargo
+  - [x] Expanding walk-forward: Train→Val→Test with embargo
   - [x] Log: Sharpe, Sortino, Calmar, max DD, turnover, hit rate, exposure %, trades/day
   - [x] Confidence: Probabilistic Sharpe Ratio (PSR) + 95% CI (anchored bootstrap)
   - [x] Sensitivity: re-score Val with 2x costs
@@ -180,13 +180,44 @@ Goal: Move to multi-asset with risk constraints; prepare for paper trading.
   - [x] Action: per-asset long/flat — `sp500_multi_longflat.yaml`
   - [x] Constraints scaffolded: position norm penalty, turnover penalty, soft sector caps
 - Live-readiness
-  - [~] Paper trade via IBKR/Alpaca; measure latency budget
-  - [ ] Daily retrain or weekly recalibration strategy
-  - [ ] MLflow model registry; reproducible seeds and artifacts
+  - [x] Paper trade via IBKR/Alpaca; measure latency budget
+  - [x] Daily retrain or weekly recalibration strategy
+  - [x] MLflow model registry; reproducible seeds and artifacts
 - Monitoring
   - [x] Drift detection (PSI/pop stats) — `python -m finrl_pro.mlops.monitoring --fingerprint <fp>`
   - [ ] Rolling performance attribution
   - [ ] Alerts on drawdown/turnover spikes
+
+---
+
+## Phase 6 - Alpha Validation (The "Real Data" Loop) (2-3 weeks)
+Goal: Transition from verifying code to verifying financial performance using real historical data.
+
+- Data Foundation
+  - [ ] Ingest 10-15 years of S&P 500 data (OHLCV) via Alpaca/Yahoo
+  - [ ] Create canonical `snapshot://sp500_full`
+- Feature Audit
+  - [ ] Upgrade `pit_validator` to support recursive indicators (EMA, etc.)
+  - [ ] Certify feature set on real data (no look-ahead bias)
+- The Tournament
+  - [ ] Re-run Agent Comparison (PPO vs SAC vs DDPG) on real data (2010-2020 Train / 2021-2024 Test)
+  - [ ] Identify "Golden Configuration" (features + agent)
+- Optimization
+  - [ ] Perform hyperparameter tuning (Ray Tune/Optuna) on the tournament winner
+
+---
+
+## Phase 7 - Operational Burn-In (Paper Trading) (4+ weeks)
+Goal: Prove stability and drift management in a live environment.
+
+- Deployment
+  - [ ] Set up persistent paper trading instance connecting to Alpaca
+  - [ ] Schedule `retrain.py` loop (daily) and execution loop (minutely/hourly)
+- Observability
+  - [ ] Implement "Health Check" dashboard (Drift PSI, Latency, Error Rates)
+- Exit Gate
+  - [ ] 4 weeks of continuous uptime with no crash
+  - [ ] PSI < 0.1 throughout the period
 
 ---
 
@@ -249,17 +280,3 @@ Goal: Move to multi-asset with risk constraints; prepare for paper trading.
 - Phase 3 sign-off: __________________  Date: ______
 - Phase 4 sign-off: __________________  Date: ______
 - Phase 5 sign-off: __________________  Date: ______
-
-
-
-
-
-
-
-
-
-
-
-
-
-
