@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 from pathlib import Path
 from typing import List
 
@@ -63,11 +64,16 @@ def _psi(expected: List[float], actual: List[float], bins: int = 10) -> float:
     n_e = sum(he)
     n_a = sum(ha)
     psi = 0.0
+    epsilon = 1e-6
     for i in range(bins):
         pe = he[i] / n_e if n_e else 0.0
         pa = ha[i] / n_a if n_a else 0.0
-        if pe > 0 and pa > 0:
-            psi += (pa - pe) * (0 if pe == 0 else (pa / pe))
+        
+        # Apply epsilon to avoid zero division or log(0)
+        pe = max(pe, epsilon)
+        pa = max(pa, epsilon)
+        
+        psi += (pa - pe) * math.log(pa / pe)
     return float(psi)
 
 
