@@ -85,7 +85,9 @@ class ProStockEnv(gym.Env, ABC):
         self.observation_space = gym.spaces.Box(low=-500, high=500, shape=(self.state_dim,), dtype=np.float32)
         self.action_space = gym.spaces.Box(low=-1, high=1, shape=(self.action_dim,), dtype=np.float32)
 
-    def reset(self):
+    def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
+        super().reset(seed=seed) # Important for Gymnasium API
+
         self.day = 0
         price = self.price_ary[self.day]
         self.stocks = np.zeros_like(self.stocks)
