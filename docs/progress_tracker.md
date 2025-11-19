@@ -41,13 +41,13 @@ Goal: Establish a baseline PPO that beats Buy&Hold on out-of-sample Sharpe under
 
 - Data & splits
   - [ ] Freeze Test: 2023-2025; Val: 2022; Train: 2016-2021
-  - [ ] Purged, embargoed split (>=21 trading days embargo)
+  - [x] Purged, embargoed split (>=21 trading days embargo)
   - [ ] Log `dataset_hash`, symbol list, adj/CA flags
 - Environment & costs
   - [ ] Single-asset `StockTradingEnv` (SPY), daily rebalance
   - [ ] Costs: 1 bp fee + 1 bp slippage; next-bar open execution
   - [ ] Clip actions; action in [-1, +1] target position
-  - [ ] Enable `RiskControlPolicy` (max_drawdown <= 25%, capital_at_risk cap)
+  - [x] Enable `RiskControlPolicy` (max_drawdown <= 25%, capital_at_risk cap)
 - Features (PIT enforced)
   - [ ] Log returns; rolling z-score on Close (and Volume) with `shift(1)`
   - [ ] PIT validator passes (no lookahead; no forward-fill leakage)
@@ -56,8 +56,8 @@ Goal: Establish a baseline PPO that beats Buy&Hold on out-of-sample Sharpe under
   - [ ] Early stop on Val Sharpe plateau (patience K=10 evals)
 - Baselines
   - [x] Buy&Hold (SPY)
-  - [ ] 60/40 proxy (SPY/IEF)
-  - [ ] SMA(20/50) crossover
+  - [x] 60/40 proxy (SPY/IEF)
+  - [x] SMA(20/50) crossover
 - Evaluation & metrics
   - [x] Expanding walk-forward: Train?al?est with embargo
   - [x] Log: Sharpe, Sortino, Calmar, max DD, turnover, hit rate, exposure %, trades/day
@@ -88,7 +88,7 @@ Goal: Identify the simplest change that robustly improves Test Sharpe with contr
     - [x] logR - lambda*vol (lambda in {0.1, 0.2, 0.3})
   - Transaction model
     - [x] Costs: 1 vs 5 vs 10 bps
-    - [ ] Slippage on/off; action smoothing/EMA; action clipping
+    - [x] Slippage on/off; action smoothing/EMA; action clipping
   - Training horizon
     - [x] Train windows: 2y vs 4y vs 6y (end 2021)
 - Gate
