@@ -44,6 +44,7 @@ def make_env(df, mode='train'):
         # env = RiskAwareWrapper(env, risk_policy)
         # Apply Slippage (1 bp) (Temporarily commented out for debugging)
         # env = SlippageWrapper(env, slippage_bps=1.0)
+        pass # Added to fix IndentationError
         
     return env
 
