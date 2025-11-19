@@ -39,21 +39,20 @@ def make_env(df, mode='train'):
     
     # Wrappers
     if mode == 'train':
-        # Apply Risk Control (Temporarily commented out for debugging)
-        # risk_policy = RiskControlPolicy(max_drawdown=0.25, max_exposure=1.0)
-        # env = RiskAwareWrapper(env, risk_policy)
-        # Apply Slippage (1 bp) (Temporarily commented out for debugging)
-        # env = SlippageWrapper(env, slippage_bps=1.0)
-        pass # Added to fix IndentationError
+        # Apply Risk Control
+        risk_policy = RiskControlPolicy(max_drawdown=0.25, max_exposure=1.0)
+        env = RiskAwareWrapper(env, risk_policy)
+        # Apply Slippage (1 bp)
+        env = SlippageWrapper(env, slippage_bps=1.0)
         
     return env
 
 def run_agent(agent_name, train_env, val_env, total_timesteps=30000):
     print(f"--- Training {agent_name} ---")
     
-    # Temporarily disable EvalCallback and evaluation loop for debugging
-    # stop_train_callback = StopTrainingOnNoModelImprovement(max_no_improvement_evals=5, min_evals=3, verbose=0)
-    # eval_callback = EvalCallback(val_env, eval_freq=1000, callback_after_eval=stop_train_callback, verbose=0)
+    # Stop if no improvement after 5 eval periods
+    stop_train_callback = StopTrainingOnNoModelImprovement(max_no_improvement_evals=5, min_evals=3, verbose=0)
+    eval_callback = EvalCallback(val_env, eval_freq=1000, callback_after_eval=stop_train_callback, verbose=0)
     
     if agent_name == "PPO":
         agent = PPO("MlpPolicy", train_env, verbose=0, seed=42, device='cpu')
@@ -72,14 +71,7 @@ def run_agent(agent_name, train_env, val_env, total_timesteps=30000):
     else:
         raise ValueError(f"Unknown agent: {agent_name}")
         
-    agent.learn(total_timesteps=1000) # Reduced timesteps for quicker debugging
-    
-    # Manual predict call for debugging
-    obs = train_env.reset()
-    debug_predict_output = agent.predict(obs, deterministic=True)
-    print(f"DEBUG_MANUAL: Type of predict output: {type(debug_predict_output)}")
-    print(f"DEBUG_MANUAL: Length of predict output: {len(debug_predict_output) if isinstance(debug_predict_output, (list, tuple)) else 'N/A'}")
-    
+    agent.learn(total_timesteps=total_timesteps, callback=eval_callback)
     return agent
 
 def run_phase3():
