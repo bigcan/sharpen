@@ -12628,3 +12628,96 @@ fingerprints:
     features.cache_key: 5d1f9ec033158f6e1e1ebb11a9aebfa85c5299d44fa5e7b257acf4ae03fb626a
     features.env_mode: A
   seed: 1234
+- artifact_uris:
+  - reports/42ed909b-90c3-43d2-bd07-07b6a434f3f0/returns.csv
+  - reports/42ed909b-90c3-43d2-bd07-07b6a434f3f0/equity_curve.csv
+  - reports/42ed909b-90c3-43d2-bd07-07b6a434f3f0/drawdown.csv
+  - reports/42ed909b-90c3-43d2-bd07-07b6a434f3f0/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 42ed909b-90c3-43d2-bd07-07b6a434f3f0
+  metrics_snapshot:
+    annualized_turnover: 0.036686958699566834
+    avg_turnover: 0.11006087609870051
+    capital_at_risk: 0.09
+    leverage: 1.2
+    max_drawdown: 0.18390054886618645
+    sharpe_ratio: -0.8923368142566939
+    total_turnover: 83.20602233061759
+    transaction_costs: 0.016641204466123518
+    transaction_costs_bps: 166.41204466123517
+    volatility: 0.05585937712121782
+  mlflow_run_id: 299996d250c245c58c532c384b91f64f
+  module_versions:
+    action.space: CONTINUOUS_[-1,+1]
+    agent: PPO
+    agent.gae_lambda: 0.98
+    features.cache_key: 938e3f736513aab02e1c475884c20ee847c5bd081757b99767fc2f87b1eb6d69
+    features.env_mode: A
+    features.set: raw_log_returns
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.type: logR
+  seed: 42
+- artifact_uris:
+  - reports/a91e8e05-1d4a-4994-bc7e-b07227d1cd81/returns.csv
+  - reports/a91e8e05-1d4a-4994-bc7e-b07227d1cd81/equity_curve.csv
+  - reports/a91e8e05-1d4a-4994-bc7e-b07227d1cd81/drawdown.csv
+  - reports/a91e8e05-1d4a-4994-bc7e-b07227d1cd81/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: a91e8e05-1d4a-4994-bc7e-b07227d1cd81
+  metrics_snapshot:
+    annualized_turnover: 0.0379311216165693
+    avg_turnover: 0.11379336484970791
+    capital_at_risk: 0.09
+    leverage: 1.2
+    max_drawdown: 0.18191048924591668
+    sharpe_ratio: 0.13714063292010867
+    total_turnover: 86.02778382637918
+    transaction_costs: 0.017205556765275836
+    transaction_costs_bps: 172.05556765275836
+    volatility: 0.08781487423757073
+  mlflow_run_id: a8f7fe9544724aadb8afa7cc72d320f6
+  module_versions:
+    action.space: CONTINUOUS_[-1,+1]
+    agent: PPO
+    agent.gae_lambda: 0.98
+    features.cache_key: 938e3f736513aab02e1c475884c20ee847c5bd081757b99767fc2f87b1eb6d69
+    features.env_mode: A
+    features.set: raw_log_returns
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.type: logR_turnover_penalty
+  seed: 42
+- artifact_uris:
+  - reports/7b882d49-9662-4d3d-9e87-c2127c83b23b/returns.csv
+  - reports/7b882d49-9662-4d3d-9e87-c2127c83b23b/equity_curve.csv
+  - reports/7b882d49-9662-4d3d-9e87-c2127c83b23b/drawdown.csv
+  - reports/7b882d49-9662-4d3d-9e87-c2127c83b23b/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 7b882d49-9662-4d3d-9e87-c2127c83b23b
+  metrics_snapshot:
+    annualized_turnover: 0.03377935992813556
+    avg_turnover: 0.1013380797844067
+    capital_at_risk: 0.09
+    leverage: 1.2
+    max_drawdown: 0.18284956183874668
+    sharpe_ratio: -0.5187951876995963
+    total_turnover: 76.61158831701147
+    transaction_costs: 0.015322317663402293
+    transaction_costs_bps: 153.22317663402293
+    volatility: 0.0758329766390334
+  mlflow_run_id: 331e85ebcdda4a088822b7e185cdfac8
+  module_versions:
+    action.space: CONTINUOUS_[-1,+1]
+    agent: PPO
+    agent.gae_lambda: 0.98
+    features.cache_key: 938e3f736513aab02e1c475884c20ee847c5bd081757b99767fc2f87b1eb6d69
+    features.env_mode: A
+    features.set: raw_log_returns
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    reward.type: logR_turnover_penalty_5_0
+  seed: 42
