@@ -4,7 +4,7 @@ Iterates over PPO, SAC, TD3, DDPG, A2C agents to compare performance."""
 
 import pandas as pd
 import numpy as np
-import gym
+import gymnasium as gym
 import os
 from stable_baselines3 import PPO, SAC, TD3, DDPG, A2C
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
