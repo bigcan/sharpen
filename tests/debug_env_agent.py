@@ -12,22 +12,26 @@ from finrl_pro.envs.pro_stock_env import ProStockEnv
 # Assuming wrappers are commented out in run_phase3.py, so not using them here either for isolation
 
 def make_debug_env():
-    # Create dummy data
-    dates = pd.date_range(start='2016-01-01', end='2016-01-31', freq='D')
+    # Create dummy data with a longer range
+    dates = pd.date_range(start='2015-01-01', end='2017-12-31', freq='D')
     dates = dates[dates.dayofweek < 5] 
     data = pd.DataFrame({
         'date': dates,
         'tic': 'SPY',
-        'open': np.random.uniform(100, 110, size=len(dates)),
-        'high': np.random.uniform(100, 110, size=len(dates)),
-        'low': np.random.uniform(100, 110, size=len(dates)),
-        'close': np.random.uniform(100, 110, size=len(dates)),
-        'volume': np.random.uniform(1000000, 2000000, size=len(dates))
+        'open': np.random.uniform(100, 400, size=len(dates)),
+        'high': np.random.uniform(100, 400, size=len(dates)),
+        'low': np.random.uniform(100, 400, size=len(dates)),
+        'close': np.random.uniform(100, 400, size=len(dates)),
+        'volume': np.random.uniform(1000000, 5000000, size=len(dates))
     })
     data = data.sort_values('date')
     
     fe = FeatureEngineer()
     df_processed = fe.preprocess_data(data)
+    print(f"DEBUG: df_processed length after FE: {len(df_processed)}")
+    
+    if df_processed.empty:
+        raise ValueError("df_processed is empty after feature engineering. Adjust dummy data range.")
     
     price_ary = df_processed[['close']].values
     tech_cols = [c for c in df_processed.columns if '_shifted' in c]
