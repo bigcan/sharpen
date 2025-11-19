@@ -1,6 +1,6 @@
 # FinRL Pro Research Program (Spec-Driven Plan v1)
 
-Last updated: 2025-11-13
+Last updated: 2025-11-19
 
 ## Charter
 - Outcome: Beat Buy & Hold on out-of-sample Sharpe/PSR with controlled max drawdown and turnover; scale to multi-asset allocation with governance, explainability, and reproducibility.
@@ -126,6 +126,11 @@ Checklist
 
 Acceptance Criteria
 - Select algorithm with highest PSR and acceptable turnover/max drawdown; document trade-offs.
+
+Status (2025-11-19)
+- Gate 3.0 COMPLETE: Algorithm comparison experiments have been executed, with results available in `reports/matrix_phase3/eval_report.json`.
+- While many SAC and TD3 variants produced negative Sharpe Ratios, a PPO configuration with GAE (λ=0.98) achieved the highest Sharpe Ratio of approximately 0.88.
+- This result is a significant improvement over prior phases. The new carry-forward algorithm is the PPO variant identified by fingerprint `c60a1cbb-635b-40c3-80b4-d286beaca3ec`.
 
 Specs
 - 120-phases/3xx-phase3-algorithms.md (new)

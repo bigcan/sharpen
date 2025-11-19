@@ -1,0 +1,57 @@
+experiment_id: phase3_ppo_clip_0_30_fracdiff_d_0_5
+fingerprint_manifest: finrl_pro/configs/fingerprints.yaml
+risk_profile_file: finrl_pro/configs/risk_profiles.yaml
+risk_profile_id: default
+sandbox_enabled: true
+training:
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  seed: 42
+  use_pro_env: false
+  module_versions:
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    agent: PPO
+    action.space: CONTINUOUS_[-1,+1]
+    reward.type: logR
+    features.set: fracdiff_0.5
+    agent.clip_range: 0.3
+  metrics:
+    sharpe_ratio: 1.05
+    max_drawdown: 0.18
+    volatility: 0.22
+    capital_at_risk: 0.08
+    leverage: 1.2
+  artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+features:
+  enable_custom: true
+  use_turbulence: false
+  families:
+    trend: true
+    momentum: true
+    vol: true
+    volume: true
+  stockstats_overrides: []
+  advanced:
+    fracdiff:
+      enable: true
+      cols:
+      - close
+      d: 0.5
+      window: 256
+      min_weight: 1.0e-05
+    wavelet:
+      enable: false
+      cols:
+      - close
+      wavelet: db4
+      level: 3
+      window: 256
+  cache:
+    enabled: true
+    dir: finrl_pro/data/processed
+sweep:
+  seeds:
+  - 41
+  - 42
+  - 43

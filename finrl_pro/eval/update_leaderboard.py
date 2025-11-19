@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional
 import yaml
 
 from finrl_pro.eval.statistics import probabilistic_sharpe_ratio
+from finrl_pro.eval.risk_summary_gate import enforce_turnover_cost_limits
 
 
 @dataclass(slots=True)
@@ -276,7 +277,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--leaderboard", default="docs/leaderboard.md", help="Leaderboard Markdown path")
     args = ap.parse_args(argv or None)
 
-    rows = _to_eval_rows(Path(args.matrix_dir))
+    matrix_dir = Path(args.matrix_dir)
+    enforce_turnover_cost_limits(matrix_dir)
+    rows = _to_eval_rows(matrix_dir)
     _apply_upserts(Path(args.leaderboard), rows)
 
 

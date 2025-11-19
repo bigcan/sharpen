@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import csv
 import json
 from pathlib import Path
 
@@ -55,6 +56,16 @@ def test_pipeline_generates_compliance_report(tmp_path: Path) -> None:
 
     replayed = trainer.reproduce(fingerprint.fingerprint_id)
     assert replayed.metrics_snapshot["sharpe_ratio"] == pytest.approx(1.08)
+
+    returns_dir = Path("reports") / fingerprint.fingerprint_id
+    returns_dir.mkdir(parents=True, exist_ok=True)
+    returns_path = returns_dir / "returns.csv"
+    with returns_path.open("w", encoding="utf-8", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow(["t", "return"])
+        for idx in range(252):
+            value = 0.0015 if idx % 2 else 0.0005
+            writer.writerow([idx, value])
 
     catalog = BenchmarkCatalog(manifest_path=Path("finrl_pro/configs/benchmarks.yaml"))
     catalog.load()
