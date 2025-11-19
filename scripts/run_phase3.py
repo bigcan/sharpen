@@ -1,6 +1,6 @@
-"Module: run_phase3
+"""Module: run_phase3
 Purpose: Execute Phase 3 Algorithm Exploration.
-Iterates over PPO, SAC, TD3, DDPG, A2C agents to compare performance."
+Iterates over PPO, SAC, TD3, DDPG, A2C agents to compare performance."""
 
 import pandas as pd
 import numpy as np
