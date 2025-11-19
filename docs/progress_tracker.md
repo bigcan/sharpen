@@ -196,8 +196,8 @@ Goal: Move to multi-asset with risk constraints; prepare for paper trading.
 - [x] Implement Explainability Layer
   - [~] Implement SHAP Analysis
   - [x] Implement Integrated Gradients
-- [~] Integration Testing
-  - [~] Create End-to-End Training Test
+- [x] Integration Testing
+  - [x] Create End-to-End Training Test
 
 
 ---
