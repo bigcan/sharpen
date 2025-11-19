@@ -22,7 +22,8 @@ dependencies = [
     "PyWavelets>=1.5.0",
     "statsmodels>=0.14.0",
     "gymnasium>=0.29.1",
-    "stable-baselines3>=2.3.0"
+    "stable-baselines3>=2.3.0",
+    "shimmy>=0.2.1" # Required for SB3 compatibility with gym.Env
 ]
 readme = "README.md"
 
