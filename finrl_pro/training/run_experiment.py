@@ -462,6 +462,11 @@ def main(argv: Iterable[str] | None = None) -> None:
         sandbox_enabled=bool(cfg.get("sandbox_enabled", False)),
     )
 
+    # Register model if configured
+    if tcfg.get("register_model", False):
+        model_name = str(tcfg.get("model_name", "finrl_pro_model"))
+        trainer.register_model(fingerprint.mlflow_run_id, model_name)
+
     artifact_paths = _persist_artifacts(fingerprint.fingerprint_id, sim)
     fingerprint.artifact_uris = artifact_paths
     store.register(fingerprint)

@@ -12573,3 +12573,58 @@ fingerprints:
     action.space: continuous
     agent: DDPG
   seed: 42
+- artifact_uris:
+  - reports/6edb6482-ca01-45d6-8761-133b6984ad3c/returns.csv
+  - reports/6edb6482-ca01-45d6-8761-133b6984ad3c/equity_curve.csv
+  - reports/6edb6482-ca01-45d6-8761-133b6984ad3c/drawdown.csv
+  - reports/6edb6482-ca01-45d6-8761-133b6984ad3c/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  fingerprint_id: 6edb6482-ca01-45d6-8761-133b6984ad3c
+  metrics_snapshot:
+    annualized_turnover: 0.037299673857413965
+    avg_turnover: 0.11189902157224191
+    capital_at_risk: 0.09
+    leverage: 1.2
+    max_drawdown: 0.15311028134304383
+    sharpe_ratio: -0.43833241121360966
+    total_turnover: 84.59566030861488
+    transaction_costs: 0.016919132061722977
+    transaction_costs_bps: 169.19132061722976
+    volatility: 0.05285157308103209
+  mlflow_run_id: 44648d27113b4d9dbf949934123d4ac9
+  module_versions:
+    agent: PPO
+    features.cache_key: 7118da1039b9cabadaca0381134883c8a6e885ec3523fba3a7d4496e9966f8fe
+    features.env_mode: A
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    horizon.years: 4
+  seed: 6185
+- artifact_uris:
+  - reports/382ad125-7cbf-42bf-8e08-2d231da28a4c/returns.csv
+  - reports/382ad125-7cbf-42bf-8e08-2d231da28a4c/equity_curve.csv
+  - reports/382ad125-7cbf-42bf-8e08-2d231da28a4c/drawdown.csv
+  - reports/382ad125-7cbf-42bf-8e08-2d231da28a4c/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/experiments/verify_registry.yaml
+  dataset_hash: file://data/test_data.csv
+  fingerprint_id: 382ad125-7cbf-42bf-8e08-2d231da28a4c
+  metrics_snapshot:
+    annualized_turnover: 0.03835750603617931
+    avg_turnover: 0.11507251810853794
+    capital_at_risk: 0.09
+    leverage: 1.2
+    max_drawdown: 0.10598327674050012
+    sharpe_ratio: -1.377096854039337
+    total_turnover: 86.99482369005469
+    transaction_costs: 0.01739896473801094
+    transaction_costs_bps: 173.9896473801094
+    volatility: 0.020196512409699784
+  mlflow_run_id: d0285e4166f8445ab4293819e9bc1528
+  module_versions:
+    action.space: continuous
+    agent: PPO
+    features.cache_key: 5d1f9ec033158f6e1e1ebb11a9aebfa85c5299d44fa5e7b257acf4ae03fb626a
+    features.env_mode: A
+  seed: 1234
