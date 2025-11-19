@@ -104,3 +104,47 @@ class TurnoverPenaltyWrapper(gym.Wrapper):
             
         self.prev_action = np.array(action, dtype=np.float32)
         return obs, reward, done, truncated, info
+
+class ActionSmoothingWrapper(gym.Wrapper):
+    """
+    Smooths actions to enforce low turnover.
+    Formula: Executed_Action = (1 - smooth_factor) * Previous + smooth_factor * New
+    
+    If smooth_factor is 0.1:
+    Executed = 0.9 * Previous + 0.1 * New
+    """
+    def __init__(self, env: gym.Env, smooth_factor: float = 0.1):
+        super().__init__(env)
+        self.smooth_factor = smooth_factor
+        self.prev_action = None
+        self.action_dim = None
+        
+        # Try to infer action dim
+        if hasattr(env.action_space, 'shape'):
+            self.action_dim = env.action_space.shape[0]
+
+    def reset(self, **kwargs):
+        obs, info = self.env.reset(**kwargs)
+        if self.action_dim is None:
+             if hasattr(self.env.action_space, 'shape'):
+                self.action_dim = self.env.action_space.shape[0]
+             else:
+                self.action_dim = 1
+                
+        self.prev_action = np.zeros(self.action_dim, dtype=np.float32)
+        return obs, info
+
+    def step(self, action):
+        # Apply smoothing
+        # smoothed = (1 - alpha) * prev + alpha * new
+        smoothed_action = (1.0 - self.smooth_factor) * self.prev_action + self.smooth_factor * action
+        
+        # Clip to valid action space (usually [-1, 1] for continuous)
+        if hasattr(self.env.action_space, 'high'):
+            smoothed_action = np.clip(smoothed_action, self.env.action_space.low, self.env.action_space.high)
+            
+        obs, reward, done, truncated, info = self.env.step(smoothed_action)
+        
+        self.prev_action = smoothed_action
+        info['smoothed_action'] = smoothed_action
+        return obs, reward, done, truncated, info

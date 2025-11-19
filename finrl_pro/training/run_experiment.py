@@ -24,7 +24,7 @@ from finrl_pro.mlops.logger import MLOpsLogger
 from finrl_pro.mlops.risk_controls import RiskControlPolicy
 from finrl_pro.mlops.risk_profiles import load_risk_profile
 from finrl_pro.training.trainer import Trainer
-from finrl_pro.envs.wrappers import TurnoverPenaltyWrapper
+from finrl_pro.envs.wrappers import TurnoverPenaltyWrapper, ActionSmoothingWrapper
 
 # Import agents
 from finrl_pro.agents.ppo import PPOAgent
@@ -228,6 +228,12 @@ def _run_real_training(
     if turnover_penalty > 0.0:
         env = TurnoverPenaltyWrapper(env, penalty_coef=turnover_penalty)
         logger.log_event("finrl_pro.training.wrapper_applied", context={"wrapper": "TurnoverPenaltyWrapper", "coef": turnover_penalty})
+
+    # Apply Action Smoothing Wrapper
+    action_smoothing = float(training_cfg.get("action_smoothing", 0.0))
+    if action_smoothing > 0.0:
+        env = ActionSmoothingWrapper(env, smooth_factor=action_smoothing)
+        logger.log_event("finrl_pro.training.wrapper_applied", context={"wrapper": "ActionSmoothingWrapper", "smooth_factor": action_smoothing})
 
     logger.log_event("finrl_pro.training.environment_created", context={"env_name": "ProStockEnv"})
 

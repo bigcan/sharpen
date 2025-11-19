@@ -226,19 +226,39 @@ Checklist
 Acceptance Criteria
 - No collapse under stresses; DSR > 0; PBO < 0.20; mean Sharpe > 0.0 across trial portfolio.
 
-Status (2025-11-19)
-- **Gate 4.0 FAILED: Phase 3 winner c60a1cbb-635b-40c3-80b4-d286beaca3ec failed robustness testing**
-  - **Deflated Sharpe Ratio (DSR):** 0.00% (FAIL - target: > 0.50)
-    - Interpretation: The observed Sharpe of 0.88 is statistically indistinguishable from noise given 42 trials conducted
-    - Algorithm pool mean Sharpe: -0.71 (extremely poor baseline)
-    - The "winner" appears to be a lucky outlier in a weak field, not a robust strategy
-  - **Probability of Backtest Overfitting (PBO):** 56.3% (FAIL - target: < 20%)
-    - Interpretation: In-sample winner has ~coin-flip chance of outperforming median out-of-sample
-    - Indicates severe selection bias; likely cherry-picked from noise
-  - **Block Bootstrap CI:** (awaiting detailed results)
-  - **Critical Insight:** The systemic issue is mean Sharpe = -0.71 across all 42 trials. This suggests an upstream problem (data leakage, broken environment, or fundamental signal absence) rather than isolated algorithm failure.
+Status (2025-11-19)                                                                           
 
-**BLOCK: Phase 5 Progression Halted**
+- **Gate 4.0 FAILED: Phase 3 winner c60a1cbb-635b-40c3-80b4-d286beaca3ec failed robustness tes
+
+ting**                                                                                         
+
+  - **Deflated Sharpe Ratio (DSR):** 0.00% (FAIL - target: > 0.50)                            
+
+    - Interpretation: The observed Sharpe of 0.88 is statistically indistinguishable from nois
+
+e given 42 trials conducted                                                                    
+
+    - Algorithm pool mean Sharpe: -0.71 (extremely poor baseline)                             
+
+    - The "winner" appears to be a lucky outlier in a weak field, not a robust strategy       
+
+  - **Probability of Backtest Overfitting (PBO):** 56.3% (FAIL - target: < 20%)               
+
+    - Interpretation: In-sample winner has ~coin-flip chance of outperforming median out-of-sa
+
+mple                                                                                           
+
+    - Indicates severe selection bias; likely cherry-picked from noise                        
+
+  - **Phase 4.5 Attempt (Turnover Penalty 5.0):** FAILED. Turnover remained > 25x. Agent ignored penalty.
+
+  - **Phase 4.6 Plan (Structural Cure):** Force action smoothing (`0.9 * Prev + 0.1 * New`). Stop asking nicely.
+
+
+
+**BLOCK: Phase 5 Progression Halted**                                                         
+
+
 - **Decision:** Phase 4 gate remains CLOSED until root cause identified and remediated
 - **Rationale:** Proceeding with a false positive (DSR=0, PBO=56%) would waste resources on multi-asset scaling of a broken foundation
 - **Immediate Actions:**
