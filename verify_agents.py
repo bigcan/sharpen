@@ -22,7 +22,7 @@ def main():
     
     # 1. Check Dependencies
     print("\n--- Checking Dependencies ---")
-    deps = ["numpy", "torch", "pandas", "gym"]
+    deps = ["numpy", "torch", "pandas", "gymnasium"]
     missing = []
     for dep in deps:
         if not check_dependency(dep):
