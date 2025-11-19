@@ -17,10 +17,19 @@ import yaml
 
 from finrl_pro.configs.fingerprint_store import FingerprintStore
 from finrl_pro.data.cache import feature_cache_key
+from finrl_pro.data.loader import DataLoader
+from finrl_pro.data.loader_pro import ProFeatureAssembler
+from finrl_pro.envs.factory import make_pro_env
 from finrl_pro.mlops.logger import MLOpsLogger
 from finrl_pro.mlops.risk_controls import RiskControlPolicy
 from finrl_pro.mlops.risk_profiles import load_risk_profile
 from finrl_pro.training.trainer import Trainer
+
+# Import agents
+from finrl_pro.agents.ppo import PPOAgent
+from finrl_pro.agents.sac import SACAgent
+from finrl_pro.agents.td3 import TD3Agent
+from finrl_pro.agents.ddpg import DDPGAgent
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -180,6 +189,146 @@ def _simulate_training_outputs(
         metrics=metrics,
     )
 
+import numpy as np
+import torch # needed for agent
+
+def _run_real_training(
+    *,
+    training_cfg: dict[str, Any],
+    logger: MLOpsLogger,
+) -> SimulatedRunArtifacts:
+    """Execute a real training run with an RL agent."""
+    dataset_hash = str(training_cfg.get("dataset_hash", ""))
+    if not dataset_hash:
+        raise ValueError("dataset_hash must be provided for real training.")
+
+    # 1. Load Data
+    df = DataLoader.resolve_dataset(dataset_hash)
+    logger.log_event("finrl_pro.training.real_data_loaded", context={"dataset_hash": dataset_hash, "rows": len(df)})
+
+    # 2. Assemble Features
+    feat_cfg = training_cfg.get("features", {})
+    assembler = ProFeatureAssembler()
+    asm = assembler.assemble_from_df(
+        df=df,
+        features_cfg=feat_cfg,
+        dataset_hash=dataset_hash, # Pass the original dataset hash for cache key
+    )
+    logger.log_event("finrl_pro.training.features_assembled", context={"feature_set_id": asm.feature_set_id})
+
+
+    # 3. Create Environment
+    env_cfg = training_cfg.get("environment", {})
+    env = make_pro_env(asm=asm, **env_cfg)
+    logger.log_event("finrl_pro.training.environment_created", context={"env_name": "ProStockEnv"})
+
+
+    # 4. Instantiate Agent
+    agent_name = training_cfg.get("agent.name", "PPOAgent") # Default to PPO
+    agent_params = training_cfg.get("agent.params", {})
+
+    # Dynamically select agent
+    current_agent = None
+    if agent_name == "PPOAgent":
+        current_agent = PPOAgent(state_dim=env.state_dim, action_dim=env.action_dim, **agent_params)
+    elif agent_name == "SACAgent":
+        current_agent = SACAgent(state_dim=env.state_dim, action_dim=env.action_dim, **agent_params)
+    elif agent_name == "TD3Agent":
+        current_agent = TD3Agent(state_dim=env.state_dim, action_dim=env.action_dim, **agent_params)
+    elif agent_name == "DDPGAgent":
+        current_agent = DDPGAgent(state_dim=env.state_dim, action_dim=env.action_dim, **agent_params)
+    else:
+        raise ValueError(f"Unknown agent: {agent_name}")
+    logger.log_event("finrl_pro.training.agent_instantiated", context={"agent_name": agent_name})
+
+
+    # 5. Training Loop
+    total_timesteps = training_cfg.get("total_timesteps", 100000)
+    stress_tests = training_cfg.get("stress_tests", {})
+    
+    # Execution Gap Stress Test Config
+    exec_gap_enabled = stress_tests.get("execution_gap", {}).get("enable", False)
+    exec_gap_ticks = stress_tests.get("execution_gap", {}).get("ticks", 0)
+    
+    # Input Noise Stress Test Config
+    input_noise_enabled = stress_tests.get("input_noise", {}).get("enable", False)
+    input_noise_std = stress_tests.get("input_noise", {}).get("std", 0.0)
+
+    obs, info = env.reset() # Initial reset
+    
+    rewards_history = []
+    # Buffer to simulate execution delay (gap)
+    action_buffer = []
+    
+    for t in range(total_timesteps):
+        
+        # Apply Input Noise Stress Test
+        if input_noise_enabled:
+            noise = np.random.normal(0, input_noise_std, size=obs.shape)
+            obs = obs + noise
+
+        action, log_prob = current_agent.select_action(obs)
+        
+        # Apply Execution Gap Stress Test
+        if exec_gap_enabled:
+            action_buffer.append(action)
+            if len(action_buffer) > exec_gap_ticks:
+                executed_action = action_buffer.pop(0)
+            else:
+                # During warm-up of the delay buffer, execute a neutral action (e.g., 0)
+                # Or simply repeat the first action. Let's assume zero vector (hold)
+                executed_action = np.zeros_like(action)
+        else:
+            executed_action = action
+
+        next_obs, reward, terminated, truncated, info = env.step(executed_action)
+        
+        rewards_history.append(reward) # Collect rewards
+
+        # Store transition (using the *intended* action for training, or executed? 
+        # Standard RL assumes transition (s, a, r, s') where 'a' caused 'r'.
+        # If there's a gap, the reward is response to the delayed action.
+        # For robustness *testing*, we usually freeze weights (no training), just evaluation.
+        # But if training, we store what actually happened.
+        
+        current_agent.store_transition(obs, executed_action, reward, terminated, log_prob)
+        
+        obs = next_obs
+        
+        if terminated or truncated:
+            # Update agent after episode
+            metrics_from_update = current_agent.update() # Returns dict of losses
+            logger.log_event("finrl_pro.training.agent_updated", context=metrics_from_update)
+            current_agent.reset_buffer() # Clear buffer for next episode
+
+            obs, info = env.reset()
+            action_buffer = [] # Reset gap buffer
+
+
+    # 6. Collect and Compute Metrics
+    if rewards_history:
+        # Assuming rewards_history are daily returns
+        equity, drawdowns, sharpe, vol_realized, max_dd = _compute_equity_and_metrics(rewards_history)
+        final_metrics = {
+            "sharpe_ratio": float(sharpe),
+            "max_drawdown": float(max_dd),
+            "volatility": float(vol_realized),
+            # Add other metrics as needed
+        }
+    else:
+        final_metrics = {"sharpe_ratio": 0.0, "max_drawdown": 0.0, "volatility": 0.0} # Fallback
+
+    return SimulatedRunArtifacts(
+        returns=rewards_history,
+        equity=equity if rewards_history else [],
+        drawdowns=drawdowns if rewards_history else [],
+        positions=[], # Not collected in this basic loop
+        trades=[], # Not collected in this basic loop
+        turnover=[], # Not collected in this basic loop
+        transaction_costs=[], # Not collected in this basic loop
+        metrics=final_metrics,
+    )
+
 
 def _persist_artifacts(fingerprint_id: str, sim: SimulatedRunArtifacts) -> list[str]:
     """Write simulated artifacts to disk for downstream evaluation."""
@@ -249,60 +398,51 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     tcfg = cfg["training"]
-    sim = _simulate_training_outputs(cfg_path=cfg_path, training_cfg=tcfg)
+    
+    real_training_enabled = bool(tcfg.get("real_training", False))
+
+    if real_training_enabled:
+        sim = _run_real_training(training_cfg=tcfg, logger=logger)
+    else:
+        sim = _simulate_training_outputs(cfg_path=cfg_path, training_cfg=tcfg)
 
     # Optional dataset resolution check for snapshot-backed datasets
     ds_hash = str(tcfg.get("dataset_hash", ""))
-    if ds_hash.startswith("snapshot://"):
+    # This block is for logging and feature assembly, handled in _run_real_training
+    # if real_training_enabled.
+    if ds_hash.startswith("snapshot://") and not real_training_enabled:
         try:
-            from finrl_pro.data.loader import DataLoader  # noqa: WPS433
-        except Exception as exc:  # noqa: BLE001
+            # from finrl_pro.data.loader import DataLoader  # noqa: WPS433 (already imported)
+            df = DataLoader.resolve_dataset(ds_hash)
             logger.log_event(
-                "finrl_pro.training.dataset_resolve_skipped",
-                level=30,
-                context={
-                    "dataset_hash": ds_hash,
-                    "reason": f"DataLoader import failed: {exc}",
-                },
+                "finrl_pro.training.dataset_resolved",
+                context={"dataset_hash": ds_hash, "rows": int(df.shape[0])},
             )
-        else:
-            try:
-                df = DataLoader.resolve_dataset(ds_hash)
-                logger.log_event(
-                    "finrl_pro.training.dataset_resolved",
-                    context={"dataset_hash": ds_hash, "rows": int(df.shape[0])},
-                )
-            except Exception as e:  # noqa: BLE001
-                logger.log_event(
-                    "finrl_pro.training.dataset_resolve_error",
-                    context={"dataset_hash": ds_hash, "error": str(e)},
-                )
-                raise
+        except Exception as e:  # noqa: BLE001
+            logger.log_event(
+                "finrl_pro.training.dataset_resolve_error",
+                context={"dataset_hash": ds_hash, "error": str(e)},
+            )
+            raise
+    
     # Compose module versions with feature cache key for reproducibility
     mv = dict(tcfg.get("module_versions", {}))
     feat_cfg = cfg.get("features", {})
-    try:
-        fkey = feature_cache_key(str(tcfg.get("dataset_hash", "")), feat_cfg)
-        mv["features.cache_key"] = fkey
-    except Exception:
-        # Keep going if features block is malformed
-        pass
-
-    # Optional: assemble features from DB and log feature_set_id (snapshot datasets only)
-    ds_hash = str(tcfg.get("dataset_hash", ""))
-    use_pro_env = bool(tcfg.get("use_pro_env", False))
-    mv["features.env_mode"] = "B" if use_pro_env else "A"
-    if ds_hash.startswith("snapshot://") and feat_cfg:
+    # Skip feature assembly if real training is enabled, as it's handled in _run_real_training
+    if not real_training_enabled:
         try:
-            from finrl_pro.data.loader_pro import ProFeatureAssembler  # noqa: WPS433
-        except Exception as exc:  # noqa: BLE001
-            logger.log_event(
-                "finrl_pro.training.feature_assembly_skipped",
-                level=30,
-                context={"dataset_hash": ds_hash, "reason": f"import failed: {exc}"},
-            )
-        else:
+            fkey = feature_cache_key(str(tcfg.get("dataset_hash", "")), feat_cfg)
+            mv["features.cache_key"] = fkey
+        except Exception:
+            # Keep going if features block is malformed
+            pass
+
+        # Optional: assemble features from DB and log feature_set_id (snapshot datasets only)
+        use_pro_env = bool(tcfg.get("use_pro_env", False))
+        mv["features.env_mode"] = "B" if use_pro_env else "A"
+        if ds_hash.startswith("snapshot://") and feat_cfg:
             try:
+                # from finrl_pro.data.loader_pro import ProFeatureAssembler  # noqa: WPS433 (already imported)
                 snapshot_id = ds_hash.split("//", 1)[1]
                 assembler = ProFeatureAssembler()
                 asm = assembler.assemble_from_snapshot(snapshot_id=snapshot_id, features_cfg=feat_cfg)
