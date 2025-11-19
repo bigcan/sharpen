@@ -280,5 +280,15 @@ Goal: Prove stability and drift management in a live environment.
 - Phase 1 sign-off: Overridden (See Decision Log)  Date: 2025-11-13
 - Phase 2 sign-off: Overridden (See Decision Log)  Date: 2025-11-13
 - Phase 3 sign-off: Complete (PPO Selected)        Date: 2025-11-19
-- Phase 4 sign-off: __________________  Date: ______
-- Phase 5 sign-off: __________________  Date: ______
+- Phase 4 sign-off: __________________  Date: ______                                          
+- Phase 5 sign-off: __________________  Date: ______                                          
+
+## Phase 4.5/4.6: Robustness & Structural Cure
+Goal: Fix excessive turnover and enforce robustness.
+- [x] **Phase 4.5 (Failed)**: Turnover Penalty 5.0
+  - Result: Agent ignored penalty (Turnover > 25x). Stubborn noise chasing.
+- [ ] **Phase 4.6 (Structural Cure)**: Action Smoothing
+  - [x] Implement `ActionSmoothingWrapper` (0.9 * Prev + 0.1 * New)
+  - [ ] Execute `phase4_structural_cure` config (seeds 41, 42, 43)
+  - [ ] Verify turnover < 2.0x (Hard mathematical guarantee)
+  - [ ] Check DSR > 0 with smoothed actions
