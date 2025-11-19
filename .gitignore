@@ -93,3 +93,8 @@ logs/
 
 # Docker artifacts
 docker/*.log
+
+# Experiment artifacts (MLflow and Reports)
+mlruns/
+reports/
+tmp/
