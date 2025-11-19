@@ -39,11 +39,11 @@ def make_env(df, mode='train'):
     
     # Wrappers
     if mode == 'train':
-        # Apply Risk Control
-        risk_policy = RiskControlPolicy(max_drawdown=0.25, max_exposure=1.0)
-        env = RiskAwareWrapper(env, risk_policy)
-        # Apply Slippage (1 bp)
-        env = SlippageWrapper(env, slippage_bps=1.0)
+        # Apply Risk Control (Temporarily commented out for debugging)
+        # risk_policy = RiskControlPolicy(max_drawdown=0.25, max_exposure=1.0)
+        # env = RiskAwareWrapper(env, risk_policy)
+        # Apply Slippage (1 bp) (Temporarily commented out for debugging)
+        # env = SlippageWrapper(env, slippage_bps=1.0)
         
     return env
 
