@@ -145,7 +145,7 @@ def add_wavelet_features(df: pd.DataFrame, cfg: WaveletConfig | None = None) -> 
                     seg,
                     wavelet=cfg.wavelet,
                     level=cfg.level,
-                    trim_approx=True,
+                    trim_approx=False,
                     start_level=0,
                     norm=True,
                 )

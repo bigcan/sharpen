@@ -12,10 +12,10 @@ def test_pro_env_shapes_and_step():
 
     env = ProStockEnv(price_ary=price, tech_ary=tech, turbulence_ary=turb)
     assert env.state_dim == 1 + 2 + 3 * stock_dim + stock_dim * tech_dim
-    s = env.reset()
+    s, _ = env.reset()
     assert s.shape == (env.state_dim,)
     a = np.zeros(env.action_dim, dtype=np.float32)
-    ns, r, done, info = env.step(a)
+    ns, r, terminated, truncated, info = env.step(a)
     assert ns.shape == (env.state_dim,)
     assert isinstance(r, float)
 
