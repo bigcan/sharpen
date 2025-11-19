@@ -142,6 +142,140 @@ class ProFeatureAssembler:
     def __init__(self, dsn: str | None = None) -> None:
         self._db = DatabaseClient(dsn=dsn)
 
+    def _process_and_assemble_df(
+        self,
+        bars_df: pd.DataFrame,
+        features_cfg: Mapping[str, object],
+        preferred_order: Sequence[str],
+        dataset_hash: str,
+    ) -> Assembly:
+        """Helper to process a DataFrame and assemble the final arrays."""
+        ind_list = resolve_indicator_list(
+            families=dict(features_cfg.get("families", {})),
+            overrides=list(features_cfg.get("stockstats_overrides", []) or [])
+        ) or list(DEFAULT_TECH7)
+
+        bars_df = _add_stockstats(bars_df, ind_list)
+
+        # Advanced features
+        adv = dict(features_cfg.get("advanced", {}) or {})
+        fd_cfg = adv.get("fracdiff")
+        wl_cfg = adv.get("wavelet")
+        if fd_cfg and fd_cfg.get("enable"):
+            frac = FracDiffConfig(
+                cols=tuple(fd_cfg.get("cols", ["close"])),
+                d=float(fd_cfg.get("d", 0.5)),
+                window=int(fd_cfg.get("window", 256)),
+                min_weight=float(fd_cfg.get("min_weight", 1e-5)),
+            )
+            bars_df = build_features(bars_df, fracdiff=frac)
+        if wl_cfg and wl_cfg.get("enable"):
+            wav = WaveletConfig(
+                cols=tuple(wl_cfg.get("cols", ["close"])),
+                wavelet=str(wl_cfg.get("wavelet", "db4")),
+                level=int(wl_cfg.get("level", 3)),
+                window=int(wl_cfg.get("window", 256)),
+            )
+            bars_df = build_features(bars_df, wavelet=wav)
+
+        # Instead of storing in DB, directly assemble arrays
+        tickers = sorted(bars_df["tic"].unique().tolist())
+        dates = sorted(bars_df["date"].unique().tolist())
+
+        # Select 7 indicators in a stable order
+        feature_cols = [c for c in bars_df.columns if c not in ["date", "tic", "open", "high", "low", "close", "volume", "source", "vendor_rev"]]
+        tech7 = _select_tech7(feature_cols, preferred_order=preferred_order)
+
+        # Compute turbulence if requested
+        turbulence = np.zeros(len(dates), dtype=float)
+        if bool(features_cfg.get("use_turbulence", False)):
+            tdf = _calculate_turbulence(bars_df)
+            tdf = tdf.set_index("date").reindex(dates).fillna(0.0).reset_index()
+            turbulence = tdf["turbulence"].to_numpy(dtype=float)
+
+        # Build arrays
+        price_piv = bars_df.pivot(index="date", columns="tic", values="close").reindex(dates).reindex(columns=tickers)
+        price_ary = price_piv.to_numpy(dtype=float)
+
+        tech_blocks: List[np.ndarray] = []
+        for f in tech7:
+            blk = bars_df.pivot(index="date", columns="tic", values=f).reindex(dates).reindex(columns=tickers).to_numpy(dtype=float)
+            tech_blocks.append(blk)
+        tech_stack = np.stack(tech_blocks, axis=2)  # (T, stock_dim, 7)
+        tech_ary = tech_stack.reshape((tech_stack.shape[0], -1))  # (T, stock_dim*7)
+
+        # Fill NaNs by forward-fill along time per column (like upstream fill)
+        def ffill2d(a: np.ndarray) -> np.ndarray:
+            out = a.copy()
+            for j in range(out.shape[1]):
+                col = out[:, j]
+                mask = np.isnan(col)
+                if mask.all():
+                    continue
+                idx = np.where(~mask, np.arange(len(col)), 0)
+                np.maximum.accumulate(idx, out=idx)
+                out[:, j] = col[idx]
+            return out
+            
+        # Simple backfill for leading NaNs
+        def bfill2d(a: np.ndarray) -> np.ndarray:
+            out = a.copy()
+            for j in range(out.shape[1]):
+                col = out[:, j]
+                mask = np.isnan(col)
+                if mask.all():
+                    continue
+                # Find first valid index
+                first_valid = np.where(~mask)[0][0]
+                if first_valid > 0:
+                    out[:first_valid, j] = out[first_valid, j]
+            return out
+
+        price_ary = ffill2d(price_ary)
+        price_ary = bfill2d(price_ary) # Backfill leading NaNs
+        
+        tech_ary = ffill2d(tech_ary)
+        tech_ary = bfill2d(tech_ary) # Backfill leading NaNs
+
+        local_cache_key = feature_cache_key(dataset_hash, dict(features_cfg))
+
+        return Assembly(
+            price_ary=price_ary,
+            tech_ary=tech_ary,
+            turbulence_ary=turbulence,
+            tickers=tickers,
+            dates=dates,
+            feature_list=tech7,
+            feature_set_id=local_cache_key, # Use local_cache_key as feature_set_id
+        )
+
+    def assemble_from_df(
+        self,
+        *,
+        df: pd.DataFrame,
+        features_cfg: Mapping[str, object],
+        dataset_hash: str,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> Assembly:
+        """Build features and assemble arrays from a DataFrame."""
+        fams = dict(features_cfg.get("families", {})) if features_cfg else {}
+        overrides = list(features_cfg.get("stockstats_overrides", []) or [])
+        preferred_order = overrides or DEFAULT_TECH7
+
+        # Filter by start/end dates if provided
+        if start:
+            df = df[df["date"] >= pd.to_datetime(start)]
+        if end:
+            df = df[df["date"] <= pd.to_datetime(end)]
+
+        return self._process_and_assemble_df(
+            bars_df=df,
+            features_cfg=features_cfg,
+            preferred_order=preferred_order,
+            dataset_hash=dataset_hash,
+        )
+
     def assemble_from_snapshot(
         self,
         *,
@@ -172,28 +306,14 @@ class ProFeatureAssembler:
             if not bars:
                 raise RuntimeError(f"No bars for snapshot {snapshot_id}")
             bars_df = _bars_to_df(bars)
-            # Compute stockstats
-            bars_df = _add_stockstats(bars_df, ind_list)
-            # Advanced features
-            adv = dict(features_cfg.get("advanced", {}) or {})
-            fd_cfg = adv.get("fracdiff")
-            wl_cfg = adv.get("wavelet")
-            if fd_cfg and fd_cfg.get("enable"):
-                frac = FracDiffConfig(
-                    cols=tuple(fd_cfg.get("cols", ["close"])),
-                    d=float(fd_cfg.get("d", 0.5)),
-                    window=int(fd_cfg.get("window", 256)),
-                    min_weight=float(fd_cfg.get("min_weight", 1e-5)),
-                )
-                bars_df = build_features(bars_df, fracdiff=frac)
-            if wl_cfg and wl_cfg.get("enable"):
-                wav = WaveletConfig(
-                    cols=tuple(wl_cfg.get("cols", ["close"])),
-                    wavelet=str(wl_cfg.get("wavelet", "db4")),
-                    level=int(wl_cfg.get("level", 3)),
-                    window=int(wl_cfg.get("window", 256)),
-                )
-                bars_df = build_features(bars_df, wavelet=wav)
+
+            # Process and assemble DF using the new helper
+            assembly = self._process_and_assemble_df(
+                bars_df=bars_df,
+                features_cfg=features_cfg,
+                preferred_order=preferred_order,
+                dataset_hash=dataset_hash,
+            )
 
             # Register feature set (wide → long rows)
             from uuid import uuid4
@@ -223,6 +343,10 @@ class ProFeatureAssembler:
                             "value": float(val),
                         }
             self._db.upsert_feature_values(fs_id, gen_rows())
+        
+            # Update fs_id in the returned assembly
+            assembly.feature_set_id = fs_id
+            return assembly
 
         # Fetch features and assemble arrays
         # Determine tickers from snapshot assets and time window

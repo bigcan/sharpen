@@ -65,4 +65,11 @@ class DataLoader:
             cols = ["timestamp", "ticker", "open", "high", "low", "close", "volume", "source", "vendor_rev"]
             present = [c for c in cols if c in df.columns]
             return df[present]
+        elif dataset_hash.startswith("file://"):
+            file_path = dataset_hash[len("file://"):]
+            # Assuming CSV for now, extend as needed for other formats
+            df = pd.read_csv(file_path, parse_dates=['timestamp'])
+            # Rename 'timestamp' to 'date' and 'ticker' to 'tic' for compatibility with ProFeatureAssembler
+            df = df.rename(columns={'timestamp': 'date', 'ticker': 'tic'})
+            return df
         raise NotImplementedError(f"Unknown dataset reference: {dataset_hash}")
