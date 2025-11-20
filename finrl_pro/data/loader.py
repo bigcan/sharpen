@@ -67,9 +67,16 @@ class DataLoader:
             return df[present]
         elif dataset_hash.startswith("file://"):
             file_path = dataset_hash[len("file://"):]
-            # Assuming CSV for now, extend as needed for other formats
-            df = pd.read_csv(file_path, parse_dates=['timestamp'])
+            if file_path.endswith(".parquet"):
+                df = pd.read_parquet(file_path)
+            else:
+                # Assuming CSV for now, extend as needed for other formats
+                df = pd.read_csv(file_path, parse_dates=['timestamp'])
+            
             # Rename 'timestamp' to 'date' and 'ticker' to 'tic' for compatibility with ProFeatureAssembler
-            df = df.rename(columns={'timestamp': 'date', 'ticker': 'tic'})
+            if 'timestamp' in df.columns:
+                df = df.rename(columns={'timestamp': 'date'})
+            if 'ticker' in df.columns:
+                df = df.rename(columns={'ticker': 'tic'})
             return df
         raise NotImplementedError(f"Unknown dataset reference: {dataset_hash}")

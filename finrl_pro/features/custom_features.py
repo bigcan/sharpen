@@ -199,3 +199,90 @@ def build_features(
             out = fn(out)
     return out
 
+
+def add_log_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add Log-based HLOCV features (Stationary Returns).
+    
+    Computes:
+    - log_close: log(Close_t / Close_t-1)  (Return)
+    - log_open:  log(Open_t / Close_t-1)   (Overnight Gap)
+    - log_high:  log(High_t / Close_t-1)   (High Extent)
+    - log_low:   log(Low_t / Close_t-1)    (Low Extent)
+    - log_volume: log(Volume_t / Volume_t-1) (Volume Change)
+    """
+    out = _ensure_datetime_sorted(df)
+    
+    def per_tic(g: pd.DataFrame) -> pd.DataFrame:
+        g = g.copy()
+        # Prev Close
+        prev_close = g["close"].shift(1)
+        prev_vol = g["volume"].shift(1)
+        
+        # Avoid log(0) or log(neg)
+        epsilon = 1e-8
+        
+        g["log_close"] = np.log(g["close"] / (prev_close + epsilon))
+        g["log_open"]  = np.log(g["open"] / (prev_close + epsilon))
+        g["log_high"]  = np.log(g["high"] / (prev_close + epsilon))
+        g["log_low"]   = np.log(g["low"] / (prev_close + epsilon))
+        g["log_volume"] = np.log((g["volume"] + epsilon) / (prev_vol + epsilon))
+        
+        # Add Trend Context
+        sma_50 = g["close"].rolling(window=50).mean()
+        sma_200 = g["close"].rolling(window=200).mean()
+        
+        g["log_sma_50"] = np.log(g["close"] / (sma_50 + epsilon))
+        g["log_sma_200"] = np.log(g["close"] / (sma_200 + epsilon))
+        
+        # Fill NaNs from rolling windows
+        g = g.fillna(0.0)
+        
+        return g
+    
+    return out.groupby("tic", group_keys=False).apply(per_tic)
+
+
+def add_hybrid_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Add Hybrid features (FinRL Baseline + Volume/Volatility upgrades).
+    
+    Features:
+    - macd: Trend (Standard)
+    - rsi_14: Momentum (Faster window)
+    - vwap_ratio: vwma_14 / close (Valuation)
+    - atr_norm: atr_14 / close (Normalized Volatility)
+    - log_volume: log(volume + 1) (Traffic Scale)
+    """
+    from stockstats import StockDataFrame as Sdf
+    out = _ensure_datetime_sorted(df)
+    
+    def per_tic(g: pd.DataFrame) -> pd.DataFrame:
+        # Use StockDataFrame for efficient calculation
+        stock = Sdf.retype(g.copy())
+        
+        # 1. Calculate Base Indicators
+        # MACD (close_12_ema - close_26_ema)
+        _ = stock['macd'] 
+        
+        # RSI 14 (Faster than default 30)
+        _ = stock['rsi_14']
+        
+        # 2. VWAP Ratio (VWMA 14 / Close)
+        # Stockstats 'vwma' is volume weighted moving average
+        vwma = stock['vwma_14']
+        stock['vwap_ratio'] = vwma / stock['close']
+        
+        # 3. Normalized ATR (ATR 14 / Close)
+        atr = stock['atr_14']
+        stock['atr_norm'] = atr / stock['close']
+        
+        # 4. Log Volume
+        stock['log_volume'] = np.log(stock['volume'] + 1)
+        
+        # Select final columns
+        cols = ['macd', 'rsi_14', 'vwap_ratio', 'atr_norm', 'log_volume']
+        # Sdf modifies in place, so we just return the dataframe with these columns
+        # We keep the original columns (open/close etc) for safety, the assembler selects features.
+        return stock
+    
+    return out.groupby("tic", group_keys=False).apply(per_tic)
+

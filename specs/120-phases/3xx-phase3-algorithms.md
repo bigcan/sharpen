@@ -5,18 +5,18 @@ Owner: <YOUR_NAME>
 Last updated: 2025-11-13
 
 ## Motivation
-Quantify whether PPO, TD3, or SAC delivers the best risk-adjusted performance when paired with the Phase 2 carry-forward stack (continuous actions, log-return reward, fracdiff features at d=0.5). Results inform which agent advances toward robustness testing.
+Quantify whether PPO, TD3, or SAC delivers the best risk-adjusted performance when paired with the Phase 2 carry-forward stack (continuous actions, log-return reward, and Phase 2 winning features). Results inform which agent advances toward robustness testing.
 
 ## Requirements
 - Dataset / splits: `dvc://datasets/sp500_daily_2016_2025` with Train 2016–2021, Val 2022 (21-day embargo), Test 2023–2025.
 - Costs and execution: 1 bp fee + 1 bp slippage; next-bar open execution.
 - Actions: continuous target position in [-1,+1]; reuse RiskControlPolicy (`risk_profiles.yaml`, `default`).
 - Reward: log returns with costs applied ex-ante (`reward.type: logR`).
-- Features: enable fracdiff (d=0.5, cols=[close], window 256, cached).
+- Features: **Phase 2 Winner** (Currently evaluating Hybrid Baseline: MACD/RSI/VWAP/ATR/Vol).
 - Seeds: {41, 42, 43} per agent to capture stability; report aggregated PSR/Sharpe/MaxDD.
 
 ## Non-Goals
-- Feature engineering beyond fracdiff ladder (Phase 2 scope).
+- Feature engineering beyond Phase 2 scope.
 - HPO or automated policy search (Phase 6).
 - Multi-asset or alternative cost models (later phases).
 
