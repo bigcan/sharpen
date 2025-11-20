@@ -24,7 +24,7 @@ from finrl_pro.mlops.logger import MLOpsLogger
 from finrl_pro.mlops.risk_controls import RiskControlPolicy
 from finrl_pro.mlops.risk_profiles import load_risk_profile
 from finrl_pro.training.trainer import Trainer
-from finrl_pro.envs.wrappers import TurnoverPenaltyWrapper, ActionSmoothingWrapper
+from finrl_pro.envs.wrappers import TurnoverPenaltyWrapper, ActionSmoothingWrapper, SoftmaxAllocationWrapper
 
 # Import agents
 from finrl_pro.agents.ppo import PPOAgent
@@ -229,6 +229,12 @@ def _run_real_training(
         env = TurnoverPenaltyWrapper(env, penalty_coef=turnover_penalty)
         logger.log_event("finrl_pro.training.wrapper_applied", context={"wrapper": "TurnoverPenaltyWrapper", "coef": turnover_penalty})
 
+    # Apply Softmax Allocation Wrapper
+    module_versions = training_cfg.get("module_versions", {})
+    if module_versions.get("action.space") == "ALLOCATION_VECTOR_LONG_ONLY":
+        env = SoftmaxAllocationWrapper(env)
+        logger.log_event("finrl_pro.training.wrapper_applied", context={"wrapper": "SoftmaxAllocationWrapper"})
+
     # Apply Action Smoothing Wrapper
     action_smoothing = float(training_cfg.get("action_smoothing", 0.0))
     if action_smoothing > 0.0:
@@ -242,16 +248,37 @@ def _run_real_training(
     agent_name = training_cfg.get("agent.name", "PPOAgent") # Default to PPO
     agent_params = training_cfg.get("agent.params", {})
 
+    # Configure Action Adapter for Allocation
+    if module_versions.get("action.space") == "ALLOCATION_VECTOR_LONG_ONLY":
+        agent_params["action_adapter"] = "identity"
+        logger.log_event("finrl_pro.training.agent_configured", context={"action_adapter": "identity"})
+
     # Dynamically select agent
     current_agent = None
+    
+    # Resolve dimensions (unwrap to access custom attributes or use spaces)
+    if hasattr(env, "state_dim"):
+        s_dim = env.state_dim
+    elif hasattr(env.unwrapped, "state_dim"):
+        s_dim = env.unwrapped.state_dim
+    else:
+        s_dim = env.observation_space.shape[0]
+        
+    if hasattr(env, "action_dim"):
+        a_dim = env.action_dim
+    elif hasattr(env.unwrapped, "action_dim"):
+        a_dim = env.unwrapped.action_dim
+    else:
+        a_dim = env.action_space.shape[0]
+
     if agent_name == "PPOAgent":
-        current_agent = PPOAgent(state_dim=env.state_dim, action_dim=env.action_dim, **agent_params)
+        current_agent = PPOAgent(state_dim=s_dim, action_dim=a_dim, **agent_params)
     elif agent_name == "SACAgent":
-        current_agent = SACAgent(state_dim=env.state_dim, action_dim=env.action_dim, **agent_params)
+        current_agent = SACAgent(state_dim=s_dim, action_dim=a_dim, **agent_params)
     elif agent_name == "TD3Agent":
-        current_agent = TD3Agent(state_dim=env.state_dim, action_dim=env.action_dim, **agent_params)
+        current_agent = TD3Agent(state_dim=s_dim, action_dim=a_dim, **agent_params)
     elif agent_name == "DDPGAgent":
-        current_agent = DDPGAgent(state_dim=env.state_dim, action_dim=env.action_dim, **agent_params)
+        current_agent = DDPGAgent(state_dim=s_dim, action_dim=a_dim, **agent_params)
     else:
         raise ValueError(f"Unknown agent: {agent_name}")
     logger.log_event("finrl_pro.training.agent_instantiated", context={"agent_name": agent_name})
@@ -275,6 +302,18 @@ def _run_real_training(
     # Buffer to simulate execution delay (gap)
     action_buffer = []
     
+    # Metrics collection
+    positions_history = []
+    turnover_history = []
+    costs_history = []
+    asset_values = [] # Track portfolio value
+    
+    # Initial asset value
+    if hasattr(env, "unwrapped"):
+        asset_values.append(env.unwrapped.total_asset)
+    else:
+        asset_values.append(1e6) # Fallback
+
     for t in range(total_timesteps):
         
         # Apply Input Noise Stress Test
@@ -282,8 +321,13 @@ def _run_real_training(
             noise = np.random.normal(0, input_noise_std, size=obs.shape)
             obs = obs + noise
 
-        action, log_prob = current_agent.select_action(obs)
-        
+        action_output = current_agent.select_action(obs)
+        if isinstance(action_output, tuple):
+            action, log_prob = action_output
+        else:
+            action = action_output
+            log_prob = 0.0 # Dummy for Off-Policy agents
+
         # Apply Execution Gap Stress Test
         if exec_gap_enabled:
             action_buffer.append(action)
@@ -299,31 +343,78 @@ def _run_real_training(
         next_obs, reward, terminated, truncated, info = env.step(executed_action)
         
         rewards_history.append(reward) # Collect rewards
+        
+        # Collect metrics
+        # Try to get from info or env
+        if hasattr(env, "unwrapped"):
+             positions_history.append(str(env.unwrapped.stocks))
+             asset_values.append(env.unwrapped.total_asset)
+        else:
+             positions_history.append("N/A")
+             # Estimate asset value from reward if unwrapped not available (imprecise)
+             # prev = asset_values[-1]
+             # asset_values.append(prev + reward / 2**-13) # Assuming default scaling
+             asset_values.append(asset_values[-1]) # Fallback
+             
+        turnover_history.append(info.get("turnover_penalty", 0.0)) # Proxy if real turnover not available
+        costs_history.append(0.0) # Placeholder as Env doesn't expose cost explicitly in info yet
 
-        # Store transition (using the *intended* action for training, or executed? 
-        # Standard RL assumes transition (s, a, r, s') where 'a' caused 'r'.
+        # Store transition (using the *intended* action for training, or executed?)
+        # Standard RL assumes transition (s, a, r, s') where 'a' caused 'r'.  
         # If there's a gap, the reward is response to the delayed action.
         # For robustness *testing*, we usually freeze weights (no training), just evaluation.
         # But if training, we store what actually happened.
         
-        current_agent.store_transition(obs, executed_action, reward, terminated, log_prob)
+        current_agent.store_transition(obs, executed_action, reward, terminated, next_state=next_obs, log_prob=log_prob)
+        
+        # Off-Policy Update (SAC/TD3/DDPG)
+        is_off_policy = agent_name in ["SACAgent", "TD3Agent", "DDPGAgent"]
+        
+        if is_off_policy:
+            metrics_from_update = current_agent.update()
+            # Log sparingly or aggregate? For now relying on agent internal checks
         
         obs = next_obs
         
         if terminated or truncated:
-            # Update agent after episode
-            metrics_from_update = current_agent.update() # Returns dict of losses
-            logger.log_event("finrl_pro.training.agent_updated", context=metrics_from_update)
-            current_agent.reset_buffer() # Clear buffer for next episode
+            if not is_off_policy:
+                # Update agent after episode (On-Policy PPO)
+                metrics_from_update = current_agent.update() # Returns dict of losses
+                logger.log_event("finrl_pro.training.agent_updated", context=metrics_from_update)
+                current_agent.reset_buffer() # Clear buffer for next episode
+            elif 'metrics_from_update' in locals() and metrics_from_update:
+                 # Log last metrics for off-policy
+                 logger.log_event("finrl_pro.training.agent_updated", context=metrics_from_update)
 
             obs, info = env.reset()
             action_buffer = [] # Reset gap buffer
+            if hasattr(env, "unwrapped"):
+                 asset_values.append(env.unwrapped.total_asset) # New episode start
 
+    # Calculate Returns from Asset Values
+    # returns[t] = (asset[t+1] - asset[t]) / asset[t]
+    # We captured asset_values at t=0 and after each step.
+    # asset_values has length T+1 (or more if resets happened)
+    # We need to align with rewards_history which has length T.
+    # We'll compute simple returns for the contiguous segments.
+    
+    calculated_returns = []
+    # This simple diff ignores reset jumps, assuming single episode or we handle it.
+    # For simplicity in this MVP, we just diff the list.
+    for i in range(1, len(asset_values)):
+        if i > len(rewards_history): break
+        prev = asset_values[i-1]
+        curr = asset_values[i]
+        if prev > 0:
+            ret = (curr - prev) / prev
+        else:
+            ret = 0.0
+        calculated_returns.append(ret)
 
     # 6. Collect and Compute Metrics
-    if rewards_history:
+    if calculated_returns:
         # Assuming rewards_history are daily returns
-        equity, drawdowns, sharpe, vol_realized, max_dd = _compute_equity_and_metrics(rewards_history)
+        equity, drawdowns, sharpe, vol_realized, max_dd = _compute_equity_and_metrics(calculated_returns)
         final_metrics = {
             "sharpe_ratio": float(sharpe),
             "max_drawdown": float(max_dd),
@@ -334,13 +425,13 @@ def _run_real_training(
         final_metrics = {"sharpe_ratio": 0.0, "max_drawdown": 0.0, "volatility": 0.0} # Fallback
 
     return SimulatedRunArtifacts(
-        returns=rewards_history,
-        equity=equity if rewards_history else [],
-        drawdowns=drawdowns if rewards_history else [],
-        positions=[], # Not collected in this basic loop
-        trades=[], # Not collected in this basic loop
-        turnover=[], # Not collected in this basic loop
-        transaction_costs=[], # Not collected in this basic loop
+        returns=calculated_returns,
+        equity=equity if calculated_returns else [],
+        drawdowns=drawdowns if calculated_returns else [],
+        positions=positions_history, 
+        trades=[0.0] * len(positions_history), # Placeholder
+        turnover=turnover_history, 
+        transaction_costs=costs_history, 
         metrics=final_metrics,
     )
 

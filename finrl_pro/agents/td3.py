@@ -122,10 +122,14 @@ class TD3Agent:
         self,
         state: np.ndarray,
         action: np.ndarray,
-        next_state: np.ndarray,
         reward: float,
         done: bool,
+        next_state: Optional[np.ndarray] = None,
+        log_prob: Optional[float] = None,
+        **kwargs,
     ) -> None:
+        if next_state is None:
+            raise ValueError("TD3 requires next_state in store_transition")
         self.replay_buffer.add(state, action, next_state, reward, done)
 
     def update(self) -> Dict[str, float]:

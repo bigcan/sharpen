@@ -22,8 +22,10 @@ class ActorCritic(nn.Module):
         action_dim: int,
         hidden_dim: int = 256,
         activation: nn.Module = nn.Tanh(),
+        action_adapter: str = "tanh",
     ) -> None:
         super().__init__()
+        self.action_adapter = action_adapter
         
         # Shared features (optional, but common) or separate networks
         # Here we use separate networks for simplicity and stability
@@ -61,15 +63,11 @@ class ActorCritic(nn.Module):
         log_prob = dist.log_prob(action).sum(dim=-1)
         entropy = dist.entropy().sum(dim=-1)
         
-        # Tanh squash for action bounds [-1, 1]
-        # Note: Standard PPO often runs on unbounded Gaussian and clips later, 
-        # but for finance [-1, 1] is convenient. 
-        # However, squashing changes the distribution density. 
-        # For simplicity in this baseline, we'll clip the output action manually 
-        # or use the raw Gaussian if the env handles it.
-        # ProStockEnv expects [-1, 1].
+        # Adapter
+        if self.action_adapter == "tanh":
+            return torch.tanh(action), log_prob, entropy
         
-        return torch.tanh(action), log_prob, entropy
+        return action, log_prob, entropy
 
     def get_value(self, state: torch.Tensor) -> torch.Tensor:
         """Return value estimate for a given state."""
@@ -111,6 +109,7 @@ class PPOAgent:
         entropy_coef: float = 0.01,
         value_coef: float = 0.5,
         device: str = "cpu",
+        action_adapter: str = "tanh",
     ) -> None:
         self.state_dim = state_dim
         self.action_dim = action_dim
@@ -124,11 +123,12 @@ class PPOAgent:
         self.value_coef = value_coef
         self.device = torch.device(device)
 
-        self.policy = ActorCritic(state_dim, action_dim).to(self.device)
+        self.policy = ActorCritic(state_dim, action_dim, action_adapter=action_adapter).to(self.device)
         self.optimizer = optim.Adam(self.policy.parameters(), lr=lr)
         
         # Buffer for one epoch
         self.reset_buffer()
+
 
     def reset_buffer(self) -> None:
         self.buffer: Dict[str, list] = {
@@ -146,7 +146,11 @@ class PPOAgent:
             state_t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             if deterministic:
                 features = self.policy.actor(state_t)
-                action_t = torch.tanh(self.policy.actor_mean(features))
+                mean = self.policy.actor_mean(features)
+                if self.policy.action_adapter == "tanh":
+                    action_t = torch.tanh(mean)
+                else:
+                    action_t = mean
                 log_prob = 0.0
             else:
                 action_t, log_prob_t, _ = self.policy.act(state_t)
@@ -160,16 +164,17 @@ class PPOAgent:
         action: np.ndarray,
         reward: float,
         done: bool,
-        log_prob: float,
-        value: float = 0.0, # Optional if computed later
+        next_state: Optional[np.ndarray] = None,
+        log_prob: Optional[float] = None,
+        **kwargs,
     ) -> None:
         """Store transition in buffer."""
         self.buffer["states"].append(state)
         self.buffer["actions"].append(action)
         self.buffer["rewards"].append(reward)
         self.buffer["dones"].append(done)
-        self.buffer["log_probs"].append(log_prob)
-        self.buffer["values"].append(value)
+        self.buffer["log_probs"].append(log_prob if log_prob is not None else 0.0)
+        self.buffer["values"].append(0.0) # Value computed/not stored here
 
     def update(self) -> Dict[str, float]:
         """Update policy using stored transitions."""

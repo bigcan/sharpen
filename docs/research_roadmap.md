@@ -119,42 +119,120 @@ Status (2025-11-13)
 Specs
 - 120-phases/1xx-phase1-actions.md
 
-### Phase 2 ??Feature Engineering
+### Phase 2 — Feature Engineering (Revamp: Feature Factory)
 Owner: Research Lead
-Promotion Gate 2.0: Best feature variant improves PSR >= 0.15 vs. baseline with max drawdown within 1.1x of baseline and no risk alerts.
+Promotion Gate 2.0: Feature Factory pipeline implemented; > 20 features selected by mRMR; stationarity verified.
 
-Goal
-- Evaluate PIT-safe feature ladders (fracdiff, momentum/vol, wavelets) under the Phase 1 carry-forward configuration with artifact-backed evaluations.
+#### Goal
+Transform raw time-series (HLOCV) into a high-dimensional, information-dense feature set for AutoML and Reinforcement Learning using a modular "Feature Factory" architecture.
 
-Checklist
-- [x] Author fracdiff configs for d ∈ {0.4, 0.5, 0.6} with seeds {41, 42, 43}.
-- [x] Produce real training artifacts (`returns.csv`) for each fingerprint; evaluator now fails fast if missing.
-- [x] Run PIT validator + cache hash checks for every enabled ladder.
-- [x] Summarize Gate 2.0 metrics and carry-forward selection in final report/roadmap.
+#### Master Feature Engineering Plan
+**Objective:** Transform raw marketing time-series (HLOCV) into a high-dimensional, information-dense feature set for AutoML and Reinforcement Learning (FinRL-Podracer).
+**Input:** DataFrame with columns `[timestamp, open, high, low, close, volume]`.
+**Output:** Vectorized DataFrame (T x F) where F > 100, cleaned and ready for training.
 
-Acceptance Criteria
-- Best feature variant improves PSR by >= 0.15 with max drawdown within 1.1x of baseline.
+##### 1. Data Mapping & Standardization
+Ensure input data is mapped correctly before processing.
+- **Open/Close:** CPC (Cost Per Click), CPM, or CPA.
+- **High/Low:** Max/Min costs within the time bucket.
+- **Volume:** Impressions or Spend.
 
-Status (2025-11-13)
-- Matrix outputs for fracdiff d∈{0.4,0.5,0.6} (seeds 41/42/43) live under `reports/matrix_phase2/`, but none achieved the +0.15 PSR uplift (best mean PSR 0.33 for d=0.4 vs. Phase 1 carry-forward PSR 0.38) and Sharpe remains negative on average.
-- PIT validator (`finrl_pro.eval.pit_validator`) passed for all ladders using cached feature snapshots in `finrl_pro/data/processed/<cache_key>/`; see `reports/pit_checks/phase2_summary.json`.
+```python
+# Standard Naming Convention for the Pipeline
+MAPPING = {
+    'CPA': 'close', 
+    'Max_CPA': 'high', 
+    'Min_CPA': 'low', 
+    'Start_CPA': 'open', 
+    'Impressions': 'volume'
+}
+```
 
-**Gate Override / Lessons Learned:**
-- **Decision:** Close Gate 2.0 via Override and proceed to Phase 3.
-- **Rationale:** Feature engineering alone (fracdiff) did not unlock performance with the baseline PPO agent. Similar to Phase 1, we suspect the limitation lies in the interaction between the agent algorithm and the features. Holding the gate open indefinitely for feature engineering without exploring algorithm suitability (SAC/TD3/Tuned PPO) is blocking progress.
-- **Adjustment:** Proceed to Phase 3 using the most robust feature set found (FracDiff d=0.5) to test if a more capable agent can leverage these stationary features better than the baseline.
-- **Deferred Items:** Momentum, volatility, and wavelet features (originally planned for Phase 2) are deferred. They will be revisited in a potential "Phase 2.5" or Phase 4 only after the `fracdiff` baseline is validated with a stronger agent.
+##### 2. The Feature Factory Architecture
+Create a class `MarketingFeatureFactory` implementing 5 Modules (A-E) corresponding to 9 Phases.
 
-**Revamp Status (2025-11-20):**
-- **Trigger:** Phase 4 robustness failure (DSR=0%) of the Phase 3 winner necessitated a revisit of Phase 2.
-- **Action:** Executed "5-Mode Automated Search" (Raw, FracDiff, Wavelet, Regime, Combo).
-- **Outcome:** Tested Log, Trend, and Hybrid baselines.
-    - **Log/Hybrid:** FAILED (Crashes).
-    - **Trend:** STABLE (Sharpe ~0.0, No Crash).
-- **Decision:** Carrying forward **Trend Baseline** (Log HLOCV + SMA Distance) to Phase 3.
-    - **Rationale:** It is the only feature set that enables the agent to survive. We rely on Phase 3 (Algorithm Selection) to unlock alpha from this stable foundation.
+**Module A: High-Fidelity Volatility & Shape (Phases 1 & 5)**
+*Goal: Quantify risk, bid uncertainty, and candle geometry.*
+- Rogers-Satchell Volatility
+- Yang-Zhang Volatility
+- ATR Normalized
+- Bollinger Width
+- Shadow Ratios
+- Body-to-Range
+- Gap Size
 
-Specs
+**Module B: Trend, Momentum & Regimes (Phases 6 & 10)**
+*Goal: Detect direction and structural breaks.*
+- RSI & MFI (Volume weighted)
+- ADX (Trend Strength)
+- Ichimoku Distances
+- Parabolic SAR
+- CUSUM Excursion
+- Linear Slope
+
+**Module C: Auction Dynamics & Volume Flow (Phases 4 & 9)**
+*Goal: Measure intent, bid density, and market efficiency.*
+- VWAP Ratio
+- Kaufman Efficiency (KER)
+- Price-Vol Correlation
+- Spread Proxy
+- Force Index
+- Ease of Movement
+
+**Module D: Signal Processing & Physics (Phases 2, 3, & 8)**
+*Goal: Denoising, Stationarity, and Bot Detection.*
+- FracDiff (d=0.4)
+- Hurst Exponent
+- Lempel-Ziv Complexity
+- Approx Entropy
+- FFT Coefficients
+- Wavelet Energy
+
+**Module E: Cyclical Time Encoding (Phase 7)**
+*Goal: Map linear time to circular time for Neural Networks.*
+```python
+df['sin_hour'] = np.sin(2 * np.pi * df.index.hour / 24)
+df['cos_hour'] = np.cos(2 * np.pi * df.index.hour / 24)
+df['sin_day'] = np.sin(2 * np.pi * df.index.dayofweek / 7)
+```
+
+##### 3. Execution Strategy: Window Stacking
+Calculate features over multiple time horizons to capture Fractal Market Hypothesis dynamics.
+- **Windows:** `[3, 7, 14, 30, 90]` (Instant, Daily, Weekly, Monthly, Quarterly).
+- **Naming:** `FeatureName_WindowSize` (e.g., `RSI_14`).
+
+##### 4. Integration with FinRL-Podracer
+- **Cleanliness:** Forward Fill -> Backward Fill -> Replace inf/0.
+- **Stationarity:** Convert "Price" columns to Log Returns or FracDiffs.
+- **Feature Selection:** Apply mRMR to reduce ~200 features to top 20-30.
+
+##### 5. Implementation Stack
+- `numpy`, `pandas`
+- `talib` (Technical Indicators)
+- `stockstats` (FinRL compatibility)
+- `finta` (Advanced Volatility)
+- `antropy` (Complexity/Entropy)
+- `scipy.signal` (FFT)
+- `statsmodels` (ADF/Cointegration)
+
+#### Checklist
+- [ ] Implement `MarketingFeatureFactory` class with Modules A-E.
+- [ ] Verify data mapping for Marketing HLOCV (CPA, Impressions, etc.).
+- [ ] Implement Window Stacking loop `[3, 7, 14, 30, 90]`.
+- [ ] Integrate mRMR feature selection.
+- [ ] Validate stationarity (ADF test) on generated features.
+- [ ] **Experiment:** Compare FinRL Default (stockstats) vs. Hybrid Setup (Feature Factory).
+    - [ ] Run baseline PPO with standard FinRL features (MACD, RSI, CCI, ADX).
+    - [ ] Run PPO with Hybrid/Feature Factory setup.
+    - [ ] Compare Sharpe, Stability, and Training Time.
+
+#### Historical Status (2025-11-13)
+- **Gate 2.0 (Original) FAILED:** FracDiff d=0.4/0.5/0.6 did not yield PSR uplift.
+- **Override:** Proceeded to Phase 3 to test algorithm sensitivity.
+- **Revamp (2025-11-20):** Triggered by Phase 4 failure. New "Feature Factory" plan adopted.
+- **Current Status:** Running side-by-side experiments: **FinRL Default vs. Hybrid Setup** to establish a clear performance baseline before full Feature Factory rollout.
+
+#### Specs
 - 120-phases/2xx-phase2-features.md
 
 ### Phase 3 — Algorithm Exploration
@@ -173,9 +251,13 @@ Acceptance Criteria
 - Select algorithm with highest PSR and acceptable turnover/max drawdown; document trade-offs.
 
 Status (2025-11-20)
-- **INVALIDATED Previous Result:** The previous success (Sharpe 0.88) was based on the "FracDiff" feature set, which Phase 2.5 revealed to be non-stationary/broken and likely simulated.
-- **Reset:** Phase 3 is blocked until Phase 2 (Hybrid Baseline) validation is complete and successful.
-- **Plan:** Once Hybrid features are validated, re-execute Phase 3 matrix.
+- **Phase 3 Revamp COMPLETE:** Executed 11-run hyperparameter sweep (PPO, SAC, TD3) using the validated Phase 2 Hybrid features.
+- **Findings:**
+    - **Low Entropy/Alpha** (PPO Ent 0.005, SAC Fix 0.20, TD3 Noise 0.25): Led to aggressive trading and catastrophic blowups (MaxDD > 58%).
+    - **High Entropy/Alpha** (PPO Ent 0.02, SAC Fix 0.05): Led to passivity/inactivity (Sharpe ~0).
+    - **Balanced:** PPO with Clip Ratio 0.30 achieved the best stability (Sharpe 0.018, MaxDD 28%) beating the baseline (MaxDD 37%).
+- **Decision:** Selected **PPO Clip 0.30** as the Phase 3 Winner.
+- **Next Step:** Proceed to Phase 4 (Robustness) to stress-test this configuration.
 
 Specs
 - 120-phases/3xx-phase3-algorithms.md
