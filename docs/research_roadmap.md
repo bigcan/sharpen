@@ -148,11 +148,11 @@ Status (2025-11-13)
 **Revamp Status (2025-11-20):**
 - **Trigger:** Phase 4 robustness failure (DSR=0%) of the Phase 3 winner necessitated a revisit of Phase 2.
 - **Action:** Executed "5-Mode Automated Search" (Raw, FracDiff, Wavelet, Regime, Combo).
-- **Outcome:** 'Combo' Mode (Wavelet Denoising + Volatility features) emerged as the clear winner with Sharpe ~0.63 in initial search (pending confirmation).
-- **Decision:** Validated 'Combo' mode with full seed sweeps (41, 42, 43) using **Real Training**. **Result: FAILED**.
-    - Seed 41 breached risk limits (-49% DD).
-    - Seeds 42/43 produced flat returns (Sharpe ~0.0).
-    - **Conclusion:** Single-asset feature engineering is tapping out. Proceeding to **Phase 5 (Multi-Asset)** to leverage cross-sectional signal and diversification.
+- **Outcome:** Tested Log, Trend, and Hybrid baselines.
+    - **Log/Hybrid:** FAILED (Crashes).
+    - **Trend:** STABLE (Sharpe ~0.0, No Crash).
+- **Decision:** Carrying forward **Trend Baseline** (Log HLOCV + SMA Distance) to Phase 3.
+    - **Rationale:** It is the only feature set that enables the agent to survive. We rely on Phase 3 (Algorithm Selection) to unlock alpha from this stable foundation.
 
 Specs
 - 120-phases/2xx-phase2-features.md
