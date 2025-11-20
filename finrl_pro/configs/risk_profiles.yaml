@@ -46,3 +46,25 @@ profiles:
     fallback_agent: null
     max_avg_turnover: 0.35
     max_transaction_costs_bps: 400
+
+  - profile_id: phase2_research
+    name: Phase 2 Research
+    max_capital_at_risk: 0.50
+    max_drawdown_pct: 0.60
+    leverage_cap: 3.0
+    sandbox_required: false
+    approved_by: Research Lead
+    effective_date: 2025-11-20
+    max_avg_turnover: 1.0
+    max_transaction_costs_bps: 5000
+
+  - profile_id: phase5_test
+    name: Phase 5 Stress Test
+    max_capital_at_risk: 1.0
+    max_drawdown_pct: 0.90
+    leverage_cap: 5.0
+    sandbox_required: false
+    approved_by: Research Lead
+    effective_date: 2025-11-19
+    max_avg_turnover: 100.0
+    max_transaction_costs_bps: 50000

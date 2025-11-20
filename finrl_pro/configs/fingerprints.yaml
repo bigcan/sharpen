@@ -15235,3 +15235,105 @@ fingerprints:
   module_versions:
     finrl_pro.training.trainer: FinRL-Pro-Research-1
   seed: 41
+- artifact_uris:
+  - reports/721753b5-6b73-4da5-9865-9cc28a6d5786/returns.csv
+  - reports/721753b5-6b73-4da5-9865-9cc28a6d5786/equity_curve.csv
+  - reports/721753b5-6b73-4da5-9865-9cc28a6d5786/drawdown.csv
+  - reports/721753b5-6b73-4da5-9865-9cc28a6d5786/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: file://data/sp500_daily_2016_2025.parquet
+  fingerprint_id: 721753b5-6b73-4da5-9865-9cc28a6d5786
+  metrics_snapshot:
+    max_drawdown: 0.586342582933383
+    sharpe_ratio: 0.13770460261536477
+    volatility: 0.21064482613926036
+  mlflow_run_id: 2bcf8eb3728841788400d2b611fff662
+  module_versions:
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 41
+- artifact_uris:
+  - reports/af9a6c3b-2062-4086-82f3-93034a6d39b8/returns.csv
+  - reports/af9a6c3b-2062-4086-82f3-93034a6d39b8/equity_curve.csv
+  - reports/af9a6c3b-2062-4086-82f3-93034a6d39b8/drawdown.csv
+  - reports/af9a6c3b-2062-4086-82f3-93034a6d39b8/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: file://data/sp500_daily_2016_2025.parquet
+  fingerprint_id: af9a6c3b-2062-4086-82f3-93034a6d39b8
+  metrics_snapshot:
+    max_drawdown: 0.11082013887435582
+    sharpe_ratio: 0.00573182487801007
+    volatility: 0.011119066213235322
+  mlflow_run_id: 27c3ce05709345a8b850732e2f2263a3
+  module_versions:
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris:
+  - reports/40ae4965-ee7c-4326-bbdf-443ca6ba5dbd/returns.csv
+  - reports/40ae4965-ee7c-4326-bbdf-443ca6ba5dbd/equity_curve.csv
+  - reports/40ae4965-ee7c-4326-bbdf-443ca6ba5dbd/drawdown.csv
+  - reports/40ae4965-ee7c-4326-bbdf-443ca6ba5dbd/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: file://data/sp500_daily_2016_2025.parquet
+  fingerprint_id: 40ae4965-ee7c-4326-bbdf-443ca6ba5dbd
+  metrics_snapshot:
+    max_drawdown: 0.5801556770791549
+    sharpe_ratio: 0.03673679384633524
+    volatility: 0.0707879023455877
+  mlflow_run_id: 86c9bf8c95e040ec808f6819fb36f9bc
+  module_versions:
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 43
+- artifact_uris:
+  - reports/c2404d42-df5c-4b70-b36e-b9c85d88a34a/returns.csv
+  - reports/c2404d42-df5c-4b70-b36e-b9c85d88a34a/equity_curve.csv
+  - reports/c2404d42-df5c-4b70-b36e-b9c85d88a34a/drawdown.csv
+  - reports/c2404d42-df5c-4b70-b36e-b9c85d88a34a/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: file://data/sp500_daily_2016_2025.parquet
+  fingerprint_id: c2404d42-df5c-4b70-b36e-b9c85d88a34a
+  metrics_snapshot:
+    max_drawdown: 0.24014150291006964
+    sharpe_ratio: 0.010005137592509747
+    volatility: 0.019791952296645834
+  mlflow_run_id: 079413e8af2c41d98ed00ca45b23da1a
+  module_versions:
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 41
+- artifact_uris:
+  - reports/df063653-6991-4f82-83df-10902ec1dbc3/returns.csv
+  - reports/df063653-6991-4f82-83df-10902ec1dbc3/equity_curve.csv
+  - reports/df063653-6991-4f82-83df-10902ec1dbc3/drawdown.csv
+  - reports/df063653-6991-4f82-83df-10902ec1dbc3/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: file://data/sp500_daily_2016_2025.parquet
+  fingerprint_id: df063653-6991-4f82-83df-10902ec1dbc3
+  metrics_snapshot:
+    max_drawdown: 0.41818635357271294
+    sharpe_ratio: 0.01612584263436852
+    volatility: 0.030533008024617492
+  mlflow_run_id: b255b21e6d7047a9a23f90f2d47d9ed4
+  module_versions:
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 42
+- artifact_uris:
+  - reports/71ac7f89-39c0-4033-80e9-47fa5fe74f77/returns.csv
+  - reports/71ac7f89-39c0-4033-80e9-47fa5fe74f77/equity_curve.csv
+  - reports/71ac7f89-39c0-4033-80e9-47fa5fe74f77/drawdown.csv
+  - reports/71ac7f89-39c0-4033-80e9-47fa5fe74f77/execution.csv
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: file://data/sp500_daily_2016_2025.parquet
+  fingerprint_id: 71ac7f89-39c0-4033-80e9-47fa5fe74f77
+  metrics_snapshot:
+    max_drawdown: 0.32274697318914014
+    sharpe_ratio: 0.0125485423312837
+    volatility: 0.024183210317717935
+  mlflow_run_id: ed1f836a378c4801abce79eafe2426eb
+  module_versions:
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  seed: 43

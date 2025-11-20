@@ -1,0 +1,30 @@
+experiment_id: phase2_hybrid_baseline_seed_43
+features:
+  advanced: {}
+  cache:
+    dir: finrl_pro/data/processed
+    enabled: true
+  families: {}
+  hybrid_baseline: true
+  use_turbulence: false
+fingerprint_manifest: finrl_pro/configs/fingerprints.yaml
+risk_profile_file: finrl_pro/configs/risk_profiles.yaml
+risk_profile_id: phase2_research
+sandbox_enabled: true
+training:
+  artifact_uris: []
+  baseline_reference: benchmarks:sp500_rolling_1y
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: file://data/sp500_daily_2016_2025.parquet
+  metrics:
+    capital_at_risk: 0.08
+    leverage: 1.2
+    max_drawdown: 0.15
+    sharpe_ratio: 1.1
+    volatility: 0.25
+  module_versions:
+    finrl_pro.training.trainer: FinRL-Pro-Research-1
+  real_training: true
+  seed: 43
+  total_timesteps: 50000
+  use_pro_env: false
