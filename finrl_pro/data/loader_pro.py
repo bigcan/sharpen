@@ -150,10 +150,24 @@ class ProFeatureAssembler:
         dataset_hash: str,
     ) -> Assembly:
         """Helper to process a DataFrame and assemble the final arrays."""
-        ind_list = resolve_indicator_list(
-            families=dict(features_cfg.get("families", {})),
-            overrides=list(features_cfg.get("stockstats_overrides", []) or [])
-        ) or list(DEFAULT_TECH7)
+        
+        # Check for Log Baseline Mode
+        if bool(features_cfg.get("log_baseline", False)):
+            from finrl_pro.features.custom_features import add_log_features
+            bars_df = add_log_features(bars_df)
+            # Override indicators to use only log features
+            ind_list = []
+            preferred_order = ["log_close", "log_open", "log_high", "log_low", "log_volume", "log_sma_50", "log_sma_200"]
+        elif bool(features_cfg.get("hybrid_baseline", False)):
+            from finrl_pro.features.custom_features import add_hybrid_features
+            bars_df = add_hybrid_features(bars_df)
+            ind_list = []
+            preferred_order = ["macd", "rsi_14", "vwap_ratio", "atr_norm", "log_volume"]
+        else:
+            ind_list = resolve_indicator_list(
+                families=dict(features_cfg.get("families", {})),
+                overrides=list(features_cfg.get("stockstats_overrides", []) or [])
+            ) or list(DEFAULT_TECH7)
 
         bars_df = _add_stockstats(bars_df, ind_list)
 

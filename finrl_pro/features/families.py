@@ -14,7 +14,7 @@ from typing import Dict, List, Mapping, Sequence
 FAMILY_MAP: Dict[str, List[str]] = {
     "trend": ["close_30_sma", "close_60_sma", "macd"],
     "momentum": ["rsi_30"],
-    "vol": ["dx_30", "boll_ub", "boll_lb"],
+    "vol": ["dx_30", "rsi_30", "cci_30", "mfi_30"],
     "volume": [],
 }
 
