@@ -545,7 +545,8 @@ def main(argv: Iterable[str] | None = None) -> None:
                 mlflow.log_artifact("temp_model.pth", artifact_path="model")
                 # Clean up temp file
                 try:
-                    Path("temp_model.pth").unlink()
+                    # Path("temp_model.pth").unlink()
+                    pass
                 except:
                     pass
         else:

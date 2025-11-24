@@ -9,10 +9,16 @@ the value at time t uses only information available at or before t-1.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Optional
 
 import numpy as np
 import pandas as pd
+
+try:
+    from finrl_pro.data.regimes import HMMRegimeDetector, MarketRegime
+except ImportError:
+    # Fallback or delay import to avoid circular deps if any (though unlikely here)
+    pass
 
 
 @dataclass(frozen=True)
@@ -35,6 +41,15 @@ class WaveletConfig:
     compute_energy: bool = True
     denoise: bool = False
     thresh_method: str = "universal"
+
+
+@dataclass(frozen=True)
+class RegimeConfig:
+    method: str = "hmm" # "hmm" or "fixed"
+    benchmark_tic: str = "SPY"
+    source: str = "close" # column to compute returns from
+    window: int = 252
+    n_components: int = 3
 
 
 def _ensure_datetime_sorted(df: pd.DataFrame) -> pd.DataFrame:
@@ -64,6 +79,60 @@ def _fracdiff_weights(d: float, window: int, min_weight: float) -> np.ndarray:
         return np.array([1.0], dtype=float)
     used = w_np[: idx[-1] + 1]
     return used[::-1]  # reverse to oldest->newest
+
+
+def add_market_regime_features(df: pd.DataFrame, cfg: RegimeConfig | None = None) -> pd.DataFrame:
+    """Add Market Regime features.
+    
+    Calculates regime (Bull/Bear/etc) based on a benchmark ticker (e.g. SPY)
+    and broadcasts it to all tickers in the dataframe.
+    
+    Ensures PIT safety by using rolling window estimation if specified.
+    """
+    cfg = cfg or RegimeConfig()
+    out = _ensure_datetime_sorted(df)
+    
+    # 1. Extract Benchmark Data
+    bench_df = out[out['tic'] == cfg.benchmark_tic].copy()
+    if bench_df.empty:
+        # If benchmark not in df, we can't compute regime. 
+        # Should we fail or fill 0? Let's warn and fill 0 (Bear/Unknown)
+        # But for now, raise error to ensure user provides SPY
+        print(f"Warning: Benchmark ticker {cfg.benchmark_tic} not found for regime detection.")
+        # return out with nan regime?
+        out["market_regime"] = 0
+        return out
+        
+    # 2. Compute Returns
+    bench_df = bench_df.sort_values("date")
+    returns = bench_df[cfg.source].pct_change().fillna(0)
+    
+    # 3. Detect Regime
+    if cfg.method == "hmm":
+        detector = HMMRegimeDetector(n_components=cfg.n_components)
+        # Use rolling fit for PIT safety
+        regime_series = detector.rolling_fit_predict(returns, window=cfg.window)
+        
+        # Fill NaNs (initial window) with SIDEWAYS (3) or most common?
+        # Let's fill with SIDEWAYS (3) as neutral assumption
+        regime_series = regime_series.fillna(MarketRegime.SIDEWAYS).astype(int)
+        
+    else:
+        raise NotImplementedError(f"Regime method {cfg.method} not implemented.")
+        
+    # 4. Broadcast to all tickers
+    # Create a mapping date -> regime
+    regime_map = pd.DataFrame({
+        "date": bench_df["date"], 
+        "market_regime": regime_series.values
+    })
+    
+    out = out.merge(regime_map, on="date", how="left")
+    
+    # Fill missing regimes (e.g. dates where SPY missing) with previous or default
+    out["market_regime"] = out["market_regime"].ffill().fillna(MarketRegime.SIDEWAYS)
+    
+    return out
 
 
 def add_fracdiff_features(df: pd.DataFrame, cfg: FracDiffConfig | None = None) -> pd.DataFrame:
@@ -182,6 +251,7 @@ def build_features(
     *,
     fracdiff: FracDiffConfig | None = None,
     wavelet: WaveletConfig | None = None,
+    regime: RegimeConfig | None = None,
     extra_transforms: Iterable[callable] | None = None,
 ) -> pd.DataFrame:
     """Compose advanced PIT-safe features over an input dataframe.
@@ -194,6 +264,8 @@ def build_features(
         out = add_fracdiff_features(out, fracdiff)
     if wavelet is not None:
         out = add_wavelet_features(out, wavelet)
+    if regime is not None:
+        out = add_market_regime_features(out, regime)
     if extra_transforms:
         for fn in extra_transforms:
             out = fn(out)

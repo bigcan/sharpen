@@ -25,6 +25,7 @@ from finrl_pro.features.custom_features import (
     build_features,
     FracDiffConfig,
     WaveletConfig,
+    RegimeConfig,
 )
 
 
@@ -177,6 +178,12 @@ class ProFeatureAssembler:
         adv = dict(features_cfg.get("advanced", {}) or {})
         fd_cfg = adv.get("fracdiff")
         wl_cfg = adv.get("wavelet")
+        reg_dict = adv.get("regime") or features_cfg.get("regime")
+        
+        frac = None
+        wav = None
+        reg = None
+
         if fd_cfg and fd_cfg.get("enable"):
             frac = FracDiffConfig(
                 cols=tuple(fd_cfg.get("cols", ["close"])),
@@ -184,7 +191,6 @@ class ProFeatureAssembler:
                 window=int(fd_cfg.get("window", 256)),
                 min_weight=float(fd_cfg.get("min_weight", 1e-5)),
             )
-            bars_df = build_features(bars_df, fracdiff=frac)
         if wl_cfg and wl_cfg.get("enable"):
             wav = WaveletConfig(
                 cols=tuple(wl_cfg.get("cols", ["close"])),
@@ -192,7 +198,17 @@ class ProFeatureAssembler:
                 level=int(wl_cfg.get("level", 3)),
                 window=int(wl_cfg.get("window", 256)),
             )
-            bars_df = build_features(bars_df, wavelet=wav)
+        if reg_dict:
+             reg = RegimeConfig(
+                 method=str(reg_dict.get("method", "hmm")),
+                 benchmark_tic=str(reg_dict.get("benchmark_tic", "SPY")),
+                 source=str(reg_dict.get("source", "close")),
+                 window=int(reg_dict.get("window", 252)),
+                 n_components=int(reg_dict.get("n_components", 3)),
+             )
+
+        if frac or wav or reg:
+            bars_df = build_features(bars_df, fracdiff=frac, wavelet=wav, regime=reg)
 
         # Instead of storing in DB, directly assemble arrays
         tickers = sorted(bars_df["tic"].unique().tolist())
@@ -207,6 +223,12 @@ class ProFeatureAssembler:
                 feature_cols.append(c)
 
         tech7 = _select_tech7(feature_cols, preferred_order=preferred_order)
+        
+        # Ensure market_regime is included if present
+        if "market_regime" in bars_df.columns:
+            # We append it to the end of the feature list
+            if "market_regime" not in tech7:
+                tech7.append("market_regime")
 
         # Compute turbulence if requested
         turbulence = np.zeros(len(dates), dtype=float)

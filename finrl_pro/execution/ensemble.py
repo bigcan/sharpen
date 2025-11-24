@@ -109,6 +109,23 @@ class ThresholdRegimeDetector(RegimeDetector):
              idx = np.digitize(val.item(), self.thresholds)
              return self.labels[idx]
 
+
+class FeatureRegimeDetector(RegimeDetector):
+    """
+    Detects regime by reading a specific feature index (e.g., pre-calculated regime label).
+    """
+    def __init__(self, feature_index: int):
+        self.feature_index = feature_index
+        
+    def detect(self, obs: np.ndarray) -> Any:
+        # Obs shape: (n_envs, n_features) or (n_features,)
+        val = obs[..., self.feature_index]
+        if np.isscalar(val) or val.ndim == 0:
+             return int(val)
+        else:
+             # Assume global regime (same for all concurrent envs in batch)
+             return int(val.flatten()[0])
+
 class RegimeAwareEnsemble:
     """
     Routes the observation to specific agents based on the detected market regime.

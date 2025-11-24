@@ -15855,3 +15855,39 @@ fingerprints:
   mlflow_run_id: cf31189fd7884338be0958d6761056dc
   module_versions: {}
   seed: 42
+- artifact_uris:
+  - reports/0609db90-d38f-440d-8fd1-552929894171/returns.csv
+  - reports/0609db90-d38f-440d-8fd1-552929894171/equity_curve.csv
+  - reports/0609db90-d38f-440d-8fd1-552929894171/drawdown.csv
+  - reports/0609db90-d38f-440d-8fd1-552929894171/execution.csv
+  baseline_reference: benchmarks:sp500_buy_hold
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: file://data/sp500_full_2010_2025.parquet
+  fingerprint_id: 0609db90-d38f-440d-8fd1-552929894171
+  metrics_snapshot:
+    max_drawdown: 0.9393338250792469
+    sharpe_ratio: 0.5110656887072623
+    volatility: 0.30888090914263167
+  mlflow_run_id: 53414c825fad4a4ca285e63774685b09
+  module_versions:
+    action.space: ALLOCATION_VECTOR_LONG_ONLY
+    agent: PPOAgent
+  seed: 100
+- artifact_uris:
+  - reports/b393dc11-3c0d-4466-8d44-48a771e79fdc/returns.csv
+  - reports/b393dc11-3c0d-4466-8d44-48a771e79fdc/equity_curve.csv
+  - reports/b393dc11-3c0d-4466-8d44-48a771e79fdc/drawdown.csv
+  - reports/b393dc11-3c0d-4466-8d44-48a771e79fdc/execution.csv
+  baseline_reference: benchmarks:sp500_buy_hold
+  config_path: finrl_pro/configs/config.yaml
+  dataset_hash: file://data/sp500_full_2010_2025.parquet
+  fingerprint_id: b393dc11-3c0d-4466-8d44-48a771e79fdc
+  metrics_snapshot:
+    max_drawdown: 0.8766818334566653
+    sharpe_ratio: 0.35659468086274304
+    volatility: 0.3049404587460214
+  mlflow_run_id: 484d96a9ae9944dcb07c648810270ad2
+  module_versions:
+    action.space: ALLOCATION_VECTOR_LONG_ONLY
+    agent: PPOAgent
+  seed: 200
