@@ -167,3 +167,31 @@ class RegimeAwareEnsemble:
             
         mean_action = np.mean(actions, axis=0)
         return mean_action, None
+
+class GatingEnsemble(WeightedEnsemble):
+    """
+    Uses a Gating Network (meta-learner) to dynamically weight agents based on the observation.
+    The gating model should accept the observation and output a weight vector summing to 1.
+    """
+    def __init__(self, agents: list, gating_model: Any):
+        super().__init__(agents)
+        self.gating_model = gating_model
+
+    def predict(self, obs: np.ndarray, deterministic: bool = True) -> tuple:
+        if not self.agents:
+             raise ValueError("Ensemble has no agents!")
+
+        # Get weights from the gating model
+        # The model is expected to output a numpy array of shape (n_agents,)
+        # or (batch_size, n_agents).
+        # We assume single-step inference for now or handle batch appropriately.
+        weights = self.gating_model.predict(obs)
+        
+        # If weights are batch, we might need to handle differently, 
+        # but WeightedEnsemble.predict expects 1D weights or we need to update it.
+        # For simplicity, let's assume scalar inference or 1D weights.
+        if weights.ndim > 1:
+            weights = weights[0] 
+            
+        self.set_weights(weights)
+        return super().predict(obs, deterministic)
