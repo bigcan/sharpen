@@ -20,6 +20,20 @@ TICKERS = [
     "WMT", "PG", "XOM", "UNH", "MA", "HD", "CVX", "MRK", "ABBV", "KO"
 ]
 
+from finrl_pro.data.regimes import HMMRegimeDetector, MarketRegime
+
+# Run IDs (Hardcoded from training step)
+RUN_IDS = {
+    "bull": "74324eece6cd446c837e055cf34f6415",
+    "bear": "b3bd16fc4b5349a9a267a1fc84427e61",
+    "sideways": "cf31189fd7884338be0958d6761056dc"
+}
+
+TICKERS = [
+    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "NVDA", "JPM", "V", "JNJ",
+    "WMT", "PG", "XOM", "UNH", "MA", "HD", "CVX", "MRK", "ABBV", "KO"
+]
+
 def load_agent(run_id, state_dim, action_dim, device="cpu"):
     print(f"Loading agent from run {run_id}...")
     local_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="model/temp_model.pth")
@@ -30,39 +44,37 @@ def load_agent(run_id, state_dim, action_dim, device="cpu"):
     agent.policy.load_state_dict(torch.load(local_path, map_location=device))
     return agent
 
-def get_regime(date, df):
+def precompute_regimes_hmm(df):
     """
-    Determine regime based on market data up to date.
-    Simple Heuristic: Average distance from SMA60 across universe.
+    Use HMM to detect regimes on the market average return.
+    Returns a Series mapping Date -> MarketRegime (Enum Int).
     """
-    # This is slow if done per step naively. 
-    # We pre-compute regimes for the whole dataframe.
-    pass
-
-def precompute_regimes(df):
-    """
-    Add 'regime' column: 0=Sideways, 1=Bull, -1=Bear
-    """
-    # Calculate SMA60 for each ticker
-    # We need pivot
+    print("Computing Market Proxy Returns...")
+    # Pivot to get matrix of closes
     piv = df.pivot(index="date", columns="tic", values="close")
-    sma60 = piv.rolling(60).mean()
     
-    # Deviation
-    dev = (piv - sma60) / sma60
+    # Calculate Daily Returns
+    returns = piv.pct_change().fillna(0)
     
-    # Mean Deviation across market
-    market_score = dev.mean(axis=1)
+    # Create Market Proxy (Equal Weight Index)
+    market_returns = returns.mean(axis=1)
     
-    # Define thresholds
-    # > 0.02 -> Bull
-    # < -0.02 -> Bear
-    # Else -> Sideways
-    regimes = pd.Series(0, index=market_score.index) # Default Sideways
-    regimes[market_score > 0.02] = 1
-    regimes[market_score < -0.02] = -1
+    # Fit HMM
+    print("Fitting HMMRegimeDetector (3 Components)...")
+    # 3 Components: Bull, Sideways, Crisis (mapped to Bear)
+    detector = HMMRegimeDetector(n_components=3, random_state=42)
     
-    return regimes
+    # Fit on the entire history provided (2010-2025) to establish global regimes
+    # Then we will lookup the date in the backtest loop
+    regime_vals = detector.fit_predict(market_returns.values)
+    
+    regime_series = pd.Series(regime_vals, index=market_returns.index)
+    
+    # Log distribution
+    counts = regime_series.value_counts()
+    print(f"Regime Distribution (Global):\n{counts}")
+    
+    return regime_series
 
 def main():
     # 1. Load Data (Test Set: 2023-2025)
@@ -74,11 +86,13 @@ def main():
         df = df[df["tic"].isin(TICKERS)]
         
     df["date"] = pd.to_datetime(df["date"])
-    test_df = df[(df["date"] >= "2023-01-04") & (df["date"] <= "2024-12-31")]
     
-    # 2. Precompute Regimes
-    print("Detecting Regimes...")
-    regimes = precompute_regimes(df) # Compute on full history to have SMA ready
+    # 2. Precompute Regimes (HMM)
+    print("Detecting Regimes with HMM...")
+    # We use the full dataset for fitting to get stable regimes, then slice for backtest
+    regimes = precompute_regimes_hmm(df)
+    
+    # Slice Test Data
     test_df = df[(df["date"] >= "2023-01-04") & (df["date"] <= "2024-12-31")]
     
     print(f"DEBUG: Test Data Shape: {test_df.shape}")
@@ -118,35 +132,29 @@ def main():
         return
 
     # 6. Run Backtest
-    print("Running Ensemble Backtest...")
+    print("Running Ensemble Backtest (HMM Switching)...")
     obs, _ = env.reset()
     done = False
     
     rewards = []
     regime_history = []
     
-    # Helper to map date to regime
-    # ProStockEnv tracks 'day' index. asm.dates[day] gives date.
-    
     while not done:
         # Get current date
-        # env.day is the index in asm.dates
-        # But env might handle day internally.
-        # ProStockEnv: self.day
-        current_date = asm.dates[env.day] # Assuming env.day is accessible and synced
+        current_date = asm.dates[env.day]
         
-        # Get Regime
-        # date might be timestamp, regimes index is timestamp
-        regime_val = regimes.get(current_date, 0) # Default 0
+        # Get Regime from HMM Series
+        # regime_val is MarketRegime enum (int)
+        regime_val = regimes.get(current_date, MarketRegime.SIDEWAYS) 
         regime_history.append(regime_val)
         
-        # Select Agent
-        if regime_val == 1:
+        # Map Regime to Agent
+        if regime_val == MarketRegime.BULL:
             agent = agents["bull"]
-        elif regime_val == -1:
-            agent = agents["bear"]
+        elif regime_val == MarketRegime.BEAR or regime_val == MarketRegime.CRISIS:
+            agent = agents["bear"] # Crisis -> Bear Agent
         else:
-            agent = agents["sideways"]
+            agent = agents["sideways"] # Sideways or default
             
         # Act
         action, _ = agent.select_action(obs, deterministic=True)
@@ -162,7 +170,12 @@ def main():
     print(f"Ensemble Sharpe Ratio: {sharpe:.4f}")
     
     # Regime Stats
-    print(f"Regime Distribution: Bull={regime_history.count(1)}, Bear={regime_history.count(-1)}, Sideways={regime_history.count(0)}")
+    bull_days = regime_history.count(MarketRegime.BULL)
+    bear_days = regime_history.count(MarketRegime.BEAR) + regime_history.count(MarketRegime.CRISIS)
+    side_days = regime_history.count(MarketRegime.SIDEWAYS)
+    
+    print(f"Regime Distribution (Test): Bull={bull_days}, Bear/Crisis={bear_days}, Sideways={side_days}")
+
 
 if __name__ == "__main__":
     main()
