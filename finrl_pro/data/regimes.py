@@ -129,34 +129,61 @@ class HMMRegimeDetector:
             if i not in self._state_map:
                 self._state_map[i] = MarketRegime.SIDEWAYS
 
-    def rolling_fit_predict(self, returns: pd.Series, window: int = 252, min_periods: int = 60) -> pd.Series:
+    def predict_proba(self, returns: np.ndarray) -> np.ndarray:
         """
-        PIT-safe rolling prediction.
-        For each day t, fits HMM on [t-window : t] and predicts state for t.
+        Predicts the state probabilities for each time step.
+        Returns an array of shape (n_samples, n_regimes), where columns are ordered by MarketRegime enum values.
         """
-        out = pd.Series(index=returns.index, dtype=float) # Use float to allow NaNs
-        out[:] = np.nan
+        X = returns.reshape(-1, 1)
+        log_probs = self.model.predict_log_proba(X)
+        
+        # Convert log probabilities to probabilities
+        probs = np.exp(log_probs)
+        
+        # Reorder probabilities according to _state_map
+        # Initialize an array for reordered probabilities for MarketRegime enums (0, 1, 2, 3)
+        ordered_probs = np.zeros((probs.shape[0], len(MarketRegime)))
+        
+        # Map self._state_map[hmm_state] to the column index
+        for hmm_state, market_regime_enum in self._state_map.items():
+            ordered_probs[:, int(market_regime_enum)] = probs[:, hmm_state]
+            
+        return ordered_probs
+
+    def rolling_predict_proba(self, returns: pd.Series, window: int = 252, min_periods: int = 60) -> pd.DataFrame:
+        """
+        PIT-safe rolling probability prediction.
+        For each day t, fits HMM on [t-window : t] and predicts probabilities for t.
+        Returns a DataFrame of probabilities (indexed by date), where columns are MarketRegime enum values.
+        """
+        out_df = pd.DataFrame(index=returns.index, dtype=float, 
+                              columns=[r.value for r in MarketRegime])
         
         values = returns.values
         
-        # Optimization: Re-fit only periodically or stride? 
-        # For strict PIT, we should re-fit every step or use a growing window.
-        # Here we implement strict rolling window re-fit (computationally expensive but safe).
+        # Initialize a new detector for each rolling window to ensure clean state_map
+        window_detector = HMMRegimeDetector(n_components=self.n_components, random_state=self.random_state, n_iter=self.n_iter)
         
         for t in range(min_periods, len(values)):
             start_idx = max(0, t - window)
-            window_data = values[start_idx:t+1] # Include t for prediction, but wait... 
-            # Standard PIT: We can only use data up to t to understand regime at t.
-            # So we fit on history, and identify the state of the *last* point.
-            
-            # However, HMM is unsupervised. The states might swap labels between windows (Label Switching Problem).
-            # We must rely on the `_map_states_to_regimes` heuristic to stabilize labels across windows.
+            window_data = values[start_idx:t+1]
             
             try:
-                regimes = self.fit_predict(window_data)
-                out.iloc[t] = regimes[-1]
+                # Fit the detector for the current window and update its state_map
+                window_detector.fit_predict(window_data)
+                
+                # Predict probabilities for the last point of the window using the fitted detector
+                probs_last_point = window_detector.predict_proba(window_data[-1].reshape(1,-1))[0]
+                out_df.loc[returns.index[t]] = probs_last_point
             except Exception:
+                # Fill with default (e.g., equal probability or previous day's probs)
+                if t > 0 and not out_df.iloc[t-1].isnull().all():
+                    out_df.loc[returns.index[t]] = out_df.iloc[t-1]
+                else:
+                    out_df.loc[returns.index[t]] = [1/len(MarketRegime)] * len(MarketRegime) # Equal probability if no prior
                 continue
                 
-        return out
+        return out_df.fillna(0.0) # Fill any remaining NaNs with 0 probability
+
+
 

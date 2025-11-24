@@ -7,19 +7,6 @@ from finrl_pro.agents.ppo import PPOAgent
 from finrl_pro.data.loader_pro import ProFeatureAssembler
 from finrl_pro.envs.factory import make_pro_env
 from finrl_pro.data.loader import DataLoader
-
-# Run IDs (Hardcoded from training step)
-RUN_IDS = {
-    "bull": "74324eece6cd446c837e055cf34f6415",
-    "bear": "b3bd16fc4b5349a9a267a1fc84427e61",
-    "sideways": "cf31189fd7884338be0958d6761056dc"
-}
-
-TICKERS = [
-    "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "NVDA", "JPM", "V", "JNJ",
-    "WMT", "PG", "XOM", "UNH", "MA", "HD", "CVX", "MRK", "ABBV", "KO"
-]
-
 from finrl_pro.data.regimes import HMMRegimeDetector, MarketRegime
 
 # Run IDs (Hardcoded from training step)
@@ -44,10 +31,10 @@ def load_agent(run_id, state_dim, action_dim, device="cpu"):
     agent.policy.load_state_dict(torch.load(local_path, map_location=device))
     return agent
 
-def precompute_regimes_hmm(df):
+def precompute_regimes_hmm(df, hysteresis_window=3):
     """
-    Use HMM to detect regimes on the market average return.
-    Returns a Series mapping Date -> MarketRegime (Enum Int).
+    Use HMM to detect regimes on the market average return and apply hysteresis.
+    Returns a DataFrame of probabilities (indexed by date), where columns are MarketRegime enum values.
     """
     print("Computing Market Proxy Returns...")
     # Pivot to get matrix of closes
@@ -57,24 +44,28 @@ def precompute_regimes_hmm(df):
     returns = piv.pct_change().fillna(0)
     
     # Create Market Proxy (Equal Weight Index)
-    market_returns = returns.mean(axis=1)
+    market_returns = returns.mean(axis=1).dropna() # Drop NaNs from pct_change
     
-    # Fit HMM
-    print("Fitting HMMRegimeDetector (3 Components)...")
-    # 3 Components: Bull, Sideways, Crisis (mapped to Bear)
+    # Fit HMM for rolling probabilities
+    print("Fitting HMMRegimeDetector for rolling probabilities (3 Components)...")
     detector = HMMRegimeDetector(n_components=3, random_state=42)
     
-    # Fit on the entire history provided (2010-2025) to establish global regimes
-    # Then we will lookup the date in the backtest loop
-    regime_vals = detector.fit_predict(market_returns.values)
+    # rolling_predict_proba is PIT-safe and returns DataFrame of probabilities
+    # Columns are MarketRegime.value (0=BEAR, 1=BULL, 2=CRISIS, 3=SIDEWAYS)
+    regime_probs_df = detector.rolling_predict_proba(market_returns, window=252, min_periods=60)
     
-    regime_series = pd.Series(regime_vals, index=market_returns.index)
+    # Apply Hysteresis: rolling mean on probabilities
+    if hysteresis_window > 1:
+        print(f"Applying {hysteresis_window}-day hysteresis to HMM probabilities...")
+        # Fill any NaNs from rolling (beginning of series) before applying mean
+        regime_probs_df = regime_probs_df.fillna(method='ffill').fillna(method='bfill')
+        regime_probs_df = regime_probs_df.rolling(window=hysteresis_window).mean().dropna()
+        regime_probs_df = regime_probs_df.div(regime_probs_df.sum(axis=1), axis=0) # Re-normalize after rolling mean
     
     # Log distribution
-    counts = regime_series.value_counts()
-    print(f"Regime Distribution (Global):\n{counts}")
+    print(f"HMM Probabilities Head (with Hysteresis):\n{regime_probs_df.head()}")
     
-    return regime_series
+    return regime_probs_df
 
 def main():
     # 1. Load Data (Test Set: 2023-2025)
@@ -87,10 +78,10 @@ def main():
         
     df["date"] = pd.to_datetime(df["date"])
     
-    # 2. Precompute Regimes (HMM)
-    print("Detecting Regimes with HMM...")
-    # We use the full dataset for fitting to get stable regimes, then slice for backtest
-    regimes = precompute_regimes_hmm(df)
+    # 2. Precompute Regimes (HMM Probabilities with Hysteresis)
+    print("Detecting Regimes with HMM Probabilities...")
+    # Use the full dataset for fitting to establish global regimes
+    regime_probs_df = precompute_regimes_hmm(df)
     
     # Slice Test Data
     test_df = df[(df["date"] >= "2023-01-04") & (df["date"] <= "2024-12-31")]
@@ -124,41 +115,45 @@ def main():
     
     agents = {}
     try:
-        agents["bull"] = load_agent(RUN_IDS["bull"], state_dim, action_dim)
-        agents["bear"] = load_agent(RUN_IDS["bear"], state_dim, action_dim)
-        agents["sideways"] = load_agent(RUN_IDS["sideways"], state_dim, action_dim)
+        agents[MarketRegime.BULL] = load_agent(RUN_IDS["bull"], state_dim, action_dim)
+        agents[MarketRegime.BEAR] = load_agent(RUN_IDS["bear"], state_dim, action_dim)
+        agents[MarketRegime.CRISIS] = agents[MarketRegime.BEAR] # Map CRISIS to BEAR agent
+        agents[MarketRegime.SIDEWAYS] = load_agent(RUN_IDS["sideways"], state_dim, action_dim)
     except Exception as e:
         print(f"Failed to load agents: {e}")
         return
 
-    # 6. Run Backtest
-    print("Running Ensemble Backtest (HMM Switching)...")
+    # 6. Run Backtest with Soft Voting
+    print("Running Ensemble Backtest (Soft Voting with HMM Probabilities)...")
     obs, _ = env.reset()
     done = False
     
     rewards = []
-    regime_history = []
     
     while not done:
-        # Get current date
         current_date = asm.dates[env.day]
         
-        # Get Regime from HMM Series
-        # regime_val is MarketRegime enum (int)
-        regime_val = regimes.get(current_date, MarketRegime.SIDEWAYS) 
-        regime_history.append(regime_val)
+        # Get current regime probabilities, use equal weights if not found (e.g., initial days of hysteresis)
+        current_probs = regime_probs_df.loc[current_date] if current_date in regime_probs_df.index else pd.Series([1/len(MarketRegime)] * len(MarketRegime), index=[r.value for r in MarketRegime])
         
-        # Map Regime to Agent
-        if regime_val == MarketRegime.BULL:
-            agent = agents["bull"]
-        elif regime_val == MarketRegime.BEAR or regime_val == MarketRegime.CRISIS:
-            agent = agents["bear"] # Crisis -> Bear Agent
-        else:
-            agent = agents["sideways"] # Sideways or default
+        # Normalize probabilities to ensure they sum to 1, especially after slicing
+        current_probs = current_probs / current_probs.sum()
+        
+        # Collect actions from all relevant agents
+        individual_actions = {}
+        for regime_enum_val in [MarketRegime.BEAR, MarketRegime.BULL, MarketRegime.CRISIS, MarketRegime.SIDEWAYS]:
+            if regime_enum_val in agents: # Ensure we have an agent for this regime
+                action, _ = agents[regime_enum_val].select_action(obs, deterministic=True)
+                individual_actions[regime_enum_val] = action
             
-        # Act
-        action, _ = agent.select_action(obs, deterministic=True)
-        obs, reward, done, truncated, info = env.step(action)
+        # Compute weighted average action (soft voting)
+        weighted_action = np.zeros(action_dim)
+        for regime_enum_val, prob in current_probs.items():
+            if regime_enum_val in individual_actions: # Ensure we have an action for this regime
+                weighted_action += prob * individual_actions[MarketRegime(regime_enum_val)]
+                
+        # Perform step with the weighted action
+        obs, reward, done, truncated, info = env.step(weighted_action)
         rewards.append(reward)
         
         if truncated: done = True
@@ -169,13 +164,8 @@ def main():
     sharpe = np.mean(returns) / np.std(returns) * np.sqrt(252)
     print(f"Ensemble Sharpe Ratio: {sharpe:.4f}")
     
-    # Regime Stats
-    bull_days = regime_history.count(MarketRegime.BULL)
-    bear_days = regime_history.count(MarketRegime.BEAR) + regime_history.count(MarketRegime.CRISIS)
-    side_days = regime_history.count(MarketRegime.SIDEWAYS)
-    
-    print(f"Regime Distribution (Test): Bull={bull_days}, Bear/Crisis={bear_days}, Sideways={side_days}")
-
+    # Note: Regime distribution is now a blend, not distinct counts
+    print("Regime distribution was applied as soft probabilities during backtest.")
 
 if __name__ == "__main__":
     main()
