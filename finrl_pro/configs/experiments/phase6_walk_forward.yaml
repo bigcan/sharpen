@@ -1,0 +1,68 @@
+# Phase 6: Walk-Forward Hyperparameter Optimization (Regime Validation)
+# ============================================================================
+# This configuration defines the experiment for validating PPO stability across
+# different market regimes (2000-2025) using a Walk-Forward framework.
+
+data:
+  dataset_hash: "file://data/sp500_multi_2016_2025/liquid20.parquet" # Placeholder, expects user to have this or similar
+  start_date: "2000-01-01"
+  end_date: "2025-01-01"
+  tickers: # Liquid 20 Universe
+    - AAPL
+    - MSFT
+    - AMZN
+    - GOOGL
+    - META # (FB)
+    - TSLA
+    - NVDA
+    - JPM
+    - V
+    - JNJ
+    - WMT
+    - PG
+    - XOM
+    - UNH
+    - MA
+    - HD
+    - CVX
+    - MRK
+    - ABBV
+    - KO
+
+hpo:
+  study_name: "phase6_ppo_walk_forward"
+  storage: "sqlite:///phase6_hpo.db" # persistent storage for Optuna
+  n_trials: 20 # Trials per window
+  
+  rolling_window:
+    train_years: 3
+    val_years: 1
+    test_years: 1
+    step_years: 1
+
+features:
+  families:
+    momentum: ["rsi_30", "dx_30"]
+    trend: ["macd", "close_30_sma", "close_60_sma"]
+    volatility: ["boll_ub", "boll_lb"]
+  use_turbulence: true
+  log_baseline: false
+  hybrid_baseline: false
+
+agents:
+  PPO:
+    name: "PPOAgent"
+    parameters:
+      lr: 3.0e-4 # Base to be tuned
+      gamma: 0.99
+      gae_lambda: 0.95
+      clip_ratio: 0.2
+      ent_coef: 0.01 # Note: Param name in Agent is entropy_coef
+      batch_size: 64
+      n_epochs: 10
+      
+environment:
+  initial_capital: 1000000
+  buy_cost_pct: 0.001
+  sell_cost_pct: 0.001
+  reward_scaling: 0.0001220703125 # 2^-13
