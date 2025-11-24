@@ -12,6 +12,11 @@ from alpaca.trading.enums import OrderSide, TimeInForce, OrderStatus
 from finrl_pro.execution.broker import BrokerClient
 
 
+from alpaca.data.historical import StockHistoricalDataClient
+from alpaca.data.requests import StockBarsRequest, StockLatestQuoteRequest
+from alpaca.data.timeframe import TimeFrame
+from datetime import datetime, timedelta
+
 class AlpacaBroker(BrokerClient):
     """Alpaca broker client for paper/live trading."""
 
@@ -22,6 +27,7 @@ class AlpacaBroker(BrokerClient):
             raise ValueError("Alpaca credentials not provided.")
         
         self._client = TradingClient(self._key, self._secret, paper=paper)
+        self._data_client = StockHistoricalDataClient(self._key, self._secret)
 
     def get_account(self) -> Dict[str, Any]:
         """Fetch account information."""
@@ -49,6 +55,49 @@ class AlpacaBroker(BrokerClient):
             }
             for p in positions
         ]
+
+    def get_bar_data(self, symbols: List[str], timeframe: str = "1Day", limit: int = 100) -> Dict[str, Any]:
+        """Fetch historical bars for feature engineering.
+        
+        Args:
+            symbols: List of ticker symbols.
+            timeframe: "1Min", "1Hour", "1Day".
+            limit: Number of bars to fetch.
+        """
+        tf_map = {
+            "1Min": TimeFrame.Minute,
+            "1Hour": TimeFrame.Hour,
+            "1Day": TimeFrame.Day
+        }
+        tf = tf_map.get(timeframe, TimeFrame.Day)
+        
+        # Calculate start time based on limit roughly (buffer for weekends)
+        # This is an approximation; Alpaca handles limits but start is required often
+        days_back = limit * 2 if timeframe == "1Day" else limit # simple buffer
+        start = datetime.now() - timedelta(days=days_back)
+        
+        req = StockBarsRequest(
+            symbol_or_symbols=symbols,
+            timeframe=tf,
+            start=start,
+            limit=limit,
+            adjustment="all" # Split/Div adjustment
+        )
+        
+        bars = self._data_client.get_stock_bars(req)
+        return bars.df # Returns MultiIndex DataFrame (symbol, timestamp)
+
+    def get_latest_quotes(self, symbols: List[str]) -> Dict[str, float]:
+        """Get latest bid/ask/price for execution."""
+        req = StockLatestQuoteRequest(symbol_or_symbols=symbols)
+        res = self._data_client.get_stock_latest_quote(req)
+        
+        quotes = {}
+        for sym, q in res.items():
+            # Use ask price for buy, bid for sell? Or mid?
+            # Let's just return ask for now as conservative buy price
+            quotes[sym] = float(q.ask_price) if q.ask_price else 0.0
+        return quotes
 
     def submit_order(
         self,
