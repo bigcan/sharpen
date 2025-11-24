@@ -92,6 +92,10 @@ logs/
 *.log
 logs_*.txt
 
+# Generated artifacts to ignore globally
+feature_mapping.txt
+figs/
+
 # Docker artifacts
 docker/*.log
 
