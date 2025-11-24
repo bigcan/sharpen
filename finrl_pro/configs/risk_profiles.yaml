@@ -68,3 +68,14 @@ profiles:
     effective_date: 2025-11-19
     max_avg_turnover: 100.0
     max_transaction_costs_bps: 50000
+
+  - profile_id: yolo
+    name: YOLO Mode (No Guardrails)
+    max_capital_at_risk: 1.0          # 100% Capital at Risk
+    max_drawdown_pct: 1.0             # 100% Drawdown allowed
+    leverage_cap: 100.0               # Extreme leverage
+    sandbox_required: false           # No sandbox checks
+    approved_by: User                 # Self-approved
+    effective_date: 2025-11-20
+    max_avg_turnover: 1000.0          # Unlimited trading
+    max_transaction_costs_bps: 1000000 # Ignore costs

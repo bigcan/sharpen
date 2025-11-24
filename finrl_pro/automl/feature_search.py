@@ -31,35 +31,67 @@ def _load_yaml(path: Path) -> dict[str, Any]:
 
 
 def suggest_features(trial: optuna.Trial, base_cfg: dict[str, Any]) -> dict[str, Any]:
+    """Suggest features based on 5 distinct hypotheses (Modes)."""
     cfg = dict(base_cfg)
-    fams = dict(cfg.get("families", {}))
-    for fam in ["trend", "momentum", "vol", "volume"]:
-        fams[fam] = bool(trial.suggest_categorical(f"family::{fam}", [False, True]))
-    cfg["families"] = fams
+    
+    # 1. Select Mode
+    mode = trial.suggest_categorical("mode", ["raw", "fracdiff", "wavelet", "regime", "combo"])
+    
+    # 2. Reset all to False (Baseline)
+    cfg["families"] = {
+        "trend": False, 
+        "momentum": False, 
+        "vol": False, 
+        "volume": False
+    }
+    cfg["advanced"] = {
+        "fracdiff": {"enable": False}, 
+        "wavelet": {"enable": False}
+    }
+    
+    # 3. Configure based on Mode
+    if mode == "raw":
+        # Baseline: Price + Volume only (already in base data)
+        pass
 
-    adv = dict(cfg.get("advanced", {}) or {})
-    # fracdiff
-    if trial.suggest_categorical("fracdiff::enable", [0, 1]):
-        fd = dict(adv.get("fracdiff", {}) or {})
-        fd["enable"] = True
-        fd["d"] = float(trial.suggest_categorical("fracdiff::d", [0.3, 0.5, 0.7]))
-        fd["window"] = int(trial.suggest_categorical("fracdiff::window", [128, 256]))
-        fd["cols"] = fd.get("cols", ["close"])  # fixed for now
-        adv["fracdiff"] = fd
-    else:
-        adv["fracdiff"] = {"enable": False}
-    # wavelet
-    if trial.suggest_categorical("wavelet::enable", [0, 1]):
-        wl = dict(adv.get("wavelet", {}) or {})
-        wl["enable"] = True
-        wl["level"] = int(trial.suggest_categorical("wavelet::level", [2, 3]))
-        wl["window"] = int(trial.suggest_categorical("wavelet::window", [128, 256]))
-        wl["wavelet"] = wl.get("wavelet", "db4")
-        wl["cols"] = wl.get("cols", ["close"])  # fixed for now
-        adv["wavelet"] = wl
-    else:
-        adv["wavelet"] = {"enable": False}
-    cfg["advanced"] = adv
+    elif mode == "fracdiff":
+        # Hypothesis: Stationarity + Volatility Context
+        cfg["families"]["vol"] = True
+        cfg["advanced"]["fracdiff"] = {
+            "enable": True,
+            "d": float(trial.suggest_categorical("fd_d", [0.3, 0.5, 0.7])),
+            "window": 256,
+            "cols": ["close"]
+        }
+
+    elif mode == "wavelet":
+        # Hypothesis: Signal/Noise Separation + Volatility Context
+        cfg["families"]["vol"] = True
+        cfg["advanced"]["wavelet"] = {
+            "enable": True,
+            "wavelet": "db4",
+            "level": int(trial.suggest_categorical("wl_level", [2, 3])),
+            "window": 256,
+            "cols": ["close"],
+            "denoise": bool(trial.suggest_categorical("wl_denoise", [True, False]))
+        }
+
+    elif mode == "regime":
+        # Hypothesis: Only Volatility Context matters
+        cfg["families"]["vol"] = True
+
+    elif mode == "combo":
+        # Hypothesis: Wavelet Trend + Volatility Context (Best of Both)
+        cfg["families"]["vol"] = True
+        cfg["advanced"]["wavelet"] = {
+            "enable": True,
+            "wavelet": "db4",
+            "level": 2, # Fixed to most stable level
+            "window": 256,
+            "cols": ["close"],
+            "denoise": True # Force denoising for combo
+        }
+
     return cfg
 
 
@@ -68,9 +100,7 @@ def run_study(args: argparse.Namespace) -> None:
     tcfg = exp_cfg.get("training", {})
     base_feat = exp_cfg.get("features", {})
     ds_hash = str(tcfg.get("dataset_hash", ""))
-    if not ds_hash.startswith("snapshot://"):
-        raise SystemExit("feature_search requires a snapshot-backed dataset_hash")
-
+    
     manifest = Path(exp_cfg.get("fingerprint_manifest", "finrl_pro/configs/fingerprints.yaml"))
     store = FingerprintStore(manifest_path=manifest)
     store.load()
@@ -80,37 +110,43 @@ def run_study(args: argparse.Namespace) -> None:
 
     def objective(trial: optuna.Trial) -> float:
         feat_cfg = suggest_features(trial, base_feat)
-        # Build or fetch features
+        
+        # 1. Build Features (Real)
         snapshot_id = ds_hash.split("//", 1)[1]
         asm = assembler.assemble_from_snapshot(snapshot_id=snapshot_id, features_cfg=feat_cfg)
-        # Placeholder evaluation: prefer smaller feature sets and penalize NaNs
-        feature_count = len(asm.feature_list)
-        score = 1.0 / (feature_count + 1e-6)
-        # Log fingerprint and MLflow
+        
+        # 2. Log Metadata
         cache_key = feature_cache_key(ds_hash, feat_cfg)
         mv = {
             "automl.study": args.study_name or "default",
             "features.cache_key": cache_key,
             "features.feature_set_id": asm.feature_set_id,
-            "features.count": str(feature_count),
+            "features.count": str(len(asm.feature_list)),
+            "optuna.trial": str(trial.number)
         }
-        trainer.run(
+        
+        # 3. Run Training (Fast Mode)
+        # We override total_timesteps to keep the search fast (e.g., 10k steps instead of 1M)
+        # The goal is to find relative performance, not absolute convergence.
+        metrics = trainer.run(
             config_path=str(args.experiment),
             dataset_hash=ds_hash,
-            seed=int(tcfg.get("seed", 0)),
+            seed=int(tcfg.get("seed", 42)),
             module_versions=mv,
-            metrics={
-                "sharpe_ratio": float(score),
-                "max_drawdown": 0.05,
-                "volatility": 0.10,
-                "capital_at_risk": 0.02,
-                "leverage": 1.0,
-            },
             artifact_uris=[],
             baseline_reference=str(tcfg.get("baseline_reference", "benchmarks:none")),
             sandbox_enabled=bool(exp_cfg.get("sandbox_enabled", False)),
+            # Override for speed: 20k steps is enough to see if features have signal
+            override_timesteps=20000 
         )
-        return score
+        
+        # 4. Optimize for Sharpe Ratio
+        # If training failed or returned NaN, return a terrible score
+        score = metrics.get("sharpe_ratio", -999.0)
+        if score is None:
+            score = -999.0
+            
+        return float(score)
 
     study = optuna.create_study(direction="maximize", study_name=args.study_name)
     study.optimize(objective, n_trials=int(args.trials))

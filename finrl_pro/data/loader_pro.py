@@ -41,7 +41,7 @@ DEFAULT_TECH7 = [
 
 def _ensure_dt(df: pd.DataFrame) -> pd.DataFrame:
     out = df.copy()
-    if not np.issubdtype(out["date"].dtype, np.datetime64):
+    if not pd.api.types.is_datetime64_any_dtype(out["date"]):
         out["date"] = pd.to_datetime(out["date"])  # type: ignore[assignment]
     return out.sort_values(["tic", "date"]).reset_index(drop=True)
 
@@ -68,6 +68,8 @@ def _add_stockstats(df: pd.DataFrame, indicators: Sequence[str]) -> pd.DataFrame
     stock = Sdf.retype(df.copy())
     unique = stock.tic.unique()
     for ind in indicators:
+        if ind in df.columns:
+            continue
         ind_df = pd.DataFrame()
         for t in unique:
             try:
@@ -197,7 +199,13 @@ class ProFeatureAssembler:
         dates = sorted(bars_df["date"].unique().tolist())
 
         # Select 7 indicators in a stable order
-        feature_cols = [c for c in bars_df.columns if c not in ["date", "tic", "open", "high", "low", "close", "volume", "source", "vendor_rev"]]
+        base_cols = ["date", "tic", "open", "high", "low", "close", "volume", "source", "vendor_rev"]
+        feature_cols = [c for c in bars_df.columns if c not in base_cols]
+        # Re-add base cols if they are in preferred_order (e.g. for raw price features)
+        for c in ["open", "high", "low", "close", "volume"]:
+            if c in preferred_order and c in bars_df.columns:
+                feature_cols.append(c)
+
         tech7 = _select_tech7(feature_cols, preferred_order=preferred_order)
 
         # Compute turbulence if requested

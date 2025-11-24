@@ -148,3 +148,65 @@ class ActionSmoothingWrapper(gym.Wrapper):
         self.prev_action = smoothed_action
         info['smoothed_action'] = smoothed_action
         return obs, reward, done, truncated, info
+
+
+class SoftmaxAllocationWrapper(gym.Wrapper):
+    """
+    Converts raw agent actions (logits) into portfolio allocation weights (Softmax),
+    and then into ProStockEnv actions (shares to buy/sell).
+    
+    Logic:
+    1. Weights = Softmax(Action)
+    2. Target_Value_i = Weights_i * Total_Portfolio_Value
+    3. Diff_Value_i = Target_Value_i - Current_Value_i
+    4. Env_Action_i = (Diff_Value_i / Price_i) / Max_Stock
+    """
+    def __init__(self, env: gym.Env):
+        super().__init__(env)
+    
+    def step(self, action):
+        # 1. Softmax to get weights (sum=1, range[0,1])
+        # Numeric stability
+        e_x = np.exp(action - np.max(action))
+        weights = e_x / e_x.sum()
+        
+        # 2. Access Env State
+        # We need to unwrap to find ProStockEnv attributes
+        unwrapped = self.env.unwrapped
+        
+        # Get current data (Prices at current T, before step increments T)
+        # ProStockEnv.day is the index of current state
+        current_price = unwrapped.price_ary[unwrapped.day]
+        current_stocks = unwrapped.stocks
+        
+        # Total Asset (Cash + Stocks)
+        # unwrapped.total_asset is updated after previous step
+        total_asset = unwrapped.total_asset
+        if total_asset < 1e-5:
+            total_asset = unwrapped.initial_capital
+
+        # 3. Calculate Target Values
+        target_values = weights * total_asset
+        current_values = current_stocks * current_price
+        
+        # 4. Calculate Diff (Value to Trade)
+        diff_values = target_values - current_values
+        
+        # 5. Convert to Shares
+        # Avoid div by zero
+        safe_price = np.where(current_price < 1e-5, 1.0, current_price)
+        diff_shares = diff_values / safe_price
+        
+        # 6. Convert to Env Action (Normalized by max_stock)
+        # ProStockEnv: real_trade = action * max_stock
+        env_actions = diff_shares / unwrapped.max_stock
+        
+        # Clip to [-1, 1] as required by ProStockEnv
+        env_actions = np.clip(env_actions, -1.0, 1.0)
+        
+        # Execute
+        obs, reward, done, truncated, info = self.env.step(env_actions)
+        
+        info['allocation_weights'] = weights
+        return obs, reward, done, truncated, info
+
