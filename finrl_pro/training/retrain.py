@@ -61,6 +61,21 @@ def retrain(
         
     # Update output artifacts tag if needed, or rely on fingerprinting
     # ...
+    
+    # Ensure training block exists
+    if "training" not in config_data:
+        config_data["training"] = {}
+
+    # Enable model registration for the retrained model
+    config_data["training"]["register_model"] = True
+
+    # Determine model name if not present
+    if "model_name" not in config_data["training"]:
+        base_name = cfg.stem
+        # Sanitize name for MLflow (alphanumeric, underscores, dashes, periods, spaces)
+        safe_name = "".join(c if c.isalnum() or c in "_-." else "_" for c in base_name)
+        config_data["training"]["model_name"] = safe_name
+        print(f"[+] Configured for Model Registry: {safe_name}")
 
     tmp_config = Path(f"tmp_retrain_{cfg.name}")
     with open(tmp_config, "w") as f:

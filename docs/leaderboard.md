@@ -323,6 +323,8 @@ Links:
 | 2025-11-17 | - | - | PPO | - | - | - | - | - | - | -0.41 | 0.00 | 16.0% | - | 122df368-32c1-4db0-8cdf-4cc4899f0c28 | fracdiff_d_0.6__risk-default__agent-PPO__seed-41 |
 | 2025-11-17 | - | - | PPO | - | - | - | - | - | - | -0.43 | 0.00 | 15.2% | - | 000349c1-5d73-4559-bed9-76208c9dca3b | fracdiff_d_0.6__risk-default__agent-PPO__seed-42 |
 | 2025-11-17 | - | - | PPO | - | - | - | - | - | - | -0.99 | 0.00 | 15.2% | - | a15f39b4-fa81-4086-9afc-69651335749c | fracdiff_d_0.6__risk-default__agent-PPO__seed-43 |
+| 2025-11-21 | - | - | PPO | - | - | - | - | - | - | 0.20 | 1.00 | 2.7% | - | ceb953e7-613e-4174-98d9-d95a241464df | stress_2x |
+| 2025-11-21 | - | - | PPO | - | - | - | - | - | - | -0.40 | 0.00 | 2.0% | - | 68b3042e-0cb4-46d6-8f6c-c482d304ece5 | stress_3x |
 
 Notes:
 - Seeds: number of independent seeds aggregated for metrics.

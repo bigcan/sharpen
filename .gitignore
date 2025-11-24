@@ -90,6 +90,7 @@ finrl_pro/data/processed/
 # Logs
 logs/
 *.log
+logs_*.txt
 
 # Docker artifacts
 docker/*.log
@@ -98,3 +99,7 @@ docker/*.log
 mlruns/
 reports/
 tmp/
+results/
+models/
+*.db
+marketing_best_params.yaml
