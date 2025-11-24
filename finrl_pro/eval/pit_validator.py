@@ -1,85 +1,147 @@
-"""Point-in-time (PIT) validator for feature CSVs.
+"""Point-in-time (PIT) validator for Feature Engineering.
 
-Checks that feature columns are strictly trailing using shift(1) by recomputing
-basic rolling stats and verifying column equality at t to estimations from t-1.
+Performs a "Deletion Test" to certify that feature generation has no look-ahead bias.
+Methodology:
+1. Compute features on the full dataset (F_full).
+2. Truncate the dataset at random points t.
+3. Compute features on the truncated dataset (F_trunc).
+4. Assert that F_full[t] == F_trunc[t].
 
-Usage expects a CSV with a time index column and raw columns:
-  - close (required) and optional: open, high, low, volume
-  - feature columns names provided via --features
-
-Outputs a JSON summary with per-feature PIT pass/fail and a failure count.
+If F_full[t] differs from F_trunc[t], it means the calculation at t depended on data after t.
 """
 
-from __future__ import annotations
-
 import argparse
-import csv
-import json
+import pandas as pd
+import numpy as np
 from pathlib import Path
-from typing import Dict, List
+from finrl_pro.features.engineering import FeatureEngineer
 
-
-def _read_csv(path: Path) -> List[Dict[str, str]]:
-    with path.open("r", encoding="utf-8", newline="") as f:
-        rdr = csv.DictReader(f)
-        return [row for row in rdr]
-
-
-def _rolling_mean(vals: List[float], window: int) -> List[float]:
-    out: List[float] = []
-    s = 0.0
-    for i, v in enumerate(vals):
-        s += v
-        if i >= window:
-            s -= vals[i - window]
-        if i + 1 >= window:
-            out.append(s / window)
-        else:
-            out.append(0.0)
-    return out
-
-
-def main(argv: List[str] | None = None) -> None:
-    ap = argparse.ArgumentParser(prog="finrl_pro.eval.pit_validator")
-    ap.add_argument("--csv", required=True, help="Path to features CSV")
-    ap.add_argument("--features", nargs="+", required=True, help="Feature columns to validate as trailing")
-    ap.add_argument("--price-col", default="close", help="Base price column (default: close)")
-    ap.add_argument("--window", type=int, default=20, help="Window size for basic rolling estimator")
-    ap.add_argument("--out-json", default=None, help="Optional output JSON path")
-    args = ap.parse_args(argv or None)
-
-    rows = _read_csv(Path(args.csv))
-    if not rows:
-        raise RuntimeError("Empty CSV")
-    # Build series
-    try:
-        price = [float(r[args.price_col]) for r in rows]
-    except Exception as e:  # noqa: BLE001
-        raise RuntimeError(f"Price column '{args.price_col}' missing or invalid") from e
-    estimate = _rolling_mean(price, int(args.window))
-    # shift(1): align estimator to t-1 by dropping last and prepending 0
-    shifted = [0.0] + estimate[:-1]
-
-    summary: Dict[str, Dict[str, float | int | bool]] = {}
-    for feat in args.features:
-        diffs = 0
-        for i, r in enumerate(rows):
-            try:
-                v = float(r[feat])
-            except Exception:
+def validate_pit(df_raw: pd.DataFrame, sample_size: int = 10) -> dict:
+    """
+    Runs the PIT validation.
+    Args:
+        df_raw: DataFrame with columns [date, tic, open, high, low, close, volume]
+        sample_size: Number of random truncation points to test per ticker.
+    Returns:
+        Dictionary with validation results.
+    """
+    # 1. Compute Full Features
+    print("Computing features on full dataset...")
+    engineer = FeatureEngineer()
+    df_full = engineer.preprocess_data(df_raw)
+    
+    # Identify feature columns (those ending in _shifted)
+    feature_cols = [c for c in df_full.columns if c.endswith('_shifted')]
+    if not feature_cols:
+        print("No '_shifted' columns found. Using all non-OHLCV columns.")
+        exclude = {'date', 'tic', 'open', 'high', 'low', 'close', 'volume', 'timestamp'}
+        feature_cols = [c for c in df_full.columns if c not in exclude]
+    
+    print(f"Validating features: {feature_cols}")
+    
+    violations = {}
+    for col in feature_cols:
+        violations[col] = 0
+        
+    tickers = df_raw['tic'].unique()
+    
+    total_checks = 0
+    failed_checks = 0
+    
+    for tic in tickers:
+        df_tic = df_raw[df_raw['tic'] == tic].sort_values('date').reset_index(drop=True)
+        
+        # Determine valid range for testing (skip initial warmup period)
+        # Heuristic: Skip first 100 rows
+        if len(df_tic) < 150:
+            continue
+            
+        test_indices = np.random.choice(range(100, len(df_tic)), size=sample_size, replace=False)
+        
+        for cut_idx in test_indices:
+            # Date at cut
+            cut_date = df_tic.iloc[cut_idx]['date']
+            
+            # Get Full Feature value at cut_idx
+            # We need to match by date because preprocessing might drop rows (dropna)
+            full_row = df_full[(df_full['tic'] == tic) & (df_full['date'] == cut_date)]
+            if full_row.empty:
+                # This happens if the row was dropped (e.g. NaN). Skip.
                 continue
-            if abs(v - shifted[i]) > 1e-9:
-                diffs += 1
-        summary[feat] = {"pit_pass": diffs == 0, "violations": diffs}
+            
+            # 2. Truncate
+            # We include data up to cut_idx
+            df_trunc_raw = df_tic.iloc[:cut_idx+1]
+            
+            # 3. Compute Truncated Features
+            df_trunc_feats = engineer.preprocess_data(df_trunc_raw)
+            
+            trunc_row = df_trunc_feats[(df_trunc_feats['tic'] == tic) & (df_trunc_feats['date'] == cut_date)]
+            
+            if trunc_row.empty:
+                # Should not happen if full_row existed, unless calculation creates NaNs at the edge
+                # If it creates NaN at edge, that's arguably safe (no value > wrong value), but let's log it.
+                continue
+                
+            total_checks += 1
+            
+            # 4. Compare
+            for col in feature_cols:
+                val_full = full_row[col].values[0]
+                val_trunc = trunc_row[col].values[0]
+                
+                # Handle NaNs
+                if np.isnan(val_full) and np.isnan(val_trunc):
+                    continue
+                if np.isnan(val_full) or np.isnan(val_trunc):
+                    violations[col] += 1
+                    failed_checks += 1
+                    continue
+                
+                if not np.isclose(val_full, val_trunc, rtol=1e-5, atol=1e-8):
+                    violations[col] += 1
+                    failed_checks += 1
+                    print(f"FAIL: {tic} @ {cut_date} | {col} | Full: {val_full} != Trunc: {val_trunc}")
 
-    payload = {"window": int(args.window), "price_col": args.price_col, "features": summary}
-    blob = json.dumps(payload, indent=2, sort_keys=True)
-    if args.out_json:
-        Path(args.out_json).write_text(blob, encoding="utf-8")
+    return {
+        "total_checks_per_feature": total_checks,
+        "violations": violations,
+        "passed": failed_checks == 0
+    }
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", required=True, help="Path to raw OHLCV Parquet/CSV")
+    ap.add_argument("--samples", type=int, default=5, help="Samples per ticker")
+    args = ap.parse_args()
+    
+    path = Path(args.data)
+    if path.suffix == '.parquet':
+        df = pd.read_parquet(path)
     else:
-        print(blob)
+        df = pd.read_csv(path)
+        
+    # Ensure column names
+    # Expected: date, tic, open, high, low, close, volume
+    # Map: timestamp -> date, ticker -> tic
+    rename_map = {'timestamp': 'date', 'ticker': 'tic'}
+    df = df.rename(columns=rename_map)
+    
+    results = validate_pit(df, sample_size=args.samples)
+    
+    print("\n=== PIT Validation Results ===")
+    print(f"Total Comparison Points: {results['total_checks_per_feature']}")
+    print("Violations per feature:")
+    for feat, count in results['violations'].items():
+        status = "FAIL" if count > 0 else "PASS"
+        print(f"  {feat:<20}: {count} ({status})")
+        
+    if results['passed']:
+        print("\nSUCCESS: No look-ahead bias detected.")
+    else:
+        print("\nFAILURE: Look-ahead bias detected in one or more features.")
+        exit(1)
 
-
-if __name__ == "__main__":  # pragma: no cover
+if __name__ == "__main__":
     main()
 

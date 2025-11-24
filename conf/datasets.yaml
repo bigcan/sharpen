@@ -5,4 +5,7 @@ datasets:
   sp500_multi_2016_2025:
     uri: dvc://datasets/sp500_multi_2016_2025
     description: S&P 10–50 names daily OHLCV, 2016-01-01 to 2025-12-31.
+  sp500_full_2010_2025:
+    uri: data/sp500_full_2010_2025.parquet
+    description: S&P 500 Top 20 + SPY daily OHLCV, 2010-01-01 to 2025-01-01.
 
