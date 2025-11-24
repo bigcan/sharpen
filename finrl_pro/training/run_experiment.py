@@ -197,6 +197,7 @@ def _run_real_training(
     *,
     training_cfg: dict[str, Any],
     logger: MLOpsLogger,
+    tickers: list[str] | None = None,
 ) -> SimulatedRunArtifacts:
     """Execute a real training run with an RL agent."""
     dataset_hash = str(training_cfg.get("dataset_hash", ""))
@@ -216,6 +217,11 @@ def _run_real_training(
             df = df[df['date'] >= pd.to_datetime(start_date)]
         if end_date:
             df = df[df['date'] <= pd.to_datetime(end_date)]
+            
+    # Filter by Tickers
+    if tickers and 'tic' in df.columns:
+        df = df[df['tic'].isin(tickers)]
+        logger.log_event("finrl_pro.training.tickers_filtered", context={"count": len(tickers)})
             
     if df.empty:
         raise ValueError(f"No data found for range {start_date} to {end_date}")
@@ -439,6 +445,12 @@ def _run_real_training(
     else:
         final_metrics = {"sharpe_ratio": 0.0, "max_drawdown": 0.0, "volatility": 0.0} # Fallback
 
+    # Save agent model for MLflow logging
+    try:
+        current_agent.save("temp_model.pth")
+    except Exception as e:
+        print(f"Warning: Failed to save temp model: {e}")
+
     return SimulatedRunArtifacts(
         returns=calculated_returns,
         equity=equity if calculated_returns else [],
@@ -519,74 +531,86 @@ def main(argv: Iterable[str] | None = None) -> None:
     )
 
     tcfg = cfg["training"]
+    tickers = cfg.get("data", {}).get("tickers")
     
     real_training_enabled = bool(tcfg.get("real_training", False))
 
-    if real_training_enabled:
-        sim = _run_real_training(training_cfg=tcfg, logger=logger)
-    else:
-        sim = _simulate_training_outputs(cfg_path=cfg_path, training_cfg=tcfg)
+    import mlflow
+    # Start MLflow run explicitly to capture artifacts from real training
+    with mlflow.start_run() as active_run:
+        if real_training_enabled:
+            sim = _run_real_training(training_cfg=tcfg, logger=logger, tickers=tickers)
+            # Log model artifact if generated
+            if Path("temp_model.pth").exists():
+                mlflow.log_artifact("temp_model.pth", artifact_path="model")
+                # Clean up temp file
+                try:
+                    Path("temp_model.pth").unlink()
+                except:
+                    pass
+        else:
+            sim = _simulate_training_outputs(cfg_path=cfg_path, training_cfg=tcfg)
 
-    # Optional dataset resolution check for snapshot-backed datasets
-    ds_hash = str(tcfg.get("dataset_hash", ""))
-    # This block is for logging and feature assembly, handled in _run_real_training
-    # if real_training_enabled.
-    if ds_hash.startswith("snapshot://") and not real_training_enabled:
-        try:
-            # from finrl_pro.data.loader import DataLoader  # noqa: WPS433 (already imported)
-            df = DataLoader.resolve_dataset(ds_hash)
-            logger.log_event(
-                "finrl_pro.training.dataset_resolved",
-                context={"dataset_hash": ds_hash, "rows": int(df.shape[0])},
-            )
-        except Exception as e:  # noqa: BLE001
-            logger.log_event(
-                "finrl_pro.training.dataset_resolve_error",
-                context={"dataset_hash": ds_hash, "error": str(e)},
-            )
-            raise
-    
-    # Compose module versions with feature cache key for reproducibility
-    mv = dict(tcfg.get("module_versions", {}))
-    feat_cfg = cfg.get("features", {})
-    # Skip feature assembly if real training is enabled, as it's handled in _run_real_training
-    if not real_training_enabled:
-        try:
-            fkey = feature_cache_key(str(tcfg.get("dataset_hash", "")), feat_cfg)
-            mv["features.cache_key"] = fkey
-        except Exception:
-            # Keep going if features block is malformed
-            pass
-
-        # Optional: assemble features from DB and log feature_set_id (snapshot datasets only)
-        use_pro_env = bool(tcfg.get("use_pro_env", False))
-        mv["features.env_mode"] = "B" if use_pro_env else "A"
-        if ds_hash.startswith("snapshot://") and feat_cfg:
+        # Optional dataset resolution check for snapshot-backed datasets
+        ds_hash = str(tcfg.get("dataset_hash", ""))
+        # This block is for logging and feature assembly, handled in _run_real_training
+        # if real_training_enabled.
+        if ds_hash.startswith("snapshot://") and not real_training_enabled:
             try:
-                # from finrl_pro.data.loader_pro import ProFeatureAssembler  # noqa: WPS433 (already imported)
-                snapshot_id = ds_hash.split("//", 1)[1]
-                assembler = ProFeatureAssembler()
-                asm = assembler.assemble_from_snapshot(snapshot_id=snapshot_id, features_cfg=feat_cfg)
-                mv["features.feature_set_id"] = asm.feature_set_id
-            except Exception:  # noqa: BLE001
-                # Non-fatal: continue without feature_set_id if assembly not available
+                # from finrl_pro.data.loader import DataLoader  # noqa: WPS433 (already imported)
+                df = DataLoader.resolve_dataset(ds_hash)
+                logger.log_event(
+                    "finrl_pro.training.dataset_resolved",
+                    context={"dataset_hash": ds_hash, "rows": int(df.shape[0])},
+                )
+            except Exception as e:  # noqa: BLE001
+                logger.log_event(
+                    "finrl_pro.training.dataset_resolve_error",
+                    context={"dataset_hash": ds_hash, "error": str(e)},
+                )
+                raise
+        
+        # Compose module versions with feature cache key for reproducibility
+        mv = dict(tcfg.get("module_versions", {}))
+        feat_cfg = cfg.get("features", {})
+        # Skip feature assembly if real training is enabled, as it's handled in _run_real_training
+        if not real_training_enabled:
+            try:
+                fkey = feature_cache_key(str(tcfg.get("dataset_hash", "")), feat_cfg)
+                mv["features.cache_key"] = fkey
+            except Exception:
+                # Keep going if features block is malformed
                 pass
 
-    fingerprint = trainer.run(
-        config_path=str(tcfg["config_path"]),
-        dataset_hash=str(tcfg["dataset_hash"]),
-        seed=int(tcfg.get("seed", 0)),
-        module_versions=mv,
-        metrics=sim.metrics,
-        artifact_uris=list(tcfg.get("artifact_uris", [])),
-        baseline_reference=str(tcfg["baseline_reference"]),
-        sandbox_enabled=bool(cfg.get("sandbox_enabled", False)),
-    )
+            # Optional: assemble features from DB and log feature_set_id (snapshot datasets only)
+            use_pro_env = bool(tcfg.get("use_pro_env", False))
+            mv["features.env_mode"] = "B" if use_pro_env else "A"
+            if ds_hash.startswith("snapshot://") and feat_cfg:
+                try:
+                    # from finrl_pro.data.loader_pro import ProFeatureAssembler  # noqa: WPS433 (already imported)
+                    snapshot_id = ds_hash.split("//", 1)[1]
+                    assembler = ProFeatureAssembler()
+                    asm = assembler.assemble_from_snapshot(snapshot_id=snapshot_id, features_cfg=feat_cfg)
+                    mv["features.feature_set_id"] = asm.feature_set_id
+                except Exception:  # noqa: BLE001
+                    # Non-fatal: continue without feature_set_id if assembly not available
+                    pass
 
-    # Register model if configured
-    if tcfg.get("register_model", False):
-        model_name = str(tcfg.get("model_name", "finrl_pro_model"))
-        trainer.register_model(fingerprint.mlflow_run_id, model_name)
+        fingerprint = trainer.run(
+            config_path=str(tcfg["config_path"]),
+            dataset_hash=str(tcfg["dataset_hash"]),
+            seed=int(tcfg.get("seed", 0)),
+            module_versions=mv,
+            metrics=sim.metrics,
+            artifact_uris=list(tcfg.get("artifact_uris", [])),
+            baseline_reference=str(tcfg["baseline_reference"]),
+            sandbox_enabled=bool(cfg.get("sandbox_enabled", False)),
+        )
+
+        # Register model if configured
+        if tcfg.get("register_model", False):
+            model_name = str(tcfg.get("model_name", "finrl_pro_model"))
+            trainer.register_model(fingerprint.mlflow_run_id, model_name)
 
     artifact_paths = _persist_artifacts(fingerprint.fingerprint_id, sim)
     fingerprint.artifact_uris = artifact_paths
