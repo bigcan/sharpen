@@ -12,7 +12,7 @@ import statistics
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
-
+import pandas as pd
 import yaml
 
 from finrl_pro.configs.fingerprint_store import FingerprintStore
@@ -205,7 +205,22 @@ def _run_real_training(
 
     # 1. Load Data
     df = DataLoader.resolve_dataset(dataset_hash)
-    logger.log_event("finrl_pro.training.real_data_loaded", context={"dataset_hash": dataset_hash, "rows": len(df)})
+    
+    # Filter by Date Range
+    start_date = training_cfg.get("start_date")
+    end_date = training_cfg.get("end_date")
+    
+    if 'date' in df.columns:
+        df['date'] = pd.to_datetime(df['date']) # Ensure datetime
+        if start_date:
+            df = df[df['date'] >= pd.to_datetime(start_date)]
+        if end_date:
+            df = df[df['date'] <= pd.to_datetime(end_date)]
+            
+    if df.empty:
+        raise ValueError(f"No data found for range {start_date} to {end_date}")
+
+    logger.log_event("finrl_pro.training.real_data_loaded", context={"dataset_hash": dataset_hash, "rows": len(df), "start": str(start_date), "end": str(end_date)})
 
     # 2. Assemble Features
     feat_cfg = training_cfg.get("features", {})

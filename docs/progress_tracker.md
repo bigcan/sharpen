@@ -176,17 +176,21 @@ Goal: Move to multi-asset with risk constraints; prepare for paper trading.
 
 - Multi-asset, single-account
   - [x] Universe: 10-50 S&P names (synthetic dataset tracked with DVC)
-  - [x] Action: allocation vector (sum to 1, long-only) — `sp500_multi_longonly.yaml`
-  - [x] Action: per-asset long/flat — `sp500_multi_longflat.yaml`
-  - [x] Constraints scaffolded: position norm penalty, turnover penalty, soft sector caps
+  - [x] Env: Configure `StockTradingEnv` for multi-asset (ProStockEnv verified)
+  - [x] Action: allocation vector (sum to 1, long-only) — `sp500_multi_longonly.yaml` / `SoftmaxAllocationWrapper`
+  - [x] Constraints: Apply `ActionSmoothingWrapper` to vector actions
+  - [x] Experiment: Run PPO baseline on multi-asset basket (fingerprint: `f843ca17...`)
+    - Result: Agent successfully allocated to 5 assets using Softmax -> Smoothing -> Env chain.
+    - Drawdown: ~20% on synthetic random walk.
+    - Turnover: Regulated by smoothing and max_stock limits.
 - Live-readiness
-  - [x] Paper trade via IBKR/Alpaca; measure latency budget
-  - [x] Daily retrain or weekly recalibration strategy
-  - [x] MLflow model registry; reproducible seeds and artifacts
+  - [ ] Paper trade via IBKR/Alpaca; measure latency budget (`finrl_pro.execution.executor` implemented)
+  - [x] Daily retrain or weekly recalibration strategy (`finrl_pro.training.retrain` implemented)
+  - [x] MLflow model registry; reproducible seeds and artifacts (Integrated into `retrain.py` and `trainer.py`)
 - Monitoring
   - [x] Drift detection (PSI/pop stats) — `python -m finrl_pro.mlops.monitoring --fingerprint <fp>`
   - [ ] Rolling performance attribution
-  - [ ] Alerts on drawdown/turnover spikes
+  - [x] Alerts on drawdown/turnover spikes (Added to monitoring script)
 
 ---
 
@@ -194,16 +198,19 @@ Goal: Move to multi-asset with risk constraints; prepare for paper trading.
 Goal: Transition from verifying code to verifying financial performance using real historical data.
 
 - Data Foundation
-  - [ ] Ingest 10-15 years of S&P 500 data (OHLCV) via Alpaca/Yahoo
-  - [ ] Create canonical `snapshot://sp500_full`
+  - [x] Ingest 10-15 years of S&P 500 data (OHLCV) via Alpaca/Yahoo (Created `data/sp500_full_2010_2025.parquet`)
+  - [x] Create canonical `snapshot://sp500_full`
 - Feature Audit
-  - [ ] Upgrade `pit_validator` to support recursive indicators (EMA, etc.)
-  - [ ] Certify feature set on real data (no look-ahead bias)
+  - [x] Upgrade `pit_validator` to support recursive indicators (EMA, etc.) (Implemented Deletion Test)
+  - [x] Certify feature set on real data (no look-ahead bias) (Passed Deletion Test)
 - The Tournament
-  - [ ] Re-run Agent Comparison (PPO vs SAC vs DDPG) on real data (2010-2020 Train / 2021-2024 Test)
-  - [ ] Identify "Golden Configuration" (features + agent)
+  - [x] Re-run Agent Comparison (PPO vs SAC vs DDPG) on real data (2010-2020 Train / 2021-2024 Test)
+    - Winner: PPO (Sharpe ~0.37 vs SAC ~0.35 vs DDPG ~0.34). All struggled in real market conditions.
+  - [x] Identify "Golden Configuration" (features + agent) -> PPO + Phase 2 Hybrid Features
 - Optimization
-  - [ ] Perform hyperparameter tuning (Ray Tune/Optuna) on the tournament winner
+  - [x] Perform hyperparameter tuning (Ray Tune/Optuna) on the tournament winner
+    - Optimized Sharpe: 0.45. LR=5e-5, Gamma=0.985, Batch=512.
+    - Config: `finrl_pro/configs/experiments/phase6_ppo_optimized.yaml`
 
 ---
 
@@ -262,6 +269,7 @@ Goal: Prove stability and drift management in a live environment.
 | 2025-11-13 | Override Gate 1.0: Carry forward `action_continuous` + `reward_logr` | 1 | Strict uplift not met, but configuration provided most stable foundation. Discrete actions regressed. | Metric regression (stabilized later) |
 | 2025-11-13 | Override Gate 2.0: Close gate and proceed to Phase 3 | 2 | Feature engineering alone insufficient; need algorithm exploration. | N/A (Carry forward Phase 1 baseline) |
 | 2025-11-19 | Select PPO (GAE=0.98) as Phase 3 winner | 3 | Achieved highest Sharpe (0.88) and stability, validating the override strategy. | Sharpe ~0.88 / PSR improved |
+| 2025-11-19 | Retain FracDiff (d=0.5) after A/B Test | 3.5 | Tested hypothesis that FracDiff hurt Sharpe. Result: Removing it caused collapse to Sharpe -0.67. Stationarity is essential. | Validated 0.88 as best single-asset baseline |
 
 ---
 
@@ -287,8 +295,17 @@ Goal: Prove stability and drift management in a live environment.
 Goal: Fix excessive turnover and enforce robustness.
 - [x] **Phase 4.5 (Failed)**: Turnover Penalty 5.0
   - Result: Agent ignored penalty (Turnover > 25x). Stubborn noise chasing.
-- [ ] **Phase 4.6 (Structural Cure)**: Action Smoothing
+- [x] **Phase 4.6 (Structural Cure)**: Action Smoothing
   - [x] Implement `ActionSmoothingWrapper` (0.9 * Prev + 0.1 * New)
-  - [ ] Execute `phase4_structural_cure` config (seeds 41, 42, 43)
-  - [ ] Verify turnover < 2.0x (Hard mathematical guarantee)
-  - [ ] Check DSR > 0 with smoothed actions
+  - [x] Execute `phase4_structural_cure` config (fingerprint: `3ac30af3...`)
+  - [x] Verify turnover < 2.0x (Result: ~0.10 daily turnover - PASS)
+  - [x] Check DSR > 0 (Result: Sharpe ~0.11. Signal vanished, confirming Phase 3 was noise-mining. Safe but weak baseline.)
+## Phase 4 Real Data Validation (2025-11-20)
+- **Critical Finding**: Previous runs were Simulated. Enabled `real_training: true` for robustness checks.
+- **Diagnostics**:
+  - [x] PIT Audit: PASS (features are safe).
+  - [x] Env Audit: PASS (costs are correct).
+- **Real Training Results**:
+  - [x] Baseline (10bps): FAILED (MaxDD 35.8% > 20% Limit).
+  - [x] Stress 2x/3x: Passed risk gates but performance collapsed (Sharpe < 0.2, agent stopped trading).
+- **Conclusion**: Validated that single-asset strategy fails on real data. Confirms decision to move to Multi-Asset (Phase 5).
