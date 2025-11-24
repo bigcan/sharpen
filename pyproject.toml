@@ -23,7 +23,9 @@ dependencies = [
     "statsmodels>=0.14.0",
     "gymnasium>=0.29.1",
     "stable-baselines3>=2.3.0",
-    "shimmy>=0.2.1" # Required for SB3 compatibility with gym.Env
+    "shimmy>=0.2.1", # Required for SB3 compatibility with gym.Env
+    "hmmlearn>=0.3.0",
+    "scikit-learn>=1.3.0"
 ]
 readme = "README.md"
 
