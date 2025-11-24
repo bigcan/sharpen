@@ -212,23 +212,16 @@ def main():
     BEHAVIOR_MODEL = "models/phase6/behavior.pth"
     TARGET_MODEL = "models/phase6/target.pth"
     
-    # Feature Config (Matching Phase 6)
+    # Feature Config (Matching Phase 6 Ensemble / SHAP)
     FEATURES_CFG = {
-        "advanced": {
-            "fracdiff": {"d": 0.4, "enable": True},
-            "wavelet": {"enable": False}
-        },
-        "families": {
-            "momentum": True,
-            "trend": True,
-            "vol": True,
-            "volume": True
-        },
+        "stockstats_overrides": [
+            "macd", "boll_ub", "boll_lb", "rsi_30", "dx_30", "close_30_sma", "close_60_sma"
+        ],
         "use_turbulence": True
     }
     
-    START_DATE = "2020-01-01"
-    END_DATE = "2020-12-31" # 1 year evaluation
+    START_DATE = "2023-01-01" # Evaluation on Test Period
+    END_DATE = "2023-06-01" # Short horizon for OPE demo
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
@@ -237,7 +230,7 @@ def main():
     env = load_data_and_create_env(DATA_PATH, FEATURES_CFG, START_DATE, END_DATE)
     print(f"State Dim: {env.state_dim}, Action Dim: {env.action_dim}")
     
-    print_feature_names(env)
+    # print_feature_names(env) # Optional, relies on generic names
     
     # 2. Load Behavior Agent
     try:
