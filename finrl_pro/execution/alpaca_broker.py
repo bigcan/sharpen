@@ -85,7 +85,12 @@ class AlpacaBroker(BrokerClient):
         )
         
         bars = self._data_client.get_stock_bars(req)
-        return bars.df # Returns MultiIndex DataFrame (symbol, timestamp)
+        df = bars.df.reset_index()
+        df.rename(columns={"symbol": "tic", "timestamp": "date"}, inplace=True)
+        # Ensure timezone naive for consistency
+        if "date" in df.columns:
+            df["date"] = df["date"].dt.tz_localize(None)
+        return df
 
     def get_latest_quotes(self, symbols: List[str]) -> Dict[str, float]:
         """Get latest bid/ask/price for execution."""

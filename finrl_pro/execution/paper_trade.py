@@ -10,6 +10,9 @@ Orchestrates the full loop:
 6. Execution (Alpaca)
 """
 
+import json
+from datetime import datetime
+
 import os
 import time
 import logging
@@ -17,14 +20,30 @@ import pandas as pd
 import numpy as np
 import torch
 import mlflow
-import json
-from datetime import datetime
-from dotenv import load_dotenv
+import re # Added for manual .env parsing
 
 from finrl_pro.execution.alpaca_broker import AlpacaBroker
 from finrl_pro.data.loader_pro import ProFeatureAssembler
 from finrl_pro.data.regimes import HMMRegimeDetector, MarketRegime
 from finrl_pro.agents.ppo import PPOAgent
+
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
+
+# Manually parse .env for Alpaca credentials
+dotenv_file_path = os.path.join(project_root, ".env")
+try:
+    with open(dotenv_file_path, 'r') as f:
+        for line in f:
+            match_key = re.match(r'^\s*ALPACA_API_KEY_ID=(.*)$', line)
+            match_secret = re.match(r'^\s*ALPACA_API_SECRET_KEY=(.*)$', line)
+            if match_key:
+                os.environ["ALPACA_API_KEY_ID"] = match_key.group(1).strip()
+            elif match_secret:
+                os.environ["ALPACA_API_SECRET_KEY"] = match_secret.group(1).strip()
+except FileNotFoundError:
+    logger.error(f"Error: .env file not found at {dotenv_file_path}")
+except Exception as e:
+    logger.error(f"Error parsing .env file: {e}")
 
 # Setup Logging
 logging.basicConfig(
@@ -37,9 +56,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Load Env Vars
-load_dotenv()
-
 # Configuration
 TICKERS = [
     "AAPL", "MSFT", "AMZN", "GOOGL", "META", "TSLA", "NVDA", "JPM", "V", "JNJ",
@@ -47,9 +63,9 @@ TICKERS = [
 ]
 # Hardcoded Model Paths (or MLflow URIs)
 MODEL_PATHS = {
-    "bull": "models/phase6/bull_agent.pth", # Placeholder paths, need to verify
-    "bear": "models/phase6/bear_agent.pth",
-    "sideways": "models/phase6/sideways_agent.pth"
+    "bull": "models/phase8/bull_agent.pth",
+    "bear": "models/phase8/bear_agent.pth",
+    "sideways": "models/phase8/sideways_agent.pth"
 }
 # MLflow Run IDs (Alternative)
 RUN_IDS = {
@@ -86,36 +102,28 @@ class PaperTradingSystem:
             json.dump(state, f)
 
     def _load_models(self):
-        """Load ensemble agents from MLflow."""
-        logger.info("Loading Ensemble Agents...")
-        # We need to know dims. Hardcoded for now based on Phase 6.
-        # 183 state dim, 20 action dim (18 tickers? Wait, TICKERS list has 20).
-        # Phase 6 config had 20 tickers. 
-        # Let's verify dims dynamically if possible or assume standard.
+        """Load ensemble agents from local paths."""
+        logger.info("Loading Ensemble Agents from local disk...")
         
-        # Assuming 183 state, 20 action (if universe is 20)
-        # Wait, previous logs showed State Dim: 183, Action Dim: 18.
-        # Why 18? TICKERS list in run_phase6 had 20 items.
-        # Ah, the run_phase6_ensemble.py script filtered tickers?
-        # Let's stick to the list used in training.
+        # Assuming 183 state, 18 action (based on Phase 6 logs)
+        self.state_dim = 183 
+        self.action_dim = 18 
         
-        # Check run_phase6_ensemble.py:
-        # TICKERS = ["AAPL", ... "KO"] (Length 20)
-        # But logs said Action Dim: 18. 
-        # Maybe 2 tickers failed to load data or were filtered?
-        # Proceed with caution.
-        self.state_dim = 183 # From logs
-        self.action_dim = 18 # From logs
-        
-        for regime, run_id in RUN_IDS.items():
+        for regime, path in MODEL_PATHS.items():
+            # Construct absolute path
+            full_path = os.path.join(project_root, path)
+            
+            if not os.path.exists(full_path):
+                logger.error(f"Model file not found: {full_path}")
+                continue
+
             try:
-                local_path = mlflow.artifacts.download_artifacts(run_id=run_id, artifact_path="model/temp_model.pth")
                 agent = PPOAgent(state_dim=self.state_dim, action_dim=self.action_dim, device=self.device)
-                agent.policy.load_state_dict(torch.load(local_path, map_location=self.device))
+                agent.policy.load_state_dict(torch.load(full_path, map_location=self.device))
                 self.agents[regime] = agent
-                logger.info(f"Loaded {regime} agent from {run_id}")
+                logger.info(f"Loaded {regime} agent from {full_path}")
             except Exception as e:
-                logger.error(f"Failed to load {regime} agent: {e}")
+                logger.error(f"Failed to load {regime} agent from {full_path}: {e}")
                 raise e
 
     def fetch_data_and_features(self):
@@ -124,13 +132,7 @@ class PaperTradingSystem:
         # Fetch 252 days to ensure valid rolling windows for features
         df = self.broker.get_bar_data(TICKERS, timeframe="1Day", limit=300)
         
-        # Reset Index to get 'tic' and 'date' columns
-        # Alpaca returns multi-index (symbol, timestamp)
-        df = df.reset_index()
-        df.rename(columns={"symbol": "tic", "timestamp": "date"}, inplace=True)
-        
-        # Ensure datetime is tz-naive or consistent
-        df["date"] = pd.to_datetime(df["date"]).dt.tz_localize(None)
+        # Broker now returns standardized df (tic, date, open, high, low, close, volume)
         
         # Feature Assembly
         features_cfg = {
@@ -201,9 +203,7 @@ class PaperTradingSystem:
             # Let's assume fetch_data handles it.
             
             # Re-fetch specifically for regime (inefficient but safe for MVP)
-            df_raw = self.broker.get_bar_data(TICKERS, limit=300).reset_index()
-            df_raw.rename(columns={"symbol": "tic", "timestamp": "date"}, inplace=True)
-            df_raw["date"] = pd.to_datetime(df_raw["date"]).dt.tz_localize(None)
+            df_raw = self.broker.get_bar_data(TICKERS, limit=300)
             
             probs = self.detect_regime(df_raw)
             logger.info(f"Regime Probabilities: {probs.to_dict()}")
@@ -237,7 +237,7 @@ class PaperTradingSystem:
         # If we set env.day = len(asm.dates) - 1, that's the last valid data point.
         # obs = env.get_state(day)
         env.day = len(asm.dates) - 1
-        obs = env._get_observation()
+        obs = env._get_state(asm.price_ary[env.day])
         
         # Soft Voting
         weighted_action = np.zeros(self.action_dim)

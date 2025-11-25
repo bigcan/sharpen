@@ -461,23 +461,30 @@ Acceptance Criteria
 Specs
 - 150-ops/800-paper-monitoring.md
 
-### Phase 9 – Production Deployment (if applicable)
-Owner: MLOps + Risk + Research Leads
-Promotion Gate 9.0: Live trading with >= 8 weeks stability; PSI < 0.1; weekly compliance maintained.
+### Phase 9 – Cloud Infrastructure & Deployment
+Owner: MLOps Lead + Risk Lead
+Promotion Gate 9.0: Dockerized stack deployed; MLflow service persistent; Live trading stability >= 8 weeks; PSI < 0.1.
 
 Goal
+- Containerize the entire research and execution stack for portable deployment on Google Cloud (GCP).
 - Transition from paper-trade to live with capital allocation and risk oversight.
 
 Checklist
-- [ ] Risk committee approval with documented worst-case loss scenarios
-- [ ] Capital allocation: start with 1-5% of portfolio; scale based on performance
-- [ ] Live execution adapter with exchange connectivity
-- [ ] Real-time monitoring dashboard with kill switch
-- [ ] Weekly performance attribution and drift reports
-- [ ] Quarterly model review and retraining schedule
+- [ ] **Infrastructure & MLOps**
+  - [ ] Create unified `docker-compose.yml` (TimescaleDB + MLflow + Agents).
+  - [ ] Verify local persistence (volumes for DB and Artifacts).
+  - [ ] Deploy stack to GCP (Compute Engine or GKE).
+- [ ] **Production Governance**
+  - [ ] Risk committee approval with documented worst-case loss scenarios.
+  - [ ] Capital allocation: start with 1-5% of portfolio; scale based on performance.
+  - [ ] Live execution adapter with exchange connectivity.
+  - [ ] Real-time monitoring dashboard with kill switch.
+  - [ ] Weekly performance attribution and drift reports.
+  - [ ] Quarterly model review and retraining schedule.
 
 Acceptance Criteria
-- 8+ weeks of live stability with no silent failures; actual Sharpe within 0.8-1.2x of paper-trade Sharpe
+- 8+ weeks of live stability with no silent failures; actual Sharpe within 0.8-1.2x of paper-trade Sharpe.
+- Infrastructure fully containerized and reproducible via `docker-compose`.
 
 ## Timeframe Promotion Checklist
 - [ ] Daily → 4h: PSR >= 0.50, max drawdown <= 22%, turnover <= 2x daily, 2x cost stress passed
