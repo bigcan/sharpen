@@ -1,14 +1,14 @@
 # FinRL Pro Research Program (Spec-Driven Plan v1)
 
-Last updated: 2025-11-19
+Last updated: 2025-11-24
 
 > **Note:** This roadmap defines the high-level research plan, gates, and specifications. See `docs/progress_tracker.md` for detailed daily task tracking, execution checklists, and the decision log.
 
 ## Current Status Summary
-- **Current Phase:** Phase 4 (Risk, Costs, Robustness)
-- **Latest Milestone:** Phase 3 Complete (PPO with GAE=0.98 selected; Sharpe 0.88)
-- **Next Gate:** Gate 4.0 (DSR > 0, PBO < 0.20)
-- **Critical Path:** Validate Phase 3 winner under stress (2x/3x costs) to confirm robustness before multi-asset scaling.
+- **Current Phase:** Phase 7 (Explainability & OPE)
+- **Latest Milestone:** Phase 6 Complete (Ensemble Sharpe 1.24, HPO Optimized)
+- **Next Gate:** Gate 7.0 (SHAP/OPE verified)
+- **Critical Path:** Validate Phase 6 specialists with SHAP and OPE to ensure they are learning robust features before paper trading.
 
 ## Charter
 - Outcome: Beat Buy & Hold on out-of-sample Sharpe/PSR with controlled max drawdown and turnover; scale to multi-asset allocation with governance, explainability, and reproducibility.
@@ -34,15 +34,15 @@ Strict sequential gating can sometimes block progress when variables are highly 
     *   **Adjustment**: How the missed criteria will be re-evaluated later.
 
 ## Phase Overview
-- Phase 0 ??MVP Baseline (single-asset)
-- Phase 1 ??Action/Reward Ablations
-- Phase 2 ??Feature Engineering
-- Phase 3 ??Algorithm Exploration
-- Phase 4 ??Risk, Costs, Robustness
-- Phase 5 ??Multi-Asset Allocation & Constraints
-- Phase 6 ??HPO/HPIO & Ensembles
-- Phase 7 ??Explainability & OPE
-- Phase 8 ??Paper-Trade & Monitoring
+- Phase 0 — MVP Baseline (single-asset)
+- Phase 1 — Action/Reward Ablations
+- Phase 2 — Feature Engineering
+- Phase 3 — Algorithm Exploration
+- Phase 4 — Risk, Costs, Robustness
+- Phase 5 — Multi-Asset Allocation & Constraints
+- Phase 6 — HPO/HPIO & Ensembles
+- Phase 7 — Explainability & OPE
+- Phase 8 — Paper-Trade & Monitoring
 
 ## Scope: Timeframes & Assets
 - Timeframes: start at daily; escalate to 4h -> 1h -> 15m -> 5m -> 1m once stability and risk gates pass at the current level.
@@ -56,17 +56,17 @@ Strict sequential gating can sometimes block progress when variables are highly 
 - [x] 120-phases/1xx-phase1-actions.md – Phase 1 spec
 - [x] 120-phases/2xx-phase2-features.md – Phase 2 spec
 - [x] 120-phases/3xx-phase3-algorithms.md – Phase 3 spec
-- [ ] 120-phases/4xx-phase4-robustness.md – Phase 4 spec (planned)
-- [ ] 120-phases/5xx-phase5-multiasset.md – Phase 5 spec (planned)
-- [ ] 130-opt/600-hpo-driver.md – HPO/HPIO orchestrator (planned)
-- [ ] 140-xai/700-shap-ig-spec.md – explainability (planned)
+- [ ] 120-phases/4xx-phase4-robustness.md – Phase 4 spec (Missing)
+- [x] 120-phases/5xx-phase5-multiasset.md – Phase 5 spec
+- [ ] 130-opt/600-hpo-driver.md – HPO/HPIO orchestrator (Missing)
+- [x] 120-phases/7xx-phase7-xai-ope.md – Phase 7 spec
 - [ ] 150-ops/800-paper-monitoring.md – paper/live monitoring (planned)
 
 Each spec contains: Motivation, Requirements, Non-Goals, Data/Configs, Interfaces, Telemetry, Risks, Acceptance Criteria, Test Plan, Artifacts.
 
 ## Phases
 
-### Phase 0 ??MVP Baseline (single-asset)
+### Phase 0 — MVP Baseline (single-asset)
 Owner: Research Lead
 Promotion Gate 0.0: Test PSR >= 0.60; max drawdown <= 20%; turnover within budget; no risk alerts.
 
@@ -74,15 +74,15 @@ Goal
 - Establish a PPO/TD3 baseline that meets risk gates and sets the leaderboard anchor.
 
 Checklist
-- [x] Data & Splits ??Freeze Test (2023??025), Val (2022), Train (2016??021); 21-day embargo.
-- [x] Data & Splits ??Verify PIT features (shift(1) on trailing windows); run PIT validator.
-- [x] Environment & Costs ??SPY daily env; action in [-1, +1]; next-bar open execution.
-- [x] Environment & Costs ??Costs: 1 bp fee + 1 bp slippage; turnover logged.
-- [x] Agent & Training ??PPO (clip/GAE variants) and TD3; 3 seeds; early stop on Val plateau.
-- [x] Agent & Training ??Record fingerprint, MLflow run_id, artifact URIs.
-- [x] Evaluation & Reporting ??Walk-forward splits; compute Sharpe/Sortino/Calmar/MaxDD/PSR with CIs.
-- [x] Evaluation & Reporting ??Emit returns/equity/drawdown CSV + plots; update leaderboard.
-- [x] Risk & Governance ??Enforce RiskControlPolicy; block promotion on breaches.
+- [x] Data & Splits — Freeze Test (2023-2025), Val (2022), Train (2016-2021); 21-day embargo.
+- [x] Data & Splits — Verify PIT features (shift(1) on trailing windows); run PIT validator.
+- [x] Environment & Costs — SPY daily env; action in [-1, +1]; next-bar open execution.
+- [x] Environment & Costs — Costs: 1 bp fee + 1 bp slippage; turnover logged.
+- [x] Agent & Training — PPO (clip/GAE variants) and TD3; 3 seeds; early stop on Val plateau.
+- [x] Agent & Training — Record fingerprint, MLflow run_id, artifact URIs.
+- [x] Evaluation & Reporting — Walk-forward splits; compute Sharpe/Sortino/Calmar/MaxDD/PSR with CIs.
+- [x] Evaluation & Reporting — Emit returns/equity/drawdown CSV + plots; update leaderboard.
+- [x] Risk & Governance — Enforce RiskControlPolicy; block promotion on breaches.
 
 Acceptance Criteria
 - Test PSR >= 0.60, max drawdown <= 20%, turnover within budget; no risk alerts.
@@ -90,7 +90,7 @@ Acceptance Criteria
 Specs
 - 120-phases/0xx-phase0-mvp.md
 
-### Phase 1 ??Action/Reward Ablations
+### Phase 1 — Action/Reward Ablations
 Owner: Research Lead
 Promotion Gate 1.0: PSR gain ≥ 0.20 vs. Phase 0 with turnover within budget and MaxDD ≤ 1.1× baseline.
 
@@ -262,7 +262,7 @@ Status (2025-11-20)
 Specs
 - 120-phases/3xx-phase3-algorithms.md
 
-### Phase 4 ??Risk, Costs, Robustness
+### Phase 4 — Risk, Costs, Robustness
 Owner: Risk Lead
 Promotion Gate 4.0: No collapse under stress; DSR > 0; PBO < 0.20 under stressed costs and execution gaps.
 
@@ -312,32 +312,16 @@ Checklist
 Acceptance Criteria
 - No collapse under stresses; DSR > 0; PBO < 0.20; mean Sharpe > 0.0 across trial portfolio.
 
-Status (2025-11-19)                                                                           
-
-- **Gate 4.0 FAILED: Phase 3 winner c60a1cbb-635b-40c3-80b4-d286beaca3ec failed robustness tes
-
-ting**                                                                                         
-
-  - **Deflated Sharpe Ratio (DSR):** 0.00% (FAIL - target: > 0.50)                            
-
-    - Interpretation: The observed Sharpe of 0.88 is statistically indistinguishable from nois
-
-e given 42 trials conducted                                                                    
-
-    - Algorithm pool mean Sharpe: -0.71 (extremely poor baseline)                             
-
-    - The "winner" appears to be a lucky outlier in a weak field, not a robust strategy       
-
-  - **Probability of Backtest Overfitting (PBO):** 56.3% (FAIL - target: < 20%)               
-
-    - Interpretation: In-sample winner has ~coin-flip chance of outperforming median out-of-sa
-
-mple                                                                                           
-
-    - Indicates severe selection bias; likely cherry-picked from noise                        
-
+Status (2025-11-19)
+- **Gate 4.0 FAILED:** Phase 3 winner c60a1cbb-635b-40c3-80b4-d286beaca3ec failed robustness testing.
+  - **Deflated Sharpe Ratio (DSR):** 0.00% (FAIL - target: > 0.50)
+    - Interpretation: The observed Sharpe of 0.88 is statistically indistinguishable from noise given 42 trials conducted.
+    - Algorithm pool mean Sharpe: -0.71 (extremely poor baseline).
+    - The "winner" appears to be a lucky outlier in a weak field, not a robust strategy.
+  - **Probability of Backtest Overfitting (PBO):** 56.3% (FAIL - target: < 20%)
+    - Interpretation: In-sample winner has ~coin-flip chance of outperforming median out-of-sample.
+    - Indicates severe selection bias; likely cherry-picked from noise.
   - **Phase 4.5 Attempt (Turnover Penalty 5.0):** FAILED. Turnover remained > 25x. Agent ignored penalty.
-
   - **Phase 4.6 (Structural Cure):** Completed.
     - Implemented `ActionSmoothingWrapper` (0.9 * Prev + 0.1 * New)
     - Result: Turnover reduced to ~10% (Pass). Sharpe dropped to 0.11 (Expected - signal was noise).
@@ -348,7 +332,7 @@ mple
 - **Status:** Phase 5 Baseline Executed.
 
 Specs
-- 120-phases/4xx-phase4-robustness.md
+- 120-phases/4xx-phase4-robustness.md (Missing)
 
 ### Phase 5 — Multi-Asset Allocation (Big Data Edition)
 Owner: Research Lead + Risk Lead
@@ -441,9 +425,9 @@ Acceptance Criteria
 - Ensemble members have pairwise correlation < 0.7.
 
 Specs
-- 130-opt/600-hpo-driver.md
+- 130-opt/600-hpo-driver.md (Missing)
 
-### Phase 7 ??Explainability & OPE
+### Phase 7 — Explainability & OPE
 Owner: Research Lead
 Promotion Gate 7.0: SHAP/IG analyses complete; OPE variance acceptable and consistent with backtest; insights documented.
 
@@ -452,15 +436,15 @@ Goal
 
 Checklist
 - [ ] SHAP (DeepExplainer), Integrated Gradients; temporal stability by regime.
-- [ ] OPE ??WIS/DR estimators; variance diagnostics; sanity checks vs. backtest.
+- [ ] OPE — WIS/DR estimators; variance diagnostics; sanity checks vs. backtest.
 
 Acceptance Criteria
 - XAI/OPE complete with consistent conclusions and documented limitations.
 
 Specs
-- 140-xai/700-shap-ig-spec.md
+- 120-phases/7xx-phase7-xai-ope.md
 
-### Phase 8 ??Paper-Trade & Monitoring
+### Phase 8 — Paper-Trade & Monitoring
 Owner: MLOps Lead + Risk Lead
 Promotion Gate 8.0: Paper-trade stability >= 4 weeks; alerts, drift, circuit breakers verified; weekly compliance report in place.
 
@@ -503,7 +487,7 @@ Acceptance Criteria
 - [ ] 5m → 1m: paper-trade stability >= 4 weeks, PSI < 0.1, no silent failures
 
 ## Asset Promotion Checklist
-- [ ] Equities (SPY/single-asset) complete ??baseline and robustness gates.
-- [ ] Equities (basket/multi-asset) ??sector caps and turnover budgets enforced.
-- [ ] Crypto (BTC) ??24/7 calendar, fee/slippage models, volatility-aware risk caps.
-- [ ] Crypto (ETH) ??replicate BTC setup; cross-asset correlation checks.
+- [ ] Equities (SPY/single-asset) complete — baseline and robustness gates.
+- [ ] Equities (basket/multi-asset) — sector caps and turnover budgets enforced.
+- [ ] Crypto (BTC) — 24/7 calendar, fee/slippage models, volatility-aware risk caps.
+- [ ] Crypto (ETH) — replicate BTC setup; cross-asset correlation checks.

@@ -129,6 +129,19 @@ class HMMRegimeDetector:
             if i not in self._state_map:
                 self._state_map[i] = MarketRegime.SIDEWAYS
 
+    def predict(self, returns: np.ndarray) -> np.ndarray:
+        """
+        Predicts the regime sequence for new data using the fitted model.
+        Returns an array of MarketRegime enum values.
+        """
+        if not self._state_map:
+            raise RuntimeError("Model not fitted. Call fit_predict first.")
+            
+        X = returns.reshape(-1, 1)
+        hidden_states = self.model.predict(X)
+        regimes = np.array([self._state_map[s] for s in hidden_states], dtype=int)
+        return regimes
+
     def predict_proba(self, returns: np.ndarray) -> np.ndarray:
         """
         Predicts the state probabilities for each time step.
