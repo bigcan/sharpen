@@ -106,4 +106,4 @@ tmp/
 results/
 models/
 *.db
-marketing_best_params.yaml
+marketing_best_params.yamltrading_state.json

@@ -209,7 +209,33 @@ Circuit breakers in live/paper trading.
 
 
 
-10. Implementation Roadmap
+10. Infrastructure Specification (Docker & Cloud)
+10.1 Container Architecture
+The platform adopts a "Develop like you Deploy" philosophy using Docker Compose. The stack consists of:
+
+*   **Database Service (`db`):**
+    *   **Image:** `timescale/timescaledb:latest-pg14`
+    *   **Role:** Primary store for Market Data (TimescaleDB) and MLflow Backend (PostgreSQL).
+    *   **Persistence:** Docker volume `finrl_pro_db_data`.
+
+*   **MLflow Service (`mlflow`):**
+    *   **Image:** `ghcr.io/mlflow/mlflow:v2.14.1` (or similar stable version).
+    *   **Role:** Centralized Experiment Tracking and Model Registry.
+    *   **Command:** `mlflow server --backend-store-uri postgresql://... --default-artifact-root /mlflow/artifacts --host 0.0.0.0`
+    *   **Persistence:** Docker volume `finrl_pro_mlflow_data` (for local artifacts) or S3 (production).
+    *   **Port:** `5000`.
+
+*   **Agent Services (Optional/On-Demand):**
+    *   **Role:** Paper trading or live execution agents running as detached containers.
+    *   **Config:** Mounts project code and credentials; connects to `mlflow` service for model loading.
+
+10.2 Deployment Strategy
+*   **Local Development:** `docker-compose up -d` starts the infrastructure. Research notebooks and scripts run on the host, connecting via `localhost:5432` and `localhost:5000`.
+*   **GCP Deployment:** The same `docker-compose.yml` is deployed to a Google Compute Engine (GCE) VM.
+    *   **Networking:** Firewall rules restrict access to ports 5432/5000 to authorized IPs or VPN.
+    *   **Storage:** Docker volumes map to persistent GCE disks for durability.
+
+11. Implementation Roadmap
 Cloud Deployment Strategy
 The production FinRL Pro system will run on Google Cloud Platform (GCP).
 Components:
