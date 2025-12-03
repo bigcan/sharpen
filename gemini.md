@@ -100,3 +100,10 @@ A typical developer workflow involves interacting primarily with the `finrl_pro`
 3.  **Training:** Run training jobs using the `finrl_pro` command-line tools, which handle experiment tracking, fingerprinting, and risk enforcement.
 4.  **Evaluation:** Analyze results using the provided evaluation tools and generate reports.
 5.  **Iteration:** Use the tracked experiments and reproducible results to iterate on and improve trading strategies.
+
+## DEVELOPMENT GUIDELINES
+
+### 1. Hardware Acceleration (CUDA)
+- **Prioritize CUDA:** All training pipelines and heavy computational tasks should be configured to use NVIDIA CUDA acceleration where available.
+- **Configuration:** Ensure experiment YAML files specify `device: cuda` in agent parameters.
+- **Dependencies:** Maintain a CUDA-enabled PyTorch environment (check `torch.version.cuda`).
