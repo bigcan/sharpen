@@ -99,6 +99,7 @@ class PPOAgent:
         self,
         state_dim: int,
         action_dim: int,
+        env: Any = None,
         lr: float = 3e-4,
         gamma: float = 0.99,
         gae_lambda: float = 0.95,
@@ -110,9 +111,11 @@ class PPOAgent:
         value_coef: float = 0.5,
         device: str = "cpu",
         action_adapter: str = "tanh",
+        **kwargs
     ) -> None:
         self.state_dim = state_dim
         self.action_dim = action_dim
+        self.env = env
         self.gamma = gamma
         self.gae_lambda = gae_lambda
         self.clip_ratio = clip_ratio
@@ -129,7 +132,6 @@ class PPOAgent:
         # Buffer for one epoch
         self.reset_buffer()
 
-
     def reset_buffer(self) -> None:
         self.buffer: Dict[str, list] = {
             "states": [],
@@ -139,6 +141,31 @@ class PPOAgent:
             "log_probs": [],
             "values": [],
         }
+
+    def train(self, total_timesteps: int) -> None:
+        """Train the agent for a specified number of timesteps."""
+        if self.env is None:
+            raise ValueError("Environment not set. Pass 'env' to constructor.")
+            
+        state, _ = self.env.reset()
+        steps = 0
+        
+        while steps < total_timesteps:
+            action, log_prob = self.select_action(state, deterministic=False)
+            next_state, reward, done, truncated, _ = self.env.step(action)
+            
+            self.store_transition(state, action, reward, done, next_state, log_prob)
+            
+            state = next_state
+            steps += 1
+            
+            if done or truncated:
+                state, _ = self.env.reset()
+            
+            update_interval = 2048
+            if len(self.buffer["states"]) >= update_interval:
+                self.update()
+                self.reset_buffer()
 
     def select_action(self, state: np.ndarray, deterministic: bool = False) -> Tuple[np.ndarray, float]:
         """Select action for a given state."""
@@ -188,11 +215,6 @@ class PPOAgent:
         dones = self.buffer["dones"]
         
         # Compute Returns and Advantages (GAE)
-        # Note: This simple version assumes the buffer contains a complete trajectory 
-        # or we handle the last value bootstrap externally.
-        # For simplicity, we'll compute simple discounted returns here, 
-        # but GAE is better.
-        
         returns = []
         discounted_sum = 0.0
         for r, d in zip(reversed(rewards), reversed(dones)):
@@ -204,14 +226,15 @@ class PPOAgent:
         returns_t = torch.FloatTensor(returns).to(self.device)
         
         # Normalize returns
-        returns_t = (returns_t - returns_t.mean()) / (returns_t.std() + 1e-8)
+        if returns_t.std() > 1e-8:
+             returns_t = (returns_t - returns_t.mean()) / (returns_t.std() + 1e-8)
         
         # Advantages (using returns - values approximation if values not stored/accurate)
-        # Ideally we use GAE.
         with torch.no_grad():
              values = self.policy.get_value(states).squeeze()
         advantages = returns_t - values
-        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        if advantages.std() > 1e-8:
+             advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
         # PPO Epochs
         loss_info = {"policy_loss": 0.0, "value_loss": 0.0, "entropy": 0.0}
@@ -230,17 +253,11 @@ class PPOAgent:
                 b_advantages = advantages[idx]
                 
                 # Evaluate
-                # Note: We are re-sampling distribution to get new log_probs
-                # Ideally we should use the distribution parameters to compute log_prob of b_actions
                 features = self.policy.actor(b_states)
                 mean = self.policy.actor_mean(features)
                 std = self.policy.actor_log_std.exp().expand_as(mean)
                 dist = Normal(mean, std)
                 
-                # We are using the stored actions, which were tanh'd.
-                # Technically we should use the pre-tanh actions for Gaussian log_prob
-                # OR use a TanhNormal distribution.
-                # For this MVP, we approximate.
                 new_log_probs = dist.log_prob(b_actions).sum(dim=-1) # Approximation
                 entropy = dist.entropy().sum(dim=-1).mean()
                 b_values = self.policy.critic(b_states).squeeze()
@@ -279,3 +296,11 @@ class PPOAgent:
     def load(self, path: str) -> None:
         """Load agent model."""
         self.policy.load_state_dict(torch.load(path, map_location=self.device))
+
+    def act(self, state: np.ndarray) -> np.ndarray:
+        """Alias for select_action to match common API."""
+        action, _ = self.select_action(state, deterministic=True)
+        return action
+
+
+

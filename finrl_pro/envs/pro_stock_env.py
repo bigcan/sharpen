@@ -37,6 +37,7 @@ class ProStockEnv(gym.Env, ABC):
         buy_cost_pct: float = 1e-3,
         sell_cost_pct: float = 1e-3,
         reward_scaling: float = 2 ** -13,
+        turnover_penalty: float = 0.0,
     ) -> None:
         assert price_ary.ndim == 2, "price_ary must be (T, stock_dim)"
         assert tech_ary.ndim == 2, "tech_ary must be (T, stock_dim * tech_dim)"
@@ -55,6 +56,7 @@ class ProStockEnv(gym.Env, ABC):
         self.buy_cost_pct = float(buy_cost_pct)
         self.sell_cost_pct = float(sell_cost_pct)
         self.reward_scaling = float(reward_scaling)
+        self.turnover_penalty = float(turnover_penalty)
 
         # Derived shapes
         self.stock_dim = int(self.price_ary.shape[1])
@@ -113,24 +115,33 @@ class ProStockEnv(gym.Env, ABC):
         price = self.price_ary[self.day]
         self.stocks_cd += 1
 
+        total_trade_value = 0.0
         for i in range(self.action_dim):
             action = actions[i]
             if action > 0:  # buy
                 available_amount = self.amount // (price[i] * (1 + self.buy_cost_pct))
                 delta = min(available_amount, action)
                 if delta > 0:
-                    self.amount -= float(price[i] * delta * (1 + self.buy_cost_pct))
+                    trade_val = float(price[i] * delta)
+                    self.amount -= trade_val * (1 + self.buy_cost_pct)
                     self.stocks[i] += delta
                     self.stocks_cd[i] = 0
+                    total_trade_value += trade_val
             elif action < 0:  # sell
                 delta = min(-action, self.stocks[i])
                 if delta > 0:
-                    self.amount += float(price[i] * delta * (1 - self.sell_cost_pct))
+                    trade_val = float(price[i] * delta)
+                    self.amount += trade_val * (1 - self.sell_cost_pct)
                     self.stocks[i] -= delta
                     self.stocks_cd[i] = 0
+                    total_trade_value += trade_val
 
         next_total_asset = self.amount + float((self.stocks * price).sum())
+        # Reward = asset_change - turnover_penalty
+        # We scale the penalty by reward_scaling so it's comparable to the asset change
         reward = (next_total_asset - self.total_asset) * self.reward_scaling
+        reward -= (total_trade_value * self.turnover_penalty * self.reward_scaling)
+        
         self.total_asset = next_total_asset
         self.gamma_reward = self.gamma_reward * self.gamma + reward
         self.episode_return = self.total_asset / self.initial_total_asset
