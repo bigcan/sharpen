@@ -17,6 +17,7 @@ def make_pro_env(
     buy_cost_pct: float = 1e-3,
     sell_cost_pct: float = 1e-3,
     reward_scaling: float = 2 ** -13,
+    turnover_penalty: float = 0.0,
 ) -> ProStockEnv:
     return ProStockEnv(
         price_ary=asm.price_ary,
@@ -30,5 +31,6 @@ def make_pro_env(
         buy_cost_pct=buy_cost_pct,
         sell_cost_pct=sell_cost_pct,
         reward_scaling=reward_scaling,
+        turnover_penalty=turnover_penalty,
     )
 
