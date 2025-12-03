@@ -19,12 +19,16 @@ inside the `finrl_pro/` namespace so upstream code remains untouched.
 
 ## Environment Setup
 
-Requires Python 3.11.
+Requires Python 3.11. **CUDA-capable GPU is highly recommended for training.**
 
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e .[dev]
+
+# For GPU Acceleration (Required for large-scale training):
+# Install PyTorch with CUDA support (adjust cu121 to your CUDA version)
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 # Optional formatters/linters if not installed globally
 pip install ruff black mypy
