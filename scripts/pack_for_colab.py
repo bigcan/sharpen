@@ -10,7 +10,9 @@ def zip_project(output_filename="colab_package.zip"):
         "setup.py",
         "data/sp500_phase9_2005_2025.parquet",
         "results/phase9_sonnet_protocol/phase9_results.csv",
-        "colab_entrypoint.ipynb"
+        "colab_entrypoint.ipynb",
+        "colab_phase10_synapse.ipynb",
+        "specs/phase10_synapse_experiment.md"
     ]
     
     print(f"Creating {output_filename}...")
