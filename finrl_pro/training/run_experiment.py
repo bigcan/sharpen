@@ -31,6 +31,7 @@ from finrl_pro.agents.ppo import PPOAgent
 from finrl_pro.agents.sac import SACAgent
 from finrl_pro.agents.td3 import TD3Agent
 from finrl_pro.agents.ddpg import DDPGAgent
+from finrl_pro.utils.naming import generate_experiment_name
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
@@ -535,9 +536,18 @@ def main(argv: Iterable[str] | None = None) -> None:
     
     real_training_enabled = bool(tcfg.get("real_training", False))
 
+    # Generate Experiment Name
+    exp_meta = cfg.get("experiment", {})
+    run_name = generate_experiment_name(
+        category=exp_meta.get("category", "VALI"),
+        system=exp_meta.get("system", "FinRLPro"),
+        description=exp_meta.get("description", "experiment"),
+        experiment_id=exp_meta.get("id")
+    )
+
     import mlflow
     # Start MLflow run explicitly to capture artifacts from real training
-    with mlflow.start_run() as active_run:
+    with mlflow.start_run(run_name=run_name) as active_run:
         if real_training_enabled:
             sim = _run_real_training(training_cfg=tcfg, logger=logger, tickers=tickers)
             # Log model artifact if generated

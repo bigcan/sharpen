@@ -76,28 +76,6 @@ Get-Content conf/finrl_pro.env | ForEach-Object {
   trainer.run(
       config_path="finrl_pro/configs/experiment_sp500.yaml",
       dataset_hash="dvc://datasets/sp500",
-      seed=42,
-      module_versions={"finrl_pro.training.trainer": "main"},
-      metrics={"sharpe_ratio": 1.1, "max_drawdown": 0.12, "volatility": 0.25},
-      artifact_uris=["s3://finrl-pro/checkpoints/sp500.pt"],
-      baseline_reference="benchmarks:sp500_rolling_1y",
-  )
-  ```
-- **Replay an experiment** using the stored fingerprint manifest:
-  ```bash
-  python -m finrl_pro.training.commands.reproduce <fingerprint_id> \
-    --manifest finrl_pro/configs/fingerprints.yaml
-  ```
-- **Evaluate and generate compliance reports** against the benchmark catalog:
-  ```python
-  from pathlib import Path
-  from finrl_pro.eval.base import EvaluationContext
-  from finrl_pro.eval.benchmark_catalog import BenchmarkCatalog
-  from finrl_pro.eval.report_pipeline import ReportPipeline
-  from finrl_pro.eval.walk_forward import WalkForwardEvaluator
-
-  catalog = BenchmarkCatalog(manifest_path=Path("finrl_pro/configs/benchmarks.yaml"))
-  catalog.load()
 
   evaluator = WalkForwardEvaluator(catalog=catalog)
   context = EvaluationContext(
