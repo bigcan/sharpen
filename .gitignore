@@ -107,3 +107,5 @@ results/
 models/
 *.db
 marketing_best_params.yamltrading_state.json
+
+archive/
