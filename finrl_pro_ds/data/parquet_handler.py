@@ -56,28 +56,30 @@ class ParquetDataHandler:
                  raise ValueError("Parquet data must be in wide format (bid_price_1, etc.) or pre-processed.")
 
             # 2. Macro Features (Tech Indicators)
-            # If OHLCV columns exist (open, high, low, close, volume), generate macro features
-            ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
-            if all(col in df.columns for col in ohlcv_cols):
+            # Check if macro columns are already present (pre-computed)
+            env_macro_cols = [
+                'rsi_14', 'MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9',
+                'BBL_20_2.0', 'BBM_20_2.0', 'BBU_20_2.0', 'BBB_20_2.0', 'BBP_20_2.0',
+                'atr_14', 'obv'
+            ]
+            
+            if all(col in df.columns for col in env_macro_cols):
+                 macro_features = df[env_macro_cols].copy()
+                 macro_features['timestamp'] = df['timestamp']
+            elif all(col in df.columns for col in ['open', 'high', 'low', 'close', 'volume']):
+                # Generate from OHLCV
                 macro_features = self.fe.process_macro(df)
             else:
-                # If macro features are already computed?
-                # MACRO_COLS from env: rsi_14, MACD..., etc.
-                # Check if they exist
-                # For now, generate empty or zeros if missing, or error?
-                # DeepScalper Env REQUIRES macro.
-                # Let's try to compute if possible, else 0 pad.
-                 macro_features = pd.DataFrame(0, index=df.index, columns=[
-                    'rsi_14', 'MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9',
-                    'BBL_20_2.0', 'BBM_20_2.0', 'BBU_20_2.0', 'BBB_20_2.0', 'BBP_20_2.0',
-                    'atr_14', 'obv'
-                ])
+                # Generate dummy if missing
+                 macro_features = pd.DataFrame(0, index=df.index, columns=env_macro_cols)
+                 macro_features['timestamp'] = df['timestamp']
                 
             # 3. Align
             if not macro_features.empty:
                 self._feature_data = self.fe.align_multimodal(micro_features, macro_features)
             else:
                 self._feature_data = micro_features
+
 
             self._timestamps = self._feature_data.index.tolist()
             self._ptr = 0
