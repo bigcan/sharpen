@@ -70,6 +70,26 @@ def test_ensemble_voting(dummy_input):
     action = ensemble.predict(micro, macro)
     assert action.shape == (3,)
 
+def test_dqn_get_probs(dummy_input):
+    micro, macro = dummy_input
+    agent = DeepScalperDQN(network_config=NET_CONFIG)
+    pd, pp, pv = agent.get_probs(micro, macro, temp=1.0)
+    
+    # Check shapes
+    assert pd.shape == (1, 3)
+    assert pp.shape == (1, 5)
+    assert pv.shape == (1, 5)
+    
+    # Check probability properties
+    assert torch.allclose(pd.sum(dim=1), torch.ones(1), atol=1e-5)
+    assert torch.all(pd >= 0) and torch.all(pd <= 1)
+
+def test_a2c_agent_predict(dummy_input):
+    micro, macro = dummy_input
+    agent = DeepScalperA2C(network_config=NET_CONFIG)
+    action = agent.predict(micro, macro)
+    assert action.shape == (3,)
+
 def test_gating_network_output(dummy_input):
     _, macro = dummy_input
     gating = SynapseGatingNetwork(input_dim=11)
