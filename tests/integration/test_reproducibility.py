@@ -8,9 +8,9 @@ from typing import Iterable
 
 import pytest
 
-from finrl_pro.configs.fingerprint_store import FingerprintStore
-from finrl_pro.training.commands.reproduce import main as reproduce_main
-from finrl_pro.training.trainer import Trainer
+from finrl_pro_ds.configs.fingerprint_store import FingerprintStore
+from finrl_pro_ds.training.commands.reproduce import main as reproduce_main
+from finrl_pro_ds.training.trainer import Trainer
 
 
 @pytest.fixture(autouse=True)
@@ -29,10 +29,10 @@ def _run_training(tmp_path: Path) -> tuple[Trainer, FingerprintStore, str]:
     trainer = Trainer(fingerprint_store=store)
 
     fingerprint = trainer.run(
-        config_path="finrl_pro/configs/experiment.yaml",
+        config_path="finrl_pro_ds/configs/experiment.yaml",
         dataset_hash="abc123",
         seed=42,
-        module_versions={"finrl_pro.training.trainer": "abc"},
+        module_versions={"finrl_pro_ds.training.trainer": "abc"},
         metrics={
             "sharpe_ratio": 1.05,
             "max_drawdown": 0.1,

@@ -1,7 +1,7 @@
 import unittest
 import numpy as np
 from unittest.mock import MagicMock
-from finrl_pro.execution.ensemble import VotingEnsemble, WeightedEnsemble, RegimeAwareEnsemble, ThresholdRegimeDetector
+from finrl_pro_ds.execution.ensemble import VotingEnsemble, WeightedEnsemble, RegimeAwareEnsemble, ThresholdRegimeDetector
 
 class MockAgent:
     def __init__(self, action_value):

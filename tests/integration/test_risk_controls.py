@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro.configs.fingerprint_store import FingerprintStore
-from finrl_pro.mlops.alerting import RiskAlertDispatcher
-from finrl_pro.mlops.risk_controls import RiskControlPolicy
-from finrl_pro.mlops.risk_profiles import RiskControlProfile
-from finrl_pro.training.trainer import Trainer
+from finrl_pro_ds.configs.fingerprint_store import FingerprintStore
+from finrl_pro_ds.mlops.alerting import RiskAlertDispatcher
+from finrl_pro_ds.mlops.risk_controls import RiskControlPolicy
+from finrl_pro_ds.mlops.risk_profiles import RiskControlProfile
+from finrl_pro_ds.training.trainer import Trainer
 
 
 @pytest.fixture(autouse=True)
@@ -33,10 +33,10 @@ def _create_trainer(tmp_path: Path, profile: RiskControlProfile) -> tuple[Traine
 
 def _base_kwargs() -> dict[str, object]:
     return {
-        "config_path": "finrl_pro/configs/experiment.yaml",
+        "config_path": "finrl_pro_ds/configs/experiment.yaml",
         "dataset_hash": "abc123",
         "seed": 42,
-        "module_versions": {"finrl_pro.training.trainer": "1.0"},
+        "module_versions": {"finrl_pro_ds.training.trainer": "1.0"},
         "metrics": {
             "sharpe_ratio": 1.05,
             "max_drawdown": 0.05,

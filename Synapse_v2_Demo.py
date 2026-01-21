@@ -5,7 +5,7 @@ Visualizes how the arbitrator adapts weights based on Realized Profit.
 
 import numpy as np
 import pandas as pd
-from finrl_pro.execution.arbitrator import SynapseArbitrator
+from finrl_pro_ds.execution.arbitrator import SynapseArbitrator
 
 class MockAgent:
     def __init__(self, name, mu, sigma):

@@ -3,7 +3,7 @@ import os
 
 def zip_project(output_filename="colab_package.zip"):
     paths_to_zip = [
-        "finrl_pro",
+        "finrl_pro_ds",
         "scripts",
         "configs",
         "pyproject.toml",

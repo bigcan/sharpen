@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from finrl_pro.envs.pro_stock_env import ProStockEnv
+from finrl_pro_ds.envs.pro_stock_env import ProStockEnv
 
 def trace_episode():
     csv_path = "tmp/features_to_validate.csv"

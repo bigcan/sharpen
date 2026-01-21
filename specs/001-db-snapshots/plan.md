@@ -32,7 +32,7 @@
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
 - Verify the feature keeps upstream `FinRLPodracer/` and `Podracer/` directories unchanged; list FinRL Pro modules impacted.
-- Document reproducibility strategy (seeds, dataset identifiers, config files under `finrl_pro/configs/`).
+- Document reproducibility strategy (seeds, dataset identifiers, config files under `finrl_pro_ds/configs/`).
 - Outline experimental risk controls (capital limits, safety toggles, sandbox evaluation path).
 - Define evaluation baselines, walk-forward splits, and success metrics with acceptance thresholds.
 - Specify observability plan: logging, metrics, experiment tracking, and artifact promotion pipeline.

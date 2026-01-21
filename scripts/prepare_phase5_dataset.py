@@ -4,8 +4,8 @@ import os
 import json
 import numpy as np
 import pandas as pd
-from finrl_pro.data.snapshot import main as snapshot_main
-from finrl_pro.data.loader_pro import ProFeatureAssembler
+from finrl_pro_ds.data.snapshot import main as snapshot_main
+from finrl_pro_ds.data.loader_pro import ProFeatureAssembler
 
 def prepare_phase5_dataset():
     print("Starting Phase 5 Full Dataset Preparation (Liquid 20 + Macro)...")

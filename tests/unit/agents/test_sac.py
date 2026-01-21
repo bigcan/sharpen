@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from finrl_pro.agents.sac import SACAgent
+from finrl_pro_ds.agents.sac import SACAgent
 
 
 @pytest.fixture

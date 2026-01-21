@@ -54,4 +54,4 @@ Previous phases failed to produce robust agents because single-asset timing in l
 ## 4. Artifacts
 *   `specs/5xx-phase5-multiasset.md` (This file)
 *   `data/liquid20_vix_macro.parquet`
-*   `finrl_pro/envs/portfolio_allocation.py`
+*   `finrl_pro_ds/envs/portfolio_allocation.py`

@@ -6,7 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from finrl_pro.mlops.api_client import FinRLProAPIClient, FinRLProAPIError
+from finrl_pro_ds.mlops.api_client import FinRLProAPIClient, FinRLProAPIError
 
 
 def _mock_response(status_code: int, payload: dict[str, object]) -> Mock:

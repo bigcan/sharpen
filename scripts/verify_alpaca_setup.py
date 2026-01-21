@@ -12,10 +12,10 @@ import sys
 import pandas as pd
 from dotenv import load_dotenv
 
-# Ensure we can import finrl_pro
+# Ensure we can import finrl_pro_ds
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from finrl_pro.execution.alpaca_broker import AlpacaBroker
+from finrl_pro_ds.execution.alpaca_broker import AlpacaBroker
 
 def main():
     print("=== Alpaca Execution Handler Setup Verification ===")

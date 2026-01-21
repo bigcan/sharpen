@@ -10,11 +10,11 @@ This document describes how to run the Phase 8 Paper Trading Loop.
     ALPACA_API_KEY_ID=your_key_id
     ALPACA_API_SECRET_KEY=your_secret_key
     ```
-3.  **MLflow Models:** The script expects the Phase 6 models to be logged in MLflow (Run IDs hardcoded in `finrl_pro/execution/paper_trade.py`).
+3.  **MLflow Models:** The script expects the Phase 6 models to be logged in MLflow (Run IDs hardcoded in `finrl_pro_ds/execution/paper_trade.py`).
 
 ## Architecture
 
-The paper trading loop (`finrl_pro/execution/paper_trade.py`) performs the following steps:
+The paper trading loop (`finrl_pro_ds/execution/paper_trade.py`) performs the following steps:
 
 1.  **Data Fetching:** Downloads the last 300 days of daily bars from Alpaca for the 20-ticker universe.
 2.  **Feature Engineering:** Computes the 7 standard tech indicators + turbulence using `ProFeatureAssembler`.

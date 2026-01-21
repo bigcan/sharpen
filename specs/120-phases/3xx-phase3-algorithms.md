@@ -21,21 +21,21 @@ Quantify whether PPO, TD3, or SAC delivers the best risk-adjusted performance wh
 - Multi-asset or alternative cost models (later phases).
 
 ## Data / Configs
-- Baseline config path: `finrl_pro/configs/experiments/phase3`
+- Baseline config path: `finrl_pro_ds/configs/experiments/phase3`
   - `ppo_fracdiff_d_0_5.yaml`
   - `td3_fracdiff_d_0_5.yaml`
   - `sac_fracdiff_d_0_5.yaml`
-- Fingerprints recorded in `finrl_pro/configs/fingerprints.yaml`.
+- Fingerprints recorded in `finrl_pro_ds/configs/fingerprints.yaml`.
 
 ## Interfaces
 - Matrix runner:
   ```bash
-  python -m finrl_pro.training.commands.run_matrix \
-    --experiments-dir finrl_pro/configs/experiments/phase3 \
+  python -m finrl_pro_ds.training.commands.run_matrix \
+    --experiments-dir finrl_pro_ds/configs/experiments/phase3 \
     --walk-forward-splits 5
   ```
-- Evaluator: `finrl_pro.eval.walk_forward.WalkForwardEvaluator` (prefers `reports/<fp>/returns.csv`).
-- Leaderboard updater: `python -m finrl_pro.eval.update_leaderboard --matrix-dir reports/matrix --leaderboard docs/leaderboard.md`.
+- Evaluator: `finrl_pro_ds.eval.walk_forward.WalkForwardEvaluator` (prefers `reports/<fp>/returns.csv`).
+- Leaderboard updater: `python -m finrl_pro_ds.eval.update_leaderboard --matrix-dir reports/matrix --leaderboard docs/leaderboard.md`.
 
 ## Telemetry
 - MLflow: log module_versions (agent, action space, reward, fracdiff flag) plus metrics snapshot.
@@ -48,9 +48,9 @@ Quantify whether PPO, TD3, or SAC delivers the best risk-adjusted performance wh
 - Duplicate return artifacts flagged in `reports/matrix/eval_report.json` must be investigated before promotion.
 
 ## Test Plan
-- Dry-run `run_matrix` with `--experiments-dir finrl_pro/configs/experiments/phase3` to ensure sweep expansion handles per-agent YAMLs.
+- Dry-run `run_matrix` with `--experiments-dir finrl_pro_ds/configs/experiments/phase3` to ensure sweep expansion handles per-agent YAMLs.
 - Confirm evaluator ingests newly produced `returns.csv` for each fingerprint (hash-based duplicate guard).
-- Spot-check PSR computation via `python -m finrl_pro.eval.statistics --returns reports/<fp>/returns.csv`.
+- Spot-check PSR computation via `python -m finrl_pro_ds.eval.statistics --returns reports/<fp>/returns.csv`.
 
 ## Tuning Notes (2025-11-13)
 - Added PPO clip-range sweeps (0.15, 0.30), GAE λ = 0.98, and entropy coefficients (ent_coef ∈ {0.005, 0.02}) to probe bias/variance and exploration pressure.
@@ -59,12 +59,12 @@ Quantify whether PPO, TD3, or SAC delivers the best risk-adjusted performance wh
 
 ## Tasks
 - [x] Carry forward baseline knobs (action_continuous + reward_logr + fracdiff d=0.5).
-- [x] Scaffold PPO/TD3/SAC configs with seed sweeps under `finrl_pro/configs/experiments/phase3/`.
+- [x] Scaffold PPO/TD3/SAC configs with seed sweeps under `finrl_pro_ds/configs/experiments/phase3/`.
 - [x] Execute matrix run and capture fingerprints + eval artifacts (`reports/matrix_phase3/`).
 - [ ] Update `reports/matrix/final_report.md` with Phase 3 comparative summary and gate decision.
 - [ ] Adversarial review: confirm no data leakage, non-PIT features, or risk breaches before promotion.
 
 ## Artifacts
 - Matrix outputs: `reports/matrix/runs.json`, `reports/matrix/eval_report.json`, `reports/matrix/report.md` filtered to Phase 3 configs.
-- Fingerprints for each agent + seed stored via `finrl_pro/configs/fingerprints.yaml`.
+- Fingerprints for each agent + seed stored via `finrl_pro_ds/configs/fingerprints.yaml`.
 - Leaderboard row updated once winning agent selected.

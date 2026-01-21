@@ -1,9 +1,9 @@
 import pytest
 import pandas as pd
 import numpy as np
-from finrl_pro.data.regimes import HMMRegimeDetector, MarketRegime
-from finrl_pro.features.custom_features import add_market_regime_features, RegimeConfig
-from finrl_pro.execution.ensemble import FeatureRegimeDetector
+from finrl_pro_ds.data.regimes import HMMRegimeDetector, MarketRegime
+from finrl_pro_ds.features.custom_features import add_market_regime_features, RegimeConfig
+from finrl_pro_ds.execution.ensemble import FeatureRegimeDetector
 
 @pytest.fixture
 def mock_returns():

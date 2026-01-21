@@ -1,15 +1,15 @@
 experiment_id: phase1_action_discrete
-fingerprint_manifest: finrl_pro/configs/fingerprints.yaml
-risk_profile_file: finrl_pro/configs/risk_profiles.yaml
+fingerprint_manifest: finrl_pro_ds/configs/fingerprints.yaml
+risk_profile_file: finrl_pro_ds/configs/risk_profiles.yaml
 risk_profile_id: default
 sandbox_enabled: true
 training:
-  config_path: finrl_pro/configs/config.yaml
+  config_path: finrl_pro_ds/configs/config.yaml
   dataset_hash: dvc://datasets/sp500_daily_2016_2025
   seed: 43
   use_pro_env: false
   module_versions:
-    finrl_pro.training.trainer: FinRL-Pro-Research-1
+    finrl_pro_ds.training.trainer: FinRL-Pro-Research-1
     agent: PPO
     action.space: DISCRETE_{-1,0,+1}
   metrics:
@@ -46,7 +46,7 @@ features:
       window: 256
   cache:
     enabled: true
-    dir: finrl_pro/data/processed
+    dir: finrl_pro_ds/data/processed
 sweep:
   seeds:
   - 41

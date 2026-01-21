@@ -11,15 +11,15 @@ Following the user request to "proceed to phase 4", a comprehensive diagnostic a
 ### A. Data Quality & PIT Audit
 - **Objective:** Verify that feature engineering is Point-In-Time (PIT) safe.
 - **Method:**
-    - Analyzed `finrl_pro.features.custom_features.add_fracdiff_features` code. Confirmed strict `t-1` shifting logic.
-    - Ran `finrl_pro.eval.pit_validator` on `ma20_lag` feature. Result: **PASS**.
+    - Analyzed `finrl_pro_ds.features.custom_features.add_fracdiff_features` code. Confirmed strict `t-1` shifting logic.
+    - Ran `finrl_pro_ds.eval.pit_validator` on `ma20_lag` feature. Result: **PASS**.
     - Created `scripts/verify_fracdiff.py` to re-calculate fracdiff features from raw price. Result: **PASS** (matches CSV).
 - **Conclusion:** The Feature Engineering pipeline is robust and PIT-safe.
 
 ### B. Environment & Cost Model Review
 - **Objective:** Verify that `ProStockEnv` correctly applies costs and executes trades.
 - **Method:**
-    - Audited `finrl_pro.envs.pro_stock_env.py`. Cost logic `price * delta * (1 + fee)` is correct.
+    - Audited `finrl_pro_ds.envs.pro_stock_env.py`. Cost logic `price * delta * (1 + fee)` is correct.
     - Executed `scripts/trace_env.py` for a 50-step episode. Traced cash/asset flow manually.
 - **Conclusion:** The Environment logic is correct. No double-charging or execution bugs found.
 

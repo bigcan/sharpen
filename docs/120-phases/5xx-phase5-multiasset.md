@@ -39,5 +39,5 @@ Single-asset trading (Phase 0-4) has proven fragile, with performance highly sen
 
 ## 5. Artifacts
 - `docs/120-phases/5xx-phase5-multiasset.md` (This file)
-- `finrl_pro/configs/experiments/phase5/` (Experiment configs)
+- `finrl_pro_ds/configs/experiments/phase5/` (Experiment configs)
 - `reports/phase5/` (Results and Analysis)

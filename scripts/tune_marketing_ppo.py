@@ -9,8 +9,8 @@ from stable_baselines3.common.callbacks import BaseCallback
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from finrl_pro.data.feature_factory import MarketingFeatureFactory
-from finrl_pro.envs.pro_stock_env import ProStockEnv
+from finrl_pro_ds.data.feature_factory import MarketingFeatureFactory
+from finrl_pro_ds.envs.pro_stock_env import ProStockEnv
 
 # ---------------------------------------------------------
 # Data Loading & Prep

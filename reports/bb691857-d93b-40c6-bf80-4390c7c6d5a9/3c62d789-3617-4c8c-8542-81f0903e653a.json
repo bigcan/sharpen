@@ -2,7 +2,7 @@
   "benchmark_label": "S&P 500 Rolling 1Y",
   "report": {
     "approval_status": "Draft",
-    "author": "finrl_pro",
+    "author": "finrl_pro_ds",
     "benchmark_id": "sp500_rolling_1y",
     "fingerprint_id": "bb691857-d93b-40c6-bf80-4390c7c6d5a9",
     "generated_at": "2025-11-07T01:12:17.127360+00:00",

@@ -4,7 +4,7 @@ from pathlib import Path
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
 from scipy.stats import pearsonr
-from finrl_pro.data.loader_pro import ProFeatureAssembler
+from finrl_pro_ds.data.loader_pro import ProFeatureAssembler
 
 def main():
     print("Loading data...")

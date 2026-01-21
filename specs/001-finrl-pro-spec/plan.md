@@ -11,7 +11,7 @@ Establish the FinRL Pro extension framework on top of FinRL Podracer so
 institutional teams can ship new DRL capabilities without touching upstream
 code. The feature delivers reproducible research pipelines, enforced risk
 controls, robust observability, and compliance-ready reporting via scaffolded
-modules inside the `finrl_pro/` namespace.
+modules inside the `finrl_pro_ds/` namespace.
 
 ## Technical Context
 
@@ -35,11 +35,11 @@ modules inside the `finrl_pro/` namespace.
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-- **Extension Boundary**: Work remains limited to `finrl_pro/` modules (data, env, agents, training, eval, explainability, mlops, utils) plus configs/tests/docs; upstream trees stay read-only. Impacted FinRL Pro modules will be enumerated per deliverable.
-- **Reproducibility**: Experiments emit deterministic seeds, dataset hashes, and YAML config fingerprints stored in `finrl_pro/configs/` with provenance logs in `finrl_pro/data/`.
+- **Extension Boundary**: Work remains limited to `finrl_pro_ds/` modules (data, env, agents, training, eval, explainability, mlops, utils) plus configs/tests/docs; upstream trees stay read-only. Impacted FinRL Pro modules will be enumerated per deliverable.
+- **Reproducibility**: Experiments emit deterministic seeds, dataset hashes, and YAML config fingerprints stored in `finrl_pro_ds/configs/` with provenance logs in `finrl_pro_ds/data/`.
 - **Risk Controls**: Training and evaluation routines apply capital exposure thresholds, drawdown stops, and sandbox toggles defined in risk control profiles before promotion.
 - **Evaluation Baselines**: Walk-forward suites compare against benchmark indices and prior champions with predefined significance thresholds and diagnostic metrics.
-- **Observability Plan**: Structured logging, metrics, and artifact tags flow through shared utilities in `finrl_pro/mlops/`; experiment tracking tool (TBD) captures runs and promotion pipeline enforces artifact versioning.
+- **Observability Plan**: Structured logging, metrics, and artifact tags flow through shared utilities in `finrl_pro_ds/mlops/`; experiment tracking tool (TBD) captures runs and promotion pipeline enforces artifact versioning.
 
 ## Project Structure
 
@@ -59,7 +59,7 @@ specs/001-finrl-pro-spec/
 ### Source Code (repository root)
 
 ```text
-finrl_pro/
+finrl_pro_ds/
 ├── data/
 ├── env/
 ├── agents/
@@ -70,10 +70,10 @@ finrl_pro/
 ├── configs/
 └── utils/
 
-finrl_pro/configs/
+finrl_pro_ds/configs/
 └── config.yaml (placeholder; to expand for reproducible fingerprints)
 
-finrl_pro/mlops/
+finrl_pro_ds/mlops/
 └── logger.py (placeholder; to expand with observability integrations)
 
 tests/
@@ -84,7 +84,7 @@ docker/
 ```
 
 **Structure Decision**: Continue enhancing the existing Python package layout under
-`finrl_pro/`, adding new modules and experiments while keeping upstream
+`finrl_pro_ds/`, adding new modules and experiments while keeping upstream
 directories untouched.
 
 ## Complexity Tracking
@@ -97,7 +97,7 @@ directories untouched.
 
 ## Constitution Check (Post-Design Review)
 
-- Extension boundary respected: artifacts created only under `finrl_pro/` and
+- Extension boundary respected: artifacts created only under `finrl_pro_ds/` and
   `specs/001-finrl-pro-spec/`; upstream directories untouched.
 - Reproducibility workflow defined via MLflow + DVC S3 backend with config
   fingerprints and benchmark catalog governance.

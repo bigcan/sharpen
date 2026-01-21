@@ -4,7 +4,7 @@ Goal: Validate the new PPO/TD3 tuning variants (clip, entropy, policy noise) aga
 
 ## Chain-of-Verification
 - **Inputs/Outputs**: All configs share `dvc://datasets/sp500_daily_2016_2025`, continuous actions, reward=logR, fracdiff d=0.5. Outputs verified via `reports/<fp>/returns.csv` (hash-checked during matrix run). Feature cache keys recorded per fingerprint.
-- **Config paths**: All new YAMLs live under `finrl_pro/configs/experiments/phase3/` and were invoked by `python -m finrl_pro.training.commands.run_matrix --experiments-dir finrl_pro/configs/experiments/phase3 --output-dir reports/matrix_phase3 --walk-forward-splits 5`.
+- **Config paths**: All new YAMLs live under `finrl_pro_ds/configs/experiments/phase3/` and were invoked by `python -m finrl_pro_ds.training.commands.run_matrix --experiments-dir finrl_pro_ds/configs/experiments/phase3 --output-dir reports/matrix_phase3 --walk-forward-splits 5`.
 - **Risk hooks**: `RiskControlPolicy(default)` enforced; metrics from `reports/matrix_phase3/eval_report.json` show MaxDD ≤ 0.187 and capital_at_risk ≤ 0.09 across new runs.
 - **Tests**: Spot-checked PSR-equivalent Sharpe via evaluator; leaderboard updated from `reports/matrix_phase3/`.
 

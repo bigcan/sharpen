@@ -13,7 +13,7 @@ This document instructs AI coding agents working in this repository. It defines 
 ## Scope & Extension Boundary
 
 - Only modify code under the FinRL Pro extension boundary:
-  - Allowed: `finrl_pro/**`, `tests/**`, `docs/**`, `conf/**`, `specs/**`, `README.md`
+  - Allowed: `finrl_pro_ds/**`, `tests/**`, `docs/**`, `conf/**`, `specs/**`, `README.md`
   - Do not modify upstream code: `FinRLPodracer/**`, `Podracer/**`
 - Keep dependencies and Python versions aligned with `pyproject.toml` (Python 3.11+).
 
@@ -23,7 +23,7 @@ This document instructs AI coding agents working in this repository. It defines 
 - Break work into 3–7 clear steps; use the CLI plan tool when non-trivial.
 
 2) Draft
-- Implement changes under `finrl_pro/**` with minimal, targeted diffs.
+- Implement changes under `finrl_pro_ds/**` with minimal, targeted diffs.
 
 3) Verify (Chain‑of‑Verification; COV)
 - Self-check logic, IO, config paths, and risk/reporting hooks; cross-check with specs in `specs/001-finrl-pro-spec/`.
@@ -32,7 +32,7 @@ This document instructs AI coding agents working in this repository. It defines 
 - Challenge assumptions: data leakage, non-PIT features, risk breaches, missing reproducibility metadata, noisy metrics.
 
 5) Test
-- Lint: `ruff check finrl_pro`
+- Lint: `ruff check finrl_pro_ds`
 - Unit/integration: `pytest`
 
 6) Commit
@@ -45,27 +45,27 @@ This document instructs AI coding agents working in this repository. It defines 
   ```bash
   python -m venv .venv && source .venv/bin/activate
   pip install -e .[dev]
-  cp conf/finrl_pro.env.example conf/finrl_pro.env
-  set -a; source conf/finrl_pro.env; set +a
+  cp conf/finrl_pro_ds.env.example conf/finrl_pro_ds.env
+  set -a; source conf/finrl_pro_ds.env; set +a
   ```
 - Lint & test:
   ```bash
-  ruff check finrl_pro
+  ruff check finrl_pro_ds
   pytest
   ```
 - CLI utilities:
   ```bash
-  # Scaffold a new module inside finrl_pro
-  python -m finrl_pro scaffold finrl_pro.agents.my_agent --doc "My agent"
+  # Scaffold a new module inside finrl_pro_ds
+  python -m finrl_pro_ds scaffold finrl_pro_ds.agents.my_agent --doc "My agent"
 
   # Reproduce an experiment by fingerprint
-  python -m finrl_pro.training.commands.reproduce <fingerprint_id> \
-    --manifest finrl_pro/configs/fingerprints.yaml
+  python -m finrl_pro_ds.training.commands.reproduce <fingerprint_id> \
+    --manifest finrl_pro_ds/configs/fingerprints.yaml
   ```
 
 ## Quality Gates (What to Verify Before Commit)
 
-- Extension boundary: No changes outside `finrl_pro/**` (guard test enforces)
+- Extension boundary: No changes outside `finrl_pro_ds/**` (guard test enforces)
 - Reproducibility: Fingerprints persisted; config/dataset hashes present
 - Risk: Uses `RiskControlPolicy`; no silent breaches; alerts/logs emitted
 - Evaluation/Reporting: Walk-forward integrations remain intact; SHAP hooks unaffected
@@ -75,7 +75,7 @@ This document instructs AI coding agents working in this repository. It defines 
 
 - Data: Enforce Point‑in‑Time indexing; embargo LLM-derived features to avoid leakage
 - Rewards: Keep drawdown/transaction cost/slippage penalties configurable
-- Risk: Validate against `finrl_pro/configs/risk_profiles.yaml` via `load_risk_profile`
+- Risk: Validate against `finrl_pro_ds/configs/risk_profiles.yaml` via `load_risk_profile`
 - Metrics: Favor Sortino/Calmar; provide variance vs. baseline with confidence markers
 
 ## Prompting Technique Templates (10)
@@ -168,7 +168,7 @@ Verify: IO | Configs | Risk | Tests
 
 - “Risk Gate”
 ```text
-Load profile: load_risk_profile(Path("finrl_pro/configs/risk_profiles.yaml"), "default")
+Load profile: load_risk_profile(Path("finrl_pro_ds/configs/risk_profiles.yaml"), "default")
 Check: capital_at_risk, max_drawdown, leverage → policy.evaluate(...)
 ```
 

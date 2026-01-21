@@ -1,19 +1,19 @@
 # Tasks: Database-Backed Data Snapshots
 
 Input: specs/001-db-snapshots/spec.md
-Prerequisites: TimescaleDB/PostgreSQL available; provider creds in `conf/finrl_pro.env` (if Alpaca)
+Prerequisites: TimescaleDB/PostgreSQL available; provider creds in `conf/finrl_pro_ds.env` (if Alpaca)
 
 ## Constitution Guards
-- Extension boundary: FinRL Pro-only changes under `finrl_pro/**`, `specs/**`, `docs/**`, `tests/**`
+- Extension boundary: FinRL Pro-only changes under `finrl_pro_ds/**`, `specs/**`, `docs/**`, `tests/**`
 - Reproducibility: Experiments reference `dataset_hash: snapshot://<snapshot_id>`
 
 ## Tasks (by requirement)
 
- - [x] T101 Schema helpers for TimescaleDB in `finrl_pro/data/db.py` (create hypertable `market_bars`, tables `snapshots`, `snapshot_assets`)
- - [x] T102 Upsert/batch insert utilities for OHLCV bars in `finrl_pro/data/db.py`
- - [x] T103 Snapshot CLI in `finrl_pro/data/snapshot.py` (yfinance complete; Alpaca pending) (fetch → DB upsert → insert into `snapshots`/`snapshot_assets` → print JSON)
- - [x] T104 Export CLI in `finrl_pro/data/export_snapshot.py` (DB → DataFrame → Parquet/CSV with checksum)
- - [x] T105 Loader resolution in `finrl_pro/data/loader.py` for `snapshot://<snapshot_id>`
+ - [x] T101 Schema helpers for TimescaleDB in `finrl_pro_ds/data/db.py` (create hypertable `market_bars`, tables `snapshots`, `snapshot_assets`)
+ - [x] T102 Upsert/batch insert utilities for OHLCV bars in `finrl_pro_ds/data/db.py`
+ - [x] T103 Snapshot CLI in `finrl_pro_ds/data/snapshot.py` (yfinance complete; Alpaca pending) (fetch → DB upsert → insert into `snapshots`/`snapshot_assets` → print JSON)
+ - [x] T104 Export CLI in `finrl_pro_ds/data/export_snapshot.py` (DB → DataFrame → Parquet/CSV with checksum)
+ - [x] T105 Loader resolution in `finrl_pro_ds/data/loader.py` for `snapshot://<snapshot_id>`
  - [x] T106 Trainer integration (no change to interface; ensure fingerprints preserve snapshot URI)
  - [x] T107 README docs: snapshot workflow and commands
  - [x] T108 Unit tests: schema creation, resolver plumbing (mocks)

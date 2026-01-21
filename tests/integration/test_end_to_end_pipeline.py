@@ -8,12 +8,12 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro.configs.fingerprint_store import FingerprintStore
-from finrl_pro.eval.base import EvaluationContext
-from finrl_pro.eval.benchmark_catalog import BenchmarkCatalog
-from finrl_pro.eval.report_pipeline import ReportPipeline
-from finrl_pro.eval.walk_forward import WalkForwardEvaluator
-from finrl_pro.training.trainer import Trainer
+from finrl_pro_ds.configs.fingerprint_store import FingerprintStore
+from finrl_pro_ds.eval.base import EvaluationContext
+from finrl_pro_ds.eval.benchmark_catalog import BenchmarkCatalog
+from finrl_pro_ds.eval.report_pipeline import ReportPipeline
+from finrl_pro_ds.eval.walk_forward import WalkForwardEvaluator
+from finrl_pro_ds.training.trainer import Trainer
 
 
 @pytest.fixture(autouse=True)
@@ -34,10 +34,10 @@ def test_pipeline_generates_compliance_report(tmp_path: Path) -> None:
     trainer = Trainer(fingerprint_store=store)
 
     fingerprint = trainer.run(
-        config_path="finrl_pro/configs/experiment_sp500.yaml",
+        config_path="finrl_pro_ds/configs/experiment_sp500.yaml",
         dataset_hash="dvc://datasets/sp500",
         seed=101,
-        module_versions={"finrl_pro.training.trainer": "test"},
+        module_versions={"finrl_pro_ds.training.trainer": "test"},
         metrics={
             "sharpe_ratio": 1.08,
             "max_drawdown": 0.12,
@@ -67,7 +67,7 @@ def test_pipeline_generates_compliance_report(tmp_path: Path) -> None:
             value = 0.0015 if idx % 2 else 0.0005
             writer.writerow([idx, value])
 
-    catalog = BenchmarkCatalog(manifest_path=Path("finrl_pro/configs/benchmarks.yaml"))
+    catalog = BenchmarkCatalog(manifest_path=Path("finrl_pro_ds/configs/benchmarks.yaml"))
     catalog.load()
 
     context = EvaluationContext(

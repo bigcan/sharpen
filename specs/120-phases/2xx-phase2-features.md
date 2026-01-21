@@ -21,21 +21,21 @@ Evaluate Point-in-Time safe feature ladders (fracdiff, momentum/volatility compo
 - Algorithm changes (Phase 3).
 
 ## Data / Configs
-- `finrl_pro/configs/experiments/phase2/`:
+- `finrl_pro_ds/configs/experiments/phase2/`:
   - `fracdiff_d_0.4.yaml`
   - `fracdiff_d_0.5.yaml`
   - `fracdiff_d_0.6.yaml`
-- Additional ladders (momentum/vol, wavelet) captured under `finrl_pro/configs/experiments/sp500_daily_feats_*.yaml` as optional extensions.
+- Additional ladders (momentum/vol, wavelet) captured under `finrl_pro_ds/configs/experiments/sp500_daily_feats_*.yaml` as optional extensions.
 
 ## Interfaces
 - Matrix runner:
   ```bash
-  python -m finrl_pro.training.commands.run_matrix \
-    --experiments-dir finrl_pro/configs/experiments/phase2 \
+  python -m finrl_pro_ds.training.commands.run_matrix \
+    --experiments-dir finrl_pro_ds/configs/experiments/phase2 \
     --walk-forward-splits 5
   ```
-- Evaluator: `finrl_pro.eval.walk_forward.WalkForwardEvaluator`.
-- PIT validator: `python -m finrl_pro.eval.pit_validator --csv <features.csv> --features <cols...>` before enabling new ladders.
+- Evaluator: `finrl_pro_ds.eval.walk_forward.WalkForwardEvaluator`.
+- PIT validator: `python -m finrl_pro_ds.eval.pit_validator --csv <features.csv> --features <cols...>` before enabling new ladders.
 
 ## Telemetry
 - Log fracdiff parameters (`features.set`, `advanced.fracdiff.d`, `window`, `min_weight`) via `module_versions`.
@@ -50,7 +50,7 @@ Evaluate Point-in-Time safe feature ladders (fracdiff, momentum/volatility compo
 ## Test Plan
 - Run `run_matrix` over Phase 2 configs; inspect `reports/matrix/eval_report.json` for each fracdiff seed.
 - Verify `features.cache_key` differs per d and is recorded in fingerprints.
-- Spot-check `reports/<fp>/returns.csv` → `finrl_pro.eval.statistics` to confirm PSR calculations.
+- Spot-check `reports/<fp>/returns.csv` → `finrl_pro_ds.eval.statistics` to confirm PSR calculations.
 - Run PIT validator on generated feature exports to guard against leakage.
 
 ## Tasks

@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import pandas as pd
 import numpy as np
 
-# Mock necessary components from finrl_pro for a lightweight test
+# Mock necessary components from finrl_pro_ds for a lightweight test
 class MockAgent:
     def __init__(self, config):
         self.config = config
@@ -33,10 +33,10 @@ class MockEnv:
     def reset(self):
         return np.zeros(10)
 
-@patch('finrl_pro.data.loader.load_data', MagicMock(return_value=(pd.DataFrame(), pd.DataFrame(), pd.DataFrame())))
-@patch('finrl_pro.envs.factory.build_env', MagicMock(side_effect=MockEnv))
-@patch('finrl_pro.agents.ppo.PPO', MockAgent)
-@patch('finrl_pro.configs.manager.ConfigManager')
+@patch('finrl_pro_ds.data.loader.load_data', MagicMock(return_value=(pd.DataFrame(), pd.DataFrame(), pd.DataFrame())))
+@patch('finrl_pro_ds.envs.factory.build_env', MagicMock(side_effect=MockEnv))
+@patch('finrl_pro_ds.agents.ppo.PPO', MockAgent)
+@patch('finrl_pro_ds.configs.manager.ConfigManager')
 def test_end_to_end_training_workflow(mock_config_manager):
     """
     Tests a simplified end-to-end training workflow.

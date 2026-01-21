@@ -12,7 +12,7 @@ Stress-test the MVP baseline by toggling action spaces (continuous vs. discrete)
 - Costs: 1 bp fee + 1 bp slippage; next-bar open execution; turnover logged.
 - Agents: PPO baseline replicated with `action.space` ∈ {CONTINUOUS, DISCRETE}; reward toggles {logR, logR_lambda}.
 - Seeds: {41, 42, 43} per config for stability statistics.
-- Risk: enforce `RiskControlPolicy` from `finrl_pro/configs/risk_profiles.yaml` (default).
+- Risk: enforce `RiskControlPolicy` from `finrl_pro_ds/configs/risk_profiles.yaml` (default).
 - Risk budgets now include turnover/cost caps: ensure `max_avg_turnover` and
   `max_transaction_costs_bps` stay within profile limits using the telemetry
   emitted to `reports/<fingerprint_id>/execution.csv`.
@@ -24,22 +24,22 @@ Stress-test the MVP baseline by toggling action spaces (continuous vs. discrete)
 - Multi-asset or cost-stress testing (later phases).
 
 ## Data / Configs
-- Source configs under `finrl_pro/configs/experiments/phase1/`:
+- Source configs under `finrl_pro_ds/configs/experiments/phase1/`:
   - `action_continuous.yaml`
   - `action_discrete.yaml`
   - `reward_logr.yaml`
   - `reward_logr_lambda_sweep.yaml`
-- Fingerprints tracked via `finrl_pro/configs/fingerprints.yaml`.
+- Fingerprints tracked via `finrl_pro_ds/configs/fingerprints.yaml`.
 
 ## Interfaces
 - Matrix runner:
   ```bash
-  python -m finrl_pro.training.commands.run_matrix \
-    --experiments-dir finrl_pro/configs/experiments/phase1 \
+  python -m finrl_pro_ds.training.commands.run_matrix \
+    --experiments-dir finrl_pro_ds/configs/experiments/phase1 \
     --walk-forward-splits 5
   ```
-- Evaluator: `finrl_pro.eval.walk_forward.WalkForwardEvaluator` (now artifact-only).
-- Leaderboard updater: `python -m finrl_pro.eval.update_leaderboard --matrix-dir reports/matrix --leaderboard docs/leaderboard.md`.
+- Evaluator: `finrl_pro_ds.eval.walk_forward.WalkForwardEvaluator` (now artifact-only).
+- Leaderboard updater: `python -m finrl_pro_ds.eval.update_leaderboard --matrix-dir reports/matrix --leaderboard docs/leaderboard.md`.
 
 ## Telemetry
 - MLflow tags: action space, reward type, lambda (if applicable), seed.
@@ -56,7 +56,7 @@ Stress-test the MVP baseline by toggling action spaces (continuous vs. discrete)
 - Ensure each fingerprint directory contains `returns.csv`, `equity_curve.csv`, `drawdown.csv`.
 - Inspect `reports/matrix/risk_summary.json` (auto-generated) for per-config
   averages of Sharpe, PSR, turnover, and cost metrics.
-- Cross-check PSR calculations via `python -m finrl_pro.eval.statistics --returns reports/<fp>/returns.csv`.
+- Cross-check PSR calculations via `python -m finrl_pro_ds.eval.statistics --returns reports/<fp>/returns.csv`.
 - Confirm leaderboard updates only after artifact-backed metrics exist.
 
 ## Tasks

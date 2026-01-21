@@ -6,7 +6,7 @@ import os
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from finrl_pro.data.feature_factory import MarketingFeatureFactory
+from finrl_pro_ds.data.feature_factory import MarketingFeatureFactory
 
 def test_marketing_feature_factory():
     print("Testing MarketingFeatureFactory...")

@@ -14,8 +14,8 @@ description: "Task list template for feature implementation"
 
 ## Constitution Guards *(Mandatory placeholders — replace with concrete tasks)*
 
-- [ ] T00A Confirm no upstream (`FinRLPodracer/`, `Podracer/`) files are modified; reference affected `finrl_pro/` modules.
-- [ ] T00B Capture reproducibility assets (seeds, dataset hashes, configs) and store under `finrl_pro/configs/`.
+- [ ] T00A Confirm no upstream (`FinRLPodracer/`, `Podracer/`) files are modified; reference affected `finrl_pro_ds/` modules.
+- [ ] T00B Capture reproducibility assets (seeds, dataset hashes, configs) and store under `finrl_pro_ds/configs/`.
 - [ ] T00C Implement risk controls and sandbox toggles referenced in the specification.
 - [ ] T00D Define evaluation harness (baselines, walk-forward splits, metrics) and tests/notebooks that exercise it.
 - [ ] T00E Wire observability: structured logging, metrics emission, experiment tracking, and artifact versioning tasks.

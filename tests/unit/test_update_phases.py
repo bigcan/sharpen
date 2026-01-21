@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from finrl_pro.eval.update_phases import _collect
+from finrl_pro_ds.eval.update_phases import _collect
 
 
 def test_collect_includes_risk_telemetry(tmp_path: Path) -> None:

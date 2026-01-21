@@ -9,7 +9,7 @@ Links
 - Matrix evals: `reports/matrix/eval_report.json:1`
 - Matrix summary: `reports/matrix/report.md:1`
 - Fingerprints: `reports/matrix/fingerprints.json:1`
-- Config (MVP): `finrl_pro/configs/experiments/sp500_daily.yaml:1`
+- Config (MVP): `finrl_pro_ds/configs/experiments/sp500_daily.yaml:1`
 - Leaderboard: `docs/leaderboard.md:1`
  - Cost sensitivity: `reports/matrix/cost_sensitivity.md:1`
 
@@ -65,7 +65,7 @@ Links
 - Reward: log returns (costs applied ex‑ante), early stop on Val Sharpe plateau
 - Features: log returns, rolling z‑scores (trailing; shift(1))
 - Costs: 1 bp fee + 1 bp slippage; next‑bar open; action clipping
-- Risk: `default` profile (`finrl_pro/configs/risk_profiles.yaml:1`), hard stop on max drawdown
+- Risk: `default` profile (`finrl_pro_ds/configs/risk_profiles.yaml:1`), hard stop on max drawdown
 - Rebalance: daily
 - Seeds: 3
 - Fingerprint: see `reports/matrix/fingerprints.json:1` (sp500_daily)
@@ -82,13 +82,13 @@ Links
 - Walk-forward rolls executed (expand and roll variants); see `reports/matrix/phase4_runs.md:1`.
 - Regime analysis for MVP in `reports/<fingerprint_id>/regime_report.md:1` shows higher Sharpe in bull regimes and lower in bear/sideways, as expected.
 - Cost sensitivity (2x/3x) summarized in `reports/matrix/cost_sensitivity.md:1` with consistent normalized metrics.
-- PIT validator available: `python -m finrl_pro.eval.pit_validator --csv <features.csv> --features <cols...>`; awaiting real feature exports to certify no leakage.
+- PIT validator available: `python -m finrl_pro_ds.eval.pit_validator --csv <features.csv> --features <cols...>`; awaiting real feature exports to certify no leakage.
  - Execution gap stress (1–2 ticks) added: see `reports/<fingerprint_id>/execution_gap_report.md:1` for base vs gap metrics.
  - Input-noise stress (Gaussian) added: see `reports/<fingerprint_id>/input_noise_report.md:1` for sigma levels vs base.
 
 ## Phase 5 Readiness
 - Multi-asset configs scaffolded: `sp500_multi_longonly.yaml` (allocation vector, long-only) and `sp500_multi_longflat.yaml` (per-asset long/flat) with constraints placeholders.
-- Monitoring hook available: `python -m finrl_pro.mlops.monitoring --fingerprint <fp>` producing PSI/population stats.
+- Monitoring hook available: `python -m finrl_pro_ds.mlops.monitoring --fingerprint <fp>` producing PSI/population stats.
 - Next: bind real multi-asset datasets, add sector exposure mapping, and enable paper-trade integration.
 
 ## Phase 5 Runs

@@ -6,7 +6,7 @@ from typing import Any, Iterable, List, Sequence
 
 import pandas as pd
 
-import finrl_pro.data.snapshot as snap
+import finrl_pro_ds.data.snapshot as snap
 
 
 class _FakeDB:

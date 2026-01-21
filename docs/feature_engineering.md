@@ -8,7 +8,7 @@ the upstream FinRLPodracer pipeline without modifying upstream code.
 
 ## Configuration
 
-Add a `features:` block to your experiment YAML (e.g., `finrl_pro/configs/experiments/sp500_daily.yaml`):
+Add a `features:` block to your experiment YAML (e.g., `finrl_pro_ds/configs/experiments/sp500_daily.yaml`):
 
 ```
 features:
@@ -25,7 +25,7 @@ features:
     wavelet:  { enable: false, cols: [close], wavelet: db4, level: 3, window: 256 }
   cache:
     enabled: true
-    dir: finrl_pro/data/processed
+    dir: finrl_pro_ds/data/processed
 ```
 
 The resolved feature configuration is hashed into a cache key and stored in
@@ -36,8 +36,8 @@ the experiment fingerprint as `features.cache_key`.
 - Build arrays with the Pro loader and create a dynamic env:
 
 ```
-from finrl_pro.data.loader_pro import ProFeatureAssembler
-from finrl_pro.envs.factory import make_pro_env
+from finrl_pro_ds.data.loader_pro import ProFeatureAssembler
+from finrl_pro_ds.envs.factory import make_pro_env
 
 asm = ProFeatureAssembler(dsn=os.getenv("FINRL_PRO_DB_DSN")).assemble_from_snapshot(
     snapshot_id="<uuid>", features_cfg=YOUR_FEATURES_CFG)
@@ -51,8 +51,8 @@ env = make_pro_env(asm)
 - Run a small study over feature families and advanced toggles using Optuna:
 
 ```
-python -m finrl_pro.automl.feature_search \
-  --experiment finrl_pro/configs/experiments/spy_snapshot.yaml \
+python -m finrl_pro_ds.automl.feature_search \
+  --experiment finrl_pro_ds/configs/experiments/spy_snapshot.yaml \
   --trials 10 --study-name demo-ablation
 ```
 
@@ -61,21 +61,21 @@ python -m finrl_pro.automl.feature_search \
 
 ## Advanced Features
 
-- Fractional Differentiation: `finrl_pro.features.custom_features.add_fracdiff_features`
+- Fractional Differentiation: `finrl_pro_ds.features.custom_features.add_fracdiff_features`
   - Parameters: `d`, `window`, `min_weight`, `cols`
   - Produces columns like `fd_close_d0p5_w256`
 
-- Wavelets (SWT/MODWT): `finrl_pro.features.custom_features.add_wavelet_features`
+- Wavelets (SWT/MODWT): `finrl_pro_ds.features.custom_features.add_wavelet_features`
   - Parameters: `wavelet`, `level`, `window`, `cols`
   - Produces band features like `wlt_close_D1_last`, `wlt_close_D1_energy`, and optional `wlt_close_trend`
 
 ## Indicator Families
 
-`finrl_pro.features.families.resolve_indicator_list()` maps family toggles to
+`finrl_pro_ds.features.families.resolve_indicator_list()` maps family toggles to
 stockstats names (e.g., trend → `close_30_sma`, `close_60_sma`, `macd`).
 
 ## Caching
 
-`finrl_pro.data.cache` provides a stable `feature_cache_key` and helpers to
+`finrl_pro_ds.data.cache` provides a stable `feature_cache_key` and helpers to
 load/save cached feature tables (Parquet + JSON meta) under
-`finrl_pro/data/processed/<key>/`.
+`finrl_pro_ds/data/processed/<key>/`.

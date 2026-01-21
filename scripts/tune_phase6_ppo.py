@@ -4,14 +4,14 @@ import optuna
 import yaml
 import logging
 from pathlib import Path
-from finrl_pro.training.run_experiment import _run_real_training, _load_yaml
-from finrl_pro.mlops.logger import MLOpsLogger
+from finrl_pro_ds.training.run_experiment import _run_real_training, _load_yaml
+from finrl_pro_ds.mlops.logger import MLOpsLogger
 
 # Suppress excessive logging
-logging.getLogger("finrl_pro").setLevel(logging.WARNING)
+logging.getLogger("finrl_pro_ds").setLevel(logging.WARNING)
 optuna.logging.set_verbosity(optuna.logging.INFO)
 
-BASE_CONFIG_PATH = Path("finrl_pro/configs/experiments/phase6_tournament_ppo.yaml")
+BASE_CONFIG_PATH = Path("finrl_pro_ds/configs/experiments/phase6_tournament_ppo.yaml")
 
 def objective(trial: optuna.Trial) -> float:
     # 1. Load Base Config
@@ -74,7 +74,7 @@ def main():
     best_config["training"]["agent"]["params"]["batch_size"] = best_params["batch_size"]
     best_config["experiment_id"] = "phase6_ppo_optimized"
     
-    out_path = Path("finrl_pro/configs/experiments/phase6_ppo_optimized.yaml")
+    out_path = Path("finrl_pro_ds/configs/experiments/phase6_ppo_optimized.yaml")
     with out_path.open("w", encoding="utf-8") as f:
         yaml.dump(best_config, f)
     

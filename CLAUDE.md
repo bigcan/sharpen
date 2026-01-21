@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Critical Architectural Principle: Extension Boundary
 
-**NEVER modify files in `FinRLPodracer/` or `Podracer/` directories.** These are upstream dependencies that must remain untouched. All new functionality belongs in `finrl_pro/` namespace and downstream assets. This boundary is non-negotiable and enforced by the FinRL Pro Constitution.
+**NEVER modify files in `FinRLPodracer/` or `Podracer/` directories.** These are upstream dependencies that must remain untouched. All new functionality belongs in `finrl_pro_ds/` namespace and downstream assets. This boundary is non-negotiable and enforced by the FinRL Pro Constitution.
 
 ## Development Commands
 
@@ -40,26 +40,26 @@ pytest -k "test_risk"
 ### Code Quality
 ```bash
 # Lint with ruff
-ruff check finrl_pro
+ruff check finrl_pro_ds
 
 # Format with black
-black finrl_pro
+black finrl_pro_ds
 
 # Type checking (if configured)
-mypy finrl_pro
+mypy finrl_pro_ds
 ```
 
 ### Training & Evaluation
 ```bash
 # Run reproducible training experiment
-python -m finrl_pro.training.trainer \
-  --config finrl_pro/configs/experiment_sp500.yaml \
+python -m finrl_pro_ds.training.trainer \
+  --config finrl_pro_ds/configs/experiment_sp500.yaml \
   --risk-profile risk_profiles:baseline_sp500 \
   --mlflow-tracking-uri $MLFLOW_TRACKING_URI
 
 # Execute walk-forward evaluation
-python -m finrl_pro.eval.walk_forward \
-  --config finrl_pro/configs/experiment_sp500.yaml \
+python -m finrl_pro_ds.eval.walk_forward \
+  --config finrl_pro_ds/configs/experiment_sp500.yaml \
   --benchmark-id benchmarks:sp500_rolling_1y
 ```
 
@@ -69,7 +69,7 @@ python -m finrl_pro.eval.walk_forward \
 
 Every feature must satisfy these non-negotiable requirements:
 
-1. **Extension Boundary**: All work stays within `finrl_pro/` and downstream assets (`specs/`, `tests/`, `notebooks/`, `docker/`, `conf/`)
+1. **Extension Boundary**: All work stays within `finrl_pro_ds/` and downstream assets (`specs/`, `tests/`, `notebooks/`, `docker/`, `conf/`)
 2. **Reproducibility**: Deterministic seeds, dataset hashes, config fingerprints, and checkpoints for every experiment
 3. **Risk Controls**: Enforced capital exposure, drawdown stops, leverage caps, and sandbox requirements
 4. **Evaluation Baselines**: Benchmark comparisons, walk-forward analysis, statistical significance checks
@@ -77,7 +77,7 @@ Every feature must satisfy these non-negotiable requirements:
 
 ### Module Structure
 
-The `finrl_pro/` package is organized by concern:
+The `finrl_pro_ds/` package is organized by concern:
 
 - **`data/`** - Data ingestion, preprocessing, provenance logging
 - **`env/`** - Advanced market environments, safety guards, scenario orchestration
@@ -116,7 +116,7 @@ Understanding these core entities is essential for working with FinRL Pro:
 
 ### Risk Enforcement Flow
 
-The `finrl_pro.training.trainer.Trainer` class orchestrates training with automatic risk checks:
+The `finrl_pro_ds.training.trainer.Trainer` class orchestrates training with automatic risk checks:
 
 1. Execute training workflow
 2. Collect metrics (`capital_at_risk`, `max_drawdown`, `leverage`)
@@ -130,7 +130,7 @@ The `finrl_pro.training.trainer.Trainer` class orchestrates training with automa
 
 Every experiment must be reproducible:
 
-1. Define config in `finrl_pro/configs/` with seed and dataset hash
+1. Define config in `finrl_pro_ds/configs/` with seed and dataset hash
 2. Training captures module versions (git commits)
 3. Fingerprint stored with MLflow run ID and artifact URIs
 4. DVC tracks datasets and checkpoints with content hashes
@@ -138,8 +138,8 @@ Every experiment must be reproducible:
 
 ### MLOps Integration Points
 
-- **Logging**: `finrl_pro.mlops.logger.MLOpsLogger` - structured event logging with correlation IDs
-- **Alerting**: `finrl_pro.mlops.alerting.RiskAlertDispatcher` - risk breach notifications
+- **Logging**: `finrl_pro_ds.mlops.logger.MLOpsLogger` - structured event logging with correlation IDs
+- **Alerting**: `finrl_pro_ds.mlops.alerting.RiskAlertDispatcher` - risk breach notifications
 - **Tracking**: MLflow integration for runs, metrics, params, artifacts
 - **Storage**: DVC with S3-compatible backend for datasets and checkpoints
 
@@ -162,7 +162,7 @@ When implementing features, always reference the relevant spec documents and ens
 
 When creating new functionality:
 
-1. Place code under appropriate `finrl_pro/` subdirectory
+1. Place code under appropriate `finrl_pro_ds/` subdirectory
 2. Add type hints and docstrings
 3. Create corresponding tests in `tests/`
 4. Update relevant config schemas if needed
@@ -224,7 +224,7 @@ Dataset hashes must correspond to DVC-tracked artifacts.
 
 ## Common Pitfalls
 
-1. **Modifying Upstream Code**: Never edit `FinRLPodracer/` or `Podracer/` - use wrappers in `finrl_pro/` instead
+1. **Modifying Upstream Code**: Never edit `FinRLPodracer/` or `Podracer/` - use wrappers in `finrl_pro_ds/` instead
 2. **Missing Reproducibility Metadata**: Always capture seeds, dataset hashes, and module versions
 3. **Skipping Risk Checks**: All training must enforce risk profiles - no bypass allowed
 4. **Incomplete Fingerprints**: Ensure all required metrics (sharpe_ratio, max_drawdown, volatility) are included

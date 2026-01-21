@@ -4,7 +4,7 @@ from typing import List
 
 import types
 
-from finrl_pro.data.db import DatabaseClient
+from finrl_pro_ds.data.db import DatabaseClient
 
 
 class _Cur:

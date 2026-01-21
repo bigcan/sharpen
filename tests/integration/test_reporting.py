@@ -6,16 +6,16 @@ from pathlib import Path
 
 import json
 
-from finrl_pro.eval.base import EvaluationContext
-from finrl_pro.eval.benchmark_catalog import BenchmarkCatalog
-from finrl_pro.eval.report_pipeline import ReportPipeline
-from finrl_pro.eval.walk_forward import WalkForwardEvaluator
-from finrl_pro.explainability.shap_analysis import ShapAnalysis
+from finrl_pro_ds.eval.base import EvaluationContext
+from finrl_pro_ds.eval.benchmark_catalog import BenchmarkCatalog
+from finrl_pro_ds.eval.report_pipeline import ReportPipeline
+from finrl_pro_ds.eval.walk_forward import WalkForwardEvaluator
+from finrl_pro_ds.explainability.shap_analysis import ShapAnalysis
 
 
 def test_reporting_pipeline_generates_report(tmp_path: Path) -> None:
     """Walk-forward evaluation feeds the reporting pipeline end-to-end."""
-    catalog = BenchmarkCatalog(manifest_path=Path("finrl_pro/configs/benchmarks.yaml"))
+    catalog = BenchmarkCatalog(manifest_path=Path("finrl_pro_ds/configs/benchmarks.yaml"))
     catalog.load()
 
     evaluator = WalkForwardEvaluator(catalog=catalog, shap=ShapAnalysis())

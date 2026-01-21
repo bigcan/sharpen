@@ -99,7 +99,7 @@ Goal
 - Require artifact-backed `returns.csv` for every run; evaluations no longer fall back to synthesized metrics.
 
 Checklist
-- [x] Define action/reward experiment YAMLs with seed sweeps under `finrl_pro/configs/experiments/phase1/`.
+- [x] Define action/reward experiment YAMLs with seed sweeps under `finrl_pro_ds/configs/experiments/phase1/`.
 - [x] Run matrix with real training outputs (returns, equity, drawdown CSVs per fingerprint).
 - [x] Aggregate seed metrics, evaluate PSR uplift, and document Gate 1.0 decision with evidence.
 - [x] Adversarial review for turnover spikes, risk breaches, and data leakage.
@@ -401,12 +401,12 @@ Replace "Alchemy" (random tuning) with "Science" (Bayesian Optimization) and "Te
 #### Status (2025-11-24)
 - **HPO (Bayesian Optimization) on PPO Complete:**
     - Tuned PPO hyperparameters on 2010-2020 data, achieving Sharpe ~0.45 (up from ~0.37).
-    - Best parameters saved in `finrl_pro/configs/experiments/phase6_ppo_optimized.yaml`.
+    - Best parameters saved in `finrl_pro_ds/configs/experiments/phase6_ppo_optimized.yaml`.
 - **Walk-Forward HPO Results:**
     - **Execution:** `WalkForwardTuner` completed for 10 rolling windows. Parallel coordinates plots saved in `results/phase6_hpo/`.
     - **Stability:** Parameter stability analysis reveals convergence around `lr=5e-5`, `gamma=0.985`, `clip=0.2`. These values were locked for the optimized PPO.
 - **Regime-Specific Agents:**
-    - Verified training configs in `finrl_pro/configs/experiments/phase6_specialists/`.
+    - Verified training configs in `finrl_pro_ds/configs/experiments/phase6_specialists/`.
     - **Bull:** Trained on 2016-2018 (Strong Bull).
     - **Bear:** Trained on 2008/2020 crash periods (verified via config).
     - **Sideways:** Trained on low-beta periods.

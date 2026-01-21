@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro.eval.risk_summary_gate import enforce_turnover_cost_limits
+from finrl_pro_ds.eval.risk_summary_gate import enforce_turnover_cost_limits
 
 
 def _write_profiles(path: Path, *, max_turnover: float, max_costs: float) -> None:
@@ -34,7 +34,7 @@ def _write_config(path: Path, profile_path: Path) -> None:
         "\n".join(
             [
                 "experiment_id: test",
-                "fingerprint_manifest: finrl_pro/configs/fingerprints.yaml",
+                "fingerprint_manifest: finrl_pro_ds/configs/fingerprints.yaml",
                 f"risk_profile_file: {profile_path.as_posix()}",
                 "risk_profile_id: default",
                 "sandbox_enabled: true",

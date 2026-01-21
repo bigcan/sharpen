@@ -22,17 +22,17 @@ Establish a risk‑compliant single‑asset baseline (SPY daily) to anchor subse
 - Dataset: `dvc://datasets/sp500_daily_2016_2025`
 - Benchmark: `benchmarks:sp500_rolling_1y`
 - Experiments (Phase 0 folder):
-  - `finrl_pro/configs/experiments/phase0/sp500_daily_phase0_ppo.yaml`
-  - `finrl_pro/configs/experiments/phase0/sp500_daily_phase0_td3.yaml`
+  - `finrl_pro_ds/configs/experiments/phase0/sp500_daily_phase0_ppo.yaml`
+  - `finrl_pro_ds/configs/experiments/phase0/sp500_daily_phase0_td3.yaml`
 
 ## Interfaces
-- Runner: `python -m finrl_pro.training.commands.run_matrix --experiments-dir finrl_pro/configs/experiments/phase0 --walk-forward-splits 5`
-- Evaluator: `finrl_pro.eval.walk_forward.WalkForwardEvaluator`
-- Leaderboard updater: `finrl_pro.eval.update_leaderboard`
+- Runner: `python -m finrl_pro_ds.training.commands.run_matrix --experiments-dir finrl_pro_ds/configs/experiments/phase0 --walk-forward-splits 5`
+- Evaluator: `finrl_pro_ds.eval.walk_forward.WalkForwardEvaluator`
+- Leaderboard updater: `finrl_pro_ds.eval.update_leaderboard`
 
 ## Telemetry
 - MLflow params/metrics; artifact URIs tagged
-- Fingerprint manifest: `finrl_pro/configs/fingerprints.yaml`
+- Fingerprint manifest: `finrl_pro_ds/configs/fingerprints.yaml`
 
 ## Acceptance Criteria
 - Test PSR ≥ 0.6; MaxDD ≤ 20%; turnover within budget

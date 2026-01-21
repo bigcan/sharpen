@@ -216,13 +216,13 @@ The platform adopts a "Develop like you Deploy" philosophy using Docker Compose.
 *   **Database Service (`db`):**
     *   **Image:** `timescale/timescaledb:latest-pg14`
     *   **Role:** Primary store for Market Data (TimescaleDB) and MLflow Backend (PostgreSQL).
-    *   **Persistence:** Docker volume `finrl_pro_db_data`.
+    *   **Persistence:** Docker volume `finrl_pro_ds_db_data`.
 
 *   **MLflow Service (`mlflow`):**
     *   **Image:** `ghcr.io/mlflow/mlflow:v2.14.1` (or similar stable version).
     *   **Role:** Centralized Experiment Tracking and Model Registry.
     *   **Command:** `mlflow server --backend-store-uri postgresql://... --default-artifact-root /mlflow/artifacts --host 0.0.0.0`
-    *   **Persistence:** Docker volume `finrl_pro_mlflow_data` (for local artifacts) or S3 (production).
+    *   **Persistence:** Docker volume `finrl_pro_ds_mlflow_data` (for local artifacts) or S3 (production).
     *   **Port:** `5000`.
 
 *   **Agent Services (Optional/On-Demand):**

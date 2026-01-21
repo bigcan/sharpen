@@ -6,7 +6,7 @@ pytestmark = pytest.mark.skipif(
     not os.getenv("FINRL_PRO_DB_DSN"), reason="Requires FINRL_PRO_DB_DSN to run DB integration tests",
 )
 
-from finrl_pro.data.loader_pro import ProFeatureAssembler
+from finrl_pro_ds.data.loader_pro import ProFeatureAssembler
 
 
 def test_assemble_from_snapshot_smoke():

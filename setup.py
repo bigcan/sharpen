@@ -1,8 +1,8 @@
 from setuptools import setup, find_packages
 
 setup(
-    name="elegant_finrl",
-    version="0.3.1",
+    name="finrl_pro_ds",
+    version="0.1.0",
     author="Xiaoyang Liu, Steven Li, Hongyang Yang, Jiahao Zheng",
     author_email="XL2427@columbia.edu",
     url="https://github.com/AI4Finance-LLC/Elegant-finrl",
@@ -10,7 +10,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         'gym', 'matplotlib', 'numpy', 'torch', 'opencv-python', 'yfinance', 'stockstats'],
-    description="finrl 2.0",
+    description="FinRL-Pro_DS",
     classifiers=[
         # Trove classifiers
         # Full list: https://pypi.python.org/pypi?%3Aaction=list_classifiers

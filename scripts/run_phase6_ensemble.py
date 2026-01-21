@@ -3,11 +3,11 @@ import torch
 import pandas as pd
 import numpy as np
 import os
-from finrl_pro.agents.ppo import PPOAgent
-from finrl_pro.data.loader_pro import ProFeatureAssembler
-from finrl_pro.envs.factory import make_pro_env
-from finrl_pro.data.loader import DataLoader
-from finrl_pro.data.regimes import HMMRegimeDetector, MarketRegime
+from finrl_pro_ds.agents.ppo import PPOAgent
+from finrl_pro_ds.data.loader_pro import ProFeatureAssembler
+from finrl_pro_ds.envs.factory import make_pro_env
+from finrl_pro_ds.data.loader import DataLoader
+from finrl_pro_ds.data.regimes import HMMRegimeDetector, MarketRegime
 
 # Run IDs (Hardcoded from training step)
 RUN_IDS = {

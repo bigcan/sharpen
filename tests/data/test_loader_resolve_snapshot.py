@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from finrl_pro.data.loader import DataLoader
+from finrl_pro_ds.data.loader import DataLoader
 
 
 class _FakeDB:

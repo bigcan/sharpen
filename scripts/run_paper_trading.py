@@ -4,7 +4,7 @@ Script to run the Phase 8 Paper Trading Loop.
 import os
 import sys
 import time
-from finrl_pro.execution.paper_trade import PaperTradingSystem
+from finrl_pro_ds.execution.paper_trade import PaperTradingSystem
 
 def main():
     print("Initializing Paper Trading System...")

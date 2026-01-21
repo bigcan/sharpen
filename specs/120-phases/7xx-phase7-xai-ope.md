@@ -16,8 +16,8 @@ RL agents are often "black boxes." To deploy them in finance, we need to underst
 - **Doubly Robust (DR):** Combine IS with a Q-function model for lower variance.
 
 ## Deliverables
-1.  `finrl_pro/explainability/ppo_explainer.py`: Wrapper to apply SHAP/IG to PPO agents.
-2.  `finrl_pro/ope/estimators.py`: Implementation of IS, WIS, and DR estimators.
+1.  `finrl_pro_ds/explainability/ppo_explainer.py`: Wrapper to apply SHAP/IG to PPO agents.
+2.  `finrl_pro_ds/ope/estimators.py`: Implementation of IS, WIS, and DR estimators.
 3.  `scripts/run_phase7_xai.py`: Script to generate SHAP plots for Phase 6 specialists.
 
 ## Success Criteria
