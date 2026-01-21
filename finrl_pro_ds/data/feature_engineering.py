@@ -110,8 +110,10 @@ class DeepScalperFeatureEngineer:
         # OBV
         df['obv'] = ta.obv(df['close'], df['volume'])
         
-        # Clean NaNs
-        df = df.fillna(0) # Forward fill better?
+        # Clean NaNs - FIX F4: Use causal fill methods instead of fillna(0)
+        # ffill propagates last valid observation forward (no look-ahead)
+        # bfill is used only for initial rows where ffill has nothing to propagate
+        df = df.ffill().bfill()
         
         return df
 
