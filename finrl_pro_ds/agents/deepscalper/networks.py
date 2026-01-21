@@ -13,6 +13,7 @@ class MicroEncoder(nn.Module):
     def __init__(
         self, 
         input_size: int = 20, # 5 levels * 4 features
+        private_input_size: int = 2, # Position + Balance
         hidden_size: int = 128,
         num_layers: int = 1,
         dropout: float = 0.0,
@@ -20,18 +21,35 @@ class MicroEncoder(nn.Module):
     ):
         super().__init__()
         self.rnn_type = rnn_type
+        self.hidden_size = hidden_size
         
+        # Micro (LOB) Branch
         if rnn_type == "LSTM":
-            self.rnn = nn.LSTM(
+            self.micro_rnn = nn.LSTM(
                 input_size=input_size,
                 hidden_size=hidden_size,
                 num_layers=num_layers,
                 batch_first=True,
                 dropout=dropout
             )
+            # Private State Branch
+            self.private_rnn = nn.LSTM(
+                input_size=private_input_size,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                batch_first=True,
+                dropout=dropout
+            )
         elif rnn_type == "GRU":
-            self.rnn = nn.GRU(
+            self.micro_rnn = nn.GRU(
                 input_size=input_size,
+                hidden_size=hidden_size,
+                num_layers=num_layers,
+                batch_first=True,
+                dropout=dropout
+            )
+            self.private_rnn = nn.GRU(
+                input_size=private_input_size,
                 hidden_size=hidden_size,
                 num_layers=num_layers,
                 batch_first=True,
@@ -40,26 +58,32 @@ class MicroEncoder(nn.Module):
         else:
             raise ValueError(f"Unknown RNN type: {rnn_type}")
             
-        self.out_layer = nn.Linear(hidden_size, hidden_size)
+        # Projection for concatenated output (Hidden + Hidden)
+        self.out_layer = nn.Linear(hidden_size * 2, hidden_size)
         self.layernorm = nn.LayerNorm(hidden_size)
         self.activation = nn.LeakyReLU()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, private_x: torch.Tensor) -> torch.Tensor:
         # x: (Batch, Window, Features)
+        # private_x: (Batch, Window, 2)
         
-        # RNN
-        # out: (Batch, Window, Hidden)
-        # hn: (Layers, Batch, Hidden)
+        # Micro RNN
         if self.rnn_type == "LSTM":
-            out, (hn, cn) = self.rnn(x)
+            micro_out, _ = self.micro_rnn(x)
+            private_out, _ = self.private_rnn(private_x)
         else:
-            out, hn = self.rnn(x)
+            micro_out, _ = self.micro_rnn(x)
+            private_out, _ = self.private_rnn(private_x)
             
         # Take last time step
-        last_step = out[:, -1, :]
+        micro_last = micro_out[:, -1, :]
+        private_last = private_out[:, -1, :]
+        
+        # Concatenate: (Batch, Hidden * 2)
+        combined = torch.cat([micro_last, private_last], dim=1)
         
         # MLP Projection
-        x = self.out_layer(last_step)
+        x = self.out_layer(combined)
         x = self.layernorm(x)
         x = self.activation(x)
         return x
@@ -161,12 +185,12 @@ class DeepScalperNetwork(nn.Module):
             nn.Linear(128, self.vol_dims)
         )
         
-    def forward(self, micro_in: torch.Tensor, macro_in: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Returns (Q_dir, Q_price, Q_vol, V_state)
         """
         # Encode
-        h_micro = self.micro_encoder(micro_in)
+        h_micro = self.micro_encoder(micro_in, private_in)
         h_macro = self.macro_encoder(macro_in)
         
         # Fusion

@@ -42,8 +42,8 @@ class DeepScalperPolicyNetwork(nn.Module):
         self.actor_price = nn.Linear(fusion_dim, action_space_dims[1])
         self.actor_vol = nn.Linear(fusion_dim, action_space_dims[2])
         
-    def forward(self, micro_in: torch.Tensor, macro_in: torch.Tensor):
-        h_micro = self.micro_encoder(micro_in)
+    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor):
+        h_micro = self.micro_encoder(micro_in, private_in)
         h_macro = self.macro_encoder(macro_in)
         
         combined = torch.cat([h_micro, h_macro], dim=1)
@@ -71,12 +71,13 @@ class DeepScalperPPO:
         if path:
             self.load(path)
             
-    def predict(self, micro: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
+    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
         micro = micro.to(self.device)
+        private_in = private_in.to(self.device)
         macro = macro.to(self.device)
         
         with torch.no_grad():
-            logits_dir, logits_price, logits_vol, _ = self.network(micro, macro)
+            logits_dir, logits_price, logits_vol, _ = self.network(micro, private_in, macro)
             
             if deterministic:
                 a_dir = torch.argmax(logits_dir, dim=1)
@@ -93,13 +94,14 @@ class DeepScalperPPO:
                 
             return np.array([a_dir.item(), a_price.item(), a_vol.item()])
 
-    def get_probs(self, micro: torch.Tensor, macro: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def get_probs(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Return Probabilities for Ensemble Voting"""
         micro = micro.to(self.device)
+        private_in = private_in.to(self.device)
         macro = macro.to(self.device)
         
         with torch.no_grad():
-            logits_dir, logits_price, logits_vol, _ = self.network(micro, macro)
+            logits_dir, logits_price, logits_vol, _ = self.network(micro, private_in, macro)
             
             prob_dir = torch.softmax(logits_dir, dim=1)
             prob_price = torch.softmax(logits_price, dim=1)

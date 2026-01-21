@@ -19,7 +19,7 @@ class DeepScalperEnv(gym.Env):
     State Space: Dict
       - micro: (Window, Levels * 4) -> LOB snapshots FLATTENED for LSTM
       - macro: (Features,) -> Tech indicators
-      - private: (2,) -> Position, Cash (or unrealized PnL)
+      - private: (Window, 2) -> Historical Position & Balance for Private State LSTM
       
     Action Space: MultiDiscrete([3, 5, 5])
       - Direction: 0: Hold, 1: Buy, 2: Sell
@@ -60,7 +60,7 @@ class DeepScalperEnv(gym.Env):
         self.observation_space = gym.spaces.Dict({
             "micro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self.micro_dim), dtype=np.float32),
             "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(NUM_MACRO_FEATURES,), dtype=np.float32),
-            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
+            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, 2), dtype=np.float32)
         })
         
         # Action: [Direction, Price, Volume]
@@ -88,6 +88,7 @@ class DeepScalperEnv(gym.Env):
         
         # Window Buffer - FIX F1: Now (W, L*F)
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
+        self.private_window = np.zeros((self.window_size, 2), dtype=np.float32)
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
 
     def reset(self, seed=None, options=None):
@@ -106,6 +107,11 @@ class DeepScalperEnv(gym.Env):
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
         # We will fill this in reset() properly
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
+        
+        # Initialize Private Window (Position=0, Balance=Initial)
+        self.private_window = np.zeros((self.window_size, 2), dtype=np.float32)
+        initial_private_state = np.array([0.0, float(self.initial_balance)], dtype=np.float32)
+        self.private_window = np.tile(initial_private_state, (self.window_size, 1))
         
         if self.handler:
             self.handler.reset()
@@ -408,11 +414,18 @@ class DeepScalperEnv(gym.Env):
         # 3. Update Macro
         self._update_macro_state(step_data)
 
+        # 4. Update Private Window
+        # Note: self.position and self.balance are already updated in step() before this call
+        # or initialized in reset().
+        current_private = np.array([self.position, self.balance], dtype=np.float32)
+        self.private_window = np.roll(self.private_window, -1, axis=0)
+        self.private_window[-1] = current_private
+
     def _get_observation(self):
         return {
             "micro": self.micro_window.copy(),
             "macro": self.current_macro.copy(),
-            "private": np.array([self.position, self.balance], dtype=np.float32)
+            "private": self.private_window.copy()
         }
 
     def render(self, mode='human'):

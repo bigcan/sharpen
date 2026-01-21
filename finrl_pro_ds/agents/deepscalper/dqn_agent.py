@@ -69,16 +69,17 @@ class DeepScalperDQN:
         # Action dimensions (Dir, Price, Vol)
         self.action_dims = [3, 5, 5] 
 
-    def get_probs(self, micro: torch.Tensor, macro: torch.Tensor, temp: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def get_probs(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, temp: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Return action probabilities via temperature-scaled softmax of Q-values.
         Includes numerical stability fix (subtract max).
         """
         micro = micro.to(self.device)
+        private_in = private_in.to(self.device)
         macro = macro.to(self.device)
         
         with torch.no_grad():
-            q_dir, q_price, q_vol, _ = self.policy_net(micro, macro)
+            q_dir, q_price, q_vol, _ = self.policy_net(micro, private_in, macro)
             
             def safe_softmax(q, t):
                 # Subtract max for numerical stability to prevent overflow
@@ -91,7 +92,7 @@ class DeepScalperDQN:
             
         return p_dir, p_price, p_vol
 
-    def predict(self, micro: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
+    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
         """
         Select action using Epsilon-Greedy strategy.
         Input shapes:
@@ -99,6 +100,7 @@ class DeepScalperDQN:
         macro: (1, Features)
         """
         micro = micro.to(self.device)
+        private_in = private_in.to(self.device)
         macro = macro.to(self.device)
         
         if not deterministic and random.random() < self.epsilon:
@@ -109,7 +111,7 @@ class DeepScalperDQN:
             return np.array([a_dir, a_price, a_vol])
         
         with torch.no_grad():
-            q_dir, q_price, q_vol, _ = self.policy_net(micro, macro)
+            q_dir, q_price, q_vol, _ = self.policy_net(micro, private_in, macro)
             
             a_dir = q_dir.argmax(dim=1).item()
             a_price = q_price.argmax(dim=1).item()
@@ -133,9 +135,11 @@ class DeepScalperDQN:
             return torch.tensor(np.array([s[key] for s in batch_list]), dtype=torch.float32).to(self.device)
         
         micro_state = stack_dict_keys(state_batch, "micro")
+        private_state = stack_dict_keys(state_batch, "private")
         macro_state = stack_dict_keys(state_batch, "macro")
         
         micro_next = stack_dict_keys(next_state_batch, "micro")
+        private_next = stack_dict_keys(next_state_batch, "private")
         macro_next = stack_dict_keys(next_state_batch, "macro")
         
         actions = torch.tensor(np.array(action_batch), dtype=torch.long).to(self.device) # (B, 3)
@@ -143,7 +147,7 @@ class DeepScalperDQN:
         dones = torch.tensor(np.array(done_batch), dtype=torch.float32).unsqueeze(1).to(self.device) # (B, 1)
         
         # Current Q-Values
-        q_dir, q_price, q_vol, _ = self.policy_net(micro_state, macro_state)
+        q_dir, q_price, q_vol, _ = self.policy_net(micro_state, private_state, macro_state)
         
         # Gather Q-values for taken actions
         # actions[:, 0] is direction indices
@@ -153,7 +157,7 @@ class DeepScalperDQN:
         
         # Target Q-Values (Double DQN Logic could be added here, sticking to standard DQN for now)
         with torch.no_grad():
-            next_q_dir, next_q_price, next_q_vol, _ = self.target_net(micro_next, macro_next)
+            next_q_dir, next_q_price, next_q_vol, _ = self.target_net(micro_next, private_next, macro_next)
             
             # Max next Q
             max_next_q_dir = next_q_dir.max(1)[0].unsqueeze(1)

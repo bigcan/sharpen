@@ -44,7 +44,7 @@ class DeepScalperEnsemble:
         self.gating = gating_net.to(device)
         self.device = torch.device(device)
         
-    def predict(self, micro: torch.Tensor, macro: torch.Tensor) -> np.ndarray:
+    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor) -> np.ndarray:
         """
         Ensemble Prediction.
         1. Get weights from Gating Network (based on Macro).
@@ -55,6 +55,7 @@ class DeepScalperEnsemble:
         4. Sample from final distribution.
         """
         micro = micro.to(self.device)
+        private_in = private_in.to(self.device)
         macro = macro.to(self.device)
         
         # 1. Gating Weights
@@ -67,13 +68,13 @@ class DeepScalperEnsemble:
         # 2. Get Probs
         # DQN needs Q->Prob conversion (handled safely by agent now)
         # Note: get_probs handles device movement internally
-        p_dqn_dir, p_dqn_price, p_dqn_vol = self.dqn.get_probs(micro, macro, temp=1.0)
+        p_dqn_dir, p_dqn_price, p_dqn_vol = self.dqn.get_probs(micro, private_in, macro, temp=1.0)
             
         # PPO
-        p_ppo_dir, p_ppo_price, p_ppo_vol = self.ppo.get_probs(micro, macro)
+        p_ppo_dir, p_ppo_price, p_ppo_vol = self.ppo.get_probs(micro, private_in, macro)
         
         # A2C
-        p_a2c_dir, p_a2c_price, p_a2c_vol = self.a2c.get_probs(micro, macro)
+        p_a2c_dir, p_a2c_price, p_a2c_vol = self.a2c.get_probs(micro, private_in, macro)
         
         # 3. Aggregate
         # Final_Prob = w1*P1 + w2*P2 + w3*P3
