@@ -109,3 +109,5 @@ models/
 marketing_best_params.yamltrading_state.json
 
 archive/
+wandb/
+checkpoints/

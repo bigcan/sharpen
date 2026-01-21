@@ -45,12 +45,11 @@ class DeepScalperEnv(gym.Env):
         
         # Reward Config
         self.reward_config = config.get("reward", {})
-        self.reward_scaling = self.reward_config.get("scaling", 1.0)
-        self.reward_type = self.reward_config.get("type", "pnl")
-        # Paper-Aligned Hindsight & Risk
-        self.hindsight_weight = self.reward_config.get("hindsight_weight", 0.0)
-        self.hindsight_horizon = self.reward_config.get("hindsight_horizon", 180) # Default 180 steps as per paper
-        self.risk_penalty_weight = self.reward_config.get("risk_penalty", 0.0)
+        # Reward terms
+        self.reward_scaling = float(self.reward_config.get("scaling", 1e-4))
+        self.hindsight_weight = float(self.reward_config.get("hindsight_weight", 0.0))
+        self.hindsight_horizon = int(self.reward_config.get("hindsight_horizon", 100))
+        self.risk_penalty_weight = float(self.reward_config.get("risk_penalty", 0.0))
         
         # Spaces
         self.lob_levels = 5
@@ -165,60 +164,93 @@ class DeepScalperEnv(gym.Env):
             
             # Level-Crossing Conservative Fill
             if order_dir == 1:  # Buy
-                # Fill if Ask <= Limit Price
-                if self.current_best_ask > 0 and self.current_best_ask <= order_px:
-                    fill_price = self.current_best_ask
+                # CRITICAL FIX: Position Limit Check
+                if self.position + order_qty > self.max_position:
+                    # Cap quantity to reach max_position
+                    order_qty = max(0, self.max_position - self.position)
+                
+                if order_qty > 0 and self.current_best_ask > 0 and self.current_best_ask <= order_px:
+                    # CRITICAL FIX: Liquidity Check
+                    # Check available volume at Level 1 (simplification, real engine would walk book)
+                    # We need to access the LOB data used for this step. 
+                    # self.handler.peek() isn't reliable for "current" step data since ptr moved.
+                    # We can infer it from micro_window[-1] which we just updated.
+                    # Micro Frame: [BidPx1, BidVol1, AskPx1, AskVol1, ...]
+                    # Index 2 = AskPx1, Index 3 = AskVol1
                     
-                    # Apply Maker/Taker Fee
-                    fee_rate = self.taker_fee if is_taker else self.maker_fee
-                    fee = fill_price * order_qty * fee_rate
-                    cost = fill_price * order_qty + fee
+                    # But micro_window is flattened? No, code says:
+                    # self.micro_dim = 20
+                    # frame structure: [bid_px, bid_vol, ask_px, ask_vol] * 5 levels
+                    # Level 1 Ask Vol is at index 3.
                     
-                    if cost <= self.balance:
-                        self.balance -= cost
-                        # Update average price
-                        if self.position >= 0:
-                            total_cost = self.avg_price * self.position + fill_price * order_qty
-                            self.position += order_qty
-                            self.avg_price = total_cost / self.position if self.position > 0 else 0
-                        else:
-                            # Closing short
-                            self.position += order_qty
-                            if self.position > 0:
-                                self.avg_price = fill_price
-                            elif self.position == 0:
-                                self.avg_price = 0
-                            # If pos < 0, avg_price remains same
-                        # If we are buying back, we are closing the most expensive sells first (FIFO/LIFO not implemented, so average).
-                        # For simplicity, if we are still short, the avg_price remains the same as it represents the average sell price of the *remaining* short.
-                        # If we are reducing a short, the avg_price of the remaining short doesn't change based on the buy price.
-                        # It only changes if we open a new short.
-                        # However, the user's intent seems to be to update avg_price based on the fill_price when closing/reducing a short.
-                        self.position += order_qty
-                        if self.position > 0:
-                            self.avg_price = fill_price
-                        elif self.position == 0:
-                            self.avg_price = 0
-                        # If pos < 0 (still short), avg_price of remaining short doesn't change.
+                    available_vol = float(self.micro_window[-1, 3])
+                    
+                    # Fill only what is available or what we ordered
+                    exec_qty = min(order_qty, available_vol)
+                    
+                    if exec_qty > 0:
+                        fill_price = self.current_best_ask
+                        
+                        # Apply Maker/Taker Fee
+                        fee_rate = self.taker_fee if is_taker else self.maker_fee
+                        fee = fill_price * exec_qty * fee_rate
+                        cost = fill_price * exec_qty + fee
+                        
+                        if cost <= self.balance:
+                            self.balance -= cost
+                            # Update average price
+                            if self.position >= 0:
+                                total_cost = self.avg_price * self.position + fill_price * exec_qty
+                                self.position += exec_qty
+                                self.avg_price = total_cost / self.position if self.position > 0 else 0
+                            else:
+                                # Closing short
+                                self.position += exec_qty
+                                if self.position > 0:
+                                    self.avg_price = fill_price
+                                elif self.position == 0:
+                                    self.avg_price = 0
+                            
+                            # Force scalars
+                            if hasattr(self.balance, "item"): self.balance = self.balance.item()
+                            self.balance = float(self.balance)
+                            if hasattr(self.position, "item"): self.position = self.position.item()
+                            self.position = float(self.position)
                                 
             elif order_dir == 2:  # Sell
-                # Fill if Bid >= Limit Price
-                if self.current_best_bid > 0 and self.current_best_bid >= order_px:
-                    fill_price = self.current_best_bid
+                # CRITICAL FIX: Position Limit Check (Short Limit)
+                # Assuming max_position applies to absolute size
+                if self.position - order_qty < -self.max_position:
+                    order_qty = max(0, self.position - (-self.max_position))
+
+                if order_qty > 0 and self.current_best_bid > 0 and self.current_best_bid >= order_px:
+                    # CRITICAL FIX: Liquidity Check
+                    # Level 1 Bid Vol is at index 1.
+                    available_vol = float(self.micro_window[-1, 1])
                     
-                    # Apply Maker/Taker Fee
-                    fee_rate = self.taker_fee if is_taker else self.maker_fee
-                    fee = fill_price * order_qty * fee_rate
-                    proceeds = fill_price * order_qty - fee
+                    exec_qty = min(order_qty, available_vol)
                     
-                    self.balance += proceeds
-                    # Update position
-                    self.position -= order_qty
-                    if self.position < 0: # Was Long, now short
-                        self.avg_price = fill_price
-                    elif self.position == 0: # Was Long, now flat
-                        self.avg_price = 0
-                    # If pos > 0 (still long), avg_price of remaining long doesn't change from a sell to reduce.
+                    if exec_qty > 0:
+                        fill_price = self.current_best_bid
+                        
+                        # Apply Maker/Taker Fee
+                        fee_rate = self.taker_fee if is_taker else self.maker_fee
+                        fee = fill_price * exec_qty * fee_rate
+                        proceeds = fill_price * exec_qty - fee
+                        
+                        self.balance += proceeds
+                        # Update position
+                        self.position -= exec_qty
+                        if self.position < 0: # Was Long, now short
+                            self.avg_price = fill_price
+                        elif self.position == 0: # Was Long, now flat
+                            self.avg_price = 0
+                        
+                        # Force scalars
+                        if hasattr(self.balance, "item"): self.balance = self.balance.item()
+                        self.balance = float(self.balance)
+                        if hasattr(self.position, "item"): self.position = self.position.item()
+                        self.position = float(self.position)
                         
             self.pending_order = None  # Order processed
 
@@ -230,13 +262,11 @@ class DeepScalperEnv(gym.Env):
         else:
             # Map indices to actual values
             offset_ticks = self.price_offsets[price_idx]
-            quantity = self.vol_proportions[vol_idx] * self.max_position
+            quantity = self.vol_proportions[vol_idx] * self.max_position # This is just "Desired Size"
             
             if direction == 1:  # Buy
                 # Limit buy below best ask
                 limit_price = self.current_best_ask - offset_ticks * self.tick_size
-                # Determine Aggressiveness for Fee Logic
-                # If Limit Price >= Best Ask at submission, it's a marketable order (Taker)
                 is_taker = (limit_price >= self.current_best_ask)
             else:  # Sell
                 # Limit sell above best bid
@@ -249,14 +279,25 @@ class DeepScalperEnv(gym.Env):
         current_portfolio_value = self._get_portfolio_value()
         raw_pnl = current_portfolio_value - self.prev_portfolio_value
         
-        # DEBUG: Check types
-        if not isinstance(raw_pnl, (float, int, np.float32, np.float64)):
-             logging.error(f"DEBUG: raw_pnl type={type(raw_pnl)}, val={raw_pnl}")
-             logging.error(f"DEBUG: curr_val={current_portfolio_value}, prev={self.prev_portfolio_value}")
-             logging.error(f"DEBUG: balance={self.balance}, pos={self.position}")
-        
-        # Base Reward
-        reward = raw_pnl * self.reward_scaling
+        try:
+            # Force float to ensure scalar
+            if hasattr(raw_pnl, "item"): raw_pnl = raw_pnl.item() # Handle 0-d array
+            raw_pnl = float(raw_pnl)
+            
+            # Base Reward
+            reward = raw_pnl * self.reward_scaling
+        except Exception as e:
+            logging.error(f"CRITICAL ERROR in Reward Calc: {e}")
+            logging.error(f"raw_pnl: {raw_pnl} type: {type(raw_pnl)}")
+            logging.error(f"curr_val: {current_portfolio_value} type: {type(current_portfolio_value)}")
+            logging.error(f"prev_val: {self.prev_portfolio_value} type: {type(self.prev_portfolio_value)}")
+            logging.error(f"balance: {self.balance} type: {type(self.balance)}")
+            logging.error(f"pos: {self.position} type: {type(self.position)}")
+            # Fallback
+            reward = 0.0
+            raw_pnl = 0.0
+            
+        # 4.1 Risk Penalty (Volatility/Drawdown awareness)
         
         # 4.1 Risk Penalty (Volatility/Drawdown awareness)
         # Penalize negative PnL more heavily? Or simple returns volatility proxy?
@@ -269,20 +310,25 @@ class DeepScalperEnv(gym.Env):
         # "Encourage capturing long-term trends"
         # Term: w * (Price_t+h - Price_t) * Position_t
         if self.hindsight_weight > 0 and self.handler and hasattr(self.handler, 'get_lookahead_price'):
-            future_price = self.handler.get_lookahead_price(self.hindsight_horizon)
-            
-            # Estimate Current Price (Mid)
-            current_mid = (self.current_best_bid + self.current_best_ask) / 2.0
-            if future_price is not None and current_mid > 0:
-                price_delta = future_price - current_mid
-                # Identify if current position aligns with future trend
-                # If Position > 0 and Future Price > Current Price => Good
-                # If Position < 0 and Future Price < Current Price => Good
-                # Normalize by price to get percentage return? Or raw value?
-                # Paper often uses raw value or log returns. Let's use raw value scaled.
+            try:
+                future_price = self.handler.get_lookahead_price(self.hindsight_horizon)
                 
-                hindsight_term = self.position * price_delta
-                reward += self.hindsight_weight * hindsight_term * self.reward_scaling
+                # Estimate Current Price (Mid)
+                current_mid = (self.current_best_bid + self.current_best_ask) / 2.0
+                if future_price is not None and current_mid > 0:
+                    # Force scalars
+                    if hasattr(future_price, "item"): future_price = future_price.item()
+                    future_price = float(future_price)
+                    if hasattr(self.position, "item"): self.position = self.position.item()
+                    self.position = float(self.position)
+                    
+                    price_delta = future_price - current_mid
+                    hindsight_term = self.position * price_delta
+                    reward += self.hindsight_weight * hindsight_term * self.reward_scaling
+            except Exception as e:
+                logging.error(f"Error in Hindsight: {e}")
+                # Hindsight is bonus, safe to skip if fails
+                pass
 
         self.prev_portfolio_value = current_portfolio_value
         
@@ -305,7 +351,10 @@ class DeepScalperEnv(gym.Env):
         """Calculate total equity (Balance + Unrealized PnL)"""
         # Value position at Mid Price
         mid = (self.current_best_ask + self.current_best_bid) / 2.0 if self.current_best_ask > 0 else 0.0
-        return self.balance + (self.position * mid)
+        val = self.balance + (self.position * mid)
+        # Force scalar
+        if hasattr(val, "item"): val = val.item()
+        return float(val)
 
     def _build_frame(self, step_data: Any) -> np.ndarray:
         """Construct a single micro-observation frame from step data."""

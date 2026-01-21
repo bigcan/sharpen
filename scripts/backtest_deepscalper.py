@@ -57,20 +57,25 @@ def main():
         "micro_config": {"input_size": 20, "hidden_size": 128},
         "macro_config": {"input_size": 11, "hidden_sizes": [128]}
     })
+
+    # Create clean config for agents (remove ensemble_config if present)
+    agent_net_config = net_config.copy()
+    if "ensemble_config" in agent_net_config:
+        del agent_net_config["ensemble_config"]
     
     agents_config = config.get("agents", {})
     dqn_config = agents_config.get("dqn", {})
     dqn_kwargs = {k:v for k,v in dqn_config.items() if k not in ["learning_rate", "gamma"]}
     
     dqn = DeepScalperDQN(
-        network_config=net_config, 
-        lr=dqn_config.get("learning_rate", 1e-4),
-        gamma=dqn_config.get("gamma", 0.99),
+        network_config=agent_net_config, 
+        lr=float(dqn_config.get("learning_rate", 1e-4)),
+        gamma=float(dqn_config.get("gamma", 0.99)),
         device=device,
         **dqn_kwargs
     )
-    ppo = DeepScalperPPO(net_config, device=device)
-    a2c = DeepScalperA2C(net_config, device=device)
+    ppo = DeepScalperPPO(agent_net_config, device=device)
+    a2c = DeepScalperA2C(agent_net_config, device=device)
     gating = SynapseGatingNetwork(input_dim=net_config["macro_config"]["input_size"])
     ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
 

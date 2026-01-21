@@ -7,6 +7,7 @@ import os
 import time
 from collections import deque
 import random
+import wandb # Added for WandB logging
 from torch.distributions import Categorical
 
 from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
@@ -44,6 +45,10 @@ class DeepScalperTrainer:
         # self.learning_rate is depcreated for agent-specific configs, but kept as fallback
         self.learning_rate = config.get("learning_rate", 1e-4)
         self.target_update_freq = config.get("target_update_freq", 1000)
+        self.checkpoint_interval = config.get("checkpoint_interval", 10000)
+        
+        # Ensure checkpoint dir exists
+        os.makedirs("checkpoints", exist_ok=True)
         
         # Parse Agent Configs (if available, else fallback to global LR)
         agents_config = config.get("agents", {})
@@ -378,9 +383,14 @@ class DeepScalperTrainer:
                 
                 # Log losses
                 if ppo_loss is not None:
-                     self.logger.log_event("deepscalper.training.update", context={
-                         "step": step, "ppo_loss": ppo_loss, "a2c_loss": a2c_loss, "gating_loss": gating_loss
-                     })
+                     metrics = {
+                         "train/ppo_loss": ppo_loss, 
+                         "train/a2c_loss": a2c_loss, 
+                         "train/gating_loss": gating_loss,
+                         "train/global_step": self.global_step
+                     }
+                     self.logger.log_event("deepscalper.training.update", context=metrics)
+                     wandb.log(metrics)
                 
                 self.ppo_buffer = [] # Clear buffers
                 self.a2c_buffer = []
@@ -390,19 +400,30 @@ class DeepScalperTrainer:
             # self.update_gating(...)
             
             if step % 100 == 0 and dqn_loss is not None:
-                self.logger.log_event("deepscalper.training.step", context={
-                    "step": step, 
-                    "dqn_loss": dqn_loss,
-                    "reward": reward
-                })
+                metrics = {
+                    "train/dqn_loss": dqn_loss,
+                    "train/step_reward": reward,
+                    "train/global_step": self.global_step
+                }
+                self.logger.log_event("deepscalper.training.step", context=metrics)
+                wandb.log(metrics)
+            
+            # Save Checkpoint
+            if (step + 1) % self.checkpoint_interval == 0:
+                ckpt_path = f"checkpoints/checkpoint_{step+1}.pth"
+                self.save_checkpoint(ckpt_path)
+                print(f"Saved checkpoint to {ckpt_path}")
                 
             # Handle Episode End
             if done:
-                self.logger.log_event("deepscalper.training.episode_end", context={
-                    "episode": episode_count,
-                    "reward": episode_rewards,
-                    "length": episode_steps
-                })
+                metrics = {
+                    "train/episode_reward": episode_rewards,
+                    "train/episode_length": episode_steps,
+                    "train/episode_count": episode_count,
+                    "train/global_step": self.global_step
+                }
+                self.logger.log_event("deepscalper.training.episode_end", context=metrics)
+                wandb.log(metrics)
                 
                 obs, info = self.env.reset()
                 micro, macro = self._unpack_obs(obs)

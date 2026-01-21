@@ -1,4 +1,4 @@
-# configs/deepscalper_pilot.yaml
+# configs/deepscalper_pilot_local.yaml
 
 # 1. Environment & Data
 env:
@@ -8,10 +8,10 @@ env:
   window_size: 50
   maker_fee: 0.0002
   taker_fee: 0.0005 # Binance VIP 0 Taker Fee (0.05%)
-  initial_balance: 10000.0 # Data Source (Remote Linux Path)
+  initial_balance: 10000.0
 
 data:
-  file_path: "/data/btc_lob_jan2023.parquet"
+  file_path: "c:/data/btc_lob_jan2023.parquet"
   ticker: "BTCUSDT"
   time_col: "timestamp"
   timeframe: "1m"
@@ -46,7 +46,7 @@ agents:
     epsilon_decay: 0.995
     batch_size: 64
     target_update_freq: 1000
-    buffer_size: 50000 # Reduced for Pilot
+    buffer_size: 50000 
   
   ppo:
     learning_rate: 0.0003
@@ -69,10 +69,14 @@ agents:
 
 # 4. Global Training Settings
 training:
-  total_timesteps: 50000 # Reduced for Pilot (Test Flight)
+  total_timesteps: 500 # Reduced for Local Sanity Check
   device: "cuda"
   update_interval: 64 # Frequent updates for monitoring
-  
+  log_interval: 10
+  checkpoint_interval: 100 # Save frequently
+  seed: 42
+
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["pilot", "test-flight", "fast-debug"]
+  tags: ["pilot", "test-flight", "fast-debug", "local"]
+  mode: "offline" # Offline for local check
