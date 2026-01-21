@@ -2,7 +2,7 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from finrl_pro.data.loader_pro import ProFeatureAssembler
+from finrl_pro_ds.data.loader_pro import ProFeatureAssembler
 
 SNAPSHOT_ID = "36629e7c-ff6a-4585-9fcf-284058413028"
 

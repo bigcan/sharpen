@@ -2,7 +2,7 @@
 
 import pandas as pd
 from pathlib import Path
-from finrl_pro.data.yahoo_loader import YahooLoader
+from finrl_pro_ds.data.yahoo_loader import YahooLoader
 
 # Top 20 S&P 500 constituents (approximate) + SPY
 TICKERS = [

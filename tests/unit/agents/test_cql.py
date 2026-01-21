@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from finrl_pro.agents.cql import CQLAgent
+from finrl_pro_ds.agents.cql import CQLAgent
 
 
 @pytest.fixture

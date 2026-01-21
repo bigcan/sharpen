@@ -39,11 +39,11 @@ def main():
     try:
         import torch
         import numpy as np
-        from finrl_pro.agents.ppo import PPOAgent
-        from finrl_pro.agents.sac import SACAgent
-        from finrl_pro.agents.ddpg import DDPGAgent
-        from finrl_pro.agents.td3 import TD3Agent
-        from finrl_pro.agents.cql import CQLAgent
+        from finrl_pro_ds.agents.ppo import PPOAgent
+        from finrl_pro_ds.agents.sac import SACAgent
+        from finrl_pro_ds.agents.ddpg import DDPGAgent
+        from finrl_pro_ds.agents.td3 import TD3Agent
+        from finrl_pro_ds.agents.cql import CQLAgent
         print("[+] All agents imported successfully.")
     except ImportError as e:
         print(f"[-] Import Error: {e}")

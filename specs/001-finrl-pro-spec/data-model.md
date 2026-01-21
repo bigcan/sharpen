@@ -11,7 +11,7 @@ business concepts from the specification into data contracts for implementation.
 ## Entities
 
 ### 1. FinRL Pro Module
-- **Description**: Logical package within `finrl_pro/` encapsulating a specific
+- **Description**: Logical package within `finrl_pro_ds/` encapsulating a specific
   concern (data, environment, agent, training, evaluation, explainability,
   mlops, utils).
 - **Key Fields**:
@@ -23,7 +23,7 @@ business concepts from the specification into data contracts for implementation.
 - **Relationships**:
   - One-to-many with Experiment Fingerprints (modules contribute to runs).
 - **Validation**:
-  - Module name MUST start with `finrl_pro.`.
+  - Module name MUST start with `finrl_pro_ds.`.
   - Upstream dependency `FinRLPodracer` requires documented adapter coverage.
 
 ### 2. Experiment Fingerprint
@@ -114,5 +114,5 @@ business concepts from the specification into data contracts for implementation.
 
 - All entities must capture `created_at`, `updated_at`, and `created_by` fields
   even if omitted above for brevity.
-- Audit logs should be emitted through `finrl_pro/mlops/logger.py` for any
+- Audit logs should be emitted through `finrl_pro_ds/mlops/logger.py` for any
   changes to risk profiles or benchmark catalogs.

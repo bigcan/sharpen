@@ -2,10 +2,10 @@
 import os
 import time
 import psycopg
-from finrl_pro.data.db import DatabaseClient
+from finrl_pro_ds.data.db import DatabaseClient
 
 def init():
-    dsn = os.getenv("FINRL_PRO_DB_DSN", "postgresql://postgres:password@localhost:5432/finrl_pro")
+    dsn = os.getenv("FINRL_PRO_DB_DSN", "postgresql://postgres:password@localhost:5432/finrl_pro_ds")
     print(f"Connecting to {dsn}...")
     
     # Retry loop for DB readiness

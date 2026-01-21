@@ -4,7 +4,7 @@
 
                           ],
         "baseline_reference":  "benchmarks:sp500_rolling_1y",
-        "config_path":  "finrl_pro/configs/config.yaml",
+        "config_path":  "finrl_pro_ds/configs/config.yaml",
         "dataset_hash":  "dvc://datasets/sp500_daily_2020_2025",
         "fingerprint_id":  "a7957519-39ef-4b64-922a-dcca8b21bbbb",
         "metrics_snapshot":  {
@@ -18,7 +18,7 @@
         "module_versions":  {
                                 "features.cache_key":  "755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347",
                                 "features.env_mode":  "A",
-                                "finrl_pro.training.trainer":  "FinRL-Pro-Research-1"
+                                "finrl_pro_ds.training.trainer":  "FinRL-Pro-Research-1"
                             },
         "seed":  42
     },
@@ -27,7 +27,7 @@
 
                           ],
         "baseline_reference":  "benchmarks:sp500_rolling_1y",
-        "config_path":  "finrl_pro/configs/config.yaml",
+        "config_path":  "finrl_pro_ds/configs/config.yaml",
         "dataset_hash":  "dvc://datasets/sp500_daily_2020_2025",
         "fingerprint_id":  "92068810-78f0-44b8-945e-5c6a892196de",
         "metrics_snapshot":  {
@@ -41,7 +41,7 @@
         "module_versions":  {
                                 "features.cache_key":  "755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347",
                                 "features.env_mode":  "A",
-                                "finrl_pro.training.trainer":  "FinRL-Pro-Research-1"
+                                "finrl_pro_ds.training.trainer":  "FinRL-Pro-Research-1"
                             },
         "seed":  42
     },
@@ -50,7 +50,7 @@
 
                           ],
         "baseline_reference":  "benchmarks:sp500_rolling_1y",
-        "config_path":  "finrl_pro/configs/config.yaml",
+        "config_path":  "finrl_pro_ds/configs/config.yaml",
         "dataset_hash":  "dvc://datasets/sp500_daily_2020_2025",
         "fingerprint_id":  "42de2508-8b1c-416b-a60a-c719517c3e98",
         "metrics_snapshot":  {
@@ -64,7 +64,7 @@
         "module_versions":  {
                                 "features.cache_key":  "755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347",
                                 "features.env_mode":  "A",
-                                "finrl_pro.training.trainer":  "FinRL-Pro-Research-1"
+                                "finrl_pro_ds.training.trainer":  "FinRL-Pro-Research-1"
                             },
         "seed":  42
     },
@@ -73,7 +73,7 @@
 
                           ],
         "baseline_reference":  "benchmarks:sp500_rolling_1y",
-        "config_path":  "finrl_pro/configs/config.yaml",
+        "config_path":  "finrl_pro_ds/configs/config.yaml",
         "dataset_hash":  "dvc://datasets/sp500_daily_2020_2025",
         "fingerprint_id":  "82694300-db61-4364-a642-836ce3e22876",
         "metrics_snapshot":  {
@@ -87,7 +87,7 @@
         "module_versions":  {
                                 "features.cache_key":  "755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347",
                                 "features.env_mode":  "A",
-                                "finrl_pro.training.trainer":  "FinRL-Pro-Research-1"
+                                "finrl_pro_ds.training.trainer":  "FinRL-Pro-Research-1"
                             },
         "seed":  42
     },
@@ -96,7 +96,7 @@
 
                           ],
         "baseline_reference":  "benchmarks:sp500_rolling_1y",
-        "config_path":  "finrl_pro/configs/config.yaml",
+        "config_path":  "finrl_pro_ds/configs/config.yaml",
         "dataset_hash":  "dvc://datasets/sp500_daily_2020_2025",
         "fingerprint_id":  "0a163349-2396-45d6-92a9-a6d2b3517604",
         "metrics_snapshot":  {
@@ -110,7 +110,7 @@
         "module_versions":  {
                                 "features.cache_key":  "755216cbfd4fe1d15fe382f2e17eb4b102dc2370fa50c4f410958c82cefb1347",
                                 "features.env_mode":  "A",
-                                "finrl_pro.training.trainer":  "FinRL-Pro-Research-1"
+                                "finrl_pro_ds.training.trainer":  "FinRL-Pro-Research-1"
                             },
         "seed":  42
     }

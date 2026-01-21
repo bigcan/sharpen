@@ -3,7 +3,7 @@
 Purpose: Track best configurations per phase and roll. One row per winning config; no test-set tuning.
 
 Links:
-- Experiment config: `finrl_pro/configs/experiments/sp500_daily.yaml:1`
+- Experiment config: `finrl_pro_ds/configs/experiments/sp500_daily.yaml:1`
 - Fingerprints index: `reports/matrix/fingerprints.json:1`
 
 ## Table (update after each phase)

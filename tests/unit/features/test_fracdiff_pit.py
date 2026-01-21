@@ -2,7 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from finrl_pro.features.custom_features import add_fracdiff_features, FracDiffConfig
+from finrl_pro_ds.features.custom_features import add_fracdiff_features, FracDiffConfig
 
 
 def _toy_df() -> pd.DataFrame:

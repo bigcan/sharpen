@@ -8,9 +8,9 @@ from stable_baselines3 import PPO
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from finrl_pro.data.feature_factory import MarketingFeatureFactory
-from finrl_pro.envs.pro_stock_env import ProStockEnv
-from finrl_pro.execution.ensemble import VotingEnsemble
+from finrl_pro_ds.data.feature_factory import MarketingFeatureFactory
+from finrl_pro_ds.envs.pro_stock_env import ProStockEnv
+from finrl_pro_ds.execution.ensemble import VotingEnsemble
 
 def load_real_data(ticker='AAPL', start_date='2016-01-01', end_date='2020-01-01'):
     """Loads real S&P 500 data for the experiment."""

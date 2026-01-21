@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 import torch
 import matplotlib.pyplot as plt
-from finrl_pro.data.loader_pro import ProFeatureAssembler
-from finrl_pro.envs.portfolio_allocation import PortfolioAllocationEnv
-from finrl_pro.agents.ppo import PPOAgent
+from finrl_pro_ds.data.loader_pro import ProFeatureAssembler
+from finrl_pro_ds.envs.portfolio_allocation import PortfolioAllocationEnv
+from finrl_pro_ds.agents.ppo import PPOAgent
 
 SNAPSHOT_ID = "36629e7c-ff6a-4585-9fcf-284058413028"
 LIQUID_20 = [

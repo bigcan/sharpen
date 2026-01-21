@@ -3,8 +3,8 @@ import sys
 import os
 import json
 import numpy as np
-from finrl_pro.data.snapshot import main as snapshot_main
-from finrl_pro.data.loader_pro import ProFeatureAssembler
+from finrl_pro_ds.data.snapshot import main as snapshot_main
+from finrl_pro_ds.data.loader_pro import ProFeatureAssembler
 
 def verify_phase5_data():
     print("Starting Phase 5 Data Verification...")

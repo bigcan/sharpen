@@ -9,7 +9,7 @@ Start: <YYYY-MM-DD>
 Target MVP (Phase 0) date: 2025-11-07
 Repo commit: 60dd9a71625bcffa33678e2ae6e13e3bddd13bf4
 Dataset hash: dvc://datasets/sp500_daily_2020_2025
-Config: `finrl_pro/configs/experiments/sp500_daily.yaml:1`
+Config: `finrl_pro_ds/configs/experiments/sp500_daily.yaml:1`
 Fingerprints index: `reports/matrix/fingerprints.json:1`
 Leaderboard: `docs/leaderboard.md:1`
 Matrix report: `reports/matrix/report.md:1`
@@ -49,7 +49,7 @@ Goal: Transition to real data, optimize parameters, and deploy regime-aware ense
 - Optimization
   - [x] Perform hyperparameter tuning (Ray Tune/Optuna) on the tournament winner
     - Optimized Sharpe: 0.45. LR=5e-5, Gamma=0.985, Batch=512.
-    - Config: `finrl_pro/configs/experiments/phase6_ppo_optimized.yaml`
+    - Config: `finrl_pro_ds/configs/experiments/phase6_ppo_optimized.yaml`
 - Ensembles
   - [x] Train Specialist Agents (Bull, Bear, Sideways)
   - [x] Implement Regime Selector / Voting Ensemble

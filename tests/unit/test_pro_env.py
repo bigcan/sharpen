@@ -1,7 +1,7 @@
 import numpy as np
 import pytest
 
-from finrl_pro.envs.pro_stock_env import ProStockEnv
+from finrl_pro_ds.envs.pro_stock_env import ProStockEnv
 
 
 def test_pro_env_shapes_and_step():

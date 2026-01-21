@@ -9,7 +9,7 @@ Links
 - Matrix evals: `reports/matrix/eval_report.json:1`
 - Matrix summary: `reports/matrix/report.md:1`
 - Fingerprints: `reports/matrix/fingerprints.json:1`
-- Config (MVP): `finrl_pro/configs/experiments/sp500_daily.yaml:1`
+- Config (MVP): `finrl_pro_ds/configs/experiments/sp500_daily.yaml:1`
 - Leaderboard: `docs/leaderboard.md:1`
  - Cost sensitivity: `reports/matrix/cost_sensitivity.md:1`
 
@@ -64,7 +64,7 @@ Links
 - Reward: log returns (costs applied ex‑ante), early stop on Val Sharpe plateau
 - Features: log returns, rolling z‑scores (trailing; shift(1))
 - Costs: 1 bp fee + 1 bp slippage; next‑bar open; action clipping
-- Risk: `default` profile (`finrl_pro/configs/risk_profiles.yaml:1`), hard stop on max drawdown
+- Risk: `default` profile (`finrl_pro_ds/configs/risk_profiles.yaml:1`), hard stop on max drawdown
 - Rebalance: daily
 - Seeds: 3
 - Fingerprint: see `reports/matrix/fingerprints.json:1` (sp500_daily)
@@ -74,7 +74,7 @@ Links
 ## Evidence
 - Phase-specific matrices live under `reports/matrix_phase0/` … `reports/matrix_phase3/`, each with `runs.json`, `eval_report.json`, `report.md`, and the corresponding fingerprint IDs.
 - Every fingerprint directory (for example `reports/ea8e4e70-50d7-4bfd-b03e-3287cde01c94/`) now includes `returns.csv`, `equity_curve.csv`, and `drawdown.csv`, enabling leaderboard refreshes, stress tests, and regime analysis.
-- Leaderboard updates remain available via `python -m finrl_pro.eval.update_leaderboard --matrix-dir <matrix_dir> --leaderboard docs/leaderboard.md` once a phase hits its gate with artifact-backed evidence.
+- Leaderboard updates remain available via `python -m finrl_pro_ds.eval.update_leaderboard --matrix-dir <matrix_dir> --leaderboard docs/leaderboard.md` once a phase hits its gate with artifact-backed evidence.
 
 ## Phase Metrics Snapshot (artifact rerun on 2025-11-13)
 - **Phase 0 (MVP)**: Sharpe range [-0.80, 0.94], MaxDD ≈0.19, Vol 0.05–0.13; PPO seed 42 is the most stable configuration under the risk caps.

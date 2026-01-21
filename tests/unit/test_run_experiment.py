@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from finrl_pro.training.run_experiment import (
+from finrl_pro_ds.training.run_experiment import (
     _persist_artifacts,
     _simulate_training_outputs,
 )

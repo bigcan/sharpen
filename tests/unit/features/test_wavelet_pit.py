@@ -4,7 +4,7 @@ import pytest
 
 pywt = pytest.importorskip("pywt")
 
-from finrl_pro.features.custom_features import add_wavelet_features, WaveletConfig
+from finrl_pro_ds.features.custom_features import add_wavelet_features, WaveletConfig
 
 
 def _toy_df() -> pd.DataFrame:

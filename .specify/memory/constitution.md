@@ -4,8 +4,8 @@
 
 ### I. Non-Invasive Extension Boundary
 
-* All FinRL Pro features MUST be implemented inside the `finrl_pro` namespace, leaving `FinRLPodracer/` and `Podracer/` directories untouched unless a cross-team change control process approves an upstream patch.
-* Shared abstractions MUST be introduced through adapters or wrappers layered inside `finrl_pro`, ensuring upstream upgrades can be applied without merge conflicts.
+* All FinRL Pro features MUST be implemented inside the `finrl_pro_ds` namespace, leaving `FinRLPodracer/` and `Podracer/` directories untouched unless a cross-team change control process approves an upstream patch.
+* Shared abstractions MUST be introduced through adapters or wrappers layered inside `finrl_pro_ds`, ensuring upstream upgrades can be applied without merge conflicts.
 * Any proposal to diverge from upstream MUST include a revert strategy and documented impact analysis before work begins.
 
 Maintaining a strict extension boundary ensures the upstream FinRL Podracer project remains stable while FinRL Pro evolves safely under Spec-Kit governance.
@@ -14,8 +14,8 @@ Maintaining a strict extension boundary ensures the upstream FinRL Podracer proj
 
 ### II. Reproducible DRL Pipelines
 
-* Every experiment MUST declare deterministic seeds, dataset hashes, and configuration fingerprints inside `finrl_pro/configs/` and commit them for traceability.
-* Data ingestion and preprocessing routines MUST log provenance (source, timestamp, schema version) through shared helpers in `finrl_pro/data/`.
+* Every experiment MUST declare deterministic seeds, dataset hashes, and configuration fingerprints inside `finrl_pro_ds/configs/` and commit them for traceability.
+* Data ingestion and preprocessing routines MUST log provenance (source, timestamp, schema version) through shared helpers in `finrl_pro_ds/data/`.
 * Training scripts MUST support resumable checkpoints and environment version locking so results can be regenerated on demand.
 
 These rules guarantee that research findings and production deployments can be repeated and audited with full transparency.
@@ -46,7 +46,7 @@ Rigorous evaluation ensures honest reporting, prevents overfitting, and preserve
 
 ### V. Observability & MLOps Discipline
 
-* Structured logging, metric emission, and experiment tracking MUST be enabled for every training/evaluation workflow and routed through shared utilities in `finrl_pro/mlops/`.
+* Structured logging, metric emission, and experiment tracking MUST be enabled for every training/evaluation workflow and routed through shared utilities in `finrl_pro_ds/mlops/`.
 * Critical alerts (training divergence, NaNs, missing data) MUST integrate with the monitoring stack and notify maintainers.
 * Artifacts (models, checkpoints, reports) MUST be versioned, tagged, and promoted through a documented release pipeline.
 
@@ -68,7 +68,7 @@ Traceability ensures that knowledge, design intent, and decisions remain discove
 
 * Use Python 3.11+ with strict type hints, Ruff linting, and `black` formatting in the `.venv` configured by `.vscode/settings.json`.
 * All source files MUST include descriptive docstrings for modules, classes, and public functions.
-* Configurations and hyperparameters MUST live in YAML files under `finrl_pro/configs/` and be imported via Hydra.
+* Configurations and hyperparameters MUST live in YAML files under `finrl_pro_ds/configs/` and be imported via Hydra.
 * Notebooks in `notebooks/` serve as parameterized, reproducible examples, not exploratory scratchpads.
 
 ---

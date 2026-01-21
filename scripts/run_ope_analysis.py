@@ -7,13 +7,13 @@ import pandas as pd
 from typing import Dict, List
 import gymnasium as gym
 
-# Ensure finrl_pro is in path
+# Ensure finrl_pro_ds is in path
 sys.path.append(os.getcwd())
 
-from finrl_pro.data.loader_pro import ProFeatureAssembler
-from finrl_pro.envs.factory import make_pro_env
-from finrl_pro.agents.ppo import PPOAgent
-from finrl_pro.ope.estimators import ImportanceSampling, WeightedImportanceSampling
+from finrl_pro_ds.data.loader_pro import ProFeatureAssembler
+from finrl_pro_ds.envs.factory import make_pro_env
+from finrl_pro_ds.agents.ppo import PPOAgent
+from finrl_pro_ds.ope.estimators import ImportanceSampling, WeightedImportanceSampling
 
 def load_config(config_path: str) -> Dict:
     with open(config_path, "r") as f:

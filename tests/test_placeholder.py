@@ -4,6 +4,6 @@ Purpose: Verify the pytest discovery pipeline for the FinRL Pro scaffold."""
 
 def test_scaffold_imports() -> None:
     """Ensure the FinRL Pro package can be imported."""
-    import finrl_pro
+    import finrl_pro_ds
 
-    assert hasattr(finrl_pro, "__all__")
+    assert hasattr(finrl_pro_ds, "__all__")

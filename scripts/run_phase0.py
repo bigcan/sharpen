@@ -9,12 +9,12 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoModelImprovement
 from stable_baselines3.common.vec_env import DummyVecEnv
 
-from finrl_pro.data.loader import load_data  # Assuming this loads raw Yahoo/Alpaca data
-from finrl_pro.data.splitter import DataSplitter
-from finrl_pro.features.engineering import FeatureEngineer
-from finrl_pro.envs.pro_stock_env import ProStockEnv
-from finrl_pro.envs.wrappers import RiskAwareWrapper, SlippageWrapper
-from finrl_pro.mlops.risk import RiskControlPolicy
+from finrl_pro_ds.data.loader import load_data  # Assuming this loads raw Yahoo/Alpaca data
+from finrl_pro_ds.data.splitter import DataSplitter
+from finrl_pro_ds.features.engineering import FeatureEngineer
+from finrl_pro_ds.envs.pro_stock_env import ProStockEnv
+from finrl_pro_ds.envs.wrappers import RiskAwareWrapper, SlippageWrapper
+from finrl_pro_ds.mlops.risk import RiskControlPolicy
 
 def run_phase0():
     print("--- Starting Phase 0 MVP Run ---")

@@ -48,7 +48,7 @@ training.dataset_hash: dvc://datasets/sp500_multi_2016_2025
 ```
 git pull
 dvc pull
-python -m finrl_pro.training.commands.run_matrix --experiments-dir finrl_pro/configs/experiments --output-dir reports/matrix
+python -m finrl_pro_ds.training.commands.run_matrix --experiments-dir finrl_pro_ds/configs/experiments --output-dir reports/matrix
 ```
 
 ## Notes

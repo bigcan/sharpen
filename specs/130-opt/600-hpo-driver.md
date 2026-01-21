@@ -22,10 +22,10 @@ Manual tuning ("Alchemy") is inefficient and prone to bias. A single agent canno
 - **Meta-Learner:** A mechanism (Voting, Gating Network, or Heuristic like VIX/ADX) to switch between specialists or weight their outputs.
 
 ## Deliverables
-1.  `finrl_pro/automl/hpo_driver.py`: Class to orchestrate Optuna trials.
+1.  `finrl_pro_ds/automl/hpo_driver.py`: Class to orchestrate Optuna trials.
 2.  `scripts/tune_phase6_ppo.py`: Script to run the HPO sweep.
-3.  `finrl_pro/agents/ensemble.py`: Implementation of the `VotingEnsemble` or `RegimeSelector`.
-4.  `finrl_pro/configs/experiments/phase6_specialists/`: Config files for Bull/Bear/Sideways agents.
+3.  `finrl_pro_ds/agents/ensemble.py`: Implementation of the `VotingEnsemble` or `RegimeSelector`.
+4.  `finrl_pro_ds/configs/experiments/phase6_specialists/`: Config files for Bull/Bear/Sideways agents.
 
 ## Success Criteria
 - **Ensemble Uplift:** Ensemble Test Sharpe > 1.2x best single agent.

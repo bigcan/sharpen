@@ -2,211 +2,211 @@
   {
     "config": "tmp/matrix_inputs/ppo_clip_0_15_fracdiff_d_0_5__risk-default__agent-PPO__seed-41.yaml",
     "fingerprint_id": "a9afba6b-096e-4a01-bcf0-d3b3434eae72",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_clip_0_15_fracdiff_d_0_5__risk-default__agent-PPO__seed-42.yaml",
     "fingerprint_id": "4c16bb05-3a8a-42e9-8946-dab0ba82060a",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_clip_0_15_fracdiff_d_0_5__risk-default__agent-PPO__seed-43.yaml",
     "fingerprint_id": "52353742-0cc5-4a89-9b80-8ba8be91f5c6",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_clip_0_30_fracdiff_d_0_5__risk-default__agent-PPO__seed-41.yaml",
     "fingerprint_id": "af5ced0f-839d-4ed0-b644-344e9acd08b5",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_clip_0_30_fracdiff_d_0_5__risk-default__agent-PPO__seed-42.yaml",
     "fingerprint_id": "843cd47f-35c3-4d96-a506-26ebe4d778d7",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_clip_0_30_fracdiff_d_0_5__risk-default__agent-PPO__seed-43.yaml",
     "fingerprint_id": "d6286f8b-7ecb-4421-8d92-7fb472ade8bb",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_entropy_0_005_fracdiff_d_0_5__risk-default__agent-PPO__seed-41.yaml",
     "fingerprint_id": "87c9f9da-0d1d-4daf-99d8-e423b5a62347",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_entropy_0_005_fracdiff_d_0_5__risk-default__agent-PPO__seed-42.yaml",
     "fingerprint_id": "35dfb8a1-2c4c-4147-b516-a0db58cd52f6",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_entropy_0_005_fracdiff_d_0_5__risk-default__agent-PPO__seed-43.yaml",
     "fingerprint_id": "e02e255c-a5aa-4259-afe3-464ca2bd7ccf",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_entropy_0_020_fracdiff_d_0_5__risk-default__agent-PPO__seed-41.yaml",
     "fingerprint_id": "52114a98-8b52-404d-8297-1c1a33af1d94",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_entropy_0_020_fracdiff_d_0_5__risk-default__agent-PPO__seed-42.yaml",
     "fingerprint_id": "6abe21ee-4a54-4bbf-8f34-ff127414b98d",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_entropy_0_020_fracdiff_d_0_5__risk-default__agent-PPO__seed-43.yaml",
     "fingerprint_id": "b5082515-608d-4b52-b6f1-b73b6a0caad9",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_fracdiff_d_0_5__risk-default__agent-PPO__seed-41.yaml",
     "fingerprint_id": "f44614cd-2711-498b-9a1f-d33c4f953dea",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_fracdiff_d_0_5__risk-default__agent-PPO__seed-42.yaml",
     "fingerprint_id": "dbec1f3d-f2c4-4d8c-994d-8a7068387b89",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_fracdiff_d_0_5__risk-default__agent-PPO__seed-43.yaml",
     "fingerprint_id": "98098bb7-84d5-4777-82ba-dfe56849e91d",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_gae_0_98_fracdiff_d_0_5__risk-default__agent-PPO__seed-41.yaml",
     "fingerprint_id": "d51a60bf-0590-473f-bb13-b23d47bc0351",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_gae_0_98_fracdiff_d_0_5__risk-default__agent-PPO__seed-42.yaml",
     "fingerprint_id": "da07a3cc-f90e-499e-856b-bfcd98d5ea79",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/ppo_gae_0_98_fracdiff_d_0_5__risk-default__agent-PPO__seed-43.yaml",
     "fingerprint_id": "0c417d41-28b9-418d-b96e-85733349cff0",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_decay_fracdiff_d_0_5__risk-default__agent-SAC__seed-41.yaml",
     "fingerprint_id": "e7669b1d-6f97-452a-8817-999545bcc2c6",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_decay_fracdiff_d_0_5__risk-default__agent-SAC__seed-42.yaml",
     "fingerprint_id": "6f6e4be9-077b-4c9c-89ae-b2f252e8b147",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_decay_fracdiff_d_0_5__risk-default__agent-SAC__seed-43.yaml",
     "fingerprint_id": "7da17d31-ae88-4282-9ad3-e61db906ce75",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_fixed_0_02_fracdiff_d_0_5__risk-default__agent-SAC__seed-41.yaml",
     "fingerprint_id": "53625736-bd09-4311-b828-22de981885c3",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_fixed_0_02_fracdiff_d_0_5__risk-default__agent-SAC__seed-42.yaml",
     "fingerprint_id": "2b631328-3f6c-49de-b785-8a7c9dd419d2",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_fixed_0_02_fracdiff_d_0_5__risk-default__agent-SAC__seed-43.yaml",
     "fingerprint_id": "8ab68155-a58e-423e-9974-93d3421809cd",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_fixed_0_05_fracdiff_d_0_5__risk-default__agent-SAC__seed-41.yaml",
     "fingerprint_id": "90269097-62b5-4cc0-a19c-cd2183222ae3",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_fixed_0_05_fracdiff_d_0_5__risk-default__agent-SAC__seed-42.yaml",
     "fingerprint_id": "c60a1cbb-635b-40c3-80b4-d286beaca3ec",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_fixed_0_05_fracdiff_d_0_5__risk-default__agent-SAC__seed-43.yaml",
     "fingerprint_id": "a6acb6e6-250c-4f78-a84a-c84eb92fb517",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_fixed_0_20_fracdiff_d_0_5__risk-default__agent-SAC__seed-41.yaml",
     "fingerprint_id": "f13da156-f1c7-4eae-83a3-237b4e4fa0ab",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_fixed_0_20_fracdiff_d_0_5__risk-default__agent-SAC__seed-42.yaml",
     "fingerprint_id": "eba0100b-06d0-4141-a6b3-ac3c6f5ee310",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_alpha_fixed_0_20_fracdiff_d_0_5__risk-default__agent-SAC__seed-43.yaml",
     "fingerprint_id": "de2adfe7-f25d-4391-b9dd-05e180a9147e",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_fracdiff_d_0_5__risk-default__agent-SAC__seed-41.yaml",
     "fingerprint_id": "9e1ca3e8-3fb9-4791-832d-af4876e56338",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_fracdiff_d_0_5__risk-default__agent-SAC__seed-42.yaml",
     "fingerprint_id": "a5890432-1554-45da-9249-81577795d22b",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/sac_fracdiff_d_0_5__risk-default__agent-SAC__seed-43.yaml",
     "fingerprint_id": "3557c220-6e38-4b7a-8b48-0bebfad14470",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/td3_fracdiff_d_0_5__risk-default__agent-TD3__seed-41.yaml",
     "fingerprint_id": "1fec0a53-0a82-417b-8113-820f9f93404a",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/td3_fracdiff_d_0_5__risk-default__agent-TD3__seed-42.yaml",
     "fingerprint_id": "78318eaf-c04c-4c96-9063-1030bdcf34c6",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/td3_fracdiff_d_0_5__risk-default__agent-TD3__seed-43.yaml",
     "fingerprint_id": "e7cc3e01-ad12-4312-916c-1de2128668ff",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/td3_policy_noise_0_10_fracdiff_d_0_5__risk-default__agent-TD3__seed-41.yaml",
     "fingerprint_id": "59467262-c4cf-4b24-92ec-a9f756ce4b69",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/td3_policy_noise_0_10_fracdiff_d_0_5__risk-default__agent-TD3__seed-42.yaml",
     "fingerprint_id": "a844c3d9-1ae8-41c3-861a-d9da16b3d30b",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/td3_policy_noise_0_10_fracdiff_d_0_5__risk-default__agent-TD3__seed-43.yaml",
     "fingerprint_id": "84056af4-a14d-4321-8fbc-e84c27c47a23",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-41.yaml",
     "fingerprint_id": "be9e154a-b76d-4441-93b5-9f59f6bb44a5",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-42.yaml",
     "fingerprint_id": "e056f9f9-14d1-400d-8caa-6f7c7926e9ee",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   },
   {
     "config": "tmp/matrix_inputs/td3_policy_noise_0_25_fracdiff_d_0_5__risk-default__agent-TD3__seed-43.yaml",
     "fingerprint_id": "30f90f32-d533-434f-baed-fee386f0042e",
-    "manifest": "finrl_pro/configs/fingerprints.yaml"
+    "manifest": "finrl_pro_ds/configs/fingerprints.yaml"
   }
 ]

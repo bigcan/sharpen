@@ -2,16 +2,16 @@ version: '3.8'
 services:
   timescaledb:
     image: timescale/timescaledb:latest-pg14
-    container_name: finrl_pro_db
+    container_name: finrl_pro_ds_db
     environment:
       - POSTGRES_PASSWORD=password
       - POSTGRES_USER=postgres
-      - POSTGRES_DB=finrl_pro
+      - POSTGRES_DB=finrl_pro_ds
     ports:
       - "5432:5432"
     restart: always
     volumes:
-      - finrl_pro_db_data:/var/lib/postgresql/data
+      - finrl_pro_ds_db_data:/var/lib/postgresql/data
 
 volumes:
-  finrl_pro_db_data:
+  finrl_pro_ds_db_data:

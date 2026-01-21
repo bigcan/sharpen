@@ -1,11 +1,11 @@
 ﻿import json
 from pathlib import Path
-from finrl_pro.eval.benchmark_catalog import BenchmarkCatalog
-from finrl_pro.eval.walk_forward import WalkForwardEvaluator
-from finrl_pro.eval.base import EvaluationContext
+from finrl_pro_ds.eval.benchmark_catalog import BenchmarkCatalog
+from finrl_pro_ds.eval.walk_forward import WalkForwardEvaluator
+from finrl_pro_ds.eval.base import EvaluationContext
 
 data = json.loads(Path('tmp/fingerprints_full.json').read_text(encoding='utf-8-sig'))
-catalog = BenchmarkCatalog(Path('finrl_pro/configs/benchmarks.yaml'))
+catalog = BenchmarkCatalog(Path('finrl_pro_ds/configs/benchmarks.yaml'))
 catalog.load()
 wf = WalkForwardEvaluator(catalog)
 report = []

@@ -3,9 +3,9 @@ requires = ["setuptools>=64", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "finrl-pro"
+name = "finrl-pro-ds"
 version = "0.1.0"
-description = "FinRL Pro scaffold extending FinRL Podracer with modular components."
+description = "FinRL-Pro_DS scaffold extending FinRL Podracer with modular components."
 authors = [{ name = "FinRL Contributors" }]
 requires-python = ">=3.11"
 dependencies = [
@@ -42,7 +42,7 @@ Homepage = "https://github.com/AI4Finance-Foundation/FinRL"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["finrl_pro*"]
+include = ["finrl_pro_ds*"]
 
 [tool.pytest.ini_options]
 addopts = "-q"

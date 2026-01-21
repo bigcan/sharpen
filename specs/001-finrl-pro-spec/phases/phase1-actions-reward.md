@@ -20,8 +20,8 @@ Identify the simplest action space or reward shaping change that delivers a stat
 ## Data & Configs
 - Dataset: `dvc://datasets/sp500_daily_2016_2025`
 - Baseline reference: `benchmarks:sp500_rolling_1y`
-- Experiments: `finrl_pro/configs/experiments/phase1/*.yaml`
-- Risk profile: `finrl_pro/configs/risk_profiles.yaml` (id: `default`)
+- Experiments: `finrl_pro_ds/configs/experiments/phase1/*.yaml`
+- Risk profile: `finrl_pro_ds/configs/risk_profiles.yaml` (id: `default`)
 
 ## Interfaces
 - Module versions (examples):

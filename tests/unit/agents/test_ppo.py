@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import torch
 
-from finrl_pro.agents.ppo import PPOAgent
+from finrl_pro_ds.agents.ppo import PPOAgent
 
 
 @pytest.fixture

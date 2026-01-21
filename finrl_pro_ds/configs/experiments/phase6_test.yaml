@@ -1,0 +1,68 @@
+experiment_id: phase6_test_out_of_sample
+fingerprint_manifest: finrl_pro_ds/configs/fingerprints.yaml
+risk_profile_file: finrl_pro_ds/configs/risk_profiles.yaml
+risk_profile_id: aggressive # Use Default Research profile for OOS test (enforce risk limits)
+sandbox_enabled: true
+
+training:
+  config_path: finrl_pro_ds/configs/config.yaml
+  dataset_hash: file://data/sp500_full_2010_2025.parquet
+  seed: 2025
+  real_training: true
+  start_date: "2021-01-01"
+  end_date: "2024-12-31"
+  total_timesteps: 10000 # Just evaluation, but using the training loop for now
+  
+  module_versions:
+    agent: PPOAgent
+    action.space: ALLOCATION_VECTOR_LONG_ONLY
+  
+  agent:
+    name: PPOAgent
+    params:
+      learning_rate: 5.2e-5
+      n_steps: 2048
+      batch_size: 512
+      gamma: 0.985
+      gae_lambda: 0.95
+      clip_range: 0.2
+      ent_coef: 0.022
+
+  environment:
+    initial_capital: 1000000.0
+    buy_cost_pct: 0.001
+    sell_cost_pct: 0.001
+    gamma: 0.985
+    turbulence_thresh: 150.0
+    min_stock_rate: 0.0
+    max_stock: 1.0e2
+
+  action_smoothing: 0.1
+  turnover_penalty: 0.0
+
+  metrics:
+    sharpe_ratio: 1.0
+    max_drawdown: 0.25 # Relaxed slightly for OOS reality check
+  
+  artifact_uris: []
+  baseline_reference: benchmarks:sp500_buy_hold
+
+features:
+  enable_custom: false
+  use_turbulence: true
+  families:
+    trend: true
+    momentum: true
+    vol: true
+    volume: true
+  advanced:
+    fracdiff:
+      enable: true
+      d: 0.4
+    wavelet:
+      enable: false # Disable wavelet for speed/simplicity as it was unused in optimized run? 
+                    # Wait, feature set should match Training. Training had Wavelet: False in the yaml.
+                    # Checked phase6_tournament_ppo.yaml: Wavelet enable: false. Correct.
+  cache:
+    enabled: true
+    dir: finrl_pro_ds/data/processed

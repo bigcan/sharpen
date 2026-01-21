@@ -10,13 +10,13 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from finrl_pro.data.loader_pro import ProFeatureAssembler
-from finrl_pro.envs.factory import make_pro_env
-from finrl_pro.agents.ppo import PPOAgent
-from finrl_pro.data.regimes import HMMRegimeDetector, MarketRegime
+from finrl_pro_ds.data.loader_pro import ProFeatureAssembler
+from finrl_pro_ds.envs.factory import make_pro_env
+from finrl_pro_ds.agents.ppo import PPOAgent
+from finrl_pro_ds.data.regimes import HMMRegimeDetector, MarketRegime
 
 # Configuration
-CONFIG_PATH = "finrl_pro/configs/experiments/phase8_comprehensive.yaml"
+CONFIG_PATH = "finrl_pro_ds/configs/experiments/phase8_comprehensive.yaml"
 DATA_PATH = "data/sp500_full_2010_2025.parquet"
 MODEL_DIR = "models/phase8"
 os.makedirs(MODEL_DIR, exist_ok=True)

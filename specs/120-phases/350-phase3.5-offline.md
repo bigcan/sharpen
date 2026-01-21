@@ -31,11 +31,11 @@ Offline RL is designed for this exact scenario. It learns a policy from a static
 
 ## Architecture Changes
 
-### `finrl_pro/agents/cql.py`
+### `finrl_pro_ds/agents/cql.py`
 - Inherit from `SACAgent`.
 - Override `update` method to add CQL loss term.
 
-### `finrl_pro/data/offline.py`
+### `finrl_pro_ds/data/offline.py`
 - `OfflineDatasetBuilder`: Class to generate and save/load static replay buffers.
 
 ## Success Criteria

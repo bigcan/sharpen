@@ -11,11 +11,11 @@ from stable_baselines3.common.callbacks import EvalCallback, StopTrainingOnNoMod
 from stable_baselines3.common.vec_env import DummyVecEnv
 from stable_baselines3.common.noise import NormalActionNoise
 
-from finrl_pro.data.splitter import DataSplitter
-from finrl_pro.features.engineering import FeatureEngineer
-from finrl_pro.envs.pro_stock_env import ProStockEnv
-from finrl_pro.envs.wrappers import RiskAwareWrapper, SlippageWrapper
-from finrl_pro.mlops.risk import RiskControlPolicy
+from finrl_pro_ds.data.splitter import DataSplitter
+from finrl_pro_ds.features.engineering import FeatureEngineer
+from finrl_pro_ds.envs.pro_stock_env import ProStockEnv
+from finrl_pro_ds.envs.wrappers import RiskAwareWrapper, SlippageWrapper
+from finrl_pro_ds.mlops.risk import RiskControlPolicy
 
 def make_env(df, mode='train'):
     # Convert DF to arrays for ProStockEnv

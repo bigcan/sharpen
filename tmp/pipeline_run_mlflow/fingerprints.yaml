@@ -2,7 +2,7 @@ fingerprints:
 - artifact_uris:
   - finrl-pro/runs/fingerprint/checkpoint.pt
   baseline_reference: benchmarks:sp500_rolling_1y
-  config_path: finrl_pro/configs/experiment_sp500.yaml
+  config_path: finrl_pro_ds/configs/experiment_sp500.yaml
   dataset_hash: dvc://datasets/sp500
   fingerprint_id: 63731e2e-8b9f-427a-9c64-2c2911c99e8c
   metrics_snapshot:
@@ -13,5 +13,5 @@ fingerprints:
     volatility: 0.27
   mlflow_run_id: 43a3d65c9134431c9ca9bd88d50cee97
   module_versions:
-    finrl_pro.training.trainer: mlflow-test
+    finrl_pro_ds.training.trainer: mlflow-test
   seed: 20250102

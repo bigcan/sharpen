@@ -36,16 +36,16 @@ pip install ruff black mypy
    ```bash
    dvc pull data/benchmarks.dvc
    ```
-3. Create experiment config skeletons in `finrl_pro/configs/` with deterministic
+3. Create experiment config skeletons in `finrl_pro_ds/configs/` with deterministic
    seeds, dataset hashes, and risk profile IDs.
 
 ## 4. Register Risk Control Profiles
 
-1. Define profiles in `finrl_pro/configs/risk_profiles.yaml` (to be created) with
+1. Define profiles in `finrl_pro_ds/configs/risk_profiles.yaml` (to be created) with
    capital at risk, drawdown stops, leverage caps, and sandbox toggles.
 2. Log the profile to MLflow via helper (to be implemented):
    ```python
-   from finrl_pro.mlops.logger import MLOpsLogger
+   from finrl_pro_ds.mlops.logger import MLOpsLogger
 
    logger = MLOpsLogger()
    logger.log_risk_profile(profile)
@@ -54,8 +54,8 @@ pip install ruff black mypy
 ## 5. Run a Reproducible Experiment
 
 ```bash
-python -m finrl_pro.training.trainer \
-  --config finrl_pro/configs/experiment_sp500.yaml \
+python -m finrl_pro_ds.training.trainer \
+  --config finrl_pro_ds/configs/experiment_sp500.yaml \
   --risk-profile risk_profiles:baseline_sp500 \
   --mlflow-tracking-uri $MLFLOW_TRACKING_URI
 ```
@@ -68,12 +68,12 @@ python -m finrl_pro.training.trainer \
 ## 6. Evaluate & Generate Reports
 
 ```bash
-python -m finrl_pro.eval.walk_forward \
-  --config finrl_pro/configs/experiment_sp500.yaml \
+python -m finrl_pro_ds.eval.walk_forward \
+  --config finrl_pro_ds/configs/experiment_sp500.yaml \
   --benchmark-id benchmarks:sp500_rolling_1y
 ```
 
-- Outputs SHAP summaries (via `finrl_pro.explainability.shap_analysis`) and
+- Outputs SHAP summaries (via `finrl_pro_ds.explainability.shap_analysis`) and
   compliance-ready reports stored under `reports/<fingerprint_id>/`.
 - Upload resulting notebook or PDF to MLflow artifacts and link to performance
   report entity.
@@ -88,8 +88,8 @@ python -m finrl_pro.eval.walk_forward \
 ## 8. Lint & Test Before Merge
 
 ```bash
-ruff check finrl_pro
-black --check finrl_pro
+ruff check finrl_pro_ds
+black --check finrl_pro_ds
 pytest
 ```
 

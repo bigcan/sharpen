@@ -1,0 +1,81 @@
+profiles:
+  - profile_id: default
+    name: Default Research
+    max_capital_at_risk: 0.10         # fraction of capital at risk (0-1]
+    max_drawdown_pct: 0.20            # max allowed drawdown as fraction (0-1]
+    leverage_cap: 2.0                 # max portfolio leverage
+    sandbox_required: true            # require sandbox before promotion
+    approved_by: Research Lead        # approver name/role
+    effective_date: 2025-01-01        # ISO date
+    fallback_agent: null              # optional fallback agent
+    max_avg_turnover: 0.20            # avg |delta position| per step
+    max_transaction_costs_bps: 250    # cumulative transaction cost cap in bps
+
+  - profile_id: conservative
+    name: Conservative Risk
+    max_capital_at_risk: 0.05
+    max_drawdown_pct: 0.12
+    leverage_cap: 1.1
+    sandbox_required: true
+    approved_by: Risk Officer
+    effective_date: 2025-01-01
+    fallback_agent: null
+    max_avg_turnover: 0.10
+    max_transaction_costs_bps: 150
+
+  - profile_id: balanced
+    name: Balanced Risk
+    max_capital_at_risk: 0.10
+    max_drawdown_pct: 0.20
+    leverage_cap: 1.5
+    sandbox_required: true
+    approved_by: Risk Officer
+    effective_date: 2025-01-01
+    fallback_agent: null
+    max_avg_turnover: 0.15
+    max_transaction_costs_bps: 200
+
+  - profile_id: aggressive
+    name: Aggressive Risk
+    max_capital_at_risk: 0.20
+    max_drawdown_pct: 0.30
+    leverage_cap: 3.0
+    sandbox_required: true
+    approved_by: Research Lead
+    effective_date: 2025-01-01
+    fallback_agent: null
+    max_avg_turnover: 0.35
+    max_transaction_costs_bps: 400
+
+  - profile_id: phase2_research
+    name: Phase 2 Research
+    max_capital_at_risk: 0.50
+    max_drawdown_pct: 0.60
+    leverage_cap: 3.0
+    sandbox_required: false
+    approved_by: Research Lead
+    effective_date: 2025-11-20
+    max_avg_turnover: 1.0
+    max_transaction_costs_bps: 5000
+
+  - profile_id: phase5_test
+    name: Phase 5 Stress Test
+    max_capital_at_risk: 1.0
+    max_drawdown_pct: 0.90
+    leverage_cap: 5.0
+    sandbox_required: false
+    approved_by: Research Lead
+    effective_date: 2025-11-19
+    max_avg_turnover: 100.0
+    max_transaction_costs_bps: 50000
+
+  - profile_id: yolo
+    name: YOLO Mode (No Guardrails)
+    max_capital_at_risk: 1.0          # 100% Capital at Risk
+    max_drawdown_pct: 1.0             # 100% Drawdown allowed
+    leverage_cap: 100.0               # Extreme leverage
+    sandbox_required: false           # No sandbox checks
+    approved_by: User                 # Self-approved
+    effective_date: 2025-11-20
+    max_avg_turnover: 1000.0          # Unlimited trading
+    max_transaction_costs_bps: 1000000 # Ignore costs

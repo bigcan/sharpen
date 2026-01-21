@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pandas as pd
 
-import finrl_pro.data.snapshot as snapshot_cli
-import finrl_pro.data.export_snapshot as export_cli
-from finrl_pro.data.loader import DataLoader
+import finrl_pro_ds.data.snapshot as snapshot_cli
+import finrl_pro_ds.data.export_snapshot as export_cli
+from finrl_pro_ds.data.loader import DataLoader
 
 
 class _FakeDB:

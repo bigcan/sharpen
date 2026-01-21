@@ -2,7 +2,7 @@ import json
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from finrl_pro.eval.robustness import deflated_sharpe_ratio, probability_backtest_overfitting
+from finrl_pro_ds.eval.robustness import deflated_sharpe_ratio, probability_backtest_overfitting
 from scipy.stats import skew, kurtosis
 
 def run_robustness_checks():

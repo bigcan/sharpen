@@ -2,7 +2,7 @@
 
 import os
 import sys
-from finrl_pro.execution.alpaca_broker import AlpacaBroker
+from finrl_pro_ds.execution.alpaca_broker import AlpacaBroker
 
 def main():
     print("--- Checking Alpaca Connectivity ---")

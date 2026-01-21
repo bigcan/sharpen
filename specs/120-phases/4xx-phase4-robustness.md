@@ -20,7 +20,7 @@ Strategies that perform well in idealized backtests often fail in live trading d
 ## Deliverables
 1.  `scripts/run_phase4_robustness.py`: Driver script for PBO and DSR calculations.
 2.  `reports/phase4/robustness_report.json`: JSON report containing DSR, PBO, and stress test results.
-3.  `finrl_pro/eval/robustness.py`: Library functions for DSR and PBO.
+3.  `finrl_pro_ds/eval/robustness.py`: Library functions for DSR and PBO.
 
 ## Success Criteria
 - **Pass:** DSR > 0, PBO < 0.20, and positive Sharpe under 2x cost stress.

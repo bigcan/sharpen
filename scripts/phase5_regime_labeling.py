@@ -7,7 +7,7 @@ import sys
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from finrl_pro.data.regimes import HMMRegimeDetector, MarketRegime
+from finrl_pro_ds.data.regimes import HMMRegimeDetector, MarketRegime
 
 def label_regimes():
     ticker = 'AAPL'

@@ -3,7 +3,7 @@
 import pytest
 import numpy as np
 import pandas as pd
-from finrl_pro.eval.robustness import (
+from finrl_pro_ds.eval.robustness import (
     expected_max_sharpe,
     deflated_sharpe_ratio,
     probability_backtest_overfitting

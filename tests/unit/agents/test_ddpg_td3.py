@@ -4,8 +4,8 @@ import numpy as np
 import pytest
 import torch
 
-from finrl_pro.agents.ddpg import DDPGAgent
-from finrl_pro.agents.td3 import TD3Agent
+from finrl_pro_ds.agents.ddpg import DDPGAgent
+from finrl_pro_ds.agents.td3 import TD3Agent
 
 
 @pytest.fixture

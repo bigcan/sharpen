@@ -12,11 +12,11 @@ A quantitative strategy lead can create and iterate on new FinRL Pro capabilitie
 
 **Why this priority**: This is the foundational promise of FinRL Pro—enabling innovation while preserving upstream compatibility.
 
-**Independent Test**: Demonstrate that a new module added under `finrl_pro/` delivers functionality while leaving upstream directories unchanged and passing regression tests.
+**Independent Test**: Demonstrate that a new module added under `finrl_pro_ds/` delivers functionality while leaving upstream directories unchanged and passing regression tests.
 
 **Acceptance Scenarios**:
 
-1. **Given** a clean checkout of FinRL Pro, **When** a developer scaffolds a new agent inside `finrl_pro/agents/`, **Then** the change set touches only FinRL Pro directories and associated configs.
+1. **Given** a clean checkout of FinRL Pro, **When** a developer scaffolds a new agent inside `finrl_pro_ds/agents/`, **Then** the change set touches only FinRL Pro directories and associated configs.
 2. **Given** a proposed upstream change, **When** the change control process rejects it, **Then** the developer can still ship the FinRL Pro feature by adapting via wrappers without modifying upstream files.
 
 ---
@@ -30,7 +30,7 @@ A research lead can reproduce historical experiments with auditable configuratio
 
 **Acceptance Scenarios**:
 
-1. **Given** an experiment fingerprint stored in `finrl_pro/configs/`, **When** a researcher reruns the pipeline, **Then** the resulting metrics match the recorded baseline within the documented tolerance.
+1. **Given** an experiment fingerprint stored in `finrl_pro_ds/configs/`, **When** a researcher reruns the pipeline, **Then** the resulting metrics match the recorded baseline within the documented tolerance.
 2. **Given** a data ingestion job, **When** provenance logging detects a schema change, **Then** the system records the change and blocks promotion until reviewed.
 
 ---
@@ -63,7 +63,7 @@ A compliance analyst reviews standardized reports measuring strategy uplift agai
 
 ### Edge Cases
 
-- What happens when upstream FinRL Podracer releases breaking changes? → Establish adapters in `finrl_pro/` and document revalidation plans before adoption.
+- What happens when upstream FinRL Podracer releases breaking changes? → Establish adapters in `finrl_pro_ds/` and document revalidation plans before adoption.
 - How does the system handle corrupted checkpoints or missing datasets? → Block reruns, surface alerts, and require dataset re-ingestion before promotion.
 - What if evaluation metrics regress while observability signals remain green? → Fail the pipeline, require human review, and record justification before proceeding.
 
@@ -71,7 +71,7 @@ A compliance analyst reviews standardized reports measuring strategy uplift agai
 
 ### Functional Requirements
 
-- **FR-001**: FinRL Pro MUST isolate all new functionality within the `finrl_pro/` namespace and downstream assets, preventing direct edits to upstream directories without change control approval.
+- **FR-001**: FinRL Pro MUST isolate all new functionality within the `finrl_pro_ds/` namespace and downstream assets, preventing direct edits to upstream directories without change control approval.
 - **FR-002**: The platform MUST capture reproducibility metadata (seeds, dataset hashes, config fingerprints, checkpoints) for every experiment and store it in accessible registries.
 - **FR-003**: Experiment pipelines MUST enforce risk thresholds (capital at risk, drawdown stops, leverage caps) with automatic halt and alert mechanisms.
 - **FR-004**: Evaluation workflows MUST conduct benchmark comparisons, walk-forward analysis, and statistical significance checks before results are accepted.
@@ -81,7 +81,7 @@ A compliance analyst reviews standardized reports measuring strategy uplift agai
 
 ### Key Entities *(include if feature involves data)*
 
-- **FinRL Pro Module**: A bounded package under `finrl_pro/` that encapsulates data, environment, agent, training, evaluation, MLOps, or explainability capabilities.
+- **FinRL Pro Module**: A bounded package under `finrl_pro_ds/` that encapsulates data, environment, agent, training, evaluation, MLOps, or explainability capabilities.
 - **Experiment Fingerprint**: Structured metadata describing seeds, dataset identifiers, config version, code commit, checkpoints, and resulting metrics.
 - **Risk Control Profile**: Parameter set defining allowable exposure, stop conditions, and sandbox toggles for experiments and deployments.
 - **Performance Report**: A reproducible artifact (notebook or document) capturing benchmark comparisons, diagnostics, and compliance commentary.
@@ -98,7 +98,7 @@ A compliance analyst reviews standardized reports measuring strategy uplift agai
 
 ## Constitution Compliance Checklist *(mandatory)*
 
-- Extension boundary respected? `Yes` — Spec confines work to `finrl_pro/` and downstream assets, referencing wrappers for upstream interactions.
+- Extension boundary respected? `Yes` — Spec confines work to `finrl_pro_ds/` and downstream assets, referencing wrappers for upstream interactions.
 - Reproducibility documented? `Yes` — Requirements and user stories mandate seeds, dataset hashes, checkpoints, and fingerprint storage.
 - Risk controls defined? `Yes` — Mandatory thresholds, sandbox toggles, and halt mechanisms specified.
 - Evaluation plan aligned? `Yes` — Benchmark comparisons, walk-forward analysis, and diagnostic reporting required.

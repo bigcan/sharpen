@@ -1,4 +1,4 @@
-from finrl_pro.data.cache import feature_cache_key
+from finrl_pro_ds.data.cache import feature_cache_key
 
 
 def test_feature_cache_key_stable_order():

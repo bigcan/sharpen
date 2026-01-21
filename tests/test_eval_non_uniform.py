@@ -1,12 +1,12 @@
 from pathlib import Path
 
-from finrl_pro.eval.base import EvaluationContext
-from finrl_pro.eval.benchmark_catalog import BenchmarkCatalog
-from finrl_pro.eval.walk_forward import WalkForwardEvaluator
+from finrl_pro_ds.eval.base import EvaluationContext
+from finrl_pro_ds.eval.benchmark_catalog import BenchmarkCatalog
+from finrl_pro_ds.eval.walk_forward import WalkForwardEvaluator
 
 
 def test_walk_forward_metrics_vary_by_fingerprint(tmp_path: Path) -> None:
-    catalog = BenchmarkCatalog(Path("finrl_pro/configs/benchmarks.yaml"))
+    catalog = BenchmarkCatalog(Path("finrl_pro_ds/configs/benchmarks.yaml"))
     catalog.load()
     wf = WalkForwardEvaluator(catalog)
 

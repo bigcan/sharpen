@@ -4,7 +4,7 @@ import sys
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from finrl_pro.data.yahoo_loader import YahooLoader
+from finrl_pro_ds.data.yahoo_loader import YahooLoader
 
 def main():
     output_file = "data/sp500_phase9_2005_2025.parquet"
@@ -30,7 +30,7 @@ def main():
     # Post-processing to ensure format matches expectations (timestamp, ticker, open, high, low, close, volume)
     # YahooLoader.fetch might return MultiIndex columns if multiple tickers are passed, 
     # or a stacked dataframe. Let's check the output structure by running a small test or handling it robustly.
-    # The YahooLoader.fetch in `finrl_pro/data/yahoo_loader.py` (from previous read) seems to handle standardization 
+    # The YahooLoader.fetch in `finrl_pro_ds/data/yahoo_loader.py` (from previous read) seems to handle standardization 
     # but let's double check the behavior for multiple tickers. 
     # Actually, looking at the code I read earlier:
     # "If multiple tickers, columns are MultiIndex: (ticker, field)"

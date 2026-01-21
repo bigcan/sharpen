@@ -1,6 +1,6 @@
 import pandas as pd
 import numpy as np
-from finrl_pro.features.custom_features import add_fracdiff_features, FracDiffConfig
+from finrl_pro_ds.features.custom_features import add_fracdiff_features, FracDiffConfig
 
 def verify_fracdiff():
     csv_path = "tmp/features_to_validate.csv"

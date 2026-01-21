@@ -7,15 +7,15 @@ echo "Period: 2010-2020 (Training)"
 
 echo "---------------------------------------------------"
 echo "1. Running PPO Agent..."
-python -m finrl_pro.training.run_experiment --config finrl_pro/configs/experiments/phase6_tournament_ppo.yaml
+python -m finrl_pro_ds.training.run_experiment --config finrl_pro_ds/configs/experiments/phase6_tournament_ppo.yaml
 
 echo "---------------------------------------------------"
 echo "2. Running SAC Agent..."
-python -m finrl_pro.training.run_experiment --config finrl_pro/configs/experiments/phase6_tournament_sac.yaml
+python -m finrl_pro_ds.training.run_experiment --config finrl_pro_ds/configs/experiments/phase6_tournament_sac.yaml
 
 echo "---------------------------------------------------"
 echo "3. Running DDPG Agent..."
-python -m finrl_pro.training.run_experiment --config finrl_pro/configs/experiments/phase6_tournament_ddpg.yaml
+python -m finrl_pro_ds.training.run_experiment --config finrl_pro_ds/configs/experiments/phase6_tournament_ddpg.yaml
 
 echo "---------------------------------------------------"
 echo "Tournament Complete. Check 'reports/' for results."

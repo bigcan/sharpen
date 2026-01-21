@@ -1,4 +1,4 @@
-"""Guards ensuring module scaffolding respects the finrl_pro namespace."""
+"""Guards ensuring module scaffolding respects the finrl_pro_ds namespace."""
 
 from __future__ import annotations
 
@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from finrl_pro.utils.module_scaffolder import ModuleScaffolder
+from finrl_pro_ds.utils.module_scaffolder import ModuleScaffolder
 
 
 def _create_package_root(tmp_path: Path) -> Path:
-    package_root = tmp_path / "finrl_pro"
+    package_root = tmp_path / "finrl_pro_ds"
     package_root.mkdir()
     (package_root / "__init__.py").write_text("", encoding="utf-8")
     return package_root
@@ -31,7 +31,7 @@ def test_scaffolder_creates_module_with_init_files(tmp_path: Path) -> None:
     scaffolder = ModuleScaffolder(package_root=package_root)
 
     target = scaffolder.scaffold(
-        "finrl_pro.alpha.beta",
+        "finrl_pro_ds.alpha.beta",
         docstring="Example scaffolded module.",
     )
 
