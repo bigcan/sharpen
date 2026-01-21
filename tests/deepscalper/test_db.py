@@ -22,11 +22,18 @@ class TestDatabaseClientLOB(unittest.TestCase):
         self.assertEqual(len(args[0][1]), 1)
 
     def test_fetch_lob(self):
-        # Mock rows
-        self.mock_cur.fetchall.return_value = [
+        # Mock rows for iteration
+        rows = [
             ("2023-01-01", "BTC", 1, 10.0, 1.0, 11.0, 1.0, "s")
         ]
-        res = self.client.fetch_lob_snapshots(ticker="BTC")
+        # Mock cursor iteration
+        self.mock_cur.__iter__.return_value = iter(rows)
+        
+        # Also mock fetchall just in case logic reverts (optional)
+        self.mock_cur.fetchall.return_value = rows
+
+        res = list(self.client.fetch_lob_snapshots(ticker="BTC"))
+        
         self.assertEqual(len(res), 1)
         self.assertEqual(res[0].ticker, "BTC")
         self.mock_cur.execute.assert_called()

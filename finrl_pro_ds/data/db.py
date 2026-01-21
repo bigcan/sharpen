@@ -197,43 +197,66 @@ class DatabaseClient:
         start: str | None = None,
         end: str | None = None,
         limit: int | None = None
-    ) -> Sequence[LOBSnapshot]:
+    ) -> Iterable[LOBSnapshot]:
         """Fetch LOB snapshots."""
         sql = (
             "SELECT timestamp, ticker, level, bid_price, bid_vol, ask_price, ask_vol, source "
-            "FROM lob_snapshots WHERE ticker = %s"
+            "FROM lob_snapshots "
+            "WHERE ticker = %(ticker)s"
         )
-        args = [ticker]
+        params = {"ticker": ticker}
         if start:
-            sql += " AND timestamp >= %s"
-            args.append(start)
+            sql += " AND timestamp >= %(start)s"
+            params["start"] = start
         if end:
-            sql += " AND timestamp <= %s"
-            args.append(end)
-        sql += " ORDER BY timestamp ASC, level ASC"
-        if limit:
-            sql += " LIMIT %s"
-            args.append(limit)
+            sql += " AND timestamp <= %(end)s"
+            params["end"] = end
+            
+        sql += " ORDER BY timestamp, level"
         
+        if limit:
+            sql += " LIMIT %(limit)s"
+            params["limit"] = limit
+
         with self._connect(self._dsn) as conn:
             with conn.cursor() as cur:
-                cur.execute(sql, args)
-                rows = cur.fetchall()
-                results = []
-                for r in rows:
-                    results.append(
-                        LOBSnapshot(
-                            timestamp=r[0].isoformat() if hasattr(r[0], 'isoformat') else str(r[0]),
-                            ticker=r[1],
-                            level=r[2],
-                            bid_price=float(r[3]),
-                            bid_vol=float(r[4]),
-                            ask_price=float(r[5]),
-                            ask_vol=float(r[6]),
-                            source=r[7]
-                        )
-                    )
-                return results
+                cur.execute(sql, params)
+                for row in cur:
+                    yield LOBSnapshot(*row)
+
+    def fetch_market_bars(
+        self,
+        *,
+        ticker: str,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int | None = None
+    ) -> pd.DataFrame:
+        """Fetch market bars as DataFrame."""
+        sql = (
+            "SELECT timestamp, open, high, low, close, volume "
+            "FROM market_bars "
+            "WHERE ticker = %(ticker)s"
+        )
+        params = {"ticker": ticker}
+        if start:
+            sql += " AND timestamp >= %(start)s"
+            params["start"] = start
+        if end:
+            sql += " AND timestamp <= %(end)s"
+            params["end"] = end
+            
+        sql += " ORDER BY timestamp"
+        
+        if limit:
+            sql += " LIMIT %(limit)s"
+            params["limit"] = limit
+
+        # Use pandas read_sql for convenience
+        with self._connect(self._dsn) as conn:
+            df = pd.read_sql(sql, conn, params=params)
+            
+        return df
 
     # ----------------------------- Feature Store -----------------------------
 
