@@ -58,6 +58,29 @@ def load_config(path):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
+import wandb
+
+def setup_wandb(config):
+    wandb_config = config.get("wandb", {})
+    project = wandb_config.get("project", "DeepScalper_Pilot")
+    tags = wandb_config.get("tags", [])
+    mode = wandb_config.get("mode", "online")
+    
+    # User requested entity: bigcan-chiwin-technology
+    # Ideally should be in config, but I will hardcode default if missing or pass it here.
+    # The prompt explicitly asked to start run in this project.
+    entity = wandb_config.get("entity", "bigcan-chiwin-technology")
+    
+    print(f"Initializing WandB: Project={project}, Entity={entity}, Mode={mode}")
+    wandb.init(
+        project=project,
+        entity=entity,
+        config=config,
+        tags=tags,
+        mode=mode,
+        name=wandb_config.get("name", None) # Optional run name
+    )
+
 def main():
     parser = argparse.ArgumentParser(description="Train DeepScalper Agent")
     parser.add_argument("--config", type=str, required=True, help="Path to config yaml")
@@ -66,6 +89,9 @@ def main():
 
     # Load Config
     config = load_config(args.config)
+    
+    # Setup WandB
+    setup_wandb(config)
     
     # Device
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -88,6 +114,11 @@ def main():
         "macro_config": {"input_size": 11, "hidden_sizes": [64]}
     })
     
+    # Create clean config for agents (remove ensemble_config if present)
+    agent_net_config = net_config.copy()
+    if "ensemble_config" in agent_net_config:
+        del agent_net_config["ensemble_config"]
+    
     # Initialize Agents with Specific Configs
     agents_config = config.get("agents", {})
     dqn_config = agents_config.get("dqn", {})
@@ -104,7 +135,7 @@ def main():
     dqn_kwargs = {k:v for k,v in dqn_config.items() if k not in ["learning_rate", "gamma"]}
     
     dqn = DeepScalperDQN(
-        network_config=net_config, 
+        network_config=agent_net_config, 
         lr=dqn_lr,
         gamma=dqn_gamma,
         device=device,
@@ -112,18 +143,26 @@ def main():
     )
     
     # PPO/A2C currently take net_config and device. LRs are handled in Trainer now.
-    ppo = DeepScalperPPO(net_config, device=device)
-    a2c = DeepScalperA2C(net_config, device=device)
+    ppo = DeepScalperPPO(agent_net_config, device=device)
+    a2c = DeepScalperA2C(agent_net_config, device=device)
     
     # Initialize Ensemble
-    gating = SynapseGatingNetwork(input_dim=net_config["macro_config"]["input_size"])
+    ensemble_config = net_config.get("ensemble_config", {})
+    gating_input = ensemble_config.get("input_size", net_config["macro_config"]["input_size"])
+    gating_hidden = ensemble_config.get("hidden_size", 64)
+    
+    gating = SynapseGatingNetwork(input_dim=gating_input, hidden_dim=gating_hidden)
     ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
     
     # Initialize Trainer
+    # Inject 'agents' config into 'training' config so Trainer can find it
+    training_config = config.get("training", {})
+    training_config["agents"] = config.get("agents", {})
+    
     trainer = DeepScalperTrainer(
         env=env,
         ensemble_agent=ensemble,
-        config=config.get("training", {}),
+        config=training_config,
         device=device
     )
     

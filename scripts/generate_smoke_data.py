@@ -42,4 +42,4 @@ def generate_dummy_data(output_path="data/smoke_test_lob.parquet", n_rows=2000):
     print(f"Generated {n_rows} rows of dummy data at {output_path}")
 
 if __name__ == "__main__":
-    generate_dummy_data(output_path="c:/FinRL/FinRL-Pro_DS/data/smoke_data.parquet")
+    generate_dummy_data(output_path="c:/FinRL/FinRL-Pro_DS/data/dummy_lob.parquet")
