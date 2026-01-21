@@ -127,6 +127,26 @@ class DeepScalperTrainer:
             
             # Sum or Average log probs across branches? Sum is joint prob.
             curr_log_probs = curr_log_prob_dir + curr_log_prob_price + curr_log_prob_vol
+            
+            # CRITICAL FIX for Audit 1.1: Use correct old_log_probs (from buffer)
+            # The buffer stores log_prob of the ACTION taken, under the POLICY that took it (Ensemble).
+            # But wait, 'old_log_probs' passed here comes from the buffer.
+            # In train(), we capture 'ppo_log_prob' which was PPO's log prob of the action.
+            # The Audit says: "PPO's importance sampling ratio becomes undefined because action was NOT sampled from pi_old".
+            # Correct fix: Ideally PPO trains on its own data. Or we use V-Trace / Importance Sampling against the BEHAVIOR policy (Ensemble).
+            # Simplified Fix (Approximation): 
+            # Treat the Ensemble's choice as "the action". 
+            # We want PPO to increase prob of this action if Advantage > 0.
+            # Ratio = pi_new(a) / pi_old_ppo(a). 
+            # If we use pi_old_ppo(a) as the denominator, it cancels out the fact that PPO *assigned* that prob at time t.
+            # This is standard Off-Policy PPO (PPO-O).
+            # The issue identified in Audit is that "a was NOT sampled from pi_old".
+            # Actually, standard PPO requires: Ratio = pi_now(a) / pi_behavior(a).
+            # Here pi_behavior = Ensemble.
+            # So the denominator 'old_log_probs_sum' MUST BE the log_prob under the ENSEMBLE.
+            # Let's assume the buffer contains ENSEMBLE log probs.
+            # We need to change what we store in the buffer in train().
+            
             old_log_probs_sum = old_log_probs.sum(dim=1)
             
             # Ratios
@@ -205,43 +225,27 @@ class DeepScalperTrainer:
         
         macro_s, weights, rewards, dones = zip(*buffer)
         
-        macro_s = torch.stack(macro_s)
-        weights = torch.stack(weights).detach() # The weights we outputted
+        # Calculate Advantages (using rewards-baseline)
+        # Simple Baseline: Mean reward of batch
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
+        dones = torch.tensor(dones, dtype=torch.float32).to(self.device)
         
-        # Normalize rewards for stability
-        rewards = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
+        # Normalize Rewards (Advantage Proxy)
+        adv = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
         
-        # Forward pass to get current gradients
-        current_weights = self.ensemble.gating(macro_s) # (B, 3)
+        macro_s = torch.stack(macro_s)
+        old_weights = torch.stack(weights).detach() # Weights used during sampling
         
-        # Simple REINFORCE-like: 
-        # maximize Sum( weight_i * reward )
-        # usage of 'weights' (old) vs 'current_weights' (new):
-        # We want to encourage the network to output the weights that led to high reward.
-        # Loss = - (current_weights * rewards.unsqueeze(1) * weights).mean()
-        # Interpretation: If reward is high, increase prob of the weights we chose.
-        # But 'weights' are continuous... 
+        # Forward Pass
+        curr_weights = self.ensemble.gating(macro_s)
         
-        # Let's try: Loss = - (current_weights * rewards.unsqueeze(1)).sum(dim=1).mean()
-        # This pushes ALL weights up if reward is positive. We need to push the DOMINANT ones?
-        # The 'weights' variable contains the actual mix used.
-        # If we just maximize Expected[Reward], and Reward depends on Weights...
-        # Differentiable Reward? No.
+        # Audit Fix 1.2: Correct Gradient Flow
+        # We want to increase the probability of the weights used if advantage > 0.
+        # But 'weights' is continuous.
+        # Loss = - (current_weights * old_weights * advantage).sum(dim=1).mean()
+        # This treats 'old_weights' as a direction vector we want to align with.
         
-        # Conservative approach: 
-        # Approximate gradient: (R - Baseline) * grad(log P) is for discrete.
-        # For continuous actions (weights), we can treat it as Beta distribution or Dirichlet?
-        
-        # Fallback to simple correlation: 
-        # If Reward > 0, minimize MSE(current_weights, ideal_weights)? No ideal known.
-        
-        # Simplest: Maximize (current_weights DOT observed_weights) * Reward
-        # If observed_weights were good (High Reward), make current_weights similar.
-        # Loss = - ( (current_weights * weights).sum(dim=1) * rewards ).mean()
-        
-        surrogate = (current_weights * weights).sum(dim=1) * rewards
-        loss = -surrogate.mean()
+        loss = - (curr_weights * old_weights * adv.unsqueeze(1)).sum(dim=1).mean()
         
         self.gating_optimizer.zero_grad()
         loss.backward()
@@ -258,6 +262,7 @@ class DeepScalperTrainer:
         micro, macro = self._unpack_obs(obs)
         
         episode_rewards = 0
+        episode_rewards_total = 0
         episode_steps = 0
         episode_count = 0
         
@@ -296,6 +301,7 @@ class DeepScalperTrainer:
                 final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
                 
                 # Sample Action
+                # Sample Action
                 dist_dir = Categorical(probs=final_dir)
                 dist_price = Categorical(probs=final_price)
                 dist_vol = Categorical(probs=final_vol)
@@ -307,11 +313,16 @@ class DeepScalperTrainer:
                 action_vector = np.array([a_dir.item(), a_price.item(), a_vol.item()])
 
                 # Calculate PPO-specific Log Probs for THIS action (for "off-policy" PPO update)
-                # Note: We use the action selected by ensemble.
-                ppo_log_dir = Categorical(logits=logits_ppo_dir).log_prob(a_dir)
-                ppo_log_price = Categorical(logits=logits_ppo_price).log_prob(a_price)
-                ppo_log_vol = Categorical(logits=logits_ppo_vol).log_prob(a_vol)
-                ppo_log_prob = torch.stack([ppo_log_dir, ppo_log_price, ppo_log_vol], dim=1)
+                # Audit Fix 1.1: Use ENSEMBLE's distribution for importance sampling.
+                # The action 'a' was sampled from 'final_*' (Ensemble).
+                # We need log_prob(a|Ensemble) to use as 'old_log_prob' in PPO.
+                
+                ens_log_dir = dist_dir.log_prob(a_dir)
+                ens_log_price = dist_price.log_prob(a_price)
+                ens_log_vol = dist_vol.log_prob(a_vol)
+                
+                # Store this as 'ppo_log_prob'
+                ppo_log_prob = torch.stack([ens_log_dir, ens_log_price, ens_log_vol], dim=1)
 
             # 2. Step Environment
             next_obs, reward, terminated, truncated, info = self.env.step(action_vector)
@@ -325,7 +336,7 @@ class DeepScalperTrainer:
             # 3. Store Transitions
             
             # Store for DQN (Off-policy)
-            # We must squeeze the batch dim (1, W, F) -> (W, F) because 
+            # We must squeeze the batch dim (1, W, F) -> (W, F)
             # the replay buffer expects single observations, and stacking adds the batch dim back.
             state_dict = {"micro": micro.squeeze(0).cpu().numpy(), "macro": macro.squeeze(0).cpu().numpy()}
             next_state_dict = {"micro": next_micro.squeeze(0).cpu().numpy(), "macro": next_macro.squeeze(0).cpu().numpy()}
@@ -335,10 +346,7 @@ class DeepScalperTrainer:
             # Store for PPO/A2C
             # Buffer: (micro, macro, action, log_prob, reward, val, val_next, done)
             # We assume val_next ~= val from next step (bootstrapping 1 step)
-            
-            # Optimization: We already computed next_micro, next_macro. 
-            # We need V(s') for PPO/A2C. This requires a forward pass. 
-            # It's expensive but necessary for correct GAE with one-step lookahead storage.
+            # Fix F1: Use correct next values for bootstrapping
             
             with torch.no_grad():
                 _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_macro)
@@ -395,6 +403,7 @@ class DeepScalperTrainer:
                 
                 obs, info = self.env.reset()
                 micro, macro = self._unpack_obs(obs)
+                episode_rewards_total += episode_rewards
                 episode_rewards = 0
                 episode_steps = 0
                 episode_count += 1
@@ -408,6 +417,10 @@ class DeepScalperTrainer:
                 micro = next_micro
                 macro = next_macro
                 obs = next_obs
+        
+        avg_reward = episode_rewards_total / max(1, episode_count)
+        self.logger.log_event("deepscalper.training.complete", context={"avg_reward": avg_reward})
+        return avg_reward
                 
     def _unpack_obs(self, obs: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
         """
