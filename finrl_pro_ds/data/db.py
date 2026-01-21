@@ -28,6 +28,19 @@ class MarketBar:
     vendor_rev: int
 
 
+@dataclass
+class LOBSnapshot:
+    timestamp: str
+    ticker: str
+    level: int
+    bid_price: float
+    bid_vol: float
+    ask_price: float
+    ask_vol: float
+    source: str
+
+
+
 class DatabaseClient:
     """DB client for TimescaleDB/PostgreSQL interactions.
 
@@ -100,6 +113,34 @@ class DatabaseClient:
                         continue
                 conn.commit()
 
+        # Init LOB tables
+        lob_stmts = [
+            """
+            CREATE TABLE IF NOT EXISTS lob_snapshots (
+              timestamp TIMESTAMPTZ NOT NULL,
+              ticker TEXT NOT NULL,
+              level INTEGER NOT NULL,
+              bid_price DOUBLE PRECISION NOT NULL,
+              bid_vol DOUBLE PRECISION NOT NULL,
+              ask_price DOUBLE PRECISION NOT NULL,
+              ask_vol DOUBLE PRECISION NOT NULL,
+              source TEXT NOT NULL,
+              ingest_ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+              CONSTRAINT lob_snapshots_uniq UNIQUE (timestamp, ticker, level, source)
+            )
+            """,
+            "SELECT 1 FROM create_hypertable('lob_snapshots', by_range('timestamp'), if_not_exists => TRUE)"
+        ]
+        with self._connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                for stmt in lob_stmts:
+                    try:
+                        cur.execute(stmt)
+                    except Exception:
+                        conn.rollback()
+                        continue
+                conn.commit()
+
     def upsert_bars(self, bars: Iterable[MarketBar]) -> int:
         """Batch upsert OHLCV bars, returning affected row count."""
         if not bars:
@@ -124,6 +165,75 @@ class DatabaseClient:
                 cur.executemany(sql, payloads)
             conn.commit()
             return len(payloads)
+
+    def upsert_lob_snapshots(self, snapshots: Iterable[LOBSnapshot]) -> int:
+        """Batch upsert LOB snapshots."""
+        if not snapshots:
+            return 0
+        with self._connect(self._dsn) as conn:
+            from dataclasses import asdict
+            with conn.cursor() as cur:
+                sql = (
+                    "INSERT INTO lob_snapshots (timestamp, ticker, level, bid_price, bid_vol, ask_price, ask_vol, source) "
+                    "VALUES (%(timestamp)s, %(ticker)s, %(level)s, %(bid_price)s, %(bid_vol)s, %(ask_price)s, %(ask_vol)s, %(source)s) "
+                    "ON CONFLICT (timestamp, ticker, level, source) DO UPDATE SET "
+                    "bid_price=EXCLUDED.bid_price, bid_vol=EXCLUDED.bid_vol, "
+                    "ask_price=EXCLUDED.ask_price, ask_vol=EXCLUDED.ask_vol"
+                )
+                payloads = []
+                for s in snapshots:
+                    try:
+                        payloads.append(asdict(s))
+                    except Exception:
+                        payloads.append(dict(s))
+                cur.executemany(sql, payloads)
+            conn.commit()
+            return len(payloads)
+
+    def fetch_lob_snapshots(
+        self,
+        *,
+        ticker: str,
+        start: str | None = None,
+        end: str | None = None,
+        limit: int | None = None
+    ) -> Sequence[LOBSnapshot]:
+        """Fetch LOB snapshots."""
+        sql = (
+            "SELECT timestamp, ticker, level, bid_price, bid_vol, ask_price, ask_vol, source "
+            "FROM lob_snapshots WHERE ticker = %s"
+        )
+        args = [ticker]
+        if start:
+            sql += " AND timestamp >= %s"
+            args.append(start)
+        if end:
+            sql += " AND timestamp <= %s"
+            args.append(end)
+        sql += " ORDER BY timestamp ASC, level ASC"
+        if limit:
+            sql += " LIMIT %s"
+            args.append(limit)
+        
+        with self._connect(self._dsn) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, args)
+                rows = cur.fetchall()
+                results = []
+                for r in rows:
+                    results.append(
+                        LOBSnapshot(
+                            timestamp=r[0].isoformat() if hasattr(r[0], 'isoformat') else str(r[0]),
+                            ticker=r[1],
+                            level=r[2],
+                            bid_price=float(r[3]),
+                            bid_vol=float(r[4]),
+                            ask_price=float(r[5]),
+                            ask_vol=float(r[6]),
+                            source=r[7]
+                        )
+                    )
+                return results
 
     # ----------------------------- Feature Store -----------------------------
 

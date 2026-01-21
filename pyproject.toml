@@ -25,7 +25,13 @@ dependencies = [
     "stable-baselines3>=2.3.0",
     "shimmy>=0.2.1", # Required for SB3 compatibility with gym.Env
     "hmmlearn>=0.3.0",
-    "scikit-learn>=1.3.0"
+    "scikit-learn>=1.3.0",
+    "vectorbt>=0.25.0",
+    "wandb>=0.16.0",
+    "python-binance>=1.0.19",
+    "pandas-ta>=0.3.14b",
+    "python-dotenv>=1.0.0",
+    "kaggle>=1.5.16"
 ]
 readme = "README.md"
 
