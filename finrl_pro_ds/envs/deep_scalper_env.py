@@ -37,6 +37,7 @@ class DeepScalperEnv(gym.Env):
         self.lob_levels = 5
         self.lob_features = 4 # BidPx, BidVol, AskPx, AskVol
         
+        # Micro: Window x levels x features
         self.observation_space = gym.spaces.Dict({
             "micro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self.lob_levels, self.lob_features), dtype=np.float32),
             "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(64,), dtype=np.float32), # Placeholder size
@@ -52,13 +53,12 @@ class DeepScalperEnv(gym.Env):
         self.position = 0.0
         self.avg_price = 0.0
         
-        # Order Book & History
-        # Latency simulation: store action to be executed in next step?
-        # Or simply match against next step's data. 
-        # DeepScalper plan says "t+1 tick execution delay". 
-        # So we submit order at t, it rests, and we check fill at t+1.
-        
         self.pending_order = None # (direction, price, quantity)
+        
+        # Window Buffer
+        # Initialize with zeros
+        self.micro_window = np.zeros((self.window_size, self.lob_levels, self.lob_features), dtype=np.float32)
+        self.current_macro = np.zeros((64,), dtype=np.float32)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -68,11 +68,17 @@ class DeepScalperEnv(gym.Env):
         self.avg_price = 0.0
         self.pending_order = None
         
+        self.micro_window = np.zeros((self.window_size, self.lob_levels, self.lob_features), dtype=np.float32)
+        self.current_macro = np.zeros((64,), dtype=np.float32)
+        
         if self.handler:
             self.handler.reset()
-            # Need to pre-fill window? 
-            # For now just get first observation
-            pass
+            # Feed window_size steps to fill buffer if possible?
+            # Or just fetch one and pad?
+            # For simplicity, fetch one.
+            first_step = self.handler.step()
+            if first_step is not None:
+                self._update_state(first_step)
             
         return self._get_observation(), {}
 
@@ -83,16 +89,18 @@ class DeepScalperEnv(gym.Env):
         self.current_step += 1
         
         # 1. Get Market Data T+1 (The data we will match against)
-        # In this skeleton, we assume handler gives us the 'next' snapshot immediately
-        current_lob = None
+        step_data = None
         if self.handler:
-            current_lob = self.handler.step()
+            step_data = self.handler.step()
         
         # If no more data, done
         terminated = False
-        if self.handler and current_lob is None:
+        if self.handler and step_data is None:
             terminated = True
             return self._get_observation(), 0.0, terminated, False, {}
+
+        # Update State (Observation) for T+1
+        self._update_state(step_data)
 
         # 2. Execute Pending Order (submitted at T) against Data (T+1)
         reward = 0.0
@@ -129,12 +137,43 @@ class DeepScalperEnv(gym.Env):
         info = {}
         
         return obs, reward, terminated, truncated, info
+    
+    def _update_state(self, step_data: Any):
+        """Update micro window and macro state from step data."""
+        # Assume step_data is a Series or Dict-like from Handler
+        # Extract LOB levels
+        # Columns: bid_price_1, bid_vol_1, ask_price_1, ask_vol_1, ...
+        
+        frame = np.zeros((self.lob_levels, self.lob_features), dtype=np.float32)
+        
+        try:
+            for i in range(self.lob_levels):
+                level = i + 1
+                frame[i, 0] = float(step_data.get(f'bid_price_{level}', 0))
+                frame[i, 1] = float(step_data.get(f'bid_vol_{level}', 0))
+                frame[i, 2] = float(step_data.get(f'ask_price_{level}', 0))
+                frame[i, 3] = float(step_data.get(f'ask_vol_{level}', 0))
+                
+            # Update Macro
+            # Extract macro columns. This requires knowing which cols are macro.
+            # Generally, not micro keys.
+            # Hack: take known macro cols or just a random subset for now.
+            # TODO: optimize this mapping.
+            self.current_macro = np.zeros((64,), dtype=np.float32) # Placeholder
+        except Exception as e:
+            # Fallback if data is malformed
+            pass
+            
+        # Push to window (Shift and Insert)
+        # self.micro_window is (W, L, F)
+        self.micro_window = np.roll(self.micro_window, -1, axis=0)
+        self.micro_window[-1] = frame
 
     def _get_observation(self):
         # Return dummy observation matching space
         return {
-            "micro": np.zeros((self.window_size, self.lob_levels, self.lob_features), dtype=np.float32),
-            "macro": np.zeros((64,), dtype=np.float32),
+            "micro": self.micro_window,
+            "macro": self.current_macro,
             "private": np.array([self.position, self.balance], dtype=np.float32)
         }
 
