@@ -29,7 +29,7 @@ dependencies = [
     "vectorbt>=0.25.0",
     "wandb>=0.16.0",
     "python-binance>=1.0.19",
-    "pandas-ta>=0.3.14b",
+    "ta>=0.11.0",
     "python-dotenv>=1.0.0",
     "kaggle>=1.5.16"
 ]

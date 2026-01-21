@@ -4,7 +4,10 @@ Implements Micro (LOB) and Macro (Technical) feature extraction.
 """
 import numpy as np
 import pandas as pd
-import pandas_ta as ta
+from ta.momentum import RSIIndicator
+from ta.trend import MACD
+from ta.volatility import BollingerBands, AverageTrueRange
+from ta.volume import OnBalanceVolumeIndicator
 from typing import List, Dict, Union
 
 class DeepScalperFeatureEngineer:
@@ -78,13 +81,13 @@ class DeepScalperFeatureEngineer:
 
     def process_macro(self, ohlcv_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Process OHLCV data into Macro Features using pandas-ta.
+        Process OHLCV data into Macro Features using the 'ta' library.
         
         Features:
         - RSI (14)
-        - MACD
-        - Bollinger Bands
-        - ATR
+        - MACD (12, 26, 9)
+        - Bollinger Bands (20, 2)
+        - ATR (14)
         - OBV
         """
         df = ohlcv_df.copy()
@@ -92,23 +95,31 @@ class DeepScalperFeatureEngineer:
         # Ensure we have standard columns
         # df should have: open, high, low, close, volume
         
-        # RSI
-        df['rsi_14'] = ta.rsi(df['close'], length=14)
+        # RSI (14)
+        rsi = RSIIndicator(close=df['close'], window=14)
+        df['rsi_14'] = rsi.rsi()
         
-        # MACD
-        macd = ta.macd(df['close'])
-        # Append macd columns
-        df = pd.concat([df, macd], axis=1)
+        # MACD (12, 26, 9)
+        macd = MACD(close=df['close'], window_slow=26, window_fast=12, window_sign=9)
+        df['MACD_12_26_9'] = macd.macd()
+        df['MACDh_12_26_9'] = macd.macd_diff()  # Histogram
+        df['MACDs_12_26_9'] = macd.macd_signal()
         
-        # Bollinger Bands
-        bb = ta.bbands(df['close'], length=20)
-        df = pd.concat([df, bb], axis=1)
+        # Bollinger Bands (20, 2)
+        bb = BollingerBands(close=df['close'], window=20, window_dev=2)
+        df['BBL_20_2.0'] = bb.bollinger_lband()
+        df['BBM_20_2.0'] = bb.bollinger_mavg()
+        df['BBU_20_2.0'] = bb.bollinger_hband()
+        df['BBB_20_2.0'] = bb.bollinger_wband()  # Bandwidth
+        df['BBP_20_2.0'] = bb.bollinger_pband()  # %B
         
-        # ATR
-        df['atr_14'] = ta.atr(df['high'], df['low'], df['close'], length=14)
+        # ATR (14)
+        atr = AverageTrueRange(high=df['high'], low=df['low'], close=df['close'], window=14)
+        df['atr_14'] = atr.average_true_range()
         
         # OBV
-        df['obv'] = ta.obv(df['close'], df['volume'])
+        obv = OnBalanceVolumeIndicator(close=df['close'], volume=df['volume'])
+        df['obv'] = obv.on_balance_volume()
         
         # Clean NaNs - FIX F4: Use causal fill methods instead of fillna(0)
         # ffill propagates last valid observation forward (no look-ahead)
