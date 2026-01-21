@@ -65,14 +65,9 @@ class DeepScalperEnsemble:
             w_a2c = weights[:, 2].item()
             
         # 2. Get Probs
-        # DQN needs Q->Prob conversion
-        with torch.no_grad():
-            q_dir, q_price, q_vol, _ = self.dqn.policy_net(micro, macro)
-            # Temperature scaling for DQN soft-voting?
-            temp = 1.0
-            p_dqn_dir = torch.softmax(q_dir / temp, dim=1)
-            p_dqn_price = torch.softmax(q_price / temp, dim=1)
-            p_dqn_vol = torch.softmax(q_vol / temp, dim=1)
+        # DQN needs Q->Prob conversion (handled safely by agent now)
+        # Note: get_probs handles device movement internally
+        p_dqn_dir, p_dqn_price, p_dqn_vol = self.dqn.get_probs(micro, macro, temp=1.0)
             
         # PPO
         p_ppo_dir, p_ppo_price, p_ppo_vol = self.ppo.get_probs(micro, macro)

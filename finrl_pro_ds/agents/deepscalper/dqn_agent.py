@@ -69,6 +69,28 @@ class DeepScalperDQN:
         # Action dimensions (Dir, Price, Vol)
         self.action_dims = [3, 5, 5] 
 
+    def get_probs(self, micro: torch.Tensor, macro: torch.Tensor, temp: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Return action probabilities via temperature-scaled softmax of Q-values.
+        Includes numerical stability fix (subtract max).
+        """
+        micro = micro.to(self.device)
+        macro = macro.to(self.device)
+        
+        with torch.no_grad():
+            q_dir, q_price, q_vol, _ = self.policy_net(micro, macro)
+            
+            def safe_softmax(q, t):
+                # Subtract max for numerical stability to prevent overflow
+                q_scaled = (q - q.max(dim=1, keepdim=True)[0]) / t
+                return torch.softmax(q_scaled, dim=1)
+            
+            p_dir = safe_softmax(q_dir, temp)
+            p_price = safe_softmax(q_price, temp)
+            p_vol = safe_softmax(q_vol, temp)
+            
+        return p_dir, p_price, p_vol
+
     def predict(self, micro: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
         """
         Select action using Epsilon-Greedy strategy.
