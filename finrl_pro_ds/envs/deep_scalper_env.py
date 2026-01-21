@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+import logging
 from typing import Dict, Optional, Tuple, Any
 from finrl_pro_ds.data.handler import DBMarketDataHandler
 
@@ -39,6 +40,7 @@ class DeepScalperEnv(gym.Env):
         self.maker_fee = config.get("maker_fee", 0.0002)
         self.taker_fee = config.get("taker_fee", 0.0004)
         self.window_size = config.get("window_size", 50)
+        self.initial_balance = config.get("initial_balance", 10000.0)
         
         # Spaces
         self.lob_levels = 5
@@ -63,13 +65,15 @@ class DeepScalperEnv(gym.Env):
         
         # Internal State
         self.current_step = 0
-        self.balance = 10000.0
+        self.balance = self.initial_balance
         self.position = 0.0
         self.avg_price = 0.0
+        self.prev_portfolio_value = self.initial_balance # For dense reward
         
-        self.pending_order = None  # (direction, price, quantity)
+        self.pending_order = None  # (direction, price, quantity, is_taker)
         
         # Current Market State (for order matching)
+        self.current_mid_price = 0.0
         self.current_best_bid = 0.0
         self.current_best_ask = 0.0
         
@@ -80,10 +84,12 @@ class DeepScalperEnv(gym.Env):
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.current_step = 0
-        self.balance = 10000.0
+        self.balance = self.initial_balance
         self.position = 0.0
         self.avg_price = 0.0
+        self.prev_portfolio_value = self.initial_balance
         self.pending_order = None
+        self.current_mid_price = 0.0
         self.current_best_bid = 0.0
         self.current_best_ask = 0.0
         
@@ -95,6 +101,9 @@ class DeepScalperEnv(gym.Env):
             first_step = self.handler.step()
             if first_step is not None:
                 self._update_state(first_step)
+        
+        # Initialize portfolio value after first state update
+        self.prev_portfolio_value = self._get_portfolio_value()
             
         return self._get_observation(), {}
 
@@ -117,18 +126,20 @@ class DeepScalperEnv(gym.Env):
         self._update_state(step_data)
 
         # FIX F3: Execute Pending Order against T+1 data
-        reward = 0.0
         
         if self.pending_order:
-            order_dir, order_px, order_qty = self.pending_order
+            order_dir, order_px, order_qty, is_taker = self.pending_order
             fill_price = None
             
             # Level-Crossing Conservative Fill
             if order_dir == 1:  # Buy
                 # Fill if Ask <= Limit Price
                 if self.current_best_ask > 0 and self.current_best_ask <= order_px:
-                    fill_price = self.current_best_ask  # Taker fill at ask
-                    fee = fill_price * order_qty * self.taker_fee
+                    fill_price = self.current_best_ask
+                    
+                    # Apply Maker/Taker Fee
+                    fee_rate = self.taker_fee if is_taker else self.maker_fee
+                    fee = fill_price * order_qty * fee_rate
                     cost = fill_price * order_qty + fee
                     
                     if cost <= self.balance:
@@ -147,20 +158,24 @@ class DeepScalperEnv(gym.Env):
             elif order_dir == 2:  # Sell
                 # Fill if Bid >= Limit Price
                 if self.current_best_bid > 0 and self.current_best_bid >= order_px:
-                    fill_price = self.current_best_bid  # Taker fill at bid
-                    fee = fill_price * order_qty * self.taker_fee
+                    fill_price = self.current_best_bid
+                    
+                    # Apply Maker/Taker Fee
+                    fee_rate = self.taker_fee if is_taker else self.maker_fee
+                    fee = fill_price * order_qty * fee_rate
                     proceeds = fill_price * order_qty - fee
                     
                     self.balance += proceeds
                     # Update position
-                    if self.position > 0:
-                        # Calculate PnL for closing long
-                        pnl = (fill_price - self.avg_price) * min(order_qty, self.position)
-                        reward += pnl
-                        
                     self.position -= order_qty
                     if self.position <= 0:
-                        self.avg_price = fill_price if self.position < 0 else 0
+                         # Closing long or opening short
+                        if self.position < 0:
+                             # Updating short avg price is complex, simplified here to fill price if flipping
+                             if self.position + order_qty > 0: # Was Long
+                                 self.avg_price = fill_price
+                        else:
+                             self.avg_price = 0
                         
             self.pending_order = None  # Order processed
 
@@ -172,23 +187,47 @@ class DeepScalperEnv(gym.Env):
         else:
             # Map indices to actual values
             offset_ticks = self.price_offsets[price_idx]
+            quantity = self.vol_proportions[vol_idx] * self.max_position
             
             if direction == 1:  # Buy
                 # Limit buy below best ask
                 limit_price = self.current_best_ask - offset_ticks * self.tick_size
+                # Determine Aggressiveness for Fee Logic
+                # If Limit Price >= Best Ask at submission, it's a marketable order (Taker)
+                is_taker = (limit_price >= self.current_best_ask)
             else:  # Sell
                 # Limit sell above best bid
                 limit_price = self.current_best_bid + offset_ticks * self.tick_size
+                is_taker = (limit_price <= self.current_best_bid)
                 
-            quantity = self.vol_proportions[vol_idx] * self.max_position
-            self.pending_order = (direction, limit_price, quantity)
+            self.pending_order = (direction, limit_price, quantity, is_taker)
+        
+        # 4. Dense Rewards (Unrealized PnL)
+        current_portfolio_value = self._get_portfolio_value()
+        reward = current_portfolio_value - self.prev_portfolio_value
+        self.prev_portfolio_value = current_portfolio_value
+        
+        # 5. Safety Drawdown Stop
+        truncted = False
+        if current_portfolio_value < 0.8 * self.initial_balance:
+            terminated = True
+            logging.warning("Hit Max Drawdown Stop (20%). Terminating Episode.")
         
         obs = self._get_observation()
-        truncated = False
-        info = {"balance": self.balance, "position": self.position}
+        info = {
+            "balance": self.balance, 
+            "position": self.position, 
+            "portfolio_value": current_portfolio_value
+        }
         
-        return obs, reward, terminated, truncated, info
+        return obs, reward, terminated, truncted, info
     
+    def _get_portfolio_value(self):
+        """Calculate total equity (Balance + Unrealized PnL)"""
+        # Value position at Mid Price
+        mid = (self.current_best_ask + self.current_best_bid) / 2.0 if self.current_best_ask > 0 else 0.0
+        return self.balance + (self.position * mid)
+
     def _update_state(self, step_data: Any):
         """Update micro window and macro state from step data."""
         # FIX F1: Build FLATTENED micro frame (L*F = 20,)
@@ -225,6 +264,7 @@ class DeepScalperEnv(gym.Env):
             
         except Exception as e:
             # Fallback if data is malformed
+            logging.error(f"Error updating state: {e}")
             pass
             
         # Push to window (Shift and Insert)
@@ -239,6 +279,8 @@ class DeepScalperEnv(gym.Env):
         }
 
     def render(self, mode='human'):
-        print(f"Step: {self.current_step}, Balance: {self.balance:.2f}, Pos: {self.position:.4f}")
+        val = self._get_portfolio_value()
+        print(f"Step: {self.current_step}, Value: {val:.2f}, Balance: {self.balance:.2f}, Pos: {self.position:.4f}")
+
 
 
