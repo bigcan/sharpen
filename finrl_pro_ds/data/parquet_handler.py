@@ -1,0 +1,107 @@
+import pandas as pd
+import numpy as np
+from typing import Dict, Any, Optional, List
+from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
+
+class ParquetDataHandler:
+    """
+    Streams processed DeepScalper features from Parquet files.
+    Designed to be a drop-in replacement for DBMarketDataHandler in DeepScalperEnv.
+    """
+    def __init__(self, file_path: str, ticker: str, feature_config: Dict = None):
+        self.file_path = file_path
+        self.ticker = ticker
+        self.fe = DeepScalperFeatureEngineer(config=feature_config)
+        
+        self._ptr = 0
+        self._timestamps: List[Any] = []
+        self._feature_data: pd.DataFrame = pd.DataFrame()
+        
+        self.load_data()
+
+    def load_data(self):
+        """Loads data from parquet and processes it."""
+        try:
+            # Load raw parquet (assuming it contains both LOB and optional trade/OHLCV data)
+            # The user provided example suggests using DataLoader, but we can direct read for simplicity if structure is known.
+            # Assuming the parquet file has columns like 'timestamp', 'bid_price_1', 'bid_vol_1', etc.
+            # OR it might be raw snapshots.
+            
+            df = pd.read_parquet(self.file_path)
+            
+            # Basic validation
+            if df.empty:
+                raise ValueError(f"Empty parquet file: {self.file_path}")
+                
+            # Ensure timestamp is datetime and sorted
+            if 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                df = df.sort_values('timestamp').reset_index(drop=True)
+            
+            # Feature Engineering
+            # 1. Micro Features
+            # DeepScalperFeatureEngineer expects a specific format. 
+            # If the parquet is already pre-processed (e.g. from a previous pipeline), we might skip this.
+            # But let's assume we need to process it.
+            
+            # Check if columns are already present
+            required_cols = ['bid_price_1', 'ask_price_1'] 
+            if all(col in df.columns for col in required_cols):
+                 # It looks like wide format LOB data
+                 micro_features = self.fe.process_micro(df)
+            else:
+                 # Attempt to pivot if it looks like snapshot data (timestamp, level, ...)
+                 # Implementation detail: Assume wide format for now as that's typical for ML parquet datasets
+                 # or we would need a specific pivoting logic.
+                 raise ValueError("Parquet data must be in wide format (bid_price_1, etc.) or pre-processed.")
+
+            # 2. Macro Features (Tech Indicators)
+            # If OHLCV columns exist (open, high, low, close, volume), generate macro features
+            ohlcv_cols = ['open', 'high', 'low', 'close', 'volume']
+            if all(col in df.columns for col in ohlcv_cols):
+                macro_features = self.fe.process_macro(df)
+            else:
+                # If macro features are already computed?
+                # MACRO_COLS from env: rsi_14, MACD..., etc.
+                # Check if they exist
+                # For now, generate empty or zeros if missing, or error?
+                # DeepScalper Env REQUIRES macro.
+                # Let's try to compute if possible, else 0 pad.
+                 macro_features = pd.DataFrame(0, index=df.index, columns=[
+                    'rsi_14', 'MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9',
+                    'BBL_20_2.0', 'BBM_20_2.0', 'BBU_20_2.0', 'BBB_20_2.0', 'BBP_20_2.0',
+                    'atr_14', 'obv'
+                ])
+                
+            # 3. Align
+            if not macro_features.empty:
+                self._feature_data = self.fe.align_multimodal(micro_features, macro_features)
+            else:
+                self._feature_data = micro_features
+
+            self._timestamps = self._feature_data.index.tolist()
+            self._ptr = 0
+            
+            print(f"Loaded {len(self._feature_data)} rows from {self.file_path}")
+
+        except Exception as e:
+            raise RuntimeError(f"Failed to load parquet data: {e}")
+
+    def reset(self):
+        """Reset stream pointer."""
+        self._ptr = 0
+
+    def step(self) -> Optional[Dict[str, Any]]:
+        """Return next row."""
+        if self._ptr >= len(self._feature_data):
+            return None
+            
+        # Return as series/dict-like
+        row = self._feature_data.iloc[self._ptr]
+        self._ptr += 1
+        return row
+        
+    def peek(self) -> Optional[Any]:
+        if self._ptr >= len(self._feature_data):
+            return None
+        return self._feature_data.iloc[self._ptr]
