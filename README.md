@@ -234,12 +234,13 @@ risk enforcement, reporting, and the end-to-end fingerprint ??report flow. Run
 the full suite before committing changes to ensure constitutional guards remain
 intact.
 
-## DeepScalper Replication
+## DeepScalper Replication (Status: Production Training 🟢)
 
 Work-in-progress replication of the DeepScalper architecture (Sun et al., 2022) for minimal latency intraday trading on Bitcoin Futures.
 
 - **Agent**: `finrl_pro_ds.agents.deepscalper` (Synapse Ensemble: DQN, PPO, A2C)
-- **Environment**: `finrl_pro_ds.envs.deep_scalper_env.DeepScalperEnv` (LOB-aware, T+1 latency)
+- **Environment**: `finrl_pro_ds.envs.deep_scalper_env.DeepScalperEnv` (LOB-aware, T+1 latency, **Verified**)
+- **Training**: Production Run `deepscalper_prod_v1` active on GPUHub (Jan 21, 2026).
 - **Data**: TimescaleDB storage for high-frequency LOB snapshots (`finrl_pro_ds.data.db.LOBSnapshot`)
 
 Run DeepScalper tests:

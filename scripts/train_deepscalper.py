@@ -85,10 +85,16 @@ def main():
     parser = argparse.ArgumentParser(description="Train DeepScalper Agent")
     parser.add_argument("--config", type=str, required=True, help="Path to config yaml")
     parser.add_argument("--debug", action="store_true", help="Use mock environment")
+    parser.add_argument("--run_name", type=str, default=None, help="WandB Run Name")
     args = parser.parse_args()
 
     # Load Config
     config = load_config(args.config)
+    
+    # Override Run Name if provided
+    if args.run_name:
+        if "wandb" not in config: config["wandb"] = {}
+        config["wandb"]["name"] = args.run_name
     
     # Setup WandB
     setup_wandb(config)
