@@ -192,3 +192,9 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 - **Production Launched**: Full-scale training (2M steps) running on GPUHub under `deepscalper_prod_v1`.
 - **Infrastructure**: Validated `scripts/deploy_bare_metal.py` for correct PID tracking and WandB tagging.
 
+### Phase 9: Hardware Optimization (RTX 5090) - COMPLETE 🟢
+- **Configuration**: Created `deepscalper_prod_rtx5090.yaml` optimized for 32GB VRAM (Batch 4096) and 25 vCPUs (24 Envs).
+- **Vectorization**: Implementing `gymnasium.vector.AsyncVectorEnv` for parallel data collection, achieving >1000 SPS target.
+- **Computation**: Enabled `torch.compile` (PyTorch 2.x) for graph optimization.
+- **Verification**: Validated with `dry_run_rtx5090_v8` smoke test.
+

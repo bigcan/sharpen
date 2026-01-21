@@ -266,49 +266,76 @@ class DeepScalperTrainer:
         """Main Training Loop"""
         self.logger.log_event("deepscalper.training.start")
         
-        obs, info = self.env.reset()
-        micro, macro = self._unpack_obs(obs)
+        # Detect Vector Env
+        is_vector_env = False
+        import gymnasium as gym
+        if isinstance(self.env, gym.vector.VectorEnv):
+            is_vector_env = True
+            num_envs = self.env.num_envs
+            # Ensure env is reset
+            obs, info = self.env.reset()
+        else:
+            num_envs = 1
+            obs, info = self.env.reset()
+            # If standard env, ensure batch dim is handled in _unpack_obs
+            
+        micro, macro = self._unpack_obs(obs) 
+        # _unpack_obs handles adding batch dim if missing for single env.
+        # For VecEnv, micro is (B, W, F), macro is (B, F). Perfect.
         
-        episode_rewards = 0
+        # Compile Model if requested
+        print(f"DEBUG: self.config['torch_compile'] = {self.config.get('torch_compile', 'Not Set')}")
+        if self.config.get("torch_compile", False) and hasattr(torch, "compile"):
+            print("Compiling models with torch.compile...")
+            try:
+                self.ensemble.dqn.policy_net = torch.compile(self.ensemble.dqn.policy_net)
+                self.ensemble.ppo.network = torch.compile(self.ensemble.ppo.network)
+                self.ensemble.a2c.network = torch.compile(self.ensemble.a2c.network)
+                self.ensemble.gating = torch.compile(self.ensemble.gating)
+                print("Models compiled successfully.")
+            except Exception as e:
+                print(f"WARNING: torch.compile failed: {e}. Proceeding without compilation.")
+        
+        # Tracking
+        if is_vector_env:
+            episode_rewards = np.zeros(num_envs, dtype=np.float32)
+            episode_lengths = np.zeros(num_envs, dtype=np.int32)
+        else:
+            episode_rewards = 0.0
+            episode_steps = 0 # Legacy Scalar
+            
         episode_rewards_total = 0
-        episode_steps = 0
         episode_count = 0
         
         for step in range(self.total_timesteps):
             self.global_step = step
             
             # 1. Select Action (Voting)
-            # We need to capture INTERMEDIATE outputs for training PPO/A2C/Gating
-            # ensemble.predict is too high level. We need to manually call components here.
-            
             with torch.no_grad():
-                # Gating Weights
-                weights = self.ensemble.gating(macro) # (1, 3)
+                weights = self.ensemble.gating(macro) # (B, 3)
                 
                 # Individual Probs
-                # DQN
                 p_dqn_dir, p_dqn_price, p_dqn_vol = self.ensemble.dqn.get_probs(micro, macro)
-                
-                # PPO
                 logits_ppo_dir, logits_ppo_price, logits_ppo_vol, val_ppo = self.ensemble.ppo.network(micro, macro)
                 p_ppo_dir = torch.softmax(logits_ppo_dir, dim=1)
                 p_ppo_price = torch.softmax(logits_ppo_price, dim=1)
                 p_ppo_vol = torch.softmax(logits_ppo_vol, dim=1)
                 
-                # A2C
                 logits_a2c_dir, logits_a2c_price, logits_a2c_vol, val_a2c = self.ensemble.a2c.network(micro, macro)
                 p_a2c_dir = torch.softmax(logits_a2c_dir, dim=1)
                 p_a2c_price = torch.softmax(logits_a2c_price, dim=1)
                 p_a2c_vol = torch.softmax(logits_a2c_vol, dim=1)
                 
                 # Ensemble Aggregate
-                w_dqn, w_ppo, w_a2c = weights[0]
+                # Weights: (B, 3)
+                w_dqn = weights[:, 0].unsqueeze(1)
+                w_ppo = weights[:, 1].unsqueeze(1)
+                w_a2c = weights[:, 2].unsqueeze(1)
                 
                 final_dir = w_dqn * p_dqn_dir + w_ppo * p_ppo_dir + w_a2c * p_a2c_dir
                 final_price = w_dqn * p_dqn_price + w_ppo * p_ppo_price + w_a2c * p_a2c_price
                 final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
                 
-                # Sample Action
                 # Sample Action
                 dist_dir = Categorical(probs=final_dir)
                 dist_price = Categorical(probs=final_price)
@@ -318,70 +345,171 @@ class DeepScalperTrainer:
                 a_price = dist_price.sample()
                 a_vol = dist_vol.sample()
                 
-                action_vector = np.array([a_dir.item(), a_price.item(), a_vol.item()])
-
-                # Calculate PPO-specific Log Probs for THIS action (for "off-policy" PPO update)
-                # Audit Fix 1.1: Use ENSEMBLE's distribution for importance sampling.
-                # The action 'a' was sampled from 'final_*' (Ensemble).
-                # We need log_prob(a|Ensemble) to use as 'old_log_prob' in PPO.
+                # Action Vector: (B, 3)
+                action_vector = torch.stack([a_dir, a_price, a_vol], dim=1).cpu().numpy()
                 
+                # Log Probs for PPO
                 ens_log_dir = dist_dir.log_prob(a_dir)
                 ens_log_price = dist_price.log_prob(a_price)
                 ens_log_vol = dist_vol.log_prob(a_vol)
-                
-                # Store this as 'ppo_log_prob'
                 ppo_log_prob = torch.stack([ens_log_dir, ens_log_price, ens_log_vol], dim=1)
 
             # 2. Step Environment
             next_obs, reward, terminated, truncated, info = self.env.step(action_vector)
             
             next_micro, next_macro = self._unpack_obs(next_obs)
-            done = terminated or truncated
             
-            episode_rewards += reward
-            episode_steps += 1
+            # Handle Done
+            if is_vector_env:
+                dones = terminated | truncated # Element-wise OR
+            else:
+                dones = terminated or truncated
+                # Wrap scalar to array for uniform handling if we want, but keeping separate paths is safer for legacy
             
-            # 3. Store Transitions
+            # 3. Store Transitions & Track Rewards
             
-            # Store for DQN (Off-policy)
-            # We must squeeze the batch dim (1, W, F) -> (W, F)
-            # the replay buffer expects single observations, and stacking adds the batch dim back.
-            state_dict = {"micro": micro.squeeze(0).cpu().numpy(), "macro": macro.squeeze(0).cpu().numpy()}
-            next_state_dict = {"micro": next_micro.squeeze(0).cpu().numpy(), "macro": next_macro.squeeze(0).cpu().numpy()}
+            if is_vector_env:
+                # Vectorized Tracking
+                episode_rewards += reward
+                episode_lengths += 1
+                
+                # Check for finished episodes
+                for i in range(num_envs):
+                    if dones[i]:
+                        metrics = {
+                            "train/episode_reward": episode_rewards[i],
+                            "train/episode_length": episode_lengths[i],
+                            "train/global_step": self.global_step
+                        }
+                        self.logger.log_event("deepscalper.training.episode_end", context=metrics)
+                        wandb.log(metrics)
+                        
+                        episode_rewards[i] = 0
+                        episode_lengths[i] = 0
+                        episode_count += 1
+                
+                # Handling next_val for PPO/A2C
+                with torch.no_grad():
+                    _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_macro)
+                    _, _, _, val_next_a2c = self.ensemble.a2c.network(next_micro, next_macro)
+                
+                # Loop to push to buffers individually (simplest integration with current buffers)
+                for i in range(num_envs):
+                    # Identify correct next_state
+                    # If done, next_obs[i] is reset state. We need terminal state.
+                    if dones[i] and "final_observation" in info:
+                        # Gymnasium VectorEnv: info['final_observation'][i] is the terminal obs
+                        # Note: info['final_observation'] is a list or array
+                        term_obs = info['final_observation'][i]
+                        term_micro, term_macro = self._unpack_obs(term_obs) # This creates (1, ...) tensors
+                        
+                        # Use terminal state for buffer
+                        s_micro = term_micro.squeeze(0)
+                        s_macro = term_macro.squeeze(0)
+                        
+                        # For bootstrapping (val_next), we should technically use the value of the terminal state (0 if term, V(s) if trunc)
+                        # But here we use 'val_next' computed on RESET state which is WRONG for PPO.
+                        # Should compute value on terminal obs.
+                        # Approximation: Use valid next value if truncated, 0 if terminated?
+                        # Simplification: Use computed val_next (of reset state) but set mask=0 later.
+                        # Better: Recompute val for terminal state?
+                        # Let's trust GAE Logic: delta = r + gamma * V(s') * (1-d)
+                        # If done=True, V(s') is ignored. So val_next doesn't matter much.
+                        
+                    else:
+                        s_micro = next_micro[i]
+                        s_macro = next_macro[i]
+                    
+                    # Current State
+                    c_micro = micro[i]
+                    c_macro = macro[i]
+                    
+                    # Store DQN
+                    # DQN Memory requires numpy dicts
+                    state_dict = {"micro": c_micro.cpu().numpy(), "macro": c_macro.cpu().numpy()}
+                    next_state_dict = {"micro": s_micro.cpu().numpy(), "macro": s_macro.cpu().numpy()}
+                    
+                    self.ensemble.dqn.memory.push(
+                        state_dict, 
+                        action_vector[i], 
+                        reward[i], 
+                        next_state_dict, 
+                        bool(dones[i])
+                    )
+                    
+                    # Store PPO/A2C
+                    # (micro, macro, action, log_prob, reward, val, val_next, done)
+                    self.ppo_buffer.append((
+                        c_micro, c_macro, action_vector[i], ppo_log_prob[i], 
+                        float(reward[i]), float(val_ppo[i]), float(val_next_ppo[i]), bool(dones[i])
+                    ))
+                    
+                    self.a2c_buffer.append((
+                        c_micro, c_macro, action_vector[i], None, 
+                        float(reward[i]), float(val_a2c[i]), float(val_next_a2c[i]), bool(dones[i])
+                    ))
+                    
+                    self.gating_buffer.append((
+                        c_macro, weights[i], float(reward[i]), bool(dones[i])
+                    ))
+                    
+            else:
+                # SINGLE ENV LEGACY PATH
+                # To maintain compatibility if needed, but above logic works for num_envs=1 too technically
+                # if we treat scalars as arrays of 1.
+                # However, scalars (float) don't index [i].
+                # Let's keep separate block for safety or just assume array wrap?
+                # _unpack_obs ensures tensors are (B, ...).
+                
+                # Single env reward is float.
+                episode_rewards += reward
+                episode_steps += 1
+                
+                done = dones # Scalar
+                
+                with torch.no_grad():
+                    _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_macro)
+                    _, _, _, val_next_a2c = self.ensemble.a2c.network(next_micro, next_macro)
+                
+                # Buffer Push (Squeeze batch dims for storage as buffers expect single items usually)
+                state_dict = {"micro": micro.squeeze(0).cpu().numpy(), "macro": macro.squeeze(0).cpu().numpy()}
+                next_state_dict = {"micro": next_micro.squeeze(0).cpu().numpy(), "macro": next_macro.squeeze(0).cpu().numpy()}
+                
+                self.ensemble.dqn.memory.push(state_dict, action_vector[0], reward, next_state_dict, done)
+                
+                self.ppo_buffer.append((
+                    micro.squeeze(0), macro.squeeze(0), action_vector[0], ppo_log_prob.squeeze(0),
+                    reward, val_ppo.item(), val_next_ppo.item(), done
+                ))
+                self.a2c_buffer.append((
+                    micro.squeeze(0), macro.squeeze(0), action_vector[0], None,
+                    reward, val_a2c.item(), val_next_a2c.item(), done
+                ))
+                self.gating_buffer.append((
+                    macro.squeeze(0), weights.squeeze(0), reward, done
+                ))
+                
+                if done:
+                    metrics = {"train/episode_reward": episode_rewards, "train/episode_length": episode_steps, "train/global_step": self.global_step}
+                    wandb.log(metrics)
+                    episode_rewards = 0
+                    episode_steps = 0
+                    episode_count += 1
+                    
+                    obs, info = self.env.reset()
+                    next_micro, next_macro = self._unpack_obs(obs)
             
-            self.ensemble.dqn.memory.push(state_dict, action_vector, reward, next_state_dict, done)
-            
-            # Store for PPO/A2C
-            # Buffer: (micro, macro, action, log_prob, reward, val, val_next, done)
-            # We assume val_next ~= val from next step (bootstrapping 1 step)
-            # Fix F1: Use correct next values for bootstrapping
-            
-            with torch.no_grad():
-                _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_macro)
-                _, _, _, val_next_a2c = self.ensemble.a2c.network(next_micro, next_macro)
-            
-            self.ppo_buffer.append((micro.squeeze(0), macro.squeeze(0), action_vector, ppo_log_prob.squeeze(0), reward, val_ppo.item(), val_next_ppo.item(), done))
-            self.a2c_buffer.append((micro.squeeze(0), macro.squeeze(0), action_vector, None, reward, val_a2c.item(), val_next_a2c.item(), done))
-            
-            # Gating Buffer: (macro, weights, reward, done)
-            # weights is (1, 3) tensor
-            self.gating_buffer.append((macro.squeeze(0), weights.squeeze(0), reward, done))
-            
-            # 4. Update Steps
+            # 4. Updates
             
             # A. Train DQN
             dqn_loss = self.ensemble.dqn.train_step()
             
-            # B. Train PPO/A2C (Batch/Epoch based)
-            # Update every N steps or episode end? PPO usually fixed horizon.
-            update_interval = 256 # Example horizon
-            
-            if (step + 1) % update_interval == 0:
+            # B. Train PPO/A2C
+            if (step + 1) % self.config.get("update_interval", 256) == 0:
                 ppo_loss = self.update_ppo(self.ensemble.ppo, self.ppo_optimizer, self.ppo_buffer)
                 a2c_loss = self.update_a2c(self.ensemble.a2c, self.a2c_optimizer, self.a2c_buffer)
                 gating_loss = self.update_gating(self.gating_buffer)
                 
-                # Log losses
                 if ppo_loss is not None:
                      metrics = {
                          "train/ppo_loss": ppo_loss, 
@@ -389,62 +517,32 @@ class DeepScalperTrainer:
                          "train/gating_loss": gating_loss,
                          "train/global_step": self.global_step
                      }
-                     self.logger.log_event("deepscalper.training.update", context=metrics)
                      wandb.log(metrics)
                 
-                self.ppo_buffer = [] # Clear buffers
+                self.ppo_buffer = [] 
                 self.a2c_buffer = []
                 self.gating_buffer = []
-                
-            # C. Train Gating
-            # self.update_gating(...)
             
-            if step % 100 == 0 and dqn_loss is not None:
-                metrics = {
-                    "train/dqn_loss": dqn_loss,
-                    "train/step_reward": reward,
-                    "train/global_step": self.global_step
-                }
-                self.logger.log_event("deepscalper.training.step", context=metrics)
-                wandb.log(metrics)
-            
+            if step % self.config.get("log_interval", 100) == 0 and dqn_loss is not None:
+                # Log avg reward if using vector envs? reward is array.
+                r = reward.mean() if is_vector_env else reward
+                wandb.log({"train/dqn_loss": dqn_loss, "train/step_reward_mean": r, "train/global_step": self.global_step})
+
             # Save Checkpoint
             if (step + 1) % self.checkpoint_interval == 0:
                 ckpt_path = f"checkpoints/checkpoint_{step+1}.pth"
                 self.save_checkpoint(ckpt_path)
-                print(f"Saved checkpoint to {ckpt_path}")
                 
-            # Handle Episode End
-            if done:
-                metrics = {
-                    "train/episode_reward": episode_rewards,
-                    "train/episode_length": episode_steps,
-                    "train/episode_count": episode_count,
-                    "train/global_step": self.global_step
-                }
-                self.logger.log_event("deepscalper.training.episode_end", context=metrics)
-                wandb.log(metrics)
-                
-                obs, info = self.env.reset()
-                micro, macro = self._unpack_obs(obs)
-                episode_rewards_total += episode_rewards
-                episode_rewards = 0
-                episode_steps = 0
-                episode_count += 1
-                
-                # Critical: Clear buffers on episode end to prevent cross-episode contamination
-                # PPO/A2C are on-policy and typically don't span episodes blindly without correct handling.
-                self.ppo_buffer = []
-                self.a2c_buffer = []
-                self.gating_buffer = []
-            else:
-                micro = next_micro
-                macro = next_macro
-                obs = next_obs
+                # Check for max checkpoints and delete old ones
+                # Not implemented yet but planned
+                pass
+
+            # Update Obs
+            micro = next_micro
+            macro = next_macro
+            obs = next_obs
         
-        avg_reward = episode_rewards_total / max(1, episode_count)
-        self.logger.log_event("deepscalper.training.complete", context={"avg_reward": avg_reward})
-        return avg_reward
+        self.logger.log_event("deepscalper.training.complete")
                 
     def _unpack_obs(self, obs: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
         """

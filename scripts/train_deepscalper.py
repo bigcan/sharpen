@@ -7,6 +7,8 @@ import numpy as np
 from pathlib import Path
 
 from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
+import gymnasium as gym
+import numpy as np
 from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
 from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
 from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
@@ -14,20 +16,36 @@ from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
 # Mock Env for initial testing if real env fails or for debugging
-class MockDeepScalperEnv:
-    def __init__(self):
-        self.observation_space = None # Placeholder
-        self.action_space = None 
+class MockDeepScalperEnv(gym.Env):
+    metadata = {"render_modes": ["human"]}
     
-    def reset(self):
-        # Micro: (20, 20), Macro: (11,)
+    def __init__(self):
+        super().__init__()
+        # Define spaces matching DeepScalperEnv
+        self.window_size = 50
+        self.micro_dim = 20
+        self.observation_space = gym.spaces.Dict({
+            "micro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self.micro_dim), dtype=np.float32),
+            "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(11,), dtype=np.float32),
+            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
+        })
+        self.action_space = gym.spaces.MultiDiscrete([3, 5, 5])
+    
+    def reset(self, seed=None, options=None):
         return {
-            "micro": np.random.randn(20, 20),
-            "macro": np.random.randn(11)
+            "micro": np.random.randn(50, 20).astype(np.float32),
+            "macro": np.random.randn(11).astype(np.float32),
+            "private": np.zeros(2, dtype=np.float32)
         }, {}
     
     def step(self, action):
-        return self.reset()[0], 1.0, False, False, {}
+        # Return proper types
+        obs = self.reset()[0]
+        reward = 1.0
+        terminated = False
+        truncated = False
+        info = {}
+        return obs, reward, terminated, truncated, info
 
 def make_env(config):
     """Factory to create DeepScalperEnv with Real Data"""
@@ -91,6 +109,12 @@ def main():
     # Load Config
     config = load_config(args.config)
     
+    if args.debug:
+        config["torch_compile"] = False
+        print("DEBUG MODE: torch.compile disabled.")
+        import torch._dynamo
+        torch._dynamo.config.suppress_errors = True
+    
     # Override Run Name if provided
     if args.run_name:
         if "wandb" not in config: config["wandb"] = {}
@@ -103,16 +127,40 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Using device: {device}")
     
-    # Environment
-    if args.debug:
-        print("DEBUG MODE: Using Mock Environment")
-        env = MockDeepScalperEnv()
-    else:
-        print("Loading Real Environment...")
-        env = make_env(config)
-        print("Real Environment Loaded.")
 
-    # Network Configs
+
+    # Environment
+    
+    # Check for num_envs in config
+    env_config = config.get("env", {})
+    num_envs = env_config.get("num_envs", 1)
+    
+    # Define Factory
+    def env_factory():
+        if args.debug:
+            return MockDeepScalperEnv()
+        else:
+            return make_env(config)
+            
+    if num_envs > 1:
+        print(f"Vectorizing {'Mock' if args.debug else 'Real'} Environment: {num_envs} Envs")
+        
+        # Use Gymnasium AsyncVectorEnv (Real) or SyncVectorEnv (Debug/Fallback)
+        # MockEnv is hard to pickle on Windows from __main__, so use Sync for debug.
+        if args.debug:
+             print("Debug Mode: Forcing SyncVectorEnv.")
+             env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
+        else:
+            try:
+                env = gym.vector.AsyncVectorEnv([env_factory for _ in range(num_envs)])
+            except Exception as e:
+                print(f"Failed to create AsyncVectorEnv: {e}. Fallback to Sync.")
+                env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
+            
+        print("Vector Environment Loaded.")
+    else:
+        env = env_factory()
+        print(f"{'Mock' if args.debug else 'Real'} Environment Loaded.")
 
     # Network Configs
     net_config = config.get("network", {
@@ -165,6 +213,9 @@ def main():
     training_config = config.get("training", {})
     training_config["agents"] = config.get("agents", {})
     
+    # Check if we should enable torch.compile (passed via config or args)
+    # The config file has training.torch_compile
+    
     trainer = DeepScalperTrainer(
         env=env,
         ensemble_agent=ensemble,
@@ -177,7 +228,11 @@ def main():
         trainer.train()
     except KeyboardInterrupt:
         print("Training interrupted. Saving checkpoint...")
-        trainer.save_checkpoint("interrupted_checkpoint.pth")
+        trainer.save_checkpoint("checkpoints/interrupted_checkpoint.pth")
+    finally:
+        env.close()
 
 if __name__ == "__main__":
+    import gymnasium as gym # Lazy import for vector envs
     main()
+

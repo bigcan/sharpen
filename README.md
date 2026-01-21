@@ -247,3 +247,10 @@ Run DeepScalper tests:
 ```bash
 pytest tests/deepscalper
 ```
+
+**RTX 5090 Production Training (Optimized):**
+To utilize the 32GB VRAM and 25 vCPUs:
+```bash
+python scripts/train_deepscalper.py --config configs/deepscalper_prod_rtx5090.yaml --run_name prod_rtx5090_v1
+```
+*(Key Optimizations: Batch Size=4096, Num Envs=24, Buffer=1M, torch.compile=True)*
