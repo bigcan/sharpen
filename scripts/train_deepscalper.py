@@ -10,6 +10,8 @@ from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
 from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
 from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
 from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
+from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
 # Mock Env for initial testing if real env fails or for debugging
 class MockDeepScalperEnv:
@@ -26,6 +28,27 @@ class MockDeepScalperEnv:
     
     def step(self, action):
         return self.reset()[0], 1.0, False, False, {}
+
+def make_env(config):
+    """Factory to create DeepScalperEnv with Real Data"""
+    # 1. Get Data Config
+    data_config = config.get("data", {})
+    file_path = data_config.get("file_path")
+    ticker = data_config.get("ticker", "BTCUSDT")
+    
+    if not file_path or not os.path.exists(file_path):
+        raise ValueError(f"Invalid data file path: {file_path}")
+        
+    # 2. Init Data Handler
+    handler = ParquetDataHandler(
+        file_path=file_path,
+        ticker=ticker,
+        feature_config=config.get("features", {})
+    )
+    
+    # 3. Init Env
+    env = DeepScalperEnv(config=config.get("env", {}), data_handler=handler)
+    return env
 
 def load_config(path):
     with open(path, 'r') as f:
@@ -49,10 +72,11 @@ def main():
         print("DEBUG MODE: Using Mock Environment")
         env = MockDeepScalperEnv()
     else:
-        # TODO: Load real environment using factory
-        # from finrl_pro_ds.envs.factory import make_env
-        # env = make_env(config['env'])
-        raise NotImplementedError("Real environment loading not yet integrated. Use --debug to run with MockEnv.")
+        print("Loading Real Environment...")
+        env = make_env(config)
+        print("Real Environment Loaded.")
+
+    # Network Configs
 
     # Network Configs
     net_config = config.get("network", {
