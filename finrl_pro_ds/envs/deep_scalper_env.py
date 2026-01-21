@@ -93,14 +93,19 @@ class DeepScalperEnv(gym.Env):
         self.current_best_bid = 0.0
         self.current_best_ask = 0.0
         
+        # Cold Start Fix: Fill window with first frame
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
+        # We will fill this in reset() properly
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
         
         if self.handler:
             self.handler.reset()
             first_step = self.handler.step()
             if first_step is not None:
-                self._update_state(first_step)
+                # Reset Window with valid data
+                first_frame = self._build_frame(first_step)
+                self.micro_window = np.tile(first_frame, (self.window_size, 1))
+                self._update_macro_state(first_step) # Update macro state as well
         
         # Initialize portfolio value after first state update
         self.prev_portfolio_value = self._get_portfolio_value()
@@ -116,8 +121,25 @@ class DeepScalperEnv(gym.Env):
         if self.handler:
             step_data = self.handler.step()
         
-        # If no more data, done
+        # Pre-Execution Drawdown Check
+        # Estimate max loss from this trade (simplistic: spread cost + fees)
+        # Better: check funds available vs Stop Loss threshold.
+        # If Current Equity is already close to Stop, forbid risk?
+        # For now, we stick to the post-check but move it or add a predictive check?
+        # "Safety Stops: Is the 20% Max Drawdown logic robust?"
+        # Let's add an explicit check on current equity.
+        
         terminated = False
+        truncated = False
+        info = {}
+
+        current_val = self._get_portfolio_value()
+        if current_val < 0.8 * self.initial_balance:
+             terminated = True
+             reward = -1.0 # Penalty for hitting stop
+             info['stop_loss'] = True
+             return self._get_observation(), reward, terminated, truncated, info
+        
         if self.handler and step_data is None:
             terminated = True
             return self._get_observation(), 0.0, terminated, False, {}
@@ -152,8 +174,22 @@ class DeepScalperEnv(gym.Env):
                         else:
                             # Closing short
                             self.position += order_qty
-                            if self.position >= 0:
+                            if self.position > 0:
                                 self.avg_price = fill_price
+                            elif self.position == 0:
+                                self.avg_price = 0
+                            # If pos < 0, avg_price remains same
+                        # If we are buying back, we are closing the most expensive sells first (FIFO/LIFO not implemented, so average).
+                        # For simplicity, if we are still short, the avg_price remains the same as it represents the average sell price of the *remaining* short.
+                        # If we are reducing a short, the avg_price of the remaining short doesn't change based on the buy price.
+                        # It only changes if we open a new short.
+                        # However, the user's intent seems to be to update avg_price based on the fill_price when closing/reducing a short.
+                        self.position += order_qty
+                        if self.position > 0:
+                            self.avg_price = fill_price
+                        elif self.position == 0:
+                            self.avg_price = 0
+                        # If pos < 0 (still short), avg_price of remaining short doesn't change.
                                 
             elif order_dir == 2:  # Sell
                 # Fill if Bid >= Limit Price
@@ -168,14 +204,11 @@ class DeepScalperEnv(gym.Env):
                     self.balance += proceeds
                     # Update position
                     self.position -= order_qty
-                    if self.position <= 0:
-                         # Closing long or opening short
-                        if self.position < 0:
-                             # Updating short avg price is complex, simplified here to fill price if flipping
-                             if self.position + order_qty > 0: # Was Long
-                                 self.avg_price = fill_price
-                        else:
-                             self.avg_price = 0
+                    if self.position < 0: # Was Long, now short
+                        self.avg_price = fill_price
+                    elif self.position == 0: # Was Long, now flat
+                        self.avg_price = 0
+                    # If pos > 0 (still long), avg_price of remaining long doesn't change from a sell to reduce.
                         
             self.pending_order = None  # Order processed
 
@@ -228,11 +261,9 @@ class DeepScalperEnv(gym.Env):
         mid = (self.current_best_ask + self.current_best_bid) / 2.0 if self.current_best_ask > 0 else 0.0
         return self.balance + (self.position * mid)
 
-    def _update_state(self, step_data: Any):
-        """Update micro window and macro state from step data."""
-        # FIX F1: Build FLATTENED micro frame (L*F = 20,)
+    def _build_frame(self, step_data: Any) -> np.ndarray:
+        """Construct a single micro-observation frame from step data."""
         frame = np.zeros((self.micro_dim,), dtype=np.float32)
-        
         try:
             idx = 0
             for i in range(self.lob_levels):
@@ -248,12 +279,18 @@ class DeepScalperEnv(gym.Env):
                 frame[idx + 3] = ask_vol
                 idx += 4
                 
-                # Track best bid/ask for order matching
+                # Track best bid/ask for order matching (side effect but necessary if coupled)
+                # Ideally separating side effects is better, but safe here if called sequentially.
                 if level == 1:
                     self.current_best_bid = bid_px
                     self.current_best_ask = ask_px
-                
-            # FIX F2: Extract actual macro columns
+        except Exception as e:
+            logging.error(f"Error building frame: {e}")
+        return frame
+
+    def _update_macro_state(self, step_data: Any):
+        """Update macro state vector."""
+        try:
             macro_values = []
             for col in MACRO_COLS:
                 val = step_data.get(col, 0)
@@ -261,15 +298,20 @@ class DeepScalperEnv(gym.Env):
                     val = 0.0
                 macro_values.append(float(val))
             self.current_macro = np.array(macro_values, dtype=np.float32)
-            
         except Exception as e:
-            # Fallback if data is malformed
-            logging.error(f"Error updating state: {e}")
-            pass
-            
-        # Push to window (Shift and Insert)
+             logging.error(f"Error updating macro state: {e}")
+
+    def _update_state(self, step_data: Any):
+        """Update micro window and macro state from step data."""
+        # 1. Build Micro Frame
+        frame = self._build_frame(step_data)
+        
+        # 2. Push to window (Shift and Insert)
         self.micro_window = np.roll(self.micro_window, -1, axis=0)
         self.micro_window[-1] = frame
+        
+        # 3. Update Macro
+        self._update_macro_state(step_data)
 
     def _get_observation(self):
         return {
