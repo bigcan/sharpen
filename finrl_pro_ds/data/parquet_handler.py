@@ -107,3 +107,21 @@ class ParquetDataHandler:
         if self._ptr >= len(self._feature_data):
             return None
         return self._feature_data.iloc[self._ptr]
+
+    def get_lookahead_price(self, horizon: int) -> Optional[float]:
+        """Get price at t + horizon for hindsight reward."""
+        target_idx = self._ptr + horizon
+        if target_idx >= len(self._feature_data):
+            return None
+            
+        row = self._feature_data.iloc[target_idx]
+        
+        # Try finding a mid/close price
+        if 'mid_price' in row:
+            return float(row['mid_price'])
+        elif 'close' in row:
+            return float(row['close'])
+        elif 'bid_price_1' in row and 'ask_price_1' in row:
+            return (float(row['bid_price_1']) + float(row['ask_price_1'])) / 2.0
+            
+        return None

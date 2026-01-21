@@ -1,0 +1,77 @@
+# configs/deepscalper_pilot.yaml
+
+# 1. Environment & Data
+env:
+  symbol: "BTCUSDT"
+  tick_size: 0.1
+  lot_size: 0.001
+  window_size: 50
+  maker_fee: 0.0002
+  taker_fee: 0.0005 # Binance VIP 0 Taker Fee (0.05%)
+  initial_balance: 10000.0
+
+data:
+  file_path: "c:/data/btc_lob_jan2023.parquet"
+  ticker: "BTCUSDT"
+  timeframe: "1m"
+
+# 1.1 Reward Configuration
+reward:
+  type: "pnl"          # simple_pnl, risk_adjusted, etc.
+  scaling: 1e-4        # Scale PnL to roughly [-1, 1] range for stability
+  # Paper-Aligned Settings (arXiv:2201.09058)
+  hindsight_weight: 0.1  # Bonus for long-term trend alignment (Training Only)
+  hindsight_horizon: 180 # Lookahead steps (e.g. 180 mins)
+  risk_penalty: 0.05     # Penalty for high volatility/drawdown
+  drawdown_penalty: 0.0  # (Legacy/Specific) Optional penalty factor for drawdown
+
+# 2. Network Architecture (Shared Encoders)
+network:
+  micro_config:
+    input_size: 20
+    hidden_size: 128
+  macro_config:
+    input_size: 11
+    hidden_sizes: [128]
+  fusion_dim: 256
+
+# 3. Agent-Specific Configurations
+agents:
+  dqn:
+    learning_rate: 0.0001
+    gamma: 0.99
+    epsilon_start: 1.0
+    epsilon_end: 0.01
+    epsilon_decay: 0.995
+    batch_size: 64
+    target_update_freq: 1000
+    buffer_size: 50000 # Reduced for Pilot
+  
+  ppo:
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    entropy_coef: 0.01
+    clip_range: 0.2
+    n_epochs: 4
+    batch_size: 64 
+    
+  a2c:
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    entropy_coef: 0.01
+    
+  gating:
+    learning_rate: 0.001
+    update_mode: "reinforce"
+
+# 4. Global Training Settings
+training:
+  total_timesteps: 500 # Reduced for Local Sanity Check
+  device: "cuda"
+  update_interval: 64 # Frequent updates for monitoring
+  
+wandb:
+  project: "DeepScalper_Pilot"
+  tags: ["pilot", "test-flight", "fast-debug"]

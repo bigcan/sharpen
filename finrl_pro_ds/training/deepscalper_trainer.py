@@ -39,28 +39,31 @@ class DeepScalperTrainer:
         
         # Training Hyperparameters
         self.batch_size = config.get("batch_size", 64)
-        self.gamma = config.get("gamma", 0.99)
+        self.gamma = config.get("gamma", 0.99) # Default global gamma, but agents might have their own
         self.total_timesteps = config.get("total_timesteps", 100000)
+        # self.learning_rate is depcreated for agent-specific configs, but kept as fallback
         self.learning_rate = config.get("learning_rate", 1e-4)
         self.target_update_freq = config.get("target_update_freq", 1000)
+        
+        # Parse Agent Configs (if available, else fallback to global LR)
+        agents_config = config.get("agents", {})
+        
+        ppo_config = agents_config.get("ppo", {})
+        a2c_config = agents_config.get("a2c", {})
+        gating_config = agents_config.get("gating", {})
+        
+        ppo_lr = ppo_config.get("learning_rate", self.learning_rate)
+        a2c_lr = a2c_config.get("learning_rate", self.learning_rate)
+        gating_lr = gating_config.get("learning_rate", self.learning_rate)
         
         # Gating Optimizer
         self.gating_optimizer = optim.Adam(
             self.ensemble.gating.parameters(), 
-            lr=self.learning_rate
+            lr=gating_lr
         )
         
-        # We assume agents have their own optimizers initialized internally
-        # but we might need to access them for coordinated updates if not.
-        # Check: dqn_agent.py initializes its own optimizer.
-        # PPO/A2C likely need optimizers attached or passed in.
-        # For this implementation, we will assume policy agents need optimizers created here
-        # or we update `policy_agents.py` to include them. 
-        # Looking at policy_agents.py, it's just a network wrapper currently. 
-        # We need to add optimizers for PPO and A2C here.
-        
-        self.ppo_optimizer = optim.Adam(self.ensemble.ppo.network.parameters(), lr=self.learning_rate)
-        self.a2c_optimizer = optim.Adam(self.ensemble.a2c.network.parameters(), lr=self.learning_rate)
+        self.ppo_optimizer = optim.Adam(self.ensemble.ppo.network.parameters(), lr=ppo_lr)
+        self.a2c_optimizer = optim.Adam(self.ensemble.a2c.network.parameters(), lr=a2c_lr)
         
         # Buffers
         # DQN has its own buffer. PPO/A2C need rollout buffers.
