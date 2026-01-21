@@ -233,3 +233,16 @@ Integration tests cover reproducibility (fingerprints), evaluation scheduling,
 risk enforcement, reporting, and the end-to-end fingerprint ??report flow. Run
 the full suite before committing changes to ensure constitutional guards remain
 intact.
+
+## DeepScalper Replication
+
+Work-in-progress replication of the DeepScalper architecture (Sun et al., 2022) for minimal latency intraday trading on Bitcoin Futures.
+
+- **Agent**: `finrl_pro_ds.agents.deepscalper` (Synapse Ensemble: DQN, PPO, A2C)
+- **Environment**: `finrl_pro_ds.envs.deep_scalper_env.DeepScalperEnv` (LOB-aware, T+1 latency)
+- **Data**: TimescaleDB storage for high-frequency LOB snapshots (`finrl_pro_ds.data.db.LOBSnapshot`)
+
+Run DeepScalper tests:
+```bash
+pytest tests/deepscalper
+```
