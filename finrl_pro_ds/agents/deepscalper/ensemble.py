@@ -1,0 +1,94 @@
+import torch
+import torch.nn as nn
+import numpy as np
+from typing import Dict, List, Tuple
+from torch.distributions import Categorical
+
+from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
+from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
+
+class SynapseGatingNetwork(nn.Module):
+    """
+    Meta-Controller for the Ensemble.
+    Input: Macro Features
+    Output: Softmax Weights for [DQN, PPO, A2C]
+    """
+    def __init__(self, input_dim: int = 11, hidden_dim: int = 64):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(input_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Linear(hidden_dim, 3), # 3 Agents
+            nn.Softmax(dim=1)
+        )
+        
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.net(x)
+
+class DeepScalperEnsemble:
+    """
+    The 'Scalper Squad' Ensemble.
+    Aggregates predictions from DQN, PPO, A2C using the Gating Network.
+    """
+    def __init__(
+        self, 
+        dqn_agent: DeepScalperDQN,
+        ppo_agent: DeepScalperPPO,
+        a2c_agent: DeepScalperA2C,
+        gating_net: SynapseGatingNetwork,
+        device: str = "cpu"
+    ):
+        self.dqn = dqn_agent
+        self.ppo = ppo_agent
+        self.a2c = a2c_agent
+        self.gating = gating_net.to(device)
+        self.device = torch.device(device)
+        
+    def predict(self, micro: torch.Tensor, macro: torch.Tensor) -> np.ndarray:
+        """
+        Ensemble Prediction.
+        1. Get weights from Gating Network (based on Macro).
+        2. Get Branch Probabilities from all agents.
+           - DQN: Softmax(Q_values)
+           - PPO/A2C: Net Outputs
+        3. Weighted Sum of Probs.
+        4. Sample from final distribution.
+        """
+        micro = micro.to(self.device)
+        macro = macro.to(self.device)
+        
+        # 1. Gating Weights
+        with torch.no_grad():
+            weights = self.gating(macro) # (1, 3) -> [w_dqn, w_ppo, w_a2c]
+            w_dqn = weights[:, 0].item()
+            w_ppo = weights[:, 1].item()
+            w_a2c = weights[:, 2].item()
+            
+        # 2. Get Probs
+        # DQN needs Q->Prob conversion
+        with torch.no_grad():
+            q_dir, q_price, q_vol, _ = self.dqn.policy_net(micro, macro)
+            # Temperature scaling for DQN soft-voting?
+            temp = 1.0
+            p_dqn_dir = torch.softmax(q_dir / temp, dim=1)
+            p_dqn_price = torch.softmax(q_price / temp, dim=1)
+            p_dqn_vol = torch.softmax(q_vol / temp, dim=1)
+            
+        # PPO
+        p_ppo_dir, p_ppo_price, p_ppo_vol = self.ppo.get_probs(micro, macro)
+        
+        # A2C
+        p_a2c_dir, p_a2c_price, p_a2c_vol = self.a2c.get_probs(micro, macro)
+        
+        # 3. Aggregate
+        # Final_Prob = w1*P1 + w2*P2 + w3*P3
+        final_dir = w_dqn * p_dqn_dir + w_ppo * p_ppo_dir + w_a2c * p_a2c_dir
+        final_price = w_dqn * p_dqn_price + w_ppo * p_ppo_price + w_a2c * p_a2c_price
+        final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
+        
+        # 4. Sample Action
+        a_dir = Categorical(probs=final_dir).sample().item()
+        a_price = Categorical(probs=final_price).sample().item()
+        a_vol = Categorical(probs=final_vol).sample().item()
+        
+        return np.array([a_dir, a_price, a_vol])
