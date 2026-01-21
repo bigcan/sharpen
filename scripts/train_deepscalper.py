@@ -47,7 +47,11 @@ def make_env(config):
     )
     
     # 3. Init Env
-    env = DeepScalperEnv(config=config.get("env", {}), data_handler=handler)
+    env_config = config.get("env", {})
+    # Inject reward config if it exists at top level, or ensure it's passed
+    env_config["reward"] = config.get("reward", {})
+    
+    env = DeepScalperEnv(config=env_config, data_handler=handler)
     return env
 
 def load_config(path):
@@ -84,8 +88,30 @@ def main():
         "macro_config": {"input_size": 11, "hidden_sizes": [64]}
     })
     
-    # Initialize Agents
-    dqn = DeepScalperDQN(net_config, device=device)
+    # Initialize Agents with Specific Configs
+    agents_config = config.get("agents", {})
+    dqn_config = agents_config.get("dqn", {})
+    
+    # DQN expects network_config + its own params. 
+    # We combine them or pass specific args. 
+    # DQN signature: (network_config, lr, gamma, etc.)
+    # We can pass kwargs from dqn_config
+    
+    # Extract known args for DQN
+    dqn_lr = dqn_config.get("learning_rate", 1e-4) # Fallback
+    dqn_gamma = dqn_config.get("gamma", 0.99)
+    # Passed as kwargs to dqn
+    dqn_kwargs = {k:v for k,v in dqn_config.items() if k not in ["learning_rate", "gamma"]}
+    
+    dqn = DeepScalperDQN(
+        network_config=net_config, 
+        lr=dqn_lr,
+        gamma=dqn_gamma,
+        device=device,
+        **dqn_kwargs
+    )
+    
+    # PPO/A2C currently take net_config and device. LRs are handled in Trainer now.
     ppo = DeepScalperPPO(net_config, device=device)
     a2c = DeepScalperA2C(net_config, device=device)
     

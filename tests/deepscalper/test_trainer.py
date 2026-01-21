@@ -14,7 +14,13 @@ NET_CONFIG = {"micro_config": MICRO_CONFIG, "macro_config": MACRO_CONFIG}
 TRAIN_CONFIG = {
     "batch_size": 4, 
     "gamma": 0.99, 
-    "total_timesteps": 10
+    "total_timesteps": 10,
+    "agents": {
+        "dqn": {"learning_rate": 0.001, "gamma": 0.99},
+        "ppo": {"learning_rate": 0.002, "gamma": 0.99},
+        "a2c": {"learning_rate": 0.003, "gamma": 0.99},
+        "gating": {"learning_rate": 0.004}
+    }
 }
 
 class MockEnv:

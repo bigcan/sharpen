@@ -118,3 +118,27 @@ class DBMarketDataHandler:
         if self._ptr >= len(self._timestamps):
             return None
         return self._feature_data.iloc[self._ptr]
+
+    def get_lookahead_price(self, horizon: int) -> Optional[float]:
+        """Get price at t + horizon for hindsight reward."""
+        # Note: _ptr points to NEXT step. 
+        # Current time t is effectively at _ptr - 1 in terms of what was just returned? 
+        # But lookahead assumes valid future data is available.
+        # DeepScalperEnv calls get_lookahead_price AFTER step(), so _ptr is already T+1.
+        # If we want Price at T+H, we look at index _ptr + horizon - 1?
+        # Let's keep it simple: look 'horizon' steps ahead from current pointer.
+        target_idx = self._ptr + horizon
+        if target_idx >= len(self._feature_data):
+            return None
+            
+        row = self._feature_data.iloc[target_idx]
+        
+        # Try finding a mid/close price
+        if 'mid_price' in row:
+            return float(row['mid_price'])
+        elif 'close' in row:
+            return float(row['close'])
+        elif 'bid_price_1' in row and 'ask_price_1' in row:
+            return (float(row['bid_price_1']) + float(row['ask_price_1'])) / 2.0
+            
+        return None

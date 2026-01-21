@@ -38,9 +38,19 @@ class DeepScalperEnv(gym.Env):
         self.tick_size = config.get("tick_size", 0.1)
         self.lot_size = config.get("lot_size", 0.001)
         self.maker_fee = config.get("maker_fee", 0.0002)
-        self.taker_fee = config.get("taker_fee", 0.0004)
+        self.taker_fee = config.get("taker_fee", 0.0005) # Default to 0.05%
+        self.window_size = config.get("window_size", 50)
         self.window_size = config.get("window_size", 50)
         self.initial_balance = config.get("initial_balance", 10000.0)
+        
+        # Reward Config
+        self.reward_config = config.get("reward", {})
+        self.reward_scaling = self.reward_config.get("scaling", 1.0)
+        self.reward_type = self.reward_config.get("type", "pnl")
+        # Paper-Aligned Hindsight & Risk
+        self.hindsight_weight = self.reward_config.get("hindsight_weight", 0.0)
+        self.hindsight_horizon = self.reward_config.get("hindsight_horizon", 180) # Default 180 steps as per paper
+        self.risk_penalty_weight = self.reward_config.get("risk_penalty", 0.0)
         
         # Spaces
         self.lob_levels = 5
@@ -237,7 +247,43 @@ class DeepScalperEnv(gym.Env):
         
         # 4. Dense Rewards (Unrealized PnL)
         current_portfolio_value = self._get_portfolio_value()
-        reward = current_portfolio_value - self.prev_portfolio_value
+        raw_pnl = current_portfolio_value - self.prev_portfolio_value
+        
+        # DEBUG: Check types
+        if not isinstance(raw_pnl, (float, int, np.float32, np.float64)):
+             logging.error(f"DEBUG: raw_pnl type={type(raw_pnl)}, val={raw_pnl}")
+             logging.error(f"DEBUG: curr_val={current_portfolio_value}, prev={self.prev_portfolio_value}")
+             logging.error(f"DEBUG: balance={self.balance}, pos={self.position}")
+        
+        # Base Reward
+        reward = raw_pnl * self.reward_scaling
+        
+        # 4.1 Risk Penalty (Volatility/Drawdown awareness)
+        # Penalize negative PnL more heavily? Or simple returns volatility proxy?
+        # Paper uses auxiliary task, here we add a penalty term for simple risk control.
+        # If PnL < 0, add extra penalty: reward -= penalty * |PnL|
+        if self.risk_penalty_weight > 0 and raw_pnl < 0:
+             reward -= self.risk_penalty_weight * abs(raw_pnl) * self.reward_scaling
+
+        # 4.2 Hindsight Bonus (Paper: 2201.09058)
+        # "Encourage capturing long-term trends"
+        # Term: w * (Price_t+h - Price_t) * Position_t
+        if self.hindsight_weight > 0 and self.handler and hasattr(self.handler, 'get_lookahead_price'):
+            future_price = self.handler.get_lookahead_price(self.hindsight_horizon)
+            
+            # Estimate Current Price (Mid)
+            current_mid = (self.current_best_bid + self.current_best_ask) / 2.0
+            if future_price is not None and current_mid > 0:
+                price_delta = future_price - current_mid
+                # Identify if current position aligns with future trend
+                # If Position > 0 and Future Price > Current Price => Good
+                # If Position < 0 and Future Price < Current Price => Good
+                # Normalize by price to get percentage return? Or raw value?
+                # Paper often uses raw value or log returns. Let's use raw value scaled.
+                
+                hindsight_term = self.position * price_delta
+                reward += self.hindsight_weight * hindsight_term * self.reward_scaling
+
         self.prev_portfolio_value = current_portfolio_value
         
         # 5. Safety Drawdown Stop

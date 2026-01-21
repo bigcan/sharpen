@@ -68,5 +68,70 @@ class TestDeepScalperEnv(unittest.TestCase):
         obs, reward, terminated, truncated, info = self.env.step(action)
         self.assertTrue(terminated)
 
+    def test_reward_logic_risk_penalty(self):
+        # Configure env with risk penalty
+        self.config["reward"] = {"risk_penalty": 0.1, "scaling": 1.0}
+        self.env = DeepScalperEnv(self.config, self.mock_handler)
+        self.env.reset()
+        
+        # Mock step data
+        mock_row = {'bid_price_1': 100.0, 'ask_price_1': 101.0}
+        self.mock_handler.step.return_value = mock_row
+        
+        # Artificially lower portfolio value to induce negative PnL
+        self.env.prev_portfolio_value = 10000.0
+        self.env.balance = 9900.0 # Loss of 100
+        self.env.position = 0.0
+        
+        # Step
+        action = np.array([0, 0, 0])
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # Raw PnL = 9900 - 10000 = -100
+        # Risk Penalty = 0.1 * |-100| = 10
+        # Expected Reward = -100 - 10 = -110
+        self.assertEqual(reward, -110.0)
+
+    def test_reward_logic_hindsight_bonus(self):
+        # Configure env with hindsight
+        self.config["reward"] = {"hindsight_weight": 0.5, "scaling": 1.0, "hindsight_horizon": 10}
+        self.env = DeepScalperEnv(self.config, self.mock_handler)
+        self.env.reset()
+        
+        # Current State: Price 100
+        self.env.current_best_bid = 100.0
+        self.env.current_best_ask = 100.0 # Mid = 100
+        # Position Long
+        self.env.position = 1.0 
+        
+        # FIX: Align prev_portfolio_value so base PnL is 0
+        self.env.prev_portfolio_value = self.env._get_portfolio_value()
+        
+        # Mock Handler
+        mock_row = {'bid_price_1': 100.0, 'ask_price_1': 100.0}
+        self.mock_handler.step.return_value = mock_row
+        self.mock_handler.get_lookahead_price.return_value = 110.0 # Future Price +10
+        
+        # Step
+        action = np.array([0, 0, 0])
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # PnL calc: 
+        # Portfolio Value = Balance + Pos*Mid
+        # Let's say balance is constant. PnL comes from micro-change in this step or manually calc?
+        # In step(), prev_portfolio_value is updated. If we don't change prices in step data, PnL is 0.
+        # Current Mid calc in step() uses updated step_data.
+        # step_data has bid/ask. Let's set them same as current to isolate bonus.
+        
+        # Raw PnL = 0 
+        # Hindsight = Pos (1.0) * (Future (110) - CurrentMid (100)) = 10
+        # Bonus = Weight (0.5) * 10 = 5.0
+        # Total Reward = 5.0
+        
+        # Note: step() updates current_best_* from the NEW data. 
+        # So we must ensure the mock_row matches our "Current" expectation if we want 0 PnL.
+        
+        self.assertAlmostEqual(reward, 5.0)
+
 if __name__ == "__main__":
     unittest.main()
