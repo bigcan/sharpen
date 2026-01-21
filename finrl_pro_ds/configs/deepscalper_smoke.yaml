@@ -1,0 +1,20 @@
+symbol: "BTCUSDT"
+data:
+  file_path: "c:/FinRL/FinRL-Pro_DS/data/dummy_lob.parquet"
+  ticker: "BTCUSDT"
+features:
+  feature_list: ["micro", "macro"]
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 10000.0
+network:
+  micro_config:
+    input_size: 20
+    hidden_size: 64
+  macro_config:
+    input_size: 11
+    hidden_sizes: [64]
+training:
+  batch_size: 32
+  total_timesteps: 100
+  learning_rate: 0.0001
