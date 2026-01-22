@@ -7,6 +7,8 @@ features:
 env:
   symbol: "BTCUSDT"
   initial_balance: 10000.0
+  reward:
+    volatility_horizon: 100
 network:
   micro_config:
     input_size: 20
@@ -22,6 +24,7 @@ agents:
   dqn:
     learning_rate: 0.0001
     gamma: 0.99
+    auxiliary_weight: 0.1 # Section 4.4
   ppo:
     learning_rate: 0.0001
   a2c:

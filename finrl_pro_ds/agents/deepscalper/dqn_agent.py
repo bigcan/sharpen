@@ -14,19 +14,20 @@ class ReplayBuffer:
     def __init__(self, capacity: int):
         self.buffer = deque(maxlen=capacity)
     
-    def push(self, state, action, reward, next_state, done):
+    def push(self, state, action, reward, next_state, done, aux_target=0.0):
         """
         state, next_state: Dict of tensors or np arrays
         action: [dir, price, vol]
         reward: float
         done: bool
+        aux_target: float (Volatility Target)
         """
-        self.buffer.append((state, action, reward, next_state, done))
+        self.buffer.append((state, action, reward, next_state, done, aux_target))
     
     def sample(self, batch_size: int):
         batch = random.sample(self.buffer, batch_size)
-        state, action, reward, next_state, done = zip(*batch)
-        return state, action, reward, next_state, done
+        state, action, reward, next_state, done, aux_target = zip(*batch)
+        return state, action, reward, next_state, done, aux_target
     
     def __len__(self):
         return len(self.buffer)
@@ -46,9 +47,11 @@ class DeepScalperDQN:
         buffer_size: int = 100000,
         batch_size: int = 64,
         target_update_freq: int = 100,
+        auxiliary_weight: float = 0.1, # Section 4.4
         device: str = "cpu"
     ):
         self.device = torch.device(device)
+        self.auxiliary_weight = auxiliary_weight
         self.gamma = gamma
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
@@ -79,7 +82,7 @@ class DeepScalperDQN:
         macro = macro.to(self.device)
         
         with torch.no_grad():
-            q_dir, q_price, q_vol, _ = self.policy_net(micro, private_in, macro)
+            q_dir, q_price, q_vol, _, _ = self.policy_net(micro, private_in, macro)
             
             def safe_softmax(q, t):
                 # Subtract max for numerical stability to prevent overflow
@@ -111,7 +114,7 @@ class DeepScalperDQN:
             return np.array([a_dir, a_price, a_vol])
         
         with torch.no_grad():
-            q_dir, q_price, q_vol, _ = self.policy_net(micro, private_in, macro)
+            q_dir, q_price, q_vol, _, _ = self.policy_net(micro, private_in, macro)
             
             a_dir = q_dir.argmax(dim=1).item()
             a_price = q_price.argmax(dim=1).item()
@@ -124,7 +127,7 @@ class DeepScalperDQN:
             return None
         
         # Sample Batch
-        state_batch, action_batch, reward_batch, next_state_batch, done_batch = self.memory.sample(self.batch_size)
+        state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = self.memory.sample(self.batch_size)
         
         # Prepare Tensors
         # Assuming state is Dict[str, np.ndarray] or similar, need to collate
@@ -145,9 +148,10 @@ class DeepScalperDQN:
         actions = torch.tensor(np.array(action_batch), dtype=torch.long).to(self.device) # (B, 3)
         rewards = torch.tensor(np.array(reward_batch), dtype=torch.float32).unsqueeze(1).to(self.device) # (B, 1)
         dones = torch.tensor(np.array(done_batch), dtype=torch.float32).unsqueeze(1).to(self.device) # (B, 1)
+        aux_targets = torch.tensor(np.array(aux_target_batch), dtype=torch.float32).unsqueeze(1).to(self.device) # (B, 1)
         
-        # Current Q-Values
-        q_dir, q_price, q_vol, _ = self.policy_net(micro_state, private_state, macro_state)
+        # Current Q-Values and Volatility Prediction
+        q_dir, q_price, q_vol, _, pred_vol = self.policy_net(micro_state, private_state, macro_state)
         
         # Gather Q-values for taken actions
         # actions[:, 0] is direction indices
@@ -157,7 +161,7 @@ class DeepScalperDQN:
         
         # Target Q-Values (Double DQN Logic could be added here, sticking to standard DQN for now)
         with torch.no_grad():
-            next_q_dir, next_q_price, next_q_vol, _ = self.target_net(micro_next, private_next, macro_next)
+            next_q_dir, next_q_price, next_q_vol, _, _ = self.target_net(micro_next, private_next, macro_next)
             
             # Max next Q
             max_next_q_dir = next_q_dir.max(1)[0].unsqueeze(1)
@@ -176,7 +180,9 @@ class DeepScalperDQN:
         loss_price = loss_fn(curr_q_price, target_q_price)
         loss_vol = loss_fn(curr_q_vol, target_q_vol)
         
-        total_loss = loss_dir + loss_price + loss_vol
+        loss_vol_pred = loss_fn(pred_vol, aux_targets)
+        
+        total_loss = loss_dir + loss_price + loss_vol + self.auxiliary_weight * loss_vol_pred
         
         self.optimizer.zero_grad()
         total_loss.backward()

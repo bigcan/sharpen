@@ -4,11 +4,11 @@ import logging
 from typing import Dict, Optional, Tuple, Any
 from finrl_pro_ds.data.handler import DBMarketDataHandler
 
-# Known macro feature columns from feature_engineering.py
+# Known macro feature columns from feature_engineering.py (DeepScalper Table 2)
 MACRO_COLS = [
-    'rsi_14', 'MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9',
-    'BBL_20_2.0', 'BBM_20_2.0', 'BBU_20_2.0', 'BBB_20_2.0', 'BBP_20_2.0',
-    'atr_14', 'obv'
+    'z_open', 'z_high', 'z_low', 
+    'z_close', 'z_adj_close',
+    'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
 ]
 NUM_MACRO_FEATURES = len(MACRO_COLS)  # 11
 
@@ -50,6 +50,7 @@ class DeepScalperEnv(gym.Env):
         self.hindsight_weight = float(self.reward_config.get("hindsight_weight", 0.0))
         self.hindsight_horizon = int(self.reward_config.get("hindsight_horizon", 100))
         self.risk_penalty_weight = float(self.reward_config.get("risk_penalty", 0.0))
+        self.volatility_horizon = int(self.reward_config.get("volatility_horizon", 100)) # Section 4.4
         
         # Spaces
         self.lob_levels = 5
@@ -259,6 +260,10 @@ class DeepScalperEnv(gym.Env):
                         self.position = float(self.position)
                         
             self.pending_order = None  # Order processed
+            
+            # CRITICAL FIX: Update Private State in Window to reflect execution
+            # The agent needs to see the new position in the current observation
+            self.private_window[-1] = np.array([self.position, self.balance], dtype=np.float32)
 
         # 3. Process NEW Action (T) -> becomes Pending for T+1
         direction, price_idx, vol_idx = int(action[0]), int(action[1]), int(action[2])
@@ -336,6 +341,19 @@ class DeepScalperEnv(gym.Env):
                 # Hindsight is bonus, safe to skip if fails
                 pass
 
+                # Hindsight is bonus, safe to skip if fails
+                pass
+
+        # 4.3 Volatility Prediction Target (Section 4.4)
+        volatility_target = 0.0
+        if self.handler and hasattr(self.handler, 'get_lookahead_volatility'):
+            try:
+                v_target = self.handler.get_lookahead_volatility(self.volatility_horizon)
+                if v_target is not None:
+                    volatility_target = v_target
+            except Exception as e:
+                logging.error(f"Error in Volatility Target Calc: {e}")
+
         self.prev_portfolio_value = current_portfolio_value
         
         # 5. Safety Drawdown Stop
@@ -348,7 +366,8 @@ class DeepScalperEnv(gym.Env):
         info = {
             "balance": self.balance, 
             "position": self.position, 
-            "portfolio_value": current_portfolio_value
+            "portfolio_value": current_portfolio_value,
+            "volatility_target": volatility_target
         }
         
         return obs, reward, terminated, truncted, info
