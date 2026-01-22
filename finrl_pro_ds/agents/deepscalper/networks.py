@@ -185,9 +185,12 @@ class DeepScalperNetwork(nn.Module):
             nn.Linear(128, self.vol_dims)
         )
         
-    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        # Auxiliary Task: Volatility Prediction (Section 4.4)
+        self.vol_head = nn.Linear(fusion_dim, 1)
+        
+    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Returns (Q_dir, Q_price, Q_vol, V_state)
+        Returns (Q_dir, Q_price, Q_vol, V_state, Pred_Vol)
         """
         # Encode
         h_micro = self.micro_encoder(micro_in, private_in)
@@ -212,4 +215,7 @@ class DeepScalperNetwork(nn.Module):
         q_price = v_s + (a_price - a_price.mean(dim=1, keepdim=True))
         q_vol = v_s + (a_vol - a_vol.mean(dim=1, keepdim=True))
         
-        return q_dir, q_price, q_vol, v_s
+        # Volatility Prediction
+        pred_vol = self.vol_head(features)
+        
+        return q_dir, q_price, q_vol, v_s, pred_vol

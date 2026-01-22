@@ -61,9 +61,9 @@ class DeepScalperEnsemble:
         # 1. Gating Weights
         with torch.no_grad():
             weights = self.gating(macro) # (1, 3) -> [w_dqn, w_ppo, w_a2c]
-            w_dqn = weights[:, 0].item()
-            w_ppo = weights[:, 1].item()
-            w_a2c = weights[:, 2].item()
+            w_dqn = weights[:, 0].unsqueeze(1)
+            w_ppo = weights[:, 1].unsqueeze(1)
+            w_a2c = weights[:, 2].unsqueeze(1)
             
         # 2. Get Probs
         # DQN needs Q->Prob conversion (handled safely by agent now)
@@ -83,8 +83,12 @@ class DeepScalperEnsemble:
         final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
         
         # 4. Sample Action
-        a_dir = Categorical(probs=final_dir).sample().item()
-        a_price = Categorical(probs=final_price).sample().item()
-        a_vol = Categorical(probs=final_vol).sample().item()
+        # Categorical sample returns (B,) or ()
+        a_dir = Categorical(probs=final_dir).sample()
+        a_price = Categorical(probs=final_price).sample()
+        a_vol = Categorical(probs=final_vol).sample()
         
-        return np.array([a_dir, a_price, a_vol])
+        # Stack to (B, 3) or (3,)
+        actions = torch.stack([a_dir, a_price, a_vol], dim=-1).cpu().numpy()
+        
+        return actions

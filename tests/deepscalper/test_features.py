@@ -45,9 +45,10 @@ class TestDeepScalperFeatures(unittest.TestCase):
         res = self.fe.process_macro(df)
         
         # Check TA columns
-        self.assertIn('rsi_14', res.columns)
-        self.assertIn('atr_14', res.columns)
-        self.assertIn('obv', res.columns)
+        # Check Table 2 columns
+        expected_cols = ['z_open', 'z_high', 'z_low', 'z_close', 'z_adj_close', 'zd_5']
+        for col in expected_cols:
+            self.assertIn(col, res.columns)
         
 if __name__ == "__main__":
     unittest.main()

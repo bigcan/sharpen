@@ -97,10 +97,11 @@ class DeepScalperTrainer:
         if not buffer: return
         
         # Unpack Buffer
-        micro_s, macro_s, actions, old_log_probs, rewards, values, next_values_list, dones = zip(*buffer)
+        micro_s, private_s, macro_s, actions, old_log_probs, rewards, values, next_values_list, dones = zip(*buffer)
         
         # Convert to Tensors
         micro_s = torch.stack(micro_s)
+        private_s = torch.stack(private_s)
         macro_s = torch.stack(macro_s)
         actions = torch.tensor(np.array(actions), dtype=torch.long).to(self.device)
         old_log_probs = torch.stack(old_log_probs).detach() # (B, 3)
@@ -120,7 +121,7 @@ class DeepScalperTrainer:
         # PPO Epochs
         for _ in range(4): # K_epochs
             # Forward Pass
-            logits_dir, logits_price, logits_vol, current_values = agent.network(micro_s, macro_s)
+            logits_dir, logits_price, logits_vol, current_values = agent.network(micro_s, private_s, macro_s)
             
             # Calculate current log probs of the wrapper actions
             # Actions: (B, 3) -> Dir, Price, Vol
@@ -181,9 +182,10 @@ class DeepScalperTrainer:
     def update_a2c(self, agent: DeepScalperA2C, optimizer: optim.Optimizer, buffer: List):
         if not buffer: return
         
-        micro_s, macro_s, actions, _, rewards, values, next_values_list, dones = zip(*buffer)
+        micro_s, private_s, macro_s, actions, _, rewards, values, next_values_list, dones = zip(*buffer)
         
         micro_s = torch.stack(micro_s)
+        private_s = torch.stack(private_s)
         macro_s = torch.stack(macro_s)
         actions = torch.tensor(np.array(actions), dtype=torch.long).to(self.device)
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
@@ -195,7 +197,7 @@ class DeepScalperTrainer:
         returns = advantages + values_t
         
         # Single Update Step
-        logits_dir, logits_price, logits_vol, current_values = agent.network(micro_s, macro_s)
+        logits_dir, logits_price, logits_vol, current_values = agent.network(micro_s, private_s, macro_s)
         
         dist_dir = Categorical(logits=logits_dir)
         dist_price = Categorical(logits=logits_price)
@@ -279,9 +281,9 @@ class DeepScalperTrainer:
             obs, info = self.env.reset()
             # If standard env, ensure batch dim is handled in _unpack_obs
             
-        micro, macro = self._unpack_obs(obs) 
+        micro, private, macro = self._unpack_obs(obs) 
         # _unpack_obs handles adding batch dim if missing for single env.
-        # For VecEnv, micro is (B, W, F), macro is (B, F). Perfect.
+        # For VecEnv, micro is (B, W, F), private is (B, W, F_p), macro is (B, F). Perfect.
         
         # Compile Model if requested
         print(f"DEBUG: self.config['torch_compile'] = {self.config.get('torch_compile', 'Not Set')}")
@@ -315,13 +317,13 @@ class DeepScalperTrainer:
                 weights = self.ensemble.gating(macro) # (B, 3)
                 
                 # Individual Probs
-                p_dqn_dir, p_dqn_price, p_dqn_vol = self.ensemble.dqn.get_probs(micro, macro)
-                logits_ppo_dir, logits_ppo_price, logits_ppo_vol, val_ppo = self.ensemble.ppo.network(micro, macro)
+                p_dqn_dir, p_dqn_price, p_dqn_vol = self.ensemble.dqn.get_probs(micro, private, macro)
+                logits_ppo_dir, logits_ppo_price, logits_ppo_vol, val_ppo = self.ensemble.ppo.network(micro, private, macro)
                 p_ppo_dir = torch.softmax(logits_ppo_dir, dim=1)
                 p_ppo_price = torch.softmax(logits_ppo_price, dim=1)
                 p_ppo_vol = torch.softmax(logits_ppo_vol, dim=1)
                 
-                logits_a2c_dir, logits_a2c_price, logits_a2c_vol, val_a2c = self.ensemble.a2c.network(micro, macro)
+                logits_a2c_dir, logits_a2c_price, logits_a2c_vol, val_a2c = self.ensemble.a2c.network(micro, private, macro)
                 p_a2c_dir = torch.softmax(logits_a2c_dir, dim=1)
                 p_a2c_price = torch.softmax(logits_a2c_price, dim=1)
                 p_a2c_vol = torch.softmax(logits_a2c_vol, dim=1)
@@ -357,7 +359,7 @@ class DeepScalperTrainer:
             # 2. Step Environment
             next_obs, reward, terminated, truncated, info = self.env.step(action_vector)
             
-            next_micro, next_macro = self._unpack_obs(next_obs)
+            next_micro, next_private, next_macro = self._unpack_obs(next_obs)
             
             # Handle Done
             if is_vector_env:
@@ -390,8 +392,8 @@ class DeepScalperTrainer:
                 
                 # Handling next_val for PPO/A2C
                 with torch.no_grad():
-                    _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_macro)
-                    _, _, _, val_next_a2c = self.ensemble.a2c.network(next_micro, next_macro)
+                    _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_private, next_macro)
+                    _, _, _, val_next_a2c = self.ensemble.a2c.network(next_micro, next_private, next_macro)
                 
                 # Loop to push to buffers individually (simplest integration with current buffers)
                 for i in range(num_envs):
@@ -401,10 +403,11 @@ class DeepScalperTrainer:
                         # Gymnasium VectorEnv: info['final_observation'][i] is the terminal obs
                         # Note: info['final_observation'] is a list or array
                         term_obs = info['final_observation'][i]
-                        term_micro, term_macro = self._unpack_obs(term_obs) # This creates (1, ...) tensors
+                        term_micro, term_private, term_macro = self._unpack_obs(term_obs) # This creates (1, ...) tensors
                         
                         # Use terminal state for buffer
                         s_micro = term_micro.squeeze(0)
+                        s_private = term_private.squeeze(0)
                         s_macro = term_macro.squeeze(0)
                         
                         # For bootstrapping (val_next), we should technically use the value of the terminal state (0 if term, V(s) if trunc)
@@ -418,34 +421,37 @@ class DeepScalperTrainer:
                         
                     else:
                         s_micro = next_micro[i]
+                        s_private = next_private[i]
                         s_macro = next_macro[i]
                     
                     # Current State
                     c_micro = micro[i]
+                    c_private = private[i]
                     c_macro = macro[i]
                     
                     # Store DQN
                     # DQN Memory requires numpy dicts
-                    state_dict = {"micro": c_micro.cpu().numpy(), "macro": c_macro.cpu().numpy()}
-                    next_state_dict = {"micro": s_micro.cpu().numpy(), "macro": s_macro.cpu().numpy()}
+                    state_dict = {"micro": c_micro.cpu().numpy(), "private": c_private.cpu().numpy(), "macro": c_macro.cpu().numpy()}
+                    next_state_dict = {"micro": s_micro.cpu().numpy(), "private": s_private.cpu().numpy(), "macro": s_macro.cpu().numpy()}
                     
                     self.ensemble.dqn.memory.push(
                         state_dict, 
                         action_vector[i], 
                         reward[i], 
                         next_state_dict, 
-                        bool(dones[i])
+                        bool(dones[i]),
+                        float(info.get("volatility_target", [0.0]*num_envs)[i]) # Section 4.4
                     )
                     
                     # Store PPO/A2C
-                    # (micro, macro, action, log_prob, reward, val, val_next, done)
+                    # (micro, private, macro, action, log_prob, reward, val, val_next, done)
                     self.ppo_buffer.append((
-                        c_micro, c_macro, action_vector[i], ppo_log_prob[i], 
+                        c_micro, c_private, c_macro, action_vector[i], ppo_log_prob[i], 
                         float(reward[i]), float(val_ppo[i]), float(val_next_ppo[i]), bool(dones[i])
                     ))
                     
                     self.a2c_buffer.append((
-                        c_micro, c_macro, action_vector[i], None, 
+                        c_micro, c_private, c_macro, action_vector[i], None, 
                         float(reward[i]), float(val_a2c[i]), float(val_next_a2c[i]), bool(dones[i])
                     ))
                     
@@ -468,21 +474,28 @@ class DeepScalperTrainer:
                 done = dones # Scalar
                 
                 with torch.no_grad():
-                    _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_macro)
-                    _, _, _, val_next_a2c = self.ensemble.a2c.network(next_micro, next_macro)
+                    _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_private, next_macro)
+                    _, _, _, val_next_a2c = self.ensemble.a2c.network(next_micro, next_private, next_macro)
                 
                 # Buffer Push (Squeeze batch dims for storage as buffers expect single items usually)
-                state_dict = {"micro": micro.squeeze(0).cpu().numpy(), "macro": macro.squeeze(0).cpu().numpy()}
-                next_state_dict = {"micro": next_micro.squeeze(0).cpu().numpy(), "macro": next_macro.squeeze(0).cpu().numpy()}
+                state_dict = {"micro": micro.squeeze(0).cpu().numpy(), "private": private.squeeze(0).cpu().numpy(), "macro": macro.squeeze(0).cpu().numpy()}
+                next_state_dict = {"micro": next_micro.squeeze(0).cpu().numpy(), "private": next_private.squeeze(0).cpu().numpy(), "macro": next_macro.squeeze(0).cpu().numpy()}
                 
-                self.ensemble.dqn.memory.push(state_dict, action_vector[0], reward, next_state_dict, done)
+                self.ensemble.dqn.memory.push(
+                    state_dict, 
+                    action_vector[0], 
+                    reward, 
+                    next_state_dict, 
+                    done,
+                    float(info.get("volatility_target", 0.0)) # Section 4.4
+                )
                 
                 self.ppo_buffer.append((
-                    micro.squeeze(0), macro.squeeze(0), action_vector[0], ppo_log_prob.squeeze(0),
+                    micro.squeeze(0), private.squeeze(0), macro.squeeze(0), action_vector[0], ppo_log_prob.squeeze(0),
                     reward, val_ppo.item(), val_next_ppo.item(), done
                 ))
                 self.a2c_buffer.append((
-                    micro.squeeze(0), macro.squeeze(0), action_vector[0], None,
+                    micro.squeeze(0), private.squeeze(0), macro.squeeze(0), action_vector[0], None,
                     reward, val_a2c.item(), val_next_a2c.item(), done
                 ))
                 self.gating_buffer.append((
@@ -497,7 +510,7 @@ class DeepScalperTrainer:
                     episode_count += 1
                     
                     obs, info = self.env.reset()
-                    next_micro, next_macro = self._unpack_obs(obs)
+                    next_micro, next_private, next_macro = self._unpack_obs(obs)
             
             # 4. Updates
             
@@ -539,6 +552,7 @@ class DeepScalperTrainer:
 
             # Update Obs
             micro = next_micro
+            private = next_private
             macro = next_macro
             obs = next_obs
         
@@ -552,16 +566,29 @@ class DeepScalperTrainer:
         # Handle cases where env returns numpy arrays
         if isinstance(obs, dict):
             micro_np = obs.get("micro")
+            private_np = obs.get("private")
             macro_np = obs.get("macro")
             
             if micro_np is None:
                 raise ValueError(f"Observation missing 'micro' key. Keys found: {list(obs.keys())}")
+            if private_np is None:
+                raise ValueError(f"Observation missing 'private' key. Keys found: {list(obs.keys())}")
             
             # If batch dim missing, add it
             if len(micro_np.shape) == 2:
                 micro_t = torch.tensor(micro_np, dtype=torch.float32).unsqueeze(0).to(self.device)
             else:
                 micro_t = torch.tensor(micro_np, dtype=torch.float32).to(self.device)
+                
+            if len(private_np.shape) == 2: # (Window, Features)
+                 private_t = torch.tensor(private_np, dtype=torch.float32).unsqueeze(0).to(self.device)
+            elif len(private_np.shape) == 1: # (Features)
+                 # If env gives 1D private? Network expects Window
+                 # But we assume Env gives Window. If Env gives (F), we unsqueeze(0) for batch, but still 1D.
+                 # Let's assume Env gives (W, F) as standard.
+                 private_t = torch.tensor(private_np, dtype=torch.float32).unsqueeze(0).to(self.device)
+            else:
+                 private_t = torch.tensor(private_np, dtype=torch.float32).to(self.device)
                 
             # Handle optional macro if system design allows, though DeepScalper requires it
             if macro_np is None:
@@ -574,7 +601,7 @@ class DeepScalperTrainer:
             else:
                 macro_t = torch.tensor(macro_np, dtype=torch.float32).to(self.device)
                 
-            return micro_t, macro_t
+            return micro_t, private_t, macro_t
         else:
             raise ValueError(f"Expected dict observation, got {type(obs)}")
 

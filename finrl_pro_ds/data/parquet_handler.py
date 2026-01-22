@@ -58,9 +58,9 @@ class ParquetDataHandler:
             # 2. Macro Features (Tech Indicators)
             # Check if macro columns are already present (pre-computed)
             env_macro_cols = [
-                'rsi_14', 'MACD_12_26_9', 'MACDh_12_26_9', 'MACDs_12_26_9',
-                'BBL_20_2.0', 'BBM_20_2.0', 'BBU_20_2.0', 'BBB_20_2.0', 'BBP_20_2.0',
-                'atr_14', 'obv'
+                'z_open', 'z_high', 'z_low', 
+                'z_close', 'z_adj_close',
+                'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
             ]
             
             if all(col in df.columns for col in env_macro_cols):
@@ -125,3 +125,43 @@ class ParquetDataHandler:
             return (float(row['bid_price_1']) + float(row['ask_price_1'])) / 2.0
             
         return None
+
+    def get_lookahead_volatility(self, horizon: int) -> Optional[float]:
+        """
+        Calculate volatility (std dev of returns) from t+1 to t+horizon.
+        DeepScalper Section 4.4: Volatility Prediction Auxiliary Task.
+        """
+        start_idx = self._ptr
+        end_idx = self._ptr + horizon
+        
+        if end_idx > len(self._feature_data):
+            end_idx = len(self._feature_data) 
+            
+        if end_idx - start_idx < 2:
+            return 0.0 # Not enough data
+            
+        # Extract prices
+        slice_df = self._feature_data.iloc[start_idx:end_idx]
+        
+        # Determine price column to use
+        if 'mid_price' in slice_df.columns:
+            prices = slice_df['mid_price'].astype(float)
+        elif 'close' in slice_df.columns:
+            prices = slice_df['close'].astype(float)
+        elif 'bid_price_1' in slice_df.columns and 'ask_price_1' in slice_df.columns:
+            prices = (slice_df['bid_price_1'].astype(float) + slice_df['ask_price_1'].astype(float)) / 2.0
+        else:
+            return None
+            
+        # Calculate Log Returns
+        # We assume 1-minute steps roughly.
+        logs = np.log(prices / prices.shift(1))
+        logs = logs.dropna()
+        
+        if len(logs) < 2:
+            return 0.0
+            
+        # Standard Deviation of returns
+        vol = logs.std()
+        
+        return float(vol)
