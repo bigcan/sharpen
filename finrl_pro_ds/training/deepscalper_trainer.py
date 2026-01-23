@@ -13,7 +13,9 @@ from torch.distributions import Categorical
 from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
 from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
 from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
+from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
 from finrl_pro_ds.mlops.logger import MLOpsLogger
+from finrl_pro_ds.mlops.watchdog import TrainingWatchdog
 
 class DeepScalperTrainer:
     """
@@ -309,10 +311,20 @@ class DeepScalperTrainer:
         episode_rewards_total = 0
         episode_count = 0
         
+        # Init Watchdog (Timeout: 5 minutes = 300s)
+        self.watchdog = TrainingWatchdog(lambda: self.global_step, timeout_seconds=600)
+        self.watchdog.start()
+        
         for step in range(self.total_timesteps):
             self.global_step = step
             
             # 1. Select Action (Voting)
+            # Watchdog: Log if this step takes too long? 
+            # We can't interrupt easily without signal.
+            # Let's verify we are entering the loop.
+            if step % 1000 == 0:
+                 self.logger.log_event("deepscalper.training.step_start", context={"step": step})
+                 
             with torch.no_grad():
                 weights = self.ensemble.gating(macro) # (B, 3)
                 
@@ -560,6 +572,14 @@ class DeepScalperTrainer:
             macro = next_macro
             obs = next_obs
         
+            # Update Obs
+            micro = next_micro
+            private = next_private
+            macro = next_macro
+            obs = next_obs
+        
+        self.watchdog.stop()
+
         self.logger.log_event("deepscalper.training.complete")
                 
     def _unpack_obs(self, obs: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:

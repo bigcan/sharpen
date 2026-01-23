@@ -73,7 +73,7 @@ agents:
 training:
   total_timesteps: 10000000 # 10 Million Steps
   device: "cuda"
-  torch_compile: true # Enable PyTorch 2.0 optimization
+  torch_compile: false # Enable PyTorch 2.0 optimization
   update_interval: 1024 # Larger update interval
   log_interval: 100
   checkpoint_interval: 100000
@@ -83,5 +83,5 @@ training:
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["rtx5090", "optimized", "v1.2", "fix_leverage"]
+  tags: ["rtx5090", "optimized", "v1.3", "no_compile"]
   mode: "online"

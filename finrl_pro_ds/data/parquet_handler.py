@@ -157,6 +157,13 @@ class ParquetDataHandler:
             
         # Return as series/dict-like
         row = self._feature_data.iloc[self._ptr]
+        
+        # Periodic Heartbeat Log (e.g., every 100k steps per worker)
+        if self._ptr % 50000 == 0:
+            import logging # Ensure logging is available
+            # We use print if logging config is complex in workers, but standard logging is better
+            print(f"[DataHandler-{os.getpid()}] Heartbeat: Ptr={self._ptr}/{len(self._feature_data)} Time={row.get('timestamp', '?')}")
+            
         self._ptr += 1
         return row
         
