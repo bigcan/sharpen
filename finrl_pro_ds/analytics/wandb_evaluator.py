@@ -94,13 +94,17 @@ class WandbFinRLEvaluator:
             else:
                  df_bench = df_bench.to_frame(name='Close')
             
+            if df_bench.empty:
+                raise ValueError("Downloaded benchmark data is empty.")
+                
             if df_bench.index.tz is not None:
                 df_bench.index = df_bench.index.tz_convert(None)
                 
             self.df_benchmark = df_bench  
         except Exception as e:
             print(f"WARNING: Failed to fetch benchmark data '{self.benchmark_ticker}': {e}. Using flat zero-return benchmark (Sharpe will be 0/Undefined).")
-            self.df_benchmark = pd.DataFrame({'Close': [100] * len(self.df_ensemble)}, index=self.df_ensemble.index)
+            # Create dummy benchmark matching the ensemble index
+            self.df_benchmark = pd.DataFrame({'Close': [100.0] * len(self.df_ensemble)}, index=self.df_ensemble.index)
 
         # 3. Align and Calculate Daily Returns
         # We assume 'account_value' exists.

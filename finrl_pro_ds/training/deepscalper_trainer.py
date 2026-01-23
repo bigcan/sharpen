@@ -357,7 +357,11 @@ class DeepScalperTrainer:
                 ppo_log_prob = torch.stack([ens_log_dir, ens_log_price, ens_log_vol], dim=1)
 
             # 2. Step Environment
-            next_obs, reward, terminated, truncated, info = self.env.step(action_vector)
+            if is_vector_env:
+                next_obs, reward, terminated, truncated, info = self.env.step(action_vector)
+            else:
+                # Unwrap for single env (1, 3) -> (3,)
+                next_obs, reward, terminated, truncated, info = self.env.step(action_vector[0])
             
             next_micro, next_private, next_macro = self._unpack_obs(next_obs)
             

@@ -397,9 +397,9 @@ class DeepScalperEnv(gym.Env):
             "position": self.position, 
             "portfolio_value": current_portfolio_value,
             "volatility_target": volatility_target,
-            "cumulative_fees": self.cumulative_fees,
             "cumulative_slippage": self.cumulative_slippage,
-            "total_execution_costs": self.cumulative_fees + self.cumulative_slippage
+            "total_execution_costs": self.cumulative_fees + self.cumulative_slippage,
+            "timestamp": step_data.get("timestamp") if step_data is not None else None
         }
         
         return obs, reward, terminated, truncated, info

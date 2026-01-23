@@ -21,6 +21,11 @@ def check_remote():
     print(stdout.read().decode())
     print(stderr.read().decode())
     
+    # Check Processes
+    print("--- Checking Processes ---")
+    stdin, stdout, stderr = ssh.exec_command("ps aux | grep python")
+    print(stdout.read().decode())
+    
     # Check Logs
     print("--- Checking Run Log ---")
     stdin, stdout, stderr = ssh.exec_command("cat /workspace/Synapse_V9/run.log")

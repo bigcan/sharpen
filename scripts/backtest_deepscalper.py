@@ -200,5 +200,62 @@ def main():
             print(f"Total Return: {((equity_curve.iloc[-1] / equity_curve.iloc[0]) - 1)*100:.2f}%")
             print(f"Max Drawdown: {((equity_curve / equity_curve.cummax()) - 1).min()*100:.2f}%")
 
+    # 6. WandB Reporting
+    try:
+        from finrl_pro_ds.analytics.wandb_evaluator import generate_wandb_report
+        print("\nGenerating WandB Report...")
+        
+        # Construct DataFrame for Evaluator
+        # Needs: date, account_value, actions
+        # We collected portfolio_values and positions. calculate actions from diff.
+        
+        # Timestamps? We need them.
+        # If env info has timestamp, we used it? 
+        # Wait, main loop didn't collect timestamps. Let's assume we can get them or use step index.
+        # If env.handler is available, we can grab timestamps corresponding to steps?
+        # Or did we save them? The loop above didn't save them.
+        
+        # Let's fix the loop to save INFO
+        # But I can't easily patch the loop without replacing too much.
+        # Alternative: Generate mock dates or try to access handler timestamps
+        
+        timestamps = []
+        if hasattr(env, 'handler') and hasattr(env.handler, '_timestamps'):
+             # _timestamps is list of all timestamps. We executed 'step' steps.
+             # Note: env.reset() called handler.reset? 
+             # We can slice timestamps[:step]
+             # But 'step' in loop is incremented.
+             all_ts = env.handler._timestamps
+             if len(all_ts) >= step:
+                timestamps = all_ts[:step]
+             else:
+                timestamps = pd.date_range(start='2023-01-01', periods=step, freq='1min')
+        else:
+             timestamps = pd.date_range(start='2023-01-01', periods=step, freq='1min')
+             
+        df_ensemble = pd.DataFrame({
+            'date': timestamps,
+            'account_value': portfolio_values,
+            'actions': orders_arr # This matches length roughly? orders_arr is len(positions).
+        })
+        
+        # Agents? We only have Ensemble output here.
+        # Create dummy dict for now or skip agent breakdown if not tracked
+        dict_agents = {"Ensemble_Agent": df_ensemble.copy()} 
+        
+        generate_wandb_report(
+            df_ensemble=df_ensemble,
+            dict_agents=dict_agents,
+            run_name=f"Backtest_{args.checkpoint.split('/')[-1]}",
+            project_name=config.get("wandb", {}).get("project", "FinRL-Pro-DS-Backtest"),
+            entity=config.get("wandb", {}).get("entity", "bigcan-chiwin-technology")
+        )
+        print("WandB Report Generated.")
+        
+    except Exception as e:
+        print(f"WandB Reporting Failed: {e}")
+        import traceback
+        traceback.print_exc()
+
 if __name__ == "__main__":
     main()
