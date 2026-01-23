@@ -188,6 +188,20 @@ def main():
     
     # Initialize Agents with Specific Configs
     agents_config = config.get("agents", {})
+    
+    # Sanitize Config Types (Fix for YAML string parsing issues)
+    def sanitize_config(cfg):
+        for k, v in cfg.items():
+            if isinstance(v, dict):
+                sanitize_config(v)
+            elif k in ["learning_rate", "gamma", "entropy_coef", "gae_lambda", "clip_epsilon", "max_grad_norm"]:
+                try:
+                    cfg[k] = float(v)
+                except:
+                    pass
+    
+    sanitize_config(agents_config)
+    
     dqn_config = agents_config.get("dqn", {})
     
     # DQN expects network_config + its own params. 
@@ -196,8 +210,8 @@ def main():
     # We can pass kwargs from dqn_config
     
     # Extract known args for DQN
-    dqn_lr = dqn_config.get("learning_rate", 1e-4) # Fallback
-    dqn_gamma = dqn_config.get("gamma", 0.99)
+    dqn_lr = float(dqn_config.get("learning_rate", 1e-4)) # Fallback
+    dqn_gamma = float(dqn_config.get("gamma", 0.99))
     # Passed as kwargs to dqn
     dqn_kwargs = {k:v for k,v in dqn_config.items() if k not in ["learning_rate", "gamma"]}
     

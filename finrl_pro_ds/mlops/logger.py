@@ -23,7 +23,22 @@ class LogEnvelope:
     def to_payload(self) -> str:
         """Serialize the envelope to a JSON string."""
         payload = {"message": self.message, **self.context}
-        return json.dumps(payload, sort_keys=True)
+        return json.dumps(payload, sort_keys=True, cls=NumpyJSONEncoder)
+
+
+class NumpyJSONEncoder(json.JSONEncoder):
+    """Custom encoder for NumPy data types."""
+
+    def default(self, obj: Any) -> Any:
+        import numpy as np
+        
+        if isinstance(obj, (np.integer, np.int64, np.int32)):
+            return int(obj)
+        if isinstance(obj, (np.floating, np.float64, np.float32)):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super().default(obj)
 
 
 class MLOpsLogger:
