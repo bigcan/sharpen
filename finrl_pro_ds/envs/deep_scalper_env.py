@@ -37,11 +37,18 @@ class DeepScalperEnv(gym.Env):
         self.symbol = config.get("symbol", "BTCUSDT")
         self.tick_size = config.get("tick_size", 0.1)
         self.lot_size = config.get("lot_size", 0.001)
-        self.maker_fee = config.get("maker_fee", 0.0002)
-        self.taker_fee = config.get("taker_fee", 0.0005) # Default to 0.05%
+        
+        # Binance VIP 0 Fees (realistic defaults)
+        # Maker: 0.10% (10 bps), Taker: 0.10% (10 bps)
+        self.maker_fee = config.get("maker_fee", 0.0010)
+        self.taker_fee = config.get("taker_fee", 0.0010)
+        
+        # Slippage Model: base_slippage + (trade_size / liquidity) * impact_factor
+        self.base_slippage_bps = config.get("base_slippage_bps", 1.0)  # 1 bp base
+        self.slippage_impact_factor = config.get("slippage_impact_factor", 0.5)
+        
         self.window_size = config.get("window_size", 50)
-        self.window_size = config.get("window_size", 50)
-        self.initial_balance = config.get("initial_balance", 10000.0)
+        self.initial_balance = config.get("initial_balance", 100000.0)  # 100K USDT default
         
         # Reward Config
         self.reward_config = config.get("reward", {})
@@ -82,6 +89,10 @@ class DeepScalperEnv(gym.Env):
         
         self.pending_order = None  # (direction, price, quantity, is_taker)
         
+        # Fee/Slippage Tracking (for analytics)
+        self.cumulative_fees = 0.0
+        self.cumulative_slippage = 0.0
+        
         # Current Market State (for order matching)
         self.current_mid_price = 0.0
         self.current_best_bid = 0.0
@@ -103,6 +114,10 @@ class DeepScalperEnv(gym.Env):
         self.current_mid_price = 0.0
         self.current_best_bid = 0.0
         self.current_best_ask = 0.0
+        
+        # Reset fee/slippage tracking
+        self.cumulative_fees = 0.0
+        self.cumulative_slippage = 0.0
         
         # Cold Start Fix: Fill window with first frame
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
@@ -196,12 +211,19 @@ class DeepScalperEnv(gym.Env):
                     exec_qty = min(order_qty, available_vol)
                     
                     if exec_qty > 0:
-                        fill_price = self.current_best_ask
+                        # Calculate slippage based on market impact
+                        slippage_rate = self._calculate_slippage(exec_qty, available_vol)
+                        fill_price = self.current_best_ask * (1 + slippage_rate)  # Worse price for buyer
+                        slippage_cost = self.current_best_ask * exec_qty * slippage_rate
                         
                         # Apply Maker/Taker Fee
                         fee_rate = self.taker_fee if is_taker else self.maker_fee
                         fee = fill_price * exec_qty * fee_rate
                         cost = fill_price * exec_qty + fee
+                        
+                        # Track cumulative costs
+                        self.cumulative_fees += fee
+                        self.cumulative_slippage += slippage_cost
                         
                         if cost <= self.balance:
                             self.balance -= cost
@@ -238,12 +260,19 @@ class DeepScalperEnv(gym.Env):
                     exec_qty = min(order_qty, available_vol)
                     
                     if exec_qty > 0:
-                        fill_price = self.current_best_bid
+                        # Calculate slippage based on market impact
+                        slippage_rate = self._calculate_slippage(exec_qty, available_vol)
+                        fill_price = self.current_best_bid * (1 - slippage_rate)  # Worse price for seller
+                        slippage_cost = self.current_best_bid * exec_qty * slippage_rate
                         
                         # Apply Maker/Taker Fee
                         fee_rate = self.taker_fee if is_taker else self.maker_fee
                         fee = fill_price * exec_qty * fee_rate
                         proceeds = fill_price * exec_qty - fee
+                        
+                        # Track cumulative costs
+                        self.cumulative_fees += fee
+                        self.cumulative_slippage += slippage_cost
                         
                         self.balance += proceeds
                         # Update position
@@ -367,7 +396,10 @@ class DeepScalperEnv(gym.Env):
             "balance": self.balance, 
             "position": self.position, 
             "portfolio_value": current_portfolio_value,
-            "volatility_target": volatility_target
+            "volatility_target": volatility_target,
+            "cumulative_fees": self.cumulative_fees,
+            "cumulative_slippage": self.cumulative_slippage,
+            "total_execution_costs": self.cumulative_fees + self.cumulative_slippage
         }
         
         return obs, reward, terminated, truncated, info
@@ -380,6 +412,27 @@ class DeepScalperEnv(gym.Env):
         # Force scalar
         if hasattr(val, "item"): val = val.item()
         return float(val)
+
+    def _calculate_slippage(self, trade_size: float, available_liquidity: float) -> float:
+        """
+        Calculate execution slippage based on market impact model.
+        
+        Slippage = base_slippage + (trade_size / liquidity) * impact_factor
+        
+        Args:
+            trade_size: Size of the trade (quantity)
+            available_liquidity: Available volume at the price level
+            
+        Returns:
+            Slippage as a decimal (e.g., 0.0001 = 1 bp)
+        """
+        base = self.base_slippage_bps * 1e-4  # Convert bps to decimal
+        if available_liquidity > 0:
+            # Market impact: larger trades relative to liquidity cause more slippage
+            impact = (trade_size / available_liquidity) * self.slippage_impact_factor * 1e-4
+        else:
+            impact = 0
+        return base + impact
 
     def _build_frame(self, step_data: Any) -> np.ndarray:
         """Construct a single micro-observation frame from step data."""
