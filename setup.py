@@ -9,7 +9,7 @@ setup(
     license="Apache 2.0",
     packages=find_packages(),
     install_requires=[
-        'gym', 'matplotlib', 'numpy', 'torch', 'opencv-python', 'yfinance', 'stockstats'],
+        'gym', 'matplotlib', 'numpy', 'torch', 'opencv-python', 'yfinance', 'stockstats', 'wandb', 'pandas', 'pyarrow'],
     description="FinRL-Pro_DS",
     classifiers=[
         # Trove classifiers

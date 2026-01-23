@@ -112,8 +112,9 @@ def main():
     if args.debug:
         config["torch_compile"] = False
         print("DEBUG MODE: torch.compile disabled.")
-        import torch._dynamo
-        torch._dynamo.config.suppress_errors = True
+        # import torch._dynamo  <-- removed to prevent shadowing
+        if hasattr(torch, "_dynamo"):
+            torch._dynamo.config.suppress_errors = True
     
     # Override Run Name if provided
     if args.run_name:
@@ -124,8 +125,9 @@ def main():
     setup_wandb(config)
     
     # Device
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
+    # device = "cuda" if torch.cuda.is_available() else "cpu"
+    # print(f"Using device: {device}")
+    # MOVED DOWN after Env creation
     
 
 
@@ -136,23 +138,30 @@ def main():
     num_envs = env_config.get("num_envs", 1)
     
     # Define Factory
+    # Define Factory
     def env_factory():
         if args.debug:
             return MockDeepScalperEnv()
         else:
             return make_env(config)
             
+    # CRITICAL FIX for Multiprocessing with CUDA:
+    # 1. Do not initialize CUDA before forking/spawning if possible.
+    # 2. Use 'spawn' context to avoid CUDA context corruption in workers.
+    # We delay device init until after env creation (though we still assign it later).
+    
     if num_envs > 1:
         print(f"Vectorizing {'Mock' if args.debug else 'Real'} Environment: {num_envs} Envs")
         
-        # Use Gymnasium AsyncVectorEnv (Real) or SyncVectorEnv (Debug/Fallback)
-        # MockEnv is hard to pickle on Windows from __main__, so use Sync for debug.
         if args.debug:
              print("Debug Mode: Forcing SyncVectorEnv.")
              env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
         else:
             try:
-                env = gym.vector.AsyncVectorEnv([env_factory for _ in range(num_envs)])
+                # Use spawn to be safe with CUDA/Torch
+                import multiprocessing
+                ctx = multiprocessing.get_context("spawn")
+                env = gym.vector.AsyncVectorEnv([env_factory for _ in range(num_envs)], context=ctx)
             except Exception as e:
                 print(f"Failed to create AsyncVectorEnv: {e}. Fallback to Sync.")
                 env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
@@ -161,6 +170,10 @@ def main():
     else:
         env = env_factory()
         print(f"{'Mock' if args.debug else 'Real'} Environment Loaded.")
+
+    # Device Setup - moved AFTER Env creation to check for CUDA safely
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {device}")
 
     # Network Configs
     net_config = config.get("network", {

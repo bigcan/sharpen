@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import os
 from typing import Dict, Any, Optional, List
 from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
 
@@ -27,16 +28,59 @@ class ParquetDataHandler:
             # Assuming the parquet file has columns like 'timestamp', 'bid_price_1', 'bid_vol_1', etc.
             # OR it might be raw snapshots.
             
+            print(f"DEBUG: Loading Parquet from {os.path.abspath(self.file_path)}")
             df = pd.read_parquet(self.file_path)
+            # Sanitize columns
+            df.columns = df.columns.astype(str).str.strip()
+            print(f"DEBUG: Cols (Sanitized): {df.columns.tolist()}")
+            if df.columns.duplicated().any():
+                raise RuntimeError(f"Duplicate columns found: {df.columns[df.columns.duplicated()].tolist()}")
             
+            if 'timestamp' in df.columns:
+                 # Check if duplicated specifically (handled above but explicit check)
+                 try:
+                     head_val = df['timestamp'].head()
+                     # raise RuntimeError(f"DEBUG: Successfully accessed timestamp. Head: {head_val}")
+                     # If success, proceed to to_datetime, but verify what we are passing
+                     pass
+                 except Exception as e:
+                     raise RuntimeError(f"DEBUG: Failed to access df['timestamp'] despite being in columns: {e}")
+            else:
+                 print("DEBUG: 'timestamp' IS NOT in df.columns")
+                 raise RuntimeError(f"Timestamp MISSING from columns: {df.columns.tolist()}")
+            
+            # Ensure timestamp is available as a column
+            if 'timestamp' not in df.columns and df.index.name == 'timestamp':
+                df = df.reset_index()
+                
             # Basic validation
             if df.empty:
                 raise ValueError(f"Empty parquet file: {self.file_path}")
-                
+            
+            if 'timestamp' not in df.columns:
+                 # Try to find a logical timestamp column or fail
+                 possible = [c for c in df.columns if 'time' in c.lower() or 'date' in c.lower()]
+                 if possible:
+                     # Rename first match
+                     df = df.rename(columns={possible[0]: 'timestamp'})
+                 else:
+                     raise ValueError(f"Parquet file must have a 'timestamp' column. Types found: {df.columns.tolist()}")
+
             # Ensure timestamp is datetime and sorted
-            if 'timestamp' in df.columns:
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
+            try:
+                # DEBUG: Check type before to_datetime
+                ts_col = df['timestamp']
+                # print(f"DEBUG: ts_col type: {type(ts_col)}")
+                df['timestamp'] = pd.to_datetime(ts_col)
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                raise RuntimeError(f"DEBUG: pd.to_datetime FAILED: {e}")
+
+            try:
                 df = df.sort_values('timestamp').reset_index(drop=True)
+            except Exception as e:
+                raise RuntimeError(f"DEBUG: sort_values FAILED: {e}")
             
             # Feature Engineering
             # 1. Micro Features
@@ -48,7 +92,10 @@ class ParquetDataHandler:
             required_cols = ['bid_price_1', 'ask_price_1'] 
             if all(col in df.columns for col in required_cols):
                  # It looks like wide format LOB data
-                 micro_features = self.fe.process_micro(df)
+                 try:
+                     micro_features = self.fe.process_micro(df)
+                 except Exception as e:
+                     raise RuntimeError(f"DEBUG: process_micro FAILED: {e}")
             else:
                  # Attempt to pivot if it looks like snapshot data (timestamp, level, ...)
                  # Implementation detail: Assume wide format for now as that's typical for ML parquet datasets
@@ -68,7 +115,13 @@ class ParquetDataHandler:
                  macro_features['timestamp'] = df['timestamp']
             elif all(col in df.columns for col in ['open', 'high', 'low', 'close', 'volume']):
                 # Generate from OHLCV
-                macro_features = self.fe.process_macro(df)
+                try:
+                    macro_features = self.fe.process_macro(df)
+                    # FIX: Ensure timestamp is present for alignment
+                    if 'timestamp' not in macro_features.columns:
+                        macro_features['timestamp'] = df['timestamp']
+                except Exception as e:
+                    raise RuntimeError(f"Failed to generate macro features: {e}")
             else:
                 # Generate dummy if missing
                  macro_features = pd.DataFrame(0, index=df.index, columns=env_macro_cols)
@@ -76,7 +129,10 @@ class ParquetDataHandler:
                 
             # 3. Align
             if not macro_features.empty:
-                self._feature_data = self.fe.align_multimodal(micro_features, macro_features)
+                try:
+                    self._feature_data = self.fe.align_multimodal(micro_features, macro_features)
+                except Exception as e:
+                    raise RuntimeError(f"Failed to align features: {e}. Micro cols: {micro_features.columns}, Macro cols: {macro_features.columns}")
             else:
                 self._feature_data = micro_features
 
@@ -84,9 +140,10 @@ class ParquetDataHandler:
             self._timestamps = self._feature_data.index.tolist()
             self._ptr = 0
             
-            print(f"Loaded {len(self._feature_data)} rows from {self.file_path}")
+            print(f"Loaded {len(self._feature_data)} rows from {os.path.basename(self.file_path)}")
 
         except Exception as e:
+            # Clean exception handling
             raise RuntimeError(f"Failed to load parquet data: {e}")
 
     def reset(self):

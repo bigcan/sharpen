@@ -357,7 +357,7 @@ class DeepScalperEnv(gym.Env):
         self.prev_portfolio_value = current_portfolio_value
         
         # 5. Safety Drawdown Stop
-        truncted = False
+        truncated = False
         if current_portfolio_value < 0.8 * self.initial_balance:
             terminated = True
             logging.warning("Hit Max Drawdown Stop (20%). Terminating Episode.")
@@ -370,7 +370,7 @@ class DeepScalperEnv(gym.Env):
             "volatility_target": volatility_target
         }
         
-        return obs, reward, terminated, truncted, info
+        return obs, reward, terminated, truncated, info
     
     def _get_portfolio_value(self):
         """Calculate total equity (Balance + Unrealized PnL)"""
