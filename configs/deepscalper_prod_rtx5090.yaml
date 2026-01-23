@@ -11,7 +11,7 @@ env:
   maker_fee: 0.0002
   taker_fee: 0.0005 
   
-  initial_balance: 10000.0
+  initial_balance: 100000.0
   max_position: 10.0 # Increased for production scale
   num_envs: 24 # Utilize 25 vCPUs
 
@@ -83,5 +83,5 @@ training:
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["rtx5090", "optimized", "v1.1"]
+  tags: ["rtx5090", "optimized", "v1.2", "fix_leverage"]
   mode: "online"
