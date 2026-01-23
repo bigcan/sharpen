@@ -136,7 +136,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--script", required=True, help="Script to run (relative to root), e.g., scripts/train_deepscalper.py")
     parser.add_argument("--config", required=True, help="Config file path")
-    parser.add_argument("--run_name", default="deepscalper_pilot", help="Base name for WandB run")
+    parser.add_argument("--run_name", default="DS_GPUHub_BM_V1", help="Base name for WandB run")
     parser.add_argument("--upload_data", action="store_true", help="Upload data file to /data")
     args = parser.parse_args()
     

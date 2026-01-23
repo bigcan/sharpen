@@ -99,9 +99,10 @@ def main():
     def unpack(o):
         micro_t = torch.tensor(o["micro"], dtype=torch.float32).unsqueeze(0).to(device)
         macro_t = torch.tensor(o["macro"], dtype=torch.float32).unsqueeze(0).to(device)
-        return micro_t, macro_t
+        private_t = torch.tensor(o["private"], dtype=torch.float32).unsqueeze(0).to(device)
+        return micro_t, private_t, macro_t
 
-    micro, macro = unpack(obs)
+    micro, private, macro = unpack(obs)
     
     portfolio_values = []
     positions = []
@@ -113,10 +114,12 @@ def main():
     try:
         while not done:
             with torch.no_grad():
-                action_vector = ensemble.predict(micro, macro)
+                action_vector = ensemble.predict(micro, private, macro)
+                # Unwrap batch dim (1, 3) -> (3,)
+                action_vector = action_vector[0]
             
             obs, reward, terminated, truncated, info = env.step(action_vector)
-            micro, macro = unpack(obs)
+            micro, private, macro = unpack(obs)
             done = terminated or truncated
             
             val = info.get("portfolio_value", env.initial_balance)
@@ -127,6 +130,12 @@ def main():
             
             if step % 1000 == 0:
                 print(f"Step {step}: Value={val:.2f}, Pos={pos:.4f}")
+            
+            # Capture Price for VBT
+            mid_p = (env.current_best_bid + env.current_best_ask) / 2.0
+            if mid_p == 0: mid_p = env.avg_price # Fallback
+            prices.append(mid_p)
+            
             step += 1
             
             if step > 50000: # Safety break logic
@@ -139,48 +148,57 @@ def main():
     
     # 5. Analysis
     try:
-        import vectorbt as vbt
-        print("Running VectorBT Analysis...")
+        from finrl_pro_ds.analytics.vbt_analyzer import VBTAnalyzer
+        print("Running VectorBT Analysis via VBTAnalyzer...")
         
-        # Construct Price Series (Approximate)
-        # DeepScalperEnv has internal tick data, maybe hard to align perfectly without timestamps.
-        # But we have Portfolio Value History.
+        # 1. Prepare Data
+        price_series = pd.Series(prices)
         
-        # Method 1: Portfolio from Equity
-        # vectorbt expects a pandas Series with DatetimeIndex usually, but can work with simple index.
+        # 2. Derive Orders from Positions
+        # pos[i] - pos[i-1] = execution
+        pos_arr = np.array(positions)
+        orders_arr = np.diff(pos_arr, prepend=0.0) 
+        orders_series = pd.Series(orders_arr)
         
-        equity_curve = pd.Series(portfolio_values)
+        # 3. Create Analyzer and Portfolio
+        analyzer = VBTAnalyzer(
+            close=price_series, 
+            size=orders_series, 
+            init_cash=env.initial_balance,
+            fees=env.taker_fee,
+            freq='1min'
+        )
+        pf = analyzer.create_portfolio(group_by=True)
         
-        # Calculate Returns
-        returns = equity_curve.pct_change().dropna()
+        print("\n=== VectorBT Stats ===")
+        print(analyzer.get_metrics())
         
-        total_return = (equity_curve.iloc[-1] - equity_curve.iloc[0]) / equity_curve.iloc[0]
-        sharpe = returns.mean() / returns.std() * np.sqrt(60*24*365) # Approx annualization for 1m data?
-        # Assuming 1m data: 525600 mins/year. If data is 1m.
-        # Config says 1m.
-        sharpe = returns.mean() / returns.std() * np.sqrt(525600)
+        # Also print comparison
+        vbt_final = pf.final_value()
+        if hasattr(vbt_final, 'iloc'):
+            vbt_final = vbt_final.iloc[-1]
         
-        max_drawdown = (equity_curve / equity_curve.cummax() - 1).min()
+        print(f"\n--- Env vs VBT Check ---")
+        print(f"Env Final Balance: {portfolio_values[-1]:.2f}")
+        print(f"VBT Final Balance: {float(vbt_final):.2f} (Approx)")
         
-        print(f"--- Results ---")
-        print(f"Steps: {step}")
-        print(f"Initial Balance: {env.initial_balance}")
-        print(f"Final Balance: {equity_curve.iloc[-1]:.2f}")
-        print(f"Total Return: {total_return * 100:.2f}%")
-        print(f"Sharpe Ratio (Annualized): {sharpe:.2f}")
-        print(f"Max Drawdown: {max_drawdown * 100:.2f}%")
-        
-        # VBT Stats
-        # We can create a portfolio from returns
-        # pf = vbt.Portfolio.from_returns(returns, init_cash=env.initial_balance, freq='1m')
-        # print(pf.stats())
+        # Optional: Save Report
+        # analyzer.plot("backtest_report.html")
 
     except ImportError:
-        print("VectorBT not installed. Using simple pandas metrics.")
+        print("VBTAnalyzer or VectorBT not found. Using simple pandas metrics.")
         equity_curve = pd.Series(portfolio_values)
-        ret = equity_curve.pct_change().dropna()
         print(f"Total Return: {((equity_curve.iloc[-1] / equity_curve.iloc[0]) - 1)*100:.2f}%")
         print(f"Max Drawdown: {((equity_curve / equity_curve.cummax()) - 1).min()*100:.2f}%")
+
+
+    except Exception as e:
+        print(f"VectorBT Analysis Failed: {e}")
+        # Fallback to simple metrics
+        equity_curve = pd.Series(portfolio_values)
+        if len(equity_curve) > 0:
+            print(f"Total Return: {((equity_curve.iloc[-1] / equity_curve.iloc[0]) - 1)*100:.2f}%")
+            print(f"Max Drawdown: {((equity_curve / equity_curve.cummax()) - 1).min()*100:.2f}%")
 
 if __name__ == "__main__":
     main()
