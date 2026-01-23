@@ -237,6 +237,53 @@ class WandbFinRLEvaluator:
         
         return corr_matrix, ensemble_lift
 
+    def _build_trade_log(self, df: pd.DataFrame, agent_name: str) -> pd.DataFrame:
+        """
+        Build a trade log with per-trade details and P&L.
+        
+        Args:
+            df: DataFrame with 'date', 'price', 'quantity' columns.
+            agent_name: Name of the agent for identification.
+            
+        Returns:
+            DataFrame with trade details, or empty DataFrame if required columns missing.
+        """
+        # Check for required columns (graceful degradation)
+        if 'price' not in df.columns or 'quantity' not in df.columns:
+            return pd.DataFrame()
+        
+        # Filter to actual trades (non-zero quantity)
+        trades = df[df['quantity'] != 0].copy()
+        
+        if trades.empty:
+            return pd.DataFrame()
+        
+        # Direction
+        trades['direction'] = np.where(trades['quantity'] > 0, 'BUY', 'SELL')
+        
+        # Notional value
+        trades['notional'] = trades['price'] * trades['quantity'].abs()
+        
+        # Per-trade P&L (simple: quantity * price change to next period)
+        # Using shift to get next-period price difference
+        trades['pnl'] = trades['quantity'] * trades['price'].diff().shift(-1).fillna(0)
+        
+        # Agent identification
+        trades['agent'] = agent_name
+        
+        # Ticker (optional column)
+        if 'ticker' not in trades.columns:
+            trades['ticker'] = 'N/A'
+        
+        # Reset index to get date as column
+        trades = trades.reset_index()
+        
+        # Select and order columns
+        output_cols = ['date', 'agent', 'ticker', 'direction', 'price', 'quantity', 'notional', 'pnl']
+        available_cols = [c for c in output_cols if c in trades.columns]
+        
+        return trades[available_cols]
+
     def compute_all_metrics(self):
         """
         Compute metrics for Ensemble and all Sub-Agents.
@@ -340,6 +387,28 @@ class WandbFinRLEvaluator:
             ax.grid(True)
             wandb.log({"Underwater Plot": wandb.Image(fig)})
             plt.close(fig)
+            
+            # 7. Trade Log Table (Detailed trade activities)
+            trade_logs = []
+            
+            # Build trade logs for ensemble
+            ens_trades = self._build_trade_log(self.df_ensemble, "Ensemble")
+            if not ens_trades.empty:
+                trade_logs.append(ens_trades)
+            
+            # Build trade logs for each agent
+            for name, df in self.dict_agents.items():
+                agent_trades = self._build_trade_log(df, name)
+                if not agent_trades.empty:
+                    trade_logs.append(agent_trades)
+            
+            if trade_logs:
+                combined_log = pd.concat(trade_logs, ignore_index=True)
+                trade_log_table = wandb.Table(dataframe=combined_log)
+                wandb.log({"Trade Log": trade_log_table})
+                print(f"Logged {len(combined_log)} trade records to W&B.")
+            else:
+                print("No detailed trade data available (missing price/quantity columns).")
             
             # 6. Summary Attributes
             ens_metrics = self.results.get("Ensemble", {})

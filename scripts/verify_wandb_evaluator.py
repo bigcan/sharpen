@@ -22,13 +22,25 @@ def create_mock_data(start_date='2023-01-01', periods=100, name="Agent"):
     # Random Actions (-1, 0, 1)
     actions = np.random.choice([-1, 0, 1], size=periods)
     
+    # Enhanced: Price simulation (random walk starting at 100)
+    price_changes = np.random.normal(0, 0.5, periods)
+    prices = 100 + np.cumsum(price_changes)
+    
+    # Enhanced: Quantity (scale actions by random share amounts, 0 when no action)
+    base_qty = np.random.randint(10, 100, periods)
+    quantities = actions * base_qty  # Signed: + for buy, - for sell
+    
     df = pd.DataFrame({
         'date': dates,
         'account_value': account_value,
-        'actions': actions
+        'actions': actions,
+        'price': prices,
+        'quantity': quantities,
+        'ticker': 'TEST'
     })
     
     return df
+
 
 def test_wandb_evaluator():
     print("Generating mock data...")
