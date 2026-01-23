@@ -1,0 +1,384 @@
+import pandas as pd
+import numpy as np
+import yfinance as yf
+import wandb
+import seaborn as sns
+import matplotlib.pyplot as plt
+from typing import Dict, Optional, List, Union
+import warnings
+
+# Suppress warnings for cleaner output
+warnings.filterwarnings("ignore")
+
+class WandbFinRLEvaluator:
+    """
+    A production-grade evaluator for FinRL Ensemble Trading Systems.
+    Handles performance metrics, ensemble analysis, and W&B logging.
+    """
+    
+    def __init__(
+        self,
+        df_ensemble: pd.DataFrame,
+        dict_agents: Dict[str, pd.DataFrame],
+        benchmark_ticker: str = "^GSPC",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None
+    ):
+        """
+        Initialize the evaluator.
+        
+        Args:
+            df_ensemble: DataFrame with 'date', 'account_value', 'actions' (optional).
+            dict_agents: Dictionary of DataFrames for each sub-agent.
+            benchmark_ticker: Ticker symbol for benchmark comparison.
+        """
+        self.df_ensemble = df_ensemble.copy()
+        self.dict_agents = {k: v.copy() for k, v in dict_agents.items()}
+        self.benchmark_ticker = benchmark_ticker
+        
+        # Infer dates if not provided
+        if start_date is None:
+            self.start_date = self.df_ensemble['date'].min()
+        else:
+            self.start_date = start_date
+            
+        if end_date is None:
+            self.end_date = self.df_ensemble['date'].max()
+        else:
+            self.end_date = end_date
+            
+        self.results = {} # Store calculated metrics
+        self.daily_returns = pd.DataFrame() # Store aligned daily returns
+        
+        # Preprocess Data Immediately
+        self._preprocess_data()
+        
+    def _preprocess_data(self):
+        """
+        Clean, align, and calculate returns for all agents and benchmark.
+        Handles timezone mismatches and NaNs.
+        """
+        print("Preprocessing data...")
+        
+        # 1. Standardize Dates
+        def process_df(df):
+            df['date'] = pd.to_datetime(df['date'])
+            df = df.sort_values('date').set_index('date')
+            # Handle potential timezone issues by localizing to None or UTC
+            if df.index.tz is not None:
+                df.index = df.index.tz_convert(None)
+            return df
+
+        self.df_ensemble = process_df(self.df_ensemble)
+        for name, df in self.dict_agents.items():
+            self.dict_agents[name] = process_df(df)
+            
+        # 2. Fetch Benchmark Data
+        print(f"Fetching benchmark data for {self.benchmark_ticker}...")
+        try:
+            df_bench = yf.download(
+                self.benchmark_ticker, 
+                start=self.start_date, 
+                end=self.end_date, 
+                progress=False
+            )
+            if isinstance(df_bench.columns, pd.MultiIndex):
+                # Handle yfinance multi-index (Price, Ticker)
+                df_bench = df_bench['Close']
+            else:
+                 df_bench = df_bench[['Close']]
+            
+            # Rename to standard column
+            if isinstance(df_bench, pd.DataFrame):
+                 df_bench = df_bench.rename(columns={df_bench.columns[0]: 'Close'})
+            else:
+                 df_bench = df_bench.to_frame(name='Close')
+            
+            if df_bench.index.tz is not None:
+                df_bench.index = df_bench.index.tz_convert(None)
+                
+            self.df_benchmark = df_bench  
+        except Exception as e:
+            print(f"WARNING: Failed to fetch benchmark data '{self.benchmark_ticker}': {e}. Using flat zero-return benchmark (Sharpe will be 0/Undefined).")
+            self.df_benchmark = pd.DataFrame({'Close': [100] * len(self.df_ensemble)}, index=self.df_ensemble.index)
+
+        # 3. Align and Calculate Daily Returns
+        # We assume 'account_value' exists.
+        
+        # Ensemble Returns
+        ensemble_ret = self.df_ensemble['account_value'].pct_change().dropna()
+        self.daily_returns['Ensemble'] = ensemble_ret
+        
+        # Agent Returns
+        for name, df in self.dict_agents.items():
+            agent_ret = df['account_value'].pct_change().dropna()
+            self.daily_returns[name] = agent_ret
+        
+        # Benchmark Returns
+        bench_ret = self.df_benchmark['Close'].pct_change().dropna()
+        self.daily_returns['Benchmark'] = bench_ret
+        
+        # Fill NaNs with 0 for alignment (or forward fill depending on strictness, but 0 is safer for "no trade")
+        self.daily_returns = self.daily_returns.fillna(0)
+        
+        # Align indexes to intersection to be fair
+        # common_index = self.daily_returns.dropna().index
+        # self.daily_returns = self.daily_returns.loc[common_index]
+        
+    def calculate_metrics(self, df: pd.DataFrame, name: str) -> Dict:
+        """
+        Calculate generic financial metrics for a given DataFrame (Agent or Ensemble).
+        """
+        # Ensure daily returns exist
+        if 'daily_return' not in df.columns:
+            df['daily_return'] = df['account_value'].pct_change().fillna(0)
+            
+        returns = df['daily_return']
+        
+        # 1. Risk-Adjusted Returns
+        # Annualized Sharpe Ratio (assuming 252 trading days)
+        mean_ret = returns.mean()
+        std_ret = returns.std()
+        sharpe = (mean_ret / std_ret * np.sqrt(252)) if std_ret != 0 else 0
+        
+        # Sortino Ratio
+        downside_returns = returns[returns < 0]
+        downside_std = downside_returns.std()
+        sortino = (mean_ret / downside_std * np.sqrt(252)) if downside_std != 0 else 0
+        
+        # Calmar Ratio
+        # Need Cum Sum for MDD
+        cum_ret = (1 + returns).cumprod()
+        running_max = cum_ret.cummax()
+        drawdown = (cum_ret - running_max) / running_max
+        max_drawdown = drawdown.min() # Negative number
+        
+        annualized_return = mean_ret * 252 # Simple approximation
+        # Or geometric: (final/initial)^(252/days) - 1
+        days = (df.index[-1] - df.index[0]).days
+        if days > 0:
+            total_ret_geo = (df['account_value'].iloc[-1] / df['account_value'].iloc[0])
+            annualized_return_geo = (total_ret_geo ** (365/days)) - 1
+        else:
+            annualized_return_geo = 0
+            
+        calmar = (annualized_return_geo / abs(max_drawdown)) if max_drawdown != 0 else 0
+        
+        # 2. Risk Metrics
+        annualized_vol = std_ret * np.sqrt(252)
+        
+        # 3. Trade Stats
+        total_return_pct = (df['account_value'].iloc[-1] / df['account_value'].iloc[0]) - 1
+        
+        # Need to know actions for Wind Rate / Profit Factor
+        # Assuming 'actions' column exists. If it's pure account value, we can't infer trade accuracy easily 
+        # without transaction logs. But if 'actions' is present (shares bought/sold).
+        
+        # Trade Counts (require 'actions' column)
+        total_trades = 0
+        long_trades = 0
+        short_trades = 0
+        
+        if 'actions' in df.columns:
+            actions = df['actions'].fillna(0)
+            total_trades = int((actions != 0).sum())
+            long_trades = int((actions > 0).sum())
+            short_trades = int((actions < 0).sum())
+        
+        # Win Rate & Profit Factor (based on daily returns, always calculated)
+        winning_days = returns[returns > 0]
+        losing_days = returns[returns < 0]
+        
+        total_days = len(returns)
+        win_rate = (len(winning_days) / total_days) if total_days > 0 else 0.0
+
+        gross_profit = winning_days.sum()
+        gross_loss = abs(losing_days.sum())
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float('inf')
+
+        metrics = {
+            "Agent": name,
+            "Sharpe_Ratio": sharpe,
+            "Sortino_Ratio": sortino,
+            "Calmar_Ratio": calmar,
+            "Max_Drawdown": max_drawdown,
+            "Annual_Volatility": annualized_vol,
+            "Total_Return": total_return_pct,
+            "Win_Rate_Daily": win_rate,
+            "Profit_Factor_Daily": profit_factor,
+            "Total_Action_Count": total_trades,
+            "Long_Action_Count": long_trades,
+            "Short_Action_Count": short_trades
+        }
+        
+        return metrics
+
+    def calculate_diversity(self):
+        """
+        Compute correlation matrix and Ensemble Lift.
+        """
+        # Correlation Matrix
+        corr_matrix = self.daily_returns.corr(method='pearson')
+        
+        # Ensemble Lift
+        best_single_agent_sharpe = -float('inf')
+        
+        # We need to ensure we have metrics calculated first
+        if not self.results:
+            self.compute_all_metrics()
+            
+        for name, metrics in self.results.items():
+            if name != "Ensemble" and name != "Benchmark":
+                if metrics['Sharpe_Ratio'] > best_single_agent_sharpe:
+                    best_single_agent_sharpe = metrics['Sharpe_Ratio']
+        
+        ensemble_sharpe = self.results.get("Ensemble", {}).get("Sharpe_Ratio", 0)
+        ensemble_lift = ensemble_sharpe - best_single_agent_sharpe
+        
+        return corr_matrix, ensemble_lift
+
+    def compute_all_metrics(self):
+        """
+        Compute metrics for Ensemble and all Sub-Agents.
+        """
+        # Ensemble
+        self.results["Ensemble"] = self.calculate_metrics(self.df_ensemble, "Ensemble")
+        
+        # Agents
+        for name, df in self.dict_agents.items():
+            self.results[name] = self.calculate_metrics(df, name)
+
+    def log_to_wandb(self, run_name: str, project_name: str = "finrl-ensemble", entity: Optional[str] = None):
+        """
+        Log all results to Weights & Biases.
+        """
+        # Initialize W&B
+        run = wandb.init(project=project_name, name=run_name, entity=entity, reinit=True)
+        
+        try:
+            # Ensure metrics are ready
+            if not self.results:
+                self.compute_all_metrics()
+                
+            corr_matrix, ensemble_lift = self.calculate_diversity()
+            
+            # 1. Leaderboard Table
+            # Convert results dict to list of dicts
+            data_list = list(self.results.values())
+            # Add Ensemble Lift to Ensemble row
+            for row in data_list:
+                if row['Agent'] == "Ensemble":
+                    row['Ensemble_Alpha'] = ensemble_lift
+                else:
+                    row['Ensemble_Alpha'] = 0.0 # N/A
+            
+            leaderboard_df = pd.DataFrame(data_list)
+            leaderboard_table = wandb.Table(dataframe=leaderboard_df)
+            wandb.log({"Leaderboard": leaderboard_table})
+            
+            # 2. Equity Curve Overlay (Matplotlib -> wandb.Image)
+            cum_returns = (1 + self.daily_returns).cumprod()
+            
+            fig, ax = plt.subplots(figsize=(12, 6))
+            for col in cum_returns.columns:
+                ax.plot(cum_returns.index, cum_returns[col], label=col)
+            ax.set_title("Cumulative Returns Comparison")
+            ax.set_xlabel("Date")
+            ax.set_ylabel("Cumulative Return")
+            ax.legend()
+            ax.grid(True)
+            wandb.log({"Equity Curve": wandb.Image(fig)})
+            plt.close(fig)
+            
+            # 3. Correlation Matrix Heatmap (Seaborn)
+            # FIXED: Use explicit figure/ax instead of global state
+            fig, ax = plt.subplots(figsize=(10, 8))
+            sns.heatmap(corr_matrix, annot=True, cmap="coolwarm", fmt=".2f", ax=ax)
+            ax.set_title("Agent Correlation Matrix")
+            wandb.log({"Correlation Matrix": wandb.Image(fig)})
+            plt.close(fig)
+            
+            # 4. Activity Heatmap (Vectorized approach)
+            action_dfs = []
+            
+            if 'actions' in self.df_ensemble.columns:
+                ens_actions = self.df_ensemble[['actions']].copy()
+                ens_actions['Agent'] = 'Ensemble'
+                ens_actions = ens_actions.reset_index().rename(columns={'actions': 'Action', 'date': 'Date'})
+                action_dfs.append(ens_actions)
+            
+            for name, df in self.dict_agents.items():
+                if 'actions' in df.columns:
+                    agent_actions = df[['actions']].copy()
+                    agent_actions['Agent'] = name
+                    agent_actions = agent_actions.reset_index().rename(columns={'actions': 'Action', 'date': 'Date'})
+                    action_dfs.append(agent_actions)
+            
+            if action_dfs:
+                act_df = pd.concat(action_dfs, ignore_index=True)
+                act_pivot = act_df.pivot_table(index='Agent', columns='Date', values='Action', aggfunc='sum')
+                
+                fig, ax = plt.subplots(figsize=(14, 6))
+                sns.heatmap(act_pivot, cmap="vlag", center=0, cbar_kws={'label': 'Action Magnitude'}, ax=ax)
+                ax.set_title("Trading Activity Heatmap")
+                wandb.log({"Activity Heatmap": wandb.Image(fig)})
+                plt.close(fig)
+                
+            # 5. Underwater Plot (Ensemble Only)
+            # Drawdown over time
+            ensemble_ret = self.daily_returns['Ensemble']
+            cum = (1 + ensemble_ret).cumprod()
+            running_max = cum.cummax()
+            dd = (cum - running_max) / running_max
+            
+            # FIXED: Use explicit figure/ax instead of global state
+            fig, ax = plt.subplots(figsize=(12, 4))
+            ax.fill_between(dd.index, dd, 0, color='red', alpha=0.3)
+            ax.plot(dd.index, dd, color='red', linewidth=1)
+            ax.set_title("Ensemble Underwater Plot")
+            ax.set_ylabel("Drawdown")
+            ax.grid(True)
+            wandb.log({"Underwater Plot": wandb.Image(fig)})
+            plt.close(fig)
+            
+            # 6. Summary Attributes
+            ens_metrics = self.results.get("Ensemble", {})
+            wandb.run.summary["Ensemble_Sharpe"] = ens_metrics.get("Sharpe_Ratio", 0)
+            wandb.run.summary["Ensemble_Sortino"] = ens_metrics.get("Sortino_Ratio", 0)
+            wandb.run.summary["Ensemble_Total_Return"] = ens_metrics.get("Total_Return", 0)
+            
+            print(f"Results logged to W&B run: {run.name}")
+            
+        finally:
+            # FIXED: Ensure run is finished even if errors occur
+            run.finish()
+
+def generate_wandb_report(
+    df_ensemble: pd.DataFrame,
+    dict_agents: Dict[str, pd.DataFrame],
+    run_name: str = "ensemble-eval-run",
+    project_name: str = "finrl-ensemble",
+    benchmark_ticker: str = "^GSPC",
+    entity: Optional[str] = None
+):
+    """
+    Helper function to instantiate and run the evaluator.
+    
+    Args:
+        df_ensemble: DataFrame with 'date', 'account_value', 'actions' columns.
+        dict_agents: Dictionary of DataFrames for each sub-agent.
+        run_name: Name for the W&B run.
+        project_name: W&B project name.
+        benchmark_ticker: Ticker symbol for benchmark (default: S&P 500).
+        entity: W&B entity (team or username). Optional.
+    
+    Returns:
+        WandbFinRLEvaluator: The evaluator instance with computed metrics.
+    """
+    evaluator = WandbFinRLEvaluator(
+        df_ensemble=df_ensemble,
+        dict_agents=dict_agents,
+        benchmark_ticker=benchmark_ticker
+    )
+    evaluator.log_to_wandb(run_name=run_name, project_name=project_name, entity=entity)
+    return evaluator

@@ -16,7 +16,7 @@ def fetch_logs():
     ssh.connect(host, port=port, username='root', password=password)
     
     remote_workspace = "/workspace/Synapse_V9"
-    cmd = f"tail -n 300 {remote_workspace}/run.log"
+    cmd = f"tail -n 50 {remote_workspace}/run.log"
     
     print(f"Fetching logs from {cmd}...")
     stdin, stdout, stderr = ssh.exec_command(cmd)
