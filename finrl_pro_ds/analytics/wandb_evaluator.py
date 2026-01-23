@@ -410,6 +410,38 @@ class WandbFinRLEvaluator:
             else:
                 print("No detailed trade data available (missing price/quantity columns).")
             
+            # 8. Account Balance Time-Series (USDT tracking)
+            # Log balance progression for Ensemble and all agents
+            balance_data = []
+            
+            # Ensemble balance
+            ens_balance = self.df_ensemble[['account_value']].copy()
+            ens_balance = ens_balance.reset_index()
+            ens_balance['agent'] = 'Ensemble'
+            ens_balance = ens_balance.rename(columns={'account_value': 'balance_usdt'})
+            balance_data.append(ens_balance)
+            
+            # Agent balances
+            for name, df in self.dict_agents.items():
+                agent_balance = df[['account_value']].copy()
+                agent_balance = agent_balance.reset_index()
+                agent_balance['agent'] = name
+                agent_balance = agent_balance.rename(columns={'account_value': 'balance_usdt'})
+                balance_data.append(agent_balance)
+            
+            if balance_data:
+                combined_balance = pd.concat(balance_data, ignore_index=True)
+                balance_table = wandb.Table(dataframe=combined_balance)
+                wandb.log({"Account Balance": balance_table})
+                
+                # Also log initial and final balance to summary
+                initial_balance = self.df_ensemble['account_value'].iloc[0]
+                final_balance = self.df_ensemble['account_value'].iloc[-1]
+                wandb.run.summary["Initial_Balance_USDT"] = initial_balance
+                wandb.run.summary["Final_Balance_USDT"] = final_balance
+                wandb.run.summary["Absolute_PnL_USDT"] = final_balance - initial_balance
+                print(f"Balance: {initial_balance:,.2f} USDT → {final_balance:,.2f} USDT (P&L: {final_balance - initial_balance:+,.2f})")
+            
             # 6. Summary Attributes
             ens_metrics = self.results.get("Ensemble", {})
             wandb.run.summary["Ensemble_Sharpe"] = ens_metrics.get("Sharpe_Ratio", 0)
