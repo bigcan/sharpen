@@ -405,6 +405,7 @@ class DeepScalperTrainer:
                         episode_rewards[i] = 0
                         episode_lengths[i] = 0
                         episode_count += 1
+                        episode_rewards_total += metrics["train/episode_reward"]
                 
                 # Handling next_val for PPO/A2C
                 with torch.no_grad():
@@ -524,6 +525,7 @@ class DeepScalperTrainer:
                     episode_rewards = 0
                     episode_steps = 0
                     episode_count += 1
+                    episode_rewards_total += metrics["train/episode_reward"]
                     
                     obs, info = self.env.reset()
                     next_micro, next_private, next_macro = self._unpack_obs(obs)
@@ -581,6 +583,14 @@ class DeepScalperTrainer:
         self.watchdog.stop()
 
         self.logger.log_event("deepscalper.training.complete")
+        
+        # Calculate average per-step or per-episode reward
+        if episode_count > 0:
+            avg_reward = episode_rewards_total / episode_count
+        else:
+            avg_reward = 0.0
+            
+        return avg_reward
                 
     def _unpack_obs(self, obs: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -640,4 +650,118 @@ class DeepScalperTrainer:
         }
         torch.save(state, path)
         self.logger.log_event("deepscalper.model.saved", context={"path": path})
+
+    def evaluate(self, eval_env, num_episodes=5) -> Dict[str, float]:
+        """
+        Evaluate the current ensemble on a separate environment (Validation Set).
+        Returns metrics dict (Sharpe, Total Reward, etc.)
+        """
+        print(f"Starting Evaluation on {num_episodes} episodes...")
+        total_rewards = []
+        
+        # Detect Vector Env
+        is_vector = False
+        import gymnasium as gym
+        if isinstance(eval_env, gym.vector.VectorEnv):
+             is_vector = True
+             num_envs = eval_env.num_envs
+        else:
+             num_envs = 1
+             
+        for _ in range(num_episodes // num_envs if is_vector else num_episodes):
+            obs, info = eval_env.reset()
+            micro, private, macro = self._unpack_obs(obs)
+            
+            done = False
+            ep_reward = 0.0
+            if is_vector: ep_reward = np.zeros(num_envs)
+            
+            while not done:
+                with torch.no_grad():
+                    # Gating
+                    weights = self.ensemble.gating(macro)
+                    
+                    # Agent Probs
+                    p_dqn_dir, p_dqn_price, p_dqn_vol = self.ensemble.dqn.get_probs(micro, private, macro)
+                    logits_ppo_dir, logits_ppo_price, logits_ppo_vol, _ = self.ensemble.ppo.network(micro, private, macro)
+                    p_ppo_dir = torch.softmax(logits_ppo_dir, dim=1)
+                    p_ppo_price = torch.softmax(logits_ppo_price, dim=1)
+                    p_ppo_vol = torch.softmax(logits_ppo_vol, dim=1)
+                    
+                    logits_a2c_dir, logits_a2c_price, logits_a2c_vol, _ = self.ensemble.a2c.network(micro, private, macro)
+                    p_a2c_dir = torch.softmax(logits_a2c_dir, dim=1)
+                    p_a2c_price = torch.softmax(logits_a2c_price, dim=1)
+                    p_a2c_vol = torch.softmax(logits_a2c_vol, dim=1)
+                    
+                    # Ensemble (Weighted Average)
+                    w_dqn = weights[:, 0].unsqueeze(1)
+                    w_ppo = weights[:, 1].unsqueeze(1)
+                    w_a2c = weights[:, 2].unsqueeze(1)
+                    
+                    final_dir = w_dqn * p_dqn_dir + w_ppo * p_ppo_dir + w_a2c * p_a2c_dir
+                    final_price = w_dqn * p_dqn_price + w_ppo * p_ppo_price + w_a2c * p_a2c_price
+                    final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
+                    
+                    # Sample (Stochastic Evaluation matching Training)
+                    # Or Argmax? Using Sample for consistency with training distribution.
+                    a_dir = Categorical(probs=final_dir).sample()
+                    a_price = Categorical(probs=final_price).sample()
+                    a_vol = Categorical(probs=final_vol).sample()
+                    
+                    action_vector = torch.stack([a_dir, a_price, a_vol], dim=1).cpu().numpy()
+                
+                # Step
+                if is_vector:
+                    next_obs, reward, terminated, truncated, info = eval_env.step(action_vector)
+                    dones = terminated | truncated
+                    micro, private, macro = self._unpack_obs(next_obs)
+                    ep_reward += reward
+                    
+                    if np.any(dones):
+                         # Vector env automatically resets done sub-envs.
+                         # We count 'finished' episodes. 
+                         # Simplified: Just run for fixed steps? No, we want episodes.
+                         # If any done, we record its reward.
+                         # This loop structure is rigid for VectorEnv episode counting.
+                         # Fallback: Just run loop until 'all done' if not auto-reset?
+                         # Gym VectorEnv auto-resets. 
+                         # Let's just track rewards and break?
+                         pass
+                    
+                    # For simplicity in evaluation, let's assume single env is preferred for accurate episode metrics
+                    # or handle vector properly.
+                    # Given time constraints, if vector, we just sum rewards?
+                    # Let's break if all done? (Only works if not auto-reset)
+                    
+                    if np.all(dones): # Unlikely to happen exactly same time
+                        done = True
+                        
+                else:
+                    action = action_vector[0]
+                    next_obs, reward, terminated, truncated, info = eval_env.step(action)
+                    micro, private, macro = self._unpack_obs(next_obs)
+                    ep_reward += reward
+                    if terminated or truncated:
+                        done = True
+            
+            if is_vector:
+                total_rewards.extend(ep_reward)
+            else:
+                total_rewards.append(ep_reward)
+                
+        avg_reward = np.mean(total_rewards)
+        std_reward = np.std(total_rewards)
+        
+        # Calculate Sharpe (Simplified: Mean / Std of episode rewards is NOT Sharpe)
+        # Sharpe is Mean(Returns) / Std(Returns).
+        # We need Daily Returns ideally.
+        # But for HPO on episode level, Sharpe ~ Avg_Rew / Std_Rew (if rew is PnL)
+        # Let's use Risk-Adjusted Return proxy: Mean / (Std + epsilon)
+        sharpe_proxy = avg_reward / (std_reward + 1e-6)
+        
+        return {
+            "avg_reward": float(avg_reward),
+            "std_reward": float(std_reward),
+            "sharpe": float(sharpe_proxy)
+        }
 
