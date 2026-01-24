@@ -13,7 +13,7 @@ from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, Synaps
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
-def make_env(config):
+def make_env(config, start_date=None, end_date=None):
     # Determine data path - Fallback to demo if main missing
     data_config = config.get("data", {})
     file_path = data_config.get("file_path")
@@ -31,10 +31,14 @@ def make_env(config):
          raise FileNotFoundError(f"Neither specified path nor demo data found at {file_path}")
 
     ticker = data_config.get("ticker", "BTCUSDT")
+    
+    # Pass dates to handler
     handler = ParquetDataHandler(
         file_path=file_path,
         ticker=ticker,
-        feature_config=config.get("features", {})
+        feature_config=config.get("features", {}),
+        start_date=start_date,
+        end_date=end_date
     )
     env = DeepScalperEnv(config=config.get("env", {}), data_handler=handler)
     return env
@@ -51,18 +55,10 @@ def objective(trial):
     entropy_coef = trial.suggest_float('entropy_coef', 0.001, 0.05, log=True)
     
     # Paper-Aligned Reward HPO (arXiv:2201.09058)
-    # Hindsight Weight (w) - Paper Optimal is roughly 0.1
     hindsight_weight = trial.suggest_float('hindsight_weight', 0.0, 0.5) 
-    # Hindsight Horizon (h) - Paper suggests larger is better, e.g. 180
     hindsight_horizon = trial.suggest_categorical('hindsight_horizon', [30, 60, 120, 180, 240])
-    # Risk Penalty (Auxiliary)
     risk_penalty = trial.suggest_float('risk_penalty', 0.0, 0.1)
 
-    # Gating interval not easily hot-swappable in current trainer structure without code change, 
-    # assuming it's hardcoded to 'update_interval' or similar in training loop.
-    # Looking at code: update_interval = 256 is hardcoded in train() line 361.
-    # We will stick to tuning LR and Gamma for now which are passed in config.
-    
     # Update Config (Reward)
     if "reward" not in config: config["reward"] = {}
     config["reward"]["hindsight_weight"] = hindsight_weight
@@ -75,14 +71,11 @@ def objective(trial):
     config['training']['gae_lambda'] = gae_lambda
     
     # Inject into Agent Specifics for HPO
-    # For HPO, we typically start by tuning them consistently (shared) 
-    # but the structure now SUPPORTS divergence.
     if "agents" not in config: config["agents"] = {}
     
     for agent_name in ["dqn", "ppo", "a2c", "gating"]:
         if agent_name not in config["agents"]: config["agents"][agent_name] = {}
         config["agents"][agent_name]["learning_rate"] = lr
-        # Gamma mainly affects DQN and GAE calc
         if agent_name in ["dqn", "ppo", "a2c"]:
              config["agents"][agent_name]["gamma"] = gamma
         if agent_name in ["ppo", "a2c"]:
@@ -92,51 +85,82 @@ def objective(trial):
     # Trainer fallback
     config['training']['learning_rate'] = lr
     
-    # 3. Setup Training
+    # 3. Walk-Forward Validation Folds
+    # Assuming data spans Jan 2023. 
+    # Fold 1: Train Jan 1-10, Val Jan 11-13
+    # Fold 2: Train Jan 1-13, Val Jan 14-16 (Expanding Window)
+    # Fold 3: Train Jan 1-16, Val Jan 17-19
+    # Note: Dates must match data. If using demo data (short), adjust.
+    # We'll use robust strings that pandas parses.
+    folds = [
+        {"train": ("2023-01-01", "2023-01-10"), "val": ("2023-01-10", "2023-01-13")},
+        {"train": ("2023-01-01", "2023-01-13"), "val": ("2023-01-13", "2023-01-16")},
+        {"train": ("2023-01-01", "2023-01-16"), "val": ("2023-01-16", "2023-01-19")}
+    ]
+    
+    fold_scores = []
+    
     device = "cuda" if torch.cuda.is_available() else "cpu"
     
     try:
-        env = make_env(config)
-        
-        # Network
-        net_config = config.get("network", {
-            "micro_config": {"input_size": 20, "hidden_size": 64},
-            "macro_config": {"input_size": 11, "hidden_sizes": [64]}
-        })
-        
-        dqn = DeepScalperDQN(
-            network_config=net_config, 
-            lr=lr, 
-            gamma=gamma, 
-            device=device
-        )
-        ppo = DeepScalperPPO(net_config, device=device)
-        a2c = DeepScalperA2C(net_config, device=device)
-        gating = SynapseGatingNetwork(input_dim=net_config["macro_config"]["input_size"])
-        ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
-        
-        # Override Trainer Params via Config
-        trainer = DeepScalperTrainer(
-            env=env,
-            ensemble_agent=ensemble,
-            config=config.get("training", {}),
-            device=device
-        )
-        # Manually overwrite potentially mapped params if they aren't fully plumbed
-        trainer.learning_rate = lr
-        trainer.gamma = gamma
-        # Re-init optimizers with new LR
-        trainer.gating_optimizer = torch.optim.Adam(ensemble.gating.parameters(), lr=lr)
-        trainer.ppo_optimizer = torch.optim.Adam(ensemble.ppo.network.parameters(), lr=lr)
-        trainer.a2c_optimizer = torch.optim.Adam(ensemble.a2c.network.parameters(), lr=lr)
-        
-        # Shorten training for HPO speed (configurable)
-        trainer.total_timesteps = args.steps 
-        
-        # 4. Train
-        avg_reward = trainer.train()
-        
-        return avg_reward
+        if args.debug:
+            # Fast path for debug
+            folds = [folds[0]]
+            
+        for i, fold in enumerate(folds):
+            print(f"--- Fold {i+1}/{len(folds)} ---")
+            train_start, train_end = fold["train"]
+            val_start, val_end = fold["val"]
+            
+            # Make Environments with Date Splits
+            try:
+                env_train = make_env(config, start_date=train_start, end_date=train_end)
+                env_val = make_env(config, start_date=val_start, end_date=val_end)
+            except ValueError as e:
+                print(f"Fold {i+1} Skipped: {e}")
+                continue
+
+            # Network
+            net_config = config.get("network", {
+                "micro_config": {"input_size": 20, "hidden_size": 64},
+                "macro_config": {"input_size": 11, "hidden_sizes": [64]}
+            })
+            
+            dqn = DeepScalperDQN(network_config=net_config, lr=lr, gamma=gamma, device=device)
+            ppo = DeepScalperPPO(net_config, device=device)
+            a2c = DeepScalperA2C(net_config, device=device)
+            gating = SynapseGatingNetwork(input_dim=net_config["macro_config"]["input_size"])
+            ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
+            
+            trainer = DeepScalperTrainer(
+                env=env_train,
+                ensemble_agent=ensemble,
+                config=config.get("training", {}),
+                device=device
+            )
+            # Manual Overrides
+            trainer.learning_rate = lr
+            trainer.gamma = gamma
+            trainer.gating_optimizer = torch.optim.Adam(ensemble.gating.parameters(), lr=lr)
+            trainer.ppo_optimizer = torch.optim.Adam(ensemble.ppo.network.parameters(), lr=lr)
+            trainer.a2c_optimizer = torch.optim.Adam(ensemble.a2c.network.parameters(), lr=lr)
+            
+            # Train
+            trainer.total_timesteps = args.steps 
+            trainer.train()
+            
+            # Evaluate on Validation Set
+            # Run episodes ~ enough to cover val period roughly or fixed 10
+            metrics = trainer.evaluate(env_val, num_episodes=10)
+            print(f"Fold {i+1} Val Metrics: {metrics}")
+            
+            scores_metric = metrics["sharpe"] # Optimizing Sharpe
+            fold_scores.append(scores_metric)
+            
+        if not fold_scores:
+            return float('-inf')
+            
+        return np.mean(fold_scores)
         
     except Exception as e:
         import traceback
@@ -147,14 +171,14 @@ def objective(trial):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--trials", type=int, default=5, help="Number of trials")
-    parser.add_argument("--steps", type=int, default=20000, help="Timesteps per trial")
+    parser.add_argument("--steps", type=int, default=10000, help="Timesteps per fold")
+    parser.add_argument("--debug", action="store_true", help="Run single fold only")
     args = parser.parse_args()
 
     # Pass args to objective via partial or global (using global args for simplicity as objective signature is fixed by optuna)
-    # Ideally use lambda or class, but global 'args' works in simple script.
     
     study = optuna.create_study(direction="maximize")
     study.optimize(objective, n_trials=args.trials)
 
     print("Best params:", study.best_params)
-    print("Best value:", study.best_value)
+    print("Best value (Avg Sharpe):", study.best_value)

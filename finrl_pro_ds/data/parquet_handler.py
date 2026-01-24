@@ -9,10 +9,12 @@ class ParquetDataHandler:
     Streams processed DeepScalper features from Parquet files.
     Designed to be a drop-in replacement for DBMarketDataHandler in DeepScalperEnv.
     """
-    def __init__(self, file_path: str, ticker: str, feature_config: Dict = None):
+    def __init__(self, file_path: str, ticker: str, feature_config: Dict = None, start_date: str = None, end_date: str = None):
         self.file_path = file_path
         self.ticker = ticker
         self.fe = DeepScalperFeatureEngineer(config=feature_config)
+        self.start_date = pd.to_datetime(start_date) if start_date else None
+        self.end_date = pd.to_datetime(end_date) if end_date else None
         
         self._ptr = 0
         self._timestamps: List[Any] = []
@@ -138,6 +140,19 @@ class ParquetDataHandler:
 
 
             self._timestamps = self._feature_data.index.tolist()
+            
+            # Apply Date Filter
+            if self.start_date:
+                self._feature_data = self._feature_data[self._feature_data['timestamp'] >= self.start_date]
+            if self.end_date:
+                self._feature_data = self._feature_data[self._feature_data['timestamp'] < self.end_date]
+                
+            if self._feature_data.empty:
+                raise ValueError(f"No data found between {self.start_date} and {self.end_date}")
+                
+            # Reset index after filtering to ensure linear access via _ptr
+            self._feature_data = self._feature_data.reset_index(drop=True)
+            self._timestamps = self._feature_data['timestamp'].tolist() if 'timestamp' in self._feature_data.columns else []
             self._ptr = 0
             
             print(f"Loaded {len(self._feature_data)} rows from {os.path.basename(self.file_path)}")
