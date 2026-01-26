@@ -83,11 +83,26 @@ def main():
     print(f"Loading Checkpoint: {args.checkpoint}")
     if os.path.exists(args.checkpoint):
         checkpoint = torch.load(args.checkpoint, map_location=device)
-        dqn.policy_net.load_state_dict(checkpoint["dqn"])
-        ppo.network.load_state_dict(checkpoint["ppo"])
-        a2c.network.load_state_dict(checkpoint["a2c"])
-        gating.load_state_dict(checkpoint["gating"])
-        print("Checkpoint Loaded.")
+        
+        def load_robust(model, key):
+            if key not in checkpoint:
+                print(f"Warning: {key} not found in checkpoint.")
+                return
+            state_dict = checkpoint[key]
+            # Remove _orig_mod prefix from torch.compile
+            new_state_dict = {}
+            for k, v in state_dict.items():
+                if k.startswith("_orig_mod."):
+                    new_state_dict[k[10:]] = v
+                else:
+                    new_state_dict[k] = v
+            model.load_state_dict(new_state_dict)
+
+        load_robust(dqn.policy_net, "dqn")
+        load_robust(ppo.network, "ppo")
+        load_robust(a2c.network, "a2c")
+        load_robust(gating, "gating")
+        print("Checkpoint Loaded Successfully (Robust Mode).")
     else:
         print("Checkpoint not found! Running with initialized weights.")
 
