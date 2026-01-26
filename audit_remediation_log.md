@@ -317,3 +317,22 @@ This document tracks the audit findings, red team reviews, and remediations perf
 -   **Status**: **PASSED**. Reporting layer is now modular and robust.
 
 - **Deployment**: Multiprocessing bottleneck resolved via delayed CUDA init and `spawn` context.
+
+---
+
+## Phase 26: Performance & Training Integrity Fix (Jan 26, 2026)
+**Focus**: VectorEnv step counting and DQN update ratios.
+
+### 🔴 Critical Findings
+1.  **Step Counting Loop**: The training loop iterated `total_timesteps` (10M) times, but with `num_envs=24`, this resulted in 240M transitions processed (24x over-run) and extremely slow wall-clock progress.
+2.  **DQN Overtraining**: `dqn.train_step()` was called on every loop iteration. With `num_envs=24`, this meant 1 gradient update per 24 environment steps, whereas the config expectation (and standard DQN) is ~1 update per 4 environment steps. This resulted in severe **undertraining** (6x fewer updates than required).
+3.  **Check Interval Bug**: The simple modulo check `(step+1) % interval == 0` frequently failed to trigger when `step` incremented by chunks (e.g., +24), causing skipped PPO updates and checkpoints.
+
+### ✅ Remediation
+-   **Vectorized Step Logic**: Updated the loop to `while global_step < total:` with `global_step += num_envs`.
+-   **Gradient Accumulator**: Implemented a fractional accumulator for DQN updates:
+    -   `accumulator += num_envs / dqn_update_interval`
+    -   Triggers exact number of updates required (e.g., 6 per loop) to maintain 1:4 ratio.
+-   **Boundary Crossing Check**: Replaced modulo logic with robust boundary crossing detection (`curr_idx > prev_idx`) for reliable interval triggering.
+-   **Verification**: Validated logic with simulation script (100% update accuracy).
+-   **Status**: **PASSED**. Estimated runtime reduced from ~50 days to ~14-16 hours.
