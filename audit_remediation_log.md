@@ -356,3 +356,22 @@ This document tracks the audit findings, red team reviews, and remediations perf
     -   **Throughput**: Single-thread benchmark demonstrated **>32,000 steps/sec**.
     -   **Correctness**: Verified `volatility_target` values align with expectations.
 -   **Status**: **PASSED**. System supports throughput well beyond the 200k steps/hour target.
+
+---
+
+## Phase 28: Performance & Stability Audit (Jan 26, 2026)
+**Focus**: Throughput optimization for RTX 5090 (AMP) and memory leak prevention.
+
+### 🔴 Critical Findings
+1.  **Missing AMP**: The training loop was operating in full FP32 precision, failing to utilize the Tensor Cores of the RTX 5090, resulting in suboptimal training throughput (Steps/Second).
+2.  **Memory Leak Risk (Graph Retention)**: The `append` operations for the `gating_buffer` were storing `weights[i]` directly. Since `weights` are outputs of the Gating Network (with grad history), appending them without `.detach()` risked keeping the entire computation graph alive in the replay buffer, leading to eventual OOM (Out of Memory).
+3.  **Sync-Killer Risk**: Usage of `.item()` in update loops (e.g., logging loss) was identified, but determined to be acceptable as they occur only once per update interval (low frequency).
+
+### ✅ Remediation
+-   **Integrated AMP**: Implemented `torch.cuda.amp.GradScaler` and `autocast` contexts in both `DeepScalperTrainer` (PPO/A2C/Gating) and `DeepScalperDQN`.
+-   **Explicit Detachment**: Added `.detach()` to `weights[i]` before appending to `gating_buffer`, severing the graph connection for storage.
+-   **Verification**:
+    -   Ran `tests/test_amp_minimal.py` confirming correct `autocast` behavior and gradient scaling.
+    -   Verified scaler state updates and unscaling logic for gradient clipping.
+-   **Status**: **PASSED**. Production ready for high-throughput training.
+
