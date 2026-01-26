@@ -198,3 +198,9 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 - **Computation**: Enabled `torch.compile` (PyTorch 2.x) for graph optimization.
 - **Verification**: Validated with `dry_run_rtx5090_v8` smoke test.
 
+### Phase 28: Performance & Stability Audit - COMPLETE 🟢
+- **AMP Integration**: Implemented `autocast` and `GradScaler` for mixed-precision training on RTX 5090.
+- **Memory Safety**: Fixed potential graph leak by detaching gating weights in replay buffer.
+- **Deployment**: Successfully redeployed to GPUHub targeting 10M steps (`DS_GPUHub_BM_V1_20260126_...`).
+
+
