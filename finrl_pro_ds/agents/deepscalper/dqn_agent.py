@@ -196,7 +196,10 @@ class DeepScalperDQN:
         # Update Target Net
         self.step_count += 1
         if self.step_count % self.target_update_freq == 0:
-            self.target_net.load_state_dict(self.policy_net.state_dict())
+            # Handle torch.compile prefix (_orig_mod.)
+            state_dict = self.policy_net.state_dict()
+            clean_state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+            self.target_net.load_state_dict(clean_state_dict)
             
         return total_loss.item()
 
