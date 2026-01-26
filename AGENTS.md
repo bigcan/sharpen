@@ -191,3 +191,16 @@ Replay: reproduce <fingerprint_id>
 ## Recent Changes
 - 001-db-snapshots: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
 - 001-db-snapshots: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+
+## Available Agent Skills
+
+The following skills are installed in `.agent/skills` to assist with specialized tasks:
+
+- **Backtest Auditor**: Performs pre-flight checks on Synapse backtest configurations to prevent common crashes and logical errors.
+- **Backtest Monitor**: Actively monitors deployed backtests to ensure they are progressing as planned (checks process health, FPS, windows).
+- **Deployment Manager**: Robustly deploys experiments to remote environments (GPUHub/RunPod), managing configuration and file sync.
+- **Experiment Scaffolder**: Automates creating new experiment versions (e.g., scaffolding V10 from V9) by generating configs and scripts.
+- **GitHub Manager**: Automates git operations for clean history, semantic commits, and documentation updates.
+- **Log Analyzer**: Analyzes experiment logs for crash causes, Tracebacks, OOMs, and performance regressions.
+- **Research Logger**: Standardizes logging of experimental findings to `randd_log.md` with structured metadata.
+- **Work Auditor**: Generates context-rich prompts for auditing current work to ensure logic consistency and identify risks.
