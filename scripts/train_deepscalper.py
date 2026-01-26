@@ -4,11 +4,11 @@ import os
 import torch
 import logging
 import numpy as np
+import atexit
 from pathlib import Path
 
 from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
 import gymnasium as gym
-import numpy as np
 from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
 from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
 from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
@@ -61,7 +61,8 @@ def make_env(config):
     handler = ParquetDataHandler(
         file_path=file_path,
         ticker=ticker,
-        feature_config=config.get("features", {})
+        feature_config=config.get("features", {}),
+        shared_memory_config=config.get("data", {}).get("shared_memory_config")
     )
     
     # 3. Init Env
@@ -123,6 +124,32 @@ def main():
     
     # Setup WandB
     setup_wandb(config)
+
+    # Pre-load Data for Shared Memory (Optimization)
+    data_loader = None
+    
+    # Emergency cleanup for abnormal exits (SIGTERM, etc.)
+    def _emergency_shm_cleanup():
+        if data_loader:
+            print("[atexit] Cleaning up Shared Memory...")
+            data_loader.close_shared_memory(unlink=True)
+    atexit.register(_emergency_shm_cleanup)
+    
+    if config.get("env", {}).get("num_envs", 1) > 1 and not args.debug:
+        print("Initializing Shared Memory for Vector Env...")
+        data_config = config.get("data", {})
+        file_path = data_config.get("file_path")
+        
+        # Load once in main process
+        data_loader = ParquetDataHandler(
+            file_path=file_path, 
+            ticker=data_config.get("ticker", "BTCUSDT"), 
+            feature_config=config.get("features", {})
+        )
+        # Create SHM and inject into config
+        shm_config = data_loader.create_shared_memory()
+        data_config["shared_memory_config"] = shm_config
+        print(f"Shared Memory Initialized. Config injected.")
     
     # Device
     # device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -258,6 +285,9 @@ def main():
         trainer.save_checkpoint("checkpoints/interrupted_checkpoint.pth")
     finally:
         env.close()
+        if data_loader:
+            print("Cleaning up Shared Memory...")
+            data_loader.close_shared_memory(unlink=True)
 
 if __name__ == "__main__":
     import gymnasium as gym # Lazy import for vector envs

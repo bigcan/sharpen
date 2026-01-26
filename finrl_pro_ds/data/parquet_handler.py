@@ -9,7 +9,8 @@ class ParquetDataHandler:
     Streams processed DeepScalper features from Parquet files.
     Designed to be a drop-in replacement for DBMarketDataHandler in DeepScalperEnv.
     """
-    def __init__(self, file_path: str, ticker: str, feature_config: Dict = None, start_date: str = None, end_date: str = None):
+    
+    def __init__(self, file_path: str, ticker: str, feature_config: Dict = None, start_date: str = None, end_date: str = None, shared_memory_config: Dict = None):
         self.file_path = file_path
         self.ticker = ticker
         self.fe = DeepScalperFeatureEngineer(config=feature_config)
@@ -21,10 +22,14 @@ class ParquetDataHandler:
         self.volatility_horizon = int(fc.get("volatility_horizon", 100))
         
         self._ptr = 0
-        self._timestamps: List[Any] = []
-        self._feature_data: pd.DataFrame = pd.DataFrame()
+        self._shm_objects = [] # Keep references to prevent GC of shared memory objects
         
-        self.load_data()
+        if shared_memory_config:
+            self._attach_shared_memory(shared_memory_config)
+        else:
+            self._timestamps: List[Any] = []
+            self._feature_data: pd.DataFrame = pd.DataFrame()
+            self.load_data()
 
     def load_data(self):
         """Loads data from parquet and processes it."""
@@ -240,6 +245,88 @@ class ParquetDataHandler:
         except Exception as e:
             # Clean exception handling
             raise RuntimeError(f"Failed to load parquet data: {e}")
+
+    def create_shared_memory(self) -> Dict[str, Any]:
+        """
+        Creates shared memory blocks for all data arrays and returns configuration for workers.
+        Call this from the main process after loading data.
+        """
+        from multiprocessing.shared_memory import SharedMemory
+        
+        config = {
+            'length': self._len,
+            'cols': self._feature_cols,
+            'timestamps': self._timestamps, # Pass full list (assuming it's not massive, <10MB for 1M rows)
+            'buffers': {}
+        }
+        
+        print(f"DEBUG: Creating Shared Memory for {len(self._feature_cols)} columns, {self._len} rows.")
+        
+        self._shm_objects = [] # Clear/Init list
+        
+        for col, arr in self._data_arrays.items():
+            try:
+                # Create new shared memory block
+                shm = SharedMemory(create=True, size=arr.nbytes)
+                self._shm_objects.append(shm)
+                
+                # Copy data into it
+                # Create an array backed by shared memory
+                shm_arr = np.ndarray(arr.shape, dtype=arr.dtype, buffer=shm.buf)
+                shm_arr[:] = arr[:]
+                
+                config['buffers'][col] = {
+                    'name': shm.name,
+                    'shape': arr.shape,
+                    'dtype': str(arr.dtype) # Serialize dtype
+                }
+            except Exception as e:
+                print(f"Error creating SHM for col {col}: {e}")
+                # Clean up already created
+                for s in self._shm_objects:
+                    s.close()
+                    s.unlink()
+                raise e
+                
+        return config
+
+    def _attach_shared_memory(self, config: Dict[str, Any]):
+        """Attaches to existing shared memory blocks (for workers)."""
+        from multiprocessing.shared_memory import SharedMemory
+        
+        self._len = config['length']
+        self._feature_cols = config['cols']
+        self._timestamps = config['timestamps']
+        self._data_arrays = {}
+        self._shm_objects = []
+        
+        for col, info in config['buffers'].items():
+            try:
+                # Attach to existing
+                shm = SharedMemory(name=info['name'])
+                self._shm_objects.append(shm)
+                
+                # Create numpy array wrapper
+                # Need to parse dtype string properly
+                dt = np.dtype(info['dtype'])
+                arr = np.ndarray(info['shape'], dtype=dt, buffer=shm.buf)
+                self._data_arrays[col] = arr
+            except Exception as e:
+                raise RuntimeError(f"Failed to attach SHM for {col}: {e}")
+                
+        print(f"[Worker-{os.getpid()}] Attached to Shared Memory ({self._len} rows).")
+    
+    def close_shared_memory(self, unlink=False):
+        """Clean up shared memory resources."""
+        if hasattr(self, '_shm_objects'):
+            for shm in self._shm_objects:
+                try:
+                    shm.close()
+                    if unlink:
+                        shm.unlink()
+                except:
+                    pass
+            self._shm_objects = []
 
     def reset(self):
         """Reset stream pointer."""
