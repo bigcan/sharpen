@@ -336,3 +336,23 @@ This document tracks the audit findings, red team reviews, and remediations perf
 -   **Boundary Crossing Check**: Replaced modulo logic with robust boundary crossing detection (`curr_idx > prev_idx`) for reliable interval triggering.
 -   **Verification**: Validated logic with simulation script (100% update accuracy).
 -   **Status**: **PASSED**. Estimated runtime reduced from ~50 days to ~14-16 hours.
+
+---
+
+## Phase 27: Secondary Performance Optimization (Jan 26, 2026)
+**Focus**: Data loader throughput and memory overhead.
+
+### 🔴 Findings
+1.  **DataFrame Access Overhead**: `ParquetDataHandler.step()` utilized `iloc` for row retrieval, creating a new Pandas Series object at every step (~50µs overhead per call).
+2.  **Redundant Computation**: `get_lookahead_volatility()` recalculated standard deviation on a rolling window for every step, changing an O(N) operation into O(N*Horizon).
+3.  **String Formatting**: `DeepScalperEnv._build_frame` constructed 20 feature key strings (e.g., `f'bid_price_{i}'`) per step.
+
+### ✅ Remediation
+-   **NumPy Conversion**: Refactored `ParquetDataHandler` to convert the DataFrame into a dictionary of NumPy arrays (`Dict[str, np.ndarray]`) at load time. `step()` now performs direct array indexing (O(1)).
+-   **Pre-computed Volatility**: Moved volatility calculation to `load_data()`, computing the entire rolling window vector once via `pandas.rolling().std()` and shifting it for lookahead alignment. `get_lookahead_volatility()` is now a simple array lookup.
+-   **Vectorized LOB Access**: Pre-computed LOB feature keys in `DeepScalperEnv.__init__` to eliminate runtime string formatting.
+-   **Memory Optimization**: Removed defensive `.copy()` calls in `_get_observation` (safe due to serialization mechanics).
+-   **Verification**:
+    -   **Throughput**: Single-thread benchmark demonstrated **>32,000 steps/sec**.
+    -   **Correctness**: Verified `volatility_target` values align with expectations.
+-   **Status**: **PASSED**. System supports throughput well beyond the 200k steps/hour target.

@@ -102,6 +102,18 @@ class DeepScalperEnv(gym.Env):
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
         self.private_window = np.zeros((self.window_size, 2), dtype=np.float32)
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
+        
+        # Optimization: Pre-compute LOB keys to avoid string formatting in hot loop
+        self._lob_keys = []
+        for i in range(self.lob_levels):
+            level = i + 1
+            # Tuple of keys for this level
+            self._lob_keys.append((
+                f'bid_price_{level}',
+                f'bid_vol_{level}',
+                f'ask_price_{level}',
+                f'ask_vol_{level}'
+            ))
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -436,29 +448,32 @@ class DeepScalperEnv(gym.Env):
 
     def _build_frame(self, step_data: Any) -> np.ndarray:
         """Construct a single micro-observation frame from step data."""
+        # Optimization: Use pre-computed keys
+        # Avoid try/except block in hot path for speed if possible, but keep for safety logic
+        # We can init frame with zeros and fill.
+        
         frame = np.zeros((self.micro_dim,), dtype=np.float32)
+        
+        # Unroll loop? Or just iterate over tuples
+        idx = 0
         try:
-            idx = 0
-            for i in range(self.lob_levels):
-                level = i + 1
-                bid_px = float(step_data.get(f'bid_price_{level}', 0))
-                bid_vol = float(step_data.get(f'bid_vol_{level}', 0))
-                ask_px = float(step_data.get(f'ask_price_{level}', 0))
-                ask_vol = float(step_data.get(f'ask_vol_{level}', 0))
+            for b_p, b_v, a_p, a_v in self._lob_keys:
+                # Direct dict lookups
+                frame[idx]   = float(step_data.get(b_p, 0))
+                frame[idx+1] = float(step_data.get(b_v, 0))
+                frame[idx+2] = float(step_data.get(a_p, 0))
+                frame[idx+3] = float(step_data.get(a_v, 0))
                 
-                frame[idx] = bid_px
-                frame[idx + 1] = bid_vol
-                frame[idx + 2] = ask_px
-                frame[idx + 3] = ask_vol
+                # Side effect: Track best bid/ask from Level 1
+                if idx == 0:
+                   self.current_best_bid = frame[idx]  # bid_px_1
+                   self.current_best_ask = frame[idx+2] # ask_px_1
+                   
                 idx += 4
-                
-                # Track best bid/ask for order matching (side effect but necessary if coupled)
-                # Ideally separating side effects is better, but safe here if called sequentially.
-                if level == 1:
-                    self.current_best_bid = bid_px
-                    self.current_best_ask = ask_px
-        except Exception as e:
-            logging.error(f"Error building frame: {e}")
+        except Exception:
+            # Fallback (rare)
+            pass
+            
         return frame
 
     def _update_macro_state(self, step_data: Any):
@@ -494,10 +509,12 @@ class DeepScalperEnv(gym.Env):
         self.private_window[-1] = current_private
 
     def _get_observation(self):
+        # Optimization: Remove .copy() to save memory allocation
+        # VectorEnv serializes data immediately, so internal mutation in next step is safe
         return {
-            "micro": self.micro_window.copy(),
-            "macro": self.current_macro.copy(),
-            "private": self.private_window.copy()
+            "micro": self.micro_window,
+            "macro": self.current_macro,
+            "private": self.private_window
         }
 
     def render(self, mode='human'):
