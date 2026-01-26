@@ -48,6 +48,7 @@ class DeepScalperTrainer:
         self.learning_rate = config.get("learning_rate", 1e-4)
         self.target_update_freq = config.get("target_update_freq", 1000)
         self.checkpoint_interval = config.get("checkpoint_interval", 10000)
+        self.dqn_update_interval = config.get("dqn_update_interval", 4)  # Train DQN every N env steps
         
         # Ensure checkpoint dir exists
         os.makedirs("checkpoints", exist_ok=True)
@@ -79,6 +80,7 @@ class DeepScalperTrainer:
         self.gating_buffer = []
         
         self.global_step = 0
+        self.dqn_updates_accumulator = 0.0
 
     def compute_gae(self, rewards, values, next_values, dones, gamma=0.99, lam=0.95):
         """Compute Generalized Advantage Estimation"""
@@ -315,8 +317,9 @@ class DeepScalperTrainer:
         self.watchdog = TrainingWatchdog(lambda: self.global_step, timeout_seconds=600)
         self.watchdog.start()
         
-        for step in range(self.total_timesteps):
-            self.global_step = step
+        while self.global_step < self.total_timesteps:
+            start_step = self.global_step
+            step = self.global_step  # For backward compatibility with logging
             
             # 1. Select Action (Voting)
             # Watchdog: Log if this step takes too long? 
@@ -530,13 +533,28 @@ class DeepScalperTrainer:
                     obs, info = self.env.reset()
                     next_micro, next_private, next_macro = self._unpack_obs(obs)
             
+            # Increment global step by number of envs (after env step and storage)
+            self.global_step += num_envs
+
             # 4. Updates
             
-            # A. Train DQN
-            dqn_loss = self.ensemble.dqn.train_step()
+            # A. Train DQN (Accumulate gradients to match update ratio)
+            # We want 1 update per dqn_update_interval transitions.
+            # We collected 'num_envs' transitions.
+            self.dqn_updates_accumulator += num_envs / self.dqn_update_interval
+            
+            dqn_loss = None
+            while self.dqn_updates_accumulator >= 1.0:
+                dqn_loss = self.ensemble.dqn.train_step()
+                self.dqn_updates_accumulator -= 1.0
             
             # B. Train PPO/A2C
-            if (step + 1) % self.config.get("update_interval", 256) == 0:
+            # Check if we crossed an update interval boundary
+            update_interval = self.config.get("update_interval", 256)
+            prev_interval_idx = start_step // update_interval
+            curr_interval_idx = self.global_step // update_interval
+            
+            if curr_interval_idx > prev_interval_idx:
                 ppo_loss = self.update_ppo(self.ensemble.ppo, self.ppo_optimizer, self.ppo_buffer)
                 a2c_loss = self.update_a2c(self.ensemble.a2c, self.a2c_optimizer, self.a2c_buffer)
                 gating_loss = self.update_gating(self.gating_buffer)
@@ -554,26 +572,21 @@ class DeepScalperTrainer:
                 self.a2c_buffer = []
                 self.gating_buffer = []
             
-            if step % self.config.get("log_interval", 100) == 0 and dqn_loss is not None:
+            log_interval = self.config.get("log_interval", 100)
+            if (self.global_step // log_interval) > (start_step // log_interval) and dqn_loss is not None:
                 # Log avg reward if using vector envs? reward is array.
                 r = reward.mean() if is_vector_env else reward
                 wandb.log({"train/dqn_loss": dqn_loss, "train/step_reward_mean": r, "train/global_step": self.global_step})
 
             # Save Checkpoint
-            if (step + 1) % self.checkpoint_interval == 0:
-                ckpt_path = f"checkpoints/checkpoint_{step+1}.pth"
+            if (self.global_step // self.checkpoint_interval) > (start_step // self.checkpoint_interval):
+                ckpt_path = f"checkpoints/checkpoint_{self.global_step}.pth"
                 self.save_checkpoint(ckpt_path)
                 
                 # Check for max checkpoints and delete old ones
                 # Not implemented yet but planned
                 pass
 
-            # Update Obs
-            micro = next_micro
-            private = next_private
-            macro = next_macro
-            obs = next_obs
-        
             # Update Obs
             micro = next_micro
             private = next_private
