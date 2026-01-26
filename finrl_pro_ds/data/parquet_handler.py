@@ -16,6 +16,10 @@ class ParquetDataHandler:
         self.start_date = pd.to_datetime(start_date) if start_date else None
         self.end_date = pd.to_datetime(end_date) if end_date else None
         
+        # FIX: Extract volatility_horizon from config or use default (100)
+        fc = feature_config or {}
+        self.volatility_horizon = int(fc.get("volatility_horizon", 100))
+        
         self._ptr = 0
         self._timestamps: List[Any] = []
         self._feature_data: pd.DataFrame = pd.DataFrame()
@@ -139,9 +143,69 @@ class ParquetDataHandler:
                 self._feature_data = micro_features
 
 
+            # 4. Convert to NumPy Dictionary for Fast Access (Avoid iloc)
+            # This is critical for performance (>20x speedup vs iterrows/iloc)
+            self._feature_cols = self._feature_data.columns.tolist()
+            
+            # Pre-compute Volatility Target (Section 4.4)
+            # Calculate rolling volatility for the entire series at once
+            if self.volatility_horizon > 0:
+                # Need prices for volatility
+                # Try finding mid or close
+                price_col = None
+                if 'mid_price' in self._feature_data.columns:
+                    price_col = 'mid_price'
+                elif 'close' in self._feature_data.columns:
+                    price_col = 'close'
+                
+                if price_col:
+                    prices = self._feature_data[price_col].values.astype(np.float64)
+                    # Log returns: ln(p_t / p_{t-1})
+                    # Use numpy for speed
+                    # Insert 0 at start to maintain shape
+                    log_rets = np.zeros_like(prices)
+                    log_rets[1:] = np.log(prices[1:] / prices[:-1])
+                    
+                    # Rolling Std Dev
+                    # We want vol from t+1 to t+H.
+                    # Rolling window at index i covers [i-H+1, i].
+                    # So Rolling[t+H] covers [t+1, t+H].
+                    # We want Val[t] = Rolling[t+H].
+                    # So shift by -H.
+                    
+                    s = pd.Series(log_rets)
+                    # Use H as window size.
+                    rolling_std = s.rolling(self.volatility_horizon).std()
+                    # Shift back
+                    vol_target = rolling_std.shift(-self.volatility_horizon)
+                    # Fill NA
+                    vol_target = vol_target.fillna(0.0).values
+                    
+                    # Add to dataframe first (simplest to keep aligned)
+                    self._feature_data['volatility_target'] = vol_target
+                    self._feature_cols.append('volatility_target')
+
+            # Convert to dict of numpy arrays
+            # Cast to appropriate types (float32 for features)
+            self._data_arrays = {}
+            for col in self._feature_cols:
+                # Use float32 for feature numeric columns to save memory/bandwidth
+                # Keep timestamp as object/datetime or int64?
+                # Step expects dict with values.
+                if col == 'timestamp':
+                    self._data_arrays[col] = self._feature_data[col].values # Keep original type
+                else:
+                    self._data_arrays[col] = self._feature_data[col].values.astype(np.float32)
+
             self._timestamps = self._feature_data.index.tolist()
             
             # Apply Date Filter
+            # Optimization: Filter the DATAFRAME first? 
+            # Logic above applies date filter at end. 
+            # With dict_arrays, we must filter arrays.
+            # But the original code applied filter on self._feature_data at line 145/146.
+            # Let's respect that flow: modify self._feature_data FIRST, then numpy conversion.
+            
             if self.start_date:
                 self._feature_data = self._feature_data[self._feature_data['timestamp'] >= self.start_date]
             if self.end_date:
@@ -155,7 +219,23 @@ class ParquetDataHandler:
             self._timestamps = self._feature_data['timestamp'].tolist() if 'timestamp' in self._feature_data.columns else []
             self._ptr = 0
             
-            print(f"Loaded {len(self._feature_data)} rows from {os.path.basename(self.file_path)}")
+            # RE-DO Numpy Conversion on filtered data
+            self._feature_cols = self._feature_data.columns.tolist()
+            self._data_arrays = {}
+            for col in self._feature_cols:
+                if col == 'timestamp':
+                     self._data_arrays[col] = self._feature_data[col].values
+                else:
+                     try:
+                        self._data_arrays[col] = self._feature_data[col].values.astype(np.float32)
+                     except:
+                        # Fallback for non-convertible
+                        self._data_arrays[col] = self._feature_data[col].values
+
+            # Determine length from arbitrary column
+            self._len = len(self._feature_data)
+
+            print(f"Loaded {self._len} rows from {os.path.basename(self.file_path)}")
 
         except Exception as e:
             # Clean exception handling
@@ -167,17 +247,23 @@ class ParquetDataHandler:
 
     def step(self) -> Optional[Dict[str, Any]]:
         """Return next row."""
-        if self._ptr >= len(self._feature_data):
+        if self._ptr >= self._len:
             return None
             
-        # Return as series/dict-like
-        row = self._feature_data.iloc[self._ptr]
+        # Optimization: Construct dict from numpy arrays directly
+        # Much faster than iloc
+        # dict comprehension vs zip? zip is often faster for large dicts, but simple comprehension is fine.
+        # k: self._data_arrays[k][self._ptr]
+        
+        # Micro-optimization: Pre-cache column list? already in self._feature_cols
+        
+        row = {k: self._data_arrays[k][self._ptr] for k in self._feature_cols}
         
         # Periodic Heartbeat Log (e.g., every 100k steps per worker)
         if self._ptr % 50000 == 0:
             import logging # Ensure logging is available
             # We use print if logging config is complex in workers, but standard logging is better
-            print(f"[DataHandler-{os.getpid()}] Heartbeat: Ptr={self._ptr}/{len(self._feature_data)} Time={row.get('timestamp', '?')}")
+            print(f"[DataHandler-{os.getpid()}] Heartbeat: Ptr={self._ptr}/{self._len} Time={row.get('timestamp', '?')}")
             
         self._ptr += 1
         return row
@@ -207,40 +293,25 @@ class ParquetDataHandler:
 
     def get_lookahead_volatility(self, horizon: int) -> Optional[float]:
         """
-        Calculate volatility (std dev of returns) from t+1 to t+horizon.
-        DeepScalper Section 4.4: Volatility Prediction Auxiliary Task.
+        Get pre-computed volatility (Section 4.4).
+        O(1) lookup.
         """
-        start_idx = self._ptr
-        end_idx = self._ptr + horizon
+        # Note: 'volatility_target' in _data_arrays is pre-shifted.
+        # So val at _ptr is the volatility from ptr+1 to ptr+H.
+        # But wait, step() incremented ptr!
+        # step() is called -> ptr increments -> returns row at OLD ptr.
+        # env.step() calls handler.step() -> gets row T.
+        # env logic calls get_lookahead_volatility during T processing.
+        # At that moment, self._ptr is T+1.
+        # The row we just returned is T.
+        # The volatility we want is for T.
+        # So we need access to index T = self._ptr - 1.
         
-        if end_idx > len(self._feature_data):
-            end_idx = len(self._feature_data) 
-            
-        if end_idx - start_idx < 2:
-            return 0.0 # Not enough data
-            
-        # Extract prices
-        slice_df = self._feature_data.iloc[start_idx:end_idx]
-        
-        # Determine price column to use
-        if 'mid_price' in slice_df.columns:
-            prices = slice_df['mid_price'].astype(float)
-        elif 'close' in slice_df.columns:
-            prices = slice_df['close'].astype(float)
-        elif 'bid_price_1' in slice_df.columns and 'ask_price_1' in slice_df.columns:
-            prices = (slice_df['bid_price_1'].astype(float) + slice_df['ask_price_1'].astype(float)) / 2.0
-        else:
-            return None
-            
-        # Calculate Log Returns
-        # We assume 1-minute steps roughly.
-        logs = np.log(prices / prices.shift(1))
-        logs = logs.dropna()
-        
-        if len(logs) < 2:
+        idx = self._ptr - 1
+        if idx < 0 or idx >= self._len:
             return 0.0
             
-        # Standard Deviation of returns
-        vol = logs.std()
-        
-        return float(vol)
+        if 'volatility_target' in self._data_arrays:
+            return float(self._data_arrays['volatility_target'][idx])
+            
+        return 0.0
