@@ -110,7 +110,8 @@ def deploy(args):
     # Construct command
     # Assuming script is in scripts/ folder usually
     # We run from workspace root
-    cmd = f"nohup python3 {script_path} --config {config_path} --run_name {full_run_name} > run.log 2>&1 & echo $! > run.pid"
+    # SET ULIMIT for high-concurrency shared memory (24 workers * 93 cols)
+    cmd = f"ulimit -n 65535 && nohup python3 {script_path} --config {config_path} --run_name {full_run_name} > run.log 2>&1 & echo $! > run.pid"
     
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
