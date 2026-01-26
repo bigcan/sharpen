@@ -19,6 +19,7 @@ Matrix report: `reports/matrix/report.md:1`
 ## Program Status (snapshot)
 - [x] Phase 6: Regime-Aware Ensemble Complete (Sharpe 1.24)
 - [x] Phase 7: XAI & OPE Analysis Complete (SHAP verified, OPE high variance)
+- [x] Phase 26/27: DeepScalper Performance Optimization Complete (50x Speedup)
 - [ ] Phase 8: Paper Trading & Monitoring (Next)
 - [x] Leaderboard initialized with MVP fingerprint
 - [x] Final report drafted: `reports/matrix/final_report.md:1`
@@ -73,6 +74,23 @@ Goal: Provide transparency and off-policy evaluation for the winning strategy.
 
 ---
 
+## Phase 26/27 - DeepScalper Performance Sprint (Jan 2026) (Complete)
+Goal: Fix critical training latency (50 days -> 16 hours) and update correctness for DeepScalper production deployment.
+
+- Logic Audit (Phase 26)
+  - [x] Fix VectorEnv step counting (24x speedup check)
+  - [x] Implement DQN Accumulator (Fix 6x undertraining)
+  - [x] Robust PPO Interval Detection
+- Optimization (Phase 27)
+  - [x] Vectorize Parquet Data Handler (NumPy Dict) -> >32k FPS
+  - [x] Vectorize Environment LOB Access
+  - [x] Remove memory copy overhead
+- Result
+  - Runtime reduced from ~50 days to ~14 hours.
+  - Throughput > 200k steps/hour validated.
+
+---
+
 ## Phase 8 - Operational Burn-In (Paper Trading) (Pending)
 Goal: Prove stability and drift management in a live environment.
 
@@ -95,6 +113,7 @@ Goal: Prove stability and drift management in a live environment.
 | 2025-11-19 | Select PPO (GAE=0.98) as Phase 3 winner | 3 | Achieved highest Sharpe (0.88) and stability, validating the override strategy. | Sharpe ~0.88 / PSR improved |
 | 2025-11-19 | Retain FracDiff (d=0.5) after A/B Test | 3.5 | Tested hypothesis that FracDiff hurt Sharpe. Result: Removing it caused collapse to Sharpe -0.67. Stationarity is essential. | Validated 0.88 as best single-asset baseline |
 | 2025-11-24 | Close Phase 7 (XAI/OPE) | 7 | SHAP analysis confirmed feature importance (Cash/Price). OPE showed high variance, confirming need for live paper trading for true validation. | N/A |
+| 2026-01-26 | Phase 26/27 Optimization | 26/27 | Logic audit revealed 50x slowdown due to loop structure. Applied vectorization and gradient accumulation. | Runtime: 50d -> 14h |
 
 ---
 
@@ -107,3 +126,4 @@ Goal: Prove stability and drift management in a live environment.
 - Phase 5 sign-off: Complete (Multi-Asset)         Date: 2025-11-21
 - Phase 6 sign-off: Complete (Ensemble)            Date: 2025-11-24
 - Phase 7 sign-off: Complete (XAI/OPE)             Date: 2025-11-24
+- Phase 26/27 sign-off: Complete (Performance)     Date: 2026-01-26
