@@ -13,7 +13,6 @@ from torch.distributions import Categorical
 from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
 from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
 from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
-from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
 from finrl_pro_ds.mlops.logger import MLOpsLogger
 from finrl_pro_ds.mlops.watchdog import TrainingWatchdog
 
@@ -572,8 +571,24 @@ class DeepScalperTrainer:
                 self.a2c_buffer = []
                 self.gating_buffer = []
             
-            log_interval = self.config.get("log_interval", 100)
-            if (self.global_step // log_interval) > (start_step // log_interval) and dqn_loss is not None:
+            # Smart Logging: Log every N seconds OR every M steps to avoid IO bottleneck
+            current_time = time.time()
+            if not hasattr(self, '_last_log_time'): self._last_log_time = current_time
+            
+            log_interval = self.config.get("log_interval", 1000) # Increased default
+            time_interval = 5.0 # Seconds
+            
+            should_log = False
+            if dqn_loss is not None:
+                # Check Time
+                if current_time - self._last_log_time > time_interval:
+                    should_log = True
+                # Check Steps (Backwards compat + ensure we log at least sometimes if fast)
+                elif (self.global_step // log_interval) > (start_step // log_interval):
+                    should_log = True
+            
+            if should_log:
+                self._last_log_time = current_time
                 # Log avg reward if using vector envs? reward is array.
                 r = reward.mean() if is_vector_env else reward
                 wandb.log({"train/dqn_loss": dqn_loss, "train/step_reward_mean": r, "train/global_step": self.global_step})
