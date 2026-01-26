@@ -28,7 +28,7 @@ def check_remote():
     
     # Check Logs
     print("--- Checking Run Log ---")
-    stdin, stdout, stderr = ssh.exec_command("cat /workspace/Synapse_V9/run.log")
+    stdin, stdout, stderr = ssh.exec_command("tail -n 100 /workspace/Synapse_V9/run.log")
     print(stdout.read().decode())
     print("--- End Log ---")
     
