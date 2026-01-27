@@ -15,6 +15,8 @@ from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepSc
 from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
 from finrl_pro_ds.mlops.logger import MLOpsLogger
 from finrl_pro_ds.mlops.watchdog import TrainingWatchdog
+from finrl_pro_ds.training.accumulators import GradientAccumulator
+from torch.cuda.amp import GradScaler, autocast
 
 class DeepScalperTrainer:
     """
@@ -72,8 +74,15 @@ class DeepScalperTrainer:
         self.ppo_optimizer = optim.Adam(self.ensemble.ppo.network.parameters(), lr=ppo_lr)
         self.a2c_optimizer = optim.Adam(self.ensemble.a2c.network.parameters(), lr=a2c_lr)
         
-        # Buffers
-        # DQN has its own buffer. PPO/A2C need rollout buffers.
+        # AMP Scalers (Independent)
+        self.use_amp = config.get("use_amp", False) and torch.cuda.is_available()
+        self.scaler_ppo = GradScaler(enabled=self.use_amp)
+        self.scaler_a2c = GradScaler(enabled=self.use_amp)
+        self.scaler_gating = GradScaler(enabled=self.use_amp)
+        
+        # Accumulator (For tracking batch targets mainly, or if we switched to pseudo-updates)
+        self.accumulator = GradientAccumulator(self.batch_size, num_envs=config.get("env", {}).get("num_envs", 1))
+
         self.ppo_buffer = [] 
         self.a2c_buffer = []
         self.gating_buffer = []
@@ -102,7 +111,8 @@ class DeepScalperTrainer:
         # Unpack Buffer
         micro_s, private_s, macro_s, actions, old_log_probs, rewards, values, next_values_list, dones = zip(*buffer)
         
-        # Convert to Tensors
+        # Convert to Tensors (Full Batch)
+        # We process GAE on the full batch first (time-sequential)
         micro_s = torch.stack(micro_s)
         private_s = torch.stack(private_s)
         macro_s = torch.stack(macro_s)
@@ -111,79 +121,90 @@ class DeepScalperTrainer:
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
         dones = torch.tensor(dones, dtype=torch.float32).to(self.device)
         
-        # Compute Advantages (GAE)
         values_t = torch.tensor(values, dtype=torch.float32).to(self.device).detach()
         next_values = torch.tensor(next_values_list, dtype=torch.float32).to(self.device).detach()
         
+        # Compute Advantages (GAE) on full sequence
         advantages = self.compute_gae(rewards, values_t, next_values, dones, self.gamma, 0.95)
         returns = advantages + values_t
         
         # Normalize Advantages
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         
-        # PPO Epochs
+        # PPO Mini-Batch Updates
+        # Default mini_batch_size to 64 or derived from config if available (self.batch_size is global)
+        mini_batch_size = 64 
+        dataset_size = len(rewards)
+        indices = np.arange(dataset_size)
+        
+        total_loss = 0.0
+        n_updates = 0
+
         for _ in range(4): # K_epochs
-            # Forward Pass
-            logits_dir, logits_price, logits_vol, current_values = agent.network(micro_s, private_s, macro_s)
+            np.random.shuffle(indices)
             
-            # Calculate current log probs of the wrapper actions
-            # Actions: (B, 3) -> Dir, Price, Vol
-            # We need log_prob for EACH branch
-            dist_dir = Categorical(logits=logits_dir)
-            dist_price = Categorical(logits=logits_price)
-            dist_vol = Categorical(logits=logits_vol)
+            for start in range(0, dataset_size, mini_batch_size):
+                end = start + mini_batch_size
+                idx = indices[start:end]
+                
+                # Mini-batch Slices
+                mb_micro = micro_s[idx]
+                mb_private = private_s[idx]
+                mb_macro = macro_s[idx]
+                mb_actions = actions[idx]
+                mb_old_log_probs = old_log_probs[idx]
+                mb_advantages = advantages[idx]
+                mb_returns = returns[idx]
+                
+                with autocast(enabled=self.use_amp):
+                    logits_dir, logits_price, logits_vol, current_values = agent.network(mb_micro, mb_private, mb_macro)
+                    
+                    # Calculate current log probs (re-eval)
+                    dist_dir = Categorical(logits=logits_dir)
+                    dist_price = Categorical(logits=logits_price)
+                    dist_vol = Categorical(logits=logits_vol)
+                    
+                    curr_log_prob_dir = dist_dir.log_prob(mb_actions[:, 0])
+                    curr_log_prob_price = dist_price.log_prob(mb_actions[:, 1])
+                    curr_log_prob_vol = dist_vol.log_prob(mb_actions[:, 2])
+                    
+                    curr_log_probs = curr_log_prob_dir + curr_log_prob_price + curr_log_prob_vol
+                    
+                    # Ratios
+                    old_log_probs_sum = mb_old_log_probs.sum(dim=1)
+                    ratios = torch.exp(curr_log_probs - old_log_probs_sum)
+                    
+                    # Surrogate Losses
+                    surr1 = ratios * mb_advantages
+                    surr2 = torch.clamp(ratios, 1 - 0.2, 1 + 0.2) * mb_advantages
+                    
+                    policy_loss = -torch.min(surr1, surr2).mean()
+                    value_loss = 0.5 * (mb_returns - current_values.squeeze()).pow(2).mean()
+                    entropy = dist_dir.entropy() + dist_price.entropy() + dist_vol.entropy()
+                    entropy_loss = -0.01 * entropy.mean()
+                    
+                    loss = policy_loss + value_loss + entropy_loss
+                
+                optimizer.zero_grad()
+                self.scaler_ppo.scale(loss).backward()
+                self.scaler_ppo.unscale_(optimizer)
+                nn.utils.clip_grad_norm_(agent.network.parameters(), 0.5)
+                self.scaler_ppo.step(optimizer)
+                self.scaler_ppo.update()
+                
+                total_loss += loss.item()
+                n_updates += 1
             
-            curr_log_prob_dir = dist_dir.log_prob(actions[:, 0])
-            curr_log_prob_price = dist_price.log_prob(actions[:, 1])
-            curr_log_prob_vol = dist_vol.log_prob(actions[:, 2])
-            
-            # Sum or Average log probs across branches? Sum is joint prob.
-            curr_log_probs = curr_log_prob_dir + curr_log_prob_price + curr_log_prob_vol
-            
-            # CRITICAL FIX for Audit 1.1: Use correct old_log_probs (from buffer)
-            # The buffer stores log_prob of the ACTION taken, under the POLICY that took it (Ensemble).
-            # But wait, 'old_log_probs' passed here comes from the buffer.
-            # In train(), we capture 'ppo_log_prob' which was PPO's log prob of the action.
-            # The Audit says: "PPO's importance sampling ratio becomes undefined because action was NOT sampled from pi_old".
-            # Correct fix: Ideally PPO trains on its own data. Or we use V-Trace / Importance Sampling against the BEHAVIOR policy (Ensemble).
-            # Simplified Fix (Approximation): 
-            # Treat the Ensemble's choice as "the action". 
-            # We want PPO to increase prob of this action if Advantage > 0.
-            # Ratio = pi_new(a) / pi_old_ppo(a). 
-            # If we use pi_old_ppo(a) as the denominator, it cancels out the fact that PPO *assigned* that prob at time t.
-            # This is standard Off-Policy PPO (PPO-O).
-            # The issue identified in Audit is that "a was NOT sampled from pi_old".
-            # Actually, standard PPO requires: Ratio = pi_now(a) / pi_behavior(a).
-            # Here pi_behavior = Ensemble.
-            # So the denominator 'old_log_probs_sum' MUST BE the log_prob under the ENSEMBLE.
-            # Let's assume the buffer contains ENSEMBLE log probs.
-            # We need to change what we store in the buffer in train().
-            
-            old_log_probs_sum = old_log_probs.sum(dim=1)
-            
-            # Ratios
-            ratios = torch.exp(curr_log_probs - old_log_probs_sum)
-            
-            # Surrogate Losses
-            surr1 = ratios * advantages
-            surr2 = torch.clamp(ratios, 1 - 0.2, 1 + 0.2) * advantages
-            
-            policy_loss = -torch.min(surr1, surr2).mean()
-            value_loss = 0.5 * (returns - current_values.squeeze()).pow(2).mean()
-            entropy = dist_dir.entropy() + dist_price.entropy() + dist_vol.entropy()
-            entropy_loss = -0.01 * entropy.mean()
-            
-            loss = policy_loss + value_loss + entropy_loss
-            
-            optimizer.zero_grad()
-            loss.backward()
-            nn.utils.clip_grad_norm_(agent.network.parameters(), 0.5)
-            optimizer.step()
-            
-        return loss.item()
+        return total_loss / n_updates if n_updates > 0 else 0.0
 
     def update_a2c(self, agent: DeepScalperA2C, optimizer: optim.Optimizer, buffer: List):
         if not buffer: return
+        
+        # A2C typically updates on the full batch collected (synchronous)
+        # But we can also mini-batch if memory is constrained. 
+        # DeepScalper A2C usually one update per roll-out.
+        # We keep full batch for A2C to distinguish from PPO, but verify memory safety.
+        # If buffer is huge, we might need to split, but A2C gradient is usually over the whole set.
         
         micro_s, private_s, macro_s, actions, _, rewards, values, next_values_list, dones = zip(*buffer)
         
@@ -199,70 +220,62 @@ class DeepScalperTrainer:
         advantages = self.compute_gae(rewards, values_t, next_values, dones, self.gamma, 0.95)
         returns = advantages + values_t
         
-        # Single Update Step
-        logits_dir, logits_price, logits_vol, current_values = agent.network(micro_s, private_s, macro_s)
-        
-        dist_dir = Categorical(logits=logits_dir)
-        dist_price = Categorical(logits=logits_price)
-        dist_vol = Categorical(logits=logits_vol)
-        
-        log_prob_dir = dist_dir.log_prob(actions[:, 0])
-        log_prob_price = dist_price.log_prob(actions[:, 1])
-        log_prob_vol = dist_vol.log_prob(actions[:, 2])
-        log_probs = log_prob_dir + log_prob_price + log_prob_vol
-        
-        policy_loss = -(log_probs * advantages.detach()).mean()
-        value_loss = 0.5 * (returns - current_values.squeeze()).pow(2).mean()
-        
+        # Full Batch Update for A2C
+        with autocast(enabled=self.use_amp):
+            logits_dir, logits_price, logits_vol, current_values = agent.network(micro_s, private_s, macro_s)
+            
+            dist_dir = Categorical(logits=logits_dir)
+            dist_price = Categorical(logits=logits_price)
+            dist_vol = Categorical(logits=logits_vol)
+            
+            log_prob_dir = dist_dir.log_prob(actions[:, 0])
+            log_prob_price = dist_price.log_prob(actions[:, 1])
+            log_prob_vol = dist_vol.log_prob(actions[:, 2])
+            log_probs = log_prob_dir + log_prob_price + log_prob_vol
+            
+            policy_loss = -(log_probs * advantages.detach()).mean()
+            value_loss = 0.5 * (returns - current_values.squeeze()).pow(2).mean()
+            
+            loss = policy_loss + value_loss
+            
         optimizer.zero_grad()
-        (policy_loss + value_loss).backward()
+        self.scaler_a2c.scale(loss).backward()
+        self.scaler_a2c.unscale_(optimizer)
         nn.utils.clip_grad_norm_(agent.network.parameters(), 0.5)
-        optimizer.step()
+        
+        self.scaler_a2c.step(optimizer)
+        self.scaler_a2c.update()
         
         return policy_loss.item() + value_loss.item()
 
     def update_gating(self, buffer: List):
         """Update Gating Network using REINFORCE"""
-        # We want to increase prob of weights that led to high rewards.
-        # Inputs: Macro states, Gating Weights (actions), Rewards.
-        # Since gating weights are continuous outputs of Softmax, we treat them as 'actions' 
-        # but REINFORCE typically needs discrete choices or Gaussian.
-        # Here: We differentiate the ENTIRE chain if we had full differentiability, but we don't.
-        # Simplified: Treat the 'dominant' agent as the choice and REINFORCE that?
-        # Better: PPO for the Gating Network?
-        # Simplest feasible for now: Use the rewards to weight the gradients of the gating net output.
-        # Or: Supervised Proxy -> Which agent *would have* performed best? (requires hindsight)
-        
-        # Let's use a simple REINFORCE-like update on the weight vectors.
         if not buffer: return
         
         macro_s, weights, rewards, dones = zip(*buffer)
         
-        # Calculate Advantages (using rewards-baseline)
-        # Simple Baseline: Mean reward of batch
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
-        dones = torch.tensor(dones, dtype=torch.float32).to(self.device)
+        # dones = torch.tensor(dones, dtype=torch.float32).to(self.device) # Unused in this simple reinforce logic
         
         # Normalize Rewards (Advantage Proxy)
+        # Standardize for stability
         adv = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
         
         macro_s = torch.stack(macro_s)
-        old_weights = torch.stack(weights).detach() # Weights used during sampling
+        old_weights = torch.stack(weights).detach() 
         
-        # Forward Pass
-        curr_weights = self.ensemble.gating(macro_s)
-        
-        # Audit Fix 1.2: Correct Gradient Flow
-        # We want to increase the probability of the weights used if advantage > 0.
-        # But 'weights' is continuous.
-        # Loss = - (current_weights * old_weights * advantage).sum(dim=1).mean()
-        # This treats 'old_weights' as a direction vector we want to align with.
-        
-        loss = - (curr_weights * old_weights * adv.unsqueeze(1)).sum(dim=1).mean()
+        with autocast(enabled=self.use_amp):
+            # Forward Pass
+            curr_weights = self.ensemble.gating(macro_s)
+            
+            # Loss: Minimize - (NewWeights * OldWeights * Adv)
+            # This intuitively pushes NewWeights towards OldWeights where Adv was high.
+            loss = - (curr_weights * old_weights * adv.unsqueeze(1)).sum(dim=1).mean()
         
         self.gating_optimizer.zero_grad()
-        loss.backward()
-        self.gating_optimizer.step()
+        self.scaler_gating.scale(loss).backward()
+        self.scaler_gating.step(self.gating_optimizer)
+        self.scaler_gating.update()
         
         return loss.item()
 
@@ -312,8 +325,12 @@ class DeepScalperTrainer:
         episode_rewards_total = 0
         episode_count = 0
         
-        # Init Watchdog (Timeout: 5 minutes = 300s)
-        self.watchdog = TrainingWatchdog(lambda: self.global_step, timeout_seconds=600)
+        # Init Watchdog (SPS Monitor)
+        self.watchdog = TrainingWatchdog(
+            lambda: self.global_step, 
+            timeout_seconds=300,
+            min_sps=100.0 if self.config.get("env", {}).get("num_envs", 1) > 8 else 0.0 # Only enforce SPS on high throughput
+        )
         self.watchdog.start()
         
         while self.global_step < self.total_timesteps:
@@ -667,13 +684,18 @@ class DeepScalperTrainer:
         else:
             raise ValueError(f"Expected dict observation, got {type(obs)}")
 
+    def _get_clean_state_dict(self, model: nn.Module) -> Dict:
+        """Helper to strip _orig_mod. prefix from torch.compile"""
+        state_dict = model.state_dict()
+        return {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+
     def save_checkpoint(self, path: str):
         """Save all agent states"""
         state = {
-            "dqn": self.ensemble.dqn.policy_net.state_dict(),
-            "ppo": self.ensemble.ppo.network.state_dict(),
-            "a2c": self.ensemble.a2c.network.state_dict(),
-            "gating": self.ensemble.gating.state_dict(),
+            "dqn": self._get_clean_state_dict(self.ensemble.dqn.policy_net),
+            "ppo": self._get_clean_state_dict(self.ensemble.ppo.network),
+            "a2c": self._get_clean_state_dict(self.ensemble.a2c.network),
+            "gating": self._get_clean_state_dict(self.ensemble.gating),
             "config": self.config
         }
         torch.save(state, path)
