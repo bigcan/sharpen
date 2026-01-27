@@ -101,7 +101,9 @@ def deploy(args):
         f"cd {remote_workspace}",
         f"unzip -o {zip_name} > /dev/null",
         "rm deploy_package.zip",
-        # CRITICAL: Force reinstall pinned deps to override cached ABI-broken versions
+        # CRITICAL: Nuke conflicting nightly/dev torch builds before reinstall
+        "pip uninstall torch torchvision torchaudio -y || true",
+        # Force reinstall pinned deps to override cached ABI-broken versions
         "pip install --upgrade --force-reinstall -r requirements.txt",
         "pip install -e .",  # Editable install after deps are correct
         f"wandb login {wandb_key}" if wandb_key else "echo 'No WandB Key provided, skipping login'",
