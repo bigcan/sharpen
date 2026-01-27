@@ -1,6 +1,7 @@
 import argparse
 import yaml
 import os
+import pyarrow # Import before torch to prevent ABI conflict
 import torch
 import logging
 import numpy as np
@@ -138,7 +139,10 @@ def main():
             data_loader.close_shared_memory(unlink=True)
     atexit.register(_emergency_shm_cleanup)
     
-    if config.get("env", {}).get("num_envs", 1) > 1 and not args.debug:
+    # Respect use_shm config (default False if not specified)
+    use_shm_config = config.get("training", {}).get("use_shm", False)
+    
+    if config.get("env", {}).get("num_envs", 1) > 1 and not args.debug and use_shm_config:
         print("Initializing Shared Memory for Vector Env...")
         data_config = config.get("data", {})
         file_path = data_config.get("file_path")

@@ -39,11 +39,11 @@ class ParquetDataHandler:
             # Assuming the parquet file has columns like 'timestamp', 'bid_price_1', 'bid_vol_1', etc.
             # OR it might be raw snapshots.
             
-            print(f"DEBUG: Loading Parquet from {os.path.abspath(self.file_path)}")
-            df = pd.read_parquet(self.file_path)
+            print(f"DEBUG: Loading Parquet from {os.path.abspath(self.file_path)}", flush=True)
+            df = pd.read_parquet(self.file_path, engine='pyarrow')
             # Sanitize columns
             df.columns = df.columns.astype(str).str.strip()
-            print(f"DEBUG: Cols (Sanitized): {df.columns.tolist()}")
+            print(f"DEBUG: Cols (Sanitized): {df.columns.tolist()}", flush=True)
             if df.columns.duplicated().any():
                 raise RuntimeError(f"Duplicate columns found: {df.columns[df.columns.duplicated()].tolist()}")
             
@@ -363,19 +363,19 @@ class ParquetDataHandler:
     def get_lookahead_price(self, horizon: int) -> Optional[float]:
         """Get price at t + horizon for hindsight reward."""
         target_idx = self._ptr + horizon
-        if target_idx >= len(self._feature_data):
+        if target_idx >= self._len:
             return None
             
-        row = self._feature_data.iloc[target_idx]
-        
-        # Try finding a mid/close price
-        if 'mid_price' in row:
-            return float(row['mid_price'])
-        elif 'close' in row:
-            return float(row['close'])
-        elif 'bid_price_1' in row and 'ask_price_1' in row:
-            return (float(row['bid_price_1']) + float(row['ask_price_1'])) / 2.0
-            
+        # Optimization: Use _data_arrays for O(1) lookup vs O(N) DataFrame access
+        if 'mid_price' in self._data_arrays:
+            return float(self._data_arrays['mid_price'][target_idx])
+        elif 'close' in self._data_arrays:
+            return float(self._data_arrays['close'][target_idx])
+        elif 'bid_price_1' in self._data_arrays and 'ask_price_1' in self._data_arrays:
+             bid = self._data_arrays['bid_price_1'][target_idx]
+             ask = self._data_arrays['ask_price_1'][target_idx]
+             return float((bid + ask) / 2.0)
+             
         return None
 
     def get_lookahead_volatility(self, horizon: int) -> Optional[float]:
