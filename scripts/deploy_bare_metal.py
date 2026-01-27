@@ -57,7 +57,7 @@ def deploy(args):
     script_path = args.script
     config_path = args.config
     
-    remote_workspace = "/workspace/Synapse_V9"
+    remote_workspace = "/workspace/DeepScalper"
     zip_name = "deploy_package.zip"
     
     # 1. Create Zip
@@ -71,17 +71,25 @@ def deploy(args):
     sftp = ssh.open_sftp()
     
     # 3. Clean & Upload
-    print("Cleaning remote workspace...")
+    print("Ensuring remote workspace exists...")
+    ssh.exec_command(f"mkdir -p {remote_workspace}")
+    
+    print("Cleaning remote workspace of old zips...")
     ssh.exec_command(f"rm -rf {remote_workspace}/*.zip")
     
     if args.upload_data:
+        # Use absolute paths for robust deployment
         local_data = "c:/data/btc_lob_jan2023.parquet"
         remote_data = "/data/btc_lob_jan2023.parquet"
-        print(f"Uploading Data: {local_data} -> {remote_data} (This may take a while)...")
-        # Ensure remote dir exists
-        ssh.exec_command("mkdir -p /data")
-        sftp.put(local_data, remote_data)
-        print("Data upload complete.")
+        
+        if not os.path.exists(local_data):
+            print(f"WARNING: Local data not found at {local_data}. CHECK PATHS.")
+        else:
+            print(f"Uploading Data: {local_data} -> {remote_data} (This may take a while)...")
+            # Ensure remote /data dir exists
+            ssh.exec_command("mkdir -p /data")
+            sftp.put(local_data, remote_data)
+            print("Data upload complete.")
 
     print(f"Uploading {zip_name}...")
     sftp.put(zip_name, f"{remote_workspace}/{zip_name}")
@@ -93,7 +101,9 @@ def deploy(args):
         f"cd {remote_workspace}",
         f"unzip -o {zip_name} > /dev/null",
         "rm deploy_package.zip",
-        "pip install -e .", # Ensure local package is installed
+        # CRITICAL: Force reinstall pinned deps to override cached ABI-broken versions
+        "pip install --upgrade --force-reinstall -r requirements.txt",
+        "pip install -e .",  # Editable install after deps are correct
         f"wandb login {wandb_key}" if wandb_key else "echo 'No WandB Key provided, skipping login'",
         f"pkill -f {script_path} || true" # Kill previous instances of THIS script
     ]
@@ -111,7 +121,8 @@ def deploy(args):
     # Assuming script is in scripts/ folder usually
     # We run from workspace root
     # SET ULIMIT for high-concurrency shared memory (24 workers * 93 cols)
-    cmd = f"ulimit -n 65535 && nohup python3 {script_path} --config {config_path} --run_name {full_run_name} > run.log 2>&1 & echo $! > run.pid"
+    # Use -u for unbuffered output to capture crashes
+    cmd = f"ulimit -n 65535 && nohup python3 -u {script_path} --config {config_path} --run_name {full_run_name} > run.log 2>&1 & echo $! > run.pid"
     
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
