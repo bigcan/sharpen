@@ -1,0 +1,76 @@
+# DeepScalper Unified Master Configuration
+# Optimized for NVIDIA RTX 5090 (Mach 3)
+
+data:
+  file_path: "/data/btc_lob_jan2023.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2023-01-01"
+  train_end_date: "2023-01-30"
+  val_start_date: "2023-02-01"
+  val_end_date: "2023-02-05"
+
+features:
+  micro_features: ["micro"] # Column prefixes
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  transaction_fee: 0.0001
+  num_envs: 24
+  window_size: 50
+  
+  reward:
+    profit_weight: 1.0
+    volatility_penalty_weight: 0.1
+    volatility_horizon: 100
+    risk_aversion: 0.5
+    
+  action:
+    direction_bins: 3 # Buy, Hold, Sell
+    price_bins: 5     # Limit Order Aggressiveness
+    volume_bins: 5    # Order Size Fractions
+
+network:
+  micro_input_size: 20
+  macro_input_size: 11
+  private_input_size: 2
+  hidden_size: 64
+
+agents:
+  dqn:
+    learning_rate: 0.0001
+    gamma: 0.99
+    dqn_batch_size: 64
+    dqn_buffer_size: 100000
+    dqn_target_update_freq: 1000
+    
+  ppo:
+    learning_rate: 0.0001
+    gamma: 0.99
+    entropy_coef: 0.01
+    clip_epsilon: 0.2
+    
+  a2c:
+    learning_rate: 0.0001
+    gamma: 0.99
+    
+  gating:
+    learning_rate: 0.0001
+
+training:
+  total_timesteps: 1000000
+  batch_size: 4096      # High throughput
+  learning_rate: 0.0001 # Fallback/Global
+  log_interval: 1000
+  checkpoint_interval: 10000
+  torch_compile: true
+  use_amp: true
+  use_shm: true
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["Unified", "Mach3", "RTX5090"]

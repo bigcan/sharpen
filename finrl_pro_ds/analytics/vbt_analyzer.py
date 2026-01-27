@@ -1,23 +1,34 @@
 import pandas as pd
 import vectorbt as vbt
 import numpy as np
+from typing import Dict, Any, Optional
 
 class VBTAnalyzer:
     """
-    Standardized VectorBT Analyzer for FinRL-Pro.
-    Handles data broadcasting, portfolio construction, and metric extraction.
+    Standardized VectorBT Analyzer for DeepScalper Financial Auditing.
+    Handles data broadcasting, portfolio construction, and granular metric extraction.
     """
-    def __init__(self, close, size, init_cash=10000.0, fees=0.001, slippage=0.0, freq='1min'):
+    def __init__(
+        self, 
+        close: pd.Series, 
+        size: pd.Series, 
+        price: Optional[pd.Series] = None,
+        init_cash: float = 100000.0, 
+        fees: float = 0.0001, 
+        slippage: float = 0.0, 
+        freq: str = '1m'
+    ):
         """
         Initialize the analyzer with trade data.
         
         Args:
-            close (pd.Series or pd.DataFrame): Price data.
-            size (pd.Series or pd.DataFrame): Trade size data (amount).
+            close (pd.Series): Reference market price (close).
+            size (pd.Series): Signed trade size (+ for Buy, - for Sell).
+            price (pd.Series): Actual execution price of orders. If None, uses Close.
             init_cash (float): Initial capital.
-            fees (float): Transaction fees (e.g., 0.001 for 0.1%).
-            slippage (float): Slippage model (simple percent or fixed).
-            freq (str): Data frequency string for annualization (e.g., '1min', '1D').
+            fees (float): Transaction fees (e.g., 0.0001 for 1bps).
+            slippage (float): Slippage model (simple percent).
+            freq (str): Data frequency (e.g., '1m', '1h').
         """
         self.init_cash = init_cash
         self.fees = fees
@@ -25,60 +36,71 @@ class VBTAnalyzer:
         self.freq = freq
         
         # 1. BroadCast / Align Data
-        # Ensure close and size have matching shapes/indices using VBT's robust broadcasting
-        # This handles cases where close is 1D (benchmark) but size is 2D (multiple agents)
-        self.close, self.size = vbt.base.reshape_fns.broadcast(
-            close, 
-            size, 
-            keep_raw=False  # Convert to standard DataFrames/Series
+        # Ensure all inputs share same index/shape
+        broadcast_args = [close, size]
+        if price is not None:
+            broadcast_args.append(price)
+            
+        broadcasted = vbt.base.reshape_fns.broadcast(
+            *broadcast_args,
+            keep_raw=False
         )
         
-        # Portfolio Placeholder
+        self.close = broadcasted[0]
+        self.size = broadcasted[1]
+        self.price = broadcasted[2] if price is not None else self.close
+        
         self.pf = None
 
-    def create_portfolio(self, group_by=True):
+    def create_portfolio(self) -> vbt.Portfolio:
         """
         Generate the VectorBT Portfolio object.
-        
-        Args:
-            group_by (bool): If True, aggregates all columns into one portfolio (Single Account).
-                             If False, maintains separate equity curves per column (Multi Account).
+        Uses `from_orders` to simulate execution based on size and price.
         """
-        # VectorBT's from_orders is efficient and handles the simulation
         self.pf = vbt.Portfolio.from_orders(
             close=self.close,
             size=self.size,
+            price=self.price,
             init_cash=self.init_cash,
             fees=self.fees,
             slippage=self.slippage,
-            freq=self.freq,
-            group_by=group_by,
-            cash_sharing=group_by  # Share cash if grouped (One wallet, multiple assets)
+            freq=self.freq
         )
         return self.pf
 
-    def get_metrics(self):
+    def get_audit_metrics(self) -> Dict[str, float]:
         """
-        Extract key performance metrics.
-        Returns a dictionary or DataFrame of metrics.
+        Extract key institutional metrics for auditing.
         """
         if self.pf is None:
-            raise ValueError("Portfolio not created. Call create_portfolio() first.")
+            self.create_portfolio()
             
         stats = self.pf.stats()
-        return stats
+        
+        # Robust extraction with defaults
+        def get_stat(key, default=0.0):
+            val = stats.get(key, default)
+            return float(val) if pd.notnull(val) else default
+
+        return {
+            "total_return": get_stat("Total Return [%]"),
+            "benchmark_return": get_stat("Benchmark Return [%]"),
+            "max_drawdown": get_stat("Max Drawdown [%]"),
+            "sharpe_ratio": get_stat("Sharpe Ratio"),
+            "sortino_ratio": get_stat("Sortino Ratio"),
+            "calmar_ratio": get_stat("Calmar Ratio"),
+            "omega_ratio": get_stat("Omega Ratio"),
+            "win_rate": get_stat("Win Rate [%]"),
+            "total_trades": get_stat("Total Trades"),
+            "profit_factor": get_stat("Profit Factor"),
+        }
 
     def plot(self, path=None, subplots=None):
         """
         Generate an interactive plot.
-        
-        Args:
-            path (str): Optional path to save HTML file.
-            subplots (list): List of subplots to include (e.g., ['drawdowns', 'underwater']).
-                             If None, uses default VBT plot.
         """
         if self.pf is None:
-            raise ValueError("Portfolio not created. Call create_portfolio() first.")
+            self.create_portfolio()
             
         if subplots:
             fig = self.pf.plot(subplots=subplots)

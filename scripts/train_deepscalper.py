@@ -27,7 +27,7 @@ class MockDeepScalperEnv(gym.Env):
         self.observation_space = gym.spaces.Dict({
             "micro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self.micro_dim), dtype=np.float32),
             "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(11,), dtype=np.float32),
-            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(2,), dtype=np.float32)
+            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, 2), dtype=np.float32)
         })
         self.action_space = gym.spaces.MultiDiscrete([3, 5, 5])
     
@@ -35,7 +35,7 @@ class MockDeepScalperEnv(gym.Env):
         return {
             "micro": np.random.randn(50, 20).astype(np.float32),
             "macro": np.random.randn(11).astype(np.float32),
-            "private": np.zeros(2, dtype=np.float32)
+            "private": np.zeros((50, 2), dtype=np.float32)
         }, {}
     
     def step(self, action):
@@ -112,6 +112,9 @@ def main():
     
     if args.debug:
         config["torch_compile"] = False
+        if "training" in config:
+            config["training"]["torch_compile"] = False
+            
         print("DEBUG MODE: torch.compile disabled.")
         # import torch._dynamo  <-- removed to prevent shadowing
         if hasattr(torch, "_dynamo"):
@@ -203,10 +206,27 @@ def main():
     print(f"Using device: {device}")
 
     # Network Configs
-    net_config = config.get("network", {
-        "micro_config": {"input_size": 20, "hidden_size": 64},
-        "macro_config": {"input_size": 11, "hidden_sizes": [64]}
-    })
+    # Network Configs
+    raw_net_config = config.get("network", {})
+    
+    # Handle Flat YAML Config -> Nested Config for DeepScalperNetwork
+    if "micro_config" not in raw_net_config:
+        hidden_size = raw_net_config.get("hidden_size", 64)
+        net_config = {
+            "micro_config": {
+                "input_size": raw_net_config.get("micro_input_size", 20),
+                "private_input_size": raw_net_config.get("private_input_size", 2),
+                "hidden_size": hidden_size
+            },
+            "macro_config": {
+                "input_size": raw_net_config.get("macro_input_size", 11),
+                "hidden_sizes": [hidden_size]
+            },
+            # Preserve potential ensemble settings
+            "ensemble_config": raw_net_config.get("ensemble_config", {})
+        }
+    else:
+        net_config = raw_net_config
     
     # Create clean config for agents (remove ensemble_config if present)
     agent_net_config = net_config.copy()
@@ -240,7 +260,28 @@ def main():
     dqn_lr = float(dqn_config.get("learning_rate", 1e-4)) # Fallback
     dqn_gamma = float(dqn_config.get("gamma", 0.99))
     # Passed as kwargs to dqn
-    dqn_kwargs = {k:v for k,v in dqn_config.items() if k not in ["learning_rate", "gamma"]}
+    # Map prefixed config keys to agent init args
+    dqn_kwargs = {}
+    
+    # Key Mapping (Config -> Init Arg)
+    key_map = {
+        "dqn_batch_size": "batch_size",
+        "dqn_buffer_size": "buffer_size",
+        "dqn_target_update_freq": "target_update_freq",
+        "dqn_epsilon_start": "epsilon_start",
+        "dqn_epsilon_end": "epsilon_end", 
+        "dqn_epsilon_decay": "epsilon_decay"
+    }
+
+    for k, v in dqn_config.items():
+        if k in ["learning_rate", "gamma"]:
+            continue
+            
+        if k in key_map:
+            dqn_kwargs[key_map[k]] = v
+        else:
+            # Pass through other keys 
+            dqn_kwargs[k] = v
     
     dqn = DeepScalperDQN(
         network_config=agent_net_config, 

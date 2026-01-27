@@ -2,6 +2,22 @@
 
 ---
 
+## 2026-01-27 | Pipeline Planning Prompt Creation
+
+### Objective
+Create a prompt for a new agent to plan an end-to-end training/backtesting pipeline.
+
+### Issue / Hypothesis
+Need to hand over the current 'Mach 3' state to a new agent session for high-level pipeline automation.
+
+### Solution / Method
+Developed a multi-phase implementation prompt covering Data, Training, Backtesting, Deployment, and Governance stages, adhering to AGENTS.md.
+
+### Conclusion
+Consolidated repository context into a single actionable prompt.
+
+---
+
 
 ## 2026-01-26 | DeepScalper Performance Audit & Safe Shared Memory
 
