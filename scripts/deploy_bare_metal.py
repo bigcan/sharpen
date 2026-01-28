@@ -79,15 +79,36 @@ def deploy(args):
     
     if args.upload_data:
         # Use absolute paths for robust deployment
-        local_data = PROJECT_ROOT / "data" / "btc_lob_demo.parquet"
-        remote_data = f"{remote_workspace}/btc_lob_demo.parquet"
+        # default to demo if not specified
+        data_filename = args.data_file if args.data_file else "btc_lob_demo.parquet"
+        local_data = PROJECT_ROOT / "data" / data_filename
+        remote_data = f"{remote_workspace}/data/{data_filename}" # Keep in data subdir on remote
         
+        # Create remote data dir
+        ssh.exec_command(f"mkdir -p {remote_workspace}/data")
+
         if not local_data.exists():
             print(f"WARNING: Local data not found at {local_data}. CHECK PATHS.")
         else:
-            print(f"Uploading Data: {local_data} -> {remote_data}...")
-            sftp.put(str(local_data), remote_data)
-            print("Data upload complete.")
+            # GOLD CACHE LOGIC
+            should_upload = True
+            local_size = os.path.getsize(local_data)
+            try:
+                remote_attr = sftp.stat(remote_data)
+                remote_size = remote_attr.st_size
+                if remote_size == local_size:
+                     print(f"Gold Cache Hit: Remote file {data_filename} exists and matches size ({local_size/1024/1024:.2f} MB). Skipping upload.")
+                     should_upload = False
+                else:
+                     print(f"Cache Miss: Size mismatch (Local: {local_size} vs Remote: {remote_size}). Re-uploading...")
+            except IOError:
+                print(f"Cache Miss: Remote file not found. Uploading...")
+            
+            if should_upload:
+                print(f"Uploading Data: {local_data} -> {remote_data}...")
+                # using generic put
+                sftp.put(str(local_data), remote_data)
+                print("Data upload complete.")
 
     print(f"Uploading {zip_name}...")
     sftp.put(zip_name, f"{remote_workspace}/{zip_name}")
@@ -161,6 +182,7 @@ if __name__ == "__main__":
     parser.add_argument("--config", required=True, help="Config file path")
     parser.add_argument("--run_name", default="DS_GPUHub_BM_V1", help="Base name for WandB run")
     parser.add_argument("--upload_data", action="store_true", help="Upload data file to /data")
+    parser.add_argument("--data_file", default=None, help="Specific data filename in data/ to upload (e.g. btc_lob_jan2023.parquet)")
     args = parser.parse_args()
     
     deploy(args)

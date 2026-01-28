@@ -2,12 +2,12 @@
 # Optimized for NVIDIA RTX 5090 (Mach 3)
 
 data:
-  file_path: "/workspace/DeepScalper/btc_lob_demo.parquet"
+  file_path: "data/btc_lob_jan2023.parquet"
   ticker: "BTCUSDT"
-  train_start_date: "2023-01-01"
-  train_end_date: "2023-01-30"
-  val_start_date: "2023-02-01"
-  val_end_date: "2023-02-05"
+  train_start_date: "2023-01-09"
+  train_end_date: "2023-01-18"
+  val_start_date: "2023-01-19"
+  val_end_date: "2023-01-20"
 
 features:
   micro_features: ["micro"] # Column prefixes
@@ -60,7 +60,7 @@ agents:
     learning_rate: 0.0001
 
 training:
-  total_timesteps: 5000
+  total_timesteps: 2000000
   batch_size: 4096      # High throughput
   learning_rate: 0.0001 # Fallback/Global
   log_interval: 1000
