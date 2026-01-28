@@ -24,12 +24,19 @@ from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 from finrl_pro_ds.configs.schema import UnifiedConfig, ConfigLoader
 from finrl_pro_ds.analytics.wandb_evaluator import generate_wandb_report
+import multiprocessing as mp
+
 
 # Setup Logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("HPO")
 
-def make_env(config_dict: Dict[str, Any], start_date=None, end_date=None):
+# GLOBAL: Shared Memory Config (Loaded once in main)
+active_shm_config = None
+active_data_handler = None
+
+
+def make_env(config_dict: Dict[str, Any], start_date=None, end_date=None, shared_memory_config=None):
     """
     Robust Environment Factory
     """
@@ -62,7 +69,8 @@ def make_env(config_dict: Dict[str, Any], start_date=None, end_date=None):
         ticker=ticker,
         feature_config=config_dict.get("features", {}), 
         start_date=start_date,
-        end_date=end_date
+        end_date=end_date,
+        shared_memory_config=shared_memory_config
     )
     
     env_config = config_dict.get("env", {})
@@ -80,7 +88,7 @@ def sanitize_config(cfg):
             except: pass
     return cfg
 
-def objective(trial, base_config: UnifiedConfig, args):
+def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
     # 0. WandB Silent Mode
     wandb.init(mode="disabled")
 
@@ -206,8 +214,51 @@ def objective(trial, base_config: UnifiedConfig, args):
             logger.info(f"Trial {trial.number} Fold {i+1}")
             
             # Create Envs
-            env_train = make_env(trial_config, start_date=fold['train'][0], end_date=fold['train'][1])
-            env_val = make_env(trial_config, start_date=fold['val'][0], end_date=fold['val'][1])
+            # FIX: Use VectorEnv if num_envs > 1 to match production throughput
+            num_envs = trial_config.get("env", {}).get("num_envs", 1)
+            
+            def make_env_thunk(config, start, end, shm_cfg):
+                return lambda: make_env(config, start_date=start, end_date=end, shared_memory_config=shm_cfg)
+
+            if num_envs > 1:
+                import gymnasium as gym
+                # Use AsyncVectorEnv with Spawn context for Shared Memory
+                # This ensures workers attach to existing SHM segments rather than copying 2GB data
+                logger.info(f"Initializing AsyncVectorEnv (spawn) with {num_envs} environments...")
+                
+                # Manually infer spaces to avoid AsyncVectorEnv creating a dummy env internally
+                # This prevents double-initialization of Shared Memory in the Main Process
+                logger.info(f"Creating Dummy Env for Space Inference (PID: {os.getpid()})...")
+                dummy_env = make_env(trial_config, start_date=fold['train'][0], end_date=fold['train'][1], shared_memory_config=shm_config)
+                obs_space = dummy_env.observation_space
+                action_space = dummy_env.action_space
+                dummy_env.close()
+                logger.info(f"Inferred Spaces: Obs={obs_space}, Action={action_space}")
+
+                # Create list of factory functions
+                # Note: We must pass simple dict/configs that are picklable. shm_config is dict.
+                env_fns_train = [make_env_thunk(trial_config, fold['train'][0], fold['train'][1], shm_config) for _ in range(num_envs)]
+                
+                # Check for context
+                # "spawn" is safer for CUDA/Torch + Multiprocessing
+                env_train = gym.vector.AsyncVectorEnv(
+                    env_fns_train, 
+                    context="spawn", 
+                    observation_space=obs_space,
+                    action_space=action_space
+                )
+                
+                env_fns_val = [make_env_thunk(trial_config, fold['val'][0], fold['val'][1], shm_config) for _ in range(num_envs)]
+                env_val = gym.vector.AsyncVectorEnv(
+                    env_fns_val, 
+                    context="spawn",
+                    observation_space=obs_space, 
+                    action_space=action_space
+                )
+            else:
+                logger.info("Initializing Single Environment (WARNING: Low Throughput)...")
+                env_train = make_env(trial_config, start_date=fold['train'][0], end_date=fold['train'][1], shared_memory_config=shm_config)
+                env_val = make_env(trial_config, start_date=fold['val'][0], end_date=fold['val'][1], shared_memory_config=shm_config)
             
             # --- AGENT INITIALIZATION ---
             raw_net_config = trial_config.get("network", {})
@@ -277,7 +328,7 @@ def objective(trial, base_config: UnifiedConfig, args):
             trainer.total_timesteps = args.steps
             trainer.train()
             
-            metrics = trainer.evaluate(env_val, num_episodes=1 if args.debug else 5)
+            metrics = trainer.evaluate(env_val, num_episodes=5 if args.debug else 20) # Ensure enough episodes for vector env
             fold_scores.append(metrics['sharpe'])
             
             env_train.close()
@@ -319,7 +370,7 @@ def run_best_model_report(best_params, base_config, args):
              start_date = "2023-01-10 00:00:00"
              end_date = "2023-01-10 04:00:00"
         
-    env = make_env(config_dict, start_date=start_date, end_date=end_date)
+    env = make_env(config_dict, start_date=start_date, end_date=end_date, shared_memory_config=active_shm_config)
     
     raw_net_config = config_dict.get("network", {})
     if "micro_config" not in raw_net_config:
@@ -359,7 +410,7 @@ def run_best_model_report(best_params, base_config, args):
              train_start = "2023-01-10 00:00:00"
              train_end = "2023-01-10 02:00:00"
 
-    env_train = make_env(config_dict, start_date=train_start, end_date=train_end)
+    env_train = make_env(config_dict, start_date=train_start, end_date=train_end, shared_memory_config=active_shm_config)
     trainer = DeepScalperTrainer(env_train, ensemble, config_dict, device=device)
     trainer.total_timesteps = args.steps if args.debug else 50000 
     trainer.train()
@@ -499,23 +550,76 @@ if __name__ == "__main__":
     if args.data_file:
         base_config.data.file_path = f"data/{args.data_file}"
         logger.info(f"Overridden data file path to: {base_config.data.file_path}")
-    
-    study = optuna.create_study(
-        study_name=args.study_name,
-        storage=args.storage,
-        load_if_exists=True,
-        direction="maximize"
-    )
-    
-    logger.info(f"Starting HPO. Trials: {args.trials}")
-    study.optimize(lambda t: objective(t, base_config, args), n_trials=args.trials)
-    
-    logger.info("Best Params: " + str(study.best_params))
-    logger.info("Best Sharpe: " + str(study.best_value))
-    
+        
+    # --- SHARED MEMORY SETUP ---
     try:
-        run_best_model_report(study.best_params, base_config, args)
+        data_path = base_config.data.file_path
+        # Map to absolute or robust path
+        if not os.path.exists(data_path):
+             candidates = [
+                data_path,
+                os.path.join(os.getcwd(), data_path),
+                "data/btc_lob_demo.parquet",
+                "btc_lob_demo.parquet"
+            ]
+             for c in candidates:
+                 if c and os.path.exists(c):
+                     data_path = c
+                     break
+                     
+        logger.info(f"Loading Main Data for Shared Memory from: {data_path}")
+        # Initialize MAIN Data Handler (loads parquet once)
+        # Verify ticker is accessible from base_config.data
+        ticker = base_config.data.ticker if hasattr(base_config.data, "ticker") else "BTCUSDT"
+        
+        # Determine feature config
+        feat_config = {}
+        if hasattr(base_config, "features"):
+             feat_config = dataclasses.asdict(base_config.features)
+        
+        active_data_handler = ParquetDataHandler(
+            file_path=data_path,
+            ticker=ticker,
+            feature_config=feat_config
+            # No date filter here - load ALL data into SHM
+        )
+        
+        # Create Shared Memory
+        logger.info("Creating Shared Memory Segments...")
+        active_shm_config = active_data_handler.create_shared_memory()
+        logger.info("Shared Memory Ready.")
+        
     except Exception as e:
-        logger.error(f"Post-HPO Reporting Failed: {e}")
+        logger.error(f"Failed to initialize Shared Memory: {e}")
         import traceback
         traceback.print_exc()
+        sys.exit(1)
+        
+    try:
+        study = optuna.create_study(
+            study_name=args.study_name,
+            storage=args.storage,
+            load_if_exists=True,
+            direction="maximize"
+        )
+        
+        logger.info(f"Starting HPO. Trials: {args.trials}")
+        # Pass shm_config to objective
+        study.optimize(lambda t: objective(t, base_config, args, shm_config=active_shm_config), n_trials=args.trials)
+        
+        logger.info("Best Params: " + str(study.best_params))
+        logger.info("Best Sharpe: " + str(study.best_value))
+        
+        try:
+            run_best_model_report(study.best_params, base_config, args)
+        except Exception as e:
+            logger.error(f"Post-HPO Reporting Failed: {e}")
+            import traceback
+            traceback.print_exc()
+            
+    finally:
+        # Cleanup Shared Memory
+        if active_data_handler:
+            logger.info("Cleaning up Shared Memory...")
+            active_data_handler.close_shared_memory(unlink=True)
+            logger.info("Cleanup Complete.")
