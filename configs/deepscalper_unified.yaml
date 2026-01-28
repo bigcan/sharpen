@@ -18,7 +18,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   transaction_fee: 0.0001
-  num_envs: 24
+  num_envs: 12
   window_size: 50
   
   reward:
