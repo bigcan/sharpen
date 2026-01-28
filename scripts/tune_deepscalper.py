@@ -91,10 +91,22 @@ def objective(trial, base_config: UnifiedConfig, args):
     
     # Paper-Aligned Reward HPO
     profit_weight = trial.suggest_float('profit_weight', 0.5, 2.0)
-    volatility_penalty_weight = trial.suggest_float('volatility_penalty_weight', 0.0, 0.5)
+    volatility_penalty_weight = trial.suggest_float('volatility_penalty_weight', 0.1, 5.0)
     
+    # Network Architecture HPO
+    hidden_size = trial.suggest_categorical('hidden_size', [64, 128, 256])
+
     # 2. Config Updates
     trial_config = dataclasses.asdict(base_config)
+    
+    # Update Hidden Size (Applies to all agents)
+    if "network" not in trial_config: trial_config["network"] = {}
+    trial_config["network"]["hidden_size"] = hidden_size
+    # Ensure sub-configs are updated if they exist
+    if "micro_config" in trial_config["network"]:
+        trial_config["network"]["micro_config"]["hidden_size"] = hidden_size
+    if "macro_config" in trial_config["network"]:
+        trial_config["network"]["macro_config"]["hidden_sizes"] = [hidden_size]
 
     if args.strategy == "independent":
         # === Independent HPO ===
@@ -159,8 +171,32 @@ def objective(trial, base_config: UnifiedConfig, args):
     is_demo = "demo" in str(data_path).lower() or args.debug
     
     if is_demo:
-         # Shorter windows, aligned with demo data (2026-01-21)
-         folds = [{"train": ("2026-01-21 13:40:00", "2026-01-21 14:00:00"), "val": ("2026-01-21 14:00:00", "2026-01-21 14:10:00")}]
+         if "demo" in str(data_path).lower():
+             # Shorter windows, aligned with demo data (2026-01-21)
+             folds = [{"train": ("2026-01-21 13:40:00", "2026-01-21 14:00:00"), "val": ("2026-01-21 14:00:00", "2026-01-21 14:10:00")}]
+         else:
+             # Debugging with real data (2023) - Use small valid slice
+             folds = [{"train": ("2023-01-10 00:00:00", "2023-01-10 02:00:00"), "val": ("2023-01-10 02:00:00", "2023-01-10 02:30:00")}]
+
+    fold_scores = []
+# ... in run_best_model_report ...
+    if args.debug:
+        if "demo" in str(data_path).lower():
+            start_date = "2026-01-21 13:40:00"
+            end_date = "2026-01-21 14:10:00"
+        else:
+             # Debug with real data
+             start_date = "2023-01-10 00:00:00"
+             end_date = "2023-01-10 04:00:00"
+
+# ... and train settings ...
+    if args.debug:
+        if "demo" in str(data_path).lower():
+            train_start = "2026-01-21 13:40:00"
+            train_end = "2026-01-21 14:00:00"
+        else:
+             train_start = "2023-01-10 00:00:00"
+             train_end = "2023-01-10 02:00:00"
 
     fold_scores = []
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -207,12 +243,16 @@ def objective(trial, base_config: UnifiedConfig, args):
                 "dqn_epsilon_end": "epsilon_end", 
                 "dqn_epsilon_decay": "epsilon_decay"
             }
+            # STRICT FILTERING: Only pass keys that are explicitly in the key_map.
+            # AgentConfig is a god-object containing PPO/A2C params which DeepScalperDQN does NOT accept.
             for k, v in dqn_config.items():
-                if k in ["learning_rate", "gamma"]: continue
-                if k in key_map: dqn_kwargs[key_map[k]] = v
-                else: dqn_kwargs[k] = v
+                if k in key_map: 
+                    dqn_kwargs[key_map[k]] = v
+            
+            # Use specific LR if available (for Independent HPO), else fallback to global lr
+            current_lr = dqn_config.get("learning_rate", lr)
                 
-            dqn = DeepScalperDQN(agent_net_config, lr=lr, gamma=gamma, device=device, **dqn_kwargs)
+            dqn = DeepScalperDQN(agent_net_config, lr=current_lr, gamma=gamma, device=device, **dqn_kwargs)
             ppo = DeepScalperPPO(agent_net_config, device=device)
             a2c = DeepScalperA2C(agent_net_config, device=device)
             
@@ -270,9 +310,14 @@ def run_best_model_report(best_params, base_config, args):
     
     # Robust Debug / Demo logic
     data_path = config_dict.get("data", {}).get("file_path", "")
-    if "demo" in str(data_path).lower() or args.debug:
-        start_date = "2026-01-21 13:40:00"
-        end_date = "2026-01-21 14:10:00"
+    if args.debug:
+        if "demo" in str(data_path).lower():
+            start_date = "2026-01-21 13:40:00"
+            end_date = "2026-01-21 14:10:00"
+        else:
+             # Debug with real data
+             start_date = "2023-01-10 00:00:00"
+             end_date = "2023-01-10 04:00:00"
         
     env = make_env(config_dict, start_date=start_date, end_date=end_date)
     
@@ -306,9 +351,13 @@ def run_best_model_report(best_params, base_config, args):
     # For demo, just use same range or small slice
     train_start = "2023-01-01"
     train_end = "2023-01-10"
-    if "demo" in str(data_path).lower() or args.debug:
-        train_start = "2026-01-21 13:40:00"
-        train_end = "2026-01-21 14:00:00"
+    if args.debug:
+        if "demo" in str(data_path).lower():
+            train_start = "2026-01-21 13:40:00"
+            train_end = "2026-01-21 14:00:00"
+        else:
+             train_start = "2023-01-10 00:00:00"
+             train_end = "2023-01-10 02:00:00"
 
     env_train = make_env(config_dict, start_date=train_start, end_date=train_end)
     trainer = DeepScalperTrainer(env_train, ensemble, config_dict, device=device)
@@ -439,12 +488,17 @@ if __name__ == "__main__":
     parser.add_argument("--study_name", type=str, default="deepscalper_hpo")
     parser.add_argument("--storage", type=str, default="sqlite:///hpo.db")
     parser.add_argument("--resume", action="store_true", help="Resume study")
-    parser.add_argument("--debug", action="store_true", default=True)
+    parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument("--run_name", type=str, default=None, help="Run name (ignored but required by deployment runner)")
     parser.add_argument("--strategy", type=str, default="joint", choices=["joint", "independent"], help="HPO Strategy")
+    parser.add_argument("--data_file", type=str, default=None, help="Override data file path")
     args = parser.parse_args()
     
     base_config = ConfigLoader.load_yaml(args.config)
+    
+    if args.data_file:
+        base_config.data.file_path = f"data/{args.data_file}"
+        logger.info(f"Overridden data file path to: {base_config.data.file_path}")
     
     study = optuna.create_study(
         study_name=args.study_name,
