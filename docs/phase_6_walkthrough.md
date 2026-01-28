@@ -82,5 +82,23 @@ python scripts/train_deepscalper.py --config configs/smoke_test.yaml
 
 ## 5. Next Steps
 - [ ] **Hyperparameter Tuning:** Adjust `gamma`, `lam`, and learning rates in config.
-- [ ] **Full Training Run:** Execute on full dataset and monitor WandB.
-- [ ] **Metric Analysis:** Watch `loss/ppo`, `loss/gating`, and `cumulative_reward`.
+- [x] **Full Training Run:** Execute on full dataset and monitor WandB.
+- [x] **Metric Analysis:** Watch `loss/ppo`, `loss/gating`, and `cumulative_reward`.
+
+## 6. MLOps Verification (Jan 28, 2026)
+
+**Objective:** Validate the "Production-Lite" MLOps pipeline on Remote Infrastructure (GPUHub).
+
+**Pipeline Verified:**
+1.  **Deployment:** Automated `scripts/deploy_bare_metal.py` handles clean install and data upload.
+2.  **Training:** `scripts/train_deepscalper_v3.py` runs stably (5000 steps), integrates WandB, and **saves valid checkpoints**.
+3.  **Backtesting:** `scripts/backtest_deepscalper.py` auto-discovers checkpoints, initializes the Ensemble correctly, and generates Backtest reports.
+
+**Critical Fixes Implemented:**
+- **Checkpointing:** Corrected Trainer to ensure final model state is saved even if outside interval boundaries.
+- **Config Flow:** Ported robust configuration mapping from Training to Backtesting script to ensure architectural consistency.
+- **Environment Safety:** Verified that the pipeline handles dependencies (Torch/WandB) correctly in a specific Native Environment.
+
+**Final Status:** **READY FOR PRODUCTION DEPLOYMENT**.
+- Training Run: `DS_Train_V3_Native_Full_Retry` (Verified).
+- Backtest Run: `DS_Backtest_V3_Native_Full_Retry` (Verified).

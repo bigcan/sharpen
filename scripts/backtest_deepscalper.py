@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--config", type=str, required=True, help="Path to config yaml")
     parser.add_argument("--checkpoint", type=str, default="auto", help="Path to checkpoint .pth or 'auto' to find latest")
     parser.add_argument("--debug", action="store_true", help="Debug mode")
+    parser.add_argument("--run_name", type=str, default=None, help="Run name (ignored but accepted for compatibility)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -53,10 +54,22 @@ def main():
 
     # 2. Re-Init Agents
     print("Initializing Agents...")
-    net_config = config.get("network", {
-        "micro_config": {"input_size": 20, "hidden_size": 128},
-        "macro_config": {"input_size": 11, "hidden_sizes": [128]}
-    })
+    raw_net_config = config.get("network", {})
+    if "micro_config" not in raw_net_config:
+        hidden_size = raw_net_config.get("hidden_size", 64)
+        net_config = {
+            "micro_config": {
+                "input_size": raw_net_config.get("micro_input_size", 20),
+                "private_input_size": raw_net_config.get("private_input_size", 2),
+                "hidden_size": hidden_size
+            },
+            "macro_config": {
+                "input_size": raw_net_config.get("macro_input_size", 11),
+                "hidden_sizes": [hidden_size]
+            }
+        }
+    else:
+        net_config = raw_net_config
 
     # Create clean config for agents (remove ensemble_config if present)
     agent_net_config = net_config.copy()
@@ -65,7 +78,22 @@ def main():
     
     agents_config = config.get("agents", {})
     dqn_config = agents_config.get("dqn", {})
-    dqn_kwargs = {k:v for k,v in dqn_config.items() if k not in ["learning_rate", "gamma"]}
+    
+    # Map config keys to DQN init args
+    dqn_kwargs = {}
+    key_map = {
+        "dqn_batch_size": "batch_size",
+        "dqn_buffer_size": "buffer_size",
+        "dqn_target_update_freq": "target_update_freq",
+        "dqn_epsilon_start": "epsilon_start",
+        "dqn_epsilon_end": "epsilon_end", 
+        "dqn_epsilon_decay": "epsilon_decay"
+    }
+    
+    for k,v in dqn_config.items():
+        if k in ["learning_rate", "gamma"]: continue
+        if k in key_map: dqn_kwargs[key_map[k]] = v
+        else: dqn_kwargs[k] = v
     
     dqn = DeepScalperDQN(
         network_config=agent_net_config, 
@@ -84,29 +112,33 @@ def main():
     
     if checkpoint_path.lower() == "auto":
         print("Auto-discovering latest checkpoint...")
-        # Search in ./results for correct run
+        
+        candidates = []
+        
+        # 1. Search in ./checkpoints (Direct access)
+        ckpt_dir_local = os.path.join(os.getcwd(), "checkpoints")
+        if os.path.exists(ckpt_dir_local):
+            ckpts = [os.path.join(ckpt_dir_local, f) for f in os.listdir(ckpt_dir_local) if f.endswith(".pth")]
+            candidates.extend(ckpts)
+            
+        # 2. Search in ./results (Run folders)
         results_dir = os.path.join(os.getcwd(), "results")
         if os.path.exists(results_dir):
-            # Find latest run folder
             runs = [os.path.join(results_dir, d) for d in os.listdir(results_dir) if os.path.isdir(os.path.join(results_dir, d))]
             if runs:
                 latest_run = max(runs, key=os.path.getmtime)
-                print(f"Latest Run Found: {latest_run}")
-                # Look for checkpoint in checkpoints/ or root of run
-                ckpt_dir = os.path.join(latest_run, "checkpoints")
-                if os.path.exists(ckpt_dir):
-                    ckpts = [os.path.join(ckpt_dir, f) for f in os.listdir(ckpt_dir) if f.endswith(".pth")]
-                    if ckpts:
-                        checkpoint_path = max(ckpts, key=os.path.getmtime)
-                        print(f"Auto-selected Checkpoint: {checkpoint_path}")
-                    else:
-                        print("No .pth files in checkpoints dir.")
-                else:
-                    print("No checkpoints dir in run folder.")
-            else:
-                print("No run folders in results/.")
+                run_ckpt_dir = os.path.join(latest_run, "checkpoints")
+                if os.path.exists(run_ckpt_dir):
+                     ckpts = [os.path.join(run_ckpt_dir, f) for f in os.listdir(run_ckpt_dir) if f.endswith(".pth")]
+                     candidates.extend(ckpts)
+        
+        if candidates:
+            # Pick latest
+            checkpoint_path = max(candidates, key=os.path.getmtime)
+            print(f"Auto-selected Checkpoint: {checkpoint_path}")
         else:
-             print("results/ directory not found.")
+            print("No checkpoints found in ./checkpoints or ./results.")
+            checkpoint_path = None
              
     print(f"Loading Checkpoint: {checkpoint_path}")
     if checkpoint_path and os.path.exists(checkpoint_path):
@@ -190,17 +222,19 @@ def main():
     print("Backtest Complete.")
     
     # 5. Analysis
+    # Pre-calculate common metrics
+    pos_arr = np.array(positions)
+    orders_arr = np.diff(pos_arr, prepend=0.0) 
+    
+    print(f"Final Value: {portfolio_values[-1]:.2f}")
+    print(f"Initial Value: {portfolio_values[0]:.2f}")
+
     try:
         from finrl_pro_ds.analytics.vbt_analyzer import VBTAnalyzer
         print("Running VectorBT Analysis via VBTAnalyzer...")
         
         # 1. Prepare Data
         price_series = pd.Series(prices)
-        
-        # 2. Derive Orders from Positions
-        # pos[i] - pos[i-1] = execution
-        pos_arr = np.array(positions)
-        orders_arr = np.diff(pos_arr, prepend=0.0) 
         orders_series = pd.Series(orders_arr)
         
         # 3. Create Analyzer and Portfolio
