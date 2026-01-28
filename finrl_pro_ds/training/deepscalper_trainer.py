@@ -65,6 +65,9 @@ class DeepScalperTrainer:
         a2c_lr = a2c_config.get("learning_rate", self.learning_rate)
         gating_lr = gating_config.get("learning_rate", self.learning_rate)
         
+        self.ppo_entropy_coef = ppo_config.get("entropy_coef", 0.01)
+        self.a2c_entropy_coef = a2c_config.get("entropy_coef", 0.01)
+        
         # Gating Optimizer
         self.gating_optimizer = optim.Adam(
             self.ensemble.gating.parameters(), 
@@ -181,7 +184,7 @@ class DeepScalperTrainer:
                     policy_loss = -torch.min(surr1, surr2).mean()
                     value_loss = 0.5 * (mb_returns - current_values.squeeze()).pow(2).mean()
                     entropy = dist_dir.entropy() + dist_price.entropy() + dist_vol.entropy()
-                    entropy_loss = -0.01 * entropy.mean()
+                    entropy_loss = -self.ppo_entropy_coef * entropy.mean()
                     
                     loss = policy_loss + value_loss + entropy_loss
                 
@@ -236,7 +239,10 @@ class DeepScalperTrainer:
             policy_loss = -(log_probs * advantages.detach()).mean()
             value_loss = 0.5 * (returns - current_values.squeeze()).pow(2).mean()
             
-            loss = policy_loss + value_loss
+            entropy = dist_dir.entropy() + dist_price.entropy() + dist_vol.entropy()
+            entropy_loss = -self.a2c_entropy_coef * entropy.mean()
+            
+            loss = policy_loss + value_loss + entropy_loss
             
         optimizer.zero_grad()
         self.scaler_a2c.scale(loss).backward()
@@ -346,7 +352,7 @@ class DeepScalperTrainer:
             while self.global_step < self.total_timesteps:
                 start_step = self.global_step
                 step = self.global_step  # For backward compatibility with logging
-                print(f"DEBUG: Loop Start. Step: {step}, Global: {self.global_step}, NumEnvs: {num_envs}", flush=True)
+                # print(f"DEBUG: Loop Start. Step: {step}, Global: {self.global_step}, NumEnvs: {num_envs}", flush=True)
                 
                 # 1. Select Action (Voting)
                 # 1. Select Action (Voting)
