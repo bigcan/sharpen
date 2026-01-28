@@ -85,34 +85,13 @@ def load_config(path):
     with open(path, 'r') as f:
         return yaml.safe_load(f)
 
-import wandb
-
-def setup_wandb(config):
-    wandb_config = config.get("wandb", {})
-    project = wandb_config.get("project", "DeepScalper_Pilot")
-    tags = wandb_config.get("tags", [])
-    mode = wandb_config.get("mode", "online")
-    
-    # User requested entity: bigcan-chiwin-technology
-    # Ideally should be in config, but I will hardcode default if missing or pass it here.
-    # The prompt explicitly asked to start run in this project.
-    entity = wandb_config.get("entity", "bigcan-chiwin-technology")
-    
-    print(f"Initializing WandB: Project={project}, Entity={entity}, Mode={mode}")
-    wandb.init(
-        project=project,
-        entity=entity,
-        config=config,
-        tags=tags,
-        mode=mode,
-        name=wandb_config.get("name", None) # Optional run name
-    )
+# WandB Removed for Debugging
 
 def main():
-    parser = argparse.ArgumentParser(description="Train DeepScalper Agent")
+    parser = argparse.ArgumentParser(description="Train DeepScalper Agent (Debug No-WandB)")
     parser.add_argument("--config", type=str, required=True, help="Path to config yaml")
     parser.add_argument("--debug", action="store_true", help="Use mock environment")
-    parser.add_argument("--run_name", type=str, default=None, help="WandB Run Name")
+    parser.add_argument("--run_name", type=str, default=None, help="Run Name")
     args = parser.parse_args()
 
     # Load Config
@@ -124,17 +103,15 @@ def main():
             config["training"]["torch_compile"] = False
             
         print("DEBUG MODE: torch.compile disabled.")
-        # import torch._dynamo  <-- removed to prevent shadowing
         if hasattr(torch, "_dynamo"):
             torch._dynamo.config.suppress_errors = True
     
     # Override Run Name if provided
-    if args.run_name:
-        if "wandb" not in config: config["wandb"] = {}
-        config["wandb"]["name"] = args.run_name
+    # if args.run_name:
+    #     if "wandb" not in config: config["wandb"] = {}
+    #     config["wandb"]["name"] = args.run_name
     
-    # Setup WandB
-    # setup_wandb(config) # DISABLED: Testing if WandB causes PyArrow crash
+    # Setup WandB - REMOVED
 
     # Pre-load Data for Shared Memory (Optimization)
     data_loader = None
@@ -170,8 +147,6 @@ def main():
     # print(f"Using device: {device}")
     # MOVED DOWN after Env creation
     
-
-
     # Environment
     
     # Check for num_envs in config
@@ -179,17 +154,12 @@ def main():
     num_envs = env_config.get("num_envs", 1)
     
     # Define Factory
-    # Define Factory using functools.partial (Must be picklable for spawn)
     import functools
     
     # Use the top-level create_env helper
     env_factory = functools.partial(create_env, config=config, debug=args.debug)
             
-    # CRITICAL FIX for Multiprocessing with CUDA:
-    # 1. Do not initialize CUDA before forking/spawning if possible.
-    # 2. Use 'spawn' context to avoid CUDA context corruption in workers.
-    # We delay device init until after env creation (though we still assign it later).
-    
+    # CRITICAL FIX for Multiprocessing with CUDA
     if num_envs > 1:
         print(f"Vectorizing {'Mock' if args.debug else 'Real'} Environment: {num_envs} Envs")
         
@@ -199,7 +169,6 @@ def main():
         else:
             try:
                 # Use spawn to be safe with CUDA/Torch
-                # Gymnasium expects a string for the context arg, which it passes to multiprocessing.get_context()
                 env = gym.vector.AsyncVectorEnv([env_factory for _ in range(num_envs)], context="spawn")
             except Exception as e:
                 import traceback
@@ -217,10 +186,8 @@ def main():
     print(f"Using device: {device}")
 
     # Network Configs
-    # Network Configs
     raw_net_config = config.get("network", {})
     
-    # Handle Flat YAML Config -> Nested Config for DeepScalperNetwork
     if "micro_config" not in raw_net_config:
         hidden_size = raw_net_config.get("hidden_size", 64)
         net_config = {
@@ -233,13 +200,11 @@ def main():
                 "input_size": raw_net_config.get("macro_input_size", 11),
                 "hidden_sizes": [hidden_size]
             },
-            # Preserve potential ensemble settings
             "ensemble_config": raw_net_config.get("ensemble_config", {})
         }
     else:
         net_config = raw_net_config
     
-    # Create clean config for agents (remove ensemble_config if present)
     agent_net_config = net_config.copy()
     if "ensemble_config" in agent_net_config:
         del agent_net_config["ensemble_config"]
@@ -247,7 +212,6 @@ def main():
     # Initialize Agents with Specific Configs
     agents_config = config.get("agents", {})
     
-    # Sanitize Config Types (Fix for YAML string parsing issues)
     def sanitize_config(cfg):
         for k, v in cfg.items():
             if isinstance(v, dict):
@@ -261,20 +225,10 @@ def main():
     sanitize_config(agents_config)
     
     dqn_config = agents_config.get("dqn", {})
-    
-    # DQN expects network_config + its own params. 
-    # We combine them or pass specific args. 
-    # DQN signature: (network_config, lr, gamma, etc.)
-    # We can pass kwargs from dqn_config
-    
-    # Extract known args for DQN
-    dqn_lr = float(dqn_config.get("learning_rate", 1e-4)) # Fallback
+    dqn_lr = float(dqn_config.get("learning_rate", 1e-4))
     dqn_gamma = float(dqn_config.get("gamma", 0.99))
-    # Passed as kwargs to dqn
-    # Map prefixed config keys to agent init args
     dqn_kwargs = {}
     
-    # Key Mapping (Config -> Init Arg)
     key_map = {
         "dqn_batch_size": "batch_size",
         "dqn_buffer_size": "buffer_size",
@@ -287,11 +241,9 @@ def main():
     for k, v in dqn_config.items():
         if k in ["learning_rate", "gamma"]:
             continue
-            
         if k in key_map:
             dqn_kwargs[key_map[k]] = v
         else:
-            # Pass through other keys 
             dqn_kwargs[k] = v
     
     dqn = DeepScalperDQN(
@@ -302,7 +254,6 @@ def main():
         **dqn_kwargs
     )
     
-    # PPO/A2C currently take net_config and device. LRs are handled in Trainer now.
     ppo = DeepScalperPPO(agent_net_config, device=device)
     a2c = DeepScalperA2C(agent_net_config, device=device)
     
@@ -315,12 +266,8 @@ def main():
     ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
     
     # Initialize Trainer
-    # Inject 'agents' config into 'training' config so Trainer can find it
     training_config = config.get("training", {})
     training_config["agents"] = config.get("agents", {})
-    
-    # Check if we should enable torch.compile (passed via config or args)
-    # The config file has training.torch_compile
     
     trainer = DeepScalperTrainer(
         env=env,
@@ -342,6 +289,5 @@ def main():
             data_loader.close_shared_memory(unlink=True)
 
 if __name__ == "__main__":
-    import gymnasium as gym # Lazy import for vector envs
+    import gymnasium as gym
     main()
-

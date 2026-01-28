@@ -2,7 +2,9 @@ import gymnasium as gym
 import numpy as np
 import logging
 from typing import Dict, Optional, Tuple, Any
-from finrl_pro_ds.data.handler import DBMarketDataHandler
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from finrl_pro_ds.data.handler import DBMarketDataHandler
 
 # Known macro feature columns from feature_engineering.py (DeepScalper Table 2)
 MACRO_COLS = [
@@ -28,7 +30,7 @@ class DeepScalperEnv(gym.Env):
     """
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, config: Dict[str, Any], data_handler: Optional[DBMarketDataHandler] = None):
+    def __init__(self, config: Dict[str, Any], data_handler: Optional["DBMarketDataHandler"] = None):
         super().__init__()
         self.config = config
         self.handler = data_handler

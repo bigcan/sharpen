@@ -1,16 +1,17 @@
 # FinRL-Pro_DS DeepScalper V10 Dependencies
-# Pinned to resolve torch/pyarrow ABI conflict on Linux (Exit Code 0 crash)
+# Updated for RTX 5090 (Blackwell) - requires PyTorch 2.8+ per GPUHub
 
 gym
 matplotlib
-numpy<2.0.0          # NumPy 2.0+ has breaking ABI changes
-torch                # Keep latest for RTX 5090 / CUDA 12.x support
+numpy                    # PyTorch 2.8 handles numpy compatibility
+torch>=2.8.0             # Match Base Image (RTX 5090 / CUDA 12.8)
 opencv-python
 yfinance
 stockstats
 wandb
-pandas<2.2.0         # Compatible with PyArrow 14.x
-pyarrow==14.0.1      # Last stable version before symbol conflicts with torch
+pandas                   # PyTorch 2.8+ has resolved ABI conflicts
+pyarrow>=14.0.1           # Use latest compatible version
+fastparquet              # Pure Python fallback for ABI safety
 seaborn
-vectorbt
+# vectorbt
 scipy

@@ -15,7 +15,7 @@ load_dotenv()
 PROJECT_ROOT = Path(os.getcwd())
 DEPLOY_EXCLUDES = [
     'mlruns', 'logs', 'wandb', 'results', 'checkpoints', '.git', '.venv', 'venv', '__pycache__', 
-    'market_data.parquet', 'btc_lob_jan2023.parquet' # Exclude massive data files
+    'market_data.parquet', 'btc_lob_jan2023.parquet', 'finrl_pro_ds.egg-info' # Exclude massive data & stale metadata
 ]
 ROOT_DATA_EXCLUDE = ['data'] # Only exclude root data folder
 
@@ -79,16 +79,14 @@ def deploy(args):
     
     if args.upload_data:
         # Use absolute paths for robust deployment
-        local_data = "c:/data/btc_lob_jan2023.parquet"
-        remote_data = "/data/btc_lob_jan2023.parquet"
+        local_data = PROJECT_ROOT / "data" / "btc_lob_demo.parquet"
+        remote_data = f"{remote_workspace}/btc_lob_demo.parquet"
         
-        if not os.path.exists(local_data):
+        if not local_data.exists():
             print(f"WARNING: Local data not found at {local_data}. CHECK PATHS.")
         else:
-            print(f"Uploading Data: {local_data} -> {remote_data} (This may take a while)...")
-            # Ensure remote /data dir exists
-            ssh.exec_command("mkdir -p /data")
-            sftp.put(local_data, remote_data)
+            print(f"Uploading Data: {local_data} -> {remote_data}...")
+            sftp.put(str(local_data), remote_data)
             print("Data upload complete.")
 
     print(f"Uploading {zip_name}...")
@@ -97,14 +95,23 @@ def deploy(args):
     
     # 4. Extract & Setup
     print("Extracting and Setting up...")
+    
+    # Prepend Miniconda to PATH for all commands
+    export_path = "export PATH=/root/miniconda3/bin:$PATH"
+    
     setup_cmds = [
+        f"{export_path}",
         f"cd {remote_workspace}",
+        # CRITICAL: Clean everything to avoid stale deps
+        "pip uninstall finrl-pro-ds -y || true",
+        "rm -rf finrl_pro_ds.egg-info build dist",
         f"unzip -o {zip_name} > /dev/null",
         "rm deploy_package.zip",
-        # CRITICAL: Nuke conflicting nightly/dev torch builds before reinstall
-        "pip uninstall torch torchvision torchaudio -y || true",
-        # Force reinstall pinned deps to override cached ABI-broken versions
-        "pip install --upgrade --force-reinstall -r requirements.txt",
+        # Verify setup.py content
+        "grep -C 2 'install_requires' setup.py || echo 'setup.py missing'",
+        # Base Image is PyTorch 2.8.0 + CUDA 12.8 (Correct for RTX 5090)
+        # DO NOT uninstall torch - use the pre-installed version
+        "pip install --upgrade -r requirements.txt",
         "pip install -e .",  # Editable install after deps are correct
         f"wandb login {wandb_key}" if wandb_key else "echo 'No WandB Key provided, skipping login'",
         f"pkill -f {script_path} || true" # Kill previous instances of THIS script
@@ -113,6 +120,7 @@ def deploy(args):
     stdin, stdout, stderr = ssh.exec_command(" && ".join(setup_cmds))
     out = stdout.read().decode()
     err = stderr.read().decode()
+    
     if err and "error" in err.lower():
         print(f"Setup Warning/Error: {err}")
     
@@ -124,7 +132,8 @@ def deploy(args):
     # We run from workspace root
     # SET ULIMIT for high-concurrency shared memory (24 workers * 93 cols)
     # Use -u for unbuffered output to capture crashes
-    cmd = f"ulimit -n 65535 && nohup python3 -u {script_path} --config {config_path} --run_name {full_run_name} > run.log 2>&1 & echo $! > run.pid"
+    # Prepend PATH here too
+    cmd = f"{export_path} && ulimit -n 65535 && nohup python -u {script_path} --config {config_path} --run_name {full_run_name} > run.log 2>&1 & echo $! > run.pid"
     
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
