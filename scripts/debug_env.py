@@ -1,41 +1,76 @@
-
+import argparse
 import sys
 import os
-sys.path.append(os.getcwd())
-
+import yaml
 import numpy as np
-import logging
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
-logging.basicConfig(level=logging.INFO)
+# Mock Config Loader or minimal config
+def load_config(path):
+    with open(path, 'r') as f:
+        return yaml.safe_load(f)
 
 def main():
-    # Mock Data Handler logic or use real data
-    # Let's use real data if available, else mock
-    file_path = "c:/data/btc_lob_jan2023.parquet"
-    if not os.path.exists(file_path):
-        print("Data not found, using mock logic via Mock Data Handler not implemented, using real config")
+    print("Starting Env Isolation Test...")
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--config", type=str, required=True)
+    parser.add_argument("--run_name", type=str)
+    args = parser.parse_args()
+
+    print("Importing Gymnasium...")
+    import gymnasium as gym
+    print(f"Gymnasium Version: {gym.__version__}")
+
+    print("Importing DeepScalperEnv...")
+    try:
+        from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+        print("DeepScalperEnv Imported.")
+    except Exception as e:
+        print(f"DeepScalperEnv Import Failed: {e}")
         return
 
-    config = {
-        "symbol": "BTCUSDT",
-        "data": {"file_path": file_path, "ticker": "BTCUSDT"},
-        "reward": {"scaling": 1e-4, "risk_penalty": 0.05}
-    }
-    
-    handler = ParquetDataHandler(file_path=file_path, ticker="BTCUSDT")
-    env = DeepScalperEnv(config=config, data_handler=handler)
-    
-    obs, _ = env.reset()
-    print("Env Reset.")
-    
-    # Step 10 times
-    for i in range(10):
-        action = np.array([1, 0, 0]) # Buy, Price 0, Vol 0
-        obs, reward, terminated, truncated, info = env.step(action)
-        print(f"Step {i}: Reward={reward}, Term={terminated}, Info={info}")
-        if terminated: break
+    print("Loading Config...")
+    config = load_config(args.config)
+    print("Config Loaded.")
+
+    print("Initializing Environment...")
+    try:
+        env = DeepScalperEnv(config)
+        print("Environment Initialized.")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Env Init Failed: {e}")
+        return
+
+    print("Resetting Environment...")
+    try:
+        obs, info = env.reset()
+        print("Environment Reset Successful.")
+        print(f"Obs Keys: {obs.keys() if isinstance(obs, dict) else 'Not Dict'}")
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Env Reset Failed: {e}")
+        return
+
+    print("Stepping Environment (5 steps)...")
+    try:
+        for i in range(5):
+            # Random Action: [Direction(3), Price(5), Volume(5)]
+            action = np.array([1, 2, 2]) 
+            obs, reward, terminated, truncated, info = env.step(action)
+            print(f"Step {i+1}: Reward={reward:.4f}, Done={terminated or truncated}")
+            if terminated or truncated:
+                print("Episode Done. Resetting...")
+                env.reset()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Env Step Failed: {e}")
+        return
+
+    print("Env Debug SUCCESS.")
 
 if __name__ == "__main__":
     main()

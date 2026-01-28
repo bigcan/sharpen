@@ -23,7 +23,7 @@ def load_config(path):
 def main():
     parser = argparse.ArgumentParser(description="Backtest DeepScalper")
     parser.add_argument("--config", type=str, required=True, help="Path to config yaml")
-    parser.add_argument("--checkpoint", type=str, required=True, help="Path to checkpoint .pth")
+    parser.add_argument("--checkpoint", type=str, default="auto", help="Path to checkpoint .pth or 'auto' to find latest")
     parser.add_argument("--debug", action="store_true", help="Debug mode")
     args = parser.parse_args()
 
@@ -80,9 +80,37 @@ def main():
     ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
 
     # 3. Load Checkpoint
-    print(f"Loading Checkpoint: {args.checkpoint}")
-    if os.path.exists(args.checkpoint):
-        checkpoint = torch.load(args.checkpoint, map_location=device)
+    checkpoint_path = args.checkpoint
+    
+    if checkpoint_path.lower() == "auto":
+        print("Auto-discovering latest checkpoint...")
+        # Search in ./results for correct run
+        results_dir = os.path.join(os.getcwd(), "results")
+        if os.path.exists(results_dir):
+            # Find latest run folder
+            runs = [os.path.join(results_dir, d) for d in os.listdir(results_dir) if os.path.isdir(os.path.join(results_dir, d))]
+            if runs:
+                latest_run = max(runs, key=os.path.getmtime)
+                print(f"Latest Run Found: {latest_run}")
+                # Look for checkpoint in checkpoints/ or root of run
+                ckpt_dir = os.path.join(latest_run, "checkpoints")
+                if os.path.exists(ckpt_dir):
+                    ckpts = [os.path.join(ckpt_dir, f) for f in os.listdir(ckpt_dir) if f.endswith(".pth")]
+                    if ckpts:
+                        checkpoint_path = max(ckpts, key=os.path.getmtime)
+                        print(f"Auto-selected Checkpoint: {checkpoint_path}")
+                    else:
+                        print("No .pth files in checkpoints dir.")
+                else:
+                    print("No checkpoints dir in run folder.")
+            else:
+                print("No run folders in results/.")
+        else:
+             print("results/ directory not found.")
+             
+    print(f"Loading Checkpoint: {checkpoint_path}")
+    if checkpoint_path and os.path.exists(checkpoint_path):
+        checkpoint = torch.load(checkpoint_path, map_location=device)
         
         def load_robust(model, key):
             if key not in checkpoint:

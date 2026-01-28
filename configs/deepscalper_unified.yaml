@@ -2,7 +2,7 @@
 # Optimized for NVIDIA RTX 5090 (Mach 3)
 
 data:
-  file_path: "/data/btc_lob_jan2023.parquet"
+  file_path: "/workspace/DeepScalper/btc_lob_demo.parquet"
   ticker: "BTCUSDT"
   train_start_date: "2023-01-01"
   train_end_date: "2023-01-30"
@@ -18,7 +18,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   transaction_fee: 0.0001
-  num_envs: 24
+  num_envs: 1
   window_size: 50
   
   reward:
@@ -60,14 +60,14 @@ agents:
     learning_rate: 0.0001
 
 training:
-  total_timesteps: 10000000
+  total_timesteps: 5000
   batch_size: 4096      # High throughput
   learning_rate: 0.0001 # Fallback/Global
   log_interval: 1000
   checkpoint_interval: 10000
-  torch_compile: true
+  torch_compile: false
   use_amp: true
-  use_shm: true
+  use_shm: false
 
 wandb:
   project: "FinRL-Pro-DS"
