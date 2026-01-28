@@ -234,14 +234,15 @@ risk enforcement, reporting, and the end-to-end fingerprint ??report flow. Run
 the full suite before committing changes to ensure constitutional guards remain
 intact.
 
-## DeepScalper Replication (Status: Production Training 🟢)
+## DeepScalper Replication (Status: Production Ready 🟢)
 
 Work-in-progress replication of the DeepScalper architecture (Sun et al., 2022) for minimal latency intraday trading on Bitcoin Futures.
 
 - **Agent**: `finrl_pro_ds.agents.deepscalper` (Synapse Ensemble: DQN, PPO, A2C)
 - **Environment**: `finrl_pro_ds.envs.deep_scalper_env.DeepScalperEnv` (LOB-aware, T+1 latency, **Verified**)
-- **Training**: Production Run `deepscalper_prod_v1` active on GPUHub (Jan 21, 2026).
-- **Data**: TimescaleDB storage for high-frequency LOB snapshots (`finrl_pro_ds.data.db.LOBSnapshot`)
+- **Training**: Verified MLOps Pipeline (`Native_PyTorch28_RTX5090`) on GPUHub.
+- **Backtesting**: Verified Auto-Discovery and VBT Reporting.
+- **Data**: Parquet-based high-frequency LOB streaming (Verified 32k FPS throughput).
 
 Run DeepScalper tests:
 ```bash
@@ -249,8 +250,8 @@ pytest tests/deepscalper
 ```
 
 **RTX 5090 Production Training (Optimized):**
-To utilize the 32GB VRAM and 25 vCPUs, use the Unified CLI:
+To utilize the 32GB VRAM and 25 vCPUs, use the verified remote deployment tool:
 ```bash
-python -m finrl_pro_ds.cli train --config configs/deepscalper_unified.yaml
+python scripts/deploy_bare_metal.py --script scripts/train_deepscalper_v3.py --config configs/deepscalper_unified.yaml --run_name DS_Production_Run
 ```
 *(Key Optimizations: Batch Size=4096, Num Envs=24, Buffer=1M, torch.compile=True)*

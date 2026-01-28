@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 import yaml
 import logging
+import wandb
 from pathlib import Path
 
 # Imports
@@ -65,6 +66,21 @@ def main():
 
     # Load Config
     config = load_config(args.config)
+    
+    # Initialize WandB
+    wandb_config = config.get("wandb", {})
+    # Use CLI run_name if provided, else from config, else None (auto-generated)
+    run_name = args.run_name 
+    
+    print(f"Initializing WandB run: {run_name}", flush=True)
+    wandb.init(
+        project=wandb_config.get("project", "FinRL-Pro-DS"),
+        entity=wandb_config.get("entity"),
+        mode=wandb_config.get("mode", "online"),
+        tags=wandb_config.get("tags", []),
+        name=run_name,
+        config=config
+    )
     
     if args.debug:
         config["torch_compile"] = False

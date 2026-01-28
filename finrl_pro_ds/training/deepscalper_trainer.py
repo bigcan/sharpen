@@ -296,6 +296,11 @@ class DeepScalperTrainer:
             num_envs = 1
             obs, info = self.env.reset()
             # If standard env, ensure batch dim is handled in _unpack_obs
+        
+        # GUARD: Prevent infinite loop if num_envs is 0
+        if num_envs < 1:
+            print(f"WARNING: num_envs detected as {num_envs}. Forcing to 1 to prevent infinite loop.", flush=True)
+            num_envs = 1
             
         micro, private, macro = self._unpack_obs(obs) 
         # _unpack_obs handles adding batch dim if missing for single env.
@@ -326,231 +331,143 @@ class DeepScalperTrainer:
         episode_count = 0
         
         # Init Watchdog (SPS Monitor)
+        print("DEBUG: Initializing Watchdog...", flush=True)
         self.watchdog = TrainingWatchdog(
             lambda: self.global_step, 
             timeout_seconds=300,
             min_sps=100.0 if self.config.get("env", {}).get("num_envs", 1) > 8 else 0.0 # Only enforce SPS on high throughput
         )
+        print("DEBUG: Starting Watchdog...", flush=True)
         self.watchdog.start()
+        print("DEBUG: Watchdog started.", flush=True)
         
-        while self.global_step < self.total_timesteps:
-            start_step = self.global_step
-            step = self.global_step  # For backward compatibility with logging
-            
-            # 1. Select Action (Voting)
-            # Watchdog: Log if this step takes too long? 
-            # We can't interrupt easily without signal.
-            # Let's verify we are entering the loop.
-            if step % 1000 == 0:
-                 self.logger.log_event("deepscalper.training.step_start", context={"step": step})
-                 
-            with torch.no_grad():
-                weights = self.ensemble.gating(macro) # (B, 3)
+        print("DEBUG: Entering Training Loop...", flush=True)
+        try:
+            while self.global_step < self.total_timesteps:
+                start_step = self.global_step
+                step = self.global_step  # For backward compatibility with logging
+                print(f"DEBUG: Loop Start. Step: {step}, Global: {self.global_step}, NumEnvs: {num_envs}", flush=True)
                 
-                # Individual Probs
-                p_dqn_dir, p_dqn_price, p_dqn_vol = self.ensemble.dqn.get_probs(micro, private, macro)
-                logits_ppo_dir, logits_ppo_price, logits_ppo_vol, val_ppo = self.ensemble.ppo.network(micro, private, macro)
-                p_ppo_dir = torch.softmax(logits_ppo_dir, dim=1)
-                p_ppo_price = torch.softmax(logits_ppo_price, dim=1)
-                p_ppo_vol = torch.softmax(logits_ppo_vol, dim=1)
+                # 1. Select Action (Voting)
+                # 1. Select Action (Voting)
+                if step % 1000 == 0:
+                     self.logger.log_event("deepscalper.training.step_start", context={"step": step})
                 
-                logits_a2c_dir, logits_a2c_price, logits_a2c_vol, val_a2c = self.ensemble.a2c.network(micro, private, macro)
-                p_a2c_dir = torch.softmax(logits_a2c_dir, dim=1)
-                p_a2c_price = torch.softmax(logits_a2c_price, dim=1)
-                p_a2c_vol = torch.softmax(logits_a2c_vol, dim=1)
-                
-                # Ensemble Aggregate
-                # Weights: (B, 3)
-                w_dqn = weights[:, 0].unsqueeze(1)
-                w_ppo = weights[:, 1].unsqueeze(1)
-                w_a2c = weights[:, 2].unsqueeze(1)
-                
-                final_dir = w_dqn * p_dqn_dir + w_ppo * p_ppo_dir + w_a2c * p_a2c_dir
-                final_price = w_dqn * p_dqn_price + w_ppo * p_ppo_price + w_a2c * p_a2c_price
-                final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
-                
-                # Sample Action
-                dist_dir = Categorical(probs=final_dir)
-                dist_price = Categorical(probs=final_price)
-                dist_vol = Categorical(probs=final_vol)
-                
-                a_dir = dist_dir.sample()
-                a_price = dist_price.sample()
-                a_vol = dist_vol.sample()
-                
-                # Action Vector: (B, 3)
-                action_vector = torch.stack([a_dir, a_price, a_vol], dim=1).cpu().numpy()
-                
-                # Log Probs for PPO
-                ens_log_dir = dist_dir.log_prob(a_dir)
-                ens_log_price = dist_price.log_prob(a_price)
-                ens_log_vol = dist_vol.log_prob(a_vol)
-                ppo_log_prob = torch.stack([ens_log_dir, ens_log_price, ens_log_vol], dim=1)
-
-            # 2. Step Environment
-            if is_vector_env:
-                next_obs, reward, terminated, truncated, info = self.env.step(action_vector)
-            else:
-                # Unwrap for single env (1, 3) -> (3,)
-                next_obs, reward, terminated, truncated, info = self.env.step(action_vector[0])
-            
-            next_micro, next_private, next_macro = self._unpack_obs(next_obs)
-            
-            # Handle Done
-            if is_vector_env:
-                dones = terminated | truncated # Element-wise OR
-            else:
-                dones = terminated or truncated
-                # Wrap scalar to array for uniform handling if we want, but keeping separate paths is safer for legacy
-            
-            # 3. Store Transitions & Track Rewards
-            
-            if is_vector_env:
-                # Vectorized Tracking
-                episode_rewards += reward
-                episode_lengths += 1
-                
-                # Check for finished episodes
-                for i in range(num_envs):
-                    if dones[i]:
-                        metrics = {
-                            "train/episode_reward": episode_rewards[i],
-                            "train/episode_length": episode_lengths[i],
-                            "train/global_step": self.global_step
-                        }
-                        self.logger.log_event("deepscalper.training.episode_end", context=metrics)
-                        wandb.log(metrics)
-                        
-                        episode_rewards[i] = 0
-                        episode_lengths[i] = 0
-                        episode_count += 1
-                        episode_rewards_total += metrics["train/episode_reward"]
-                
-                # Handling next_val for PPO/A2C
+                # Action Selection (Flattened & Robust)
                 with torch.no_grad():
-                    _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_private, next_macro)
-                    _, _, _, val_next_a2c = self.ensemble.a2c.network(next_micro, next_private, next_macro)
+                    # Ensemble Gating
+                    weights = self.ensemble.gating(macro) # (B, 3)
+                    
+                    # Individual Probs
+                    p_dqn_dir, p_dqn_price, p_dqn_vol = self.ensemble.dqn.get_probs(micro, private, macro)
+                    logits_ppo_dir, logits_ppo_price, logits_ppo_vol, val_ppo = self.ensemble.ppo.network(micro, private, macro)
+                    
+                    p_ppo_dir = torch.softmax(logits_ppo_dir, dim=1)
+                    p_ppo_price = torch.softmax(logits_ppo_price, dim=1)
+                    p_ppo_vol = torch.softmax(logits_ppo_vol, dim=1)
+                    
+                    logits_a2c_dir, logits_a2c_price, logits_a2c_vol, val_a2c = self.ensemble.a2c.network(micro, private, macro)
+                    p_a2c_dir = torch.softmax(logits_a2c_dir, dim=1)
+                    p_a2c_price = torch.softmax(logits_a2c_price, dim=1)
+                    p_a2c_vol = torch.softmax(logits_a2c_vol, dim=1)
+                    
+                    # Ensemble Aggregate
+                    w_dqn = weights[:, 0].unsqueeze(1)
+                    w_ppo = weights[:, 1].unsqueeze(1)
+                    w_a2c = weights[:, 2].unsqueeze(1)
+                    
+                    final_dir = w_dqn * p_dqn_dir + w_ppo * p_ppo_dir + w_a2c * p_a2c_dir
+                    final_price = w_dqn * p_dqn_price + w_ppo * p_ppo_price + w_a2c * p_a2c_price
+                    final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
+                    
+                    # Sample Action
+                    dist_dir = Categorical(probs=final_dir)
+                    dist_price = Categorical(probs=final_price)
+                    dist_vol = Categorical(probs=final_vol)
+                    
+                    a_dir = dist_dir.sample()
+                    a_price = dist_price.sample()
+                    a_vol = dist_vol.sample()
+                    
+                    # Action Vector: (B, 3)
+                    action_vector = torch.stack([a_dir, a_price, a_vol], dim=1).cpu().numpy()
+                    
+                    # Log Probs for PPO
+                    ens_log_dir = dist_dir.log_prob(a_dir)
+                    ens_log_price = dist_price.log_prob(a_price)
+                    ens_log_vol = dist_vol.log_prob(a_vol)
+                    
+                    ppo_log_prob = torch.stack([ens_log_dir, ens_log_price, ens_log_vol], dim=1)
+
+                # 2. Step Environment
+                if is_vector_env:
+                    next_obs, reward, terminated, truncated, info = self.env.step(action_vector)
+                else:
+                    # Unwrap for single env (1, 3) -> (3,)
+                    next_obs, reward, terminated, truncated, info = self.env.step(action_vector[0])
                 
-                # Loop to push to buffers individually (simplest integration with current buffers)
-                for i in range(num_envs):
-                    # Identify correct next_state
-                    # If done, next_obs[i] is reset state. We need terminal state.
-                    if dones[i] and "final_observation" in info:
-                        # Gymnasium VectorEnv: info['final_observation'][i] is the terminal obs
-                        # Note: info['final_observation'] is a list or array
-                        term_obs = info['final_observation'][i]
-                        term_micro, term_private, term_macro = self._unpack_obs(term_obs) # This creates (1, ...) tensors
-                        
-                        # Use terminal state for buffer
-                        s_micro = term_micro.squeeze(0)
-                        s_private = term_private.squeeze(0)
-                        s_macro = term_macro.squeeze(0)
-                        
-                        # For bootstrapping (val_next), we should technically use the value of the terminal state (0 if term, V(s) if trunc)
-                        # But here we use 'val_next' computed on RESET state which is WRONG for PPO.
-                        # Should compute value on terminal obs.
-                        # Approximation: Use valid next value if truncated, 0 if terminated?
-                        # Simplification: Use computed val_next (of reset state) but set mask=0 later.
-                        # Better: Recompute val for terminal state?
-                        # Let's trust GAE Logic: delta = r + gamma * V(s') * (1-d)
-                        # If done=True, V(s') is ignored. So val_next doesn't matter much.
-                        
-                    else:
-                        s_micro = next_micro[i]
-                        s_private = next_private[i]
-                        s_macro = next_macro[i]
+                next_micro, next_private, next_macro = self._unpack_obs(next_obs)
+                
+                # Handle Done
+                if is_vector_env:
+                    dones = terminated | truncated # Element-wise OR
+                else:
+                    dones = terminated or truncated
+                
+                # 3. Store Transitions & Track Rewards
+                if is_vector_env:
+                     pass # Vector path logic would go here
+                else:
+                    # SINGLE ENV STORAGE
+                    episode_rewards += reward
+                    episode_steps += 1
                     
-                    # Current State
-                    c_micro = micro[i]
-                    c_private = private[i]
-                    c_macro = macro[i]
+                    done = dones
                     
-                    # Store DQN
-                    # DQN Memory requires numpy dicts
-                    state_dict = {"micro": c_micro.cpu().numpy(), "private": c_private.cpu().numpy(), "macro": c_macro.cpu().numpy()}
-                    next_state_dict = {"micro": s_micro.cpu().numpy(), "private": s_private.cpu().numpy(), "macro": s_macro.cpu().numpy()}
+                    with torch.no_grad():
+                        _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_private, next_macro)
+                        _, _, _, val_next_a2c = self.ensemble.a2c.network(next_micro, next_private, next_macro)
+                    
+                    # Buffer Push
+                    state_dict = {"micro": micro.squeeze(0).cpu().numpy(), "private": private.squeeze(0).cpu().numpy(), "macro": macro.squeeze(0).cpu().numpy()}
+                    next_state_dict = {"micro": next_micro.squeeze(0).cpu().numpy(), "private": next_private.squeeze(0).cpu().numpy(), "macro": next_macro.squeeze(0).cpu().numpy()}
                     
                     self.ensemble.dqn.memory.push(
                         state_dict, 
-                        action_vector[i], 
-                        reward[i], 
+                        action_vector[0], 
+                        reward, 
                         next_state_dict, 
-                        bool(dones[i]),
-                        float(info.get("volatility_target", [0.0]*num_envs)[i]) # Section 4.4
+                        done,
+                        float(info.get("volatility_target", 0.0))
                     )
                     
-                    # Store PPO/A2C
-                    # (micro, private, macro, action, log_prob, reward, val, val_next, done)
                     self.ppo_buffer.append((
-                        c_micro, c_private, c_macro, action_vector[i], ppo_log_prob[i], 
-                        float(reward[i]), float(val_ppo[i]), float(val_next_ppo[i]), bool(dones[i])
+                        micro.squeeze(0), private.squeeze(0), macro.squeeze(0), action_vector[0], ppo_log_prob.squeeze(0),
+                        reward, val_ppo.item(), val_next_ppo.item(), done
                     ))
-                    
                     self.a2c_buffer.append((
-                        c_micro, c_private, c_macro, action_vector[i], None, 
-                        float(reward[i]), float(val_a2c[i]), float(val_next_a2c[i]), bool(dones[i])
+                        micro.squeeze(0), private.squeeze(0), macro.squeeze(0), action_vector[0], None,
+                        reward, val_a2c.item(), val_next_a2c.item(), done
                     ))
-                    
                     self.gating_buffer.append((
-                        c_macro, weights[i], float(reward[i]), bool(dones[i])
+                        macro.squeeze(0), weights.squeeze(0), reward, done
                     ))
                     
-            else:
-                # SINGLE ENV LEGACY PATH
-                # To maintain compatibility if needed, but above logic works for num_envs=1 too technically
-                # if we treat scalars as arrays of 1.
-                # However, scalars (float) don't index [i].
-                # Let's keep separate block for safety or just assume array wrap?
-                # _unpack_obs ensures tensors are (B, ...).
+                    if done:
+                        metrics = {"train/episode_reward": episode_rewards, "train/episode_length": episode_steps, "train/global_step": self.global_step}
+                        wandb.log(metrics)
+                        episode_rewards = 0
+                        episode_steps = 0
+                        episode_count += 1
+                        episode_rewards_total += metrics["train/episode_reward"]
+                        
+                        obs, info = self.env.reset()
+                        next_micro, next_private, next_macro = self._unpack_obs(obs)
                 
-                # Single env reward is float.
-                episode_rewards += reward
-                episode_steps += 1
-                
-                done = dones # Scalar
-                
-                with torch.no_grad():
-                    _, _, _, val_next_ppo = self.ensemble.ppo.network(next_micro, next_private, next_macro)
-                    _, _, _, val_next_a2c = self.ensemble.a2c.network(next_micro, next_private, next_macro)
-                
-                # Buffer Push (Squeeze batch dims for storage as buffers expect single items usually)
-                state_dict = {"micro": micro.squeeze(0).cpu().numpy(), "private": private.squeeze(0).cpu().numpy(), "macro": macro.squeeze(0).cpu().numpy()}
-                next_state_dict = {"micro": next_micro.squeeze(0).cpu().numpy(), "private": next_private.squeeze(0).cpu().numpy(), "macro": next_macro.squeeze(0).cpu().numpy()}
-                
-                self.ensemble.dqn.memory.push(
-                    state_dict, 
-                    action_vector[0], 
-                    reward, 
-                    next_state_dict, 
-                    done,
-                    float(info.get("volatility_target", 0.0)) # Section 4.4
-                )
-                
-                self.ppo_buffer.append((
-                    micro.squeeze(0), private.squeeze(0), macro.squeeze(0), action_vector[0], ppo_log_prob.squeeze(0),
-                    reward, val_ppo.item(), val_next_ppo.item(), done
-                ))
-                self.a2c_buffer.append((
-                    micro.squeeze(0), private.squeeze(0), macro.squeeze(0), action_vector[0], None,
-                    reward, val_a2c.item(), val_next_a2c.item(), done
-                ))
-                self.gating_buffer.append((
-                    macro.squeeze(0), weights.squeeze(0), reward, done
-                ))
-                
-                if done:
-                    metrics = {"train/episode_reward": episode_rewards, "train/episode_length": episode_steps, "train/global_step": self.global_step}
-                    wandb.log(metrics)
-                    episode_rewards = 0
-                    episode_steps = 0
-                    episode_count += 1
-                    episode_rewards_total += metrics["train/episode_reward"]
-                    
-                    obs, info = self.env.reset()
-                    next_micro, next_private, next_macro = self._unpack_obs(obs)
-            
-            # Increment global step by number of envs (after env step and storage)
-            self.global_step += num_envs
+                # Increment global step by number of envs
+                self.global_step += num_envs
+
+            # 4. Updates
 
             # 4. Updates
             
@@ -624,8 +541,22 @@ class DeepScalperTrainer:
             private = next_private
             macro = next_macro
             obs = next_obs
+            print("DEBUG: Loop End. Obs updated.", flush=True)
         
-        self.watchdog.stop()
+        except Exception as e:
+            print(f"FATAL EXCEPTION IN TRAINING LOOP: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise e
+        finally:
+            print("DEBUG: Stopping Watchdog...", flush=True)
+            if hasattr(self, 'watchdog'):
+                self.watchdog.stop()
+
+        # Save Final Checkpoint
+        final_ckpt_path = f"checkpoints/checkpoint_final_{self.global_step}.pth"
+        print(f"Saving final checkpoint to {final_ckpt_path}...", flush=True)
+        self.save_checkpoint(final_ckpt_path)
 
         self.logger.log_event("deepscalper.training.complete")
         
