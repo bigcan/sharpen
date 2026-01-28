@@ -154,13 +154,13 @@ def deploy(args):
     # SET ULIMIT for high-concurrency shared memory (24 workers * 93 cols)
     # Use -u for unbuffered output to capture crashes
     # Prepend PATH here too
-    cmd = f"{export_path} && ulimit -n 65535 && nohup python -u {script_path} --config {config_path} --run_name {full_run_name} > run.log 2>&1 & echo $! > run.pid"
+    cmd = f"{export_path} && ulimit -n 65535 && nohup python -u {script_path} --config {config_path} --run_name {full_run_name} {args.extra_args} > run.log 2>&1 & echo $! > run.pid"
     
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
     
     # Check if launched
-    time.sleep(5)
+    time.sleep(15)
     stdin, stdout, stderr = ssh.exec_command(f"cat {remote_workspace}/run.pid")
     pid = stdout.read().decode().strip()
     
@@ -183,6 +183,7 @@ if __name__ == "__main__":
     parser.add_argument("--run_name", default="DS_GPUHub_BM_V1", help="Base name for WandB run")
     parser.add_argument("--upload_data", action="store_true", help="Upload data file to /data")
     parser.add_argument("--data_file", default=None, help="Specific data filename in data/ to upload (e.g. btc_lob_jan2023.parquet)")
+    parser.add_argument("--extra_args", default="", help="Extra arguments to pass to the script (e.g. '--trials 50 --steps 200000')")
     args = parser.parse_args()
     
     deploy(args)
