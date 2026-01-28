@@ -90,7 +90,16 @@ def sanitize_config(cfg):
 
 def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
     # 0. WandB Silent Mode
-    wandb.init(mode="disabled")
+    # 0. WandB Active Mode
+    run_mode = dataclasses.asdict(base_config).get("wandb", {}).get("mode", "online")
+    wandb.init(
+        project=dataclasses.asdict(base_config).get("wandb", {}).get("project", "FinRL-Pro-DS"),
+        entity=dataclasses.asdict(base_config).get("wandb", {}).get("entity"),
+        mode=run_mode,
+        group=f"HPO_{args.study_name}",
+        name=f"Trial_{trial.number}",
+        reinit=True
+    )
 
     # 1. Sample Hyperparameters
     lr = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
