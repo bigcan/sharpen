@@ -1,5 +1,5 @@
 # DeepScalper Unified Master Configuration
-# Optimized for NVIDIA RTX 5090 (Mach 3)
+# Optimized for NVIDIA RTX 5090 (Mach 3.5) - Synapse V9.5 Profile/V10 Spec
 
 data:
   file_path: "data/btc_lob_jan2023.parquet"
@@ -17,13 +17,13 @@ features:
 env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
-  transaction_fee: 0.0001
-  num_envs: 12
+  transaction_fee: 1.0e-5 # Reduced Fees (V9.5)
+  num_envs: 50            # Standard Scaling (V9.5)
   window_size: 50
   
   reward:
     profit_weight: 1.0
-    volatility_penalty_weight: 0.1
+    volatility_penalty_weight: 0.5 # Risk Aversion Bump (V9.5)
     volatility_horizon: 100
     risk_aversion: 0.5
     
@@ -33,44 +33,50 @@ env:
     volume_bins: 5    # Order Size Fractions
 
 network:
-  micro_input_size: 20
-  macro_input_size: 11
-  private_input_size: 2
-  hidden_size: 64
+  # Nested Configuration for Complex Architectures (V9.5)
+  micro_config:
+    input_size: 20
+    private_input_size: 2
+    hidden_size: 256 # LSTM Optimized
+    
+  macro_config:
+    input_size: 11
+    hidden_sizes: [1024, 1024, 512] # Deep MLP (V9.5)
 
 agents:
   dqn:
-    learning_rate: 0.0001
-    gamma: 0.99
+    learning_rate: 5.0e-5 # V9.5 tuned
+    gamma: 0.999          # Long horizon
     dqn_batch_size: 64
     dqn_buffer_size: 100000
     dqn_target_update_freq: 1000
     
   ppo:
-    learning_rate: 0.0001
-    gamma: 0.99
+    learning_rate: 5.0e-5
+    gamma: 0.999
     entropy_coef: 0.01
     clip_epsilon: 0.2
     
   a2c:
-    learning_rate: 0.0001
-    gamma: 0.99
+    learning_rate: 5.0e-5
+    gamma: 0.999
     
   gating:
-    learning_rate: 0.0001
+    learning_rate: 5.0e-5
 
 training:
   total_timesteps: 2000000
-  batch_size: 4096      # High throughput
-  learning_rate: 0.0001 # Fallback/Global
+  batch_size: 8192      # High throughput (V9.5)
+  learning_rate: 5.0e-5 # Fallback/Global
+  dqn_update_interval: 0.5 # 2 updates per step (V9.5)
   log_interval: 1000
   checkpoint_interval: 10000
-  torch_compile: false
+  torch_compile: true   # Enabled
   use_amp: true
-  use_shm: false
+  use_shm: false        # Keep false unless necessary for stability
 
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   mode: "online"
-  tags: ["Unified", "Mach3", "RTX5090"]
+  tags: ["Unified", "Mach3.5", "RTX5090", "SynapseV9.5"]
