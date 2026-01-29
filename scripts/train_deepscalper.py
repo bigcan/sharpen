@@ -100,9 +100,9 @@ def setup_wandb(config):
     # Enforce Naming Convention
     run_name = wandb_config.get("name")
     if not run_name:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        run_name = f"Deepscalper_V1_GPUHub_{timestamp}"
-        print(f"Auto-generated Mandatory Run Name: {run_name}")
+        from finrl_pro_ds.utils.naming import generate_run_name
+        run_name = generate_run_name(version="V1", platform="GPUHub")
+        print(f"Auto-generated Canonical Run Name: {run_name}")
     
     print(f"Initializing WandB: Project={project}, Entity={entity}, Mode={mode}, Name={run_name}")
     wandb.init(

@@ -96,32 +96,9 @@ def sanitize_config(cfg):
     return cfg
 
 def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
-    run_mode = dataclasses.asdict(base_config).get("wandb", {}).get("mode", "online")
-    
-    # 0.5 Determine Base Run Name (Authoritative)
-    if args.run_name:
-        base_name = args.run_name
-    else:
-        # Default to Operations Guide Standard: Deepscalper_V1_GPUHub_YYYYMMDD_HHMM
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
-        base_name = f"Deepscalper_V1_GPUHub_{timestamp}"
-
-    # Determine Final Run Name (Handle Trials)
-    if args.trials > 1:
-        run_name = f"{base_name}_Trial_{trial.number}"
-        group_name = f"HPO_{args.study_name}"
-    else:
-        run_name = base_name
-        group_name = base_name
-
-    wandb.init(
-        project=dataclasses.asdict(base_config).get("wandb", {}).get("project", "FinRL-Pro-DS"),
-        entity=dataclasses.asdict(base_config).get("wandb", {}).get("entity"),
-        mode=run_mode,
-        group=group_name, 
-        name=run_name,
-        reinit=True
-    )
+    # Log trial start (WandB is already initialized in main)
+    logger.info(f"=== Starting Trial {trial.number} ===")
+    wandb.log({"trial/number": trial.number, "trial/status": "started"}, commit=False)
 
     # 1. Sample Hyperparameters
     lr = trial.suggest_float('learning_rate', 1e-5, 1e-3, log=True)
@@ -359,20 +336,35 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
             metrics = trainer.evaluate(env_val, num_episodes=5 if args.debug else 20) # Ensure enough episodes for vector env
             fold_scores.append(metrics['sharpe'])
             
+            # Log fold metrics to WandB (single run, all trials)
+            wandb.log({
+                f"trial_{trial.number}/fold_{i+1}/sharpe": metrics['sharpe'],
+                f"trial_{trial.number}/fold_{i+1}/return": metrics.get('total_return', 0),
+                "current_trial": trial.number,
+                "current_fold": i + 1
+            })
+            
             # Optuna Pruning: Report intermediate value after each fold
             intermediate_sharpe = np.mean(fold_scores)
             trial.report(intermediate_sharpe, i)
             
             if trial.should_prune():
                 logger.info(f"Trial pruned at fold {i+1}")
+                wandb.log({f"trial_{trial.number}/status": "pruned"})
                 env_train.close()
                 env_val.close()
                 raise optuna.TrialPruned()
             
             env_train.close()
             env_val.close()
-            
-        return np.mean(fold_scores)
+        
+        # Log final trial result
+        final_sharpe = np.mean(fold_scores)
+        wandb.log({
+            f"trial_{trial.number}/final_sharpe": final_sharpe,
+            f"trial_{trial.number}/status": "completed"
+        })
+        return final_sharpe
 
     except Exception as e:
         logger.error(f"Trial failed: {e}")
@@ -578,7 +570,7 @@ if __name__ == "__main__":
     parser.add_argument("--storage", type=str, default="sqlite:///hpo.db")
     parser.add_argument("--resume", action="store_true", help="Resume study")
     parser.add_argument("--debug", action="store_true", default=False)
-    parser.add_argument("--run_name", type=str, default=None, help="Run name (ignored but required by deployment runner)")
+    parser.add_argument("--run_name", type=str, default=None, help="WandB run name (uses canonical format if not provided)")
     parser.add_argument("--strategy", type=str, default="joint", choices=["joint", "independent"], help="HPO Strategy")
     parser.add_argument("--data_file", type=str, default=None, help="Override data file path")
     args = parser.parse_args()
@@ -653,12 +645,48 @@ if __name__ == "__main__":
             direction="maximize"
         )
         
+        # === SINGLE WANDB RUN FOR ALL TRIALS ===
+        # Determine Run Name
+        if args.run_name:
+            hpo_run_name = args.run_name
+        else:
+            # Use centralized naming utility for consistent format
+            from finrl_pro_ds.utils.naming import generate_run_name
+            hpo_run_name = generate_run_name(version="V1", platform="GPUHub", suffix="HPO")
+        
+        wandb_config = dataclasses.asdict(base_config).get("wandb", {})
+        wandb.init(
+            project=wandb_config.get("project", "FinRL-Pro-DS"),
+            entity=wandb_config.get("entity"),
+            mode=wandb_config.get("mode", "online"),
+            name=hpo_run_name,
+            config={
+                "study_name": args.study_name,
+                "n_trials": args.trials,
+                "steps_per_fold": args.steps,
+                "strategy": args.strategy,
+                "config_file": args.config
+            }
+        )
+        logger.info(f"WandB Run Initialized: {hpo_run_name}")
+        
         logger.info(f"Starting HPO. Trials: {args.trials}")
         # Pass shm_config to objective
         study.optimize(lambda t: objective(t, base_config, args, shm_config=active_shm_config), n_trials=args.trials)
         
         logger.info("Best Params: " + str(study.best_params))
         logger.info("Best Sharpe: " + str(study.best_value))
+        
+        # Log best trial summary to WandB
+        if study.best_trial:
+            wandb.log({
+                "best_trial/number": study.best_trial.number,
+                "best_trial/sharpe": study.best_value,
+                "best_trial/params": study.best_params
+            })
+            wandb.summary["best_sharpe"] = study.best_value
+            wandb.summary["best_trial"] = study.best_trial.number
+            wandb.summary["best_params"] = study.best_params
         
         try:
             run_best_model_report(study.best_params, base_config, args)
@@ -668,6 +696,9 @@ if __name__ == "__main__":
             traceback.print_exc()
             
     finally:
+        # Finalize WandB
+        wandb.finish()
+        
         # Cleanup Shared Memory
         if active_data_handler:
             logger.info("Cleaning up Shared Memory...")
