@@ -1,6 +1,7 @@
 import argparse
 import sys
 import os
+from datetime import datetime
 
 # Critical Fix: Import Torch BEFORE Pandas/PyArrow to prevent ABI conflicts
 import torch
@@ -73,6 +74,11 @@ def main():
     # Use CLI run_name if provided, else from config, else None (auto-generated)
     run_name = args.run_name 
     
+    if run_name is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        run_name = f"Deepscalper_V3_GPUHub_{timestamp}"
+        print(f"Auto-generating Missing Run Name: {run_name}", flush=True)
+
     print(f"Initializing WandB run: {run_name}", flush=True)
     wandb.init(
         project=wandb_config.get("project", "FinRL-Pro-DS"),

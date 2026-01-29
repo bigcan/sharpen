@@ -1,6 +1,7 @@
 import argparse
 import yaml
 import os
+from datetime import datetime
 import pandas as pd # Explicitly import pandas/pyarrow BEFORE torch to avoid ABI crash
 # import pyarrow # REMOVED: Testing if this caused conflict
 import torch
@@ -94,18 +95,23 @@ def setup_wandb(config):
     mode = wandb_config.get("mode", "online")
     
     # User requested entity: bigcan-chiwin-technology
-    # Ideally should be in config, but I will hardcode default if missing or pass it here.
-    # The prompt explicitly asked to start run in this project.
     entity = wandb_config.get("entity", "bigcan-chiwin-technology")
     
-    print(f"Initializing WandB: Project={project}, Entity={entity}, Mode={mode}")
+    # Enforce Naming Convention
+    run_name = wandb_config.get("name")
+    if not run_name:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        run_name = f"Deepscalper_V1_GPUHub_{timestamp}"
+        print(f"Auto-generated Mandatory Run Name: {run_name}")
+    
+    print(f"Initializing WandB: Project={project}, Entity={entity}, Mode={mode}, Name={run_name}")
     wandb.init(
         project=project,
         entity=entity,
         config=config,
         tags=tags,
         mode=mode,
-        name=wandb_config.get("name", None) # Optional run name
+        name=run_name
     )
 
 def main():
@@ -134,7 +140,7 @@ def main():
         config["wandb"]["name"] = args.run_name
     
     # Setup WandB
-    # setup_wandb(config) # DISABLED: Testing if WandB causes PyArrow crash
+    setup_wandb(config)
 
     # Pre-load Data for Shared Memory (Optimization)
     data_loader = None
