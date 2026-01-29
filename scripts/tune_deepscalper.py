@@ -24,6 +24,7 @@ from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepSc
 from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
+from finrl_pro_ds.data.splitter import RollingWindowSplitter
 from finrl_pro_ds.configs.schema import UnifiedConfig, ConfigLoader
 from finrl_pro_ds.analytics.wandb_evaluator import generate_wandb_report
 import multiprocessing as mp
@@ -179,16 +180,15 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
         
     sanitize_config(trial_config)
 
-    # 3. Walk-Forward Validation Setup
+    # 3. Walk-Forward Validation Setup (Rolling Window)
     train_start_date = trial_config.get("data", {}).get("train_start_date", "2023-01-01")
-    folds = [
-        {"train": (train_start_date, "2023-01-10"), "val": ("2023-01-11", "2023-01-13")}
-    ]
+    # Default End Date: One year from start or specified
+    train_end_date = trial_config.get("data", {}).get("train_end_date", "2023-12-31")
     
     # Robust Debug / Demo Data Detection
     data_path = trial_config.get("data", {}).get("file_path", "")
     is_demo = "demo" in str(data_path).lower() or args.debug
-    
+
     if is_demo:
          if "demo" in str(data_path).lower():
              # Shorter windows, aligned with demo data (2026-01-21)
@@ -196,26 +196,24 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
          else:
              # Debugging with real data (2023) - Use small valid slice
              folds = [{"train": ("2023-01-10 00:00:00", "2023-01-10 02:00:00"), "val": ("2023-01-10 02:00:00", "2023-01-10 02:30:00")}]
-
-    fold_scores = []
-# ... in run_best_model_report ...
-    if args.debug:
-        if "demo" in str(data_path).lower():
-            start_date = "2026-01-21 13:40:00"
-            end_date = "2026-01-21 14:10:00"
-        else:
-             # Debug with real data
-             start_date = "2023-01-10 00:00:00"
-             end_date = "2023-01-10 04:00:00"
-
-# ... and train settings ...
-    if args.debug:
-        if "demo" in str(data_path).lower():
-            train_start = "2026-01-21 13:40:00"
-            train_end = "2026-01-21 14:00:00"
-        else:
-             train_start = "2023-01-10 00:00:00"
-             train_end = "2023-01-10 02:00:00"
+    else:
+        # PRODUCTION: Use Rolling Window Splitter
+        logger.info(f"Generating Rolling Window Folds ({train_start_date} to {train_end_date})...")
+        splitter = RollingWindowSplitter(train_months=3, val_months=1, test_months=1, step_months=1)
+        raw_folds = splitter.split(train_start_date, train_end_date)
+        
+        # Convert to tuple format for harness
+        folds = []
+        for rf in raw_folds:
+            folds.append({
+                "train": rf["train"].to_tuple(),
+                "val": rf["val"].to_tuple()
+            })
+        
+        logger.info(f"Generated {len(folds)} folds for Walk-Forward Validation.")
+        if len(folds) == 0:
+            logger.warning("No folds generated! Check dates. Fallback to static fold.")
+            folds = [{"train": ("2023-01-01", "2023-04-01"), "val": ("2023-04-01", "2023-05-01")}]
 
     fold_scores = []
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -341,6 +339,16 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
             
             metrics = trainer.evaluate(env_val, num_episodes=5 if args.debug else 20) # Ensure enough episodes for vector env
             fold_scores.append(metrics['sharpe'])
+            
+            # Optuna Pruning: Report intermediate value after each fold
+            intermediate_sharpe = np.mean(fold_scores)
+            trial.report(intermediate_sharpe, fold_idx)
+            
+            if trial.should_prune():
+                logger.info(f"Trial pruned at fold {fold_idx+1}")
+                env_train.close()
+                env_val.close()
+                raise optuna.TrialPruned()
             
             env_train.close()
             env_val.close()

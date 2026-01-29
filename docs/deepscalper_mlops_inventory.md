@@ -52,3 +52,12 @@ This document chronicles the inventory of scripts involved in the DeepScalper ML
 
 *   `configs/deepscalper_unified.yaml`
     *   **Function:** The master configuration file controlling environment parameters, model architecture (DeepScalper), and training settings.
+
+---
+
+## 7. Scheduled Refactors (Tech Debt)
+
+| Item | Status | Description |
+|---|---|---|
+| `SynapseGatingNetwork` Alias | 🔴 Open | Remove backward-compat alias from `ensemble.py`. Rename all usages to `DeepScalperGatingNetwork`. |
+

@@ -8,6 +8,9 @@ from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
 from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
 from finrl_pro_ds.networks.gating import DeepScalperGatingNetwork
 
+# Backward Compatibility
+SynapseGatingNetwork = DeepScalperGatingNetwork
+
 class DeepScalperEnsemble:
     """
     The 'Scalper Squad' Ensemble.
