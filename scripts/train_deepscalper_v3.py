@@ -20,7 +20,8 @@ from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
 import gymnasium as gym
 from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
 from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
-from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
+from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble
+from finrl_pro_ds.networks.gating import DeepScalperGatingNetwork
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
@@ -168,7 +169,7 @@ def main():
         
         ensemble_config = net_config.get("ensemble_config", {})
         gating_input = ensemble_config.get("input_size", net_config["macro_config"]["input_size"])
-        gating = SynapseGatingNetwork(input_dim=gating_input, hidden_dim=64)
+        gating = DeepScalperGatingNetwork(input_dim=gating_input, hidden_dim=64)
         
         ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
         print("Agents Initialized.", flush=True)

@@ -13,7 +13,8 @@ from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
 from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
-from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
+from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble
+from finrl_pro_ds.networks.gating import DeepScalperGatingNetwork
 from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer # reusing for unpack_obs logic if needed
 
 def load_config(path):
@@ -104,7 +105,7 @@ def main():
     )
     ppo = DeepScalperPPO(agent_net_config, device=device)
     a2c = DeepScalperA2C(agent_net_config, device=device)
-    gating = SynapseGatingNetwork(input_dim=net_config["macro_config"]["input_size"])
+    gating = DeepScalperGatingNetwork(input_dim=net_config["macro_config"]["input_size"])
     ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
 
     # 3. Load Checkpoint
