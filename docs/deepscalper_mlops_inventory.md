@@ -60,4 +60,5 @@ This document chronicles the inventory of scripts involved in the DeepScalper ML
 | Item | Status | Description |
 |---|---|---|
 | `SynapseGatingNetwork` Alias | 🔴 Open | Remove backward-compat alias from `ensemble.py`. Rename all usages to `DeepScalperGatingNetwork`. |
+| Notebook-to-CLI Migration | 🟡 Open | Migrate Control Plane logic from Notebook to a dedicated CLI (`mission_control.py`) using `typer`. |
 
