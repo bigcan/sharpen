@@ -5,82 +5,190 @@ import subprocess
 import sys
 import yaml
 
+# Ensure project root is in path
+sys.path.append(os.getcwd())
+
 def run_command(cmd, shell=True):
     print(f"Running command: {cmd}")
     result = subprocess.run(cmd, shell=shell, text=True)
     if result.returncode != 0:
         print(f"Error executing command: {cmd}")
-        print(f"Return Code: {result.returncode}")
-        # Decide if we strictly exit or continue. For pipeline, usually strict exit is safer.
+        # Fail fast implementation
         sys.exit(result.returncode)
     return result
 
-def main():
-    parser = argparse.ArgumentParser(description="Run Full DeepScalper Pipeline (Train -> Backtest)")
-    parser.add_argument("--config", type=str, required=True, help="Path to config file")
-    parser.add_argument("--run_name", type=str, default=None, help="Run name for WandB (auto-generated if not provided)")
-    # Capture extra args to pass them down if needed, or loosely handle them
-    parser.add_argument("--debug", action="store_true", help="Run in debug mode")
+def load_yaml(path):
+    with open(path, 'r') as f:
+        return yaml.safe_load(f)
+
+def save_yaml(data, path):
+    with open(path, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False)
+
+def merge_params(config, params):
+    """
+    Merge flat HPO params into structured config.
+    Matches logic in tune_deepscalper.py
+    """
+    # 1. Global/Common Updates
+    if "network" not in config: config["network"] = {}
     
-    parser.add_argument("--resume-from", type=str, choices=["train", "backtest", "report"], default="train", 
-                        help="Start pipeline from a specific phase (skipping previous ones)")
+    if "hidden_size" in params:
+        hs = params["hidden_size"]
+        config["network"]["hidden_size"] = hs
+        if "micro_config" in config["network"]:
+            config["network"]["micro_config"]["hidden_size"] = hs
+        if "macro_config" in config["network"]:
+            config["network"]["macro_config"]["hidden_sizes"] = [hs]
+
+    if "env" in config and "reward" in config["env"]:
+        if "profit_weight" in params:
+            config["env"]["reward"]["profit_weight"] = params["profit_weight"]
+        if "volatility_penalty_weight" in params:
+            config["env"]["reward"]["volatility_penalty_weight"] = params["volatility_penalty_weight"]
+
+    # 2. Agent Specific Updates (Strategy Dependent)
+    agents = config.get("agents", {})
+    
+    # Check if Independent strategy was likely used (presence of specific keys)
+    is_independent = "dqn_lr" in params
+    
+    if is_independent:
+        # DQN
+        if "dqn_lr" in params and "dqn" in agents:
+             agents["dqn"]["learning_rate"] = params["dqn_lr"]
+        
+        # PPO
+        if "ppo_lr" in params and "ppo" in agents:
+             agents["ppo"]["learning_rate"] = params["ppo_lr"]
+        if "ppo_entropy" in params and "ppo" in agents:
+             agents["ppo"]["entropy_coef"] = params["ppo_entropy"]
+             
+        # A2C
+        if "a2c_lr" in params and "a2c" in agents:
+             agents["a2c"]["learning_rate"] = params["a2c_lr"]
+        if "a2c_entropy" in params and "a2c" in agents:
+             agents["a2c"]["entropy_coef"] = params["a2c_entropy"]
+             
+        # Gating
+        if "gating_lr" in params and "gating" in agents:
+             agents["gating"]["learning_rate"] = params["gating_lr"]
+             
+        # Global fallback (Gamma)
+        if "gamma" in params:
+            config["training"]["gamma"] = params["gamma"]
+
+    else:
+        # Joint Strategy
+        lr = params.get("learning_rate")
+        gamma = params.get("gamma")
+        entropy = params.get("entropy_coef")
+        
+        if lr is not None:
+            config["training"]["learning_rate"] = lr
+            for ag in ["dqn", "ppo", "a2c", "gating"]:
+                if ag in agents: agents[ag]["learning_rate"] = lr
+        
+        if gamma is not None:
+            config["training"]["gamma"] = gamma
+            for ag in ["dqn", "ppo", "a2c"]:
+                if ag in agents: agents[ag]["gamma"] = gamma
+                
+        if entropy is not None:
+             if "ppo" in agents: agents["ppo"]["entropy_coef"] = entropy
+             if "a2c" in agents: agents["a2c"]["entropy_coef"] = entropy
+
+    config["agents"] = agents
+    return config
+
+def main():
+    parser = argparse.ArgumentParser(description="Run Full DeepScalper Pipeline (HPO -> Train -> Backtest)")
+    parser.add_argument("--config", type=str, required=True, help="Base config file")
+    parser.add_argument("--run_name", type=str, default=None, help="WandB Run Name")
+    parser.add_argument("--debug", action="store_true")
+    parser.add_argument("--trials", type=int, default=5, help="HPO Trials")
+    parser.add_argument("--steps", type=int, default=5000, help="HPO/Train Steps")
+    parser.add_argument("--resume-from", type=str, choices=["hpo", "train", "backtest", "report"], default="hpo")
     
     args, unknown = parser.parse_known_args()
     
-    # Auto-generate run_name if not provided
+    # Auto-generate name
     if not args.run_name:
         from finrl_pro_ds.utils.naming import generate_run_name
         args.run_name = generate_run_name(version="V1", platform="GPUHub", suffix="Pipeline")
         print(f"Auto-generated Run Name: {args.run_name}")
-    
-    phases = ["train", "backtest", "report"]
+        
+    phases = ["hpo", "train", "backtest", "report"]
     start_index = phases.index(args.resume_from)
     
-    # 1. Training Phase
+    tuned_config_path = "deepscalper_tuned.yaml"
+    
+    # PHASE 0: HPO
     if start_index <= 0:
-        print("="*60)
-        print("PHASE 1: TRAINING")
-        print("="*60)
+        print("\n=== PHASE 1: HYPERPARAMETER OPTIMIZATION ===")
+        print(f"Trials: {args.trials}, Steps: {args.steps}")
         
-        train_script = "scripts/train_deepscalper_v3.py"
-        train_cmd = f"python {train_script} --config {args.config} --run_name {args.run_name}"
+        hpo_cmd = f"python scripts/tune_deepscalper.py --config {args.config} --trials {args.trials} --steps {args.steps} --run_name {args.run_name}_HPO"
+        if args.debug:
+            hpo_cmd += " --debug"
+            
+        run_command(hpo_cmd)
+    else:
+        print(f"Skipping HPO (Resuming from {args.resume_from})")
+
+    # PHASE 0.5: CONFIG MERGE
+    # Always try to merge if best_params exists, or just use base config
+    if os.path.exists("best_params.yaml"):
+        print("\n=== PHASE 1.5: CONFIG MERGE ===")
+        print("Merging best_params.yaml into config...")
+        base_config = load_yaml(args.config)
+        best_params = load_yaml("best_params.yaml")
+        tuned_config = merge_params(base_config, best_params)
+        
+        # Ensure training uses correct steps if passed via CLI, or stick to config?
+        # Typically HPO steps != Training steps (Training should be longer)
+        # But for pipeline simple run, let's respect config, unless debug.
+        if args.debug:
+             tuned_config["training"]["total_timesteps"] = args.steps
+             
+        save_yaml(tuned_config, tuned_config_path)
+        print(f"Saved tuned config to {tuned_config_path}")
+        active_config = tuned_config_path
+    else:
+        print("\nWARNING: best_params.yaml not found. Using base config.")
+        active_config = args.config
+
+    # PHASE 1: TRAIN
+    if start_index <= 1:
+        print("\n=== PHASE 2: TRAINING ===")
+        train_cmd = f"python scripts/train_deepscalper.py --config {active_config} --run_name {args.run_name}_Train"
         if args.debug:
             train_cmd += " --debug"
             
         run_command(train_cmd)
-    else:
-        print("Skipping PHASE 1: TRAINING (Resuming from {})".format(args.resume_from))
-    
-    # 2. Backtesting Phase
-    if start_index <= 1:
-        print("\n" + "="*60)
-        print("PHASE 2: BACKTESTING")
-        print("="*60)
         
-        backtest_script = "scripts/backtest_deepscalper.py"
-        # Backtest uses --checkpoint auto to find the model we just trained (since we don't know the exact hash path yet)
-        # We pass the same config.
-        backtest_cmd = f"python {backtest_script} --config {args.config} --checkpoint auto" 
+    # PHASE 2: BACKTEST
+    if start_index <= 2:
+        print("\n=== PHASE 3: BACKTESTING ===")
+        # Checkpoint auto-detection
+        # If we just trained, checkpoint is likely checkpoints/checkpoint_final_*.pth
+        # But we don't know the exact step count if config varied.
+        # Let 'auto' handle it if backtest_deepscalper supports it.
+        # Yes, standard run_full_pipeline used 'auto'.
+        
+        backtest_cmd = f"python scripts/backtest_deepscalper.py --config {active_config} --checkpoint auto"
         if args.debug:
             backtest_cmd += " --debug"
             
         run_command(backtest_cmd)
-    else:
-        print("Skipping PHASE 2: BACKTESTING (Resuming from {})".format(args.resume_from))
-    
-    # 3. Reporting Phase
-    if start_index <= 2:
-        print("\n" + "="*60)
-        print("PHASE 3: REPORTING")
-        print("="*60)
         
-        report_script = "scripts/generate_report.py"
-        report_cmd = f"python {report_script} --run_name {args.run_name}"
+    # PHASE 3: REPORT
+    if start_index <= 3:
+        print("\n=== PHASE 4: REPORTING ===")
+        report_cmd = f"python scripts/generate_report.py --run_name {args.run_name}"
         run_command(report_cmd)
 
-    print("\n" + "="*60)
-    print("PIPELINE COMPLETE")
-    print("="*60)
+    print("\n=== PIPELINE COMPLETE ===")
 
 if __name__ == "__main__":
     main()

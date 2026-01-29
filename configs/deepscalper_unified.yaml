@@ -20,7 +20,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   transaction_fee: 0.0001
-  num_envs: 16            # GPUHub stable limit (16 with AsyncVectorEnv)
+  num_envs: 24            # Scaled up for Blackwell (with Zero-Copy fix)
   window_size: 50
   
   reward:
@@ -35,16 +35,15 @@ env:
     volume_bins: 5    # Order Size Fractions
 
 network:
-  # Standard V1 MLP Architecture
+  # V9.5 Blackwell Architecture (Large)
   micro_config:
     input_size: 20
     private_input_size: 2
-    hidden_size: 128      # Standard V1
+    hidden_size: 256      # Increased for LSTM Throughput
     
   macro_config:
     input_size: 11
-    hidden_sizes: [512, 256] # Standard V1
-
+    hidden_sizes: [1024, 1024, 512] # Deep Regime Detection
 
 agents:
   dqn:
@@ -72,12 +71,12 @@ training:
   batch_size: 8192      # Optimized (Blackwell)
   update_interval: 8192 # Matched to Batch Size
   learning_rate: 0.0001
-  dqn_update_interval: 1.0 
+  dqn_update_interval: 0.5 # Aggressive (2 updates per step)
   log_interval: 1000
   checkpoint_interval: 10000
   torch_compile: true   # Enabled for Speed
   use_amp: true         # Enabled for Mixed Precision
-  use_shm: false        # Keep Disabled (ABI Conflict Risk)
+  use_shm: true         # Enabled (Zero-Copy Fix Applied)
 
 wandb:
   project: "FinRL-Pro-DS"
