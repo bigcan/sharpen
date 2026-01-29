@@ -1,81 +1,93 @@
-"""Module: splitter
-Purpose: Provide robust data splitting logic with purging and embargoing for time-series data."""
 
 import pandas as pd
-from typing import Tuple, List
+from typing import List, Tuple, Dict
+from dataclasses import dataclass
+from datetime import timedelta
 
-class DataSplitter:
-    """
-    Splits time-series data into Train, Validation, and Test sets with purging and embargoing.
-    """
+@dataclass
+class TimeRange:
+    start: str
+    end: str
 
-    def __init__(self, df: pd.DataFrame, date_col: str = "date"):
+    def to_tuple(self):
+        return (self.start, self.end)
+
+class RollingWindowSplitter:
+    """
+    Implements the 3-Split (Train/Validation/Trade) Rolling Window strategy 
+    for non-stationary financial time-series data.
+    """
+    def __init__(
+        self, 
+        train_months: int = 12, 
+        val_months: int = 3, 
+        test_months: int = 1, 
+        step_months: int = 1,
+        buffer_days: int = 0
+    ):
         """
         Args:
-            df: The dataframe containing the time-series data.
-            date_col: The name of the column containing the date information.
+            train_months: Length of training window.
+            val_months: Length of validation window (immediately follows train).
+            test_months: Length of testing/trade window (immediately follows val).
+            step_months: How much to shift the window forward for the next fold.
+            buffer_days: Gap between windows (optional, usually 0).
         """
-        self.df = df.copy()
-        self.df[date_col] = pd.to_datetime(self.df[date_col])
-        self.df = self.df.sort_values(date_col).reset_index(drop=True)
-        self.date_col = date_col
+        self.train_months = train_months
+        self.val_months = val_months
+        self.test_months = test_months
+        self.step_months = step_months
+        self.buffer_days = buffer_days
 
-    def split_by_date(self, train_start: str, train_end: str, 
-                      val_start: str, val_end: str, 
-                      test_start: str, test_end: str,
-                      purge_overlap: int = 0, embargo: int = 0) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    def split(self, start_date: str, end_date: str) -> List[Dict[str, TimeRange]]:
         """
-        Splits the data into Train, Validation, and Test sets based on date ranges.
+        Generates rolling window splits within the global start/end range.
         
-        Args:
-            train_start: Start date for training set (inclusive).
-            train_end: End date for training set (inclusive).
-            val_start: Start date for validation set (inclusive).
-            val_end: End date for validation set (inclusive).
-            test_start: Start date for test set (inclusive).
-            test_end: End date for test set (inclusive).
-            purge_overlap: Number of observations to drop from the end of the training set 
-                           before the validation set starts (to prevent leakage).
-            embargo: Number of observations to drop from the beginning of the test set 
-                     after the training/validation set ends.
-
         Returns:
-            A tuple of (train_df, val_df, test_df).
+            List of dicts: [{'train': (s,e), 'val': (s,e), 'test': (s,e)}, ...]
         """
-        train_mask = (self.df[self.date_col] >= train_start) & (self.df[self.date_col] <= train_end)
-        val_mask = (self.df[self.date_col] >= val_start) & (self.df[self.date_col] <= val_end)
-        test_mask = (self.df[self.date_col] >= test_start) & (self.df[self.date_col] <= test_end)
-
-        train_df = self.df.loc[train_mask].copy()
-        val_df = self.df.loc[val_mask].copy()
-        test_df = self.df.loc[test_mask].copy()
-
-        # Apply purging (removing data from end of train set)
-        if purge_overlap > 0:
-             # Assuming sorted data, drop last 'purge_overlap' rows from train
-             if len(train_df) > purge_overlap:
-                 train_df = train_df.iloc[:-purge_overlap]
-             else:
-                 raise ValueError(f"Training set is smaller than purge_overlap ({purge_overlap})")
-
-        # Apply embargoing (removing data from beginning of test set)
-        # Embargo is typically applied after the training set to prevent leakage from the 
-        # immediate future into the training set if there's overlap in labeling logic.
-        # Here we apply it to the test set relative to the validation set (standard walk-forward).
-        if embargo > 0:
-            if len(test_df) > embargo:
-                test_df = test_df.iloc[embargo:]
-            else:
-                 raise ValueError(f"Test set is smaller than embargo ({embargo})")
-
-        return train_df, val_df, test_df
-
-    def get_rolling_splits(self, start_date: str, end_date: str, 
-                           train_window_months: int, val_window_months: int, test_window_months: int,
-                           step_months: int) -> List[Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]]:
-        """
-        Generates rolling window splits.
+        folds = []
+        current_start = pd.Timestamp(start_date)
+        global_end = pd.Timestamp(end_date)
         
-        (Implementation pending - for Phase 4)
-        """
-        raise NotImplementedError("Rolling splits are not yet implemented.")
+        while True:
+            # 1. Calculate boundaries
+            train_end = current_start + pd.DateOffset(months=self.train_months)
+            
+            val_start = train_end + pd.Timedelta(days=self.buffer_days)
+            val_end = val_start + pd.DateOffset(months=self.val_months)
+            
+            test_start = val_end + pd.Timedelta(days=self.buffer_days)
+            test_end = test_start + pd.DateOffset(months=self.test_months)
+            
+            # 2. Check if we exceeded global end
+            if test_end > global_end:
+                break
+                
+            # 3. Add Fold
+            folds.append({
+                "train": TimeRange(str(current_start), str(train_end)),
+                "val": TimeRange(str(val_start), str(val_end)),
+                "test": TimeRange(str(test_start), str(test_end))
+            })
+            
+            # 4. Step forward
+            current_start += pd.DateOffset(months=self.step_months)
+            
+        return folds
+
+    @staticmethod
+    def print_schedule(folds):
+        print(f"{'Fold':<5} | {'Train':<25} | {'Validation':<25} | {'Trade (Test)':<25}")
+        print("-" * 85)
+        for i, fold in enumerate(folds):
+            t = fold['train']
+            v = fold['val']
+            e = fold['test']
+            print(f"{i+1:<5} | {t.start[:10]} -> {t.end[:10]} | {v.start[:10]} -> {v.end[:10]} | {e.start[:10]} -> {e.end[:10]}")
+
+# Example Usage
+if __name__ == "__main__":
+    splitter = RollingWindowSplitter(train_months=3, val_months=1, test_months=1, step_months=1)
+    folds = splitter.split("2023-01-01", "2023-12-31")
+    RollingWindowSplitter.print_schedule(folds)
