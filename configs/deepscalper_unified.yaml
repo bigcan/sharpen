@@ -69,14 +69,15 @@ agents:
 
 training:
   total_timesteps: 2000000
-  batch_size: 4096      # Standard V1
+  batch_size: 8192      # V9.5 Optimized (Blackwell)
+  update_interval: 8192 # Matched to Batch Size
   learning_rate: 0.0001
-  dqn_update_interval: 1.0 # Standard V1
+  dqn_update_interval: 1.0 
   log_interval: 1000
   checkpoint_interval: 10000
-  torch_compile: false  # Disabled for V1 stability
-  use_amp: false        # Disabled for V1 stability
-  use_shm: false        # Disabled for V1 stability
+  torch_compile: true   # Enabled for V9.5 Speed
+  use_amp: true         # Enabled for V9.5 Mixed Precision
+  use_shm: false        # Keep Disabled (ABI Conflict Risk)
 
 wandb:
   project: "FinRL-Pro-DS"

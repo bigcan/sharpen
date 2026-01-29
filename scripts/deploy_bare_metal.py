@@ -121,21 +121,19 @@ def deploy(args):
     export_path = "export PATH=/root/miniconda3/bin:$PATH"
     
     setup_cmds = [
-        f"{export_path}",
         f"cd {remote_workspace}",
         # CRITICAL: Clean everything to avoid stale deps
-        "pip uninstall finrl-pro-ds -y || true",
+        "/root/miniconda3/bin/pip uninstall finrl-pro-ds -y || true",
         "rm -rf finrl_pro_ds.egg-info build dist",
         f"unzip -o {zip_name} > /dev/null",
         "rm deploy_package.zip",
         # Verify setup.py content
         "grep -C 2 'install_requires' setup.py || echo 'setup.py missing'",
-        # Base Image is PyTorch 2.8.0 + CUDA 12.8 (Correct for RTX 5090)
-        # DO NOT uninstall torch - use the pre-installed version
-        "pip install --upgrade -r requirements.txt",
-        "pip install -e .",  # Editable install after deps are correct
+        # Base Image is PyTorch 2.8.0 + CUDA 12.8
+        "/root/miniconda3/bin/pip install --upgrade -r requirements.txt",
+        "/root/miniconda3/bin/pip install -e .",  # Editable install
         f"wandb login {wandb_key}" if wandb_key else "echo 'No WandB Key provided, skipping login'",
-        f"pkill -f {script_path} || true" # Kill previous instances of THIS script
+        f"pkill -f {script_path} || true" # Kill previous instances
     ]
     
     cmd_chain = " && ".join(setup_cmds) + " && echo SETUP_SUCCESS"
