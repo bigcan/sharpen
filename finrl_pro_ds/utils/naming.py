@@ -55,3 +55,34 @@ def parse_experiment_name(name: str) -> dict:
         "description": "_".join(parts[3:]).split("_exp")[0] if "exp" in parts[-1] else "_".join(parts[3:]),
         "id": parts[-1] if len(parts) > 4 else None
     }
+
+
+def generate_run_name(
+    version: str = "V1",
+    platform: str = "GPUHub",
+    suffix: str = None,
+    timestamp_format: str = "%Y%m%d_%H%M"
+) -> str:
+    """
+    Generate a standardized WandB run name for DeepScalper experiments.
+    
+    Canonical format: DeepScalper_{Version}_{Platform}_{YYYYMMDD}_{HHMM}[_{Suffix}]
+    
+    Args:
+        version: Version tag (e.g., 'V1', 'V95', 'V10')
+        platform: Deployment platform (e.g., 'GPUHub', 'Blackwell', 'Local')
+        suffix: Optional suffix (e.g., 'HPO', 'Backtest')
+        timestamp_format: strftime format for timestamp
+        
+    Returns:
+        Formatted run name string
+        
+    Example:
+        >>> generate_run_name('V95', 'Blackwell')
+        'DeepScalper_V95_Blackwell_20260129_1942'
+        >>> generate_run_name('V95', 'GPUHub', suffix='HPO')
+        'DeepScalper_V95_GPUHub_20260129_1942_HPO'
+    """
+    timestamp = datetime.datetime.now().strftime(timestamp_format)
+    base = f"DeepScalper_{version}_{platform}_{timestamp}"
+    return f"{base}_{suffix}" if suffix else base

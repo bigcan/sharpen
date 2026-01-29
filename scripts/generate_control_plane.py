@@ -138,7 +138,7 @@ def build_notebook(config: dict) -> dict:
             "outputs": [],
             "source": [
                 "MISSION = 'hpo'  # 'train', 'hpo', 'pipeline'\n",
-                "RUN_NAME = f'Deepscalper_V95_GPUHub_{datetime.now().strftime(\"%Y%m%d_%H%M\")}'\n",
+                "RUN_NAME = f'DeepScalper_V1_GPUHub_{datetime.now().strftime(\"%Y%m%d_%H%M\")}'\n",
                 "EXTRA = '--trials 20 --steps 2000000'\n",
                 "print(f'🚀 {RUN_NAME}')"
             ]
