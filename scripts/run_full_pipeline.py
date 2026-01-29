@@ -18,7 +18,7 @@ def run_command(cmd, shell=True):
 def main():
     parser = argparse.ArgumentParser(description="Run Full DeepScalper Pipeline (Train -> Backtest)")
     parser.add_argument("--config", type=str, required=True, help="Path to config file")
-    parser.add_argument("--run_name", type=str, required=True, help="Run name for WandB and file artifacts")
+    parser.add_argument("--run_name", type=str, default=None, help="Run name for WandB (auto-generated if not provided)")
     # Capture extra args to pass them down if needed, or loosely handle them
     parser.add_argument("--debug", action="store_true", help="Run in debug mode")
     
@@ -26,6 +26,12 @@ def main():
                         help="Start pipeline from a specific phase (skipping previous ones)")
     
     args, unknown = parser.parse_known_args()
+    
+    # Auto-generate run_name if not provided
+    if not args.run_name:
+        from finrl_pro_ds.utils.naming import generate_run_name
+        args.run_name = generate_run_name(version="V1", platform="GPUHub", suffix="Pipeline")
+        print(f"Auto-generated Run Name: {args.run_name}")
     
     phases = ["train", "backtest", "report"]
     start_index = phases.index(args.resume_from)
