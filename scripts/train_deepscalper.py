@@ -204,9 +204,33 @@ def main():
              env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
         else:
             try:
-                # Use spawn to be safe with CUDA/Torch
-                # Gymnasium expects a string for the context arg, which it passes to multiprocessing.get_context()
-                env = gym.vector.AsyncVectorEnv([env_factory for _ in range(num_envs)], context="spawn")
+                # Staggered spawning to avoid CPU/RAM spike that causes BrokenPipeError
+                # Each env waits based on its batch before loading data
+                batch_size = 6
+                delay_per_batch = 2.0  # seconds between batches
+                
+                def make_staggered_factory(index, base_factory, batch_size, delay_per_batch):
+                    """Create a factory that delays based on batch index to stagger data loading."""
+                    def staggered_factory():
+                        import time
+                        batch_num = index // batch_size
+                        delay = batch_num * delay_per_batch
+                        if delay > 0:
+                            time.sleep(delay)
+                        return base_factory()
+                    return staggered_factory
+                
+                staggered_factories = [
+                    make_staggered_factory(i, env_factory, batch_size, delay_per_batch)
+                    for i in range(num_envs)
+                ]
+                
+                total_batches = (num_envs + batch_size - 1) // batch_size
+                est_time = (total_batches - 1) * delay_per_batch
+                print(f"Using staggered AsyncVectorEnv: {num_envs} envs in {total_batches} batches of {batch_size}")
+                print(f"Estimated stagger time: {est_time:.1f}s to spread CPU/RAM load...")
+                
+                env = gym.vector.AsyncVectorEnv(staggered_factories, context="spawn", shared_memory=True)
             except Exception as e:
                 import traceback
                 traceback.print_exc()

@@ -122,6 +122,8 @@ def deploy(args):
     
     setup_cmds = [
         f"cd {remote_workspace}",
+        # CRITICAL: Increase file descriptor limit for high-concurrency AsyncVectorEnv
+        "ulimit -n 65536",
         # CRITICAL: Clean everything to avoid stale deps
         "/root/miniconda3/bin/pip uninstall finrl-pro-ds -y || true",
         "rm -rf finrl_pro_ds.egg-info build dist",
