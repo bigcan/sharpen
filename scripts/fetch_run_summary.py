@@ -2,6 +2,7 @@ import wandb
 import os
 import pandas as pd
 from dotenv import load_dotenv
+import sys
 
 load_dotenv()
 
@@ -51,5 +52,10 @@ def fetch_run_report(run_path):
         print(f"Error fetching run: {e}")
 
 if __name__ == "__main__":
-    RUN_PATH = "bigcan-chiwin-technology/FinRL-Pro-DS/514e17aa"
+    if len(sys.argv) > 1:
+        RUN_PATH = sys.argv[1]
+    else:
+        RUN_PATH = "bigcan-chiwin-technology/FinRL-Pro-DS/514e17aa"
+    
+    print(f"Fetching summary for: {RUN_PATH}")
     fetch_run_report(RUN_PATH)
