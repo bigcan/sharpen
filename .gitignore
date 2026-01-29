@@ -106,7 +106,11 @@ tmp/
 results/
 models/
 *.db
-marketing_best_params.yamltrading_state.json
+marketing_best_params.yaml
+trading_state.json
+best_params.yaml
+deepscalper_tuned.yaml
+deploy_package.zip
 
 archive/
 wandb/
