@@ -45,12 +45,32 @@ experiments/
 └── ...
 ```
 
-## 3. Alternative Considered: Notion
-**Pros:** Database properties (Tags, Status, Best Sharpe).
-**Cons:** Context switching. Code is in VSCode, tracking is in Browser.
-**Verdict:** Use Notion *only* if you need to share results with non-technical stakeholders. For "Management" of the MLOps pipeline itself, staying in VSCode (Notebook + MD) is faster.
+## 4. 3-Split Rolling Window Data Strategy
 
-## 4. Next Steps
+> [!IMPORTANT]
+> The **Test Window is for Final Evaluation Only**. Never use it for model selection or hyperparameter tuning.
+
+To prevent look-ahead bias and ensure robust model development, the pipeline uses a **3-Split Rolling Window** approach:
+
+| Split | Purpose | Used In |
+|---|---|---|
+| **Train** | Model Learning | Gradient updates, policy optimization |
+| **Validation** | Hyperparameter Selection | Optuna objective, early stopping |
+| **Test (Trade)** | Final Evaluation | Out-of-sample performance, audit reports |
+
+**Example (Monthly Folds):**
+```
+Fold 1: Train [Jan-Mar] → Validate [Apr] → Trade [May]
+Fold 2: Train [Feb-Apr] → Validate [May] → Trade [Jun]
+...
+```
+
+**Implementation:** `finrl_pro_ds/data/splitter.py` (`RollingWindowSplitter`)
+
+---
+
+## 5. Next Steps
 1.  **Scaffold**: Create `notebooks/DeepScalper_Control_Plane.ipynb`.
 2.  **Migrate**: Move ad-hoc CLI commands into the Notebook.
 3.  **Automate**: Hook the Notebook into `Research Logger`.
+
