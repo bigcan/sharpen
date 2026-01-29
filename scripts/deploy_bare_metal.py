@@ -51,8 +51,8 @@ def deploy(args):
     wandb_key = os.getenv("WANDB_API_KEY", "")
     
     run_name = args.run_name
-    timestamp = time.strftime("%Y%m%d_%H%M%S")
-    full_run_name = f"{run_name}_{timestamp}"
+    # Don't force timestamp - trust the caller or the script's internal logic
+    full_run_name = run_name
     
     script_path = args.script
     config_path = args.config
