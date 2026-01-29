@@ -138,12 +138,22 @@ def deploy(args):
         f"pkill -f {script_path} || true" # Kill previous instances of THIS script
     ]
     
-    stdin, stdout, stderr = ssh.exec_command(" && ".join(setup_cmds))
+    cmd_chain = " && ".join(setup_cmds) + " && echo SETUP_SUCCESS"
+    stdin, stdout, stderr = ssh.exec_command(cmd_chain)
     out = stdout.read().decode()
     err = stderr.read().decode()
     
-    if err and "error" in err.lower():
-        print(f"Setup Warning/Error: {err}")
+    print("Setup Output:")
+    print(out)
+    if err:
+        print("Setup Stderr:")
+        print(err)
+    
+    if "SETUP_SUCCESS" not in out:
+        print("CRITICAL: Setup failed. Aborting launch.")
+        sys.exit(1)
+    else:
+        print("Setup completed successfully.")
     
     # 5. Launch
     print(f"Launching {script_path} as {full_run_name}...")
