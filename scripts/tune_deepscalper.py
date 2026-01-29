@@ -1,12 +1,16 @@
-import optuna
-import yaml
-import os
+import logging
 import torch
 import numpy as np
+import optuna
+import signal
+import sys
+import os
+import dataclasses
+from datetime import datetime
 import argparse
-import logging
-import pandas as pd
+import optuna
 import wandb
+import pandas as pd
 import sys
 from typing import Dict, Any, List
 from datetime import datetime
@@ -92,15 +96,30 @@ def sanitize_config(cfg):
     return cfg
 
 def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
-    # 0. WandB Silent Mode
-    # 0. WandB Active Mode
     run_mode = dataclasses.asdict(base_config).get("wandb", {}).get("mode", "online")
+    
+    # 0.5 Determine Base Run Name (Authoritative)
+    if args.run_name:
+        base_name = args.run_name
+    else:
+        # Default to Operations Guide Standard: Deepscalper_V1_GPUHub_YYYYMMDD_HHMM
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M")
+        base_name = f"Deepscalper_V1_GPUHub_{timestamp}"
+
+    # Determine Final Run Name (Handle Trials)
+    if args.trials > 1:
+        run_name = f"{base_name}_Trial_{trial.number}"
+        group_name = f"HPO_{args.study_name}"
+    else:
+        run_name = base_name
+        group_name = base_name
+
     wandb.init(
         project=dataclasses.asdict(base_config).get("wandb", {}).get("project", "FinRL-Pro-DS"),
         entity=dataclasses.asdict(base_config).get("wandb", {}).get("entity"),
         mode=run_mode,
-        group=f"HPO_{args.study_name}",
-        name=f"Trial_{trial.number}",
+        group=group_name, 
+        name=run_name,
         reinit=True
     )
 
@@ -342,10 +361,10 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
             
             # Optuna Pruning: Report intermediate value after each fold
             intermediate_sharpe = np.mean(fold_scores)
-            trial.report(intermediate_sharpe, fold_idx)
+            trial.report(intermediate_sharpe, i)
             
             if trial.should_prune():
-                logger.info(f"Trial pruned at fold {fold_idx+1}")
+                logger.info(f"Trial pruned at fold {i+1}")
                 env_train.close()
                 env_val.close()
                 raise optuna.TrialPruned()
