@@ -440,7 +440,7 @@ class ParquetDataHandler:
         config = {
             'length': self._len,
             'cols': self._feature_cols,
-            'timestamps': self._timestamps, # Pass full list (assuming it's not massive, <10MB for 1M rows)
+            # 'timestamps': self._timestamps, # REMOVED: Too large for IPC (causes BrokenPipeError)
             'buffers': {}
         }
         
@@ -481,7 +481,7 @@ class ParquetDataHandler:
         
         self._len = config['length']
         self._feature_cols = config['cols']
-        self._timestamps = config['timestamps']
+        # self._timestamps = config['timestamps'] # REMOVED
         self._data_arrays = {}
         self._shm_objects = []
         
@@ -499,6 +499,12 @@ class ParquetDataHandler:
             except Exception as e:
                 raise RuntimeError(f"Failed to attach SHM for {col}: {e}")
                 
+        # Reconstruct timestamps from the shared array (if available)
+        if 'timestamp' in self._data_arrays:
+             self._timestamps = self._data_arrays['timestamp'].tolist()
+        else:
+             self._timestamps = [] # Fallback
+             
         print(f"[Worker-{os.getpid()}] Attached to Shared Memory ({self._len} rows).")
     
     def close_shared_memory(self, unlink=False):

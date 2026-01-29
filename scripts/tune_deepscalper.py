@@ -695,6 +695,17 @@ if __name__ == "__main__":
             import traceback
             traceback.print_exc()
             
+        # Save Best Params for Pipeline Handoff
+        if study.best_trial:
+            yaml_path = "best_params.yaml"
+            logger.info(f"Saving best parameters to {yaml_path}...")
+            # Convert numpy types if any
+            best_params_clean = {k: v.item() if hasattr(v, 'item') else v for k, v in study.best_params.items()}
+            
+            with open(yaml_path, "w") as f:
+                yaml.dump(best_params_clean, f)
+            logger.info("Best parameters saved.")
+
     finally:
         # Finalize WandB
         wandb.finish()
