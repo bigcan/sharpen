@@ -6,24 +6,7 @@ from torch.distributions import Categorical
 
 from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
 from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
-
-class SynapseGatingNetwork(nn.Module):
-    """
-    Meta-Controller for the Ensemble.
-    Input: Macro Features
-    Output: Softmax Weights for [DQN, PPO, A2C]
-    """
-    def __init__(self, input_dim: int = 11, hidden_dim: int = 64):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
-            nn.ReLU(),
-            nn.Linear(hidden_dim, 3), # 3 Agents
-            nn.Softmax(dim=1)
-        )
-        
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+from finrl_pro_ds.networks.gating import DeepScalperGatingNetwork
 
 class DeepScalperEnsemble:
     """
@@ -35,13 +18,14 @@ class DeepScalperEnsemble:
         dqn_agent: DeepScalperDQN,
         ppo_agent: DeepScalperPPO,
         a2c_agent: DeepScalperA2C,
-        gating_net: SynapseGatingNetwork,
+        gating_net: DeepScalperGatingNetwork,
         device: str = "cpu"
     ):
         self.dqn = dqn_agent
         self.ppo = ppo_agent
         self.a2c = a2c_agent
         self.gating = gating_net.to(device)
+        self.device = torch.device(device)
         self.device = torch.device(device)
         
     def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor) -> np.ndarray:
