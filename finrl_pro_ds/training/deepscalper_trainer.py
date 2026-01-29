@@ -422,7 +422,62 @@ class DeepScalperTrainer:
                 
                 # 3. Store Transitions & Track Rewards
                 if is_vector_env:
-                     pass # Vector path logic would go here
+                    # VECTOR ENV STORAGE LOOP
+                    for i in range(num_envs):
+                        episode_rewards[i] += reward[i]
+                        episode_lengths[i] += 1
+                        
+                        done = dones[i]
+                        
+                        # Store transition
+                        # Note: values, log_probs are tensors (B, ...), need to extract [i]
+                        # Observations are (B, ...), extract [i]
+                        
+                        state_dict = {"micro": micro[i].cpu().numpy(), "private": private[i].cpu().numpy(), "macro": macro[i].cpu().numpy()}
+                        next_state_dict = {"micro": next_micro[i].cpu().numpy(), "private": next_private[i].cpu().numpy(), "macro": next_macro[i].cpu().numpy()}
+                        
+                        self.ensemble.dqn.memory.push(
+                            state_dict, 
+                            action_vector[i], 
+                            reward[i], 
+                            next_state_dict, 
+                            done,
+                            float(info.get("volatility_target", [0.0]*num_envs)[i]) if isinstance(info.get("volatility_target"), (list, np.ndarray)) else 0.0
+                        )
+                        
+                        self.ppo_buffer.append((
+                            micro[i], private[i], macro[i], action_vector[i], ppo_log_prob[i],
+                            reward[i], val_ppo[i].item(), val_next_ppo[i].item(), done
+                        ))
+                        self.a2c_buffer.append((
+                            micro[i], private[i], macro[i], action_vector[i], None,
+                            reward[i], val_a2c[i].item(), val_next_a2c[i].item(), done
+                        ))
+                        # Gating: weights are (B, 3)
+                        self.gating_buffer.append((
+                            macro[i], weights[i], reward[i], done
+                        ))
+
+                        if done:
+                            # Log metrics for THIS environment
+                            metrics = {
+                                "train/episode_reward": episode_rewards[i], 
+                                "train/episode_length": episode_lengths[i], 
+                                "train/global_step": self.global_step
+                            }
+                            # To avoid spamming wandb, maybe only log if it's the 0th env (or use aggregate)? 
+                            # For now, log all completed episodes is fine, but high throughput might throttle.
+                            # Optimization: only log env 0?
+                            # Let's log all for now but rely on wandb's internal sampling if needed.
+                            # Check config if we should limit logging?
+                            wandb.log(metrics)
+                            
+                            episode_rewards_total += episode_rewards[i]
+                            episode_count += 1
+                            
+                            episode_rewards[i] = 0.0
+                            episode_lengths[i] = 0
+                            
                 else:
                     # SINGLE ENV STORAGE
                     episode_rewards += reward

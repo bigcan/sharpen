@@ -12,6 +12,8 @@ from typing import Dict, Any, List
 from datetime import datetime
 import dataclasses
 import copy
+import signal
+import sys
 
 # Append root to path for robust imports
 sys.path.append(os.getcwd())
@@ -597,6 +599,18 @@ if __name__ == "__main__":
         logger.info("Creating Shared Memory Segments...")
         active_shm_config = active_data_handler.create_shared_memory()
         logger.info("Shared Memory Ready.")
+        
+        # --- SIGNAL HANDLER ---
+        def cleanup_handler(signum, frame):
+            logger.info(f"Signal {signum} received. Cleaning up Shared Memory...")
+            if active_data_handler:
+                active_data_handler.close_shared_memory(unlink=True)
+            logger.info("Cleanup Complete. Exiting.")
+            sys.exit(0)
+            
+        signal.signal(signal.SIGINT, cleanup_handler)
+        signal.signal(signal.SIGTERM, cleanup_handler)
+
         
     except Exception as e:
         logger.error(f"Failed to initialize Shared Memory: {e}")
