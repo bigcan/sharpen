@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import os
 import sys
+import json
 
 # Append root to path
 sys.path.append(os.getcwd())
@@ -275,8 +276,47 @@ def main():
         # Fallback to simple metrics
         equity_curve = pd.Series(portfolio_values)
         if len(equity_curve) > 0:
-            print(f"Total Return: {((equity_curve.iloc[-1] / equity_curve.iloc[0]) - 1)*100:.2f}%")
-            print(f"Max Drawdown: {((equity_curve / equity_curve.cummax()) - 1).min()*100:.2f}%")
+            total_return = ((equity_curve.iloc[-1] / equity_curve.iloc[0]) - 1) * 100
+            max_drawdown = ((equity_curve / equity_curve.cummax()) - 1).min() * 100
+            print(f"Total Return: {total_return:.2f}%")
+            print(f"Max Drawdown: {max_drawdown:.2f}%")
+            
+            # Simple metrics dict for fallback
+            metrics = {
+                "total_return": total_return,
+                "benchmark_return": 0.0, # Placeholder
+                "max_drawdown": max_drawdown,
+                "sharpe_ratio": 0.0, # Placeholder
+                "sortino_ratio": 0.0,
+                "calmar_ratio": 0.0,
+                "omega_ratio": 0.0,
+                "win_rate": 0.0,
+                "total_trades": len(orders_arr[orders_arr != 0]),
+                "profit_factor": 0.0
+            }
+            # Save simple metrics
+            os.makedirs("results", exist_ok=True)
+            with open("results/metrics.json", "w") as f:
+                json.dump(metrics, f, indent=4)
+            print("Simple metrics saved to results/metrics.json")
+            
+    else:
+        # VBT Success Path - Save Metrics & Plot
+        if 'analyzer' in locals():
+            metrics = analyzer.get_audit_metrics()
+            
+            # Save Metrics
+            os.makedirs("results", exist_ok=True)
+            with open("results/metrics.json", "w") as f:
+                json.dump(metrics, f, indent=4)
+            print("VBT metrics saved to results/metrics.json")
+            
+            # Save Plot
+            try:
+                analyzer.plot(path="results/backtest_plot.html")
+                print("Backtest plot saved to results/backtest_plot.html")
+            except Exception as plot_e:
+                print(f"Plot generation failed: {plot_e}")
 
     # 6. WandB Reporting
     try:
