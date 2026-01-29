@@ -137,10 +137,9 @@ def build_notebook(config: dict) -> dict:
             "metadata": {},
             "outputs": [],
             "source": [
-                "MISSION = 'hpo'  # 'train', 'hpo', 'pipeline'\n",
-                "RUN_NAME = f'DeepScalper_V1_GPUHub_{datetime.now().strftime(\"%Y%m%d_%H%M\")}'\n",
-                "EXTRA = '--trials 20 --steps 2000000'\n",
-                "print(f'🚀 {RUN_NAME}')"
+                "MISSION = 'pipeline'  # 'train', 'hpo', 'pipeline'\n",
+                "EXTRA = ''  # e.g. '--trials 20 --steps 2000000' for HPO\n",
+                "print(f'🚀 Mission: {MISSION}')"
             ]
         },
         {
@@ -150,8 +149,9 @@ def build_notebook(config: dict) -> dict:
             "metadata": {},
             "outputs": [],
             "source": [
-                "SCRIPTS = {'hpo': 'scripts/tune_deepscalper.py', 'train': 'scripts/train_deepscalper_v3.py'}\n",
-                "cmd = f'python scripts/deploy_bare_metal.py --script {SCRIPTS.get(MISSION, SCRIPTS[\"train\"])} --config configs/deepscalper_unified.yaml --run_name \"{RUN_NAME}\" --extra_args \"{EXTRA}\"'\n",
+                "SCRIPTS = {'hpo': 'scripts/tune_deepscalper.py', 'train': 'scripts/train_deepscalper_v3.py', 'pipeline': 'scripts/run_full_pipeline.py'}\n",
+                "cmd = f'python scripts/deploy_bare_metal.py --script {SCRIPTS[MISSION]} --config configs/deepscalper_unified.yaml --upload_data --data_file btc_lob_jan2023.parquet'\n",
+                "if EXTRA: cmd += f' --extra_args \"{EXTRA}\"'\n",
                 "print(cmd)\n",
                 "# !{cmd}  # Uncomment to run"
             ]
