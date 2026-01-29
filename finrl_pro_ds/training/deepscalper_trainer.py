@@ -422,6 +422,20 @@ class DeepScalperTrainer:
                 
                 # 3. Store Transitions & Track Rewards
                 if is_vector_env:
+                    # Calculate Next Values for PPO/A2C (Missing in original code)
+                    with torch.no_grad():
+                        _, _, _, val_next_ppo_batch = self.ensemble.ppo.network(next_micro, next_private, next_macro)
+                        _, _, _, val_next_a2c_batch = self.ensemble.a2c.network(next_micro, next_private, next_macro)
+                        
+                        # Flatten if needed or ensure shape matches reward[i]
+                        val_next_ppo = val_next_ppo_batch.squeeze()
+                        val_next_a2c = val_next_a2c_batch.squeeze()
+                        
+                        # Handle scalar squeeze edge case (if num_envs=1 but somehow flagged as vector)
+                        if val_next_ppo.ndim == 0:
+                            val_next_ppo = val_next_ppo.unsqueeze(0)
+                            val_next_a2c = val_next_a2c.unsqueeze(0)
+
                     # VECTOR ENV STORAGE LOOP
                     for i in range(num_envs):
                         episode_rewards[i] += reward[i]
