@@ -5,9 +5,10 @@
 DeepScalper is an end-to-end institutional-grade reinforcement learning pipeline designed for sub-second intraday trading. It leverages an ensemble of **PPO, A2C, and DQN** agents to trade on Limit Order Book (LOB) data with micro-structure awareness.
 
 ## 🚀 Key Features
-- **5-Phase MLOps Pipeline**: Unified schema for Tuner $\to$ Trainer $\to$ Auditor $\to$ Deployer.
+- **Unified MLOps Pipeline**: Orchestrates HPO $\to$ Multi-Phase Training (Specialists/Gating) $\to$ Backtesting.
+- **WandB Standardization**: Automatic canonical naming (`DeepScalper_V1_GPUHub_YYYYMMDD_HHMM`) for all runs to ensure auditability.
 - **Mach 3 Optimization**: Optimized for RTX 5090 (32GB VRAM), utilizing Shared Memory, AMP, and Torch Compile for max throughput.
-- **Hybrid Data Engine**: Syncs 1-minute OHLCV bars with 250ms LOB snapshots for realistic latency simulation.
+- **Remote Ops & Monitoring**: Integrated deployment engine with real-time remote GPU/Process monitoring scripts.
 - **Institutional Governance**: Automated "Smoke Tests", Financial Audits (Sharpe/Sortino), and Risk Guardrails.
 
 ---
@@ -66,6 +67,20 @@ python scripts/tune_deepscalper.py --trials 50
 **Audit**:
 ```bash
 python scripts/audit_model.py --checkpoint checkpoints/best_model.pth
+```
+
+### 5. Monitoring & Ops (Remote)
+Once deployed, use these utilities to track progress without full SSH sessions:
+```bash
+# Check overall status (PID, Log tail)
+python scripts/check_remote_status.py
+
+# Live GPU monitoring (nvidia-smi)
+python scripts/check_remote_gpu.py
+
+# List active checkpoints and WandB artifacts
+python scripts/check_remote_checkpoints.py
+python scripts/list_wandb.py
 ```
 
 ---
