@@ -49,9 +49,15 @@ agents:
   dqn:
     learning_rate: 0.0001
     gamma: 0.99
+    # Replay Ratio Optimization: 
+    # Increased from 4 -> 128 to prevent bottleneck with num_envs=24
+    # At 128, ratio is approx 16 updates per sample which is standard.
+    dqn_update_interval: 128.0 
     dqn_batch_size: 2048    # Optimized (Blackwell)
     dqn_buffer_size: 1000000 # Production Scale
     dqn_target_update_freq: 1000
+    target_update_freq: 1000
+    checkpoint_interval: 1000000 # Production Scale
     
   ppo:
     learning_rate: 0.0001
