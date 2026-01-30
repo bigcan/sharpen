@@ -184,6 +184,10 @@ class DeepScalperDQN:
         
         total_loss = loss_dir + loss_price + loss_vol + self.auxiliary_weight * loss_vol_pred
         
+        if not torch.isfinite(total_loss):
+            print(f"WARNING: DQN Loss is {total_loss.item()} (NaN/Inf). Skipping update.", flush=True)
+            return 0.0
+
         self.optimizer.zero_grad()
         total_loss.backward()
         # Gradient clipping

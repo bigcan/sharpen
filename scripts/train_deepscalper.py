@@ -88,7 +88,9 @@ def load_config(path):
 
 import wandb
 
-def setup_wandb(config):
+import wandb
+
+def setup_wandb(config, run_id=None):
     wandb_config = config.get("wandb", {})
     project = wandb_config.get("project", "DeepScalper_Pilot")
     tags = wandb_config.get("tags", [])
@@ -106,6 +108,8 @@ def setup_wandb(config):
     
     print(f"Initializing WandB: Project={project}, Entity={entity}, Mode={mode}, Name={run_name}")
     wandb.init(
+        id=run_id, # UNIFIED PIPELINE RUN
+        resume="allow",
         project=project,
         entity=entity,
         config=config,
@@ -113,12 +117,16 @@ def setup_wandb(config):
         mode=mode,
         name=run_name
     )
+    return run_name
 
 def main():
     parser = argparse.ArgumentParser(description="Train DeepScalper Agent")
     parser.add_argument("--config", type=str, required=True, help="Path to config yaml")
     parser.add_argument("--debug", action="store_true", help="Use mock environment")
     parser.add_argument("--run_name", type=str, default=None, help="WandB Run Name")
+    parser.add_argument("--run_id", type=str, default=None, help="WandB Run ID for resuming")
+    parser.add_argument("--phase", type=str, choices=["full", "specialists", "gating"], default="full", help="Training Phase")
+    parser.add_argument("--load_checkpoint", type=str, default=None, help="Path to checkpoint to resume/start from")
     args = parser.parse_args()
 
     # Load Config
@@ -140,7 +148,7 @@ def main():
         config["wandb"]["name"] = args.run_name
     
     # Setup WandB
-    setup_wandb(config)
+    run_name = setup_wandb(config, run_id=args.run_id)
 
     # Pre-load Data for Shared Memory (Optimization)
     data_loader = None
@@ -176,8 +184,8 @@ def main():
     # print(f"Using device: {device}")
     # MOVED DOWN after Env creation
     
-
-
+    
+    
     # Environment
     
     # Check for num_envs in config
@@ -356,12 +364,21 @@ def main():
         env=env,
         ensemble_agent=ensemble,
         config=training_config,
-        device=device
+        device=device,
+        run_name=run_name  # Pass canonical run name for checkpoint versioning
     )
+    
+    # Load Checkpoint if requested
+    if args.load_checkpoint:
+        try:
+            trainer.load_checkpoint(args.load_checkpoint)
+        except Exception as e:
+            print(f"FATAL: Failed to load checkpoint {args.load_checkpoint}: {e}")
+            sys.exit(1)
     
     # Start Training
     try:
-        trainer.train()
+        trainer.train(phase=args.phase)
     except KeyboardInterrupt:
         print("Training interrupted. Saving checkpoint...")
         trainer.save_checkpoint("checkpoints/interrupted_checkpoint.pth")

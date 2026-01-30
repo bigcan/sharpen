@@ -19,3 +19,4 @@ scipy
 plotly
 kaleido
 optuna
+filelock

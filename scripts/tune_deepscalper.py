@@ -573,6 +573,7 @@ if __name__ == "__main__":
     parser.add_argument("--resume", action="store_true", help="Resume study")
     parser.add_argument("--debug", action="store_true", default=False)
     parser.add_argument("--run_name", type=str, default=None, help="WandB run name (uses canonical format if not provided)")
+    parser.add_argument("--run_id", type=str, default=None, help="WandB Run ID for resuming/unifying runs")
     parser.add_argument("--strategy", type=str, default="joint", choices=["joint", "independent"], help="HPO Strategy")
     parser.add_argument("--data_file", type=str, default=None, help="Override data file path")
     args = parser.parse_args()
@@ -658,6 +659,8 @@ if __name__ == "__main__":
         
         wandb_config = dataclasses.asdict(base_config).get("wandb", {})
         wandb.init(
+            id=args.run_id, # UNIFIED PIPELINE RUN
+            resume="allow", # Allow appending to existing run
             project=wandb_config.get("project", "FinRL-Pro-DS"),
             entity=wandb_config.get("entity"),
             mode=wandb_config.get("mode", "online"),
