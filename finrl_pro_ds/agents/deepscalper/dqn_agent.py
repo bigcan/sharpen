@@ -12,7 +12,9 @@ from finrl_pro_ds.agents.deepscalper.networks import DeepScalperNetwork
 
 class ReplayBuffer:
     def __init__(self, capacity: int):
-        self.buffer = deque(maxlen=capacity)
+        self.capacity = capacity
+        self.buffer = []
+        self.position = 0
     
     def push(self, state, action, reward, next_state, done, aux_target=0.0):
         """
@@ -22,9 +24,14 @@ class ReplayBuffer:
         done: bool
         aux_target: float (Volatility Target)
         """
-        self.buffer.append((state, action, reward, next_state, done, aux_target))
+        if len(self.buffer) < self.capacity:
+            self.buffer.append(None)
+        
+        self.buffer[self.position] = (state, action, reward, next_state, done, aux_target)
+        self.position = (self.position + 1) % self.capacity
     
     def sample(self, batch_size: int):
+        # List sampling is much faster than deque sampling
         batch = random.sample(self.buffer, batch_size)
         state, action, reward, next_state, done, aux_target = zip(*batch)
         return state, action, reward, next_state, done, aux_target
