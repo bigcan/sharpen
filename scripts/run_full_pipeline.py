@@ -107,6 +107,7 @@ def main():
     parser.add_argument("--run_name", type=str, default=None, help="WandB Run Name")
     parser.add_argument("--debug", action="store_true")
     parser.add_argument("--trials", type=int, default=5, help="HPO Trials")
+    parser.add_argument("--run_id", type=str, default=None, help="Manual WandB Run ID")
     parser.add_argument("--steps", type=int, default=5000, help="HPO/Train Steps")
     parser.add_argument("--resume-from", type=str, choices=["hpo", "train", "backtest", "report"], default="hpo")
     
@@ -117,6 +118,12 @@ def main():
         from finrl_pro_ds.utils.naming import generate_run_name
         args.run_name = generate_run_name(version="V1", platform="GPUHub", suffix="Pipeline")
         print(f"Auto-generated Run Name: {args.run_name}")
+
+    # Generate or Use Run ID
+    import wandb
+    if not args.run_id:
+        args.run_id = wandb.util.generate_id()
+    print(f"Pipeline Run ID: {args.run_id}")
         
     phases = ["hpo", "train", "backtest", "report"]
     start_index = phases.index(args.resume_from)
@@ -128,7 +135,8 @@ def main():
         print("\n=== PHASE 1: HYPERPARAMETER OPTIMIZATION ===")
         print(f"Trials: {args.trials}, Steps: {args.steps}")
         
-        hpo_cmd = f"python scripts/tune_deepscalper.py --config {args.config} --trials {args.trials} --steps {args.steps} --run_name {args.run_name}_HPO"
+        # Pass run_id and SAME run_name
+        hpo_cmd = f"python scripts/tune_deepscalper.py --config {args.config} --trials {args.trials} --steps {args.steps} --run_name {args.run_name} --run_id {args.run_id}"
         if args.debug:
             hpo_cmd += " --debug"
             
@@ -160,12 +168,43 @@ def main():
 
     # PHASE 1: TRAIN
     if start_index <= 1:
-        print("\n=== PHASE 2: TRAINING ===")
-        train_cmd = f"python scripts/train_deepscalper.py --config {active_config} --run_name {args.run_name}_Train"
+        print("\n=== PHASE 2: TRAINING (SPECIALISTS) ===")
+        # 1. Specialists Phase
+        # Pass run_id and SAME run_name
+        train_cmd_spec = f"python scripts/train_deepscalper.py --config {active_config} --run_name {args.run_name} --run_id {args.run_id} --phase specialists"
         if args.debug:
-            train_cmd += " --debug"
+            train_cmd_spec += " --debug"
+        run_command(train_cmd_spec)
+
+        # Find the checkpoint
+        import glob
+        # Checkpoint dir uses run_name (which we unified to just args.run_name)
+        checkpoint_dir = os.path.join("checkpoints", args.run_name)
+        if not os.path.exists(checkpoint_dir):
+            print(f"Error: Checkpoint directory not found: {checkpoint_dir}")
+            sys.exit(1)
             
-        run_command(train_cmd)
+        # Look for the latest checkpoint (final or step)
+        checkpoints = glob.glob(os.path.join(checkpoint_dir, "checkpoint_final_*.pth"))
+        if not checkpoints:
+             checkpoints = glob.glob(os.path.join(checkpoint_dir, "checkpoint_step_*.pth"))
+        
+        if not checkpoints:
+             print(f"Error: No checkpoint found in {checkpoint_dir} after specialists training.")
+             sys.exit(1)
+             
+        # Sort by modification time to get the latest
+        latest_checkpoint = max(checkpoints, key=os.path.getmtime)
+        print(f"Found latest checkpoint: {latest_checkpoint}")
+
+        print("\n=== PHASE 2.5: TRAINING (GATING) ===")
+        # 2. Gating Phase
+        # Resume from the specialist checkpoint
+        # Note: We use the SAME run_name and run_id
+        train_cmd_gate = f"python scripts/train_deepscalper.py --config {active_config} --run_name {args.run_name} --run_id {args.run_id} --phase gating --load_checkpoint {latest_checkpoint}"
+        if args.debug:
+            train_cmd_gate += " --debug"
+        run_command(train_cmd_gate)
         
     # PHASE 2: BACKTEST
     if start_index <= 2:

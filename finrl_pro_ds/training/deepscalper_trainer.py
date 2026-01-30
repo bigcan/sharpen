@@ -8,6 +8,7 @@ import time
 from collections import deque
 import random
 import wandb # Added for WandB logging
+import filelock # Audit Fix 1: Prevention of Race Conditions
 from torch.distributions import Categorical
 
 from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
@@ -33,13 +34,15 @@ class DeepScalperTrainer:
         ensemble_agent: DeepScalperEnsemble,
         config: Dict[str, Any],
         logger: Optional[MLOpsLogger] = None,
-        device: str = "cpu"
+        device: str = "cpu",
+        run_name: str = "default_run"
     ):
         self.env = env
         self.ensemble = ensemble_agent
         self.config = config
         self.logger = logger or MLOpsLogger()
         self.device = torch.device(device)
+        self.run_name = run_name
         
         # Training Hyperparameters
         self.batch_size = config.get("batch_size", 64)
@@ -52,7 +55,8 @@ class DeepScalperTrainer:
         self.dqn_update_interval = config.get("dqn_update_interval", 4)  # Train DQN every N env steps
         
         # Ensure checkpoint dir exists
-        os.makedirs("checkpoints", exist_ok=True)
+        self.checkpoint_dir = os.path.join("checkpoints", self.run_name)
+        os.makedirs(self.checkpoint_dir, exist_ok=True)
         
         # Parse Agent Configs (if available, else fallback to global LR)
         agents_config = config.get("agents", {})
@@ -92,6 +96,55 @@ class DeepScalperTrainer:
         
         self.global_step = 0
         self.dqn_updates_accumulator = 0.0
+
+    def _freeze_module(self, module: nn.Module):
+        for param in module.parameters():
+            param.requires_grad = False
+        module.eval()
+
+    def _unfreeze_module(self, module: nn.Module):
+        for param in module.parameters():
+            param.requires_grad = True
+        module.train()
+
+    def load_checkpoint(self, path: str):
+        """Load agent states from checkpoint"""
+        print(f"Loading checkpoint from {path}...")
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Checkpoint not found: {path}")
+            
+        checkpoint = torch.load(path, map_location=self.device)
+        
+        # Load State Dictionaries
+        # Note: We need to match keys. 
+        # If compiled, keys might have _orig_mod prefix in checkpoint or model.
+        # But we strip it on save. Load should be clean.
+        
+        try:
+            self.ensemble.dqn.policy_net.load_state_dict(checkpoint["dqn"])
+            print("Loaded DQN state.")
+        except Exception as e:
+            print(f"WARNING: Failed to load DQN state: {e}")
+
+        try:
+            self.ensemble.ppo.network.load_state_dict(checkpoint["ppo"])
+            print("Loaded PPO state.")
+        except Exception as e:
+            print(f"WARNING: Failed to load PPO state: {e}")
+
+        try:
+            self.ensemble.a2c.network.load_state_dict(checkpoint["a2c"])
+            print("Loaded A2C state.")
+        except Exception as e:
+            print(f"WARNING: Failed to load A2C state: {e}")
+
+        try:
+            self.ensemble.gating.load_state_dict(checkpoint["gating"])
+            print("Loaded Gating state.")
+        except Exception as e:
+            print(f"WARNING: Failed to load Gating state: {e}")
+            
+        print("Checkpoint loaded successfully.")
 
     def compute_gae(self, rewards, values, next_values, dones, gamma=0.99, lam=0.95):
         """Compute Generalized Advantage Estimation"""
@@ -188,6 +241,11 @@ class DeepScalperTrainer:
                     
                     loss = policy_loss + value_loss + entropy_loss
                 
+                if not torch.isfinite(loss):
+                    print(f"WARNING: PPO Loss is {loss.item()} (NaN/Inf). Skipping update.", flush=True)
+                    optimizer.zero_grad() # Clear any bad grads
+                    continue
+
                 optimizer.zero_grad()
                 self.scaler_ppo.scale(loss).backward()
                 self.scaler_ppo.unscale_(optimizer)
@@ -243,7 +301,11 @@ class DeepScalperTrainer:
             entropy_loss = -self.a2c_entropy_coef * entropy.mean()
             
             loss = policy_loss + value_loss + entropy_loss
-            
+        
+        if not torch.isfinite(loss):
+            print(f"WARNING: A2C Loss is {loss.item()} (NaN/Inf). Skipping update.", flush=True)
+            return 0.0
+
         optimizer.zero_grad()
         self.scaler_a2c.scale(loss).backward()
         self.scaler_a2c.unscale_(optimizer)
@@ -278,6 +340,10 @@ class DeepScalperTrainer:
             # This intuitively pushes NewWeights towards OldWeights where Adv was high.
             loss = - (curr_weights * old_weights * adv.unsqueeze(1)).sum(dim=1).mean()
         
+        if not torch.isfinite(loss):
+            print(f"WARNING: Gating Loss is {loss.item()} (NaN/Inf). Skipping update.", flush=True)
+            return 0.0
+
         self.gating_optimizer.zero_grad()
         self.scaler_gating.scale(loss).backward()
         self.scaler_gating.step(self.gating_optimizer)
@@ -286,9 +352,33 @@ class DeepScalperTrainer:
         return loss.item()
 
         
-    def train(self):
-        """Main Training Loop"""
-        self.logger.log_event("deepscalper.training.start")
+    def train(self, phase: str = "full"):
+        """
+        Main Training Loop
+        phase: 'full' | 'specialists' | 'gating'
+        """
+        self.logger.log_event("deepscalper.training.start", context={"phase": phase})
+        print(f"Starting Training Phase: {phase.upper()}")
+
+        # Phase-Specific Setup
+        if phase == "specialists":
+            print("PHASE: SPECIALISTS - Freezing Gating Network")
+            self._freeze_module(self.ensemble.gating)
+            self._unfreeze_module(self.ensemble.dqn.policy_net)
+            self._unfreeze_module(self.ensemble.ppo.network)
+            self._unfreeze_module(self.ensemble.a2c.network)
+        elif phase == "gating":
+            print("PHASE: GATING - Freezing Specialist Agents")
+            self._unfreeze_module(self.ensemble.gating)
+            self._freeze_module(self.ensemble.dqn.policy_net)
+            self._freeze_module(self.ensemble.ppo.network)
+            self._freeze_module(self.ensemble.a2c.network)
+        else: # full
+            print("PHASE: FULL - Training All Components")
+            self._unfreeze_module(self.ensemble.gating)
+            self._unfreeze_module(self.ensemble.dqn.policy_net)
+            self._unfreeze_module(self.ensemble.ppo.network)
+            self._unfreeze_module(self.ensemble.a2c.network)
         
         # Detect Vector Env
         is_vector_env = False
@@ -317,6 +407,8 @@ class DeepScalperTrainer:
         if self.config.get("torch_compile", False) and hasattr(torch, "compile"):
             print("Compiling models with torch.compile...")
             try:
+                # Only compile active components to save time/errors? 
+                # Or just compile everything once. Compiling frozen models is fine.
                 self.ensemble.dqn.policy_net = torch.compile(self.ensemble.dqn.policy_net)
                 self.ensemble.ppo.network = torch.compile(self.ensemble.ppo.network)
                 self.ensemble.a2c.network = torch.compile(self.ensemble.a2c.network)
@@ -354,7 +446,6 @@ class DeepScalperTrainer:
                 step = self.global_step  # For backward compatibility with logging
                 # print(f"DEBUG: Loop Start. Step: {step}, Global: {self.global_step}, NumEnvs: {num_envs}", flush=True)
                 
-                # 1. Select Action (Voting)
                 # 1. Select Action (Voting)
                 if step % 1000 == 0:
                      self.logger.log_event("deepscalper.training.step_start", context={"step": step})
@@ -450,27 +541,33 @@ class DeepScalperTrainer:
                         state_dict = {"micro": micro[i].cpu().numpy(), "private": private[i].cpu().numpy(), "macro": macro[i].cpu().numpy()}
                         next_state_dict = {"micro": next_micro[i].cpu().numpy(), "private": next_private[i].cpu().numpy(), "macro": next_macro[i].cpu().numpy()}
                         
-                        self.ensemble.dqn.memory.push(
-                            state_dict, 
-                            action_vector[i], 
-                            reward[i], 
-                            next_state_dict, 
-                            done,
-                            float(info.get("volatility_target", [0.0]*num_envs)[i]) if isinstance(info.get("volatility_target"), (list, np.ndarray)) else 0.0
-                        )
+                        # Only push to DQN if we are training DQN (Full or Specialists)
+                        if phase in ["full", "specialists"]:
+                            self.ensemble.dqn.memory.push(
+                                state_dict, 
+                                action_vector[i], 
+                                reward[i], 
+                                next_state_dict, 
+                                done,
+                                float(info.get("volatility_target", [0.0]*num_envs)[i]) if isinstance(info.get("volatility_target"), (list, np.ndarray)) else 0.0
+                            )
                         
-                        self.ppo_buffer.append((
-                            micro[i], private[i], macro[i], action_vector[i], ppo_log_prob[i],
-                            reward[i], val_ppo[i].item(), val_next_ppo[i].item(), done
-                        ))
-                        self.a2c_buffer.append((
-                            micro[i], private[i], macro[i], action_vector[i], None,
-                            reward[i], val_a2c[i].item(), val_next_a2c[i].item(), done
-                        ))
-                        # Gating: weights are (B, 3)
-                        self.gating_buffer.append((
-                            macro[i], weights[i], reward[i], done
-                        ))
+                        # Only append to PPO/A2C buffers if active
+                        if phase in ["full", "specialists"]:
+                            self.ppo_buffer.append((
+                                micro[i], private[i], macro[i], action_vector[i], ppo_log_prob[i],
+                                reward[i], val_ppo[i].item(), val_next_ppo[i].item(), done
+                            ))
+                            self.a2c_buffer.append((
+                                micro[i], private[i], macro[i], action_vector[i], None,
+                                reward[i], val_a2c[i].item(), val_next_a2c[i].item(), done
+                            ))
+                        
+                        # Only append to Gating buffer if active
+                        if phase in ["full", "gating"]:
+                            self.gating_buffer.append((
+                                macro[i], weights[i], reward[i], done
+                            ))
 
                         if done:
                             # Log metrics for THIS environment
@@ -479,11 +576,6 @@ class DeepScalperTrainer:
                                 "train/episode_length": episode_lengths[i], 
                                 "train/global_step": self.global_step
                             }
-                            # To avoid spamming wandb, maybe only log if it's the 0th env (or use aggregate)? 
-                            # For now, log all completed episodes is fine, but high throughput might throttle.
-                            # Optimization: only log env 0?
-                            # Let's log all for now but rely on wandb's internal sampling if needed.
-                            # Check config if we should limit logging?
                             wandb.log(metrics)
                             
                             episode_rewards_total += episode_rewards[i]
@@ -507,26 +599,29 @@ class DeepScalperTrainer:
                     state_dict = {"micro": micro.squeeze(0).cpu().numpy(), "private": private.squeeze(0).cpu().numpy(), "macro": macro.squeeze(0).cpu().numpy()}
                     next_state_dict = {"micro": next_micro.squeeze(0).cpu().numpy(), "private": next_private.squeeze(0).cpu().numpy(), "macro": next_macro.squeeze(0).cpu().numpy()}
                     
-                    self.ensemble.dqn.memory.push(
-                        state_dict, 
-                        action_vector[0], 
-                        reward, 
-                        next_state_dict, 
-                        done,
-                        float(info.get("volatility_target", 0.0))
-                    )
-                    
-                    self.ppo_buffer.append((
-                        micro.squeeze(0), private.squeeze(0), macro.squeeze(0), action_vector[0], ppo_log_prob.squeeze(0),
-                        reward, val_ppo.item(), val_next_ppo.item(), done
-                    ))
-                    self.a2c_buffer.append((
-                        micro.squeeze(0), private.squeeze(0), macro.squeeze(0), action_vector[0], None,
-                        reward, val_a2c.item(), val_next_a2c.item(), done
-                    ))
-                    self.gating_buffer.append((
-                        macro.squeeze(0), weights.squeeze(0), reward, done
-                    ))
+                    if phase in ["full", "specialists"]:
+                        self.ensemble.dqn.memory.push(
+                            state_dict, 
+                            action_vector[0], 
+                            reward, 
+                            next_state_dict, 
+                            done,
+                            float(info.get("volatility_target", 0.0))
+                        )
+                        
+                        self.ppo_buffer.append((
+                            micro.squeeze(0), private.squeeze(0), macro.squeeze(0), action_vector[0], ppo_log_prob.squeeze(0),
+                            reward, val_ppo.item(), val_next_ppo.item(), done
+                        ))
+                        self.a2c_buffer.append((
+                            micro.squeeze(0), private.squeeze(0), macro.squeeze(0), action_vector[0], None,
+                            reward, val_a2c.item(), val_next_a2c.item(), done
+                        ))
+                        
+                    if phase in ["full", "gating"]:
+                        self.gating_buffer.append((
+                            macro.squeeze(0), weights.squeeze(0), reward, done
+                        ))
                     
                     if done:
                         metrics = {"train/episode_reward": episode_rewards, "train/episode_length": episode_steps, "train/global_step": self.global_step}
@@ -543,18 +638,17 @@ class DeepScalperTrainer:
                 self.global_step += num_envs
 
             # 4. Updates
-
-            # 4. Updates
             
             # A. Train DQN (Accumulate gradients to match update ratio)
-            # We want 1 update per dqn_update_interval transitions.
-            # We collected 'num_envs' transitions.
-            self.dqn_updates_accumulator += num_envs / self.dqn_update_interval
-            
-            dqn_loss = None
-            while self.dqn_updates_accumulator >= 1.0:
-                dqn_loss = self.ensemble.dqn.train_step()
-                self.dqn_updates_accumulator -= 1.0
+            if phase in ["full", "specialists"]:
+                self.dqn_updates_accumulator += num_envs / self.dqn_update_interval
+                
+                dqn_loss = None
+                while self.dqn_updates_accumulator >= 1.0:
+                    dqn_loss = self.ensemble.dqn.train_step()
+                    self.dqn_updates_accumulator -= 1.0
+            else:
+                dqn_loss = None
             
             # B. Train PPO/A2C
             # Check if we crossed an update interval boundary
@@ -563,60 +657,70 @@ class DeepScalperTrainer:
             curr_interval_idx = self.global_step // update_interval
             
             if curr_interval_idx > prev_interval_idx:
-                ppo_loss = self.update_ppo(self.ensemble.ppo, self.ppo_optimizer, self.ppo_buffer)
-                a2c_loss = self.update_a2c(self.ensemble.a2c, self.a2c_optimizer, self.a2c_buffer)
-                gating_loss = self.update_gating(self.gating_buffer)
+                ppo_loss = None
+                a2c_loss = None
+                gating_loss = None
                 
-                if ppo_loss is not None:
+                if phase in ["full", "specialists"]:
+                    ppo_loss = self.update_ppo(self.ensemble.ppo, self.ppo_optimizer, self.ppo_buffer)
+                    a2c_loss = self.update_a2c(self.ensemble.a2c, self.a2c_optimizer, self.a2c_buffer)
+                
+                if phase in ["full", "gating"]:
+                    gating_loss = self.update_gating(self.gating_buffer)
+                
+                if ppo_loss is not None or gating_loss is not None:
                      metrics = {
-                         "train/ppo_loss": ppo_loss, 
-                         "train/a2c_loss": a2c_loss, 
-                         "train/gating_loss": gating_loss,
                          "train/global_step": self.global_step
                      }
+                     if ppo_loss is not None: metrics["train/ppo_loss"] = ppo_loss
+                     if a2c_loss is not None: metrics["train/a2c_loss"] = a2c_loss
+                     if gating_loss is not None: metrics["train/gating_loss"] = gating_loss
+                     
                      wandb.log(metrics)
                 
+                # Clear buffers regardless, they are stale
                 self.ppo_buffer = [] 
                 self.a2c_buffer = []
                 self.gating_buffer = []
             
-            # Smart Logging: Log every N seconds OR every M steps to avoid IO bottleneck
+            # Smart Logging
             current_time = time.time()
             if not hasattr(self, '_last_log_time'): self._last_log_time = current_time
             
-            log_interval = self.config.get("log_interval", 1000) # Increased default
+            log_interval = self.config.get("log_interval", 1000)
             time_interval = 5.0 # Seconds
             
             should_log = False
-            if dqn_loss is not None:
-                # Check Time
-                if current_time - self._last_log_time > time_interval:
-                    should_log = True
-                # Check Steps (Backwards compat + ensure we log at least sometimes if fast)
-                elif (self.global_step // log_interval) > (start_step // log_interval):
-                    should_log = True
+            # Always check time for logging heartbeat, not just if dqn_loss is not None
+            if current_time - self._last_log_time > time_interval:
+                should_log = True
+            elif (self.global_step // log_interval) > (start_step // log_interval):
+                should_log = True
             
             if should_log:
                 self._last_log_time = current_time
-                # Log avg reward if using vector envs? reward is array.
                 r = reward.mean() if is_vector_env else reward
-                wandb.log({"train/dqn_loss": dqn_loss, "train/step_reward_mean": r, "train/global_step": self.global_step})
+                
+                log_data = {
+                    "train/step_reward_mean": r, 
+                    "train/global_step": self.global_step
+                }
+                if dqn_loss is not None:
+                     log_data["train/dqn_loss"] = dqn_loss
+                     
+                wandb.log(log_data)
 
             # Save Checkpoint
             if (self.global_step // self.checkpoint_interval) > (start_step // self.checkpoint_interval):
-                ckpt_path = f"checkpoints/checkpoint_{self.global_step}.pth"
+                ckpt_path = os.path.join(self.checkpoint_dir, f"checkpoint_{self.global_step}.pth")
                 self.save_checkpoint(ckpt_path)
-                
-                # Check for max checkpoints and delete old ones
-                # Not implemented yet but planned
-                pass
 
             # Update Obs
             micro = next_micro
             private = next_private
             macro = next_macro
             obs = next_obs
-            print("DEBUG: Loop End. Obs updated.", flush=True)
+            # print("DEBUG: Loop End. Obs updated.", flush=True)
         
         except Exception as e:
             print(f"FATAL EXCEPTION IN TRAINING LOOP: {e}", flush=True)
@@ -629,20 +733,27 @@ class DeepScalperTrainer:
                 self.watchdog.stop()
 
         # Save Final Checkpoint
-        final_ckpt_path = f"checkpoints/checkpoint_final_{self.global_step}.pth"
+        final_ckpt_path = os.path.join(self.checkpoint_dir, f"checkpoint_final_{self.global_step}.pth")
         print(f"Saving final checkpoint to {final_ckpt_path}...", flush=True)
         self.save_checkpoint(final_ckpt_path)
 
         self.logger.log_event("deepscalper.training.complete")
         
-        # Calculate average per-step or per-episode reward
         if episode_count > 0:
             avg_reward = episode_rewards_total / episode_count
         else:
             avg_reward = 0.0
             
         return avg_reward
-                
+        
+    def _freeze_module(self, module):
+        for param in module.parameters():
+            param.requires_grad = False
+
+    def _unfreeze_module(self, module):
+        for param in module.parameters():
+            param.requires_grad = True
+
     def _unpack_obs(self, obs: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Convert dict observation to tensors on device.
@@ -704,8 +815,16 @@ class DeepScalperTrainer:
             "gating": self._get_clean_state_dict(self.ensemble.gating),
             "config": self.config
         }
-        torch.save(state, path)
-        self.logger.log_event("deepscalper.model.saved", context={"path": path})
+        
+        lock_path = os.path.join(self.checkpoint_dir, ".lock")
+        try:
+            with filelock.FileLock(lock_path, timeout=10):
+                torch.save(state, path)
+                self.logger.log_event("deepscalper.model.saved", context={"path": path})
+        except filelock.Timeout:
+            print(f"WARNING: Could not acquire lock for checkpoint {path}. Skipping save.", flush=True)
+        except Exception as e:
+            print(f"ERROR: Failed to save checkpoint {path}: {e}", flush=True)
 
     def evaluate(self, eval_env, num_episodes=5) -> Dict[str, float]:
         """
