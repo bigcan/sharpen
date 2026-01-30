@@ -566,7 +566,7 @@ def run_best_model_report(best_params, base_config, args):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="configs/deepscalper_unified.yaml", help="Master Config")
-    parser.add_argument("--trials", type=int, default=1)
+    parser.add_argument("--trials", type=int, default=50)
     parser.add_argument("--steps", type=int, default=5000, help="Steps per fold")
     parser.add_argument("--study_name", type=str, default="deepscalper_hpo")
     parser.add_argument("--storage", type=str, default="sqlite:///hpo.db")
