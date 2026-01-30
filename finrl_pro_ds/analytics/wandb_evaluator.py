@@ -76,10 +76,14 @@ class WandbFinRLEvaluator:
         # 2. Fetch Benchmark Data
         print(f"Fetching benchmark data for {self.benchmark_ticker}...")
         try:
+            # Fix: Ensure dates are converted to datetime objects (yfinance doesn't like int64 ns timestamps)
+            start_dt = pd.to_datetime(self.start_date)
+            end_dt = pd.to_datetime(self.end_date)
+            
             df_bench = yf.download(
                 self.benchmark_ticker, 
-                start=self.start_date, 
-                end=self.end_date, 
+                start=start_dt, 
+                end=end_dt, 
                 progress=False
             )
             if isinstance(df_bench.columns, pd.MultiIndex):
