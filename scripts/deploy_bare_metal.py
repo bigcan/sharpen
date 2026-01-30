@@ -122,20 +122,23 @@ def deploy(args):
     
     setup_cmds = [
         f"cd {remote_workspace}",
+        "echo 'STEP: START'",
         # CRITICAL: Increase file descriptor limit for high-concurrency AsyncVectorEnv
         "ulimit -n 65536",
+        "echo 'STEP: UNINSTALL'",
         # CRITICAL: Clean everything to avoid stale deps
         "/root/miniconda3/bin/pip uninstall finrl-pro-ds -y || true",
         "rm -rf finrl_pro_ds.egg-info build dist",
-        f"unzip -o {zip_name} > /dev/null",
+        "echo 'STEP: UNZIP'",
+        f"unzip -o {zip_name}",
         "rm deploy_package.zip",
         # Verify setup.py content
         "grep -C 2 'install_requires' setup.py || echo 'setup.py missing'",
+        "echo 'STEP: INSTALL REQS'",
         # Base Image is PyTorch 2.8.0 + CUDA 12.8
-        "/root/miniconda3/bin/pip install --upgrade -r requirements.txt",
-        "/root/miniconda3/bin/pip install -e .",  # Editable install
-        f"wandb login {wandb_key}" if wandb_key else "echo 'No WandB Key provided, skipping login'",
-        f"pkill -f {script_path} || true" # Kill previous instances
+        "/root/miniconda3/bin/pip install -q --upgrade -r requirements.txt",
+        "echo 'STEP: INSTALL PKG'",
+        "/root/miniconda3/bin/pip install -q -e ."  # Editable install
     ]
     
     cmd_chain = " && ".join(setup_cmds) + " && echo SETUP_SUCCESS"
@@ -155,6 +158,27 @@ def deploy(args):
     else:
         print("Setup completed successfully.")
     
+    # 4.5 Clean up old processes (Independent Step to avoid suicide)
+    print("Killing old instances...")
+    # Use pgrep to ensure we don't kill ourself? 
+    # Actually, running it as separate exec_command means THIS command line contains the pattern?
+    # Yes. "pkill -f script" via SSH.
+    # But if we just fire and forget or ignore exit code?
+    # Or better: exclude 'deploy_bare_metal'? No, remote logic doesn't know.
+    # We can rely on pkill NOT killing the shell executing pkill?
+    # The shell executing pkill is `bash -c 'pkill ...'`.
+    # It might kill itself.
+    # To avoid this, we can exclude the current SSH session somehow?
+    # Or just ignore the error if it happens, as long as setup finished.
+    # BUT we want to ensure setup is CONFIRMED. Setup IS confirmed now.
+    # So if pkill kills this session, we assume success.
+    
+    try:
+        ssh.exec_command(f"pkill -f {script_path} || true")
+        time.sleep(2) # Allow cleanup
+    except:
+        pass
+
     # 5. Launch
     print(f"Launching {script_path}..." + (f" as {full_run_name}" if full_run_name else " (script will auto-generate name)"))
     
@@ -166,7 +190,8 @@ def deploy(args):
     # Prepend PATH here too
     # Build run_name arg only if provided
     run_name_arg = f"--run_name {full_run_name}" if full_run_name else ""
-    cmd = f"{export_path} && ulimit -n 65535 && nohup python -u {script_path} --config {config_path} {run_name_arg} {args.extra_args} > run.log 2>&1 & echo $! > run.pid"
+    wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
+    cmd = f"{export_path} && {wandb_env} ulimit -n 65535 && nohup python -u {script_path} --config {config_path} {run_name_arg} {args.extra_args} > run.log 2>&1 & echo $! > run.pid"
     
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
