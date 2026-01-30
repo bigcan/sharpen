@@ -675,90 +675,80 @@ class DeepScalperTrainer:
                 # Increment global step by number of envs
                 self.global_step += num_envs
 
-            # 4. Updates
-            
-            # A. Train DQN (Accumulate gradients to match update ratio)
-            if phase in ["full", "specialists"]:
-                self.dqn_updates_accumulator += num_envs / self.dqn_update_interval
+                # 4. Updates
                 
-                dqn_loss = None
-                while self.dqn_updates_accumulator >= 1.0:
-                    dqn_loss = self.ensemble.dqn.train_step()
-                    self.dqn_updates_accumulator -= 1.0
-            else:
-                dqn_loss = None
-            
-            # B. Train PPO/A2C
-            # Check if we crossed an update interval boundary
-            update_interval = self.config.get("update_interval", 256)
-            prev_interval_idx = start_step // update_interval
-            curr_interval_idx = self.global_step // update_interval
-            
-            if curr_interval_idx > prev_interval_idx:
-                ppo_loss = None
-                a2c_loss = None
-                gating_loss = None
-                
+                # A. Train DQN (Accumulate gradients to match update ratio)
                 if phase in ["full", "specialists"]:
-                    ppo_loss = self.update_ppo(self.ensemble.ppo, self.ppo_optimizer, self.ppo_buffer)
-                    a2c_loss = self.update_a2c(self.ensemble.a2c, self.a2c_optimizer, self.a2c_buffer)
+                    self.dqn_updates_accumulator += num_envs / self.dqn_update_interval
+                    
+                    dqn_loss = None
+                    while self.dqn_updates_accumulator >= 1.0:
+                        dqn_loss = self.ensemble.dqn.train_step()
+                        self.dqn_updates_accumulator -= 1.0
+                else:
+                    dqn_loss = None
                 
-                if phase in ["full", "gating"]:
-                    gating_loss = self.update_gating(self.gating_buffer)
+                # B. Train PPO/A2C
+                # Check if we crossed an update interval boundary
+                update_interval = self.config.get("update_interval", 256)
+                prev_interval_idx = start_step // update_interval
+                curr_interval_idx = self.global_step // update_interval
                 
-                if ppo_loss is not None or gating_loss is not None:
-                     metrics = {
-                         "train/global_step": self.global_step
-                     }
-                     if ppo_loss is not None: metrics["train/ppo_loss"] = ppo_loss
-                     if a2c_loss is not None: metrics["train/a2c_loss"] = a2c_loss
-                     if gating_loss is not None: metrics["train/gating_loss"] = gating_loss
-                     
-                     wandb.log(metrics)
-                
-                # Clear buffers regardless, they are stale
-                self.ppo_buffer = [] 
-                self.a2c_buffer = []
-                self.gating_buffer = []
-            
-            # Smart Logging
-            current_time = time.time()
-            if not hasattr(self, '_last_log_time'): self._last_log_time = current_time
-            
-            log_interval = self.config.get("log_interval", 1000)
-            time_interval = 5.0 # Seconds
-            
-            should_log = False
-            # Always check time for logging heartbeat, not just if dqn_loss is not None
-            if current_time - self._last_log_time > time_interval:
-                should_log = True
-            elif (self.global_step // log_interval) > (start_step // log_interval):
-                should_log = True
-            
-            if should_log:
-                self._last_log_time = current_time
-                r = reward.mean() if is_vector_env else reward
-                
-                log_data = {
-                    "train/step_reward_mean": r, 
-                    "train/global_step": self.global_step
-                }
-                if dqn_loss is not None:
-                     log_data["train/dqn_loss"] = dqn_loss
-                     
-                wandb.log(log_data)
+                if curr_interval_idx > prev_interval_idx:
+                    ppo_loss = None
+                    a2c_loss = None
+                    gating_loss = None
+                    
+                    if phase in ["full", "specialists"]:
+                        ppo_loss = self.update_ppo(self.ensemble.ppo, self.ppo_optimizer, self.ppo_buffer)
+                        a2c_loss = self.update_a2c(self.ensemble.a2c, self.a2c_optimizer, self.a2c_buffer)
+                    
+                    if phase in ["full", "gating"]:
+                        gating_loss = self.update_gating(self.gating_buffer)
+                    
+                    if ppo_loss is not None or gating_loss is not None:
+                         metrics = {
+                             "train/global_step": self.global_step
+                         }
+                         if ppo_loss is not None: metrics["train/ppo_loss"] = ppo_loss
+                         if a2c_loss is not None: metrics["train/a2c_loss"] = a2c_loss
+                         if gating_loss is not None: metrics["train/gating_loss"] = gating_loss
+                         
+                         wandb.log(metrics)
+                    
+                    # Clear buffers regardless, they are stale
+                    self.ppo_buffer = [] 
+                    self.a2c_buffer = []
+                    self.gating_buffer = []
 
-            # Save Checkpoint
-            if (self.global_step // self.checkpoint_interval) > (start_step // self.checkpoint_interval):
-                ckpt_path = os.path.join(self.checkpoint_dir, f"checkpoint_{self.global_step}.pth")
-                self.save_checkpoint(ckpt_path)
+                # C. Log Batch Metrics
+                if self.global_step % self.config.get("log_interval", 1000) < num_envs:
+                    self.logger.log_event("deepscalper.training.batch", context={
+                        "step": self.global_step,
+                        "dqn_loss": dqn_loss if dqn_loss is not None else 0.0,
+                        "reward_mean": episode_rewards_total / max(1, episode_count)
+                    })
+                
+                # Periodic Evaluation / Logging
+                log_interval = self.config.get("log_interval", 1000)
+                if (self.global_step // log_interval) > (start_step // log_interval):
+                     # Log summary metrics to wandb
+                     wandb.log({
+                         "train/dqn_loss": dqn_loss if dqn_loss is not None else 0.0,
+                         "train/step_reward_mean": episode_rewards_total / max(1, episode_count) if episode_count > 0 else 0.0
+                     })
 
-            # Update Obs
-            micro = next_micro
-            private = next_private
-            macro = next_macro
-            obs = next_obs
-            # print("DEBUG: Loop End. Obs updated.", flush=True)
+                # Save Checkpoint
+                if (self.global_step // self.checkpoint_interval) > (start_step // self.checkpoint_interval):
+                    ckpt_path = os.path.join(self.checkpoint_dir, f"checkpoint_{self.global_step}.pth")
+                    self.save_checkpoint(ckpt_path)
+
+                # Update Obs
+                micro = next_micro
+                private = next_private
+                macro = next_macro
+                obs = next_obs
+                # print("DEBUG: Loop End. Obs updated.", flush=True)
         
         except Exception as e:
             print(f"FATAL EXCEPTION IN TRAINING LOOP: {e}", flush=True)
