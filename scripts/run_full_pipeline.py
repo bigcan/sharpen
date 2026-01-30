@@ -106,7 +106,7 @@ def main():
     parser.add_argument("--config", type=str, required=True, help="Base config file")
     parser.add_argument("--run_name", type=str, default=None, help="WandB Run Name")
     parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--trials", type=int, default=5, help="HPO Trials")
+    parser.add_argument("--trials", type=int, default=50, help="HPO Trials")
     parser.add_argument("--run_id", type=str, default=None, help="Manual WandB Run ID")
     parser.add_argument("--steps", type=int, default=5000, help="HPO/Train Steps")
     parser.add_argument("--resume-from", type=str, choices=["hpo", "train", "backtest", "report"], default="hpo")

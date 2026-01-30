@@ -5,11 +5,11 @@ data:
   file_path: "data/btc_lob_jan2023.parquet"
   ticker: "BTCUSDT"
   train_start_date: "2023-01-10"
-  train_end_date: "2023-01-19"
-  val_start_date: "2023-01-19"
-  val_end_date: "2023-01-20"
-  test_start_date: "2023-01-20"
-  test_end_date: "2023-01-21"
+  train_end_date: "2023-01-18"
+  val_start_date: "2023-01-18"
+  val_end_date: "2023-01-19"
+  test_start_date: "2023-01-19"
+  test_end_date: "2023-01-20"
 
 features:
   micro_features: ["micro"] # Column prefixes
@@ -49,8 +49,8 @@ agents:
   dqn:
     learning_rate: 0.0001
     gamma: 0.99
-    dqn_batch_size: 64
-    dqn_buffer_size: 100000
+    dqn_batch_size: 2048    # Optimized (Blackwell)
+    dqn_buffer_size: 1000000 # Production Scale
     dqn_target_update_freq: 1000
     
   ppo:
@@ -67,13 +67,13 @@ agents:
     learning_rate: 0.0001
 
 training:
-  total_timesteps: 2000000
-  batch_size: 8192      # Optimized (Blackwell)
-  update_interval: 8192 # Matched to Batch Size
+  total_timesteps: 30000000 # 30M Global Frames (Industry Standard)
+  batch_size: 2048          # Optimized (Blackwell)
+  update_interval: 2048     # Matched to Batch Size
   learning_rate: 0.0001
   dqn_update_interval: 8.0 # FIXED: Reduced from 0.5 to 8.0 to prevent Replay Ratio explosion (Ratio ~8)
   log_interval: 1000
-  checkpoint_interval: 10000
+  checkpoint_interval: 100000
   torch_compile: true   # Enabled for Speed
   use_amp: true         # Enabled for Mixed Precision
   use_shm: true         # Enabled (Zero-Copy Fix Applied)
