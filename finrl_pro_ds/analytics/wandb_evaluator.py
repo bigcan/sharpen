@@ -20,7 +20,7 @@ class WandbFinRLEvaluator:
         self,
         df_ensemble: pd.DataFrame,
         dict_agents: Dict[str, pd.DataFrame],
-        benchmark_ticker: str = "^GSPC",
+        benchmark_ticker: str = "BTC-USD",
         start_date: Optional[str] = None,
         end_date: Optional[str] = None
     ):
@@ -478,7 +478,7 @@ def generate_wandb_report(
     dict_agents: Dict[str, pd.DataFrame],
     run_name: str = "ensemble-eval-run",
     project_name: str = "finrl-ensemble",
-    benchmark_ticker: str = "^GSPC",
+    benchmark_ticker: str = "BTC-USD",
     entity: Optional[str] = None
 ):
     """
