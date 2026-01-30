@@ -107,42 +107,79 @@ class DeepScalperTrainer:
             param.requires_grad = True
         module.train()
 
-    def load_checkpoint(self, path: str):
-        """Load agent states from checkpoint"""
+    def load_checkpoint(self, path: str, strict: bool = False, load_optimizers: bool = False):
+        """
+        Load agent states from checkpoint.
+        
+        Args:
+            path: Path to checkpoint file
+            strict: If True, raise error if any agent state fails to load
+            load_optimizers: If True, also load optimizer states (for mid-phase resume)
+        """
         print(f"Loading checkpoint from {path}...")
         if not os.path.exists(path):
             raise FileNotFoundError(f"Checkpoint not found: {path}")
             
         checkpoint = torch.load(path, map_location=self.device)
         
-        # Load State Dictionaries
-        # Note: We need to match keys. 
-        # If compiled, keys might have _orig_mod prefix in checkpoint or model.
-        # But we strip it on save. Load should be clean.
+        # Track loading success for strict mode
+        load_errors = []
         
+        # Load State Dictionaries
         try:
             self.ensemble.dqn.policy_net.load_state_dict(checkpoint["dqn"])
             print("Loaded DQN state.")
         except Exception as e:
+            load_errors.append(f"DQN: {e}")
             print(f"WARNING: Failed to load DQN state: {e}")
 
         try:
             self.ensemble.ppo.network.load_state_dict(checkpoint["ppo"])
             print("Loaded PPO state.")
         except Exception as e:
+            load_errors.append(f"PPO: {e}")
             print(f"WARNING: Failed to load PPO state: {e}")
 
         try:
             self.ensemble.a2c.network.load_state_dict(checkpoint["a2c"])
             print("Loaded A2C state.")
         except Exception as e:
+            load_errors.append(f"A2C: {e}")
             print(f"WARNING: Failed to load A2C state: {e}")
 
         try:
             self.ensemble.gating.load_state_dict(checkpoint["gating"])
             print("Loaded Gating state.")
         except Exception as e:
+            load_errors.append(f"Gating: {e}")
             print(f"WARNING: Failed to load Gating state: {e}")
+        
+        # Restore global step for proper resume
+        if "global_step" in checkpoint:
+            self.global_step = checkpoint["global_step"]
+            print(f"Resumed from global_step: {self.global_step}")
+        else:
+            print("WARNING: Checkpoint does not contain global_step. Starting from 0.")
+        
+        # Optionally load optimizer states (for mid-phase resume)
+        if load_optimizers and "optimizers" in checkpoint:
+            print("Loading optimizer states...")
+            try:
+                if "gating" in checkpoint["optimizers"]:
+                    self.gating_optimizer.load_state_dict(checkpoint["optimizers"]["gating"])
+                if "ppo" in checkpoint["optimizers"]:
+                    self.ppo_optimizer.load_state_dict(checkpoint["optimizers"]["ppo"])
+                if "a2c" in checkpoint["optimizers"]:
+                    self.a2c_optimizer.load_state_dict(checkpoint["optimizers"]["a2c"])
+                print("Optimizer states loaded.")
+            except Exception as e:
+                print(f"WARNING: Failed to load optimizer states: {e}")
+        elif load_optimizers:
+            print("WARNING: Checkpoint does not contain optimizer states.")
+        
+        # Strict mode validation
+        if strict and load_errors:
+            raise RuntimeError(f"Checkpoint load failed in strict mode. Errors: {load_errors}")
             
         print("Checkpoint loaded successfully.")
 
@@ -371,6 +408,7 @@ class DeepScalperTrainer:
             print("PHASE: GATING - Freezing Specialist Agents")
             self._unfreeze_module(self.ensemble.gating)
             self._freeze_module(self.ensemble.dqn.policy_net)
+            self._freeze_module(self.ensemble.dqn.target_net)  # Also freeze target net
             self._freeze_module(self.ensemble.ppo.network)
             self._freeze_module(self.ensemble.a2c.network)
         else: # full
@@ -807,13 +845,19 @@ class DeepScalperTrainer:
         return {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
 
     def save_checkpoint(self, path: str):
-        """Save all agent states"""
+        """Save all agent states and optimizer states for resume"""
         state = {
             "dqn": self._get_clean_state_dict(self.ensemble.dqn.policy_net),
             "ppo": self._get_clean_state_dict(self.ensemble.ppo.network),
             "a2c": self._get_clean_state_dict(self.ensemble.a2c.network),
             "gating": self._get_clean_state_dict(self.ensemble.gating),
-            "config": self.config
+            "config": self.config,
+            "global_step": self.global_step,
+            "optimizers": {
+                "gating": self.gating_optimizer.state_dict(),
+                "ppo": self.ppo_optimizer.state_dict(),
+                "a2c": self.a2c_optimizer.state_dict()
+            }
         }
         
         lock_path = os.path.join(self.checkpoint_dir, ".lock")
