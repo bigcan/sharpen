@@ -127,6 +127,8 @@ def main():
     parser.add_argument("--run_id", type=str, default=None, help="WandB Run ID for resuming")
     parser.add_argument("--phase", type=str, choices=["full", "specialists", "gating"], default="full", help="Training Phase")
     parser.add_argument("--load_checkpoint", type=str, default=None, help="Path to checkpoint to resume/start from")
+    parser.add_argument("--strict_checkpoint", action="store_true", help="Fail if checkpoint load has any errors")
+    parser.add_argument("--load_optimizers", action="store_true", help="Also load optimizer states from checkpoint (for mid-phase resume)")
     args = parser.parse_args()
 
     # Load Config
@@ -371,7 +373,11 @@ def main():
     # Load Checkpoint if requested
     if args.load_checkpoint:
         try:
-            trainer.load_checkpoint(args.load_checkpoint)
+            trainer.load_checkpoint(
+                args.load_checkpoint, 
+                strict=args.strict_checkpoint, 
+                load_optimizers=args.load_optimizers
+            )
         except Exception as e:
             print(f"FATAL: Failed to load checkpoint {args.load_checkpoint}: {e}")
             sys.exit(1)
