@@ -215,7 +215,7 @@ def deploy(args):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--script", required=True, help="Script to run (relative to root), e.g., scripts/train_deepscalper.py")
+    parser.add_argument("--script", default="scripts/run_full_pipeline.py", help="Script to run (default: scripts/run_full_pipeline.py)")
     parser.add_argument("--config", required=True, help="Config file path")
     parser.add_argument("--run_name", default=None, help="WandB run name (target script generates canonical name if not provided)")
     parser.add_argument("--upload_data", action="store_true", help="Upload data file to /data")

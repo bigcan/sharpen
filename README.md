@@ -40,29 +40,32 @@ All parameters are controlled via `configs/deepscalper_unified.yaml`.
 - **Mode**: User `production` for real runs, `smoke_test` for CI checks.
 - **Hardware**: Toggle `use_amp`, `torch_compile` based on your GPU.
 
-### 2. Train (The Engine)
-Launch the optimized trainer. This handles environment vectorization (AsyncVectorEnv) and shared memory pre-loading.
+### 2. Automated Pipeline (Recommended)
+Run the end-to-end MLOps pipeline (HPO $\to$ Train $\to$ Backtest $\to$ Report).
 ```bash
-python scripts/train_deepscalper.py --config configs/deepscalper_unified.yaml --run_name DS_V1_QuickStart
+python scripts/run_full_pipeline.py --config configs/deepscalper_unified.yaml --trials 20
 ```
 
-### 3. Tune (AutoML)
-Find the best hyperparameters using Optuna.
+### 3. Deployment (Remote Ops)
+Deploy the **full pipeline** to a remote node (e.g., GPUHub).
 ```bash
-python scripts/tune_deepscalper.py --trials 20 --study_name DS_HyperOpt
+# Correctly launches the pipeline script, NOT just the trainer
+python scripts/deploy_bare_metal.py --script scripts/run_full_pipeline.py --config configs/deepscalper_unified.yaml --run_name DS_Production_V1
 ```
 
-### 4. Audit (Financial Verification)
-Verify a model's performance on out-of-sample data before deployment.
+### 4. Manual Component Execution (Advanced)
+If you need to run specific stages manually:
+**Train**:
 ```bash
-python scripts/audit_model.py --checkpoint checkpoints/DS_V1_QuickStart/best_model.pth
+python scripts/train_deepscalper.py --config configs/deepscalper_unified.yaml
 ```
-*Output: `reports/audit_DS_V1.md` containing Sharpe, Sorino, and MaxDD metrics.*
-
-### 5. Deploy (Remote Ops)
-Deploy code and config to a remote high-performance node (e.g., GPUHub).
+**Tune**:
 ```bash
-python scripts/deploy_bare_metal.py --target gpuhub --run_name DS_Production_Run
+python scripts/tune_deepscalper.py --trials 50
+```
+**Audit**:
+```bash
+python scripts/audit_model.py --checkpoint checkpoints/best_model.pth
 ```
 
 ---
