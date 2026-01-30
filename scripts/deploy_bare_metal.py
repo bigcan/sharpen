@@ -52,7 +52,11 @@ def deploy(args):
     
     run_name = args.run_name
     # Don't force timestamp - trust the caller or the script's internal logic
-    full_run_name = run_name
+    if run_name:
+        from finrl_pro_ds.utils.naming import standardize_run_name
+        full_run_name = standardize_run_name(run_name)
+    else:
+        full_run_name = None # Script will generate it
     
     script_path = args.script
     config_path = args.config

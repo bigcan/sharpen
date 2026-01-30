@@ -86,3 +86,33 @@ def generate_run_name(
     timestamp = datetime.datetime.now().strftime(timestamp_format)
     base = f"DeepScalper_{version}_{platform}_{timestamp}"
     return f"{base}_{suffix}" if suffix else base
+
+
+def standardize_run_name(
+    run_name: str,
+    version: str = "V1",
+    platform: str = "GPUHub",
+    timestamp_format: str = "%Y%m%d_%H%M"
+) -> str:
+    """
+    Standardize a manually-provided run name to fit the canonical format.
+    
+    If name already fits the pattern DeepScalper_V.*_Platform_TIMESTAMP_..., returns it as is.
+    Otherwise, treats the manual name as the 'suffix' and rebuilds the standard name.
+    """
+    import re
+    # Pattern: DeepScalper_..._YYYYMMDD_HHMM
+    ts_pattern = r"\d{8}_\d{4}"
+    if re.search(f"DeepScalper_.*_.*_{ts_pattern}", run_name):
+        return run_name
+        
+    # Extract suffix from manual name
+    # Remove prefix if present
+    clean_suffix = run_name
+    if clean_suffix.startswith("DeepScalper_"):
+        clean_suffix = clean_suffix[len("DeepScalper_"):]
+    
+    # Clean up underscores
+    clean_suffix = clean_suffix.strip('_')
+        
+    return generate_run_name(version=version, platform=platform, suffix=clean_suffix, timestamp_format=timestamp_format)

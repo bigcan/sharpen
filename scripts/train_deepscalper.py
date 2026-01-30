@@ -100,11 +100,14 @@ def setup_wandb(config, run_id=None):
     entity = wandb_config.get("entity", "bigcan-chiwin-technology")
     
     # Enforce Naming Convention
+    from finrl_pro_ds.utils.naming import generate_run_name, standardize_run_name
     run_name = wandb_config.get("name")
     if not run_name:
-        from finrl_pro_ds.utils.naming import generate_run_name
         run_name = generate_run_name(version="V1", platform="GPUHub")
         print(f"Auto-generated Canonical Run Name: {run_name}")
+    else:
+        run_name = standardize_run_name(run_name)
+        print(f"Standardized Canonical Run Name: {run_name}")
     
     print(f"Initializing WandB: Project={project}, Entity={entity}, Mode={mode}, Name={run_name}")
     wandb.init(
