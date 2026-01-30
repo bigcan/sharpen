@@ -129,6 +129,8 @@ def deploy(args):
         "echo 'STEP: START'",
         # CRITICAL: Increase file descriptor limit for high-concurrency AsyncVectorEnv
         "ulimit -n 65536",
+        # Fresh HPO Logic
+        f"{'rm -f hpo.db hpo.db-journal && echo STEP: WIPE HPO DB' if args.fresh_hpo else 'echo STEP: RETAIN HPO DB'}", 
         "echo 'STEP: UNINSTALL'",
         # CRITICAL: Clean everything to avoid stale deps
         "/root/miniconda3/bin/pip uninstall finrl-pro-ds -y || true",
@@ -225,6 +227,7 @@ if __name__ == "__main__":
     parser.add_argument("--upload_data", action="store_true", help="Upload data file to /data")
     parser.add_argument("--data_file", default=None, help="Specific data filename in data/ to upload (e.g. btc_lob_jan2023.parquet)")
     parser.add_argument("--extra_args", default="", help="Extra arguments to pass to the script (e.g. '--trials 50 --steps 200000')")
+    parser.add_argument("--fresh_hpo", action="store_true", help="Wipe existing HPO database for a fresh start")
     args = parser.parse_args()
     
     deploy(args)
