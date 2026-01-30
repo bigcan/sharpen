@@ -307,8 +307,19 @@ class WandbFinRLEvaluator:
         """
         Log all results to Weights & Biases.
         """
-        # Initialize W&B
-        run = wandb.init(project=project_name, name=run_name, entity=entity, reinit=True)
+        """
+        Log all results to Weights & Biases.
+        """
+        # Check if run exists
+        should_finish = False
+        if wandb.run is None:
+            # Initialize W&B only if not active
+            run = wandb.init(project=project_name, name=run_name, entity=entity, reinit=True)
+            should_finish = True
+        else:
+            # Use existing run
+            run = wandb.run
+            print(f"Logging metrics to active W&B run: {run.name}")
         
         try:
             # Ensure metrics are ready
@@ -459,8 +470,8 @@ class WandbFinRLEvaluator:
             print(f"Results logged to W&B run: {run.name}")
             
         finally:
-            # FIXED: Ensure run is finished even if errors occur
-            run.finish()
+            if should_finish:
+                run.finish()
 
 def generate_wandb_report(
     df_ensemble: pd.DataFrame,
