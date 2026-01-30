@@ -650,12 +650,15 @@ if __name__ == "__main__":
         
         # === SINGLE WANDB RUN FOR ALL TRIALS ===
         # Determine Run Name
+        from finrl_pro_ds.utils.naming import generate_run_name, standardize_run_name
         if args.run_name:
-            hpo_run_name = args.run_name
+            hpo_run_name = standardize_run_name(args.run_name)
         else:
             # Use centralized naming utility for consistent format
-            from finrl_pro_ds.utils.naming import generate_run_name
             hpo_run_name = generate_run_name(version="V1", platform="GPUHub", suffix="HPO")
+        
+        # Ensure we update args.run_name for downstream if necessary
+        args.run_name = hpo_run_name
         
         wandb_config = dataclasses.asdict(base_config).get("wandb", {})
         wandb.init(

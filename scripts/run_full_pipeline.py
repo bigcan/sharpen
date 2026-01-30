@@ -113,11 +113,15 @@ def main():
     
     args, unknown = parser.parse_known_args()
     
-    # Auto-generate name
+    # Auto-generate or standardize name
+    from finrl_pro_ds.utils.naming import generate_run_name, standardize_run_name
     if not args.run_name:
-        from finrl_pro_ds.utils.naming import generate_run_name
         args.run_name = generate_run_name(version="V1", platform="GPUHub", suffix="Pipeline")
         print(f"Auto-generated Run Name: {args.run_name}")
+    else:
+        # Standardize even user-provided name to ensure format compliance
+        args.run_name = standardize_run_name(args.run_name)
+        print(f"Standardized Run Name: {args.run_name}")
 
     # Generate or Use Run ID
     import wandb
