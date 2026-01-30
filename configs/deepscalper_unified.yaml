@@ -71,7 +71,7 @@ training:
   batch_size: 8192      # Optimized (Blackwell)
   update_interval: 8192 # Matched to Batch Size
   learning_rate: 0.0001
-  dqn_update_interval: 0.5 # Aggressive (2 updates per step)
+  dqn_update_interval: 8.0 # FIXED: Reduced from 0.5 to 8.0 to prevent Replay Ratio explosion (Ratio ~8)
   log_interval: 1000
   checkpoint_interval: 10000
   torch_compile: true   # Enabled for Speed
