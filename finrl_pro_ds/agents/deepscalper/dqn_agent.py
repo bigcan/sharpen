@@ -129,7 +129,7 @@ class DeepScalperDQN:
             
             return np.array([a_dir, a_price, a_vol])
     
-    def train_step(self) -> Optional[float]:
+    def train_step(self) -> Optional[Dict[str, float]]:
         if len(self.memory) < self.batch_size:
             return None
         
@@ -193,7 +193,7 @@ class DeepScalperDQN:
         
         if not torch.isfinite(total_loss):
             print(f"WARNING: DQN Loss is {total_loss.item()} (NaN/Inf). Skipping update.", flush=True)
-            return 0.0
+            return None
 
         self.optimizer.zero_grad()
         total_loss.backward()
@@ -212,7 +212,20 @@ class DeepScalperDQN:
             clean_state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
             self.target_net.load_state_dict(clean_state_dict)
             
-        return total_loss.item()
+        # Logging Metrics
+        metrics = {
+            "loss_total": total_loss.item(),
+            "loss_dir": loss_dir.item(),
+            "loss_price": loss_price.item(),
+            "loss_vol": loss_vol.item(),
+            "loss_aux": loss_vol_pred.item(),
+            "q_dir_mean": curr_q_dir.mean().item(),
+            "q_price_mean": curr_q_price.mean().item(),
+            "q_vol_mean": curr_q_vol.mean().item(),
+            "epsilon": self.epsilon
+        }
+            
+        return metrics
 
     def save(self, path: str):
         torch.save({

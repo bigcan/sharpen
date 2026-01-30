@@ -5,7 +5,7 @@ import numpy as np
 from typing import Dict, Any, Optional, Tuple, List
 import os
 import time
-from collections import deque
+from collections import deque, defaultdict
 import random
 import wandb # Added for WandB logging
 import filelock # Audit Fix 1: Prevention of Race Conditions
@@ -293,7 +293,14 @@ class DeepScalperTrainer:
                 total_loss += loss.item()
                 n_updates += 1
             
-        return total_loss / n_updates if n_updates > 0 else 0.0
+        avg_loss = total_loss / n_updates if n_updates > 0 else 0.0
+        # For simplicity, we assume entropy from last batch is representative, or we could averge it. 
+        # But we only have scope to return avg loss easily without big refactor. 
+        # Actually let's return a dict with the last entropy for now as proxy.
+        return {
+            "loss": avg_loss,
+            "entropy": entropy.mean().item()
+        }
 
     def update_a2c(self, agent: DeepScalperA2C, optimizer: optim.Optimizer, buffer: List):
         if not buffer: return
@@ -341,7 +348,7 @@ class DeepScalperTrainer:
         
         if not torch.isfinite(loss):
             print(f"WARNING: A2C Loss is {loss.item()} (NaN/Inf). Skipping update.", flush=True)
-            return 0.0
+            return None
 
         optimizer.zero_grad()
         self.scaler_a2c.scale(loss).backward()
@@ -351,7 +358,12 @@ class DeepScalperTrainer:
         self.scaler_a2c.step(optimizer)
         self.scaler_a2c.update()
         
-        return policy_loss.item() + value_loss.item()
+        return {
+            "loss": policy_loss.item() + value_loss.item(),
+            "policy_loss": policy_loss.item(),
+            "value_loss": value_loss.item(),
+            "entropy": entropy.mean().item()
+        }
 
     def update_gating(self, buffer: List):
         """Update Gating Network using REINFORCE"""
@@ -386,7 +398,10 @@ class DeepScalperTrainer:
         self.scaler_gating.step(self.gating_optimizer)
         self.scaler_gating.update()
         
-        return loss.item()
+        return {
+            "loss": loss.item(),
+            "weights": curr_weights.mean(dim=0).float().detach().cpu().numpy() # [w_dqn, w_ppo, w_a2c]
+        }
 
         
     def train(self, phase: str = "full"):
@@ -466,6 +481,15 @@ class DeepScalperTrainer:
         episode_rewards_total = 0
         episode_count = 0
         
+        # Metric Aggregators
+        dqn_metrics_accum = defaultdict(list)
+        ppo_metrics_accum = defaultdict(list)
+        a2c_metrics_accum = defaultdict(list)
+        gating_metrics_accum = defaultdict(list)
+        vol_target_accum = []
+        inventory_accum = []
+        action_counts = {"dir": [0]*3, "price": [0]*5, "vol": [0]*5}
+        
         # Init Watchdog (SPS Monitor)
         print("DEBUG: Initializing Watchdog...", flush=True)
         self.watchdog = TrainingWatchdog(
@@ -526,6 +550,12 @@ class DeepScalperTrainer:
                     
                     # Action Vector: (B, 3)
                     action_vector = torch.stack([a_dir, a_price, a_vol], dim=1).cpu().numpy()
+
+                    # Track Actions
+                    for b_idx in range(action_vector.shape[0]):
+                        action_counts["dir"][action_vector[b_idx, 0]] += 1
+                        action_counts["price"][action_vector[b_idx, 1]] += 1
+                        action_counts["vol"][action_vector[b_idx, 2]] += 1
                     
                     # Log Probs for PPO
                     ens_log_dir = dist_dir.log_prob(a_dir)
@@ -607,6 +637,18 @@ class DeepScalperTrainer:
                                 macro[i], weights[i], reward[i], done
                             ))
 
+                        # Accumulate Context Metrics
+                        # Info might be list or dict depending on Wrapper, assuming VectorEnv wrapper handles it
+                        vt_raw = info.get("volatility_target")
+                        if isinstance(vt_raw, (list, np.ndarray)):
+                             cur_vt = float(vt_raw[i])
+                        else:
+                             cur_vt = 0.0
+                        
+                        vol_target_accum.append(cur_vt)
+                        # private is Tensor (B, W, 2), we want [i, -1, 0] (Position)
+                        inventory_accum.append(abs(private[i, -1, 0].item()))
+
                         if done:
                             # Log metrics for THIS environment
                             metrics = {
@@ -661,6 +703,11 @@ class DeepScalperTrainer:
                             macro.squeeze(0), weights.squeeze(0), reward, done
                         ))
                     
+                    # Accumulate Context Metrics (Single Env)
+                    vol_target_accum.append(float(info.get("volatility_target", 0.0)))
+                    # single env private is (1, W, 2), squeeze -> (W, 2)
+                    inventory_accum.append(abs(private.squeeze(0)[-1, 0].item()))
+                    
                     if done:
                         metrics = {"train/episode_reward": episode_rewards, "train/episode_length": episode_steps, "train/global_step": self.global_step}
                         wandb.log(metrics)
@@ -678,15 +725,16 @@ class DeepScalperTrainer:
                 # 4. Updates
                 
                 # A. Train DQN (Accumulate gradients to match update ratio)
+                metrics_dqn = None
                 if phase in ["full", "specialists"]:
                     self.dqn_updates_accumulator += num_envs / self.dqn_update_interval
                     
-                    dqn_loss = None
                     while self.dqn_updates_accumulator >= 1.0:
-                        dqn_loss = self.ensemble.dqn.train_step()
+                        metrics_dqn = self.ensemble.dqn.train_step()
+                        if metrics_dqn:
+                             for k, v in metrics_dqn.items():
+                                 dqn_metrics_accum[k].append(v)
                         self.dqn_updates_accumulator -= 1.0
-                else:
-                    dqn_loss = None
                 
                 # B. Train PPO/A2C
                 # Check if we crossed an update interval boundary
@@ -695,48 +743,89 @@ class DeepScalperTrainer:
                 curr_interval_idx = self.global_step // update_interval
                 
                 if curr_interval_idx > prev_interval_idx:
-                    ppo_loss = None
-                    a2c_loss = None
-                    gating_loss = None
+                    ppo_res = None
+                    a2c_res = None
+                    gating_res = None
                     
                     if phase in ["full", "specialists"]:
-                        ppo_loss = self.update_ppo(self.ensemble.ppo, self.ppo_optimizer, self.ppo_buffer)
-                        a2c_loss = self.update_a2c(self.ensemble.a2c, self.a2c_optimizer, self.a2c_buffer)
+                        ppo_res = self.update_ppo(self.ensemble.ppo, self.ppo_optimizer, self.ppo_buffer)
+                        a2c_res = self.update_a2c(self.ensemble.a2c, self.a2c_optimizer, self.a2c_buffer)
                     
                     if phase in ["full", "gating"]:
-                        gating_loss = self.update_gating(self.gating_buffer)
+                        gating_res = self.update_gating(self.gating_buffer)
                     
-                    if ppo_loss is not None or gating_loss is not None:
-                         metrics = {
-                             "train/global_step": self.global_step
-                         }
-                         if ppo_loss is not None: metrics["train/ppo_loss"] = ppo_loss
-                         if a2c_loss is not None: metrics["train/a2c_loss"] = a2c_loss
-                         if gating_loss is not None: metrics["train/gating_loss"] = gating_loss
-                         
-                         wandb.log(metrics)
+                    if ppo_res:
+                        for k, v in ppo_res.items(): ppo_metrics_accum[k].append(v)
+                    if a2c_res:
+                        for k, v in a2c_res.items(): a2c_metrics_accum[k].append(v)
+                    if gating_res:
+                        for k, v in gating_res.items(): 
+                            gating_metrics_accum[k].append(v) # Handles both scalar and array
                     
                     # Clear buffers regardless, they are stale
                     self.ppo_buffer = [] 
                     self.a2c_buffer = []
                     self.gating_buffer = []
-
+                
                 # C. Log Batch Metrics
                 if self.global_step % self.config.get("log_interval", 1000) < num_envs:
                     self.logger.log_event("deepscalper.training.batch", context={
                         "step": self.global_step,
-                        "dqn_loss": dqn_loss if dqn_loss is not None else 0.0,
+                        "dqn_loss": metrics_dqn["loss_total"] if metrics_dqn else 0.0,
                         "reward_mean": episode_rewards_total / max(1, episode_count)
                     })
                 
                 # Periodic Evaluation / Logging
                 log_interval = self.config.get("log_interval", 1000)
                 if (self.global_step // log_interval) > (start_step // log_interval):
-                     # Log summary metrics to wandb
-                     wandb.log({
-                         "train/dqn_loss": dqn_loss if dqn_loss is not None else 0.0,
-                         "train/step_reward_mean": episode_rewards_total / max(1, episode_count) if episode_count > 0 else 0.0
-                     })
+                     # Construct Log Dict
+                     log_dict = {
+                         "train/step_reward_mean": episode_rewards_total / max(1, episode_count) if episode_count > 0 else 0.0,
+                         "train/global_step": self.global_step
+                     }
+                     # Aggregate DQN
+                     for k, v in dqn_metrics_accum.items():
+                         log_dict[f"train/dqn/{k}"] = np.mean(v)
+                     dqn_metrics_accum.clear()
+                     
+                     # Aggregate PPO
+                     for k, v in ppo_metrics_accum.items():
+                         log_dict[f"train/ppo/{k}"] = np.mean(v)
+                     ppo_metrics_accum.clear()
+                     
+                     # Aggregate A2C
+                     for k, v in a2c_metrics_accum.items():
+                         log_dict[f"train/a2c/{k}"] = np.mean(v)
+                     a2c_metrics_accum.clear()
+
+                     # Aggregate Gating
+                     for k, v in gating_metrics_accum.items():
+                         if k == "weights":
+                             if len(v) > 0:
+                                 avg_weights = np.mean(np.stack(v), axis=0)
+                                 log_dict["train/gating/weight_dqn"] = avg_weights[0]
+                                 log_dict["train/gating/weight_ppo"] = avg_weights[1]
+                                 log_dict["train/gating/weight_a2c"] = avg_weights[2]
+                         else:
+                             log_dict[f"train/gating/{k}"] = np.mean(v)
+                     gating_metrics_accum.clear()
+                     
+                     # Action Dist
+                     total_acts = sum(action_counts["dir"])
+                     if total_acts > 0:
+                         for i in range(3): log_dict[f"train/action_dist/dir_{i}"] = action_counts["dir"][i] / total_acts
+                         # Reset stats
+                         action_counts = {"dir": [0]*3, "price": [0]*5, "vol": [0]*5}
+                     
+                     # Market Context
+                     if vol_target_accum:
+                         log_dict["train/market/volatility_target"] = np.mean(vol_target_accum)
+                         vol_target_accum = []
+                     if inventory_accum:
+                         log_dict["train/market/inventory_abs_mean"] = np.mean(inventory_accum)
+                         inventory_accum = []
+                     
+                     wandb.log(log_dict)
 
                 # Save Checkpoint
                 if (self.global_step // self.checkpoint_interval) > (start_step // self.checkpoint_interval):
