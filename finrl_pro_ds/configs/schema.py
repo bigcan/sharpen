@@ -46,7 +46,7 @@ class ActionConfig:
 @dataclass
 class EnvConfig:
     symbol: str = "BTCUSDT"
-    initial_balance: float = 100000.0
+    initial_balance: float = 100000.0  # USDT
     transaction_fee: float = 0.0001
     num_envs: int = 1
     window_size: int = 50

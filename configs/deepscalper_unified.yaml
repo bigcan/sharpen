@@ -18,7 +18,7 @@ features:
 
 env:
   symbol: "BTCUSDT"
-  initial_balance: 100000.0
+  initial_balance: 100000.0  # USDT
   transaction_fee: 0.0001
   num_envs: 24            # Scaled up for Blackwell (with Zero-Copy fix)
   window_size: 50
