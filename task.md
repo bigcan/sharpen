@@ -27,3 +27,7 @@
 - [ ] **Full Production Run:** Scale to 1M+ steps.
 - [ ] **Hyperparameter Tuning:** Run Optuna optimization.
 - [ ] **Model Analysis:** Investigate flat PnL/0% Return issue (likely initial balance fallback or data limitation).
+
+### RTX 5090 Optimization (Feb 1, 2026)
+- [x] **Precision Upgrade**: Enforce TF32 and FP16 (Mixed Precision) in `DeepScalperTrainer`.
+- [x] **Throughput Scaling**: Increase batch sizes to 16,384 in `deepscalper_unified.yaml`.
