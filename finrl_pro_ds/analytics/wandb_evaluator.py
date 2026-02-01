@@ -512,7 +512,7 @@ def generate_wandb_report(
         dict_agents: Dictionary of DataFrames for each sub-agent.
         run_name: Name for the W&B run.
         project_name: W&B project name.
-        benchmark_ticker: Ticker symbol for benchmark (default: S&P 500).
+        benchmark_ticker: Ticker symbol for benchmark (default: BTC-USD).
         entity: W&B entity (team or username). Optional.
     
     Returns:

@@ -63,7 +63,7 @@ def _prepare_gpuhub(dist_dir, config, dry_run):
 # GPUHub Startup for DeepScalper {config.wandb.project}
 echo "Starting DeepScalper Training..."
 pip install -r requirements.txt
-python -m finrl_pro_ds.cli train --config configs/deepscalper_unified.yaml
+python -m finrl_pro_ds.cli train --config configs/deepscalper_production.yaml
 echo "Training Complete."
 """
     with open(f"{dist_dir}/start.sh", "w") as f:
@@ -82,7 +82,7 @@ FROM pytorch/pytorch:2.1.0-cuda12.1-cudnn8-runtime
 WORKDIR /app
 COPY . .
 RUN pip install -r requirements.txt
-CMD ["python", "-m", "finrl_pro_ds.cli", "train", "--config", "configs/deepscalper_unified.yaml"]
+CMD ["python", "-m", "finrl_pro_ds.cli", "train", "--config", "configs/deepscalper_production.yaml"]
 """
     with open(f"{dist_dir}/Dockerfile", "w") as f:
         f.write(dockerfile)

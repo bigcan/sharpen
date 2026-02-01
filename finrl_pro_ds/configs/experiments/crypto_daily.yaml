@@ -19,7 +19,7 @@ training:
     capital_at_risk: 0.10
     leverage: 1.5
   artifact_uris: []
-  baseline_reference: benchmarks:sp500_rolling_1y
+  baseline_reference: benchmarks:btc_usdt_rolling_1y
 
 features:
   enable_custom: false

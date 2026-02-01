@@ -4,7 +4,7 @@
 # different market regimes (2000-2025) using a Walk-Forward framework.
 
 data:
-  dataset_hash: "file://data/sp500_full_2010_2025.parquet" # Adjusted to existing data
+  dataset_hash: "file://data/btc_usdt_full_2010_2025.parquet" # Adjusted to existing data
   start_date: "2010-01-04"
   end_date: "2024-12-31"
   tickers: # Liquid 20 Universe

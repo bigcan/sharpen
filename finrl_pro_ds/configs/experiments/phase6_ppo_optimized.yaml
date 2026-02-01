@@ -33,9 +33,9 @@ training:
       learning_rate: 5.232306418575175e-05
       n_steps: 2048
   artifact_uris: []
-  baseline_reference: benchmarks:sp500_buy_hold
+  baseline_reference: benchmarks:btc_usdt_buy_hold
   config_path: finrl_pro_ds/configs/config.yaml
-  dataset_hash: file://data/sp500_full_2010_2025.parquet
+  dataset_hash: file://data/btc_usdt_full_2010_2025.parquet
   end_date: '2020-12-31'
   environment:
     buy_cost_pct: 0.001

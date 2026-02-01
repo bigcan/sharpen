@@ -6,7 +6,7 @@ sandbox_enabled: true
 
 training:
   config_path: finrl_pro_ds/configs/config.yaml
-  dataset_hash: dvc://datasets/sp500_daily_2016_2025
+  dataset_hash: dvc://datasets/btc_usdt_daily_2016_2025
   seed: 42
   use_pro_env: false
   module_versions:
@@ -26,7 +26,7 @@ training:
     capital_at_risk: 0.08
     leverage: 1.2
   artifact_uris: []
-  baseline_reference: benchmarks:sp500_rolling_1y
+  baseline_reference: benchmarks:btc_usdt_rolling_1y
 
 features:
   enable_custom: true

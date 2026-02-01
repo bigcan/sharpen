@@ -1,7 +1,7 @@
 """CLI for building and registering features into the DB feature store.
 
 Usage examples:
-  python -m finrl_pro_ds.data.feature_store build --snapshot <uuid> --config finrl_pro_ds/configs/experiments/sp500_daily.yaml
+  python -m finrl_pro_ds.data.feature_store build --snapshot <uuid> --config finrl_pro_ds/configs/experiments/crypto_daily.yaml
   python -m finrl_pro_ds.data.feature_store export --feature-set <uuid> --fmt parquet --out data/features.parquet
 """
 

@@ -48,26 +48,26 @@ def main():
     
     # Train
     train_parser = subparsers.add_parser("train", help="Train DeepScalper Model")
-    train_parser.add_argument("--config", default="configs/deepscalper_unified.yaml", help="Path to config")
+    train_parser.add_argument("--config", default="configs/deepscalper_production.yaml", help="Path to config")
     train_parser.add_argument("--debug", action="store_true", help="Run in debug mode (mock env)")
     
     # Tune
     tune_parser = subparsers.add_parser("tune", help="Run HPO Tuning")
-    tune_parser.add_argument("--config", default="configs/deepscalper_unified.yaml")
+    tune_parser.add_argument("--config", default="configs/deepscalper_production.yaml")
     tune_parser.add_argument("--trials", type=int, default=10)
     tune_parser.add_argument("--steps", type=int, default=5000)
     tune_parser.add_argument("--resume", action="store_true")
     
     # Audit
     audit_parser = subparsers.add_parser("audit", help="Audit a trained model")
-    audit_parser.add_argument("--config", default="configs/deepscalper_unified.yaml")
+    audit_parser.add_argument("--config", default="configs/deepscalper_production.yaml")
     audit_parser.add_argument("--checkpoint", required=True, help="Path to .pth checkpoint")
     audit_parser.add_argument("--output", default="reports/audit", help="Output directory")
 
     # Deploy
     deploy_parser = subparsers.add_parser("deploy", help="Deploy to Remote (GPUHub/RunPod)")
     deploy_parser.add_argument("--target", choices=["gpuhub", "runpod"], default="gpuhub")
-    deploy_parser.add_argument("--config", default="configs/deepscalper_unified.yaml")
+    deploy_parser.add_argument("--config", default="configs/deepscalper_production.yaml")
     deploy_parser.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args()
