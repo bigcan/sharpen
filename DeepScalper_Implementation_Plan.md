@@ -41,10 +41,13 @@ The current `tune` script is outdated and lacks the critical fixes verified in P
 ## Verification Plan
 
 ### Automated Tests
-1.  **Local Smoke Test**: Run `python scripts/tune_deepscalper.py --trials 1 --steps 100 --debug` locally (if data exists) or check syntax.
-2.  **Remote Smoke Deployment**: 
-    *   Command: `python scripts/deploy_bare_metal.py --script scripts/tune_deepscalper.py --config configs/deepscalper_unified.yaml --run_name DS_HPO_Smoke_V1 --upload_data`
-    *   Args: `--trials 2 --steps 1000` (Fast check).
+1.  **Tier 1: Smoke Test (Sanity)**: 
+    *   Command: `python scripts/tune_deepscalper.py --trials 1 --steps 100 --debug`
+    *   Goal: syntax check, import check.
+2.  **Tier 2: Pilot Run**: 
+    *   Command: `python scripts/deploy_bare_metal.py ... --config configs/deepscalper_unified.yaml ...`
+    *   Args: `--trials 2 --steps 1000` (Fast check, but enough to trigger callbacks).
+    *   Note: For full logic verification, use `deepscalper_smoke_test.yaml` (100k steps).
 
 ### Success Criteria
 *   Script runs 2 trials without crashing.

@@ -69,6 +69,29 @@ Fold 2: Train [Feb-Apr] → Validate [May] → Trade [Jun]
 
 ---
 
+## 6. Quality Assurance Protocols (Verification Tiers)
+
+MANDATORY for all new experimental features or codebase refactors:
+
+### Tier 1: Smoke Test (Sanity Check)
+- **Goal**: Verify connectivity, environment setup, SSH access, and file uploads.
+- **Config**: `--steps 100`, `--trials 1`.
+- **Duration**: ~1 minute.
+- **Outcome**: Confirms *connectivity*, NOT logic.
+
+### Tier 2: Pilot Run (Logic Verification)
+- **Goal**: Verify end-to-end pipeline logic, phase transitions (Specialist -> Gating -> Joint), checkpointing, and memory stability.
+- **Config**: `deepscalper_smoke_test.yaml` (100k steps, 3 phases).
+- **Duration**: ~15-20 minutes.
+- **Outcome**: REQUIRED pass before full production run.
+
+### Tier 3: Production Run
+- **Goal**: Model convergence and maximum performance.
+- **Config**: `deepscalper_unified.yaml` (Full steps, full data).
+- **Outcome**: Final Model Artifacts.
+
+---
+
 ## 5. Next Steps
 1.  **Scaffold**: Create `notebooks/DeepScalper_Control_Plane.ipynb`.
 2.  **Migrate**: Move ad-hoc CLI commands into the Notebook.
