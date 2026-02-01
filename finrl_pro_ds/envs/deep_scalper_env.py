@@ -40,10 +40,10 @@ class DeepScalperEnv(gym.Env):
         self.tick_size = config.get("tick_size", 0.1)
         self.lot_size = config.get("lot_size", 0.001)
         
-        # Binance VIP 0 Fees (realistic defaults)
-        # Maker: 0.10% (10 bps), Taker: 0.10% (10 bps)
-        self.maker_fee = config.get("maker_fee", 0.0010)
-        self.taker_fee = config.get("taker_fee", 0.0010)
+        # Binance VIP 0 USDⓈ-M Futures Fees (Realistic 2025)
+        # Maker: 0.02% (2 bps), Taker: 0.05% (5 bps)
+        self.maker_fee = config.get("maker_fee", 0.0002)
+        self.taker_fee = config.get("taker_fee", 0.0005)
         
         # Slippage Model: base_slippage + (trade_size / liquidity) * impact_factor
         self.base_slippage_bps = config.get("base_slippage_bps", 1.0)  # 1 bp base
@@ -58,8 +58,12 @@ class DeepScalperEnv(gym.Env):
         self.reward_scaling = float(self.reward_config.get("scaling", 1e-4))
         self.hindsight_weight = float(self.reward_config.get("hindsight_weight", 0.0))
         self.hindsight_horizon = int(self.reward_config.get("hindsight_horizon", 100))
-        self.risk_penalty_weight = float(self.reward_config.get("risk_penalty", 0.0))
+        self.profit_weight = float(self.reward_config.get("profit_weight", 1.0))
+        self.risk_penalty_weight = float(self.reward_config.get("risk_penalty", self.reward_config.get("volatility_penalty_weight", 0.0)))
+        self.cost_penalty_weight = float(self.reward_config.get("transaction_cost_penalty", 0.0))
         self.volatility_horizon = int(self.reward_config.get("volatility_horizon", 100)) # Section 4.4
+
+
         
         # Spaces
         self.lob_levels = 5
@@ -132,6 +136,7 @@ class DeepScalperEnv(gym.Env):
         # Reset fee/slippage tracking
         self.cumulative_fees = 0.0
         self.cumulative_slippage = 0.0
+        self.step_transaction_costs = 0.0 # Track per-step cost for reward
         
         # Cold Start Fix: Fill window with first frame
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
@@ -159,6 +164,7 @@ class DeepScalperEnv(gym.Env):
 
     def step(self, action):
         """Execute one time step within the environment"""
+        self.step_transaction_costs = 0.0 # Reset per-step cost
         self.current_step += 1
         
         # 1. Get Market Data T+1
@@ -238,6 +244,7 @@ class DeepScalperEnv(gym.Env):
                         # Track cumulative costs
                         self.cumulative_fees += fee
                         self.cumulative_slippage += slippage_cost
+                        self.step_transaction_costs += (fee + slippage_cost)
                         
                         if cost <= self.balance:
                             self.balance -= cost
@@ -287,6 +294,7 @@ class DeepScalperEnv(gym.Env):
                         # Track cumulative costs
                         self.cumulative_fees += fee
                         self.cumulative_slippage += slippage_cost
+                        self.step_transaction_costs += (fee + slippage_cost)
                         
                         self.balance += proceeds
                         # Update position
@@ -339,7 +347,10 @@ class DeepScalperEnv(gym.Env):
             raw_pnl = float(raw_pnl)
             
             # Base Reward
-            reward = raw_pnl * self.reward_scaling
+            if raw_pnl > 0:
+                reward = raw_pnl * self.profit_weight * self.reward_scaling
+            else:
+                reward = raw_pnl * self.reward_scaling
         except Exception as e:
             logging.error(f"CRITICAL ERROR in Reward Calc: {e}")
             logging.error(f"raw_pnl: {raw_pnl} type: {type(raw_pnl)}")
@@ -352,13 +363,15 @@ class DeepScalperEnv(gym.Env):
             raw_pnl = 0.0
             
         # 4.1 Risk Penalty (Volatility/Drawdown awareness)
-        
-        # 4.1 Risk Penalty (Volatility/Drawdown awareness)
         # Penalize negative PnL more heavily? Or simple returns volatility proxy?
         # Paper uses auxiliary task, here we add a penalty term for simple risk control.
         # If PnL < 0, add extra penalty: reward -= penalty * |PnL|
         if self.risk_penalty_weight > 0 and raw_pnl < 0:
              reward -= self.risk_penalty_weight * abs(raw_pnl) * self.reward_scaling
+
+        # 4.1.b Transaction Cost Penalty (Explicit Churn suppression)
+        if self.cost_penalty_weight > 0 and self.step_transaction_costs > 0:
+             reward -= self.step_transaction_costs * self.cost_penalty_weight * self.reward_scaling
 
         # 4.2 Hindsight Bonus (Paper: 2201.09058)
         # "Encourage capturing long-term trends"
@@ -382,10 +395,6 @@ class DeepScalperEnv(gym.Env):
             except Exception as e:
                 logging.error(f"Error in Hindsight: {e}")
                 # Hindsight is bonus, safe to skip if fails
-                pass
-
-                # Hindsight is bonus, safe to skip if fails
-                pass
 
         # 4.3 Volatility Prediction Target (Section 4.4)
         volatility_target = 0.0
