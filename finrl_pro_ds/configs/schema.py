@@ -124,8 +124,8 @@ class ConfigLoader:
         data_cfg = DataConfig(
             file_path=data_d.get("file_path", ""),
             ticker=data_d.get("ticker", "BTCUSDT"),
-            train_start_date=data_d.get("train_start_date"),
-            train_end_date=data_d.get("train_end_date"),
+            train_start_date=data_d.get("train_start_date") or data_d.get("start_date"),
+            train_end_date=data_d.get("train_end_date") or data_d.get("end_date"),
             val_start_date=data_d.get("val_start_date"),
             val_end_date=data_d.get("val_end_date")
         )
