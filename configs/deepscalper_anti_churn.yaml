@@ -24,7 +24,8 @@ env:
   reward:
     profit_weight: 1.966109723001378
     volatility_penalty_weight: 1.6324713022504311
-    transaction_cost_penalty: 2.0  # Explicit penalty for churning
+    transaction_cost_penalty: 0.0  # Disabled: Fees are already in PnL (Realistic VIP 0)
+
     volatility_horizon: 100
     risk_aversion: 0.5
     

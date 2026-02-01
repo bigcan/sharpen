@@ -464,6 +464,7 @@ class DeepScalperEnv(gym.Env):
         # We can init frame with zeros and fill.
         
         frame = np.zeros((self.micro_dim,), dtype=np.float32)
+
         
         # Unroll loop? Or just iterate over tuples
         idx = 0
