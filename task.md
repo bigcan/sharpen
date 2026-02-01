@@ -32,7 +32,7 @@
 ### Audit & Verification (Feb 1, 2026)
 - [ ] **Phase 3: DeepScalper Production Deployment & Audit**
     - [/] **Smoke Test Verification (Production Data)** `[Active]`
-        - [x] Create `deepscalper_smoke_test.yaml` (Fast HPO/Training)
+        - [x] Create `deepscalper_pilot_test.yaml` (Fast HPO/Training)
         - [x] Implement "Joint Fine-tuning" Logic (Phase 3)
         - [x] Deploy to GPUHub with Demo Data (Sanity Check)
         - [x] Resolve Deployment Bugs (Import Errors, Path Issues)

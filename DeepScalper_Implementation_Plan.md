@@ -47,7 +47,7 @@ The current `tune` script is outdated and lacks the critical fixes verified in P
 2.  **Tier 2: Pilot Run**: 
     *   Command: `python scripts/deploy_bare_metal.py ... --config configs/deepscalper_unified.yaml ...`
     *   Args: `--trials 2 --steps 1000` (Fast check, but enough to trigger callbacks).
-    *   Note: For full logic verification, use `deepscalper_smoke_test.yaml` (100k steps).
+    *   Note: For full logic verification, use `deepscalper_pilot_test.yaml` (100k steps).
 
 ### Success Criteria
 *   Script runs 2 trials without crashing.

@@ -6,7 +6,7 @@ data:
   tech_indicator_list: [] # We use custom feature engineer
 
 env:
-  num_envs: 8                # Moderate parallelism
+  num_envs: 2                # Reduced for stability
   window_size: 20            # Reduced context for speed
   initial_balance: 100000
   transaction_fee: 0.0001
@@ -16,11 +16,14 @@ env:
     transaction_cost_penalty: 0.0 # Disabled: Fees are already in PnL (Realistic VIP 0)
 
 network:
-  hidden_size: 64            # Small network
+  hidden_size: 64
   micro_config:
+    input_size: 20
+    private_input_size: 2
     hidden_size: 64
   macro_config:
-    hidden_sizes: [64, 32]
+    input_size: 11
+    hidden_sizes: [64]
 
 training:
   total_timesteps: 100000    # ~20 mins on RTX 5090
