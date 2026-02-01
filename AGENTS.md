@@ -71,6 +71,11 @@ This document instructs AI coding agents working in this repository. It defines 
 - Evaluation/Reporting: Walk-forward integrations remain intact; SHAP hooks unaffected
 - Docs: README and relevant docs reflect new workflows/configs
 
+### Verification Tiers (Mandatory)
+1. **Tier 1 (Smoke/Sanity)**: 100 steps. Verify connectivity/crashes only.
+2. **Tier 2 (Pilot Run)**: 100k steps (Full Phase Cycle). Verify logic stability. **Required for Prod Approval.**
+3. **Tier 3 (Production)**: Full Scale. Verify convergence.
+
 ## RL‑Specific Build Guidance
 
 - Data: Enforce Point‑in‑Time indexing; embargo LLM-derived features to avoid leakage

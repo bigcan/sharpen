@@ -85,6 +85,29 @@ python scripts/list_wandb.py
 
 ---
 
+## 🛡️ Quality Assurance Protocols (Verification Tiers)
+
+To ensure stability and prevent ambiguity between debugging and production verification, we define the following strict testing tiers:
+
+### Tier 1: Smoke Test (Sanity Check)
+- **Goal**: Verify connectivity, environment setup, SSH access, and file uploads.
+- **Config**: `--steps 100`, `--trials 1`.
+- **Duration**: ~1 minute.
+- **Outcome**: Confirms *connectivity*, NOT logic. **NEVER** cite as "Success" for pipeline logic.
+
+### Tier 2: Pilot Run (Logic Verification)
+- **Goal**: Verify end-to-end pipeline logic, phase transitions (Specialist -> Gating -> Joint), checkpointing, and memory stability.
+- **Config**: `deepscalper_smoke_test.yaml` (100k steps, 3 phases).
+- **Duration**: ~15-20 minutes.
+- **Outcome**: REQUIRED pass before full production run.
+
+### Tier 3: Production Run
+- **Goal**: Model convergence and maximum performance.
+- **Config**: `deepscalper_unified.yaml` (Full steps, full data).
+- **Outcome**: Final Model Artifacts.
+
+---
+
 ## 📂 Project Structure
 
 ```text
