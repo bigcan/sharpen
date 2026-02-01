@@ -803,337 +803,184 @@ class DeepScalperTrainer:
                      for k, v in a2c_metrics_accum.items():
                          if v: log_dict[f"train/a2c/{k}"] = np.mean(v)
                      a2c_metrics_accum.clear()
-
+                     
                      # Aggregate Gating
-                     for k, v in gating_metrics_accum.items():
-                         if k == "weights":
-                             if len(v) > 0:
-                                 avg_weights = np.mean(np.stack(v), axis=0)
-                                 log_dict["train/gating/weight_dqn"] = avg_weights[0]
-                                 log_dict["train/gating/weight_ppo"] = avg_weights[1]
-                                 log_dict["train/gating/weight_a2c"] = avg_weights[2]
-                         else:
-                             if v: log_dict[f"train/gating/{k}"] = np.mean(v)
+                     # Weights might be array
+                     if gating_metrics_accum["loss"]:
+                         log_dict["train/gating/loss"] = np.mean(gating_metrics_accum["loss"])
+                         
+                     if gating_metrics_accum["weights"]:
+                         # Combine all weight snapshots and mean
+                         all_weights = np.stack(gating_metrics_accum["weights"]) # (N, 3)
+                         mean_weights = np.mean(all_weights, axis=0)
+                         log_dict["train/gating/w_dqn"] = mean_weights[0]
+                         log_dict["train/gating/w_ppo"] = mean_weights[1]
+                         log_dict["train/gating/w_a2c"] = mean_weights[2]
                      gating_metrics_accum.clear()
                      
-                     # Action Dist
-                     total_acts = sum(action_counts["dir"])
-                     if total_acts > 0:
-                         for i in range(3): log_dict[f"train/action_dist/dir_{i}"] = action_counts["dir"][i] / total_acts
-                         # Reset stats
-                         action_counts = {"dir": [0]*3, "price": [0]*5, "vol": [0]*5}
-                     
-                     # Market Context
+                     # Context Metrics
                      if vol_target_accum:
-                         log_dict["train/market/volatility_target"] = np.mean(vol_target_accum)
+                         log_dict["env/volatility_target_mean"] = np.mean(vol_target_accum)
                          vol_target_accum = []
                      if inventory_accum:
-                         log_dict["train/market/inventory_abs_mean"] = np.mean(inventory_accum)
+                         log_dict["env/inventory_abs_mean"] = np.mean(inventory_accum)
                          inventory_accum = []
+                         
+                     # Action Distribution
+                     total_actions = sum(sum(v) for v in action_counts.values())
+                     if total_actions > 0:
+                         # Normalize
+                         # Dir: 0,1,2
+                         total_dir = sum(action_counts["dir"])
+                         if total_dir > 0:
+                             log_dict["action/dir_buy"] = action_counts["dir"][0] / total_dir
+                             log_dict["action/dir_hold"] = action_counts["dir"][1] / total_dir
+                             log_dict["action/dir_sell"] = action_counts["dir"][2] / total_dir
+                             
+                     # Reset counts
+                     action_counts = {"dir": [0]*3, "price": [0]*5, "vol": [0]*5}
                      
                      wandb.log(log_dict)
-
-                # Save Checkpoint
-                if (self.global_step // self.checkpoint_interval) > (start_step // self.checkpoint_interval):
-                    ckpt_path = os.path.join(self.checkpoint_dir, f"checkpoint_{self.global_step}.pth")
-                    self.save_checkpoint(ckpt_path)
-
-                # Update Obs
-                micro = next_micro
-                private = next_private
-                macro = next_macro
-                obs = next_obs
-                # print("DEBUG: Loop End. Obs updated.", flush=True)
-        
+                     
+                     # Checkpoint
+                     if self.global_step > 0 and self.global_step % self.checkpoint_interval == 0:
+                         self.save_checkpoint(f"{self.checkpoint_dir}/step_{self.global_step}.pth")
+                         
+            # Save Final Checkpoint
+            self.save_checkpoint(f"{self.checkpoint_dir}/final.pth")
+            
+        except KeyboardInterrupt:
+            print("Training interrupted manually.")
+            self.save_checkpoint(f"{self.checkpoint_dir}/interrupted.pth")
         except Exception as e:
-            print(f"FATAL EXCEPTION IN TRAINING LOOP: {e}", flush=True)
+            print(f"Training failed with error: {e}")
             import traceback
             traceback.print_exc()
-            raise e
+            self.save_checkpoint(f"{self.checkpoint_dir}/failed_state.pth")
         finally:
-            print("DEBUG: Stopping Watchdog...", flush=True)
-            if hasattr(self, 'watchdog'):
-                self.watchdog.stop()
+            self.watchdog.stop()
 
-        # Save Final Checkpoint
-        final_ckpt_path = os.path.join(self.checkpoint_dir, f"checkpoint_final_{self.global_step}.pth")
-        print(f"Saving final checkpoint to {final_ckpt_path}...", flush=True)
-        self.save_checkpoint(final_ckpt_path)
-
-        self.logger.log_event("deepscalper.training.complete")
-        
-        if episode_count > 0:
-            avg_reward = episode_rewards_total / episode_count
-        else:
-            avg_reward = 0.0
-            
-        return avg_reward
-        
-    def _freeze_module(self, module):
-        for param in module.parameters():
-            param.requires_grad = False
-
-    def _unfreeze_module(self, module):
-        for param in module.parameters():
-            param.requires_grad = True
-
-    def _unpack_obs(self, obs: Dict[str, Any]) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Convert dict observation to tensors on device.
-        Expected keys: 'micro' (Window, Feat), 'macro' (Feat)
-        """
-        # Handle cases where env returns numpy arrays
-        if isinstance(obs, dict):
-            micro_np = obs.get("micro")
-            private_np = obs.get("private")
-            macro_np = obs.get("macro")
-            
-            if micro_np is None:
-                raise ValueError(f"Observation missing 'micro' key. Keys found: {list(obs.keys())}")
-            if private_np is None:
-                raise ValueError(f"Observation missing 'private' key. Keys found: {list(obs.keys())}")
-            
-            # If batch dim missing, add it
-            if len(micro_np.shape) == 2:
-                micro_t = torch.tensor(micro_np, dtype=torch.float32).unsqueeze(0).to(self.device)
-            else:
-                micro_t = torch.tensor(micro_np, dtype=torch.float32).to(self.device)
-                
-            if len(private_np.shape) == 2: # (Window, Features)
-                 private_t = torch.tensor(private_np, dtype=torch.float32).unsqueeze(0).to(self.device)
-            elif len(private_np.shape) == 1: # (Features)
-                 # If env gives 1D private? Network expects Window
-                 # But we assume Env gives Window. If Env gives (F), we unsqueeze(0) for batch, but still 1D.
-                 # Let's assume Env gives (W, F) as standard.
-                 private_t = torch.tensor(private_np, dtype=torch.float32).unsqueeze(0).to(self.device)
-            else:
-                 private_t = torch.tensor(private_np, dtype=torch.float32).to(self.device)
-                
-            # Handle optional macro if system design allows, though DeepScalper requires it
-            if macro_np is None:
-                 # If using a mock env that might return None or different structure?
-                 # DeepScalper requires macro.
-                 raise ValueError("Observation missing 'macro' key.")
-
-            if len(macro_np.shape) == 1:
-                macro_t = torch.tensor(macro_np, dtype=torch.float32).unsqueeze(0).to(self.device)
-            else:
-                macro_t = torch.tensor(macro_np, dtype=torch.float32).to(self.device)
-                
-            return micro_t, private_t, macro_t
-        else:
-            raise ValueError(f"Expected dict observation, got {type(obs)}")
-
-    def _get_clean_state_dict(self, model: nn.Module) -> Dict:
-        """Helper to strip _orig_mod. prefix from torch.compile"""
-        state_dict = model.state_dict()
-        return {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
 
     def save_checkpoint(self, path: str):
-        """Save all agent states and optimizer states for resume"""
-        state = {
-            "dqn": self._get_clean_state_dict(self.ensemble.dqn.policy_net),
-            "ppo": self._get_clean_state_dict(self.ensemble.ppo.network),
-            "a2c": self._get_clean_state_dict(self.ensemble.a2c.network),
-            "gating": self._get_clean_state_dict(self.ensemble.gating),
-            "config": self.config,
-            "global_step": self.global_step,
-            "optimizers": {
-                "gating": self.gating_optimizer.state_dict(),
-                "ppo": self.ppo_optimizer.state_dict(),
-                "a2c": self.a2c_optimizer.state_dict()
-            }
+        print(f"Saving checkpoint to {path}...")
+        
+        # Consolidate Optimizer States
+        opt_states = {
+            "gating": self.gating_optimizer.state_dict(),
+            "ppo": self.ppo_optimizer.state_dict(),
+            "a2c": self.a2c_optimizer.state_dict()
         }
         
-        lock_path = os.path.join(self.checkpoint_dir, ".lock")
-        try:
-            with filelock.FileLock(lock_path, timeout=10):
-                torch.save(state, path)
-                self.logger.log_event("deepscalper.model.saved", context={"path": path})
-        except filelock.Timeout:
-            print(f"WARNING: Could not acquire lock for checkpoint {path}. Skipping save.", flush=True)
-        except Exception as e:
-            print(f"ERROR: Failed to save checkpoint {path}: {e}", flush=True)
+        checkpoint = {
+            "dqn": self.ensemble.dqn.policy_net.state_dict(),
+            "ppo": self.ensemble.ppo.network.state_dict(),
+            "a2c": self.ensemble.a2c.network.state_dict(),
+            "gating": self.ensemble.gating.state_dict(),
+            "optimizers": opt_states,
+            "global_step": self.global_step,
+            "config": self.config
+        }
+        torch.save(checkpoint, path)
+        print("Checkpoint saved.")
 
-    def evaluate(self, eval_env, num_episodes=5) -> Dict[str, float]:
-        """
-        Evaluate the current ensemble on a separate environment (Validation Set).
-        Returns metrics dict (Sharpe, Total Reward, etc.)
-        """
-        print(f"Starting Evaluation on {num_episodes} episodes...")
+    def _unpack_obs(self, obs):
+        """Helper to unpack dictionary observation into tensors"""
+        # Obs is dict of numpy arrays
+        # If single env, add batch dim
+        # If vector env, already batched
         
-        if num_episodes == 0:
-            print("WARNING: num_eval_episodes is 0. Returning zero metrics.")
-            return {
-                "avg_reward": 0.0,
-                "std_reward": 0.0,
-                "sharpe": 0.0,
-                 "max_drawdown": 0.0,
-                "win_rate": 0.0,
-                "total_return": 0.0
-            }
+        # Check if batched by looking at 'micro' shape
+        # Micro: (W, F) -> Unbatched. (B, W, F) -> Batched.
+        
+        micro = torch.tensor(obs["micro"], dtype=torch.float32).to(self.device)
+        private = torch.tensor(obs["private"], dtype=torch.float32).to(self.device)
+        macro = torch.tensor(obs["macro"], dtype=torch.float32).to(self.device)
+        
+        if micro.ndim == 2: # (W, F) -> Single Env
+             micro = micro.unsqueeze(0)
+             private = private.unsqueeze(0)
+             macro = macro.unsqueeze(0)
+             
+        return micro, private, macro
 
-        total_rewards = []
+    def evaluate(self, env, num_episodes=10):
+        print("Starting Evaluation...")
+        import gymnasium as gym
         
         # Detect Vector Env
-        is_vector = False
-        import gymnasium as gym
-        if isinstance(eval_env, gym.vector.VectorEnv):
-             is_vector = True
-             num_envs = eval_env.num_envs
-        else:
-             num_envs = 1
-             
-        # Prepare for evaluation loop
-        # We need to handle VectorEnv (auto-reset) and Single Env (manual reset) differently
+        is_vector = isinstance(env, (gym.vector.VectorEnv, gym.vector.SyncVectorEnv, gym.vector.AsyncVectorEnv))
+        num_envs = env.num_envs if is_vector else 1
+        
+        total_rewards = []
         
         if is_vector:
-            # --- VECTOR ENV STRATEGY ---
-            finished_episodes = [0] * num_envs
-            current_ep_rewards = np.zeros(num_envs, dtype=np.float32)
+            # Vector Env Evaluation
+            # We need to collect `num_episodes` completions.
+            # In VectorEnv, episodes end asynchronously.
+            # We will run until we have collected at least num_episodes results.
             
-            # Reset once at start
-            obs, info = eval_env.reset()
-            micro, private, macro = self._unpack_obs(obs)
+            episode_counts = 0
+            # Track current episode returns per env
+            current_returns = np.zeros(num_envs, dtype=np.float32)
+            completed_returns = []
             
-            # Run untill we collect enough episodes
-            # Safety: Max steps to prevent infinite loop if something is really broken
+            obs, _ = env.reset()
+            
+            # Safety timeout to prevent infinite loops if envs stall
             max_steps = 100000 
-            step_count = 0
+            steps = 0
             
-            # We want total_episodes >= num_episodes
-            while sum(finished_episodes) < num_episodes:
+            while episode_counts < num_episodes and steps < max_steps:
+                micro, private, macro = self._unpack_obs(obs)
                 with torch.no_grad():
-                    # Gating
-                    weights = self.ensemble.gating(macro)
-                    
-                    # Agent Probs
-                    p_dqn_dir, p_dqn_price, p_dqn_vol = self.ensemble.dqn.get_probs(micro, private, macro)
-                    logits_ppo_dir, logits_ppo_price, logits_ppo_vol, _ = self.ensemble.ppo.network(micro, private, macro)
-                    p_ppo_dir = torch.softmax(logits_ppo_dir, dim=1)
-                    p_ppo_price = torch.softmax(logits_ppo_price, dim=1)
-                    p_ppo_vol = torch.softmax(logits_ppo_vol, dim=1)
-                    
-                    logits_a2c_dir, logits_a2c_price, logits_a2c_vol, _ = self.ensemble.a2c.network(micro, private, macro)
-                    p_a2c_dir = torch.softmax(logits_a2c_dir, dim=1)
-                    p_a2c_price = torch.softmax(logits_a2c_price, dim=1)
-                    p_a2c_vol = torch.softmax(logits_a2c_vol, dim=1)
-                    
-                    # Ensemble (Weighted Average)
-                    w_dqn = weights[:, 0].unsqueeze(1)
-                    w_ppo = weights[:, 1].unsqueeze(1)
-                    w_a2c = weights[:, 2].unsqueeze(1)
-                    
-                    final_dir = w_dqn * p_dqn_dir + w_ppo * p_ppo_dir + w_a2c * p_a2c_dir
-                    final_price = w_dqn * p_dqn_price + w_ppo * p_ppo_price + w_a2c * p_a2c_price
-                    final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
-                    
-                    # Sample
-                    from torch.distributions import Categorical
-                    a_dir = Categorical(probs=final_dir).sample()
-                    a_price = Categorical(probs=final_price).sample()
-                    a_vol = Categorical(probs=final_vol).sample()
-                    
-                    action_vector = torch.stack([a_dir, a_price, a_vol], dim=1).cpu().numpy()
-
-                # Step
-                next_obs, reward, terminated, truncated, info = eval_env.step(action_vector)
+                    # Deterministic prediction for eval
+                    actions = self.ensemble.predict(micro, private, macro, deterministic=True)
+                
+                obs, rewards, terminated, truncated, infos = env.step(actions)
+                steps += 1
+                
+                # Accumulate rewards
+                current_returns += rewards
+                
+                # Check for dones
                 dones = terminated | truncated
                 
-                # Accumulate Rewards
-                current_ep_rewards += reward
+                for i in range(num_envs):
+                    if dones[i]:
+                        completed_returns.append(current_returns[i])
+                        current_returns[i] = 0.0 # Reset accumulator
+                        episode_counts += 1
+                        
+            if not completed_returns:
+                print("WARNING: Evaluation finished with 0 completed episodes.")
+                return {"sharpe": 0.0, "total_return": 0.0}
                 
-                # Check completions
-                if np.any(dones):
-                    for i, d in enumerate(dones):
-                        if d:
-                            finished_episodes[i] += 1
-                            if sum(finished_episodes) <= num_episodes: # Only record needed episodes? Or all?
-                                # Let's record all valid completions
-                                total_rewards.append(current_ep_rewards[i])
-                            current_ep_rewards[i] = 0.0
-                
-                obs = next_obs
-                micro, private, macro = self._unpack_obs(obs)
-                step_count += 1
-                
-                if step_count > max_steps:
-                    print(f"WARNING: Evaluation timed out after {max_steps} steps.")
-                    break
+            avg_reward = np.mean(completed_returns)
+            std_reward = np.std(completed_returns)
+            sharpe = avg_reward / (std_reward + 1e-6)
+            
+            return {
+                "sharpe": sharpe, 
+                "total_return": avg_reward,
+                "episodes": len(completed_returns)
+            }
+            
         else:
-            # --- SINGLE ENV STRATEGY (Legacy Logic) ---
+            # Single Env Evaluation
             for _ in range(num_episodes):
-                obs, info = eval_env.reset()
-                micro, private, macro = self._unpack_obs(obs)
-                
+                obs, _ = env.reset()
                 done = False
-                ep_reward = 0.0
-                
+                ep_reward = 0
                 while not done:
+                    micro, private, macro = self._unpack_obs(obs)
                     with torch.no_grad():
-                        # Gating
-                        weights = self.ensemble.gating(macro)
-                        
-                        # Agent Probs
-                        p_dqn_dir, p_dqn_price, p_dqn_vol = self.ensemble.dqn.get_probs(micro, private, macro)
-                        logits_ppo_dir, logits_ppo_price, logits_ppo_vol, _ = self.ensemble.ppo.network(micro, private, macro)
-                        p_ppo_dir = torch.softmax(logits_ppo_dir, dim=1)
-                        p_ppo_price = torch.softmax(logits_ppo_price, dim=1)
-                        p_ppo_vol = torch.softmax(logits_ppo_vol, dim=1)
-                        
-                        logits_a2c_dir, logits_a2c_price, logits_a2c_vol, _ = self.ensemble.a2c.network(micro, private, macro)
-                        p_a2c_dir = torch.softmax(logits_a2c_dir, dim=1)
-                        p_a2c_price = torch.softmax(logits_a2c_price, dim=1)
-                        p_a2c_vol = torch.softmax(logits_a2c_vol, dim=1)
-                        
-                        # Ensemble (Weighted Average)
-                        w_dqn = weights[:, 0].unsqueeze(1)
-                        w_ppo = weights[:, 1].unsqueeze(1)
-                        w_a2c = weights[:, 2].unsqueeze(1)
-                        
-                        final_dir = w_dqn * p_dqn_dir + w_ppo * p_ppo_dir + w_a2c * p_a2c_dir
-                        final_price = w_dqn * p_dqn_price + w_ppo * p_ppo_price + w_a2c * p_a2c_price
-                        final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
-                        
-                        # Sample
-                        from torch.distributions import Categorical
-                        a_dir = Categorical(probs=final_dir).sample()
-                        a_price = Categorical(probs=final_price).sample()
-                        a_vol = Categorical(probs=final_vol).sample()
-                        
-                        # Single Action
-                        action = np.array([a_dir.item(), a_price.item(), a_vol.item()])
-
-                    next_obs, reward, terminated, truncated, info = eval_env.step(action)
-                    micro, private, macro = self._unpack_obs(next_obs)
+                        action = self.ensemble.predict(micro, private, macro, deterministic=True)[0]
+                    obs, reward, terminated, truncated, _ = env.step(action)
                     ep_reward += reward
-                    
-                    if terminated or truncated:
-                        done = True
-                
+                    done = terminated or truncated
                 total_rewards.append(ep_reward)
                 
-        if not total_rewards:
-            print("WARNING: Evaluation produced NO episodes. Returning zero metrics.")
-            return {
-                "avg_reward": 0.0,
-                "std_reward": 0.0,
-                "sharpe": 0.0
-            }
-
-        avg_reward = np.mean(total_rewards)
-        std_reward = np.std(total_rewards)
-        
-        # Calculate Sharpe (Simplified: Mean / Std of episode rewards is NOT Sharpe)
-        # Sharpe is Mean(Returns) / Std(Returns).
-        # We need Daily Returns ideally.
-        # But for HPO on episode level, Sharpe ~ Avg_Rew / Std_Rew (if rew is PnL)
-        # Let's use Risk-Adjusted Return proxy: Mean / (Std + epsilon)
-        sharpe_proxy = avg_reward / (std_reward + 1e-6)
-        
-        return {
-            "avg_reward": float(avg_reward),
-            "std_reward": float(std_reward),
-            "sharpe": float(sharpe_proxy)
-        }
-
+            avg_reward = np.mean(total_rewards)
+            std_reward = np.std(total_rewards)
+            sharpe = avg_reward / (std_reward + 1e-6)
+            return {"sharpe": sharpe, "total_return": avg_reward, "episodes": num_episodes}

@@ -1,0 +1,83 @@
+# DeepScalper Anti-Churn Configuration
+data:
+  file_path: "data/btc_lob_jan2023.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2023-01-10"
+  train_end_date: "2023-01-18"
+  val_start_date: "2023-01-18"
+  val_end_date: "2023-01-19"
+  test_start_date: "2023-01-19"
+  test_end_date: "2023-01-20"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  transaction_fee: 0.0001
+  num_envs: 24
+  window_size: 50
+  
+  reward:
+    profit_weight: 1.966109723001378
+    volatility_penalty_weight: 1.6324713022504311
+    transaction_cost_penalty: 2.0  # Explicit penalty for churning
+    volatility_horizon: 100
+    risk_aversion: 0.5
+    
+  action:
+    direction_bins: 3
+    price_bins: 5
+    volume_bins: 5
+
+network:
+  micro_config:
+    input_size: 20
+    private_input_size: 2
+    hidden_size: 64
+    
+  macro_config:
+    input_size: 11
+    hidden_sizes: [64]
+
+agents:
+  dqn:
+    learning_rate: 3.734192688333788e-05
+    gamma: 0.999
+    dqn_batch_size: 16384
+    dqn_buffer_size: 1000000
+    dqn_target_update_freq: 1000
+    
+  ppo:
+    learning_rate: 3.734192688333788e-05
+    gamma: 0.999
+    entropy_coef: 0.0016238013017095057
+    clip_epsilon: 0.2
+    
+  a2c:
+    learning_rate: 3.734192688333788e-05
+    gamma: 0.999
+    
+  gating:
+    learning_rate: 3.734192688333788e-05
+
+training:
+  total_timesteps: 100000
+  batch_size: 16384
+  update_interval: 2048
+  learning_rate: 3.734192688333788e-05
+  dqn_update_interval: 2048.0
+  log_interval: 100
+  checkpoint_interval: 10000
+  torch_compile: false
+  use_amp: true
+  use_shm: true
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["AntiChurn", "BestParams", "SmokeTest"]

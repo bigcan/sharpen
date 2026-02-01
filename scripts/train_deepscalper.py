@@ -363,7 +363,12 @@ def main():
     gating_input = ensemble_config.get("input_size", net_config["macro_config"]["input_size"])
     gating_hidden = ensemble_config.get("hidden_size", 64)
     
-    gating = SynapseGatingNetwork(input_dim=gating_input, hidden_dim=gating_hidden)
+    # Extract Micro Shape for Gating
+    window_size = config.get("env", {}).get("window_size", 50)
+    micro_input = net_config["micro_config"]["input_size"]
+    micro_shape = (window_size, micro_input)
+    
+    gating = SynapseGatingNetwork(input_dim=gating_input, micro_shape=micro_shape, hidden_dim=gating_hidden)
     ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
     
     # Initialize Trainer
