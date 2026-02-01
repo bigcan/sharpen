@@ -179,9 +179,26 @@ def deploy(args):
     # BUT we want to ensure setup is CONFIRMED. Setup IS confirmed now.
     # So if pkill kills this session, we assume success.
     
+    # 4.5 Clean up old processes (Independent Step to avoid suicide)
+    print("Killing old instances (Orchestrator & Workers)...")
+    
+    # Aggressively kill all DeepScalper related scripts to prevent zombies
+    # The orchestrator might be run_full_pipeline, but it spawns train/tune/backtest
+    targets = [
+        script_path,                # The script we are about to launch
+        "train_deepscalper.py",     # The specialized trainer
+        "tune_deepscalper.py",      # The HPO tuner
+        "backtest_deepscalper.py",  # The backtester
+        "wandb-service"             # Optional: Cleanup wandb internal process if stuck
+    ]
+    # Unique and formatted for pkill
+    unique_targets = list(set(targets))
+    kill_cmd_parts = [f"pkill -f {t}" for t in unique_targets]
+    full_kill_cmd = " || true; ".join(kill_cmd_parts) + " || true"
+    
     try:
-        ssh.exec_command(f"pkill -f {script_path} || true")
-        time.sleep(2) # Allow cleanup
+        ssh.exec_command(full_kill_cmd)
+        time.sleep(3) # Allow cleanup
     except:
         pass
 
