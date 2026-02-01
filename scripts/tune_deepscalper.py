@@ -368,6 +368,9 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
         })
         return final_sharpe
 
+    except optuna.TrialPruned:
+        # Allow pruning exception to bubble up to Optuna
+        raise
     except Exception as e:
         logger.error(f"Trial failed: {e}")
         import traceback

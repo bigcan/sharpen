@@ -83,20 +83,34 @@ def monitor_loop(interval=300, workspace="/workspace/DeepScalper"):
             # ---------------------------------------------------------
             print(f"[Pipeline]")
             
-            # Check PID
+            # Check PID logic (Robust)
+            # 1. Try Process Name Search (Most Reliable)
+            stdin, stdout, stderr = ssh.exec_command("pgrep -f 'tune_deepscalper.py|train_deepscalper.py' | head -n 1")
+            real_pid = stdout.read().decode().strip()
+            
+            # 2. Try PID File (Metadata)
             stdin, stdout, stderr = ssh.exec_command(f"cat {workspace}/run.pid")
-            pid = stdout.read().decode().strip()
+            file_pid = stdout.read().decode().strip()
+            
+            pid = real_pid if real_pid else file_pid
             
             is_running = False
             if pid and pid.isdigit():
-                stdin, stdout, stderr = ssh.exec_command(f"ps -p {pid} -o comm=")
-                if stdout.read().decode().strip():
-                    is_running = True
+                 # Double check it exists
+                 stdin, stdout, stderr = ssh.exec_command(f"ps -p {pid} -o comm=")
+                 if stdout.read().decode().strip():
+                     is_running = True
             
             if is_running:
-                print(f"  Status: RUNNING (PID {pid})")
+                status_extras = []
+                if real_pid and not file_pid: status_extras.append("ORPHANED/NO_PID_FILE")
+                if file_pid and not real_pid: status_extras.append("STALE_PID_FILE")
+                
+                status_msg = f"  Status: RUNNING (PID {pid})"
+                if status_extras: status_msg += f" [{' '.join(status_extras)}]"
+                print(status_msg)
             else:
-                print(f"  Status: STOPPED (PID {pid} not found)")
+                print(f"  Status: STOPPED")
             
             # Check Log Snips
             # Latest Phase
