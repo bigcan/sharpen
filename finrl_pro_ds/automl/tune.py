@@ -79,12 +79,12 @@ if __name__ == "__main__":
     # tuner = HyperparameterTuner(config_path, agent_name="PPO")
     # tuner.tune(n_trials=10, study_name="ppo_test_tune", storage="sqlite:///ppo_study.db")
     
-    # Placeholder for a realistic config structure, if `finrl_pro_ds.configs.experiments/sp500_daily.yaml` is a good example
+    # Placeholder for a realistic config structure, if `finrl_pro_ds.configs.experiments/crypto_daily.yaml` is a good example
     # For now, let's assume a dummy config or a path to an existing config
     # Example: create a dummy config file for testing purposes
     dummy_config_content = """
 data:
-  dataset_name: "sp500_daily"
+  dataset_name: "btc_usdt_daily"
   start_date: "2000-01-01"
   end_date: "2023-01-01"
 environment:

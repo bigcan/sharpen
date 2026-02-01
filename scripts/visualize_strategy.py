@@ -169,7 +169,7 @@ def run_visualization(ensemble, config, device, data_file=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", default="configs/deepscalper_unified.yaml")
+    parser.add_argument("--config", default="configs/deepscalper_production.yaml")
     parser.add_argument("--checkpoint", default=None)
     parser.add_argument("--data", default=None)
     args = parser.parse_args()

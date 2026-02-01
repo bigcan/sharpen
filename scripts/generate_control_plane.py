@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).parent.parent
-CONFIG_PATH = PROJECT_ROOT / "configs" / "deepscalper_unified.yaml"
+CONFIG_PATH = PROJECT_ROOT / "configs" / "deepscalper_production.yaml"
 OUTPUT_PATH = PROJECT_ROOT / "notebooks" / "DeepScalper_Control_Plane.ipynb"
 
 
@@ -150,7 +150,7 @@ def build_notebook(config: dict) -> dict:
             "outputs": [],
             "source": [
                 "SCRIPTS = {'hpo': 'scripts/tune_deepscalper.py', 'train': 'scripts/train_deepscalper_v3.py', 'pipeline': 'scripts/run_full_pipeline.py'}\n",
-                "cmd = f'python scripts/deploy_bare_metal.py --script {SCRIPTS[MISSION]} --config configs/deepscalper_unified.yaml --upload_data --data_file btc_lob_jan2023.parquet'\n",
+                "cmd = f'python scripts/deploy_bare_metal.py --script {SCRIPTS[MISSION]} --config configs/deepscalper_production.yaml --upload_data --data_file btc_lob_jan2023.parquet'\n",
                 "if EXTRA: cmd += f' --extra_args \"{EXTRA}\"'\n",
                 "print(cmd)\n",
                 "# !{cmd}  # Uncomment to run"

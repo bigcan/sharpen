@@ -22,7 +22,7 @@ risk_profile_id: conservative
 sandbox_enabled: true
 
 data:
-  dataset_hash: file://data/sp500_phase9_2005_2025.parquet
+  dataset_hash: file://data/btc_usdt_phase9_2005_2025.parquet
   start_date: '2005-01-01'
   end_date: '2025-01-01'
   tickers:
@@ -71,7 +71,7 @@ training:
       learning_rate: 0.00025
       n_steps: 2048
       n_epochs: 10
-  baseline_reference: benchmarks:sp500_buy_hold
+  baseline_reference: benchmarks:btc_usdt_buy_hold
   config_path: finrl_pro_ds/configs/config.yaml
   
   environment:

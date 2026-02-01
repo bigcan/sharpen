@@ -6,7 +6,7 @@ from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
 def verify_config_dates():
     try:
-        with open('configs/deepscalper_unified.yaml', 'r') as f:
+        with open('configs/deepscalper_production.yaml', 'r') as f:
             config = yaml.safe_load(f)
         
         data_config = config['data']

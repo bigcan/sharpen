@@ -66,7 +66,7 @@ def _classify_phase(config_path: str) -> Optional[int]:
         return 1
     if any(k in stem for k in ("feature", "fracdiff", "wavelet")):
         return 2
-    if "sp500_daily" in stem:
+    if "crypto" in stem or "btc" in stem:
         return 0
     return None
 

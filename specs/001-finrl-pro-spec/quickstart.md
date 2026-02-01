@@ -55,8 +55,8 @@ pip install ruff black mypy
 
 ```bash
 python -m finrl_pro_ds.training.trainer \
-  --config finrl_pro_ds/configs/experiment_sp500.yaml \
-  --risk-profile risk_profiles:baseline_sp500 \
+  --config finrl_pro_ds/configs/experiments/crypto_daily.yaml \
+  --risk-profile risk_profiles:baseline_btc_usd \
   --mlflow-tracking-uri $MLFLOW_TRACKING_URI
 ```
 
@@ -69,8 +69,8 @@ python -m finrl_pro_ds.training.trainer \
 
 ```bash
 python -m finrl_pro_ds.eval.walk_forward \
-  --config finrl_pro_ds/configs/experiment_sp500.yaml \
-  --benchmark-id benchmarks:sp500_rolling_1y
+  --config finrl_pro_ds/configs/experiments/crypto_daily.yaml \
+  --benchmark-id benchmarks:btc_usdt_rolling_1y
 ```
 
 - Outputs SHAP summaries (via `finrl_pro_ds.explainability.shap_analysis`) and

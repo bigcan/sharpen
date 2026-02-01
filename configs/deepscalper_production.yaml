@@ -26,6 +26,7 @@ env:
   reward:
     profit_weight: 1.0
     volatility_penalty_weight: 0.1
+    transaction_cost_penalty: 0.0 # Disabled: Fees are already in PnL (Realistic VIP 0)
     volatility_horizon: 100
     risk_aversion: 0.5
     
@@ -73,9 +74,9 @@ agents:
     learning_rate: 0.0001
 
 training:
-  total_timesteps: 30000000 # 30M Global Frames (Industry Standard)
-  batch_size: 16384          # Optimized (Blackwell 32GB VRAM)
-  update_interval: 16384     # Matched to Batch Size
+  total_timesteps: 10000000
+  batch_size: 16384
+  update_interval: 16384
   learning_rate: 0.0001
   dqn_update_interval: 2048.0 # FIXED: Replay Ratio Optimization (Target ~8)
   log_interval: 1000

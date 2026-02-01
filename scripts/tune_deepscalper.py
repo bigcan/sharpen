@@ -573,7 +573,7 @@ if __name__ == "__main__":
     except RuntimeError:
         pass
     parser = argparse.ArgumentParser()
-    parser.add_argument("--config", type=str, default="configs/deepscalper_unified.yaml", help="Master Config")
+    parser.add_argument("--config", type=str, default="configs/deepscalper_production.yaml", help="Master Config")
     parser.add_argument("--trials", type=int, default=50)
     parser.add_argument("--steps", type=int, default=5000, help="Steps per fold")
     parser.add_argument("--study_name", type=str, default="deepscalper_hpo")

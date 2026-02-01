@@ -6,7 +6,7 @@ sandbox_enabled: true
 
 training:
   config_path: finrl_pro_ds/configs/config.yaml
-  dataset_hash: file://data/sp500_full_2010_2025.parquet
+  dataset_hash: file://data/btc_usdt_full_2010_2025.parquet
   seed: 2025
   real_training: true
   start_date: "2021-01-01"
@@ -45,7 +45,7 @@ training:
     max_drawdown: 0.25 # Relaxed slightly for OOS reality check
   
   artifact_uris: []
-  baseline_reference: benchmarks:sp500_buy_hold
+  baseline_reference: benchmarks:btc_usdt_buy_hold
 
 features:
   enable_custom: false

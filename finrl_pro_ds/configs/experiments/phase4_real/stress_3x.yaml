@@ -7,7 +7,7 @@ sandbox_enabled: true
 training:
   real_training: true
   config_path: finrl_pro_ds/configs/config.yaml
-  dataset_hash: file://data/sp500_daily_2016_2025.parquet
+  dataset_hash: file://data/btc_usdt_daily_2016_2025.parquet
   seed: 42
   use_pro_env: true
   total_timesteps: 2600
@@ -33,7 +33,7 @@ training:
     capital_at_risk: 0.08
     leverage: 1.2
 
-  baseline_reference: benchmarks:sp500_rolling_1y
+  baseline_reference: benchmarks:btc_usdt_rolling_1y
 
 features:
   enable_custom: true

@@ -1,7 +1,7 @@
 # Sideways Specialist (Volatility Harvesting)
 # Trained on 2018-2019 (Volatile/Sideways)
 data:
-  dataset_hash: "file://data/sp500_full_2010_2025.parquet"
+  dataset_hash: "file://data/btc_usdt_full_2010_2025.parquet"
   start_date: "2018-01-04"
   end_date: "2019-01-04"
   tickers: 
@@ -28,7 +28,7 @@ data:
 
 training:
   config_path: finrl_pro_ds/configs/experiments/phase6_specialists/sideways.yaml
-  dataset_hash: "file://data/sp500_full_2010_2025.parquet"
+  dataset_hash: "file://data/btc_usdt_full_2010_2025.parquet"
   start_date: "2018-01-04"
   end_date: "2019-01-04"
   real_training: true
@@ -41,7 +41,7 @@ training:
       gamma: 0.94
       clip_ratio: 0.35
       entropy_coef: 0.0
-  baseline_reference: benchmarks:sp500_buy_hold
+  baseline_reference: benchmarks:btc_usdt_buy_hold
   register_model: true
   model_name: "specialist_sideways"
 
