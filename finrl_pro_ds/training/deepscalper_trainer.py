@@ -857,6 +857,11 @@ class DeepScalperTrainer:
             import traceback
             traceback.print_exc()
             self.save_checkpoint(f"{self.checkpoint_dir}/failed_state.pth")
+        except Exception as e:
+            print(f"ERROR: Exception in Training Loop: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            raise e
         finally:
             self.watchdog.stop()
 
@@ -903,8 +908,8 @@ class DeepScalperTrainer:
              
         return micro, private, macro
 
-    def evaluate(self, env, num_episodes=10):
-        print("Starting Evaluation...")
+    def evaluate(self, env, num_episodes=10, max_steps=100000):
+        print(f"Starting Evaluation (Episodes: {num_episodes}, Max Steps: {max_steps})...", flush=True)
         import gymnasium as gym
         
         # Detect Vector Env
@@ -927,14 +932,15 @@ class DeepScalperTrainer:
             obs, _ = env.reset()
             
             # Safety timeout to prevent infinite loops if envs stall
-            max_steps = 100000 
+            # max_steps argument used here
+            steps = 0 
             steps = 0
             
             while episode_counts < num_episodes and steps < max_steps:
                 micro, private, macro = self._unpack_obs(obs)
                 with torch.no_grad():
                     # Deterministic prediction for eval
-                    actions = self.ensemble.predict(micro, private, macro, deterministic=True)
+                    actions, _ = self.ensemble.predict(micro, private, macro, deterministic=True)
                 
                 obs, rewards, terminated, truncated, infos = env.step(actions)
                 steps += 1

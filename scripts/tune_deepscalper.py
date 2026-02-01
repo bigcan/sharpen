@@ -245,23 +245,23 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
                 # Create list of factory functions
                 # Note: We must pass simple dict/configs that are picklable. shm_config is dict.
                 env_fns_train = [make_env_thunk(trial_config, fold['train'][0], fold['train'][1], shm_config) for _ in range(num_envs)]
+                env_fns_val = [make_env_thunk(trial_config, fold['val'][0], fold['val'][1], shm_config) for _ in range(num_envs)]
                 
                 # Check for context
                 # "spawn" is safer for CUDA/Torch + Multiprocessing
-                env_train = gym.vector.AsyncVectorEnv(
-                    env_fns_train, 
-                    context="spawn", 
-                    observation_space=obs_space,
-                    action_space=action_space
-                )
-                
-                env_fns_val = [make_env_thunk(trial_config, fold['val'][0], fold['val'][1], shm_config) for _ in range(num_envs)]
-                env_val = gym.vector.AsyncVectorEnv(
-                    env_fns_val, 
-                    context="spawn",
-                    observation_space=obs_space, 
-                    action_space=action_space
-                )
+                if args.debug:
+                     logger.info("Debug Mode: Using SyncVectorEnv")
+                     env_train = gym.vector.SyncVectorEnv(env_fns_train)
+                     env_val = gym.vector.SyncVectorEnv(env_fns_val)
+                else:
+                    env_train = gym.vector.AsyncVectorEnv(
+                        env_fns_train, 
+                        context="spawn"
+                    )
+                    env_val = gym.vector.AsyncVectorEnv(
+                        env_fns_val, 
+                        context="spawn"
+                    )
             else:
                 logger.info("Initializing Single Environment (WARNING: Low Throughput)...")
                 env_train = make_env(trial_config, start_date=fold['train'][0], end_date=fold['train'][1], shared_memory_config=shm_config)
@@ -316,7 +316,14 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
             
             ensemble_config = net_config.get("ensemble_config", {})
             gating_input = ensemble_config.get("input_size", net_config["macro_config"]["input_size"])
-            gating = SynapseGatingNetwork(input_dim=gating_input, hidden_dim=64)
+            
+            # Fix: Pass correct micro_shape from environment to avoid mismatch
+            if num_envs > 1:
+                 micro_shape = obs_space["micro"].shape
+            else:
+                 micro_shape = env_train.observation_space["micro"].shape
+                 
+            gating = SynapseGatingNetwork(input_dim=gating_input, micro_shape=micro_shape, hidden_dim=64)
             
             ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
             
@@ -335,7 +342,8 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
             trainer.total_timesteps = args.steps
             trainer.train()
             
-            metrics = trainer.evaluate(env_val, num_episodes=5 if args.debug else 20) # Ensure enough episodes for vector env
+            # Evaluate
+            metrics = trainer.evaluate(env_val, num_episodes=5, max_steps=args.steps * 50) # 50x training steps for eval buffer
             fold_scores.append(metrics['sharpe'])
             
             # Log fold metrics to WandB (single run, all trials)
@@ -430,7 +438,10 @@ def run_best_model_report(best_params, base_config, args):
     dqn = DeepScalperDQN(agent_net_config, lr=lr, gamma=gamma, device=device, batch_size=config_dict.get("agents",{}).get("dqn",{}).get("dqn_batch_size", 64))
     ppo = DeepScalperPPO(agent_net_config, device=device)
     a2c = DeepScalperA2C(agent_net_config, device=device)
-    gating = SynapseGatingNetwork(input_dim=net_config["macro_config"]["input_size"])
+    
+    # Fix: Pass correct micro_shape
+    micro_shape = env.observation_space["micro"].shape
+    gating = SynapseGatingNetwork(input_dim=net_config["macro_config"]["input_size"], micro_shape=micro_shape)
     ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
     
     logger.info("Training Best Model (Short Run)...")
@@ -483,7 +494,8 @@ def run_best_model_report(best_params, base_config, args):
     
     while not done:
         with torch.no_grad():
-            action_vec = ensemble.predict(micro, private, macro)[0]
+            # Use deterministic prediction for reporting
+            action_vec = ensemble.predict(micro, private, macro, deterministic=True)[0][0]
         
         obs, reward, term, trunc, info = env.step(action_vec)
         micro, private, macro = unpack(obs)
