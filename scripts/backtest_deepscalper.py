@@ -195,6 +195,7 @@ def main():
     portfolio_values = []
     positions = []
     prices = []
+    timestamps = []
     
     done = False
     step = 0
@@ -225,6 +226,7 @@ def main():
             
             portfolio_values.append(val)
             positions.append(pos)
+            timestamps.append(info.get('date', pd.Timestamp.now()))
             
             if step % 1000 == 0:
                 print(f"Step {step}: Value={val:.2f}, Pos={pos:.4f}")
@@ -358,19 +360,13 @@ def main():
         # But I can't easily patch the loop without replacing too much.
         # Alternative: Generate mock dates or try to access handler timestamps
         
-        timestamps = []
-        if hasattr(env, 'handler') and hasattr(env.handler, '_timestamps'):
-             # _timestamps is list of all timestamps. We executed 'step' steps.
-             # Note: env.reset() called handler.reset? 
-             # We can slice timestamps[:step]
-             # But 'step' in loop is incremented.
-             all_ts = env.handler._timestamps
-             if len(all_ts) >= step:
-                timestamps = all_ts[:step]
-             else:
-                timestamps = pd.date_range(start='2023-01-01', periods=step, freq='1min')
-        else:
-             timestamps = pd.date_range(start='2023-01-01', periods=step, freq='1min')
+        # Use collected timestamps
+        if not timestamps:
+            print("WARNING: No timestamps collected. Generating dummy timestamps.")
+            timestamps = pd.date_range(start='2023-01-01', periods=len(portfolio_values), freq='1min')
+        
+        # Ensure length match
+        timestamps = timestamps[:len(portfolio_values)]
              
         # Defensive: Ensure all arrays are same length
         n = len(portfolio_values)
