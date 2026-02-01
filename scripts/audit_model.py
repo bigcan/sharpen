@@ -33,7 +33,12 @@ def load_model(config_path, checkpoint_path, device="cpu"):
     dqn = DeepScalperDQN(network_config=net_conf, device=device)
     ppo = DeepScalperPPO(net_conf, device=device)
     a2c = DeepScalperA2C(net_conf, device=device)
-    gating = SynapseGatingNetwork(input_dim=config.network.macro_input_size)
+    
+    # Fix: Calculate micro_shape for correct gating init
+    window_size = config.env.window_size
+    micro_feat_dim = config.network.micro_input_size
+    micro_shape = (window_size, micro_feat_dim)
+    gating = SynapseGatingNetwork(input_dim=config.network.macro_input_size, micro_shape=micro_shape)
     
     # Load Weights
     if not os.path.exists(checkpoint_path):
@@ -101,10 +106,10 @@ def run_backtest(ensemble, config, start_date, end_date):
         macro = torch.tensor(obs['macro'], dtype=torch.float32).unsqueeze(0).to(ensemble.device)
         
         with torch.no_grad():
-            action = ensemble.predict(micro, private, macro) # Returns (1, 3)
+            actions, _ = ensemble.predict(micro, private, macro, deterministic=True) # Returns (1, 3), weights
             
         # Step
-        next_obs, reward, terminated, truncated, info = env.step(action[0])
+        next_obs, reward, terminated, truncated, info = env.step(actions[0])
         done = terminated or truncated
         
         # Log Data for VBT

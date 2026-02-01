@@ -1,0 +1,195 @@
+Run Name: DeepScalper_V1_GPUHub_20260201_1842_Pipeline
+ID: tqi6pwgy
+Status: finished
+
+--- Config ---
+{
+  "n_trials": 1,
+  "strategy": "joint",
+  "study_name": "deepscalper_hpo",
+  "config_file": "configs/deepscalper_smoke_test.yaml",
+  "steps_per_fold": 5000
+}
+
+--- Summary Metrics ---
+{
+  "Absolute_PnL_USDT": 8.640625,
+  "Account Balance": {
+    "_latest_artifact_path": "wandb-client-artifact://nnvcmm7eiptfna8hiqh664mcwqqvfkughjenszuz72pokul83wvk4n0epvi5bo800xrpu8lgrnl1qmfrcifcrnh6dfmifzyptggbohq4lv8ht4ejdn14k0balf4aas72:latest/Account Balance.table.json",
+    "_type": "table-file",
+    "artifact_path": "wandb-client-artifact://r8gngp86ze94cq9mirqyjqp84iag7t0xjg4nmazuo4wrpbcjn10w40h7ebxvxw2okhymdtwrvfhymbl4x0fg0mphm5zfj86ot7syi8fqsu86ulxyx45yja0j9q1vj26a/Account Balance.table.json",
+    "log_mode": "IMMUTABLE",
+    "ncols": 3,
+    "nrows": 20002,
+    "path": "media/table/Account Balance_65_7fd38f8a0ab0b8cc4da8.table.json",
+    "sha256": "7fd38f8a0ab0b8cc4da876cd68300e9e3b0c64e438be7175b2bd2e9289b8e86d",
+    "size": 494995
+  },
+  "Activity Heatmap": {
+    "_type": "image-file",
+    "format": "png",
+    "height": 600,
+    "path": "media/images/Activity Heatmap_62_20ce355bdce9f1982995.png",
+    "sha256": "20ce355bdce9f198299529866e73a15ea1dafee039fbd5d0816bcae66c72c36d",
+    "size": 33663,
+    "width": 1400
+  },
+  "Correlation Matrix": {
+    "_type": "image-file",
+    "format": "png",
+    "height": 800,
+    "path": "media/images/Correlation Matrix_61_7bf389aef0be8f84bb6b.png",
+    "sha256": "7bf389aef0be8f84bb6b33995c87890793f154c41f45cae350939da0862e6faf",
+    "size": 25765,
+    "width": 1000
+  },
+  "Ensemble_Sharpe": 0.09130308669118602,
+  "Ensemble_Sortino": 0.021512150965084433,
+  "Ensemble_Total_Return": 8.640624999989299e-05,
+  "Equity Curve": {
+    "_type": "image-file",
+    "format": "png",
+    "height": 600,
+    "path": "media/images/Equity Curve_60_489680e771d5c76a2216.png",
+    "sha256": "489680e771d5c76a221638f5c2a44a987661d113aed0dee222213150bd81a510",
+    "size": 46522,
+    "width": 1200
+  },
+  "Final_Balance_USDT": 100008.640625,
+  "Initial_Balance_USDT": 100000,
+  "Leaderboard": {
+    "_latest_artifact_path": "wandb-client-artifact://ru4waz6kyg7txry3c3vwjt5iaz32rs4j5an0q3x940d95aw917nzj4aradlv3w2yai4ybfa15rvlwp06lxispi6zuf3gyh0ef4djzvfdom1n244rdu68mnzgj8ahrtl9:latest/Leaderboard.table.json",
+    "_type": "table-file",
+    "artifact_path": "wandb-client-artifact://8sziib1rl03tlppzansy4lm75wwu1skj145l2sdtrrhutj27qcknabxpde1ptyhk3s4mp9g27g1u6f5eanh46a9qng8ooioxyzfbt7gdi8uopkj59qanwx53zthima2e/Leaderboard.table.json",
+    "log_mode": "IMMUTABLE",
+    "ncols": 13,
+    "nrows": 1,
+    "path": "media/table/Leaderboard_59_2a296254fdf66632e1b7.table.json",
+    "sha256": "2a296254fdf66632e1b756f532c2f116d638037ac8d0edba62f7d741bbb89821",
+    "size": 447
+  },
+  "Trade Log": {
+    "_latest_artifact_path": "wandb-client-artifact://ux1nowll2yh68txwyg02ohwi15q5x6nndnbmsa1u5vwysd8iwavwc2zxmj81flfqxq6oe213ov90s9k13ub0vxozrb7co7zt0h3im28ksvcjj3z0ijekmg1z25yk37gu:latest/Trade Log.table.json",
+    "_type": "table-file",
+    "artifact_path": "wandb-client-artifact://rlero0g4n0ahwks6yu9mrd9tr844ino518z5bbfsrsw1e655c31ii13ci4e4fhjb6taqvbjqkdn1647fxk4dzwqcrl4q67afecu28nznao6b35nulygfw1703ty6dn9z/Trade Log.table.json",
+    "log_mode": "IMMUTABLE",
+    "ncols": 8,
+    "nrows": 4,
+    "path": "media/table/Trade Log_64_0f8e41aa7fac702dda28.table.json",
+    "sha256": "0f8e41aa7fac702dda28f95691b59329a082581201c8b8ac970ca1034c662c07",
+    "size": 383
+  },
+  "Underwater Plot": {
+    "_type": "image-file",
+    "format": "png",
+    "height": 400,
+    "path": "media/images/Underwater Plot_63_c2c7c8da0906970540ed.png",
+    "sha256": "c2c7c8da0906970540ed6439fbbe156a219c624bfc40da418e4177b586b04d90",
+    "size": 31155,
+    "width": 1200
+  },
+  "_runtime": 2020,
+  "_step": 65,
+  "_timestamp": 1769944559.2109203,
+  "_wandb": {
+    "runtime": 2020
+  },
+  "action/dir_buy": 0.33,
+  "action/dir_hold": 0.397,
+  "action/dir_sell": 0.273,
+  "best_params": {
+    "entropy_coef": 0.021240605109221152,
+    "gamma": 0.99,
+    "hidden_size": 64,
+    "learning_rate": 2.6591415606823906e-05,
+    "profit_weight": 1.651582501584171,
+    "volatility_penalty_weight": 3.126576830576749
+  },
+  "best_sharpe": 0,
+  "best_trial": 0,
+  "best_trial/number": 0,
+  "best_trial/params": {
+    "entropy_coef": 0.021240605109221152,
+    "gamma": 0.99,
+    "hidden_size": 64,
+    "learning_rate": 2.6591415606823906e-05,
+    "profit_weight": 1.651582501584171,
+    "volatility_penalty_weight": 3.126576830576749
+  },
+  "best_trial/sharpe": 0,
+  "current_fold": 1,
+  "current_trial": 0,
+  "env/inventory_abs_mean": 0,
+  "env/volatility_target_mean": 4.471854599387371e-06,
+  "train/a2c/entropy": 4.257878422737122,
+  "train/a2c/loss": -0.06348047126084566,
+  "train/a2c/policy_loss": -0.09016432426869868,
+  "train/a2c/value_loss": 0.02668385300785303,
+  "train/dqn/epsilon": 0.01,
+  "train/dqn/loss_aux": 5.09032519403263e-07,
+  "train/dqn/loss_dir": 7.635471393427906e-06,
+  "train/dqn/loss_price": 7.567186323001352e-06,
+  "train/dqn/loss_total": 2.2834879242054735e-05,
+  "train/dqn/loss_vol": 7.581318277402716e-06,
+  "train/dqn/q_dir_mean": 0.6531424601078033,
+  "train/dqn/q_price_mean": 0.6531498041152954,
+  "train/dqn/q_vol_mean": 0.6531465547084808,
+  "train/episode_length": 45506,
+  "train/episode_reward": -2.0002523437499575,
+  "train/gating/loss": -6.8102963268756875e-09,
+  "train/gating/w_a2c": 0,
+  "train/gating/w_dqn": 0,
+  "train/gating/w_ppo": 1,
+  "train/global_step": 50000,
+  "train/ppo/entropy": 4.282488703727722,
+  "train/ppo/loss": -0.04789264631108381,
+  "train/step_reward_mean": -2.0002523437499575,
+  "trial/number": 0,
+  "trial/status": "started",
+  "trial_0/final_sharpe": 0,
+  "trial_0/fold_1/return": 0,
+  "trial_0/fold_1/sharpe": 0,
+  "trial_0/status": "completed"
+}
+
+=== Available Artifacts & Media ===
+Total Files: 16
+Media Files:
+  - media/images/Activity Heatmap_62_20ce355bdce9f1982995.png
+  - media/images/Correlation Matrix_61_7bf389aef0be8f84bb6b.png
+  - media/images/Equity Curve_60_489680e771d5c76a2216.png
+  - media/images/Underwater Plot_63_c2c7c8da0906970540ed.png
+  - media/table/Account Balance_65_7fd38f8a0ab0b8cc4da8.table.json
+  - media/table/Leaderboard_59_2a296254fdf66632e1b7.table.json
+  - media/table/Trade Log_64_0f8e41aa7fac702dda28.table.json
+Other Files:
+  - artifact/2421376797/wandb_manifest.json
+  - artifact/2421376887/wandb_manifest.json
+  - artifact/2421376934/wandb_manifest.json
+  - artifact/2421399200/wandb_manifest.json
+  - config.yaml
+  - output.log
+  - requirements.txt
+  - wandb-metadata.json
+  - wandb-summary.json
+
+=== Output Log Analysis ===
+Downloading output.log...
+Log Length: 185 lines
+
+--- Key Warnings/Errors ---
+Line 6: WARNING:HPO:No folds generated! Check dates. Fallback to static fold.
+Line 40: WARNING: Evaluation finished with 0 completed episodes.
+Line 160: WARNING:root:Hit Max Drawdown Stop (20%). Terminating Episode.
+
+--- Log Sample (Middle 10 lines) ---
+INFO:finrl_pro_ds.mlops:{"message": "deepscalper.training.step_start", "step": 15000}
+INFO:finrl_pro_ds.mlops:{"dqn_loss": 9.193950972985476e-06, "message": "deepscalper.training.batch", "reward_mean": 0.0, "step": 16000}
+INFO:finrl_pro_ds.mlops:{"message": "deepscalper.training.step_start", "step": 16000}
+INFO:finrl_pro_ds.mlops:{"dqn_loss": 8.978333426057361e-06, "message": "deepscalper.training.batch", "reward_mean": 0.0, "step": 17000}
+INFO:finrl_pro_ds.mlops:{"message": "deepscalper.training.step_start", "step": 17000}
+INFO:finrl_pro_ds.mlops:{"dqn_loss": 6.941284482309129e-06, "message": "deepscalper.training.batch", "reward_mean": 0.0, "step": 18000}
+INFO:finrl_pro_ds.mlops:{"message": "deepscalper.training.step_start", "step": 18000}
+INFO:finrl_pro_ds.mlops:{"dqn_loss": 5.7236861721321475e-06, "message": "deepscalper.training.batch", "reward_mean": 0.0, "step": 19000}
+INFO:finrl_pro_ds.mlops:{"message": "deepscalper.training.step_start", "step": 19000}
+INFO:finrl_pro_ds.mlops:{"dqn_loss": 5.625975973089226e-06, "message": "deepscalper.training.batch", "reward_mean": 0.0, "step": 20000}

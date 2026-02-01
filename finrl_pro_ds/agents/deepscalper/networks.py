@@ -128,7 +128,8 @@ class DeepScalperNetwork(nn.Module):
         micro_config: Dict,
         macro_config: Dict,
         fusion_dim: int = 256,
-        action_space_dims: Tuple[int, int, int] = (3, 5, 5) # (Dir, Price, Vol)
+        action_space_dims: Tuple[int, int, int] = (3, 5, 5), # (Dir, Price, Vol)
+        **kwargs
     ):
         super().__init__()
         

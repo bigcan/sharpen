@@ -81,7 +81,7 @@ MANDATORY for all new experimental features or codebase refactors:
 
 ### Tier 2: Pilot Run (Logic Verification)
 - **Goal**: Verify end-to-end pipeline logic, phase transitions (Specialist -> Gating -> Joint), checkpointing, and memory stability.
-- **Config**: `deepscalper_smoke_test.yaml` (100k steps, 3 phases).
+- **Config**: `deepscalper_pilot_test.yaml` (100k steps, 3 phases).
 - **Duration**: ~15-20 minutes.
 - **Outcome**: REQUIRED pass before full production run.
 

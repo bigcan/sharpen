@@ -128,7 +128,7 @@ def run_visualization(ensemble, config, device, data_file=None):
         with torch.no_grad():
             # Ensemble.predict returns (actions, weights_dict)
             # actions is (B, 3). weights_dict contains arrays.
-            actions_batch, weights_dict = ensemble.predict(micro, private, macro)
+            actions_batch, weights_dict = ensemble.predict(micro, private, macro, deterministic=True)
             action = actions_batch[0]
             
             # Use weights from predict return if available, else use manual extraction

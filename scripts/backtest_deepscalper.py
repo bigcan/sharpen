@@ -77,6 +77,9 @@ def main():
     agent_net_config = net_config.copy()
     if "ensemble_config" in agent_net_config:
         del agent_net_config["ensemble_config"]
+    # FIX: Remove top-level 'hidden_size' which causes TypeError in PolicyNetwork
+    if "hidden_size" in agent_net_config:
+        del agent_net_config["hidden_size"]
     
     agents_config = config.get("agents", {})
     dqn_config = agents_config.get("dqn", {})
@@ -117,7 +120,12 @@ def main():
         network_config=agent_net_config,
         device=device
     )
-    gating = DeepScalperGatingNetwork(input_dim=net_config["macro_config"]["input_size"])
+    
+    # Fix: Extract micro_shape from env for correct gating init
+    micro_shape = env.observation_space["micro"].shape
+    # FIX: Use .get() for input_size with default 11 (standard macro size)
+    gating_input_dim = net_config["macro_config"].get("input_size", net_config.get("macro_input_size", 11))
+    gating = DeepScalperGatingNetwork(input_dim=gating_input_dim, micro_shape=micro_shape)
     ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
 
     # 3. Load Checkpoint
@@ -207,7 +215,7 @@ def main():
     try:
         while not done:
             with torch.no_grad():
-                action_vector, weights_dict = ensemble.predict(micro, private, macro)
+                action_vector, weights_dict = ensemble.predict(micro, private, macro, deterministic=True)
                 # Unwrap batch dim (1, 3) -> (3,)
                 action_vector = action_vector[0]
                 
@@ -234,6 +242,12 @@ def main():
             # Capture Price for VBT
             mid_p = (env.current_best_bid + env.current_best_ask) / 2.0
             if mid_p == 0: mid_p = env.avg_price # Fallback
+            
+            # DEBUG: Diagnose 0-price issue
+            if mid_p == 0 and step < 5:
+                print(f"DEBUG [Step {step}]: Mid Price is 0.0! Bid={env.current_best_bid}, Ask={env.current_best_ask}")
+                print(f"DEBUG: LOB Frame head: {env.micro_window[-1][:4]}")
+                
             prices.append(mid_p)
             
             step += 1
@@ -384,7 +398,10 @@ def main():
             'price': prices,
             'weight_dqn': weights_dqn,
             'weight_ppo': weights_ppo,
-            'weight_a2c': weights_a2c
+            'weight_dqn': weights_dqn,
+            'weight_ppo': weights_ppo,
+            'weight_a2c': weights_a2c,
+            'ticker': [ticker] * len(portfolio_values) # Add Ticker for WandB Evaluator
         })
         
         # Agents? We only have Ensemble output here.

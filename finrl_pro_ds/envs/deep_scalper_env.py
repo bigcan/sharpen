@@ -81,7 +81,10 @@ class DeepScalperEnv(gym.Env):
         self.action_space = gym.spaces.MultiDiscrete([3, 5, 5])
         
         # Price offset mapping (ticks from best)
-        self.price_offsets = [0, 1, 2, 3, 4]  # Ticks from best bid/ask
+        # [-1] = Crossing spread (Aggressive/Marketable)
+        # [0]  = At Touch (Best Bid/Ask)
+        # [1+] = Passive
+        self.price_offsets = [-1, 0, 1, 2, 3]  # Ticks from best bid/ask
         # Volume proportions (of max position size)
         self.vol_proportions = [0.1, 0.25, 0.5, 0.75, 1.0]
         self.max_position = config.get("max_position", 1.0)  # Max BTC

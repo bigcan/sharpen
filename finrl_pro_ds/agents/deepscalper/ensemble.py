@@ -30,7 +30,7 @@ class DeepScalperEnsemble:
         self.gating = gating_net.to(device)
         self.device = torch.device(device)
         
-    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor) -> np.ndarray:
+    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
         """
         Ensemble Prediction.
         1. Get weights from Gating Network (based on Macro).
@@ -81,11 +81,17 @@ class DeepScalperEnsemble:
         final_price = w_dqn * p_dqn_price + w_ppo * p_ppo_price + w_a2c * p_a2c_price
         final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
         
-        # 4. Sample Action
-        # Categorical sample returns (B,) or ()
-        a_dir = Categorical(probs=final_dir).sample()
-        a_price = Categorical(probs=final_price).sample()
-        a_vol = Categorical(probs=final_vol).sample()
+        # 4. Select Action
+        if deterministic:
+             a_dir = torch.argmax(final_dir, dim=1)
+             a_price = torch.argmax(final_price, dim=1)
+             a_vol = torch.argmax(final_vol, dim=1)
+        else:
+             # Sample Action
+             # Categorical sample returns (B,) or ()
+             a_dir = Categorical(probs=final_dir).sample()
+             a_price = Categorical(probs=final_price).sample()
+             a_vol = Categorical(probs=final_vol).sample()
         
         # Stack to (B, 3) or (3,)
         actions = torch.stack([a_dir, a_price, a_vol], dim=-1).cpu().numpy()
