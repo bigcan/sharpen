@@ -132,6 +132,7 @@ def main():
     parser.add_argument("--load_checkpoint", type=str, default=None, help="Path to checkpoint to resume/start from")
     parser.add_argument("--strict_checkpoint", action="store_true", help="Fail if checkpoint load has any errors")
     parser.add_argument("--load_optimizers", action="store_true", help="Also load optimizer states from checkpoint (for mid-phase resume)")
+    parser.add_argument("--tags", type=str, default=None, help="Comma-separated WandB tags")
     args = parser.parse_args()
 
     # Load Config
@@ -151,6 +152,14 @@ def main():
     if args.run_name:
         if "wandb" not in config: config["wandb"] = {}
         config["wandb"]["name"] = args.run_name
+
+    # Override Tags if provided
+    if args.tags:
+        if "wandb" not in config: config["wandb"] = {}
+        new_tags = [t.strip() for t in args.tags.split(",") if t.strip()]
+        # Merge with existing tags
+        current_tags = config["wandb"].get("tags", [])
+        config["wandb"]["tags"] = list(set(current_tags + new_tags))
     
     # Setup WandB
     run_name = setup_wandb(config, run_id=args.run_id)
@@ -398,6 +407,11 @@ def main():
             data_loader.close_shared_memory(unlink=True)
 
 if __name__ == "__main__":
+    import multiprocessing as mp
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
     import gymnasium as gym # Lazy import for vector envs
     main()
 

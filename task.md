@@ -30,24 +30,26 @@
 
 ### Audit & Verification (Feb 1, 2026)
 ### Audit & Verification (Feb 1, 2026)
-- [x] **DeepScalper Pipeline Audit**
-    - [x] Audit "Doom Loop" Fix (`deepscalper_trainer.py`)
-    - [x] Audit "Zombie Process" Fix (`deploy_bare_metal.py`)
-    - [x] Audit WandB Logging Fixes (`deepscalper_trainer.py`)
-    - [x] Audit Hardware Optimization (TF32/FP16)
-    - [x] Audit Ensemble Gating Weight Logging
-    - [x] Audit Architecture Verification
-- [x] **DeepScalper Audit Fixes Implementation**
-    - [x] **Trainer Robustness**: Fix `evaluate()` edge cases (0 episodes) & `np.mean` warnings.
-    - [x] **Ensemble Stability**: Add NaN guards to `predict()` and Gating Network.
-    - [x] **Backtest Precision**: Fix timestamp collection in `backtest_deepscalper.py`.
-    - [x] **Verification**: Pass `tests/test_trainer_robustness.py`.
+- [ ] **Phase 3: DeepScalper Production Deployment & Audit**
+    - [/] **Smoke Test Verification (Production Data)** `[Active]`
+        - [x] Create `deepscalper_smoke_test.yaml` (Fast HPO/Training)
+        - [x] Implement "Joint Fine-tuning" Logic (Phase 3)
+        - [x] Deploy to GPUHub with Demo Data (Sanity Check)
+        - [x] Resolve Deployment Bugs (Import Errors, Path Issues)
+        - [/] Run Smoke Test with **Production Data** (Jan 2023) `[Running]`
+        - [x] Fix HPO "Dirty State" (Clean `hpo.db` wipe)
+        - [x] Implement WandB Tags for clean naming `[Completed]`
+    - [ ] **Expert Audit Implementation**
+        - [x] Configure Two-Phase Training (Specialists -> Gating)
+        - [x] Implement "Evaluation Survival Check" (Doom Loop Fix) `[Completed]`
+        - [x] Verify Shared Memory "Spawn" Context `[Completed]`
+    - [ ] **Production Run (Full Scale)**
+        - [ ] Deploy `deepscalper_production_fix.yaml`
+        - [ ] Monitor Max Drawdown & Stability
 
 ### RTX 5090 Optimization (Feb 1, 2026)
 - [x] **Precision Upgrade**: Enforce TF32 and FP16 (Mixed Precision) in `DeepScalperTrainer`.
-- [x] **Throughput Scaling**: Increase batch sizes to 16,384 in `deepscalper_unified.yaml`.
-### Expert Audit Implementation (Feb 1, 2026)
-- [x] **Replay Ratio Fix**: Updated `dqn_update_interval` to 2048 in `deepscalper_unified.yaml`.
-- [x] **Architecture Upgrade**: Added `MicroEncoder` to Gating Network (`gating.py`).
-- [x] **Pipeline Phase 3**: Implemented Joint Fine-tuning in `run_full_pipeline.py`.
-- [x] **Config Creation**: Created smoke test and production optimization configs.
+    - [x] Fix Replay Ratio (`dqn_update_interval: 2048.0`) <!-- id: 11 -->
+    - [x] Implement Micro-Gating (LOB Encoder) <!-- id: 12 -->
+    - [/] Verify with Smoke Test (Production Data, Joint Phase) <!-- id: 13 -->
+    - [ ] Deploy Production Config (Phase 3 Enabled) <!-- id: 14 -->

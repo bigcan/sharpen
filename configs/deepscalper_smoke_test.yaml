@@ -1,3 +1,10 @@
+data:
+  file_path: "data/btc_lob_jan2023.parquet" # Optimized for speed/memory
+  start_date: "2023-01-01"
+  end_date: "2023-01-31"   # 1 month for full context
+  split: [0.8, 0.1, 0.1]
+  tech_indicator_list: [] # We use custom feature engineer
+
 env:
   num_envs: 8                # Moderate parallelism
   window_size: 20            # Reduced context for speed
@@ -30,7 +37,7 @@ training:
   
   torch_compile: false       # Skip compilation overhead for short run
   use_amp: true
-  use_shm: true
+  use_shm: false
 
 agents:
   dqn:
@@ -43,6 +50,6 @@ agents:
     entropy_coef: 0.01
 
 phases:
-  phase1_specialists: 50000
-  phase2_gating: 50000
-  phase3_joint: 0 # Skip for smoke test or keep small if validation needed
+  phase1_specialists: 30000
+  phase2_gating: 30000
+  phase3_joint: 40000 # Enabled for Phase 3 Verification
