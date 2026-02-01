@@ -1113,6 +1113,14 @@ class DeepScalperTrainer:
                 
                 total_rewards.append(ep_reward)
                 
+        if not total_rewards:
+            print("WARNING: Evaluation produced NO episodes. Returning zero metrics.")
+            return {
+                "avg_reward": 0.0,
+                "std_reward": 0.0,
+                "sharpe": 0.0
+            }
+
         avg_reward = np.mean(total_rewards)
         std_reward = np.std(total_rewards)
         

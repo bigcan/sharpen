@@ -15,7 +15,8 @@ load_dotenv()
 PROJECT_ROOT = Path(os.getcwd())
 DEPLOY_EXCLUDES = [
     'mlruns', 'logs', 'wandb', 'results', 'checkpoints', '.git', '.venv', 'venv', '__pycache__', 
-    'market_data.parquet', 'btc_lob_jan2023.parquet', 'finrl_pro_ds.egg-info' # Exclude massive data & stale metadata
+    'market_data.parquet', 'btc_lob_jan2023.parquet', 'finrl_pro_ds.egg-info', # Exclude massive data & stale metadata
+    'hpo.db', 'hpo.db-journal' # Exclude local HPO state to prevent overwriting remote clean start
 ]
 ROOT_DATA_EXCLUDE = ['data'] # Only exclude root data folder
 
@@ -39,6 +40,7 @@ def create_filtered_zip(source_dir, output_filename):
                 
             for file in files:
                 if file.endswith((".pyc", ".pyo", ".zip", ".ds_store")): continue
+                if file in DEPLOY_EXCLUDES or file.startswith("hpo.db"): continue # Exclude specific files like hpo.db*
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, source_dir)
                 zipf.write(file_path, arcname)
@@ -118,7 +120,26 @@ def deploy(args):
     sftp.put(zip_name, f"{remote_workspace}/{zip_name}")
     sftp.close()
     
-    # 4. Extract & Setup
+    # 4. Clean up old processes FIRST (Avoid file locks on hpo.db)
+    print("Killing old instances (Orchestrator & Workers)...")
+    targets = [
+        script_path,                # The script we are about to launch
+        "train_deepscalper.py",     # The specialized trainer
+        "tune_deepscalper.py",      # The HPO tuner
+        "backtest_deepscalper.py",  # The backtester
+        "wandb-service"             # Optional: Cleanup wandb internal process if stuck
+    ]
+    unique_targets = list(set(targets))
+    kill_cmd_parts = [f"pkill -f {t}" for t in unique_targets]
+    full_kill_cmd = " || true; ".join(kill_cmd_parts) + " || true"
+    
+    try:
+        ssh.exec_command(full_kill_cmd)
+        time.sleep(3) # Allow cleanup
+    except:
+        pass
+
+    # 5. Extract & Setup
     print("Extracting and Setting up...")
     
     # Prepend Miniconda to PATH for all commands
@@ -130,7 +151,7 @@ def deploy(args):
         # CRITICAL: Increase file descriptor limit for high-concurrency AsyncVectorEnv
         "ulimit -n 65536",
         # Fresh HPO Logic
-        f"{'rm -f hpo.db hpo.db-journal && echo STEP: WIPE HPO DB' if args.fresh_hpo else 'echo STEP: RETAIN HPO DB'}", 
+        f"{'rm -f hpo.db* && echo STEP: WIPE HPO DB' if args.fresh_hpo else 'echo STEP: RETAIN HPO DB'}", 
         "echo 'STEP: UNINSTALL'",
         # CRITICAL: Clean everything to avoid stale deps
         "/root/miniconda3/bin/pip uninstall finrl-pro-ds -y || true",
@@ -163,44 +184,6 @@ def deploy(args):
         sys.exit(1)
     else:
         print("Setup completed successfully.")
-    
-    # 4.5 Clean up old processes (Independent Step to avoid suicide)
-    print("Killing old instances...")
-    # Use pgrep to ensure we don't kill ourself? 
-    # Actually, running it as separate exec_command means THIS command line contains the pattern?
-    # Yes. "pkill -f script" via SSH.
-    # But if we just fire and forget or ignore exit code?
-    # Or better: exclude 'deploy_bare_metal'? No, remote logic doesn't know.
-    # We can rely on pkill NOT killing the shell executing pkill?
-    # The shell executing pkill is `bash -c 'pkill ...'`.
-    # It might kill itself.
-    # To avoid this, we can exclude the current SSH session somehow?
-    # Or just ignore the error if it happens, as long as setup finished.
-    # BUT we want to ensure setup is CONFIRMED. Setup IS confirmed now.
-    # So if pkill kills this session, we assume success.
-    
-    # 4.5 Clean up old processes (Independent Step to avoid suicide)
-    print("Killing old instances (Orchestrator & Workers)...")
-    
-    # Aggressively kill all DeepScalper related scripts to prevent zombies
-    # The orchestrator might be run_full_pipeline, but it spawns train/tune/backtest
-    targets = [
-        script_path,                # The script we are about to launch
-        "train_deepscalper.py",     # The specialized trainer
-        "tune_deepscalper.py",      # The HPO tuner
-        "backtest_deepscalper.py",  # The backtester
-        "wandb-service"             # Optional: Cleanup wandb internal process if stuck
-    ]
-    # Unique and formatted for pkill
-    unique_targets = list(set(targets))
-    kill_cmd_parts = [f"pkill -f {t}" for t in unique_targets]
-    full_kill_cmd = " || true; ".join(kill_cmd_parts) + " || true"
-    
-    try:
-        ssh.exec_command(full_kill_cmd)
-        time.sleep(3) # Allow cleanup
-    except:
-        pass
 
     # 5. Launch
     print(f"Launching {script_path}..." + (f" as {full_run_name}" if full_run_name else " (script will auto-generate name)"))

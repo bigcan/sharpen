@@ -564,6 +564,11 @@ def run_best_model_report(best_params, base_config, args):
 
 
 if __name__ == "__main__":
+    import multiprocessing as mp
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, default="configs/deepscalper_unified.yaml", help="Master Config")
     parser.add_argument("--trials", type=int, default=50)
@@ -576,6 +581,7 @@ if __name__ == "__main__":
     parser.add_argument("--run_id", type=str, default=None, help="WandB Run ID for resuming/unifying runs")
     parser.add_argument("--strategy", type=str, default="joint", choices=["joint", "independent"], help="HPO Strategy")
     parser.add_argument("--data_file", type=str, default=None, help="Override data file path")
+    parser.add_argument("--tags", type=str, default=None, help="Comma-separated WandB tags")
     args = parser.parse_args()
     
     base_config = ConfigLoader.load_yaml(args.config)
@@ -641,10 +647,20 @@ if __name__ == "__main__":
         sys.exit(1)
         
     try:
+        if not args.resume:
+            logger.info(f"Fresh Start Requested. Checking for existing study: {args.study_name}...")
+            try:
+                # Try to delete the study to ensure a clean slate
+                optuna.delete_study(study_name=args.study_name, storage=args.storage)
+                logger.info(f"Deleted existing study: {args.study_name}")
+            except Exception:
+                # Study might not exist, which is fine
+                pass
+
         study = optuna.create_study(
             study_name=args.study_name,
             storage=args.storage,
-            load_if_exists=True,
+            load_if_exists=True, # We just deleted it if resume=False, so this is safe
             direction="maximize"
         )
         
@@ -661,6 +677,12 @@ if __name__ == "__main__":
         args.run_name = hpo_run_name
         
         wandb_config = dataclasses.asdict(base_config).get("wandb", {})
+        
+        # Parse CLI tags
+        cli_tags = [t.strip() for t in args.tags.split(",")] if args.tags else []
+        config_tags = wandb_config.get("tags", [])
+        final_tags = list(set(config_tags + cli_tags))
+        
         wandb.init(
             id=args.run_id, # UNIFIED PIPELINE RUN
             resume="allow", # Allow appending to existing run
@@ -668,6 +690,7 @@ if __name__ == "__main__":
             entity=wandb_config.get("entity"),
             mode=wandb_config.get("mode", "online"),
             name=hpo_run_name,
+            tags=final_tags,
             config={
                 "study_name": args.study_name,
                 "n_trials": args.trials,

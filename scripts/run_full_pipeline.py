@@ -110,6 +110,8 @@ def main():
     parser.add_argument("--run_id", type=str, default=None, help="Manual WandB Run ID")
     parser.add_argument("--steps", type=int, default=5000, help="HPO/Train Steps")
     parser.add_argument("--resume-from", type=str, choices=["hpo", "train", "backtest", "report"], default="hpo")
+    parser.add_argument("--resume", action="store_true", help="Resume HPO study if exists")
+    parser.add_argument("--tags", type=str, default=None, help="Comma-separated WandB tags")
     
     args, unknown = parser.parse_known_args()
     
@@ -140,7 +142,10 @@ def main():
         print(f"Trials: {args.trials}, Steps: {args.steps}")
         
         # Pass run_id and SAME run_name
+        # Pass run_id and SAME run_name
         hpo_cmd = f"python scripts/tune_deepscalper.py --config {args.config} --trials {args.trials} --steps {args.steps} --run_name {args.run_name} --run_id {args.run_id}"
+        if args.resume: hpo_cmd += " --resume"
+        if args.tags: hpo_cmd += f" --tags {args.tags}"
         if args.debug:
             hpo_cmd += " --debug"
             
@@ -175,7 +180,9 @@ def main():
         print("\n=== PHASE 2: TRAINING (SPECIALISTS) ===")
         # 1. Specialists Phase
         # Pass run_id and SAME run_name
+        # Pass run_id and SAME run_name
         train_cmd_spec = f"python scripts/train_deepscalper.py --config {active_config} --run_name {args.run_name} --run_id {args.run_id} --phase specialists"
+        if args.tags: train_cmd_spec += f" --tags {args.tags}"
         if args.debug:
             train_cmd_spec += " --debug"
         run_command(train_cmd_spec)
@@ -205,7 +212,9 @@ def main():
         # 2. Gating Phase
         # Resume from the specialist checkpoint
         # Note: We use the SAME run_name and run_id
+        # Note: We use the SAME run_name and run_id
         train_cmd_gate = f"python scripts/train_deepscalper.py --config {active_config} --run_name {args.run_name} --run_id {args.run_id} --phase gating --load_checkpoint {latest_checkpoint}"
+        if args.tags: train_cmd_gate += f" --tags {args.tags}"
         if args.debug:
             train_cmd_gate += " --debug"
         run_command(train_cmd_gate)
@@ -225,7 +234,9 @@ def main():
         print("\n=== PHASE 2.8: TRAINING (JOINT FINE-TUNING) ===")
         # 3. Joint Phase (Phase 3)
         # Train EVERYTHING together
+        # Train EVERYTHING together
         train_cmd_joint = f"python scripts/train_deepscalper.py --config {active_config} --run_name {args.run_name} --run_id {args.run_id} --phase full --load_checkpoint {latest_checkpoint_gating}"
+        if args.tags: train_cmd_joint += f" --tags {args.tags}"
         if args.debug:
             train_cmd_joint += " --debug"
         run_command(train_cmd_joint)
