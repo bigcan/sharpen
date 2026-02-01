@@ -790,17 +790,17 @@ class DeepScalperTrainer:
                      }
                      # Aggregate DQN
                      for k, v in dqn_metrics_accum.items():
-                         log_dict[f"train/dqn/{k}"] = np.mean(v)
+                         if v: log_dict[f"train/dqn/{k}"] = np.mean(v)
                      dqn_metrics_accum.clear()
                      
                      # Aggregate PPO
                      for k, v in ppo_metrics_accum.items():
-                         log_dict[f"train/ppo/{k}"] = np.mean(v)
+                         if v: log_dict[f"train/ppo/{k}"] = np.mean(v)
                      ppo_metrics_accum.clear()
                      
                      # Aggregate A2C
                      for k, v in a2c_metrics_accum.items():
-                         log_dict[f"train/a2c/{k}"] = np.mean(v)
+                         if v: log_dict[f"train/a2c/{k}"] = np.mean(v)
                      a2c_metrics_accum.clear()
 
                      # Aggregate Gating
@@ -812,7 +812,7 @@ class DeepScalperTrainer:
                                  log_dict["train/gating/weight_ppo"] = avg_weights[1]
                                  log_dict["train/gating/weight_a2c"] = avg_weights[2]
                          else:
-                             log_dict[f"train/gating/{k}"] = np.mean(v)
+                             if v: log_dict[f"train/gating/{k}"] = np.mean(v)
                      gating_metrics_accum.clear()
                      
                      # Action Dist
@@ -960,6 +960,18 @@ class DeepScalperTrainer:
         Returns metrics dict (Sharpe, Total Reward, etc.)
         """
         print(f"Starting Evaluation on {num_episodes} episodes...")
+        
+        if num_episodes == 0:
+            print("WARNING: num_eval_episodes is 0. Returning zero metrics.")
+            return {
+                "avg_reward": 0.0,
+                "std_reward": 0.0,
+                "sharpe": 0.0,
+                 "max_drawdown": 0.0,
+                "win_rate": 0.0,
+                "total_return": 0.0
+            }
+
         total_rewards = []
         
         # Detect Vector Env

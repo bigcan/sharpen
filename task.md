@@ -28,6 +28,21 @@
 - [ ] **Hyperparameter Tuning:** Run Optuna optimization.
 - [ ] **Model Analysis:** Investigate flat PnL/0% Return issue (likely initial balance fallback or data limitation).
 
+### Audit & Verification (Feb 1, 2026)
+### Audit & Verification (Feb 1, 2026)
+- [x] **DeepScalper Pipeline Audit**
+    - [x] Audit "Doom Loop" Fix (`deepscalper_trainer.py`)
+    - [x] Audit "Zombie Process" Fix (`deploy_bare_metal.py`)
+    - [x] Audit WandB Logging Fixes (`deepscalper_trainer.py`)
+    - [x] Audit Hardware Optimization (TF32/FP16)
+    - [x] Audit Ensemble Gating Weight Logging
+    - [x] Audit Architecture Verification
+- [x] **DeepScalper Audit Fixes Implementation**
+    - [x] **Trainer Robustness**: Fix `evaluate()` edge cases (0 episodes) & `np.mean` warnings.
+    - [x] **Ensemble Stability**: Add NaN guards to `predict()` and Gating Network.
+    - [x] **Backtest Precision**: Fix timestamp collection in `backtest_deepscalper.py`.
+    - [x] **Verification**: Pass `tests/test_trainer_robustness.py`.
+
 ### RTX 5090 Optimization (Feb 1, 2026)
 - [x] **Precision Upgrade**: Enforce TF32 and FP16 (Mixed Precision) in `DeepScalperTrainer`.
 - [x] **Throughput Scaling**: Increase batch sizes to 16,384 in `deepscalper_unified.yaml`.

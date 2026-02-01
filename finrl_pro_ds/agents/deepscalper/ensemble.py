@@ -45,11 +45,24 @@ class DeepScalperEnsemble:
         macro = macro.to(self.device)
         
         # 1. Gating Weights
-        with torch.no_grad():
-            weights = self.gating(macro) # (1, 3) -> [w_dqn, w_ppo, w_a2c]
-            w_dqn = weights[:, 0].unsqueeze(1)
-            w_ppo = weights[:, 1].unsqueeze(1)
-            w_a2c = weights[:, 2].unsqueeze(1)
+        if torch.isnan(macro).any():
+             # Softmax Guard: Default to equal weights if NaN detected
+             # This prevents the Gating Network from propagating NaNs or crashing
+             # Shape of macro is (1, dim) or (B, dim). 
+             # We assume Equal Weights: 0.33, 0.33, 0.33
+             bs = macro.shape[0]
+             # (B, 3)
+             weights = torch.ones((bs, 3), device=self.device) / 3.0
+             
+             w_dqn = weights[:, 0].unsqueeze(1)
+             w_ppo = weights[:, 1].unsqueeze(1)
+             w_a2c = weights[:, 2].unsqueeze(1)
+        else:
+            with torch.no_grad():
+                weights = self.gating(macro) # (1, 3) -> [w_dqn, w_ppo, w_a2c]
+                w_dqn = weights[:, 0].unsqueeze(1)
+                w_ppo = weights[:, 1].unsqueeze(1)
+                w_a2c = weights[:, 2].unsqueeze(1)
             
         # 2. Get Probs
         # DQN needs Q->Prob conversion (handled safely by agent now)

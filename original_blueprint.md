@@ -19,7 +19,7 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 | **Evaluation** | Custom Backtester | **VectorBT** (Institutional Grade) | 🚀 **Upgraded** |
 | **Monitoring** | Static Plots | **WandB** (Real-time Tracking) | 🚀 **Upgraded** |
 | **Framework** | Plain PyTorch/Gym | **Gymnasium** + FinRL-Pro Ecosystem | 🚀 **Upgraded** |
-| **Asset Universe** | Chinese Stocks/Futures | **Bitcoin Perpetual Futures** (BTC-USDT) | 🔄 **Adapted** |
+| **Asset Universe** | N/A | **Bitcoin Perpetual Futures** (BTC-USDT) | � **Defined** |
 
 ## User Review Required
 > [!IMPORTANT]
