@@ -74,7 +74,7 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 -   **Operations**: Pipe hygiene script (`scripts/clean.py`).
 -   **Structure**:
     -   `finrl_pro_ds/agents/deepscalper/`: Core model logic.
-    -   `configs/deepscalper.yaml`: Centralized configuration.
+    -   `configs/deepscalper_unified.yaml`: Centralized configuration.
     -   `tests/deepscalper/`: dedicated test suite.
 
 ### 1. Data Engineering & Preprocessing
