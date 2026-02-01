@@ -59,7 +59,7 @@ class DeepScalperEnsemble:
              w_a2c = weights[:, 2].unsqueeze(1)
         else:
             with torch.no_grad():
-                weights = self.gating(macro) # (1, 3) -> [w_dqn, w_ppo, w_a2c]
+                weights = self.gating(macro, micro) # (1, 3) -> [w_dqn, w_ppo, w_a2c]
                 w_dqn = weights[:, 0].unsqueeze(1)
                 w_ppo = weights[:, 1].unsqueeze(1)
                 w_a2c = weights[:, 2].unsqueeze(1)

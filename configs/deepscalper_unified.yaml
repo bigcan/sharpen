@@ -77,7 +77,7 @@ training:
   batch_size: 16384          # Optimized (Blackwell 32GB VRAM)
   update_interval: 16384     # Matched to Batch Size
   learning_rate: 0.0001
-  dqn_update_interval: 8.0 # FIXED: Reduced from 0.5 to 8.0 to prevent Replay Ratio explosion (Ratio ~8)
+  dqn_update_interval: 2048.0 # FIXED: Replay Ratio Optimization (Target ~8)
   log_interval: 1000
   checkpoint_interval: 100000
   torch_compile: true   # Enabled for Speed

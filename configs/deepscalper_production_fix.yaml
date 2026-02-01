@@ -1,0 +1,48 @@
+env:
+  num_envs: 64               # Saturation of 24GB VRAM
+  window_size: 50            # Full context
+  initial_balance: 100000
+  transaction_fee: 0.0001
+  reward:
+    profit_weight: 1.0
+    volatility_penalty_weight: 0.5 
+
+network:
+  hidden_size: 512           # Large capacity
+  micro_config:
+    hidden_size: 256
+  macro_config:
+    hidden_sizes: [1024, 1024, 512] # Deep Regime Detection
+
+training:
+  total_timesteps: 50000000  # 50M Steps
+  batch_size: 16384          # Large batch for stable gradients (using TF32)
+  update_interval: 16384
+  log_interval: 1000
+  checkpoint_interval: 100000
+  
+  # Target Ratio: 8 (Industry Standard)
+  # Calculation: (16384 * 8) / 64 = 2048
+  dqn_update_interval: 2048.0 
+  
+  learning_rate: 0.00005     # Reduced LR for large batch stability
+  gamma: 0.99
+  
+  torch_compile: true        # Enable TorchDynamo
+  use_amp: true              # FP16 Mixed Precision
+  use_shm: true              # Zero-Copy Data Loading
+
+agents:
+  dqn:
+    dqn_batch_size: 16384
+    dqn_buffer_size: 2000000 # 2M transitions (~40GB System RAM required)
+    target_update_freq: 2000
+  ppo:
+    entropy_coef: 0.01
+  a2c:
+    entropy_coef: 0.01
+
+phases:
+  phase1_specialists: 15000000
+  phase2_gating: 15000000
+  phase3_joint: 20000000     # Extensive fine-tuning

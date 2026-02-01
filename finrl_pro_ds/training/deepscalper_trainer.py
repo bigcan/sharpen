@@ -374,7 +374,7 @@ class DeepScalperTrainer:
         """Update Gating Network using REINFORCE"""
         if not buffer: return
         
-        macro_s, weights, rewards, dones = zip(*buffer)
+        micro_s, macro_s, weights, rewards, dones = zip(*buffer)
         
         rewards = torch.tensor(rewards, dtype=torch.float32).to(self.device)
         # dones = torch.tensor(dones, dtype=torch.float32).to(self.device) # Unused in this simple reinforce logic
@@ -384,11 +384,12 @@ class DeepScalperTrainer:
         adv = (rewards - rewards.mean()) / (rewards.std() + 1e-8)
         
         macro_s = torch.stack(macro_s)
+        micro_s = torch.stack(micro_s)
         old_weights = torch.stack(weights).detach() 
         
         with autocast(enabled=self.use_amp, dtype=torch.float16):
             # Forward Pass
-            curr_weights = self.ensemble.gating(macro_s)
+            curr_weights = self.ensemble.gating(macro_s, micro_s)
             
             # Loss: Minimize - (NewWeights * OldWeights * Adv)
             # This intuitively pushes NewWeights towards OldWeights where Adv was high.
@@ -639,7 +640,7 @@ class DeepScalperTrainer:
                         # Only append to Gating buffer if active
                         if phase in ["full", "gating"]:
                             self.gating_buffer.append((
-                                macro[i], weights[i], reward[i], done
+                                micro[i], macro[i], weights[i], reward[i], done
                             ))
 
                         # Accumulate Context Metrics
@@ -705,7 +706,7 @@ class DeepScalperTrainer:
                         
                     if phase in ["full", "gating"]:
                         self.gating_buffer.append((
-                            macro.squeeze(0), weights.squeeze(0), reward, done
+                            micro.squeeze(0), macro.squeeze(0), weights.squeeze(0), reward, done
                         ))
                     
                     # Accumulate Context Metrics (Single Env)
