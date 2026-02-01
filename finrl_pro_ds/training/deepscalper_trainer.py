@@ -43,8 +43,13 @@ class DeepScalperTrainer:
         self.logger = logger or MLOpsLogger()
         self.device = torch.device(device)
         self.run_name = run_name
-        
-        # Training Hyperparameters
+
+        # OPTIMIZATION: Enforce TensorFloat-32 (TF32) for RTX 5090 (Blackwell)
+        # 10-bit mantissa (same as FP16) + 8-bit exponent (same as FP32)
+        if torch.cuda.is_available():
+            torch.set_float32_matmul_precision('high')
+            print("PRECISION: Enforced TensorFloat-32 (TF32) 'high' precision.")
+                # Training Hyperparameters
         self.batch_size = config.get("batch_size", 64)
         self.gamma = config.get("gamma", 0.99) # Default global gamma, but agents might have their own
         self.total_timesteps = config.get("total_timesteps", 100000)
@@ -249,7 +254,7 @@ class DeepScalperTrainer:
                 mb_advantages = advantages[idx]
                 mb_returns = returns[idx]
                 
-                with autocast(enabled=self.use_amp):
+                with autocast(enabled=self.use_amp, dtype=torch.float16):
                     logits_dir, logits_price, logits_vol, current_values = agent.network(mb_micro, mb_private, mb_macro)
                     
                     # Calculate current log probs (re-eval)
@@ -326,7 +331,7 @@ class DeepScalperTrainer:
         returns = advantages + values_t
         
         # Full Batch Update for A2C
-        with autocast(enabled=self.use_amp):
+        with autocast(enabled=self.use_amp, dtype=torch.float16):
             logits_dir, logits_price, logits_vol, current_values = agent.network(micro_s, private_s, macro_s)
             
             dist_dir = Categorical(logits=logits_dir)
@@ -381,7 +386,7 @@ class DeepScalperTrainer:
         macro_s = torch.stack(macro_s)
         old_weights = torch.stack(weights).detach() 
         
-        with autocast(enabled=self.use_amp):
+        with autocast(enabled=self.use_amp, dtype=torch.float16):
             # Forward Pass
             curr_weights = self.ensemble.gating(macro_s)
             
@@ -966,15 +971,25 @@ class DeepScalperTrainer:
         else:
              num_envs = 1
              
-        for _ in range(num_episodes // num_envs if is_vector else num_episodes):
+        # Prepare for evaluation loop
+        # We need to handle VectorEnv (auto-reset) and Single Env (manual reset) differently
+        
+        if is_vector:
+            # --- VECTOR ENV STRATEGY ---
+            finished_episodes = [0] * num_envs
+            current_ep_rewards = np.zeros(num_envs, dtype=np.float32)
+            
+            # Reset once at start
             obs, info = eval_env.reset()
             micro, private, macro = self._unpack_obs(obs)
             
-            done = False
-            ep_reward = 0.0
-            if is_vector: ep_reward = np.zeros(num_envs)
+            # Run untill we collect enough episodes
+            # Safety: Max steps to prevent infinite loop if something is really broken
+            max_steps = 100000 
+            step_count = 0
             
-            while not done:
+            # We want total_episodes >= num_episodes
+            while sum(finished_episodes) < num_episodes:
                 with torch.no_grad():
                     # Gating
                     weights = self.ensemble.gating(macro)
@@ -1000,51 +1015,89 @@ class DeepScalperTrainer:
                     final_price = w_dqn * p_dqn_price + w_ppo * p_ppo_price + w_a2c * p_a2c_price
                     final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
                     
-                    # Sample (Stochastic Evaluation matching Training)
-                    # Or Argmax? Using Sample for consistency with training distribution.
+                    # Sample
+                    from torch.distributions import Categorical
                     a_dir = Categorical(probs=final_dir).sample()
                     a_price = Categorical(probs=final_price).sample()
                     a_vol = Categorical(probs=final_vol).sample()
                     
                     action_vector = torch.stack([a_dir, a_price, a_vol], dim=1).cpu().numpy()
-                
+
                 # Step
-                if is_vector:
-                    next_obs, reward, terminated, truncated, info = eval_env.step(action_vector)
-                    dones = terminated | truncated
-                    micro, private, macro = self._unpack_obs(next_obs)
-                    ep_reward += reward
-                    
-                    if np.any(dones):
-                         # Vector env automatically resets done sub-envs.
-                         # We count 'finished' episodes. 
-                         # Simplified: Just run for fixed steps? No, we want episodes.
-                         # If any done, we record its reward.
-                         # This loop structure is rigid for VectorEnv episode counting.
-                         # Fallback: Just run loop until 'all done' if not auto-reset?
-                         # Gym VectorEnv auto-resets. 
-                         # Let's just track rewards and break?
-                         pass
-                    
-                    # For simplicity in evaluation, let's assume single env is preferred for accurate episode metrics
-                    # or handle vector properly.
-                    # Given time constraints, if vector, we just sum rewards?
-                    # Let's break if all done? (Only works if not auto-reset)
-                    
-                    if np.all(dones): # Unlikely to happen exactly same time
-                        done = True
+                next_obs, reward, terminated, truncated, info = eval_env.step(action_vector)
+                dones = terminated | truncated
+                
+                # Accumulate Rewards
+                current_ep_rewards += reward
+                
+                # Check completions
+                if np.any(dones):
+                    for i, d in enumerate(dones):
+                        if d:
+                            finished_episodes[i] += 1
+                            if sum(finished_episodes) <= num_episodes: # Only record needed episodes? Or all?
+                                # Let's record all valid completions
+                                total_rewards.append(current_ep_rewards[i])
+                            current_ep_rewards[i] = 0.0
+                
+                obs = next_obs
+                micro, private, macro = self._unpack_obs(obs)
+                step_count += 1
+                
+                if step_count > max_steps:
+                    print(f"WARNING: Evaluation timed out after {max_steps} steps.")
+                    break
+        else:
+            # --- SINGLE ENV STRATEGY (Legacy Logic) ---
+            for _ in range(num_episodes):
+                obs, info = eval_env.reset()
+                micro, private, macro = self._unpack_obs(obs)
+                
+                done = False
+                ep_reward = 0.0
+                
+                while not done:
+                    with torch.no_grad():
+                        # Gating
+                        weights = self.ensemble.gating(macro)
                         
-                else:
-                    action = action_vector[0]
+                        # Agent Probs
+                        p_dqn_dir, p_dqn_price, p_dqn_vol = self.ensemble.dqn.get_probs(micro, private, macro)
+                        logits_ppo_dir, logits_ppo_price, logits_ppo_vol, _ = self.ensemble.ppo.network(micro, private, macro)
+                        p_ppo_dir = torch.softmax(logits_ppo_dir, dim=1)
+                        p_ppo_price = torch.softmax(logits_ppo_price, dim=1)
+                        p_ppo_vol = torch.softmax(logits_ppo_vol, dim=1)
+                        
+                        logits_a2c_dir, logits_a2c_price, logits_a2c_vol, _ = self.ensemble.a2c.network(micro, private, macro)
+                        p_a2c_dir = torch.softmax(logits_a2c_dir, dim=1)
+                        p_a2c_price = torch.softmax(logits_a2c_price, dim=1)
+                        p_a2c_vol = torch.softmax(logits_a2c_vol, dim=1)
+                        
+                        # Ensemble (Weighted Average)
+                        w_dqn = weights[:, 0].unsqueeze(1)
+                        w_ppo = weights[:, 1].unsqueeze(1)
+                        w_a2c = weights[:, 2].unsqueeze(1)
+                        
+                        final_dir = w_dqn * p_dqn_dir + w_ppo * p_ppo_dir + w_a2c * p_a2c_dir
+                        final_price = w_dqn * p_dqn_price + w_ppo * p_ppo_price + w_a2c * p_a2c_price
+                        final_vol = w_dqn * p_dqn_vol + w_ppo * p_ppo_vol + w_a2c * p_a2c_vol
+                        
+                        # Sample
+                        from torch.distributions import Categorical
+                        a_dir = Categorical(probs=final_dir).sample()
+                        a_price = Categorical(probs=final_price).sample()
+                        a_vol = Categorical(probs=final_vol).sample()
+                        
+                        # Single Action
+                        action = np.array([a_dir.item(), a_price.item(), a_vol.item()])
+
                     next_obs, reward, terminated, truncated, info = eval_env.step(action)
                     micro, private, macro = self._unpack_obs(next_obs)
                     ep_reward += reward
+                    
                     if terminated or truncated:
                         done = True
-            
-            if is_vector:
-                total_rewards.extend(ep_reward)
-            else:
+                
                 total_rewards.append(ep_reward)
                 
         avg_reward = np.mean(total_rewards)

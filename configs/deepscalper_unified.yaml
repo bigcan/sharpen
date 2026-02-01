@@ -53,7 +53,7 @@ agents:
     # Increased from 4 -> 128 to prevent bottleneck with num_envs=24
     # At 128, ratio is approx 16 updates per sample which is standard.
     dqn_update_interval: 128.0 
-    dqn_batch_size: 2048    # Optimized (Blackwell)
+    dqn_batch_size: 16384    # Optimized (Blackwell 32GB VRAM)
     dqn_buffer_size: 1000000 # Production Scale
     dqn_target_update_freq: 1000
     target_update_freq: 1000
@@ -74,8 +74,8 @@ agents:
 
 training:
   total_timesteps: 30000000 # 30M Global Frames (Industry Standard)
-  batch_size: 2048          # Optimized (Blackwell)
-  update_interval: 2048     # Matched to Batch Size
+  batch_size: 16384          # Optimized (Blackwell 32GB VRAM)
+  update_interval: 16384     # Matched to Batch Size
   learning_rate: 0.0001
   dqn_update_interval: 8.0 # FIXED: Reduced from 0.5 to 8.0 to prevent Replay Ratio explosion (Ratio ~8)
   log_interval: 1000
