@@ -46,3 +46,8 @@
 ### RTX 5090 Optimization (Feb 1, 2026)
 - [x] **Precision Upgrade**: Enforce TF32 and FP16 (Mixed Precision) in `DeepScalperTrainer`.
 - [x] **Throughput Scaling**: Increase batch sizes to 16,384 in `deepscalper_unified.yaml`.
+### Expert Audit Implementation (Feb 1, 2026)
+- [x] **Replay Ratio Fix**: Updated `dqn_update_interval` to 2048 in `deepscalper_unified.yaml`.
+- [x] **Architecture Upgrade**: Added `MicroEncoder` to Gating Network (`gating.py`).
+- [x] **Pipeline Phase 3**: Implemented Joint Fine-tuning in `run_full_pipeline.py`.
+- [x] **Config Creation**: Created smoke test and production optimization configs.

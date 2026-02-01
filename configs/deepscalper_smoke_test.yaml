@@ -1,0 +1,48 @@
+env:
+  num_envs: 8                # Moderate parallelism
+  window_size: 20            # Reduced context for speed
+  initial_balance: 100000
+  transaction_fee: 0.0001
+  reward:
+    profit_weight: 1.0
+    volatility_penalty_weight: 0.1
+
+network:
+  hidden_size: 64            # Small network
+  micro_config:
+    hidden_size: 64
+  macro_config:
+    hidden_sizes: [64, 32]
+
+training:
+  total_timesteps: 100000    # ~20 mins on RTX 5090
+  batch_size: 1024           # Small batch
+  update_interval: 1024      # Frequent PPO updates
+  log_interval: 100
+  checkpoint_interval: 10000
+  
+  # Target Ratio: ~4
+  # Calculation: (1024 * 4) / 8 = 512
+  dqn_update_interval: 512.0 
+  
+  learning_rate: 0.0001
+  gamma: 0.99
+  
+  torch_compile: false       # Skip compilation overhead for short run
+  use_amp: true
+  use_shm: true
+
+agents:
+  dqn:
+    dqn_batch_size: 1024
+    dqn_buffer_size: 50000   # Small buffer
+    target_update_freq: 200
+  ppo:
+    entropy_coef: 0.01
+  a2c:
+    entropy_coef: 0.01
+
+phases:
+  phase1_specialists: 50000
+  phase2_gating: 50000
+  phase3_joint: 0 # Skip for smoke test or keep small if validation needed

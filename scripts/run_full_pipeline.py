@@ -210,6 +210,26 @@ def main():
             train_cmd_gate += " --debug"
         run_command(train_cmd_gate)
         
+        # Find the checkpoint from Gating Phase
+        checkpoints_gating = glob.glob(os.path.join(checkpoint_dir, "checkpoint_final_*.pth"))
+        if not checkpoints_gating:
+             checkpoints_gating = glob.glob(os.path.join(checkpoint_dir, "checkpoint_step_*.pth"))
+        
+        if not checkpoints_gating:
+             print(f"Error: No checkpoint found in {checkpoint_dir} after gating training.")
+             sys.exit(1)
+             
+        latest_checkpoint_gating = max(checkpoints_gating, key=os.path.getmtime)
+        print(f"Found latest gating checkpoint: {latest_checkpoint_gating}")
+
+        print("\n=== PHASE 2.8: TRAINING (JOINT FINE-TUNING) ===")
+        # 3. Joint Phase (Phase 3)
+        # Train EVERYTHING together
+        train_cmd_joint = f"python scripts/train_deepscalper.py --config {active_config} --run_name {args.run_name} --run_id {args.run_id} --phase full --load_checkpoint {latest_checkpoint_gating}"
+        if args.debug:
+            train_cmd_joint += " --debug"
+        run_command(train_cmd_joint)
+        
     # PHASE 2: BACKTEST
     if start_index <= 2:
         print("\n=== PHASE 3: BACKTESTING ===")
