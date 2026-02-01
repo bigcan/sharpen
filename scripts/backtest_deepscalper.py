@@ -92,20 +92,31 @@ def main():
         "dqn_epsilon_decay": "epsilon_decay"
     }
     
-    for k,v in dqn_config.items():
-        if k in ["learning_rate", "gamma"]: continue
-        if k in key_map: dqn_kwargs[key_map[k]] = v
-        else: dqn_kwargs[k] = v
+    ppo_config = agents_config.get("ppo", {})
+    a2c_config = agents_config.get("a2c", {})
     
     dqn = DeepScalperDQN(
-        network_config=agent_net_config, 
-        lr=float(dqn_config.get("learning_rate", 1e-4)),
-        gamma=float(dqn_config.get("gamma", 0.99)),
+        network_config=agent_net_config,
+        lr=dqn_config.get("lr", 1e-4),
+        gamma=dqn_config.get("gamma", 0.99),
         device=device,
-        **dqn_kwargs
+        batch_size=dqn_config.get("batch_size", 32),
+        buffer_size=dqn_config.get("buffer_size", 100000),
+        target_update_freq=dqn_config.get("target_update_freq", 1000),
+        epsilon_start=dqn_config.get("epsilon_start", 0.9),
+        epsilon_end=dqn_config.get("epsilon_end", 0.05),
+        epsilon_decay=dqn_config.get("epsilon_decay", 10000)
     )
-    ppo = DeepScalperPPO(agent_net_config, device=device)
-    a2c = DeepScalperA2C(agent_net_config, device=device)
+    
+    ppo = DeepScalperPPO(
+        network_config=agent_net_config,
+        device=device
+    )
+    
+    a2c = DeepScalperA2C(
+        network_config=agent_net_config,
+        device=device
+    )
     gating = DeepScalperGatingNetwork(input_dim=net_config["macro_config"]["input_size"])
     ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
 
@@ -188,12 +199,22 @@ def main():
     done = False
     step = 0
     
+    weights_dqn = []
+    weights_ppo = []
+    weights_a2c = []
+    
     try:
         while not done:
             with torch.no_grad():
-                action_vector = ensemble.predict(micro, private, macro)
+                action_vector, weights_dict = ensemble.predict(micro, private, macro)
                 # Unwrap batch dim (1, 3) -> (3,)
                 action_vector = action_vector[0]
+                
+                # Unwrap weights
+                # weights_dict values are numpy arrays of shape (1,) or scalars
+                weights_dqn.append(float(weights_dict["w_dqn"][0]))
+                weights_ppo.append(float(weights_dict["w_ppo"][0]))
+                weights_a2c.append(float(weights_dict["w_a2c"][0]))
             
             obs, reward, terminated, truncated, info = env.step(action_vector)
             micro, private, macro = unpack(obs)
@@ -215,7 +236,7 @@ def main():
             
             step += 1
             
-            if step > 50000: # Safety break logic
+            if step > 50000: # Safety break logic (original)
                 break
 
     except KeyboardInterrupt:
@@ -351,10 +372,23 @@ def main():
         else:
              timestamps = pd.date_range(start='2023-01-01', periods=step, freq='1min')
              
+        # Defensive: Ensure all arrays are same length
+        n = len(portfolio_values)
+        if len(weights_dqn) != n:
+            print(f"WARNING: Weight array length mismatch ({len(weights_dqn)} vs {n}). Truncating/padding.")
+            weights_dqn = weights_dqn[:n] + [0.33] * max(0, n - len(weights_dqn))
+            weights_ppo = weights_ppo[:n] + [0.33] * max(0, n - len(weights_ppo))
+            weights_a2c = weights_a2c[:n] + [0.33] * max(0, n - len(weights_a2c))
+              
         df_ensemble = pd.DataFrame({
             'date': timestamps,
             'account_value': portfolio_values,
-            'actions': orders_arr # This matches length roughly? orders_arr is len(positions).
+            'actions': orders_arr,
+            'quantity': orders_arr,
+            'price': prices,
+            'weight_dqn': weights_dqn,
+            'weight_ppo': weights_ppo,
+            'weight_a2c': weights_a2c
         })
         
         # Agents? We only have Ensemble output here.

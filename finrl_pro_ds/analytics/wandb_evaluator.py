@@ -407,6 +407,29 @@ class WandbFinRLEvaluator:
             wandb.log({"Underwater Plot": wandb.Image(fig)})
             plt.close(fig)
             
+            # 6. Gating Weights Plot (Ensemble Only)
+            if all(col in self.df_ensemble.columns for col in ['weight_dqn', 'weight_ppo', 'weight_a2c']):
+                fig, ax = plt.subplots(figsize=(12, 4))
+                
+                # Ensure index is datetime for nice plotting
+                # self.df_ensemble index should be 'date' if preprocess worked well.
+                # But preprocess set index to date.
+                # So we can use index.
+                
+                y1 = self.df_ensemble['weight_dqn']
+                y2 = self.df_ensemble['weight_ppo']
+                y3 = self.df_ensemble['weight_a2c']
+                
+                # Stackplot
+                ax.stackplot(self.df_ensemble.index, y1, y2, y3, labels=['DQN', 'PPO', 'A2C'], alpha=0.8)
+                ax.set_title("Ensemble Gating Weights Over Time")
+                ax.set_ylabel("Weight Assignment")
+                ax.legend(loc='upper left')
+                ax.grid(True, alpha=0.3)
+                ax.set_ylim(0, 1.0)
+                
+                wandb.log({"Gating Weights": wandb.Image(fig)})
+                plt.close(fig)            
             # 7. Trade Log Table (Detailed trade activities)
             trade_logs = []
             

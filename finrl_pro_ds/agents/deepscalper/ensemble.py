@@ -29,7 +29,6 @@ class DeepScalperEnsemble:
         self.a2c = a2c_agent
         self.gating = gating_net.to(device)
         self.device = torch.device(device)
-        self.device = torch.device(device)
         
     def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor) -> np.ndarray:
         """
@@ -78,4 +77,11 @@ class DeepScalperEnsemble:
         # Stack to (B, 3) or (3,)
         actions = torch.stack([a_dir, a_price, a_vol], dim=-1).cpu().numpy()
         
-        return actions
+        # Return weights for logging
+        weights_dict = {
+            "w_dqn": w_dqn.cpu().numpy().flatten(),
+            "w_ppo": w_ppo.cpu().numpy().flatten(),
+            "w_a2c": w_a2c.cpu().numpy().flatten()
+        }
+        
+        return actions, weights_dict
