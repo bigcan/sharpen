@@ -80,4 +80,9 @@ def monitor_run(run_path):
 
 if __name__ == "__main__":
     # The run path provided by user: bigcan-chiwin-technology/FinRL-Pro-DS/hlmj8s0t
-    monitor_run("bigcan-chiwin-technology/FinRL-Pro-DS/hlmj8s0t")
+    import argparse
+    parser = argparse.ArgumentParser(description='Monitor WandB Run via API')
+    parser.add_argument('run_path', type=str, help='WandB run path (entity/project/run_id)')
+    args = parser.parse_args()
+    
+    monitor_run(args.run_path)

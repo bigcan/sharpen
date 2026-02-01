@@ -195,23 +195,41 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
              # Debugging with real data (2023) - Use small valid slice
              folds = [{"train": ("2023-01-10 00:00:00", "2023-01-10 02:00:00"), "val": ("2023-01-10 02:00:00", "2023-01-10 02:30:00")}]
     else:
-        # PRODUCTION: Use Rolling Window Splitter
-        logger.info(f"Generating Rolling Window Folds ({train_start_date} to {train_end_date})...")
-        splitter = RollingWindowSplitter(train_months=3, val_months=1, test_months=1, step_months=1)
-        raw_folds = splitter.split(train_start_date, train_end_date)
+        # Check Duration
+        s_dt = pd.Timestamp(train_start_date)
+        e_dt = pd.Timestamp(train_end_date)
+        duration_days = (e_dt - s_dt).days
         
-        # Convert to tuple format for harness
-        folds = []
-        for rf in raw_folds:
-            folds.append({
-                "train": rf["train"].to_tuple(),
-                "val": rf["val"].to_tuple()
-            })
+        if duration_days < 120: # Less than 4 months (min req for 3m val 1m test)
+            logger.warning(f"Short Data Duration ({duration_days} days) detected. Using Fixed Fraction Split (Train 80% / Val 20%).")
+            cutoff = s_dt + (e_dt - s_dt) * 0.8
+            # Round to nearest hour for tidiness
+            cutoff = cutoff.round("h")
+            
+            folds = [{
+                 "train": (str(s_dt), str(cutoff)),
+                 "val": (str(cutoff), str(e_dt))
+            }]
+            logger.info(f"Generated Adaptive Fold: Train [{s_dt} -> {cutoff}], Val [{cutoff} -> {e_dt}]")
         
-        logger.info(f"Generated {len(folds)} folds for Walk-Forward Validation.")
-        if len(folds) == 0:
-            logger.warning("No folds generated! Check dates. Fallback to static fold.")
-            folds = [{"train": ("2023-01-01", "2023-04-01"), "val": ("2023-04-01", "2023-05-01")}]
+        else:
+            # PRODUCTION: Use Rolling Window Splitter
+            logger.info(f"Generating Rolling Window Folds ({train_start_date} to {train_end_date})...")
+            splitter = RollingWindowSplitter(train_months=3, val_months=1, test_months=1, step_months=1)
+            raw_folds = splitter.split(train_start_date, train_end_date)
+            
+            # Convert to tuple format for harness
+            folds = []
+            for rf in raw_folds:
+                folds.append({
+                    "train": rf["train"].to_tuple(),
+                    "val": rf["val"].to_tuple()
+                })
+            
+            logger.info(f"Generated {len(folds)} folds for Rolling Window Validation.")
+            if len(folds) == 0:
+                logger.warning("No folds generated! Check dates. Fallback to static fold.")
+                folds = [{"train": ("2023-01-01", "2023-04-01"), "val": ("2023-04-01", "2023-05-01")}]
 
     fold_scores = []
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -343,7 +361,8 @@ def objective(trial, base_config: UnifiedConfig, args, shm_config=None):
             trainer.train()
             
             # Evaluate
-            metrics = trainer.evaluate(env_val, num_episodes=5, max_steps=args.steps * 50) # 50x training steps for eval buffer
+            # FIX: Reduce evaluation scope for Pilot/HPO (1 episode or limited steps) to avoid data exhaustion crash
+            metrics = trainer.evaluate(env_val, num_episodes=1, max_steps=args.steps)
             fold_scores.append(metrics['sharpe'])
             
             # Log fold metrics to WandB (single run, all trials)
