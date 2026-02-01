@@ -363,10 +363,13 @@ def main():
     gating_input = ensemble_config.get("input_size", net_config["macro_config"]["input_size"])
     gating_hidden = ensemble_config.get("hidden_size", 64)
     
-    # Extract Micro Shape for Gating
-    window_size = config.get("env", {}).get("window_size", 50)
-    micro_input = net_config["micro_config"]["input_size"]
-    micro_shape = (window_size, micro_input)
+    # Extract Micro Shape for Gating (Robust to Env Type)
+    if hasattr(env, "single_observation_space"):
+         # Vector Env
+         micro_shape = env.single_observation_space["micro"].shape
+    else:
+         # Single Env
+         micro_shape = env.observation_space["micro"].shape
     
     gating = SynapseGatingNetwork(input_dim=gating_input, micro_shape=micro_shape, hidden_dim=gating_hidden)
     ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
@@ -375,6 +378,36 @@ def main():
     # Inject 'agents' config into 'training' config so Trainer can find it
     training_config = config.get("training", {})
     training_config["agents"] = config.get("agents", {})
+    
+    # DYNAMIC PHASE STEP ADJUSTMENT
+    # If config defines specific phase lengths, respect them.
+    phases_config = config.get("phases", {})
+    if phases_config:
+        p1 = phases_config.get("phase1_specialists", 0)
+        p2 = phases_config.get("phase2_gating", 0)
+        p3 = phases_config.get("phase3_joint", 0)
+        
+        original_total = training_config.get("total_timesteps", 100000)
+        new_total = original_total
+        
+        if args.phase == "specialists":
+            # Run until end of Phase 1
+             new_total = p1
+             print(f"PHASE LOGIC: Limiting Specialists Phase to {new_total} steps.")
+        elif args.phase == "gating":
+            # Run until end of Phase 2
+             new_total = p1 + p2
+             print(f"PHASE LOGIC: Limiting Gating Phase to {new_total} steps (Cumulative).")
+        elif args.phase == "full":
+            # Run until end of Phase 3 (or configured total if not using phases block for joint)
+             if p3 > 0:
+                 new_total = p1 + p2 + p3
+                 print(f"PHASE LOGIC: Limiting Joint Phase to {new_total} steps (Cumulative).")
+             else:
+                 print(f"PHASE LOGIC: Using global total {new_total} steps for Joint Phase.")
+        
+        # Override Training Config
+        training_config["total_timesteps"] = new_total
     
     # Check if we should enable torch.compile (passed via config or args)
     # The config file has training.torch_compile
