@@ -2,6 +2,7 @@ import os
 import paramiko
 import json
 import time
+import re
 from dotenv import load_dotenv
 
 # Load .env from project root
@@ -23,85 +24,103 @@ def monitor_run(run_id_fragment):
         print(f"Connecting to {host}:{port}...")
         ssh.connect(host, port=port, username='root', password=password)
         
-        # 1. Find the full directory name
-        cmd_find = f"ls -d /workspace/DeepScalper/wandb/*{run_id_fragment}*"
-        stdin, stdout, stderr = ssh.exec_command(cmd_find)
-        run_dirs = stdout.read().decode().strip().split('\n')
+        # 1. Find Process and Heavy PID
+        print(f"\n--- Finding Process for {run_id_fragment} ---")
+        cmd_ps_all = "ps aux | grep 'hlmj8s0t' | grep -v grep | sort -nr -k 3"
+        stdin, stdout, stderr = ssh.exec_command(cmd_ps_all)
+        ps_lines = stdout.read().decode().strip().split('\n')
         
-        if not run_dirs or run_dirs[0] == '':
-            print(f"No run directory found matching *{run_id_fragment}*")
+        target_pid = None
+        if ps_lines and ps_lines[0]:
+             parts = ps_lines[0].split()
+             if len(parts) > 1:
+                 target_pid = parts[1]
+                 print(f"Found Target PID: {target_pid} (Heavy Load)")
+                 print(f"Top Process: {ps_lines[0]}")
+        else:
+            print("No matching process found.")
             return
-            
-        run_dir = run_dirs[0].strip() # Take the first match
-        print(f"Found run directory: {run_dir}")
-        
-        # 2. Get PID from wandb-metadata.json
-        cmd_meta = f"cat {run_dir}/files/wandb-metadata.json"
-        stdin, stdout, stderr = ssh.exec_command(cmd_meta)
-        meta_json = stdout.read().decode()
-        
-        pid = None
-        try:
-            meta = json.loads(meta_json)
-            pid = meta.get('program_exitcode', None) # Check if it already exited
-            if pid is None:
-                pid = meta.get('slurm_job_id') or meta.get('job_id') # Sometimes job_id
-                # Actually usually it's process ID in 'program'
-                # Let's check 'args' or just check if we can find the python process running this
-            
-            # The wandb-metadata.json usually has "os" -> "pid" ? No, usually top level
-            # Let's just check the log for errors
-        except:
-            pass
 
-        # Check if process is running using ps aux | grep strict matching
-        # Assuming we know the script name or just check if *something* is writing to the log
-        
-        # 3. Check process via ps
-        # We can try to grep for the run id in the process list if it was passed as arg, 
-        # or just check if the log file was modified recently.
-        
-        log_file = f"{run_dir}/files/output.log"
-        cmd_mtime = f"stat -c %Y {log_file}"
-        stdin, stdout, stderr = ssh.exec_command(cmd_mtime)
-        mtime = stdout.read().decode().strip()
-        
-        status = "UNKNOWN"
-        last_update_str = "N/A"
-        
-        if mtime.isdigit():
-            last_update = int(mtime)
-            time_diff = time.time() - last_update
-            last_update_str = f"{time_diff:.0f} seconds ago"
+        # 2. Check File Descriptors (Where is output going?)
+        log_file = None
+        if target_pid:
+            print(f"\n--- Output Redirection for PID {target_pid} ---")
+            cmd_fd = f"ls -l /proc/{target_pid}/fd/1 /proc/{target_pid}/fd/2"
+            stdin, stdout, stderr = ssh.exec_command(cmd_fd)
+            fd_out = stdout.read().decode()
+            print(fd_out)
             
-            if time_diff < 120: # Updated in last 2 mins
-                status = "HEALTHY (Active Logging)"
-            elif time_diff < 600:
-                status = "WARNING (No logs > 2 mins)"
+            # Detect log file from FD output
+            # Format: l-wx------ ... -> /workspace/DeepScalper/run.log
+            match = re.search(r'->\s+(/.+\.log)', fd_out)
+            if match:
+                log_file = match.group(1)
+                print(f"Detected Active Log File: {log_file}")
             else:
-                status = "STALLED / FINISHED (No logs > 10 mins)"
+                # Fallback
+                log_file = "/workspace/DeepScalper/run.log"
+                print(f"Could not detect from FD, defaulting to {log_file}")
+
+        # 3. Check Log Freshness
+        cmd_date = "date +%s"
+        stdin, stdout, stderr = ssh.exec_command(cmd_date)
+        remote_now = int(stdout.read().decode().strip())
         
-        print(f"Run Status: {status}")
-        print(f"Last Log Update: {last_update_str}")
-        
-        # 4. Tail the log
-        print(f"\n--- Tail of {log_file} ---")
-        cmd_tail = f"tail -n 20 {log_file}"
-        stdin, stdout, stderr = ssh.exec_command(cmd_tail)
-        print(stdout.read().decode())
-        
-        # 5. Check for errors
-        cmd_err = f"grep -i 'error' {log_file} | tail -n 5"
-        stdin, stdout, stderr = ssh.exec_command(cmd_err)
-        errors = stdout.read().decode()
-        if errors:
-            print(f"\n--- Recent Errors ---")
-            print(errors)
+        cmd_stat = f"stat -c %Y {log_file}"
+        stdin, stdout, stderr = ssh.exec_command(cmd_stat)
+        try:
+            log_mtime = int(stdout.read().decode().strip())
+            diff = remote_now - log_mtime
+            print(f"\n--- Freshness Check ---")
+            print(f"Remote Time: {remote_now}")
+            print(f"Log Mod Time: {log_mtime}")
+            print(f"Time Since Last Write: {diff} seconds")
             
+            if diff > 300:
+                print("WARNING: No log output for > 5 minutes. Process might be STALLED or HUNG.")
+        except:
+             print(f"Could not stat log file {log_file}")
+
+        # 4. Analyze Max Drawdown Loop
+        print(f"\n--- Drawdown Diagnosis ---")
+        cmd_count = f"grep -c 'Hit Max Drawdown Stop' {log_file}"
+        stdin, stdout, stderr = ssh.exec_command(cmd_count)
+        try:
+            count = stdout.read().decode().strip()
+            print(f"Total Drawdown Stops: {count}")
+        except:
+            print("Could not grep log file.")
+        
+        # 5. Find Latest Simulation Date
+        # Look for date patterns YYYY-MM-DD
+        print(f"\n--- Latest Simulation Date ---")
+        cmd_date_sim = f"grep -oE '[0-9]{{4}}-[0-9]{{2}}-[0-9]{{2}}' {log_file} | tail -n 1"
+        stdin, stdout, stderr = ssh.exec_command(cmd_date_sim)
+        latest_date = stdout.read().decode().strip()
+        print(f"Latest Date in Logs: {latest_date}")
+        
+        # 6. GPU Usage Check
+        print(f"\n--- NVIDIA-SMI (GPU Usage) ---")
+        cmd_gpu = "nvidia-smi --query-gpu=timestamp,utilization.gpu,utilization.memory --format=csv,noheader"
+        stdin, stdout, stderr = ssh.exec_command(cmd_gpu)
+        print(stdout.read().decode())
+
+        # 7. Real Tail
+        # print(f"\n--- Tail of {log_file} (Last 20 lines) ---")
+        # cmd_tail = f"tail -n 20 {log_file}"
+        # stdin, stdout, stderr = ssh.exec_command(cmd_tail)
+        # print(stdout.read().decode())
+        
+        # 8. Check File Size growth
+        cmd_du = f"ls -l --block-size=M {log_file}"
+        stdin, stdout, stderr = ssh.exec_command(cmd_du)
+        print(f"\nLog Size: {stdout.read().decode().strip()}")
+
     except Exception as e:
-        print(f"SSH Error: {e}")
+        print(f"SSH/Parsing Error: {e}")
     finally:
-        ssh.close()
+        if ssh:
+            ssh.close()
 
 if __name__ == "__main__":
     monitor_run("hlmj8s0t")
