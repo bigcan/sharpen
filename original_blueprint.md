@@ -184,3 +184,71 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 3.  **Hygiene**:
     -   Run `scripts/clean.py` to remove `__pycache__`, temporary logs, and artifacts.
     -   Ensure no sensitive API keys were accidentally committed (check `.env` usage).
+
+---
+
+## Implementation Updates Log
+
+> [!NOTE]
+> This section tracks significant updates to the DeepScalper pipeline implementation.
+
+### 2026-02-01 11:05 | Ensemble Gating Weight Logging
+**Commit:** `31aaf0c`
+| File | Change |
+|------|--------|
+| `ensemble.py` | `predict()` now returns `(action, weights_dict)` |
+| `backtest_deepscalper.py` | Adds `weight_dqn`/`weight_ppo`/`weight_a2c` columns to results |
+| `wandb_evaluator.py` | New "Gating Weights" stacked area chart |
+
+**Self-Audit Fixes:** Removed duplicate `self.device`, added defensive array checks, fixed PPO/A2C init args.
+
+---
+
+### 2026-02-01 10:00 | System Stabilization & Architecture Verification
+**Status:** ✅ Mission Critical Success
+
+| Fix | File | Description |
+|-----|------|-------------|
+| "Doom Loop" Resolution | `deepscalper_trainer.py` | Rewrote `evaluate()` with robust episode counting (handles `VectorEnv` auto-resets) |
+| "Zombie Process" Killer | `deploy_bare_metal.py` | Aggressive `pkill -f` for all DeepScalper scripts before deployment |
+
+**Architecture Verified:**
+- Two-Phase Training (Specialists → Gating) correctly orchestrated in `run_full_pipeline.py`
+- Weight freezing logic confirmed in `deepscalper_trainer.py`
+- HPO defaults to `phase="full"` (Joint Optimization)
+
+---
+
+### 2026-02-01 02:00 | RTX 5090 Precision Optimization
+**Status:** ✅ Implemented
+
+| Setting | Implementation |
+|---------|----------------|
+| TF32 Precision | `torch.set_float32_matmul_precision('high')` |
+| FP16 Enforcement | Explicit `autocast(..., dtype=torch.float16)` in update loops |
+| Batch Scaling | Increased to `16,384` for GDDR7 bandwidth |
+
+---
+
+### 2026-01-30 13:00 | WandB Logging Audit Fixes
+**Status:** ✅ All Critical Bugs Resolved
+
+| Bug | File | Resolution |
+|-----|------|------------|
+| Duplicate PPO Loss | `deepscalper_trainer.py` | Removed duplicate `total_loss` accumulation |
+| A2C NaN Return | `deepscalper_trainer.py` | Changed to `return None` on non-finite loss |
+| Redundant Gating Logic | `deepscalper_trainer.py` | Simplified metric append |
+
+---
+
+### 2026-01-30 04:00 | Checkpoint Versioning Fix
+**Status:** ✅ Fixed
+- `DeepScalperTrainer` now creates unique checkpoint directories based on run name.
+- Prevents data overwrites between runs.
+
+---
+
+### 2026-01-30 02:30 | V9.5 Replay Ratio Stabilization
+**Status:** ✅ Fixed
+- **Root Cause:** `dqn_update_interval: 0.5` with `num_envs: 24` caused 48 updates/step (Replay Ratio ~128).
+- **Fix:** Increased `dqn_update_interval` to `8.0` for stable learning.
