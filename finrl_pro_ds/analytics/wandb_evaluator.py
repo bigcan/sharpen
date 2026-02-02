@@ -76,27 +76,37 @@ class WandbFinRLEvaluator:
         # 2. Fetch Benchmark Data
         print(f"Fetching benchmark data for {self.benchmark_ticker}...")
         try:
-            # Fix: Ensure dates are converted to datetime objects (yfinance doesn't like int64 ns timestamps)
-            start_dt = pd.to_datetime(self.start_date)
-            end_dt = pd.to_datetime(self.end_date)
+            # Fix: Ensure dates are converted to datetime objects and ADD BUFFER
+            # yfinance sometimes fails if start==end or for intraday limits
+            start_dt = pd.to_datetime(self.start_date) - pd.Timedelta(days=2)
+            end_dt = pd.to_datetime(self.end_date) + pd.Timedelta(days=2)
             
             df_bench = yf.download(
                 self.benchmark_ticker, 
-                start=start_dt, 
-                end=end_dt, 
+                start=start_dt.strftime('%Y-%m-%d'), 
+                end=end_dt.strftime('%Y-%m-%d'), 
                 progress=False
             )
+            
+            # Handle yfinance 0.2+ multi-index columns (Ticker, Price)
             if isinstance(df_bench.columns, pd.MultiIndex):
-                # Handle yfinance multi-index (Price, Ticker)
-                df_bench = df_bench['Close']
-            else:
-                 df_bench = df_bench[['Close']]
+                try:
+                    df_bench = df_bench.xs(self.benchmark_ticker, axis=1, level=1)
+                except KeyError:
+                    # Fallback if structure is different
+                    if 'Close' in df_bench.columns.get_level_values(0):
+                         df_bench = df_bench['Close']
+
+            # Flatten if still needed
+            if isinstance(df_bench, pd.DataFrame):
+                if 'Close' in df_bench.columns:
+                     df_bench = df_bench[['Close']]
+                else: 
+                     # Taking first column as close
+                     df_bench = df_bench.iloc[:, 0].to_frame(name='Close')
             
             # Rename to standard column
-            if isinstance(df_bench, pd.DataFrame):
-                 df_bench = df_bench.rename(columns={df_bench.columns[0]: 'Close'})
-            else:
-                 df_bench = df_bench.to_frame(name='Close')
+            df_bench.columns = ['Close']
             
             if df_bench.empty:
                 raise ValueError("Downloaded benchmark data is empty.")
@@ -106,7 +116,7 @@ class WandbFinRLEvaluator:
                 
             self.df_benchmark = df_bench  
         except Exception as e:
-            print(f"WARNING: Failed to fetch benchmark data '{self.benchmark_ticker}': {e}. Using flat zero-return benchmark (Sharpe will be 0/Undefined).")
+            print(f"WARNING: Failed to fetch benchmark data '{self.benchmark_ticker}': {e}. Using flat zero-return benchmark.")
             # Create dummy benchmark matching the ensemble index
             self.df_benchmark = pd.DataFrame({'Close': [100.0] * len(self.df_ensemble)}, index=self.df_ensemble.index)
 
@@ -256,6 +266,10 @@ class WandbFinRLEvaluator:
         Returns:
             DataFrame with trade details, or empty DataFrame if required columns missing.
         """
+        # Alias 'actions' to 'quantity' if needed
+        if 'quantity' not in df.columns and 'actions' in df.columns:
+            df['quantity'] = df['actions']
+
         # Check for required columns (graceful degradation)
         if 'price' not in df.columns or 'quantity' not in df.columns:
             return pd.DataFrame()
@@ -304,9 +318,6 @@ class WandbFinRLEvaluator:
             self.results[name] = self.calculate_metrics(df, name)
 
     def log_to_wandb(self, run_name: str, project_name: str = "finrl-ensemble", entity: Optional[str] = None):
-        """
-        Log all results to Weights & Biases.
-        """
         """
         Log all results to Weights & Biases.
         """
@@ -430,6 +441,7 @@ class WandbFinRLEvaluator:
                 
                 wandb.log({"Gating Weights": wandb.Image(fig)})
                 plt.close(fig)            
+            
             # 7. Trade Log Table (Detailed trade activities)
             trade_logs = []
             

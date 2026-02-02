@@ -31,7 +31,7 @@
 ### Audit & Verification (Feb 1, 2026)
 ### Audit & Verification (Feb 1, 2026)
 - [ ] **Phase 3: DeepScalper Production Deployment & Audit**
-    - [/] **Smoke Test Verification (Production Data)** `[Active]`
+    - [x] **Smoke Test Verification (Production Data)** `[Completed]`
         - [x] Create `deepscalper_pilot_test.yaml` (Fast HPO/Training)
         - [x] Implement "Joint Fine-tuning" Logic (Phase 3)
         - [x] Deploy to GPUHub with Demo Data (Sanity Check)
@@ -44,7 +44,8 @@
             - [x] Update `train_deepscalper.py` to output Run ID.
             - [x] Update `backtest_deepscalper.py` to accept and resume Run ID.
             - [x] Update `run_full_pipeline.py` to propagate Run ID from Phase 2 to Phase 3.
-        - [ ] Run Smoke Test with **Production Data** (Jan 2023) `[Awaiting Clarification]` GPUHub (No Overrides).
+        - [x] Run Smoke Test with **Production Data** (Jan 2023) -> Launched as Pilot `hmz9g7op` on GPUHub.
+            - [x] **Verification:** Pilot Completed (-7.8% Return). Report Generated.
         - [x] Committed and Pushed changes to `DS_Core`.
         - [x] Fix HPO "Dirty State" (Clean `hpo.db` wipe)
         - [x] Implement WandB Tags for clean naming `[Completed]`
@@ -60,5 +61,5 @@
 - [x] **Precision Upgrade**: Enforce TF32 and FP16 (Mixed Precision) in `DeepScalperTrainer`.
     - [x] Fix Replay Ratio (`dqn_update_interval: 2048.0`) <!-- id: 11 -->
     - [x] Implement Micro-Gating (LOB Encoder) <!-- id: 12 -->
-    - [/] Verify with Smoke Test (Production Data, Joint Phase) <!-- id: 13 -->
+    - [x] Verify with Smoke Test (Production Data, Joint Phase) <!-- id: 13 -->
     - [ ] Deploy Production Config (Phase 3 Enabled) <!-- id: 14 -->
