@@ -4,7 +4,7 @@ import os
 import torch
 import logging
 import numpy as np
-import atexit
+
 import wandb
 import sys
 import gymnasium as gym
@@ -142,76 +142,87 @@ def main():
     
     # Pre-load Data for Shared Memory (Optimization)
     data_loader = None
-    use_shm = config.get("training", {}).get("use_shm", False)
-    num_envs = config.get("env", {}).get("num_envs", 1)
-    
-    if num_envs > 1 and not args.debug and use_shm:
-        print("Initializing Shared Memory for Vector Env...")
-        data_config = config.get("data", {})
-        file_path = data_config.get("file_path")
-        
-        data_loader = ParquetDataHandler(
-            file_path=file_path, 
-            ticker=data_config.get("ticker", "BTCUSDT"), 
-            feature_config=config.get("features", {})
-        )
-        shm_config = data_loader.create_shared_memory()
-        data_config["shared_memory_config"] = shm_config
-        
-        # Register cleanup
-        def cleanup():
-            if data_loader:
-                data_loader.close_shared_memory(unlink=True)
-        atexit.register(cleanup)
-        
-    # Env Factory
-    import functools
-    env_factory = functools.partial(create_env, config=config, debug=args.debug)
-    
-    if num_envs > 1:
-        if args.debug:
-             env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
-        else:
-             # Use Sync for stability unless Async needed
-             # For 16 envs, Async 'spawn' is better but harder to setup without proper main guard
-             # We use Sync for simplicity/robustness in this update unless performance is blocked
-             # But let's try Async with spawn context if possible, or Sync.
-             # Given previous code had complex staggering, let's stick to Sync for 16 envs on Windows/PyTorch to avoid Pickle hell?
-             # Actually, config said "num_envs: 16". Sync might be slow.
-             # Using Async with 'spawn' context.
-             try:
-                 # NOTE: Gymnasium's shared_memory=True is for obs/action IPC, NOT our data SHM.
-                 # We disable Gymnasium SHM (avoid /psm_* POSIX SHM failures in containers)
-                 # but our ParquetDataHandler SHM for data arrays is passed via config.
-                 env = gym.vector.AsyncVectorEnv(
-                     [env_factory for _ in range(num_envs)], 
-                     context="spawn", 
-                     shared_memory=False  # Disabled to avoid POSIX SHM namespace issues
-                 )
-             except (RuntimeError, pickle.PicklingError, AttributeError) as e:
-                 print(f"AsyncVectorEnv failed ({type(e).__name__}: {e}), falling back to Sync.")
-                 env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
-    else:
-        # Force SyncVectorEnv to maintain (1, ...) shapes and array rewards
-        env = gym.vector.SyncVectorEnv([env_factory])
-        
-    print(f"Environment Loaded: {env}")
-    
-    # Device
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Device: {device}")
-    
-    # Trainer
-    trainer = DeepScalperTrainer(env, config, device=device, run_name=run_name)
+    env = None
     
     try:
+        use_shm = config.get("training", {}).get("use_shm", False)
+        num_envs = config.get("env", {}).get("num_envs", 1)
+        
+        if num_envs > 1 and not args.debug and use_shm:
+            print("Initializing Shared Memory for Vector Env...")
+            data_config = config.get("data", {})
+            file_path = data_config.get("file_path")
+            
+            data_loader = ParquetDataHandler(
+                file_path=file_path, 
+                ticker=data_config.get("ticker", "BTCUSDT"), 
+                feature_config=config.get("features", {})
+            )
+            shm_config = data_loader.create_shared_memory()
+            data_config["shared_memory_config"] = shm_config
+            
+        # Env Factory
+        import functools
+        env_factory = functools.partial(create_env, config=config, debug=args.debug)
+        
+        if num_envs > 1:
+            if args.debug:
+                 env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
+            else:
+                 # Use Sync for stability unless Async needed
+                 # For 16 envs, Async 'spawn' is better but harder to setup without proper main guard
+                 # We use Sync for simplicity/robustness in this update unless performance is blocked
+                 # But let's try Async with spawn context if possible, or Sync.
+                 # Given previous code had complex staggering, let's stick to Sync for 16 envs on Windows/PyTorch to avoid Pickle hell?
+                 # Actually, config said "num_envs: 16". Sync might be slow.
+                 # Using Async with 'spawn' context.
+                 try:
+                     # NOTE: Gymnasium's shared_memory=True is for obs/action IPC, NOT our data SHM.
+                     # We disable Gymnasium SHM (avoid /psm_* POSIX SHM failures in containers)
+                     # but our ParquetDataHandler SHM for data arrays is passed via config.
+                     env = gym.vector.AsyncVectorEnv(
+                         [env_factory for _ in range(num_envs)], 
+                         context="spawn", 
+                         shared_memory=False  # Disabled to avoid POSIX SHM namespace issues
+                     )
+                 except (RuntimeError, pickle.PicklingError, AttributeError) as e:
+                     print(f"AsyncVectorEnv failed ({type(e).__name__}: {e}), falling back to Sync.")
+                     env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
+        else:
+            # Force SyncVectorEnv to maintain (1, ...) shapes and array rewards
+            env = gym.vector.SyncVectorEnv([env_factory])
+            
+        print(f"Environment Loaded: {env}")
+        
+        # Device
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"Device: {device}")
+        
+        # Trainer
+        trainer = DeepScalperTrainer(env, config, device=device, run_name=run_name)
+        
         trainer.train()
+        
     except KeyboardInterrupt:
         print("Interrupted.")
+    except Exception as e:
+        print(f"An error occurred during training: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
     finally:
-        env.close()
+        if env:
+            try:
+                env.close()
+            except Exception as e:
+                print(f"Error closing environment: {e}")
+                
         if data_loader:
-            data_loader.close_shared_memory(unlink=True)
+            print("Cleaning up Shared Memory...")
+            try:
+                data_loader.close_shared_memory(unlink=True)
+            except Exception as e:
+                print(f"Error unlinking shared memory: {e}")
 
 if __name__ == "__main__":
     import multiprocessing as mp
