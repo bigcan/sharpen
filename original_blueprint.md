@@ -6,20 +6,20 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 **Key Architecture Components:**
 1.  **Multi-Modal Embedding**: Combining Micro-level (LOB) and Macro-level (OHLCV/Technicals) data.
 2.  **Encoder-Decoder/Fusion**: Using LSTM for Micro sequence learning and MLP for Macro context.
-3.  **Intraday Environment**: Simulation of order book dynamics and execution costs.
+3.  **Single BDQ Agent**: A standard Branching Dueling Q-Network processing the fused state.
 
 ## Plan vs. Paper: Fidelity & Upgrades
-| Feature | DeepScalper Paper (Sun et al.) | FinRL-Pro Synapse Implementation | Status |
+| Feature | DeepScalper Paper (Sun et al.) | FinRL-Pro Implementation | Status |
 | :--- | :--- | :--- | :--- |
 | **Core Architecture** | Micro(LOB)+Macro(Tech) Fusion | Micro(LOB)+Macro(Tech) Fusion | 🟢 **Aligned** |
 | **Action Space** | Discrete Branching (Dir/Price/Vol) | Discrete Branching (Dir/Price/Vol) | 🟢 **Aligned** |
 | **Primary Algorithm** | Dueling DQN | Branching Dueling DQN | 🟢 **Aligned** |
-| **Agent Strategy** | Single Agent | **Synapse Dynamic Ensemble** (DQN+PPO+A2C) | 🚀 **Upgraded** |
+| **Agent Strategy** | Single Agent | **Single BDQ Agent** | 🟢 **Aligned** |
 | **Data Storage** | Flat Files (Implied) | **TimescaleDB** (High-Freq/Scalable) | 🚀 **Upgraded** |
 | **Evaluation** | Custom Backtester | **VectorBT** (Institutional Grade) | 🚀 **Upgraded** |
 | **Monitoring** | Static Plots | **WandB** (Real-time Tracking) | 🚀 **Upgraded** |
 | **Framework** | Plain PyTorch/Gym | **Gymnasium** + FinRL-Pro Ecosystem | 🚀 **Upgraded** |
-| **Asset Universe** | N/A | **Bitcoin Perpetual Futures** (BTC-USDT) | � **Defined** |
+| **Asset Universe** | N/A | **Bitcoin Perpetual Futures** (BTC-USDT) |  **Defined** |
 
 ## User Review Required
 > [!IMPORTANT]
@@ -27,10 +27,6 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 > We will NOT support the Chinese assets (CSI 300, etc.) from the original paper.
 > - **Symbol**: `BTCUSDT` (Perpetual Contract)
 > - **Exchange**: Binance Futures (Simulated via Kaggle Data/Live API)
-
-> [!IMPORTANT]
-> **Ensemble Strategy**: We are adopting a **Synapse Dynamic Ensemble** approach.
-> The final decision will be an aggregation of **Branching DQN** (Micro-structure expert), **PPO** (Stability anchor), and **A2C** (Trend follower), weighted dynamically by a **Softmax Gating Network** based on market context.
 
 > [!IMPORTANT]
 > **Data Availability**: DeepScalper relies heavily on **Limit Order Book (LOB)** data (e.g., Level 2 data). Standard OHLCV data is insufficient for the "Micro" component.
@@ -49,206 +45,129 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 > - **Security**: API Credentials (Binance & Kaggle) must be loaded from `.env` (git-ignored).
 
 ## Non-Goals
--   **Baseline Models**: We will **skip** implementation of separate, non-fusion baselines. The ensemble *is* the model.
+-   **Ensemble Methods**: We are removing the experimental "Synapse" ensemble to strictly follow the paper's Single Agent design.
 -   **MLflow**: We are deprecating MLflow in favor of WandB for this module.
 
-## Proposed Changes
+---
+
+## DeepScalper Technical Specification
+*Based on recent paper analysis.*
+
+### 1. Training Architecture & Objectives
+
+DeepScalper does not rely on a standard DQN loss alone. It employs a multi-objective loss function and a specialized training-only reward structure.
+
+#### **A. The Network Architecture (BDQ)**
+*   **Input Processing:** The agent uses an encoder-decoder architecture.
+    *   **Micro-Level Encoder:** Processes Limit Order Book (LOB) data and the trader's private state (position, cash) using **LSTM** layers to capture immediate supply/demand pressure.
+    *   **Macro-Level Encoder:** Processes OHLCV (Open, High, Low, Close, Volume) data and technical indicators using an **MLP** (Multilayer Perceptron) to capture broader trends.
+    *   **Fusion:** These embeddings are concatenated to form the state embedding $e_t$.
+*   **Action Branching:** The BDQ splits the Q-value estimation into two independent branches to avoid the combinatorial explosion of actions:
+    *   **Price Branch:** Estimating $Q$ values for discrete price levels.
+    *   **Quantity Branch:** Estimating $Q$ values for discrete quantity proportions.
+*   **Dueling Mechanism:** Both branches share a common state-value stream $V(s)$ but maintain separate advantage streams $Adv(s, a)$.
+
+#### **B. The Loss Function (Hybrid Learning)**
+DeepScalper optimizes a composite loss function that combines the standard Reinforcement Learning (RL) loss with a risk-aware auxiliary task.
+*   **Primary RL Loss ($L_q$):** This is the standard Mean Squared Error (MSE) between the predicted Q-values and the TD targets (using a target network and Prioritized Experience Replay).
+*   **Auxiliary Loss ($L_{vol}$):** The model simultaneously predicts **future volatility** (standard deviation of returns). This is a supervised regression task using the market embedding $e_t$.
+*   **Total Loss:**
+    $$L = L_q + \rho \times L_{vol}$$
+    Where $\rho$ is a weight parameter balancing profit seeking (RL) and risk awareness (volatility prediction).
+
+#### **C. Reward Shaping: The Hindsight Bonus**
+A critical innovation in DeepScalper's training is the **Hindsight Bonus**, designed to prevent the agent from becoming "short-sighted" (capturing tiny fluctuations while missing the day's major trend).
+*   **Formula:**
+    $$r_{hind} = r_t + w \times (p_{t+h} - p_t) \times \text{position}_t$$
+    *   $r_t$: Immediate PnL minus transaction costs.
+    *   $w$: Weight of the hindsight bonus.
+    *   $h$: The look-ahead horizon (time steps into the future).
+*   **Training vs. Testing:** This bonus is **only applied during training**. During testing/backtesting, the agent is evaluated solely on real realized PnL ($r_t$).
+
+---
+
+### 2. Hyperparameter Optimization (HPO) Setup
+
+DeepScalper utilizes **Grid Search** rather than advanced Bayesian or Random search methods to tune its hyperparameters.
+
+#### **A. The Search Space**
+The authors explored the following specific grids for their hyperparameters:
+
+| Hyperparameter | Description | Grid Search Values | Optimal Findings (approx.) |
+| :--- | :--- | :--- | :--- |
+| **$h$** | **Hindsight Horizon** | `` (minutes) | Performance peaked at **180**, then decreased. |
+| **$w$** | **Hindsight Weight** | `[1e-3, 5e-3, 1e-2, 5e-2, 1e-1]` | **0.1** ($1e^{-1}$) achieved highest profit. |
+| **$\rho$** | **Aux. Task Weight** | `[0.5, 1.0]` | Results were robust, but **1.0** is a decent start. |
+| **Hidden Units** | Network Size (MLP/GRU) | `` | Not specified, dependent on asset complexity. |
+| **$\alpha$** | **Learning Rate** | Range `(1e-5, 1e-3)` | Tuned per asset. |
+
+#### **B. Training Execution Details**
+*   **Hardware:** The training was performed on a **Tesla V100 GPU**.
+*   **Duration:** The model was trained for **5 epochs** on each financial asset.
+*   **Optimizer:** The **Adam** optimizer was used for updating weights.
+*   **Data Augmentation:** To improve data efficiency and prevent overfitting, the trader's **private state** (account balance/position) was augmented repeatedly during training.
+*   **Robustness:** Experiments were run with **5 different random seeds** to ensure that the reported performance was not due to lucky initialization.
+
+### Summary of Key "Tricks"
+1.  **Prioritized Experience Replay:** Used to sample important transitions more frequently.
+2.  **Target Networks:** Updated recursively to stabilize Q-learning.
+3.  **Risk-Awareness:** The agent doesn't just maximize profit; the auxiliary task forces the shared embedding layer to encode market volatility risk.
+
+---
+
+## Implementation Roadmap (Revised)
 
 ### 0. Dependencies & Infrastructure
 **File:** `pyproject.toml`
--   Add `vectorbt`, `wandb`, `python-binance`, `python-dotenv`, `kaggle` to dependencies.
+-   Add `vectorbt`, `wandb`, `python-binance`, `python-dotenv`, `kaggle`.
 **File:** `scripts/deploy_gpuhub.py`
--   Create standardized deployment script for GPUHub execution.
-**File:** `.env`
--   Store `BINANCE_API_KEY`, `BINANCE_SECRET_KEY`, `KAGGLE_USERNAME`, `KAGGLE_KEY` safely.
-
-### 0.5. Database Integration
-**File:** `finrl_pro_ds/data/db.py`
--   **Schema Update:** Add `lob_snapshots` and `lob_data` tables to support high-frequency LOB data (Time, Ticker, Level, BidPrice, BidVol, AskPrice, AskVol).
-**File:** `scripts/reset_db_schema.py`
--   Create script to drop/re-create LOB tables.
-**File:** `finrl_pro_ds/data/handler.py`
--   Implement `DBMarketDataHandler` to fetch/stream data from TimescaleDB into the Gym Env.
-
-### 0.6. Clean Slate & Scaffolding
--   **Operations**: Pipe hygiene script (`scripts/clean.py`).
--   **Structure**:
-    -   `finrl_pro_ds/agents/deepscalper/`: Core model logic.
-    -   `configs/deepscalper_unified.yaml`: Centralized configuration.
-    -   `tests/deepscalper/`: dedicated test suite.
+-   Standardized deployment script.
 
 ### 1. Data Engineering & Preprocessing
 **File:** `finrl_pro_ds/data/feature_engineering.py`
--   **Micro-Features (LOB)**:
-    -   **Normalization**: Convert absolute prices to *relative percentage changes* (Log Returns) or *spread-relative* levels.
-    -   **Order Flow Imbalance (OFI)**: Calculate *Aggressor Trade* Delta (Active Buying - Active Selling) vs. Passive Depth.
-    -   **Crypto-Specifics**:
-        -   **Funding Rates**: Include current funding rate and countdown (critical for perp holding costs).
-        -   **Open Interest (OI)**: Track OI changes to detect liquidation cascades.
-    -   **Stationarity**: Ensure all inputs are stationary (z-score normalization using rolling window).
--   **Macro-Features (Technicals)**:
-    -   **Library**: Use `pandas-ta` to generate standard indicators.
-    -   **Indicators**: RSI (14), MACD, Bollinger Bands, ATR (Volatility), OBV (Volume).
-    -   **Horizon**: Multiple timeframes (1min, 5min, 15min) to capture broader trends.
--   **Multi-Modal Alignment**:
-    -   **Frequency Mismatch**: Micro data is tick/snapshot level (~100ms), Macro is bar level (1min).
-    -   **Strategy**: *Forward Fill* Macro features. Every Micro snapshot sees the most recent completed Macro bar's features.
+-   **Micro-Features (LOB)**: LSTM-ready sequences.
+-   **Macro-Features (Technicals)**: MLP-ready vector.
+-   **Auxiliary Target Generation**: Pre-calculate "Future Volatility" for the $L_{vol}$ loss.
 
-### 2. New Environment Module
-**File:** `finrl_pro_ds/envs/deep_scalper_env.py`
--   **Class:** `DeepScalperEnv(gymnasium.Env)`
--   **State Space:** Dictionary space `{ 'micro': (T, Levels, 4), 'macro': (Features,), 'private': (Pos, cash) }`.
--   **Action Space:** Discrete (0: Hold, 1: Buy, 2: Sell) or Continuous (if adapted).
--   **Reward:** PnL - **Maker/Taker Fees** - Funding Cost - Volatility Penalty.
-    -   *Crucial Update*: Differentiate Maker (0.02%) vs Taker (0.04%) fee application.
--   **Execution Logic (Hardened)**:
-    -   **Level Crossing**: For limit orders, only fill if `Ask Px < Limit Px` (Conservative). No "Touch Fills".
-    -   **Latency Simulation**: Implement `t+1` tick execution delay to prevent lookahead bias.
-    -   **Order Manager**: Logic to handle "Modify" (Cancel-Replace) vs "New" orders efficiently.
--   **Safety**: Circuit breakers for Max Drawdown and Position Size limits.
--   **Integration:** Must accept a `DatabaseClient` to stream LOB data.
-
-### 3. Neural Network Architecture
+### 2. Neural Network Architecture (Single BDQ)
 **File:** `finrl_pro_ds/agents/deepscalper/networks.py`
-#### [NEW] Component: Micro-Encoder
--   **Input:** LOB Snapshot Sequence `(Batch, Time, Levels * 4)`.
--   **Layer:** LSTM or GRU.
--   **Output:** Micro-Feature Vector `h_micro`.
+-   Implement `DeepScalperNetwork` class:
+    -   `MicroEncoder` (LSTM)
+    -   `MacroEncoder` (MLP)
+    -   `FusionLayer` -> `FeatureExtractor`
+    -   `ValueHead`
+    -   `ActionHeads` (Price, Quantity, Direction?? Paper specifies Price/Quantity, implementation usually needs Direction too or encodes it).
+    -   **Auxiliary Head**: Predicts volatility from fusion layer.
 
-#### [NEW] Component: Macro-Encoder
--   **Input:** Technical Indicators `(Batch, Features)`.
--   **Layer:** MLP (Dense Layers).
--   **Output:** Macro-Feature Vector `h_macro`.
+### 3. Training Logic (Custom Trainer)
+**File:** `finrl_pro_ds/training/trainer.py`
+-   **Custom Loss Calculation**:
+    -   Calculate $L_q$ (TD Error).
+    -   Calculate $L_{vol}$ (MSE between Aux Head and Actual Volatility).
+    -   Combine: $loss = L_q + \rho L_{vol}$.
+-   **Reward Shaping Integration**:
+    -   Augment rewards in the Replay Buffer with $r_{hind}$.
 
-#### [NEW] Component: Fusion Policy & Action Branching
--   **Input:** `h_micro`, `h_macro`.
--   **Fusion:** Concatenation -> Dense Layers -> Shared Representation `h_fusion`.
--   **Action Branching Heads:** The paper uses 3 independent decision branches:
-    1.  **Direction Head**: 3 outputs (Buy, Sell, Hold).
-    2.  **Price Head**: 5 outputs (Limit Price offsets).
-    3.  **Quantity Head**: 5 outputs (Volume proportions, e.g., 10%, 25%, 50%, 75%, 100%).
--   **Output:** Separate Q-values for each branch (Total Actions = 3 + 5 + 5 = 13 outputs vs 3x5x5 = 75 in flat space).
-
-### 4. Agent Ensemble (The "Scalper Squad")
-**File:** `finrl_pro_ds/agents/deepscalper/ensemble.py`
--   **Class:** `DeepScalperEnsemble`
--   **Strategy:** **Synapse Dynamic Weighting** (Meta-Controller).
--   **Sub-Agents:**
-    1.  **Branching Dueling DQN**: (The Expert) Limit Order specialist.
-    2.  **PPO (Multi-Discrete)**: (The Anchor) Stability specialist.
-    3.  **A2C (Multi-Discrete)**: (The Trend Follower) Volatility specialist.
--   **Aggregation Mechanism: Synapse Gating Network**
-    -   **Input:** `Macro Context` (Technical Indicators).
-    -   **Normalization (CRITICAL FIX)**:
-        -   **DQN**: Apply `Softmax(Q_values / Temp)` to convert Q-values to pseudo-probabilities.
-        -   **PPO/A2C**: Use Policy Probabilities directly.
-    -   **Meta-Learner:** A small MLP that outputs a **Softmax** vector `[w_dqn, w_ppo, w_a2c]`.
-    -   **Logic:** `Final_Probs = w_dqn * Probs_DQN + w_ppo * Probs_PPO + w_a2c * Probs_A2C`.
-
-### 5. Training Pipeline
-**File:** `scripts/train_ensemble.py`
--   **Strategy: Two-Phase Training (Stability)**
-    -   **Phase 1 (Specialists)**: Train DQN, PPO, A2C independently on the environment. Freeze weights.
-    -   **Phase 2 (Meta-Controller)**: Train ONLY the Gating Network (MLP) to select/weight the best specialist for the current state.
-    -   **Evaluate:** VectorBT backtest of the Ensemble on unseen test data.
-
-## Verification Plan
-
-### 1. Automated Unit Tests
--   **Shape/PASS Test:** Verify the network accepts the Dict observation and outputs correct action shapes.
--   **Ensemble Voting Test:** Feed conflicting inputs to mock agents and verify the voting logic (Soft Majority) works as expected.
--   **Gradient Check:** Ensure gradients flow to both LSTM (Micro) and MLP (Macro) weights.
-
-### 2. Pipeline Integration Tests (End-to-End)
--   **Data Ingestion Test**: Run `scripts/ingest_kaggle_lob.py` on a small sample, query TimescaleDB to verify correct schema and data integrity.
--   **Environment Streaming Test**: Initialize `DeepScalperEnv` connected to DB, step through 100 ticks, verify `t+1` latency logic and reward calculations.
--   **Training Smoke Test**: Run `scripts/train_ensemble.py` for 100 steps (1 epoch) with mock data. Verify:
-    -   Weights update.
-    -   WandB logs are created.
-    -   Checkpoints are saved.
--   **Evaluation Pipeline Test**: Load a saved checkpoint, run `vectorbt` backtest, and generate an HTML report. Verify no `NaN` metrics.
-
-### 3. Manual Verification
--   **Review Learning Curves:** Check for convergence (increasing Reward, decreasing Loss).
--   **Inspect Latency:** Ensure LOB processing is efficient enough for training (>100 steps/sec).
-
-## Definition of Done (Post-Coding)
-> [!IMPORTANT]
-> The implementation of any phase is NOT complete until the following are executed:
-
-1.  **Documentation Update**:
-    -   Update repository root `README.md` to list the new `DeepScalper` module.
-    -   Create/Update `finrl_pro_ds/agents/deepscalper/README.md` explaining the package structure.
-2.  **Task Tracking**:
-    -   Update `task.md` to mark completed items as `[x]`.
-3.  **Hygiene**:
-    -   Run `scripts/clean.py` to remove `__pycache__`, temporary logs, and artifacts.
-    -   Ensure no sensitive API keys were accidentally committed (check `.env` usage).
+### 4. Verification Plan
+-   **Unit Test**: Verify Hindsight Bonus calculation matches formula.
+-   **Unit Test**: Verify Aux Loss gradient flow.
+-   **Integration**: Train Single Agent on Smoke Test.
+-   **Validation**: Check if Aux Loss decreases alongside RL Loss.
 
 ---
 
 ## Implementation Updates Log
 
-> [!NOTE]
-> This section tracks significant updates to the DeepScalper pipeline implementation.
+### 2026-02-02 11:45 | Blueprint Alignment to Paper
+**Status:** ✅ Completed
+-   Replaced experimental "Synapse Ensemble" with **Single BDQ Agent** as per *Sun et al.*.
+-   Added **Hindsight Bonus** and **Auxiliary Loss** specifications.
+-   Defined **HPO Grid** based on paper findings.
 
-### 2026-02-01 11:05 | Ensemble Gating Weight Logging
+### 2026-02-01 11:05 | Ensemble Gating Weight Logging (Legacy)
+*Note: This feature is relevant only if we revert to ensemble, keeping for history.*
 **Commit:** `31aaf0c`
-| File | Change |
-|------|--------|
-| `ensemble.py` | `predict()` now returns `(action, weights_dict)` |
-| `backtest_deepscalper.py` | Adds `weight_dqn`/`weight_ppo`/`weight_a2c` columns to results |
-| `wandb_evaluator.py` | New "Gating Weights" stacked area chart |
-
-**Self-Audit Fixes:** Removed duplicate `self.device`, added defensive array checks, fixed PPO/A2C init args.
-
----
-
-### 2026-02-01 10:00 | System Stabilization & Architecture Verification
-**Status:** ✅ Mission Critical Success
-
-| Fix | File | Description |
-|-----|------|-------------|
-| "Doom Loop" Resolution | `deepscalper_trainer.py` | Rewrote `evaluate()` with robust episode counting (handles `VectorEnv` auto-resets) |
-| "Zombie Process" Killer | `deploy_bare_metal.py` | Aggressive `pkill -f` for all DeepScalper scripts before deployment |
-
-**Architecture Verified:**
-- Two-Phase Training (Specialists → Gating) correctly orchestrated in `run_full_pipeline.py`
-- Weight freezing logic confirmed in `deepscalper_trainer.py`
-- HPO defaults to `phase="full"` (Joint Optimization)
-
----
 
 ### 2026-02-01 02:00 | RTX 5090 Precision Optimization
 **Status:** ✅ Implemented
-
-| Setting | Implementation |
-|---------|----------------|
-| TF32 Precision | `torch.set_float32_matmul_precision('high')` |
-| FP16 Enforcement | Explicit `autocast(..., dtype=torch.float16)` in update loops |
-| Batch Scaling | Increased to `16,384` for GDDR7 bandwidth |
-
----
-
-### 2026-01-30 13:00 | WandB Logging Audit Fixes
-**Status:** ✅ All Critical Bugs Resolved
-
-| Bug | File | Resolution |
-|-----|------|------------|
-| Duplicate PPO Loss | `deepscalper_trainer.py` | Removed duplicate `total_loss` accumulation |
-| A2C NaN Return | `deepscalper_trainer.py` | Changed to `return None` on non-finite loss |
-| Redundant Gating Logic | `deepscalper_trainer.py` | Simplified metric append |
-
----
-
-### 2026-01-30 04:00 | Checkpoint Versioning Fix
-**Status:** ✅ Fixed
-- `DeepScalperTrainer` now creates unique checkpoint directories based on run name.
-- Prevents data overwrites between runs.
-
----
-
-### 2026-01-30 02:30 | V9.5 Replay Ratio Stabilization
-**Status:** ✅ Fixed
-- **Root Cause:** `dqn_update_interval: 0.5` with `num_envs: 24` caused 48 updates/step (Replay Ratio ~128).
-- **Fix:** Increased `dqn_update_interval` to `8.0` for stable learning.
+-   TF32 Precision & FP16 Enforcement.
