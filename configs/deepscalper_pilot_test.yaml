@@ -68,7 +68,7 @@ training:
   
   torch_compile: true
   use_amp: true         
-  use_shm: true
+  use_shm: false         # Disabled for HPO stability (SHM sync issues)
 
 hpo:
   enabled: true
