@@ -21,7 +21,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   transaction_fee: 0.00005 # Blended average (Maker 0.02%, Taker 0.05%) or explicit logic in Env
-  num_envs: 16            # RTX 5090 Efficient Batching
+  num_envs: 24            # RTX 5090 + 25 CPU Cores (Spawn Safe)
   window_size: 50
   
   reward:
@@ -82,11 +82,11 @@ agents:
     exploration_fraction: 0.2
     epsilon_start: 1.0
     epsilon_end: 0.01
-    epsilon_decay: 0.999995 # Target ~10% exp after 2M steps
+    epsilon_decay: 0.9998895 # FIX: Reaches epsilon_end=0.01 at 1M steps (41.7k decay calls @ num_envs=24)
 
 training:
   # Overall length
-  total_timesteps: 10000000
+  total_timesteps: 1000000  # 1M steps (Phase 1 - will scale to 10M)
   log_interval: 1000
   
   # Optimization

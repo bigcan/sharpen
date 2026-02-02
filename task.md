@@ -46,6 +46,7 @@
             - [x] Update `run_full_pipeline.py` to propagate Run ID from Phase 2 to Phase 3.
         - [x] Run Smoke Test with **Production Data** (Jan 2023) -> Launched as Pilot `hmz9g7op` on GPUHub.
             - [x] **Verification:** Pilot Completed (-7.8% Return). Report Generated.
+            - [x] **Reporting Fix:** Resolved Benchmark Data & Trade Logging. Verified in run `uiuivysu`.
         - [x] Committed and Pushed changes to `DS_Core`.
         - [x] Fix HPO "Dirty State" (Clean `hpo.db` wipe)
         - [x] Implement WandB Tags for clean naming `[Completed]`
@@ -62,4 +63,5 @@
     - [x] Fix Replay Ratio (`dqn_update_interval: 2048.0`) <!-- id: 11 -->
     - [x] Implement Micro-Gating (LOB Encoder) <!-- id: 12 -->
     - [x] Verify with Smoke Test (Production Data, Joint Phase) <!-- id: 13 -->
-    - [ ] Deploy Production Config (Phase 3 Enabled) <!-- id: 14 -->
+    - [x] Deploy Production Config (Phase 3 Enabled) <!-- id: 14 -->
+        - Run: `DeepScalper_V1_GPUHub_20260202_1816` (1M steps, 24 envs)
