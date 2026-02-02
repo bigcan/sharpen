@@ -3,12 +3,9 @@ Purpose: Expose the FinRL Pro namespace for high-level package imports."""
 
 __all__ = [
     "data",
-    "env",
+    "envs",
     "agents",
     "training",
-    "eval",
-    "mlops",
-    "explainability",
-    "configs",
+    "analytics",
     "utils",
 ]

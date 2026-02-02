@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 from finrl_pro_ds.agents.deepscalper.networks import MicroEncoder, MacroEncoder, DeepScalperNetwork
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv, NUM_MACRO_FEATURES
-from finrl_pro_ds.data.handler import DBMarketDataHandler
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
 class TestDeepScalperNetworks(unittest.TestCase):
     def setUp(self):
@@ -85,7 +85,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
     def test_env_to_network_handshake(self):
         """Integration test: Verify Env observation flows to Network without error."""
         config = {"window_size": 50, "tick_size": 0.1}
-        mock_handler = MagicMock(spec=DBMarketDataHandler)
+        mock_handler = MagicMock(spec=ParquetDataHandler)
         
         # Mock feature row with all expected columns
         mock_row = {

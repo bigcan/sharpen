@@ -5,8 +5,7 @@ import numpy as np
 import gymnasium as gym
 
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
-from finrl_pro_ds.data.handler import DBMarketDataHandler
-from finrl_pro_ds.data.db import LOBSnapshot
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
 class TestDeepScalperEnv(unittest.TestCase):
     def setUp(self):
@@ -16,7 +15,7 @@ class TestDeepScalperEnv(unittest.TestCase):
             "tick_size": 0.1,
             "lot_size": 0.001
         }
-        self.mock_handler = MagicMock(spec=DBMarketDataHandler)
+        self.mock_handler = MagicMock(spec=ParquetDataHandler)
         self.env = DeepScalperEnv(self.config, self.mock_handler)
 
     def test_instantiation(self):
