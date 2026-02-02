@@ -44,10 +44,21 @@ def main():
          print(f"Data file not found: {file_path}")
          return
 
+    # FIX: Enforce Test Split Dates
+    test_start = data_config.get("test_start_date")
+    test_end = data_config.get("test_end_date")
+    
+    if test_start and test_end:
+        print(f"Backtest Range: {test_start} to {test_end}")
+    else:
+        print("WARNING: No Test Dates found in config! Backtesting on FULL DATASET.")
+
     handler = ParquetDataHandler(
         file_path=file_path,
         ticker=ticker,
-        feature_config=config.get("features", {})
+        feature_config=config.get("features", {}),
+        start_date=test_start,
+        end_date=test_end
     )
     
     env_config = config.get("env", {})

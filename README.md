@@ -34,6 +34,28 @@ pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 
 ---
 
+## 🛡️ Three-Tier QA Protocol
+
+To ensure reliability on expensive GPU resources, we strictly follow a three-tier execution strategy:
+
+### 1. Smoke Test (`deepscalper_smoke_test.yaml`)
+- **Purpose:** Logic verification & Crash detection.
+- **Scope:** 10 steps, Synthetic Data, CPU/Local.
+- **Goal:** Confirm code runs without syntax errors or immediate crashes.
+
+### 2. Pilot Run (`deepscalper_pilot_test.yaml`)
+- **Purpose:** Integration testing & "Trap" detection.
+- **Scope:** 1 Month Data, 5,000 Steps/Trial, Remote GPU.
+- **Goal:** Verify pipeline connectors (WandB, Shared Memory, HPO) and catch data-specific bugs (e.g., Short Dataset constraints, Memory Leaks) before committing to full training.
+- **Success Criteria:** HPO completes 1 cycle, Evaluation runs without OOM/BrokenPipe.
+
+### 3. Production Run (`deepscalper_production.yaml`)
+- **Purpose:** Model Convergence & Maximizing ROI.
+- **Scope:** Full Year Data, 10M Steps, 24 Envs, Torch Compile ON.
+- **Goal:** Produce the final profitable agent.
+
+---
+
 ## ⚡ Quick Start
 
 ### 1. Unified Configuration
