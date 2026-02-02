@@ -51,10 +51,24 @@ def main():
         run_name = generate_run_name(version="V1", platform=platform)
 
     print(f"Pipeline Run Name: {run_name}")
-    print("Enforcing Unified WandB Grouping...")
     
-    # CRITICAL: Set Group ID to run_name so HPO and Training appear together
+    # ---------------------------------------------------------
+    # UNIFIED WANDB RUN: Single run for entire pipeline
+    # ---------------------------------------------------------
+    wandb_config = base_config.get("wandb", {})
+    wandb.init(
+        project=wandb_config.get("project", "FinRL-Pro-DS"),
+        entity=wandb_config.get("entity", "bigcan-chiwin-technology"),
+        name=run_name,
+        tags=args.tags,
+        config=base_config
+    )
+    
+    # Propagate run ID to child scripts
+    os.environ["WANDB_RUN_ID"] = wandb.run.id
     os.environ["WANDB_RUN_GROUP"] = run_name
+    
+    print(f"Unified WandB Run: {wandb.run.url}")
     
     # ---------------------------------------------------------
     # 1. Hyperparameter Optimization (Ray Tune)
@@ -172,6 +186,10 @@ def main():
     subprocess.run(cmd)
 
     print("\n>>> PIPELINE COMPLETION SUCCESSFUL.")
+    
+    # Finalize unified WandB run
+    wandb.finish()
+    print("WandB run finalized.")
 
 if __name__ == "__main__":
     main()

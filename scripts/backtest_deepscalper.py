@@ -38,9 +38,15 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Using device: {device}")
 
-    # 0. Resume WandB if Run ID provided
-    if args.run_id:
-        import wandb
+    # 0. Resume WandB if unified or explicit Run ID provided
+    import wandb
+    unified_run_id = os.getenv("WANDB_RUN_ID")
+    
+    if unified_run_id:
+        # Unified run from orchestrator - already initialized, just log
+        logger.info(f"Using unified WandB run: {unified_run_id}")
+    elif args.run_id:
+        # Legacy: explicit run ID from CLI
         wandb_config = config.get("wandb", {})
         project = wandb_config.get("project", "FinRL-Pro-DS")
         entity = wandb_config.get("entity", "bigcan-chiwin-technology")
