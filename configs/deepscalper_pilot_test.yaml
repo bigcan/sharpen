@@ -5,12 +5,12 @@
 data:
   file_path: "data/btc_lob_jan2023.parquet"
   ticker: "BTCUSDT"
-  train_start_date: "2023-01-01"
-  train_end_date: "2023-01-07"   # 1 week data
-  val_start_date: "2023-01-07"
-  val_end_date: "2023-01-08"
-  test_start_date: "2023-01-08"
-  test_end_date: "2023-01-09"
+  train_start_date: "2023-01-10 00:00:00"
+  train_end_date: "2023-01-18 23:59:59"
+  val_start_date: "2023-01-19 00:00:00"
+  val_end_date: "2023-01-19 23:59:59"
+  test_start_date: "2023-01-20 00:00:00"
+  test_end_date: "2023-01-20 23:59:59"
 
 features:
   micro_features: ["micro"]
@@ -21,7 +21,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   transaction_fee: 0.00005 
-  num_envs: 1            # Single Env for Windows Pilot Stability
+  num_envs: 24            # Scaled for RTX 5090 Blackwell Capacity
   window_size: 50
   
   reward:
@@ -65,9 +65,9 @@ training:
   total_timesteps: 100000   # 100k steps (Pilot Scale)
   log_interval: 500
   
-  torch_compile: false      # Skip compilation overhead
+  torch_compile: true
   use_amp: true         
-  use_shm: false
+  use_shm: true
   
 wandb:
   project: "FinRL-Pro-DS"

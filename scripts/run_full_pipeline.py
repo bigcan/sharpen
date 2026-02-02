@@ -26,6 +26,8 @@ def main():
     parser.add_argument("--skip_backtest", action="store_true", help="Skip Backtest")
     parser.add_argument("--tags", nargs="*", default=["Pipeline"], help="WandB Tags")
     parser.add_argument("--run_name", type=str, default=None, help="Override WandB Run Name")
+    parser.add_argument("--trials", type=int, default=None, help="Number of HPO trials")
+    parser.add_argument("--steps", type=int, default=None, help="Number of training steps override")
     args = parser.parse_args()
 
     base_config = load_config(args.config)
@@ -34,6 +36,11 @@ def main():
     # 1. Hyperparameter Optimization (Ray Tune)
     # ---------------------------------------------------------
     best_params_path = "configs/best_params.yaml"
+    
+    # CRITICAL: Delete legacy best_params to ensure run reproducibility
+    if os.path.exists(best_params_path):
+        print(f"Removing stale HPO results from {best_params_path}")
+        os.remove(best_params_path)
     
     if not args.skip_hpo:
         print("\n" + "="*50)
@@ -48,20 +55,24 @@ def main():
         ]
         if args.tags:
             cmd.extend(["--tags"] + args.tags)
+        if args.trials:
+            cmd.extend(["--trials", str(args.trials)])
             
         print(f"Executing: {' '.join(cmd)}")
         ret = subprocess.run(cmd)
         if ret.returncode != 0:
             print("HPO Failed.")
             sys.exit(ret.returncode)
-    
-    # Reload config with best params if available
-    if os.path.exists(best_params_path):
+        
+        if not os.path.exists(best_params_path):
+            print("HPO completed but no best_params.yaml was produced. Terminating.")
+            sys.exit(1)
+
         print(f"Loading optimized parameters from {best_params_path}")
         best_params = load_config(best_params_path)
         final_config = merge_configs(base_config, best_params)
     else:
-        print("No best params found, using default config.")
+        print("Skipping HPO; using base configuration directly.")
         final_config = base_config
 
     # ---------------------------------------------------------
@@ -99,6 +110,8 @@ def main():
     ]
     if args.tags:
         cmd.extend(["--tags"] + args.tags)
+    if args.steps:
+        cmd.extend(["--total_timesteps", str(args.steps)])
         
     print(f"Executing: {' '.join(cmd)}")
     ret = subprocess.run(cmd)

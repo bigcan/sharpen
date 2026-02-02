@@ -52,6 +52,7 @@ def main():
     parser.add_argument("--config", type=str, default="configs/deepscalper_rtx5090.yaml")
     parser.add_argument("--output", type=str, default="configs/best_params.yaml")
     parser.add_argument("--tags", nargs="*", default=["HPO"])
+    parser.add_argument("--trials", type=int, default=1, help="Number of trials if using random/bayesian search")
     args = parser.parse_args()
     
     print(f"Loading config from {args.config}")

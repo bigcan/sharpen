@@ -36,7 +36,11 @@
         - [x] Implement "Joint Fine-tuning" Logic (Phase 3)
         - [x] Deploy to GPUHub with Demo Data (Sanity Check)
         - [x] Resolve Deployment Bugs (Import Errors, Path Issues)
-        - [/] Run Smoke Test with **Production Data** (Jan 2023) `[Running]`
+        - [x] Corrected Split Dates: Train (Jan 10-18), Val (Jan 19), Test (Jan 20).
+            - [x] Specified precise timestamps (00:00:00 to 23:59:59).
+            - [x] Identified LOB vs 1m discrepancy for Pilot duration.
+            - [x] Enabled Performance Features: `torch_compile`, `use_shm`.
+        - [ ] Run Smoke Test with **Production Data** (Jan 2023) `[Awaiting Clarification]`
         - [x] Fix HPO "Dirty State" (Clean `hpo.db` wipe)
         - [x] Implement WandB Tags for clean naming `[Completed]`
     - [ ] **Expert Audit Implementation**
