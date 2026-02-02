@@ -13,6 +13,7 @@ import sys
 import copy
 import numpy as np
 import pandas as pd
+import wandb
 import torch
 import gymnasium as gym
 import functools
@@ -187,7 +188,8 @@ def objective(trial, base_config, args):
             env=train_env,
             config=config,
             device=device,
-            run_name=f"hpo_trial_{trial.number}"
+            run_name=f"hpo_trial_{trial.number}",
+            hpo_mode=True  # Suppress step-level WandB logging
         )
         
         # === PROPER EARLY STOPPING ===
@@ -238,7 +240,7 @@ def objective(trial, base_config, args):
     except Exception as e:
         logger.error(f"Trial {trial.number} failed: {e}")
         wandb.finish()
-        raise optuna.TrialFailed(f"Trial crashed: {e}")
+        raise e
     finally:
         # P0 FIX: Always cleanup resources
         if 'train_env' in locals():
