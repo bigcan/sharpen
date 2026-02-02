@@ -54,22 +54,26 @@ class DeepScalperTrainer:
         self.ckpt_dir = os.path.join("checkpoints", self.run_name)
         os.makedirs(self.ckpt_dir, exist_ok=True)
         
-    def train(self, start_step=0):
-        """Single Phase Training Loop"""
+    def train(self, start_step=0, skip_reset=False):
+        """Single Phase Training Loop
+        
+        Args:
+            start_step: Resume training from this step (for chunked HPO).
+            skip_reset: If True, reuse stored obs from previous chunk instead of resetting.
+        """
         print(f"Starting Training: Single BDQ Agent | Device: {self.device} | Start Step: {start_step}")
         
-        # Init State
-        # Obs is Dict: {'micro': ..., 'macro': ..., 'private': ...}
-        obs, _ = self.env.reset()
+        # Init State - Obs is Dict: {'micro': ..., 'macro': ..., 'private': ...}
+        if skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
+            obs = self._current_obs
+            print(f"  Resuming from stored observation (skip_reset=True)")
+        else:
+            obs, _ = self.env.reset()
         
         # Defensive Assertion: Ensure VectorEnv semantics (batch dimension present)
         assert len(obs["micro"].shape) == 3, \
             f"Expected obs['micro'] shape (B, Window, Features), got {obs['micro'].shape}. " \
             "Ensure env is wrapped in SyncVectorEnv even for num_envs=1."
-        
-        # Need to ensure obs components are batched correctly (VectorEnv does this, but if Single env?)
-        # If VectorEnv, obs['micro'] is (NumEnvs, Window, Feats)
-        # We process row-by-row for filling buffer if NumEnvs > 1
         
         num_envs = self.config["env"].get("num_envs", 1)
         
@@ -177,6 +181,9 @@ class DeepScalperTrainer:
             # 5. Checkpointing
             if global_step % self.checkpoint_interval == 0:
                 self.save_checkpoint(f"checkpoint_step_{global_step}.pth")
+                
+        # Store obs for potential resume via skip_reset=True
+        self._current_obs = obs
                 
         # Final Save
         self.save_checkpoint("checkpoint_final.pth")
