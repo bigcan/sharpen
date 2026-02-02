@@ -38,6 +38,7 @@ class DeepScalperTrainer:
             batch_size=config["agents"]["bdq"]["batch_size"],
             target_update_freq=config["agents"]["bdq"]["target_update_freq"],
             auxiliary_weight=config["agents"]["bdq"].get("auxiliary_weight", 1.0),
+            epsilon_decay=config["agents"]["bdq"].get("epsilon_decay", 0.99999), # FIX: Read from config
             action_dims=action_dims,  # FIX: Pass from config
             device=device
         )
@@ -152,13 +153,10 @@ class DeepScalperTrainer:
             # Or train once every 1/interval steps.
             
             if global_step > self.learning_starts:
-                num_updates = int(self.update_interval * num_envs) # Scale by envs?
-                # Actually, standard is: collected specific batch size?
-                # Using config logic: "Update every 2 steps" -> update_interval = 2.0 (wait 2 steps?)
-                # Config comment says: "dqn_update_interval: 2.0" -> "Update every 2 steps".
-                # My logic:
-                
-                should_update = (global_step % int(self.update_interval) == 0)
+                # Update Logic: Support Frequency based on int(interval)
+                # If interval=2.0, update every 2 steps.
+                update_step = int(self.update_interval)
+                should_update = (global_step % update_step == 0) if update_step > 0 else True
                 if should_update:
                      metrics = self.agent.train_step()
                      if metrics and global_step % self.log_interval == 0:

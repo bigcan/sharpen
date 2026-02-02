@@ -50,7 +50,7 @@ class DeepScalperBDQ:
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.01,
-        epsilon_decay: float = 0.995,
+        epsilon_decay: float = 0.999995, # Fix: Slower decay (target ~10% at 2M steps)
         buffer_size: int = 100000,
         batch_size: int = 64,
         target_update_freq: int = 100,

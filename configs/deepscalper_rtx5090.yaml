@@ -82,6 +82,7 @@ agents:
     exploration_fraction: 0.2
     epsilon_start: 1.0
     epsilon_end: 0.01
+    epsilon_decay: 0.999995 # Target ~10% exp after 2M steps
 
 training:
   # Overall length

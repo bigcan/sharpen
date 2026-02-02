@@ -47,7 +47,7 @@ network:
     hidden_sizes: [1024, 1024, 512] # Deep Regime Detection
 
 agents:
-  dqn:
+  bdq:
     learning_rate: 0.0001
     gamma: 0.99
     # Replay Ratio Optimization: 

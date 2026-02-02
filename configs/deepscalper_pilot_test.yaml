@@ -1,59 +1,76 @@
+# DeepScalper Pilot Test Configuration (Single BDQ)
+# Goal: Verify logic, connections, and initial learning.
+# Duration: ~15 mins
+
 data:
-  file_path: "data/btc_lob_jan2023.parquet" # Optimized for speed/memory
-  start_date: "2023-01-01"
-  end_date: "2023-01-31"   # 1 month for full context
-  split: [0.8, 0.1, 0.1]
-  tech_indicator_list: [] # We use custom feature engineer
+  file_path: "data/btc_lob_jan2023.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2023-01-01"
+  train_end_date: "2023-01-07"   # 1 week data
+  val_start_date: "2023-01-07"
+  val_end_date: "2023-01-08"
+  test_start_date: "2023-01-08"
+  test_end_date: "2023-01-09"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
 
 env:
-  num_envs: 2                # Reduced for stability
-  window_size: 20            # Reduced context for speed
-  initial_balance: 100000
-  transaction_fee: 0.0001
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  transaction_fee: 0.00005 
+  num_envs: 8            # Moderate parallelism for Pilot
+  window_size: 50
+  
   reward:
     profit_weight: 1.0
-    volatility_penalty_weight: 0.1
-    transaction_cost_penalty: 0.0 # Disabled: Fees are already in PnL (Realistic VIP 0)
+    hindsight_weight: 0.1
+    hindsight_horizon: 180
+    volatility_horizon: 100
+    
+  action:
+    direction_bins: 3 
+    price_bins: 5     
+    volume_bins: 5    
+    max_position: 5.0
 
 network:
-  hidden_size: 64
   micro_config:
     input_size: 20
     private_input_size: 2
-    hidden_size: 64
+    hidden_size: 128
+    rnn_type: "LSTM"
   macro_config:
     input_size: 11
-    hidden_sizes: [64]
-
-training:
-  total_timesteps: 100000    # ~20 mins on RTX 5090
-  batch_size: 1024           # Small batch
-  update_interval: 1024      # Frequent PPO updates
-  log_interval: 100
-  checkpoint_interval: 10000
-  
-  # Target Ratio: ~4
-  # Calculation: (1024 * 4) / 8 = 512
-  dqn_update_interval: 512.0 
-  
-  learning_rate: 0.0001
-  gamma: 0.99
-  
-  torch_compile: false       # Skip compilation overhead for short run
-  use_amp: true
-  use_shm: false
+    hidden_sizes: [256, 128] 
 
 agents:
-  dqn:
-    dqn_batch_size: 1024
-    dqn_buffer_size: 50000   # Small buffer
-    target_update_freq: 200
-  ppo:
-    entropy_coef: 0.01
-  a2c:
-    entropy_coef: 0.01
+  bdq:
+    learning_rate: 0.0001
+    gamma: 0.99
+    auxiliary_weight: 1.0
+    update_interval: 2.0 
+    batch_size: 128
+    buffer_size: 50000   
+    target_update_freq: 1000
+    checkpoint_interval: 10000 
+    learning_starts: 1000
+    epsilon_start: 1.0
+    epsilon_end: 0.05
+    epsilon_decay: 0.999    # Faster decay for pilot to see some exploitation
 
-phases:
-  phase1_specialists: 30000
-  phase2_gating: 30000
-  phase3_joint: 40000 # Enabled for Phase 3 Verification
+training:
+  total_timesteps: 100000   # 100k steps (Pilot Scale)
+  log_interval: 500
+  
+  torch_compile: false      # Skip compilation overhead
+  use_amp: true         
+  use_shm: false
+  
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["Pilot", "SingleBDQ", "VerifyingLogic"]
