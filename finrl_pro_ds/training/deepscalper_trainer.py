@@ -54,9 +54,9 @@ class DeepScalperTrainer:
         self.ckpt_dir = os.path.join("checkpoints", self.run_name)
         os.makedirs(self.ckpt_dir, exist_ok=True)
         
-    def train(self):
+    def train(self, start_step=0):
         """Single Phase Training Loop"""
-        print(f"Starting Training: Single BDQ Agent | Device: {self.device}")
+        print(f"Starting Training: Single BDQ Agent | Device: {self.device} | Start Step: {start_step}")
         
         # Init State
         # Obs is Dict: {'micro': ..., 'macro': ..., 'private': ...}
@@ -73,7 +73,7 @@ class DeepScalperTrainer:
         
         num_envs = self.config["env"].get("num_envs", 1)
         
-        global_step = 0
+        global_step = start_step
         episode_rewards = deque(maxlen=100)
         episode_lens = deque(maxlen=100)
         
