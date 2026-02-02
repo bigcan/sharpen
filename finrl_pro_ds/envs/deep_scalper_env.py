@@ -89,6 +89,10 @@ class DeepScalperEnv(gym.Env):
         self.vol_proportions = [0.1, 0.25, 0.5, 0.75, 1.0]
         self.max_position = config.get("max_position", 1.0)  # Max BTC
         
+        # Configurable Stop-Loss (default: 20% drawdown = 0.80 survival threshold)
+        self.max_drawdown_pct = config.get("max_drawdown_pct", 0.20)
+        self._stop_loss_threshold = 1.0 - self.max_drawdown_pct  # e.g., 0.60 for 40% drawdown
+        
         # Internal State
         self.current_step = 0
         self.balance = self.initial_balance
@@ -188,7 +192,7 @@ class DeepScalperEnv(gym.Env):
         info = {}
 
         current_val = self._get_portfolio_value()
-        if current_val < 0.8 * self.initial_balance:
+        if current_val < self._stop_loss_threshold * self.initial_balance:
              terminated = True
              reward = -1.0 # Penalty for hitting stop
              info['stop_loss'] = True
