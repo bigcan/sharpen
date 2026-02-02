@@ -176,18 +176,18 @@ def main():
                  # Given previous code had complex staggering, let's stick to Sync for 16 envs on Windows/PyTorch to avoid Pickle hell?
                  # Actually, config said "num_envs: 16". Sync might be slow.
                  # Using Async with 'spawn' context.
-                 try:
-                     # NOTE: Gymnasium's shared_memory=True is for obs/action IPC, NOT our data SHM.
-                     # We disable Gymnasium SHM (avoid /psm_* POSIX SHM failures in containers)
-                     # but our ParquetDataHandler SHM for data arrays is passed via config.
-                     env = gym.vector.AsyncVectorEnv(
-                         [env_factory for _ in range(num_envs)], 
-                         context="spawn", 
-                         shared_memory=False  # Disabled to avoid POSIX SHM namespace issues
-                     )
-                 except (RuntimeError, pickle.PicklingError, AttributeError) as e:
-                     print(f"AsyncVectorEnv failed ({type(e).__name__}: {e}), falling back to Sync.")
-                     env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
+                try:
+                    # NOTE: Gymnasium's shared_memory=True is for obs/action IPC, NOT our data SHM.
+                    # We disable Gymnasium SHM (avoid /psm_* POSIX SHM failures in containers)
+                    # but our ParquetDataHandler SHM for data arrays is passed via config.
+                    env = gym.vector.AsyncVectorEnv(
+                        [env_factory for _ in range(num_envs)], 
+                        context="spawn", 
+                        shared_memory=False  # Disabled to avoid POSIX SHM namespace issues
+                    )
+                except (RuntimeError, pickle.PicklingError, AttributeError, OSError) as e:
+                    print(f"AsyncVectorEnv failed ({type(e).__name__}: {e}), falling back to Sync.")
+                    env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
         else:
             # Force SyncVectorEnv to maintain (1, ...) shapes and array rewards
             env = gym.vector.SyncVectorEnv([env_factory])
