@@ -68,9 +68,14 @@ training:
   torch_compile: true
   use_amp: true         
   use_shm: true
+
+hpo:
+  enabled: true
+  n_trials: 3              # Quick verification (3 trials)
+  steps_per_trial: 10000   # 10k steps/trial for fast feedback
   
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   mode: "online"
-  tags: ["Pilot", "SingleBDQ", "VerifyingLogic"]
+  tags: ["Pilot", "SingleBDQ", "HPO"]

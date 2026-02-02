@@ -22,8 +22,7 @@ def merge_configs(base, overrides):
 def main():
     parser = argparse.ArgumentParser(description="DeepScalper Single BDQ Pipeline")
     parser.add_argument("--config", type=str, default="configs/deepscalper_rtx5090.yaml")
-    parser.add_argument("--skip_hpo", action="store_true", help="Skip HPO and use default/best params")
-    parser.add_argument("--skip_backtest", action="store_true", help="Skip Backtest")
+    # NOTE: --skip_hpo and --skip_backtest flags REMOVED to enforce full pipeline execution
     parser.add_argument("--tags", nargs="*", default=["Pipeline"], help="WandB Tags")
     parser.add_argument("--run_name", type=str, default=None, help="Override WandB Run Name")
     parser.add_argument("--trials", type=int, default=None, help="Number of HPO trials")
@@ -42,38 +41,39 @@ def main():
         print(f"Removing stale HPO results from {best_params_path}")
         os.remove(best_params_path)
     
-    if not args.skip_hpo:
-        print("\n" + "="*50)
-        print(">>> STARTING STEP 1: HYPERPARAMETER OPTIMIZATION (HPO)")
-        print("="*50 + "\n")
+    # HPO is MANDATORY - no skip flag
+    print("\n" + "="*50)
+    print(">>> STARTING STEP 1: HYPERPARAMETER OPTIMIZATION (HPO)")
+    print("="*50 + "\n")
+    
+    # Run tune script
+    hpo_config = base_config.get("hpo", {})
+    n_trials = args.trials or hpo_config.get("n_trials", 20)
+    steps_per_trial = hpo_config.get("steps_per_trial", 50000)
+    
+    cmd = [
+        sys.executable, "scripts/tune_deepscalper.py",
+        "--config", args.config,
+        "--output", best_params_path,
+        "--trials", str(n_trials),
+        "--steps", str(steps_per_trial)
+    ]
+    if args.tags:
+        cmd.extend(["--tags"] + args.tags)
         
-        # Run tune script
-        cmd = [
-            sys.executable, "scripts/tune_deepscalper.py",
-            "--config", args.config,
-            "--output", best_params_path
-        ]
-        if args.tags:
-            cmd.extend(["--tags"] + args.tags)
-        if args.trials:
-            cmd.extend(["--trials", str(args.trials)])
-            
-        print(f"Executing: {' '.join(cmd)}")
-        ret = subprocess.run(cmd)
-        if ret.returncode != 0:
-            print("HPO Failed.")
-            sys.exit(ret.returncode)
-        
-        if not os.path.exists(best_params_path):
-            print("HPO completed but no best_params.yaml was produced. Terminating.")
-            sys.exit(1)
+    print(f"Executing: {' '.join(cmd)}")
+    ret = subprocess.run(cmd)
+    if ret.returncode != 0:
+        print("HPO Failed.")
+        sys.exit(ret.returncode)
+    
+    if not os.path.exists(best_params_path):
+        print("HPO completed but no best_params.yaml was produced. Terminating.")
+        sys.exit(1)
 
-        print(f"Loading optimized parameters from {best_params_path}")
-        best_params = load_config(best_params_path)
-        final_config = merge_configs(base_config, best_params)
-    else:
-        print("Skipping HPO; using base configuration directly.")
-        final_config = base_config
+    print(f"Loading optimized parameters from {best_params_path}")
+    best_params = load_config(best_params_path)
+    final_config = merge_configs(base_config, best_params)
 
     # ---------------------------------------------------------
     # 2. Training (Single Phase)
@@ -139,23 +139,23 @@ def main():
     # ---------------------------------------------------------
     # 3. Backtesting
     # ---------------------------------------------------------
-    if not args.skip_backtest:
-        print("\n" + "="*50)
-        print(">>> STARTING STEP 3: BACKTESTING")
-        print(f"Consolidating with Run ID: {run_id}")
-        print("="*50 + "\n")
+    # Backtest is MANDATORY - no skip flag
+    print("\n" + "="*50)
+    print(">>> STARTING STEP 3: BACKTESTING")
+    print(f"Consolidating with Run ID: {run_id}")
+    print("="*50 + "\n")
+    
+    cmd = [
+        sys.executable, "scripts/backtest_deepscalper.py",
+        "--config", temp_config_path
+    ]
+    if run_id:
+        cmd.extend(["--run_id", run_id])
+    if args.tags:
+         cmd.extend(["--tags"] + args.tags)
         
-        cmd = [
-            sys.executable, "scripts/backtest_deepscalper.py",
-            "--config", temp_config_path
-        ]
-        if run_id:
-            cmd.extend(["--run_id", run_id])
-        if args.tags:
-             cmd.extend(["--tags"] + args.tags)
-            
-        print(f"Executing: {' '.join(cmd)}")
-        subprocess.run(cmd)
+    print(f"Executing: {' '.join(cmd)}")
+    subprocess.run(cmd)
 
     print("\n>>> PIPELINE COMPLETION SUCCESSFUL.")
 
