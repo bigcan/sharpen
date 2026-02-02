@@ -40,7 +40,8 @@
             - [x] Specified precise timestamps (00:00:00 to 23:59:59).
             - [x] Identified LOB vs 1m discrepancy for Pilot duration.
             - [x] Enabled Performance Features: `torch_compile`, `use_shm`.
-        - [ ] Run Smoke Test with **Production Data** (Jan 2023) `[Awaiting Clarification]`
+        - [x] Launched Clean Pilot Test to GPUHub (No Overrides).
+        - [x] Committed and Pushed changes to `DS_Core`.
         - [x] Fix HPO "Dirty State" (Clean `hpo.db` wipe)
         - [x] Implement WandB Tags for clean naming `[Completed]`
     - [ ] **Expert Audit Implementation**
