@@ -60,6 +60,14 @@ def make_env(config):
     file_path = data_config.get("file_path")
     ticker = data_config.get("ticker", "BTCUSDT")
     
+    # DEBUG: Check if SHM config reached the worker
+    shm_cfg = data_config.get("shared_memory_config")
+    print(f"[Worker {os.getpid()}] make_env: Has SHM config? {bool(shm_cfg)}", flush=True)
+    if shm_cfg:
+        print(f"[Worker {os.getpid()}] SHM Config keys: {list(shm_cfg.keys())}", flush=True)
+    else:
+        print(f"[Worker {os.getpid()}] WARNING: No SHM config found in data_config!", flush=True)
+    
     if not file_path or not os.path.exists(file_path):
         # Fallback for testing if file doesn't exist? Or crash.
         # Check if debug mode might imply mock data

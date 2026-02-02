@@ -25,6 +25,7 @@ class ParquetDataHandler:
         self._shm_objects = [] # Keep references to prevent GC of shared memory objects
         
         if shared_memory_config:
+            print(f"[Worker {os.getpid()}] ParquetDataHandler received SHM config.", flush=True)
             self._attach_shared_memory(shared_memory_config)
         else:
             self._timestamps: List[Any] = []

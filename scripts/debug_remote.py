@@ -13,7 +13,9 @@ def get_env_var(key):
         raise ValueError(f"Missing required environment variable: {key}")
     return val
 
-def debug_remote():
+import argparse
+
+def debug_remote(custom_cmd=None):
     host = get_env_var("GPUHUB_HOST")
     port = int(get_env_var("GPUHUB_PORT"))
     password = get_env_var("GPUHUB_PASSWORD")
@@ -26,7 +28,11 @@ def debug_remote():
     remote_workspace = "/workspace/DeepScalper"
     log_file = f"{remote_workspace}/run.log"
     
-    cmd = f"grep -a -E 'Trial|Error|Exception|Sharpe' {log_file} | tail -n 20"
+    if custom_cmd:
+        cmd = custom_cmd
+    else:
+        cmd = f"grep -a -E 'Trial|Error|Exception|Sharpe' {log_file} | tail -n 20"
+        
     print(f"Executing remote command: {cmd}")
     stdin, stdout, stderr = ssh.exec_command(cmd)
     
@@ -42,4 +48,7 @@ def debug_remote():
     ssh.close()
 
 if __name__ == "__main__":
-    debug_remote()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--cmd", type=str, help="Custom command to execute")
+    args = parser.parse_args()
+    debug_remote(args.cmd)
