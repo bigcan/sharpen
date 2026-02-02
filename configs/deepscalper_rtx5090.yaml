@@ -1,6 +1,6 @@
 # DeepScalper RTX 5090 Optimized Configuration
-# Based on consolidated hyperparameter reference (Feb 1 2026)
-# Focus: Convergence Quality & Sample Efficiency over Raw Throughput
+# Based on consolidated hyperparameter reference (Feb 1 2026) & Original Paper (Sun et al.)
+# Focus: Single BDQ Agent with Hybrid Loss
 
 data:
   file_path: "data/btc_lob_jan2023.parquet"
@@ -20,20 +20,22 @@ features:
 env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
-  transaction_fee: 0.0001
-  num_envs: 16            # Reduced from 24 to 16 for A2C CPU vectorization stability
+  transaction_fee: 0.00005 # Blended average (Maker 0.02%, Taker 0.05%) or explicit logic in Env
+  num_envs: 16            # RTX 5090 Efficient Batching
   window_size: 50
   
   reward:
     profit_weight: 1.0
-    volatility_penalty_weight: 0.1
-    volatility_horizon: 100
-    risk_aversion: 0.5
+    # Paper Settings HPO:
+    hindsight_weight: 0.1     # w = 0.1 (Optimal)
+    hindsight_horizon: 180    # h = 180 min (Optimal)
+    volatility_horizon: 100   # For Aux Target calculation
     
   action:
     direction_bins: 3 
     price_bins: 5     
     volume_bins: 5    
+    max_position: 5.0 # Max BTC
 
 network:
   # V9.5 Blackwell Architecture
@@ -41,31 +43,34 @@ network:
     input_size: 20
     private_input_size: 2
     hidden_size: 256
+    rnn_type: "LSTM"
     
   macro_config:
     input_size: 11
     hidden_sizes: [1024, 1024, 512] 
 
 agents:
-  dqn:
+  bdq:
     # Reference: 1e-4 (fixed)
     learning_rate: 0.0001
     gamma: 0.995 # Reference: 0.99-0.995
     
+    # Hybrid Loss Weight (rho)
+    auxiliary_weight: 1.0 # Paper: 1.0 robust
+    
     # Replay Ratio Math:
     # Batch=256, Envs=16. Target Ratio ~8.
-    # Updates/Step = (Ratio * Envs) / Batch = (8 * 16) / 256 = 128 / 256 = 0.5 updates per step.
+    # Updates/Step = (Ratio * Envs) / Batch = 0.5 updates per step.
     # Inverse: Update every 2 steps.
-    dqn_update_interval: 2.0 
+    update_interval: 2.0 
     
     # Reference: 128-256 (Bandwidth Optimized)
-    dqn_batch_size: 256
+    batch_size: 256
     
     # Reference: 1-2M (GDDR7 VRAM)
-    dqn_buffer_size: 2000000 
+    buffer_size: 2000000 
     
     # Reference: 5,000-10,000
-    dqn_target_update_freq: 7500
     target_update_freq: 7500
     
     checkpoint_interval: 100000 
@@ -75,54 +80,13 @@ agents:
     
     # Reference: Exploration 0.15-0.2
     exploration_fraction: 0.2
-    
-  ppo:
-    # Reference: 3e-4 -> 5e-5 (Decay)
-    # Set to Start Value (3e-4) as simple trainer doesn't support schedule string
-    learning_rate: 0.0003
-    gamma: 0.99
-    
-    # Reference: 0.2 (or 0.18-0.22)
-    clip_epsilon: 0.2
-    # Reference: Entropy 0.01 (Default)
-    entropy_coef: 0.01
-    
-    # Reference: n_steps 3000-4000
-    # Note: PPO typically uses n_steps as rollout definition.
-    # We map this to update_interval if shared, or handled in trainer.
-    
-    # Reference: 256-512 (RTX 5090)
-    mini_batch_size: 256
-    # We map this to update_interval if shared, or handled in trainer.
-    update_interval: 4096 # Explicitly match global collection size
-    
-  a2c:
-    # Reference: 7e-4 -> 1e-4 (Decay)
-    learning_rate: 0.0007
-    gamma: 0.99
-    
-    # Reference: Entropy 0.01-0.05 (CRITICAL)
-    entropy_coef: 0.02
-
-    # Reference: 15-25 steps per env. With num_envs=16, 20*16 = 320 global steps.
-    update_interval: 320 
-    
-  gating:
-    learning_rate: 0.0001
-    update_interval: 4096 # Update gating with PPO cadence
-    
+    epsilon_start: 1.0
+    epsilon_end: 0.01
 
 training:
   # Overall length
   total_timesteps: 10000000
-  
-  # PPO/A2C Batch Size (Reference: PPO 3000-4000)
-  batch_size: 4096      # PPO Batch
-  update_interval: 4096 # Steps per rollout (n_steps)
-  
-  learning_rate: 0.0001 # Fallback
   log_interval: 1000
-  checkpoint_interval: 100000
   
   # Optimization
   torch_compile: true   # Enabled
@@ -133,4 +97,4 @@ wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   mode: "online"
-  tags: ["RTX5090", "ReferenceProfile", "Optimized"]
+  tags: ["RTX5090", "SingleBDQ", "PaperAligned"]

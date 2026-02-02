@@ -1,54 +1,43 @@
 import argparse
 import yaml
 import os
-from datetime import datetime
-import pandas as pd # Explicitly import pandas/pyarrow BEFORE torch to avoid ABI crash
-# import pyarrow # REMOVED: Testing if this caused conflict
 import torch
 import logging
 import numpy as np
 import atexit
-from pathlib import Path
+import wandb
+import sys
+import gymnasium as gym
+import pickle  # FIX: Added for exception handling
 
 from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
-import gymnasium as gym
-from finrl_pro_ds.agents.deepscalper.dqn_agent import DeepScalperDQN
-from finrl_pro_ds.agents.deepscalper.policy_agents import DeepScalperPPO, DeepScalperA2C
-from finrl_pro_ds.agents.deepscalper.ensemble import DeepScalperEnsemble, SynapseGatingNetwork
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
-# Mock Env for initial testing if real env fails or for debugging
-class MockDeepScalperEnv(gym.Env):
-    metadata = {"render_modes": ["human"]}
+def load_config(path):
+    with open(path, 'r') as f:
+        return yaml.safe_load(f)
+
+def setup_wandb(config, run_name=None):
+    wandb_config = config.get("wandb", {})
+    project = wandb_config.get("project", "FinRL-Pro-DS")
+    tags = wandb_config.get("tags", [])
+    mode = wandb_config.get("mode", "online")
+    entity = wandb_config.get("entity", "bigcan-chiwin-technology")
     
-    def __init__(self):
-        super().__init__()
-        # Define spaces matching DeepScalperEnv
-        self.window_size = 50
-        self.micro_dim = 20
-        self.observation_space = gym.spaces.Dict({
-            "micro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self.micro_dim), dtype=np.float32),
-            "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(11,), dtype=np.float32),
-            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, 2), dtype=np.float32)
-        })
-        self.action_space = gym.spaces.MultiDiscrete([3, 5, 5])
-    
-    def reset(self, seed=None, options=None):
-        return {
-            "micro": np.random.randn(50, 20).astype(np.float32),
-            "macro": np.random.randn(11).astype(np.float32),
-            "private": np.zeros((50, 2), dtype=np.float32)
-        }, {}
-    
-    def step(self, action):
-        # Return proper types
-        obs = self.reset()[0]
-        reward = 1.0
-        terminated = False
-        truncated = False
-        info = {}
-        return obs, reward, terminated, truncated, info
+    if run_name:
+        wandb_config["name"] = run_name
+        
+    wandb.init(
+        project=project,
+        entity=entity,
+        config=config,
+        tags=tags,
+        mode=mode,
+        name=run_name,
+        resume="allow"
+    )
+    return wandb.run.name
 
 def make_env(config):
     """Factory to create DeepScalperEnv with Real Data"""
@@ -58,6 +47,8 @@ def make_env(config):
     ticker = data_config.get("ticker", "BTCUSDT")
     
     if not file_path or not os.path.exists(file_path):
+        # Fallback for testing if file doesn't exist? Or crash.
+        # Check if debug mode might imply mock data
         raise ValueError(f"Invalid data file path: {file_path}")
         
     # 2. Init Data Handler
@@ -70,378 +61,129 @@ def make_env(config):
     
     # 3. Init Env
     env_config = config.get("env", {})
-    # Inject reward config if it exists at top level, or ensure it's passed
-    env_config["reward"] = config.get("reward", {})
+    # Inject reward config
+    env_config["reward"] = config.get("env", {}).get("reward", {})
     
     env = DeepScalperEnv(config=env_config, data_handler=handler)
     return env
 
 def create_env(config, debug=False):
-    """Top-level wrapper for env creation to ensure picklability."""
     if debug:
-        return MockDeepScalperEnv()
+        # Simple Mock
+        class MockEnv(gym.Env):
+            metadata = {"render_modes": ["human"]}
+            def __init__(self):
+                self.observation_space = gym.spaces.Dict({
+                    "micro": gym.spaces.Box(-np.inf, np.inf, (50, 20)),
+                    "macro": gym.spaces.Box(-np.inf, np.inf, (11,)),
+                    "private": gym.spaces.Box(-np.inf, np.inf, (50, 2))
+                })
+                self.action_space = gym.spaces.MultiDiscrete([3, 5, 5])
+            def reset(self, **kwargs):
+                return {
+                    "micro": np.random.randn(50, 20).astype(np.float32),
+                    "macro": np.random.randn(11).astype(np.float32),
+                    "private": np.zeros((50, 2), dtype=np.float32)
+                }, {}
+            def step(self, action):
+                return self.reset()[0], 1.0, False, False, {"volatility_target": 0.001}
+        return MockEnv()
     return make_env(config)
 
-def load_config(path):
-    with open(path, 'r') as f:
-        return yaml.safe_load(f)
-
-import wandb
-
-import wandb
-
-def setup_wandb(config, run_id=None):
-    wandb_config = config.get("wandb", {})
-    project = wandb_config.get("project", "DeepScalper_Pilot")
-    tags = wandb_config.get("tags", [])
-    mode = wandb_config.get("mode", "online")
-    
-    # User requested entity: bigcan-chiwin-technology
-    entity = wandb_config.get("entity", "bigcan-chiwin-technology")
-    
-    # Enforce Naming Convention
-    from finrl_pro_ds.utils.naming import generate_run_name, standardize_run_name
-    run_name = wandb_config.get("name")
-    if not run_name:
-        run_name = generate_run_name(version="V1", platform="GPUHub")
-        print(f"Auto-generated Canonical Run Name: {run_name}")
-    else:
-        run_name = standardize_run_name(run_name)
-        print(f"Standardized Canonical Run Name: {run_name}")
-    
-    print(f"Initializing WandB: Project={project}, Entity={entity}, Mode={mode}, Name={run_name}")
-    wandb.init(
-        id=run_id, # UNIFIED PIPELINE RUN
-        resume="allow",
-        project=project,
-        entity=entity,
-        config=config,
-        tags=tags,
-        mode=mode,
-        name=run_name
-    )
-    return run_name
-
 def main():
-    parser = argparse.ArgumentParser(description="Train DeepScalper Agent")
+    parser = argparse.ArgumentParser(description="Train DeepScalper Single BDQ")
     parser.add_argument("--config", type=str, required=True, help="Path to config yaml")
     parser.add_argument("--debug", action="store_true", help="Use mock environment")
     parser.add_argument("--run_name", type=str, default=None, help="WandB Run Name")
-    parser.add_argument("--run_id", type=str, default=None, help="WandB Run ID for resuming")
-    parser.add_argument("--phase", type=str, choices=["full", "specialists", "gating"], default="full", help="Training Phase")
-    parser.add_argument("--load_checkpoint", type=str, default=None, help="Path to checkpoint to resume/start from")
-    parser.add_argument("--strict_checkpoint", action="store_true", help="Fail if checkpoint load has any errors")
-    parser.add_argument("--load_optimizers", action="store_true", help="Also load optimizer states from checkpoint (for mid-phase resume)")
     parser.add_argument("--tags", type=str, default=None, help="Comma-separated WandB tags")
+    parser.add_argument("--steps", type=int, default=None, help="Override total_timesteps (e.g. for smoke test)")
     args = parser.parse_args()
 
     # Load Config
     config = load_config(args.config)
     
-    if args.debug:
-        config["torch_compile"] = False
-        if "training" in config:
-            config["training"]["torch_compile"] = False
-            
-        print("DEBUG MODE: torch.compile disabled.")
-        # import torch._dynamo  <-- removed to prevent shadowing
-        if hasattr(torch, "_dynamo"):
-            torch._dynamo.config.suppress_errors = True
-    
-    # Override Run Name if provided
-    if args.run_name:
-        if "wandb" not in config: config["wandb"] = {}
-        config["wandb"]["name"] = args.run_name
-
-    # Override Tags if provided
+    # Override Steps
+    if args.steps:
+        print(f"Overriding total_timesteps: {args.steps}")
+        config["training"]["total_timesteps"] = args.steps
+        
+    # Override Tags
     if args.tags:
-        if "wandb" not in config: config["wandb"] = {}
         new_tags = [t.strip() for t in args.tags.split(",") if t.strip()]
-        # Merge with existing tags
-        current_tags = config["wandb"].get("tags", [])
+        current_tags = config.get("wandb", {}).get("tags", [])
+        if "wandb" not in config: config["wandb"] = {}
         config["wandb"]["tags"] = list(set(current_tags + new_tags))
-    
-    # Setup WandB
-    run_name = setup_wandb(config, run_id=args.run_id)
 
+    # Setup WandB
+    run_name = setup_wandb(config, run_name=args.run_name)
+    
     # Pre-load Data for Shared Memory (Optimization)
     data_loader = None
+    use_shm = config.get("training", {}).get("use_shm", False)
+    num_envs = config.get("env", {}).get("num_envs", 1)
     
-    # Emergency cleanup for abnormal exits (SIGTERM, etc.)
-    def _emergency_shm_cleanup():
-        if data_loader:
-            print("[atexit] Cleaning up Shared Memory...")
-            data_loader.close_shared_memory(unlink=True)
-    atexit.register(_emergency_shm_cleanup)
-    
-    # Respect use_shm config (default False if not specified)
-    use_shm_config = config.get("training", {}).get("use_shm", False)
-    
-    if config.get("env", {}).get("num_envs", 1) > 1 and not args.debug and use_shm_config:
+    if num_envs > 1 and not args.debug and use_shm:
         print("Initializing Shared Memory for Vector Env...")
         data_config = config.get("data", {})
         file_path = data_config.get("file_path")
         
-        # Load once in main process
         data_loader = ParquetDataHandler(
             file_path=file_path, 
             ticker=data_config.get("ticker", "BTCUSDT"), 
             feature_config=config.get("features", {})
         )
-        # Create SHM and inject into config
         shm_config = data_loader.create_shared_memory()
         data_config["shared_memory_config"] = shm_config
-        print(f"Shared Memory Initialized. Config injected.")
-    
-    # Device
-    # device = "cuda" if torch.cuda.is_available() else "cpu"
-    # print(f"Using device: {device}")
-    # MOVED DOWN after Env creation
-    
-    
-    
-    # Environment
-    
-    # Check for num_envs in config
-    env_config = config.get("env", {})
-    num_envs = env_config.get("num_envs", 1)
-    
-    # Define Factory
-    # Define Factory using functools.partial (Must be picklable for spawn)
+        
+        # Register cleanup
+        def cleanup():
+            if data_loader:
+                data_loader.close_shared_memory(unlink=True)
+        atexit.register(cleanup)
+        
+    # Env Factory
     import functools
-    
-    # Use the top-level create_env helper
     env_factory = functools.partial(create_env, config=config, debug=args.debug)
-            
-    # CRITICAL FIX for Multiprocessing with CUDA:
-    # 1. Do not initialize CUDA before forking/spawning if possible.
-    # 2. Use 'spawn' context to avoid CUDA context corruption in workers.
-    # We delay device init until after env creation (though we still assign it later).
     
     if num_envs > 1:
-        print(f"Vectorizing {'Mock' if args.debug else 'Real'} Environment: {num_envs} Envs")
-        
         if args.debug:
-             print("Debug Mode: Forcing SyncVectorEnv.")
              env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
         else:
-            try:
-                # Staggered spawning to avoid CPU/RAM spike that causes BrokenPipeError
-                # Each env waits based on its batch before loading data
-                batch_size = 6
-                delay_per_batch = 2.0  # seconds between batches
-                
-                def make_staggered_factory(index, base_factory, batch_size, delay_per_batch):
-                    """Create a factory that delays based on batch index to stagger data loading."""
-                    def staggered_factory():
-                        import time
-                        batch_num = index // batch_size
-                        delay = batch_num * delay_per_batch
-                        if delay > 0:
-                            time.sleep(delay)
-                        return base_factory()
-                    return staggered_factory
-                
-                staggered_factories = [
-                    make_staggered_factory(i, env_factory, batch_size, delay_per_batch)
-                    for i in range(num_envs)
-                ]
-                
-                total_batches = (num_envs + batch_size - 1) // batch_size
-                est_time = (total_batches - 1) * delay_per_batch
-                print(f"Using staggered AsyncVectorEnv: {num_envs} envs in {total_batches} batches of {batch_size}")
-                print(f"Estimated stagger time: {est_time:.1f}s to spread CPU/RAM load...")
-                
-                env = gym.vector.AsyncVectorEnv(staggered_factories, context="spawn", shared_memory=True)
-            except Exception as e:
-                import traceback
-                traceback.print_exc()
-                print(f"Failed to create AsyncVectorEnv: {e}. Fallback to Sync.")
-                env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
-            
-        print("Vector Environment Loaded.")
+             # Use Sync for stability unless Async needed
+             # For 16 envs, Async 'spawn' is better but harder to setup without proper main guard
+             # We use Sync for simplicity/robustness in this update unless performance is blocked
+             # But let's try Async with spawn context if possible, or Sync.
+             # Given previous code had complex staggering, let's stick to Sync for 16 envs on Windows/PyTorch to avoid Pickle hell?
+             # Actually, config said "num_envs: 16". Sync might be slow.
+             # Using Async with 'spawn' context.
+             try:
+                 env = gym.vector.AsyncVectorEnv(
+                     [env_factory for _ in range(num_envs)], 
+                     context="spawn", 
+                     shared_memory=use_shm
+                 )
+             except (RuntimeError, pickle.PicklingError, AttributeError) as e:
+                 print(f"AsyncVectorEnv failed ({type(e).__name__}: {e}), falling back to Sync.")
+                 env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
     else:
         env = env_factory()
-        print(f"{'Mock' if args.debug else 'Real'} Environment Loaded.")
-
-    # Device Setup - moved AFTER Env creation to check for CUDA safely
+        
+    print(f"Environment Loaded: {env}")
+    
+    # Device
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"Using device: {device}")
-
-    # Network Configs
-    # Network Configs
-    raw_net_config = config.get("network", {})
+    print(f"Device: {device}")
     
-    # Handle Flat YAML Config -> Nested Config for DeepScalperNetwork
-    if "micro_config" not in raw_net_config:
-        hidden_size = raw_net_config.get("hidden_size", 64)
-        net_config = {
-            "micro_config": {
-                "input_size": raw_net_config.get("micro_input_size", 20),
-                "private_input_size": raw_net_config.get("private_input_size", 2),
-                "hidden_size": hidden_size
-            },
-            "macro_config": {
-                "input_size": raw_net_config.get("macro_input_size", 11),
-                "hidden_sizes": [hidden_size]
-            },
-            # Preserve potential ensemble settings
-            "ensemble_config": raw_net_config.get("ensemble_config", {})
-        }
-    else:
-        net_config = raw_net_config
+    # Trainer
+    trainer = DeepScalperTrainer(env, config, device=device, run_name=run_name)
     
-    # Create clean config for agents (remove ensemble_config if present)
-    agent_net_config = net_config.copy()
-    if "ensemble_config" in agent_net_config:
-        del agent_net_config["ensemble_config"]
-    
-    # Initialize Agents with Specific Configs
-    agents_config = config.get("agents", {})
-    
-    # Sanitize Config Types (Fix for YAML string parsing issues)
-    def sanitize_config(cfg):
-        for k, v in cfg.items():
-            if isinstance(v, dict):
-                sanitize_config(v)
-            elif k in ["learning_rate", "gamma", "entropy_coef", "gae_lambda", "clip_epsilon", "max_grad_norm"]:
-                try:
-                    cfg[k] = float(v)
-                except:
-                    pass
-    
-    sanitize_config(agents_config)
-    
-    dqn_config = agents_config.get("dqn", {})
-    
-    # DQN expects network_config + its own params. 
-    # We combine them or pass specific args. 
-    # DQN signature: (network_config, lr, gamma, etc.)
-    # We can pass kwargs from dqn_config
-    
-    # Extract known args for DQN
-    dqn_lr = float(dqn_config.get("learning_rate", 1e-4)) # Fallback
-    dqn_gamma = float(dqn_config.get("gamma", 0.99))
-    # Passed as kwargs to dqn
-    # Map prefixed config keys to agent init args
-    dqn_kwargs = {}
-    
-    # Key Mapping (Config -> Init Arg)
-    key_map = {
-        "dqn_batch_size": "batch_size",
-        "dqn_buffer_size": "buffer_size",
-        "dqn_target_update_freq": "target_update_freq",
-        "dqn_epsilon_start": "epsilon_start",
-        "dqn_epsilon_end": "epsilon_end", 
-        "dqn_epsilon_decay": "epsilon_decay"
-    }
-
-    for k, v in dqn_config.items():
-        if k in ["learning_rate", "gamma"]:
-            continue
-            
-        if k in key_map:
-            dqn_kwargs[key_map[k]] = v
-        else:
-            # Pass through other keys 
-            dqn_kwargs[k] = v
-    
-    dqn = DeepScalperDQN(
-        network_config=agent_net_config, 
-        lr=dqn_lr,
-        gamma=dqn_gamma,
-        device=device,
-        **dqn_kwargs
-    )
-    
-    # PPO/A2C currently take net_config and device. LRs are handled in Trainer now.
-    ppo = DeepScalperPPO(agent_net_config, device=device)
-    a2c = DeepScalperA2C(agent_net_config, device=device)
-    
-    # Initialize Ensemble
-    ensemble_config = net_config.get("ensemble_config", {})
-    gating_input = ensemble_config.get("input_size", net_config["macro_config"]["input_size"])
-    gating_hidden = ensemble_config.get("hidden_size", 64)
-    
-    # Extract Micro Shape for Gating (Robust to Env Type)
-    if hasattr(env, "single_observation_space"):
-         # Vector Env
-         micro_shape = env.single_observation_space["micro"].shape
-    else:
-         # Single Env
-         micro_shape = env.observation_space["micro"].shape
-    
-    gating = SynapseGatingNetwork(input_dim=gating_input, micro_shape=micro_shape, hidden_dim=gating_hidden)
-    ensemble = DeepScalperEnsemble(dqn, ppo, a2c, gating, device=device)
-    
-    # Initialize Trainer
-    # Inject 'agents' config into 'training' config so Trainer can find it
-    training_config = config.get("training", {})
-    training_config["agents"] = config.get("agents", {})
-    
-    # DYNAMIC PHASE STEP ADJUSTMENT
-    # If config defines specific phase lengths, respect them.
-    phases_config = config.get("phases", {})
-    if phases_config:
-        p1 = phases_config.get("phase1_specialists", 0)
-        p2 = phases_config.get("phase2_gating", 0)
-        p3 = phases_config.get("phase3_joint", 0)
-        
-        original_total = training_config.get("total_timesteps", 100000)
-        new_total = original_total
-        
-        if args.phase == "specialists":
-            # Run until end of Phase 1
-             new_total = p1
-             print(f"PHASE LOGIC: Limiting Specialists Phase to {new_total} steps.")
-        elif args.phase == "gating":
-            # Run until end of Phase 2
-             new_total = p1 + p2
-             print(f"PHASE LOGIC: Limiting Gating Phase to {new_total} steps (Cumulative).")
-        elif args.phase == "full":
-            # Run until end of Phase 3 (or configured total if not using phases block for joint)
-             if p3 > 0:
-                 new_total = p1 + p2 + p3
-                 print(f"PHASE LOGIC: Limiting Joint Phase to {new_total} steps (Cumulative).")
-             else:
-                 print(f"PHASE LOGIC: Using global total {new_total} steps for Joint Phase.")
-        
-        # Override Training Config
-        training_config["total_timesteps"] = new_total
-    
-    # Check if we should enable torch.compile (passed via config or args)
-    # The config file has training.torch_compile
-    
-    trainer = DeepScalperTrainer(
-        env=env,
-        ensemble_agent=ensemble,
-        config=training_config,
-        device=device,
-        run_name=run_name  # Pass canonical run name for checkpoint versioning
-    )
-    
-    # Load Checkpoint if requested
-    if args.load_checkpoint:
-        try:
-            trainer.load_checkpoint(
-                args.load_checkpoint, 
-                strict=args.strict_checkpoint, 
-                load_optimizers=args.load_optimizers
-            )
-        except Exception as e:
-            print(f"FATAL: Failed to load checkpoint {args.load_checkpoint}: {e}")
-            sys.exit(1)
-    
-    # Start Training
     try:
-        trainer.train(phase=args.phase)
+        trainer.train()
     except KeyboardInterrupt:
-        print("Training interrupted. Saving checkpoint...")
-        trainer.save_checkpoint("checkpoints/interrupted_checkpoint.pth")
+        print("Interrupted.")
     finally:
         env.close()
         if data_loader:
-            print("Cleaning up Shared Memory...")
             data_loader.close_shared_memory(unlink=True)
 
 if __name__ == "__main__":
@@ -450,6 +192,4 @@ if __name__ == "__main__":
         mp.set_start_method("spawn", force=True)
     except RuntimeError:
         pass
-    import gymnasium as gym # Lazy import for vector envs
     main()
-

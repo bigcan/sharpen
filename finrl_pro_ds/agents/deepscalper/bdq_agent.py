@@ -39,9 +39,9 @@ class ReplayBuffer:
     def __len__(self):
         return len(self.buffer)
 
-class DeepScalperDQN:
+class DeepScalperBDQ:
     """
-    Branching Dueling DQN Agent for DeepScalper.
+    Branching Dueling Q-Network (BDQ) Agent for DeepScalper.
     """
     def __init__(
         self,
@@ -55,6 +55,7 @@ class DeepScalperDQN:
         batch_size: int = 64,
         target_update_freq: int = 100,
         auxiliary_weight: float = 0.1, # Section 4.4
+        action_dims: Tuple[int, int, int] = (3, 5, 5),  # FIX: Configurable action dims
         device: str = "cpu"
     ):
         self.device = torch.device(device)
@@ -66,6 +67,7 @@ class DeepScalperDQN:
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
         self.step_count = 0
+        self.action_dims = list(action_dims)  # FIX: Use constructor param
         
         # Initialize Networks
         self.policy_net = DeepScalperNetwork(**network_config).to(self.device)
@@ -75,9 +77,6 @@ class DeepScalperDQN:
         
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
         self.memory = ReplayBuffer(buffer_size)
-        
-        # Action dimensions (Dir, Price, Vol)
-        self.action_dims = [3, 5, 5] 
 
     def get_probs(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, temp: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -105,29 +104,64 @@ class DeepScalperDQN:
     def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
         """
         Select action using Epsilon-Greedy strategy.
+        Supports Batch Input.
         Input shapes:
-        micro: (1, Window, Features)
-        macro: (1, Features)
+        micro: (B, Window, Features)
+        macro: (B, Features)
+        Returns: (B, 3) numpy array
         """
         micro = micro.to(self.device)
         private_in = private_in.to(self.device)
         macro = macro.to(self.device)
         
-        if not deterministic and random.random() < self.epsilon:
-            # Random action for each branch
-            a_dir = random.randint(0, self.action_dims[0] - 1)
-            a_price = random.randint(0, self.action_dims[1] - 1)
-            a_vol = random.randint(0, self.action_dims[2] - 1)
-            return np.array([a_dir, a_price, a_vol])
+        batch_size = micro.shape[0]
         
+        # Epsilon-Greedy Mask
+        # We need independent random choices for each item in batch if we were doing true vector env exploration
+        # But commonly we just use the same epsilon check or per-env check.
+        # For efficiency, we can generate a mask.
+        
+        if not deterministic:
+            rand_vals = torch.rand(batch_size, device=self.device)
+            random_mask = rand_vals < self.epsilon
+        else:
+            random_mask = torch.zeros(batch_size, dtype=torch.bool, device=self.device)
+            
+        # Get Net Actions (Greedy)
         with torch.no_grad():
             q_dir, q_price, q_vol, _, _ = self.policy_net(micro, private_in, macro)
             
-            a_dir = q_dir.argmax(dim=1).item()
-            a_price = q_price.argmax(dim=1).item()
-            a_vol = q_vol.argmax(dim=1).item()
+            # (B,) indices 
+            a_dir_greedy = q_dir.argmax(dim=1)
+            a_price_greedy = q_price.argmax(dim=1)
+            a_vol_greedy = q_vol.argmax(dim=1)
             
-            return np.array([a_dir, a_price, a_vol])
+            # Stack: (B, 3)
+            greedy_actions = torch.stack([a_dir_greedy, a_price_greedy, a_vol_greedy], dim=1)
+            
+        # If any random, generate random actions for ALL (simplest) then mask, OR just fills
+        if random_mask.any():
+            # Generate random actions for the whole batch (wasteful but vector-friendly)
+            # or just for masked ones.
+            # Torch doesn't have randint for different ranges per column easily in one go if dims differ.
+            # But dims are fixed: 3, 5, 5.
+            
+            # Random Actions: (B, 3)
+            r_dir = torch.randint(0, self.action_dims[0], (batch_size,), device=self.device)
+            r_price = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
+            r_vol = torch.randint(0, self.action_dims[2], (batch_size,), device=self.device)
+            
+            random_actions = torch.stack([r_dir, r_price, r_vol], dim=1)
+            
+            # Combine
+            # Where mask is true, use random. Else greedy.
+            # mask is (B,) -> unsqueeze to (B,1)
+            mask_expanded = random_mask.unsqueeze(1).expand(-1, 3)
+            final_actions = torch.where(mask_expanded, random_actions, greedy_actions)
+        else:
+            final_actions = greedy_actions
+            
+        return final_actions.cpu().numpy()
     
     def train_step(self) -> Optional[Dict[str, float]]:
         if len(self.memory) < self.batch_size:
@@ -137,9 +171,6 @@ class DeepScalperDQN:
         state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = self.memory.sample(self.batch_size)
         
         # Prepare Tensors
-        # Assuming state is Dict[str, np.ndarray] or similar, need to collate
-        # We need to stack micro and macro components
-        # Note: Replay buffer stores list of tuples.
         
         def stack_dict_keys(batch_list, key):
             return torch.tensor(np.array([s[key] for s in batch_list]), dtype=torch.float32).to(self.device)
@@ -161,12 +192,11 @@ class DeepScalperDQN:
         q_dir, q_price, q_vol, _, pred_vol = self.policy_net(micro_state, private_state, macro_state)
         
         # Gather Q-values for taken actions
-        # actions[:, 0] is direction indices
         curr_q_dir = q_dir.gather(1, actions[:, 0].unsqueeze(1))
         curr_q_price = q_price.gather(1, actions[:, 1].unsqueeze(1))
         curr_q_vol = q_vol.gather(1, actions[:, 2].unsqueeze(1))
         
-        # Target Q-Values (Double DQN Logic could be added here, sticking to standard DQN for now)
+        # Target Q-Values
         with torch.no_grad():
             next_q_dir, next_q_price, next_q_vol, _, _ = self.target_net(micro_next, private_next, macro_next)
             
@@ -176,7 +206,6 @@ class DeepScalperDQN:
             max_next_q_vol = next_q_vol.max(1)[0].unsqueeze(1)
             
             # Target = r + gamma * max_next_Q * (1 - done)
-            # Branching DQN uses the SAME reward for all branches (common reward)
             target_q_dir = rewards + self.gamma * max_next_q_dir * (1 - dones)
             target_q_price = rewards + self.gamma * max_next_q_price * (1 - dones)
             target_q_vol = rewards + self.gamma * max_next_q_vol * (1 - dones)
@@ -192,7 +221,7 @@ class DeepScalperDQN:
         total_loss = loss_dir + loss_price + loss_vol + self.auxiliary_weight * loss_vol_pred
         
         if not torch.isfinite(total_loss):
-            print(f"WARNING: DQN Loss is {total_loss.item()} (NaN/Inf). Skipping update.", flush=True)
+            print(f"WARNING: BDQ Loss is {total_loss.item()} (NaN/Inf). Skipping update.", flush=True)
             return None
 
         self.optimizer.zero_grad()
@@ -201,13 +230,12 @@ class DeepScalperDQN:
         nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
         self.optimizer.step()
         
-        # Update epsilon
-        self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
+        # NOTE: Epsilon decay moved to dedicated method for decoupling
+        # Call decay_epsilon() from trainer after each env step batch
         
         # Update Target Net
         self.step_count += 1
         if self.step_count % self.target_update_freq == 0:
-            # Handle torch.compile prefix (_orig_mod.)
             state_dict = self.policy_net.state_dict()
             clean_state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
             self.target_net.load_state_dict(clean_state_dict)
@@ -226,6 +254,10 @@ class DeepScalperDQN:
         }
             
         return metrics
+
+    def decay_epsilon(self):
+        """Decay epsilon by one step. Call from trainer after each env step batch."""
+        self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
 
     def save(self, path: str):
         torch.save({
