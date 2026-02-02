@@ -143,8 +143,22 @@ def objective(trial, base_config, args):
     hpo_steps = args.steps if args.steps else 50000
     config["training"]["total_timesteps"] = hpo_steps
     
-    # Disable WandB during HPO to prevent spam
-    config["wandb"] = {"mode": "disabled"}
+    # Enable basic WandB logging for HPO trials
+    wandb_project = config.get("wandb", {}).get("project", "DeepScalper-HPO")
+    wandb.init(
+        project=wandb_project,
+        name=f"HPO_trial_{trial.number}",
+        tags=["HPO"] + (args.tags or []),
+        config={
+            "trial_number": trial.number,
+            "hindsight_horizon": hindsight_horizon,
+            "hindsight_weight": hindsight_weight,
+            "learning_rate": learning_rate,
+            "batch_size": batch_size,
+            "gamma": gamma,
+        },
+        reinit=True  # Allow multiple inits in same process
+    )
     
     logger.info(f"Trial {trial.number}: h={hindsight_horizon}, w={hindsight_weight:.4f}, aux={auxiliary_weight}")
     
@@ -213,12 +227,17 @@ def objective(trial, base_config, args):
         val_sharpe = evaluate_agent(val_env, trainer.agent, num_episodes=3, max_steps=hpo_steps // 10)
         
         logger.info(f"Trial {trial.number} completed: Val Sharpe={val_sharpe:.4f}")
+        wandb.log({"hpo/final_val_sharpe": val_sharpe})
+        wandb.finish()
         return val_sharpe
         
     except optuna.TrialPruned:
+        wandb.log({"hpo/pruned": True})
+        wandb.finish()
         raise
     except Exception as e:
         logger.error(f"Trial {trial.number} failed: {e}")
+        wandb.finish()
         raise optuna.TrialFailed(f"Trial crashed: {e}")
     finally:
         # P0 FIX: Always cleanup resources
