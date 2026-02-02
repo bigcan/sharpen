@@ -1,0 +1,120 @@
+{
+    "name": "DeepScalper_V1_GPUHub_20260202_1417",
+    "status": "finished",
+    "config": {
+        "env": {
+            "action": {
+                "price_bins": 5,
+                "volume_bins": 5,
+                "max_position": 5,
+                "direction_bins": 3
+            },
+            "reward": {
+                "profit_weight": 1,
+                "hindsight_weight": 0.1,
+                "hindsight_horizon": 180,
+                "volatility_horizon": 100
+            },
+            "symbol": "BTCUSDT",
+            "num_envs": 1,
+            "window_size": 50,
+            "initial_balance": 100000,
+            "transaction_fee": 5e-05
+        },
+        "data": {
+            "ticker": "BTCUSDT",
+            "file_path": "data/btc_lob_jan2023.parquet",
+            "val_end_date": "2023-01-08",
+            "test_end_date": "2023-01-09",
+            "train_end_date": "2023-01-07",
+            "val_start_date": "2023-01-07",
+            "test_start_date": "2023-01-08",
+            "train_start_date": "2023-01-01"
+        },
+        "wandb": {
+            "mode": "online",
+            "name": "DeepScalper_V1_GPUHub_20260202_1417",
+            "tags": [
+                "Pilot",
+                "Full",
+                "SingleBDQ",
+                "GPU",
+                "VerifyingLogic"
+            ],
+            "entity": "bigcan-chiwin-technology",
+            "project": "FinRL-Pro-DS"
+        },
+        "agents": {
+            "bdq": {
+                "gamma": 0.99,
+                "batch_size": 128,
+                "buffer_size": 50000,
+                "epsilon_end": 0.05,
+                "epsilon_decay": 0.999,
+                "epsilon_start": 1,
+                "learning_rate": 0.0001,
+                "learning_starts": 1000,
+                "update_interval": 2,
+                "auxiliary_weight": 1,
+                "target_update_freq": 1000,
+                "checkpoint_interval": 10000
+            }
+        },
+        "network": {
+            "macro_config": {
+                "input_size": 11,
+                "hidden_sizes": [
+                    256,
+                    128
+                ]
+            },
+            "micro_config": {
+                "rnn_type": "LSTM",
+                "input_size": 20,
+                "hidden_size": 128,
+                "private_input_size": 2
+            }
+        },
+        "features": {
+            "macro_features": [
+                "macro"
+            ],
+            "micro_features": [
+                "micro"
+            ],
+            "private_features": [
+                "position",
+                "balance"
+            ]
+        },
+        "training": {
+            "use_amp": true,
+            "use_shm": false,
+            "log_interval": 500,
+            "torch_compile": false,
+            "total_timesteps": 100000
+        }
+    },
+    "summary": {
+        "_runtime": 2993,
+        "_step": 197,
+        "_timestamp": 1770016087.304173,
+        "_wandb": {
+            "runtime": 2993
+        },
+        "agent/epsilon": 0.05,
+        "agent/loss_aux": 4.239532813699043e-07,
+        "agent/loss_dir": 2.3608760102433737e-07,
+        "agent/loss_price": 1.0202334976838757e-07,
+        "agent/loss_total": 9.564646461512891e-07,
+        "agent/loss_vol": 1.9440039977780546e-07,
+        "agent/q_dir_mean": 0.2342280149459839,
+        "agent/q_price_mean": 0.23428983986377716,
+        "agent/q_vol_mean": 0.23425506055355072,
+        "step": 100000,
+        "train/len_mean": 43241.5,
+        "train/reward_mean": -2.0441632401261964
+    },
+    "created_at": "2026-02-02T06:18:13Z",
+    "duration": 2993
+}

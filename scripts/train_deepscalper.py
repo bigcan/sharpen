@@ -131,6 +131,8 @@ def main():
 
     # Setup WandB
     run_name = setup_wandb(config, run_name=args.run_name)
+    print(f"WANDB_RUN_ID: {wandb.run.id}")
+    sys.stdout.flush()
     
     # Pre-load Data for Shared Memory (Optimization)
     data_loader = None

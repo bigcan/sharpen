@@ -40,7 +40,11 @@
             - [x] Specified precise timestamps (00:00:00 to 23:59:59).
             - [x] Identified LOB vs 1m discrepancy for Pilot duration.
             - [x] Enabled Performance Features: `torch_compile`, `use_shm`.
-        - [x] Launched Clean Pilot Test to GPUHub (No Overrides).
+        - [x] Consolidate WandB Runs (Single Run ID for Training + Backtest)
+            - [x] Update `train_deepscalper.py` to output Run ID.
+            - [x] Update `backtest_deepscalper.py` to accept and resume Run ID.
+            - [x] Update `run_full_pipeline.py` to propagate Run ID from Phase 2 to Phase 3.
+        - [ ] Run Smoke Test with **Production Data** (Jan 2023) `[Awaiting Clarification]` GPUHub (No Overrides).
         - [x] Committed and Pushed changes to `DS_Core`.
         - [x] Fix HPO "Dirty State" (Clean `hpo.db` wipe)
         - [x] Implement WandB Tags for clean naming `[Completed]`

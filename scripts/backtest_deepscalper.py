@@ -29,13 +29,28 @@ def main():
     parser.add_argument("--config", type=str, required=True, help="Path to config yaml")
     parser.add_argument("--checkpoint", type=str, default="auto", help="Path to checkpoint .pth or 'auto' to find latest")
     parser.add_argument("--debug", action="store_true", help="Debug mode")
-    parser.add_argument("--run_name", type=str, default=None, help="Run name (ignored but accepted for compatibility)")
+    parser.add_argument("--run_name", type=str, default=None, help="Run name (ignored if run_id provided)")
+    parser.add_argument("--run_id", type=str, default=None, help="WandB Run ID to resume/append results")
     parser.add_argument("--tags", nargs="*", default=[], help="WandB tags (compatibility)")
     args = parser.parse_args()
 
     config = load_config(args.config)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Using device: {device}")
+
+    # 0. Resume WandB if Run ID provided
+    if args.run_id:
+        import wandb
+        wandb_config = config.get("wandb", {})
+        project = wandb_config.get("project", "FinRL-Pro-DS")
+        entity = wandb_config.get("entity", "bigcan-chiwin-technology")
+        logger.info(f"Resuming WandB Run: {args.run_id}")
+        wandb.init(
+            project=project,
+            entity=entity,
+            id=args.run_id,
+            resume="allow"
+        )
 
     # 1. Init Data & Environment
     logger.info("Initializing Environment...")
