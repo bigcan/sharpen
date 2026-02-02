@@ -7,6 +7,7 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 1.  **Multi-Modal Embedding**: Combining Micro-level (LOB) and Macro-level (OHLCV/Technicals) data.
 2.  **Encoder-Decoder/Fusion**: Using LSTM for Micro sequence learning and MLP for Macro context.
 3.  **Single BDQ Agent**: A standard Branching Dueling Q-Network processing the fused state.
+4.  **High-Performance Data Pipeline**: Utilizing **Shared Memory (SHM)** and `fastparquet` for zero-copy access to massive LOB datasets.
 
 ## Plan vs. Paper: Fidelity & Upgrades
 | Feature | DeepScalper Paper (Sun et al.) | FinRL-Pro Implementation | Status |
@@ -16,7 +17,7 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 | **Primary Algorithm** | Dueling DQN | Branching Dueling DQN | 🟢 **Aligned** |
 | **Agent Strategy** | Single Agent | **Single BDQ Agent** | 🟢 **Aligned** |
 | **Data Storage** | Flat Files (Implied) | **TimescaleDB** (High-Freq/Scalable) | 🚀 **Upgraded** |
-| **Evaluation** | Custom Backtester | **VectorBT** (Institutional Grade) | 🚀 **Upgraded** |
+| **Evaluation** | Custom Backtester | **Pyfolio** (Institutional Grade) | 🚀 **Upgraded** |
 | **Monitoring** | Static Plots | **WandB** (Real-time Tracking) | 🚀 **Upgraded** |
 | **Framework** | Plain PyTorch/Gym | **Gymnasium** + FinRL-Pro Ecosystem | 🚀 **Upgraded** |
 | **Asset Universe** | N/A | **Bitcoin Perpetual Futures** (BTC-USDT) |  **Defined** |
@@ -37,16 +38,17 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 
 > [!IMPORTANT]
 > **Tooling Mandate**:
-> - **Evaluation**: MUST use `vectorbt` for all performance metrics and reporting.
+> - **Evaluation**: MUST use `pyfolio` (via `empyrical`) for all performance metrics and reporting (VectorBT removed).
 > - **Monitoring**: MUST use `wandb` (Weights & Biases) for experiment tracking.
-> - **Deployment**: Pipeline will deploy to `gpuhub` for training and testing.
-> - **Data Source (Training)**: MUST use **Kaggle** (via CLI) to fetch High-Frequency LOB data (Option 1: `siavashraz/bitcoin-perpetualbtcusdtp-limit-order-book-data`).
+> - **Deployment**: Pipeline will deploy to `gpuhub` via `deploy_bare_metal.py`.
+> - **Hardware**: Optimized for **NVIDIA RTX 5090 (Blackwell)** (TF32, AMP, 24 Envs).
+> - **Data Source (Training)**: MUST use **Kaggle** (via CLI) to fetch High-Frequency LOB data.
 > - **Data Source (Live)**: Use **Binance** via `python-binance` for real-time streams.
 > - **Security**: API Credentials (Binance & Kaggle) must be loaded from `.env` (git-ignored).
 
 ## Non-Goals
--   **Ensemble Methods**: We are removing the experimental "Synapse" ensemble to strictly follow the paper's Single Agent design.
--   **MLflow**: We are deprecating MLflow in favor of WandB for this module.
+-   **Ensemble Methods**: We strictly adhere to the **Single BDQ** architecture. Multi-agent ensembles are out of scope for V1.
+-   **Legacy Formats**: We do not support CSV/Pandas for core training; Parquet/Numpy is mandatory for performance.
 
 ---
 
@@ -111,7 +113,26 @@ The authors explored the following specific grids for their hyperparameters:
 ### Summary of Key "Tricks"
 1.  **Prioritized Experience Replay:** Used to sample important transitions more frequently.
 2.  **Target Networks:** Updated recursively to stabilize Q-learning.
-3.  **Risk-Awareness:** The agent doesn't just maximize profit; the auxiliary task forces the shared embedding layer to encode market volatility risk.
+116.  **Risk-Awareness:** The agent doesn't just maximize profit; the auxiliary task forces the shared embedding layer to encode market volatility risk.
+117. 
+118. ---
+119. 
+120. ## Remote Deployment Standard
+121. 
+122. ### 1. Canonical Naming
+123. All runs must follow the strict canonical format enforced by `finrl_pro_ds.utils.naming`:
+124. `DeepScalper_V{version}_{Platform}_{YYYYMMDD}_{HHMM}`
+125. -   **No Suffixes**: Metadata (e.g., "Pilot", "HPO") must be stored in WandB **Tags**, not the run name.
+126. -   **Platform**: `GPUHub` or `Local`.
+127. 
+128. ### 2. Deployment Workflow
+129. -   **Script**: `scripts/deploy_bare_metal.py`
+130. -   **Orchestration**:
+131.     1.  **Pack**: Creates a filtered zip (excluding `data/`, `wandb/`, etc.).
+132.     2.  **Upload**: SCPs zip and data (with Gold Cache verification) to `/workspace/DeepScalper`.
+133.     3.  **Setup**: Installs dependencies (PyTorch 2.5+, CUDA 12.x) in a fresh Miniconda env.
+134.     4.  **Launch**: Executes `run_full_pipeline.py` or specific scripts with `nohup`.
+
 
 ---
 
