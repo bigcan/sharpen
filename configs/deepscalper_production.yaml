@@ -4,12 +4,12 @@
 data:
   file_path: "data/btc_lob_jan2023.parquet"
   ticker: "BTCUSDT"
-  train_start_date: "2023-01-10"
-  train_end_date: "2023-01-18"
-  val_start_date: "2023-01-18"
-  val_end_date: "2023-01-19"
-  test_start_date: "2023-01-19"
-  test_end_date: "2023-01-20"
+  train_start_date: "2023-01-01"
+  train_end_date: "2023-01-25"
+  val_start_date: "2023-01-25"
+  val_end_date: "2023-01-28"
+  test_start_date: "2023-01-28"
+  test_end_date: "2023-01-31"
 
 features:
   micro_features: ["micro"] # Column prefixes

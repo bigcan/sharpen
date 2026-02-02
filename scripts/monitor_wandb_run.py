@@ -49,14 +49,36 @@ def monitor_run(run_id_fragment):
         stdin, stdout, stderr = ssh.exec_command(cmd_tail)
         print(stdout.read().decode())
 
+        # Check for Adaptive Fold patch
         print(f"\n--- Patch Verification ---")
         cmd_grep_patch = "grep 'Adaptive Fold' /workspace/DeepScalper/run.log"
         stdin, stdout, stderr = ssh.exec_command(cmd_grep_patch)
         patch_out = stdout.read().decode().strip()
         if patch_out:
-            print(f"SUCCESS: Patch Active!\n{patch_out}")
+            print(f"SUCCESS: Patch Active! (Found 'Adaptive Fold')")
         else:
             print("WARNING: 'Adaptive Fold' not found. Patch might be missing.")
+
+        print(f"\n--- HPO Results ---")
+        # Grep Best Sharpe
+        cmd_best = "grep 'Best Sharpe:' /workspace/DeepScalper/run.log | tail -n 1"
+        stdin, stdout, stderr = ssh.exec_command(cmd_best)
+        sharpe_out = stdout.read().decode().strip()
+        if sharpe_out:
+            print(f"{sharpe_out}")
+        else:
+            print("Best Sharpe not yet found in logs.")
+
+        # Cat best_params.yaml
+        print(f"\n--- Best Parameters (best_params.yaml) ---")
+        cmd_cat_params = "cat /workspace/DeepScalper/best_params.yaml"
+        stdin, stdout, stderr = ssh.exec_command(cmd_cat_params)
+        params_out = stdout.read().decode().strip()
+        if params_out and "No such file" not in params_out:
+            print(params_out)
+        else:
+            print("best_params.yaml not found (HPO might still be running).")
+
 
     except Exception as e:
         print(f"SSH/Parsing Error: {e}")
