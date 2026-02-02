@@ -184,13 +184,13 @@ def objective(trial, base_config, args):
     # Enable basic WandB logging for HPO trials
     wandb_project = config.get("wandb", {}).get("project", "DeepScalper-HPO")
     
-    # Contextual Naming: STRICT CONVENTION (Re-use Parent Name, ID via Tags)
-    # User Requirement: No "HPO_Trial_0" suffix/name. Must look like standard run.
-    # WANDB_RUN_GROUP contains the canonical name (DeepScalper_V1_...)
+    # Contextual Naming: Unique per trial, grouped by parent
+    # WANDB_RUN_GROUP: Used for unified grouping in WandB UI
+    # trial_name: Must be unique per trial for distinguishability
     parent_name = os.getenv("WANDB_RUN_GROUP", "HPO_Default")
-    trial_name = parent_name
+    trial_name = f"{parent_name}_T{trial.number}"  # Unique per trial
     
-    # Add Trial ID to tags to distinguish in UI (while keeping Name canonical)
+    # Add Trial ID to tags as well for filterability
     trial_tag = f"Trial_{trial.number}"
     trial_tags = ["HPO", trial_tag] + (args.tags or [])
     
