@@ -536,5 +536,11 @@ class DeepScalperEnv(gym.Env):
         val = self._get_portfolio_value()
         print(f"Step: {self.current_step}, Value: {val:.2f}, Balance: {self.balance:.2f}, Pos: {self.position:.4f}")
 
+    def close(self):
+        """Clean up environment resources."""
+        if hasattr(self, 'handler') and self.handler and hasattr(self.handler, 'close'):
+            self.handler.close()
+        super().close()
+
 
 

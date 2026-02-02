@@ -594,3 +594,14 @@ class ParquetDataHandler:
             return float(self._data_arrays['volatility_target'][idx])
             
         return 0.0
+
+    def close(self):
+        """Clean up shared memory resources."""
+        if hasattr(self, '_shm_objects'):
+            for shm in self._shm_objects:
+                try:
+                    shm.close()
+                    shm.unlink()
+                except Exception:
+                    pass
+            self._shm_objects = []
