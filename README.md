@@ -7,7 +7,8 @@ DeepScalper is an end-to-end institutional-grade reinforcement learning pipeline
 ## 🚀 Key Features
 - **Unified MLOps Pipeline**: Orchestrates HPO $\to$ Single-Phase Training $\to$ Backtesting.
 - **WandB Standardization**: Automatic canonical naming (`DeepScalper_V1_GPUHub_YYYYMMDD_HHMM`) for all runs to ensure auditability.
-- **Mach 3 Optimization**: Optimized for RTX 5090 (32GB VRAM), utilizing Shared Memory, AMP, and Torch Compile for max throughput.
+- **Mach 3 Optimization**: Optimized for RTX 5090 (32GB VRAM), utilizing **Shared Memory (SHM)**, AMP, and Torch Compile for max throughput.
+- **Single BDQ Agent**: Strict adherence to the original paper's Single-Agent architecture (no ensembles).
 - **Remote Ops & Monitoring**: Integrated deployment engine with real-time remote GPU/Process monitoring scripts.
 - **Institutional Governance**: Automated "Smoke Tests", Financial Audits (Sharpe/Sortino), and Risk Guardrails.
 
@@ -58,29 +59,29 @@ To ensure reliability on expensive GPU resources, we strictly follow a three-tie
 
 ## ⚡ Quick Start
 
-### 1. Unified Configuration
-All parameters are controlled via `configs/deepscalper_unified.yaml`.
-- **Mode**: User `production` for real runs, `smoke_test` for CI checks.
-- **Hardware**: Toggle `use_amp`, `torch_compile` based on your GPU.
+### 1. Configuration Strategy
+We use purpose-built configuration files for each stage of the lifecycle:
+- **Smoke/Pilot**: `configs/deepscalper_pilot_test.yaml`
+- **Production**: `configs/deepscalper_rtx5090_production.yaml` (RTX 5090 Optimized)
 
 ### 2. Automated Pipeline (Recommended)
 Run the end-to-end MLOps pipeline (HPO $\to$ Train $\to$ Backtest $\to$ Report).
 ```bash
-python scripts/run_full_pipeline.py --config configs/deepscalper_unified.yaml --trials 20
+python scripts/run_full_pipeline.py --config configs/deepscalper_rtx5090_production.yaml
 ```
 
 ### 3. Deployment (Remote Ops)
 Deploy the **full pipeline** to a remote node (e.g., GPUHub).
 ```bash
 # Correctly launches the pipeline script, NOT just the trainer
-python scripts/deploy_bare_metal.py --script scripts/run_full_pipeline.py --config configs/deepscalper_unified.yaml --run_name DS_Production_V1
+python scripts/deploy_bare_metal.py --script scripts/run_full_pipeline.py --config configs/deepscalper_rtx5090_production.yaml --run_name DS_Production_V1
 ```
 
 ### 4. Manual Component Execution (Advanced)
 If you need to run specific stages manually:
 **Train**:
 ```bash
-python scripts/train_deepscalper.py --config configs/deepscalper_unified.yaml
+python scripts/train_deepscalper.py --config configs/deepscalper_rtx5090_production.yaml
 ```
 **Tune**:
 ```bash
@@ -116,6 +117,7 @@ To ensure stability and prevent ambiguity between debugging and production verif
 - **Config**: `--steps 100`, `--trials 1`.
 - **Duration**: ~1 minute.
 - **Outcome**: Confirms *connectivity*, NOT logic. **NEVER** cite as "Success" for pipeline logic.
+- **SHM Check**: Verifies `/dev/shm` access and cleanup logic.
 
 ### Tier 2: Pilot Run (Logic Verification)
 - **Goal**: Verify end-to-end pipeline logic, checkpointing, and memory stability.

@@ -15,7 +15,7 @@ def get_env_var(key):
 
 import argparse
 
-def debug_remote(custom_cmd=None):
+def debug_remote(custom_cmd=None, upload_src=None, upload_dst=None):
     host = get_env_var("GPUHUB_HOST")
     port = int(get_env_var("GPUHUB_PORT"))
     password = get_env_var("GPUHUB_PASSWORD")
@@ -25,6 +25,15 @@ def debug_remote(custom_cmd=None):
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(host, port=port, username='root', password=password)
     
+    if upload_src and upload_dst:
+        print(f"Uploading {upload_src} to {upload_dst}...")
+        sftp = ssh.open_sftp()
+        sftp.put(upload_src, upload_dst)
+        sftp.close()
+        print("Upload complete.")
+        ssh.close()
+        return
+
     remote_workspace = "/workspace/DeepScalper"
     log_file = f"{remote_workspace}/run.log"
     
@@ -50,5 +59,7 @@ def debug_remote(custom_cmd=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--cmd", type=str, help="Custom command to execute")
+    parser.add_argument("--upload_src", type=str, help="Local source file to upload")
+    parser.add_argument("--upload_dst", type=str, help="Remote destination path")
     args = parser.parse_args()
-    debug_remote(args.cmd)
+    debug_remote(args.cmd, args.upload_src, args.upload_dst)
