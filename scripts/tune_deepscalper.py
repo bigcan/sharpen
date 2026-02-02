@@ -184,6 +184,11 @@ def objective(trial, base_config, args):
         
         # Create trainer
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        
+        # FIX: HPO uses single env, but config might say num_envs=24
+        # Override config so Trainer knows to iterate only once
+        config["env"]["num_envs"] = 1
+        
         trainer = DeepScalperTrainer(
             env=train_env,
             config=config,
