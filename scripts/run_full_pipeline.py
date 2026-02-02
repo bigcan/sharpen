@@ -84,21 +84,15 @@ def make_env(config, start_date=None, end_date=None, shm_config=None):
 
 
 def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_config=None):
-    """Create vectorized environment for training."""
+    """Create vectorized environment for training.
+    
+    Note: Using SyncVectorEnv only. AsyncVectorEnv has race conditions with
+    SHM cleanup and memory issues when workers load large datasets individually.
+    """
     env_factory = functools.partial(make_env, config=config, start_date=start_date, end_date=end_date, shm_config=shm_config)
     
-    if num_envs > 1:
-        try:
-            env = gym.vector.AsyncVectorEnv(
-                [env_factory for _ in range(num_envs)],
-                context="spawn",
-                shared_memory=False
-            )
-        except (RuntimeError, OSError) as e:
-            logger.warning(f"AsyncVectorEnv failed ({e}), using Sync.")
-            env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
-    else:
-        env = gym.vector.SyncVectorEnv([env_factory])
+    # Always use SyncVectorEnv to avoid subprocess issues
+    env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
     
     return env
 
