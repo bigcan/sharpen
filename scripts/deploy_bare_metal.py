@@ -11,6 +11,9 @@ from dotenv import load_dotenv
 # Load Environment Variables from Root
 load_dotenv()
 
+# Add project root to path for local imports
+sys.path.append(os.getcwd())
+
 # Configuration
 PROJECT_ROOT = Path(os.getcwd())
 DEPLOY_EXCLUDES = [

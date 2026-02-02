@@ -69,35 +69,72 @@ def create_env_factory(config, start_date=None, end_date=None):
 
 
 def evaluate_agent(env, agent, num_episodes=1, max_steps=10000):
-    """Evaluate agent and compute Sharpe-like metric."""
-    episode_returns = []
+    """
+    Evaluate agent and compute Annualized Sharpe Ratio based on step-wise returns.
+    Assumes 1-minute steps for annualization (Crypto 24/7: 365*24*60 = 525600 min/year).
+    """
+    all_returns = []
+    import traceback
     
-    for _ in range(num_episodes):
-        obs, _ = env.reset()
-        done = False
-        episode_reward = 0.0
-        step = 0
-        
-        while not done and step < max_steps:
-            # Extract tensors
-            micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(agent.device)
-            private = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(agent.device)
-            macro = torch.tensor(obs["macro"], dtype=torch.float32).unsqueeze(0).to(agent.device)
+    try:
+        for _ in range(num_episodes):
+            obs, info = env.reset()
+            done = False
+            step = 0
             
-            action = agent.predict(micro, private, macro, deterministic=True)
-            obs, reward, term, trunc, _ = env.step(action[0])
-            done = term or trunc
-            episode_reward += reward
-            step += 1
-        
-        episode_returns.append(episode_reward)
+            # Get initial portfolio value (fallback to 100k if not in info)
+            # Handle VectorEnv array in info
+            if "portfolio_value" in info:
+                val = info["portfolio_value"]
+                if hasattr(val, "__len__"): val = val[0]
+                prev_val = float(val)
+            else:
+                prev_val = 100000.0
+            
+            if prev_val <= 0: prev_val = 1e-6
+
+            while not done and step < max_steps:
+                # Extract tensors
+                micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device)
+                private = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device)
+                macro = torch.tensor(obs["macro"], dtype=torch.float32).to(agent.device)
+                
+                action = agent.predict(micro, private, macro, deterministic=True)
+                obs, reward, term, trunc, info = env.step(action)
+                
+                # VectorEnv returns arrays for term/trunc
+                t_val = term[0] if hasattr(term, "__len__") else term
+                tr_val = trunc[0] if hasattr(trunc, "__len__") else trunc
+                done = bool(t_val or tr_val)
+                
+                # Calculate Step Return
+                if "portfolio_value" in info:
+                    curr = info["portfolio_value"]
+                    if hasattr(curr, "__len__"): curr = curr[0]
+                    current_val = float(curr)
+                else:
+                    current_val = prev_val # Fallback if missing
+                
+                step_return = (current_val - prev_val) / prev_val
+                all_returns.append(step_return)
+                
+                prev_val = current_val
+                step += 1
+                
+    except Exception as e:
+        print(f"CRITICAL ERROR in evaluate_agent: {e}")
+        traceback.print_exc()
+        return 0.0
     
-    # Compute Sharpe-like metric (mean/std of returns)
-    returns = np.array(episode_returns)
-    if len(returns) > 1 and np.std(returns) > 0:
-        sharpe = np.mean(returns) / np.std(returns)
+    # Compute Annualized Sharpe Ratio
+    returns = np.array(all_returns)
+    if len(returns) > 1 and np.std(returns) > 1e-9:
+        # Annualization factor for minute data (Crypto 24/7)
+        # 365 days * 24 hours * 60 minutes = 525,600
+        ann_factor = np.sqrt(525600)
+        sharpe = (np.mean(returns) / np.std(returns)) * ann_factor
     else:
-        sharpe = np.mean(returns) / 100.0  # Fallback for single episode
+        sharpe = 0.0
     
     return sharpe
 
@@ -146,10 +183,21 @@ def objective(trial, base_config, args):
     
     # Enable basic WandB logging for HPO trials
     wandb_project = config.get("wandb", {}).get("project", "DeepScalper-HPO")
+    
+    # Contextual Naming: STRICT CONVENTION (Re-use Parent Name, ID via Tags)
+    # User Requirement: No "HPO_Trial_0" suffix/name. Must look like standard run.
+    # WANDB_RUN_GROUP contains the canonical name (DeepScalper_V1_...)
+    parent_name = os.getenv("WANDB_RUN_GROUP", "HPO_Default")
+    trial_name = parent_name
+    
+    # Add Trial ID to tags to distinguish in UI (while keeping Name canonical)
+    trial_tag = f"Trial_{trial.number}"
+    trial_tags = ["HPO", trial_tag] + (args.tags or [])
+    
     wandb.init(
         project=wandb_project,
-        name=f"HPO_trial_{trial.number}",
-        tags=["HPO"] + (args.tags or []),
+        name=trial_name,
+        tags=trial_tags,
         config={
             "trial_number": trial.number,
             "hindsight_horizon": hindsight_horizon,
