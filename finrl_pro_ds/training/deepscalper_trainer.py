@@ -230,9 +230,15 @@ class DeepScalperTrainer:
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
         
         # PPO Mini-Batch Updates
-        # Default mini_batch_size to 64 or derived from config if available (self.batch_size is global)
-        mini_batch_size = 64 
+        # Default mini_batch_size from config or adaptive based on dataset size
+        ppo_config = self.config.get("agents", {}).get("ppo", {})
+        target_mini_batch = ppo_config.get("mini_batch_size", 4096)
+        
         dataset_size = len(rewards)
+        # Ensure mini_batch_size is not larger than dataset, but at least 64 if possible
+        mini_batch_size = min(dataset_size, target_mini_batch)
+        if mini_batch_size < 64 and dataset_size >= 64:
+             mini_batch_size = 64
         indices = np.arange(dataset_size)
         
         total_loss = 0.0
@@ -742,36 +748,49 @@ class DeepScalperTrainer:
                                  dqn_metrics_accum[k].append(v)
                         self.dqn_updates_accumulator -= 1.0
                 
-                # B. Train PPO/A2C
-                # Check if we crossed an update interval boundary
-                update_interval = self.config.get("update_interval", 256)
-                prev_interval_idx = start_step // update_interval
-                curr_interval_idx = self.global_step // update_interval
+                # B. Train PPO/A2C INDEPENDENTLY (Decoupled Strides)
+                # PPO Update
+                ppo_config = self.config.get("agents", {}).get("ppo", {})
+                ppo_interval = ppo_config.get("update_interval", self.config.get("update_interval", 256))
                 
-                if curr_interval_idx > prev_interval_idx:
-                    ppo_res = None
-                    a2c_res = None
-                    gating_res = None
-                    
-                    if phase in ["full", "specialists"]:
-                        ppo_res = self.update_ppo(self.ensemble.ppo, self.ppo_optimizer, self.ppo_buffer)
-                        a2c_res = self.update_a2c(self.ensemble.a2c, self.a2c_optimizer, self.a2c_buffer)
-                    
-                    if phase in ["full", "gating"]:
-                        gating_res = self.update_gating(self.gating_buffer)
-                    
-                    if ppo_res:
-                        for k, v in ppo_res.items(): ppo_metrics_accum[k].append(v)
-                    if a2c_res:
-                        for k, v in a2c_res.items(): a2c_metrics_accum[k].append(v)
-                    if gating_res:
-                        for k, v in gating_res.items(): 
-                            gating_metrics_accum[k].append(v) # Handles both scalar and array
-                    
-                    # Clear buffers regardless, they are stale
-                    self.ppo_buffer = [] 
-                    self.a2c_buffer = []
-                    self.gating_buffer = []
+                prev_ppo_idx = start_step // ppo_interval
+                curr_ppo_idx = self.global_step // ppo_interval
+                
+                if curr_ppo_idx > prev_ppo_idx:
+                     if phase in ["full", "specialists"]:
+                         ppo_res = self.update_ppo(self.ensemble.ppo, self.ppo_optimizer, self.ppo_buffer)
+                         if ppo_res:
+                            for k, v in ppo_res.items(): ppo_metrics_accum[k].append(v)
+                     self.ppo_buffer = [] # Flush PPO buffer
+
+                # A2C Update
+                a2c_config = self.config.get("agents", {}).get("a2c", {})
+                a2c_interval = a2c_config.get("update_interval", self.config.get("update_interval", 256))
+                
+                prev_a2c_idx = start_step // a2c_interval
+                curr_a2c_idx = self.global_step // a2c_interval
+                
+                if curr_a2c_idx > prev_a2c_idx:
+                     if phase in ["full", "specialists"]:
+                         a2c_res = self.update_a2c(self.ensemble.a2c, self.a2c_optimizer, self.a2c_buffer)
+                         if a2c_res:
+                            for k, v in a2c_res.items(): a2c_metrics_accum[k].append(v)
+                     self.a2c_buffer = [] # Flush A2C buffer
+
+                # Gating uses global or own interval (usually tied to rollout)
+                gating_config = self.config.get("agents", {}).get("gating", {})
+                gating_interval = gating_config.get("update_interval", self.config.get("update_interval", 256))
+                
+                prev_gating_idx = start_step // gating_interval
+                curr_gating_idx = self.global_step // gating_interval
+
+                if curr_gating_idx > prev_gating_idx:
+                     if phase in ["full", "gating"]:
+                         gating_res = self.update_gating(self.gating_buffer)
+                         if gating_res:
+                            for k, v in gating_res.items(): 
+                                gating_metrics_accum[k].append(v)
+                     self.gating_buffer = []
                 
                 # C. Log Batch Metrics
                 if self.global_step % self.config.get("log_interval", 1000) < num_envs:

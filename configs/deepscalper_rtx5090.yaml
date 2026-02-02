@@ -91,6 +91,11 @@ agents:
     # Note: PPO typically uses n_steps as rollout definition.
     # We map this to update_interval if shared, or handled in trainer.
     
+    # Reference: 256-512 (RTX 5090)
+    mini_batch_size: 256
+    # We map this to update_interval if shared, or handled in trainer.
+    update_interval: 4096 # Explicitly match global collection size
+    
   a2c:
     # Reference: 7e-4 -> 1e-4 (Decay)
     learning_rate: 0.0007
@@ -98,9 +103,14 @@ agents:
     
     # Reference: Entropy 0.01-0.05 (CRITICAL)
     entropy_coef: 0.02
+
+    # Reference: 15-25 steps per env. With num_envs=16, 20*16 = 320 global steps.
+    update_interval: 320 
     
   gating:
     learning_rate: 0.0001
+    update_interval: 4096 # Update gating with PPO cadence
+    
 
 training:
   # Overall length
