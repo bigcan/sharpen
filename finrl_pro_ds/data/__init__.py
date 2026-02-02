@@ -1,2 +1,13 @@
-"""Module: finrl_pro_ds.data
-Purpose: Group data access and preprocessing utilities for FinRL Pro."""
+"""
+Data processing and loading module.
+"""
+
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
+from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
+from finrl_pro_ds.data.splitter import RollingWindowSplitter
+
+__all__ = [
+    "ParquetDataHandler",
+    "DeepScalperFeatureEngineer",
+    "RollingWindowSplitter",
+]

@@ -546,10 +546,11 @@ class ParquetDataHandler:
         self._ptr += 1
         return row
         
-    def peek(self) -> Optional[Any]:
-        if self._ptr >= len(self._feature_data):
+    def peek(self) -> Optional[Dict[str, Any]]:
+        """Peek at current step without advancing."""
+        if self._ptr >= self._len:
             return None
-        return self._feature_data.iloc[self._ptr]
+        return {k: self._data_arrays[k][self._ptr] for k in self._feature_cols}
 
     def get_lookahead_price(self, horizon: int) -> Optional[float]:
         """Get price at t + horizon for hindsight reward."""
