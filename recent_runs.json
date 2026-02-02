@@ -1,0 +1,260 @@
+[
+    {
+        "id": "afmnna8y",
+        "name": "DeepScalper_V1_GPUHub_20260202_1417",
+        "status": "finished",
+        "created_at": "2026-02-02T06:18:13Z",
+        "tags": [
+            "Full",
+            "GPU",
+            "Pilot",
+            "SingleBDQ",
+            "VerifyingLogic"
+        ],
+        "summary": {
+            "_runtime": 2993,
+            "_step": 197,
+            "_timestamp": 1770016087.304173,
+            "_wandb": {
+                "runtime": 2993
+            },
+            "agent/epsilon": 0.05,
+            "agent/loss_aux": 4.239532813699043e-07,
+            "agent/loss_dir": 2.3608760102433737e-07,
+            "agent/loss_price": 1.0202334976838757e-07,
+            "agent/loss_total": 9.564646461512891e-07,
+            "agent/loss_vol": 1.9440039977780546e-07,
+            "agent/q_dir_mean": 0.2342280149459839,
+            "agent/q_price_mean": 0.23428983986377716,
+            "agent/q_vol_mean": 0.23425506055355072,
+            "step": 100000,
+            "train/len_mean": 43241.5,
+            "train/reward_mean": -2.0441632401261964
+        }
+    },
+    {
+        "id": "iou7egfi",
+        "name": "DeepScalper_V1_GPUHub_20260202_1412",
+        "status": "crashed",
+        "created_at": "2026-02-02T06:13:48Z",
+        "tags": [
+            "Full",
+            "GPU",
+            "Pilot",
+            "SingleBDQ",
+            "VerifyingLogic"
+        ],
+        "summary": {
+            "_runtime": 214.310222603,
+            "_step": 4,
+            "_timestamp": 1770013043.307929,
+            "_wandb": {
+                "runtime": 214
+            },
+            "agent/epsilon": 0.05,
+            "agent/loss_aux": 7.01140561432112e-06,
+            "agent/loss_dir": 0.0003291176981292665,
+            "agent/loss_price": 0.003544227220118046,
+            "agent/loss_total": 0.004208256024867296,
+            "agent/loss_vol": 0.00032789941178634763,
+            "agent/q_dir_mean": 0.2027287781238556,
+            "agent/q_price_mean": 0.25477251410484314,
+            "agent/q_vol_mean": 0.2026875764131546,
+            "step": 3500,
+            "train/len_mean": 0,
+            "train/reward_mean": 0
+        }
+    },
+    {
+        "id": "e5j3ywkw",
+        "name": "Pilot_Feb02",
+        "status": "crashed",
+        "created_at": "2026-02-02T06:04:51Z",
+        "tags": [
+            "Full",
+            "GPU",
+            "Pilot",
+            "SingleBDQ",
+            "VerifyingLogic"
+        ],
+        "summary": {
+            "_runtime": 736.711296698,
+            "_step": 41,
+            "_timestamp": 1770013028.703571,
+            "_wandb": {
+                "runtime": 736
+            },
+            "agent/epsilon": 0.05,
+            "agent/loss_aux": 2.2031460957805393e-06,
+            "agent/loss_dir": 3.235442591176252e-06,
+            "agent/loss_price": 3.003836354764644e-06,
+            "agent/loss_total": 3.37559831677936e-05,
+            "agent/loss_vol": 2.531355676183011e-05,
+            "agent/q_dir_mean": 0.4608997702598572,
+            "agent/q_price_mean": 0.46094250679016113,
+            "agent/q_vol_mean": 0.4755995273590088,
+            "step": 22000,
+            "train/len_mean": 17555,
+            "train/reward_mean": -2.0447918916930723
+        }
+    },
+    {
+        "id": "emriys1h",
+        "name": "DeepScalper_V1_GPUHub_20260202_1400_PilotGPU_Feb02",
+        "status": "crashed",
+        "created_at": "2026-02-02T06:00:59Z",
+        "tags": [
+            "Full",
+            "GPU",
+            "Pilot",
+            "SingleBDQ",
+            "VerifyingLogic"
+        ],
+        "summary": {
+            "_runtime": 182.55939774,
+            "_step": 11,
+            "_timestamp": 1770012242.214791,
+            "_wandb": {
+                "runtime": 182
+            },
+            "agent/epsilon": 0.05,
+            "agent/loss_aux": 9.949893353677909e-08,
+            "agent/loss_dir": 3.217122139176354e-05,
+            "agent/loss_price": 1.0211076642008263e-06,
+            "agent/loss_total": 3.79116645490285e-05,
+            "agent/loss_vol": 4.6198365453165025e-06,
+            "agent/q_dir_mean": 0.4376285374164582,
+            "agent/q_price_mean": 0.4314829111099243,
+            "agent/q_vol_mean": 0.4314506649971008,
+            "step": 7000,
+            "train/len_mean": 0,
+            "train/reward_mean": 0
+        }
+    },
+    {
+        "id": "14a33z4x",
+        "name": "PilotFull_Feb02",
+        "status": "finished",
+        "created_at": "2026-02-02T05:56:48Z",
+        "tags": [
+            "Full",
+            "Pilot",
+            "Pipeline",
+            "SingleBDQ",
+            "VerifyingLogic"
+        ],
+        "summary": {
+            "_runtime": 188,
+            "_step": 12,
+            "_timestamp": 1770011986.3507705,
+            "_wandb": {
+                "runtime": 188
+            },
+            "agent/epsilon": 0.05,
+            "agent/loss_aux": 3.2244822705251863e-06,
+            "agent/loss_dir": 1.5187215467449278e-05,
+            "agent/loss_price": 0.00017697340808808804,
+            "agent/loss_total": 0.00020416107145138085,
+            "agent/loss_vol": 8.775953574513551e-06,
+            "agent/q_dir_mean": 0.25167134404182434,
+            "agent/q_price_mean": 0.2682572305202484,
+            "agent/q_vol_mean": 0.25389009714126587,
+            "step": 7500,
+            "train/len_mean": 0,
+            "train/reward_mean": 0
+        }
+    },
+    {
+        "id": "n4rwq75i",
+        "name": "Pilot_Verify_Fix",
+        "status": "finished",
+        "created_at": "2026-02-02T05:51:41Z",
+        "tags": [
+            "Fix",
+            "Pilot",
+            "SingleBDQ",
+            "Verify",
+            "VerifyingLogic"
+        ],
+        "summary": {
+            "_runtime": 8,
+            "_wandb": {
+                "runtime": 8
+            }
+        }
+    },
+    {
+        "id": "1197ul62",
+        "name": "Debug_Run_Shapes_v2",
+        "status": "failed",
+        "created_at": "2026-02-02T05:49:37Z",
+        "tags": [
+            "Debug",
+            "Pilot",
+            "Shapes",
+            "SingleBDQ",
+            "VerifyingLogic"
+        ],
+        "summary": {
+            "_runtime": 6,
+            "_wandb": {
+                "runtime": 6
+            }
+        }
+    },
+    {
+        "id": "8pn6kor0",
+        "name": "Debug_Run_Shapes",
+        "status": "failed",
+        "created_at": "2026-02-02T05:47:46Z",
+        "tags": [
+            "Debug",
+            "Pilot",
+            "Shapes",
+            "SingleBDQ",
+            "VerifyingLogic"
+        ],
+        "summary": {
+            "_runtime": 6,
+            "_wandb": {
+                "runtime": 6
+            }
+        }
+    },
+    {
+        "id": "zts43xv9",
+        "name": "Pilot_Full_Run_v3",
+        "status": "failed",
+        "created_at": "2026-02-02T05:36:06Z",
+        "tags": [
+            "FullPipeline",
+            "Pilot",
+            "SingleBDQ",
+            "VerifyingLogic"
+        ],
+        "summary": {
+            "_runtime": 8,
+            "_wandb": {
+                "runtime": 8
+            }
+        }
+    },
+    {
+        "id": "o8vuaxef",
+        "name": "Pilot_Full_Run_v2",
+        "status": "failed",
+        "created_at": "2026-02-02T05:34:00Z",
+        "tags": [
+            "FullPipeline",
+            "Pilot",
+            "SingleBDQ",
+            "VerifyingLogic"
+        ],
+        "summary": {
+            "_runtime": 42,
+            "_wandb": {
+                "runtime": 42
+            }
+        }
+    }
+]

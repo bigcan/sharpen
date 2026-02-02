@@ -114,10 +114,27 @@ def main():
         cmd.extend(["--total_timesteps", str(args.steps)])
         
     print(f"Executing: {' '.join(cmd)}")
-    ret = subprocess.run(cmd)
-    if ret.returncode != 0:
+    
+    # Use Popen to capture stdout in real-time
+    process = subprocess.Popen(
+        cmd, 
+        stdout=subprocess.PIPE, 
+        stderr=subprocess.STDOUT, 
+        text=True,
+        bufsize=1
+    )
+    
+    run_id = None
+    for line in process.stdout:
+        print(line, end="")
+        if "WANDB_RUN_ID:" in line:
+            run_id = line.split("WANDB_RUN_ID:")[1].strip()
+            
+    process.wait()
+    
+    if process.returncode != 0:
         print("Training Failed.")
-        sys.exit(ret.returncode)
+        sys.exit(process.returncode)
 
     # ---------------------------------------------------------
     # 3. Backtesting
@@ -125,12 +142,15 @@ def main():
     if not args.skip_backtest:
         print("\n" + "="*50)
         print(">>> STARTING STEP 3: BACKTESTING")
+        print(f"Consolidating with Run ID: {run_id}")
         print("="*50 + "\n")
         
         cmd = [
             sys.executable, "scripts/backtest_deepscalper.py",
             "--config", temp_config_path
         ]
+        if run_id:
+            cmd.extend(["--run_id", run_id])
         if args.tags:
              cmd.extend(["--tags"] + args.tags)
             
