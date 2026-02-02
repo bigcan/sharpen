@@ -22,11 +22,11 @@ def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro
         return {"error": str(e)}
 
 if __name__ == "__main__":
-    run_id = "afmnna8y"
+    run_id = "uiuivysu"
     print(f"Fetching data for run {run_id}...")
     data = fetch_run_data(run_id)
     
-    with open("run_data_afmnna8y.json", "w") as f:
+    with open("run_data_uiuivysu.json", "w") as f:
         json.dump(data, f, indent=4)
     
     if "error" in data:

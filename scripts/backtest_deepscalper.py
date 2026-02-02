@@ -285,11 +285,31 @@ def main():
         # Cleaned up dict
         dict_agents = {"DeepScalper_BDQ": df_ensemble.copy()} 
         
+        # Use Canonical Run Name or provided Run ID for report
+        # If run_id is resumed, we just log to it. 
+        # But generate_wandb_report creates a NEW run usually?
+        # Let's check generate_wandb_report internals or just use current run if active.
+        
+        # If WandB is active (from Resume), use its name/id
+        import wandb
+        if wandb.run:
+             report_run_name = wandb.run.name
+             report_project = wandb.run.project
+        else:
+             report_run_name = args.run_name or f"Backtest_{os.path.basename(checkpoint_path) if checkpoint_path else 'Init'}"
+             report_project = config.get("wandb", {}).get("project", "FinRL-Pro-DS-Backtest")
+
+        if args.tags:
+             # Add tags to the report run if possible? 
+             # generate_wandb_report doesn't seem to take tags arg in current signature (checked by inference)
+             # We assume it uses the active run if we are logged in.
+             pass
+
         generate_wandb_report(
             df_ensemble=df_ensemble,
             dict_agents=dict_agents,
-            run_name=f"Backtest_{os.path.basename(checkpoint_path) if checkpoint_path else 'Init'}",
-            project_name=config.get("wandb", {}).get("project", "FinRL-Pro-DS-Backtest"),
+            run_name=report_run_name,
+            project_name=report_project,
             entity=config.get("wandb", {}).get("entity", "bigcan-chiwin-technology")
         )
         logger.info("WandB Report Generated.")

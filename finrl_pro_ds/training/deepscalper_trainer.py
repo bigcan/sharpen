@@ -13,7 +13,7 @@ class DeepScalperTrainer:
     """
     Simplified Trainer for Single BDQ Agent Strategy (Paper Replication).
     """
-    def __init__(self, env, config, device="cuda" if torch.cuda.is_available() else "cpu", run_name=None):
+    def __init__(self, env, config, device="cuda" if torch.cuda.is_available() else "cpu", run_name=None, hpo_mode=False):
         self.env = env
         self.config = config
         self.device = device
@@ -53,6 +53,9 @@ class DeepScalperTrainer:
         # Checkpoint Directory
         self.ckpt_dir = os.path.join("checkpoints", self.run_name)
         os.makedirs(self.ckpt_dir, exist_ok=True)
+        
+        # HPO mode: suppress frequent WandB logging to avoid memory flooding
+        self.hpo_mode = hpo_mode
         
     def train(self, start_step=0, skip_reset=False):
         """Single Phase Training Loop
@@ -169,14 +172,15 @@ class DeepScalperTrainer:
                 if should_update:
                      metrics = self.agent.train_step()
                      if metrics and global_step % self.log_interval == 0:
-                         # Log to WandB
-                         logs = {
-                             "step": global_step,
-                             "train/reward_mean": np.mean(episode_rewards) if len(episode_rewards) > 0 else 0.0,
-                             "train/len_mean": np.mean(episode_lens) if len(episode_lens) > 0 else 0.0,
-                             **{f"agent/{k}": v for k, v in metrics.items()}
-                         }
-                         wandb.log(logs)
+                         # Log to WandB (skip in HPO mode to avoid flooding)
+                         if not self.hpo_mode:
+                             logs = {
+                                 "step": global_step,
+                                 "train/reward_mean": np.mean(episode_rewards) if len(episode_rewards) > 0 else 0.0,
+                                 "train/len_mean": np.mean(episode_lens) if len(episode_lens) > 0 else 0.0,
+                                 **{f"agent/{k}": v for k, v in metrics.items()}
+                             }
+                             wandb.log(logs)
             
             # 5. Checkpointing
             if global_step % self.checkpoint_interval == 0:

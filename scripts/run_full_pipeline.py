@@ -32,6 +32,31 @@ def main():
     base_config = load_config(args.config)
     
     # ---------------------------------------------------------
+    # 0. Setup Naming & WandB Grouping (Unified View)
+    # ---------------------------------------------------------
+    # ╔═══════════════════════════════════════════════════════════════════════╗
+    # ║  CANONICAL NAMING: DeepScalper_V{version}_{Platform}_{YYYYMMDD}_{HHMM}║
+    # ║  NO SUFFIXES - use --tags for metadata (Pilot, HPO, etc.)            ║
+    # ╚═══════════════════════════════════════════════════════════════════════╝
+    from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
+    
+    if args.run_name:
+        # Validate user-provided name follows canonical format
+        validate_run_name(args.run_name, raise_on_fail=True)
+        run_name = args.run_name
+    else:
+        # CANONICAL NAMING: DeepScalper_V1_{Platform}_{YYYYMMDD}_{HHMM}
+        # Detect platform from environment (os imported at top of file)
+        platform = "GPUHub" if os.path.exists("/workspace") else "Local"
+        run_name = generate_run_name(version="V1", platform=platform)
+
+    print(f"Pipeline Run Name: {run_name}")
+    print("Enforcing Unified WandB Grouping...")
+    
+    # CRITICAL: Set Group ID to run_name so HPO and Training appear together
+    os.environ["WANDB_RUN_GROUP"] = run_name
+    
+    # ---------------------------------------------------------
     # 1. Hyperparameter Optimization (Ray Tune)
     # ---------------------------------------------------------
     best_params_path = "configs/best_params.yaml"
@@ -87,21 +112,10 @@ def main():
     with open(temp_config_path, "w") as f:
         yaml.dump(final_config, f)
         
-    # ╔═══════════════════════════════════════════════════════════════════════╗
-    # ║  CANONICAL NAMING: DeepScalper_V{version}_{Platform}_{YYYYMMDD}_{HHMM}║
-    # ║  NO SUFFIXES - use --tags for metadata (Pilot, HPO, etc.)            ║
-    # ╚═══════════════════════════════════════════════════════════════════════╝
-    from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
     
-    if args.run_name:
-        # Validate user-provided name follows canonical format
-        validate_run_name(args.run_name, raise_on_fail=True)
-        run_name = args.run_name
-    else:
-        # CANONICAL NAMING: DeepScalper_V1_{Platform}_{YYYYMMDD}_{HHMM}
-        # Detect platform from environment (os imported at top of file)
-        platform = "GPUHub" if os.path.exists("/workspace") else "Local"
-        run_name = generate_run_name(version="V1", platform=platform)
+    # Run Name is already set in Step 0
+    run_name = os.environ["WANDB_RUN_GROUP"]
+
     
     cmd = [
         sys.executable, "scripts/train_deepscalper.py",

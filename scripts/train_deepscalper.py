@@ -116,19 +116,17 @@ def main():
     # Load Config
     config = load_config(args.config)
     
-    # Override Steps
+    # Merge CLI args
     if args.steps:
         print(f"Overriding total_timesteps: {args.steps}")
         config["training"]["total_timesteps"] = args.steps
         
-    # Override Tags
+    # Inject CLI tags into config for setup_wandb
     if args.tags:
-        # args.tags is already a list due to nargs="*"
-        new_tags = args.tags
-        current_tags = config.get("wandb", {}).get("tags", [])
-        if "wandb" not in config: config["wandb"] = {}
-        config["wandb"]["tags"] = list(set(current_tags + new_tags))
+        config.setdefault("wandb", {})["tags"] = args.tags
 
+    run_name = args.run_name  # Can be None, will be auto-generated if so
+    
     # Setup WandB
     run_name = setup_wandb(config, run_name=args.run_name)
     print(f"WANDB_RUN_ID: {wandb.run.id}")
