@@ -68,7 +68,7 @@ training:
   
   torch_compile: true
   use_amp: true         
-  use_shm: true          # Our data SHM (safe); Gymnasium SHM is disabled in code
+  use_shm: false         # Disable SHM due to race condition (fix pending)
 
 hpo:
   enabled: true
