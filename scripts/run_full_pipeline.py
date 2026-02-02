@@ -53,8 +53,11 @@ def merge_configs(base, overrides):
 # ============================================================================
 # ENVIRONMENT FACTORY
 # ============================================================================
-def make_env(config, start_date=None, end_date=None):
-    """Factory to create DeepScalperEnv with real data."""
+def make_env(config, start_date=None, end_date=None, shm_config=None):
+    """Factory to create DeepScalperEnv with real data.
+    
+    Note: shm_config is passed explicitly to avoid stale references.
+    """
     data_config = config.get("data", {})
     file_path = data_config.get("file_path")
     ticker = data_config.get("ticker", "BTCUSDT")
@@ -71,7 +74,7 @@ def make_env(config, start_date=None, end_date=None):
         feature_config=config.get("features", {}),
         start_date=sd,
         end_date=ed,
-        shared_memory_config=data_config.get("shared_memory_config")
+        shared_memory_config=shm_config  # Explicit, not from config dict
     )
     
     env_config = config.get("env", {})
@@ -80,9 +83,9 @@ def make_env(config, start_date=None, end_date=None):
     return DeepScalperEnv(config=env_config, data_handler=handler)
 
 
-def create_vector_env(config, num_envs, start_date=None, end_date=None):
+def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_config=None):
     """Create vectorized environment for training."""
-    env_factory = functools.partial(make_env, config=config, start_date=start_date, end_date=end_date)
+    env_factory = functools.partial(make_env, config=config, start_date=start_date, end_date=end_date, shm_config=shm_config)
     
     if num_envs > 1:
         try:
@@ -262,6 +265,7 @@ def run_training(config, run_name, device):
     
     try:
         # Setup shared memory if enabled
+        shm_config = None
         use_shm = config.get("training", {}).get("use_shm", False)
         if num_envs > 1 and use_shm:
             logger.info("Initializing Shared Memory...")
@@ -272,10 +276,10 @@ def run_training(config, run_name, device):
                 feature_config=config.get("features", {})
             )
             shm_config = data_loader.create_shared_memory()
-            config["data"]["shared_memory_config"] = shm_config
+            # Note: Don't store in config dict - pass explicitly to avoid stale refs
         
-        # Create environment
-        env = create_vector_env(config, num_envs)
+        # Create environment (pass shm_config explicitly)
+        env = create_vector_env(config, num_envs, shm_config=shm_config)
         logger.info(f"Environment ready: {num_envs} workers")
         
         # Train
