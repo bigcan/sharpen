@@ -222,42 +222,44 @@ def main():
     pos_arr = np.array(positions)
     orders_arr = np.diff(pos_arr, prepend=0.0) 
     
-    # Fallback VBT Analysis
+    # Pyfolio Analysis
     try:
-        from finrl_pro_ds.analytics.vbt_analyzer import VBTAnalyzer
-        logger.info("Running VectorBT Analysis...")
+        from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
+        logger.info("Running Pyfolio Analysis...")
         
-        price_series = pd.Series(prices)
-        orders_series = pd.Series(orders_arr)
+        # Calculate Percentage Returns
+        # Portfolio values track total equity. Returns = % change.
+        returns_s = pd.Series(portfolio_values).pct_change().fillna(0.0)
         
-        analyzer = VBTAnalyzer(
-            close=price_series, 
-            size=orders_series, 
-            init_cash=env.initial_balance,
-            fees=env.taker_fee,
-            freq='1min'
-        )
-        # pf = analyzer.create_portfolio(group_by=True) # Optional if we just want metrics
+        # Helper to ensure DatetimeIndex
+        if not timestamps:
+             # Fallback if timestamps somehow empty
+             timestamps = pd.date_range(end=pd.Timestamp.now(), periods=len(portfolio_values), freq='1min')
         
-        print("\n=== VectorBT Stats ===")
-        print(analyzer.get_metrics())
+        returns_s.index = pd.to_datetime(timestamps)
+        
+        analyzer = PyfolioAnalyzer(returns=returns_s)
+        
+        # Get Metrics
+        metrics = analyzer.get_audit_metrics()
+        print("\n=== Pyfolio Stats ===")
+        print(json.dumps(metrics, indent=4, default=str))
         
         # Save Results
         os.makedirs("results", exist_ok=True)
-        metrics = analyzer.get_audit_metrics()
-        
         with open("results/metrics.json", "w") as f:
-            json.dump(metrics, f, indent=4)
+            json.dump(metrics, f, indent=4, default=str)
         print("Metrics saved to results/metrics.json")
             
         try:
-            analyzer.plot(path="results/backtest_plot.html")
-            print("Plot saved to results/backtest_plot.html")
+            plot_path = analyzer.generate_tear_sheet(save_path="results/backtest_tear_sheet.png")
+            if plot_path:
+                print(f"Tear Sheet saved to {plot_path}")
         except Exception as e:
              logger.warning(f"Plotting failed: {e}")
         
-    except ImportError:
-        logger.warning("VBTAnalyzer not found. Using simple metrics.")
+    except ImportError as e:
+        logger.warning(f"PyfolioAnalyzer import failed: {e}. Using simple metrics.")
         equity_curve = pd.Series(portfolio_values)
         total_return = ((equity_curve.iloc[-1] / equity_curve.iloc[0]) - 1) * 100
         logger.info(f"Total Return: {total_return:.2f}%")
@@ -275,6 +277,7 @@ def main():
             'date': timestamps[:t_len],
             'account_value': portfolio_values[:t_len],
             'actions': orders_arr[:t_len], 
+            'quantity': orders_arr[:t_len], # Explicit quantity for trade logging
             'price': prices[:t_len],
             'ticker': [ticker] * t_len
         })
