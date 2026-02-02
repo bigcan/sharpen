@@ -180,6 +180,7 @@ def objective(trial, base_config, args):
         # Train in chunks and report intermediate metrics for pruning
         checkpoint_interval = 10000  # Report every 10k steps
         total_steps = 0
+        is_first_chunk = True
         
         while total_steps < hpo_steps:
             # Train for one chunk
@@ -190,14 +191,15 @@ def objective(trial, base_config, args):
             # CRITICAL FIX: Manually update trainer's target steps
             trainer.total_timesteps = target_step_count
             
-            # CRITICAL FIX: Pass start_step to resume correctly (epsilon decay, learning_starts)
-            trainer.train(start_step=total_steps)
+            # CRITICAL FIX: Pass start_step and skip_reset to preserve trajectory state
+            trainer.train(start_step=total_steps, skip_reset=not is_first_chunk)
+            is_first_chunk = False
             
             total_steps = target_step_count
             
-            # Evaluate on VALIDATION env
+            # Evaluate on VALIDATION env (3 episodes for statistical validity)
             intermediate_sharpe = evaluate_agent(
-                val_env, trainer.agent, num_episodes=1, max_steps=hpo_steps // 10
+                val_env, trainer.agent, num_episodes=3, max_steps=hpo_steps // 10
             )
             trial.report(intermediate_sharpe, step=total_steps)
             
@@ -205,15 +207,10 @@ def objective(trial, base_config, args):
             
             # Check if trial should be pruned
             if trial.should_prune():
-                train_env.close()
-                val_env.close()
                 raise optuna.TrialPruned()
         
-        # Final evaluation
-        val_sharpe = evaluate_agent(val_env, trainer.agent, num_episodes=1, max_steps=hpo_steps // 10)
-        
-        train_env.close()
-        val_env.close()
+        # Final evaluation (3 episodes)
+        val_sharpe = evaluate_agent(val_env, trainer.agent, num_episodes=3, max_steps=hpo_steps // 10)
         
         logger.info(f"Trial {trial.number} completed: Val Sharpe={val_sharpe:.4f}")
         return val_sharpe
@@ -222,7 +219,13 @@ def objective(trial, base_config, args):
         raise
     except Exception as e:
         logger.error(f"Trial {trial.number} failed: {e}")
-        return float("-inf")
+        raise optuna.TrialFailed(f"Trial crashed: {e}")
+    finally:
+        # P0 FIX: Always cleanup resources
+        if 'train_env' in locals():
+            train_env.close()
+        if 'val_env' in locals():
+            val_env.close()
 
 
 def main():
