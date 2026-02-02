@@ -67,7 +67,6 @@ class MicroEncoder(nn.Module):
         # x: (Batch, Window, Features)
         # private_x: (Batch, Window, 2)
         
-        # Micro RNN
         if self.rnn_type == "LSTM":
             micro_out, _ = self.micro_rnn(x)
             private_out, _ = self.private_rnn(private_x)

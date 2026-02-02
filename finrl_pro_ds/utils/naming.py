@@ -60,32 +60,69 @@ def parse_experiment_name(name: str) -> dict:
 def generate_run_name(
     version: str = "V1",
     platform: str = "GPUHub",
-    suffix: str = None,
     timestamp_format: str = "%Y%m%d_%H%M"
 ) -> str:
     """
     Generate a standardized WandB run name for DeepScalper experiments.
     
-    Canonical format: DeepScalper_{Version}_{Platform}_{YYYYMMDD}_{HHMM}[_{Suffix}]
+    ╔═══════════════════════════════════════════════════════════════════════════╗
+    ║  CANONICAL FORMAT: DeepScalper_{Version}_{Platform}_{YYYYMMDD}_{HHMM}     ║
+    ║                                                                           ║
+    ║  NO SUFFIXES ALLOWED! All metadata (Pilot, HPO, etc.) must go in WandB   ║
+    ║  tags, NOT in the run name. This ensures:                                ║
+    ║    1. Deterministic checkpoint paths                                      ║
+    ║    2. Easy querying via WandB dashboard filters                          ║
+    ║    3. Consistent naming across all scripts                               ║
+    ╚═══════════════════════════════════════════════════════════════════════════╝
     
     Args:
         version: Version tag (e.g., 'V1', 'V95', 'V10')
         platform: Deployment platform (e.g., 'GPUHub', 'Blackwell', 'Local')
-        suffix: Optional suffix (e.g., 'HPO', 'Backtest')
         timestamp_format: strftime format for timestamp
         
     Returns:
-        Formatted run name string
+        Formatted run name string (e.g., 'DeepScalper_V1_GPUHub_20260202_1415')
         
     Example:
-        >>> generate_run_name('V95', 'Blackwell')
-        'DeepScalper_V95_Blackwell_20260129_1942'
-        >>> generate_run_name('V95', 'GPUHub', suffix='HPO')
-        'DeepScalper_V95_GPUHub_20260129_1942_HPO'
+        >>> generate_run_name('V1', 'GPUHub')
+        'DeepScalper_V1_GPUHub_20260202_1415'
     """
     timestamp = datetime.datetime.now().strftime(timestamp_format)
-    base = f"DeepScalper_{version}_{platform}_{timestamp}"
-    return f"{base}_{suffix}" if suffix else base
+    return f"DeepScalper_{version}_{platform}_{timestamp}"
+
+
+def validate_run_name(run_name: str, raise_on_fail: bool = True) -> bool:
+    """
+    Validate that a run name follows the canonical format.
+    
+    Canonical pattern: DeepScalper_{Version}_{Platform}_{YYYYMMDD}_{HHMM}
+    
+    This function is used to catch naming violations at runtime.
+    
+    Args:
+        run_name: The run name to validate
+        raise_on_fail: If True, raises ValueError on invalid names
+        
+    Returns:
+        True if valid, False otherwise
+        
+    Raises:
+        ValueError: If run_name is invalid and raise_on_fail=True
+    """
+    # Pattern: DeepScalper_V{digits}_{Platform}_{YYYYMMDD}_{HHMM}
+    # No trailing content after the timestamp (no suffixes)
+    pattern = r"^DeepScalper_V\d+_[A-Za-z]+_\d{8}_\d{4}$"
+    
+    is_valid = bool(re.match(pattern, run_name))
+    
+    if not is_valid and raise_on_fail:
+        raise ValueError(
+            f"Invalid run name: '{run_name}'. "
+            f"Expected format: 'DeepScalper_V{{version}}_{{Platform}}_{{YYYYMMDD}}_{{HHMM}}'. "
+            f"Do NOT add suffixes - use WandB tags for metadata (Pilot, HPO, etc.)."
+        )
+    
+    return is_valid
 
 
 def standardize_run_name(
@@ -95,24 +132,23 @@ def standardize_run_name(
     timestamp_format: str = "%Y%m%d_%H%M"
 ) -> str:
     """
-    Standardize a manually-provided run name to fit the canonical format.
-    
-    If name already fits the pattern DeepScalper_V.*_Platform_TIMESTAMP_..., returns it as is.
-    Otherwise, treats the manual name as the 'suffix' and rebuilds the standard name.
+    ╔═══════════════════════════════════════════════════════════════════════════╗
+    ║  DEPRECATED - DO NOT USE                                                  ║
+    ║                                                                           ║
+    ║  This function was causing naming convention violations by adding        ║
+    ║  suffixes to run names. Use generate_run_name() instead and pass any    ║
+    ║  descriptive metadata via WandB tags.                                    ║
+    ║                                                                           ║
+    ║  Deprecated: Feb 2, 2026                                                 ║
+    ╚═══════════════════════════════════════════════════════════════════════════╝
     """
-    import re
-    # Pattern: DeepScalper_..._YYYYMMDD_HHMM
-    ts_pattern = r"\d{8}_\d{4}"
-    if re.search(f"DeepScalper_.*_.*_{ts_pattern}", run_name):
-        return run_name
-        
-    # Extract suffix from manual name
-    # Remove prefix if present
-    clean_suffix = run_name
-    if clean_suffix.startswith("DeepScalper_"):
-        clean_suffix = clean_suffix[len("DeepScalper_"):]
-    
-    # Clean up underscores
-    clean_suffix = clean_suffix.strip('_')
-        
-    return generate_run_name(version=version, platform=platform, suffix=clean_suffix, timestamp_format=timestamp_format)
+    import warnings
+    warnings.warn(
+        "standardize_run_name() is DEPRECATED! Use generate_run_name() instead. "
+        "Pass descriptive info via WandB tags, not the run name.",
+        DeprecationWarning,
+        stacklevel=2
+    )
+    # Always return canonical format - ignore user input
+    return generate_run_name(version=version, platform=platform, timestamp_format=timestamp_format)
+

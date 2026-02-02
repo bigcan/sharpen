@@ -25,8 +25,22 @@ def setup_wandb(config, run_name=None):
     mode = wandb_config.get("mode", "online")
     entity = wandb_config.get("entity", "bigcan-chiwin-technology")
     
-    if run_name:
-        wandb_config["name"] = run_name
+    # ╔═══════════════════════════════════════════════════════════════════════╗
+    # ║  CANONICAL NAMING: DeepScalper_V{version}_{Platform}_{YYYYMMDD}_{HHMM}║
+    # ║  NO SUFFIXES - use WandB tags for metadata (Pilot, HPO, etc.)        ║
+    # ╚═══════════════════════════════════════════════════════════════════════╝
+    from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
+    
+    if not run_name:
+        # os is imported at top of file
+        platform = "GPUHub" if os.path.exists("/workspace") else "Local"
+        run_name = generate_run_name(version="V1", platform=platform)
+    else:
+        # Validate user-provided name follows canonical format
+        # This will raise ValueError if name has suffixes
+        validate_run_name(run_name, raise_on_fail=True)
+    
+    wandb_config["name"] = run_name
         
     wandb.init(
         project=project,
@@ -95,7 +109,7 @@ def main():
     parser.add_argument("--config", type=str, required=True, help="Path to config yaml")
     parser.add_argument("--debug", action="store_true", help="Use mock environment")
     parser.add_argument("--run_name", type=str, default=None, help="WandB Run Name")
-    parser.add_argument("--tags", type=str, default=None, help="Comma-separated WandB tags")
+    parser.add_argument("--tags", nargs="*", default=[], help="List of WandB tags")
     parser.add_argument("--steps", type=int, default=None, help="Override total_timesteps (e.g. for smoke test)")
     args = parser.parse_args()
 
@@ -109,7 +123,8 @@ def main():
         
     # Override Tags
     if args.tags:
-        new_tags = [t.strip() for t in args.tags.split(",") if t.strip()]
+        # args.tags is already a list due to nargs="*"
+        new_tags = args.tags
         current_tags = config.get("wandb", {}).get("tags", [])
         if "wandb" not in config: config["wandb"] = {}
         config["wandb"]["tags"] = list(set(current_tags + new_tags))
@@ -166,7 +181,8 @@ def main():
                  print(f"AsyncVectorEnv failed ({type(e).__name__}: {e}), falling back to Sync.")
                  env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
     else:
-        env = env_factory()
+        # Force SyncVectorEnv to maintain (1, ...) shapes and array rewards
+        env = gym.vector.SyncVectorEnv([env_factory])
         
     print(f"Environment Loaded: {env}")
     

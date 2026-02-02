@@ -21,7 +21,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   transaction_fee: 0.00005 
-  num_envs: 8            # Moderate parallelism for Pilot
+  num_envs: 1            # Single Env for Windows Pilot Stability
   window_size: 50
   
   reward:
