@@ -184,30 +184,33 @@ def objective(trial, base_config, args):
     # Enable basic WandB logging for HPO trials
     wandb_project = config.get("wandb", {}).get("project", "DeepScalper-HPO")
     
-    # Contextual Naming: Unique per trial, grouped by parent
-    # WANDB_RUN_GROUP: Used for unified grouping in WandB UI
-    # trial_name: Must be unique per trial for distinguishability
-    parent_name = os.getenv("WANDB_RUN_GROUP", "HPO_Default")
-    trial_name = f"{parent_name}_T{trial.number}"  # Unique per trial
+    # Check for unified run from orchestrator
+    unified_run_id = os.getenv("WANDB_RUN_ID")
+    trial_prefix = f"hpo/t{trial.number}"
     
-    # Add Trial ID to tags as well for filterability
-    trial_tag = f"Trial_{trial.number}"
-    trial_tags = ["HPO", trial_tag] + (args.tags or [])
-    
-    wandb.init(
-        project=wandb_project,
-        name=trial_name,
-        tags=trial_tags,
-        config={
-            "trial_number": trial.number,
-            "hindsight_horizon": hindsight_horizon,
-            "hindsight_weight": hindsight_weight,
-            "learning_rate": learning_rate,
-            "batch_size": batch_size,
-            "gamma": gamma,
-        },
-        reinit=True  # Allow multiple inits in same process
-    )
+    if unified_run_id:
+        # Resume the single orchestrator run (no new run created)
+        # WandB is already initialized by the orchestrator, just log with prefix
+        logger.info(f"Using unified WandB run: {unified_run_id}")
+        # Log trial start
+        wandb.log({f"{trial_prefix}/started": True})
+    else:
+        # Standalone HPO execution (fallback for direct script run)
+        parent_name = os.getenv("WANDB_RUN_GROUP", "HPO_Standalone")
+        wandb.init(
+            project=wandb_project,
+            name=f"{parent_name}_T{trial.number}",
+            tags=["HPO", f"Trial_{trial.number}"],
+            config={
+                "trial_number": trial.number,
+                "hindsight_horizon": hindsight_horizon,
+                "hindsight_weight": hindsight_weight,
+                "learning_rate": learning_rate,
+                "batch_size": batch_size,
+                "gamma": gamma,
+            },
+            reinit=True
+        )
     
     logger.info(f"Trial {trial.number}: h={hindsight_horizon}, w={hindsight_weight:.4f}, aux={auxiliary_weight}")
     
@@ -282,17 +285,23 @@ def objective(trial, base_config, args):
         val_sharpe = evaluate_agent(val_env, trainer.agent, num_episodes=3, max_steps=hpo_steps // 10)
         
         logger.info(f"Trial {trial.number} completed: Val Sharpe={val_sharpe:.4f}")
-        wandb.log({"hpo/final_val_sharpe": val_sharpe})
-        wandb.finish()
+        wandb.log({f"{trial_prefix}/final_val_sharpe": val_sharpe})
+        
+        # Only finish WandB if standalone mode (not unified)
+        if not unified_run_id:
+            wandb.finish()
         return val_sharpe
         
     except optuna.TrialPruned:
-        wandb.log({"hpo/pruned": True})
-        wandb.finish()
+        wandb.log({f"{trial_prefix}/pruned": True})
+        if not unified_run_id:
+            wandb.finish()
         raise
     except Exception as e:
         logger.error(f"Trial {trial.number} failed: {e}")
-        wandb.finish()
+        wandb.log({f"{trial_prefix}/error": str(e)})
+        if not unified_run_id:
+            wandb.finish()
         raise e
     finally:
         # P0 FIX: Always cleanup resources

@@ -19,6 +19,15 @@ def load_config(path):
         return yaml.safe_load(f)
 
 def setup_wandb(config, run_name=None):
+    # Check for unified run from orchestrator (run_full_pipeline.py)
+    unified_run_id = os.getenv("WANDB_RUN_ID")
+    
+    if unified_run_id:
+        # Already in unified run - just log with train/ prefix
+        print(f"Using unified WandB run: {unified_run_id}")
+        return run_name or os.getenv("WANDB_RUN_GROUP", "Training")
+    
+    # Standalone execution - create new run
     wandb_config = config.get("wandb", {})
     project = wandb_config.get("project", "FinRL-Pro-DS")
     tags = wandb_config.get("tags", [])
