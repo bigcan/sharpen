@@ -2,10 +2,10 @@
 
 **High-Frequency Crypto Scalping with Deep Reinforcement Learning (Bitcoin Futures)**
 
-DeepScalper is an end-to-end institutional-grade reinforcement learning pipeline designed for sub-second intraday trading. It leverages an ensemble of **PPO, A2C, and DQN** agents to trade on Limit Order Book (LOB) data with micro-structure awareness.
+DeepScalper is an end-to-end institutional-grade reinforcement learning pipeline designed for sub-second intraday trading. It leverages a **Single Branching Dueling Q-Network (BDQ)** agent to trade on Limit Order Book (LOB) data with micro-structure awareness.
 
 ## 🚀 Key Features
-- **Unified MLOps Pipeline**: Orchestrates HPO $\to$ Multi-Phase Training (Specialists/Gating) $\to$ Backtesting.
+- **Unified MLOps Pipeline**: Orchestrates HPO $\to$ Single-Phase Training $\to$ Backtesting.
 - **WandB Standardization**: Automatic canonical naming (`DeepScalper_V1_GPUHub_YYYYMMDD_HHMM`) for all runs to ensure auditability.
 - **Mach 3 Optimization**: Optimized for RTX 5090 (32GB VRAM), utilizing Shared Memory, AMP, and Torch Compile for max throughput.
 - **Remote Ops & Monitoring**: Integrated deployment engine with real-time remote GPU/Process monitoring scripts.
@@ -118,9 +118,9 @@ To ensure stability and prevent ambiguity between debugging and production verif
 - **Outcome**: Confirms *connectivity*, NOT logic. **NEVER** cite as "Success" for pipeline logic.
 
 ### Tier 2: Pilot Run (Logic Verification)
-- **Goal**: Verify end-to-end pipeline logic, phase transitions (Specialist -> Gating -> Joint), checkpointing, and memory stability.
-- **Config**: `deepscalper_pilot_test.yaml` (100k steps, 3 phases).
-- **Duration**: ~15-20 minutes.
+- **Goal**: Verify end-to-end pipeline logic, checkpointing, and memory stability.
+- **Config**: `deepscalper_pilot_test.yaml` (100k steps).
+- **Duration**: ~10-15 minutes.
 - **Outcome**: REQUIRED pass before full production run.
 
 ### Tier 3: Production Run

@@ -80,9 +80,9 @@ MANDATORY for all new experimental features or codebase refactors:
 - **Outcome**: Confirms *connectivity*, NOT logic.
 
 ### Tier 2: Pilot Run (Logic Verification)
-- **Goal**: Verify end-to-end pipeline logic, phase transitions (Specialist -> Gating -> Joint), checkpointing, and memory stability.
-- **Config**: `deepscalper_pilot_test.yaml` (100k steps, 3 phases).
-- **Duration**: ~15-20 minutes.
+- **Goal**: Verify end-to-end pipeline logic, checkpointing, and memory stability.
+- **Config**: `deepscalper_pilot_test.yaml` (100k steps).
+- **Duration**: ~10-15 minutes.
 - **Outcome**: REQUIRED pass before full production run.
 
 ### Tier 3: Production Run
