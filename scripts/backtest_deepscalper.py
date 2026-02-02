@@ -28,6 +28,7 @@ def main():
     parser.add_argument("--checkpoint", type=str, default="auto", help="Path to checkpoint .pth or 'auto' to find latest")
     parser.add_argument("--debug", action="store_true", help="Debug mode")
     parser.add_argument("--run_name", type=str, default=None, help="Run name (ignored but accepted for compatibility)")
+    parser.add_argument("--tags", nargs="*", default=[], help="WandB tags (compatibility)")
     args = parser.parse_args()
 
     config = load_config(args.config)

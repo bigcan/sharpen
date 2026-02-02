@@ -1,22 +1,14 @@
-# FinRL-Pro_DS DeepScalper V10 Dependencies
-# Updated for RTX 5090 (Blackwell) - requires PyTorch 2.8+ per GPUHub
-
 gym
-gymnasium==0.29.1
 matplotlib
-numpy                    # PyTorch 2.8 handles numpy compatibility
-torch>=2.8.0             # Match Base Image (RTX 5090 / CUDA 12.8)
+numpy
 opencv-python
 yfinance
 stockstats
 wandb
-pandas                   # PyTorch 2.8+ has resolved ABI conflicts
-pyarrow>=14.0.1           # Use latest compatible version
-fastparquet              # Pure Python fallback for ABI safety
+pandas
+pyarrow
 seaborn
-vectorbt
 scipy
-plotly
-kaleido
-optuna
-filelock
+pyyaml
+ray[tune]
+gymnasium

@@ -25,6 +25,7 @@ def main():
     parser.add_argument("--skip_hpo", action="store_true", help="Skip HPO and use default/best params")
     parser.add_argument("--skip_backtest", action="store_true", help="Skip Backtest")
     parser.add_argument("--tags", nargs="*", default=["Pipeline"], help="WandB Tags")
+    parser.add_argument("--run_name", type=str, default=None, help="Override WandB Run Name")
     args = parser.parse_args()
 
     base_config = load_config(args.config)
@@ -75,10 +76,26 @@ def main():
     with open(temp_config_path, "w") as f:
         yaml.dump(final_config, f)
         
+    # ╔═══════════════════════════════════════════════════════════════════════╗
+    # ║  CANONICAL NAMING: DeepScalper_V{version}_{Platform}_{YYYYMMDD}_{HHMM}║
+    # ║  NO SUFFIXES - use --tags for metadata (Pilot, HPO, etc.)            ║
+    # ╚═══════════════════════════════════════════════════════════════════════╝
+    from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
+    
+    if args.run_name:
+        # Validate user-provided name follows canonical format
+        validate_run_name(args.run_name, raise_on_fail=True)
+        run_name = args.run_name
+    else:
+        # CANONICAL NAMING: DeepScalper_V1_{Platform}_{YYYYMMDD}_{HHMM}
+        # Detect platform from environment (os imported at top of file)
+        platform = "GPUHub" if os.path.exists("/workspace") else "Local"
+        run_name = generate_run_name(version="V1", platform=platform)
+    
     cmd = [
         sys.executable, "scripts/train_deepscalper.py",
         "--config", temp_config_path,
-        "--run_name", f"BDQ_Pipeline_{int(time.time())}"
+        "--run_name", run_name
     ]
     if args.tags:
         cmd.extend(["--tags"] + args.tags)

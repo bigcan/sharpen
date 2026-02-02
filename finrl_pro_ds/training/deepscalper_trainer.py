@@ -62,6 +62,11 @@ class DeepScalperTrainer:
         # Obs is Dict: {'micro': ..., 'macro': ..., 'private': ...}
         obs, _ = self.env.reset()
         
+        # Defensive Assertion: Ensure VectorEnv semantics (batch dimension present)
+        assert len(obs["micro"].shape) == 3, \
+            f"Expected obs['micro'] shape (B, Window, Features), got {obs['micro'].shape}. " \
+            "Ensure env is wrapped in SyncVectorEnv even for num_envs=1."
+        
         # Need to ensure obs components are batched correctly (VectorEnv does this, but if Single env?)
         # If VectorEnv, obs['micro'] is (NumEnvs, Window, Feats)
         # We process row-by-row for filling buffer if NumEnvs > 1

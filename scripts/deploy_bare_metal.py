@@ -50,15 +50,17 @@ def deploy(args):
     host = get_env_var("GPUHUB_HOST")
     port = int(get_env_var("GPUHUB_PORT"))
     password = get_env_var("GPUHUB_PASSWORD")
-    wandb_key = os.getenv("WANDB_API_KEY", "")
+    # CANONICAL NAMING: DeepScalper_V1_{Platform}_{YYYYMMDD}_{HHMM}
+    # Suffixes/metadata go in tags, not run name
+    from finrl_pro_ds.utils.naming import generate_run_name
+    full_run_name = generate_run_name(version="V1", platform="GPUHub")
     
-    run_name = args.run_name
-    # Don't force timestamp - trust the caller or the script's internal logic
-    if run_name:
-        from finrl_pro_ds.utils.naming import standardize_run_name
-        full_run_name = standardize_run_name(run_name)
-    else:
-        full_run_name = None # Script will generate it
+    # If user provided a custom name, add it as a tag instead
+    extra_tags = []
+    if args.run_name:
+        extra_tags.append(args.run_name)
+    
+    wandb_key = os.getenv("WANDB_API_KEY", "")
     
     script_path = args.script
     config_path = args.config
@@ -196,8 +198,19 @@ def deploy(args):
     # Prepend PATH here too
     # Build run_name arg only if provided
     run_name_arg = f"--run_name {full_run_name}" if full_run_name else ""
+    # Merge extra_tags with any tags in extra_args
+    all_extra_args = args.extra_args
+    if extra_tags:
+        # Append extra tags to the command  
+        tag_str = " ".join(extra_tags)
+        if "--tags" in all_extra_args:
+            # Append to existing tags
+            all_extra_args = all_extra_args.replace("--tags", f"--tags {tag_str}")
+        else:
+            all_extra_args = f"{all_extra_args} --tags {tag_str}"
+    
     wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
-    cmd = f"{export_path} && {wandb_env} ulimit -n 65535 && nohup python -u {script_path} --config {config_path} {run_name_arg} {args.extra_args} > run.log 2>&1 & echo $! > run.pid"
+    cmd = f"{export_path} && {wandb_env} ulimit -n 65535 && nohup python -u {script_path} --config {config_path} {run_name_arg} {all_extra_args} > run.log 2>&1 & echo $! > run.pid"
     
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
