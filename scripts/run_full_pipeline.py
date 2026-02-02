@@ -25,7 +25,7 @@ sys.path.append(os.getcwd())
 from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.agents.deepscalper.bdq_agent import BDQAgent
+from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
 
 logging.basicConfig(level=logging.INFO)
@@ -332,10 +332,19 @@ def run_backtest(config, checkpoint_path, device):
         
         # Create agent
         sample_obs, _ = env.reset()
-        agent = BDQAgent(
-            observation_space=env.observation_space,
-            action_space=env.action_space,
-            config=config.get("agents", {}).get("bdq", {}),
+        # Create agent for backtest
+        bdq_config = config.get("agents", {}).get("bdq", {})
+        network_config = config.get("agents", {}).get("bdq", {}).get("network", {
+            "micro_features": 20,
+            "macro_features": 11,
+            "private_features": 2,
+            "window_size": 50,
+        })
+        agent = DeepScalperBDQ(
+            network_config=network_config,
+            lr=bdq_config.get("learning_rate", 1e-4),
+            gamma=bdq_config.get("gamma", 0.99),
+            batch_size=bdq_config.get("batch_size", 64),
             device=device
         )
         
