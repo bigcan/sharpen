@@ -25,7 +25,7 @@ sys.path.append(os.getcwd())
 from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.agents.bdq_agent import BDQAgent
+from finrl_pro_ds.agents.deepscalper.bdq_agent import BDQAgent
 from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
 
 logging.basicConfig(level=logging.INFO)
