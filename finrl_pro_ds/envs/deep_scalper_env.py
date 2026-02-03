@@ -417,9 +417,9 @@ class DeepScalperEnv(gym.Env):
         
         # 5. Safety Drawdown Stop
         truncated = False
-        if current_portfolio_value < 0.8 * self.initial_balance:
+        if current_portfolio_value < self._stop_loss_threshold * self.initial_balance:
             terminated = True
-            logging.warning("Hit Max Drawdown Stop (20%). Terminating Episode.")
+            logging.warning(f"Hit Max Drawdown Stop ({self.max_drawdown_pct:.0%}). Terminating Episode.")
         
         obs = self._get_observation()
         info = {

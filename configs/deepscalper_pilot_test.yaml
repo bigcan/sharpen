@@ -21,7 +21,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   transaction_fee: 0.00005 
-  num_envs: 4             # Reduced for SyncVectorEnv (data loads per-env)
+  num_envs: 16            # 16 parallel envs for higher throughput (Stress Test)
   window_size: 50
   max_drawdown_pct: 0.40  # Relaxed for training (40%); tighten to 0.20 in production
   
@@ -68,7 +68,7 @@ training:
   
   torch_compile: true
   use_amp: true         
-  use_shm: false         # Disable SHM due to race condition (fix pending)
+  use_shm: true         # Enabled for performance verification
 
 hpo:
   enabled: true

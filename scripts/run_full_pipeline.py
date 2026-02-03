@@ -192,7 +192,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         # Create env and train
         env = None
         try:
-            env = create_vector_env(config, num_envs=1)
+            env = create_vector_env(config, num_envs=config["env"].get("num_envs", 12))
             trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
             trainer.train()
             
@@ -253,7 +253,7 @@ def run_training(config, run_name, device):
     logger.info("Starting Training Phase")
     wandb.log({"train/status": "started"})
     
-    num_envs = config.get("env", {}).get("num_envs", 1)
+    num_envs = config.get("env", {}).get("num_envs", 12)
     data_loader = None
     env = None
     
@@ -284,7 +284,7 @@ def run_training(config, run_name, device):
         checkpoints_dir = f"checkpoints/{run_name}"
         checkpoint_path = None
         if os.path.exists(checkpoints_dir):
-            ckpts = sorted([f for f in os.listdir(checkpoints_dir) if f.endswith(".pt")])
+            ckpts = sorted([f for f in os.listdir(checkpoints_dir) if f.endswith(".pth") or f.endswith(".pt")])
             if ckpts:
                 checkpoint_path = os.path.join(checkpoints_dir, ckpts[-1])
         
@@ -310,33 +310,43 @@ def run_training(config, run_name, device):
 # ============================================================================
 # PHASE 3: BACKTESTING
 # ============================================================================
-def run_backtest(config, checkpoint_path, device):
-    """Phase 3: Backtest on held-out test data."""
-    logger.info("Starting Backtest Phase")
-    wandb.log({"backtest/status": "started"})
+def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None, prefix="backtest"):
+    """Phase 3: Backtest on specified data range."""
+    mode = "Test" if prefix == "backtest" else "Validation"
+    logger.info(f"Starting {mode} Phase")
+    wandb.log({f"{prefix}/status": "started"})
     
     data_config = config.get("data", {})
-    test_start = data_config.get("test_start_date")
-    test_end = data_config.get("test_end_date")
-    
-    if not test_start or not test_end:
-        logger.warning("No test dates configured, using validation dates")
-        test_start = data_config.get("val_start_date")
-        test_end = data_config.get("val_end_date")
+    if not start_date:
+        start_date = data_config.get("test_start_date")
+    if not end_date:
+        end_date = data_config.get("test_end_date")
+        
+    if not start_date or not end_date:
+        logger.warning(f"No dates configured for {prefix}, using validation dates as fallback")
+        start_date = data_config.get("val_start_date")
+        end_date = data_config.get("val_end_date")
     
     env = None
     try:
-        env = make_env(config, start_date=test_start, end_date=test_end)
+        env = make_env(config, start_date=start_date, end_date=end_date)
         
         # Create agent
         sample_obs, _ = env.reset()
         # Create agent for backtest
         bdq_config = config.get("agents", {}).get("bdq", {})
-        network_config = config.get("agents", {}).get("bdq", {}).get("network", {
-            "micro_features": 20,
-            "macro_features": 11,
-            "private_features": 2,
-            "window_size": 50,
+        # Fix: Network config is at top level, not inside agents.bdq
+        network_config = config.get("network", {
+            "micro_config": {
+                "input_size": 20,
+                "private_input_size": 2,
+                "hidden_size": 128,
+                "rnn_type": "LSTM"
+            },
+            "macro_config": {
+                "input_size": 11,
+                "hidden_sizes": [128, 128]
+            }
         })
         agent = DeepScalperBDQ(
             network_config=network_config,
@@ -378,29 +388,36 @@ def run_backtest(config, checkpoint_path, device):
         
         # Compute metrics
         pv = np.array(portfolio_values)
+        pos_arr = np.array(positions)
         returns = np.diff(pv) / pv[:-1]
         
         total_return = (pv[-1] - pv[0]) / pv[0] if len(pv) > 0 else 0
         sharpe = (np.mean(returns) / np.std(returns)) * np.sqrt(525600) if np.std(returns) > 1e-9 else 0
         max_dd = np.min(pv / np.maximum.accumulate(pv)) - 1 if len(pv) > 0 else 0
         
+        # Trade Stats
+        trade_count = np.sum(np.abs(np.diff(pos_arr)) > 1e-6)
+        market_exposure = np.mean(np.abs(pos_arr) > 1e-6)
+        
         metrics = {
-            "backtest/total_return": total_return,
-            "backtest/sharpe": sharpe,
-            "backtest/max_drawdown": max_dd,
-            "backtest/final_value": pv[-1] if len(pv) > 0 else 0,
-            "backtest/steps": step,
-            "backtest/status": "completed"
+            f"{prefix}/total_return": total_return,
+            f"{prefix}/sharpe": sharpe,
+            f"{prefix}/max_drawdown": max_dd,
+            f"{prefix}/final_value": pv[-1] if len(pv) > 0 else 0,
+            f"{prefix}/steps": step,
+            f"{prefix}/trade_count": int(trade_count),
+            f"{prefix}/market_exposure": market_exposure,
+            f"{prefix}/status": "completed"
         }
         
         wandb.log(metrics)
-        logger.info(f"Backtest Complete. Return={total_return*100:.2f}%, Sharpe={sharpe:.2f}, MaxDD={max_dd*100:.2f}%")
+        logger.info(f"{mode} Complete. Return={total_return*100:.2f}%, Sharpe={sharpe:.2f}, MaxDD={max_dd*100:.2f}%")
         
         return metrics
         
     except Exception as e:
         logger.error(f"Backtest failed: {e}")
-        wandb.log({"backtest/status": "failed", "backtest/error": str(e)})
+        wandb.log({f"{prefix}/status": "failed", f"{prefix}/error": str(e)})
         raise
     finally:
         if env:
@@ -477,14 +494,29 @@ def main():
         
         checkpoint_path = run_training(final_config, run_name, device)
         
-        # =====================================================================
-        # PHASE 3: BACKTESTING
-        # =====================================================================
-        print("\n" + "="*60)
-        print(">>> PHASE 3: BACKTESTING")
-        print("="*60 + "\n")
-        
-        metrics = run_backtest(final_config, checkpoint_path, device)
+        if checkpoint_path:
+            # PHASE 3a: Validation Backtest (for Overfitting Check)
+            print(">>> PHASE 3a: VALIDATION BACKTEST")
+            data_config = final_config.get("data", {})
+            run_backtest(
+                final_config, 
+                checkpoint_path, 
+                device, 
+                start_date=data_config.get("val_start_date"), 
+                end_date=data_config.get("val_end_date"),
+                prefix="backtest_val"
+            )
+
+            # PHASE 3b: Test Backtest (for Final Evaluation)
+            print(">>> PHASE 3b: TEST BACKTEST")
+            run_backtest(
+                final_config, 
+                checkpoint_path, 
+                device,
+                prefix="backtest_test"
+            )
+        else:
+            logger.warning("No checkpoint found, skipping backtests")
         
         print("\n" + "="*60)
         print(">>> PIPELINE COMPLETE")
