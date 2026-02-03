@@ -32,13 +32,56 @@ def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro
         data["history"] = history.to_dict(orient="records")
 
         
-        # Save to file
+        # Save to JSON (Detail View)
         os.makedirs(os.path.dirname(output_file), exist_ok=True)
         with open(output_file, 'w') as f:
             json.dump(data, f, indent=4)
         
         print(f"Successfully saved run data to {output_file}")
+
+        # Update Local Metrics DB (Registry View)
+        import sqlite3
+        db_path = "c:/FinRL/FinRL-Pro_DS/results/metrics.db"
+        conn = sqlite3.connect(db_path)
+        cursor = conn.cursor()
         
+        # Create table if not exists
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS runs (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                status TEXT,
+                created_at TEXT,
+                sharpe REAL,
+                total_return REAL,
+                sps REAL,
+                tags TEXT,
+                config TEXT,
+                json_path TEXT
+            )
+        ''')
+        
+        # Check if config column exists (migration for existing DB)
+        try:
+            cursor.execute("SELECT config FROM runs LIMIT 1")
+        except sqlite3.OperationalError:
+            cursor.execute("ALTER TABLE runs ADD COLUMN config TEXT")
+        
+        # Extract Key Metrics
+        sharpe = data.get("summary", {}).get("backtest_test/sharpe", data.get("summary", {}).get("backtest/sharpe", 0.0))
+        ret = data.get("summary", {}).get("backtest_test/total_return", data.get("summary", {}).get("backtest/total_return", 0.0))
+        sps = data.get("summary", {}).get("train/sps", 0.0)
+        
+        # Upsert
+        cursor.execute('''
+            INSERT OR REPLACE INTO runs (id, name, status, created_at, sharpe, total_return, sps, tags, config, json_path)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (run.id, run.name, run.state, run.created_at, sharpe, ret, sps, json.dumps(run.tags), json.dumps(run.config), output_file))
+        
+        conn.commit()
+        conn.close()
+        print(f"Updated Local Metrics DB: {db_path}")
+
     except Exception as e:
         print(f"Error fetching run data: {e}")
 
