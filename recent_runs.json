@@ -1,260 +1,330 @@
 [
     {
-        "id": "afmnna8y",
-        "name": "DeepScalper_V1_GPUHub_20260202_1417",
+        "id": "erf2ibqo",
+        "name": "DeepScalper_V1_GPUHub_20260203_0824",
         "status": "finished",
-        "created_at": "2026-02-02T06:18:13Z",
+        "created_at": "2026-02-03T00:25:10Z",
         "tags": [
-            "Full",
-            "GPU",
-            "Pilot",
-            "SingleBDQ",
-            "VerifyingLogic"
+            "Pipeline"
         ],
         "summary": {
-            "_runtime": 2993,
-            "_step": 197,
-            "_timestamp": 1770016087.304173,
+            "_runtime": 1144,
+            "_step": 80,
+            "_timestamp": 1770079455.1589105,
             "_wandb": {
-                "runtime": 2993
+                "runtime": 1144
             },
             "agent/epsilon": 0.05,
-            "agent/loss_aux": 4.239532813699043e-07,
-            "agent/loss_dir": 2.3608760102433737e-07,
-            "agent/loss_price": 1.0202334976838757e-07,
-            "agent/loss_total": 9.564646461512891e-07,
-            "agent/loss_vol": 1.9440039977780546e-07,
-            "agent/q_dir_mean": 0.2342280149459839,
-            "agent/q_price_mean": 0.23428983986377716,
-            "agent/q_vol_mean": 0.23425506055355072,
-            "step": 100000,
-            "train/len_mean": 43241.5,
-            "train/reward_mean": -2.0441632401261964
-        }
-    },
-    {
-        "id": "iou7egfi",
-        "name": "DeepScalper_V1_GPUHub_20260202_1412",
-        "status": "crashed",
-        "created_at": "2026-02-02T06:13:48Z",
-        "tags": [
-            "Full",
-            "GPU",
-            "Pilot",
-            "SingleBDQ",
-            "VerifyingLogic"
-        ],
-        "summary": {
-            "_runtime": 214.310222603,
-            "_step": 4,
-            "_timestamp": 1770013043.307929,
-            "_wandb": {
-                "runtime": 214
-            },
-            "agent/epsilon": 0.05,
-            "agent/loss_aux": 7.01140561432112e-06,
-            "agent/loss_dir": 0.0003291176981292665,
-            "agent/loss_price": 0.003544227220118046,
-            "agent/loss_total": 0.004208256024867296,
-            "agent/loss_vol": 0.00032789941178634763,
-            "agent/q_dir_mean": 0.2027287781238556,
-            "agent/q_price_mean": 0.25477251410484314,
-            "agent/q_vol_mean": 0.2026875764131546,
-            "step": 3500,
+            "agent/loss_aux": 7.490947950827832e-08,
+            "agent/loss_dir": 2.985573530622787e-07,
+            "agent/loss_price": 4.249266112310579e-07,
+            "agent/loss_total": 8.622564564575441e-07,
+            "agent/loss_vol": 1.0131775241006836e-07,
+            "agent/q_dir_mean": 0.2806621789932251,
+            "agent/q_price_mean": 0.28081175684928894,
+            "agent/q_vol_mean": 0.2807554304599762,
+            "backtest/final_value": 97757.5234375,
+            "backtest/max_drawdown": -0.02309650169991262,
+            "backtest/sharpe": -18.88442860862017,
+            "backtest/status": "completed",
+            "backtest/steps": 200000,
+            "backtest/total_return": -0.022424765625,
+            "hpo/best_sharpe": -5.990773081284567,
+            "hpo/best_trial": 2,
+            "hpo/n_trials": 3,
+            "hpo/status": "completed",
+            "hpo/t0/batch_size": 64,
+            "hpo/t0/completed": true,
+            "hpo/t0/hindsight_horizon": 120,
+            "hpo/t0/learning_rate": 0.00036740592026352257,
+            "hpo/t0/sharpe": -63.64145979350665,
+            "hpo/t0/started": true,
+            "hpo/t1/batch_size": 64,
+            "hpo/t1/completed": true,
+            "hpo/t1/hindsight_horizon": 180,
+            "hpo/t1/learning_rate": 0.0003048919554765758,
+            "hpo/t1/sharpe": -19.402559090701196,
+            "hpo/t1/started": true,
+            "hpo/t2/batch_size": 256,
+            "hpo/t2/completed": true,
+            "hpo/t2/hindsight_horizon": 180,
+            "hpo/t2/learning_rate": 0.0004057797837985251,
+            "hpo/t2/sharpe": -5.990773081284567,
+            "hpo/t2/started": true,
+            "step": 99000,
+            "train/checkpoint": "none",
             "train/len_mean": 0,
-            "train/reward_mean": 0
+            "train/reward_mean": 0,
+            "train/status": "completed"
         }
     },
     {
-        "id": "e5j3ywkw",
-        "name": "Pilot_Feb02",
-        "status": "crashed",
-        "created_at": "2026-02-02T06:04:51Z",
+        "id": "5nr7p4dx",
+        "name": "DeepScalper_V1_GPUHub_20260203_0803",
+        "status": "finished",
+        "created_at": "2026-02-03T00:04:09Z",
         "tags": [
-            "Full",
-            "GPU",
-            "Pilot",
-            "SingleBDQ",
-            "VerifyingLogic"
+            "Pipeline"
         ],
         "summary": {
-            "_runtime": 736.711296698,
-            "_step": 41,
-            "_timestamp": 1770013028.703571,
+            "_runtime": 952,
+            "_step": 80,
+            "_timestamp": 1770078002.9707358,
             "_wandb": {
-                "runtime": 736
+                "runtime": 952
             },
             "agent/epsilon": 0.05,
-            "agent/loss_aux": 2.2031460957805393e-06,
-            "agent/loss_dir": 3.235442591176252e-06,
-            "agent/loss_price": 3.003836354764644e-06,
-            "agent/loss_total": 3.37559831677936e-05,
-            "agent/loss_vol": 2.531355676183011e-05,
-            "agent/q_dir_mean": 0.4608997702598572,
-            "agent/q_price_mean": 0.46094250679016113,
-            "agent/q_vol_mean": 0.4755995273590088,
-            "step": 22000,
-            "train/len_mean": 17555,
-            "train/reward_mean": -2.0447918916930723
+            "agent/loss_aux": 5.468697850119497e-08,
+            "agent/loss_dir": 3.427123147048406e-06,
+            "agent/loss_price": 3.248606390116038e-06,
+            "agent/loss_total": 8.447601430816576e-06,
+            "agent/loss_vol": 1.7171851141029038e-06,
+            "agent/q_dir_mean": -0.03982715681195259,
+            "agent/q_price_mean": -0.039772991091012955,
+            "agent/q_vol_mean": -0.0396999791264534,
+            "backtest/final_value": 79996.296875,
+            "backtest/max_drawdown": -0.20003703125000005,
+            "backtest/sharpe": -896.7918091036848,
+            "backtest/status": "completed",
+            "backtest/steps": 5456,
+            "backtest/total_return": -0.20003703125,
+            "hpo/best_sharpe": -1.16612327159031,
+            "hpo/best_trial": 1,
+            "hpo/n_trials": 3,
+            "hpo/status": "completed",
+            "hpo/t0/batch_size": 64,
+            "hpo/t0/completed": true,
+            "hpo/t0/hindsight_horizon": 120,
+            "hpo/t0/learning_rate": 0.00036740592026352257,
+            "hpo/t0/sharpe": -1.815677584799096,
+            "hpo/t0/started": true,
+            "hpo/t1/batch_size": 64,
+            "hpo/t1/completed": true,
+            "hpo/t1/hindsight_horizon": 180,
+            "hpo/t1/learning_rate": 0.0003048919554765758,
+            "hpo/t1/sharpe": -1.16612327159031,
+            "hpo/t1/started": true,
+            "hpo/t2/batch_size": 256,
+            "hpo/t2/completed": true,
+            "hpo/t2/hindsight_horizon": 180,
+            "hpo/t2/learning_rate": 0.0004057797837985251,
+            "hpo/t2/sharpe": -29.39630530636064,
+            "hpo/t2/started": true,
+            "step": 99000,
+            "train/checkpoint": "none",
+            "train/len_mean": 0,
+            "train/reward_mean": 0,
+            "train/status": "completed"
         }
     },
     {
-        "id": "emriys1h",
-        "name": "DeepScalper_V1_GPUHub_20260202_1400_PilotGPU_Feb02",
-        "status": "crashed",
-        "created_at": "2026-02-02T06:00:59Z",
+        "id": "x6jzv2iz",
+        "name": "DeepScalper_V1_Local_20260203_0756",
+        "status": "finished",
+        "created_at": "2026-02-02T23:56:46Z",
         "tags": [
-            "Full",
-            "GPU",
-            "Pilot",
-            "SingleBDQ",
-            "VerifyingLogic"
+            "Pipeline"
         ],
         "summary": {
-            "_runtime": 182.55939774,
+            "_runtime": 406,
             "_step": 11,
-            "_timestamp": 1770012242.214791,
+            "_timestamp": 1770077007.166581,
             "_wandb": {
-                "runtime": 182
+                "runtime": 406
+            },
+            "hpo/best_sharpe": 0,
+            "hpo/best_trial": 1,
+            "hpo/n_trials": 3,
+            "hpo/status": "completed",
+            "hpo/t0/batch_size": 64,
+            "hpo/t0/completed": true,
+            "hpo/t0/hindsight_horizon": 120,
+            "hpo/t0/learning_rate": 0.00036740592026352257,
+            "hpo/t0/sharpe": -16.044057862933172,
+            "hpo/t0/started": true,
+            "hpo/t1/batch_size": 64,
+            "hpo/t1/error": "Failed to load parquet data: Unable to allocate 28.5 MiB for an array with shape (3730870,) and data type float64",
+            "hpo/t1/hindsight_horizon": 180,
+            "hpo/t1/learning_rate": 0.0003048919554765758,
+            "hpo/t1/started": true,
+            "hpo/t2/batch_size": 256,
+            "hpo/t2/completed": true,
+            "hpo/t2/hindsight_horizon": 180,
+            "hpo/t2/learning_rate": 0.0004057797837985251,
+            "hpo/t2/sharpe": 0,
+            "hpo/t2/started": true,
+            "train/status": "started"
+        }
+    },
+    {
+        "id": "4gxmmxnm",
+        "name": "DeepScalper_V1_GPUHub_20260202_2329",
+        "status": "finished",
+        "created_at": "2026-02-02T15:30:23Z",
+        "tags": [
+            "Pipeline"
+        ],
+        "summary": {
+            "_runtime": 1381,
+            "_step": 213,
+            "_timestamp": 1770047604.8743963,
+            "_wandb": {
+                "runtime": 1381
             },
             "agent/epsilon": 0.05,
-            "agent/loss_aux": 9.949893353677909e-08,
-            "agent/loss_dir": 3.217122139176354e-05,
-            "agent/loss_price": 1.0211076642008263e-06,
-            "agent/loss_total": 3.79116645490285e-05,
-            "agent/loss_vol": 4.6198365453165025e-06,
-            "agent/q_dir_mean": 0.4376285374164582,
-            "agent/q_price_mean": 0.4314829111099243,
-            "agent/q_vol_mean": 0.4314506649971008,
-            "step": 7000,
+            "agent/loss_aux": 8.111138072308677e-07,
+            "agent/loss_dir": 4.6095158268144587e-07,
+            "agent/loss_price": 1.2634412769330083e-06,
+            "agent/loss_total": 2.293593752256129e-06,
+            "agent/loss_vol": 1.6364403165880506e-07,
+            "agent/q_dir_mean": 0.2990792393684387,
+            "agent/q_price_mean": 0.2991653084754944,
+            "agent/q_vol_mean": 0.2990603446960449,
+            "backtest/error": "DeepScalperNetwork.__init__() missing 2 required positional arguments: 'micro_config' and 'macro_config'",
+            "backtest/status": "failed",
+            "hpo/best_sharpe": 0,
+            "hpo/best_trial": 0,
+            "hpo/n_trials": 3,
+            "hpo/status": "completed",
+            "hpo/t0/batch_size": 64,
+            "hpo/t0/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t0/hindsight_horizon": 120,
+            "hpo/t0/learning_rate": 0.00036740592026352257,
+            "hpo/t0/started": true,
+            "hpo/t1/batch_size": 64,
+            "hpo/t1/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t1/hindsight_horizon": 180,
+            "hpo/t1/learning_rate": 0.0003048919554765758,
+            "hpo/t1/started": true,
+            "hpo/t2/batch_size": 256,
+            "hpo/t2/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t2/hindsight_horizon": 180,
+            "hpo/t2/learning_rate": 0.0004057797837985251,
+            "hpo/t2/started": true,
+            "pipeline/error": "DeepScalperNetwork.__init__() missing 2 required positional arguments: 'micro_config' and 'macro_config'",
+            "pipeline/status": "failed",
+            "step": 100000,
+            "train/checkpoint": "none",
             "train/len_mean": 0,
-            "train/reward_mean": 0
+            "train/reward_mean": 0,
+            "train/status": "completed"
         }
     },
     {
-        "id": "14a33z4x",
-        "name": "PilotFull_Feb02",
-        "status": "finished",
-        "created_at": "2026-02-02T05:56:48Z",
+        "id": "35lhz41f",
+        "name": "DeepScalper_V1_GPUHub_20260202_2326",
+        "status": "crashed",
+        "created_at": "2026-02-02T15:27:25Z",
         "tags": [
-            "Full",
-            "Pilot",
-            "Pipeline",
-            "SingleBDQ",
-            "VerifyingLogic"
+            "Pipeline"
         ],
         "summary": {
-            "_runtime": 188,
-            "_step": 12,
-            "_timestamp": 1770011986.3507705,
+            "_runtime": 20.014182338,
+            "_step": 11,
+            "_timestamp": 1770046065.837073,
             "_wandb": {
-                "runtime": 188
+                "runtime": 20
             },
-            "agent/epsilon": 0.05,
-            "agent/loss_aux": 3.2244822705251863e-06,
-            "agent/loss_dir": 1.5187215467449278e-05,
-            "agent/loss_price": 0.00017697340808808804,
-            "agent/loss_total": 0.00020416107145138085,
-            "agent/loss_vol": 8.775953574513551e-06,
-            "agent/q_dir_mean": 0.25167134404182434,
-            "agent/q_price_mean": 0.2682572305202484,
-            "agent/q_vol_mean": 0.25389009714126587,
-            "step": 7500,
-            "train/len_mean": 0,
-            "train/reward_mean": 0
+            "hpo/best_sharpe": 0,
+            "hpo/best_trial": 0,
+            "hpo/n_trials": 3,
+            "hpo/status": "completed",
+            "hpo/t0/batch_size": 64,
+            "hpo/t0/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t0/hindsight_horizon": 120,
+            "hpo/t0/learning_rate": 0.00036740592026352257,
+            "hpo/t0/started": true,
+            "hpo/t1/batch_size": 64,
+            "hpo/t1/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t1/hindsight_horizon": 180,
+            "hpo/t1/learning_rate": 0.0003048919554765758,
+            "hpo/t1/started": true,
+            "hpo/t2/batch_size": 256,
+            "hpo/t2/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t2/hindsight_horizon": 180,
+            "hpo/t2/learning_rate": 0.0004057797837985251,
+            "hpo/t2/started": true,
+            "train/status": "started"
         }
     },
     {
-        "id": "n4rwq75i",
-        "name": "Pilot_Verify_Fix",
+        "id": "0lqx7qig",
+        "name": "DeepScalper_V1_GPUHub_20260202_2323",
         "status": "finished",
-        "created_at": "2026-02-02T05:51:41Z",
+        "created_at": "2026-02-02T15:24:25Z",
         "tags": [
-            "Fix",
-            "Pilot",
-            "SingleBDQ",
-            "Verify",
-            "VerifyingLogic"
+            "Pipeline"
         ],
         "summary": {
-            "_runtime": 8,
+            "_runtime": 30,
+            "_step": 13,
+            "_timestamp": 1770045896.1145968,
             "_wandb": {
-                "runtime": 8
-            }
+                "runtime": 30
+            },
+            "hpo/best_sharpe": 0,
+            "hpo/best_trial": 0,
+            "hpo/n_trials": 3,
+            "hpo/status": "completed",
+            "hpo/t0/batch_size": 64,
+            "hpo/t0/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t0/hindsight_horizon": 120,
+            "hpo/t0/learning_rate": 0.00036740592026352257,
+            "hpo/t0/started": true,
+            "hpo/t1/batch_size": 64,
+            "hpo/t1/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t1/hindsight_horizon": 180,
+            "hpo/t1/learning_rate": 0.0003048919554765758,
+            "hpo/t1/started": true,
+            "hpo/t2/batch_size": 256,
+            "hpo/t2/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t2/hindsight_horizon": 180,
+            "hpo/t2/learning_rate": 0.0004057797837985251,
+            "hpo/t2/started": true,
+            "pipeline/error": "Failed to attach SHM for timestamp: [Errno 2] No such file or directory: '/psm_f789b695'",
+            "pipeline/status": "failed",
+            "train/error": "Failed to attach SHM for timestamp: [Errno 2] No such file or directory: '/psm_f789b695'",
+            "train/status": "failed"
         }
     },
     {
-        "id": "1197ul62",
-        "name": "Debug_Run_Shapes_v2",
-        "status": "failed",
-        "created_at": "2026-02-02T05:49:37Z",
+        "id": "vhst9rih",
+        "name": "DeepScalper_V1_GPUHub_20260202_2319",
+        "status": "finished",
+        "created_at": "2026-02-02T15:20:00Z",
         "tags": [
-            "Debug",
-            "Pilot",
-            "Shapes",
-            "SingleBDQ",
-            "VerifyingLogic"
+            "Pipeline"
         ],
         "summary": {
-            "_runtime": 6,
+            "_runtime": 30,
+            "_step": 13,
+            "_timestamp": 1770045631.7031314,
             "_wandb": {
-                "runtime": 6
-            }
-        }
-    },
-    {
-        "id": "8pn6kor0",
-        "name": "Debug_Run_Shapes",
-        "status": "failed",
-        "created_at": "2026-02-02T05:47:46Z",
-        "tags": [
-            "Debug",
-            "Pilot",
-            "Shapes",
-            "SingleBDQ",
-            "VerifyingLogic"
-        ],
-        "summary": {
-            "_runtime": 6,
-            "_wandb": {
-                "runtime": 6
-            }
-        }
-    },
-    {
-        "id": "zts43xv9",
-        "name": "Pilot_Full_Run_v3",
-        "status": "failed",
-        "created_at": "2026-02-02T05:36:06Z",
-        "tags": [
-            "FullPipeline",
-            "Pilot",
-            "SingleBDQ",
-            "VerifyingLogic"
-        ],
-        "summary": {
-            "_runtime": 8,
-            "_wandb": {
-                "runtime": 8
-            }
-        }
-    },
-    {
-        "id": "o8vuaxef",
-        "name": "Pilot_Full_Run_v2",
-        "status": "failed",
-        "created_at": "2026-02-02T05:34:00Z",
-        "tags": [
-            "FullPipeline",
-            "Pilot",
-            "SingleBDQ",
-            "VerifyingLogic"
-        ],
-        "summary": {
-            "_runtime": 42,
-            "_wandb": {
-                "runtime": 42
-            }
+                "runtime": 30
+            },
+            "hpo/best_sharpe": 0,
+            "hpo/best_trial": 0,
+            "hpo/n_trials": 3,
+            "hpo/status": "completed",
+            "hpo/t0/batch_size": 64,
+            "hpo/t0/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t0/hindsight_horizon": 120,
+            "hpo/t0/learning_rate": 0.00036740592026352257,
+            "hpo/t0/started": true,
+            "hpo/t1/batch_size": 64,
+            "hpo/t1/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t1/hindsight_horizon": 180,
+            "hpo/t1/learning_rate": 0.0003048919554765758,
+            "hpo/t1/started": true,
+            "hpo/t2/batch_size": 256,
+            "hpo/t2/error": "index 1 is out of bounds for axis 0 with size 1",
+            "hpo/t2/hindsight_horizon": 180,
+            "hpo/t2/learning_rate": 0.0004057797837985251,
+            "hpo/t2/started": true,
+            "pipeline/error": "Failed to attach SHM for timestamp: [Errno 2] No such file or directory: '/psm_5e57ec00'",
+            "pipeline/status": "failed",
+            "train/error": "Failed to attach SHM for timestamp: [Errno 2] No such file or directory: '/psm_5e57ec00'",
+            "train/status": "failed"
         }
     }
 ]
