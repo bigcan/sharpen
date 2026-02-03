@@ -21,7 +21,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   transaction_fee: 0.00005 
-  num_envs: 16            # 16 parallel envs for higher throughput (Stress Test)
+  num_envs: 20            # 20 parallel envs for scale-up stress test
   window_size: 50
   max_drawdown_pct: 0.40  # Relaxed for training (40%); tighten to 0.20 in production
   
