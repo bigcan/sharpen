@@ -20,9 +20,10 @@ features:
 env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
-  transaction_fee: 0.00005 # Blended average (Maker 0.02%, Taker 0.05%) or explicit logic in Env
-  num_envs: 24            # RTX 5090 + 25 CPU Cores (Spawn Safe)
+  transaction_fee: 0.001 # Standard Retail (10 bps) - Avoids "Free Money" trap
+  num_envs: 20            # RTX 5090 Stable Limit (Avoids IPC Saturation)
   window_size: 50
+  max_drawdown_pct: 0.20  # Tightened for Production
   
   reward:
     profit_weight: 1.0
@@ -47,7 +48,7 @@ network:
     
   macro_config:
     input_size: 11
-    hidden_sizes: [1024, 1024, 512] 
+    hidden_sizes: [256, 128] # Resised for 350MB Data (Avoids Overfitting) 
 
 agents:
   bdq:
@@ -82,7 +83,7 @@ agents:
     exploration_fraction: 0.2
     epsilon_start: 1.0
     epsilon_end: 0.01
-    epsilon_decay: 0.9998895 # FIX: Reaches epsilon_end=0.01 at 1M steps (41.7k decay calls @ num_envs=24)
+    epsilon_decay: 0.999908 # FIX: Reaches epsilon_end=0.01 at 1M steps (50k decay calls @ num_envs=20)
 
 training:
   # Overall length
@@ -94,8 +95,13 @@ training:
   use_amp: true         # Enabled (Reference: FP16)
   use_shm: true         
   
+hpo:
+  enabled: true
+  n_trials: 50             # User requested
+  steps_per_trial: 50000   # Production recommendation: 5% of total steps for robust signal
+
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   mode: "online"
-  tags: ["RTX5090", "SingleBDQ", "PaperAligned"]
+  tags: ["Production", "RTX5090", "SingleBDQ", "PaperAligned"]
