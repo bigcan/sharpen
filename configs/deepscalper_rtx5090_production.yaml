@@ -88,7 +88,7 @@ agents:
 training:
   # Overall length
   total_timesteps: 1000000  # 1M steps (Phase 1 - will scale to 10M)
-  log_interval: 1000
+  log_interval: 100000
   
   # Optimization
   torch_compile: true   # Enabled
