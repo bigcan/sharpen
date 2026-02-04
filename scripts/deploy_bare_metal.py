@@ -213,7 +213,8 @@ def deploy(args):
             all_extra_args = f"{all_extra_args} --tags {tag_str}"
     
     wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
-    cmd = f"{export_path} && {wandb_env} ulimit -n 65535 && nohup python -u {script_path} --config {config_path} {run_name_arg} {all_extra_args} > run.log 2>&1 & echo $! > run.pid"
+    # FIX: Remove () around ulimit so it applies to the current shell and subsequent nohup process
+    cmd = f"{export_path} && {wandb_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {all_extra_args} > run.log 2>&1 & echo $! > run.pid"
     
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)

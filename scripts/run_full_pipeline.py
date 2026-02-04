@@ -211,7 +211,11 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         finally:
             if env:
                 env.close()
+            # FIX A: Force garbage collection to release PyArrow mmap/FD handles
+            import gc
+            gc.collect()
     
+
     # Run optimization
     study = optuna.create_study(
         direction="maximize",
@@ -267,7 +271,9 @@ def run_training(config, run_name, device):
             data_loader = ParquetDataHandler(
                 file_path=data_config.get("file_path"),
                 ticker=data_config.get("ticker", "BTCUSDT"),
-                feature_config=config.get("features", {})
+                feature_config=config.get("features", {}),
+                start_date=data_config.get("train_start_date"),
+                end_date=data_config.get("train_end_date")
             )
             shm_config = data_loader.create_shared_memory()
             # Note: Don't store in config dict - pass explicitly to avoid stale refs
@@ -473,13 +479,18 @@ def main():
         print("="*60 + "\n")
         
         hpo_config = base_config.get("hpo", {})
-        n_trials = args.trials or hpo_config.get("n_trials", 20)
-        steps_per_trial = hpo_config.get("steps_per_trial", 50000)
+        final_config = copy.deepcopy(base_config)
         
-        best_params = run_hpo(base_config, n_trials, steps_per_trial, device)
-        
-        # Merge best params into config
-        final_config = merge_configs(copy.deepcopy(base_config), best_params)
+        if hpo_config.get("enabled", True):
+            n_trials = args.trials or hpo_config.get("n_trials", 20)
+            steps_per_trial = hpo_config.get("steps_per_trial", 50000)
+            
+            best_params = run_hpo(base_config, n_trials, steps_per_trial, device)
+            
+            # Merge best params into config
+            final_config = merge_configs(final_config, best_params)
+        else:
+            logger.info("HPO disabled in config. Using base configuration.")
         
         # Override training steps if specified
         if args.steps:

@@ -21,7 +21,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   transaction_fee: 0.001 # Standard Retail (10 bps) - Avoids "Free Money" trap
-  num_envs: 20            # RTX 5090 Stable Limit (Avoids IPC Saturation)
+  num_envs: 12            # Reduced from 20 to 12 to fix SHM FD exhaustion (Errno 24)
   window_size: 50
   max_drawdown_pct: 0.20  # Tightened for Production
   
