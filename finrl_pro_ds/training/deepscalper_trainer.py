@@ -41,6 +41,7 @@ class DeepScalperTrainer:
             auxiliary_weight=config["agents"]["bdq"].get("auxiliary_weight", 1.0),
             epsilon_decay=config["agents"]["bdq"].get("epsilon_decay", 0.99999), # FIX: Read from config
             action_dims=action_dims,  # FIX: Pass from config
+            use_amp=config["training"].get("use_amp", False),
             device=device
         )
         
