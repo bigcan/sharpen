@@ -597,7 +597,8 @@ class ParquetDataHandler:
         return 0.0
 
     def close(self):
-        """Clean up shared memory resources."""
+        """Clean up all resources including shared memory and data arrays."""
+        # Clean up SHM
         if hasattr(self, '_shm_objects'):
             for shm in self._shm_objects:
                 try:
@@ -606,3 +607,17 @@ class ParquetDataHandler:
                 except Exception:
                     pass
             self._shm_objects = []
+        
+        # FIX B: Explicitly release data arrays and DataFrame to free mmap handles
+        if hasattr(self, '_data_arrays') and self._data_arrays:
+            self._data_arrays.clear()
+        if hasattr(self, '_feature_data'):
+            del self._feature_data
+            self._feature_data = None
+        if hasattr(self, '_volatility_target'):
+            del self._volatility_target
+            self._volatility_target = None
+        
+        # Force GC to release any remaining mmap handles
+        import gc
+        gc.collect()
