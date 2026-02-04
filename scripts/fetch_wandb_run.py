@@ -4,6 +4,87 @@ import os
 
 import argparse
 
+
+def fetch_latest_run_metrics(entity="bigcan-chiwin-technology", project="FinRL-Pro-DS"):
+    """
+    Fetch the most recent run's metrics for goal verification.
+    Returns dict with: state, hpo_trials, validation_sharpe, test_sharpe, checkpoint_saved
+    """
+    api = wandb.Api()
+    
+    # Get the most recent run
+    runs = api.runs(f"{entity}/{project}", order="-created_at", per_page=1)
+    
+    if not runs:
+        return {"state": "no_runs", "error": "No runs found"}
+    
+    run = runs[0]
+    summary = run.summary._json_dict
+    
+    # Extract metrics for goal checking
+    metrics = {
+        "run_id": run.id,
+        "run_name": run.name,
+        "state": run.state,  # "running", "finished", "crashed", "failed"
+        "url": run.url,
+        
+        # HPO metrics
+        "hpo_trials": summary.get("hpo/best_trial_number", summary.get("hpo/completed_trials", 0)),
+        
+        # Training metrics
+        "checkpoint_saved": summary.get("train/checkpoint_saved", False) or "checkpoint" in str(summary),
+        "total_steps": summary.get("train/global_step", 0),
+        
+        # Backtest metrics
+        "validation_sharpe": summary.get("backtest_validation/sharpe", summary.get("backtest/validation_sharpe")),
+        "test_sharpe": summary.get("backtest_test/sharpe", summary.get("backtest/test_sharpe")),
+        "validation_return": summary.get("backtest_validation/total_return"),
+        "test_return": summary.get("backtest_test/total_return"),
+    }
+    
+    return metrics
+
+
+def poll_run_until_complete(run_id=None, entity="bigcan-chiwin-technology", project="FinRL-Pro-DS", 
+                            poll_interval=300, max_wait=7200):
+    """
+    Poll a WandB run until it completes or times out.
+    
+    Args:
+        run_id: Specific run ID to poll. If None, polls the latest run.
+        poll_interval: Seconds between polls (default: 5 minutes)
+        max_wait: Maximum seconds to wait (default: 2 hours)
+    
+    Returns:
+        Final run state and metrics
+    """
+    import time
+    
+    api = wandb.Api()
+    start_time = time.time()
+    
+    while time.time() - start_time < max_wait:
+        if run_id:
+            run = api.run(f"{entity}/{project}/{run_id}")
+        else:
+            runs = api.runs(f"{entity}/{project}", order="-created_at", per_page=1)
+            if not runs:
+                print("No runs found, waiting...")
+                time.sleep(poll_interval)
+                continue
+            run = runs[0]
+        
+        state = run.state
+        print(f"[{time.strftime('%H:%M:%S')}] Run {run.id}: {state}")
+        
+        if state in ("finished", "crashed", "failed"):
+            return fetch_latest_run_metrics(entity, project)
+        
+        time.sleep(poll_interval)
+    
+    return {"state": "timeout", "error": f"Run did not complete within {max_wait}s"}
+
+
 def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro-DS"):
     run_path = f"{entity}/{project}/{run_id}"
     output_file = f"c:/FinRL/FinRL-Pro_DS/results/run_data_{run_id}.json"
