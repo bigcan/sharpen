@@ -13,7 +13,8 @@ print("Checking remote process state...")
 try:
     # pgrep returns PIDs if found. -f matches full command line.
     # We ignore our own transient check command if it appears.
-    pid_output = remote_cmd("pgrep -f 'run_full_pipeline.py' || true", timeout=15)
+    # Robust check: Get full command line (-a), filter for python, exclude bash/pgrep wrappers
+    pid_output = remote_cmd("pgrep -a -f 'run_full_pipeline.py' | grep 'python' | grep -v 'bash' | awk '{print $1}' || true", timeout=15)
     # cleaning output to get just numbers
     pids = [p.strip() for p in pid_output.split() if p.strip().isdigit()]
     
