@@ -6,6 +6,7 @@ import wandb
 import logging
 from collections import deque
 from datetime import datetime
+import optuna
 
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
@@ -57,12 +58,14 @@ class DeepScalperTrainer:
         # HPO mode: suppress frequent WandB logging to avoid memory flooding
         self.hpo_mode = hpo_mode
         
-    def train(self, start_step=0, skip_reset=False):
+    def train(self, start_step=0, skip_reset=False, optuna_trial=None, pruning_callback=None):
         """Single Phase Training Loop
         
         Args:
             start_step: Resume training from this step (for chunked HPO).
             skip_reset: If True, reuse stored obs from previous chunk instead of resetting.
+            optuna_trial: Optuna Trial object for HPO reporting/pruning.
+            pruning_callback: Function() -> float to evaluate agent during training.
         """
         print(f"Starting Training: Single BDQ Agent | Device: {self.device} | Start Step: {start_step}")
         
@@ -89,6 +92,10 @@ class DeepScalperTrainer:
         
         import time
         start_time = time.time()
+        
+        # Reset pruning rung tracker for fresh trial (P0 fix)
+        # Initialize to 0 to skip rung 0 - avoids eval at step ~12 before learning starts (P1a fix)
+        self._last_prune_rung = 0
         
         while global_step < self.total_timesteps:
             # 1. Action Selection
@@ -182,6 +189,25 @@ class DeepScalperTrainer:
                              }
                              wandb.log(logs)
             
+            # 4b. HPO Pruning Check (rung-based for vectorized envs)
+            # Uses rung tracking to handle num_envs > 1 step increments
+            if optuna_trial and pruning_callback:
+                prune_interval = 5000
+                current_rung = global_step // prune_interval
+                if current_rung > getattr(self, '_last_prune_rung', -1):
+                    self._last_prune_rung = current_rung
+                    print(f"  [HPO] Probing agent at step {global_step} (rung {current_rung})...")
+                    score = pruning_callback()
+                    print(f"  [HPO] Step {global_step} Score: {score:.4f}")
+                    
+                    # Report to Optuna
+                    optuna_trial.report(score, global_step)
+                    
+                    # Check Pruning
+                    if optuna_trial.should_prune():
+                        print(f"  [HPO] Pruning trial at step {global_step}")
+                        raise optuna.TrialPruned()
+
             # 5. Checkpointing
             if global_step % self.checkpoint_interval == 0:
                 self.save_checkpoint(f"checkpoint_step_{global_step}.pth")

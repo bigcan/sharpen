@@ -90,18 +90,18 @@ A critical innovation in DeepScalper's training is the **Hindsight Bonus**, desi
 
 ### 2. Hyperparameter Optimization (HPO) Setup
 
-DeepScalper utilizes **Grid Search** rather than advanced Bayesian or Random search methods to tune its hyperparameters.
+DeepScalper utilizes **BOHB (Bayesian Optimization + Hyperband)**, combining the TPE intelligence of Optuna with Hyperband's aggressive early stopping.
 
 #### **A. The Search Space**
-The authors explored the following specific grids for their hyperparameters:
+We optimize the following high-impact parameters:
 
-| Hyperparameter | Description | Grid Search Values | Optimal Findings (approx.) |
+| Hyperparameter | Description | BOHB Range/Type | Optimal Reference |
 | :--- | :--- | :--- | :--- |
-| **$h$** | **Hindsight Horizon** | `` (minutes) | Performance peaked at **180**, then decreased. |
-| **$w$** | **Hindsight Weight** | `[1e-3, 5e-3, 1e-2, 5e-2, 1e-1]` | **0.1** ($1e^{-1}$) achieved highest profit. |
-| **$\rho$** | **Aux. Task Weight** | `[0.5, 1.0]` | Results were robust, but **1.0** is a decent start. |
-| **Hidden Units** | Network Size (MLP/GRU) | `` | Not specified, dependent on asset complexity. |
-| **$\alpha$** | **Learning Rate** | Range `(1e-5, 1e-3)` | Tuned per asset. |
+| **$h$** | **Hindsight Horizon** | Categorical `[60, 120, 180, 240]` | 180 min |
+| **$w$** | **Hindsight Weight** | LogUniform `[0.001, 0.1]` | 0.1 |
+| **$\rho$** | **Aux. Task Weight** | Categorical `[0.5, 1.0]` | 1.0 |
+| **`lr`** | **Learning Rate** | LogUniform `[5e-5, 5e-4]` | 1e-4 |
+| **`target_freq`**| **Target Update** | Categorical `[5000, ... 15000]` | 7500 |
 
 #### **B. Training Execution Details**
 *   **Hardware:** The training was performed on a **Tesla V100 GPU**.
