@@ -192,7 +192,15 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         try:
             env = create_vector_env(config, num_envs=config["env"].get("num_envs", 12))
             trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
-            trainer.train()
+            
+            # Create DEDICATED eval env for pruning (P1b fix: prevents training state corruption)
+            eval_env = create_vector_env(config, num_envs=1)
+            
+            # Define Pruning Callback with dedicated eval env
+            def pruning_callback():
+                return evaluate_for_hpo(eval_env, trainer.agent, max_steps=1000)
+
+            trainer.train(optuna_trial=trial, pruning_callback=pruning_callback)
             
             # Evaluate
             sharpe = evaluate_for_hpo(env, trainer.agent, max_steps=5000)
@@ -202,6 +210,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
             
             return sharpe
             
+        except optuna.TrialPruned:
+            logger.info(f"Trial {trial.number} pruned.")
+            wandb.log({f"{trial_prefix}/status": "pruned"})
+            raise  # Re-raise original exception to preserve traceback
         except Exception as e:
             logger.error(f"Trial {trial.number} failed: {e}")
             wandb.log({f"{trial_prefix}/error": str(e)})
@@ -209,6 +221,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         finally:
             if env:
                 env.close()
+            # Close dedicated eval env
+            if 'eval_env' in dir() and eval_env:
+                eval_env.close()
             # FIX A: Force garbage collection to release PyArrow mmap/FD handles
             import gc
             gc.collect()
@@ -217,7 +232,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
     # Run optimization
     study = optuna.create_study(
         direction="maximize",
-        sampler=TPESampler(seed=42)
+        sampler=TPESampler(seed=42),
+        pruner=optuna.pruners.HyperbandPruner(
+            min_resource=5000, 
+            max_resource=steps_per_trial, 
+            reduction_factor=3
+        )
     )
     study.optimize(objective, n_trials=n_trials)
     
