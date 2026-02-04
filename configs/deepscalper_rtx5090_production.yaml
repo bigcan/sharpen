@@ -93,7 +93,7 @@ training:
   # Optimization
   torch_compile: true   # Enabled
   use_amp: true         # Enabled (Reference: FP16)
-  use_shm: true         
+  use_shm: false         
   
 hpo:
   enabled: true
