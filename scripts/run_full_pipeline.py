@@ -164,11 +164,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         hindsight_weight = trial.suggest_float("hindsight_weight", 0.001, 0.1, log=True)
         auxiliary_weight = trial.suggest_categorical("auxiliary_weight", [0.5, 1.0])
         learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
-        target_update_interval = trial.suggest_categorical("target_update_interval", [5000, 10000, 15000])
-        exploration_fraction = trial.suggest_float("exploration_fraction", 0.05, 0.20)
+        target_update_freq = trial.suggest_categorical("target_update_freq", [5000, 7500, 10000, 15000])
         batch_size = trial.suggest_categorical("batch_size", [64, 128, 256])
         gamma = trial.suggest_categorical("gamma", [0.99, 0.995])
-        exploration_final_eps = trial.suggest_float("exploration_final_eps", 0.01, 0.10)
+        epsilon_end = trial.suggest_float("epsilon_end", 0.01, 0.10)
         
         # Create trial config
         config = copy.deepcopy(base_config)
@@ -178,9 +177,8 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         config["agents"]["bdq"]["learning_rate"] = learning_rate
         config["agents"]["bdq"]["gamma"] = gamma
         config["agents"]["bdq"]["batch_size"] = batch_size
-        config["training"]["target_update_interval"] = target_update_interval
-        config["training"]["exploration_fraction"] = exploration_fraction
-        config["training"]["exploration_final_eps"] = exploration_final_eps
+        config["agents"]["bdq"]["target_update_freq"] = target_update_freq
+        config["agents"]["bdq"]["epsilon_end"] = epsilon_end
         config["training"]["total_timesteps"] = steps_per_trial
         
         wandb.log({
@@ -234,7 +232,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
     for key, val in best.params.items():
         if key in ["hindsight_horizon", "hindsight_weight"]:
             best_params["env"]["reward"][key] = val
-        elif key in ["auxiliary_weight", "learning_rate", "gamma", "batch_size"]:
+        elif key in ["auxiliary_weight", "learning_rate", "gamma", "batch_size", "target_update_freq", "epsilon_end"]:
             best_params["agents"]["bdq"][key] = val
         else:
             best_params["training"][key] = val
@@ -462,7 +460,7 @@ def main():
         project=wandb_config.get("project", "FinRL-Pro-DS"),
         entity=wandb_config.get("entity", "bigcan-chiwin-technology"),
         name=run_name,
-        tags=args.tags,
+        tags=wandb_config.get("tags", []) + args.tags,
         config=base_config
     )
     logger.info(f"WandB Run: {wandb.run.url}")
@@ -495,6 +493,10 @@ def main():
         # Override training steps if specified
         if args.steps:
             final_config["training"]["total_timesteps"] = args.steps
+
+        # Update WandB config to reflect final parameters (Crucial for reproducibility)
+        wandb.config.update(final_config, allow_val_change=True)
+        logger.info(f"Final Config for Training: {final_config}")
         
         # =====================================================================
         # PHASE 2: TRAINING
