@@ -5,15 +5,21 @@ import os
 import argparse
 
 
-def fetch_latest_run_metrics(entity="bigcan-chiwin-technology", project="FinRL-Pro-DS"):
+def fetch_latest_run_metrics(entity="bigcan-chiwin-technology", project="FinRL-Pro-DS", tag=None):
     """
     Fetch the most recent run's metrics for goal verification.
+    Args:
+        tag: Optional tag to filter runs (e.g. "Ralph_Autonomous")
     Returns dict with: state, hpo_trials, validation_sharpe, test_sharpe, checkpoint_saved
     """
     api = wandb.Api()
     
-    # Get the most recent run
-    runs = api.runs(f"{entity}/{project}", order="-created_at", per_page=1)
+    # Filter by tag if provided to avoid resuming unrelated runs
+    filters = {}
+    if tag:
+        filters = {"tags": {"$in": [tag]}}
+        
+    runs = api.runs(f"{entity}/{project}", order="-created_at", per_page=1, filters=filters)
     
     if not runs:
         return {"state": "no_runs", "error": "No runs found"}
@@ -46,7 +52,7 @@ def fetch_latest_run_metrics(entity="bigcan-chiwin-technology", project="FinRL-P
 
 
 def poll_run_until_complete(run_id=None, entity="bigcan-chiwin-technology", project="FinRL-Pro-DS", 
-                            poll_interval=300, max_wait=7200):
+                            poll_interval=300, max_wait=7200, tag=None):
     """
     Poll a WandB run until it completes or times out.
     
@@ -54,6 +60,7 @@ def poll_run_until_complete(run_id=None, entity="bigcan-chiwin-technology", proj
         run_id: Specific run ID to poll. If None, polls the latest run.
         poll_interval: Seconds between polls (default: 5 minutes)
         max_wait: Maximum seconds to wait (default: 2 hours)
+        tag: Optional tag to filter runs (e.g. "Ralph_Autonomous")
     
     Returns:
         Final run state and metrics
@@ -63,11 +70,17 @@ def poll_run_until_complete(run_id=None, entity="bigcan-chiwin-technology", proj
     api = wandb.Api()
     start_time = time.time()
     
+    # Build filter for tag if provided
+    filters = {}
+    if tag:
+        filters = {"tags": {"$in": [tag]}}
+    
     while time.time() - start_time < max_wait:
         if run_id:
             run = api.run(f"{entity}/{project}/{run_id}")
         else:
-            runs = api.runs(f"{entity}/{project}", order="-created_at", per_page=1)
+            # Use tag filter when polling latest
+            runs = api.runs(f"{entity}/{project}", order="-created_at", per_page=1, filters=filters)
             if not runs:
                 print("No runs found, waiting...")
                 time.sleep(poll_interval)
@@ -78,7 +91,8 @@ def poll_run_until_complete(run_id=None, entity="bigcan-chiwin-technology", proj
         print(f"[{time.strftime('%H:%M:%S')}] Run {run.id}: {state}")
         
         if state in ("finished", "crashed", "failed"):
-            return fetch_latest_run_metrics(entity, project)
+            # Pass tag through to final metrics fetch for consistency
+            return fetch_latest_run_metrics(entity, project, tag=tag)
         
         time.sleep(poll_interval)
     
@@ -87,7 +101,8 @@ def poll_run_until_complete(run_id=None, entity="bigcan-chiwin-technology", proj
 
 def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro-DS"):
     run_path = f"{entity}/{project}/{run_id}"
-    output_file = f"c:/FinRL/FinRL-Pro_DS/results/run_data_{run_id}.json"
+    # Use relative path for portability (works on WSL/Windows)
+    output_file = os.path.join(os.getcwd(), "results", f"run_data_{run_id}.json")
     
     print(f"Fetching run data for {run_path}...")
     api = wandb.Api()
@@ -122,7 +137,7 @@ def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro
 
         # Update Local Metrics DB (Registry View)
         import sqlite3
-        db_path = "c:/FinRL/FinRL-Pro_DS/results/metrics.db"
+        db_path = os.path.join(os.getcwd(), "results", "metrics.db")
         conn = sqlite3.connect(db_path)
         cursor = conn.cursor()
         
@@ -165,6 +180,7 @@ def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro
 
     except Exception as e:
         print(f"Error fetching run data: {e}")
+        raise  # Re-raise to make failures explicit to caller
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
