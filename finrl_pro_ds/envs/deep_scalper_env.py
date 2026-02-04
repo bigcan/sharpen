@@ -40,10 +40,19 @@ class DeepScalperEnv(gym.Env):
         self.tick_size = config.get("tick_size", 0.1)
         self.lot_size = config.get("lot_size", 0.001)
         
-        # Binance VIP 0 USDⓈ-M Futures Fees (Realistic 2025)
-        # Maker: 0.02% (2 bps), Taker: 0.05% (5 bps)
-        self.maker_fee = config.get("maker_fee", 0.0002)
-        self.taker_fee = config.get("taker_fee", 0.0005)
+        # Fee Structure Priority:
+        # 1. Specific 'maker_fee'/'taker_fee' in config
+        # 2. Flat 'transaction_fee' in config (applied to both)
+        # 3. Defaults (VIP0: Maker 2bps, Taker 5bps)
+        
+        flat_fee = config.get("transaction_fee")
+        
+        # Determine defaults based on flat_fee existence
+        default_maker = flat_fee if flat_fee is not None else 0.0002
+        default_taker = flat_fee if flat_fee is not None else 0.0005
+        
+        self.maker_fee = float(config.get("maker_fee", default_maker))
+        self.taker_fee = float(config.get("taker_fee", default_taker))
         
         # Slippage Model: base_slippage + (trade_size / liquidity) * impact_factor
         self.base_slippage_bps = config.get("base_slippage_bps", 1.0)  # 1 bp base
