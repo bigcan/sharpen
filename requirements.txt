@@ -12,3 +12,4 @@ scipy
 pyyaml
 ray[tune]
 gymnasium
+optuna

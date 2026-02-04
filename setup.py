@@ -10,7 +10,7 @@ setup(
     packages=find_packages(),
     install_requires=[
         'gym', 'matplotlib', 'numpy', 'opencv-python', 'yfinance', 
-        'stockstats', 'wandb', 'pandas', 'pyarrow', 'seaborn', 'scipy', 'pyyaml', 'ray[tune]'],
+        'stockstats', 'wandb', 'pandas', 'pyarrow', 'seaborn', 'scipy', 'pyyaml', 'ray[tune]', 'optuna'],
     description="FinRL-Pro_DS",
     classifiers=[
         # Trove classifiers
