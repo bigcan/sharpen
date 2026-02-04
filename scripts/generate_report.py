@@ -5,7 +5,7 @@ from datetime import datetime
 
 def generate_report(run_id, output_path):
     # 1. Load Data
-    json_path = f"c:/FinRL/FinRL-Pro_DS/results/run_data_{run_id}.json"
+    json_path = os.path.join(os.getcwd(), "results", f"run_data_{run_id}.json")
     if not os.path.exists(json_path):
         print(f"Error: Data file not found at {json_path}")
         return
