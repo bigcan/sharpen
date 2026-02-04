@@ -410,7 +410,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             portfolio_values.append(info.get("portfolio_value", 100000))
             positions.append(info.get("position", 0))
             
-            if step % 5000 == 0:
+            if step % 50000 == 0:
                 logger.info(f"Backtest step {step}: Value={portfolio_values[-1]:.2f}")
             step += 1
         
@@ -504,6 +504,9 @@ def main():
         final_config = copy.deepcopy(base_config)
         
         if hpo_config.get("enabled", True):
+            # Silence Optuna INFO logs (Start/Finish trial) to avoid WandB console spam
+            optuna.logging.set_verbosity(optuna.logging.WARNING)
+            
             n_trials = args.trials or hpo_config.get("n_trials", 20)
             steps_per_trial = hpo_config.get("steps_per_trial", 50000)
             
