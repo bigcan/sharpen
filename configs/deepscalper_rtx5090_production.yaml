@@ -23,7 +23,7 @@ env:
   transaction_fee: 0.001 # Standard Retail (10 bps) - Avoids "Free Money" trap
   num_envs: 12            # Reduced from 20 to 12 to fix SHM FD exhaustion (Errno 24)
   window_size: 50
-  max_drawdown_pct: 0.20  # Tightened for Production
+  max_drawdown_pct: 0.30  # Relaxed to 30% for Production
   
   reward:
     profit_weight: 1.0
