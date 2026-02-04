@@ -86,13 +86,17 @@ def make_env(config, start_date=None, end_date=None, shm_config=None):
 def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_config=None):
     """Create vectorized environment for training.
     
-    Note: Using SyncVectorEnv only. AsyncVectorEnv has race conditions with
-    SHM cleanup and memory issues when workers load large datasets individually.
+    Note: Using AsyncVectorEnv for parallel data loading. Context 'spawn' is used
+    for CUDA/PyTorch safety.
     """
     env_factory = functools.partial(make_env, config=config, start_date=start_date, end_date=end_date, shm_config=shm_config)
     
-    # Always use SyncVectorEnv to avoid subprocess issues
-    env = gym.vector.SyncVectorEnv([env_factory for _ in range(num_envs)])
+    # Use AsyncVectorEnv for 5090 I/O optimization (Parallel Data Loading)
+    # Context 'spawn' is safer for PyTorch/CUDA interaction
+    env = gym.vector.AsyncVectorEnv(
+        [env_factory for _ in range(num_envs)],
+        context="spawn"
+    )
     
     return env
 

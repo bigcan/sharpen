@@ -56,9 +56,11 @@ class DeepScalperBDQ:
         target_update_freq: int = 100,
         auxiliary_weight: float = 0.1, # Section 4.4
         action_dims: Tuple[int, int, int] = (3, 5, 5),  # FIX: Configurable action dims
+        use_amp: bool = False,
         device: str = "cpu"
     ):
         self.device = torch.device(device)
+        self.use_amp = use_amp
         self.auxiliary_weight = auxiliary_weight
         self.gamma = gamma
         self.epsilon = epsilon_start
@@ -76,6 +78,10 @@ class DeepScalperBDQ:
         self.target_net.eval()
         
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
+        
+        # AMP Scaler
+        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
+        
         self.memory = ReplayBuffer(buffer_size)
 
     def get_probs(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, temp: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
@@ -188,47 +194,57 @@ class DeepScalperBDQ:
         dones = torch.tensor(np.array(done_batch), dtype=torch.float32).unsqueeze(1).to(self.device) # (B, 1)
         aux_targets = torch.tensor(np.array(aux_target_batch), dtype=torch.float32).unsqueeze(1).to(self.device) # (B, 1)
         
-        # Current Q-Values and Volatility Prediction
-        q_dir, q_price, q_vol, _, pred_vol = self.policy_net(micro_state, private_state, macro_state)
+        # Current Q-Values, Loss Computation under autocast
+        with torch.cuda.amp.autocast(enabled=self.use_amp):
+            q_dir, q_price, q_vol, _, pred_vol = self.policy_net(micro_state, private_state, macro_state)
         
-        # Gather Q-values for taken actions
-        curr_q_dir = q_dir.gather(1, actions[:, 0].unsqueeze(1))
-        curr_q_price = q_price.gather(1, actions[:, 1].unsqueeze(1))
-        curr_q_vol = q_vol.gather(1, actions[:, 2].unsqueeze(1))
-        
-        # Target Q-Values
-        with torch.no_grad():
-            next_q_dir, next_q_price, next_q_vol, _, _ = self.target_net(micro_next, private_next, macro_next)
+            # Gather Q-values for taken actions
+            curr_q_dir = q_dir.gather(1, actions[:, 0].unsqueeze(1))
+            curr_q_price = q_price.gather(1, actions[:, 1].unsqueeze(1))
+            curr_q_vol = q_vol.gather(1, actions[:, 2].unsqueeze(1))
             
-            # Max next Q
-            max_next_q_dir = next_q_dir.max(1)[0].unsqueeze(1)
-            max_next_q_price = next_q_price.max(1)[0].unsqueeze(1)
-            max_next_q_vol = next_q_vol.max(1)[0].unsqueeze(1)
+            # Target Q-Values
+            with torch.no_grad():
+                next_q_dir, next_q_price, next_q_vol, _, _ = self.target_net(micro_next, private_next, macro_next)
+                
+                # Max next Q
+                max_next_q_dir = next_q_dir.max(1)[0].unsqueeze(1)
+                max_next_q_price = next_q_price.max(1)[0].unsqueeze(1)
+                max_next_q_vol = next_q_vol.max(1)[0].unsqueeze(1)
+                
+                # Target = r + gamma * max_next_Q * (1 - done)
+                target_q_dir = rewards + self.gamma * max_next_q_dir * (1 - dones)
+                target_q_price = rewards + self.gamma * max_next_q_price * (1 - dones)
+                target_q_vol = rewards + self.gamma * max_next_q_vol * (1 - dones)
+                
+            # Loss (Huber or MSE)
+            loss_fn = nn.MSELoss()
+            loss_dir = loss_fn(curr_q_dir, target_q_dir)
+            loss_price = loss_fn(curr_q_price, target_q_price)
+            loss_vol = loss_fn(curr_q_vol, target_q_vol)
             
-            # Target = r + gamma * max_next_Q * (1 - done)
-            target_q_dir = rewards + self.gamma * max_next_q_dir * (1 - dones)
-            target_q_price = rewards + self.gamma * max_next_q_price * (1 - dones)
-            target_q_vol = rewards + self.gamma * max_next_q_vol * (1 - dones)
+            loss_vol_pred = loss_fn(pred_vol, aux_targets)
             
-        # Loss (Huber or MSE)
-        loss_fn = nn.MSELoss()
-        loss_dir = loss_fn(curr_q_dir, target_q_dir)
-        loss_price = loss_fn(curr_q_price, target_q_price)
-        loss_vol = loss_fn(curr_q_vol, target_q_vol)
-        
-        loss_vol_pred = loss_fn(pred_vol, aux_targets)
-        
-        total_loss = loss_dir + loss_price + loss_vol + self.auxiliary_weight * loss_vol_pred
+            total_loss = loss_dir + loss_price + loss_vol + self.auxiliary_weight * loss_vol_pred
         
         if not torch.isfinite(total_loss):
             print(f"WARNING: BDQ Loss is {total_loss.item()} (NaN/Inf). Skipping update.", flush=True)
             return None
 
         self.optimizer.zero_grad()
-        total_loss.backward()
-        # Gradient clipping
-        nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
-        self.optimizer.step()
+        
+        # AMP Backward Pass
+        if self.use_amp:
+            self.scaler.scale(total_loss).backward()
+            self.scaler.unscale_(self.optimizer)
+            nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
+        else:
+            total_loss.backward()
+            # Gradient clipping
+            nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
+            self.optimizer.step()
         
         # NOTE: Epsilon decay moved to dedicated method for decoupling
         # Call decay_epsilon() from trainer after each env step batch
