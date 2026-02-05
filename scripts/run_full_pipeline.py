@@ -107,18 +107,59 @@ def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_conf
 # PHASE 1: HYPERPARAMETER OPTIMIZATION
 # ============================================================================
 def evaluate_for_hpo(env, agent, max_steps=5000):
-    """Quick evaluation for HPO - returns Sharpe ratio."""
+    """Quick evaluation for HPO - returns Sharpe ratio.
+    
+    IMPORTANT: This function handles both single envs and VectorEnvs.
+    VectorEnv returns info as a dict of arrays, or for newer Gymnasium versions,
+    as a tuple (info_dict, final_info_dict).
+    """
     all_returns = []
+    action_counts = {0: 0, 1: 0, 2: 0}  # Track action distribution
+    
+    def extract_portfolio_value(info, env_idx=0, default=100000.0):
+        """Extract portfolio_value handling both single env and VectorEnv info structures."""
+        if info is None:
+            return default
+        
+        # Handle VectorEnv info structure (Gymnasium >= 0.26)
+        # VectorEnv returns: info = {'final_info': [...], 'final_observation': [...], ...}
+        # with per-step metrics potentially in different places
+        
+        # Try direct access first (single env case)
+        pv = info.get("portfolio_value")
+        
+        if pv is not None:
+            # If it's an array (VectorEnv), get the env_idx element
+            if hasattr(pv, "__len__") and not isinstance(pv, str):
+                return float(pv[env_idx])
+            return float(pv)
+        
+        # For VectorEnv, the step info might be nested
+        # Try '_all_info' key which some versions use
+        if "_all_info" in info:
+            per_env_info = info["_all_info"]
+            if per_env_info and len(per_env_info) > env_idx:
+                env_info = per_env_info[env_idx]
+                if env_info and "portfolio_value" in env_info:
+                    return float(env_info["portfolio_value"])
+        
+        # For final_info (used on episode termination)
+        if "final_info" in info:
+            final = info["final_info"]
+            if final and len(final) > env_idx and final[env_idx]:
+                if "portfolio_value" in final[env_idx]:
+                    return float(final[env_idx]["portfolio_value"])
+        
+        return default
+    
+    info_logged = False  # Only log once
     
     try:
         obs, info = env.reset()
         done = False
         step = 0
         
-        prev_val = info.get("portfolio_value", 100000.0)
-        if hasattr(prev_val, "__len__"):
-            prev_val = prev_val[0]
-        prev_val = float(prev_val) if prev_val > 0 else 1e-6
+        prev_val = extract_portfolio_value(info, env_idx=0, default=100000.0)
         
         while not done and step < max_steps:
             micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device)
@@ -126,16 +167,34 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
             macro = torch.tensor(obs["macro"], dtype=torch.float32).to(agent.device)
             
             action = agent.predict(micro, private, macro, deterministic=True)
+            
+            # Track action distribution (first env if vectorized)
+            first_action = action[0] if len(action.shape) > 1 else action
+            direction = int(first_action[0]) if hasattr(first_action, "__len__") else int(first_action)
+            action_counts[direction] = action_counts.get(direction, 0) + 1
+            
             obs, reward, term, trunc, info = env.step(action)
+            
+            # Log info structure on first step to diagnose VectorEnv format
+            if not info_logged:
+                info_keys = list(info.keys()) if isinstance(info, dict) else str(type(info))
+                sample_values = {}
+                if isinstance(info, dict):
+                    for k, v in list(info.items())[:5]:  # First 5 keys
+                        if hasattr(v, "shape"):
+                            sample_values[k] = f"array{v.shape}"
+                        elif hasattr(v, "__len__") and len(v) > 0:
+                            sample_values[k] = f"list[{len(v)}]:{type(v[0]).__name__}"
+                        else:
+                            sample_values[k] = str(type(v).__name__)
+                wandb.log({"_debug/info_keys": str(info_keys), "_debug/info_sample": str(sample_values)})
+                info_logged = True
             
             t_val = term[0] if hasattr(term, "__len__") else term
             tr_val = trunc[0] if hasattr(trunc, "__len__") else trunc
             done = bool(t_val or tr_val)
             
-            curr_val = info.get("portfolio_value", prev_val)
-            if hasattr(curr_val, "__len__"):
-                curr_val = curr_val[0]
-            curr_val = float(curr_val)
+            curr_val = extract_portfolio_value(info, env_idx=0, default=prev_val)
             
             step_return = (curr_val - prev_val) / prev_val if prev_val > 0 else 0
             all_returns.append(step_return)
@@ -144,14 +203,31 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
             
     except Exception as e:
         logger.error(f"Evaluation error: {e}")
+        import traceback
+        wandb.log({"_debug/eval_error": str(e), "_debug/eval_traceback": traceback.format_exc()})
         return 0.0
     
     returns = np.array(all_returns)
+    
+    # Diagnostic: log what we computed including action distribution
+    diag = {
+        "_debug/eval_steps": step,
+        "_debug/eval_returns_len": len(returns),
+        "_debug/eval_returns_std": float(np.std(returns)) if len(returns) > 0 else 0.0,
+        "_debug/eval_returns_mean": float(np.mean(returns)) if len(returns) > 0 else 0.0,
+        "_debug/eval_final_pv": prev_val,
+        "_debug/eval_action_hold": action_counts.get(0, 0),
+        "_debug/eval_action_buy": action_counts.get(1, 0),
+        "_debug/eval_action_sell": action_counts.get(2, 0),
+    }
+    wandb.log(diag)
+    
     if len(returns) > 1 and np.std(returns) > 1e-9:
         ann_factor = np.sqrt(525600)  # Minute data, 24/7
         sharpe = (np.mean(returns) / np.std(returns)) * ann_factor
     else:
         sharpe = 0.0
+        logger.warning(f"Zero Sharpe: steps={step}, len={len(returns)}, std={np.std(returns) if len(returns) > 0 else 'N/A'}, actions={action_counts}")
     
     return sharpe
 

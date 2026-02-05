@@ -12,6 +12,8 @@ import time
 import json
 import shutil
 import argparse
+import subprocess
+import yaml
 from datetime import datetime
 
 # Add project root to path
@@ -105,25 +107,23 @@ def deploy(config_file):
     update_mission_control("Running", 0, "Deploying new run...")
     
     # Construct command
-    # Note: Using python executor to run deploy script
+    # Use subprocess.run with list args for secure and robust quoting on Windows/Linux
     cmd = [
-        "python", "scripts/deploy_bare_metal.py",
+        sys.executable, "scripts/deploy_bare_metal.py",
         "--config", config_file,
         "--fresh_hpo",
         "--upload_data",
         "--data_file", "btc_lob_jan2023.parquet",
-        "--extra_args", "'--tags Ralph_Autonomous'"
+        "--extra_args", "--tags Ralph_Autonomous" 
     ]
     
     # Execute locally to trigger remote deployment
-    # We use os.system for simplicity as deploy_bare_metal handles the heavy lifting
-    full_cmd = " ".join(cmd)
-    ret = os.system(full_cmd)
-    
-    if ret != 0:
-        raise RuntimeError(f"Deployment failed with exit code {ret}")
-        
-    print("Deployment command sent.")
+    print(f"Executing: {' '.join(cmd)}")
+    try:
+        subprocess.run(cmd, check=True)
+        print("Deployment command sent successfully.")
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Deployment failed with exit code {e.returncode}")
 
 def monitor_loop():
     """Poll for completion."""
@@ -177,6 +177,7 @@ def diagnose_and_fix(state, metrics):
     run_state = metrics.get('state', 'unknown')
     test_sharpe = metrics.get('test_sharpe', 0) or 0
     val_sharpe = metrics.get('validation_sharpe', 0) or 0
+    goal_metrics = state.get('goal_criteria', {'min_test_sharpe': 1.0})
     
     print(f"Diagnosing failure (Iter {iteration}). State: {run_state}, Sharpe: {test_sharpe}")
     
@@ -189,44 +190,76 @@ def diagnose_and_fix(state, metrics):
         
     fix_applied = None
     
-    # Logic Tree
+    # Logic Tree & Fix Application
+    new_config_path = None
+    
+    # Load current config to modify
+    current_config_path = state.get('config_file', DEFAULT_CONFIG)
+    try:
+        with open(current_config_path, 'r') as f:
+            config_data = yaml.safe_load(f)
+    except Exception as e:
+        print(f"Error loading config {current_config_path}: {e}")
+        config_data = {} # Should probably fail hard here, but let's try to proceed or handle gracefully
+
     # 1. OOM / CUDA Memory
     if "CUDA out of memory" in logs or "OOM" in logs:
-        fix_applied = "Reduced num_envs by 4 (OOM detected)"
-        # Note: In a real logic, we'd edit the yaml or passed args. 
-        # For version 1, we imply it by handling this in config loading next time 
-        # or we just log it for now as we don't have a config parser here yet.
-        # We will assume manual config intervention isn't fully automated yet for YAML 
-        # but we can simulate it or just log it.
-        # Ideally, we should load YAML, edit, save back.
+        fix_applied = "Reduced num_envs (OOM detected)"
+        
+        # Action: Reduce num_envs
+        current_envs = config_data.get('env', {}).get('num_envs', 12)
+        new_envs = max(1, current_envs - 4)
+        if 'env' not in config_data: config_data['env'] = {}
+        config_data['env']['num_envs'] = new_envs
         
     # 2. Low Sharpe (Underperformance)
-    elif run_state == 'finished' and test_sharpe < 1.0:
+    elif run_state == 'finished' and test_sharpe < goal_metrics['min_test_sharpe']:
         # Check history to avoid cycles
         fixes = state.get('fixes_applied', [])
         lr_fixes = sum(1 for f in fixes if 'learning_rate' in f['fix'])
         
         if lr_fixes < 2:
-             fix_applied = "Adjust HPO range: Increase n_trials +20"
+             fix_applied = "Adjust HPO: Shift Learning Rate Range"
+             # Action: Shift LR range down slightly to exploit
+             if 'agents' not in config_data: config_data['agents'] = {'bdq': {}}
+             # Simplified: just reduce LR for training phase
+             current_lr = config_data.get('agents', {}).get('bdq', {}).get('learning_rate', 0.0001)
+             config_data['agents']['bdq']['learning_rate'] = current_lr * 0.5
         else:
-             fix_applied = "Increase Batch Size (Potential noise)"
+             fix_applied = "Increase Batch Size (Stability)"
+             current_bs = config_data.get('agents', {}).get('bdq', {}).get('batch_size', 64)
+             config_data['agents']['bdq']['batch_size'] = current_bs * 2
              
     # 3. Crash/NaN
     elif run_state in ['crashed', 'failed']:
         if "NaN" in logs:
              fix_applied = "Reduce Learning Rate (NaN detected)"
+             current_lr = config_data.get('agents', {}).get('bdq', {}).get('learning_rate', 0.0001)
+             if 'agents' not in config_data: config_data['agents'] = {'bdq': {}}
+             config_data['agents']['bdq']['learning_rate'] = current_lr * 0.1
         else:
-             fix_applied = "Retry (Transient Error)"
+             fix_applied = "Retry (Transient Error or Unknown)"
+             # No config change, just retry
              
     if not fix_applied:
         fix_applied = "Retry (General Failure)"
+
+    # Save new config if changed
+    if fix_applied and "Retry" not in fix_applied:
+        os.makedirs('configs/autogen', exist_ok=True)
+        new_config_path = f"configs/autogen/ralph_iter_{iteration+1}.yaml"
+        with open(new_config_path, 'w') as f:
+            yaml.dump(config_data, f)
+        print(f"Generated new config: {new_config_path}")
+        state['config_file'] = new_config_path
 
     # Log fix
     state['fixes_applied'].append({
         'timestamp': datetime.now().isoformat(),
         'iteration': iteration,
         'fix': fix_applied,
-        'reason': f"State: {run_state}, TestSharpe: {test_sharpe}"
+        'reason': f"State: {run_state}, TestSharpe: {test_sharpe}",
+        'new_config': new_config_path
     })
     
     print(f"Applying Fix: {fix_applied}")
