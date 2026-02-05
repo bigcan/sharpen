@@ -13,6 +13,7 @@ The **Ralph Mission Control** database provides real-time visibility into the tr
 | **Sharpe** | Latest **Validation Sharpe Ratio** from the backtest. |
 | **Command** | **USER INPUT**: Control the workflow here (see below). |
 | **Logs** | Recent log snippets (e.g., "Run ID: ... State: running"). |
+| **Remark** | High-level outcome or failure reason (e.g. "Goal Result: SUCCESS"). |
 | **Timestamp**| Time of last update. |
 
 > **Note:** "Mission Control" maintains a single active row named **Ralph Status**. When a run completes, a **permanent history record** is created as a new row (e.g., `Run 8k... (Iter 1)`).

@@ -79,7 +79,7 @@ def get_mission_control_page_id():
         return resp.json()["id"]
     return None
 
-def update_mission_control(status, sharpe, logs, command=None):
+def update_mission_control(status, sharpe, logs, remark=None, command=None):
     """
     Updates the Ralph Mission Control database in Notion (Singleton Row).
     """
@@ -109,6 +109,9 @@ def update_mission_control(status, sharpe, logs, command=None):
         }
     }
     
+    if remark:
+         data["properties"]["Remark"] = { "rich_text": [{ "text": { "content": remark[:2000] } }] }
+
     if command:
          data["properties"]["Command"] = { "select": { "name": command } }
 
@@ -118,7 +121,7 @@ def update_mission_control(status, sharpe, logs, command=None):
     else:
          print(f"Failed to update Notion: {resp.text}")
 
-def log_run(run_id, iteration, outcome, sharpe, logs, start_time=None, end_time=None):
+def log_run(run_id, iteration, outcome, sharpe, logs, remark=None, start_time=None, end_time=None):
     """
     Creates a NEW history entry for a completed run.
     """
@@ -146,6 +149,9 @@ def log_run(run_id, iteration, outcome, sharpe, logs, start_time=None, end_time=
             # We use Timestamp for the "Start/End" range if both provided, otherwise just End
         }
     }
+    
+    if remark:
+         data["properties"]["Remark"] = { "rich_text": [{ "text": { "content": remark[:2000] } }] }
     
     if start_time and end_time:
          data["properties"]["Timestamp"] = { "date": { "start": start_time, "end": end_time } }
