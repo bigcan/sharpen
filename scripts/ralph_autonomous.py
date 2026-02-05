@@ -63,7 +63,7 @@ def init_state():
     return load_state()
 
 def check_active_run():
-    """Check if a run is already active (Physical or WandB)."""
+    """Check if a run is already active (Physical AND WandB running)."""
     print("Checking active runs...")
     update_mission_control("Running", 0, "Checking active runs...")
     
@@ -76,17 +76,26 @@ def check_active_run():
             print(f"PHYSICAL RUN DETECTED: PID(s) {pids}")
             is_running_physically = True
     except Exception as e:
-        print(f"Warning: Remote check failed ({e}). Assuming active for safety.")
-        is_running_physically = True
+        print(f"Warning: Remote check failed ({e}).")
 
     # 2. WandB Check
     metrics = fetch_latest_run_metrics(tag="Ralph_Autonomous")
     wandb_state = metrics.get('state', 'unknown')
     run_id = metrics.get('run_id', 'unknown')
     
-    if is_running_physically or wandb_state == 'running':
-        print(f"Active run detected. Physical: {is_running_physically}, WandB: {wandb_state}")
+    # CRITICAL FIX: Only skip deploy if WandB is actively "running"
+    # A "finished" WandB run with lingering physical process = stale zombie, deploy new run
+    if wandb_state == 'running':
+        print(f"Active WandB run detected (State: {wandb_state}, Physical: {is_running_physically})")
         return True, run_id
+    
+    # WandB not running - deploy regardless of physical process (could be zombie)
+    if is_running_physically:
+        print(f"Stale physical process detected (WandB: {wandb_state}). Killing and deploying fresh.")
+        try:
+            remote_cmd("pkill -f 'run_full_pipeline.py' || true", timeout=15)
+        except:
+            pass
     
     return False, None
 
