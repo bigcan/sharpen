@@ -42,9 +42,9 @@ def fetch_latest_run_metrics(entity="bigcan-chiwin-technology", project="FinRL-P
         "total_steps": summary.get("train/global_step", 0),
         
         # Backtest metrics
-        "validation_sharpe": summary.get("backtest_validation/sharpe", summary.get("backtest/validation_sharpe")),
+        "validation_sharpe": summary.get("backtest_val/sharpe", summary.get("backtest_validation/sharpe", summary.get("backtest/validation_sharpe"))),
         "test_sharpe": summary.get("backtest_test/sharpe", summary.get("backtest/test_sharpe")),
-        "validation_return": summary.get("backtest_validation/total_return"),
+        "validation_return": summary.get("backtest_val/total_return", summary.get("backtest_validation/total_return")),
         "test_return": summary.get("backtest_test/total_return"),
     }
     
