@@ -119,6 +119,8 @@ class DeepScalperEnv(gym.Env):
         self.current_mid_price = 0.0
         self.current_best_bid = 0.0
         self.current_best_ask = 0.0
+        self._raw_bid_vol_1 = 0.0  # RAW volume for liquidity checks
+        self._raw_ask_vol_1 = 0.0  # RAW volume for liquidity checks
         
         # Window Buffer - FIX F1: Now (W, L*F)
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
@@ -164,6 +166,8 @@ class DeepScalperEnv(gym.Env):
         self.current_mid_price = 0.0
         self.current_best_bid = 0.0
         self.current_best_ask = 0.0
+        self._raw_bid_vol_1 = 0.0  # RAW volume for liquidity checks
+        self._raw_ask_vol_1 = 0.0  # RAW volume for liquidity checks
         
         # Reset fee/slippage tracking
         self.cumulative_fees = 0.0
@@ -258,7 +262,11 @@ class DeepScalperEnv(gym.Env):
                     # frame structure: [bid_px, bid_vol, ask_px, ask_vol] * 5 levels
                     # Level 1 Ask Vol is at index 3.
                     
-                    available_vol = float(self.micro_window[-1, 3])
+                    if hasattr(self, '_raw_ask_vol_1') and self._raw_ask_vol_1 > 0:
+                         available_vol = self._raw_ask_vol_1
+                    else:
+                         available_vol = 0.0 # Strict: No fallback to normalized
+
                     
                     # Fill only what is available or what we ordered
                     exec_qty = min(order_qty, available_vol)
@@ -309,7 +317,11 @@ class DeepScalperEnv(gym.Env):
                 if order_qty > 0 and self.current_best_bid > 0 and self.current_best_bid >= order_px:
                     # CRITICAL FIX: Liquidity Check
                     # Level 1 Bid Vol is at index 1.
-                    available_vol = float(self.micro_window[-1, 1])
+                    if hasattr(self, '_raw_bid_vol_1') and self._raw_bid_vol_1 > 0:
+                        available_vol = self._raw_bid_vol_1
+                    else:
+                        available_vol = 0.0 # Strict: No fallback to normalized
+
                     
                     exec_qty = min(order_qty, available_vol)
                     
@@ -495,7 +507,11 @@ class DeepScalperEnv(gym.Env):
         return base + impact
 
     def _build_frame(self, step_data: Any) -> np.ndarray:
-        """Construct a single micro-observation frame from step data."""
+        """Construct a single micro-observation frame from step data.
+        
+        IMPORTANT: Uses NORMALIZED columns for the observation frame (neural net input)
+        but stores RAW prices/volumes separately for order execution.
+        """
         # Optimization: Use pre-computed keys
         # Avoid try/except block in hot path for speed if possible, but keep for safety logic
         # We can init frame with zeros and fill.
@@ -507,20 +523,25 @@ class DeepScalperEnv(gym.Env):
         idx = 0
         try:
             for b_p, b_v, a_p, a_v in self._lob_keys:
-                # Direct dict lookups
+                # Direct dict lookups - NORMALIZED values for observation
                 frame[idx]   = float(step_data.get(b_p, 0))
                 frame[idx+1] = float(step_data.get(b_v, 0))
                 frame[idx+2] = float(step_data.get(a_p, 0))
                 frame[idx+3] = float(step_data.get(a_v, 0))
-                
-                # Side effect: Track best bid/ask from Level 1
-                if idx == 0:
-                   self.current_best_bid = frame[idx]  # bid_px_1
-                   self.current_best_ask = frame[idx+2] # ask_px_1
-                   
                 idx += 4
-        except Exception:
+                
+            # CRITICAL FIX: Use RAW prices for order execution (not normalized)
+            # Level 1 prices from raw columns for accurate order matching
+            self.current_best_bid = float(step_data.get('bid_price_1', 0))
+            self.current_best_ask = float(step_data.get('ask_price_1', 0))
+            
+            # Also store raw volumes for liquidity checks
+            self._raw_bid_vol_1 = float(step_data.get('bid_vol_1', 0))
+            self._raw_ask_vol_1 = float(step_data.get('ask_vol_1', 0))
+                
+        except Exception as e:
             # Fallback (rare)
+            logging.error(f"Error in _build_frame: {e}")
             pass
             
         return frame
