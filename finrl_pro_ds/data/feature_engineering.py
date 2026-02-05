@@ -41,18 +41,18 @@ class DeepScalperFeatureEngineer:
         # Since Handler discards original, this is acceptable.
         
         df = lob_df
-        print("DEBUG: process_micro ENTER (Numpy Trace Mode)", flush=True)
+        # print("DEBUG: process_micro ENTER (Numpy Trace Mode)", flush=True)
 
         # 1. Mid Prices
         # Assuming we have columns like bid_price_1, ask_price_1
-        print("DEBUG: Computing mid_price...", flush=True)
+        # print("DEBUG: Computing mid_price...", flush=True)
         if 'bid_price_1' in df.columns and 'ask_price_1' in df.columns:
              # Use values to avoid PyArrow Series ops
              # FIX: Force extraction of underlying numpy array to prevent ABI crash
              bp1 = df['bid_price_1'].values
              ap1 = df['ask_price_1'].values
              df['mid_price'] = (bp1 + ap1) / 2
-        print("DEBUG: mid_price done.", flush=True)
+        # print("DEBUG: mid_price done.", flush=True)
             
         # 2. Spread
         # df['spread_1'] = df['ask_price_1'] - df['bid_price_1']
@@ -61,7 +61,7 @@ class DeepScalperFeatureEngineer:
              bp1 = df['bid_price_1'].values
              ap1 = df['ask_price_1'].values
              df['spread_1'] = ap1 - bp1
-        print("DEBUG: spread done.", flush=True)
+        # print("DEBUG: spread done.", flush=True)
         
         # 3. Order Flow Imbalance (OFI) - Simplified to Volume Imbalance
         # OFI ~ (BidVol - AskVol) / (BidVol + AskVol)
@@ -72,7 +72,7 @@ class DeepScalperFeatureEngineer:
                 av = df[f'ask_vol_{i}'].values
                 # Numpy vector div
                 df[f'vol_imbalance_{i}'] = (bv - av) / (bv + av + 1e-9)
-        print("DEBUG: OFI Loop done.", flush=True)
+        # print("DEBUG: OFI Loop done.", flush=True)
                 
         # 4. Log Returns
         # Original: np.log(df['mid_price'] / df['mid_price'].shift(1)).fillna(0)
@@ -88,7 +88,7 @@ class DeepScalperFeatureEngineer:
             log_ret[1:] = np.log(mp[1:] / (mp[:-1] + 1e-9))
             
             df['log_ret'] = log_ret
-        print("DEBUG: Log Ret done. Returned.", flush=True)
+        # print("DEBUG: Log Ret done. Returned.", flush=True)
         
         return df
 
@@ -195,13 +195,13 @@ class DeepScalperFeatureEngineer:
         Fast-path: When N==M (same row count), returns arrays as-is (or shallow copy).
         Normal-path: Uses searchsorted for O(N log M) alignment.
         """
-        print("DEBUG: align_multimodal ENTER", flush=True)
+        # print("DEBUG: align_multimodal ENTER", flush=True)
         
         N = len(micro_df)
         
         # Handle dict input (pre-sanitized numpy arrays from parquet_handler)
         if isinstance(macro_data, dict):
-            print("DEBUG: Input is pre-sanitized dict.", flush=True)
+            # print("DEBUG: Input is pre-sanitized dict.", flush=True)
             # Get length from any non-timestamp array
             M = 0
             for k, v in macro_data.items():
@@ -209,18 +209,18 @@ class DeepScalperFeatureEngineer:
                     M = len(v)
                     break
             
-            print(f"DEBUG: Micro={N}, Macro={M} rows.", flush=True)
+            # print(f"DEBUG: Micro={N}, Macro={M} rows.", flush=True)
             
             # Fast-path: Same length, just return the dict (already numpy)
             if N == M:
-                print("DEBUG: FAST-PATH - Same length, returning dict as-is.", flush=True)
+                # print("DEBUG: FAST-PATH - Same length, returning dict as-is.", flush=True)
                 # Filter out timestamp if present
                 aligned_data = {k: v for k, v in macro_data.items() if k != 'timestamp'}
-                print(f"DEBUG: Fast-path aligned {len(aligned_data)} macro features.", flush=True)
+                # print(f"DEBUG: Fast-path aligned {len(aligned_data)} macro features.", flush=True)
                 return aligned_data
             
             # Normal-path: Need searchsorted alignment
-            print("DEBUG: NORMAL-PATH - Different lengths, using searchsorted.", flush=True)
+            # print("DEBUG: NORMAL-PATH - Different lengths, using searchsorted.", flush=True)
             if 'timestamp' not in macro_data:
                 raise ValueError("macro_data dict must have 'timestamp' for alignment when lengths differ")
                 
@@ -228,10 +228,10 @@ class DeepScalperFeatureEngineer:
             micro_ts = np.array(micro_df['timestamp'].values, dtype='datetime64[ns]').view('int64')
             macro_ts = np.array(macro_data['timestamp'], dtype='datetime64[ns]').view('int64')
             
-            print("DEBUG: Running searchsorted...", flush=True)
+            # print("DEBUG: Running searchsorted...", flush=True)
             idx = np.searchsorted(macro_ts, micro_ts, side='right') - 1
             idx = np.clip(idx, 0, M - 1)
-            print("DEBUG: searchsorted done.", flush=True)
+            # print("DEBUG: searchsorted done.", flush=True)
             
             aligned_data = {}
             for k, v in macro_data.items():
@@ -239,35 +239,37 @@ class DeepScalperFeatureEngineer:
                     continue
                 aligned_data[k] = v[idx]
             
-            print(f"DEBUG: Aligned {len(aligned_data)} macro features.", flush=True)
+            # print(f"DEBUG: Aligned {len(aligned_data)} macro features.", flush=True)
             return aligned_data
         
         # Legacy DataFrame path (not used when called from parquet_handler)
-        print("DEBUG: Input is DataFrame (legacy path).", flush=True)
+        # print("DEBUG: Input is DataFrame (legacy path).", flush=True)
         M = len(macro_data)
-        print(f"DEBUG: Micro={N}, Macro={M} rows.", flush=True)
+        # print(f"DEBUG: Micro={N}, Macro={M} rows.", flush=True)
         
         if N == M:
-            print("DEBUG: FAST-PATH DataFrame - Same length, direct copy.", flush=True)
+            # print("DEBUG: FAST-PATH DataFrame - Same length, direct copy.", flush=True)
             aligned_data = {}
             for col in macro_data.columns:
                 if col == 'timestamp':
                     continue
-                print(f"DEBUG: Copying col {col}...", flush=True)
+                # print(f"DEBUG: Copying col {col}...", flush=True)
                 vals = np.array(macro_data[col].values, dtype=np.float32)
                 aligned_data[col] = vals
-            print(f"DEBUG: Fast-path aligned {len(aligned_data)} macro features.", flush=True)
+            # print(f"DEBUG: Fast-path aligned {len(aligned_data)} macro features.", flush=True)
             return aligned_data
         
         # DataFrame searchsorted path
-        print("DEBUG: NORMAL-PATH DataFrame - Different lengths, using searchsorted.", flush=True)
+        # print("DEBUG: NORMAL-PATH DataFrame - Different lengths, using searchsorted.", flush=True)
+        micro_ts = np.array(micro_df['timestamp'].values, dtype='datetime64[ns]').view('int64')
+        macro_ts = np.array(macro_data['timestamp'].values, dtype='datetime64[ns]').view('int64')
         micro_ts = np.array(micro_df['timestamp'].values, dtype='datetime64[ns]').view('int64')
         macro_ts = np.array(macro_data['timestamp'].values, dtype='datetime64[ns]').view('int64')
         
-        print("DEBUG: Running searchsorted...", flush=True)
+        # print("DEBUG: Running searchsorted...", flush=True)
         idx = np.searchsorted(macro_ts, micro_ts, side='right') - 1
         idx = np.clip(idx, 0, M - 1)
-        print("DEBUG: searchsorted done.", flush=True)
+        # print("DEBUG: searchsorted done.", flush=True)
         
         aligned_data = {}
         for col in macro_data.columns:
@@ -276,5 +278,5 @@ class DeepScalperFeatureEngineer:
             vals = np.array(macro_data[col].values, dtype=np.float32)
             aligned_data[col] = vals[idx]
         
-        print(f"DEBUG: Aligned {len(aligned_data)} macro features.", flush=True)
+        # print(f"DEBUG: Aligned {len(aligned_data)} macro features.", flush=True)
         return aligned_data
