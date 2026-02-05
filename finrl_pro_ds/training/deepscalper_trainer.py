@@ -204,7 +204,28 @@ class DeepScalperTrainer:
                              self._last_log_time = current_time
                              self._last_log_step = global_step
 
-                             wandb.log(logs)
+                             # FILTER METRICS TO REDUCE NOISE (Unless verbose_logging=True)
+                             verbose = self.config["training"].get("verbose_logging", False)
+                             
+                             if not verbose:
+                                 # Key Metrics Only ["The Big 5"]
+                                 filtered_logs = {
+                                     "step": logs["step"],
+                                     "train/reward_mean": logs.get("train/reward_mean", 0.0),
+                                     "train/loss_total": logs.get("agent/loss_total", 0.0), # Map from agent/
+                                     "train/sps": logs.get("train/sps", 0.0),
+                                     "train/epsilon": logs.get("agent/epsilon", 0.0),       # Map from agent/
+                                     "train/len_mean": logs.get("train/len_mean", 0.0)
+                                 }
+                                 # Preserve any 'eval/' metrics if they happened to be mixed in (rare)
+                                 for k, v in logs.items():
+                                     if k.startswith("eval/"):
+                                         filtered_logs[k] = v
+                                         
+                                 wandb.log(filtered_logs)
+                             else:
+                                 # Full detailed logging
+                                 wandb.log(logs)
             
             # 4b. HPO Pruning Check (rung-based for vectorized envs)
             # Uses rung tracking to handle num_envs > 1 step increments

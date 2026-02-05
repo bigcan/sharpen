@@ -83,7 +83,7 @@ def make_env(config, start_date=None, end_date=None, shm_config=None):
     return DeepScalperEnv(config=env_config, data_handler=handler)
 
 
-def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_config=None):
+def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_config=None, gym_shm=True):
     """Create vectorized environment for training.
     
     Note: Using AsyncVectorEnv for parallel data loading. Context 'spawn' is used
@@ -93,9 +93,11 @@ def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_conf
     
     # Use AsyncVectorEnv for 5090 I/O optimization (Parallel Data Loading)
     # Context 'spawn' is safer for PyTorch/CUDA interaction
+    # shared_memory=gym_shm allows explicit disabling of Gymnasium's internal SHM
     env = gym.vector.AsyncVectorEnv(
         [env_factory for _ in range(num_envs)],
-        context="spawn"
+        context="spawn",
+        shared_memory=gym_shm
     )
     
     return env
@@ -194,11 +196,13 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         # Create env and train
         env = None
         try:
-            env = create_vector_env(config, num_envs=config["env"].get("num_envs", 12))
+            # Disable gym SHM for HPO to avoid crashes
+            use_shm = config["training"].get("use_shm", False)
+            env = create_vector_env(config, num_envs=config["env"].get("num_envs", 12), gym_shm=use_shm)
             trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
             
             # Create DEDICATED eval env for pruning (P1b fix: prevents training state corruption)
-            eval_env = create_vector_env(config, num_envs=1)
+            eval_env = create_vector_env(config, num_envs=1, gym_shm=False)
             
             # Define Pruning Callback with dedicated eval env
             def pruning_callback():
@@ -301,7 +305,8 @@ def run_training(config, run_name, device):
             # Note: Don't store in config dict - pass explicitly to avoid stale refs
         
         # Create environment (pass shm_config explicitly)
-        env = create_vector_env(config, num_envs, shm_config=shm_config)
+        # Also pass use_shm to Gymnasium to disable internal SHM if needed
+        env = create_vector_env(config, num_envs, shm_config=shm_config, gym_shm=use_shm)
         logger.info(f"Environment ready: {num_envs} workers")
         
         # Train
