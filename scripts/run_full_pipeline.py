@@ -165,7 +165,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         
         # Sample hyperparameters
         hindsight_horizon = trial.suggest_categorical("hindsight_horizon", [60, 120, 180, 240])
-        hindsight_weight = trial.suggest_float("hindsight_weight", 0.001, 0.1, log=True)
+        hindsight_weight = base_config["env"]["reward"].get("hindsight_weight", 0.1)
         auxiliary_weight = trial.suggest_categorical("auxiliary_weight", [0.5, 1.0])
         learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
         target_update_freq = trial.suggest_categorical("target_update_freq", [5000, 7500, 10000, 15000])
@@ -254,7 +254,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
     }
     
     for key, val in best.params.items():
-        if key in ["hindsight_horizon", "hindsight_weight"]:
+        if key in ["hindsight_horizon"]:
             best_params["env"]["reward"][key] = val
         elif key in ["auxiliary_weight", "learning_rate", "gamma", "batch_size", "target_update_freq", "epsilon_end"]:
             best_params["agents"]["bdq"][key] = val
