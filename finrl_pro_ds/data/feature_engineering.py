@@ -19,6 +19,45 @@ class DeepScalperFeatureEngineer:
     def __init__(self, config: Dict = None):
         self.config = config or {}
         
+
+    def _add_normalized_features(self, df: pd.DataFrame):
+        """
+        Adds normalized versions of LOB features.
+        Prices: (P - Mid) / Mid
+        Volumes: log1p(V)
+        """
+        # print("DEBUG: Adding normalized features...", flush=True)
+        if 'mid_price' not in df.columns:
+            return df
+            
+        mp = df['mid_price'].values
+        # Avoid div by zero
+        mp = np.where(mp == 0, 1.0, mp)
+        
+        for i in range(1, 6):
+            # Prices
+            bp_col = f'bid_price_{i}'
+            ap_col = f'ask_price_{i}'
+            
+            if bp_col in df.columns:
+                # Relative distance from mid
+                df[f'n_{bp_col}'] = (df[bp_col].values - mp) / mp
+            
+            if ap_col in df.columns:
+                df[f'n_{ap_col}'] = (df[ap_col].values - mp) / mp
+                
+            # Volumes
+            bv_col = f'bid_vol_{i}'
+            av_col = f'ask_vol_{i}'
+            
+            if bv_col in df.columns:
+                df[f'n_{bv_col}'] = np.log1p(df[bv_col].values)
+                
+            if av_col in df.columns:
+                df[f'n_{av_col}'] = np.log1p(df[av_col].values)
+                
+        return df
+
     def process_micro(self, lob_df: pd.DataFrame) -> pd.DataFrame:
         """
         Process Level 2 LOB data into Micro Features.
@@ -89,6 +128,9 @@ class DeepScalperFeatureEngineer:
             
             df['log_ret'] = log_ret
         # print("DEBUG: Log Ret done. Returned.", flush=True)
+        
+        # 5. Add Normalization
+        self._add_normalized_features(df)
         
         return df
 
