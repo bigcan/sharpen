@@ -8,12 +8,14 @@ The **Ralph Mission Control** database provides real-time visibility into the tr
 
 | Column | Description |
 |--------|-------------|
-| **Name** | Title of the log entry (e.g., "Ralph Status"). |
-| **Status** | Current state of the workflow: <br>🟢 `Running`: Active <br>🟡 `Paused`: Waiting for user command <br>🔴 `Stopped`: Terminated <br>🔴 `Error`: Failed |
+| **Name** | Title of the log entry. "Ralph Status" is the active controller. "Run X" are historical logs. |
+| **Status** | Current state of the workflow: <br>🟢 `Running`: Active <br>🟡 `Paused`: Waiting for user command <br>🔴 `Stopped`: Terminated <br>🔴 `Error`: Failed <br>🏁 `Done`: Completed History |
 | **Sharpe** | Latest **Validation Sharpe Ratio** from the backtest. |
 | **Command** | **USER INPUT**: Control the workflow here (see below). |
 | **Logs** | Recent log snippets (e.g., "Run ID: ... State: running"). |
 | **Timestamp**| Time of last update. |
+
+> **Note:** "Mission Control" maintains a single active row named **Ralph Status**. When a run completes, a **permanent history record** is created as a new row (e.g., `Run 8k... (Iter 1)`).
 
 ---
 
