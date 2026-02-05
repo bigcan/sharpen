@@ -188,6 +188,22 @@ class DeepScalperTrainer:
                                  "train/len_mean": np.mean(episode_lens) if len(episode_lens) > 0 else 0.0,
                                  **{f"agent/{k}": v for k, v in metrics.items()}
                              }
+                             
+                             # Calculate SPS
+                             current_time = time.time()
+                             # Use getattr for safety if init failed
+                             last_time = getattr(self, '_last_log_time', start_time)
+                             last_step = getattr(self, '_last_log_step', start_step)
+                             
+                             elapsed = current_time - last_time
+                             if elapsed > 1e-6:
+                                 sps = (global_step - last_step) / elapsed
+                                 logs["train/sps"] = sps
+                             
+                             # Update trackers
+                             self._last_log_time = current_time
+                             self._last_log_step = global_step
+
                              wandb.log(logs)
             
             # 4b. HPO Pruning Check (rung-based for vectorized envs)

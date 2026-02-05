@@ -22,8 +22,8 @@ def monitor():
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(host, port=port, username='root', password=password)
     
-    print("Connected. Tailing run.log...")
-    stdin, stdout, stderr = ssh.exec_command("tail -n 20 /workspace/DeepScalper/run.log")
+    print("Connected. Checking System Stats...")
+    stdin, stdout, stderr = ssh.exec_command("nvidia-smi; echo '---'; tail -n 20 /workspace/DeepScalper/run.log")
     print(stdout.read().decode())
     ssh.close()
 
