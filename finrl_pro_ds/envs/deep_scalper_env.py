@@ -130,12 +130,28 @@ class DeepScalperEnv(gym.Env):
         for i in range(self.lob_levels):
             level = i + 1
             # Tuple of keys for this level
+            # FIX: Use NORMALIZED features for observation
             self._lob_keys.append((
-                f'bid_price_{level}',
-                f'bid_vol_{level}',
-                f'ask_price_{level}',
-                f'ask_vol_{level}'
+                f'n_bid_price_{level}',
+                f'n_bid_vol_{level}',
+                f'n_ask_price_{level}',
+                f'n_ask_vol_{level}'
             ))
+
+    def _normalize_private_state(self, position: float, balance: float) -> np.ndarray:
+        """
+        Normalize private state variables.
+        Position: [-Max, Max] -> [-1, 1]
+        Balance:  [0, Init*2] -> [0, 2] (approx)
+        """
+        # Avoid div zero
+        max_pos = self.max_position if self.max_position > 0 else 1.0
+        n_pos = position / max_pos
+        
+        # Balance relative to initial
+        n_bal = balance / self.initial_balance
+        
+        return np.array([n_pos, n_bal], dtype=np.float32)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -161,7 +177,8 @@ class DeepScalperEnv(gym.Env):
         
         # Initialize Private Window (Position=0, Balance=Initial)
         self.private_window = np.zeros((self.window_size, 2), dtype=np.float32)
-        initial_private_state = np.array([0.0, float(self.initial_balance)], dtype=np.float32)
+        # FIX: Normalize initial private state
+        initial_private_state = self._normalize_private_state(0.0, float(self.initial_balance))
         self.private_window = np.tile(initial_private_state, (self.window_size, 1))
         
         if self.handler:
@@ -330,7 +347,7 @@ class DeepScalperEnv(gym.Env):
             
             # CRITICAL FIX: Update Private State in Window to reflect execution
             # The agent needs to see the new position in the current observation
-            self.private_window[-1] = np.array([self.position, self.balance], dtype=np.float32)
+            self.private_window[-1] = self._normalize_private_state(self.position, self.balance)
 
         # 3. Process NEW Action (T) -> becomes Pending for T+1
         direction, price_idx, vol_idx = int(action[0]), int(action[1]), int(action[2])
@@ -357,6 +374,12 @@ class DeepScalperEnv(gym.Env):
         current_portfolio_value = self._get_portfolio_value()
         raw_pnl = current_portfolio_value - self.prev_portfolio_value
         
+        # Breakdown components for telemetry
+        reward_pnl = 0.0
+        reward_risk = 0.0
+        reward_cost = 0.0
+        reward_hindsight = 0.0
+        
         try:
             # Force float to ensure scalar
             if hasattr(raw_pnl, "item"): raw_pnl = raw_pnl.item() # Handle 0-d array
@@ -364,34 +387,24 @@ class DeepScalperEnv(gym.Env):
             
             # Base Reward
             if raw_pnl > 0:
-                reward = raw_pnl * self.profit_weight * self.reward_scaling
+                reward_pnl = raw_pnl * self.profit_weight * self.reward_scaling
             else:
-                reward = raw_pnl * self.reward_scaling
+                reward_pnl = raw_pnl * self.reward_scaling
         except Exception as e:
             logging.error(f"CRITICAL ERROR in Reward Calc: {e}")
             logging.error(f"raw_pnl: {raw_pnl} type: {type(raw_pnl)}")
-            logging.error(f"curr_val: {current_portfolio_value} type: {type(current_portfolio_value)}")
-            logging.error(f"prev_val: {self.prev_portfolio_value} type: {type(self.prev_portfolio_value)}")
-            logging.error(f"balance: {self.balance} type: {type(self.balance)}")
-            logging.error(f"pos: {self.position} type: {type(self.position)}")
             # Fallback
-            reward = 0.0
-            raw_pnl = 0.0
+            reward_pnl = 0.0
             
         # 4.1 Risk Penalty (Volatility/Drawdown awareness)
-        # Penalize negative PnL more heavily? Or simple returns volatility proxy?
-        # Paper uses auxiliary task, here we add a penalty term for simple risk control.
-        # If PnL < 0, add extra penalty: reward -= penalty * |PnL|
         if self.risk_penalty_weight > 0 and raw_pnl < 0:
-             reward -= self.risk_penalty_weight * abs(raw_pnl) * self.reward_scaling
+             reward_risk = -1.0 * self.risk_penalty_weight * abs(raw_pnl) * self.reward_scaling
 
         # 4.1.b Transaction Cost Penalty (Explicit Churn suppression)
         if self.cost_penalty_weight > 0 and self.step_transaction_costs > 0:
-             reward -= self.step_transaction_costs * self.cost_penalty_weight * self.reward_scaling
+             reward_cost = -1.0 * self.step_transaction_costs * self.cost_penalty_weight * self.reward_scaling
 
-        # 4.2 Hindsight Bonus (Paper: 2201.09058)
-        # "Encourage capturing long-term trends"
-        # Term: w * (Price_t+h - Price_t) * Position_t
+        # 4.2 Hindsight Bonus
         if self.hindsight_weight > 0 and self.handler and hasattr(self.handler, 'get_lookahead_price'):
             try:
                 future_price = self.handler.get_lookahead_price(self.hindsight_horizon)
@@ -407,10 +420,12 @@ class DeepScalperEnv(gym.Env):
                     
                     price_delta = future_price - current_mid
                     hindsight_term = self.position * price_delta
-                    reward += self.hindsight_weight * hindsight_term * self.reward_scaling
+                    reward_hindsight = self.hindsight_weight * hindsight_term * self.reward_scaling
             except Exception as e:
                 logging.error(f"Error in Hindsight: {e}")
-                # Hindsight is bonus, safe to skip if fails
+
+        # Total Reward
+        reward = reward_pnl + reward_risk + reward_cost + reward_hindsight
 
         # 4.3 Volatility Prediction Target (Section 4.4)
         volatility_target = 0.0
@@ -438,7 +453,13 @@ class DeepScalperEnv(gym.Env):
             "volatility_target": volatility_target,
             "cumulative_slippage": self.cumulative_slippage,
             "total_execution_costs": self.cumulative_fees + self.cumulative_slippage,
-            "timestamp": step_data.get("timestamp") if step_data is not None else None
+            "timestamp": step_data.get("timestamp") if step_data is not None else None,
+            # Telemetry
+            "reward_pnl": reward_pnl,
+            "reward_risk": reward_risk,
+            "reward_cost": reward_cost,
+            "reward_hindsight": reward_hindsight,
+            "reward_total": reward
         }
         
         return obs, reward, terminated, truncated, info
@@ -532,7 +553,7 @@ class DeepScalperEnv(gym.Env):
         # 4. Update Private Window
         # Note: self.position and self.balance are already updated in step() before this call
         # or initialized in reset().
-        current_private = np.array([self.position, self.balance], dtype=np.float32)
+        current_private = self._normalize_private_state(self.position, self.balance)
         self.private_window = np.roll(self.private_window, -1, axis=0)
         self.private_window[-1] = current_private
 
