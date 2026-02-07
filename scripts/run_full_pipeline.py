@@ -225,7 +225,7 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     
     if len(returns) > 1 and np.std(returns) > 1e-9:
         raw_ratio = np.mean(returns) / np.std(returns)
-        # Per-minute Sharpe (canonical — matches data frequency)
+        # Per-minute Sharpe (for reporting only)
         sharpe_minute = raw_ratio * np.sqrt(525600)  # 365.25 × 24 × 60
         # Hourly-aggregated Sharpe (research comparison)
         n_per_hour = 60
@@ -240,10 +240,15 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
             "_research/raw_ratio_per_step": raw_ratio,
         })
     else:
+        raw_ratio = 0.0
         sharpe_minute = 0.0
         logger.warning(f"Zero Sharpe: steps={step}, len={len(returns)}, std={np.std(returns) if len(returns) > 0 else 'N/A'}, actions={action_counts}")
     
-    return sharpe_minute  # HPO optimizes on per-minute (canonical)
+    # FIX: Return RAW (non-annualized) ratio for HPO optimization.
+    # sqrt(525600) ≈ 725x amplification makes all trials look equally catastrophic,
+    # preventing Optuna's TPE sampler from differentiating between trial quality.
+    # Annualization is applied only during final backtesting (Phase 3).
+    return raw_ratio
 
 
 def run_hpo(base_config, n_trials, steps_per_trial, device):
@@ -293,6 +298,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         
         # Create env and train
         env = None
+        eval_env = None
         try:
             # Disable gym SHM for HPO to avoid crashes
             use_shm = config["training"].get("use_shm", False)
@@ -308,11 +314,11 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
 
             trainer.train(optuna_trial=trial, pruning_callback=pruning_callback)
             
-            # Evaluate
-            sharpe = evaluate_for_hpo(env, trainer.agent, max_steps=5000)
+            # FIX: Evaluate on dedicated eval_env (clean state), not training env
+            sharpe = evaluate_for_hpo(eval_env, trainer.agent, max_steps=5000)
             
             wandb.log({f"{trial_prefix}/sharpe": sharpe, f"{trial_prefix}/completed": True})
-            logger.info(f"Trial {trial.number}: Sharpe={sharpe:.4f}")
+            logger.info(f"Trial {trial.number}: Sharpe(raw)={sharpe:.6f}")
             
             return sharpe
             
@@ -328,7 +334,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
             if env:
                 env.close()
             # Close dedicated eval env
-            if 'eval_env' in dir() and eval_env:
+            if eval_env:
                 eval_env.close()
             # FIX A: Force garbage collection to release PyArrow mmap/FD handles
             import gc
@@ -355,21 +361,40 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         "training": {}
     }
     
+    # FIX: Explicit routing for ALL HPO params to prevent silent mis-routing.
+    # Previously cost_penalty/risk_penalty fell into the catch-all "else" branch
+    # and went to training{} instead of env.reward{}, meaning the optimized
+    # reward params were silently discarded before Phase 2.
+    reward_params = {"hindsight_horizon", "cost_penalty", "risk_penalty"}
+    agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "target_update_freq", "epsilon_end"}
+    
+    # Key name mapping: Optuna param name -> config key name
+    reward_key_map = {
+        "cost_penalty": "transaction_cost_penalty",  # env reads 'transaction_cost_penalty'
+        "risk_penalty": "risk_penalty",
+        "hindsight_horizon": "hindsight_horizon",
+    }
+    
     for key, val in best.params.items():
-        if key in ["hindsight_horizon"]:
-            best_params["env"]["reward"][key] = val
-        elif key in ["auxiliary_weight", "learning_rate", "gamma", "batch_size", "target_update_freq", "epsilon_end"]:
+        if key in reward_params:
+            config_key = reward_key_map.get(key, key)
+            best_params["env"]["reward"][config_key] = val
+        elif key in agent_params:
             best_params["agents"]["bdq"][key] = val
         else:
-            best_params["training"][key] = val
+            raise ValueError(f"HPO param '{key}' has no routing rule. Add to reward_params or agent_params in run_hpo().")
     
+    # best.value is raw (non-annualized) ratio; also report annualized for human reference
+    annualized_sharpe = best.value * np.sqrt(525600) if best.value is not None else 0.0
     wandb.log({
-        "hpo/best_sharpe": best.value,
+        "hpo/best_sharpe_raw": best.value,
+        "hpo/best_sharpe": annualized_sharpe,  # Human-readable annualized
         "hpo/best_trial": best.number,
+        "hpo/best_params": str(best.params),
         "hpo/status": "completed"
     })
     
-    logger.info(f"HPO Complete. Best Sharpe: {best.value:.4f}")
+    logger.info(f"HPO Complete. Best Raw Ratio: {best.value:.6f} (Annualized: {annualized_sharpe:.2f})")
     return best_params
 
 
