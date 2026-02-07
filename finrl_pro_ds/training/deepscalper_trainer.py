@@ -82,7 +82,9 @@ class DeepScalperTrainer:
             f"Expected obs['micro'] shape (B, Window, Features), got {obs['micro'].shape}. " \
             "Ensure env is wrapped in SyncVectorEnv even for num_envs=1."
         
-        num_envs = self.config["env"].get("num_envs", 1)
+        # FIX: Read num_envs from ACTUAL env, not config.
+        # During HPO, env may have fewer workers than config specifies.
+        num_envs = self.env.num_envs
         
         global_step = start_step
         episode_rewards = deque(maxlen=100)
