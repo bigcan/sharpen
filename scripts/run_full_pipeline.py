@@ -247,7 +247,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         auxiliary_weight = trial.suggest_categorical("auxiliary_weight", [0.5, 1.0])
         learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
         target_update_freq = trial.suggest_categorical("target_update_freq", [5000, 7500, 10000, 15000])
-        batch_size = trial.suggest_categorical("batch_size", [64, 128, 256])
+        batch_size = trial.suggest_categorical("batch_size", [256, 512, 1024])
         gamma = trial.suggest_categorical("gamma", [0.99, 0.995])
         epsilon_end = trial.suggest_float("epsilon_end", 0.01, 0.10)
         
@@ -572,6 +572,11 @@ def main():
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Device: {device}")
+    
+    # Enable TF32 for 5th Gen Tensor Cores (RTX 5090 Blackwell)
+    # Uses 10-bit mantissa — sufficient for financial signals, ~8x faster than IEEE FP32
+    torch.set_float32_matmul_precision('high')
+    logger.info("TF32 enabled: torch.set_float32_matmul_precision('high')")
     
     try:
         # =====================================================================
