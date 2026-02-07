@@ -23,7 +23,7 @@ env:
   # FIX Bug#2: Explicit maker/taker split (Binance VIP0)
   maker_fee: 0.0002   # 2 bps
   taker_fee: 0.0005   # 5 bps
-  num_envs: 12            # Reduced from 20 to 12 to fix SHM FD exhaustion (Errno 24)
+  num_envs: 20            # Restored to 20 (ulimit -n 65535 in deploy script prevents Errno 24)
   window_size: 50
   max_drawdown_pct: 0.30  # Relaxed to 30% for Production
   
@@ -65,9 +65,9 @@ agents:
     auxiliary_weight: 1.0 # Paper: 1.0 robust
     
     # Replay Ratio Math:
-    # Batch=1024, Envs=12. Target Ratio ~8.
-    # Updates/Step = (Ratio * Envs) / Batch = 0.09 updates per step.
-    # Inverse: Update every ~11 steps. Current: update_interval=2.
+    # Batch=1024, Envs=20. Target Ratio ~8.
+    # Updates/Step = (Ratio * Envs) / Batch = 0.16 updates per step.
+    # Inverse: Update every ~6 steps. Current: update_interval=2.
     update_interval: 2.0 
     
     # Reference: 128-256 (Bandwidth Optimized) -> 1024 (RTX 5090 Optimized)
@@ -98,7 +98,7 @@ training:
   # Optimization
   torch_compile: true   # Enabled
   use_amp: true         # Enabled (Reference: FP16)
-  use_shm: false         
+  use_shm: true          # Re-enabled: zero-copy obs transfer (ulimit raised in deploy script)
   
 hpo:
   enabled: true
