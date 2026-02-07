@@ -94,11 +94,13 @@ def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_conf
     
     # Use AsyncVectorEnv for 5090 I/O optimization (Parallel Data Loading)
     # Context 'spawn' is safer for PyTorch/CUDA interaction
-    # shared_memory=gym_shm allows explicit disabling of Gymnasium's internal SHM
+    # NOTE: Gymnasium's shared_memory is DISABLED. It conflicts with spawn context
+    # + our custom data SHM, causing [Errno 104] worker crashes at _check_spaces().
+    # Our custom ParquetDataHandler SHM (passed via shm_config) is separate and works.
     env = gym.vector.AsyncVectorEnv(
         [env_factory for _ in range(num_envs)],
         context="spawn",
-        shared_memory=gym_shm
+        shared_memory=False
     )
     
     return env
