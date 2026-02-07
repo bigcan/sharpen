@@ -155,6 +155,9 @@ def deploy(args):
         "echo 'STEP: START'",
         # CRITICAL: Increase file descriptor limit for high-concurrency AsyncVectorEnv
         "ulimit -n 65536",
+        # CRITICAL: Resize /dev/shm from default 64MB to 2GB for shared memory IPC
+        # Without this, AsyncVectorEnv with SHM + 20 workers triggers [Errno 104]
+        "mount -o remount,size=2G /dev/shm || echo 'WARN: /dev/shm remount failed (non-fatal)'",
         # Fresh HPO Logic
         f"{'rm -f hpo.db* && echo STEP: WIPE HPO DB' if args.fresh_hpo else 'echo STEP: RETAIN HPO DB'}", 
         "echo 'STEP: UNINSTALL'",
