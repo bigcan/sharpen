@@ -2,155 +2,159 @@
 
 **High-Frequency Crypto Scalping with Deep Reinforcement Learning (Bitcoin Futures)**
 
-DeepScalper is an end-to-end institutional-grade reinforcement learning pipeline designed for sub-second intraday trading. It leverages a **Single Branching Dueling Q-Network (BDQ)** agent to trade on Limit Order Book (LOB) data with micro-structure awareness.
-
-## 🚀 Key Features
-- **Unified MLOps Pipeline**: Orchestrates HPO $\to$ Single-Phase Training $\to$ Backtesting.
-- **WandB Standardization**: Automatic canonical naming (`DeepScalper_V1_GPUHub_YYYYMMDD_HHMM`) for all runs to ensure auditability.
-- **Mach 3 Optimization**: Optimized for RTX 5090 (32GB VRAM), utilizing **Shared Memory (SHM)**, AMP, and Torch Compile for max throughput.
-- **Single BDQ Agent**: Strict adherence to the original paper's Single-Agent architecture (no ensembles).
-- **Remote Ops & Monitoring**: Integrated deployment engine with real-time remote GPU/Process monitoring scripts.
-- **Institutional Governance**: Automated "Smoke Tests", Financial Audits (Sharpe/Sortino), and Risk Guardrails.
+DeepScalper is an institutional-grade reinforcement learning pipeline for sub-second intraday trading. It implements a **Branching Dueling Q-Network (BDQ)** agent trained on Limit Order Book (LOB) micro-structure data, following [Sun et al. (2022)](docs/2201.09058v3.pdf).
 
 ---
 
-## 🛠️ Installation
+## Key Features
+
+- **End-to-End Pipeline**: HPO → Training → Backtesting in a single script
+- **Multi-Modal Observations**: Fuses LOB micro-features (5-level OFI, spread, returns) with macro technical indicators (SMAs, z-scores)
+- **Branching Dueling DQN**: Three action branches (direction, price, volume) with value-advantage decomposition
+- **Auxiliary Volatility Prediction**: Side-task head improves representation learning (Section 4.4)
+- **Shared Memory Data Streaming**: Zero-copy `ParquetDataHandler` for multi-env training throughput
+- **WandB Integration**: Canonical run naming, metric logging, and institutional-grade reporting
+- **RTX 5090 Optimized**: AMP, Torch Compile, and tuned batch sizes for 32GB VRAM
+
+---
+
+## Installation
 
 Requires **Python 3.10+** and a CUDA-capable GPU.
 
 ```bash
-# 1. Clone & Setup
+# Clone & Setup
 git clone https://github.com/bigcan/FinRL-Pro-DS.git
 cd FinRL-Pro-DS
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1  # or source .venv/bin/activate
+.\.venv\Scripts\Activate.ps1  # or: source .venv/bin/activate
 
-# 2. Install Core Dependencies
+# Install
 pip install -r requirements.txt
 pip install -e .
-
-# 3. (Optional) Install Flash Attention / Torch Compile support
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
 ```
 
 ---
 
-## 🛡️ Three-Tier QA Protocol
+## Quick Start
 
-To ensure reliability on expensive GPU resources, we strictly follow a three-tier execution strategy:
+### Run the Full Pipeline (Recommended)
 
-### 1. Smoke Test (`deepscalper_smoke_test.yaml`)
-- **Purpose:** Logic verification & Crash detection.
-- **Scope:** 10 steps, Synthetic Data, CPU/Local.
-- **Goal:** Confirm code runs without syntax errors or immediate crashes.
-
-### 2. Pilot Run (`deepscalper_pilot_test.yaml`)
-- **Purpose:** Integration testing & "Trap" detection.
-- **Scope:** 1 Month Data, 5,000 Steps/Trial, Remote GPU.
-- **Goal:** Verify pipeline connectors (WandB, Shared Memory, HPO) and catch data-specific bugs (e.g., Short Dataset constraints, Memory Leaks) before committing to full training.
-- **Success Criteria:** HPO completes 1 cycle, Evaluation runs without OOM/BrokenPipe.
-
-### 3. Production Run (`deepscalper_production.yaml`)
-- **Purpose:** Model Convergence & Maximizing ROI.
-- **Scope:** Full Year Data, 10M Steps, 24 Envs, Torch Compile ON.
-- **Goal:** Produce the final profitable agent.
-
----
-
-## ⚡ Quick Start
-
-### 1. Configuration Strategy
-We use purpose-built configuration files for each stage of the lifecycle:
-- **Smoke/Pilot**: `configs/deepscalper_pilot_test.yaml`
-- **Production**: `configs/deepscalper_rtx5090_production.yaml` (RTX 5090 Optimized)
-
-### 2. Automated Pipeline (Recommended)
-Run the end-to-end MLOps pipeline (HPO $\to$ Train $\to$ Backtest $\to$ Report).
 ```bash
+# Development (fast iteration, 50k steps)
+python scripts/run_full_pipeline.py --config configs/deepscalper_dev.yaml
+
+# Production (RTX 5090, full training)
 python scripts/run_full_pipeline.py --config configs/deepscalper_rtx5090_production.yaml
 ```
 
-### 3. Deployment (Remote Ops)
-Deploy the **full pipeline** to a remote node (e.g., GPUHub).
-```bash
-# Correctly launches the pipeline script, NOT just the trainer
-python scripts/deploy_bare_metal.py --script scripts/run_full_pipeline.py --config configs/deepscalper_rtx5090_production.yaml --run_name DS_Production_V1
-```
+### Deploy to Remote GPU (GPUHub)
 
-### 4. Manual Component Execution (Advanced)
-If you need to run specific stages manually:
-**Train**:
 ```bash
-python scripts/train_deepscalper.py --config configs/deepscalper_rtx5090_production.yaml
-```
-**Tune**:
-```bash
-python scripts/tune_deepscalper.py --trials 50
-```
-**Audit**:
-```bash
-python scripts/audit_model.py --checkpoint checkpoints/best_model.pth
-```
-
-### 5. Monitoring & Ops (Remote)
-Once deployed, use these utilities to track progress without full SSH sessions:
-```bash
-# Check overall status (PID, Log tail)
-python scripts/check_remote_status.py
-
-# Live GPU monitoring (nvidia-smi)
-python scripts/check_remote_gpu.py
-
-# List active checkpoints and WandB artifacts
-python scripts/check_remote_checkpoints.py
-python scripts/list_wandb.py
+python scripts/deploy_bare_metal.py \
+    --script scripts/run_full_pipeline.py \
+    --config configs/deepscalper_rtx5090_production.yaml \
+    --run_name DS_Production_V1
 ```
 
 ---
 
-## 🛡️ Quality Assurance Protocols (Verification Tiers)
+## Architecture
 
-To ensure stability and prevent ambiguity between debugging and production verification, we define the following strict testing tiers:
-
-### Tier 1: Smoke Test (Sanity Check)
-- **Goal**: Verify connectivity, environment setup, SSH access, and file uploads.
-- **Config**: `--steps 100`, `--trials 1`.
-- **Duration**: ~1 minute.
-- **Outcome**: Confirms *connectivity*, NOT logic. **NEVER** cite as "Success" for pipeline logic.
-- **SHM Check**: Verifies `/dev/shm` access and cleanup logic.
-
-### Tier 2: Pilot Run (Logic Verification)
-- **Goal**: Verify end-to-end pipeline logic, checkpointing, and memory stability.
-- **Config**: `deepscalper_pilot_test.yaml` (100k steps).
-- **Duration**: ~10-15 minutes.
-- **Outcome**: REQUIRED pass before full production run.
-
-### Tier 3: Production Run
-- **Goal**: Model convergence and maximum performance.
-- **Config**: `deepscalper_unified.yaml` (Full steps, full data).
-- **Outcome**: Final Model Artifacts.
+```
+Observation Space                    Agent
+─────────────────                    ─────
+                                     ┌──────────────────┐
+Micro (LOB × 5 levels)             │  MicroEncoder     │
+  • Normalized prices (bps)    ────▶│  (LSTM/GRU)       │──┐
+  • Log volumes (z-scored)          └──────────────────┘  │
+  • OFI, Spread, Log-Returns                              │  ┌───────────┐
+                                                          ├─▶│  Fusion   │
+Private State                                             │  │  (MLP)    │
+  • Position / Max Position    ─────────────────────────┘  └─────┬─────┘
+  • Balance / Initial Balance                                     │
+                                     ┌──────────────────┐        │
+Macro (OHLCV)                       │  MacroEncoder     │        ▼
+  • z_open, z_high, z_low     ────▶│  (MLP)            │──┐  ┌────────────────┐
+  • z_close, z_adj_close            └──────────────────┘  │  │ Dueling Heads  │
+  • SMA zd_{5..30}                                        ┘  │ • V(s)         │
+                                                              │ • A_dir(s,a)   │
+                                                              │ • A_price(s,a) │
+                                                              │ • A_vol(s,a)   │
+                                                              │ • σ_pred (aux) │
+                                                              └────────────────┘
+```
 
 ---
 
-## 📂 Project Structure
+## Project Structure
 
-```text
+```
 FinRL-Pro-DS/
-??? configs/                # Unified YAML configurations
-??? data/                   # Dataset storage (Parquet)
-??? finrl_pro_ds/           # Core Package
-?   ??? agents/             # RL Algorithms (PPO, DQN, A2C)
-?   ??? envs/               # DeepScalperEnv (LOB-aware)
-?   ??? mlops/              # Watchdog, Logger, Risk Guards
-?   ??? training/           # Trainer, Accumulators
-??? scripts/                # Entry points (train, tune, deploy, audit)
-??? tests/                  # Pytest suite
-??? checkpoints/            # Model artifacts
-??? reports/                # Audit reports
+├── configs/
+│   ├── deepscalper_dev.yaml              # Fast local development (50k steps)
+│   └── deepscalper_rtx5090_production.yaml  # Full production training
+├── finrl_pro_ds/                         # Core Package
+│   ├── agents/deepscalper/
+│   │   ├── bdq_agent.py                  # BDQ agent (replay buffer, ε-greedy)
+│   │   └── networks.py                   # MicroEncoder, MacroEncoder, DeepScalperNetwork
+│   ├── analytics/
+│   │   ├── pyfolio_analyzer.py           # Performance metrics & tear sheets
+│   │   └── wandb_evaluator.py            # WandB metric logging & analysis
+│   ├── data/
+│   │   ├── feature_engineering.py        # Micro (LOB) & Macro (OHLCV) features
+│   │   ├── parquet_handler.py            # Shared-memory Parquet data streaming
+│   │   ├── splitter.py                   # Rolling window train/val/test splits
+│   │   └── binance_loader/              # Binance data download & processing
+│   ├── envs/
+│   │   └── deep_scalper_env.py           # Gymnasium trading environment
+│   ├── training/
+│   │   ├── deepscalper_trainer.py        # Training loop, HPO, checkpointing
+│   │   └── accumulators.py              # Metric accumulators
+│   └── utils/
+│       └── naming.py                     # WandB run name standardization
+├── scripts/
+│   ├── run_full_pipeline.py              # Main entry: HPO → Train → Backtest
+│   ├── deploy_bare_metal.py              # Remote GPU deployment
+│   ├── ralph_autonomous.py               # Autonomous workflow agent
+│   ├── fetch_wandb_run.py                # WandB run data fetcher
+│   ├── notion_sync.py                    # Notion integration
+│   └── data/                            # Data acquisition scripts
+├── tests/                               # Pytest test suite
+├── docs/2201.09058v3.pdf                # Original paper
+└── requirements.txt
 ```
 
-## ⚠️ Risk Disclaimer
+---
+
+## Configuration
+
+Two configuration modes:
+
+| Config | Use Case | Steps | Envs | Purpose |
+|--------|----------|-------|------|---------|
+| `deepscalper_dev.yaml` | Local dev | 50k | 4 | Fast iteration & debugging |
+| `deepscalper_rtx5090_production.yaml` | Production | 10M+ | 24 | Full convergence on RTX 5090 |
+
+Both share the same fee structure (`maker_fee: 0.0002`, `taker_fee: 0.0004`) to ensure consistency.
+
+---
+
+## Testing
+
+```bash
+# Run full test suite
+python -m pytest tests/ -v
+
+# Expected: 19 passed, 1 known failure (test_reward_logic_risk_penalty)
+```
+
+---
+
+## Risk Disclaimer
+
 This software is for educational and research purposes only. **Deep Reinforcement Learning involves significant financial risk.** The authors are not responsible for trading losses.
 
 ---
-*Based on "DeepScalper: A Deep Reinforcement Learning Health Indicator for Cryptocurrency High-Frequency Trading" (Sun et al., 2022).*
+
+*Based on "DeepScalper: A Risk-Aware Reinforcement Learning Framework for High-Frequency Trading" (Sun et al., 2022).*

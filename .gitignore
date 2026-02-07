@@ -31,7 +31,6 @@ MANIFEST
 ENV/
 env/
 venv/
-.ipynb_checkpoints
 
 # PyInstaller
 *.manifest
@@ -58,60 +57,65 @@ coverage.xml
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# Pyre type checker
+# Type checkers
 .pyre/
-
-# pytype
 .pytype/
-
-# Cython debug symbols
 cython_debug/
 
 # VS Code
 .vscode/
-!.vscode/
 !.vscode/settings.json
-.code-workspace
 
 # Poetry
 poetry.lock
 
-# DVC (track .dvc files and .dvc dir)
-#!*.dvc
-#!.dvc/
+# ──────────────────────────────────────
+# Project-Specific
+# ──────────────────────────────────────
 
-# Local data (ignore raw but keep DVC pointers)
+# Data (track DVC pointers, not raw data)
 /data/
 !data/*.dvc
 !data/**/*.dvc
-finrl_pro/data/raw/
-finrl_pro/data/processed/
 
 # Logs
 logs/
 *.log
-logs_*.txt
 
-# Generated artifacts to ignore globally
-feature_mapping.txt
+# Experiment artifacts
+mlruns/
+wandb/
+checkpoints/
+reports/
+results/
+models/
+tmp/
 figs/
+
+# Generated configs / state files
+best_params.yaml
+deepscalper_tuned.yaml
+trading_state.json
+recent_runs.json
+deploy_package.zip
+*.db
 
 # Docker artifacts
 docker/*.log
 
-# Experiment artifacts (MLflow and Reports)
-mlruns/
-reports/
-tmp/
-results/
-models/
-*.db
-marketing_best_params.yaml
-trading_state.json
-best_params.yaml
-deepscalper_tuned.yaml
-deploy_package.zip
-
+# Legacy directories (prevent re-creation)
+specs/
+prompts/
+audits/
+media/
 archive/
-wandb/
-checkpoints/
+.specify/
+.idea/
+
+# Agent runtime artifacts
+.agent/audits/
+.agent/reports/
+.agent/ralph.err
+.agent/ralph.log
+.agent/ralph_log.md
+.agent/ralph_state.json
