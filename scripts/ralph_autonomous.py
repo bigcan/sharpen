@@ -72,7 +72,7 @@ def check_active_run():
     # 1. Physical Check
     is_running_physically = False
     try:
-        pid_output = remote_cmd("pgrep -f 'run_full_pipeline.py' || true", timeout=15)
+        pid_output = remote_cmd("pgrep -f '[r]un_full_pipeline.py' || true", timeout=15)
         pids = [p.strip() for p in pid_output.split() if p.strip().isdigit()]
         if pids:
             print(f"PHYSICAL RUN DETECTED: PID(s) {pids}")
