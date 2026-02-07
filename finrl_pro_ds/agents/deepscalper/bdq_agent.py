@@ -214,7 +214,7 @@ class DeepScalperBDQ:
         
         # Current Q-Values, Loss Computation under autocast
         # FIX H1: Use modern torch.amp.autocast (works on CPU + CUDA)
-        with torch.amp.autocast(device_type=self.device.type, enabled=self.use_amp):
+        with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.use_amp):
             q_dir, q_price, q_vol, _, pred_vol = self.policy_net(micro_state, private_state, macro_state)
         
             # Gather Q-values for taken actions
