@@ -72,7 +72,10 @@ class TestDeepScalperEnv(unittest.TestCase):
 
     def test_reward_logic_risk_penalty(self):
         # Configure env with risk penalty
+        # FIX: Set initial_balance to 10000 so test portfolio values (9900)
+        # stay above the 80% stop-loss threshold (8000), avoiding early termination.
         self.config["reward"] = {"risk_penalty": 0.1, "scaling": 1.0}
+        self.config["initial_balance"] = 10000.0
         self.env = DeepScalperEnv(self.config, self.mock_handler)
         self.env.reset()
         

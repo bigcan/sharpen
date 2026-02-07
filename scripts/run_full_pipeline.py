@@ -489,26 +489,33 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         
         # Create agent
         sample_obs, _ = env.reset()
-        # Create agent for backtest
+        # Create agent for backtest — MUST mirror trainer constructor (deepscalper_trainer.py L32-46)
         bdq_config = config.get("agents", {}).get("bdq", {})
-        # Fix: Network config is at top level, not inside agents.bdq
-        network_config = config.get("network", {
-            "micro_config": {
-                "input_size": 27,
-                "private_input_size": 2,
-                "hidden_size": 128,
-                "rnn_type": "LSTM"
-            },
-            "macro_config": {
-                "input_size": 11,
-                "hidden_sizes": [128, 128]
-            }
-        })
+        network_config = config.get("network")
+        if not network_config:
+            raise ValueError("Config missing 'network' section — cannot reconstruct agent for backtest")
+        
+        # Read action dims from config (mirrors trainer L24-29)
+        action_config = config.get("env", {}).get("action", {})
+        action_dims = (
+            action_config.get("direction_bins", 3),
+            action_config.get("price_bins", 5),
+            action_config.get("volume_bins", 5)
+        )
+        
         agent = DeepScalperBDQ(
             network_config=network_config,
             lr=bdq_config.get("learning_rate", 1e-4),
             gamma=bdq_config.get("gamma", 0.99),
+            epsilon_start=bdq_config.get("epsilon_start", 1.0),
+            epsilon_end=bdq_config.get("epsilon_end", 0.01),
+            buffer_size=bdq_config.get("buffer_size", 100000),
             batch_size=bdq_config.get("batch_size", 64),
+            target_update_freq=bdq_config.get("target_update_freq", 100),
+            auxiliary_weight=bdq_config.get("auxiliary_weight", 1.0),
+            epsilon_decay=bdq_config.get("epsilon_decay", 0.99999),
+            action_dims=action_dims,
+            use_amp=config.get("training", {}).get("use_amp", False),
             device=device
         )
         
