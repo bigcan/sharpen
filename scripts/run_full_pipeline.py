@@ -27,6 +27,7 @@ from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
+from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DeepScalperPipeline")
@@ -223,13 +224,26 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     wandb.log(diag)
     
     if len(returns) > 1 and np.std(returns) > 1e-9:
-        ann_factor = np.sqrt(525600)  # Minute data, 24/7
-        sharpe = (np.mean(returns) / np.std(returns)) * ann_factor
+        raw_ratio = np.mean(returns) / np.std(returns)
+        # Per-minute Sharpe (canonical — matches data frequency)
+        sharpe_minute = raw_ratio * np.sqrt(525600)  # 365.25 × 24 × 60
+        # Hourly-aggregated Sharpe (research comparison)
+        n_per_hour = 60
+        hourly_returns = np.add.reduceat(returns, np.arange(0, len(returns), n_per_hour))
+        if len(hourly_returns) > 1 and np.std(hourly_returns) > 1e-9:
+            sharpe_hourly = (np.mean(hourly_returns) / np.std(hourly_returns)) * np.sqrt(365 * 24)
+        else:
+            sharpe_hourly = 0.0
+        wandb.log({
+            "_research/sharpe_minute": sharpe_minute,
+            "_research/sharpe_hourly": sharpe_hourly,
+            "_research/raw_ratio_per_step": raw_ratio,
+        })
     else:
-        sharpe = 0.0
+        sharpe_minute = 0.0
         logger.warning(f"Zero Sharpe: steps={step}, len={len(returns)}, std={np.std(returns) if len(returns) > 0 else 'N/A'}, actions={action_counts}")
     
-    return sharpe
+    return sharpe_minute  # HPO optimizes on per-minute (canonical)
 
 
 def run_hpo(base_config, n_trials, steps_per_trial, device):
@@ -263,10 +277,18 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         config["agents"]["bdq"]["epsilon_end"] = epsilon_end
         config["training"]["total_timesteps"] = steps_per_trial
         
+        # FIX Bug#5: Search reward structure
+        cost_penalty = trial.suggest_float("cost_penalty", 0.0, 2.0)
+        risk_penalty = trial.suggest_float("risk_penalty", 0.0, 1.0)
+        config["env"]["reward"]["transaction_cost_penalty"] = cost_penalty
+        config["env"]["reward"]["risk_penalty"] = risk_penalty
+        
         wandb.log({
             f"{trial_prefix}/hindsight_horizon": hindsight_horizon,
             f"{trial_prefix}/learning_rate": learning_rate,
             f"{trial_prefix}/batch_size": batch_size,
+            f"{trial_prefix}/cost_penalty": cost_penalty,
+            f"{trial_prefix}/risk_penalty": risk_penalty,
         })
         
         # Create env and train
@@ -501,26 +523,74 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         returns = np.diff(pv) / pv[:-1]
         
         total_return = (pv[-1] - pv[0]) / pv[0] if len(pv) > 0 else 0
-        sharpe = (np.mean(returns) / np.std(returns)) * np.sqrt(525600) if np.std(returns) > 1e-9 else 0
+        
+        # Dual Sharpe: per-minute (canonical) + hourly-aggregated (research)
+        sharpe = 0.0
+        sharpe_hourly = 0.0
+        if np.std(returns) > 1e-9:
+            raw_ratio = np.mean(returns) / np.std(returns)
+            sharpe = raw_ratio * np.sqrt(525600)  # Per-minute (canonical)
+            # Hourly aggregation
+            n_per_hour = 60
+            hourly_returns = np.add.reduceat(returns, np.arange(0, len(returns), n_per_hour))
+            if len(hourly_returns) > 1 and np.std(hourly_returns) > 1e-9:
+                sharpe_hourly = (np.mean(hourly_returns) / np.std(hourly_returns)) * np.sqrt(365 * 24)
+        
         max_dd = np.min(pv / np.maximum.accumulate(pv)) - 1 if len(pv) > 0 else 0
         
         # Trade Stats
         trade_count = np.sum(np.abs(np.diff(pos_arr)) > 1e-6)
         market_exposure = np.mean(np.abs(pos_arr) > 1e-6)
         
+        # ── Institutional Metrics via PyfolioAnalyzer (Blueprint mandate) ──
+        returns_series = pd.Series(returns)
+        try:
+            analyzer = PyfolioAnalyzer(returns_series)
+            pyfolio_metrics = analyzer.get_audit_metrics()
+        except Exception as e:
+            logger.warning(f"PyfolioAnalyzer failed, using fallback: {e}")
+            pyfolio_metrics = {}
+        
+        # Manual: Profit Factor & Avg Win/Loss Ratio
+        wins = returns[returns > 0]
+        losses = returns[returns < 0]
+        gross_profit = np.sum(wins) if len(wins) > 0 else 0.0
+        gross_loss = abs(np.sum(losses)) if len(losses) > 0 else 0.0
+        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else 0.0
+        avg_win = np.mean(wins) if len(wins) > 0 else 0.0
+        avg_loss = abs(np.mean(losses)) if len(losses) > 0 else 0.0
+        avg_win_loss_ratio = avg_win / avg_loss if avg_loss > 1e-12 else 0.0
+        
         metrics = {
+            # ── Core metrics (manual, crypto-specific annualization) ──
             f"{prefix}/total_return": total_return,
             f"{prefix}/sharpe": sharpe,
+            f"{prefix}/sharpe_hourly": sharpe_hourly,
             f"{prefix}/max_drawdown": max_dd,
             f"{prefix}/final_value": pv[-1] if len(pv) > 0 else 0,
             f"{prefix}/steps": step,
             f"{prefix}/trade_count": int(trade_count),
             f"{prefix}/market_exposure": market_exposure,
+            # ── Institutional metrics (PyfolioAnalyzer / empyrical) ──
+            f"{prefix}/sortino": pyfolio_metrics.get("sortino_ratio", 0.0),
+            f"{prefix}/calmar": pyfolio_metrics.get("calmar_ratio", 0.0),
+            f"{prefix}/omega": pyfolio_metrics.get("omega_ratio", 0.0),
+            f"{prefix}/stability": pyfolio_metrics.get("stability", 0.0),
+            f"{prefix}/daily_var": pyfolio_metrics.get("daily_value_at_risk", 0.0),
+            f"{prefix}/win_rate": pyfolio_metrics.get("win_rate", 0.0),
+            f"{prefix}/annual_return": pyfolio_metrics.get("annual_return", 0.0),
+            # ── Trade quality metrics (manual) ──
+            f"{prefix}/profit_factor": profit_factor,
+            f"{prefix}/avg_win_loss_ratio": avg_win_loss_ratio,
             f"{prefix}/status": "completed"
         }
         
         wandb.log(metrics)
-        logger.info(f"{mode} Complete. Return={total_return*100:.2f}%, Sharpe={sharpe:.2f}, MaxDD={max_dd*100:.2f}%")
+        logger.info(
+            f"{mode} Complete. Return={total_return*100:.2f}%, Sharpe={sharpe:.2f}, "
+            f"Sortino={pyfolio_metrics.get('sortino_ratio', 0):.2f}, "
+            f"MaxDD={max_dd*100:.2f}%, WinRate={pyfolio_metrics.get('win_rate', 0):.1f}%"
+        )
         
         return metrics
         

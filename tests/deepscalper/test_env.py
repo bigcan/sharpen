@@ -135,5 +135,56 @@ class TestDeepScalperEnv(unittest.TestCase):
         
         self.assertAlmostEqual(reward, 5.0)
 
+    def test_max_position_from_action_config(self):
+        """Bug #1 Fix: max_position should be read from nested action config."""
+        # Nested config (how YAML structures it)
+        config_nested = {
+            "symbol": "BTCUSDT",
+            "window_size": 50,
+            "action": {"max_position": 5.0}
+        }
+        env = DeepScalperEnv(config_nested, self.mock_handler)
+        self.assertEqual(env.max_position, 5.0)
+        
+        # Flat config (backward compatibility)
+        config_flat = {
+            "symbol": "BTCUSDT",
+            "window_size": 50,
+            "max_position": 3.0
+        }
+        env_flat = DeepScalperEnv(config_flat, self.mock_handler)
+        self.assertEqual(env_flat.max_position, 3.0)
+        
+        # Default (no max_position anywhere)
+        config_default = {
+            "symbol": "BTCUSDT",
+            "window_size": 50,
+        }
+        env_default = DeepScalperEnv(config_default, self.mock_handler)
+        self.assertEqual(env_default.max_position, 1.0)
+
+    def test_fee_split_maker_taker(self):
+        """Bug #2 Fix: Explicit maker/taker fees should not be overridden by transaction_fee."""
+        # When maker_fee and taker_fee are set explicitly
+        config = {
+            "symbol": "BTCUSDT",
+            "window_size": 50,
+            "maker_fee": 0.0002,
+            "taker_fee": 0.0005,
+        }
+        env = DeepScalperEnv(config, self.mock_handler)
+        self.assertAlmostEqual(env.maker_fee, 0.0002)
+        self.assertAlmostEqual(env.taker_fee, 0.0005)
+        
+        # When only transaction_fee is set (legacy behavior)
+        config_flat = {
+            "symbol": "BTCUSDT",
+            "window_size": 50,
+            "transaction_fee": 0.001,
+        }
+        env_flat = DeepScalperEnv(config_flat, self.mock_handler)
+        self.assertAlmostEqual(env_flat.maker_fee, 0.001)
+        self.assertAlmostEqual(env_flat.taker_fee, 0.001)
+
 if __name__ == "__main__":
     unittest.main()

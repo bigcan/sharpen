@@ -20,7 +20,9 @@ features:
 env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
-  transaction_fee: 0.001 # Standard Retail (10 bps) - Avoids "Free Money" trap
+  # FIX Bug#2: Explicit maker/taker split (Binance VIP0)
+  maker_fee: 0.0002   # 2 bps
+  taker_fee: 0.0005   # 5 bps
   num_envs: 12            # Reduced from 20 to 12 to fix SHM FD exhaustion (Errno 24)
   window_size: 50
   max_drawdown_pct: 0.30  # Relaxed to 30% for Production
@@ -31,6 +33,9 @@ env:
     hindsight_weight: 0.1     # w = 0.1 (Optimal)
     hindsight_horizon: 180    # h = 180 min (Optimal)
     volatility_horizon: 100   # For Aux Target calculation
+    # FIX Bug#4: Enable cost/risk penalties to suppress churning
+    transaction_cost_penalty: 1.0
+    risk_penalty: 0.5
     
   action:
     direction_bins: 3 
