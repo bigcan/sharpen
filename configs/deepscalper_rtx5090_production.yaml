@@ -23,7 +23,7 @@ env:
   # FIX Bug#2: Explicit maker/taker split (Binance VIP0)
   maker_fee: 0.0002   # 2 bps
   taker_fee: 0.0005   # 5 bps
-  num_envs: 20            # Restored to 20 (ulimit -n 65535 in deploy script prevents Errno 24)
+  num_envs: 12            # Reverted from 20 — SHM+spawn crashes persist at higher counts
   window_size: 50
   max_drawdown_pct: 0.30  # Relaxed to 30% for Production
   
@@ -98,7 +98,7 @@ training:
   # Optimization
   torch_compile: true   # Enabled
   use_amp: true         # Enabled (Reference: FP16)
-  use_shm: true          # Re-enabled: zero-copy obs transfer (ulimit raised in deploy script)
+  use_shm: false          # Reverted — causes [Errno 104] with AsyncVectorEnv spawn context
   
 hpo:
   enabled: true
