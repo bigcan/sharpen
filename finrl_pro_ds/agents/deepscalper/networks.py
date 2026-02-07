@@ -12,7 +12,7 @@ class MicroEncoder(nn.Module):
     """
     def __init__(
         self, 
-        input_size: int = 20, # 5 levels * 4 features
+        input_size: int = 27, # 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret)
         private_input_size: int = 2, # Position + Balance
         hidden_size: int = 128,
         num_layers: int = 1,

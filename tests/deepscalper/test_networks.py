@@ -12,11 +12,13 @@ class TestDeepScalperNetworks(unittest.TestCase):
     def setUp(self):
         self.batch_size = 32
         self.window_size = 50
-        self.micro_features = 20  # 5 levels * 4
+        self.micro_features = 27  # 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret)
+        self.private_features = 2  # Position + Balance
         self.macro_features = NUM_MACRO_FEATURES  # 11 (from Env)
         
         self.micro_config = {
             "input_size": self.micro_features,
+            "private_input_size": self.private_features,
             "hidden_size": 128,
             "num_layers": 1,
             "rnn_type": "LSTM"
@@ -30,7 +32,8 @@ class TestDeepScalperNetworks(unittest.TestCase):
     def test_micro_encoder_lstm(self):
         encoder = MicroEncoder(**self.micro_config)
         x = torch.randn(self.batch_size, self.window_size, self.micro_features)
-        out = encoder(x)
+        private_x = torch.randn(self.batch_size, self.window_size, self.private_features)
+        out = encoder(x, private_x)
         
         self.assertEqual(out.shape, (self.batch_size, 128))
         
@@ -39,7 +42,8 @@ class TestDeepScalperNetworks(unittest.TestCase):
         config["rnn_type"] = "GRU"
         encoder = MicroEncoder(**config)
         x = torch.randn(self.batch_size, self.window_size, self.micro_features)
-        out = encoder(x)
+        private_x = torch.randn(self.batch_size, self.window_size, self.private_features)
+        out = encoder(x, private_x)
         self.assertEqual(out.shape, (self.batch_size, 128))
 
     def test_macro_encoder(self):
@@ -56,14 +60,16 @@ class TestDeepScalperNetworks(unittest.TestCase):
         )
         
         micro_in = torch.randn(self.batch_size, self.window_size, self.micro_features)
+        private_in = torch.randn(self.batch_size, self.window_size, self.private_features)
         macro_in = torch.randn(self.batch_size, self.macro_features)
         
-        q_dir, q_price, q_vol, v_s = net(micro_in, macro_in)
+        q_dir, q_price, q_vol, v_s, pred_vol = net(micro_in, private_in, macro_in)
         
         self.assertEqual(q_dir.shape, (self.batch_size, 3))
         self.assertEqual(q_price.shape, (self.batch_size, 5))
         self.assertEqual(q_vol.shape, (self.batch_size, 5))
         self.assertEqual(v_s.shape, (self.batch_size, 1))
+        self.assertEqual(pred_vol.shape, (self.batch_size, 1))
         
     def test_gradient_flow(self):
         net = DeepScalperNetwork(
@@ -72,9 +78,10 @@ class TestDeepScalperNetworks(unittest.TestCase):
         )
         
         micro_in = torch.randn(self.batch_size, self.window_size, self.micro_features, requires_grad=True)
+        private_in = torch.randn(self.batch_size, self.window_size, self.private_features, requires_grad=True)
         macro_in = torch.randn(self.batch_size, self.macro_features, requires_grad=True)
         
-        q_dir, _, _, _ = net(micro_in, macro_in)
+        q_dir, _, _, _, _ = net(micro_in, private_in, macro_in)
         loss = q_dir.mean()
         loss.backward()
         
@@ -109,11 +116,13 @@ class TestDeepScalperNetworks(unittest.TestCase):
         obs, _ = env.reset()
         
         # Convert to tensors for Network
-        micro = torch.tensor(obs["micro"]).unsqueeze(0)  # (1, 50, 20)
+        micro = torch.tensor(obs["micro"]).unsqueeze(0)  # (1, 50, 27)
+        private = torch.tensor(obs["private"]).unsqueeze(0)  # (1, 50, 2)
         macro = torch.tensor(obs["macro"]).unsqueeze(0)  # (1, 11)
         
         # Verify shapes match network expectations
-        self.assertEqual(micro.shape, (1, 50, 20))
+        self.assertEqual(micro.shape, (1, 50, 27))
+        self.assertEqual(private.shape, (1, 50, 2))
         self.assertEqual(macro.shape, (1, 11))
         
         # Forward pass through network
@@ -123,7 +132,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
             action_space_dims=(3, 5, 5)
         )
         
-        q_dir, q_price, q_vol, v = net(micro, macro)
+        q_dir, q_price, q_vol, v, pred_vol = net(micro, private, macro)
         
         # Verify output shapes
         self.assertEqual(q_dir.shape, (1, 3))

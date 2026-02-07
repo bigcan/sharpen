@@ -23,8 +23,8 @@ class DeepScalperFeatureEngineer:
     def _add_normalized_features(self, df: pd.DataFrame):
         """
         Adds normalized versions of LOB features.
-        Prices: (P - Mid) / Mid
-        Volumes: log1p(V)
+        Prices: (P - Mid) / Mid * 10000 (Basis Points) -> Scale ~ 0.5 - 5.0
+        Volumes: (log1p(V) - Mean) / Std -> Scale ~ -2.0 - 2.0
         """
         # print("DEBUG: Adding normalized features...", flush=True)
         if 'mid_price' not in df.columns:
@@ -34,27 +34,37 @@ class DeepScalperFeatureEngineer:
         # Avoid div by zero
         mp = np.where(mp == 0, 1.0, mp)
         
+        # Approximate Volume Statistics for Crypto (Log Space)
+        # log1p(0.1) ~ 0.1, log1p(100) ~ 4.6, log1p(10000) ~ 9.2
+        # Mean ~ 5.0, Std ~ 3.0 covers decent range
+        VOL_MEAN = 5.0
+        VOL_STD = 3.0
+        
         for i in range(1, 6):
             # Prices
             bp_col = f'bid_price_{i}'
             ap_col = f'ask_price_{i}'
             
             if bp_col in df.columns:
-                # Relative distance from mid
-                df[f'n_{bp_col}'] = (df[bp_col].values - mp) / mp
+                # Relative distance from mid in BASIS POINTS
+                # Previous: 0.0001 -> Now: 1.0
+                df[f'n_{bp_col}'] = ((df[bp_col].values - mp) / mp) * 10000.0
             
             if ap_col in df.columns:
-                df[f'n_{ap_col}'] = (df[ap_col].values - mp) / mp
+                df[f'n_{ap_col}'] = ((df[ap_col].values - mp) / mp) * 10000.0
                 
             # Volumes
             bv_col = f'bid_vol_{i}'
             av_col = f'ask_vol_{i}'
             
             if bv_col in df.columns:
-                df[f'n_{bv_col}'] = np.log1p(df[bv_col].values)
+                # Log-Normal + Z-Score
+                log_v = np.log1p(df[bv_col].values)
+                df[f'n_{bv_col}'] = (log_v - VOL_MEAN) / VOL_STD
                 
             if av_col in df.columns:
-                df[f'n_{av_col}'] = np.log1p(df[av_col].values)
+                log_v = np.log1p(df[av_col].values)
+                df[f'n_{av_col}'] = (log_v - VOL_MEAN) / VOL_STD
                 
         return df
 
@@ -93,12 +103,8 @@ class DeepScalperFeatureEngineer:
              df['mid_price'] = (bp1 + ap1) / 2
         # print("DEBUG: mid_price done.", flush=True)
             
-        # 2. Spread
-        # df['spread_1'] = df['ask_price_1'] - df['bid_price_1']
+        # 2. Spread — reuse bp1/ap1 already extracted above (FIX M1: avoid redundant extraction)
         if 'bid_price_1' in df.columns and 'ask_price_1' in df.columns:
-            # Use already extracted arrays if possible, or extract new
-             bp1 = df['bid_price_1'].values
-             ap1 = df['ask_price_1'].values
              df['spread_1'] = ap1 - bp1
         # print("DEBUG: spread done.", flush=True)
         
@@ -121,10 +127,12 @@ class DeepScalperFeatureEngineer:
             # Prepare result array
             log_ret = np.zeros_like(mp)
             # Safe division: log(p_t / p_{t-1})
-            # Slicing: mp[1:] is t, mp[:-1] is t-1
-            # Prevent divide by zero if price is 0 (unlikely for midprice) using clip or just run
-            # Assuming strictly positive prices
-            log_ret[1:] = np.log(mp[1:] / (mp[:-1] + 1e-9))
+            # FIX L1: Explicit zero-price guard with np.where
+            prev_mp = mp[:-1]
+            safe_prev = np.where(prev_mp > 0, prev_mp, 1e-9)
+            log_ret[1:] = np.log(mp[1:] / safe_prev)
+            # Clamp extreme values to prevent NaN propagation
+            log_ret = np.clip(log_ret, -1.0, 1.0)
             
             df['log_ret'] = log_ret
         # print("DEBUG: Log Ret done. Returned.", flush=True)
@@ -166,21 +174,22 @@ class DeepScalperFeatureEngineer:
                  
         # 1. Intraday Relative Values (z_open, z_high, z_low)
         # Note: Paper says "compared to the close price at the current time step"
-        df['z_open'] = op / cl - 1
-        df['z_high'] = hi / cl - 1
-        df['z_low'] = lo / cl - 1
+        # FIX: Scale to Basis Points (* 10000)
+        df['z_open'] = (op / cl - 1) * 10000.0
+        df['z_high'] = (hi / cl - 1) * 10000.0
+        df['z_low'] = (lo / cl - 1) * 10000.0
         
         # 2. Interday Returns (z_close, z_adj_close)
         # "compared to the time step t-1"
         # df['z_close'] = df['close'] / df['close'].shift(1) - 1
         z_cl = np.zeros_like(cl)
         # Safe slice div
-        z_cl[1:] = cl[1:] / (cl[:-1] + 1e-9) - 1
+        z_cl[1:] = (cl[1:] / (cl[:-1] + 1e-9) - 1) * 10000.0
         df['z_close'] = z_cl
         
         # df['z_adj_close'] = df['adj_close'] / df['adj_close'].shift(1) - 1
         z_adj = np.zeros_like(adj)
-        z_adj[1:] = adj[1:] / (adj[:-1] + 1e-9) - 1
+        z_adj[1:] = (adj[1:] / (adj[:-1] + 1e-9) - 1) * 10000.0
         df['z_adj_close'] = z_adj
         
         # 3. Long-term Moving Averages (zd_k)
@@ -199,7 +208,8 @@ class DeepScalperFeatureEngineer:
             
             # df[f'zd_{k}'] = sma_k / df['adj_close'] - 1
             # Numpy Vector op (NaN propagation handled by Numpy)
-            df[f'zd_{k}'] = sma_k / adj - 1
+            # FIX: Scale to Basis Points (* 10000)
+            df[f'zd_{k}'] = (sma_k / adj - 1) * 10000.0
             
         # Select final columns
         macro_cols = [
@@ -303,8 +313,6 @@ class DeepScalperFeatureEngineer:
         
         # DataFrame searchsorted path
         # print("DEBUG: NORMAL-PATH DataFrame - Different lengths, using searchsorted.", flush=True)
-        micro_ts = np.array(micro_df['timestamp'].values, dtype='datetime64[ns]').view('int64')
-        macro_ts = np.array(macro_data['timestamp'].values, dtype='datetime64[ns]').view('int64')
         micro_ts = np.array(micro_df['timestamp'].values, dtype='datetime64[ns]').view('int64')
         macro_ts = np.array(macro_data['timestamp'].values, dtype='datetime64[ns]').view('int64')
         

@@ -447,7 +447,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         # Fix: Network config is at top level, not inside agents.bdq
         network_config = config.get("network", {
             "micro_config": {
-                "input_size": 20,
+                "input_size": 27,
                 "private_input_size": 2,
                 "hidden_size": 128,
                 "rnn_type": "LSTM"

@@ -77,10 +77,28 @@ class DeepScalperBDQ:
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         
+        # FIX M2: Validate action dims match between agent and network
+        net_action_dims = network_config.get('action_space_dims', (3, 5, 5))
+        assert tuple(self.action_dims) == tuple(net_action_dims), (
+            f"Action dim mismatch: agent={self.action_dims}, network={net_action_dims}"
+        )
+        
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
         
-        # AMP Scaler
-        self.scaler = torch.cuda.amp.GradScaler(enabled=self.use_amp)
+        # FIX H1: Use modern torch.amp API (torch.cuda.amp deprecated in PyTorch ≥2.4)
+        # torch.amp.GradScaler works on both CPU and CUDA without crashing
+        self.scaler = torch.amp.GradScaler(device=str(self.device), enabled=self.use_amp)
+        
+        # FIX H2: Memory warning for large replay buffers
+        # Rough estimate: each transition ~150KB (3 dict obs * 50*27*4 bytes + overhead)
+        est_mb = buffer_size * 150 / 1024  # MB estimate
+        if est_mb > 8000:  # > 8GB
+            import warnings
+            warnings.warn(
+                f"Replay buffer capacity={buffer_size} estimated ~{est_mb/1024:.1f}GB RAM. "
+                f"Consider reducing buffer_size or using disk-backed buffer.",
+                ResourceWarning
+            )
         
         self.memory = ReplayBuffer(buffer_size)
 
@@ -195,7 +213,8 @@ class DeepScalperBDQ:
         aux_targets = torch.tensor(np.array(aux_target_batch), dtype=torch.float32).unsqueeze(1).to(self.device) # (B, 1)
         
         # Current Q-Values, Loss Computation under autocast
-        with torch.cuda.amp.autocast(enabled=self.use_amp):
+        # FIX H1: Use modern torch.amp.autocast (works on CPU + CUDA)
+        with torch.amp.autocast(device_type=self.device.type, enabled=self.use_amp):
             q_dir, q_price, q_vol, _, pred_vol = self.policy_net(micro_state, private_state, macro_state)
         
             # Gather Q-values for taken actions
@@ -203,27 +222,38 @@ class DeepScalperBDQ:
             curr_q_price = q_price.gather(1, actions[:, 1].unsqueeze(1))
             curr_q_vol = q_vol.gather(1, actions[:, 2].unsqueeze(1))
             
-            # Target Q-Values
+            # FIX D1: Double DQN — use policy net to SELECT best next action,
+            # then EVALUATE that action with target net.
+            # This reduces Q-value overestimation bias.
             with torch.no_grad():
-                next_q_dir, next_q_price, next_q_vol, _, _ = self.target_net(micro_next, private_next, macro_next)
+                # Policy net selects best actions for next state
+                next_q_dir_policy, next_q_price_policy, next_q_vol_policy, _, _ = self.policy_net(
+                    micro_next, private_next, macro_next
+                )
+                best_next_dir = next_q_dir_policy.argmax(dim=1, keepdim=True)
+                best_next_price = next_q_price_policy.argmax(dim=1, keepdim=True)
+                best_next_vol = next_q_vol_policy.argmax(dim=1, keepdim=True)
                 
-                # Max next Q
-                max_next_q_dir = next_q_dir.max(1)[0].unsqueeze(1)
-                max_next_q_price = next_q_price.max(1)[0].unsqueeze(1)
-                max_next_q_vol = next_q_vol.max(1)[0].unsqueeze(1)
+                # Target net evaluates those actions
+                next_q_dir_target, next_q_price_target, next_q_vol_target, _, _ = self.target_net(
+                    micro_next, private_next, macro_next
+                )
+                max_next_q_dir = next_q_dir_target.gather(1, best_next_dir)
+                max_next_q_price = next_q_price_target.gather(1, best_next_price)
+                max_next_q_vol = next_q_vol_target.gather(1, best_next_vol)
                 
-                # Target = r + gamma * max_next_Q * (1 - done)
+                # Target = r + gamma * Q_target(s', argmax_a Q_policy(s', a)) * (1 - done)
                 target_q_dir = rewards + self.gamma * max_next_q_dir * (1 - dones)
                 target_q_price = rewards + self.gamma * max_next_q_price * (1 - dones)
                 target_q_vol = rewards + self.gamma * max_next_q_vol * (1 - dones)
                 
-            # Loss (Huber or MSE)
-            loss_fn = nn.MSELoss()
+            # Loss (Huber for more robust gradients than MSE)
+            loss_fn = nn.SmoothL1Loss()
             loss_dir = loss_fn(curr_q_dir, target_q_dir)
             loss_price = loss_fn(curr_q_price, target_q_price)
             loss_vol = loss_fn(curr_q_vol, target_q_vol)
             
-            loss_vol_pred = loss_fn(pred_vol, aux_targets)
+            loss_vol_pred = nn.MSELoss()(pred_vol, aux_targets)
             
             total_loss = loss_dir + loss_price + loss_vol + self.auxiliary_weight * loss_vol_pred
         

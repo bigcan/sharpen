@@ -89,7 +89,11 @@ def check_active_run():
     # A "finished" WandB run with lingering physical process = stale zombie, deploy new run
     if wandb_state == 'running':
         print(f"Active WandB run detected (State: {wandb_state}, Physical: {is_running_physically})")
-        return True, run_id
+        if is_running_physically:
+            return True, run_id
+        else:
+            print("WARNING: WandB says running but no physical process found. Treating as Zombie/Crashed.")
+            return False, None
     
     # WandB not running - deploy regardless of physical process (could be zombie)
     if is_running_physically:
@@ -216,7 +220,7 @@ def diagnose_and_fix(state, metrics):
     elif run_state == 'finished' and test_sharpe < goal_metrics['min_test_sharpe']:
         # Check history to avoid cycles
         fixes = state.get('fixes_applied', [])
-        lr_fixes = sum(1 for f in fixes if 'learning_rate' in f['fix'])
+        lr_fixes = sum(1 for f in fixes if 'learning rate' in f['fix'].lower())
         
         if lr_fixes < 2:
              fix_applied = "Adjust HPO: Shift Learning Rate Range"
