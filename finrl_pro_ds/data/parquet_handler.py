@@ -594,9 +594,26 @@ class ParquetDataHandler:
         # The volatility we want is for T.
         # So we need access to index T = self._ptr - 1.
         
-        idx = self._ptr - 1
-        if idx < 0 or idx >= self._len:
+        # FIX: Lookahead means FUTURE volatility (from T to T+H). 
+        # _volatility_target[k] stores std dev of window ENDING at k.
+        # So we want _volatility_target[self._ptr + horizon].
+        # But wait, lookahead vol calculation in feature_engineering isn't "vol at T+H", 
+        # it's usually "vol of window [T, T+H]". 
+        # The pre-calc logic in load_data computes:
+        # vol[k] = std(log_ret[k-H+1 : k+1])  (Window of size H ending at k)
+        #
+        # At step T (self._ptr-1), we want volatility of [T, T+H].
+        # This corresponds to the window ending at T+H.
+        # So we access vol[T+H]. 
+        # Current time T index is self._ptr - 1.
+        # Target index = (self._ptr - 1) + horizon.
+        
+        idx = (self._ptr - 1) + horizon
+        if idx >= self._len:
             return 0.0
+        
+        if idx < 0: # Should not happen unless horizon < 0?
+            idx = 0
             
         if 'volatility_target' in self._data_arrays:
             return float(self._data_arrays['volatility_target'][idx])

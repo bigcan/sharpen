@@ -28,10 +28,13 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.assertIn("micro", obs)
         self.assertIn("macro", obs)
         self.assertIn("private", obs)
-        # FIX: Micro is now FLATTENED (W, L*F) = (50, 20)
-        self.assertEqual(obs["micro"].shape, (50, 20))
+        # FIX: Micro is now FLATTENED (W, Features) = (50, 27)
+        # 27 = 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret)
+        self.assertEqual(obs["micro"].shape, (50, 27))
         # Macro is now 11 features
         self.assertEqual(obs["macro"].shape, (11,))
+        # Private state window
+        self.assertEqual(obs["private"].shape, (50, 2))
         self.mock_handler.reset.assert_called_once()
     
     def test_step_logic(self):

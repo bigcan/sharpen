@@ -1,0 +1,79 @@
+agents:
+  bdq:
+    auxiliary_weight: 1.0
+    batch_size: 1024
+    buffer_size: 2000000
+    checkpoint_interval: 100000
+    epsilon_decay: 0.999908
+    epsilon_end: 0.01
+    epsilon_start: 1.0
+    exploration_fraction: 0.2
+    gamma: 0.995
+    learning_rate: 1.25e-05
+    learning_starts: 5000
+    target_update_freq: 7500
+    update_interval: 2.0
+data:
+  file_path: data/btc_lob_jan2023.parquet
+  test_end_date: '2023-01-20 23:59:59'
+  test_start_date: '2023-01-20 00:00:00'
+  ticker: BTCUSDT
+  train_end_date: '2023-01-18 23:59:59'
+  train_start_date: '2023-01-10 00:00:00'
+  val_end_date: '2023-01-19 23:59:59'
+  val_start_date: '2023-01-19 00:00:00'
+env:
+  action:
+    direction_bins: 3
+    max_position: 5.0
+    price_bins: 5
+    volume_bins: 5
+  initial_balance: 100000.0
+  max_drawdown_pct: 0.3
+  num_envs: 12
+  reward:
+    hindsight_horizon: 180
+    hindsight_weight: 0.1
+    profit_weight: 1.0
+    volatility_horizon: 100
+  symbol: BTCUSDT
+  transaction_fee: 0.001
+  window_size: 50
+features:
+  macro_features:
+  - macro
+  micro_features:
+  - micro
+  private_features:
+  - position
+  - balance
+hpo:
+  enabled: true
+  n_trials: 50
+  steps_per_trial: 50000
+network:
+  macro_config:
+    hidden_sizes:
+    - 256
+    - 128
+    input_size: 11
+  micro_config:
+    hidden_size: 256
+    input_size: 27
+    private_input_size: 2
+    rnn_type: LSTM
+training:
+  log_interval: 100000
+  torch_compile: true
+  total_timesteps: 1000000
+  use_amp: true
+  use_shm: false
+wandb:
+  entity: bigcan-chiwin-technology
+  mode: online
+  project: FinRL-Pro-DS
+  tags:
+  - Production
+  - RTX5090
+  - SingleBDQ
+  - PaperAligned

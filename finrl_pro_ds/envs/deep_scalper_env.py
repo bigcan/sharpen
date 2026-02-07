@@ -77,7 +77,8 @@ class DeepScalperEnv(gym.Env):
         # Spaces
         self.lob_levels = 5
         self.lob_features = 4  # BidPx, BidVol, AskPx, AskVol
-        self.micro_dim = self.lob_levels * self.lob_features  # 20 (FLATTENED)
+        # FIX: Micro dim = 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret) = 27
+        self.micro_dim = 27
         
         # FIX F1: Micro is now (Window, L*F) = (50, 20)
         self.observation_space = gym.spaces.Dict({
@@ -445,7 +446,8 @@ class DeepScalperEnv(gym.Env):
             try:
                 v_target = self.handler.get_lookahead_volatility(self.volatility_horizon)
                 if v_target is not None:
-                    volatility_target = v_target
+                    # Scale to Percentage Points (e.g., 0.001 -> 0.1) to make Loss comparable to Q-Loss
+                    volatility_target = v_target * 100.0
             except Exception as e:
                 logging.error(f"Error in Volatility Target Calc: {e}")
 
@@ -529,6 +531,29 @@ class DeepScalperEnv(gym.Env):
                 frame[idx+2] = float(step_data.get(a_p, 0))
                 frame[idx+3] = float(step_data.get(a_v, 0))
                 idx += 4
+                
+            # FIX: Add Derived Features (OFI, Spread, Ret)
+            # 1. Spread (Normalized) - Assuming 'spread_1' is already computed/normalized? 
+            # In feature_engineering.py, 'spread_1' is raw difference. 'n_spread' isn't explicitly created there?
+            # actually process_micro computes 'spread_1' = ap1 - bp1. It does NOT normalize it in _add_normalized_features.
+            # But wait, prices are normalized. Spread of normalized prices?
+            # Or raw spread?
+            # DeepScalper paper usually uses raw log-ret, and normalized spread.
+            # Let's use 'spread_1' (raw) but maybe we should normalize it?
+            # For now, let's inject 'spread_1', 'log_ret' (already computed), and 'vol_imbalance_{i}'.
+            
+            # Spread
+            frame[idx] = float(step_data.get('spread_1', 0))
+            idx += 1
+            
+            # Return
+            frame[idx] = float(step_data.get('log_ret', 0))
+            idx += 1
+            
+            # OFI (5 levels)
+            for i in range(1, 6):
+                frame[idx] = float(step_data.get(f'vol_imbalance_{i}', 0))
+                idx += 1
                 
             # CRITICAL FIX: Use RAW prices for order execution (not normalized)
             # Level 1 prices from raw columns for accurate order matching

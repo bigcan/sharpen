@@ -41,7 +41,7 @@ env:
 network:
   # V9.5 Blackwell Architecture
   micro_config:
-    input_size: 20
+    input_size: 27
     private_input_size: 2
     hidden_size: 256
     rnn_type: "LSTM"
