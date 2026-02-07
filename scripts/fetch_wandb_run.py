@@ -46,6 +46,20 @@ def fetch_latest_run_metrics(entity="bigcan-chiwin-technology", project="FinRL-P
         "test_sharpe": summary.get("backtest_test/sharpe", summary.get("backtest/test_sharpe")),
         "validation_return": summary.get("backtest_val/total_return", summary.get("backtest_validation/total_return")),
         "test_return": summary.get("backtest_test/total_return"),
+        
+        # Institutional metrics (PyfolioAnalyzer)
+        "validation_sortino": summary.get("backtest_val/sortino"),
+        "test_sortino": summary.get("backtest_test/sortino"),
+        "validation_calmar": summary.get("backtest_val/calmar"),
+        "test_calmar": summary.get("backtest_test/calmar"),
+        "validation_omega": summary.get("backtest_val/omega"),
+        "test_omega": summary.get("backtest_test/omega"),
+        "validation_max_drawdown": summary.get("backtest_val/max_drawdown"),
+        "test_max_drawdown": summary.get("backtest_test/max_drawdown"),
+        "validation_win_rate": summary.get("backtest_val/win_rate"),
+        "test_win_rate": summary.get("backtest_test/win_rate"),
+        "validation_profit_factor": summary.get("backtest_val/profit_factor"),
+        "test_profit_factor": summary.get("backtest_test/profit_factor"),
     }
     
     return metrics

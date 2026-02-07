@@ -97,7 +97,9 @@ class DeepScalperEnv(gym.Env):
         self.price_offsets = [-1, 0, 1, 2, 3]  # Ticks from best bid/ask
         # Volume proportions (of max position size)
         self.vol_proportions = [0.1, 0.25, 0.5, 0.75, 1.0]
-        self.max_position = config.get("max_position", 1.0)  # Max BTC
+        # FIX Bug#1: Read from nested action config (YAML: env.action.max_position)
+        # with fallback to flat key for backward compatibility
+        self.max_position = config.get("action", {}).get("max_position", config.get("max_position", 1.0))
         
         # Configurable Stop-Loss (default: 20% drawdown = 0.80 survival threshold)
         self.max_drawdown_pct = config.get("max_drawdown_pct", 0.20)
