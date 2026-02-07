@@ -136,7 +136,7 @@ Two configuration modes:
 | `deepscalper_dev.yaml` | Local dev | 50k | 4 | Fast iteration & debugging |
 | `deepscalper_rtx5090_production.yaml` | Production | 10M+ | 24 | Full convergence on RTX 5090 |
 
-Both share the same fee structure (`maker_fee: 0.0002`, `taker_fee: 0.0004`) to ensure consistency.
+Both share the same fee structure (`maker_fee: 0.0002`, `taker_fee: 0.0005`) to ensure consistency.
 
 ---
 

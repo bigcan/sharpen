@@ -102,8 +102,9 @@ class ParquetDataHandler:
             ]
             
             if all(col in df.columns for col in env_macro_cols):
-                macro_features = df[env_macro_cols].copy()
-                macro_features['timestamp'] = df['timestamp']
+                # Pre-computed macro columns already exist — no processing needed
+                # FIX C2: Set _feature_data so downstream numpy conversion has data
+                self._feature_data = df
             elif all(col in df.columns for col in ['open', 'high', 'low', 'close', 'volume']):
                 # Generate from OHLCV
                 if self.fe:
@@ -143,7 +144,9 @@ class ParquetDataHandler:
                 # Set final DF
                 self._feature_data = df
             else:
-                pass
+                # FIX C2b: Still set feature_data even without macro features
+                print("WARNING: No macro features found. Using raw data columns.", flush=True)
+                self._feature_data = df
 
             # Convert to NumPy Dictionary for Fast Access (>20x speedup vs iterrows/iloc)
             self._feature_cols = self._feature_data.columns.tolist()
@@ -363,7 +366,9 @@ class ParquetDataHandler:
 
     def get_lookahead_price(self, horizon: int) -> Optional[float]:
         """Get price at t + horizon for hindsight reward."""
-        target_idx = self._ptr + horizon
+        # _ptr was already incremented by step(), so _ptr-1 = current row.
+        # We want the price 'horizon' rows ahead of current.
+        target_idx = (self._ptr - 1) + horizon
         if target_idx >= self._len:
             return None
             

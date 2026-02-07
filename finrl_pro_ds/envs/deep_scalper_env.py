@@ -153,8 +153,9 @@ class DeepScalperEnv(gym.Env):
         max_pos = self.max_position if self.max_position > 0 else 1.0
         n_pos = position / max_pos
         
-        # Balance relative to initial
-        n_bal = balance / self.initial_balance
+        # Balance relative to initial (guard div-by-zero)
+        init_bal = self.initial_balance if self.initial_balance > 0 else 1.0
+        n_bal = balance / init_bal
         
         return np.array([n_pos, n_bal], dtype=np.float32)
 
@@ -293,17 +294,18 @@ class DeepScalperEnv(gym.Env):
                         if cost <= self.balance:
                             self.balance -= cost
                             # Update average price
-                            if self.position >= 0:
-                                total_cost = self.avg_price * self.position + fill_price * exec_qty
+                            if self.position >= -1e-12:  # Long or flat (tolerance for float)
+                                total_cost = self.avg_price * max(self.position, 0) + fill_price * exec_qty
                                 self.position += exec_qty
-                                self.avg_price = total_cost / self.position if self.position > 0 else 0
+                                self.avg_price = total_cost / self.position if self.position > 1e-12 else 0
                             else:
                                 # Closing short
                                 self.position += exec_qty
-                                if self.position > 0:
+                                if self.position > 1e-12:
                                     self.avg_price = fill_price
-                                elif self.position == 0:
+                                elif abs(self.position) < 1e-12:
                                     self.avg_price = 0
+                                    self.position = 0.0  # Snap to exact zero
                             
                             # Force scalars
                             if hasattr(self.balance, "item"): self.balance = self.balance.item()
@@ -345,12 +347,25 @@ class DeepScalperEnv(gym.Env):
                         self.step_transaction_costs += (fee + slippage_cost)
                         
                         self.balance += proceeds
-                        # Update position
+                        # Update position and avg_price
+                        old_position = self.position
                         self.position -= exec_qty
-                        if self.position < 0: # Was Long, now short
-                            self.avg_price = fill_price
-                        elif self.position == 0: # Was Long, now flat
+                        
+                        if self.position > 1e-12:
+                            # Partial close of long — avg_price unchanged
+                            pass
+                        elif abs(self.position) < 1e-12:
+                            # Fully closed long — reset avg
                             self.avg_price = 0
+                            self.position = 0.0  # Snap to exact zero
+                        elif old_position <= 1e-12:
+                            # Adding to existing short (or new short from flat) — weighted average
+                            old_short = abs(min(old_position, 0))
+                            total_cost = old_short * self.avg_price + exec_qty * fill_price
+                            self.avg_price = total_cost / abs(self.position) if abs(self.position) > 1e-12 else 0
+                        else:
+                            # Flipped from long to short — new short at fill_price
+                            self.avg_price = fill_price
                         
                         # Force scalars
                         if hasattr(self.balance, "item"): self.balance = self.balance.item()
@@ -606,12 +621,14 @@ class DeepScalperEnv(gym.Env):
         self.private_window[-1] = current_private
 
     def _get_observation(self):
-        # Optimization: Remove .copy() to save memory allocation
-        # VectorEnv serializes data immediately, so internal mutation in next step is safe
+        # FIX M1: Restore .copy() to prevent mutable aliasing if env is used
+        # outside AsyncVectorEnv (e.g. SyncVectorEnv, raw env with replay buffer).
+        # AsyncVectorEnv serializes internally, but other wrappers do not.
+        # Cost: ~5µs per step (negligible vs LOB I/O).
         return {
-            "micro": self.micro_window,
-            "macro": self.current_macro,
-            "private": self.private_window
+            "micro": self.micro_window.copy(),
+            "macro": self.current_macro.copy(),
+            "private": self.private_window.copy()
         }
 
     def render(self, mode='human'):

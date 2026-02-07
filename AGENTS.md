@@ -13,7 +13,7 @@ This document instructs AI coding agents working in this repository. It defines 
 ## Scope & Extension Boundary
 
 - Only modify code under the FinRL Pro extension boundary:
-  - Allowed: `finrl_pro_ds/**`, `tests/**`, `docs/**`, `conf/**`, `specs/**`, `README.md`
+  - Allowed: `finrl_pro_ds/**`, `tests/**`, `docs/**`, `configs/**`, `README.md`
   - Do not modify upstream code: `FinRLPodracer/**`, `Podracer/**`
 - Keep dependencies and Python versions aligned with `pyproject.toml` (Python 3.11+).
 
@@ -26,7 +26,7 @@ This document instructs AI coding agents working in this repository. It defines 
 - Implement changes under `finrl_pro_ds/**` with minimal, targeted diffs.
 
 3) Verify (Chain‑of‑Verification; COV)
-- Self-check logic, IO, config paths, and risk/reporting hooks; cross-check with specs in `specs/001-finrl-pro-spec/`.
+- Self-check logic, IO, config paths, and risk/reporting hooks.
 
 4) Adversarial Review
 - Challenge assumptions: data leakage, non-PIT features, risk breaches, missing reproducibility metadata, noisy metrics.
@@ -55,12 +55,11 @@ This document instructs AI coding agents working in this repository. It defines 
   ```
 - CLI utilities:
   ```bash
-  # Scaffold a new module inside finrl_pro_ds
-  python -m finrl_pro_ds scaffold finrl_pro_ds.agents.my_agent --doc "My agent"
+  # Run full pipeline
+  python scripts/run_full_pipeline.py --config configs/deepscalper_dev.yaml
 
-  # Reproduce an experiment by fingerprint
-  python -m finrl_pro_ds.training.commands.reproduce <fingerprint_id> \
-    --manifest finrl_pro_ds/configs/fingerprints.yaml
+  # Deploy to remote GPU
+  python scripts/deploy_bare_metal.py --config configs/deepscalper_rtx5090_production.yaml
   ```
 
 ## Quality Gates (What to Verify Before Commit)
