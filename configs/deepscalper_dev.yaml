@@ -1,0 +1,93 @@
+# Dev/Test Configuration for DeepScalper
+# For production, use deepscalper_rtx5090_production.yaml
+#
+# This config consolidates the former dry_run_hpo, diagnosis,
+# sanity_check, and pilot_test configs into a single fast-iteration
+# dev config. It inherits the production fee structure to avoid
+# the flat transaction_fee bug present in the old configs.
+
+data:
+  file_path: "data/btc_lob_jan2023.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2023-01-10 00:00:00"
+  train_end_date: "2023-01-18 23:59:59"
+  val_start_date: "2023-01-19 00:00:00"
+  val_end_date: "2023-01-19 23:59:59"
+  test_start_date: "2023-01-20 00:00:00"
+  test_end_date: "2023-01-20 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  # Production-aligned fee structure (Binance VIP0)
+  maker_fee: 0.0002   # 2 bps
+  taker_fee: 0.0005   # 5 bps
+  num_envs: 4              # Reduced for fast local dev
+  window_size: 50
+  max_drawdown_pct: 0.30
+
+  reward:
+    profit_weight: 1.0
+    hindsight_weight: 0.1
+    hindsight_horizon: 180
+    volatility_horizon: 100
+    transaction_cost_penalty: 1.0
+    risk_penalty: 0.5
+
+  action:
+    direction_bins: 3
+    price_bins: 5
+    volume_bins: 5
+    max_position: 5.0
+
+network:
+  micro_config:
+    input_size: 27
+    private_input_size: 2
+    hidden_size: 256
+    rnn_type: "LSTM"
+
+  macro_config:
+    input_size: 11
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    learning_rate: 0.0001
+    gamma: 0.995
+    auxiliary_weight: 1.0
+    update_interval: 2.0
+    batch_size: 1024
+    buffer_size: 2000000
+    target_update_freq: 7500
+    checkpoint_interval: 100000
+    learning_starts: 5000
+    exploration_fraction: 0.2
+    epsilon_start: 1.0
+    epsilon_end: 0.01
+    epsilon_decay: 0.999908
+
+training:
+  total_timesteps: 50000     # Fast dev iterations (50K vs 1M production)
+  log_interval: 10000
+
+  # Optimization
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+
+hpo:
+  enabled: true
+  n_trials: 5               # Quick HPO sweep for dev
+  steps_per_trial: 10000    # Fast trial evaluation
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["Dev", "LocalTest"]
