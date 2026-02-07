@@ -303,11 +303,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         eval_env = None
         try:
             # FIX: Force-disable SHM for HPO trials to prevent [Errno 104] crashes.
-            # Each trial spawns num_envs async workers; 50 trials × 20 workers
-            # exhausts /dev/shm (typically 64MB on GPUHub containers).
-            # Also cap num_envs at 4 — HPO trials are short (50k steps),
-            # throughput comes from Optuna parallelism, not env parallelism.
-            hpo_num_envs = min(config["env"].get("num_envs", 4), 4)
+            # Each trial spawns num_envs async workers; Gymnasium shared_memory
+            # is disabled in create_vector_env so this is now safe at higher counts.
+            hpo_num_envs = min(config["env"].get("num_envs", 12), 12)
             env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False)
             trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
             
