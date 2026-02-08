@@ -86,6 +86,22 @@ class DeepScalperTrainer:
         # During HPO, env may have fewer workers than config specifies.
         num_envs = self.env.num_envs
         
+        # FIX HPO-2: Override Epsilon Decay for HPO to ensure exploration fits within trial budget
+        if self.hpo_mode:
+            steps_per_trial = self.config.get("hpo", {}).get("steps_per_trial", 50000)
+            # decay is applied once per step *batch* (every num_envs steps)
+            decay_calls = list(range(0, steps_per_trial, num_envs))
+            n_calls = len(decay_calls)
+            
+            if n_calls > 0:
+                # Target epsilon 0.01 at end of trial
+                epsilon_end = 0.01
+                # decay ^ n_calls = end -> n_calls * ln(decay) = ln(end) -> ln(decay) = ln(end)/n_calls
+                # decay = exp(ln(end)/n_calls)
+                hpo_decay = np.exp(np.log(epsilon_end) / n_calls)
+                self.agent.epsilon_decay = hpo_decay
+                print(f"[HPO] Overriding epsilon_decay to {hpo_decay:.6f} for {steps_per_trial} steps (~{n_calls} updates)")
+        
         global_step = start_step
         episode_rewards = deque(maxlen=100)
         episode_lens = deque(maxlen=100)
@@ -232,9 +248,14 @@ class DeepScalperTrainer:
             # 4b. HPO Pruning Check (rung-based for vectorized envs)
             # Uses rung tracking to handle num_envs > 1 step increments
             if optuna_trial and pruning_callback:
+                # FIX HPO-1: Prevent premature pruning before agent has learned anything.
+                # Pruning while Epsilon is high (random) is noisy and counter-productive.
+                min_pruning_steps = 20000 
+                
                 prune_interval = 5000
                 current_rung = global_step // prune_interval
-                if current_rung > getattr(self, '_last_prune_rung', -1):
+                
+                if global_step > min_pruning_steps and current_rung > getattr(self, '_last_prune_rung', -1):
                     self._last_prune_rung = current_rung
                     print(f"  [HPO] Probing agent at step {global_step} (rung {current_rung})...")
                     score = pruning_callback()
