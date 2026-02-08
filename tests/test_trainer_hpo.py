@@ -39,7 +39,7 @@ class TestTrainerHPO(unittest.TestCase):
                 "action": {"direction_bins": 3, "price_bins": 5, "volume_bins": 5}
             },
             "network": {
-                "micro_config": {"input_size": 44, "private_size": 2, "hidden_size": 256, "rnn_type": "LSTM"},
+                "micro_config": {"input_size": 44, "private_input_size": 2, "hidden_size": 256, "rnn_type": "LSTM"},
                 "macro_config": {"input_size": 10, "hidden_sizes": [256, 128]}
             },
             "agents": {
