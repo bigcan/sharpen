@@ -72,6 +72,11 @@ agents:
     epsilon_start: 1.0
     epsilon_end: 0.01
     epsilon_decay: 0.999908
+    # Prioritized Experience Replay (Paper Section 4.3)
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
 
 training:
   total_timesteps: 50000     # Fast dev iterations (50K vs 1M production)

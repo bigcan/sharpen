@@ -42,6 +42,11 @@ class DeepScalperTrainer:
             epsilon_decay=config["agents"]["bdq"].get("epsilon_decay", 0.99999), # FIX: Read from config
             action_dims=action_dims,  # FIX: Pass from config
             use_amp=config["training"].get("use_amp", False),
+            # Paper Section 4.3: Prioritized Experience Replay
+            use_per=config["agents"]["bdq"].get("use_per", False),
+            per_alpha=config["agents"]["bdq"].get("per_alpha", 0.6),
+            per_beta_start=config["agents"]["bdq"].get("per_beta_start", 0.4),
+            per_beta_frames=config["agents"]["bdq"].get("per_beta_frames", 100000),
             device=device
         )
         

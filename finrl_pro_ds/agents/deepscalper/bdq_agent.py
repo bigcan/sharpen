@@ -9,6 +9,7 @@ import os
 import copy
 
 from finrl_pro_ds.agents.deepscalper.networks import DeepScalperNetwork
+from finrl_pro_ds.agents.deepscalper.per_buffer import PrioritizedReplayBuffer
 
 class ReplayBuffer:
     def __init__(self, capacity: int):
@@ -57,10 +58,15 @@ class DeepScalperBDQ:
         auxiliary_weight: float = 0.1, # Section 4.4
         action_dims: Tuple[int, int, int] = (3, 5, 5),  # FIX: Configurable action dims
         use_amp: bool = False,
+        use_per: bool = False,          # Paper Section 4.3: Prioritized Experience Replay
+        per_alpha: float = 0.6,         # Prioritization exponent (0=uniform, 1=full)
+        per_beta_start: float = 0.4,    # Initial IS correction
+        per_beta_frames: int = 100000,  # Anneal beta to 1.0 over this many frames
         device: str = "cpu"
     ):
         self.device = torch.device(device)
         self.use_amp = use_amp
+        self.use_per = use_per
         self.auxiliary_weight = auxiliary_weight
         self.gamma = gamma
         self.epsilon = epsilon_start
@@ -100,7 +106,16 @@ class DeepScalperBDQ:
                 ResourceWarning
             )
         
-        self.memory = ReplayBuffer(buffer_size)
+        # Paper Section 4.3: PER vs simple replay
+        if self.use_per:
+            self.memory = PrioritizedReplayBuffer(
+                capacity=buffer_size,
+                alpha=per_alpha,
+                beta_start=per_beta_start,
+                beta_frames=per_beta_frames
+            )
+        else:
+            self.memory = ReplayBuffer(buffer_size)
 
     def get_probs(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, temp: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -191,8 +206,15 @@ class DeepScalperBDQ:
         if len(self.memory) < self.batch_size:
             return None
         
-        # Sample Batch
-        state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = self.memory.sample(self.batch_size)
+        # Sample Batch — PER returns (indices, is_weights) alongside transitions
+        if self.use_per:
+            (state_batch, action_batch, reward_batch, next_state_batch,
+             done_batch, aux_target_batch, per_indices, is_weights) = self.memory.sample(self.batch_size)
+            is_weights_t = torch.tensor(is_weights, dtype=torch.float32).unsqueeze(1).to(self.device)  # (B, 1)
+        else:
+            state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = self.memory.sample(self.batch_size)
+            per_indices = None
+            is_weights_t = None
         
         # Prepare Tensors
         
@@ -247,11 +269,22 @@ class DeepScalperBDQ:
                 target_q_price = rewards + self.gamma * max_next_q_price * (1 - dones)
                 target_q_vol = rewards + self.gamma * max_next_q_vol * (1 - dones)
                 
-            # Loss (Huber for more robust gradients than MSE)
-            loss_fn = nn.SmoothL1Loss()
-            loss_dir = loss_fn(curr_q_dir, target_q_dir)
-            loss_price = loss_fn(curr_q_price, target_q_price)
-            loss_vol = loss_fn(curr_q_vol, target_q_vol)
+            # Loss — PER: per-sample Huber, weighted by IS; Uniform: standard mean
+            if self.use_per:
+                loss_fn = nn.SmoothL1Loss(reduction='none')  # Per-sample losses
+                loss_dir_raw = loss_fn(curr_q_dir, target_q_dir)     # (B, 1)
+                loss_price_raw = loss_fn(curr_q_price, target_q_price)
+                loss_vol_raw = loss_fn(curr_q_vol, target_q_vol)
+                
+                # IS-weighted mean (Schaul et al. 2016, Eq. 3)
+                loss_dir = (loss_dir_raw * is_weights_t).mean()
+                loss_price = (loss_price_raw * is_weights_t).mean()
+                loss_vol = (loss_vol_raw * is_weights_t).mean()
+            else:
+                loss_fn = nn.SmoothL1Loss()
+                loss_dir = loss_fn(curr_q_dir, target_q_dir)
+                loss_price = loss_fn(curr_q_price, target_q_price)
+                loss_vol = loss_fn(curr_q_vol, target_q_vol)
             
             loss_vol_pred = nn.MSELoss()(pred_vol, aux_targets)
             
@@ -276,6 +309,16 @@ class DeepScalperBDQ:
             nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0)
             self.optimizer.step()
         
+        # PER: Update priorities with TD errors (mean across branches)
+        if self.use_per and per_indices is not None:
+            with torch.no_grad():
+                td_dir = (curr_q_dir - target_q_dir).abs()
+                td_price = (curr_q_price - target_q_price).abs()
+                td_vol = (curr_q_vol - target_q_vol).abs()
+                # Mean TD error across 3 action branches per sample
+                td_errors = ((td_dir + td_price + td_vol) / 3.0).squeeze(1).cpu().numpy()
+            self.memory.update_priorities(per_indices, td_errors)
+        
         # NOTE: Epsilon decay moved to dedicated method for decoupling
         # Call decay_epsilon() from trainer after each env step batch
         
@@ -298,6 +341,10 @@ class DeepScalperBDQ:
             "q_vol_mean": curr_q_vol.mean().item(),
             "epsilon": self.epsilon
         }
+        
+        if self.use_per:
+            metrics["per_beta"] = self.memory.beta
+            metrics["per_max_priority"] = self.memory._max_priority
             
         return metrics
 
