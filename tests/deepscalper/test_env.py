@@ -417,5 +417,49 @@ class TestDeepScalperEnv(unittest.TestCase):
                                msg=f"Blend should be 0.5*{paper_pnl} + 0.5*{dsr}")
 
 
+    def test_margin_flip_long_to_short(self):
+        """Test Margin Logic when flipping from Long to Short (Advisory fix)."""
+        self.config["margin_requirement"] = 1.0
+        self.config["initial_balance"] = 1000.0
+        env = DeepScalperEnv(self.config, self.mock_handler)
+        env.reset()
+        
+        # Setup: Long 2.0 @ 100.0
+        env.position = 2.0
+        env.balance = 50.0  # Cash=50.
+        
+        # Action: Sell 3.0 @ 100.0 (Net Short 1.0)
+        # Required Margin = 1.0 * 100 * 1.0 = 100.0
+        # Balance 50 < 100 -> Reject.
+        allowed = env._check_margin(2.0, 3.0, 100.0, 2)
+        self.assertFalse(allowed, "Should reject flip if balance insufficient for net new short")
+        
+        # Case 2: Sufficient Balance
+        env.balance = 150.0
+        allowed = env._check_margin(2.0, 3.0, 100.0, 2)
+        self.assertTrue(allowed, "Should allow flip if balance covers net new short")
+
+    def test_margin_flip_short_to_long(self):
+        """Test Margin Logic when flipping from Short to Long."""
+        self.config["margin_requirement"] = 1.0
+        self.config["initial_balance"] = 1000.0
+        env = DeepScalperEnv(self.config, self.mock_handler)
+        env.reset()
+        
+        # Setup: Short 2.0
+        env.position = -2.0
+        env.balance = 50.0
+        
+        # Action: Buy 3.0 @ 100.0 (Net Long 1.0)
+        # Required: 1.0 * 100 = 100.0
+        # Balance 50 < 100 -> Reject.
+        allowed = env._check_margin(-2.0, 3.0, 100.0, 1)
+        self.assertFalse(allowed, "Should reject flip if balance insufficient for net new long")
+        
+        # Case 2: Sufficient Balance
+        env.balance = 150.0
+        allowed = env._check_margin(-2.0, 3.0, 100.0, 1)
+        self.assertTrue(allowed, "Should allow flip if balance covers net new long")
+
 if __name__ == "__main__":
     unittest.main()

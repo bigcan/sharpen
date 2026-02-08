@@ -247,7 +247,7 @@ class TestFix3FeatureDataAssignment:
             df[f'ask_vol_{i}'] = np.random.uniform(0.1, 10, n)
         # Pre-computed macro columns
         macro_cols = [
-            'z_open', 'z_high', 'z_low', 'z_close', 'z_adj_close',
+            'z_open', 'z_high', 'z_low', 'z_close', 'z_volume',
             'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
         ]
         for col in macro_cols:

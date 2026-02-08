@@ -1,12 +1,12 @@
 gym
 matplotlib
-numpy
+numpy<2.0.0
 opencv-python
 yfinance
 stockstats
 wandb
-pandas
-pyarrow
+pandas<3.0
+pyarrow<20
 seaborn
 scipy
 pyyaml

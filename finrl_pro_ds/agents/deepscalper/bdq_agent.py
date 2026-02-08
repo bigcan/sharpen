@@ -317,6 +317,13 @@ class DeepScalperBDQ:
                 td_vol = (curr_q_vol - target_q_vol).abs()
                 # Mean TD error across 3 action branches per sample
                 td_errors = ((td_dir + td_price + td_vol) / 3.0).squeeze(1).cpu().numpy()
+            
+            # FIX FIND-1: Note on Stale Q-Values
+            # We use Q-values from *before* the optimization step to compute TD errors.
+            # Ideally, we would re-run the forward pass with the updated network to get
+            # fresh Q-values (Schaul et al., 2016). However, that requires a second
+            # batch forward pass, doubling computational cost. The approximation of
+            # using pre-update Q-values is standard practice (e.g., Stable Baselines3).
             self.memory.update_priorities(per_indices, td_errors)
         
         # NOTE: Epsilon decay moved to dedicated method for decoupling

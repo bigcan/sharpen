@@ -194,7 +194,8 @@ class PrioritizedReplayBuffer:
         for idx, td_err in zip(indices, td_errors):
             priority = (abs(td_err) + self._epsilon) ** self.alpha
             self.tree.update(int(idx), priority)
-            self._max_priority = max(self._max_priority, priority)
+            # FIX FIND-2: Decay max_priority to prevent permanent bias from early high-error samples
+            self._max_priority = max(self._max_priority * 0.999, priority)
 
     def __len__(self) -> int:
         return self.tree.size

@@ -6,10 +6,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
-# Known macro feature columns from feature_engineering.py (DeepScalper Table 2)
+# Known macro feature columns from feature_engineering.py (DeepScalper Table 2, modified)
 MACRO_COLS = [
     'z_open', 'z_high', 'z_low', 
-    'z_close', 'z_adj_close',
+    'z_close', 'z_volume',
     'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
 ]
 NUM_MACRO_FEATURES = len(MACRO_COLS)  # 11
@@ -108,6 +108,10 @@ class DeepScalperEnv(gym.Env):
         # Configurable Stop-Loss (default: 20% drawdown = 0.80 survival threshold)
         self.max_drawdown_pct = config.get("max_drawdown_pct", 0.20)
         self._stop_loss_threshold = 1.0 - self.max_drawdown_pct  # e.g., 0.60 for 40% drawdown
+        
+        # Deviation #8: Private State Augmentation (Data Efficiency)
+        # Probability of initializing with random position/balance
+        self.private_state_augment_prob = float(config.get("private_state_augment_prob", 0.0))
         
         # Internal State
         self.current_step = 0
@@ -211,6 +215,34 @@ class DeepScalperEnv(gym.Env):
                 first_frame = self._build_frame(first_step)
                 self.micro_window = np.tile(first_frame, (self.window_size, 1))
                 self._update_macro_state(first_step) # Update macro state as well
+                
+                # Update current pricing for augmentation
+                # Assumes handler returns dict with 'mid_price' or similar, or we extract from LOB
+                # _build_frame likely sets internal mid_price if not explicitly set
+                if hasattr(first_step, 'mid_price'):
+                     self.current_mid_price = first_step.mid_price
+                elif 'mid_price' in first_step:
+                     self.current_mid_price = first_step['mid_price']
+                elif 'bid_price_1' in first_step and 'ask_price_1' in first_step:
+                     self.current_mid_price = (first_step['bid_price_1'] + first_step['ask_price_1']) / 2.0
+                
+                # Deviation #8: Private State Augmentation
+                if self.private_state_augment_prob > 0.0 and np.random.random() < self.private_state_augment_prob:
+                    # Random Position: [-Max, Max]
+                    self.position = np.random.uniform(-self.max_position, self.max_position)
+                    
+                    # Random Balance: Need enough to cover margin + buffer
+                    value = abs(self.position) * self.current_mid_price
+                    required_margin = value * self.margin_requirement
+                    
+                    # Range: [Required * 1.05, Initial * 1.5]
+                    min_bal = required_margin * 1.05
+                    max_bal = max(min_bal * 1.1, self.initial_balance * 1.5)
+                    self.balance = np.random.uniform(min_bal, max_bal)
+                    
+                    # Re-normalize/fill private window with NEW state
+                    aug_private_state = self._normalize_private_state(self.position, self.balance)
+                    self.private_window = np.tile(aug_private_state, (self.window_size, 1))
         
         # Initialize portfolio value after first state update
         self.prev_portfolio_value = self._get_portfolio_value()
@@ -605,13 +637,8 @@ class DeepScalperEnv(gym.Env):
                 idx += 4
                 
             # Derived Features: Spread (bps), Log Return, OFI (5 levels)
-            # spread_1 is raw (ask_price_1 - bid_price_1) from feature_engineering.py
-            # Normalize to basis points: (spread / mid) * 10000 for scale consistency
-            raw_spread = float(step_data.get('spread_1', 0))
-            raw_bid = float(step_data.get('bid_price_1', 0))
-            raw_ask = float(step_data.get('ask_price_1', 0))
-            mid_for_norm = (raw_bid + raw_ask) / 2.0 if raw_ask > 0 else 1.0
-            frame[idx] = (raw_spread / mid_for_norm) * 10000.0 if mid_for_norm > 0 else 0.0
+            # spread_1 IS NOW NORMALIZED in feature_engineering.py (Basis Points)
+            frame[idx] = float(step_data.get('spread_1', 0))
             idx += 1
             
             # Return

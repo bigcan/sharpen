@@ -97,7 +97,7 @@ class ParquetDataHandler:
             # 2. Macro Features (Tech Indicators)
             env_macro_cols = [
                 'z_open', 'z_high', 'z_low', 
-                'z_close', 'z_adj_close',
+                'z_close', 'z_volume',
                 'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
             ]
             

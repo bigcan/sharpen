@@ -23,8 +23,8 @@ env:
   # FIX AUDIT-7: Symmetric Margin Logic (1.0 = Spot, 0.5 = 2x Lev)
   margin_requirement: 1.0
   # FIX Bug#2: Explicit maker/taker split (Binance VIP0)
-  maker_fee: 0.0002   # 2 bps
-  taker_fee: 0.0005   # 5 bps
+  maker_fee: 0.0   # DIAGNOSTIC: Zero Fees
+  taker_fee: 0.0   # DIAGNOSTIC: Zero Fees
   num_envs: 12            # Reverted from 20 — SHM+spawn crashes persist at higher counts
   window_size: 50
   max_drawdown_pct: 0.30  # Relaxed to 30% for Production
@@ -103,6 +103,8 @@ training:
   torch_compile: true   # Enabled
   use_amp: true         # Enabled (Reference: FP16)
   use_shm: false          # Reverted — causes [Errno 104] with AsyncVectorEnv spawn context
+  verbose_logging: true   # DIAGNOSTIC: Enable full metrics
+
   
 hpo:
   enabled: true

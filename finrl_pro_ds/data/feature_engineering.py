@@ -19,8 +19,8 @@ class DeepScalperFeatureEngineer:
     def _add_normalized_features(self, df: pd.DataFrame):
         """
         Adds normalized versions of LOB features.
-        Prices: (P - Mid) / Mid * 10000 (Basis Points) -> Scale ~ 0.5 - 5.0
-        Volumes: (log1p(V) - Mean) / Std -> Scale ~ -2.0 - 2.0
+        Prices: (P - Mid) / Mid * 10000 (Basis Points), clamped to [-50, 50]
+        Volumes: (log1p(V) - Mean) / Std (Z-Score), clamped to [-5, 5]
         """
         if 'mid_price' not in df.columns:
             return df
@@ -35,30 +35,37 @@ class DeepScalperFeatureEngineer:
         VOL_MEAN = 5.0
         VOL_STD = 3.0
         
+        PRICE_CLAMP = 50.0   # ±50 bps (0.5%) max distance from mid
+        VOL_CLAMP = 5.0      # ±5 std deviations
+        
         for i in range(1, 6):
             # Prices
             bp_col = f'bid_price_{i}'
             ap_col = f'ask_price_{i}'
             
             if bp_col in df.columns:
-                # Relative distance from mid in BASIS POINTS
-                df[f'n_{bp_col}'] = ((df[bp_col].values - mp) / mp) * 10000.0
+                # Relative distance from mid in BASIS POINTS, clamped
+                df[f'n_{bp_col}'] = np.clip(
+                    ((df[bp_col].values - mp) / mp) * 10000.0, -PRICE_CLAMP, PRICE_CLAMP
+                )
             
             if ap_col in df.columns:
-                df[f'n_{ap_col}'] = ((df[ap_col].values - mp) / mp) * 10000.0
+                df[f'n_{ap_col}'] = np.clip(
+                    ((df[ap_col].values - mp) / mp) * 10000.0, -PRICE_CLAMP, PRICE_CLAMP
+                )
                 
             # Volumes
             bv_col = f'bid_vol_{i}'
             av_col = f'ask_vol_{i}'
             
             if bv_col in df.columns:
-                # Log-Normal + Z-Score
+                # Log-Normal + Z-Score, clamped
                 log_v = np.log1p(df[bv_col].values)
-                df[f'n_{bv_col}'] = (log_v - VOL_MEAN) / VOL_STD
+                df[f'n_{bv_col}'] = np.clip((log_v - VOL_MEAN) / VOL_STD, -VOL_CLAMP, VOL_CLAMP)
                 
             if av_col in df.columns:
                 log_v = np.log1p(df[av_col].values)
-                df[f'n_{av_col}'] = (log_v - VOL_MEAN) / VOL_STD
+                df[f'n_{av_col}'] = np.clip((log_v - VOL_MEAN) / VOL_STD, -VOL_CLAMP, VOL_CLAMP)
                 
         return df
 
@@ -90,15 +97,60 @@ class DeepScalperFeatureEngineer:
             
         # 2. Spread — reuse bp1/ap1 already extracted above
         if 'bid_price_1' in df.columns and 'ask_price_1' in df.columns:
-            df['spread_1'] = ap1 - bp1
+            # Normalized to Basis Points: (Ask - Bid) / Mid * 10000
+            mp_safe = np.where(df['mid_price'].values > 0, df['mid_price'].values, 1.0)
+            df['spread_1'] = ((ap1 - bp1) / mp_safe) * 10000.0
         
-        # 3. Order Flow Imbalance (OFI) - Simplified to Volume Imbalance
-        # OFI ~ (BidVol - AskVol) / (BidVol + AskVol)
+        # 3. Order Flow Imbalance (OFI) - True Cont et al. (2014) Definition
+        # Captures changes in supply/demand at best levels
         for i in range(1, 6):  # 5 Levels
-            if f'bid_vol_{i}' in df.columns and f'ask_vol_{i}' in df.columns:
-                bv = df[f'bid_vol_{i}'].values
-                av = df[f'ask_vol_{i}'].values
-                df[f'vol_imbalance_{i}'] = (bv - av) / (bv + av + 1e-9)
+            bp_curr = f'bid_price_{i}'
+            bv_curr = f'bid_vol_{i}'
+            ap_curr = f'ask_price_{i}'
+            av_curr = f'ask_vol_{i}'
+            
+            if bp_curr in df.columns: # Assuming if bp exists, others likely do or will handle NaN
+                # We need numpy arrays for efficient computation
+                # Safe fillna(0) for vol if missing
+                v_b = df.get(bv_curr, np.zeros(len(df))).values
+                p_b = df.get(bp_curr, np.zeros(len(df))).values
+                
+                v_a = df.get(av_curr, np.zeros(len(df))).values
+                p_a = df.get(ap_curr, np.zeros(len(df))).values
+                
+                # Shifted (Previous) arrays
+                p_b_prev = np.roll(p_b, 1)
+                v_b_prev = np.roll(v_b, 1)
+                p_a_prev = np.roll(p_a, 1)
+                v_a_prev = np.roll(v_a, 1)
+                
+                # Handle first row artifact (set to 0 change)
+                p_b_prev[0] = p_b[0]
+                v_b_prev[0] = v_b[0]
+                p_a_prev[0] = p_a[0]
+                v_a_prev[0] = v_a[0]
+                
+                # Compute Bid OFI Component (W_b)
+                # If Pb > Pb_prev: +Vb (Improved Best Bid)
+                # If Pb < Pb_prev: -Vb_prev (Worse Best Bid)
+                # If Pb = Pb_prev: Vb - Vb_prev (Volume Change)
+                w_b = np.where(p_b > p_b_prev, v_b,
+                         np.where(p_b < p_b_prev, -v_b_prev, v_b - v_b_prev))
+                
+                # Compute Ask OFI Component (W_a)
+                # If Pa < Pa_prev: +Va (Improved Best Ask)
+                # If Pa > Pa_prev: -Va_prev (Worse Best Ask)
+                # If Pa = Pa_prev: Va - Va_prev (Volume Change)
+                w_a = np.where(p_a < p_a_prev, v_a,
+                         np.where(p_a > p_a_prev, -v_a_prev, v_a - v_a_prev))
+                
+                # OFI = W_b - W_a
+                # Positive OFI => Buying Pressure
+                ofi_raw = w_b - w_a
+                
+                # Log-Modulus Normalization: sign(x) * log(1 + |x|)
+                # Handles large volume spikes gracefully without strict Z-scoring
+                df[f'vol_imbalance_{i}'] = np.sign(ofi_raw) * np.log1p(np.abs(ofi_raw))
                 
         # 4. Log Returns
         if 'mid_price' in df.columns:
@@ -117,17 +169,20 @@ class DeepScalperFeatureEngineer:
         
         return df
 
+    # Clamp range for all macro features (basis points)
+    MACRO_CLAMP_BPS = 100.0  # ±1% cap — prevents gradient bombs
+
     def process_macro(self, ohlcv_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Process OHLCV data into Macro Features as per DeepScalper Table 2.
+        Process OHLCV data into Macro Features (DeepScalper Table 2).
         
-        Features (11 Total):
-        1. z_open = open_t / close_t - 1
-        2. z_high = high_t / close_t - 1
-        3. z_low = low_t / close_t - 1
-        4. z_close = close_t / close_{t-1} - 1
-        5. z_adj_close = adj_close_t / adj_close_{t-1} - 1
-        6-11. zd_k = SMA_k / close_t - 1 for k in [5, 10, 15, 20, 25, 30]
+        Features (11 Total), all in basis points, clamped to [-100, 100]:
+        1. z_open  = (open_t / close_{t-1} - 1) × 10000    [Paper Table 2]
+        2. z_high  = (high_t / close_{t-1} - 1) × 10000    [Paper Table 2]
+        3. z_low   = (low_t  / close_{t-1} - 1) × 10000    [Paper Table 2]
+        4. z_close = (close_t / close_{t-1} - 1) × 10000   [Paper Table 2]
+        5. z_volume = (volume_t / SMA_20(volume) - 1) × 100 [replaces redundant z_adj_close]
+        6-11. zd_k = (SMA_k(adj_close) / adj_close_t - 1) × 10000  [Paper Table 2]
         """
         df = ohlcv_df
         
@@ -139,39 +194,52 @@ class DeepScalperFeatureEngineer:
                 raise ValueError("Missing 'close' column for macro features.")
                  
         # Extract base arrays (explicit Numpy extraction)
-        op = df['open'].values
-        hi = df['high'].values
-        lo = df['low'].values
-        cl = df['close'].values
-        adj = df['adj_close'].values
-                 
-        # 1. Intraday Relative Values (scaled to Basis Points)
-        df['z_open'] = (op / cl - 1) * 10000.0
-        df['z_high'] = (hi / cl - 1) * 10000.0
-        df['z_low'] = (lo / cl - 1) * 10000.0
+        op = df['open'].values.astype(np.float64)
+        hi = df['high'].values.astype(np.float64)
+        lo = df['low'].values.astype(np.float64)
+        cl = df['close'].values.astype(np.float64)
+        adj = df['adj_close'].values.astype(np.float64)
+        vol = df['volume'].values.astype(np.float64) if 'volume' in df.columns else np.ones_like(cl)
         
-        # 2. Interday Returns (scaled to Basis Points)
+        C = self.MACRO_CLAMP_BPS
+        
+        # Previous bar's close (Paper Table 2 denominator for z_open/z_high/z_low)
+        # Row 0 has no previous bar — use current close as fallback
+        prev_cl = np.empty_like(cl)
+        prev_cl[0] = cl[0]
+        prev_cl[1:] = cl[:-1]
+        prev_cl = np.where(prev_cl > 0, prev_cl, 1e-9)  # guard div-by-zero
+                 
+        # 1. Relative to previous bar's close (Paper: z_open = open_t / close_{t-1})
+        df['z_open'] = np.clip((op / prev_cl - 1) * 10000.0, -C, C)
+        df['z_high'] = np.clip((hi / prev_cl - 1) * 10000.0, -C, C)
+        df['z_low'] = np.clip((lo / prev_cl - 1) * 10000.0, -C, C)
+        
+        # 2. Interday Returns (scaled to Basis Points, clamped)
         z_cl = np.zeros_like(cl)
         z_cl[1:] = (cl[1:] / (cl[:-1] + 1e-9) - 1) * 10000.0
-        df['z_close'] = z_cl
+        df['z_close'] = np.clip(z_cl, -C, C)
         
-        z_adj = np.zeros_like(adj)
-        z_adj[1:] = (adj[1:] / (adj[:-1] + 1e-9) - 1) * 10000.0
-        df['z_adj_close'] = z_adj
+        # 3. Relative Volume (replaces redundant z_adj_close)
+        # z_volume = (volume / SMA_20(volume) - 1) * 100
+        # Captures volume spikes/dips relative to 20-bar average
+        vol_sma = pd.Series(vol).rolling(window=20, min_periods=1).mean().values
+        vol_sma = np.where(vol_sma > 0, vol_sma, 1.0)  # prevent div-by-zero
+        df['z_volume'] = np.clip((vol / vol_sma - 1) * 100.0, -C, C)
         
-        # 3. Long-term Moving Averages (zd_k)
+        # 4. Long-term Moving Averages (zd_k), clamped
         # Formula: (SMA_k / Close_t) - 1, scaled to Basis Points
         ks = [5, 10, 15, 20, 25, 30]
         for k in ks:
             # SMA on adj_close using pd.Series rolling (safe numpy-backed)
             sma_k_series = pd.Series(adj).rolling(window=k).mean()
             sma_k = sma_k_series.values
-            df[f'zd_{k}'] = (sma_k / adj - 1) * 10000.0
+            df[f'zd_{k}'] = np.clip((sma_k / adj - 1) * 10000.0, -C, C)
             
         # Select final columns
         macro_cols = [
             'z_open', 'z_high', 'z_low', 
-            'z_close', 'z_adj_close',
+            'z_close', 'z_volume',
             'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
         ]
         
