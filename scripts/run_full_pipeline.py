@@ -349,8 +349,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
     study = optuna.create_study(
         direction="maximize",
         sampler=TPESampler(seed=42),
+        # FIX AUDIT-5: Increased min_resource from 5K to 15K.
+        # At 5K steps, learning_starts=5K means the agent has done ~0 gradient updates.
+        # The LSTM micro-encoder needs ~10-20K steps to warm up hidden states.
+        # Pruning at 5K discards trials before they can demonstrate learning.
         pruner=optuna.pruners.HyperbandPruner(
-            min_resource=5000, 
+            min_resource=15000, 
             max_resource=steps_per_trial, 
             reduction_factor=3
         )

@@ -20,6 +20,8 @@ features:
 env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
+  # FIX AUDIT-7: Symmetric Margin Logic (1.0 = Spot, 0.5 = 2x Lev)
+  margin_requirement: 1.0
   # FIX Bug#2: Explicit maker/taker split (Binance VIP0)
   maker_fee: 0.0002   # 2 bps
   taker_fee: 0.0005   # 5 bps
@@ -30,12 +32,16 @@ env:
   reward:
     profit_weight: 1.0
     # Paper Settings HPO:
-    hindsight_weight: 0.1     # w = 0.1 (Optimal)
+    # FIX AUDIT-6: Hindsight was producing signals 5x larger than PnL,
+    # causing the agent to memorize training data direction rather than
+    # learn generalizable trading strategies.
+    hindsight_weight: 0.02    # Reduced from 0.1 (was 5x PnL magnitude)
     hindsight_horizon: 180    # h = 180 min (Optimal)
     volatility_horizon: 100   # For Aux Target calculation
-    # FIX Bug#4: Enable cost/risk penalties to suppress churning
-    transaction_cost_penalty: 1.0
-    risk_penalty: 0.5
+    # FIX AUDIT-6: Cost penalty was 3.5x larger than typical PnL at 1.0.
+    # Risk penalty is now a symmetric holding cost (AUDIT-1), needs lower weight.
+    transaction_cost_penalty: 0.3   # Reduced from 1.0
+    risk_penalty: 0.1               # Reduced from 0.5 (holding cost, not loss penalty)
     
   action:
     direction_bins: 3 
