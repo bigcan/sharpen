@@ -74,7 +74,9 @@ def test_spread_bp1_ap1_scope():
         'bid_vol_1': np.ones(10), 'ask_vol_1': np.ones(10),
     })
     result = fe.process_micro(df)
-    assert np.isclose(result['spread_1'].iloc[0], 0.5)
+    # Expect Spread in Basis Points: (0.5 / 100.25) * 10000 = 49.8753
+    expected_spread = (0.5 / 100.25) * 10000.0
+    assert np.isclose(result['spread_1'].iloc[0], expected_spread)
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -63,6 +63,12 @@ class DeepScalperTrainer:
         
         # HPO mode: suppress frequent WandB logging to avoid memory flooding
         self.hpo_mode = hpo_mode
+        self.gradient_accumulator = 0.0  # FIX FIND-4: Accumulator for fractional update_interval
+
+        # FIX FIND-5: Private size consistency check
+        # Env hardcodes private=2 (pos, bal). Config must match.
+        priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_size", 2)
+        assert priv_cfg == 2, f"FIND-5 Mismatch: Env produces 2 private features, config expects {priv_cfg}"
         
     def train(self, start_step=0, skip_reset=False, optuna_trial=None, pruning_callback=None):
         """Single Phase Training Loop
@@ -114,7 +120,9 @@ class DeepScalperTrainer:
         curr_rewards = np.zeros(num_envs)
         curr_lens = np.zeros(num_envs)
         
-        import time
+        curr_lens = np.zeros(num_envs)
+        
+        # FIND-3: Removed redundant 'import time'
         start_time = time.time()
         
         # Reset pruning rung tracker for fresh trial (P0 fix)
@@ -196,13 +204,14 @@ class DeepScalperTrainer:
             # Or train once every 1/interval steps.
             
             if global_step > self.learning_starts:
-                # Update Logic: Support Frequency based on int(interval)
-                # If interval=2.0, update every 2 steps.
-                update_step = int(self.update_interval)
-                should_update = (global_step % update_step == 0) if update_step > 0 else True
-                if should_update:
-                     metrics = self.agent.train_step()
-                     if metrics and global_step % self.log_interval == 0:
+                # FIX FIND-4: Fractional Update Interval Support via Accumulator
+                self.gradient_accumulator += self.update_interval
+                
+                while self.gradient_accumulator >= 1.0:
+                    self.gradient_accumulator -= 1.0
+                    metrics = self.agent.train_step()
+                    
+                    if metrics and global_step % self.log_interval == 0:
                          # Log to WandB (skip in HPO mode to avoid flooding)
                          if not self.hpo_mode:
                              logs = {
