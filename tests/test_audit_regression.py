@@ -352,22 +352,22 @@ class TestFix4BacktestAgentParity:
 class TestFix5HPORouting:
     """All trial.suggest_* params must be routed to the correct config keys."""
 
-    # These are the 9 params from trial.suggest_* calls in objective()
+    # These are the 10 params from trial.suggest_* calls in objective()
     HPO_PARAM_NAMES = {
-        "hindsight_horizon", "auxiliary_weight", "learning_rate",
+        "hindsight_horizon", "hindsight_weight", "reward_scaling",
+        "auxiliary_weight", "learning_rate",
         "target_update_freq", "batch_size", "gamma", "epsilon_end",
-        "cost_penalty", "risk_penalty",
     }
 
     # Sets from the routing code
-    REWARD_PARAMS = {"hindsight_horizon", "cost_penalty", "risk_penalty"}
+    REWARD_PARAMS = {"hindsight_horizon", "hindsight_weight", "reward_scaling"}
     AGENT_PARAMS = {"auxiliary_weight", "learning_rate", "gamma",
                     "batch_size", "target_update_freq", "epsilon_end"}
 
     REWARD_KEY_MAP = {
-        "cost_penalty": "transaction_cost_penalty",
-        "risk_penalty": "risk_penalty",
         "hindsight_horizon": "hindsight_horizon",
+        "hindsight_weight": "hindsight_weight",
+        "reward_scaling": "scaling",  # env reads 'scaling'
     }
 
     def test_all_params_routed(self):
@@ -385,12 +385,12 @@ class TestFix5HPORouting:
         for p in self.REWARD_PARAMS:
             assert p in self.REWARD_KEY_MAP
 
-    def test_cost_penalty_maps_to_env_key(self):
+    def test_reward_scaling_maps_to_scaling(self):
         """
-        The env reads 'transaction_cost_penalty' (deep_scalper_env.py L72),
-        so the HPO param 'cost_penalty' MUST map to that key.
+        The env reads 'scaling' (deep_scalper_env.py __init__),
+        so the HPO param 'reward_scaling' MUST map to 'scaling'.
         """
-        assert self.REWARD_KEY_MAP["cost_penalty"] == "transaction_cost_penalty"
+        assert self.REWARD_KEY_MAP["reward_scaling"] == "scaling"
 
     def test_merge_configs_deep(self):
         """merge_configs must deep-merge nested dicts without clobbering siblings."""
@@ -404,20 +404,20 @@ class TestFix5HPORouting:
             return base
 
         base = {
-            "env": {"reward": {"scaling": 100.0, "risk_penalty": 0.0}},
+            "env": {"reward": {"scaling": 1.0, "hindsight_weight": 0.1}},
             "agents": {"bdq": {"learning_rate": 1e-4, "gamma": 0.99}},
         }
         overrides = {
-            "env": {"reward": {"risk_penalty": 0.5}},
+            "env": {"reward": {"hindsight_weight": 0.05}},
             "agents": {"bdq": {"learning_rate": 3e-4}},
         }
         result = merge_configs(base, overrides)
 
         # Overridden values
-        assert result["env"]["reward"]["risk_penalty"] == 0.5
+        assert result["env"]["reward"]["hindsight_weight"] == 0.05
         assert result["agents"]["bdq"]["learning_rate"] == 3e-4
         # Siblings preserved
-        assert result["env"]["reward"]["scaling"] == 100.0
+        assert result["env"]["reward"]["scaling"] == 1.0
         assert result["agents"]["bdq"]["gamma"] == 0.99
 
 

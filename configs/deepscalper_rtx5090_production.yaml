@@ -30,18 +30,12 @@ env:
   max_drawdown_pct: 0.30  # Relaxed to 30% for Production
   
   reward:
-    profit_weight: 1.0
-    # Paper Settings HPO:
-    # FIX AUDIT-6: Hindsight was producing signals 5x larger than PnL,
-    # causing the agent to memorize training data direction rather than
-    # learn generalizable trading strategies.
-    hindsight_weight: 0.02    # Reduced from 0.1 (was 5x PnL magnitude)
-    hindsight_horizon: 180    # h = 180 min (Optimal)
-    volatility_horizon: 100   # For Aux Target calculation
-    # FIX AUDIT-6: Cost penalty was 3.5x larger than typical PnL at 1.0.
-    # Risk penalty is now a symmetric holding cost (AUDIT-1), needs lower weight.
-    transaction_cost_penalty: 0.3   # Reduced from 1.0
-    risk_penalty: 0.1               # Reduced from 0.5 (holding cost, not loss penalty)
+    # Paper-aligned reward (Section 3.2 + 4.2)
+    # r_t = (mid_{t+1} - mid_t) × pos_t - fees + w × pos_t × (mid_{t+h} - mid_t)
+    scaling: 1.0              # Paper: no scaling.  HPO range: [1e-2, 1.0]
+    hindsight_weight: 0.1     # Paper optimal.      HPO range: [1e-3, 0.2]
+    hindsight_horizon: 180    # Paper optimal (min). HPO range: [30..180]
+    volatility_horizon: 100   # For Aux Target calculation (Section 4.4)
     
   action:
     direction_bins: 3 
