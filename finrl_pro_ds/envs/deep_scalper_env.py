@@ -465,7 +465,7 @@ class DeepScalperEnv(gym.Env):
                 if future_price is not None and current_mid > 0 and abs(self.prev_position) > 1e-12:
                     if hasattr(future_price, "item"): future_price = future_price.item()
                     future_price = float(future_price)
-                    reward_hindsight = self.hindsight_weight * self.prev_position * (future_price - current_mid)
+                    reward_hindsight = self.hindsight_weight * self.prev_position * (future_price - self.prev_mid_price)
             except Exception as e:
                 logging.error(f"Error in Hindsight: {e}")
 

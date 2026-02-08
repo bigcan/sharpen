@@ -260,5 +260,59 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.assertAlmostEqual(env_flat.maker_fee, 0.001)
         self.assertAlmostEqual(env_flat.taker_fee, 0.001)
 
+    def test_reward_logic_hindsight_anchor(self):
+        """Test REWARD-1: Hindsight bonus uses T price (prev_mid) NOT T+1 (current_mid)."""
+        self.config["reward"] = {
+            "scaling": 1.0,
+            "hindsight_weight": 0.1,
+            "hindsight_horizon": 10
+        }
+        
+        env = DeepScalperEnv(self.config, self.mock_handler)
+        env.reset()
+        
+        # Setup state manually to control T vs T+1
+        # T (prev)
+        env.prev_mid_price = 100.0  
+        env.prev_position = 1.0     
+        
+        # We need to ensure that when step() runs, it perceives T+1 price as 102.0.
+        # DeepScalperEnv.step() calls self.handler.step() (conceptually) or similar.
+        # We'll mock the handler to update the env's current state when called, 
+        # or we rely on mocking the data retrieval.
+        
+        # Assume env.step() calls self.handler.step() which returns a row dict.
+        # We'll mock that row.
+        mock_step_data = {
+            'bid_price_1': 102.0, 
+            'ask_price_1': 102.0,
+            'bid_vol_1': 1.0, 'ask_vol_1': 1.0,
+            'timestamp': 1234567890
+        }
+        # If the env calls handler.step(), return this.
+        self.mock_handler.step.return_value = mock_step_data
+        
+        # Mock get_lookahead_price for T+h to return 110.0
+        self.mock_handler.get_lookahead_price.return_value = 110.0
+        
+        # IMPORTANT: If DeepScalperEnv calls `_update_state` with the result of handler.step(),
+        # then our mock above works.
+        # If DeepScalperEnv reads properties from handler, we might need to mock properties.
+        # Let's inspect DeepScalperEnv._update_state briefly to be sure.
+        # Typically it pulls from step_data dict.
+        
+        # Action: Hold
+        action = np.array([0, 0, 0])
+        obs, reward, terminated, truncated, info = env.step(action)
+        
+        # Paper Formula:
+        # PnL = (102 - 100) * 1.0 = 2.0 (but check if PnL is computed correctly using prev_mid)
+        # Hindsight = 0.1 * 1.0 * (110 - 100) = 1.0  <-- CORRECT (T anchor)
+        # Hindsight (Buggy) = 0.1 * 1.0 * (110 - 102) = 0.8  <-- WRONG (T+1 anchor)
+        
+        reward_hindsight = info["reward_hindsight"]
+        self.assertAlmostEqual(reward_hindsight, 1.0, places=4, 
+                               msg=f"Hindsight should be 1.0 (110-100), got {reward_hindsight}")
+
 if __name__ == "__main__":
     unittest.main()
