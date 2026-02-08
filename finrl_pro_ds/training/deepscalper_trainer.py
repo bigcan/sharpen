@@ -67,7 +67,7 @@ class DeepScalperTrainer:
 
         # FIX FIND-5: Private size consistency check
         # Env hardcodes private=2 (pos, bal). Config must match.
-        priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_size", 2)
+        priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_input_size", 2)
         assert priv_cfg == 2, f"FIND-5 Mismatch: Env produces 2 private features, config expects {priv_cfg}"
         
     def train(self, start_step=0, skip_reset=False, optuna_trial=None, pruning_callback=None):
