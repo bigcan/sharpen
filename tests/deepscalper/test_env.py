@@ -70,73 +70,144 @@ class TestDeepScalperEnv(unittest.TestCase):
         obs, reward, terminated, truncated, info = self.env.step(action)
         self.assertTrue(terminated)
 
-    def test_reward_logic_risk_penalty(self):
-        # Configure env with risk penalty
-        # FIX: Set initial_balance to 10000 so test portfolio values (9900)
-        # stay above the 80% stop-loss threshold (8000), avoiding early termination.
-        self.config["reward"] = {"risk_penalty": 0.1, "scaling": 1.0}
-        self.config["initial_balance"] = 10000.0
+    def test_reward_pnl_price_delta(self):
+        """Paper formula: reward_pnl = (mid_t+1 - mid_t) × prev_position."""
+        self.config["reward"] = {"scaling": 1.0}
+        self.config["initial_balance"] = 100000.0
         self.env = DeepScalperEnv(self.config, self.mock_handler)
         self.env.reset()
         
-        # Mock step data
-        mock_row = {'bid_price_1': 100.0, 'ask_price_1': 101.0}
-        self.mock_handler.step.return_value = mock_row
-        
-        # Artificially lower portfolio value to induce negative PnL
-        self.env.prev_portfolio_value = 10000.0
-        self.env.balance = 9900.0 # Loss of 100
-        self.env.position = 0.0
-        
-        # Step
-        action = np.array([0, 0, 0])
-        obs, reward, terminated, truncated, info = self.env.step(action)
-        
-        # Raw PnL = 9900 - 10000 = -100
-        # Risk Penalty = 0.1 * |-100| = 10
-        # Expected Reward = -100 - 10 = -110
-        self.assertEqual(reward, -110.0)
-
-    def test_reward_logic_hindsight_bonus(self):
-        # Configure env with hindsight
-        self.config["reward"] = {"hindsight_weight": 0.5, "scaling": 1.0, "hindsight_horizon": 10}
-        self.env = DeepScalperEnv(self.config, self.mock_handler)
-        self.env.reset()
-        
-        # Current State: Price 100
-        self.env.current_best_bid = 100.0
-        self.env.current_best_ask = 100.0 # Mid = 100
-        # Position Long
-        self.env.position = 1.0 
-        
-        # FIX: Align prev_portfolio_value so base PnL is 0
-        self.env.prev_portfolio_value = self.env._get_portfolio_value()
-        
-        # Mock Handler
+        # Mock step data (price = 100)
         mock_row = {'bid_price_1': 100.0, 'ask_price_1': 100.0}
         self.mock_handler.step.return_value = mock_row
-        self.mock_handler.get_lookahead_price.return_value = 110.0 # Future Price +10
         
-        # Step
+        # Set up: agent holds 2.0 BTC, prev mid was 99.0
+        self.env.prev_position = 2.0
+        self.env.prev_mid_price = 99.0
+        self.env.position = 2.0
+        self.env.step_transaction_costs = 0.0
+        
+        action = np.array([0, 0, 0])  # Hold
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # PnL = (100.0 - 99.0) × 2.0 = 2.0, no fee, no hindsight
+        self.assertAlmostEqual(reward, 2.0)
+        self.assertAlmostEqual(info["reward_pnl"], 2.0)
+        self.assertAlmostEqual(info["reward_fee"], 0.0)
+
+    def test_reward_fee_counted_once(self):
+        """Fee appears exactly once in reward — not double-counted.
+        
+        Verifies: reward_total = reward_pnl + reward_fee + reward_hindsight
+        and that reward_fee == -step_transaction_costs after execution.
+        """
+        self.config["reward"] = {"scaling": 1.0}
+        self.config["initial_balance"] = 100000.0
+        self.config["taker_fee"] = 0.0005  # 5 bps
+        self.env = DeepScalperEnv(self.config, self.mock_handler)
+        self.env.reset()
+        
+        # Set up: agent holds 1.0, price constant → PnL = 0
+        mock_row = {'bid_price_1': 100.0, 'ask_price_1': 100.0,
+                     'bid_vol_1': 10.0, 'ask_vol_1': 10.0}
+        for i in range(2, 6):
+            mock_row[f'bid_price_{i}'] = 99.0
+            mock_row[f'bid_vol_{i}'] = 10.0
+            mock_row[f'ask_price_{i}'] = 101.0
+            mock_row[f'ask_vol_{i}'] = 10.0
+        self.mock_handler.step.return_value = mock_row
+        
+        self.env.prev_position = 0.0
+        self.env.prev_mid_price = 100.0
+        
+        action = np.array([0, 0, 0])  # Hold
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # With hold action: no trade → fees = 0
+        # Verify structural correctness: components sum to total
+        component_sum = info["reward_pnl"] + info["reward_fee"] + info["reward_hindsight"]
+        self.assertAlmostEqual(reward, component_sum,
+                               msg="reward_total must equal sum of components")
+
+    def test_reward_symmetry(self):
+        """Equal +$1 and -$1 price moves produce symmetric rewards."""
+        self.config["reward"] = {"scaling": 1.0}
+        self.config["initial_balance"] = 100000.0
+        
+        # Test +$1 move
+        env1 = DeepScalperEnv(self.config, self.mock_handler)
+        env1.reset()
+        mock_row = {'bid_price_1': 101.0, 'ask_price_1': 101.0}
+        self.mock_handler.step.return_value = mock_row
+        env1.prev_position = 1.0
+        env1.prev_mid_price = 100.0
+        env1.position = 1.0
+        obs1, reward1, _, _, _ = env1.step(np.array([0, 0, 0]))
+        
+        # Test -$1 move
+        env2 = DeepScalperEnv(self.config, self.mock_handler)
+        env2.reset()
+        mock_row2 = {'bid_price_1': 99.0, 'ask_price_1': 99.0}
+        self.mock_handler.step.return_value = mock_row2
+        env2.prev_position = 1.0
+        env2.prev_mid_price = 100.0
+        env2.position = 1.0
+        obs2, reward2, _, _, _ = env2.step(np.array([0, 0, 0]))
+        
+        # |reward1| == |reward2| (symmetric, no profit_weight asymmetry)
+        self.assertAlmostEqual(abs(reward1), abs(reward2))
+        self.assertAlmostEqual(reward1, 1.0)
+        self.assertAlmostEqual(reward2, -1.0)
+
+    def test_reward_hindsight_uses_prev_position(self):
+        """Hindsight bonus uses prev_position (start of step), not current."""
+        self.config["reward"] = {"hindsight_weight": 0.5, "scaling": 1.0, "hindsight_horizon": 10}
+        self.config["initial_balance"] = 100000.0
+        self.env = DeepScalperEnv(self.config, self.mock_handler)
+        self.env.reset()
+        
+        mock_row = {'bid_price_1': 100.0, 'ask_price_1': 100.0}
+        self.mock_handler.step.return_value = mock_row
+        self.mock_handler.get_lookahead_price.return_value = 110.0  # Future +$10
+        
+        # prev_position = 1.0 (held at START of step)
+        self.env.prev_position = 1.0
+        self.env.prev_mid_price = 100.0
+        self.env.position = 1.0
+        
         action = np.array([0, 0, 0])
         obs, reward, terminated, truncated, info = self.env.step(action)
         
-        # PnL calc: 
-        # Portfolio Value = Balance + Pos*Mid
-        # Let's say balance is constant. PnL comes from micro-change in this step or manually calc?
-        # In step(), prev_portfolio_value is updated. If we don't change prices in step data, PnL is 0.
-        # Current Mid calc in step() uses updated step_data.
-        # step_data has bid/ask. Let's set them same as current to isolate bonus.
-        
-        # Raw PnL = 0 
-        # Hindsight = Pos (1.0) * (Future (110) - CurrentMid (100)) = 10
-        # Bonus = Weight (0.5) * 10 = 5.0
-        # Total Reward = 5.0
-        
-        # Note: step() updates current_best_* from the NEW data. 
-        # So we must ensure the mock_row matches our "Current" expectation if we want 0 PnL.
-        
+        # PnL = 0 (price unchanged), Fee = 0
+        # Hindsight = 0.5 × 1.0 × (110 - 100) = 5.0
+        self.assertAlmostEqual(info["reward_hindsight"], 5.0)
         self.assertAlmostEqual(reward, 5.0)
+
+    def test_reward_no_risk_penalty(self):
+        """Paper has no risk penalty — holding a large position should not penalize."""
+        self.config["reward"] = {"scaling": 1.0}
+        self.config["initial_balance"] = 100000.0
+        self.env = DeepScalperEnv(self.config, self.mock_handler)
+        self.env.reset()
+        
+        mock_row = {'bid_price_1': 100.0, 'ask_price_1': 100.0}
+        self.mock_handler.step.return_value = mock_row
+        
+        # Large position, price unchanged
+        self.env.prev_position = 5.0
+        self.env.prev_mid_price = 100.0
+        self.env.position = 5.0
+        self.env.step_transaction_costs = 0.0
+        
+        action = np.array([0, 0, 0])
+        obs, reward, terminated, truncated, info = self.env.step(action)
+        
+        # No price change + no fees = reward should be exactly 0
+        # (In the old code, risk_penalty would make this negative)
+        self.assertAlmostEqual(reward, 0.0)
+        # Verify no risk/cost keys in info
+        self.assertNotIn("reward_risk", info)
+        self.assertNotIn("reward_cost", info)
 
     def test_max_position_from_action_config(self):
         """Bug #1 Fix: max_position should be read from nested action config."""

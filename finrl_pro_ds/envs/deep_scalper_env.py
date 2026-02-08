@@ -64,16 +64,12 @@ class DeepScalperEnv(gym.Env):
         self.window_size = config.get("window_size", 50)
         self.initial_balance = config.get("initial_balance", 100000.0)  # 100K USDT default
         
-        # Reward Config
+        # Reward Config (Paper-aligned: Section 3.2 + 4.2)
         self.reward_config = config.get("reward", {})
-        # Reward terms
-        self.reward_scaling = float(self.reward_config.get("scaling", 1e-4))
+        self.reward_scaling = float(self.reward_config.get("scaling", 1.0))  # Paper: no scaling
         self.hindsight_weight = float(self.reward_config.get("hindsight_weight", 0.0))
         self.hindsight_horizon = int(self.reward_config.get("hindsight_horizon", 100))
-        self.profit_weight = float(self.reward_config.get("profit_weight", 1.0))
-        self.risk_penalty_weight = float(self.reward_config.get("risk_penalty", self.reward_config.get("volatility_penalty_weight", 0.0)))
-        self.cost_penalty_weight = float(self.reward_config.get("transaction_cost_penalty", 0.0))
-        self.volatility_horizon = int(self.reward_config.get("volatility_horizon", 100)) # Section 4.4
+        self.volatility_horizon = int(self.reward_config.get("volatility_horizon", 100))  # Section 4.4
 
 
         
@@ -176,10 +172,14 @@ class DeepScalperEnv(gym.Env):
         self._raw_bid_vol_1 = 0.0  # RAW volume for liquidity checks
         self._raw_ask_vol_1 = 0.0  # RAW volume for liquidity checks
         
+        # Paper reward tracking: position and price at START of each step
+        self.prev_mid_price = 0.0
+        self.prev_position = 0.0
+        
         # Reset fee/slippage tracking
         self.cumulative_fees = 0.0
         self.cumulative_slippage = 0.0
-        self.step_transaction_costs = 0.0 # Track per-step cost for reward
+        self.step_transaction_costs = 0.0  # Track per-step cost for reward
         
         # Cold Start Fix: Fill window with first frame
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
@@ -438,83 +438,54 @@ class DeepScalperEnv(gym.Env):
                 
             self.pending_order = (direction, limit_price, quantity, is_taker)
         
-        # 4. Dense Rewards (Unrealized PnL)
+        # 4. Dense Reward (Paper-aligned: Section 3.2 + 4.2)
+        # Formula: r_t = (mid_{t+1} - mid_t) * pos_t - fees + w * pos_t * (mid_{t+h} - mid_t)
         current_portfolio_value = self._get_portfolio_value()
-        raw_pnl = current_portfolio_value - self.prev_portfolio_value
+        current_mid = (self.current_best_bid + self.current_best_ask) / 2.0
         
-        # Breakdown components for telemetry
+        # Telemetry breakdown
         reward_pnl = 0.0
-        reward_risk = 0.0
-        reward_cost = 0.0
+        reward_fee = 0.0
         reward_hindsight = 0.0
         
-        try:
-            # Force float to ensure scalar
-            if hasattr(raw_pnl, "item"): raw_pnl = raw_pnl.item() # Handle 0-d array
-            raw_pnl = float(raw_pnl)
-            
-            # Base Reward
-            if raw_pnl > 0:
-                reward_pnl = raw_pnl * self.profit_weight * self.reward_scaling
-            else:
-                reward_pnl = raw_pnl * self.reward_scaling
-        except Exception as e:
-            logging.error(f"CRITICAL ERROR in Reward Calc: {e}")
-            logging.error(f"raw_pnl: {raw_pnl} type: {type(raw_pnl)}")
-            # Fallback
-            reward_pnl = 0.0
-            
-        # 4.1 Risk Penalty: Symmetric holding cost proportional to position size.
-        # FIX AUDIT-1: Previous version only penalized losses (1.5x loss vs 1.0x gain asymmetry).
-        # New: Small constant penalty for holding any position, encouraging the agent
-        # to only hold when expected PnL exceeds the carrying cost.
-        if self.risk_penalty_weight > 0 and abs(self.position) > 1e-12:
-             # Holding cost in BPS: position_fraction * weight * scaling
-             position_fraction = abs(self.position) / self.max_position if self.max_position > 0 else 0
-             reward_risk = -1.0 * self.risk_penalty_weight * position_fraction * self.reward_scaling
-
-        # 4.1.b Transaction Cost Penalty (Explicit Churn suppression)
-        # FIX AUDIT-2: Normalize cost to basis points relative to portfolio value
-        # to prevent the raw dollar cost from dominating the PnL signal.
-        if self.cost_penalty_weight > 0 and self.step_transaction_costs > 0:
-             # Normalize: cost_in_bps = cost / portfolio_value (already in same units as PnL)
-             reward_cost = -1.0 * self.step_transaction_costs * self.cost_penalty_weight * self.reward_scaling
-
-        # 4.2 Hindsight Bonus
+        # --- Component 1: Instant PnL (price change × position at START of step) ---
+        if self.prev_mid_price > 0 and abs(self.prev_position) > 1e-12:
+            price_delta = current_mid - self.prev_mid_price
+            reward_pnl = price_delta * self.prev_position
+        
+        # --- Component 2: Transaction Fee (counted ONCE — already deducted from balance) ---
+        # Paper: -δ × price × |Δpos|.  We use the actual computed fees from execution.
+        if self.step_transaction_costs > 1e-12:
+            reward_fee = -self.step_transaction_costs
+        
+        # --- Component 3: Hindsight Bonus (training only, Section 4.2) ---
         if self.hindsight_weight > 0 and self.handler and hasattr(self.handler, 'get_lookahead_price'):
             try:
                 future_price = self.handler.get_lookahead_price(self.hindsight_horizon)
-                
-                # Estimate Current Price (Mid)
-                current_mid = (self.current_best_bid + self.current_best_ask) / 2.0
-                if future_price is not None and current_mid > 0:
-                    # Force scalars
+                if future_price is not None and current_mid > 0 and abs(self.prev_position) > 1e-12:
                     if hasattr(future_price, "item"): future_price = future_price.item()
                     future_price = float(future_price)
-                    if hasattr(self.position, "item"): self.position = self.position.item()
-                    self.position = float(self.position)
-                    
-                    price_delta = future_price - current_mid
-                    hindsight_term = self.position * price_delta
-                    reward_hindsight = self.hindsight_weight * hindsight_term * self.reward_scaling
+                    reward_hindsight = self.hindsight_weight * self.prev_position * (future_price - current_mid)
             except Exception as e:
                 logging.error(f"Error in Hindsight: {e}")
 
-        # Total Reward
-        reward = reward_pnl + reward_risk + reward_cost + reward_hindsight
+        # Total Reward (paper formula, with optional scaling)
+        reward = (reward_pnl + reward_fee + reward_hindsight) * self.reward_scaling
 
-        # 4.3 Volatility Prediction Target (Section 4.4)
+        # 4.3 Volatility Prediction Target (Section 4.4 — auxiliary loss, NOT reward)
         volatility_target = 0.0
         if self.handler and hasattr(self.handler, 'get_lookahead_volatility'):
             try:
                 v_target = self.handler.get_lookahead_volatility(self.volatility_horizon)
                 if v_target is not None:
-                    # Scale to Percentage Points (e.g., 0.001 -> 0.1) to make Loss comparable to Q-Loss
                     volatility_target = v_target * 100.0
             except Exception as e:
                 logging.error(f"Error in Volatility Target Calc: {e}")
 
+        # Update trailing state for next step's reward calculation
         self.prev_portfolio_value = current_portfolio_value
+        self.prev_mid_price = current_mid
+        self.prev_position = float(self.position)
         
         # 5. Safety Drawdown Stop
         truncated = False
@@ -531,10 +502,9 @@ class DeepScalperEnv(gym.Env):
             "cumulative_slippage": self.cumulative_slippage,
             "total_execution_costs": self.cumulative_fees + self.cumulative_slippage,
             "timestamp": step_data.get("timestamp") if step_data is not None else None,
-            # Telemetry
+            # Telemetry (paper-aligned)
             "reward_pnl": reward_pnl,
-            "reward_risk": reward_risk,
-            "reward_cost": reward_cost,
+            "reward_fee": reward_fee,
             "reward_hindsight": reward_hindsight,
             "reward_total": reward
         }

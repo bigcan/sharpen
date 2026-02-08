@@ -263,8 +263,11 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         wandb.log({f"{trial_prefix}/started": True})
         
         # Sample hyperparameters
-        hindsight_horizon = trial.suggest_categorical("hindsight_horizon", [60, 120, 180, 240])
-        hindsight_weight = base_config["env"]["reward"].get("hindsight_weight", 0.1)
+        # Paper-aligned reward params (Section 3.2 + 4.2)
+        hindsight_horizon = trial.suggest_categorical("hindsight_horizon", [30, 60, 90, 120, 150, 180])
+        hindsight_weight = trial.suggest_float("hindsight_weight", 1e-3, 0.2, log=True)
+        reward_scaling = trial.suggest_float("reward_scaling", 1e-2, 1.0, log=True)
+        # Agent params
         auxiliary_weight = trial.suggest_categorical("auxiliary_weight", [0.5, 1.0])
         learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
         target_update_freq = trial.suggest_categorical("target_update_freq", [5000, 7500, 10000, 15000])
@@ -276,6 +279,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         config = copy.deepcopy(base_config)
         config["env"]["reward"]["hindsight_horizon"] = hindsight_horizon
         config["env"]["reward"]["hindsight_weight"] = hindsight_weight
+        config["env"]["reward"]["scaling"] = reward_scaling
         config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
         config["agents"]["bdq"]["learning_rate"] = learning_rate
         config["agents"]["bdq"]["gamma"] = gamma
@@ -284,18 +288,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         config["agents"]["bdq"]["epsilon_end"] = epsilon_end
         config["training"]["total_timesteps"] = steps_per_trial
         
-        # FIX Bug#5: Search reward structure
-        cost_penalty = trial.suggest_float("cost_penalty", 0.0, 2.0)
-        risk_penalty = trial.suggest_float("risk_penalty", 0.0, 1.0)
-        config["env"]["reward"]["transaction_cost_penalty"] = cost_penalty
-        config["env"]["reward"]["risk_penalty"] = risk_penalty
-        
         wandb.log({
             f"{trial_prefix}/hindsight_horizon": hindsight_horizon,
+            f"{trial_prefix}/hindsight_weight": hindsight_weight,
+            f"{trial_prefix}/reward_scaling": reward_scaling,
             f"{trial_prefix}/learning_rate": learning_rate,
             f"{trial_prefix}/batch_size": batch_size,
-            f"{trial_prefix}/cost_penalty": cost_penalty,
-            f"{trial_prefix}/risk_penalty": risk_penalty,
         })
         
         # Create env and train
@@ -369,18 +367,15 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         "training": {}
     }
     
-    # FIX: Explicit routing for ALL HPO params to prevent silent mis-routing.
-    # Previously cost_penalty/risk_penalty fell into the catch-all "else" branch
-    # and went to training{} instead of env.reward{}, meaning the optimized
-    # reward params were silently discarded before Phase 2.
-    reward_params = {"hindsight_horizon", "cost_penalty", "risk_penalty"}
+    # Explicit routing for ALL HPO params to prevent silent mis-routing.
+    reward_params = {"hindsight_horizon", "hindsight_weight", "reward_scaling"}
     agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "target_update_freq", "epsilon_end"}
     
     # Key name mapping: Optuna param name -> config key name
     reward_key_map = {
-        "cost_penalty": "transaction_cost_penalty",  # env reads 'transaction_cost_penalty'
-        "risk_penalty": "risk_penalty",
         "hindsight_horizon": "hindsight_horizon",
+        "hindsight_weight": "hindsight_weight",
+        "reward_scaling": "scaling",  # env reads 'scaling'
     }
     
     for key, val in best.params.items():
