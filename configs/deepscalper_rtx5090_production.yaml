@@ -36,6 +36,10 @@ env:
     hindsight_weight: 0.1     # Paper optimal.      HPO range: [1e-3, 0.2]
     hindsight_horizon: 180    # Paper optimal (min). HPO range: [30..180]
     volatility_horizon: 100   # For Aux Target calculation (Section 4.4)
+    # Risk-Aware Reward: Differential Sharpe Ratio (Moody & Saffell 2001)
+    # Optional — disabled by default. Enable for future risk-aware research.
+    sharpe_weight: 0.0        # 0.0 = paper-only. Range: [0.0, 1.0]
+    sharpe_horizon: 100       # EMA lookback window for DSR statistics
     
   action:
     direction_bins: 3 

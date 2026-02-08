@@ -314,5 +314,108 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.assertAlmostEqual(reward_hindsight, 1.0, places=4, 
                                msg=f"Hindsight should be 1.0 (110-100), got {reward_hindsight}")
 
+    # ══════════════════════════════════════════════════════════════
+    # Differential Sharpe Ratio (DSR) — Optional Risk-Aware Reward
+    # ══════════════════════════════════════════════════════════════
+
+    def test_sharpe_reward_disabled_by_default(self):
+        """With no sharpe_weight, reward is identical to paper formula."""
+        self.config["reward"] = {"scaling": 1.0}  # No sharpe_weight key
+        self.config["initial_balance"] = 100000.0
+        env = DeepScalperEnv(self.config, self.mock_handler)
+        env.reset()
+
+        mock_row = {'bid_price_1': 101.0, 'ask_price_1': 101.0}
+        self.mock_handler.step.return_value = mock_row
+
+        env.prev_position = 1.0
+        env.prev_mid_price = 100.0
+        env.position = 1.0
+
+        action = np.array([0, 0, 0])
+        obs, reward, _, _, info = env.step(action)
+
+        # Pure paper: PnL = (101-100)*1 = 1.0, no fee, no hindsight
+        self.assertAlmostEqual(reward, 1.0)
+        self.assertAlmostEqual(info["reward_sharpe"], 0.0)
+
+    def test_sharpe_reward_positive_trend(self):
+        """Consistent positive returns → DSR should be positive."""
+        self.config["reward"] = {"scaling": 1.0, "sharpe_weight": 1.0, "sharpe_horizon": 10}
+        self.config["initial_balance"] = 100000.0
+        env = DeepScalperEnv(self.config, self.mock_handler)
+        env.reset()
+
+        # Simulate 20 steps of consistent +$1 returns
+        price = 100.0
+        for i in range(20):
+            env.prev_position = 1.0
+            env.prev_mid_price = price
+            price += 1.0  # Consistent uptrend
+            mock_row = {'bid_price_1': price, 'ask_price_1': price}
+            self.mock_handler.step.return_value = mock_row
+            env.position = 1.0
+            obs, reward, _, _, info = env.step(np.array([0, 0, 0]))
+
+        # After 20 consistent positive returns, DSR should be positive
+        self.assertGreater(info["reward_sharpe"], 0.0,
+                           "DSR should be positive for consistent uptrend")
+
+    def test_sharpe_reward_volatile_returns(self):
+        """Alternating +/- returns → DSR should decay toward zero."""
+        self.config["reward"] = {"scaling": 1.0, "sharpe_weight": 1.0, "sharpe_horizon": 10}
+        self.config["initial_balance"] = 100000.0
+        env = DeepScalperEnv(self.config, self.mock_handler)
+        env.reset()
+
+        # Simulate 50 steps of alternating +$1/-$1 (pure noise, Sharpe ≈ 0)
+        base_price = 100.0
+        for i in range(50):
+            env.prev_position = 1.0
+            env.prev_mid_price = base_price
+            delta = 1.0 if i % 2 == 0 else -1.0
+            current_price = base_price + delta
+            mock_row = {'bid_price_1': current_price, 'ask_price_1': current_price}
+            self.mock_handler.step.return_value = mock_row
+            env.position = 1.0
+            obs, reward, _, _, info = env.step(np.array([0, 0, 0]))
+            base_price = current_price
+
+        # DSR of noise: magnitude should be much smaller than trending DSR
+        # (trending DSR from test above is >> 1.0; noise should be << that)
+        self.assertLess(abs(info["reward_sharpe"]), 5.0,
+                        msg=f"DSR magnitude {info['reward_sharpe']:.4f} too large for noise")
+
+    def test_sharpe_reward_blending(self):
+        """With sharpe_weight=0.5, reward = 0.5 * paper + 0.5 * DSR."""
+        self.config["reward"] = {"scaling": 1.0, "sharpe_weight": 0.5, "sharpe_horizon": 10}
+        self.config["initial_balance"] = 100000.0
+        env = DeepScalperEnv(self.config, self.mock_handler)
+        env.reset()
+
+        # Run a few warmup steps to populate DSR statistics
+        for i in range(5):
+            env.prev_position = 1.0
+            env.prev_mid_price = 100.0 + i
+            mock_row = {'bid_price_1': 101.0 + i, 'ask_price_1': 101.0 + i}
+            self.mock_handler.step.return_value = mock_row
+            env.position = 1.0
+            env.step(np.array([0, 0, 0]))
+
+        # Now take one more step and verify blending
+        env.prev_position = 1.0
+        env.prev_mid_price = 105.0
+        mock_row = {'bid_price_1': 106.0, 'ask_price_1': 106.0}
+        self.mock_handler.step.return_value = mock_row
+        env.position = 1.0
+        obs, reward, _, _, info = env.step(np.array([0, 0, 0]))
+
+        paper_pnl = info["reward_pnl"]  # Should be 1.0
+        dsr = info["reward_sharpe"]
+        expected_blend = 0.5 * paper_pnl + 0.5 * dsr
+        self.assertAlmostEqual(reward, expected_blend, places=6,
+                               msg=f"Blend should be 0.5*{paper_pnl} + 0.5*{dsr}")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -71,6 +71,11 @@ class DeepScalperEnv(gym.Env):
         self.hindsight_horizon = int(self.reward_config.get("hindsight_horizon", 100))
         self.volatility_horizon = int(self.reward_config.get("volatility_horizon", 100))  # Section 4.4
 
+        # Optional Risk-Aware Reward: Differential Sharpe Ratio (Moody & Saffell 2001)
+        # sharpe_weight=0.0 (default) → pure paper reward; >0 blends in DSR signal
+        self.sharpe_weight = float(self.reward_config.get("sharpe_weight", 0.0))
+        self.sharpe_horizon = int(self.reward_config.get("sharpe_horizon", 100))
+
 
         
         # Spaces
@@ -180,6 +185,12 @@ class DeepScalperEnv(gym.Env):
         self.cumulative_fees = 0.0
         self.cumulative_slippage = 0.0
         self.step_transaction_costs = 0.0  # Track per-step cost for reward
+
+        # DSR state (Differential Sharpe Ratio — EMA statistics)
+        self._dsr_A = 0.0       # EMA of returns
+        self._dsr_B = 0.0       # EMA of squared returns
+        self._dsr_warmup = 0    # steps since reset (need >1 for valid DSR)
+        self._dsr_eta = 1.0 / max(self.sharpe_horizon, 1)  # adaptation rate
         
         # Cold Start Fix: Fill window with first frame
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
@@ -469,8 +480,35 @@ class DeepScalperEnv(gym.Env):
             except Exception as e:
                 logging.error(f"Error in Hindsight: {e}")
 
-        # Total Reward (paper formula, with optional scaling)
-        reward = (reward_pnl + reward_fee + reward_hindsight) * self.reward_scaling
+        # Total paper reward (Section 3.2 + 4.2)
+        paper_reward = (reward_pnl + reward_fee + reward_hindsight) * self.reward_scaling
+
+        # --- Component 4 (Optional): Differential Sharpe Ratio ---
+        reward_sharpe = 0.0
+        if self.sharpe_weight > 0:
+            # Step return normalized by initial balance for scale invariance
+            init_bal = self.initial_balance if self.initial_balance > 0 else 1.0
+            R_t = reward_pnl / init_bal  # fractional return
+
+            # Update EMA statistics
+            delta_A = R_t - self._dsr_A
+            delta_B = R_t * R_t - self._dsr_B
+            self._dsr_A += self._dsr_eta * delta_A
+            self._dsr_B += self._dsr_eta * delta_B
+            self._dsr_warmup += 1
+
+            # Compute DSR after warmup (need variance estimate)
+            if self._dsr_warmup > 1:
+                variance = self._dsr_B - self._dsr_A ** 2
+                if variance > 1e-16:  # Guard against zero-variance
+                    # DSR = (B * ΔA - 0.5 * A * ΔB) / (B - A²)^{3/2}
+                    denom = variance ** 1.5
+                    dsr = (self._dsr_B * delta_A - 0.5 * self._dsr_A * delta_B) / denom
+                    # Clamp to avoid extreme outliers during early adaptation
+                    reward_sharpe = float(np.clip(dsr, -10.0, 10.0))
+
+        # Blend: (1 - w) × paper + w × DSR  (w=0 → pure paper)
+        reward = (1.0 - self.sharpe_weight) * paper_reward + self.sharpe_weight * reward_sharpe
 
         # 4.3 Volatility Prediction Target (Section 4.4 — auxiliary loss, NOT reward)
         volatility_target = 0.0
@@ -502,10 +540,11 @@ class DeepScalperEnv(gym.Env):
             "cumulative_slippage": self.cumulative_slippage,
             "total_execution_costs": self.cumulative_fees + self.cumulative_slippage,
             "timestamp": step_data.get("timestamp") if step_data is not None else None,
-            # Telemetry (paper-aligned)
+            # Telemetry (paper-aligned + optional DSR)
             "reward_pnl": reward_pnl,
             "reward_fee": reward_fee,
             "reward_hindsight": reward_hindsight,
+            "reward_sharpe": reward_sharpe,
             "reward_total": reward
         }
         
@@ -565,19 +604,13 @@ class DeepScalperEnv(gym.Env):
                 frame[idx+3] = float(step_data.get(a_v, 0))
                 idx += 4
                 
-            # FIX: Add Derived Features (OFI, Spread, Ret)
-            # 1. Spread (Normalized) - Assuming 'spread_1' is already computed/normalized? 
-            # In feature_engineering.py, 'spread_1' is raw difference. 'n_spread' isn't explicitly created there?
-            # actually process_micro computes 'spread_1' = ap1 - bp1. It does NOT normalize it in _add_normalized_features.
-            # But wait, prices are normalized. Spread of normalized prices?
-            # Or raw spread?
-            # DeepScalper paper usually uses raw log-ret, and normalized spread.
-            # Let's use 'spread_1' (raw) but maybe we should normalize it?
-            # For now, let's inject 'spread_1', 'log_ret' (already computed), and 'vol_imbalance_{i}'.
-            
-            # Spread — FIX AUDIT-4: Normalize to basis points for consistent feature scaling
+            # Derived Features: Spread (bps), Log Return, OFI (5 levels)
+            # spread_1 is raw (ask_price_1 - bid_price_1) from feature_engineering.py
+            # Normalize to basis points: (spread / mid) * 10000 for scale consistency
             raw_spread = float(step_data.get('spread_1', 0))
-            mid_for_norm = (self.current_best_bid + self.current_best_ask) / 2.0 if self.current_best_ask > 0 else 1.0
+            raw_bid = float(step_data.get('bid_price_1', 0))
+            raw_ask = float(step_data.get('ask_price_1', 0))
+            mid_for_norm = (raw_bid + raw_ask) / 2.0 if raw_ask > 0 else 1.0
             frame[idx] = (raw_spread / mid_for_norm) * 10000.0 if mid_for_norm > 0 else 0.0
             idx += 1
             

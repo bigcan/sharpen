@@ -12,6 +12,7 @@ DeepScalper is an institutional-grade reinforcement learning pipeline for sub-se
 - **Multi-Modal Observations**: Fuses LOB micro-features (5-level OFI, spread, returns) with macro technical indicators (SMAs, z-scores)
 - **Branching Dueling DQN**: Three action branches (direction, price, volume) with value-advantage decomposition
 - **Auxiliary Volatility Prediction**: Side-task head improves representation learning (Section 4.4)
+- **Optional Risk-Aware Reward**: Differential Sharpe Ratio (Moody & Saffell 2001) — blendable, opt-in risk signal
 - **Shared Memory Data Streaming**: Zero-copy `ParquetDataHandler` for multi-env training throughput
 - **WandB Integration**: Canonical run naming, metric logging, and institutional-grade reporting
 - **RTX 5090 Optimized**: AMP, Torch Compile, and tuned batch sizes for 32GB VRAM
@@ -140,13 +141,39 @@ Both share the same fee structure (`maker_fee: 0.0002`, `taker_fee: 0.0005`) to 
 
 ---
 
+## Reward Function
+
+The reward follows [Sun et al. (2022)](docs/2201.09058v3.pdf) Section 3.2 + 4.2:
+
+```
+r_t = (mid_{t+1} - mid_t) × pos_t − fees + w × pos_t × (mid_{t+h} - mid_t)
+```
+
+### Optional: Differential Sharpe Ratio (DSR)
+
+An opt-in risk-aware reward component (Moody & Saffell 2001) that provides a dense, per-step signal
+approximating the marginal contribution to the Sharpe ratio. When enabled, the final reward becomes:
+
+```
+reward = (1 − sharpe_weight) × paper_reward + sharpe_weight × DSR_t
+```
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `sharpe_weight` | `0.0` | Disabled by default. Set `0.1–0.5` to enable risk-aware training. |
+| `sharpe_horizon` | `100` | EMA lookback window. Lower = faster adaptation, noisier signal. |
+
+Configure in `env.reward` section of your YAML config. See `randd_log.md` for full design notes.
+
+---
+
 ## Testing
 
 ```bash
 # Run full test suite
 python -m pytest tests/ -v
 
-# Expected: 19 passed, 1 known failure (test_reward_logic_risk_penalty)
+# Expected: 40 passed (16 env + 24 regression)
 ```
 
 ---

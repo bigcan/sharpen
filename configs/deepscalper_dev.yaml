@@ -32,12 +32,13 @@ env:
   max_drawdown_pct: 0.30
 
   reward:
-    profit_weight: 1.0
+    # Paper-aligned reward (matches production structure)
+    scaling: 1.0
     hindsight_weight: 0.1
     hindsight_horizon: 180
     volatility_horizon: 100
-    transaction_cost_penalty: 1.0
-    risk_penalty: 0.5
+    sharpe_weight: 0.0
+    sharpe_horizon: 100
 
   action:
     direction_bins: 3
