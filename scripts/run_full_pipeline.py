@@ -309,7 +309,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
             # FIX: Use SyncVectorEnv for HPO to avoid AsyncVectorEnv pipe crashes
             # on containers where ulimit -n is blocked. SyncVectorEnv runs all
             # envs in the main process — slower but no IPC/FD issues.
-            hpo_num_envs = min(config["env"].get("num_envs", 12), 4)  # Cap at 4 for HPO speed
+            hpo_num_envs = min(config["env"].get("num_envs", 12), 12)  # Cap at 12 for HPO throughput
             env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True)
             trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
             
