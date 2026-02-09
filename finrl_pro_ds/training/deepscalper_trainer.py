@@ -120,6 +120,11 @@ class DeepScalperTrainer:
         curr_rewards = np.zeros(num_envs)
         curr_lens = np.zeros(num_envs)
         
+        # Reward component accumulators for hindsight ratio tracking
+        _acc_hindsight = 0.0
+        _acc_total = 0.0
+        _acc_count = 0
+        
         curr_lens = np.zeros(num_envs)
         
         # FIND-3: Removed redundant 'import time'
@@ -177,6 +182,15 @@ class DeepScalperTrainer:
                      aux_target = infos[i].get("volatility_target", 0.0)
                 
                 self.agent.memory.push(s, a, float(r), ns, bool(d), float(aux_target))
+                
+                # Accumulate reward components for hindsight ratio tracking
+                if isinstance(infos, dict):
+                    rh = infos.get("reward_hindsight", None)
+                    rt = infos.get("reward_total", None)
+                    if rh is not None and rt is not None:
+                        _acc_hindsight += abs(float(rh[i]) if hasattr(rh, "__getitem__") else float(rh))
+                        _acc_total += abs(float(rt[i]) if hasattr(rt, "__getitem__") else float(rt))
+                        _acc_count += 1
                 
                 # Track Episodic Stats
                 curr_rewards[i] += r
@@ -239,15 +253,20 @@ class DeepScalperTrainer:
                              # FILTER METRICS TO REDUCE NOISE (Unless verbose_logging=True)
                              verbose = self.config["training"].get("verbose_logging", False)
                              
+                             # Compute hindsight ratio for this logging window
+                             hindsight_ratio = _acc_hindsight / _acc_total if _acc_total > 1e-9 else 0.0
+                             
                              if not verbose:
-                                 # Key Metrics Only ["The Big 5"]
+                                 # Key Metrics Only ["The Big 6"]
                                  filtered_logs = {
                                      "step": logs["step"],
                                      "train/reward_mean": logs.get("train/reward_mean", 0.0),
-                                     "train/loss_total": logs.get("agent/loss_total", 0.0), # Map from agent/
+                                     "train/loss_total": logs.get("agent/loss_total", 0.0),
                                      "train/sps": logs.get("train/sps", 0.0),
-                                     "train/epsilon": logs.get("agent/epsilon", 0.0),       # Map from agent/
-                                     "train/len_mean": logs.get("train/len_mean", 0.0)
+                                     "train/epsilon": logs.get("agent/epsilon", 0.0),
+                                     "train/len_mean": logs.get("train/len_mean", 0.0),
+                                     # Audit rec: track hindsight dominance (>50% = not learning from PnL)
+                                     "reward/hindsight_ratio": hindsight_ratio,
                                  }
                                  # Preserve any 'eval/' metrics if they happened to be mixed in (rare)
                                  for k, v in logs.items():
@@ -257,7 +276,13 @@ class DeepScalperTrainer:
                                  wandb.log(filtered_logs)
                              else:
                                  # Full detailed logging
+                                 logs["reward/hindsight_ratio"] = hindsight_ratio
                                  wandb.log(logs)
+                              
+                             # Reset accumulators after logging
+                             _acc_hindsight = 0.0
+                             _acc_total = 0.0
+                             _acc_count = 0
             
             # 4b. HPO Pruning Check (rung-based for vectorized envs)
             # Uses rung tracking to handle num_envs > 1 step increments
