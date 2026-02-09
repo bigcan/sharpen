@@ -243,8 +243,10 @@ class DeepScalperFeatureEngineer:
             'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
         ]
         
-        # Clean NaNs - causal fill (forward then backward for initial window gaps)
-        df[macro_cols] = df[macro_cols].ffill().bfill().fillna(0.0)
+        # FIX FE-1: Causal-only NaN fill (no bfill to prevent future data leakage).
+        # SMA warm-up NaNs (first ~30 rows) get 0.0 instead of backward-extrapolated
+        # future values. This gives the agent a clean "no data" signal.
+        df[macro_cols] = df[macro_cols].ffill().fillna(0.0)
         
         result = df[macro_cols].copy()
         return result

@@ -84,24 +84,28 @@ def make_env(config, start_date=None, end_date=None, shm_config=None):
     return DeepScalperEnv(config=env_config, data_handler=handler)
 
 
-def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_config=None, gym_shm=True):
+def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_config=None, gym_shm=True, use_sync=False):
     """Create vectorized environment for training.
     
     Note: Using AsyncVectorEnv for parallel data loading. Context 'spawn' is used
-    for CUDA/PyTorch safety.
+    for CUDA/PyTorch safety. Set use_sync=True to use SyncVectorEnv (no subprocesses),
+    which avoids IPC/FD limits on constrained containers.
     """
     env_factory = functools.partial(make_env, config=config, start_date=start_date, end_date=end_date, shm_config=shm_config)
     
-    # Use AsyncVectorEnv for 5090 I/O optimization (Parallel Data Loading)
-    # Context 'spawn' is safer for PyTorch/CUDA interaction
-    # NOTE: Gymnasium's shared_memory is DISABLED. It conflicts with spawn context
-    # + our custom data SHM, causing [Errno 104] worker crashes at _check_spaces().
-    # Our custom ParquetDataHandler SHM (passed via shm_config) is separate and works.
-    env = gym.vector.AsyncVectorEnv(
-        [env_factory for _ in range(num_envs)],
-        context="spawn",
-        shared_memory=False
-    )
+    if use_sync:
+        # SyncVectorEnv: all envs run in main process. No pipes, no FD issues.
+        # Slower but reliable on containers with restricted ulimits.
+        env = gym.vector.SyncVectorEnv(
+            [env_factory for _ in range(num_envs)]
+        )
+    else:
+        # AsyncVectorEnv for production training (parallel data loading)
+        env = gym.vector.AsyncVectorEnv(
+            [env_factory for _ in range(num_envs)],
+            context="spawn",
+            shared_memory=False
+        )
     
     return env
 
@@ -268,10 +272,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         hindsight_weight = trial.suggest_float("hindsight_weight", 1e-3, 0.2, log=True)
         reward_scaling = trial.suggest_float("reward_scaling", 1e-2, 1.0, log=True)
         # Agent params
-        auxiliary_weight = trial.suggest_categorical("auxiliary_weight", [0.5, 1.0])
+        # FIX HPO-1: Replace auxiliary_weight (low-impact 2-value) with epsilon_decay
+        # (high-impact continuous). Controls exploration decay rate.
+        epsilon_decay = trial.suggest_float("epsilon_decay", 0.99998, 0.999998, log=True)
         learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
         target_update_freq = trial.suggest_categorical("target_update_freq", [5000, 7500, 10000, 15000])
-        batch_size = trial.suggest_categorical("batch_size", [256, 512, 1024])
+        batch_size = trial.suggest_categorical("batch_size", [256, 512])  # No 1024: too large for HPO buffer
         gamma = trial.suggest_categorical("gamma", [0.99, 0.995])
         epsilon_end = trial.suggest_float("epsilon_end", 0.01, 0.10)
         
@@ -280,7 +286,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         config["env"]["reward"]["hindsight_horizon"] = hindsight_horizon
         config["env"]["reward"]["hindsight_weight"] = hindsight_weight
         config["env"]["reward"]["scaling"] = reward_scaling
-        config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
+        config["agents"]["bdq"]["epsilon_decay"] = epsilon_decay
         config["agents"]["bdq"]["learning_rate"] = learning_rate
         config["agents"]["bdq"]["gamma"] = gamma
         config["agents"]["bdq"]["batch_size"] = batch_size
@@ -294,21 +300,22 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
             f"{trial_prefix}/reward_scaling": reward_scaling,
             f"{trial_prefix}/learning_rate": learning_rate,
             f"{trial_prefix}/batch_size": batch_size,
+            f"{trial_prefix}/epsilon_decay": epsilon_decay,
         })
         
         # Create env and train
         env = None
         eval_env = None
         try:
-            # FIX: Force-disable SHM for HPO trials to prevent [Errno 104] crashes.
-            # Each trial spawns num_envs async workers; Gymnasium shared_memory
-            # is disabled in create_vector_env so this is now safe at higher counts.
-            hpo_num_envs = min(config["env"].get("num_envs", 12), 12)
-            env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False)
+            # FIX: Use SyncVectorEnv for HPO to avoid AsyncVectorEnv pipe crashes
+            # on containers where ulimit -n is blocked. SyncVectorEnv runs all
+            # envs in the main process — slower but no IPC/FD issues.
+            hpo_num_envs = min(config["env"].get("num_envs", 12), 4)  # Cap at 4 for HPO speed
+            env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True)
             trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
             
             # Create DEDICATED eval env for pruning (P1b fix: prevents training state corruption)
-            eval_env = create_vector_env(config, num_envs=1, gym_shm=False)
+            eval_env = create_vector_env(config, num_envs=1, gym_shm=False, use_sync=True)
             
             # Define Pruning Callback with dedicated eval env
             def pruning_callback():
@@ -333,11 +340,20 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
             wandb.log({f"{trial_prefix}/error": str(e)})
             return 0.0
         finally:
+            # FIX: AsyncVectorEnv pipes may already be dead → BrokenPipeError
+            # during close(). This is harmless (cleanup of dead workers) but
+            # kills the entire HPO study if uncaught.
             if env:
-                env.close()
+                try:
+                    env.close()
+                except (BrokenPipeError, EOFError, ConnectionResetError):
+                    pass
             # Close dedicated eval env
             if eval_env:
-                eval_env.close()
+                try:
+                    eval_env.close()
+                except (BrokenPipeError, EOFError, ConnectionResetError):
+                    pass
             # FIX A: Force garbage collection to release PyArrow mmap/FD handles
             import gc
             gc.collect()
@@ -458,7 +474,10 @@ def run_training(config, run_name, device):
         raise
     finally:
         if env:
-            env.close()
+            try:
+                env.close()
+            except (BrokenPipeError, EOFError, ConnectionResetError):
+                pass
         if data_loader:
             try:
                 data_loader.close_shared_memory(unlink=True)
