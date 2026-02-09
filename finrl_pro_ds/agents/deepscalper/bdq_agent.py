@@ -126,6 +126,8 @@ class DeepScalperBDQ:
         private_in = private_in.to(self.device)
         macro = macro.to(self.device)
         
+        # FIX FIND-4: Disable dropout during inference
+        self.policy_net.eval()
         with torch.no_grad():
             q_dir, q_price, q_vol, _, _ = self.policy_net(micro, private_in, macro)
             
@@ -138,6 +140,7 @@ class DeepScalperBDQ:
             p_price = safe_softmax(q_price, temp)
             p_vol = safe_softmax(q_vol, temp)
             
+        self.policy_net.train()  # Restore train mode
         return p_dir, p_price, p_vol
 
     def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
@@ -154,6 +157,9 @@ class DeepScalperBDQ:
         macro = macro.to(self.device)
         
         batch_size = micro.shape[0]
+        
+        # FIX FIND-4: Disable dropout during inference
+        self.policy_net.eval()
         
         # Epsilon-Greedy Mask
         # We need independent random choices for each item in batch if we were doing true vector env exploration
@@ -199,10 +205,13 @@ class DeepScalperBDQ:
             final_actions = torch.where(mask_expanded, random_actions, greedy_actions)
         else:
             final_actions = greedy_actions
-            
+        
+        self.policy_net.train()  # FIX FIND-4: Restore train mode (parity with get_probs)
         return final_actions.cpu().numpy()
     
     def train_step(self) -> Optional[Dict[str, float]]:
+        # FIX FIND-4: Ensure train mode for dropout/batchnorm
+        self.policy_net.train()
         if len(self.memory) < self.batch_size:
             return None
         
