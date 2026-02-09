@@ -10,6 +10,7 @@ import copy
 
 from finrl_pro_ds.agents.deepscalper.networks import DeepScalperNetwork
 from finrl_pro_ds.agents.deepscalper.per_buffer import PrioritizedReplayBuffer
+from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 
 class ReplayBuffer:
     def __init__(self, capacity: int):
@@ -95,18 +96,7 @@ class DeepScalperBDQ:
         # torch.amp.GradScaler works on both CPU and CUDA without crashing
         self.scaler = torch.amp.GradScaler(device=str(self.device), enabled=self.use_amp)
         
-        # FIX H2: Memory warning for large replay buffers
-        # Rough estimate: each transition ~150KB (3 dict obs * 50*27*4 bytes + overhead)
-        est_mb = buffer_size * 150 / 1024  # MB estimate
-        if est_mb > 8000:  # > 8GB
-            import warnings
-            warnings.warn(
-                f"Replay buffer capacity={buffer_size} estimated ~{est_mb/1024:.1f}GB RAM. "
-                f"Consider reducing buffer_size or using disk-backed buffer.",
-                ResourceWarning
-            )
-        
-        # Paper Section 4.3: PER vs simple replay
+        # Paper Section 4.3: PER vs flat numpy replay
         if self.use_per:
             self.memory = PrioritizedReplayBuffer(
                 capacity=buffer_size,
@@ -115,7 +105,28 @@ class DeepScalperBDQ:
                 beta_frames=per_beta_frames
             )
         else:
-            self.memory = ReplayBuffer(buffer_size)
+            # FIX BUF-1: Pre-allocated numpy arrays instead of Python list.
+            # 2M entries: ~22 GB (numpy) vs ~60-100 GB (Python objects).
+            micro_cfg = network_config.get("micro_config", {})
+            macro_cfg = network_config.get("macro_config", {})
+            window_size = micro_cfg.get("window_size", 50)
+            micro_input = micro_cfg.get("input_size", 27)
+            private_input = micro_cfg.get("private_input_size", 2)
+            macro_input = macro_cfg.get("input_size", 11)
+            self.memory = FlatReplayBuffer(
+                capacity=buffer_size,
+                micro_shape=(window_size, micro_input),
+                macro_shape=(macro_input,),
+                private_shape=(private_input,),
+                action_shape=(len(action_dims),),
+            )
+            est_gb = self.memory.nbytes() / (1024**3)
+            if est_gb > 8:
+                import warnings
+                warnings.warn(
+                    f"FlatReplayBuffer capacity={buffer_size} pre-allocated {est_gb:.1f}GB RAM.",
+                    ResourceWarning
+                )
 
     def get_probs(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, temp: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -220,28 +231,35 @@ class DeepScalperBDQ:
             (state_batch, action_batch, reward_batch, next_state_batch,
              done_batch, aux_target_batch, per_indices, is_weights) = self.memory.sample(self.batch_size)
             is_weights_t = torch.tensor(is_weights, dtype=torch.float32).unsqueeze(1).to(self.device)  # (B, 1)
+            # PER buffer returns tuples of dicts — need list comprehension to stack
+            def stack_dict_keys(batch_list, key):
+                return torch.tensor(np.array([s[key] for s in batch_list]), dtype=torch.float32).to(self.device)
+            micro_state = stack_dict_keys(state_batch, "micro")
+            private_state = stack_dict_keys(state_batch, "private")
+            macro_state = stack_dict_keys(state_batch, "macro")
+            micro_next = stack_dict_keys(next_state_batch, "micro")
+            private_next = stack_dict_keys(next_state_batch, "private")
+            macro_next = stack_dict_keys(next_state_batch, "macro")
+            actions = torch.tensor(np.array(action_batch), dtype=torch.long).to(self.device)
+            rewards = torch.tensor(np.array(reward_batch), dtype=torch.float32).unsqueeze(1).to(self.device)
+            dones = torch.tensor(np.array(done_batch), dtype=torch.float32).unsqueeze(1).to(self.device)
+            aux_targets = torch.tensor(np.array(aux_target_batch), dtype=torch.float32).unsqueeze(1).to(self.device)
         else:
+            # FIX BUF-1: FlatReplayBuffer returns pre-stacked numpy arrays (dicts with batch dim)
             state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = self.memory.sample(self.batch_size)
             per_indices = None
             is_weights_t = None
-        
-        # Prepare Tensors
-        
-        def stack_dict_keys(batch_list, key):
-            return torch.tensor(np.array([s[key] for s in batch_list]), dtype=torch.float32).to(self.device)
-        
-        micro_state = stack_dict_keys(state_batch, "micro")
-        private_state = stack_dict_keys(state_batch, "private")
-        macro_state = stack_dict_keys(state_batch, "macro")
-        
-        micro_next = stack_dict_keys(next_state_batch, "micro")
-        private_next = stack_dict_keys(next_state_batch, "private")
-        macro_next = stack_dict_keys(next_state_batch, "macro")
-        
-        actions = torch.tensor(np.array(action_batch), dtype=torch.long).to(self.device) # (B, 3)
-        rewards = torch.tensor(np.array(reward_batch), dtype=torch.float32).unsqueeze(1).to(self.device) # (B, 1)
-        dones = torch.tensor(np.array(done_batch), dtype=torch.float32).unsqueeze(1).to(self.device) # (B, 1)
-        aux_targets = torch.tensor(np.array(aux_target_batch), dtype=torch.float32).unsqueeze(1).to(self.device) # (B, 1)
+            # Zero-copy path: numpy → torch tensor (no list comprehension)
+            micro_state = torch.as_tensor(state_batch["micro"], dtype=torch.float32).to(self.device)
+            private_state = torch.as_tensor(state_batch["private"], dtype=torch.float32).to(self.device)
+            macro_state = torch.as_tensor(state_batch["macro"], dtype=torch.float32).to(self.device)
+            micro_next = torch.as_tensor(next_state_batch["micro"], dtype=torch.float32).to(self.device)
+            private_next = torch.as_tensor(next_state_batch["private"], dtype=torch.float32).to(self.device)
+            macro_next = torch.as_tensor(next_state_batch["macro"], dtype=torch.float32).to(self.device)
+            actions = torch.as_tensor(action_batch, dtype=torch.long).to(self.device)
+            rewards = torch.as_tensor(reward_batch, dtype=torch.float32).unsqueeze(1).to(self.device)
+            dones = torch.as_tensor(done_batch, dtype=torch.float32).unsqueeze(1).to(self.device)
+            aux_targets = torch.as_tensor(aux_target_batch, dtype=torch.float32).unsqueeze(1).to(self.device)
         
         # Current Q-Values, Loss Computation under autocast
         # FIX H1: Use modern torch.amp.autocast (works on CPU + CUDA)
