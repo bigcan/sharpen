@@ -20,7 +20,7 @@ class FlatReplayBuffer:
         capacity: Maximum number of transitions
         micro_shape: Shape of micro observation, e.g. (50, 27)
         macro_shape: Shape of macro observation, e.g. (11,)
-        private_shape: Shape of private observation, e.g. (2,)
+        private_shape: Shape of private observation, e.g. (50, 2)
         action_shape: Shape of action vector, e.g. (3,)
     """
 
@@ -36,7 +36,7 @@ class FlatReplayBuffer:
         capacity: int,
         micro_shape: Tuple[int, ...] = (50, 27),
         macro_shape: Tuple[int, ...] = (11,),
-        private_shape: Tuple[int, ...] = (2,),
+        private_shape: Tuple[int, ...] = (50, 2),
         action_shape: Tuple[int, ...] = (3,),
     ):
         self.capacity = capacity
@@ -103,7 +103,7 @@ class FlatReplayBuffer:
         states = {
             "micro": self._micro[indices],       # (B, 50, 27)
             "macro": self._macro[indices],        # (B, 11)
-            "private": self._private[indices],    # (B, 2)
+            "private": self._private[indices],    # (B, W, 2)
         }
         next_states = {
             "micro": self._next_micro[indices],

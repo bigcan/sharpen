@@ -117,7 +117,7 @@ class DeepScalperBDQ:
                 capacity=buffer_size,
                 micro_shape=(window_size, micro_input),
                 macro_shape=(macro_input,),
-                private_shape=(private_input,),
+                private_shape=(window_size, private_input),  # FIX: env returns private_window (W, 2), not flat (2,)
                 action_shape=(len(action_dims),),
             )
             est_gb = self.memory.nbytes() / (1024**3)
