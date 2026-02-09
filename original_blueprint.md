@@ -271,13 +271,19 @@ graph LR
 
 **Search Space**:
 
-| Hyperparameter | Range | Type |
-|:---|:---|:---|
-| Hindsight Horizon ($h$) | [30, 60, 120, 180] | Categorical |
-| Hindsight Weight ($w$) | [1e-3, 0.2] | Log-Uniform |
-| Aux. Task Weight ($\rho$) | [0.5, 1.0] | Categorical |
-| Learning Rate | [5e-5, 5e-4] | Log-Uniform |
-| Target Update Freq | [5000, 7500, 10000, 15000] | Categorical |
+| Hyperparameter | Range | Type | Notes |
+|:---|:---|:---|:---|
+| Hindsight Horizon ($h$) | [30, 60, 90, 120, 150, 180] | Categorical | Paper: 180 min optimal |
+| Hindsight Weight ($w$) | [0.05, 0.2] | Log-Uniform | Paper optimal: 0.1 |
+| Aux. Task Weight ($\rho$) | [0.5, 1.5] | Log-Uniform | Paper optimal: 1.0 |
+| Learning Rate | [5e-5, 5e-4] | Log-Uniform | |
+| Target Update Freq | [5000, 7500, 10000, 15000] | Categorical | |
+| Batch Size | [256, 512] | Categorical | |
+| Gamma | [0.99, 0.995] | Categorical | |
+| Epsilon End | [0.01, 0.10] | Uniform | |
+
+> [!IMPORTANT]
+> **`reward_scaling` is NOT tuned via HPO** — fixed at `1.0` (paper default). Tuning it previously allowed HPO to crush the reward signal to 0.286×, causing negative Sharpe.
 
 ### Phase 2 — Full Training
 **Trainer**: [`deepscalper_trainer.py`](file:///c:/FinRL/FinRL-Pro_DS/finrl_pro_ds/training/deepscalper_trainer.py)
@@ -431,6 +437,13 @@ configs/
 ---
 
 ## 11. Implementation Updates Log
+
+### 2026-02-09 | HPO Search Space Fix (Negative Sharpe Investigation)
+**Status:** ✅ Completed
+- **Root cause**: HPO tuned `reward_scaling` down to 0.286×, crushing reward signal below FP16 noise floor. Also selected `hindsight_weight=0.0035` (28× below paper optimal).
+- **Fix**: Removed `reward_scaling` from HPO search space (fixed at `1.0`). Tightened `hindsight_weight` to `[0.05, 0.2]`, `auxiliary_weight` to `[0.5, 1.5]`.
+- Increased HPO eval coverage from 5K→15K steps (full validation window).
+- Updated HPO search space table in blueprint.
 
 ### 2026-02-09 | Blueprint Audit & Rewrite
 **Status:** ✅ Completed
