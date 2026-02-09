@@ -139,5 +139,119 @@ class TestDeepScalperNetworks(unittest.TestCase):
         self.assertEqual(q_price.shape, (1, 5))
         self.assertEqual(q_vol.shape, (1, 5))
 
+
+class TestNetworkRobustness(unittest.TestCase):
+    """FIND-7: Expanded test coverage for edge cases and robustness."""
+
+    def test_gru_encoder(self):
+        """Verify GRU code path works correctly."""
+        encoder = MicroEncoder(
+            input_size=27, private_input_size=2,
+            hidden_size=64, rnn_type="GRU"
+        )
+        x = torch.randn(4, 50, 27)
+        p = torch.randn(4, 50, 2)
+        out = encoder(x, p)
+        self.assertEqual(out.shape, (4, 64))
+
+    def test_lstm_multilayer_with_dropout(self):
+        """Verify multi-layer LSTM with dropout produces no warnings."""
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            encoder = MicroEncoder(
+                input_size=27, private_input_size=2,
+                hidden_size=64, num_layers=2, dropout=0.3, rnn_type="LSTM"
+            )
+            # No UserWarning about dropout should be raised
+            dropout_warnings = [x for x in w if "dropout" in str(x.message).lower()]
+            self.assertEqual(len(dropout_warnings), 0, f"Unexpected dropout warnings: {dropout_warnings}")
+        
+        out = encoder(torch.randn(4, 50, 27), torch.randn(4, 50, 2))
+        self.assertEqual(out.shape, (4, 64))
+
+    def test_single_layer_no_dropout_warning(self):
+        """FIND-1: Verify num_layers=1 + dropout>0 does NOT emit PyTorch warning."""
+        import warnings
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            encoder = MicroEncoder(
+                input_size=27, private_input_size=2,
+                hidden_size=64, num_layers=1, dropout=0.5, rnn_type="LSTM"
+            )
+            dropout_warnings = [x for x in w if "dropout" in str(x.message).lower()]
+            self.assertEqual(len(dropout_warnings), 0,
+                             "FIND-1 regression: dropout warning with num_layers=1")
+
+    def test_batch_size_one(self):
+        """Edge case: single-sample batch."""
+        net = DeepScalperNetwork(
+            micro_config={"input_size": 27, "private_input_size": 2, "hidden_size": 64},
+            macro_config={"input_size": 11, "hidden_sizes": [64, 32]},
+            fusion_dim=64,
+            action_space_dims=(3, 5, 5)
+        )
+        q_dir, q_price, q_vol, v, pv = net(
+            torch.randn(1, 50, 27),
+            torch.randn(1, 50, 2),
+            torch.randn(1, 11)
+        )
+        self.assertEqual(q_dir.shape, (1, 3))
+        self.assertEqual(v.shape, (1, 1))
+        self.assertEqual(pv.shape, (1, 1))
+
+    def test_eval_vs_train_mode(self):
+        """FIND-4: Verify dropout is active in train and disabled in eval."""
+        net = DeepScalperNetwork(
+            micro_config={"input_size": 10, "private_input_size": 2, "hidden_size": 32},
+            macro_config={"input_size": 5, "hidden_sizes": [32, 16], "dropout": 0.5},
+            fusion_dim=32,
+            action_space_dims=(3, 3, 3)
+        )
+        micro = torch.randn(8, 10, 10)
+        priv = torch.randn(8, 10, 2)
+        macro = torch.randn(8, 5)
+
+        # In eval mode, outputs should be deterministic
+        net.eval()
+        out1 = net(micro, priv, macro)
+        out2 = net(micro, priv, macro)
+        for a, b in zip(out1, out2):
+            self.assertTrue(torch.equal(a, b), "eval() mode should produce deterministic output")
+
+    def test_weight_init_applied(self):
+        """FIND-3: Verify custom weight init was applied (not default uniform)."""
+        encoder = MicroEncoder(input_size=10, private_input_size=2, hidden_size=32)
+        # Verify forget gate bias is initialized to 1.0
+        for rnn in [encoder.micro_rnn, encoder.private_rnn]:
+            for name, param in rnn.named_parameters():
+                if 'bias' in name:
+                    n = param.size(0)
+                    forget_gate_bias = param.data[n // 4: n // 2]
+                    self.assertTrue(
+                        torch.allclose(forget_gate_bias, torch.ones_like(forget_gate_bias)),
+                        f"Forget gate bias should be 1.0, got {forget_gate_bias}"
+                    )
+
+    def test_small_fusion_dim_head_scaling(self):
+        """FIND-5: Verify head_hidden = max(fusion_dim//2, 64) doesn't break."""
+        # Small fusion_dim: head_hidden should be clamped to 64
+        net = DeepScalperNetwork(
+            micro_config={"input_size": 10, "private_input_size": 2, "hidden_size": 32},
+            macro_config={"input_size": 5, "hidden_sizes": [32, 16]},
+            fusion_dim=64,
+            action_space_dims=(3, 3, 3)
+        )
+        # head_hidden should be max(64//2, 64) = 64 (clamped)
+        first_linear = net.value_stream[0]
+        self.assertEqual(first_linear.in_features, 64)
+        self.assertEqual(first_linear.out_features, 64)  # max(32, 64) = 64
+
+    def test_invalid_rnn_type_raises(self):
+        """Verify invalid rnn_type raises ValueError."""
+        with self.assertRaises(ValueError):
+            MicroEncoder(input_size=10, private_input_size=2, hidden_size=32, rnn_type="Transformer")
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -301,8 +301,9 @@ class TestBDQWithPER:
         assert len(set(losses)) > 1, "Loss never changed across 100 steps"
 
     def test_backward_compat_no_per(self):
-        """Agent with use_per=False should use standard ReplayBuffer."""
-        from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ, ReplayBuffer
+        """Agent with use_per=False should use FlatReplayBuffer."""
+        from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
+        from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 
         network_config = {
             "micro_config": {"input_size": 27, "private_input_size": 2,
@@ -318,7 +319,7 @@ class TestBDQWithPER:
             use_per=False,
             device="cpu",
         )
-        assert isinstance(agent.memory, ReplayBuffer)
+        assert isinstance(agent.memory, FlatReplayBuffer)
         assert agent.use_per is False
 
         # Train step should work without PER metrics

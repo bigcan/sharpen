@@ -22,10 +22,11 @@ env:
   initial_balance: 100000.0
   # FIX AUDIT-7: Symmetric Margin Logic (1.0 = Spot, 0.5 = 2x Lev)
   margin_requirement: 1.0
-  # FIX Bug#2: Explicit maker/taker split (Binance VIP0)
-  maker_fee: 0.0   # DIAGNOSTIC: Zero Fees
-  taker_fee: 0.0   # DIAGNOSTIC: Zero Fees
-  num_envs: 12            # Reverted from 20 — SHM+spawn crashes persist at higher counts
+  # FIX: Reduced to VIP1 levels. VIP0 (10 bps/side) made minute-level
+  # trading structurally unprofitable (round-trip fee 44x > per-step vol).
+  maker_fee: 0.0002  # 2 bps (Binance VIP1 / maker rebate tier)
+  taker_fee: 0.0004  # 4 bps (Binance VIP1)
+  num_envs: 12            # BrokenPipeError was from env.close() (now fixed), not env count
   window_size: 50
   max_drawdown_pct: 0.30  # Relaxed to 30% for Production
   
@@ -45,7 +46,7 @@ env:
     direction_bins: 3 
     price_bins: 5     
     volume_bins: 5    
-    max_position: 5.0 # Max BTC
+    max_position: 1.0 # Max BTC (reduced: 5 BTC @ $20K = 100% of account)
 
 network:
   # V9.5 Blackwell Architecture
@@ -109,7 +110,7 @@ training:
 hpo:
   enabled: true
   n_trials: 50             # User requested
-  steps_per_trial: 50000   # Production recommendation: 5% of total steps for robust signal
+  steps_per_trial: 200000  # 20% of total. 50K was too few — agent couldn't overcome fee drag
 
 wandb:
   project: "FinRL-Pro-DS"

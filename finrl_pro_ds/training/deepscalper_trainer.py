@@ -123,7 +123,7 @@ class DeepScalperTrainer:
         # Reward component accumulators for hindsight ratio tracking
         _acc_hindsight = 0.0
         _acc_total = 0.0
-        _acc_count = 0
+
         
         curr_lens = np.zeros(num_envs)
         
@@ -190,7 +190,7 @@ class DeepScalperTrainer:
                     if rh is not None and rt is not None:
                         _acc_hindsight += abs(float(rh[i]) if hasattr(rh, "__getitem__") else float(rh))
                         _acc_total += abs(float(rt[i]) if hasattr(rt, "__getitem__") else float(rt))
-                        _acc_count += 1
+
                 
                 # Track Episodic Stats
                 curr_rewards[i] += r
@@ -282,7 +282,7 @@ class DeepScalperTrainer:
                              # Reset accumulators after logging
                              _acc_hindsight = 0.0
                              _acc_total = 0.0
-                             _acc_count = 0
+
             
             # 4b. HPO Pruning Check (rung-based for vectorized envs)
             # Uses rung tracking to handle num_envs > 1 step increments
