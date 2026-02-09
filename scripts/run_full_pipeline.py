@@ -272,9 +272,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         hindsight_weight = trial.suggest_float("hindsight_weight", 1e-3, 0.2, log=True)
         reward_scaling = trial.suggest_float("reward_scaling", 1e-2, 1.0, log=True)
         # Agent params
-        # FIX HPO-1: Replace auxiliary_weight (low-impact 2-value) with epsilon_decay
-        # (high-impact continuous). Controls exploration decay rate.
-        epsilon_decay = trial.suggest_float("epsilon_decay", 0.99998, 0.999998, log=True)
+        auxiliary_weight = trial.suggest_float("auxiliary_weight", 0.1, 2.0, log=True)
         learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
         target_update_freq = trial.suggest_categorical("target_update_freq", [5000, 7500, 10000, 15000])
         batch_size = trial.suggest_categorical("batch_size", [256, 512])  # No 1024: too large for HPO buffer
@@ -286,7 +284,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         config["env"]["reward"]["hindsight_horizon"] = hindsight_horizon
         config["env"]["reward"]["hindsight_weight"] = hindsight_weight
         config["env"]["reward"]["scaling"] = reward_scaling
-        config["agents"]["bdq"]["epsilon_decay"] = epsilon_decay
+        config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
         config["agents"]["bdq"]["learning_rate"] = learning_rate
         config["agents"]["bdq"]["gamma"] = gamma
         config["agents"]["bdq"]["batch_size"] = batch_size
@@ -300,7 +298,8 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
             f"{trial_prefix}/reward_scaling": reward_scaling,
             f"{trial_prefix}/learning_rate": learning_rate,
             f"{trial_prefix}/batch_size": batch_size,
-            f"{trial_prefix}/epsilon_decay": epsilon_decay,
+            f"{trial_prefix}/auxiliary_weight": auxiliary_weight,
+            f"{trial_prefix}/epsilon_end": epsilon_end,
         })
         
         # Create env and train
