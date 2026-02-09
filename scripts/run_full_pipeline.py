@@ -269,10 +269,11 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         # Sample hyperparameters
         # Paper-aligned reward params (Section 3.2 + 4.2)
         hindsight_horizon = trial.suggest_categorical("hindsight_horizon", [30, 60, 90, 120, 150, 180])
-        hindsight_weight = trial.suggest_float("hindsight_weight", 1e-3, 0.2, log=True)
-        reward_scaling = trial.suggest_float("reward_scaling", 1e-2, 1.0, log=True)
+        hindsight_weight = trial.suggest_float("hindsight_weight", 0.05, 0.2, log=True)
+        # NOTE: reward_scaling REMOVED from HPO — paper uses no scaling (1.0).
+        # Tuning it allowed HPO to crush the signal to 0.286x, causing negative Sharpe.
         # Agent params
-        auxiliary_weight = trial.suggest_float("auxiliary_weight", 0.1, 2.0, log=True)
+        auxiliary_weight = trial.suggest_float("auxiliary_weight", 0.5, 1.5, log=True)
         learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
         target_update_freq = trial.suggest_categorical("target_update_freq", [5000, 7500, 10000, 15000])
         batch_size = trial.suggest_categorical("batch_size", [256, 512])  # No 1024: too large for HPO buffer
@@ -283,7 +284,6 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         config = copy.deepcopy(base_config)
         config["env"]["reward"]["hindsight_horizon"] = hindsight_horizon
         config["env"]["reward"]["hindsight_weight"] = hindsight_weight
-        config["env"]["reward"]["scaling"] = reward_scaling
         config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
         config["agents"]["bdq"]["learning_rate"] = learning_rate
         config["agents"]["bdq"]["gamma"] = gamma
@@ -295,7 +295,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         wandb.log({
             f"{trial_prefix}/hindsight_horizon": hindsight_horizon,
             f"{trial_prefix}/hindsight_weight": hindsight_weight,
-            f"{trial_prefix}/reward_scaling": reward_scaling,
+
             f"{trial_prefix}/learning_rate": learning_rate,
             f"{trial_prefix}/batch_size": batch_size,
             f"{trial_prefix}/auxiliary_weight": auxiliary_weight,
@@ -318,12 +318,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
             
             # Define Pruning Callback with dedicated eval env
             def pruning_callback():
-                return evaluate_for_hpo(eval_env, trainer.agent, max_steps=1000)
+                return evaluate_for_hpo(eval_env, trainer.agent, max_steps=3000)
 
             trainer.train(optuna_trial=trial, pruning_callback=pruning_callback)
             
             # FIX: Evaluate on dedicated eval_env (clean state), not training env
-            sharpe = evaluate_for_hpo(eval_env, trainer.agent, max_steps=5000)
+            sharpe = evaluate_for_hpo(eval_env, trainer.agent, max_steps=15000)
             
             wandb.log({f"{trial_prefix}/sharpe": sharpe, f"{trial_prefix}/completed": True})
             logger.info(f"Trial {trial.number}: Sharpe(raw)={sharpe:.6f}")
@@ -383,14 +383,13 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
     }
     
     # Explicit routing for ALL HPO params to prevent silent mis-routing.
-    reward_params = {"hindsight_horizon", "hindsight_weight", "reward_scaling"}
+    reward_params = {"hindsight_horizon", "hindsight_weight"}
     agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "target_update_freq", "epsilon_end"}
     
     # Key name mapping: Optuna param name -> config key name
     reward_key_map = {
         "hindsight_horizon": "hindsight_horizon",
         "hindsight_weight": "hindsight_weight",
-        "reward_scaling": "scaling",  # env reads 'scaling'
     }
     
     for key, val in best.params.items():
