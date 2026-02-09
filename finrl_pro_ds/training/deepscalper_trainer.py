@@ -105,8 +105,8 @@ class DeepScalperTrainer:
             n_calls = len(decay_calls)
             
             if n_calls > 0:
-                # Target epsilon 0.01 at end of trial
-                epsilon_end = 0.01
+                # Read epsilon_end from config (HPO tunes this) instead of hardcoding
+                epsilon_end = self.config.get("agents", {}).get("bdq", {}).get("epsilon_end", 0.01)
                 # decay ^ n_calls = end -> n_calls * ln(decay) = ln(end) -> ln(decay) = ln(end)/n_calls
                 # decay = exp(ln(end)/n_calls)
                 hpo_decay = np.exp(np.log(epsilon_end) / n_calls)
