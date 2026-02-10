@@ -46,7 +46,7 @@ def fetch_day(api_key: str, symbol: str, date_str: str, limit_levels: int = 5) -
 
     for attempt in range(MAX_RETRIES):
         try:
-            resp = requests.get(url, headers=headers, params=params, timeout=120)
+            resp = requests.get(url, headers=headers, params=params, timeout=300)
 
             if resp.status_code == 200:
                 return resp.json()
@@ -185,7 +185,7 @@ def main():
     )
     parser.add_argument("--levels", type=int, default=5, help="LOB depth levels")
     parser.add_argument(
-        "--delay", type=float, default=1.5, help="Delay between daily fetches (seconds)"
+        "--delay", type=float, default=3.0, help="Delay between daily fetches (seconds)"
     )
     parser.add_argument(
         "--dry-run", action="store_true", help="Fetch 1 day only for testing"
