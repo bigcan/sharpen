@@ -96,7 +96,8 @@ def deploy(args):
         remote_data = f"{remote_workspace}/data/{data_filename}" # Keep in data subdir on remote
         
         # Create remote data dir
-        ssh.exec_command(f"mkdir -p {remote_workspace}/data")
+        remote_dir = os.path.dirname(remote_data).replace("\\", "/") # Ensure forward slashes for Linux
+        ssh.exec_command(f"mkdir -p {remote_dir}")
 
         if not local_data.exists():
             print(f"WARNING: Local data not found at {local_data}. CHECK PATHS.")
@@ -126,23 +127,26 @@ def deploy(args):
     sftp.close()
     
     # 4. Clean up old processes FIRST (Avoid file locks on hpo.db)
-    print("Killing old instances (Orchestrator & Workers)...")
-    targets = [
-        script_path,                # The script we are about to launch
-        "train_deepscalper.py",     # The specialized trainer
-        "tune_deepscalper.py",      # The HPO tuner
-        "backtest_deepscalper.py",  # The backtester
-        "wandb-service"             # Optional: Cleanup wandb internal process if stuck
-    ]
-    unique_targets = list(set(targets))
-    kill_cmd_parts = [f"pkill -f {t}" for t in unique_targets]
-    full_kill_cmd = " || true; ".join(kill_cmd_parts) + " || true"
-    
-    try:
-        ssh.exec_command(full_kill_cmd)
-        time.sleep(3) # Allow cleanup
-    except:
-        pass
+    if not args.no_kill:
+        print("Killing old instances (Orchestrator & Workers)...")
+        targets = [
+            script_path,                # The script we are about to launch
+            "train_deepscalper.py",     # The specialized trainer
+            "tune_deepscalper.py",      # The HPO tuner
+            "backtest_deepscalper.py",  # The backtester
+            "wandb-service"             # Optional: Cleanup wandb internal process if stuck
+        ]
+        unique_targets = list(set(targets))
+        kill_cmd_parts = [f"pkill -f {t}" for t in unique_targets]
+        full_kill_cmd = " || true; ".join(kill_cmd_parts) + " || true"
+        
+        try:
+            ssh.exec_command(full_kill_cmd)
+            time.sleep(3) # Allow cleanup
+        except:
+            pass
+    else:
+        print("SKIPPING kill step (Preserving existing processes)...")
 
     # 5. Extract & Setup
     print("Extracting and Setting up...")
@@ -248,6 +252,7 @@ if __name__ == "__main__":
     parser.add_argument("--data_file", default=None, help="Specific data filename in data/ to upload (e.g. btc_lob_jan2023.parquet)")
     parser.add_argument("--extra_args", default="", help="Extra arguments to pass to the script (e.g. '--trials 50 --steps 200000')")
     parser.add_argument("--fresh_hpo", action="store_true", help="Wipe existing HPO database for a fresh start")
+    parser.add_argument("--no_kill", action="store_true", help="Do NOT kill existing processes (e.g. preserve Synapse run)")
     args = parser.parse_args()
     
     deploy(args)
