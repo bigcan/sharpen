@@ -396,12 +396,16 @@ class DeepScalperBDQ:
         self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
 
     def save(self, path: str):
-        torch.save({
+        ckpt = {
             'policy_net': self.policy_net.state_dict(),
             'target_net': self.target_net.state_dict(),
             'optimizer': self.optimizer.state_dict(),
             'epsilon': self.epsilon
-        }, path)
+        }
+        # FIX N3: Persist LR scheduler state for crash recovery
+        if hasattr(self, '_lr_scheduler') and self._lr_scheduler is not None:
+            ckpt['lr_scheduler'] = self._lr_scheduler.state_dict()
+        torch.save(ckpt, path)
 
     def load(self, path: str):
         if not os.path.exists(path):
@@ -411,3 +415,6 @@ class DeepScalperBDQ:
         self.target_net.load_state_dict(checkpoint['target_net'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
         self.epsilon = checkpoint.get('epsilon', self.epsilon)
+        # FIX N3: Restore LR scheduler state if available (backward-compatible)
+        if 'lr_scheduler' in checkpoint and hasattr(self, '_lr_scheduler') and self._lr_scheduler is not None:
+            self._lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])

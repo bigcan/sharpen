@@ -66,7 +66,9 @@ class DeepScalperTrainer:
         self.gradient_accumulator = 0.0  # FIX FIND-4: Accumulator for fractional update_interval
 
         # FIX PERF-8: Initialize cosine LR scheduler for stable late-training convergence
-        total_updates = int(self.total_timesteps * self.update_interval / num_envs) if num_envs > 0 else 100000
+        # FIX N1: Resolve num_envs from env before use (was NameError)
+        _num_envs = getattr(self.env, 'num_envs', 1)
+        total_updates = int(self.total_timesteps * self.update_interval / _num_envs) if _num_envs > 0 else 100000
         self.agent._lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.agent.optimizer, T_max=total_updates, eta_min=1e-6
         )
@@ -140,18 +142,15 @@ class DeepScalperTrainer:
         # Initialize to 0 to skip rung 0 - avoids eval at step ~12 before learning starts (P1a fix)
         self._last_prune_rung = 0
         
-        while global_step <= self.total_timesteps:
-            # FIX PERF-3: Moved extract_tensors outside loop and use as_tensor
-            # (avoids closure re-creation + zero-copy for contiguous numpy arrays)
-            def extract_tensors(o, device=self.device):
-                return (
-                    torch.as_tensor(o["micro"], dtype=torch.float32).to(device),
-                    torch.as_tensor(o["private"], dtype=torch.float32).to(device),
-                    torch.as_tensor(o["macro"], dtype=torch.float32).to(device)
-                )
+        # FIX PERF-3 + N4: Hoist extract_tensors outside loop to avoid per-iteration closure recreation
+        def extract_tensors(o, device=self.device):
+            return (
+                torch.as_tensor(o["micro"], dtype=torch.float32).to(device),
+                torch.as_tensor(o["private"], dtype=torch.float32).to(device),
+                torch.as_tensor(o["macro"], dtype=torch.float32).to(device)
+            )
 
-            # Epsilon Decay handled in agent logic or here? Agent has it inside train_step usually
-            # But get_action uses epsilon.
+        while global_step <= self.total_timesteps:
             # Convert to torch for prediction
             micro_t, private_t, macro_t = extract_tensors(obs)
             
