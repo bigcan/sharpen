@@ -62,10 +62,12 @@ class DeepScalperEnv(gym.Env):
         # supported because execution debits full notional from balance, making portfolio
         # value calculation incorrect with leverage. Assert to prevent silent breakage.
         self.margin_requirement = float(config.get("margin_requirement", 1.0))
-        assert self.margin_requirement == 1.0, (
-            f"Leverage not supported: margin_requirement must be 1.0, got {self.margin_requirement}. "
-            "Execution logic debits full notional from balance, which breaks portfolio tracking with leverage."
-        )
+        # FIX CRIT-3 hardened: ValueError instead of assert (assert stripped by python -O)
+        if self.margin_requirement != 1.0:
+            raise ValueError(
+                f"Leverage not supported: margin_requirement must be 1.0, got {self.margin_requirement}. "
+                "Execution logic debits full notional from balance, which breaks portfolio tracking with leverage."
+            )
         
         self.window_size = config.get("window_size", 50)
         self.initial_balance = config.get("initial_balance", 100000.0)  # 100K USDT default
@@ -404,10 +406,8 @@ class DeepScalperEnv(gym.Env):
 
                 if order_qty > 0 and self.current_best_bid > 0 and self.current_best_bid >= order_px:
                     # Liquidity Check
-                    if hasattr(self, '_raw_bid_vol_1') and self._raw_bid_vol_1 > 0:
-                        available_vol = self._raw_bid_vol_1
-                    else:
-                        available_vol = 0.0
+                    # FIX N2: Removed dead hasattr check (sell-side, matches buy-side CQ-2 fix)
+                    available_vol = self._raw_bid_vol_1 if self._raw_bid_vol_1 > 0 else 0.0
                     
                     exec_qty = min(order_qty, available_vol)
                     
