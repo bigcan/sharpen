@@ -167,6 +167,40 @@ Configure in `env.reward` section of your YAML config. See `randd_log.md` for fu
 
 ---
 
+## Agent Memory System
+
+This project includes a **persistent long-term memory system** that gives the AI agent continuity across chat sessions. It stores project context, daily session logs, and milestone snapshots in plain Markdown files.
+
+### How It Works
+
+```
+.agent/memory/
+├── core.md           ← Project facts, preferences, active decisions (git-tracked)
+├── logs/
+│   └── YYYY-MM-DD.md ← Daily session logs with timestamped entries (gitignored)
+└── snapshots/
+    └── YYYY-MM-DD-topic.md ← Session summaries (gitignored)
+```
+
+- **`core.md`** is the agent's ground truth — project context, your preferences, and active architectural decisions.
+- **Daily logs** record key decisions, bug fixes, and deployments as timestamped entries.
+- **Snapshots** capture end-of-session summaries with what was accomplished and next steps.
+
+### User Commands
+
+| Command | What It Does |
+|---|---|
+| `/memory-boot` | Loads core memory + recent logs at session start. Run this first in any new chat. |
+| `//save` | Generates a session snapshot and appends it to today's log. Use at end of session. |
+
+> **Tip**: The agent's skill description includes a directive to self-load memory at session start, but saying `/memory-boot` guarantees it.
+
+### Editing Core Memory
+
+To update project facts or preferences, just tell the agent (e.g., "update my preferences: I prefer verbose logging"). It will modify `core.md` under the relevant section.
+
+---
+
 ## Testing
 
 ```bash

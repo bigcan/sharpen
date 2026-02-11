@@ -1,6 +1,6 @@
 # AGENTS.md — FinRL Pro Repo Agent Guide
 
-Last updated: 2025-11-05
+Last updated: 2026-02-11
 
 This document instructs AI coding agents working in this repository. It defines persona, workflow, guardrails, quality gates, technique templates, and ready‑to‑run macros tailored to the FinRL Pro scaffold built atop FinRL Podracer.
 
@@ -187,6 +187,7 @@ Replay: reproduce <fingerprint_id>
 - Python 3.11 typing; avoid one-letter names; keep functions short
 - Minimal diffs; no drive‑by refactors
 - No secrets or large data in git; use DVC/MLflow for artifacts
+- **Memory protocol**: Log key decisions via the memory skill; read `core.md` at session start
 
 ## When In Doubt
 
@@ -206,5 +207,6 @@ The following skills are installed in `.agent/skills` to assist with specialized
 - **Experiment Scaffolder**: Automates creating new experiment versions (e.g., scaffolding V10 from V9) by generating configs and scripts.
 - **GitHub Manager**: Automates git operations for clean history, semantic commits, and documentation updates.
 - **Log Analyzer**: Analyzes experiment logs for crash causes, Tracebacks, OOMs, and performance regressions.
+- **Memory Manager**: Persistent long-term memory system — maintains `core.md` (project context), daily session logs, and snapshots across sessions. Auto-loads at session start via `/memory-boot`.
 - **Research Logger**: Standardizes logging of experimental findings to `randd_log.md` with structured metadata.
 - **Work Auditor**: Generates context-rich prompts for auditing current work to ensure logic consistency and identify risks.
