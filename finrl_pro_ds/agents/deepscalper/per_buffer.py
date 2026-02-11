@@ -194,8 +194,10 @@ class PrioritizedReplayBuffer:
         for idx, td_err in zip(indices, td_errors):
             priority = (abs(td_err) + self._epsilon) ** self.alpha
             self.tree.update(int(idx), priority)
-            # FIX FIND-2: Decay max_priority to prevent permanent bias from early high-error samples
-            self._max_priority = max(self._max_priority * 0.999, priority)
+            # FIX PERF-6: Standard max_priority update (Schaul et al. 2016).
+            # Removed 0.999 decay which created recency bias by inserting newer
+            # transitions with progressively lower priority.
+            self._max_priority = max(self._max_priority, priority)
 
     def __len__(self) -> int:
         return self.tree.size

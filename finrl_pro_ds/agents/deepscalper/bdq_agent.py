@@ -92,6 +92,10 @@ class DeepScalperBDQ:
         
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
         
+        # PERF-8: Cosine LR scheduler for stable late-training convergence
+        # total_steps estimated from config; updated by trainer if available
+        self._lr_scheduler = None  # Initialized by trainer via init_lr_scheduler()
+        
         # FIX H1: Use modern torch.amp API (torch.cuda.amp deprecated in PyTorch ≥2.4)
         # torch.amp.GradScaler works on both CPU and CUDA without crashing
         self.scaler = torch.amp.GradScaler(device=str(self.device), enabled=self.use_amp)
@@ -291,17 +295,19 @@ class DeepScalperBDQ:
                 max_next_q_price = next_q_price_target.gather(1, best_next_price)
                 max_next_q_vol = next_q_vol_target.gather(1, best_next_vol)
                 
-                # Target = r + gamma * Q_target(s', argmax_a Q_policy(s', a)) * (1 - done)
-                target_q_dir = rewards + self.gamma * max_next_q_dir * (1 - dones)
-                target_q_price = rewards + self.gamma * max_next_q_price * (1 - dones)
-                target_q_vol = rewards + self.gamma * max_next_q_vol * (1 - dones)
+                # FIX CRIT-1: Shared Bellman target across all BDQ branches.
+                # Aggregating next-state Q-values prevents V(s) gradient tripling
+                # (Tavakoli et al. 2018, Section 3.2: shared value stream).
+                max_next_q_agg = (max_next_q_dir + max_next_q_price + max_next_q_vol) / 3.0
+                target_q_shared = rewards + self.gamma * max_next_q_agg * (1 - dones)
                 
             # Loss — PER: per-sample Huber, weighted by IS; Uniform: standard mean
+            # FIX CRIT-1: All branches use shared target (target_q_shared)
             if self.use_per:
                 loss_fn = nn.SmoothL1Loss(reduction='none')  # Per-sample losses
-                loss_dir_raw = loss_fn(curr_q_dir, target_q_dir)     # (B, 1)
-                loss_price_raw = loss_fn(curr_q_price, target_q_price)
-                loss_vol_raw = loss_fn(curr_q_vol, target_q_vol)
+                loss_dir_raw = loss_fn(curr_q_dir, target_q_shared)     # (B, 1)
+                loss_price_raw = loss_fn(curr_q_price, target_q_shared)
+                loss_vol_raw = loss_fn(curr_q_vol, target_q_shared)
                 
                 # IS-weighted mean (Schaul et al. 2016, Eq. 3)
                 loss_dir = (loss_dir_raw * is_weights_t).mean()
@@ -309,13 +315,15 @@ class DeepScalperBDQ:
                 loss_vol = (loss_vol_raw * is_weights_t).mean()
             else:
                 loss_fn = nn.SmoothL1Loss()
-                loss_dir = loss_fn(curr_q_dir, target_q_dir)
-                loss_price = loss_fn(curr_q_price, target_q_price)
-                loss_vol = loss_fn(curr_q_vol, target_q_vol)
+                loss_dir = loss_fn(curr_q_dir, target_q_shared)
+                loss_price = loss_fn(curr_q_price, target_q_shared)
+                loss_vol = loss_fn(curr_q_vol, target_q_shared)
             
-            loss_vol_pred = nn.MSELoss()(pred_vol, aux_targets)
+            # FIX PERF-5: SmoothL1Loss for aux task (robust to volatility spikes)
+            loss_vol_pred = nn.SmoothL1Loss()(pred_vol, aux_targets)
             
-            total_loss = loss_dir + loss_price + loss_vol + self.auxiliary_weight * loss_vol_pred
+            # FIX CRIT-1: Average branch losses (not sum) for balanced V(s) gradient
+            total_loss = (loss_dir + loss_price + loss_vol) / 3.0 + self.auxiliary_weight * loss_vol_pred
         
         if not torch.isfinite(total_loss):
             print(f"WARNING: BDQ Loss is {total_loss.item()} (NaN/Inf). Skipping update.", flush=True)
@@ -339,9 +347,10 @@ class DeepScalperBDQ:
         # PER: Update priorities with TD errors (mean across branches)
         if self.use_per and per_indices is not None:
             with torch.no_grad():
-                td_dir = (curr_q_dir - target_q_dir).abs()
-                td_price = (curr_q_price - target_q_price).abs()
-                td_vol = (curr_q_vol - target_q_vol).abs()
+                # FIX: Use shared target (CRIT-1 consistency)
+                td_dir = (curr_q_dir - target_q_shared).abs()
+                td_price = (curr_q_price - target_q_shared).abs()
+                td_vol = (curr_q_vol - target_q_shared).abs()
                 # Mean TD error across 3 action branches per sample
                 td_errors = ((td_dir + td_price + td_vol) / 3.0).squeeze(1).cpu().numpy()
             

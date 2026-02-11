@@ -90,9 +90,10 @@ class TestDeepScalperEnv(unittest.TestCase):
         action = np.array([0, 0, 0])  # Hold
         obs, reward, terminated, truncated, info = self.env.step(action)
         
-        # PnL = (100.0 - 99.0) × 2.0 = 2.0, no fee, no hindsight
-        self.assertAlmostEqual(reward, 2.0)
-        self.assertAlmostEqual(info["reward_pnl"], 2.0)
+        # PnL = (100.0 - 99.0) × 2.0 = 2.0 USDT
+        # bps ≈ (2.0 / ~100000) × 10000 ≈ 0.2 (portfolio drifts slightly from initial)
+        self.assertAlmostEqual(reward, 0.2, places=2)
+        self.assertAlmostEqual(info["reward_pnl"], 0.2, places=2)
         self.assertAlmostEqual(info["reward_fee"], 0.0)
 
     def test_reward_fee_counted_once(self):
@@ -155,9 +156,10 @@ class TestDeepScalperEnv(unittest.TestCase):
         obs2, reward2, _, _, _ = env2.step(np.array([0, 0, 0]))
         
         # |reward1| == |reward2| (symmetric, no profit_weight asymmetry)
-        self.assertAlmostEqual(abs(reward1), abs(reward2))
-        self.assertAlmostEqual(reward1, 1.0)
-        self.assertAlmostEqual(reward2, -1.0)
+        # bps ≈ (1.0 / ~100000) × 10000 ≈ 0.1
+        self.assertAlmostEqual(abs(reward1), abs(reward2), places=4)
+        self.assertAlmostEqual(reward1, 0.1, places=2)
+        self.assertAlmostEqual(reward2, -0.1, places=2)
 
     def test_reward_hindsight_uses_prev_position(self):
         """Hindsight bonus uses prev_position (start of step), not current."""
@@ -179,9 +181,10 @@ class TestDeepScalperEnv(unittest.TestCase):
         obs, reward, terminated, truncated, info = self.env.step(action)
         
         # PnL = 0 (price unchanged), Fee = 0
-        # Hindsight = 0.5 × 1.0 × (110 - 100) = 5.0
-        self.assertAlmostEqual(info["reward_hindsight"], 5.0)
-        self.assertAlmostEqual(reward, 5.0)
+        # Hindsight (USDT) = 0.5 × 1.0 × (110 - 100) = 5.0
+        # bps ≈ (5.0 / ~100000) × 10000 ≈ 0.5
+        self.assertAlmostEqual(info["reward_hindsight"], 0.5, places=2)
+        self.assertAlmostEqual(reward, 0.5, places=2)
 
     def test_reward_no_risk_penalty(self):
         """Paper has no risk penalty — holding a large position should not penalize."""
@@ -310,9 +313,11 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Hindsight = 0.1 * 1.0 * (110 - 100) = 1.0  <-- CORRECT (T anchor)
         # Hindsight (Buggy) = 0.1 * 1.0 * (110 - 102) = 0.8  <-- WRONG (T+1 anchor)
         
+        # Hindsight (USDT) = 0.1 × 1.0 × (110 - 100) = 1.0
+        # bps = (1.0 / portfolio) × 10000 — portfolio ≈ 100000
         reward_hindsight = info["reward_hindsight"]
-        self.assertAlmostEqual(reward_hindsight, 1.0, places=4, 
-                               msg=f"Hindsight should be 1.0 (110-100), got {reward_hindsight}")
+        self.assertAlmostEqual(reward_hindsight, 0.1, places=3, 
+                               msg=f"Hindsight should be ~0.1 bps, got {reward_hindsight}")
 
     # ══════════════════════════════════════════════════════════════
     # Differential Sharpe Ratio (DSR) — Optional Risk-Aware Reward
@@ -335,8 +340,9 @@ class TestDeepScalperEnv(unittest.TestCase):
         action = np.array([0, 0, 0])
         obs, reward, _, _, info = env.step(action)
 
-        # Pure paper: PnL = (101-100)*1 = 1.0, no fee, no hindsight
-        self.assertAlmostEqual(reward, 1.0)
+        # Pure paper: PnL = (101-100)*1 = 1.0 USDT
+        # bps ≈ (1.0 / ~100000) × 10000 ≈ 0.1
+        self.assertAlmostEqual(reward, 0.1, places=2)
         self.assertAlmostEqual(info["reward_sharpe"], 0.0)
 
     def test_sharpe_reward_positive_trend(self):
@@ -416,6 +422,37 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.assertAlmostEqual(reward, expected_blend, places=6,
                                msg=f"Blend should be 0.5*{paper_pnl} + 0.5*{dsr}")
 
+
+    def test_reward_bps_scale_invariance(self):
+        """Doubling price and portfolio value produces the same bps reward."""
+        self.config["reward"] = {"scaling": 1.0}
+        
+        # Scenario A: BTC @ $100, $100K portfolio, +$1 move, 1 BTC
+        self.config["initial_balance"] = 100000.0
+        env_a = DeepScalperEnv(self.config, self.mock_handler)
+        env_a.reset()
+        mock_row_a = {'bid_price_1': 101.0, 'ask_price_1': 101.0}
+        self.mock_handler.step.return_value = mock_row_a
+        env_a.prev_position = 1.0
+        env_a.prev_mid_price = 100.0
+        env_a.position = 1.0
+        _, reward_a, _, _, _ = env_a.step(np.array([0, 0, 0]))
+        
+        # Scenario B: BTC @ $200, $200K portfolio, +$2 move, 1 BTC
+        # Same fractional return (1%) → same bps
+        self.config["initial_balance"] = 200000.0
+        env_b = DeepScalperEnv(self.config, self.mock_handler)
+        env_b.reset()
+        mock_row_b = {'bid_price_1': 202.0, 'ask_price_1': 202.0}
+        self.mock_handler.step.return_value = mock_row_b
+        env_b.prev_position = 1.0
+        env_b.prev_mid_price = 200.0
+        env_b.position = 1.0
+        _, reward_b, _, _, _ = env_b.step(np.array([0, 0, 0]))
+        
+        # Both should be 1 bps (0.01% return)
+        self.assertAlmostEqual(reward_a, reward_b, places=4,
+                               msg=f"bps rewards should be equal: {reward_a} vs {reward_b}")
 
     def test_margin_flip_long_to_short(self):
         """Test Margin Logic when flipping from Long to Short (Advisory fix)."""

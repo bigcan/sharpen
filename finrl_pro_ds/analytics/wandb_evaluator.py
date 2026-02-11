@@ -157,12 +157,17 @@ class WandbFinRLEvaluator:
         # Annualized Sharpe Ratio (assuming 252 trading days)
         mean_ret = returns.mean()
         std_ret = returns.std()
-        sharpe = (mean_ret / std_ret * np.sqrt(252)) if std_ret != 0 else 0
+        sharpe = (mean_ret / std_ret * np.sqrt(252)) if (std_ret != 0 and not np.isnan(std_ret)) else 0.0
         
         # Sortino Ratio
         downside_returns = returns[returns < 0]
-        downside_std = downside_returns.std()
-        sortino = (mean_ret / downside_std * np.sqrt(252)) if downside_std != 0 else 0
+        # Fix: If no downside returns, std is NaN or 0. If all returns negative, std is valid.
+        if len(downside_returns) < 2:
+            downside_std = 0.0
+        else:
+            downside_std = downside_returns.std()
+            
+        sortino = (mean_ret / downside_std * np.sqrt(252)) if (downside_std > 1e-9 and not np.isnan(downside_std)) else 0.0
         
         # Calmar Ratio
         # Need Cum Sum for MDD
@@ -180,7 +185,10 @@ class WandbFinRLEvaluator:
         else:
             annualized_return_geo = 0
             
-        calmar = (annualized_return_geo / abs(max_drawdown)) if max_drawdown != 0 else 0
+        if max_drawdown == 0:
+            calmar = 0.0
+        else:
+            calmar = (annualized_return_geo / abs(max_drawdown)) if (not np.isnan(max_drawdown) and abs(max_drawdown) > 1e-9) else 0.0
         
         # 2. Risk Metrics
         annualized_vol = std_ret * np.sqrt(252)
