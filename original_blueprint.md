@@ -46,7 +46,7 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 > - **Monitoring**: `wandb` (Weights & Biases) for experiment tracking.
 > - **Deployment**: `deploy_bare_metal.py` → GPUHub via SCP+SSH.
 > - **Hardware**: Optimized for **NVIDIA RTX 5090 (Blackwell)** (TF32, AMP, 12–24 Envs).
-> - **Data Source (Training)**: **Kaggle** LOB data (Parquet, `fastparquet`).
+> - **Data Source (Training)**: **CoinAPI** LOB data (Synthetic OHLCV, Parquet, `fastparquet`).
 > - **Security**: API Credentials loaded from `.env` (git-ignored).
 
 ## Non-Goals
@@ -328,7 +328,7 @@ Automated 4-step deployment via SSH/SCP:
 | 3. **Setup** | Miniconda + deps | PyTorch 2.5+, CUDA 12.x |
 | 4. **Launch** | `nohup` + PID tracking | `run_full_pipeline.py` or custom script |
 
-**CLI Flags**: `--script`, `--platform`, `--version`, `--config`, `--extra-args`, `--fresh_hpo`.
+**CLI Flags**: `--script`, `--platform`, `--version`, `--config`, `--extra-args`, `--fresh_hpo`, `--no-kill`.
 
 ### 6.3 Ralph Autonomous Driver
 **File**: [`ralph_autonomous.py`](file:///c:/FinRL/FinRL-Pro_DS/scripts/ralph_autonomous.py)
@@ -437,6 +437,12 @@ configs/
 ---
 
 ## 11. Implementation Updates Log
+
+### 2026-02-11 | Data Pipeline & Deployment Upgrade
+**Status:** ✅ Completed
+- **Data Source**: Switched to CoinAPI LOB data (Jan-Jun 2025) with synthetic OHLCV generation (`process_2025_data.py`).
+- **Deployment**: Added `--no-kill` flag to `deploy_bare_metal.py` to preserve existing processes (e.g., Synapse).
+- **Audit**: Verified data quality (0 NaNs, good stationarity).
 
 ### 2026-02-09 | HPO Search Space Fix (Negative Sharpe Investigation)
 **Status:** ✅ Completed

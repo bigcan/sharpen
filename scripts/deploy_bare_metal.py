@@ -56,7 +56,8 @@ def deploy(args):
     # CANONICAL NAMING: DeepScalper_V1_{Platform}_{YYYYMMDD}_{HHMM}
     # Suffixes/metadata go in tags, not run name
     from finrl_pro_ds.utils.naming import generate_run_name
-    full_run_name = generate_run_name(version="V1", platform="GPUHub")
+    version = args.version if args.version else "V1"
+    full_run_name = generate_run_name(version=version, platform="GPUHub")
     
     # If user provided a custom name, add it as a tag instead
     extra_tags = []
@@ -220,8 +221,9 @@ def deploy(args):
             all_extra_args = f"{all_extra_args} --tags {tag_str}"
     
     wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
+    version_arg = f"--version {args.version}" if args.version else ""
     # FIX: Remove () around ulimit so it applies to the current shell and subsequent nohup process
-    cmd = f"{export_path} && {wandb_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {all_extra_args} > run.log 2>&1 & echo $! > run.pid"
+    cmd = f"{export_path} && {wandb_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {version_arg} {all_extra_args} > run.log 2>&1 & echo $! > run.pid"
     
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
@@ -253,6 +255,7 @@ if __name__ == "__main__":
     parser.add_argument("--extra_args", default="", help="Extra arguments to pass to the script (e.g. '--trials 50 --steps 200000')")
     parser.add_argument("--fresh_hpo", action="store_true", help="Wipe existing HPO database for a fresh start")
     parser.add_argument("--no_kill", action="store_true", help="Do NOT kill existing processes (e.g. preserve Synapse run)")
+    parser.add_argument("--version", default=None, help="Version tag (e.g. V1.1)")
     args = parser.parse_args()
     
     deploy(args)
