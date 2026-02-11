@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
+from finrl_pro_ds.analytics.wandb_evaluator import WandbFinRLEvaluator
 
 
 # ──────────────────────────────────────────────────────────────
@@ -419,6 +420,42 @@ class TestFix5HPORouting:
         # Siblings preserved
         assert result["env"]["reward"]["scaling"] == 1.0
         assert result["agents"]["bdq"]["gamma"] == 0.99
+
+
+
+# ══════════════════════════════════════════════════════════════
+# FIX 6 — Zero-Valued Risk Metrics Regression
+# ══════════════════════════════════════════════════════════════
+class TestFix6ZeroMetricsRegression:
+    """Risk metrics (Sortino, Calmar) must assume non-zero values even on negative returns."""
+
+    def test_wandb_evaluator_losing_streak(self):
+        """Standard evaluator scenario with strictly negative returns."""
+        # Create a scenario with losing streak (negative returns only)
+        dates = pd.date_range(start="2023-01-01", periods=10, freq="D")
+        # Account value drops from 100 to 90
+        values = [100.0, 99.0, 98.0, 97.0, 96.0, 95.0, 94.0, 93.0, 92.0, 91.0]
+        df = pd.DataFrame({"account_value": values, "date": dates})
+        
+        # Instantiate evaluator (mocking dict_agents as empty)
+        evaluator = WandbFinRLEvaluator(
+            df_ensemble=df, 
+            dict_agents={}, 
+            benchmark_ticker="BTC-USD"
+        )
+        
+        # Calculate metrics for Ensemble
+        metrics = evaluator.calculate_metrics(evaluator.df_ensemble, "Ensemble")
+        
+        # Sortino should be negative but computable (not 0.0 unless flat)
+        # Downside deviation is non-zero, mean return is negative.
+        assert metrics["Sortino_Ratio"] < -0.1, f"Sortino should be negative, got {metrics['Sortino_Ratio']}"
+        
+        # Calmar should be negative (Annualized Ret < 0, MaxDD < 0)
+        assert metrics["Calmar_Ratio"] < -0.1, f"Calmar should be negative, got {metrics['Calmar_Ratio']}"
+        
+        # Max Drawdown should be roughly -9%
+        assert metrics["Max_Drawdown"] < -0.05
 
 
 if __name__ == "__main__":

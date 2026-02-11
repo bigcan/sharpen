@@ -112,11 +112,13 @@ class MacroEncoder(nn.Module):
         layers = []
         in_dim = input_size
         
-        for h_dim in hidden_sizes:
+        for i, h_dim in enumerate(hidden_sizes):
             layers.append(nn.Linear(in_dim, h_dim))
             layers.append(nn.LayerNorm(h_dim))
             layers.append(nn.LeakyReLU())
-            if dropout > 0:
+            # FIX PERF-4: Skip dropout on last layer to prevent asymmetric noise
+            # at fusion (micro encoder has no dropout on its output)
+            if dropout > 0 and i < len(hidden_sizes) - 1:
                 layers.append(nn.Dropout(dropout))
             in_dim = h_dim
             

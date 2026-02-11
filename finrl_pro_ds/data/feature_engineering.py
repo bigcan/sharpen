@@ -29,11 +29,19 @@ class DeepScalperFeatureEngineer:
         # Avoid div by zero
         mp = np.where(mp == 0, 1.0, mp)
         
-        # Approximate Volume Statistics for Crypto (Log Space)
-        # log1p(0.1) ~ 0.1, log1p(100) ~ 4.6, log1p(10000) ~ 9.2
-        # Mean ~ 5.0, Std ~ 3.0 covers decent range
-        VOL_MEAN = 5.0
-        VOL_STD = 3.0
+        # FIX CRIT-4: Compute volume normalization stats from ACTUAL data
+        # instead of hardcoded approximations. This adapts to exchange-specific
+        # and time-varying volume distributions.
+        vol_cols = [f'{side}_vol_{i}' for side in ('bid', 'ask') for i in range(1, 6)
+                    if f'{side}_vol_{i}' in df.columns]
+        if vol_cols:
+            all_log_vols = np.concatenate([np.log1p(df[c].values) for c in vol_cols])
+            VOL_MEAN = float(np.mean(all_log_vols))
+            VOL_STD = float(np.std(all_log_vols)) + 1e-8  # prevent div-by-zero
+        else:
+            # Fallback if no volume columns found
+            VOL_MEAN = 5.0
+            VOL_STD = 3.0
         
         PRICE_CLAMP = 50.0   # ±50 bps (0.5%) max distance from mid
         VOL_CLAMP = 5.0      # ±5 std deviations
