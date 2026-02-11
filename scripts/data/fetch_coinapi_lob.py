@@ -22,6 +22,11 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from pathlib import Path
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 
 # ─── Constants ───────────────────────────────────────────────────────
 BASE_URL = "https://rest.coinapi.io/v1"
@@ -170,7 +175,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Fetch CoinAPI LOB Data for DeepScalper"
     )
-    parser.add_argument("--api-key", required=True, help="CoinAPI API key")
+    parser.add_argument("--api-key", required=False, help="CoinAPI API key (or set COINAPI_KEY env var)")
     parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="End date YYYY-MM-DD")
     parser.add_argument(
@@ -197,6 +202,10 @@ def main():
     )
 
     args = parser.parse_args()
+    
+    api_key = args.api_key or os.getenv("COINAPI_KEY")
+    if not api_key:
+        parser.error("API Key must be provided via --api-key or COINAPI_KEY env var")
 
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -247,7 +256,7 @@ def main():
         daily_file = output_dir / f"lob_{date_str}.parquet"
 
         # Fetch raw snapshots
-        snapshots = fetch_day(args.api_key, args.symbol, date_str, args.levels)
+        snapshots = fetch_day(api_key, args.symbol, date_str, args.levels)
 
         if not snapshots:
             print(f"  ⚠ No data for {date_str}, skipping.")
