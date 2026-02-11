@@ -119,3 +119,9 @@ archive/
 .agent/ralph.log
 .agent/ralph_log.md
 .agent/ralph_state.json
+
+# Agent memory (ephemeral logs, keep core.md + SKILL.md)
+.agent/memory/logs/*
+!.agent/memory/logs/.gitkeep
+.agent/memory/snapshots/*
+!.agent/memory/snapshots/.gitkeep
