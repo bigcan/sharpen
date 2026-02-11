@@ -665,6 +665,7 @@ def main():
     parser.add_argument("--run_name", type=str, default=None, help="Override WandB Run Name")
     parser.add_argument("--trials", type=int, default=None, help="Number of HPO trials")
     parser.add_argument("--steps", type=int, default=None, help="Training steps override")
+    parser.add_argument("--version", type=str, default="V1", help="Version tag")
     args = parser.parse_args()
 
     base_config = load_config(args.config)
@@ -677,7 +678,7 @@ def main():
         run_name = args.run_name
     else:
         platform = "GPUHub" if os.path.exists("/workspace") else "Local"
-        run_name = generate_run_name(version="V1", platform=platform)
+        run_name = generate_run_name(version=args.version, platform=platform)
     
     logger.info(f"Pipeline Run: {run_name}")
     
