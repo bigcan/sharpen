@@ -84,6 +84,10 @@ class DeepScalperEnv(gym.Env):
         self.sharpe_weight = float(self.reward_config.get("sharpe_weight", 0.0))
         self.sharpe_horizon = int(self.reward_config.get("sharpe_horizon", 100))
 
+        # Hold Bonus: small reward (in bps) for staying flat — fee-avoidance shaping
+        # Default 0.0 preserves paper behavior; production use ~0.1 bps
+        self.hold_bonus_bps = float(self.reward_config.get("hold_bonus_bps", 0.0))
+
 
         
         # Spaces
@@ -107,8 +111,11 @@ class DeepScalperEnv(gym.Env):
         # [0]  = At Touch (Best Bid/Ask)
         # [1+] = Passive
         self.price_offsets = [-1, 0, 1, 2, 3]  # Ticks from best bid/ask
-        # Volume proportions (of max position size)
-        self.vol_proportions = [0.1, 0.25, 0.5, 0.75, 1.0]
+        # Volume proportions (of max position size) — configurable via YAML
+        # Reduced defaults: min trade 2% of max_pos (was 10%) to lower fee drag
+        self.vol_proportions = list(config.get("action", {}).get(
+            "vol_proportions", [0.02, 0.05, 0.1, 0.2, 0.5]
+        ))
         # FIX Bug#1: Read from nested action config (YAML: env.action.max_position)
         # with fallback to flat key for backward compatibility
         self.max_position = config.get("action", {}).get("max_position", config.get("max_position", 1.0))
@@ -488,6 +495,14 @@ class DeepScalperEnv(gym.Env):
         reward_pnl = 0.0
         reward_fee = 0.0
         reward_hindsight = 0.0
+        hold_bonus = 0.0
+        
+        # --- Component 0: Hold Bonus (fee-avoidance shaping) ---
+        # When agent holds AND is flat, reward for not incurring unnecessary fees.
+        # This counterbalances the structural fee drag that biases toward inactivity
+        # only after the agent has already learned to trade randomly.
+        if direction == 0 and abs(self.prev_position) < 1e-12 and self.hold_bonus_bps > 0:
+            hold_bonus = self.hold_bonus_bps
         
         # --- Component 1: Instant PnL (price change × position at START of step) ---
         if self.prev_mid_price > 0 and abs(self.prev_position) > 1e-12:
@@ -521,8 +536,8 @@ class DeepScalperEnv(gym.Env):
         reward_fee_bps = (reward_fee / norm_divisor) * 10000.0
         reward_hindsight_bps = (reward_hindsight / norm_divisor) * 10000.0
 
-        # Total paper reward (Section 3.2 + 4.2)
-        paper_reward = (reward_pnl_bps + reward_fee_bps + reward_hindsight_bps) * self.reward_scaling
+        # Total paper reward (Section 3.2 + 4.2) + hold bonus shaping
+        paper_reward = (reward_pnl_bps + reward_fee_bps + reward_hindsight_bps + hold_bonus) * self.reward_scaling
 
         # --- Component 4 (Optional): Differential Sharpe Ratio ---
         reward_sharpe = 0.0
@@ -581,10 +596,11 @@ class DeepScalperEnv(gym.Env):
             "cumulative_slippage": self.cumulative_slippage,
             "total_execution_costs": self.cumulative_fees + self.cumulative_slippage,
             "timestamp": step_data.get("timestamp") if step_data is not None else None,
-            # Telemetry (paper-aligned + optional DSR)
+            # Telemetry (paper-aligned + optional DSR + hold shaping)
             "reward_pnl": reward_pnl_bps,
             "reward_fee": reward_fee_bps,
             "reward_hindsight": reward_hindsight_bps,
+            "reward_hold_bonus": hold_bonus,
             "reward_sharpe": reward_sharpe,
             "reward_total": reward
         }

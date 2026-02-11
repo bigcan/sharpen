@@ -38,15 +38,18 @@ env:
     hindsight_horizon: 180    # Paper optimal (min). HPO range: [30..180]
     volatility_horizon: 100   # For Aux Target calculation (Section 4.4)
     # Risk-Aware Reward: Differential Sharpe Ratio (Moody & Saffell 2001)
-    # Optional — disabled by default. Enable for future risk-aware research.
-    sharpe_weight: 0.0        # 0.0 = paper-only. Range: [0.0, 1.0]
+    sharpe_weight: 0.3        # Blend: 0.7 × paper + 0.3 × DSR (was 0.0)
     sharpe_horizon: 100       # EMA lookback window for DSR statistics
+    # Fee-avoidance shaping: small reward for holding flat (no unnecessary trades)
+    hold_bonus_bps: 0.1       # 0.1 bps reward for holding when flat
     
   action:
     direction_bins: 3 
     price_bins: 5     
     volume_bins: 5    
     max_position: 1.0 # Max BTC (reduced: 5 BTC @ $20K = 100% of account)
+    # Reduced from [0.1, 0.25, 0.5, 0.75, 1.0] to lower fee drag per trade
+    vol_proportions: [0.02, 0.05, 0.1, 0.2, 0.5]
 
 network:
   # V9.5 Blackwell Architecture
@@ -64,7 +67,7 @@ agents:
   bdq:
     # Reference: 1e-4 (fixed)
     learning_rate: 0.0001
-    gamma: 0.995 # Reference: 0.99-0.995
+    gamma: 0.99  # Reduced from 0.995: shorter horizon (100 steps) better for scalping
     
     # Hybrid Loss Weight (rho)
     # FIX PERF-5: Reduced from 1.0 to 0.1 to prevent aux volatility loss
