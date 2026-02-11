@@ -498,5 +498,91 @@ class TestDeepScalperEnv(unittest.TestCase):
         allowed = env._check_margin(-2.0, 3.0, 100.0, 1)
         self.assertTrue(allowed, "Should allow flip if balance covers net new long")
 
+    def test_vol_proportions_from_config(self):
+        """Fix 1: Volume proportions should be configurable via YAML."""
+        # Default (new reduced defaults)
+        config_default = {
+            "symbol": "BTCUSDT",
+            "window_size": 50,
+        }
+        env = DeepScalperEnv(config_default, self.mock_handler)
+        self.assertEqual(env.vol_proportions, [0.02, 0.05, 0.1, 0.2, 0.5],
+                         "Default vol_proportions should be reduced")
+        
+        # Custom from config
+        config_custom = {
+            "symbol": "BTCUSDT",
+            "window_size": 50,
+            "action": {"vol_proportions": [0.01, 0.05, 0.1, 0.25, 0.5]}
+        }
+        env_custom = DeepScalperEnv(config_custom, self.mock_handler)
+        self.assertEqual(env_custom.vol_proportions, [0.01, 0.05, 0.1, 0.25, 0.5])
+    
+    def test_hold_bonus_flat_position(self):
+        """Fix 2: Hold bonus should only apply when agent holds AND is flat."""
+        self.config["reward"] = {"scaling": 1.0, "hold_bonus_bps": 0.1}
+        self.config["initial_balance"] = 100000.0
+        env = DeepScalperEnv(self.config, self.mock_handler)
+        env.reset()
+        
+        mock_row = {'bid_price_1': 100.0, 'ask_price_1': 100.0}
+        self.mock_handler.step.return_value = mock_row
+        
+        # Case 1: Hold while flat → should get hold bonus
+        env.prev_position = 0.0
+        env.prev_mid_price = 100.0
+        env.position = 0.0
+        obs, reward, _, _, info = env.step(np.array([0, 0, 0]))  # Hold
+        self.assertAlmostEqual(info["reward_hold_bonus"], 0.1,
+                               msg="Hold bonus should be 0.1 bps when flat")
+        self.assertAlmostEqual(reward, 0.1, places=4,
+                               msg="Total reward should include hold bonus")
+        
+        # Case 2: Hold while positioned → NO hold bonus
+        env.prev_position = 1.0
+        env.prev_mid_price = 100.0
+        env.position = 1.0
+        obs, reward2, _, _, info2 = env.step(np.array([0, 0, 0]))  # Hold
+        self.assertAlmostEqual(info2["reward_hold_bonus"], 0.0,
+                               msg="Hold bonus should be 0 when positioned")
+        
+        # Case 3: Trade while flat → NO hold bonus
+        env.prev_position = 0.0
+        env.prev_mid_price = 100.0
+        env.position = 0.0
+        obs, reward3, _, _, info3 = env.step(np.array([1, 0, 0]))  # Buy
+        self.assertAlmostEqual(info3["reward_hold_bonus"], 0.0,
+                               msg="Hold bonus should be 0 when trading")
+
+    def test_vol_proportions_trade_sizing(self):
+        """Fix 1: Trade quantities should use the new vol_proportions."""
+        self.config["action"] = {
+            "max_position": 1.0,
+            "vol_proportions": [0.02, 0.05, 0.1, 0.2, 0.5]
+        }
+        env = DeepScalperEnv(self.config, self.mock_handler)
+        env.reset()
+        
+        # Set up market data so we can verify order quantity
+        mock_row = {
+            'bid_price_1': 100.0, 'ask_price_1': 100.0,
+            'bid_vol_1': 10.0, 'ask_vol_1': 10.0
+        }
+        for i in range(2, 6):
+            mock_row[f'bid_price_{i}'] = 99.0
+            mock_row[f'bid_vol_{i}'] = 10.0
+            mock_row[f'ask_price_{i}'] = 101.0
+            mock_row[f'ask_vol_{i}'] = 10.0
+        self.mock_handler.step.return_value = mock_row
+        
+        # Action: Buy, price_idx=0, vol_idx=0 (smallest volume)
+        env.step(np.array([1, 0, 0]))
+        
+        # Check pending order quantity: vol_proportions[0] * max_position = 0.02 * 1.0 = 0.02
+        self.assertIsNotNone(env.pending_order, "Should have a pending buy order")
+        _, _, order_qty, _ = env.pending_order
+        self.assertAlmostEqual(order_qty, 0.02,
+                               msg=f"Min volume should be 0.02 BTC, got {order_qty}")
+
 if __name__ == "__main__":
     unittest.main()
