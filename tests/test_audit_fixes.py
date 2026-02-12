@@ -28,10 +28,10 @@ def test_double_dqn_train():
     agent = _make_agent()
     for _ in range(128):
         state = {'micro': np.random.randn(50, 27).astype(np.float32),
-                 'private': np.random.randn(50, 2).astype(np.float32),
+                 'private': np.random.randn(50, 3).astype(np.float32),
                  'macro': np.random.randn(11).astype(np.float32)}
         next_state = {'micro': np.random.randn(50, 27).astype(np.float32),
-                      'private': np.random.randn(50, 2).astype(np.float32),
+                      'private': np.random.randn(50, 3).astype(np.float32),
                       'macro': np.random.randn(11).astype(np.float32)}
         action = [np.random.randint(3), np.random.randint(5), np.random.randint(5)]
         agent.memory.push(state, action, float(np.random.randn()), next_state, False, 0.1)

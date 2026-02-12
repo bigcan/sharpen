@@ -36,7 +36,7 @@ class FlatReplayBuffer:
         capacity: int,
         micro_shape: Tuple[int, ...] = (50, 27),
         macro_shape: Tuple[int, ...] = (11,),
-        private_shape: Tuple[int, ...] = (50, 2),
+        private_shape: Tuple[int, ...] = (50, 3),
         action_shape: Tuple[int, ...] = (3,),
     ):
         self.capacity = capacity

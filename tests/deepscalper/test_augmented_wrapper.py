@@ -45,7 +45,7 @@ def _make_step_data(mid=50000.0, spread_bps=2.0):
         data[f"bid_vol_{i}"] = 10.0 + i
         data[f"ask_price_{i}"] = ap + i * 0.1
         data[f"ask_vol_{i}"] = 8.0 + i
-        data[f"vol_imbalance_{i}"] = 0.5 * i
+        data[f"ofi_{i}"] = 0.5 * i
     # Macro features
     for col in ['z_open', 'z_high', 'z_low', 'z_close', 'z_volume',
                 'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30']:

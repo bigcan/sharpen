@@ -115,13 +115,13 @@ class DeepScalperBDQ:
             macro_cfg = network_config.get("macro_config", {})
             window_size = micro_cfg.get("window_size", 50)
             micro_input = micro_cfg.get("input_size", 27)
-            private_input = micro_cfg.get("private_input_size", 2)
+            private_input = micro_cfg.get("private_input_size", 3)
             macro_input = macro_cfg.get("input_size", 11)
             self.memory = FlatReplayBuffer(
                 capacity=buffer_size,
                 micro_shape=(window_size, micro_input),
                 macro_shape=(macro_input,),
-                private_shape=(window_size, private_input),  # FIX: env returns private_window (W, 2), not flat (2,)
+                private_shape=(window_size, private_input),  # FIX: env returns private_window (W, 3), not flat (3,)
                 action_shape=(len(action_dims),),
             )
             est_gb = self.memory.nbytes() / (1024**3)
