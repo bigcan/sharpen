@@ -305,7 +305,7 @@ class TestFix4BacktestAgentParity:
             "network": {
                 "micro_config": {"input_size": 27, "private_input_size": 2, "hidden_size": 128},
                 "macro_config": {"input_size": 11, "hidden_sizes": (64, 64)},
-                "action_space_dims": (3, 7, 7),  # Non-default dims
+                "action_space_dims": (7, 9),  # Non-default dims
             },
             "agents": {"bdq": {
                 "learning_rate": 1e-4,
@@ -319,20 +319,21 @@ class TestFix4BacktestAgentParity:
                 "epsilon_decay": 0.99999,
             }},
             "env": {"action": {
-                "direction_bins": 3,
                 "price_bins": 7,
-                "volume_bins": 7,
+                "signed_qty_proportions": [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5],
             }},
             "training": {"use_amp": False},
         }
         # Extract action_dims the way the fixed backtest code does
         action_config = config.get("env", {}).get("action", {})
-        action_dims = (
-            action_config.get("direction_bins", 3),
-            action_config.get("price_bins", 5),
-            action_config.get("volume_bins", 5),
+        signed_qty_props = action_config.get(
+            "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
         )
-        assert action_dims == (3, 7, 7)
+        action_dims = (
+            action_config.get("price_bins", 5),
+            len(signed_qty_props),
+        )
+        assert action_dims == (7, 9)
 
     def test_missing_network_raises(self):
         """Config without 'network' should raise ValueError, not silently default."""

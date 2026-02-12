@@ -520,10 +520,12 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         
         # Read action dims from config (mirrors trainer L24-29)
         action_config = config.get("env", {}).get("action", {})
+        signed_qty_props = action_config.get(
+            "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+        )
         action_dims = (
-            action_config.get("direction_bins", 3),
             action_config.get("price_bins", 5),
-            action_config.get("volume_bins", 5)
+            len(signed_qty_props)
         )
         
         agent = DeepScalperBDQ(
