@@ -10,7 +10,7 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 | Feature | DeepScalper Paper (Sun et al.) | FinRL-Pro Implementation | Status |
 | :--- | :--- | :--- | :--- |
 | **Core Architecture** | Micro(LOB)+Macro(Tech) Fusion | Micro(LOB)+Macro(Tech) Fusion | 🟢 **Aligned** |
-| **Action Space** | Discrete Branching (Price/Vol) | Discrete Branching (**Dir**/Price/Vol) — 3 branches | 🟡 **Extended** |
+| **Action Space** | Discrete Branching (Price/Vol) | Discrete Branching (**Price/SignedQty**) — 2 branches | � **Aligned** |
 | **Primary Algorithm** | Dueling DQN | Branching Dueling DQN (BDQ) | 🟢 **Aligned** |
 | **Agent Strategy** | Single Agent | **Single BDQ Agent** | 🟢 **Aligned** |
 | **Experience Replay** | PER (Section 4.3) | **PER** (SumTree, IS weights, β-annealing) | 🟢 **Aligned** |
@@ -100,13 +100,13 @@ MacroEncoder(B, 11) ─────────────────→ (B, 1
                                                           └─→ AuxHead: Volatility Pred   → (B, 1)
 ```
 
-**Action Space** (3 branches, 75 combinations):
-
+**Action Space** (2 branches, 45 combinations):
 | Branch | Bins | Semantics |
 |:---|:---|:---|
-| Direction | 3 | Hold / Buy / Sell |
 | Price | 5 | Discrete price offsets from mid |
-| Volume | 5 | Discrete quantity proportions of `max_position` |
+| SignedQty | 9 | Relative to `max_position`: [-0.5, -0.2, -0.1, -0.05, 0.0, +0.05, +0.1, +0.2, +0.5] |
+
+**Note**: Direction is implicit in SignedQty (Negative = Sell, Positive = Buy). No separate direction branch.
 
 **Dueling Mechanism**: $Q(s,a) = V(s) + Adv(s,a) - \text{mean}(Adv)$ applied independently per branch.
 
@@ -186,9 +186,13 @@ $$r_t = \underbrace{(p_{t+1} - p_t) \times pos_t - fees}_{r_{PnL}} + \underbrace
 |:---|:---|:---|
 | Maker Fee | 2 bps | Binance VIP1 |
 | Taker Fee | 4 bps | Binance VIP1 |
-| Margin Requirement | 1.0 (Spot) | 0.5 = 2× leverage |
+| Margin Requirement | 0.2 (5x) | 1.0 (Spot) | 0.2 = 5× leverage (Fix 5) |
 
 **Margin Check**: Orders rejected if insufficient balance to cover initial margin. Symmetric margin logic prevents asymmetric position bias.
+
+**Flip Trade Splitting (Fix 3)**: Trades flipping net position (e.g., +Long → -Short) are split atomically:
+1.  **Close Leg**: Releases debt proportionally, repays to balance.
+2.  **Open Leg**: Debits margin, adds new debt for remaining quantity.
 
 ### 3.4 Slippage Model
 Market-impact slippage: `slippage = base + (trade_size / liquidity) × impact_factor`. Applied to execution price for realistic simulation.
@@ -198,7 +202,8 @@ Market-impact slippage: `slippage = base + (trade_size / liquidity) × impact_fa
 - Max drawdown exceeded (`max_drawdown_pct`, default 30%)
 
 ### 3.6 Private State Augmentation
-During `reset()`, the trader's initial private state (position, balance) may be randomly augmented to improve data efficiency and prevent overfitting (per paper Section 4.2).
+During `reset()`, the trader's initial private state (position, balance) may be randomly augmented to improve data efficiency.  
+**Fix 5**: `notional_debt` is initialized proportional to augmented position value (`value * (1 - margin)`) to ensure correct portfolio valuation at episode start.
 
 ---
 
@@ -477,4 +482,9 @@ configs/
 
 ### 2026-02-01 | RTX 5090 Precision Optimization
 **Status:** ✅ Implemented
-- TF32 Precision & FP16 Enforcement.
+### 2026-02-12 | Adversarial Audit Fixes (5-Star)
+**Status:** ✅ Completed & Deployed
+- **Action Space**: Consolidated 3-branch (Dir/Price/Vol) → Paper-aligned 2-branch (Price/SignedGenQty).
+- **Leverage Logic**: Fixed `notional_debt` init in augmentation (was 0, now proportional).
+- **Execution Logic**: Atomic split for flip trades (Close+Open) to fix zero-margin exploit.
+- **Config**: Defaulted to `margin=0.2` (5x) and 2-branch action space.

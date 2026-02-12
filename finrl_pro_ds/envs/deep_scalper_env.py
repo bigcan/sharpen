@@ -252,6 +252,12 @@ class DeepScalperEnv(gym.Env):
                     max_bal = max(min_bal * 1.1, self.initial_balance * 1.5)
                     self.balance = np.random.uniform(min_bal, max_bal)
                     
+                    # FIX AUDIT-A: Initialize notional_debt for leveraged positions
+                    # Without this, portfolio_value = balance + pos*mid (overstated)
+                    # Correct:     portfolio_value = balance + pos*mid - debt
+                    if self.margin_requirement < 1.0 and abs(self.position) > 1e-12:
+                        self.notional_debt = value * (1.0 - self.margin_requirement)
+                    
                     # Re-normalize/fill private window with NEW state
                     aug_private_state = self._normalize_private_state(self.position, self.balance)
                     self.private_window = np.tile(aug_private_state, (self.window_size, 1))
@@ -373,13 +379,32 @@ class DeepScalperEnv(gym.Env):
                         notional = fill_price * exec_qty
                         
                         # Margin-based accounting (symmetric with sell-side)
+                        # FIX AUDIT-B: Split flip trades into close + open legs
                         if self.position < -1e-12 and self.notional_debt > 0:
-                            # Closing short: release proportional debt
-                            close_frac = min(exec_qty / abs(self.position), 1.0)
+                            # Determine how much is closing vs opening
+                            close_qty = min(exec_qty, abs(self.position))
+                            open_qty = exec_qty - close_qty  # > 0 if flipping
+                            
+                            # Leg 1: Close short — release proportional debt
+                            close_frac = min(close_qty / abs(self.position), 1.0)
                             debt_release = self.notional_debt * close_frac
                             self.notional_debt -= debt_release
-                            # Cost = notional to buy back + fee - debt released
-                            self.balance -= (notional + fee - debt_release)
+                            close_notional = fill_price * close_qty
+                            close_fee = close_notional * fee_rate
+                            self.balance -= (close_notional + close_fee - debt_release)
+                            
+                            # Leg 2: Open new long (if flipping)
+                            if open_qty > 1e-12:
+                                open_notional = fill_price * open_qty
+                                open_fee = open_notional * fee_rate
+                                margin_cost = open_notional * self.margin_requirement + open_fee
+                                borrowed = open_notional * (1.0 - self.margin_requirement)
+                                self.balance -= margin_cost
+                                self.notional_debt += borrowed
+                                # Recalculate total fee for tracking
+                                fee = close_fee + open_fee
+                            else:
+                                fee = close_fee
                         else:
                             # Opening/extending long: debit margin, add debt
                             margin_cost = notional * self.margin_requirement + fee
@@ -440,14 +465,34 @@ class DeepScalperEnv(gym.Env):
                         proceeds = notional - fee
                         
                         # Margin-based: on sell, release borrowed portion
-                        # If closing a long, repay proportional debt
+                        # FIX AUDIT-B: Split flip trades into close + open legs
                         if self.position > 1e-12 and self.notional_debt > 0:
-                            # Proportion of position being closed
-                            close_frac = min(exec_qty / self.position, 1.0)
+                            # Determine how much is closing vs opening
+                            close_qty = min(exec_qty, self.position)
+                            open_qty = exec_qty - close_qty  # > 0 if flipping
+                            
+                            # Leg 1: Close long — release proportional debt
+                            close_frac = min(close_qty / self.position, 1.0)
                             debt_release = self.notional_debt * close_frac
                             self.notional_debt -= debt_release
-                            # Net credit: proceeds minus debt repayment
-                            self.balance += (proceeds - debt_release)
+                            close_notional = fill_price * close_qty
+                            close_fee = close_notional * fee_rate
+                            close_proceeds = close_notional - close_fee
+                            self.balance += (close_proceeds - debt_release)
+                            
+                            # Leg 2: Open new short (if flipping)
+                            if open_qty > 1e-12:
+                                open_notional = fill_price * open_qty
+                                open_fee = open_notional * fee_rate
+                                margin_cost = open_notional * self.margin_requirement + open_fee
+                                borrowed = open_notional * (1.0 - self.margin_requirement)
+                                self.balance -= margin_cost
+                                self.notional_debt += borrowed
+                                # Recalculate total fee for tracking
+                                fee = close_fee + open_fee
+                            else:
+                                fee = close_fee
+                            proceeds = 0  # Handled above per-leg
                         else:
                             # Opening/extending short: debit margin, add debt
                             margin_cost = notional * self.margin_requirement + fee

@@ -36,7 +36,10 @@ class TestTrainerHPO(unittest.TestCase):
     def setUp(self):
         self.config = {
             "env": {
-                "action": {"direction_bins": 3, "price_bins": 5, "volume_bins": 5}
+                "action": {
+                    "price_bins": 5,
+                    "signed_qty_proportions": [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+                }
             },
             "network": {
                 "micro_config": {"input_size": 44, "private_input_size": 2, "hidden_size": 256, "rnn_type": "LSTM"},
