@@ -20,17 +20,23 @@ class DeepScalperTrainer:
         self.device = device
         self.run_name = run_name or datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Read Action Dims from Config (Default: 3, 5, 5)
+        # Read Action Dims from Config — Paper-aligned: 2 branches (Price, SignedQty)
         action_config = config.get("env", {}).get("action", {})
-        action_dims = (
-            action_config.get("direction_bins", 3),
-            action_config.get("price_bins", 5),
-            action_config.get("volume_bins", 5)
+        signed_qty_props = action_config.get(
+            "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
         )
+        action_dims = (
+            action_config.get("price_bins", 5),
+            len(signed_qty_props)
+        )
+        
+        # Inject action_space_dims into network config so BDQ assertion is guaranteed
+        net_cfg = dict(config["network"])
+        net_cfg["action_space_dims"] = action_dims
         
         # Agent Init
         self.agent = DeepScalperBDQ(
-            network_config=config["network"],
+            network_config=net_cfg,
             lr=config["agents"]["bdq"]["learning_rate"],
             gamma=config["agents"]["bdq"]["gamma"],
             epsilon_start=config["agents"]["bdq"].get("epsilon_start", 1.0),
@@ -52,6 +58,7 @@ class DeepScalperTrainer:
         
         # Training Params
         self.total_timesteps = config["training"]["total_timesteps"]
+        self.training_epochs = config["training"].get("training_epochs", 1)  # Paper: ~5 epochs
         self.update_interval = config["agents"]["bdq"].get("update_interval", 1.0)
         self.log_interval = config["training"]["log_interval"]
         self.checkpoint_interval = config["agents"]["bdq"]["checkpoint_interval"]
@@ -68,7 +75,7 @@ class DeepScalperTrainer:
         # FIX PERF-8: Initialize cosine LR scheduler for stable late-training convergence
         # FIX N1: Resolve num_envs from env before use (was NameError)
         _num_envs = getattr(self.env, 'num_envs', 1)
-        total_updates = int(self.total_timesteps * self.update_interval / _num_envs) if _num_envs > 0 else 100000
+        total_updates = int(self.total_timesteps * self.training_epochs * self.update_interval / _num_envs) if _num_envs > 0 else 100000
         self.agent._lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.agent.optimizer, T_max=total_updates, eta_min=1e-6
         )
@@ -87,7 +94,7 @@ class DeepScalperTrainer:
             optuna_trial: Optuna Trial object for HPO reporting/pruning.
             pruning_callback: Function() -> float to evaluate agent during training.
         """
-        print(f"Starting Training: Single BDQ Agent | Device: {self.device} | Start Step: {start_step}")
+        print(f"Starting Training: Single BDQ Agent | Device: {self.device} | Start Step: {start_step} | Epochs: {self.training_epochs}")
         
         # Init State - Obs is Dict: {'micro': ..., 'macro': ..., 'private': ...}
         if skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
@@ -113,13 +120,15 @@ class DeepScalperTrainer:
             n_calls = self.total_timesteps // num_envs
 
         if n_calls > 0:
+            # Scale epsilon decay across ALL epochs
+            total_calls = n_calls * self.training_epochs
             epsilon_end = self.config.get("agents", {}).get("bdq", {}).get("epsilon_end", 0.01)
-            computed_decay = np.exp(np.log(max(epsilon_end, 1e-10)) / n_calls)
+            computed_decay = np.exp(np.log(max(epsilon_end, 1e-10)) / total_calls)
             self.agent.epsilon_decay = computed_decay
             if self.hpo_mode:
-                print(f"[HPO] Overriding epsilon_decay to {computed_decay:.6f} for {steps_per_trial} steps (~{n_calls} updates)")
+                print(f"[HPO] Overriding epsilon_decay to {computed_decay:.6f} for {steps_per_trial} steps (~{total_calls} updates, {self.training_epochs} epochs)")
             else:
-                print(f"[Train] Computed epsilon_decay = {computed_decay:.6f} for {self.total_timesteps} steps (~{n_calls} updates)")
+                print(f"[Train] Computed epsilon_decay = {computed_decay:.6f} for {self.total_timesteps}x{self.training_epochs} steps (~{total_calls} updates)")
         
         global_step = start_step
         episode_rewards = deque(maxlen=100)
@@ -142,7 +151,7 @@ class DeepScalperTrainer:
         # Initialize to 0 to skip rung 0 - avoids eval at step ~12 before learning starts (P1a fix)
         self._last_prune_rung = 0
         
-        # FIX PERF-3 + N4: Hoist extract_tensors outside loop to avoid per-iteration closure recreation
+        # FIX PERF-3 + N4: Hoist extract_tensors outside loop
         def extract_tensors(o, device=self.device):
             return (
                 torch.as_tensor(o["micro"], dtype=torch.float32).to(device),
@@ -150,190 +159,168 @@ class DeepScalperTrainer:
                 torch.as_tensor(o["macro"], dtype=torch.float32).to(device)
             )
 
-        while global_step <= self.total_timesteps:
-            # Convert to torch for prediction
-            micro_t, private_t, macro_t = extract_tensors(obs)
+        # Paper Section 4.3: Epoch-based training — each epoch replays the data
+        for epoch in range(self.training_epochs):
+            print(f"\n=== Epoch {epoch+1}/{self.training_epochs} ===")
             
-            # Predict (Returns numpy array of actions [B, 3])
-            actions = self.agent.predict(micro_t, private_t, macro_t, deterministic=False)
-            
-            # 2. Step Environment
-            next_obs, rewards, term, trunc, infos = self.env.step(actions)
-            
-            dones = np.logical_or(term, trunc)
-            
-            # 3. Store in Buffer
-            # Handle VectorEnv by iterating
-            for i in range(num_envs):
-                # Extract single instance data
-                # obs is dict of batch arrays
-                s = {k: v[i] for k, v in obs.items()}
-                ns = {k: v[i] for k, v in next_obs.items()}
-                a = actions[i]
-                r = rewards[i]
-                d = dones[i]
-                
-                # EXTRACT VOLATILITY TARGET FROM INFO for Hindsight/Aux
-                # Gymnasium VectorEnv returns info as Dict of Arrays
-                aux_target = 0.0
-                if isinstance(infos, dict) and "volatility_target" in infos:
-                    # Handle numpy array or list
-                    val = infos["volatility_target"]
-                    if hasattr(val, "__getitem__"):
-                         aux_target = val[i]
-                    else:
-                         aux_target = val
-                elif isinstance(infos, list):
-                     aux_target = infos[i].get("volatility_target", 0.0)
-                
-                self.agent.memory.push(s, a, float(r), ns, bool(d), float(aux_target))
-                
-                # Accumulate reward components for hindsight ratio tracking
-                if isinstance(infos, dict):
-                    rh = infos.get("reward_hindsight", None)
-                    rt = infos.get("reward_total", None)
-                    if rh is not None and rt is not None:
-                        _acc_hindsight += abs(float(rh[i]) if hasattr(rh, "__getitem__") else float(rh))
-                        _acc_total += abs(float(rt[i]) if hasattr(rt, "__getitem__") else float(rt))
+            # Reset env at start of each epoch (except first if skip_reset)
+            if epoch == 0 and skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
+                obs = self._current_obs
+                print(f"  Resuming from stored observation (skip_reset=True)")
+            else:
+                obs, _ = self.env.reset()
 
+            epoch_step = 0
+            while epoch_step < self.total_timesteps:
+                # Convert to torch for prediction
+                micro_t, private_t, macro_t = extract_tensors(obs)
                 
-                # Track Episodic Stats
-                curr_rewards[i] += r
-                curr_lens[i] += 1
+                # Predict (Returns numpy array of actions [B, 2])
+                actions = self.agent.predict(micro_t, private_t, macro_t, deterministic=False)
                 
-                if d:
-                    episode_rewards.append(curr_rewards[i])
-                    episode_lens.append(curr_lens[i])
-                    curr_rewards[i] = 0
-                    curr_lens[i] = 0
+                # 2. Step Environment
+                next_obs, rewards, term, trunc, infos = self.env.step(actions)
+                
+                dones = np.logical_or(term, trunc)
+                
+                # 3. Store in Buffer
+                for i in range(num_envs):
+                    s = {k: v[i] for k, v in obs.items()}
+                    ns = {k: v[i] for k, v in next_obs.items()}
+                    a = actions[i]
+                    r = rewards[i]
+                    d = dones[i]
                     
-            obs = next_obs
-            global_step += num_envs
-            
-            # FIX: Decay epsilon every step batch (decoupled from train updates)
-            self.agent.decay_epsilon()
-            
-            # 4. Training Step
-            # Update every N steps (accumulated logic via update_interval)
-            # If update_interval = 2.0, we update every 2 steps (0.5 updates/step? No, usually ratio)
-            # Logic: If update_interval >= 1, do X updates.
-            # If update_interval < 1 (e.g. 0.1), update every 10 steps.
-            
-            # Simpler: Just train `update_interval` times per step if >=1
-            # Or train once every 1/interval steps.
-            
-            if global_step > self.learning_starts:
-                # Training Step Loop (Logic: Do update_interval updates per step)
-                self.gradient_accumulator += self.update_interval
+                    # EXTRACT VOLATILITY TARGET FROM INFO for Hindsight/Aux
+                    aux_target = 0.0
+                    if isinstance(infos, dict) and "volatility_target" in infos:
+                        val = infos["volatility_target"]
+                        if hasattr(val, "__getitem__"):
+                             aux_target = val[i]
+                        else:
+                             aux_target = val
+                    elif isinstance(infos, list):
+                         aux_target = infos[i].get("volatility_target", 0.0)
+                    
+                    self.agent.memory.push(s, a, float(r), ns, bool(d), float(aux_target))
+                    
+                    # Accumulate reward components for hindsight ratio tracking
+                    if isinstance(infos, dict):
+                        rh = infos.get("reward_hindsight", None)
+                        rt = infos.get("reward_total", None)
+                        if rh is not None and rt is not None:
+                            _acc_hindsight += abs(float(rh[i]) if hasattr(rh, "__getitem__") else float(rh))
+                            _acc_total += abs(float(rt[i]) if hasattr(rt, "__getitem__") else float(rt))
+                    
+                    # Track Episodic Stats
+                    curr_rewards[i] += r
+                    curr_lens[i] += 1
+                    
+                    if d:
+                        episode_rewards.append(curr_rewards[i])
+                        episode_lens.append(curr_lens[i])
+                        curr_rewards[i] = 0
+                        curr_lens[i] = 0
+                        
+                obs = next_obs
+                global_step += num_envs
+                epoch_step += num_envs
                 
-                metrics = None
-                while self.gradient_accumulator >= 1.0:
-                    self.gradient_accumulator -= 1.0
-                    metrics = self.agent.train_step()
-                    # FIX PERF-8: Step LR scheduler after each gradient update
-                    if self.agent._lr_scheduler is not None:
-                        self.agent._lr_scheduler.step()
+                # FIX: Decay epsilon every step batch
+                self.agent.decay_epsilon()
                 
-                # LOGGING (Moved OUTSIDE inner loop to prevent duplicate logs/SPS=0)
-                # Only log if we actually trained this step (metrics is not None)
-                if metrics and global_step > 0 and global_step % self.log_interval == 0:
-                     # Log to WandB (skip in HPO mode to avoid flooding)
-                     if not self.hpo_mode:
-                         logs = {
-                             "step": global_step,
-                             "train/reward_mean": np.mean(episode_rewards) if len(episode_rewards) > 0 else 0.0,
-                             "train/len_mean": np.mean(episode_lens) if len(episode_lens) > 0 else 0.0,
-                             **{f"agent/{k}": v for k, v in metrics.items()}
-                         }
-                         # FIX CQ-4: Log auxiliary diagnostics (weight, loss ratio, LR)
-                         logs["agent/auxiliary_weight"] = self.agent.auxiliary_weight
-                         if "loss_aux" in metrics and "loss_total" in metrics:
-                             total = metrics["loss_total"]
-                             if total > 1e-12:
-                                 logs["agent/aux_loss_ratio"] = metrics["loss_aux"] / total
-                         if self.agent._lr_scheduler is not None:
-                             logs["agent/learning_rate"] = self.agent._lr_scheduler.get_last_lr()[0]
-                         
-                         # Calculate SPS
-                         current_time = time.time()
-                         # Use getattr for safety if init failed
-                         last_time = getattr(self, '_last_log_time', start_time)
-                         last_step = getattr(self, '_last_log_step', start_step)
-                         
-                         elapsed = current_time - last_time
-                         if elapsed > 1e-4:  # Threshold for valid time diff
-                             sps = (global_step - last_step) / elapsed
-                             logs["train/sps"] = sps
-                         else:
-                             # Fallback or keep previous? 
-                             # If elapsed is near 0, SPS is huge or invalid.
-                             logs["train/sps"] = 0.0 # Better to log 0 than Inf
-                         
-                         # Update trackers
-                         self._last_log_time = current_time
-                         self._last_log_step = global_step
-
-                         # FILTER METRICS TO REDUCE NOISE (Unless verbose_logging=True)
-                         verbose = self.config["training"].get("verbose_logging", False)
-                         
-                         if not verbose:
-                             # Key Metrics Only ["The Big 6"]
-                             filtered_logs = {
-                                 "step": logs["step"],
-                                 "train/reward_mean": logs.get("train/reward_mean", 0.0),
-                                 "train/loss_total": logs.get("agent/loss_total", 0.0),
-                                 "train/sps": logs.get("train/sps", 0.0),
-                                 "train/epsilon": logs.get("agent/epsilon", 0.0),
-                                 "train/len_mean": logs.get("train/len_mean", 0.0),
+                # 4. Training Step
+                if global_step > self.learning_starts:
+                    self.gradient_accumulator += self.update_interval
+                    
+                    metrics = None
+                    while self.gradient_accumulator >= 1.0:
+                        self.gradient_accumulator -= 1.0
+                        metrics = self.agent.train_step()
+                        if self.agent._lr_scheduler is not None:
+                            self.agent._lr_scheduler.step()
+                    
+                    # LOGGING
+                    if metrics and global_step > 0 and global_step % self.log_interval == 0:
+                         if not self.hpo_mode:
+                             logs = {
+                                 "step": global_step,
+                                 "train/epoch": epoch + 1,
+                                 "train/reward_mean": np.mean(episode_rewards) if len(episode_rewards) > 0 else 0.0,
+                                 "train/len_mean": np.mean(episode_lens) if len(episode_lens) > 0 else 0.0,
+                                 **{f"agent/{k}": v for k, v in metrics.items()}
                              }
-                             # Preserve any 'eval/' metrics if they happened to be mixed in (rare)
-                             for k, v in logs.items():
-                                 if k.startswith("eval/"):
-                                     filtered_logs[k] = v
-                                     
-                             wandb.log(filtered_logs)
-                         else:
-                              wandb.log(logs)
+                             logs["agent/auxiliary_weight"] = self.agent.auxiliary_weight
+                             if "loss_aux" in metrics and "loss_total" in metrics:
+                                 total = metrics["loss_total"]
+                                 if total > 1e-12:
+                                     logs["agent/aux_loss_ratio"] = metrics["loss_aux"] / total
+                             if self.agent._lr_scheduler is not None:
+                                 logs["agent/learning_rate"] = self.agent._lr_scheduler.get_last_lr()[0]
+                             
+                             # Calculate SPS
+                             current_time = time.time()
+                             last_time = getattr(self, '_last_log_time', start_time)
+                             last_step = getattr(self, '_last_log_step', start_step)
+                             
+                             elapsed = current_time - last_time
+                             if elapsed > 1e-4:
+                                 sps = (global_step - last_step) / elapsed
+                                 logs["train/sps"] = sps
+                             else:
+                                 logs["train/sps"] = 0.0
+                             
+                             self._last_log_time = current_time
+                             self._last_log_step = global_step
 
-                # 4a. Hindsight Ratio Logging (decoupled from train gate)
-                              
+                             verbose = self.config["training"].get("verbose_logging", False)
+                             
+                             if not verbose:
+                                 filtered_logs = {
+                                     "step": logs["step"],
+                                     "train/epoch": logs.get("train/epoch", 1),
+                                     "train/reward_mean": logs.get("train/reward_mean", 0.0),
+                                     "train/loss_total": logs.get("agent/loss_total", 0.0),
+                                     "train/sps": logs.get("train/sps", 0.0),
+                                     "train/epsilon": logs.get("agent/epsilon", 0.0),
+                                     "train/len_mean": logs.get("train/len_mean", 0.0),
+                                 }
+                                 for k, v in logs.items():
+                                     if k.startswith("eval/"):
+                                         filtered_logs[k] = v
+                                         
+                                 wandb.log(filtered_logs)
+                             else:
+                                  wandb.log(logs)
 
-            # 4a. Hindsight Ratio Logging (decoupled from train gate)
-            # This fires at every log_interval regardless of whether train_step ran.
-            if global_step > 0 and global_step % self.log_interval == 0 and not self.hpo_mode:
-                hindsight_ratio = _acc_hindsight / _acc_total if _acc_total > 1e-9 else 0.0
-                wandb.log({"reward/hindsight_ratio": hindsight_ratio}, step=global_step)
-                _acc_hindsight = 0.0
-                _acc_total = 0.0
+                # 4a. Hindsight Ratio Logging
+                if global_step > 0 and global_step % self.log_interval == 0 and not self.hpo_mode:
+                    hindsight_ratio = _acc_hindsight / _acc_total if _acc_total > 1e-9 else 0.0
+                    wandb.log({"reward/hindsight_ratio": hindsight_ratio}, step=global_step)
+                    _acc_hindsight = 0.0
+                    _acc_total = 0.0
 
-            
-            # 4b. HPO Pruning Check (rung-based for vectorized envs)
-            # Uses rung tracking to handle num_envs > 1 step increments
-            if optuna_trial and pruning_callback:
-                # FIX HPO-1: Prevent premature pruning before agent has learned anything.
-                # Pruning while Epsilon is high (random) is noisy and counter-productive.
-                min_pruning_steps = 20000 
-                
-                prune_interval = 5000
-                current_rung = global_step // prune_interval
-                
-                if global_step > min_pruning_steps and current_rung > getattr(self, '_last_prune_rung', -1):
-                    self._last_prune_rung = current_rung
-                    print(f"  [HPO] Probing agent at step {global_step} (rung {current_rung})...")
-                    score = pruning_callback()
-                    print(f"  [HPO] Step {global_step} Score: {score:.4f}")
+                # 4b. HPO Pruning Check
+                if optuna_trial and pruning_callback:
+                    min_pruning_steps = 20000 
+                    prune_interval = 5000
+                    current_rung = global_step // prune_interval
                     
-                    # Report to Optuna
-                    optuna_trial.report(score, global_step)
-                    
-                    # Check Pruning
-                    if optuna_trial.should_prune():
-                        print(f"  [HPO] Pruning trial at step {global_step}")
-                        raise optuna.TrialPruned()
+                    if global_step > min_pruning_steps and current_rung > getattr(self, '_last_prune_rung', -1):
+                        self._last_prune_rung = current_rung
+                        print(f"  [HPO] Probing agent at step {global_step} (rung {current_rung})...")
+                        score = pruning_callback()
+                        print(f"  [HPO] Step {global_step} Score: {score:.4f}")
+                        
+                        optuna_trial.report(score, global_step)
+                        
+                        if optuna_trial.should_prune():
+                            print(f"  [HPO] Pruning trial at step {global_step}")
+                            raise optuna.TrialPruned()
 
-            # 5. Checkpointing
-            if global_step % self.checkpoint_interval == 0:
-                self.save_checkpoint(f"checkpoint_step_{global_step}.pth")
+                # 5. Checkpointing
+                if global_step % self.checkpoint_interval == 0:
+                    self.save_checkpoint(f"checkpoint_step_{global_step}.pth")
                 
         # Store obs for potential resume via skip_reset=True
         self._current_obs = obs
