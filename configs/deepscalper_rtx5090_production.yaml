@@ -28,7 +28,7 @@ env:
   taker_fee: 0.0004  # 4 bps (Binance VIP1)
   num_envs: 12            # BrokenPipeError was from env.close() (now fixed), not env count
   window_size: 50
-  max_drawdown_pct: 0.30  # Relaxed to 30% for Production
+  max_drawdown_pct: 1.0   # Disabled for training — was killing episodes during exploration
   
   reward:
     # Paper-aligned reward (Section 3.2 + 4.2)
