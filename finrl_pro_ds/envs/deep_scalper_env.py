@@ -58,16 +58,10 @@ class DeepScalperEnv(gym.Env):
         self.base_slippage_bps = config.get("base_slippage_bps", 1.0)  # 1 bp base
         self.slippage_impact_factor = config.get("slippage_impact_factor", 0.5)
         
-        # FIX CRIT-3: Spot-only simulator. Leverage (margin_requirement < 1.0) is NOT
-        # supported because execution debits full notional from balance, making portfolio
-        # value calculation incorrect with leverage. Assert to prevent silent breakage.
+        # Margin Requirement (Paper: 5x leverage = 0.2 margin)
+        # margin_requirement = 1.0 => spot (no leverage)
+        # margin_requirement = 0.2 => 5x leverage
         self.margin_requirement = float(config.get("margin_requirement", 1.0))
-        # FIX CRIT-3 hardened: ValueError instead of assert (assert stripped by python -O)
-        if self.margin_requirement != 1.0:
-            raise ValueError(
-                f"Leverage not supported: margin_requirement must be 1.0, got {self.margin_requirement}. "
-                "Execution logic debits full notional from balance, which breaks portfolio tracking with leverage."
-            )
         
         self.window_size = config.get("window_size", 50)
         self.initial_balance = config.get("initial_balance", 100000.0)  # 100K USDT default
@@ -103,19 +97,20 @@ class DeepScalperEnv(gym.Env):
             "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, 2), dtype=np.float32)
         })
         
-        # Action: [Direction, Price, Volume]
-        self.action_space = gym.spaces.MultiDiscrete([3, 5, 5])
+        # Paper-aligned Action Space: 2 branches (Price, SignedQty)
+        # Direction encoded in sign of quantity: +q=buy, -q=sell, 0=hold
+        self.signed_qty_proportions = list(config.get("action", {}).get(
+            "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+        ))
+        n_price = config.get("action", {}).get("price_bins", 5)
+        n_qty = len(self.signed_qty_proportions)
+        self.action_space = gym.spaces.MultiDiscrete([n_price, n_qty])
         
         # Price offset mapping (ticks from best)
         # [-1] = Crossing spread (Aggressive/Marketable)
         # [0]  = At Touch (Best Bid/Ask)
         # [1+] = Passive
         self.price_offsets = [-1, 0, 1, 2, 3]  # Ticks from best bid/ask
-        # Volume proportions (of max position size) — configurable via YAML
-        # Reduced defaults: min trade 2% of max_pos (was 10%) to lower fee drag
-        self.vol_proportions = list(config.get("action", {}).get(
-            "vol_proportions", [0.02, 0.05, 0.1, 0.2, 0.5]
-        ))
         # FIX Bug#1: Read from nested action config (YAML: env.action.max_position)
         # with fallback to flat key for backward compatibility
         self.max_position = config.get("action", {}).get("max_position", config.get("max_position", 1.0))
@@ -133,6 +128,7 @@ class DeepScalperEnv(gym.Env):
         self.balance = self.initial_balance
         self.position = 0.0
         self.avg_price = 0.0
+        self.notional_debt = 0.0  # Borrowed notional for leveraged positions
         self.prev_portfolio_value = self.initial_balance # For dense reward
         
         self.pending_order = None  # (direction, price, quantity, is_taker)
@@ -188,6 +184,7 @@ class DeepScalperEnv(gym.Env):
         self.balance = self.initial_balance
         self.position = 0.0
         self.avg_price = 0.0
+        self.notional_debt = 0.0
         self.prev_portfolio_value = self.initial_balance
         self.pending_order = None
         self.current_mid_price = 0.0
@@ -373,15 +370,27 @@ class DeepScalperEnv(gym.Env):
                         # Fee
                         fee_rate = self.taker_fee if is_taker else self.maker_fee
                         fee = fill_price * exec_qty * fee_rate
-                        cost = fill_price * exec_qty + fee
+                        notional = fill_price * exec_qty
+                        
+                        # Margin-based accounting (symmetric with sell-side)
+                        if self.position < -1e-12 and self.notional_debt > 0:
+                            # Closing short: release proportional debt
+                            close_frac = min(exec_qty / abs(self.position), 1.0)
+                            debt_release = self.notional_debt * close_frac
+                            self.notional_debt -= debt_release
+                            # Cost = notional to buy back + fee - debt released
+                            self.balance -= (notional + fee - debt_release)
+                        else:
+                            # Opening/extending long: debit margin, add debt
+                            margin_cost = notional * self.margin_requirement + fee
+                            borrowed = notional * (1.0 - self.margin_requirement)
+                            self.balance -= margin_cost
+                            self.notional_debt += borrowed
                         
                         # Track cumulative costs
                         self.cumulative_fees += fee
                         self.cumulative_slippage += slippage_cost
                         self.step_transaction_costs += (fee + slippage_cost)
-                        
-                        # Execute
-                        self.balance -= cost
                         
                         if self.position >= -1e-12:  # Long or flat
                             total_cost = self.avg_price * max(self.position, 0) + fill_price * exec_qty
@@ -427,14 +436,30 @@ class DeepScalperEnv(gym.Env):
                         # Fee
                         fee_rate = self.taker_fee if is_taker else self.maker_fee
                         fee = fill_price * exec_qty * fee_rate
-                        proceeds = fill_price * exec_qty - fee
+                        notional = fill_price * exec_qty
+                        proceeds = notional - fee
+                        
+                        # Margin-based: on sell, release borrowed portion
+                        # If closing a long, repay proportional debt
+                        if self.position > 1e-12 and self.notional_debt > 0:
+                            # Proportion of position being closed
+                            close_frac = min(exec_qty / self.position, 1.0)
+                            debt_release = self.notional_debt * close_frac
+                            self.notional_debt -= debt_release
+                            # Net credit: proceeds minus debt repayment
+                            self.balance += (proceeds - debt_release)
+                        else:
+                            # Opening/extending short: debit margin, add debt
+                            margin_cost = notional * self.margin_requirement + fee
+                            borrowed = notional * (1.0 - self.margin_requirement)
+                            self.balance -= margin_cost
+                            self.notional_debt += borrowed
+                            proceeds = 0  # No credit, we debited instead
                         
                         # Track cumulative costs
                         self.cumulative_fees += fee
                         self.cumulative_slippage += slippage_cost
                         self.step_transaction_costs += (fee + slippage_cost)
-                        
-                        self.balance += proceeds
                         
                         old_position = self.position
                         self.position -= exec_qty
@@ -465,22 +490,23 @@ class DeepScalperEnv(gym.Env):
             # The agent needs to see the new position in the current observation
             self.private_window[-1] = self._normalize_private_state(self.position, self.balance)
 
-        # 3. Process NEW Action (T) -> becomes Pending for T+1
-        direction, price_idx, vol_idx = int(action[0]), int(action[1]), int(action[2])
+        # 3. Process NEW Action (T) → becomes Pending for T+1
+        # Paper-aligned: 2-branch action = (price_idx, qty_idx)
+        price_idx, qty_idx = int(action[0]), int(action[1])
+        signed_qty = self.signed_qty_proportions[qty_idx]
         
-        if direction == 0:  # Hold
+        if abs(signed_qty) < 1e-8:  # Hold
+            direction = 0
             self.pending_order = None
         else:
-            # Map indices to actual values
+            direction = 1 if signed_qty > 0 else 2  # Buy or Sell
+            quantity = abs(signed_qty) * self.max_position
             offset_ticks = self.price_offsets[price_idx]
-            quantity = self.vol_proportions[vol_idx] * self.max_position # This is just "Desired Size"
             
             if direction == 1:  # Buy
-                # Limit buy below best ask
                 limit_price = self.current_best_ask - offset_ticks * self.tick_size
                 is_taker = (limit_price >= self.current_best_ask)
             else:  # Sell
-                # Limit sell above best bid
                 limit_price = self.current_best_bid + offset_ticks * self.tick_size
                 is_taker = (limit_price <= self.current_best_bid)
                 
@@ -498,9 +524,6 @@ class DeepScalperEnv(gym.Env):
         hold_bonus = 0.0
         
         # --- Component 0: Hold Bonus (fee-avoidance shaping) ---
-        # When agent holds AND is flat, reward for not incurring unnecessary fees.
-        # This counterbalances the structural fee drag that biases toward inactivity
-        # only after the agent has already learned to trade randomly.
         if direction == 0 and abs(self.prev_position) < 1e-12 and self.hold_bonus_bps > 0:
             hold_bonus = self.hold_bonus_bps
         
@@ -608,10 +631,14 @@ class DeepScalperEnv(gym.Env):
         return obs, reward, terminated, truncated, info
     
     def _get_portfolio_value(self):
-        """Calculate total equity (Balance + Unrealized PnL)"""
-        # Value position at Mid Price
+        """Calculate total equity (Balance + Unrealized PnL - Debt)
+        
+        With leverage (margin_req < 1.0):
+          equity = balance + position*mid - notional_debt
+        When margin_req = 1.0, notional_debt = 0 and this reduces to the spot formula.
+        """
         mid = (self.current_best_ask + self.current_best_bid) / 2.0 if self.current_best_ask > 0 else 0.0
-        val = self.balance + (self.position * mid)
+        val = self.balance + (self.position * mid) - self.notional_debt
         # Force scalar
         if hasattr(val, "item"): val = val.item()
         return float(val)

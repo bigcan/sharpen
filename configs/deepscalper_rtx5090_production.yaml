@@ -21,7 +21,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   # FIX AUDIT-7: Symmetric Margin Logic (1.0 = Spot, 0.5 = 2x Lev)
-  margin_requirement: 1.0
+  margin_requirement: 0.2  # 5x leverage (paper-aligned)
   # FIX: Reduced to VIP1 levels. VIP0 (10 bps/side) made minute-level
   # trading structurally unprofitable (round-trip fee 44x > per-step vol).
   maker_fee: 0.0002  # 2 bps (Binance VIP1 / maker rebate tier)
@@ -29,6 +29,7 @@ env:
   num_envs: 12            # BrokenPipeError was from env.close() (now fixed), not env count
   window_size: 50
   max_drawdown_pct: 1.0   # Disabled for training — was killing episodes during exploration
+  private_state_augment_prob: 1.0  # Paper: always augment private state (Fix 5)
   
   reward:
     # Paper-aligned reward (Section 3.2 + 4.2)
@@ -44,12 +45,11 @@ env:
     hold_bonus_bps: 0.1       # 0.1 bps reward for holding when flat
     
   action:
-    direction_bins: 3 
-    price_bins: 5     
-    volume_bins: 5    
-    max_position: 1.0 # Max BTC (reduced: 5 BTC @ $20K = 100% of account)
-    # Reduced from [0.1, 0.25, 0.5, 0.75, 1.0] to lower fee drag per trade
-    vol_proportions: [0.02, 0.05, 0.1, 0.2, 0.5]
+    price_bins: 5
+    # Paper-aligned: signed qty encodes direction implicitly
+    # Negative = Sell, Zero = Hold, Positive = Buy
+    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    max_position: 1.0 # Max BTC
 
 network:
   # V9.5 Blackwell Architecture
@@ -105,6 +105,7 @@ agents:
 training:
   # Overall length
   total_timesteps: 1000000  # 1M steps (Phase 1 - will scale to 10M)
+  training_epochs: 5        # Paper Section 4.3: replay dataset ~5 epochs
   log_interval: 100000
   
   # Optimization

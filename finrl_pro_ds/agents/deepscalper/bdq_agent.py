@@ -21,7 +21,7 @@ class ReplayBuffer:
     def push(self, state, action, reward, next_state, done, aux_target=0.0):
         """
         state, next_state: Dict of tensors or np arrays
-        action: [dir, price, vol]
+        action: [price, qty]
         reward: float
         done: bool
         aux_target: float (Volatility Target)
@@ -57,7 +57,7 @@ class DeepScalperBDQ:
         batch_size: int = 64,
         target_update_freq: int = 100,
         auxiliary_weight: float = 0.1, # Section 4.4
-        action_dims: Tuple[int, int, int] = (3, 5, 5),  # FIX: Configurable action dims
+        action_dims: Tuple[int, int] = (5, 9),  # Paper-aligned: (Price, SignedQty)
         use_amp: bool = False,
         use_per: bool = False,          # Paper Section 4.3: Prioritized Experience Replay
         per_alpha: float = 0.6,         # Prioritization exponent (0=uniform, 1=full)
@@ -85,7 +85,7 @@ class DeepScalperBDQ:
         self.target_net.eval()
         
         # FIX M2: Validate action dims match between agent and network
-        net_action_dims = network_config.get('action_space_dims', (3, 5, 5))
+        net_action_dims = network_config.get('action_space_dims', (5, 9))
         assert tuple(self.action_dims) == tuple(net_action_dims), (
             f"Action dim mismatch: agent={self.action_dims}, network={net_action_dims}"
         )
@@ -132,10 +132,10 @@ class DeepScalperBDQ:
                     ResourceWarning
                 )
 
-    def get_probs(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, temp: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def get_probs(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, temp: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Return action probabilities via temperature-scaled softmax of Q-values.
-        Includes numerical stability fix (subtract max).
+        Returns: (p_price, p_qty)
         """
         micro = micro.to(self.device)
         private_in = private_in.to(self.device)
@@ -144,43 +144,36 @@ class DeepScalperBDQ:
         # FIX FIND-4: Disable dropout during inference
         self.policy_net.eval()
         with torch.no_grad():
-            q_dir, q_price, q_vol, _, _ = self.policy_net(micro, private_in, macro)
+            q_price, q_qty, _, _ = self.policy_net(micro, private_in, macro)
             
             def safe_softmax(q, t):
                 # Subtract max for numerical stability to prevent overflow
                 q_scaled = (q - q.max(dim=1, keepdim=True)[0]) / t
                 return torch.softmax(q_scaled, dim=1)
             
-            p_dir = safe_softmax(q_dir, temp)
             p_price = safe_softmax(q_price, temp)
-            p_vol = safe_softmax(q_vol, temp)
+            p_qty = safe_softmax(q_qty, temp)
             
         self.policy_net.train()  # Restore train mode
-        return p_dir, p_price, p_vol
+        return p_price, p_qty
 
     def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
         """
         Select action using Epsilon-Greedy strategy.
-        Supports Batch Input.
-        Input shapes:
-        micro: (B, Window, Features)
-        macro: (B, Features)
-        Returns: (B, 3) numpy array
+        Paper-aligned: 2 branches (Price, SignedQty).
+        Returns: (B, 2) numpy array
         """
         micro = micro.to(self.device)
         private_in = private_in.to(self.device)
         macro = macro.to(self.device)
         
         batch_size = micro.shape[0]
+        n_branches = len(self.action_dims)  # 2
         
         # FIX FIND-4: Disable dropout during inference
         self.policy_net.eval()
         
         # Epsilon-Greedy Mask
-        # We need independent random choices for each item in batch if we were doing true vector env exploration
-        # But commonly we just use the same epsilon check or per-env check.
-        # For efficiency, we can generate a mask.
-        
         if not deterministic:
             rand_vals = torch.rand(batch_size, device=self.device)
             random_mask = rand_vals < self.epsilon
@@ -189,39 +182,27 @@ class DeepScalperBDQ:
             
         # Get Net Actions (Greedy)
         with torch.no_grad():
-            q_dir, q_price, q_vol, _, _ = self.policy_net(micro, private_in, macro)
+            q_price, q_qty, _, _ = self.policy_net(micro, private_in, macro)
             
-            # (B,) indices 
-            a_dir_greedy = q_dir.argmax(dim=1)
             a_price_greedy = q_price.argmax(dim=1)
-            a_vol_greedy = q_vol.argmax(dim=1)
+            a_qty_greedy = q_qty.argmax(dim=1)
             
-            # Stack: (B, 3)
-            greedy_actions = torch.stack([a_dir_greedy, a_price_greedy, a_vol_greedy], dim=1)
+            # Stack: (B, 2)
+            greedy_actions = torch.stack([a_price_greedy, a_qty_greedy], dim=1)
             
-        # If any random, generate random actions for ALL (simplest) then mask, OR just fills
+        # Random exploration
         if random_mask.any():
-            # Generate random actions for the whole batch (wasteful but vector-friendly)
-            # or just for masked ones.
-            # Torch doesn't have randint for different ranges per column easily in one go if dims differ.
-            # But dims are fixed: 3, 5, 5.
+            r_price = torch.randint(0, self.action_dims[0], (batch_size,), device=self.device)
+            r_qty = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
             
-            # Random Actions: (B, 3)
-            r_dir = torch.randint(0, self.action_dims[0], (batch_size,), device=self.device)
-            r_price = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
-            r_vol = torch.randint(0, self.action_dims[2], (batch_size,), device=self.device)
+            random_actions = torch.stack([r_price, r_qty], dim=1)
             
-            random_actions = torch.stack([r_dir, r_price, r_vol], dim=1)
-            
-            # Combine
-            # Where mask is true, use random. Else greedy.
-            # mask is (B,) -> unsqueeze to (B,1)
-            mask_expanded = random_mask.unsqueeze(1).expand(-1, 3)
+            mask_expanded = random_mask.unsqueeze(1).expand(-1, n_branches)
             final_actions = torch.where(mask_expanded, random_actions, greedy_actions)
         else:
             final_actions = greedy_actions
         
-        self.policy_net.train()  # FIX FIND-4: Restore train mode (parity with get_probs)
+        self.policy_net.train()  # FIX FIND-4: Restore train mode
         return final_actions.cpu().numpy()
     
     def train_step(self) -> Optional[Dict[str, float]]:
@@ -265,65 +246,53 @@ class DeepScalperBDQ:
             dones = torch.as_tensor(done_batch, dtype=torch.float32).unsqueeze(1).to(self.device)
             aux_targets = torch.as_tensor(aux_target_batch, dtype=torch.float32).unsqueeze(1).to(self.device)
         
-        # Current Q-Values, Loss Computation under autocast
+        # Current Q-Values — 2 branches (Paper-aligned)
         # FIX H1: Use modern torch.amp.autocast (works on CPU + CUDA)
         with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.use_amp):
-            q_dir, q_price, q_vol, _, pred_vol = self.policy_net(micro_state, private_state, macro_state)
+            q_price, q_qty, _, pred_vol = self.policy_net(micro_state, private_state, macro_state)
         
-            # Gather Q-values for taken actions
-            curr_q_dir = q_dir.gather(1, actions[:, 0].unsqueeze(1))
-            curr_q_price = q_price.gather(1, actions[:, 1].unsqueeze(1))
-            curr_q_vol = q_vol.gather(1, actions[:, 2].unsqueeze(1))
+            # Gather Q-values for taken actions: (B, 1)
+            curr_q_price = q_price.gather(1, actions[:, 0].unsqueeze(1))
+            curr_q_qty = q_qty.gather(1, actions[:, 1].unsqueeze(1))
             
-            # FIX D1: Double DQN — use policy net to SELECT best next action,
-            # then EVALUATE that action with target net.
-            # This reduces Q-value overestimation bias.
+            # Double DQN (FIX D1): policy net selects, target net evaluates
             with torch.no_grad():
                 # Policy net selects best actions for next state
-                next_q_dir_policy, next_q_price_policy, next_q_vol_policy, _, _ = self.policy_net(
+                next_q_price_policy, next_q_qty_policy, _, _ = self.policy_net(
                     micro_next, private_next, macro_next
                 )
-                best_next_dir = next_q_dir_policy.argmax(dim=1, keepdim=True)
                 best_next_price = next_q_price_policy.argmax(dim=1, keepdim=True)
-                best_next_vol = next_q_vol_policy.argmax(dim=1, keepdim=True)
+                best_next_qty = next_q_qty_policy.argmax(dim=1, keepdim=True)
                 
                 # Target net evaluates those actions
-                next_q_dir_target, next_q_price_target, next_q_vol_target, _, _ = self.target_net(
+                next_q_price_target, next_q_qty_target, _, _ = self.target_net(
                     micro_next, private_next, macro_next
                 )
-                max_next_q_dir = next_q_dir_target.gather(1, best_next_dir)
                 max_next_q_price = next_q_price_target.gather(1, best_next_price)
-                max_next_q_vol = next_q_vol_target.gather(1, best_next_vol)
+                max_next_q_qty = next_q_qty_target.gather(1, best_next_qty)
                 
-                # FIX CRIT-1: Shared Bellman target across all BDQ branches.
-                # Aggregating next-state Q-values prevents V(s) gradient tripling
-                # (Tavakoli et al. 2018, Section 3.2: shared value stream).
-                max_next_q_agg = (max_next_q_dir + max_next_q_price + max_next_q_vol) / 3.0
+                # Shared Bellman target across BDQ branches (FIX CRIT-1)
+                max_next_q_agg = (max_next_q_price + max_next_q_qty) / 2.0
                 target_q_shared = rewards + self.gamma * max_next_q_agg * (1 - dones)
                 
-            # Loss — PER: per-sample Huber, weighted by IS; Uniform: standard mean
-            # FIX CRIT-1: All branches use shared target (target_q_shared)
+            # Loss — 2 branches
             if self.use_per:
-                loss_fn = nn.SmoothL1Loss(reduction='none')  # Per-sample losses
-                loss_dir_raw = loss_fn(curr_q_dir, target_q_shared)     # (B, 1)
+                loss_fn = nn.SmoothL1Loss(reduction='none')
                 loss_price_raw = loss_fn(curr_q_price, target_q_shared)
-                loss_vol_raw = loss_fn(curr_q_vol, target_q_shared)
+                loss_qty_raw = loss_fn(curr_q_qty, target_q_shared)
                 
-                # IS-weighted mean (Schaul et al. 2016, Eq. 3)
-                loss_dir = (loss_dir_raw * is_weights_t).mean()
                 loss_price = (loss_price_raw * is_weights_t).mean()
-                loss_vol = (loss_vol_raw * is_weights_t).mean()
+                loss_qty = (loss_qty_raw * is_weights_t).mean()
             else:
                 loss_fn = nn.SmoothL1Loss()
-                loss_dir = loss_fn(curr_q_dir, target_q_shared)
                 loss_price = loss_fn(curr_q_price, target_q_shared)
-                loss_vol = loss_fn(curr_q_vol, target_q_shared)
+                loss_qty = loss_fn(curr_q_qty, target_q_shared)
             
-            # FIX PERF-5: SmoothL1Loss for aux task (robust to volatility spikes)
+            # Auxiliary volatility prediction loss (Section 4.4)
             loss_vol_pred = nn.SmoothL1Loss()(pred_vol, aux_targets)
             
-            # FIX CRIT-1: Average branch losses (not sum) for balanced V(s) gradient
-            total_loss = (loss_dir + loss_price + loss_vol) / 3.0 + self.auxiliary_weight * loss_vol_pred
+            # Average branch losses (CRIT-1: balanced V(s) gradient)
+            total_loss = (loss_price + loss_qty) / 2.0 + self.auxiliary_weight * loss_vol_pred
         
         if not torch.isfinite(total_loss):
             print(f"WARNING: BDQ Loss is {total_loss.item()} (NaN/Inf). Skipping update.", flush=True)
@@ -347,23 +316,11 @@ class DeepScalperBDQ:
         # PER: Update priorities with TD errors (mean across branches)
         if self.use_per and per_indices is not None:
             with torch.no_grad():
-                # FIX: Use shared target (CRIT-1 consistency)
-                td_dir = (curr_q_dir - target_q_shared).abs()
                 td_price = (curr_q_price - target_q_shared).abs()
-                td_vol = (curr_q_vol - target_q_shared).abs()
-                # Mean TD error across 3 action branches per sample
-                td_errors = ((td_dir + td_price + td_vol) / 3.0).squeeze(1).cpu().numpy()
-            
-            # FIX FIND-1: Note on Stale Q-Values
-            # We use Q-values from *before* the optimization step to compute TD errors.
-            # Ideally, we would re-run the forward pass with the updated network to get
-            # fresh Q-values (Schaul et al., 2016). However, that requires a second
-            # batch forward pass, doubling computational cost. The approximation of
-            # using pre-update Q-values is standard practice (e.g., Stable Baselines3).
+                td_qty = (curr_q_qty - target_q_shared).abs()
+                # Mean TD error across 2 action branches per sample
+                td_errors = ((td_price + td_qty) / 2.0).squeeze(1).cpu().numpy()
             self.memory.update_priorities(per_indices, td_errors)
-        
-        # NOTE: Epsilon decay moved to dedicated method for decoupling
-        # Call decay_epsilon() from trainer after each env step batch
         
         # Update Target Net
         self.step_count += 1
@@ -372,16 +329,14 @@ class DeepScalperBDQ:
             clean_state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
             self.target_net.load_state_dict(clean_state_dict)
             
-        # Logging Metrics
+        # Logging Metrics — 2 branches
         metrics = {
             "loss_total": total_loss.item(),
-            "loss_dir": loss_dir.item(),
             "loss_price": loss_price.item(),
-            "loss_vol": loss_vol.item(),
+            "loss_qty": loss_qty.item(),
             "loss_aux": loss_vol_pred.item(),
-            "q_dir_mean": curr_q_dir.mean().item(),
             "q_price_mean": curr_q_price.mean().item(),
-            "q_vol_mean": curr_q_vol.mean().item(),
+            "q_qty_mean": curr_q_qty.mean().item(),
             "epsilon": self.epsilon
         }
         
@@ -410,7 +365,10 @@ class DeepScalperBDQ:
     def load(self, path: str):
         if not os.path.exists(path):
             return
-        checkpoint = torch.load(path, map_location=self.device)
+        # FIX: weights_only=False required for PyTorch ≥2.6 (default changed to True).
+        # Our checkpoints contain numpy scalars (epsilon, LR scheduler state) which
+        # are rejected by the safe unpickler. These are our own trusted checkpoints.
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         self.policy_net.load_state_dict(checkpoint['policy_net'])
         self.target_net.load_state_dict(checkpoint['target_net'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])

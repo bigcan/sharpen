@@ -131,14 +131,14 @@ class MacroEncoder(nn.Module):
 class DeepScalperNetwork(nn.Module):
     """
     Fusion Network with Branching Dueling DQN Heads.
-    Combines Micro and Macro embeddings.
+    Paper-aligned: 2 branches (Price, SignedQty). Direction is implicit in qty sign.
     """
     def __init__(
         self,
         micro_config: Dict,
         macro_config: Dict,
         fusion_dim: int = 256,
-        action_space_dims: Tuple[int, int, int] = (3, 5, 5), # (Dir, Price, Vol)
+        action_space_dims: Tuple[int, int] = (5, 9), # (Price, SignedQty) — paper-aligned
         **kwargs
     ):
         super().__init__()
@@ -171,28 +171,21 @@ class DeepScalperNetwork(nn.Module):
             nn.Linear(head_hidden, 1)
         )
         
-        # Advantage Streams A(s, a) for each branch
-        self.dir_dims, self.price_dims, self.vol_dims = action_space_dims
+        # Advantage Streams A(s, a) — 2 branches (Paper Section 4.1)
+        self.price_dims, self.qty_dims = action_space_dims
         
-        # Direction Branch
-        self.adv_dir = nn.Sequential(
-            nn.Linear(fusion_dim, head_hidden),
-            nn.LeakyReLU(),
-            nn.Linear(head_hidden, self.dir_dims)
-        )
-        
-        # Price Branch
+        # Price Branch (relative price offset)
         self.adv_price = nn.Sequential(
             nn.Linear(fusion_dim, head_hidden),
             nn.LeakyReLU(),
             nn.Linear(head_hidden, self.price_dims)
         )
         
-        # Volume Branch
-        self.adv_vol = nn.Sequential(
+        # Signed Quantity Branch (direction implicit in sign)
+        self.adv_qty = nn.Sequential(
             nn.Linear(fusion_dim, head_hidden),
             nn.LeakyReLU(),
-            nn.Linear(head_hidden, self.vol_dims)
+            nn.Linear(head_hidden, self.qty_dims)
         )
         
         # FIX FIND-6: Auxiliary Task — 2-layer MLP for volatility prediction (Section 4.4)
@@ -207,17 +200,18 @@ class DeepScalperNetwork(nn.Module):
         
     def _init_heads(self):
         """FIX FIND-3: Xavier init for all Linear layers in heads."""
-        for module in [self.fusion, self.value_stream, self.adv_dir,
-                       self.adv_price, self.adv_vol, self.vol_head]:
+        for module in [self.fusion, self.value_stream,
+                       self.adv_price, self.adv_qty, self.vol_head]:
             for layer in module:
                 if isinstance(layer, nn.Linear):
                     nn.init.xavier_uniform_(layer.weight)
                     if layer.bias is not None:
                         nn.init.zeros_(layer.bias)
 
-    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Returns (Q_dir, Q_price, Q_vol, V_state, Pred_Vol)
+        Returns (Q_price, Q_qty, V_state, Pred_Vol)
+        Paper-aligned: 2 action branches (Price, SignedQty).
         """
         # Encode
         h_micro = self.micro_encoder(micro_in, private_in)
@@ -230,19 +224,16 @@ class DeepScalperNetwork(nn.Module):
         # Value
         v_s = self.value_stream(features)
         
-        # Advantages
-        a_dir = self.adv_dir(features)
+        # Advantages — 2 branches
         a_price = self.adv_price(features)
-        a_vol = self.adv_vol(features)
+        a_qty = self.adv_qty(features)
         
         # Q-Values (Dueling Aggregation)
         # Q(s,a) = V(s) + (A(s,a) - mean(A(s,a)))
-        
-        q_dir = v_s + (a_dir - a_dir.mean(dim=1, keepdim=True))
         q_price = v_s + (a_price - a_price.mean(dim=1, keepdim=True))
-        q_vol = v_s + (a_vol - a_vol.mean(dim=1, keepdim=True))
+        q_qty = v_s + (a_qty - a_qty.mean(dim=1, keepdim=True))
         
         # Volatility Prediction
         pred_vol = self.vol_head(features)
         
-        return q_dir, q_price, q_vol, v_s, pred_vol
+        return q_price, q_qty, v_s, pred_vol
