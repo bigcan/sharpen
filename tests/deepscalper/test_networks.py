@@ -13,7 +13,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
         self.batch_size = 32
         self.window_size = 50
         self.micro_features = 27  # 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret)
-        self.private_features = 2  # Position + Balance
+        self.private_features = 3  # Position + Balance + RemainingTime
         self.macro_features = NUM_MACRO_FEATURES  # 11 (from Env)
         
         self.micro_config = {
@@ -63,11 +63,10 @@ class TestDeepScalperNetworks(unittest.TestCase):
         private_in = torch.randn(self.batch_size, self.window_size, self.private_features)
         macro_in = torch.randn(self.batch_size, self.macro_features)
         
-        q_dir, q_price, q_vol, v_s, pred_vol = net(micro_in, private_in, macro_in)
+        q_price, q_qty, v_s, pred_vol = net(micro_in, private_in, macro_in)
         
-        self.assertEqual(q_dir.shape, (self.batch_size, 3))
         self.assertEqual(q_price.shape, (self.batch_size, 5))
-        self.assertEqual(q_vol.shape, (self.batch_size, 5))
+        self.assertEqual(q_qty.shape, (self.batch_size, 9))
         self.assertEqual(v_s.shape, (self.batch_size, 1))
         self.assertEqual(pred_vol.shape, (self.batch_size, 1))
         
@@ -81,8 +80,8 @@ class TestDeepScalperNetworks(unittest.TestCase):
         private_in = torch.randn(self.batch_size, self.window_size, self.private_features, requires_grad=True)
         macro_in = torch.randn(self.batch_size, self.macro_features, requires_grad=True)
         
-        q_dir, _, _, _, _ = net(micro_in, private_in, macro_in)
-        loss = q_dir.mean()
+        q_price, _, _, _ = net(micro_in, private_in, macro_in)
+        loss = q_price.mean()
         loss.backward()
         
         # Check gradients exist
@@ -117,27 +116,26 @@ class TestDeepScalperNetworks(unittest.TestCase):
         
         # Convert to tensors for Network
         micro = torch.tensor(obs["micro"]).unsqueeze(0)  # (1, 50, 27)
-        private = torch.tensor(obs["private"]).unsqueeze(0)  # (1, 50, 2)
+        private = torch.tensor(obs["private"]).unsqueeze(0)  # (1, 50, 3)
         macro = torch.tensor(obs["macro"]).unsqueeze(0)  # (1, 11)
         
         # Verify shapes match network expectations
         self.assertEqual(micro.shape, (1, 50, 27))
-        self.assertEqual(private.shape, (1, 50, 2))
+        self.assertEqual(private.shape, (1, 50, 3))
         self.assertEqual(macro.shape, (1, 11))
         
         # Forward pass through network
         net = DeepScalperNetwork(
             micro_config=self.micro_config,
             macro_config=self.macro_config,
-            action_space_dims=(3, 5, 5)
+            action_space_dims=(5, 9)
         )
         
-        q_dir, q_price, q_vol, v, pred_vol = net(micro, private, macro)
+        q_price, q_qty, v, pred_vol = net(micro, private, macro)
         
         # Verify output shapes
-        self.assertEqual(q_dir.shape, (1, 3))
         self.assertEqual(q_price.shape, (1, 5))
-        self.assertEqual(q_vol.shape, (1, 5))
+        self.assertEqual(q_qty.shape, (1, 9))
 
 
 class TestNetworkRobustness(unittest.TestCase):
@@ -146,11 +144,11 @@ class TestNetworkRobustness(unittest.TestCase):
     def test_gru_encoder(self):
         """Verify GRU code path works correctly."""
         encoder = MicroEncoder(
-            input_size=27, private_input_size=2,
+            input_size=27, private_input_size=3,
             hidden_size=64, rnn_type="GRU"
         )
         x = torch.randn(4, 50, 27)
-        p = torch.randn(4, 50, 2)
+        p = torch.randn(4, 50, 3)
         out = encoder(x, p)
         self.assertEqual(out.shape, (4, 64))
 
@@ -160,14 +158,14 @@ class TestNetworkRobustness(unittest.TestCase):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             encoder = MicroEncoder(
-                input_size=27, private_input_size=2,
+                input_size=27, private_input_size=3,
                 hidden_size=64, num_layers=2, dropout=0.3, rnn_type="LSTM"
             )
             # No UserWarning about dropout should be raised
             dropout_warnings = [x for x in w if "dropout" in str(x.message).lower()]
             self.assertEqual(len(dropout_warnings), 0, f"Unexpected dropout warnings: {dropout_warnings}")
         
-        out = encoder(torch.randn(4, 50, 27), torch.randn(4, 50, 2))
+        out = encoder(torch.randn(4, 50, 27), torch.randn(4, 50, 3))
         self.assertEqual(out.shape, (4, 64))
 
     def test_single_layer_no_dropout_warning(self):
@@ -176,7 +174,7 @@ class TestNetworkRobustness(unittest.TestCase):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             encoder = MicroEncoder(
-                input_size=27, private_input_size=2,
+                input_size=27, private_input_size=3,
                 hidden_size=64, num_layers=1, dropout=0.5, rnn_type="LSTM"
             )
             dropout_warnings = [x for x in w if "dropout" in str(x.message).lower()]
@@ -186,30 +184,30 @@ class TestNetworkRobustness(unittest.TestCase):
     def test_batch_size_one(self):
         """Edge case: single-sample batch."""
         net = DeepScalperNetwork(
-            micro_config={"input_size": 27, "private_input_size": 2, "hidden_size": 64},
+            micro_config={"input_size": 27, "private_input_size": 3, "hidden_size": 64},
             macro_config={"input_size": 11, "hidden_sizes": [64, 32]},
             fusion_dim=64,
-            action_space_dims=(3, 5, 5)
+            action_space_dims=(5, 9)
         )
-        q_dir, q_price, q_vol, v, pv = net(
+        q_price, q_qty, v, pv = net(
             torch.randn(1, 50, 27),
-            torch.randn(1, 50, 2),
+            torch.randn(1, 50, 3),
             torch.randn(1, 11)
         )
-        self.assertEqual(q_dir.shape, (1, 3))
+        self.assertEqual(q_price.shape, (1, 5))
         self.assertEqual(v.shape, (1, 1))
         self.assertEqual(pv.shape, (1, 1))
 
     def test_eval_vs_train_mode(self):
         """FIND-4: Verify dropout is active in train and disabled in eval."""
         net = DeepScalperNetwork(
-            micro_config={"input_size": 10, "private_input_size": 2, "hidden_size": 32},
+            micro_config={"input_size": 10, "private_input_size": 3, "hidden_size": 32},
             macro_config={"input_size": 5, "hidden_sizes": [32, 16], "dropout": 0.5},
             fusion_dim=32,
-            action_space_dims=(3, 3, 3)
+            action_space_dims=(5, 9)
         )
         micro = torch.randn(8, 10, 10)
-        priv = torch.randn(8, 10, 2)
+        priv = torch.randn(8, 10, 3)
         macro = torch.randn(8, 5)
 
         # In eval mode, outputs should be deterministic
@@ -221,26 +219,25 @@ class TestNetworkRobustness(unittest.TestCase):
 
     def test_weight_init_applied(self):
         """FIND-3: Verify custom weight init was applied (not default uniform)."""
-        encoder = MicroEncoder(input_size=10, private_input_size=2, hidden_size=32)
-        # Verify forget gate bias is initialized to 1.0
-        for rnn in [encoder.micro_rnn, encoder.private_rnn]:
-            for name, param in rnn.named_parameters():
-                if 'bias' in name:
-                    n = param.size(0)
-                    forget_gate_bias = param.data[n // 4: n // 2]
-                    self.assertTrue(
-                        torch.allclose(forget_gate_bias, torch.ones_like(forget_gate_bias)),
-                        f"Forget gate bias should be 1.0, got {forget_gate_bias}"
-                    )
+        encoder = MicroEncoder(input_size=10, private_input_size=3, hidden_size=32)
+        # FIX CRIT-2: Single LSTM — verify forget gate bias on micro_rnn only
+        for name, param in encoder.micro_rnn.named_parameters():
+            if 'bias' in name:
+                n = param.size(0)
+                forget_gate_bias = param.data[n // 4: n // 2]
+                self.assertTrue(
+                    torch.allclose(forget_gate_bias, torch.ones_like(forget_gate_bias)),
+                    f"Forget gate bias should be 1.0, got {forget_gate_bias}"
+                )
 
     def test_small_fusion_dim_head_scaling(self):
         """FIND-5: Verify head_hidden = max(fusion_dim//2, 64) doesn't break."""
         # Small fusion_dim: head_hidden should be clamped to 64
         net = DeepScalperNetwork(
-            micro_config={"input_size": 10, "private_input_size": 2, "hidden_size": 32},
+            micro_config={"input_size": 10, "private_input_size": 3, "hidden_size": 32},
             macro_config={"input_size": 5, "hidden_sizes": [32, 16]},
             fusion_dim=64,
-            action_space_dims=(3, 3, 3)
+            action_space_dims=(5, 9)
         )
         # head_hidden should be max(64//2, 64) = 64 (clamped)
         first_linear = net.value_stream[0]
@@ -250,7 +247,7 @@ class TestNetworkRobustness(unittest.TestCase):
     def test_invalid_rnn_type_raises(self):
         """Verify invalid rnn_type raises ValueError."""
         with self.assertRaises(ValueError):
-            MicroEncoder(input_size=10, private_input_size=2, hidden_size=32, rnn_type="Transformer")
+            MicroEncoder(input_size=10, private_input_size=3, hidden_size=32, rnn_type="Transformer")
 
 
 if __name__ == "__main__":

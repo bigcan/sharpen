@@ -97,12 +97,12 @@ def _make_dummy_transition(index: int = 0):
     """Create a dummy transition matching BDQ agent format."""
     state = {
         "micro": np.random.randn(50, 27).astype(np.float32),
-        "private": np.random.randn(50, 2).astype(np.float32),
+        "private": np.random.randn(50, 3).astype(np.float32),
         "macro": np.random.randn(11).astype(np.float32),
     }
     next_state = {
         "micro": np.random.randn(50, 27).astype(np.float32),
-        "private": np.random.randn(50, 2).astype(np.float32),
+        "private": np.random.randn(50, 3).astype(np.float32),
         "macro": np.random.randn(11).astype(np.float32),
     }
     return (state, [0, 2, 1], float(np.random.randn()), next_state, False, 0.1)

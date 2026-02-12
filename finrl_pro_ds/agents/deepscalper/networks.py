@@ -5,14 +5,16 @@ import math
 
 class MicroEncoder(nn.Module):
     """
-    Encodes Micro-structure features (LOB) using LSTM/GRU.
-    Input: (Batch, Window, Features)
+    Encodes Micro-structure features (LOB + Private State) using a single LSTM/GRU.
+    Paper-aligned (Section 3.1, Figure 2): concatenate LOB and private state
+    before feeding into a single temporal encoder.
+    Input: micro (Batch, Window, LOB_Features), private (Batch, Window, Private_Features)
     Output: (Batch, HiddenSize)
     """
     def __init__(
         self, 
         input_size: int = 27, # 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret)
-        private_input_size: int = 2, # Position + Balance
+        private_input_size: int = 3, # Position + Balance + RemainingTime (Paper Section 3.1)
         hidden_size: int = 128,
         num_layers: int = 1,
         dropout: float = 0.0,
@@ -33,24 +35,18 @@ class MicroEncoder(nn.Module):
         else:
             raise ValueError(f"Unknown RNN type: {rnn_type}")
         
-        # Micro (LOB) Branch
+        # FIX CRIT-2: Single LSTM processes concatenated [LOB | Private] input
+        # Paper Figure 2: LOB and private state are concatenated BEFORE the LSTM
+        combined_input_size = input_size + private_input_size
         self.micro_rnn = rnn_cls(
-            input_size=input_size,
+            input_size=combined_input_size,
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
             dropout=rnn_dropout
         )
-        # Private State Branch
-        self.private_rnn = rnn_cls(
-            input_size=private_input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            batch_first=True,
-            dropout=rnn_dropout
-        )
-        # Projection for concatenated output (Hidden + Hidden)
-        self.out_layer = nn.Linear(hidden_size * 2, hidden_size)
+        # Projection: hidden_size -> hidden_size (maintains interface)
+        self.out_layer = nn.Linear(hidden_size, hidden_size)
         self.layernorm = nn.LayerNorm(hidden_size)
         self.activation = nn.LeakyReLU()
         
@@ -59,42 +55,39 @@ class MicroEncoder(nn.Module):
 
     def _init_weights(self):
         """FIX FIND-3: Orthogonal init for RNN, Xavier for Linear."""
-        for rnn in [self.micro_rnn, self.private_rnn]:
-            for name, param in rnn.named_parameters():
-                if 'weight_ih' in name:
-                    nn.init.xavier_uniform_(param)
-                elif 'weight_hh' in name:
-                    nn.init.orthogonal_(param)
-                elif 'bias' in name:
-                    nn.init.zeros_(param)
-                    # Set forget gate bias to 1.0 for LSTM (Jozefowicz et al. 2015)
-                    if self.rnn_type == "LSTM":
-                        n = param.size(0)
-                        param.data[n // 4 : n // 2].fill_(1.0)
+        for name, param in self.micro_rnn.named_parameters():
+            if 'weight_ih' in name:
+                nn.init.xavier_uniform_(param)
+            elif 'weight_hh' in name:
+                nn.init.orthogonal_(param)
+            elif 'bias' in name:
+                nn.init.zeros_(param)
+                # Set forget gate bias to 1.0 for LSTM (Jozefowicz et al. 2015)
+                if self.rnn_type == "LSTM":
+                    n = param.size(0)
+                    param.data[n // 4 : n // 2].fill_(1.0)
         
         nn.init.xavier_uniform_(self.out_layer.weight)
         nn.init.zeros_(self.out_layer.bias)
 
     def forward(self, x: torch.Tensor, private_x: torch.Tensor) -> torch.Tensor:
-        # x: (Batch, Window, Features)
-        # private_x: (Batch, Window, 2)
+        # x: (Batch, Window, LOB_Features)
+        # private_x: (Batch, Window, 3)  [position, balance, remaining_time]
         
-        # FIX FIND-2: Both LSTM and GRU return (output, hidden_state) — no branch needed
-        micro_out, _ = self.micro_rnn(x)
-        private_out, _ = self.private_rnn(private_x)
+        # FIX CRIT-2: Concatenate LOB + private along feature dim BEFORE LSTM
+        combined = torch.cat([x, private_x], dim=-1)  # (Batch, Window, LOB+Private)
+        
+        # Single LSTM processes joint temporal sequence
+        rnn_out, _ = self.micro_rnn(combined)
             
         # Take last time step
-        micro_last = micro_out[:, -1, :]
-        private_last = private_out[:, -1, :]
-        
-        # Concatenate: (Batch, Hidden * 2)
-        combined = torch.cat([micro_last, private_last], dim=1)
+        last_hidden = rnn_out[:, -1, :]
         
         # MLP Projection
-        x = self.out_layer(combined)
-        x = self.layernorm(x)
-        x = self.activation(x)
-        return x
+        out = self.out_layer(last_hidden)
+        out = self.layernorm(out)
+        out = self.activation(out)
+        return out
 
 class MacroEncoder(nn.Module):
     """

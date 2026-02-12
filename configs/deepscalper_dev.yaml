@@ -48,7 +48,7 @@ env:
 network:
   micro_config:
     input_size: 27
-    private_input_size: 2
+    private_input_size: 3  # FIX CRIT-1: Position + Balance + RemainingTime
     hidden_size: 256
     rnn_type: "LSTM"
 

@@ -32,7 +32,7 @@ from typing import Any, Dict, Optional, Tuple
 # [0:20]  = 5 levels × 4 (n_bid_px, n_bid_vol, n_ask_px, n_ask_vol)
 # [20]    = spread_1 (basis points)
 # [21]    = log_ret
-# [22:27] = vol_imbalance_1..5 (OFI)
+# [22:27] = ofi_1..5 (Order Flow Imbalance)
 
 _LOB_COLS_END = 20       # 5 levels × 4 features
 _SPREAD_IDX = 20
@@ -54,7 +54,7 @@ class AugmentedDataWrapper(gym.ObservationWrapper):
       2. Spread Perturbation — scales spread_1 by a random factor
       3. Volume Jitter       — adds Gaussian noise to normalized volumes
       4. Macro Noise         — adds Gaussian noise to macro features
-      5. OFI Perturbation    — scales vol_imbalance columns by a random factor
+      5. OFI Perturbation    — scales ofi columns by a random factor
 
     Parameters are sampled once per episode (on reset) and held constant
     across all steps within that episode for regime consistency.

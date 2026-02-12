@@ -21,7 +21,7 @@ class DeepScalperEnv(gym.Env):
     State Space: Dict
       - micro: (Window, Levels * 4) -> LOB snapshots FLATTENED for LSTM
       - macro: (Features,) -> Tech indicators
-      - private: (Window, 2) -> Historical Position & Balance for Private State LSTM
+      - private: (Window, 3) -> Historical Position, Balance & Remaining Time for Private State
       
     Action Space: MultiDiscrete([3, 5, 5])
       - Direction: 0: Hold, 1: Buy, 2: Sell
@@ -94,7 +94,7 @@ class DeepScalperEnv(gym.Env):
         self.observation_space = gym.spaces.Dict({
             "micro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self.micro_dim), dtype=np.float32),
             "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(NUM_MACRO_FEATURES,), dtype=np.float32),
-            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, 2), dtype=np.float32)
+            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, 3), dtype=np.float32)
         })
         
         # Paper-aligned Action Space: 2 branches (Price, SignedQty)
@@ -146,7 +146,8 @@ class DeepScalperEnv(gym.Env):
         
         # Window Buffer - FIX F1: Now (W, L*F)
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
-        self.private_window = np.zeros((self.window_size, 2), dtype=np.float32)
+        self.private_window = np.zeros((self.window_size, 3), dtype=np.float32)
+        self.total_episode_steps = 1  # Discovered from handler in reset()
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
         
         # Optimization: Pre-compute LOB keys to avoid string formatting in hot loop
@@ -162,11 +163,12 @@ class DeepScalperEnv(gym.Env):
                 f'n_ask_vol_{level}'
             ))
 
-    def _normalize_private_state(self, position: float, balance: float) -> np.ndarray:
+    def _normalize_private_state(self, position: float, balance: float, remaining_time: float = 1.0) -> np.ndarray:
         """
-        Normalize private state variables.
-        Position: [-Max, Max] -> [-1, 1]
-        Balance:  [0, Init*2] -> [0, 2] (approx)
+        Normalize private state variables (Paper Section 3.1).
+        Position:       [-Max, Max] -> [-1, 1]
+        Balance:        [0, Init*2] -> [0, 2] (approx)
+        Remaining Time: [0, 1]      -> [0, 1] (fraction of episode left)
         """
         # Avoid div zero
         max_pos = self.max_position if self.max_position > 0 else 1.0
@@ -176,7 +178,10 @@ class DeepScalperEnv(gym.Env):
         init_bal = self.initial_balance if self.initial_balance > 0 else 1.0
         n_bal = balance / init_bal
         
-        return np.array([n_pos, n_bal], dtype=np.float32)
+        # Remaining time: already in [0, 1]
+        n_time = float(np.clip(remaining_time, 0.0, 1.0))
+        
+        return np.array([n_pos, n_bal, n_time], dtype=np.float32)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -213,10 +218,16 @@ class DeepScalperEnv(gym.Env):
         # We will fill this in reset() properly
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
         
-        # Initialize Private Window (Position=0, Balance=Initial)
-        self.private_window = np.zeros((self.window_size, 2), dtype=np.float32)
-        # FIX: Normalize initial private state
-        initial_private_state = self._normalize_private_state(0.0, float(self.initial_balance))
+        # Discover total episode steps from handler (for remaining_time)
+        if self.handler and hasattr(self.handler, '_len'):
+            self.total_episode_steps = max(self.handler._len, 1)
+        else:
+            self.total_episode_steps = 1  # Fallback: remaining_time always 1.0
+        
+        # Initialize Private Window (Position=0, Balance=Initial, RemainingTime=1.0)
+        self.private_window = np.zeros((self.window_size, 3), dtype=np.float32)
+        # FIX CRIT-1: Normalize initial private state with remaining_time=1.0
+        initial_private_state = self._normalize_private_state(0.0, float(self.initial_balance), 1.0)
         self.private_window = np.tile(initial_private_state, (self.window_size, 1))
         
         if self.handler:
@@ -259,7 +270,7 @@ class DeepScalperEnv(gym.Env):
                         self.notional_debt = value * (1.0 - self.margin_requirement)
                     
                     # Re-normalize/fill private window with NEW state
-                    aug_private_state = self._normalize_private_state(self.position, self.balance)
+                    aug_private_state = self._normalize_private_state(self.position, self.balance, 1.0)
                     self.private_window = np.tile(aug_private_state, (self.window_size, 1))
         
         # Initialize portfolio value after first state update
@@ -744,7 +755,7 @@ class DeepScalperEnv(gym.Env):
             
             # OFI (5 levels)
             for i in range(1, 6):
-                frame[idx] = float(step_data.get(f'vol_imbalance_{i}', 0))
+                frame[idx] = float(step_data.get(f'ofi_{i}', 0))
                 idx += 1
                 
             # CRITICAL FIX: Use RAW prices for order execution (not normalized)
@@ -792,7 +803,9 @@ class DeepScalperEnv(gym.Env):
         # 4. Update Private Window
         # Note: self.position and self.balance are already updated in step() before this call
         # or initialized in reset().
-        current_private = self._normalize_private_state(self.position, self.balance)
+        # FIX CRIT-1: Include remaining_time = 1 - (current_step / total_episode_steps)
+        remaining_time = max(0.0, 1.0 - (self.current_step / self.total_episode_steps))
+        current_private = self._normalize_private_state(self.position, self.balance, remaining_time)
         # FIX PERF-1: In-place shift (same as micro_window above)
         self.private_window[:-1] = self.private_window[1:]
         self.private_window[-1] = current_private

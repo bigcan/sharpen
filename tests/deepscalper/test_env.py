@@ -34,7 +34,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Macro is now 11 features
         self.assertEqual(obs["macro"].shape, (11,))
         # Private state window
-        self.assertEqual(obs["private"].shape, (50, 2))
+        self.assertEqual(obs["private"].shape, (50, 3))
         self.mock_handler.reset.assert_called_once()
     
     def test_step_logic(self):

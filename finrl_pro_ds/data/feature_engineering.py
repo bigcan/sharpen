@@ -158,7 +158,7 @@ class DeepScalperFeatureEngineer:
                 
                 # Log-Modulus Normalization: sign(x) * log(1 + |x|)
                 # Handles large volume spikes gracefully without strict Z-scoring
-                df[f'vol_imbalance_{i}'] = np.sign(ofi_raw) * np.log1p(np.abs(ofi_raw))
+                df[f'ofi_{i}'] = np.sign(ofi_raw) * np.log1p(np.abs(ofi_raw))
                 
         # 4. Log Returns
         if 'mid_price' in df.columns:
@@ -236,13 +236,16 @@ class DeepScalperFeatureEngineer:
         df['z_volume'] = np.clip((vol / vol_sma - 1) * 100.0, -C, C)
         
         # 4. Long-term Moving Averages (zd_k), clamped
-        # Formula: (SMA_k / Close_t) - 1, scaled to Basis Points
+        # FIX MIN-2: Paper Table 2: zd_k = (Close_t / SMA_k - 1) × 10000
+        # Positive = price ABOVE trend, negative = BELOW trend
         ks = [5, 10, 15, 20, 25, 30]
         for k in ks:
             # SMA on adj_close using pd.Series rolling (safe numpy-backed)
             sma_k_series = pd.Series(adj).rolling(window=k).mean()
             sma_k = sma_k_series.values
-            df[f'zd_{k}'] = np.clip((sma_k / adj - 1) * 10000.0, -C, C)
+            # Guard SMA div-by-zero (NaN rows get filled below)
+            sma_k_safe = np.where(np.isnan(sma_k) | (sma_k == 0), 1e-9, sma_k)
+            df[f'zd_{k}'] = np.clip((adj / sma_k_safe - 1) * 10000.0, -C, C)
             
         # Select final columns
         macro_cols = [

@@ -19,7 +19,7 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 | **Reward: Risk-Aware** | Volatility prediction only | **+ Differential Sharpe Ratio (DSR)** (opt-in) | 🚀 **Upgraded** |
 | **Macro Features** | Table 2 (OHLCV + SMA ratios) | Table 2 aligned (11 features, basis-point normalized) | 🟢 **Aligned** |
 | **Micro Features** | LOB L5 + OFI + Spread + Ret | LOB L5 + OFI(5) + Spread + Ret (27 dims) | 🟢 **Aligned** |
-| **Private State** | Position + Balance | Position + Balance (normalized, augmented in training) | 🟢 **Aligned** |
+| **Private State** | Position + Balance + Remaining Time | Position + Balance + Remaining Time (normalized, augmented in training) | 🟢 **Aligned** |
 | **Weight Init** | Not specified | **Orthogonal (RNN) + Xavier (Linear)** | 🚀 **Upgraded** |
 | **HPO** | Bayesian / Grid | **Optuna (TPE + Hyperband pruning)** | 🚀 **Upgraded** |
 | **Data Storage** | Flat Files (Implied) | **Parquet + Shared Memory (SHM)** | 🚀 **Upgraded** |
@@ -54,6 +54,11 @@ Replicate the **DeepScalper** framework (Deep Reinforcement Learning for Intrada
 - **Legacy Formats**: No CSV/Pandas for core training; Parquet/NumPy mandatory.
 - **Live Trading**: V1 is simulation-only; Binance API stubs reserved for V2.
 
+### Intentional Deviations from Paper
+
+> [!WARNING]
+> **LOB Normalization (CRIT-3 — Intentional Deviation)**: The paper normalizes LOB prices/volumes using z-scoring (Section 3.1). Our implementation uses **relative normalization** (prices as deviation from mid-price, volumes as log-modulus). This was a deliberate design choice for numerical stability in the crypto domain where LOB price levels span many orders of magnitude. The relative approach preserves cross-level structure better than z-scoring for highly volatile BTC perpetual futures.
+
 ---
 
 ## 1. Network Architecture Specification
@@ -66,13 +71,16 @@ Encodes LOB snapshots (micro-structure) and trader private state.
 | Parameter | Value | Notes |
 |:---|:---|:---|
 | `input_size` | 27 | 20 (LOB L5×4) + 5 (OFI) + 1 (Spread) + 1 (Return) |
-| `private_input_size` | 2 | Normalized position ∈ [-1,1], balance ∈ [0,2] |
+| `private_input_size` | 3 | Normalized position ∈ [-1,1], balance ∈ [0,2], remaining_time ∈ [0,1] |
 | `hidden_size` | 256 | Production config |
 | `num_layers` | 1 | Single-layer LSTM |
 | `rnn_type` | LSTM | Configurable (LSTM/GRU) |
 | `dropout` | 0.0 | Disabled for single-layer |
 
-**Forward pass**: LOB sequence `(B, W, 27)` → LSTM → last hidden `(B, 256)` → concat with private MLP output `(B, 32)` → final projection `(B, 256)`.
+**Forward pass**: LOB `(B, W, 27)` concat private `(B, W, 3)` → `(B, W, 30)` → single LSTM → last hidden `(B, 256)` → projection `(B, 256)`.
+
+> [!NOTE]
+> **Paper Alignment (CRIT-2)**: The paper's Figure 2 shows a single temporal encoder processing concatenated LOB + private state. Our implementation merges both into one LSTM, matching this design.
 
 **Weight Init**: Orthogonal initialization for RNN weights, Xavier for linear layers.
 
@@ -90,14 +98,13 @@ Encodes OHLCV technical indicators (Table 2 from paper).
 Combines Micro and Macro embeddings into a fused representation and produces branching Q-values.
 
 ```
-MicroEncoder(B,W,27) + Private(B,2) ──→ (B, 256)
-                                            ├──→ FusionLayer ──→ (B, 256)
-MacroEncoder(B, 11) ─────────────────→ (B, 128) ─┘       │
-                                                          ├─→ V(s): State Value Head     → (B, 1)
-                                                          ├─→ Q_dir: Direction Advantage → (B, 3)
-                                                          ├─→ Q_price: Price Advantage   → (B, 5)
-                                                          ├─→ Q_vol: Volume Advantage    → (B, 5)
-                                                          └─→ AuxHead: Volatility Pred   → (B, 1)
+MicroEncoder(B,W,30) ─── [LOB(27)+Private(3) concat] ──→ LSTM ──→ (B, 256)
+                                                                      ├──→ FusionLayer ──→ (B, 256)
+MacroEncoder(B, 11) ───────────────────────────────→ (B, 128) ─┘       │
+                                                                       ├─→ V(s): State Value Head     → (B, 1)
+                                                                       ├─→ Q_price: Price Advantage   → (B, 5)
+                                                                       ├─→ Q_qty: SignedQty Advantage → (B, 9)
+                                                                       └─→ AuxHead: Volatility Pred   → (B, 1)
 ```
 
 **Action Space** (2 branches, 45 combinations):
