@@ -103,10 +103,18 @@ class DeepScalperTrainer:
         else:
             obs, _ = self.env.reset()
         
-        # Defensive Assertion: Ensure VectorEnv semantics (batch dimension present)
-        assert len(obs["micro"].shape) == 3, \
-            f"Expected obs['micro'] shape (B, Window, Features), got {obs['micro'].shape}. " \
-            "Ensure env is wrapped in SyncVectorEnv even for num_envs=1."
+        # Defensive Shape Assertions — run once at start for performance
+        if global_step == start_step:
+            B = self.env.num_envs
+            W = self.config.get("env", {}).get("window_size", 50)
+            assert obs["micro"].shape == (B, W, 27), \
+                f"obs['micro'] shape mismatch: expected ({B}, {W}, 27), got {obs['micro'].shape}"
+            assert obs["private"].shape == (B, W, 3), \
+                f"obs['private'] shape mismatch: expected ({B}, {W}, 3), got {obs['private'].shape}"
+            assert obs["macro"].ndim == 2, \
+                f"obs['macro'] expected 2D (B, M), got shape {obs['macro'].shape}"
+            print(f"✓ Observation shapes verified: micro={obs['micro'].shape}, "
+                  f"private={obs['private'].shape}, macro={obs['macro'].shape}")
         
         # FIX PERF-2: Dynamic epsilon decay for BOTH HPO and production training.
         # Ensures exploration schedule matches actual training budget regardless of num_envs.
