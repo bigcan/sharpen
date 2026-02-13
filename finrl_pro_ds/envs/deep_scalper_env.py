@@ -263,11 +263,15 @@ class DeepScalperEnv(gym.Env):
                     max_bal = max(min_bal * 1.1, self.initial_balance * 1.5)
                     self.balance = np.random.uniform(min_bal, max_bal)
                     
-                    # FIX AUDIT-A: Initialize notional_debt for leveraged positions
-                    # Without this, portfolio_value = balance + pos*mid (overstated)
-                    # Correct:     portfolio_value = balance + pos*mid - debt
+                    # FIX SHORT-ACCT: Initialize notional_debt for leveraged positions
+                    # Long: debt = borrowed cash (partial notional)
+                    # Short: debt = full buyback obligation (full notional)
                     if self.margin_requirement < 1.0 and abs(self.position) > 1e-12:
-                        self.notional_debt = value * (1.0 - self.margin_requirement)
+                        if self.position > 0:
+                            self.notional_debt = value * (1.0 - self.margin_requirement)
+                        else:
+                            # Short: track full notional as buyback obligation
+                            self.notional_debt = value
                     
                     # Re-normalize/fill private window with NEW state
                     aug_private_state = self._normalize_private_state(self.position, self.balance, 1.0)
@@ -396,13 +400,14 @@ class DeepScalperEnv(gym.Env):
                             close_qty = min(exec_qty, abs(self.position))
                             open_qty = exec_qty - close_qty  # > 0 if flipping
                             
-                            # Leg 1: Close short — release proportional debt
+                            # Leg 1: Close short — buy back asset, release debt
+                            # FIX SHORT-ACCT: P&L = entry_debt (what we sold for) - buyback_cost
                             close_frac = min(close_qty / abs(self.position), 1.0)
                             debt_release = self.notional_debt * close_frac
                             self.notional_debt -= debt_release
                             close_notional = fill_price * close_qty
                             close_fee = close_notional * fee_rate
-                            self.balance -= (close_notional + close_fee - debt_release)
+                            self.balance += (debt_release - close_notional - close_fee)
                             
                             # Leg 2: Open new long (if flipping)
                             if open_qty > 1e-12:
@@ -492,25 +497,22 @@ class DeepScalperEnv(gym.Env):
                             self.balance += (close_proceeds - debt_release)
                             
                             # Leg 2: Open new short (if flipping)
+                            # FIX SHORT-ACCT: Only deduct fee, track full notional as buyback obligation
                             if open_qty > 1e-12:
                                 open_notional = fill_price * open_qty
                                 open_fee = open_notional * fee_rate
-                                margin_cost = open_notional * self.margin_requirement + open_fee
-                                borrowed = open_notional * (1.0 - self.margin_requirement)
-                                self.balance -= margin_cost
-                                self.notional_debt += borrowed
+                                self.balance -= open_fee
+                                self.notional_debt += open_notional
                                 # Recalculate total fee for tracking
                                 fee = close_fee + open_fee
                             else:
                                 fee = close_fee
                             proceeds = 0  # Handled above per-leg
                         else:
-                            # Opening/extending short: debit margin, add debt
-                            margin_cost = notional * self.margin_requirement + fee
-                            borrowed = notional * (1.0 - self.margin_requirement)
-                            self.balance -= margin_cost
-                            self.notional_debt += borrowed
-                            proceeds = 0  # No credit, we debited instead
+                            # FIX SHORT-ACCT: Opening/extending short — fee only, full buyback debt
+                            self.balance -= fee
+                            self.notional_debt += notional  # Full buyback obligation
+                            proceeds = 0
                         
                         # Track cumulative costs
                         self.cumulative_fees += fee
@@ -687,14 +689,19 @@ class DeepScalperEnv(gym.Env):
         return obs, reward, terminated, truncated, info
     
     def _get_portfolio_value(self):
-        """Calculate total equity (Balance + Unrealized PnL - Debt)
+        """Calculate total equity.
         
-        With leverage (margin_req < 1.0):
-          equity = balance + position*mid - notional_debt
-        When margin_req = 1.0, notional_debt = 0 and this reduces to the spot formula.
+        FIX SHORT-ACCT: Split formula by position direction.
+        Long:  equity = balance + position*mid - debt  (debt = borrowed cash)
+        Short: equity = balance - |position|*mid + debt  (debt = buyback obligation)
+        When margin_req = 1.0, notional_debt = 0 and both reduce to spot formula.
         """
         mid = (self.current_best_ask + self.current_best_bid) / 2.0 if self.current_best_ask > 0 else 0.0
-        val = self.balance + (self.position * mid) - self.notional_debt
+        if self.position >= 0:
+            val = self.balance + (self.position * mid) - self.notional_debt
+        else:
+            # Short: cash - buyback_cost + entry_obligation
+            val = self.balance - abs(self.position) * mid + self.notional_debt
         # Force scalar
         if hasattr(val, "item"): val = val.item()
         return float(val)
