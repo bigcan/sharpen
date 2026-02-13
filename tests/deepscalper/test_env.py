@@ -68,7 +68,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.mock_handler.step.return_value = None
         action = np.array([0, 4])  # Hold (qty_idx 4 = 0.0)
         obs, reward, terminated, truncated, info = self.env.step(action)
-        self.assertTrue(terminated)
+        self.assertTrue(truncated, "Should be truncated when data is exhausted")
 
     def test_reward_pnl_price_delta(self):
         """Paper formula: reward_pnl = (mid_t+1 - mid_t) × prev_position."""

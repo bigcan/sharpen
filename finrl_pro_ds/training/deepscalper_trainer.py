@@ -243,7 +243,7 @@ class DeepScalperTrainer:
                             _acc_total += abs(float(rt[i]) if hasattr(rt, "__getitem__") else float(rt))
                     
                     # Track Episodic Stats
-                    curr_rewards[i] += r
+                    curr_rewards[i] += raw_r
                     curr_lens[i] += 1
                     
                     if d:

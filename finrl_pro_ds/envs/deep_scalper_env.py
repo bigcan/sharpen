@@ -123,13 +123,16 @@ class DeepScalperEnv(gym.Env):
         # Probability of initializing with random position/balance
         self.private_state_augment_prob = float(config.get("private_state_augment_prob", 0.0))
         
-        # Internal State
-        self.current_step = 0
+        # Track PnL
         self.balance = self.initial_balance
+        self.portfolio_value = self.initial_balance
+        self.peak_portfolio_value = self.initial_balance  # Sprint 3: Deep Drawdown Tracking
         self.position = 0.0
-        self.avg_price = 0.0
         self.notional_debt = 0.0  # Borrowed notional for leveraged positions
         self.prev_portfolio_value = self.initial_balance # For dense reward
+        
+        self.current_step = 0
+        self.avg_price = 0.0
         
         self.pending_order = None  # (direction, price, quantity, is_taker)
         
@@ -279,6 +282,7 @@ class DeepScalperEnv(gym.Env):
         
         # Initialize portfolio value after first state update
         self.prev_portfolio_value = self._get_portfolio_value()
+        self.peak_portfolio_value = self.prev_portfolio_value # Reset peak for drawdown tracking
             
         return self._get_observation(), {}
 
@@ -620,7 +624,20 @@ class DeepScalperEnv(gym.Env):
         # Total paper reward (Section 3.2 + 4.2) + hold bonus shaping
         paper_reward = (reward_pnl_bps + reward_fee_bps + reward_hindsight_bps + hold_bonus) * self.reward_scaling
 
-        # --- Component 4 (Optional): Differential Sharpe Ratio ---
+        # Sprint 3: Drawdown Penalty (Risk Control)
+        # Penalize deep drawdowns (>10%) to prevent catastrophic ruin
+        self.peak_portfolio_value = max(self.peak_portfolio_value, current_portfolio_value)
+        drawdown_pct = 1.0 - (current_portfolio_value / self.peak_portfolio_value)
+        drawdown_penalty = 0.0
+        if drawdown_pct > 0.10:
+            # 5 bps penalty for every 1% beyond 10%
+            drawdown_penalty = (drawdown_pct - 0.10) * 100.0 * 5.0
+            
+        paper_reward -= drawdown_penalty
+
+        # DSR (Differential Sharpe Ratio) - Section 3.2
+        # Use realized PnL for Sharpe calculation to avoid unrealized noise
+        # DSR update logic...
         reward_sharpe = 0.0
         if self.sharpe_weight > 0:
             # Step return normalized by initial balance for scale invariance
