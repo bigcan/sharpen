@@ -53,7 +53,7 @@ class DeepScalperBDQ:
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.01,
         epsilon_decay: float = 0.999995, # Fix: Slower decay (target ~10% at 2M steps)
-        exploration_mode: str = "boltzmann",  # "uniform" or "boltzmann"
+        exploration_mode: str = "epsilon_greedy",  # Sprint 3: Boltzmann removed
         buffer_size: int = 100000,
         batch_size: int = 64,
         target_update_freq: int = 100,
@@ -138,30 +138,6 @@ class DeepScalperBDQ:
                     ResourceWarning
                 )
 
-    def get_probs(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, temp: float = 1.0) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Return action probabilities via temperature-scaled softmax of Q-values.
-        Returns: (p_price, p_qty)
-        """
-        micro = micro.to(self.device)
-        private_in = private_in.to(self.device)
-        macro = macro.to(self.device)
-        
-        # FIX FIND-4: Disable dropout during inference
-        self.policy_net.eval()
-        with torch.no_grad():
-            q_price, q_qty, _, _ = self.policy_net(micro, private_in, macro)
-            
-            def safe_softmax(q, t):
-                # Subtract max for numerical stability to prevent overflow
-                q_scaled = (q - q.max(dim=1, keepdim=True)[0]) / t
-                return torch.softmax(q_scaled, dim=1)
-            
-            p_price = safe_softmax(q_price, temp)
-            p_qty = safe_softmax(q_qty, temp)
-            
-        self.policy_net.train()  # Restore train mode
-        return p_price, p_qty
 
     def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
         """
@@ -196,17 +172,10 @@ class DeepScalperBDQ:
             # Stack: (B, 2)
             greedy_actions = torch.stack([a_price_greedy, a_qty_greedy], dim=1)
             
-        # Exploration: Boltzmann (softmax of Q-values) or uniform random
+        # Exploration: Uniform random (Sprint 3: Boltzmann removed)
         if random_mask.any():
-            if self.exploration_mode == "boltzmann":
-                # Temperature decays with epsilon: high temp → uniform, low temp → greedy
-                temp = max(self.epsilon * 10.0, 0.1)
-                p_price, p_qty = self.get_probs(micro, private_in, macro, temp=temp)
-                r_price = torch.multinomial(p_price, 1).squeeze(1)
-                r_qty = torch.multinomial(p_qty, 1).squeeze(1)
-            else:
-                r_price = torch.randint(0, self.action_dims[0], (batch_size,), device=self.device)
-                r_qty = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
+            r_price = torch.randint(0, self.action_dims[0], (batch_size,), device=self.device)
+            r_qty = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
             
             random_actions = torch.stack([r_price, r_qty], dim=1)
             

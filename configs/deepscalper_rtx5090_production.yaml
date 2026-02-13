@@ -112,7 +112,8 @@ agents:
     # FIX PERF-2: epsilon_decay now computed dynamically by trainer
     # from total_timesteps and num_envs. Config value is ignored.
     epsilon_decay: 0.999908  # Legacy — overridden at runtime
-    exploration_mode: "epsilon_greedy"  # Sprint 3: Revert Boltzmann (Sprint 2 regression) (was uniform random)
+    exploration_mode: "epsilon_greedy"  # Sprint 3: Revert Boltzmann (Sprint 2 regression)
+    target_q_clip: 5000.0  # Sprint 3: Clip target Q-values to ±R_max/(1-γ)
 
 training:
   # Overall length
