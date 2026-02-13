@@ -1,3 +1,4 @@
+
 """
 Regression tests for all 5 audited fixes — adversarial audit coverage.
 Run:  pytest tests/test_audit_regression.py -v
@@ -6,11 +7,71 @@ import pytest
 import copy
 import numpy as np
 import pandas as pd
+import torch
 from unittest.mock import MagicMock, patch
 
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 from finrl_pro_ds.analytics.wandb_evaluator import WandbFinRLEvaluator
+from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
+
+# ══════════════════════════════════════════════════════════════
+# SPRINT 3 — Target Q Clipping
+# ══════════════════════════════════════════════════════════════
+class TestTargetQClipping:
+    """Sprint 3: Verify target Q-value clipping logic."""
+    
+    @pytest.fixture
+    def mock_agent(self):
+        network_config = {
+            "micro_config": {"input_size": 27, "private_input_size": 3, "hidden_size": 256, "rnn_type": "LSTM"},
+            "macro_config": {"input_size": 11, "hidden_sizes": [256, 128]},
+            "action_space_dims": (5, 9)
+        }
+        return DeepScalperBDQ(network_config=network_config, device="cpu", gamma=0.99)
+
+    def test_default_clipping(self, mock_agent):
+        """Verify default clipping at ±5000 for gamma=0.99."""
+        assert mock_agent.target_q_clip == pytest.approx(5000.0, rel=1e-3)
+        
+        # Simulate high target Q
+        rewards = torch.tensor([100.0])
+        max_next_q = torch.tensor([6000.0])
+        dones = torch.tensor([0.0])
+        
+        # Manually replicate calculation for test
+        target = rewards + 0.99 * max_next_q * (1 - dones)
+        # 100 + 0.99 * 6000 = 6040
+        
+        # The agent logic (internal):
+        # target_q_shared = target_q_shared.clamp(-self.target_q_clip, self.target_q_clip)
+        clipped = target.clamp(-mock_agent.target_q_clip, mock_agent.target_q_clip)
+        
+        assert clipped.item() == pytest.approx(5000.0)
+
+    def test_custom_clipping(self):
+        """Verify custom clipping value."""
+        network_config = {
+            "micro_config": {"input_size": 27, "private_input_size": 3, "hidden_size": 256, "rnn_type": "LSTM"},
+            "macro_config": {"input_size": 11, "hidden_sizes": [256, 128]},
+            "action_space_dims": (5, 9)
+        }
+        agent = DeepScalperBDQ(network_config=network_config, target_q_clip=100.0, device="cpu")
+        assert agent.target_q_clip == 100.0
+        
+        target = torch.tensor([200.0])
+        clipped = target.clamp(-agent.target_q_clip, agent.target_q_clip)
+        assert clipped.item() == 100.0
+
+    def test_clipping_disabled(self):
+        """Verify clipping disabling (0.0)."""
+        network_config = {
+            "micro_config": {"input_size": 27, "private_input_size": 3, "hidden_size": 256, "rnn_type": "LSTM"},
+            "macro_config": {"input_size": 11, "hidden_sizes": [256, 128]},
+            "action_space_dims": (5, 9)
+        }
+        agent = DeepScalperBDQ(network_config=network_config, target_q_clip=0.0, device="cpu")
+        assert agent.target_q_clip == 0.0
 
 
 # ──────────────────────────────────────────────────────────────

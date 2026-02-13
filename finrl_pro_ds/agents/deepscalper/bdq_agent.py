@@ -65,6 +65,7 @@ class DeepScalperBDQ:
         per_alpha: float = 0.6,         # Prioritization exponent (0=uniform, 1=full)
         per_beta_start: float = 0.4,    # Initial IS correction
         per_beta_frames: int = 100000,  # Anneal beta to 1.0 over this many frames
+        target_q_clip: float = 5000.0,  # Sprint 3: Clip target Q-values (default for gamma=0.99, R=50)
         device: str = "cpu"
     ):
         self.device = torch.device(device)
@@ -72,6 +73,7 @@ class DeepScalperBDQ:
         self.use_per = use_per
         self.auxiliary_weight = auxiliary_weight
         self.gamma = gamma
+        self.target_q_clip = target_q_clip
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
@@ -286,6 +288,10 @@ class DeepScalperBDQ:
                 max_next_q_agg = (max_next_q_price + max_next_q_qty) / 2.0
                 target_q_shared = rewards + self.gamma * max_next_q_agg * (1 - dones)
                 
+                # Sprint 3: Target Q Clipping to prevent bootstrap divergence
+                if self.target_q_clip > 0:
+                    target_q_shared = target_q_shared.clamp(-self.target_q_clip, self.target_q_clip)
+                
             # Loss — 2 branches
             if self.use_per:
                 loss_fn = nn.SmoothL1Loss(reduction='none')
@@ -353,6 +359,9 @@ class DeepScalperBDQ:
             "q_value/std": (curr_q_price.std().item() + curr_q_qty.std().item()) / 2.0,
             "q_value/max": max(curr_q_price.max().item(), curr_q_qty.max().item()),
             "q_value/min": min(curr_q_price.min().item(), curr_q_qty.min().item()),
+            "q_value/target_mean": target_q_shared.mean().item(),
+            "q_value/target_max": target_q_shared.max().item(),
+            "q_value/target_min": target_q_shared.min().item(),
             "exploration_mode": 0.0 if self.exploration_mode == "uniform" else 1.0,
         }
         
