@@ -1,0 +1,90 @@
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date: "2025-01-02 23:59:59"
+  val_start_date: "2025-01-03 00:00:00"
+  val_end_date: "2025-01-03 12:00:00"
+  test_start_date: "2025-01-03 12:00:00"
+  test_end_date: "2025-01-03 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.2
+  maker_fee: 0.0002
+  taker_fee: 0.0004
+  num_envs: 1
+  window_size: 50
+  max_drawdown_pct: 1.0
+  private_state_augment_prob: 0.0
+  
+  reward:
+    scaling: 1.0
+    hindsight_weight: 0.1
+    hindsight_horizon: 180
+    volatility_horizon: 100
+    sharpe_weight: 0.3
+    sharpe_horizon: 100
+    hold_bonus_bps: 0.0
+    
+  action:
+    price_bins: 5
+    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    max_position: 1.0
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 27
+    private_input_size: 3
+    hidden_size: 256
+    rnn_type: "LSTM"
+    
+  macro_config:
+    input_size: 11
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    learning_rate: 0.0001
+    gamma: 0.99
+    auxiliary_weight: 0.1
+    update_interval: 1
+    batch_size: 32
+    buffer_size: 10000
+    target_update_freq: 100
+    tau: 0.005
+    checkpoint_interval: 500
+    learning_starts: 100
+    exploration_fraction: 0.5
+    epsilon_start: 1.0
+    epsilon_end: 0.01
+    epsilon_decay: 0.99
+    exploration_mode: "epsilon_greedy"
+    target_q_clip: 5000.0
+
+training:
+  total_timesteps: 1000
+  training_epochs: 1
+  log_interval: 100
+  torch_compile: false
+  use_amp: false
+  use_shm: false
+  verbose_logging: true
+  
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS-Smoke"
+  entity: "bigcan-chiwin-technology"
+  mode: "offline"
+  tags: ["SmokeTest", "Sprint3"]

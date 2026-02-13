@@ -9,6 +9,14 @@ import numpy as np
 import pandas as pd
 import torch
 from unittest.mock import MagicMock, patch
+import sys
+# Mock yfinance to avoid ImportError in test environment
+sys.modules["yfinance"] = MagicMock()
+sys.modules["seaborn"] = MagicMock()
+sys.modules["matplotlib"] = MagicMock()
+sys.modules["matplotlib.pyplot"] = MagicMock()
+
+
 
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
