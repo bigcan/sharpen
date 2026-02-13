@@ -97,7 +97,8 @@ agents:
     buffer_size: 2000000 
     
     # Reference: 5,000-10,000
-    target_update_freq: 7500
+    target_update_freq: 7500  # Legacy — replaced by tau (Polyak) in Sprint 2
+    tau: 0.005  # Sprint 2: Polyak averaging coefficient (replaces hard target copy)
     
     checkpoint_interval: 100000 
     
@@ -111,6 +112,7 @@ agents:
     # FIX PERF-2: epsilon_decay now computed dynamically by trainer
     # from total_timesteps and num_envs. Config value is ignored.
     epsilon_decay: 0.999908  # Legacy — overridden at runtime
+    exploration_mode: "boltzmann"  # Sprint 2: Softmax exploration (was uniform random)
 
 training:
   # Overall length
