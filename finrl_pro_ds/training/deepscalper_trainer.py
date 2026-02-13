@@ -127,15 +127,17 @@ class DeepScalperTrainer:
             n_calls = self.total_timesteps // num_envs
 
         if n_calls > 0:
-            # Scale epsilon decay across ALL epochs
+            # Scale epsilon decay to reach epsilon_end at exploration_fraction of total training
+            exploration_fraction = self.config.get("agents", {}).get("bdq", {}).get("exploration_fraction", 0.5)
             total_calls = n_calls * self.training_epochs
+            explore_calls = max(int(total_calls * exploration_fraction), 1)
             epsilon_end = self.config.get("agents", {}).get("bdq", {}).get("epsilon_end", 0.01)
-            computed_decay = np.exp(np.log(max(epsilon_end, 1e-10)) / total_calls)
+            computed_decay = np.exp(np.log(max(epsilon_end, 1e-10)) / explore_calls)
             self.agent.epsilon_decay = computed_decay
             if self.hpo_mode:
-                print(f"[HPO] Overriding epsilon_decay to {computed_decay:.6f} for {steps_per_trial} steps (~{total_calls} updates, {self.training_epochs} epochs)")
+                print(f"[HPO] Overriding epsilon_decay to {computed_decay:.6f} for {steps_per_trial} steps (~{explore_calls} explore updates of {total_calls} total, {self.training_epochs} epochs)")
             else:
-                print(f"[Train] Computed epsilon_decay = {computed_decay:.6f} for {self.total_timesteps}x{self.training_epochs} steps (~{total_calls} updates)")
+                print(f"[Train] Computed epsilon_decay = {computed_decay:.6f} (explore over {explore_calls}/{total_calls} updates, fraction={exploration_fraction})")
         
         global_step = start_step
         episode_rewards = deque(maxlen=100)
