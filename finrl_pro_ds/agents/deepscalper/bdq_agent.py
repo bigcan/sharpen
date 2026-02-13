@@ -337,7 +337,12 @@ class DeepScalperBDQ:
             "loss_aux": loss_vol_pred.item(),
             "q_price_mean": curr_q_price.mean().item(),
             "q_qty_mean": curr_q_qty.mean().item(),
-            "epsilon": self.epsilon
+            "epsilon": self.epsilon,
+            # Sprint 1: Q-value statistics for overestimation monitoring
+            "q_value/mean": (curr_q_price.mean().item() + curr_q_qty.mean().item()) / 2.0,
+            "q_value/std": (curr_q_price.std().item() + curr_q_qty.std().item()) / 2.0,
+            "q_value/max": max(curr_q_price.max().item(), curr_q_qty.max().item()),
+            "q_value/min": min(curr_q_price.min().item(), curr_q_qty.min().item()),
         }
         
         if self.use_per:

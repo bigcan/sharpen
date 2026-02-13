@@ -647,6 +647,10 @@ class DeepScalperEnv(gym.Env):
         # Blend: (1 - w) × paper + w × DSR  (w=0 → pure paper)
         reward = (1.0 - self.sharpe_weight) * paper_reward + self.sharpe_weight * reward_sharpe
 
+        # Sprint 1: Reward clipping to prevent Q-value overestimation
+        # ±50 bps is generous (~0.5% per step with 5× leverage)
+        reward = float(np.clip(reward, -50.0, 50.0))
+
         # 4.3 Volatility Prediction Target (Section 4.4 — auxiliary loss, NOT reward)
         volatility_target = 0.0
         if self.handler and hasattr(self.handler, 'get_lookahead_volatility'):
