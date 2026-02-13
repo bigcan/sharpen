@@ -53,9 +53,11 @@ class DeepScalperBDQ:
         epsilon_start: float = 1.0,
         epsilon_end: float = 0.01,
         epsilon_decay: float = 0.999995, # Fix: Slower decay (target ~10% at 2M steps)
+        exploration_mode: str = "boltzmann",  # "uniform" or "boltzmann"
         buffer_size: int = 100000,
         batch_size: int = 64,
         target_update_freq: int = 100,
+        tau: float = 0.005,  # Polyak averaging coefficient (0 = no update, 1 = hard copy)
         auxiliary_weight: float = 0.1, # Section 4.4
         action_dims: Tuple[int, int] = (5, 9),  # Paper-aligned: (Price, SignedQty)
         use_amp: bool = False,
@@ -73,6 +75,8 @@ class DeepScalperBDQ:
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
         self.epsilon_decay = epsilon_decay
+        self.exploration_mode = exploration_mode
+        self.tau = tau
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
         self.step_count = 0
@@ -190,10 +194,17 @@ class DeepScalperBDQ:
             # Stack: (B, 2)
             greedy_actions = torch.stack([a_price_greedy, a_qty_greedy], dim=1)
             
-        # Random exploration
+        # Exploration: Boltzmann (softmax of Q-values) or uniform random
         if random_mask.any():
-            r_price = torch.randint(0, self.action_dims[0], (batch_size,), device=self.device)
-            r_qty = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
+            if self.exploration_mode == "boltzmann":
+                # Temperature decays with epsilon: high temp → uniform, low temp → greedy
+                temp = max(self.epsilon * 10.0, 0.1)
+                p_price, p_qty = self.get_probs(micro, private_in, macro, temp=temp)
+                r_price = torch.multinomial(p_price, 1).squeeze(1)
+                r_qty = torch.multinomial(p_qty, 1).squeeze(1)
+            else:
+                r_price = torch.randint(0, self.action_dims[0], (batch_size,), device=self.device)
+                r_qty = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
             
             random_actions = torch.stack([r_price, r_qty], dim=1)
             
@@ -322,12 +333,11 @@ class DeepScalperBDQ:
                 td_errors = ((td_price + td_qty) / 2.0).squeeze(1).cpu().numpy()
             self.memory.update_priorities(per_indices, td_errors)
         
-        # Update Target Net
+        # Update Target Net — Polyak (soft) averaging
         self.step_count += 1
-        if self.step_count % self.target_update_freq == 0:
-            state_dict = self.policy_net.state_dict()
-            clean_state_dict = {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
-            self.target_net.load_state_dict(clean_state_dict)
+        with torch.no_grad():
+            for p, tp in zip(self.policy_net.parameters(), self.target_net.parameters()):
+                tp.data.mul_(1.0 - self.tau).add_(p.data, alpha=self.tau)
             
         # Logging Metrics — 2 branches
         metrics = {
@@ -343,6 +353,7 @@ class DeepScalperBDQ:
             "q_value/std": (curr_q_price.std().item() + curr_q_qty.std().item()) / 2.0,
             "q_value/max": max(curr_q_price.max().item(), curr_q_qty.max().item()),
             "q_value/min": min(curr_q_price.min().item(), curr_q_qty.min().item()),
+            "exploration_mode": 0.0 if self.exploration_mode == "uniform" else 1.0,
         }
         
         if self.use_per:

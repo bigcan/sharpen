@@ -53,6 +53,8 @@ class DeepScalperTrainer:
             per_alpha=config["agents"]["bdq"].get("per_alpha", 0.6),
             per_beta_start=config["agents"]["bdq"].get("per_beta_start", 0.4),
             per_beta_frames=config["agents"]["bdq"].get("per_beta_frames", 100000),
+            exploration_mode=config["agents"]["bdq"].get("exploration_mode", "boltzmann"),
+            tau=config["agents"]["bdq"].get("tau", 0.005),
             device=device
         )
         
