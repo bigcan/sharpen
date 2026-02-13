@@ -4,6 +4,8 @@
 
 data:
   file_path: "data/processed/btc_2025_jan_jun.parquet"
+  # TODO: Merge jan_jun + jul_dec into single parquet for extended training
+  # ParquetDataHandler only supports single file_path currently
   ticker: "BTCUSDT"
   train_start_date: "2025-01-01 00:00:00"
   train_end_date: "2025-05-31 23:59:59"
@@ -42,7 +44,7 @@ env:
     sharpe_weight: 0.3        # Blend: 0.7 × paper + 0.3 × DSR (was 0.0)
     sharpe_horizon: 100       # EMA lookback window for DSR statistics
     # Fee-avoidance shaping: small reward for holding flat (no unnecessary trades)
-    hold_bonus_bps: 0.1       # 0.1 bps reward for holding when flat
+    hold_bonus_bps: 0.0       # Disabled — paper uses no hold bonus
     
   action:
     price_bins: 5
@@ -50,6 +52,14 @@ env:
     # Negative = Sell, Zero = Hold, Positive = Buy
     signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
     max_position: 1.0 # Max BTC
+
+  augmentation:
+    enabled: true
+    volatility_scale_range: [0.7, 1.5]
+    spread_scale_range: [0.9, 1.2]
+    volume_noise_std: 0.1
+    macro_noise_std: 0.05
+    ofi_scale_range: [0.9, 1.1]
 
 network:
   # V9.5 Blackwell Architecture
@@ -95,9 +105,9 @@ agents:
     learning_starts: 5000
     
     # Reference: Exploration 0.15-0.2
-    exploration_fraction: 0.2
+    exploration_fraction: 0.5
     epsilon_start: 1.0
-    epsilon_end: 0.01
+    epsilon_end: 0.005
     # FIX PERF-2: epsilon_decay now computed dynamically by trainer
     # from total_timesteps and num_envs. Config value is ignored.
     epsilon_decay: 0.999908  # Legacy — overridden at runtime
