@@ -5,55 +5,14 @@ import warnings
 import matplotlib.pyplot as plt
 from typing import Dict, Any, Optional
 
-# --- Patch for Pyfolio / Empyrical / Pandas / Numpy compatibility ---
-# Pyfolio relies on empyrical, which relies on pandas_datareader, which uses a deprecated
-# pandas function. Also Numpy 2.0 removed NINF. Also pandas 2.0 removed iteritems.
-
-try:
-    # Patch Numpy 2.0 compatibility
-    if not hasattr(np, 'NINF'):
-        np.NINF = -np.inf
-    if not hasattr(np, 'float_'):
-         np.float_ = np.float64
-         
-    # Patch Pandas 2.0 compatibility (iteritems removed)
-    if not hasattr(pd.Series, 'iteritems'):
-        pd.Series.iteritems = pd.Series.items
-except Exception as e:
-    warnings.warn(f"Failed to patch numpy/pandas: {e}")
-
-try:
-    from pandas.util import deprecate_kwarg
-except ImportError:
-    # Check if we can patch it in _decorators
-    try:
-        from pandas.util import _decorators
-        # Create a dummy decorator
-        def dummy_deprecate_kwarg(*args, **kwargs):
-            def decorator(func):
-                return func
-            return decorator
-        
-        # Patch usage
-        _decorators.deprecate_kwarg = dummy_deprecate_kwarg
-        if hasattr(pd, 'util'):
-            pd.util.deprecate_kwarg = dummy_deprecate_kwarg
-            
-    except Exception as e:
-        warnings.warn(f"Failed to patch pandas for pyfolio compatibility: {e}")
-
-try:
-    import pyfolio
-    from pyfolio import timeseries
-except ImportError:
-    warnings.warn("Pyfolio import failed. Analysis capabilities will be limited.")
-    pyfolio = None
-    timeseries = None
 
 class PyfolioAnalyzer:
     """
-    Standardized Pyfolio Analyzer for DeepScalper Financial Auditing.
-    Replaces VectorBT for generating Tear Sheets and Metrics.
+    Standardized Financial Analyzer for DeepScalper Auditing.
+    
+    Sprint 4: Replaced pyfolio/empyrical with manual numpy computations.
+    Root cause: pyfolio → empyrical → pandas_datareader → deprecate_kwarg crash.
+    All metrics are now computed directly using numpy for reliability.
     """
     def __init__(self, returns: pd.Series):
         """
@@ -67,9 +26,8 @@ class PyfolioAnalyzer:
         if not isinstance(self.returns, pd.Series):
             self.returns = pd.Series(self.returns)
             
-        # Ensure index is datetime, otherwise pyfolio complains
+        # Ensure index is datetime for compatibility
         if not isinstance(self.returns.index, pd.DatetimeIndex):
-            # Try to convert or generate dummy index
             try:
                 self.returns.index = pd.to_datetime(self.returns.index)
             except:
@@ -79,45 +37,80 @@ class PyfolioAnalyzer:
 
     def get_audit_metrics(self) -> Dict[str, float]:
         """
-        Extract key institutional metrics for auditing using Pyfolio/Empyrical.
+        Compute institutional metrics using pure numpy (no pyfolio/empyrical).
+        
+        Metrics: Sharpe, Sortino, Calmar, Omega, Stability, VaR, Win Rate,
+        Annual Return, Max Drawdown, Cumulative Return.
+        
+        Annualization: 525,600 minutes/year (365.25 × 24 × 60).
         """
-        if pyfolio is None:
+        r = self.returns.values.astype(np.float64)
+        n = len(r)
+        if n < 2:
             return self._fallback_metrics()
-            
-        try:
-            # Empyrical functions are exposed via pyfolio.timeseries
-            # or directly from empyrical if we imported it
-            
-            # Simple stats
-            perf_stats = timeseries.perf_stats(self.returns)
-            
-            # Helper to safely get value from Series or dict
-            def get_val(key, default=0.0):
-                if isinstance(perf_stats, pd.Series):
-                    val = perf_stats.get(key, default)
-                else:
-                    val = perf_stats.get(key, default)
-                return float(val) if pd.notnull(val) else default
 
-            return {
-                "total_return": self.returns.sum() * 100, 
-                "cumulative_return": get_val('Cumulative Return') * 100,
-                "annual_return": get_val('Annual return') * 100,
-                "max_drawdown": get_val('Max drawdown') * 100,
-                "sharpe_ratio": get_val('Sharpe ratio'),
-                "sortino_ratio": get_val('Sortino ratio'),
-                "calmar_ratio": get_val('Calmar ratio'),
-                "omega_ratio": get_val('Omega ratio'),
-                "stability": get_val('Stability'),
-                "daily_value_at_risk": get_val('Daily value at risk'),
-                "win_rate": (self.returns > 0).mean() * 100
-            }
-        except Exception as e:
-            warnings.warn(f"Failed to calculate Pyfolio metrics: {e}")
-            return self._fallback_metrics()
+        mean_r = np.mean(r)
+        std_r = np.std(r)
+        
+        # Annualization factor: 525,600 minutes per year (365.25 × 24 × 60)
+        ann_factor = np.sqrt(525600)
+
+        # Sharpe Ratio (annualized, minute-level)
+        sharpe = (mean_r / std_r) * ann_factor if std_r > 1e-9 else 0.0
+
+        # Sortino Ratio (downside deviation only)
+        downside = r[r < 0]
+        downside_std = np.sqrt(np.mean(downside**2)) if len(downside) > 0 else 1e-9
+        sortino = (mean_r / downside_std) * ann_factor if downside_std > 1e-9 else 0.0
+
+        # Cumulative returns & Max Drawdown
+        cum = np.cumprod(1 + r)
+        peak = np.maximum.accumulate(cum)
+        dd = (cum - peak) / peak
+        max_dd = float(np.min(dd))
+
+        # Annual Return (compound)
+        annual_ret = float(np.prod(1 + r) ** (525600 / n) - 1) if n > 0 else 0.0
+
+        # Calmar Ratio (annual return / |max drawdown|)
+        calmar = annual_ret / abs(max_dd) if abs(max_dd) > 1e-9 else 0.0
+
+        # Omega Ratio (sum gains / sum losses + 1, threshold=0)
+        gains = np.sum(r[r > 0])
+        losses = abs(np.sum(r[r < 0]))
+        omega = (1.0 + gains / losses) if losses > 1e-9 else 0.0
+
+        # Stability (R² of log cumulative returns vs time)
+        log_cum = np.log(np.maximum(cum, 1e-12))
+        x = np.arange(n, dtype=np.float64)
+        if np.std(log_cum) > 1e-9:
+            corr = np.corrcoef(x, log_cum)[0, 1]
+            stability = float(corr ** 2)
+        else:
+            stability = 0.0
+
+        # Value at Risk (5th percentile)
+        var_5 = float(np.percentile(r, 5))
+
+        # Win Rate
+        win_rate = float(np.mean(r > 0) * 100)
+
+        return {
+            "total_return": float(np.sum(r) * 100),
+            "cumulative_return": float((cum[-1] - 1) * 100),
+            "annual_return": float(annual_ret * 100),
+            "max_drawdown": float(max_dd * 100),
+            "sharpe_ratio": sharpe,
+            "sortino_ratio": sortino,
+            "calmar_ratio": calmar,
+            "omega_ratio": omega,
+            "stability": stability,
+            "daily_value_at_risk": var_5,
+            "win_rate": win_rate,
+        }
 
     def _fallback_metrics(self):
-        """Simple fallback metrics if Pyfolio fails"""
+        """Simple fallback metrics for very short return series."""
         cum_ret = (1 + self.returns).prod() - 1
         return {
             "total_return": cum_ret * 100,
@@ -126,25 +119,28 @@ class PyfolioAnalyzer:
 
     def generate_tear_sheet(self, save_path: str = "results/pyfolio_tear_sheet.png"):
         """
-        Generate and save a simple tear sheet.
+        Generate and save a simple equity curve plot.
         """
-        if pyfolio is None:
-            warnings.warn("Pyfolio not available. Skipping tear sheet.")
-            return
-
         try:
-            # We use create_simple_tear_sheet which creates a figure
-            plt.figure(figsize=(12, 8))
+            cum_returns = (1 + self.returns).cumprod()
             
-            # Silence warnings from pyfolio internal matplotlib calls
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                # Removed return_fig, just let it plot to current figure
-                pyfolio.create_simple_tear_sheet(self.returns)
+            fig, axes = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [3, 1]})
             
-            # Capture current figure
-            fig = plt.gcf()
-                
+            # Equity Curve
+            axes[0].plot(cum_returns.index, cum_returns.values, linewidth=1)
+            axes[0].set_title("Cumulative Returns")
+            axes[0].set_ylabel("Growth of $1")
+            axes[0].grid(True, alpha=0.3)
+            
+            # Drawdown
+            peak = cum_returns.cummax()
+            dd = (cum_returns - peak) / peak
+            axes[1].fill_between(dd.index, dd.values, 0, alpha=0.5, color='red')
+            axes[1].set_title("Drawdown")
+            axes[1].set_ylabel("Drawdown %")
+            axes[1].grid(True, alpha=0.3)
+            
+            plt.tight_layout()
             fig.savefig(save_path)
             plt.close(fig)
             return save_path

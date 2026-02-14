@@ -42,6 +42,7 @@ The plan below is organized into 3 tiers by implementation complexity.
 | 2026-02-13 | S2 | `2f4d1i79` | ❌ Val -9.65, Test -18.75, Q-max 1072 |
 | 2026-02-14 | S3 | `6ezrc832` | ⚠️ Q-max 145↓, Val -4.90, Test +4.07, Val frozen |
 | 2026-02-14 | S3→ | `5satim2n` | ❌ Test Sharpe -24.03, MaxDD -100% (Drawdown Trap) |
+| 2026-02-14 | S3.5 | `t9rybsnt` | ⚠️ Test Sharpe +4.70 (40 trades only), Near-frozen, DD factor=316.6 |
 
 ---
 
