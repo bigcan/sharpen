@@ -25,8 +25,8 @@ The plan below is organized into 3 tiers by implementation complexity.
 | **S2** | 2.1 + 2.2 (Boltzmann + Polyak) | Better exploration + stable Q-values | ❌ REGRESSED (Boltzmann reverted, Polyak retained) |
 | **S2.5** | Target Q-clip ±5000 | Fix Q-value divergence from S2 | ✅ DONE |
 | **S3** | S1 + Polyak + Q-clip | Verify stabilization | ✅ DONE (`6ezrc832`) — ⚠️ Overfit persists |
-| **S3→** | 2.5 (Drawdown penalty) | Risk control | ⏳ NEXT |
-| **S4** | 3.1 (Walk-forward) | Honest OOS evaluation | ⏳ Pending |
+| **S3→** | 2.5 (Drawdown penalty) | Risk control | ✅ DONE |
+| **S4** | 3.1 (Walk-forward) | Honest OOS evaluation | ⏳ READY |
 
 ### Key Decisions Made
 - **No leverage**: `margin_requirement: 1.0` (spot only). BTC vol ~54% is too high for margin.
@@ -237,7 +237,7 @@ class RunningRewardNormalizer:
 
 ---
 
-### 2.5 Position-Aware Reward Shaping — ⏳ NEXT (S3→)
+### 2.5 Position-Aware Reward Shaping — ✅ DONE (S3→)
 
 | | |
 |---|---|

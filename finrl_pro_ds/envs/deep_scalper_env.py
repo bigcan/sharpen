@@ -82,6 +82,10 @@ class DeepScalperEnv(gym.Env):
         # Default 0.0 preserves paper behavior; production use ~0.1 bps
         self.hold_bonus_bps = float(self.reward_config.get("hold_bonus_bps", 0.0))
 
+        # Sprint 3: Configurable Drawdown Penalty (Risk Control)
+        # Penalize deep drawdowns beyond threshold to prevent catastrophic ruin
+        self.drawdown_penalty_threshold = float(self.reward_config.get("drawdown_penalty_threshold", 0.10))
+        self.drawdown_penalty_factor = float(self.reward_config.get("drawdown_penalty_factor", 5.0))
 
         
         # Spaces
@@ -629,9 +633,9 @@ class DeepScalperEnv(gym.Env):
         self.peak_portfolio_value = max(self.peak_portfolio_value, current_portfolio_value)
         drawdown_pct = 1.0 - (current_portfolio_value / self.peak_portfolio_value)
         drawdown_penalty = 0.0
-        if drawdown_pct > 0.10:
-            # 5 bps penalty for every 1% beyond 10%
-            drawdown_penalty = (drawdown_pct - 0.10) * 100.0 * 5.0
+        if drawdown_pct > self.drawdown_penalty_threshold:
+            # N bps penalty for every 1% beyond threshold
+            drawdown_penalty = (drawdown_pct - self.drawdown_penalty_threshold) * 100.0 * self.drawdown_penalty_factor
             
         paper_reward -= drawdown_penalty
 
@@ -704,6 +708,8 @@ class DeepScalperEnv(gym.Env):
             "reward_hindsight": reward_hindsight_bps,
             "reward_hold_bonus": hold_bonus,
             "reward_sharpe": reward_sharpe,
+            "reward_drawdown_penalty": drawdown_penalty,
+            "drawdown_pct": drawdown_pct,
             "reward_total": reward
         }
         
