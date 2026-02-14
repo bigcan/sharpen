@@ -1,0 +1,227 @@
+#!/usr/bin/env python
+"""
+Walk-Forward Evaluation — Rolling Window Backtesting
+=====================================================
+Orchestrates train → validate → test across multiple temporal folds
+using RollingWindowSplitter.  Aggregates per-fold metrics into a
+summary table for regime-robustness assessment.
+
+Usage:
+    python scripts/run_walk_forward.py --config configs/v95_walk_forward.yaml
+    python scripts/run_walk_forward.py --config configs/v95_walk_forward.yaml --dry-run
+"""
+
+import argparse
+import logging
+import os
+import sys
+import yaml
+from datetime import datetime, timedelta
+from pathlib import Path
+
+# Add project root to path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+from finrl_pro_ds.data.splitter import RollingWindowSplitter
+
+logger = logging.getLogger("WalkForward")
+
+
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
+
+def load_config(path: str) -> dict:
+    """Load YAML config."""
+    with open(path, encoding='utf-8') as f:
+        return yaml.safe_load(f)
+
+
+# ---------------------------------------------------------------------------
+# Fold Runner
+# ---------------------------------------------------------------------------
+
+def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dry_run: bool = False):
+    """
+    Execute a single walk-forward fold:
+      1. Train agent on train_range
+      2. Validate on val_range (optional: early stopping)
+      3. Backtest on test_range → collect metrics
+
+    Returns dict of fold metrics.
+    """
+    fold_id = f"fold_{fold_idx:02d}"
+    logger.info(f"{'='*60}")
+    logger.info(f"  FOLD {fold_idx}: Train {train_range} | Val {val_range} | Test {test_range}")
+    logger.info(f"{'='*60}")
+
+    if dry_run:
+        logger.info(f"  [DRY RUN] Skipping actual training/backtest for {fold_id}")
+        return {
+            "fold": fold_idx,
+            "train_range": str(train_range),
+            "val_range": str(val_range),
+            "test_range": str(test_range),
+            "sharpe": None,
+            "max_drawdown": None,
+            "total_return_pct": None,
+            "status": "dry_run",
+        }
+
+    # ------------------------------------------------------------------
+    # Phase 1: Training
+    # ------------------------------------------------------------------
+    try:
+        from scripts.run_full_pipeline import make_env, run_training, run_backtest, load_config as _lc
+        import copy
+
+        fold_config = copy.deepcopy(config)
+
+        # Override date ranges for this fold
+        fold_config.setdefault("data", {})
+        fold_config["data"]["train_start_date"] = str(train_range[0])
+        fold_config["data"]["train_end_date"] = str(train_range[1])
+        fold_config["data"]["val_start_date"] = str(val_range[0])
+        fold_config["data"]["val_end_date"] = str(val_range[1])
+        fold_config["data"]["test_start_date"] = str(test_range[0])
+        fold_config["data"]["test_end_date"] = str(test_range[1])
+
+        # Run training
+        run_name = f"WF_{fold_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        device = fold_config.get("agent", {}).get("device", "cuda")
+        checkpoint_path = run_training(fold_config, run_name, device)
+
+        # ------------------------------------------------------------------
+        # Phase 2: Backtest on test range
+        # ------------------------------------------------------------------
+        if checkpoint_path and os.path.exists(checkpoint_path):
+            metrics = run_backtest(
+                fold_config,
+                checkpoint_path,
+                device,
+                start_date=str(test_range[0]),
+                end_date=str(test_range[1]),
+                prefix=f"wf_{fold_id}",
+            )
+        else:
+            logger.warning(f"  No checkpoint found for {fold_id}, skipping backtest")
+            metrics = {}
+
+        return {
+            "fold": fold_idx,
+            "train_range": str(train_range),
+            "val_range": str(val_range),
+            "test_range": str(test_range),
+            "sharpe": metrics.get("sharpe_ratio"),
+            "max_drawdown": metrics.get("max_drawdown"),
+            "total_return_pct": metrics.get("total_return_pct"),
+            "status": "completed",
+        }
+
+    except Exception as e:
+        logger.error(f"  Fold {fold_idx} failed: {e}", exc_info=True)
+        return {
+            "fold": fold_idx,
+            "train_range": str(train_range),
+            "val_range": str(val_range),
+            "test_range": str(test_range),
+            "sharpe": None,
+            "max_drawdown": None,
+            "total_return_pct": None,
+            "status": f"error: {e}",
+        }
+
+
+# ---------------------------------------------------------------------------
+# Summary
+# ---------------------------------------------------------------------------
+
+def print_summary(results: list):
+    """Print aggregated walk-forward results."""
+    print("\n" + "=" * 80)
+    print("  WALK-FORWARD EVALUATION SUMMARY")
+    print("=" * 80)
+    print(f"  {'Fold':<8} {'Test Range':<30} {'Sharpe':>10} {'MaxDD':>10} {'Return%':>10} {'Status':<12}")
+    print("-" * 80)
+
+    sharpes, drawdowns, returns = [], [], []
+    for r in results:
+        sharpe_str = f"{r['sharpe']:.3f}" if r['sharpe'] is not None else "N/A"
+        dd_str = f"{r['max_drawdown']:.2%}" if r['max_drawdown'] is not None else "N/A"
+        ret_str = f"{r['total_return_pct']:.2f}%" if r['total_return_pct'] is not None else "N/A"
+
+        print(f"  {r['fold']:<8} {r['test_range']:<30} {sharpe_str:>10} {dd_str:>10} {ret_str:>10} {r['status']:<12}")
+
+        if r["sharpe"] is not None:
+            sharpes.append(r["sharpe"])
+        if r["max_drawdown"] is not None:
+            drawdowns.append(r["max_drawdown"])
+        if r["total_return_pct"] is not None:
+            returns.append(r["total_return_pct"])
+
+    print("-" * 80)
+    if sharpes:
+        import numpy as np
+        print(f"  {'MEAN':<8} {'':30} {np.mean(sharpes):>10.3f} {np.mean(drawdowns):>10.2%} {np.mean(returns):>10.2f}%")
+        print(f"  {'STD':<8} {'':30} {np.std(sharpes):>10.3f} {np.std(drawdowns):>10.2%} {np.std(returns):>10.2f}%")
+    print("=" * 80 + "\n")
+
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    parser = argparse.ArgumentParser(description="Walk-Forward Evaluation")
+    parser.add_argument("--config", required=True, help="Path to YAML config")
+    parser.add_argument("--dry-run", action="store_true", help="Print folds without running")
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+    )
+
+    config = load_config(args.config)
+
+    # Extract splitter params
+    splitter_cfg = config.get("splitter", {})
+    data_cfg = config.get("data", {})
+
+    splitter = RollingWindowSplitter(
+        train_months=splitter_cfg.get("train_months", 3),
+        val_months=splitter_cfg.get("val_months", 1),
+        test_months=splitter_cfg.get("test_months", 1),
+        step_months=splitter_cfg.get("step_months", 1),
+        buffer_days=splitter_cfg.get("buffer_days", 0),
+    )
+
+    folds = splitter.split(
+        start_date=data_cfg.get("start_date", "2025-01-01"),
+        end_date=data_cfg.get("end_date", "2025-06-30")
+    )
+    logger.info(f"Generated {len(folds)} walk-forward folds")
+
+    if not folds:
+        logger.error("No folds generated! Check date range and splitter config.")
+        sys.exit(1)
+
+    # Run each fold
+    results = []
+    for i, (train_range, val_range, test_range) in enumerate(folds):
+        fold_result = run_fold(i, train_range, val_range, test_range, config, dry_run=args.dry_run)
+        results.append(fold_result)
+
+    # Print summary
+    print_summary(results)
+
+    return results
+
+
+if __name__ == "__main__":
+    import multiprocessing as mp
+    try:
+        mp.set_start_method("spawn", force=True)
+    except RuntimeError:
+        pass
+    main()
