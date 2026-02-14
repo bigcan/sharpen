@@ -21,7 +21,7 @@ def _make_env():
     cfg = {
         "initial_balance": 100_000.0,
         "max_position": 2.0,
-        "margin_requirement": 0.2,
+        "margin_requirement": 1.0,  # Spot (no leverage)
         "maker_fee": 0.0004,
         "taker_fee": 0.0004,
         "max_drawdown_pct": 1.0,  # disable drawdown stop for testing
