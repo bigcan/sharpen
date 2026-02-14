@@ -25,7 +25,7 @@ The plan below is organized into 3 tiers by implementation complexity.
 | **S2** | 2.1 + 2.2 (Boltzmann + Polyak) | Better exploration + stable Q-values | ❌ REGRESSED (Boltzmann reverted, Polyak retained) |
 | **S2.5** | Target Q-clip ±5000 | Fix Q-value divergence from S2 | ✅ DONE |
 | **S3** | S1 + Polyak + Q-clip | Verify stabilization | ✅ DONE (`6ezrc832`) — ⚠️ Overfit persists |
-| **S3→** | 2.3 + 2.5 (Reward norm + DD penalty) | Regime robustness + risk control | ⏳ NEXT |
+| **S3→** | 2.5 (Drawdown penalty) | Risk control | ⏳ NEXT |
 | **S4** | 3.1 (Walk-forward) | Honest OOS evaluation | ⏳ Pending |
 
 ### Key Decisions Made
@@ -193,7 +193,7 @@ with torch.no_grad():
 
 ---
 
-### 2.3 Reward Normalization (Running Mean/Std) — ⏳ NEXT (S3→)
+### 2.3 Reward Normalization (Running Mean/Std) — ✅ DONE (S3)
 
 | | |
 |---|---|
@@ -221,7 +221,7 @@ class RunningRewardNormalizer:
 | **Risk** | Normalization removes absolute magnitude information. The agent can't distinguish "high-vol profitable" from "low-vol profitable". Mitigated by keeping the macro encoder's volatility features informative. |
 | **Verification** | Log raw vs. normalized reward distributions to WandB. Normalized should have mean ~0, std ~1 throughout training. |
 
-> **Note**: Especially critical now that leverage is removed — spot rewards are smaller, making normalization even more important for stable Q-learning.
+> **Result**: ✅ Implemented in `deepscalper_trainer.py`. Running mean/var with clip=10.0. Active in production.
 
 ---
 
@@ -333,7 +333,7 @@ In high-vol regimes, `effective_max_position` shrinks, automatically reducing ri
 | 🥈 | 2.1 Boltzmann Exploration | T2 | 1d | High (buffer quality) | ❌ Reverted |
 | 🥉 | 1.1 Fix Risk Metrics | T1 | 4h | Critical (diagnostics) | ⚠️ Partial |
 | 4 | 2.2 Soft Target Updates | T2 | 4h | Medium (Q stability) | ✅ Done |
-| 5 | 2.3 Reward Normalization | T2 | 4h | Medium (regime-robust) | ⏳ Next |
+| 5 | 2.3 Reward Normalization | T2 | 4h | Medium (regime-robust) | ✅ Done |
 | 6 | 1.5 Tune Epsilon Schedule | T1 | 1h | Medium (explore/exploit) | ✅ Done |
 | 7 | 1.3 Q-Value Clipping | T1 | 1h | Low-Medium (stability) | ✅ Done |
 | 8 | 2.5 Drawdown Penalty | T2 | 1d | Medium (risk) | ⏳ Next |
@@ -354,7 +354,7 @@ Apply items **1.1 + 1.2 + 1.4 + 1.5** (config + analytics fixes). One production
 Add items **2.1 + 2.2** (Boltzmann exploration + soft target updates). These are the biggest behavioral changes and should show clear improvement in WandB metrics.
 
 ### Sprint 3 (Validation — 3 days) — ⏳ IN PROGRESS (S3→ next)
-Add items **2.3 + 2.5** (reward normalization + drawdown penalty) and run under **3.1** (walk-forward with 2-3 windows). This sprint focuses on honest evaluation of the strategy.
+Add item **2.5** (drawdown penalty) and run under **3.1** (walk-forward with 2-3 windows). Item **2.3** (reward normalization) is already active. This sprint focuses on honest evaluation of the strategy.
 
 ### Sprint 4 (Scaling — 1 week) — ⏳ PLANNED
 Items **3.2 + 3.3** (more data + dynamic sizing). Only pursue if Sprints 1-3 show the agent has a genuine edge across multiple walk-forward windows.
