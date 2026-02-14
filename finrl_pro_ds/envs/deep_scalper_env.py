@@ -83,10 +83,7 @@ class DeepScalperEnv(gym.Env):
         # Default 0.0 preserves paper behavior; production use ~0.1 bps
         self.hold_bonus_bps = float(self.reward_config.get("hold_bonus_bps", 0.0))
 
-        # Sprint 3: Configurable Drawdown Penalty (Risk Control)
-        # Penalize deep drawdowns beyond threshold to prevent catastrophic ruin
-        self.drawdown_penalty_threshold = float(self.reward_config.get("drawdown_penalty_threshold", 0.10))
-        self.drawdown_penalty_factor = float(self.reward_config.get("drawdown_penalty_factor", 5.0))
+
 
         
         # Spaces
@@ -629,22 +626,10 @@ class DeepScalperEnv(gym.Env):
         # Total paper reward (Section 3.2 + 4.2) + hold bonus shaping
         paper_reward = (reward_pnl_bps + reward_fee_bps + reward_hindsight_bps + hold_bonus) * self.reward_scaling
 
-        # Sprint 3.5: Position-Aware Drawdown Penalty (Risk Control)
-        # Fix: Scale penalty by position size to incentivize de-leveraging (Flat = 0 penalty)
+        # Drawdown tracking (telemetry only — penalty removed in Sprint 4, not in paper)
         self.peak_portfolio_value = max(self.peak_portfolio_value, current_portfolio_value)
         drawdown_pct = 1.0 - (current_portfolio_value / self.peak_portfolio_value)
         drawdown_penalty = 0.0
-        
-        if drawdown_pct > self.drawdown_penalty_threshold:
-            # (drawdown_pct - thr) * 100 * factor * position_scale
-            # position_scale = |pos| / max_pos
-            position_scale = min(abs(self.position) / self.max_position, 1.0)
-            
-            # Apply penalty only if exposed. Going flat stops the penalty.
-            if position_scale > 1e-6:
-                drawdown_penalty = (drawdown_pct - self.drawdown_penalty_threshold) * 100.0 * self.drawdown_penalty_factor * position_scale
-            
-        paper_reward -= drawdown_penalty
 
         # DSR (Differential Sharpe Ratio) - Section 3.2
         # Use realized PnL for Sharpe calculation to avoid unrealized noise

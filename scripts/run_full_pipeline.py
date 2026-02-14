@@ -276,9 +276,6 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         dsr_scale = trial.suggest_float("dsr_scale", 10.0, 1000.0, log=True)
         # DSR EMA lookback — affects DSR sensitivity to recent vs distant returns
         sharpe_horizon = trial.suggest_int("sharpe_horizon", 50, 200)
-        # Sprint 3.5: Drawdown Penalty
-        drawdown_penalty_factor = trial.suggest_float("drawdown_penalty_factor", 50.0, 500.0)
-        drawdown_penalty_threshold = trial.suggest_float("drawdown_penalty_threshold", 0.03, 0.15)
         # NOTE: reward_scaling REMOVED from HPO — paper uses no scaling (1.0).
         # Tuning it allowed HPO to crush the signal to 0.286x, causing negative Sharpe.
         # Agent params
@@ -297,8 +294,6 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         config["env"]["reward"]["sharpe_weight"] = sharpe_weight
         config["env"]["reward"]["dsr_scale"] = dsr_scale
         config["env"]["reward"]["sharpe_horizon"] = sharpe_horizon
-        config["env"]["reward"]["drawdown_penalty_factor"] = drawdown_penalty_factor
-        config["env"]["reward"]["drawdown_penalty_threshold"] = drawdown_penalty_threshold
         config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
         config["agents"]["bdq"]["learning_rate"] = learning_rate
         config["agents"]["bdq"]["gamma"] = gamma
@@ -314,8 +309,6 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
             f"{trial_prefix}/sharpe_weight": sharpe_weight,
             f"{trial_prefix}/dsr_scale": dsr_scale,
             f"{trial_prefix}/sharpe_horizon": sharpe_horizon,
-            f"{trial_prefix}/drawdown_penalty_factor": drawdown_penalty_factor,
-            f"{trial_prefix}/drawdown_penalty_threshold": drawdown_penalty_threshold,
             f"{trial_prefix}/learning_rate": learning_rate,
             f"{trial_prefix}/batch_size": batch_size,
             f"{trial_prefix}/auxiliary_weight": auxiliary_weight,
@@ -404,7 +397,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
     }
     
     # Explicit routing for ALL HPO params to prevent silent mis-routing.
-    reward_params = {"hindsight_horizon", "hindsight_weight", "sharpe_weight", "dsr_scale", "sharpe_horizon", "drawdown_penalty_factor", "drawdown_penalty_threshold"}
+    reward_params = {"hindsight_horizon", "hindsight_weight", "sharpe_weight", "dsr_scale", "sharpe_horizon"}
     agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "target_update_freq", "epsilon_end", "tau"}
     
     # Key name mapping: Optuna param name -> config key name
