@@ -42,12 +42,13 @@ env:
     volatility_horizon: 100   # For Aux Target calculation (Section 4.4)
     # Risk-Aware Reward: Differential Sharpe Ratio (Moody & Saffell 2001)
     sharpe_weight: 0.3        # Blend: 0.7 × paper + 0.3 × DSR (was 0.0)
+    dsr_scale: 100.0          # Scale DSR to match paper_reward magnitude (HPO: 10-1000)
     sharpe_horizon: 100       # EMA lookback window for DSR statistics
     # Fee-avoidance shaping: small reward for holding flat (no unnecessary trades)
     hold_bonus_bps: 0.0       # Disabled — paper uses no hold bonus
-    # Sprint 3: Drawdown Penalty (Risk Control)
-    drawdown_penalty_threshold: 0.10  # 10% drawdown triggers penalty
-    drawdown_penalty_factor: 5.0      # 5 bps penalty per 1% beyond threshold
+    # Sprint 3.5: Drawdown Penalty (Risk Control)
+    drawdown_penalty_threshold: 0.05  # 5% drawdown triggers penalty (was 10%)
+    drawdown_penalty_factor: 5.0      # Default (overridden by HPO [50-500])
     
   action:
     price_bins: 5
@@ -133,7 +134,7 @@ training:
   
 hpo:
   enabled: true
-  n_trials: 50             # User requested
+  n_trials: 75             # 14 dims × 5 = 70 min (Stage 1: +3 params from audit)
   steps_per_trial: 200000  # 20% of total. 50K was too few — agent couldn't overcome fee drag
 
 wandb:
