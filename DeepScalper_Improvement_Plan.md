@@ -25,8 +25,8 @@ The plan below is organized into 3 tiers by implementation complexity.
 | **S2** | 2.1 + 2.2 (Boltzmann + Polyak) | Better exploration + stable Q-values | ❌ REGRESSED (Boltzmann reverted, Polyak retained) |
 | **S2.5** | Target Q-clip ±5000 | Fix Q-value divergence from S2 | ✅ DONE |
 | **S3** | S1 + Polyak + Q-clip | Verify stabilization | ✅ DONE (`6ezrc832`) — ⚠️ Overfit persists |
-| **S3→** | 2.5 (Drawdown penalty) | Risk control | ✅ DONE |
-| **S4** | 3.1 (Walk-forward) | Honest OOS evaluation | ⏳ READY |
+| **S3→** | 2.5 (Drawdown penalty) | Risk control | ❌ FAIL (Strategy) — Code verified, policy failed |
+| **S4** | 3.1 (Walk-forward) | Honest OOS evaluation | ⏳ READY (Validation Needed First) |
 
 ### Key Decisions Made
 - **No leverage**: `margin_requirement: 1.0` (spot only). BTC vol ~54% is too high for margin.
@@ -41,6 +41,7 @@ The plan below is organized into 3 tiers by implementation complexity.
 | 2026-02-13 | S1 | `ox89l7q3` | Test Sharpe +4.62 / Val -37.3 (Overfit) |
 | 2026-02-13 | S2 | `2f4d1i79` | ❌ Val -9.65, Test -18.75, Q-max 1072 |
 | 2026-02-14 | S3 | `6ezrc832` | ⚠️ Q-max 145↓, Val -4.90, Test +4.07, Val frozen |
+| 2026-02-14 | S3→ | `5satim2n` | ❌ Test Sharpe -24.03, MaxDD -100% (Drawdown Trap) |
 
 ---
 
@@ -263,6 +264,31 @@ Track `peak_portfolio_value` (rolling max) as episode state.
 
 ---
 
+### 2.6 Reward Function Experiment: Let HPO Decide — ⏳ PLANNED
+
+| | |
+|---|---|
+| **Problem** | The current reward blends 3 objectives (PnL + DSR + Drawdown Penalty) with 5+ hyperparameters. The `sharpe_weight=0.3` was chosen arbitrarily. We don't know the optimal PnL-vs-DSR ratio. |
+| **Proposed Experiment** | Widen `sharpe_weight` HPO range to `[0.0, 1.0]` and let the optimizer find the best blend empirically: |
+
+| Param | HPO Range |
+|-------|-----------|
+| `sharpe_weight` | `[0.0, 1.0]` |
+| `dsr_scale` | `[10, 1000]` (log) |
+| `drawdown_penalty_factor` | `[50, 500]` |
+| `hindsight_weight` | `[0.001, 0.2]` (log) |
+
+| | |
+|---|---|
+| **Interpretation** | If HPO picks `sharpe_weight > 0.8` → DSR dominates, simplify reward. If `< 0.2` → DSR isn't helping, remove it. |
+| **Control** | Current S3.5 run (`sharpe_weight=0.3`, `dsr_scale=100`). |
+| **Key Metrics** | Total PnL, Sharpe, MaxDD, Trade Count, Win Rate. |
+| **Verification** | Check HPO convergence on `sharpe_weight` across top-5 trials. Consistent clustering = strong signal. |
+
+> **Implementation**: One config change (`sharpe_weight` HPO range). `dsr_scale` already implemented. No code changes needed.
+
+---
+
 ## Tier 3: Strategic Changes (3-7 days each)
 
 ### 3.1 Walk-Forward Evaluation with Multiple Windows — ⏳ PLANNED (S4)
@@ -336,12 +362,14 @@ In high-vol regimes, `effective_max_position` shrinks, automatically reducing ri
 | 5 | 2.3 Reward Normalization | T2 | 4h | Medium (regime-robust) | ✅ Done |
 | 6 | 1.5 Tune Epsilon Schedule | T1 | 1h | Medium (explore/exploit) | ✅ Done |
 | 7 | 1.3 Q-Value Clipping | T1 | 1h | Low-Medium (stability) | ✅ Done |
-| 8 | 2.5 Drawdown Penalty | T2 | 1d | Medium (risk) | ⏳ Next |
+| 8 | 2.5 Drawdown Penalty | T2 | 1d | High (risk) | ❌ Failed (Strategy) |
 | 9 | 1.4 Remove hold_bonus | T1 | 5min | Low | ✅ Done |
-| 10 | 2.4 Aux Head Redesign | T2 | 2d | Low-Medium (regularize) | ⏳ |
-| 11 | 3.1 Walk-Forward Eval | T3 | 3d | Critical (honest eval) | ⏳ Planned |
-| 12 | 3.2 Expand Dataset | T3 | 3d | High (generalization) | ⏳ |
-| 13 | 3.3 Dynamic Position Sizing | T3 | 5d | High (risk mgmt) | ⏳ |
+| 10 | 2.5.1 Tune Drawdown (HPO) | T2 | 2d | High (fix S3→) | ⏳ IN PROGRESS |
+| 11 | 2.6 Reward A/B (DSR vs Hybrid) | T2 | 2d | High (simplification) | ⏳ Planned |
+| 12 | 2.4 Aux Head Redesign | T2 | 2d | Low-Medium (regularize) | ⏳ |
+| 13 | 3.1 Walk-Forward Eval | T3 | 3d | Critical (honest eval) | ⏳ Planned |
+| 14 | 3.2 Expand Dataset | T3 | 3d | High (generalization) | ⏳ |
+| 15 | 3.3 Dynamic Position Sizing | T3 | 5d | High (risk mgmt) | ⏳ |
 
 ---
 
@@ -355,6 +383,9 @@ Add items **2.1 + 2.2** (Boltzmann exploration + soft target updates). These are
 
 ### Sprint 3 (Validation — 3 days) — ⏳ IN PROGRESS (S3→ next)
 Add item **2.5** (drawdown penalty) and run under **3.1** (walk-forward with 2-3 windows). Item **2.3** (reward normalization) is already active. This sprint focuses on honest evaluation of the strategy.
+
+### Sprint 3.5→ (Reward Experiment — 2 days) — ⏳ PLANNED
+A/B test: **Pure DSR (Config B)** vs **High DSR (Config C)** vs **Current Hybrid (Config A)**. Config-only changes, no code edits. Run after S3.5 HPO completes to use the tuned drawdown factor as baseline.
 
 ### Sprint 4 (Scaling — 1 week) — ⏳ PLANNED
 Items **3.2 + 3.3** (more data + dynamic sizing). Only pursue if Sprints 1-3 show the agent has a genuine edge across multiple walk-forward windows.

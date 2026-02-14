@@ -76,6 +76,7 @@ class DeepScalperEnv(gym.Env):
         # Optional Risk-Aware Reward: Differential Sharpe Ratio (Moody & Saffell 2001)
         # sharpe_weight=0.0 (default) → pure paper reward; >0 blends in DSR signal
         self.sharpe_weight = float(self.reward_config.get("sharpe_weight", 0.0))
+        self.dsr_scale = float(self.reward_config.get("dsr_scale", 100.0))  # Scale DSR to match paper_reward magnitude (bps)
         self.sharpe_horizon = int(self.reward_config.get("sharpe_horizon", 100))
 
         # Hold Bonus: small reward (in bps) for staying flat — fee-avoidance shaping
@@ -628,14 +629,20 @@ class DeepScalperEnv(gym.Env):
         # Total paper reward (Section 3.2 + 4.2) + hold bonus shaping
         paper_reward = (reward_pnl_bps + reward_fee_bps + reward_hindsight_bps + hold_bonus) * self.reward_scaling
 
-        # Sprint 3: Drawdown Penalty (Risk Control)
-        # Penalize deep drawdowns (>10%) to prevent catastrophic ruin
+        # Sprint 3.5: Position-Aware Drawdown Penalty (Risk Control)
+        # Fix: Scale penalty by position size to incentivize de-leveraging (Flat = 0 penalty)
         self.peak_portfolio_value = max(self.peak_portfolio_value, current_portfolio_value)
         drawdown_pct = 1.0 - (current_portfolio_value / self.peak_portfolio_value)
         drawdown_penalty = 0.0
+        
         if drawdown_pct > self.drawdown_penalty_threshold:
-            # N bps penalty for every 1% beyond threshold
-            drawdown_penalty = (drawdown_pct - self.drawdown_penalty_threshold) * 100.0 * self.drawdown_penalty_factor
+            # (drawdown_pct - thr) * 100 * factor * position_scale
+            # position_scale = |pos| / max_pos
+            position_scale = min(abs(self.position) / self.max_position, 1.0)
+            
+            # Apply penalty only if exposed. Going flat stops the penalty.
+            if position_scale > 1e-6:
+                drawdown_penalty = (drawdown_pct - self.drawdown_penalty_threshold) * 100.0 * self.drawdown_penalty_factor * position_scale
             
         paper_reward -= drawdown_penalty
 
@@ -662,8 +669,8 @@ class DeepScalperEnv(gym.Env):
                     # DSR = (B * ΔA - 0.5 * A * ΔB) / (B - A²)^{3/2}
                     denom = variance ** 1.5
                     dsr = (self._dsr_B * delta_A - 0.5 * self._dsr_A * delta_B) / denom
-                    # Clamp to avoid extreme outliers during early adaptation
-                    reward_sharpe = float(np.clip(dsr, -10.0, 10.0))
+                    # Scale DSR to match paper_reward magnitude (bps), then clamp
+                    reward_sharpe = float(np.clip(dsr * self.dsr_scale, -10.0, 10.0))
 
         # Blend: (1 - w) × paper + w × DSR  (w=0 → pure paper)
         reward = (1.0 - self.sharpe_weight) * paper_reward + self.sharpe_weight * reward_sharpe
