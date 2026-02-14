@@ -45,6 +45,9 @@ env:
     sharpe_horizon: 100       # EMA lookback window for DSR statistics
     # Fee-avoidance shaping: small reward for holding flat (no unnecessary trades)
     hold_bonus_bps: 0.0       # Disabled — paper uses no hold bonus
+    # Sprint 3: Drawdown Penalty (Risk Control)
+    drawdown_penalty_threshold: 0.10  # 10% drawdown triggers penalty
+    drawdown_penalty_factor: 5.0      # 5 bps penalty per 1% beyond threshold
     
   action:
     price_bins: 5
