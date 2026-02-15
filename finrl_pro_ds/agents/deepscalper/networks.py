@@ -68,11 +68,12 @@ class MicroEncoder(nn.Module):
         nn.init.xavier_uniform_(self.out_layer.weight)
         nn.init.zeros_(self.out_layer.bias)
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         # x: (Batch, Window, LOB_Features)  — market data only
         
         # Sprint 7 DIV-1 FIX: LSTM processes only LOB features
-        rnn_out, _ = self.micro_rnn(x)
+        # BUG-B: Pass hidden state through for inference persistence
+        rnn_out, new_hidden = self.micro_rnn(x, hidden)
             
         # Take last time step
         last_hidden = rnn_out[:, -1, :]
@@ -81,7 +82,7 @@ class MicroEncoder(nn.Module):
         out = self.out_layer(last_hidden)
         out = self.layernorm(out)
         out = self.activation(out)
-        return out
+        return out, new_hidden
 
 class MacroEncoder(nn.Module):
     """
@@ -198,13 +199,13 @@ class DeepScalperNetwork(nn.Module):
                     if layer.bias is not None:
                         nn.init.zeros_(layer.bias)
 
-    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
-        Returns (Q_price, Q_qty, V_state, Pred_Vol)
+        Returns (Q_price, Q_qty, V_state, Pred_Vol, new_hidden)
         Paper-aligned: 2 action branches (Price, SignedQty).
         """
         # Encode
-        h_micro = self.micro_encoder(micro_in)  # Sprint 7: no private_in
+        h_micro, new_hidden = self.micro_encoder(micro_in, hidden)  # Sprint 7: no private_in
         h_macro = self.macro_encoder(macro_in)
         
         # Sprint 7 DIV-1 FIX: Private state injected at fusion layer (paper Figure 2)
@@ -230,4 +231,4 @@ class DeepScalperNetwork(nn.Module):
         # Volatility Prediction
         pred_vol = self.vol_head(features)
         
-        return q_price, q_qty, v_s, pred_vol
+        return q_price, q_qty, v_s, pred_vol, new_hidden

@@ -189,21 +189,39 @@ class DeepScalperTrainer:
                 print(f"  Resuming from stored observation (skip_reset=True)")
             else:
                 obs, _ = self.env.reset()
+                
+                # BUG-B: Reset per-epoch hidden state (stateless LSTM assumption for training, but inference needs clean slate)
+                if hasattr(self.agent, "reset_hidden_state"):
+                    self.agent.reset_hidden_state()
 
             epoch_step = 0
+            qty_mask = None  # ARCH-3: Will be populated from env info after first step
             while epoch_step < self.total_timesteps:
                 # Convert to torch for prediction
                 micro_t, private_t, macro_t = extract_tensors(obs)
                 
                 # Predict (Returns numpy array of actions [B, 2])
-                actions = self.agent.predict(micro_t, private_t, macro_t, deterministic=False)
+                # ARCH-3: Pass qty mask to block invalid actions at position limits
+                actions = self.agent.predict(micro_t, private_t, macro_t, deterministic=False, qty_mask=qty_mask)
                 
                 # 2. Step Environment
                 next_obs, rewards, term, trunc, infos = self.env.step(actions)
                 
+                # ARCH-3: Extract qty_action_mask for NEXT step's predict()
+                if isinstance(infos, dict) and "qty_action_mask" in infos:
+                    qty_mask = infos["qty_action_mask"]
+                elif isinstance(infos, list) and len(infos) > 0 and "qty_action_mask" in infos[0]:
+                    qty_mask = np.stack([info_i["qty_action_mask"] for info_i in infos])
+                else:
+                    qty_mask = None
+                
                 # Sprint 7 BUG-2 FIX: Only true termination (drawdown) zeroes bootstrap.
                 # Truncation (data exhaustion) is NOT terminal — the MDP continues.
                 dones_for_reset = np.logical_or(term, trunc)  # For episodic stats reset
+                
+                # BUG-B: Mask hidden states for terminated/truncated envs
+                if hasattr(self.agent, "mask_hidden_state"):
+                    self.agent.mask_hidden_state(dones_for_reset)
                 dones_for_buffer = term  # Only term zeroes Bellman bootstrap
                 
                 # 3. Store in Buffer

@@ -24,6 +24,21 @@ class DeepScalperFeatureEngineer:
         Prices: (P - Mid) / Mid * 10000 (Basis Points), clamped to [-50, 50]
         Volumes: Rolling Z-Score (causal), clamped to [-5, 5]
         """
+        # Fix DIV-1: Also normalize OFI and Spread (Report 2 recommendation)
+        # 
+        # 1. Volume Columns
+        vol_cols = [c for c in df.columns if 'vol_' in c and 'n_' not in c and ('bid' in c or 'ask' in c)]
+        
+        # 2. OFI Columns (ofi_1..ofi_5)
+        ofi_cols = [c for c in df.columns if 'ofi_' in c]
+        
+        # 3. Spread Column (spread_1) represents ticks/bps, relative magnitude matters
+        # We treat spread like volume (statistically)
+        spread_cols = ['spread_1'] if 'spread_1' in df.columns else []
+        
+        # Combine all for rolling Z-score
+        z_score_cols = vol_cols + ofi_cols + spread_cols
+        
         if 'mid_price' not in df.columns:
             return df
             
@@ -68,6 +83,20 @@ class DeepScalperFeatureEngineer:
                 roll_std = pd.Series(log_v).rolling(window=ROLLING_WINDOW, min_periods=1).std().values
                 roll_std = np.where(np.isnan(roll_std) | (roll_std < 1e-8), 1.0, roll_std)
                 df[f'n_{av_col}'] = np.clip((log_v - roll_mean) / roll_std, -VOL_CLAMP, VOL_CLAMP)
+
+        # 3. Normalize OFI and Spread (Direct Rolling Z-Score)
+        # OFI is already log-modulus transformed in process_micro. Spread is raw bps.
+        other_z_cols = ofi_cols + spread_cols
+        for col in other_z_cols:
+            if col not in df.columns: continue
+            
+            vals = df[col].values
+            # Rolling stats
+            roll_mean = pd.Series(vals).rolling(window=ROLLING_WINDOW, min_periods=1).mean().values
+            roll_std = pd.Series(vals).rolling(window=ROLLING_WINDOW, min_periods=1).std().values
+            roll_std = np.where(np.isnan(roll_std) | (roll_std < 1e-8), 1.0, roll_std)
+            
+            df[f'n_{col}'] = np.clip((vals - roll_mean) / roll_std, -VOL_CLAMP, VOL_CLAMP)
                 
         return df
 
@@ -179,12 +208,12 @@ class DeepScalperFeatureEngineer:
         Process OHLCV data into Macro Features (DeepScalper Table 2).
         
         Features (11 Total), all in basis points, clamped to [-100, 100]:
-        1. z_open  = (open_t / close_{t-1} - 1) × 10000    [Paper Table 2]
-        2. z_high  = (high_t / close_{t-1} - 1) × 10000    [Paper Table 2]
-        3. z_low   = (low_t  / close_{t-1} - 1) × 10000    [Paper Table 2]
-        4. z_close = (close_t / close_{t-1} - 1) × 10000   [Paper Table 2]
-        5. z_volume = (volume_t / SMA_20(volume) - 1) × 100 [replaces redundant z_adj_close]
-        6-11. zd_k = (SMA_k(adj_close) / adj_close_t - 1) × 10000  [Paper Table 2]
+        1. z_open  = (open_t / close_{t-1} - 1) * 10000    [Paper Table 2]
+        2. z_high  = (high_t / close_{t-1} - 1) * 10000    [Paper Table 2]
+        3. z_low   = (low_t  / close_{t-1} - 1) * 10000    [Paper Table 2]
+        4. z_close = (close_t / close_{t-1} - 1) * 10000   [Paper Table 2]
+        5. z_volume = (volume_t / SMA_20(volume) - 1) * 100 [replaces redundant z_adj_close]
+        6-11. zd_k = (SMA_k(adj_close) / adj_close_t - 1) * 10000  [Paper Table 2]
         """
         df = ohlcv_df
         
@@ -230,7 +259,7 @@ class DeepScalperFeatureEngineer:
         df['z_volume'] = np.clip((vol / vol_sma - 1) * 100.0, -C, C)
         
         # 4. Long-term Moving Averages (zd_k), clamped
-        # FIX MIN-2: Paper Table 2: zd_k = (Close_t / SMA_k - 1) × 10000
+        # FIX MIN-2: Paper Table 2: zd_k = (Close_t / SMA_k - 1) * 10000
         # Positive = price ABOVE trend, negative = BELOW trend
         ks = [5, 10, 15, 20, 25, 30]
         for k in ks:

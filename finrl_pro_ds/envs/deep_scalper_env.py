@@ -286,7 +286,7 @@ class DeepScalperEnv(gym.Env):
         self.prev_portfolio_value = self._get_portfolio_value()
         self.peak_portfolio_value = self.prev_portfolio_value # Reset peak for drawdown tracking
             
-        return self._get_observation(), {}
+        return self._get_observation(), {"qty_action_mask": self._get_qty_action_mask()}
 
 
 
@@ -360,7 +360,27 @@ class DeepScalperEnv(gym.Env):
         # FIX CQ-3: Data exhaustion is truncation (external limit), not termination (MDP event)
         if self.handler and step_data is None:
             truncated = True
-            return self._get_observation(), 0.0, terminated, truncated, {}
+            
+            # ARCH-2: Force liquidation — charge spread + taker fee for exit
+            liquidation_cost_bps = 0.0
+            if abs(self.position) > 1e-9:
+                mid = (self.current_best_bid + self.current_best_ask) / 2.0
+                if mid > 0:
+                    # Taker exit: half-spread + taker fee
+                    half_spread = (self.current_best_ask - self.current_best_bid) / (2 * mid)
+                    exit_cost_rate = half_spread + self.taker_fee
+                    liquidation_cost = exit_cost_rate * abs(self.position) * mid
+                    # Convert to Basis Points relative to initial balance
+                    liquidation_cost_bps = (liquidation_cost / self.initial_balance) * 10000.0
+            
+            obs = self._get_observation()
+            info = {
+                "qty_action_mask": self._get_qty_action_mask(),
+                "reward_total": -liquidation_cost_bps,
+                "forced_liquidation": True,
+                "portfolio_value": self._get_portfolio_value() # Ensure tracking at end
+            }
+            return obs, -liquidation_cost_bps, terminated, truncated, info
 
         # Bug #1 Fix: Snapshot T prices before advancing to T+1
         # Used for limit-price calculation on the NEW action (prevents 1-tick lookahead)
@@ -569,7 +589,9 @@ class DeepScalperEnv(gym.Env):
             
             # CRITICAL FIX: Update Private State in Window to reflect execution
             # The agent needs to see the new position in the current observation
-            self.private_window[-1] = self._normalize_private_state(self.position, self.balance)
+            # Fix BUG-A: detailed audit confirmed remaining_time must be passed explicitly
+            remaining_time = max(0.0, 1.0 - (self.current_step / self.total_episode_steps))
+            self.private_window[-1] = self._normalize_private_state(self.position, self.balance, remaining_time)
 
         # 3. Process NEW Action (T) → becomes Pending for T+1
         # Paper-aligned: 2-branch action = (price_idx, qty_idx)
@@ -629,7 +651,9 @@ class DeepScalperEnv(gym.Env):
                 if future_price is not None and current_mid > 0 and abs(self.prev_position) > 1e-12:
                     if hasattr(future_price, "item"): future_price = future_price.item()
                     future_price = float(future_price)
-                    reward_hindsight = self.hindsight_weight * self.prev_position * (future_price - self.prev_mid_price)
+                    # Fix BUG-C: Use current_mid instead of prev_mid_price for hindsight reward
+                    # prev_position is correct (lagged), but price delta should be future vs current
+                    reward_hindsight = self.hindsight_weight * self.prev_position * (future_price - current_mid)
             except Exception as e:
                 logging.error(f"Error in Hindsight: {e}")
 
@@ -720,7 +744,8 @@ class DeepScalperEnv(gym.Env):
             "reward_sharpe": reward_sharpe,
             "reward_drawdown_penalty": drawdown_penalty,
             "drawdown_pct": drawdown_pct,
-            "reward_total": reward
+            "reward_total": reward,
+            "qty_action_mask": self._get_qty_action_mask()
         }
         
         return obs, reward, terminated, truncated, info
@@ -864,6 +889,24 @@ class DeepScalperEnv(gym.Env):
             "macro": self.current_macro.copy(),
             "private": self.private_window.copy()
         }
+
+    def _get_qty_action_mask(self):
+        """ARCH-3: Action mask for quantity branch.
+        
+        Returns np.ndarray of shape (n_qty,) with 1=valid, 0=invalid.
+        Blocks buy actions at max_position, sell actions at -max_position.
+        Hold (qty=0) is always valid.
+        """
+        n_qty = len(self.signed_qty_proportions)
+        mask = np.ones(n_qty, dtype=np.float32)
+        
+        for i, sq in enumerate(self.signed_qty_proportions):
+            if self.position >= self.max_position and sq > 0:
+                mask[i] = 0.0  # Block buys at max long
+            elif self.position <= -self.max_position and sq < 0:
+                mask[i] = 0.0  # Block sells at max short
+        
+        return mask
 
     def render(self, mode='human'):
         val = self._get_portfolio_value()
