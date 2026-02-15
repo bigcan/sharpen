@@ -161,6 +161,11 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     
     info_logged = False  # Only log once
     
+    # BUG-B: Reset LSTM hidden state before eval to prevent shape mismatch.
+    # Training uses num_envs=12 → hidden=(1,12,256), but eval uses num_envs=1.
+    if hasattr(agent, "reset_hidden_state"):
+        agent.reset_hidden_state()
+    
     try:
         obs, info = env.reset()
         done = False
