@@ -29,8 +29,8 @@ env:
     hindsight_weight: 0.1
     hindsight_horizon: 180
     volatility_horizon: 100
-    sharpe_weight: 0.3
-    sharpe_horizon: 100
+    sharpe_weight: 0.0        # Pure paper reward (DSR removed)
+    # sharpe_horizon: 100     # Dead at sharpe_weight=0
     hold_bonus_bps: 0.0
     
   action:
