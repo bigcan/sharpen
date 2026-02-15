@@ -105,6 +105,7 @@ class PPOTrainer:
             private_shape=(window_size, private_input),
             macro_shape=(macro_input,),
             n_action_branches=2,
+            n_qty_actions=action_dims[1],  # B4: match qty action count
         )
 
         # Checkpoint directory
@@ -193,6 +194,15 @@ class PPOTrainer:
                     # Step environment
                     next_obs, rewards, term, trunc, infos = self.env.step(actions)
 
+                    # C2 fix: NaN guard on rewards
+                    if np.isnan(rewards).any():
+                        nan_envs = np.where(np.isnan(rewards))[0]
+                        print(f"  ⚠️ NaN reward detected in envs {nan_envs} at step {global_step}, replacing with 0.0")
+                        rewards = np.nan_to_num(rewards, nan=0.0)
+
+                    # Store current qty_mask before extracting next one (B4: for this timestep)
+                    current_qty_mask = qty_mask  # mask used for THIS action selection
+
                     # Extract qty mask for next step
                     if isinstance(infos, dict) and "qty_action_mask" in infos:
                         qty_mask = infos["qty_action_mask"]
@@ -215,6 +225,7 @@ class PPOTrainer:
                         rewards=rewards,
                         values=values,
                         dones=term.astype(np.float32),
+                        qty_masks=current_qty_mask,  # B4: store mask used for this step's action
                     )
 
                     # Track episodic stats

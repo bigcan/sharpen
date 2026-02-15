@@ -177,11 +177,13 @@ class PPOAgent:
                 advantages = torch.as_tensor(batch["advantages"], dtype=torch.float32, device=self.device)
                 returns = torch.as_tensor(batch["returns"], dtype=torch.float32, device=self.device)
                 old_values = torch.as_tensor(batch["old_values"], dtype=torch.float32, device=self.device)
+                # B4 fix: Pass stored qty_masks so evaluate_actions uses same masking as rollout
+                qty_mask_t = torch.as_tensor(batch["qty_masks"], dtype=torch.float32, device=self.device)
 
                 with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.use_amp):
-                    # Evaluate current policy on old actions
+                    # Evaluate current policy on old actions (with original action mask)
                     new_log_probs, new_values, entropy = self.network.evaluate_actions(
-                        micro, private, macro, old_actions
+                        micro, private, macro, old_actions, qty_mask=qty_mask_t
                     )
 
                     # Policy loss (clipped surrogate)
