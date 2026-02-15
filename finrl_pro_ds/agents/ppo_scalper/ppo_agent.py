@@ -1,0 +1,296 @@
+"""
+PPO Agent for DeepScalper.
+
+On-policy agent using Proximal Policy Optimization with clipped surrogate objective.
+Implements the same interface contract as DeepScalperBDQ for pipeline compatibility.
+"""
+import torch
+import torch.nn as nn
+import torch.optim as optim
+import numpy as np
+import os
+from typing import Dict, Tuple, Optional
+
+from finrl_pro_ds.agents.ppo_scalper.networks import PPOActorCritic
+from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
+
+
+class PPOAgent:
+    """
+    PPO Agent with Multi-Discrete action space (Price × SignedQty).
+    
+    Key differences from BDQ:
+    - On-policy: no replay buffer, uses rollout buffer
+    - No epsilon-greedy: entropy bonus drives exploration
+    - Clipped surrogate objective for stable policy updates
+    - GAE for advantage estimation
+    """
+
+    def __init__(
+        self,
+        network_config: Dict,
+        lr: float = 3e-4,
+        gamma: float = 0.99,
+        gae_lambda: float = 0.95,
+        clip_eps: float = 0.2,
+        vf_coef: float = 0.5,
+        ent_coef: float = 0.01,
+        max_grad_norm: float = 0.5,
+        n_epochs: int = 4,
+        rollout_steps: int = 2048,
+        batch_size: int = 256,
+        action_dims: Tuple[int, int] = (5, 9),
+        lr_schedule: str = "linear",
+        total_timesteps: int = 1_000_000,
+        use_amp: bool = False,
+        device: str = "cpu",
+    ):
+        self.device = torch.device(device)
+        self.gamma = gamma
+        self.gae_lambda = gae_lambda
+        self.clip_eps = clip_eps
+        self.vf_coef = vf_coef
+        self.ent_coef = ent_coef
+        self.max_grad_norm = max_grad_norm
+        self.n_epochs = n_epochs
+        self.rollout_steps = rollout_steps
+        self.batch_size = batch_size
+        self.action_dims = list(action_dims)
+        self.lr_schedule = lr_schedule
+        self.total_timesteps = total_timesteps
+        self.use_amp = use_amp
+        self.lr = lr
+
+        # Step counter for LR schedule
+        self.step_count = 0
+
+        # Network
+        net_cfg = dict(network_config)
+        net_cfg["action_space_dims"] = action_dims
+        self.network = PPOActorCritic(**net_cfg).to(self.device)
+
+        # Optimizer
+        self.optimizer = optim.Adam(self.network.parameters(), lr=lr, eps=1e-5)
+
+        # AMP
+        self.scaler = torch.amp.GradScaler(device=str(self.device), enabled=self.use_amp)
+
+        # LR scheduler (linear decay)
+        if lr_schedule == "linear":
+            self._lr_scheduler = optim.lr_scheduler.LambdaLR(
+                self.optimizer,
+                lr_lambda=lambda step: max(1.0 - step / max(total_timesteps, 1), 0.0)
+            )
+        else:
+            self._lr_scheduler = None
+
+        # LSTM hidden state (same pattern as BDQ)
+        self._hidden_state = None
+
+    # ------------------------------------------------------------------
+    # Interface: predict()
+    # ------------------------------------------------------------------
+    def predict(
+        self,
+        micro: torch.Tensor,
+        private_in: torch.Tensor,
+        macro: torch.Tensor,
+        deterministic: bool = False,
+        qty_mask=None,
+    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """
+        Select actions from the current policy.
+
+        Args:
+            micro: (B, W, 27) micro features
+            private_in: (B, W, 3) private state
+            macro: (B, M) macro features
+            deterministic: If True, take argmax actions
+            qty_mask: Optional (B, n_qty) or (n_qty,) mask
+
+        Returns:
+            actions: (B, 2) numpy int64
+            log_probs: (B,) numpy float32
+            values: (B,) numpy float32
+        """
+        micro = micro.to(self.device)
+        private_in = private_in.to(self.device)
+        macro = macro.to(self.device)
+
+        # Prepare qty mask tensor
+        qty_mask_t = None
+        if qty_mask is not None:
+            qty_mask_t = torch.as_tensor(qty_mask, dtype=torch.float32, device=self.device)
+            if qty_mask_t.dim() == 1:
+                qty_mask_t = qty_mask_t.unsqueeze(0).expand(micro.shape[0], -1)
+
+        self.network.eval()
+        with torch.no_grad():
+            actions, log_probs, values, _, new_hidden = self.network(
+                micro, private_in, macro,
+                hidden=self._hidden_state,
+                qty_mask=qty_mask_t,
+                deterministic=deterministic,
+            )
+            self._hidden_state = new_hidden
+
+        self.network.train()
+
+        return (
+            actions.cpu().numpy(),
+            log_probs.cpu().numpy(),
+            values.cpu().numpy(),
+        )
+
+    # ------------------------------------------------------------------
+    # Interface: train_step()
+    # ------------------------------------------------------------------
+    def train_step(self, rollout_buffer: RolloutBuffer) -> Dict[str, float]:
+        """
+        Run K epochs of PPO minibatch updates on the rollout buffer.
+
+        Args:
+            rollout_buffer: Full rollout buffer with computed GAE advantages
+
+        Returns:
+            Dict of training metrics
+        """
+        self.network.train()
+
+        # Accumulators for metrics
+        total_policy_loss = 0.0
+        total_value_loss = 0.0
+        total_entropy_loss = 0.0
+        total_loss_acc = 0.0
+        total_approx_kl = 0.0
+        total_clip_fraction = 0.0
+        n_updates = 0
+
+        for epoch in range(self.n_epochs):
+            for batch in rollout_buffer.iterate_minibatches(self.batch_size):
+                # Convert to torch
+                micro = torch.as_tensor(batch["micro"], dtype=torch.float32, device=self.device)
+                private = torch.as_tensor(batch["private"], dtype=torch.float32, device=self.device)
+                macro = torch.as_tensor(batch["macro"], dtype=torch.float32, device=self.device)
+                old_actions = torch.as_tensor(batch["actions"], dtype=torch.int64, device=self.device)
+                old_log_probs = torch.as_tensor(batch["old_log_probs"], dtype=torch.float32, device=self.device)
+                advantages = torch.as_tensor(batch["advantages"], dtype=torch.float32, device=self.device)
+                returns = torch.as_tensor(batch["returns"], dtype=torch.float32, device=self.device)
+                old_values = torch.as_tensor(batch["old_values"], dtype=torch.float32, device=self.device)
+
+                with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.use_amp):
+                    # Evaluate current policy on old actions
+                    new_log_probs, new_values, entropy = self.network.evaluate_actions(
+                        micro, private, macro, old_actions
+                    )
+
+                    # Policy loss (clipped surrogate)
+                    ratio = torch.exp(new_log_probs - old_log_probs)
+                    surr1 = ratio * advantages
+                    surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * advantages
+                    policy_loss = -torch.min(surr1, surr2).mean()
+
+                    # Value loss (clipped)
+                    values_clipped = old_values + torch.clamp(
+                        new_values - old_values, -self.clip_eps, self.clip_eps
+                    )
+                    value_loss_unclipped = (new_values - returns) ** 2
+                    value_loss_clipped = (values_clipped - returns) ** 2
+                    value_loss = 0.5 * torch.max(value_loss_unclipped, value_loss_clipped).mean()
+
+                    # Entropy loss (negative because we want to maximize entropy)
+                    entropy_loss = -entropy.mean()
+
+                    # Total loss
+                    loss = policy_loss + self.vf_coef * value_loss + self.ent_coef * entropy_loss
+
+                # Gradient step
+                self.optimizer.zero_grad()
+                if self.use_amp:
+                    self.scaler.scale(loss).backward()
+                    self.scaler.unscale_(self.optimizer)
+                    nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
+                    self.scaler.step(self.optimizer)
+                    self.scaler.update()
+                else:
+                    loss.backward()
+                    nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
+                    self.optimizer.step()
+
+                # Metrics
+                with torch.no_grad():
+                    approx_kl = ((ratio - 1) - torch.log(ratio)).mean().item()
+                    clip_fraction = (torch.abs(ratio - 1) > self.clip_eps).float().mean().item()
+
+                total_policy_loss += policy_loss.item()
+                total_value_loss += value_loss.item()
+                total_entropy_loss += entropy_loss.item()
+                total_loss_acc += loss.item()
+                total_approx_kl += approx_kl
+                total_clip_fraction += clip_fraction
+                n_updates += 1
+
+        # LR schedule step (per rollout, not per minibatch)
+        if self._lr_scheduler is not None:
+            self._lr_scheduler.step()
+
+        n = max(n_updates, 1)
+        metrics = {
+            "loss_total": total_loss_acc / n,
+            "policy_loss": total_policy_loss / n,
+            "value_loss": total_value_loss / n,
+            "entropy_loss": total_entropy_loss / n,
+            "entropy": -total_entropy_loss / n,  # Positive entropy
+            "approx_kl": total_approx_kl / n,
+            "clip_fraction": total_clip_fraction / n,
+            "learning_rate": self.optimizer.param_groups[0]["lr"],
+        }
+
+        return metrics
+
+    # ------------------------------------------------------------------
+    # Interface: compatibility methods
+    # ------------------------------------------------------------------
+    def decay_epsilon(self):
+        """No-op. PPO doesn't use epsilon-greedy."""
+        pass
+
+    def reset_hidden_state(self):
+        """Reset LSTM hidden state (e.g., on episode start)."""
+        self._hidden_state = None
+
+    def mask_hidden_state(self, dones: np.ndarray):
+        """Zero out hidden states for environments that terminated."""
+        if self._hidden_state is None:
+            return
+
+        h, c = self._hidden_state
+        dones_t = torch.tensor(dones, device=self.device, dtype=torch.float32).view(1, -1, 1)
+        h = h * (1.0 - dones_t)
+        c = c * (1.0 - dones_t)
+        self._hidden_state = (h, c)
+
+    # ------------------------------------------------------------------
+    # Interface: save / load
+    # ------------------------------------------------------------------
+    def save(self, path: str):
+        """Save checkpoint."""
+        ckpt = {
+            "network": self.network.state_dict(),
+            "optimizer": self.optimizer.state_dict(),
+            "step_count": self.step_count,
+        }
+        if self._lr_scheduler is not None:
+            ckpt["lr_scheduler"] = self._lr_scheduler.state_dict()
+        torch.save(ckpt, path)
+
+    def load(self, path: str):
+        """Load checkpoint."""
+        if not os.path.exists(path):
+            return
+        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        self.network.load_state_dict(checkpoint["network"])
+        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        self.step_count = checkpoint.get("step_count", 0)
+        if "lr_scheduler" in checkpoint and self._lr_scheduler is not None:
+            self._lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
