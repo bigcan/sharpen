@@ -362,11 +362,6 @@ class DeepScalperEnv(gym.Env):
             truncated = True
             return self._get_observation(), 0.0, terminated, truncated, {}
 
-        # Bug #1 Fix: Snapshot T prices before advancing to T+1
-        # Used for limit-price calculation on the NEW action (prevents 1-tick lookahead)
-        pre_best_bid = self.current_best_bid
-        pre_best_ask = self.current_best_ask
-
         # Update State for T+1
         self._update_state(step_data)
 
@@ -394,16 +389,10 @@ class DeepScalperEnv(gym.Env):
                     exec_qty = min(order_qty, available_vol)
                     
                     if exec_qty > 0:
-                        # Bug #3 Fix: Differentiate maker/taker slippage
-                        if is_taker:
-                            slippage_rate = self._calculate_slippage(exec_qty, available_vol)
-                            fill_price = self.current_best_ask * (1 + slippage_rate)
-                            slippage_cost = self.current_best_ask * exec_qty * slippage_rate
-                        else:
-                            # Makers fill at their limit price with zero slippage
-                            fill_price = order_px
-                            slippage_rate = 0.0
-                            slippage_cost = 0.0
+                        # Slippage
+                        slippage_rate = self._calculate_slippage(exec_qty, available_vol)
+                        fill_price = self.current_best_ask * (1 + slippage_rate) 
+                        slippage_cost = self.current_best_ask * exec_qty * slippage_rate
                         
                         # Fee
                         fee_rate = self.taker_fee if is_taker else self.maker_fee
@@ -486,16 +475,10 @@ class DeepScalperEnv(gym.Env):
                     exec_qty = min(order_qty, available_vol)
                     
                     if exec_qty > 0:
-                        # Bug #3 Fix: Differentiate maker/taker slippage
-                        if is_taker:
-                            slippage_rate = self._calculate_slippage(exec_qty, available_vol)
-                            fill_price = self.current_best_bid * (1 - slippage_rate)
-                            slippage_cost = self.current_best_bid * exec_qty * slippage_rate
-                        else:
-                            # Makers fill at their limit price with zero slippage
-                            fill_price = order_px
-                            slippage_rate = 0.0
-                            slippage_cost = 0.0
+                        # Slippage
+                        slippage_rate = self._calculate_slippage(exec_qty, available_vol)
+                        fill_price = self.current_best_bid * (1 - slippage_rate)
+                        slippage_cost = self.current_best_bid * exec_qty * slippage_rate
                         
                         # Fee
                         fee_rate = self.taker_fee if is_taker else self.maker_fee
@@ -585,12 +568,11 @@ class DeepScalperEnv(gym.Env):
             offset_ticks = self.price_offsets[price_idx]
             
             if direction == 1:  # Buy
-                # Bug #1 Fix: Use pre-tick prices (T) for limit calculation, not T+1
-                limit_price = pre_best_ask - offset_ticks * self.tick_size
-                is_taker = (limit_price >= pre_best_ask)
+                limit_price = self.current_best_ask - offset_ticks * self.tick_size
+                is_taker = (limit_price >= self.current_best_ask)
             else:  # Sell
-                limit_price = pre_best_bid + offset_ticks * self.tick_size
-                is_taker = (limit_price <= pre_best_bid)
+                limit_price = self.current_best_bid + offset_ticks * self.tick_size
+                is_taker = (limit_price <= self.current_best_bid)
                 
             self.pending_order = (direction, limit_price, quantity, is_taker)
         

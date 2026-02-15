@@ -14,15 +14,13 @@ class DeepScalperFeatureEngineer:
     
     def __init__(self, config: Dict = None):
         self.config = config or {}
-        # Bug #4 Fix: Rolling window for causal volume normalization (no future leakage)
-        self.vol_norm_window = int(self.config.get('vol_norm_window', 5000))
         
 
     def _add_normalized_features(self, df: pd.DataFrame):
         """
         Adds normalized versions of LOB features.
         Prices: (P - Mid) / Mid * 10000 (Basis Points), clamped to [-50, 50]
-        Volumes: Rolling Z-Score (causal), clamped to [-5, 5]
+        Volumes: (log1p(V) - Mean) / Std (Z-Score), clamped to [-5, 5]
         """
         if 'mid_price' not in df.columns:
             return df
@@ -31,9 +29,22 @@ class DeepScalperFeatureEngineer:
         # Avoid div by zero
         mp = np.where(mp == 0, 1.0, mp)
         
+        # FIX CRIT-4: Compute volume normalization stats from ACTUAL data
+        # instead of hardcoded approximations. This adapts to exchange-specific
+        # and time-varying volume distributions.
+        vol_cols = [f'{side}_vol_{i}' for side in ('bid', 'ask') for i in range(1, 6)
+                    if f'{side}_vol_{i}' in df.columns]
+        if vol_cols:
+            all_log_vols = np.concatenate([np.log1p(df[c].values) for c in vol_cols])
+            VOL_MEAN = float(np.mean(all_log_vols))
+            VOL_STD = float(np.std(all_log_vols)) + 1e-8  # prevent div-by-zero
+        else:
+            # Fallback if no volume columns found
+            VOL_MEAN = 5.0
+            VOL_STD = 3.0
+        
         PRICE_CLAMP = 50.0   # ±50 bps (0.5%) max distance from mid
         VOL_CLAMP = 5.0      # ±5 std deviations
-        ROLLING_WINDOW = self.vol_norm_window
         
         for i in range(1, 6):
             # Prices
@@ -51,23 +62,18 @@ class DeepScalperFeatureEngineer:
                     ((df[ap_col].values - mp) / mp) * 10000.0, -PRICE_CLAMP, PRICE_CLAMP
                 )
                 
-            # Volumes — Bug #4 Fix: Causal rolling Z-scores (no global lookahead)
+            # Volumes
             bv_col = f'bid_vol_{i}'
             av_col = f'ask_vol_{i}'
             
             if bv_col in df.columns:
+                # Log-Normal + Z-Score, clamped
                 log_v = np.log1p(df[bv_col].values)
-                roll_mean = pd.Series(log_v).rolling(window=ROLLING_WINDOW, min_periods=1).mean().values
-                roll_std = pd.Series(log_v).rolling(window=ROLLING_WINDOW, min_periods=1).std().values
-                roll_std = np.where(np.isnan(roll_std) | (roll_std < 1e-8), 1.0, roll_std)
-                df[f'n_{bv_col}'] = np.clip((log_v - roll_mean) / roll_std, -VOL_CLAMP, VOL_CLAMP)
+                df[f'n_{bv_col}'] = np.clip((log_v - VOL_MEAN) / VOL_STD, -VOL_CLAMP, VOL_CLAMP)
                 
             if av_col in df.columns:
                 log_v = np.log1p(df[av_col].values)
-                roll_mean = pd.Series(log_v).rolling(window=ROLLING_WINDOW, min_periods=1).mean().values
-                roll_std = pd.Series(log_v).rolling(window=ROLLING_WINDOW, min_periods=1).std().values
-                roll_std = np.where(np.isnan(roll_std) | (roll_std < 1e-8), 1.0, roll_std)
-                df[f'n_{av_col}'] = np.clip((log_v - roll_mean) / roll_std, -VOL_CLAMP, VOL_CLAMP)
+                df[f'n_{av_col}'] = np.clip((log_v - VOL_MEAN) / VOL_STD, -VOL_CLAMP, VOL_CLAMP)
                 
         return df
 
