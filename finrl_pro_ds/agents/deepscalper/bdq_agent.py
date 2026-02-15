@@ -130,6 +130,14 @@ class DeepScalperBDQ:
                 private_shape=(window_size, private_input),  # FIX: env returns private_window (W, 3), not flat (3,)
                 action_shape=(len(action_dims),),
             )
+            # Estimate memory footprint for warning
+            est_bytes = buffer_size * (
+                np.prod((window_size, micro_input)) +  # micro
+                np.prod((macro_input,)) +              # macro
+                np.prod((window_size, private_input)) + # private
+                len(action_dims) + 1 + 1 + 1           # action, reward, done, aux
+            ) * 4 * 2  # float32 (4 bytes) × 2 (state + next_state)
+            est_gb = est_bytes / (1024 ** 3)
             if est_gb > 8:
                 import warnings
                 warnings.warn(
@@ -389,9 +397,9 @@ class DeepScalperBDQ:
             "q_value/std": (curr_q_price.std().item() + curr_q_qty.std().item()) / 2.0,
             "q_value/max": max(curr_q_price.max().item(), curr_q_qty.max().item()),
             "q_value/min": min(curr_q_price.min().item(), curr_q_qty.min().item()),
-            "q_value/target_mean": target_q_shared.mean().item(),
-            "q_value/target_max": target_q_shared.max().item(),
-            "q_value/target_min": target_q_shared.min().item(),
+            "q_value/target_mean": (target_q_price.mean().item() + target_q_qty.mean().item()) / 2.0,
+            "q_value/target_max": max(target_q_price.max().item(), target_q_qty.max().item()),
+            "q_value/target_min": min(target_q_price.min().item(), target_q_qty.min().item()),
             "exploration_mode": 0.0 if self.exploration_mode == "uniform" else 1.0,
         }
         
