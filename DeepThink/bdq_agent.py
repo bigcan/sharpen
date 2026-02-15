@@ -261,23 +261,18 @@ class DeepScalperBDQ:
                 if self.target_q_clip > 0:
                     target_q_shared = target_q_shared.clamp(-self.target_q_clip, self.target_q_clip)
                 
-            # Bug #5 Fix: Mask price-branch loss when action is Hold (qty = middle index)
-            # During Hold, the price action is irrelevant — masking prevents noisy gradients
-            hold_idx = self.action_dims[1] // 2
-            is_trading = (actions[:, 1] != hold_idx).float().unsqueeze(1)
-
             # Loss — 2 branches
             if self.use_per:
                 loss_fn = nn.SmoothL1Loss(reduction='none')
-                loss_price_raw = loss_fn(curr_q_price, target_q_shared) * is_trading
+                loss_price_raw = loss_fn(curr_q_price, target_q_shared)
                 loss_qty_raw = loss_fn(curr_q_qty, target_q_shared)
                 
                 loss_price = (loss_price_raw * is_weights_t).mean()
                 loss_qty = (loss_qty_raw * is_weights_t).mean()
             else:
-                loss_fn = nn.SmoothL1Loss(reduction='none')
-                loss_price = (loss_fn(curr_q_price, target_q_shared) * is_trading).mean()
-                loss_qty = loss_fn(curr_q_qty, target_q_shared).mean()
+                loss_fn = nn.SmoothL1Loss()
+                loss_price = loss_fn(curr_q_price, target_q_shared)
+                loss_qty = loss_fn(curr_q_qty, target_q_shared)
             
             # Auxiliary volatility prediction loss (Section 4.4)
             loss_vol_pred = nn.SmoothL1Loss()(pred_vol, aux_targets)
