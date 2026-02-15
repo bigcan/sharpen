@@ -32,6 +32,7 @@ class RolloutBuffer:
         private_shape: Tuple[int, ...] = (50, 3),
         macro_shape: Tuple[int, ...] = (11,),
         n_action_branches: int = 2,
+        n_qty_actions: int = 9,
     ):
         self.rollout_steps = rollout_steps
         self.num_envs = num_envs
@@ -50,6 +51,9 @@ class RolloutBuffer:
         self.log_probs = np.zeros((T, B), dtype=np.float32)
         self.values = np.zeros((T, B), dtype=np.float32)
 
+        # Action masks (B4 fix: store masks for evaluate_actions during training)
+        self.qty_masks = np.ones((T, B, n_qty_actions), dtype=np.float32)
+
         # Env outputs
         self.rewards = np.zeros((T, B), dtype=np.float32)
         self.dones = np.zeros((T, B), dtype=np.float32)
@@ -66,6 +70,7 @@ class RolloutBuffer:
         rewards: np.ndarray,
         values: np.ndarray,
         dones: np.ndarray,
+        qty_masks: np.ndarray = None,
     ):
         """
         Store one timestep of data from all environments.
@@ -92,6 +97,10 @@ class RolloutBuffer:
         self.rewards[t] = rewards
         self.values[t] = values
         self.dones[t] = dones
+        if qty_masks is not None:
+            self.qty_masks[t] = qty_masks
+        else:
+            self.qty_masks[t] = 1.0  # All actions valid
 
         self.pos += 1
         if self.pos == self.rollout_steps:
@@ -161,6 +170,7 @@ class RolloutBuffer:
         flat_advantages = self.advantages.reshape(total)
         flat_returns = self.returns.reshape(total)
         flat_values = self.values.reshape(total)
+        flat_qty_masks = self.qty_masks.reshape(total, -1)
 
         # Normalize advantages (crucial for PPO stability)
         adv_mean = flat_advantages.mean()
@@ -186,6 +196,7 @@ class RolloutBuffer:
                 "advantages": flat_advantages[idx],
                 "returns": flat_returns[idx],
                 "old_values": flat_values[idx],
+                "qty_masks": flat_qty_masks[idx],
             }
 
     def reset(self):
