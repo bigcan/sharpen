@@ -161,8 +161,10 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     
     info_logged = False  # Only log once
     
-    # BUG-B: Reset LSTM hidden state before eval to prevent shape mismatch.
-    # Training uses num_envs=12 → hidden=(1,12,256), but eval uses num_envs=1.
+    # BUG-B: Save and restore LSTM hidden state around eval.
+    # Training uses num_envs=12 → hidden=(1,12,256), eval uses num_envs=1.
+    # Must restore after eval to avoid corrupting training state.
+    _saved_hidden = agent._hidden_state if hasattr(agent, '_hidden_state') else None
     if hasattr(agent, "reset_hidden_state"):
         agent.reset_hidden_state()
     
@@ -217,6 +219,8 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         logger.error(f"Evaluation error: {e}")
         import traceback
         wandb.log({"_debug/eval_error": str(e), "_debug/eval_traceback": traceback.format_exc()})
+        # BUG-B: Restore training hidden state even on error
+        agent._hidden_state = _saved_hidden
         return 0.0
     
     returns = np.array(all_returns)
@@ -254,6 +258,9 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         raw_ratio = 0.0
         sharpe_minute = 0.0
         logger.warning(f"Zero Sharpe: steps={step}, len={len(returns)}, std={np.std(returns) if len(returns) > 0 else 'N/A'}, actions={action_counts}")
+    
+    # BUG-B: Restore training hidden state after eval
+    agent._hidden_state = _saved_hidden
     
     # FIX: Return RAW (non-annualized) ratio for HPO optimization.
     # sqrt(525600) ≈ 725x amplification makes all trials look equally catastrophic,
