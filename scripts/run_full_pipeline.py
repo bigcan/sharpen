@@ -500,9 +500,15 @@ def run_training(config, run_name, device, agent_type="bdq"):
         checkpoints_dir = f"checkpoints/{run_name}"
         checkpoint_path = None
         if os.path.exists(checkpoints_dir):
-            ckpts = sorted([f for f in os.listdir(checkpoints_dir) if f.endswith(".pth") or f.endswith(".pt")])
-            if ckpts:
-                checkpoint_path = os.path.join(checkpoints_dir, ckpts[-1])
+            if agent_type == "earnhft":
+                # EarnHFT saves a manifest describing all sub-checkpoints
+                manifest = os.path.join(checkpoints_dir, "pool_manifest.json")
+                if os.path.exists(manifest):
+                    checkpoint_path = manifest
+            else:
+                ckpts = sorted([f for f in os.listdir(checkpoints_dir) if f.endswith(".pth") or f.endswith(".pt")])
+                if ckpts:
+                    checkpoint_path = os.path.join(checkpoints_dir, ckpts[-1])
         
         wandb.log({"train/status": "completed", "train/checkpoint": checkpoint_path or "none"})
         logger.info(f"Training complete. Checkpoint: {checkpoint_path}")
@@ -567,7 +573,65 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         )
         
         # Dispatch agent creation based on type
-        if agent_type == "ppo":
+        if agent_type == "earnhft":
+            # EarnHFT: load from manifest with multi-agent checkpoint
+            from finrl_pro_ds.agents.earnhft.earnhft_agent import EarnHFTAgent
+            import json as _json
+            import re
+            
+            if not checkpoint_path or not os.path.exists(checkpoint_path):
+                raise FileNotFoundError(f"EarnHFT manifest not found: {checkpoint_path}")
+            
+            with open(checkpoint_path, "r") as f:
+                manifest = _json.load(f)
+            
+            # Extract pool checkpoint paths from manifest, sorted by beta value (float)
+            pool_info = manifest.get("pool", {})
+            def parse_beta_key(k):
+                # Extract float from "beta_0.0", "beta_1.0" etc
+                m = re.search(r"beta_([\d\.]+)", k)
+                return float(m.group(1)) if m else -1.0
+                
+            sorted_keys = sorted(
+                [k for k in pool_info.keys() if "checkpoint" in pool_info[k]],
+                key=parse_beta_key
+            )
+            pool_paths = [pool_info[k]["checkpoint"] for k in sorted_keys]
+            
+            router_path = manifest.get("router", {}).get("checkpoint")
+            router_obs_dim = manifest.get("router", {}).get("obs_dim", 7)
+            
+            # Reconstruct network_config structure required by DiscretePPOAgent
+            # (EarnHFTTrainer builds this manually from flat config)
+            net_cfg = config.get("network", {})
+            earnhft_cfg = config.get("agents", {}).get("earnhft", {})
+            earnhft_network_config = {
+                "micro_config": {
+                    "input_size": net_cfg.get("micro_input_size", 20),
+                    "private_input_size": net_cfg.get("private_input_size", 3),
+                    "hidden_size": net_cfg.get("micro_hidden_size", 128),
+                    "rnn_type": net_cfg.get("rnn_type", "LSTM"),
+                },
+                "macro_config": {
+                    "input_size": net_cfg.get("macro_input_size", 11),
+                    "hidden_sizes": net_cfg.get("macro_hidden_sizes", [128, 64]),
+                },
+                "fusion_dim": net_cfg.get("fusion_dim", 128),
+                "num_actions": earnhft_cfg.get("num_actions", 5),
+            }
+            
+            agent = EarnHFTAgent.from_checkpoints(
+                pool_checkpoint_paths=pool_paths,
+                router_checkpoint_path=router_path,
+                network_config=earnhft_network_config,
+                router_obs_dim=router_obs_dim,
+                num_actions=earnhft_cfg.get("num_actions", 5),
+                max_holding=earnhft_cfg.get("max_holding", 1.0),
+                minute_interval=earnhft_cfg.get("minute_interval", 60),
+                device=device,
+            )
+            logger.info(f"Loaded EarnHFT agent from manifest: {len(pool_paths)} pool agents + router")
+        elif agent_type == "ppo":
             ppo_cfg = config.get("agents", {}).get("ppo", {})
             agent = PPOAgent(
                 network_config=network_config,
@@ -596,12 +660,13 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 device=device
             )
         
-        # Load checkpoint
-        if checkpoint_path and os.path.exists(checkpoint_path):
-            logger.info(f"Loading checkpoint: {checkpoint_path}")
-            agent.load(checkpoint_path)
-        else:
-            logger.warning("No checkpoint found, using random policy")
+        # Load checkpoint (EarnHFT already loaded above via from_checkpoints)
+        if agent_type != "earnhft":
+            if checkpoint_path and os.path.exists(checkpoint_path):
+                logger.info(f"Loading checkpoint: {checkpoint_path}")
+                agent.load(checkpoint_path)
+            else:
+                logger.warning("No checkpoint found, using random policy")
         
         # Run backtest
         obs, info = env.reset()
@@ -609,18 +674,30 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         positions = []
         done = False
         step = 0
+        minute_features = None  # For EarnHFT router decisions
         
         while not done and step < 200000:
             micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(device)
             private = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device)
-            macro = torch.tensor(obs["macro"], dtype=torch.float32).unsqueeze(0).to(device)
             
-            # PPO predict returns (actions, log_probs, values); BDQ returns actions
-            pred = agent.predict(micro, private, macro, deterministic=True)
-            if isinstance(pred, tuple):
-                action = pred[0][0]  # PPO: (actions, log_probs, values) → first actions
+            if agent_type == "earnhft":
+                # EarnHFT predict returns a dict; router uses macro as minute features
+                if step % 60 == 0 and "macro" in obs:
+                    minute_features = obs["macro"]
+                pred = agent.predict(
+                    micro, private,
+                    minute_features=minute_features,
+                    deterministic=True,
+                )
+                action = pred["action"]
             else:
-                action = pred[0]    # BDQ: actions array
+                macro = torch.tensor(obs["macro"], dtype=torch.float32).unsqueeze(0).to(device)
+                pred = agent.predict(micro, private, macro, deterministic=True)
+                if isinstance(pred, tuple):
+                    action = pred[0][0]  # PPO: (actions, log_probs, values)
+                else:
+                    action = pred[0]    # BDQ: actions array
+            
             obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             
