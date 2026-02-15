@@ -3,16 +3,14 @@
 # Focus: Single BDQ Agent with Hybrid Loss
 
 data:
-  file_path: "data/processed/btc_2025_jan_jun.parquet"
-  # TODO: Merge jan_jun + jul_dec into single parquet for extended training
-  # ParquetDataHandler only supports single file_path currently
+  file_path: "data/processed/btc_2025_full_year.parquet"
   ticker: "BTCUSDT"
   train_start_date: "2025-01-01 00:00:00"
-  train_end_date: "2025-05-31 23:59:59"
-  val_start_date: "2025-06-01 00:00:00"
-  val_end_date: "2025-06-14 23:59:59"
-  test_start_date: "2025-06-15 00:00:00"
-  test_end_date: "2025-06-30 23:59:59"
+  train_end_date: "2025-10-31 23:59:59"
+  val_start_date: "2025-11-01 00:00:00"
+  val_end_date: "2025-11-30 23:59:59"
+  test_start_date: "2025-12-01 00:00:00"
+  test_end_date: "2025-12-31 23:59:59"
 
 features:
   micro_features: ["micro"]
