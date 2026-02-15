@@ -266,39 +266,30 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         trial_prefix = f"hpo/t{trial.number}"
         wandb.log({f"{trial_prefix}/started": True})
         
-        # Sample hyperparameters
+        # Sample hyperparameters (8 dimensions)
         # Paper-aligned reward params (Section 3.2 + 4.2)
         hindsight_horizon = trial.suggest_categorical("hindsight_horizon", [30, 60, 90, 120, 150, 180])
         hindsight_weight = trial.suggest_float("hindsight_weight", 0.05, 0.2, log=True)
-        # Risk-aware reward: DSR blend weight (Item 2.6: let HPO decide full range)
-        sharpe_weight = trial.suggest_float("sharpe_weight", 0.0, 1.0)
-        # DSR scale: amplify DSR signal to match paper_reward magnitude (bps)
-        dsr_scale = trial.suggest_float("dsr_scale", 10.0, 1000.0, log=True)
-        # DSR EMA lookback — affects DSR sensitivity to recent vs distant returns
-        sharpe_horizon = trial.suggest_int("sharpe_horizon", 50, 200)
-        # NOTE: reward_scaling REMOVED from HPO — paper uses no scaling (1.0).
-        # Tuning it allowed HPO to crush the signal to 0.286x, causing negative Sharpe.
+        # DSR REMOVED: Sprint 5 showed sharpe_weight=0.815 → agent optimized for
+        # variance minimization instead of profit. Pure paper reward only.
         # Agent params
         auxiliary_weight = trial.suggest_float("auxiliary_weight", 0.5, 1.5, log=True)
         learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
-        target_update_freq = trial.suggest_categorical("target_update_freq", [5000, 7500, 10000, 15000])
-        batch_size = trial.suggest_categorical("batch_size", [256, 512])  # No 1024: too large for HPO buffer
+        batch_size = trial.suggest_categorical("batch_size", [256, 512, 1024])
         gamma = trial.suggest_categorical("gamma", [0.99, 0.995])
         epsilon_end = trial.suggest_float("epsilon_end", 0.01, 0.10)
         tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
+        # NOTE: target_update_freq removed — Polyak (tau) runs every step, freq is dead code.
         
         # Create trial config
         config = copy.deepcopy(base_config)
         config["env"]["reward"]["hindsight_horizon"] = hindsight_horizon
         config["env"]["reward"]["hindsight_weight"] = hindsight_weight
-        config["env"]["reward"]["sharpe_weight"] = sharpe_weight
-        config["env"]["reward"]["dsr_scale"] = dsr_scale
-        config["env"]["reward"]["sharpe_horizon"] = sharpe_horizon
+        config["env"]["reward"]["sharpe_weight"] = 0.0  # Pure paper reward
         config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
         config["agents"]["bdq"]["learning_rate"] = learning_rate
         config["agents"]["bdq"]["gamma"] = gamma
         config["agents"]["bdq"]["batch_size"] = batch_size
-        config["agents"]["bdq"]["target_update_freq"] = target_update_freq
         config["agents"]["bdq"]["epsilon_end"] = epsilon_end
         config["agents"]["bdq"]["tau"] = tau
         config["training"]["total_timesteps"] = steps_per_trial
@@ -306,9 +297,6 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         wandb.log({
             f"{trial_prefix}/hindsight_horizon": hindsight_horizon,
             f"{trial_prefix}/hindsight_weight": hindsight_weight,
-            f"{trial_prefix}/sharpe_weight": sharpe_weight,
-            f"{trial_prefix}/dsr_scale": dsr_scale,
-            f"{trial_prefix}/sharpe_horizon": sharpe_horizon,
             f"{trial_prefix}/learning_rate": learning_rate,
             f"{trial_prefix}/batch_size": batch_size,
             f"{trial_prefix}/auxiliary_weight": auxiliary_weight,
@@ -397,8 +385,8 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
     }
     
     # Explicit routing for ALL HPO params to prevent silent mis-routing.
-    reward_params = {"hindsight_horizon", "hindsight_weight", "sharpe_weight", "dsr_scale", "sharpe_horizon"}
-    agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "target_update_freq", "epsilon_end", "tau"}
+    reward_params = {"hindsight_horizon", "hindsight_weight"}
+    agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "epsilon_end", "tau"}
     
     # Key name mapping: Optuna param name -> config key name
     reward_key_map = {
