@@ -130,19 +130,46 @@ class DeepScalperBDQ:
                 private_shape=(window_size, private_input),  # FIX: env returns private_window (W, 3), not flat (3,)
                 action_shape=(len(action_dims),),
             )
-            est_gb = self.memory.nbytes() / (1024**3)
             if est_gb > 8:
                 import warnings
                 warnings.warn(
                     f"FlatReplayBuffer capacity={buffer_size} pre-allocated {est_gb:.1f}GB RAM.",
                     ResourceWarning
                 )
+        
+        # BUG-B: Initialize hidden state for stateful inference
+        self._hidden_state = None
+
+    def reset_hidden_state(self):
+        """Reset LSTM hidden state (e.g., on episode start)."""
+        self._hidden_state = None
+
+    def mask_hidden_state(self, dones: np.ndarray):
+        """Zero out hidden states for environments that terminated."""
+        if self._hidden_state is None:
+            return
+            
+        # unpack (h, c)
+        h, c = self._hidden_state
+        
+        # Dones: (B,) -> Tensor on device
+        # Expand to (1, B, 1) to broadcast against (NumLayers, B, HiddenSize)
+        dones_t = torch.tensor(dones, device=self.device, dtype=torch.float32).view(1, -1, 1)
+        
+        # Mask
+        h = h * (1.0 - dones_t)
+        c = c * (1.0 - dones_t)
+        self._hidden_state = (h, c)
 
 
-    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False) -> np.ndarray:
+    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False, qty_mask=None) -> np.ndarray:
         """
         Select action using Epsilon-Greedy strategy.
         Paper-aligned: 2 branches (Price, SignedQty).
+        
+        Args:
+            qty_mask: Optional np.ndarray (B, n_qty) or (n_qty,). 1=valid, 0=invalid.
+                      ARCH-3: blocks buys at max_position / sells at -max_position.
         Returns: (B, 2) numpy array
         """
         micro = micro.to(self.device)
@@ -162,9 +189,24 @@ class DeepScalperBDQ:
         else:
             random_mask = torch.zeros(batch_size, dtype=torch.bool, device=self.device)
             
+        # ARCH-3: Prepare qty mask tensor if provided
+        qty_mask_t = None
+        if qty_mask is not None:
+            qty_mask_t = torch.as_tensor(qty_mask, dtype=torch.float32, device=self.device)
+            if qty_mask_t.dim() == 1:
+                qty_mask_t = qty_mask_t.unsqueeze(0).expand(batch_size, -1)  # (n_qty,) -> (B, n_qty)
+        
         # Get Net Actions (Greedy)
         with torch.no_grad():
-            q_price, q_qty, _, _ = self.policy_net(micro, private_in, macro)
+            # BUG-B: Pass hidden state for persistent memory
+            q_price, q_qty, _, _, new_hidden = self.policy_net(micro, private_in, macro, hidden=self._hidden_state)
+            
+            # Update hidden state for next step (inference only)
+            self._hidden_state = new_hidden
+            
+            # ARCH-3: Mask invalid qty actions before argmax
+            if qty_mask_t is not None:
+                q_qty = q_qty.masked_fill(qty_mask_t == 0, float('-inf'))
             
             a_price_greedy = q_price.argmax(dim=1)
             a_qty_greedy = q_qty.argmax(dim=1)
@@ -175,7 +217,18 @@ class DeepScalperBDQ:
         # Exploration: Uniform random (Sprint 3: Boltzmann removed)
         if random_mask.any():
             r_price = torch.randint(0, self.action_dims[0], (batch_size,), device=self.device)
-            r_qty = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
+            
+            # ARCH-3: Random exploration respects qty mask
+            if qty_mask_t is not None:
+                # Sample from valid indices only
+                valid_indices = [torch.where(qty_mask_t[b] > 0)[0] for b in range(batch_size)]
+                r_qty = torch.stack([
+                    vi[torch.randint(0, len(vi), (1,))] if len(vi) > 0
+                    else torch.tensor([self.action_dims[1] // 2], device=self.device)  # fallback: hold
+                    for vi in valid_indices
+                ]).squeeze(-1)
+            else:
+                r_qty = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
             
             random_actions = torch.stack([r_price, r_qty], dim=1)
             
@@ -231,7 +284,8 @@ class DeepScalperBDQ:
         # Current Q-Values — 2 branches (Paper-aligned)
         # FIX H1: Use modern torch.amp.autocast (works on CPU + CUDA)
         with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.use_amp):
-            q_price, q_qty, _, pred_vol = self.policy_net(micro_state, private_state, macro_state)
+            # BUG-B: Hidden state ignored during training (stateless update)
+            q_price, q_qty, _, pred_vol, _ = self.policy_net(micro_state, private_state, macro_state)
         
             # Gather Q-values for taken actions: (B, 1)
             curr_q_price = q_price.gather(1, actions[:, 0].unsqueeze(1))
@@ -240,26 +294,28 @@ class DeepScalperBDQ:
             # Double DQN (FIX D1): policy net selects, target net evaluates
             with torch.no_grad():
                 # Policy net selects best actions for next state
-                next_q_price_policy, next_q_qty_policy, _, _ = self.policy_net(
+                next_q_price_policy, next_q_qty_policy, _, _, _ = self.policy_net(
                     micro_next, private_next, macro_next
                 )
                 best_next_price = next_q_price_policy.argmax(dim=1, keepdim=True)
                 best_next_qty = next_q_qty_policy.argmax(dim=1, keepdim=True)
                 
                 # Target net evaluates those actions
-                next_q_price_target, next_q_qty_target, _, _ = self.target_net(
+                next_q_price_target, next_q_qty_target, _, _, _ = self.target_net(
                     micro_next, private_next, macro_next
                 )
                 max_next_q_price = next_q_price_target.gather(1, best_next_price)
                 max_next_q_qty = next_q_qty_target.gather(1, best_next_qty)
                 
-                # Shared Bellman target across BDQ branches (FIX CRIT-1)
-                max_next_q_agg = (max_next_q_price + max_next_q_qty) / 2.0
-                target_q_shared = rewards + self.gamma * max_next_q_agg * (1 - dones)
+                # ARCH-1: Per-branch Bellman targets (Independent Q-learning within Dueling BDQ)
+                # Decouples price/qty streams to prevent noise propagation
+                target_q_price = rewards + self.gamma * max_next_q_price * (1 - dones)
+                target_q_qty = rewards + self.gamma * max_next_q_qty * (1 - dones)
                 
                 # Sprint 3: Target Q Clipping to prevent bootstrap divergence
                 if self.target_q_clip > 0:
-                    target_q_shared = target_q_shared.clamp(-self.target_q_clip, self.target_q_clip)
+                    target_q_price = target_q_price.clamp(-self.target_q_clip, self.target_q_clip)
+                    target_q_qty = target_q_qty.clamp(-self.target_q_clip, self.target_q_clip)
                 
             # Bug #5 Fix: Mask price-branch loss when action is Hold (qty = middle index)
             # During Hold, the price action is irrelevant — masking prevents noisy gradients
@@ -269,15 +325,15 @@ class DeepScalperBDQ:
             # Loss — 2 branches
             if self.use_per:
                 loss_fn = nn.SmoothL1Loss(reduction='none')
-                loss_price_raw = loss_fn(curr_q_price, target_q_shared) * is_trading
-                loss_qty_raw = loss_fn(curr_q_qty, target_q_shared)
+                loss_price_raw = loss_fn(curr_q_price, target_q_price) * is_trading
+                loss_qty_raw = loss_fn(curr_q_qty, target_q_qty)
                 
                 loss_price = (loss_price_raw * is_weights_t).mean()
                 loss_qty = (loss_qty_raw * is_weights_t).mean()
             else:
                 loss_fn = nn.SmoothL1Loss(reduction='none')
-                loss_price = (loss_fn(curr_q_price, target_q_shared) * is_trading).mean()
-                loss_qty = loss_fn(curr_q_qty, target_q_shared).mean()
+                loss_price = (loss_fn(curr_q_price, target_q_price) * is_trading).mean()
+                loss_qty = loss_fn(curr_q_qty, target_q_qty).mean()
             
             # Auxiliary volatility prediction loss (Section 4.4)
             loss_vol_pred = nn.SmoothL1Loss()(pred_vol, aux_targets)
@@ -307,8 +363,8 @@ class DeepScalperBDQ:
         # PER: Update priorities with TD errors (mean across branches)
         if self.use_per and per_indices is not None:
             with torch.no_grad():
-                td_price = (curr_q_price - target_q_shared).abs()
-                td_qty = (curr_q_qty - target_q_shared).abs()
+                td_price = (curr_q_price - target_q_price).abs()
+                td_qty = (curr_q_qty - target_q_qty).abs()
                 # Mean TD error across 2 action branches per sample
                 td_errors = ((td_price + td_qty) / 2.0).squeeze(1).cpu().numpy()
             self.memory.update_priorities(per_indices, td_errors)

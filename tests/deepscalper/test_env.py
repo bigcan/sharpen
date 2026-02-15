@@ -585,5 +585,179 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.assertAlmostEqual(order_qty, 0.05,
                                msg=f"Min buy volume should be 0.05 BTC, got {order_qty}")
 
+
+class TestActionMasking(unittest.TestCase):
+    """ARCH-3: Tests for qty branch action masking at position limits."""
+    
+    def setUp(self):
+        self.config = {
+            "symbol": "BTCUSDT",
+            "window_size": 50,
+            "tick_size": 0.1,
+            "lot_size": 0.001,
+            "action": {
+                "max_position": 1.0,
+                "signed_qty_proportions": [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+            }
+        }
+        self.mock_handler = MagicMock(spec=ParquetDataHandler)
+        self.env = DeepScalperEnv(self.config, self.mock_handler)
+    
+    def test_mask_at_max_long_position(self):
+        """At max_position, all buy indices (positive qty) should be blocked."""
+        self.env.position = 1.0  # At max
+        mask = self.env._get_qty_action_mask()
+        
+        # Expected: sell indices valid, hold valid, buy indices blocked
+        # [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+        #   1      1     1     1     1     0     0    0    0
+        expected = np.array([1, 1, 1, 1, 1, 0, 0, 0, 0], dtype=np.float32)
+        np.testing.assert_array_equal(mask, expected,
+            err_msg="At max long position, buy actions should be masked")
+    
+    def test_mask_at_max_short_position(self):
+        """At -max_position, all sell indices (negative qty) should be blocked."""
+        self.env.position = -1.0  # At max short
+        mask = self.env._get_qty_action_mask()
+        
+        # Expected: sell indices blocked, hold valid, buy indices valid
+        # [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+        #   0      0     0     0     1     1     1    1    1
+        expected = np.array([0, 0, 0, 0, 1, 1, 1, 1, 1], dtype=np.float32)
+        np.testing.assert_array_equal(mask, expected,
+            err_msg="At max short position, sell actions should be masked")
+    
+    def test_mask_at_mid_position(self):
+        """At zero or partial position, all actions should be valid."""
+        for pos in [0.0, 0.5, -0.5, 0.99, -0.99]:
+            self.env.position = pos
+            mask = self.env._get_qty_action_mask()
+            expected = np.ones(9, dtype=np.float32)
+            np.testing.assert_array_equal(mask, expected,
+                err_msg=f"At position={pos}, all actions should be valid")
+    
+    def test_mask_in_reset_info(self):
+        """Reset should return qty_action_mask in info dict."""
+        _, info = self.env.reset()
+        self.assertIn("qty_action_mask", info)
+        # After reset, position=0, so all actions valid
+        expected = np.ones(9, dtype=np.float32)
+        np.testing.assert_array_equal(info["qty_action_mask"], expected)
+    
+    def test_mask_in_step_info(self):
+        """Step should return qty_action_mask in info dict."""
+        self.env.reset()
+        # Mock handler to provide valid step data
+        mock_row = {
+            'bid_price_1': 100.0, 'bid_vol_1': 1.0,
+            'ask_price_1': 101.0, 'ask_vol_1': 1.0,
+            'timestamp': '2023-01-01T00:00:00'
+        }
+        for i in range(2, 6):
+            mock_row[f'bid_price_{i}'] = 100.0 - i * 0.1
+            mock_row[f'bid_vol_{i}'] = 1.0
+            mock_row[f'ask_price_{i}'] = 101.0 + i * 0.1
+            mock_row[f'ask_vol_{i}'] = 1.0
+        self.mock_handler.step.return_value = mock_row
+        
+        action = np.array([2, 4])  # hold action
+        _, _, _, _, info = self.env.step(action)
+        self.assertIn("qty_action_mask", info)
+    
+    def test_hold_always_valid(self):
+        """Hold action (index 4, qty=0) should always be valid regardless of position."""
+        for pos in [1.0, -1.0, 0.0, 0.5, -0.5]:
+            self.env.position = pos
+            mask = self.env._get_qty_action_mask()
+            self.assertEqual(mask[4], 1.0,
+                msg=f"Hold action (idx=4) must always be valid, position={pos}")
+
+class TestForcedLiquidation(unittest.TestCase):
+    def setUp(self):
+        self.config = {
+            "symbol": "BTCUSDT",
+            "window_size": 50,
+            "tick_size": 0.1,
+            "lot_size": 0.001,  # Matches Env default if not specified
+            "maker_fee": 0.0001,
+            "taker_fee": 0.0003,
+            "initial_balance": 10000.0,
+            # ARCH-2 requires observing spread/fee impact
+            "action": {
+                "max_position": 1.0,
+                 "signed_qty_proportions": [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+            }
+        }
+        self.mock_handler = MagicMock(spec=ParquetDataHandler)
+        self.env = DeepScalperEnv(self.config, self.mock_handler)
+    
+    def test_forced_liquidation_cost(self):
+        """ARCH-2: Verify forced liquidation penalty at truncation."""
+        # 1. Setup env in state where truncation is imminent
+        self.env.reset()
+        # Mock data for reset
+        mock_row_reset = {
+             'bid_price_1': 100.0, 'bid_vol_1': 1.0,
+             'ask_price_1': 101.0, 'ask_vol_1': 1.0,
+             'timestamp': '2023-01-01T00:00:00'
+        }
+        for i in range(2, 6):
+             mock_row_reset[f'bid_price_{i}'] = 99.0
+             mock_row_reset[f'bid_vol_{i}'] = 1.0
+             mock_row_reset[f'ask_price_{i}'] = 102.0
+             mock_row_reset[f'ask_vol_{i}'] = 1.0
+        # Add macro (optional but good for robustness)
+        for k in range(11): mock_row_reset[f'macro_{k}'] = 0.0
+             
+        self.mock_handler.step.return_value = mock_row_reset
+        self.env.reset()
+        
+        # Force near end
+        self.env.current_step = 100
+        self.env.end_step = 101  # Next step triggers truncation
+        
+        # Make handler return None (End of Data)
+        self.mock_handler.step.return_value = None
+        
+        # 2. Open a position
+        self.env.position = 1.0 # Long
+        self.env.cash = 10000.0
+        self.env.current_best_bid = 100.0
+        self.env.current_best_ask = 101.0
+        # Set portfolio value manually as it might rely on step data if checked before truncation?
+        # Actually _get_portfolio_value uses self.data_handler explicitly if available?
+        # Let's hope it uses cached values or self.data_handler.step?
+        # In Env:
+        # def _get_portfolio_value(self):
+        #    price = (self.current_best_bid + self.current_best_ask) / 2
+        #    return self.cash + self.position * price
+        
+        self.env.portfolio_value = 10000.0 + (1.0 * 100.5) # Based on 100/101 mid
+        
+        # 3. Take HOLD action
+        action = np.array([2, 4]) # Price idx 2, Qty idx 4 (Hold)
+        
+        # 4. Step -> Truncation
+        # The env calls data_handler.step() -> returns None -> truncated
+        obs, reward, term, trunc, info = self.env.step(action)
+        
+        self.assertTrue(trunc, "Environment should truncate when handler returns None")
+        self.assertTrue(info.get("forced_liquidation", False), 
+            "Should flag forced liquidation in info dict")
+            
+        # 5. Check Reward (Exit Cost)
+        # We exited a Long position at Bid Price (100.0).
+        # We paid Taker Fee (0.0003).
+        # We also paid Half-Spread if valuation was mid-price?
+        # The reward is change in Portfolio Value.
+        # PV before: Cash + Pos * MidPrice (usually) or Bid?
+        # DeepScalper uses MidPrice for valuation typically, or varies.
+        # But forced liquidation executes at Market (Bid for Long).
+        # So we lose Half-Spread + Fee.
+        # Reward should be negative.
+        self.assertLess(reward, 0.0, 
+            f"Forced liquidation of Long pos should yield negative reward (Cost), got {reward}")
+
+
 if __name__ == "__main__":
     unittest.main()

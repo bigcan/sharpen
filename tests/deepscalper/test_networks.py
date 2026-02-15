@@ -32,7 +32,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
     def test_micro_encoder_lstm(self):
         encoder = MicroEncoder(**self.micro_config)
         x = torch.randn(self.batch_size, self.window_size, self.micro_features)
-        out = encoder(x)  # Sprint 7: no private_x (DIV-1)
+        out, _ = encoder(x)  # Sprint 7: no private_x (DIV-1)
         
         self.assertEqual(out.shape, (self.batch_size, 128))
         
@@ -41,7 +41,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
         config["rnn_type"] = "GRU"
         encoder = MicroEncoder(**config)
         x = torch.randn(self.batch_size, self.window_size, self.micro_features)
-        out = encoder(x)  # Sprint 7: no private_x (DIV-1)
+        out, _ = encoder(x)  # Sprint 7: no private_x (DIV-1)
         self.assertEqual(out.shape, (self.batch_size, 128))
 
     def test_macro_encoder(self):
@@ -61,7 +61,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
         private_in = torch.randn(self.batch_size, self.window_size, self.private_features)
         macro_in = torch.randn(self.batch_size, self.macro_features)
         
-        q_price, q_qty, v_s, pred_vol = net(micro_in, private_in, macro_in)
+        q_price, q_qty, v_s, pred_vol, _ = net(micro_in, private_in, macro_in)
         
         self.assertEqual(q_price.shape, (self.batch_size, 5))
         self.assertEqual(q_qty.shape, (self.batch_size, 9))
@@ -78,7 +78,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
         private_in = torch.randn(self.batch_size, self.window_size, self.private_features, requires_grad=True)
         macro_in = torch.randn(self.batch_size, self.macro_features, requires_grad=True)
         
-        q_price, _, _, _ = net(micro_in, private_in, macro_in)
+        q_price, _, _, _, _ = net(micro_in, private_in, macro_in)
         loss = q_price.mean()
         loss.backward()
         
@@ -129,7 +129,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
             action_space_dims=(5, 9)
         )
         
-        q_price, q_qty, v, pred_vol = net(micro, private, macro)
+        q_price, q_qty, v, pred_vol, _ = net(micro, private, macro)
         
         # Verify output shapes
         self.assertEqual(q_price.shape, (1, 5))
@@ -146,7 +146,7 @@ class TestNetworkRobustness(unittest.TestCase):
             hidden_size=64, rnn_type="GRU"
         )
         x = torch.randn(4, 50, 27)
-        out = encoder(x)  # Sprint 7: no private_x
+        out, _ = encoder(x)  # Sprint 7: no private_x
         self.assertEqual(out.shape, (4, 64))
 
     def test_lstm_multilayer_with_dropout(self):
@@ -162,7 +162,7 @@ class TestNetworkRobustness(unittest.TestCase):
             dropout_warnings = [x for x in w if "dropout" in str(x.message).lower()]
             self.assertEqual(len(dropout_warnings), 0, f"Unexpected dropout warnings: {dropout_warnings}")
         
-        out = encoder(torch.randn(4, 50, 27))  # Sprint 7: no private_x
+        out, _ = encoder(torch.randn(4, 50, 27))  # Sprint 7: no private_x
         self.assertEqual(out.shape, (4, 64))
 
     def test_single_layer_no_dropout_warning(self):
@@ -186,7 +186,7 @@ class TestNetworkRobustness(unittest.TestCase):
             fusion_dim=64,
             action_space_dims=(5, 9)
         )
-        q_price, q_qty, v, pv = net(
+        q_price, q_qty, v, pv, _ = net(
             torch.randn(1, 50, 27),
             torch.randn(1, 50, 3),
             torch.randn(1, 11)
@@ -211,8 +211,15 @@ class TestNetworkRobustness(unittest.TestCase):
         net.eval()
         out1 = net(micro, priv, macro)
         out2 = net(micro, priv, macro)
-        for a, b in zip(out1, out2):
-            self.assertTrue(torch.equal(a, b), "eval() mode should produce deterministic output")
+        for i, (a, b) in enumerate(zip(out1, out2)):
+            if i == 4: # Hidden State (tuple)
+                 if isinstance(a, tuple):
+                     for ha, hb in zip(a, b):
+                         self.assertTrue(torch.equal(ha, hb), "eval() mode hidden state check failed")
+                 else:
+                     self.assertTrue(torch.equal(a, b), "eval() mode hidden state check failed")
+            else:
+                self.assertTrue(torch.equal(a, b), "eval() mode should produce deterministic output")
 
     def test_weight_init_applied(self):
         """FIND-3: Verify custom weight init was applied (not default uniform)."""
