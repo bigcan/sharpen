@@ -23,9 +23,11 @@ from optuna.samplers import TPESampler
 # Project imports
 sys.path.append(os.getcwd())
 from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
+from finrl_pro_ds.training.ppo_trainer import PPOTrainer
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
+from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
 from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
 from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
 
@@ -432,10 +434,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
 # ============================================================================
 # PHASE 2: TRAINING
 # ============================================================================
-def run_training(config, run_name, device):
+def run_training(config, run_name, device, agent_type="bdq"):
     """Phase 2: Full training with optimized hyperparameters."""
-    logger.info("Starting Training Phase")
-    wandb.log({"train/status": "started"})
+    logger.info(f"Starting Training Phase (agent={agent_type})")
+    wandb.log({"train/status": "started", "train/agent_type": agent_type})
     
     num_envs = config.get("env", {}).get("num_envs", 12)
     data_loader = None
@@ -463,8 +465,11 @@ def run_training(config, run_name, device):
         env = create_vector_env(config, num_envs, shm_config=shm_config, gym_shm=use_shm)
         logger.info(f"Environment ready: {num_envs} workers")
         
-        # Train
-        trainer = DeepScalperTrainer(env, config, device=device, run_name=run_name)
+        # Train — dispatch based on agent type
+        if agent_type == "ppo":
+            trainer = PPOTrainer(env, config, device=device, run_name=run_name)
+        else:
+            trainer = DeepScalperTrainer(env, config, device=device, run_name=run_name)
         trainer.train()
         
         # Find checkpoint
@@ -500,10 +505,10 @@ def run_training(config, run_name, device):
 # ============================================================================
 # PHASE 3: BACKTESTING
 # ============================================================================
-def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None, prefix="backtest"):
+def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None, prefix="backtest", agent_type="bdq"):
     """Phase 3: Backtest on specified data range."""
     mode = "Test" if prefix == "backtest" else "Validation"
-    logger.info(f"Starting {mode} Phase")
+    logger.info(f"Starting {mode} Phase (agent={agent_type})")
     wandb.log({f"{prefix}/status": "started"})
     
     data_config = config.get("data", {})
@@ -523,8 +528,6 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         
         # Create agent
         sample_obs, _ = env.reset()
-        # Create agent for backtest — MUST mirror trainer constructor (deepscalper_trainer.py L32-46)
-        bdq_config = config.get("agents", {}).get("bdq", {})
         network_config = config.get("network")
         if not network_config:
             raise ValueError("Config missing 'network' section — cannot reconstruct agent for backtest")
@@ -539,21 +542,35 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             len(signed_qty_props)
         )
         
-        agent = DeepScalperBDQ(
-            network_config=network_config,
-            lr=bdq_config.get("learning_rate", 1e-4),
-            gamma=bdq_config.get("gamma", 0.99),
-            epsilon_start=bdq_config.get("epsilon_start", 1.0),
-            epsilon_end=bdq_config.get("epsilon_end", 0.01),
-            buffer_size=bdq_config.get("buffer_size", 100000),
-            batch_size=bdq_config.get("batch_size", 64),
-            target_update_freq=bdq_config.get("target_update_freq", 100),
-            auxiliary_weight=bdq_config.get("auxiliary_weight", 1.0),
-            epsilon_decay=bdq_config.get("epsilon_decay", 0.99999),
-            action_dims=action_dims,
-            use_amp=config.get("training", {}).get("use_amp", False),
-            device=device
-        )
+        # Dispatch agent creation based on type
+        if agent_type == "ppo":
+            ppo_cfg = config.get("agents", {}).get("ppo", {})
+            agent = PPOAgent(
+                network_config=network_config,
+                lr=ppo_cfg.get("learning_rate", 3e-4),
+                gamma=ppo_cfg.get("gamma", 0.99),
+                action_dims=action_dims,
+                use_amp=config.get("training", {}).get("use_amp", False),
+                device=device,
+            )
+        else:
+            # BDQ agent (existing behavior)
+            bdq_config = config.get("agents", {}).get("bdq", {})
+            agent = DeepScalperBDQ(
+                network_config=network_config,
+                lr=bdq_config.get("learning_rate", 1e-4),
+                gamma=bdq_config.get("gamma", 0.99),
+                epsilon_start=bdq_config.get("epsilon_start", 1.0),
+                epsilon_end=bdq_config.get("epsilon_end", 0.01),
+                buffer_size=bdq_config.get("buffer_size", 100000),
+                batch_size=bdq_config.get("batch_size", 64),
+                target_update_freq=bdq_config.get("target_update_freq", 100),
+                auxiliary_weight=bdq_config.get("auxiliary_weight", 1.0),
+                epsilon_decay=bdq_config.get("epsilon_decay", 0.99999),
+                action_dims=action_dims,
+                use_amp=config.get("training", {}).get("use_amp", False),
+                device=device
+            )
         
         # Load checkpoint
         if checkpoint_path and os.path.exists(checkpoint_path):
@@ -574,7 +591,12 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             private = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device)
             macro = torch.tensor(obs["macro"], dtype=torch.float32).unsqueeze(0).to(device)
             
-            action = agent.predict(micro, private, macro, deterministic=True)[0]
+            # PPO predict returns (actions, log_probs, values); BDQ returns actions
+            pred = agent.predict(micro, private, macro, deterministic=True)
+            if isinstance(pred, tuple):
+                action = pred[0][0]  # PPO: (actions, log_probs, values) → first actions
+            else:
+                action = pred[0]    # BDQ: actions array
             obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
             
@@ -675,14 +697,19 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
 # MAIN PIPELINE
 # ============================================================================
 def main():
-    parser = argparse.ArgumentParser(description="DeepScalper Single BDQ Pipeline")
+    parser = argparse.ArgumentParser(description="DeepScalper Pipeline (BDQ / PPO)")
     parser.add_argument("--config", type=str, default="configs/deepscalper_rtx5090.yaml")
+    parser.add_argument("--agent", type=str, default="bdq", choices=["bdq", "ppo"],
+                        help="Agent type: bdq (default) or ppo")
     parser.add_argument("--tags", nargs="*", default=["Pipeline"], help="WandB Tags")
     parser.add_argument("--run_name", type=str, default=None, help="Override WandB Run Name")
     parser.add_argument("--trials", type=int, default=None, help="Number of HPO trials")
     parser.add_argument("--steps", type=int, default=None, help="Training steps override")
     parser.add_argument("--version", type=str, default="V1", help="Version tag")
     args = parser.parse_args()
+    
+    agent_type = args.agent
+    logger.info(f"Agent type: {agent_type}")
 
     base_config = load_config(args.config)
     
@@ -757,7 +784,7 @@ def main():
         print(">>> PHASE 2: TRAINING (Full Run with Best Params)")
         print("="*60 + "\n")
         
-        checkpoint_path = run_training(final_config, run_name, device)
+        checkpoint_path = run_training(final_config, run_name, device, agent_type=agent_type)
         
         if checkpoint_path:
             # PHASE 3a: Validation Backtest (for Overfitting Check)
@@ -769,7 +796,8 @@ def main():
                 device, 
                 start_date=data_config.get("val_start_date"), 
                 end_date=data_config.get("val_end_date"),
-                prefix="backtest_val"
+                prefix="backtest_val",
+                agent_type=agent_type
             )
 
             # PHASE 3b: Test Backtest (for Final Evaluation)
@@ -778,7 +806,8 @@ def main():
                 final_config, 
                 checkpoint_path, 
                 device,
-                prefix="backtest_test"
+                prefix="backtest_test",
+                agent_type=agent_type
             )
         else:
             logger.warning("No checkpoint found, skipping backtests")
