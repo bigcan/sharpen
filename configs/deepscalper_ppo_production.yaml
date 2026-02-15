@@ -86,7 +86,7 @@ training:
   verbose_logging: true
 
 hpo:
-  enabled: true
+  enabled: false  # B5: HPO not yet implemented for PPO, disable until run_hpo_ppo() exists
   n_trials: 50
   steps_per_trial: 200000
 
