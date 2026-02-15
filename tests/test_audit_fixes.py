@@ -7,22 +7,22 @@ from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
 import pandas as pd
 
 NET_CONFIG = {
-    'micro_config': {'input_size': 27, 'private_input_size': 2, 'hidden_size': 128, 'num_layers': 1, 'rnn_type': 'LSTM'},
+    'micro_config': {'input_size': 27, 'private_input_size': 3, 'hidden_size': 128, 'num_layers': 1, 'rnn_type': 'LSTM'},
     'macro_config': {'input_size': 11, 'hidden_sizes': (64, 64)},
-    'action_space_dims': (3, 5, 5)
+    'action_space_dims': (5, 9)  # Sprint 7: 2-branch (Price, SignedQty)
 }
 
 def _make_agent():
-    return DeepScalperBDQ(network_config=NET_CONFIG, action_dims=(3,5,5), use_amp=False, device='cpu')
+    return DeepScalperBDQ(network_config=NET_CONFIG, action_dims=(5, 9), use_amp=False, device='cpu')
 
 def test_bdq_init_amp_cpu():
     agent = _make_agent()
     assert "torch.amp" in type(agent.scaler).__module__
-    assert agent.action_dims == [3, 5, 5]
+    assert agent.action_dims == [5, 9]
 
 def test_action_dim_mismatch():
     with pytest.raises(AssertionError, match="Action dim mismatch"):
-        DeepScalperBDQ(network_config=NET_CONFIG, action_dims=(3,5,3), use_amp=False, device='cpu')
+        DeepScalperBDQ(network_config=NET_CONFIG, action_dims=(5, 3), use_amp=False, device='cpu')
 
 def test_double_dqn_train():
     agent = _make_agent()
@@ -33,7 +33,7 @@ def test_double_dqn_train():
         next_state = {'micro': np.random.randn(50, 27).astype(np.float32),
                       'private': np.random.randn(50, 3).astype(np.float32),
                       'macro': np.random.randn(11).astype(np.float32)}
-        action = [np.random.randint(3), np.random.randint(5), np.random.randint(5)]
+        action = [np.random.randint(5), np.random.randint(9)]
         agent.memory.push(state, action, float(np.random.randn()), next_state, False, 0.1)
     metrics = agent.train_step()
     assert metrics is not None

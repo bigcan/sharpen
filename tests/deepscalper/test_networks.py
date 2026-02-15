@@ -32,8 +32,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
     def test_micro_encoder_lstm(self):
         encoder = MicroEncoder(**self.micro_config)
         x = torch.randn(self.batch_size, self.window_size, self.micro_features)
-        private_x = torch.randn(self.batch_size, self.window_size, self.private_features)
-        out = encoder(x, private_x)
+        out = encoder(x)  # Sprint 7: no private_x (DIV-1)
         
         self.assertEqual(out.shape, (self.batch_size, 128))
         
@@ -42,8 +41,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
         config["rnn_type"] = "GRU"
         encoder = MicroEncoder(**config)
         x = torch.randn(self.batch_size, self.window_size, self.micro_features)
-        private_x = torch.randn(self.batch_size, self.window_size, self.private_features)
-        out = encoder(x, private_x)
+        out = encoder(x)  # Sprint 7: no private_x (DIV-1)
         self.assertEqual(out.shape, (self.batch_size, 128))
 
     def test_macro_encoder(self):
@@ -56,7 +54,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
         net = DeepScalperNetwork(
             micro_config=self.micro_config,
             macro_config=self.macro_config,
-            action_space_dims=(3, 5, 5)
+            action_space_dims=(5, 9)  # Sprint 7: 2-branch (Price, SignedQty)
         )
         
         micro_in = torch.randn(self.batch_size, self.window_size, self.micro_features)
@@ -148,8 +146,7 @@ class TestNetworkRobustness(unittest.TestCase):
             hidden_size=64, rnn_type="GRU"
         )
         x = torch.randn(4, 50, 27)
-        p = torch.randn(4, 50, 3)
-        out = encoder(x, p)
+        out = encoder(x)  # Sprint 7: no private_x
         self.assertEqual(out.shape, (4, 64))
 
     def test_lstm_multilayer_with_dropout(self):
@@ -165,7 +162,7 @@ class TestNetworkRobustness(unittest.TestCase):
             dropout_warnings = [x for x in w if "dropout" in str(x.message).lower()]
             self.assertEqual(len(dropout_warnings), 0, f"Unexpected dropout warnings: {dropout_warnings}")
         
-        out = encoder(torch.randn(4, 50, 27), torch.randn(4, 50, 3))
+        out = encoder(torch.randn(4, 50, 27))  # Sprint 7: no private_x
         self.assertEqual(out.shape, (4, 64))
 
     def test_single_layer_no_dropout_warning(self):
