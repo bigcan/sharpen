@@ -5,10 +5,9 @@ import math
 
 class MicroEncoder(nn.Module):
     """
-    Encodes Micro-structure features (LOB + Private State) using a single LSTM/GRU.
-    Paper-aligned (Section 3.1, Figure 2): concatenate LOB and private state
-    before feeding into a single temporal encoder.
-    Input: micro (Batch, Window, LOB_Features), private (Batch, Window, Private_Features)
+    Encodes Micro-structure features (LOB only) using LSTM/GRU.
+    Sprint 7 DIV-1 FIX: Private state moved to fusion layer (paper Figure 2).
+    Input: micro (Batch, Window, LOB_Features)
     Output: (Batch, HiddenSize)
     """
     def __init__(
@@ -35,11 +34,10 @@ class MicroEncoder(nn.Module):
         else:
             raise ValueError(f"Unknown RNN type: {rnn_type}")
         
-        # FIX CRIT-2: Single LSTM processes concatenated [LOB | Private] input
-        # Paper Figure 2: LOB and private state are concatenated BEFORE the LSTM
-        combined_input_size = input_size + private_input_size
+        # Sprint 7 DIV-1 FIX: LSTM processes only market data (no private state)
+        # Private state is injected at the fusion layer in DeepScalperNetwork
         self.micro_rnn = rnn_cls(
-            input_size=combined_input_size,
+            input_size=input_size,  # 27 LOB features only
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
@@ -70,15 +68,11 @@ class MicroEncoder(nn.Module):
         nn.init.xavier_uniform_(self.out_layer.weight)
         nn.init.zeros_(self.out_layer.bias)
 
-    def forward(self, x: torch.Tensor, private_x: torch.Tensor) -> torch.Tensor:
-        # x: (Batch, Window, LOB_Features)
-        # private_x: (Batch, Window, 3)  [position, balance, remaining_time]
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        # x: (Batch, Window, LOB_Features)  — market data only
         
-        # FIX CRIT-2: Concatenate LOB + private along feature dim BEFORE LSTM
-        combined = torch.cat([x, private_x], dim=-1)  # (Batch, Window, LOB+Private)
-        
-        # Single LSTM processes joint temporal sequence
-        rnn_out, _ = self.micro_rnn(combined)
+        # Sprint 7 DIV-1 FIX: LSTM processes only LOB features
+        rnn_out, _ = self.micro_rnn(x)
             
         # Take last time step
         last_hidden = rnn_out[:, -1, :]
@@ -140,11 +134,14 @@ class DeepScalperNetwork(nn.Module):
         self.micro_encoder = MicroEncoder(**micro_config)
         self.macro_encoder = MacroEncoder(**macro_config)
         
-        # Input dim to fusion is micro_hidden + macro_hidden
+        # Input dim to fusion is micro_hidden + macro_hidden + private_size
+        # Sprint 7 DIV-1: Private state (3) injected at fusion, not in LSTM
         micro_out_dim = micro_config.get("hidden_size", 128)
         macro_out_dim = macro_config.get("hidden_sizes", (128, 128))[-1]
+        private_size = micro_config.get("private_input_size", 3)
+        self.private_size = private_size
         
-        fusion_in_dim = micro_out_dim + macro_out_dim
+        fusion_in_dim = micro_out_dim + macro_out_dim + private_size
         
         # FIX FIND-5: Head width scales with fusion_dim (default: fusion_dim // 2)
         head_hidden = max(fusion_dim // 2, 64)
@@ -207,11 +204,15 @@ class DeepScalperNetwork(nn.Module):
         Paper-aligned: 2 action branches (Price, SignedQty).
         """
         # Encode
-        h_micro = self.micro_encoder(micro_in, private_in)
+        h_micro = self.micro_encoder(micro_in)  # Sprint 7: no private_in
         h_macro = self.macro_encoder(macro_in)
         
-        # Fusion
-        combined = torch.cat([h_micro, h_macro], dim=1)
+        # Sprint 7 DIV-1 FIX: Private state injected at fusion layer (paper Figure 2)
+        # Take last timestep: (Batch, Window, 3) -> (Batch, 3)
+        private_last = private_in[:, -1, :]
+        
+        # Fusion: market encodings + private state
+        combined = torch.cat([h_micro, h_macro, private_last], dim=1)
         features = self.fusion(combined)
         
         # Value

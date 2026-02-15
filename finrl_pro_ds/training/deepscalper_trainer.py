@@ -10,16 +10,10 @@ import optuna
 
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
-class RunningRewardNormalizer:
-    """Normalizes rewards to ~N(0,1) using EMA statistics."""
-    def __init__(self, clip=10.0, decay=0.999):
-        self.mean, self.var, self.clip, self.decay = 0.0, 1.0, clip, decay
-
-    def normalize(self, reward):
-        self.mean = self.decay * self.mean + (1 - self.decay) * reward
-        self.var = self.decay * self.var + (1 - self.decay) * (reward - self.mean) ** 2
-        std = max(np.sqrt(self.var), 1e-8)
-        return float(np.clip((reward - self.mean) / std, -self.clip, self.clip))
+# RunningRewardNormalizer REMOVED (Sprint 7 BUG-3):
+# Rewards are already in basis points (~O(1)) from the environment.
+# Double-normalizing with an EMA z-score created a non-stationary target
+# that fought learning stability.
 
 class DeepScalperTrainer:
     """
@@ -32,8 +26,7 @@ class DeepScalperTrainer:
         self.tracker_rewards = []
         self.tracker_lens = []
         
-        # Sprint 3: Reward Normalization
-        self.reward_normalizer = RunningRewardNormalizer(clip=10.0)
+        # Sprint 7: Reward normalizer removed (BUG-3). Raw bps rewards used directly.
         self.run_name = run_name or datetime.now().strftime("%Y%m%d_%H%M%S")
         
         # Read Action Dims from Config — Paper-aligned: 2 branches (Price, SignedQty)
@@ -208,7 +201,10 @@ class DeepScalperTrainer:
                 # 2. Step Environment
                 next_obs, rewards, term, trunc, infos = self.env.step(actions)
                 
-                dones = np.logical_or(term, trunc)
+                # Sprint 7 BUG-2 FIX: Only true termination (drawdown) zeroes bootstrap.
+                # Truncation (data exhaustion) is NOT terminal — the MDP continues.
+                dones_for_reset = np.logical_or(term, trunc)  # For episodic stats reset
+                dones_for_buffer = term  # Only term zeroes Bellman bootstrap
                 
                 # 3. Store in Buffer
                 for i in range(num_envs):
@@ -216,10 +212,11 @@ class DeepScalperTrainer:
                     ns = {k: v[i] for k, v in next_obs.items()}
                     a = actions[i]
                     raw_r = rewards[i] # Store raw reward for tracking
-                    d = dones[i]
+                    d_reset = dones_for_reset[i]  # For episodic stats
+                    d_buffer = dones_for_buffer[i]  # For Bellman bootstrap
                     
-                    # Sprint 3: Normalize reward before storage
-                    norm_r = self.reward_normalizer.normalize(raw_r)
+                    # Sprint 7 BUG-3 FIX: Use raw bps reward (no double-normalization)
+                    norm_r = raw_r
                     
                     # EXTRACT VOLATILITY TARGET FROM INFO for Hindsight/Aux
                     aux_target = 0.0
@@ -232,7 +229,7 @@ class DeepScalperTrainer:
                     elif isinstance(infos, list):
                          aux_target = infos[i].get("volatility_target", 0.0)
                     
-                    self.agent.memory.push(s, a, float(norm_r), ns, bool(d), float(aux_target))
+                    self.agent.memory.push(s, a, float(norm_r), ns, bool(d_buffer), float(aux_target))
                     
                     # Accumulate reward components for hindsight ratio tracking
                     if isinstance(infos, dict):
@@ -246,7 +243,7 @@ class DeepScalperTrainer:
                     curr_rewards[i] += raw_r
                     curr_lens[i] += 1
                     
-                    if d:
+                    if d_reset:  # Reset episodic stats on ANY episode end
                         episode_rewards.append(curr_rewards[i])
                         episode_lens.append(curr_lens[i])
                         curr_rewards[i] = 0
