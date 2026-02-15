@@ -466,11 +466,35 @@ def run_training(config, run_name, device, agent_type="bdq"):
         logger.info(f"Environment ready: {num_envs} workers")
         
         # Train — dispatch based on agent type
-        if agent_type == "ppo":
+        if agent_type == "earnhft":
+            # EarnHFT uses its own 3-stage pipeline (Q-Teacher → Pool → Router)
+            # instead of the standard vector-env training loop
+            from finrl_pro_ds.training.earnhft_trainer import EarnHFTTrainer
+            data_config = config.get("data", {})
+            import pandas as pd
+            train_df = pd.read_parquet(
+                data_config.get("file_path"),
+            )
+            # Filter to training date range
+            if "timestamp" in train_df.columns:
+                train_df = train_df[
+                    (train_df["timestamp"] >= data_config.get("train_start_date", "")) &
+                    (train_df["timestamp"] <= data_config.get("train_end_date", ""))
+                ]
+            earnhft_trainer = EarnHFTTrainer(
+                config=config,
+                data_df=train_df,
+                device=device,
+                run_name=run_name,
+                checkpoint_dir=f"checkpoints/{run_name}",
+            )
+            earnhft_trainer.train()
+        elif agent_type == "ppo":
             trainer = PPOTrainer(env, config, device=device, run_name=run_name)
+            trainer.train()
         else:
             trainer = DeepScalperTrainer(env, config, device=device, run_name=run_name)
-        trainer.train()
+            trainer.train()
         
         # Find checkpoint
         checkpoints_dir = f"checkpoints/{run_name}"
@@ -699,8 +723,8 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
 def main():
     parser = argparse.ArgumentParser(description="DeepScalper Pipeline (BDQ / PPO)")
     parser.add_argument("--config", type=str, default="configs/deepscalper_rtx5090.yaml")
-    parser.add_argument("--agent", type=str, default="bdq", choices=["bdq", "ppo"],
-                        help="Agent type: bdq (default) or ppo")
+    parser.add_argument("--agent", type=str, default="bdq", choices=["bdq", "ppo", "earnhft"],
+                        help="Agent type: bdq (default), ppo, or earnhft")
     parser.add_argument("--tags", nargs="*", default=["Pipeline"], help="WandB Tags")
     parser.add_argument("--run_name", type=str, default=None, help="Override WandB Run Name")
     parser.add_argument("--trials", type=int, default=None, help="Number of HPO trials")

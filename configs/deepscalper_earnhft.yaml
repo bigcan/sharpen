@@ -1,0 +1,79 @@
+# EarnHFT Configuration — Hierarchical RL for HFT
+# Based on deepscalper_ppo_production.yaml
+# Shared: data, features sections
+# New: agents.earnhft (Q-teacher + pool + router)
+
+data:
+  file_path: "data/processed/btc_2025_full_year.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date: "2025-10-31 23:59:59"
+  val_start_date: "2025-11-01 00:00:00"
+  val_end_date: "2025-11-30 23:59:59"
+  test_start_date: "2025-12-01 00:00:00"
+  test_end_date: "2025-12-31 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+network:
+  micro_input_size: 20         # 5 levels * 4 cols (bid_price, bid_vol, ask_price, ask_vol)
+  private_input_size: 3        # position, pnl, remaining_frac
+  micro_hidden_size: 128       # LSTM hidden size
+  rnn_type: "LSTM"
+  macro_input_size: 8          # minute-level aggregated features
+  macro_hidden_sizes: [128, 64]
+  fusion_dim: 128
+
+agents:
+  earnhft:
+    # Q-Teacher
+    num_actions: 5             # Position levels: {0, 0.25, 0.5, 0.75, 1.0}
+    max_holding: 1.0
+    commission_fee: 0.000175
+    reward_scale: 1000.0
+    gamma: 0.999
+
+    # Low-Level Pool
+    betas: [0.0, 1.0, 5.0]    # Lite pool: pure PnL, balanced, teacher-guided
+    learning_rate: 0.0003
+    gae_lambda: 0.95
+    clip_eps: 0.2
+    vf_coef: 0.5
+    ent_coef: 0.01
+    max_grad_norm: 0.5
+    n_epochs: 4
+    batch_size: 256
+    rollout_steps: 2048
+    low_level_steps: 200000
+    chunk_length: 3600         # 1-hour episodes
+
+    # High-Level Router
+    router_lr: 0.001
+    router_gamma: 0.99
+    router_epsilon_start: 1.0
+    router_epsilon_end: 0.05
+    router_epsilon_decay: 5000
+    router_buffer_capacity: 10000
+    router_target_update_freq: 100
+    router_batch_size: 32
+    router_steps: 50000
+    minute_interval: 60        # Router decides every 60 ticks
+
+training:
+  total_timesteps: 500000      # Per-agent training budget
+  checkpoint_interval: 100000
+  torch_compile: false         # Keep simple for initial runs
+  use_amp: false
+  verbose_logging: true
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "DeepScalper-EarnHFT"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["EarnHFT", "Hierarchical", "QTeacher"]
