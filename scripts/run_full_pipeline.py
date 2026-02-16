@@ -56,10 +56,13 @@ def merge_configs(base, overrides):
 # ============================================================================
 # ENVIRONMENT FACTORY
 # ============================================================================
-def make_env(config, start_date=None, end_date=None, shm_config=None):
+def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutoff_date=None):
     """Factory to create DeepScalperEnv with real data.
     
-    Note: shm_config is passed explicitly to avoid stale references.
+    Args:
+        norm_cutoff_date: FIX LEAK-1 — When set, rolling normalization statistics
+            (z-scores, SMAs) are reset at this date boundary so that training
+            data does not leak into val/test feature statistics.
     """
     data_config = config.get("data", {})
     file_path = data_config.get("file_path")
@@ -77,7 +80,8 @@ def make_env(config, start_date=None, end_date=None, shm_config=None):
         feature_config=config.get("features", {}),
         start_date=sd,
         end_date=ed,
-        shared_memory_config=shm_config  # Explicit, not from config dict
+        shared_memory_config=shm_config,
+        norm_cutoff_date=norm_cutoff_date  # FIX LEAK-1
     )
     
     env_config = config.get("env", {})
@@ -535,10 +539,17 @@ def run_training(config, run_name, device, agent_type="bdq"):
 # ============================================================================
 # PHASE 3: BACKTESTING
 # ============================================================================
-def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None, prefix="backtest", agent_type="bdq"):
-    """Phase 3: Backtest on specified data range."""
+def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None, prefix="backtest", agent_type="bdq", norm_cutoff_date=None):
+    """Phase 3: Backtest on specified data range.
+    
+    Args:
+        norm_cutoff_date: FIX LEAK-1 — Reset normalization statistics at this
+            date boundary (e.g. train_end_date for val, val_end_date for test).
+    """
     mode = "Test" if prefix == "backtest" else "Validation"
     logger.info(f"Starting {mode} Phase (agent={agent_type})")
+    if norm_cutoff_date:
+        logger.info(f"[LEAK-1] Normalization cutoff: {norm_cutoff_date}")
     wandb.log({f"{prefix}/status": "started"})
     
     data_config = config.get("data", {})
@@ -554,7 +565,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
     
     env = None
     try:
-        env = make_env(config, start_date=start_date, end_date=end_date)
+        env = make_env(config, start_date=start_date, end_date=end_date, norm_cutoff_date=norm_cutoff_date)
         
         # Create agent
         sample_obs, _ = env.reset()
@@ -889,6 +900,8 @@ def main():
         
         if checkpoint_path:
             # PHASE 3a: Validation Backtest (for Overfitting Check)
+            # FIX LEAK-1: Pass train_end_date as cutoff so validation z-scores
+            # don't include training data in their rolling windows.
             print(">>> PHASE 3a: VALIDATION BACKTEST")
             data_config = final_config.get("data", {})
             run_backtest(
@@ -898,17 +911,21 @@ def main():
                 start_date=data_config.get("val_start_date"), 
                 end_date=data_config.get("val_end_date"),
                 prefix="backtest_val",
-                agent_type=agent_type
+                agent_type=agent_type,
+                norm_cutoff_date=data_config.get("val_start_date")  # Reset stats at val boundary
             )
 
             # PHASE 3b: Test Backtest (for Final Evaluation)
+            # FIX LEAK-1: Pass val_end_date as cutoff so test z-scores
+            # don't include val/train data in their rolling windows.
             print(">>> PHASE 3b: TEST BACKTEST")
             run_backtest(
                 final_config, 
                 checkpoint_path, 
                 device,
                 prefix="backtest_test",
-                agent_type=agent_type
+                agent_type=agent_type,
+                norm_cutoff_date=data_config.get("test_start_date")  # Reset stats at test boundary
             )
         else:
             logger.warning("No checkpoint found, skipping backtests")

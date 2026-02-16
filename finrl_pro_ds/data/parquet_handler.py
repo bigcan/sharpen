@@ -10,12 +10,17 @@ class ParquetDataHandler:
     Designed to be a drop-in replacement for DBMarketDataHandler in DeepScalperEnv.
     """
     
-    def __init__(self, file_path: str, ticker: str, feature_config: Dict = None, start_date: str = None, end_date: str = None, shared_memory_config: Dict = None):
+    def __init__(self, file_path: str, ticker: str, feature_config: Dict = None, start_date: str = None, end_date: str = None, shared_memory_config: Dict = None, norm_cutoff_date: str = None):
         self.file_path = file_path
         self.ticker = ticker
         self.fe = DeepScalperFeatureEngineer(config=feature_config)
         self.start_date = pd.to_datetime(start_date) if start_date else None
         self.end_date = pd.to_datetime(end_date) if end_date else None
+        
+        # FIX LEAK-1: Normalization cutoff resets rolling statistics at split boundary.
+        # When set, rolling z-scores and SMAs are computed independently for data
+        # before vs after the cutoff, preventing train→test information leakage.
+        self.norm_cutoff_date = pd.to_datetime(norm_cutoff_date) if norm_cutoff_date else None
         
         # Extract volatility_horizon from config or use default (100)
         fc = feature_config or {}
@@ -84,68 +89,15 @@ class ParquetDataHandler:
                 raise RuntimeError(f"pd.to_datetime FAILED: {e}")
 
             # Feature Engineering
-            # 1. Micro Features
-            required_cols = ['bid_price_1', 'ask_price_1']  
-            if all(col in df.columns for col in required_cols):
-                try:
-                    micro_features = self.fe.process_micro(df)
-                except Exception as e:
-                    raise RuntimeError(f"process_micro FAILED: {e}")
-            else:
-                raise ValueError("Parquet data must be in wide format (bid_price_1, etc.) or pre-processed.")
-
-            # 2. Macro Features (Tech Indicators)
-            env_macro_cols = [
-                'z_open', 'z_high', 'z_low', 
-                'z_close', 'z_volume',
-                'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
-            ]
-            
-            if all(col in df.columns for col in env_macro_cols):
-                # Pre-computed macro columns already exist — no processing needed
-                # FIX C2: Set _feature_data so downstream numpy conversion has data
-                self._feature_data = df
-            elif all(col in df.columns for col in ['open', 'high', 'low', 'close', 'volume']):
-                # Generate from OHLCV
-                if self.fe:
-                    if self.ticker:
-                        req_macro = ['open', 'high', 'low', 'close']
-                        if all(c in df.columns for c in req_macro):
-                            macro_feat = self.fe.process_macro(df)
-                            
-                            # Ensure timestamp in macro_feat from df
-                            if 'timestamp' not in macro_feat.columns and 'timestamp' in df.columns:
-                                macro_feat['timestamp'] = df['timestamp'].values
-
-                            # Sanitize Macro Features to Pure Numpy Float32
-                            safe_macro = {}
-                            if 'timestamp' in macro_feat:
-                                safe_macro['timestamp'] = macro_feat['timestamp'].values
-                            for c in macro_feat.columns:
-                                if c == 'timestamp': continue
-                                # Force conversion to unlink from PyArrow memory
-                                safe_macro[c] = np.array(macro_feat[c].values).astype(np.float32)
-
-                            # Align macro features to micro timeline
-                            try:
-                                aligned_macro_dict = self.fe.align_multimodal(df, safe_macro)
-                                for c, arr in aligned_macro_dict.items():
-                                    df[c] = arr
-                            except Exception as e:
-                                print(f"Align/Merge Failed: {e}", flush=True)
-                                pass
-                        else:
-                            print(f"Skipping Macro, missing cols: {[c for c in req_macro if c not in df.columns]}", flush=True)
-                    else:
-                        print("Skipping Macro, no ticker provided.", flush=True)
-                else:
-                    print("Skipping Macro, feature engineer not initialized.", flush=True)
-                
-                # Set final DF
+            # FIX LEAK-1: When norm_cutoff_date is set, split the data at the
+            # boundary, process each half independently (resetting rolling z-scores
+            # and SMAs), then re-concatenate. This prevents training statistics
+            # from leaking into validation/test normalization.
+            if self.norm_cutoff_date is not None:
+                df = self._process_features_with_cutoff(df)
                 self._feature_data = df
             else:
-                # FIX C2b: Still set feature_data even without macro features
-                print("WARNING: No macro features found. Using raw data columns.", flush=True)
+                df = self._process_features(df)
                 self._feature_data = df
 
             # Convert to NumPy Dictionary for Fast Access (>20x speedup vs iterrows/iloc)
@@ -261,6 +213,103 @@ class ParquetDataHandler:
 
         except Exception as e:
             raise RuntimeError(f"Failed to load parquet data: {e}")
+
+    def _process_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Process micro and macro features on the full DataFrame (original behavior)."""
+        # 1. Micro Features
+        required_cols = ['bid_price_1', 'ask_price_1']
+        if all(col in df.columns for col in required_cols):
+            try:
+                self.fe.process_micro(df)
+            except Exception as e:
+                raise RuntimeError(f"process_micro FAILED: {e}")
+        else:
+            raise ValueError("Parquet data must be in wide format (bid_price_1, etc.) or pre-processed.")
+
+        # 2. Macro Features (Tech Indicators)
+        env_macro_cols = [
+            'z_open', 'z_high', 'z_low',
+            'z_close', 'z_volume',
+            'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
+        ]
+
+        if all(col in df.columns for col in env_macro_cols):
+            # Pre-computed macro columns already exist
+            pass
+        elif all(col in df.columns for col in ['open', 'high', 'low', 'close', 'volume']):
+            if self.fe and self.ticker:
+                req_macro = ['open', 'high', 'low', 'close']
+                if all(c in df.columns for c in req_macro):
+                    macro_feat = self.fe.process_macro(df)
+
+                    if 'timestamp' not in macro_feat.columns and 'timestamp' in df.columns:
+                        macro_feat['timestamp'] = df['timestamp'].values
+
+                    safe_macro = {}
+                    if 'timestamp' in macro_feat:
+                        safe_macro['timestamp'] = macro_feat['timestamp'].values
+                    for c in macro_feat.columns:
+                        if c == 'timestamp': continue
+                        safe_macro[c] = np.array(macro_feat[c].values).astype(np.float32)
+
+                    try:
+                        aligned_macro_dict = self.fe.align_multimodal(df, safe_macro)
+                        for c, arr in aligned_macro_dict.items():
+                            df[c] = arr
+                    except Exception as e:
+                        print(f"Align/Merge Failed: {e}", flush=True)
+                else:
+                    print(f"Skipping Macro, missing cols: {[c for c in req_macro if c not in df.columns]}", flush=True)
+            else:
+                print("Skipping Macro, no FE or ticker.", flush=True)
+        else:
+            print("WARNING: No macro features found. Using raw data columns.", flush=True)
+
+        return df
+
+    def _process_features_with_cutoff(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        FIX LEAK-1: Process features with a normalization cutoff.
+        
+        Splits the DataFrame at norm_cutoff_date, processes each half
+        independently (resetting rolling z-scores and SMAs), then
+        re-concatenates. This ensures zero information leakage from
+        training data into validation/test normalization statistics.
+        """
+        ts = df['timestamp']
+        cutoff = self.norm_cutoff_date
+
+        mask_before = ts < cutoff
+        mask_after = ts >= cutoff
+
+        n_before = mask_before.sum()
+        n_after = mask_after.sum()
+        print(f"[LEAK-1] Splitting at {cutoff}: {n_before} rows before, {n_after} rows after", flush=True)
+
+        if n_after == 0:
+            # All data is before cutoff — process normally
+            print("[LEAK-1] No data after cutoff, processing normally", flush=True)
+            return self._process_features(df)
+
+        if n_before == 0:
+            # All data is after cutoff — process normally (no leakage possible)
+            print("[LEAK-1] No data before cutoff, processing normally", flush=True)
+            return self._process_features(df)
+
+        # Split into two independent DataFrames
+        df_before = df[mask_before].copy().reset_index(drop=True)
+        df_after = df[mask_after].copy().reset_index(drop=True)
+
+        # Process each half independently — this resets rolling statistics
+        # so the "after" half's z-scores start fresh with no lookback into "before"
+        df_before = self._process_features(df_before)
+        df_after = self._process_features(df_after)
+
+        # Re-concatenate with original ordering preserved
+        df_combined = pd.concat([df_before, df_after], ignore_index=True)
+        
+        print(f"[LEAK-1] Combined: {len(df_combined)} rows (before={len(df_before)}, after={len(df_after)})", flush=True)
+        return df_combined
 
     def create_shared_memory(self) -> Dict[str, Any]:
         """
