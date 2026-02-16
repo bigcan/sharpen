@@ -427,19 +427,24 @@ class DeepScalperEnv(gym.Env):
                         
                         # Margin-based accounting (symmetric with sell-side)
                         # FIX AUDIT-B: Split flip trades into close + open legs
-                        if self.position < -1e-12 and self.notional_debt > 0:
-                            # Determine how much is closing vs opening
+                        # FIX SPOT-ACCT: Use position-based detection, not debt-based
+                        if self.position < -1e-12:
+                            # Currently short — buying closes (partially or fully)
                             close_qty = min(exec_qty, abs(self.position))
                             open_qty = exec_qty - close_qty  # > 0 if flipping
                             
-                            # Leg 1: Close short — buy back asset, release debt
-                            # FIX SHORT-ACCT: P&L = entry_debt (what we sold for) - buyback_cost
-                            close_frac = min(close_qty / abs(self.position), 1.0)
-                            debt_release = self.notional_debt * close_frac
-                            self.notional_debt -= debt_release
+                            # Leg 1: Close short — buy back asset
                             close_notional = fill_price * close_qty
                             close_fee = close_notional * fee_rate
-                            self.balance += (debt_release - close_notional - close_fee)
+                            if self.notional_debt > 1e-12:
+                                # Leveraged: release proportional debt
+                                close_frac = min(close_qty / abs(self.position), 1.0)
+                                debt_release = self.notional_debt * close_frac
+                                self.notional_debt -= debt_release
+                                self.balance += (debt_release - close_notional - close_fee)
+                            else:
+                                # Spot: deduct buyback cost + fee
+                                self.balance -= (close_notional + close_fee)
                             
                             # Leg 2: Open new long (if flipping)
                             if open_qty > 1e-12:
@@ -449,7 +454,6 @@ class DeepScalperEnv(gym.Env):
                                 borrowed = open_notional * (1.0 - self.margin_requirement)
                                 self.balance -= margin_cost
                                 self.notional_debt += borrowed
-                                # Recalculate total fee for tracking
                                 fee = close_fee + open_fee
                             else:
                                 fee = close_fee
@@ -520,34 +524,38 @@ class DeepScalperEnv(gym.Env):
                         
                         # Margin-based: on sell, release borrowed portion
                         # FIX AUDIT-B: Split flip trades into close + open legs
-                        if self.position > 1e-12 and self.notional_debt > 0:
-                            # Determine how much is closing vs opening
+                        # FIX SPOT-ACCT: Use position-based detection, not debt-based
+                        if self.position > 1e-12:
+                            # Currently long — selling closes (partially or fully)
                             close_qty = min(exec_qty, self.position)
                             open_qty = exec_qty - close_qty  # > 0 if flipping
                             
-                            # Leg 1: Close long — release proportional debt
-                            close_frac = min(close_qty / self.position, 1.0)
-                            debt_release = self.notional_debt * close_frac
-                            self.notional_debt -= debt_release
+                            # Leg 1: Close long — credit sale proceeds
                             close_notional = fill_price * close_qty
                             close_fee = close_notional * fee_rate
                             close_proceeds = close_notional - close_fee
-                            self.balance += (close_proceeds - debt_release)
+                            if self.notional_debt > 1e-12:
+                                # Leveraged: release proportional debt
+                                close_frac = min(close_qty / self.position, 1.0)
+                                debt_release = self.notional_debt * close_frac
+                                self.notional_debt -= debt_release
+                                self.balance += (close_proceeds - debt_release)
+                            else:
+                                # Spot: just credit proceeds
+                                self.balance += close_proceeds
                             
                             # Leg 2: Open new short (if flipping)
-                            # FIX SHORT-ACCT: Only deduct fee, track full notional as buyback obligation
                             if open_qty > 1e-12:
                                 open_notional = fill_price * open_qty
                                 open_fee = open_notional * fee_rate
                                 self.balance -= open_fee
                                 self.notional_debt += open_notional
-                                # Recalculate total fee for tracking
                                 fee = close_fee + open_fee
                             else:
                                 fee = close_fee
                             proceeds = 0  # Handled above per-leg
                         else:
-                            # FIX SHORT-ACCT: Opening/extending short — fee only, full buyback debt
+                            # Opening/extending short — fee only, full buyback debt
                             self.balance -= fee
                             self.notional_debt += notional  # Full buyback obligation
                             proceeds = 0
