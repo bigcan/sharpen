@@ -1,0 +1,94 @@
+# DeepScalper Stabilization Config — PPO Agent (Expert-Recommended Pivot)
+# Purpose: Replace BDQ with PPO after BDQ proven unable to converge.
+# Carries forward: reward scaling (0.001), 20% drawdown kill, augmentation off,
+#                  spiteful broker fees (3x real).
+# New: On-policy PPO with GAE, clip_range shield, entropy exploration.
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-02-28 23:59:59"
+  val_start_date:   "2025-03-01 00:00:00"
+  val_end_date:     "2025-03-15 23:59:59"
+  test_start_date:  "2025-03-16 00:00:00"
+  test_end_date:    "2025-03-31 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0         # Spot (no leverage)
+  maker_fee: 0.0006               # Spiteful broker (3x real fee) — stop churn
+  taker_fee: 0.0012               # Spiteful broker (3x real fee) — stop churn
+  num_envs: 8                     # Stable parallel count (GPUHub safe)
+  window_size: 15
+  max_drawdown_pct: 0.20          # EXPERT FIX: Kill zombie episodes at -20% equity
+  private_state_augment_prob: 0.5
+
+  reward:
+    scaling: 0.001                # EXPERT FIX: Squash reward magnitude ($1000 → 1.0)
+    hindsight_weight: 0.1
+    hindsight_horizon: 60         # EXPERT FIX: Match 1-min LOB reality
+    volatility_horizon: 100
+    sharpe_weight: 0.5            # EXPERT FIX: Penalize wild equity swings
+    hold_bonus_bps: 0.05          # EXPERT FIX: Pay a wage for holding winning trades
+
+  action:
+    price_bins: 5
+    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    max_position: 1.0
+
+  augmentation:
+    enabled: false                # EXPERT FIX: Protect micro-structure signal
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 3
+    hidden_size: 256
+    rnn_type: "LSTM"
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0003          # PPO standard (3x BDQ — stable due to clip)
+    gamma: 0.999                   # Macro vision (~1000 mins)
+    gae_lambda: 0.95               # GAE: smooths variance of advantage estimates
+    clip_eps: 0.2                  # THE SHIELD: Prevents network explosions
+    vf_coef: 0.5                   # Value function loss multiplier
+    ent_coef: 0.01                 # Entropy: forces smooth exploration
+    max_grad_norm: 0.5             # Secondary shield against gradient explosions
+    n_epochs: 10                   # EXPERT: 10 passes over collected data
+    rollout_steps: 2048            # 8 envs × 2048 = 16,384 transitions per rollout
+    batch_size: 512                # Minibatch size for PPO update
+    lr_schedule: "linear"          # Linear decay to 0 over training
+    checkpoint_interval: 50000
+
+training:
+  total_timesteps: 200000          # 200K steps (same budget as BDQ)
+  training_epochs: 1               # PPO uses rollout epochs internally
+  log_interval: 16384              # Log every rollout (8 envs × 2048)
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  use_sync: false                  # Async but without SHM for stability
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 15                     # EXPERT: PPO needs slightly more trials
+  steps_per_trial: 150000          # EXPERT: On-policy needs more steps to converge
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["stabilize", "PPO", "2025-Q1", "expert-pivot", "bdq-replacement"]
