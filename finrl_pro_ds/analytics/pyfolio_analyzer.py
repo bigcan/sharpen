@@ -58,10 +58,12 @@ class PyfolioAnalyzer:
         # Sharpe Ratio (annualized, minute-level)
         sharpe = (mean_r / std_r) * ann_factor if std_r > 1e-9 else 0.0
 
-        # Sortino Ratio (downside deviation only)
-        downside = r[r < 0]
-        downside_std = np.sqrt(np.mean(downside**2)) if len(downside) > 0 else 1e-9
-        sortino = (mean_r / downside_std) * ann_factor if downside_std > 1e-9 else 0.0
+        # Sortino Ratio (lower partial moment — standard definition)
+        # FIX BUG-A1: Use all returns with min(r,0)² — not just negative returns' RMS.
+        # The old formula excluded zero/positive returns from the denominator,
+        # systematically understating it and inflating the Sortino ratio.
+        downside_deviation = np.sqrt(np.mean(np.minimum(r, 0.0)**2))
+        sortino = (mean_r / downside_deviation) * ann_factor if downside_deviation > 1e-9 else 0.0
 
         # Cumulative returns & Max Drawdown
         cum = np.cumprod(1 + r)
@@ -69,8 +71,14 @@ class PyfolioAnalyzer:
         dd = (cum - peak) / peak
         max_dd = float(np.min(dd))
 
-        # Annual Return (compound)
-        annual_ret = float(np.prod(1 + r) ** (525600 / n) - 1) if n > 0 else 0.0
+        # Annual Return (compound, log-space to prevent overflow)
+        # FIX BUG-A2: np.prod(1+r) overflows float64 for 100K+ minute returns.
+        # Log-space: exp(sum(log(1+r)) * ann_periods/n) - 1
+        try:
+            log_cum = np.sum(np.log1p(r))
+            annual_ret = float(np.exp(log_cum * (525600 / n)) - 1) if n > 0 else 0.0
+        except (OverflowError, FloatingPointError):
+            annual_ret = 0.0
 
         # Calmar Ratio (annual return / |max drawdown|)
         calmar = annual_ret / abs(max_dd) if abs(max_dd) > 1e-9 else 0.0
@@ -89,7 +97,9 @@ class PyfolioAnalyzer:
         else:
             stability = 0.0
 
-        # Value at Risk (5th percentile)
+        # Value at Risk (5th percentile of per-minute returns)
+        # FIX BUG-A3: Renamed from "daily" — this is per-minute VaR since
+        # returns are at minute granularity.
         var_5 = float(np.percentile(r, 5))
 
         # Win Rate
@@ -105,7 +115,7 @@ class PyfolioAnalyzer:
             "calmar_ratio": calmar,
             "omega_ratio": omega,
             "stability": stability,
-            "daily_value_at_risk": var_5,
+            "minute_value_at_risk": var_5,
             "win_rate": win_rate,
         }
 
