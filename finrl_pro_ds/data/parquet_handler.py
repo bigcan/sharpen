@@ -100,11 +100,11 @@ class ParquetDataHandler:
                 df = self._process_features(df)
                 self._feature_data = df
 
-            # Fix E: Drop warm-up rows where EMA normalization is unstable.
-            # The EMA-Z pipeline (span=120) needs ~120 rows to produce stable
-            # statistics. Do NOT fillna(0) — that poisons the replay buffer
-            # with 120 minutes of synthetic flatlined data.
-            WARMUP_ROWS = 120
+            # Fix E + Fix #28: Drop warm-up rows where EMA normalization is unstable.
+            # The EMA-Z pipeline (span=120) needs ~200 rows (~1.7 half-lives) to
+            # produce stable statistics. Do NOT fillna(0) — that poisons the replay
+            # buffer with synthetic flatlined data.
+            WARMUP_ROWS = 200
             pre_warmup_len = len(self._feature_data)
             self._feature_data = self._feature_data.iloc[WARMUP_ROWS:].reset_index(drop=True)
             print(f"[WARMUP] Sliced {WARMUP_ROWS} warm-up rows: {pre_warmup_len} → {len(self._feature_data)}", flush=True)
@@ -220,6 +220,12 @@ class ParquetDataHandler:
 
             print(f"Loaded {self._len} rows from {os.path.basename(self.file_path)}")
 
+            # Fix #30: Log effective start date after warm-up slice + date filter
+            if 'timestamp' in self._data_arrays and self._len > 0:
+                eff_start = self._data_arrays['timestamp'][0]
+                eff_end = self._data_arrays['timestamp'][-1]
+                print(f"[DATA] Effective date range: {eff_start} → {eff_end}", flush=True)
+
         except Exception as e:
             raise RuntimeError(f"Failed to load parquet data: {e}")
 
@@ -276,13 +282,20 @@ class ParquetDataHandler:
 
     def _process_features_with_cutoff(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        FIX LEAK-1: Process features with a normalization cutoff.
-        
+        FIX LEAK-1 + Fix #37: Process features with a normalization cutoff.
+
         Splits the DataFrame at norm_cutoff_date, processes each half
-        independently (resetting rolling z-scores and SMAs), then
-        re-concatenates. This ensures zero information leakage from
-        training data into validation/test normalization statistics.
+        independently to prevent information leakage from training into
+        validation/test normalization statistics.
+
+        Fix #37: Instead of cold-starting the "after" half, we carry forward
+        a warm-up buffer (BUFFER_ROWS rows from the end of "before") into
+        the "after" processing. This gives the EMA enough context to converge
+        before genuine "after" data begins. The buffer rows are then stripped
+        from the result so only genuine rows remain.
         """
+        BUFFER_ROWS = 200  # Same as WARMUP_ROWS for EMA convergence
+
         ts = df['timestamp']
         cutoff = self.norm_cutoff_date
 
@@ -294,28 +307,41 @@ class ParquetDataHandler:
         print(f"[LEAK-1] Splitting at {cutoff}: {n_before} rows before, {n_after} rows after", flush=True)
 
         if n_after == 0:
-            # All data is before cutoff — process normally
             print("[LEAK-1] No data after cutoff, processing normally", flush=True)
             return self._process_features(df)
 
         if n_before == 0:
-            # All data is after cutoff — process normally (no leakage possible)
             print("[LEAK-1] No data before cutoff, processing normally", flush=True)
             return self._process_features(df)
 
-        # Split into two independent DataFrames
+        # Split at cutoff
         df_before = df[mask_before].copy().reset_index(drop=True)
-        df_after = df[mask_after].copy().reset_index(drop=True)
+        df_after_raw = df[mask_after].copy().reset_index(drop=True)
 
-        # Process each half independently — this resets rolling statistics
-        # so the "after" half's z-scores start fresh with no lookback into "before"
+        # Process "before" half normally
         df_before = self._process_features(df_before)
-        df_after = self._process_features(df_after)
+
+        # Fix #37: Carry forward a raw warm-up buffer into "after" processing.
+        # Take the last BUFFER_ROWS of RAW (pre-normalization) data from "before"
+        # and prepend it to "after" so the EMA has context to converge.
+        buffer_size = min(BUFFER_ROWS, n_before)
+        raw_buffer = df[mask_before].iloc[-buffer_size:].copy()
+        df_after_with_buffer = pd.concat(
+            [raw_buffer, df_after_raw], ignore_index=True
+        )
+
+        # Process the combined buffer+after data
+        df_after_processed = self._process_features(df_after_with_buffer)
+
+        # Strip the buffer rows — only keep genuine "after" rows
+        df_after_processed = df_after_processed.iloc[buffer_size:].reset_index(drop=True)
 
         # Re-concatenate with original ordering preserved
-        df_combined = pd.concat([df_before, df_after], ignore_index=True)
-        
-        print(f"[LEAK-1] Combined: {len(df_combined)} rows (before={len(df_before)}, after={len(df_after)})", flush=True)
+        df_combined = pd.concat([df_before, df_after_processed], ignore_index=True)
+
+        print(f"[LEAK-1] Combined: {len(df_combined)} rows "
+              f"(before={len(df_before)}, after={len(df_after_processed)}, "
+              f"buffer={buffer_size})", flush=True)
         return df_combined
 
     def create_shared_memory(self) -> Dict[str, Any]:

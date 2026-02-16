@@ -802,6 +802,14 @@ class DeepScalperEnv(gym.Env):
         except Exception as e:
             logging.error(f"Error in _build_frame: {e}")
 
+        # Fix #36: Hard NaN assertion — catch upstream issues before
+        # they silently poison the replay buffer
+        if np.isnan(frame).any():
+            nan_cols = [self._micro_keys[i] for i in np.where(np.isnan(frame))[0]]
+            raise ValueError(
+                f"NaN in _build_frame at step {self._current_step}: {nan_cols}"
+            )
+
         return frame
 
     def _update_macro_state(self, step_data: Any):
