@@ -278,12 +278,11 @@ class PPOTrainer:
                     # Move to device for prediction
                     micro_t, private_t, macro_t = [t.to(self.device) for t in extract_tensors(obs)]
                     
-                    # Unpack 5 values (actions, log_probs, values, entropy, hidden)
-                    _, _, last_values_t, _, _ = self.agent.predict(
+                    # predict() returns 3 numpy arrays: (actions, log_probs, values)
+                    _, _, last_values = self.agent.predict(
                         micro_t, private_t, macro_t,
                         deterministic=True
                     )
-                    last_values = last_values_t.cpu().numpy()
 
                 self.buffer.compute_gae(
                     gamma=self.agent.gamma,
