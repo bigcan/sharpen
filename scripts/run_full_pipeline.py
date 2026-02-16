@@ -466,7 +466,8 @@ def run_training(config, run_name, device, agent_type="bdq"):
         
         # Create environment (pass shm_config explicitly)
         # Also pass use_shm to Gymnasium to disable internal SHM if needed
-        env = create_vector_env(config, num_envs, shm_config=shm_config, gym_shm=use_shm)
+        use_sync = config.get("training", {}).get("use_sync", False)
+        env = create_vector_env(config, num_envs, shm_config=shm_config, gym_shm=use_shm, use_sync=use_sync)
         logger.info(f"Environment ready: {num_envs} workers")
         
         # Train — dispatch based on agent type
