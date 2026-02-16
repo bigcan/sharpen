@@ -98,8 +98,8 @@ class DeepScalperFeatureEngineer:
         ema_mean = s.ewm(span=span, adjust=False).mean().shift(1)
         ema_std = s.ewm(span=span, adjust=False).std().shift(1)
 
-        mu = ema_mean.values
-        sigma = ema_std.values
+        mu = ema_mean.values.copy()
+        sigma = ema_std.values.copy()
 
         # Fill NaN from shift(1) on first row
         mu[0] = 0.0
@@ -109,7 +109,9 @@ class DeepScalperFeatureEngineer:
         sigma = np.where(np.isnan(sigma) | (sigma < 1e-8), 1.0, sigma)
 
         z = (x - mu) / sigma
-        return np.tanh(z).astype(np.float32)
+        # Fix #27: tanh(z*0.5) widens gradient-active range.
+        # Saturation at |z|>4 instead of |z|>2, preserving tail info.
+        return np.tanh(z * 0.5).astype(np.float32)
 
     def _normalize_features(self, df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
         """
@@ -117,7 +119,11 @@ class DeepScalperFeatureEngineer:
           raw → SymLog → EMA-Z(span, shift=1) → tanh
 
         Bounded features (listed in _BOUNDED_FEATURES) are left unchanged.
+        Fix #24: Tracks normalized columns to prevent accidental double-normalization.
         """
+        # Fix #24: Guard against double-normalization
+        normalized = df.attrs.get('_normalized_cols', set())
+
         for col in cols:
             if col not in df.columns:
                 continue
@@ -125,11 +131,15 @@ class DeepScalperFeatureEngineer:
                 # Already bounded — cast to float32 and skip
                 df[col] = df[col].astype(np.float32)
                 continue
+            if col in normalized:
+                continue  # Already normalized — skip
 
             raw = df[col].values.astype(np.float64)
             symlog_vals = self._symlog(raw)
             df[col] = self._ema_zscore_tanh(pd.Series(symlog_vals), self.norm_span)
+            normalized.add(col)
 
+        df.attrs['_normalized_cols'] = normalized
         return df
 
     # ──────────────────────────────────────────────────────────────────────
@@ -247,9 +257,12 @@ class DeepScalperFeatureEngineer:
         slope_ask = ask_vol_sum / ask_depth_safe
 
         slope_sum = slope_bid + slope_ask
-        df['slope_asym'] = np.clip(
-            (slope_ask - slope_bid) / (slope_sum + 1e-8), -1.0, 1.0  # Fix D: epsilon
-        ).astype(np.float32)
+        slope_asym_raw = (slope_ask - slope_bid) / (slope_sum + 1e-8)  # Fix D: epsilon
+        # Fix #4: Neutralize slope_asym when either depth is degenerate
+        # (all 5 levels at same price, e.g. flash crash) to prevent artifacts
+        degenerate_mask = (bid_depth < 1e-9) | (ask_depth < 1e-9)
+        slope_asym_raw[degenerate_mask] = 0.0
+        df['slope_asym'] = np.clip(slope_asym_raw, -1.0, 1.0).astype(np.float32)
 
         # ── 8. Relative Spread (bps) (1 dim) ──
         df['spread_bps'] = ((ap1 - bp1) / mid_safe) * 10000.0
@@ -280,6 +293,13 @@ class DeepScalperFeatureEngineer:
         Returns a NEW DataFrame with MACRO_FEATURE_COLS columns.
         """
         df = ohlcv_df.copy()
+
+        # Fix #29: Forward-fill raw OHLCV to handle mid-sequence gaps BEFORE
+        # normalization, not after. This ensures EMA sees continuous data and
+        # normalization statistics are consistent across gaps.
+        ohlcv_cols = [c for c in ['open', 'high', 'low', 'close', 'volume'] if c in df.columns]
+        if ohlcv_cols:
+            df[ohlcv_cols] = df[ohlcv_cols].ffill()
 
         # Ensure standard columns
         if 'adj_close' not in df.columns:
@@ -337,8 +357,9 @@ class DeepScalperFeatureEngineer:
         delta = np.diff(cl, prepend=cl[0])
         gain = np.where(delta > 0, delta, 0.0)
         loss = np.where(delta < 0, -delta, 0.0)
-        avg_gain = pd.Series(gain).ewm(span=14, adjust=False).mean().values
-        avg_loss = pd.Series(loss).ewm(span=14, adjust=False).mean().values
+        # Fix #5: Wilder's smoothing uses α=1/14, equivalent to pandas span=27
+        avg_gain = pd.Series(gain).ewm(span=27, adjust=False).mean().values
+        avg_loss = pd.Series(loss).ewm(span=27, adjust=False).mean().values
         rs = avg_gain / (avg_loss + 1e-8)  # Fix D: epsilon
         rsi_raw = 1.0 - 1.0 / (1.0 + rs)  # [0, 1]
         # Fix B: Center to [-1, 1] for DQN gradient flow
@@ -387,11 +408,10 @@ class DeepScalperFeatureEngineer:
         # ── NORMALIZE unbounded macro features ──
         self._normalize_features(df, MACRO_FEATURE_COLS)
 
-        # Fix E: Let NaNs flow through — warm-up rows are sliced off
-        # downstream in parquet_handler. Do NOT fillna(0) as it poisons
-        # early replay buffer with synthetic flatlined data.
-        # Only forward-fill for mid-sequence gaps (e.g., missing candles).
-        df[MACRO_FEATURE_COLS] = df[MACRO_FEATURE_COLS].ffill()
+        # Fix E + Fix #29: NaN warm-up rows are sliced off downstream.
+        # Raw OHLCV is ffill'd at the top of process_macro() (Fix #29),
+        # so mid-sequence gaps are handled before normalization.
+        # No post-normalization ffill needed — it would create discontinuities.
 
         result = df[MACRO_FEATURE_COLS].copy()
 
