@@ -820,10 +820,24 @@ def main():
     parser.add_argument("--version", type=str, default="V1", help="Version tag")
     args = parser.parse_args()
     
-    agent_type = args.agent
-    logger.info(f"Agent type: {agent_type}")
-
     base_config = load_config(args.config)
+    
+    # Auto-detect agent type from config if --agent was not explicitly provided.
+    # This prevents KeyError when deploying with e.g. deepscalper_ppo_dev.yaml
+    # but forgetting to pass --agent ppo on the command line.
+    agent_type = args.agent
+    if agent_type == "bdq":  # default value — check if config says otherwise
+        agents_section = base_config.get("agents", {})
+        if "ppo" in agents_section and "bdq" not in agents_section:
+            agent_type = "ppo"
+            logger.info(f"Agent type auto-detected from config: {agent_type}")
+        elif "earnhft" in agents_section and "bdq" not in agents_section:
+            agent_type = "earnhft"
+            logger.info(f"Agent type auto-detected from config: {agent_type}")
+        else:
+            logger.info(f"Agent type: {agent_type}")
+    else:
+        logger.info(f"Agent type (explicit): {agent_type}")
     
     # =========================================================================
     # 0. Setup Run Name & WandB
