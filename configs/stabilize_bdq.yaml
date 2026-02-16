@@ -1,7 +1,7 @@
 
-# DeepScalper Stabilization Config — BDQ Agent
-# Purpose: Verify fixes for "Negative Equity" and "Random Backtest" bugs.
-# Focus: Stable training without instant drawdown stops.
+# DeepScalper Stabilization Config — BDQ Agent (Expert-Tuned v2)
+# Purpose: Apply expert's 5-point fix for convergence.
+# Fixes: Reward scaling, target network, exploration alignment, drawdown, augmentation.
 
 data:
   file_path: "data/processed/btc_2025_jan_jun.parquet"
@@ -22,20 +22,20 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   margin_requirement: 1.0    # Spot (no leverage)
-  maker_fee: 0.0002          # 2 bps (Binance VIP1)
-  taker_fee: 0.0004          # 4 bps (Binance VIP1)
-  num_envs: 8                # Parallel environment (Safer limit)
+  maker_fee: 0.0006          # FIX #2: Spiteful broker (3x real fee) — stop churn
+  taker_fee: 0.0012          # FIX #2: Spiteful broker (3x real fee) — stop churn
+  num_envs: 8                # Parallel environments
   window_size: 15
-  max_drawdown_pct: 1.0      # Disabled for training (check only at 100% loss)
-  private_state_augment_prob: 0.5 # Reduced from 1.0 to allow 50% natural starts
+  max_drawdown_pct: 0.20     # FIX #4: Kill zombie episodes at -20% equity
+  private_state_augment_prob: 0.5
 
   reward:
-    scaling: 1.0
+    scaling: 0.001           # FIX #2: Squash Q-value explosions ($1000 → 1.0)
     hindsight_weight: 0.1
-    hindsight_horizon: 180
+    hindsight_horizon: 60    # FIX: Reduced from 180 to match 1-min LOB reality
     volatility_horizon: 100
-    sharpe_weight: 0.0
-    hold_bonus_bps: 0.0
+    sharpe_weight: 0.5       # FIX: Penalize wild equity swings
+    hold_bonus_bps: 0.05     # FIX: Pay a wage for holding winning trades
 
   action:
     price_bins: 5
@@ -43,12 +43,7 @@ env:
     max_position: 1.0
 
   augmentation:
-    enabled: true
-    volatility_scale_range: [0.7, 1.5]
-    spread_scale_range: [0.9, 1.2]
-    volume_noise_std: 0.1
-    macro_noise_std: 0.05
-    ofi_scale_range: [0.9, 1.1]
+    enabled: false           # FIX #5: Protect micro-structure signal until overfitting
 
 network:
   micro_config:
@@ -64,21 +59,21 @@ network:
 agents:
   bdq:
     learning_rate: 0.0001
-    gamma: 0.99
+    gamma: 0.999             # FIX: ~1000 min macro vision (was 0.99)
     auxiliary_weight: 0.1
-    update_interval: 0.25
+    update_interval: 1.0     # FIX #3: Was 0.25 (4 updates/step) — too aggressive
     batch_size: 1024
     buffer_size: 2000000
-    target_update_freq: 7500
-    tau: 0.005
+    target_update_freq: 1    # FIX #3: Soft update every step (required for tau)
+    tau: 0.005               # FIX #3: Polyak averaging — blend 0.5% per step
     checkpoint_interval: 50000
     learning_starts: 5000
-    exploration_fraction: 0.5
+    exploration_fraction: 0.15  # FIX #1: Finish exploring by step ~30K (was 0.5)
     epsilon_start: 1.0
-    epsilon_end: 0.005
-    epsilon_decay: 0.999908
+    epsilon_end: 0.01        # FIX #1: Leave 1% noise (was 0.005)
+    epsilon_decay: 0.9995    # FIX #1: Faster decay to match 0.15 fraction
     exploration_mode: "epsilon_greedy"
-    target_q_clip: 5000.0
+    target_q_clip: 15.0      # FIX #2: Hard ceiling (was 5000.0)
     use_per: true
     per_alpha: 0.6
     per_beta_start: 0.4
@@ -91,16 +86,16 @@ training:
   torch_compile: true
   use_amp: true
   use_shm: false
-  use_sync: false            # Keep Async but without SHM for stability
+  use_sync: false
   verbose_logging: true
 
 hpo:
   enabled: true
   n_trials: 10
-  steps_per_trial: 50000
+  steps_per_trial: 60000     # FIX #1: 30K exploitation steps to judge (was 50000)
 
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   mode: "online"
-  tags: ["stabilize", "BDQ", "2025-Q1", "v2-pipeline-fixed", "post-fix"]
+  tags: ["stabilize", "BDQ", "2025-Q1", "expert-tuned-v2", "5-fix"]
