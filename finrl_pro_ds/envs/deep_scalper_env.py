@@ -260,11 +260,17 @@ class DeepScalperEnv(gym.Env):
                     # FIX SHORT-ACCT: Initialize notional_debt for leveraged positions
                     # Long: debt = borrowed cash (partial notional)
                     # Short: debt = full buyback obligation (full notional)
-                    if self.margin_requirement < 1.0 and abs(self.position) > 1e-12:
+                    # FIX SHORT-ACCT: Initialize notional_debt for leveraged positions
+                    # Long: debt = borrowed cash (partial notional)
+                    # Short: debt = full buyback obligation (full notional/proceeds)
+                    if abs(self.position) > 1e-12:
                         if self.position > 0:
-                            self.notional_debt = value * (1.0 - self.margin_requirement)
+                            # Long: Only have debt if using leverage
+                            if self.margin_requirement < 1.0:
+                                self.notional_debt = value * (1.0 - self.margin_requirement)
                         else:
-                            # Short: track full notional as buyback obligation
+                            # Short: Always track full notional as buyback obligation (proceeds)
+                            # This was previously blocked by the `margin < 1.0` check
                             self.notional_debt = value
                     
                     # Re-normalize/fill private window with NEW state

@@ -565,7 +565,13 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
     
     env = None
     try:
-        env = make_env(config, start_date=start_date, end_date=end_date, norm_cutoff_date=norm_cutoff_date)
+        # Fix Issue #1: Disable Private State Augmentation during backtest
+        # We need deterministic starting states (Initial Balance, Pos=0), not random ones.
+        backtest_config = copy.deepcopy(config)
+        if "env" not in backtest_config: backtest_config["env"] = {}
+        backtest_config["env"]["private_state_augment_prob"] = 0.0
+        
+        env = make_env(backtest_config, start_date=start_date, end_date=end_date, norm_cutoff_date=norm_cutoff_date)
         
         # Create agent
         sample_obs, _ = env.reset()
