@@ -1,0 +1,99 @@
+# A/B Test Configuration — PPO Agent
+# Purpose: Fair comparison vs BDQ on 2025 data
+# Data: Q1 2025 (Jan-Mar) — 3 months
+# Budget: ~2 hours on single V100/A100
+#
+# Matches ab_test_bdq.yaml in: data, features, env, network, training budget
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-02-28 23:59:59"
+  val_start_date:   "2025-03-01 00:00:00"
+  val_end_date:     "2025-03-15 23:59:59"
+  test_start_date:  "2025-03-16 00:00:00"
+  test_end_date:    "2025-03-31 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0    # Spot (no leverage)
+  maker_fee: 0.0002          # 2 bps (Binance VIP1)
+  taker_fee: 0.0004          # 4 bps (Binance VIP1)
+  num_envs: 8                # Balanced: parallel but leaves headroom for 2nd agent
+  window_size: 15
+  max_drawdown_pct: 1.0      # Disabled for training
+  private_state_augment_prob: 1.0
+
+  reward:
+    scaling: 1.0
+    hindsight_weight: 0.1
+    hindsight_horizon: 180
+    volatility_horizon: 100
+    sharpe_weight: 0.0
+    hold_bonus_bps: 0.0
+
+  action:
+    price_bins: 5
+    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    max_position: 1.0
+
+  augmentation:
+    enabled: true
+    volatility_scale_range: [0.7, 1.5]
+    spread_scale_range: [0.9, 1.2]
+    volume_noise_std: 0.1
+    macro_noise_std: 0.05
+    ofi_scale_range: [0.9, 1.1]
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 3
+    hidden_size: 256
+    rnn_type: "LSTM"
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_eps: 0.2
+    vf_coef: 0.5
+    ent_coef: 0.01
+    max_grad_norm: 0.5
+    n_epochs: 4
+    rollout_steps: 2048
+    batch_size: 256
+    lr_schedule: "linear"
+    checkpoint_interval: 50000
+
+training:
+  total_timesteps: 200000      # 200K — matched to BDQ for fair comparison
+  training_epochs: 3           # 3 epochs over the data
+  log_interval: 10240          # Every 5 PPO rollouts
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: false               # HPO not yet implemented for PPO
+  n_trials: 10
+  steps_per_trial: 50000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["AB-test", "PPO", "2025-Q1", "v2-pipeline"]
