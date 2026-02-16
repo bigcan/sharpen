@@ -92,10 +92,10 @@ class PPOTrainer:
         )
 
         # Rollout buffer
-        window_size = config.get("env", {}).get("window_size", 50)
-        micro_input = net_cfg.get("micro_config", {}).get("input_size", 27)
+        window_size = config.get("env", {}).get("window_size", 15)
+        micro_input = net_cfg.get("micro_config", {}).get("input_size", 30)
         private_input = net_cfg.get("micro_config", {}).get("private_input_size", 3)
-        macro_input = net_cfg.get("macro_config", {}).get("input_size", 11)
+        macro_input = net_cfg.get("macro_config", {}).get("input_size", 15)
         num_envs = getattr(env, "num_envs", 1)
 
         self.buffer = RolloutBuffer(
@@ -139,9 +139,10 @@ class PPOTrainer:
 
         # Shape assertions
         B = num_envs
-        W = self.config.get("env", {}).get("window_size", 50)
-        assert obs["micro"].shape == (B, W, 27), \
-            f"obs['micro'] shape mismatch: expected ({B}, {W}, 27), got {obs['micro'].shape}"
+        W = self.config.get("env", {}).get("window_size", 15)
+        _micro_dim = net_cfg.get("micro_config", {}).get("input_size", 30)
+        assert obs["micro"].shape == (B, W, _micro_dim), \
+            f"obs['micro'] shape mismatch: expected ({B}, {W}, {_micro_dim}), got {obs['micro'].shape}"
         assert obs["private"].shape == (B, W, 3), \
             f"obs['private'] shape mismatch: expected ({B}, {W}, 3), got {obs['private'].shape}"
         print(f"✓ Observation shapes verified: micro={obs['micro'].shape}, "

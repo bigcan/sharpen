@@ -27,13 +27,13 @@ torch = pytest.importorskip("torch")
 def network_config():
     return {
         "micro_config": {
-            "input_size": 27,
+            "input_size": 30,
             "private_input_size": 3,
             "hidden_size": 64,    # Small for tests
             "rnn_type": "LSTM",
         },
         "macro_config": {
-            "input_size": 11,
+            "input_size": 15,
             "hidden_sizes": [64, 32],
         },
         "fusion_dim": 64,
@@ -44,10 +44,10 @@ def network_config():
 @pytest.fixture
 def batch_data(network_config):
     """Create batch of observations."""
-    B, W = 4, 50
-    micro = torch.randn(B, W, 27)
+    B, W = 4, 15
+    micro = torch.randn(B, W, 30)
     private = torch.randn(B, W, 3)
-    macro = torch.randn(B, 11)
+    macro = torch.randn(B, 15)
     return micro, private, macro
 
 
@@ -147,15 +147,15 @@ class TestRolloutBuffer:
         T, B = 8, 2
         buf = RolloutBuffer(
             rollout_steps=T, num_envs=B,
-            micro_shape=(50, 27), private_shape=(50, 3),
-            macro_shape=(11,), n_action_branches=2,
+            micro_shape=(15, 30), private_shape=(15, 3),
+            macro_shape=(15,), n_action_branches=2,
         )
         
         for t in range(T):
             obs = {
-                "micro": np.random.randn(B, 50, 27).astype(np.float32),
-                "private": np.random.randn(B, 50, 3).astype(np.float32),
-                "macro": np.random.randn(B, 11).astype(np.float32),
+                "micro": np.random.randn(B, 15, 30).astype(np.float32),
+                "private": np.random.randn(B, 15, 3).astype(np.float32),
+                "macro": np.random.randn(B, 15).astype(np.float32),
             }
             buf.store(
                 obs=obs,
@@ -184,14 +184,14 @@ class TestRolloutBuffer:
         T, B = 16, 2
         buf = RolloutBuffer(
             rollout_steps=T, num_envs=B,
-            micro_shape=(50, 27), private_shape=(50, 3), macro_shape=(11,),
+            micro_shape=(15, 30), private_shape=(15, 3), macro_shape=(15,),
         )
         
         for t in range(T):
             obs = {
-                "micro": np.zeros((B, 50, 27), dtype=np.float32),
-                "private": np.zeros((B, 50, 3), dtype=np.float32),
-                "macro": np.zeros((B, 11), dtype=np.float32),
+                "micro": np.zeros((B, 15, 30), dtype=np.float32),
+                "private": np.zeros((B, 15, 3), dtype=np.float32),
+                "macro": np.zeros((B, 15), dtype=np.float32),
             }
             buf.store(obs=obs, actions=np.zeros((B, 2), dtype=np.int64),
                       log_probs=np.zeros(B, dtype=np.float32),
@@ -205,7 +205,7 @@ class TestRolloutBuffer:
         total_samples = 0
         for batch in buf.iterate_minibatches(batch_size):
             assert batch["micro"].shape[0] <= batch_size
-            assert batch["micro"].shape[1:] == (50, 27)
+            assert batch["micro"].shape[1:] == (15, 27)
             assert batch["actions"].shape[1] == 2
             total_samples += batch["micro"].shape[0]
         
@@ -215,12 +215,12 @@ class TestRolloutBuffer:
         """Test buffer reset."""
         from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
         
-        buf = RolloutBuffer(4, 1, (50, 27), (50, 3), (11,))
+        buf = RolloutBuffer(4, 1, (15, 27), (15, 3), (11,))
         
         for t in range(4):
             obs = {
-                "micro": np.zeros((1, 50, 27), dtype=np.float32),
-                "private": np.zeros((1, 50, 3), dtype=np.float32),
+                "micro": np.zeros((1, 15, 27), dtype=np.float32),
+                "private": np.zeros((1, 15, 3), dtype=np.float32),
                 "macro": np.zeros((1, 11), dtype=np.float32),
             }
             buf.store(obs=obs, actions=np.zeros((1, 2), dtype=np.int64),
@@ -249,10 +249,10 @@ class TestPPOAgent:
             lr=3e-4, device="cpu",
         )
         
-        B, W = 2, 50
-        micro = torch.randn(B, W, 27)
+        B, W = 2, 15
+        micro = torch.randn(B, W, 30)
         private = torch.randn(B, W, 3)
-        macro = torch.randn(B, 11)
+        macro = torch.randn(B, 15)
         
         actions, log_probs, values = agent.predict(micro, private, macro)
         
@@ -277,8 +277,8 @@ class TestPPOAgent:
         assert agent._hidden_state is None
         
         # Predict to create hidden state
-        micro = torch.randn(1, 50, 27)
-        private = torch.randn(1, 50, 3)
+        micro = torch.randn(1, 15, 27)
+        private = torch.randn(1, 15, 3)
         macro = torch.randn(1, 11)
         agent.predict(micro, private, macro)
         assert agent._hidden_state is not None

@@ -18,9 +18,9 @@ class RolloutBuffer:
     Args:
         rollout_steps: Number of steps per rollout (T)
         num_envs: Number of parallel environments (B) 
-        micro_shape: Shape of micro observation per env, e.g. (50, 27)
-        private_shape: Shape of private state per env, e.g. (50, 3)
-        macro_shape: Shape of macro observation per env, e.g. (11,)
+        micro_shape: Shape of micro observation per env, e.g. (15, 30)
+        private_shape: Shape of private state per env, e.g. (15, 3)
+        macro_shape: Shape of macro observation per env, e.g. (15,)
         n_action_branches: Number of action branches (2 for price+qty)
     """
 
@@ -28,9 +28,9 @@ class RolloutBuffer:
         self,
         rollout_steps: int,
         num_envs: int,
-        micro_shape: Tuple[int, ...] = (50, 27),
-        private_shape: Tuple[int, ...] = (50, 3),
-        macro_shape: Tuple[int, ...] = (11,),
+        micro_shape: Tuple[int, ...] = (15, 30),
+        private_shape: Tuple[int, ...] = (15, 3),
+        macro_shape: Tuple[int, ...] = (15,),
         n_action_branches: int = 2,
         n_qty_actions: int = 9,
     ):

@@ -12,7 +12,7 @@ class MicroEncoder(nn.Module):
     """
     def __init__(
         self, 
-        input_size: int = 27, # 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret)
+        input_size: int = 30, # v2: 30 evidence-ranked LOB features
         private_input_size: int = 3, # Position + Balance + RemainingTime (Paper Section 3.1)
         hidden_size: int = 128,
         num_layers: int = 1,
@@ -37,7 +37,7 @@ class MicroEncoder(nn.Module):
         # Sprint 7 DIV-1 FIX: LSTM processes only market data (no private state)
         # Private state is injected at the fusion layer in DeepScalperNetwork
         self.micro_rnn = rnn_cls(
-            input_size=input_size,  # 27 LOB features only
+            input_size=input_size,  # v2: 30 micro features
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,

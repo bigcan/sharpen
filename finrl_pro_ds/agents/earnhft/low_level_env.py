@@ -45,7 +45,7 @@ class EarnHFTLowLevelEnv(gym.Env):
         max_holding: float = 1.0,
         beta: float = 1.0,
         commission_fee: float = 0.000175,
-        window_size: int = 50,
+        window_size: int = 15,
         micro_feature_cols: Optional[list] = None,
         macro_features: Optional[np.ndarray] = None,
     ):

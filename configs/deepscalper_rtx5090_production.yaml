@@ -27,7 +27,7 @@ env:
   maker_fee: 0.0002  # 2 bps (Binance VIP1 / maker rebate tier)
   taker_fee: 0.0004  # 4 bps (Binance VIP1)
   num_envs: 12            # BrokenPipeError was from env.close() (now fixed), not env count
-  window_size: 50
+  window_size: 15  # Expert D1: reduced from 50 to prevent stale noise
   max_drawdown_pct: 1.0   # Disabled for training — was killing episodes during exploration
   private_state_augment_prob: 1.0  # Paper: always augment private state (Fix 5)
   
@@ -64,13 +64,13 @@ env:
 network:
   # V9.5 Blackwell Architecture
   micro_config:
-    input_size: 27
+    input_size: 30  # v2: evidence-ranked LOB features
     private_input_size: 3  # FIX CRIT-1: Position + Balance + RemainingTime
     hidden_size: 256
     rnn_type: "LSTM"
     
   macro_config:
-    input_size: 11
+    input_size: 15  # v2: macro features with vol/CVD/RSI/session
     hidden_sizes: [256, 128] # Resised for 350MB Data (Avoids Overfitting) 
 
 agents:

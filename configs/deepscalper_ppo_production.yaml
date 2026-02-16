@@ -25,7 +25,7 @@ env:
   maker_fee: 0.0002  # 2 bps
   taker_fee: 0.0004  # 4 bps
   num_envs: 12
-  window_size: 50
+  window_size: 15  # Expert D1: reduced from 50 to prevent stale noise
   max_drawdown_pct: 1.0  # Disabled for training
   private_state_augment_prob: 1.0
 
@@ -52,13 +52,13 @@ env:
 
 network:
   micro_config:
-    input_size: 27
+    input_size: 30  # v2: evidence-ranked LOB features
     private_input_size: 3
     hidden_size: 256
     rnn_type: "LSTM"
 
   macro_config:
-    input_size: 11
+    input_size: 15  # v2: macro features with vol/CVD/RSI/session
     hidden_sizes: [256, 128]
 
 agents:
