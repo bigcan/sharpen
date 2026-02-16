@@ -25,6 +25,15 @@ from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
 from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
 
 
+def extract_tensors(obs):
+    """Helper to convert obs dict to tensors (CPU)."""
+    return (
+        torch.as_tensor(obs["micro"], dtype=torch.float32),
+        torch.as_tensor(obs["private"], dtype=torch.float32),
+        torch.as_tensor(obs["macro"], dtype=torch.float32),
+    )
+
+
 class PPOTrainer:
     """
     On-policy trainer for PPO agent.
@@ -88,6 +97,8 @@ class PPOTrainer:
             lr_schedule=ppo_cfg.get("lr_schedule", "linear"),
             total_timesteps=self.total_timesteps * self.training_epochs,
             use_amp=config["training"].get("use_amp", False),
+            clip_value_loss=ppo_cfg.get("clip_value_loss", True),  # AUDIT FIX FLAG-3
+            target_kl=ppo_cfg.get("target_kl", None),              # AUDIT FIX FLAG-4
             device=device,
         )
 
@@ -134,8 +145,16 @@ class PPOTrainer:
         # Init state
         if skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
             obs = self._current_obs
+            # AUDIT FIX: Restore mask too
+            if hasattr(self, '_current_qty_mask'):
+                qty_mask = self._current_qty_mask
         else:
-            obs, _ = self.env.reset()
+            obs, reset_info = self.env.reset()
+            # AUDIT FIX FLAG-2: Robust extraction (dict or list of dicts)
+            if isinstance(reset_info, dict) and "qty_action_mask" in reset_info:
+                qty_mask = reset_info["qty_action_mask"]
+            elif isinstance(reset_info, list) and len(reset_info) > 0 and "qty_action_mask" in reset_info[0]:
+                qty_mask = np.stack([info_i["qty_action_mask"] for info_i in reset_info])
 
         # Shape assertions
         B = num_envs
@@ -149,6 +168,7 @@ class PPOTrainer:
               f"private={obs['private'].shape}, macro={obs['macro'].shape}")
 
         global_step = start_step
+        start_time = time.time()  # AUDIT FIX: Define start_time for SPS metrics
         episode_rewards = deque(maxlen=100)
         episode_lens = deque(maxlen=100)
         curr_rewards = np.zeros(num_envs)
@@ -164,6 +184,8 @@ class PPOTrainer:
                 torch.as_tensor(o["macro"], dtype=torch.float32).to(device),
             )
 
+        # AUDIT FIX FLAG-2: Extract qty_mask from env.reset() info so masking
+        # is active from the very first prediction (prevents position-limit violations).
         qty_mask = None
 
         for epoch in range(self.training_epochs):
@@ -172,8 +194,13 @@ class PPOTrainer:
             if epoch == 0 and skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
                 obs = self._current_obs
             else:
-                obs, _ = self.env.reset()
+                obs, reset_info = self.env.reset()
                 self.agent.reset_hidden_state()
+                # AUDIT FIX FLAG-2: Robust extraction (dict or list of dicts)
+                if isinstance(reset_info, dict) and "qty_action_mask" in reset_info:
+                    qty_mask = reset_info["qty_action_mask"]
+                elif isinstance(reset_info, list) and len(reset_info) > 0 and "qty_action_mask" in reset_info[0]:
+                    qty_mask = np.stack([info_i["qty_action_mask"] for info_i in reset_info])
 
             epoch_step = 0
 
@@ -248,11 +275,15 @@ class PPOTrainer:
                 # ============================================================
                 # Bootstrap value for the last step
                 with torch.no_grad():
-                    micro_t, private_t, macro_t = extract_tensors(obs)
-                    _, _, last_values = self.agent.predict(
+                    # Move to device for prediction
+                    micro_t, private_t, macro_t = [t.to(self.device) for t in extract_tensors(obs)]
+                    
+                    # Unpack 5 values (actions, log_probs, values, entropy, hidden)
+                    _, _, last_values_t, _, _ = self.agent.predict(
                         micro_t, private_t, macro_t,
-                        deterministic=True, qty_mask=qty_mask
+                        deterministic=True
                     )
+                    last_values = last_values_t.cpu().numpy()
 
                 self.buffer.compute_gae(
                     gamma=self.agent.gamma,
@@ -264,8 +295,9 @@ class PPOTrainer:
                 # ============================================================
                 # PPO UPDATE
                 # ============================================================
-                metrics = self.agent.train_step(self.buffer)
+                # AUDIT FIX: Update step_count BEFORE train_step so scheduler uses current progress
                 self.agent.step_count = global_step
+                metrics = self.agent.train_step(self.buffer)
 
                 # ============================================================
                 # LOGGING
@@ -306,6 +338,7 @@ class PPOTrainer:
 
         # Store obs for resume
         self._current_obs = obs
+        self._current_qty_mask = qty_mask
 
         # Final save
         self.save_checkpoint("checkpoint_final.pth")

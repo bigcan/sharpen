@@ -43,6 +43,8 @@ class PPOAgent:
         lr_schedule: str = "linear",
         total_timesteps: int = 1_000_000,
         use_amp: bool = False,
+        clip_value_loss: bool = True,
+        target_kl: Optional[float] = None,
         device: str = "cpu",
     ):
         self.device = torch.device(device)
@@ -59,6 +61,8 @@ class PPOAgent:
         self.lr_schedule = lr_schedule
         self.total_timesteps = total_timesteps
         self.use_amp = use_amp
+        self.clip_value_loss = clip_value_loss  # AUDIT FIX FLAG-3: Toggleable value clipping
+        self.target_kl = target_kl  # AUDIT FIX FLAG-4: KL early-stopping threshold
         self.lr = lr
 
         # Step counter for LR schedule
@@ -75,11 +79,18 @@ class PPOAgent:
         # AMP
         self.scaler = torch.amp.GradScaler(device=str(self.device), enabled=self.use_amp)
 
-        # LR scheduler (linear decay)
+        # LR scheduler (linear decay based on global environment steps)
+        # AUDIT FIX CRIT-1: Use global_step (env steps) for decay, not scheduler step count.
+        # The scheduler.step() is called once per rollout (~12 times), but we want
+        # linear decay over total_timesteps. We use LambdaLR with a closure over
+        # self.step_count which is set to global_step after each train_step().
+        self._total_timesteps_for_lr = max(total_timesteps, 1)
         if lr_schedule == "linear":
             self._lr_scheduler = optim.lr_scheduler.LambdaLR(
                 self.optimizer,
-                lr_lambda=lambda step: max(1.0 - step / max(total_timesteps, 1), 0.0)
+                lr_lambda=lambda _step: max(
+                    1.0 - self.step_count / self._total_timesteps_for_lr, 0.0
+                )
             )
         else:
             self._lr_scheduler = None
@@ -167,6 +178,7 @@ class PPOAgent:
         n_updates = 0
 
         for epoch in range(self.n_epochs):
+            epoch_kl_exceeded = False
             for batch in rollout_buffer.iterate_minibatches(self.batch_size):
                 # Convert to torch
                 micro = torch.as_tensor(batch["micro"], dtype=torch.float32, device=self.device)
@@ -192,13 +204,16 @@ class PPOAgent:
                     surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * advantages
                     policy_loss = -torch.min(surr1, surr2).mean()
 
-                    # Value loss (clipped)
-                    values_clipped = old_values + torch.clamp(
-                        new_values - old_values, -self.clip_eps, self.clip_eps
-                    )
-                    value_loss_unclipped = (new_values - returns) ** 2
-                    value_loss_clipped = (values_clipped - returns) ** 2
-                    value_loss = 0.5 * torch.max(value_loss_unclipped, value_loss_clipped).mean()
+                    # Value loss — AUDIT FIX FLAG-3: Toggleable value clipping
+                    if self.clip_value_loss:
+                        values_clipped = old_values + torch.clamp(
+                            new_values - old_values, -self.clip_eps, self.clip_eps
+                        )
+                        value_loss_unclipped = (new_values - returns) ** 2
+                        value_loss_clipped = (values_clipped - returns) ** 2
+                        value_loss = 0.5 * torch.max(value_loss_unclipped, value_loss_clipped).mean()
+                    else:
+                        value_loss = 0.5 * ((new_values - returns) ** 2).mean()
 
                     # Entropy loss (negative because we want to maximize entropy)
                     entropy_loss = -entropy.mean()
@@ -232,6 +247,16 @@ class PPOAgent:
                 total_clip_fraction += clip_fraction
                 n_updates += 1
 
+                # AUDIT FIX FLAG-4: KL early-stopping — break epoch if policy diverges too far
+                if self.target_kl is not None and approx_kl > self.target_kl:
+                    epoch_kl_exceeded = True
+                    break
+            if epoch_kl_exceeded:
+                break
+
+        # Capture LR used for THIS update
+        current_lr = self.optimizer.param_groups[0]["lr"]
+
         # LR schedule step (per rollout, not per minibatch)
         if self._lr_scheduler is not None:
             self._lr_scheduler.step()
@@ -245,7 +270,7 @@ class PPOAgent:
             "entropy": -total_entropy_loss / n,  # Positive entropy
             "approx_kl": total_approx_kl / n,
             "clip_fraction": total_clip_fraction / n,
-            "learning_rate": self.optimizer.param_groups[0]["lr"],
+            "learning_rate": current_lr,
         }
 
         return metrics

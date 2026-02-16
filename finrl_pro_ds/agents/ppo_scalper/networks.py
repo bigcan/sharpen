@@ -196,6 +196,11 @@ class PPOActorCritic(nn.Module):
             log_probs: (B,) float
             values: (B,) float
             entropy: (B,) float
+        
+        Note (AUDIT CRIT-3): hidden=None means the LSTM processes each minibatch
+        as a fresh sequence during PPO training (no cross-step memory). This is
+        standard for non-recurrent PPO — the 15-step window provides sufficient
+        temporal context. True recurrent PPO would require sequence-chunked training.
         """
         # Encode
         h_micro, _ = self.micro_encoder(micro_in, hidden)
