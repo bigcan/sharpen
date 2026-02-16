@@ -205,7 +205,7 @@ class TestRolloutBuffer:
         total_samples = 0
         for batch in buf.iterate_minibatches(batch_size):
             assert batch["micro"].shape[0] <= batch_size
-            assert batch["micro"].shape[1:] == (15, 27)
+            assert batch["micro"].shape[1:] == (15, 30)
             assert batch["actions"].shape[1] == 2
             total_samples += batch["micro"].shape[0]
         
@@ -215,13 +215,13 @@ class TestRolloutBuffer:
         """Test buffer reset."""
         from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
         
-        buf = RolloutBuffer(4, 1, (15, 27), (15, 3), (11,))
+        buf = RolloutBuffer(4, 1, (15, 30), (15, 3), (15,))
         
         for t in range(4):
             obs = {
-                "micro": np.zeros((1, 15, 27), dtype=np.float32),
+                "micro": np.zeros((1, 15, 30), dtype=np.float32),
                 "private": np.zeros((1, 15, 3), dtype=np.float32),
-                "macro": np.zeros((1, 11), dtype=np.float32),
+                "macro": np.zeros((1, 15), dtype=np.float32),
             }
             buf.store(obs=obs, actions=np.zeros((1, 2), dtype=np.int64),
                       log_probs=np.zeros(1, dtype=np.float32),
@@ -277,9 +277,9 @@ class TestPPOAgent:
         assert agent._hidden_state is None
         
         # Predict to create hidden state
-        micro = torch.randn(1, 15, 27)
+        micro = torch.randn(1, 15, 30)
         private = torch.randn(1, 15, 3)
-        macro = torch.randn(1, 11)
+        macro = torch.randn(1, 15)
         agent.predict(micro, private, macro)
         assert agent._hidden_state is not None
         

@@ -28,7 +28,7 @@ env:
   num_envs: 8                     # Stable parallel count (GPUHub safe)
   window_size: 15
   max_drawdown_pct: 0.20          # EXPERT FIX: Kill zombie episodes at -20% equity
-  private_state_augment_prob: 0.5
+  private_state_augment_prob: 0.0   # AUDIT FIX FLAG-5: Disabled for PPO (on-policy ≠ replay buffer diversity)
 
   reward:
     scaling: 0.001                # EXPERT FIX: Squash reward magnitude ($1000 → 1.0)
@@ -71,6 +71,8 @@ agents:
     batch_size: 512                # Minibatch size for PPO update
     lr_schedule: "linear"          # Linear decay to 0 over training
     checkpoint_interval: 50000
+    target_kl: 0.03                 # AUDIT FIX FLAG-4: Stop epochs early if KL diverges (protects n_epochs=10)
+    clip_value_loss: true            # AUDIT FIX FLAG-3: Toggleable (set false to try unclipped V-loss)
 
 training:
   total_timesteps: 200000          # 200K steps (same budget as BDQ)
