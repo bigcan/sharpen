@@ -24,7 +24,7 @@ env:
   margin_requirement: 1.0    # Spot (no leverage)
   maker_fee: 0.0002          # 2 bps (Binance VIP1)
   taker_fee: 0.0004          # 4 bps (Binance VIP1)
-  num_envs: 12               # Parallel environment (GPUHub safe limit ≤20)
+  num_envs: 8                # Parallel environment (Safer limit)
   window_size: 15
   max_drawdown_pct: 1.0      # Disabled for training (check only at 100% loss)
   private_state_augment_prob: 0.5 # Reduced from 1.0 to allow 50% natural starts
@@ -90,7 +90,8 @@ training:
   log_interval: 50000
   torch_compile: true
   use_amp: true
-  use_shm: true
+  use_shm: false
+  use_sync: false            # Keep Async but without SHM for stability
   verbose_logging: true
 
 hpo:
