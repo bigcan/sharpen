@@ -140,7 +140,7 @@ class PPOTrainer:
         # Shape assertions
         B = num_envs
         W = self.config.get("env", {}).get("window_size", 15)
-        _micro_dim = net_cfg.get("micro_config", {}).get("input_size", 30)
+        _micro_dim = self.config.get("network", {}).get("micro_config", {}).get("input_size", 30)
         assert obs["micro"].shape == (B, W, _micro_dim), \
             f"obs['micro'] shape mismatch: expected ({B}, {W}, {_micro_dim}), got {obs['micro'].shape}"
         assert obs["private"].shape == (B, W, 3), \
