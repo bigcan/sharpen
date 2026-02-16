@@ -6,13 +6,12 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
-# Known macro feature columns from feature_engineering.py (DeepScalper Table 2, modified)
-MACRO_COLS = [
-    'z_open', 'z_high', 'z_low', 
-    'z_close', 'z_volume',
-    'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
-]
-NUM_MACRO_FEATURES = len(MACRO_COLS)  # 11
+# v2 feature columns from feature_engineering.py
+from finrl_pro_ds.data.feature_engineering import (
+    MICRO_FEATURE_COLS, NUM_MICRO_FEATURES,
+    MACRO_FEATURE_COLS, NUM_MACRO_FEATURES,
+)
+MACRO_COLS = list(MACRO_FEATURE_COLS)
 
 class DeepScalperEnv(gym.Env):
     """
@@ -63,7 +62,7 @@ class DeepScalperEnv(gym.Env):
         # margin_requirement = 0.2 => 5x leverage
         self.margin_requirement = float(config.get("margin_requirement", 1.0))
         
-        self.window_size = config.get("window_size", 50)
+        self.window_size = config.get("window_size", 15)
         self.initial_balance = config.get("initial_balance", 100000.0)  # 100K USDT default
         
         # Reward Config (Paper-aligned: Section 3.2 + 4.2)
@@ -89,10 +88,10 @@ class DeepScalperEnv(gym.Env):
         # Spaces
         self.lob_levels = 5
         self.lob_features = 4  # BidPx, BidVol, AskPx, AskVol
-        # FIX: Micro dim = 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret) = 27
-        self.micro_dim = 27
+        # v2: Micro dim = 30 (evidence-ranked LOB features)
+        self.micro_dim = NUM_MICRO_FEATURES  # 30
         
-        # FIX F1: Micro is now (Window, L*F) = (50, 20)
+        # FIX F1: Micro is now (Window, L*F) = (15, 20)
         self.observation_space = gym.spaces.Dict({
             "micro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self.micro_dim), dtype=np.float32),
             "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(NUM_MACRO_FEATURES,), dtype=np.float32),
@@ -155,18 +154,8 @@ class DeepScalperEnv(gym.Env):
         self.total_episode_steps = 1  # Discovered from handler in reset()
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
         
-        # Optimization: Pre-compute LOB keys to avoid string formatting in hot loop
-        self._lob_keys = []
-        for i in range(self.lob_levels):
-            level = i + 1
-            # Tuple of keys for this level
-            # FIX: Use NORMALIZED features for observation
-            self._lob_keys.append((
-                f'n_bid_price_{level}',
-                f'n_bid_vol_{level}',
-                f'n_ask_price_{level}',
-                f'n_ask_vol_{level}'
-            ))
+        # v2: Pre-compute micro feature keys to avoid string formatting in hot loop
+        self._micro_keys = list(MICRO_FEATURE_COLS)  # 30 column names
 
     def _normalize_private_state(self, position: float, balance: float, remaining_time: float = 1.0) -> np.ndarray:
         """
@@ -792,55 +781,27 @@ class DeepScalperEnv(gym.Env):
     def _build_frame(self, step_data: Any) -> np.ndarray:
         """Construct a single micro-observation frame from step data.
         
-        IMPORTANT: Uses NORMALIZED columns for the observation frame (neural net input)
-        but stores RAW prices/volumes separately for order execution.
+        v2: Reads 30 normalized micro features by name from MICRO_FEATURE_COLS.
+        RAW prices/volumes stored separately for order execution.
         """
-        # Optimization: Use pre-computed keys
-        # Avoid try/except block in hot path for speed if possible, but keep for safety logic
-        # We can init frame with zeros and fill.
-        
         frame = np.zeros((self.micro_dim,), dtype=np.float32)
 
-        
-        # Unroll loop? Or just iterate over tuples
-        idx = 0
         try:
-            for b_p, b_v, a_p, a_v in self._lob_keys:
-                # Direct dict lookups - NORMALIZED values for observation
-                frame[idx]   = float(step_data.get(b_p, 0))
-                frame[idx+1] = float(step_data.get(b_v, 0))
-                frame[idx+2] = float(step_data.get(a_p, 0))
-                frame[idx+3] = float(step_data.get(a_v, 0))
-                idx += 4
-                
-            # Derived Features: Spread (bps), Log Return, OFI (5 levels)
-            # spread_1 IS NOW NORMALIZED in feature_engineering.py (Basis Points)
-            frame[idx] = float(step_data.get('spread_1', 0))
-            idx += 1
-            
-            # Return
-            frame[idx] = float(step_data.get('log_ret', 0))
-            idx += 1
-            
-            # OFI (5 levels)
-            for i in range(1, 6):
-                frame[idx] = float(step_data.get(f'ofi_{i}', 0))
-                idx += 1
-                
-            # CRITICAL FIX: Use RAW prices for order execution (not normalized)
-            # Level 1 prices from raw columns for accurate order matching
+            # Read all 30 micro features by column name
+            for idx, key in enumerate(self._micro_keys):
+                frame[idx] = float(step_data.get(key, 0))
+
+            # CRITICAL: Use RAW prices for order execution (not normalized)
             self.current_best_bid = float(step_data.get('bid_price_1', 0))
             self.current_best_ask = float(step_data.get('ask_price_1', 0))
-            
-            # Also store raw volumes for liquidity checks
+
+            # Raw volumes for liquidity checks
             self._raw_bid_vol_1 = float(step_data.get('bid_vol_1', 0))
             self._raw_ask_vol_1 = float(step_data.get('ask_vol_1', 0))
-                
+
         except Exception as e:
-            # Fallback (rare)
             logging.error(f"Error in _build_frame: {e}")
-            pass
-            
+
         return frame
 
     def _update_macro_state(self, step_data: Any):

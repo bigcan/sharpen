@@ -119,10 +119,10 @@ class DeepScalperBDQ:
             # 2M entries: ~22 GB (numpy) vs ~60-100 GB (Python objects).
             micro_cfg = network_config.get("micro_config", {})
             macro_cfg = network_config.get("macro_config", {})
-            window_size = micro_cfg.get("window_size", 50)
-            micro_input = micro_cfg.get("input_size", 27)
+            window_size = micro_cfg.get("window_size", 15)
+            micro_input = micro_cfg.get("input_size", 30)
             private_input = micro_cfg.get("private_input_size", 3)
-            macro_input = macro_cfg.get("input_size", 11)
+            macro_input = macro_cfg.get("input_size", 15)
             self.memory = FlatReplayBuffer(
                 capacity=buffer_size,
                 micro_shape=(window_size, micro_input),

@@ -72,7 +72,7 @@ class EarnHFTTrainer:
                 "rnn_type": net_cfg.get("rnn_type", "LSTM"),
             },
             "macro_config": {
-                "input_size": net_cfg.get("macro_input_size", 11),
+                "input_size": net_cfg.get("macro_input_size", 15),
                 "hidden_sizes": net_cfg.get("macro_hidden_sizes", [128, 64]),
             },
             "fusion_dim": net_cfg.get("fusion_dim", 128),

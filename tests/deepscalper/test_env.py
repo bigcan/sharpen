@@ -11,7 +11,7 @@ class TestDeepScalperEnv(unittest.TestCase):
     def setUp(self):
         self.config = {
             "symbol": "BTCUSDT",
-            "window_size": 50,
+            "window_size": 15,
             "tick_size": 0.1,
             "lot_size": 0.001
         }
@@ -28,13 +28,13 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.assertIn("micro", obs)
         self.assertIn("macro", obs)
         self.assertIn("private", obs)
-        # FIX: Micro is now FLATTENED (W, Features) = (50, 27)
+        # FIX: Micro is now FLATTENED (W, Features) = (15, 27)
         # 27 = 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret)
-        self.assertEqual(obs["micro"].shape, (50, 27))
+        self.assertEqual(obs["micro"].shape, (15, 27))
         # Macro is now 11 features
         self.assertEqual(obs["macro"].shape, (11,))
         # Private state window
-        self.assertEqual(obs["private"].shape, (50, 3))
+        self.assertEqual(obs["private"].shape, (15, 3))
         self.mock_handler.reset.assert_called_once()
     
     def test_step_logic(self):
@@ -217,7 +217,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Nested config (how YAML structures it)
         config_nested = {
             "symbol": "BTCUSDT",
-            "window_size": 50,
+            "window_size": 15,
             "action": {"max_position": 5.0}
         }
         env = DeepScalperEnv(config_nested, self.mock_handler)
@@ -226,7 +226,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Flat config (backward compatibility)
         config_flat = {
             "symbol": "BTCUSDT",
-            "window_size": 50,
+            "window_size": 15,
             "max_position": 3.0
         }
         env_flat = DeepScalperEnv(config_flat, self.mock_handler)
@@ -235,7 +235,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Default (no max_position anywhere)
         config_default = {
             "symbol": "BTCUSDT",
-            "window_size": 50,
+            "window_size": 15,
         }
         env_default = DeepScalperEnv(config_default, self.mock_handler)
         self.assertEqual(env_default.max_position, 1.0)
@@ -245,7 +245,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # When maker_fee and taker_fee are set explicitly
         config = {
             "symbol": "BTCUSDT",
-            "window_size": 50,
+            "window_size": 15,
             "maker_fee": 0.0002,
             "taker_fee": 0.0005,
         }
@@ -256,7 +256,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # When only transaction_fee is set (legacy behavior)
         config_flat = {
             "symbol": "BTCUSDT",
-            "window_size": 50,
+            "window_size": 15,
             "transaction_fee": 0.001,
         }
         env_flat = DeepScalperEnv(config_flat, self.mock_handler)
@@ -503,7 +503,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Default
         config_default = {
             "symbol": "BTCUSDT",
-            "window_size": 50,
+            "window_size": 15,
         }
         env = DeepScalperEnv(config_default, self.mock_handler)
         self.assertEqual(env.signed_qty_proportions,
@@ -513,7 +513,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Custom from config
         config_custom = {
             "symbol": "BTCUSDT",
-            "window_size": 50,
+            "window_size": 15,
             "action": {"signed_qty_proportions": [-0.3, -0.1, 0.0, 0.1, 0.3]}
         }
         env_custom = DeepScalperEnv(config_custom, self.mock_handler)
@@ -592,7 +592,7 @@ class TestActionMasking(unittest.TestCase):
     def setUp(self):
         self.config = {
             "symbol": "BTCUSDT",
-            "window_size": 50,
+            "window_size": 15,
             "tick_size": 0.1,
             "lot_size": 0.001,
             "action": {
@@ -676,7 +676,7 @@ class TestForcedLiquidation(unittest.TestCase):
     def setUp(self):
         self.config = {
             "symbol": "BTCUSDT",
-            "window_size": 50,
+            "window_size": 15,
             "tick_size": 0.1,
             "lot_size": 0.001,  # Matches Env default if not specified
             "maker_fee": 0.0001,

@@ -11,10 +11,10 @@ from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 class TestDeepScalperNetworks(unittest.TestCase):
     def setUp(self):
         self.batch_size = 32
-        self.window_size = 50
-        self.micro_features = 27  # 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret)
+        self.window_size = 15
+        self.micro_features = 30  # v2: evidence-ranked LOB features
         self.private_features = 3  # Position + Balance + RemainingTime
-        self.macro_features = NUM_MACRO_FEATURES  # 11 (from Env)
+        self.macro_features = NUM_MACRO_FEATURES  # 15 (v2 from feature_engineering)
         
         self.micro_config = {
             "input_size": self.micro_features,
@@ -88,7 +88,7 @@ class TestDeepScalperNetworks(unittest.TestCase):
 
     def test_env_to_network_handshake(self):
         """Integration test: Verify Env observation flows to Network without error."""
-        config = {"window_size": 50, "tick_size": 0.1}
+        config = {"window_size": 15, "tick_size": 0.1}
         mock_handler = MagicMock(spec=ParquetDataHandler)
         
         # Mock feature row with all expected columns
@@ -113,14 +113,14 @@ class TestDeepScalperNetworks(unittest.TestCase):
         obs, _ = env.reset()
         
         # Convert to tensors for Network
-        micro = torch.tensor(obs["micro"]).unsqueeze(0)  # (1, 50, 27)
-        private = torch.tensor(obs["private"]).unsqueeze(0)  # (1, 50, 3)
-        macro = torch.tensor(obs["macro"]).unsqueeze(0)  # (1, 11)
+        micro = torch.tensor(obs["micro"]).unsqueeze(0)  # (1, 15, 30)
+        private = torch.tensor(obs["private"]).unsqueeze(0)  # (1, 15, 3)
+        macro = torch.tensor(obs["macro"]).unsqueeze(0)  # (1, 15)
         
         # Verify shapes match network expectations
-        self.assertEqual(micro.shape, (1, 50, 27))
-        self.assertEqual(private.shape, (1, 50, 3))
-        self.assertEqual(macro.shape, (1, 11))
+        self.assertEqual(micro.shape, (1, 15, 30))
+        self.assertEqual(private.shape, (1, 15, 3))
+        self.assertEqual(macro.shape, (1, 15))
         
         # Forward pass through network
         net = DeepScalperNetwork(
@@ -142,10 +142,10 @@ class TestNetworkRobustness(unittest.TestCase):
     def test_gru_encoder(self):
         """Verify GRU code path works correctly."""
         encoder = MicroEncoder(
-            input_size=27, private_input_size=3,
+            input_size=30, private_input_size=3,
             hidden_size=64, rnn_type="GRU"
         )
-        x = torch.randn(4, 50, 27)
+        x = torch.randn(4, 15, 30)
         out, _ = encoder(x)  # Sprint 7: no private_x
         self.assertEqual(out.shape, (4, 64))
 
@@ -155,14 +155,14 @@ class TestNetworkRobustness(unittest.TestCase):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             encoder = MicroEncoder(
-                input_size=27, private_input_size=3,
+                input_size=30, private_input_size=3,
                 hidden_size=64, num_layers=2, dropout=0.3, rnn_type="LSTM"
             )
             # No UserWarning about dropout should be raised
             dropout_warnings = [x for x in w if "dropout" in str(x.message).lower()]
             self.assertEqual(len(dropout_warnings), 0, f"Unexpected dropout warnings: {dropout_warnings}")
         
-        out, _ = encoder(torch.randn(4, 50, 27))  # Sprint 7: no private_x
+        out, _ = encoder(torch.randn(4, 15, 30))  # Sprint 7: no private_x
         self.assertEqual(out.shape, (4, 64))
 
     def test_single_layer_no_dropout_warning(self):
@@ -171,7 +171,7 @@ class TestNetworkRobustness(unittest.TestCase):
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
             encoder = MicroEncoder(
-                input_size=27, private_input_size=3,
+                input_size=30, private_input_size=3,
                 hidden_size=64, num_layers=1, dropout=0.5, rnn_type="LSTM"
             )
             dropout_warnings = [x for x in w if "dropout" in str(x.message).lower()]
@@ -181,15 +181,15 @@ class TestNetworkRobustness(unittest.TestCase):
     def test_batch_size_one(self):
         """Edge case: single-sample batch."""
         net = DeepScalperNetwork(
-            micro_config={"input_size": 27, "private_input_size": 3, "hidden_size": 64},
-            macro_config={"input_size": 11, "hidden_sizes": [64, 32]},
+            micro_config={"input_size": 30, "private_input_size": 3, "hidden_size": 64},
+            macro_config={"input_size": 15, "hidden_sizes": [64, 32]},
             fusion_dim=64,
             action_space_dims=(5, 9)
         )
         q_price, q_qty, v, pv, _ = net(
-            torch.randn(1, 50, 27),
-            torch.randn(1, 50, 3),
-            torch.randn(1, 11)
+            torch.randn(1, 15, 30),
+            torch.randn(1, 15, 3),
+            torch.randn(1, 15)
         )
         self.assertEqual(q_price.shape, (1, 5))
         self.assertEqual(v.shape, (1, 1))

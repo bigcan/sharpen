@@ -100,6 +100,15 @@ class ParquetDataHandler:
                 df = self._process_features(df)
                 self._feature_data = df
 
+            # Fix E: Drop warm-up rows where EMA normalization is unstable.
+            # The EMA-Z pipeline (span=120) needs ~120 rows to produce stable
+            # statistics. Do NOT fillna(0) — that poisons the replay buffer
+            # with 120 minutes of synthetic flatlined data.
+            WARMUP_ROWS = 120
+            pre_warmup_len = len(self._feature_data)
+            self._feature_data = self._feature_data.iloc[WARMUP_ROWS:].reset_index(drop=True)
+            print(f"[WARMUP] Sliced {WARMUP_ROWS} warm-up rows: {pre_warmup_len} → {len(self._feature_data)}", flush=True)
+
             # Convert to NumPy Dictionary for Fast Access (>20x speedup vs iterrows/iloc)
             self._feature_cols = self._feature_data.columns.tolist()
             
@@ -227,11 +236,9 @@ class ParquetDataHandler:
             raise ValueError("Parquet data must be in wide format (bid_price_1, etc.) or pre-processed.")
 
         # 2. Macro Features (Tech Indicators)
-        env_macro_cols = [
-            'z_open', 'z_high', 'z_low',
-            'z_close', 'z_volume',
-            'zd_5', 'zd_10', 'zd_15', 'zd_20', 'zd_25', 'zd_30'
-        ]
+        # v2 macro feature columns from feature_engineering.py
+        from finrl_pro_ds.data.feature_engineering import MACRO_FEATURE_COLS
+        env_macro_cols = list(MACRO_FEATURE_COLS)
 
         if all(col in df.columns for col in env_macro_cols):
             # Pre-computed macro columns already exist

@@ -96,14 +96,14 @@ class TestSumTree:
 def _make_dummy_transition(index: int = 0):
     """Create a dummy transition matching BDQ agent format."""
     state = {
-        "micro": np.random.randn(50, 27).astype(np.float32),
-        "private": np.random.randn(50, 3).astype(np.float32),
-        "macro": np.random.randn(11).astype(np.float32),
+        "micro": np.random.randn(15, 30).astype(np.float32),
+        "private": np.random.randn(15, 3).astype(np.float32),
+        "macro": np.random.randn(15).astype(np.float32),
     }
     next_state = {
-        "micro": np.random.randn(50, 27).astype(np.float32),
-        "private": np.random.randn(50, 3).astype(np.float32),
-        "macro": np.random.randn(11).astype(np.float32),
+        "micro": np.random.randn(15, 30).astype(np.float32),
+        "private": np.random.randn(15, 3).astype(np.float32),
+        "macro": np.random.randn(15).astype(np.float32),
     }
     return (state, [0, 2, 1], float(np.random.randn()), next_state, False, 0.1)
 
@@ -233,9 +233,9 @@ def _make_per_agent():
     from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
     network_config = {
-        "micro_config": {"input_size": 27, "private_input_size": 2,
+        "micro_config": {"input_size": 30, "private_input_size": 2,
                          "hidden_size": 64, "rnn_type": "LSTM"},
-        "macro_config": {"input_size": 11, "hidden_sizes": [64, 32]},
+        "macro_config": {"input_size": 15, "hidden_sizes": [64, 32]},
         "action_space_dims": [3, 5, 5],
     }
     return DeepScalperBDQ(
@@ -306,9 +306,9 @@ class TestBDQWithPER:
         from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 
         network_config = {
-            "micro_config": {"input_size": 27, "private_input_size": 2,
+            "micro_config": {"input_size": 30, "private_input_size": 2,
                              "hidden_size": 64, "rnn_type": "LSTM"},
-            "macro_config": {"input_size": 11, "hidden_sizes": [64, 32]},
+            "macro_config": {"input_size": 15, "hidden_sizes": [64, 32]},
             "action_space_dims": [3, 5, 5],
         }
         agent = DeepScalperBDQ(
