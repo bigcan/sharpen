@@ -186,7 +186,13 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
             private = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device)
             macro = torch.tensor(obs["macro"], dtype=torch.float32).to(agent.device)
             
-            action = agent.predict(micro, private, macro, deterministic=True)
+            pred = agent.predict(micro, private, macro, deterministic=True)
+            
+            # PPO returns (actions, log_probs, values), BDQ returns just actions
+            if isinstance(pred, tuple):
+                action = pred[0]  # PPO: extract actions from tuple
+            else:
+                action = pred  # BDQ: already just actions
             
             # Track action distribution (first env if vectorized)
             first_action = action[0] if len(action.shape) > 1 else action
@@ -275,8 +281,8 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     return raw_ratio
 
 
-def run_hpo(base_config, n_trials, steps_per_trial, device):
-    """Phase 1: Hyperparameter Optimization with Optuna."""
+def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
+    """Phase 1: Hyperparameter Optimization with Optuna. Supports BDQ and PPO agents."""
     logger.info(f"Starting HPO: {n_trials} trials, {steps_per_trial} steps each")
     wandb.log({"hpo/status": "started", "hpo/n_trials": n_trials})
     
@@ -284,65 +290,103 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
         trial_prefix = f"hpo/t{trial.number}"
         wandb.log({f"{trial_prefix}/started": True})
         
-        # Sample hyperparameters (8 dimensions)
-        # Paper-aligned reward params (Section 3.2 + 4.2)
-        hindsight_horizon = trial.suggest_categorical("hindsight_horizon", [30, 60, 90, 120, 150, 180])
-        hindsight_weight = trial.suggest_float("hindsight_weight", 0.05, 0.2, log=True)
-        # DSR REMOVED: Sprint 5 showed sharpe_weight=0.815 → agent optimized for
-        # variance minimization instead of profit. Pure paper reward only.
-        # Agent params
-        auxiliary_weight = trial.suggest_float("auxiliary_weight", 0.5, 1.5, log=True)
-        learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
-        batch_size = trial.suggest_categorical("batch_size", [256, 512, 1024])
-        gamma = trial.suggest_categorical("gamma", [0.99, 0.995])
-        epsilon_end = trial.suggest_float("epsilon_end", 0.01, 0.10)
-        tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
-        # NOTE: target_update_freq removed — Polyak (tau) runs every step, freq is dead code.
-        
         # Create trial config
         config = copy.deepcopy(base_config)
-        config["env"]["reward"]["hindsight_horizon"] = hindsight_horizon
-        config["env"]["reward"]["hindsight_weight"] = hindsight_weight
-        config["env"]["reward"]["sharpe_weight"] = 0.0  # Pure paper reward
-        config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
-        config["agents"]["bdq"]["learning_rate"] = learning_rate
-        config["agents"]["bdq"]["gamma"] = gamma
-        config["agents"]["bdq"]["batch_size"] = batch_size
-        config["agents"]["bdq"]["epsilon_end"] = epsilon_end
-        config["agents"]["bdq"]["tau"] = tau
         config["training"]["total_timesteps"] = steps_per_trial
         
-        wandb.log({
-            f"{trial_prefix}/hindsight_horizon": hindsight_horizon,
-            f"{trial_prefix}/hindsight_weight": hindsight_weight,
-            f"{trial_prefix}/learning_rate": learning_rate,
-            f"{trial_prefix}/batch_size": batch_size,
-            f"{trial_prefix}/auxiliary_weight": auxiliary_weight,
-            f"{trial_prefix}/epsilon_end": epsilon_end,
-            f"{trial_prefix}/tau": tau,
-        })
+        # -----------------------------------------------------------
+        # Agent-specific HPO hyperparameter sampling
+        # -----------------------------------------------------------
+        if agent_type == "ppo":
+            # PPO hyperparams (6 dimensions)
+            learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-3, log=True)
+            ent_coef = trial.suggest_float("ent_coef", 0.001, 0.05, log=True)
+            gae_lambda = trial.suggest_float("gae_lambda", 0.9, 0.99)
+            n_epochs = trial.suggest_categorical("n_epochs", [4, 10, 15])
+            batch_size = trial.suggest_categorical("batch_size", [256, 512, 1024])
+            gamma = trial.suggest_categorical("gamma", [0.99, 0.995, 0.999])
+            # Reward params (shared with BDQ)
+            hindsight_horizon = trial.suggest_categorical("hindsight_horizon", [30, 60, 90])
+            hindsight_weight = trial.suggest_float("hindsight_weight", 0.05, 0.2, log=True)
+            sharpe_weight = trial.suggest_float("sharpe_weight", 0.0, 1.0)
+            
+            config["agents"]["ppo"]["learning_rate"] = learning_rate
+            config["agents"]["ppo"]["ent_coef"] = ent_coef
+            config["agents"]["ppo"]["gae_lambda"] = gae_lambda
+            config["agents"]["ppo"]["n_epochs"] = n_epochs
+            config["agents"]["ppo"]["batch_size"] = batch_size
+            config["agents"]["ppo"]["gamma"] = gamma
+            config["env"]["reward"]["hindsight_horizon"] = hindsight_horizon
+            config["env"]["reward"]["hindsight_weight"] = hindsight_weight
+            config["env"]["reward"]["sharpe_weight"] = sharpe_weight
+            
+            wandb.log({
+                f"{trial_prefix}/learning_rate": learning_rate,
+                f"{trial_prefix}/ent_coef": ent_coef,
+                f"{trial_prefix}/gae_lambda": gae_lambda,
+                f"{trial_prefix}/n_epochs": n_epochs,
+                f"{trial_prefix}/batch_size": batch_size,
+                f"{trial_prefix}/gamma": gamma,
+                f"{trial_prefix}/hindsight_horizon": hindsight_horizon,
+                f"{trial_prefix}/hindsight_weight": hindsight_weight,
+                f"{trial_prefix}/sharpe_weight": sharpe_weight,
+            })
+        else:
+            # BDQ hyperparams (8 dimensions) — original HPO logic
+            hindsight_horizon = trial.suggest_categorical("hindsight_horizon", [30, 60, 90, 120, 150, 180])
+            hindsight_weight = trial.suggest_float("hindsight_weight", 0.05, 0.2, log=True)
+            auxiliary_weight = trial.suggest_float("auxiliary_weight", 0.5, 1.5, log=True)
+            learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
+            batch_size = trial.suggest_categorical("batch_size", [256, 512, 1024])
+            gamma = trial.suggest_categorical("gamma", [0.99, 0.995])
+            epsilon_end = trial.suggest_float("epsilon_end", 0.01, 0.10)
+            tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
+            
+            config["env"]["reward"]["hindsight_horizon"] = hindsight_horizon
+            config["env"]["reward"]["hindsight_weight"] = hindsight_weight
+            config["env"]["reward"]["sharpe_weight"] = 0.0  # Pure paper reward for BDQ
+            config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
+            config["agents"]["bdq"]["learning_rate"] = learning_rate
+            config["agents"]["bdq"]["gamma"] = gamma
+            config["agents"]["bdq"]["batch_size"] = batch_size
+            config["agents"]["bdq"]["epsilon_end"] = epsilon_end
+            config["agents"]["bdq"]["tau"] = tau
+            
+            wandb.log({
+                f"{trial_prefix}/hindsight_horizon": hindsight_horizon,
+                f"{trial_prefix}/hindsight_weight": hindsight_weight,
+                f"{trial_prefix}/learning_rate": learning_rate,
+                f"{trial_prefix}/batch_size": batch_size,
+                f"{trial_prefix}/auxiliary_weight": auxiliary_weight,
+                f"{trial_prefix}/epsilon_end": epsilon_end,
+                f"{trial_prefix}/tau": tau,
+            })
         
-        # Create env and train
+        # -----------------------------------------------------------
+        # Create env and train (agent-agnostic)
+        # -----------------------------------------------------------
         env = None
         eval_env = None
         try:
             # FIX: Use SyncVectorEnv for HPO to avoid AsyncVectorEnv pipe crashes
-            # on containers where ulimit -n is blocked. SyncVectorEnv runs all
-            # envs in the main process — slower but no IPC/FD issues.
-            hpo_num_envs = min(config["env"].get("num_envs", 12), 12)  # Cap at 12 for HPO throughput
+            hpo_num_envs = min(config["env"].get("num_envs", 12), 12)
             env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True)
-            trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
             
-            # Create DEDICATED eval env for pruning (P1b fix: prevents training state corruption)
+            if agent_type == "ppo":
+                trainer = PPOTrainer(env, config, device=device, hpo_mode=True)
+            else:
+                trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
+            
+            # Create DEDICATED eval env for pruning
             eval_env = create_vector_env(config, num_envs=1, gym_shm=False, use_sync=True)
             
-            # Define Pruning Callback with dedicated eval env
+            # Define Pruning Callback
             def pruning_callback():
                 return evaluate_for_hpo(eval_env, trainer.agent, max_steps=3000)
 
             trainer.train(optuna_trial=trial, pruning_callback=pruning_callback)
             
-            # FIX: Evaluate on dedicated eval_env (clean state), not training env
+            # Evaluate on dedicated eval_env (clean state)
             sharpe = evaluate_for_hpo(eval_env, trainer.agent, max_steps=15000)
             
             wandb.log({f"{trial_prefix}/sharpe": sharpe, f"{trial_prefix}/completed": True})
@@ -396,28 +440,25 @@ def run_hpo(base_config, n_trials, steps_per_trial, device):
     
     # Log best results
     best = study.best_trial
+    agent_key = "ppo" if agent_type == "ppo" else "bdq"
     best_params = {
         "env": {"reward": {}},
-        "agents": {"bdq": {}},
+        "agents": {agent_key: {}},
         "training": {}
     }
     
     # Explicit routing for ALL HPO params to prevent silent mis-routing.
-    reward_params = {"hindsight_horizon", "hindsight_weight"}
-    agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "epsilon_end", "tau"}
-    
-    # Key name mapping: Optuna param name -> config key name
-    reward_key_map = {
-        "hindsight_horizon": "hindsight_horizon",
-        "hindsight_weight": "hindsight_weight",
-    }
+    reward_params = {"hindsight_horizon", "hindsight_weight", "sharpe_weight"}
+    if agent_type == "ppo":
+        agent_params = {"learning_rate", "ent_coef", "gae_lambda", "n_epochs", "batch_size", "gamma"}
+    else:
+        agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "epsilon_end", "tau"}
     
     for key, val in best.params.items():
         if key in reward_params:
-            config_key = reward_key_map.get(key, key)
-            best_params["env"]["reward"][config_key] = val
+            best_params["env"]["reward"][key] = val
         elif key in agent_params:
-            best_params["agents"]["bdq"][key] = val
+            best_params["agents"][agent_key][key] = val
         else:
             raise ValueError(f"HPO param '{key}' has no routing rule. Add to reward_params or agent_params in run_hpo().")
     
@@ -901,7 +942,7 @@ def main():
             n_trials = args.trials or hpo_config.get("n_trials", 20)
             steps_per_trial = hpo_config.get("steps_per_trial", 50000)
             
-            best_params = run_hpo(base_config, n_trials, steps_per_trial, device)
+            best_params = run_hpo(base_config, n_trials, steps_per_trial, device, agent_type=agent_type)
             
             # Merge best params into config
             final_config = merge_configs(final_config, best_params)
