@@ -747,7 +747,13 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         max_dd = np.min(pv / np.maximum.accumulate(pv)) - 1 if len(pv) > 0 else 0
         
         # Trade Stats
-        trade_count = np.sum(np.abs(np.diff(pos_arr)) > 1e-6)
+        # FIX BUG-P2: Count position-change legs (flips = 2 counts).
+        # Base count: any change > epsilon.
+        # Sign change: crossing zero implies 2 legs (Close + Open).
+        pos_deltas = np.abs(np.diff(pos_arr))
+        base_count = np.sum(pos_deltas > 1e-6)
+        sign_flips = np.sum((pos_arr[:-1] * pos_arr[1:]) < -1e-9)
+        trade_count = base_count + sign_flips
         market_exposure = np.mean(np.abs(pos_arr) > 1e-6)
         
         # ── Institutional Metrics via PyfolioAnalyzer (Blueprint mandate) ──
@@ -784,7 +790,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             f"{prefix}/calmar": pyfolio_metrics.get("calmar_ratio", 0.0),
             f"{prefix}/omega": pyfolio_metrics.get("omega_ratio", 0.0),
             f"{prefix}/stability": pyfolio_metrics.get("stability", 0.0),
-            f"{prefix}/daily_var": pyfolio_metrics.get("daily_value_at_risk", 0.0),
+            f"{prefix}/minute_var": pyfolio_metrics.get("minute_value_at_risk", 0.0),
             f"{prefix}/win_rate": pyfolio_metrics.get("win_rate", 0.0),
             f"{prefix}/annual_return": pyfolio_metrics.get("annual_return", 0.0),
             # ── Trade quality metrics (manual) ──
