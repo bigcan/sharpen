@@ -120,13 +120,17 @@ def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_conf
 # PHASE 1: HYPERPARAMETER OPTIMIZATION
 # ============================================================================
 def evaluate_for_hpo(env, agent, max_steps=5000):
-    """Quick evaluation for HPO - returns Sharpe ratio.
+    """Evaluate agent for HPO — returns (profit_factor, trade_count).
+    
+    V4.2: Changed from raw Sharpe to profit_factor to prevent specification gaming.
+    Also tracks trade_count for the activity constraint (min 100 trades).
     
     IMPORTANT: This function handles both single envs and VectorEnvs.
     VectorEnv returns info as a dict of arrays, or for newer Gymnasium versions,
     as a tuple (info_dict, final_info_dict).
     """
     all_returns = []
+    positions = []  # V4.2: Track positions for trade counting
     action_counts = {0: 0, 1: 0, 2: 0}  # Track action distribution
     
     def extract_portfolio_value(info, env_idx=0, default=100000.0):
@@ -222,6 +226,14 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
             
             curr_val = extract_portfolio_value(info, env_idx=0, default=prev_val)
             
+            # V4.2: Track position for trade counting
+            pos = info.get("position")
+            if pos is not None:
+                if hasattr(pos, "__len__") and not isinstance(pos, str):
+                    positions.append(float(pos[0]))
+                else:
+                    positions.append(float(pos))
+            
             step_return = (curr_val - prev_val) / prev_val if prev_val > 0 else 0
             all_returns.append(step_return)
             prev_val = curr_val
@@ -233,9 +245,23 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         wandb.log({"_debug/eval_error": str(e), "_debug/eval_traceback": traceback.format_exc()})
         # BUG-B: Restore training hidden state even on error
         agent._hidden_state = _saved_hidden
-        return 0.0
+        return 0.0, 0  # V4.2: (profit_factor, trade_count)
     
     returns = np.array(all_returns)
+    pos_arr = np.array(positions) if positions else np.array([0.0])
+    
+    # V4.2: Count trades (position changes) — same logic as backtest
+    pos_deltas = np.abs(np.diff(pos_arr))
+    base_count = int(np.sum(pos_deltas > 1e-6))
+    sign_flips = int(np.sum((pos_arr[:-1] * pos_arr[1:]) < -1e-9))
+    trade_count = base_count + sign_flips
+    
+    # V4.2: Compute profit_factor (gross_profit / gross_loss)
+    positive_returns = returns[returns > 0]
+    negative_returns = returns[returns < 0]
+    gross_profit = float(np.sum(positive_returns)) if len(positive_returns) > 0 else 0.0
+    gross_loss = float(np.abs(np.sum(negative_returns))) if len(negative_returns) > 0 else 0.0
+    profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (10.0 if gross_profit > 1e-12 else 0.0)
     
     # Diagnostic: log what we computed including action distribution
     diag = {
@@ -247,14 +273,15 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         "_debug/eval_action_hold": action_counts.get(0, 0),
         "_debug/eval_action_buy": action_counts.get(1, 0),
         "_debug/eval_action_sell": action_counts.get(2, 0),
+        "_debug/eval_trade_count": trade_count,
+        "_debug/eval_profit_factor": profit_factor,
     }
     wandb.log(diag)
     
+    # Also log Sharpe for research tracking (not used for HPO scoring)
     if len(returns) > 1 and np.std(returns) > 1e-9:
         raw_ratio = np.mean(returns) / np.std(returns)
-        # Per-minute Sharpe (for reporting only)
-        sharpe_minute = raw_ratio * np.sqrt(525600)  # 365.25 × 24 × 60
-        # Hourly-aggregated Sharpe (research comparison)
+        sharpe_minute = raw_ratio * np.sqrt(525600)
         n_per_hour = 60
         hourly_returns = np.add.reduceat(returns, np.arange(0, len(returns), n_per_hour))
         if len(hourly_returns) > 1 and np.std(hourly_returns) > 1e-9:
@@ -267,18 +294,15 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
             "_research/raw_ratio_per_step": raw_ratio,
         })
     else:
-        raw_ratio = 0.0
-        sharpe_minute = 0.0
         logger.warning(f"Zero Sharpe: steps={step}, len={len(returns)}, std={np.std(returns) if len(returns) > 0 else 'N/A'}, actions={action_counts}")
     
     # BUG-B: Restore training hidden state after eval
     agent._hidden_state = _saved_hidden
     
-    # FIX: Return RAW (non-annualized) ratio for HPO optimization.
-    # sqrt(525600) ≈ 725x amplification makes all trials look equally catastrophic,
-    # preventing Optuna's TPE sampler from differentiating between trial quality.
-    # Annualization is applied only during final backtesting (Phase 3).
-    return raw_ratio
+    # V4.2: Return profit_factor + trade_count for anti-specification-gaming.
+    # Profit factor is immune to the Sharpe smoothness hack. Trade count
+    # enables the activity constraint (min 100 trades to pass).
+    return profit_factor, trade_count
 
 
 def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
@@ -296,40 +320,39 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         
         # -----------------------------------------------------------
         # Agent-specific HPO hyperparameter sampling
+        # V4.2: OPTIMIZER HPs ONLY — MDP/reward params are LOCKED.
+        # Rationale: Tuning reward params (gamma, sharpe_weight) allows
+        # Optuna to change the game definition, causing specification gaming.
+        # See: expert DRL audit, "Goodhart's Law" in RL.
         # -----------------------------------------------------------
         if agent_type == "ppo":
-            # PPO hyperparams (6 dimensions)
-            learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-3, log=True)
-            ent_coef = trial.suggest_float("ent_coef", 0.001, 0.05, log=True)
-            gae_lambda = trial.suggest_float("gae_lambda", 0.9, 0.99)
-            n_epochs = trial.suggest_categorical("n_epochs", [4, 10, 15])
-            batch_size = trial.suggest_categorical("batch_size", [256, 512, 1024])
-            gamma = trial.suggest_categorical("gamma", [0.99, 0.995, 0.999])
-            # Reward params (shared with BDQ)
-            hindsight_horizon = trial.suggest_categorical("hindsight_horizon", [30, 60, 90])
-            hindsight_weight = trial.suggest_float("hindsight_weight", 0.05, 0.2, log=True)
-            sharpe_weight = trial.suggest_float("sharpe_weight", 0.0, 1.0)
+            # === OPTIMIZER HPs (tunable) ===
+            learning_rate = trial.suggest_float("learning_rate", 1e-5, 3e-4, log=True)
+            ent_coef = trial.suggest_float("ent_coef", 1e-4, 0.01, log=True)
+            gae_lambda = trial.suggest_float("gae_lambda", 0.90, 0.98)
+            n_epochs = trial.suggest_categorical("n_epochs", [3, 5, 8])
+            target_kl = trial.suggest_float("target_kl", 0.01, 0.04)
+            max_grad_norm = trial.suggest_categorical("max_grad_norm", [0.5, 1.0, 5.0])
+            clip_eps = trial.suggest_categorical("clip_eps", [0.1, 0.2])
             
             config["agents"]["ppo"]["learning_rate"] = learning_rate
             config["agents"]["ppo"]["ent_coef"] = ent_coef
             config["agents"]["ppo"]["gae_lambda"] = gae_lambda
             config["agents"]["ppo"]["n_epochs"] = n_epochs
-            config["agents"]["ppo"]["batch_size"] = batch_size
-            config["agents"]["ppo"]["gamma"] = gamma
-            config["env"]["reward"]["hindsight_horizon"] = hindsight_horizon
-            config["env"]["reward"]["hindsight_weight"] = hindsight_weight
-            config["env"]["reward"]["sharpe_weight"] = sharpe_weight
+            config["agents"]["ppo"]["target_kl"] = target_kl
+            config["agents"]["ppo"]["max_grad_norm"] = max_grad_norm
+            config["agents"]["ppo"]["clip_eps"] = clip_eps
+            # NOTE: gamma, batch_size, sharpe_weight, hindsight_* are
+            # READ FROM CONFIG and never overridden by HPO.
             
             wandb.log({
                 f"{trial_prefix}/learning_rate": learning_rate,
                 f"{trial_prefix}/ent_coef": ent_coef,
                 f"{trial_prefix}/gae_lambda": gae_lambda,
                 f"{trial_prefix}/n_epochs": n_epochs,
-                f"{trial_prefix}/batch_size": batch_size,
-                f"{trial_prefix}/gamma": gamma,
-                f"{trial_prefix}/hindsight_horizon": hindsight_horizon,
-                f"{trial_prefix}/hindsight_weight": hindsight_weight,
-                f"{trial_prefix}/sharpe_weight": sharpe_weight,
+                f"{trial_prefix}/target_kl": target_kl,
+                f"{trial_prefix}/max_grad_norm": max_grad_norm,
+                f"{trial_prefix}/clip_eps": clip_eps,
             })
         else:
             # BDQ hyperparams (8 dimensions) — original HPO logic
@@ -377,22 +400,39 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             else:
                 trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
             
-            # Create DEDICATED eval env for pruning
-            eval_env = create_vector_env(config, num_envs=1, gym_shm=False, use_sync=True)
+            # V4.2: Evaluate on VALIDATION set (anti-overfitting)
+            # Training happens on Jan-Apr, evaluation on May.
+            data_cfg = config.get("data", {})
+            eval_env = create_vector_env(
+                config, num_envs=1, gym_shm=False, use_sync=True,
+                start_date=data_cfg.get("val_start_date"),
+                end_date=data_cfg.get("val_end_date"),
+            )
             
-            # Define Pruning Callback
+            # Define Pruning Callback (also uses validation env)
             def pruning_callback():
-                return evaluate_for_hpo(eval_env, trainer.agent, max_steps=3000)
+                pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=3000)
+                return pf  # Optuna pruner expects a single float
 
             trainer.train(optuna_trial=trial, pruning_callback=pruning_callback)
             
-            # Evaluate on dedicated eval_env (clean state)
-            sharpe = evaluate_for_hpo(eval_env, trainer.agent, max_steps=15000)
+            # V4.2: Evaluate on validation set with profit_factor metric
+            profit_factor, trade_count = evaluate_for_hpo(eval_env, trainer.agent, max_steps=50000)
             
-            wandb.log({f"{trial_prefix}/sharpe": sharpe, f"{trial_prefix}/completed": True})
-            logger.info(f"Trial {trial.number}: Sharpe(raw)={sharpe:.6f}")
+            # V4.2: Activity constraint — kill lazy holding agents
+            if trade_count < 100:
+                wandb.log({f"{trial_prefix}/killed": "lazy_agent", f"{trial_prefix}/trades": trade_count})
+                logger.info(f"Trial {trial.number}: KILLED (only {trade_count} trades, min=100)")
+                return -999.0
             
-            return sharpe
+            wandb.log({
+                f"{trial_prefix}/profit_factor": profit_factor,
+                f"{trial_prefix}/trade_count": trade_count,
+                f"{trial_prefix}/completed": True,
+            })
+            logger.info(f"Trial {trial.number}: PF={profit_factor:.4f}, Trades={trade_count}")
+            
+            return profit_factor
             
         except optuna.TrialPruned:
             logger.info(f"Trial {trial.number} pruned.")
@@ -447,10 +487,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         "training": {}
     }
     
-    # Explicit routing for ALL HPO params to prevent silent mis-routing.
-    reward_params = {"hindsight_horizon", "hindsight_weight", "sharpe_weight"}
+    # V4.2: Explicit routing for ALL HPO params to prevent silent mis-routing.
+    # Reward params are no longer in HPO search space (locked in config).
+    reward_params = set()  # Empty — no reward params in HPO anymore
     if agent_type == "ppo":
-        agent_params = {"learning_rate", "ent_coef", "gae_lambda", "n_epochs", "batch_size", "gamma"}
+        # V4.2: Only optimizer HPs are tunable
+        agent_params = {"learning_rate", "ent_coef", "gae_lambda", "n_epochs", "target_kl", "max_grad_norm", "clip_eps"}
     else:
         agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "epsilon_end", "tau"}
     
@@ -462,17 +504,15 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         else:
             raise ValueError(f"HPO param '{key}' has no routing rule. Add to reward_params or agent_params in run_hpo().")
     
-    # best.value is raw (non-annualized) ratio; also report annualized for human reference
-    annualized_sharpe = best.value * np.sqrt(525600) if best.value is not None else 0.0
+    # V4.2: best.value is now profit_factor (not Sharpe)
     wandb.log({
-        "hpo/best_sharpe_raw": best.value,
-        "hpo/best_sharpe": annualized_sharpe,  # Human-readable annualized
+        "hpo/best_profit_factor": best.value,
         "hpo/best_trial": best.number,
         "hpo/best_params": str(best.params),
         "hpo/status": "completed"
     })
     
-    logger.info(f"HPO Complete. Best Raw Ratio: {best.value:.6f} (Annualized: {annualized_sharpe:.2f})")
+    logger.info(f"HPO Complete. Best Profit Factor: {best.value:.4f} (Trial #{best.number})")
     return best_params
 
 
