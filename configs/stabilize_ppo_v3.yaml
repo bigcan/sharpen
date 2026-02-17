@@ -1,0 +1,97 @@
+# DeepScalper Stabilization Config — PPO Agent V3
+# Purpose: Fix profitability failure from V2 run (yg8gjeey).
+# Changes from V2:
+#   1. FEES: Reduced to 1x real Binance (was 3x "spiteful broker")
+#   2. BUDGET: 2M timesteps (was 200K — only 13 PPO rollouts)
+#   3. DATA: 4-month train, 1-month val, 1-month test (was 2m/2w/2w)
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0         # Spot (no leverage)
+  maker_fee: 0.0002               # 1x real Binance VIP-0 (was 0.0006)
+  taker_fee: 0.0004               # 1x real Binance VIP-0 (was 0.0012)
+  num_envs: 8                     # Stable parallel count (GPUHub safe)
+  window_size: 15
+  max_drawdown_pct: 0.20          # Kill zombie episodes at -20% equity
+  private_state_augment_prob: 0.0 # Disabled for on-policy PPO
+
+  reward:
+    scaling: 0.001                # Squash reward magnitude ($1000 → 1.0)
+    hindsight_weight: 0.1
+    hindsight_horizon: 60         # 1-min LOB reality
+    volatility_horizon: 100
+    sharpe_weight: 0.5            # Penalize wild equity swings
+    hold_bonus_bps: 0.05          # Wage for holding winning trades
+
+  action:
+    price_bins: 5
+    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    max_position: 1.0
+
+  augmentation:
+    enabled: false                # Protect micro-structure signal
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 3
+    hidden_size: 256
+    rnn_type: "LSTM"
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0003          # PPO standard — HPO will search [1e-4, 1e-3]
+    gamma: 0.999                   # Macro vision (~1000 mins)
+    gae_lambda: 0.95               # GAE: smooths variance of advantage estimates
+    clip_eps: 0.2                  # Prevents network explosions
+    vf_coef: 0.5                   # Value function loss multiplier
+    ent_coef: 0.01                 # HPO will search [0.001, 0.05]
+    max_grad_norm: 0.5             # Secondary shield against gradient explosions
+    n_epochs: 10                   # 10 passes over collected data
+    rollout_steps: 2048            # 8 envs × 2048 = 16,384 transitions per rollout
+    batch_size: 512                # Minibatch size for PPO update
+    lr_schedule: "linear"          # Linear decay to 0 over training
+    checkpoint_interval: 200000    # Save every 200K steps (more frequent with 2M budget)
+    target_kl: 0.03                # Stop epochs early if KL diverges
+    clip_value_loss: true          # Toggleable (set false to try unclipped V-loss)
+
+training:
+  total_timesteps: 2000000         # 2M steps (~122 PPO rollouts, ~54 min at 622 SPS)
+  training_epochs: 1               # PPO uses rollout epochs internally
+  log_interval: 16384              # Log every rollout (8 envs × 2048)
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  use_sync: false                  # Async but without SHM for stability
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 15
+  steps_per_trial: 500000          # 500K per HPO trial (was 150K — more signal per trial)
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["stabilize", "PPO", "V3", "2025-H1", "real-fees", "2M-budget"]
