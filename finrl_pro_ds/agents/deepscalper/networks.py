@@ -84,6 +84,68 @@ class MicroEncoder(nn.Module):
         out = self.activation(out)
         return out, new_hidden
 
+
+class MicroEncoderMLP(nn.Module):
+    """
+    Stateless MLP encoder for micro-structure features.
+
+    Replaces LSTM for PPO V5: eliminates the recurrence gap where
+    π_old (rolling hidden) ≠ π_θ (zeroed hidden per minibatch).
+
+    Architecture:
+        (B, W, F) → Flatten → (B, W*F)
+        → Linear(W*F, 256) → LayerNorm → GELU
+        → Linear(256, hidden_size) → LayerNorm
+
+    The network learns time-decay weights organically — recent features
+    get high weights, stale features decay — without imposing structure.
+    """
+
+    def __init__(
+        self,
+        input_size: int = 30,
+        hidden_size: int = 128,
+        window_size: int = 15,
+        **kwargs,  # Absorbs rnn_type, num_layers, dropout, private_input_size
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        flat_dim = input_size * window_size
+
+        self.net = nn.Sequential(
+            nn.Flatten(start_dim=1),
+            nn.Linear(flat_dim, 256),
+            nn.LayerNorm(256),
+            nn.GELU(),
+            nn.Dropout(0.1),  # AUDIT FIX A6: Regularize 450→256 dense layer
+            nn.Linear(256, hidden_size),
+            nn.LayerNorm(hidden_size),
+        )
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for layer in self.net:
+            if isinstance(layer, nn.Linear):
+                # AUDIT FIX A4: gain=1.0 for GELU (√2 is ReLU-specific;
+                # LayerNorm compensates but correct gain improves init)
+                nn.init.orthogonal_(layer.weight, gain=1.0)
+                nn.init.zeros_(layer.bias)
+
+    def forward(
+        self, x: torch.Tensor, hidden=None
+    ) -> Tuple[torch.Tensor, None]:
+        """
+        Args:
+            x: (B, W, F) micro features
+            hidden: Ignored — kept for interface compatibility
+
+        Returns:
+            (B, hidden_size) encoded features, None (no hidden state)
+        """
+        return self.net(x), None
+
+
 class MacroEncoder(nn.Module):
     """
     Encodes Macro-structure features (Technicals) using MLP.

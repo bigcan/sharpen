@@ -30,7 +30,8 @@ def network_config():
             "input_size": 30,
             "private_input_size": 3,
             "hidden_size": 64,    # Small for tests
-            "rnn_type": "LSTM",
+            "encoder_type": "mlp",
+            "window_size": 15,
         },
         "macro_config": {
             "input_size": 15,
@@ -67,7 +68,7 @@ class TestPPOActorCritic:
         micro, private, macro = batch_data
         B = micro.shape[0]
         
-        actions, log_probs, values, entropy, hidden = ppo_network(
+        actions, log_probs, values, entropy = ppo_network(
             micro, private, macro
         )
         
@@ -75,14 +76,13 @@ class TestPPOActorCritic:
         assert log_probs.shape == (B,), f"Expected (B,), got {log_probs.shape}"
         assert values.shape == (B,), f"Expected (B,), got {values.shape}"
         assert entropy.shape == (B,), f"Expected (B,), got {entropy.shape}"
-        assert isinstance(hidden, tuple) and len(hidden) == 2
 
     def test_deterministic_mode(self, ppo_network, batch_data):
         """Deterministic mode should produce consistent actions."""
         micro, private, macro = batch_data
         
-        actions1, _, _, _, _ = ppo_network(micro, private, macro, deterministic=True)
-        actions2, _, _, _, _ = ppo_network(micro, private, macro, deterministic=True)
+        actions1, _, _, _ = ppo_network(micro, private, macro, deterministic=True)
+        actions2, _, _, _ = ppo_network(micro, private, macro, deterministic=True)
         
         assert torch.equal(actions1, actions2)
 
@@ -96,7 +96,7 @@ class TestPPOActorCritic:
         qty_mask[:, 4] = 1.0
         
         for _ in range(10):
-            actions, _, _, _, _ = ppo_network(
+            actions, _, _, _ = ppo_network(
                 micro, private, macro, qty_mask=qty_mask
             )
             assert (actions[:, 1] == 4).all(), "Masked qty should always be 4"
@@ -122,7 +122,7 @@ class TestPPOActorCritic:
         """Gradients should flow to all parameters."""
         micro, private, macro = batch_data
         
-        actions, log_probs, values, entropy, _ = ppo_network(
+        actions, log_probs, values, _ = ppo_network(
             micro, private, macro
         )
         
@@ -264,8 +264,8 @@ class TestPPOAgent:
         assert isinstance(values, np.ndarray)
         assert values.shape == (B,)
 
-    def test_hidden_state_management(self, network_config):
-        """Test LSTM hidden state reset and masking."""
+    def test_stateless_agent(self, network_config):
+        """V5: Agent should have no hidden state (stateless MLP)."""
         from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
         
         agent = PPOAgent(
@@ -273,19 +273,19 @@ class TestPPOAgent:
             lr=3e-4, device="cpu",
         )
         
-        # Initial state should be None
-        assert agent._hidden_state is None
+        # No _hidden_state attribute
+        assert not hasattr(agent, '_hidden_state') or agent._hidden_state is None
         
-        # Predict to create hidden state
+        # Predict should work without hidden state
         micro = torch.randn(1, 15, 30)
         private = torch.randn(1, 15, 3)
         macro = torch.randn(1, 15)
-        agent.predict(micro, private, macro)
-        assert agent._hidden_state is not None
+        actions, log_probs, values = agent.predict(micro, private, macro)
+        assert actions.shape == (1, 2)
         
-        # Reset
+        # reset/mask should be no-ops (no error)
         agent.reset_hidden_state()
-        assert agent._hidden_state is None
+        agent.mask_hidden_state(np.zeros(1))
 
     def test_save_load(self, network_config, tmp_path):
         """Test checkpoint save/load."""
@@ -313,3 +313,110 @@ class TestPPOAgent:
             agent2.network.named_parameters()
         ):
             assert torch.equal(p1, p2), f"Mismatch at {n1}"
+
+    def test_checkpoint_architecture_mismatch(self, network_config, tmp_path):
+        """AUDIT FIX C4: V4→V5 checkpoint mismatch should not crash."""
+        from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
+
+        # Save with LSTM encoder (simulates V4 checkpoint)
+        lstm_config = dict(network_config)
+        lstm_config["micro_config"] = dict(lstm_config["micro_config"])
+        lstm_config["micro_config"]["encoder_type"] = "lstm"
+
+        agent_v4 = PPOAgent(
+            network_config=lstm_config,
+            lr=3e-4, device="cpu",
+        )
+        path = str(tmp_path / "v4_ckpt.pth")
+        agent_v4.save(path)
+
+        # Load V4 checkpoint into V5 MLP agent — should warn, not crash
+        agent_v5 = PPOAgent(
+            network_config=network_config,  # MLP encoder
+            lr=3e-4, device="cpu",
+        )
+        agent_v5.load(path)  # Should NOT raise RuntimeError
+
+        # Agent should still work with fresh weights
+        micro = torch.randn(1, 15, 30)
+        private = torch.randn(1, 15, 3)
+        macro = torch.randn(1, 15)
+        actions, _, _ = agent_v5.predict(micro, private, macro)
+        assert actions.shape == (1, 2)
+
+
+# ============================================================================
+# TEST: ENCODER TYPE REGRESSION (AUDIT FIX E1)
+# ============================================================================
+class TestEncoderTypeRegression:
+    """Verify both MLP and LSTM encoder paths construct and run correctly."""
+
+    @pytest.mark.parametrize("encoder_type", ["mlp", "lstm"])
+    def test_encoder_forward(self, encoder_type):
+        """Both encoder types should produce correct output shapes."""
+        from finrl_pro_ds.agents.ppo_scalper.networks import PPOActorCritic
+
+        config = {
+            "micro_config": {
+                "input_size": 30,
+                "private_input_size": 3,
+                "hidden_size": 64,
+                "encoder_type": encoder_type,
+                "window_size": 15,
+            },
+            "macro_config": {
+                "input_size": 15,
+                "hidden_sizes": [64, 32],
+            },
+            "fusion_dim": 64,
+            "action_space_dims": (5, 9),
+        }
+
+        net = PPOActorCritic(**config)
+
+        B, W = 2, 15
+        micro = torch.randn(B, W, 30)
+        private = torch.randn(B, W, 3)
+        macro = torch.randn(B, 15)
+
+        actions, log_probs, values, entropy = net(micro, private, macro)
+        assert actions.shape == (B, 2)
+        assert log_probs.shape == (B,)
+        assert values.shape == (B,)
+
+    @pytest.mark.parametrize("encoder_type", ["mlp", "lstm"])
+    def test_encoder_evaluate_actions(self, encoder_type):
+        """Both encoder types should work with evaluate_actions."""
+        from finrl_pro_ds.agents.ppo_scalper.networks import PPOActorCritic
+
+        config = {
+            "micro_config": {
+                "input_size": 30,
+                "private_input_size": 3,
+                "hidden_size": 64,
+                "encoder_type": encoder_type,
+                "window_size": 15,
+            },
+            "macro_config": {
+                "input_size": 15,
+                "hidden_sizes": [64, 32],
+            },
+            "fusion_dim": 64,
+            "action_space_dims": (5, 9),
+        }
+
+        net = PPOActorCritic(**config)
+
+        B = 2
+        micro = torch.randn(B, 15, 30)
+        private = torch.randn(B, 15, 3)
+        macro = torch.randn(B, 15)
+        actions = torch.tensor([[2, 4], [1, 3]])
+
+        log_probs, values, entropy = net.evaluate_actions(
+            micro, private, macro, actions
+        )
+        assert log_probs.shape == (B,)
+        assert values.shape == (B,)
+        assert entropy.shape == (B,)
+

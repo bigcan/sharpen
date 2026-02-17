@@ -3,6 +3,8 @@ PPO Actor-Critic Network for DeepScalper.
 
 Reuses MicroEncoder and MacroEncoder from the BDQ network.
 Adds Actor (two Categorical heads) and Critic (V(s)) on top of shared fusion.
+
+V5: Supports configurable encoder_type (mlp/lstm) via micro_config.
 """
 import torch
 import torch.nn as nn
@@ -10,7 +12,9 @@ import numpy as np
 from torch.distributions import Categorical
 from typing import Dict, Tuple, Optional
 
-from finrl_pro_ds.agents.deepscalper.networks import MicroEncoder, MacroEncoder
+from finrl_pro_ds.agents.deepscalper.networks import (
+    MicroEncoder, MicroEncoderMLP, MacroEncoder
+)
 
 
 class PPOActorCritic(nn.Module):
@@ -18,16 +22,18 @@ class PPOActorCritic(nn.Module):
     Actor-Critic network for PPO with Multi-Discrete action space.
 
     Architecture:
-        MicroEncoder (LSTM) ──┐
-                              ├── Fusion (Linear → LayerNorm → LeakyReLU)
-        MacroEncoder (MLP)  ──┤
-                              │
-        Private State (3)   ──┘
-                              │
-                         fusion (256-dim)
-                    ┌─────────┼─────────┐
-               Actor Price  Actor Qty   Critic
-               softmax(5)  softmax(9)    V(s)
+        MicroEncoder (MLP/LSTM) ──┐
+                                  ├── Fusion (Linear → LayerNorm → LeakyReLU)
+        MacroEncoder (MLP)      ──┤
+                                  │
+        Private State (3)       ──┘
+                                  │
+                             fusion (256-dim)
+                        ┌─────────┼─────────┐
+                   Actor Price  Actor Qty   Critic
+                   softmax(5)  softmax(9)    V(s)
+
+    V5: encoder_type in micro_config selects stateless MLP vs LSTM.
     """
 
     def __init__(
@@ -40,14 +46,21 @@ class PPOActorCritic(nn.Module):
     ):
         super().__init__()
 
-        # Shared encoders (same architecture as BDQ)
-        self.micro_encoder = MicroEncoder(**micro_config)
+        # Select encoder based on config (V5: defaults to LSTM for backward compat)
+        micro_config = dict(micro_config)  # Don't mutate caller's dict
+        encoder_type = micro_config.pop("encoder_type", "lstm")
+        # AUDIT FIX A2: Extract private_input_size before passing to encoder
+        # (was silently absorbed by **kwargs — fragile if kwargs removed)
+        private_size = micro_config.pop("private_input_size", 3)
+        if encoder_type == "mlp":
+            self.micro_encoder = MicroEncoderMLP(**micro_config)
+        else:
+            self.micro_encoder = MicroEncoder(**micro_config)
         self.macro_encoder = MacroEncoder(**macro_config)
 
         # Fusion dimensions
         micro_out_dim = micro_config.get("hidden_size", 128)
         macro_out_dim = macro_config.get("hidden_sizes", (128, 128))[-1]
-        private_size = micro_config.get("private_input_size", 3)
         self.private_size = private_size
 
         fusion_in_dim = micro_out_dim + macro_out_dim + private_size
@@ -106,19 +119,16 @@ class PPOActorCritic(nn.Module):
         micro_in: torch.Tensor,
         private_in: torch.Tensor,
         macro_in: torch.Tensor,
-        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         qty_mask: Optional[torch.Tensor] = None,
         deterministic: bool = False
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor,
-               Tuple[torch.Tensor, torch.Tensor]]:
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
-        Forward pass returning actions, log-probs, values, entropy, and new hidden.
+        Forward pass returning actions, log-probs, values, entropy.
 
         Args:
-            micro_in: (B, W, 27) micro-structure features
+            micro_in: (B, W, 30) micro-structure features
             private_in: (B, W, 3) private state
             macro_in: (B, M) macro features
-            hidden: Optional LSTM hidden state tuple
             qty_mask: Optional (B, n_qty) mask, 1=valid, 0=invalid
             deterministic: If True, take argmax actions
 
@@ -127,10 +137,9 @@ class PPOActorCritic(nn.Module):
             log_probs: (B,) float — sum of per-branch log-probs
             values: (B,) float — V(s) estimate
             entropy: (B,) float — sum of per-branch entropies
-            new_hidden: LSTM hidden state tuple
         """
-        # Encode
-        h_micro, new_hidden = self.micro_encoder(micro_in, hidden)
+        # Encode (hidden ignored — stateless for MLP, fresh-init for LSTM)
+        h_micro, _ = self.micro_encoder(micro_in, None)
         h_macro = self.macro_encoder(macro_in)
 
         # Private state: take last timestep (B, W, 3) -> (B, 3)
@@ -172,7 +181,7 @@ class PPOActorCritic(nn.Module):
         # Actions
         actions = torch.stack([price_action, qty_action], dim=1)  # (B, 2)
 
-        return actions, log_probs, value, entropy, new_hidden
+        return actions, log_probs, value, entropy
 
     def evaluate_actions(
         self,
@@ -180,7 +189,6 @@ class PPOActorCritic(nn.Module):
         private_in: torch.Tensor,
         macro_in: torch.Tensor,
         actions: torch.Tensor,
-        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
         qty_mask: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
@@ -189,21 +197,19 @@ class PPOActorCritic(nn.Module):
         Args:
             micro_in, private_in, macro_in: observation tensors
             actions: (B, 2) int64 — [price_idx, qty_idx]
-            hidden: Optional LSTM hidden state
             qty_mask: Optional (B, n_qty) mask
 
         Returns:
             log_probs: (B,) float
             values: (B,) float
             entropy: (B,) float
-        
-        Note (AUDIT CRIT-3): hidden=None means the LSTM processes each minibatch
-        as a fresh sequence during PPO training (no cross-step memory). This is
-        standard for non-recurrent PPO — the 15-step window provides sufficient
-        temporal context. True recurrent PPO would require sequence-chunked training.
+
+        V5: Encoder is always stateless (MLP) or fresh-init (LSTM fallback).
+        No hidden state carried across minibatches — the 15-step window
+        provides the full temporal context.
         """
-        # Encode
-        h_micro, _ = self.micro_encoder(micro_in, hidden)
+        # Encode (stateless)
+        h_micro, _ = self.micro_encoder(micro_in, None)
         h_macro = self.macro_encoder(macro_in)
         private_last = private_in[:, -1, :]
 

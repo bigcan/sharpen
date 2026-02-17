@@ -244,7 +244,9 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         import traceback
         wandb.log({"_debug/eval_error": str(e), "_debug/eval_traceback": traceback.format_exc()})
         # BUG-B: Restore training hidden state even on error
-        agent._hidden_state = _saved_hidden
+        # AUDIT FIX C1: Guard to prevent phantom attribute on stateless agents
+        if hasattr(agent, '_hidden_state'):
+            agent._hidden_state = _saved_hidden
         return 0.0, 0  # V4.2: (profit_factor, trade_count)
     
     returns = np.array(all_returns)
@@ -297,7 +299,9 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         logger.warning(f"Zero Sharpe: steps={step}, len={len(returns)}, std={np.std(returns) if len(returns) > 0 else 'N/A'}, actions={action_counts}")
     
     # BUG-B: Restore training hidden state after eval
-    agent._hidden_state = _saved_hidden
+    # AUDIT FIX C1: Guard to prevent phantom attribute on stateless agents
+    if hasattr(agent, '_hidden_state'):
+        agent._hidden_state = _saved_hidden
     
     # V4.2: Return profit_factor + trade_count for anti-specification-gaming.
     # Profit factor is immune to the Sharpe smoothness hack. Trade count
