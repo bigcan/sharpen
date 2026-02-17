@@ -127,6 +127,14 @@ class PPOTrainer:
         priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_input_size", 3)
         assert priv_cfg == 3, f"Env produces 3 private features, config expects {priv_cfg}"
 
+        # AUDIT FIX D1: Validate window_size consistency between env and network
+        net_ws = config.get("network", {}).get("micro_config", {}).get("window_size")
+        if net_ws is not None:
+            assert window_size == net_ws, (
+                f"env.window_size ({window_size}) != micro_config.window_size ({net_ws}). "
+                f"These MUST match or MLP encoder will crash with a shape mismatch."
+            )
+
     def train(self, start_step=0, skip_reset=False, optuna_trial=None, pruning_callback=None):
         """
         On-policy training loop.

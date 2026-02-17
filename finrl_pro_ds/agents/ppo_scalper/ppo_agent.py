@@ -68,6 +68,13 @@ class PPOAgent:
         # Step counter for LR schedule
         self.step_count = 0
 
+        # AUDIT FIX D1: Validate window_size consistency between env and network
+        env_ws = network_config.get("micro_config", {}).get("window_size")
+        if env_ws is not None:
+            # This will be validated against env.window_size by the trainer;
+            # here we just log it for debugging.
+            logger.info(f"PPOAgent micro_config.window_size = {env_ws}")
+
         # Network
         net_cfg = dict(network_config)
         net_cfg["action_space_dims"] = action_dims
@@ -95,8 +102,8 @@ class PPOAgent:
         else:
             self._lr_scheduler = None
 
-        # LSTM hidden state (same pattern as BDQ)
-        self._hidden_state = None
+        # V5: Stateless agent — no hidden state needed
+        # (reset_hidden_state / mask_hidden_state kept as no-ops for trainer compat)
 
     # ------------------------------------------------------------------
     # Interface: predict()
@@ -113,7 +120,7 @@ class PPOAgent:
         Select actions from the current policy.
 
         Args:
-            micro: (B, W, 27) micro features
+            micro: (B, W, 30) micro features
             private_in: (B, W, 3) private state
             macro: (B, M) macro features
             deterministic: If True, take argmax actions
@@ -137,13 +144,11 @@ class PPOAgent:
 
         self.network.eval()
         with torch.no_grad():
-            actions, log_probs, values, _, new_hidden = self.network(
+            actions, log_probs, values, _ = self.network(
                 micro, private_in, macro,
-                hidden=self._hidden_state,
                 qty_mask=qty_mask_t,
                 deterministic=deterministic,
             )
-            self._hidden_state = new_hidden
 
         self.network.train()
 
@@ -283,19 +288,12 @@ class PPOAgent:
         pass
 
     def reset_hidden_state(self):
-        """Reset LSTM hidden state (e.g., on episode start)."""
-        self._hidden_state = None
+        """No-op. V5 stateless agent has no hidden state."""
+        pass
 
     def mask_hidden_state(self, dones: np.ndarray):
-        """Zero out hidden states for environments that terminated."""
-        if self._hidden_state is None:
-            return
-
-        h, c = self._hidden_state
-        dones_t = torch.tensor(dones, device=self.device, dtype=torch.float32).view(1, -1, 1)
-        h = h * (1.0 - dones_t)
-        c = c * (1.0 - dones_t)
-        self._hidden_state = (h, c)
+        """No-op. V5 stateless agent has no hidden state."""
+        pass
 
     # ------------------------------------------------------------------
     # Interface: save / load
@@ -312,11 +310,24 @@ class PPOAgent:
         torch.save(ckpt, path)
 
     def load(self, path: str):
-        """Load checkpoint."""
+        """Load checkpoint.
+        
+        AUDIT FIX C4: Handles architecture mismatch (e.g. V4 LSTM → V5 MLP)
+        gracefully instead of crashing with opaque state_dict error.
+        """
         if not os.path.exists(path):
             return
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
-        self.network.load_state_dict(checkpoint["network"])
+        try:
+            self.network.load_state_dict(checkpoint["network"])
+        except RuntimeError as e:
+            if "Missing key" in str(e) or "Unexpected key" in str(e):
+                logger.warning(
+                    f"Checkpoint architecture mismatch (encoder changed?): {e}"
+                )
+                logger.warning("Starting with fresh network weights.")
+                return  # Skip optimizer/scheduler restore — fresh start
+            raise
         self.optimizer.load_state_dict(checkpoint["optimizer"])
         self.step_count = checkpoint.get("step_count", 0)
         if "lr_scheduler" in checkpoint and self._lr_scheduler is not None:
