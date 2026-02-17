@@ -1,0 +1,100 @@
+# DeepScalper Stabilization Config — PPO Agent V4.1
+# Purpose: Hardware-optimized V4 for RTX 5090 + 90GB RAM.
+# Base: V4 (expert DRL audit fixes) + RTX 5090 hardware tuning.
+# Changes from V4:
+#   1. BATCH: 4096 (was 512 — underutilized 5090 CUDA cores)
+#   2. SHM: use_shm=true (was false — leverage 90GB RAM for zero-copy IPC)
+#   3. COMPILE: torch_compile=true (was false — PT 2.8 handles LSTM better)
+#   4. CHECKPOINT: Every 3M steps (was 500K — protect 50GB disk)
+#   NOTE: If SHM causes Errno 24 or crashes, revert use_shm to false.
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0         # 1x (no leverage) — prove alpha first
+  maker_fee: 0.0002               # Binance Futures VIP-0 (2 bps)
+  taker_fee: 0.0004               # Binance Futures VIP-0 (4 bps)
+  num_envs: 20                    # Max safe on GPUHub (>20 = BrokenPipeError)
+  window_size: 15                 # Windowed LSTM requires W-step input
+  max_drawdown_pct: 0.20          # Kill zombie episodes at -20% equity
+  private_state_augment_prob: 0.0 # Disabled for on-policy PPO
+
+  reward:
+    scaling: 0.001
+    hindsight_weight: 0.1
+    hindsight_horizon: 60
+    volatility_horizon: 100
+    sharpe_weight: 0.1            # V4: Reduced for gradient stability
+    hold_bonus_bps: 0.0           # V4: Disabled — anti reward-farming
+
+  action:
+    price_bins: 5
+    signed_qty_proportions: [-1.0, -0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5, 1.0]
+    max_position: 1.0
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 3
+    hidden_size: 128              # V4: Reduced from 256
+    rnn_type: "LSTM"
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0003
+    gamma: 0.99                    # V4: 100-min scalper horizon
+    gae_lambda: 0.95
+    clip_eps: 0.2
+    vf_coef: 0.5
+    ent_coef: 0.01
+    max_grad_norm: 0.5
+    n_epochs: 4                    # V4: Reduced for LSTM
+    rollout_steps: 2048            # 20 envs × 2048 = 40,960 transitions per rollout
+    batch_size: 4096               # V4.1: 10 minibatches/epoch — feed the 5090
+    lr_schedule: "linear"
+    checkpoint_interval: 3000000   # V4.1: Every 3M steps (~5 saves for 15M budget)
+    target_kl: 0.015               # V4: Tighter trust region
+    clip_value_loss: true
+
+training:
+  total_timesteps: 15000000        # V4: ~10 epochs over 4-month data
+  training_epochs: 1
+  log_interval: 40960              # Log every rollout (20 envs × 2048)
+  torch_compile: true              # V4.1: PT 2.8 handles LSTM — test in smoke run
+  use_amp: true                    # RTX 5090 excels at mixed precision
+  use_shm: true                    # V4.1: 90GB RAM — zero-copy IPC for 20 envs
+  use_sync: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 15
+  steps_per_trial: 1500000         # V4: Full 4-month regime coverage per trial
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["stabilize", "PPO", "V4.1", "2025-H1", "expert-audit", "15M-budget", "hw-optimized"]
