@@ -28,6 +28,7 @@ class ParquetDataHandler:
         
         self._ptr = 0
         self._shm_objects = []  # Keep references to prevent GC of shared memory objects
+        self._is_shm_owner = False  # Only the creator process should unlink SHM segments
         
         if shared_memory_config:
             print(f"[Worker {os.getpid()}] ParquetDataHandler received SHM config.", flush=True)
@@ -358,6 +359,7 @@ class ParquetDataHandler:
         }
         
         self._shm_objects = []
+        self._is_shm_owner = True  # This process created the SHM — it owns unlink rights
         
         for col, arr in self._data_arrays.items():
             try:
@@ -416,7 +418,7 @@ class ParquetDataHandler:
             for shm in self._shm_objects:
                 try:
                     shm.close()
-                    if unlink:
+                    if unlink and getattr(self, '_is_shm_owner', False):
                         shm.unlink()
                 except:
                     pass
@@ -492,7 +494,11 @@ class ParquetDataHandler:
             for shm in self._shm_objects:
                 try:
                     shm.close()
-                    shm.unlink()
+                    # Only the creator process should unlink (destroy) SHM segments.
+                    # Worker processes spawned by AsyncVectorEnv must NOT unlink,
+                    # or they destroy the segment for all other workers.
+                    if getattr(self, '_is_shm_owner', False):
+                        shm.unlink()
                 except Exception:
                     pass
             self._shm_objects = []
