@@ -13,6 +13,9 @@ from typing import Dict, Tuple, Optional
 
 from finrl_pro_ds.agents.ppo_scalper.networks import PPOActorCritic
 from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class PPOAgent:

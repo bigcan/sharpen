@@ -1,0 +1,97 @@
+# DeepScalper V5.0 — Zero-Fee Diagnostic
+# Purpose: Isolate raw alpha from fee drag. If profitable here but not
+#          with fees, the agent has edge but fees eat it (fix: reduce trade freq).
+#          If still losing, features can't be exploited by the agent.
+# Base: stateless_mlp_v5.yaml with fees zeroed out and short budget.
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0
+  maker_fee: 0.0       # ← ZEROED for diagnostic
+  taker_fee: 0.0       # ← ZEROED for diagnostic
+  num_envs: 20
+  window_size: 15
+  max_drawdown_pct: 0.20
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 0.001
+    hindsight_weight: 0.1
+    hindsight_horizon: 60
+    volatility_horizon: 100
+    sharpe_weight: 0.1
+    hold_bonus_bps: 0.0
+
+  action:
+    price_bins: 5
+    signed_qty_proportions: [-1.0, -0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5, 1.0]
+    max_position: 1.0
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 3
+    hidden_size: 128
+    encoder_type: "mlp"
+    window_size: 15
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0001
+    ent_coef: 0.005
+    gae_lambda: 0.95
+    n_epochs: 5
+    target_kl: 0.02
+    max_grad_norm: 1.0
+    clip_eps: 0.2
+    gamma: 0.99
+    vf_coef: 0.5
+    rollout_steps: 2048
+    batch_size: 4096
+    lr_schedule: "linear"
+    checkpoint_interval: 3000000
+    clip_value_loss: true
+
+training:
+  total_timesteps: 5000000    # Shorter budget — diagnostic only
+  training_epochs: 1
+  log_interval: 40960
+  torch_compile: true
+  use_amp: true
+  use_shm: true
+  use_sync: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 5                 # Fewer trials — diagnostic only
+  steps_per_trial: 1000000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["diagnostic", "PPO", "V5.0", "zero-fee", "stateless-mlp", "phase3"]
