@@ -1,0 +1,110 @@
+# DeepScalper V6 Shock Therapy — Discrete Buy/Hold/Sell
+# Purpose: Radically simplify action space to test whether PPO entropy death
+# is caused by the 55-dim MultiDiscrete space vs a simple 3-action decision.
+#
+# Key Changes from V5:
+#   1. Action Space: MultiDiscrete([1, 3]) ≈ Discrete(3) — Buy/Hold/Sell at market
+#      - price_bins=1 → always taker (market order, no price selection)
+#      - signed_qty_proportions=[-1, 0, 1] → Full Sell / Hold / Full Buy
+#   2. LR: Constant 3e-4 (no linear decay — prevents late-stage paralysis)
+#   3. Reward: Raw PnL + fees only (no hindsight, no DSR, no hold bonus)
+#   4. Encoder: Stateless MLP (V5 architecture)
+#   5. Training: Shorter budget (PPO should converge faster with 3 actions)
+#
+# Expert Diagnosis: PPO entropy death with 55-dim space → policy collapses to hold.
+# If Discrete(3) PPO trades profitably, the problem was action space complexity.
+# If it still fails, the problem is deeper (reward signal, env dynamics).
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0          # Spot (no leverage)
+  maker_fee: 0.0002                # 2 bps
+  taker_fee: 0.0004                # 4 bps (will always be taker with price_bins=1)
+  num_envs: 20
+  window_size: 15
+  max_drawdown_pct: 0.20
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 0.001
+    hindsight_weight: 0.0          # V6: NO hindsight — raw PnL only
+    hindsight_horizon: 60
+    volatility_horizon: 100
+    sharpe_weight: 0.0             # V6: NO DSR blending
+    hold_bonus_bps: 0.0            # V6: NO hold shaping
+
+  action:
+    price_bins: 1     # RALPH-07: Intentionally forces aggressive market orders (crossing spread)
+    signed_qty_proportions: [-1.0, 0.0, 1.0] # Simulates Discrete(3): Sell, Hold, Buy
+    max_position: 1.0
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 3
+    hidden_size: 128
+    encoder_type: "mlp"            # V5: Stateless MLP
+    window_size: 15
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    # V6 Shock Therapy: Higher entropy, constant LR, bigger batches
+    learning_rate: 0.0003          # 3e-4 constant (no decay paralysis)
+    ent_coef: 0.02                 # 4x higher entropy to prevent collapse with 3 actions
+    gae_lambda: 0.95
+    n_epochs: 5
+    target_kl: 0.03                # Slightly relaxed KL (fewer early stops)
+    max_grad_norm: 1.0
+    clip_eps: 0.2
+
+    gamma: 0.99
+    vf_coef: 0.5
+    rollout_steps: 2048
+    batch_size: 4096
+    lr_schedule: "constant"        # V6: NO linear decay
+    checkpoint_interval: 3000000
+    clip_value_loss: true
+
+training:
+  total_timesteps: 5000000         # V6: Shorter — 3 actions should converge faster
+  training_epochs: 1
+  log_interval: 40960
+  torch_compile: true
+  use_amp: true
+  use_shm: true
+  use_sync: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 10
+  steps_per_trial: 1000000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["shock-therapy", "PPO", "V6", "2025-H1", "discrete-3", "constant-lr", "raw-pnl", "phase4"]

@@ -472,8 +472,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     
 
     # Run optimization
+    logger.info(f"Creating Optuna study (storage={base_config.get('hpo', {}).get('storage')})...")
     study = optuna.create_study(
         direction="maximize",
+        storage=base_config.get("hpo", {}).get("storage"),  # RALPH-10: Persistent storage
+        study_name=f"hpo_{agent_type}",                     # RALPH-10: Persistent study name
+        load_if_exists=True,                                # RALPH-10: Resume if exists
         sampler=TPESampler(seed=42),
         # FIX AUDIT-5: Increased min_resource from 5K to 15K.
         # At 5K steps, learning_starts=5K means the agent has done ~0 gradient updates.
@@ -930,6 +934,7 @@ def main():
     parser.add_argument("--trials", type=int, default=None, help="Number of HPO trials")
     parser.add_argument("--steps", type=int, default=None, help="Training steps override")
     parser.add_argument("--version", type=str, default="V1", help="Version tag")
+    parser.add_argument("--hpo_storage", type=str, default=None, help="Optuna storage URL (e.g. sqlite:///hpo.db)")
     args = parser.parse_args()
     
     base_config = load_config(args.config)
