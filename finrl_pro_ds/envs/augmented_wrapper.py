@@ -26,22 +26,16 @@ consistency.
 import gymnasium as gym
 import numpy as np
 from typing import Any, Dict, Optional, Tuple
+from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS
 
 
-# Micro observation column layout (27 features total):
-# [0:20]  = 5 levels × 4 (n_bid_px, n_bid_vol, n_ask_px, n_ask_vol)
-# [20]    = spread_1 (basis points)
-# [21]    = log_ret
-# [22:27] = ofi_1..5 (Order Flow Imbalance)
-
-_LOB_COLS_END = 20       # 5 levels × 4 features
-_SPREAD_IDX = 20
-_LOG_RET_IDX = 21
-_OFI_START = 22
-_OFI_END = 27
-
-# Volume column indices within the LOB block (every 4 cols: idx 1,3,5,...,19)
-_VOL_INDICES = [1, 3, 5, 7, 9, 11, 13, 15, 17, 19]
+# FIX BUG-13: Compute augmentation indices from feature_engineering constants
+# instead of hardcoding. Adapts automatically when feature set changes.
+_SPREAD_IDX = MICRO_FEATURE_COLS.index('spread_bps') if 'spread_bps' in MICRO_FEATURE_COLS else None
+_OFI_INDICES = [i for i, c in enumerate(MICRO_FEATURE_COLS) if c.startswith('dofi_') and not c.startswith('dofi_int_') and c != 'dofi_velocity']
+_OFI_INT_INDICES = [i for i, c in enumerate(MICRO_FEATURE_COLS) if c.startswith('dofi_int_')]
+# Volume-related columns (dist_bid/dist_ask are LOB distance proxies)
+_VOL_INDICES = [i for i, c in enumerate(MICRO_FEATURE_COLS) if c.startswith('dist_bid_') or c.startswith('dist_ask_')]
 
 
 class AugmentedDataWrapper(gym.ObservationWrapper):
@@ -114,12 +108,13 @@ class AugmentedDataWrapper(gym.ObservationWrapper):
         macro = obs["macro"].copy()  # (11,)
         # Private is NEVER perturbed — position/balance must stay accurate
 
-        # --- 1. Volatility Scaling (log_ret) ---
+        # --- 1. Volatility Scaling (OFI = proxy for order flow intensity) ---
         if self.augment_volatility and self._vol_scale != 1.0:
-            micro[:, _LOG_RET_IDX] *= self._vol_scale
+            if _OFI_INDICES:
+                micro[:, _OFI_INDICES] *= self._vol_scale
 
         # --- 2. Spread Perturbation ---
-        if self.augment_spread and self._spread_scale != 1.0:
+        if self.augment_spread and self._spread_scale != 1.0 and _SPREAD_IDX is not None:
             micro[:, _SPREAD_IDX] *= self._spread_scale
 
         # --- 3. Volume Jitter (additive Gaussian noise on normalized volumes) ---
@@ -127,9 +122,9 @@ class AugmentedDataWrapper(gym.ObservationWrapper):
             noise = self._rng.normal(0, self.volume_noise_std, size=(micro.shape[0], len(_VOL_INDICES)))
             micro[:, _VOL_INDICES] += noise.astype(np.float32)
 
-        # --- 4. OFI Perturbation ---
-        if self.augment_ofi and self._ofi_scale != 1.0:
-            micro[:, _OFI_START:_OFI_END] *= self._ofi_scale
+        # --- 4. OFI Integrated Perturbation ---
+        if self.augment_ofi and self._ofi_scale != 1.0 and _OFI_INT_INDICES:
+            micro[:, _OFI_INT_INDICES] *= self._ofi_scale
 
         # --- 5. Macro Noise (additive Gaussian) ---
         if self.augment_macro and self.macro_noise_std > 0:

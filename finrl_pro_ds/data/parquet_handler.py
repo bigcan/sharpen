@@ -327,6 +327,13 @@ class ParquetDataHandler:
         # and prepend it to "after" so the EMA has context to converge.
         buffer_size = min(BUFFER_ROWS, n_before)
         raw_buffer = df[mask_before].iloc[-buffer_size:].copy()
+        # FIX BUG-08: Strip price columns from buffer rows to prevent
+        # hindsight reward from accessing training-era prices in the first
+        # 200 steps of validation. Buffer is only needed for EMA convergence.
+        lookahead_cols = ['mid_price', 'close', 'bid_price_1', 'ask_price_1']
+        for col in lookahead_cols:
+            if col in raw_buffer.columns:
+                raw_buffer[col] = np.nan
         df_after_with_buffer = pd.concat(
             [raw_buffer, df_after_raw], ignore_index=True
         )

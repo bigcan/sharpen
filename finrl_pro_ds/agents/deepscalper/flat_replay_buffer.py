@@ -87,6 +87,12 @@ class FlatReplayBuffer:
         # Advance circular pointer
         self._ptr = (self._ptr + 1) % self.capacity
         self._size = min(self._size + 1, self.capacity)
+        # FIX BUG-09: Log when buffer first wraps (oldest experiences being overwritten)
+        if self._ptr == 0 and self._size == self.capacity:
+            import logging
+            logging.getLogger(__name__).info(
+                f"Replay buffer full ({self.capacity}). Oldest transitions now being overwritten."
+            )
 
     def sample(self, batch_size: int) -> Tuple[Dict, np.ndarray, np.ndarray,
                                                 Dict, np.ndarray, np.ndarray]:

@@ -146,6 +146,15 @@ class DeepScalperTrainer:
             epsilon_end = self.config.get("agents", {}).get("bdq", {}).get("epsilon_end", 0.01)
             computed_decay = np.exp(np.log(max(epsilon_end, 1e-10)) / explore_calls)
             self.agent.epsilon_decay = computed_decay
+            # FIX BUG-07: Store schedule params for closed-form linear decay
+            self.agent._epsilon_start = self.agent.epsilon  # current epsilon (should be epsilon_start)
+            self.agent._epsilon_decay_steps = explore_calls
+            self.agent.step_count = 0  # Reset step counter for decay schedule
+            # FIX BUG-04: Assert epsilon_end consistency between config and agent
+            assert abs(self.agent.epsilon_end - epsilon_end) < 1e-9, (
+                f"Epsilon end mismatch: agent={self.agent.epsilon_end}, config={epsilon_end}. "
+                f"Config was likely mutated after agent creation."
+            )
             if self.hpo_mode:
                 print(f"[HPO] Overriding epsilon_decay to {computed_decay:.6f} for {steps_per_trial} steps (~{explore_calls} explore updates of {total_calls} total, {self.training_epochs} epochs)")
             else:

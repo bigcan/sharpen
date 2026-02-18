@@ -287,6 +287,10 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         sharpe_minute = raw_ratio * np.sqrt(525600)
         n_per_hour = 60
         hourly_returns = np.add.reduceat(returns, np.arange(0, len(returns), n_per_hour))
+        # FIX BUG-05: Drop last partial bucket to avoid upward Sharpe bias
+        # A partial bucket with fewer than 60 samples has lower variance, inflating Sharpe.
+        if len(returns) % n_per_hour != 0 and len(hourly_returns) > 1:
+            hourly_returns = hourly_returns[:-1]
         if len(hourly_returns) > 1 and np.std(hourly_returns) > 1e-9:
             sharpe_hourly = (np.mean(hourly_returns) / np.std(hourly_returns)) * np.sqrt(365 * 24)
         else:
@@ -862,7 +866,8 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         losses = returns[returns < 0]
         gross_profit = np.sum(wins) if len(wins) > 0 else 0.0
         gross_loss = abs(np.sum(losses)) if len(losses) > 0 else 0.0
-        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else 0.0
+        # FIX BUG-14: Zero losses with gains = excellent (cap at 10, not 0)
+        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (10.0 if gross_profit > 1e-12 else 0.0)
         avg_win = np.mean(wins) if len(wins) > 0 else 0.0
         avg_loss = abs(np.mean(losses)) if len(losses) > 0 else 0.0
         avg_win_loss_ratio = avg_win / avg_loss if avg_loss > 1e-12 else 0.0

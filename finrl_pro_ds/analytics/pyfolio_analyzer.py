@@ -86,7 +86,8 @@ class PyfolioAnalyzer:
         # Omega Ratio (sum gains / sum losses + 1, threshold=0)
         gains = np.sum(r[r > 0])
         losses = abs(np.sum(r[r < 0]))
-        omega = (1.0 + gains / losses) if losses > 1e-9 else 0.0
+        # FIX BUG-12: Zero losses with positive gains = excellent (cap at 100, not 0)
+        omega = (1.0 + gains / losses) if losses > 1e-9 else (100.0 if gains > 1e-9 else 1.0)
 
         # Stability (R² of log cumulative returns vs time)
         log_cum = np.log(np.maximum(cum, 1e-12))

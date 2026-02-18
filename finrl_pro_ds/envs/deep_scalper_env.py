@@ -86,9 +86,7 @@ class DeepScalperEnv(gym.Env):
 
         
         # Spaces
-        self.lob_levels = 5
-        self.lob_features = 4  # BidPx, BidVol, AskPx, AskVol
-        # v2: Micro dim = 30 (evidence-ranked LOB features)
+        # v2: Micro dim = 30 (evidence-ranked features, replaces v1 LOB layout)
         self.micro_dim = NUM_MICRO_FEATURES  # 30
         
         # FIX F1: Micro is now (Window, L*F) = (15, 20)
@@ -695,6 +693,7 @@ class DeepScalperEnv(gym.Env):
             # Compute DSR after warmup (need variance estimate)
             if self._dsr_warmup > 1:
                 variance = self._dsr_B - self._dsr_A ** 2
+                variance = max(variance, 0.0)  # FIX BUG-06: EMA can produce slightly negative variance
                 if variance > 1e-16:  # Guard against zero-variance
                     # DSR = (B * ΔA - 0.5 * A * ΔB) / (B - A²)^{3/2}
                     denom = variance ** 1.5
