@@ -820,7 +820,7 @@ class DeepScalperEnv(gym.Env):
         if np.isnan(frame).any():
             nan_cols = [self._micro_keys[i] for i in np.where(np.isnan(frame))[0]]
             raise ValueError(
-                f"NaN in _build_frame at step {self._current_step}: {nan_cols}"
+                f"NaN in _build_frame at step {self.current_step}: {nan_cols}"
             )
 
         return frame
