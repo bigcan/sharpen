@@ -208,6 +208,8 @@ class PPOAgent:
 
                     # Policy loss (clipped surrogate)
                     ratio = torch.exp(new_log_probs - old_log_probs)
+                    # FIX N-3: Clamp ratio to prevent NaN/Inf from stale log-probs
+                    ratio = torch.clamp(ratio, 1e-4, 100.0)
                     surr1 = ratio * advantages
                     surr2 = torch.clamp(ratio, 1.0 - self.clip_eps, 1.0 + self.clip_eps) * advantages
                     policy_loss = -torch.min(surr1, surr2).mean()

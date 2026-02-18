@@ -76,7 +76,12 @@ class DeepScalperBDQ:
         self.target_q_clip = target_q_clip
         self.epsilon = epsilon_start
         self.epsilon_end = epsilon_end
-        self.epsilon_decay = epsilon_decay
+        self.epsilon_decay = epsilon_decay  # Used only in fallback (standalone) mode
+        # NOTE: Epsilon schedule is managed by DeepScalperTrainer at runtime.
+        # The trainer calls decay_epsilon() which uses a closed-form linear
+        # schedule (BUG-07 fix). The multiplicative decay below is a fallback
+        # for standalone agent usage only. The max(epsilon_end, ...) guard
+        # ensures epsilon never drops below epsilon_end regardless of method.
         self.exploration_mode = exploration_mode
         self.tau = tau
         self.batch_size = batch_size
@@ -410,8 +415,20 @@ class DeepScalperBDQ:
         return metrics
 
     def decay_epsilon(self):
-        """Decay epsilon by one step. Call from trainer after each env step batch."""
-        self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
+        """Decay epsilon by one step. Call from trainer after each env step batch.
+        
+        FIX BUG-07: Uses closed-form linear schedule instead of multiplicative decay.
+        Multiplicative decay (epsilon *= 0.999995) accumulates float error over millions
+        of steps. Linear schedule computes epsilon directly from step count.
+        """
+        self.step_count += 1
+        if hasattr(self, '_epsilon_decay_steps') and self._epsilon_decay_steps > 0:
+            # Closed-form linear decay: no float accumulation error
+            frac = min(1.0, self.step_count / self._epsilon_decay_steps)
+            self.epsilon = self._epsilon_start + (self.epsilon_end - self._epsilon_start) * frac
+        else:
+            # Fallback: original multiplicative decay (standalone agent without trainer)
+            self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
 
     def save(self, path: str):
         ckpt = {
