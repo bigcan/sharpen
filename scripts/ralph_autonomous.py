@@ -56,13 +56,18 @@ DATA_FILE = "btc_2025_jan_jun.parquet"  # Default data file for V5-era configs
 def rlog(msg, level="INFO"):
     """Timestamped log line."""
     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    prefix = {"INFO": "ℹ️ ", "OK": "✅", "WARN": "⚠️ ", "ERR": "❌", "PHASE": "🔶"}.get(level, "  ")
+    prefix = {"INFO": "[i]", "OK": "[OK]", "WARN": "[!!]", "ERR": "[ERR]", "PHASE": "[>>>]"}.get(level, "   ")
     line = f"[{ts}] {prefix} {msg}"
-    print(line)
+    # Force UTF-8 to avoid CP950 crashes on Windows
+    try:
+        sys.stdout.buffer.write((line + "\n").encode("utf-8", errors="replace"))
+        sys.stdout.flush()
+    except Exception:
+        print(line.encode("ascii", errors="replace").decode())
     # Also append to file log
     try:
         os.makedirs('.agent/logs', exist_ok=True)
-        with open(f'.agent/logs/ralph_{datetime.now().strftime("%Y%m%d")}.log', 'a') as f:
+        with open(f'.agent/logs/ralph_{datetime.now().strftime("%Y%m%d")}.log', 'a', encoding='utf-8') as f:
             f.write(line + "\n")
     except:
         pass
@@ -625,13 +630,13 @@ def print_roadmap_plan(roadmap):
         label = phase.get('label', name)
         
         if ptype == 'decision_gate':
-            icon = "🔀"
+            icon = "[?]"
         elif ptype == 'terminal':
-            icon = "🏁"
+            icon = "[X]"
         elif phase.get('deploy', False):
-            icon = "🚀"
+            icon = "[D]"
         else:
-            icon = "👀"
+            icon = "[M]"
         
         status = ""
         if name in roadmap.get('results', {}):
@@ -639,7 +644,12 @@ def print_roadmap_plan(roadmap):
         elif name == current:
             status = " [ACTIVE]"
         
-        print(f"  {marker}{icon} {label}{status}")
+        # Use sys.stdout.buffer for safe encoding on Windows
+        line = f"  {marker}{icon} {label}{status}"
+        try:
+            sys.stdout.buffer.write((line + "\n").encode("utf-8", errors="replace"))
+        except Exception:
+            print(line.encode("ascii", errors="replace").decode())
         
         if ptype == 'decision_gate':
             matrix = phase.get('matrix', {})
