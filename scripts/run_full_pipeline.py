@@ -492,12 +492,13 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     }
     
     # V4.2: Explicit routing for ALL HPO params to prevent silent mis-routing.
-    # Reward params are no longer in HPO search space (locked in config).
-    reward_params = set()  # Empty — no reward params in HPO anymore
     if agent_type == "ppo":
-        # V4.2: Only optimizer HPs are tunable
+        # V4.2: PPO locks reward params — only optimizer HPs are tunable
+        reward_params = set()
         agent_params = {"learning_rate", "ent_coef", "gae_lambda", "n_epochs", "target_kl", "max_grad_norm", "clip_eps"}
     else:
+        # BDQ still tunes hindsight_horizon/weight → routed to env.reward
+        reward_params = {"hindsight_horizon", "hindsight_weight"}
         agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "epsilon_end", "tau"}
     
     for key, val in best.params.items():
