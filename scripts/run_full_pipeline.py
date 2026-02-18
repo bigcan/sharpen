@@ -90,14 +90,15 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     return DeepScalperEnv(config=env_config, data_handler=handler)
 
 
-def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_config=None, gym_shm=True, use_sync=False):
+def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_config=None, gym_shm=True, use_sync=False, norm_cutoff_date=None):
     """Create vectorized environment for training.
     
     Note: Using AsyncVectorEnv for parallel data loading. Context 'spawn' is used
     for CUDA/PyTorch safety. Set use_sync=True to use SyncVectorEnv (no subprocesses),
     which avoids IPC/FD limits on constrained containers.
     """
-    env_factory = functools.partial(make_env, config=config, start_date=start_date, end_date=end_date, shm_config=shm_config)
+    # FIX BUG-02: Forward norm_cutoff_date to individual envs for normalization isolation
+    env_factory = functools.partial(make_env, config=config, start_date=start_date, end_date=end_date, shm_config=shm_config, norm_cutoff_date=norm_cutoff_date)
     
     if use_sync:
         # SyncVectorEnv: all envs run in main process. No pipes, no FD issues.
@@ -359,9 +360,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 f"{trial_prefix}/clip_eps": clip_eps,
             })
         else:
-            # BDQ hyperparams (8 dimensions) — original HPO logic
-            hindsight_horizon = trial.suggest_categorical("hindsight_horizon", [30, 60, 90, 120, 150, 180])
-            hindsight_weight = trial.suggest_float("hindsight_weight", 0.05, 0.2, log=True)
+            # BDQ hyperparams (6 dimensions) — optimizer HPs only
+            # FIX BUG-01: hindsight_horizon/weight are MDP-defining reward params.
+            # Tuning them lets HPO Goodhart the reward definition.
+            # They are now LOCKED in config, consistent with PPO's anti-spec-gaming.
             auxiliary_weight = trial.suggest_float("auxiliary_weight", 0.5, 1.5, log=True)
             learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
             batch_size = trial.suggest_categorical("batch_size", [256, 512, 1024])
@@ -369,8 +371,6 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             epsilon_end = trial.suggest_float("epsilon_end", 0.01, 0.10)
             tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
             
-            config["env"]["reward"]["hindsight_horizon"] = hindsight_horizon
-            config["env"]["reward"]["hindsight_weight"] = hindsight_weight
             config["env"]["reward"]["sharpe_weight"] = 0.0  # Pure paper reward for BDQ
             config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
             config["agents"]["bdq"]["learning_rate"] = learning_rate
@@ -380,8 +380,6 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             config["agents"]["bdq"]["tau"] = tau
             
             wandb.log({
-                f"{trial_prefix}/hindsight_horizon": hindsight_horizon,
-                f"{trial_prefix}/hindsight_weight": hindsight_weight,
                 f"{trial_prefix}/learning_rate": learning_rate,
                 f"{trial_prefix}/batch_size": batch_size,
                 f"{trial_prefix}/auxiliary_weight": auxiliary_weight,
@@ -411,6 +409,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 config, num_envs=1, gym_shm=False, use_sync=True,
                 start_date=data_cfg.get("val_start_date"),
                 end_date=data_cfg.get("val_end_date"),
+                # FIX BUG-02: HPO eval env must have normalization isolation.
+                # Without this, EMA stats from training data leak into validation scoring.
+                norm_cutoff_date=data_cfg.get("val_start_date"),
             )
             
             # Define Pruning Callback (also uses validation env)
@@ -497,8 +498,8 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         reward_params = set()
         agent_params = {"learning_rate", "ent_coef", "gae_lambda", "n_epochs", "target_kl", "max_grad_norm", "clip_eps"}
     else:
-        # BDQ still tunes hindsight_horizon/weight → routed to env.reward
-        reward_params = {"hindsight_horizon", "hindsight_weight"}
+        # FIX BUG-01+BUG-10: BDQ reward params are now LOCKED (no longer in HPO search space)
+        reward_params = set()
         agent_params = {"auxiliary_weight", "learning_rate", "gamma", "batch_size", "epsilon_end", "tau"}
     
     for key, val in best.params.items():
@@ -657,6 +658,10 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         backtest_config = copy.deepcopy(config)
         if "env" not in backtest_config: backtest_config["env"] = {}
         backtest_config["env"]["private_state_augment_prob"] = 0.0
+        # FIX BUG-03: Disable hindsight reward during backtest — it uses future prices
+        # which inflates evaluation metrics. Hindsight is a training-only shaping signal.
+        if "reward" not in backtest_config["env"]: backtest_config["env"]["reward"] = {}
+        backtest_config["env"]["reward"]["hindsight_weight"] = 0.0
         
         env = make_env(backtest_config, start_date=start_date, end_date=end_date, norm_cutoff_date=norm_cutoff_date)
         
