@@ -1,0 +1,112 @@
+# DeepScalper BDQ — Reduced Trade Frequency
+# Purpose: Test whether BDQ can profit if we reduce trade frequency (lower fee drag).
+# Route: Triggered when BDQ zero-fee profits but BDQ+fees loses → fee drag is the problem.
+#
+# Key Changes from bdq_baseline_v5era.yaml:
+#   1. Action Space: Fewer qty levels, bias toward hold
+#      - signed_qty: removed small ±0.05 positions (noise trades)
+#      - Added 0.0 twice in proportions to bias hold selection
+#   2. Hold Bonus: 0.5 bps reward for staying flat (fee-avoidance shaping)
+#   3. Maker-biased execution: 5 price bins preserved (passive fill = lower fees)
+#
+# Expert Reasoning: If BDQ trades profitably without fees but loses with fees,
+# the agent is overtrading. Reducing quantity granularity + hold bonus should
+# encourage fewer, higher-conviction trades.
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0
+  maker_fee: 0.0002                # 2 bps (Binance VIP-0)
+  taker_fee: 0.0004                # 4 bps (Binance VIP-0)
+  num_envs: 20
+  window_size: 15
+  max_drawdown_pct: 0.20
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 0.001
+    hindsight_weight: 0.1
+    hindsight_horizon: 60
+    volatility_horizon: 100
+    sharpe_weight: 0.1
+    hold_bonus_bps: 0.5            # CHANGED: 0.5 bps hold bonus (was 0.0)
+
+  action:
+    price_bins: 5                  # Keep 5 price levels (encourage passive/maker fills)
+    # CHANGED: Removed ±0.05 noise trades, kept high-conviction sizes only
+    signed_qty_proportions: [-1.0, -0.5, -0.2, 0.0, 0.2, 0.5, 1.0]
+    max_position: 1.0
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 3
+    hidden_size: 128
+    rnn_type: "LSTM"               # BDQ uses LSTM encoder (original architecture)
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    learning_rate: 0.0001
+    gamma: 0.99
+    auxiliary_weight: 0.1
+    update_interval: 0.25
+    batch_size: 1024
+    buffer_size: 2000000
+    target_update_freq: 7500
+    tau: 0.005
+    checkpoint_interval: 50000
+    learning_starts: 5000
+    exploration_fraction: 0.5
+    epsilon_start: 1.0
+    epsilon_end: 0.005
+    epsilon_decay: 0.999908
+    exploration_mode: "epsilon_greedy"
+    target_q_clip: 5000.0
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+
+training:
+  total_timesteps: 500000
+  training_epochs: 1
+  log_interval: 50000
+  torch_compile: true
+  use_amp: true
+  use_shm: true
+  use_sync: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 10
+  steps_per_trial: 100000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["reduced-freq", "BDQ", "V5-era", "2025-H1", "with-fees", "phase4", "fee-mitigation"]

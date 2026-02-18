@@ -194,7 +194,12 @@ class DeepScalperNetwork(nn.Module):
         super().__init__()
         
         # Encoders
-        self.micro_encoder = MicroEncoder(**micro_config)
+        encoder_type = micro_config.get("encoder_type", "rnn").lower()
+        if encoder_type == "mlp":
+            self.micro_encoder = MicroEncoderMLP(**micro_config)
+        else:
+            self.micro_encoder = MicroEncoder(**micro_config)
+            
         self.macro_encoder = MacroEncoder(**macro_config)
         
         # Input dim to fusion is micro_hidden + macro_hidden + private_size
