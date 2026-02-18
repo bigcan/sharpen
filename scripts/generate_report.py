@@ -1,6 +1,7 @@
 import json
 import argparse
 import os
+import sqlite3
 from datetime import datetime
 
 def generate_report(run_id, output_path):
@@ -68,9 +69,65 @@ def generate_report(run_id, output_path):
 ## 4. Automated Decision
 """
     if metrics['TestSharpe'] >= 1.0 and metrics['ValSharpe'] >= 1.0:
-        report += "✅ **GOAL ACHIEVED**: Run meets all production criteria."
+        report += "\n✅ **GOAL ACHIEVED**: Run meets all production criteria.\n"
     else:
-        report += "❌ **GOAL MISSED**: Performance below target thresholds."
+        report += "\n❌ **GOAL MISSED**: Performance below target thresholds.\n"
+
+    # ------------------------------------------------------------------
+    # Gap #5: Richer Reports (HPO + Logs)
+    # ------------------------------------------------------------------
+    artifact_dir = os.path.join(os.getcwd(), "results", run_id)
+    
+    # HPO Summary
+    hpo_db_path = os.path.join(artifact_dir, "hpo.db")
+    if os.path.exists(hpo_db_path):
+        try:
+            conn = sqlite3.connect(f"file:{hpo_db_path}?mode=ro", uri=True)
+            cursor = conn.cursor()
+            
+            # Query trials (assuming standard Optuna schema)
+            # We want: trial_id, state, value (Sharpe/Reward), params
+            # This is a bit complex in raw SQL as params are in check table
+            # Simplified: just count trials and get best value if possible
+            cursor.execute("SELECT count(*) FROM trials")
+            n_trials = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT count(*) FROM trials where state='COMPLETE'")
+            n_complete = cursor.fetchone()[0]
+            
+            cursor.execute("SELECT max(value) FROM trial_values") # value is usually sharpe or reward
+            best_val = cursor.fetchone()[0]
+            
+            conn.close()
+            
+            report += f"""
+## 5. HPO Summary
+*   **Trials:** {n_complete}/{n_trials} completed
+*   **Best Objective Value:** {best_val if best_val else 'N/A'}
+*   *Detailed trial data available in `results/{run_id}/hpo.db`*
+"""
+        except Exception as e:
+            report += f"\n## 5. HPO Summary\n*Error reading HPO DB: {e}*\n"
+
+    # Log Tail
+    log_path = os.path.join(artifact_dir, "run.log")
+    if os.path.exists(log_path):
+        try:
+            with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                # Read last 2 KB
+                f.seek(0, os.SEEK_END)
+                size = f.tell()
+                f.seek(max(0, size - 2048))
+                tail = f.read()
+                
+            report += f"""
+## 6. Remote Log (Tail)
+```text
+{tail}
+```
+"""
+        except Exception as e:
+            report += f"\n## 6. Remote Log\n*Error reading log: {e}*\n"
 
     # 5. Save Report
     os.makedirs(os.path.dirname(output_path), exist_ok=True)

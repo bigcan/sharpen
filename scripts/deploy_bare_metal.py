@@ -244,6 +244,116 @@ def deploy(args):
     
     ssh.close()
     os.remove(zip_name)
+    
+    # ------------------------------------------------------------------
+    # Gap #2 & #3: Resolve Run ID & Log to Registry
+    # ------------------------------------------------------------------
+    resolved_run_id = None
+    if pid and pid.isdigit():
+        print(f"\n🔍 Resolving WandB Run ID (waiting for remote init)...")
+        time.sleep(10) # Give WandB a moment to init
+        
+        # We need a new SSH connection since we closed the main one
+        # (Or we could have kept it open, but let's keep logic isolated)
+        try:
+            # Re-connect for registry/monitoring tasks
+            ssh_reg = paramiko.SSHClient()
+            ssh_reg.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh_reg.connect(host, port=int(port), username='root', password=password, timeout=30)
+            
+            # Check wandb/latest-run symlink target
+            # Target format: run-20260218_120000-8charID.wandb
+            for attempt in range(6): # Try for 60s
+                stdin, stdout, stderr = ssh_reg.exec_command(f"readlink {remote_workspace}/wandb/latest-run")
+                target = stdout.read().decode().strip()
+                
+                if target and "run-" in target and ".wandb" in target:
+                    # Parse ID: run-DATETIME-ID.wandb
+                    parts = target.split("-")
+                    if len(parts) >= 3:
+                        resolved_run_id = parts[-1].replace(".wandb", "")
+                        print(f"✅ Resolved Run ID: {resolved_run_id}")
+                        break
+                time.sleep(10)
+            
+            if not resolved_run_id:
+                print("⚠️  Could not resolve Run ID from remote (WandB init too slow?)")
+            
+            # Log to Registry (results/deploys.db)
+            import sqlite3
+            from datetime import datetime
+            
+            db_path = os.path.join(PROJECT_ROOT, "results", "deploys.db")
+            os.makedirs(os.path.dirname(db_path), exist_ok=True)
+            
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS deploys (
+                    run_id TEXT,
+                    pid TEXT,
+                    config_path TEXT,
+                    run_name TEXT,
+                    gpuhub_host TEXT,
+                    deployed_at TEXT,
+                    extra_args TEXT,
+                    status TEXT
+                )
+            ''')
+            
+            cursor.execute('''
+                INSERT INTO deploys (run_id, pid, config_path, run_name, gpuhub_host, deployed_at, extra_args, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                resolved_run_id, 
+                pid, 
+                args.config, 
+                full_run_name or "auto", 
+                host, 
+                datetime.now().isoformat(), 
+                args.extra_args,
+                "deployed"
+            ))
+            conn.commit()
+            conn.close()
+            print(f"📋 Logged deployment to {db_path}")
+            
+            ssh_reg.close()
+            
+        except Exception as e:
+            print(f"⚠️  Registry logging failed: {e}")
+
+    # ------------------------------------------------------------------
+    # Post-deploy: Poll & Collect
+    # ------------------------------------------------------------------
+    # Post-deploy: poll and collect if --collect flag is set
+    if getattr(args, 'collect', False) and pid and pid.isdigit():
+        print(f"\n{'='*60}")
+        print("  --collect mode: waiting for run to complete...")
+        print(f"{'='*60}")
+        print("  Poll interval: 5 min | Max wait: 8 hours")
+        print("  Press Ctrl+C to cancel (run will continue on remote)\n")
+        
+        try:
+            from scripts.fetch_wandb_run import poll_run_until_complete
+            from scripts.collect_run import collect_run
+            
+            # Wait for run to appear in WandB and complete
+            # Use resolved ID if we have it, otherwise poll latest
+            target_run_id = resolved_run_id
+            
+            print(f"  Polling Run ID: {target_run_id if target_run_id else 'LATEST (auto-detect)'}")
+            result = poll_run_until_complete(run_id=target_run_id, poll_interval=300, max_wait=28800)
+            
+            if result.get("run_id"):
+                print(f"\nRun completed: {result['run_id']} (state: {result['state']})")
+                collect_run(result["run_id"])
+            else:
+                print(f"\n⚠️  Polling ended without a completed run: {result}")
+                print("  Use 'python scripts/collect_run.py --run_id <ID>' manually later.")
+        except KeyboardInterrupt:
+            print("\n\n⏹️  Collection cancelled. Run continues on remote.")
+            print("  Use 'python scripts/collect_run.py --run_id <ID>' manually later.")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -256,6 +366,7 @@ if __name__ == "__main__":
     parser.add_argument("--fresh_hpo", action="store_true", help="Wipe existing HPO database for a fresh start")
     parser.add_argument("--no_kill", action="store_true", help="Do NOT kill existing processes (e.g. preserve Synapse run)")
     parser.add_argument("--version", default=None, help="Version tag (e.g. V1.1)")
+    parser.add_argument("--collect", action="store_true", help="After deploy, poll WandB until completion then auto-collect all data (blocking)")
     args = parser.parse_args()
     
     deploy(args)
