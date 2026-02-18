@@ -380,8 +380,12 @@ class DeepScalperTrainer:
         # Store obs for potential resume via skip_reset=True
         self._current_obs = obs
                 
-        # Final Save
-        self.save_checkpoint("checkpoint_final.pth")
+        # Final Save — only if actual training occurred (guards against
+        # total_timesteps=0 flows overwriting loaded weights with random init)
+        if n_calls > 0:
+            self.save_checkpoint("checkpoint_final.pth")
+        else:
+            print("⚠ Skipping checkpoint_final.pth save: no training steps executed (n_calls=0)")
         
         # Always log final step status to ensure graph continuity
         if not self.hpo_mode:
