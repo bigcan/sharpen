@@ -671,7 +671,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         
         # Create agent
         sample_obs, _ = env.reset()
-        network_config = config.get("network")
+        network_config = dict(config.get("network", {}))
         if not network_config:
             raise ValueError("Config missing 'network' section — cannot reconstruct agent for backtest")
         
@@ -684,6 +684,9 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             action_config.get("price_bins", 5),
             len(signed_qty_props)
         )
+        # FIX: Inject action_space_dims into network_config (mirrors trainer logic).
+        # Without this, the BDQ/PPO agent assertion falls back to default (5,9).
+        network_config["action_space_dims"] = action_dims
         
         # Dispatch agent creation based on type
         if agent_type == "earnhft":

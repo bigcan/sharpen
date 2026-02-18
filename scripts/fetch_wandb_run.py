@@ -1,8 +1,19 @@
 import wandb
 import json
 import os
-
 import argparse
+import paramiko
+from dotenv import load_dotenv
+
+load_dotenv()
+
+# Remote artifacts to download (filename -> description)
+REMOTE_ARTIFACTS = {
+    "checkpoint_final.pth": "Trained model checkpoint",
+    "run.log": "Remote stdout/stderr log",
+    "hpo.db": "HPO Optuna database",
+}
+REMOTE_WORKSPACE = "/workspace/DeepScalper"
 
 
 def fetch_latest_run_metrics(entity="bigcan-chiwin-technology", project="FinRL-Pro-DS", tag=None):
@@ -113,7 +124,76 @@ def poll_run_until_complete(run_id=None, entity="bigcan-chiwin-technology", proj
     return {"state": "timeout", "error": f"Run did not complete within {max_wait}s"}
 
 
-def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro-DS"):
+def download_remote_artifacts(run_id, remote_workspace=REMOTE_WORKSPACE):
+    """
+    Download run artifacts from remote GPUHub via SFTP.
+    
+    Downloads checkpoint, logs, and HPO database to results/{run_id}/.
+    Requires GPUHUB_HOST, GPUHUB_PORT, GPUHUB_PASSWORD in .env.
+    
+    Args:
+        run_id: WandB run ID (used for local directory naming)
+        remote_workspace: Remote workspace path
+        
+    Returns:
+        dict of {filename: local_path} for successfully downloaded files
+    """
+    host = os.getenv("GPUHUB_HOST")
+    port = os.getenv("GPUHUB_PORT")
+    password = os.getenv("GPUHUB_PASSWORD")
+    
+    if not all([host, port, password]):
+        print("WARNING: GPUHUB credentials not found in .env. Skipping remote artifact download.")
+        return {}
+    
+    local_dir = os.path.join(os.getcwd(), "results", run_id)
+    os.makedirs(local_dir, exist_ok=True)
+    
+    downloaded = {}
+    
+    print(f"Connecting to {host}:{port} for artifact download...")
+    ssh = paramiko.SSHClient()
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    
+    try:
+        ssh.connect(host, port=int(port), username='root', password=password, timeout=30)
+        sftp = ssh.open_sftp()
+        
+        for filename, description in REMOTE_ARTIFACTS.items():
+            remote_path = f"{remote_workspace}/{filename}"
+            local_path = os.path.join(local_dir, filename)
+            
+            try:
+                remote_attr = sftp.stat(remote_path)
+                size_mb = remote_attr.st_size / (1024 * 1024)
+                print(f"  Downloading {filename} ({size_mb:.1f} MB) — {description}...")
+                sftp.get(remote_path, local_path)
+                downloaded[filename] = local_path
+                print(f"  ✅ {filename} saved to {local_path}")
+            except FileNotFoundError:
+                print(f"  ⚠️  {filename} not found on remote (run may have crashed early)")
+            except Exception as e:
+                print(f"  ⚠️  Failed to download {filename}: {e}")
+        
+        sftp.close()
+    except Exception as e:
+        print(f"WARNING: SFTP connection failed: {e}")
+    finally:
+        ssh.close()
+    
+    return downloaded
+
+
+def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro-DS", full_history=False):
+    """
+    Fetch run data from WandB and save to local JSON + SQLite registry.
+    
+    Args:
+        run_id: WandB 8-character run ID
+        entity: WandB entity
+        project: WandB project name
+        full_history: If True, fetch all history rows (up to 10K). Default: 100 samples.
+    """
     run_path = f"{entity}/{project}/{run_id}"
     # Use relative path for portability (works on WSL/Windows)
     output_file = os.path.join(os.getcwd(), "results", f"run_data_{run_id}.json")
@@ -133,13 +213,24 @@ def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro
             "tags": run.tags,
             "created_at": run.created_at,
             "url": run.url,
-            "history": [] # Attempt to fetch history sample
+            "history": []
         }
         
-        # Fetch some history for performance metrics (SPS)
-        # We process 'train/global_step' vs '_runtime' to calc SPS if not logged
-        history = run.history(keys=["step", "train/global_step", "_runtime"], samples=100)
-        data["history"] = history.to_dict(orient="records")
+        # Fetch history
+        if full_history:
+            print("  Fetching full history (scan_history, max 10K rows)...")
+            history_rows = []
+            for i, row in enumerate(run.scan_history()):
+                history_rows.append(row)
+                if i >= 9999:
+                    print("  WARNING: History capped at 10,000 rows.")
+                    break
+            data["history"] = history_rows
+            print(f"  Fetched {len(history_rows)} history rows.")
+        else:
+            # Default: 100 sampled points for SPS calculation
+            history = run.history(keys=["step", "train/global_step", "_runtime"], samples=100)
+            data["history"] = history.to_dict(orient="records")
 
         
         # Save to JSON (Detail View)
@@ -197,8 +288,13 @@ def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro
         raise  # Re-raise to make failures explicit to caller
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(description="Fetch WandB run data and optionally download remote artifacts")
     parser.add_argument("--run_id", type=str, required=True, help="WandB Run ID")
+    parser.add_argument("--full_history", action="store_true", help="Fetch all history rows (up to 10K) instead of 100 samples")
+    parser.add_argument("--download_artifacts", action="store_true", help="Download remote artifacts via SFTP (checkpoint, logs, hpo.db)")
     args = parser.parse_args()
     
-    fetch_run_data(args.run_id)
+    fetch_run_data(args.run_id, full_history=args.full_history)
+    
+    if args.download_artifacts:
+        download_remote_artifacts(args.run_id)
