@@ -229,6 +229,8 @@ def deploy(args):
     hpo_db = f"hpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
     hpo_storage_arg = f"--hpo_storage sqlite:///{remote_workspace}/{hpo_db}"
     
+    version_arg = f"--version {version}" if version else ""
+    
     # FIX: Remove () around ulimit so it applies to the current shell and subsequent nohup process
     cmd = f"{export_path} && {wandb_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {version_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
     
