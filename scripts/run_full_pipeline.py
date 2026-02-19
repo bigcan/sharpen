@@ -340,7 +340,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         if agent_type == "ppo":
             # === OPTIMIZER HPs (tunable) ===
             learning_rate = trial.suggest_float("learning_rate", 1e-5, 3e-4, log=True)
-            ent_coef = trial.suggest_float("ent_coef", 1e-4, 0.01, log=True)
+            ent_coef = trial.suggest_float("ent_coef", 0.005, 0.1, log=True)
             gae_lambda = trial.suggest_float("gae_lambda", 0.90, 0.98)
             n_epochs = trial.suggest_categorical("n_epochs", [3, 5, 8])
             target_kl = trial.suggest_float("target_kl", 0.01, 0.04)
