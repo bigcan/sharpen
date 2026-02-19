@@ -1,0 +1,113 @@
+# DeepScalper V7 TCN Shock Therapy — Temporal Convolutional Network
+# Purpose: Test whether causal dilated convolutions outperform MLP/LSTM
+# for LOB micro-structure encoding in the PPO pipeline.
+#
+# Key Changes from V6:
+#   1. Encoder: TCN (causal dilated convolutions) replaces MLP
+#      - 3 residual blocks: dilations [1, 2, 4] → receptive field = 15 ticks
+#      - Preserves temporal locality (MLP flattens away time structure)
+#      - No hidden state (PPO-safe, no recurrence gap)
+#   2. Action Space: Discrete(3) Buy/Hold/Sell (same as V6)
+#   3. LR: Constant 3e-4 (same as V6)
+#   4. Reward: Raw PnL + fees only (same as V6)
+#
+# Hypothesis: TCN > MLP because:
+#   - MLP flattens (W*F=450) destroying temporal structure
+#   - TCN preserves causality and learns multi-scale patterns
+#   - Dilated convs are computationally cheap (no hidden state to unroll)
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0          # Spot (no leverage)
+  maker_fee: 0.0002                # 2 bps
+  taker_fee: 0.0004                # 4 bps
+  num_envs: 20
+  window_size: 15
+  max_drawdown_pct: 0.20
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 0.001
+    hindsight_weight: 0.0          # Raw PnL only
+    hindsight_horizon: 60
+    volatility_horizon: 100
+    sharpe_weight: 0.0
+    hold_bonus_bps: 0.0
+
+  action:
+    price_bins: 1     # Market orders only (Discrete-3 style)
+    signed_qty_proportions: [-1.0, 0.0, 1.0]  # Sell / Hold / Buy
+    max_position: 1.0
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 3
+    hidden_size: 128
+    encoder_type: "tcn"            # V7: Temporal Convolutional Network
+    window_size: 15
+    tcn_channels: [64, 64, 128]    # 3 blocks: dilations [1,2,4] → RF=15
+    kernel_size: 3
+    dropout: 0.1
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0003          # 3e-4 constant
+    ent_coef: 0.02                 # Higher entropy for 3-action space
+    gae_lambda: 0.95
+    n_epochs: 5
+    target_kl: 0.03
+    max_grad_norm: 1.0
+    clip_eps: 0.2
+
+    gamma: 0.99
+    vf_coef: 0.5
+    rollout_steps: 2048
+    batch_size: 4096
+    lr_schedule: "constant"
+    checkpoint_interval: 3000000
+    clip_value_loss: true
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 40960
+  torch_compile: true
+  use_amp: true
+  use_shm: true
+  use_sync: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 10
+  steps_per_trial: 1000000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["TCN", "PPO", "V7", "2025-H1", "discrete-3", "constant-lr", "raw-pnl", "phase5"]

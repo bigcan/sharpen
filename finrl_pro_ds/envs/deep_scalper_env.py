@@ -815,13 +815,17 @@ class DeepScalperEnv(gym.Env):
         except Exception as e:
             logging.error(f"Error in _build_frame: {e}")
 
-        # Fix #36: Hard NaN assertion — catch upstream issues before
-        # they silently poison the replay buffer
+        # Fix #36: NaN guard — fill with 0 at step 0 (LOB distance columns
+        # are NaN before the first tick), but assert after warmup period
         if np.isnan(frame).any():
             nan_cols = [self._micro_keys[i] for i in np.where(np.isnan(frame))[0]]
-            raise ValueError(
-                f"NaN in _build_frame at step {self.current_step}: {nan_cols}"
-            )
+            if self.current_step <= self.window_size:
+                # During warmup: fill NaN with 0 (expected for LOB distance/spread cols)
+                np.nan_to_num(frame, copy=False, nan=0.0)
+            else:
+                raise ValueError(
+                    f"NaN in _build_frame at step {self.current_step}: {nan_cols}"
+                )
 
         return frame
 

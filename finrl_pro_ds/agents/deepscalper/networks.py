@@ -146,6 +146,120 @@ class MicroEncoderMLP(nn.Module):
         return self.net(x), None
 
 
+class _CausalConv1dBlock(nn.Module):
+    """Single causal convolution block with residual connection.
+
+    Architecture:
+        x → pad(left) → Conv1d → LayerNorm → GELU → Dropout → + residual → out
+
+    The left-padding ensures causal (no future leakage): output at time t
+    depends only on inputs at times ≤ t.
+    """
+
+    def __init__(self, in_ch: int, out_ch: int, kernel_size: int,
+                 dilation: int, dropout: float = 0.1):
+        super().__init__()
+        # Causal padding: (kernel_size - 1) * dilation on the left side only
+        self.pad_len = (kernel_size - 1) * dilation
+        self.conv = nn.Conv1d(in_ch, out_ch, kernel_size, dilation=dilation)
+        self.norm = nn.LayerNorm(out_ch)
+        self.dropout = nn.Dropout(dropout)
+        # Residual: 1x1 conv if channel dims differ
+        self.residual = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
+
+        self._init_weights()
+
+    def _init_weights(self):
+        nn.init.kaiming_normal_(self.conv.weight, nonlinearity='linear')
+        nn.init.zeros_(self.conv.bias)
+        if isinstance(self.residual, nn.Conv1d):
+            nn.init.kaiming_normal_(self.residual.weight, nonlinearity='linear')
+            nn.init.zeros_(self.residual.bias)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """x: (B, C, T) → (B, C_out, T)"""
+        # Left-pad for causal convolution
+        padded = torch.nn.functional.pad(x, (self.pad_len, 0))
+        out = self.conv(padded)
+        # LayerNorm expects (B, T, C), so transpose → norm → transpose back
+        out = self.norm(out.transpose(1, 2)).transpose(1, 2)
+        out = self.dropout(torch.nn.functional.gelu(out))
+        return out + self.residual(x)
+
+
+class MicroEncoderTCN(nn.Module):
+    """Temporal Convolutional Network encoder for micro-structure features.
+
+    V7: Causal dilated convolutions capture multi-scale LOB dynamics without
+    any hidden state. No recurrence gap (PPO-safe), no flattening (preserves
+    temporal locality unlike MLP).
+
+    Architecture:
+        (B, W, F) → transpose → (B, F, W)
+        → CausalConv1d(F→C₁, k=3, d=1)    — sees 3 ticks
+        → CausalConv1d(C₁→C₂, k=3, d=2)   — sees 7 ticks
+        → CausalConv1d(C₂→C₃, k=3, d=4)   — sees 15 ticks (full window)
+        → take last timestep → (B, C₃)
+        → Linear(C₃, hidden_size) → LayerNorm
+
+    Receptive field = 1 + Σ (kernel_size - 1) * dilation_i for each layer.
+    With k=3, dilations [1,2,4]: RF = 1 + 2*1 + 2*2 + 2*4 = 15 = window_size.
+    """
+
+    def __init__(
+        self,
+        input_size: int = 30,
+        hidden_size: int = 128,
+        window_size: int = 15,
+        tcn_channels: Tuple[int, ...] = (64, 64, 128),
+        kernel_size: int = 3,
+        dropout: float = 0.1,
+        **kwargs,  # Absorbs rnn_type, num_layers, private_input_size
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.window_size = window_size
+
+        # Build TCN blocks with exponentially increasing dilation
+        blocks = []
+        in_ch = input_size
+        for i, out_ch in enumerate(tcn_channels):
+            dilation = 2 ** i  # 1, 2, 4, 8, ...
+            blocks.append(_CausalConv1dBlock(
+                in_ch, out_ch, kernel_size, dilation, dropout
+            ))
+            in_ch = out_ch
+
+        self.tcn = nn.Sequential(*blocks)
+
+        # Project last timestep to hidden_size
+        self.proj = nn.Sequential(
+            nn.Linear(in_ch, hidden_size),
+            nn.LayerNorm(hidden_size),
+        )
+
+        # Compute and log receptive field
+        rf = 1 + sum((kernel_size - 1) * (2 ** i) for i in range(len(tcn_channels)))
+        self._receptive_field = rf
+
+    def forward(
+        self, x: torch.Tensor, hidden=None
+    ) -> Tuple[torch.Tensor, None]:
+        """
+        Args:
+            x: (B, W, F) micro features
+            hidden: Ignored — kept for interface compatibility
+
+        Returns:
+            (B, hidden_size) encoded features, None (no hidden state)
+        """
+        # (B, W, F) → (B, F, W) for Conv1d
+        x = x.transpose(1, 2)
+        x = self.tcn(x)
+        # Take last timestep: (B, C, W) → (B, C)
+        x = x[:, :, -1]
+        return self.proj(x), None
+
 class MacroEncoder(nn.Module):
     """
     Encodes Macro-structure features (Technicals) using MLP.
@@ -197,6 +311,8 @@ class DeepScalperNetwork(nn.Module):
         encoder_type = micro_config.get("encoder_type", "rnn").lower()
         if encoder_type == "mlp":
             self.micro_encoder = MicroEncoderMLP(**micro_config)
+        elif encoder_type == "tcn":
+            self.micro_encoder = MicroEncoderTCN(**micro_config)
         else:
             self.micro_encoder = MicroEncoder(**micro_config)
             
