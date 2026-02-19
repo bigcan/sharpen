@@ -417,28 +417,82 @@ def wait_for_runs(run_ids, poll_interval=None, max_wait=None):
                     completed[rid] = fetch_run_metrics(rid)
                     pending.discard(rid)
                 else:
-                    # RALPH-04: Zombie Check
-                    # Verify if process is actually running on remote
+                    # ── RALPH-04 v2: Robust zombie/stall detection ──
+                    # Three independent signals:
+                    #   1. pgrep: Is a pipeline process physically running?
+                    #   2. WandB heartbeat: Has WandB received data recently?
+                    #   3. Step progress: Have training steps advanced?
+                    
+                    steps = run.summary._json_dict.get("train/global_step", None)
+                    
+                    # Track step progress for stall detection
+                    if not hasattr(wait_for_runs, '_step_tracker'):
+                        wait_for_runs._step_tracker = {}
+                    tracker_key = rid
+                    now = time.time()
+                    
+                    if tracker_key not in wait_for_runs._step_tracker:
+                        wait_for_runs._step_tracker[tracker_key] = {
+                            'last_steps': steps, 'last_change': now, 'stall_count': 0
+                        }
+                    tracker = wait_for_runs._step_tracker[tracker_key]
+                    
+                    # Update step tracker
+                    if steps is not None and steps != tracker['last_steps']:
+                        tracker['last_steps'] = steps
+                        tracker['last_change'] = now
+                        tracker['stall_count'] = 0
+                    
+                    # Signal 1: Physical process check (pgrep)
+                    # Use [r] trick to prevent pgrep matching its own bash -c shell
+                    process_alive = True
                     try:
-                        # We need the PID to check specifically, but finding specific run PIDs 
-                        # remotely without a mapping is hard. 
-                        # However, we can check if *any* python process matches the run config?
-                        # Simpler: If WandB says running but last heartbeat > 5 min, suspect zombie.
-                        # Even better: remote_cmd("pgrep -f run_full_pipeline.py") 
-                        # If NO pipeline is running, but this run is 'running', it's a zombie.
-                        if len(pending) == 1: # Only accurate if we are tracking 1 run or we know they share the machine
-                             pids = remote_cmd("pgrep -f run_full_pipeline.py || echo ''", timeout=10).strip()
-                             if not pids:
-                                 rlog(f"Run {rid}: WandB='running' but NO physical process found! Marking CRASHED.", "ERR")
-                                 completed[rid] = {"run_id": rid, "state": "crashed", "error": "Zombie process detected"}
-                                 pending.discard(rid)
-                                 continue
+                        pids = remote_cmd(
+                            "pgrep -f '[r]un_full_pipeline.py' || true", 
+                            timeout=15
+                        ).strip()
+                        process_alive = bool(pids)
                     except Exception as z_err:
-                        rlog(f"Zombie check failed: {z_err}")
-
+                        rlog(f"Zombie pgrep failed (assuming alive): {z_err}")
+                    
+                    # Signal 2: WandB heartbeat age
+                    heartbeat_stale = False
+                    try:
+                        last_hb = run.heartbeatAt
+                        if last_hb:
+                            from datetime import timezone
+                            hb_age_sec = (datetime.now(timezone.utc) - last_hb).total_seconds()
+                            heartbeat_stale = hb_age_sec > 600  # >10 min = stale
+                    except Exception:
+                        pass
+                    
+                    # Signal 3: Stall detection (no step progress for 15+ min)
+                    mins_since_change = (now - tracker['last_change']) / 60
+                    is_stalled = mins_since_change > 15
+                    
+                    # Decision logic
+                    if not process_alive:
+                        rlog(f"Run {rid}: NO physical process! Marking CRASHED.", "ERR")
+                        completed[rid] = {"run_id": rid, "state": "crashed", 
+                                        "error": "No matching process on remote"}
+                        pending.discard(rid)
+                        continue
+                    
+                    if heartbeat_stale and is_stalled:
+                        tracker['stall_count'] += 1
+                        rlog(f"Run {rid}: Heartbeat stale ({int(mins_since_change)}m no progress). "
+                             f"Stall count: {tracker['stall_count']}/2", "WARN")
+                        if tracker['stall_count'] >= 2:
+                            rlog(f"Run {rid}: Confirmed zombie (stale heartbeat + no progress). "
+                                 f"Marking CRASHED.", "ERR")
+                            completed[rid] = {"run_id": rid, "state": "crashed",
+                                            "error": "Zombie: stale heartbeat + no step progress"}
+                            pending.discard(rid)
+                            continue
+                    
                     # Log progress
-                    steps = run.summary._json_dict.get("train/global_step", "?")
-                    rlog(f"Run {rid}: {state} (steps: {steps})")
+                    step_str = steps if steps is not None else "?"
+                    rlog(f"Run {rid}: {state} (steps: {step_str})")
             except Exception as e:
                 rlog(f"Error polling {rid}: {e}", "WARN")
         

@@ -75,7 +75,7 @@ class PPOTrainer:
 
         # FIX BUG-11: Validate encoder_type before agent construction
         encoder_type = net_cfg.get("micro_config", {}).get("encoder_type", "lstm")
-        assert encoder_type in ("lstm", "mlp"), (
+        assert encoder_type in ("lstm", "mlp", "tcn"), (
             f"Unknown encoder_type='{encoder_type}' in network.micro_config. "
             f"Supported: 'lstm', 'mlp'."
         )

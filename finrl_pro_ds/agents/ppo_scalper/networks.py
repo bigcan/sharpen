@@ -13,7 +13,7 @@ from torch.distributions import Categorical
 from typing import Dict, Tuple, Optional
 
 from finrl_pro_ds.agents.deepscalper.networks import (
-    MicroEncoder, MicroEncoderMLP, MacroEncoder
+    MicroEncoder, MicroEncoderMLP, MicroEncoderTCN, MacroEncoder
 )
 
 
@@ -54,6 +54,8 @@ class PPOActorCritic(nn.Module):
         private_size = micro_config.pop("private_input_size", 3)
         if encoder_type == "mlp":
             self.micro_encoder = MicroEncoderMLP(**micro_config)
+        elif encoder_type == "tcn":
+            self.micro_encoder = MicroEncoderTCN(**micro_config)
         else:
             self.micro_encoder = MicroEncoder(**micro_config)
         self.macro_encoder = MacroEncoder(**macro_config)
