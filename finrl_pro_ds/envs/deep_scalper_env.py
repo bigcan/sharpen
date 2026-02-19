@@ -33,7 +33,11 @@ class RunningMeanStd:
         self.var += (delta * delta2 - self.var) / self.count
 
     def normalize(self, x):
-        return x / max(self.var ** 0.5, 1e-8)
+        # NOTE: Only divides by std, does NOT subtract mean.
+        # This matches SB3 VecNormalize(norm_reward=True) behavior.
+        # Mean centering would shift the reward baseline that PPO's
+        # value function already handles.
+        return x / max(max(self.var, 0.0) ** 0.5, 1e-8)
 
 
 class DeepScalperEnv(gym.Env):
@@ -91,6 +95,12 @@ class DeepScalperEnv(gym.Env):
         # Reward Config — T1.1: NAV-based reward (portfolio delta)
         self.reward_config = config.get("reward", {})
         self.reward_scaling = float(self.reward_config.get("scaling", 1.0))
+        if self.reward_scaling != 1.0:
+            logging.warning(
+                f"reward_scaling={self.reward_scaling} != 1.0. "
+                f"Post T1.1 NAV-based reward, scaling should typically be 1.0. "
+                f"Check if this config is outdated (pre-Tier-1)."
+            )
         self.volatility_horizon = int(self.reward_config.get("volatility_horizon", 100))  # Section 4.4
 
         # Optional Risk-Aware Reward: Differential Sharpe Ratio (Moody & Saffell 2001)
@@ -153,6 +163,10 @@ class DeepScalperEnv(gym.Env):
         self.position = 0.0
         self.notional_debt = 0.0  # Borrowed notional for leveraged positions
         self.prev_portfolio_value = self.initial_balance # For dense reward
+
+        # T1.5v2: High/Low candle prices for realistic maker fill simulation
+        self.current_high = 0.0
+        self.current_low = 0.0
         
         self.current_step = 0
         self.avg_price = 0.0
@@ -211,6 +225,8 @@ class DeepScalperEnv(gym.Env):
         self.current_mid_price = 0.0
         self.current_best_bid = 0.0
         self.current_best_ask = 0.0
+        self.current_high = 0.0
+        self.current_low = 0.0
         self._raw_bid_vol_1 = 0.0  # RAW volume for liquidity checks
         self._raw_ask_vol_1 = 0.0  # RAW volume for liquidity checks
         
@@ -423,8 +439,10 @@ class DeepScalperEnv(gym.Env):
                 if not self._check_margin(self.position, order_qty, order_px, 1):
                      order_qty = 0 # Reject
 
-                # T1.5 FIX (BUG-03): Strict inequality for maker fills to reduce adverse selection
-                fill_condition = (self.current_best_ask <= order_px) if is_taker else (self.current_best_ask < order_px)
+                # T1.5v2 FIX (BUG-03): Candle-based maker fill simulation
+                # Taker: fills if ask <= limit (immediate execution at BBO)
+                # Maker: fills if low < limit (market traded below our buy limit)
+                fill_condition = (self.current_best_ask <= order_px) if is_taker else (self.current_low < order_px)
                 if order_qty > 0 and self.current_best_ask > 0 and fill_condition:
                     # FIX CQ-2: Removed dead hasattr check (_raw_ask_vol_1 always set in __init__)
                     available_vol = self._raw_ask_vol_1 if self._raw_ask_vol_1 > 0 else 0.0
@@ -520,8 +538,10 @@ class DeepScalperEnv(gym.Env):
                 if not self._check_margin(self.position, order_qty, order_px, 2):
                      order_qty = 0 # Reject
 
-                # T1.5 FIX (BUG-03): Strict inequality for maker fills to reduce adverse selection
-                fill_condition = (self.current_best_bid >= order_px) if is_taker else (self.current_best_bid > order_px)
+                # T1.5v2 FIX (BUG-03): Candle-based maker fill simulation
+                # Taker: fills if bid >= limit (immediate execution at BBO)
+                # Maker: fills if high > limit (market traded above our sell limit)
+                fill_condition = (self.current_best_bid >= order_px) if is_taker else (self.current_high > order_px)
                 if order_qty > 0 and self.current_best_bid > 0 and fill_condition:
                     # Liquidity Check
                     # FIX N2: Removed dead hasattr check (sell-side, matches buy-side CQ-2 fix)
@@ -613,7 +633,12 @@ class DeepScalperEnv(gym.Env):
                         if hasattr(self.position, "item"): self.position = self.position.item()
                         self.position = float(self.position)
                         
-            self.pending_order = None  # Order processed
+            # T1.4 FIX (Finding-02): Only clear pending_order on FILL.
+            # Previously cleared unconditionally, giving maker orders only
+            # 1-tick lifetime. Now unfilled maker orders persist until
+            # filled or replaced by a new action.
+            if fill_price is not None:
+                self.pending_order = None  # Order filled — clear it
             
             # CRITICAL FIX: Update Private State in Window to reflect execution
             # The agent needs to see the new position in the current observation
@@ -681,6 +706,8 @@ class DeepScalperEnv(gym.Env):
             # Update EMA statistics
             delta_A = R_t - self._dsr_A
             delta_B = R_t * R_t - self._dsr_B
+            # Finding-10: Cache previous values for DSR formula (Moody & Saffell 2001)
+            prev_A, prev_B = self._dsr_A, self._dsr_B
             self._dsr_A += self._dsr_eta * delta_A
             self._dsr_B += self._dsr_eta * delta_B
             self._dsr_warmup += 1
@@ -691,19 +718,22 @@ class DeepScalperEnv(gym.Env):
                 variance = max(variance, 0.0)
                 if variance > 1e-16:
                     denom = variance ** 1.5
-                    dsr = (self._dsr_B * delta_A - 0.5 * self._dsr_A * delta_B) / denom
+                    dsr = (prev_B * delta_A - 0.5 * prev_A * delta_B) / denom
                     reward_sharpe = float(np.clip(dsr * self.dsr_scale, -10.0, 10.0))
 
         # Blend: (1 - w) × paper + w × DSR  (w=0 → pure NAV)
         reward = (1.0 - self.sharpe_weight) * paper_reward + self.sharpe_weight * reward_sharpe
 
-        # Reward clipping ±50 bps
-        reward = float(np.clip(reward, -50.0, 50.0))
-
         # T1.3: Running reward normalization
+        # Finding-03: Update with RAW reward, then normalize, then clip the normalized result.
+        # Clipping before normalization would bias the variance estimate downward.
         if self.reward_normalizer:
-            self.reward_normalizer.update(reward)
+            self.reward_normalizer.update(reward)  # Raw reward for accurate statistics
             reward = self.reward_normalizer.normalize(reward)
+            reward = float(np.clip(reward, -5.0, 5.0))  # Clip normalized (tighter window)
+        else:
+            # Reward clipping ±50 bps (raw rewards only)
+            reward = float(np.clip(reward, -50.0, 50.0))
 
         # 4.3 Volatility Prediction Target (Section 4.4 — auxiliary loss, NOT reward)
         volatility_target = 0.0
@@ -802,6 +832,11 @@ class DeepScalperEnv(gym.Env):
             # CRITICAL: Use RAW prices for order execution (not normalized)
             self.current_best_bid = float(step_data.get('bid_price_1', 0))
             self.current_best_ask = float(step_data.get('ask_price_1', 0))
+
+            # T1.5v2: High/Low candle data for realistic maker fill simulation
+            # Fallback to BBO if high/low not available (test environments)
+            self.current_high = float(step_data.get('high', self.current_best_ask))
+            self.current_low = float(step_data.get('low', self.current_best_bid))
 
             # Raw volumes for liquidity checks
             self._raw_bid_vol_1 = float(step_data.get('bid_vol_1', 0))

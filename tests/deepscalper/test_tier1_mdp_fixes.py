@@ -4,7 +4,7 @@ Tests for Tier 1 MDP Physics Fixes (Stage 2).
 T1.1: NAV-based reward (replaces mid-to-mid PnL + removes hindsight)
 T1.3: RunningMeanStd reward normalizer
 T1.4: Hold preserves pending order (maker persistence)
-T1.5: Strict fill inequality for maker orders
+T1.5v2: Candle-based fill (maker fills use high/low, not BBO)
 """
 
 import unittest
@@ -33,11 +33,17 @@ def _make_env(config_overrides=None, handler=None):
     return DeepScalperEnv(config, mock_handler), mock_handler
 
 
-def _make_step_data(bid=100.0, ask=101.0, bid_vol=10.0, ask_vol=10.0):
-    """Create a mock step data dict with LOB data."""
+def _make_step_data(bid=100.0, ask=101.0, bid_vol=10.0, ask_vol=10.0, high=None, low=None):
+    """Create a mock step data dict with LOB + candle data.
+    
+    high/low default to ask/bid respectively (no intra-snapshot movement).
+    Set explicitly to simulate candle range for fill tests.
+    """
     row = {
         "bid_price_1": bid, "bid_vol_1": bid_vol,
         "ask_price_1": ask, "ask_vol_1": ask_vol,
+        "high": high if high is not None else ask,
+        "low": low if low is not None else bid,
         "timestamp": "2023-01-01T00:00:00",
     }
     for i in range(2, 6):
@@ -199,30 +205,65 @@ class TestT14MakerPersistence(unittest.TestCase):
     """T1.4: Hold action preserves existing pending order."""
 
     def test_hold_preserves_pending_order(self):
-        """A Hold action should NOT clear pending_order."""
+        """A Hold action should NOT clear an unfilled pending_order (Finding-02 fix)."""
         env, handler = _make_env()
         env.reset()
 
-        # Place a buy order (non-taker) that won't fill immediately
+        # Place a deep maker buy (price_idx=4 → offset=4 ticks below ask)
+        # limit_price = 101.0 - 4*0.1 = 100.6, maker (below ask)
+        # At T+1 ask=101.0, fill_condition: 101.0 < 100.6 → False → no fill
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
         buy_idx = env.signed_qty_proportions.index(0.05)
-        action = np.array([0, buy_idx])  # price_idx=0 → deep limit order
+        action = np.array([4, buy_idx])  # price_idx=4 → deep limit
         _, _, _, _, _ = env.step(action)
 
         # Verify pending order was created
+        self.assertIsNotNone(env.pending_order,
+                             "A maker buy order should create a pending order")
         pending_before = env.pending_order
-        self.assertIsNotNone(pending_before,
-                             "A buy order should create a pending order")
 
-        # Now send Hold — pending_order should PERSIST
+        # Hold — ask stays at 101.0, order at 100.6 should NOT fill and should persist
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
         hold_idx = env.signed_qty_proportions.index(0.0)
         action = np.array([2, hold_idx])
         _, _, _, _, _ = env.step(action)
 
-        # If the order didn't fill, pending_order should still be there
-        # (it may have been consumed by the fill logic, which is correct)
-        # The key test: Hold itself does NOT set pending_order = None
+        # Finding-02 fix: unfilled order MUST survive through Hold
+        self.assertIsNotNone(env.pending_order,
+                             "Unfilled maker order must persist through Hold (Finding-02)")
+        self.assertEqual(env.pending_order[1], pending_before[1],
+                         "Persisted order should retain its limit price")
+        self.assertAlmostEqual(env.position, 0.0,
+                               msg="No fill should have occurred")
+
+    def test_multi_hold_order_survives(self):
+        """Maker order should survive multiple consecutive Hold steps (Finding-12)."""
+        env, handler = _make_env()
+        env.reset()
+
+        # Place deep maker buy that won't fill
+        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        buy_idx = env.signed_qty_proportions.index(0.05)
+        action = np.array([4, buy_idx])  # Deep limit order
+        _, _, _, _, _ = env.step(action)
+
+        self.assertIsNotNone(env.pending_order)
+        original_price = env.pending_order[1]
+
+        # Hold for 3 consecutive steps — order should persist each time
+        hold_idx = env.signed_qty_proportions.index(0.0)
+        for step_i in range(3):
+            handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+            action = np.array([2, hold_idx])
+            _, _, _, _, _ = env.step(action)
+
+            self.assertIsNotNone(env.pending_order,
+                                 f"Order must survive Hold at step {step_i+1}")
+            self.assertEqual(env.pending_order[1], original_price,
+                             f"Order price must be unchanged at step {step_i+1}")
+
+        # Position should still be flat
+        self.assertAlmostEqual(env.position, 0.0)
 
     def test_new_order_replaces_pending(self):
         """A new non-hold action should replace any existing pending_order."""
@@ -231,15 +272,15 @@ class TestT14MakerPersistence(unittest.TestCase):
 
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
 
-        # Place first order
+        # Place first order (deep limit so it doesn't fill)
         buy_idx = env.signed_qty_proportions.index(0.05)
-        action = np.array([0, buy_idx])
+        action = np.array([4, buy_idx])
         _, _, _, _, _ = env.step(action)
 
         # Place different order — should replace
         sell_idx = env.signed_qty_proportions.index(-0.05)
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-        action = np.array([0, sell_idx])
+        action = np.array([4, sell_idx])
         _, _, _, _, _ = env.step(action)
 
         self.assertIsNotNone(env.pending_order)
@@ -247,44 +288,42 @@ class TestT14MakerPersistence(unittest.TestCase):
                          "New order should replace old pending order")
 
 
-class TestT15StrictFillInequality(unittest.TestCase):
-    """T1.5: Maker fills require strict price crossing."""
+class TestT15CandleBasedFill(unittest.TestCase):
+    """T1.5v2: Maker fills use candle high/low for realistic fill simulation."""
 
-    def test_maker_buy_at_ask_does_not_fill(self):
-        """Maker limit buy at exactly best_ask should NOT fill (equality excluded)."""
+    def test_maker_buy_no_fill_when_low_at_limit(self):
+        """Maker buy at 101.0 should NOT fill when low==101.0 (equality excluded)."""
         env, handler = _make_env()
         env.reset()
 
-        # Create a maker buy order at exactly the ask price
-        # This simulates: limit_price = best_ask (maker, not taker since offset > 0
-        # but then the ask doesn't move, so at T+1 best_ask == order_px → should NOT fill)
-        env.pending_order = (1, 101.0, 0.05, False)  # Buy, at ask=101, maker (is_taker=False)
+        # Maker buy at 101.0 — low never dips below limit
+        env.pending_order = (1, 101.0, 0.05, False)
 
-        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        # low=101.0 == limit → NOT filled (need strict <)
+        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0, low=101.0)
         hold_idx = env.signed_qty_proportions.index(0.0)
         action = np.array([2, hold_idx])
         _, _, _, _, _ = env.step(action)
 
-        # Position should NOT have changed (maker order at ask = no fill)
         self.assertAlmostEqual(env.position, 0.0,
-                               msg="Maker buy at exactly ask should NOT fill (strict inequality)")
+                               msg="Maker buy should NOT fill when low == limit (need low < limit)")
 
-    def test_maker_buy_fills_when_ask_drops_below(self):
-        """Maker buy fills when ask drops strictly below limit price."""
+    def test_maker_buy_fills_when_low_below_limit(self):
+        """Maker buy fills when candle low dips below limit price."""
         env, handler = _make_env()
         env.reset()
 
         # Maker buy at 101.0
         env.pending_order = (1, 101.0, 0.05, False)
 
-        # Ask drops to 100.5 < 101.0 → should fill
-        handler.step.return_value = _make_step_data(bid=100.0, ask=100.5)
+        # low=100.5 < 101.0 → market traded below our limit → fill
+        handler.step.return_value = _make_step_data(bid=100.0, ask=102.0, low=100.5)
         hold_idx = env.signed_qty_proportions.index(0.0)
         action = np.array([2, hold_idx])
         _, _, _, _, _ = env.step(action)
 
         self.assertGreater(abs(env.position), 0.0,
-                           msg="Maker buy should fill when ask < limit_price")
+                           msg="Maker buy should fill when low < limit_price")
 
     def test_taker_buy_fills_at_equality(self):
         """Taker buy should still fill at equality (backward compatible)."""
@@ -302,37 +341,38 @@ class TestT15StrictFillInequality(unittest.TestCase):
         self.assertGreater(abs(env.position), 0.0,
                            msg="Taker buy should fill at ask == limit_price")
 
-    def test_maker_sell_at_bid_does_not_fill(self):
-        """Maker limit sell at exactly best_bid should NOT fill."""
+    def test_maker_sell_no_fill_when_high_at_limit(self):
+        """Maker sell at 100.0 should NOT fill when high==100.0 (equality excluded)."""
         env, handler = _make_env()
         env.reset()
 
-        # Maker sell at bid=100.0
+        # Maker sell at 100.0 — high never rises above limit
         env.pending_order = (2, 100.0, 0.05, False)
 
-        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        # high=100.0 == limit → NOT filled (need strict >)
+        handler.step.return_value = _make_step_data(bid=99.0, ask=100.0, high=100.0)
         hold_idx = env.signed_qty_proportions.index(0.0)
         action = np.array([2, hold_idx])
         _, _, _, _, _ = env.step(action)
 
         self.assertAlmostEqual(env.position, 0.0,
-                               msg="Maker sell at exactly bid should NOT fill (strict inequality)")
+                               msg="Maker sell should NOT fill when high == limit (need high > limit)")
 
-    def test_maker_sell_fills_when_bid_rises_above(self):
-        """Maker sell fills when bid rises strictly above limit price."""
+    def test_maker_sell_fills_when_high_above_limit(self):
+        """Maker sell fills when candle high rises above limit price."""
         env, handler = _make_env()
         env.reset()
 
         env.pending_order = (2, 100.0, 0.05, False)
 
-        # Bid rises to 100.5 > 100.0 → should fill
-        handler.step.return_value = _make_step_data(bid=100.5, ask=101.5)
+        # high=100.5 > 100.0 → market traded above our limit → fill
+        handler.step.return_value = _make_step_data(bid=99.0, ask=100.0, high=100.5)
         hold_idx = env.signed_qty_proportions.index(0.0)
         action = np.array([2, hold_idx])
         _, _, _, _, _ = env.step(action)
 
         self.assertLess(env.position, 0.0,
-                        msg="Maker sell should fill when bid > limit_price")
+                        msg="Maker sell should fill when high > limit_price")
 
     def test_taker_sell_fills_at_equality(self):
         """Taker sell should still fill at equality."""
