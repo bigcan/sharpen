@@ -92,7 +92,12 @@ class RolloutBuffer:
         self.micro[t] = obs["micro"]
         self.private[t] = obs["private"]
         self.macro[t] = obs["macro"]
-        self.actions[t] = actions
+        # FIX T2-SHAPE: PPO Discrete(6) returns actions as (B,) flat array,
+        # but buffer shape is (T, B, n_action_branches=1). Reshape to match.
+        act = np.asarray(actions)
+        if act.ndim == 1 and self.actions.ndim == 3:
+            act = act.reshape(-1, 1)
+        self.actions[t] = act
         self.log_probs[t] = log_probs
         self.rewards[t] = rewards
         self.values[t] = values

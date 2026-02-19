@@ -151,6 +151,7 @@ class PPOTrainer:
               f"Epochs: {self.training_epochs}")
 
         # Init state
+        qty_mask = None  # Default: no masking unless env or prior state provides one
         if skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
             obs = self._current_obs
             # AUDIT FIX: Restore mask too
@@ -192,9 +193,6 @@ class PPOTrainer:
                 torch.as_tensor(o["macro"], dtype=torch.float32).to(device),
             )
 
-        # AUDIT FIX FLAG-2: Extract qty_mask from env.reset() info so masking
-        # is active from the very first prediction (prevents position-limit violations).
-        qty_mask = None
 
         for epoch in range(self.training_epochs):
             print(f"\n=== Epoch {epoch+1}/{self.training_epochs} ===")
