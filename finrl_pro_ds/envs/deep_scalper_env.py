@@ -611,17 +611,21 @@ class DeepScalperEnv(gym.Env):
                                 open_fee = open_notional * fee_rate
                                 self.balance += open_notional  # Receive sale proceeds
                                 self.balance -= open_fee       # Pay fee
-                                self.notional_debt += open_notional  # Owe buyback
+                                # FIX ENV-06b: Debt = unfunded portion only (0 in spot mode)
+                                # Symmetric with buy-side: borrowed = notional * (1 - margin_req)
+                                self.notional_debt += open_notional * (1.0 - self.margin_requirement)
                                 fee = close_fee + open_fee
                             else:
                                 fee = close_fee
                             proceeds = 0  # Handled above per-leg
                         else:
-                            # Opening/extending short — receive proceeds, pay fee, owe buyback
+                            # Opening/extending short — receive proceeds, pay fee
                             # FIX ENV-06: Credit short sale proceeds (was missing)
                             self.balance += notional   # Receive sale proceeds
                             self.balance -= fee        # Pay fee
-                            self.notional_debt += notional  # Full buyback obligation
+                            # FIX ENV-06b: Debt = unfunded portion only (0 in spot mode)
+                            # Symmetric with buy-side: borrowed = notional * (1 - margin_req)
+                            self.notional_debt += notional * (1.0 - self.margin_requirement)
                             proceeds = 0
                         
                         # Track cumulative costs
