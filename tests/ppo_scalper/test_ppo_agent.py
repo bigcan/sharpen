@@ -38,7 +38,7 @@ def network_config():
             "hidden_sizes": [64, 32],
         },
         "fusion_dim": 64,
-        "action_space_dims": (5, 9),
+        "action_space_dims": 6,  # Tier 2: Discrete(6)
     }
 
 
@@ -72,7 +72,7 @@ class TestPPOActorCritic:
             micro, private, macro
         )
         
-        assert actions.shape == (B, 2), f"Expected (B, 2), got {actions.shape}"
+        assert actions.shape == (B,), f"Expected (B,), got {actions.shape}"
         assert log_probs.shape == (B,), f"Expected (B,), got {log_probs.shape}"
         assert values.shape == (B,), f"Expected (B,), got {values.shape}"
         assert entropy.shape == (B,), f"Expected (B,), got {entropy.shape}"
@@ -91,24 +91,22 @@ class TestPPOActorCritic:
         micro, private, macro = batch_data
         B = micro.shape[0]
         
-        # Mask: only allow qty index 4 (center = hold)
-        qty_mask = torch.zeros(B, 9)
-        qty_mask[:, 4] = 1.0
+        # Mask: only allow action index 3 (center = hold)
+        qty_mask = torch.zeros(B, 6)
+        qty_mask[:, 3] = 1.0
         
         for _ in range(10):
             actions, _, _, _ = ppo_network(
                 micro, private, macro, qty_mask=qty_mask
             )
-            assert (actions[:, 1] == 4).all(), "Masked qty should always be 4"
+            assert (actions == 3).all(), "Masked action should always be 3"
 
     def test_evaluate_actions(self, ppo_network, batch_data):
         """evaluate_actions should return matching shapes."""
         micro, private, macro = batch_data
         B = micro.shape[0]
         
-        actions = torch.randint(0, 5, (B,)).unsqueeze(1)
-        qty_actions = torch.randint(0, 9, (B,)).unsqueeze(1)
-        all_actions = torch.cat([actions, qty_actions], dim=1)
+        all_actions = torch.randint(0, 6, (B,))
         
         log_probs, values, entropy = ppo_network.evaluate_actions(
             micro, private, macro, all_actions
@@ -148,7 +146,7 @@ class TestRolloutBuffer:
         buf = RolloutBuffer(
             rollout_steps=T, num_envs=B,
             micro_shape=(15, 30), private_shape=(15, 3),
-            macro_shape=(15,), n_action_branches=2,
+            macro_shape=(15,), n_action_branches=1,
         )
         
         for t in range(T):
@@ -159,7 +157,7 @@ class TestRolloutBuffer:
             }
             buf.store(
                 obs=obs,
-                actions=np.random.randint(0, 5, (B, 2)),
+                actions=np.random.randint(0, 6, (B, 1)),
                 log_probs=np.random.randn(B).astype(np.float32),
                 rewards=np.random.randn(B).astype(np.float32),
                 values=np.random.randn(B).astype(np.float32),
@@ -193,7 +191,7 @@ class TestRolloutBuffer:
                 "private": np.zeros((B, 15, 3), dtype=np.float32),
                 "macro": np.zeros((B, 15), dtype=np.float32),
             }
-            buf.store(obs=obs, actions=np.zeros((B, 2), dtype=np.int64),
+            buf.store(obs=obs, actions=np.zeros((B, 1), dtype=np.int64),
                       log_probs=np.zeros(B, dtype=np.float32),
                       rewards=np.zeros(B, dtype=np.float32),
                       values=np.zeros(B, dtype=np.float32),
@@ -206,7 +204,7 @@ class TestRolloutBuffer:
         for batch in buf.iterate_minibatches(batch_size):
             assert batch["micro"].shape[0] <= batch_size
             assert batch["micro"].shape[1:] == (15, 30)
-            assert batch["actions"].shape[1] == 2
+            assert batch["actions"].shape[1] == 1
             total_samples += batch["micro"].shape[0]
         
         assert total_samples == T * B
@@ -223,7 +221,7 @@ class TestRolloutBuffer:
                 "private": np.zeros((1, 15, 3), dtype=np.float32),
                 "macro": np.zeros((1, 15), dtype=np.float32),
             }
-            buf.store(obs=obs, actions=np.zeros((1, 2), dtype=np.int64),
+            buf.store(obs=obs, actions=np.zeros((1, 1), dtype=np.int64),
                       log_probs=np.zeros(1, dtype=np.float32),
                       rewards=np.zeros(1, dtype=np.float32),
                       values=np.zeros(1, dtype=np.float32),
@@ -257,7 +255,7 @@ class TestPPOAgent:
         actions, log_probs, values = agent.predict(micro, private, macro)
         
         assert isinstance(actions, np.ndarray)
-        assert actions.shape == (B, 2)
+        assert actions.shape == (B,)
         assert actions.dtype == np.int64
         assert isinstance(log_probs, np.ndarray)
         assert log_probs.shape == (B,)
@@ -281,7 +279,7 @@ class TestPPOAgent:
         private = torch.randn(1, 15, 3)
         macro = torch.randn(1, 15)
         actions, log_probs, values = agent.predict(micro, private, macro)
-        assert actions.shape == (1, 2)
+        assert actions.shape == (1,)
         
         # reset/mask should be no-ops (no error)
         agent.reset_hidden_state()
@@ -342,7 +340,7 @@ class TestPPOAgent:
         private = torch.randn(1, 15, 3)
         macro = torch.randn(1, 15)
         actions, _, _ = agent_v5.predict(micro, private, macro)
-        assert actions.shape == (1, 2)
+        assert actions.shape == (1,)
 
 
 # ============================================================================
@@ -369,7 +367,7 @@ class TestEncoderTypeRegression:
                 "hidden_sizes": [64, 32],
             },
             "fusion_dim": 64,
-            "action_space_dims": (5, 9),
+            "action_space_dims": 6,
         }
 
         net = PPOActorCritic(**config)
@@ -380,7 +378,7 @@ class TestEncoderTypeRegression:
         macro = torch.randn(B, 15)
 
         actions, log_probs, values, entropy = net(micro, private, macro)
-        assert actions.shape == (B, 2)
+        assert actions.shape == (B,)
         assert log_probs.shape == (B,)
         assert values.shape == (B,)
 
@@ -411,7 +409,7 @@ class TestEncoderTypeRegression:
         micro = torch.randn(B, 15, 30)
         private = torch.randn(B, 15, 3)
         macro = torch.randn(B, 15)
-        actions = torch.tensor([[2, 4], [1, 3]])
+        actions = torch.randint(0, 6, (B,))
 
         log_probs, values, entropy = net.evaluate_actions(
             micro, private, macro, actions
