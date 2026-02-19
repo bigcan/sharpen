@@ -117,9 +117,15 @@ class DeepScalperEnv(gym.Env):
         self.reward_normalizer = RunningMeanStd() if self.normalize_reward else None
 
         # Tier 2: Discrete Action Space (Flattened)
-        # 0: Taker Buy, 1: Maker Buy, 2: Hold, 3: Cancel, 4: Maker Sell, 5: Taker Sell
-        self.action_space = gym.spaces.Discrete(6)
+        # Discrete(6): 0=TakerBuy, 1=MakerBuy, 2=Hold, 3=Cancel, 4=MakerSell, 5=TakerSell
+        # Discrete(3): 0=TakerBuy, 1=Hold, 2=TakerSell (taker-only, no maker/cancel)
+        self.discrete_dims = config.get("action", {}).get("discrete_dims", 6)
+        self.action_space = gym.spaces.Discrete(self.discrete_dims)
         self.fixed_trade_qty = float(config.get("action", {}).get("fixed_trade_qty", 0.2)) # 20% of max_position
+
+        # Discrete(3) → Discrete(6) action mapping for internal processing
+        # Maps simplified 3-action space to the 6-action internal logic
+        self._disc3_to_disc6 = {0: 0, 1: 2, 2: 5}  # TakerBuy→0, Hold→2, TakerSell→5
 
         # Spaces
         # v2: Micro dim = 30 (evidence-ranked features, replaces v1 LOB layout)
@@ -683,6 +689,9 @@ class DeepScalperEnv(gym.Env):
         # 3. Process NEW Action (T) → becomes Pending for T+1
         # Tier 2: Flattened Action Space [0: TBuy, 1: MBuy, 2: Hold, 3: Cancel, 4: MSell, 5: TSell]
         action = int(action)
+        # Discrete(3) remapping: 0=TakerBuy→0, 1=Hold→2, 2=TakerSell→5
+        if self.discrete_dims == 3:
+            action = self._disc3_to_disc6[action]
         direction = 0
         quantity = self.fixed_trade_qty * self.max_position
         
@@ -965,21 +974,26 @@ class DeepScalperEnv(gym.Env):
         }
 
     def _get_qty_action_mask(self):
-        """Tier 2: Action mask for Discrete(6) action space.
-        
-        Returns np.ndarray of shape (6,) with 1=valid, 0=invalid.
-        0: Taker Buy, 1: Maker Buy, 2: Hold, 3: Cancel, 4: Maker Sell, 5: Taker Sell
+        """Action mask for Discrete action space.
+
+        Discrete(6): shape (6,) — 0:TBuy, 1:MBuy, 2:Hold, 3:Cancel, 4:MSell, 5:TSell
+        Discrete(3): shape (3,) — 0:TBuy, 1:Hold, 2:TSell
         """
+        if self.discrete_dims == 3:
+            mask = np.ones(3, dtype=np.float32)
+            if self.position >= self.max_position:
+                mask[0] = 0.0  # Block Taker Buy
+            if self.position <= -self.max_position:
+                mask[2] = 0.0  # Block Taker Sell
+            return mask
+
         mask = np.ones(6, dtype=np.float32)
-        
         if self.position >= self.max_position:
             mask[0] = 0.0  # Block Taker Buy
             mask[1] = 0.0  # Block Maker Buy
-        
         if self.position <= -self.max_position:
             mask[4] = 0.0  # Block Maker Sell
             mask[5] = 0.0  # Block Taker Sell
-        
         return mask
 
     def render(self, mode='human'):

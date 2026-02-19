@@ -87,16 +87,23 @@ class DeepScalperBDQ:
         self.batch_size = batch_size
         self.target_update_freq = target_update_freq
         self.step_count = 0
-        self.action_dims = list(action_dims)  # FIX: Use constructor param
-        
+        # FIX BDQ-DISC: Handle both int (Discrete) and tuple (MultiDiscrete) action_dims
+        if isinstance(action_dims, int):
+            self.action_dims = [action_dims]
+        else:
+            self.action_dims = list(action_dims)
+
         # Initialize Networks
         self.policy_net = DeepScalperNetwork(**network_config).to(self.device)
         self.target_net = DeepScalperNetwork(**network_config).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
-        
+
         # FIX M2: Validate action dims match between agent and network
         net_action_dims = network_config.get('action_space_dims', (5, 9))
+        # Normalize both to tuples for comparison
+        if isinstance(net_action_dims, int):
+            net_action_dims = (net_action_dims,)
         assert tuple(self.action_dims) == tuple(net_action_dims), (
             f"Action dim mismatch: agent={self.action_dims}, network={net_action_dims}"
         )
@@ -133,14 +140,14 @@ class DeepScalperBDQ:
                 micro_shape=(window_size, micro_input),
                 macro_shape=(macro_input,),
                 private_shape=(window_size, private_input),  # FIX: env returns private_window (W, 3), not flat (3,)
-                action_shape=(len(action_dims),),
+                action_shape=(len(self.action_dims),),
             )
             # Estimate memory footprint for warning
             est_bytes = buffer_size * (
                 np.prod((window_size, micro_input)) +  # micro
                 np.prod((macro_input,)) +              # macro
                 np.prod((window_size, private_input)) + # private
-                len(action_dims) + 1 + 1 + 1           # action, reward, done, aux
+                len(self.action_dims) + 1 + 1 + 1      # action, reward, done, aux
             ) * 4 * 2  # float32 (4 bytes) × 2 (state + next_state)
             est_gb = est_bytes / (1024 ** 3)
             if est_gb > 8:
@@ -258,7 +265,7 @@ class DeepScalperBDQ:
                         for vi in valid_indices
                     ])
                 else:
-                    random_actions = torch.randint(0, self.action_dims, (batch_size, 1), device=self.device)
+                    random_actions = torch.randint(0, self.action_dims[0], (batch_size, 1), device=self.device)
             
             mask_expanded = random_mask.unsqueeze(1).expand(-1, n_branches)
             final_actions = torch.where(mask_expanded, random_actions, greedy_actions)
