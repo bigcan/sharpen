@@ -1,0 +1,101 @@
+# Phase B5: BDQ + Discrete(6) HPO — First Clean BDQ Test
+# ============================================================
+# Hypothesis H2b: BDQ on fixed MDP + v2 features (NEVER TESTED BEFORE)
+# Key advantages: no entropy bonus, off-policy replay, epsilon-greedy
+# All 10 original BDQ runs used broken MDP. This is the first clean test.
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+  norm_cutoff_date: "2025-05-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0
+  maker_fee: 0.0002
+  taker_fee: 0.0005
+  num_envs: 24
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 100
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 100
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 6
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "mlp"
+    window_size: 15
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    learning_rate: 0.0002
+    gamma: 0.95                  # LOCKED — T1.2 signal horizon alignment
+    epsilon_start: 1.0
+    epsilon_end: 0.05
+    epsilon_decay: 0.99999
+    buffer_size: 500000
+    batch_size: 512
+    target_update_freq: 100
+    tau: 0.005
+    auxiliary_weight: 1.0
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+    exploration_mode: "epsilon_greedy"
+    update_interval: 1.0
+    checkpoint_interval: 500000
+    learning_starts: 10000
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 15
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["BDQ", "Stage2", "PhaseB5", "Discrete6", "HPO", "5M-budget", "FirstCleanBDQ", "EpsilonGreedy"]
