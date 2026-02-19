@@ -405,5 +405,63 @@ class TestRewardTelemetry(unittest.TestCase):
                          "Old reward_hindsight key should be removed")
 
 
+class TestENV06bShortAccounting(unittest.TestCase):
+    """FIX ENV-06b: Short sale proceeds must not double-count in portfolio value.
+
+    With margin_req=1.0 (spot mode), notional_debt must remain 0.
+    Opening a short credits balance (ENV-06) but must NOT also add to debt,
+    otherwise the portfolio formula double-counts the proceeds.
+    """
+
+    def test_short_open_no_phantom_profit(self):
+        """Opening a short should not inflate portfolio value."""
+        env, handler = _make_env({"margin_requirement": 1.0})
+        env.reset()
+        initial_pv = env._get_portfolio_value()
+
+        # Taker sell to open short
+        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        action = 5  # TakerSell
+        _, _, _, _, info = env.step(action)
+
+        if env.position < 0:
+            # notional_debt must be 0 in spot mode
+            self.assertAlmostEqual(env.notional_debt, 0.0, places=6,
+                                   msg="Spot mode: notional_debt must be 0")
+            # Portfolio should be <= initial (lost fees at most)
+            pv_after = env._get_portfolio_value()
+            self.assertLessEqual(pv_after, initial_pv + 1.0,
+                                 msg=f"Short open must not create phantom profit: "
+                                     f"before={initial_pv:.2f}, after={pv_after:.2f}")
+
+    def test_short_roundtrip_loses_fees_only(self):
+        """Open short + close short at same price should lose ~2x fees."""
+        env, handler = _make_env({
+            "margin_requirement": 1.0,
+            "maker_fee": 0.0,
+            "taker_fee": 0.001,  # 10bps for easy math
+        })
+        env.reset()
+        initial_pv = env._get_portfolio_value()
+
+        # Step 1: Open short via TakerSell
+        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        action = 5  # TakerSell
+        env.step(action)
+
+        # Step 2: Close short via TakerBuy (same price)
+        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        action = 0  # TakerBuy
+        env.step(action)
+
+        final_pv = env._get_portfolio_value()
+        # Should lose approximately 2x fee on the notional
+        self.assertLess(final_pv, initial_pv,
+                        msg=f"Roundtrip at same price must lose fees: "
+                            f"before={initial_pv:.2f}, after={final_pv:.2f}")
+        self.assertAlmostEqual(env.notional_debt, 0.0, places=6,
+                               msg="Debt must be 0 after closing short in spot mode")
+
+
 if __name__ == "__main__":
     unittest.main()
