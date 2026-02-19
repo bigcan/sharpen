@@ -5,6 +5,9 @@ T1.1: NAV-based reward (replaces mid-to-mid PnL + removes hindsight)
 T1.3: RunningMeanStd reward normalizer
 T1.4: Hold preserves pending order (maker persistence)
 T1.5v2: Candle-based fill (maker fills use high/low, not BBO)
+
+Updated for Tier 2: Discrete(6) action space.
+  0: TakerBuy, 1: MakerBuy, 2: Hold, 3: Cancel, 4: MakerSell, 5: TakerSell
 """
 
 import unittest
@@ -35,7 +38,7 @@ def _make_env(config_overrides=None, handler=None):
 
 def _make_step_data(bid=100.0, ask=101.0, bid_vol=10.0, ask_vol=10.0, high=None, low=None):
     """Create a mock step data dict with LOB + candle data.
-    
+
     high/low default to ask/bid respectively (no intra-snapshot movement).
     Set explicitly to simulate candle range for fill tests.
     """
@@ -63,9 +66,7 @@ class TestT11NavReward(unittest.TestCase):
         env.reset()
 
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-        # Hold action: qty_idx maps to 0.0 in signed_qty_proportions
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, reward, _, _, info = env.step(action)
 
         self.assertAlmostEqual(reward, 0.0, places=3,
@@ -83,8 +84,7 @@ class TestT11NavReward(unittest.TestCase):
 
         # Price goes up: bid/ask shift by +2
         handler.step.return_value = _make_step_data(bid=102.0, ask=103.0)
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, reward, _, _, info = env.step(action)
 
         self.assertGreater(reward, 0.0,
@@ -108,8 +108,7 @@ class TestT11NavReward(unittest.TestCase):
 
         # Price goes down: mid drops from 100.5 to 98.5
         handler.step.return_value = _make_step_data(bid=98.0, ask=99.0)
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, reward, _, _, info = env.step(action)
 
         self.assertLess(reward, 0.0,
@@ -120,19 +119,15 @@ class TestT11NavReward(unittest.TestCase):
         env, handler = _make_env()
         env.reset()
 
-        # Set up for a trade: place a buy order first
+        # Set up for a trade: place a taker buy order
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-
-        # Use a taker buy (price_idx=4, highest offset → crosses spread)
-        buy_idx = env.signed_qty_proportions.index(0.05)  # Small buy
-        action = np.array([4, buy_idx])  # price_idx=4 crosses spread
+        action = 0  # Tier 2: TakerBuy (crosses spread)
         _, _, _, _, _ = env.step(action)
 
         # Now price stays same, pending order should fill
         env.prev_portfolio_value = env._get_portfolio_value()
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, reward, _, _, info = env.step(action)
 
         # If a fill happened with fees, NAV should have decreased slightly
@@ -209,12 +204,9 @@ class TestT14MakerPersistence(unittest.TestCase):
         env, handler = _make_env()
         env.reset()
 
-        # Place a deep maker buy (price_idx=4 → offset=4 ticks below ask)
-        # limit_price = 101.0 - 4*0.1 = 100.6, maker (below ask)
-        # At T+1 ask=101.0, fill_condition: 101.0 < 100.6 → False → no fill
+        # Place a maker buy — limit sits at best bid, won't fill if ask stays above
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-        buy_idx = env.signed_qty_proportions.index(0.05)
-        action = np.array([4, buy_idx])  # price_idx=4 → deep limit
+        action = 1  # Tier 2: MakerBuy (limit at best bid)
         _, _, _, _, _ = env.step(action)
 
         # Verify pending order was created
@@ -222,10 +214,9 @@ class TestT14MakerPersistence(unittest.TestCase):
                              "A maker buy order should create a pending order")
         pending_before = env.pending_order
 
-        # Hold — ask stays at 101.0, order at 100.6 should NOT fill and should persist
+        # Hold — order should NOT fill (low never dips below limit) and should persist
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, _, _, _, _ = env.step(action)
 
         # Finding-02 fix: unfilled order MUST survive through Hold
@@ -241,20 +232,18 @@ class TestT14MakerPersistence(unittest.TestCase):
         env, handler = _make_env()
         env.reset()
 
-        # Place deep maker buy that won't fill
+        # Place maker buy that won't fill
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-        buy_idx = env.signed_qty_proportions.index(0.05)
-        action = np.array([4, buy_idx])  # Deep limit order
+        action = 1  # Tier 2: MakerBuy
         _, _, _, _, _ = env.step(action)
 
         self.assertIsNotNone(env.pending_order)
         original_price = env.pending_order[1]
 
         # Hold for 3 consecutive steps — order should persist each time
-        hold_idx = env.signed_qty_proportions.index(0.0)
         for step_i in range(3):
             handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-            action = np.array([2, hold_idx])
+            action = 2  # Tier 2: Hold
             _, _, _, _, _ = env.step(action)
 
             self.assertIsNotNone(env.pending_order,
@@ -272,15 +261,13 @@ class TestT14MakerPersistence(unittest.TestCase):
 
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
 
-        # Place first order (deep limit so it doesn't fill)
-        buy_idx = env.signed_qty_proportions.index(0.05)
-        action = np.array([4, buy_idx])
+        # Place first order (maker buy)
+        action = 1  # Tier 2: MakerBuy
         _, _, _, _, _ = env.step(action)
 
-        # Place different order — should replace
-        sell_idx = env.signed_qty_proportions.index(-0.05)
+        # Place maker sell — should replace
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-        action = np.array([4, sell_idx])
+        action = 4  # Tier 2: MakerSell
         _, _, _, _, _ = env.step(action)
 
         self.assertIsNotNone(env.pending_order)
@@ -301,8 +288,7 @@ class TestT15CandleBasedFill(unittest.TestCase):
 
         # low=101.0 == limit → NOT filled (need strict <)
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0, low=101.0)
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, _, _, _, _ = env.step(action)
 
         self.assertAlmostEqual(env.position, 0.0,
@@ -318,8 +304,7 @@ class TestT15CandleBasedFill(unittest.TestCase):
 
         # low=100.5 < 101.0 → market traded below our limit → fill
         handler.step.return_value = _make_step_data(bid=100.0, ask=102.0, low=100.5)
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, _, _, _, _ = env.step(action)
 
         self.assertGreater(abs(env.position), 0.0,
@@ -334,8 +319,7 @@ class TestT15CandleBasedFill(unittest.TestCase):
         env.pending_order = (1, 101.0, 0.05, True)
 
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, _, _, _, _ = env.step(action)
 
         self.assertGreater(abs(env.position), 0.0,
@@ -351,8 +335,7 @@ class TestT15CandleBasedFill(unittest.TestCase):
 
         # high=100.0 == limit → NOT filled (need strict >)
         handler.step.return_value = _make_step_data(bid=99.0, ask=100.0, high=100.0)
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, _, _, _, _ = env.step(action)
 
         self.assertAlmostEqual(env.position, 0.0,
@@ -367,8 +350,7 @@ class TestT15CandleBasedFill(unittest.TestCase):
 
         # high=100.5 > 100.0 → market traded above our limit → fill
         handler.step.return_value = _make_step_data(bid=99.0, ask=100.0, high=100.5)
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, _, _, _, _ = env.step(action)
 
         self.assertLess(env.position, 0.0,
@@ -382,8 +364,7 @@ class TestT15CandleBasedFill(unittest.TestCase):
         env.pending_order = (2, 100.0, 0.05, True)
 
         handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, _, _, _, _ = env.step(action)
 
         self.assertLess(env.position, 0.0,
@@ -399,8 +380,7 @@ class TestRewardTelemetry(unittest.TestCase):
         env.reset()
 
         handler.step.return_value = _make_step_data()
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, _, _, _, info = env.step(action)
 
         self.assertIn("reward_nav", info)
@@ -414,8 +394,7 @@ class TestRewardTelemetry(unittest.TestCase):
         env.reset()
 
         handler.step.return_value = _make_step_data()
-        hold_idx = env.signed_qty_proportions.index(0.0)
-        action = np.array([2, hold_idx])
+        action = 2  # Tier 2: Hold
         _, _, _, _, info = env.step(action)
 
         self.assertNotIn("reward_pnl", info,

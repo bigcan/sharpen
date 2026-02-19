@@ -21,20 +21,19 @@ class TestDeepScalperEnv(unittest.TestCase):
     def test_instantiation(self):
         self.assertIsInstance(self.env, gym.Env)
         self.assertIsInstance(self.env.observation_space, gym.spaces.Dict)
-        self.assertIsInstance(self.env.action_space, gym.spaces.MultiDiscrete)
+        # Tier 2: Flattened action space Discrete(6), not MultiDiscrete
+        self.assertIsInstance(self.env.action_space, gym.spaces.Discrete)
         
     def test_reset(self):
         obs, info = self.env.reset()
         self.assertIn("micro", obs)
         self.assertIn("macro", obs)
         self.assertIn("private", obs)
-        # FIX: Micro is now FLATTENED (W, Features) = (15, 27)
-        # 27 = 20 (LOB) + 5 (OFI) + 1 (Spread) + 1 (Ret)
-        self.assertEqual(obs["micro"].shape, (15, 27))
-        # Macro is now 11 features
-        self.assertEqual(obs["macro"].shape, (11,))
-        # Private state window
-        self.assertEqual(obs["private"].shape, (15, 3))
+        # Tier 2: 30 micro features (LOB-derived), 15 macro features (OHLCV-derived)
+        self.assertEqual(obs["micro"].shape, (15, 30))
+        self.assertEqual(obs["macro"].shape, (15,))
+        # Tier 2: 5-dim private state (pos, bal, remaining_time, order_dir, order_dist)
+        self.assertEqual(obs["private"].shape, (15, 5))
         self.mock_handler.reset.assert_called_once()
     
     def test_step_logic(self):
@@ -55,8 +54,8 @@ class TestDeepScalperEnv(unittest.TestCase):
             
         self.mock_handler.step.return_value = mock_row
         
-        # Action: Price idx 2, Qty idx 5 (buy 0.05)
-        action = np.array([2, 5])
+        # Tier 2: TakerBuy (action 0)
+        action = 0
         obs, reward, terminated, truncated, info = self.env.step(action)
         
         self.assertFalse(terminated)
@@ -66,7 +65,7 @@ class TestDeepScalperEnv(unittest.TestCase):
     def test_done_when_no_data(self):
         self.env.reset()
         self.mock_handler.step.return_value = None
-        action = np.array([0, 4])  # Hold (qty_idx 4 = 0.0)
+        action = 2  # Tier 2 Discrete(6): Hold
         obs, reward, terminated, truncated, info = self.env.step(action)
         self.assertTrue(truncated, "Should be truncated when data is exhausted")
 
@@ -89,7 +88,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.env.prev_portfolio_value = self.env._get_portfolio_value()  # 100000 + 2*99 = 100198
         self.env.step_transaction_costs = 0.0
         
-        action = np.array([0, 4])  # Hold (qty_idx 4 = 0.0)
+        action = 2  # Tier 2 Discrete(6): Hold
         obs, reward, terminated, truncated, info = self.env.step(action)
         
         # NAV delta = (100000 + 2*100) - (100000 + 2*99) = 2.0 USDT
@@ -117,7 +116,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         
         self.env.prev_position = 0.0
         
-        action = np.array([0, 4])  # Hold (qty_idx 4 = 0.0)
+        action = 2  # Tier 2 Discrete(6): Hold
         obs, reward, terminated, truncated, info = self.env.step(action)
         
         # With hold + no position: NAV delta ≈ 0
@@ -142,7 +141,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         env1.prev_portfolio_value = env1._get_portfolio_value()  # 100100
         mock_row = {'bid_price_1': 101.0, 'ask_price_1': 101.0}
         self.mock_handler.step.return_value = mock_row
-        obs1, reward1, _, _, _ = env1.step(np.array([0, 4]))  # Hold
+        obs1, reward1, _, _, _ = env1.step(2)  # Tier 2: Hold
         
         # Test -$1 move
         env2 = DeepScalperEnv(self.config, self.mock_handler)
@@ -154,7 +153,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         env2.prev_portfolio_value = env2._get_portfolio_value()  # 100100
         mock_row2 = {'bid_price_1': 99.0, 'ask_price_1': 99.0}
         self.mock_handler.step.return_value = mock_row2
-        obs2, reward2, _, _, _ = env2.step(np.array([0, 4]))  # Hold
+        obs2, reward2, _, _, _ = env2.step(2)  # Tier 2: Hold
         
         # |reward1| ≈ |reward2| (symmetric)
         # bps ≈ (1.0 / ~100100) × 10000 ≈ 0.1
@@ -190,9 +189,9 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.env.prev_portfolio_value = self.env._get_portfolio_value()
         self.env.step_transaction_costs = 0.0
         
-        action = np.array([0, 4])  # Hold
+        action = 2  # Tier 2: Hold
         obs, reward, terminated, truncated, info = self.env.step(action)
-        
+
         # No price change + no fees = reward should be ~0
         self.assertAlmostEqual(reward, 0.0, places=3)
         self.assertNotIn("reward_risk", info)
@@ -266,7 +265,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         mock_row = {'bid_price_1': 101.0, 'ask_price_1': 101.0}
         self.mock_handler.step.return_value = mock_row
 
-        action = np.array([0, 4])  # Hold
+        action = 2  # Tier 2: Hold
         obs, reward, _, _, info = env.step(action)
 
         # NAV delta positive, DSR component should be 0
@@ -291,7 +290,7 @@ class TestDeepScalperEnv(unittest.TestCase):
             price += 1.0  # Consistent uptrend
             mock_row = {'bid_price_1': price, 'ask_price_1': price}
             self.mock_handler.step.return_value = mock_row
-            obs, reward, _, _, info = env.step(np.array([0, 4]))  # Hold
+            obs, reward, _, _, info = env.step(2)  # Tier 2: Hold
 
         # After 20 consistent positive returns, DSR should be positive
         self.assertGreater(info["reward_sharpe"], 0.0,
@@ -316,7 +315,7 @@ class TestDeepScalperEnv(unittest.TestCase):
             current_price = base_price + delta
             mock_row = {'bid_price_1': current_price, 'ask_price_1': current_price}
             self.mock_handler.step.return_value = mock_row
-            obs, reward, _, _, info = env.step(np.array([0, 4]))  # Hold
+            obs, reward, _, _, info = env.step(2)  # Tier 2: Hold
             base_price = current_price
 
         # DSR of noise: magnitude should be much smaller than trending DSR
@@ -339,7 +338,7 @@ class TestDeepScalperEnv(unittest.TestCase):
             env.prev_portfolio_value = env._get_portfolio_value()
             mock_row = {'bid_price_1': 101.0 + i, 'ask_price_1': 101.0 + i}
             self.mock_handler.step.return_value = mock_row
-            env.step(np.array([0, 4]))  # Hold
+            env.step(2)  # Tier 2: Hold
 
         # Now take one more step and verify blending
         env.current_best_bid = 105.0
@@ -349,7 +348,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         env.prev_portfolio_value = env._get_portfolio_value()
         mock_row = {'bid_price_1': 106.0, 'ask_price_1': 106.0}
         self.mock_handler.step.return_value = mock_row
-        obs, reward, _, _, info = env.step(np.array([0, 4]))  # Hold
+        obs, reward, _, _, info = env.step(2)  # Tier 2: Hold
 
         nav_bps = info["reward_nav"]
         dsr = info["reward_sharpe"]
@@ -373,7 +372,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         env_a.prev_portfolio_value = env_a._get_portfolio_value()
         mock_row_a = {'bid_price_1': 101.0, 'ask_price_1': 101.0}
         self.mock_handler.step.return_value = mock_row_a
-        _, reward_a, _, _, _ = env_a.step(np.array([0, 4]))  # Hold
+        _, reward_a, _, _, _ = env_a.step(2)  # Tier 2: Hold
         
         # Scenario B: BTC @ $200, $200K portfolio, +$2 move, 1 BTC
         # Same fractional return → same bps
@@ -387,7 +386,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         env_b.prev_portfolio_value = env_b._get_portfolio_value()
         mock_row_b = {'bid_price_1': 202.0, 'ask_price_1': 202.0}
         self.mock_handler.step.return_value = mock_row_b
-        _, reward_b, _, _, _ = env_b.step(np.array([0, 4]))  # Hold
+        _, reward_b, _, _, _ = env_b.step(2)  # Tier 2: Hold
         
         # Both should be ~1 bps (Δ1/100100 ≈ Δ2/200200)
         self.assertAlmostEqual(reward_a, reward_b, places=4,
@@ -437,26 +436,25 @@ class TestDeepScalperEnv(unittest.TestCase):
         allowed = env._check_margin(-2.0, 3.0, 100.0, 1)
         self.assertTrue(allowed, "Should allow flip if balance covers net new long")
 
-    def test_signed_qty_proportions_from_config(self):
-        """Fix 1: Signed qty proportions should be configurable via YAML."""
-        # Default
+    def test_fixed_trade_qty_from_config(self):
+        """Tier 2: fixed_trade_qty should be configurable via YAML."""
+        # Default (0.2 = 20% of max_position)
         config_default = {
             "symbol": "BTCUSDT",
             "window_size": 15,
         }
         env = DeepScalperEnv(config_default, self.mock_handler)
-        self.assertEqual(env.signed_qty_proportions,
-                         [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5],
-                         "Default signed_qty_proportions should be 9 values")
-        
+        self.assertAlmostEqual(env.fixed_trade_qty, 0.2,
+                               msg="Default fixed_trade_qty should be 0.2")
+
         # Custom from config
         config_custom = {
             "symbol": "BTCUSDT",
             "window_size": 15,
-            "action": {"signed_qty_proportions": [-0.3, -0.1, 0.0, 0.1, 0.3]}
+            "action": {"fixed_trade_qty": 0.5}
         }
         env_custom = DeepScalperEnv(config_custom, self.mock_handler)
-        self.assertEqual(env_custom.signed_qty_proportions, [-0.3, -0.1, 0.0, 0.1, 0.3])
+        self.assertAlmostEqual(env_custom.fixed_trade_qty, 0.5)
     
     def test_hold_bonus_flat_position(self):
         """Fix 2: Hold bonus should only apply when agent holds AND is flat."""
@@ -471,7 +469,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Case 1: Hold while flat → should get hold bonus
         env.prev_position = 0.0
         env.position = 0.0
-        obs, reward, _, _, info = env.step(np.array([0, 4]))  # Hold (qty_idx 4 = 0.0)
+        obs, reward, _, _, info = env.step(2)  # Tier 2: Hold (qty_idx 4 = 0.0)
         self.assertAlmostEqual(info["reward_hold_bonus"], 0.1,
                                msg="Hold bonus should be 0.1 bps when flat")
         self.assertAlmostEqual(reward, 0.1, places=4,
@@ -483,26 +481,26 @@ class TestDeepScalperEnv(unittest.TestCase):
         env.prev_position = 1.0
         env.position = 1.0
         env.prev_portfolio_value = env._get_portfolio_value()
-        obs, reward2, _, _, info2 = env.step(np.array([0, 4]))  # Hold
+        obs, reward2, _, _, info2 = env.step(2)  # Tier 2: Hold
         self.assertAlmostEqual(info2["reward_hold_bonus"], 0.0,
                                msg="Hold bonus should be 0 when positioned")
         
         # Case 3: Trade while flat → NO hold bonus
         env.prev_position = 0.0
         env.position = 0.0
-        obs, reward3, _, _, info3 = env.step(np.array([0, 5]))  # Buy (qty_idx 5 = +0.05)
+        obs, reward3, _, _, info3 = env.step(0)  # Tier 2: TakerBuy
         self.assertAlmostEqual(info3["reward_hold_bonus"], 0.0,
                                msg="Hold bonus should be 0 when trading")
 
-    def test_signed_qty_trade_sizing(self):
-        """Fix 1: Trade quantities should use signed_qty_proportions."""
+    def test_tier2_trade_sizing(self):
+        """Tier 2: Trade qty = fixed_trade_qty * max_position."""
         self.config["action"] = {
             "max_position": 1.0,
-            "signed_qty_proportions": [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+            "fixed_trade_qty": 0.3,
         }
         env = DeepScalperEnv(self.config, self.mock_handler)
         env.reset()
-        
+
         # Set up market data so we can verify order quantity
         mock_row = {
             'bid_price_1': 100.0, 'ask_price_1': 100.0,
@@ -514,20 +512,20 @@ class TestDeepScalperEnv(unittest.TestCase):
             mock_row[f'ask_price_{i}'] = 101.0
             mock_row[f'ask_vol_{i}'] = 10.0
         self.mock_handler.step.return_value = mock_row
-        
-        # Action: price_idx=0, qty_idx=5 (signed_qty = +0.05 → Buy 0.05)
-        env.step(np.array([0, 5]))
-        
-        # Check pending order quantity: |0.05| * max_position = 0.05 * 1.0 = 0.05
+
+        # Tier 2: TakerBuy (action 0)
+        env.step(0)
+
+        # Check pending order quantity: 0.3 * 1.0 = 0.3
         self.assertIsNotNone(env.pending_order, "Should have a pending buy order")
         _, _, order_qty, _ = env.pending_order
-        self.assertAlmostEqual(order_qty, 0.05,
-                               msg=f"Min buy volume should be 0.05 BTC, got {order_qty}")
+        self.assertAlmostEqual(order_qty, 0.3,
+                               msg=f"Trade qty should be 0.3 BTC, got {order_qty}")
 
 
 class TestActionMasking(unittest.TestCase):
-    """ARCH-3: Tests for qty branch action masking at position limits."""
-    
+    """Tier 2: Tests for Discrete(6) action masking at position limits."""
+
     def setUp(self):
         self.config = {
             "symbol": "BTCUSDT",
@@ -536,53 +534,50 @@ class TestActionMasking(unittest.TestCase):
             "lot_size": 0.001,
             "action": {
                 "max_position": 1.0,
-                "signed_qty_proportions": [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
             }
         }
         self.mock_handler = MagicMock(spec=ParquetDataHandler)
         self.env = DeepScalperEnv(self.config, self.mock_handler)
-    
+
     def test_mask_at_max_long_position(self):
-        """At max_position, all buy indices (positive qty) should be blocked."""
+        """At max_position, buy actions (0: TakerBuy, 1: MakerBuy) should be blocked."""
         self.env.position = 1.0  # At max
         mask = self.env._get_qty_action_mask()
-        
-        # Expected: sell indices valid, hold valid, buy indices blocked
-        # [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
-        #   1      1     1     1     1     0     0    0    0
-        expected = np.array([1, 1, 1, 1, 1, 0, 0, 0, 0], dtype=np.float32)
+
+        # Tier 2: [TBuy, MBuy, Hold, Cancel, MSell, TSell]
+        #           0     0     1      1      1      1
+        expected = np.array([0, 0, 1, 1, 1, 1], dtype=np.float32)
         np.testing.assert_array_equal(mask, expected,
             err_msg="At max long position, buy actions should be masked")
-    
+
     def test_mask_at_max_short_position(self):
-        """At -max_position, all sell indices (negative qty) should be blocked."""
+        """At -max_position, sell actions (4: MakerSell, 5: TakerSell) should be blocked."""
         self.env.position = -1.0  # At max short
         mask = self.env._get_qty_action_mask()
-        
-        # Expected: sell indices blocked, hold valid, buy indices valid
-        # [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
-        #   0      0     0     0     1     1     1    1    1
-        expected = np.array([0, 0, 0, 0, 1, 1, 1, 1, 1], dtype=np.float32)
+
+        # Tier 2: [TBuy, MBuy, Hold, Cancel, MSell, TSell]
+        #           1     1     1      1      0      0
+        expected = np.array([1, 1, 1, 1, 0, 0], dtype=np.float32)
         np.testing.assert_array_equal(mask, expected,
             err_msg="At max short position, sell actions should be masked")
-    
+
     def test_mask_at_mid_position(self):
         """At zero or partial position, all actions should be valid."""
         for pos in [0.0, 0.5, -0.5, 0.99, -0.99]:
             self.env.position = pos
             mask = self.env._get_qty_action_mask()
-            expected = np.ones(9, dtype=np.float32)
+            expected = np.ones(6, dtype=np.float32)
             np.testing.assert_array_equal(mask, expected,
                 err_msg=f"At position={pos}, all actions should be valid")
-    
+
     def test_mask_in_reset_info(self):
         """Reset should return qty_action_mask in info dict."""
         _, info = self.env.reset()
         self.assertIn("qty_action_mask", info)
         # After reset, position=0, so all actions valid
-        expected = np.ones(9, dtype=np.float32)
+        expected = np.ones(6, dtype=np.float32)
         np.testing.assert_array_equal(info["qty_action_mask"], expected)
-    
+
     def test_mask_in_step_info(self):
         """Step should return qty_action_mask in info dict."""
         self.env.reset()
@@ -598,18 +593,18 @@ class TestActionMasking(unittest.TestCase):
             mock_row[f'ask_price_{i}'] = 101.0 + i * 0.1
             mock_row[f'ask_vol_{i}'] = 1.0
         self.mock_handler.step.return_value = mock_row
-        
-        action = np.array([2, 4])  # hold action
+
+        action = 2  # Tier 2: Hold
         _, _, _, _, info = self.env.step(action)
         self.assertIn("qty_action_mask", info)
-    
+
     def test_hold_always_valid(self):
-        """Hold action (index 4, qty=0) should always be valid regardless of position."""
+        """Hold (action 2) should always be valid regardless of position."""
         for pos in [1.0, -1.0, 0.0, 0.5, -0.5]:
             self.env.position = pos
             mask = self.env._get_qty_action_mask()
-            self.assertEqual(mask[4], 1.0,
-                msg=f"Hold action (idx=4) must always be valid, position={pos}")
+            self.assertEqual(mask[2], 1.0,
+                msg=f"Hold action (idx=2) must always be valid, position={pos}")
 
 class TestForcedLiquidation(unittest.TestCase):
     def setUp(self):
@@ -624,7 +619,6 @@ class TestForcedLiquidation(unittest.TestCase):
             # ARCH-2 requires observing spread/fee impact
             "action": {
                 "max_position": 1.0,
-                 "signed_qty_proportions": [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
             }
         }
         self.mock_handler = MagicMock(spec=ParquetDataHandler)
@@ -674,7 +668,7 @@ class TestForcedLiquidation(unittest.TestCase):
         self.env.portfolio_value = 10000.0 + (1.0 * 100.5) # Based on 100/101 mid
         
         # 3. Take HOLD action
-        action = np.array([2, 4]) # Price idx 2, Qty idx 4 (Hold)
+        action = 2  # Tier 2: Hold
         
         # 4. Step -> Truncation
         # The env calls data_handler.step() -> returns None -> truncated

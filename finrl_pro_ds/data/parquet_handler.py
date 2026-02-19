@@ -327,11 +327,12 @@ class ParquetDataHandler:
         # and prepend it to "after" so the EMA has context to converge.
         buffer_size = min(BUFFER_ROWS, n_before)
         raw_buffer = df[mask_before].iloc[-buffer_size:].copy()
-        # FIX BUG-08 (narrowed): Only zero columns used for lookahead reward.
-        # LOB prices (bid_price_*, ask_price_*) MUST remain for micro feature
-        # computation (dist_bid_*, dist_ask_*, spread_bps, microprice_basis)
-        # and EMA warm-up convergence. They are not a leakage vector.
-        lookahead_cols = ['mid_price', 'close']
+        # FIX BUG-DPI-02: Only zero columns used for lookahead/hindsight reward.
+        # mid_price MUST remain for micro feature computation (dist_bid_*,
+        # dist_ask_*, spread_bps, microprice_basis) and EMA warm-up convergence.
+        # Zeroing mid_price caused NaN poisoning through the entire "after" half.
+        # Only 'close' is used by hindsight reward (get_lookahead_price fallback).
+        lookahead_cols = ['close']
         for col in lookahead_cols:
             if col in raw_buffer.columns:
                 raw_buffer[col] = np.nan

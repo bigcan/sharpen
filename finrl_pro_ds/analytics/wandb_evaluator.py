@@ -154,20 +154,17 @@ class WandbFinRLEvaluator:
         returns = df['daily_return']
         
         # 1. Risk-Adjusted Returns
-        # Annualized Sharpe Ratio (assuming 252 trading days)
+        # FIX WB-03: Use 525600 (minute-level crypto) not 252 (daily equity)
+        ANN_FACTOR = np.sqrt(525600)  # minutes per year: 365.25 * 24 * 60
         mean_ret = returns.mean()
         std_ret = returns.std()
-        sharpe = (mean_ret / std_ret * np.sqrt(252)) if (std_ret != 0 and not np.isnan(std_ret)) else 0.0
-        
-        # Sortino Ratio
-        downside_returns = returns[returns < 0]
-        # Fix: If no downside returns, std is NaN or 0. If all returns negative, std is valid.
-        if len(downside_returns) < 2:
-            downside_std = 0.0
-        else:
-            downside_std = downside_returns.std()
-            
-        sortino = (mean_ret / downside_std * np.sqrt(252)) if (downside_std > 1e-9 and not np.isnan(downside_std)) else 0.0
+        sharpe = (mean_ret / std_ret * ANN_FACTOR) if (std_ret > 1e-9 and not np.isnan(std_ret)) else 0.0
+
+        # FIX WB-02: Correct Sortino formula — sqrt(mean(min(r,0)²)), not std(negative_returns)
+        downside_returns = returns.values
+        downside_sq = np.minimum(downside_returns, 0.0) ** 2
+        downside_dev = np.sqrt(np.mean(downside_sq))
+        sortino = (mean_ret / downside_dev * ANN_FACTOR) if downside_dev > 1e-9 else 0.0
         
         # Calmar Ratio
         # Need Cum Sum for MDD
@@ -176,7 +173,7 @@ class WandbFinRLEvaluator:
         drawdown = (cum_ret - running_max) / running_max
         max_drawdown = drawdown.min() # Negative number
         
-        annualized_return = mean_ret * 252 # Simple approximation
+        annualized_return = mean_ret * 525600  # FIX WB-04: minute-level annualization
         # Or geometric: (final/initial)^(252/days) - 1
         days = (df.index[-1] - df.index[0]).days
         if days > 0:
@@ -191,7 +188,7 @@ class WandbFinRLEvaluator:
             calmar = (annualized_return_geo / abs(max_drawdown)) if (not np.isnan(max_drawdown) and abs(max_drawdown) > 1e-9) else 0.0
         
         # 2. Risk Metrics
-        annualized_vol = std_ret * np.sqrt(252)
+        annualized_vol = std_ret * ANN_FACTOR  # FIX WB-03: minute-level
         
         # 3. Trade Stats
         total_return_pct = (df['account_value'].iloc[-1] / df['account_value'].iloc[0]) - 1
@@ -220,7 +217,8 @@ class WandbFinRLEvaluator:
 
         gross_profit = winning_days.sum()
         gross_loss = abs(losing_days.sum())
-        profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float('inf')
+        # FIX WB-01: Cap profit_factor at 10.0 instead of inf (breaks WandB logging)
+        profit_factor = (gross_profit / gross_loss) if gross_loss > 1e-12 else (10.0 if gross_profit > 1e-12 else 0.0)
 
         metrics = {
             "Agent": name,

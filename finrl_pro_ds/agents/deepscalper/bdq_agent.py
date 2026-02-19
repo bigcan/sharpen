@@ -126,7 +126,7 @@ class DeepScalperBDQ:
             macro_cfg = network_config.get("macro_config", {})
             window_size = micro_cfg.get("window_size", 15)
             micro_input = micro_cfg.get("input_size", 30)
-            private_input = micro_cfg.get("private_input_size", 3)
+            private_input = micro_cfg.get("private_input_size", 5)  # Tier 2: 5-dim private state
             macro_input = macro_cfg.get("input_size", 15)
             self.memory = FlatReplayBuffer(
                 capacity=buffer_size,
@@ -421,7 +421,8 @@ class DeepScalperBDQ:
             self.memory.update_priorities(per_indices, td_errors)
         
         # Update Target Net — Polyak (soft) averaging
-        self.step_count += 1
+        # FIX FIND-NEW-01: step_count is ONLY incremented in decay_epsilon().
+        # Previously incremented here too, causing epsilon to decay 2x too fast.
         with torch.no_grad():
             for p, tp in zip(self.policy_net.parameters(), self.target_net.parameters()):
                 tp.data.mul_(1.0 - self.tau).add_(p.data, alpha=self.tau)
