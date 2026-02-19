@@ -662,11 +662,16 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             raise ValueError("Config missing 'network' section — cannot reconstruct agent for backtest")
         
         # Read action dims from config (mirrors trainer logic)
+        # FIX BUG-15: PPO uses Discrete(N) — action_dims MUST be int, not tuple.
+        # The PPO network's nn.Linear(head_hidden, action_dim) crashes on tuples.
         action_config = config.get("env", {}).get("action", {})
-        if "discrete_dims" in action_config:
+        if agent_type == "ppo":
+            # PPO: Discrete(N) — same default as ppo_trainer.py:60
+            action_dims = action_config.get("discrete_dims", 6)
+        elif "discrete_dims" in action_config:
             action_dims = action_config["discrete_dims"]
         else:
-            # Fallback for MultiDiscrete legacy
+            # BDQ: MultiDiscrete (price_bins, qty_bins)
             signed_qty_props = action_config.get(
                 "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
             )
