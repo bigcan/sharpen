@@ -71,7 +71,7 @@ env:
 network:
   micro_config:
     input_size: 30
-    private_input_size: 3
+    private_input_size: 5      # Env always outputs 5: pos, bal, time, order_dir, order_dist
     hidden_size: 256
     encoder_type: "mlp"
     window_size: 15
