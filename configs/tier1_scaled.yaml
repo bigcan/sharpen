@@ -6,7 +6,7 @@
 #
 # Changes from tier1_validation.yaml:
 #   1. total_timesteps: 500K → 5M (10x)  — enough for ~6 epochs
-#   2. HPO: enabled with 15 trials × 500K steps each
+#   2. HPO: enabled with 30 trials × 500K steps each
 #   3. rollout_steps: 2048 → 4096  — larger rollouts for lower variance
 #   4. batch_size: 256 → 1024  — better GPU utilization
 #   5. checkpoint_interval: 100K → 500K — avoid disk spam
@@ -82,16 +82,17 @@ network:
 
 agents:
   ppo:
-    learning_rate: 0.0003        # HPO range: [3e-5, 5e-4]
-    gamma: 0.95                  # T1.2: LOB signal decay (~20 min horizon)
-    gae_lambda: 0.95             # HPO range: [0.90, 0.99]
-    clip_eps: 0.2                # HPO range: [0.1, 0.3]
-    vf_coef: 0.5
-    ent_coef: 0.001              # HPO range: [5e-4, 0.01]
-    max_grad_norm: 0.5           # HPO range: [0.3, 1.0]
-    n_epochs: 4                  # HPO range: [3, 6]
-    rollout_steps: 4096          # Larger rollouts for variance reduction
-    batch_size: 1024             # Better GPU utilization on RTX 5090
+    learning_rate: 0.0003        # HPO range: [1e-5, 3e-4] log
+    gamma: 0.95                  # T1.2: LOB signal decay (~20 min horizon) — LOCKED
+    gae_lambda: 0.95             # HPO range: [0.90, 0.98]
+    clip_eps: 0.2                # HPO range: categorical [0.1, 0.2]
+    vf_coef: 0.5                 # LOCKED
+    ent_coef: 0.001              # HPO range: [1e-4, 0.01] log
+    max_grad_norm: 0.5           # HPO range: categorical [0.5, 1.0, 5.0]
+    n_epochs: 4                  # HPO range: categorical [3, 5, 8]
+    target_kl: 0.02              # HPO range: [0.01, 0.04] — early stop if KL exceeds
+    rollout_steps: 4096          # Larger rollouts for variance reduction — LOCKED
+    batch_size: 1024             # Better GPU utilization on RTX 5090 — LOCKED
     lr_schedule: "linear"
     checkpoint_interval: 500000
 
@@ -106,7 +107,9 @@ training:
 
 hpo:
   enabled: true
-  n_trials: 15                   # ~6 dims × 2.5 = 15 trials
+  # 7 HPO dims: learning_rate, ent_coef, gae_lambda, clip_eps, max_grad_norm, n_epochs, target_kl
+  # Rule of thumb: ~4 × dims ≈ 30 trials (thorough TPE coverage)
+  n_trials: 30
   steps_per_trial: 500000        # Same as pilot — enough to see signal
 
 wandb:
