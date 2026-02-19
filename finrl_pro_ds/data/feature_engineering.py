@@ -101,9 +101,16 @@ class DeepScalperFeatureEngineer:
         mu = ema_mean.values.copy()
         sigma = ema_std.values.copy()
 
-        # Fill NaN from shift(1) on first row
-        mu[0] = 0.0
-        sigma[0] = 1.0  # avoid div-by-zero on first row
+        # FIX BUG-DPI-03: Forward-fill from first valid EMA values instead of
+        # using mu=0, sigma=1 which creates an artificial "shock" discontinuity
+        # at the EMA warmup boundary (~row 200).
+        first_valid = np.where(~np.isnan(mu))[0]
+        if len(first_valid) > 0:
+            fv = first_valid[0]
+            mu[:fv] = mu[fv]
+            sigma[:fv] = sigma[fv]
+        else:
+            mu[np.isnan(mu)] = 0.0
 
         # Guard against zero/NaN sigma
         sigma = np.where(np.isnan(sigma) | (sigma < 1e-8), 1.0, sigma)
@@ -335,9 +342,12 @@ class DeepScalperFeatureEngineer:
         # ── 3. Volatility Regime Ratio — 15m/60m Parkinson (1 dim) ──
         parkinson_60 = pd.Series(ln_hl_sq).rolling(window=60, min_periods=1).mean().values
         ratio_raw = parkinson_raw / (parkinson_60 + 1e-8)  # Fix D: epsilon
-        # Fix B: Center to [-1, 1] for DQN gradient flow
-        # Map [0, 3] → [0, 1] → [-1, 1]
-        df['vol_regime_ratio'] = (np.clip(ratio_raw / 3.0, 0.0, 1.0) * 2.0 - 1.0).astype(np.float32)
+        # FIX BUG-DPI-05: Log-ratio + tanh gives full [-1,1] dynamic range.
+        # Old linear mapping wasted 90% of range for normal volatility (ratio 0.5-1.5).
+        # log1p(ratio): ratio=0→0, ratio=1→0.69, ratio=3→1.39, ratio=10→2.40
+        # tanh(log1p/1.5): smoothly maps to [-1,1] with good resolution around ratio=1
+        df['vol_regime_ratio'] = np.tanh(np.log1p(ratio_raw) / 1.5 - 0.46).astype(np.float32)
+        # Calibration: ratio=1 → log1p=0.693 → 0.693/1.5-0.46 ≈ 0 → tanh(0) = 0 (centered)
 
         # ── 4. Proxy CVD — OHLCV taker aggression (2 dims) ──
         # Proxy: sign = 2*(close > open) - 1,  magnitude = volume

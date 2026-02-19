@@ -90,23 +90,26 @@ class PPOAgent:
         self.scaler = torch.amp.GradScaler(device=str(self.device), enabled=self.use_amp)
 
         # LR scheduler (linear decay based on global environment steps)
-        # AUDIT FIX CRIT-1: Use global_step (env steps) for decay, not scheduler step count.
-        # The scheduler.step() is called once per rollout (~12 times), but we want
-        # linear decay over total_timesteps. We use LambdaLR with a closure over
-        # self.step_count which is set to global_step after each train_step().
+        # FIX FIND-PPO-02: LambdaLR closure captured live self.step_count by reference,
+        # causing non-monotonic LR decay. Replaced with explicit manual LR update
+        # called from train_step() that reads step_count at the correct time.
         self._total_timesteps_for_lr = max(total_timesteps, 1)
-        if lr_schedule == "linear":
-            self._lr_scheduler = optim.lr_scheduler.LambdaLR(
-                self.optimizer,
-                lr_lambda=lambda _step: max(
-                    1.0 - self.step_count / self._total_timesteps_for_lr, 0.0
-                )
-            )
-        else:
-            self._lr_scheduler = None
+        self._base_lr = lr
+        self._lr_schedule_type = lr_schedule
+        # No LambdaLR — LR is updated explicitly in _update_lr()
+        self._lr_scheduler = None
 
         # V5: Stateless agent — no hidden state needed
         # (reset_hidden_state / mask_hidden_state kept as no-ops for trainer compat)
+
+    def _update_lr(self):
+        """FIX FIND-PPO-02: Explicit linear LR decay based on current step_count.
+        Called once per rollout from train_step(), AFTER step_count is set."""
+        if self._lr_schedule_type == "linear":
+            frac = max(1.0 - self.step_count / self._total_timesteps_for_lr, 0.0)
+            new_lr = self._base_lr * frac
+            for param_group in self.optimizer.param_groups:
+                param_group['lr'] = new_lr
 
     # ------------------------------------------------------------------
     # Interface: predict()
@@ -267,9 +270,8 @@ class PPOAgent:
         # Capture LR used for THIS update
         current_lr = self.optimizer.param_groups[0]["lr"]
 
-        # LR schedule step (per rollout, not per minibatch)
-        if self._lr_scheduler is not None:
-            self._lr_scheduler.step()
+        # FIX FIND-PPO-02: Explicit LR update based on step_count (set by trainer)
+        self._update_lr()
 
         n = max(n_updates, 1)
         metrics = {
@@ -310,8 +312,6 @@ class PPOAgent:
             "optimizer": self.optimizer.state_dict(),
             "step_count": self.step_count,
         }
-        if self._lr_scheduler is not None:
-            ckpt["lr_scheduler"] = self._lr_scheduler.state_dict()
         torch.save(ckpt, path)
 
     def load(self, path: str):
@@ -335,5 +335,5 @@ class PPOAgent:
             raise
         self.optimizer.load_state_dict(checkpoint["optimizer"])
         self.step_count = checkpoint.get("step_count", 0)
-        if "lr_scheduler" in checkpoint and self._lr_scheduler is not None:
-            self._lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
+        # FIX FIND-PPO-02: Restore LR from step_count (no scheduler state needed)
+        self._update_lr()

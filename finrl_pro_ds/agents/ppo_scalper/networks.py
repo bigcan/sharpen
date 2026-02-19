@@ -147,7 +147,13 @@ class PPOActorCritic(nn.Module):
         logits = self.actor(features)  # (B, action_dim)
 
         # Action masking
+        # FIX FIND-PPO-01: Guard against all actions being masked (degenerate state)
         if qty_mask is not None:
+            valid_count = qty_mask.sum(dim=1)
+            if (valid_count == 0).any():
+                # Unmask Hold (action 2) as safe fallback for fully-masked samples
+                qty_mask = qty_mask.clone()
+                qty_mask[valid_count == 0, 2] = 1.0
             logits = logits.masked_fill(qty_mask == 0, float('-inf'))
 
         # Distribution
@@ -202,7 +208,12 @@ class PPOActorCritic(nn.Module):
         logits = self.actor(features)
 
         # Action masking
+        # FIX FIND-PPO-01/03: Same guard in evaluate_actions to ensure consistency
         if qty_mask is not None:
+            valid_count = qty_mask.sum(dim=1)
+            if (valid_count == 0).any():
+                qty_mask = qty_mask.clone()
+                qty_mask[valid_count == 0, 2] = 1.0
             logits = logits.masked_fill(qty_mask == 0, float('-inf'))
 
         # Distribution

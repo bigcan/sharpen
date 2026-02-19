@@ -604,18 +604,23 @@ class DeepScalperEnv(gym.Env):
                                 self.balance += close_proceeds
                             
                             # Leg 2: Open new short (if flipping)
+                            # FIX ENV-06: Credit short sale proceeds before debiting fee.
+                            # Opening a short = selling borrowed asset → receive proceeds.
                             if open_qty > 1e-12:
                                 open_notional = fill_price * open_qty
                                 open_fee = open_notional * fee_rate
-                                self.balance -= open_fee
-                                self.notional_debt += open_notional
+                                self.balance += open_notional  # Receive sale proceeds
+                                self.balance -= open_fee       # Pay fee
+                                self.notional_debt += open_notional  # Owe buyback
                                 fee = close_fee + open_fee
                             else:
                                 fee = close_fee
                             proceeds = 0  # Handled above per-leg
                         else:
-                            # Opening/extending short — fee only, full buyback debt
-                            self.balance -= fee
+                            # Opening/extending short — receive proceeds, pay fee, owe buyback
+                            # FIX ENV-06: Credit short sale proceeds (was missing)
+                            self.balance += notional   # Receive sale proceeds
+                            self.balance -= fee        # Pay fee
                             self.notional_debt += notional  # Full buyback obligation
                             proceeds = 0
                         
@@ -861,9 +866,18 @@ class DeepScalperEnv(gym.Env):
             self.current_best_ask = float(step_data.get('ask_price_1', 0))
 
             # T1.5v2: High/Low candle data for realistic maker fill simulation
-            # Fallback to BBO if high/low not available (test environments)
-            self.current_high = float(step_data.get('high', self.current_best_ask))
-            self.current_low = float(step_data.get('low', self.current_best_bid))
+            # FIX ENV-07: Warn on first fallback to BBO — T1.5v2 requires real high/low
+            raw_high = step_data.get('high', None)
+            raw_low = step_data.get('low', None)
+            if raw_high is not None and raw_low is not None:
+                self.current_high = float(raw_high)
+                self.current_low = float(raw_low)
+            else:
+                self.current_high = self.current_best_ask
+                self.current_low = self.current_best_bid
+                if not getattr(self, '_warned_no_highlow', False) and self.current_step > self.window_size:
+                    logging.warning("T1.5v2: 'high'/'low' missing from data — falling back to BBO for maker fills")
+                    self._warned_no_highlow = True
 
             # Raw volumes for liquidity checks
             self._raw_bid_vol_1 = float(step_data.get('bid_vol_1', 0))

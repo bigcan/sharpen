@@ -96,9 +96,9 @@ class DeepScalperTrainer:
         )
 
         # FIX FIND-5 + CRIT-1: Private size consistency check
-        # Env produces 3 private features (pos, bal, remaining_time). Config must match.
-        priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_input_size", 3)
-        assert priv_cfg == 3, f"FIND-5 Mismatch: Env produces 3 private features, config expects {priv_cfg}"
+        # Tier 2: Env produces 5 private features (pos, bal, remaining_time, order_dir, order_dist).
+        priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_input_size", 5)
+        assert priv_cfg == 5, f"FIND-5 Mismatch: Env produces 5 private features (Tier 2), config expects {priv_cfg}"
         
     def train(self, start_step=0, skip_reset=False, optuna_trial=None, pruning_callback=None):
         """Single Phase Training Loop
@@ -124,8 +124,8 @@ class DeepScalperTrainer:
         _micro_dim = self.config.get("network", {}).get("micro_config", {}).get("input_size", 30)
         assert obs["micro"].shape == (B, W, _micro_dim), \
             f"obs['micro'] shape mismatch: expected ({B}, {W}, {_micro_dim}), got {obs['micro'].shape}"
-        assert obs["private"].shape == (B, W, 3), \
-            f"obs['private'] shape mismatch: expected ({B}, {W}, 3), got {obs['private'].shape}"
+        assert obs["private"].shape == (B, W, 5), \
+            f"obs['private'] shape mismatch: expected ({B}, {W}, 5), got {obs['private'].shape}"
         assert obs["macro"].ndim == 2, \
             f"obs['macro'] expected 2D (B, M), got shape {obs['macro'].shape}"
         print(f"✓ Observation shapes verified: micro={obs['micro'].shape}, "
