@@ -854,6 +854,8 @@ def main():
     parser.add_argument("--steps", type=int, default=None, help="Training steps override")
     parser.add_argument("--version", type=str, default="V1", help="Version tag")
     parser.add_argument("--hpo_storage", type=str, default=None, help="Optuna storage URL (e.g. sqlite:///hpo.db)")
+    parser.add_argument("--backtest_only", action="store_true", help="Skip HPO and training, run backtest only (requires --checkpoint)")
+    parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint for --backtest_only mode")
     args = parser.parse_args()
     
     base_config = load_config(args.config)
@@ -914,7 +916,9 @@ def main():
         hpo_config = base_config.get("hpo", {})
         final_config = copy.deepcopy(base_config)
         
-        if hpo_config.get("enabled", True):
+        if args.backtest_only:
+            logger.info("Backtest-only mode: skipping HPO.")
+        elif hpo_config.get("enabled", True):
             # Silence Optuna INFO logs (Start/Finish trial) to avoid WandB console spam
             optuna.logging.set_verbosity(optuna.logging.WARNING)
             
@@ -939,11 +943,17 @@ def main():
         # =====================================================================
         # PHASE 2: TRAINING
         # =====================================================================
-        print("\n" + "="*60)
-        print(">>> PHASE 2: TRAINING (Full Run with Best Params)")
-        print("="*60 + "\n")
-        
-        checkpoint_path = run_training(final_config, run_name, device, agent_type=agent_type)
+        if args.backtest_only:
+            if not args.checkpoint:
+                raise ValueError("--backtest_only requires --checkpoint <path>")
+            checkpoint_path = args.checkpoint
+            logger.info(f"Backtest-only mode: using checkpoint {checkpoint_path}")
+        else:
+            print("\n" + "="*60)
+            print(">>> PHASE 2: TRAINING (Full Run with Best Params)")
+            print("="*60 + "\n")
+            
+            checkpoint_path = run_training(final_config, run_name, device, agent_type=agent_type)
         
         if checkpoint_path:
             # PHASE 3a: Validation Backtest (for Overfitting Check)
