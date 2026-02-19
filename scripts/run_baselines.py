@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Phase A: Baseline Strategies — Establishes performance spectrum.
-Runs 7 deterministic policies through the DeepScalper env on val+test splits.
+Runs deterministic policies through the DeepScalper env on val+test splits.
 
 Baselines:
   A1: Random       — uniform random from Discrete(6)
@@ -11,10 +11,12 @@ Baselines:
   A5: Mean-Revert  — buy if microprice_basis < -0.5bps, sell if > +0.5bps
   A6: OracleTaker  — 1-step lookahead, taker-only (10bps round-trip)
   A7: OracleMaker  — 1-step lookahead, maker-only (4bps round-trip)
+  A8: OracleMulti  — N-step lookahead, maker-only (horizon scan)
 
 Usage:
   python scripts/run_baselines.py --config configs/postaudit_hpo.yaml
-  python scripts/run_baselines.py --config configs/postaudit_hpo.yaml --baselines A1 A6 A7
+  python scripts/run_baselines.py --config configs/postaudit_hpo.yaml --baselines A6 A7 A8
+  python scripts/run_baselines.py --config configs/postaudit_hpo.yaml --baselines A8 --horizons 1 5 10 15 30 60
 """
 import yaml
 import argparse
@@ -315,6 +317,57 @@ def make_oracle_maker_policy(mid_prices, maker_fee):
     return policy_oracle_maker
 
 
+def make_oracle_multistep_policy(mid_prices, maker_fee, horizon):
+    """A8: Oracle — N-step perfect foresight, maker-only.
+
+    Enters when N-step return exceeds round-trip maker fees.
+    Holds for exactly `horizon` steps, then exits. Uses position from
+    env info to stay in sync even if maker fills are delayed/rejected.
+    """
+    fee_threshold = maker_fee * 2  # Round-trip fee cost
+    state = {"entry_step": -1}
+
+    def policy_oracle_multistep(obs, info, step, env):
+        current_step = env.current_step
+        pos = info.get("position", 0)
+        if isinstance(pos, np.ndarray):
+            pos = float(pos.flat[0])
+        has_position = abs(pos) > 1e-6
+
+        # If in position and horizon elapsed → exit
+        if has_position and state["entry_step"] >= 0:
+            if current_step - state["entry_step"] >= horizon:
+                state["entry_step"] = -1
+                return MAKER_SELL if pos > 0 else MAKER_BUY
+            return HOLD
+
+        # If flat but entry_step set → fill didn't happen, reset
+        if not has_position and state["entry_step"] >= 0:
+            # Give 2 steps for maker fill to execute
+            if current_step - state["entry_step"] > 2:
+                state["entry_step"] = -1
+
+        # If flat → look ahead N steps
+        if state["entry_step"] >= 0:
+            return HOLD  # Waiting for fill
+        if current_step + horizon >= len(mid_prices):
+            return HOLD
+        mid_now = mid_prices[current_step]
+        mid_future = mid_prices[current_step + horizon]
+        if mid_now <= 0:
+            return HOLD
+        ret = (mid_future - mid_now) / mid_now
+        if ret > fee_threshold:
+            state["entry_step"] = current_step
+            return MAKER_BUY
+        elif ret < -fee_threshold:
+            state["entry_step"] = current_step
+            return MAKER_SELL
+        return HOLD
+
+    return policy_oracle_multistep
+
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -325,6 +378,8 @@ def main():
                         help="Specific baselines to run (e.g., A1 A3 A6). Default: all.")
     parser.add_argument("--no_wandb", action="store_true", help="Disable WandB logging")
     parser.add_argument("--seeds", type=int, default=3, help="Number of seeds for A1 (random)")
+    parser.add_argument("--horizons", nargs="*", type=int, default=[1, 3, 5, 10, 15, 30],
+                        help="Horizons for A8 multi-step oracle (default: 1 3 5 10 15 30)")
     args = parser.parse_args()
 
     config = load_config(args.config)
@@ -360,6 +415,7 @@ def main():
         "A5": ("MeanReversion", policy_mean_reversion),
         "A6": ("OracleTaker", None),  # Special handling
         "A7": ("OracleMaker", None),  # Special handling
+        "A8": ("OracleMulti", None),  # Special handling — horizon scan
     }
 
     selected = args.baselines or list(all_baselines.keys())
@@ -439,6 +495,28 @@ def main():
                                if isinstance(v, (int, float))})
                 continue
 
+            # A8 (OracleMulti) — horizon scan: run multiple holding periods
+            if exp_id == "A8":
+                for h in args.horizons:
+                    logger.info(f"  Running A8_OracleH{h}_{split_name} (horizon={h} steps)...")
+                    env, mid_prices = make_oracle_env(config, start_date, end_date, norm_cutoff)
+                    ms_policy = make_oracle_multistep_policy(mid_prices, maker_fee, h)
+                    name = f"A8_OracleH{h}_{split_name}"
+                    metrics = run_backtest(env, ms_policy, name)
+                    metrics["split"] = split_name
+                    metrics["horizon"] = h
+                    results.append(metrics)
+                    env.close()
+                    logger.info(f"    Return={metrics['total_return']*100:.2f}%, "
+                                f"Sharpe={metrics['sharpe']:.2f}, "
+                                f"Trades={metrics['trade_count']}, "
+                                f"PF={metrics['profit_factor']:.3f}")
+                    if not args.no_wandb:
+                        import wandb
+                        wandb.log({f"baseline/{name}/{k}": v for k, v in metrics.items()
+                                   if isinstance(v, (int, float))})
+                continue
+
             # Standard baselines (A2-A5)
             env = make_env(config, start_date, end_date, norm_cutoff)
             name = f"{exp_id}_{label}_{split_name}"
@@ -504,6 +582,37 @@ def main():
         else:
             print("  VERDICT: Neither oracle profitable — MDP may be unsolvable at this resolution")
             print("           Consider: longer timeframe (5-min bars), lower fees, or richer features")
+
+    # Multi-step oracle horizon scan
+    horizon_results = [r for r in results if r.get("horizon") is not None]
+    if horizon_results:
+        # Group by horizon, average across splits
+        horizons_seen = sorted(set(r["horizon"] for r in horizon_results))
+        print("\n  HORIZON SCAN (A8 — Multi-Step Maker Oracle)")
+        print(f"  {'─'*70}")
+        print(f"  {'Horizon':>8} {'Val PF':>8} {'Val Trades':>10} {'Test PF':>9} {'Test Trades':>11} {'Avg PF':>8}")
+        print(f"  {'─'*70}")
+        first_pass_h = None
+        for h in horizons_seen:
+            val_r = [r for r in horizon_results if r["horizon"] == h and r["split"] == "val"]
+            test_r = [r for r in horizon_results if r["horizon"] == h and r["split"] == "test"]
+            val_pf = val_r[0]["profit_factor"] if val_r else 0
+            val_trades = val_r[0]["trade_count"] if val_r else 0
+            test_pf = test_r[0]["profit_factor"] if test_r else 0
+            test_trades = test_r[0]["trade_count"] if test_r else 0
+            avg_pf = np.mean([r["profit_factor"] for r in horizon_results if r["horizon"] == h])
+            marker = " <-- PASS" if avg_pf >= 1.2 else ""
+            if avg_pf >= 1.2 and first_pass_h is None:
+                first_pass_h = h
+            print(f"  {h:>7}m {val_pf:>8.3f} {val_trades:>10d} {test_pf:>9.3f} {test_trades:>11d} {avg_pf:>8.3f}{marker}")
+        print(f"  {'─'*70}")
+        if first_pass_h is not None:
+            print(f"  RESULT: Oracle gate passes at {first_pass_h}-minute horizon (maker fees)")
+            print(f"          Agent must learn to hold positions for ~{first_pass_h} steps to capture alpha")
+        else:
+            print("  RESULT: No horizon passes the gate — alpha insufficient even with multi-step lookahead")
+            max_h = max(horizons_seen)
+            print(f"          Tested up to {max_h}-min. Consider longer horizons or Phase E (RF).")
 
     if not args.no_wandb:
         import wandb
