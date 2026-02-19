@@ -33,11 +33,11 @@ class PPOAgent:
         self,
         network_config: Dict,
         lr: float = 3e-4,
-        gamma: float = 0.99,
+        gamma: float = 0.95,  # T1.2: LOB signal decay alignment
         gae_lambda: float = 0.95,
         clip_eps: float = 0.2,
         vf_coef: float = 0.5,
-        ent_coef: float = 0.01,
+        ent_coef: float = 0.001,  # T1.3: Don't drown trading signal
         max_grad_norm: float = 0.5,
         n_epochs: int = 4,
         rollout_steps: int = 2048,
