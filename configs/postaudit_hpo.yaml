@@ -1,0 +1,110 @@
+# PostAudit HPO Run — Discrete(6) + All 15 Bug Fixes + HPO
+# ==========================================================
+# Purpose: First HPO sweep on post-audit codebase. All previous HPO runs
+#          (mmv1yqr7) were on broken code. PostAudit-v2 (xospmrmj) used
+#          fixed budget params and failed (Sharpe -13/-6, 4 trades).
+#          This run lets HPO find optimal params for the clean MDP.
+#
+# Key changes from tier1_scaled.yaml:
+#   1. Clean Tier 2 action config (discrete_dims: 6)
+#   2. num_envs: 24 (user preference, GPUHub safe)
+#   3. Wider HPO ent_coef range: [0.005, 0.1] (was [1e-4, 0.01])
+#      Rationale: Discrete(6) needs higher entropy to explore trading actions.
+#      Previous HPO selected 0.000266 → instant policy collapse.
+#   4. Higher base ent_coef: 0.01 (was 0.001)
+#   5. Updated tags
+#
+# Hypothesis: With clean MDP + wider ent_coef sweep, HPO can find params
+#             where the agent actually explores Buy/Sell actions and discovers
+#             the 0.607 AUC signal embedded in features.
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+  norm_cutoff_date: "2025-05-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0
+  maker_fee: 0.0002
+  taker_fee: 0.0005
+  num_envs: 24
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 100
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 100
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 6
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "mlp"
+    window_size: 15
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0003
+    gamma: 0.95                  # LOCKED — T1.2 signal horizon alignment
+    gae_lambda: 0.95
+    clip_eps: 0.2
+    vf_coef: 0.5
+    ent_coef: 0.01               # Higher base — Discrete(6) needs exploration
+    max_grad_norm: 0.5
+    n_epochs: 4
+    target_kl: 0.02
+    rollout_steps: 4096
+    batch_size: 1024
+    lr_schedule: "linear"
+    checkpoint_interval: 500000
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 30
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["PPO", "Stage2", "PostAudit-HPO", "MLP-V5", "NAV-reward", "candle-fill", "HPO", "5M-budget", "Discrete6", "WideEntCoef"]
