@@ -179,7 +179,7 @@ class DeepScalperEnv(gym.Env):
         
         # Window Buffer - FIX F1: Now (W, L*F)
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
-        self.private_window = np.zeros((self.window_size, 3), dtype=np.float32)
+        self.private_window = np.zeros((self.window_size, 5), dtype=np.float32)
         self.total_episode_steps = 1  # Discovered from handler in reset()
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
         
@@ -657,8 +657,19 @@ class DeepScalperEnv(gym.Env):
             # CRITICAL FIX: Update Private State in Window to reflect execution
             # The agent needs to see the new position in the current observation
             # Fix BUG-A: detailed audit confirmed remaining_time must be passed explicitly
+            # FIX T2-SHAPE: Pass order state (dir + dist) for 5-dim private consistency
             remaining_time = max(0.0, 1.0 - (self.current_step / self.total_episode_steps))
-            self.private_window[-1] = self._normalize_private_state(self.position, self.balance, remaining_time)
+            post_order_dir = 0.0
+            post_order_dist = 0.0
+            if self.pending_order:
+                post_order_dir = 1.0 if self.pending_order[0] == 1 else -1.0
+                limit_px = self.pending_order[1]
+                mid = (self.current_best_ask + self.current_best_bid) / 2.0
+                if mid > 0:
+                    post_order_dist = ((limit_px - mid) / mid) * 10000.0  # bps
+            self.private_window[-1] = self._normalize_private_state(
+                self.position, self.balance, remaining_time, post_order_dir, post_order_dist
+            )
 
         # 3. Process NEW Action (T) → becomes Pending for T+1
         # Tier 2: Flattened Action Space [0: TBuy, 1: MBuy, 2: Hold, 3: Cancel, 4: MSell, 5: TSell]

@@ -92,7 +92,7 @@ training:
   log_interval: 20480
   torch_compile: true
   use_amp: true
-  use_shm: false
+  use_shm: true
   verbose_logging: true
 
 hpo:
