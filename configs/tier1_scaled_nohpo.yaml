@@ -106,4 +106,4 @@ wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   mode: "online"
-  tags: ["PPO", "Stage2", "Tier1-ScaleTest", "MLP-V5", "NAV-reward", "candle-fill", "NoHPO", "5M-budget", "BudgetParams", "PostAudit"]
+  tags: ["PPO", "Stage2", "Tier1-ScaleTest", "MLP-V5", "NAV-reward", "candle-fill", "NoHPO", "5M-budget", "BudgetParams", "PostAudit-v2", "ENV06b-fix"]
