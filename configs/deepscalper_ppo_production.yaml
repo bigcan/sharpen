@@ -31,8 +31,6 @@ env:
 
   reward:
     scaling: 1.0
-    hindsight_weight: 0.1
-    hindsight_horizon: 180
     volatility_horizon: 100
     sharpe_weight: 0.0
     hold_bonus_bps: 0.0
@@ -64,11 +62,11 @@ network:
 agents:
   ppo:
     learning_rate: 0.0003
-    gamma: 0.99
+    gamma: 0.95  # T1.2: LOB signal decay alignment
     gae_lambda: 0.95
     clip_eps: 0.2
     vf_coef: 0.5
-    ent_coef: 0.01
+    ent_coef: 0.001  # T1.3: Reduced from 0.01
     max_grad_norm: 0.5
     n_epochs: 4
     rollout_steps: 2048

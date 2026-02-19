@@ -28,10 +28,7 @@ env:
   max_drawdown_pct: 0.30
 
   reward:
-    # Paper-aligned reward (matches BDQ dev structure)
     scaling: 1.0
-    hindsight_weight: 0.1
-    hindsight_horizon: 180
     volatility_horizon: 100
     sharpe_weight: 0.0
     sharpe_horizon: 100
@@ -55,11 +52,11 @@ network:
 agents:
   ppo:
     learning_rate: 0.0003
-    gamma: 0.99
+    gamma: 0.95  # T1.2: Align with LOB signal decay (~20 min horizon)
     gae_lambda: 0.95
     clip_eps: 0.2
     vf_coef: 0.5
-    ent_coef: 0.01
+    ent_coef: 0.001  # T1.3: Reduced from 0.01 to not drown trading signal
     max_grad_norm: 0.5
     n_epochs: 4
     rollout_steps: 2048

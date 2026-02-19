@@ -13,6 +13,29 @@ from finrl_pro_ds.data.feature_engineering import (
 )
 MACRO_COLS = list(MACRO_FEATURE_COLS)
 
+
+class RunningMeanStd:
+    """Welford's online algorithm for running reward normalization.
+    
+    Equivalent to SB3's VecNormalize(norm_reward=True) but works
+    with our custom PPO training loop.
+    """
+    def __init__(self, epsilon=1e-8):
+        self.mean = 0.0
+        self.var = 1.0
+        self.count = epsilon
+    
+    def update(self, x):
+        self.count += 1
+        delta = x - self.mean
+        self.mean += delta / self.count
+        delta2 = x - self.mean
+        self.var += (delta * delta2 - self.var) / self.count
+
+    def normalize(self, x):
+        return x / max(self.var ** 0.5, 1e-8)
+
+
 class DeepScalperEnv(gym.Env):
     """
     DeepScalper Intraday Trading Environment
@@ -65,22 +88,23 @@ class DeepScalperEnv(gym.Env):
         self.window_size = config.get("window_size", 15)
         self.initial_balance = config.get("initial_balance", 100000.0)  # 100K USDT default
         
-        # Reward Config (Paper-aligned: Section 3.2 + 4.2)
+        # Reward Config — T1.1: NAV-based reward (portfolio delta)
         self.reward_config = config.get("reward", {})
-        self.reward_scaling = float(self.reward_config.get("scaling", 1.0))  # Paper: no scaling
-        self.hindsight_weight = float(self.reward_config.get("hindsight_weight", 0.0))
-        self.hindsight_horizon = int(self.reward_config.get("hindsight_horizon", 100))
+        self.reward_scaling = float(self.reward_config.get("scaling", 1.0))
         self.volatility_horizon = int(self.reward_config.get("volatility_horizon", 100))  # Section 4.4
 
         # Optional Risk-Aware Reward: Differential Sharpe Ratio (Moody & Saffell 2001)
-        # sharpe_weight=0.0 (default) → pure paper reward; >0 blends in DSR signal
+        # sharpe_weight=0.0 (default) → pure NAV reward; >0 blends in DSR signal
         self.sharpe_weight = float(self.reward_config.get("sharpe_weight", 0.0))
-        self.dsr_scale = float(self.reward_config.get("dsr_scale", 100.0))  # Scale DSR to match paper_reward magnitude (bps)
+        self.dsr_scale = float(self.reward_config.get("dsr_scale", 100.0))
         self.sharpe_horizon = int(self.reward_config.get("sharpe_horizon", 100))
 
         # Hold Bonus: small reward (in bps) for staying flat — fee-avoidance shaping
-        # Default 0.0 preserves paper behavior; production use ~0.1 bps
         self.hold_bonus_bps = float(self.reward_config.get("hold_bonus_bps", 0.0))
+
+        # T1.3: Running reward normalizer (equivalent to VecNormalize)
+        self.normalize_reward = config.get("normalize_reward", False)
+        self.reward_normalizer = RunningMeanStd() if self.normalize_reward else None
 
 
 
@@ -190,8 +214,7 @@ class DeepScalperEnv(gym.Env):
         self._raw_bid_vol_1 = 0.0  # RAW volume for liquidity checks
         self._raw_ask_vol_1 = 0.0  # RAW volume for liquidity checks
         
-        # Paper reward tracking: position and price at START of each step
-        self.prev_mid_price = 0.0
+        # T1.1: NAV reward uses prev_portfolio_value (set above), only need prev_position
         self.prev_position = 0.0
         
         # Reset fee/slippage tracking
@@ -400,7 +423,9 @@ class DeepScalperEnv(gym.Env):
                 if not self._check_margin(self.position, order_qty, order_px, 1):
                      order_qty = 0 # Reject
 
-                if order_qty > 0 and self.current_best_ask > 0 and self.current_best_ask <= order_px:
+                # T1.5 FIX (BUG-03): Strict inequality for maker fills to reduce adverse selection
+                fill_condition = (self.current_best_ask <= order_px) if is_taker else (self.current_best_ask < order_px)
+                if order_qty > 0 and self.current_best_ask > 0 and fill_condition:
                     # FIX CQ-2: Removed dead hasattr check (_raw_ask_vol_1 always set in __init__)
                     available_vol = self._raw_ask_vol_1 if self._raw_ask_vol_1 > 0 else 0.0
 
@@ -495,7 +520,9 @@ class DeepScalperEnv(gym.Env):
                 if not self._check_margin(self.position, order_qty, order_px, 2):
                      order_qty = 0 # Reject
 
-                if order_qty > 0 and self.current_best_bid > 0 and self.current_best_bid >= order_px:
+                # T1.5 FIX (BUG-03): Strict inequality for maker fills to reduce adverse selection
+                fill_condition = (self.current_best_bid >= order_px) if is_taker else (self.current_best_bid > order_px)
+                if order_qty > 0 and self.current_best_bid > 0 and fill_condition:
                     # Liquidity Check
                     # FIX N2: Removed dead hasattr check (sell-side, matches buy-side CQ-2 fix)
                     available_vol = self._raw_bid_vol_1 if self._raw_bid_vol_1 > 0 else 0.0
@@ -601,7 +628,8 @@ class DeepScalperEnv(gym.Env):
         
         if abs(signed_qty) < 1e-8:  # Hold
             direction = 0
-            self.pending_order = None
+            # T1.4 FIX (BUG-02): Hold preserves existing pending order for maker persistence
+            # Old code: self.pending_order = None  # This killed resting limit orders
         else:
             direction = 1 if signed_qty > 0 else 2  # Buy or Sell
             quantity = abs(signed_qty) * self.max_position
@@ -617,71 +645,38 @@ class DeepScalperEnv(gym.Env):
                 
             self.pending_order = (direction, limit_price, quantity, is_taker)
         
-        # 4. Dense Reward (Paper-aligned: Section 3.2 + 4.2)
-        # Formula: r_t = (mid_{t+1} - mid_t) * pos_t - fees + w * pos_t * (mid_{t+h} - mid_t)
+        # 4. Dense Reward — T1.1: Pure NAV delta (BUG-01 fix)
+        # r_t = NAV_{t+1} - NAV_t, normalized to bps
+        # This automatically captures mark-to-market PnL + all execution costs
         current_portfolio_value = self._get_portfolio_value()
-        current_mid = (self.current_best_bid + self.current_best_ask) / 2.0
         
-        # Telemetry breakdown
-        reward_pnl = 0.0
-        reward_fee = 0.0
-        reward_hindsight = 0.0
+        # Telemetry
         hold_bonus = 0.0
         
-        # --- Component 0: Hold Bonus (fee-avoidance shaping) ---
+        # --- Hold Bonus (fee-avoidance shaping) ---
         if direction == 0 and abs(self.prev_position) < 1e-12 and self.hold_bonus_bps > 0:
             hold_bonus = self.hold_bonus_bps
         
-        # --- Component 1: Instant PnL (price change × position at START of step) ---
-        if self.prev_mid_price > 0 and abs(self.prev_position) > 1e-12:
-            price_delta = current_mid - self.prev_mid_price
-            reward_pnl = price_delta * self.prev_position
+        # --- NAV Delta: captures mark-to-market PnL + realized execution costs ---
+        nav_delta = current_portfolio_value - self.prev_portfolio_value
         
-        # --- Component 2: Transaction Fee (counted ONCE — already deducted from balance) ---
-        # CRIT-2 NOTE: This fee is from FILLING the order placed at step t-1, not the action
-        # at step t. This creates a 1-step delay in fee credit assignment. With γ=0.995 the
-        # distortion is <0.5%, but fee-awareness learning is slightly weakened.
-        # Paper: -δ × price × |Δpos|.  We use the actual computed fees from execution.
-        if self.step_transaction_costs > 1e-12:
-            reward_fee = -self.step_transaction_costs
-        
-        # --- Component 3: Hindsight Bonus (training only, Section 4.2) ---
-        if self.hindsight_weight > 0 and self.handler and hasattr(self.handler, 'get_lookahead_price'):
-            try:
-                future_price = self.handler.get_lookahead_price(self.hindsight_horizon)
-                if future_price is not None and current_mid > 0 and abs(self.prev_position) > 1e-12:
-                    if hasattr(future_price, "item"): future_price = future_price.item()
-                    future_price = float(future_price)
-                    # Fix BUG-C: Use current_mid instead of prev_mid_price for hindsight reward
-                    # prev_position is correct (lagged), but price delta should be future vs current
-                    reward_hindsight = self.hindsight_weight * self.prev_position * (future_price - current_mid)
-            except Exception as e:
-                logging.error(f"Error in Hindsight: {e}")
-
         # Normalize to basis-point returns for scale invariance
-        # Raw PnL is in USDT — dividing by portfolio makes it a fractional return,
-        # then ×10,000 converts to bps (O(1) magnitude for Q-learning).
-        norm_divisor = max(current_portfolio_value, 1.0)
-        reward_pnl_bps = (reward_pnl / norm_divisor) * 10000.0
-        reward_fee_bps = (reward_fee / norm_divisor) * 10000.0
-        reward_hindsight_bps = (reward_hindsight / norm_divisor) * 10000.0
+        norm_divisor = max(self.prev_portfolio_value, 1.0)
+        reward_nav_bps = (nav_delta / norm_divisor) * 10000.0
 
-        # Total paper reward (Section 3.2 + 4.2) + hold bonus shaping
-        paper_reward = (reward_pnl_bps + reward_fee_bps + reward_hindsight_bps + hold_bonus) * self.reward_scaling
+        # Total reward: NAV bps + hold bonus
+        paper_reward = (reward_nav_bps + hold_bonus) * self.reward_scaling
 
-        # Drawdown tracking (telemetry only — penalty removed in Sprint 4, not in paper)
+        # Drawdown tracking (telemetry only)
         self.peak_portfolio_value = max(self.peak_portfolio_value, current_portfolio_value)
         drawdown_pct = 1.0 - (current_portfolio_value / self.peak_portfolio_value)
         drawdown_penalty = 0.0
 
-        # DSR (Differential Sharpe Ratio) - Section 3.2
-        # Use realized PnL for Sharpe calculation to avoid unrealized noise
-        # DSR update logic...
+        # DSR (Differential Sharpe Ratio) — uses NAV delta as step return
         reward_sharpe = 0.0
         if self.sharpe_weight > 0:
-            # Step return normalized by initial balance for scale invariance
             init_bal = self.initial_balance if self.initial_balance > 0 else 1.0
-            R_t = reward_pnl / init_bal  # fractional return
+            R_t = nav_delta / init_bal  # fractional return from NAV
 
             # Update EMA statistics
             delta_A = R_t - self._dsr_A
@@ -690,23 +685,25 @@ class DeepScalperEnv(gym.Env):
             self._dsr_B += self._dsr_eta * delta_B
             self._dsr_warmup += 1
 
-            # Compute DSR after warmup (need variance estimate)
+            # Compute DSR after warmup
             if self._dsr_warmup > 1:
                 variance = self._dsr_B - self._dsr_A ** 2
-                variance = max(variance, 0.0)  # FIX BUG-06: EMA can produce slightly negative variance
-                if variance > 1e-16:  # Guard against zero-variance
-                    # DSR = (B * ΔA - 0.5 * A * ΔB) / (B - A²)^{3/2}
+                variance = max(variance, 0.0)
+                if variance > 1e-16:
                     denom = variance ** 1.5
                     dsr = (self._dsr_B * delta_A - 0.5 * self._dsr_A * delta_B) / denom
-                    # Scale DSR to match paper_reward magnitude (bps), then clamp
                     reward_sharpe = float(np.clip(dsr * self.dsr_scale, -10.0, 10.0))
 
-        # Blend: (1 - w) × paper + w × DSR  (w=0 → pure paper)
+        # Blend: (1 - w) × paper + w × DSR  (w=0 → pure NAV)
         reward = (1.0 - self.sharpe_weight) * paper_reward + self.sharpe_weight * reward_sharpe
 
-        # Sprint 1: Reward clipping to prevent Q-value overestimation
-        # ±50 bps is generous (~0.5% per step with 5× leverage)
+        # Reward clipping ±50 bps
         reward = float(np.clip(reward, -50.0, 50.0))
+
+        # T1.3: Running reward normalization
+        if self.reward_normalizer:
+            self.reward_normalizer.update(reward)
+            reward = self.reward_normalizer.normalize(reward)
 
         # 4.3 Volatility Prediction Target (Section 4.4 — auxiliary loss, NOT reward)
         volatility_target = 0.0
@@ -720,7 +717,6 @@ class DeepScalperEnv(gym.Env):
 
         # Update trailing state for next step's reward calculation
         self.prev_portfolio_value = current_portfolio_value
-        self.prev_mid_price = current_mid
         self.prev_position = float(self.position)
         
         # 5. Safety Drawdown Stop
@@ -738,10 +734,9 @@ class DeepScalperEnv(gym.Env):
             "cumulative_slippage": self.cumulative_slippage,
             "total_execution_costs": self.cumulative_fees + self.cumulative_slippage,
             "timestamp": step_data.get("timestamp") if step_data is not None else None,
-            # Telemetry (paper-aligned + optional DSR + hold shaping)
-            "reward_pnl": reward_pnl_bps,
-            "reward_fee": reward_fee_bps,
-            "reward_hindsight": reward_hindsight_bps,
+            # Telemetry — T1.1: NAV-based reward components
+            "reward_nav": reward_nav_bps,
+            "nav_delta": nav_delta,
             "reward_hold_bonus": hold_bonus,
             "reward_sharpe": reward_sharpe,
             "reward_drawdown_penalty": drawdown_penalty,
