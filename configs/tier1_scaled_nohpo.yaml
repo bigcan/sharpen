@@ -1,0 +1,109 @@
+# Stage 2 - Tier 1 Scaled Run (NO HPO — Budget Params)
+# =====================================================
+# Purpose: Isolation experiment to determine if production regression was
+#          from HPO (bad hyperparams) or from scaling (overfitting at 5M steps).
+#
+# Uses EXACTLY the hand-tuned params from rt4c56ew (budget run, Sharpe +0.89)
+# but with 5M training budget. HPO is DISABLED.
+#
+# Key differences from tier1_scaled.yaml (mmv1yqr7):
+#   1. HPO: DISABLED (was 30 trials)
+#   2. ent_coef: 0.001 (was 0.000266 from HPO — 3.8× higher)
+#   3. batch_size: 256 (was 1024)
+#   4. rollout_steps: 2048 (was 4096)
+#   5. n_epochs: 4 (was 8)
+#   6. max_grad_norm: 0.5 (was 1.0)
+#   7. No target_kl (was 0.023)
+#
+# Expected outcome:
+#   If this run is better than mmv1yqr7 → HPO was the problem
+#   If this run is worse than rt4c56ew → scaling is the problem (overfitting)
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+  norm_cutoff_date: "2025-05-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0
+  maker_fee: 0.0002
+  taker_fee: 0.0005
+  num_envs: 20
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 100
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 100
+    hold_bonus_bps: 0.0
+
+  action:
+    price_bins: 5
+    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    max_position: 5.0
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5      # Current env always outputs 5 dims
+    hidden_size: 256
+    encoder_type: "mlp"
+    window_size: 15
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    # --- EXACT rt4c56ew (budget) hand-tuned params ---
+    learning_rate: 0.0003
+    gamma: 0.95
+    gae_lambda: 0.95
+    clip_eps: 0.2
+    vf_coef: 0.5
+    ent_coef: 0.001             # CRITICAL: 3.8× higher than HPO-selected 0.000266
+    max_grad_norm: 0.5
+    n_epochs: 4
+    rollout_steps: 2048         # Budget size (smaller = more frequent updates)
+    batch_size: 256             # Budget size
+    lr_schedule: "linear"
+    checkpoint_interval: 500000
+
+training:
+  total_timesteps: 5000000       # 10× budget — same as mmv1yqr7
+  training_epochs: 1
+  log_interval: 10240            # Every 5 rollouts (same as budget)
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: false                 # NO HPO — pure scaling test
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["PPO", "Stage2", "Tier1-ScaleTest", "MLP-V5", "NAV-reward", "candle-fill", "NoHPO", "5M-budget", "BudgetParams"]
