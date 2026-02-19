@@ -91,11 +91,11 @@ class PPOTrainer:
         self.agent = PPOAgent(
             network_config=net_cfg,
             lr=ppo_cfg.get("learning_rate", 3e-4),
-            gamma=ppo_cfg.get("gamma", 0.99),
+            gamma=ppo_cfg.get("gamma", 0.95),  # T1.2 default
             gae_lambda=ppo_cfg.get("gae_lambda", 0.95),
             clip_eps=ppo_cfg.get("clip_eps", 0.2),
             vf_coef=ppo_cfg.get("vf_coef", 0.5),
-            ent_coef=ppo_cfg.get("ent_coef", 0.01),
+            ent_coef=ppo_cfg.get("ent_coef", 0.001),  # T1.3 default
             max_grad_norm=ppo_cfg.get("max_grad_norm", 0.5),
             n_epochs=ppo_cfg.get("n_epochs", 4),
             rollout_steps=self.rollout_steps,
