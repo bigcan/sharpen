@@ -72,4 +72,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     output = remote_cmd(args.command, args.timeout)
-    print(output)
+    sys.stdout.buffer.write(output.encode("utf-8", errors="replace") + b"\n")
