@@ -327,10 +327,11 @@ class ParquetDataHandler:
         # and prepend it to "after" so the EMA has context to converge.
         buffer_size = min(BUFFER_ROWS, n_before)
         raw_buffer = df[mask_before].iloc[-buffer_size:].copy()
-        # FIX BUG-08: Strip price columns from buffer rows to prevent
-        # hindsight reward from accessing training-era prices in the first
-        # 200 steps of validation. Buffer is only needed for EMA convergence.
-        lookahead_cols = ['mid_price', 'close', 'bid_price_1', 'ask_price_1']
+        # FIX BUG-08 (narrowed): Only zero columns used for lookahead reward.
+        # LOB prices (bid_price_*, ask_price_*) MUST remain for micro feature
+        # computation (dist_bid_*, dist_ask_*, spread_bps, microprice_basis)
+        # and EMA warm-up convergence. They are not a leakage vector.
+        lookahead_cols = ['mid_price', 'close']
         for col in lookahead_cols:
             if col in raw_buffer.columns:
                 raw_buffer[col] = np.nan
