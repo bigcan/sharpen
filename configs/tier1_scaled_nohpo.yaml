@@ -55,9 +55,9 @@ env:
     hold_bonus_bps: 0.0
 
   action:
-    price_bins: 5
-    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    discrete_dims: 6                # Tier 2: Discrete(6) — TBuy|MBuy|Hold|Cancel|MSell|TSell
     max_position: 5.0
+    fixed_trade_qty: 0.2            # 20% of max_position per trade
 
   augmentation:
     enabled: false
@@ -106,4 +106,4 @@ wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   mode: "online"
-  tags: ["PPO", "Stage2", "Tier1-ScaleTest", "MLP-V5", "NAV-reward", "candle-fill", "NoHPO", "5M-budget", "BudgetParams"]
+  tags: ["PPO", "Stage2", "Tier1-ScaleTest", "MLP-V5", "NAV-reward", "candle-fill", "NoHPO", "5M-budget", "BudgetParams", "PostAudit"]
