@@ -1,0 +1,116 @@
+# Stage 2 - Tier 1 Scaled Validation Run
+# ====================================
+# Purpose: Full-budget training run with HPO to validate Tier 1 MDP fixes at scale.
+#          Tier 1 pilot (rt4c56ew, 500K steps) confirmed positive Sharpe (Val 1.33 / Test 0.89)
+#          but only 6 test trades — policy didn't converge. This run gives it enough budget.
+#
+# Changes from tier1_validation.yaml:
+#   1. total_timesteps: 500K → 5M (10x)  — enough for ~6 epochs
+#   2. HPO: enabled with 15 trials × 500K steps each
+#   3. rollout_steps: 2048 → 4096  — larger rollouts for lower variance
+#   4. batch_size: 256 → 1024  — better GPU utilization
+#   5. checkpoint_interval: 100K → 500K — avoid disk spam
+#   6. log_interval: 10240 → 20480  — reasonable for longer run
+#
+# Tier 1 fixes baked into env code (not config):
+#   T1.1: NAV-based reward (replaces mid-to-mid PnL, removes hindsight)
+#   T1.4: Maker order persistence (Hold preserves pending orders)
+#   T1.5v2: Candle-based fill (maker fills use high/low prices)
+#   T1.3: RunningMeanStd reward normalizer
+#   NaN fix: LOB prices preserved in warm-up buffer
+#
+# Success criteria:
+#   - Test trade count > 100 (vs. 6 in pilot)
+#   - Test Sharpe > 0.5  (vs. 0.89 in pilot, but on 6 trades)
+#   - Entropy < 3.0  (vs. 3.55 in pilot — agent should commit to a strategy)
+#   - HPO best trial improving across sweeps (not all equally bad)
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+  norm_cutoff_date: "2025-05-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0       # Spot (no leverage)
+  maker_fee: 0.0002             # 2 bps (Binance VIP0)
+  taker_fee: 0.0005             # 5 bps (Binance VIP0)
+  num_envs: 20                  # GPUHub safe limit (>20 risks BrokenPipeError)
+  window_size: 15
+  max_drawdown_pct: 0.30        # Safety net
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 100
+    sharpe_weight: 0.0           # Pure NAV reward
+    dsr_scale: 100.0
+    sharpe_horizon: 100
+    hold_bonus_bps: 0.0
+
+  action:
+    price_bins: 5
+    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    max_position: 5.0
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 3
+    hidden_size: 256
+    encoder_type: "mlp"
+    window_size: 15
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0003        # HPO range: [3e-5, 5e-4]
+    gamma: 0.95                  # T1.2: LOB signal decay (~20 min horizon)
+    gae_lambda: 0.95             # HPO range: [0.90, 0.99]
+    clip_eps: 0.2                # HPO range: [0.1, 0.3]
+    vf_coef: 0.5
+    ent_coef: 0.001              # HPO range: [5e-4, 0.01]
+    max_grad_norm: 0.5           # HPO range: [0.3, 1.0]
+    n_epochs: 4                  # HPO range: [3, 6]
+    rollout_steps: 4096          # Larger rollouts for variance reduction
+    batch_size: 1024             # Better GPU utilization on RTX 5090
+    lr_schedule: "linear"
+    checkpoint_interval: 500000
+
+training:
+  total_timesteps: 5000000       # 10x pilot — ~6 epochs over training data
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 15                   # ~6 dims × 2.5 = 15 trials
+  steps_per_trial: 500000        # Same as pilot — enough to see signal
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["PPO", "Stage2", "Tier1-Scaled", "MLP-V5", "NAV-reward", "candle-fill", "HPO", "5M-budget"]
