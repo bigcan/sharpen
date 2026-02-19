@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 """
 Phase A: Baseline Strategies — Establishes performance spectrum.
-Runs 6 deterministic policies through the DeepScalper env on val+test splits.
+Runs 7 deterministic policies through the DeepScalper env on val+test splits.
 
 Baselines:
   A1: Random       — uniform random from Discrete(6)
@@ -9,11 +9,12 @@ Baselines:
   A3: Buy-and-Hold — TAKER_BUY at t=0, then HOLD
   A4: Momentum     — buy if logret_5 > 0, sell if < 0
   A5: Mean-Revert  — buy if microprice_basis < -0.5bps, sell if > +0.5bps
-  A6: Oracle        — 1-step lookahead, taker-only
+  A6: OracleTaker  — 1-step lookahead, taker-only (10bps round-trip)
+  A7: OracleMaker  — 1-step lookahead, maker-only (4bps round-trip)
 
 Usage:
   python scripts/run_baselines.py --config configs/postaudit_hpo.yaml
-  python scripts/run_baselines.py --config configs/postaudit_hpo.yaml --baselines A1 A6
+  python scripts/run_baselines.py --config configs/postaudit_hpo.yaml --baselines A1 A6 A7
 """
 import yaml
 import argparse
@@ -292,6 +293,28 @@ def make_oracle_policy(mid_prices, taker_fee):
     return policy_oracle
 
 
+def make_oracle_maker_policy(mid_prices, maker_fee):
+    """A7: Oracle — 1-step perfect foresight, maker-only (lower round-trip cost)."""
+    fee_threshold = maker_fee * 2  # Round-trip fee cost (e.g. 4bps vs 10bps taker)
+
+    def policy_oracle_maker(obs, info, step, env):
+        current_step = env.current_step
+        if current_step + 1 >= len(mid_prices):
+            return HOLD
+        mid_now = mid_prices[current_step]
+        mid_next = mid_prices[current_step + 1]
+        if mid_now <= 0:
+            return HOLD
+        ret = (mid_next - mid_now) / mid_now
+        if ret > fee_threshold:
+            return MAKER_BUY
+        elif ret < -fee_threshold:
+            return MAKER_SELL
+        return HOLD
+
+    return policy_oracle_maker
+
+
 # ============================================================================
 # MAIN
 # ============================================================================
@@ -319,6 +342,7 @@ def main():
         )
 
     taker_fee = config.get("env", {}).get("taker_fee", 0.0005)
+    maker_fee = config.get("env", {}).get("maker_fee", 0.0002)
 
     # Define splits
     splits = [
@@ -334,7 +358,8 @@ def main():
         "A3": ("BuyAndHold", policy_buy_and_hold),
         "A4": ("Momentum", policy_momentum),
         "A5": ("MeanReversion", policy_mean_reversion),
-        "A6": ("Oracle", None),  # Special handling
+        "A6": ("OracleTaker", None),  # Special handling
+        "A7": ("OracleMaker", None),  # Special handling
     }
 
     selected = args.baselines or list(all_baselines.keys())
@@ -374,13 +399,33 @@ def main():
                                    if isinstance(v, (int, float))})
                 continue
 
-            # A6 (Oracle) needs special env with mid-price lookahead
+            # A6 (OracleTaker) needs special env with mid-price lookahead
             if exp_id == "A6":
-                logger.info(f"  Running A6_Oracle_{split_name} (loading mid prices)...")
+                logger.info(f"  Running A6_OracleTaker_{split_name} (loading mid prices)...")
                 env, mid_prices = make_oracle_env(config, start_date, end_date, norm_cutoff)
                 oracle_policy = make_oracle_policy(mid_prices, taker_fee)
-                name = f"A6_Oracle_{split_name}"
+                name = f"A6_OracleTaker_{split_name}"
                 metrics = run_backtest(env, oracle_policy, name)
+                metrics["split"] = split_name
+                results.append(metrics)
+                env.close()
+                logger.info(f"    Return={metrics['total_return']*100:.2f}%, "
+                            f"Sharpe={metrics['sharpe']:.2f}, "
+                            f"Trades={metrics['trade_count']}, "
+                            f"PF={metrics['profit_factor']:.3f}")
+                if not args.no_wandb:
+                    import wandb
+                    wandb.log({f"baseline/{name}/{k}": v for k, v in metrics.items()
+                               if isinstance(v, (int, float))})
+                continue
+
+            # A7 (OracleMaker) — same lookahead env, maker orders + lower fee threshold
+            if exp_id == "A7":
+                logger.info(f"  Running A7_OracleMaker_{split_name} (loading mid prices)...")
+                env, mid_prices = make_oracle_env(config, start_date, end_date, norm_cutoff)
+                oracle_maker_policy = make_oracle_maker_policy(mid_prices, maker_fee)
+                name = f"A7_OracleMaker_{split_name}"
+                metrics = run_backtest(env, oracle_maker_policy, name)
                 metrics["split"] = split_name
                 results.append(metrics)
                 env.close()
@@ -423,17 +468,42 @@ def main():
               f"{r['trade_count']:>7d} {r['profit_factor']:>7.3f} "
               f"{r['max_drawdown']*100:>7.2f}%")
 
-    # Oracle gate check
-    oracle_results = [r for r in results if 'Oracle' in r['baseline']]
-    if oracle_results:
-        avg_pf = np.mean([r['profit_factor'] for r in oracle_results])
-        print(f"\n  ORACLE GATE: Avg PF = {avg_pf:.3f}")
-        if avg_pf < 1.2:
-            print("  WARNING: Oracle PF < 1.2 -- signal may be too weak for ANY strategy at this fee level")
-        elif avg_pf < 2.0:
-            print("  OK: Oracle PF 1.2-2.0 -- tight alpha margin, execution quality matters")
+    # Oracle gate check — split by taker vs maker
+    taker_oracle = [r for r in results if 'OracleTaker' in r['baseline']]
+    maker_oracle = [r for r in results if 'OracleMaker' in r['baseline']]
+
+    taker_pf = np.mean([r['profit_factor'] for r in taker_oracle]) if taker_oracle else None
+    maker_pf = np.mean([r['profit_factor'] for r in maker_oracle]) if maker_oracle else None
+
+    if taker_pf is not None or maker_pf is not None:
+        print("\n  ORACLE GATE EVALUATION")
+        print(f"  {'─'*50}")
+
+        taker_pass = False
+        if taker_pf is not None:
+            taker_pass = taker_pf >= 1.2
+            status = "PASS" if taker_pass else "FAIL"
+            print(f"  Taker Oracle (A6): Avg PF = {taker_pf:.3f}  [{status}]"
+                  f"  (10bps RT @ taker_fee={taker_fee*1e4:.1f}bps)")
+
+        maker_pass = False
+        if maker_pf is not None:
+            maker_pass = maker_pf >= 1.2
+            status = "PASS" if maker_pass else "FAIL"
+            print(f"  Maker Oracle (A7): Avg PF = {maker_pf:.3f}  [{status}]"
+                  f"  (4bps RT @ maker_fee={maker_fee*1e4:.1f}bps)")
+
+        print(f"  {'─'*50}")
+        if taker_pass and maker_pass:
+            print("  VERDICT: Alpha abundant — both taker and maker oracles profitable")
+        elif maker_pass and not taker_pass:
+            print("  VERDICT: Maker-dominant execution required — agent must learn to prefer maker orders")
+            print("           (taker fees erode alpha, but spread-earning via LOB is viable)")
+        elif taker_pass and not maker_pass:
+            print("  VERDICT: Taker oracle passes but maker fails — check maker fill logic")
         else:
-            print("  OK: Oracle PF > 2.0 -- significant headroom, even naive strategies should profit")
+            print("  VERDICT: Neither oracle profitable — MDP may be unsolvable at this resolution")
+            print("           Consider: longer timeframe (5-min bars), lower fees, or richer features")
 
     if not args.no_wandb:
         import wandb
