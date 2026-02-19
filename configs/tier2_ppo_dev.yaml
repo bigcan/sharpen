@@ -1,0 +1,107 @@
+# Stage 2 - Tier 2 Architectural Alignment
+# ========================================
+# Purpose: Implement flattened action space and expanded observability (order state).
+# 
+# Changes from Tier 1:
+#   1. action_space: MultiDiscrete([5, 9]) → Discrete(6) [Taker Buy, Maker Buy, Hold, Cancel, Maker Sell, Taker Sell]
+#   2. private_state: 3 dims → 5 dims [position, balance, remaining_time, order_direction, order_dist_to_mid]
+#   3. ent_coef: default 0.001 → 0.0005 (reduced exploration mass for smaller space)
+#   4. action.fixed_trade_qty: 0.2 (20% of max_position per trade)
+#
+# Tier 1 foundation (KEPT):
+#   T1.1: NAV-based reward
+#   T1.4: Maker order persistence (Hold preserves pending orders)
+#   T1.5v2: Candle-based fill
+#   T1.3: RunningMeanStd reward normalizer
+#   NaN fix: LOB prices preserved in warm-up buffer
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+  norm_cutoff_date: "2025-05-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance", "remaining_time", "order_direction", "order_dist"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0       # Spot (no leverage)
+  maker_fee: 0.0002             # 2 bps (Binance VIP0)
+  taker_fee: 0.0005             # 5 bps (Binance VIP0)
+  num_envs: 20                  # GPUHub safe limit
+  window_size: 15
+  max_drawdown_pct: 0.30        # Safety net
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 100
+    sharpe_weight: 0.0           # Pure NAV reward
+    dsr_scale: 100.0
+    sharpe_horizon: 100
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 6             # Tier 2: Flattened
+    fixed_trade_qty: 0.2         # 20% of max_position per discrete action
+    max_position: 5.0
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5        # Tier 2: Expanded order state
+    hidden_size: 256
+    encoder_type: "mlp"
+    window_size: 15
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0003
+    gamma: 0.95
+    gae_lambda: 0.95
+    clip_eps: 0.2
+    vf_coef: 0.5
+    ent_coef: 0.0005             # Tier 2: Lowered for smaller action space
+    max_grad_norm: 0.5
+    n_epochs: 4
+    target_kl: 0.02
+    rollout_steps: 4096
+    batch_size: 1024
+    lr_schedule: "linear"
+    checkpoint_interval: 500000
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 30
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["PPO", "Stage2", "Tier2", "Flattened-Actions", "Order-State", "MLP-V5", "NAV-reward", "candle-fill", "HPO"]

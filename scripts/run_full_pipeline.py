@@ -650,15 +650,19 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         if not network_config:
             raise ValueError("Config missing 'network' section — cannot reconstruct agent for backtest")
         
-        # Read action dims from config (mirrors trainer L24-29)
+        # Read action dims from config (mirrors trainer logic)
         action_config = config.get("env", {}).get("action", {})
-        signed_qty_props = action_config.get(
-            "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
-        )
-        action_dims = (
-            action_config.get("price_bins", 5),
-            len(signed_qty_props)
-        )
+        if "discrete_dims" in action_config:
+            action_dims = action_config["discrete_dims"]
+        else:
+            # Fallback for MultiDiscrete legacy
+            signed_qty_props = action_config.get(
+                "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+            )
+            action_dims = (
+                action_config.get("price_bins", 5),
+                len(signed_qty_props)
+            )
         # FIX: Inject action_space_dims into network_config (mirrors trainer logic).
         # Without this, the BDQ/PPO agent assertion falls back to default (5,9).
         network_config["action_space_dims"] = action_dims

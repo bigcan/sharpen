@@ -221,29 +221,44 @@ class DeepScalperBDQ:
             if qty_mask_t is not None:
                 q_qty = q_qty.masked_fill(qty_mask_t == 0, float('-inf'))
             
-            a_price_greedy = q_price.argmax(dim=1)
-            a_qty_greedy = q_qty.argmax(dim=1)
-            
-            # Stack: (B, 2)
-            greedy_actions = torch.stack([a_price_greedy, a_qty_greedy], dim=1)
+            if q_price is not None:
+                a_price_greedy = q_price.argmax(dim=1)
+                a_qty_greedy = q_qty.argmax(dim=1)
+                # Stack: (B, 2)
+                greedy_actions = torch.stack([a_price_greedy, a_qty_greedy], dim=1)
+            else:
+                # Tier 2: Single branch
+                greedy_actions = q_qty.argmax(dim=1, keepdim=True)
             
         # Exploration: Uniform random (Sprint 3: Boltzmann removed)
         if random_mask.any():
-            r_price = torch.randint(0, self.action_dims[0], (batch_size,), device=self.device)
-            
-            # ARCH-3: Random exploration respects qty mask
-            if qty_mask_t is not None:
-                # Sample from valid indices only
-                valid_indices = [torch.where(qty_mask_t[b] > 0)[0] for b in range(batch_size)]
-                r_qty = torch.stack([
-                    vi[torch.randint(0, len(vi), (1,))] if len(vi) > 0
-                    else torch.tensor([self.action_dims[1] // 2], device=self.device)  # fallback: hold
-                    for vi in valid_indices
-                ]).squeeze(-1)
+            if q_price is not None:
+                r_price = torch.randint(0, self.action_dims[0], (batch_size,), device=self.device)
+                
+                # ARCH-3: Random exploration respects qty mask
+                if qty_mask_t is not None:
+                    # Sample from valid indices only
+                    valid_indices = [torch.where(qty_mask_t[b] > 0)[0] for b in range(batch_size)]
+                    r_qty = torch.stack([
+                        vi[torch.randint(0, len(vi), (1,))] if len(vi) > 0
+                        else torch.tensor([self.action_dims[1] // 2], device=self.device)  # fallback: hold
+                        for vi in valid_indices
+                    ]).squeeze(-1)
+                else:
+                    r_qty = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
+                
+                random_actions = torch.stack([r_price, r_qty], dim=1)
             else:
-                r_qty = torch.randint(0, self.action_dims[1], (batch_size,), device=self.device)
-            
-            random_actions = torch.stack([r_price, r_qty], dim=1)
+                # Tier 2: Sample from Discrete(6)
+                if qty_mask_t is not None:
+                    valid_indices = [torch.where(qty_mask_t[b] > 0)[0] for b in range(batch_size)]
+                    random_actions = torch.stack([
+                        vi[torch.randint(0, len(vi), (1,))] if len(vi) > 0
+                        else torch.tensor([2], device=self.device) # Fallback: Hold (index 2 in Tier 2)
+                        for vi in valid_indices
+                    ])
+                else:
+                    random_actions = torch.randint(0, self.action_dims, (batch_size, 1), device=self.device)
             
             mask_expanded = random_mask.unsqueeze(1).expand(-1, n_branches)
             final_actions = torch.where(mask_expanded, random_actions, greedy_actions)
@@ -251,7 +266,8 @@ class DeepScalperBDQ:
             final_actions = greedy_actions
         
         self.policy_net.train()  # FIX FIND-4: Restore train mode
-        return final_actions.cpu().numpy()
+        # Return (B, 2) for MultiDiscrete, (B,) for Discrete
+        return final_actions.cpu().numpy() if q_price is not None else final_actions.squeeze(1).cpu().numpy()
     
     def train_step(self) -> Optional[Dict[str, float]]:
         # FIX FIND-4: Ensure train mode for dropout/batchnorm
@@ -300,9 +316,14 @@ class DeepScalperBDQ:
             # BUG-B: Hidden state ignored during training (stateless update)
             q_price, q_qty, _, pred_vol, _ = self.policy_net(micro_state, private_state, macro_state)
         
-            # Gather Q-values for taken actions: (B, 1)
-            curr_q_price = q_price.gather(1, actions[:, 0].unsqueeze(1))
-            curr_q_qty = q_qty.gather(1, actions[:, 1].unsqueeze(1))
+            if q_price is not None:
+                # MultiDiscrete: 2 branches
+                curr_q_price = q_price.gather(1, actions[:, 0].unsqueeze(1))
+                curr_q_qty = q_qty.gather(1, actions[:, 1].unsqueeze(1))
+            else:
+                # Discrete: single branch
+                curr_q_qty = q_qty.gather(1, actions.view(-1, 1))
+                curr_q_price = None
             
             # Double DQN (FIX D1): policy net selects, target net evaluates
             with torch.no_grad():
@@ -310,49 +331,64 @@ class DeepScalperBDQ:
                 next_q_price_policy, next_q_qty_policy, _, _, _ = self.policy_net(
                     micro_next, private_next, macro_next
                 )
-                best_next_price = next_q_price_policy.argmax(dim=1, keepdim=True)
-                best_next_qty = next_q_qty_policy.argmax(dim=1, keepdim=True)
                 
-                # Target net evaluates those actions
-                next_q_price_target, next_q_qty_target, _, _, _ = self.target_net(
-                    micro_next, private_next, macro_next
-                )
-                max_next_q_price = next_q_price_target.gather(1, best_next_price)
-                max_next_q_qty = next_q_qty_target.gather(1, best_next_qty)
-                
-                # ARCH-1: Per-branch Bellman targets (Independent Q-learning within Dueling BDQ)
-                # Decouples price/qty streams to prevent noise propagation
-                target_q_price = rewards + self.gamma * max_next_q_price * (1 - dones)
-                target_q_qty = rewards + self.gamma * max_next_q_qty * (1 - dones)
+                if q_price is not None:
+                    best_next_price = next_q_price_policy.argmax(dim=1, keepdim=True)
+                    best_next_qty = next_q_qty_policy.argmax(dim=1, keepdim=True)
+                    
+                    # Target net evaluates those actions
+                    next_q_price_target, next_q_qty_target, _, _, _ = self.target_net(
+                        micro_next, private_next, macro_next
+                    )
+                    max_next_q_price = next_q_price_target.gather(1, best_next_price)
+                    max_next_q_qty = next_q_qty_target.gather(1, best_next_qty)
+                    
+                    # ARCH-1: Per-branch Bellman targets
+                    target_q_price = rewards + self.gamma * max_next_q_price * (1 - dones)
+                    target_q_qty = rewards + self.gamma * max_next_q_qty * (1 - dones)
+                else:
+                    best_next_action = next_q_qty_policy.argmax(dim=1, keepdim=True)
+                    _, next_q_target, _, _, _ = self.target_net(micro_next, private_next, macro_next)
+                    max_next_q = next_q_target.gather(1, best_next_action)
+                    target_q_qty = rewards + self.gamma * max_next_q * (1 - dones)
+                    target_q_price = None
                 
                 # Sprint 3: Target Q Clipping to prevent bootstrap divergence
                 if self.target_q_clip > 0:
-                    target_q_price = target_q_price.clamp(-self.target_q_clip, self.target_q_clip)
+                    if target_q_price is not None: target_q_price = target_q_price.clamp(-self.target_q_clip, self.target_q_clip)
                     target_q_qty = target_q_qty.clamp(-self.target_q_clip, self.target_q_clip)
                 
-            # Bug #5 Fix: Mask price-branch loss when action is Hold (qty = middle index)
-            # During Hold, the price action is irrelevant — masking prevents noisy gradients
-            hold_idx = self.action_dims[1] // 2
-            is_trading = (actions[:, 1] != hold_idx).float().unsqueeze(1)
-
-            # Loss — 2 branches
-            if self.use_per:
-                loss_fn = nn.SmoothL1Loss(reduction='none')
-                loss_price_raw = loss_fn(curr_q_price, target_q_price) * is_trading
-                loss_qty_raw = loss_fn(curr_q_qty, target_q_qty)
+            # Loss Calculation
+            loss_fn = nn.SmoothL1Loss(reduction='none')
+            if q_price is not None:
+                # Bug #5 Fix: Mask price-branch loss when action is Hold
+                hold_idx = self.action_dims[1] // 2
+                is_trading = (actions[:, 1] != hold_idx).float().unsqueeze(1)
                 
-                loss_price = (loss_price_raw * is_weights_t).mean()
-                loss_qty = (loss_qty_raw * is_weights_t).mean()
+                if self.use_per:
+                    loss_price_raw = loss_fn(curr_q_price, target_q_price) * is_trading
+                    loss_qty_raw = loss_fn(curr_q_qty, target_q_qty)
+                    loss_price = (loss_price_raw * is_weights_t).mean()
+                    loss_qty = (loss_qty_raw * is_weights_t).mean()
+                else:
+                    loss_price = (loss_fn(curr_q_price, target_q_price) * is_trading).mean()
+                    loss_qty = loss_fn(curr_q_qty, target_q_qty).mean()
+                
+                total_loss_main = (loss_price + loss_qty) / 2.0
             else:
-                loss_fn = nn.SmoothL1Loss(reduction='none')
-                loss_price = (loss_fn(curr_q_price, target_q_price) * is_trading).mean()
-                loss_qty = loss_fn(curr_q_qty, target_q_qty).mean()
+                # Tier 2: Single branch
+                if self.use_per:
+                    loss_qty = (loss_fn(curr_q_qty, target_q_qty) * is_weights_t).mean()
+                else:
+                    loss_qty = loss_fn(curr_q_qty, target_q_qty).mean()
+                total_loss_main = loss_qty
+                loss_price = torch.tensor(0.0, device=self.device)
             
             # Auxiliary volatility prediction loss (Section 4.4)
             loss_vol_pred = nn.SmoothL1Loss()(pred_vol, aux_targets)
             
-            # Average branch losses (CRIT-1: balanced V(s) gradient)
-            total_loss = (loss_price + loss_qty) / 2.0 + self.auxiliary_weight * loss_vol_pred
+            # Final combined loss
+            total_loss = total_loss_main + self.auxiliary_weight * loss_vol_pred
         
         if not torch.isfinite(total_loss):
             print(f"WARNING: BDQ Loss is {total_loss.item()} (NaN/Inf). Skipping update.", flush=True)
@@ -376,10 +412,12 @@ class DeepScalperBDQ:
         # PER: Update priorities with TD errors (mean across branches)
         if self.use_per and per_indices is not None:
             with torch.no_grad():
-                td_price = (curr_q_price - target_q_price).abs()
-                td_qty = (curr_q_qty - target_q_qty).abs()
-                # Mean TD error across 2 action branches per sample
-                td_errors = ((td_price + td_qty) / 2.0).squeeze(1).cpu().numpy()
+                if q_price is not None:
+                    td_price = (curr_q_price - target_q_price).abs()
+                    td_qty = (curr_q_qty - target_q_qty).abs()
+                    td_errors = ((td_price + td_qty) / 2.0).squeeze(1).cpu().numpy()
+                else:
+                    td_errors = (curr_q_qty - target_q_qty).abs().squeeze(1).cpu().numpy()
             self.memory.update_priorities(per_indices, td_errors)
         
         # Update Target Net — Polyak (soft) averaging
@@ -394,19 +432,22 @@ class DeepScalperBDQ:
             "loss_price": loss_price.item(),
             "loss_qty": loss_qty.item(),
             "loss_aux": loss_vol_pred.item(),
-            "q_price_mean": curr_q_price.mean().item(),
             "q_qty_mean": curr_q_qty.mean().item(),
             "epsilon": self.epsilon,
             # Sprint 1: Q-value statistics for overestimation monitoring
-            "q_value/mean": (curr_q_price.mean().item() + curr_q_qty.mean().item()) / 2.0,
-            "q_value/std": (curr_q_price.std().item() + curr_q_qty.std().item()) / 2.0,
-            "q_value/max": max(curr_q_price.max().item(), curr_q_qty.max().item()),
-            "q_value/min": min(curr_q_price.min().item(), curr_q_qty.min().item()),
-            "q_value/target_mean": (target_q_price.mean().item() + target_q_qty.mean().item()) / 2.0,
-            "q_value/target_max": max(target_q_price.max().item(), target_q_qty.max().item()),
-            "q_value/target_min": min(target_q_price.min().item(), target_q_qty.min().item()),
+            "q_value/mean": curr_q_qty.mean().item(),
+            "q_value/std": curr_q_qty.std().item(),
+            "q_value/max": curr_q_qty.max().item(),
+            "q_value/min": curr_q_qty.min().item(),
+            "q_value/target_mean": target_q_qty.mean().item(),
+            "q_value/target_max": target_q_qty.max().item(),
+            "q_value/target_min": target_q_qty.min().item(),
             "exploration_mode": 0.0 if self.exploration_mode == "uniform" else 1.0,
         }
+        if q_price is not None:
+            metrics["q_price_mean"] = curr_q_price.mean().item()
+            metrics["q_value/mean"] = (curr_q_price.mean().item() + curr_q_qty.mean().item()) / 2.0
+
         
         if self.use_per:
             metrics["per_beta"] = self.memory.beta

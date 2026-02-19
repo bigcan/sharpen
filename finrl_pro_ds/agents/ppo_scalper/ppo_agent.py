@@ -42,7 +42,7 @@ class PPOAgent:
         n_epochs: int = 4,
         rollout_steps: int = 2048,
         batch_size: int = 256,
-        action_dims: Tuple[int, int] = (5, 9),
+        action_dims: int = 6, # Tier 2: Discrete(6)
         lr_schedule: str = "linear",
         total_timesteps: int = 1_000_000,
         use_amp: bool = False,
@@ -60,7 +60,7 @@ class PPOAgent:
         self.n_epochs = n_epochs
         self.rollout_steps = rollout_steps
         self.batch_size = batch_size
-        self.action_dims = list(action_dims)
+        self.action_dims = action_dims
         self.lr_schedule = lr_schedule
         self.total_timesteps = total_timesteps
         self.use_amp = use_amp
@@ -124,13 +124,13 @@ class PPOAgent:
 
         Args:
             micro: (B, W, 30) micro features
-            private_in: (B, W, 3) private state
+            private_in: (B, W, 5) private state
             macro: (B, M) macro features
             deterministic: If True, take argmax actions
-            qty_mask: Optional (B, n_qty) or (n_qty,) mask
+            qty_mask: Optional (B, 6) mask
 
         Returns:
-            actions: (B, 2) numpy int64
+            actions: (B,) numpy int64
             log_probs: (B,) numpy float32
             values: (B,) numpy float32
         """
@@ -192,7 +192,7 @@ class PPOAgent:
                 micro = torch.as_tensor(batch["micro"], dtype=torch.float32, device=self.device)
                 private = torch.as_tensor(batch["private"], dtype=torch.float32, device=self.device)
                 macro = torch.as_tensor(batch["macro"], dtype=torch.float32, device=self.device)
-                old_actions = torch.as_tensor(batch["actions"], dtype=torch.int64, device=self.device)
+                old_actions = torch.as_tensor(batch["actions"], dtype=torch.int64, device=self.device).squeeze(-1)
                 old_log_probs = torch.as_tensor(batch["old_log_probs"], dtype=torch.float32, device=self.device)
                 advantages = torch.as_tensor(batch["advantages"], dtype=torch.float32, device=self.device)
                 returns = torch.as_tensor(batch["returns"], dtype=torch.float32, device=self.device)

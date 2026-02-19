@@ -57,14 +57,7 @@ class PPOTrainer:
         self.run_name = run_name or time.strftime("%Y%m%d_%H%M%S")
 
         # Read action dims from config
-        action_config = config.get("env", {}).get("action", {})
-        signed_qty_props = action_config.get(
-            "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
-        )
-        action_dims = (
-            action_config.get("price_bins", 5),
-            len(signed_qty_props)
-        )
+        action_dims = config.get("env", {}).get("action", {}).get("discrete_dims", 6)
 
         # PPO config
         ppo_cfg = config.get("agents", {}).get("ppo", {})
@@ -112,7 +105,7 @@ class PPOTrainer:
         # Rollout buffer
         window_size = config.get("env", {}).get("window_size", 15)
         micro_input = net_cfg.get("micro_config", {}).get("input_size", 30)
-        private_input = net_cfg.get("micro_config", {}).get("private_input_size", 3)
+        private_input = net_cfg.get("micro_config", {}).get("private_input_size", 5)
         macro_input = net_cfg.get("macro_config", {}).get("input_size", 15)
         num_envs = getattr(env, "num_envs", 1)
 
@@ -122,8 +115,8 @@ class PPOTrainer:
             micro_shape=(window_size, micro_input),
             private_shape=(window_size, private_input),
             macro_shape=(macro_input,),
-            n_action_branches=2,
-            n_qty_actions=action_dims[1],  # B4: match qty action count
+            n_action_branches=1, # Tier 2: Flattened
+            n_qty_actions=action_dims,
         )
 
         # Checkpoint directory
@@ -131,8 +124,8 @@ class PPOTrainer:
         os.makedirs(self.ckpt_dir, exist_ok=True)
 
         # Private state check
-        priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_input_size", 3)
-        assert priv_cfg == 3, f"Env produces 3 private features, config expects {priv_cfg}"
+        priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_input_size", 5)
+        assert priv_cfg == 5, f"Tier 2 Env produces 5 private features, config expects {priv_cfg}"
 
         # AUDIT FIX D1: Validate window_size consistency between env and network
         net_ws = config.get("network", {}).get("micro_config", {}).get("window_size")
@@ -177,8 +170,8 @@ class PPOTrainer:
         _micro_dim = self.config.get("network", {}).get("micro_config", {}).get("input_size", 30)
         assert obs["micro"].shape == (B, W, _micro_dim), \
             f"obs['micro'] shape mismatch: expected ({B}, {W}, {_micro_dim}), got {obs['micro'].shape}"
-        assert obs["private"].shape == (B, W, 3), \
-            f"obs['private'] shape mismatch: expected ({B}, {W}, 3), got {obs['private'].shape}"
+        assert obs["private"].shape == (B, W, 5), \
+            f"obs['private'] shape mismatch: expected ({B}, {W}, 5), got {obs['private'].shape}"
         print(f"✓ Observation shapes verified: micro={obs['micro'].shape}, "
               f"private={obs['private'].shape}, macro={obs['macro'].shape}")
 
