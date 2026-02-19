@@ -1,0 +1,109 @@
+# Stage 2 - Tier 1 MDP Validation Run
+# ====================================
+# Purpose: First training run with ALL Tier 1 MDP physics fixes.
+#          Validates that the fixed environment produces a learnable signal.
+#
+# Tier 1 fixes baked into env code (not config):
+#   T1.1: NAV-based reward (replaces mid-to-mid PnL, removes hindsight)
+#   T1.4: Maker order persistence (Hold preserves pending orders)
+#   T1.5v2: Candle-based fill (maker fills use high/low prices)
+#   T1.3: RunningMeanStd reward normalizer
+#   NaN fix: LOB prices preserved in warm-up buffer
+#
+# Success criteria:
+#   - Reward trend improving (not flat/oscillating)
+#   - Entropy gradually decreasing from max (~3.8 -> <3.0)
+#   - Non-zero trade count (> 5% steps with fills)
+#   - No NaN in rewards, no crashes
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+  norm_cutoff_date: "2025-05-01 00:00:00"   # Prevent normalization leakage
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 1.0     # Spot (no leverage)
+  maker_fee: 0.0002           # 2 bps (Binance VIP0)
+  taker_fee: 0.0005           # 5 bps (Binance VIP0)
+  num_envs: 20                # GPUHub RTX 5090 safe limit
+  window_size: 15
+  max_drawdown_pct: 0.30      # Safety net, not too tight for learning
+  private_state_augment_prob: 0.0  # No augmentation for clean signal
+
+  reward:
+    # Post-T1.1 NAV reward: r = delta_NAV_bps * scaling
+    scaling: 1.0               # Multiplier on final reward
+    volatility_horizon: 100    # Lookback for vol-target normalization
+    # Differential Sharpe Ratio (optional blend)
+    sharpe_weight: 0.0         # 0 = pure NAV reward (no DSR)
+    dsr_scale: 100.0           # DSR amplitude (only if sharpe_weight > 0)
+    sharpe_horizon: 100        # DSR lookback window
+    # Shaping
+    hold_bonus_bps: 0.0        # Extra bps for staying flat (0 = disabled)
+
+  action:
+    price_bins: 5              # Market + 4 limit depths
+    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    max_position: 5.0
+
+  augmentation:
+    enabled: false             # Clean validation -- no noise injection
+
+network:
+  micro_config:
+    input_size: 30             # v2 evidence-ranked LOB features
+    private_input_size: 3      # Position + Balance + RemainingTime
+    hidden_size: 256
+    encoder_type: "mlp"        # V5: Stateless MLP (replaces LSTM)
+    window_size: 15            # Required by MLP for flatten dim
+
+  macro_config:
+    input_size: 15             # v2 macro features
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    # --- Core PPO hyperparameters ---
+    learning_rate: 0.0003
+    gamma: 0.95                # T1.2: LOB signal decay (~20 min horizon)
+    gae_lambda: 0.95
+    clip_eps: 0.2
+    vf_coef: 0.5
+    ent_coef: 0.001            # T1.3: Don't drown trading signal
+    max_grad_norm: 0.5
+    n_epochs: 4
+    rollout_steps: 2048
+    batch_size: 256
+    lr_schedule: "linear"
+    checkpoint_interval: 100000
+
+training:
+  total_timesteps: 500000      # ~2.5 hours -- enough to see learning signal
+  training_epochs: 1
+  log_interval: 10240          # Every 5 rollouts
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: false               # No HPO -- pure validation of Tier 1 fixes
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["PPO", "Stage2", "Tier1-Validation", "MLP-V5", "NAV-reward", "candle-fill"]
