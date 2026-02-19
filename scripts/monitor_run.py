@@ -68,7 +68,7 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
     try:
         run = api.run(run_path)
     except Exception as e:
-        print(f"❌ Could not find run {run_id}: {e}")
+        print(f"[ERROR] Could not find run {run_id}: {e}")
         return
 
     while time.time() - start_time < max_wait:
@@ -81,13 +81,13 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
             if state in ['finished', 'crashed', 'failed']:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Run ended: {state.upper()}")
                 if not no_collect and state == 'finished':
-                    print("\n⬇️  Triggering collection...")
+                    print("\n[COLLECT] Triggering collection...")
                     collect_run(run_id)
                 elif state in ['crashed', 'failed']:
-                     print(f"⚠️  Run {state} — collection optional scan recommended.")
+                     print(f"[WARN] Run {state} -- collection optional scan recommended.")
                      # We still collect on crash to get logs/traceback
-                     if not no_collect: 
-                         print("\n⬇️  Triggering collection (logs match)...")
+                     if not no_collect:
+                         print("\n[COLLECT] Triggering collection (logs match)...")
                          collect_run(run_id, skip_report=True) # Skip report for crashed runs
                 return
 
@@ -95,7 +95,7 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
             if pid:
                 is_alive = check_remote_pid(pid)
                 if not is_alive:
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] ❌ Remote process {pid} DIED but WandB is {state}")
+                    print(f"[{datetime.now().strftime('%H:%M:%S')}] [DEAD] Remote process {pid} DIED but WandB is {state}")
                     print("  This usually means a hard crash or OOM kill.")
                     if not no_collect: collect_run(run_id, skip_report=True)
                     return
@@ -114,16 +114,16 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
                     last_step = step
                     last_step_time = time.time()
                 elif time.time() - last_step_time > (poll_interval * 5): # 5 cycles no step
-                    print(f"⚠️  STALL DETECTED: No new steps for {(time.time()-last_step_time)/60:.1f} min")
+                    print(f"[WARN] STALL DETECTED: No new steps for {(time.time()-last_step_time)/60:.1f} min")
 
                 # NaN Detection
                 if loss is not None and str(loss).lower() == 'nan':
-                     print(f"❌ NaN DETECTED in loss at step {step}")
+                     print(f"[ERROR] NaN DETECTED in loss at step {step}")
                      # Could kill process here? For now, just alert.
 
                 # Q-Divergence
                 if q_mean and abs(q_mean) > 1e6:
-                    print(f"⚠️  Q-DIVERGENCE: Mean Q > 1e6 ({q_mean:.2e}) at step {step}")
+                    print(f"[WARN] Q-DIVERGENCE: Mean Q > 1e6 ({q_mean:.2e}) at step {step}")
 
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Status: {state} | Step: {step} | Loss: {loss:.4f} | Q: {q_mean:.2f}")
             else:
@@ -134,7 +134,7 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
 
         time.sleep(poll_interval)
     
-    print(f"\n⏹️  Monitoring timed out after {max_wait/3600:.1f}h")
+    print(f"\n[TIMEOUT] Monitoring timed out after {max_wait/3600:.1f}h")
 
 
 if __name__ == "__main__":
