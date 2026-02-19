@@ -115,10 +115,6 @@ archive/
 # Agent runtime artifacts
 .agent/audits/
 .agent/reports/
-.agent/ralph.err
-.agent/ralph.log
-.agent/ralph_log.md
-.agent/ralph_state.json
 
 # Agent memory (ephemeral logs, keep core.md + SKILL.md)
 .agent/memory/logs/*

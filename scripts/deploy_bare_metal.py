@@ -221,11 +221,10 @@ def deploy(args):
             all_extra_args = f"{all_extra_args} --tags {tag_str}"
     
     wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
-    # RALPH-09: Unique log file
     from datetime import datetime
     log_file = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-    
-    # RALPH-10: Unique HPO DB to prevent locking collisions
+
+    # Unique HPO DB to prevent locking collisions
     hpo_db = f"hpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
     hpo_storage_arg = f"--hpo_storage sqlite:///{remote_workspace}/{hpo_db}"
     
@@ -282,7 +281,6 @@ def deploy(args):
                     if len(parts) >= 3:
                         resolved_run_id = parts[-1].replace(".wandb", "")
                         print(f"✅ Resolved Run ID: {resolved_run_id}")
-                        # RALPH-03: Write resolved ID to file for autonomous pickup
                         ssh_reg.exec_command(f"echo {resolved_run_id} > {remote_workspace}/run_id.txt")
                         break
                 time.sleep(10)

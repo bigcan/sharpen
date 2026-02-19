@@ -19,7 +19,7 @@ def fetch_latest_run_metrics(entity="bigcan-chiwin-technology", project="FinRL-P
     """
     Fetch the most recent run's metrics for goal verification.
     Args:
-        tag: Optional tag to filter runs (e.g. "Ralph_Autonomous")
+        tag: Optional tag to filter runs
     Returns dict with: state, hpo_trials, validation_sharpe, test_sharpe, checkpoint_saved
     """
     api = wandb.Api()
@@ -84,7 +84,7 @@ def poll_run_until_complete(run_id=None, entity="bigcan-chiwin-technology", proj
         run_id: Specific run ID to poll. If None, polls the latest run.
         poll_interval: Seconds between polls (default: 5 minutes)
         max_wait: Maximum seconds to wait (default: 2 hours)
-        tag: Optional tag to filter runs (e.g. "Ralph_Autonomous")
+        tag: Optional tag to filter runs
     
     Returns:
         Final run state and metrics
@@ -174,7 +174,7 @@ def download_remote_artifacts(run_id, remote_workspace=REMOTE_WORKSPACE):
             except Exception as e:
                 print(f"  ⚠️  Failed to download {filename}: {e}")
         
-        # Download the most recent per-run log (RALPH-09: run_YYYYMMDD_HHMMSS.log)
+        # Download the most recent per-run log (run_YYYYMMDD_HHMMSS.log)
         # Falls back to legacy run.log if no timestamped logs exist
         try:
             log_files = []
