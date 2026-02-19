@@ -10,7 +10,6 @@ load_dotenv()
 # Remote artifacts to download (filename -> description)
 REMOTE_ARTIFACTS = {
     "checkpoint_final.pth": "Trained model checkpoint",
-    "run.log": "Remote stdout/stderr log",
     "hpo.db": "HPO Optuna database",
 }
 REMOTE_WORKSPACE = "/workspace/DeepScalper"
@@ -174,6 +173,42 @@ def download_remote_artifacts(run_id, remote_workspace=REMOTE_WORKSPACE):
                 print(f"  ⚠️  {filename} not found on remote (run may have crashed early)")
             except Exception as e:
                 print(f"  ⚠️  Failed to download {filename}: {e}")
+        
+        # Download the most recent per-run log (RALPH-09: run_YYYYMMDD_HHMMSS.log)
+        # Falls back to legacy run.log if no timestamped logs exist
+        try:
+            log_files = []
+            for entry in sftp.listdir_attr(remote_workspace):
+                if entry.filename.startswith("run_") and entry.filename.endswith(".log"):
+                    log_files.append((entry.filename, entry.st_mtime))
+            
+            if log_files:
+                # Pick the most recently modified log
+                log_files.sort(key=lambda x: x[1], reverse=True)
+                log_name = log_files[0][0]
+                remote_log = f"{remote_workspace}/{log_name}"
+                local_log = os.path.join(local_dir, log_name)
+                remote_attr = sftp.stat(remote_log)
+                size_mb = remote_attr.st_size / (1024 * 1024)
+                print(f"  Downloading {log_name} ({size_mb:.1f} MB) — Per-run log (latest)...")
+                sftp.get(remote_log, local_log)
+                downloaded[log_name] = local_log
+                print(f"  ✅ {log_name} saved to {local_log}")
+            else:
+                # Fallback: try legacy run.log
+                remote_log = f"{remote_workspace}/run.log"
+                local_log = os.path.join(local_dir, "run.log")
+                try:
+                    remote_attr = sftp.stat(remote_log)
+                    size_mb = remote_attr.st_size / (1024 * 1024)
+                    print(f"  Downloading run.log ({size_mb:.1f} MB) — Legacy log (fallback)...")
+                    sftp.get(remote_log, local_log)
+                    downloaded["run.log"] = local_log
+                    print(f"  ✅ run.log saved to {local_log}")
+                except FileNotFoundError:
+                    print("  ⚠️  No log files found on remote")
+        except Exception as e:
+            print(f"  ⚠️  Failed to download run log: {e}")
         
         sftp.close()
     except Exception as e:

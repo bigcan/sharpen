@@ -577,9 +577,17 @@ def run_training(config, run_name, device, agent_type="bdq"):
         checkpoints_dir = f"checkpoints/{run_name}"
         checkpoint_path = None
         if os.path.exists(checkpoints_dir):
-            ckpts = sorted([f for f in os.listdir(checkpoints_dir) if f.endswith(".pth") or f.endswith(".pt")])
-            if ckpts:
-                checkpoint_path = os.path.join(checkpoints_dir, ckpts[-1])
+            # Prefer checkpoint_final.pth (saved after all training steps)
+            final_ckpt = os.path.join(checkpoints_dir, "checkpoint_final.pth")
+            if os.path.exists(final_ckpt):
+                checkpoint_path = final_ckpt
+            else:
+                # Fallback: highest step number (numerical sort, not alphabetical)
+                step_ckpts = [f for f in os.listdir(checkpoints_dir) 
+                              if f.startswith("checkpoint_step_") and f.endswith(".pth")]
+                if step_ckpts:
+                    step_ckpts.sort(key=lambda f: int(f.replace("checkpoint_step_", "").replace(".pth", "")))
+                    checkpoint_path = os.path.join(checkpoints_dir, step_ckpts[-1])
         
         wandb.log({"train/status": "completed", "train/checkpoint": checkpoint_path or "none"})
         logger.info(f"Training complete. Checkpoint: {checkpoint_path}")
