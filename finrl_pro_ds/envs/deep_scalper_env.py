@@ -116,33 +116,26 @@ class DeepScalperEnv(gym.Env):
         self.normalize_reward = config.get("normalize_reward", False)
         self.reward_normalizer = RunningMeanStd() if self.normalize_reward else None
 
+        # Tier 2: Discrete Action Space (Flattened)
+        # 0: Taker Buy, 1: Maker Buy, 2: Hold, 3: Cancel, 4: Maker Sell, 5: Taker Sell
+        self.action_space = gym.spaces.Discrete(6)
+        self.fixed_trade_qty = float(config.get("action", {}).get("fixed_trade_qty", 0.2)) # 20% of max_position
 
-
-        
         # Spaces
         # v2: Micro dim = 30 (evidence-ranked features, replaces v1 LOB layout)
         self.micro_dim = NUM_MICRO_FEATURES  # 30
         
         # FIX F1: Micro is now (Window, L*F) = (15, 20)
+        # T2.2: Private state expanded to 5 dims: [pos, bal, time, order_dir, order_dist]
         self.observation_space = gym.spaces.Dict({
             "micro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self.micro_dim), dtype=np.float32),
             "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(NUM_MACRO_FEATURES,), dtype=np.float32),
-            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, 3), dtype=np.float32)
+            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, 5), dtype=np.float32)
         })
         
-        # Paper-aligned Action Space: 2 branches (Price, SignedQty)
-        # Direction encoded in sign of quantity: +q=buy, -q=sell, 0=hold
-        self.signed_qty_proportions = list(config.get("action", {}).get(
-            "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
-        ))
-        n_price = config.get("action", {}).get("price_bins", 5)
-        n_qty = len(self.signed_qty_proportions)
-        self.action_space = gym.spaces.MultiDiscrete([n_price, n_qty])
-        
         # Price offset mapping (ticks from best)
-        # [-1] = Crossing spread (Aggressive/Marketable)
-        # [0]  = At Touch (Best Bid/Ask)
-        # [1+] = Passive
+        # Taker: -1 (marketable)
+        # Maker: 0 (at touch)
         self.price_offsets = [-1, 0, 1, 2, 3]  # Ticks from best bid/ask
         # FIX Bug#1: Read from nested action config (YAML: env.action.max_position)
         # with fallback to flat key for backward compatibility
@@ -193,25 +186,37 @@ class DeepScalperEnv(gym.Env):
         # v2: Pre-compute micro feature keys to avoid string formatting in hot loop
         self._micro_keys = list(MICRO_FEATURE_COLS)  # 30 column names
 
-    def _normalize_private_state(self, position: float, balance: float, remaining_time: float = 1.0) -> np.ndarray:
+    def _normalize_private_state(self, position: float, balance: float, 
+                                 remaining_time: float = 1.0,
+                                 order_direction: float = 0.0,
+                                 order_dist_to_mid: float = 0.0) -> np.ndarray:
         """
-        Normalize private state variables (Paper Section 3.1).
+        Normalize private state variables (Tier 2).
         Position:       [-Max, Max] -> [-1, 1]
-        Balance:        [0, Init*2] -> [0, 2] (approx)
-        Remaining Time: [0, 1]      -> [0, 1] (fraction of episode left)
+        Balance:        [0, Init*2] -> [0, 2]
+        Remaining Time: [0, 1]      -> [0, 1]
+        Order Dir:      [-1, 0, 1]  -> [-1, 0, 1] (Buy=+1, Sell=-1, None=0)
+        Order Dist:     [-50, 50]   -> [-1, 1] (bps from mid, clipped and scaled)
         """
-        # Avoid div zero
+        # 1. Position
         max_pos = self.max_position if self.max_position > 0 else 1.0
         n_pos = position / max_pos
         
-        # Balance relative to initial (guard div-by-zero)
+        # 2. Balance
         init_bal = self.initial_balance if self.initial_balance > 0 else 1.0
         n_bal = balance / init_bal
         
-        # Remaining time: already in [0, 1]
+        # 3. Remaining time
         n_time = float(np.clip(remaining_time, 0.0, 1.0))
+
+        # 4. Order Direction (Buy=+1, Sell=-1, None=0)
+        n_dir = float(order_direction)
+
+        # 5. Order Distance (in bps from mid)
+        # Typically +/- 50 bps is the range of interest for scalping.
+        n_dist = float(np.clip(order_dist_to_mid / 50.0, -1.0, 1.0))
         
-        return np.array([n_pos, n_bal, n_time], dtype=np.float32)
+        return np.array([n_pos, n_bal, n_time, n_dir, n_dist], dtype=np.float32)
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
@@ -255,10 +260,10 @@ class DeepScalperEnv(gym.Env):
         else:
             self.total_episode_steps = 1  # Fallback: remaining_time always 1.0
         
-        # Initialize Private Window (Position=0, Balance=Initial, RemainingTime=1.0)
-        self.private_window = np.zeros((self.window_size, 3), dtype=np.float32)
+        # Initialize Private Window (Position=0, Balance=Initial, RemainingTime=1.0, OrderDir=0, OrderDist=0)
+        self.private_window = np.zeros((self.window_size, 5), dtype=np.float32)
         # FIX CRIT-1: Normalize initial private state with remaining_time=1.0
-        initial_private_state = self._normalize_private_state(0.0, float(self.initial_balance), 1.0)
+        initial_private_state = self._normalize_private_state(0.0, float(self.initial_balance), 1.0, 0.0, 0.0)
         self.private_window = np.tile(initial_private_state, (self.window_size, 1))
         
         if self.handler:
@@ -311,7 +316,7 @@ class DeepScalperEnv(gym.Env):
                             self.notional_debt = value
                     
                     # Re-normalize/fill private window with NEW state
-                    aug_private_state = self._normalize_private_state(self.position, self.balance, 1.0)
+                    aug_private_state = self._normalize_private_state(self.position, self.balance, 1.0, 0.0, 0.0)
                     self.private_window = np.tile(aug_private_state, (self.window_size, 1))
         
         # Initialize portfolio value after first state update
@@ -405,14 +410,23 @@ class DeepScalperEnv(gym.Env):
                     # Convert to Basis Points relative to initial balance
                     liquidation_cost_bps = (liquidation_cost / self.initial_balance) * 10000.0
             
+            # FIX: Consistent reward scaling and normalization for truncation
+            reward = (-liquidation_cost_bps) * self.reward_scaling
+            if self.reward_normalizer:
+                self.reward_normalizer.update(reward)
+                reward = self.reward_normalizer.normalize(reward)
+                reward = float(np.clip(reward, -5.0, 5.0))
+            else:
+                reward = float(np.clip(reward, -50.0, 50.0))
+            
             obs = self._get_observation()
             info = {
                 "qty_action_mask": self._get_qty_action_mask(),
-                "reward_total": -liquidation_cost_bps,
+                "reward_total": reward,
                 "forced_liquidation": True,
                 "portfolio_value": self._get_portfolio_value() # Ensure tracking at end
             }
-            return obs, -liquidation_cost_bps, terminated, truncated, info
+            return obs, reward, terminated, truncated, info
 
         # Bug #1 Fix: Snapshot T prices before advancing to T+1
         # Used for limit-price calculation on the NEW action (prevents 1-tick lookahead)
@@ -647,26 +661,28 @@ class DeepScalperEnv(gym.Env):
             self.private_window[-1] = self._normalize_private_state(self.position, self.balance, remaining_time)
 
         # 3. Process NEW Action (T) → becomes Pending for T+1
-        # Paper-aligned: 2-branch action = (price_idx, qty_idx)
-        price_idx, qty_idx = int(action[0]), int(action[1])
-        signed_qty = self.signed_qty_proportions[qty_idx]
+        # Tier 2: Flattened Action Space [0: TBuy, 1: MBuy, 2: Hold, 3: Cancel, 4: MSell, 5: TSell]
+        action = int(action)
+        direction = 0
+        quantity = self.fixed_trade_qty * self.max_position
         
-        if abs(signed_qty) < 1e-8:  # Hold
+        if action == 2:  # Hold
+            # T1.4: Hold preserves existing pending order for maker persistence
             direction = 0
-            # T1.4 FIX (BUG-02): Hold preserves existing pending order for maker persistence
-            # Old code: self.pending_order = None  # This killed resting limit orders
+        elif action == 3:  # Cancel
+            self.pending_order = None
+            direction = 0
         else:
-            direction = 1 if signed_qty > 0 else 2  # Buy or Sell
-            quantity = abs(signed_qty) * self.max_position
-            offset_ticks = self.price_offsets[price_idx]
-            
-            if direction == 1:  # Buy
-                # Bug #1 Fix: Use pre-tick prices (T) for limit calculation, not T+1
-                limit_price = pre_best_ask - offset_ticks * self.tick_size
-                is_taker = (limit_price >= pre_best_ask)
-            else:  # Sell
-                limit_price = pre_best_bid + offset_ticks * self.tick_size
-                is_taker = (limit_price <= pre_best_bid)
+            if action in [0, 1]:  # Buy
+                direction = 1
+                is_taker = (action == 0)
+                # Taker crosses spread, Maker sits at touch
+                limit_price = pre_best_ask if is_taker else pre_best_bid
+            else:  # Sell (action 4 or 5)
+                direction = 2
+                is_taker = (action == 5)
+                # Taker crosses spread, Maker sits at touch
+                limit_price = pre_best_bid if is_taker else pre_best_ask
                 
             self.pending_order = (direction, limit_price, quantity, is_taker)
         
@@ -888,9 +904,22 @@ class DeepScalperEnv(gym.Env):
         # 4. Update Private Window
         # Note: self.position and self.balance are already updated in step() before this call
         # or initialized in reset().
-        # FIX CRIT-1: Include remaining_time = 1 - (current_step / total_episode_steps)
+        
+        # T2.2: Extract pending order info for private state
+        order_dir = 0.0
+        order_dist = 0.0
+        if self.pending_order:
+            order_dir = 1.0 if self.pending_order[0] == 1 else -1.0
+            limit_px = self.pending_order[1]
+            mid = (self.current_best_ask + self.current_best_bid) / 2.0
+            if mid > 0:
+                order_dist = ((limit_px - mid) / mid) * 10000.0 # bps
+
         remaining_time = max(0.0, 1.0 - (self.current_step / self.total_episode_steps))
-        current_private = self._normalize_private_state(self.position, self.balance, remaining_time)
+        current_private = self._normalize_private_state(
+            self.position, self.balance, remaining_time, order_dir, order_dist
+        )
+        
         # FIX PERF-1: In-place shift (same as micro_window above)
         self.private_window[:-1] = self.private_window[1:]
         self.private_window[-1] = current_private
@@ -907,20 +936,20 @@ class DeepScalperEnv(gym.Env):
         }
 
     def _get_qty_action_mask(self):
-        """ARCH-3: Action mask for quantity branch.
+        """Tier 2: Action mask for Discrete(6) action space.
         
-        Returns np.ndarray of shape (n_qty,) with 1=valid, 0=invalid.
-        Blocks buy actions at max_position, sell actions at -max_position.
-        Hold (qty=0) is always valid.
+        Returns np.ndarray of shape (6,) with 1=valid, 0=invalid.
+        0: Taker Buy, 1: Maker Buy, 2: Hold, 3: Cancel, 4: Maker Sell, 5: Taker Sell
         """
-        n_qty = len(self.signed_qty_proportions)
-        mask = np.ones(n_qty, dtype=np.float32)
+        mask = np.ones(6, dtype=np.float32)
         
-        for i, sq in enumerate(self.signed_qty_proportions):
-            if self.position >= self.max_position and sq > 0:
-                mask[i] = 0.0  # Block buys at max long
-            elif self.position <= -self.max_position and sq < 0:
-                mask[i] = 0.0  # Block sells at max short
+        if self.position >= self.max_position:
+            mask[0] = 0.0  # Block Taker Buy
+            mask[1] = 0.0  # Block Maker Buy
+        
+        if self.position <= -self.max_position:
+            mask[4] = 0.0  # Block Maker Sell
+            mask[5] = 0.0  # Block Taker Sell
         
         return mask
 

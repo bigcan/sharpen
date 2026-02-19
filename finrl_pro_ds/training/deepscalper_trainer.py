@@ -29,15 +29,19 @@ class DeepScalperTrainer:
         # Sprint 7: Reward normalizer removed (BUG-3). Raw bps rewards used directly.
         self.run_name = run_name or datetime.now().strftime("%Y%m%d_%H%M%S")
         
-        # Read Action Dims from Config — Paper-aligned: 2 branches (Price, SignedQty)
+        # Read Action Dims from Config
         action_config = config.get("env", {}).get("action", {})
-        signed_qty_props = action_config.get(
-            "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
-        )
-        action_dims = (
-            action_config.get("price_bins", 5),
-            len(signed_qty_props)
-        )
+        if "discrete_dims" in action_config:
+            action_dims = action_config["discrete_dims"]
+        else:
+            # Fallback for legacy MultiDiscrete
+            signed_qty_props = action_config.get(
+                "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+            )
+            action_dims = (
+                action_config.get("price_bins", 5),
+                len(signed_qty_props)
+            )
         
         # Inject action_space_dims into network config so BDQ assertion is guaranteed
         net_cfg = dict(config["network"])

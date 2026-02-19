@@ -29,10 +29,10 @@ class RolloutBuffer:
         rollout_steps: int,
         num_envs: int,
         micro_shape: Tuple[int, ...] = (15, 30),
-        private_shape: Tuple[int, ...] = (15, 3),
+        private_shape: Tuple[int, ...] = (15, 5),
         macro_shape: Tuple[int, ...] = (15,),
-        n_action_branches: int = 2,
-        n_qty_actions: int = 9,
+        n_action_branches: int = 1,
+        n_qty_actions: int = 6,
     ):
         self.rollout_steps = rollout_steps
         self.num_envs = num_envs
@@ -132,7 +132,7 @@ class RolloutBuffer:
                 next_non_terminal = 1.0 - last_dones
             else:
                 next_values = self.values[t + 1]
-                next_non_terminal = 1.0 - self.dones[t + 1]
+                next_non_terminal = 1.0 - self.dones[t]
 
             delta = self.rewards[t] + gamma * next_values * next_non_terminal - self.values[t]
             gae = delta + gamma * gae_lambda * next_non_terminal * gae

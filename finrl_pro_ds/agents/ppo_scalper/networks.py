@@ -19,19 +19,18 @@ from finrl_pro_ds.agents.deepscalper.networks import (
 
 class PPOActorCritic(nn.Module):
     """
-    Actor-Critic network for PPO with Multi-Discrete action space.
+    Actor-Critic network for PPO with Discrete(6) action space (Tier 2).
 
     Architecture:
         MicroEncoder (MLP/LSTM) ──┐
                                   ├── Fusion (Linear → LayerNorm → LeakyReLU)
         MacroEncoder (MLP)      ──┤
-                                  │
-        Private State (3)       ──┘
+        Private State (5)       ──┘
                                   │
                              fusion (256-dim)
-                        ┌─────────┼─────────┐
-                   Actor Price  Actor Qty   Critic
-                   softmax(5)  softmax(9)    V(s)
+                        ┌─────────┴─────────┐
+                      Actor               Critic
+                   softmax(6)              V(s)
 
     V5: encoder_type in micro_config selects stateless MLP vs LSTM.
     """
@@ -41,7 +40,7 @@ class PPOActorCritic(nn.Module):
         micro_config: Dict,
         macro_config: Dict,
         fusion_dim: int = 256,
-        action_space_dims: Tuple[int, int] = (5, 9),
+        action_space_dims: int = 6, # Tier 2: Discrete(6)
         **kwargs
     ):
         super().__init__()
@@ -50,8 +49,8 @@ class PPOActorCritic(nn.Module):
         micro_config = dict(micro_config)  # Don't mutate caller's dict
         encoder_type = micro_config.pop("encoder_type", "lstm")
         # AUDIT FIX A2: Extract private_input_size before passing to encoder
-        # (was silently absorbed by **kwargs — fragile if kwargs removed)
-        private_size = micro_config.pop("private_input_size", 3)
+        # T2.2: Private size expanded to 5
+        private_size = micro_config.pop("private_input_size", 5)
         if encoder_type == "mlp":
             self.micro_encoder = MicroEncoderMLP(**micro_config)
         elif encoder_type == "tcn":
@@ -76,19 +75,13 @@ class PPOActorCritic(nn.Module):
         )
 
         # Action dimensions
-        self.price_dims, self.qty_dims = action_space_dims
+        self.action_dim = action_space_dims
 
-        # Actor heads — output logits for Categorical distributions
-        self.actor_price = nn.Sequential(
+        # Actor head — single head for Discrete(6)
+        self.actor = nn.Sequential(
             nn.Linear(fusion_dim, head_hidden),
             nn.Tanh(),
-            nn.Linear(head_hidden, self.price_dims)
-        )
-
-        self.actor_qty = nn.Sequential(
-            nn.Linear(fusion_dim, head_hidden),
-            nn.Tanh(),
-            nn.Linear(head_hidden, self.qty_dims)
+            nn.Linear(head_hidden, self.action_dim)
         )
 
         # Critic head — scalar V(s)
@@ -103,15 +96,14 @@ class PPOActorCritic(nn.Module):
 
     def _init_weights(self):
         """Orthogonal init for all Linear layers. PPO standard practice."""
-        for module in [self.fusion, self.actor_price, self.actor_qty, self.critic]:
+        for module in [self.fusion, self.actor, self.critic]:
             for layer in module:
                 if isinstance(layer, nn.Linear):
                     nn.init.orthogonal_(layer.weight, gain=np.sqrt(2))
                     nn.init.constant_(layer.bias, 0.0)
 
         # Policy output layers: small gain for initial near-uniform policy
-        nn.init.orthogonal_(self.actor_price[-1].weight, gain=0.01)
-        nn.init.orthogonal_(self.actor_qty[-1].weight, gain=0.01)
+        nn.init.orthogonal_(self.actor[-1].weight, gain=0.01)
 
         # Value output layer: gain=1.0
         nn.init.orthogonal_(self.critic[-1].weight, gain=1.0)
@@ -129,22 +121,22 @@ class PPOActorCritic(nn.Module):
 
         Args:
             micro_in: (B, W, 30) micro-structure features
-            private_in: (B, W, 3) private state
+            private_in: (B, W, 5) private state
             macro_in: (B, M) macro features
-            qty_mask: Optional (B, n_qty) mask, 1=valid, 0=invalid
+            qty_mask: Optional (B, 6) mask, 1=valid, 0=invalid
             deterministic: If True, take argmax actions
 
         Returns:
-            actions: (B, 2) int64 — [price_idx, qty_idx]
-            log_probs: (B,) float — sum of per-branch log-probs
+            actions: (B,) int64 — discrete action index
+            log_probs: (B,) float
             values: (B,) float — V(s) estimate
-            entropy: (B,) float — sum of per-branch entropies
+            entropy: (B,) float
         """
-        # Encode (hidden ignored — stateless for MLP, fresh-init for LSTM)
+        # Encode
         h_micro, _ = self.micro_encoder(micro_in, None)
         h_macro = self.macro_encoder(macro_in)
 
-        # Private state: take last timestep (B, W, 3) -> (B, 3)
+        # Private state: take last timestep (B, W, 5) -> (B, 5)
         private_last = private_in[:, -1, :]
 
         # Fusion
@@ -152,38 +144,29 @@ class PPOActorCritic(nn.Module):
         features = self.fusion(combined)
 
         # Actor logits
-        price_logits = self.actor_price(features)  # (B, price_dims)
-        qty_logits = self.actor_qty(features)       # (B, qty_dims)
+        logits = self.actor(features)  # (B, action_dim)
 
-        # Action masking on qty branch
+        # Action masking
         if qty_mask is not None:
-            qty_logits = qty_logits.masked_fill(qty_mask == 0, float('-inf'))
+            logits = logits.masked_fill(qty_mask == 0, float('-inf'))
 
-        # Distributions
-        price_dist = Categorical(logits=price_logits)
-        qty_dist = Categorical(logits=qty_logits)
+        # Distribution
+        dist = Categorical(logits=logits)
 
         # Sample or argmax
         if deterministic:
-            price_action = price_logits.argmax(dim=1)
-            qty_action = qty_logits.argmax(dim=1)
+            action = logits.argmax(dim=1)
         else:
-            price_action = price_dist.sample()
-            qty_action = qty_dist.sample()
+            action = dist.sample()
 
-        # Log-probs (sum of independent branches)
-        log_probs = price_dist.log_prob(price_action) + qty_dist.log_prob(qty_action)
-
-        # Entropy (sum of independent branches)
-        entropy = price_dist.entropy() + qty_dist.entropy()
+        # Log-probs and entropy
+        log_probs = dist.log_prob(action)
+        entropy = dist.entropy()
 
         # Critic
         value = self.critic(features).squeeze(-1)  # (B,)
 
-        # Actions
-        actions = torch.stack([price_action, qty_action], dim=1)  # (B, 2)
-
-        return actions, log_probs, value, entropy
+        return action, log_probs, value, entropy
 
     def evaluate_actions(
         self,
@@ -198,17 +181,13 @@ class PPOActorCritic(nn.Module):
 
         Args:
             micro_in, private_in, macro_in: observation tensors
-            actions: (B, 2) int64 — [price_idx, qty_idx]
-            qty_mask: Optional (B, n_qty) mask
+            actions: (B,) int64
+            qty_mask: Optional (B, 6) mask
 
         Returns:
             log_probs: (B,) float
             values: (B,) float
             entropy: (B,) float
-
-        V5: Encoder is always stateless (MLP) or fresh-init (LSTM fallback).
-        No hidden state carried across minibatches — the 15-step window
-        provides the full temporal context.
         """
         # Encode (stateless)
         h_micro, _ = self.micro_encoder(micro_in, None)
@@ -220,24 +199,18 @@ class PPOActorCritic(nn.Module):
         features = self.fusion(combined)
 
         # Actor logits
-        price_logits = self.actor_price(features)
-        qty_logits = self.actor_qty(features)
+        logits = self.actor(features)
 
         # Action masking
         if qty_mask is not None:
-            qty_logits = qty_logits.masked_fill(qty_mask == 0, float('-inf'))
+            logits = logits.masked_fill(qty_mask == 0, float('-inf'))
 
-        # Distributions
-        price_dist = Categorical(logits=price_logits)
-        qty_dist = Categorical(logits=qty_logits)
+        # Distribution
+        dist = Categorical(logits=logits)
 
         # Log-probs for the given actions
-        log_probs = (
-            price_dist.log_prob(actions[:, 0]) +
-            qty_dist.log_prob(actions[:, 1])
-        )
-
-        entropy = price_dist.entropy() + qty_dist.entropy()
+        log_probs = dist.log_prob(actions)
+        entropy = dist.entropy()
         value = self.critic(features).squeeze(-1)
 
         return log_probs, value, entropy

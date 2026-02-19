@@ -345,22 +345,34 @@ class DeepScalperNetwork(nn.Module):
             nn.Linear(head_hidden, 1)
         )
         
-        # Advantage Streams A(s, a) — 2 branches (Paper Section 4.1)
-        self.price_dims, self.qty_dims = action_space_dims
+        # Advantage Streams A(s, a)
+        self.is_multidiscrete = isinstance(action_space_dims, (list, tuple))
         
-        # Price Branch (relative price offset)
-        self.adv_price = nn.Sequential(
-            nn.Linear(fusion_dim, head_hidden),
-            nn.LeakyReLU(),
-            nn.Linear(head_hidden, self.price_dims)
-        )
-        
-        # Signed Quantity Branch (direction implicit in sign)
-        self.adv_qty = nn.Sequential(
-            nn.Linear(fusion_dim, head_hidden),
-            nn.LeakyReLU(),
-            nn.Linear(head_hidden, self.qty_dims)
-        )
+        if self.is_multidiscrete:
+            # Paper-aligned: 2 branches (Price, SignedQty)
+            self.price_dims, self.qty_dims = action_space_dims
+            
+            # Price Branch (relative price offset)
+            self.adv_price = nn.Sequential(
+                nn.Linear(fusion_dim, head_hidden),
+                nn.LeakyReLU(),
+                nn.Linear(head_hidden, self.price_dims)
+            )
+            
+            # Signed Quantity Branch (direction implicit in sign)
+            self.adv_qty = nn.Sequential(
+                nn.Linear(fusion_dim, head_hidden),
+                nn.LeakyReLU(),
+                nn.Linear(head_hidden, self.qty_dims)
+            )
+        else:
+            # Tier 2: Single head for standard Dueling DQN
+            self.action_dim = action_space_dims
+            self.adv_stream = nn.Sequential(
+                nn.Linear(fusion_dim, head_hidden),
+                nn.LeakyReLU(),
+                nn.Linear(head_hidden, self.action_dim)
+            )
         
         # FIX FIND-6: Auxiliary Task — 2-layer MLP for volatility prediction (Section 4.4)
         self.vol_head = nn.Sequential(
@@ -374,8 +386,13 @@ class DeepScalperNetwork(nn.Module):
         
     def _init_heads(self):
         """FIX FIND-3: Xavier init for all Linear layers in heads."""
-        for module in [self.fusion, self.value_stream,
-                       self.adv_price, self.adv_qty, self.vol_head]:
+        modules = [self.fusion, self.value_stream, self.vol_head]
+        if self.is_multidiscrete:
+            modules.extend([self.adv_price, self.adv_qty])
+        else:
+            modules.append(self.adv_stream)
+
+        for module in modules:
             for layer in module:
                 if isinstance(layer, nn.Linear):
                     nn.init.xavier_uniform_(layer.weight)
@@ -385,14 +402,14 @@ class DeepScalperNetwork(nn.Module):
     def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Returns (Q_price, Q_qty, V_state, Pred_Vol, new_hidden)
-        Paper-aligned: 2 action branches (Price, SignedQty).
+        For Tier 2 (Discrete), Q_qty will be the single Q-value vector, and Q_price will be None.
         """
         # Encode
         h_micro, new_hidden = self.micro_encoder(micro_in, hidden)  # Sprint 7: no private_in
         h_macro = self.macro_encoder(macro_in)
         
         # Sprint 7 DIV-1 FIX: Private state injected at fusion layer (paper Figure 2)
-        # Take last timestep: (Batch, Window, 3) -> (Batch, 3)
+        # Take last timestep: (Batch, Window, N) -> (Batch, N)
         private_last = private_in[:, -1, :]
         
         # Fusion: market encodings + private state
@@ -402,14 +419,19 @@ class DeepScalperNetwork(nn.Module):
         # Value
         v_s = self.value_stream(features)
         
-        # Advantages — 2 branches
-        a_price = self.adv_price(features)
-        a_qty = self.adv_qty(features)
-        
-        # Q-Values (Dueling Aggregation)
-        # Q(s,a) = V(s) + (A(s,a) - mean(A(s,a)))
-        q_price = v_s + (a_price - a_price.mean(dim=1, keepdim=True))
-        q_qty = v_s + (a_qty - a_qty.mean(dim=1, keepdim=True))
+        # Advantages
+        if self.is_multidiscrete:
+            a_price = self.adv_price(features)
+            a_qty = self.adv_qty(features)
+            
+            # Q-Values (Dueling Aggregation)
+            # Q(s,a) = V(s) + (A(s,a) - mean(A(s,a)))
+            q_price = v_s + (a_price - a_price.mean(dim=1, keepdim=True))
+            q_qty = v_s + (a_qty - a_qty.mean(dim=1, keepdim=True))
+        else:
+            a_stream = self.adv_stream(features)
+            q_qty = v_s + (a_stream - a_stream.mean(dim=1, keepdim=True))
+            q_price = None  # Single head mode
         
         # Volatility Prediction
         pred_vol = self.vol_head(features)
