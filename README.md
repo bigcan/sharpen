@@ -117,7 +117,6 @@ FinRL-Pro-DS/
 ├── scripts/
 │   ├── run_full_pipeline.py              # Main entry: HPO → Train → Backtest
 │   ├── deploy_bare_metal.py              # Remote GPU deployment
-│   ├── ralph_autonomous.py               # Autonomous workflow agent
 │   ├── fetch_wandb_run.py                # WandB run data fetcher
 │   ├── notion_sync.py                    # Notion integration
 │   └── data/                            # Data acquisition scripts
