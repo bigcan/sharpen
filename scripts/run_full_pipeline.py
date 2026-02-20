@@ -385,6 +385,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
 
             config["env"]["reward"]["sharpe_weight"] = 0.0  # Pure paper reward for BDQ
+            config["env"]["reward"]["hindsight_weight"] = 0.0  # FIX FIND-V3-05: Lock hindsight (BUG-01 invariant)
             config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
             config["agents"]["bdq"]["learning_rate"] = learning_rate
             # NOTE: gamma read from config (locked), NOT tuned by HPO
@@ -769,6 +770,9 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             # Hourly aggregation
             n_per_hour = 60
             hourly_returns = np.add.reduceat(returns, np.arange(0, len(returns), n_per_hour))
+            # FIX FIND-V3-02c: Drop last partial bucket (matches HPO eval BUG-05 fix)
+            if len(returns) % n_per_hour != 0 and len(hourly_returns) > 1:
+                hourly_returns = hourly_returns[:-1]
             if len(hourly_returns) > 1 and np.std(hourly_returns) > 1e-9:
                 sharpe_hourly = (np.mean(hourly_returns) / np.std(hourly_returns)) * np.sqrt(365 * 24)
         

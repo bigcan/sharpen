@@ -50,7 +50,9 @@ class PyfolioAnalyzer:
             return self._fallback_metrics()
 
         mean_r = np.mean(r)
-        std_r = np.std(r)
+        # FIX FIND-V3-12: Use ddof=1 (sample std) to match pandas .std() convention
+        # used by wandb_evaluator. Ensures consistent Sharpe across all analytics modules.
+        std_r = np.std(r, ddof=1)
         
         # Annualization factor: 525,600 minutes per year (365.25 × 24 × 60)
         ann_factor = np.sqrt(525600)

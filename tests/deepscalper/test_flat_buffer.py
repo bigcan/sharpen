@@ -193,7 +193,7 @@ class TestFlatBufferMemory:
         assert buf.nbytes() == expected
 
     def test_nbytes_large_capacity(self):
-        """Sanity: 2M capacity should be in the ~22 GB range."""
+        """Sanity: 2M capacity should be in the ~7 GB range for unit test shapes."""
         cap = 2_000_000
         buf = FlatReplayBuffer(
             capacity=cap,
@@ -203,7 +203,7 @@ class TestFlatBufferMemory:
             action_shape=ACTION_SHAPE,
         )
         gb = buf.nbytes() / (1024**3)
-        assert 20 < gb < 25, f"Expected ~22 GB, got {gb:.1f} GB"
+        assert 5 < gb < 10, f"Expected ~7 GB, got {gb:.1f} GB"
 
 
 # ---------------------------------------------------------------------------
@@ -214,12 +214,12 @@ def _push_integration_transition(buf, idx=0):
     """Push a transition matching integration test shapes (windowed private, 2-branch action)."""
     state = {
         "micro": np.full((15, 30), idx, dtype=np.float32),
-        "private": np.full((15, 3), idx + 0.1, dtype=np.float32),
+        "private": np.full((15, 5), idx + 0.1, dtype=np.float32),
         "macro": np.full((15,), idx + 0.2, dtype=np.float32),
     }
     next_state = {
         "micro": np.full((15, 30), idx + 100, dtype=np.float32),
-        "private": np.full((15, 3), idx + 100.1, dtype=np.float32),
+        "private": np.full((15, 5), idx + 100.1, dtype=np.float32),
         "macro": np.full((15,), idx + 100.2, dtype=np.float32),
     }
     action = [idx % 5, idx % 9]
@@ -233,7 +233,7 @@ class TestFlatBufferAgentIntegration:
         from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
         network_config = {
-            "micro_config": {"input_size": 30, "private_input_size": 3,
+            "micro_config": {"input_size": 30, "private_input_size": 5,
                              "hidden_size": 64, "rnn_type": "LSTM"},
             "macro_config": {"input_size": 15, "hidden_sizes": [64, 32]},
             "action_space_dims": (5, 9),  # Sprint 7: 2-branch
@@ -253,7 +253,7 @@ class TestFlatBufferAgentIntegration:
         from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
         network_config = {
-            "micro_config": {"input_size": 30, "private_input_size": 3,
+            "micro_config": {"input_size": 30, "private_input_size": 5,
                              "hidden_size": 64, "rnn_type": "LSTM"},
             "macro_config": {"input_size": 15, "hidden_sizes": [64, 32]},
             "action_space_dims": (5, 9),  # Sprint 7: 2-branch
@@ -282,7 +282,7 @@ class TestFlatBufferAgentIntegration:
         from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
         network_config = {
-            "micro_config": {"input_size": 30, "private_input_size": 3,
+            "micro_config": {"input_size": 30, "private_input_size": 5,
                              "hidden_size": 64, "rnn_type": "LSTM"},
             "macro_config": {"input_size": 15, "hidden_sizes": [64, 32]},
             "action_space_dims": (5, 9),  # Sprint 7: 2-branch

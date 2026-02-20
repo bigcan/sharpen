@@ -51,7 +51,10 @@ class PPOActorCritic(nn.Module):
         # AUDIT FIX A2: Extract private_input_size before passing to encoder
         # T2.2: Private size expanded to 5
         private_size = micro_config.pop("private_input_size", 5)
+        window_size = micro_config.pop("window_size", None)
         if encoder_type == "mlp":
+            if window_size is not None:
+                micro_config["window_size"] = window_size
             self.micro_encoder = MicroEncoderMLP(**micro_config)
         elif encoder_type == "tcn":
             self.micro_encoder = MicroEncoderTCN(**micro_config)

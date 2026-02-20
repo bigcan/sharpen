@@ -89,6 +89,13 @@ class ParquetDataHandler:
                 traceback.print_exc()
                 raise RuntimeError(f"pd.to_datetime FAILED: {e}")
 
+            # FIX FIND-V3-02: Enforce monotonic timestamp ordering.
+            # Unsorted data silently corrupts DOFI (np.roll), rolling windows,
+            # and macro-micro alignment via searchsorted.
+            if not df['timestamp'].is_monotonic_increasing:
+                print("[WARN] Data was not sorted by timestamp — sorting in-place", flush=True)
+                df = df.sort_values('timestamp').reset_index(drop=True)
+
             # Feature Engineering
             # FIX LEAK-1: When norm_cutoff_date is set, split the data at the
             # boundary, process each half independently (resetting rolling z-scores

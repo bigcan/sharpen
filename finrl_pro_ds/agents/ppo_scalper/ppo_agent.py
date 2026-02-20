@@ -312,6 +312,9 @@ class PPOAgent:
             "optimizer": self.optimizer.state_dict(),
             "step_count": self.step_count,
         }
+        # FIX FIND-V3-04c: Persist AMP GradScaler state
+        if hasattr(self, 'scaler') and self.use_amp:
+            ckpt['scaler'] = self.scaler.state_dict()
         torch.save(ckpt, path)
 
     def load(self, path: str):
@@ -337,3 +340,6 @@ class PPOAgent:
         self.step_count = checkpoint.get("step_count", 0)
         # FIX FIND-PPO-02: Restore LR from step_count (no scheduler state needed)
         self._update_lr()
+        # FIX FIND-V3-04c: Restore AMP GradScaler state
+        if 'scaler' in checkpoint and hasattr(self, 'scaler') and self.use_amp:
+            self.scaler.load_state_dict(checkpoint['scaler'])

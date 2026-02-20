@@ -151,8 +151,9 @@ def run_backtest(env, policy_fn, name, max_steps=300000):
 
     total_return = (pv[-1] - pv[0]) / pv[0] if len(pv) > 0 else 0
     sharpe = 0.0
-    if len(returns) > 1 and np.std(returns) > 1e-9:
-        raw_ratio = np.mean(returns) / np.std(returns)
+    # FIX FIND-V3-12: Use ddof=1 (sample std) to match wandb_evaluator convention
+    if len(returns) > 1 and np.std(returns, ddof=1) > 1e-9:
+        raw_ratio = np.mean(returns) / np.std(returns, ddof=1)
         sharpe = raw_ratio * np.sqrt(525600)
 
     max_dd = np.min(pv / np.maximum.accumulate(pv)) - 1 if len(pv) > 0 else 0

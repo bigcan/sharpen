@@ -101,9 +101,9 @@ class DeepScalperFeatureEngineer:
         mu = ema_mean.values.copy()
         sigma = ema_std.values.copy()
 
-        # FIX BUG-DPI-03: Forward-fill from first valid EMA values instead of
-        # using mu=0, sigma=1 which creates an artificial "shock" discontinuity
-        # at the EMA warmup boundary (~row 200).
+        # FIX BUG-DPI-03: Backward-fill pre-warmup rows with first valid EMA values
+        # instead of using mu=0, sigma=1 which creates an artificial "shock"
+        # discontinuity at the EMA warmup boundary (~row 200).
         first_valid = np.where(~np.isnan(mu))[0]
         if len(first_valid) > 0:
             fv = first_valid[0]

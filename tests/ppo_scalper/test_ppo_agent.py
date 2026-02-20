@@ -28,7 +28,7 @@ def network_config():
     return {
         "micro_config": {
             "input_size": 30,
-            "private_input_size": 3,
+            "private_input_size": 5,  # FIX FIND-V3-06: Match Tier 2 env output
             "hidden_size": 64,    # Small for tests
             "encoder_type": "mlp",
             "window_size": 15,
@@ -47,7 +47,7 @@ def batch_data(network_config):
     """Create batch of observations."""
     B, W = 4, 15
     micro = torch.randn(B, W, 30)
-    private = torch.randn(B, W, 3)
+    private = torch.randn(B, W, 5)
     macro = torch.randn(B, 15)
     return micro, private, macro
 
@@ -80,10 +80,10 @@ class TestPPOActorCritic:
     def test_deterministic_mode(self, ppo_network, batch_data):
         """Deterministic mode should produce consistent actions."""
         micro, private, macro = batch_data
-        
+        ppo_network.eval()  # Disable dropout for deterministic test
         actions1, _, _, _ = ppo_network(micro, private, macro, deterministic=True)
         actions2, _, _, _ = ppo_network(micro, private, macro, deterministic=True)
-        
+        ppo_network.train()
         assert torch.equal(actions1, actions2)
 
     def test_action_masking(self, ppo_network, batch_data):
@@ -145,14 +145,14 @@ class TestRolloutBuffer:
         T, B = 8, 2
         buf = RolloutBuffer(
             rollout_steps=T, num_envs=B,
-            micro_shape=(15, 30), private_shape=(15, 3),
+            micro_shape=(15, 30), private_shape=(15, 5),
             macro_shape=(15,), n_action_branches=1,
         )
         
         for t in range(T):
             obs = {
                 "micro": np.random.randn(B, 15, 30).astype(np.float32),
-                "private": np.random.randn(B, 15, 3).astype(np.float32),
+                "private": np.random.randn(B, 15, 5).astype(np.float32),
                 "macro": np.random.randn(B, 15).astype(np.float32),
             }
             buf.store(
@@ -182,13 +182,13 @@ class TestRolloutBuffer:
         T, B = 16, 2
         buf = RolloutBuffer(
             rollout_steps=T, num_envs=B,
-            micro_shape=(15, 30), private_shape=(15, 3), macro_shape=(15,),
+            micro_shape=(15, 30), private_shape=(15, 5), macro_shape=(15,),
         )
         
         for t in range(T):
             obs = {
                 "micro": np.zeros((B, 15, 30), dtype=np.float32),
-                "private": np.zeros((B, 15, 3), dtype=np.float32),
+                "private": np.zeros((B, 15, 5), dtype=np.float32),
                 "macro": np.zeros((B, 15), dtype=np.float32),
             }
             buf.store(obs=obs, actions=np.zeros((B, 1), dtype=np.int64),
@@ -213,12 +213,12 @@ class TestRolloutBuffer:
         """Test buffer reset."""
         from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
         
-        buf = RolloutBuffer(4, 1, (15, 30), (15, 3), (15,))
+        buf = RolloutBuffer(4, 1, (15, 30), (15, 5), (15,))
         
         for t in range(4):
             obs = {
                 "micro": np.zeros((1, 15, 30), dtype=np.float32),
-                "private": np.zeros((1, 15, 3), dtype=np.float32),
+                "private": np.zeros((1, 15, 5), dtype=np.float32),
                 "macro": np.zeros((1, 15), dtype=np.float32),
             }
             buf.store(obs=obs, actions=np.zeros((1, 1), dtype=np.int64),
@@ -249,7 +249,7 @@ class TestPPOAgent:
         
         B, W = 2, 15
         micro = torch.randn(B, W, 30)
-        private = torch.randn(B, W, 3)
+        private = torch.randn(B, W, 5)
         macro = torch.randn(B, 15)
         
         actions, log_probs, values = agent.predict(micro, private, macro)
@@ -276,7 +276,7 @@ class TestPPOAgent:
         
         # Predict should work without hidden state
         micro = torch.randn(1, 15, 30)
-        private = torch.randn(1, 15, 3)
+        private = torch.randn(1, 15, 5)
         macro = torch.randn(1, 15)
         actions, log_probs, values = agent.predict(micro, private, macro)
         assert actions.shape == (1,)
@@ -337,7 +337,7 @@ class TestPPOAgent:
 
         # Agent should still work with fresh weights
         micro = torch.randn(1, 15, 30)
-        private = torch.randn(1, 15, 3)
+        private = torch.randn(1, 15, 5)
         macro = torch.randn(1, 15)
         actions, _, _ = agent_v5.predict(micro, private, macro)
         assert actions.shape == (1,)
@@ -357,7 +357,7 @@ class TestEncoderTypeRegression:
         config = {
             "micro_config": {
                 "input_size": 30,
-                "private_input_size": 3,
+                "private_input_size": 5,  # FIX FIND-V3-06: Match Tier 2 env output
                 "hidden_size": 64,
                 "encoder_type": encoder_type,
                 "window_size": 15,
@@ -374,7 +374,7 @@ class TestEncoderTypeRegression:
 
         B, W = 2, 15
         micro = torch.randn(B, W, 30)
-        private = torch.randn(B, W, 3)
+        private = torch.randn(B, W, 5)
         macro = torch.randn(B, 15)
 
         actions, log_probs, values, entropy = net(micro, private, macro)
@@ -390,7 +390,7 @@ class TestEncoderTypeRegression:
         config = {
             "micro_config": {
                 "input_size": 30,
-                "private_input_size": 3,
+                "private_input_size": 5,  # FIX FIND-V3-06: Match Tier 2 env output
                 "hidden_size": 64,
                 "encoder_type": encoder_type,
                 "window_size": 15,
@@ -400,14 +400,14 @@ class TestEncoderTypeRegression:
                 "hidden_sizes": [64, 32],
             },
             "fusion_dim": 64,
-            "action_space_dims": (5, 9),
+            "action_space_dims": 6,  # Tier 2: Discrete(6)
         }
 
         net = PPOActorCritic(**config)
 
         B = 2
         micro = torch.randn(B, 15, 30)
-        private = torch.randn(B, 15, 3)
+        private = torch.randn(B, 15, 5)
         macro = torch.randn(B, 15)
         actions = torch.randint(0, 6, (B,))
 
