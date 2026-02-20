@@ -21,7 +21,7 @@ env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
   # FIX AUDIT-7: Symmetric Margin Logic (1.0 = Spot, 0.5 = 2x Lev)
-  margin_requirement: 1.0  # Spot (no leverage) — BTC vol too high for margin
+  margin_requirement: 0.05  # 20x leverage (BTC futures). Was 1.0 (spot) — caused margin starvation
   # FIX: Reduced to VIP1 levels. VIP0 (10 bps/side) made minute-level
   # trading structurally unprofitable (round-trip fee 44x > per-step vol).
   maker_fee: 0.0002  # 2 bps (Binance VIP1 / maker rebate tier)

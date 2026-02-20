@@ -267,21 +267,29 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (10.0 if gross_profit > 1e-12 else 0.0)
     
     # Diagnostic: log what we computed including action distribution
+    # Action labels depend on action space size (Disc6 vs Disc3)
+    # VectorEnv wraps Discrete(n) → MultiDiscrete([n]), so check .nvec first
+    if hasattr(env.action_space, 'n'):
+        discrete_dims = env.action_space.n
+    elif hasattr(env.action_space, 'nvec'):
+        discrete_dims = int(env.action_space.nvec[0])
+    else:
+        discrete_dims = 6
+    if discrete_dims == 3:
+        action_labels = {0: "taker_buy", 1: "hold", 2: "taker_sell"}
+    else:
+        action_labels = {0: "taker_buy", 1: "maker_buy", 2: "hold", 3: "cancel", 4: "maker_sell", 5: "taker_sell"}
     diag = {
         "_debug/eval_steps": step,
         "_debug/eval_returns_len": len(returns),
         "_debug/eval_returns_std": float(np.std(returns)) if len(returns) > 0 else 0.0,
         "_debug/eval_returns_mean": float(np.mean(returns)) if len(returns) > 0 else 0.0,
         "_debug/eval_final_pv": prev_val,
-        "_debug/eval_action_0_taker_buy": action_counts.get(0, 0),
-        "_debug/eval_action_1_maker_buy": action_counts.get(1, 0),
-        "_debug/eval_action_2_hold": action_counts.get(2, 0),
-        "_debug/eval_action_3_cancel": action_counts.get(3, 0),
-        "_debug/eval_action_4_maker_sell": action_counts.get(4, 0),
-        "_debug/eval_action_5_taker_sell": action_counts.get(5, 0),
         "_debug/eval_trade_count": trade_count,
         "_debug/eval_profit_factor": profit_factor,
     }
+    for idx, label in action_labels.items():
+        diag[f"_debug/eval_action_{idx}_{label}"] = action_counts.get(idx, 0)
     wandb.log(diag)
     
     # Also log Sharpe for research tracking (not used for HPO scoring)

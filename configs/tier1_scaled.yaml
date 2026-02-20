@@ -44,7 +44,7 @@ features:
 env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
-  margin_requirement: 1.0       # Spot (no leverage)
+  margin_requirement: 0.05      # 20x leverage (BTC futures). Was 1.0 (spot) — caused margin starvation
   maker_fee: 0.0002             # 2 bps (Binance VIP0)
   taker_fee: 0.0005             # 5 bps (Binance VIP0)
   num_envs: 20                  # GPUHub safe limit (>20 risks BrokenPipeError)
