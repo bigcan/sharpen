@@ -57,9 +57,11 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Tier 2: TakerBuy (action 0)
         action = 0
         obs, reward, terminated, truncated, info = self.env.step(action)
-        
+
         self.assertFalse(terminated)
-        self.assertIsNotNone(self.env.pending_order)
+        # FIX TAKER-DELAY: Taker orders now fill immediately in the same step,
+        # so pending_order is cleared to None after execution.
+        self.assertIsNone(self.env.pending_order)
         # Check execution logic placeholder
         
     def test_done_when_no_data(self):
@@ -513,11 +515,11 @@ class TestDeepScalperEnv(unittest.TestCase):
             mock_row[f'ask_vol_{i}'] = 10.0
         self.mock_handler.step.return_value = mock_row
 
-        # Tier 2: TakerBuy (action 0)
-        env.step(0)
+        # Tier 2: MakerBuy (action 1) — maker orders pend for next-bar fill
+        env.step(1)
 
         # Check pending order quantity: 0.3 * 1.0 = 0.3
-        self.assertIsNotNone(env.pending_order, "Should have a pending buy order")
+        self.assertIsNotNone(env.pending_order, "Should have a pending maker buy order")
         _, _, order_qty, _ = env.pending_order
         self.assertAlmostEqual(order_qty, 0.3,
                                msg=f"Trade qty should be 0.3 BTC, got {order_qty}")
