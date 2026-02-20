@@ -121,3 +121,6 @@ archive/
 !.agent/memory/logs/.gitkeep
 .agent/memory/snapshots/*
 !.agent/memory/snapshots/.gitkeep
+
+# Claude Code local settings and worktrees
+.claude/
