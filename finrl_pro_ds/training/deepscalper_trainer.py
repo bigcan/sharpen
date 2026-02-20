@@ -90,7 +90,9 @@ class DeepScalperTrainer:
         # FIX PERF-8: Initialize cosine LR scheduler for stable late-training convergence
         # FIX N1: Resolve num_envs from env before use (was NameError)
         _num_envs = getattr(self.env, 'num_envs', 1)
-        total_updates = int(self.total_timesteps * self.training_epochs * self.update_interval / _num_envs) if _num_envs > 0 else 100000
+        # FIX FIND-V3-05b: Subtract learning_starts warmup from T_max — no LR steps during warmup
+        effective_steps = max(self.total_timesteps - self.learning_starts, 1)
+        total_updates = int(effective_steps * self.training_epochs * self.update_interval / _num_envs) if _num_envs > 0 else 100000
         self.agent._lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
             self.agent.optimizer, T_max=total_updates, eta_min=1e-6
         )

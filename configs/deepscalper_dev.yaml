@@ -11,6 +11,7 @@ data:
   ticker: "BTCUSDT"
   train_start_date: "2023-01-10 00:00:00"
   train_end_date: "2023-01-18 23:59:59"
+  norm_cutoff_date: "2023-01-19 00:00:00"  # FIX FIND-V3-03b: Explicit LEAK-1 boundary
   val_start_date: "2023-01-19 00:00:00"
   val_end_date: "2023-01-19 23:59:59"
   test_start_date: "2023-01-20 00:00:00"
@@ -42,14 +43,13 @@ env:
     sharpe_horizon: 100
 
   action:
-    price_bins: 5
-    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    discrete_dims: 6  # FIX FIND-V3-03: Tier 2 flattened Discrete(6). Was legacy MultiDiscrete.
     max_position: 5.0
 
 network:
   micro_config:
     input_size: 30  # v2: evidence-ranked LOB features
-    private_input_size: 3  # FIX CRIT-1: Position + Balance + RemainingTime
+    private_input_size: 5  # FIX FIND-V3-04: Tier 2 (pos, bal, time, order_dir, order_dist)
     hidden_size: 256
     rnn_type: "LSTM"
 
@@ -60,7 +60,7 @@ network:
 agents:
   bdq:
     learning_rate: 0.0001
-    gamma: 0.995
+    gamma: 0.95  # FIX FIND-V3-04b: Align with Tier 2 signal horizon (~20 min)
     auxiliary_weight: 1.0
     update_interval: 2.0
     batch_size: 1024

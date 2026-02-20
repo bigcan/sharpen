@@ -7,6 +7,7 @@ data:
   ticker: "BTCUSDT"
   train_start_date: "2025-01-01 00:00:00"
   train_end_date: "2025-10-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"  # FIX FIND-V3-03b: Explicit LEAK-1 boundary
   val_start_date: "2025-11-01 00:00:00"
   val_end_date: "2025-11-30 23:59:59"
   test_start_date: "2025-12-01 00:00:00"
@@ -47,10 +48,7 @@ env:
     hold_bonus_bps: 0.0       # Disabled — paper uses no hold bonus
     
   action:
-    price_bins: 5
-    # Paper-aligned: signed qty encodes direction implicitly
-    # Negative = Sell, Zero = Hold, Positive = Buy
-    signed_qty_proportions: [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+    discrete_dims: 6  # FIX FIND-V3-03: Tier 2 flattened Discrete(6). Was legacy MultiDiscrete.
     max_position: 1.0 # Max BTC
 
   augmentation:
@@ -65,7 +63,7 @@ network:
   # V9.5 Blackwell Architecture
   micro_config:
     input_size: 30  # v2: evidence-ranked LOB features
-    private_input_size: 3  # FIX CRIT-1: Position + Balance + RemainingTime
+    private_input_size: 5  # FIX FIND-V3-04: Tier 2 (pos, bal, time, order_dir, order_dist)
     hidden_size: 256
     rnn_type: "LSTM"
     

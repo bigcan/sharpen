@@ -753,14 +753,16 @@ class DeepScalperEnv(gym.Env):
             delta_B = R_t * R_t - self._dsr_B
             # Finding-10: Cache previous values for DSR formula (Moody & Saffell 2001)
             prev_A, prev_B = self._dsr_A, self._dsr_B
+            # FIX FIND-V3-20: Compute variance from pre-update values (Moody & Saffell spec)
+            prev_variance = prev_B - prev_A ** 2
+            prev_variance = max(prev_variance, 0.0)
             self._dsr_A += self._dsr_eta * delta_A
             self._dsr_B += self._dsr_eta * delta_B
             self._dsr_warmup += 1
 
             # Compute DSR after warmup
             if self._dsr_warmup > 1:
-                variance = self._dsr_B - self._dsr_A ** 2
-                variance = max(variance, 0.0)
+                variance = prev_variance
                 if variance > 1e-16:
                     denom = variance ** 1.5
                     dsr = (prev_B * delta_A - 0.5 * prev_A * delta_B) / denom
@@ -942,8 +944,8 @@ class DeepScalperEnv(gym.Env):
         self._update_macro_state(step_data)
 
         # 4. Update Private Window
-        # Note: self.position and self.balance are already updated in step() before this call
-        # or initialized in reset().
+        # Note: self.position and self.balance reflect PREVIOUS step's state here.
+        # Post-execution correction happens at step() lines 685-687.
         
         # T2.2: Extract pending order info for private state
         order_dir = 0.0

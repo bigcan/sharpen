@@ -392,7 +392,12 @@ class DeepScalperBDQ:
                 loss_price = torch.tensor(0.0, device=self.device)
             
             # Auxiliary volatility prediction loss (Section 4.4)
-            loss_vol_pred = nn.SmoothL1Loss()(pred_vol, aux_targets)
+            # FIX FIND-V3-07: Apply IS weights to auxiliary loss under PER to prevent
+            # biasing shared encoder gradients toward high-TD-error transitions.
+            if self.use_per and is_weights_t is not None:
+                loss_vol_pred = (nn.SmoothL1Loss(reduction='none')(pred_vol, aux_targets) * is_weights_t).mean()
+            else:
+                loss_vol_pred = nn.SmoothL1Loss()(pred_vol, aux_targets)
             
             # Final combined loss
             total_loss = total_loss_main + self.auxiliary_weight * loss_vol_pred
@@ -484,11 +489,19 @@ class DeepScalperBDQ:
             'policy_net': self.policy_net.state_dict(),
             'target_net': self.target_net.state_dict(),
             'optimizer': self.optimizer.state_dict(),
-            'epsilon': self.epsilon
+            'epsilon': self.epsilon,
+            # FIX FIND-V3-02b: Persist epsilon schedule state for resume
+            'step_count': self.step_count,
         }
+        if hasattr(self, '_epsilon_start'):
+            ckpt['_epsilon_start'] = self._epsilon_start
+            ckpt['_epsilon_decay_steps'] = self._epsilon_decay_steps
         # FIX N3: Persist LR scheduler state for crash recovery
         if hasattr(self, '_lr_scheduler') and self._lr_scheduler is not None:
             ckpt['lr_scheduler'] = self._lr_scheduler.state_dict()
+        # FIX FIND-V3-04c: Persist AMP GradScaler state
+        if self.use_amp:
+            ckpt['scaler'] = self.scaler.state_dict()
         torch.save(ckpt, path)
 
     def load(self, path: str):
@@ -502,6 +515,15 @@ class DeepScalperBDQ:
         self.target_net.load_state_dict(checkpoint['target_net'])
         self.optimizer.load_state_dict(checkpoint['optimizer'])
         self.epsilon = checkpoint.get('epsilon', self.epsilon)
+        # FIX FIND-V3-02b: Restore epsilon schedule state (backward-compatible)
+        if 'step_count' in checkpoint:
+            self.step_count = checkpoint['step_count']
+        if '_epsilon_start' in checkpoint:
+            self._epsilon_start = checkpoint['_epsilon_start']
+            self._epsilon_decay_steps = checkpoint['_epsilon_decay_steps']
         # FIX N3: Restore LR scheduler state if available (backward-compatible)
         if 'lr_scheduler' in checkpoint and hasattr(self, '_lr_scheduler') and self._lr_scheduler is not None:
             self._lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+        # FIX FIND-V3-04c: Restore AMP GradScaler state
+        if 'scaler' in checkpoint and self.use_amp:
+            self.scaler.load_state_dict(checkpoint['scaler'])

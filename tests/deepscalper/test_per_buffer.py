@@ -97,15 +97,15 @@ def _make_dummy_transition(index: int = 0):
     """Create a dummy transition matching BDQ agent format."""
     state = {
         "micro": np.random.randn(15, 30).astype(np.float32),
-        "private": np.random.randn(15, 3).astype(np.float32),
+        "private": np.random.randn(15, 5).astype(np.float32),
         "macro": np.random.randn(15).astype(np.float32),
     }
     next_state = {
         "micro": np.random.randn(15, 30).astype(np.float32),
-        "private": np.random.randn(15, 3).astype(np.float32),
+        "private": np.random.randn(15, 5).astype(np.float32),
         "macro": np.random.randn(15).astype(np.float32),
     }
-    return (state, [0, 2, 1], float(np.random.randn()), next_state, False, 0.1)
+    return (state, [0, 2], float(np.random.randn()), next_state, False, 0.1)
 
 
 class TestPrioritizedReplayBuffer:
@@ -233,10 +233,10 @@ def _make_per_agent():
     from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
     network_config = {
-        "micro_config": {"input_size": 30, "private_input_size": 2,
+        "micro_config": {"input_size": 30, "private_input_size": 5,
                          "hidden_size": 64, "rnn_type": "LSTM"},
         "macro_config": {"input_size": 15, "hidden_sizes": [64, 32]},
-        "action_space_dims": [3, 5, 5],
+        "action_space_dims": (5, 9),
     }
     return DeepScalperBDQ(
         network_config=network_config,
@@ -306,10 +306,10 @@ class TestBDQWithPER:
         from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 
         network_config = {
-            "micro_config": {"input_size": 30, "private_input_size": 2,
+            "micro_config": {"input_size": 30, "private_input_size": 5,
                              "hidden_size": 64, "rnn_type": "LSTM"},
             "macro_config": {"input_size": 15, "hidden_sizes": [64, 32]},
-            "action_space_dims": [3, 5, 5],
+            "action_space_dims": (5, 9),
         }
         agent = DeepScalperBDQ(
             network_config=network_config,
