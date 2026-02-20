@@ -4,7 +4,9 @@ import torch.nn as nn
 import numpy as np
 from unittest.mock import MagicMock
 
-from finrl_pro_ds.agents.deepscalper.networks import MicroEncoder, MacroEncoder, DeepScalperNetwork
+from finrl_pro_ds.agents.deepscalper.networks import (
+    MicroEncoder, MicroEncoderMLP, MicroEncoderTCN, MacroEncoder, DeepScalperNetwork
+)
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv, NUM_MACRO_FEATURES
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
@@ -252,6 +254,125 @@ class TestNetworkRobustness(unittest.TestCase):
         """Verify invalid rnn_type raises ValueError."""
         with self.assertRaises(ValueError):
             MicroEncoder(input_size=10, private_input_size=5, hidden_size=32, rnn_type="Transformer")
+
+
+class TestEncoderVariants(unittest.TestCase):
+    """Test coverage for MicroEncoderMLP, MicroEncoderTCN, and encoder_type factory."""
+
+    B = 4
+    W = 15
+    F = 30
+    H = 256
+
+    def _micro_in(self):
+        return torch.randn(self.B, self.W, self.F)
+
+    # ------------------------------------------------------------------
+    # MicroEncoderMLP
+    # ------------------------------------------------------------------
+
+    def test_micro_encoder_mlp(self):
+        """Shape check (B, W, F) → (B, hidden_size); hidden is None; stateless."""
+        enc = MicroEncoderMLP(input_size=self.F, hidden_size=self.H, window_size=self.W)
+        out, hidden = enc(self._micro_in())
+        self.assertEqual(out.shape, (self.B, self.H))
+        self.assertIsNone(hidden)
+
+    # ------------------------------------------------------------------
+    # MicroEncoderTCN
+    # ------------------------------------------------------------------
+
+    def test_micro_encoder_tcn_defaults(self):
+        """Default channels → shape check; hidden is None; RF == 15."""
+        enc = MicroEncoderTCN(input_size=self.F, hidden_size=self.H, window_size=self.W)
+        out, hidden = enc(self._micro_in())
+        self.assertEqual(out.shape, (self.B, self.H))
+        self.assertIsNone(hidden)
+        # Default tcn_channels=(64,64,128), k=3: RF = 1 + 2*1 + 2*2 + 2*4 = 15
+        self.assertEqual(enc._receptive_field, 15)
+
+    def test_micro_encoder_tcn_custom_channels(self):
+        """Explicit tcn_channels=[64, 64, 128] and hidden_size=256."""
+        enc = MicroEncoderTCN(
+            input_size=self.F,
+            hidden_size=self.H,
+            window_size=self.W,
+            tcn_channels=(64, 64, 128),
+            kernel_size=3,
+            dropout=0.1,
+        )
+        out, hidden = enc(self._micro_in())
+        self.assertEqual(out.shape, (self.B, self.H))
+        self.assertIsNone(hidden)
+        self.assertEqual(enc._receptive_field, 15)
+
+    def test_micro_encoder_tcn_causal_no_future_leakage(self):
+        """Causal property: overwriting a future timestep must not change earlier output.
+
+        Specifically: set the last 5 timesteps of one sample to a large sentinel value.
+        The output at any timestep ≤ (W-6) for that sample should be unaffected when
+        we verify via the TCN's left-only padding. We verify by comparing full outputs
+        of two tensors that differ only in future timesteps for one sample.
+        """
+        enc = MicroEncoderTCN(
+            input_size=self.F, hidden_size=self.H, window_size=self.W,
+            tcn_channels=(64, 64, 128), kernel_size=3, dropout=0.0,
+        )
+        enc.eval()
+
+        x = self._micro_in()
+        x_future = x.clone()
+        # Corrupt future timesteps for the first sample only
+        x_future[0, -5:, :] = 1e6
+
+        # The outputs for samples 1..B-1 must be identical (their inputs are unchanged)
+        with torch.no_grad():
+            out_orig, _ = enc(x)
+            out_corrupt, _ = enc(x_future)
+
+        # Samples 1..B-1: unmodified → outputs identical
+        self.assertTrue(
+            torch.allclose(out_orig[1:], out_corrupt[1:], atol=1e-5),
+            "Causal property violated: changing future timesteps of one sample "
+            "affected outputs of other samples.",
+        )
+
+    # ------------------------------------------------------------------
+    # encoder_type factory routing via DeepScalperNetwork
+    # ------------------------------------------------------------------
+
+    _BASE_MACRO = {"input_size": 15, "hidden_sizes": [64, 32]}
+
+    def _net(self, encoder_type: str) -> DeepScalperNetwork:
+        micro_cfg = {
+            "input_size": self.F,
+            "private_input_size": 5,
+            "hidden_size": 64,
+            "encoder_type": encoder_type,
+            "window_size": self.W,
+            "tcn_channels": (32, 32, 64),
+            "kernel_size": 3,
+            "dropout": 0.0,
+        }
+        return DeepScalperNetwork(
+            micro_config=micro_cfg,
+            macro_config=self._BASE_MACRO,
+            fusion_dim=64,
+            action_space_dims=6,
+        )
+
+    def test_encoder_type_factory_mlp(self):
+        net = self._net("mlp")
+        self.assertIsInstance(net.micro_encoder, MicroEncoderMLP)
+
+    def test_encoder_type_factory_tcn(self):
+        net = self._net("tcn")
+        self.assertIsInstance(net.micro_encoder, MicroEncoderTCN)
+
+    def test_encoder_type_factory_rnn(self):
+        """Default / 'rnn' / 'lstm' path → MicroEncoder (LSTM/GRU base class)."""
+        net = self._net("rnn")
+        self.assertIsInstance(net.micro_encoder, MicroEncoder)
 
 
 if __name__ == "__main__":

@@ -70,7 +70,7 @@ class PPOTrainer:
         encoder_type = net_cfg.get("micro_config", {}).get("encoder_type", "lstm")
         assert encoder_type in ("lstm", "mlp", "tcn"), (
             f"Unknown encoder_type='{encoder_type}' in network.micro_config. "
-            f"Supported: 'lstm', 'mlp'."
+            f"Supported: 'lstm', 'mlp', 'tcn'."
         )
 
         # Training params
