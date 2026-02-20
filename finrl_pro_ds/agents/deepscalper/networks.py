@@ -11,13 +11,14 @@ class MicroEncoder(nn.Module):
     Output: (Batch, HiddenSize)
     """
     def __init__(
-        self, 
-        input_size: int = 30, # v2: 30 evidence-ranked LOB features
-        private_input_size: int = 3, # Position + Balance + RemainingTime (Paper Section 3.1)
+        self,
+        input_size: int = 30,  # v2: 30 evidence-ranked LOB features
+        private_input_size: int = 3,  # Position + Balance + RemainingTime (Paper Section 3.1)
         hidden_size: int = 128,
         num_layers: int = 1,
         dropout: float = 0.0,
-        rnn_type: str = "LSTM"
+        rnn_type: str = "LSTM",
+        **kwargs,  # Absorbs encoder_type, window_size, tcn_channels etc. from shared micro_config
     ):
         super().__init__()
         self.rnn_type = rnn_type
