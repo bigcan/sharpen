@@ -51,8 +51,13 @@ def load_config(path):
         return yaml.safe_load(f)
 
 
-def make_env(config, start_date, end_date, norm_cutoff_date=None):
-    """Create a single DeepScalperEnv for backtesting."""
+def make_env(config, start_date, end_date, norm_cutoff_date=None, fee_overrides=None):
+    """Create a single DeepScalperEnv for backtesting.
+
+    Args:
+        fee_overrides: dict with optional keys 'maker_fee' and/or 'taker_fee' (float, as rate not bps).
+                       If provided, overrides values in config["env"]. Used by fee_sweep.py.
+    """
     data_config = config.get("data", {})
     file_path = data_config.get("file_path")
     ticker = data_config.get("ticker", "BTCUSDT")
@@ -66,18 +71,26 @@ def make_env(config, start_date, end_date, norm_cutoff_date=None):
         norm_cutoff_date=norm_cutoff_date,
     )
 
-    env_config = config.get("env", {})
+    env_config = copy.deepcopy(config.get("env", {}))
     env_config["reward"] = config.get("env", {}).get("reward", {})
     # Force Discrete(6) for baselines (A4/A5 need maker actions available)
     env_config.setdefault("action", {})["discrete_dims"] = 6
     # Disable augmentation
     env_config["private_state_augment_prob"] = 0.0
+    # Apply fee overrides (Phase Fee sweep)
+    if fee_overrides:
+        env_config.update(fee_overrides)
 
     return DeepScalperEnv(config=env_config, data_handler=handler)
 
 
-def make_oracle_env(config, start_date, end_date, norm_cutoff_date=None):
-    """Create env + pre-load all mid prices for oracle lookahead."""
+def make_oracle_env(config, start_date, end_date, norm_cutoff_date=None, fee_overrides=None):
+    """Create env + pre-load all mid prices for oracle lookahead.
+
+    Args:
+        fee_overrides: dict with optional keys 'maker_fee' and/or 'taker_fee' (float, as rate not bps).
+                       If provided, overrides values in config["env"]. Used by fee_sweep.py.
+    """
     data_config = config.get("data", {})
     file_path = data_config.get("file_path")
     ticker = data_config.get("ticker", "BTCUSDT")
@@ -116,10 +129,13 @@ def make_oracle_env(config, start_date, end_date, norm_cutoff_date=None):
         ask = float(row.get('ask_price_1', 0))
         mid_prices.append((bid + ask) / 2.0)
 
-    env_config = config.get("env", {})
+    env_config = copy.deepcopy(config.get("env", {}))
     env_config["reward"] = config.get("env", {}).get("reward", {})
     env_config.setdefault("action", {})["discrete_dims"] = 6
     env_config["private_state_augment_prob"] = 0.0
+    # Apply fee overrides (Phase Fee sweep)
+    if fee_overrides:
+        env_config.update(fee_overrides)
 
     env = DeepScalperEnv(config=env_config, data_handler=handler)
     return env, np.array(mid_prices)
@@ -399,10 +415,22 @@ def main():
     parser.add_argument("--seeds", type=int, default=3, help="Number of seeds for A1 (random)")
     parser.add_argument("--horizons", nargs="*", type=int, default=[1, 3, 5, 10, 15, 30],
                         help="Horizons for A8 multi-step oracle (default: 1 3 5 10 15 30)")
+    # Phase Fee: optional fee overrides for venue/fee sensitivity analysis
+    parser.add_argument("--taker_fee", type=float, default=None,
+                        help="Override taker fee rate (e.g. 0.0003 = 3bps). Default: from config.")
+    parser.add_argument("--maker_fee", type=float, default=None,
+                        help="Override maker fee rate (e.g. -0.0002 = -2bps rebate). Default: from config.")
     args = parser.parse_args()
 
     config = load_config(args.config)
     data_config = config.get("data", {})
+
+    # Build fee overrides dict if CLI flags were provided
+    fee_overrides = {}
+    if args.taker_fee is not None:
+        fee_overrides["taker_fee"] = args.taker_fee
+    if args.maker_fee is not None:
+        fee_overrides["maker_fee"] = args.maker_fee
 
     # WandB init
     if not args.no_wandb:
@@ -415,8 +443,8 @@ def main():
             config=config,
         )
 
-    taker_fee = config.get("env", {}).get("taker_fee", 0.0005)
-    maker_fee = config.get("env", {}).get("maker_fee", 0.0002)
+    taker_fee = fee_overrides.get("taker_fee", config.get("env", {}).get("taker_fee", 0.0005))
+    maker_fee = fee_overrides.get("maker_fee", config.get("env", {}).get("maker_fee", 0.0002))
 
     # Define splits
     splits = [
@@ -456,7 +484,7 @@ def main():
             if exp_id == "A1":
                 for seed in range(args.seeds):
                     np.random.seed(seed + 42)
-                    env = make_env(config, start_date, end_date, norm_cutoff)
+                    env = make_env(config, start_date, end_date, norm_cutoff, fee_overrides or None)
                     name = f"A1_Random_seed{seed}_{split_name}"
                     logger.info(f"  Running {name}...")
                     metrics = run_backtest(env, policy_random, name)
@@ -477,7 +505,7 @@ def main():
             # A6 (OracleTaker) needs special env with mid-price lookahead
             if exp_id == "A6":
                 logger.info(f"  Running A6_OracleTaker_{split_name} (loading mid prices)...")
-                env, mid_prices = make_oracle_env(config, start_date, end_date, norm_cutoff)
+                env, mid_prices = make_oracle_env(config, start_date, end_date, norm_cutoff, fee_overrides or None)
                 oracle_policy = make_oracle_policy(mid_prices, taker_fee)
                 name = f"A6_OracleTaker_{split_name}"
                 metrics = run_backtest(env, oracle_policy, name)
@@ -497,7 +525,7 @@ def main():
             # A7 (OracleMaker) — same lookahead env, maker orders + lower fee threshold
             if exp_id == "A7":
                 logger.info(f"  Running A7_OracleMaker_{split_name} (loading mid prices)...")
-                env, mid_prices = make_oracle_env(config, start_date, end_date, norm_cutoff)
+                env, mid_prices = make_oracle_env(config, start_date, end_date, norm_cutoff, fee_overrides or None)
                 oracle_maker_policy = make_oracle_maker_policy(mid_prices, maker_fee)
                 name = f"A7_OracleMaker_{split_name}"
                 metrics = run_backtest(env, oracle_maker_policy, name)
@@ -518,7 +546,7 @@ def main():
             if exp_id == "A8":
                 for h in args.horizons:
                     logger.info(f"  Running A8_OracleH{h}_{split_name} (horizon={h} steps)...")
-                    env, mid_prices = make_oracle_env(config, start_date, end_date, norm_cutoff)
+                    env, mid_prices = make_oracle_env(config, start_date, end_date, norm_cutoff, fee_overrides or None)
                     ms_policy = make_oracle_multistep_policy(mid_prices, maker_fee, h)
                     name = f"A8_OracleH{h}_{split_name}"
                     metrics = run_backtest(env, ms_policy, name)
@@ -537,7 +565,7 @@ def main():
                 continue
 
             # Standard baselines (A2-A5)
-            env = make_env(config, start_date, end_date, norm_cutoff)
+            env = make_env(config, start_date, end_date, norm_cutoff, fee_overrides or None)
             name = f"{exp_id}_{label}_{split_name}"
             logger.info(f"  Running {name}...")
             metrics = run_backtest(env, policy_fn, name)

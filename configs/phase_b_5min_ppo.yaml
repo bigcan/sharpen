@@ -1,0 +1,111 @@
+# Phase B — 5-Min Bars PPO Training Config
+# ==========================================
+# Purpose: PPO training on 5-min resolution after oracle gate confirms PF ≥ 1.2.
+# Base: postaudit_hpo.yaml — all 15 bug fixes applied, clean MDP.
+#
+# Key changes vs postaudit_hpo.yaml:
+#   data.file_path: 1-min → 5-min parquet
+#   features.vol_norm_window: 24 (2h EMA at 5-min bars = 24×5min = 120min)
+#   env.reward.volatility_horizon: 100 → 20 (20×5min = 100min, same real-time window)
+#   env.reward.sharpe_horizon: 100 → 20
+#   hpo.n_trials: 30 → 20 (same HPO budget, fewer trials)
+#   hpo.steps_per_trial: 500K → 200K (convergence faster at 5-min bar count)
+#
+# Rationale:
+#   At 5-min bars, the agent sees 32K unique bars over Jan-Apr training window.
+#   5M steps / 32K bars ≈ 156 passes through data (comparable to 1-min 5M/150K ≈ 33 passes
+#   with 24 envs × 5M = 120M env steps total → ~800 passes).
+#   Shorter steps_per_trial reflects that meaningful convergence happens sooner
+#   in bar-count terms at 5-min resolution.
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun_5min.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+  norm_cutoff_date: "2025-05-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24      # 2-hour EMA context at 5-min resolution (24×5min=120min)
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05    # 20x leverage (BTC futures)
+  maker_fee: 0.0002
+  taker_fee: 0.0005
+  num_envs: 24
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20    # 20×5min = 100min ≈ 1.7h (same real-time as 100×1min)
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 20
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 6
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "mlp"
+    window_size: 15
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0003
+    gamma: 0.95                  # LOCKED — T1.2 signal horizon alignment
+    gae_lambda: 0.95
+    clip_eps: 0.2
+    vf_coef: 0.5
+    ent_coef: 0.01               # Higher base — Discrete(6) needs exploration
+    max_grad_norm: 0.5
+    n_epochs: 4
+    target_kl: 0.02
+    rollout_steps: 4096
+    batch_size: 1024
+    lr_schedule: "linear"
+    checkpoint_interval: 500000
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 20             # Same HPO budget as postaudit_hpo (fewer trials, faster bars)
+  steps_per_trial: 200000  # Shorter trial — convergence faster per bar-count at 5-min
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["PPO", "Stage2", "PhaseB", "5min", "PostAudit-HPO", "MLP-V5", "NAV-reward", "candle-fill", "HPO", "Discrete6", "5MinBars"]
