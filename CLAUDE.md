@@ -84,6 +84,14 @@ Tier 3: .agent/memory/logs/YYYY-MM-DD.md (gitignored) — Ephemeral daily scratc
 - R&D log is reverse-chronological, append-only, one entry per day
 - Full workflow: `.agent/workflows/memory-boot.md`
 
+**Commit checklist** (on "update memory" / "commit" / session end):
+1. **Tier 3 FIRST**: Append session work to `.agent/memory/logs/YYYY-MM-DD.md` — this is the source of truth for what happened today
+2. **Tier 1**: Update `core.md` status, incidents, next steps
+3. **Tier 2**: Sync daily log → `randd_log.md` (structured entry)
+4. **git commit**: Stage and commit
+
+> **MANDATORY**: Never skip the daily log. It is the primary record. Tier 2 is derived FROM it.
+
 ## Architecture
 
 ### Data Flow
