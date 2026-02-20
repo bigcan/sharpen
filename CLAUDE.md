@@ -170,6 +170,7 @@ These are non-negotiable correctness constraints. Violating any of these causes 
 | **T1.5v2** | Maker fills use candle high/low prices, not just best bid/offer snapshots. Taker fills are unconditional (taker crosses spread by definition). |
 | **SHORT-ACCT** | Long and short leverage accounting are calculated with split formulas. Shorts must NOT accumulate `notional_debt` — buyback obligation is captured by `|pos|*mid` in equity (FIX V3-01). |
 | **MARGIN-CFG** | `margin_requirement` must be `0.05` (20x leverage) for BTC futures. `1.0` (spot) causes margin starvation — agent can only hold ~1 BTC before all orders are rejected. |
+| **TAKER-IMM** | Taker orders fill immediately in the same `step()` call. Maker orders pend for next-bar fill. `_try_fill_pending()` is called twice: once for previous maker fills, once after taker action creation. |
 
 ## Known Open Issues (as of 2026-02-20)
 

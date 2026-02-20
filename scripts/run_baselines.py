@@ -275,18 +275,26 @@ def policy_mean_reversion(obs, info, step, env):
 
 
 def make_oracle_policy(mid_prices, taker_fee):
-    """A6: Oracle — 1-step perfect foresight, taker-only."""
+    """A6: Oracle — 1-step perfect foresight, taker-only.
+
+    FIX ORACLE-DELAY: With immediate taker fill (FIX TAKER-DELAY),
+    action at step T fills at T+1 prices (same env.step() call).
+    The oracle should predict the return from fill (T+1) to exit (T+2),
+    i.e., mid[T+1] → mid[T+2], NOT mid[T] → mid[T+1] (which is already
+    priced in by the time the fill happens).
+    """
     fee_threshold = taker_fee * 2  # Round-trip fee cost
 
     def policy_oracle(obs, info, step, env):
         current_step = env.current_step
-        if current_step + 1 >= len(mid_prices):
+        if current_step + 2 >= len(mid_prices):
             return HOLD
-        mid_now = mid_prices[current_step]
-        mid_next = mid_prices[current_step + 1]
-        if mid_now <= 0:
+        # Predict return from fill price (T+1) to next observation (T+2)
+        mid_fill = mid_prices[current_step + 1]  # Where taker fill happens
+        mid_exit = mid_prices[current_step + 2]  # Next exit opportunity
+        if mid_fill <= 0:
             return HOLD
-        ret = (mid_next - mid_now) / mid_now
+        ret = (mid_exit - mid_fill) / mid_fill
         if ret > fee_threshold:
             return TAKER_BUY
         elif ret < -fee_threshold:
@@ -297,18 +305,24 @@ def make_oracle_policy(mid_prices, taker_fee):
 
 
 def make_oracle_maker_policy(mid_prices, maker_fee):
-    """A7: Oracle — 1-step perfect foresight, maker-only (lower round-trip cost)."""
+    """A7: Oracle — 1-step perfect foresight, maker-only (lower round-trip cost).
+
+    NOTE: Maker orders still have 2-step fill delay (pending → next bar fill).
+    Oracle uses +2/+3 lookahead to account for this: maker pending created at T,
+    fills at T+2 prices, exit opportunity at T+3.
+    """
     fee_threshold = maker_fee * 2  # Round-trip fee cost (e.g. 4bps vs 10bps taker)
 
     def policy_oracle_maker(obs, info, step, env):
         current_step = env.current_step
-        if current_step + 1 >= len(mid_prices):
+        if current_step + 3 >= len(mid_prices):
             return HOLD
-        mid_now = mid_prices[current_step]
-        mid_next = mid_prices[current_step + 1]
-        if mid_now <= 0:
+        # Maker fills at T+2 (pending delay), exit at T+3
+        mid_fill = mid_prices[current_step + 2]
+        mid_exit = mid_prices[current_step + 3]
+        if mid_fill <= 0:
             return HOLD
-        ret = (mid_next - mid_now) / mid_now
+        ret = (mid_exit - mid_fill) / mid_fill
         if ret > fee_threshold:
             return MAKER_BUY
         elif ret < -fee_threshold:
@@ -324,6 +338,9 @@ def make_oracle_multistep_policy(mid_prices, maker_fee, horizon):
     Enters when N-step return exceeds round-trip maker fees.
     Holds for exactly `horizon` steps, then exits. Uses position from
     env info to stay in sync even if maker fills are delayed/rejected.
+
+    FIX ORACLE-DELAY: Maker orders have 2-step fill delay.
+    Lookahead starts from fill point (current_step + 2), not current_step.
     """
     fee_threshold = maker_fee * 2  # Round-trip fee cost
     state = {"entry_step": -1}
@@ -348,16 +365,17 @@ def make_oracle_multistep_policy(mid_prices, maker_fee, horizon):
             if current_step - state["entry_step"] > 2:
                 state["entry_step"] = -1
 
-        # If flat → look ahead N steps
+        # If flat → look ahead N steps from fill point (2-step maker delay)
         if state["entry_step"] >= 0:
             return HOLD  # Waiting for fill
-        if current_step + horizon >= len(mid_prices):
+        fill_offset = 2  # Maker pending delay
+        if current_step + fill_offset + horizon >= len(mid_prices):
             return HOLD
-        mid_now = mid_prices[current_step]
-        mid_future = mid_prices[current_step + horizon]
-        if mid_now <= 0:
+        mid_fill = mid_prices[current_step + fill_offset]
+        mid_future = mid_prices[current_step + fill_offset + horizon]
+        if mid_fill <= 0:
             return HOLD
-        ret = (mid_future - mid_now) / mid_now
+        ret = (mid_future - mid_fill) / mid_fill
         if ret > fee_threshold:
             state["entry_step"] = current_step
             return MAKER_BUY

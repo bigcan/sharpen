@@ -384,6 +384,209 @@ class DeepScalperEnv(gym.Env):
                 
         return False
 
+    def _try_fill_pending(self):
+        """Try to fill the current pending order against current market data.
+
+        Handles buy/sell fill logic, margin accounting, position updates,
+        fee/slippage tracking, and private state window update.
+        Called twice per step: once for previous-step maker orders,
+        and immediately for same-step taker orders (FIX TAKER-DELAY).
+        """
+        if not self.pending_order:
+            return
+
+        order_dir, order_px, order_qty, is_taker = self.pending_order
+        fill_price = None
+
+        # Level-Crossing Conservative Fill
+        if order_dir == 1:  # Buy
+            # CRITICAL FIX: Position Limit Check
+            if self.position + order_qty > self.max_position:
+                order_qty = max(0, self.max_position - self.position)
+
+            # MARGIN CHECK (Symmetric)
+            if not self._check_margin(self.position, order_qty, order_px, 1):
+                order_qty = 0  # Reject
+
+            # T1.5v2 FIX (BUG-03): Candle-based fill simulation
+            # Taker buy: always fills — taker crosses spread (immediate execution)
+            # Maker buy: fills if bar low < limit (market traded below our buy limit)
+            fill_condition = True if is_taker else (self.current_low < order_px)
+            if order_qty > 0 and self.current_best_ask > 0 and fill_condition:
+                available_vol = self._raw_ask_vol_1 if self._raw_ask_vol_1 > 0 else 0.0
+                exec_qty = min(order_qty, available_vol)
+
+                if exec_qty > 0:
+                    if is_taker:
+                        slippage_rate = self._calculate_slippage(exec_qty, available_vol)
+                        fill_price = self.current_best_ask * (1 + slippage_rate)
+                        slippage_cost = self.current_best_ask * exec_qty * slippage_rate
+                    else:
+                        fill_price = order_px
+                        slippage_rate = 0.0
+                        slippage_cost = 0.0
+
+                    fee_rate = self.taker_fee if is_taker else self.maker_fee
+                    fee = fill_price * exec_qty * fee_rate
+                    notional = fill_price * exec_qty
+
+                    # Margin-based accounting
+                    # FIX AUDIT-B: Split flip trades into close + open legs
+                    # FIX SPOT-ACCT: Use position-based detection, not debt-based
+                    if self.position < -1e-12:
+                        close_qty = min(exec_qty, abs(self.position))
+                        open_qty = exec_qty - close_qty
+
+                        close_notional = fill_price * close_qty
+                        close_fee = close_notional * fee_rate
+                        if self.notional_debt > 1e-12:
+                            close_frac = min(close_qty / abs(self.position), 1.0)
+                            debt_release = self.notional_debt * close_frac
+                            self.notional_debt -= debt_release
+                            self.balance += (debt_release - close_notional - close_fee)
+                        else:
+                            self.balance -= (close_notional + close_fee)
+
+                        if open_qty > 1e-12:
+                            open_notional = fill_price * open_qty
+                            open_fee = open_notional * fee_rate
+                            margin_cost = open_notional * self.margin_requirement + open_fee
+                            borrowed = open_notional * (1.0 - self.margin_requirement)
+                            self.balance -= margin_cost
+                            self.notional_debt += borrowed
+                            fee = close_fee + open_fee
+                        else:
+                            fee = close_fee
+                    else:
+                        margin_cost = notional * self.margin_requirement + fee
+                        borrowed = notional * (1.0 - self.margin_requirement)
+                        self.balance -= margin_cost
+                        self.notional_debt += borrowed
+
+                    self.cumulative_fees += fee
+                    self.cumulative_slippage += slippage_cost
+                    self.step_transaction_costs += (fee + slippage_cost)
+
+                    if self.position >= -1e-12:
+                        total_cost = self.avg_price * max(self.position, 0) + fill_price * exec_qty
+                        self.position += exec_qty
+                        self.avg_price = total_cost / self.position if self.position > 1e-12 else 0
+                    else:
+                        self.position += exec_qty
+                        if self.position > 1e-12:
+                            self.avg_price = fill_price
+                        elif abs(self.position) < 1e-12:
+                            self.avg_price = 0
+                            self.position = 0.0
+
+                    if hasattr(self.balance, "item"): self.balance = self.balance.item()
+                    self.balance = float(self.balance)
+                    if hasattr(self.position, "item"): self.position = self.position.item()
+                    self.position = float(self.position)
+
+        elif order_dir == 2:  # Sell
+            if self.position - order_qty < -self.max_position:
+                order_qty = max(0, self.position - (-self.max_position))
+
+            if not self._check_margin(self.position, order_qty, order_px, 2):
+                order_qty = 0  # Reject
+
+            # Taker sell: always fills. Maker sell: fills if bar high > limit.
+            fill_condition = True if is_taker else (self.current_high > order_px)
+            if order_qty > 0 and self.current_best_bid > 0 and fill_condition:
+                available_vol = self._raw_bid_vol_1 if self._raw_bid_vol_1 > 0 else 0.0
+                exec_qty = min(order_qty, available_vol)
+
+                if exec_qty > 0:
+                    if is_taker:
+                        slippage_rate = self._calculate_slippage(exec_qty, available_vol)
+                        fill_price = self.current_best_bid * (1 - slippage_rate)
+                        slippage_cost = self.current_best_bid * exec_qty * slippage_rate
+                    else:
+                        fill_price = order_px
+                        slippage_rate = 0.0
+                        slippage_cost = 0.0
+
+                    fee_rate = self.taker_fee if is_taker else self.maker_fee
+                    fee = fill_price * exec_qty * fee_rate
+                    notional = fill_price * exec_qty
+                    proceeds = notional - fee
+
+                    # FIX AUDIT-B: Split flip trades into close + open legs
+                    if self.position > 1e-12:
+                        close_qty = min(exec_qty, self.position)
+                        open_qty = exec_qty - close_qty
+
+                        close_notional = fill_price * close_qty
+                        close_fee = close_notional * fee_rate
+                        close_proceeds = close_notional - close_fee
+                        if self.notional_debt > 1e-12:
+                            close_frac = min(close_qty / self.position, 1.0)
+                            debt_release = self.notional_debt * close_frac
+                            self.notional_debt -= debt_release
+                            self.balance += (close_proceeds - debt_release)
+                        else:
+                            self.balance += close_proceeds
+
+                        if open_qty > 1e-12:
+                            open_notional = fill_price * open_qty
+                            open_fee = open_notional * fee_rate
+                            self.balance += open_notional
+                            self.balance -= open_fee
+                            # FIX V3-01: No debt for shorts
+                            fee = close_fee + open_fee
+                        else:
+                            fee = close_fee
+                        proceeds = 0
+                    else:
+                        # Opening/extending short
+                        self.balance += notional
+                        self.balance -= fee
+                        # FIX V3-01: No debt for shorts
+                        proceeds = 0
+
+                    self.cumulative_fees += fee
+                    self.cumulative_slippage += slippage_cost
+                    self.step_transaction_costs += (fee + slippage_cost)
+
+                    old_position = self.position
+                    self.position -= exec_qty
+
+                    if self.position > 1e-12:
+                        pass  # Reducing Long
+                    elif abs(self.position) < 1e-12:
+                        self.avg_price = 0
+                        self.position = 0.0
+                    elif old_position <= 1e-12:
+                        old_short = abs(min(old_position, 0))
+                        total_cost = old_short * self.avg_price + exec_qty * fill_price
+                        self.avg_price = total_cost / abs(self.position) if abs(self.position) > 1e-12 else 0
+                    else:
+                        self.avg_price = fill_price
+
+                    if hasattr(self.balance, "item"): self.balance = self.balance.item()
+                    self.balance = float(self.balance)
+                    if hasattr(self.position, "item"): self.position = self.position.item()
+                    self.position = float(self.position)
+
+        # T1.4 FIX (Finding-02): Only clear pending_order on FILL.
+        if fill_price is not None:
+            self.pending_order = None
+
+        # Update Private State in Window to reflect execution
+        remaining_time = max(0.0, 1.0 - (self.current_step / self.total_episode_steps))
+        post_order_dir = 0.0
+        post_order_dist = 0.0
+        if self.pending_order:
+            post_order_dir = 1.0 if self.pending_order[0] == 1 else -1.0
+            limit_px = self.pending_order[1]
+            mid = (self.current_best_ask + self.current_best_bid) / 2.0
+            if mid > 0:
+                post_order_dist = ((limit_px - mid) / mid) * 10000.0  # bps
+        self.private_window[-1] = self._normalize_private_state(
+            self.position, self.balance, remaining_time, post_order_dir, post_order_dist
+        )
+
     def step(self, action):
         """Execute one time step within the environment"""
         self.step_transaction_costs = 0.0 # Reset per-step cost
@@ -443,250 +646,9 @@ class DeepScalperEnv(gym.Env):
         self._update_state(step_data)
 
         # FIX F3: Execute Pending Order against T+1 data
-        
-        if self.pending_order:
-            order_dir, order_px, order_qty, is_taker = self.pending_order
-            fill_price = None
-            
-            # Level-Crossing Conservative Fill
-            if order_dir == 1:  # Buy
-                # CRITICAL FIX: Position Limit Check
-                if self.position + order_qty > self.max_position:
-                    # Cap quantity to reach max_position
-                    order_qty = max(0, self.max_position - self.position)
-                
-                # MARGIN CHECK (Symmetric)
-                if not self._check_margin(self.position, order_qty, order_px, 1):
-                     order_qty = 0 # Reject
+        self._try_fill_pending()
 
-                # T1.5v2 FIX (BUG-03): Candle-based fill simulation
-                # Taker buy: always fills — taker crosses spread (immediate execution)
-                # Maker buy: fills if bar low < limit (market traded below our buy limit)
-                fill_condition = True if is_taker else (self.current_low < order_px)
-                if order_qty > 0 and self.current_best_ask > 0 and fill_condition:
-                    # FIX CQ-2: Removed dead hasattr check (_raw_ask_vol_1 always set in __init__)
-                    available_vol = self._raw_ask_vol_1 if self._raw_ask_vol_1 > 0 else 0.0
-
-                    exec_qty = min(order_qty, available_vol)
-                    
-                    if exec_qty > 0:
-                        # Bug #3 Fix: Differentiate maker/taker slippage
-                        if is_taker:
-                            slippage_rate = self._calculate_slippage(exec_qty, available_vol)
-                            fill_price = self.current_best_ask * (1 + slippage_rate)
-                            slippage_cost = self.current_best_ask * exec_qty * slippage_rate
-                        else:
-                            # Makers fill at their limit price with zero slippage
-                            fill_price = order_px
-                            slippage_rate = 0.0
-                            slippage_cost = 0.0
-                        
-                        # Fee
-                        fee_rate = self.taker_fee if is_taker else self.maker_fee
-                        fee = fill_price * exec_qty * fee_rate
-                        notional = fill_price * exec_qty
-                        
-                        # Margin-based accounting (symmetric with sell-side)
-                        # FIX AUDIT-B: Split flip trades into close + open legs
-                        # FIX SPOT-ACCT: Use position-based detection, not debt-based
-                        if self.position < -1e-12:
-                            # Currently short — buying closes (partially or fully)
-                            close_qty = min(exec_qty, abs(self.position))
-                            open_qty = exec_qty - close_qty  # > 0 if flipping
-                            
-                            # Leg 1: Close short — buy back asset
-                            close_notional = fill_price * close_qty
-                            close_fee = close_notional * fee_rate
-                            if self.notional_debt > 1e-12:
-                                # Leveraged: release proportional debt
-                                close_frac = min(close_qty / abs(self.position), 1.0)
-                                debt_release = self.notional_debt * close_frac
-                                self.notional_debt -= debt_release
-                                self.balance += (debt_release - close_notional - close_fee)
-                            else:
-                                # Spot: deduct buyback cost + fee
-                                self.balance -= (close_notional + close_fee)
-                            
-                            # Leg 2: Open new long (if flipping)
-                            if open_qty > 1e-12:
-                                open_notional = fill_price * open_qty
-                                open_fee = open_notional * fee_rate
-                                margin_cost = open_notional * self.margin_requirement + open_fee
-                                borrowed = open_notional * (1.0 - self.margin_requirement)
-                                self.balance -= margin_cost
-                                self.notional_debt += borrowed
-                                fee = close_fee + open_fee
-                            else:
-                                fee = close_fee
-                        else:
-                            # Opening/extending long: debit margin, add debt
-                            margin_cost = notional * self.margin_requirement + fee
-                            borrowed = notional * (1.0 - self.margin_requirement)
-                            self.balance -= margin_cost
-                            self.notional_debt += borrowed
-                        
-                        # Track cumulative costs
-                        self.cumulative_fees += fee
-                        self.cumulative_slippage += slippage_cost
-                        self.step_transaction_costs += (fee + slippage_cost)
-                        
-                        if self.position >= -1e-12:  # Long or flat
-                            total_cost = self.avg_price * max(self.position, 0) + fill_price * exec_qty
-                            self.position += exec_qty
-                            self.avg_price = total_cost / self.position if self.position > 1e-12 else 0
-                        else:
-                            # Closing short
-                            self.position += exec_qty
-                            if self.position > 1e-12:
-                                self.avg_price = fill_price
-                            elif abs(self.position) < 1e-12:
-                                self.avg_price = 0
-                                self.position = 0.0 
-                        
-                        # Force scalars
-                        if hasattr(self.balance, "item"): self.balance = self.balance.item()
-                        self.balance = float(self.balance)
-                        if hasattr(self.position, "item"): self.position = self.position.item()
-                        self.position = float(self.position)
-                                
-            elif order_dir == 2:  # Sell
-                # Position Limit Check (Short Limit)
-                if self.position - order_qty < -self.max_position:
-                    order_qty = max(0, self.position - (-self.max_position))
-                
-                # MARGIN CHECK (Symmetric)
-                if not self._check_margin(self.position, order_qty, order_px, 2):
-                     order_qty = 0 # Reject
-
-                # T1.5v2 FIX (BUG-03): Candle-based fill simulation
-                # Taker sell: always fills — taker crosses spread (immediate execution)
-                # Maker sell: fills if bar high > limit (market traded above our sell limit)
-                fill_condition = True if is_taker else (self.current_high > order_px)
-                if order_qty > 0 and self.current_best_bid > 0 and fill_condition:
-                    # Liquidity Check
-                    # FIX N2: Removed dead hasattr check (sell-side, matches buy-side CQ-2 fix)
-                    available_vol = self._raw_bid_vol_1 if self._raw_bid_vol_1 > 0 else 0.0
-                    
-                    exec_qty = min(order_qty, available_vol)
-                    
-                    if exec_qty > 0:
-                        # Bug #3 Fix: Differentiate maker/taker slippage
-                        if is_taker:
-                            slippage_rate = self._calculate_slippage(exec_qty, available_vol)
-                            fill_price = self.current_best_bid * (1 - slippage_rate)
-                            slippage_cost = self.current_best_bid * exec_qty * slippage_rate
-                        else:
-                            # Makers fill at their limit price with zero slippage
-                            fill_price = order_px
-                            slippage_rate = 0.0
-                            slippage_cost = 0.0
-                        
-                        # Fee
-                        fee_rate = self.taker_fee if is_taker else self.maker_fee
-                        fee = fill_price * exec_qty * fee_rate
-                        notional = fill_price * exec_qty
-                        proceeds = notional - fee
-                        
-                        # Margin-based: on sell, release borrowed portion
-                        # FIX AUDIT-B: Split flip trades into close + open legs
-                        # FIX SPOT-ACCT: Use position-based detection, not debt-based
-                        if self.position > 1e-12:
-                            # Currently long — selling closes (partially or fully)
-                            close_qty = min(exec_qty, self.position)
-                            open_qty = exec_qty - close_qty  # > 0 if flipping
-                            
-                            # Leg 1: Close long — credit sale proceeds
-                            close_notional = fill_price * close_qty
-                            close_fee = close_notional * fee_rate
-                            close_proceeds = close_notional - close_fee
-                            if self.notional_debt > 1e-12:
-                                # Leveraged: release proportional debt
-                                close_frac = min(close_qty / self.position, 1.0)
-                                debt_release = self.notional_debt * close_frac
-                                self.notional_debt -= debt_release
-                                self.balance += (close_proceeds - debt_release)
-                            else:
-                                # Spot: just credit proceeds
-                                self.balance += close_proceeds
-                            
-                            # Leg 2: Open new short (if flipping)
-                            # FIX ENV-06: Credit short sale proceeds before debiting fee.
-                            # Opening a short = selling borrowed asset → receive proceeds.
-                            if open_qty > 1e-12:
-                                open_notional = fill_price * open_qty
-                                open_fee = open_notional * fee_rate
-                                self.balance += open_notional  # Receive sale proceeds
-                                self.balance -= open_fee       # Pay fee
-                                # FIX V3-01: No debt for shorts — buyback obligation is
-                                # captured by |pos|*mid in equity. Adding debt here inflated
-                                # NAV by ~1900bps per short entry at margin_req=0.05.
-                                fee = close_fee + open_fee
-                            else:
-                                fee = close_fee
-                            proceeds = 0  # Handled above per-leg
-                        else:
-                            # Opening/extending short — receive proceeds, pay fee
-                            # FIX ENV-06: Credit short sale proceeds (was missing)
-                            self.balance += notional   # Receive sale proceeds
-                            self.balance -= fee        # Pay fee
-                            # FIX V3-01: No debt for shorts — buyback obligation is
-                            # captured by |pos|*mid in equity. Adding debt here inflated
-                            # NAV by ~1900bps per short entry at margin_req=0.05.
-                            proceeds = 0
-                        
-                        # Track cumulative costs
-                        self.cumulative_fees += fee
-                        self.cumulative_slippage += slippage_cost
-                        self.step_transaction_costs += (fee + slippage_cost)
-                        
-                        old_position = self.position
-                        self.position -= exec_qty
-                        
-                        if self.position > 1e-12:
-                            pass # Reducing Long
-                        elif abs(self.position) < 1e-12:
-                            self.avg_price = 0
-                            self.position = 0.0
-                        elif old_position <= 1e-12:
-                            # Adding to short
-                            old_short = abs(min(old_position, 0))
-                            total_cost = old_short * self.avg_price + exec_qty * fill_price
-                            self.avg_price = total_cost / abs(self.position) if abs(self.position) > 1e-12 else 0
-                        else:
-                            # Flipped Long -> Short
-                            self.avg_price = fill_price
-                        
-                        # Force scalars
-                        if hasattr(self.balance, "item"): self.balance = self.balance.item()
-                        self.balance = float(self.balance)
-                        if hasattr(self.position, "item"): self.position = self.position.item()
-                        self.position = float(self.position)
-                        
-            # T1.4 FIX (Finding-02): Only clear pending_order on FILL.
-            # Previously cleared unconditionally, giving maker orders only
-            # 1-tick lifetime. Now unfilled maker orders persist until
-            # filled or replaced by a new action.
-            if fill_price is not None:
-                self.pending_order = None  # Order filled — clear it
-            
-            # CRITICAL FIX: Update Private State in Window to reflect execution
-            # The agent needs to see the new position in the current observation
-            # Fix BUG-A: detailed audit confirmed remaining_time must be passed explicitly
-            # FIX T2-SHAPE: Pass order state (dir + dist) for 5-dim private consistency
-            remaining_time = max(0.0, 1.0 - (self.current_step / self.total_episode_steps))
-            post_order_dir = 0.0
-            post_order_dist = 0.0
-            if self.pending_order:
-                post_order_dir = 1.0 if self.pending_order[0] == 1 else -1.0
-                limit_px = self.pending_order[1]
-                mid = (self.current_best_ask + self.current_best_bid) / 2.0
-                if mid > 0:
-                    post_order_dist = ((limit_px - mid) / mid) * 10000.0  # bps
-            self.private_window[-1] = self._normalize_private_state(
-                self.position, self.balance, remaining_time, post_order_dir, post_order_dist
-            )
-
-        # 3. Process NEW Action (T) → becomes Pending for T+1
+        # 3. Process NEW Action (T)
         # Tier 2: Flattened Action Space [0: TBuy, 1: MBuy, 2: Hold, 3: Cancel, 4: MSell, 5: TSell]
         action = int(action)
         # Discrete(3) remapping: 0=TakerBuy→0, 1=Hold→2, 2=TakerSell→5
@@ -694,7 +656,7 @@ class DeepScalperEnv(gym.Env):
             action = self._disc3_to_disc6[action]
         direction = 0
         quantity = self.fixed_trade_qty * self.max_position
-        
+
         if action == 2:  # Hold
             # T1.4: Hold preserves existing pending order for maker persistence
             direction = 0
@@ -712,8 +674,16 @@ class DeepScalperEnv(gym.Env):
                 is_taker = (action == 5)
                 # Taker crosses spread, Maker sits at touch
                 limit_price = pre_best_bid if is_taker else pre_best_ask
-                
+
             self.pending_order = (direction, limit_price, quantity, is_taker)
+
+            # FIX TAKER-DELAY: Taker orders fill immediately — they cross the
+            # spread by definition and execute at the current market price.
+            # Previously takers were pending for 1 extra step, causing a 2-step
+            # delay from observation to fill (oracle gate PF 0.9 vs theoretical 3.9-303).
+            # Maker orders still pend for next-bar fill (correct: they sit on the book).
+            if is_taker:
+                self._try_fill_pending()
         
         # 4. Dense Reward — T1.1: Pure NAV delta (BUG-01 fix)
         # r_t = NAV_{t+1} - NAV_t, normalized to bps
