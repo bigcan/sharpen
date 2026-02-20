@@ -139,8 +139,9 @@ These are non-negotiable correctness constraints. Violating any of these causes 
 | **LEAK-1** | Normalization cutoff dates must reset rolling EMA-Z statistics at train/val/test boundaries. Never normalize across splits. |
 | **BUG-03** | Hindsight reward (`hindsight_weight > 0`) uses future prices — it **must be disabled** (`hindsight_weight=0.0`) during backtesting. |
 | **BUG-01** | HPO objective is `profit_factor`, not Sharpe. Reward structure params (gamma, sharpe_weight, hindsight_*) must be locked in HPO trials. |
-| **T1.5v2** | Maker fills use candle high/low prices, not just best bid/offer snapshots. |
+| **T1.5v2** | Maker fills use candle high/low prices, not just best bid/offer snapshots. Taker fills are unconditional (taker crosses spread by definition). |
 | **SHORT-ACCT** | Long and short leverage accounting are calculated with split formulas. |
+| **MARGIN-CFG** | `margin_requirement` must be `0.05` (20x leverage) for BTC futures. `1.0` (spot) causes margin starvation — agent can only hold ~1 BTC before all orders are rejected. |
 
 ## Known Open Issues (as of 2026-02-19)
 
@@ -164,6 +165,7 @@ network:
     private_input_size: 5   # Must be 5 (Tier 2). NOT 3.
 
 env:
+  margin_requirement: 0.05  # Must be 0.05 (20x leverage). NOT 1.0 (spot — causes margin starvation).
   reward:
     hindsight_weight: 0.0   # Must be 0 during backtest
   action:

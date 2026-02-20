@@ -24,6 +24,7 @@ features:
 env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
+  margin_requirement: 0.05    # 20x leverage (BTC futures)
   # Production-aligned fee structure (Binance VIP0)
   maker_fee: 0.0002   # 2 bps
   taker_fee: 0.0005   # 5 bps
