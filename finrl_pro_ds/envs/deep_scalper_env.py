@@ -459,10 +459,10 @@ class DeepScalperEnv(gym.Env):
                 if not self._check_margin(self.position, order_qty, order_px, 1):
                      order_qty = 0 # Reject
 
-                # T1.5v2 FIX (BUG-03): Candle-based maker fill simulation
-                # Taker: fills if ask <= limit (immediate execution at BBO)
-                # Maker: fills if low < limit (market traded below our buy limit)
-                fill_condition = (self.current_best_ask <= order_px) if is_taker else (self.current_low < order_px)
+                # T1.5v2 FIX (BUG-03): Candle-based fill simulation
+                # Taker buy: always fills — taker crosses spread (immediate execution)
+                # Maker buy: fills if bar low < limit (market traded below our buy limit)
+                fill_condition = True if is_taker else (self.current_low < order_px)
                 if order_qty > 0 and self.current_best_ask > 0 and fill_condition:
                     # FIX CQ-2: Removed dead hasattr check (_raw_ask_vol_1 always set in __init__)
                     available_vol = self._raw_ask_vol_1 if self._raw_ask_vol_1 > 0 else 0.0
@@ -558,10 +558,10 @@ class DeepScalperEnv(gym.Env):
                 if not self._check_margin(self.position, order_qty, order_px, 2):
                      order_qty = 0 # Reject
 
-                # T1.5v2 FIX (BUG-03): Candle-based maker fill simulation
-                # Taker: fills if bid >= limit (immediate execution at BBO)
-                # Maker: fills if high > limit (market traded above our sell limit)
-                fill_condition = (self.current_best_bid >= order_px) if is_taker else (self.current_high > order_px)
+                # T1.5v2 FIX (BUG-03): Candle-based fill simulation
+                # Taker sell: always fills — taker crosses spread (immediate execution)
+                # Maker sell: fills if bar high > limit (market traded above our sell limit)
+                fill_condition = True if is_taker else (self.current_high > order_px)
                 if order_qty > 0 and self.current_best_bid > 0 and fill_condition:
                     # Liquidity Check
                     # FIX N2: Removed dead hasattr check (sell-side, matches buy-side CQ-2 fix)

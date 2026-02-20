@@ -1,0 +1,63 @@
+# Oracle Gate — Fair Capital, H2 Data (Jul-Dec 2025, Fully OOS)
+# ==============================================================
+
+data:
+  file_path: "data/processed/btc_2025_jul_dec.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-07-01 00:00:00"
+  train_end_date:   "2025-08-31 23:59:59"
+  val_start_date:   "2025-09-01 00:00:00"
+  val_end_date:     "2025-09-30 23:59:59"
+  test_start_date:  "2025-10-01 00:00:00"
+  test_end_date:    "2025-10-31 23:59:59"
+  norm_cutoff_date: "2025-09-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05
+  maker_fee: 0.0002
+  taker_fee: 0.0005
+  num_envs: 1
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 100
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 100
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 6
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "mlp"
+    window_size: 15
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["OracleGate", "FairCapital", "H2-OOS", "JulDec2025"]
