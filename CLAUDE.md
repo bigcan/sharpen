@@ -60,16 +60,36 @@ python scripts/collect_run.py --run_id <ID>   # Collect single run (WandB + SFTP
 python scripts/collect_run.py --batch          # Auto-collect all finished runs
 ```
 
-### Memory Protocol
+### Memory Protocol — 3-Tier System
 
-At the start of every session, read `.agent/memory/core.md` for project state, active runs, active decisions, and critical incidents. Log key decisions using the Memory Manager skill.
+The agent has a persistent file-based memory system. Full spec: `.agent/skills/memory/SKILL.md`.
+
+```
+Tier 1: .agent/memory/core.md        (git-tracked) — Project facts, status, decisions (~100 lines)
+Tier 2: randd_log.md                  (git-tracked) — Durable R&D history (canonical experiment record)
+Tier 3: .agent/memory/logs/YYYY-MM-DD.md (gitignored) — Ephemeral daily scratchpad
+```
+
+**Boot sequence** (every session, silent):
+1. Read `core.md` — check `Last Updated` freshness (>3 days = stale warning)
+2. Read last 2 entries from `randd_log.md` (scan for `## 20` date headers)
+3. Read today's + yesterday's + T-2 daily logs (skip if missing)
+4. Fallback: if ALL daily logs missing, R&D log is sole recent context
+5. Validate artifact links in `core.md` — remove broken references silently
+
+**Active maintenance** (during session):
+- **Tier 3**: Log key decisions, bugs, deployments to today's daily log
+- **Tier 1**: Update `core.md` immediately on significant findings (proactive, don't wait for user)
+- **Tier 2**: Sync daily log → `randd_log.md` at session end or on `/commit`
+- R&D log is reverse-chronological, append-only, one entry per day
+- Full workflow: `.agent/workflows/memory-boot.md`
 
 ## Architecture
 
 ### Data Flow
 
 ```
-btc_lob_jan2023.parquet
+btc_lob_2025.parquet
   → ParquetDataHandler (feature_engineering.py)
       SymLog → EMA-Z(span=120, shift=1) → tanh[-1,1]
       30 micro features (LOB-derived: OFI, spread, depth)
