@@ -22,7 +22,7 @@ features:
 env:
   symbol: "BTCUSDT"
   initial_balance: 100000.0
-  margin_requirement: 1.0
+  margin_requirement: 0.05  # FIX: was 1.0 → 20x leverage (BTC futures standard)
   maker_fee: 0.0002
   taker_fee: 0.0005
   num_envs: 1

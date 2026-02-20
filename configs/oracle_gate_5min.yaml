@@ -1,0 +1,76 @@
+# Oracle Gate — 5-Min Bars, H1 Data (Jan-Jun 2025) — Fair Capital
+# ================================================================
+# Purpose: Test whether 5-min resolution passes oracle gate.
+# Merges oracle_gate_5min_h1.yaml (5-min parquet, correct splits) with
+# oracle_gate_fair.yaml (margin=0.05 — 20x leverage, no margin starvation).
+#
+# Rationale: At 5-min bars, price moves are ~5x larger than 1-min while
+# per-trade fee (10bps RT taker) stays fixed → alpha-to-cost ratio ~5x better.
+# Expected: A6 taker PF >> 1.2.
+#
+# Key params vs oracle_gate_5min_h1.yaml:
+#   margin_requirement: 1.0 → 0.05  (FIX: was rejecting 93% of oracle trades)
+#   vol_norm_window: 24              (ADD: 2h EMA context = 24×5min = 120min)
+#   volatility_horizon: 20           (unchanged: 20×5min = 100min ≈ 1.7h)
+
+data:
+  file_path: "data/processed/btc_2025_jan_jun_5min.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-04-30 23:59:59"
+  val_start_date:   "2025-05-01 00:00:00"
+  val_end_date:     "2025-05-31 23:59:59"
+  test_start_date:  "2025-06-01 00:00:00"
+  test_end_date:    "2025-06-30 23:59:59"
+  norm_cutoff_date: "2025-05-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24      # 2-hour EMA context at 5-min resolution (24×5min=120min)
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05  # 20x leverage (BTC futures). FIX: was 1.0 → 93% trade rejection
+  maker_fee: 0.0002
+  taker_fee: 0.0005
+  num_envs: 1
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20  # 20×5min = 100min ≈ 1.7h (same real-time as 100×1min)
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 20
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 6
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "mlp"
+    window_size: 15
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["OracleGate", "5min", "FairCapital", "Stage2", "MarginFix", "H1-Jan-Jun"]
