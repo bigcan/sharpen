@@ -160,20 +160,21 @@ These are non-negotiable correctness constraints. Violating any of these causes 
 | **BUG-03** | Hindsight reward (`hindsight_weight > 0`) uses future prices — it **must be disabled** (`hindsight_weight=0.0`) during backtesting. |
 | **BUG-01** | HPO objective is `profit_factor`, not Sharpe. Reward structure params (gamma, sharpe_weight, hindsight_*) must be locked in HPO trials. |
 | **T1.5v2** | Maker fills use candle high/low prices, not just best bid/offer snapshots. Taker fills are unconditional (taker crosses spread by definition). |
-| **SHORT-ACCT** | Long and short leverage accounting are calculated with split formulas. |
+| **SHORT-ACCT** | Long and short leverage accounting are calculated with split formulas. Shorts must NOT accumulate `notional_debt` — buyback obligation is captured by `|pos|*mid` in equity (FIX V3-01). |
 | **MARGIN-CFG** | `margin_requirement` must be `0.05` (20x leverage) for BTC futures. `1.0` (spot) causes margin starvation — agent can only hold ~1 BTC before all orders are rejected. |
 
-## Known Open Issues (as of 2026-02-19)
+## Known Open Issues (as of 2026-02-20)
 
-From zero-trust adversarial audit:
+From zero-trust adversarial audits (V2 + V3):
 
-| ID | Severity | File | Issue |
-|----|----------|------|-------|
-| FIND-NEW-01 | **CRITICAL** | `bdq_agent.py` | `step_count` incremented in both `train_step()` AND `decay_epsilon()` → epsilon decays 2× too fast |
-| FIND-NEW-04 | Medium | `wandb_evaluator.py` | Sortino formula uses `std(negative_returns)` instead of correct `sqrt(mean(min(r,0)²))` |
-| FIND-NEW-09 | Medium | `wandb_evaluator.py` | Annualization factor uses 252 (daily equity) — should be 525600 (minute-level crypto) |
-| FIND-NEW-03 | Medium | `deepscalper_trainer.py` | Gradient accumulator not incremented during `learning_starts` warmup |
-| FIND-NEW-12 | Medium | `run_full_pipeline.py` | PPO `RunningMeanStd` normalizer state not persisted in checkpoint |
+| ID | Severity | File | Status | Issue |
+|----|----------|------|--------|-------|
+| FIND-NEW-01 | **CRITICAL** | `bdq_agent.py` | **FIXED** | `step_count` incremented in both `train_step()` AND `decay_epsilon()` → epsilon decays 2x too fast |
+| FIND-V3-01 | **CRITICAL** | `deep_scalper_env.py` | **FIXED** | Short-side leveraged equity inflated NAV by `notional*(1-margin_req)` per entry (~1900bps at 0.05 margin). `notional_debt` was incorrectly accumulated for shorts and added to equity. |
+| FIND-NEW-04 | Medium | `wandb_evaluator.py` | **FIXED** | Sortino formula uses `std(negative_returns)` instead of correct `sqrt(mean(min(r,0)^2))` |
+| FIND-NEW-09 | Medium | `wandb_evaluator.py` | **FIXED** | Annualization factor uses 252 (daily equity) — should be 525600 (minute-level crypto) |
+| FIND-NEW-03 | Medium | `deepscalper_trainer.py` | **FALSE POSITIVE** | Gradient accumulator starts at 0 during `learning_starts` warmup — this is correct behavior (accumulator resets naturally when training begins) |
+| FIND-NEW-12 | Low | `run_full_pipeline.py` | Open | PPO `RunningMeanStd` normalizer state not persisted in checkpoint (low impact: reward normalizer lives on env, resets on reset()) |
 
 ## Config Schema Reference
 

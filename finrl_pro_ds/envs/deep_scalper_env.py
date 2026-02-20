@@ -305,21 +305,21 @@ class DeepScalperEnv(gym.Env):
                     max_bal = max(min_bal * 1.1, self.initial_balance * 1.5)
                     self.balance = np.random.uniform(min_bal, max_bal)
                     
-                    # FIX SHORT-ACCT: Initialize notional_debt for leveraged positions
+                    # Initialize notional_debt for leveraged positions
                     # Long: debt = borrowed cash (partial notional)
-                    # Short: debt = full buyback obligation (full notional)
-                    # FIX SHORT-ACCT: Initialize notional_debt for leveraged positions
-                    # Long: debt = borrowed cash (partial notional)
-                    # Short: debt = full buyback obligation (full notional/proceeds)
+                    # Short: no debt — shorts borrow the asset, not cash (FIX V3-01)
                     if abs(self.position) > 1e-12:
                         if self.position > 0:
                             # Long: Only have debt if using leverage
                             if self.margin_requirement < 1.0:
                                 self.notional_debt = value * (1.0 - self.margin_requirement)
                         else:
-                            # Short: Always track full notional as buyback obligation (proceeds)
-                            # This was previously blocked by the `margin < 1.0` check
-                            self.notional_debt = value
+                            # FIX V3-01: Shorts don't borrow cash → no notional_debt.
+                            # Add sale proceeds to balance (agent received cash when
+                            # opening the short). Without this, NAV = balance - value
+                            # would be negative for most random inits.
+                            self.notional_debt = 0.0
+                            self.balance += value
                     
                     # Re-normalize/fill private window with NEW state
                     aug_private_state = self._normalize_private_state(self.position, self.balance, 1.0, 0.0, 0.0)
@@ -617,9 +617,9 @@ class DeepScalperEnv(gym.Env):
                                 open_fee = open_notional * fee_rate
                                 self.balance += open_notional  # Receive sale proceeds
                                 self.balance -= open_fee       # Pay fee
-                                # FIX ENV-06b: Debt = unfunded portion only (0 in spot mode)
-                                # Symmetric with buy-side: borrowed = notional * (1 - margin_req)
-                                self.notional_debt += open_notional * (1.0 - self.margin_requirement)
+                                # FIX V3-01: No debt for shorts — buyback obligation is
+                                # captured by |pos|*mid in equity. Adding debt here inflated
+                                # NAV by ~1900bps per short entry at margin_req=0.05.
                                 fee = close_fee + open_fee
                             else:
                                 fee = close_fee
@@ -629,9 +629,9 @@ class DeepScalperEnv(gym.Env):
                             # FIX ENV-06: Credit short sale proceeds (was missing)
                             self.balance += notional   # Receive sale proceeds
                             self.balance -= fee        # Pay fee
-                            # FIX ENV-06b: Debt = unfunded portion only (0 in spot mode)
-                            # Symmetric with buy-side: borrowed = notional * (1 - margin_req)
-                            self.notional_debt += notional * (1.0 - self.margin_requirement)
+                            # FIX V3-01: No debt for shorts — buyback obligation is
+                            # captured by |pos|*mid in equity. Adding debt here inflated
+                            # NAV by ~1900bps per short entry at margin_req=0.05.
                             proceeds = 0
                         
                         # Track cumulative costs
@@ -824,18 +824,20 @@ class DeepScalperEnv(gym.Env):
     
     def _get_portfolio_value(self):
         """Calculate total equity.
-        
+
         FIX SHORT-ACCT: Split formula by position direction.
         Long:  equity = balance + position*mid - debt  (debt = borrowed cash)
-        Short: equity = balance - |position|*mid + debt  (debt = buyback obligation)
+        Short: equity = balance - |position|*mid  (no debt — obligation captured by |pos|*mid)
+        FIX V3-01: Shorts must NOT use notional_debt. Previously +debt inflated
+        equity by notional*(1-margin_req) per short entry (~1900bps at 0.05 margin).
         When margin_req = 1.0, notional_debt = 0 and both reduce to spot formula.
         """
         mid = (self.current_best_ask + self.current_best_bid) / 2.0 if self.current_best_ask > 0 else 0.0
         if self.position >= 0:
             val = self.balance + (self.position * mid) - self.notional_debt
         else:
-            # Short: cash - buyback_cost + entry_obligation
-            val = self.balance - abs(self.position) * mid + self.notional_debt
+            # Short: cash - buyback_cost (debt is 0 for shorts after V3-01 fix)
+            val = self.balance - abs(self.position) * mid
         # Force scalar
         if hasattr(val, "item"): val = val.item()
         return float(val)

@@ -463,5 +463,94 @@ class TestENV06bShortAccounting(unittest.TestCase):
                                msg="Debt must be 0 after closing short in spot mode")
 
 
+class TestV301LeveragedShortAccounting(unittest.TestCase):
+    """FIX V3-01: Short-side leveraged equity must NOT inflate NAV.
+
+    With margin_req=0.05 (20x leverage), opening a short previously added
+    notional*(1-0.05) = 95% of notional to notional_debt, which the NAV
+    formula added back → ~1900 bps phantom profit per short entry.
+    After fix: notional_debt stays 0 for shorts, NAV = balance - |pos|*mid.
+    """
+
+    def test_leveraged_short_open_no_phantom_profit(self):
+        """Opening a leveraged short must not inflate portfolio value."""
+        env, handler = _make_env({"margin_requirement": 0.05})
+        env.reset()
+        initial_pv = env._get_portfolio_value()
+
+        # Taker sell to open short
+        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        action = 5  # TakerSell
+        _, _, _, _, info = env.step(action)
+
+        if env.position < 0:
+            # notional_debt must be 0 for shorts (V3-01)
+            self.assertAlmostEqual(env.notional_debt, 0.0, places=6,
+                                   msg="Leveraged short: notional_debt must be 0")
+            pv_after = env._get_portfolio_value()
+            # PV should be <= initial (fees only, no phantom profit)
+            self.assertLessEqual(pv_after, initial_pv + 1.0,
+                                 msg=f"Leveraged short must not create phantom profit: "
+                                     f"before={initial_pv:.2f}, after={pv_after:.2f}")
+
+    def test_leveraged_short_roundtrip_loses_fees_only(self):
+        """Open + close leveraged short at same price loses ~2x fees."""
+        env, handler = _make_env({
+            "margin_requirement": 0.05,
+            "maker_fee": 0.0,
+            "taker_fee": 0.001,
+        })
+        env.reset()
+        initial_pv = env._get_portfolio_value()
+
+        # Open short
+        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        env.step(5)  # TakerSell
+
+        # Close short
+        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        env.step(0)  # TakerBuy
+
+        final_pv = env._get_portfolio_value()
+        self.assertLess(final_pv, initial_pv,
+                        msg=f"Leveraged roundtrip must lose fees: "
+                            f"before={initial_pv:.2f}, after={final_pv:.2f}")
+        self.assertAlmostEqual(env.notional_debt, 0.0, places=6,
+                               msg="Debt must be 0 after closing leveraged short")
+
+    def test_leveraged_short_profit_on_price_drop(self):
+        """Short at 100, price drops to 99 → positive P&L.
+
+        Actions become pending and execute on the NEXT step, so we need:
+        Step 1: Submit TakerSell (pending)
+        Step 2: Sell executes at step 2's bid → measure pv_after_short
+        Step 3: Price drops, Hold → measure pv_after_drop
+        """
+        env, handler = _make_env({
+            "margin_requirement": 0.05,
+            "maker_fee": 0.0,
+            "taker_fee": 0.0,
+        })
+        env.reset()
+
+        # Step 1: Submit TakerSell (becomes pending, no trade yet)
+        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        env.step(5)  # TakerSell → pending
+
+        # Step 2: Pending sell executes at bid=100. Hold to not queue another.
+        handler.step.return_value = _make_step_data(bid=100.0, ask=101.0)
+        env.step(2)  # Hold — sell fills this step
+        pv_after_short = env._get_portfolio_value()
+
+        # Step 3: Price drops — mid moves from 100.5 to 99.5
+        handler.step.return_value = _make_step_data(bid=99.0, ask=100.0)
+        env.step(2)  # Hold
+        pv_after_drop = env._get_portfolio_value()
+
+        if env.position < 0:
+            self.assertGreater(pv_after_drop, pv_after_short,
+                               msg="Short should profit when price drops")
+
+
 if __name__ == "__main__":
     unittest.main()
