@@ -1,0 +1,131 @@
+# Phase B10: BDQ + Disc3 + TCN + DQfD Warm-Start + 5-Min Full-Year
+# ============================================================
+# Hypothesis: DQfD buffer seeding breaks cold-start catastrophe.
+#
+# Root cause of cold-start: at epsilon=1.0 with 10bps RT taker cost,
+# random actions destroy portfolio → agent learns "trading = losing" →
+# Hold = Nash equilibrium → Q-function never sees profitable signal.
+#
+# Fix: pre-populate replay buffer with 480K transitions from a simple
+# momentum policy (buy if logret_5 > 5bps, sell if < -5bps, else hold)
+# BEFORE epsilon-greedy training begins. The buffer contains real
+# environment dynamics (honest accounting, real fees) from an observable
+# rule — no oracle lookahead.
+#
+# Ablation design:
+#   B7: MLP + Disc6 (baseline)
+#   B8: MLP + Disc3 (action space only)
+#   B9: TCN + Disc3 (action space + encoder) — running
+#   B10: TCN + Disc3 + DQfD (action + encoder + cold-start fix) — this config
+#
+#   B9 vs B10 → measures pure effect of demo buffer seeding
+#
+# DQfD implementation:
+#   demo_seed_steps: 20000 × num_envs=24 = 480K transitions (fills 500K buffer ~96%)
+#   Policy: logret_5 > 5bps → TakerBuy, < -5bps → TakerSell, else Hold
+#   Uses observable features only — not oracle cheating
+#   Seeding runs before epsilon-greedy loop (start_step==0 only)
+#
+# Ref: Hester et al. (2018) — "Deep Q-learning from Demonstrations"
+
+data:
+  file_path: "data/processed/btc_2025_full_year_5min.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24      # 2h EMA context at 5-min (24×5min = 120min)
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05    # 20x leverage (BTC futures)
+  maker_fee: 0.0002
+  taker_fee: 0.0005
+  num_envs: 24
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20    # 20×5min = 100min
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 20
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 3           # {TakerBuy, Hold, TakerSell} only
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "tcn"        # TCN — same as B9
+    window_size: 15
+    tcn_channels: [64, 64, 128]  # RF = 1+(2*1)+(2*2)+(2*4) = 15 = window_size
+    kernel_size: 3
+    dropout: 0.1
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    learning_rate: 0.0002
+    gamma: 0.95                  # LOCKED — T1.2 signal horizon alignment
+    epsilon_start: 1.0
+    epsilon_end: 0.05
+    epsilon_decay: 0.99999
+    buffer_size: 500000
+    batch_size: 512
+    target_update_freq: 100
+    tau: 0.005
+    auxiliary_weight: 1.0
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+    exploration_mode: "epsilon_greedy"
+    update_interval: 1.0
+    checkpoint_interval: 500000
+    learning_starts: 10000
+    demo_seed_steps: 20000       # KEY CHANGE: 20K×24 envs = 480K demo transitions
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 15
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["BDQ", "Stage2", "PhaseB10", "5min", "FullYear", "Discrete3", "HPO", "TCN",
+         "NAV-reward", "candle-fill", "EpsilonGreedy", "83K-bars", "DQfD", "ColdStartFix"]
