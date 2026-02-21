@@ -101,16 +101,81 @@ class DeepScalperTrainer:
         # Tier 2: Env produces 5 private features (pos, bal, remaining_time, order_dir, order_dist).
         priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_input_size", 5)
         assert priv_cfg == 5, f"FIND-5 Mismatch: Env produces 5 private features (Tier 2), config expects {priv_cfg}"
-        
+
+    def _seed_demo_buffer(self, demo_steps: int) -> None:
+        """Pre-populate replay buffer with a rule-based momentum policy (DQfD warm-start).
+
+        Runs a simple OFI/return-momentum policy through the training env for demo_steps
+        steps and pushes all transitions directly to agent.memory. This breaks the
+        cold-start catastrophe: the buffer has profitable-ish trajectories before
+        epsilon-greedy exploration begins, so the agent's early Q-updates see signal
+        rather than pure noise.
+
+        Policy: buy if macro[:,0] (logret_5) > 5bps, sell if < -5bps, else hold.
+        Uses observable features only (no lookahead) — not oracle cheating.
+
+        Args:
+            demo_steps: Number of env steps. demo_steps * num_envs transitions are stored.
+                        Set to buffer_size // num_envs to fill the buffer exactly once.
+        """
+        logger = logging.getLogger(__name__)
+
+        discrete_dims = self.config.get("env", {}).get("action", {}).get("discrete_dims", 6)
+        if discrete_dims == 3:
+            BUY_ACTION, HOLD_ACTION, SELL_ACTION = 0, 1, 2
+        else:
+            BUY_ACTION, HOLD_ACTION, SELL_ACTION = 0, 2, 5
+
+        THRESHOLD = 0.0005  # 5bps logret_5 threshold for directional signal
+        num_envs = self.env.num_envs
+        total_transitions = demo_steps * num_envs
+        logger.info(f"[DQfD] Seeding buffer: {demo_steps} steps x {num_envs} envs = {total_transitions} transitions")
+        print(f"[DQfD] Seeding replay buffer with {total_transitions} momentum-policy demos...")
+
+        obs, _ = self.env.reset()
+        n_pushed = 0
+
+        for _ in range(demo_steps):
+            signal = obs["macro"][:, 0]  # logret_5, shape (num_envs,)
+            actions = np.where(signal > THRESHOLD, BUY_ACTION,
+                      np.where(signal < -THRESHOLD, SELL_ACTION, HOLD_ACTION))
+
+            next_obs, rewards, term, trunc, infos = self.env.step(actions)
+            dones_for_buffer = term
+
+            for i in range(num_envs):
+                s = {k: v[i] for k, v in obs.items()}
+                ns = {k: v[i] for k, v in next_obs.items()}
+                aux_target = 0.0
+                if isinstance(infos, list):
+                    aux_target = float(infos[i].get("volatility_target", 0.0))
+                elif isinstance(infos, dict) and "volatility_target" in infos:
+                    val = infos["volatility_target"]
+                    aux_target = float(val[i]) if hasattr(val, "__getitem__") else float(val)
+                self.agent.memory.push(s, actions[i], float(rewards[i]),
+                                       ns, bool(dones_for_buffer[i]), aux_target)
+                n_pushed += 1
+
+            obs = next_obs
+
+        print(f"[DQfD] Buffer seeded: {n_pushed} transitions ({len(self.agent.memory)} in buffer). "
+              f"Resuming with epsilon-greedy exploration.")
+
     def train(self, start_step=0, skip_reset=False, optuna_trial=None, pruning_callback=None):
         """Single Phase Training Loop
-        
+
         Args:
             start_step: Resume training from this step (for chunked HPO).
             skip_reset: If True, reuse stored obs from previous chunk instead of resetting.
             optuna_trial: Optuna Trial object for HPO reporting/pruning.
             pruning_callback: Function() -> float to evaluate agent during training.
         """
+        # DQfD warm-start: pre-populate buffer with rule-based demos before training.
+        # Only runs on fresh start (start_step==0) — not on HPO trial resumptions.
+        demo_steps = self.config.get("agents", {}).get("bdq", {}).get("demo_seed_steps", 0)
+        if demo_steps > 0 and start_step == 0:
+            self._seed_demo_buffer(demo_steps)
+
         print(f"Starting Training: Single BDQ Agent | Device: {self.device} | Start Step: {start_step} | Epochs: {self.training_epochs}")
         
         # Init State - Obs is Dict: {'micro': ..., 'macro': ..., 'private': ...}
