@@ -147,6 +147,61 @@ class MicroEncoderMLP(nn.Module):
         return self.net(x), None
 
 
+class MicroEncoderFlat(nn.Module):
+    """Flat snapshot encoder -- no temporal processing.
+
+    Takes only the LAST timestep of the micro window and passes through a
+    small Linear → LayerNorm projection. This tests whether temporal encoding
+    (LSTM/TCN/MLP-flatten) adds value over a pure snapshot observation.
+
+    Motivated by EXP-E2b finding: lagged features add ZERO temporal value
+    (AUC delta = +0.0006). If the signal is in concurrent snapshots, a
+    simpler network should converge faster with fewer parameters.
+
+    Architecture:
+        (B, W, F) → take last step → (B, F)
+        → Linear(F, hidden_size) → LayerNorm
+    """
+
+    def __init__(
+        self,
+        input_size: int = 30,
+        hidden_size: int = 128,
+        **kwargs,  # Absorbs window_size, rnn_type, num_layers, dropout, etc.
+    ):
+        super().__init__()
+        self.hidden_size = hidden_size
+
+        self.net = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.LayerNorm(hidden_size),
+            nn.GELU(),
+        )
+
+        self._init_weights()
+
+    def _init_weights(self):
+        for layer in self.net:
+            if isinstance(layer, nn.Linear):
+                nn.init.orthogonal_(layer.weight, gain=1.0)
+                nn.init.zeros_(layer.bias)
+
+    def forward(
+        self, x: torch.Tensor, hidden=None
+    ) -> Tuple[torch.Tensor, None]:
+        """
+        Args:
+            x: (B, W, F) micro features
+            hidden: Ignored -- kept for interface compatibility
+
+        Returns:
+            (B, hidden_size) encoded features, None (no hidden state)
+        """
+        # Take only the last timestep -- discard temporal window
+        last = x[:, -1, :]  # (B, F)
+        return self.net(last), None
+
+
 class _CausalConv1dBlock(nn.Module):
     """Single causal convolution block with residual connection.
 
@@ -314,6 +369,8 @@ class DeepScalperNetwork(nn.Module):
             self.micro_encoder = MicroEncoderMLP(**micro_config)
         elif encoder_type == "tcn":
             self.micro_encoder = MicroEncoderTCN(**micro_config)
+        elif encoder_type == "flat":
+            self.micro_encoder = MicroEncoderFlat(**micro_config)
         else:
             self.micro_encoder = MicroEncoder(**micro_config)
             
