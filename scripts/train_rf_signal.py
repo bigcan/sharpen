@@ -182,23 +182,33 @@ def get_full_probs(rf, X):
 
 def run_threshold_backtest(config, probs, mid, timestamps, split_name,
                            start_date, end_date, norm_cutoff, threshold,
-                           horizon, maker_fee):
+                           horizon, maker_fee, execution_mode="maker"):
     """Run a simple threshold strategy through the DeepScalper env.
 
     Strategy:
-      - Buy (MAKER_BUY) when P(up) > threshold
-      - Sell (MAKER_SELL) when P(up) < (1 - threshold)
+      - Buy when P(up) > threshold
+      - Sell when P(up) < (1 - threshold)
       - Hold otherwise
       - Close position after `horizon` steps (timeout exit)
+
+    Args:
+        execution_mode: "maker" (MAKER_BUY/SELL, next-bar fill) or
+                        "taker" (TAKER_BUY/SELL, immediate fill)
     """
     from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 
     # Import run_backtest from baselines
     from run_baselines import run_backtest, make_env
 
-    MAKER_BUY = 1
+    # make_env forces discrete_dims=6: TakerBuy=0, MakerBuy=1, Hold=2,
+    # Cancel=3, MakerSell=4, TakerSell=5
+    if execution_mode == "taker":
+        BUY = 0   # TAKER_BUY — immediate fill
+        SELL = 5  # TAKER_SELL — immediate fill
+    else:
+        BUY = 1   # MAKER_BUY — next-bar fill
+        SELL = 4  # MAKER_SELL — next-bar fill
     HOLD = 2
-    MAKER_SELL = 4
 
     env = make_env(config, start_date, end_date, norm_cutoff)
 
@@ -217,7 +227,7 @@ def run_threshold_backtest(config, probs, mid, timestamps, split_name,
         if has_position and state["entry_step"] >= 0:
             if current_step - state["entry_step"] >= horizon:
                 state["entry_step"] = -1
-                return MAKER_SELL if pos > 0 else MAKER_BUY
+                return SELL if pos > 0 else BUY
             return HOLD
 
         # Reset stale entry
@@ -235,13 +245,14 @@ def run_threshold_backtest(config, probs, mid, timestamps, split_name,
         p = probs[current_step]
         if p > threshold:
             state["entry_step"] = current_step
-            return MAKER_BUY
+            return BUY
         elif p < (1.0 - threshold):
             state["entry_step"] = current_step
-            return MAKER_SELL
+            return SELL
         return HOLD
 
-    name = f"E1_RF_T{threshold:.2f}_H{horizon}_{split_name}"
+    exec_tag = "taker" if execution_mode == "taker" else "maker"
+    name = f"E1_{exec_tag}_RF_T{threshold:.2f}_H{horizon}_{split_name}"
     metrics = run_backtest(env, rf_threshold_policy, name)
     metrics["split"] = split_name
     metrics["threshold"] = threshold
@@ -251,7 +262,8 @@ def run_threshold_backtest(config, probs, mid, timestamps, split_name,
     return metrics
 
 
-def run_e1_threshold_sweep(config, data_splits, rf_h30, horizon=30):
+def run_e1_threshold_sweep(config, data_splits, rf_model, horizon=30,
+                           execution_mode="maker"):
     """Sweep thresholds on val and test splits."""
     thresholds = [0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64]
     maker_fee = config.get("env", {}).get("maker_fee", 0.0002)
@@ -268,7 +280,7 @@ def run_e1_threshold_sweep(config, data_splits, rf_h30, horizon=30):
         norm_cutoff = split_data["norm_cutoff"]
 
         # Get RF probs for this split
-        probs = get_full_probs(rf_h30, X)
+        probs = get_full_probs(rf_model, X)
 
         for thresh in thresholds:
             try:
@@ -276,6 +288,7 @@ def run_e1_threshold_sweep(config, data_splits, rf_h30, horizon=30):
                     config, probs, mid, timestamps, split_name,
                     start_date, end_date, norm_cutoff,
                     thresh, horizon, maker_fee,
+                    execution_mode=execution_mode,
                 )
                 results.append(metrics)
                 print(f"  E1 T={thresh:.2f} {split_name}: "
@@ -368,6 +381,11 @@ def main():
     parser.add_argument("--no_e1", action="store_true", help="Skip E-1 threshold backtests")
     parser.add_argument("--horizons", nargs="*", type=int, default=[1, 30],
                         help="Prediction horizons (default: 1 30)")
+    parser.add_argument("--execution", type=str, default="maker",
+                        choices=["maker", "taker"],
+                        help="E-1 execution mode: maker (next-bar fill) or taker (immediate fill)")
+    parser.add_argument("--e1_horizons", nargs="*", type=int, default=None,
+                        help="Horizons for E-1 backtest (default: largest trained horizon)")
     args = parser.parse_args()
 
     print("=" * 70)
@@ -478,12 +496,27 @@ def main():
     # ── 5. E-1 Threshold backtests ──
     e1_results = []
     if not args.no_e1:
-        print("\n[5/5] Running E-1 threshold backtests (H30)...")
-        h30_label = "H30"
-        if h30_label in rf_models:
-            e1_results = run_e1_threshold_sweep(config, data_splits, rf_models[h30_label], horizon=30)
+        # Determine which horizons to backtest
+        if args.e1_horizons:
+            e1_horizons = args.e1_horizons
         else:
-            print("  Skipping E-1: H30 model not trained")
+            e1_horizons = [max(args.horizons)]  # Default: largest trained horizon
+
+        exec_label = args.execution
+        print(f"\n[5/5] Running E-1 threshold backtests ({exec_label} execution)...")
+
+        for e1_h in e1_horizons:
+            h_label = f"H{e1_h}"
+            if h_label in rf_models:
+                print(f"\n  --- {h_label} ({exec_label}) ---")
+                results = run_e1_threshold_sweep(
+                    config, data_splits, rf_models[h_label],
+                    horizon=e1_h, execution_mode=args.execution,
+                )
+                e1_results.extend(results)
+            else:
+                print(f"  Skipping E-1 {h_label}: model not trained "
+                      f"(available: {list(rf_models.keys())})")
     else:
         print("\n[5/5] E-1 threshold backtests skipped (--no_e1)")
 
@@ -511,30 +544,39 @@ def main():
                   f"(accuracy={m['accuracy']:.4f}, N={m['n_samples']})")
 
     if e1_results:
-        print(f"\n  E-1 THRESHOLD SWEEP (H30, maker only):")
-        print(f"  {'Thresh':>7} {'Val PF':>8} {'Val Trades':>10} {'Test PF':>9} {'Test Trades':>11}")
-        print(f"  {'-' * 50}")
+        e1_h_set = sorted(set(r.get("horizon", 30) for r in e1_results))
+        exec_label = args.execution
+        print(f"\n  E-1 THRESHOLD SWEEP ({exec_label} execution, H={e1_h_set}):")
+        print(f"  {'H':>3} {'Thresh':>7} {'Val PF':>8} {'Val Trades':>10} {'Test PF':>9} {'Test Trades':>11}")
+        print(f"  {'-' * 55}")
 
-        thresholds_seen = sorted(set(r.get("threshold", 0) for r in e1_results))
         best_val_pf = 0
         best_thresh = None
-        for t in thresholds_seen:
-            val_r = [r for r in e1_results if r.get("threshold") == t and r.get("split") == "val"]
-            test_r = [r for r in e1_results if r.get("threshold") == t and r.get("split") == "test"]
-            val_pf = val_r[0]["profit_factor"] if val_r else 0
-            val_trades = val_r[0]["trade_count"] if val_r else 0
-            test_pf = test_r[0]["profit_factor"] if test_r else 0
-            test_trades = test_r[0]["trade_count"] if test_r else 0
-            marker = " <-- BEST" if val_pf > best_val_pf and val_trades >= 50 else ""
-            if val_pf > best_val_pf and val_trades >= 50:
-                best_val_pf = val_pf
-                best_thresh = t
-            print(f"  {t:>7.2f} {val_pf:>8.3f} {val_trades:>10d} {test_pf:>9.3f} {test_trades:>11d}{marker}")
+        best_horizon = None
+        for h in e1_h_set:
+            h_results = [r for r in e1_results if r.get("horizon") == h]
+            thresholds_seen = sorted(set(r.get("threshold", 0) for r in h_results))
+            for t in thresholds_seen:
+                val_r = [r for r in h_results if r.get("threshold") == t and r.get("split") == "val"]
+                test_r = [r for r in h_results if r.get("threshold") == t and r.get("split") == "test"]
+                val_pf = val_r[0]["profit_factor"] if val_r else 0
+                val_trades = val_r[0]["trade_count"] if val_r else 0
+                test_pf = test_r[0]["profit_factor"] if test_r else 0
+                test_trades = test_r[0]["trade_count"] if test_r else 0
+                marker = " <-- BEST" if val_pf > best_val_pf and val_trades >= 50 else ""
+                if val_pf > best_val_pf and val_trades >= 50:
+                    best_val_pf = val_pf
+                    best_thresh = t
+                    best_horizon = h
+                print(f"  {h:>3} {t:>7.2f} {val_pf:>8.3f} {val_trades:>10d} "
+                      f"{test_pf:>9.3f} {test_trades:>11d}{marker}")
 
         if best_thresh is not None:
-            print(f"\n  Best threshold: {best_thresh:.2f} (val PF={best_val_pf:.3f})")
+            print(f"\n  Best: H{best_horizon} T={best_thresh:.2f} (val PF={best_val_pf:.3f})")
             best_test = [r for r in e1_results
-                         if r.get("threshold") == best_thresh and r.get("split") == "test"]
+                         if r.get("threshold") == best_thresh
+                         and r.get("horizon") == best_horizon
+                         and r.get("split") == "test"]
             if best_test:
                 test_pf = best_test[0]["profit_factor"]
                 if test_pf >= 1.2:
