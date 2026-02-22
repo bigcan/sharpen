@@ -87,6 +87,13 @@ class DeepScalperTrainer:
         self.hpo_mode = hpo_mode
         self.gradient_accumulator = 0.0  # FIX FIND-4: Accumulator for fractional update_interval
 
+        # Fee curriculum: sorted list of {step, taker_fee, maker_fee} tier dicts.
+        # Applied only during production training (not HPO — HPO uses static base fees).
+        # Uses env.call("set_fees", ...) which works for SyncVectorEnv and AsyncVectorEnv.
+        raw_schedule = self.config.get("env", {}).get("fee_schedule", [])
+        self._fee_schedule = sorted(raw_schedule, key=lambda x: x["step"]) if raw_schedule else []
+        self._fee_tier_applied = -1  # Index of the last applied tier (-1 = none yet)
+
         # FIX PERF-8: Initialize cosine LR scheduler for stable late-training convergence
         # FIX N1: Resolve num_envs from env before use (was NameError)
         _num_envs = getattr(self.env, 'num_envs', 1)
@@ -351,7 +358,27 @@ class DeepScalperTrainer:
                 obs = next_obs
                 global_step += num_envs
                 epoch_step += num_envs
-                
+
+                # Fee curriculum: activate the highest eligible tier (production only).
+                # Each tier defines the fees that apply from `step` onwards.
+                if self._fee_schedule and not self.hpo_mode:
+                    highest_eligible = -1
+                    for tier_idx, tier in enumerate(self._fee_schedule):
+                        if global_step >= tier["step"]:
+                            highest_eligible = tier_idx
+                    if highest_eligible > self._fee_tier_applied:
+                        tier = self._fee_schedule[highest_eligible]
+                        t_fee = float(tier.get("taker_fee", self.config["env"].get("taker_fee", 0.0005)))
+                        m_fee = float(tier.get("maker_fee", self.config["env"].get("maker_fee", 0.0002)))
+                        self.env.call("set_fees", t_fee, m_fee)
+                        self._fee_tier_applied = highest_eligible
+                        wandb.log({"train/fee_tier": highest_eligible,
+                                   "train/taker_fee_bps": t_fee * 10000,
+                                   "train/maker_fee_bps": m_fee * 10000,
+                                   "step": global_step})
+                        print(f"[FeeCurriculum] Step {global_step}: tier {highest_eligible} activated "
+                              f"→ taker={t_fee*10000:.1f}bps, maker={m_fee*10000:.1f}bps")
+
                 # FIX: Decay epsilon every step batch
                 self.agent.decay_epsilon()
                 
