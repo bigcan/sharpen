@@ -1,0 +1,63 @@
+# Phase E1b: RF Signal Evaluation on 1-Min Full-Year Data
+# ======================================================================
+# Diagnostic: Do our 45 features carry more predictive signal at 1-min
+# than at 5-min? E1 (5-min) showed H30 val AUC=0.5005 (coin flip).
+#
+# If 1-min AUC >> 0.50: signal exists at 1-min but gets diluted by
+# 5-min aggregation. Points toward cross-timeframe features.
+#
+# If 1-min AUC ~ 0.50: features are fundamentally weak across all
+# timeframes. Feature engineering is the bottleneck.
+#
+# Horizons tested:
+#   H1  = 1 bar  = 1 min  (ultra-short)
+#   H5  = 5 bars = 5 min  (same real-time as 5-min H1)
+#   H30 = 30 bars = 30 min (same bar count as 5-min H30)
+#   H150 = 150 bars = 2.5h (same real-time as 5-min H30)
+#
+# Note: vol_norm_window=120 (default) = 120 bars * 1 min = 2h EMA context,
+# matching 5-min config's vol_norm_window=24 (24 * 5min = 2h).
+#
+# No E-1 threshold backtest -- maker execution known to fail at 1-min.
+# This is purely an AUC diagnostic experiment.
+
+data:
+  file_path: "data/processed/btc_2025_full_year.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  # vol_norm_window: 120 (default) -- 120 bars * 1min = 2h EMA, same real-time as 5-min's 24*5min
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05
+  maker_fee: 0.0002
+  taker_fee: 0.0005
+  num_envs: 1
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 100
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 100
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 6
+    max_position: 5.0
+    fixed_trade_qty: 0.2
