@@ -192,7 +192,16 @@ class DeepScalperEnv(gym.Env):
         # v2: Pre-compute micro feature keys to avoid string formatting in hot loop
         self._micro_keys = list(MICRO_FEATURE_COLS)  # 30 column names
 
-    def _normalize_private_state(self, position: float, balance: float, 
+    def set_fees(self, taker_fee: float, maker_fee: float) -> None:
+        """Runtime fee update for fee curriculum training.
+
+        Called by DeepScalperTrainer at fee schedule boundaries.
+        Takes effect immediately on the next fill calculation.
+        """
+        self.taker_fee = float(taker_fee)
+        self.maker_fee = float(maker_fee)
+
+    def _normalize_private_state(self, position: float, balance: float,
                                  remaining_time: float = 1.0,
                                  order_direction: float = 0.0,
                                  order_dist_to_mid: float = 0.0) -> np.ndarray:

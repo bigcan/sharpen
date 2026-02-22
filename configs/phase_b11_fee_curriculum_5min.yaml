@@ -1,0 +1,146 @@
+# Phase B11: BDQ + Disc3 + TCN + DQfD + Fee Curriculum + 5-Min Full-Year
+# ======================================================================
+# Hypothesis: Fee curriculum breaks the "learning at full cost" cold-start.
+#
+# Root cause being addressed: Even with DQfD warm-start (B10), the agent
+# converges to a loss-making policy. Hypothesis: the agent still receives
+# 10bps RT cost signal from step 1, which overwhelms the weak directional
+# signal (oracle PF ceiling 1.24 = only 24% margin above costs).
+#
+# Fix: graduate fee difficulty over 5M steps:
+#   Steps    0 - 1.5M: taker_fee = 0.0    (zero cost - pure signal learning)
+#   Steps 1.5M - 3.0M: taker_fee = 0.0002 (4bps RT  - easy mode)
+#   Steps 3.0M - 5.0M: taker_fee = 0.0005 (10bps RT - real Binance VIP-0)
+#
+# This decouples two learning objectives that are entangled in B7-B10:
+#   "Which bars have directional signal" -> learned cheaply at zero fees
+#   "Which signals survive after costs"  -> layered in after signal is known
+#
+# Ablation design vs B10:
+#   B10: DQfD + TCN + Disc3             (cold-start fix only)
+#   B11: DQfD + TCN + Disc3 + FeeCurr  (cold-start fix + graduated difficulty)
+#
+#   B10 vs B11 -> measures pure effect of fee curriculum, HPs held constant
+#
+# HPs: B10 Trial 0 best (lr=4.46e-4, batch=256, eps_end=0.024, tau=1.14e-3,
+#      aux_weight=0.755). No HPO — clean ablation of fee curriculum effect.
+#
+# Ref: Bengio et al. (2009) - "Curriculum Learning"
+# Ref: strategy_improvement_analysis.md Tier 2 recommendation #4
+
+data:
+  file_path: "data/processed/btc_2025_full_year_5min.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24      # 2h EMA context at 5-min (24×5min = 120min)
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05    # 20x leverage (BTC futures) - CRITICAL: do not change
+  maker_fee: 0.0002           # Static maker fee throughout training
+  taker_fee: 0.0000           # Tier 0 start: zero cost. Overridden by fee_schedule.
+  num_envs: 24
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  # Fee curriculum: taker fee graduated over 5M training steps.
+  # Applied by DeepScalperTrainer.train() only (not HPO trials).
+  # Transitions logged to WandB as train/fee_tier + train/taker_fee_bps.
+  fee_schedule:
+    - step: 0
+      taker_fee: 0.0000    # Zero cost — learn directional signal
+      maker_fee: 0.0002
+    - step: 1500000
+      taker_fee: 0.0002    # 4bps RT — easy mode (half real cost)
+      maker_fee: 0.0002
+    - step: 3000000
+      taker_fee: 0.0005    # 10bps RT — real Binance VIP-0 costs
+      maker_fee: 0.0002
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20    # 20×5min = 100min
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 20
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 3           # {TakerBuy, Hold, TakerSell} only
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "tcn"        # TCN — same as B9/B10
+    window_size: 15
+    tcn_channels: [64, 64, 128]  # RF = 1+(2*1)+(2*2)+(2*4) = 15 = window_size
+    kernel_size: 3
+    dropout: 0.1
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    # B10 Trial 0 best hyperparameters (frozen — ablation of fee curriculum only)
+    learning_rate: 0.000446    # lr=4.46e-4
+    gamma: 0.95                # LOCKED — T1.2 signal horizon alignment
+    epsilon_start: 1.0
+    epsilon_end: 0.024         # eps_end=0.024 from B10 best trial
+    epsilon_decay: 0.99999
+    buffer_size: 500000
+    batch_size: 256            # batch=256 from B10 best trial
+    target_update_freq: 100
+    tau: 0.00114               # tau=1.14e-3 from B10 best trial
+    auxiliary_weight: 0.755    # aux_weight=0.755 from B10 best trial
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+    exploration_mode: "epsilon_greedy"
+    update_interval: 1.0
+    checkpoint_interval: 500000
+    learning_starts: 10000
+    demo_seed_steps: 20000     # DQfD warm-start: 20K×24 envs = 480K demo transitions
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  use_sync: true               # Force SyncVectorEnv — required for env.call("set_fees")
+  verbose_logging: true
+
+hpo:
+  enabled: false               # No HPO — B10 HPs frozen, testing curriculum effect only
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["BDQ", "Stage2", "PhaseB11", "5min", "FullYear", "Discrete3", "NoHPO", "TCN",
+         "NAV-reward", "candle-fill", "EpsilonGreedy", "83K-bars", "DQfD", "ColdStartFix",
+         "FeeCurriculum", "CurriculumLearning"]
