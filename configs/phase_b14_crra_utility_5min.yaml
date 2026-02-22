@@ -1,0 +1,132 @@
+# Phase B14: BDQ + Disc3 + TCN + DQfD + CRRA Utility Reward + 5-Min Full-Year
+# ======================================================================
+# Hypothesis: Concave utility shaping encodes risk aversion directly into reward.
+#
+# Root cause being addressed: Pure NAV-delta (linear) reward treats +10 bps and
+# -10 bps symmetrically. With thin alpha (oracle PF 1.24 = 24% margin above costs),
+# a risk-neutral agent takes high-variance bets hoping for large wins. CRRA utility
+# compresses large rewards and amplifies small ones, encoding "many small consistent
+# wins > occasional large bets" directly into the objective.
+#
+# CRRA utility: U(x) = sign(x) * |x|^(1-γ) / (1-γ)
+# γ = 0.5 (square-root utility): U(x) = sign(x) * 2*sqrt(|x|)
+#   - +4 bps → U = +4.0      (linear would give +4.0)
+#   - +16 bps → U = +8.0     (linear would give +16.0 — 2x compression)
+#   - -4 bps → U = -4.0
+#   - -16 bps → U = -8.0     (symmetric compression)
+#
+# Effect: Agent values going from 0 to +4 bps as much as going from +4 to +16.
+# Incentivizes consistent small wins. Reduces variance of learned policy.
+#
+# Ablation design vs B11:
+#   B11: DQfD + TCN + Disc3 + FeeCurr    (graduated fee difficulty)
+#   B14: DQfD + TCN + Disc3 + CRRA(0.5)  (utility-shaped reward, static fees)
+#
+#   B11 vs B14 -> different reward philosophy: curriculum vs utility shaping
+#
+# Ref: Research Compendium Part III §1 — CARA/CRRA utility theory
+# Ref: Arrow (1965), Pratt (1964) — risk aversion in expected utility theory
+
+data:
+  file_path: "data/processed/btc_2025_full_year_5min.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24      # 2h EMA context at 5-min (24×5min = 120min)
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05    # 20x leverage (BTC futures) - CRITICAL: do not change
+  maker_fee: 0.0002           # 2bps (static)
+  taker_fee: 0.0005           # 5bps (static — real Binance VIP-0)
+  num_envs: 24
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20    # 20×5min = 100min
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 20
+    hold_bonus_bps: 0.0
+    crra_gamma: 0.5            # NEW: CRRA γ=0.5 → sqrt utility (risk-averse shaping)
+
+  action:
+    discrete_dims: 3           # {TakerBuy, Hold, TakerSell} only
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 40             # 30 base + 10 fev3 (defaults 0.0 if not in parquet)
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "tcn"        # TCN — same as B9/B10/B11
+    window_size: 15
+    tcn_channels: [64, 64, 128]  # RF = 1+(2*1)+(2*2)+(2*4) = 15 = window_size
+    kernel_size: 3
+    dropout: 0.1
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    # B10 Trial 0 best hyperparameters (frozen — ablation of CRRA utility only)
+    learning_rate: 0.000446    # lr=4.46e-4
+    gamma: 0.95                # LOCKED — T1.2 signal horizon alignment
+    epsilon_start: 1.0
+    epsilon_end: 0.024         # eps_end=0.024 from B10 best trial
+    epsilon_decay: 0.99999
+    buffer_size: 500000
+    batch_size: 256            # batch=256 from B10 best trial
+    target_update_freq: 100
+    tau: 0.00114               # tau=1.14e-3 from B10 best trial
+    auxiliary_weight: 0.755    # aux_weight=0.755 from B10 best trial
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+    exploration_mode: "epsilon_greedy"
+    update_interval: 1.0
+    checkpoint_interval: 500000
+    learning_starts: 10000
+    demo_seed_steps: 20000     # DQfD warm-start: 20K×24 envs = 480K demo transitions
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: false          # Disabled — segfaults on RTX 5090 + CUDA 13.0 driver
+  use_amp: true
+  use_shm: false
+  use_sync: true               # Force SyncVectorEnv
+  verbose_logging: true
+
+hpo:
+  enabled: false               # No HPO — B10 HPs frozen, testing CRRA utility effect only
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["BDQ", "Stage2", "PhaseB14", "5min", "FullYear", "Discrete3", "NoHPO", "TCN",
+         "NAV-reward", "candle-fill", "EpsilonGreedy", "83K-bars", "DQfD", "ColdStartFix",
+         "CRRA-Utility", "RewardShaping", "RiskAversion"]
