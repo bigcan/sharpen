@@ -1,8 +1,11 @@
 """
-DeepScalper Feature Engineering v2 — Evidence-Ranked Feature Pipeline
+DeepScalper Feature Engineering v3 — Evidence-Ranked Feature Pipeline
 =====================================================================
 
-Micro Features (~30 dims):  LOB-derived → LSTM
+Micro Features (~40 dims):  LOB-derived → LSTM
+  - 30 base (v2): microprice, DOFI, OBI, distances, slopes, spread, velocity
+  - 5 cross-timeframe (fev3): 1-min aggregates pre-computed in parquet
+  - 5 acceleration (fev3): 2nd-order derivatives on 5-min data
 Macro Features (~15 dims):  OHLCV-derived → MLP
 
 Normalization Pipeline (all unbounded features):
@@ -16,7 +19,8 @@ from typing import Dict, List, Union
 
 # ─── Column name constants (used by env, parquet_handler, tests) ──────────
 
-# 30 micro features consumed by the env's _build_frame()
+# 40 micro features consumed by the env's _build_frame()
+# v2: dims 0-29 (base), fev3: dims 30-34 (cross-TF), dims 35-39 (acceleration)
 MICRO_FEATURE_COLS: List[str] = (
     ['microprice_basis']                                     # 1   dim  0
     + [f'dofi_{i}' for i in range(1, 6)]                     # 5   dims 1-5
@@ -28,8 +32,20 @@ MICRO_FEATURE_COLS: List[str] = (
     + ['slope_asym']                                         # 1   dim  27
     + ['spread_bps']                                         # 1   dim  28
     + ['dofi_velocity']                                      # 1   dim  29
+    # ── fev3: Cross-Timeframe (5 dims, pre-computed in parquet) ──
+    + ['obi_burst']                                          # 1   dim  30
+    + ['obi_trend']                                          # 1   dim  31
+    + ['dofi_burst']                                         # 1   dim  32
+    + ['microprice_range']                                   # 1   dim  33
+    + ['spread_max']                                         # 1   dim  34
+    # ── fev3: Acceleration (5 dims, computed in process_micro) ──
+    + ['obi_accel']                                          # 1   dim  35
+    + ['dofi_accel']                                         # 1   dim  36
+    + ['microprice_accel']                                   # 1   dim  37
+    + ['spread_velocity']                                    # 1   dim  38
+    + ['depth_drain']                                        # 1   dim  39
 )
-NUM_MICRO_FEATURES = len(MICRO_FEATURE_COLS)  # 30
+NUM_MICRO_FEATURES = len(MICRO_FEATURE_COLS)  # 40
 
 # 15 macro features consumed by the env's _update_macro_state()
 MACRO_FEATURE_COLS: List[str] = [
@@ -49,6 +65,7 @@ NUM_MACRO_FEATURES = len(MACRO_FEATURE_COLS)  # 15
 # All bounded features MUST output in [-1, 1] range (Fix B)
 _BOUNDED_FEATURES = {
     'total_obi', 'slope_asym',          # Fix A: voi → total_obi
+    'obi_burst',                         # fev3: max(|OBI_1min|) ∈ [0, 1]
     *[f'obi_{i}' for i in range(1, 6)],
     'rsi_14', 'bbpct_20',               # Fix B: centered to [-1, 1]
     'funding_sin', 'funding_cos',
@@ -155,13 +172,15 @@ class DeepScalperFeatureEngineer:
 
     def process_micro(self, lob_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Process Level 2 LOB data into 30-dim micro features.
+        Process Level 2 LOB data into 40-dim micro features (v3).
 
-        Computes features IN-PLACE on lob_df (same contract as v1).
+        Computes features IN-PLACE on lob_df (same contract as v1/v2).
         Raw LOB columns (bid_price_1, ask_price_1, bid_vol_1, ask_vol_1)
         are preserved for order execution in the environment.
 
-        Output columns (30): see MICRO_FEATURE_COLS
+        v2 features (0-29): see MICRO_FEATURE_COLS[:30]
+        fev3 cross-TF (30-34): read from parquet if present, default 0.0
+        fev3 acceleration (35-39): computed as 2nd-order derivatives
         """
         df = lob_df
 
@@ -283,6 +302,42 @@ class DeepScalperFeatureEngineer:
 
         # ── 10. Legacy compatibility: keep spread_1 alias for backward compat ──
         df['spread_1'] = df['spread_bps']
+
+        # ── 11. fev3: Cross-Timeframe features (5 dims) ──
+        # Pre-computed in parquet by build_fev3_parquet.py.
+        # Default to 0.0 if absent (backward compat with v2 parquet).
+        for col in ['obi_burst', 'obi_trend', 'dofi_burst',
+                     'microprice_range', 'spread_max']:
+            if col not in df.columns:
+                df[col] = np.float32(0.0)
+
+        # ── 12. fev3: Acceleration features (5 dims) ──
+        # 2nd-order derivatives on 5-min data. diff() introduces leading zeros,
+        # well within the 200-row warmup slice.
+
+        # obi_accel: diff(diff(total_obi))
+        obi_d1 = np.diff(df['total_obi'].values.astype(np.float64), prepend=0.0)
+        df['obi_accel'] = np.diff(obi_d1, prepend=0.0)
+
+        # dofi_accel: diff(dofi_velocity)  (dofi_velocity is already 1st derivative)
+        df['dofi_accel'] = np.diff(dofi_vel, prepend=0.0)
+
+        # microprice_accel: diff(diff(microprice_basis))
+        mp_d1 = np.diff(df['microprice_basis'].values.astype(np.float64), prepend=0.0)
+        df['microprice_accel'] = np.diff(mp_d1, prepend=0.0)
+
+        # spread_velocity: diff(spread_bps)
+        df['spread_velocity'] = np.diff(
+            df['spread_bps'].values.astype(np.float64), prepend=0.0
+        )
+
+        # depth_drain: diff(mean near-book liquidity L1-L3)
+        near_liq = np.zeros(len(df), dtype=np.float64)
+        for i in range(1, 4):  # levels 1-3
+            near_liq += df[f'bid_vol_{i}'].values.astype(np.float64)
+            near_liq += df[f'ask_vol_{i}'].values.astype(np.float64)
+        near_liq /= 6.0  # mean across 6 sides (3 bid + 3 ask)
+        df['depth_drain'] = np.diff(near_liq, prepend=0.0)
 
         # ── NORMALIZE all micro features ──
         self._normalize_features(df, MICRO_FEATURE_COLS)
