@@ -86,7 +86,9 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     
     env_config = config.get("env", {})
     env_config["reward"] = config.get("env", {}).get("reward", {})
-    
+    # Forward network config so env can read micro_config.input_size for fev3 compat
+    env_config["network"] = config.get("network", {})
+
     return DeepScalperEnv(config=env_config, data_handler=handler)
 
 

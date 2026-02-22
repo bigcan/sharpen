@@ -112,6 +112,17 @@ class DeepScalperEnv(gym.Env):
         # Hold Bonus: small reward (in bps) for staying flat — fee-avoidance shaping
         self.hold_bonus_bps = float(self.reward_config.get("hold_bonus_bps", 0.0))
 
+        # Inventory Penalty: per-step cost (bps) for holding a non-zero position.
+        # Discourages "always in market" behavior (B5: 99% exposure).
+        # Ref: Research Compendium Part III §2 — inventory penalties for market making.
+        self.inventory_penalty_bps = float(self.reward_config.get("inventory_penalty_bps", 0.0))
+
+        # CRRA Utility Shaping: applies concave utility to NAV-delta reward.
+        # reward = sign(x) * |x|^(1-γ) / (1-γ), where γ = crra_gamma.
+        # γ=0 → linear (no shaping), γ=0.5 → sqrt utility (risk-averse).
+        # Ref: Research Compendium Part III §1 — CARA/CRRA utility theory.
+        self.crra_gamma = float(self.reward_config.get("crra_gamma", 0.0))
+
         # T1.3: Running reward normalizer (equivalent to VecNormalize)
         self.normalize_reward = config.get("normalize_reward", False)
         self.reward_normalizer = RunningMeanStd() if self.normalize_reward else None
@@ -717,8 +728,25 @@ class DeepScalperEnv(gym.Env):
         norm_divisor = max(self.prev_portfolio_value, 1.0)
         reward_nav_bps = (nav_delta / norm_divisor) * 10000.0
 
-        # Total reward: NAV bps + hold bonus
-        paper_reward = (reward_nav_bps + hold_bonus) * self.reward_scaling
+        # Inventory penalty: penalize holding any position (bps/step)
+        inventory_penalty = 0.0
+        if self.inventory_penalty_bps > 0 and abs(self.position) > 1e-12:
+            inventory_penalty = -self.inventory_penalty_bps
+
+        # Pre-shaping reward: NAV bps + hold bonus + inventory penalty
+        raw_reward = reward_nav_bps + hold_bonus + inventory_penalty
+
+        # CRRA utility shaping: concave transform for risk aversion
+        if self.crra_gamma > 0:
+            # sign(x) * |x|^(1-γ) / (1-γ) — preserves sign, compresses tails
+            gamma = self.crra_gamma
+            abs_r = abs(raw_reward)
+            if abs_r > 1e-12:
+                shaped = (abs_r ** (1.0 - gamma)) / (1.0 - gamma)
+                raw_reward = shaped if raw_reward >= 0 else -shaped
+
+        # Total reward (post-shaping)
+        paper_reward = raw_reward * self.reward_scaling
 
         # Drawdown tracking (telemetry only)
         self.peak_portfolio_value = max(self.peak_portfolio_value, current_portfolio_value)
@@ -798,6 +826,7 @@ class DeepScalperEnv(gym.Env):
             "reward_nav": reward_nav_bps,
             "nav_delta": nav_delta,
             "reward_hold_bonus": hold_bonus,
+            "reward_inventory_penalty": inventory_penalty,
             "reward_sharpe": reward_sharpe,
             "reward_drawdown_penalty": drawdown_penalty,
             "drawdown_pct": drawdown_pct,
