@@ -128,8 +128,11 @@ class DeepScalperEnv(gym.Env):
         self._disc3_to_disc6 = {0: 0, 1: 2, 2: 5}  # TakerBuy→0, Hold→2, TakerSell→5
 
         # Spaces
-        # v2: Micro dim = 30 (evidence-ranked features, replaces v1 LOB layout)
-        self.micro_dim = NUM_MICRO_FEATURES  # 30
+        # fev3: Micro dim is config-driven for backward compatibility.
+        # v2 configs (input_size: 30) → 30-dim obs. fev3 configs (input_size: 40) → 40-dim obs.
+        self.micro_dim = config.get("network", {}).get("micro_config", {}).get(
+            "input_size", NUM_MICRO_FEATURES
+        )
         
         # FIX F1: Micro is now (Window, L*F) = (15, 20)
         # T2.2: Private state expanded to 5 dims: [pos, bal, time, order_dir, order_dist]
@@ -189,8 +192,9 @@ class DeepScalperEnv(gym.Env):
         self.total_episode_steps = 1  # Discovered from handler in reset()
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
         
-        # v2: Pre-compute micro feature keys to avoid string formatting in hot loop
-        self._micro_keys = list(MICRO_FEATURE_COLS)  # 30 column names
+        # Pre-compute micro feature keys to avoid string formatting in hot loop
+        # Sliced to micro_dim for backward compat (v2: 30, fev3: 40)
+        self._micro_keys = list(MICRO_FEATURE_COLS[:self.micro_dim])
 
     def set_fees(self, taker_fee: float, maker_fee: float) -> None:
         """Runtime fee update for fee curriculum training.

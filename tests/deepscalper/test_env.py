@@ -6,6 +6,7 @@ import gymnasium as gym
 
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
+from finrl_pro_ds.data.feature_engineering import NUM_MICRO_FEATURES
 
 class TestDeepScalperEnv(unittest.TestCase):
     def setUp(self):
@@ -29,8 +30,8 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.assertIn("micro", obs)
         self.assertIn("macro", obs)
         self.assertIn("private", obs)
-        # Tier 2: 30 micro features (LOB-derived), 15 macro features (OHLCV-derived)
-        self.assertEqual(obs["micro"].shape, (15, 30))
+        # Micro dim matches NUM_MICRO_FEATURES (40 as of fev3)
+        self.assertEqual(obs["micro"].shape, (15, NUM_MICRO_FEATURES))
         self.assertEqual(obs["macro"].shape, (15,))
         # Tier 2: 5-dim private state (pos, bal, remaining_time, order_dir, order_dist)
         self.assertEqual(obs["private"].shape, (15, 5))
