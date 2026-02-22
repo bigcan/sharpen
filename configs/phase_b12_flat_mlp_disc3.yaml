@@ -1,0 +1,130 @@
+# Phase B12: BDQ + Disc3 + FLAT MLP + 5-Min Full-Year
+# ======================================================================
+# Hypothesis: Complex temporal encoders (LSTM/TCN/MLP-flatten) are dead
+# weight when the signal is in concurrent snapshots, not temporal patterns.
+#
+# Evidence (EXP-E2a + E2b):
+#   E2a: Top discriminating features (OBI, microprice |d|=0.29) are
+#        CONCURRENT with profitable bars. Predictive features (RSI, BB%B)
+#        are 5x weaker (|d|=0.06).
+#   E2b: Adding t-1..t-4 lagged features to RF adds ZERO val AUC
+#        (+0.0006 at H1, -0.0025 at H30). Temporal patterns don't exist
+#        in the current feature set.
+#
+# Design: Replace TCN/LSTM/MLP-flatten with a flat snapshot encoder that
+# takes ONLY the last timestep of micro features (30 dims). Combined with
+# macro (15) + private (5) = 50 total inputs to a small fusion MLP.
+#
+# Expected advantages:
+#   - ~10x fewer parameters than TCN/MLP-flatten (50 input vs 450+)
+#   - Faster convergence (less to learn, less overfitting)
+#   - Tests whether architecture complexity is a convergence barrier
+#
+# Ablation design:
+#   B8:  Disc3 + MLP(flatten) -- 450-dim flattened micro input
+#   B9:  Disc3 + TCN          -- causal conv temporal processing
+#   B12: Disc3 + FLAT         -- 30-dim snapshot only (this experiment)
+#
+# HPs: B10 Trial 0 best (same as B11). No HPO -- clean arch ablation.
+
+data:
+  file_path: "data/processed/btc_2025_full_year_5min.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24      # 2h EMA context at 5-min
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05    # 20x leverage - CRITICAL
+  maker_fee: 0.0002
+  taker_fee: 0.0005           # Full Binance VIP-0 taker fee
+  num_envs: 24
+  window_size: 15             # Still needed for env obs shape, but encoder ignores window
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 20
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 3           # {TakerBuy, Hold, TakerSell} only
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5
+    hidden_size: 128             # Smaller than B8-B11 (256) -- fewer params
+    encoder_type: "flat"         # FLAT: last-timestep snapshot only
+    window_size: 15              # Passed to env, ignored by flat encoder
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [128, 64]      # Smaller macro encoder
+
+  fusion_dim: 128                # Smaller fusion (was 256)
+
+agents:
+  bdq:
+    # B10 Trial 0 best hyperparameters (frozen -- arch ablation only)
+    learning_rate: 0.000446
+    gamma: 0.95
+    epsilon_start: 1.0
+    epsilon_end: 0.024
+    epsilon_decay: 0.99999
+    buffer_size: 500000
+    batch_size: 256
+    target_update_freq: 100
+    tau: 0.00114
+    auxiliary_weight: 0.755
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+    exploration_mode: "epsilon_greedy"
+    update_interval: 1.0
+    checkpoint_interval: 500000
+    learning_starts: 10000
+    demo_seed_steps: 20000     # DQfD warm-start (same as B10/B11)
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  use_sync: true
+  verbose_logging: true
+
+hpo:
+  enabled: false               # No HPO -- clean arch ablation
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["BDQ", "Stage2", "PhaseB12", "5min", "FullYear", "Discrete3", "NoHPO", "FlatMLP",
+         "NAV-reward", "candle-fill", "EpsilonGreedy", "83K-bars", "DQfD",
+         "ArchAblation", "SnapshotOnly", "E2aMotivated"]
