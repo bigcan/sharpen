@@ -9,13 +9,18 @@ class ParquetDataHandler:
     Streams processed DeepScalper features from Parquet files.
     Designed to be a drop-in replacement for DBMarketDataHandler in DeepScalperEnv.
     """
-    
+
     def __init__(self, file_path: str, ticker: str, feature_config: Dict = None, start_date: str = None, end_date: str = None, shared_memory_config: Dict = None, norm_cutoff_date: str = None):
         self.file_path = file_path
         self.ticker = ticker
-        self.fe = DeepScalperFeatureEngineer(config=feature_config)
+        fc = feature_config or {}
+        self.fe = DeepScalperFeatureEngineer(config=fc)
         self.start_date = pd.to_datetime(start_date) if start_date else None
         self.end_date = pd.to_datetime(end_date) if end_date else None
+
+        # Expose dynamic feature column lists for downstream consumers (env, tests)
+        self.micro_feature_cols = self.fe.micro_feature_cols
+        self.macro_feature_cols = self.fe.macro_feature_cols
         
         # FIX LEAK-1: Normalization cutoff resets rolling statistics at split boundary.
         # When set, rolling z-scores and SMAs are computed independently for data
@@ -250,9 +255,8 @@ class ParquetDataHandler:
             raise ValueError("Parquet data must be in wide format (bid_price_1, etc.) or pre-processed.")
 
         # 2. Macro Features (Tech Indicators)
-        # v2 macro feature columns from feature_engineering.py
-        from finrl_pro_ds.data.feature_engineering import MACRO_FEATURE_COLS
-        env_macro_cols = list(MACRO_FEATURE_COLS)
+        # Dynamic macro feature columns from feature engineer instance
+        env_macro_cols = list(self.fe.macro_feature_cols)
 
         if all(col in df.columns for col in env_macro_cols):
             # Pre-computed macro columns already exist

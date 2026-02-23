@@ -1,0 +1,110 @@
+# Phase G5: Gold BDQ Production — DQfD + Disc3 + HPO
+# ====================================================
+# Full-scale Gold (GC) BDQ training with DQfD warm-start.
+# Same architecture as B10, adapted for Gold's Level-1 LOB.
+#
+# Key advantage: Gold's 0.35 bps taker fee = 14x cheaper than
+# BTC's 5 bps. This gives RL 14x more headroom to discover
+# profitable patterns before fees eat the signal.
+#
+# Gate: Test PF > 1.0 (min), Test PF > 1.2 (strong), Trades >= 200
+
+data:
+  file_path: "data/processed/gc_2025_full_year_5min.parquet"
+  ticker: "GC"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  n_levels: 1
+  asset_class: "cme_futures"
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24
+
+env:
+  symbol: "GC"
+  initial_balance: 100000.0
+  margin_requirement: 0.05
+  maker_fee: 0.000010
+  taker_fee: 0.000035
+  num_envs: 24               # Full parallel envs for GPU training
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 20
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 3
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 18
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "flat"       # Flat MLP for Level-1
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    learning_rate: 0.0002
+    gamma: 0.95
+    epsilon_start: 1.0
+    epsilon_end: 0.05
+    epsilon_decay: 0.99999
+    buffer_size: 500000
+    batch_size: 512
+    target_update_freq: 100
+    tau: 0.005
+    auxiliary_weight: 1.0
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+    exploration_mode: "epsilon_greedy"
+    update_interval: 1.0
+    checkpoint_interval: 500000
+    learning_starts: 10000
+    demo_seed_steps: 20000     # DQfD: 20K × 24 envs = 480K demo transitions
+
+training:
+  total_timesteps: 5000000    # 5M steps (full production run)
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 15
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["Gold", "GC", "PhaseG5", "BDQ", "5min", "FullYear", "Discrete3",
+         "HPO", "DQfD", "Level1", "CME", "Production"]
