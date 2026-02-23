@@ -32,7 +32,7 @@ def fetch_and_resample_month(client, start_str, end_str):
     t0 = time.time()
     data = client.timeseries.get_range(
         dataset="GLBX.MDP3",
-        symbols=["GC.c.2"],
+        symbols=["GC.c.0"],
         stype_in="continuous",
         schema="mbp-1",
         start=start_str,
@@ -109,7 +109,7 @@ def fetch_and_resample_month(client, start_str, end_str):
 
 def fetch_all_months():
     """Fetch MBP-1 month by month for full year."""
-    out_path = DATA_DIR / "gc_2025_lob1_1min.parquet"
+    out_path = DATA_DIR / "gc_2025_lob1_1min_front.parquet"
     if out_path.exists():
         print(f"  Already exists: {out_path}")
         return pd.read_parquet(out_path)
@@ -117,7 +117,7 @@ def fetch_all_months():
     client = db.Historical(API_KEY)
     all_months = []
 
-    print("  Fetching GC.c.2 MBP-1 month by month...")
+    print("  Fetching GC.c.0 (front-month) MBP-1 month by month...")
     start = datetime(2025, 1, 1)
     end = datetime(2026, 1, 1)
 
