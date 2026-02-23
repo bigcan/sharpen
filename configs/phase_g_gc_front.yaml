@@ -1,0 +1,95 @@
+# Phase G: Gold (GC) — Front-Month Stitched Data
+# ================================================
+# Same as phase_g_gc_dev.yaml but using clean front-month stitched data
+# (individual delivery contracts) instead of GC.c.2 continuous + spread clamp.
+#
+# Data: gc_2025_full_year_5min_front.parquet (67,871 bars, median spread 0.72 bps)
+# Source: scripts/fetch_gc_front_month.py → scripts/prepare_gc_5min.py
+
+data:
+  file_path: "data/processed/gc_2025_full_year_5min_front.parquet"
+  ticker: "GC"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  n_levels: 1
+  asset_class: "cme_futures"
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24
+
+env:
+  symbol: "GC"
+  initial_balance: 100000.0
+  margin_requirement: 0.05
+  maker_fee: 0.000010
+  taker_fee: 0.000035
+  num_envs: 4
+  window_size: 15
+  max_drawdown_pct: 0.30
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20
+    sharpe_weight: 0.0
+
+  action:
+    discrete_dims: 3
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+network:
+  micro_config:
+    input_size: 18
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "flat"
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    learning_rate: 0.0001
+    gamma: 0.95
+    auxiliary_weight: 1.0
+    update_interval: 2.0
+    batch_size: 1024
+    buffer_size: 2000000
+    target_update_freq: 7500
+    checkpoint_interval: 100000
+    learning_starts: 5000
+    exploration_fraction: 0.2
+    epsilon_start: 1.0
+    epsilon_end: 0.01
+    epsilon_decay: 0.999908
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+
+training:
+  total_timesteps: 50000
+  log_interval: 10000
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+
+hpo:
+  enabled: true
+  n_trials: 5
+  steps_per_trial: 10000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["Gold", "GC", "PhaseG", "Dev", "Level1", "CME", "Discrete3", "FrontMonth"]
