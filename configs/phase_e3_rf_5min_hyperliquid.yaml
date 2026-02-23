@@ -1,0 +1,73 @@
+# Phase E3: RF Supervised Threshold Sweep — 5-Min + Hyperliquid Fees
+# ======================================================================
+# Hypothesis: Hyperliquid's lower taker fee (2.5bps vs Binance 5bps)
+# gives 50% fee reduction → RF threshold strategy may become profitable.
+#
+# Oracle context: Hyperliquid 5-min A6 taker PF=1.337 (vs Binance 1.241).
+# 34% headroom above breakeven for sub-oracle agent.
+#
+# RF baseline (Binance): Best E1 taker T=0.54 H1 → val PF 1.056.
+# With Hyperliquid fees, same signal at half the cost should improve PF.
+#
+# Execution: taker-only (maker fails at 5-min per oracle gate).
+# Data: 5-min full-year (Jan-Oct train, Nov val, Dec test).
+#
+# Fee config:
+#   Hyperliquid maker rebate: -2.0 bps (receive 2bps for limit orders)
+#   Hyperliquid taker fee:     2.5 bps (lowest major venue)
+
+data:
+  file_path: "data/processed/btc_2025_full_year_5min.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24      # 2h EMA context at 5-min (24x5min = 120min)
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05    # 20x leverage (BTC futures)
+  maker_fee: -0.0002          # -2bps (Hyperliquid maker REBATE)
+  taker_fee: 0.00025          # 2.5bps (Hyperliquid taker)
+  num_envs: 1
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 20
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 6           # RF backtest needs all 6 actions available
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "tcn"
+    window_size: 15
+    tcn_channels: [64, 64, 128]
+    kernel_size: 3
+    dropout: 0.1
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]

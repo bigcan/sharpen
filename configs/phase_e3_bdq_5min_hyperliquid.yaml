@@ -1,0 +1,121 @@
+# Phase E3: BDQ + Disc3 + TCN + DQfD — 5-Min + Hyperliquid Fees
+# ======================================================================
+# Hypothesis: Hyperliquid taker fee (2.5bps) gives 50% fee reduction
+# vs Binance (5bps). Oracle PF at Hyperliquid = 1.337 (vs 1.241).
+# The 34% headroom above breakeven may be enough for the BDQ agent
+# to extract profitable signal that was too thin at Binance fees.
+#
+# This is the first Phase E experiment: test if lower fees
+# can rescue the RL approach. B10-B15 all failed at Binance fees
+# (0/9 profitable). If Hyperliquid fees don't help → RL approach
+# is fundamentally broken for this signal quality.
+#
+# Base: B10 best HPs (same as B15), Disc3+TCN+DQfD, 5-min full-year.
+# Only change: taker_fee 0.0005 → 0.00025, maker_fee 0.0002 → -0.0002
+#
+# Fee config:
+#   Hyperliquid maker rebate: -2.0 bps (receive 2bps for limit orders)
+#   Hyperliquid taker fee:     2.5 bps (lowest major venue)
+
+data:
+  file_path: "data/processed/btc_2025_full_year_5min.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24      # 2h EMA context at 5-min (24x5min = 120min)
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05    # 20x leverage (BTC futures) - CRITICAL: do not change
+  maker_fee: -0.0002          # -2bps (Hyperliquid maker REBATE)
+  taker_fee: 0.00025          # 2.5bps (Hyperliquid taker — 50% of Binance)
+  num_envs: 24
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20    # 20x5min = 100min
+    sharpe_weight: 0.0        # Pure NAV-delta (no DSR — clean comparison to B10)
+    dsr_scale: 100.0
+    sharpe_horizon: 20
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 3           # {TakerBuy, Hold, TakerSell} only
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 30             # v2 features (no fev3)
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "tcn"
+    window_size: 15
+    tcn_channels: [64, 64, 128]
+    kernel_size: 3
+    dropout: 0.1
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    # B10 Trial 0 best hyperparameters (frozen)
+    learning_rate: 0.000446
+    gamma: 0.95                # LOCKED — T1.2 signal horizon alignment
+    epsilon_start: 1.0
+    epsilon_end: 0.024
+    epsilon_decay: 0.99999
+    buffer_size: 500000
+    batch_size: 256
+    target_update_freq: 100
+    tau: 0.00114
+    auxiliary_weight: 0.755
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+    exploration_mode: "epsilon_greedy"
+    update_interval: 1.0
+    checkpoint_interval: 500000
+    learning_starts: 10000
+    demo_seed_steps: 20000     # DQfD warm-start: 20Kx24 envs = 480K demo transitions
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: false          # Disabled — segfaults on RTX 5090
+  use_amp: true
+  use_shm: false
+  use_sync: true               # Force SyncVectorEnv
+  verbose_logging: true
+
+hpo:
+  enabled: false               # No HPO — B10 HPs frozen, testing fee effect only
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["BDQ", "Stage2", "PhaseE3", "5min", "FullYear", "Discrete3", "NoHPO", "TCN",
+         "NAV-reward", "candle-fill", "EpsilonGreedy", "83K-bars", "DQfD",
+         "ColdStartFix", "Hyperliquid", "LowFee", "2.5bps-taker"]

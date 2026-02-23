@@ -305,16 +305,16 @@ def run_e1_threshold_sweep(config, data_splits, rf_model, horizon=30,
 # ARTIFACT SAVING
 # ============================================================================
 
-def save_artifacts(output_dir, rf_h30, rf_h1, feature_cols, feature_importances,
+def save_artifacts(output_dir, rf_models, feature_cols, feature_importances,
                    all_probs, eval_metrics, e1_results):
     """Save all artifacts to results/rf_signal/."""
     os.makedirs(output_dir, exist_ok=True)
 
-    # 1. Save RF model
+    # 1. Save RF models
     import joblib
-    joblib.dump(rf_h30, os.path.join(output_dir, "rf_model_h30.joblib"))
-    if rf_h1 is not None:
-        joblib.dump(rf_h1, os.path.join(output_dir, "rf_model_h1.joblib"))
+    for h_label, rf in rf_models.items():
+        if rf is not None:
+            joblib.dump(rf, os.path.join(output_dir, f"rf_model_{h_label.lower()}.joblib"))
     print(f"  Saved RF models to {output_dir}/")
 
     # 2. Save probabilities
@@ -325,13 +325,12 @@ def save_artifacts(output_dir, rf_h30, rf_h1, feature_cols, feature_importances,
     print(f"  Saved rf_probs.npz ({len(all_probs)} arrays)")
 
     # 3. Save feature importances
-    imp_df = pd.DataFrame({
-        "feature": feature_cols,
-        "importance_h30": feature_importances["h30"],
-    })
-    if "h1" in feature_importances:
-        imp_df["importance_h1"] = feature_importances["h1"]
-    imp_df = imp_df.sort_values("importance_h30", ascending=False)
+    # Use first available horizon as primary sort key
+    primary_key = sorted(feature_importances.keys())[0]
+    imp_df = pd.DataFrame({"feature": feature_cols})
+    for h_key, importances in sorted(feature_importances.items()):
+        imp_df[f"importance_{h_key}"] = importances
+    imp_df = imp_df.sort_values(f"importance_{primary_key}", ascending=False)
     imp_df.to_csv(os.path.join(output_dir, "rf_feature_importance.csv"), index=False)
     print(f"  Saved feature importances (top 5: {imp_df['feature'].head().tolist()})")
 
@@ -349,10 +348,11 @@ def save_artifacts(output_dir, rf_h30, rf_h1, feature_cols, feature_importances,
                     f"N={m['n_samples']}, P(up)={m['class_balance']:.3f}\n")
 
         f.write(f"\n{'=' * 70}\n")
-        f.write("  TOP 10 FEATURES BY IMPORTANCE (H30)\n")
+        imp_col = f"importance_{primary_key}"
+        f.write(f"  TOP 10 FEATURES BY IMPORTANCE ({primary_key.upper()})\n")
         f.write(f"{'=' * 70}\n\n")
         for _, row in imp_df.head(10).iterrows():
-            f.write(f"  {row['feature']:<25} {row['importance_h30']:.4f}\n")
+            f.write(f"  {row['feature']:<25} {row[imp_col]:.4f}\n")
 
         if e1_results:
             f.write(f"\n{'=' * 70}\n")
@@ -523,12 +523,9 @@ def main():
     # ── Save artifacts ──
     print(f"\nSaving artifacts to {args.output_dir}/...")
 
-    rf_h30 = rf_models.get("H30")
-    rf_h1 = rf_models.get("H1")
-
     save_artifacts(
         args.output_dir,
-        rf_h30, rf_h1,
+        rf_models,
         feature_cols, feature_importances,
         all_probs, eval_metrics, e1_results,
     )

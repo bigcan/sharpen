@@ -1,0 +1,74 @@
+# Phase E3b: RF Supervised Threshold Sweep — 1-Min + Hyperliquid Fees
+# ======================================================================
+# Hypothesis: At 1-min resolution, Binance oracle PF was 1.08 (FAIL).
+# Hyperliquid taker fee is 2.5bps (50% less than Binance 5bps).
+# Oracle at Hyperliquid 1-min was PF 1.122 — still below 1.2 gate,
+# BUT an RF threshold strategy is sub-oracle and may still find
+# profitable niches at the lower fee tier.
+#
+# Purpose: Determine if the 1-min supervised baseline crosses PF>1.0
+# at Hyperliquid fees. If yes → 1-min Hyperliquid is viable for
+# supervised trading (even if RL fails).
+#
+# Horizons: H1 (1 bar = 1 min), H5 (5 bars = 5 min)
+# Execution: taker-only
+#
+# Fee config:
+#   Hyperliquid maker rebate: -2.0 bps
+#   Hyperliquid taker fee:     2.5 bps
+
+data:
+  file_path: "data/processed/btc_2025_full_year.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  # vol_norm_window: 120 (default) — 120 bars * 1min = 2h EMA
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05    # 20x leverage (BTC futures)
+  maker_fee: -0.0002          # -2bps (Hyperliquid maker REBATE)
+  taker_fee: 0.00025          # 2.5bps (Hyperliquid taker)
+  num_envs: 1
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 100
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 100
+    hold_bonus_bps: 0.0
+
+  action:
+    discrete_dims: 6
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+network:
+  micro_config:
+    input_size: 30
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "tcn"
+    window_size: 15
+    tcn_channels: [64, 64, 128]
+    kernel_size: 3
+    dropout: 0.1
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
