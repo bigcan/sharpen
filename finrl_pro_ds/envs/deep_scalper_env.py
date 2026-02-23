@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 from finrl_pro_ds.data.feature_engineering import (
     MICRO_FEATURE_COLS, NUM_MICRO_FEATURES,
     MACRO_FEATURE_COLS, NUM_MACRO_FEATURES,
+    get_micro_feature_cols, get_macro_feature_cols,
 )
 MACRO_COLS = list(MACRO_FEATURE_COLS)
 
@@ -203,9 +204,24 @@ class DeepScalperEnv(gym.Env):
         self.total_episode_steps = 1  # Discovered from handler in reset()
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
         
-        # Pre-compute micro feature keys to avoid string formatting in hot loop
-        # Sliced to micro_dim for backward compat (v2: 30, fev3: 40)
-        self._micro_keys = list(MICRO_FEATURE_COLS[:self.micro_dim])
+        # Pre-compute micro feature keys to avoid string formatting in hot loop.
+        # Config can override with explicit list (e.g. Gold Level-1 18-dim)
+        # or we derive from n_levels, falling back to BTC 40-dim default.
+        features_cfg = config.get("features", {})
+        micro_cols_override = features_cfg.get("micro_feature_cols")
+        if micro_cols_override:
+            self._micro_keys = list(micro_cols_override)
+        else:
+            n_levels = features_cfg.get("n_levels", 5)
+            if n_levels != 5:
+                self._micro_keys = get_micro_feature_cols(n_levels)[:self.micro_dim]
+            else:
+                # Default: slice from canonical BTC list for backward compat
+                self._micro_keys = list(MICRO_FEATURE_COLS[:self.micro_dim])
+
+        # Dynamic macro column list (CME uses dow_sin/cos instead of funding_sin/cos)
+        asset_class = features_cfg.get("asset_class", "crypto")
+        self._macro_cols = get_macro_feature_cols(asset_class)
 
     def set_fees(self, taker_fee: float, maker_fee: float) -> None:
         """Runtime fee update for fee curriculum training.
@@ -933,7 +949,7 @@ class DeepScalperEnv(gym.Env):
         """Update macro state vector."""
         try:
             macro_values = []
-            for col in MACRO_COLS:
+            for col in self._macro_cols:
                 val = step_data.get(col, 0)
                 if val is None or (isinstance(val, float) and np.isnan(val)):
                     val = 0.0

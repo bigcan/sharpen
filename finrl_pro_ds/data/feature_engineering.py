@@ -69,9 +69,58 @@ _BOUNDED_FEATURES = {
     *[f'obi_{i}' for i in range(1, 6)],
     'rsi_14', 'bbpct_20',               # Fix B: centered to [-1, 1]
     'funding_sin', 'funding_cos',
+    'dow_sin', 'dow_cos',                # CME day-of-week encoding
     'session_sin', 'session_cos',
     'vol_regime_ratio',                  # Fix B: centered to [-1, 1]
 }
+
+
+def get_micro_feature_cols(n_levels: int = 5) -> List[str]:
+    """Return the micro feature column list for a given LOB depth.
+
+    n_levels=5 (BTC, default): 40 dims (full 5-level LOB)
+    n_levels=1 (Gold/CME):     18 dims (Level-1 only, no slope_asym/depth_drain)
+    """
+    cols: List[str] = ['microprice_basis']
+    cols += [f'dofi_{i}' for i in range(1, n_levels + 1)]
+    cols += [f'dofi_int_{i}' for i in range(1, n_levels + 1)]
+    cols += ['total_obi']
+    cols += [f'dist_bid_{i}' for i in range(1, n_levels + 1)]
+    cols += [f'dist_ask_{i}' for i in range(1, n_levels + 1)]
+    cols += [f'obi_{i}' for i in range(1, n_levels + 1)]
+    if n_levels >= 5:
+        cols += ['slope_asym']
+    cols += ['spread_bps', 'dofi_velocity']
+    # fev3: Cross-Timeframe (5 dims)
+    cols += ['obi_burst', 'obi_trend', 'dofi_burst', 'microprice_range', 'spread_max']
+    # fev3: Acceleration (4 dims always + depth_drain only when n_levels >= 3)
+    cols += ['obi_accel', 'dofi_accel', 'microprice_accel', 'spread_velocity']
+    if n_levels >= 3:
+        cols += ['depth_drain']
+    return cols
+
+
+def get_macro_feature_cols(asset_class: str = 'crypto') -> List[str]:
+    """Return the macro feature column list for a given asset class.
+
+    crypto (default): funding_sin/cos (8h Binance cycle)
+    cme_futures:      dow_sin/cos (day-of-week encoding)
+    """
+    cols = [
+        'logret_1', 'logret_3', 'logret_5', 'logret_15',
+        'parkinson_vol',
+        'vol_regime_ratio',
+        'cvd_proxy_5', 'cvd_proxy_15',
+        'rvol',
+        'rsi_14',
+        'bbpct_20',
+    ]
+    if asset_class in ('cme_futures', 'cme'):
+        cols += ['dow_sin', 'dow_cos']
+    else:
+        cols += ['funding_sin', 'funding_cos']
+    cols += ['session_sin', 'session_cos']
+    return cols
 
 
 class DeepScalperFeatureEngineer:
@@ -83,6 +132,12 @@ class DeepScalperFeatureEngineer:
     def __init__(self, config: Dict = None):
         self.config = config or {}
         self.norm_span = int(self.config.get('vol_norm_window', 120))  # EMA span
+        self.n_levels = int(self.config.get('n_levels', 5))
+        self.asset_class = self.config.get('asset_class', 'crypto')
+
+        # Dynamic feature column lists based on LOB depth and asset class
+        self.micro_feature_cols = get_micro_feature_cols(self.n_levels)
+        self.macro_feature_cols = get_macro_feature_cols(self.asset_class)
 
     # ──────────────────────────────────────────────────────────────────────
     # NORMALIZATION PIPELINE
@@ -172,17 +227,18 @@ class DeepScalperFeatureEngineer:
 
     def process_micro(self, lob_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Process Level 2 LOB data into 40-dim micro features (v3).
+        Process LOB data into micro features.
+
+        Dimension depends on n_levels:
+          n_levels=5 (BTC default): 40 dims
+          n_levels=1 (Gold/CME):    18 dims
 
         Computes features IN-PLACE on lob_df (same contract as v1/v2).
         Raw LOB columns (bid_price_1, ask_price_1, bid_vol_1, ask_vol_1)
         are preserved for order execution in the environment.
-
-        v2 features (0-29): see MICRO_FEATURE_COLS[:30]
-        fev3 cross-TF (30-34): read from parquet if present, default 0.0
-        fev3 acceleration (35-39): computed as 2nd-order derivatives
         """
         df = lob_df
+        n_levels = self.n_levels
 
         # ── 0. Mid Price (needed by many features, kept for order execution) ──
         bp1 = df['bid_price_1'].values.astype(np.float64)
@@ -199,9 +255,9 @@ class DeepScalperFeatureEngineer:
         mp_safe = np.where(microprice > 0, microprice, mid_safe)
         df['microprice_basis'] = np.log(mp_safe / mid_safe) * 10000.0  # bps
 
-        # ── 2. Multi-level DOFI L1-L5 (5 dims) ──
+        # ── 2. Multi-level DOFI (n_levels dims) ──
         # Cont et al. (2014): W_b - W_a per level
-        for i in range(1, 6):
+        for i in range(1, n_levels + 1):
             bp = df[f'bid_price_{i}'].values.astype(np.float64)
             bv = df[f'bid_vol_{i}'].values.astype(np.float64)
             ap = df[f'ask_price_{i}'].values.astype(np.float64)
@@ -219,8 +275,8 @@ class DeepScalperFeatureEngineer:
 
             df[f'dofi_{i}'] = w_b - w_a
 
-        # ── 3. Integrated DOFI — 5-min rolling sum (5 dims) ──
-        for i in range(1, 6):
+        # ── 3. Integrated DOFI — 5-min rolling sum (n_levels dims) ──
+        for i in range(1, n_levels + 1):
             df[f'dofi_int_{i}'] = (
                 pd.Series(df[f'dofi_{i}'].values)
                 .rolling(window=5, min_periods=1)
@@ -229,12 +285,10 @@ class DeepScalperFeatureEngineer:
             )
 
         # ── 4. Total Book Imbalance (1 dim) ── Fix A
-        # Replaces VOI which was identical to obi_1. Total OBI captures
-        # full 5-level book imbalance in a single feature.
         # Bounded [-1, 1] → bypass normalization
         total_bid_vol = np.zeros(len(df), dtype=np.float64)
         total_ask_vol = np.zeros(len(df), dtype=np.float64)
-        for i in range(1, 6):
+        for i in range(1, n_levels + 1):
             total_bid_vol += df[f'bid_vol_{i}'].values.astype(np.float64)
             total_ask_vol += df[f'ask_vol_{i}'].values.astype(np.float64)
         total_vol_sum = total_bid_vol + total_ask_vol
@@ -243,59 +297,55 @@ class DeepScalperFeatureEngineer:
             -1.0, 1.0
         ).astype(np.float32)
 
-        # ── 5. Price Distances from Mid (bps) — 5 bid + 5 ask (10 dims) ──
-        for i in range(1, 6):
+        # ── 5. Price Distances from Mid (bps) — n_levels bid + n_levels ask ──
+        for i in range(1, n_levels + 1):
             bp_i = df[f'bid_price_{i}'].values.astype(np.float64)
             ap_i = df[f'ask_price_{i}'].values.astype(np.float64)
             df[f'dist_bid_{i}'] = ((bp_i - mid) / mid_safe) * 10000.0
             df[f'dist_ask_{i}'] = ((ap_i - mid) / mid_safe) * 10000.0
 
-        # ── 6. Level-wise Volume Imbalance — OBI per level (5 dims) ──
+        # ── 6. Level-wise Volume Imbalance — OBI per level (n_levels dims) ──
         # Bounded [-1, 1] → bypass normalization
-        for i in range(1, 6):
+        for i in range(1, n_levels + 1):
             bv_i = df[f'bid_vol_{i}'].values.astype(np.float64)
             av_i = df[f'ask_vol_{i}'].values.astype(np.float64)
             df[f'obi_{i}'] = np.clip(
                 (bv_i - av_i) / (bv_i + av_i + 1e-8), -1.0, 1.0  # Fix D: epsilon
             ).astype(np.float32)
 
-        # ── 7. LOB Slope Asymmetry (1 dim) ──
-        # slope_bid = Σ(vol_k) / (price_1 - price_K) for bid side
-        # slope_ask = Σ(vol_k) / (price_K - price_1) for ask side
-        # Asymmetry = (slope_ask - slope_bid) / (slope_ask + slope_bid)
-        # Bounded [-1, 1]
-        bid_vol_sum = np.zeros(len(df), dtype=np.float64)
-        ask_vol_sum = np.zeros(len(df), dtype=np.float64)
-        for i in range(1, 6):
-            bid_vol_sum += df[f'bid_vol_{i}'].values.astype(np.float64)
-            ask_vol_sum += df[f'ask_vol_{i}'].values.astype(np.float64)
+        # ── 7. LOB Slope Asymmetry (1 dim) — requires n_levels >= 5 ──
+        if n_levels >= 5:
+            bid_vol_sum = np.zeros(len(df), dtype=np.float64)
+            ask_vol_sum = np.zeros(len(df), dtype=np.float64)
+            for i in range(1, n_levels + 1):
+                bid_vol_sum += df[f'bid_vol_{i}'].values.astype(np.float64)
+                ask_vol_sum += df[f'ask_vol_{i}'].values.astype(np.float64)
 
-        bp5 = df['bid_price_5'].values.astype(np.float64)
-        ap5 = df['ask_price_5'].values.astype(np.float64)
+            bp5 = df[f'bid_price_{n_levels}'].values.astype(np.float64)
+            ap5 = df[f'ask_price_{n_levels}'].values.astype(np.float64)
 
-        bid_depth = np.abs(bp1 - bp5)
-        ask_depth = np.abs(ap5 - ap1)
+            bid_depth = np.abs(bp1 - bp5)
+            ask_depth = np.abs(ap5 - ap1)
 
-        bid_depth_safe = np.where(bid_depth > 1e-9, bid_depth, 1.0)
-        ask_depth_safe = np.where(ask_depth > 1e-9, ask_depth, 1.0)
+            bid_depth_safe = np.where(bid_depth > 1e-9, bid_depth, 1.0)
+            ask_depth_safe = np.where(ask_depth > 1e-9, ask_depth, 1.0)
 
-        slope_bid = bid_vol_sum / bid_depth_safe
-        slope_ask = ask_vol_sum / ask_depth_safe
+            slope_bid = bid_vol_sum / bid_depth_safe
+            slope_ask = ask_vol_sum / ask_depth_safe
 
-        slope_sum = slope_bid + slope_ask
-        slope_asym_raw = (slope_ask - slope_bid) / (slope_sum + 1e-8)  # Fix D: epsilon
-        # Fix #4: Neutralize slope_asym when either depth is degenerate
-        # (all 5 levels at same price, e.g. flash crash) to prevent artifacts
-        degenerate_mask = (bid_depth < 1e-9) | (ask_depth < 1e-9)
-        slope_asym_raw[degenerate_mask] = 0.0
-        df['slope_asym'] = np.clip(slope_asym_raw, -1.0, 1.0).astype(np.float32)
+            slope_sum = slope_bid + slope_ask
+            slope_asym_raw = (slope_ask - slope_bid) / (slope_sum + 1e-8)  # Fix D: epsilon
+            # Fix #4: Neutralize slope_asym when either depth is degenerate
+            degenerate_mask = (bid_depth < 1e-9) | (ask_depth < 1e-9)
+            slope_asym_raw[degenerate_mask] = 0.0
+            df['slope_asym'] = np.clip(slope_asym_raw, -1.0, 1.0).astype(np.float32)
 
         # ── 8. Relative Spread (bps) (1 dim) ──
         df['spread_bps'] = ((ap1 - bp1) / mid_safe) * 10000.0
 
         # ── 9. DOFI Velocity — diff of total DOFI (1 dim) ──
         total_dofi = np.zeros(len(df), dtype=np.float64)
-        for i in range(1, 6):
+        for i in range(1, n_levels + 1):
             total_dofi += df[f'dofi_{i}'].values.astype(np.float64)
         dofi_vel = np.diff(total_dofi, prepend=0.0)
         df['dofi_velocity'] = dofi_vel
@@ -311,7 +361,7 @@ class DeepScalperFeatureEngineer:
             if col not in df.columns:
                 df[col] = np.float32(0.0)
 
-        # ── 12. fev3: Acceleration features (5 dims) ──
+        # ── 12. fev3: Acceleration features ──
         # 2nd-order derivatives on 5-min data. diff() introduces leading zeros,
         # well within the 200-row warmup slice.
 
@@ -331,16 +381,17 @@ class DeepScalperFeatureEngineer:
             df['spread_bps'].values.astype(np.float64), prepend=0.0
         )
 
-        # depth_drain: diff(mean near-book liquidity L1-L3)
-        near_liq = np.zeros(len(df), dtype=np.float64)
-        for i in range(1, 4):  # levels 1-3
-            near_liq += df[f'bid_vol_{i}'].values.astype(np.float64)
-            near_liq += df[f'ask_vol_{i}'].values.astype(np.float64)
-        near_liq /= 6.0  # mean across 6 sides (3 bid + 3 ask)
-        df['depth_drain'] = np.diff(near_liq, prepend=0.0)
+        # depth_drain: diff(mean near-book liquidity) — requires n_levels >= 3
+        if n_levels >= 3:
+            near_liq = np.zeros(len(df), dtype=np.float64)
+            for i in range(1, min(n_levels, 3) + 1):  # levels 1-3
+                near_liq += df[f'bid_vol_{i}'].values.astype(np.float64)
+                near_liq += df[f'ask_vol_{i}'].values.astype(np.float64)
+            near_liq /= (min(n_levels, 3) * 2.0)
+            df['depth_drain'] = np.diff(near_liq, prepend=0.0)
 
         # ── NORMALIZE all micro features ──
-        self._normalize_features(df, MICRO_FEATURE_COLS)
+        self._normalize_features(df, self.micro_feature_cols)
 
         return df
 
@@ -443,20 +494,31 @@ class DeepScalperFeatureEngineer:
         # Center and soft-clip: tanh((x - 0.5) * 2) maps ~[0,1] → ~[-1,1]
         df['bbpct_20'] = np.tanh((pct_b_raw - 0.5) * 2.0).astype(np.float32)
 
-        # ── 8. Funding Rate Clock — sin/cos (2 dims) ──
-        # Binance BTC perps: funding every 8h at 00:00, 08:00, 16:00 UTC
-        # Encode minutes-to-next-funding as sin/cos cycle
-        if 'timestamp' in df.columns:
-            ts = pd.to_datetime(df['timestamp'])
-            minutes_in_day = ts.dt.hour * 60 + ts.dt.minute
-            # Minutes into current 8h funding cycle (480 min per cycle)
-            minutes_into_cycle = minutes_in_day % 480
-            phase = 2.0 * np.pi * minutes_into_cycle.values / 480.0
-            df['funding_sin'] = np.sin(phase).astype(np.float32)
-            df['funding_cos'] = np.cos(phase).astype(np.float32)
+        # ── 8. Cyclical Time Encoding (2 dims) ──
+        # Crypto: funding_sin/cos (8h Binance cycle)
+        # CME:    dow_sin/cos (day-of-week encoding, Mon=0..Fri=4)
+        if self.asset_class in ('cme_futures', 'cme'):
+            if 'timestamp' in df.columns:
+                ts = pd.to_datetime(df['timestamp'])
+                dow = ts.dt.dayofweek.values.astype(np.float64)  # 0=Mon, 6=Sun
+                phase = 2.0 * np.pi * dow / 5.0  # 5 trading days
+                df['dow_sin'] = np.sin(phase).astype(np.float32)
+                df['dow_cos'] = np.cos(phase).astype(np.float32)
+            else:
+                df['dow_sin'] = np.zeros(len(df), dtype=np.float32)
+                df['dow_cos'] = np.zeros(len(df), dtype=np.float32)
         else:
-            df['funding_sin'] = np.zeros(len(df), dtype=np.float32)
-            df['funding_cos'] = np.zeros(len(df), dtype=np.float32)
+            # Binance BTC perps: funding every 8h at 00:00, 08:00, 16:00 UTC
+            if 'timestamp' in df.columns:
+                ts = pd.to_datetime(df['timestamp'])
+                minutes_in_day = ts.dt.hour * 60 + ts.dt.minute
+                minutes_into_cycle = minutes_in_day % 480
+                phase = 2.0 * np.pi * minutes_into_cycle.values / 480.0
+                df['funding_sin'] = np.sin(phase).astype(np.float32)
+                df['funding_cos'] = np.cos(phase).astype(np.float32)
+            else:
+                df['funding_sin'] = np.zeros(len(df), dtype=np.float32)
+                df['funding_cos'] = np.zeros(len(df), dtype=np.float32)
 
         # ── 9. Time-of-Day Session Encoding — sin/cos (2 dims) ──
         # Encode minute-of-day for Asia/London/NY session detection
@@ -471,14 +533,14 @@ class DeepScalperFeatureEngineer:
             df['session_cos'] = np.zeros(len(df), dtype=np.float32)
 
         # ── NORMALIZE unbounded macro features ──
-        self._normalize_features(df, MACRO_FEATURE_COLS)
+        self._normalize_features(df, self.macro_feature_cols)
 
         # Fix E + Fix #29: NaN warm-up rows are sliced off downstream.
         # Raw OHLCV is ffill'd at the top of process_macro() (Fix #29),
         # so mid-sequence gaps are handled before normalization.
         # No post-normalization ffill needed — it would create discontinuities.
 
-        result = df[MACRO_FEATURE_COLS].copy()
+        result = df[self.macro_feature_cols].copy()
 
         # Carry timestamp forward if available (needed for alignment)
         if 'timestamp' in ohlcv_df.columns:
