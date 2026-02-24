@@ -141,11 +141,19 @@ class DeepScalperTrainer:
         """
         logger = logging.getLogger(__name__)
 
-        discrete_dims = self.config.get("env", {}).get("action", {}).get("discrete_dims", 6)
-        if discrete_dims == 3:
-            BUY_ACTION, HOLD_ACTION, SELL_ACTION = 0, 1, 2
+        action_cfg = self.config.get("env", {}).get("action", {})
+        size_dims = int(action_cfg.get("size_dims", 0))
+
+        if size_dims > 0:
+            # H2: MultiDiscrete([size_dims, direction_dims]) — direction is branch 1
+            BUY_DIR, HOLD_DIR, SELL_DIR = 0, 1, 2
+            DEFAULT_SIZE_IDX = size_dims // 2  # 1x multiplier (middle of size range)
         else:
-            BUY_ACTION, HOLD_ACTION, SELL_ACTION = 0, 2, 5
+            discrete_dims = action_cfg.get("discrete_dims", 6)
+            if discrete_dims == 3:
+                BUY_ACTION, HOLD_ACTION, SELL_ACTION = 0, 1, 2
+            else:
+                BUY_ACTION, HOLD_ACTION, SELL_ACTION = 0, 2, 5
 
         THRESHOLD = 0.0005  # 5bps logret_5 threshold for directional signal
         num_envs = self.env.num_envs
@@ -158,8 +166,16 @@ class DeepScalperTrainer:
 
         for _ in range(demo_steps):
             signal = obs["macro"][:, 0]  # logret_5, shape (num_envs,)
-            actions = np.where(signal > THRESHOLD, BUY_ACTION,
-                      np.where(signal < -THRESHOLD, SELL_ACTION, HOLD_ACTION))
+
+            if size_dims > 0:
+                # H2: Build (num_envs, 2) actions — [size_idx, dir_idx]
+                dir_actions = np.where(signal > THRESHOLD, BUY_DIR,
+                              np.where(signal < -THRESHOLD, SELL_DIR, HOLD_DIR))
+                size_actions = np.full(num_envs, DEFAULT_SIZE_IDX, dtype=np.intp)
+                actions = np.stack([size_actions, dir_actions], axis=1)  # (num_envs, 2)
+            else:
+                actions = np.where(signal > THRESHOLD, BUY_ACTION,
+                          np.where(signal < -THRESHOLD, SELL_ACTION, HOLD_ACTION))
 
             next_obs, rewards, term, trunc, infos = self.env.step(actions)
             dones_for_buffer = term
