@@ -221,6 +221,8 @@ def deploy(args):
             all_extra_args = f"{all_extra_args} --tags {tag_str}"
     
     wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
+    discord_url = os.getenv("DISCORD_WEBHOOK_URL", "")
+    discord_env = f"export DISCORD_WEBHOOK_URL='{discord_url}' &&" if discord_url else ""
     from datetime import datetime
     log_file = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
@@ -231,7 +233,7 @@ def deploy(args):
     version_arg = f"--version {version}" if version else ""
     
     # FIX: Remove () around ulimit so it applies to the current shell and subsequent nohup process
-    cmd = f"{export_path} && {wandb_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {version_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
+    cmd = f"{export_path} && {wandb_env} {discord_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {version_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
     
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
