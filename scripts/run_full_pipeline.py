@@ -12,6 +12,7 @@ import logging
 import functools
 from datetime import datetime
 
+import json
 import numpy as np
 import pandas as pd
 import torch
@@ -19,6 +20,7 @@ import gymnasium as gym
 import wandb
 import optuna
 from optuna.samplers import TPESampler
+from urllib.request import Request, urlopen
 
 # Project imports
 sys.path.append(os.getcwd())
@@ -853,6 +855,22 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
 
 
 # ============================================================================
+# NOTIFICATIONS
+# ============================================================================
+def _notify_discord(title: str, message: str, color: int = 0x00FF00):
+    """Send a Discord webhook notification. Silent no-op if URL not configured."""
+    url = os.environ.get("DISCORD_WEBHOOK_URL")
+    if not url:
+        return
+    payload = json.dumps({"content": "<@792547494453575693>", "embeds": [{"title": title, "description": message, "color": color}]})
+    try:
+        req = Request(url, data=payload.encode(), headers={"Content-Type": "application/json", "User-Agent": "DeepScalper/1.0"})
+        urlopen(req, timeout=10)
+    except Exception as e:
+        print(f"[notify] Discord webhook failed: {e}")
+
+
+# ============================================================================
 # MAIN PIPELINE
 # ============================================================================
 def main():
@@ -1002,10 +1020,17 @@ def main():
         print("\n" + "="*60)
         print(">>> PIPELINE COMPLETE")
         print("="*60 + "\n")
-        
+
+        # Notify on completion
+        run_name = wandb.run.name if wandb.run else "unknown"
+        _notify_discord("Pipeline Complete", f"**{run_name}** finished successfully.")
+
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
-        wandb.log({"pipeline/status": "failed", "pipeline/error": str(e)})
+        if wandb.run:
+            wandb.log({"pipeline/status": "failed", "pipeline/error": str(e)})
+        run_name = wandb.run.name if wandb.run else "unknown"
+        _notify_discord("Pipeline FAILED", f"**{run_name}** crashed: {e}", color=0xFF0000)
         raise
     finally:
         wandb.finish()
