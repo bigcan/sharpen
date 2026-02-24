@@ -31,7 +31,14 @@ class DeepScalperTrainer:
         
         # Read Action Dims from Config
         action_config = config.get("env", {}).get("action", {})
-        if "discrete_dims" in action_config:
+        if "size_dims" in action_config and int(action_config["size_dims"]) > 0:
+            # H2: Leverage-Aware Sizing — MultiDiscrete([size_dims, direction_dims])
+            # BDQ "price" branch = size, "qty" branch = direction
+            action_dims = (
+                int(action_config["size_dims"]),
+                int(action_config.get("direction_dims", 3))
+            )
+        elif "discrete_dims" in action_config:
             action_dims = action_config["discrete_dims"]
         else:
             # Fallback for legacy MultiDiscrete
@@ -106,9 +113,15 @@ class DeepScalperTrainer:
         )
 
         # FIX FIND-5 + CRIT-1: Private size consistency check
-        # Tier 2: Env produces 5 private features (pos, bal, remaining_time, order_dir, order_dist).
+        # Tier 2: 5 dims (pos, bal, time, order_dir, order_dist)
+        # H2: 6 dims (+spread_bps for leverage-aware sizing)
         priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_input_size", 5)
-        assert priv_cfg == 5, f"FIND-5 Mismatch: Env produces 5 private features (Tier 2), config expects {priv_cfg}"
+        include_spread = config.get("features", {}).get("include_spread", False)
+        expected_priv = 6 if include_spread else 5
+        assert priv_cfg == expected_priv, (
+            f"FIND-5 Mismatch: Env produces {expected_priv} private features "
+            f"({'H2 with spread' if include_spread else 'Tier 2'}), config expects {priv_cfg}"
+        )
 
     def _seed_demo_buffer(self, demo_steps: int) -> None:
         """Pre-populate replay buffer with a rule-based momentum policy (DQfD warm-start).
@@ -199,11 +212,12 @@ class DeepScalperTrainer:
         _micro_dim = self.config.get("network", {}).get("micro_config", {}).get("input_size", 30)
         assert obs["micro"].shape == (B, W, _micro_dim), \
             f"obs['micro'] shape mismatch: expected ({B}, {W}, {_micro_dim}), got {obs['micro'].shape}"
-        assert obs["private"].shape == (B, W, 5), \
-            f"obs['private'] shape mismatch: expected ({B}, {W}, 5), got {obs['private'].shape}"
+        _priv_dim = self.config.get("network", {}).get("micro_config", {}).get("private_input_size", 5)
+        assert obs["private"].shape == (B, W, _priv_dim), \
+            f"obs['private'] shape mismatch: expected ({B}, {W}, {_priv_dim}), got {obs['private'].shape}"
         assert obs["macro"].ndim == 2, \
             f"obs['macro'] expected 2D (B, M), got shape {obs['macro'].shape}"
-        print(f"✓ Observation shapes verified: micro={obs['micro'].shape}, "
+        print(f"[OK] Observation shapes verified: micro={obs['micro'].shape}, "
               f"private={obs['private'].shape}, macro={obs['macro'].shape}")
         
         # FIX PERF-2: Dynamic epsilon decay for BOTH HPO and production training.

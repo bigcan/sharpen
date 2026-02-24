@@ -131,9 +131,32 @@ class DeepScalperEnv(gym.Env):
         # Tier 2: Discrete Action Space (Flattened)
         # Discrete(6): 0=TakerBuy, 1=MakerBuy, 2=Hold, 3=Cancel, 4=MakerSell, 5=TakerSell
         # Discrete(3): 0=TakerBuy, 1=Hold, 2=TakerSell (taker-only, no maker/cancel)
-        self.discrete_dims = config.get("action", {}).get("discrete_dims", 6)
-        self.action_space = gym.spaces.Discrete(self.discrete_dims)
-        self.fixed_trade_qty = float(config.get("action", {}).get("fixed_trade_qty", 0.2)) # 20% of max_position
+        #
+        # H2: Leverage-Aware Sizing — MultiDiscrete([size_dims, direction_dims])
+        # Branch 0 (size): position size multiplier (e.g. 0.25x, 0.5x, 1x, 2x)
+        # Branch 1 (direction): TakerBuy=0, Hold=1, TakerSell=2
+        # BDQ "price" branch = size, "qty" branch = direction.
+        # hold_idx = direction_dims // 2 = 1 → Hold masking works natively.
+        action_cfg = config.get("action", {})
+        self.fixed_trade_qty = float(action_cfg.get("fixed_trade_qty", 0.2))  # 20% of max_position
+        self.size_dims = int(action_cfg.get("size_dims", 0))
+
+        if self.size_dims > 0:
+            # H2: Direction × Size branching
+            self.direction_dims = int(action_cfg.get("direction_dims", 3))
+            self.size_multipliers = [float(x) for x in action_cfg.get(
+                "size_multipliers", [0.25, 0.5, 1.0, 2.0]
+            )]
+            assert len(self.size_multipliers) == self.size_dims, (
+                f"size_multipliers length {len(self.size_multipliers)} != size_dims {self.size_dims}"
+            )
+            self.action_space = gym.spaces.MultiDiscrete([self.size_dims, self.direction_dims])
+            self._use_leverage_action = True
+            self.discrete_dims = 0  # Sentinel: not using Discrete mode
+        else:
+            self.discrete_dims = int(action_cfg.get("discrete_dims", 6))
+            self.action_space = gym.spaces.Discrete(self.discrete_dims)
+            self._use_leverage_action = False
 
         # Discrete(3) → Discrete(6) action mapping for internal processing
         # Maps simplified 3-action space to the 6-action internal logic
@@ -148,10 +171,17 @@ class DeepScalperEnv(gym.Env):
         
         # FIX F1: Micro is now (Window, L*F) = (15, 20)
         # T2.2: Private state expanded to 5 dims: [pos, bal, time, order_dir, order_dist]
+        # H2: Optional 6th dim: spread_bps (for spread-conditioned sizing)
+        # Check both nested features key and top-level (depends on how config is passed)
+        self._include_spread = bool(
+            config.get("features", {}).get("include_spread", False)
+            or config.get("include_spread", False)
+        )
+        self._private_dim = 6 if self._include_spread else 5
         self.observation_space = gym.spaces.Dict({
             "micro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self.micro_dim), dtype=np.float32),
             "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(NUM_MACRO_FEATURES,), dtype=np.float32),
-            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, 5), dtype=np.float32)
+            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self._private_dim), dtype=np.float32)
         })
         
         # Price offset mapping (ticks from best)
@@ -200,7 +230,7 @@ class DeepScalperEnv(gym.Env):
         
         # Window Buffer - FIX F1: Now (W, L*F)
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
-        self.private_window = np.zeros((self.window_size, 5), dtype=np.float32)
+        self.private_window = np.zeros((self.window_size, self._private_dim), dtype=np.float32)
         self.total_episode_steps = 1  # Discovered from handler in reset()
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
         
@@ -237,21 +267,22 @@ class DeepScalperEnv(gym.Env):
                                  order_direction: float = 0.0,
                                  order_dist_to_mid: float = 0.0) -> np.ndarray:
         """
-        Normalize private state variables (Tier 2).
+        Normalize private state variables (Tier 2 / H2).
         Position:       [-Max, Max] -> [-1, 1]
         Balance:        [0, Init*2] -> [0, 2]
         Remaining Time: [0, 1]      -> [0, 1]
         Order Dir:      [-1, 0, 1]  -> [-1, 0, 1] (Buy=+1, Sell=-1, None=0)
         Order Dist:     [-50, 50]   -> [-1, 1] (bps from mid, clipped and scaled)
+        Spread (H2):    [0, 10]     -> [0, 1] (current BBO spread in bps)
         """
         # 1. Position
         max_pos = self.max_position if self.max_position > 0 else 1.0
         n_pos = position / max_pos
-        
+
         # 2. Balance
         init_bal = self.initial_balance if self.initial_balance > 0 else 1.0
         n_bal = balance / init_bal
-        
+
         # 3. Remaining time
         n_time = float(np.clip(remaining_time, 0.0, 1.0))
 
@@ -261,7 +292,18 @@ class DeepScalperEnv(gym.Env):
         # 5. Order Distance (in bps from mid)
         # Typically +/- 50 bps is the range of interest for scalping.
         n_dist = float(np.clip(order_dist_to_mid / 50.0, -1.0, 1.0))
-        
+
+        if self._include_spread:
+            # 6. Current BBO spread (bps), normalized to [0, 1] range
+            # 10 bps cap is well above typical BTC spreads (median ~1 bps)
+            mid = (self.current_best_ask + self.current_best_bid) / 2.0
+            if mid > 0 and self.current_best_ask > 0 and self.current_best_bid > 0:
+                spread_bps = ((self.current_best_ask - self.current_best_bid) / mid) * 10000.0
+            else:
+                spread_bps = 0.0
+            n_spread = float(np.clip(spread_bps / 10.0, 0.0, 1.0))
+            return np.array([n_pos, n_bal, n_time, n_dir, n_dist, n_spread], dtype=np.float32)
+
         return np.array([n_pos, n_bal, n_time, n_dir, n_dist], dtype=np.float32)
 
     def reset(self, seed=None, options=None):
@@ -307,7 +349,7 @@ class DeepScalperEnv(gym.Env):
             self.total_episode_steps = 1  # Fallback: remaining_time always 1.0
         
         # Initialize Private Window (Position=0, Balance=Initial, RemainingTime=1.0, OrderDir=0, OrderDist=0)
-        self.private_window = np.zeros((self.window_size, 5), dtype=np.float32)
+        self.private_window = np.zeros((self.window_size, self._private_dim), dtype=np.float32)
         # FIX CRIT-1: Normalize initial private state with remaining_time=1.0
         initial_private_state = self._normalize_private_state(0.0, float(self.initial_balance), 1.0, 0.0, 0.0)
         self.private_window = np.tile(initial_private_state, (self.window_size, 1))
@@ -730,41 +772,66 @@ class DeepScalperEnv(gym.Env):
         self._try_fill_pending()
 
         # 3. Process NEW Action (T)
-        # Tier 2: Flattened Action Space [0: TBuy, 1: MBuy, 2: Hold, 3: Cancel, 4: MSell, 5: TSell]
-        action = int(action)
-        # Discrete(3) remapping: 0=TakerBuy→0, 1=Hold→2, 2=TakerSell→5
-        if self.discrete_dims == 3:
-            action = self._disc3_to_disc6[action]
-        direction = 0
-        quantity = self.fixed_trade_qty * self.max_position
+        if self._use_leverage_action:
+            # H2: MultiDiscrete([size_dims, direction_dims])
+            # action is array-like: [size_idx, dir_idx]
+            size_idx = int(action[0])
+            dir_idx = int(action[1])
 
-        if action == 2:  # Hold
-            # T1.4: Hold preserves existing pending order for maker persistence
+            size_mult = self.size_multipliers[min(size_idx, len(self.size_multipliers) - 1)]
+            quantity = size_mult * self.fixed_trade_qty * self.max_position
             direction = 0
-        elif action == 3:  # Cancel
-            self.pending_order = None
-            direction = 0
-        else:
-            if action in [0, 1]:  # Buy
+
+            if dir_idx == 1:  # Hold
+                direction = 0
+            elif dir_idx == 0:  # TakerBuy
                 direction = 1
-                is_taker = (action == 0)
-                # Taker crosses spread, Maker sits at touch
-                limit_price = pre_best_ask if is_taker else pre_best_bid
-            else:  # Sell (action 4 or 5)
-                direction = 2
-                is_taker = (action == 5)
-                # Taker crosses spread, Maker sits at touch
-                limit_price = pre_best_bid if is_taker else pre_best_ask
-
-            self.pending_order = (direction, limit_price, quantity, is_taker)
-
-            # FIX TAKER-DELAY: Taker orders fill immediately — they cross the
-            # spread by definition and execute at the current market price.
-            # Previously takers were pending for 1 extra step, causing a 2-step
-            # delay from observation to fill (oracle gate PF 0.9 vs theoretical 3.9-303).
-            # Maker orders still pend for next-bar fill (correct: they sit on the book).
-            if is_taker:
+                is_taker = True
+                limit_price = pre_best_ask
+                self.pending_order = (direction, limit_price, quantity, is_taker)
                 self._try_fill_pending()
+            elif dir_idx == 2:  # TakerSell
+                direction = 2
+                is_taker = True
+                limit_price = pre_best_bid
+                self.pending_order = (direction, limit_price, quantity, is_taker)
+                self._try_fill_pending()
+        else:
+            # Tier 2: Flattened Action Space [0: TBuy, 1: MBuy, 2: Hold, 3: Cancel, 4: MSell, 5: TSell]
+            action = int(action)
+            # Discrete(3) remapping: 0=TakerBuy→0, 1=Hold→2, 2=TakerSell→5
+            if self.discrete_dims == 3:
+                action = self._disc3_to_disc6[action]
+            direction = 0
+            quantity = self.fixed_trade_qty * self.max_position
+
+            if action == 2:  # Hold
+                # T1.4: Hold preserves existing pending order for maker persistence
+                direction = 0
+            elif action == 3:  # Cancel
+                self.pending_order = None
+                direction = 0
+            else:
+                if action in [0, 1]:  # Buy
+                    direction = 1
+                    is_taker = (action == 0)
+                    # Taker crosses spread, Maker sits at touch
+                    limit_price = pre_best_ask if is_taker else pre_best_bid
+                else:  # Sell (action 4 or 5)
+                    direction = 2
+                    is_taker = (action == 5)
+                    # Taker crosses spread, Maker sits at touch
+                    limit_price = pre_best_bid if is_taker else pre_best_ask
+
+                self.pending_order = (direction, limit_price, quantity, is_taker)
+
+                # FIX TAKER-DELAY: Taker orders fill immediately — they cross the
+                # spread by definition and execute at the current market price.
+                # Previously takers were pending for 1 extra step, causing a 2-step
+                # delay from observation to fill (oracle gate PF 0.9 vs theoretical 3.9-303).
+                # Maker orders still pend for next-bar fill (correct: they sit on the book).
+                if is_taker:
+                    self._try_fill_pending()
         
         # 4. Dense Reward — T1.1: Pure NAV delta (BUG-01 fix)
         # r_t = NAV_{t+1} - NAV_t, normalized to bps
@@ -1098,11 +1165,22 @@ class DeepScalperEnv(gym.Env):
         }
 
     def _get_qty_action_mask(self):
-        """Action mask for Discrete action space.
+        """Action mask for Discrete/MultiDiscrete action space.
 
         Discrete(6): shape (6,) — 0:TBuy, 1:MBuy, 2:Hold, 3:Cancel, 4:MSell, 5:TSell
         Discrete(3): shape (3,) — 0:TBuy, 1:Hold, 2:TSell
+        H2 Leverage: shape (direction_dims,) — 0:TBuy, 1:Hold, 2:TSell
+          (Mask applies to direction branch; size branch is always valid.)
         """
+        if self._use_leverage_action:
+            # H2: Mask applies to direction branch (branch 1 = "qty" in BDQ)
+            mask = np.ones(self.direction_dims, dtype=np.float32)
+            if self.position >= self.max_position:
+                mask[0] = 0.0  # Block TakerBuy
+            if self.position <= -self.max_position:
+                mask[2] = 0.0  # Block TakerSell
+            return mask
+
         if self.discrete_dims == 3:
             mask = np.ones(3, dtype=np.float32)
             if self.position >= self.max_position:
