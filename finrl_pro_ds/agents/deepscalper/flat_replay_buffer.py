@@ -94,6 +94,70 @@ class FlatReplayBuffer:
                 f"Replay buffer full ({self.capacity}). Oldest transitions now being overwritten."
             )
 
+    def push_batch(
+        self,
+        states: Dict[str, np.ndarray],
+        actions: np.ndarray,
+        rewards: np.ndarray,
+        next_states: Dict[str, np.ndarray],
+        dones: np.ndarray,
+        aux_targets: np.ndarray,
+    ):
+        """Store N transitions at once using numpy slice assignment.
+
+        All inputs have leading batch dimension N, e.g. states["micro"] is (N, W, 30).
+        Handles circular wraparound when ptr + N > capacity.
+        """
+        n = len(rewards)
+        if n == 0:
+            return
+
+        ptr = self._ptr
+        cap = self.capacity
+
+        if ptr + n <= cap:
+            # Simple case: fits without wrapping
+            s = slice(ptr, ptr + n)
+            self._micro[s] = states["micro"]
+            self._macro[s] = states["macro"]
+            self._private[s] = states["private"]
+            self._next_micro[s] = next_states["micro"]
+            self._next_macro[s] = next_states["macro"]
+            self._next_private[s] = next_states["private"]
+            self._actions[s] = actions
+            self._rewards[s] = rewards
+            self._dones[s] = dones
+            self._aux_targets[s] = aux_targets
+        else:
+            # Wraparound: split into two writes
+            first = cap - ptr
+            # First chunk: ptr → end
+            self._micro[ptr:cap] = states["micro"][:first]
+            self._macro[ptr:cap] = states["macro"][:first]
+            self._private[ptr:cap] = states["private"][:first]
+            self._next_micro[ptr:cap] = next_states["micro"][:first]
+            self._next_macro[ptr:cap] = next_states["macro"][:first]
+            self._next_private[ptr:cap] = next_states["private"][:first]
+            self._actions[ptr:cap] = actions[:first]
+            self._rewards[ptr:cap] = rewards[:first]
+            self._dones[ptr:cap] = dones[:first]
+            self._aux_targets[ptr:cap] = aux_targets[:first]
+            # Second chunk: 0 → remainder
+            second = n - first
+            self._micro[:second] = states["micro"][first:]
+            self._macro[:second] = states["macro"][first:]
+            self._private[:second] = states["private"][first:]
+            self._next_micro[:second] = next_states["micro"][first:]
+            self._next_macro[:second] = next_states["macro"][first:]
+            self._next_private[:second] = next_states["private"][first:]
+            self._actions[:second] = actions[first:]
+            self._rewards[:second] = rewards[first:]
+            self._dones[:second] = dones[first:]
+            self._aux_targets[:second] = aux_targets[first:]
+
+        self._ptr = (ptr + n) % cap
+        self._size = min(self._size + n, cap)
+
     def sample(self, batch_size: int) -> Tuple[Dict, np.ndarray, np.ndarray,
                                                 Dict, np.ndarray, np.ndarray]:
         """Sample a random batch. Returns pre-stacked numpy arrays.
