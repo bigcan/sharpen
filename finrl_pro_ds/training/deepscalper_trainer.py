@@ -86,6 +86,20 @@ class DeepScalperTrainer:
         self.log_interval = config["training"]["log_interval"]
         self.checkpoint_interval = config["agents"]["bdq"]["checkpoint_interval"]
         self.learning_starts = config["agents"]["bdq"]["learning_starts"]
+
+        # PERF: Auto-scale tau for high UTD (update-to-data ratio).
+        # Soft target update fires every train_step(). With UTD=N, the target net
+        # drifts N times faster per env step. To maintain the same effective tracking
+        # rate, scale tau so (1-tau)^N is constant regardless of N.
+        # Reference rate: UTD=1 with config tau. Formula: tau_eff = 1 - (1-tau)^(1/N)
+        if self.update_interval > 1.0:
+            raw_tau = self.agent.tau
+            effective_tau = 1.0 - (1.0 - raw_tau) ** (1.0 / self.update_interval)
+            self.agent.tau = effective_tau
+            print(f"[UTD] update_interval={self.update_interval:.0f} -> tau auto-scaled: "
+                  f"{raw_tau:.6f} -> {effective_tau:.6f} "
+                  f"(effective target shift per env step: "
+                  f"{1-(1-effective_tau)**self.update_interval:.4f})")
         
         # Checkpoint Directory
         self.ckpt_dir = os.path.join("checkpoints", self.run_name)

@@ -1,0 +1,122 @@
+# Phase G6: Gold BDQ — MultiDiscrete Sizing on Front-Month Data (PRODUCTION)
+# ============================================================================
+# Applies H2 leverage-aware sizing innovation to gold. Gold has the strongest
+# fundamentals: oracle PF 2.15, 0.72 bps median spread, 0.35 bps taker fee.
+#
+# G5/G5b both produced hold-dominant policies (10-13 trades). The hypothesis:
+# MultiDiscrete sizing lets the agent trade SMALL when uncertain and LARGE on
+# strong signals, breaking the hold trap. Combined with 10M steps (2x G5b)
+# and larger buffer for more replay diversity.
+#
+# Key differences vs G5b:
+#   - MultiDiscrete([4,3]) action space (size x direction)
+#   - spread_bps in 6-dim private state
+#   - 10M steps (2x), 2M buffer (4x), slower target updates
+#
+# Data: Front-month stitched GC, 67K 5-min bars, 0.72 bps median spread
+# Gate: Test PF > 1.0 (min), Test PF > 1.2 (strong), Trades >= 100
+
+data:
+  file_path: "data/processed/gc_2025_full_year_5min_front.parquet"
+  ticker: "GC"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  n_levels: 1
+  asset_class: "cme_futures"
+  include_spread: true            # G6: Feed BBO spread into private state
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24
+
+env:
+  symbol: "GC"
+  initial_balance: 100000.0
+  margin_requirement: 0.05        # 20x leverage (gold futures standard)
+  maker_fee: 0.000010             # CME gold taker ~0.35 bps
+  taker_fee: 0.000035
+  num_envs: 24
+  window_size: 15
+  max_drawdown_pct: 0.30
+  private_state_augment_prob: 0.0
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20
+    sharpe_weight: 0.0
+    dsr_scale: 100.0
+    sharpe_horizon: 20
+    hold_bonus_bps: 0.0
+
+  action:
+    # G6: Direction x Size branching (same as H2)
+    direction_dims: 3              # TakerBuy=0, Hold=1, TakerSell=2
+    size_dims: 4                   # 4 position size levels
+    size_multipliers: [0.25, 0.5, 1.0, 2.0]  # Relative to fixed_trade_qty
+    max_position: 5.0
+    fixed_trade_qty: 0.2           # Base trade qty (1x = 0.2 * 5.0 = 1.0 contract)
+
+  augmentation:
+    enabled: false
+
+network:
+  micro_config:
+    input_size: 18                 # Level-1 features (CME futures)
+    private_input_size: 6          # G6: pos, bal, time, order_dir, order_dist, spread_bps
+    hidden_size: 256
+    encoder_type: "flat"
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  bdq:
+    learning_rate: 0.0002
+    gamma: 0.95
+    auxiliary_weight: 1.0
+    update_interval: 2.0           # G6: less aggressive (was 1.0 in G5b)
+    batch_size: 1024
+    buffer_size: 2000000           # G6: 2M (was 500K in G5b)
+    target_update_freq: 7500       # G6: stabler Q-values (was 100 in G5b)
+    checkpoint_interval: 1000000   # Every 1M steps (10M total)
+    learning_starts: 10000
+    exploration_fraction: 0.2
+    epsilon_start: 1.0
+    epsilon_end: 0.01              # G6: slightly more greedy endpoint
+    epsilon_decay: 0.999908
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+    exploration_mode: "epsilon_greedy"
+    demo_seed_steps: 20000         # DQfD warm-start
+
+training:
+  total_timesteps: 10000000        # G6: 10M steps (2x G5b) — ~18h at 150 SPS
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 15
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["Gold", "GC", "PhaseG6", "BDQ", "5min", "FullYear", "FrontMonth",
+         "MultiDiscrete", "SpreadAware", "HPO", "DQfD", "Level1", "CME",
+         "Production", "10M"]

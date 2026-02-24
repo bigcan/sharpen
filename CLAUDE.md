@@ -208,7 +208,7 @@ agents:
 
 ## GPU/CPU Performance Optimizations
 
-Five optimizations are built into the training pipeline. Four are **always-on** (no config needed), one is config-gated. When creating new scripts, configs, or training loops, preserve these:
+Six optimizations are built into the training pipeline. Four are **always-on** (no config needed), two are config-gated. When creating new scripts, configs, or training loops, preserve these:
 
 | Optimization | Location | Config | Notes |
 |-------------|----------|--------|-------|
@@ -217,11 +217,13 @@ Five optimizations are built into the training pipeline. Four are **always-on** 
 | **Batch replay push** | `flat_replay_buffer.py` — `push_batch()` | Always-on | Single call pushes all parallel env transitions with wraparound. Do NOT use per-env `push()` loops. |
 | **non_blocking H2D** | All `.to(device)` calls in agents/trainers | Always-on | `non_blocking=True` overlaps CPU→GPU transfers with compute. Always include on new `.to(device)` calls. |
 | **torch.compile** | `bdq_agent.py`, `ppo_agent.py` | `torch_compile: true` | JIT-fuses ops on CUDA. Disabled on some GPU/driver combos (RTX 5090 + CUDA 13.0 segfaults). New configs should default to `true`. |
+| **High UTD ratio** | `deepscalper_trainer.py` | `update_interval: 8` | Multiple gradient updates per env step. GPU is idle 94% at UTD=2; UTD=8 fills that gap. Tau auto-scales to maintain constant target net tracking rate. Safe up to UTD=16. |
 
 **Rules for new code:**
 - New `.to(device)` calls **must** include `non_blocking=True`
 - New replay buffers **must** support batch push (no per-sample loops)
 - New configs **must** include `torch_compile: true` under `agents.bdq` or `agents.ppo`
+- New configs **should** use `update_interval: 8` for GPU utilization (tau auto-scales, no manual adjustment needed)
 - Do NOT introduce Python-level loops over batch dimensions in hot paths (sampling, updates, H2D transfers)
 
 ## Verification Tiers (from AGENTS.md)
