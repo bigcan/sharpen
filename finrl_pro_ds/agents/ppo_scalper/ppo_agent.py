@@ -48,6 +48,7 @@ class PPOAgent:
         use_amp: bool = False,
         clip_value_loss: bool = True,
         target_kl: Optional[float] = None,
+        torch_compile: bool = False,    # PERF FIX-1: torch.compile for GPU kernel fusion
         device: str = "cpu",
     ):
         self.device = torch.device(device)
@@ -82,6 +83,17 @@ class PPOAgent:
         net_cfg = dict(network_config)
         net_cfg["action_space_dims"] = action_dims
         self.network = PPOActorCritic(**net_cfg).to(self.device)
+
+        # PERF FIX-1: torch.compile for GPU kernel fusion
+        # R&D log: reduce-overhead crashes PPO — use mode="default"
+        self._torch_compiled = False
+        if torch_compile and self.device.type == "cuda":
+            try:
+                self.network = torch.compile(self.network, mode="default")
+                self._torch_compiled = True
+                print("[torch.compile] PPO network compiled (mode=default)")
+            except Exception as e:
+                print(f"[torch.compile] Failed, falling back to eager mode: {e}")
 
         # Optimizer
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr, eps=1e-5)
@@ -137,9 +149,10 @@ class PPOAgent:
             log_probs: (B,) numpy float32
             values: (B,) numpy float32
         """
-        micro = micro.to(self.device)
-        private_in = private_in.to(self.device)
-        macro = macro.to(self.device)
+        # PERF FIX-4: non_blocking H2D transfers
+        micro = micro.to(self.device, non_blocking=True)
+        private_in = private_in.to(self.device, non_blocking=True)
+        macro = macro.to(self.device, non_blocking=True)
 
         # Prepare qty mask tensor
         qty_mask_t = None
@@ -305,10 +318,16 @@ class PPOAgent:
     # ------------------------------------------------------------------
     # Interface: save / load
     # ------------------------------------------------------------------
+    @staticmethod
+    def _strip_compile_prefix(state_dict):
+        """Strip '_orig_mod.' prefix added by torch.compile for portable checkpoints."""
+        return {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+
     def save(self, path: str):
         """Save checkpoint."""
+        # PERF FIX-1: Strip torch.compile prefix for portable checkpoints
         ckpt = {
-            "network": self.network.state_dict(),
+            "network": self._strip_compile_prefix(self.network.state_dict()),
             "optimizer": self.optimizer.state_dict(),
             "step_count": self.step_count,
         }
@@ -327,7 +346,9 @@ class PPOAgent:
             return
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         try:
-            self.network.load_state_dict(checkpoint["network"])
+            # PERF FIX-1: Strip torch.compile prefix from checkpoint keys
+            network_sd = self._strip_compile_prefix(checkpoint["network"])
+            self.network.load_state_dict(network_sd)
         except RuntimeError as e:
             if "Missing key" in str(e) or "Unexpected key" in str(e):
                 logger.warning(

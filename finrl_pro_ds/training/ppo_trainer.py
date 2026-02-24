@@ -99,6 +99,7 @@ class PPOTrainer:
             use_amp=config["training"].get("use_amp", False),
             clip_value_loss=ppo_cfg.get("clip_value_loss", True),  # AUDIT FIX FLAG-3
             target_kl=ppo_cfg.get("target_kl", None),              # AUDIT FIX FLAG-4
+            torch_compile=config["training"].get("torch_compile", False),  # PERF FIX-1
             device=device,
         )
 

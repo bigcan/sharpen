@@ -207,7 +207,82 @@ class TestFlatBufferMemory:
 
 
 # ---------------------------------------------------------------------------
-# 5. Agent Integration (drop-in replacement)
+# 5. push_batch Tests
+# ---------------------------------------------------------------------------
+
+class TestFlatBufferBatchPush:
+
+    def test_push_batch_matches_sequential(self):
+        """Batch push of N transitions should match N sequential pushes."""
+        N = 20
+        buf_seq = _make_buffer(100)
+        buf_batch = _make_buffer(100)
+
+        # Build batched arrays
+        micros = np.arange(N, dtype=np.float32).reshape(N, 1, 1) * np.ones(MICRO_SHAPE, dtype=np.float32)
+        macros = np.arange(N, dtype=np.float32).reshape(N, 1) * np.ones(MACRO_SHAPE, dtype=np.float32)
+        privates = np.arange(N, dtype=np.float32).reshape(N, 1) * np.ones(PRIVATE_SHAPE, dtype=np.float32)
+        next_micros = micros + 100
+        next_macros = macros + 100
+        next_privates = privates + 100
+        actions_arr = np.zeros((N, *ACTION_SHAPE), dtype=np.int64)
+        rewards_arr = np.arange(N, dtype=np.float32) * 0.01
+        dones_arr = np.zeros(N, dtype=np.float32)
+        aux_arr = np.arange(N, dtype=np.float32) * 0.001
+
+        # Sequential
+        for i in range(N):
+            state = {"micro": micros[i], "macro": macros[i], "private": privates[i]}
+            next_state = {"micro": next_micros[i], "macro": next_macros[i], "private": next_privates[i]}
+            buf_seq.push(state, actions_arr[i], rewards_arr[i], next_state, dones_arr[i], aux_arr[i])
+
+        # Batch
+        states = {"micro": micros, "macro": macros, "private": privates}
+        next_states = {"micro": next_micros, "macro": next_macros, "private": next_privates}
+        buf_batch.push_batch(states, actions_arr, rewards_arr, next_states, dones_arr, aux_arr)
+
+        assert len(buf_seq) == len(buf_batch)
+        np.testing.assert_array_equal(buf_seq._micro[:N], buf_batch._micro[:N])
+        np.testing.assert_array_equal(buf_seq._rewards[:N], buf_batch._rewards[:N])
+        np.testing.assert_array_equal(buf_seq._next_micro[:N], buf_batch._next_micro[:N])
+
+    def test_push_batch_wraparound(self):
+        """Batch push should handle circular wraparound correctly."""
+        cap = 10
+        buf = _make_buffer(cap)
+
+        # Fill to position 8
+        for i in range(8):
+            _push_transition(buf, i)
+
+        # Batch push 5 items — wraps around from ptr=8, needs positions 8,9,0,1,2
+        N = 5
+        micros = np.ones((N, *MICRO_SHAPE), dtype=np.float32) * 99
+        macros = np.ones((N, *MACRO_SHAPE), dtype=np.float32) * 99
+        privates = np.ones((N, *PRIVATE_SHAPE), dtype=np.float32) * 99
+        states = {"micro": micros, "macro": macros, "private": privates}
+        next_states = {"micro": micros + 1, "macro": macros + 1, "private": privates + 1}
+        actions_arr = np.zeros((N, *ACTION_SHAPE), dtype=np.int64)
+        rewards_arr = np.ones(N, dtype=np.float32) * 99
+        dones_arr = np.zeros(N, dtype=np.float32)
+        aux_arr = np.zeros(N, dtype=np.float32)
+
+        buf.push_batch(states, actions_arr, rewards_arr, next_states, dones_arr, aux_arr)
+
+        assert len(buf) == cap
+        # Positions 8, 9 should have value 99
+        assert buf._micro[8, 0, 0] == pytest.approx(99.0)
+        assert buf._micro[9, 0, 0] == pytest.approx(99.0)
+        # Positions 0, 1, 2 should also have been overwritten
+        assert buf._micro[0, 0, 0] == pytest.approx(99.0)
+        assert buf._micro[1, 0, 0] == pytest.approx(99.0)
+        assert buf._micro[2, 0, 0] == pytest.approx(99.0)
+        # Position 3 should still be the old value (3.0)
+        assert buf._micro[3, 0, 0] == pytest.approx(3.0)
+
+
+# ---------------------------------------------------------------------------
+# 6. Agent Integration (drop-in replacement)
 # ---------------------------------------------------------------------------
 
 def _push_integration_transition(buf, idx=0):

@@ -312,8 +312,46 @@ class DeepScalperEnv(gym.Env):
         initial_private_state = self._normalize_private_state(0.0, float(self.initial_balance), 1.0, 0.0, 0.0)
         self.private_window = np.tile(initial_private_state, (self.window_size, 1))
         
+        # PERF FIX-5: Pre-compute column indices for raw data path
+        self._use_raw_path = False
+        if self.handler and hasattr(self.handler, '_col_to_idx') and self.handler._col_to_idx:
+            col_idx = self.handler._col_to_idx
+            try:
+                self._micro_col_indices = np.array(
+                    [col_idx[k] for k in self._micro_keys], dtype=np.intp
+                )
+                self._macro_col_indices = np.array(
+                    [col_idx[k] for k in self._macro_cols], dtype=np.intp
+                )
+                self._bid_price_idx = col_idx['bid_price_1']
+                self._ask_price_idx = col_idx['ask_price_1']
+                self._high_idx = col_idx.get('high')
+                self._low_idx = col_idx.get('low')
+                self._bid_vol_idx = col_idx.get('bid_vol_1')
+                self._ask_vol_idx = col_idx.get('ask_vol_1')
+                self._use_raw_path = True
+            except KeyError:
+                self._use_raw_path = False
+
         if self.handler:
             self.handler.reset()
+
+            # PERF FIX-5: Debug assertion — validate raw path matches dict path (runs once)
+            if self._use_raw_path and hasattr(self.handler, 'step_raw') and not getattr(self, '_raw_path_validated', False):
+                dict_step = self.handler.step()
+                if dict_step is not None:
+                    self.handler._ptr -= 1  # Rewind so normal flow re-reads this row
+                    raw_row = self.handler._row_matrix[self.handler._ptr]
+                    col_idx = self.handler._col_to_idx
+                    for key in self._micro_keys:
+                        if key in col_idx:
+                            dict_val = float(dict_step.get(key, 0))
+                            raw_val = float(raw_row[col_idx[key]])
+                            assert abs(dict_val - raw_val) < 1e-5, (
+                                f"Raw path mismatch for '{key}': dict={dict_val}, raw={raw_val}"
+                            )
+                    self._raw_path_validated = True
+
             first_step = self.handler.step()
             if first_step is not None:
                 # Reset Window with valid data
@@ -322,14 +360,13 @@ class DeepScalperEnv(gym.Env):
                 self._update_macro_state(first_step) # Update macro state as well
                 
                 # Update current pricing for augmentation
-                # Assumes handler returns dict with 'mid_price' or similar, or we extract from LOB
-                # _build_frame likely sets internal mid_price if not explicitly set
-                if hasattr(first_step, 'mid_price'):
+                # _build_frame already sets current_best_bid/ask — use those
+                if self.current_best_bid > 0 and self.current_best_ask > 0:
+                    self.current_mid_price = (self.current_best_bid + self.current_best_ask) / 2.0
+                elif hasattr(first_step, 'mid_price'):
                      self.current_mid_price = first_step.mid_price
-                elif 'mid_price' in first_step:
+                elif isinstance(first_step, dict) and 'mid_price' in first_step:
                      self.current_mid_price = first_step['mid_price']
-                elif 'bid_price_1' in first_step and 'ask_price_1' in first_step:
-                     self.current_mid_price = (first_step['bid_price_1'] + first_step['ask_price_1']) / 2.0
                 
                 # Deviation #8: Private State Augmentation
                 if self.private_state_augment_prob > 0.0 and np.random.random() < self.private_state_augment_prob:
@@ -633,9 +670,13 @@ class DeepScalperEnv(gym.Env):
         self.current_step += 1
         
         # 1. Get Market Data T+1
+        # PERF FIX-5: Use raw numpy path when available (no dict construction)
         step_data = None
         if self.handler:
-            step_data = self.handler.step()
+            if self._use_raw_path and hasattr(self.handler, 'step_raw'):
+                step_data = self.handler.step_raw()
+            else:
+                step_data = self.handler.step()
         
         # FIX CQ-1: Removed redundant pre-execution drawdown check.
         # The authoritative check is post-execution (line ~570) with current pricing.
@@ -837,7 +878,7 @@ class DeepScalperEnv(gym.Env):
             "volatility_target": volatility_target,
             "cumulative_slippage": self.cumulative_slippage,
             "total_execution_costs": self.cumulative_fees + self.cumulative_slippage,
-            "timestamp": step_data.get("timestamp") if step_data is not None else None,
+            "timestamp": step_data.get("timestamp") if (step_data is not None and isinstance(step_data, dict)) else None,
             # Telemetry — T1.1: NAV-based reward components
             "reward_nav": reward_nav_bps,
             "nav_delta": nav_delta,
@@ -895,10 +936,50 @@ class DeepScalperEnv(gym.Env):
 
     def _build_frame(self, step_data: Any) -> np.ndarray:
         """Construct a single micro-observation frame from step data.
-        
+
         v2: Reads 30 normalized micro features by name from MICRO_FEATURE_COLS.
         RAW prices/volumes stored separately for order execution.
+
+        PERF FIX-5: When step_data is a raw numpy row (from step_raw()),
+        uses pre-computed index arrays for ~10x faster extraction.
         """
+        # --- Fast path: numpy row from step_raw() ---
+        if self._use_raw_path and isinstance(step_data, np.ndarray):
+            frame = step_data[self._micro_col_indices].copy()
+
+            # RAW prices for order execution
+            self.current_best_bid = float(step_data[self._bid_price_idx])
+            self.current_best_ask = float(step_data[self._ask_price_idx])
+
+            # High/Low for maker fill simulation
+            if self._high_idx is not None and self._low_idx is not None:
+                self.current_high = float(step_data[self._high_idx])
+                self.current_low = float(step_data[self._low_idx])
+            else:
+                self.current_high = self.current_best_ask
+                self.current_low = self.current_best_bid
+                if not getattr(self, '_warned_no_highlow', False) and self.current_step > self.window_size:
+                    logging.warning("T1.5v2: 'high'/'low' missing from data — falling back to BBO for maker fills")
+                    self._warned_no_highlow = True
+
+            # Raw volumes
+            if self._bid_vol_idx is not None:
+                self._raw_bid_vol_1 = float(step_data[self._bid_vol_idx])
+            if self._ask_vol_idx is not None:
+                self._raw_ask_vol_1 = float(step_data[self._ask_vol_idx])
+
+            # NaN guard
+            if np.isnan(frame).any():
+                if self.current_step <= self.window_size:
+                    np.nan_to_num(frame, copy=False, nan=0.0)
+                else:
+                    nan_cols = [self._micro_keys[i] for i in np.where(np.isnan(frame))[0]]
+                    raise ValueError(
+                        f"NaN in _build_frame at step {self.current_step}: {nan_cols}"
+                    )
+            return frame
+
+        # --- Slow path: dict from step() ---
         frame = np.zeros((self.micro_dim,), dtype=np.float32)
 
         try:
@@ -946,7 +1027,18 @@ class DeepScalperEnv(gym.Env):
         return frame
 
     def _update_macro_state(self, step_data: Any):
-        """Update macro state vector."""
+        """Update macro state vector.
+
+        PERF FIX-5: Fast path uses pre-computed index array when step_data
+        is a numpy row from step_raw().
+        """
+        # --- Fast path: numpy row ---
+        if self._use_raw_path and isinstance(step_data, np.ndarray):
+            self.current_macro = step_data[self._macro_col_indices].copy()
+            np.nan_to_num(self.current_macro, copy=False, nan=0.0)
+            return
+
+        # --- Slow path: dict ---
         try:
             macro_values = []
             for col in self._macro_cols:

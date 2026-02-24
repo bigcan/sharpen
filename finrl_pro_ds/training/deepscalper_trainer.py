@@ -68,6 +68,7 @@ class DeepScalperTrainer:
             per_beta_frames=config["agents"]["bdq"].get("per_beta_frames", 100000),
             exploration_mode=config["agents"]["bdq"].get("exploration_mode", "boltzmann"),
             tau=config["agents"]["bdq"].get("tau", 0.005),
+            torch_compile=config["training"].get("torch_compile", False),  # PERF FIX-1
             device=device
         )
         
@@ -260,11 +261,12 @@ class DeepScalperTrainer:
         self._last_prune_rung = 0
         
         # FIX PERF-3 + N4: Hoist extract_tensors outside loop
+        # PERF FIX-4: non_blocking H2D transfers
         def extract_tensors(o, device=self.device):
             return (
-                torch.as_tensor(o["micro"], dtype=torch.float32).to(device),
-                torch.as_tensor(o["private"], dtype=torch.float32).to(device),
-                torch.as_tensor(o["macro"], dtype=torch.float32).to(device)
+                torch.as_tensor(o["micro"], dtype=torch.float32).to(device, non_blocking=True),
+                torch.as_tensor(o["private"], dtype=torch.float32).to(device, non_blocking=True),
+                torch.as_tensor(o["macro"], dtype=torch.float32).to(device, non_blocking=True)
             )
 
         # Paper Section 4.3: Epoch-based training — each epoch replays the data
@@ -313,43 +315,50 @@ class DeepScalperTrainer:
                 dones_for_buffer = term  # Only term zeroes Bellman bootstrap
                 
                 # 3. Store in Buffer
-                for i in range(num_envs):
-                    s = {k: v[i] for k, v in obs.items()}
-                    ns = {k: v[i] for k, v in next_obs.items()}
-                    a = actions[i]
-                    raw_r = rewards[i] # Store raw reward for tracking
-                    d_reset = dones_for_reset[i]  # For episodic stats
-                    d_buffer = dones_for_buffer[i]  # For Bellman bootstrap
-                    
-                    # Sprint 7 BUG-3 FIX: Use raw bps reward (no double-normalization)
-                    norm_r = raw_r
-                    
-                    # EXTRACT VOLATILITY TARGET FROM INFO for Hindsight/Aux
-                    aux_target = 0.0
-                    if isinstance(infos, dict) and "volatility_target" in infos:
-                        val = infos["volatility_target"]
-                        if hasattr(val, "__getitem__"):
-                             aux_target = val[i]
-                        else:
-                             aux_target = val
-                    elif isinstance(infos, list):
-                         aux_target = infos[i].get("volatility_target", 0.0)
-                    
-                    self.agent.memory.push(s, a, float(norm_r), ns, bool(d_buffer), float(aux_target))
-                    
-                    # Accumulate reward components for hindsight ratio tracking
-                    if isinstance(infos, dict):
-                        rh = infos.get("reward_hindsight", None)
-                        rt = infos.get("reward_total", None)
-                        if rh is not None and rt is not None:
+                # PERF FIX-2: Extract aux_targets vectorized
+                aux_targets_vec = np.zeros(num_envs, dtype=np.float32)
+                if isinstance(infos, dict) and "volatility_target" in infos:
+                    val = infos["volatility_target"]
+                    if hasattr(val, "__getitem__"):
+                        aux_targets_vec[:] = val[:num_envs]
+                    else:
+                        aux_targets_vec[:] = float(val)
+                elif isinstance(infos, list):
+                    for i in range(num_envs):
+                        aux_targets_vec[i] = float(infos[i].get("volatility_target", 0.0))
+
+                # PERF FIX-2: Batch push for FlatReplayBuffer (not PER — PER stores Python objects)
+                from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
+                if isinstance(self.agent.memory, FlatReplayBuffer):
+                    self.agent.memory.push_batch(
+                        obs, actions, rewards.astype(np.float32),
+                        next_obs, dones_for_buffer.astype(np.float32),
+                        aux_targets_vec,
+                    )
+                else:
+                    # PER fallback: per-transition push
+                    for i in range(num_envs):
+                        s = {k: v[i] for k, v in obs.items()}
+                        ns = {k: v[i] for k, v in next_obs.items()}
+                        self.agent.memory.push(
+                            s, actions[i], float(rewards[i]),
+                            ns, bool(dones_for_buffer[i]), float(aux_targets_vec[i])
+                        )
+
+                # Accumulate reward components for hindsight ratio tracking
+                if isinstance(infos, dict):
+                    rh = infos.get("reward_hindsight", None)
+                    rt = infos.get("reward_total", None)
+                    if rh is not None and rt is not None:
+                        for i in range(num_envs):
                             _acc_hindsight += abs(float(rh[i]) if hasattr(rh, "__getitem__") else float(rh))
                             _acc_total += abs(float(rt[i]) if hasattr(rt, "__getitem__") else float(rt))
-                    
-                    # Track Episodic Stats
-                    curr_rewards[i] += raw_r
+
+                # Track Episodic Stats (lightweight per-env loop)
+                for i in range(num_envs):
+                    curr_rewards[i] += rewards[i]
                     curr_lens[i] += 1
-                    
-                    if d_reset:  # Reset episodic stats on ANY episode end
+                    if dones_for_reset[i]:
                         episode_rewards.append(curr_rewards[i])
                         episode_lens.append(curr_lens[i])
                         curr_rewards[i] = 0

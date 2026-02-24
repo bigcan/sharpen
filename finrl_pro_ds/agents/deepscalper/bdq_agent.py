@@ -66,6 +66,7 @@ class DeepScalperBDQ:
         per_beta_start: float = 0.4,    # Initial IS correction
         per_beta_frames: int = 100000,  # Anneal beta to 1.0 over this many frames
         target_q_clip: float = 5000.0,  # Sprint 3: Clip target Q-values (default for gamma=0.99, R=50)
+        torch_compile: bool = False,    # PERF FIX-1: torch.compile for GPU kernel fusion
         device: str = "cpu"
     ):
         self.device = torch.device(device)
@@ -98,6 +99,18 @@ class DeepScalperBDQ:
         self.target_net = DeepScalperNetwork(**network_config).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
+
+        # PERF FIX-1: torch.compile for GPU kernel fusion
+        # R&D log: reduce-overhead crashes PPO — use mode="default" for both agents
+        self._torch_compiled = False
+        if torch_compile and self.device.type == "cuda":
+            try:
+                self.policy_net = torch.compile(self.policy_net, mode="default")
+                self.target_net = torch.compile(self.target_net, mode="default")
+                self._torch_compiled = True
+                print("[torch.compile] BDQ policy_net + target_net compiled (mode=default)")
+            except Exception as e:
+                print(f"[torch.compile] Failed, falling back to eager mode: {e}")
 
         # FIX M2: Validate action dims match between agent and network
         net_action_dims = network_config.get('action_space_dims', (5, 9))
@@ -286,36 +299,38 @@ class DeepScalperBDQ:
         if self.use_per:
             (state_batch, action_batch, reward_batch, next_state_batch,
              done_batch, aux_target_batch, per_indices, is_weights) = self.memory.sample(self.batch_size)
-            is_weights_t = torch.tensor(is_weights, dtype=torch.float32).unsqueeze(1).to(self.device)  # (B, 1)
+            # PERF FIX-4: non_blocking H2D transfers
+            is_weights_t = torch.tensor(is_weights, dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)  # (B, 1)
             # PER buffer returns tuples of dicts — need list comprehension to stack
             def stack_dict_keys(batch_list, key):
-                return torch.tensor(np.array([s[key] for s in batch_list]), dtype=torch.float32).to(self.device)
+                return torch.tensor(np.array([s[key] for s in batch_list]), dtype=torch.float32).to(self.device, non_blocking=True)
             micro_state = stack_dict_keys(state_batch, "micro")
             private_state = stack_dict_keys(state_batch, "private")
             macro_state = stack_dict_keys(state_batch, "macro")
             micro_next = stack_dict_keys(next_state_batch, "micro")
             private_next = stack_dict_keys(next_state_batch, "private")
             macro_next = stack_dict_keys(next_state_batch, "macro")
-            actions = torch.tensor(np.array(action_batch), dtype=torch.long).to(self.device)
-            rewards = torch.tensor(np.array(reward_batch), dtype=torch.float32).unsqueeze(1).to(self.device)
-            dones = torch.tensor(np.array(done_batch), dtype=torch.float32).unsqueeze(1).to(self.device)
-            aux_targets = torch.tensor(np.array(aux_target_batch), dtype=torch.float32).unsqueeze(1).to(self.device)
+            actions = torch.tensor(np.array(action_batch), dtype=torch.long).to(self.device, non_blocking=True)
+            rewards = torch.tensor(np.array(reward_batch), dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
+            dones = torch.tensor(np.array(done_batch), dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
+            aux_targets = torch.tensor(np.array(aux_target_batch), dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
         else:
             # FIX BUF-1: FlatReplayBuffer returns pre-stacked numpy arrays (dicts with batch dim)
             state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = self.memory.sample(self.batch_size)
             per_indices = None
             is_weights_t = None
             # Zero-copy path: numpy → torch tensor (no list comprehension)
-            micro_state = torch.as_tensor(state_batch["micro"], dtype=torch.float32).to(self.device)
-            private_state = torch.as_tensor(state_batch["private"], dtype=torch.float32).to(self.device)
-            macro_state = torch.as_tensor(state_batch["macro"], dtype=torch.float32).to(self.device)
-            micro_next = torch.as_tensor(next_state_batch["micro"], dtype=torch.float32).to(self.device)
-            private_next = torch.as_tensor(next_state_batch["private"], dtype=torch.float32).to(self.device)
-            macro_next = torch.as_tensor(next_state_batch["macro"], dtype=torch.float32).to(self.device)
-            actions = torch.as_tensor(action_batch, dtype=torch.long).to(self.device)
-            rewards = torch.as_tensor(reward_batch, dtype=torch.float32).unsqueeze(1).to(self.device)
-            dones = torch.as_tensor(done_batch, dtype=torch.float32).unsqueeze(1).to(self.device)
-            aux_targets = torch.as_tensor(aux_target_batch, dtype=torch.float32).unsqueeze(1).to(self.device)
+            # PERF FIX-4: non_blocking H2D transfers — CPU doesn't wait for copy completion
+            micro_state = torch.as_tensor(state_batch["micro"], dtype=torch.float32).to(self.device, non_blocking=True)
+            private_state = torch.as_tensor(state_batch["private"], dtype=torch.float32).to(self.device, non_blocking=True)
+            macro_state = torch.as_tensor(state_batch["macro"], dtype=torch.float32).to(self.device, non_blocking=True)
+            micro_next = torch.as_tensor(next_state_batch["micro"], dtype=torch.float32).to(self.device, non_blocking=True)
+            private_next = torch.as_tensor(next_state_batch["private"], dtype=torch.float32).to(self.device, non_blocking=True)
+            macro_next = torch.as_tensor(next_state_batch["macro"], dtype=torch.float32).to(self.device, non_blocking=True)
+            actions = torch.as_tensor(action_batch, dtype=torch.long).to(self.device, non_blocking=True)
+            rewards = torch.as_tensor(reward_batch, dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
+            dones = torch.as_tensor(done_batch, dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
+            aux_targets = torch.as_tensor(aux_target_batch, dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
         
         # Current Q-Values — 2 branches (Paper-aligned)
         # FIX H1: Use modern torch.amp.autocast (works on CPU + CUDA)
@@ -484,10 +499,18 @@ class DeepScalperBDQ:
             # Fallback: original multiplicative decay (standalone agent without trainer)
             self.epsilon = max(self.epsilon_end, self.epsilon * self.epsilon_decay)
 
+    @staticmethod
+    def _strip_compile_prefix(state_dict):
+        """Strip '_orig_mod.' prefix added by torch.compile for portable checkpoints."""
+        return {k.replace("_orig_mod.", ""): v for k, v in state_dict.items()}
+
     def save(self, path: str):
+        # PERF FIX-1: Strip torch.compile prefix for portable checkpoints
+        policy_sd = self._strip_compile_prefix(self.policy_net.state_dict())
+        target_sd = self._strip_compile_prefix(self.target_net.state_dict())
         ckpt = {
-            'policy_net': self.policy_net.state_dict(),
-            'target_net': self.target_net.state_dict(),
+            'policy_net': policy_sd,
+            'target_net': target_sd,
             'optimizer': self.optimizer.state_dict(),
             'epsilon': self.epsilon,
             # FIX FIND-V3-02b: Persist epsilon schedule state for resume
@@ -511,8 +534,11 @@ class DeepScalperBDQ:
         # Our checkpoints contain numpy scalars (epsilon, LR scheduler state) which
         # are rejected by the safe unpickler. These are our own trusted checkpoints.
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
-        self.policy_net.load_state_dict(checkpoint['policy_net'])
-        self.target_net.load_state_dict(checkpoint['target_net'])
+        # PERF FIX-1: Strip torch.compile prefix from checkpoint keys (backward-compatible)
+        policy_sd = self._strip_compile_prefix(checkpoint['policy_net'])
+        target_sd = self._strip_compile_prefix(checkpoint['target_net'])
+        self.policy_net.load_state_dict(policy_sd)
+        self.target_net.load_state_dict(target_sd)
         self.optimizer.load_state_dict(checkpoint['optimizer'])
         self.epsilon = checkpoint.get('epsilon', self.epsilon)
         # FIX FIND-V3-02b: Restore epsilon schedule state (backward-compatible)

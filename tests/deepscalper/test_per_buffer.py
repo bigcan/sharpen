@@ -253,6 +253,79 @@ def _make_per_agent():
     )
 
 
+# ---------------------------------------------------------------------------
+# 2b. Vectorized SumTree batch operations
+# ---------------------------------------------------------------------------
+
+class TestSumTreeBatch:
+    """Tests for vectorized get_batch / batch_update."""
+
+    def test_get_batch_matches_sequential(self):
+        """Batch retrieval should match 100 individual get() calls."""
+        tree = SumTree(capacity=64)
+        for i in range(64):
+            tree.add(float(i + 1), f"data_{i}")
+
+        np.random.seed(42)
+        cumsums = np.random.uniform(0, tree.total(), size=100)
+
+        # Sequential
+        seq_indices = []
+        seq_priorities = []
+        for cs in cumsums:
+            idx, pri, _ = tree.get(cs)
+            seq_indices.append(idx)
+            seq_priorities.append(pri)
+
+        # Batch
+        batch_indices, batch_priorities = tree.get_batch(cumsums)
+
+        np.testing.assert_array_equal(batch_indices, np.array(seq_indices))
+        np.testing.assert_array_almost_equal(batch_priorities, np.array(seq_priorities))
+
+    def test_batch_update_matches_sequential(self):
+        """Batch update should produce same tree state as sequential updates."""
+        import copy
+
+        # Build two identical trees
+        tree_seq = SumTree(capacity=32)
+        tree_batch = SumTree(capacity=32)
+        for i in range(32):
+            tree_seq.add(float(i + 1), f"data_{i}")
+            tree_batch.add(float(i + 1), f"data_{i}")
+
+        # Unique indices and new priorities
+        indices = np.array([31, 35, 40, 50, 55], dtype=np.int64)  # leaf indices
+        new_priorities = np.array([10.0, 20.0, 30.0, 40.0, 50.0])
+
+        # Sequential
+        for idx, pri in zip(indices, new_priorities):
+            tree_seq.update(int(idx), pri)
+
+        # Batch
+        tree_batch.batch_update(indices, new_priorities)
+
+        np.testing.assert_array_almost_equal(tree_batch.tree, tree_seq.tree)
+
+    def test_batch_update_duplicate_indices(self):
+        """Tree should be consistent when the same leaf is updated multiple times."""
+        tree = SumTree(capacity=8)
+        for i in range(8):
+            tree.add(1.0, f"data_{i}")
+
+        # Update the same leaf twice — last value should win
+        leaf_idx = 7  # capacity - 1 = first leaf
+        indices = np.array([leaf_idx, leaf_idx], dtype=np.int64)
+        priorities = np.array([5.0, 10.0])
+
+        tree.batch_update(indices, priorities)
+
+        # Leaf should have the LAST written value (10.0)
+        assert tree.tree[leaf_idx] == pytest.approx(10.0)
+        # Total should be: 10.0 + 7 * 1.0 = 17.0
+        assert tree.total() == pytest.approx(17.0)
+
+
 class TestBDQWithPER:
     """Integration tests: BDQ agent training with PER buffer."""
 
