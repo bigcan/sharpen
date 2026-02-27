@@ -158,6 +158,13 @@ class DeepScalperEnv(gym.Env):
             self.action_space = gym.spaces.Discrete(self.discrete_dims)
             self._use_leverage_action = False
 
+        # Phase J: Daily episodes with random start for credit assignment
+        # episode_length=0 → full dataset (default, backward-compatible)
+        # episode_length=288 → 1 day of 5-min bars (CME gold: 23h trading)
+        self.episode_length = int(config.get("episode_length", 0))
+        self.random_start = bool(config.get("random_start", False))
+        self._episode_end = 0  # Set in reset()
+
         # Discrete(3) → Discrete(6) action mapping for internal processing
         # Maps simplified 3-action space to the 6-action internal logic
         self._disc3_to_disc6 = {0: 0, 1: 2, 2: 5}  # TakerBuy→0, Hold→2, TakerSell→5
@@ -377,6 +384,20 @@ class DeepScalperEnv(gym.Env):
 
         if self.handler:
             self.handler.reset()
+
+            # Phase J: Daily episodes with random start
+            data_len = getattr(self.handler, '_len', 0)
+            if self.episode_length > 0 and data_len > 0:
+                if self.random_start:
+                    max_start = max(1, data_len - self.episode_length - self.window_size)
+                    start_idx = np.random.randint(0, max_start)
+                    self.handler._ptr = start_idx
+                    self.current_step = 0
+                self._episode_end = self.episode_length
+                # Override total_episode_steps for remaining_time calculation
+                self.total_episode_steps = self.episode_length
+            else:
+                self._episode_end = 0  # Disabled — full dataset
 
             # PERF FIX-5: Debug assertion — validate raw path matches dict path (runs once)
             if self._use_raw_path and hasattr(self.handler, 'step_raw') and not getattr(self, '_raw_path_validated', False):
@@ -933,6 +954,11 @@ class DeepScalperEnv(gym.Env):
         
         # 5. Safety Drawdown Stop
         truncated = False
+
+        # Phase J: Daily episode truncation (truncated, NOT terminated — Bellman bootstrap continues)
+        if self._episode_end > 0 and self.current_step >= self._episode_end:
+            truncated = True
+
         if current_portfolio_value < self._stop_loss_threshold * self.initial_balance:
             terminated = True
             logging.warning(f"Hit Max Drawdown Stop ({self.max_drawdown_pct:.0%}). Terminating Episode.")

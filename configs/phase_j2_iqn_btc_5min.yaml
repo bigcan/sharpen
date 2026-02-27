@@ -1,0 +1,109 @@
+# Phase J2: BTC Bitfinex IQN — Distributional RL with NoisyNets
+# =============================================================
+# Same IQN architecture as J1, adapted for BTC zero-fee environment.
+# Bitfinex zero-fee model: only cost is effective spread (~1 bps).
+#
+# Gate: Test PF > 1.05 with >= 200 trades
+
+data:
+  file_path: "data/processed/btc_bitfinex_2025_full_year_5min.parquet"
+  ticker: "BTCUSDT"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  n_levels: 1
+  asset_class: "crypto"
+  micro_features: ["micro"]
+  macro_features: ["macro"]
+  private_features: ["position", "balance"]
+  vol_norm_window: 24
+
+env:
+  symbol: "BTCUSDT"
+  initial_balance: 100000.0
+  margin_requirement: 0.05
+  maker_fee: 0.0               # Bitfinex zero-fee
+  taker_fee: 0.0               # Bitfinex zero-fee
+  num_envs: 24
+  window_size: 15
+  max_drawdown_pct: 0.30
+
+  # Phase J: Daily episodes with random start
+  episode_length: 288          # 1 day of 5-min bars (crypto 24h)
+  random_start: true
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20
+    sharpe_weight: 0.0
+
+  action:
+    discrete_dims: 3           # TakerBuy, Hold, TakerSell
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+network:
+  micro_config:
+    input_size: 18
+    private_input_size: 5
+    hidden_size: 256
+    encoder_type: "flat"
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  iqn:
+    type: iqn
+    num_quantiles: 32
+    embedding_dim: 64
+    noisy_sigma0: 0.5
+    quantile_huber_kappa: 1.0
+    learning_rate: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 256
+    buffer_size: 500000
+    learning_starts: 5000
+    use_per: true
+    per_alpha: 0.6
+    per_beta_start: 0.4
+    per_beta_frames: 100000
+    torch_compile: true
+    gradient_clip: 10.0
+    auxiliary_weight: 0.1
+    update_interval: 8
+    checkpoint_interval: 500000
+
+replay:
+  stratified_sampling: true
+  stratified_hold_action: 1
+  stratified_hold_ratio: 0.5
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 15
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["BTC", "Bitfinex", "PhaseJ2", "IQN", "5min", "NoisyNet", "DailyEpisodes",
+         "StratifiedSampling", "HPO", "Level1", "ZeroFee", "Production"]

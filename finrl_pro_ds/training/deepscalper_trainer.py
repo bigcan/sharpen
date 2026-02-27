@@ -53,39 +53,80 @@ class DeepScalperTrainer:
         # Inject action_space_dims into network config so BDQ assertion is guaranteed
         net_cfg = dict(config["network"])
         net_cfg["action_space_dims"] = action_dims
-        
-        # Agent Init
-        self.agent = DeepScalperBDQ(
-            network_config=net_cfg,
-            lr=config["agents"]["bdq"]["learning_rate"],
-            gamma=config["agents"]["bdq"]["gamma"],
-            epsilon_start=config["agents"]["bdq"].get("epsilon_start", 1.0),
-            epsilon_end=config["agents"]["bdq"].get("epsilon_end", 0.01),
-            buffer_size=config["agents"]["bdq"]["buffer_size"],
-            batch_size=config["agents"]["bdq"]["batch_size"],
-            target_update_freq=config["agents"]["bdq"]["target_update_freq"],
-            auxiliary_weight=config["agents"]["bdq"].get("auxiliary_weight", 1.0),
-            epsilon_decay=config["agents"]["bdq"].get("epsilon_decay", 0.99999), # FIX: Read from config
-            action_dims=action_dims,  # FIX: Pass from config
-            use_amp=config["training"].get("use_amp", False),
-            # Paper Section 4.3: Prioritized Experience Replay
-            use_per=config["agents"]["bdq"].get("use_per", False),
-            per_alpha=config["agents"]["bdq"].get("per_alpha", 0.6),
-            per_beta_start=config["agents"]["bdq"].get("per_beta_start", 0.4),
-            per_beta_frames=config["agents"]["bdq"].get("per_beta_frames", 100000),
-            exploration_mode=config["agents"]["bdq"].get("exploration_mode", "boltzmann"),
-            tau=config["agents"]["bdq"].get("tau", 0.005),
-            torch_compile=config["training"].get("torch_compile", False),  # PERF FIX-1
-            device=device
-        )
-        
-        # Training Params
+
+        # Detect agent type from config
+        self._agent_type = "bdq"  # default
+        if "iqn" in config.get("agents", {}) and config["agents"]["iqn"].get("type") == "iqn":
+            self._agent_type = "iqn"
+
+        # Agent Init — dispatch by type
+        if self._agent_type == "iqn":
+            from finrl_pro_ds.agents.deepscalper.iqn_agent import IQNAgent
+            iqn_cfg = config["agents"]["iqn"]
+            self.agent = IQNAgent(
+                network_config=net_cfg,
+                lr=iqn_cfg["learning_rate"],
+                gamma=iqn_cfg["gamma"],
+                tau=iqn_cfg.get("tau", 0.005),
+                batch_size=iqn_cfg.get("batch_size", 256),
+                buffer_size=iqn_cfg.get("buffer_size", 500000),
+                num_quantiles=iqn_cfg.get("num_quantiles", 32),
+                embedding_dim=iqn_cfg.get("embedding_dim", 64),
+                noisy_sigma0=iqn_cfg.get("noisy_sigma0", 0.5),
+                quantile_huber_kappa=iqn_cfg.get("quantile_huber_kappa", 1.0),
+                gradient_clip=iqn_cfg.get("gradient_clip", 10.0),
+                auxiliary_weight=iqn_cfg.get("auxiliary_weight", 0.1),
+                use_amp=config["training"].get("use_amp", False),
+                use_per=iqn_cfg.get("use_per", False),
+                per_alpha=iqn_cfg.get("per_alpha", 0.6),
+                per_beta_start=iqn_cfg.get("per_beta_start", 0.4),
+                per_beta_frames=iqn_cfg.get("per_beta_frames", 100000),
+                torch_compile=config["training"].get("torch_compile", False),
+                action_dims=action_dims,
+                device=device,
+            )
+        else:
+            self.agent = DeepScalperBDQ(
+                network_config=net_cfg,
+                lr=config["agents"]["bdq"]["learning_rate"],
+                gamma=config["agents"]["bdq"]["gamma"],
+                epsilon_start=config["agents"]["bdq"].get("epsilon_start", 1.0),
+                epsilon_end=config["agents"]["bdq"].get("epsilon_end", 0.01),
+                buffer_size=config["agents"]["bdq"]["buffer_size"],
+                batch_size=config["agents"]["bdq"]["batch_size"],
+                target_update_freq=config["agents"]["bdq"]["target_update_freq"],
+                auxiliary_weight=config["agents"]["bdq"].get("auxiliary_weight", 1.0),
+                epsilon_decay=config["agents"]["bdq"].get("epsilon_decay", 0.99999),
+                action_dims=action_dims,
+                use_amp=config["training"].get("use_amp", False),
+                use_per=config["agents"]["bdq"].get("use_per", False),
+                per_alpha=config["agents"]["bdq"].get("per_alpha", 0.6),
+                per_beta_start=config["agents"]["bdq"].get("per_beta_start", 0.4),
+                per_beta_frames=config["agents"]["bdq"].get("per_beta_frames", 100000),
+                exploration_mode=config["agents"]["bdq"].get("exploration_mode", "boltzmann"),
+                tau=config["agents"]["bdq"].get("tau", 0.005),
+                torch_compile=config["training"].get("torch_compile", False),
+                device=device
+            )
+
+        # Phase J: Configure stratified sampling for IQN
+        replay_cfg = config.get("replay", {})
+        if self._agent_type == "iqn" and replay_cfg.get("stratified_sampling", False):
+            self.agent.stratified_sampling = True
+            self.agent.stratified_hold_action = replay_cfg.get("stratified_hold_action", 1)
+            self.agent.stratified_hold_ratio = replay_cfg.get("stratified_hold_ratio", 0.5)
+            print(f"[IQN] Stratified sampling enabled: hold_action={self.agent.stratified_hold_action}, "
+                  f"hold_ratio={self.agent.stratified_hold_ratio}")
+
+        # Training Params — read from agent-type-specific config section
+        _agent_cfg_key = "iqn" if self._agent_type == "iqn" else "bdq"
+        _agent_cfg = config["agents"][_agent_cfg_key]
         self.total_timesteps = config["training"]["total_timesteps"]
         self.training_epochs = config["training"].get("training_epochs", 1)  # Paper: ~5 epochs
-        self.update_interval = config["agents"]["bdq"].get("update_interval", 1.0)
+        self.update_interval = _agent_cfg.get("update_interval", 1.0)
         self.log_interval = config["training"]["log_interval"]
-        self.checkpoint_interval = config["agents"]["bdq"]["checkpoint_interval"]
-        self.learning_starts = config["agents"]["bdq"]["learning_starts"]
+        self.checkpoint_interval = _agent_cfg.get("checkpoint_interval", 500000)
+        self.learning_starts = _agent_cfg.get("learning_starts", 5000)
 
         # PERF: Auto-scale tau for high UTD (update-to-data ratio).
         # Soft target update fires every train_step(). With UTD=N, the target net

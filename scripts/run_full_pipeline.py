@@ -380,6 +380,26 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 f"{trial_prefix}/max_grad_norm": max_grad_norm,
                 f"{trial_prefix}/clip_eps": clip_eps,
             })
+        elif agent_type == "iqn":
+            # IQN hyperparams — optimizer HPs only (gamma, reward params locked)
+            learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-3, log=True)
+            num_quantiles = trial.suggest_categorical("num_quantiles", [8, 16, 32, 64])
+            noisy_sigma0 = trial.suggest_float("noisy_sigma0", 0.3, 0.7)
+            tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
+
+            config["env"]["reward"]["sharpe_weight"] = 0.0
+            config["env"]["reward"]["hindsight_weight"] = 0.0
+            config["agents"]["iqn"]["learning_rate"] = learning_rate
+            config["agents"]["iqn"]["num_quantiles"] = num_quantiles
+            config["agents"]["iqn"]["noisy_sigma0"] = noisy_sigma0
+            config["agents"]["iqn"]["tau"] = tau
+
+            wandb.log({
+                f"{trial_prefix}/learning_rate": learning_rate,
+                f"{trial_prefix}/num_quantiles": num_quantiles,
+                f"{trial_prefix}/noisy_sigma0": noisy_sigma0,
+                f"{trial_prefix}/tau": tau,
+            })
         else:
             # BDQ hyperparams (4 dimensions) — optimizer HPs only
             # FIX BUG-01: MDP-defining params (gamma, reward) are LOCKED in config.
@@ -421,6 +441,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             if agent_type == "ppo":
                 trainer = PPOTrainer(env, config, device=device, hpo_mode=True)
             else:
+                # DeepScalperTrainer handles both BDQ and IQN (auto-detects from config)
                 trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
             
             # V4.2: Evaluate on VALIDATION set (anti-overfitting)
@@ -715,6 +736,21 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 use_amp=config.get("training", {}).get("use_amp", False),
                 device=device,
             )
+        elif agent_type == "iqn":
+            from finrl_pro_ds.agents.deepscalper.iqn_agent import IQNAgent
+            iqn_cfg = config.get("agents", {}).get("iqn", {})
+            agent = IQNAgent(
+                network_config=network_config,
+                lr=iqn_cfg.get("learning_rate", 3e-4),
+                gamma=iqn_cfg.get("gamma", 0.99),
+                tau=iqn_cfg.get("tau", 0.005),
+                num_quantiles=iqn_cfg.get("num_quantiles", 32),
+                embedding_dim=iqn_cfg.get("embedding_dim", 64),
+                noisy_sigma0=iqn_cfg.get("noisy_sigma0", 0.5),
+                action_dims=action_dims,
+                use_amp=config.get("training", {}).get("use_amp", False),
+                device=device,
+            )
         else:
             # BDQ agent (existing behavior)
             bdq_config = config.get("agents", {}).get("bdq", {})
@@ -886,8 +922,8 @@ def _notify_discord(title: str, message: str, color: int = 0x00FF00):
 def main():
     parser = argparse.ArgumentParser(description="DeepScalper Pipeline (BDQ / PPO)")
     parser.add_argument("--config", type=str, default="configs/deepscalper_rtx5090.yaml")
-    parser.add_argument("--agent", type=str, default="bdq", choices=["bdq", "ppo"],
-                        help="Agent type: bdq (default) or ppo")
+    parser.add_argument("--agent", type=str, default="bdq", choices=["bdq", "ppo", "iqn"],
+                        help="Agent type: bdq (default), ppo, or iqn")
     parser.add_argument("--tags", nargs="*", default=["Pipeline"], help="WandB Tags")
     parser.add_argument("--run_name", type=str, default=None, help="Override WandB Run Name")
     parser.add_argument("--trials", type=int, default=None, help="Number of HPO trials")
@@ -906,7 +942,10 @@ def main():
     agent_type = args.agent
     if agent_type == "bdq":  # default value — check if config says otherwise
         agents_section = base_config.get("agents", {})
-        if "ppo" in agents_section and "bdq" not in agents_section:
+        if "iqn" in agents_section and agents_section["iqn"].get("type") == "iqn":
+            agent_type = "iqn"
+            logger.info(f"Agent type auto-detected from config: {agent_type}")
+        elif "ppo" in agents_section and "bdq" not in agents_section:
             agent_type = "ppo"
             logger.info(f"Agent type auto-detected from config: {agent_type}")
         else:
