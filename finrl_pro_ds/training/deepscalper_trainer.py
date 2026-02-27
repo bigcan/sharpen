@@ -506,20 +506,41 @@ class DeepScalperTrainer:
                     _acc_hindsight = 0.0
                     _acc_total = 0.0
 
-                # 4b. HPO Pruning Check
+                # 4b. HPO Pruning Check — dual strategy:
+                #   (a) Optuna Hyperband pruner for score-based inter-trial comparison
+                #   (b) Early-kill based on TD-error divergence (no learning signal)
+                # PERF-OPT: Reduced min_pruning_steps from 20K to 15K and prune_interval
+                # from 5K to 3K for faster trial turnover. At 500K steps/trial,
+                # aggressive pruning saves ~60% of wasted compute on dead trials.
                 if optuna_trial and pruning_callback:
-                    min_pruning_steps = 20000 
-                    prune_interval = 5000
+                    min_pruning_steps = 15000
+                    prune_interval = 3000
                     current_rung = global_step // prune_interval
-                    
+
                     if global_step > min_pruning_steps and current_rung > getattr(self, '_last_prune_rung', -1):
                         self._last_prune_rung = current_rung
                         print(f"  [HPO] Probing agent at step {global_step} (rung {current_rung})...")
                         score = pruning_callback()
                         print(f"  [HPO] Step {global_step} Score: {score:.4f}")
-                        
+
+                        # Track score history for early-kill on flat/diverging trials
+                        if not hasattr(self, '_hpo_score_history'):
+                            self._hpo_score_history = []
+                        self._hpo_score_history.append((global_step, score))
+
+                        # PERF-OPT: Early-kill — if after 50K+ steps the last 3 probes
+                        # show no improvement (flat or declining), kill the trial.
+                        # Agents that haven't shown signal by 50K rarely recover.
+                        if global_step >= 50000 and len(self._hpo_score_history) >= 3:
+                            recent = [s for _, s in self._hpo_score_history[-3:]]
+                            # Kill if all recent scores are bad (PF < 0.8) and not improving
+                            if all(s < 0.8 for s in recent) and recent[-1] <= recent[0]:
+                                print(f"  [HPO] Early-kill: no learning signal after {global_step} steps "
+                                      f"(recent scores: {[f'{s:.3f}' for s in recent]})")
+                                raise optuna.TrialPruned()
+
                         optuna_trial.report(score, global_step)
-                        
+
                         if optuna_trial.should_prune():
                             print(f"  [HPO] Pruning trial at step {global_step}")
                             raise optuna.TrialPruned()

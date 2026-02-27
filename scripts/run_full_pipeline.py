@@ -381,12 +381,14 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 f"{trial_prefix}/clip_eps": clip_eps,
             })
         else:
-            # BDQ hyperparams (5 dimensions) — optimizer HPs only
+            # BDQ hyperparams (4 dimensions) — optimizer HPs only
             # FIX BUG-01: MDP-defining params (gamma, reward) are LOCKED in config.
             # gamma locked at 0.95 per T1.2 signal horizon alignment.
+            # PERF-OPT: batch_size LOCKED (not tuned). It has 4.7x SPS impact and
+            # fundamentally changes the hardware profile — tuning it conflates
+            # learning quality with throughput. Read from config instead.
             auxiliary_weight = trial.suggest_float("auxiliary_weight", 0.5, 1.5, log=True)
             learning_rate = trial.suggest_float("learning_rate", 5e-5, 5e-4, log=True)
-            batch_size = trial.suggest_categorical("batch_size", [256, 512, 1024])
             epsilon_end = trial.suggest_float("epsilon_end", 0.01, 0.10)
             tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
 
@@ -395,13 +397,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             config["agents"]["bdq"]["auxiliary_weight"] = auxiliary_weight
             config["agents"]["bdq"]["learning_rate"] = learning_rate
             # NOTE: gamma read from config (locked), NOT tuned by HPO
-            config["agents"]["bdq"]["batch_size"] = batch_size
+            # NOTE: batch_size read from config (locked), NOT tuned by HPO (PERF-OPT)
             config["agents"]["bdq"]["epsilon_end"] = epsilon_end
             config["agents"]["bdq"]["tau"] = tau
 
             wandb.log({
                 f"{trial_prefix}/learning_rate": learning_rate,
-                f"{trial_prefix}/batch_size": batch_size,
                 f"{trial_prefix}/auxiliary_weight": auxiliary_weight,
                 f"{trial_prefix}/epsilon_end": epsilon_end,
                 f"{trial_prefix}/tau": tau,
@@ -523,8 +524,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         agent_params = {"learning_rate", "ent_coef", "gae_lambda", "n_epochs", "target_kl", "max_grad_norm", "clip_eps"}
     else:
         # FIX BUG-01+BUG-10: BDQ reward/MDP params are LOCKED (gamma read from config)
+        # PERF-OPT: batch_size removed — locked in config (hardware-profile param, not learning param)
         reward_params = set()
-        agent_params = {"auxiliary_weight", "learning_rate", "batch_size", "epsilon_end", "tau"}
+        agent_params = {"auxiliary_weight", "learning_rate", "epsilon_end", "tau"}
     
     for key, val in best.params.items():
         if key in reward_params:
