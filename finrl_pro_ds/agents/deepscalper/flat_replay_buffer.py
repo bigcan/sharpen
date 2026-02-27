@@ -190,6 +190,65 @@ class FlatReplayBuffer:
             self._aux_targets[indices],    # (B,)
         )
 
+    def sample_stratified(self, batch_size: int, hold_action: int = 1,
+                          hold_ratio: float = 0.5) -> Tuple[Dict, np.ndarray,
+                                                             np.ndarray, Dict,
+                                                             np.ndarray, np.ndarray]:
+        """Sample with stratified hold/non-hold ratio.
+
+        Ensures non-hold transitions are over-represented in each batch,
+        combating the ~95% Hold domination typical in scalping environments.
+
+        Args:
+            batch_size: Total samples to return.
+            hold_action: Action index for Hold (default 1 for Discrete(3)).
+            hold_ratio: Fraction of batch that should be Hold transitions.
+                        0.5 means 50% Hold, 50% non-Hold.
+
+        Returns:
+            Same format as sample().
+        """
+        size = self._size
+        # Build masks over the filled portion of the buffer
+        actions_flat = self._actions[:size, 0] if self._actions.ndim > 1 else self._actions[:size]
+        hold_mask = (actions_flat == hold_action)
+        hold_indices = np.where(hold_mask)[0]
+        non_hold_indices = np.where(~hold_mask)[0]
+
+        # Fallback to uniform if not enough non-hold transitions
+        if len(non_hold_indices) < 2 or len(hold_indices) < 2:
+            return self.sample(batch_size)
+
+        n_hold = int(batch_size * hold_ratio)
+        n_non_hold = batch_size - n_hold
+
+        # Sample with replacement if pool is smaller than requested
+        h_idx = hold_indices[np.random.randint(0, len(hold_indices), size=n_hold)]
+        nh_idx = non_hold_indices[np.random.randint(0, len(non_hold_indices), size=n_non_hold)]
+
+        indices = np.concatenate([h_idx, nh_idx])
+        np.random.shuffle(indices)
+
+        states = {
+            "micro": self._micro[indices],
+            "macro": self._macro[indices],
+            "private": self._private[indices],
+        }
+        next_states = {
+            "micro": self._next_micro[indices],
+            "macro": self._next_macro[indices],
+            "private": self._next_private[indices],
+        }
+
+        return (
+            states,
+            self._actions[indices],
+            self._rewards[indices],
+            next_states,
+            self._dones[indices],
+            self._aux_targets[indices],
+        )
+
     def nbytes(self) -> int:
         """Total pre-allocated memory in bytes."""
         return (
