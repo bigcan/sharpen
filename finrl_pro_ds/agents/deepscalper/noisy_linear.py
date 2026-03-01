@@ -45,10 +45,13 @@ class NoisyLinear(nn.Module):
 
         self.reset_noise()
 
-    @staticmethod
-    def _scale_noise(size: int) -> torch.Tensor:
-        """Factorized noise: f(x) = sign(x) * sqrt(|x|)."""
-        x = torch.randn(size)
+    def _scale_noise(self, size: int) -> torch.Tensor:
+        """Factorized noise: f(x) = sign(x) * sqrt(|x|).
+
+        FIX J-04: Generate noise on the buffer's resident device to avoid
+        CPU→GPU synchronization bottleneck on every reset_noise() call.
+        """
+        x = torch.randn(size, device=self.mu_weight.device)
         return x.sign() * x.abs().sqrt()
 
     def reset_noise(self):

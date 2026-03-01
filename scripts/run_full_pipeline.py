@@ -531,7 +531,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     
     # Log best results
     best = study.best_trial
-    agent_key = "ppo" if agent_type == "ppo" else "bdq"
+    agent_key = agent_type if agent_type in ("ppo", "iqn") else "bdq"
     best_params = {
         "env": {"reward": {}},
         "agents": {agent_key: {}},
@@ -543,6 +543,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         # V4.2: PPO locks reward params — only optimizer HPs are tunable
         reward_params = set()
         agent_params = {"learning_rate", "ent_coef", "gae_lambda", "n_epochs", "target_kl", "max_grad_norm", "clip_eps"}
+    elif agent_type == "iqn":
+        reward_params = set()
+        agent_params = {"learning_rate", "num_quantiles", "noisy_sigma0", "tau"}
     else:
         # FIX BUG-01+BUG-10: BDQ reward/MDP params are LOCKED (gamma read from config)
         # PERF-OPT: batch_size removed — locked in config (hardware-profile param, not learning param)
@@ -688,6 +691,10 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         # which inflates evaluation metrics. Hindsight is a training-only shaping signal.
         if "reward" not in backtest_config["env"]: backtest_config["env"]["reward"] = {}
         backtest_config["env"]["reward"]["hindsight_weight"] = 0.0
+        # FIX BUG-17: Override daily episode settings for backtest — must evaluate
+        # full test period sequentially, not a single random day.
+        backtest_config["env"]["episode_length"] = 0   # Full dataset
+        backtest_config["env"]["random_start"] = False  # Sequential from start
         
         env = make_env(backtest_config, start_date=start_date, end_date=end_date, norm_cutoff_date=norm_cutoff_date)
         
@@ -942,7 +949,7 @@ def main():
     agent_type = args.agent
     if agent_type == "bdq":  # default value — check if config says otherwise
         agents_section = base_config.get("agents", {})
-        if "iqn" in agents_section and agents_section["iqn"].get("type") == "iqn":
+        if "iqn" in agents_section:
             agent_type = "iqn"
             logger.info(f"Agent type auto-detected from config: {agent_type}")
         elif "ppo" in agents_section and "bdq" not in agents_section:

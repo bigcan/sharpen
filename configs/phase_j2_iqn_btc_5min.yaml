@@ -72,15 +72,15 @@ agents:
     batch_size: 256
     buffer_size: 500000
     learning_starts: 5000
-    use_per: true
+    use_per: false              # FIX J-02: PER and stratified are mutually exclusive; stratified is the Phase J fix
     per_alpha: 0.6
     per_beta_start: 0.4
     per_beta_frames: 100000
-    torch_compile: true
+    torch_compile: false        # DISABLED: NoisyLinear train/eval branching hits recompile limit → eager fallback
     gradient_clip: 10.0
     auxiliary_weight: 0.1
     update_interval: 8
-    checkpoint_interval: 500000
+    checkpoint_interval: 200000
 
 replay:
   stratified_sampling: true
@@ -91,15 +91,15 @@ training:
   total_timesteps: 5000000
   training_epochs: 1
   log_interval: 20480
-  torch_compile: true
+  torch_compile: false
   use_amp: true
   use_shm: false
   verbose_logging: true
 
 hpo:
   enabled: true
-  n_trials: 15
-  steps_per_trial: 500000
+  n_trials: 5
+  steps_per_trial: 200000
 
 wandb:
   project: "FinRL-Pro-DS"

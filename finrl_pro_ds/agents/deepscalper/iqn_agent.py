@@ -76,8 +76,13 @@ class IQNAgent:
         self.stratified_hold_ratio = 0.5
 
         # Normalize action_dims to single int (IQN uses Discrete, not MultiDiscrete)
+        # FIX J-03: Fail fast if MultiDiscrete is passed — IQN only supports Discrete.
         if isinstance(action_dims, (list, tuple)):
-            self.n_actions = action_dims[0] if len(action_dims) == 1 else action_dims[0]
+            assert len(action_dims) == 1, (
+                f"IQNAgent only supports Discrete action spaces (single dim), "
+                f"got MultiDiscrete {action_dims}. Use BDQ for multi-branch actions."
+            )
+            self.n_actions = action_dims[0]
             self.action_dims = list(action_dims)
         else:
             self.n_actions = action_dims
@@ -314,8 +319,10 @@ class IQNAgent:
             tau_expanded = tau.unsqueeze(2)  # (B, N, 1)
             weight = (tau_expanded - (delta < 0).float()).abs()  # (B, N, N')
 
-            # Loss per sample: sum over N, mean over N'
-            quantile_loss = (weight * huber).sum(dim=1).mean(dim=1)  # (B,)
+            # Loss per sample: mean over N (policy quantiles), mean over N' (target quantiles)
+            # FIX J-01: was .sum(dim=1) over N — loss scaled linearly with num_quantiles,
+            # breaking HPO across different N values and causing gradient explosions at large N.
+            quantile_loss = (weight * huber).mean(dim=1).mean(dim=1)  # (B,)
 
             # PER weighting or uniform mean
             if is_weights_t is not None:
