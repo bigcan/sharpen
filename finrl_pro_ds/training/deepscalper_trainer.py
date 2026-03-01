@@ -55,8 +55,10 @@ class DeepScalperTrainer:
         net_cfg["action_space_dims"] = action_dims
 
         # Detect agent type from config
+        # FIX J-05: Detect by section presence, not fragile type key.
+        # If agents.iqn section exists, it's an IQN config.
         self._agent_type = "bdq"  # default
-        if "iqn" in config.get("agents", {}) and config["agents"]["iqn"].get("type") == "iqn":
+        if "iqn" in config.get("agents", {}):
             self._agent_type = "iqn"
 
         # Agent Init — dispatch by type
@@ -110,8 +112,17 @@ class DeepScalperTrainer:
             )
 
         # Phase J: Configure stratified sampling for IQN
+        # FIX J-02: PER and stratified sampling are mutually exclusive — PER branch
+        # silently ignores stratified logic, reintroducing Hold domination.
         replay_cfg = config.get("replay", {})
-        if self._agent_type == "iqn" and replay_cfg.get("stratified_sampling", False):
+        _strat_requested = replay_cfg.get("stratified_sampling", False)
+        _per_enabled = self.agent.use_per if hasattr(self.agent, "use_per") else False
+        if _strat_requested and _per_enabled:
+            raise ValueError(
+                "FIND-J-02: use_per=True and stratified_sampling=True are mutually exclusive. "
+                "PER branch bypasses stratified logic entirely. Disable one."
+            )
+        if self._agent_type == "iqn" and _strat_requested:
             self.agent.stratified_sampling = True
             self.agent.stratified_hold_action = replay_cfg.get("stratified_hold_action", 1)
             self.agent.stratified_hold_ratio = replay_cfg.get("stratified_hold_ratio", 0.5)
@@ -293,8 +304,9 @@ class DeepScalperTrainer:
         
         # FIX PERF-2: Dynamic epsilon decay for BOTH HPO and production training.
         # Ensures exploration schedule matches actual training budget regardless of num_envs.
+        # IQN uses NoisyNets — epsilon is always 0, skip this entire block.
         num_envs = self.env.num_envs
-        
+
         if self.hpo_mode:
             steps_per_trial = self.config.get("hpo", {}).get("steps_per_trial", 50000)
             n_calls = len(list(range(0, steps_per_trial, num_envs)))
@@ -302,7 +314,7 @@ class DeepScalperTrainer:
             # Production: compute from total_timesteps
             n_calls = self.total_timesteps // num_envs
 
-        if n_calls > 0:
+        if n_calls > 0 and self._agent_type != "iqn":
             # Scale epsilon decay to reach epsilon_end at exploration_fraction of total training
             exploration_fraction = self.config.get("agents", {}).get("bdq", {}).get("exploration_fraction", 0.5)
             total_calls = n_calls * self.training_epochs
@@ -415,8 +427,10 @@ class DeepScalperTrainer:
                 # PERF FIX-2: Batch push for FlatReplayBuffer (not PER — PER stores Python objects)
                 from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
                 if isinstance(self.agent.memory, FlatReplayBuffer):
+                    # IQN predict returns (B,) for Discrete; buffer expects (B, 1)
+                    _actions = actions if actions.ndim > 1 else actions.reshape(-1, 1)
                     self.agent.memory.push_batch(
-                        obs, actions, rewards.astype(np.float32),
+                        obs, _actions, rewards.astype(np.float32),
                         next_obs, dones_for_buffer.astype(np.float32),
                         aux_targets_vec,
                     )
