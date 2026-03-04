@@ -44,8 +44,9 @@ def load_data(path: str, start: str = None, end: str = None,
     if end:
         df = df[df.index <= pd.Timestamp(end)]
 
-    if resolution == "5min":
-        df = df.resample('5min').agg({
+    if resolution != "1min":
+        # Support arbitrary resolutions: "2min", "3min", "5min", "10min", etc.
+        df = df.resample(resolution).agg({
             'open': 'first', 'high': 'max', 'low': 'min',
             'close': 'last', 'volume': 'sum', 'mid_price': 'last'
         }).dropna()
@@ -303,7 +304,8 @@ def main():
     parser.add_argument("--start", default=None, help="Start date filter")
     parser.add_argument("--end", default=None, help="End date filter")
     parser.add_argument("--fee", type=float, default=5.0, help="One-way taker fee in bps")
-    parser.add_argument("--resolution", default="1min", choices=["1min", "5min"])
+    parser.add_argument("--resolution", default="1min",
+                        help="Bar resolution: 1min, 2min, 3min, 5min, 10min, 15min, 30min, etc.")
     parser.add_argument("--max-bars", type=int, default=0,
                         help="Limit bars for testing (0=all)")
     args = parser.parse_args()
