@@ -592,16 +592,11 @@ class DeepScalperTrainer:
                             self._hpo_score_history = []
                         self._hpo_score_history.append((global_step, score))
 
-                        # PERF-OPT: Early-kill — if after 50K+ steps the last 3 probes
-                        # show no improvement (flat or declining), kill the trial.
-                        # Agents that haven't shown signal by 50K rarely recover.
-                        if global_step >= 50000 and len(self._hpo_score_history) >= 3:
-                            recent = [s for _, s in self._hpo_score_history[-3:]]
-                            # Kill if all recent scores are bad (PF < 0.8) and not improving
-                            if all(s < 0.8 for s in recent) and recent[-1] <= recent[0]:
-                                print(f"  [HPO] Early-kill: no learning signal after {global_step} steps "
-                                      f"(recent scores: {[f'{s:.3f}' for s in recent]})")
-                                raise optuna.TrialPruned()
+                        # FIX HPO-2: Disabled early-kill for swing MDP validation.
+                        # PF < 0.8 threshold was calibrated for old Discrete(6) MDP.
+                        # IQN+NoisyNets on binary swing MDP needs full trial duration
+                        # to show signal. All K1-K4 trials were killed by this gate.
+                        # TODO: Re-enable with calibrated threshold once swing MDP baseline is established.
 
                         optuna_trial.report(score, global_step)
 

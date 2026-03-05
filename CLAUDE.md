@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**DeepScalper (FinRL-Pro_DS)** — Institutional-grade high-frequency crypto scalping using Deep Reinforcement Learning. Implements a Branching Dueling Q-Network (BDQ) agent trained on Limit Order Book (LOB) microstructure data, following [Sun et al. (2022)](docs/2201.09058v3.pdf). PPO is also supported.
+**FinRL-Pro_DS** — Build a profitable RL trading system that consistently outperforms the market across asset classes. Currently implementing DeepScalper-style agents (IQN, BDQ, PPO) on crypto (BTC/USDT) and commodity futures (Gold), with a swing MDP architecture targeting PF > 1.3 OOS.
 
-**Current Research Stage:** Stage 2 — MDP Physics Fix (Tier 2 architectural alignment complete, Tier 3 pending).
+**Current Research Stage:** Stage 3 — Swing MDP Pivot (Binary {Long, Short} at 3-min, IQN agent).
 
 **WandB Project:** `FinRL-Pro-DS` / entity `bigcan-chiwin-technology`
 
@@ -72,12 +72,8 @@ L2 Vector: ~/.agent-memory/lancedb/   (local) — Semantic search over all index
 ```
 
 **Semantic Memory (agent-memory MCP)**:
-- Use `search_memory` to find past experiments, decisions, and bugs by natural language query
-- Use `index_randd_log` to reindex after R&D log updates (file_path + project="FinRL-Pro")
-- Use `index_document` for research plans, audit reports, expert consultations
-- Use `index_status` to check what's indexed and chunk counts
-- Use `clear_index` to drop a collection before reindexing
 - When investigating a topic with prior history, **search vector DB first** before grepping files
+- Tool reference: see "When to use which memory" table in MCP Servers section below
 
 **Boot sequence** (every session, silent):
 1. Read `core.md` — check `Last Updated` freshness (>3 days = stale warning)
@@ -280,21 +276,17 @@ Specialized skills are installed in `.agent/skills/`:
 | Reindex after R&D log or document updates | `index_randd_log` / `index_document` (local) |
 | Forget/correct a stored preference or fact | `memory_forget` (cloud) |
 
-**Rule**: When the user says "remember this" or states a preference, store it in cloud memory (`memory_store`). When investigating project history, search local memory first (`search_memory`), then cloud if needed.
+**Rules**:
+- When the user says "remember this" or states a preference, store it in cloud memory (`memory_store`).
+- When investigating project history, search local memory first (`search_memory`), then cloud if needed.
+- **Proactive cloud saves**: After any significant experiment result, architecture decision, or infrastructure change, proactively call `memory_store`. Don't wait for `/sync` or session end.
+- **Do NOT save to cloud**: Raw R&D log entries (too verbose), intermediate debug notes, daily log contents. Cloud memories should be concise facts, not full entries.
 
 ### Bidirectional Memory Sync (on `/sync`)
 
-Cloud and local memory are kept in sync during every `/sync`:
+**Cloud → Local**: Pull cloud memories via `memory_search`, index significant ones into local LanceDB so `search_memory` returns unified results.
 
-**Cloud → Local**: Pull all cloud memories via `memory_search` with a broad query, index significant ones into local LanceDB so `search_memory` returns unified results.
-
-**Local → Cloud**: Push key session findings to cloud via `memory_store` so other agents (OpenClaw, Agent Zero) have access to:
-- Major experiment results (pass/fail, PF numbers, key metrics)
-- Architecture decisions and pivots (e.g. "Stage 2 falsified", "Swing MDP adopted")
-- Infrastructure facts (GPU instances, deployment patterns)
-- Bug fixes with broad applicability
-
-**Do NOT sync to cloud**: Raw R&D log entries (too verbose), intermediate debug notes, daily log contents. Cloud memories should be concise facts, not full entries.
+**Local → Cloud**: Push any key findings not already saved proactively during the session.
 
 ## R&D Log
 
