@@ -187,7 +187,21 @@ Replay: reproduce <fingerprint_id>
 - Python 3.11 typing; avoid one-letter names; keep functions short
 - Minimal diffs; no drive‑by refactors
 - No secrets or large data in git; use DVC/MLflow for artifacts
-- **Memory protocol**: Log key decisions via the memory skill; read `core.md` at session start
+
+## Memory System & MCP Tools
+
+This project operates a dual-tier agent memory system to preserve session context and historical R&D:
+
+1. **Local Vector Knowledge Base (`agent-memory` MCP)**: 
+   - **Purpose**: Semantic search over project history (`randd_log.md` and `core.md`). Fast retrieval of exact experiment parameters and architectural pivots (e.g. "Why did Phase J fail?").
+   - **Tools**: `search_memory`, `index_randd_log`, `index_document`, `index_status`, `clear_index`.
+   - **Protocol**: Always invoke `search_memory` first when exploring past experiments or diagnosing unknown bugs. Ensure you trigger an index refresh (`/sync` macro or `index_randd_log`) after modifying the R&D log.
+2. **Cloud Memory (`memory` MCP)**: 
+   - **Purpose**: Cross-project user preferences and global rules.
+   - **Tools**: `memory_store`, `memory_search`, `memory_forget`.
+
+- **Core Protocol**: Log key decisions via the native memory skill; read `.agent/memory/core.md` at session start via `/memory-boot`.
+- **Proactive Cloud Saves**: After any significant experiment result, architecture decision, or infrastructure change, proactively call `memory_store`.
 
 ## When In Doubt
 
