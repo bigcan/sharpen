@@ -480,9 +480,13 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             profit_factor, trade_count = evaluate_for_hpo(eval_env, trainer.agent, max_steps=50000)
             
             # V4.2: Activity constraint — kill lazy holding agents
-            if trade_count < 100:
+            # FIX HPO-3: Lowered from 100 to 30 for swing MDP. Binary {Long, Short}
+            # with cooldown_bars=2-3 naturally produces fewer trades per eval window.
+            # K1 killed trials at 54 and 78 trades — both were active agents.
+            min_trades = 30
+            if trade_count < min_trades:
                 wandb.log({f"{trial_prefix}/killed": "lazy_agent", f"{trial_prefix}/trades": trade_count})
-                logger.info(f"Trial {trial.number}: KILLED (only {trade_count} trades, min=100)")
+                logger.info(f"Trial {trial.number}: KILLED (only {trade_count} trades, min={min_trades})")
                 return -999.0
             
             wandb.log({
@@ -530,15 +534,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         study_name=f"hpo_{agent_type}",
         load_if_exists=True,
         sampler=TPESampler(seed=42),
-        # FIX AUDIT-5: Increased min_resource from 5K to 15K.
-        # At 5K steps, learning_starts=5K means the agent has done ~0 gradient updates.
-        # The LSTM micro-encoder needs ~10-20K steps to warm up hidden states.
-        # Pruning at 5K discards trials before they can demonstrate learning.
-        pruner=optuna.pruners.HyperbandPruner(
-            min_resource=15000, 
-            max_resource=steps_per_trial, 
-            reduction_factor=3
-        )
+        # FIX HPO-1: Disable inter-trial pruning for swing MDP.
+        # HyperbandPruner was killing trials before IQN+NoisyNets could converge
+        # (needs 200K+ steps for signal). All 5 trials pruned in K2/K4 runs.
+        # Let all trials run to completion so we get clean data points to
+        # distinguish "bad hyperparams" from "bad MDP design".
+        pruner=optuna.pruners.NopPruner()
     )
     study.optimize(objective, n_trials=n_trials)
     
