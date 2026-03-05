@@ -60,15 +60,24 @@ python scripts/collect_run.py --run_id <ID>   # Collect single run (WandB + SFTP
 python scripts/collect_run.py --batch          # Auto-collect all finished runs
 ```
 
-### Memory Protocol — 3-Tier System
+### Memory Protocol — 3-Tier System + Vector Search
 
-The agent has a persistent file-based memory system. Full spec: `.agent/skills/memory/SKILL.md`.
+The agent has a persistent file-based memory system with semantic search. Full spec: `.agent/skills/memory/SKILL.md`.
 
 ```
 Tier 1: .agent/memory/core.md        (git-tracked) — Project facts, status, decisions (~100 lines)
 Tier 2: randd_log.md                  (git-tracked) — Durable R&D history (canonical experiment record)
 Tier 3: .agent/memory/logs/YYYY-MM-DD.md (gitignored) — Ephemeral daily scratchpad
+L2 Vector: ~/.agent-memory/lancedb/   (local) — Semantic search over all indexed content
 ```
+
+**Semantic Memory (agent-memory MCP)**:
+- Use `search_memory` to find past experiments, decisions, and bugs by natural language query
+- Use `index_randd_log` to reindex after R&D log updates (file_path + project="FinRL-Pro")
+- Use `index_document` for research plans, audit reports, expert consultations
+- Use `index_status` to check what's indexed and chunk counts
+- Use `clear_index` to drop a collection before reindexing
+- When investigating a topic with prior history, **search vector DB first** before grepping files
 
 **Boot sequence** (every session, silent):
 1. Read `core.md` — check `Last Updated` freshness (>3 days = stale warning)
@@ -88,7 +97,8 @@ Tier 3: .agent/memory/logs/YYYY-MM-DD.md (gitignored) — Ephemeral daily scratc
 1. **Tier 3 FIRST**: Append session work to `.agent/memory/logs/YYYY-MM-DD.md` — this is the source of truth for what happened today
 2. **Tier 1**: Update `core.md` status, incidents, next steps
 3. **Tier 2**: Sync daily log → `randd_log.md` (structured entry)
-4. **git commit**: Stage and commit
+4. **Reindex**: If R&D log was modified, run `index_randd_log` to update vector DB
+5. **git commit**: Stage and commit
 
 > **MANDATORY**: Never skip the daily log. It is the primary record. Tier 2 is derived FROM it.
 
@@ -252,6 +262,13 @@ Specialized skills are installed in `.agent/skills/`:
 - **Memory Manager** — Persistent project context. Run `/memory-boot` at session start to load `core.md`.
 - **Deployment Manager** — Robust remote GPU deployment with config validation.
 - **Audit** — Comprehensive post-implementation audit. Run automatically after every code change: lint, tests, invariant check, config validation, logic spot-check, performance regression, memory update.
+
+## MCP Servers (`.mcp.json`)
+
+| Server | Purpose |
+|--------|---------|
+| `memory` | OpenClaw shared memory (Gemini embeddings, GCS-backed) |
+| `agent-memory` | **Local** semantic search — LanceDB + all-MiniLM-L6-v2, zero cloud. 5 tools: `search_memory`, `index_randd_log`, `index_document`, `index_status`, `clear_index`. Setup: `.agent/artifacts/agent_memory_setup_prompt.md` |
 
 ## R&D Log
 
