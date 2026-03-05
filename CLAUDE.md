@@ -147,6 +147,18 @@ Config key: `private_input_size: 5`. This changed from 3 in Tier 1 — configs m
 
 `Discrete(6)` — single-head policy. Prior versions used `MultiDiscrete([5,9])` (price × quantity branches). Do not revert to MultiDiscrete.
 
+## Post-Implementation Audit (MANDATORY)
+
+After completing ANY code change to `finrl_pro_ds/**`, `scripts/**`, or `configs/**`, you MUST run the audit protocol before marking the task complete or moving to the next task:
+
+1. Read `.agent/skills/audit/SKILL.md`
+2. Execute all applicable phases (lint, tests, invariants, config, logic, performance)
+3. Output the Audit Report with a PASS / PASS WITH NOTES / BLOCK verdict
+4. If BLOCK: fix the finding before proceeding. Do not skip.
+5. Update the daily log with the audit result
+
+Skip only for: documentation-only changes (`.md`), memory system updates, pure formatting.
+
 ## Extension Boundary
 
 Only modify code under:
@@ -239,11 +251,8 @@ Specialized skills are installed in `.agent/skills/`:
 
 - **Memory Manager** — Persistent project context. Run `/memory-boot` at session start to load `core.md`.
 - **Deployment Manager** — Robust remote GPU deployment with config validation.
-- **Backtest Auditor** — Pre-flight checks before running backtests.
-- **Log Analyzer** — Diagnoses crash causes, OOMs, and regressions from logs.
-- **Research Logger** — Logs experimental findings to `randd_log.md` (reverse-chronological, structured).
-- **Work Auditor** — Generates adversarial audit prompts for logic consistency checks.
+- **Audit** — Comprehensive post-implementation audit. Run automatically after every code change: lint, tests, invariant check, config validation, logic spot-check, performance regression, memory update.
 
 ## R&D Log
 
-All experimental findings are recorded in `randd_log.md` (reverse-chronological). New entries go at the top. Use the Research Logger skill for structured entries.
+All experimental findings are recorded in `randd_log.md` (reverse-chronological). New entries go at the top.
