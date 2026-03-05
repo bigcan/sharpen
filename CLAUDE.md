@@ -265,10 +265,22 @@ Specialized skills are installed in `.agent/skills/`:
 
 ## MCP Servers (`.mcp.json`)
 
-| Server | Purpose |
-|--------|---------|
-| `memory` | OpenClaw shared memory (Gemini embeddings, GCS-backed) |
-| `agent-memory` | **Local** semantic search — LanceDB + all-MiniLM-L6-v2, zero cloud. 5 tools: `search_memory`, `index_randd_log`, `index_document`, `index_status`, `clear_index`. Setup: `.agent/artifacts/agent_memory_setup_prompt.md` |
+| Server | Purpose | Tools |
+|--------|---------|-------|
+| `memory` | **Cloud** long-term memory — shared across agents (OpenClaw, Claude Code, Agent Zero). Gemini embeddings, GCS-backed. | `memory_store`, `memory_search`, `memory_forget`, `memory_count` |
+| `agent-memory` | **Local** project-scoped semantic search — LanceDB + all-MiniLM-L6-v2, zero cloud. | `search_memory`, `index_randd_log`, `index_document`, `index_status`, `clear_index` |
+
+### When to use which memory
+
+| Use case | Tool |
+|----------|------|
+| Store a user preference, decision, or fact that applies **across projects/agents** | `memory_store` (cloud) |
+| Search for past user preferences, cross-project context, or agent-shared knowledge | `memory_search` (cloud) |
+| Search for **this project's** R&D history, experiment results, bug fixes, architecture decisions | `search_memory` (local) |
+| Reindex after R&D log or document updates | `index_randd_log` / `index_document` (local) |
+| Forget/correct a stored preference or fact | `memory_forget` (cloud) |
+
+**Rule**: When the user says "remember this" or states a preference, store it in cloud memory (`memory_store`). When investigating project history, search local memory first (`search_memory`), then cloud if needed.
 
 ## R&D Log
 
