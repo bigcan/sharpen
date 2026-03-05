@@ -1,6 +1,7 @@
 
 import os
 import sys
+import json
 import argparse
 import paramiko
 import zipfile
@@ -23,11 +24,58 @@ DEPLOY_EXCLUDES = [
 ]
 ROOT_DATA_EXCLUDE = ['data'] # Only exclude root data folder
 
+INSTANCES_FILE = PROJECT_ROOT / "instances.json"
+
 def get_env_var(key, default=None):
     val = os.getenv(key, default)
     if not val:
         raise ValueError(f"Missing required environment variable: {key}")
     return val
+
+def resolve_instance(instance_name=None):
+    """Resolve SSH credentials from instances.json or .env fallback."""
+    if INSTANCES_FILE.exists():
+        with open(INSTANCES_FILE, encoding="utf-8") as f:
+            registry = json.load(f)
+        instances = registry.get("instances", {})
+
+        if instance_name:
+            if instance_name not in instances:
+                available = ", ".join(instances.keys())
+                raise ValueError(f"Instance '{instance_name}' not found. Available: {available}")
+            inst = instances[instance_name]
+        else:
+            # Use default from registry
+            default_name = registry.get("default", "")
+            if default_name and default_name in instances:
+                inst = instances[default_name]
+                instance_name = default_name
+            else:
+                # Fall back to .env
+                return {
+                    "name": "env",
+                    "host": get_env_var("GPUHUB_HOST"),
+                    "port": int(get_env_var("GPUHUB_PORT")),
+                    "password": get_env_var("GPUHUB_PASSWORD"),
+                    "gpus": [],
+                }
+
+        return {
+            "name": instance_name,
+            "host": inst["host"],
+            "port": inst["port"],
+            "password": inst["password"],
+            "gpus": inst.get("gpus", []),
+        }
+    else:
+        # No instances.json — use .env
+        return {
+            "name": "env",
+            "host": get_env_var("GPUHUB_HOST"),
+            "port": int(get_env_var("GPUHUB_PORT")),
+            "password": get_env_var("GPUHUB_PASSWORD"),
+            "gpus": [],
+        }
 
 def create_filtered_zip(source_dir, output_filename):
     print(f"Creating execution package: {output_filename}...")
@@ -50,9 +98,12 @@ def create_filtered_zip(source_dir, output_filename):
     print(f"Package created. Size: {os.path.getsize(output_filename) / 1024 / 1024:.2f} MB")
 
 def deploy(args):
-    host = get_env_var("GPUHUB_HOST")
-    port = int(get_env_var("GPUHUB_PORT"))
-    password = get_env_var("GPUHUB_PASSWORD")
+    inst = resolve_instance(args.instance)
+    host = inst["host"]
+    port = inst["port"]
+    password = inst["password"]
+    print(f"Target instance: {inst['name']} ({host}:{port})"
+          + (f" | GPUs: {inst['gpus']}" if inst['gpus'] else ""))
     # CANONICAL NAMING: DeepScalper_V1_{Platform}_{YYYYMMDD}_{HHMM}
     # Suffixes/metadata go in tags, not run name
     from finrl_pro_ds.utils.naming import generate_run_name
@@ -236,6 +287,9 @@ def deploy(args):
         else:
             all_extra_args = f"{all_extra_args} --tags {tag_str}"
     
+    # GPU selection for multi-GPU instances
+    gpu_env = f"export CUDA_VISIBLE_DEVICES={args.gpu} &&" if args.gpu is not None else ""
+
     wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
     discord_url = os.getenv("DISCORD_WEBHOOK_URL", "")
     discord_env = f"export DISCORD_WEBHOOK_URL='{discord_url}' &&" if discord_url else ""
@@ -249,7 +303,7 @@ def deploy(args):
     version_arg = f"--version {version}" if version else ""
     
     # FIX: Remove () around ulimit so it applies to the current shell and subsequent nohup process
-    cmd = f"{export_path} && {wandb_env} {discord_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {version_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
+    cmd = f"{export_path} && {gpu_env} {wandb_env} {discord_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {version_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
     
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
@@ -394,6 +448,8 @@ if __name__ == "__main__":
     parser.add_argument("--no_kill", action="store_true", help="Do NOT kill existing processes (e.g. preserve Synapse run)")
     parser.add_argument("--version", default=None, help="Version tag (e.g. V1.1)")
     parser.add_argument("--collect", action="store_true", help="After deploy, poll WandB until completion then auto-collect all data (blocking)")
+    parser.add_argument("--instance", default=None, help="Named instance from instances.json (e.g. gpuhub-1, gpuhub-2). Default: uses 'default' key or .env")
+    parser.add_argument("--gpu", default=None, help="CUDA_VISIBLE_DEVICES value (e.g. 0, 1, '0,1'). For multi-GPU instances.")
     args = parser.parse_args()
     
     deploy(args)
