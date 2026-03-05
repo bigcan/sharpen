@@ -27,6 +27,7 @@ sys.path.append(os.getcwd())
 from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
 from finrl_pro_ds.training.ppo_trainer import PPOTrainer
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from finrl_pro_ds.envs.swing_scalper_env import SwingScalperEnv
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
@@ -93,6 +94,10 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     # Forward features config for include_spread, n_levels, asset_class
     env_config["features"] = config.get("features", {})
 
+    # V6 swing MDP: binary direction-switching (Phase K)
+    mdp_version = env_config.get("mdp_version", "v5")
+    if mdp_version == "v6":
+        return SwingScalperEnv(config=env_config, data_handler=handler)
     return DeepScalperEnv(config=env_config, data_handler=handler)
 
 
@@ -258,12 +263,25 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     
     returns = np.array(all_returns)
     pos_arr = np.array(positions) if positions else np.array([0.0])
-    
+
+    # Detect action space size for V5/V6 logic
+    if hasattr(env.action_space, 'n'):
+        discrete_dims = env.action_space.n
+    elif hasattr(env.action_space, 'nvec'):
+        discrete_dims = int(env.action_space.nvec[0])
+    else:
+        discrete_dims = 6
+
     # V4.2: Count trades (position changes) — same logic as backtest
+    # FIX K03: V6 (always-in-market) double-counts: base_count and sign_flips both fire on switch.
+    # For V6, sign_flips alone is the correct trade count.
     pos_deltas = np.abs(np.diff(pos_arr))
     base_count = int(np.sum(pos_deltas > 1e-6))
     sign_flips = int(np.sum((pos_arr[:-1] * pos_arr[1:]) < -1e-9))
-    trade_count = base_count + sign_flips
+    if discrete_dims == 2:
+        trade_count = sign_flips  # V6: always in market, sign flip = one switch
+    else:
+        trade_count = base_count + sign_flips
     
     # V4.2: Compute profit_factor (gross_profit / gross_loss)
     positive_returns = returns[returns > 0]
@@ -273,15 +291,10 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (10.0 if gross_profit > 1e-12 else 0.0)
     
     # Diagnostic: log what we computed including action distribution
-    # Action labels depend on action space size (Disc6 vs Disc3)
-    # VectorEnv wraps Discrete(n) → MultiDiscrete([n]), so check .nvec first
-    if hasattr(env.action_space, 'n'):
-        discrete_dims = env.action_space.n
-    elif hasattr(env.action_space, 'nvec'):
-        discrete_dims = int(env.action_space.nvec[0])
-    else:
-        discrete_dims = 6
-    if discrete_dims == 3:
+    # discrete_dims already detected above for trade counting
+    if discrete_dims == 2:
+        action_labels = {0: "long", 1: "short"}
+    elif discrete_dims == 3:
         action_labels = {0: "taker_buy", 1: "hold", 2: "taker_sell"}
     else:
         action_labels = {0: "taker_buy", 1: "maker_buy", 2: "hold", 3: "cancel", 4: "maker_sell", 5: "taker_sell"}
@@ -818,14 +831,22 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         
         total_return = (pv[-1] - pv[0]) / pv[0] if len(pv) > 0 else 0
         
-        # Dual Sharpe: per-minute (canonical) + hourly-aggregated (research)
+        # Dual Sharpe: per-bar (canonical) + hourly-aggregated (research)
+        # FIX K04: Detect bar duration from data file path for correct annualization
+        data_file = config.get("data", {}).get("file_path", "")
+        if "3min" in data_file:
+            bar_minutes = 3
+        elif "5min" in data_file:
+            bar_minutes = 5
+        else:
+            bar_minutes = 1  # Default: 1-min bars
+        bars_per_year = 525600 / bar_minutes
+        n_per_hour = 60 // bar_minutes
         sharpe = 0.0
         sharpe_hourly = 0.0
         if np.std(returns) > 1e-9:
             raw_ratio = np.mean(returns) / np.std(returns)
-            sharpe = raw_ratio * np.sqrt(525600)  # Per-minute (canonical)
-            # Hourly aggregation
-            n_per_hour = 60
+            sharpe = raw_ratio * np.sqrt(bars_per_year)
             hourly_returns = np.add.reduceat(returns, np.arange(0, len(returns), n_per_hour))
             # FIX FIND-V3-02c: Drop last partial bucket (matches HPO eval BUG-05 fix)
             if len(returns) % n_per_hour != 0 and len(hourly_returns) > 1:
@@ -839,10 +860,15 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         # FIX BUG-P2: Count position-change legs (flips = 2 counts).
         # Base count: any change > epsilon.
         # Sign change: crossing zero implies 2 legs (Close + Open).
+        # FIX K03: V6 (always-in-market) double-counts — sign_flips alone is correct.
         pos_deltas = np.abs(np.diff(pos_arr))
         base_count = np.sum(pos_deltas > 1e-6)
         sign_flips = np.sum((pos_arr[:-1] * pos_arr[1:]) < -1e-9)
-        trade_count = base_count + sign_flips
+        mdp_ver = config.get("env", {}).get("mdp_version", "v5")
+        if mdp_ver == "v6":
+            trade_count = sign_flips
+        else:
+            trade_count = base_count + sign_flips
         market_exposure = np.mean(np.abs(pos_arr) > 1e-6)
         
         # ── Institutional Metrics via PyfolioAnalyzer (Blueprint mandate) ──

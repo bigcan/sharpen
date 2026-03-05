@@ -179,14 +179,21 @@ class DeepScalperTrainer:
         )
 
         # FIX FIND-5 + CRIT-1: Private size consistency check
-        # Tier 2: 5 dims (pos, bal, time, order_dir, order_dist)
-        # H2: 6 dims (+spread_bps for leverage-aware sizing)
+        # V5 Tier 2: 5 dims (pos, bal, time, order_dir, order_dist)
+        # V5 H2: 6 dims (+spread_bps for leverage-aware sizing)
+        # V6 Swing: 4 dims (direction, bars_since_switch, unrealized_pnl, atr)
         priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_input_size", 5)
-        include_spread = config.get("features", {}).get("include_spread", False)
-        expected_priv = 6 if include_spread else 5
+        mdp_version = config.get("env", {}).get("mdp_version", "v5")
+        if mdp_version == "v6":
+            expected_priv = 4
+            label = "V6 Swing MDP"
+        else:
+            include_spread = config.get("features", {}).get("include_spread", False)
+            expected_priv = 6 if include_spread else 5
+            label = "H2 with spread" if include_spread else "Tier 2"
         assert priv_cfg == expected_priv, (
             f"FIND-5 Mismatch: Env produces {expected_priv} private features "
-            f"({'H2 with spread' if include_spread else 'Tier 2'}), config expects {priv_cfg}"
+            f"({label}), config expects {priv_cfg}"
         )
 
     def _seed_demo_buffer(self, demo_steps: int) -> None:
@@ -275,8 +282,10 @@ class DeepScalperTrainer:
         """
         # DQfD warm-start: pre-populate buffer with rule-based demos before training.
         # Only runs on fresh start (start_step==0) — not on HPO trial resumptions.
+        # FIX K01: Demo seeding uses V5 action semantics (Buy/Hold/Sell) — skip for V6 Discrete(2).
+        mdp_ver = self.config.get("env", {}).get("mdp_version", "v5")
         demo_steps = self.config.get("agents", {}).get("bdq", {}).get("demo_seed_steps", 0)
-        if demo_steps > 0 and start_step == 0:
+        if demo_steps > 0 and start_step == 0 and mdp_ver != "v6":
             self._seed_demo_buffer(demo_steps)
 
         print(f"Starting Training: Single BDQ Agent | Device: {self.device} | Start Step: {start_step} | Epochs: {self.training_epochs}")

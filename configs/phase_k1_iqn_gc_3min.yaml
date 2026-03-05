@@ -1,0 +1,103 @@
+# Phase K1: Gold CME IQN — Swing MDP at 3-min
+# =============================================
+# Stage 3: Binary direction-switching {Long, Short} with dense per-bar reward.
+# Always in-market, no Hold action, 3-bar cooldown, taker-only execution.
+# DP oracle ceiling: PF 129.7 at 0.35 bps (Gold fees are negligible).
+# Target: PF 1.5+ OOS (30-40% of oracle).
+#
+# Gate: Test PF > 1.10 with >= 200 trades
+
+data:
+  file_path: "data/processed/gc_2025_3min_front.parquet"
+  ticker: "GC"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  n_levels: 1
+  asset_class: "cme_futures"
+  vol_norm_window: 40            # 40 x 3-min = 120 min (matches 5-min config's 24 x 5 = 120)
+
+env:
+  symbol: "GC"
+  initial_balance: 100000.0
+  margin_requirement: 0.05
+  taker_fee: 0.000035            # 0.35 bps (CME Gold taker)
+  maker_fee: 0.000010            # Not used in swing MDP
+  num_envs: 24
+  window_size: 15                # 15 x 3-min = 45 min lookback
+  max_drawdown_pct: 0.30
+  mdp_version: "v6"             # Swing MDP (SwingScalperEnv)
+  episode_length: 1000           # ~50 hours of 3-min bars
+  random_start: true
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20
+    sharpe_weight: 0.0           # Pure PnL reward
+
+  action:
+    discrete_dims: 2             # {Long, Short}
+    cooldown_bars: 3             # 3-bar (9 min) minimum hold after switch
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+network:
+  micro_config:
+    input_size: 18
+    private_input_size: 4        # [direction, bars_since_switch, unrealized_pnl, atr]
+    hidden_size: 256
+    encoder_type: "flat"
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  iqn:
+    type: iqn
+    num_quantiles: 32
+    embedding_dim: 64
+    noisy_sigma0: 0.5
+    quantile_huber_kappa: 1.0
+    learning_rate: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 256
+    buffer_size: 500000
+    learning_starts: 5000
+    use_per: false
+    torch_compile: false
+    gradient_clip: 10.0
+    auxiliary_weight: 0.1
+    update_interval: 8
+    checkpoint_interval: 200000
+
+replay:
+  stratified_sampling: false     # No Hold action to stratify against
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: false
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 5
+  steps_per_trial: 200000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["Gold", "GC", "PhaseK1", "IQN", "3min", "SwingMDP", "NoisyNet",
+         "BinaryAction", "DenseReward", "CME", "FrontMonth", "k1"]
