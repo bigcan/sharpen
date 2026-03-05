@@ -99,5 +99,5 @@ wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   mode: "online"
-  tags: ["BTC", "Bitfinex", "PhaseK2", "IQN", "3min", "SwingMDP", "NoisyNet",
+  tags: ["BTC", "Bitfinex", "IQN", "3min", "SwingMDP", "NoisyNet",
          "BinaryAction", "DenseReward", "Crypto", "k2"]

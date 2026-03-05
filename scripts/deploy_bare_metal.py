@@ -115,21 +115,13 @@ def deploy(args):
     if args.run_name:
         extra_tags.append(args.run_name)
 
-    # Auto-inject platform/location WandB tags
+    # Auto-inject platform + GPU model WandB tags
     extra_tags.append("gpuhub")
-    # Derive region from host (e.g., <GPU_HOST> -> singapore)
-    _host = host.lower()
-    if "singapore" in _host:
-        extra_tags.append("singapore")
-    elif "us" in _host or "america" in _host:
-        extra_tags.append("us")
-    elif "eu" in _host or "europe" in _host:
-        extra_tags.append("eu")
-    else:
-        # Extract subdomain as region hint
-        parts = _host.split(".")
-        if len(parts) > 2:
-            extra_tags.append(parts[1].split("-")[0])
+    # Derive GPU tag from instances.json (e.g., "RTX 4090" -> "rtx4090")
+    if inst["gpus"]:
+        gpu_idx = int(args.gpu) if args.gpu is not None and args.gpu.isdigit() else 0
+        gpu_name = inst["gpus"][min(gpu_idx, len(inst["gpus"]) - 1)]
+        extra_tags.append(gpu_name.lower().replace(" ", ""))
     
     wandb_key = os.getenv("WANDB_API_KEY", "")
     

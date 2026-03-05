@@ -99,5 +99,5 @@ wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   mode: "online"
-  tags: ["Gold", "GC", "PhaseK3", "IQN", "5min", "SwingMDP", "NoisyNet",
+  tags: ["Gold", "GC", "IQN", "5min", "SwingMDP", "NoisyNet",
          "BinaryAction", "DenseReward", "CME", "FrontMonth", "k3", "ablation-resolution"]
