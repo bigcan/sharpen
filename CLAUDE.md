@@ -282,6 +282,20 @@ Specialized skills are installed in `.agent/skills/`:
 
 **Rule**: When the user says "remember this" or states a preference, store it in cloud memory (`memory_store`). When investigating project history, search local memory first (`search_memory`), then cloud if needed.
 
+### Bidirectional Memory Sync (on `/sync`)
+
+Cloud and local memory are kept in sync during every `/sync`:
+
+**Cloud → Local**: Pull all cloud memories via `memory_search` with a broad query, index significant ones into local LanceDB so `search_memory` returns unified results.
+
+**Local → Cloud**: Push key session findings to cloud via `memory_store` so other agents (OpenClaw, Agent Zero) have access to:
+- Major experiment results (pass/fail, PF numbers, key metrics)
+- Architecture decisions and pivots (e.g. "Stage 2 falsified", "Swing MDP adopted")
+- Infrastructure facts (GPU instances, deployment patterns)
+- Bug fixes with broad applicability
+
+**Do NOT sync to cloud**: Raw R&D log entries (too verbose), intermediate debug notes, daily log contents. Cloud memories should be concise facts, not full entries.
+
 ## R&D Log
 
 All experimental findings are recorded in `randd_log.md` (reverse-chronological). New entries go at the top.
