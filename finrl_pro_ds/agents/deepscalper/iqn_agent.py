@@ -42,6 +42,7 @@ class IQNAgent:
         noisy_sigma0: float = 0.5,
         quantile_huber_kappa: float = 1.0,
         gradient_clip: float = 10.0,
+        target_q_clip: float = 5000.0,
         auxiliary_weight: float = 0.1,
         use_amp: bool = False,
         use_per: bool = False,
@@ -61,6 +62,7 @@ class IQNAgent:
         self.num_quantiles = num_quantiles
         self.kappa = quantile_huber_kappa
         self.gradient_clip = gradient_clip
+        self.target_q_clip = target_q_clip
         self.auxiliary_weight = auxiliary_weight
         self.use_amp = use_amp
         self.use_per = use_per
@@ -301,6 +303,10 @@ class IQNAgent:
                 r = rewards.view(B, 1)
                 d = dones.view(B, 1)
                 T_tau = r + self.gamma * (1.0 - d) * q_target_a  # (B, N')
+
+                # Clip target Q-values to prevent divergence (matches BDQ's target_q_clip)
+                if self.target_q_clip > 0:
+                    T_tau = T_tau.clamp(-self.target_q_clip, self.target_q_clip)
 
             # Quantile Huber loss
             # delta: (B, N, N') = T_tau[:, None, :] - Q_tau_a[:, :, None]
