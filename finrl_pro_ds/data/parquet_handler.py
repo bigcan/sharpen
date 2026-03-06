@@ -140,6 +140,11 @@ class ParquetDataHandler:
                         # Force deep copy to unlink from PyArrow
                         prices_raw = self._feature_data[price_col].values
                         prices = np.array(prices_raw, dtype=np.float64)
+                        # Guard against NaN in price data (e.g., low-liquidity gaps)
+                        if np.isnan(prices).any():
+                            n_nan = np.isnan(prices).sum()
+                            prices = pd.Series(prices).ffill().bfill().values
+                            print(f"[VOL] Forward-filled {n_nan} NaN in {price_col} for volatility computation", flush=True)
                         
                         # Log Returns
                         log_ret = np.zeros_like(prices)
