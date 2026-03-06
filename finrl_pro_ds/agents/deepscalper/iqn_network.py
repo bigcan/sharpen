@@ -4,7 +4,14 @@ IQN (Implicit Quantile Network) with quantile cosine embedding and dueling archi
 Reuses MicroEncoder and MacroEncoder from networks.py. Replaces standard
 Q-value heads with quantile-conditional heads using NoisyLinear layers.
 
-Reference: Dabney et al. (2018) "Implicit Quantile Networks for Distributional RL"
+Supports optional multi-horizon mode: two sets of dueling heads (short + long
+discount horizons) sharing the same encoder backbone. Action selection blends
+both horizons. This lets the agent balance immediate momentum (short-term gain)
+against strategic positioning (long-term goal).
+
+Reference:
+  Dabney et al. (2018) "Implicit Quantile Networks for Distributional RL"
+  Fedus et al. (2019) "Hyperbolic Discounting and Learning over Multiple Horizons"
 """
 import math
 import torch
@@ -58,6 +65,33 @@ class QuantileEmbedding(nn.Module):
         return self.activation(self.proj(cos_features))
 
 
+def _make_dueling_heads(fusion_dim: int, n_actions: int, noisy_sigma0: float):
+    """Create a pair of NoisyLinear dueling head layers (V + A streams)."""
+    head_hidden = max(fusion_dim // 2, 64)
+    return nn.ModuleDict({
+        "value_fc1": NoisyLinear(fusion_dim, head_hidden, sigma0=noisy_sigma0),
+        "value_fc2": NoisyLinear(head_hidden, 1, sigma0=noisy_sigma0),
+        "adv_fc1": NoisyLinear(fusion_dim, head_hidden, sigma0=noisy_sigma0),
+        "adv_fc2": NoisyLinear(head_hidden, n_actions, sigma0=noisy_sigma0),
+    })
+
+
+def _dueling_forward(heads: nn.ModuleDict, x: torch.Tensor) -> torch.Tensor:
+    """Apply dueling V + A heads to quantile-embedded input.
+
+    Args:
+        heads: ModuleDict with value_fc1/2, adv_fc1/2.
+        x: (B, N, fusion_dim) quantile-embedded features.
+    Returns:
+        Q_tau: (B, N, n_actions)
+    """
+    v = torch.relu(heads["value_fc1"](x))
+    v = heads["value_fc2"](v)  # (B, N, 1)
+    a = torch.relu(heads["adv_fc1"](x))
+    a = heads["adv_fc2"](a)  # (B, N, n_actions)
+    return v + a - a.mean(dim=-1, keepdim=True)
+
+
 class IQNNetwork(nn.Module):
     """Implicit Quantile Network with dueling architecture and NoisyNet heads.
 
@@ -72,6 +106,16 @@ class IQNNetwork(nn.Module):
            A = NoisyLinear -> (B, N, n_actions)
            Q_tau = V + A - mean(A) -> (B, N, n_actions)
 
+    Multi-Horizon Mode (multi_horizon=True):
+        Two sets of dueling heads sharing the same encoder + fusion + quantile
+        embedding. Each horizon has independent V/A streams trained with
+        different discount factors (gamma_short, gamma_long). Action selection
+        blends: Q = alpha * Q_short + (1-alpha) * Q_long.
+
+        This teaches the agent to balance short-term momentum ("am I making
+        money now?") with long-term strategic value ("is this direction sound
+        over the next several swings?").
+
     Args:
         micro_config: Config dict for MicroEncoder.
         macro_config: Config dict for MacroEncoder.
@@ -79,6 +123,7 @@ class IQNNetwork(nn.Module):
         n_actions: Number of discrete actions.
         embedding_dim: Cosine basis dimension for quantile embedding.
         noisy_sigma0: Initial noise scale for NoisyLinear.
+        multi_horizon: Enable dual short/long horizon heads.
     """
 
     def __init__(
@@ -89,10 +134,12 @@ class IQNNetwork(nn.Module):
         n_actions: int = 3,
         embedding_dim: int = 64,
         noisy_sigma0: float = 0.5,
+        multi_horizon: bool = False,
         **kwargs,
     ):
         super().__init__()
         self.n_actions = n_actions
+        self.multi_horizon = multi_horizon
 
         # Encoders (reuse from networks.py)
         encoder_type = micro_config.get("encoder_type", "rnn").lower()
@@ -114,28 +161,37 @@ class IQNNetwork(nn.Module):
         self.private_size = private_size
         fusion_in_dim = micro_out_dim + macro_out_dim + private_size
 
-        # Fusion layer
+        # Fusion layer (shared across horizons)
         self.fusion = nn.Sequential(
             nn.Linear(fusion_in_dim, fusion_dim),
             nn.LayerNorm(fusion_dim),
             nn.ReLU(),
         )
 
-        # Quantile embedding
+        # Quantile embedding (shared across horizons)
         self.quantile_embedding = QuantileEmbedding(
             embedding_dim=embedding_dim, output_dim=fusion_dim
         )
 
-        # Dueling heads with NoisyLinear
+        # Dueling heads
         head_hidden = max(fusion_dim // 2, 64)
 
-        # Value stream: (B, N, fusion_dim) -> (B, N, 1)
-        self.value_fc1 = NoisyLinear(fusion_dim, head_hidden, sigma0=noisy_sigma0)
-        self.value_fc2 = NoisyLinear(head_hidden, 1, sigma0=noisy_sigma0)
-
-        # Advantage stream: (B, N, fusion_dim) -> (B, N, n_actions)
-        self.adv_fc1 = NoisyLinear(fusion_dim, head_hidden, sigma0=noisy_sigma0)
-        self.adv_fc2 = NoisyLinear(head_hidden, n_actions, sigma0=noisy_sigma0)
+        if multi_horizon:
+            # Short-horizon heads: captures immediate momentum
+            self.heads_short = _make_dueling_heads(fusion_dim, n_actions, noisy_sigma0)
+            # Long-horizon heads: captures strategic value
+            self.heads_long = _make_dueling_heads(fusion_dim, n_actions, noisy_sigma0)
+            # Backward compat aliases (point to short horizon for single-head code paths)
+            self.value_fc1 = self.heads_short["value_fc1"]
+            self.value_fc2 = self.heads_short["value_fc2"]
+            self.adv_fc1 = self.heads_short["adv_fc1"]
+            self.adv_fc2 = self.heads_short["adv_fc2"]
+        else:
+            # Single-horizon (original architecture)
+            self.value_fc1 = NoisyLinear(fusion_dim, head_hidden, sigma0=noisy_sigma0)
+            self.value_fc2 = NoisyLinear(head_hidden, 1, sigma0=noisy_sigma0)
+            self.adv_fc1 = NoisyLinear(fusion_dim, head_hidden, sigma0=noisy_sigma0)
+            self.adv_fc2 = NoisyLinear(head_hidden, n_actions, sigma0=noisy_sigma0)
 
         # Auxiliary volatility prediction head (from fusion, not quantile-conditional)
         self.vol_head = nn.Sequential(
@@ -155,6 +211,32 @@ class IQNNetwork(nn.Module):
                     if layer.bias is not None:
                         nn.init.zeros_(layer.bias)
 
+    def _encode_and_fuse(
+        self,
+        micro_in: torch.Tensor,
+        private_in: torch.Tensor,
+        macro_in: torch.Tensor,
+        tau: torch.Tensor,
+        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        """Shared encoder + fusion + quantile embedding.
+
+        Returns:
+            x: (B, N, fusion_dim) — quantile-embedded fusion output
+            fused: (B, fusion_dim) — raw fusion (for vol head)
+            pred_vol: (B, 1) — auxiliary volatility prediction
+            new_hidden: LSTM state
+        """
+        h_micro, new_hidden = self.micro_encoder(micro_in, hidden)
+        h_macro = self.macro_encoder(macro_in)
+        private_last = private_in[:, -1, :]
+        combined = torch.cat([h_micro, h_macro, private_last], dim=1)
+        fused = self.fusion(combined)
+        tau_embed = self.quantile_embedding(tau)
+        x = fused.unsqueeze(1) * tau_embed
+        pred_vol = self.vol_head(fused)
+        return x, fused, pred_vol, new_hidden
+
     def forward(
         self,
         micro_in: torch.Tensor,
@@ -173,44 +255,60 @@ class IQNNetwork(nn.Module):
 
         Returns:
             Q_tau: (B, N, n_actions) quantile Q-values
+                   In multi_horizon mode, returns SHORT horizon Q-values.
+                   Use forward_dual() for both horizons.
             pred_vol: (B, 1) volatility prediction
             new_hidden: Updated LSTM hidden state (or None)
         """
-        # Encode
-        h_micro, new_hidden = self.micro_encoder(micro_in, hidden)  # (B, micro_hidden)
-        h_macro = self.macro_encoder(macro_in)  # (B, macro_hidden)
+        x, fused, pred_vol, new_hidden = self._encode_and_fuse(
+            micro_in, private_in, macro_in, tau, hidden
+        )
 
-        # DIV-1: Private state injected at fusion layer
-        private_last = private_in[:, -1, :]  # (B, private_size)
-
-        # Fusion
-        combined = torch.cat([h_micro, h_macro, private_last], dim=1)
-        fused = self.fusion(combined)  # (B, fusion_dim)
-
-        # Quantile embedding
-        tau_embed = self.quantile_embedding(tau)  # (B, N, fusion_dim)
-
-        # Element-wise product: (B, 1, fusion_dim) * (B, N, fusion_dim)
-        x = fused.unsqueeze(1) * tau_embed  # (B, N, fusion_dim)
-
-        # Dueling heads (applied per quantile)
-        v = torch.relu(self.value_fc1(x))
-        v = self.value_fc2(v)  # (B, N, 1)
-
-        a = torch.relu(self.adv_fc1(x))
-        a = self.adv_fc2(a)  # (B, N, n_actions)
-
-        # Q = V + A - mean(A)
-        q_tau = v + a - a.mean(dim=-1, keepdim=True)  # (B, N, n_actions)
-
-        # Auxiliary volatility prediction (from fusion, not quantile-conditional)
-        pred_vol = self.vol_head(fused)  # (B, 1)
+        if self.multi_horizon:
+            q_tau = _dueling_forward(self.heads_short, x)
+        else:
+            v = torch.relu(self.value_fc1(x))
+            v = self.value_fc2(v)
+            a = torch.relu(self.adv_fc1(x))
+            a = self.adv_fc2(a)
+            q_tau = v + a - a.mean(dim=-1, keepdim=True)
 
         return q_tau, pred_vol, new_hidden
 
+    def forward_dual(
+        self,
+        micro_in: torch.Tensor,
+        private_in: torch.Tensor,
+        macro_in: torch.Tensor,
+        tau: torch.Tensor,
+        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        """Multi-horizon forward pass — returns both short and long Q-values.
+
+        Only valid when multi_horizon=True.
+
+        Returns:
+            q_short: (B, N, n_actions) short-horizon quantile Q-values
+            q_long:  (B, N, n_actions) long-horizon quantile Q-values
+            pred_vol: (B, 1) volatility prediction
+            new_hidden: Updated LSTM hidden state
+        """
+        x, fused, pred_vol, new_hidden = self._encode_and_fuse(
+            micro_in, private_in, macro_in, tau, hidden
+        )
+        q_short = _dueling_forward(self.heads_short, x)
+        q_long = _dueling_forward(self.heads_long, x)
+        return q_short, q_long, pred_vol, new_hidden
+
     def reset_noise(self):
         """Reset noise in all NoisyLinear layers."""
-        self.value_fc1.reset_noise()
-        self.value_fc2.reset_noise()
-        self.adv_fc1.reset_noise()
-        self.adv_fc2.reset_noise()
+        if self.multi_horizon:
+            for heads in [self.heads_short, self.heads_long]:
+                for layer in heads.values():
+                    if isinstance(layer, NoisyLinear):
+                        layer.reset_noise()
+        else:
+            self.value_fc1.reset_noise()
+            self.value_fc2.reset_noise()
+            self.adv_fc1.reset_noise()
+            self.adv_fc2.reset_noise()

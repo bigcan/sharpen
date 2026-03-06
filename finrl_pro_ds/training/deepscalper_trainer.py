@@ -84,6 +84,11 @@ class DeepScalperTrainer:
                 per_beta_start=iqn_cfg.get("per_beta_start", 0.4),
                 per_beta_frames=iqn_cfg.get("per_beta_frames", 100000),
                 torch_compile=config["training"].get("torch_compile", False),
+                n_step=iqn_cfg.get("n_step", 1),
+                multi_horizon=iqn_cfg.get("multi_horizon", False),
+                gamma_short=iqn_cfg.get("gamma_short", 0.95),
+                gamma_long=iqn_cfg.get("gamma_long", 0.99),
+                horizon_alpha=iqn_cfg.get("horizon_alpha", 0.5),
                 action_dims=action_dims,
                 device=device,
             )
@@ -365,6 +370,18 @@ class DeepScalperTrainer:
         # Reset pruning rung tracker for fresh trial (P0 fix)
         # Initialize to 0 to skip rung 0 - avoids eval at step ~12 before learning starts (P1a fix)
         self._last_prune_rung = 0
+
+        # N-step return buffer: wraps replay buffer push for multi-step returns
+        self._nstep_buffer = None
+        if self._agent_type == "iqn":
+            _n_step = self.config.get("agents", {}).get("iqn", {}).get("n_step", 1)
+            if _n_step > 1:
+                from finrl_pro_ds.agents.deepscalper.nstep_buffer import NStepBuffer
+                self._nstep_buffer = NStepBuffer(
+                    n=_n_step, gamma=self.agent.gamma, num_envs=num_envs
+                )
+                print(f"[N-Step] Enabled: n={_n_step}, gamma={self.agent.gamma}, "
+                      f"gamma^n={self.agent.gamma_n:.6f}")
         
         # FIX PERF-3 + N4: Hoist extract_tensors outside loop
         # PERF FIX-4: non_blocking H2D transfers
@@ -435,9 +452,16 @@ class DeepScalperTrainer:
 
                 # PERF FIX-2: Batch push for FlatReplayBuffer (not PER — PER stores Python objects)
                 from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
-                if isinstance(self.agent.memory, FlatReplayBuffer):
-                    # IQN predict returns (B,) for Discrete; buffer expects (B, 1)
-                    _actions = actions if actions.ndim > 1 else actions.reshape(-1, 1)
+                _actions = actions if actions.ndim > 1 else actions.reshape(-1, 1)
+
+                if self._nstep_buffer is not None:
+                    # N-step returns: accumulate before pushing to replay
+                    self._nstep_buffer.add(
+                        obs, _actions, rewards.astype(np.float32),
+                        next_obs, dones_for_buffer.astype(np.float32),
+                        aux_targets_vec, self.agent.memory,
+                    )
+                elif isinstance(self.agent.memory, FlatReplayBuffer):
                     self.agent.memory.push_batch(
                         obs, _actions, rewards.astype(np.float32),
                         next_obs, dones_for_buffer.astype(np.float32),

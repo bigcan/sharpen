@@ -7,6 +7,12 @@ Addresses all 4 root causes of RL failure:
 3. 43K-step episodes destroy credit assignment → Daily episodes (env-side)
 4. Hold domination in replay → Stratified sampling (trainer-side)
 
+Multi-Horizon Mode (Session 67):
+  Two sets of dueling heads (short + long discount), shared encoder backbone.
+  Short-horizon captures immediate momentum, long-horizon captures strategic value.
+  Action selection blends: Q = alpha * Q_short + (1-alpha) * Q_long.
+  Ref: Fedus et al. (2019) "Hyperbolic Discounting and Learning over Multiple Horizons"
+
 Interface is identical to DeepScalperBDQ for trainer/pipeline compatibility.
 """
 import os
@@ -50,6 +56,11 @@ class IQNAgent:
         per_beta_start: float = 0.4,
         per_beta_frames: int = 100000,
         torch_compile: bool = False,
+        n_step: int = 1,
+        multi_horizon: bool = False,
+        gamma_short: float = 0.95,
+        gamma_long: float = 0.99,
+        horizon_alpha: float = 0.5,
         action_dims=3,
         device: str = "cpu",
         # Absorb BDQ-specific kwargs for config compatibility
@@ -57,6 +68,25 @@ class IQNAgent:
     ):
         self.device = torch.device(device)
         self.gamma = gamma
+        self.n_step = n_step
+        # Effective gamma for Bellman target: gamma^n for n-step returns
+        self.gamma_n = gamma ** n_step
+
+        # Multi-horizon: short-term momentum + long-term strategy
+        self.multi_horizon = multi_horizon
+        if multi_horizon:
+            self.gamma_short = gamma_short
+            self.gamma_long = gamma_long
+            self.gamma_short_n = gamma_short ** n_step
+            self.gamma_long_n = gamma_long ** n_step
+            self.horizon_alpha = horizon_alpha
+        else:
+            self.gamma_short = gamma
+            self.gamma_long = gamma
+            self.gamma_short_n = self.gamma_n
+            self.gamma_long_n = self.gamma_n
+            self.horizon_alpha = 1.0
+
         self.tau = tau
         self.batch_size = batch_size
         self.num_quantiles = num_quantiles
@@ -99,6 +129,7 @@ class IQNAgent:
             "n_actions": self.n_actions,
             "embedding_dim": embedding_dim,
             "noisy_sigma0": noisy_sigma0,
+            "multi_horizon": multi_horizon,
         }
 
         # Build networks
@@ -174,6 +205,9 @@ class IQNAgent:
     ) -> np.ndarray:
         """Select action by averaging over quantile Q-values.
 
+        In multi-horizon mode, blends short and long horizon Q-means:
+          Q = alpha * Q_short + (1-alpha) * Q_long
+
         NoisyNets provide exploration (no epsilon needed).
         In eval/deterministic mode, noise is suppressed by NoisyLinear.eval().
         """
@@ -185,17 +219,25 @@ class IQNAgent:
             self.policy_net.eval()
 
         with torch.no_grad():
-            # Sample quantile fractions
             batch_size = micro.shape[0]
             tau = torch.rand(batch_size, self.num_quantiles, device=self.device)
 
-            q_tau, _, new_hidden = self.policy_net(
-                micro, private_in, macro, tau, hidden=self._hidden_state
-            )
-            self._hidden_state = new_hidden
-
-            # Mean over quantiles -> (B, n_actions)
-            q_mean = q_tau.mean(dim=1)
+            if self.multi_horizon:
+                q_short, q_long, _, new_hidden = self.policy_net.forward_dual(
+                    micro, private_in, macro, tau, hidden=self._hidden_state
+                )
+                self._hidden_state = new_hidden
+                # Blend: alpha * short + (1-alpha) * long
+                q_mean = (
+                    self.horizon_alpha * q_short.mean(dim=1)
+                    + (1.0 - self.horizon_alpha) * q_long.mean(dim=1)
+                )
+            else:
+                q_tau, _, new_hidden = self.policy_net(
+                    micro, private_in, macro, tau, hidden=self._hidden_state
+                )
+                self._hidden_state = new_hidden
+                q_mean = q_tau.mean(dim=1)
 
             # Apply action mask if provided
             if qty_mask is not None:
@@ -209,7 +251,6 @@ class IQNAgent:
         if deterministic:
             self.policy_net.train()
         else:
-            # Reset noise after each prediction step (for fresh exploration)
             self._reset_noise()
 
         return actions.cpu().numpy()
@@ -221,8 +262,38 @@ class IQNAgent:
             return t.pin_memory().to(self.device, non_blocking=True)
         return t.to(self.device)
 
+    def _compute_quantile_loss(
+        self, q_tau_a: torch.Tensor, T_tau: torch.Tensor, tau: torch.Tensor,
+    ) -> torch.Tensor:
+        """Compute quantile Huber loss between predicted and target quantiles.
+
+        Args:
+            q_tau_a: (B, N) predicted quantile values for taken action
+            T_tau: (B, N') target quantile values
+            tau: (B, N) quantile fractions
+
+        Returns:
+            quantile_loss: (B,) per-sample loss
+        """
+        delta = T_tau.unsqueeze(1) - q_tau_a.unsqueeze(2)  # (B, N, N')
+        abs_delta = delta.abs()
+        kappa = self.kappa
+        huber = torch.where(
+            abs_delta <= kappa,
+            0.5 * delta.pow(2) / kappa,
+            abs_delta - 0.5 * kappa,
+        )
+        tau_expanded = tau.unsqueeze(2)
+        weight = (tau_expanded - (delta < 0).float()).abs()
+        return (weight * huber).mean(dim=1).mean(dim=1)  # (B,)
+
     def train_step(self) -> Optional[Dict[str, float]]:
-        """Double-DQN style IQN update with quantile Huber loss."""
+        """Double-DQN style IQN update with quantile Huber loss.
+
+        In multi-horizon mode, trains both short and long horizon heads
+        with their respective discount factors. The loss is the sum of
+        both horizon losses.
+        """
         self.policy_net.train()
         if len(self.memory) < self.batch_size:
             return None
@@ -247,7 +318,6 @@ class IQNAgent:
             dones = self._to_device_pinned(np.array(done_batch))
             aux_targets = self._to_device_pinned(np.array(aux_target_batch)).unsqueeze(1)
         else:
-            # Stratified sampling: over-represent non-Hold transitions
             if self.stratified_sampling and hasattr(self.memory, "sample_stratified"):
                 state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = (
                     self.memory.sample_stratified(
@@ -277,58 +347,76 @@ class IQNAgent:
         N_prime = self.num_quantiles
 
         with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.use_amp):
-            # Sample quantile fractions for policy and target
-            tau = torch.rand(B, N, device=self.device)           # policy quantiles
-            tau_prime = torch.rand(B, N_prime, device=self.device)  # target quantiles
-
-            # Policy net: Q_tau(s, tau) -> (B, N, n_actions)
-            q_tau_all, pred_vol, _ = self.policy_net(micro_s, private_s, macro_s, tau)
-
-            # Select taken action: (B, N, n_actions) -> (B, N)
+            tau = torch.rand(B, N, device=self.device)
+            tau_prime = torch.rand(B, N_prime, device=self.device)
             actions_flat = actions.view(B, 1) if actions.dim() == 1 else actions[:, 0:1]
-            q_tau_a = q_tau_all.gather(2, actions_flat.unsqueeze(1).expand(-1, N, -1)).squeeze(2)  # (B, N)
+            r = rewards.view(B, 1)
+            d = dones.view(B, 1)
 
-            with torch.no_grad():
-                # Double DQN: policy net selects best action for next state
-                q_next_policy, _, _ = self.policy_net(micro_ns, private_ns, macro_ns, tau_prime)
-                a_star = q_next_policy.mean(dim=1).argmax(dim=-1, keepdim=True)  # (B, 1)
+            if self.multi_horizon:
+                # --- Multi-Horizon Training ---
+                # Policy net: both horizons
+                q_short, q_long, pred_vol, _ = self.policy_net.forward_dual(
+                    micro_s, private_s, macro_s, tau
+                )
+                q_short_a = q_short.gather(2, actions_flat.unsqueeze(1).expand(-1, N, -1)).squeeze(2)
+                q_long_a = q_long.gather(2, actions_flat.unsqueeze(1).expand(-1, N, -1)).squeeze(2)
 
-                # Target net evaluates those actions
-                q_next_target, _, _ = self.target_net(micro_ns, private_ns, macro_ns, tau_prime)
-                q_target_a = q_next_target.gather(
-                    2, a_star.unsqueeze(1).expand(-1, N_prime, -1)
-                ).squeeze(2)  # (B, N')
+                with torch.no_grad():
+                    # Double DQN: use BLENDED Q from policy net to select action
+                    q_next_short, q_next_long, _, _ = self.policy_net.forward_dual(
+                        micro_ns, private_ns, macro_ns, tau_prime
+                    )
+                    q_next_blended = (
+                        self.horizon_alpha * q_next_short.mean(dim=1)
+                        + (1.0 - self.horizon_alpha) * q_next_long.mean(dim=1)
+                    )
+                    a_star = q_next_blended.argmax(dim=-1, keepdim=True)  # (B, 1)
 
-                # Bellman target: r + gamma * (1-done) * Q_target
-                r = rewards.view(B, 1)
-                d = dones.view(B, 1)
-                T_tau = r + self.gamma * (1.0 - d) * q_target_a  # (B, N')
+                    # Target net: both horizons
+                    tgt_short, tgt_long, _, _ = self.target_net.forward_dual(
+                        micro_ns, private_ns, macro_ns, tau_prime
+                    )
+                    tgt_short_a = tgt_short.gather(2, a_star.unsqueeze(1).expand(-1, N_prime, -1)).squeeze(2)
+                    tgt_long_a = tgt_long.gather(2, a_star.unsqueeze(1).expand(-1, N_prime, -1)).squeeze(2)
 
-                # Clip target Q-values to prevent divergence (matches BDQ's target_q_clip)
-                if self.target_q_clip > 0:
-                    T_tau = T_tau.clamp(-self.target_q_clip, self.target_q_clip)
+                    # Bellman targets with different gammas
+                    T_short = r + self.gamma_short_n * (1.0 - d) * tgt_short_a
+                    T_long = r + self.gamma_long_n * (1.0 - d) * tgt_long_a
 
-            # Quantile Huber loss
-            # delta: (B, N, N') = T_tau[:, None, :] - Q_tau_a[:, :, None]
-            delta = T_tau.unsqueeze(1) - q_tau_a.unsqueeze(2)  # (B, N, N')
+                    if self.target_q_clip > 0:
+                        T_short = T_short.clamp(-self.target_q_clip, self.target_q_clip)
+                        T_long = T_long.clamp(-self.target_q_clip, self.target_q_clip)
 
-            # Huber loss element-wise
-            abs_delta = delta.abs()
-            kappa = self.kappa
-            huber = torch.where(
-                abs_delta <= kappa,
-                0.5 * delta.pow(2) / kappa,
-                abs_delta - 0.5 * kappa,
-            )
+                # Quantile Huber loss for each horizon
+                loss_short = self._compute_quantile_loss(q_short_a, T_short, tau)
+                loss_long = self._compute_quantile_loss(q_long_a, T_long, tau)
+                quantile_loss = loss_short + loss_long  # (B,)
 
-            # Asymmetric weighting: |tau - I(delta < 0)|
-            tau_expanded = tau.unsqueeze(2)  # (B, N, 1)
-            weight = (tau_expanded - (delta < 0).float()).abs()  # (B, N, N')
+                # For metrics, use blended Q
+                q_tau_a = self.horizon_alpha * q_short_a + (1.0 - self.horizon_alpha) * q_long_a
+                T_tau = self.horizon_alpha * T_short + (1.0 - self.horizon_alpha) * T_long
 
-            # Loss per sample: mean over N (policy quantiles), mean over N' (target quantiles)
-            # FIX J-01: was .sum(dim=1) over N — loss scaled linearly with num_quantiles,
-            # breaking HPO across different N values and causing gradient explosions at large N.
-            quantile_loss = (weight * huber).mean(dim=1).mean(dim=1)  # (B,)
+            else:
+                # --- Single-Horizon Training (original) ---
+                q_tau_all, pred_vol, _ = self.policy_net(micro_s, private_s, macro_s, tau)
+                q_tau_a = q_tau_all.gather(2, actions_flat.unsqueeze(1).expand(-1, N, -1)).squeeze(2)
+
+                with torch.no_grad():
+                    q_next_policy, _, _ = self.policy_net(micro_ns, private_ns, macro_ns, tau_prime)
+                    a_star = q_next_policy.mean(dim=1).argmax(dim=-1, keepdim=True)
+
+                    q_next_target, _, _ = self.target_net(micro_ns, private_ns, macro_ns, tau_prime)
+                    q_target_a = q_next_target.gather(
+                        2, a_star.unsqueeze(1).expand(-1, N_prime, -1)
+                    ).squeeze(2)
+
+                    T_tau = r + self.gamma_n * (1.0 - d) * q_target_a
+
+                    if self.target_q_clip > 0:
+                        T_tau = T_tau.clamp(-self.target_q_clip, self.target_q_clip)
+
+                quantile_loss = self._compute_quantile_loss(q_tau_a, T_tau, tau)
 
             # PER weighting or uniform mean
             if is_weights_t is not None:
@@ -374,7 +462,7 @@ class IQNAgent:
         # Metrics
         metrics = {
             "loss_total": total_loss.item(),
-            "loss_price": 0.0,  # No price branch in IQN
+            "loss_price": 0.0,
             "loss_qty": main_loss.item(),
             "loss_aux": vol_loss.item(),
             "q_qty_mean": q_tau_a.mean().item(),
@@ -386,8 +474,13 @@ class IQNAgent:
             "q_value/target_mean": T_tau.mean().item(),
             "q_value/target_max": T_tau.max().item(),
             "q_value/target_min": T_tau.min().item(),
-            "exploration_mode": 2.0,  # Sentinel for NoisyNet
+            "exploration_mode": 2.0,
         }
+        if self.multi_horizon:
+            metrics["q_value/short_mean"] = q_short_a.mean().item()
+            metrics["q_value/long_mean"] = q_long_a.mean().item()
+            metrics["loss_short"] = loss_short.mean().item()
+            metrics["loss_long"] = loss_long.mean().item()
         if self.use_per:
             metrics["per_beta"] = self.memory.beta
             metrics["per_max_priority"] = self.memory._max_priority
