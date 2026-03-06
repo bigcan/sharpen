@@ -394,8 +394,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 f"{trial_prefix}/clip_eps": clip_eps,
             })
         elif agent_type == "iqn":
-            # IQN hyperparams — optimizer HPs only (gamma, reward params locked)
+            # IQN hyperparams — optimizer HPs + gamma (discount horizon)
             learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-3, log=True)
+            gamma = trial.suggest_float("gamma", 0.93, 0.999)
             num_quantiles = trial.suggest_categorical("num_quantiles", [8, 16, 32, 64])
             noisy_sigma0 = trial.suggest_float("noisy_sigma0", 0.3, 0.7)
             tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
@@ -403,12 +404,14 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             config["env"]["reward"]["sharpe_weight"] = 0.0
             config["env"]["reward"]["hindsight_weight"] = 0.0
             config["agents"]["iqn"]["learning_rate"] = learning_rate
+            config["agents"]["iqn"]["gamma"] = gamma
             config["agents"]["iqn"]["num_quantiles"] = num_quantiles
             config["agents"]["iqn"]["noisy_sigma0"] = noisy_sigma0
             config["agents"]["iqn"]["tau"] = tau
 
             wandb.log({
                 f"{trial_prefix}/learning_rate": learning_rate,
+                f"{trial_prefix}/gamma": gamma,
                 f"{trial_prefix}/num_quantiles": num_quantiles,
                 f"{trial_prefix}/noisy_sigma0": noisy_sigma0,
                 f"{trial_prefix}/tau": tau,
