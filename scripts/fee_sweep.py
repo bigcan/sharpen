@@ -20,12 +20,10 @@ import yaml
 import argparse
 import os
 import sys
-import copy
 import logging
 import itertools
 import time
 
-import numpy as np
 import pandas as pd
 
 sys.path.append(os.getcwd())

@@ -11,13 +11,13 @@ from typing import Dict, Generator, Tuple
 class RolloutBuffer:
     """
     Fixed-length rollout buffer for on-policy PPO training.
-    
+
     Stores T steps × B environments of experience, computes GAE advantages,
     and yields shuffled minibatches for K-epoch PPO updates.
-    
+
     Args:
         rollout_steps: Number of steps per rollout (T)
-        num_envs: Number of parallel environments (B) 
+        num_envs: Number of parallel environments (B)
         micro_shape: Shape of micro observation per env, e.g. (15, 30)
         private_shape: Shape of private state per env, e.g. (15, 3)
         macro_shape: Shape of macro observation per env, e.g. (15,)

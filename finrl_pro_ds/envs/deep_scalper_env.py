@@ -1,7 +1,7 @@
 import gymnasium as gym
 import numpy as np
 import logging
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, Optional, Any
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
@@ -17,7 +17,7 @@ MACRO_COLS = list(MACRO_FEATURE_COLS)
 
 class RunningMeanStd:
     """Welford's online algorithm for running reward normalization.
-    
+
     Equivalent to SB3's VecNormalize(norm_reward=True) but works
     with our custom PPO training loop.
     """
@@ -25,7 +25,7 @@ class RunningMeanStd:
         self.mean = 0.0
         self.var = 1.0
         self.count = epsilon
-    
+
     def update(self, x):
         self.count += 1
         delta = x - self.mean
@@ -44,12 +44,12 @@ class RunningMeanStd:
 class DeepScalperEnv(gym.Env):
     """
     DeepScalper Intraday Trading Environment
-    
+
     State Space: Dict
       - micro: (Window, Levels * 4) -> LOB snapshots FLATTENED for LSTM
       - macro: (Features,) -> Tech indicators
       - private: (Window, 3) -> Historical Position, Balance & Remaining Time for Private State
-      
+
     Action Space: MultiDiscrete([3, 5, 5])
       - Direction: 0: Hold, 1: Buy, 2: Sell
       - Price: 5 levels (limit price offsets)
@@ -61,38 +61,38 @@ class DeepScalperEnv(gym.Env):
         super().__init__()
         self.config = config
         self.handler = data_handler
-        
+
         # Config params
         self.symbol = config.get("symbol", "BTCUSDT")
         self.tick_size = config.get("tick_size", 0.1)
         self.lot_size = config.get("lot_size", 0.001)
-        
+
         # Fee Structure Priority:
         # 1. Specific 'maker_fee'/'taker_fee' in config
         # 2. Flat 'transaction_fee' in config (applied to both)
         # 3. Defaults (VIP0: Maker 2bps, Taker 5bps)
-        
+
         flat_fee = config.get("transaction_fee")
-        
+
         # Determine defaults based on flat_fee existence
         default_maker = flat_fee if flat_fee is not None else 0.0002
         default_taker = flat_fee if flat_fee is not None else 0.0005
-        
+
         self.maker_fee = float(config.get("maker_fee", default_maker))
         self.taker_fee = float(config.get("taker_fee", default_taker))
-        
+
         # Slippage Model: base_slippage + (trade_size / liquidity) * impact_factor
         self.base_slippage_bps = config.get("base_slippage_bps", 1.0)  # 1 bp base
         self.slippage_impact_factor = config.get("slippage_impact_factor", 0.5)
-        
+
         # Margin Requirement (Paper: 5x leverage = 0.2 margin)
         # margin_requirement = 1.0 => spot (no leverage)
         # margin_requirement = 0.2 => 5x leverage
         self.margin_requirement = float(config.get("margin_requirement", 1.0))
-        
+
         self.window_size = config.get("window_size", 15)
         self.initial_balance = config.get("initial_balance", 100000.0)  # 100K USDT default
-        
+
         # Reward Config — T1.1: NAV-based reward (portfolio delta)
         self.reward_config = config.get("reward", {})
         self.reward_scaling = float(self.reward_config.get("scaling", 1.0))
@@ -175,7 +175,7 @@ class DeepScalperEnv(gym.Env):
         self.micro_dim = config.get("network", {}).get("micro_config", {}).get(
             "input_size", NUM_MICRO_FEATURES
         )
-        
+
         # FIX F1: Micro is now (Window, L*F) = (15, 20)
         # T2.2: Private state expanded to 5 dims: [pos, bal, time, order_dir, order_dist]
         # H2: Optional 6th dim: spread_bps (for spread-conditioned sizing)
@@ -190,7 +190,7 @@ class DeepScalperEnv(gym.Env):
             "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(NUM_MACRO_FEATURES,), dtype=np.float32),
             "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self._private_dim), dtype=np.float32)
         })
-        
+
         # Price offset mapping (ticks from best)
         # Taker: -1 (marketable)
         # Maker: 0 (at touch)
@@ -198,15 +198,15 @@ class DeepScalperEnv(gym.Env):
         # FIX Bug#1: Read from nested action config (YAML: env.action.max_position)
         # with fallback to flat key for backward compatibility
         self.max_position = config.get("action", {}).get("max_position", config.get("max_position", 1.0))
-        
+
         # Configurable Stop-Loss (default: 20% drawdown = 0.80 survival threshold)
         self.max_drawdown_pct = config.get("max_drawdown_pct", 0.20)
         self._stop_loss_threshold = 1.0 - self.max_drawdown_pct  # e.g., 0.60 for 40% drawdown
-        
+
         # Deviation #8: Private State Augmentation (Data Efficiency)
         # Probability of initializing with random position/balance
         self.private_state_augment_prob = float(config.get("private_state_augment_prob", 0.0))
-        
+
         # Track PnL
         self.balance = self.initial_balance
         self.portfolio_value = self.initial_balance
@@ -218,29 +218,29 @@ class DeepScalperEnv(gym.Env):
         # T1.5v2: High/Low candle prices for realistic maker fill simulation
         self.current_high = 0.0
         self.current_low = 0.0
-        
+
         self.current_step = 0
         self.avg_price = 0.0
-        
+
         self.pending_order = None  # (direction, price, quantity, is_taker)
-        
+
         # Fee/Slippage Tracking (for analytics)
         self.cumulative_fees = 0.0
         self.cumulative_slippage = 0.0
-        
+
         # Current Market State (for order matching)
         self.current_mid_price = 0.0
         self.current_best_bid = 0.0
         self.current_best_ask = 0.0
         self._raw_bid_vol_1 = 0.0  # RAW volume for liquidity checks
         self._raw_ask_vol_1 = 0.0  # RAW volume for liquidity checks
-        
+
         # Window Buffer - FIX F1: Now (W, L*F)
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
         self.private_window = np.zeros((self.window_size, self._private_dim), dtype=np.float32)
         self.total_episode_steps = 1  # Discovered from handler in reset()
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
-        
+
         # Pre-compute micro feature keys to avoid string formatting in hot loop.
         # Config can override with explicit list (e.g. Gold Level-1 18-dim)
         # or we derive from n_levels, falling back to BTC 40-dim default.
@@ -329,10 +329,10 @@ class DeepScalperEnv(gym.Env):
         self.current_low = 0.0
         self._raw_bid_vol_1 = 0.0  # RAW volume for liquidity checks
         self._raw_ask_vol_1 = 0.0  # RAW volume for liquidity checks
-        
+
         # T1.1: NAV reward uses prev_portfolio_value (set above), only need prev_position
         self.prev_position = 0.0
-        
+
         # Reset fee/slippage tracking
         self.cumulative_fees = 0.0
         self.cumulative_slippage = 0.0
@@ -343,24 +343,24 @@ class DeepScalperEnv(gym.Env):
         self._dsr_B = 0.0       # EMA of squared returns
         self._dsr_warmup = 0    # steps since reset (need >1 for valid DSR)
         self._dsr_eta = 1.0 / max(self.sharpe_horizon, 1)  # adaptation rate
-        
+
         # Cold Start Fix: Fill window with first frame
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
         # We will fill this in reset() properly
         self.current_macro = np.zeros((NUM_MACRO_FEATURES,), dtype=np.float32)
-        
+
         # Discover total episode steps from handler (for remaining_time)
         if self.handler and hasattr(self.handler, '_len'):
             self.total_episode_steps = max(self.handler._len, 1)
         else:
             self.total_episode_steps = 1  # Fallback: remaining_time always 1.0
-        
+
         # Initialize Private Window (Position=0, Balance=Initial, RemainingTime=1.0, OrderDir=0, OrderDist=0)
         self.private_window = np.zeros((self.window_size, self._private_dim), dtype=np.float32)
         # FIX CRIT-1: Normalize initial private state with remaining_time=1.0
         initial_private_state = self._normalize_private_state(0.0, float(self.initial_balance), 1.0, 0.0, 0.0)
         self.private_window = np.tile(initial_private_state, (self.window_size, 1))
-        
+
         # PERF FIX-5: Pre-compute column indices for raw data path
         self._use_raw_path = False
         if self.handler and hasattr(self.handler, '_col_to_idx') and self.handler._col_to_idx:
@@ -421,7 +421,7 @@ class DeepScalperEnv(gym.Env):
                 first_frame = self._build_frame(first_step)
                 self.micro_window = np.tile(first_frame, (self.window_size, 1))
                 self._update_macro_state(first_step) # Update macro state as well
-                
+
                 # Update current pricing for augmentation
                 # _build_frame already sets current_best_bid/ask — use those
                 if self.current_best_bid > 0 and self.current_best_ask > 0:
@@ -430,21 +430,21 @@ class DeepScalperEnv(gym.Env):
                      self.current_mid_price = first_step.mid_price
                 elif isinstance(first_step, dict) and 'mid_price' in first_step:
                      self.current_mid_price = first_step['mid_price']
-                
+
                 # Deviation #8: Private State Augmentation
                 if self.private_state_augment_prob > 0.0 and np.random.random() < self.private_state_augment_prob:
                     # Random Position: [-Max, Max]
                     self.position = np.random.uniform(-self.max_position, self.max_position)
-                    
+
                     # Random Balance: Need enough to cover margin + buffer
                     value = abs(self.position) * self.current_mid_price
                     required_margin = value * self.margin_requirement
-                    
+
                     # Range: [Required * 1.05, Initial * 1.5]
                     min_bal = required_margin * 1.05
                     max_bal = max(min_bal * 1.1, self.initial_balance * 1.5)
                     self.balance = np.random.uniform(min_bal, max_bal)
-                    
+
                     # Initialize notional_debt for leveraged positions
                     # Long: debt = borrowed cash (partial notional)
                     # Short: no debt — shorts borrow the asset, not cash (FIX V3-01)
@@ -460,15 +460,15 @@ class DeepScalperEnv(gym.Env):
                             # would be negative for most random inits.
                             self.notional_debt = 0.0
                             self.balance += value
-                    
+
                     # Re-normalize/fill private window with NEW state
                     aug_private_state = self._normalize_private_state(self.position, self.balance, 1.0, 0.0, 0.0)
                     self.private_window = np.tile(aug_private_state, (self.window_size, 1))
-        
+
         # Initialize portfolio value after first state update
         self.prev_portfolio_value = self._get_portfolio_value()
         self.peak_portfolio_value = self.prev_portfolio_value # Reset peak for drawdown tracking
-            
+
         return self._get_observation(), {"qty_action_mask": self._get_qty_action_mask()}
 
 
@@ -476,18 +476,18 @@ class DeepScalperEnv(gym.Env):
     def _check_margin(self, current_pos: float, order_qty: float, price: float, direction: int) -> bool:
         """
         Check if we have enough balance to cover the Initial Margin for this order.
-        
+
         Args:
             current_pos: Current position size (signed).
             order_qty: Absolute quantity to trade.
             price: Execution price.
             direction: 1 (Buy) or 2 (Sell).
-            
+
         Returns:
             True if allowed, False if rejected (insufficient funds).
         """
         # Determine if we are INCREASING risk (Opening) or DECREASING risk (Closing)
-        
+
         # 1. Buy (Direction 1)
         if direction == 1:
             if current_pos < 0:
@@ -521,7 +521,7 @@ class DeepScalperEnv(gym.Env):
                 # Increasing Short
                 required = order_qty * price * self.margin_requirement
                 return self.balance >= required
-                
+
         return False
 
     def _try_fill_pending(self):
@@ -650,7 +650,6 @@ class DeepScalperEnv(gym.Env):
                     fee_rate = self.taker_fee if is_taker else self.maker_fee
                     fee = fill_price * exec_qty * fee_rate
                     notional = fill_price * exec_qty
-                    proceeds = notional - fee
 
                     # FIX AUDIT-B: Split flip trades into close + open legs
                     if self.position > 1e-12:
@@ -677,13 +676,11 @@ class DeepScalperEnv(gym.Env):
                             fee = close_fee + open_fee
                         else:
                             fee = close_fee
-                        proceeds = 0
                     else:
                         # Opening/extending short
                         self.balance += notional
                         self.balance -= fee
                         # FIX V3-01: No debt for shorts
-                        proceeds = 0
 
                     self.cumulative_fees += fee
                     self.cumulative_slippage += slippage_cost
@@ -731,7 +728,7 @@ class DeepScalperEnv(gym.Env):
         """Execute one time step within the environment"""
         self.step_transaction_costs = 0.0 # Reset per-step cost
         self.current_step += 1
-        
+
         # 1. Get Market Data T+1
         # PERF FIX-5: Use raw numpy path when available (no dict construction)
         step_data = None
@@ -740,17 +737,17 @@ class DeepScalperEnv(gym.Env):
                 step_data = self.handler.step_raw()
             else:
                 step_data = self.handler.step()
-        
+
         # FIX CQ-1: Removed redundant pre-execution drawdown check.
         # The authoritative check is post-execution (line ~570) with current pricing.
         terminated = False
         truncated = False
         info = {}
-        
+
         # FIX CQ-3: Data exhaustion is truncation (external limit), not termination (MDP event)
         if self.handler and step_data is None:
             truncated = True
-            
+
             # ARCH-2: Force liquidation — charge spread + taker fee for exit
             liquidation_cost_bps = 0.0
             if abs(self.position) > 1e-9:
@@ -762,7 +759,7 @@ class DeepScalperEnv(gym.Env):
                     liquidation_cost = exit_cost_rate * abs(self.position) * mid
                     # Convert to Basis Points relative to initial balance
                     liquidation_cost_bps = (liquidation_cost / self.initial_balance) * 10000.0
-            
+
             # FIX: Consistent reward scaling and normalization for truncation
             reward = (-liquidation_cost_bps) * self.reward_scaling
             if self.reward_normalizer:
@@ -771,7 +768,7 @@ class DeepScalperEnv(gym.Env):
                 reward = float(np.clip(reward, -5.0, 5.0))
             else:
                 reward = float(np.clip(reward, -50.0, 50.0))
-            
+
             obs = self._get_observation()
             info = {
                 "qty_action_mask": self._get_qty_action_mask(),
@@ -853,22 +850,22 @@ class DeepScalperEnv(gym.Env):
                 # Maker orders still pend for next-bar fill (correct: they sit on the book).
                 if is_taker:
                     self._try_fill_pending()
-        
+
         # 4. Dense Reward — T1.1: Pure NAV delta (BUG-01 fix)
         # r_t = NAV_{t+1} - NAV_t, normalized to bps
         # This automatically captures mark-to-market PnL + all execution costs
         current_portfolio_value = self._get_portfolio_value()
-        
+
         # Telemetry
         hold_bonus = 0.0
-        
+
         # --- Hold Bonus (fee-avoidance shaping) ---
         if direction == 0 and abs(self.prev_position) < 1e-12 and self.hold_bonus_bps > 0:
             hold_bonus = self.hold_bonus_bps
-        
+
         # --- NAV Delta: captures mark-to-market PnL + realized execution costs ---
         nav_delta = current_portfolio_value - self.prev_portfolio_value
-        
+
         # Normalize to basis-point returns for scale invariance
         norm_divisor = max(self.prev_portfolio_value, 1.0)
         reward_nav_bps = (nav_delta / norm_divisor) * 10000.0
@@ -951,7 +948,7 @@ class DeepScalperEnv(gym.Env):
         # Update trailing state for next step's reward calculation
         self.prev_portfolio_value = current_portfolio_value
         self.prev_position = float(self.position)
-        
+
         # 5. Safety Drawdown Stop
         truncated = False
 
@@ -962,11 +959,11 @@ class DeepScalperEnv(gym.Env):
         if current_portfolio_value < self._stop_loss_threshold * self.initial_balance:
             terminated = True
             logging.warning(f"Hit Max Drawdown Stop ({self.max_drawdown_pct:.0%}). Terminating Episode.")
-        
+
         obs = self._get_observation()
         info = {
-            "balance": self.balance, 
-            "position": self.position, 
+            "balance": self.balance,
+            "position": self.position,
             "portfolio_value": current_portfolio_value,
             "volatility_target": volatility_target,
             "cumulative_slippage": self.cumulative_slippage,
@@ -983,9 +980,9 @@ class DeepScalperEnv(gym.Env):
             "reward_total": reward,
             "qty_action_mask": self._get_qty_action_mask()
         }
-        
+
         return obs, reward, terminated, truncated, info
-    
+
     def _get_portfolio_value(self):
         """Calculate total equity.
 
@@ -1009,13 +1006,13 @@ class DeepScalperEnv(gym.Env):
     def _calculate_slippage(self, trade_size: float, available_liquidity: float) -> float:
         """
         Calculate execution slippage based on market impact model.
-        
+
         Slippage = base_slippage + (trade_size / liquidity) * impact_factor
-        
+
         Args:
             trade_size: Size of the trade (quantity)
             available_liquidity: Available volume at the price level
-            
+
         Returns:
             Slippage as a decimal (e.g., 0.0001 = 1 bp)
         """
@@ -1147,19 +1144,19 @@ class DeepScalperEnv(gym.Env):
         """Update micro window and macro state from step data."""
         # 1. Build Micro Frame
         frame = self._build_frame(step_data)
-        
+
         # 2. Push to window (Shift-in-place, avoids full array copy from np.roll)
         # FIX PERF-1: In-place shift is ~3x faster than np.roll for small arrays
         self.micro_window[:-1] = self.micro_window[1:]
         self.micro_window[-1] = frame
-        
+
         # 3. Update Macro
         self._update_macro_state(step_data)
 
         # 4. Update Private Window
         # Note: self.position and self.balance reflect PREVIOUS step's state here.
         # Post-execution correction happens at step() lines 685-687.
-        
+
         # T2.2: Extract pending order info for private state
         order_dir = 0.0
         order_dist = 0.0
@@ -1174,7 +1171,7 @@ class DeepScalperEnv(gym.Env):
         current_private = self._normalize_private_state(
             self.position, self.balance, remaining_time, order_dir, order_dist
         )
-        
+
         # FIX PERF-1: In-place shift (same as micro_window above)
         self.private_window[:-1] = self.private_window[1:]
         self.private_window[-1] = current_private

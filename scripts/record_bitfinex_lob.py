@@ -39,7 +39,6 @@ Bitfinex WS v2 Book Protocol:
 
 import argparse
 import json
-import os
 import signal
 import sys
 import threading

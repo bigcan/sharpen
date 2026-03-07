@@ -1,2 +1,2 @@
-from .bdq_agent import DeepScalperBDQ
-from .networks import DeepScalperNetwork
+from .bdq_agent import DeepScalperBDQ as DeepScalperBDQ
+from .networks import DeepScalperNetwork as DeepScalperNetwork

@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 class PPOAgent:
     """
     PPO Agent with Multi-Discrete action space (Price × SignedQty).
-    
+
     Key differences from BDQ:
     - On-policy: no replay buffer, uses rollout buffer
     - No epsilon-greedy: entropy bonus drives exploration
@@ -338,7 +338,7 @@ class PPOAgent:
 
     def load(self, path: str):
         """Load checkpoint.
-        
+
         AUDIT FIX C4: Handles architecture mismatch (e.g. V4 LSTM → V5 MLP)
         gracefully instead of crashing with opaque state_dict error.
         """

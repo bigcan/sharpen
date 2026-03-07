@@ -27,7 +27,6 @@ sys.path.append(os.getcwd())
 
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import roc_auc_score, accuracy_score
-from scipy import stats
 
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS

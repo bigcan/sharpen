@@ -1,19 +1,14 @@
 import csv
-import json
 import logging
 import zipfile
-import os
-from collections import OrderedDict
 from io import TextIOWrapper
-import pandas as pd
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
 class OrderBook:
     def __init__(self):
         # Bids: Descending Order (Highest bid first)
-        self.bids = {} 
+        self.bids = {}
         # Asks: Ascending Order (Lowest ask first)
         self.asks = {}
         self.last_update_id = 0
@@ -69,7 +64,7 @@ class OrderBook:
         # Sort and slice
         sorted_bids = sorted(self.bids.items(), key=lambda x: x[0], reverse=True)[:depth]
         sorted_asks = sorted(self.asks.items(), key=lambda x: x[0])[:depth]
-        
+
         return {
             "bids": sorted_bids,
             "asks": sorted_asks
@@ -92,19 +87,17 @@ class OrderBookReplayer:
             csv_files = [f for f in z.namelist() if f.endswith('.csv')]
             if not csv_files:
                 raise ValueError("No CSV found in snapshot zip")
-            
-            with z.open(csv_files[0], 'r') as f:
-                wrapper = TextIOWrapper(f, encoding='utf-8')
-                reader = csv.reader(wrapper)
+
+            with z.open(csv_files[0], 'r') as _:
                 # BINANCE SNAPSHOT FORMAT: price, qty (bids then asks? or type column?)
                 # Actually, data.binance.vision snapshots usually have `lastUpdateId` in filename or header?
                 # Many snapshots are just: price, qty. But how to distinguish bids/asks?
                 # Standard format usually: BIDS then ASKS? Or separate files?
-                # Let's assume standard response format: 
+                # Let's assume standard response format:
                 # It is usually a full depth dump. Columns: `price`, `qty`.
                 # BUT wait, how do we know which are bids and which are asks?
                 # Usually there's a side column or section.
-                # Inspecting 'depthSnapshot' samples: usually it matches the REST API response: 
+                # Inspecting 'depthSnapshot' samples: usually it matches the REST API response:
                 # `lastUpdateId`, `bids`, `asks`... but as CSV?
                 # Let's inspect rows. If 2 cols: price, qty.
                 # If 3 cols: type, price, qty.
@@ -133,7 +126,7 @@ class OrderBookReplayer:
                     # Modern format: `event_time`, `trans_time`, `first_update_id`, `final_update_id`, `symbol`, `bids`, `asks` ??
                     # Actually, usually they are flattened:
                     # e, E, s, U, u, b, a (JSON-like)
-                    # OR: 
+                    # OR:
                     # Timestamp, FirstUpdateId, FinalUpdateId, Bids, Asks
                     for row in reader:
                         yield row

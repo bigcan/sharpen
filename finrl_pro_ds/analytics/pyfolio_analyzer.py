@@ -3,13 +3,13 @@ import pandas as pd
 import numpy as np
 import warnings
 import matplotlib.pyplot as plt
-from typing import Dict, Any, Optional
+from typing import Dict
 
 
 class PyfolioAnalyzer:
     """
     Standardized Financial Analyzer for DeepScalper Auditing.
-    
+
     Sprint 4: Replaced pyfolio/empyrical with manual numpy computations.
     Root cause: pyfolio → empyrical → pandas_datareader → deprecate_kwarg crash.
     All metrics are now computed directly using numpy for reliability.
@@ -17,7 +17,7 @@ class PyfolioAnalyzer:
     def __init__(self, returns: pd.Series):
         """
         Initialize the analyzer with returns data.
-        
+
         Args:
             returns (pd.Series): Time-indexed pd.Series of percentage returns.
         """
@@ -25,7 +25,7 @@ class PyfolioAnalyzer:
         # Ensure returns are a Series
         if not isinstance(self.returns, pd.Series):
             self.returns = pd.Series(self.returns)
-            
+
         # Ensure index is datetime for compatibility
         if not isinstance(self.returns.index, pd.DatetimeIndex):
             try:
@@ -38,10 +38,10 @@ class PyfolioAnalyzer:
     def get_audit_metrics(self) -> Dict[str, float]:
         """
         Compute institutional metrics using pure numpy (no pyfolio/empyrical).
-        
+
         Metrics: Sharpe, Sortino, Calmar, Omega, Stability, VaR, Win Rate,
         Annual Return, Max Drawdown, Cumulative Return.
-        
+
         Annualization: 525,600 minutes/year (365.25 × 24 × 60).
         """
         r = self.returns.values.astype(np.float64)
@@ -53,7 +53,7 @@ class PyfolioAnalyzer:
         # FIX FIND-V3-12: Use ddof=1 (sample std) to match pandas .std() convention
         # used by wandb_evaluator. Ensures consistent Sharpe across all analytics modules.
         std_r = np.std(r, ddof=1)
-        
+
         # Annualization factor: 525,600 minutes per year (365.25 × 24 × 60)
         ann_factor = np.sqrt(525600)
 
@@ -136,15 +136,15 @@ class PyfolioAnalyzer:
         """
         try:
             cum_returns = (1 + self.returns).cumprod()
-            
+
             fig, axes = plt.subplots(2, 1, figsize=(12, 8), gridspec_kw={'height_ratios': [3, 1]})
-            
+
             # Equity Curve
             axes[0].plot(cum_returns.index, cum_returns.values, linewidth=1)
             axes[0].set_title("Cumulative Returns")
             axes[0].set_ylabel("Growth of $1")
             axes[0].grid(True, alpha=0.3)
-            
+
             # Drawdown
             peak = cum_returns.cummax()
             dd = (cum_returns - peak) / peak
@@ -152,7 +152,7 @@ class PyfolioAnalyzer:
             axes[1].set_title("Drawdown")
             axes[1].set_ylabel("Drawdown %")
             axes[1].grid(True, alpha=0.3)
-            
+
             plt.tight_layout()
             fig.savefig(save_path)
             plt.close(fig)

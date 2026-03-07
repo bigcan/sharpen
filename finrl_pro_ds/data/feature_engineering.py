@@ -426,8 +426,6 @@ class DeepScalperFeatureEngineer:
         lo = df['low'].values.astype(np.float64)
         vol = df['volume'].values.astype(np.float64) if 'volume' in df.columns else np.ones_like(cl)
 
-        cl_safe = np.where(cl > 0, cl, 1e-9)
-
         # ── 1. Multi-Horizon Log Returns (4 dims) ──
         for horizon in [1, 3, 5, 15]:
             lr = np.zeros_like(cl)

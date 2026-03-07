@@ -1,8 +1,6 @@
 import os
 import requests
-import zipfile
-import hashlib
-from datetime import datetime, timedelta
+from datetime import datetime
 from dateutil.relativedelta import relativedelta
 from tqdm import tqdm
 import logging
@@ -24,11 +22,11 @@ def generate_monthly_urls(symbol, start_date, end_date):
 
     while current_date <= end_date:
         year_month = current_date.strftime("%Y-%m")
-        
+
         # Depth Update URL
         # Format: https://data.binance.vision/data/spot/monthly/depthUpdate/BTCUSDT/BTCUSDT-depthUpdate-2023-01.zip
         update_url = f"{BASE_URL}/depthUpdate/{symbol}/{symbol}-depthUpdate-{year_month}.zip"
-        
+
         # Depth Snapshot URL
         # Format: https://data.binance.vision/data/spot/monthly/depthSnapshot/BTCUSDT/BTCUSDT-depthSnapshot-2023-01.zip
         snapshot_url = f"{BASE_URL}/depthSnapshot/{symbol}/{symbol}-depthSnapshot-{year_month}.zip"
@@ -37,7 +35,7 @@ def generate_monthly_urls(symbol, start_date, end_date):
         # Format: https://data.binance.vision/data/spot/monthly/klines/BTCUSDT/1m/BTCUSDT-1m-2023-01.zip
         # Note: We are hardcoding '1m' interval for now as per requirement.
         kline_url = f"{BASE_URL}/klines/{symbol}/1m/{symbol}-1m-{year_month}.zip"
-        
+
         urls.append({
             'date': year_month,
             'type': 'depthUpdate',
@@ -56,9 +54,9 @@ def generate_monthly_urls(symbol, start_date, end_date):
             'url': kline_url,
             'filename': f"{symbol}-1m-{year_month}.zip"
         })
-        
+
         current_date += relativedelta(months=1)
-        
+
     return urls
 
 def download_file(url, save_path):
@@ -72,10 +70,10 @@ def download_file(url, save_path):
     try:
         response = requests.get(url, stream=True)
         response.raise_for_status()
-        
+
         total_size = int(response.headers.get('content-length', 0))
         block_size = 8192 # 8KB
-        
+
         with open(save_path, 'wb') as f, tqdm(
             desc=os.path.basename(save_path),
             total=total_size,
@@ -96,11 +94,11 @@ def download_file(url, save_path):
 def verify_checksum(filepath, expected_checksum=None):
     """
     Verifies the SHA256 checksum of a file.
-    Note: Binance Vision provides .CHECKSUM files (SHA256). 
+    Note: Binance Vision provides .CHECKSUM files (SHA256).
     Ideally, we should download the .CHECKSUM file and verify against it.
     For now, this function is a placeholder or can be extended to download the checksum file.
     """
-    # TODO: Implement full checksum logic if typically required. 
+    # TODO: Implement full checksum logic if typically required.
     # Binance Vision usually has a .CHECKSUM file alongside the .zip
     # e.g., .../BTCUSDT-depthUpdate-2023-01.zip.CHECKSUM
     pass
@@ -111,26 +109,26 @@ def main():
     parser.add_argument("--start_date", type=str, required=True, help="Start date (YYYY-MM)")
     parser.add_argument("--end_date", type=str, required=True, help="End date (YYYY-MM)")
     parser.add_argument("--output_dir", type=str, default="raw_data", help="Directory to save downloaded files")
-    
+
     args = parser.parse_args()
-    
+
     start_dt = datetime.strptime(args.start_date, "%Y-%m")
     end_dt = datetime.strptime(args.end_date, "%Y-%m")
-    
+
     # Ensure output directory exists
     os.makedirs(args.output_dir, exist_ok=True)
-    
+
     download_tasks = generate_monthly_urls(args.symbol, start_dt, end_dt)
-    
+
     logger.info(f"Found {len(download_tasks)} files to download for {args.symbol} from {args.start_date} to {args.end_date}")
-    
+
     success_count = 0
     for task in download_tasks:
         file_path = os.path.join(args.output_dir, task['filename'])
         logger.info(f"Processing {task['type']} for {task['date']}...")
         if download_file(task['url'], file_path):
             success_count += 1
-            
+
     logger.info(f"Completed. Successfully downloaded {success_count}/{len(download_tasks)} files.")
 
 if __name__ == "__main__":

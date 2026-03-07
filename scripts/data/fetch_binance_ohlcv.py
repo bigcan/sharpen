@@ -18,9 +18,9 @@ def fetch_binance_ohlcv(symbol: str, days: int = None, start_date: str = None, e
         'enableRateLimit': True,
         'options': {'defaultType': 'future'}
     })
-    
+
     timeframe = '1m'
-    
+
     # Determine start timestamp
     if start_date:
         since_dt = datetime.strptime(start_date, "%Y-%m-%d")
@@ -28,14 +28,14 @@ def fetch_binance_ohlcv(symbol: str, days: int = None, start_date: str = None, e
     else:
         since_dt = datetime.now() - timedelta(days=days or 180)
         since_ts = int(since_dt.timestamp() * 1000)
-        
+
     # Determine end timestamp
     end_ts = int(datetime.now().timestamp() * 1000)
     if end_date:
         end_ts = int(datetime.strptime(end_date, "%Y-%m-%d").timestamp() * 1000)
-    
+
     print(f"Fetching data from {datetime.fromtimestamp(since_ts/1000)} to {datetime.fromtimestamp(end_ts/1000)}...")
-    
+
     if dry_run:
         print("Dry run: fetching 1 batch only.")
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since_ts, limit=100)
@@ -44,7 +44,7 @@ def fetch_binance_ohlcv(symbol: str, days: int = None, start_date: str = None, e
         return
 
     all_ohlcv = []
-    
+
     # Simple pagination loop
     current_since = since_ts
     while True:
@@ -52,34 +52,34 @@ def fetch_binance_ohlcv(symbol: str, days: int = None, start_date: str = None, e
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe, current_since, limit=1000)
             if not ohlcv:
                 break
-            
+
             # Filter if beyond end_date
             if ohlcv[0][0] > end_ts:
                 break
-                
+
             all_ohlcv.extend([x for x in ohlcv if x[0] <= end_ts])
             current_since = ohlcv[-1][0] + 60000 # +1 minute
-            
+
             # Print progress
             last_date = datetime.fromtimestamp(ohlcv[-1][0] / 1000)
             print(f"Fetched up to {last_date}...")
-            
+
             if ohlcv[-1][0] >= end_ts:
                 break
-                
+
             time.sleep(exchange.rateLimit / 1000)
-            
+
         except Exception as e:
             print(f"Error fetching: {e}")
             break
-            
+
     if not all_ohlcv:
         print("No data fetched!")
         return
 
     df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
     df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
-    
+
     # Save
     path = Path(output_file)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -95,5 +95,5 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="c:/data/raw/binance_ohlcv_6m.parquet", help="Output file")
     parser.add_argument("--dry-run", action="store_true", help="Run quick test")
     args = parser.parse_args()
-    
+
     fetch_binance_ohlcv(args.symbol, args.days, args.start_date, args.end_date, args.output, args.dry_run)

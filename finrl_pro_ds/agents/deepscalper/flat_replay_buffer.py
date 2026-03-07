@@ -7,7 +7,7 @@ Eliminates per-object overhead: 2M entries uses ~22 GB instead of ~60-100 GB.
 Drop-in replacement for ReplayBuffer (same push/sample/__len__ interface).
 """
 import numpy as np
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple
 
 
 class FlatReplayBuffer:

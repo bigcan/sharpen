@@ -25,10 +25,10 @@ class DeepScalperTrainer:
         self.device = device
         self.tracker_rewards = []
         self.tracker_lens = []
-        
+
         # Sprint 7: Reward normalizer removed (BUG-3). Raw bps rewards used directly.
         self.run_name = run_name or datetime.now().strftime("%Y%m%d_%H%M%S")
-        
+
         # Read Action Dims from Config
         action_config = config.get("env", {}).get("action", {})
         if "size_dims" in action_config and int(action_config["size_dims"]) > 0:
@@ -49,7 +49,7 @@ class DeepScalperTrainer:
                 action_config.get("price_bins", 5),
                 len(signed_qty_props)
             )
-        
+
         # Inject action_space_dims into network config so BDQ assertion is guaranteed
         net_cfg = dict(config["network"])
         net_cfg["action_space_dims"] = action_dims
@@ -157,11 +157,11 @@ class DeepScalperTrainer:
                   f"{raw_tau:.6f} -> {effective_tau:.6f} "
                   f"(effective target shift per env step: "
                   f"{1-(1-effective_tau)**self.update_interval:.4f})")
-        
+
         # Checkpoint Directory
         self.ckpt_dir = os.path.join("checkpoints", self.run_name)
         os.makedirs(self.ckpt_dir, exist_ok=True)
-        
+
         # HPO mode: suppress frequent WandB logging to avoid memory flooding
         self.hpo_mode = hpo_mode
         self.gradient_accumulator = 0.0  # FIX FIND-4: Accumulator for fractional update_interval
@@ -294,14 +294,14 @@ class DeepScalperTrainer:
             self._seed_demo_buffer(demo_steps)
 
         print(f"Starting Training: Single BDQ Agent | Device: {self.device} | Start Step: {start_step} | Epochs: {self.training_epochs}")
-        
+
         # Init State - Obs is Dict: {'micro': ..., 'macro': ..., 'private': ...}
         if skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
             obs = self._current_obs
             print(f"  Resuming from stored observation (skip_reset=True)")
         else:
             obs, _ = self.env.reset()
-        
+
         # Defensive Shape Assertions — runs once before training loop starts
         B = self.env.num_envs
         W = self.config.get("env", {}).get("window_size", 15)
@@ -315,7 +315,7 @@ class DeepScalperTrainer:
             f"obs['macro'] expected 2D (B, M), got shape {obs['macro'].shape}"
         print(f"[OK] Observation shapes verified: micro={obs['micro'].shape}, "
               f"private={obs['private'].shape}, macro={obs['macro'].shape}")
-        
+
         # FIX PERF-2: Dynamic epsilon decay for BOTH HPO and production training.
         # Ensures exploration schedule matches actual training budget regardless of num_envs.
         # IQN uses NoisyNets — epsilon is always 0, skip this entire block.
@@ -349,24 +349,24 @@ class DeepScalperTrainer:
                 print(f"[HPO] Overriding epsilon_decay to {computed_decay:.6f} for {steps_per_trial} steps (~{explore_calls} explore updates of {total_calls} total, {self.training_epochs} epochs)")
             else:
                 print(f"[Train] Computed epsilon_decay = {computed_decay:.6f} (explore over {explore_calls}/{total_calls} updates, fraction={exploration_fraction})")
-        
+
         global_step = start_step
         episode_rewards = deque(maxlen=100)
         episode_lens = deque(maxlen=100)
-        
+
         curr_rewards = np.zeros(num_envs)
         curr_lens = np.zeros(num_envs)
-        
+
         # Reward component accumulators for hindsight ratio tracking
         _acc_hindsight = 0.0
         _acc_total = 0.0
 
-        
+
         curr_lens = np.zeros(num_envs)
-        
+
         # FIND-3: Removed redundant 'import time'
         start_time = time.time()
-        
+
         # Reset pruning rung tracker for fresh trial (P0 fix)
         # Initialize to 0 to skip rung 0 - avoids eval at step ~12 before learning starts (P1a fix)
         self._last_prune_rung = 0
@@ -382,7 +382,7 @@ class DeepScalperTrainer:
                 )
                 print(f"[N-Step] Enabled: n={_n_step}, gamma={self.agent.gamma}, "
                       f"gamma^n={self.agent.gamma_n:.6f}")
-        
+
         # FIX PERF-3 + N4: Hoist extract_tensors outside loop
         # PERF FIX-4: non_blocking H2D transfers
         def extract_tensors(o, device=self.device):
@@ -395,14 +395,14 @@ class DeepScalperTrainer:
         # Paper Section 4.3: Epoch-based training — each epoch replays the data
         for epoch in range(self.training_epochs):
             print(f"\n=== Epoch {epoch+1}/{self.training_epochs} ===")
-            
+
             # Reset env at start of each epoch (except first if skip_reset)
             if epoch == 0 and skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
                 obs = self._current_obs
                 print(f"  Resuming from stored observation (skip_reset=True)")
             else:
                 obs, _ = self.env.reset()
-                
+
                 # BUG-B: Reset per-epoch hidden state (stateless LSTM assumption for training, but inference needs clean slate)
                 if hasattr(self.agent, "reset_hidden_state"):
                     self.agent.reset_hidden_state()
@@ -412,14 +412,14 @@ class DeepScalperTrainer:
             while epoch_step < self.total_timesteps:
                 # Convert to torch for prediction
                 micro_t, private_t, macro_t = extract_tensors(obs)
-                
+
                 # Predict (Returns numpy array of actions [B, 2])
                 # ARCH-3: Pass qty mask to block invalid actions at position limits
                 actions = self.agent.predict(micro_t, private_t, macro_t, deterministic=False, qty_mask=qty_mask)
-                
+
                 # 2. Step Environment
                 next_obs, rewards, term, trunc, infos = self.env.step(actions)
-                
+
                 # ARCH-3: Extract qty_action_mask for NEXT step's predict()
                 if isinstance(infos, dict) and "qty_action_mask" in infos:
                     qty_mask = infos["qty_action_mask"]
@@ -427,16 +427,16 @@ class DeepScalperTrainer:
                     qty_mask = np.stack([info_i["qty_action_mask"] for info_i in infos])
                 else:
                     qty_mask = None
-                
+
                 # Sprint 7 BUG-2 FIX: Only true termination (drawdown) zeroes bootstrap.
                 # Truncation (data exhaustion) is NOT terminal — the MDP continues.
                 dones_for_reset = np.logical_or(term, trunc)  # For episodic stats reset
-                
+
                 # BUG-B: Mask hidden states for terminated/truncated envs
                 if hasattr(self.agent, "mask_hidden_state"):
                     self.agent.mask_hidden_state(dones_for_reset)
                 dones_for_buffer = term  # Only term zeroes Bellman bootstrap
-                
+
                 # 3. Store in Buffer
                 # PERF FIX-2: Extract aux_targets vectorized
                 aux_targets_vec = np.zeros(num_envs, dtype=np.float32)
@@ -495,7 +495,7 @@ class DeepScalperTrainer:
                         episode_lens.append(curr_lens[i])
                         curr_rewards[i] = 0
                         curr_lens[i] = 0
-                        
+
                 obs = next_obs
                 global_step += num_envs
                 epoch_step += num_envs
@@ -522,18 +522,18 @@ class DeepScalperTrainer:
 
                 # FIX: Decay epsilon every step batch
                 self.agent.decay_epsilon()
-                
+
                 # 4. Training Step
                 if global_step > self.learning_starts:
                     self.gradient_accumulator += self.update_interval
-                    
+
                     metrics = None
                     while self.gradient_accumulator >= 1.0:
                         self.gradient_accumulator -= 1.0
                         metrics = self.agent.train_step()
                         if self.agent._lr_scheduler is not None:
                             self.agent._lr_scheduler.step()
-                    
+
                     # LOGGING
                     if metrics and global_step > 0 and global_step % self.log_interval == 0:
                          if not self.hpo_mode:
@@ -551,24 +551,24 @@ class DeepScalperTrainer:
                                      logs["agent/aux_loss_ratio"] = metrics["loss_aux"] / total
                              if self.agent._lr_scheduler is not None:
                                  logs["agent/learning_rate"] = self.agent._lr_scheduler.get_last_lr()[0]
-                             
+
                              # Calculate SPS
                              current_time = time.time()
                              last_time = getattr(self, '_last_log_time', start_time)
                              last_step = getattr(self, '_last_log_step', start_step)
-                             
+
                              elapsed = current_time - last_time
                              if elapsed > 1e-4:
                                  sps = (global_step - last_step) / elapsed
                                  logs["train/sps"] = sps
                              else:
                                  logs["train/sps"] = 0.0
-                             
+
                              self._last_log_time = current_time
                              self._last_log_step = global_step
 
                              verbose = self.config["training"].get("verbose_logging", False)
-                             
+
                              if not verbose:
                                  filtered_logs = {
                                      "step": logs["step"],
@@ -582,7 +582,7 @@ class DeepScalperTrainer:
                                  for k, v in logs.items():
                                      if k.startswith("eval/"):
                                          filtered_logs[k] = v
-                                         
+
                                  wandb.log(filtered_logs)
                              else:
                                   wandb.log(logs)
@@ -631,22 +631,22 @@ class DeepScalperTrainer:
                 # 5. Checkpointing
                 if global_step % self.checkpoint_interval == 0:
                     self.save_checkpoint(f"checkpoint_step_{global_step}.pth")
-                
+
         # Store obs for potential resume via skip_reset=True
         self._current_obs = obs
-                
+
         # Final Save — only if actual training occurred (guards against
         # total_timesteps=0 flows overwriting loaded weights with random init)
         if n_calls > 0:
             self.save_checkpoint("checkpoint_final.pth")
         else:
             print("⚠ Skipping checkpoint_final.pth save: no training steps executed (n_calls=0)")
-        
+
         # Always log final step status to ensure graph continuity
         if not self.hpo_mode:
             print(f"Logging final metrics at step {global_step}")
             wandb.log({"step": global_step, "train/final_step": 1})
-            
+
         print("Training Complete.")
 
     def save_checkpoint(self, filename):

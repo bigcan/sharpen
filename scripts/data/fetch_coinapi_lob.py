@@ -13,7 +13,6 @@ Usage:
         --dry-run
 """
 import os
-import sys
 import json
 import time
 import argparse
@@ -202,7 +201,7 @@ def main():
     )
 
     args = parser.parse_args()
-    
+
     api_key = args.api_key or os.getenv("COINAPI_KEY")
     if not api_key:
         parser.error("API Key must be provided via --api-key or COINAPI_KEY env var")

@@ -46,13 +46,13 @@ def get_collected_run_ids():
 def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False):
     """
     Collect all data for a completed run.
-    
+
     Args:
         run_id: WandB 8-character run ID
         skip_remote: Skip SFTP artifact download
         skip_report: Skip markdown report generation
         full_history: Fetch all history rows (up to 10K) instead of 100 samples
-        
+
     Returns:
         dict with collection results
     """
@@ -64,11 +64,11 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
         "remote_artifacts": {},
         "report": None,
     }
-    
+
     print(f"\n{'='*60}")
     print(f"  Collecting Run: {run_id}")
     print(f"{'='*60}\n")
-    
+
     # Step 1: Fetch WandB data → JSON + SQLite
     print("📥 Step 1/3: Fetching WandB data...")
     print("-" * 40)
@@ -81,7 +81,7 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
     except Exception as e:
         print(f"❌ WandB fetch failed: {e}\n")
         # Still try other steps
-    
+
     # Step 2: Download remote artifacts via SFTP
     if not skip_remote:
         print("📦 Step 2/3: Downloading remote artifacts...")
@@ -97,7 +97,7 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
             print(f"❌ Remote download failed: {e}\n")
     else:
         print("⏭️  Step 2/3: Skipping remote artifacts (--skip_remote)\n")
-    
+
     # Step 3: Generate markdown report
     if not skip_report:
         print("📝 Step 3/3: Generating report...")
@@ -111,7 +111,7 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
             print(f"❌ Report generation failed: {e}\n")
     else:
         print("⏭️  Step 3/3: Skipping report (--skip_report)\n")
-    
+
     # Summary
     print(f"{'='*60}")
     print(f"  Collection Summary")
@@ -124,7 +124,7 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
         print(f"    - {fname}: {fpath}")
     print(f"  Report:          {results['report'] or 'SKIPPED/FAILED'}")
     print(f"{'='*60}\n")
-    
+
     return results
 
 
@@ -136,15 +136,15 @@ if __name__ == "__main__":
     group.add_argument("--run_id", type=str, help="Single WandB Run ID")
     group.add_argument("--run_ids", type=str, nargs="+", help="List of Run IDs")
     group.add_argument("--batch", action="store_true", help="Auto-collect ALL finished runs not yet in metrics.db")
-    
+
     parser.add_argument("--skip_remote", action="store_true", help="Skip SFTP artifact download")
     parser.add_argument("--skip_report", action="store_true", help="Skip markdown report generation")
     parser.add_argument("--full_history", action="store_true", help="Fetch all history rows (up to 10K)")
     args = parser.parse_args()
-    
+
     # Determined which runs to process
     runs_to_collect = []
-    
+
     if args.run_id:
         runs_to_collect = [args.run_id]
     elif args.run_ids:
@@ -154,18 +154,18 @@ if __name__ == "__main__":
         # 1. Get local IDs
         local_ids = get_collected_run_ids()
         print(f"  Found {len(local_ids)} runs in local DB.")
-        
+
         # 2. Get remote finished runs
         api = wandb.Api()
         runs = api.runs("bigcan-chiwin-technology/FinRL-Pro-DS", filters={"state": "finished"})
-        
+
         # 3. Diff
         for run in runs:
             if run.id not in local_ids:
                 runs_to_collect.append(run.id)
-        
+
         print(f"  Found {len(runs_to_collect)} finished runs waiting for collection.")
-    
+
     # Process
     if not runs_to_collect:
         print("✅ No runs to collect.")
