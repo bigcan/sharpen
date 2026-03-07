@@ -361,9 +361,6 @@ class DeepScalperTrainer:
         _acc_hindsight = 0.0
         _acc_total = 0.0
 
-
-        curr_lens = np.zeros(num_envs)
-
         # FIND-3: Removed redundant 'import time'
         start_time = time.time()
 

@@ -455,7 +455,7 @@ class ParquetDataHandler:
                     shm.close()
                     if unlink and getattr(self, '_is_shm_owner', False):
                         shm.unlink()
-                except:
+                except Exception:
                     pass
             self._shm_objects = []
 

@@ -197,9 +197,9 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         prev_val = extract_portfolio_value(info, env_idx=0, default=100000.0)
 
         while not done and step < max_steps:
-            micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device)
-            private = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device)
-            macro = torch.tensor(obs["macro"], dtype=torch.float32).to(agent.device)
+            micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device, non_blocking=True)
+            private = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device, non_blocking=True)
+            macro = torch.tensor(obs["macro"], dtype=torch.float32).to(agent.device, non_blocking=True)
 
             pred = agent.predict(micro, private, macro, deterministic=True)
 
@@ -808,9 +808,9 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         step = 0
 
         while not done and step < 200000:
-            micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(device)
-            private = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device)
-            macro = torch.tensor(obs["macro"], dtype=torch.float32).unsqueeze(0).to(device)
+            micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+            private = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+            macro = torch.tensor(obs["macro"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
             pred = agent.predict(micro, private, macro, deterministic=True)
             if isinstance(pred, tuple):
                 action = pred[0][0]  # PPO: (actions, log_probs, values)
@@ -857,7 +857,8 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             if len(hourly_returns) > 1 and np.std(hourly_returns) > 1e-9:
                 sharpe_hourly = (np.mean(hourly_returns) / np.std(hourly_returns)) * np.sqrt(365 * 24)
 
-        max_dd = np.min(pv / np.maximum.accumulate(pv)) - 1 if len(pv) > 0 else 0
+        peak = np.maximum.accumulate(pv) if len(pv) > 0 else np.array([1.0])
+        max_dd = np.min(pv / np.maximum(peak, 1e-12)) - 1 if len(pv) > 0 else 0
 
         # Trade Stats
         # FIX BUG-P2: Count position-change legs (flips = 2 counts).
