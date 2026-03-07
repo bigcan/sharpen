@@ -16,6 +16,7 @@ DeepScalper is an institutional-grade reinforcement learning pipeline for sub-se
 - **Shared Memory Data Streaming**: Zero-copy `ParquetDataHandler` for multi-env training throughput
 - **WandB Integration**: Canonical run naming, metric logging, and institutional-grade reporting
 - **RTX 5090 Optimized**: AMP, Torch Compile, and tuned batch sizes for 32GB VRAM
+- **GPU Optimization Skill**: NVIDIA-grounded 10-phase protocol for Tensor Core alignment, mixed precision, and per-agent tuning
 
 ---
 

@@ -258,6 +258,7 @@ Specialized skills are installed in `.agent/skills/`:
 - **Memory Manager** — Persistent project context. Run `/memory-boot` at session start to load `core.md`.
 - **Deployment Manager** — Robust remote GPU deployment with config validation.
 - **Audit** — Comprehensive post-implementation audit. Run automatically after every code change: lint, tests, invariant check, config validation, logic spot-check, performance regression, memory update.
+- **Optimization** — GPU training optimization based on NVIDIA guidelines. 10-phase protocol: hardware profiling, Tensor Core alignment audit, AMP/BF16 config, torch.compile tuning, memory overlap, UTD ratio, agent-specific settings, SPS diagnostics. Run before deploying new configs or diagnosing performance regressions.
 
 ## MCP Servers (`.mcp.json`)
 
