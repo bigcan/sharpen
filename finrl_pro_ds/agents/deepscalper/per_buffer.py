@@ -230,7 +230,11 @@ class PrioritizedReplayBuffer:
         probs = priorities_arr / total
         beta = self.beta
         weights = (N * probs) ** (-beta)
-        weights /= weights.max()
+        w_max = weights.max()
+        if w_max > 0:
+            weights /= w_max
+        else:
+            weights[:] = 1.0
 
         # Advance frame counter for beta annealing
         self.frame += batch_size
