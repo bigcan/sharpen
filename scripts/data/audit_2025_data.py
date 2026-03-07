@@ -28,7 +28,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd
-import numpy as np
 from scipy.stats import skew, kurtosis
 
 DATA_PATH = PROJECT_ROOT / "data" / "processed" / "btc_2025_jan_jun.parquet"
@@ -58,7 +57,7 @@ def main():
     df = pd.read_parquet(DATA_PATH)
     N = len(df)
     print(f"Loaded {N:,} rows.")
-    
+
     # 0. Timestamp Integrity Check
     print("\n[0] Timestamp Integrity")
     ts = pd.to_datetime(df['timestamp'])
@@ -66,7 +65,7 @@ def main():
     mean_diff = ts_diff.mean()
     median_diff = ts_diff.median()
     print(f"    Mean Diff: {mean_diff} | Median Diff: {median_diff}")
-    
+
     # Check for gaps > 1 minute (assuming 1-min data)
     gaps = ts_diff[ts_diff > pd.Timedelta(minutes=1)]
     if len(gaps) > 0:
@@ -74,7 +73,7 @@ def main():
         print(f"    Largest gap: {gaps.max()}")
     else:
         print("    PASSED: Contiguous 1-minute steps (no significant gaps).")
-        
+
     # Check for duplicates
     dups = ts.duplicated().sum()
     if dups > 0:
@@ -97,10 +96,10 @@ def main():
     # z_open = (open_t / close_{t-1} - 1)
     # z_close = (close_t / close_{t-1} - 1)
     # These should be identical if open_t == close_t.
-    
+
     diff_open_close = (df['z_open'] - df['z_close']).abs().sum()
     diff_high_low = (df['z_high'] - df['z_low']).abs().sum()
-    
+
     if diff_open_close < 1e-6:
         print("    NOTE: z_open is identical to z_close (Expected for synthetic O=C).")
     else:
@@ -118,23 +117,23 @@ def main():
 
     # Select representative features
     audit_cols = [
-        'log_ret', 
-        'spread_1', 
-        'vol_imbalance_1', 
-        'n_bid_price_1', 
-        'n_bid_vol_1', 
-        'z_close', 
-        'z_volume', 
-        'zd_10', 
+        'log_ret',
+        'spread_1',
+        'vol_imbalance_1',
+        'n_bid_price_1',
+        'n_bid_vol_1',
+        'z_close',
+        'z_volume',
+        'zd_10',
         'zd_30'
     ]
-    
+
     for col in audit_cols:
         if col not in df.columns:
             continue
-            
+
         series = df[col]
-        
+
         # Stats
         mu = series.mean()
         sigma = series.std()
@@ -142,19 +141,19 @@ def main():
         mx = series.max()
         sk = skew(series)
         kt = kurtosis(series)
-        
+
         # Stationarity Proxy: Autocorrelation at Lag 1
         # AC(1) ~ 1.0 means unit root-ish (bad for RL inputs)
         # AC(1) < 0.9 means mean reverting enough
         ac1 = get_autocorr(series)
         is_stable = "YES" if abs(ac1) < 0.95 else "Hmm.."
-        
+
         print(f"{col:<25} {mu:10.4f} {sigma:10.4f} {mn:10.4f} {mx:10.4f} {sk:8.2f} {kt:8.2f} {ac1:10.4f} {is_stable}")
 
     # 4. Saturation Check (Clamping)
     print("\n[4] Saturation Check (Clamping Impact)")
     print("    Check if features are hitting their valid min/max limits too frequently.")
-    
+
     # Normalized Price Clamps: [-50, 50] basis points
     n_price_cols = [c for c in df.columns if c.startswith('n_') and 'price' in c]
     for col in n_price_cols:
@@ -162,7 +161,7 @@ def main():
         sat_max = (df[col] >= 50.0).mean() * 100
         if sat_min > 1.0 or sat_max > 1.0:
             print(f"    WARNING: {col} saturated: Min {sat_min:.2f}% | Max {sat_max:.2f}%")
-            
+
     # Normalized Volume Clamps: [-5, 5] (Z-score)
     n_vol_cols = [c for c in df.columns if c.startswith('n_') and 'vol' in c]
     for col in n_vol_cols:
@@ -185,7 +184,7 @@ def main():
     # Theoretically OFI drives price change -- correlation should be positive but not 1.0
     corr_ofi_ret = df['vol_imbalance_1'].corr(df['log_ret'])
     print(f"    Correlation(OFI_L1, Returns): {corr_ofi_ret:.4f} (Expected: Positive, 0.2 - 0.6 range commonly)")
-    
+
     if abs(corr_ofi_ret) > 0.95:
          print("    WARNING: Suspiciously high correlation between OFI and Returns.")
 

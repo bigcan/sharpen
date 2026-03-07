@@ -21,7 +21,7 @@ import warnings
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score, classification_report
+from sklearn.metrics import roc_auc_score
 
 warnings.filterwarnings('ignore', category=FutureWarning)
 

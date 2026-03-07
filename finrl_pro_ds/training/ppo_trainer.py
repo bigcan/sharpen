@@ -9,7 +9,6 @@ import time
 import numpy as np
 import torch
 from collections import deque
-from typing import Optional
 
 try:
     import wandb
@@ -37,7 +36,7 @@ def extract_tensors(obs):
 class PPOTrainer:
     """
     On-policy trainer for PPO agent.
-    
+
     Training loop:
         for epoch in training_epochs:
             reset env
@@ -284,7 +283,7 @@ class PPOTrainer:
                 with torch.no_grad():
                     # Move to device for prediction
                     micro_t, private_t, macro_t = [t.to(self.device) for t in extract_tensors(obs)]
-                    
+
                     # predict() returns 3 numpy arrays: (actions, log_probs, values)
                     _, _, last_values = self.agent.predict(
                         micro_t, private_t, macro_t,

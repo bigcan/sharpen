@@ -195,7 +195,6 @@ def run_threshold_backtest(config, probs, mid, timestamps, split_name,
         execution_mode: "maker" (MAKER_BUY/SELL, next-bar fill) or
                         "taker" (TAKER_BUY/SELL, immediate fill)
     """
-    from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 
     # Import run_backtest from baselines
     from run_baselines import run_backtest, make_env

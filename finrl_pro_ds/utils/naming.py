@@ -10,34 +10,34 @@ def generate_experiment_name(
 ) -> str:
     """
     Generates a standardized experiment name.
-    
+
     Format: [YYYYMMDD]_[Category]_[System]_[ShortDescription]_[Optional:ID]
-    
+
     Args:
         category: 3-4 letter code (ARCH, FEAT, DATA, HYPR, VALI).
         system: System name (e.g., Synapse, Podracer).
         description: Short description (snake_case).
         experiment_id: Optional unique identifier.
         date: Date of experiment (defaults to today).
-        
+
     Returns:
         Formatted experiment name string.
     """
     if date is None:
         date = datetime.date.today()
-        
+
     date_str = date.strftime("%Y%m%d")
-    
+
     # Sanitize inputs
     category = category.upper()[:4]
     system = system.replace(" ", "")
     description = re.sub(r'[^a-zA-Z0-9_]', '_', description).lower()
-    
+
     parts = [date_str, category, system, description]
-    
+
     if experiment_id:
         parts.append(str(experiment_id))
-        
+
     return "_".join(parts)
 
 def parse_experiment_name(name: str) -> dict:
@@ -47,7 +47,7 @@ def parse_experiment_name(name: str) -> dict:
     parts = name.split("_")
     if len(parts) < 4:
         return {}
-        
+
     return {
         "date": parts[0],
         "category": parts[1],
@@ -64,7 +64,7 @@ def generate_run_name(
 ) -> str:
     """
     Generate a standardized WandB run name for DeepScalper experiments.
-    
+
     ╔═══════════════════════════════════════════════════════════════════════════╗
     ║  CANONICAL FORMAT: DeepScalper_{Version}_{Platform}_{YYYYMMDD}_{HHMM}     ║
     ║                                                                           ║
@@ -74,15 +74,15 @@ def generate_run_name(
     ║    2. Easy querying via WandB dashboard filters                          ║
     ║    3. Consistent naming across all scripts                               ║
     ╚═══════════════════════════════════════════════════════════════════════════╝
-    
+
     Args:
         version: Version tag (e.g., 'V1', 'V95', 'V10')
         platform: Deployment platform (e.g., 'GPUHub', 'Blackwell', 'Local')
         timestamp_format: strftime format for timestamp
-        
+
     Returns:
         Formatted run name string (e.g., 'DeepScalper_V1_GPUHub_20260202_1415')
-        
+
     Example:
         >>> generate_run_name('V1', 'GPUHub')
         'DeepScalper_V1_GPUHub_20260202_1415'
@@ -94,18 +94,18 @@ def generate_run_name(
 def validate_run_name(run_name: str, raise_on_fail: bool = True) -> bool:
     """
     Validate that a run name follows the canonical format.
-    
+
     Canonical pattern: DeepScalper_{Version}_{Platform}_{YYYYMMDD}_{HHMM}
-    
+
     This function is used to catch naming violations at runtime.
-    
+
     Args:
         run_name: The run name to validate
         raise_on_fail: If True, raises ValueError on invalid names
-        
+
     Returns:
         True if valid, False otherwise
-        
+
     Raises:
         ValueError: If run_name is invalid and raise_on_fail=True
     """
@@ -113,16 +113,16 @@ def validate_run_name(run_name: str, raise_on_fail: bool = True) -> bool:
     # No trailing content after the timestamp (no suffixes)
     # Pattern: Relaxed to prevent deployment blocking
     pattern = r"^DeepScalper_V\d+.*$"
-    
+
     is_valid = bool(re.match(pattern, run_name))
-    
+
     if not is_valid and raise_on_fail:
         raise ValueError(
             f"Invalid run name: '{run_name}'. "
             f"Expected format: 'DeepScalper_V{{version}}_{{Platform}}_{{YYYYMMDD}}_{{HHMM}}'. "
             f"Do NOT add suffixes - use WandB tags for metadata (Pilot, HPO, etc.)."
         )
-    
+
     return is_valid
 
 

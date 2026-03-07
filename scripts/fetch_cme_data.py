@@ -18,7 +18,6 @@ load_dotenv(Path(__file__).parent.parent / '.env')
 
 import databento as db
 import pandas as pd
-import numpy as np
 
 API_KEY = os.environ.get('DATABENTO_API_KEY')
 if not API_KEY:

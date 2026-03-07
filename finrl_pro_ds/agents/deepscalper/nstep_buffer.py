@@ -17,7 +17,6 @@ Reference: Mnih et al. (2016) "Asynchronous Methods for Deep RL" — n-step retu
 """
 import numpy as np
 from collections import deque
-from typing import Optional
 
 
 class NStepBuffer:

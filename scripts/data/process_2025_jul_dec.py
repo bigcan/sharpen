@@ -17,7 +17,6 @@ from glob import glob
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import numpy as np
 import pandas as pd
 from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
 
@@ -39,25 +38,25 @@ def main():
 
     # ── Step 0: Load & Concatenate Daily Raw Files ────────────────────────
     print(f"\n[1/6] Loading daily LOB files from {RAW_DIR}...")
-    
+
     all_files = []
     for month in MONTHS:
         pattern = RAW_DIR / f"lob_2025-{month}-*.parquet"
         files = sorted(glob(str(pattern)))
         all_files.extend(files)
         print(f"  2025-{month}: {len(files)} files")
-    
+
     print(f"  Total files: {len(all_files)}")
-    
+
     if not all_files:
         print("ERROR: No files found! Check data/raw/coinapi_lob/ directory.")
         sys.exit(1)
-    
+
     # Read and concatenate
     dfs = []
     for f in all_files:
         dfs.append(pd.read_parquet(f))
-    
+
     df = pd.concat(dfs, ignore_index=True)
     print(f"  Loaded: {df.shape[0]:,} rows × {df.shape[1]} cols")
     print(f"  Date range: {df['timestamp'].min()} → {df['timestamp'].max()}")
@@ -69,13 +68,13 @@ def main():
 
     # Sort by timestamp (critical for daily concat)
     df = df.sort_values('timestamp').reset_index(drop=True)
-    
+
     # Check for duplicates
     n_dupes = df['timestamp'].duplicated().sum()
     if n_dupes > 0:
         print(f"  ⚠️  Dropping {n_dupes} duplicate timestamps")
         df = df.drop_duplicates(subset='timestamp', keep='first').reset_index(drop=True)
-    
+
     print(f"  Final raw rows: {df.shape[0]:,}")
 
     # ── Step 1: Synthetic OHLCV Generation ───────────────────────────────
@@ -183,7 +182,7 @@ def main():
         jj = pd.read_parquet(jan_jun_path, columns=['timestamp'] + list(df.columns[:3]))
         print(f"    Jan-Jun: {jj.shape[0]:,} rows, {jj['timestamp'].min()} → {jj['timestamp'].max()}")
         print(f"    Jul-Dec: {df.shape[0]:,} rows, {df['timestamp'].min()} → {df['timestamp'].max()}")
-        
+
         # Check column compatibility
         jj_full = pd.read_parquet(jan_jun_path, columns=None)
         jj_cols = set(jj_full.columns)

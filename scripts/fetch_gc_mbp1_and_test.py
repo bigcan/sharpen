@@ -13,7 +13,6 @@ Usage:
     python scripts/fetch_gc_mbp1_and_test.py
 """
 import os
-import sys
 import time
 from pathlib import Path
 from dotenv import load_dotenv

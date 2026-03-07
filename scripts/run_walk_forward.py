@@ -16,7 +16,7 @@ import logging
 import os
 import sys
 import yaml
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 # Add project root to path
@@ -72,7 +72,7 @@ def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dr
     # Phase 1: Training
     # ------------------------------------------------------------------
     try:
-        from scripts.run_full_pipeline import make_env, run_training, run_backtest, load_config as _lc
+        from scripts.run_full_pipeline import run_training, run_backtest
         import copy
 
         fold_config = copy.deepcopy(config)

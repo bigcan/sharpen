@@ -65,11 +65,11 @@ def main():
     if not os.path.exists(file_path):
         print(f"File not found: {file_path}")
         return
-        
+
     df = pd.read_parquet(file_path)
     print(f"Data shape: {df.shape}")
     print(df.columns)
-    
+
     # Depending on schema, calculate mid price
     if 'mid_price' in df.columns:
         mid_prices = df['mid_price'].values
@@ -87,21 +87,21 @@ def main():
     pf, count, rets = oracle_ceiling_test(mid_prices, taker_fee_bps=5.0, horizon=1)
     print(f"=== FULL DATASET ===")
     print(f"Horizon=1, Taker=5bps -> PF = {pf:.4f}, Trades = {count}, Avg return count: {len(rets)}")
-    
+
     # Mathematical validation check
     rets_1min = np.diff(mid_prices) / mid_prices[:-1] * 10000
     mean_abs_ret = np.mean(np.abs(rets_1min))
     median_abs_ret = np.median(np.abs(rets_1min))
     std_ret = np.std(rets_1min)
-    
+
     print("\n=== MATHEMATICAL PROPERTIES (1-min returns) ===")
     print(f"Mean |return|: {mean_abs_ret:.4f} bps")
     print(f"Median |return|: {median_abs_ret:.4f} bps")
     print(f"Std return: {std_ret:.4f} bps")
-    
+
     cond_exp = np.mean(np.abs(rets_1min)[np.abs(rets_1min) > 10.0])
     print(f"E[|r| | |r| > 10 bps]: {cond_exp:.4f} bps")
-    
+
     pf_theoretical = cond_exp / 10.0
     print(f"Theoretical PF bound (no friction): {pf_theoretical:.4f}")
 

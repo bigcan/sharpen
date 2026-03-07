@@ -12,14 +12,12 @@ through records without loading everything into memory.
 Output: gc_2025_lob_1min.parquet with 5-level LOB + OHLCV
 """
 import os
-import sys
 import time
 from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / '.env')
 
 import databento as db
-import numpy as np
 import pandas as pd
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "cme"

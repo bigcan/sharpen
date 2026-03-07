@@ -9,7 +9,7 @@ References:
   - Sun et al. (2022) "DeepScalper" Section 4.3
 """
 import numpy as np
-from typing import Tuple, Optional
+from typing import Tuple
 
 
 class SumTree:
@@ -92,7 +92,7 @@ class SumTree:
         """
         n = len(cumsums)
         parent_idx = np.zeros(n, dtype=np.int64)
-        remaining = cumsums.copy()
+        remaining = cumsums
         tree_len = len(self.tree)
 
         while True:
@@ -134,7 +134,7 @@ class SumTree:
         self.tree[unique_indices] = final_priorities
 
         # Propagate up level by level
-        current = unique_indices.copy()
+        current = unique_indices
         while True:
             parent = (current - 1) // 2
             # Filter out entries that have already reached or passed root
@@ -188,7 +188,7 @@ class PrioritizedReplayBuffer:
 
     def push(self, state, action, reward, next_state, done, aux_target=0.0):
         """Store transition with max_priority (ensures new experiences get sampled).
-        
+
         Uses _max_priority directly (already alpha-exponentiated in update_priorities).
         """
         transition = (state, action, reward, next_state, done, aux_target)

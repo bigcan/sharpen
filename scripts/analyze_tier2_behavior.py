@@ -1,7 +1,6 @@
 import os
 import sys
 import torch
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import yaml
@@ -193,8 +192,7 @@ def run_analysis(config_path, checkpoint_path, output_dir="results/tier2_analysi
     print(f">>> Analysis Plot saved to: {plot_path}")
     
     # Statistics Summary
-    print("
-Behavioral Statistics:")
+    print("\nBehavioral Statistics:")
     print(f"  Total Trades: {len(t_buy) + len(m_buy) + len(m_sell) + len(t_sell)}")
     print(f"  Maker Fill Ratio Attempt: { (len(m_buy) + len(m_sell)) / max(1, len(df)) * 100:.2f}% of time")
     print(f"  Cancellations: {len(cancels)}")

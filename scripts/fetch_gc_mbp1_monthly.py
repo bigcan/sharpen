@@ -6,7 +6,6 @@ Processes each month to 1-min LOB snapshots, then concatenates.
 Then runs the RF signal quality test.
 """
 import os
-import sys
 import time
 import gc as garbage_collect
 from pathlib import Path
@@ -19,7 +18,7 @@ import databento as db
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score, accuracy_score
+from sklearn.metrics import roc_auc_score
 
 API_KEY = os.environ.get('DATABENTO_API_KEY')
 DATA_DIR = Path(__file__).parent.parent / "data" / "cme"

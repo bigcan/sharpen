@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / '.env')
 
 import databento as db
-import pandas as pd
 
 API_KEY = os.environ['DATABENTO_API_KEY']
 client = db.Historical(API_KEY)

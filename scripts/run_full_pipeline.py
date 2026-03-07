@@ -10,7 +10,6 @@ import sys
 import copy
 import logging
 import functools
-from datetime import datetime
 
 import json
 import numpy as np
@@ -61,7 +60,7 @@ def merge_configs(base, overrides):
 # ============================================================================
 def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutoff_date=None):
     """Factory to create DeepScalperEnv with real data.
-    
+
     Args:
         norm_cutoff_date: FIX LEAK-1 — When set, rolling normalization statistics
             (z-scores, SMAs) are reset at this date boundary so that training
@@ -70,13 +69,13 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     data_config = config.get("data", {})
     file_path = data_config.get("file_path")
     ticker = data_config.get("ticker", "BTCUSDT")
-    
+
     if not file_path or not os.path.exists(file_path):
         raise ValueError(f"Invalid data file path: {file_path}")
-    
+
     sd = start_date or data_config.get("train_start_date")
     ed = end_date or data_config.get("train_end_date")
-    
+
     handler = ParquetDataHandler(
         file_path=file_path,
         ticker=ticker,
@@ -86,7 +85,7 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
         shared_memory_config=shm_config,
         norm_cutoff_date=norm_cutoff_date  # FIX LEAK-1
     )
-    
+
     env_config = config.get("env", {})
     env_config["reward"] = config.get("env", {}).get("reward", {})
     # Forward network config so env can read micro_config.input_size for fev3 compat
@@ -103,14 +102,14 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
 
 def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_config=None, gym_shm=True, use_sync=False, norm_cutoff_date=None):
     """Create vectorized environment for training.
-    
+
     Note: Using AsyncVectorEnv for parallel data loading. Context 'spawn' is used
     for CUDA/PyTorch safety. Set use_sync=True to use SyncVectorEnv (no subprocesses),
     which avoids IPC/FD limits on constrained containers.
     """
     # FIX BUG-02: Forward norm_cutoff_date to individual envs for normalization isolation
     env_factory = functools.partial(make_env, config=config, start_date=start_date, end_date=end_date, shm_config=shm_config, norm_cutoff_date=norm_cutoff_date)
-    
+
     if use_sync:
         # SyncVectorEnv: all envs run in main process. No pipes, no FD issues.
         # Slower but reliable on containers with restricted ulimits.
@@ -124,7 +123,7 @@ def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_conf
             context="spawn",
             shared_memory=False
         )
-    
+
     return env
 
 
@@ -133,10 +132,10 @@ def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_conf
 # ============================================================================
 def evaluate_for_hpo(env, agent, max_steps=5000):
     """Evaluate agent for HPO — returns (profit_factor, trade_count).
-    
+
     V4.2: Changed from raw Sharpe to profit_factor to prevent specification gaming.
     Also tracks trade_count for the activity constraint (min 100 trades).
-    
+
     IMPORTANT: This function handles both single envs and VectorEnvs.
     VectorEnv returns info as a dict of arrays, or for newer Gymnasium versions,
     as a tuple (info_dict, final_info_dict).
@@ -144,25 +143,25 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     all_returns = []
     positions = []  # V4.2: Track positions for trade counting
     action_counts = {0: 0, 1: 0, 2: 0}  # Track action distribution
-    
+
     def extract_portfolio_value(info, env_idx=0, default=100000.0):
         """Extract portfolio_value handling both single env and VectorEnv info structures."""
         if info is None:
             return default
-        
+
         # Handle VectorEnv info structure (Gymnasium >= 0.26)
         # VectorEnv returns: info = {'final_info': [...], 'final_observation': [...], ...}
         # with per-step metrics potentially in different places
-        
+
         # Try direct access first (single env case)
         pv = info.get("portfolio_value")
-        
+
         if pv is not None:
             # If it's an array (VectorEnv), get the env_idx element
             if hasattr(pv, "__len__") and not isinstance(pv, str):
                 return float(pv[env_idx])
             return float(pv)
-        
+
         # For VectorEnv, the step info might be nested
         # Try '_all_info' key which some versions use
         if "_all_info" in info:
@@ -171,52 +170,52 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
                 env_info = per_env_info[env_idx]
                 if env_info and "portfolio_value" in env_info:
                     return float(env_info["portfolio_value"])
-        
+
         # For final_info (used on episode termination)
         if "final_info" in info:
             final = info["final_info"]
             if final and len(final) > env_idx and final[env_idx]:
                 if "portfolio_value" in final[env_idx]:
                     return float(final[env_idx]["portfolio_value"])
-        
+
         return default
-    
+
     info_logged = False  # Only log once
-    
+
     # BUG-B: Save and restore LSTM hidden state around eval.
     # Training uses num_envs=12 → hidden=(1,12,256), eval uses num_envs=1.
     # Must restore after eval to avoid corrupting training state.
     _saved_hidden = agent._hidden_state if hasattr(agent, '_hidden_state') else None
     if hasattr(agent, "reset_hidden_state"):
         agent.reset_hidden_state()
-    
+
     try:
         obs, info = env.reset()
         done = False
         step = 0
-        
+
         prev_val = extract_portfolio_value(info, env_idx=0, default=100000.0)
-        
+
         while not done and step < max_steps:
             micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device)
             private = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device)
             macro = torch.tensor(obs["macro"], dtype=torch.float32).to(agent.device)
-            
+
             pred = agent.predict(micro, private, macro, deterministic=True)
-            
+
             # PPO returns (actions, log_probs, values), BDQ returns just actions
             if isinstance(pred, tuple):
                 action = pred[0]  # PPO: extract actions from tuple
             else:
                 action = pred  # BDQ: already just actions
-            
+
             # Track action distribution (first env if vectorized)
             first_action = action[0] if len(action.shape) > 1 else action
             direction = int(first_action[0]) if hasattr(first_action, "__len__") else int(first_action)
             action_counts[direction] = action_counts.get(direction, 0) + 1
-            
+
             obs, reward, term, trunc, info = env.step(action)
-            
+
             # Log info structure on first step to diagnose VectorEnv format
             if not info_logged:
                 info_keys = list(info.keys()) if isinstance(info, dict) else str(type(info))
@@ -231,13 +230,13 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
                             sample_values[k] = str(type(v).__name__)
                 wandb.log({"_debug/info_keys": str(info_keys), "_debug/info_sample": str(sample_values)})
                 info_logged = True
-            
+
             t_val = term[0] if hasattr(term, "__len__") else term
             tr_val = trunc[0] if hasattr(trunc, "__len__") else trunc
             done = bool(t_val or tr_val)
-            
+
             curr_val = extract_portfolio_value(info, env_idx=0, default=prev_val)
-            
+
             # V4.2: Track position for trade counting
             pos = info.get("position")
             if pos is not None:
@@ -245,12 +244,12 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
                     positions.append(float(pos[0]))
                 else:
                     positions.append(float(pos))
-            
+
             step_return = (curr_val - prev_val) / prev_val if prev_val > 0 else 0
             all_returns.append(step_return)
             prev_val = curr_val
             step += 1
-            
+
     except Exception as e:
         logger.error(f"Evaluation error: {e}")
         import traceback
@@ -260,7 +259,7 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         if hasattr(agent, '_hidden_state'):
             agent._hidden_state = _saved_hidden
         return 0.0, 0  # V4.2: (profit_factor, trade_count)
-    
+
     returns = np.array(all_returns)
     pos_arr = np.array(positions) if positions else np.array([0.0])
 
@@ -282,14 +281,14 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         trade_count = sign_flips  # V6: always in market, sign flip = one switch
     else:
         trade_count = base_count + sign_flips
-    
+
     # V4.2: Compute profit_factor (gross_profit / gross_loss)
     positive_returns = returns[returns > 0]
     negative_returns = returns[returns < 0]
     gross_profit = float(np.sum(positive_returns)) if len(positive_returns) > 0 else 0.0
     gross_loss = float(np.abs(np.sum(negative_returns))) if len(negative_returns) > 0 else 0.0
     profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (10.0 if gross_profit > 1e-12 else 0.0)
-    
+
     # Diagnostic: log what we computed including action distribution
     # discrete_dims already detected above for trade counting
     if discrete_dims == 2:
@@ -310,7 +309,7 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     for idx, label in action_labels.items():
         diag[f"_debug/eval_action_{idx}_{label}"] = action_counts.get(idx, 0)
     wandb.log(diag)
-    
+
     # Also log Sharpe for research tracking (not used for HPO scoring)
     if len(returns) > 1 and np.std(returns) > 1e-9:
         raw_ratio = np.mean(returns) / np.std(returns)
@@ -332,12 +331,12 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
         })
     else:
         logger.warning(f"Zero Sharpe: steps={step}, len={len(returns)}, std={np.std(returns) if len(returns) > 0 else 'N/A'}, actions={action_counts}")
-    
+
     # BUG-B: Restore training hidden state after eval
     # AUDIT FIX C1: Guard to prevent phantom attribute on stateless agents
     if hasattr(agent, '_hidden_state'):
         agent._hidden_state = _saved_hidden
-    
+
     # V4.2: Return profit_factor + trade_count for anti-specification-gaming.
     # Profit factor is immune to the Sharpe smoothness hack. Trade count
     # enables the activity constraint (min 100 trades to pass).
@@ -348,15 +347,15 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     """Phase 1: Hyperparameter Optimization with Optuna. Supports BDQ and PPO agents."""
     logger.info(f"Starting HPO: {n_trials} trials, {steps_per_trial} steps each")
     wandb.log({"hpo/status": "started", "hpo/n_trials": n_trials})
-    
+
     def objective(trial):
         trial_prefix = f"hpo/t{trial.number}"
         wandb.log({f"{trial_prefix}/started": True})
-        
+
         # Create trial config
         config = copy.deepcopy(base_config)
         config["training"]["total_timesteps"] = steps_per_trial
-        
+
         # -----------------------------------------------------------
         # Agent-specific HPO hyperparameter sampling
         # V4.2: OPTIMIZER HPs ONLY — MDP/reward params are LOCKED.
@@ -373,7 +372,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             target_kl = trial.suggest_float("target_kl", 0.01, 0.04)
             max_grad_norm = trial.suggest_categorical("max_grad_norm", [0.5, 1.0, 5.0])
             clip_eps = trial.suggest_categorical("clip_eps", [0.1, 0.2])
-            
+
             config["agents"]["ppo"]["learning_rate"] = learning_rate
             config["agents"]["ppo"]["ent_coef"] = ent_coef
             config["agents"]["ppo"]["gae_lambda"] = gae_lambda
@@ -383,7 +382,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             config["agents"]["ppo"]["clip_eps"] = clip_eps
             # NOTE: gamma, batch_size, sharpe_weight, hindsight_* are
             # READ FROM CONFIG and never overridden by HPO.
-            
+
             wandb.log({
                 f"{trial_prefix}/learning_rate": learning_rate,
                 f"{trial_prefix}/ent_coef": ent_coef,
@@ -443,7 +442,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 f"{trial_prefix}/epsilon_end": epsilon_end,
                 f"{trial_prefix}/tau": tau,
             })
-        
+
         # -----------------------------------------------------------
         # Create env and train (agent-agnostic)
         # -----------------------------------------------------------
@@ -453,13 +452,13 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             # FIX: Use SyncVectorEnv for HPO to avoid AsyncVectorEnv pipe crashes
             hpo_num_envs = min(config["env"].get("num_envs", 12), 12)
             env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True)
-            
+
             if agent_type == "ppo":
                 trainer = PPOTrainer(env, config, device=device, hpo_mode=True)
             else:
                 # DeepScalperTrainer handles both BDQ and IQN (auto-detects from config)
                 trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
-            
+
             # V4.2: Evaluate on VALIDATION set (anti-overfitting)
             # Training happens on Jan-Apr, evaluation on May.
             data_cfg = config.get("data", {})
@@ -471,17 +470,17 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 # Without this, EMA stats from training data leak into validation scoring.
                 norm_cutoff_date=data_cfg.get("val_start_date"),
             )
-            
+
             # Define Pruning Callback (also uses validation env)
             def pruning_callback():
                 pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=3000)
                 return pf  # Optuna pruner expects a single float
 
             trainer.train(optuna_trial=trial, pruning_callback=pruning_callback)
-            
+
             # V4.2: Evaluate on validation set with profit_factor metric
             profit_factor, trade_count = evaluate_for_hpo(eval_env, trainer.agent, max_steps=50000)
-            
+
             # V4.2: Activity constraint — kill lazy holding agents
             # FIX HPO-3: Lowered from 100 to 30 for swing MDP. Binary {Long, Short}
             # with cooldown_bars=2-3 naturally produces fewer trades per eval window.
@@ -491,16 +490,16 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 wandb.log({f"{trial_prefix}/killed": "lazy_agent", f"{trial_prefix}/trades": trade_count})
                 logger.info(f"Trial {trial.number}: KILLED (only {trade_count} trades, min={min_trades})")
                 return -999.0
-            
+
             wandb.log({
                 f"{trial_prefix}/profit_factor": profit_factor,
                 f"{trial_prefix}/trade_count": trade_count,
                 f"{trial_prefix}/completed": True,
             })
             logger.info(f"Trial {trial.number}: PF={profit_factor:.4f}, Trades={trade_count}")
-            
+
             return profit_factor
-            
+
         except optuna.TrialPruned:
             logger.info(f"Trial {trial.number} pruned.")
             wandb.log({f"{trial_prefix}/status": "pruned"})
@@ -527,7 +526,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             # FIX A: Force garbage collection to release PyArrow mmap/FD handles
             import gc
             gc.collect()
-    
+
 
     # Run optimization
     logger.info(f"Creating Optuna study (storage={base_config.get('hpo', {}).get('storage')})...")
@@ -545,7 +544,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         pruner=optuna.pruners.NopPruner()
     )
     study.optimize(objective, n_trials=n_trials)
-    
+
     # Log best results
     best = study.best_trial
     agent_key = agent_type if agent_type in ("ppo", "iqn") else "bdq"
@@ -554,7 +553,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         "agents": {agent_key: {}},
         "training": {}
     }
-    
+
     # V4.2: Explicit routing for ALL HPO params to prevent silent mis-routing.
     if agent_type == "ppo":
         # V4.2: PPO locks reward params — only optimizer HPs are tunable
@@ -568,7 +567,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         # PERF-OPT: batch_size removed — locked in config (hardware-profile param, not learning param)
         reward_params = set()
         agent_params = {"auxiliary_weight", "learning_rate", "epsilon_end", "tau"}
-    
+
     for key, val in best.params.items():
         if key in reward_params:
             best_params["env"]["reward"][key] = val
@@ -576,7 +575,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             best_params["agents"][agent_key][key] = val
         else:
             raise ValueError(f"HPO param '{key}' has no routing rule. Add to reward_params or agent_params in run_hpo().")
-    
+
     # V4.2: best.value is now profit_factor (not Sharpe)
     wandb.log({
         "hpo/best_profit_factor": best.value,
@@ -584,7 +583,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         "hpo/best_params": str(best.params),
         "hpo/status": "completed"
     })
-    
+
     logger.info(f"HPO Complete. Best Profit Factor: {best.value:.4f} (Trial #{best.number})")
     return best_params
 
@@ -596,11 +595,11 @@ def run_training(config, run_name, device, agent_type="bdq"):
     """Phase 2: Full training with optimized hyperparameters."""
     logger.info(f"Starting Training Phase (agent={agent_type})")
     wandb.log({"train/status": "started", "train/agent_type": agent_type})
-    
+
     num_envs = config.get("env", {}).get("num_envs", 12)
     data_loader = None
     env = None
-    
+
     try:
         # Setup shared memory if enabled
         shm_config = None
@@ -617,13 +616,13 @@ def run_training(config, run_name, device, agent_type="bdq"):
             )
             shm_config = data_loader.create_shared_memory()
             # Note: Don't store in config dict - pass explicitly to avoid stale refs
-        
+
         # Create environment (pass shm_config explicitly)
         # Also pass use_shm to Gymnasium to disable internal SHM if needed
         use_sync = config.get("training", {}).get("use_sync", False)
         env = create_vector_env(config, num_envs, shm_config=shm_config, gym_shm=use_shm, use_sync=use_sync)
         logger.info(f"Environment ready: {num_envs} workers")
-        
+
         # Train — dispatch based on agent type
         if agent_type == "ppo":
             trainer = PPOTrainer(env, config, device=device, run_name=run_name)
@@ -631,7 +630,7 @@ def run_training(config, run_name, device, agent_type="bdq"):
         else:
             trainer = DeepScalperTrainer(env, config, device=device, run_name=run_name)
             trainer.train()
-        
+
         # Find checkpoint
         checkpoints_dir = f"checkpoints/{run_name}"
         checkpoint_path = None
@@ -642,17 +641,17 @@ def run_training(config, run_name, device, agent_type="bdq"):
                 checkpoint_path = final_ckpt
             else:
                 # Fallback: highest step number (numerical sort, not alphabetical)
-                step_ckpts = [f for f in os.listdir(checkpoints_dir) 
+                step_ckpts = [f for f in os.listdir(checkpoints_dir)
                               if f.startswith("checkpoint_step_") and f.endswith(".pth")]
                 if step_ckpts:
                     step_ckpts.sort(key=lambda f: int(f.replace("checkpoint_step_", "").replace(".pth", "")))
                     checkpoint_path = os.path.join(checkpoints_dir, step_ckpts[-1])
-        
+
         wandb.log({"train/status": "completed", "train/checkpoint": checkpoint_path or "none"})
         logger.info(f"Training complete. Checkpoint: {checkpoint_path}")
-        
+
         return checkpoint_path
-        
+
     except Exception as e:
         logger.error(f"Training failed: {e}")
         wandb.log({"train/status": "failed", "train/error": str(e)})
@@ -675,7 +674,7 @@ def run_training(config, run_name, device, agent_type="bdq"):
 # ============================================================================
 def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None, prefix="backtest", agent_type="bdq", norm_cutoff_date=None):
     """Phase 3: Backtest on specified data range.
-    
+
     Args:
         norm_cutoff_date: FIX LEAK-1 — Reset normalization statistics at this
             date boundary (e.g. train_end_date for val, val_end_date for test).
@@ -685,18 +684,18 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
     if norm_cutoff_date:
         logger.info(f"[LEAK-1] Normalization cutoff: {norm_cutoff_date}")
     wandb.log({f"{prefix}/status": "started"})
-    
+
     data_config = config.get("data", {})
     if not start_date:
         start_date = data_config.get("test_start_date")
     if not end_date:
         end_date = data_config.get("test_end_date")
-        
+
     if not start_date or not end_date:
         logger.warning(f"No dates configured for {prefix}, using validation dates as fallback")
         start_date = data_config.get("val_start_date")
         end_date = data_config.get("val_end_date")
-    
+
     env = None
     try:
         # Fix Issue #1: Disable Private State Augmentation during backtest
@@ -712,15 +711,15 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         # full test period sequentially, not a single random day.
         backtest_config["env"]["episode_length"] = 0   # Full dataset
         backtest_config["env"]["random_start"] = False  # Sequential from start
-        
+
         env = make_env(backtest_config, start_date=start_date, end_date=end_date, norm_cutoff_date=norm_cutoff_date)
-        
+
         # Create agent
         sample_obs, _ = env.reset()
         network_config = dict(config.get("network", {}))
         if not network_config:
             raise ValueError("Config missing 'network' section — cannot reconstruct agent for backtest")
-        
+
         # Read action dims from config (mirrors trainer logic exactly)
         # FIX BUG-15: PPO uses Discrete(N) — action_dims MUST be int, not tuple.
         # FIX BUG-16: Must check size_dims BEFORE discrete_dims (parity with trainer).
@@ -748,7 +747,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         # FIX: Inject action_space_dims into network_config (mirrors trainer logic).
         # Without this, the BDQ/PPO agent assertion falls back to default (5,9).
         network_config["action_space_dims"] = action_dims
-        
+
         # Dispatch agent creation based on type
         if agent_type == "ppo":
             ppo_cfg = config.get("agents", {}).get("ppo", {})
@@ -793,21 +792,21 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 use_amp=config.get("training", {}).get("use_amp", False),
                 device=device
             )
-        
+
         # Load checkpoint
         if checkpoint_path and os.path.exists(checkpoint_path):
             logger.info(f"Loading checkpoint: {checkpoint_path}")
             agent.load(checkpoint_path)
         else:
             logger.warning("No checkpoint found, using random policy")
-        
+
         # Run backtest
         obs, info = env.reset()
         portfolio_values = []
         positions = []
         done = False
         step = 0
-        
+
         while not done and step < 200000:
             micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(device)
             private = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device)
@@ -817,24 +816,24 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 action = pred[0][0]  # PPO: (actions, log_probs, values)
             else:
                 action = pred[0]    # BDQ: actions array
-            
+
             obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
-            
+
             portfolio_values.append(info.get("portfolio_value", 100000))
             positions.append(info.get("position", 0))
-            
+
             if step % 50000 == 0:
                 logger.info(f"Backtest step {step}: Value={portfolio_values[-1]:.2f}")
             step += 1
-        
+
         # Compute metrics
         pv = np.array(portfolio_values)
         pos_arr = np.array(positions)
         returns = np.diff(pv) / pv[:-1]
-        
+
         total_return = (pv[-1] - pv[0]) / pv[0] if len(pv) > 0 else 0
-        
+
         # Dual Sharpe: per-bar (canonical) + hourly-aggregated (research)
         # FIX K04: Detect bar duration from data file path for correct annualization
         data_file = config.get("data", {}).get("file_path", "")
@@ -857,9 +856,9 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 hourly_returns = hourly_returns[:-1]
             if len(hourly_returns) > 1 and np.std(hourly_returns) > 1e-9:
                 sharpe_hourly = (np.mean(hourly_returns) / np.std(hourly_returns)) * np.sqrt(365 * 24)
-        
+
         max_dd = np.min(pv / np.maximum.accumulate(pv)) - 1 if len(pv) > 0 else 0
-        
+
         # Trade Stats
         # FIX BUG-P2: Count position-change legs (flips = 2 counts).
         # Base count: any change > epsilon.
@@ -874,7 +873,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         else:
             trade_count = base_count + sign_flips
         market_exposure = np.mean(np.abs(pos_arr) > 1e-6)
-        
+
         # ── Institutional Metrics via PyfolioAnalyzer (Blueprint mandate) ──
         returns_series = pd.Series(returns)
         try:
@@ -883,7 +882,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         except Exception as e:
             logger.warning(f"PyfolioAnalyzer failed, using fallback: {e}")
             pyfolio_metrics = {}
-        
+
         # Manual: Profit Factor & Avg Win/Loss Ratio
         wins = returns[returns > 0]
         losses = returns[returns < 0]
@@ -894,7 +893,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         avg_win = np.mean(wins) if len(wins) > 0 else 0.0
         avg_loss = abs(np.mean(losses)) if len(losses) > 0 else 0.0
         avg_win_loss_ratio = avg_win / avg_loss if avg_loss > 1e-12 else 0.0
-        
+
         metrics = {
             # ── Core metrics (manual, crypto-specific annualization) ──
             f"{prefix}/total_return": total_return,
@@ -918,16 +917,16 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             f"{prefix}/avg_win_loss_ratio": avg_win_loss_ratio,
             f"{prefix}/status": "completed"
         }
-        
+
         wandb.log(metrics)
         logger.info(
             f"{mode} Complete. Return={total_return*100:.2f}%, Sharpe={sharpe:.2f}, "
             f"Sortino={pyfolio_metrics.get('sortino_ratio', 0):.2f}, "
             f"MaxDD={max_dd*100:.2f}%, WinRate={pyfolio_metrics.get('win_rate', 0):.1f}%"
         )
-        
+
         return metrics
-        
+
     except Exception as e:
         logger.error(f"Backtest failed: {e}")
         wandb.log({f"{prefix}/status": "failed", f"{prefix}/error": str(e)})
@@ -970,9 +969,9 @@ def main():
     parser.add_argument("--backtest_only", action="store_true", help="Skip HPO and training, run backtest only (requires --checkpoint)")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint for --backtest_only mode")
     args = parser.parse_args()
-    
+
     base_config = load_config(args.config)
-    
+
     # Auto-detect agent type from config if --agent was not explicitly provided.
     # This prevents KeyError when deploying with e.g. deepscalper_ppo_dev.yaml
     # but forgetting to pass --agent ppo on the command line.
@@ -989,7 +988,7 @@ def main():
             logger.info(f"Agent type: {agent_type}")
     else:
         logger.info(f"Agent type (explicit): {agent_type}")
-    
+
     # =========================================================================
     # 0. Setup Run Name & WandB
     # =========================================================================
@@ -999,9 +998,9 @@ def main():
     else:
         platform = "GPUHub" if os.path.exists("/workspace") else "Local"
         run_name = generate_run_name(version=args.version, platform=platform)
-    
+
     logger.info(f"Pipeline Run: {run_name}")
-    
+
     # Initialize single WandB run for entire pipeline
     wandb_config = base_config.get("wandb", {})
     wandb.init(
@@ -1012,15 +1011,15 @@ def main():
         config=base_config
     )
     logger.info(f"WandB Run: {wandb.run.url}")
-    
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Device: {device}")
-    
+
     # Enable TF32 for 5th Gen Tensor Cores (RTX 5090 Blackwell)
     # Uses 10-bit mantissa — sufficient for financial signals, ~8x faster than IEEE FP32
     torch.set_float32_matmul_precision('high')
     logger.info("TF32 enabled: torch.set_float32_matmul_precision('high')")
-    
+
     try:
         # =====================================================================
         # PHASE 1: HPO
@@ -1028,26 +1027,26 @@ def main():
         print("\n" + "="*60)
         print(">>> PHASE 1: HYPERPARAMETER OPTIMIZATION")
         print("="*60 + "\n")
-        
+
         hpo_config = base_config.get("hpo", {})
         final_config = copy.deepcopy(base_config)
-        
+
         if args.backtest_only:
             logger.info("Backtest-only mode: skipping HPO.")
         elif hpo_config.get("enabled", True):
             # Silence Optuna INFO logs (Start/Finish trial) to avoid WandB console spam
             optuna.logging.set_verbosity(optuna.logging.WARNING)
-            
+
             n_trials = args.trials or hpo_config.get("n_trials", 20)
             steps_per_trial = hpo_config.get("steps_per_trial", 50000)
-            
+
             best_params = run_hpo(base_config, n_trials, steps_per_trial, device, agent_type=agent_type)
-            
+
             # Merge best params into config
             final_config = merge_configs(final_config, best_params)
         else:
             logger.info("HPO disabled in config. Using base configuration.")
-        
+
         # Override training steps if specified
         if args.steps:
             final_config["training"]["total_timesteps"] = args.steps
@@ -1055,7 +1054,7 @@ def main():
         # Update WandB config to reflect final parameters (Crucial for reproducibility)
         wandb.config.update(final_config, allow_val_change=True)
         logger.info(f"Final Config for Training: {final_config}")
-        
+
         # =====================================================================
         # PHASE 2: TRAINING
         # =====================================================================
@@ -1068,9 +1067,9 @@ def main():
             print("\n" + "="*60)
             print(">>> PHASE 2: TRAINING (Full Run with Best Params)")
             print("="*60 + "\n")
-            
+
             checkpoint_path = run_training(final_config, run_name, device, agent_type=agent_type)
-        
+
         if checkpoint_path:
             # PHASE 3a: Validation Backtest (for Overfitting Check)
             # FIX LEAK-1: Pass train_end_date as cutoff so validation z-scores
@@ -1078,10 +1077,10 @@ def main():
             print(">>> PHASE 3a: VALIDATION BACKTEST")
             data_config = final_config.get("data", {})
             run_backtest(
-                final_config, 
-                checkpoint_path, 
-                device, 
-                start_date=data_config.get("val_start_date"), 
+                final_config,
+                checkpoint_path,
+                device,
+                start_date=data_config.get("val_start_date"),
                 end_date=data_config.get("val_end_date"),
                 prefix="backtest_val",
                 agent_type=agent_type,
@@ -1093,8 +1092,8 @@ def main():
             # don't include val/train data in their rolling windows.
             print(">>> PHASE 3b: TEST BACKTEST")
             run_backtest(
-                final_config, 
-                checkpoint_path, 
+                final_config,
+                checkpoint_path,
                 device,
                 prefix="backtest_test",
                 agent_type=agent_type,
@@ -1102,7 +1101,7 @@ def main():
             )
         else:
             logger.warning("No checkpoint found, skipping backtests")
-        
+
         print("\n" + "="*60)
         print(">>> PIPELINE COMPLETE")
         print("="*60 + "\n")

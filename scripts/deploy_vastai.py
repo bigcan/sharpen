@@ -397,7 +397,6 @@ def _build_platform_tags(instance_info: dict) -> list[str]:
 
 def cmd_deploy(args):
     """Deploy code and launch training on a running Vast.ai instance."""
-    import paramiko
 
     instance_id = str(args.instance_id)
 

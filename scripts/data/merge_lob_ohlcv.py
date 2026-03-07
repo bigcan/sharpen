@@ -28,10 +28,10 @@ def merge_data(lob_path: str, ohlcv_path: str, output_path: str):
     except Exception as e:
         print(f"Error loading OHLCV data: {e}")
         return
-        
+
     print("Initializing Feature Engineer...")
     fe = DeepScalperFeatureEngineer()
-    
+
     print("Processing Micro Features...")
     try:
         # Expected columns in LOB: timestamp, bid_price_1.., ask_price_1.., bid_vol_1.., ask_vol_1..
@@ -57,11 +57,11 @@ def merge_data(lob_path: str, ohlcv_path: str, output_path: str):
     except Exception as e:
         print(f"Alignment failed: {e}")
         return
-        
+
     print(f"Saving merged dataset to {output_path}...")
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    
+
     # Ensure timestamp is a column, not just index
     if isinstance(merged_df.index, pd.DatetimeIndex):
         merged_df = merged_df.reset_index()
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     parser.add_argument("--input-lob", required=True, help="Path to processed LOB parquet")
     parser.add_argument("--input-ohlcv", required=True, help="Path to OHLCV parquet")
     parser.add_argument("--output", default="c:/data/btc_lob_jan2023.parquet", help="Final output path")
-    
+
     args = parser.parse_args()
-    
+
     merge_data(args.input_lob, args.input_ohlcv, args.output)

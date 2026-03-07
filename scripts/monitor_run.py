@@ -44,7 +44,7 @@ def check_remote_pid(pid):
 def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=False):
     """
     Monitor a specific WandB run until completion or failure.
-    
+
     Args:
         run_id: WandB run ID
         pid: Remote process ID (optional, for stricter checking)
@@ -56,15 +56,15 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
     print(f"  Monitoring Run: {run_id}")
     print(f"  Poll Interval: {poll_interval}s | Max Wait: {max_wait/3600:.1f}h")
     print(f"{'='*60}\n")
-    
+
     api = wandb.Api()
     project = "bigcan-chiwin-technology/FinRL-Pro-DS"
     run_path = f"{project}/{run_id}"
-    
+
     start_time = time.time()
     last_step = -1
     last_step_time = time.time()
-    
+
     try:
         run = api.run(run_path)
     except Exception as e:
@@ -76,7 +76,7 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
             # Refresh run data
             run = api.run(run_path)
             state = run.state
-            
+
             # 1. Check Run State
             if state in ['finished', 'crashed', 'failed']:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Run ended: {state.upper()}")
@@ -108,7 +108,7 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
                 step = latest.get('_step', 0)
                 loss = latest.get('train/loss', 0)
                 q_mean = latest.get('train/q_mean', 0)
-                
+
                 # Stall Detection
                 if step > last_step:
                     last_step = step
@@ -133,7 +133,7 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
             print(f"Monitor error (retrying): {e}")
 
         time.sleep(poll_interval)
-    
+
     print(f"\n[TIMEOUT] Monitoring timed out after {max_wait/3600:.1f}h")
 
 
@@ -145,5 +145,5 @@ if __name__ == "__main__":
     parser.add_argument("--max_wait", type=int, default=28800, help="Max wait time (seconds), default 8h")
     parser.add_argument("--no_collect", action="store_true", help="Disable auto-collection on finish")
     args = parser.parse_args()
-    
+
     monitor_run(args.run_id, args.pid, args.poll, args.max_wait, args.no_collect)

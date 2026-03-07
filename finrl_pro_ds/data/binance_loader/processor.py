@@ -1,8 +1,6 @@
 import os
 import pandas as pd
 import logging
-from tqdm import tqdm
-from .replayer import OrderBookReplayer
 
 logger = logging.getLogger(__name__)
 
@@ -17,12 +15,12 @@ def process_month(symbol, year_month, raw_dir, output_dir):
     klines_file = os.path.join(raw_dir, f"{symbol}-1m-{year_month}.zip")
     snapshot_file = os.path.join(raw_dir, f"{symbol}-depthSnapshot-{year_month}.zip")
     update_file = os.path.join(raw_dir, f"{symbol}-depthUpdate-{year_month}.zip")
-    
+
     # Check existence
     if not os.path.exists(klines_file):
         logger.error(f"Missing Klines file: {klines_file}")
         return False
-        
+
     has_depth = True
     if not os.path.exists(snapshot_file) or not os.path.exists(update_file):
         logger.warning(f"Missing Depth files for {year_month}. Generating KLINES ONLY.")
@@ -32,7 +30,7 @@ def process_month(symbol, year_month, raw_dir, output_dir):
     logger.info(f"Loading Klines from {klines_file}...")
     # Binance Klines CSV cols: Open time, Open, High, Low, Close, Volume, Close time, ...
     # We need to verify headers. Usually no headers in zip.
-    # Columns: 
+    # Columns:
     # 0: Open time
     # 1: Open
     # 2: High
@@ -45,13 +43,10 @@ def process_month(symbol, year_month, raw_dir, output_dir):
     df_klines['timestamp'] = pd.to_datetime(df_klines['open_time'], unit='ms')
     df_klines.set_index('timestamp', inplace=True)
     df_klines = df_klines[['open', 'high', 'low', 'close', 'volume']]
-    
+
     # 2. Replay LOB (if available)
     if has_depth:
-        replayer = OrderBookReplayer(snapshot_file, update_file, klines_file)
-        # replayer.replay() should return a generator or dict of snapshots keyed by timestamp?
-        # Or we step through?
-        # TODO: Implement full replay integration.
+        # TODO: Implement full replay integration with OrderBookReplayer.
         pass
     else:
         # Fill LOB cols with NaNs or Zeros if missing?

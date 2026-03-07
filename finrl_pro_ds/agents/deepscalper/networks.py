@@ -1,7 +1,6 @@
 import torch
 import torch.nn as nn
 from typing import Dict, Tuple
-import math
 
 class MicroEncoder(nn.Module):
     """
@@ -23,10 +22,10 @@ class MicroEncoder(nn.Module):
         super().__init__()
         self.rnn_type = rnn_type
         self.hidden_size = hidden_size
-        
+
         # FIX FIND-1: Dropout only meaningful between stacked layers (num_layers > 1)
         rnn_dropout = dropout if num_layers > 1 else 0.0
-        
+
         # Select RNN constructor
         if rnn_type == "LSTM":
             rnn_cls = nn.LSTM
@@ -34,7 +33,7 @@ class MicroEncoder(nn.Module):
             rnn_cls = nn.GRU
         else:
             raise ValueError(f"Unknown RNN type: {rnn_type}")
-        
+
         # Sprint 7 DIV-1 FIX: LSTM processes only market data (no private state)
         # Private state is injected at the fusion layer in DeepScalperNetwork
         self.micro_rnn = rnn_cls(
@@ -48,7 +47,7 @@ class MicroEncoder(nn.Module):
         self.out_layer = nn.Linear(hidden_size, hidden_size)
         self.layernorm = nn.LayerNorm(hidden_size)
         self.activation = nn.LeakyReLU()
-        
+
         # FIX FIND-3: Explicit weight initialization
         self._init_weights()
 
@@ -65,20 +64,20 @@ class MicroEncoder(nn.Module):
                 if self.rnn_type == "LSTM":
                     n = param.size(0)
                     param.data[n // 4 : n // 2].fill_(1.0)
-        
+
         nn.init.xavier_uniform_(self.out_layer.weight)
         nn.init.zeros_(self.out_layer.bias)
 
     def forward(self, x: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         # x: (Batch, Window, LOB_Features)  — market data only
-        
+
         # Sprint 7 DIV-1 FIX: LSTM processes only LOB features
         # BUG-B: Pass hidden state through for inference persistence
         rnn_out, new_hidden = self.micro_rnn(x, hidden)
-            
+
         # Take last time step
         last_hidden = rnn_out[:, -1, :]
-        
+
         # MLP Projection
         out = self.out_layer(last_hidden)
         out = self.layernorm(out)
@@ -331,7 +330,7 @@ class MacroEncoder(nn.Module):
         super().__init__()
         layers = []
         in_dim = input_size
-        
+
         for i, h_dim in enumerate(hidden_sizes):
             layers.append(nn.Linear(in_dim, h_dim))
             layers.append(nn.LayerNorm(h_dim))
@@ -341,7 +340,7 @@ class MacroEncoder(nn.Module):
             if dropout > 0 and i < len(hidden_sizes) - 1:
                 layers.append(nn.Dropout(dropout))
             in_dim = h_dim
-            
+
         self.net = nn.Sequential(*layers)
         self.output_dim = in_dim
 
@@ -362,7 +361,7 @@ class DeepScalperNetwork(nn.Module):
         **kwargs
     ):
         super().__init__()
-        
+
         # Encoders
         encoder_type = micro_config.get("encoder_type", "rnn").lower()
         if encoder_type == "mlp":
@@ -373,28 +372,28 @@ class DeepScalperNetwork(nn.Module):
             self.micro_encoder = MicroEncoderFlat(**micro_config)
         else:
             self.micro_encoder = MicroEncoder(**micro_config)
-            
+
         self.macro_encoder = MacroEncoder(**macro_config)
-        
+
         # Input dim to fusion is micro_hidden + macro_hidden + private_size
         # Sprint 7 DIV-1: Private state (3) injected at fusion, not in LSTM
         micro_out_dim = micro_config.get("hidden_size", 128)
         macro_out_dim = macro_config.get("hidden_sizes", (128, 128))[-1]
         private_size = micro_config.get("private_input_size", 3)
         self.private_size = private_size
-        
+
         fusion_in_dim = micro_out_dim + macro_out_dim + private_size
-        
+
         # FIX FIND-5: Head width scales with fusion_dim (default: fusion_dim // 2)
         head_hidden = max(fusion_dim // 2, 64)
-        
+
         # Fusion Layer
         self.fusion = nn.Sequential(
             nn.Linear(fusion_in_dim, fusion_dim),
             nn.LayerNorm(fusion_dim),
             nn.LeakyReLU()
         )
-        
+
         # Dueling Architecture
         # Value Stream V(s)
         self.value_stream = nn.Sequential(
@@ -402,21 +401,21 @@ class DeepScalperNetwork(nn.Module):
             nn.LeakyReLU(),
             nn.Linear(head_hidden, 1)
         )
-        
+
         # Advantage Streams A(s, a)
         self.is_multidiscrete = isinstance(action_space_dims, (list, tuple))
-        
+
         if self.is_multidiscrete:
             # Paper-aligned: 2 branches (Price, SignedQty)
             self.price_dims, self.qty_dims = action_space_dims
-            
+
             # Price Branch (relative price offset)
             self.adv_price = nn.Sequential(
                 nn.Linear(fusion_dim, head_hidden),
                 nn.LeakyReLU(),
                 nn.Linear(head_hidden, self.price_dims)
             )
-            
+
             # Signed Quantity Branch (direction implicit in sign)
             self.adv_qty = nn.Sequential(
                 nn.Linear(fusion_dim, head_hidden),
@@ -431,17 +430,17 @@ class DeepScalperNetwork(nn.Module):
                 nn.LeakyReLU(),
                 nn.Linear(head_hidden, self.action_dim)
             )
-        
+
         # FIX FIND-6: Auxiliary Task — 2-layer MLP for volatility prediction (Section 4.4)
         self.vol_head = nn.Sequential(
             nn.Linear(fusion_dim, head_hidden),
             nn.LeakyReLU(),
             nn.Linear(head_hidden, 1)
         )
-        
+
         # FIX FIND-3: Initialize all Linear heads with Xavier
         self._init_heads()
-        
+
     def _init_heads(self):
         """FIX FIND-3: Xavier init for all Linear layers in heads."""
         modules = [self.fusion, self.value_stream, self.vol_head]
@@ -465,23 +464,23 @@ class DeepScalperNetwork(nn.Module):
         # Encode
         h_micro, new_hidden = self.micro_encoder(micro_in, hidden)  # Sprint 7: no private_in
         h_macro = self.macro_encoder(macro_in)
-        
+
         # Sprint 7 DIV-1 FIX: Private state injected at fusion layer (paper Figure 2)
         # Take last timestep: (Batch, Window, N) -> (Batch, N)
         private_last = private_in[:, -1, :]
-        
+
         # Fusion: market encodings + private state
         combined = torch.cat([h_micro, h_macro, private_last], dim=1)
         features = self.fusion(combined)
-        
+
         # Value
         v_s = self.value_stream(features)
-        
+
         # Advantages
         if self.is_multidiscrete:
             a_price = self.adv_price(features)
             a_qty = self.adv_qty(features)
-            
+
             # Q-Values (Dueling Aggregation)
             # Q(s,a) = V(s) + (A(s,a) - mean(A(s,a)))
             q_price = v_s + (a_price - a_price.mean(dim=1, keepdim=True))
@@ -490,8 +489,8 @@ class DeepScalperNetwork(nn.Module):
             a_stream = self.adv_stream(features)
             q_qty = v_s + (a_stream - a_stream.mean(dim=1, keepdim=True))
             q_price = None  # Single head mode
-        
+
         # Volatility Prediction
         pred_vol = self.vol_head(features)
-        
+
         return q_price, q_qty, v_s, pred_vol, new_hidden
