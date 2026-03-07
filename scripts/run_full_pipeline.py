@@ -562,7 +562,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         agent_params = {"learning_rate", "ent_coef", "gae_lambda", "n_epochs", "target_kl", "max_grad_norm", "clip_eps"}
     elif agent_type == "iqn":
         reward_params = set()
-        agent_params = {"learning_rate", "num_quantiles", "noisy_sigma0", "tau"}
+        agent_params = {"learning_rate", "num_quantiles", "noisy_sigma0", "tau", "gamma"}
     else:
         # FIX BUG-01+BUG-10: BDQ reward/MDP params are LOCKED (gamma read from config)
         # PERF-OPT: batch_size removed — locked in config (hardware-profile param, not learning param)
