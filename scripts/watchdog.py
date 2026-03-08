@@ -91,7 +91,8 @@ def get_recently_finished(since_minutes=35):
 
 def check_run_health(run):
     """
-    Analyze a single run's health. Returns a dict with status and alerts.
+    Analyze a single run's health using summary (fast, no scan_history).
+    Returns a dict with status and alerts.
     """
     result = {
         "run_id": run.id,
@@ -104,85 +105,60 @@ def check_run_health(run):
     }
 
     summary = run.summary._json_dict
-
-    # Get recent history (last 20 logged points)
-    try:
-        history_keys = [
-            '_step', '_timestamp',
-            'train/loss', 'train/q_mean', 'train/q_std',
-            'eval/profit_factor', 'eval/switch_rate', 'eval/total_trades',
-            'eval/reward_mean', 'hpo/best_pf',
-        ]
-        history = list(run.scan_history(keys=history_keys, page_size=20))
-        recent = history[-20:] if history else []
-    except Exception as e:
-        result["alerts"].append(f"Could not fetch history: {e}")
-        result["verdict"] = "WARNING"
-        return result
-
-    if not recent:
-        result["alerts"].append("No history data yet (run may be initializing)")
-        return result
-
-    latest = recent[-1]
-    step = latest.get('_step', 0)
+    step = summary.get('_step', summary.get('step', 0))
     result["metrics"]["step"] = step
 
     # --- Check 1: Stall Detection ---
-    last_ts = latest.get('_timestamp')
-    if last_ts:
-        try:
-            if isinstance(last_ts, (int, float)):
-                last_update = datetime.fromtimestamp(last_ts, tz=timezone.utc)
-            else:
-                last_update = datetime.fromisoformat(str(last_ts).replace('Z', '+00:00'))
-            minutes_since = (datetime.now(timezone.utc) - last_update).total_seconds() / 60
-            result["metrics"]["minutes_since_update"] = round(minutes_since, 1)
-            if minutes_since > STALL_MINUTES:
-                result["alerts"].append(
-                    f"STALL: No new data for {minutes_since:.0f} min (last step: {step})"
-                )
-                result["verdict"] = "CRITICAL"
-        except Exception:
-            pass
+    last_ts = summary.get('_timestamp')
+    if last_ts and isinstance(last_ts, (int, float)):
+        import time as _time
+        minutes_since = (_time.time() - last_ts) / 60
+        result["metrics"]["minutes_since_update"] = round(minutes_since, 1)
+        if minutes_since > STALL_MINUTES:
+            result["alerts"].append(
+                f"STALL: No new data for {minutes_since:.0f} min (last step: {step:,})"
+            )
+            result["verdict"] = "CRITICAL"
 
     # --- Check 2: NaN Loss ---
-    loss = latest.get('train/loss')
+    loss = summary.get('agent/loss_total')
     if loss is not None:
         result["metrics"]["loss"] = loss
-        if str(loss).lower() == 'nan' or (isinstance(loss, float) and loss != loss):
-            result["alerts"].append(f"NaN LOSS at step {step}")
+        if str(loss).lower() in ('nan', 'inf') or (isinstance(loss, float) and (loss != loss or abs(loss) == float('inf'))):
+            result["alerts"].append(f"NaN/Inf LOSS at step {step:,}")
             result["verdict"] = "CRITICAL"
 
     # --- Check 3: Q-Divergence ---
-    q_mean = latest.get('train/q_mean')
+    q_mean = summary.get('agent/q_value/mean', summary.get('agent/q_qty_mean'))
+    q_max = summary.get('agent/q_value/max')
+    target_max = summary.get('agent/q_value/target_max')
+
     if q_mean is not None:
         result["metrics"]["q_mean"] = q_mean
         if abs(q_mean) > Q_DIVERGENCE_THRESHOLD:
             result["alerts"].append(
-                f"Q-DIVERGENCE: |q_mean| = {abs(q_mean):.2e} > {Q_DIVERGENCE_THRESHOLD:.0e} at step {step}"
+                f"Q-DIVERGENCE: |q_mean| = {abs(q_mean):.2e} > {Q_DIVERGENCE_THRESHOLD:.0e}"
             )
             result["verdict"] = "CRITICAL"
 
-    # Q trend: check if growing rapidly
-    if len(recent) >= 5:
-        q_values = [r.get('train/q_mean') for r in recent[-5:] if r.get('train/q_mean') is not None]
-        if len(q_values) >= 3:
-            q_range = max(abs(v) for v in q_values) - min(abs(v) for v in q_values)
-            if q_range > 1000:
-                result["alerts"].append(
-                    f"Q-TREND: Q-values swinging by {q_range:.0f} over recent logs"
-                )
-                if result["verdict"] != "CRITICAL":
-                    result["verdict"] = "WARNING"
+    if q_max is not None:
+        result["metrics"]["q_max"] = q_max
 
-    # --- Check 4: Profit Factor Early Warning ---
-    pf = latest.get('eval/profit_factor') or summary.get('eval/profit_factor')
-    hpo_pf = latest.get('hpo/best_pf') or summary.get('hpo/best_pf')
-    best_pf = hpo_pf or pf
+    if target_max is not None:
+        result["metrics"]["target_max"] = target_max
+        if abs(target_max) > Q_DIVERGENCE_THRESHOLD * 5:
+            result["alerts"].append(
+                f"TARGET Q EXPLODING: target_max = {target_max:.0f}"
+            )
+            result["verdict"] = "CRITICAL"
+
+    # --- Check 4: Profit Factor ---
+    hpo_pf = summary.get('hpo/best_profit_factor', summary.get('hpo/best_pf'))
+    eval_pf = summary.get('eval/profit_factor')
+    best_pf = hpo_pf or eval_pf
 
     if best_pf is not None:
-        result["metrics"]["best_pf"] = best_pf
+        result["metrics"]["best_pf"] = round(best_pf, 4)
         if step > MIN_STEPS_FOR_EARLY_PF and best_pf < PF_EARLY_KILL_THRESHOLD:
             result["alerts"].append(
                 f"LOW PF: Best PF = {best_pf:.4f} after {step:,} steps (< {PF_EARLY_KILL_THRESHOLD})"
@@ -190,32 +166,35 @@ def check_run_health(run):
             if result["verdict"] != "CRITICAL":
                 result["verdict"] = "WARNING"
 
-    # --- Check 5: Switch Rate Anomaly ---
-    switch_rate = latest.get('eval/switch_rate') or summary.get('eval/switch_rate')
-    if switch_rate is not None:
-        result["metrics"]["switch_rate"] = switch_rate
-        if switch_rate > SWITCH_RATE_HIGH:
-            result["alerts"].append(
-                f"HIGH SWITCH RATE: {switch_rate:.2%} (noise trading?)"
-            )
-            if result["verdict"] != "CRITICAL":
-                result["verdict"] = "WARNING"
-        elif switch_rate < SWITCH_RATE_LOW and step > 50_000:
-            result["alerts"].append(
-                f"LOW SWITCH RATE: {switch_rate:.2%} (stuck in one position?)"
-            )
-            if result["verdict"] != "CRITICAL":
-                result["verdict"] = "WARNING"
+    # --- Check 5: HPO Status ---
+    hpo_status = summary.get('hpo/status')
+    hpo_trials = summary.get('hpo/n_trials')
+    if hpo_status:
+        result["metrics"]["hpo_status"] = hpo_status
+    if hpo_trials:
+        result["metrics"]["hpo_trials"] = hpo_trials
 
-    # --- Check 6: Total Trades ---
-    total_trades = latest.get('eval/total_trades') or summary.get('eval/total_trades')
-    if total_trades is not None:
-        result["metrics"]["total_trades"] = total_trades
+    # Per-trial PFs
+    trial_pfs = []
+    for i in range(10):
+        tpf = summary.get(f'hpo/t{i}/profit_factor')
+        if tpf is not None:
+            trial_pfs.append((i, round(tpf, 4)))
+    if trial_pfs:
+        result["metrics"]["trial_pfs"] = trial_pfs
 
-    # --- Reward ---
-    reward_mean = latest.get('eval/reward_mean') or summary.get('eval/reward_mean')
+    # --- Check 6: Training Progress ---
+    sps = summary.get('train/sps')
+    if sps is not None:
+        result["metrics"]["sps"] = round(sps, 1)
+
+    reward_mean = summary.get('train/reward_mean')
     if reward_mean is not None:
-        result["metrics"]["reward_mean"] = round(reward_mean, 4)
+        result["metrics"]["reward_mean"] = round(reward_mean, 2)
+
+    train_status = summary.get('train/status')
+    if train_status:
+        result["metrics"]["train_status"] = train_status
 
     return result
 
@@ -236,14 +215,15 @@ def analyze_finished_run(run):
     # Key metrics
     for key in ['eval/profit_factor', 'eval/total_trades', 'eval/sharpe_ratio',
                 'eval/max_drawdown', 'eval/total_return', 'eval/switch_rate',
-                'hpo/best_pf', 'hpo/best_trial_number', 'hpo/completed_trials',
-                'train/q_mean', 'train/loss', '_step']:
+                'hpo/best_profit_factor', 'hpo/best_trial', 'hpo/n_trials',
+                'agent/q_value/mean', 'agent/loss_total', '_step',
+                'train/reward_mean', 'train/sps']:
         val = summary.get(key)
         if val is not None:
             result["metrics"][key] = val
 
     # Assessment
-    pf = summary.get('eval/profit_factor') or summary.get('hpo/best_pf')
+    pf = summary.get('eval/profit_factor') or summary.get('hpo/best_profit_factor')
     trades = summary.get('eval/total_trades', 0)
 
     if run.state in ('crashed', 'failed'):
@@ -272,29 +252,56 @@ def format_run_report(health):
     verdict_icons = {"OK": "+", "WARNING": "!", "CRITICAL": "X", "DEAD": "X"}
     icon = verdict_icons.get(health["verdict"], "?")
 
-    tag_str = ", ".join(health.get("tags", [])) or "no tags"
-    lines.append(f"  [{icon}] {health['run_name']} ({health['run_id']}) [{tag_str}]")
+    # Extract experiment tag (k1, k2, etc.)
+    exp_tags = [t for t in health.get("tags", []) if t.startswith('k')]
+    tag_label = exp_tags[0].upper() if exp_tags else "?"
+    lines.append(f"  [{icon}] {tag_label}: {health['run_name']} ({health['run_id']})")
     lines.append(f"      State: {health['state']} | Verdict: {health['verdict']}")
 
     m = health["metrics"]
-    metric_parts = []
+    # Line 1: Step, SPS, staleness
+    parts1 = []
     if "step" in m:
-        metric_parts.append(f"Step: {m['step']:,}")
-    if "loss" in m:
-        metric_parts.append(f"Loss: {m['loss']:.4f}" if isinstance(m['loss'], (int, float)) else f"Loss: {m['loss']}")
-    if "q_mean" in m:
-        metric_parts.append(f"Q: {m['q_mean']:.2f}" if isinstance(m['q_mean'], (int, float)) else f"Q: {m['q_mean']}")
-    if "best_pf" in m:
-        metric_parts.append(f"PF: {m['best_pf']:.4f}")
-    if "switch_rate" in m:
-        metric_parts.append(f"SwRate: {m['switch_rate']:.2%}")
-    if "reward_mean" in m:
-        metric_parts.append(f"Reward: {m['reward_mean']}")
+        parts1.append(f"Step: {m['step']:,}")
+    if "sps" in m:
+        parts1.append(f"SPS: {m['sps']}")
     if "minutes_since_update" in m:
-        metric_parts.append(f"LastUpdate: {m['minutes_since_update']:.0f}m ago")
+        parts1.append(f"Updated: {m['minutes_since_update']:.0f}m ago")
+    if parts1:
+        lines.append(f"      {' | '.join(parts1)}")
 
-    if metric_parts:
-        lines.append(f"      {' | '.join(metric_parts)}")
+    # Line 2: Q-values, loss
+    parts2 = []
+    if "loss" in m:
+        parts2.append(f"Loss: {m['loss']:.4f}" if isinstance(m['loss'], (int, float)) else f"Loss: {m['loss']}")
+    if "q_mean" in m:
+        parts2.append(f"Q: {m['q_mean']:.2f}" if isinstance(m['q_mean'], (int, float)) else f"Q: {m['q_mean']}")
+    if "q_max" in m:
+        parts2.append(f"Qmax: {m['q_max']:.0f}" if isinstance(m['q_max'], (int, float)) else f"Qmax: {m['q_max']}")
+    if "target_max" in m:
+        parts2.append(f"TgtMax: {m['target_max']:.0f}" if isinstance(m['target_max'], (int, float)) else f"TgtMax: {m['target_max']}")
+    if parts2:
+        lines.append(f"      {' | '.join(parts2)}")
+
+    # Line 3: PF, HPO, reward
+    parts3 = []
+    if "best_pf" in m:
+        parts3.append(f"BestPF: {m['best_pf']:.4f}")
+    if "hpo_status" in m:
+        parts3.append(f"HPO: {m['hpo_status']}")
+    if "hpo_trials" in m:
+        parts3.append(f"Trials: {m['hpo_trials']}")
+    if "reward_mean" in m:
+        parts3.append(f"Reward: {m['reward_mean']}")
+    if "train_status" in m:
+        parts3.append(f"Phase: {m['train_status']}")
+    if parts3:
+        lines.append(f"      {' | '.join(parts3)}")
+
+    # Trial PFs if available
+    if "trial_pfs" in m:
+        pf_strs = [f"T{i}={pf}" for i, pf in m["trial_pfs"]]
+        lines.append(f"      Trials: {', '.join(pf_strs)}")
 
     for alert in health.get("alerts", []):
         lines.append(f"      >> {alert}")
