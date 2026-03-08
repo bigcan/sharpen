@@ -376,5 +376,101 @@ class TestSwingEnvSmokeTest(unittest.TestCase):
         self.assertGreater(switches, 0, "Should have at least one switch with random actions")
 
 
+class TestSwingEnvCRRA(unittest.TestCase):
+    """CRRA utility reward shaping tests."""
+
+    def setUp(self):
+        self.base_config = {
+            "symbol": "BTCUSDT",
+            "window_size": 5,
+            "initial_balance": 100000.0,
+            "taker_fee": 0.0005,
+            "action": {"cooldown_bars": 0, "max_position": 1.0, "fixed_trade_qty": 0.2},
+            "episode_length": 100,
+            "network": {"micro_config": {"input_size": NUM_MICRO_FEATURES}},
+        }
+        self.mock_handler = MagicMock(spec=ParquetDataHandler)
+        self.mock_handler._len = 1000
+        self.mock_handler._col_to_idx = None
+
+    def _make_env(self, crra_gamma):
+        config = {**self.base_config, "reward": {"crra_gamma": crra_gamma}}
+        self.mock_handler.step.return_value = _mock_row(bid=100.0, ask=101.0)
+        env = SwingScalperEnv(config, self.mock_handler)
+        env.reset(seed=42)
+        return env
+
+    def test_crra_zero_is_identity(self):
+        """With crra_gamma=0.0, rewards are unchanged (backward compat)."""
+        env_no_crra = self._make_env(0.0)
+        env_no_crra.direction = 1.0
+        env_no_crra.bars_since_switch = 10
+        env_no_crra.prev_mid_price = 100.0
+
+        self.mock_handler.step.return_value = _mock_row(bid=101.0, ask=102.0)
+        _, reward_no_crra, _, _, _ = env_no_crra.step(ACTION_LONG)
+
+        # Also test without any reward config at all (default)
+        config_default = {**self.base_config}
+        self.mock_handler.step.return_value = _mock_row(bid=100.0, ask=101.0)
+        env_default = SwingScalperEnv(config_default, self.mock_handler)
+        env_default.reset(seed=42)
+        env_default.direction = 1.0
+        env_default.bars_since_switch = 10
+        env_default.prev_mid_price = 100.0
+
+        self.mock_handler.step.return_value = _mock_row(bid=101.0, ask=102.0)
+        _, reward_default, _, _, _ = env_default.step(ACTION_LONG)
+
+        self.assertAlmostEqual(reward_no_crra, reward_default, places=6,
+                               msg="crra_gamma=0 should produce identical rewards to no config")
+
+    def test_crra_compresses_large_rewards(self):
+        """With crra_gamma=0.5, |shaped| < |raw| for large rewards (>1 bps)."""
+        # Get raw reward (no CRRA)
+        env_raw = self._make_env(0.0)
+        env_raw.direction = 1.0
+        env_raw.bars_since_switch = 10
+        env_raw.prev_mid_price = 95.0  # Large price move
+
+        self.mock_handler.step.return_value = _mock_row(bid=101.0, ask=102.0)
+        _, reward_raw, _, _, _ = env_raw.step(ACTION_LONG)
+
+        # Get shaped reward (CRRA gamma=0.5 = sqrt utility)
+        env_crra = self._make_env(0.5)
+        env_crra.direction = 1.0
+        env_crra.bars_since_switch = 10
+        env_crra.prev_mid_price = 95.0
+
+        self.mock_handler.step.return_value = _mock_row(bid=101.0, ask=102.0)
+        _, reward_crra, _, _, _ = env_crra.step(ACTION_LONG)
+
+        self.assertGreater(abs(reward_raw), 1.0, "Raw reward should be > 1 bps for this test")
+        self.assertLess(abs(reward_crra), abs(reward_raw),
+                        f"CRRA should compress: |{reward_crra}| < |{reward_raw}|")
+
+    def test_crra_preserves_sign(self):
+        """With crra_gamma=0.5, positive rewards stay positive, negative stay negative."""
+        # Positive reward: long + price up
+        env = self._make_env(0.5)
+        env.direction = 1.0
+        env.bars_since_switch = 10
+        env.prev_mid_price = 100.0
+
+        self.mock_handler.step.return_value = _mock_row(bid=101.0, ask=102.0)
+        _, reward_pos, _, _, _ = env.step(ACTION_LONG)
+        self.assertGreater(reward_pos, 0.0, "Positive PnL should give positive CRRA reward")
+
+        # Negative reward: long + price down
+        env2 = self._make_env(0.5)
+        env2.direction = 1.0
+        env2.bars_since_switch = 10
+        env2.prev_mid_price = 102.0
+
+        self.mock_handler.step.return_value = _mock_row(bid=99.0, ask=100.0)
+        _, reward_neg, _, _, _ = env2.step(ACTION_LONG)
+        self.assertLess(reward_neg, 0.0, "Negative PnL should give negative CRRA reward")
+
+
 if __name__ == '__main__':
     unittest.main()
