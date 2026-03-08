@@ -369,16 +369,21 @@ class DeepScalperTrainer:
         self._last_prune_rung = 0
 
         # N-step return buffer: wraps replay buffer push for multi-step returns
+        # When multi_horizon=True, use gamma_long for N-step discounting so the
+        # long-horizon Bellman target is exactly correct. Short-horizon has a small
+        # approximation error (~0.04*r per intermediate step) which is acceptable.
         self._nstep_buffer = None
         if self._agent_type == "iqn":
             _n_step = self.config.get("agents", {}).get("iqn", {}).get("n_step", 1)
             if _n_step > 1:
                 from finrl_pro_ds.agents.deepscalper.nstep_buffer import NStepBuffer
+                _nstep_gamma = self.agent.gamma_long if self.agent.multi_horizon else self.agent.gamma
                 self._nstep_buffer = NStepBuffer(
-                    n=_n_step, gamma=self.agent.gamma, num_envs=num_envs
+                    n=_n_step, gamma=_nstep_gamma, num_envs=num_envs
                 )
-                print(f"[N-Step] Enabled: n={_n_step}, gamma={self.agent.gamma}, "
-                      f"gamma^n={self.agent.gamma_n:.6f}")
+                print(f"[N-Step] Enabled: n={_n_step}, gamma={_nstep_gamma}, "
+                      f"gamma^n={_nstep_gamma ** _n_step:.6f}"
+                      f"{' (multi_horizon: using gamma_long)' if self.agent.multi_horizon else ''}")
 
         # FIX PERF-3 + N4: Hoist extract_tensors outside loop
         # PERF FIX-4: non_blocking H2D transfers

@@ -80,6 +80,10 @@ class IQNAgent:
             self.gamma_short_n = gamma_short ** n_step
             self.gamma_long_n = gamma_long ** n_step
             self.horizon_alpha = horizon_alpha
+            # Sync base gamma with gamma_long so N-step buffer discounting
+            # matches the long-horizon Bellman target exactly.
+            self.gamma = gamma_long
+            self.gamma_n = gamma_long ** n_step
         else:
             self.gamma_short = gamma
             self.gamma_long = gamma
