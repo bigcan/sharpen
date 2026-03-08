@@ -421,16 +421,19 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 config["agents"]["iqn"]["gamma"] = gamma
 
             # CRRA risk-aversion coefficient (reward shaping, NOT reward structure)
-            crra_gamma = trial.suggest_float("crra_gamma", 0.0, 1.5)
-            config["env"]["reward"]["crra_gamma"] = crra_gamma
+            # Only tune if config has crra_gamma > 0 (opt-in per experiment)
+            if config["env"].get("reward", {}).get("crra_gamma", 0.0) > 0:
+                crra_gamma = trial.suggest_float("crra_gamma", 0.0, 1.5)
+                config["env"]["reward"]["crra_gamma"] = crra_gamma
 
             hpo_log = {
                 f"{trial_prefix}/learning_rate": learning_rate,
                 f"{trial_prefix}/num_quantiles": num_quantiles,
                 f"{trial_prefix}/noisy_sigma0": noisy_sigma0,
                 f"{trial_prefix}/tau": tau,
-                f"{trial_prefix}/crra_gamma": crra_gamma,
             }
+            if config["env"].get("reward", {}).get("crra_gamma", 0.0) > 0:
+                hpo_log[f"{trial_prefix}/crra_gamma"] = crra_gamma
             if is_multi_horizon:
                 hpo_log[f"{trial_prefix}/gamma_short"] = gamma_short
                 hpo_log[f"{trial_prefix}/gamma_long"] = gamma_long
@@ -651,10 +654,11 @@ def run_training(config, run_name, device, agent_type="bdq", warm_start=None):
         else:
             trainer = DeepScalperTrainer(env, config, device=device, run_name=run_name)
 
-        # Warm-start: load pretrained weights before training
+        # Warm-start: load pretrained weights (strict=False for architecture mismatch,
+        # e.g. bandit K8 single-head → K7 multi-horizon dual-head transfer)
         if warm_start:
-            trainer.load_checkpoint(warm_start)
-            logger.info(f"[Warm-Start] Loaded weights from {warm_start}")
+            trainer.load_checkpoint(warm_start, strict=False)
+            logger.info(f"[Warm-Start] Loaded weights from {warm_start} (strict=False)")
 
         trainer.train()
 

@@ -656,6 +656,6 @@ class DeepScalperTrainer:
         self.agent.save(path)
         print(f"Saved checkpoint: {path}")
 
-    def load_checkpoint(self, path):
-        self.agent.load(path)
-        print(f"Loaded checkpoint: {path}")
+    def load_checkpoint(self, path, strict: bool = True):
+        self.agent.load(path, strict=strict)
+        print(f"Loaded checkpoint: {path} (strict={strict})")
