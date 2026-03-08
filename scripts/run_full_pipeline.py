@@ -420,11 +420,16 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 gamma = trial.suggest_float("gamma", 0.93, 0.999)
                 config["agents"]["iqn"]["gamma"] = gamma
 
+            # CRRA risk-aversion coefficient (reward shaping, NOT reward structure)
+            crra_gamma = trial.suggest_float("crra_gamma", 0.0, 1.5)
+            config["env"]["reward"]["crra_gamma"] = crra_gamma
+
             hpo_log = {
                 f"{trial_prefix}/learning_rate": learning_rate,
                 f"{trial_prefix}/num_quantiles": num_quantiles,
                 f"{trial_prefix}/noisy_sigma0": noisy_sigma0,
                 f"{trial_prefix}/tau": tau,
+                f"{trial_prefix}/crra_gamma": crra_gamma,
             }
             if is_multi_horizon:
                 hpo_log[f"{trial_prefix}/gamma_short"] = gamma_short
@@ -608,7 +613,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
 # ============================================================================
 # PHASE 2: TRAINING
 # ============================================================================
-def run_training(config, run_name, device, agent_type="bdq"):
+def run_training(config, run_name, device, agent_type="bdq", warm_start=None):
     """Phase 2: Full training with optimized hyperparameters."""
     logger.info(f"Starting Training Phase (agent={agent_type})")
     wandb.log({"train/status": "started", "train/agent_type": agent_type})
@@ -643,10 +648,15 @@ def run_training(config, run_name, device, agent_type="bdq"):
         # Train — dispatch based on agent type
         if agent_type == "ppo":
             trainer = PPOTrainer(env, config, device=device, run_name=run_name)
-            trainer.train()
         else:
             trainer = DeepScalperTrainer(env, config, device=device, run_name=run_name)
-            trainer.train()
+
+        # Warm-start: load pretrained weights before training
+        if warm_start:
+            trainer.load_checkpoint(warm_start)
+            logger.info(f"[Warm-Start] Loaded weights from {warm_start}")
+
+        trainer.train()
 
         # Find checkpoint
         checkpoints_dir = f"checkpoints/{run_name}"
@@ -986,6 +996,8 @@ def main():
     parser.add_argument("--hpo_storage", type=str, default=None, help="Optuna storage URL (e.g. sqlite:///hpo.db)")
     parser.add_argument("--backtest_only", action="store_true", help="Skip HPO and training, run backtest only (requires --checkpoint)")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint for --backtest_only mode")
+    parser.add_argument("--warm_start", type=str, default=None,
+                        help="Path to checkpoint for warm-starting training (encoder weights)")
     args = parser.parse_args()
 
     base_config = load_config(args.config)
@@ -1086,7 +1098,8 @@ def main():
             print(">>> PHASE 2: TRAINING (Full Run with Best Params)")
             print("="*60 + "\n")
 
-            checkpoint_path = run_training(final_config, run_name, device, agent_type=agent_type)
+            checkpoint_path = run_training(final_config, run_name, device, agent_type=agent_type,
+                                           warm_start=args.warm_start)
 
         if checkpoint_path:
             # PHASE 3a: Validation Backtest (for Overfitting Check)

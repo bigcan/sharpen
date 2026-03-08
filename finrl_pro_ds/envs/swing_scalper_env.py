@@ -22,6 +22,8 @@ Key differences from DeepScalperEnv (V5):
   - Random initial direction (Long or Short) with no entry fee
 """
 
+import math
+
 import gymnasium as gym
 import numpy as np
 import logging
@@ -76,6 +78,10 @@ class SwingScalperEnv(gym.Env):
 
         # Action cooldown: minimum bars between switches
         self.cooldown_bars = int(action_cfg.get("cooldown_bars", 3))
+
+        # Reward shaping
+        reward_cfg = config.get("reward", {})
+        self.crra_gamma = float(reward_cfg.get("crra_gamma", 0.0))
 
         # Episode config
         self.episode_length = int(config.get("episode_length", 1000))
@@ -310,6 +316,18 @@ class SwingScalperEnv(gym.Env):
             # Subtract round-trip fee in bps
             fee_bps = 2.0 * self.taker_fee * 10000.0  # e.g., 2 * 5 = 10 bps for BTC
             reward -= fee_bps
+
+        # CRRA utility shaping (ported from V5 DeepScalperEnv)
+        if self.crra_gamma > 0:
+            gamma = self.crra_gamma
+            abs_r = abs(reward)
+            if abs_r > 1e-12:
+                if abs(gamma - 1.0) < 1e-6:
+                    # Log utility special case (gamma=1)
+                    shaped = math.log1p(abs_r)
+                else:
+                    shaped = (abs_r ** (1.0 - gamma)) / (1.0 - gamma)
+                reward = shaped if reward >= 0 else -shaped
 
         # Clip reward
         reward = float(np.clip(reward, -50.0, 50.0))
