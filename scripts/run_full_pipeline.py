@@ -395,7 +395,6 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         elif agent_type == "iqn":
             # IQN hyperparams — optimizer HPs + gamma (discount horizon)
             learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-3, log=True)
-            gamma = trial.suggest_float("gamma", 0.93, 0.999)
             num_quantiles = trial.suggest_categorical("num_quantiles", [8, 16, 32, 64])
             noisy_sigma0 = trial.suggest_float("noisy_sigma0", 0.3, 0.7)
             tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
@@ -403,18 +402,36 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             config["env"]["reward"]["sharpe_weight"] = 0.0
             config["env"]["reward"]["hindsight_weight"] = 0.0
             config["agents"]["iqn"]["learning_rate"] = learning_rate
-            config["agents"]["iqn"]["gamma"] = gamma
             config["agents"]["iqn"]["num_quantiles"] = num_quantiles
             config["agents"]["iqn"]["noisy_sigma0"] = noisy_sigma0
             config["agents"]["iqn"]["tau"] = tau
 
-            wandb.log({
+            # Gamma routing: multi_horizon has separate short/long gammas;
+            # single-horizon tunes one gamma. Base gamma must equal gamma_long
+            # to keep N-step buffer consistent with long-horizon Bellman targets.
+            is_multi_horizon = config["agents"]["iqn"].get("multi_horizon", False)
+            if is_multi_horizon:
+                gamma_short = trial.suggest_float("gamma_short", 0.90, 0.98)
+                gamma_long = trial.suggest_float("gamma_long", 0.95, 0.999)
+                config["agents"]["iqn"]["gamma_short"] = gamma_short
+                config["agents"]["iqn"]["gamma_long"] = gamma_long
+                config["agents"]["iqn"]["gamma"] = gamma_long  # Sync base gamma = long
+            else:
+                gamma = trial.suggest_float("gamma", 0.93, 0.999)
+                config["agents"]["iqn"]["gamma"] = gamma
+
+            hpo_log = {
                 f"{trial_prefix}/learning_rate": learning_rate,
-                f"{trial_prefix}/gamma": gamma,
                 f"{trial_prefix}/num_quantiles": num_quantiles,
                 f"{trial_prefix}/noisy_sigma0": noisy_sigma0,
                 f"{trial_prefix}/tau": tau,
-            })
+            }
+            if is_multi_horizon:
+                hpo_log[f"{trial_prefix}/gamma_short"] = gamma_short
+                hpo_log[f"{trial_prefix}/gamma_long"] = gamma_long
+            else:
+                hpo_log[f"{trial_prefix}/gamma"] = gamma
+            wandb.log(hpo_log)
         else:
             # BDQ hyperparams (4 dimensions) — optimizer HPs only
             # FIX BUG-01: MDP-defining params (gamma, reward) are LOCKED in config.
