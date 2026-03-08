@@ -1,4 +1,5 @@
 import gymnasium as gym
+import math
 import numpy as np
 import logging
 from typing import Dict, Optional, Any
@@ -884,7 +885,11 @@ class DeepScalperEnv(gym.Env):
             gamma = self.crra_gamma
             abs_r = abs(raw_reward)
             if abs_r > 1e-12:
-                shaped = (abs_r ** (1.0 - gamma)) / (1.0 - gamma)
+                if abs(gamma - 1.0) < 1e-6:
+                    # Log utility special case (gamma=1)
+                    shaped = math.log1p(abs_r)
+                else:
+                    shaped = (abs_r ** (1.0 - gamma)) / (1.0 - gamma)
                 raw_reward = shaped if raw_reward >= 0 else -shaped
 
         # Total reward (post-shaping)

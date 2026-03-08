@@ -531,19 +531,24 @@ class IQNAgent:
             ckpt["scaler"] = self.scaler.state_dict()
         torch.save(ckpt, path)
 
-    def load(self, path: str):
+    def load(self, path: str, strict: bool = True):
         if not os.path.exists(path):
             return
         checkpoint = torch.load(path, map_location=self.device, weights_only=False)
         policy_sd = self._strip_compile_prefix(checkpoint["policy_net"])
         target_sd = self._strip_compile_prefix(checkpoint["target_net"])
-        self.policy_net.load_state_dict(policy_sd)
-        self.target_net.load_state_dict(target_sd)
-        self.optimizer.load_state_dict(checkpoint["optimizer"])
+        missing_p, unexpected_p = self.policy_net.load_state_dict(policy_sd, strict=strict)
+        missing_t, unexpected_t = self.target_net.load_state_dict(target_sd, strict=strict)
+        if missing_p or unexpected_p:
+            logger.warning(f"[Warm-Start] Policy net — missing: {len(missing_p)}, unexpected: {len(unexpected_p)}")
+        if missing_t or unexpected_t:
+            logger.warning(f"[Warm-Start] Target net — missing: {len(missing_t)}, unexpected: {len(unexpected_t)}")
+        if strict:
+            self.optimizer.load_state_dict(checkpoint["optimizer"])
         self.epsilon = checkpoint.get("epsilon", 0.0)
         if "step_count" in checkpoint:
             self.step_count = checkpoint["step_count"]
-        if "lr_scheduler" in checkpoint and self._lr_scheduler is not None:
+        if "lr_scheduler" in checkpoint and self._lr_scheduler is not None and strict:
             self._lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
         if "scaler" in checkpoint and self.use_amp:
             self.scaler.load_state_dict(checkpoint["scaler"])
