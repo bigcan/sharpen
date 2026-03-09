@@ -92,7 +92,7 @@ training:
 
 hpo:
   enabled: true
-  n_trials: 5
+  n_trials: 50
   steps_per_trial: 500000       # FIX HPO: Increased from 200K — IQN needs more runway to show signal
 
 wandb:
