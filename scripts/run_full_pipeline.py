@@ -18,7 +18,7 @@ import torch
 import gymnasium as gym
 import wandb
 import optuna
-from optuna.samplers import TPESampler
+from optuna.samplers import TPESampler, RandomSampler
 from urllib.request import Request, urlopen
 
 # Project imports
@@ -343,6 +343,18 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     return profit_factor, trade_count
 
 
+def _create_sampler(hpo_config: dict):
+    """Create Optuna sampler from config. Supports 'tpe' (default) and 'random'."""
+    sampler_type = hpo_config.get("sampler", "tpe").lower()
+    seed = hpo_config.get("sampler_seed", 42)
+    if sampler_type == "random":
+        logger.info(f"Using RandomSampler (seed={seed})")
+        return RandomSampler(seed=seed)
+    # Default: TPE with multivariate correlation modeling
+    logger.info(f"Using TPESampler (seed={seed}, n_startup_trials=10, multivariate=True)")
+    return TPESampler(seed=seed, n_startup_trials=10, multivariate=True)
+
+
 def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     """Phase 1: Hyperparameter Optimization with Optuna. Supports BDQ and PPO agents."""
     logger.info(f"Starting HPO: {n_trials} trials, {steps_per_trial} steps each")
@@ -568,7 +580,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         storage=base_config.get("hpo", {}).get("storage"),
         study_name=f"hpo_{agent_type}",
         load_if_exists=True,
-        sampler=TPESampler(seed=42, n_startup_trials=10, multivariate=True),
+        sampler=_create_sampler(base_config.get("hpo", {})),
         # FIX HPO-1: Disable inter-trial pruning for swing MDP.
         # HyperbandPruner was killing trials before IQN+NoisyNets could converge
         # (needs 200K+ steps for signal). All 5 trials pruned in K2/K4 runs.

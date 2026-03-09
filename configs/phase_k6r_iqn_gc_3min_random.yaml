@@ -1,9 +1,8 @@
-# Phase K7: Gold CME IQN — CRRA Utility Reward Transform
-# ======================================================
-# Ablation: CRRA risk-averse reward shaping over K6 baseline.
-# Changes from K6: crra_gamma=0.5 under env.reward
-# Tests hypothesis: Risk-neutral reward is theoretical gap #1 (expert review Session 82).
-# CRRA compresses large rewards, penalizing variance — utility theory alignment.
+# Phase K6r: Gold CME IQN — Multi-Horizon + Random Search
+# ========================================================
+# Same as K6 but uses RandomSampler instead of TPE for HPO.
+# Purpose: Compare 50-trial random vs 50-trial TPE to measure
+# Bayesian optimization benefit on this search space.
 #
 # Gate: Test PF > 1.10 with >= 200 trades
 
@@ -29,7 +28,7 @@ env:
   margin_requirement: 0.05
   taker_fee: 0.000035            # 0.35 bps (CME Gold taker)
   maker_fee: 0.000010            # Not used in swing MDP
-  num_envs: 20                    # RTX 4090 IPC limit (was 24, TC-optimized)
+  num_envs: 24
   window_size: 15                # 15 x 3-min = 45 min lookback
   max_drawdown_pct: 0.30
   mdp_version: "v6"             # Swing MDP (SwingScalperEnv)
@@ -40,7 +39,6 @@ env:
     scaling: 1.0
     volatility_horizon: 20
     sharpe_weight: 0.0           # Pure PnL reward
-    crra_gamma: 0.5              # CRRA risk-aversion (sqrt utility)
 
   action:
     discrete_dims: 2             # {Long, Short}
@@ -101,6 +99,7 @@ hpo:
   enabled: true
   n_trials: 50
   steps_per_trial: 500000
+  sampler: "random"              # RandomSampler instead of TPE
 
 wandb:
   project: "FinRL-Pro-DS"
@@ -108,4 +107,5 @@ wandb:
   mode: "online"
   tags: ["Gold", "GC", "IQN", "3min", "SwingMDP", "NoisyNet",
          "BinaryAction", "DenseReward", "CME", "FrontMonth",
-         "k7", "crra", "nstep3", "multiHorizon", "dualGamma", "qclip500"]
+         "k6r", "nstep3", "multiHorizon", "dualGamma", "qclip500",
+         "randomSearch"]
