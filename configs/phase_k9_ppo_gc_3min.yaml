@@ -1,0 +1,114 @@
+# Phase K9: Gold CME PPO Probe — Swing MDP at 3-min
+# ==================================================
+# PPO revisit on the Stage 3 binary swing MDP. Stage 2 PPO failed (0/14)
+# due to Hold dominance + sparse reward + Discrete(6) — all eliminated.
+# This is a single probe run to test if PPO's direct policy optimization
+# and entropy regularization are better suited to binary direction-switching.
+#
+# Key differences from IQN runs (K1/K5/K6/K7):
+#   - On-policy (no replay buffer, no PER, no target network)
+#   - Entropy bonus prevents collapse to single direction
+#   - GAE for credit assignment (instead of n-step returns)
+#   - Larger rollout_steps for stable gradient estimates
+#
+# DP oracle ceiling: PF 129.7 at 0.35 bps (Gold fees negligible).
+# Target: PF 1.10+ OOS. This is a probe — if reward_mean goes positive
+# within 500K steps and switch_rate lands in 5-15%, promote to full HPO.
+#
+# Gate: Test PF > 1.10 with >= 200 trades
+
+data:
+  file_path: "data/processed/gc_2025_3min_front.parquet"
+  ticker: "GC"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  n_levels: 1
+  asset_class: "cme_futures"
+  vol_norm_window: 40            # 40 x 3-min = 120 min
+
+env:
+  symbol: "GC"
+  initial_balance: 100000.0
+  margin_requirement: 0.05
+  taker_fee: 0.000035            # 0.35 bps (CME Gold taker)
+  maker_fee: 0.000010            # Not used in swing MDP
+  num_envs: 24
+  window_size: 15                # 15 x 3-min = 45 min lookback
+  max_drawdown_pct: 0.30
+  mdp_version: "v6"             # Swing MDP (SwingScalperEnv)
+  episode_length: 1000           # ~50 hours of 3-min bars
+  random_start: true
+
+  reward:
+    scaling: 1.0
+    volatility_horizon: 20
+    sharpe_weight: 0.0           # Pure PnL reward — same as IQN baselines
+
+  action:
+    discrete_dims: 2             # {Long, Short} — binary swing
+    cooldown_bars: 3             # 3-bar (9 min) minimum hold after switch
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+network:
+  micro_config:
+    input_size: 18
+    private_input_size: 4        # [direction, bars_since_switch, unrealized_pnl, atr]
+    hidden_size: 256
+    encoder_type: "flat"         # Same as IQN K1 — MLP encoder for 3-min
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  ppo:
+    learning_rate: 0.0003
+    gamma: 0.97                  # ~33-bar effective horizon (~100 min at 3-min)
+                                 # Between IQN's HPO range [0.93, 0.999]
+                                 # Not too short (misses multi-swing value),
+                                 # not too long (bootstrapping noise)
+    gae_lambda: 0.95             # Standard GAE discount
+    clip_eps: 0.2                # PPO clip ratio
+    vf_coef: 0.5                 # Value loss coefficient
+    ent_coef: 0.02               # Higher than Stage 2 (0.001) — encourage exploration
+                                 # in binary space. Two actions need more entropy
+                                 # pressure to avoid early collapse.
+    max_grad_norm: 0.5
+    n_epochs: 4                  # PPO update epochs per rollout
+    target_kl: 0.02              # KL early-stopping to prevent policy jumps
+    rollout_steps: 4096          # Larger rollout for stable on-policy gradients
+                                 # 4096 * 24 envs = 98K transitions per update
+    batch_size: 512              # Larger batches for binary action space
+    lr_schedule: "linear"        # Linear decay to 0
+    clip_value_loss: true        # Clipped value loss (audit fix)
+    torch_compile: false         # Conservative for probe run
+    checkpoint_interval: 100000
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: false
+  use_amp: true
+  use_shm: false
+  verbose_logging: true
+
+hpo:
+  enabled: true
+  n_trials: 5
+  steps_per_trial: 500000        # Same runway as IQN K1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["Gold", "GC", "PPO", "3min", "SwingMDP", "Entropy",
+         "BinaryAction", "DenseReward", "CME", "FrontMonth", "k9"]
