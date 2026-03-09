@@ -31,8 +31,15 @@ import pandas as pd
 
 
 def load_data(path: str, start: str = None, end: str = None,
-              resolution: str = "1min") -> np.ndarray:
-    """Load mid prices from parquet, optionally resample."""
+              resolution: str = "1min",
+              price_col: str = "close") -> np.ndarray:
+    """Load prices from parquet, optionally resample.
+
+    Args:
+        price_col: Which price column to use ('close' or 'mid_price').
+                   'close' is the bar close — executable at bar boundaries.
+                   'mid_price' = (high+low)/2 — incorporates intra-bar extremes.
+    """
     df = pd.read_parquet(path)
 
     if 'timestamp' in df.columns:
@@ -46,15 +53,25 @@ def load_data(path: str, start: str = None, end: str = None,
 
     if resolution != "1min":
         # Support arbitrary resolutions: "2min", "3min", "5min", "10min", etc.
-        df = df.resample(resolution).agg({
+        agg_dict = {
             'open': 'first', 'high': 'max', 'low': 'min',
-            'close': 'last', 'volume': 'sum', 'mid_price': 'last'
-        }).dropna()
+            'close': 'last', 'volume': 'sum',
+        }
+        if 'mid_price' in df.columns:
+            agg_dict['mid_price'] = 'last'
+        df = df.resample(resolution).agg(agg_dict).dropna()
 
-    prices = df['mid_price'].values.astype(np.float64)
-    print(f"Loaded {len(prices):,} bars ({resolution}), "
+    # Resolve price column
+    if price_col == 'mid_price' and 'mid_price' not in df.columns:
+        df['mid_price'] = (df['high'] + df['low']) / 2.0
+    if price_col not in df.columns:
+        raise ValueError(f"Price column '{price_col}' not found in data. "
+                         f"Available: {list(df.columns)}")
+
+    prices = df[price_col].values.astype(np.float64)
+    print(f"Loaded {len(prices):,} bars ({resolution}), price_col='{price_col}', "
           f"{df.index[0]} → {df.index[-1]}")
-    return prices
+    return prices, df
 
 
 def dp_oracle(prices: np.ndarray, fee_bps: float = 5.0,
@@ -308,9 +325,12 @@ def main():
                         help="Bar resolution: 1min, 2min, 3min, 5min, 10min, 15min, 30min, etc.")
     parser.add_argument("--max-bars", type=int, default=0,
                         help="Limit bars for testing (0=all)")
+    parser.add_argument("--price_col", default="close", choices=["close", "mid_price"],
+                        help="Price column for oracle (default: close)")
     args = parser.parse_args()
 
-    prices = load_data(args.data, args.start, args.end, args.resolution)
+    prices, df = load_data(args.data, args.start, args.end, args.resolution,
+                           price_col=args.price_col)
 
     if args.max_bars > 0:
         prices = prices[:args.max_bars]
@@ -337,8 +357,8 @@ def main():
     print("=" * 70)
     dp = dp_oracle(prices, fee_bps=args.fee)
 
-    print(f"\n  Profit Factor (PnL):     {dp['profit_factor_pnl']:.3f}")
-    print(f"  Profit Factor (Returns): {dp['profit_factor_returns']:.3f}")
+    print(f"\n  Profit Factor (PnL-based):     {dp['profit_factor_pnl']:.3f}")
+    print(f"  Profit Factor (Returns-based): {dp['profit_factor_returns']:.3f}")
     print(f"  Total Return:            {dp['total_return_pct']:+.2f}%")
     print(f"  Total PnL:               ${dp['total_pnl']:+,.2f}")
     print(f"  Total Fees Paid:         ${dp['total_fees']:,.2f}")
@@ -389,6 +409,46 @@ def main():
         print("  >>> VERDICT: 1-MIN CONFIRMED DEAD <<<")
         print("  >>> Even optimal hold-through-swing can't fix the fee moat")
         print("  >>> Stay on 5-min. No research direction change needed.")
+
+    # === PF-XCHECK: cross-validate close vs mid_price ===
+    print()
+    print("=" * 70)
+    print("PF-XCHECK — Cross-validation: close vs mid_price")
+    print("=" * 70)
+
+    # Build the *other* price series for comparison
+    other_col = 'mid_price' if args.price_col == 'close' else 'close'
+    try:
+        _, df_xcheck = load_data(args.data, args.start, args.end, args.resolution,
+                                 price_col=other_col)
+        xcheck_prices = df_xcheck[other_col].values.astype(np.float64)
+        # Limit to max 50K bars for speed
+        xcheck_limit = min(50000, len(xcheck_prices))
+        primary_limit = min(50000, len(prices))
+
+        xcheck_result = dp_oracle(xcheck_prices[:xcheck_limit], fee_bps=args.fee)
+        primary_result = dp_oracle(prices[:primary_limit], fee_bps=args.fee)
+
+        pf_primary = primary_result['profit_factor_pnl']
+        pf_other = xcheck_result['profit_factor_pnl']
+
+        # Compute divergence
+        avg_pf = (pf_primary + pf_other) / 2.0
+        divergence_pct = abs(pf_primary - pf_other) / avg_pf * 100 if avg_pf > 1e-9 else 0
+
+        print(f"\n  PF-XCHECK (PnL-based, first {primary_limit:,} bars):")
+        print(f"    {args.price_col:10s} PF = {pf_primary:.3f}")
+        print(f"    {other_col:10s} PF = {pf_other:.3f}")
+        print(f"    Divergence = {divergence_pct:.1f}%")
+
+        if divergence_pct > 30:
+            print(f"\n  *** WARNING: PF divergence {divergence_pct:.1f}% > 30% ***")
+            print("  *** Data may have corrupted high/low values inflating mid_price. ***")
+            print("  *** Run scripts/clean_ohlcv.py before trusting results. ***")
+        else:
+            print("    OK — divergence within 30% tolerance")
+    except Exception as e:
+        print(f"\n  PF-XCHECK skipped: {e}")
 
     # === Fee sweep ===
     print()

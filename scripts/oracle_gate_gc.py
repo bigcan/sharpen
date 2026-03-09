@@ -88,20 +88,31 @@ def run_agent(env, policy_fn, label: str) -> dict:
     }
 
 
-def _get_mid_at(arrays, idx):
-    """Get raw mid price at a given data index."""
-    if 'mid_price' in arrays:
-        return float(arrays['mid_price'][idx])
-    elif 'bid_price_1' in arrays and 'ask_price_1' in arrays:
-        return (float(arrays['bid_price_1'][idx]) + float(arrays['ask_price_1'][idx])) / 2
+def _get_price_at(arrays, idx, price_col='close'):
+    """Get price at a given data index.
+
+    Args:
+        price_col: 'close' (executable bar boundary) or 'mid_price' (intra-bar).
+    """
+    if price_col == 'close' and 'close' in arrays:
+        return float(arrays['close'][idx])
+    if price_col == 'mid_price':
+        if 'mid_price' in arrays:
+            return float(arrays['mid_price'][idx])
+        elif 'bid_price_1' in arrays and 'ask_price_1' in arrays:
+            return (float(arrays['bid_price_1'][idx]) + float(arrays['ask_price_1'][idx])) / 2
+    # Fallback to close
+    if 'close' in arrays:
+        return float(arrays['close'][idx])
     return None
 
 
-def make_oracle_taker_policy(horizon: int = 1):
+def make_oracle_taker_policy(horizon: int = 1, price_col: str = 'close'):
     """Factory: create oracle with configurable lookahead horizon.
 
     horizon=1: compare T+2 to T+1 fill (minimal edge)
     horizon=5: compare T+6 to T+1 fill (captures 25-min trends)
+    price_col: 'close' (executable) or 'mid_price' (intra-bar).
     """
     def oracle_taker_policy(obs, env):
         if env.handler is None:
@@ -115,13 +126,13 @@ def make_oracle_taker_policy(horizon: int = 1):
             return 1
 
         # T+1 = fill bar, T+1+horizon = future price
-        fill_mid = _get_mid_at(arrays, ptr)
-        future_mid = _get_mid_at(arrays, ptr + horizon)
+        fill_price = _get_price_at(arrays, ptr, price_col)
+        future_price = _get_price_at(arrays, ptr + horizon, price_col)
 
-        if fill_mid is None or future_mid is None or fill_mid <= 0:
+        if fill_price is None or future_price is None or fill_price <= 0:
             return 1
 
-        expected_return_bps = ((future_mid - fill_mid) / fill_mid) * 10000
+        expected_return_bps = ((future_price - fill_price) / fill_price) * 10000
         cost_bps = env.taker_fee * 10000 * 2  # round-trip
 
         if expected_return_bps > cost_bps:
@@ -147,6 +158,8 @@ def main():
     parser = argparse.ArgumentParser(description="G3: Gold Oracle Gate")
     parser.add_argument("--config", default="configs/phase_g_gc_dev.yaml")
     parser.add_argument("--split", default="val", choices=["train", "val", "test"])
+    parser.add_argument("--price_col", default="close", choices=["close", "mid_price"],
+                        help="Price column for oracle lookahead (default: close)")
     args = parser.parse_args()
 
     config_path = os.path.join(project_root, args.config)
@@ -172,12 +185,14 @@ def main():
     print(f"[G3] Date range: {start} → {end}")
     print(f"[G3] Fees: maker={config['env']['maker_fee']*10000:.2f}bps, taker={config['env']['taker_fee']*10000:.2f}bps")
 
+    print(f"[G3] Price column: {args.price_col}")
+
     # Run each agent
     agents = [
         ("A1: Random", random_policy),
         ("A2: Always-Hold", hold_policy),
-        ("A6: Oracle H=1", make_oracle_taker_policy(horizon=1)),
-        ("A6: Oracle H=6", make_oracle_taker_policy(horizon=6)),
+        ("A6: Oracle H=1", make_oracle_taker_policy(horizon=1, price_col=args.price_col)),
+        ("A6: Oracle H=6", make_oracle_taker_policy(horizon=6, price_col=args.price_col)),
     ]
 
     results = []
