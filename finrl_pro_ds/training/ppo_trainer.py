@@ -106,6 +106,7 @@ class PPOTrainer:
         window_size = config.get("env", {}).get("window_size", 15)
         micro_input = net_cfg.get("micro_config", {}).get("input_size", 30)
         private_input = net_cfg.get("micro_config", {}).get("private_input_size", 5)
+        self._private_dim = private_input
         macro_input = net_cfg.get("macro_config", {}).get("input_size", 15)
         num_envs = getattr(env, "num_envs", 1)
 
@@ -123,9 +124,14 @@ class PPOTrainer:
         self.ckpt_dir = os.path.join("checkpoints", self.run_name)
         os.makedirs(self.ckpt_dir, exist_ok=True)
 
-        # Private state check
+        # Private state check — V6 (SwingScalperEnv) uses 4, V5 (DeepScalperEnv) uses 5
         priv_cfg = config.get("network", {}).get("micro_config", {}).get("private_input_size", 5)
-        assert priv_cfg == 5, f"Tier 2 Env produces 5 private features, config expects {priv_cfg}"
+        mdp_ver = config.get("env", {}).get("mdp_version", "v5")
+        expected_priv = 4 if mdp_ver == "v6" else 5
+        assert priv_cfg == expected_priv, (
+            f"MDP {mdp_ver} env produces {expected_priv} private features, "
+            f"config expects {priv_cfg}"
+        )
 
         # AUDIT FIX D1: Validate window_size consistency between env and network
         net_ws = config.get("network", {}).get("micro_config", {}).get("window_size")
@@ -171,8 +177,8 @@ class PPOTrainer:
         _micro_dim = self.config.get("network", {}).get("micro_config", {}).get("input_size", 30)
         assert obs["micro"].shape == (B, W, _micro_dim), \
             f"obs['micro'] shape mismatch: expected ({B}, {W}, {_micro_dim}), got {obs['micro'].shape}"
-        assert obs["private"].shape == (B, W, 5), \
-            f"obs['private'] shape mismatch: expected ({B}, {W}, 5), got {obs['private'].shape}"
+        assert obs["private"].shape == (B, W, self._private_dim), \
+            f"obs['private'] shape mismatch: expected ({B}, {W}, {self._private_dim}), got {obs['private'].shape}"
         print(f"✓ Observation shapes verified: micro={obs['micro'].shape}, "
               f"private={obs['private'].shape}, macro={obs['macro'].shape}")
 

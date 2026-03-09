@@ -588,6 +588,8 @@ def main():
                         help="Path to 3-min OHLCV parquet")
     parser.add_argument("--fee", type=float, default=0.35,
                         help="One-way fee in bps (default: 0.35 for Gold CME)")
+    parser.add_argument("--resolution", default=None,
+                        help="Resample to resolution (e.g. 5min, 15min, 30min). None=use as-is.")
     args = parser.parse_args()
 
     t_start = time.time()
@@ -600,7 +602,21 @@ def main():
     print(f"  Fee:  {args.fee} bps one-way ({args.fee * 2} bps RT)")
 
     df = pd.read_parquet(args.data)
-    print(f"  Bars: {len(df):,}")
+
+    # Resample if requested
+    if args.resolution:
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
+            df = df.set_index('timestamp')
+        df = df.resample(args.resolution).agg({
+            'open': 'first', 'high': 'max', 'low': 'min',
+            'close': 'last', 'volume': 'sum',
+        }).dropna().reset_index()
+        if 'mid_price' not in df.columns:
+            df['mid_price'] = (df['high'] + df['low']) / 2.0
+        print(f"  Resampled to {args.resolution}: {len(df):,} bars")
+    else:
+        print(f"  Bars: {len(df):,}")
 
     # Need mid_price for oracle
     if 'mid_price' not in df.columns:
