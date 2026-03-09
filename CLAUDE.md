@@ -189,6 +189,8 @@ These are non-negotiable correctness constraints. Violating any of these causes 
 | **SHORT-ACCT** | Long and short leverage accounting are calculated with split formulas. Shorts must NOT accumulate `notional_debt` — buyback obligation is captured by `|pos|*mid` in equity (FIX V3-01). |
 | **MARGIN-CFG** | `margin_requirement` must be `0.05` (20x leverage) for BTC futures. `1.0` (spot) causes margin starvation — agent can only hold ~1 BTC before all orders are rejected. |
 | **TAKER-IMM** | Taker orders fill immediately in the same `step()` call. Maker orders pend for next-bar fill. `_try_fill_pending()` is called twice: once for previous maker fills, once after taker action creation. |
+| **DATA-CLEAN** | All OHLCV source data must pass `scripts/clean_ohlcv.py` validation before any experiment (training, oracle, backtest). Checks: high ≥ max(O,C), low ≤ min(O,C), no NaN/zero/negative, no decimal-shift outliers (>5% ratio). Run on raw 1-min sources first, then re-derive downstream timeframes. Backups (`.parquet.bak`) are mandatory before modifying. |
+| **PF-XCHECK** | Any PF simulation must be cross-checked against both `mid_price = (high+low)/2` AND `close` price. If the two PF values diverge by more than 30%, the data is suspect — halt and investigate before trusting results. This prevents the "oracle gate blind spot" where corrupted high/low inflates mid_price-based PF while close-based PF reveals the truth. |
 
 ## Known Open Issues (as of 2026-02-20)
 
