@@ -62,7 +62,7 @@ network:
     input_size: 18
     private_input_size: 4        # [direction, bars_since_switch, unrealized_pnl, atr]
     hidden_size: 256
-    encoder_type: "flat"         # Same as IQN K1 — MLP encoder for 3-min
+    encoder_type: "mlp"          # PPO uses "mlp" (IQN equivalent: "flat")
 
   macro_config:
     input_size: 15
