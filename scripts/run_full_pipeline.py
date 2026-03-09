@@ -503,8 +503,16 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
 
             trainer.train(optuna_trial=trial, pruning_callback=pruning_callback)
 
-            # V4.2: Evaluate on validation set with profit_factor metric
-            profit_factor, trade_count = evaluate_for_hpo(eval_env, trainer.agent, max_steps=50000)
+            # V4.2: Multi-seed eval for robust PF measurement (3 seeds, median)
+            pf_values = []
+            tc_values = []
+            for eval_seed in [42, 123, 7]:
+                eval_env.reset(seed=eval_seed)
+                pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=50000)
+                pf_values.append(pf)
+                tc_values.append(tc)
+            profit_factor = float(np.median(pf_values))
+            trade_count = int(np.median(tc_values))
 
             # V4.2: Activity constraint — kill lazy holding agents
             # FIX HPO-3: Lowered from 100 to 30 for swing MDP. Binary {Long, Short}
@@ -560,7 +568,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         storage=base_config.get("hpo", {}).get("storage"),
         study_name=f"hpo_{agent_type}",
         load_if_exists=True,
-        sampler=TPESampler(seed=42),
+        sampler=TPESampler(seed=42, n_startup_trials=10, multivariate=True),
         # FIX HPO-1: Disable inter-trial pruning for swing MDP.
         # HyperbandPruner was killing trials before IQN+NoisyNets could converge
         # (needs 200K+ steps for signal). All 5 trials pruned in K2/K4 runs.
@@ -585,8 +593,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         reward_params = set()
         agent_params = {"learning_rate", "ent_coef", "gae_lambda", "n_epochs", "target_kl", "max_grad_norm", "clip_eps"}
     elif agent_type == "iqn":
-        reward_params = set()
-        agent_params = {"learning_rate", "num_quantiles", "noisy_sigma0", "tau", "gamma"}
+        reward_params = {"crra_gamma"}
+        agent_params = {"learning_rate", "num_quantiles", "noisy_sigma0", "tau",
+                        "gamma", "gamma_short", "gamma_long"}
     else:
         # FIX BUG-01+BUG-10: BDQ reward/MDP params are LOCKED (gamma read from config)
         # PERF-OPT: batch_size removed — locked in config (hardware-profile param, not learning param)
