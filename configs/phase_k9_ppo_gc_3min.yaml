@@ -82,21 +82,21 @@ agents:
                                  # in binary space. Two actions need more entropy
                                  # pressure to avoid early collapse.
     max_grad_norm: 0.5
-    n_epochs: 4                  # PPO update epochs per rollout
+    n_epochs: 10                 # Standard PPO (skill recommendation: 10 for max gradient reuse)
     target_kl: 0.02              # KL early-stopping to prevent policy jumps
     rollout_steps: 4096          # Larger rollout for stable on-policy gradients
                                  # 4096 * 24 envs = 98K transitions per update
-    batch_size: 512              # Larger batches for binary action space
+    batch_size: 1024             # TC-aligned, fills GPU SMs (skill: 1024 for PPO)
     lr_schedule: "linear"        # Linear decay to 0
     clip_value_loss: true        # Clipped value loss (audit fix)
-    torch_compile: false         # Conservative for probe run
+    torch_compile: true          # PPO supports compile (no NoisyLinear). Full fusion benefit.
     checkpoint_interval: 100000
 
 training:
   total_timesteps: 5000000
   training_epochs: 1
   log_interval: 20480
-  torch_compile: false
+  torch_compile: true
   use_amp: true
   use_shm: false
   verbose_logging: true
@@ -111,4 +111,5 @@ wandb:
   entity: "bigcan-chiwin-technology"
   mode: "online"
   tags: ["Gold", "GC", "PPO", "3min", "SwingMDP", "Entropy",
-         "BinaryAction", "DenseReward", "CME", "FrontMonth", "k9"]
+         "BinaryAction", "DenseReward", "CME", "FrontMonth", "k9",
+         "torchCompile", "batch1024", "epochs10"]
