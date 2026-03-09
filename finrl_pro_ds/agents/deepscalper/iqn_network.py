@@ -16,6 +16,7 @@ Reference:
 import math
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from typing import Dict, Tuple, Optional
 
 from finrl_pro_ds.agents.deepscalper.networks import (
@@ -24,6 +25,7 @@ from finrl_pro_ds.agents.deepscalper.networks import (
     MicroEncoderFlat,
     MicroEncoderTCN,
     MacroEncoder,
+    _tc_align,
 )
 from finrl_pro_ds.agents.deepscalper.noisy_linear import NoisyLinear
 
@@ -154,12 +156,14 @@ class IQNNetwork(nn.Module):
 
         self.macro_encoder = MacroEncoder(**macro_config)
 
-        # Fusion dimensions
+        # Fusion dimensions (TC-aligned for Tensor Core utilization)
         micro_out_dim = micro_config.get("hidden_size", 128)
         macro_out_dim = macro_config.get("hidden_sizes", (128, 128))[-1]
         private_size = micro_config.get("private_input_size", 5)
         self.private_size = private_size
-        fusion_in_dim = micro_out_dim + macro_out_dim + private_size
+        fusion_in_raw = micro_out_dim + macro_out_dim + private_size
+        fusion_in_dim = _tc_align(fusion_in_raw)
+        self._fusion_pad = fusion_in_dim - fusion_in_raw
 
         # Fusion layer (shared across horizons)
         self.fusion = nn.Sequential(
@@ -231,6 +235,8 @@ class IQNNetwork(nn.Module):
         h_macro = self.macro_encoder(macro_in)
         private_last = private_in[:, -1, :]
         combined = torch.cat([h_micro, h_macro, private_last], dim=1)
+        if self._fusion_pad > 0:
+            combined = F.pad(combined, (0, self._fusion_pad))
         fused = self.fusion(combined)
         tau_embed = self.quantile_embedding(tau)
         x = fused.unsqueeze(1) * tau_embed

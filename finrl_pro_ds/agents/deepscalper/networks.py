@@ -1,6 +1,12 @@
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from typing import Dict, Tuple
+
+
+def _tc_align(dim: int, multiple: int = 8) -> int:
+    """Round up to next multiple for Tensor Core alignment."""
+    return ((dim + multiple - 1) // multiple) * multiple
 
 class MicroEncoder(nn.Module):
     """
@@ -34,10 +40,13 @@ class MicroEncoder(nn.Module):
         else:
             raise ValueError(f"Unknown RNN type: {rnn_type}")
 
+        # TC alignment: pad input to multiple of 8 for Tensor Core utilization
+        self._tc_pad = _tc_align(input_size) - input_size
+
         # Sprint 7 DIV-1 FIX: LSTM processes only market data (no private state)
         # Private state is injected at the fusion layer in DeepScalperNetwork
         self.micro_rnn = rnn_cls(
-            input_size=input_size,  # v2: 30 micro features
+            input_size=_tc_align(input_size),  # v2: 30 micro features (TC-aligned)
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
@@ -70,6 +79,8 @@ class MicroEncoder(nn.Module):
 
     def forward(self, x: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         # x: (Batch, Window, LOB_Features)  — market data only
+        if self._tc_pad > 0:
+            x = F.pad(x, (0, self._tc_pad))
 
         # Sprint 7 DIV-1 FIX: LSTM processes only LOB features
         # BUG-B: Pass hidden state through for inference persistence
@@ -110,7 +121,8 @@ class MicroEncoderMLP(nn.Module):
     ):
         super().__init__()
         self.hidden_size = hidden_size
-        flat_dim = input_size * window_size
+        flat_dim = _tc_align(input_size * window_size)
+        self._tc_pad = flat_dim - (input_size * window_size)
 
         self.net = nn.Sequential(
             nn.Flatten(start_dim=1),
@@ -143,7 +155,13 @@ class MicroEncoderMLP(nn.Module):
         Returns:
             (B, hidden_size) encoded features, None (no hidden state)
         """
-        return self.net(x), None
+        x = x.reshape(x.size(0), -1)  # Manual flatten
+        if self._tc_pad > 0:
+            x = F.pad(x, (0, self._tc_pad))
+        # Skip Flatten layer (index 0), run rest of Sequential
+        for layer in list(self.net.children())[1:]:
+            x = layer(x)
+        return x, None
 
 
 class MicroEncoderFlat(nn.Module):
@@ -170,9 +188,10 @@ class MicroEncoderFlat(nn.Module):
     ):
         super().__init__()
         self.hidden_size = hidden_size
+        self._tc_pad = _tc_align(input_size) - input_size
 
         self.net = nn.Sequential(
-            nn.Linear(input_size, hidden_size),
+            nn.Linear(_tc_align(input_size), hidden_size),
             nn.LayerNorm(hidden_size),
             nn.GELU(),
         )
@@ -198,6 +217,8 @@ class MicroEncoderFlat(nn.Module):
         """
         # Take only the last timestep -- discard temporal window
         last = x[:, -1, :]  # (B, F)
+        if self._tc_pad > 0:
+            last = F.pad(last, (0, self._tc_pad))
         return self.net(last), None
 
 
@@ -328,8 +349,9 @@ class MacroEncoder(nn.Module):
         dropout: float = 0.1
     ):
         super().__init__()
+        self._tc_pad = _tc_align(input_size) - input_size
         layers = []
-        in_dim = input_size
+        in_dim = _tc_align(input_size)
 
         for i, h_dim in enumerate(hidden_sizes):
             layers.append(nn.Linear(in_dim, h_dim))
@@ -345,6 +367,8 @@ class MacroEncoder(nn.Module):
         self.output_dim = in_dim
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self._tc_pad > 0:
+            x = F.pad(x, (0, self._tc_pad))
         return self.net(x)
 
 class DeepScalperNetwork(nn.Module):
@@ -382,12 +406,14 @@ class DeepScalperNetwork(nn.Module):
         private_size = micro_config.get("private_input_size", 3)
         self.private_size = private_size
 
-        fusion_in_dim = micro_out_dim + macro_out_dim + private_size
+        fusion_in_raw = micro_out_dim + macro_out_dim + private_size
+        fusion_in_dim = _tc_align(fusion_in_raw)
+        self._fusion_pad = fusion_in_dim - fusion_in_raw
 
         # FIX FIND-5: Head width scales with fusion_dim (default: fusion_dim // 2)
         head_hidden = max(fusion_dim // 2, 64)
 
-        # Fusion Layer
+        # Fusion Layer (TC-aligned input)
         self.fusion = nn.Sequential(
             nn.Linear(fusion_in_dim, fusion_dim),
             nn.LayerNorm(fusion_dim),
@@ -469,8 +495,10 @@ class DeepScalperNetwork(nn.Module):
         # Take last timestep: (Batch, Window, N) -> (Batch, N)
         private_last = private_in[:, -1, :]
 
-        # Fusion: market encodings + private state
+        # Fusion: market encodings + private state (TC-aligned)
         combined = torch.cat([h_micro, h_macro, private_last], dim=1)
+        if self._fusion_pad > 0:
+            combined = F.pad(combined, (0, self._fusion_pad))
         features = self.fusion(combined)
 
         # Value
