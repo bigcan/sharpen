@@ -119,7 +119,7 @@ WARMUP_BARS = 60
 
 
 def make_splits(df: pd.DataFrame, features: np.ndarray, direction: np.ndarray,
-                mid_prices: np.ndarray, window: dict, val_frac: float = 0.2):
+                prices: np.ndarray, window: dict, val_frac: float = 0.2):
     """Create train/val/test splits for one walk-forward window."""
     ts = pd.to_datetime(df['timestamp'])
 
@@ -142,7 +142,7 @@ def make_splits(df: pd.DataFrame, features: np.ndarray, direction: np.ndarray,
         splits[name] = {
             'X': features[idx],
             'y': direction[idx],
-            'prices': mid_prices[idx],
+            'prices': prices[idx],
             'idx': idx,
         }
 
@@ -460,6 +460,8 @@ def main():
                         help="Random seed (default: 42)")
     parser.add_argument("--no_mlp", action="store_true",
                         help="Skip MLP training (sklearn-only mode)")
+    parser.add_argument("--price_col", default="close", choices=["close", "mid_price"],
+                        help="Price column for oracle & PF simulation (default: close)")
     args = parser.parse_args()
 
     t_start = time.time()
@@ -473,10 +475,11 @@ def main():
 
     # Load + resample
     df = load_and_resample(args.data)
-    mid_prices = df['mid_price'].values.astype(np.float64)
+    prices = df[args.price_col].values.astype(np.float64)
+    print(f"  Price column: {args.price_col}")
 
     # Oracle labels (computed once on full series)
-    labels = generate_oracle_labels(mid_prices, fee_bps=args.fee)
+    labels = generate_oracle_labels(prices, fee_bps=args.fee)
     direction = labels['direction']
 
     # Features (computed once on full series)
@@ -496,7 +499,7 @@ def main():
               f"Test {w['test_start']}->{w['test_end']}")
         print("=" * 70)
 
-        splits = make_splits(df, features, direction, mid_prices, w)
+        splits = make_splits(df, features, direction, prices, w)
         n_train = len(splits['train']['idx'])
         n_val = len(splits['val']['idx'])
         n_test = len(splits['test']['idx'])
@@ -574,7 +577,7 @@ def main():
         # Retrain winner on full Jan-Oct data (W3 training set) for deployment
         print(f"\n  Retraining {winner} on full Jan-Oct for deployment checkpoint...")
         w3 = WINDOWS[-1]
-        final_splits = make_splits(df, features, direction, mid_prices, w3)
+        final_splits = make_splits(df, features, direction, prices, w3)
         # Merge train + val for final model
         X_final = np.concatenate([final_splits['train']['X'], final_splits['val']['X']])
         y_final = np.concatenate([final_splits['train']['y'], final_splits['val']['y']])

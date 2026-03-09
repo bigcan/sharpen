@@ -408,7 +408,7 @@ def train_classifiers(splits: dict) -> dict:
 # Section 5: PF Simulation
 # ═══════════════════════════════════════════════════════════════════════
 
-def simulate_pf(directions: np.ndarray, mid_prices: np.ndarray,
+def simulate_pf(directions: np.ndarray, prices: np.ndarray,
                 fee_bps: float = 0.35) -> dict:
     """
     Simulate PF from predicted direction sequence.
@@ -416,6 +416,7 @@ def simulate_pf(directions: np.ndarray, mid_prices: np.ndarray,
     Position follows predicted direction each bar.
     PnL per bar = direction_sign * (price[t+1] - price[t])
     Switch cost = 2 * fee_bps * price when direction changes.
+    Terminal exit fee charged on last bar.
     """
     T = len(directions)
     fee_frac = fee_bps / 10000.0
@@ -425,21 +426,25 @@ def simulate_pf(directions: np.ndarray, mid_prices: np.ndarray,
 
     pnl = np.zeros(T)
     for t in range(T - 1):
-        dp = mid_prices[t + 1] - mid_prices[t]
+        dp = prices[t + 1] - prices[t]
         pnl[t] = pos_sign[t] * dp
 
         # Switch cost
         if t > 0 and directions[t] != directions[t - 1]:
-            pnl[t] -= 2 * fee_frac * mid_prices[t]
+            pnl[t] -= 2 * fee_frac * prices[t]
 
     # First bar: entry cost
-    pnl[0] -= fee_frac * mid_prices[0]
+    pnl[0] -= fee_frac * prices[0]
+
+    # Terminal exit fee (closing the final position)
+    if T >= 2:
+        pnl[T - 2] -= fee_frac * prices[T - 1]
 
     pos_pnl = pnl[pnl > 0].sum()
     neg_pnl = abs(pnl[pnl < 0].sum())
     pf = pos_pnl / neg_pnl if neg_pnl > 1e-9 else float('inf')
 
-    total_return = np.sum(pnl) / mid_prices[0] * 100
+    total_return = np.sum(pnl) / prices[0] * 100
     n_switches = np.sum(np.diff(directions) != 0)
 
     return {
@@ -452,7 +457,7 @@ def simulate_pf(directions: np.ndarray, mid_prices: np.ndarray,
 
 
 def run_pf_simulations(splits: dict, clf_results: dict,
-                       mid_prices: np.ndarray, fee_bps: float) -> dict:
+                       prices: np.ndarray, fee_bps: float) -> dict:
     """Run PF simulation for oracle, random, and all classifiers."""
     print("\n" + "=" * 70)
     print("SECTION 5: PF Simulation")
@@ -462,13 +467,13 @@ def run_pf_simulations(splits: dict, clf_results: dict,
 
     for split_name in ['val', 'test']:
         idx = splits[split_name]['idx']
-        prices = mid_prices[idx]
+        split_prices = prices[idx]
         oracle_dir = splits[split_name]['y_dir']
 
         print(f"\n  --- {split_name.upper()} split ({len(idx):,} bars) ---")
 
         # Oracle reconstruction
-        r = simulate_pf(oracle_dir, prices, fee_bps)
+        r = simulate_pf(oracle_dir, split_prices, fee_bps)
         pf_results[f'oracle_{split_name}'] = r
         print(f"    Oracle:        PF={r['pf']:.3f}  "
               f"Return={r['total_return_pct']:+.1f}%  "
@@ -477,7 +482,7 @@ def run_pf_simulations(splits: dict, clf_results: dict,
         # Random baseline
         rng = np.random.RandomState(42)
         random_dir = rng.randint(0, 2, size=len(idx))
-        r = simulate_pf(random_dir, prices, fee_bps)
+        r = simulate_pf(random_dir, split_prices, fee_bps)
         pf_results[f'random_{split_name}'] = r
         print(f"    Random:        PF={r['pf']:.3f}  "
               f"Return={r['total_return_pct']:+.1f}%  "
@@ -488,7 +493,7 @@ def run_pf_simulations(splits: dict, clf_results: dict,
             if res['target'] != 'direction' or res['split'] != split_name:
                 continue
             y_pred = res['y_pred']
-            r = simulate_pf(y_pred, prices, fee_bps)
+            r = simulate_pf(y_pred, split_prices, fee_bps)
             pf_results[f'{key}_pf'] = r
             print(f"    {res['clf_name']:18s} PF={r['pf']:.3f}  "
                   f"Return={r['total_return_pct']:+.1f}%  "
@@ -590,6 +595,8 @@ def main():
                         help="One-way fee in bps (default: 0.35 for Gold CME)")
     parser.add_argument("--resolution", default=None,
                         help="Resample to resolution (e.g. 5min, 15min, 30min). None=use as-is.")
+    parser.add_argument("--price_col", default="close", choices=["close", "mid_price"],
+                        help="Price column for oracle & PF simulation (default: close)")
     args = parser.parse_args()
 
     t_start = time.time()
@@ -600,6 +607,7 @@ def main():
     print("=" * 70)
     print(f"\n  Data: {args.data}")
     print(f"  Fee:  {args.fee} bps one-way ({args.fee * 2} bps RT)")
+    print(f"  Price column: {args.price_col}")
 
     df = pd.read_parquet(args.data)
 
@@ -612,19 +620,20 @@ def main():
             'open': 'first', 'high': 'max', 'low': 'min',
             'close': 'last', 'volume': 'sum',
         }).dropna().reset_index()
-        if 'mid_price' not in df.columns:
-            df['mid_price'] = (df['high'] + df['low']) / 2.0
+        # Always compute mid_price for fallback
+        df['mid_price'] = (df['high'] + df['low']) / 2.0
         print(f"  Resampled to {args.resolution}: {len(df):,} bars")
     else:
         print(f"  Bars: {len(df):,}")
 
-    # Need mid_price for oracle
+    # Ensure mid_price column exists for backward compat / xcheck
     if 'mid_price' not in df.columns:
         df['mid_price'] = (df['high'] + df['low']) / 2.0
-    mid_prices = df['mid_price'].values.astype(np.float64)
+
+    prices = df[args.price_col].values.astype(np.float64)
 
     # Section 1: Oracle labels
-    labels = generate_oracle_labels(mid_prices, fee_bps=args.fee)
+    labels = generate_oracle_labels(prices, fee_bps=args.fee)
 
     # Section 2: Features
     features = build_features(df)
@@ -636,10 +645,40 @@ def main():
     clf_results = train_classifiers(splits)
 
     # Section 5: PF simulation
-    pf_results = run_pf_simulations(splits, clf_results, mid_prices, args.fee)
+    pf_results = run_pf_simulations(splits, clf_results, prices, args.fee)
 
     # Section 6: Verdict
     print_verdict(clf_results, pf_results)
+
+    # PF-XCHECK: cross-validate with the other price column
+    print("\n" + "=" * 70)
+    print("PF-XCHECK — Cross-validation: close vs mid_price")
+    print("=" * 70)
+
+    other_col = 'mid_price' if args.price_col == 'close' else 'close'
+    other_prices = df[other_col].values.astype(np.float64)
+
+    # Run oracle on both price series (use max 50K bars for speed)
+    xcheck_limit = min(50000, len(prices))
+    primary_result = dp_oracle(prices[:xcheck_limit], fee_bps=args.fee)
+    other_result = dp_oracle(other_prices[:xcheck_limit], fee_bps=args.fee)
+
+    pf_primary = primary_result['profit_factor_pnl']
+    pf_other = other_result['profit_factor_pnl']
+    avg_pf = (pf_primary + pf_other) / 2.0
+    divergence_pct = abs(pf_primary - pf_other) / avg_pf * 100 if avg_pf > 1e-9 else 0
+
+    print(f"\n  PF-XCHECK (PnL-based, first {xcheck_limit:,} bars):")
+    print(f"    {args.price_col:10s} PF = {pf_primary:.3f}")
+    print(f"    {other_col:10s} PF = {pf_other:.3f}")
+    print(f"    Divergence = {divergence_pct:.1f}%")
+
+    if divergence_pct > 30:
+        print(f"\n  *** WARNING: PF divergence {divergence_pct:.1f}% > 30% ***")
+        print("  *** Data may have corrupted high/low values inflating mid_price. ***")
+        print("  *** Run scripts/clean_ohlcv.py before trusting results. ***")
+    else:
+        print("    OK — divergence within 30% tolerance")
 
     elapsed = time.time() - t_start
     print(f"\n  Total runtime: {elapsed:.1f}s")
