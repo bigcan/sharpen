@@ -250,13 +250,15 @@ class ContinuousSwingEnv(gym.Env):
             reward = float(np.clip(R_t, -50.0, 50.0))
 
         # 6. Update equity
+        # FIX R2-AUD-05: Use current equity (not initial_balance) so PnL compounds correctly.
+        # Without this, drawdown recovery is inflated and long backtests diverge from reality.
         if self.prev_close > 0:
             price_return = (self.current_close - self.prev_close) / self.prev_close
-            equity_delta = self.current_position * price_return * self.initial_balance
+            equity_delta = self.current_position * price_return * self.equity
         else:
             equity_delta = 0.0
         if traded:
-            equity_delta -= self.taker_fee * abs(delta) * self.initial_balance
+            equity_delta -= self.taker_fee * abs(delta) * self.equity
         self.equity += equity_delta
         self.peak_equity = max(self.peak_equity, self.equity)
 

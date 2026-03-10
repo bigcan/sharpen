@@ -545,9 +545,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 n_step = trial.suggest_categorical("n_step", [3, 5, 7, 10])
                 config["agents"]["iqn"]["n_step"] = n_step
 
-            # buffer_size HPO: log-uniform [200K, 1M]
+            # buffer_size HPO: log-uniform [500K, 2M] (scaled for 5090 32GB VRAM)
             if config["agents"]["iqn"].get("buffer_size_hpo", False):
-                buffer_size = trial.suggest_int("buffer_size", 200000, 1000000, log=True)
+                buffer_size = trial.suggest_int("buffer_size", 500000, 2000000, log=True)
                 config["agents"]["iqn"]["buffer_size"] = buffer_size
 
             # hidden_dim HPO: categorical {64, 128, 256}
@@ -918,6 +918,14 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         # full test period sequentially, not a single random day.
         backtest_config["env"]["episode_length"] = 0   # Full dataset
         backtest_config["env"]["random_start"] = False  # Sequential from start
+        # FIX R2-AUD-03: Backtest must use final fee from fee_schedule, not initial 0.
+        # Fee curriculum is a training concept; backtest evaluates at production fee level.
+        fee_schedule = backtest_config.get("env", {}).get("fee_schedule")
+        if fee_schedule:
+            final_tier = fee_schedule[-1]
+            final_fee = final_tier.get("ramp_to", final_tier.get("taker_fee", 0.0))
+            backtest_config["env"]["taker_fee"] = final_fee
+            logger.info(f"[R2-AUD-03] Backtest fee overridden from fee_schedule: {final_fee:.6f}")
 
         env = make_env(backtest_config, start_date=start_date, end_date=end_date, norm_cutoff_date=norm_cutoff_date)
 
@@ -967,7 +975,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 gamma=sac_cfg.get("gamma", 0.99),
                 tau=sac_cfg.get("tau", 0.005),
                 batch_size=sac_cfg.get("batch_size", 256),
-                buffer_size=sac_cfg.get("buffer_size", 1000000),
+                buffer_size=100,  # FIX R2-AUD-06: Minimal buffer for backtest (never used)
                 initial_alpha=sac_cfg.get("initial_alpha", 0.2),
                 device=device,
             )
@@ -999,6 +1007,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 horizon_alpha=iqn_cfg.get("horizon_alpha", 0.5),  # FIX GMO1-09
                 action_dims=action_dims,
                 use_amp=config.get("training", {}).get("use_amp", False),
+                amp_dtype=config.get("training", {}).get("amp_dtype", "float16"),
                 device=device,
             )
         else:
@@ -1271,6 +1280,10 @@ def main():
     # Uses 10-bit mantissa — sufficient for financial signals, ~8x faster than IEEE FP32
     torch.set_float32_matmul_precision('high')
     logger.info("TF32 enabled: torch.set_float32_matmul_precision('high')")
+
+    # cuDNN auto-tuner: caches fastest kernel for fixed input shapes (our envs have constant obs dims)
+    torch.backends.cudnn.benchmark = True
+    logger.info("cuDNN benchmark enabled")
 
     try:
         # =====================================================================
