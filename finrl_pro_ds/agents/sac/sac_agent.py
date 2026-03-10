@@ -90,9 +90,11 @@ class SACAgent:
             p.requires_grad = False
 
         # Entropy coefficient (learnable)
+        # FIX R2-AUD-08: Create Parameter directly on target device to preserve
+        # nn.Parameter type (nn.Parameter.to() returns plain Tensor on device change).
         self.log_alpha = nn.Parameter(
-            torch.log(torch.tensor(initial_alpha, dtype=torch.float32))
-        ).to(self.device)
+            torch.log(torch.tensor(initial_alpha, dtype=torch.float32, device=self.device))
+        )
         self.target_entropy = -1.0  # -dim(action_space)
 
         # Optimizers

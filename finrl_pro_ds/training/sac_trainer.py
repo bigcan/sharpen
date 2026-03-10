@@ -78,7 +78,9 @@ class SACTrainer:
         self.learning_starts = sac_cfg.get("learning_starts", 10_000)
         # update_interval is gradient steps per env step per env.
         # Scale by num_envs so UTD ≈ update_interval regardless of parallelism.
-        num_envs = config["training"].get("num_envs", 1)
+        # FIX R2-AUD-02: Read num_envs from actual env, not config (config["training"]
+        # may differ from pipeline's actual env count read from config["env"]).
+        num_envs = getattr(env, 'num_envs', 1)
         self.update_interval = sac_cfg.get("update_interval", 4) * num_envs
 
         # Auto-scale tau for high UTD
@@ -114,6 +116,7 @@ class SACTrainer:
         total_steps = 0
         t_start = time.time()
         gradient_accumulator = 0.0
+        metrics = None  # FIX R2-AUD-01: Initialize before learning_starts to prevent NameError
 
         logger.info(
             f"SAC Training: {self.total_timesteps} steps, "
