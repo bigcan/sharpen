@@ -1,6 +1,6 @@
-# GMGP1: SAC + Multi-Scale OHLCV + Continuous Action — BTC 15-min
+# GMGP1-R1: SAC + Multi-Scale OHLCV + Continuous Action — BTC 15-min
 # Pivot from 3-min HFT to 15-min swing trading: higher oracle ceiling, fewer trades
-# GPU: RTX 4090 (24GB, Ada Lovelace) — BF16, batch 512, buffer 500K, num_envs 20
+# GPU: RTX 5090 (32GB, Blackwell) — BF16, batch 1024, buffer 1M, num_envs 24
 
 data:
   file_path: "data/bitfinex/btc_usdt_perp_2025_1min.parquet"
@@ -16,14 +16,14 @@ data:
 features:
   scales: [15, 60, 240]          # 15-min decision, 1h trend, 4h regime
   window_size: 30
-  features_per_scale: 7
+  features_per_scale: 8           # TC-OPT: 8 aligns Conv1d input for Tensor Cores
   asset_class: "crypto"
 
 env:
   mdp_version: "v7"
   initial_balance: 100000.0
   window_size: 30
-  features_per_scale: 7
+  features_per_scale: 8           # TC-OPT: must match features.features_per_scale
   taker_fee: 0.0                 # Start zero (fee curriculum)
   deadband_threshold: 0.25
   atr_cap_percentile: 90
@@ -43,7 +43,7 @@ env:
 
 network:
   scale_encoder:
-    input_size: 7
+    input_size: 8                  # TC-OPT: 8 aligns Conv1d for Tensor Cores (was 7)
     channels: [32, 64, 64, 64]
     kernel_size: 3
     output_dim: 64
@@ -58,11 +58,11 @@ agents:
     lr_alpha: 0.0003
     gamma: 0.99
     tau: 0.005
-    batch_size: 512
-    buffer_size: 500000
+    batch_size: 1024               # 5090: larger tiles for cuBLAS efficiency
+    buffer_size: 1000000            # 5090: 32GB VRAM headroom, 2x replay diversity
     initial_alpha: 0.2
     learning_starts: 5000        # Reduced: fewer bars than 3-min
-    update_interval: 4
+    update_interval: 8              # UTD-OPT: 2x sample efficiency for scarce 15-min data
     gradient_clip: 10.0
     checkpoint_interval: 250000
 
@@ -71,9 +71,9 @@ training:
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
-  torch_compile: true
-  num_envs: 20
+  torch_compile: false            # DISABLED: torch.dynamo hangs on List[Tensor] multi-scale input (Session 127)
+  num_envs: 24                    # 5090: safe max for Blackwell
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["BTC", "SAC", "15min", "MultiScale", "OHLCV", "DSR", "FeeCurriculum", "swing", "gmgp1", "4090"]
+  tags: ["gmgp1-r1", "BTC", "SAC", "15min", "MultiScale", "OHLCV", "DSR", "FeeCurriculum", "swing", "gmgp1", "4090"]
