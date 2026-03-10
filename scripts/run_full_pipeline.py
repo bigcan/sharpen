@@ -94,7 +94,22 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     env_config["features"] = config.get("features", {})
 
     # V6 swing MDP: binary direction-switching (Phase K)
+    # V7 continuous swing MDP: SAC position control (GMGP1)
     mdp_version = env_config.get("mdp_version", "v5")
+    if mdp_version == "v7":
+        from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
+        from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
+        data_config = config.get("data", {})
+        features_cfg = config.get("features", {})
+        ms_handler = MultiScaleOHLCVHandler(
+            file_path=data_config.get("file_path"),
+            ticker=data_config.get("ticker", "GC"),
+            feature_config=features_cfg,
+            start_date=sd,
+            end_date=ed,
+            norm_cutoff_date=norm_cutoff_date,
+        )
+        return ContinuousSwingEnv(config=env_config, data_handler=ms_handler)
     if mdp_version == "v6":
         return SwingScalperEnv(config=env_config, data_handler=handler)
     return DeepScalperEnv(config=env_config, data_handler=handler)
@@ -143,6 +158,7 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     all_returns = []
     positions = []  # V4.2: Track positions for trade counting
     action_counts = {0: 0, 1: 0, 2: 0}  # Track action distribution
+    trade_pnls = []  # FIX GMO1-06: Track PnL per completed swing
 
     def extract_portfolio_value(info, env_idx=0, default=100000.0):
         """Extract portfolio_value handling both single env and VectorEnv info structures."""
@@ -189,19 +205,43 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     if hasattr(agent, "reset_hidden_state"):
         agent.reset_hidden_state()
 
+    # FIX GMO1-02: Detect discrete_dims BEFORE the eval loop.
+    # Previously defined after the loop, causing NameError on action tracking.
+    if hasattr(env.action_space, 'shape') and env.action_space.shape and not hasattr(env.action_space, 'n'):
+        discrete_dims = -1  # V7: continuous action space
+    elif hasattr(env.action_space, 'n'):
+        discrete_dims = env.action_space.n
+    elif hasattr(env.action_space, 'nvec'):
+        discrete_dims = int(env.action_space.nvec[0])
+    else:
+        discrete_dims = 6
+
     try:
         obs, info = env.reset()
         done = False
         step = 0
 
         prev_val = extract_portfolio_value(info, env_idx=0, default=100000.0)
+        prev_realized_pnl = 0.0  # Track cumulative realized pnl to get per-trade delta
+        # FIX GMO1-01: Track direction for fee_threshold context
+        current_direction = None  # Set after first step from info["direction"]
 
         while not done and step < max_steps:
-            micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device, non_blocking=True)
-            private = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device, non_blocking=True)
-            macro = torch.tensor(obs["macro"], dtype=torch.float32).to(agent.device, non_blocking=True)
-
-            pred = agent.predict(micro, private, macro, deterministic=True)
+            # Dispatch obs keys based on agent type
+            if "scale_3m" in obs:
+                # SAC / V7 multi-scale obs
+                s3m = torch.tensor(obs["scale_3m"], dtype=torch.float32).to(agent.device, non_blocking=True)
+                s15m = torch.tensor(obs["scale_15m"], dtype=torch.float32).to(agent.device, non_blocking=True)
+                s1h = torch.tensor(obs["scale_1h"], dtype=torch.float32).to(agent.device, non_blocking=True)
+                priv = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device, non_blocking=True)
+                pred = agent.predict(s3m, s15m, s1h, priv, deterministic=True)
+            else:
+                micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device, non_blocking=True)
+                private = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device, non_blocking=True)
+                macro = torch.tensor(obs["macro"], dtype=torch.float32).to(agent.device, non_blocking=True)
+                # FIX GMO1-01: Pass direction context for fee_threshold filtering
+                ctx = {"current_direction": current_direction} if current_direction is not None else None
+                pred = agent.predict(micro, private, macro, deterministic=True, context=ctx)
 
             # PPO returns (actions, log_probs, values), BDQ returns just actions
             if isinstance(pred, tuple):
@@ -210,9 +250,19 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
                 action = pred  # BDQ: already just actions
 
             # Track action distribution (first env if vectorized)
-            first_action = action[0] if len(action.shape) > 1 else action
-            direction = int(first_action[0]) if hasattr(first_action, "__len__") else int(first_action)
-            action_counts[direction] = action_counts.get(direction, 0) + 1
+            first_action = action[0] if hasattr(action, 'shape') and len(action.shape) > 1 else action
+            if discrete_dims == -1:
+                # V7 continuous: bucket into long/flat/short
+                act_val = float(first_action[0]) if hasattr(first_action, "__len__") else float(first_action)
+                if act_val > 0.1:
+                    action_counts[0] = action_counts.get(0, 0) + 1  # long
+                elif act_val < -0.1:
+                    action_counts[2] = action_counts.get(2, 0) + 1  # short
+                else:
+                    action_counts[1] = action_counts.get(1, 0) + 1  # flat
+            else:
+                direction = int(first_action[0]) if hasattr(first_action, "__len__") else int(first_action)
+                action_counts[direction] = action_counts.get(direction, 0) + 1
 
             obs, reward, term, trunc, info = env.step(action)
 
@@ -237,6 +287,11 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
 
             curr_val = extract_portfolio_value(info, env_idx=0, default=prev_val)
 
+            # FIX GMO1-01: Update direction context for fee_threshold filtering
+            dir_val = info.get("direction")
+            if dir_val is not None:
+                current_direction = np.array([float(dir_val[0])]) if hasattr(dir_val, "__len__") else np.array([float(dir_val)])
+
             # V4.2: Track position for trade counting
             pos = info.get("position")
             if pos is not None:
@@ -244,6 +299,19 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
                     positions.append(float(pos[0]))
                 else:
                     positions.append(float(pos))
+
+            # FIX GMO1-06: Trade-level PF via realized_pnl and switched flag
+            switched = info.get("switched")
+            if switched is not None:
+                # Handle VectorEnv format
+                is_switch = bool(switched[0]) if hasattr(switched, "__len__") and not isinstance(switched, str) else bool(switched)
+                if is_switch:
+                    rpnl = info.get("realized_pnl")
+                    if rpnl is not None:
+                        curr_rpnl = float(rpnl[0]) if hasattr(rpnl, "__len__") and not isinstance(rpnl, str) else float(rpnl)
+                        trade_pnl = curr_rpnl - prev_realized_pnl
+                        trade_pnls.append(trade_pnl)
+                        prev_realized_pnl = curr_rpnl
 
             step_return = (curr_val - prev_val) / prev_val if prev_val > 0 else 0
             all_returns.append(step_return)
@@ -263,13 +331,7 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     returns = np.array(all_returns)
     pos_arr = np.array(positions) if positions else np.array([0.0])
 
-    # Detect action space size for V5/V6 logic
-    if hasattr(env.action_space, 'n'):
-        discrete_dims = env.action_space.n
-    elif hasattr(env.action_space, 'nvec'):
-        discrete_dims = int(env.action_space.nvec[0])
-    else:
-        discrete_dims = 6
+    # discrete_dims already detected before the eval loop (FIX GMO1-02)
 
     # V4.2: Count trades (position changes) — same logic as backtest
     # FIX K03: V6 (always-in-market) double-counts: base_count and sign_flips both fire on switch.
@@ -277,21 +339,34 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     pos_deltas = np.abs(np.diff(pos_arr))
     base_count = int(np.sum(pos_deltas > 1e-6))
     sign_flips = int(np.sum((pos_arr[:-1] * pos_arr[1:]) < -1e-9))
-    if discrete_dims == 2:
+    if discrete_dims == -1:
+        trade_count = base_count  # V7: continuous, count all position changes
+    elif discrete_dims == 2:
         trade_count = sign_flips  # V6: always in market, sign flip = one switch
     else:
         trade_count = base_count + sign_flips
 
-    # V4.2: Compute profit_factor (gross_profit / gross_loss)
-    positive_returns = returns[returns > 0]
-    negative_returns = returns[returns < 0]
-    gross_profit = float(np.sum(positive_returns)) if len(positive_returns) > 0 else 0.0
-    gross_loss = float(np.abs(np.sum(negative_returns))) if len(negative_returns) > 0 else 0.0
-    profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (10.0 if gross_profit > 1e-12 else 0.0)
+    # FIX GMO1-06: Compute profit_factor based on trade-level PnL, not bar-by-bar returns
+    trade_pnls_arr = np.array(trade_pnls)
+    if len(trade_pnls_arr) > 0:
+        positive_pnls = trade_pnls_arr[trade_pnls_arr > 0]
+        negative_pnls = trade_pnls_arr[trade_pnls_arr < 0]
+        gross_profit = float(np.sum(positive_pnls))
+        gross_loss = float(np.abs(np.sum(negative_pnls)))
+        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (10.0 if gross_profit > 1e-12 else 0.0)
+    else:
+        # Fallback if no trades or no info["switched"] support
+        positive_returns = returns[returns > 0]
+        negative_returns = returns[returns < 0]
+        gross_profit = float(np.sum(positive_returns)) if len(positive_returns) > 0 else 0.0
+        gross_loss = float(np.abs(np.sum(negative_returns))) if len(negative_returns) > 0 else 0.0
+        profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (10.0 if gross_profit > 1e-12 else 0.0)
 
     # Diagnostic: log what we computed including action distribution
     # discrete_dims already detected above for trade counting
-    if discrete_dims == 2:
+    if discrete_dims == -1:
+        action_labels = {0: "long", 1: "flat", 2: "short"}
+    elif discrete_dims == 2:
         action_labels = {0: "long", 1: "short"}
     elif discrete_dims == 3:
         action_labels = {0: "taker_buy", 1: "hold", 2: "taker_sell"}
@@ -375,7 +450,28 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         # Optuna to change the game definition, causing specification gaming.
         # See: expert DRL audit, "Goodhart's Law" in RL.
         # -----------------------------------------------------------
-        if agent_type == "ppo":
+        if agent_type == "sac":
+            # SAC hyperparams — actor/critic LR, tau, alpha, deadband
+            lr_actor = trial.suggest_float("lr_actor", 1e-4, 1e-3, log=True)
+            lr_critic = trial.suggest_float("lr_critic", 1e-4, 1e-3, log=True)
+            tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
+            initial_alpha = trial.suggest_float("initial_alpha", 0.05, 0.5, log=True)
+            deadband = trial.suggest_categorical("deadband_threshold", [0.15, 0.25, 0.35])
+
+            config["agents"]["sac"]["lr_actor"] = lr_actor
+            config["agents"]["sac"]["lr_critic"] = lr_critic
+            config["agents"]["sac"]["tau"] = tau
+            config["agents"]["sac"]["initial_alpha"] = initial_alpha
+            config["env"]["deadband_threshold"] = deadband
+
+            wandb.log({
+                f"{trial_prefix}/lr_actor": lr_actor,
+                f"{trial_prefix}/lr_critic": lr_critic,
+                f"{trial_prefix}/tau": tau,
+                f"{trial_prefix}/initial_alpha": initial_alpha,
+                f"{trial_prefix}/deadband_threshold": deadband,
+            })
+        elif agent_type == "ppo":
             # === OPTIMIZER HPs (tunable) ===
             learning_rate = trial.suggest_float("learning_rate", 1e-5, 3e-4, log=True)
             ent_coef = trial.suggest_float("ent_coef", 0.005, 0.1, log=True)
@@ -521,7 +617,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             hpo_num_envs = min(config["env"].get("num_envs", 12), 12)
             env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True)
 
-            if agent_type == "ppo":
+            if agent_type == "sac":
+                from finrl_pro_ds.training.sac_trainer import SACTrainer
+                trainer = SACTrainer(env, config, device=device, hpo_mode=True)
+            elif agent_type == "ppo":
                 trainer = PPOTrainer(env, config, device=device, hpo_mode=True)
             else:
                 # DeepScalperTrainer handles both BDQ and IQN (auto-detects from config)
@@ -623,7 +722,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
 
     # Log best results
     best = study.best_trial
-    agent_key = agent_type if agent_type in ("ppo", "iqn") else "bdq"
+    agent_key = agent_type if agent_type in ("ppo", "iqn", "sac") else "bdq"
     best_params = {
         "env": {"reward": {}},
         "agents": {agent_key: {}},
@@ -631,25 +730,41 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     }
 
     # V4.2: Explicit routing for ALL HPO params to prevent silent mis-routing.
-    if agent_type == "ppo":
+    if agent_type == "sac":
+        reward_params = set()
+        agent_params = {"lr_actor", "lr_critic", "tau", "initial_alpha"}
+        # deadband routes to env, not agent
+        env_params = {"deadband_threshold"}
+    elif agent_type == "ppo":
         # V4.2: PPO locks reward params — only optimizer HPs are tunable
         reward_params = set()
         agent_params = {"learning_rate", "ent_coef", "gae_lambda", "n_epochs", "target_kl", "max_grad_norm", "clip_eps"}
     elif agent_type == "iqn":
-        reward_params = {"crra_gamma"}
+        # FIX GMO1-03: Added stay_reward_weight, n_step, buffer_size routing
+        reward_params = {"crra_gamma", "stay_reward_weight"}
         agent_params = {"learning_rate", "num_quantiles", "noisy_sigma0", "tau",
-                        "gamma", "gamma_short", "gamma_long"}
+                        "gamma", "gamma_short", "gamma_long", "n_step", "buffer_size"}
     else:
         # FIX BUG-01+BUG-10: BDQ reward/MDP params are LOCKED (gamma read from config)
         # PERF-OPT: batch_size removed — locked in config (hardware-profile param, not learning param)
         reward_params = set()
         agent_params = {"auxiliary_weight", "learning_rate", "epsilon_end", "tau", "gamma"}
 
+    # FIX GMO1-03: hidden_dim routes to network config, not agents
+    network_params = {"hidden_dim"}
+
     for key, val in best.params.items():
         if key in reward_params:
             best_params["env"]["reward"][key] = val
         elif key in agent_params:
             best_params["agents"][agent_key][key] = val
+        elif agent_type == "sac" and key in env_params:
+            best_params["env"][key] = val
+        elif key in network_params:
+            if "network" not in best_params:
+                best_params["network"] = {"micro_config": {}, "macro_config": {}}
+            best_params["network"]["micro_config"]["hidden_size"] = val
+            best_params["network"]["macro_config"] = {"hidden_sizes": [val, val // 2]}
         else:
             raise ValueError(f"HPO param '{key}' has no routing rule. Add to reward_params or agent_params in run_hpo().")
 
@@ -701,7 +816,10 @@ def run_training(config, run_name, device, agent_type="bdq", warm_start=None):
         logger.info(f"Environment ready: {num_envs} workers")
 
         # Train — dispatch based on agent type
-        if agent_type == "ppo":
+        if agent_type == "sac":
+            from finrl_pro_ds.training.sac_trainer import SACTrainer
+            trainer = SACTrainer(env, config, device=device, run_name=run_name)
+        elif agent_type == "ppo":
             trainer = PPOTrainer(env, config, device=device, run_name=run_name)
         else:
             trainer = DeepScalperTrainer(env, config, device=device, run_name=run_name)
@@ -709,10 +827,16 @@ def run_training(config, run_name, device, agent_type="bdq", warm_start=None):
         # Warm-start: load pretrained weights (strict=False for architecture mismatch,
         # e.g. bandit K8 single-head → K7 multi-horizon dual-head transfer)
         if warm_start:
-            trainer.load_checkpoint(warm_start, strict=False)
-            logger.info(f"[Warm-Start] Loaded weights from {warm_start} (strict=False)")
+            if agent_type == "sac":
+                trainer.agent.load(warm_start)
+            else:
+                trainer.load_checkpoint(warm_start, strict=False)
+            logger.info(f"[Warm-Start] Loaded weights from {warm_start}")
 
-        trainer.train()
+        if agent_type == "sac":
+            trainer.train()
+        else:
+            trainer.train()
 
         # Find checkpoint
         checkpoints_dir = f"checkpoints/{run_name}"
@@ -832,7 +956,22 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         network_config["action_space_dims"] = action_dims
 
         # Dispatch agent creation based on type
-        if agent_type == "ppo":
+        if agent_type == "sac":
+            from finrl_pro_ds.agents.sac.sac_agent import SACAgent
+            sac_cfg = config.get("agents", {}).get("sac", {})
+            agent = SACAgent(
+                network_config=network_config,
+                lr_actor=sac_cfg.get("lr_actor", 3e-4),
+                lr_critic=sac_cfg.get("lr_critic", 3e-4),
+                lr_alpha=sac_cfg.get("lr_alpha", 3e-4),
+                gamma=sac_cfg.get("gamma", 0.99),
+                tau=sac_cfg.get("tau", 0.005),
+                batch_size=sac_cfg.get("batch_size", 256),
+                buffer_size=sac_cfg.get("buffer_size", 1000000),
+                initial_alpha=sac_cfg.get("initial_alpha", 0.2),
+                device=device,
+            )
+        elif agent_type == "ppo":
             ppo_cfg = config.get("agents", {}).get("ppo", {})
             agent = PPOAgent(
                 network_config=network_config,
@@ -853,6 +992,11 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 num_quantiles=iqn_cfg.get("num_quantiles", 32),
                 embedding_dim=iqn_cfg.get("embedding_dim", 64),
                 noisy_sigma0=iqn_cfg.get("noisy_sigma0", 0.5),
+                fee_threshold=iqn_cfg.get("fee_threshold", 0.0),  # FIX GMO1-05
+                multi_horizon=iqn_cfg.get("multi_horizon", False),  # FIX GMO1-09
+                gamma_short=iqn_cfg.get("gamma_short", 0.95),  # FIX GMO1-09
+                gamma_long=iqn_cfg.get("gamma_long", 0.99),  # FIX GMO1-09
+                horizon_alpha=iqn_cfg.get("horizon_alpha", 0.5),  # FIX GMO1-09
                 action_dims=action_dims,
                 use_amp=config.get("training", {}).get("use_amp", False),
                 device=device,
@@ -889,22 +1033,38 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         positions = []
         done = False
         step = 0
+        # FIX GMO1-01: Track direction for fee_threshold context
+        current_direction = None
 
         while not done and step < 200000:
-            micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
-            private = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
-            macro = torch.tensor(obs["macro"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
-            pred = agent.predict(micro, private, macro, deterministic=True)
-            if isinstance(pred, tuple):
-                action = pred[0][0]  # PPO: (actions, log_probs, values)
+            if agent_type == "sac":
+                s3m = torch.tensor(obs["scale_3m"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+                s15m = torch.tensor(obs["scale_15m"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+                s1h = torch.tensor(obs["scale_1h"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+                priv = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+                pred = agent.predict(s3m, s15m, s1h, priv, deterministic=True)
+                action = pred[0]  # (1, 1) → scalar
             else:
-                action = pred[0]    # BDQ: actions array
+                micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+                private = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+                macro = torch.tensor(obs["macro"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+                # FIX GMO1-01: Pass direction context for fee_threshold filtering
+                ctx = {"current_direction": current_direction} if current_direction is not None else None
+                pred = agent.predict(micro, private, macro, deterministic=True, context=ctx)
+                if isinstance(pred, tuple):
+                    action = pred[0][0]  # PPO: (actions, log_probs, values)
+                else:
+                    action = pred[0]    # BDQ: actions array
 
             obs, reward, terminated, truncated, info = env.step(action)
             done = terminated or truncated
 
             portfolio_values.append(info.get("portfolio_value", 100000))
             positions.append(info.get("position", 0))
+            # FIX GMO1-01: Update direction for next step's fee_threshold context
+            dir_val = info.get("direction")
+            if dir_val is not None:
+                current_direction = np.array([float(dir_val)])
 
             if step % 50000 == 0:
                 logger.info(f"Backtest step {step}: Value={portfolio_values[-1]:.2f}")
@@ -952,7 +1112,10 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         base_count = np.sum(pos_deltas > 1e-6)
         sign_flips = np.sum((pos_arr[:-1] * pos_arr[1:]) < -1e-9)
         mdp_ver = config.get("env", {}).get("mdp_version", "v5")
-        if mdp_ver == "v6":
+        if mdp_ver == "v7":
+            # V7: continuous positions, count all position changes past deadband
+            trade_count = base_count
+        elif mdp_ver == "v6":
             trade_count = sign_flips
         else:
             trade_count = base_count + sign_flips
@@ -1042,8 +1205,8 @@ def _notify_discord(title: str, message: str, color: int = 0x00FF00):
 def main():
     parser = argparse.ArgumentParser(description="DeepScalper Pipeline (BDQ / PPO)")
     parser.add_argument("--config", type=str, default="configs/deepscalper_rtx5090.yaml")
-    parser.add_argument("--agent", type=str, default="bdq", choices=["bdq", "ppo", "iqn"],
-                        help="Agent type: bdq (default), ppo, or iqn")
+    parser.add_argument("--agent", type=str, default="bdq", choices=["bdq", "ppo", "iqn", "sac"],
+                        help="Agent type: bdq (default), ppo, iqn, or sac")
     parser.add_argument("--tags", nargs="*", default=["Pipeline"], help="WandB Tags")
     parser.add_argument("--run_name", type=str, default=None, help="Override WandB Run Name")
     parser.add_argument("--trials", type=int, default=None, help="Number of HPO trials")
@@ -1064,7 +1227,10 @@ def main():
     agent_type = args.agent
     if agent_type == "bdq":  # default value — check if config says otherwise
         agents_section = base_config.get("agents", {})
-        if "iqn" in agents_section:
+        if "sac" in agents_section:
+            agent_type = "sac"
+            logger.info(f"Agent type auto-detected from config: {agent_type}")
+        elif "iqn" in agents_section:
             agent_type = "iqn"
             logger.info(f"Agent type auto-detected from config: {agent_type}")
         elif "ppo" in agents_section and "bdq" not in agents_section:

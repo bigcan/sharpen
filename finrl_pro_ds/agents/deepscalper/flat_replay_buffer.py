@@ -38,6 +38,7 @@ class FlatReplayBuffer:
         macro_shape: Tuple[int, ...] = (15,),
         private_shape: Tuple[int, ...] = (15, 3),
         action_shape: Tuple[int, ...] = (3,),
+        action_dtype=np.int64,
     ):
         self.capacity = capacity
         self._ptr = 0
@@ -54,7 +55,7 @@ class FlatReplayBuffer:
         self._next_private = np.zeros((capacity, *private_shape), dtype=np.float32)
 
         # Scalar arrays
-        self._actions = np.zeros((capacity, *action_shape), dtype=np.int64)
+        self._actions = np.zeros((capacity, *action_shape), dtype=action_dtype)
         self._rewards = np.zeros(capacity, dtype=np.float32)
         self._dones = np.zeros(capacity, dtype=np.float32)
         self._aux_targets = np.zeros(capacity, dtype=np.float32)

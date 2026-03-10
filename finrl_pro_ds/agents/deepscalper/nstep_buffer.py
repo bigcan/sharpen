@@ -50,11 +50,12 @@ class NStepBuffer:
         dones: np.ndarray,
         aux_targets: np.ndarray,
         replay_buffer,
+        resets: np.ndarray = None,
     ):
         """Add a batch of transitions from vectorized env.
 
         For each environment, accumulates into the n-step deque.
-        When the deque is full OR when done, flushes the accumulated
+        When the deque is full OR when done/reset, flushes the accumulated
         n-step transition to the replay buffer.
 
         Args:
@@ -62,14 +63,19 @@ class NStepBuffer:
             actions: (num_envs,) or (num_envs, 1) action indices
             rewards: (num_envs,) float rewards
             next_obs: Dict with same structure as obs
-            dones: (num_envs,) float dones (1.0 = terminal)
+            dones: (num_envs,) float dones (1.0 = terminal, stored in replay)
             aux_targets: (num_envs,) float auxiliary targets
             replay_buffer: The underlying replay buffer (FlatReplayBuffer or PER)
+            resets: (num_envs,) float — 1.0 if env was reset (term OR trunc).
+                    FIX GMO1-04: Triggers n-step flush on truncation to prevent
+                    cross-episode reward mixing. If None, falls back to dones.
         """
         from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 
         num_envs = self.num_envs
         is_flat = isinstance(replay_buffer, FlatReplayBuffer)
+        # FIX GMO1-04: Use resets (term|trunc) for flush, dones (term only) for stored flag
+        flush_signals = resets if resets is not None else dones
 
         for i in range(num_envs):
             # Extract per-env transition
@@ -78,19 +84,20 @@ class NStepBuffer:
                 "action": actions[i],
                 "reward": float(rewards[i]),
                 "next_obs": {k: v[i] for k, v in next_obs.items()},
-                "done": float(dones[i]),
+                "done": float(dones[i]),  # Only true termination stored
                 "aux_target": float(aux_targets[i]),
             }
             self._buffers[i].append(transition)
 
             buf = self._buffers[i]
+            should_flush = float(flush_signals[i]) > 0.5
 
-            # Flush conditions: buffer full OR episode done
-            if len(buf) == self.n or transition["done"] > 0.5:
+            # Flush conditions: buffer full OR episode ended (term or trunc)
+            if len(buf) == self.n or should_flush:
                 self._flush_env(i, replay_buffer, is_flat)
 
-            # On done, also flush any remaining partial n-step transitions
-            if transition["done"] > 0.5:
+            # On episode end, flush any remaining partial n-step transitions
+            if should_flush:
                 while len(buf) > 0:
                     self._flush_env(i, replay_buffer, is_flat)
 

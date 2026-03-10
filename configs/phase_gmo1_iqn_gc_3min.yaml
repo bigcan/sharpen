@@ -27,7 +27,7 @@ env:
   symbol: "GC"
   initial_balance: 100000.0
   margin_requirement: 0.05
-  taker_fee: 0.000035            # 0.35 bps (CME Gold taker)
+  taker_fee: 0.0002              # 2 bps (CME Gold taker)
   maker_fee: 0.000010            # Not used in swing MDP
   num_envs: 24
   window_size: 15                # 15 x 3-min = 45 min lookback

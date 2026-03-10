@@ -89,6 +89,7 @@ class DeepScalperTrainer:
                 gamma_short=iqn_cfg.get("gamma_short", 0.95),
                 gamma_long=iqn_cfg.get("gamma_long", 0.99),
                 horizon_alpha=iqn_cfg.get("horizon_alpha", 0.5),
+                fee_threshold=iqn_cfg.get("fee_threshold", 0.0),  # FIX GMO1-05
                 action_dims=action_dims,
                 device=device,
             )
@@ -458,10 +459,13 @@ class DeepScalperTrainer:
 
                 if self._nstep_buffer is not None:
                     # N-step returns: accumulate before pushing to replay
+                    # FIX GMO1-04: Pass resets (term|trunc) so n-step flushes at
+                    # episode boundaries, preventing cross-episode reward mixing.
                     self._nstep_buffer.add(
                         obs, _actions, rewards.astype(np.float32),
                         next_obs, dones_for_buffer.astype(np.float32),
                         aux_targets_vec, self.agent.memory,
+                        resets=dones_for_reset.astype(np.float32),
                     )
                 elif isinstance(self.agent.memory, FlatReplayBuffer):
                     self.agent.memory.push_batch(
