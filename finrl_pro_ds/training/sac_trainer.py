@@ -57,6 +57,11 @@ class SACTrainer:
         net_cfg["n_scales"] = len(scales)
         self._n_scales = len(scales)
 
+        # HPO: cap buffer_size to avoid wasting memory on short trials
+        buffer_size = sac_cfg.get("buffer_size", 1_000_000)
+        if hpo_mode:
+            buffer_size = min(buffer_size, 100_000)
+
         self.agent = SACAgent(
             network_config=net_cfg,
             lr_actor=sac_cfg.get("lr_actor", 3e-4),
@@ -65,7 +70,7 @@ class SACTrainer:
             gamma=sac_cfg.get("gamma", 0.99),
             tau=sac_cfg.get("tau", 0.005),
             batch_size=sac_cfg.get("batch_size", 256),
-            buffer_size=sac_cfg.get("buffer_size", 1_000_000),
+            buffer_size=buffer_size,
             initial_alpha=sac_cfg.get("initial_alpha", 0.2),
             learning_starts=sac_cfg.get("learning_starts", 10_000),
             update_interval=sac_cfg.get("update_interval", 4),
@@ -87,7 +92,13 @@ class SACTrainer:
         # FIX R2-AUD-02: Read num_envs from actual env, not config (config["training"]
         # may differ from pipeline's actual env count read from config["env"]).
         num_envs = getattr(env, 'num_envs', 1)
-        self.update_interval = sac_cfg.get("update_interval", 4) * num_envs
+        raw_ui = sac_cfg.get("update_interval", 4)
+        if hpo_mode and raw_ui > 1:
+            # HPO trials are short (50K steps) — UTD=8 is overkill.
+            # Cap at UTD=1 (= num_envs total gradient steps per env step)
+            # to keep HPO trials under ~5 min. Full training restores config UTD.
+            raw_ui = 1
+        self.update_interval = raw_ui * num_envs
 
         # Auto-scale tau for high UTD
         if self.update_interval > 1:
@@ -124,12 +135,24 @@ class SACTrainer:
         gradient_accumulator = 0.0
         metrics = None  # FIX R2-AUD-01: Initialize before learning_starts to prevent NameError
 
+        # Limit PyTorch intra-op threads for SyncVectorEnv.
+        # Default num_threads = all CPU cores → massive context-switch overhead
+        # for small-batch ops (predict with batch=num_envs).
+        old_threads = torch.get_num_threads()
+        torch.set_num_threads(min(old_threads, 4))
+
         logger.info(
             f"SAC Training: {self.total_timesteps} steps, "
-            f"{num_envs} envs, device={self.device}"
+            f"{num_envs} envs, device={self.device}, "
+            f"torch_threads={torch.get_num_threads()}"
         )
 
         while total_steps < self.total_timesteps:
+            # Diagnostic: one-time step-0 heartbeat to confirm loop entry
+            if total_steps == 0:
+                logger.info("[DIAG] Training loop entered, step 0")
+                t_diag = time.time()
+
             # Apply fee curriculum
             self._apply_fee_schedule(total_steps)
 
@@ -151,6 +174,11 @@ class SACTrainer:
             dones = np.logical_or(terms, truncs).astype(np.float32)
             self.agent.store_batch(obs, actions_np, rewards, next_obs, dones)
 
+            # Diagnostic: first 100 steps timing
+            if total_steps == 100 * num_envs:
+                dt = time.time() - t_diag
+                logger.info(f"[DIAG] First {total_steps} steps took {dt:.1f}s ({total_steps/dt:.0f} SPS)")
+
             # Track episodes
             episode_reward += rewards
             episode_length += 1
@@ -170,8 +198,20 @@ class SACTrainer:
             if total_steps >= self.learning_starts:
                 gradient_accumulator += self.update_interval
                 while gradient_accumulator >= 1.0:
-                    metrics = self.agent.train_step()
+                    m = self.agent.train_step()
+                    if m is not None:
+                        metrics = m
                     gradient_accumulator -= 1.0
+
+            # HPO heartbeat: print progress every 10K steps so user can see it's alive
+            if self.hpo_mode and total_steps % 10000 < num_envs:
+                elapsed = time.time() - t_start
+                sps = total_steps / max(elapsed, 1e-6)
+                logger.info(
+                    f"[HPO] step {total_steps}/{self.total_timesteps} "
+                    f"({100*total_steps/self.total_timesteps:.0f}%) | "
+                    f"SPS={sps:.0f} | buf={len(self.agent.replay_buffer)}"
+                )
 
             # Logging
             if total_steps % self.log_interval < num_envs and not self.hpo_mode:
