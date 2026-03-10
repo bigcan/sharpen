@@ -81,6 +81,8 @@ class SwingScalperEnv(gym.Env):
 
         # Reward shaping
         reward_cfg = config.get("reward", {})
+        self.reward_mode = reward_cfg.get("mode", "dense")  # "dense" (K5) or "switch_centric" (GMO1)
+        self.stay_reward_weight = float(reward_cfg.get("stay_reward_weight", 0.1))
         self.crra_gamma = float(reward_cfg.get("crra_gamma", 0.0))
 
         # Episode config
@@ -284,6 +286,7 @@ class SwingScalperEnv(gym.Env):
 
         # 4. Process action (apply cooldown)
         switched = False
+        prev_entry_mid = self.entry_mid  # Save for switch-centric reward
         desired_direction = 1.0 if action == ACTION_LONG else -1.0
 
         if desired_direction != self.direction:
@@ -305,17 +308,30 @@ class SwingScalperEnv(gym.Env):
 
         self.bars_since_switch += 1
 
-        # 5. Compute reward: dense per-bar directional PnL in bps
+        # 5. Compute reward
         if self.prev_mid_price > 0:
             price_return_bps = ((self.current_mid_price - self.prev_mid_price) / self.prev_mid_price) * 10000.0
         else:
             price_return_bps = 0.0
 
-        reward = self.direction * price_return_bps
-        if switched:
-            # Subtract round-trip fee in bps
-            fee_bps = 2.0 * self.taker_fee * 10000.0  # e.g., 2 * 5 = 10 bps for BTC
-            reward -= fee_bps
+        fee_bps = 2.0 * self.taker_fee * 10000.0  # RT fee in bps
+
+        if self.reward_mode == "switch_centric":
+            # Switch-centric reward (GMO1): concentrate signal on switch decisions
+            if switched:
+                # SWITCH bar: full realized PnL of the COMPLETED trade minus RT fee
+                # direction_before is the opposite of current (we just switched)
+                direction_before = -self.direction
+                completed_pnl_bps = direction_before * ((self.current_mid_price - prev_entry_mid) / prev_entry_mid) * 10000.0
+                reward = completed_pnl_bps - fee_bps
+            else:
+                # STAY bar: heavily downweighted directional reward (maintain holding value)
+                reward = self.stay_reward_weight * self.direction * price_return_bps
+        else:
+            # Dense reward (K5 default): per-bar directional PnL
+            reward = self.direction * price_return_bps
+            if switched:
+                reward -= fee_bps
 
         # CRRA utility shaping (ported from V5 DeepScalperEnv)
         if self.crra_gamma > 0:

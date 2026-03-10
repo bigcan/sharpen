@@ -438,6 +438,29 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 crra_gamma = trial.suggest_float("crra_gamma", 0.0, 1.5)
                 config["env"]["reward"]["crra_gamma"] = crra_gamma
 
+            # GMO1 opt-in HPO expansions (config-gated, backward compatible)
+            # stay_reward_weight: only when switch_centric reward mode
+            if config["env"].get("reward", {}).get("mode") == "switch_centric":
+                stay_reward_weight = trial.suggest_float("stay_reward_weight", 0.05, 0.3)
+                config["env"]["reward"]["stay_reward_weight"] = stay_reward_weight
+
+            # n_step HPO: categorical sweep {3,5,7,10}
+            if config["agents"]["iqn"].get("n_step_hpo", False):
+                n_step = trial.suggest_categorical("n_step", [3, 5, 7, 10])
+                config["agents"]["iqn"]["n_step"] = n_step
+
+            # buffer_size HPO: log-uniform [200K, 1M]
+            if config["agents"]["iqn"].get("buffer_size_hpo", False):
+                buffer_size = trial.suggest_int("buffer_size", 200000, 1000000, log=True)
+                config["agents"]["iqn"]["buffer_size"] = buffer_size
+
+            # hidden_dim HPO: categorical {64, 128, 256}
+            if config.get("network", {}).get("hidden_dim_hpo", False):
+                hidden_dim = trial.suggest_categorical("hidden_dim", [64, 128, 256])
+                config["network"]["micro_config"]["hidden_size"] = hidden_dim
+                # Scale macro hidden sizes proportionally
+                config["network"]["macro_config"]["hidden_sizes"] = [hidden_dim, hidden_dim // 2]
+
             hpo_log = {
                 f"{trial_prefix}/learning_rate": learning_rate,
                 f"{trial_prefix}/num_quantiles": num_quantiles,
@@ -451,6 +474,14 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 hpo_log[f"{trial_prefix}/gamma_long"] = gamma_long
             else:
                 hpo_log[f"{trial_prefix}/gamma"] = gamma
+            if config["env"].get("reward", {}).get("mode") == "switch_centric":
+                hpo_log[f"{trial_prefix}/stay_reward_weight"] = stay_reward_weight
+            if config["agents"]["iqn"].get("n_step_hpo", False):
+                hpo_log[f"{trial_prefix}/n_step"] = n_step
+            if config["agents"]["iqn"].get("buffer_size_hpo", False):
+                hpo_log[f"{trial_prefix}/buffer_size"] = buffer_size
+            if config.get("network", {}).get("hidden_dim_hpo", False):
+                hpo_log[f"{trial_prefix}/hidden_dim"] = hidden_dim
             wandb.log(hpo_log)
         else:
             # BDQ hyperparams (4 dimensions) — optimizer HPs only
