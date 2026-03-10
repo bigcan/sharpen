@@ -52,6 +52,11 @@ class SACTrainer:
             scale_enc["input_size"] = features_cfg.get("features_per_scale", 7)
         net_cfg["scale_encoder"] = scale_enc
 
+        # Derive n_scales from config
+        scales = features_cfg.get("scales", config.get("env", {}).get("scales", [3, 15, 60]))
+        net_cfg["n_scales"] = len(scales)
+        self._n_scales = len(scales)
+
         self.agent = SACAgent(
             network_config=net_cfg,
             lr_actor=sac_cfg.get("lr_actor", 3e-4),
@@ -128,14 +133,15 @@ class SACTrainer:
             # Apply fee curriculum
             self._apply_fee_schedule(total_steps)
 
-            # Get actions
-            s3m = torch.tensor(obs["scale_3m"], dtype=torch.float32).to(self.device, non_blocking=True)
-            s15m = torch.tensor(obs["scale_15m"], dtype=torch.float32).to(self.device, non_blocking=True)
-            s1h = torch.tensor(obs["scale_1h"], dtype=torch.float32).to(self.device, non_blocking=True)
+            # Get actions — extract scale tensors dynamically
+            scale_tensors = [
+                torch.tensor(obs[f"scale_{i}"], dtype=torch.float32).to(self.device, non_blocking=True)
+                for i in range(self._n_scales)
+            ]
             priv = torch.tensor(obs["private"], dtype=torch.float32).to(self.device, non_blocking=True)
 
             with torch.no_grad():
-                actions = self.agent.predict(s3m, s15m, s1h, priv, deterministic=False)
+                actions = self.agent.predict(scale_tensors, priv, deterministic=False)
                 actions_np = actions.cpu().numpy()
 
             # Step environment

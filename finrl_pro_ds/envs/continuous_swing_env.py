@@ -65,28 +65,25 @@ class ContinuousSwingEnv(gym.Env):
         self.max_drawdown_pct = float(config.get("max_drawdown_pct", 0.30))
         self._stop_loss_threshold = 1.0 - self.max_drawdown_pct
 
+        # Scales from handler (must be set before obs space construction)
+        self._scales = config.get("scales", [3, 15, 60])
+
         # Spaces
         self.action_space = gym.spaces.Box(
             low=-1.0, high=1.0, shape=(1,), dtype=np.float32
         )
 
-        self.observation_space = gym.spaces.Dict({
-            "scale_3m": gym.spaces.Box(
+        # Build obs space dynamically from scales config
+        obs_spaces = {}
+        for i in range(len(self._scales)):
+            obs_spaces[f"scale_{i}"] = gym.spaces.Box(
                 low=-np.inf, high=np.inf,
                 shape=(self.window_size, features_per_scale), dtype=np.float32
-            ),
-            "scale_15m": gym.spaces.Box(
-                low=-np.inf, high=np.inf,
-                shape=(self.window_size, features_per_scale), dtype=np.float32
-            ),
-            "scale_1h": gym.spaces.Box(
-                low=-np.inf, high=np.inf,
-                shape=(self.window_size, features_per_scale), dtype=np.float32
-            ),
-            "private": gym.spaces.Box(
-                low=-1.0, high=1.0, shape=(5,), dtype=np.float32
-            ),
-        })
+            )
+        obs_spaces["private"] = gym.spaces.Box(
+            low=-1.0, high=1.0, shape=(5,), dtype=np.float32
+        )
+        self.observation_space = gym.spaces.Dict(obs_spaces)
 
         # State variables
         self.current_position = 0.0
@@ -112,8 +109,7 @@ class ContinuousSwingEnv(gym.Env):
         # Current observations
         self._current_obs = None
 
-        # Scales from handler
-        self._scales = config.get("scales", [3, 15, 60])
+        # (_scales already set above, before obs space construction)
 
     def set_fees(self, taker_fee: float):
         """Runtime fee update for curriculum learning."""
@@ -296,21 +292,13 @@ class ContinuousSwingEnv(gym.Env):
 
         return 0.0
 
-    @staticmethod
-    def _scale_key(scale: int) -> str:
-        """Map scale minutes to observation key: 60 → 'scale_1h', else 'scale_{n}m'."""
-        if scale == 60:
-            return "scale_1h"
-        return f"scale_{scale}m"
-
     def _extract_obs(self, step_data: Dict) -> Dict[str, np.ndarray]:
-        """Extract scale arrays from handler step data."""
+        """Extract scale arrays from handler step data (positional keys)."""
         obs = {}
-        for scale in self._scales:
-            src_key = f"scale_{scale}m"   # handler uses raw minutes
-            dst_key = self._scale_key(scale)  # obs space uses 1h
-            if src_key in step_data:
-                obs[dst_key] = step_data[src_key].astype(np.float32)
+        for i in range(len(self._scales)):
+            key = f"scale_{i}"
+            if key in step_data:
+                obs[key] = step_data[key].astype(np.float32)
         return obs
 
     def _get_private_state(self) -> np.ndarray:
@@ -355,24 +343,28 @@ class ContinuousSwingEnv(gym.Env):
     def _get_observation(self) -> Dict[str, np.ndarray]:
         """Build full observation dict."""
         obs = {}
+        n_scales = len(self._scales)
+        features_per_scale = int(self.config.get("features_per_scale", 7))
 
         if self._current_obs:
-            for key in ["scale_3m", "scale_15m", "scale_1h"]:
+            for i in range(n_scales):
+                key = f"scale_{i}"
                 if key in self._current_obs:
                     obs[key] = self._current_obs[key].copy()
                 else:
-                    obs[key] = np.zeros((self.window_size, 7), dtype=np.float32)
+                    obs[key] = np.zeros((self.window_size, features_per_scale), dtype=np.float32)
         else:
-            for key in ["scale_3m", "scale_15m", "scale_1h"]:
-                obs[key] = np.zeros((self.window_size, 7), dtype=np.float32)
+            for i in range(n_scales):
+                obs[f"scale_{i}"] = np.zeros((self.window_size, features_per_scale), dtype=np.float32)
 
         obs["private"] = self._get_private_state()
         return obs
 
     def _empty_obs(self) -> Dict[str, np.ndarray]:
+        features_per_scale = int(self.config.get("features_per_scale", 7))
         return {
-            self._scale_key(s): np.zeros((self.window_size, 7), dtype=np.float32)
-            for s in self._scales
+            f"scale_{i}": np.zeros((self.window_size, features_per_scale), dtype=np.float32)
+            for i in range(len(self._scales))
         }
 
     def _make_info(self, reward: float, traded: bool) -> Dict:
