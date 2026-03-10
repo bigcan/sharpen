@@ -71,8 +71,8 @@ agents:
     learning_rate: 0.0003
     gamma: 0.99
     tau: 0.005
-    batch_size: 256
-    buffer_size: 500000
+    batch_size: 512               # 5090: 32GB VRAM, better TC tile efficiency
+    buffer_size: 1000000           # 5090: 32GB VRAM, 2x replay diversity
     learning_starts: 5000
     use_per: false
     torch_compile: false
@@ -83,7 +83,7 @@ agents:
     n_step: 3                    # Base (HPO overrides when n_step_hpo: true)
     n_step_hpo: true             # GMO1: Enable n_step HPO {3,5,7,10}
     target_q_clip: 500.0
-    buffer_size_hpo: true        # GMO1: Enable buffer_size HPO [200K, 1M]
+    buffer_size_hpo: true        # GMO1: Enable buffer_size HPO [500K, 2M]
     fee_threshold: 0.0           # P3: tune post-training
 
 replay:
@@ -95,6 +95,7 @@ training:
   log_interval: 20480
   torch_compile: false
   use_amp: true
+  amp_dtype: "bfloat16"          # 5090 Blackwell: native BF16, no GradScaler overhead
   use_shm: false
   verbose_logging: true
 
