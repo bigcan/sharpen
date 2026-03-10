@@ -66,6 +66,7 @@ class SACTrainer:
             update_interval=sac_cfg.get("update_interval", 4),
             gradient_clip=sac_cfg.get("gradient_clip", 10.0),
             use_amp=config["training"].get("use_amp", False),
+            amp_dtype=config["training"].get("amp_dtype", "float16"),
             torch_compile=config["training"].get("torch_compile", False),
             checkpoint_interval=sac_cfg.get("checkpoint_interval", 500_000),
             device=device,

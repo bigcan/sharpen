@@ -207,7 +207,8 @@ class ContinuousSwingEnv(gym.Env):
             delta = 0.0
         else:
             # ATR cap: reduce max position in high-vol regimes
-            if self._atr_rolling_mean > 0:
+            # FIX R4-AUD-10: Skip during warmup — percentile unreliable with <50 samples
+            if self._atr_rolling_mean > 0 and len(self._atr_buffer) >= 50:
                 atr_pct = sorted(self._atr_buffer)
                 p90_idx = int(len(atr_pct) * self.atr_cap_percentile / 100.0)
                 p90_idx = min(p90_idx, len(atr_pct) - 1)
@@ -262,8 +263,10 @@ class ContinuousSwingEnv(gym.Env):
         self.equity += equity_delta
         self.peak_equity = max(self.peak_equity, self.equity)
 
-        # 7. Termination
-        if self.equity < self._stop_loss_threshold * self.initial_balance:
+        # 7. Termination — peak-based drawdown stop
+        # FIX R4-AUD-07: Compare against peak_equity (not initial_balance) so a 30%
+        # drawdown from the portfolio high triggers termination, regardless of absolute level.
+        if self.equity < self._stop_loss_threshold * self.peak_equity:
             terminated = True
 
         if self._episode_end > 0 and self.current_step >= self._episode_end:
