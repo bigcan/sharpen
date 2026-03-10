@@ -76,16 +76,6 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     sd = start_date or data_config.get("train_start_date")
     ed = end_date or data_config.get("train_end_date")
 
-    handler = ParquetDataHandler(
-        file_path=file_path,
-        ticker=ticker,
-        feature_config=config.get("features", {}),
-        start_date=sd,
-        end_date=ed,
-        shared_memory_config=shm_config,
-        norm_cutoff_date=norm_cutoff_date  # FIX LEAK-1
-    )
-
     env_config = config.get("env", {})
     env_config["reward"] = config.get("env", {}).get("reward", {})
     # Forward network config so env can read micro_config.input_size for fev3 compat
@@ -99,17 +89,27 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     if mdp_version == "v7":
         from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
         from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
-        data_config = config.get("data", {})
         features_cfg = config.get("features", {})
         ms_handler = MultiScaleOHLCVHandler(
-            file_path=data_config.get("file_path"),
-            ticker=data_config.get("ticker", "GC"),
+            file_path=file_path,
+            ticker=ticker,
             feature_config=features_cfg,
             start_date=sd,
             end_date=ed,
             norm_cutoff_date=norm_cutoff_date,
         )
         return ContinuousSwingEnv(config=env_config, data_handler=ms_handler)
+
+    handler = ParquetDataHandler(
+        file_path=file_path,
+        ticker=ticker,
+        feature_config=config.get("features", {}),
+        start_date=sd,
+        end_date=ed,
+        shared_memory_config=shm_config,
+        norm_cutoff_date=norm_cutoff_date  # FIX LEAK-1
+    )
+
     if mdp_version == "v6":
         return SwingScalperEnv(config=env_config, data_handler=handler)
     return DeepScalperEnv(config=env_config, data_handler=handler)

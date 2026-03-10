@@ -1,6 +1,6 @@
 # AGENTS.md — FinRL Pro Repo Agent Guide
 
-Last updated: 2026-02-11
+Last updated: 2026-03-10
 
 This document instructs AI coding agents working in this repository. It defines persona, workflow, guardrails, quality gates, technique templates, and ready‑to‑run macros tailored to the FinRL Pro scaffold built atop FinRL Podracer.
 
@@ -207,20 +207,22 @@ This project operates a dual-tier agent memory system to preserve session contex
 
 - Prefer safety: respect extension boundary, add tests, and document the change in README or specs if behavior changes.
 
-## Recent Changes
-- 001-db-snapshots: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
-- 001-db-snapshots: Added [if applicable, e.g., PostgreSQL, CoreData, files or N/A]
+## Workflows
+
+The following user-defined workflows are available via slash commands (`.agent/workflows`):
+- `/check-status`: Check the status of a running parameter deployment (WandB metrics, remote process, GPU, logs)
+- `/commit`: Save memory state and commit all changes to git with an auto-generated message
+- `/memory-boot`: Load persistent memory context at the start of a session
+- `/memory-status`: Check the health and status of the persistent memory system
+- `/sync-randd`: Sync today's session work into a durable R&D log entry (`randd_log.md`)
 
 ## Available Agent Skills
 
-The following skills are installed in `.agent/skills` to assist with specialized tasks:
+The following skills are available (in `.agent/skills/` and global skills) to extend capabilities:
 
-- **Backtest Auditor**: Performs pre-flight checks on Synapse backtest configurations to prevent common crashes and logical errors.
-- **Backtest Monitor**: Actively monitors deployed backtests to ensure they are progressing as planned (checks process health, FPS, windows).
-- **Deployment Manager**: Robustly deploys experiments to remote environments (GPUHub/RunPod), managing configuration and file sync.
-- **Experiment Scaffolder**: Automates creating new experiment versions (e.g., scaffolding V10 from V9) by generating configs and scripts.
-- **GitHub Manager**: Automates git operations for clean history, semantic commits, and documentation updates.
-- **Log Analyzer**: Analyzes experiment logs for crash causes, Tracebacks, OOMs, and performance regressions.
-- **Memory Manager**: Persistent long-term memory system — maintains `core.md` (project context), daily session logs, and snapshots across sessions. Auto-loads at session start via `/memory-boot`.
-- **Research Logger**: Standardizes logging of experimental findings to `randd_log.md` with structured metadata.
-- **Work Auditor**: Generates context-rich prompts for auditing current work to ensure logic consistency and identify risks.
+- **audit**: Run this automatically after EVERY implementation to perform a comprehensive post-implementation audit covering correctness, invariants, tests, configs, and memory hygiene.
+- **deploy** / **deployment**: Robustly deploy DeepScalper pilot/production runs to remote GPUHub instances, handling authentication, data syncing, execution monitoring, and autonomous operation via Ralph.
+- **memory**: ALWAYS read this skill at the START of every session to load persistent memory context (`/memory-boot` macro).
+- **memory-search**: Search across all memory tiers using grep-based tag and keyword queries.
+- **optimization**: Find optimal GPU training settings for RTX GPUs based on NVIDIA guidelines. Run before deploying new configs.
+- **reporting**: Generates standardized performance reports for DeepScalper runs by fetching data from WandB.
