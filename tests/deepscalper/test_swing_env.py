@@ -472,5 +472,144 @@ class TestSwingEnvCRRA(unittest.TestCase):
         self.assertLess(reward_neg, 0.0, "Negative PnL should give negative CRRA reward")
 
 
+class TestSwingEnvSwitchCentricReward(unittest.TestCase):
+    """Tests for switch-centric reward mode (GMO1)."""
+
+    def setUp(self):
+        self.base_config = {
+            "symbol": "BTCUSDT",
+            "window_size": 5,
+            "initial_balance": 100000.0,
+            "taker_fee": 0.0005,  # 5 bps → 10 bps RT
+            "action": {"cooldown_bars": 0, "max_position": 1.0, "fixed_trade_qty": 0.2},
+            "episode_length": 100,
+            "network": {"micro_config": {"input_size": NUM_MICRO_FEATURES}},
+        }
+        self.mock_handler = MagicMock(spec=ParquetDataHandler)
+        self.mock_handler._len = 1000
+        self.mock_handler._col_to_idx = None
+
+    def _make_env(self, reward_mode="switch_centric", stay_weight=0.1):
+        config = {**self.base_config, "reward": {
+            "mode": reward_mode,
+            "stay_reward_weight": stay_weight,
+        }}
+        self.mock_handler.step.return_value = _mock_row(bid=100.0, ask=101.0)
+        env = SwingScalperEnv(config, self.mock_handler)
+        env.reset(seed=42)
+        return env
+
+    def test_stay_reward_downweighted(self):
+        """On a stay bar, reward = stay_weight * direction * bar_return."""
+        env = self._make_env(stay_weight=0.1)
+        env.direction = 1.0
+        env.bars_since_switch = 10
+        env.entry_mid = 99.0  # Entered at 99
+
+        # Set current_mid_price so that step() captures prev correctly
+        env.current_mid_price = 100.0
+
+        # Price goes up: mid = (100.5+101.5)/2 = 101.0
+        self.mock_handler.step.return_value = _mock_row(bid=100.5, ask=101.5)
+        _, reward, _, _, info = env.step(ACTION_LONG)
+
+        self.assertFalse(info["switched"])
+        # prev_mid_price = 100.0, new mid = 101.0
+        # Expected: 0.1 * 1.0 * ((101.0 - 100.0)/100.0 * 10000) = 0.1 * 100 = 10.0
+        expected = 0.1 * 1.0 * ((101.0 - 100.0) / 100.0) * 10000.0
+        self.assertAlmostEqual(reward, expected, places=1,
+                               msg=f"Stay reward should be downweighted, got {reward}")
+
+    def test_switch_reward_uses_completed_trade_pnl(self):
+        """On a switch bar, reward = completed_trade_pnl - RT_fee."""
+        env = self._make_env(stay_weight=0.1)
+        env.direction = 1.0  # Currently Long
+        env.bars_since_switch = 10
+        env.entry_mid = 100.0  # Entered long at 100.0
+        env.current_mid_price = 100.1
+
+        # Price at switch: mid = (100.1+100.3)/2 = 100.2
+        self.mock_handler.step.return_value = _mock_row(bid=100.1, ask=100.3)
+        _, reward, _, _, info = env.step(ACTION_SHORT)  # Switch to short
+
+        self.assertTrue(info["switched"])
+        # completed_pnl = +1 * (100.2 - 100.0)/100.0 * 10000 = 20 bps
+        # fee = 2 * 5 = 10 bps
+        # expected = 20 - 10 = 10 bps
+        completed_pnl_bps = 1.0 * ((100.2 - 100.0) / 100.0) * 10000.0
+        fee_bps = 2.0 * 0.0005 * 10000.0
+        expected = completed_pnl_bps - fee_bps
+        self.assertAlmostEqual(reward, expected, places=0,
+                               msg=f"Switch reward should be completed_pnl - fee, got {reward}")
+
+    def test_backward_compat_dense_mode(self):
+        """mode='dense' produces identical rewards to no mode specified."""
+        # Dense mode env
+        env_dense = self._make_env(reward_mode="dense")
+        env_dense.direction = 1.0
+        env_dense.bars_since_switch = 10
+        env_dense.prev_mid_price = 100.0
+        env_dense.entry_mid = 99.0
+
+        self.mock_handler.step.return_value = _mock_row(bid=101.0, ask=102.0)
+        _, reward_dense, _, _, _ = env_dense.step(ACTION_LONG)
+
+        # Default env (no mode in config)
+        config_default = {**self.base_config}
+        self.mock_handler.step.return_value = _mock_row(bid=100.0, ask=101.0)
+        env_default = SwingScalperEnv(config_default, self.mock_handler)
+        env_default.reset(seed=42)
+        env_default.direction = 1.0
+        env_default.bars_since_switch = 10
+        env_default.prev_mid_price = 100.0
+        env_default.entry_mid = 99.0
+
+        self.mock_handler.step.return_value = _mock_row(bid=101.0, ask=102.0)
+        _, reward_default, _, _, _ = env_default.step(ACTION_LONG)
+
+        self.assertAlmostEqual(reward_dense, reward_default, places=6,
+                               msg="Dense mode should produce identical rewards to default (no mode)")
+
+    def test_default_mode_is_dense(self):
+        """When 'mode' not specified, reward_mode defaults to 'dense'."""
+        config = {**self.base_config}
+        env = SwingScalperEnv(config, self.mock_handler)
+        self.assertEqual(env.reward_mode, "dense")
+
+    def test_switch_centric_with_crra(self):
+        """CRRA shaping applies on top of switch-centric reward."""
+        config = {**self.base_config, "reward": {
+            "mode": "switch_centric",
+            "stay_reward_weight": 0.1,
+            "crra_gamma": 0.5,
+        }}
+        self.mock_handler.step.return_value = _mock_row(bid=100.0, ask=101.0)
+        env = SwingScalperEnv(config, self.mock_handler)
+        env.reset(seed=42)
+        env.direction = 1.0
+        env.bars_since_switch = 10
+        env.prev_mid_price = 95.0
+        env.entry_mid = 90.0
+
+        # Large price move to get sizeable reward for CRRA to compress
+        self.mock_handler.step.return_value = _mock_row(bid=101.0, ask=102.0)
+        _, reward_crra, _, _, _ = env.step(ACTION_LONG)
+
+        # Without CRRA for comparison
+        env2 = self._make_env(stay_weight=0.1)
+        env2.direction = 1.0
+        env2.bars_since_switch = 10
+        env2.prev_mid_price = 95.0
+        env2.entry_mid = 90.0
+
+        self.mock_handler.step.return_value = _mock_row(bid=101.0, ask=102.0)
+        _, reward_no_crra, _, _, _ = env2.step(ACTION_LONG)
+
+        # CRRA should compress the reward
+        self.assertGreater(abs(reward_no_crra), 1.0, "Base reward should be > 1 bps")
+        self.assertLess(abs(reward_crra), abs(reward_no_crra),
+                        "CRRA should compress switch-centric reward")
+
+
 if __name__ == '__main__':
     unittest.main()

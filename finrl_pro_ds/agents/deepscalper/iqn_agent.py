@@ -61,12 +61,14 @@ class IQNAgent:
         gamma_short: float = 0.95,
         gamma_long: float = 0.99,
         horizon_alpha: float = 0.5,
+        fee_threshold: float = 0.0,
         action_dims=3,
         device: str = "cpu",
         # Absorb BDQ-specific kwargs for config compatibility
         **kwargs,
     ):
         self.device = torch.device(device)
+        self.fee_threshold = fee_threshold
         self.gamma = gamma
         self.n_step = n_step
         # Effective gamma for Bellman target: gamma^n for n-step returns
@@ -206,6 +208,7 @@ class IQNAgent:
         macro: torch.Tensor,
         deterministic: bool = False,
         qty_mask=None,
+        context: Optional[Dict] = None,
     ) -> np.ndarray:
         """Select action by averaging over quantile Q-values.
 
@@ -214,6 +217,11 @@ class IQNAgent:
 
         NoisyNets provide exploration (no epsilon needed).
         In eval/deterministic mode, noise is suppressed by NoisyLinear.eval().
+
+        Args:
+            context: Optional dict with 'current_direction' (np.ndarray of shape (B,))
+                for fee_threshold filtering. When fee_threshold > 0, switches are
+                suppressed unless Q(switch) - Q(stay) > fee_threshold.
         """
         micro = micro.to(self.device, non_blocking=True)
         private_in = private_in.to(self.device, non_blocking=True)
@@ -251,6 +259,26 @@ class IQNAgent:
                 q_mean = q_mean.masked_fill(qty_mask_t == 0, float("-inf"))
 
             actions = q_mean.argmax(dim=-1)  # (B,)
+
+            # Fee-threshold switching filter (inference-time only, P3)
+            # Suppresses switches unless advantage > fee_threshold
+            if self.fee_threshold > 0 and context is not None and self.n_actions == 2:
+                current_dir = context.get("current_direction")
+                if current_dir is not None:
+                    current_dir = np.asarray(current_dir)
+                    # Map direction (+1/-1) to action index (0=Long, 1=Short)
+                    stay_idx = np.where(current_dir > 0, 0, 1).astype(np.int64)
+                    switch_idx = 1 - stay_idx
+                    q_np = q_mean.cpu().numpy()
+                    acts_np = actions.cpu().numpy()
+                    for i in range(batch_size):
+                        if acts_np[i] == switch_idx[i]:
+                            advantage = q_np[i, switch_idx[i]] - q_np[i, stay_idx[i]]
+                            if advantage < self.fee_threshold:
+                                acts_np[i] = stay_idx[i]  # Stay
+                    if deterministic:
+                        self.policy_net.train()
+                    return acts_np
 
         if deterministic:
             self.policy_net.train()
