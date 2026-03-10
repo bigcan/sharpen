@@ -61,7 +61,9 @@ class SACAgent:
         self._use_bf16 = (self.amp_dtype == torch.bfloat16)
         self.checkpoint_interval = checkpoint_interval
         self.step_count = 0
-        self._use_pinned = (self.device.type == "cuda")
+        # pin_memory disabled: cudaHostAlloc overhead dominates for small batch
+        # sizes typical in HPO/training. Sync .to(device) is faster in practice.
+        self._use_pinned = False
 
         # Extract network config
         scale_cfg = network_config.get("scale_encoder", {
@@ -129,20 +131,36 @@ class SACAgent:
             enabled=use_amp and not self._use_bf16 and self.device.type == 'cuda',
         )
 
-        # Optional torch.compile
-        # FIX R4-AUD-04: Also compile target critics for consistent JIT perf
-        # during target value computation. Polyak lerp_ operates on raw .data,
-        # unaffected by compile wrappers.
+        # torch.compile: compile individual TCN encoders instead of full model.
+        # Full-model compile hangs on List[Tensor] multi-scale input (Session 127).
+        # Per-encoder compile works because each encoder takes a single (B,T,F) tensor.
         if torch_compile and hasattr(torch, 'compile'):
             try:
-                self.actor = torch.compile(self.actor, mode='default')
-                self.critic1 = torch.compile(self.critic1, mode='default')
-                self.critic2 = torch.compile(self.critic2, mode='default')
-                self.target_critic1 = torch.compile(self.target_critic1, mode='default')
-                self.target_critic2 = torch.compile(self.target_critic2, mode='default')
+                self._compile_encoders(self.actor.encoder)
+                self._compile_encoders(self.critic1.encoder)
+                self._compile_encoders(self.critic2.encoder)
+                self._compile_encoders(self.target_critic1.encoder)
+                self._compile_encoders(self.target_critic2.encoder)
+                import logging
+                logging.getLogger(__name__).info(
+                    "[torch.compile] Compiled individual TCN encoders (5 networks × N scales)"
+                )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"torch.compile failed: {e}")
+                logging.getLogger(__name__).warning(f"torch.compile (per-encoder) failed: {e}")
+
+    @staticmethod
+    def _compile_encoders(multi_scale_encoder):
+        """Compile individual TCN encoders within a MultiScaleEncoder.
+
+        Each DilatedCNNEncoder takes a single (B,T,F) tensor, which
+        torch.compile handles correctly. The parent MultiScaleEncoder
+        takes List[Tensor], which causes dynamo to hang.
+        """
+        for i, enc in enumerate(multi_scale_encoder.encoders):
+            multi_scale_encoder.encoders[i] = torch.compile(enc, mode='default')
+        # Also compile the fusion MLP
+        multi_scale_encoder.fusion = torch.compile(multi_scale_encoder.fusion, mode='default')
 
     @property
     def alpha(self) -> float:
@@ -208,11 +226,15 @@ class SACAgent:
         if len(self.replay_buffer) < self.learning_starts:
             return None
 
+        if not hasattr(self, '_train_step_count'):
+            self._train_step_count = 0
+        self._train_step_count += 1
+
         # Sample batch
         states, actions_np, rewards_np, next_states, dones_np, _ = \
             self.replay_buffer.sample(self.batch_size)
 
-        # Convert to tensors — dynamic scale unpacking with pinned memory H2D
+        # Convert to tensors — dynamic scale unpacking with H2D
         scale_tensors, next_scale_tensors = self._unpack_buffer_to_scales(states, next_states)
         priv = self._to_device_pinned(states["private"])
 
@@ -293,15 +315,20 @@ class SACAgent:
             for tp, p in zip(self.target_critic2.parameters(), self.critic2.parameters()):
                 tp.data.lerp_(p.data, self.tau)
 
-        return {
-            "critic_loss": critic_loss.item(),
-            "actor_loss": actor_loss.item(),
-            "alpha": alpha.item(),
-            "alpha_loss": alpha_loss.item(),
-            "entropy": -log_prob.mean().item(),
-            "q1_mean": q1.mean().item(),
-            "q2_mean": q2.mean().item(),
-        }
+        # Only extract metrics every N steps to avoid .item() CUDA sync overhead.
+        # Each .item() forces GPU pipeline flush — with 12 calls per iteration
+        # that's 84 sync points (7 metrics × 12 UTD), killing throughput.
+        if self._train_step_count % 50 == 0:
+            return {
+                "critic_loss": critic_loss.item(),
+                "actor_loss": actor_loss.item(),
+                "alpha": alpha.item(),
+                "alpha_loss": alpha_loss.item(),
+                "entropy": -log_prob.mean().item(),
+                "q1_mean": q1.mean().item(),
+                "q2_mean": q2.mean().item(),
+            }
+        return None
 
     def _to_device_pinned(self, arr: np.ndarray, dtype=torch.float32) -> torch.Tensor:
         """Transfer numpy array to GPU via pinned memory for true async DMA.
@@ -313,7 +340,7 @@ class SACAgent:
         t = torch.as_tensor(arr, dtype=dtype)
         if self._use_pinned:
             return t.pin_memory().to(self.device, non_blocking=True)
-        return t.to(self.device)
+        return t.to(self.device, non_blocking=True)
 
     def _obs_to_buffer(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Convert multi-scale obs dict to replay buffer format."""

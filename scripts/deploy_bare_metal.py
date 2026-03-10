@@ -322,7 +322,7 @@ def deploy(args):
     # ------------------------------------------------------------------
     resolved_run_id = None
     if pid and pid.isdigit():
-        print(f"\n🔍 Resolving WandB Run ID (waiting for remote init)...")
+        print(f"\nResolving WandB Run ID (waiting for remote init)...")
         time.sleep(10) # Give WandB a moment to init
 
         # We need a new SSH connection since we closed the main one
@@ -344,13 +344,13 @@ def deploy(args):
                     parts = target.split("-")
                     if len(parts) >= 3:
                         resolved_run_id = parts[-1].replace(".wandb", "")
-                        print(f"✅ Resolved Run ID: {resolved_run_id}")
+                        print(f"Resolved Run ID: {resolved_run_id}")
                         ssh_reg.exec_command(f"echo {resolved_run_id} > {remote_workspace}/run_id.txt")
                         break
                 time.sleep(10)
 
             if not resolved_run_id:
-                print("⚠️  Could not resolve Run ID from remote (WandB init too slow?)")
+                print("WARNING: Could not resolve Run ID from remote (WandB init too slow?)")
 
             # Log to Registry (results/deploys.db)
             import sqlite3
@@ -389,12 +389,12 @@ def deploy(args):
             ))
             conn.commit()
             conn.close()
-            print(f"📋 Logged deployment to {db_path}")
+            print(f"Logged deployment to {db_path}")
 
             ssh_reg.close()
 
         except Exception as e:
-            print(f"⚠️  Registry logging failed: {e}")
+            print(f"WARNING: Registry logging failed: {e}")
 
     # ------------------------------------------------------------------
     # Post-deploy: Poll & Collect
@@ -422,10 +422,10 @@ def deploy(args):
                 print(f"\nRun completed: {result['run_id']} (state: {result['state']})")
                 collect_run(result["run_id"])
             else:
-                print(f"\n⚠️  Polling ended without a completed run: {result}")
+                print(f"\nWARNING: Polling ended without a completed run: {result}")
                 print("  Use 'python scripts/collect_run.py --run_id <ID>' manually later.")
         except KeyboardInterrupt:
-            print("\n\n⏹️  Collection cancelled. Run continues on remote.")
+            print("\n\nCollection cancelled. Run continues on remote.")
             print("  Use 'python scripts/collect_run.py --run_id <ID>' manually later.")
 
 if __name__ == "__main__":
