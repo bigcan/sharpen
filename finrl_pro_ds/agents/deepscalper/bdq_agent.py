@@ -365,7 +365,8 @@ class DeepScalperBDQ:
 
                 # Sprint 3: Target Q Clipping to prevent bootstrap divergence
                 if self.target_q_clip > 0:
-                    if target_q_price is not None: target_q_price = target_q_price.clamp(-self.target_q_clip, self.target_q_clip)
+                    if target_q_price is not None:
+                        target_q_price = target_q_price.clamp(-self.target_q_clip, self.target_q_clip)
                     target_q_qty = target_q_qty.clamp(-self.target_q_clip, self.target_q_clip)
 
             # Loss Calculation

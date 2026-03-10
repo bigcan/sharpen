@@ -42,6 +42,7 @@ class SACAgent:
         update_interval: int = 4,
         gradient_clip: float = 10.0,
         use_amp: bool = False,
+        amp_dtype: str = "float16",
         torch_compile: bool = False,
         checkpoint_interval: int = 500_000,
         device: str = "cpu",
@@ -56,6 +57,8 @@ class SACAgent:
         self.update_interval = update_interval
         self.gradient_clip = gradient_clip
         self.use_amp = use_amp
+        self.amp_dtype = torch.bfloat16 if amp_dtype == "bfloat16" else torch.float16
+        self._use_bf16 = (self.amp_dtype == torch.bfloat16)
         self.checkpoint_interval = checkpoint_interval
         self.step_count = 0
 
@@ -118,15 +121,23 @@ class SACAgent:
             action_dtype=np.float32,
         )
 
-        # AMP scaler
-        self.scaler = torch.amp.GradScaler('cuda', enabled=use_amp and self.device.type == 'cuda')
+        # AMP scaler — disabled for BF16 (same dynamic range as FP32, no scaling needed)
+        self.scaler = torch.amp.GradScaler(
+            'cuda',
+            enabled=use_amp and not self._use_bf16 and self.device.type == 'cuda',
+        )
 
         # Optional torch.compile
+        # FIX R4-AUD-04: Also compile target critics for consistent JIT perf
+        # during target value computation. Polyak lerp_ operates on raw .data,
+        # unaffected by compile wrappers.
         if torch_compile and hasattr(torch, 'compile'):
             try:
                 self.actor = torch.compile(self.actor, mode='default')
                 self.critic1 = torch.compile(self.critic1, mode='default')
                 self.critic2 = torch.compile(self.critic2, mode='default')
+                self.target_critic1 = torch.compile(self.target_critic1, mode='default')
+                self.target_critic2 = torch.compile(self.target_critic2, mode='default')
             except Exception as e:
                 import logging
                 logging.getLogger(__name__).warning(f"torch.compile failed: {e}")
@@ -240,7 +251,10 @@ class SACAgent:
         npriv = torch.tensor(next_states["private"], dtype=torch.float32).to(self.device, non_blocking=True)
 
         alpha = self.log_alpha.exp().detach()
-        amp_ctx = torch.amp.autocast('cuda', enabled=self.use_amp and self.device.type == 'cuda')
+        amp_ctx = torch.amp.autocast(
+            'cuda', dtype=self.amp_dtype,
+            enabled=self.use_amp and self.device.type == 'cuda',
+        )
 
         # --- Critic update ---
         with torch.no_grad():
@@ -257,13 +271,19 @@ class SACAgent:
             critic_loss = nn.functional.mse_loss(q1, target_value) + nn.functional.mse_loss(q2, target_value)
 
         self.critic_optimizer.zero_grad()
-        self.scaler.scale(critic_loss).backward()
-        self.scaler.unscale_(self.critic_optimizer)
+        if self.scaler.is_enabled():
+            self.scaler.scale(critic_loss).backward()
+            self.scaler.unscale_(self.critic_optimizer)
+        else:
+            critic_loss.backward()
         nn.utils.clip_grad_norm_(
             list(self.critic1.parameters()) + list(self.critic2.parameters()),
             self.gradient_clip,
         )
-        self.scaler.step(self.critic_optimizer)
+        if self.scaler.is_enabled():
+            self.scaler.step(self.critic_optimizer)
+        else:
+            self.critic_optimizer.step()
 
         # --- Actor update ---
         with amp_ctx:
@@ -274,10 +294,16 @@ class SACAgent:
             actor_loss = (alpha * log_prob - q_new).mean()
 
         self.actor_optimizer.zero_grad()
-        self.scaler.scale(actor_loss).backward()
-        self.scaler.unscale_(self.actor_optimizer)
+        if self.scaler.is_enabled():
+            self.scaler.scale(actor_loss).backward()
+            self.scaler.unscale_(self.actor_optimizer)
+        else:
+            actor_loss.backward()
         nn.utils.clip_grad_norm_(self.actor.parameters(), self.gradient_clip)
-        self.scaler.step(self.actor_optimizer)
+        if self.scaler.is_enabled():
+            self.scaler.step(self.actor_optimizer)
+        else:
+            self.actor_optimizer.step()
 
         # --- Alpha update (float32 — no AMP) ---
         alpha_loss = -(self.log_alpha * (log_prob.float() + self.target_entropy).detach()).mean()
@@ -285,15 +311,15 @@ class SACAgent:
         alpha_loss.backward()
         self.alpha_optimizer.step()
 
-        # Single scaler update for both critic + actor steps
+        # Scaler update (no-op if disabled for BF16)
         self.scaler.update()
 
-        # --- Target Polyak update ---
+        # --- Target Polyak update (fused lerp_) ---
         with torch.no_grad():
             for tp, p in zip(self.target_critic1.parameters(), self.critic1.parameters()):
-                tp.data.mul_(1 - self.tau).add_(p.data, alpha=self.tau)
+                tp.data.lerp_(p.data, self.tau)
             for tp, p in zip(self.target_critic2.parameters(), self.critic2.parameters()):
-                tp.data.mul_(1 - self.tau).add_(p.data, alpha=self.tau)
+                tp.data.lerp_(p.data, self.tau)
 
         return {
             "critic_loss": critic_loss.item(),

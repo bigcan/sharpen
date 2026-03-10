@@ -15,6 +15,7 @@ Multi-Horizon Mode (Session 67):
 
 Interface is identical to DeepScalperBDQ for trainer/pipeline compatibility.
 """
+import logging
 import os
 import numpy as np
 import torch
@@ -25,6 +26,8 @@ from typing import Dict, Optional
 from finrl_pro_ds.agents.deepscalper.iqn_network import IQNNetwork
 from finrl_pro_ds.agents.deepscalper.per_buffer import PrioritizedReplayBuffer
 from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
+
+logger = logging.getLogger(__name__)
 
 
 class IQNAgent:

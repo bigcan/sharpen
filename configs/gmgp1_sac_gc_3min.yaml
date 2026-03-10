@@ -1,5 +1,6 @@
 # GMGP1: SAC + Multi-Scale OHLCV + Continuous Action — Gold 3-min
 # Redesign from rl_grandmaster: continuous position control, DSR reward, fee curriculum
+# GPU: RTX 4090 (24GB, Ada Lovelace) — BF16, batch 512, buffer 500K, num_envs 20
 
 data:
   file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
@@ -57,8 +58,8 @@ agents:
     lr_alpha: 0.0003
     gamma: 0.99
     tau: 0.005
-    batch_size: 256
-    buffer_size: 1000000
+    batch_size: 512               # 4090: better TC tile efficiency (256x128 tiles)
+    buffer_size: 500000           # 4090: 24GB VRAM constraint (vs 1M on 32GB 5090)
     initial_alpha: 0.2
     learning_starts: 10000
     update_interval: 4
@@ -68,10 +69,11 @@ agents:
 training:
   total_timesteps: 5000000
   log_interval: 1000
-  use_amp: false
+  use_amp: true                   # Enable mixed precision
+  amp_dtype: "bfloat16"           # 4090 Ada: native BF16, no GradScaler overhead
   torch_compile: true
-  num_envs: 24
+  num_envs: 20                    # 4090: IPC limit (vs 24 on 5090)
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["Gold", "SAC", "3min", "MultiScale", "OHLCV", "DSR", "FeeCurriculum", "gmgp1"]
+  tags: ["Gold", "SAC", "3min", "MultiScale", "OHLCV", "DSR", "FeeCurriculum", "gmgp1", "4090"]
