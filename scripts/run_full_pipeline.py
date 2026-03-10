@@ -228,13 +228,18 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
 
         while not done and step < max_steps:
             # Dispatch obs keys based on agent type
-            if "scale_3m" in obs:
-                # SAC / V7 multi-scale obs
-                s3m = torch.tensor(obs["scale_3m"], dtype=torch.float32).to(agent.device, non_blocking=True)
-                s15m = torch.tensor(obs["scale_15m"], dtype=torch.float32).to(agent.device, non_blocking=True)
-                s1h = torch.tensor(obs["scale_1h"], dtype=torch.float32).to(agent.device, non_blocking=True)
+            if "scale_0" in obs:
+                # SAC / V7 multi-scale obs (positional keys: scale_0, scale_1, ...)
+                scale_tensors = []
+                for si in range(100):  # find all scale_N keys
+                    sk = f"scale_{si}"
+                    if sk not in obs:
+                        break
+                    scale_tensors.append(
+                        torch.tensor(obs[sk], dtype=torch.float32).to(agent.device, non_blocking=True)
+                    )
                 priv = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device, non_blocking=True)
-                pred = agent.predict(s3m, s15m, s1h, priv, deterministic=True)
+                pred = agent.predict(scale_tensors, priv, deterministic=True)
             else:
                 micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device, non_blocking=True)
                 private = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device, non_blocking=True)
@@ -1047,11 +1052,16 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
 
         while not done and step < 200000:
             if agent_type == "sac":
-                s3m = torch.tensor(obs["scale_3m"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
-                s15m = torch.tensor(obs["scale_15m"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
-                s1h = torch.tensor(obs["scale_1h"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+                scale_tensors = []
+                for si in range(100):
+                    sk = f"scale_{si}"
+                    if sk not in obs:
+                        break
+                    scale_tensors.append(
+                        torch.tensor(obs[sk], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
+                    )
                 priv = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
-                pred = agent.predict(s3m, s15m, s1h, priv, deterministic=True)
+                pred = agent.predict(scale_tensors, priv, deterministic=True)
                 action = pred[0]  # (1, 1) → scalar
             else:
                 micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)

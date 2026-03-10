@@ -78,11 +78,12 @@ class SACAgent:
         features_per_scale = scale_cfg.get("input_size", 7)
         self._window_size = window_size
         self._features_per_scale = features_per_scale
+        self._n_scales = network_config.get("n_scales", 3)
 
         # Build networks
-        self.actor = SACActorNetwork(scale_cfg, private_dim, fusion_dim).to(self.device)
-        self.critic1 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim).to(self.device)
-        self.critic2 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim).to(self.device)
+        self.actor = SACActorNetwork(scale_cfg, private_dim, fusion_dim, self._n_scales).to(self.device)
+        self.critic1 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, n_scales=self._n_scales).to(self.device)
+        self.critic2 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, n_scales=self._n_scales).to(self.device)
 
         # Target critics (Polyak-averaged)
         self.target_critic1 = copy.deepcopy(self.critic1).to(self.device)
@@ -109,9 +110,9 @@ class SACAgent:
         self.alpha_optimizer = optim.Adam([self.log_alpha], lr=lr_alpha)
 
         # Replay buffer
-        # Store scale_3m as "micro" (30,7), concat of scale_15m+scale_1h as "macro" (420,),
-        # private as "private" (5,)
-        macro_flat_dim = window_size * features_per_scale * 2  # 15m + 1h flattened
+        # Store scale_0 as "micro" (W,F), concat of remaining scales as "macro" (flat),
+        # private as "private" (private_dim,)
+        macro_flat_dim = window_size * features_per_scale * (self._n_scales - 1)
         self.replay_buffer = FlatReplayBuffer(
             capacity=buffer_size,
             micro_shape=(window_size, features_per_scale),
@@ -148,9 +149,7 @@ class SACAgent:
 
     def predict(
         self,
-        scale_3m: torch.Tensor,
-        scale_15m: torch.Tensor,
-        scale_1h: torch.Tensor,
+        scale_tensors: list,
         private: torch.Tensor,
         deterministic: bool = False,
         **kwargs,
@@ -158,10 +157,8 @@ class SACAgent:
         """Predict action given multi-scale observations.
 
         Args:
-            scale_3m: (B, 30, 7)
-            scale_15m: (B, 30, 7)
-            scale_1h: (B, 30, 7)
-            private: (B, 5)
+            scale_tensors: list of N tensors, each (B, W, F)
+            private: (B, private_dim)
             deterministic: Use mean action (no sampling)
 
         Returns:
@@ -169,7 +166,7 @@ class SACAgent:
         """
         with torch.no_grad():
             action, _ = self.actor.sample(
-                scale_3m, scale_15m, scale_1h, private,
+                scale_tensors, private,
                 deterministic=deterministic,
             )
         return action
@@ -214,40 +211,14 @@ class SACAgent:
         states, actions_np, rewards_np, next_states, dones_np, _ = \
             self.replay_buffer.sample(self.batch_size)
 
-        # Convert to tensors
-        s3m = torch.tensor(states["micro"], dtype=torch.float32).to(self.device, non_blocking=True)
-        s15m_1h = states["macro"]
-        # Split macro back into scale_15m and scale_1h
-        half = self._window_size * self._features_per_scale
-        s15m_flat = s15m_1h[:, :half]
-        s1h_flat = s15m_1h[:, half:]
-        s15m = torch.tensor(
-            s15m_flat.reshape(-1, self._window_size, self._features_per_scale),
-            dtype=torch.float32
-        ).to(self.device, non_blocking=True)
-        s1h = torch.tensor(
-            s1h_flat.reshape(-1, self._window_size, self._features_per_scale),
-            dtype=torch.float32
-        ).to(self.device, non_blocking=True)
+        # Convert to tensors — dynamic scale unpacking
+        scale_tensors, next_scale_tensors = self._unpack_buffer_to_scales(states, next_states)
         priv = torch.tensor(states["private"], dtype=torch.float32).to(self.device, non_blocking=True)
 
         actions = torch.tensor(actions_np, dtype=torch.float32).to(self.device, non_blocking=True)
         rewards = torch.tensor(rewards_np, dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
         dones = torch.tensor(dones_np, dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
 
-        # Next states
-        ns3m = torch.tensor(next_states["micro"], dtype=torch.float32).to(self.device, non_blocking=True)
-        ns15m_1h = next_states["macro"]
-        ns15m_flat = ns15m_1h[:, :half]
-        ns1h_flat = ns15m_1h[:, half:]
-        ns15m = torch.tensor(
-            ns15m_flat.reshape(-1, self._window_size, self._features_per_scale),
-            dtype=torch.float32
-        ).to(self.device, non_blocking=True)
-        ns1h = torch.tensor(
-            ns1h_flat.reshape(-1, self._window_size, self._features_per_scale),
-            dtype=torch.float32
-        ).to(self.device, non_blocking=True)
         npriv = torch.tensor(next_states["private"], dtype=torch.float32).to(self.device, non_blocking=True)
 
         alpha = self.log_alpha.exp().detach()
@@ -259,15 +230,15 @@ class SACAgent:
         # --- Critic update ---
         with torch.no_grad():
             with amp_ctx:
-                next_action, next_log_prob = self.actor.sample(ns3m, ns15m, ns1h, npriv)
-                target_q1 = self.target_critic1(ns3m, ns15m, ns1h, npriv, next_action)
-                target_q2 = self.target_critic2(ns3m, ns15m, ns1h, npriv, next_action)
+                next_action, next_log_prob = self.actor.sample(next_scale_tensors, npriv)
+                target_q1 = self.target_critic1(next_scale_tensors, npriv, next_action)
+                target_q2 = self.target_critic2(next_scale_tensors, npriv, next_action)
                 target_q = torch.min(target_q1, target_q2) - alpha * next_log_prob
                 target_value = rewards + (1.0 - dones) * self.gamma * target_q
 
         with amp_ctx:
-            q1 = self.critic1(s3m, s15m, s1h, priv, actions)
-            q2 = self.critic2(s3m, s15m, s1h, priv, actions)
+            q1 = self.critic1(scale_tensors, priv, actions)
+            q2 = self.critic2(scale_tensors, priv, actions)
             critic_loss = nn.functional.mse_loss(q1, target_value) + nn.functional.mse_loss(q2, target_value)
 
         self.critic_optimizer.zero_grad()
@@ -287,9 +258,9 @@ class SACAgent:
 
         # --- Actor update ---
         with amp_ctx:
-            new_action, log_prob = self.actor.sample(s3m, s15m, s1h, priv)
-            q1_new = self.critic1(s3m, s15m, s1h, priv, new_action)
-            q2_new = self.critic2(s3m, s15m, s1h, priv, new_action)
+            new_action, log_prob = self.actor.sample(scale_tensors, priv)
+            q1_new = self.critic1(scale_tensors, priv, new_action)
+            q2_new = self.critic2(scale_tensors, priv, new_action)
             q_new = torch.min(q1_new, q2_new)
             actor_loss = (alpha * log_prob - q_new).mean()
 
@@ -333,26 +304,55 @@ class SACAgent:
 
     def _obs_to_buffer(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Convert multi-scale obs dict to replay buffer format."""
+        macro_parts = [obs[f"scale_{i}"].flatten() for i in range(1, self._n_scales)]
         return {
-            "micro": obs["scale_3m"],
-            "macro": np.concatenate([
-                obs["scale_15m"].flatten(),
-                obs["scale_1h"].flatten(),
-            ]),
+            "micro": obs["scale_0"],
+            "macro": np.concatenate(macro_parts) if macro_parts else np.array([], dtype=np.float32),
             "private": obs["private"],
         }
 
     def _obs_batch_to_buffer(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Convert batch multi-scale obs dict to replay buffer format."""
-        n = obs["scale_3m"].shape[0]
+        n = obs["scale_0"].shape[0]
+        macro_parts = [obs[f"scale_{i}"].reshape(n, -1) for i in range(1, self._n_scales)]
         return {
-            "micro": obs["scale_3m"],
-            "macro": np.concatenate([
-                obs["scale_15m"].reshape(n, -1),
-                obs["scale_1h"].reshape(n, -1),
-            ], axis=1),
+            "micro": obs["scale_0"],
+            "macro": np.concatenate(macro_parts, axis=1) if macro_parts else np.zeros((n, 0), dtype=np.float32),
             "private": obs["private"],
         }
+
+    def _unpack_buffer_to_scales(self, states, next_states):
+        """Unpack replay buffer micro/macro into list of scale tensors."""
+        chunk = self._window_size * self._features_per_scale
+
+        # Scale 0 is stored as "micro"
+        s0 = torch.tensor(states["micro"], dtype=torch.float32).to(self.device, non_blocking=True)
+        ns0 = torch.tensor(next_states["micro"], dtype=torch.float32).to(self.device, non_blocking=True)
+        scale_tensors = [s0]
+        next_scale_tensors = [ns0]
+
+        # Remaining scales are packed in "macro"
+        if self._n_scales > 1:
+            macro = states["macro"]
+            nmacro = next_states["macro"]
+            for i in range(1, self._n_scales):
+                offset = (i - 1) * chunk
+                flat = macro[:, offset:offset + chunk]
+                nflat = nmacro[:, offset:offset + chunk]
+                scale_tensors.append(
+                    torch.tensor(
+                        flat.reshape(-1, self._window_size, self._features_per_scale),
+                        dtype=torch.float32,
+                    ).to(self.device, non_blocking=True)
+                )
+                next_scale_tensors.append(
+                    torch.tensor(
+                        nflat.reshape(-1, self._window_size, self._features_per_scale),
+                        dtype=torch.float32,
+                    ).to(self.device, non_blocking=True)
+                )
+
+        return scale_tensors, next_scale_tensors
 
     def save(self, path: str):
         """Save all model state to checkpoint."""

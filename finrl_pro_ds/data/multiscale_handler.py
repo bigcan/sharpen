@@ -1,7 +1,7 @@
 """
 Multi-Scale OHLCV Data Handler
 
-Reads 1-min OHLCV parquet, resamples to multiple timescales (3m, 15m, 1h),
+Reads 1-min OHLCV parquet, resamples to multiple timescales (configurable),
 computes 7 features per scale, and provides a stepping interface for the env.
 
 Features per scale (7 dims):
@@ -283,9 +283,9 @@ class MultiScaleOHLCVHandler:
 
         Returns:
             dict with keys:
-                scale_3m: (window_size, 7) float32
-                scale_15m: (window_size, 7) float32
-                scale_1h: (window_size, 7) float32
+                scale_0: (window_size, 7) float32  (finest scale)
+                scale_1: (window_size, 7) float32
+                scale_2: (window_size, 7) float32  (coarsest scale)
                 close: float
                 atr: float
                 timestamp: numpy datetime64
@@ -297,7 +297,7 @@ class MultiScaleOHLCVHandler:
         result = {}
 
         # For each scale, get the window of features
-        for scale in self.scales:
+        for i, scale in enumerate(self.scales):
             features = self._scale_features[scale]
             if scale == self._base_scale:
                 idx = self._ptr
@@ -315,7 +315,7 @@ class MultiScaleOHLCVHandler:
                 pad = np.tile(window[0:1], (pad_len, 1))
                 window = np.concatenate([pad, window], axis=0)
 
-            key = f"scale_{scale}m"
+            key = f"scale_{i}"
             result[key] = window.copy()
 
         result["close"] = float(self._base_close[self._ptr])
