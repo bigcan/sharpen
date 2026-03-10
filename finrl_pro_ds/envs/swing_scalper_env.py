@@ -534,6 +534,13 @@ class SwingScalperEnv(gym.Env):
             "private": self.private_window.copy(),
         }
 
+    def set_fees(self, taker_fee: float, maker_fee: float = 0.0):
+        """Update fee levels mid-episode (for fee curriculum).
+
+        FIX GMO1-08: Required by trainer fee curriculum via env.call("set_fees", ...).
+        """
+        self.taker_fee = taker_fee
+
     def render(self, mode='human'):
         print(f"Step: {self.current_step}, Dir: {'L' if self.direction > 0 else 'S'}, "
               f"Equity: {self.equity:.2f}, Switches: {self.switch_count}, "
