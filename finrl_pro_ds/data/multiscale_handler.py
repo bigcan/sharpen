@@ -173,16 +173,11 @@ class MultiScaleOHLCVHandler:
 
         df['timestamp'] = pd.to_datetime(df['timestamp'])
 
-        # Date filtering
-        if self.start_date is not None:
-            df = df[df['timestamp'] >= self.start_date]
+        # Apply end_date filter before feature computation (safe — no future leakage)
         if self.end_date is not None:
             df = df[df['timestamp'] <= self.end_date]
 
         df = df.sort_values('timestamp').reset_index(drop=True)
-
-        if len(df) < 100:
-            raise ValueError(f"Insufficient data after filtering: {len(df)} rows")
 
         # Ensure required OHLCV columns
         for col in ['open', 'high', 'low', 'close', 'volume']:
@@ -197,7 +192,7 @@ class MultiScaleOHLCVHandler:
         # Base scale = smallest in scales list
         base_scale = min(self.scales)
 
-        # Resample each scale
+        # Resample each scale and compute features on FULL history (warm EMAs)
         self._scale_dfs = {}
         self._scale_features = {}
         self._scale_timestamps = {}
@@ -213,9 +208,29 @@ class MultiScaleOHLCVHandler:
                     norm_cutoff_idx = cutoff_mask.idxmax()
 
             features = _compute_scale_features(resampled, norm_cutoff_idx, self.norm_span)
+
+            # FIX GMGP1-F1: Apply start_date AFTER feature computation
+            # so EMAs are warm when the environment window begins
+            if self.start_date is not None:
+                start_mask = resampled['timestamp'] >= self.start_date
+                if start_mask.any():
+                    trim_idx = start_mask.idxmax()
+                    # Keep window_size extra bars before start_date for obs history
+                    trim_idx = max(0, trim_idx - self.window_size)
+                    resampled = resampled.iloc[trim_idx:].reset_index(drop=True)
+                    features = features[trim_idx:]
+
             self._scale_dfs[scale] = resampled
             self._scale_features[scale] = features
             self._scale_timestamps[scale] = resampled['timestamp'].values
+
+        # Verify sufficient data after filtering
+        base_features = self._scale_features[base_scale]
+        if len(base_features) < self.window_size + 10:
+            raise ValueError(
+                f"Insufficient data after date filtering: {len(base_features)} bars "
+                f"(need at least {self.window_size + 10})"
+            )
 
         # Base scale data for stepping
         self._base_scale = base_scale
