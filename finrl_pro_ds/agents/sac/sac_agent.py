@@ -61,6 +61,7 @@ class SACAgent:
         self._use_bf16 = (self.amp_dtype == torch.bfloat16)
         self.checkpoint_interval = checkpoint_interval
         self.step_count = 0
+        self._use_pinned = (self.device.type == "cuda")
 
         # Extract network config
         scale_cfg = network_config.get("scale_encoder", {
@@ -211,15 +212,15 @@ class SACAgent:
         states, actions_np, rewards_np, next_states, dones_np, _ = \
             self.replay_buffer.sample(self.batch_size)
 
-        # Convert to tensors — dynamic scale unpacking
+        # Convert to tensors — dynamic scale unpacking with pinned memory H2D
         scale_tensors, next_scale_tensors = self._unpack_buffer_to_scales(states, next_states)
-        priv = torch.tensor(states["private"], dtype=torch.float32).to(self.device, non_blocking=True)
+        priv = self._to_device_pinned(states["private"])
 
-        actions = torch.tensor(actions_np, dtype=torch.float32).to(self.device, non_blocking=True)
-        rewards = torch.tensor(rewards_np, dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
-        dones = torch.tensor(dones_np, dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
+        actions = self._to_device_pinned(actions_np)
+        rewards = self._to_device_pinned(rewards_np).unsqueeze(1)
+        dones = self._to_device_pinned(dones_np).unsqueeze(1)
 
-        npriv = torch.tensor(next_states["private"], dtype=torch.float32).to(self.device, non_blocking=True)
+        npriv = self._to_device_pinned(next_states["private"])
 
         alpha = self.log_alpha.exp().detach()
         amp_ctx = torch.amp.autocast(
@@ -302,6 +303,18 @@ class SACAgent:
             "q2_mean": q2.mean().item(),
         }
 
+    def _to_device_pinned(self, arr: np.ndarray, dtype=torch.float32) -> torch.Tensor:
+        """Transfer numpy array to GPU via pinned memory for true async DMA.
+
+        Without pin_memory(), non_blocking=True is silently ignored because
+        numpy arrays live in pageable memory. pin_memory() copies to page-locked
+        RAM first, enabling actual async H2D transfer via DMA engine.
+        """
+        t = torch.as_tensor(arr, dtype=dtype)
+        if self._use_pinned:
+            return t.pin_memory().to(self.device, non_blocking=True)
+        return t.to(self.device)
+
     def _obs_to_buffer(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Convert multi-scale obs dict to replay buffer format."""
         macro_parts = [obs[f"scale_{i}"].flatten() for i in range(1, self._n_scales)]
@@ -322,12 +335,15 @@ class SACAgent:
         }
 
     def _unpack_buffer_to_scales(self, states, next_states):
-        """Unpack replay buffer micro/macro into list of scale tensors."""
+        """Unpack replay buffer micro/macro into list of scale tensors.
+
+        Uses pinned memory for true async H2D transfers.
+        """
         chunk = self._window_size * self._features_per_scale
 
         # Scale 0 is stored as "micro"
-        s0 = torch.tensor(states["micro"], dtype=torch.float32).to(self.device, non_blocking=True)
-        ns0 = torch.tensor(next_states["micro"], dtype=torch.float32).to(self.device, non_blocking=True)
+        s0 = self._to_device_pinned(states["micro"])
+        ns0 = self._to_device_pinned(next_states["micro"])
         scale_tensors = [s0]
         next_scale_tensors = [ns0]
 
@@ -340,16 +356,14 @@ class SACAgent:
                 flat = macro[:, offset:offset + chunk]
                 nflat = nmacro[:, offset:offset + chunk]
                 scale_tensors.append(
-                    torch.tensor(
-                        flat.reshape(-1, self._window_size, self._features_per_scale),
-                        dtype=torch.float32,
-                    ).to(self.device, non_blocking=True)
+                    self._to_device_pinned(
+                        flat.reshape(-1, self._window_size, self._features_per_scale)
+                    )
                 )
                 next_scale_tensors.append(
-                    torch.tensor(
-                        nflat.reshape(-1, self._window_size, self._features_per_scale),
-                        dtype=torch.float32,
-                    ).to(self.device, non_blocking=True)
+                    self._to_device_pinned(
+                        nflat.reshape(-1, self._window_size, self._features_per_scale)
+                    )
                 )
 
         return scale_tensors, next_scale_tensors

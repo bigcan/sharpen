@@ -225,7 +225,9 @@ class ContinuousSwingEnv(gym.Env):
                 self.trade_count += 1
 
         # 4. Compute PnL
+        # FIX R5-AUD-01: Compute price_return once, reuse for both reward and equity update
         pnl_bps = 0.0
+        price_return = 0.0
         if self.prev_close > 0:
             price_return = (self.current_close - self.prev_close) / self.prev_close
             pnl_bps = self.current_position * price_return * 10000.0
@@ -249,11 +251,7 @@ class ContinuousSwingEnv(gym.Env):
         # 6. Update equity
         # FIX R2-AUD-05: Use current equity (not initial_balance) so PnL compounds correctly.
         # Without this, drawdown recovery is inflated and long backtests diverge from reality.
-        if self.prev_close > 0:
-            price_return = (self.current_close - self.prev_close) / self.prev_close
-            equity_delta = self.current_position * price_return * self.equity
-        else:
-            equity_delta = 0.0
+        equity_delta = self.current_position * price_return * self.equity
         if traded:
             equity_delta -= self.taker_fee * abs(delta) * self.equity
         self.equity += equity_delta

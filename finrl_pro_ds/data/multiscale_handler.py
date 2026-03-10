@@ -4,11 +4,12 @@ Multi-Scale OHLCV Data Handler
 Reads 1-min OHLCV parquet, resamples to multiple timescales (configurable),
 computes 7 features per scale, and provides a stepping interface for the env.
 
-Features per scale (7 dims):
+Features per scale (8 dims, TC-aligned):
   1. log_return = log(close_t / close_{t-1})
   2. atr_norm = ATR(14) / EMA(ATR, 50), centered around 1.0
   3. parkinson_vol = sqrt(log(H/L)^2 / (4·ln2))
   4-7. open_z, high_z, low_z, close_z = SymLog → EMA-Z(span=120) → tanh
+  8. volume_z = SymLog → EMA-Z(span=120) → tanh (market participation)
 
 LEAK-1 compliant: norm_cutoff_date splits normalization.
 """
@@ -65,18 +66,26 @@ def _resample_ohlcv(df_1min: pd.DataFrame, scale_minutes: int) -> pd.DataFrame:
     return resampled.reset_index()
 
 
-def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = None, span: int = 120) -> np.ndarray:
-    """Compute 7 features for a single timescale DataFrame.
+def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = None, span: int = 120, n_features: int = 8) -> np.ndarray:
+    """Compute features for a single timescale DataFrame.
 
-    Returns: (N, 7) float32 array
+    Features (8 dims, TC-aligned for Conv1d Tensor Core acceleration):
+      0. log_return
+      1. atr_norm (centered around 0)
+      2. parkinson_vol
+      3-6. open_z, high_z, low_z, close_z (SymLog → EMA-Z → tanh)
+      7. volume_z (SymLog → EMA-Z → tanh) — market participation signal
+
+    Returns: (N, n_features) float32 array
     """
     close = df['close'].values.astype(np.float64)
     high = df['high'].values.astype(np.float64)
     low = df['low'].values.astype(np.float64)
     open_ = df['open'].values.astype(np.float64)
+    volume = df['volume'].values.astype(np.float64) if 'volume' in df.columns else np.ones(len(close))
     n = len(close)
 
-    features = np.zeros((n, 7), dtype=np.float32)
+    features = np.zeros((n, n_features), dtype=np.float32)
 
     # 1. log_return
     prev_close = np.roll(close, 1)
@@ -104,17 +113,22 @@ def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = N
     features[:, 2] = np.clip(parkinson, 0.0, 0.1).astype(np.float32)
 
     # 4-7. OHLC z-scores: SymLog → EMA-Z → tanh
-    def normalize_price(arr):
+    def normalize_series(arr):
         if norm_cutoff_idx is not None and 0 < norm_cutoff_idx < len(arr):
             part1 = _ema_zscore_tanh(_symlog(arr[:norm_cutoff_idx]), span)
             part2 = _ema_zscore_tanh(_symlog(arr[norm_cutoff_idx:]), span)
             return np.concatenate([part1, part2])
         return _ema_zscore_tanh(_symlog(arr), span)
 
-    features[:, 3] = normalize_price(open_)
-    features[:, 4] = normalize_price(high)
-    features[:, 5] = normalize_price(low)
-    features[:, 6] = normalize_price(close)
+    features[:, 3] = normalize_series(open_)
+    features[:, 4] = normalize_series(high)
+    features[:, 5] = normalize_series(low)
+    features[:, 6] = normalize_series(close)
+
+    # 8. volume_z — market participation / liquidity signal
+    # TC-OPT: 8th feature aligns Conv1d input channels to multiple of 8
+    if n_features >= 8:
+        features[:, 7] = normalize_series(volume)
 
     return features
 
