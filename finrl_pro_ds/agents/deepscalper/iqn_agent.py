@@ -51,6 +51,7 @@ class IQNAgent:
         target_q_clip: float = 5000.0,
         auxiliary_weight: float = 0.1,
         use_amp: bool = False,
+        amp_dtype: str = "float16",
         use_per: bool = False,
         per_alpha: float = 0.6,
         per_beta_start: float = 0.4,
@@ -101,6 +102,8 @@ class IQNAgent:
         self.target_q_clip = target_q_clip
         self.auxiliary_weight = auxiliary_weight
         self.use_amp = use_amp
+        self.amp_dtype = torch.bfloat16 if amp_dtype == "bfloat16" else torch.float16
+        self._use_bf16 = (self.amp_dtype == torch.bfloat16)
         self.use_per = use_per
 
         # IQN has no epsilon — NoisyNets handle exploration
@@ -158,8 +161,11 @@ class IQNAgent:
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
         self._lr_scheduler = None  # Initialized by trainer
 
-        # AMP GradScaler
-        self.scaler = torch.amp.GradScaler(device=str(self.device), enabled=self.use_amp)
+        # AMP GradScaler — disabled for BF16 (same dynamic range as FP32, no scaling needed)
+        self.scaler = torch.amp.GradScaler(
+            device=str(self.device),
+            enabled=self.use_amp and not self._use_bf16,
+        )
 
         # Replay buffer
         if self.use_per:
@@ -378,7 +384,7 @@ class IQNAgent:
         N = self.num_quantiles
         N_prime = self.num_quantiles
 
-        with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.use_amp):
+        with torch.amp.autocast(device_type=self.device.type, dtype=self.amp_dtype, enabled=self.use_amp):
             tau = torch.rand(B, N, device=self.device)
             tau_prime = torch.rand(B, N_prime, device=self.device)
             actions_flat = actions.view(B, 1) if actions.dim() == 1 else actions[:, 0:1]
@@ -470,13 +476,15 @@ class IQNAgent:
 
         self.optimizer.zero_grad()
 
-        if self.use_amp:
+        if self.use_amp and not self._use_bf16:
+            # FP16 path: GradScaler prevents underflow
             self.scaler.scale(total_loss).backward()
             self.scaler.unscale_(self.optimizer)
             nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.gradient_clip)
             self.scaler.step(self.optimizer)
             self.scaler.update()
         else:
+            # BF16 or FP32 path: no GradScaler needed
             total_loss.backward()
             nn.utils.clip_grad_norm_(self.policy_net.parameters(), self.gradient_clip)
             self.optimizer.step()

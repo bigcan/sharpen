@@ -79,6 +79,7 @@ class DeepScalperTrainer:
                 gradient_clip=iqn_cfg.get("gradient_clip", 10.0),
                 auxiliary_weight=iqn_cfg.get("auxiliary_weight", 0.1),
                 use_amp=config["training"].get("use_amp", False),
+                amp_dtype=config["training"].get("amp_dtype", "float16"),
                 use_per=iqn_cfg.get("use_per", False),
                 per_alpha=iqn_cfg.get("per_alpha", 0.6),
                 per_beta_start=iqn_cfg.get("per_beta_start", 0.4),
