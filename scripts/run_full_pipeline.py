@@ -145,7 +145,7 @@ def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_conf
 # ============================================================================
 # PHASE 1: HYPERPARAMETER OPTIMIZATION
 # ============================================================================
-def evaluate_for_hpo(env, agent, max_steps=5000):
+def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
     """Evaluate agent for HPO — returns (profit_factor, trade_count).
 
     V4.2: Changed from raw Sharpe to profit_factor to prevent specification gaming.
@@ -393,8 +393,11 @@ def evaluate_for_hpo(env, agent, max_steps=5000):
     # Also log Sharpe for research tracking (not used for HPO scoring)
     if len(returns) > 1 and np.std(returns) > 1e-9:
         raw_ratio = np.mean(returns) / np.std(returns)
-        sharpe_minute = raw_ratio * np.sqrt(525600)
-        n_per_hour = 60
+        # FIX R7-AUD-03: Use correct annualization for bar duration (not hardcoded 1-min)
+        bars_per_year = 525600 / bar_minutes
+        sharpe_minute = raw_ratio * np.sqrt(bars_per_year)
+        # FIX R7-AUD-04: Correct hourly aggregation for bar duration
+        n_per_hour = max(1, 60 // bar_minutes)
         hourly_returns = np.add.reduceat(returns, np.arange(0, len(returns), n_per_hour))
         # FIX BUG-05: Drop last partial bucket to avoid upward Sharpe bias
         # A partial bucket with fewer than 60 samples has lower variance, inflating Sharpe.
@@ -619,7 +622,8 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         eval_env = None
         try:
             # FIX: Use SyncVectorEnv for HPO to avoid AsyncVectorEnv pipe crashes
-            hpo_num_envs = min(config["env"].get("num_envs", 12), 12)
+            hpo_num_envs = min(config.get("training", {}).get("num_envs",
+                              config["env"].get("num_envs", 12)), 12)
             env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True)
 
             if agent_type == "sac":
@@ -652,9 +656,21 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 norm_cutoff_date=data_cfg.get("val_start_date"),
             )
 
+            # FIX R7-AUD-03: Compute bar_minutes for correct Sharpe annualization
+            mdp_ver = config.get("env", {}).get("mdp_version", "v5")
+            hpo_scales = config.get("features", {}).get("scales", [])
+            if mdp_ver == "v7" and hpo_scales:
+                hpo_bar_minutes = min(hpo_scales)
+            elif "3min" in config.get("data", {}).get("file_path", ""):
+                hpo_bar_minutes = 3
+            elif "5min" in config.get("data", {}).get("file_path", ""):
+                hpo_bar_minutes = 5
+            else:
+                hpo_bar_minutes = 1
+
             # Define Pruning Callback (also uses validation env)
             def pruning_callback():
-                pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=3000)
+                pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=3000, bar_minutes=hpo_bar_minutes)
                 return pf  # Optuna pruner expects a single float
 
             trainer.train(optuna_trial=trial, pruning_callback=pruning_callback)
@@ -664,7 +680,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             tc_values = []
             for eval_seed in [42, 123, 7]:
                 eval_env.reset(seed=eval_seed)
-                pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=50000)
+                pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=50000, bar_minutes=hpo_bar_minutes)
                 pf_values.append(pf)
                 tc_values.append(tc)
             profit_factor = float(np.median(pf_values))
@@ -802,7 +818,10 @@ def run_training(config, run_name, device, agent_type="bdq", warm_start=None):
     logger.info(f"Starting Training Phase (agent={agent_type})")
     wandb.log({"train/status": "started", "train/agent_type": agent_type})
 
-    num_envs = config.get("env", {}).get("num_envs", 12)
+    # FIX R6-AUD-02: num_envs may be under "training" or "env" depending on config version.
+    # Check training first (GMGP1 configs), then env (legacy), then default.
+    num_envs = config.get("training", {}).get("num_envs",
+               config.get("env", {}).get("num_envs", 12))
     data_loader = None
     env = None
 
@@ -949,6 +968,12 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         if not network_config:
             raise ValueError("Config missing 'network' section — cannot reconstruct agent for backtest")
 
+        # FIX R6-AUD-03: Inject n_scales (dynamically derived in SACTrainer but missing here).
+        # Without this, SACAgent defaults to n_scales=3 which silently breaks for != 3 scales.
+        bt_scales = config.get("features", {}).get("scales",
+                    config.get("env", {}).get("scales", [3, 15, 60]))
+        network_config["n_scales"] = len(bt_scales)
+
         # Read action dims from config (mirrors trainer logic exactly)
         # FIX BUG-15: PPO uses Discrete(N) — action_dims MUST be int, not tuple.
         # FIX BUG-16: Must check size_dims BEFORE discrete_dims (parity with trainer).
@@ -1071,7 +1096,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                     )
                 priv = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
                 pred = agent.predict(scale_tensors, priv, deterministic=True)
-                action = pred[0]  # (1, 1) → scalar
+                action = pred[0].cpu().numpy()  # (1, 1) → numpy scalar
             else:
                 micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
                 private = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)

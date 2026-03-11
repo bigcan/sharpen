@@ -183,11 +183,18 @@ class SACAgent:
         Returns:
             actions: (B, 1) continuous position fraction
         """
+        # FIX R7-AUD-06: Disable dropout for deterministic inference (backtest/eval).
+        # DilatedCNNEncoder has dropout=0.1 — without eval mode, deterministic
+        # predictions have random noise, breaking backtest reproducibility.
+        if deterministic:
+            self.actor.eval()
         with torch.no_grad():
             action, _ = self.actor.sample(
                 scale_tensors, private,
                 deterministic=deterministic,
             )
+        if deterministic:
+            self.actor.train()
         return action
 
     def store_transition(
