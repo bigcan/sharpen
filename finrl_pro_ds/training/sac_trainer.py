@@ -133,6 +133,11 @@ class SACTrainer:
         t_start = time.time()
         gradient_accumulator = 0.0
         metrics = None  # FIX R2-AUD-01: Initialize before learning_starts to prevent NameError
+        # FIX R7-AUD-01: Track which envs just terminated/truncated.
+        # Gymnasium 1.x auto-resets on the NEXT step after done, producing a
+        # phantom step (reward=0, empty info, terminal→reset obs) that should
+        # NOT be stored in the replay buffer.
+        prev_any_done = np.zeros(num_envs, dtype=bool)
 
         # Limit PyTorch intra-op threads for SyncVectorEnv.
         # Default num_threads = all CPU cores → massive context-switch overhead
@@ -170,8 +175,30 @@ class SACTrainer:
             next_obs, rewards, terms, truncs, infos = self.env.step(actions_np)
 
             # Store transitions
-            dones = np.logical_or(terms, truncs).astype(np.float32)
-            self.agent.store_batch(obs, actions_np, rewards, next_obs, dones)
+            # FIX R6-AUD-01: Truncation (episode_length reached) must NOT mask Q-bootstrap.
+            # Only true termination (drawdown stop) should set done=1.0 in the buffer.
+            # In Gymnasium 1.x, the terminal obs is returned directly as next_obs
+            # (no final_observation indirection), so store_next_obs = next_obs is correct.
+            dones_for_buffer = terms.astype(np.float32)
+
+            # FIX R7-AUD-01: Skip phantom auto-reset transitions.
+            # Gymnasium 1.x auto-resets on the step AFTER done, producing a phantom
+            # transition (terminal_obs → reset_obs, reward=0) that would pollute the
+            # replay buffer with cross-episode transitions having done=0.0.
+            valid_mask = ~prev_any_done
+            if np.all(valid_mask):
+                self.agent.store_batch(obs, actions_np, rewards, next_obs, dones_for_buffer)
+            elif np.any(valid_mask):
+                # Filter to only valid (non-phantom) transitions
+                v_obs = {k: v[valid_mask] for k, v in obs.items()}
+                v_next = {k: v[valid_mask] for k, v in next_obs.items()}
+                self.agent.store_batch(
+                    v_obs, actions_np[valid_mask], rewards[valid_mask],
+                    v_next, dones_for_buffer[valid_mask],
+                )
+
+            # Episode tracking uses actual episode boundaries (term OR trunc)
+            any_done = np.logical_or(terms, truncs)
 
             # Diagnostic: first 100 steps timing
             if total_steps == 100 * num_envs:
@@ -183,12 +210,13 @@ class SACTrainer:
             episode_length += 1
 
             for i in range(num_envs):
-                if dones[i]:
+                if any_done[i]:
                     self.episode_rewards.append(episode_reward[i])
                     self.episode_lengths.append(episode_length[i])
                     episode_reward[i] = 0.0
                     episode_length[i] = 0
 
+            prev_any_done = any_done.copy()
             obs = next_obs
             total_steps += num_envs
             self.agent.step_count = total_steps
@@ -246,7 +274,7 @@ class SACTrainer:
 
             # Checkpointing
             if total_steps % self.checkpoint_interval < num_envs:
-                ckpt_path = os.path.join(self.ckpt_dir, f"checkpoint_{total_steps}.pth")
+                ckpt_path = os.path.join(self.ckpt_dir, f"checkpoint_step_{total_steps}.pth")
                 self.agent.save(ckpt_path)
                 logger.info(f"Checkpoint saved: {ckpt_path}")
 
