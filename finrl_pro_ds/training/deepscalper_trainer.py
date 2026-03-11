@@ -370,6 +370,8 @@ class DeepScalperTrainer:
         # Initialize to 0 to skip rung 0 - avoids eval at step ~12 before learning starts (P1a fix)
         self._last_prune_rung = 0
 
+        # FIX R8-AUD-01: Truncated episode handling — see buffer push block in train().
+
         # N-step return buffer: wraps replay buffer push for multi-step returns
         # When multi_horizon=True, use gamma_long for N-step discounting so the
         # long-horizon Bellman target is exactly correct. Short-horizon has a small
@@ -432,14 +434,14 @@ class DeepScalperTrainer:
                 else:
                     qty_mask = None
 
-                # Sprint 7 BUG-2 FIX: Only true termination (drawdown) zeroes bootstrap.
-                # Truncation (data exhaustion) is NOT terminal — the MDP continues.
-                dones_for_reset = np.logical_or(term, trunc)  # For episodic stats reset
+                # Episode boundary: term (drawdown stop) or trunc (data/episode_length).
+                dones_for_reset = np.logical_or(term, trunc)  # For episodic stats + hidden state
 
                 # BUG-B: Mask hidden states for terminated/truncated envs
                 if hasattr(self.agent, "mask_hidden_state"):
                     self.agent.mask_hidden_state(dones_for_reset)
-                dones_for_buffer = term  # Only term zeroes Bellman bootstrap
+                # NOTE: dones_for_buffer is computed in the buffer push block below
+                # (FIX R8-AUD-01: includes truncation to prevent Q-bootstrap from reset obs)
 
                 # 3. Store in Buffer
                 # PERF FIX-2: Extract aux_targets vectorized
@@ -458,20 +460,30 @@ class DeepScalperTrainer:
                 from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
                 _actions = actions if actions.ndim > 1 else actions.reshape(-1, 1)
 
+                # FIX R8-AUD-01: On truncation (trunc=True, term=False), SyncVectorEnv
+                # auto-resets and returns the RESET observation as next_obs. Bootstrapping
+                # Q(s_reset) pollutes the Bellman target with cross-episode garbage.
+                # Fix: treat truncation as terminal in the buffer (done=1.0) to zero the
+                # Q-bootstrap. This is a standard approximation (SB3 does the same when
+                # final_observation is unavailable). Bias is minimal: only affects the
+                # last transition per episode (~0.1% of data).
+                # NOTE: dones_for_reset (used for stats/hidden masking) is unchanged.
+                dones_for_buffer = np.logical_or(term, trunc).astype(np.float32)
+
                 if self._nstep_buffer is not None:
                     # N-step returns: accumulate before pushing to replay
                     # FIX GMO1-04: Pass resets (term|trunc) so n-step flushes at
                     # episode boundaries, preventing cross-episode reward mixing.
                     self._nstep_buffer.add(
                         obs, _actions, rewards.astype(np.float32),
-                        next_obs, dones_for_buffer.astype(np.float32),
+                        next_obs, dones_for_buffer,
                         aux_targets_vec, self.agent.memory,
                         resets=dones_for_reset.astype(np.float32),
                     )
                 elif isinstance(self.agent.memory, FlatReplayBuffer):
                     self.agent.memory.push_batch(
                         obs, _actions, rewards.astype(np.float32),
-                        next_obs, dones_for_buffer.astype(np.float32),
+                        next_obs, dones_for_buffer,
                         aux_targets_vec,
                     )
                 else:
