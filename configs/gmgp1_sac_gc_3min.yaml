@@ -71,7 +71,7 @@ training:
   log_interval: 1000
   use_amp: true                   # Enable mixed precision
   amp_dtype: "bfloat16"           # 4090 Ada: native BF16, no GradScaler overhead
-  torch_compile: false            # DISABLED: torch.dynamo hangs on List[Tensor] multi-scale input (Session 127)
+  torch_compile: true             # Full-model compile: networks accept stacked (B,N,W,F) tensors, no List[Tensor] dynamo hang.
   num_envs: 20                    # 4090: IPC limit (vs 24 on 5090)
 
 wandb:
