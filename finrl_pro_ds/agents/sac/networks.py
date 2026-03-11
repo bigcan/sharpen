@@ -10,7 +10,7 @@ Architecture:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 from finrl_pro_ds.agents.deepscalper.networks import _CausalConv1dBlock, _tc_align
 
@@ -104,17 +104,17 @@ class MultiScaleEncoder(nn.Module):
 
     def forward(
         self,
-        scale_tensors: List[torch.Tensor],
+        scale_stack: torch.Tensor,
         private: torch.Tensor,
     ) -> torch.Tensor:
         """
         Args:
-            scale_tensors: list of N tensors, each (B, W, F)
+            scale_stack: (B, N, W, F) stacked scale tensors
             private: (B, private_dim)
         Returns:
             (B, fusion_dim)
         """
-        encoded = [enc(x) for enc, x in zip(self.encoders, scale_tensors)]
+        encoded = [enc(scale_stack[:, i]) for i, enc in enumerate(self.encoders)]
         combined = torch.cat(encoded + [private], dim=1)
         if self._fusion_pad > 0:
             combined = F.pad(combined, (0, self._fusion_pad))
@@ -162,11 +162,11 @@ class SACActorNetwork(nn.Module):
 
     def forward(
         self,
-        scale_tensors: List[torch.Tensor],
+        scale_stack: torch.Tensor,
         private: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Returns (mu, log_sigma) for the Gaussian policy."""
-        features = self.encoder(scale_tensors, private)
+        features = self.encoder(scale_stack, private)
         h = self.head(features)
         mu = self.mu_layer(h)
         log_sigma = self.log_sigma_layer(h)
@@ -175,7 +175,7 @@ class SACActorNetwork(nn.Module):
 
     def sample(
         self,
-        scale_tensors: List[torch.Tensor],
+        scale_stack: torch.Tensor,
         private: torch.Tensor,
         deterministic: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -185,7 +185,7 @@ class SACActorNetwork(nn.Module):
             action: (B, 1) in [-1, 1]
             log_prob: (B, 1)
         """
-        mu, log_sigma = self.forward(scale_tensors, private)
+        mu, log_sigma = self.forward(scale_stack, private)
         sigma = log_sigma.exp()
 
         if deterministic:
@@ -241,12 +241,12 @@ class SACCriticNetwork(nn.Module):
 
     def forward(
         self,
-        scale_tensors: List[torch.Tensor],
+        scale_stack: torch.Tensor,
         private: torch.Tensor,
         action: torch.Tensor,
     ) -> torch.Tensor:
         """Returns scalar Q-value: (B, 1)"""
-        features = self.encoder(scale_tensors, private)
+        features = self.encoder(scale_stack, private)
         combined = torch.cat([features, action], dim=1)
         if self._q_pad > 0:
             combined = F.pad(combined, (0, self._q_pad))

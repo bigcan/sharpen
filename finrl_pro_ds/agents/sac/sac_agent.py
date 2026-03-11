@@ -131,36 +131,22 @@ class SACAgent:
             enabled=use_amp and not self._use_bf16 and self.device.type == 'cuda',
         )
 
-        # torch.compile: compile individual TCN encoders instead of full model.
-        # Full-model compile hangs on List[Tensor] multi-scale input (Session 127).
-        # Per-encoder compile works because each encoder takes a single (B,T,F) tensor.
+        # torch.compile: full-model compile now works because networks accept
+        # stacked (B,N,W,F) tensors instead of List[Tensor] (Session 127 fix).
         if torch_compile and hasattr(torch, 'compile'):
             try:
-                self._compile_encoders(self.actor.encoder)
-                self._compile_encoders(self.critic1.encoder)
-                self._compile_encoders(self.critic2.encoder)
-                self._compile_encoders(self.target_critic1.encoder)
-                self._compile_encoders(self.target_critic2.encoder)
+                self.actor = torch.compile(self.actor, mode='default')
+                self.critic1 = torch.compile(self.critic1, mode='default')
+                self.critic2 = torch.compile(self.critic2, mode='default')
+                self.target_critic1 = torch.compile(self.target_critic1, mode='default')
+                self.target_critic2 = torch.compile(self.target_critic2, mode='default')
                 import logging
                 logging.getLogger(__name__).info(
-                    "[torch.compile] Compiled individual TCN encoders (5 networks × N scales)"
+                    "[torch.compile] Full-model compile: actor + 2 critics + 2 targets"
                 )
             except Exception as e:
                 import logging
-                logging.getLogger(__name__).warning(f"torch.compile (per-encoder) failed: {e}")
-
-    @staticmethod
-    def _compile_encoders(multi_scale_encoder):
-        """Compile individual TCN encoders within a MultiScaleEncoder.
-
-        Each DilatedCNNEncoder takes a single (B,T,F) tensor, which
-        torch.compile handles correctly. The parent MultiScaleEncoder
-        takes List[Tensor], which causes dynamo to hang.
-        """
-        for i, enc in enumerate(multi_scale_encoder.encoders):
-            multi_scale_encoder.encoders[i] = torch.compile(enc, mode='default')
-        # Also compile the fusion MLP
-        multi_scale_encoder.fusion = torch.compile(multi_scale_encoder.fusion, mode='default')
+                logging.getLogger(__name__).warning(f"torch.compile failed: {e}")
 
     @property
     def alpha(self) -> float:
@@ -183,6 +169,8 @@ class SACAgent:
         Returns:
             actions: (B, 1) continuous position fraction
         """
+        # Stack list into (B, N, W, F) for torch.compile-friendly forward pass
+        scale_stack = torch.stack(scale_tensors, dim=1)
         # FIX R7-AUD-06: Disable dropout for deterministic inference (backtest/eval).
         # DilatedCNNEncoder has dropout=0.1 — without eval mode, deterministic
         # predictions have random noise, breaking backtest reproducibility.
@@ -190,7 +178,7 @@ class SACAgent:
             self.actor.eval()
         with torch.no_grad():
             action, _ = self.actor.sample(
-                scale_tensors, private,
+                scale_stack, private,
                 deterministic=deterministic,
             )
         if deterministic:
@@ -242,7 +230,7 @@ class SACAgent:
             self.replay_buffer.sample(self.batch_size)
 
         # Convert to tensors — dynamic scale unpacking with H2D
-        scale_tensors, next_scale_tensors = self._unpack_buffer_to_scales(states, next_states)
+        scale_stack, next_scale_stack = self._unpack_buffer_to_stacks(states, next_states)
         priv = self._to_device_pinned(states["private"])
 
         actions = self._to_device_pinned(actions_np)
@@ -260,15 +248,15 @@ class SACAgent:
         # --- Critic update ---
         with torch.no_grad():
             with amp_ctx:
-                next_action, next_log_prob = self.actor.sample(next_scale_tensors, npriv)
-                target_q1 = self.target_critic1(next_scale_tensors, npriv, next_action)
-                target_q2 = self.target_critic2(next_scale_tensors, npriv, next_action)
+                next_action, next_log_prob = self.actor.sample(next_scale_stack, npriv)
+                target_q1 = self.target_critic1(next_scale_stack, npriv, next_action)
+                target_q2 = self.target_critic2(next_scale_stack, npriv, next_action)
                 target_q = torch.min(target_q1, target_q2) - alpha * next_log_prob
                 target_value = rewards + (1.0 - dones) * self.gamma * target_q
 
         with amp_ctx:
-            q1 = self.critic1(scale_tensors, priv, actions)
-            q2 = self.critic2(scale_tensors, priv, actions)
+            q1 = self.critic1(scale_stack, priv, actions)
+            q2 = self.critic2(scale_stack, priv, actions)
             critic_loss = nn.functional.mse_loss(q1, target_value) + nn.functional.mse_loss(q2, target_value)
 
         self.critic_optimizer.zero_grad()
@@ -288,9 +276,9 @@ class SACAgent:
 
         # --- Actor update ---
         with amp_ctx:
-            new_action, log_prob = self.actor.sample(scale_tensors, priv)
-            q1_new = self.critic1(scale_tensors, priv, new_action)
-            q2_new = self.critic2(scale_tensors, priv, new_action)
+            new_action, log_prob = self.actor.sample(scale_stack, priv)
+            q1_new = self.critic1(scale_stack, priv, new_action)
+            q2_new = self.critic2(scale_stack, priv, new_action)
             q_new = torch.min(q1_new, q2_new)
             actor_loss = (alpha * log_prob - q_new).mean()
 
@@ -368,9 +356,10 @@ class SACAgent:
             "private": obs["private"],
         }
 
-    def _unpack_buffer_to_scales(self, states, next_states):
-        """Unpack replay buffer micro/macro into list of scale tensors.
+    def _unpack_buffer_to_stacks(self, states, next_states):
+        """Unpack replay buffer micro/macro into stacked (B, N, W, F) tensors.
 
+        Returns stacked tensors for torch.compile-friendly forward passes.
         Uses pinned memory for true async H2D transfers.
         """
         chunk = self._window_size * self._features_per_scale
@@ -378,8 +367,8 @@ class SACAgent:
         # Scale 0 is stored as "micro"
         s0 = self._to_device_pinned(states["micro"])
         ns0 = self._to_device_pinned(next_states["micro"])
-        scale_tensors = [s0]
-        next_scale_tensors = [ns0]
+        scale_list = [s0]
+        next_scale_list = [ns0]
 
         # Remaining scales are packed in "macro"
         if self._n_scales > 1:
@@ -389,18 +378,19 @@ class SACAgent:
                 offset = (i - 1) * chunk
                 flat = macro[:, offset:offset + chunk]
                 nflat = nmacro[:, offset:offset + chunk]
-                scale_tensors.append(
+                scale_list.append(
                     self._to_device_pinned(
                         flat.reshape(-1, self._window_size, self._features_per_scale)
                     )
                 )
-                next_scale_tensors.append(
+                next_scale_list.append(
                     self._to_device_pinned(
                         nflat.reshape(-1, self._window_size, self._features_per_scale)
                     )
                 )
 
-        return scale_tensors, next_scale_tensors
+        # Stack into (B, N, W, F) for compile-friendly forward
+        return torch.stack(scale_list, dim=1), torch.stack(next_scale_list, dim=1)
 
     def save(self, path: str):
         """Save all model state to checkpoint."""
