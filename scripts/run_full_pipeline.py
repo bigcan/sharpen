@@ -661,6 +661,8 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             hpo_scales = config.get("features", {}).get("scales", [])
             if mdp_ver == "v7" and hpo_scales:
                 hpo_bar_minutes = min(hpo_scales)
+            elif "15min" in config.get("data", {}).get("file_path", ""):
+                hpo_bar_minutes = 15
             elif "3min" in config.get("data", {}).get("file_path", ""):
                 hpo_bar_minutes = 3
             elif "5min" in config.get("data", {}).get("file_path", ""):
@@ -1036,6 +1038,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 lr=iqn_cfg.get("learning_rate", 3e-4),
                 gamma=iqn_cfg.get("gamma", 0.99),
                 tau=iqn_cfg.get("tau", 0.005),
+                buffer_size=100,  # FIX R8-AUD-03: backtest doesn't use replay buffer
                 num_quantiles=iqn_cfg.get("num_quantiles", 32),
                 embedding_dim=iqn_cfg.get("embedding_dim", 64),
                 noisy_sigma0=iqn_cfg.get("noisy_sigma0", 0.5),
@@ -1058,7 +1061,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 gamma=bdq_config.get("gamma", 0.99),
                 epsilon_start=bdq_config.get("epsilon_start", 1.0),
                 epsilon_end=bdq_config.get("epsilon_end", 0.01),
-                buffer_size=bdq_config.get("buffer_size", 100000),
+                buffer_size=100,  # FIX R8-AUD-03: backtest doesn't use replay buffer
                 batch_size=bdq_config.get("batch_size", 64),
                 target_update_freq=bdq_config.get("target_update_freq", 100),
                 auxiliary_weight=bdq_config.get("auxiliary_weight", 1.0),
@@ -1139,6 +1142,8 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         data_file = config.get("data", {}).get("file_path", "")
         if mdp_version == "v7" and scales:
             bar_minutes = scales[0]  # First scale is the base (decision) timeframe
+        elif "15min" in data_file:
+            bar_minutes = 15
         elif "3min" in data_file:
             bar_minutes = 3
         elif "5min" in data_file:

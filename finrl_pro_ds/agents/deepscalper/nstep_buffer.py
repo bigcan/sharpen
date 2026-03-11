@@ -84,7 +84,7 @@ class NStepBuffer:
                 "action": actions[i],
                 "reward": float(rewards[i]),
                 "next_obs": {k: v[i] for k, v in next_obs.items()},
-                "done": float(dones[i]),  # Only true termination stored
+                "done": float(dones[i]),  # term|trunc (R8-AUD-01: both zero Q-bootstrap)
                 "aux_target": float(aux_targets[i]),
             }
             self._buffers[i].append(transition)
