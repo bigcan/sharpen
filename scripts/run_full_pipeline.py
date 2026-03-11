@@ -634,8 +634,17 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             # V4.2: Evaluate on VALIDATION set (anti-overfitting)
             # Training happens on Jan-Apr, evaluation on May.
             data_cfg = config.get("data", {})
+            # FIX AUD-S129-01: HPO eval must use final fee from fee_schedule, not
+            # the initial 0.0 from fee curriculum. Same pattern as R2-AUD-03 for backtest.
+            eval_config = copy.deepcopy(config)
+            fee_schedule = eval_config.get("env", {}).get("fee_schedule")
+            if fee_schedule:
+                final_tier = fee_schedule[-1]
+                final_fee = final_tier.get("ramp_to", final_tier.get("taker_fee", 0.0))
+                eval_config["env"]["taker_fee"] = final_fee
+                logger.info(f"[AUD-S129-01] HPO eval fee overridden from fee_schedule: {final_fee:.6f}")
             eval_env = create_vector_env(
-                config, num_envs=1, gym_shm=False, use_sync=True,
+                eval_config, num_envs=1, gym_shm=False, use_sync=True,
                 start_date=data_cfg.get("val_start_date"),
                 end_date=data_cfg.get("val_end_date"),
                 # FIX BUG-02: HPO eval env must have normalization isolation.
@@ -1097,9 +1106,15 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         total_return = (pv[-1] - pv[0]) / pv[0] if len(pv) > 0 else 0
 
         # Dual Sharpe: per-bar (canonical) + hourly-aggregated (research)
-        # FIX K04: Detect bar duration from data file path for correct annualization
+        # FIX K04 + AUD-S129-02: Detect bar duration for correct annualization.
+        # For multi-scale (v7), the base scale IS the bar duration. For v5/v6,
+        # infer from the data file path.
+        mdp_version = config.get("env", {}).get("mdp_version", "v5")
+        scales = config.get("features", {}).get("scales", [])
         data_file = config.get("data", {}).get("file_path", "")
-        if "3min" in data_file:
+        if mdp_version == "v7" and scales:
+            bar_minutes = scales[0]  # First scale is the base (decision) timeframe
+        elif "3min" in data_file:
             bar_minutes = 3
         elif "5min" in data_file:
             bar_minutes = 5

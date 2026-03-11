@@ -93,11 +93,10 @@ class SACTrainer:
         # may differ from pipeline's actual env count read from config["env"]).
         num_envs = getattr(env, 'num_envs', 1)
         raw_ui = sac_cfg.get("update_interval", 4)
-        if hpo_mode and raw_ui > 1:
-            # HPO trials are short (50K steps) — UTD=8 is overkill.
-            # Cap at UTD=1 (= num_envs total gradient steps per env step)
-            # to keep HPO trials under ~5 min. Full training restores config UTD.
-            raw_ui = 1
+        # FIX AUD-S129-03: HPO must use the SAME UTD as full training so that
+        # hyperparameters (especially tau, lr) are tuned in the correct regime.
+        # Previous cap to UTD=1 caused HPO to select HPs for 12 gradient steps
+        # that then ran at 96 — a fundamentally different optimization landscape.
         self.update_interval = raw_ui * num_envs
 
         # Auto-scale tau for high UTD
