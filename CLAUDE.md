@@ -67,9 +67,24 @@ tests/          # pytest suite
 - Do NOT rewrite vectorized PER with per-element iteration
 - Env returns raw numpy, not dicts — preserve this path
 
-## Post-Implementation Audit
+## Agent Skills — Auto-Dispatch
 
-**Mandatory** after code changes to `finrl_pro_ds/`, `scripts/`, `configs/`. See `.agent/skills/audit/SKILL.md`. Skip for `.md`-only changes.
+Six skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Trigger proactively** — don't wait for the user to ask.
+
+| Skill | Trigger | Spec |
+|-------|---------|------|
+| **Audit** | **Auto** after ANY code change to `finrl_pro_ds/`, `scripts/`, `configs/`. Skip `.md`-only. | `.agent/skills/audit/SKILL.md` |
+| **Deploy** | User requests GPU launch, instance management, or run deployment. | `.agent/skills/deploy/SKILL.md` |
+| **Memory** | **Auto** at session start (boot) and end (`/sync`). Update `core.md` proactively on findings. | `.agent/skills/memory/SKILL.md` |
+| **Memory Search** | Investigating past experiments, bugs, decisions. Use tag-based grep before raw file reads. | `.agent/skills/memory-search/SKILL.md` |
+| **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. `python scripts/monitor_fleet.py` | `.agent/skills/monitor/SKILL.md` |
+| **Optimization** | SPS regression, low GPU util, new hardware, new training loop, perf tuning. Profile first (Phase 1). | `.agent/skills/optimization/SKILL.md` |
+
+**Chaining rules:**
+- Code change → **Audit** (mandatory) → if perf-relevant → **Optimization**
+- Deploy request → **Monitor** (check fleet) → **Deploy** → **Monitor** (verify)
+- Session start → **Memory** boot → **Memory Search** if investigating prior work
+- Experiment result → **Memory** update `core.md` → `memory_store` if significant
 
 ## Memory Protocol
 
