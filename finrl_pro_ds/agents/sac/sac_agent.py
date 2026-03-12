@@ -104,13 +104,14 @@ class SACAgent:
         )
         self.target_entropy = -1.0  # -dim(action_space)
 
-        # Optimizers
-        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr_actor)
+        # Optimizers — OPT-09: fused=True uses single CUDA kernel for param update
+        _fused = self.device.type == "cuda"
+        self.actor_optimizer = optim.Adam(self.actor.parameters(), lr=lr_actor, fused=_fused)
         self.critic_optimizer = optim.Adam(
             list(self.critic1.parameters()) + list(self.critic2.parameters()),
-            lr=lr_critic,
+            lr=lr_critic, fused=_fused,
         )
-        self.alpha_optimizer = optim.Adam([self.log_alpha], lr=lr_alpha)
+        self.alpha_optimizer = optim.Adam([self.log_alpha], lr=lr_alpha, fused=_fused)
 
         # Replay buffer
         # Store scale_0 as "micro" (W,F), concat of remaining scales as "macro" (flat),
@@ -154,7 +155,7 @@ class SACAgent:
 
     def predict(
         self,
-        scale_tensors: list,
+        scale_input,
         private: torch.Tensor,
         deterministic: bool = False,
         **kwargs,
@@ -162,15 +163,19 @@ class SACAgent:
         """Predict action given multi-scale observations.
 
         Args:
-            scale_tensors: list of N tensors, each (B, W, F)
+            scale_input: either a pre-stacked (B, N, W, F) tensor or
+                         a list of N tensors each (B, W, F)
             private: (B, private_dim)
             deterministic: Use mean action (no sampling)
 
         Returns:
             actions: (B, 1) continuous position fraction
         """
-        # Stack list into (B, N, W, F) for torch.compile-friendly forward pass
-        scale_stack = torch.stack(scale_tensors, dim=1)
+        # Accept pre-stacked tensor (fast path) or list (backward compat)
+        if isinstance(scale_input, list):
+            scale_stack = torch.stack(scale_input, dim=1)
+        else:
+            scale_stack = scale_input
         # FIX R7-AUD-06: Disable dropout for deterministic inference (backtest/eval).
         # DilatedCNNEncoder has dropout=0.1 — without eval mode, deterministic
         # predictions have random noise, breaking backtest reproducibility.
@@ -217,113 +222,149 @@ class SACAgent:
         )
 
     def train_step(self) -> Optional[Dict[str, float]]:
-        """One SAC update step. Returns metrics dict or None if buffer too small."""
+        """One SAC update step. Returns metrics dict or None if buffer too small.
+
+        For better throughput, prefer train_step_mega(n_steps) which samples
+        once and runs multiple gradient steps from GPU-resident data.
+        """
+        return self.train_step_mega(1)
+
+    def train_step_mega(self, n_steps: int = 1) -> Optional[Dict[str, float]]:
+        """Run n_steps SAC gradient updates from a single mega-batch.
+
+        OPT-07: Samples n_steps * batch_size transitions ONCE, transfers to
+        GPU ONCE, then runs n_steps gradient steps from GPU-resident mini-batches.
+        Eliminates CPU-GPU interleaving that caused 40 pipeline flushes per env.step().
+
+        Args:
+            n_steps: Number of gradient steps to run from the mega-batch.
+
+        Returns:
+            Latest metrics dict, or None if buffer too small.
+        """
         if len(self.replay_buffer) < self.learning_starts:
             return None
 
         if not hasattr(self, '_train_step_count'):
             self._train_step_count = 0
-        self._train_step_count += 1
 
-        # Sample batch
+        mega_batch_size = n_steps * self.batch_size
+
+        # --- ONE CPU phase: sample + transfer ---
         states, actions_np, rewards_np, next_states, dones_np, _ = \
-            self.replay_buffer.sample(self.batch_size)
+            self.replay_buffer.sample(mega_batch_size)
 
-        # Convert to tensors — dynamic scale unpacking with H2D
-        scale_stack, next_scale_stack = self._unpack_buffer_to_stacks(states, next_states)
-        priv = self._to_device_pinned(states["private"])
+        # Transfer ALL data to GPU at once
+        all_scale_stack, all_next_scale_stack = self._unpack_buffer_to_stacks(states, next_states)
+        all_priv = self._to_device_pinned(states["private"])
+        all_npriv = self._to_device_pinned(next_states["private"])
+        all_actions = self._to_device_pinned(actions_np)
+        all_rewards = self._to_device_pinned(rewards_np).unsqueeze(1)
+        all_dones = self._to_device_pinned(dones_np).unsqueeze(1)
 
-        actions = self._to_device_pinned(actions_np)
-        rewards = self._to_device_pinned(rewards_np).unsqueeze(1)
-        dones = self._to_device_pinned(dones_np).unsqueeze(1)
-
-        npriv = self._to_device_pinned(next_states["private"])
-
-        alpha = self.log_alpha.exp().detach()
         amp_ctx = torch.amp.autocast(
             'cuda', dtype=self.amp_dtype,
             enabled=self.use_amp and self.device.type == 'cuda',
         )
 
-        # --- Critic update ---
-        with torch.no_grad():
+        metrics = None
+        bs = self.batch_size
+
+        # --- ONE GPU phase: n_steps gradient steps, no CPU interruption ---
+        for step_i in range(n_steps):
+            self._train_step_count += 1
+            start = step_i * bs
+            end = start + bs
+
+            # Slice mini-batch from GPU-resident mega-batch (views, zero-copy)
+            scale_stack = all_scale_stack[start:end]
+            next_scale_stack = all_next_scale_stack[start:end]
+            priv = all_priv[start:end]
+            npriv = all_npriv[start:end]
+            actions = all_actions[start:end]
+            rewards = all_rewards[start:end]
+            dones = all_dones[start:end]
+
+            alpha = self.log_alpha.exp().detach()
+
+            # --- Critic update ---
+            with torch.no_grad():
+                with amp_ctx:
+                    next_action, next_log_prob = self.actor.sample(next_scale_stack, npriv)
+                    target_q1 = self.target_critic1(next_scale_stack, npriv, next_action)
+                    target_q2 = self.target_critic2(next_scale_stack, npriv, next_action)
+                    target_q = torch.min(target_q1, target_q2) - alpha * next_log_prob
+                    target_value = rewards + (1.0 - dones) * self.gamma * target_q
+
             with amp_ctx:
-                next_action, next_log_prob = self.actor.sample(next_scale_stack, npriv)
-                target_q1 = self.target_critic1(next_scale_stack, npriv, next_action)
-                target_q2 = self.target_critic2(next_scale_stack, npriv, next_action)
-                target_q = torch.min(target_q1, target_q2) - alpha * next_log_prob
-                target_value = rewards + (1.0 - dones) * self.gamma * target_q
+                q1 = self.critic1(scale_stack, priv, actions)
+                q2 = self.critic2(scale_stack, priv, actions)
+                critic_loss = nn.functional.mse_loss(q1, target_value) + nn.functional.mse_loss(q2, target_value)
 
-        with amp_ctx:
-            q1 = self.critic1(scale_stack, priv, actions)
-            q2 = self.critic2(scale_stack, priv, actions)
-            critic_loss = nn.functional.mse_loss(q1, target_value) + nn.functional.mse_loss(q2, target_value)
+            self.critic_optimizer.zero_grad()
+            if self.scaler.is_enabled():
+                self.scaler.scale(critic_loss).backward()
+                self.scaler.unscale_(self.critic_optimizer)
+            else:
+                critic_loss.backward()
+            nn.utils.clip_grad_norm_(
+                list(self.critic1.parameters()) + list(self.critic2.parameters()),
+                self.gradient_clip,
+            )
+            if self.scaler.is_enabled():
+                self.scaler.step(self.critic_optimizer)
+            else:
+                self.critic_optimizer.step()
 
-        self.critic_optimizer.zero_grad()
-        if self.scaler.is_enabled():
-            self.scaler.scale(critic_loss).backward()
-            self.scaler.unscale_(self.critic_optimizer)
-        else:
-            critic_loss.backward()
-        nn.utils.clip_grad_norm_(
-            list(self.critic1.parameters()) + list(self.critic2.parameters()),
-            self.gradient_clip,
-        )
-        if self.scaler.is_enabled():
-            self.scaler.step(self.critic_optimizer)
-        else:
-            self.critic_optimizer.step()
+            # --- Actor update ---
+            with amp_ctx:
+                new_action, log_prob = self.actor.sample(scale_stack, priv)
+                q1_new = self.critic1(scale_stack, priv, new_action)
+                q2_new = self.critic2(scale_stack, priv, new_action)
+                q_new = torch.min(q1_new, q2_new)
+                actor_loss = (alpha * log_prob - q_new).mean()
 
-        # --- Actor update ---
-        with amp_ctx:
-            new_action, log_prob = self.actor.sample(scale_stack, priv)
-            q1_new = self.critic1(scale_stack, priv, new_action)
-            q2_new = self.critic2(scale_stack, priv, new_action)
-            q_new = torch.min(q1_new, q2_new)
-            actor_loss = (alpha * log_prob - q_new).mean()
+            self.actor_optimizer.zero_grad()
+            if self.scaler.is_enabled():
+                self.scaler.scale(actor_loss).backward()
+                self.scaler.unscale_(self.actor_optimizer)
+            else:
+                actor_loss.backward()
+            nn.utils.clip_grad_norm_(self.actor.parameters(), self.gradient_clip)
+            if self.scaler.is_enabled():
+                self.scaler.step(self.actor_optimizer)
+            else:
+                self.actor_optimizer.step()
 
-        self.actor_optimizer.zero_grad()
-        if self.scaler.is_enabled():
-            self.scaler.scale(actor_loss).backward()
-            self.scaler.unscale_(self.actor_optimizer)
-        else:
-            actor_loss.backward()
-        nn.utils.clip_grad_norm_(self.actor.parameters(), self.gradient_clip)
-        if self.scaler.is_enabled():
-            self.scaler.step(self.actor_optimizer)
-        else:
-            self.actor_optimizer.step()
+            # --- Alpha update (float32 — no AMP) ---
+            alpha_loss = -(self.log_alpha * (log_prob.float() + self.target_entropy).detach()).mean()
+            self.alpha_optimizer.zero_grad()
+            alpha_loss.backward()
+            self.alpha_optimizer.step()
 
-        # --- Alpha update (float32 — no AMP) ---
-        alpha_loss = -(self.log_alpha * (log_prob.float() + self.target_entropy).detach()).mean()
-        self.alpha_optimizer.zero_grad()
-        alpha_loss.backward()
-        self.alpha_optimizer.step()
+            # Scaler update (no-op if disabled for BF16)
+            self.scaler.update()
 
-        # Scaler update (no-op if disabled for BF16)
-        self.scaler.update()
+            # --- Target Polyak update (fused lerp_) ---
+            with torch.no_grad():
+                for tp, p in zip(self.target_critic1.parameters(), self.critic1.parameters()):
+                    tp.data.lerp_(p.data, self.tau)
+                for tp, p in zip(self.target_critic2.parameters(), self.critic2.parameters()):
+                    tp.data.lerp_(p.data, self.tau)
 
-        # --- Target Polyak update (fused lerp_) ---
-        with torch.no_grad():
-            for tp, p in zip(self.target_critic1.parameters(), self.critic1.parameters()):
-                tp.data.lerp_(p.data, self.tau)
-            for tp, p in zip(self.target_critic2.parameters(), self.critic2.parameters()):
-                tp.data.lerp_(p.data, self.tau)
+            # Extract metrics periodically to avoid .item() CUDA sync overhead.
+            if self._train_step_count % 50 == 0:
+                metrics = {
+                    "critic_loss": critic_loss.item(),
+                    "actor_loss": actor_loss.item(),
+                    "alpha": alpha.item(),
+                    "alpha_loss": alpha_loss.item(),
+                    "entropy": -log_prob.mean().item(),
+                    "q1_mean": q1.mean().item(),
+                    "q2_mean": q2.mean().item(),
+                }
 
-        # Only extract metrics every N steps to avoid .item() CUDA sync overhead.
-        # Each .item() forces GPU pipeline flush — with 12 calls per iteration
-        # that's 84 sync points (7 metrics × 12 UTD), killing throughput.
-        if self._train_step_count % 50 == 0:
-            return {
-                "critic_loss": critic_loss.item(),
-                "actor_loss": actor_loss.item(),
-                "alpha": alpha.item(),
-                "alpha_loss": alpha_loss.item(),
-                "entropy": -log_prob.mean().item(),
-                "q1_mean": q1.mean().item(),
-                "q2_mean": q2.mean().item(),
-            }
-        return None
+        return metrics
 
     def _to_device_pinned(self, arr: np.ndarray, dtype=torch.float32) -> torch.Tensor:
         """Transfer numpy array to GPU via pinned memory for true async DMA.

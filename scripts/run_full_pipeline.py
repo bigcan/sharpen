@@ -229,17 +229,16 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
         while not done and step < max_steps:
             # Dispatch obs keys based on agent type
             if "scale_0" in obs:
-                # SAC / V7 multi-scale obs (positional keys: scale_0, scale_1, ...)
-                scale_tensors = []
-                for si in range(100):  # find all scale_N keys
-                    sk = f"scale_{si}"
-                    if sk not in obs:
-                        break
-                    scale_tensors.append(
-                        torch.tensor(obs[sk], dtype=torch.float32).to(agent.device, non_blocking=True)
-                    )
-                priv = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device, non_blocking=True)
-                pred = agent.predict(scale_tensors, priv, deterministic=True)
+                # SAC / V7 multi-scale obs — stack into (B,N,W,F) for single H2D transfer
+                n_scales = sum(1 for si in range(100) if f"scale_{si}" in obs)
+                scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=0)  # (N,W,F)
+                scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).unsqueeze(0).to(
+                    agent.device, non_blocking=True
+                )  # (1,N,W,F)
+                priv = torch.as_tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(
+                    agent.device, non_blocking=True
+                )
+                pred = agent.predict(scale_stack, priv, deterministic=True)
             else:
                 micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device, non_blocking=True)
                 private = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device, non_blocking=True)
@@ -1089,16 +1088,16 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
 
         while not done and step < 200000:
             if agent_type == "sac":
-                scale_tensors = []
-                for si in range(100):
-                    sk = f"scale_{si}"
-                    if sk not in obs:
-                        break
-                    scale_tensors.append(
-                        torch.tensor(obs[sk], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
-                    )
-                priv = torch.tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
-                pred = agent.predict(scale_tensors, priv, deterministic=True)
+                # Stack all scales into (1,N,W,F) — single H2D transfer
+                n_scales = sum(1 for si in range(100) if f"scale_{si}" in obs)
+                scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=0)
+                scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).unsqueeze(0).to(
+                    device, non_blocking=True
+                )
+                priv = torch.as_tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(
+                    device, non_blocking=True
+                )
+                pred = agent.predict(scale_stack, priv, deterministic=True)
                 action = pred[0].cpu().numpy()  # (1, 1) → numpy scalar
             else:
                 micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)

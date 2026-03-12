@@ -106,6 +106,11 @@ class ContinuousSwingEnv(gym.Env):
         self._atr_buffer = []
         self._atr_rolling_mean = 0.0
 
+        # Time encoding cache — avoid np.datetime64 computation every step
+        self._cached_time_ptr = -1
+        self._cached_time_sin = 0.0
+        self._cached_time_cos = 1.0
+
         # Current observations
         self._current_obs = None
 
@@ -136,6 +141,9 @@ class ContinuousSwingEnv(gym.Env):
         # ATR tracking
         self._atr_buffer = []
         self._atr_rolling_mean = 0.0
+
+        # Reset time cache
+        self._cached_time_ptr = -1
 
         if self.handler:
             self.handler.reset()
@@ -296,7 +304,9 @@ class ContinuousSwingEnv(gym.Env):
         for i in range(len(self._scales)):
             key = f"scale_{i}"
             if key in step_data:
-                obs[key] = step_data[key].astype(np.float32)
+                arr = step_data[key]
+                # Avoid redundant copy if already float32 (handler typically returns f32)
+                obs[key] = arr if arr.dtype == np.float32 else arr.astype(np.float32)
         return obs
 
     def _get_private_state(self) -> np.ndarray:
@@ -314,19 +324,20 @@ class ContinuousSwingEnv(gym.Env):
             ret_bps = (self.current_close - self.prev_close) / self.prev_close * 10000.0
             pnl_proxy = float(np.clip(self.current_position * ret_bps / 100.0, -1.0, 1.0))
 
-        # 3-4. Time encoding
+        # 3-4. Time encoding (cached — only recompute when pointer advances)
         if self._current_obs and hasattr(self, 'handler') and self.handler:
-            ts = getattr(self.handler, '_base_timestamps', None)
             ptr = getattr(self.handler, '_ptr', 0)
-            if ts is not None and ptr > 0 and ptr <= len(ts):
-                ts_val = ts[ptr - 1]
-                # Convert to minute of day
-                dt = np.datetime64(ts_val, 'ns')
-                minutes = (dt - dt.astype('datetime64[D]')).astype('timedelta64[m]').astype(int)
-                time_sin = float(np.sin(2 * np.pi * minutes / 1440.0))
-                time_cos = float(np.cos(2 * np.pi * minutes / 1440.0))
-            else:
-                time_sin, time_cos = 0.0, 1.0
+            if ptr != self._cached_time_ptr:
+                ts = getattr(self.handler, '_base_timestamps', None)
+                if ts is not None and ptr > 0 and ptr <= len(ts):
+                    ts_val = ts[ptr - 1]
+                    dt = np.datetime64(ts_val, 'ns')
+                    minutes = (dt - dt.astype('datetime64[D]')).astype('timedelta64[m]').astype(int)
+                    self._cached_time_sin = float(np.sin(2 * np.pi * minutes / 1440.0))
+                    self._cached_time_cos = float(np.cos(2 * np.pi * minutes / 1440.0))
+                self._cached_time_ptr = ptr
+            time_sin = self._cached_time_sin
+            time_cos = self._cached_time_cos
         else:
             time_sin, time_cos = 0.0, 1.0
 
@@ -348,7 +359,9 @@ class ContinuousSwingEnv(gym.Env):
             for i in range(n_scales):
                 key = f"scale_{i}"
                 if key in self._current_obs:
-                    obs[key] = self._current_obs[key].copy()
+                    # No .copy() needed — SyncVectorEnv stacks (copies) all env obs,
+                    # and _current_obs is overwritten on next handler.step().
+                    obs[key] = self._current_obs[key]
                 else:
                     obs[key] = np.zeros((self.window_size, features_per_scale), dtype=np.float32)
         else:

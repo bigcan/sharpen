@@ -14,8 +14,9 @@ import numpy as np
 import torch
 import wandb
 import logging
-from typing import Dict
+from typing import Dict, Optional
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, Future
 
 from finrl_pro_ds.agents.sac.sac_agent import SACAgent
 
@@ -151,6 +152,18 @@ class SACTrainer:
             f"torch_threads={torch.get_num_threads()}"
         )
 
+        # OPT-08: Pipeline overlap — GPU training runs in background thread while
+        # CPU does env.step(). Deferred store ensures buffer writes don't race with sample().
+        # Timeline per iteration:
+        #   1. Wait for prev train (GPU done, buffer safe)
+        #   2. store_batch (deferred from prev iteration)
+        #   3. predict() (GPU, fast ~10ms)
+        #   4. Submit train (GPU background — samples buffer, runs gradients)
+        #   5. env.step() (CPU, ~200-300ms — overlaps with GPU training)
+        train_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="sac_train")
+        train_future: Optional[Future] = None
+        _deferred_store = None
+
         while total_steps < self.total_timesteps:
             # Diagnostic: one-time step-0 heartbeat to confirm loop entry
             if total_steps == 0:
@@ -160,42 +173,64 @@ class SACTrainer:
             # Apply fee curriculum
             self._apply_fee_schedule(total_steps)
 
-            # Get actions — extract scale tensors dynamically
-            scale_tensors = [
-                torch.tensor(obs[f"scale_{i}"], dtype=torch.float32).to(self.device, non_blocking=True)
-                for i in range(self._n_scales)
-            ]
-            priv = torch.tensor(obs["private"], dtype=torch.float32).to(self.device, non_blocking=True)
+            # OPT-08: Wait for previous training future — must complete before
+            # store_batch (buffer write safety) and predict (GPU contention).
+            if train_future is not None:
+                m = train_future.result()
+                if m is not None:
+                    metrics = m
+                train_future = None
+
+            # Store PREVIOUS iteration's transitions (deferred from last loop).
+            # Buffer write is safe here: training future is resolved above.
+            if _deferred_store is not None:
+                d_obs, d_act, d_rew, d_nobs, d_dones, d_vmask = _deferred_store
+                if np.all(d_vmask):
+                    self.agent.store_batch(d_obs, d_act, d_rew, d_nobs, d_dones)
+                elif np.any(d_vmask):
+                    v_obs = {k: v[d_vmask] for k, v in d_obs.items()}
+                    v_next = {k: v[d_vmask] for k, v in d_nobs.items()}
+                    self.agent.store_batch(
+                        v_obs, d_act[d_vmask], d_rew[d_vmask],
+                        v_next, d_dones[d_vmask],
+                    )
+                _deferred_store = None
+
+            # Get actions — stack all scales into ONE (B,N,W,F) tensor, ONE H2D transfer
+            # FIX OPT-01: Was creating N separate tensors + N .to(device) calls per step.
+            # np.stack is cheap (contiguous source from SyncVectorEnv), single torch transfer.
+            scale_np = np.stack(
+                [obs[f"scale_{i}"] for i in range(self._n_scales)], axis=1
+            )  # (B, N, W, F)
+            scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).to(
+                self.device, non_blocking=True
+            )
+            priv = torch.as_tensor(obs["private"], dtype=torch.float32).to(
+                self.device, non_blocking=True
+            )
 
             with torch.no_grad():
-                actions = self.agent.predict(scale_tensors, priv, deterministic=False)
+                actions = self.agent.predict(scale_stack, priv, deterministic=False)
                 actions_np = actions.cpu().numpy()
 
-            # Step environment
+            # Training updates — OPT-07+08: submit BEFORE env.step so GPU training
+            # runs concurrently with CPU env work. Buffer was written above (safe).
+            if total_steps >= self.learning_starts:
+                gradient_accumulator += self.update_interval
+                n_steps = int(gradient_accumulator)
+                if n_steps >= 1:
+                    train_future = train_executor.submit(self.agent.train_step_mega, n_steps)
+                    gradient_accumulator -= n_steps
+
+            # Step environment — CPU-bound, overlaps with GPU training (OPT-08)
             next_obs, rewards, terms, truncs, infos = self.env.step(actions_np)
 
-            # Store transitions
-            # FIX R6-AUD-01: Truncation (episode_length reached) must NOT mask Q-bootstrap.
-            # Only true termination (drawdown stop) should set done=1.0 in the buffer.
-            # In Gymnasium 1.x, the terminal obs is returned directly as next_obs
-            # (no final_observation indirection), so store_next_obs = next_obs is correct.
+            # Defer transition storage to next iteration (after train_future resolves)
+            # FIX R6-AUD-01: Only true termination sets done=1.0 (not truncation).
             dones_for_buffer = terms.astype(np.float32)
-
-            # FIX R7-AUD-01: Skip phantom auto-reset transitions.
-            # Gymnasium 1.x auto-resets on the step AFTER done, producing a phantom
-            # transition (terminal_obs → reset_obs, reward=0) that would pollute the
-            # replay buffer with cross-episode transitions having done=0.0.
+            # FIX R7-AUD-01: valid_mask filters phantom auto-reset transitions
             valid_mask = ~prev_any_done
-            if np.all(valid_mask):
-                self.agent.store_batch(obs, actions_np, rewards, next_obs, dones_for_buffer)
-            elif np.any(valid_mask):
-                # Filter to only valid (non-phantom) transitions
-                v_obs = {k: v[valid_mask] for k, v in obs.items()}
-                v_next = {k: v[valid_mask] for k, v in next_obs.items()}
-                self.agent.store_batch(
-                    v_obs, actions_np[valid_mask], rewards[valid_mask],
-                    v_next, dones_for_buffer[valid_mask],
-                )
+            _deferred_store = (obs, actions_np, rewards, next_obs, dones_for_buffer, valid_mask)
 
             # Episode tracking uses actual episode boundaries (term OR trunc)
             any_done = np.logical_or(terms, truncs)
@@ -220,15 +255,6 @@ class SACTrainer:
             obs = next_obs
             total_steps += num_envs
             self.agent.step_count = total_steps
-
-            # Training updates
-            if total_steps >= self.learning_starts:
-                gradient_accumulator += self.update_interval
-                while gradient_accumulator >= 1.0:
-                    m = self.agent.train_step()
-                    if m is not None:
-                        metrics = m
-                    gradient_accumulator -= 1.0
 
             # HPO heartbeat: print progress every 10K steps so user can see it's alive
             if self.hpo_mode and total_steps % 10000 < num_envs:
@@ -272,11 +298,32 @@ class SACTrainer:
 
                 wandb.log(log_data, step=total_steps)
 
-            # Checkpointing
+            # Checkpointing — drain training future first to avoid saving mid-update
             if total_steps % self.checkpoint_interval < num_envs:
+                if train_future is not None:
+                    m = train_future.result()
+                    if m is not None:
+                        metrics = m
+                    train_future = None
                 ckpt_path = os.path.join(self.ckpt_dir, f"checkpoint_step_{total_steps}.pth")
                 self.agent.save(ckpt_path)
                 logger.info(f"Checkpoint saved: {ckpt_path}")
+
+        # OPT-08: Drain last training future and flush deferred store
+        if train_future is not None:
+            train_future.result()
+        if _deferred_store is not None:
+            d_obs, d_act, d_rew, d_nobs, d_dones, d_vmask = _deferred_store
+            if np.all(d_vmask):
+                self.agent.store_batch(d_obs, d_act, d_rew, d_nobs, d_dones)
+            elif np.any(d_vmask):
+                v_obs = {k: v[d_vmask] for k, v in d_obs.items()}
+                v_next = {k: v[d_vmask] for k, v in d_nobs.items()}
+                self.agent.store_batch(
+                    v_obs, d_act[d_vmask], d_rew[d_vmask],
+                    v_next, d_dones[d_vmask],
+                )
+        train_executor.shutdown(wait=False)
 
         # Final checkpoint
         final_path = os.path.join(self.ckpt_dir, "checkpoint_final.pth")
