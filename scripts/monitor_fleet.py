@@ -232,6 +232,96 @@ def fetch_wandb_runs():
     return runs
 
 
+def _format_eta(seconds):
+    """Format seconds into a human-readable ETA string."""
+    if seconds is None or seconds < 0:
+        return "--"
+    if seconds < 60:
+        return "<1m"
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    if hours >= 24:
+        days = hours // 24
+        hours = hours % 24
+        return f"{days}d{hours:02d}h"
+    if hours > 0:
+        return f"{hours}h{minutes:02d}m"
+    return f"{minutes}m"
+
+
+def _count_completed_trials(summary):
+    """
+    Count completed HPO trials by scanning WandB summary for terminal trial keys.
+
+    Each trial logs one of: hpo/t{N}/completed, hpo/t{N}/killed, hpo/t{N}/error,
+    or hpo/t{N}/status (pruned). We find the highest trial number with a terminal
+    marker to determine how many trials have finished.
+    """
+    terminal_suffixes = ('/completed', '/killed', '/error', '/status')
+    max_trial = -1
+    for key in summary:
+        if not key.startswith('hpo/t'):
+            continue
+        if not any(key.endswith(s) for s in terminal_suffixes):
+            continue
+        # Extract trial number: "hpo/t5/completed" -> "5"
+        parts = key.split('/')
+        if len(parts) >= 2:
+            trial_str = parts[1][1:]  # strip 't' prefix
+            if trial_str.isdigit():
+                max_trial = max(max_trial, int(trial_str))
+    # Trial numbers are 0-indexed, so max_trial=5 means 6 trials done
+    return max_trial + 1 if max_trial >= 0 else 0
+
+
+def _compute_eta(run_config, summary, step, sps):
+    """
+    Compute ETA (seconds remaining) based on run phase and progress.
+
+    HPO phase: Count completed trials from summary keys, estimate remaining
+               trials * steps_per_trial + full training run.
+    Training phase: remaining = total_timesteps - step.
+    """
+    if not sps or sps <= 0 or step is None:
+        return None
+
+    # Detect phase from summary status markers
+    hpo_status = summary.get('hpo/status')
+    train_status = summary.get('train/status')
+
+    # Try to get config values
+    cfg_training = run_config.get('training', {}) or {}
+    cfg_hpo = run_config.get('hpo', {}) or {}
+    total_timesteps = cfg_training.get('total_timesteps')
+    steps_per_trial = cfg_hpo.get('steps_per_trial')
+    n_trials = cfg_hpo.get('n_trials')
+    hpo_enabled = cfg_hpo.get('enabled', False)
+
+    # HPO phase: hpo/status == "started" and NOT yet "completed"
+    if hpo_enabled and hpo_status == 'started' and steps_per_trial and n_trials:
+        trials_done = _count_completed_trials(summary)
+        remaining_trials = max(0, n_trials - trials_done)
+        # Assume current in-progress trial is ~halfway through (conservative)
+        remaining_hpo_steps = max(0, remaining_trials - 0.5) * steps_per_trial
+        # After HPO completes, full training run follows
+        full_train_steps = total_timesteps or 0
+        remaining_steps = remaining_hpo_steps + full_train_steps
+        return remaining_steps / sps
+
+    # Training phase: train/status == "started", or HPO completed and training underway
+    # During training, _step is set explicitly to global_step via wandb.log(step=global_step)
+    if train_status == 'started' and total_timesteps and total_timesteps > 0:
+        remaining = max(0, total_timesteps - step)
+        return remaining / sps
+
+    # Fallback: HPO disabled, no explicit status — try total_timesteps vs step
+    if not hpo_enabled and total_timesteps and total_timesteps > 0:
+        remaining = max(0, total_timesteps - step)
+        return remaining / sps
+
+    return None
+
+
 def _extract_wandb_metrics(run):
     """Extract key metrics from a WandB run object."""
     summary = run.summary._json_dict
@@ -298,6 +388,11 @@ def _extract_wandb_metrics(run):
             if verdict == "OK":
                 verdict = "WARNING"
 
+    # ETA computation
+    run_config = run.config or {}
+    eta_seconds = _compute_eta(run_config, summary, step, sps)
+    eta_str = _format_eta(eta_seconds)
+
     return {
         "run_id": run.id,
         "run_name": run.name,
@@ -314,6 +409,8 @@ def _extract_wandb_metrics(run):
         "hpo_status": hpo_status,
         "train_status": train_status,
         "minutes_since": round(minutes_since, 1) if minutes_since else None,
+        "eta_seconds": round(eta_seconds, 0) if eta_seconds is not None else None,
+        "eta_str": eta_str,
         "alerts": alerts,
         "verdict": verdict,
     }
@@ -391,17 +488,17 @@ def format_hw_table(hw_results):
 def format_wandb_table(wandb_runs):
     """Format WandB run status as a table."""
     lines = []
-    lines.append("=" * 110)
+    lines.append("=" * 120)
     lines.append("  WANDB ACTIVE RUNS")
-    lines.append("=" * 110)
+    lines.append("=" * 120)
 
     header = (
         f"{'Tag':<8} {'RunID':<10} {'Instance':<12} {'Step':>10} "
         f"{'SPS':>6} {'PF':>7} {'Q_mean':>8} {'Loss':>8} "
-        f"{'Phase':<10} {'Updated':>8} {'Status':<10}"
+        f"{'Phase':<10} {'Updated':>8} {'ETA':>8} {'Status':<10}"
     )
     lines.append(header)
-    lines.append("-" * 110)
+    lines.append("-" * 120)
 
     if not wandb_runs:
         lines.append("  (no active WandB runs)")
@@ -424,10 +521,12 @@ def format_wandb_table(wandb_runs):
                 phase_str = f"HPO {run['hpo_trials']}t"
             updated_str = f"{run['minutes_since']:.0f}m" if run['minutes_since'] is not None else "--"
 
+            eta_str = run.get('eta_str', '--')
+
             lines.append(
                 f"{run['exp_tag']:<8} {run['run_id']:<10} {run['instance']:<12} "
                 f"{step_str:>10} {sps_str:>6} {pf_str:>7} {q_str:>8} {loss_str:>8} "
-                f"{phase_str:<10} {updated_str:>8} {status:<10}"
+                f"{phase_str:<10} {updated_str:>8} {eta_str:>8} {status:<10}"
             )
 
     lines.append("")
@@ -471,10 +570,10 @@ def format_summary(hw_results, wandb_runs):
     ]
 
     lines = [
-        "-" * 110,
+        "-" * 120,
         f"  SUMMARY: {' | '.join(parts)}",
         f"  Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "-" * 110,
+        "-" * 120,
     ]
     return "\n".join(lines)
 
