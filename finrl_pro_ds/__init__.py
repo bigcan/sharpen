@@ -8,4 +8,5 @@ __all__ = [
     "training",
     "analytics",
     "utils",
+    "crypto",
 ]

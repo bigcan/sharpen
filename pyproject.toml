@@ -33,6 +33,13 @@ dependencies = [
 readme = "README.md"
 
 [project.optional-dependencies]
+crypto = [
+    "ccxt>=4.0.0",
+    "websockets>=12.0",
+    "aiohttp>=3.9.0",
+    "stable-baselines3>=2.3.0",
+    "matplotlib>=3.7",
+]
 dev = [
     "pytest>=7.0",
     "ruff>=0.1.8",
