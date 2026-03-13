@@ -621,8 +621,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         eval_env = None
         try:
             # FIX: Use SyncVectorEnv for HPO to avoid AsyncVectorEnv pipe crashes
+            # PERF-OPT S154: Raised cap from 12→24 — was halving throughput silently.
+            # 24 confirmed safe on all GPUHub instances (RTX 4090/5090).
             hpo_num_envs = min(config.get("training", {}).get("num_envs",
-                              config["env"].get("num_envs", 12)), 12)
+                              config["env"].get("num_envs", 24)), 24)
             env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True)
 
             if agent_type == "sac":
@@ -670,9 +672,17 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 hpo_bar_minutes = 1
 
             # Define Pruning Callback (also uses validation env)
-            def pruning_callback():
-                pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=3000, bar_minutes=hpo_bar_minutes)
-                return pf  # Optuna pruner expects a single float
+            # PERF-OPT S154: Skip pruning callback entirely when NopPruner is active.
+            # With NopPruner, the callback still ran evaluate_for_hpo(3000 steps) every
+            # 3K training steps — ~328 evals/trial × 50 trials = 16K serial eval calls,
+            # effectively doubling total runtime for zero benefit.
+            is_nop_pruner = isinstance(trial.study.pruner, optuna.pruners.NopPruner)
+            if is_nop_pruner:
+                pruning_callback = None
+            else:
+                def pruning_callback():
+                    pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=3000, bar_minutes=hpo_bar_minutes)
+                    return pf  # Optuna pruner expects a single float
 
             trainer.train(optuna_trial=trial, pruning_callback=pruning_callback)
 

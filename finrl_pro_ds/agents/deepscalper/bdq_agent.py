@@ -89,7 +89,9 @@ class DeepScalperBDQ:
             f"Action dim mismatch: agent={self.action_dims}, network={net_action_dims}"
         )
 
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
+        # PERF-OPT S154 (O5): Fused Adam — single CUDA kernel per step
+        _fused = self.device.type == "cuda"
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr, fused=_fused)
 
         # PERF-8: Cosine LR scheduler for stable late-training convergence
         # total_steps estimated from config; updated by trainer if available
@@ -277,48 +279,89 @@ class DeepScalperBDQ:
         return t.to(self.device)
 
     def train_step(self) -> Optional[Dict[str, float]]:
+        """Single gradient step (backward compat). Prefer train_step_mega()."""
+        return self.train_step_mega(1)
+
+    def train_step_mega(self, n_steps: int = 1) -> Optional[Dict[str, float]]:
+        """Run n_steps BDQ gradient updates from a single mega-batch.
+
+        PERF-OPT S154 (O1): Samples n_steps * batch_size transitions ONCE,
+        transfers to GPU ONCE, then runs n_steps gradient steps from
+        GPU-resident mini-batches. Same pattern proven in SAC (5x SPS gain).
+
+        For PER, falls back to single-step mode.
+        """
         # FIX FIND-4: Ensure train mode for dropout/batchnorm
         self.policy_net.train()
         if len(self.memory) < self.batch_size:
             return None
 
-        # Sample Batch — PER returns (indices, is_weights) alongside transitions
+        # PER fallback: can't mega-batch Python-object SumTree
         if self.use_per:
-            (state_batch, action_batch, reward_batch, next_state_batch,
-             done_batch, aux_target_batch, per_indices, is_weights) = self.memory.sample(self.batch_size)
-            # PERF FIX-4: non_blocking H2D transfers
-            is_weights_t = torch.tensor(is_weights, dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)  # (B, 1)
-            # PER buffer returns tuples of dicts — need list comprehension to stack
-            def stack_dict_keys(batch_list, key):
-                return torch.tensor(np.array([s[key] for s in batch_list]), dtype=torch.float32).to(self.device, non_blocking=True)
-            micro_state = stack_dict_keys(state_batch, "micro")
-            private_state = stack_dict_keys(state_batch, "private")
-            macro_state = stack_dict_keys(state_batch, "macro")
-            micro_next = stack_dict_keys(next_state_batch, "micro")
-            private_next = stack_dict_keys(next_state_batch, "private")
-            macro_next = stack_dict_keys(next_state_batch, "macro")
-            actions = torch.tensor(np.array(action_batch), dtype=torch.long).to(self.device, non_blocking=True)
-            rewards = torch.tensor(np.array(reward_batch), dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
-            dones = torch.tensor(np.array(done_batch), dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
-            aux_targets = torch.tensor(np.array(aux_target_batch), dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
-        else:
-            # FIX BUF-1: FlatReplayBuffer returns pre-stacked numpy arrays (dicts with batch dim)
-            state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = self.memory.sample(self.batch_size)
-            per_indices = None
-            is_weights_t = None
-            # PERF-OPT: Pinned memory H2D — numpy → pinned RAM → async DMA to GPU.
-            # Old path used non_blocking=True on unpinned tensors (effectively synchronous).
-            # pin_memory() enables true async transfers, overlapping H2D with CPU work.
-            micro_state = self._to_device_pinned(state_batch["micro"])
-            private_state = self._to_device_pinned(state_batch["private"])
-            macro_state = self._to_device_pinned(state_batch["macro"])
-            micro_next = self._to_device_pinned(next_state_batch["micro"])
-            private_next = self._to_device_pinned(next_state_batch["private"])
-            macro_next = self._to_device_pinned(next_state_batch["macro"])
-            actions = self._to_device_pinned(action_batch, dtype=torch.long)
-            rewards = self._to_device_pinned(reward_batch).unsqueeze(1)
-            dones = self._to_device_pinned(done_batch).unsqueeze(1)
-            aux_targets = self._to_device_pinned(aux_target_batch).unsqueeze(1)
+            metrics = None
+            for _ in range(n_steps):
+                metrics = self._train_step_single_per()
+            return metrics
+
+        # --- ONE CPU phase: sample n_steps * batch_size, transfer to GPU ---
+        mega_batch_size = n_steps * self.batch_size
+        state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = self.memory.sample(mega_batch_size)
+
+        all_micro_s = self._to_device_pinned(state_batch["micro"])
+        all_private_s = self._to_device_pinned(state_batch["private"])
+        all_macro_s = self._to_device_pinned(state_batch["macro"])
+        all_micro_ns = self._to_device_pinned(next_state_batch["micro"])
+        all_private_ns = self._to_device_pinned(next_state_batch["private"])
+        all_macro_ns = self._to_device_pinned(next_state_batch["macro"])
+        all_actions = self._to_device_pinned(action_batch, dtype=torch.long)
+        all_rewards = self._to_device_pinned(reward_batch).unsqueeze(1)
+        all_dones = self._to_device_pinned(done_batch).unsqueeze(1)
+        all_aux_targets = self._to_device_pinned(aux_target_batch).unsqueeze(1)
+
+        # --- ONE GPU phase: n_steps gradient steps, no CPU interruption ---
+        metrics = None
+        bs = self.batch_size
+        for step_i in range(n_steps):
+            s = step_i * bs
+            e = s + bs
+            metrics = self._train_step_on_batch(
+                all_micro_s[s:e], all_private_s[s:e], all_macro_s[s:e],
+                all_micro_ns[s:e], all_private_ns[s:e], all_macro_ns[s:e],
+                all_actions[s:e], all_rewards[s:e], all_dones[s:e],
+                all_aux_targets[s:e], per_indices=None, is_weights_t=None,
+            )
+        return metrics
+
+    def _train_step_single_per(self) -> Optional[Dict[str, float]]:
+        """Single gradient step with PER sampling (not mega-batchable)."""
+        (state_batch, action_batch, reward_batch, next_state_batch,
+         done_batch, aux_target_batch, per_indices, is_weights) = self.memory.sample(self.batch_size)
+        is_weights_t = torch.tensor(is_weights, dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
+
+        def stack_dict_keys(batch_list, key):
+            return torch.tensor(np.array([s[key] for s in batch_list]), dtype=torch.float32).to(self.device, non_blocking=True)
+
+        micro_state = stack_dict_keys(state_batch, "micro")
+        private_state = stack_dict_keys(state_batch, "private")
+        macro_state = stack_dict_keys(state_batch, "macro")
+        micro_next = stack_dict_keys(next_state_batch, "micro")
+        private_next = stack_dict_keys(next_state_batch, "private")
+        macro_next = stack_dict_keys(next_state_batch, "macro")
+        actions = torch.tensor(np.array(action_batch), dtype=torch.long).to(self.device, non_blocking=True)
+        rewards = torch.tensor(np.array(reward_batch), dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
+        dones = torch.tensor(np.array(done_batch), dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
+        aux_targets = torch.tensor(np.array(aux_target_batch), dtype=torch.float32).unsqueeze(1).to(self.device, non_blocking=True)
+
+        return self._train_step_on_batch(
+            micro_state, private_state, macro_state, micro_next, private_next, macro_next,
+            actions, rewards, dones, aux_targets, per_indices, is_weights_t,
+        )
+
+    def _train_step_on_batch(
+        self, micro_state, private_state, macro_state, micro_next, private_next, macro_next,
+        actions, rewards, dones, aux_targets, per_indices, is_weights_t,
+    ) -> Optional[Dict[str, float]]:
+        """GPU-only gradient step on pre-transferred batch tensors."""
 
         # Current Q-Values — 2 branches (Paper-aligned)
         # FIX H1: Use modern torch.amp.autocast (works on CPU + CUDA)
@@ -443,28 +486,39 @@ class DeepScalperBDQ:
         # per-parameter Python loop (eliminates ~50 kernel launches per train_step).
         self._polyak_update()
 
-        # Logging Metrics — 2 branches
+        # PERF-OPT S154: Batch all GPU→CPU metric transfers into a single sync point.
+        # Previously 11+ individual .item() calls per train_step × 8 UTD = 88+
+        # GPU pipeline stalls per env-step batch. Now 1 sync point.
+        q_qty_mean = curr_q_qty.mean()
+        _metric_vals = [
+            total_loss, loss_price, loss_qty, loss_vol_pred, q_qty_mean,
+            q_qty_mean, curr_q_qty.std(), curr_q_qty.max(), curr_q_qty.min(),
+            target_q_qty.mean(), target_q_qty.max(), target_q_qty.min(),
+        ]
+        if q_price is not None:
+            _metric_vals.append(curr_q_price.mean())
+        _cpu = torch.stack([v.detach().float() for v in _metric_vals]).cpu().numpy()
+
         metrics = {
-            "loss_total": total_loss.item(),
-            "loss_price": loss_price.item(),
-            "loss_qty": loss_qty.item(),
-            "loss_aux": loss_vol_pred.item(),
-            "q_qty_mean": curr_q_qty.mean().item(),
+            "loss_total": float(_cpu[0]),
+            "loss_price": float(_cpu[1]),
+            "loss_qty": float(_cpu[2]),
+            "loss_aux": float(_cpu[3]),
+            "q_qty_mean": float(_cpu[4]),
             "epsilon": self.epsilon,
             # Sprint 1: Q-value statistics for overestimation monitoring
-            "q_value/mean": curr_q_qty.mean().item(),
-            "q_value/std": curr_q_qty.std().item(),
-            "q_value/max": curr_q_qty.max().item(),
-            "q_value/min": curr_q_qty.min().item(),
-            "q_value/target_mean": target_q_qty.mean().item(),
-            "q_value/target_max": target_q_qty.max().item(),
-            "q_value/target_min": target_q_qty.min().item(),
+            "q_value/mean": float(_cpu[5]),
+            "q_value/std": float(_cpu[6]),
+            "q_value/max": float(_cpu[7]),
+            "q_value/min": float(_cpu[8]),
+            "q_value/target_mean": float(_cpu[9]),
+            "q_value/target_max": float(_cpu[10]),
+            "q_value/target_min": float(_cpu[11]),
             "exploration_mode": 0.0 if self.exploration_mode == "uniform" else 1.0,
         }
         if q_price is not None:
-            metrics["q_price_mean"] = curr_q_price.mean().item()
-            metrics["q_value/mean"] = (curr_q_price.mean().item() + curr_q_qty.mean().item()) / 2.0
-
+            metrics["q_price_mean"] = float(_cpu[12])
+            metrics["q_value/mean"] = (float(_cpu[12]) + float(_cpu[5])) / 2.0
 
         if self.use_per:
             metrics["per_beta"] = self.memory.beta
