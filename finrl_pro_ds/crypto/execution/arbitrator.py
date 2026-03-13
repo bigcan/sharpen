@@ -501,7 +501,10 @@ class SoftmaxArbitrator(_BaseArbitrator):
         """
         self._step_counter += 1
         due = (self._step_counter % self.reweight_every == 0)
-        if due or self._check_emergency():
+        # C1 fix: Force reweight on first step (when cache is empty) so that
+        # seeded validation returns are reflected in initial weights instead
+        # of falling back to uniform weights for the first reweight_every bars.
+        if due or not self._cached_weights or self._check_emergency():
             self._cached_weights = self._compute_weights()
 
     def get_weights(self) -> Dict[str, float]:

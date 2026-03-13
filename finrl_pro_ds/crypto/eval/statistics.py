@@ -65,7 +65,7 @@ def excess_kurtosis(x: Sequence[float]) -> float:
     return sum(((v - m) / s) ** 4 for v in x) / n - 3.0
 
 
-def sharpe_ratio(returns: Iterable[float], risk_free: float = 0.0, periods_per_year: int = 252) -> float:
+def sharpe_ratio(returns: Iterable[float], risk_free: float = 0.0, periods_per_year: int = 8760) -> float:
     r = _to_list(returns)
     if not r:
         return 0.0
@@ -76,7 +76,7 @@ def sharpe_ratio(returns: Iterable[float], risk_free: float = 0.0, periods_per_y
     return (mu / s) * (periods_per_year ** 0.5)
 
 
-def sortino_ratio(returns: Iterable[float], target: float = 0.0, periods_per_year: int = 252) -> float:
+def sortino_ratio(returns: Iterable[float], target: float = 0.0, periods_per_year: int = 8760) -> float:
     r = _to_list(returns)
     if not r:
         return 0.0
@@ -91,7 +91,7 @@ def probabilistic_sharpe_ratio(
     returns: Iterable[float],
     *,
     sr_benchmark: float = 0.0,
-    periods_per_year: int = 252,
+    periods_per_year: int = 8760,
 ) -> float:
     """Compute Probabilistic Sharpe Ratio (Bailey & Lopez de Prado, 2012).
 
@@ -136,7 +136,7 @@ def bootstrap_sharpe_ci(
     alpha: float = 0.05,
     B: int = 1000,
     seed: int | None = None,
-    periods_per_year: int = 252,
+    periods_per_year: int = 8760,
 ) -> SharpeCI:
     """Simple i.i.d. bootstrap CI for Sharpe ratio from daily returns.
 

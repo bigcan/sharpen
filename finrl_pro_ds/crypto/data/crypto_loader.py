@@ -233,9 +233,10 @@ class CryptoLoader:
             last_ts = candles[-1][0]
             if last_ts <= cursor:
                 break  # No progress — avoid infinite loop
-            # Use the candle's timestamp as the new cursor (not +1) and deduplicate
-            # to avoid skipping candles on exchanges with boundary rounding
-            cursor = last_ts
+            # C2 fix: Advance past the last candle to avoid re-fetching it.
+            # CCXT since= is inclusive, so +1ms prevents overlap. For 1h
+            # candles (3,600,000ms apart) this cannot skip any candle.
+            cursor = last_ts + 1
 
             await asyncio.sleep(REQUEST_DELAY)
 
