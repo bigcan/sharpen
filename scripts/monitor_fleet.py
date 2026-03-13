@@ -311,17 +311,14 @@ def _count_completed_trials(summary):
     return max_trial + 1 if max_trial >= 0 else 0
 
 
-def _compute_eta(run_config, summary, step, sps):
+def _compute_eta(run_config, summary, step, sps, run=None):
     """
     Compute ETA (seconds remaining) based on run phase and progress.
 
-    HPO phase: Count completed trials from summary keys, estimate remaining
-               trials * steps_per_trial + full training run.
-    Training phase: remaining = total_timesteps - step.
+    HPO phase: Use trial completion rate (elapsed_time / trials_done) to estimate
+               remaining time. Falls back to SPS-based estimate if available.
+    Training phase: remaining = total_timesteps - step, divided by SPS.
     """
-    if not sps or sps <= 0 or step is None:
-        return None
-
     # Detect phase from summary status markers
     hpo_status = summary.get('hpo/status')
     train_status = summary.get('train/status')
@@ -334,28 +331,68 @@ def _compute_eta(run_config, summary, step, sps):
     n_trials = cfg_hpo.get('n_trials')
     hpo_enabled = cfg_hpo.get('enabled', False)
 
-    # HPO phase: hpo/status == "started" and NOT yet "completed"
-    if hpo_enabled and hpo_status == 'started' and steps_per_trial and n_trials:
+    # HPO phase: estimate from trial completion rate (no SPS needed)
+    if hpo_enabled and hpo_status == 'started' and n_trials:
         trials_done = _count_completed_trials(summary)
         remaining_trials = max(0, n_trials - trials_done)
-        # Assume current in-progress trial is ~halfway through (conservative)
-        remaining_hpo_steps = max(0, remaining_trials - 0.5) * steps_per_trial
-        # After HPO completes, full training run follows
-        full_train_steps = total_timesteps or 0
-        remaining_steps = remaining_hpo_steps + full_train_steps
-        return remaining_steps / sps
+
+        # Method 1: Time-based — elapsed / trials_done * remaining_trials
+        elapsed_secs = _get_run_elapsed(run)
+        if elapsed_secs and elapsed_secs > 60 and trials_done > 0:
+            secs_per_trial = elapsed_secs / trials_done
+            # Remaining HPO time (subtract ~half a trial for in-progress work)
+            remaining_hpo_secs = max(0, remaining_trials - 0.5) * secs_per_trial
+            # After HPO, full training run — estimate from SPS or avg trial duration
+            if sps and sps > 0 and total_timesteps:
+                remaining_train_secs = total_timesteps / sps
+            else:
+                # Rough estimate: training takes ~2x a single HPO trial
+                remaining_train_secs = secs_per_trial * 2 if total_timesteps else 0
+            return remaining_hpo_secs + remaining_train_secs
+
+        # Method 2: SPS-based fallback (if SPS is logged)
+        if sps and sps > 0 and steps_per_trial:
+            remaining_hpo_steps = max(0, remaining_trials - 0.5) * steps_per_trial
+            full_train_steps = total_timesteps or 0
+            return (remaining_hpo_steps + full_train_steps) / sps
+
+        # Method 3: No trials done yet but we know elapsed time — extrapolate from step progress
+        if elapsed_secs and elapsed_secs > 60 and steps_per_trial and step and step > 0:
+            # Estimate how far into the first trial we are
+            # Assume _step roughly tracks logging frequency proportional to training steps
+            # This is a rough estimate — better than showing "--"
+            return None  # Not enough data for a reliable estimate
+
+        return None
 
     # Training phase: train/status == "started", or HPO completed and training underway
-    # During training, _step is set explicitly to global_step via wandb.log(step=global_step)
-    if train_status == 'started' and total_timesteps and total_timesteps > 0:
-        remaining = max(0, total_timesteps - step)
-        return remaining / sps
+    if sps and sps > 0 and step is not None:
+        if train_status == 'started' and total_timesteps and total_timesteps > 0:
+            remaining = max(0, total_timesteps - step)
+            return remaining / sps
 
-    # Fallback: HPO disabled, no explicit status — try total_timesteps vs step
-    if not hpo_enabled and total_timesteps and total_timesteps > 0:
-        remaining = max(0, total_timesteps - step)
-        return remaining / sps
+        # Fallback: HPO disabled, no explicit status
+        if not hpo_enabled and total_timesteps and total_timesteps > 0:
+            remaining = max(0, total_timesteps - step)
+            return remaining / sps
 
+    return None
+
+
+def _get_run_elapsed(run):
+    """Get elapsed seconds since run creation. Returns None on failure."""
+    if run is None:
+        return None
+    try:
+        created = run.created_at
+        if isinstance(created, str):
+            from datetime import datetime as _dt
+            created_dt = _dt.fromisoformat(created.replace('Z', '+00:00'))
+            return (datetime.now(timezone.utc) - created_dt).total_seconds()
+        elif isinstance(created, (int, float)):
+            return time.time() - created
+    except Exception:
+        pass
     return None
 
 
@@ -368,7 +405,7 @@ def _extract_wandb_metrics(run):
     exp_tags = [t for t in (run.tags or []) if not t.startswith('gpuhub') and not t.startswith('rtx')]
     exp_tag = exp_tags[0].upper() if exp_tags else "?"
 
-    # SPS
+    # SPS — use logged metric only (_step is a WandB log counter, not training steps)
     sps = summary.get('train/sps')
 
     # Q-values
@@ -440,7 +477,7 @@ def _extract_wandb_metrics(run):
 
     # ETA computation
     run_config = run.config or {}
-    eta_seconds = _compute_eta(run_config, summary, step, sps)
+    eta_seconds = _compute_eta(run_config, summary, step, sps, run=run)
     eta_str = _format_eta(eta_seconds)
 
     return {
