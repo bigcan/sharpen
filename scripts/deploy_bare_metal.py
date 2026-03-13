@@ -246,10 +246,10 @@ def deploy(args):
     err = stderr.read().decode()
 
     print("Setup Output:")
-    print(out.encode("utf-8", errors="replace").decode("utf-8"))
+    print(out.encode("ascii", errors="replace").decode("ascii"))
     if err:
         print("Setup Stderr:")
-        print(err.encode("utf-8", errors="replace").decode("utf-8"))
+        print(err.encode("ascii", errors="replace").decode("ascii"))
 
     if "SETUP_SUCCESS" not in out:
         print("CRITICAL: Setup failed. Aborting launch.")
@@ -312,7 +312,7 @@ def deploy(args):
     else:
         print("FAILURE: PID not found. Check remote logs.")
         stdin, stdout, stderr = ssh.exec_command(f"cat {remote_workspace}/{log_file}")
-        print(stdout.read().decode())
+        print(stdout.read().decode("utf-8", errors="replace").encode("ascii", errors="replace").decode("ascii"))
 
     ssh.close()
     os.remove(zip_name)
