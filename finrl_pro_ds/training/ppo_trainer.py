@@ -329,6 +329,17 @@ class PPOTrainer:
                             logs["train/sps"] = global_step / elapsed
 
                         wandb.log(logs)
+                    elif self.hpo_mode and wandb and wandb.run and global_step % 10000 < (self.rollout_steps * num_envs):
+                        # WandB heartbeat during HPO so fleet monitor doesn't flag as stalled
+                        try:
+                            elapsed = time.time() - start_time
+                            sps = global_step / max(elapsed, 1e-6)
+                            wandb.log({
+                                "hpo/heartbeat_step": global_step,
+                                "hpo/heartbeat_sps": round(sps, 1),
+                            })
+                        except Exception:
+                            pass
 
                 # HPO Pruning
                 if optuna_trial and pruning_callback:
