@@ -1,0 +1,71 @@
+# Funding Rate Arbitrage — Delta-Neutral Spot-Perp Strategy
+# Long spot + short perp (or reverse) to collect funding payments
+# while maintaining market neutrality across 20 crypto assets.
+
+strategy:
+  id: "funding-arb"
+  name: "funding_arb_delta_neutral"
+  version: "1.0.0"
+
+universe:
+  assets: ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "AVAX", "DOGE",
+           "DOT", "LINK", "ETC", "UNI", "ATOM", "LTC", "FIL", "APT",
+           "ARB", "OP", "NEAR", "INJ"]
+  quote: "USDT"
+  data_exchange: "binance"
+  n_assets: 20
+
+data:
+  source: "ccxt"
+  market_type: "futures"
+  frequency: "1h"
+  start_date: "2022-01-01"
+  end_date: null  # rolling
+  cache_dir: "./data/crypto_cache"
+
+features:
+  tech_dim: 12            # 12 funding-arb features per asset
+  norm_window: 720        # 1 month in hours
+  zscore_window: 720
+  correlation_window: 168  # 1 week
+
+environment:
+  type: "funding_arb"
+  initial_capital: 100000
+  # --- Cost model ---
+  spot_taker_fee_pct: 0.0001     # 1 bp Binance spot
+  perp_taker_fee_pct: 0.0005     # 5 bp Binance futures
+  perp_margin_rate: 0.05          # 5% margin for perp leg (20x leverage)
+  slippage_base_bps: 2.0
+  slippage_impact_bps: 10.0
+  # --- Constraints ---
+  max_gross_exposure: 0.80        # Max 80% of capital deployed
+  deadband_threshold: 0.02        # Ignore changes < 2%
+  # --- Reward ---
+  lambda_basis: 2.0               # Basis risk penalty weight
+  lambda_delta: 5.0               # Delta neutrality penalty weight
+  lambda_turnover: 0.003          # Churn penalty weight
+  reward_scaling: 100.0           # Scale up tiny per-bar funding
+  reward_clip_range: [-5.0, 5.0]
+  circuit_breaker_threshold: 0.05  # Terminate at 5% portfolio loss
+
+agents:
+  primary: "ppo"
+  total_timesteps: 2000000
+  ppo:
+    learning_rate: 3.0e-4
+    n_steps: 2048
+    batch_size: 64
+    n_epochs: 10
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_range: 0.2
+    ent_coef: 0.01
+    network_arch: [512, 512, 256]
+
+walk_forward:
+  train_bars: 8760        # 1 year
+  val_bars: 720           # 1 month
+  test_bars: 1440         # 2 months
+  step_bars: 720          # 1 month step
+  embargo_bars: 0

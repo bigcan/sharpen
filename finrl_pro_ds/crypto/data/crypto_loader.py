@@ -60,7 +60,7 @@ class CryptoLoader:
     def __init__(
         self,
         exchange: str = "binance",
-        market_type: Literal["swap", "future"] = "swap",
+        market_type: Literal["swap", "future", "spot"] = "swap",
         sandbox: bool = False,
     ):
         self.exchange_id = exchange
@@ -76,15 +76,17 @@ class CryptoLoader:
         import ccxt.async_support as ccxt
 
         exchange_class = getattr(ccxt, self.exchange_id)
-        self._exchange = exchange_class({
+        options = {
             "enableRateLimit": True,
             "options": {
-                "defaultType": self.market_type,  # 'swap' for perpetual futures
-                # Only load linear (USDT-margined) futures — skip dapi
-                # (coin-margined) endpoint which may have DNS/connectivity issues
-                "fetchMarkets": ["linear"],
+                "defaultType": "spot" if self.market_type == "spot" else self.market_type,
             },
-        })
+        }
+        # Only restrict to linear markets for futures/swap (skip dapi)
+        if self.market_type != "spot":
+            options["options"]["fetchMarkets"] = ["linear"]
+
+        self._exchange = exchange_class(options)
 
         if self.sandbox:
             self._exchange.set_sandbox_mode(True)
@@ -97,10 +99,13 @@ class CryptoLoader:
         return self._exchange
 
     def _to_symbol(self, base: str) -> str:
-        """Convert base asset to CCXT perpetual futures symbol.
+        """Convert base asset to CCXT symbol.
 
         Binance perpetuals: 'BTC/USDT:USDT'
+        Binance spot:       'BTC/USDT'
         """
+        if self.market_type == "spot":
+            return f"{base}/{QUOTE}"
         return f"{base}/{QUOTE}:{QUOTE}"
 
     def _resolve_symbols(self, assets: list[str]) -> dict[str, str]:
@@ -1084,6 +1089,69 @@ def fetch_crypto_data(
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
             return pool.submit(asyncio.run, coro).result()
     return asyncio.run(coro)
+
+
+def fetch_spot_data(
+    assets: list[str] | None = None,
+    start: str = "2022-01-01",
+    end: str | None = None,
+    exchange: str = "binance",
+    cache_dir: str = "./data/crypto_cache",
+    force_refresh: bool = False,
+) -> pd.DataFrame:
+    """Fetch spot OHLCV data for funding arb (spot leg).
+
+    Uses the same CryptoLoader with market_type="spot" and CryptoDataCleaner
+    for cleaning. Returns cleaned Silver-layer OHLCV DataFrame.
+
+    Usage:
+        spot_df = fetch_spot_data(["BTC", "ETH"], "2022-01-01", "2026-03-01")
+    """
+    cache_path = Path(cache_dir)
+    cache_path.mkdir(parents=True, exist_ok=True)
+    silver_spot_path = cache_path / "silver_spot_ohlcv.parquet"
+
+    if not force_refresh and silver_spot_path.exists():
+        logger.info(f"Loading spot Silver cache from {silver_spot_path}")
+        df = pd.read_parquet(silver_spot_path)
+        df["timestamp"] = pd.to_datetime(df["timestamp"])
+        if df["timestamp"].dt.tz is None:
+            df["timestamp"] = df["timestamp"].dt.tz_localize("UTC")
+        else:
+            df["timestamp"] = df["timestamp"].dt.tz_convert("UTC")
+        return df
+
+    async def _fetch():
+        loader = CryptoLoader(exchange=exchange, market_type="spot")
+        if assets is None:
+            _assets = DEFAULT_UNIVERSE
+        else:
+            _assets = assets
+        if end is None:
+            _end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        else:
+            _end = end
+
+        try:
+            bronze = await loader.fetch_ohlcv(_assets, start, _end, "1h")
+        finally:
+            await loader.close()
+
+        cleaner = CryptoDataCleaner()
+        silver, _ = cleaner.clean(bronze)
+        silver.to_parquet(silver_spot_path, index=False)
+        logger.info(f"Spot Silver data cached to {silver_spot_path}")
+        return silver
+
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    if loop and loop.is_running():
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            return pool.submit(asyncio.run, _fetch()).result()
+    return asyncio.run(_fetch())
 
 
 # ===========================================================================

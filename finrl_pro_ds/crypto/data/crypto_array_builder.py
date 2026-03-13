@@ -168,3 +168,148 @@ def _renormalize_within_window(
         result[:, col_idx] = z.fillna(0.0).clip(-clip, clip).values
 
     return result.astype(np.float32)
+
+
+# ---------------------------------------------------------------------------
+# Funding Arb Array Builder
+# ---------------------------------------------------------------------------
+
+# The 12 funding-arb feature columns produced by funding_arb_features.py.
+FUNDING_ARB_FEATURE_COLS = [
+    "funding_rate_raw",
+    "funding_rate_annualized",
+    "funding_ema_24h",
+    "funding_ema_168h",
+    "funding_zscore",
+    "basis_pct",
+    "basis_zscore",
+    "oi_change_pct",
+    "volume_zscore",
+    "btc_correlation",
+    "volatility_24h",
+    "volume_profile_skew",
+]
+
+
+def build_funding_arb_arrays(
+    spot_ohlcv: pd.DataFrame,
+    perp_ohlcv: pd.DataFrame,
+    arb_features: pd.DataFrame,
+    funding: pd.DataFrame,
+    assets: list[str],
+    start_ts: pd.Timestamp,
+    end_ts: pd.Timestamp,
+    feature_cols: list[str] | None = None,
+    norm_window: int = 720,
+) -> dict:
+    """Build numpy arrays for FundingArbEnv from a time window.
+
+    Args:
+        spot_ohlcv: Spot OHLCV DataFrame [timestamp, ticker, open, high, low, close, volume].
+        perp_ohlcv: Perp OHLCV DataFrame [timestamp, ticker, open, high, low, close, volume].
+        arb_features: Funding arb features [timestamp, ticker, ...feature_cols...].
+        funding: Funding rates [timestamp, ticker, funding_rate].
+        assets: Ordered list of base asset symbols.
+        start_ts: Window start timestamp (inclusive).
+        end_ts: Window end timestamp (inclusive).
+        feature_cols: Feature columns to use. Defaults to FUNDING_ARB_FEATURE_COLS.
+        norm_window: Rolling z-score window for per-window re-normalization (LEAK-1).
+
+    Returns:
+        Dict with keys: spot_price_ary, perp_price_ary, funding_rate_ary,
+                         spot_volume_ary, perp_volume_ary, tech_ary, timestamps.
+    """
+    if feature_cols is None:
+        feature_cols = FUNDING_ARB_FEATURE_COLS
+
+    # Filter to time window — perp OHLCV defines the canonical timestamps
+    perp_mask = (perp_ohlcv["timestamp"] >= start_ts) & (perp_ohlcv["timestamp"] <= end_ts)
+    window_perp = perp_ohlcv[perp_mask].copy()
+
+    # Perp price array (T, n_assets)
+    perp_pivot = window_perp.pivot(index="timestamp", columns="ticker", values="close")
+    perp_pivot = perp_pivot.reindex(columns=assets).ffill().fillna(0.0)
+    timestamps = perp_pivot.index
+
+    perp_price_ary = perp_pivot.values
+
+    # Spot price array (T, n_assets)
+    spot_mask = (spot_ohlcv["timestamp"] >= start_ts) & (spot_ohlcv["timestamp"] <= end_ts)
+    window_spot = spot_ohlcv[spot_mask].copy()
+    spot_pivot = window_spot.pivot(index="timestamp", columns="ticker", values="close")
+    spot_pivot = spot_pivot.reindex(index=timestamps, columns=assets).ffill().fillna(0.0)
+    spot_price_ary = spot_pivot.values
+
+    # Warn about zero-price assets
+    zero_spot = [a for a in assets if (spot_pivot[a] == 0.0).all()]
+    zero_perp = [a for a in assets if (perp_pivot[a] == 0.0).all()]
+    if zero_spot:
+        logger.warning(f"Assets with no spot price data in window: {zero_spot}")
+    if zero_perp:
+        logger.warning(f"Assets with no perp price data in window: {zero_perp}")
+
+    # Perp volume array (T, n_assets)
+    perp_vol_pivot = window_perp.pivot(index="timestamp", columns="ticker", values="volume")
+    perp_vol_pivot = perp_vol_pivot.reindex(index=timestamps, columns=assets).ffill().fillna(0.0)
+    perp_volume_ary = perp_vol_pivot.values
+
+    # Spot volume array (T, n_assets)
+    spot_vol_pivot = window_spot.pivot(index="timestamp", columns="ticker", values="volume")
+    spot_vol_pivot = spot_vol_pivot.reindex(index=timestamps, columns=assets).ffill().fillna(0.0)
+    spot_volume_ary = spot_vol_pivot.values
+
+    # Funding rate array (T, n_assets)
+    fund_mask = (funding["timestamp"] >= start_ts) & (funding["timestamp"] <= end_ts)
+    window_fund = funding[fund_mask].copy()
+    if not window_fund.empty:
+        fund_pivot = window_fund.pivot(index="timestamp", columns="ticker", values="funding_rate")
+        fund_pivot = fund_pivot.reindex(index=timestamps, columns=assets).ffill().fillna(0.0)
+        funding_ary = fund_pivot.values
+    else:
+        funding_ary = np.zeros_like(perp_price_ary)
+
+    # Tech array (T, n_assets * n_features)
+    feat_mask = (arb_features["timestamp"] >= start_ts) & (arb_features["timestamp"] <= end_ts)
+    window_feats = arb_features[feat_mask].copy()
+
+    # Validate feature columns
+    available_cols = set(window_feats.columns)
+    missing_cols = [c for c in feature_cols if c not in available_cols]
+    if missing_cols:
+        raise ValueError(
+            f"OBS-DIM violation: feature columns missing from arb_features: "
+            f"{missing_cols}. Available: {sorted(available_cols)}"
+        )
+
+    tech_frames = []
+    for asset in assets:
+        asset_feats = window_feats[window_feats["ticker"] == asset].set_index("timestamp")
+        asset_feats = asset_feats.reindex(timestamps)[feature_cols].ffill().fillna(0.0)
+        tech_frames.append(asset_feats.values)
+
+    tech_ary = np.hstack(tech_frames)
+
+    # OBS-DIM invariant
+    actual_features_per_asset = len(feature_cols)
+    if tech_ary.shape[1] != len(assets) * actual_features_per_asset:
+        raise ValueError(
+            f"OBS-DIM violation: tech_ary has {tech_ary.shape[1]} columns but expected "
+            f"{len(assets)} assets × {actual_features_per_asset} features = "
+            f"{len(assets) * actual_features_per_asset}"
+        )
+
+    # LEAK-1 fix: Re-normalize within window
+    tech_ary = _renormalize_within_window(tech_ary, norm_window)
+
+    # Convert timestamps to epoch seconds
+    ts_epoch = timestamps.astype(np.int64) // 10**9
+
+    return {
+        "spot_price_ary": spot_price_ary.astype(np.float64),
+        "perp_price_ary": perp_price_ary.astype(np.float64),
+        "funding_rate_ary": funding_ary.astype(np.float64),
+        "spot_volume_ary": spot_volume_ary.astype(np.float64),
+        "perp_volume_ary": perp_volume_ary.astype(np.float64),
+        "tech_ary": tech_ary.astype(np.float32),
+        "timestamps": ts_epoch.values,
+    }
