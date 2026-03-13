@@ -21,17 +21,18 @@ import sys
 import os
 import time
 import argparse
-import wandb
 from datetime import datetime
 
 # Add project root
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from scripts.remote_cmd import remote_cmd
-from scripts.collect_run import collect_run
+# Thresholds
+Q_DIVERGENCE_THRESHOLD = 1e4
 
 def check_remote_pid(pid):
     """Check if remote PID is running via SSH."""
+    from scripts.remote_cmd import remote_cmd
+
     if not pid:
         return False
     try:
@@ -52,6 +53,9 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
         max_wait: Max seconds to monitor
         no_collect: If True, do not trigger collect_run.py on finish
     """
+    import wandb
+    from scripts.collect_run import collect_run
+
     print(f"\n{'='*60}")
     print(f"  Monitoring Run: {run_id}")
     print(f"  Poll Interval: {poll_interval}s | Max Wait: {max_wait/3600:.1f}h")
@@ -97,37 +101,38 @@ def monitor_run(run_id, pid=None, poll_interval=120, max_wait=7200, no_collect=F
                 if not is_alive:
                     print(f"[{datetime.now().strftime('%H:%M:%S')}] [DEAD] Remote process {pid} DIED but WandB is {state}")
                     print("  This usually means a hard crash or OOM kill.")
-                    if not no_collect: collect_run(run_id, skip_report=True)
+                    if not no_collect:
+                        collect_run(run_id, skip_report=True)
                     return
 
-            # 3. Check Metrics (Live History)
-            # Scan last few rows
-            history = list(run.scan_history(keys=['_step', 'train/loss', 'train/q_mean'], page_size=10))[-10:]
-            if history:
-                latest = history[-1]
-                step = latest.get('_step', 0)
-                loss = latest.get('train/loss', 0)
-                q_mean = latest.get('train/q_mean', 0)
+            # 3. Check Metrics (via run.summary — fast, no scan_history)
+            summary = run.summary._json_dict
+            step = summary.get('_step', summary.get('step', 0))
+            loss = summary.get('agent/loss_total')
+            q_mean = summary.get('agent/q_value/mean', summary.get('agent/q_qty_mean'))
 
-                # Stall Detection
-                if step > last_step:
-                    last_step = step
-                    last_step_time = time.time()
-                elif time.time() - last_step_time > (poll_interval * 5): # 5 cycles no step
-                    print(f"[WARN] STALL DETECTED: No new steps for {(time.time()-last_step_time)/60:.1f} min")
+            # Stall Detection
+            if step > last_step:
+                last_step = step
+                last_step_time = time.time()
+            elif time.time() - last_step_time > (poll_interval * 5):
+                print(f"[WARN] STALL DETECTED: No new steps for {(time.time()-last_step_time)/60:.1f} min")
 
-                # NaN Detection
-                if loss is not None and str(loss).lower() == 'nan':
-                     print(f"[ERROR] NaN DETECTED in loss at step {step}")
-                     # Could kill process here? For now, just alert.
+            # NaN Detection
+            if loss is not None and (
+                str(loss).lower() in ('nan', 'inf')
+                or (isinstance(loss, float) and (loss != loss or abs(loss) == float('inf')))
+            ):
+                print(f"[ERROR] NaN/Inf DETECTED in loss at step {step}")
 
-                # Q-Divergence
-                if q_mean and abs(q_mean) > 1e6:
-                    print(f"[WARN] Q-DIVERGENCE: Mean Q > 1e6 ({q_mean:.2e}) at step {step}")
+            # Q-Divergence
+            if q_mean is not None and isinstance(q_mean, (int, float)) and abs(q_mean) > Q_DIVERGENCE_THRESHOLD:
+                print(f"[WARN] Q-DIVERGENCE: |q_mean| = {abs(q_mean):.2e} > {Q_DIVERGENCE_THRESHOLD:.0e}")
 
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] Status: {state} | Step: {step} | Loss: {loss:.4f} | Q: {q_mean:.2f}")
-            else:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] Status: {state} (Waiting for metrics...)")
+            # Safe formatting
+            loss_str = f"{loss:.4f}" if isinstance(loss, (int, float)) and loss == loss else str(loss)
+            q_str = f"{q_mean:.2f}" if isinstance(q_mean, (int, float)) else str(q_mean)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Status: {state} | Step: {step:,} | Loss: {loss_str} | Q: {q_str}")
 
         except Exception as e:
             print(f"Monitor error (retrying): {e}")

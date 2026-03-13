@@ -40,11 +40,12 @@ STALL_MINUTES = 30
 GPU_UTIL_LOW = 30          # % — warn if GPU < 30% with active run
 GPU_MEM_HIGH = 95          # % — warn if GPU memory > 95%
 
-# SPS thresholds by GPU tier (approximate, for swing MDP with num_envs=24)
+# SPS thresholds by GPU tier and algorithm
+# BDQ/IQN are env-step-bound (~500+ SPS); SAC is gradient-bound (~4 SPS)
 SPS_THRESHOLDS = {
-    "RTX 5090": 800,
-    "RTX 4090": 500,
-    "default": 400,
+    "RTX 5090": {"default": 800, "sac": 2},
+    "RTX 4090": {"default": 500, "sac": 2},
+    "default":  {"default": 400, "sac": 2},
 }
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -177,13 +178,49 @@ def probe_instance(name, inst_config, timeout=30):
                     result["wandb_run_ids"].append(rid)
                     seen_ids.add(rid)
 
-        # 4. Last log line (quick health check)
+        # 4. Per-GPU process count (MONITOR-10)
+        cmd_compute = (
+            "nvidia-smi --query-compute-apps=gpu_bus_id,pid "
+            "--format=csv,noheader,nounits 2>/dev/null"
+        )
+        _, stdout, _ = ssh.exec_command(cmd_compute, timeout=timeout)
+        compute_out = stdout.read().decode('utf-8', errors='replace').strip()
+
+        # Map bus_id to GPU index (nvidia-smi reports GPUs in index order)
+        cmd_bus = (
+            "nvidia-smi --query-gpu=index,gpu_bus_id "
+            "--format=csv,noheader,nounits 2>/dev/null"
+        )
+        _, stdout, _ = ssh.exec_command(cmd_bus, timeout=timeout)
+        bus_out = stdout.read().decode('utf-8', errors='replace').strip()
+        bus_to_idx = {}
+        for bline in bus_out.split('\n'):
+            bparts = [p.strip() for p in bline.split(',')]
+            if len(bparts) >= 2:
+                bus_to_idx[bparts[1]] = int(bparts[0]) if bparts[0].isdigit() else bparts[0]
+
+        # Count PIDs per GPU index
+        gpu_proc_counts = {}
+        if compute_out:
+            for cline in compute_out.split('\n'):
+                cparts = [p.strip() for p in cline.split(',')]
+                if len(cparts) >= 2:
+                    bus_id = cparts[0]
+                    gpu_idx = bus_to_idx.get(bus_id)
+                    if gpu_idx is not None:
+                        gpu_proc_counts[gpu_idx] = gpu_proc_counts.get(gpu_idx, 0) + 1
+
+        # Attach per-GPU process count
+        for gpu in result["gpus"]:
+            gpu["process_count"] = gpu_proc_counts.get(gpu["index"], 0)
+
+        # 5. Last log line (quick health check)
         cmd_log = "tail -3 /workspace/DeepScalper/run_*.log 2>/dev/null | tail -5"
         _, stdout, _ = ssh.exec_command(cmd_log, timeout=timeout)
         log_tail = stdout.read().decode('utf-8', errors='replace').strip()
         result["log_tail"] = log_tail[-200:] if log_tail else ""
 
-        # 5. Anomaly detection on hardware
+        # 6. Anomaly detection on hardware
         for gpu in result["gpus"]:
             gpu_idx = gpu["index"]
             util = gpu["util_pct"]
@@ -379,12 +416,25 @@ def _extract_wandb_metrics(run):
 
     # Low SPS (check after enough steps)
     if sps is not None and step > 10_000:
-        # Determine GPU tier from tags
+        # Determine GPU tier from tags (normalize whitespace for double-space edge case)
         gpu_tag = next((t for t in (run.tags or []) if t.startswith('rtx')), None)
-        gpu_name = gpu_tag.upper().replace('RTX', 'RTX ') if gpu_tag else "default"
-        sps_threshold = SPS_THRESHOLDS.get(gpu_name, SPS_THRESHOLDS["default"])
+        gpu_name = " ".join(gpu_tag.upper().split()) if gpu_tag else "default"
+        gpu_thresholds = SPS_THRESHOLDS.get(gpu_name, SPS_THRESHOLDS["default"])
+
+        # Detect algorithm from tags or config
+        run_tags = [t.lower() for t in (run.tags or [])]
+        if "sac" in run_tags:
+            algo = "sac"
+        elif any(t in run_tags for t in ("iqn", "bdq", "ppo")):
+            algo = "default"
+        else:
+            # Fallback: check run config for SAC-specific keys
+            run_cfg = run.config or {}
+            algo = "sac" if "sac" in run_cfg.get("agents", {}) else "default"
+
+        sps_threshold = gpu_thresholds.get(algo, gpu_thresholds["default"])
         if sps < sps_threshold * 0.5:  # Warn at 50% of expected
-            alerts.append(f"LOW SPS: {sps:.0f} (expected >{sps_threshold})")
+            alerts.append(f"LOW SPS: {sps:.0f} (expected >{sps_threshold} for {algo.upper()})")
             if verdict == "OK":
                 verdict = "WARNING"
 
@@ -461,8 +511,13 @@ def format_hw_table(hw_results):
             temp_str = f"{gpu['temp_c']}C" if isinstance(gpu['temp_c'], int) else str(gpu['temp_c'])
             mem_pct_str = f"{gpu['mem_pct']:.0f}%"
 
-            procs = len(hw["processes"])
-            status = f"{procs} proc" if procs > 0 else "idle"
+            procs = gpu.get("process_count", None)
+            if procs is not None:
+                status = f"{procs} proc" if procs > 0 else "idle"
+            else:
+                # Fallback to instance-level count (shared)
+                inst_procs = len(hw["processes"])
+                status = f"{inst_procs} proc" if inst_procs > 0 else "idle"
 
             lines.append(
                 f"{hw['instance']:<12} {gpu['index']:<4} {gpu_model:<10} "
@@ -594,33 +649,34 @@ def detect_orphans(hw_results, wandb_runs):
     Detect orphan states:
       1. WandB says "running" but no process on any instance (ghost run)
       2. GPU has active process but no WandB run (untracked run)
+         Compares active GPU count vs tracked run count per instance.
     """
     alerts = []
 
-    # All WandB run IDs matched to instances
-    matched_ids = {r["run_id"] for r in wandb_runs if r.get("instance") != "?"}
     unmatched_ids = {r["run_id"] for r in wandb_runs if r.get("instance") == "?"}
 
-    # Check for unmatched WandB runs
+    # Check for unmatched WandB runs (ghost runs)
     for rid in unmatched_ids:
         run = next(r for r in wandb_runs if r["run_id"] == rid)
         alerts.append(
             f"GHOST RUN: WandB run {run['exp_tag']} ({rid}) is 'running' but not found on any instance"
         )
 
-    # Check for GPU with high memory but no WandB run
-    all_wandb_instances = {r.get("instance") for r in wandb_runs}
+    # Check for GPUs with high memory but no WandB run
+    # Compare active GPU count vs tracked run count per instance
     for hw in hw_results:
         if hw["status"] == "UNREACHABLE":
             continue
-        for gpu in hw["gpus"]:
-            if gpu["mem_used_mb"] > 2000:  # >2GB used
-                # Check if this instance has a WandB run
-                if hw["instance"] not in all_wandb_instances and not hw.get("wandb_run_ids"):
-                    alerts.append(
-                        f"UNTRACKED: {hw['instance']} GPU {gpu['index']} using "
-                        f"{gpu['mem_used_mb']}MB but no WandB run found"
-                    )
+        active_gpus = [g for g in hw["gpus"] if g["mem_used_mb"] > 2000]
+        instance_runs = [r for r in wandb_runs if r.get("instance") == hw["instance"]]
+        # Also count run IDs found via SSH
+        total_tracked = max(len(instance_runs), len(hw.get("wandb_run_ids", [])))
+        if len(active_gpus) > total_tracked:
+            for gpu in active_gpus[total_tracked:]:
+                alerts.append(
+                    f"UNTRACKED: {hw['instance']} GPU {gpu['index']} using "
+                    f"{gpu['mem_used_mb']}MB but no WandB run found"
+                )
 
     return alerts
 
