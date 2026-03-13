@@ -237,7 +237,7 @@ def deploy(args):
         # Base Image is PyTorch 2.8.0 + CUDA 12.8
         "/root/miniconda3/bin/pip install -q --upgrade -r requirements.txt",
         "echo 'STEP: INSTALL PKG'",
-        "/root/miniconda3/bin/pip install -q -e ."  # Editable install
+        f"/root/miniconda3/bin/pip install -q -e '.[{args.pip_extras}]'" if args.pip_extras else "/root/miniconda3/bin/pip install -q -e ."  # Editable install
     ]
 
     cmd_chain = " && ".join(setup_cmds) + " && echo SETUP_SUCCESS"
@@ -442,6 +442,7 @@ if __name__ == "__main__":
     parser.add_argument("--collect", action="store_true", help="After deploy, poll WandB until completion then auto-collect all data (blocking)")
     parser.add_argument("--instance", default=None, help="Named instance from instances.json (e.g. gpuhub-1, gpuhub-2). Default: uses 'default' key or .env")
     parser.add_argument("--gpu", default=None, help="CUDA_VISIBLE_DEVICES value (e.g. 0, 1, '0,1'). For multi-GPU instances.")
+    parser.add_argument("--pip_extras", default=None, help="pip extras group to install (e.g. 'crypto' -> pip install -e .[crypto])")
     args = parser.parse_args()
 
     deploy(args)
