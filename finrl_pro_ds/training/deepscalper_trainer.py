@@ -426,6 +426,7 @@ class DeepScalperTrainer:
             train_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ds_train")
             train_future: Optional[Future] = None
             _deferred_store = None  # Tuple of args for buffer push, deferred by 1 iteration
+            metrics = None  # Initialized here; set by train_future.result() each iteration
 
             def _push_to_buffer(store_args):
                 """Push transitions to buffer (n-step, flat, or PER path)."""
@@ -572,56 +573,56 @@ class DeepScalperTrainer:
                 # (resolved at top of this iteration). Offset by 1 step, which is
                 # fine for WandB logging granularity.
                 if metrics and global_step > 0 and global_step % self.log_interval == 0:
-                         if not self.hpo_mode:
-                             logs = {
-                                 "step": global_step,
-                                 "train/epoch": epoch + 1,
-                                 "train/reward_mean": np.mean(episode_rewards) if len(episode_rewards) > 0 else 0.0,
-                                 "train/len_mean": np.mean(episode_lens) if len(episode_lens) > 0 else 0.0,
-                                 **{f"agent/{k}": v for k, v in metrics.items()}
-                             }
-                             logs["agent/auxiliary_weight"] = self.agent.auxiliary_weight
-                             if "loss_aux" in metrics and "loss_total" in metrics:
-                                 total = metrics["loss_total"]
-                                 if total > 1e-12:
-                                     logs["agent/aux_loss_ratio"] = metrics["loss_aux"] / total
-                             if self.agent._lr_scheduler is not None:
-                                 logs["agent/learning_rate"] = self.agent._lr_scheduler.get_last_lr()[0]
+                    if not self.hpo_mode:
+                        logs = {
+                            "step": global_step,
+                            "train/epoch": epoch + 1,
+                            "train/reward_mean": np.mean(episode_rewards) if len(episode_rewards) > 0 else 0.0,
+                            "train/len_mean": np.mean(episode_lens) if len(episode_lens) > 0 else 0.0,
+                            **{f"agent/{k}": v for k, v in metrics.items()}
+                        }
+                        logs["agent/auxiliary_weight"] = self.agent.auxiliary_weight
+                        if "loss_aux" in metrics and "loss_total" in metrics:
+                            total = metrics["loss_total"]
+                            if total > 1e-12:
+                                logs["agent/aux_loss_ratio"] = metrics["loss_aux"] / total
+                        if self.agent._lr_scheduler is not None:
+                            logs["agent/learning_rate"] = self.agent._lr_scheduler.get_last_lr()[0]
 
-                             # Calculate SPS
-                             current_time = time.time()
-                             last_time = getattr(self, '_last_log_time', start_time)
-                             last_step = getattr(self, '_last_log_step', start_step)
+                        # Calculate SPS
+                        current_time = time.time()
+                        last_time = getattr(self, '_last_log_time', start_time)
+                        last_step = getattr(self, '_last_log_step', start_step)
 
-                             elapsed = current_time - last_time
-                             if elapsed > 1e-4:
-                                 sps = (global_step - last_step) / elapsed
-                                 logs["train/sps"] = sps
-                             else:
-                                 logs["train/sps"] = 0.0
+                        elapsed = current_time - last_time
+                        if elapsed > 1e-4:
+                            sps = (global_step - last_step) / elapsed
+                            logs["train/sps"] = sps
+                        else:
+                            logs["train/sps"] = 0.0
 
-                             self._last_log_time = current_time
-                             self._last_log_step = global_step
+                        self._last_log_time = current_time
+                        self._last_log_step = global_step
 
-                             verbose = self.config["training"].get("verbose_logging", False)
+                        verbose = self.config["training"].get("verbose_logging", False)
 
-                             if not verbose:
-                                 filtered_logs = {
-                                     "step": logs["step"],
-                                     "train/epoch": logs.get("train/epoch", 1),
-                                     "train/reward_mean": logs.get("train/reward_mean", 0.0),
-                                     "train/loss_total": logs.get("agent/loss_total", 0.0),
-                                     "train/sps": logs.get("train/sps", 0.0),
-                                     "train/epsilon": logs.get("agent/epsilon", 0.0),
-                                     "train/len_mean": logs.get("train/len_mean", 0.0),
-                                 }
-                                 for k, v in logs.items():
-                                     if k.startswith("eval/"):
-                                         filtered_logs[k] = v
+                        if not verbose:
+                            filtered_logs = {
+                                "step": logs["step"],
+                                "train/epoch": logs.get("train/epoch", 1),
+                                "train/reward_mean": logs.get("train/reward_mean", 0.0),
+                                "train/loss_total": logs.get("agent/loss_total", 0.0),
+                                "train/sps": logs.get("train/sps", 0.0),
+                                "train/epsilon": logs.get("agent/epsilon", 0.0),
+                                "train/len_mean": logs.get("train/len_mean", 0.0),
+                            }
+                            for k, v in logs.items():
+                                if k.startswith("eval/"):
+                                    filtered_logs[k] = v
 
-                                 wandb.log(filtered_logs)
-                             else:
-                                  wandb.log(logs)
+                            wandb.log(filtered_logs)
+                        else:
+                            wandb.log(logs)
 
                 # 4a. Hindsight Ratio Logging
                 if global_step > 0 and global_step % self.log_interval == 0 and not self.hpo_mode:
@@ -679,6 +680,16 @@ class DeepScalperTrainer:
                 # 5. Checkpointing
                 if global_step % self.checkpoint_interval == 0:
                     self.save_checkpoint(f"checkpoint_step_{global_step}.pth")
+
+        # --- End-of-loop cleanup: flush pipeline (last epoch's pending work) ---
+        try:
+            if train_future is not None:
+                train_future.result()
+            if _deferred_store is not None:
+                _push_to_buffer(_deferred_store)
+            train_executor.shutdown(wait=False)
+        except NameError:
+            pass  # n_calls==0: loop never ran, no pipeline vars to flush
 
         # Store obs for potential resume via skip_reset=True
         self._current_obs = obs
