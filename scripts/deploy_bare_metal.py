@@ -246,10 +246,10 @@ def deploy(args):
     err = stderr.read().decode()
 
     print("Setup Output:")
-    print(out)
+    print(out.encode("utf-8", errors="replace").decode("utf-8"))
     if err:
         print("Setup Stderr:")
-        print(err)
+        print(err.encode("utf-8", errors="replace").decode("utf-8"))
 
     if "SETUP_SUCCESS" not in out:
         print("CRITICAL: Setup failed. Aborting launch.")

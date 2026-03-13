@@ -63,6 +63,7 @@ agents:
     initial_alpha: 0.2
     learning_starts: 5000        # Reduced: fewer bars than 3-min
     update_interval: 2              # UTD=2: balanced sample efficiency vs SPS (8 was 96 grad steps → 1.6 SPS)
+    actor_update_freq: 2            # O-B: update actor every 2 critic steps (TD3-style delayed actor)
     gradient_clip: 10.0
     checkpoint_interval: 250000
 

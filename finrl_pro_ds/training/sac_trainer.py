@@ -81,6 +81,7 @@ class SACTrainer:
             torch_compile=config["training"].get("torch_compile", False),
             checkpoint_interval=sac_cfg.get("checkpoint_interval", 500_000),
             device=device,
+            actor_update_freq=sac_cfg.get("actor_update_freq", 2),
         )
 
         # Training config
