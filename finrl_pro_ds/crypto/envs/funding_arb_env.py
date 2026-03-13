@@ -167,15 +167,11 @@ class FundingArbEnv(gym.Env):
     def _build_hours_to_funding(self) -> np.ndarray:
         """Pre-compute hours until next funding settlement for each bar."""
         hours_in_day = (self.timestamps % 86400) // 3600
-        # Funding at 0, 8, 16. Next funding hour:
-        result = np.empty(len(self.timestamps), dtype=np.float64)
-        for i, h in enumerate(hours_in_day):
-            if h < 8:
-                result[i] = 8 - h
-            elif h < 16:
-                result[i] = 16 - h
-            else:
-                result[i] = 24 - h  # next day 00:00
+        # Funding at 0, 8, 16. Next funding hour (vectorized):
+        result = np.where(
+            hours_in_day < 8, 8 - hours_in_day,
+            np.where(hours_in_day < 16, 16 - hours_in_day, 24 - hours_in_day),
+        ).astype(np.float64)
         return result / 8.0  # normalize to [0, 1]
 
     # -------------------------------------------------------------------
@@ -221,6 +217,11 @@ class FundingArbEnv(gym.Env):
         funding_earned_this_step = np.zeros(self.n_assets, dtype=np.float64)
         if self._funding_mask[self.step_idx]:
             funding_earned_this_step = self._apply_funding(perp_price)
+
+        # --- FARB-02 fix: snapshot pre-trade basis PnL for reward penalty ---
+        pre_trade_basis_pnl = self._calc_total_unrealized_basis_pnl(
+            spot_price, perp_price
+        )
 
         # --- Step 2: Apply deadband and capital constraints ---
         target_weights = self._apply_deadband(action, self.arb_weights)
@@ -273,7 +274,12 @@ class FundingArbEnv(gym.Env):
 
         # --- Step 5: Compute reward ---
         funding_total = float(funding_earned_this_step.sum())
-        basis_pnl_change = self._calc_basis_pnl_change(spot_price, perp_price)
+        # FARB-02 fix: use pre-trade snapshot so penalty reflects mark-to-market
+        # change on held positions, not stale new-position-at-old-price artifact.
+        post_trade_basis_pnl = self._calc_total_unrealized_basis_pnl(
+            spot_price, perp_price
+        )
+        basis_pnl_change = post_trade_basis_pnl - pre_trade_basis_pnl
         net_delta = self._calc_net_delta(spot_price, perp_price, portfolio_value)
         turnover = float(np.abs(delta_weights).sum())
 
@@ -508,18 +514,6 @@ class FundingArbEnv(gym.Env):
             )
         )
         return float((spot_pnl[active] + perp_pnl[active]).sum())
-
-    def _calc_basis_pnl_change(
-        self, spot_price: np.ndarray, perp_price: np.ndarray
-    ) -> float:
-        """Calculate change in unrealized basis PnL (for reward penalty)."""
-        if len(self.portfolio_values) < 2:
-            return 0.0
-        current_basis = self._calc_total_unrealized_basis_pnl(spot_price, perp_price)
-        prev_spot = self.spot_price_ary[self.step_idx - 1]
-        prev_perp = self.perp_price_ary[self.step_idx - 1]
-        prev_basis = self._calc_total_unrealized_basis_pnl(prev_spot, prev_perp)
-        return current_basis - prev_basis
 
     def _calc_net_delta(
         self, spot_price: np.ndarray, perp_price: np.ndarray, portfolio_value: float

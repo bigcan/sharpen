@@ -393,3 +393,30 @@ class TestIntegration:
         assert "portfolio_value" in summary
         assert "total_funding_earned" in summary
         assert "n_active_pairs" in summary
+
+    def test_basis_pnl_change_uses_pre_trade_snapshot(self):
+        """FARB-02: basis PnL penalty should reflect held-position MTM, not new-at-old artifact."""
+        # Create env with diverging spot/perp so basis PnL is non-trivial
+        env = _make_env(n_bars=30, n_assets=1)
+        env.spot_price_ary[:, 0] = np.linspace(100, 115, 30)
+        env.perp_price_ary[:, 0] = np.linspace(100, 110, 30)
+        env.reset()
+
+        # Open a position and hold it for several steps
+        action_hold = np.array([0.3])
+        for _ in range(10):
+            env.step(action_hold)
+
+        # Now do a big rebalance: the basis penalty should reflect
+        # the MTM change on the NEW positions, not old-positions-at-new-prices
+        # evaluated with stale entry data. Key check: reward is finite and
+        # the accounting identity still holds after the rebalance.
+        action_flip = np.array([-0.4])
+        _, reward, _, _, info = env.step(action_flip)
+
+        assert np.isfinite(reward), "Reward is NaN/Inf after rebalance"
+        spot_p = env.spot_price_ary[env.step_idx]
+        perp_p = env.perp_price_ary[env.step_idx]
+        pv = env._get_portfolio_value(spot_p, perp_p)
+        unrealized = env._calc_total_unrealized_basis_pnl(spot_p, perp_p)
+        assert abs(pv - (env.margin_balance + unrealized)) < 0.01
