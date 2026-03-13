@@ -265,6 +265,14 @@ class SACTrainer:
                     f"({100*total_steps/self.total_timesteps:.0f}%) | "
                     f"SPS={sps:.0f} | buf={len(self.agent.replay_buffer)}"
                 )
+                # WandB heartbeat so fleet monitor doesn't flag as stalled
+                try:
+                    wandb.log({
+                        "hpo/heartbeat_step": total_steps,
+                        "hpo/heartbeat_sps": round(sps, 1),
+                    })
+                except Exception:
+                    pass
 
             # Logging
             if total_steps % self.log_interval < num_envs and not self.hpo_mode:

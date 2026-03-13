@@ -406,7 +406,10 @@ def _extract_wandb_metrics(run):
     exp_tag = exp_tags[0].upper() if exp_tags else "?"
 
     # SPS — use logged metric only (_step is a WandB log counter, not training steps)
-    sps = summary.get('train/sps')
+    # During HPO, trainers log hpo/heartbeat_sps and hpo/heartbeat_step as a
+    # lightweight WandB heartbeat. Prefer these over train/sps which is only
+    # logged during full training (non-HPO) mode.
+    sps = summary.get('train/sps') or summary.get('hpo/heartbeat_sps')
 
     # Q-values
     q_mean = summary.get('agent/q_value/mean', summary.get('agent/q_qty_mean'))

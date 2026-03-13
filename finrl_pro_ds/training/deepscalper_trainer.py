@@ -5,7 +5,9 @@ import os
 import wandb
 import logging
 from collections import deque
+from concurrent.futures import ThreadPoolExecutor, Future
 from datetime import datetime
+from typing import Optional
 import optuna
 
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
@@ -415,7 +417,47 @@ class DeepScalperTrainer:
 
             epoch_step = 0
             qty_mask = None  # ARCH-3: Will be populated from env info after first step
+
+            # PERF-OPT S154 (O2): Pipeline overlap — run GPU training in background
+            # thread while CPU steps the environment. Same pattern as SAC trainer.
+            # Deferred store: buffer writes happen AFTER train_future resolves to
+            # prevent concurrent read (sample) + write (push) on the replay buffer.
+            from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
+            train_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ds_train")
+            train_future: Optional[Future] = None
+            _deferred_store = None  # Tuple of args for buffer push, deferred by 1 iteration
+
+            def _push_to_buffer(store_args):
+                """Push transitions to buffer (n-step, flat, or PER path)."""
+                _obs, _acts, _rews, _nobs, _dones_buf, _aux, _dones_reset = store_args
+                if self._nstep_buffer is not None:
+                    self._nstep_buffer.add(
+                        _obs, _acts, _rews, _nobs, _dones_buf,
+                        _aux, self.agent.memory,
+                        resets=_dones_reset,
+                    )
+                elif isinstance(self.agent.memory, FlatReplayBuffer):
+                    self.agent.memory.push_batch(_obs, _acts, _rews, _nobs, _dones_buf, _aux)
+                else:
+                    for i in range(num_envs):
+                        s = {k: v[i] for k, v in _obs.items()}
+                        ns = {k: v[i] for k, v in _nobs.items()}
+                        self.agent.memory.push(
+                            s, _acts[i], float(_rews[i]),
+                            ns, bool(_dones_buf[i]), float(_aux[i])
+                        )
+
             while epoch_step < self.total_timesteps:
+                # --- 1. WAIT for previous training to finish (buffer safe for writes) ---
+                if train_future is not None:
+                    metrics = train_future.result()
+                    train_future = None
+
+                # --- 2. PUSH deferred transitions (safe — training not running) ---
+                if _deferred_store is not None:
+                    _push_to_buffer(_deferred_store)
+                    _deferred_store = None
+
                 # Convert to torch for prediction
                 micro_t, private_t, macro_t = extract_tensors(obs)
 
@@ -423,7 +465,22 @@ class DeepScalperTrainer:
                 # ARCH-3: Pass qty mask to block invalid actions at position limits
                 actions = self.agent.predict(micro_t, private_t, macro_t, deterministic=False, qty_mask=qty_mask)
 
-                # 2. Step Environment
+                # --- 3. SUBMIT training to background thread BEFORE env.step ---
+                # PERF-OPT S154 (O1+O2): Mega-batch in background overlaps with env.step.
+                if global_step > self.learning_starts:
+                    self.gradient_accumulator += self.update_interval
+                    n_steps = int(self.gradient_accumulator)
+
+                    if n_steps >= 1:
+                        self.gradient_accumulator -= n_steps
+                        train_future = train_executor.submit(
+                            self.agent.train_step_mega, n_steps
+                        )
+                        if self.agent._lr_scheduler is not None:
+                            for _ in range(n_steps):
+                                self.agent._lr_scheduler.step()
+
+                # --- 4. ENV.STEP — CPU work, OVERLAPS with GPU training ---
                 next_obs, rewards, term, trunc, infos = self.env.step(actions)
 
                 # ARCH-3: Extract qty_action_mask for NEXT step's predict()
@@ -440,10 +497,8 @@ class DeepScalperTrainer:
                 # BUG-B: Mask hidden states for terminated/truncated envs
                 if hasattr(self.agent, "mask_hidden_state"):
                     self.agent.mask_hidden_state(dones_for_reset)
-                # NOTE: dones_for_buffer is computed in the buffer push block below
-                # (FIX R8-AUD-01: includes truncation to prevent Q-bootstrap from reset obs)
 
-                # 3. Store in Buffer
+                # --- 5. DEFER buffer write to next iteration (after train_future resolves) ---
                 # PERF FIX-2: Extract aux_targets vectorized
                 aux_targets_vec = np.zeros(num_envs, dtype=np.float32)
                 if isinstance(infos, dict) and "volatility_target" in infos:
@@ -456,45 +511,16 @@ class DeepScalperTrainer:
                     for i in range(num_envs):
                         aux_targets_vec[i] = float(infos[i].get("volatility_target", 0.0))
 
-                # PERF FIX-2: Batch push for FlatReplayBuffer (not PER — PER stores Python objects)
-                from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
                 _actions = actions if actions.ndim > 1 else actions.reshape(-1, 1)
 
-                # FIX R8-AUD-01: On truncation (trunc=True, term=False), SyncVectorEnv
-                # auto-resets and returns the RESET observation as next_obs. Bootstrapping
-                # Q(s_reset) pollutes the Bellman target with cross-episode garbage.
-                # Fix: treat truncation as terminal in the buffer (done=1.0) to zero the
-                # Q-bootstrap. This is a standard approximation (SB3 does the same when
-                # final_observation is unavailable). Bias is minimal: only affects the
-                # last transition per episode (~0.1% of data).
-                # NOTE: dones_for_reset (used for stats/hidden masking) is unchanged.
+                # FIX R8-AUD-01: treat truncation as terminal in buffer
                 dones_for_buffer = np.logical_or(term, trunc).astype(np.float32)
 
-                if self._nstep_buffer is not None:
-                    # N-step returns: accumulate before pushing to replay
-                    # FIX GMO1-04: Pass resets (term|trunc) so n-step flushes at
-                    # episode boundaries, preventing cross-episode reward mixing.
-                    self._nstep_buffer.add(
-                        obs, _actions, rewards.astype(np.float32),
-                        next_obs, dones_for_buffer,
-                        aux_targets_vec, self.agent.memory,
-                        resets=dones_for_reset.astype(np.float32),
-                    )
-                elif isinstance(self.agent.memory, FlatReplayBuffer):
-                    self.agent.memory.push_batch(
-                        obs, _actions, rewards.astype(np.float32),
-                        next_obs, dones_for_buffer,
-                        aux_targets_vec,
-                    )
-                else:
-                    # PER fallback: per-transition push
-                    for i in range(num_envs):
-                        s = {k: v[i] for k, v in obs.items()}
-                        ns = {k: v[i] for k, v in next_obs.items()}
-                        self.agent.memory.push(
-                            s, actions[i], float(rewards[i]),
-                            ns, bool(dones_for_buffer[i]), float(aux_targets_vec[i])
-                        )
+                _deferred_store = (
+                    obs, _actions, rewards.astype(np.float32),
+                    next_obs, dones_for_buffer,
+                    aux_targets_vec, dones_for_reset.astype(np.float32),
+                )
 
                 # Accumulate reward components for hindsight ratio tracking
                 if isinstance(infos, dict):
@@ -542,25 +568,10 @@ class DeepScalperTrainer:
                 # FIX: Decay epsilon every step batch
                 self.agent.decay_epsilon()
 
-                # 4. Training Step
-                # PERF-OPT S154 (O1+O2): Mega-batch — sample ONCE, transfer ONCE,
-                # run N gradient steps from GPU-resident mini-batches. Replaces
-                # the old while-loop that did N separate sample+transfer+gradient
-                # cycles (N pipeline flushes → 1).
-                if global_step > self.learning_starts:
-                    self.gradient_accumulator += self.update_interval
-                    n_steps = int(self.gradient_accumulator)
-
-                    metrics = None
-                    if n_steps >= 1:
-                        self.gradient_accumulator -= n_steps
-                        metrics = self.agent.train_step_mega(n_steps)
-                        if self.agent._lr_scheduler is not None:
-                            for _ in range(n_steps):
-                                self.agent._lr_scheduler.step()
-
-                    # LOGGING
-                    if metrics and global_step > 0 and global_step % self.log_interval == 0:
+                # LOGGING — metrics is from the PREVIOUS iteration's train_future
+                # (resolved at top of this iteration). Offset by 1 step, which is
+                # fine for WandB logging granularity.
+                if metrics and global_step > 0 and global_step % self.log_interval == 0:
                          if not self.hpo_mode:
                              logs = {
                                  "step": global_step,
@@ -622,7 +633,7 @@ class DeepScalperTrainer:
                 # 4a-hpo. WandB heartbeat during HPO so fleet monitor doesn't flag as stalled
                 if self.hpo_mode and global_step > 0 and global_step % 10000 == 0:
                     try:
-                        elapsed = time.time() - epoch_start
+                        elapsed = time.time() - start_time
                         sps = global_step / max(elapsed, 1e-6)
                         wandb.log({
                             "hpo/heartbeat_step": global_step,
