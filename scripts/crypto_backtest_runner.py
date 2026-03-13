@@ -144,7 +144,7 @@ def create_env(arrays: dict, config: dict) -> CryptoPerpEnv:
     )
 
 
-def run_backtest(config: dict) -> dict:
+def run_backtest(config: dict, max_windows: int | None = None) -> dict:
     """Run the full backtest pipeline.
 
     Returns a dict of metrics and results.
@@ -163,6 +163,10 @@ def run_backtest(config: dict) -> dict:
         return {"status": "FAILED", "reason": "insufficient_data"}
 
     logger.info(f"Walk-forward: {wf['n_windows']} windows available")
+
+    if max_windows is not None:
+        wf["window_schedule"] = wf["window_schedule"][:max_windows]
+        logger.info(f"Pilot mode: limiting to first {max_windows} window(s)")
 
     # Step 2: Walk-forward loop
     logger.info("=" * 60)
@@ -515,6 +519,15 @@ def main():
         "--config", type=str, default=None,
         help="Path to experiment config YAML"
     )
+    parser.add_argument(
+        "--max_windows", type=int, default=None,
+        help="Limit walk-forward to first N windows (pilot mode)"
+    )
+    # Compatibility with deploy_bare_metal.py injected args (ignored)
+    parser.add_argument("--run_name", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--version", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--hpo_storage", default=None, help=argparse.SUPPRESS)
+    parser.add_argument("--tags", nargs="*", default=None, help=argparse.SUPPRESS)
 
     args = parser.parse_args()
 
@@ -524,7 +537,7 @@ def main():
     )
 
     config = load_config(args.config)
-    results = run_backtest(config)
+    results = run_backtest(config, max_windows=args.max_windows)
 
     # R6 fix: Persist results to disk for downstream consumption
     out_dir = Path("results") / "crypto_backtest"
