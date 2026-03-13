@@ -56,6 +56,7 @@ class CryptoPerpEnv(gym.Env):
         slippage_base_bps: float = 3.0,
         slippage_impact_bps: float = 15.0,
         max_gross_exposure: float = 1.0,
+        max_net_short_exposure: float = -0.50,
         turnover_penalty: float = 0.002,
         reward_type: str = "sortino_softmax",
         sortino_window: int = 168,       # 1 week for downside deviation
@@ -98,6 +99,7 @@ class CryptoPerpEnv(gym.Env):
         self.slippage_base_bps = float(slippage_base_bps)
         self.slippage_impact_bps = float(slippage_impact_bps)
         self.max_gross_exposure = float(max_gross_exposure)
+        self.max_net_short_exposure = float(max_net_short_exposure)
         self.turnover_penalty = float(turnover_penalty)
         self.reward_type = reward_type
         self.sortino_window = sortino_window
@@ -299,14 +301,32 @@ class CryptoPerpEnv(gym.Env):
     # Constraint enforcement
     # -----------------------------------------------------------------------
     def _enforce_gross_exposure(self, raw_action: np.ndarray) -> np.ndarray:
-        """Enforce sum(|weights|) ≤ max_gross_exposure via proportional scaling.
+        """Enforce sum(|weights|) ≤ max_gross_exposure and net short floor.
 
         Preserves relative magnitudes and signs (conviction-aware).
+        H3 fix: Also enforces max_net_short_exposure during backtest
+        (previously only enforced by risk manager in paper/live mode).
         """
-        gross = np.abs(raw_action).sum()
+        result = raw_action.copy()
+
+        # Enforce gross exposure ceiling
+        gross = np.abs(result).sum()
         if gross > self.max_gross_exposure:
-            return raw_action * (self.max_gross_exposure / gross)
-        return raw_action.copy()
+            result *= self.max_gross_exposure / gross
+
+        # H3 fix: Enforce net short floor (always active, not just paper/live)
+        net = result.sum()
+        if net < self.max_net_short_exposure:
+            short_mask = result < 0
+            if short_mask.any():
+                short_sum = result[short_mask].sum()
+                long_sum = result[~short_mask].sum()
+                target_short = self.max_net_short_exposure - long_sum
+                if short_sum < -1e-8:
+                    scale = min(target_short / short_sum, 1.0)
+                    result[short_mask] *= scale
+
+        return result
 
     # -----------------------------------------------------------------------
     # PnL calculations
@@ -337,35 +357,36 @@ class CryptoPerpEnv(gym.Env):
 
         Uses fixed entry notionals to compute realized PnL. The closed
         fraction of the entry notional determines the realized amount.
+
+        H2 fix: Fully vectorized (was per-asset Python loop).
         """
-        realized = 0.0
         new_positions = old_positions + delta_weights
+        abs_old = np.abs(old_positions)
+        abs_new = np.abs(new_positions)
 
-        for i in range(self.n_assets):
-            old_w = old_positions[i]
-            new_w = new_positions[i]
+        has_position = abs_old >= 1e-8
+        has_entry = np.abs(self.entry_prices) >= 1e-10
+        has_notional = self.entry_notionals >= 1e-8
+        active = has_position & has_entry & has_notional
 
-            if abs(old_w) < 1e-8:
-                continue  # No existing position to realize
+        if not active.any():
+            return 0.0
 
-            # Determine closed fraction of the position
-            if np.sign(old_w) != np.sign(new_w) and abs(new_w) > 1e-8:
-                # Position flip: fully close old
-                closed_fraction = 1.0
-            elif abs(new_w) < abs(old_w):
-                # Position reduction
-                closed_fraction = (abs(old_w) - abs(new_w)) / abs(old_w)
-            else:
-                continue  # Position increased — no realization
+        closed_fraction = np.zeros(self.n_assets, dtype=np.float64)
 
-            # PnL of closed portion using entry notional
-            if abs(self.entry_prices[i]) > 1e-10 and self.entry_notionals[i] > 1e-8:
-                price_change = current_price[i] / self.entry_prices[i] - 1.0
-                realized += (
-                    np.sign(old_w) * closed_fraction * self.entry_notionals[i] * price_change
-                )
+        # Case 1: Position flip — fully close old
+        flipped = active & (np.sign(old_positions) != np.sign(new_positions)) & (abs_new > 1e-8)
+        closed_fraction[flipped] = 1.0
 
-        return realized
+        # Case 2: Position reduction (same sign, smaller magnitude)
+        reduced = active & ~flipped & (abs_new < abs_old)
+        if reduced.any():
+            closed_fraction[reduced] = (abs_old[reduced] - abs_new[reduced]) / abs_old[reduced]
+
+        # Compute PnL: sign(old) * closed_fraction * entry_notional * (price/entry - 1)
+        price_change = current_price / (self.entry_prices + 1e-10) - 1.0
+        pnl = np.sign(old_positions) * closed_fraction * self.entry_notionals * price_change
+        return float(pnl.sum())
 
     def _update_entry_prices(
         self,
@@ -385,42 +406,46 @@ class CryptoPerpEnv(gym.Env):
         by _realize_pnl() BEFORE this method is called, so the realized PnL on
         the closed portion is already computed correctly. We only set the NEW
         entry_notional here for the flipped direction.
+
+        H2 fix: Fully vectorized (was per-asset Python loop).
         """
         new_positions = old_positions + delta_weights
+        abs_old = np.abs(old_positions)
+        abs_new = np.abs(new_positions)
 
-        for i in range(self.n_assets):
-            old_w = old_positions[i]
-            new_w = new_positions[i]
+        # Case 1: Position closed (new weight ~ 0)
+        closed = abs_new < 1e-8
+        self.entry_prices[closed] = 0.0
+        self.entry_notionals[closed] = 0.0
 
-            if abs(new_w) < 1e-8:
-                # Position closed
-                self.entry_prices[i] = 0.0
-                self.entry_notionals[i] = 0.0
-                continue
+        # Case 2: New position from flat (old weight ~ 0, new weight significant)
+        from_flat = ~closed & (abs_old < 1e-8)
+        self.entry_prices[from_flat] = current_price[from_flat]
+        self.entry_notionals[from_flat] = abs_new[from_flat] * portfolio_value
 
-            if abs(old_w) < 1e-8:
-                # New position from flat
-                self.entry_prices[i] = current_price[i]
-                self.entry_notionals[i] = abs(new_w) * portfolio_value
-            elif np.sign(old_w) != np.sign(new_w):
-                # Flipped direction: _realize_pnl already used old notional.
-                # Set fresh entry for the new direction only.
-                self.entry_prices[i] = current_price[i]
-                self.entry_notionals[i] = abs(new_w) * portfolio_value
-            elif abs(new_w) > abs(old_w):
-                # Position increased — weighted average entry
-                added_notional = abs(delta_weights[i]) * portfolio_value
-                old_notional = self.entry_notionals[i]
-                new_notional = old_notional + added_notional
-                self.entry_prices[i] = (
-                    self.entry_prices[i] * old_notional + current_price[i] * added_notional
-                ) / (new_notional + 1e-10)
-                self.entry_notionals[i] = new_notional
-            elif abs(new_w) < abs(old_w):
-                # Position reduced — scale down notional proportionally
-                closed_fraction = (abs(old_w) - abs(new_w)) / abs(old_w)
-                self.entry_notionals[i] *= (1.0 - closed_fraction)
-                # entry_price stays the same for the remaining portion
+        # Case 3: Flipped direction (sign changed, not from flat, not closed)
+        flipped = ~closed & ~from_flat & (np.sign(old_positions) != np.sign(new_positions))
+        self.entry_prices[flipped] = current_price[flipped]
+        self.entry_notionals[flipped] = abs_new[flipped] * portfolio_value
+
+        # Case 4: Position increased (same sign, larger magnitude)
+        increased = ~closed & ~from_flat & ~flipped & (abs_new > abs_old)
+        if increased.any():
+            added_notional = np.abs(delta_weights[increased]) * portfolio_value
+            old_notional = self.entry_notionals[increased]
+            new_notional = old_notional + added_notional
+            self.entry_prices[increased] = (
+                self.entry_prices[increased] * old_notional
+                + current_price[increased] * added_notional
+            ) / (new_notional + 1e-10)
+            self.entry_notionals[increased] = new_notional
+
+        # Case 5: Position reduced (same sign, smaller magnitude)
+        reduced = ~closed & ~from_flat & ~flipped & ~increased & (abs_new < abs_old)
+        if reduced.any():
+            closed_frac = (abs_old[reduced] - abs_new[reduced]) / abs_old[reduced]
+            self.entry_notionals[reduced] *= (1.0 - closed_frac)
+            # entry_price stays the same for the remaining portion
 
     # -----------------------------------------------------------------------
     # Transaction costs
@@ -606,7 +631,7 @@ class CryptoPerpEnv(gym.Env):
     def render(self):
         """Render environment state (human-readable summary)."""
         summary = self.get_portfolio_summary()
-        print(
+        logger.info(
             f"Step {summary['step']:>5d} | "
             f"PV {summary['portfolio_value']:>12,.2f} | "
             f"Ret {summary['total_return']:>+8.2%} | "

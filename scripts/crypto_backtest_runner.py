@@ -132,6 +132,7 @@ def create_env(arrays: dict, config: dict) -> CryptoPerpEnv:
         slippage_base_bps=env_cfg["slippage_base_bps"],
         slippage_impact_bps=env_cfg["slippage_impact_bps"],
         max_gross_exposure=env_cfg["max_gross_exposure"],
+        max_net_short_exposure=float(env_cfg.get("max_net_short_exposure", -0.50)),
         turnover_penalty=env_cfg["turnover_penalty"],
         reward_type=env_cfg["reward_type"],
         sortino_window=env_cfg.get("sortino_window", 168),
@@ -535,6 +536,8 @@ def main():
             return int(obj)
         if isinstance(obj, (np.floating, np.float64)):
             return float(obj)
+        if isinstance(obj, (np.bool_,)):
+            return bool(obj)
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         if isinstance(obj, pd.Timestamp):

@@ -15,11 +15,13 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-# The 8 crypto-specific feature columns produced by crypto_features.py
+# The 6 crypto-specific feature columns produced by crypto_features.py.
+# M1 fix: Removed exchange_netflow and cost_to_rebalance (always zero —
+# wasted 25% of feature capacity and could confuse the agent).
 CRYPTO_FEATURE_COLS = [
     "funding_rate", "oi_change_pct", "btc_correlation",
-    "volume_profile_skew", "liquidation_intensity", "exchange_netflow",
-    "btc_dominance_regime", "cost_to_rebalance",
+    "volume_profile_skew", "liquidation_intensity",
+    "btc_dominance_regime",
 ]
 
 
@@ -31,6 +33,7 @@ def build_env_arrays(
     start_ts: pd.Timestamp,
     end_ts: pd.Timestamp,
     feature_cols: list[str] | None = None,
+    norm_window: int = 720,
 ) -> dict:
     """Build numpy arrays for CryptoPerpEnv from a time window.
 
@@ -42,6 +45,7 @@ def build_env_arrays(
         start_ts: Window start timestamp (inclusive).
         end_ts: Window end timestamp (inclusive).
         feature_cols: Feature columns to use. Defaults to CRYPTO_FEATURE_COLS.
+        norm_window: Rolling z-score window for per-window re-normalization (LEAK-1 fix).
 
     Returns:
         Dict with keys: price_ary, tech_ary, funding_rate_ary, volume_ary, timestamps.
@@ -115,6 +119,12 @@ def build_env_arrays(
             f"{len(assets) * actual_features_per_asset}"
         )
 
+    # LEAK-1 fix: Re-normalize ALL features using window-local statistics.
+    # Features computed on the full dataset carry rolling z-score / rolling
+    # correlation statistics from prior windows.  Re-applying rolling z-score
+    # here uses only data within this window, breaking cross-window leakage.
+    tech_ary = _renormalize_within_window(tech_ary, norm_window)
+
     # Convert timestamps to epoch seconds
     ts_epoch = timestamps.astype(np.int64) // 10**9
 
@@ -125,3 +135,36 @@ def build_env_arrays(
         "volume_ary": volume_ary.astype(np.float64),
         "timestamps": ts_epoch.values,
     }
+
+
+def _renormalize_within_window(
+    tech_ary: np.ndarray,
+    norm_window: int,
+    clip: float = 5.0,
+) -> np.ndarray:
+    """Re-normalize feature columns using window-local rolling z-score.
+
+    Eliminates cross-window normalization leakage (LEAK-1) by replacing
+    each column's values with z-scores computed solely from data within
+    this walk-forward window.
+
+    Args:
+        tech_ary: Feature array of shape (T, n_cols).
+        norm_window: Rolling window size for mean/std.
+        clip: Symmetric clip range for z-scores.
+
+    Returns:
+        Normalized array (same shape), float32.
+    """
+    T, n_cols = tech_ary.shape
+    result = np.empty_like(tech_ary, dtype=np.float64)
+    min_periods = max(24, norm_window // 10)
+
+    for col_idx in range(n_cols):
+        col = pd.Series(tech_ary[:, col_idx], dtype=np.float64)
+        roll_mean = col.rolling(window=norm_window, min_periods=min_periods).mean()
+        roll_std = col.rolling(window=norm_window, min_periods=min_periods).std()
+        z = (col - roll_mean) / (roll_std + 1e-6)
+        result[:, col_idx] = z.fillna(0.0).clip(-clip, clip).values
+
+    return result.astype(np.float32)

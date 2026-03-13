@@ -34,7 +34,7 @@ features:
   norm_window: 720       # 1 month in hours
   norm_clip: [-5, 5]
   log_return_clip: [-0.5, 0.5]
-  tech_dim: 8              # Current runner uses 8 crypto features; increase when full pipeline is wired
+  tech_dim: 6              # M1: 6 real features (removed 2 zero-constant placeholders)
   enable_hmm: true
   hmm_stride: 5
   enable_crypto_features: true
@@ -56,7 +56,7 @@ environment:
   # --- Constraints ---
   max_position_pct: 0.15
   max_gross_exposure: 1.0
-  max_net_short_exposure: -0.50
+  max_net_short_exposure: -0.50   # H3: enforced in env AND risk manager
   # --- Reward ---
   turnover_penalty: 0.002
   reward_type: "sortino_softmax"
@@ -109,7 +109,7 @@ arbitrator:
   reweight_every: 24
   performance_metric: "sortino"
   emergency_lookback: 72
-  emergency_sortino_floor: 0.0
+  emergency_sortino_floor: 0.3
   emergency_spread: 2.0
 
 walk_forward:
