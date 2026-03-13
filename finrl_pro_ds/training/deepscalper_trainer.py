@@ -543,15 +543,21 @@ class DeepScalperTrainer:
                 self.agent.decay_epsilon()
 
                 # 4. Training Step
+                # PERF-OPT S154 (O1+O2): Mega-batch — sample ONCE, transfer ONCE,
+                # run N gradient steps from GPU-resident mini-batches. Replaces
+                # the old while-loop that did N separate sample+transfer+gradient
+                # cycles (N pipeline flushes → 1).
                 if global_step > self.learning_starts:
                     self.gradient_accumulator += self.update_interval
+                    n_steps = int(self.gradient_accumulator)
 
                     metrics = None
-                    while self.gradient_accumulator >= 1.0:
-                        self.gradient_accumulator -= 1.0
-                        metrics = self.agent.train_step()
+                    if n_steps >= 1:
+                        self.gradient_accumulator -= n_steps
+                        metrics = self.agent.train_step_mega(n_steps)
                         if self.agent._lr_scheduler is not None:
-                            self.agent._lr_scheduler.step()
+                            for _ in range(n_steps):
+                                self.agent._lr_scheduler.step()
 
                     # LOGGING
                     if metrics and global_step > 0 and global_step % self.log_interval == 0:
@@ -612,6 +618,18 @@ class DeepScalperTrainer:
                     wandb.log({"reward/hindsight_ratio": hindsight_ratio}, step=global_step)
                     _acc_hindsight = 0.0
                     _acc_total = 0.0
+
+                # 4a-hpo. WandB heartbeat during HPO so fleet monitor doesn't flag as stalled
+                if self.hpo_mode and global_step > 0 and global_step % 10000 == 0:
+                    try:
+                        elapsed = time.time() - epoch_start
+                        sps = global_step / max(elapsed, 1e-6)
+                        wandb.log({
+                            "hpo/heartbeat_step": global_step,
+                            "hpo/heartbeat_sps": round(sps, 1),
+                        })
+                    except Exception:
+                        pass
 
                 # 4b. HPO Pruning Check — dual strategy:
                 #   (a) Optuna Hyperband pruner for score-based inter-trial comparison

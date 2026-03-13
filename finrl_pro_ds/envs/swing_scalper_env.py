@@ -148,6 +148,7 @@ class SwingScalperEnv(gym.Env):
         self._tr_buffer = np.zeros(self._atr_window, dtype=np.float64)
         self._tr_idx = 0
         self._tr_count = 0
+        self._tr_sum = 0.0  # PERF-OPT S154 (O8): running sum for O(1) mean
         self._current_atr = 0.0
         self._atr_ema = 0.0  # rolling mean ATR for normalization
 
@@ -189,6 +190,7 @@ class SwingScalperEnv(gym.Env):
         self._tr_buffer[:] = 0.0
         self._tr_idx = 0
         self._tr_count = 0
+        self._tr_sum = 0.0
         self._current_atr = 0.0
         self._atr_ema = 0.0
 
@@ -346,7 +348,8 @@ class SwingScalperEnv(gym.Env):
                 reward = shaped if reward >= 0 else -shaped
 
         # Clip reward
-        reward = float(np.clip(reward, -50.0, 50.0))
+        # PERF-OPT S154 (O9): scalar min/max instead of np.clip dispatch
+        reward = max(-50.0, min(50.0, reward))
 
         # 6. Update equity (for drawdown tracking)
         unrealized_pnl = self.direction * (self.current_mid_price - self.entry_mid) * self.position_size
@@ -421,11 +424,13 @@ class SwingScalperEnv(gym.Env):
             unrealized_bps = self.direction * ((self.current_mid_price - self.entry_mid) / self.entry_mid) * 10000.0
         else:
             unrealized_bps = 0.0
-        unrealized_norm = float(np.clip(unrealized_bps / 100.0, -1.0, 1.0))
+        # PERF-OPT S154 (O9): scalar min/max instead of np.clip dispatch
+        unrealized_norm = max(-1.0, min(1.0, unrealized_bps / 100.0))
 
         # 4. ATR ratio: current ATR / rolling mean ATR (regime indicator)
         if self._atr_ema > 1e-12:
-            atr_ratio = float(np.clip(self._current_atr / self._atr_ema, 0.0, 3.0)) / 3.0
+            # PERF-OPT S154 (O9): scalar min/max instead of np.clip dispatch
+            atr_ratio = max(0.0, min(3.0, self._current_atr / self._atr_ema)) / 3.0
         else:
             atr_ratio = 0.5  # Default neutral
 
@@ -436,12 +441,21 @@ class SwingScalperEnv(gym.Env):
         if self.prev_mid_price > 0 and self.current_mid_price > 0:
             # Simplified TR: |price change| (no high/low needed at bar level)
             tr = abs(self.current_mid_price - self.prev_mid_price)
+            # PERF-OPT S154 (O8): O(1) running sum instead of O(window) np.mean.
+            # Capture old value BEFORE overwriting for correct sum maintenance.
+            old_val = self._tr_buffer[self._tr_idx]
             self._tr_buffer[self._tr_idx] = tr
             self._tr_idx = (self._tr_idx + 1) % self._atr_window
-            self._tr_count = min(self._tr_count + 1, self._atr_window)
 
-            if self._tr_count > 0:
-                self._current_atr = float(np.mean(self._tr_buffer[:self._tr_count]))
+            if self._tr_count < self._atr_window:
+                # Still filling — add without subtracting
+                self._tr_count += 1
+                self._tr_sum += tr
+            else:
+                # Ring full — swap old value for new
+                self._tr_sum += tr - old_val
+
+            self._current_atr = self._tr_sum / self._tr_count
             # EMA of ATR for normalization (slow-moving reference)
             alpha = 2.0 / (self._atr_window * 5 + 1)  # Very slow EMA
             if self._atr_ema < 1e-12:
@@ -470,7 +484,9 @@ class SwingScalperEnv(gym.Env):
         """
         # --- Fast path: numpy row ---
         if self._use_raw_path and isinstance(step_data, np.ndarray):
-            frame = step_data[self._micro_col_indices].copy()
+            # PERF-OPT S154 (O7): Removed redundant .copy() — fancy indexing
+            # already returns an owned array (never a view).
+            frame = step_data[self._micro_col_indices]
             self.current_best_bid = float(step_data[self._bid_price_idx])
             self.current_best_ask = float(step_data[self._ask_price_idx])
             if np.isnan(frame).any():
@@ -497,7 +513,9 @@ class SwingScalperEnv(gym.Env):
     def _update_macro_state(self, step_data: Any):
         """Update macro state vector."""
         if self._use_raw_path and isinstance(step_data, np.ndarray):
-            self.current_macro = step_data[self._macro_col_indices].copy()
+            # PERF-OPT S154 (O7): Removed redundant .copy() — fancy indexing
+            # already returns an owned array.
+            self.current_macro = step_data[self._macro_col_indices]
             np.nan_to_num(self.current_macro, copy=False, nan=0.0)
             return
 
@@ -528,10 +546,12 @@ class SwingScalperEnv(gym.Env):
             self.current_mid_price = (self.current_best_bid + self.current_best_ask) / 2.0
 
     def _get_observation(self):
+        # PERF-OPT S154 (O6): Removed redundant .copy() — SyncVectorEnv
+        # already copies when stacking worker observations into the batch.
         return {
-            "micro": self.micro_window.copy(),
-            "macro": self.current_macro.copy(),
-            "private": self.private_window.copy(),
+            "micro": self.micro_window,
+            "macro": self.current_macro,
+            "private": self.private_window,
         }
 
     def set_fees(self, taker_fee: float, maker_fee: float = 0.0):

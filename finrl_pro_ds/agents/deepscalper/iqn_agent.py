@@ -161,7 +161,9 @@ class IQNAgent:
             except Exception as e:
                 print(f"[torch.compile] Failed, falling back to eager mode: {e}")
 
-        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
+        # PERF-OPT S154 (O5): Fused Adam — single CUDA kernel per step
+        _fused = self.device.type == "cuda"
+        self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr, fused=_fused)
         self._lr_scheduler = None  # Initialized by trainer
 
         # AMP GradScaler — disabled for BF16 (same dynamic range as FP32, no scaling needed)
@@ -291,8 +293,9 @@ class IQNAgent:
 
         if deterministic:
             self.policy_net.train()
-        else:
-            self._reset_noise()
+        # PERF-OPT S154 (O4): Removed redundant _reset_noise() here.
+        # With UTD=8, the last train_step() already resets noise before
+        # the next predict() call.  Saves ~80-160 kernel dispatches/step.
 
         return actions.cpu().numpy()
 
@@ -329,59 +332,99 @@ class IQNAgent:
         return (weight * huber).mean(dim=1).mean(dim=1)  # (B,)
 
     def train_step(self) -> Optional[Dict[str, float]]:
-        """Double-DQN style IQN update with quantile Huber loss.
+        """Single gradient step (backward compat). Prefer train_step_mega()."""
+        return self.train_step_mega(1)
 
-        In multi-horizon mode, trains both short and long horizon heads
-        with their respective discount factors. The loss is the sum of
-        both horizon losses.
+    def train_step_mega(self, n_steps: int = 1) -> Optional[Dict[str, float]]:
+        """Run n_steps IQN gradient updates from a single mega-batch.
+
+        PERF-OPT S154 (O1): Samples n_steps * batch_size transitions ONCE,
+        transfers to GPU ONCE, then runs n_steps gradient steps from
+        GPU-resident mini-batches. Eliminates N separate CPU-GPU round-trips
+        that caused pipeline stalls with UTD=8.
+
+        For PER, falls back to single-step mode (PER priorities need per-step
+        updates and the SumTree stores Python objects that can't be mega-batched).
         """
         self.policy_net.train()
         if len(self.memory) < self.batch_size:
             return None
 
-        # Sample batch
+        # PER fallback: can't mega-batch Python-object SumTree
         if self.use_per:
-            (state_batch, action_batch, reward_batch, next_state_batch,
-             done_batch, aux_target_batch, per_indices, is_weights) = self.memory.sample(self.batch_size)
-            is_weights_t = self._to_device_pinned(np.array(is_weights))
+            metrics = None
+            for _ in range(n_steps):
+                metrics = self._train_step_single_per()
+            return metrics
 
-            def stack_dict_keys(batch_list, key):
-                return self._to_device_pinned(np.array([s[key] for s in batch_list]))
-
-            micro_s = stack_dict_keys(state_batch, "micro")
-            private_s = stack_dict_keys(state_batch, "private")
-            macro_s = stack_dict_keys(state_batch, "macro")
-            micro_ns = stack_dict_keys(next_state_batch, "micro")
-            private_ns = stack_dict_keys(next_state_batch, "private")
-            macro_ns = stack_dict_keys(next_state_batch, "macro")
-            actions = self._to_device_pinned(np.array(action_batch), dtype=torch.long)
-            rewards = self._to_device_pinned(np.array(reward_batch))
-            dones = self._to_device_pinned(np.array(done_batch))
-            aux_targets = self._to_device_pinned(np.array(aux_target_batch)).unsqueeze(1)
-        else:
-            if self.stratified_sampling and hasattr(self.memory, "sample_stratified"):
-                state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = (
-                    self.memory.sample_stratified(
-                        self.batch_size,
-                        hold_action=self.stratified_hold_action,
-                        hold_ratio=self.stratified_hold_ratio,
-                    )
+        # --- ONE CPU phase: sample n_steps * batch_size, transfer to GPU ---
+        mega_batch_size = n_steps * self.batch_size
+        if self.stratified_sampling and hasattr(self.memory, "sample_stratified"):
+            state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = (
+                self.memory.sample_stratified(
+                    mega_batch_size,
+                    hold_action=self.stratified_hold_action,
+                    hold_ratio=self.stratified_hold_ratio,
                 )
-            else:
-                state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = self.memory.sample(self.batch_size)
-            per_indices = None
-            is_weights_t = None
+            )
+        else:
+            state_batch, action_batch, reward_batch, next_state_batch, done_batch, aux_target_batch = self.memory.sample(mega_batch_size)
 
-            micro_s = self._to_device_pinned(state_batch["micro"])
-            private_s = self._to_device_pinned(state_batch["private"])
-            macro_s = self._to_device_pinned(state_batch["macro"])
-            micro_ns = self._to_device_pinned(next_state_batch["micro"])
-            private_ns = self._to_device_pinned(next_state_batch["private"])
-            macro_ns = self._to_device_pinned(next_state_batch["macro"])
-            actions = self._to_device_pinned(action_batch, dtype=torch.long)
-            rewards = self._to_device_pinned(reward_batch)
-            dones = self._to_device_pinned(done_batch)
-            aux_targets = self._to_device_pinned(aux_target_batch).unsqueeze(1)
+        all_micro_s = self._to_device_pinned(state_batch["micro"])
+        all_private_s = self._to_device_pinned(state_batch["private"])
+        all_macro_s = self._to_device_pinned(state_batch["macro"])
+        all_micro_ns = self._to_device_pinned(next_state_batch["micro"])
+        all_private_ns = self._to_device_pinned(next_state_batch["private"])
+        all_macro_ns = self._to_device_pinned(next_state_batch["macro"])
+        all_actions = self._to_device_pinned(action_batch, dtype=torch.long)
+        all_rewards = self._to_device_pinned(reward_batch)
+        all_dones = self._to_device_pinned(done_batch)
+        all_aux_targets = self._to_device_pinned(aux_target_batch).unsqueeze(1)
+
+        # --- ONE GPU phase: n_steps gradient steps, no CPU interruption ---
+        metrics = None
+        bs = self.batch_size
+        for step_i in range(n_steps):
+            s = step_i * bs
+            e = s + bs
+            metrics = self._train_step_on_batch(
+                all_micro_s[s:e], all_private_s[s:e], all_macro_s[s:e],
+                all_micro_ns[s:e], all_private_ns[s:e], all_macro_ns[s:e],
+                all_actions[s:e], all_rewards[s:e], all_dones[s:e],
+                all_aux_targets[s:e], per_indices=None, is_weights_t=None,
+            )
+        return metrics
+
+    def _train_step_single_per(self) -> Optional[Dict[str, float]]:
+        """Single gradient step with PER sampling (not mega-batchable)."""
+        (state_batch, action_batch, reward_batch, next_state_batch,
+         done_batch, aux_target_batch, per_indices, is_weights) = self.memory.sample(self.batch_size)
+        is_weights_t = self._to_device_pinned(np.array(is_weights))
+
+        def stack_dict_keys(batch_list, key):
+            return self._to_device_pinned(np.array([s[key] for s in batch_list]))
+
+        micro_s = stack_dict_keys(state_batch, "micro")
+        private_s = stack_dict_keys(state_batch, "private")
+        macro_s = stack_dict_keys(state_batch, "macro")
+        micro_ns = stack_dict_keys(next_state_batch, "micro")
+        private_ns = stack_dict_keys(next_state_batch, "private")
+        macro_ns = stack_dict_keys(next_state_batch, "macro")
+        actions = self._to_device_pinned(np.array(action_batch), dtype=torch.long)
+        rewards = self._to_device_pinned(np.array(reward_batch))
+        dones = self._to_device_pinned(np.array(done_batch))
+        aux_targets = self._to_device_pinned(np.array(aux_target_batch)).unsqueeze(1)
+
+        return self._train_step_on_batch(
+            micro_s, private_s, macro_s, micro_ns, private_ns, macro_ns,
+            actions, rewards, dones, aux_targets, per_indices, is_weights_t,
+        )
+
+    def _train_step_on_batch(
+        self, micro_s, private_s, macro_s, micro_ns, private_ns, macro_ns,
+        actions, rewards, dones, aux_targets, per_indices, is_weights_t,
+    ) -> Optional[Dict[str, float]]:
+        """GPU-only gradient step on pre-transferred batch tensors."""
 
         B = micro_s.shape[0]
         N = self.num_quantiles
@@ -502,28 +545,43 @@ class IQNAgent:
         self._polyak_update()
         self._reset_noise()
 
-        # Metrics
+        # PERF-OPT S154: Batch all GPU→CPU metric transfers into a single sync point.
+        # Previously 10-14 individual .item() calls per train_step × 8 UTD = 80-112
+        # GPU pipeline stalls per env-step batch. Now 1 sync point.
+        q_mean = q_tau_a.mean()
+        _metric_vals = [
+            total_loss, main_loss, vol_loss, q_mean,
+            q_mean, q_tau_a.std(), q_tau_a.max(), q_tau_a.min(),
+            T_tau.mean(), T_tau.max(), T_tau.min(),
+        ]
+        if self.multi_horizon:
+            _metric_vals.extend([
+                q_short_a.mean(), q_long_a.mean(),
+                loss_short.mean(), loss_long.mean(),
+            ])
+        _cpu = torch.stack([v.detach().float() for v in _metric_vals]).cpu().numpy()
+
         metrics = {
-            "loss_total": total_loss.item(),
+            "loss_total": float(_cpu[0]),
             "loss_price": 0.0,
-            "loss_qty": main_loss.item(),
-            "loss_aux": vol_loss.item(),
-            "q_qty_mean": q_tau_a.mean().item(),
+            "loss_qty": float(_cpu[1]),
+            "loss_aux": float(_cpu[2]),
+            "q_qty_mean": float(_cpu[3]),
             "epsilon": 0.0,
-            "q_value/mean": q_tau_a.mean().item(),
-            "q_value/std": q_tau_a.std().item(),
-            "q_value/max": q_tau_a.max().item(),
-            "q_value/min": q_tau_a.min().item(),
-            "q_value/target_mean": T_tau.mean().item(),
-            "q_value/target_max": T_tau.max().item(),
-            "q_value/target_min": T_tau.min().item(),
+            "q_value/mean": float(_cpu[4]),
+            "q_value/std": float(_cpu[5]),
+            "q_value/max": float(_cpu[6]),
+            "q_value/min": float(_cpu[7]),
+            "q_value/target_mean": float(_cpu[8]),
+            "q_value/target_max": float(_cpu[9]),
+            "q_value/target_min": float(_cpu[10]),
             "exploration_mode": 2.0,
         }
         if self.multi_horizon:
-            metrics["q_value/short_mean"] = q_short_a.mean().item()
-            metrics["q_value/long_mean"] = q_long_a.mean().item()
-            metrics["loss_short"] = loss_short.mean().item()
-            metrics["loss_long"] = loss_long.mean().item()
+            metrics["q_value/short_mean"] = float(_cpu[11])
+            metrics["q_value/long_mean"] = float(_cpu[12])
+            metrics["loss_short"] = float(_cpu[13])
+            metrics["loss_long"] = float(_cpu[14])
         if self.use_per:
             metrics["per_beta"] = self.memory.beta
             metrics["per_max_priority"] = self.memory._max_priority
@@ -542,11 +600,15 @@ class IQNAgent:
             tp.data.lerp_(p.data, tau)
 
     def _reset_noise(self):
-        """Reset noise on both policy and target networks."""
+        """Reset noise on policy network only.
+
+        PERF-OPT S154 (O3): Target net is permanently in .eval() mode, so
+        NoisyLinear.forward() uses only mu_weight/mu_bias and ignores noise
+        buffers entirely.  Resetting target noise was pure waste (~80-160
+        kernel dispatches per call).
+        """
         net = self.policy_net._orig_mod if self._torch_compiled else self.policy_net
-        tgt = self.target_net._orig_mod if self._torch_compiled else self.target_net
         net.reset_noise()
-        tgt.reset_noise()
 
     @staticmethod
     def _strip_compile_prefix(state_dict):
