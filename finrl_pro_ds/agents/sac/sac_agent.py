@@ -61,6 +61,12 @@ class SACAgent:
         self._use_bf16 = (self.amp_dtype == torch.bfloat16)
         self.checkpoint_interval = checkpoint_interval
         self.step_count = 0
+        self.actor_update_freq = kwargs.get("actor_update_freq", 2)
+        self._train_step_count = 0
+        # OB-AUD-01: Initialize metric stash so getattr fallback is never needed
+        self._last_actor_loss = None
+        self._last_alpha_loss = None
+        self._last_log_prob = None
         # pin_memory disabled: cudaHostAlloc overhead dominates for small batch
         # sizes typical in HPO/training. Sync .to(device) is faster in practice.
         self._use_pinned = False
@@ -134,16 +140,24 @@ class SACAgent:
 
         # torch.compile: full-model compile now works because networks accept
         # stacked (B,N,W,F) tensors instead of List[Tensor] (Session 127 fix).
+        # OA-AUD-01: Training critics use encode()/q_head_forward() which bypass
+        # full-model compile (OptimizedModule only intercepts __call__→forward).
+        # Sub-module compile (critic.encoder/q_head individually) was tested but
+        # breaks _load_state_dict due to nested _orig_mod prefix patterns
+        # (OA-AUD-03). Training critics run eager — acceptable because O-A
+        # encoder caching already eliminates 2/4 encoder passes per step.
+        # Target critics + actor still use full forward() via __call__.
         if torch_compile and hasattr(torch, 'compile'):
             try:
                 self.actor = torch.compile(self.actor, mode='default')
-                self.critic1 = torch.compile(self.critic1, mode='default')
-                self.critic2 = torch.compile(self.critic2, mode='default')
+                # Training critics: NOT compiled (encode/q_head_forward bypass).
+                # O-A caching provides the main gain (2 fewer encoder passes).
                 self.target_critic1 = torch.compile(self.target_critic1, mode='default')
                 self.target_critic2 = torch.compile(self.target_critic2, mode='default')
                 import logging
                 logging.getLogger(__name__).info(
-                    "[torch.compile] Full-model compile: actor + 2 critics + 2 targets"
+                    "[torch.compile] actor + 2 targets (full-model). "
+                    "Training critics: eager (O-A encode/q_head split)"
                 )
             except Exception as e:
                 import logging
@@ -245,9 +259,6 @@ class SACAgent:
         if len(self.replay_buffer) < self.learning_starts:
             return None
 
-        if not hasattr(self, '_train_step_count'):
-            self._train_step_count = 0
-
         mega_batch_size = n_steps * self.batch_size
 
         # --- ONE CPU phase: sample + transfer ---
@@ -288,6 +299,7 @@ class SACAgent:
             alpha = self.log_alpha.exp().detach()
 
             # --- Critic update ---
+            # OPT-OA: Encode current state ONCE, reuse features for actor update
             with torch.no_grad():
                 with amp_ctx:
                     next_action, next_log_prob = self.actor.sample(next_scale_stack, npriv)
@@ -297,8 +309,10 @@ class SACAgent:
                     target_value = rewards + (1.0 - dones) * self.gamma * target_q
 
             with amp_ctx:
-                q1 = self.critic1(scale_stack, priv, actions)
-                q2 = self.critic2(scale_stack, priv, actions)
+                c1_feat = self.critic1.encode(scale_stack, priv)
+                c2_feat = self.critic2.encode(scale_stack, priv)
+                q1 = self.critic1.q_head_forward(c1_feat, actions)
+                q2 = self.critic2.q_head_forward(c2_feat, actions)
                 critic_loss = nn.functional.mse_loss(q1, target_value) + nn.functional.mse_loss(q2, target_value)
 
             self.critic_optimizer.zero_grad()
@@ -316,31 +330,39 @@ class SACAgent:
             else:
                 self.critic_optimizer.step()
 
-            # --- Actor update ---
-            with amp_ctx:
-                new_action, log_prob = self.actor.sample(scale_stack, priv)
-                q1_new = self.critic1(scale_stack, priv, new_action)
-                q2_new = self.critic2(scale_stack, priv, new_action)
-                q_new = torch.min(q1_new, q2_new)
-                actor_loss = (alpha * log_prob - q_new).mean()
+            # --- Actor + Alpha update (O-B: delayed, every actor_update_freq steps) ---
+            if self._train_step_count % self.actor_update_freq == 0:
+                with amp_ctx:
+                    new_action, log_prob = self.actor.sample(scale_stack, priv)
+                    # OPT-OA: Reuse cached encoder features — .detach() prevents
+                    # critic encoder gradients from flowing into actor update
+                    q1_new = self.critic1.q_head_forward(c1_feat.detach(), new_action)
+                    q2_new = self.critic2.q_head_forward(c2_feat.detach(), new_action)
+                    q_new = torch.min(q1_new, q2_new)
+                    actor_loss = (alpha * log_prob - q_new).mean()
 
-            self.actor_optimizer.zero_grad()
-            if self.scaler.is_enabled():
-                self.scaler.scale(actor_loss).backward()
-                self.scaler.unscale_(self.actor_optimizer)
-            else:
-                actor_loss.backward()
-            nn.utils.clip_grad_norm_(self.actor.parameters(), self.gradient_clip)
-            if self.scaler.is_enabled():
-                self.scaler.step(self.actor_optimizer)
-            else:
-                self.actor_optimizer.step()
+                self.actor_optimizer.zero_grad()
+                if self.scaler.is_enabled():
+                    self.scaler.scale(actor_loss).backward()
+                    self.scaler.unscale_(self.actor_optimizer)
+                else:
+                    actor_loss.backward()
+                nn.utils.clip_grad_norm_(self.actor.parameters(), self.gradient_clip)
+                if self.scaler.is_enabled():
+                    self.scaler.step(self.actor_optimizer)
+                else:
+                    self.actor_optimizer.step()
 
-            # --- Alpha update (float32 — no AMP) ---
-            alpha_loss = -(self.log_alpha * (log_prob.float() + self.target_entropy).detach()).mean()
-            self.alpha_optimizer.zero_grad()
-            alpha_loss.backward()
-            self.alpha_optimizer.step()
+                # --- Alpha update (float32 — no AMP) ---
+                alpha_loss = -(self.log_alpha * (log_prob.float() + self.target_entropy).detach()).mean()
+                self.alpha_optimizer.zero_grad()
+                alpha_loss.backward()
+                self.alpha_optimizer.step()
+
+                # Stash for metrics on non-actor steps
+                self._last_actor_loss = actor_loss
+                self._last_alpha_loss = alpha_loss
+                self._last_log_prob = log_prob
 
             # Scaler update (no-op if disabled for BF16)
             self.scaler.update()
@@ -356,10 +378,10 @@ class SACAgent:
             if self._train_step_count % 50 == 0:
                 metrics = {
                     "critic_loss": critic_loss.item(),
-                    "actor_loss": actor_loss.item(),
+                    "actor_loss": self._last_actor_loss.item() if self._last_actor_loss is not None else 0.0,
                     "alpha": alpha.item(),
-                    "alpha_loss": alpha_loss.item(),
-                    "entropy": -log_prob.mean().item(),
+                    "alpha_loss": self._last_alpha_loss.item() if self._last_alpha_loss is not None else 0.0,
+                    "entropy": -self._last_log_prob.mean().item() if self._last_log_prob is not None else 0.0,
                     "q1_mean": q1.mean().item(),
                     "q2_mean": q2.mean().item(),
                 }

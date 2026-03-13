@@ -239,6 +239,35 @@ class SACCriticNetwork(nn.Module):
                 nn.init.xavier_uniform_(layer.weight)
                 nn.init.zeros_(layer.bias)
 
+    def encode(
+        self,
+        scale_stack: torch.Tensor,
+        private: torch.Tensor,
+    ) -> torch.Tensor:
+        """Encode multi-scale obs to fusion features: (B, fusion_dim).
+
+        Use with q_head_forward() to avoid redundant encoder passes
+        when the same (scale_stack, private) is needed for both critic
+        and actor updates (O-A encoder caching).
+        """
+        return self.encoder(scale_stack, private)
+
+    def q_head_forward(
+        self,
+        features: torch.Tensor,
+        action: torch.Tensor,
+    ) -> torch.Tensor:
+        """Q-value from pre-computed encoder features: (B, 1).
+
+        Args:
+            features: (B, fusion_dim) from encode()
+            action: (B, action_dim)
+        """
+        combined = torch.cat([features, action], dim=1)
+        if self._q_pad > 0:
+            combined = F.pad(combined, (0, self._q_pad))
+        return self.q_head(combined)
+
     def forward(
         self,
         scale_stack: torch.Tensor,
@@ -246,8 +275,5 @@ class SACCriticNetwork(nn.Module):
         action: torch.Tensor,
     ) -> torch.Tensor:
         """Returns scalar Q-value: (B, 1)"""
-        features = self.encoder(scale_stack, private)
-        combined = torch.cat([features, action], dim=1)
-        if self._q_pad > 0:
-            combined = F.pad(combined, (0, self._q_pad))
-        return self.q_head(combined)
+        features = self.encode(scale_stack, private)
+        return self.q_head_forward(features, action)
