@@ -26,7 +26,6 @@ Usage:
 
 import sys
 import os
-import json
 import argparse
 from datetime import datetime, timezone
 
@@ -176,7 +175,7 @@ def check_run_health(run):
 
     # Per-trial PFs
     trial_pfs = []
-    for i in range(10):
+    for i in range(50):
         tpf = summary.get(f'hpo/t{i}/profit_factor')
         if tpf is not None:
             trial_pfs.append((i, round(tpf, 4)))
@@ -252,8 +251,8 @@ def format_run_report(health):
     verdict_icons = {"OK": "+", "WARNING": "!", "CRITICAL": "X", "DEAD": "X"}
     icon = verdict_icons.get(health["verdict"], "?")
 
-    # Extract experiment tag (k1, k2, etc.)
-    exp_tags = [t for t in health.get("tags", []) if t.startswith('k')]
+    # Extract experiment tag (k1, r2.1, gmgp1, etc.)
+    exp_tags = [t for t in health.get("tags", []) if not t.startswith('gpuhub') and not t.startswith('rtx')]
     tag_label = exp_tags[0].upper() if exp_tags else "?"
     lines.append(f"  [{icon}] {tag_label}: {health['run_name']} ({health['run_id']})")
     lines.append(f"      State: {health['state']} | Verdict: {health['verdict']}")
