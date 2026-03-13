@@ -76,7 +76,7 @@ training:
 
 hpo:
   n_trials: 10                   # 10 trials sufficient for SAC continuous (fewer HPs than IQN)
-  steps_per_trial: 20000         # 20K steps: covers ~4 episodes at episode_length=500 × 12 envs
+  steps_per_trial: 500000        # 500K steps: SAC needs long exploration past deadband + learning_starts
 
 wandb:
   project: "FinRL-Pro-DS"
