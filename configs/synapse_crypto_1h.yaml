@@ -75,7 +75,7 @@ environment:
     enabled_live: true
 
 agents:
-  lean_trinity: ["sac", "a2c", "ppo_gae"]
+  lean_trinity: ["sac", "a2c"]  # PPO dropped (0/15 main pipeline, worst in pilot v2)
   total_timesteps: 2000000
   n_envs: 20
   use_fp16: true
@@ -94,14 +94,14 @@ agents:
     n_steps: 24
     gamma: 0.98
 
-  ppo_gae:
-    learning_rate: 1.0e-4
-    n_steps: 4096
-    batch_size: 128
-    n_epochs: 10
-    gamma: 0.98
-    gae_lambda: 0.95
-    clip_range: 0.15
+  # ppo_gae: REMOVED — 0/15 in main pipeline, worst in sync-1H pilot v2
+
+hpo:
+  enabled: true
+  agents: ["sac"]              # HPO SAC only; A2C uses defaults
+  n_trials: 50
+  hpo_timesteps: 200000
+  objective: "sortino"
 
 arbitrator:
   method: "softmax"

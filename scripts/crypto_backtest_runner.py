@@ -141,7 +141,7 @@ def create_env(arrays: dict, config: dict) -> CryptoPerpEnv:
     )
 
 
-def run_backtest(config: dict, max_windows: int | None = None) -> dict:
+def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: str | None = None) -> dict:
     """Run the full backtest pipeline.
 
     Returns a dict of metrics and results.
@@ -209,7 +209,8 @@ def run_backtest(config: dict, max_windows: int | None = None) -> dict:
 
             # F1: Pass train_arrays (not train_env) — vectorized envs built inside
             test_result = _train_and_evaluate(
-                train_arrays, val_env, test_env, config
+                train_arrays, val_env, test_env, config,
+                hpo_results_dir=hpo_results_dir, window_idx=w_idx,
             )
 
             window_results.append({
@@ -402,7 +403,7 @@ class _WandbStepCallback:
                         "_step": step,
                     }
                     # Pull episode reward from SB3's logger if available
-                    if len(cb_self.model.ep_info_buffer) > 0:
+                    if cb_self.model.ep_info_buffer and len(cb_self.model.ep_info_buffer) > 0:
                         ep_rewards = [ep["r"] for ep in cb_self.model.ep_info_buffer]
                         metrics[f"train/{outer.agent_name}/ep_reward_mean"] = float(np.mean(ep_rewards))
                         metrics[f"train/{outer.agent_name}/ep_reward_std"] = float(np.std(ep_rewards))
@@ -527,6 +528,8 @@ def _train_and_evaluate(
     val_env: CryptoPerpEnv,
     test_env: CryptoPerpEnv,
     config: dict,
+    hpo_results_dir: str | None = None,
+    window_idx: int = 0,
 ) -> dict:
     """Train Lean Trinity agents, select best via validation, and evaluate
     the Softmax Arbitrator ensemble on the test set.
@@ -543,6 +546,16 @@ def _train_and_evaluate(
     lean_trinity = agents_cfg.get("lean_trinity", ["sac", "a2c", "ppo_gae"])
     n_envs = agents_cfg.get("n_envs", 1)
 
+    # Load HPO best params if available for this window
+    hpo_sac_params = None
+    if hpo_results_dir:
+        hpo_path = Path(hpo_results_dir) / f"w{window_idx}_best_sac.json"
+        if hpo_path.exists():
+            with open(hpo_path) as f:
+                hpo_data = json.load(f)
+            hpo_sac_params = hpo_data.get("agent_params", {})
+            logger.info(f"    Loaded HPO params for SAC (window {window_idx}): {hpo_sac_params}")
+
     # --- Step 1: Train each agent on vectorized env ---
     trained_agents = {}
     # Top-level network architecture applies to all agents unless overridden
@@ -550,6 +563,9 @@ def _train_and_evaluate(
 
     for agent_type in lean_trinity:
         agent_specific_cfg = agents_cfg.get(agent_type, {}).copy()
+        # Override SAC with HPO best params if available
+        if agent_type == "sac" and hpo_sac_params:
+            agent_specific_cfg.update(hpo_sac_params)
         # Inherit top-level network_arch unless agent has its own
         if default_net_arch and "network_arch" not in agent_specific_cfg:
             agent_specific_cfg["network_arch"] = default_net_arch
@@ -648,6 +664,14 @@ def main():
         "--max_windows", type=int, default=None,
         help="Limit walk-forward to first N windows (pilot mode)"
     )
+    parser.add_argument(
+        "--agents", nargs="*", default=None,
+        help="Override which agents to train (e.g. --agents sac a2c). Default: from config lean_trinity"
+    )
+    parser.add_argument(
+        "--hpo_results_dir", type=str, default=None,
+        help="Directory with HPO best params (w{N}_best_sac.json). If present, SAC uses HPO params."
+    )
     # Compatibility with deploy_bare_metal.py injected args (ignored)
     parser.add_argument("--run_name", default=None, help=argparse.SUPPRESS)
     parser.add_argument("--version", default=None, help=argparse.SUPPRESS)
@@ -662,8 +686,14 @@ def main():
     )
 
     config = load_config(args.config)
+
+    # Override lean_trinity if --agents specified
+    if args.agents:
+        config.setdefault("agents", {})["lean_trinity"] = args.agents
+        logger.info(f"Agent override: {args.agents}")
+
     _init_wandb(config, args)
-    results = run_backtest(config, max_windows=args.max_windows)
+    results = run_backtest(config, max_windows=args.max_windows, hpo_results_dir=args.hpo_results_dir)
 
     # Log final summary to WandB
     if results.get("status") == "COMPLETED":
