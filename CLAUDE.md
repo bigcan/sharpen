@@ -204,9 +204,10 @@ Skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Tri
 | **Memory Search** | Investigating past experiments, bugs, decisions. Use tag-based grep before raw file reads. | `.agent/skills/memory-search/SKILL.md` |
 | **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. `python scripts/monitor_fleet.py` | `.agent/skills/monitor/SKILL.md` |
 | **Optimization** | SPS regression, low GPU util, new hardware, new training loop, perf tuning. Profile first (Phase 1). | `.agent/skills/optimization/SKILL.md` |
+| **Math** | Manual ("check math", "verify formulas") + auto after changes to env/agent/feature code that touch formulas. | `.agent/skills/math/SKILL.md` |
 
 **Chaining rules:**
-- Code change → **Audit** (mandatory) → if perf-relevant → **Optimization**
+- Code change → **Audit** (mandatory) → if perf-relevant → **Optimization** → if math-relevant → **Math**
 - Deploy request → **Monitor** (check fleet) → **Deploy** → **Monitor** (verify)
 - Session start → **Memory** boot → **Memory Search** if investigating prior work
 - Experiment result → **Memory** update `core.md` → `memory_store` if significant
