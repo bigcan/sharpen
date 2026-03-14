@@ -271,9 +271,11 @@ class SACTrainer:
                     wandb.log({
                         "hpo/heartbeat_step": total_steps,
                         "hpo/heartbeat_sps": round(sps, 1),
-                    })
-                except Exception:
-                    pass
+                    }, commit=True)
+                except Exception as e:
+                    if not getattr(self, '_heartbeat_warn_logged', False):
+                        logger.warning(f"WandB heartbeat failed (will not repeat): {e}")
+                        self._heartbeat_warn_logged = True
 
             # Logging
             if total_steps % self.log_interval < num_envs and not self.hpo_mode:

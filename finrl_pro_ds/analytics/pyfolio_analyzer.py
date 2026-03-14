@@ -64,7 +64,10 @@ class PyfolioAnalyzer:
         # FIX BUG-A1: Use all returns with min(r,0)² — not just negative returns' RMS.
         # The old formula excluded zero/positive returns from the denominator,
         # systematically understating it and inflating the Sortino ratio.
-        downside_deviation = np.sqrt(np.mean(np.minimum(r, 0.0)**2))
+        # FIX XMATH-10: Use ddof=1 (sample) to match Sharpe and all other modules
+        # (statistics.py, crypto_perp_env.py, arbitrator.py, crypto_report.py).
+        downside_sq = np.minimum(r, 0.0) ** 2
+        downside_deviation = np.sqrt(np.sum(downside_sq) / max(n - 1, 1))
         sortino = (mean_r / downside_deviation) * ann_factor if downside_deviation > 1e-9 else 0.0
 
         # Cumulative returns & Max Drawdown

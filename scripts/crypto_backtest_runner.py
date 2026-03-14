@@ -18,7 +18,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -29,20 +31,14 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from finrl_pro_ds.crypto.data.crypto_loader import (
-    CryptoDataPipeline,
+from finrl_pro_ds.crypto.data.crypto_loader import (  # noqa: E402
     WalkForwardCoverageValidator,
     fetch_crypto_data,
-    DEFAULT_UNIVERSE,
 )
-from finrl_pro_ds.crypto.data.crypto_array_builder import (
-    build_env_arrays,
-    CRYPTO_FEATURE_COLS,
-)
-from finrl_pro_ds.crypto.features.crypto_features import compute_crypto_features
-from finrl_pro_ds.crypto.envs.crypto_perp_env import CryptoPerpEnv
-from finrl_pro_ds.crypto.mlops.crypto_risk_manager import CryptoRiskManager, CryptoRiskConfig
-from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator
+from finrl_pro_ds.crypto.data.crypto_array_builder import build_env_arrays  # noqa: E402
+from finrl_pro_ds.crypto.features.crypto_features import compute_crypto_features  # noqa: E402
+from finrl_pro_ds.crypto.envs.crypto_perp_env import CryptoPerpEnv  # noqa: E402
+from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -141,6 +137,7 @@ def create_env(arrays: dict, config: dict) -> CryptoPerpEnv:
         min_trade_pct=float(env_cfg.get("min_trade_pct", 0.005)),
         circuit_breaker_threshold=float(env_cfg.get("circuit_breaker_threshold", 0.1)),
         enable_trade_log=True,
+        action_ema_alpha=float(env_cfg.get("action_ema_alpha", 0.0)),
     )
 
 
@@ -190,13 +187,11 @@ def run_backtest(config: dict, max_windows: int | None = None) -> dict:
         )
 
         try:
-            # Build training environment
+            # Build training arrays (vectorized envs created inside _train_and_evaluate)
             train_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["train_start"], window["train_end"],
             )
-
-            train_env = create_env(train_arrays, config)
 
             # Build validation environment (for model selection / early stopping)
             val_arrays = build_env_arrays(
@@ -212,9 +207,9 @@ def run_backtest(config: dict, max_windows: int | None = None) -> dict:
             )
             test_env = create_env(test_arrays, config)
 
-            # Train Lean Trinity agents and evaluate with Softmax Arbitrator
+            # F1: Pass train_arrays (not train_env) — vectorized envs built inside
             test_result = _train_and_evaluate(
-                train_env, val_env, test_env, config
+                train_arrays, val_env, test_env, config
             )
 
             window_results.append({
@@ -229,6 +224,11 @@ def run_backtest(config: dict, max_windows: int | None = None) -> dict:
                 f"return={test_result['total_return']:.2%}, "
                 f"sharpe={test_result['sharpe']:.3f}"
             )
+            _wandb_log({
+                f"window/{w_idx}/return": test_result["total_return"],
+                f"window/{w_idx}/sharpe": test_result["sharpe"],
+                f"window/{w_idx}/max_dd": test_result["max_drawdown"],
+            })
 
         except Exception as e:
             logger.error(f"  Window {w_idx} FAILED: {e}")
@@ -277,15 +277,73 @@ def run_backtest(config: dict, max_windows: int | None = None) -> dict:
     return summary
 
 
-def _make_sb3_agent(agent_type: str, env: CryptoPerpEnv, agent_cfg: dict):
+def _init_wandb(config: dict, args) -> bool:
+    """Initialize WandB run for the crypto backtest.
+
+    Returns True if WandB is active, False if unavailable/disabled.
+    """
+    try:
+        import wandb
+    except ImportError:
+        logger.warning("wandb not installed — training metrics will not be logged")
+        return False
+
+    if os.environ.get("WANDB_DISABLED"):
+        return False
+
+    run_name = args.run_name or f"sync-1H_{time.strftime('%Y%m%d_%H%M%S')}"
+    tags = list(args.tags or []) + ["sync-1h"]
+
+    wandb.init(
+        project=config.get("wandb", {}).get("project", "FinRL-Pro-DS"),
+        entity=config.get("wandb", {}).get("entity", None),
+        name=run_name,
+        tags=tags,
+        config={
+            "strategy": config.get("strategy", {}),
+            "environment": config.get("environment", {}),
+            "agents": config.get("agents", {}),
+            "walk_forward": config.get("walk_forward", {}),
+        },
+        reinit=True,
+    )
+    return True
+
+
+def _wandb_log(metrics: dict, step: int | None = None, commit: bool = True) -> None:
+    """Log metrics to WandB if available. No-op if wandb not active."""
+    try:
+        import wandb
+        if wandb.run is not None:
+            wandb.log(metrics, step=step, commit=commit)
+    except Exception:
+        pass
+
+
+def _make_vec_env(arrays: dict, config: dict, n_envs: int):
+    """Create a vectorized training environment with n_envs copies.
+
+    F1 fix: SB3 needs vectorized envs for sample diversity (especially
+    on-policy A2C/PPO). Each sub-env gets the same data arrays but
+    independent internal state (positions, margin, etc.).
+    """
+    from stable_baselines3.common.vec_env import DummyVecEnv
+
+    def _make_fn(a=arrays, c=config):
+        return create_env(a, c)
+
+    return DummyVecEnv([_make_fn for _ in range(n_envs)])
+
+
+def _make_sb3_agent(agent_type: str, env, agent_cfg: dict):
     """Instantiate an SB3 agent from config.
 
     Parameters
     ----------
     agent_type : str
         One of "sac", "a2c", "ppo_gae".
-    env : CryptoPerpEnv
-        Training environment.
+    env : VecEnv or CryptoPerpEnv
+        Training environment (vectorized or single).
     agent_cfg : dict
         Agent-specific hyperparameters from YAML.
     """
@@ -307,6 +365,51 @@ def _make_sb3_agent(agent_type: str, env: CryptoPerpEnv, agent_cfg: dict):
         params["policy_kwargs"] = {"net_arch": list(net_arch)}
 
     return cls("MlpPolicy", env, verbose=0, **params)
+
+
+class _WandbStepCallback:
+    """Lightweight SB3 callback that logs training progress to WandB.
+
+    Logs every `log_interval` steps: current step, episode reward stats,
+    and a heartbeat so the fleet monitor doesn't flag stalls.
+    """
+
+    def __init__(self, agent_name: str, total_timesteps: int, log_interval: int = 10_000):
+        from stable_baselines3.common.callbacks import BaseCallback
+
+        self.agent_name = agent_name
+        self.total_timesteps = total_timesteps
+        self.log_interval = log_interval
+        self._last_log_step = 0
+        self._start_time = time.time()
+
+        class _Callback(BaseCallback):
+            def __init__(cb_self, outer=self):
+                super().__init__(verbose=0)
+                cb_self.outer = outer
+
+            def _on_step(cb_self) -> bool:
+                step = cb_self.num_timesteps
+                outer = cb_self.outer
+                if step - outer._last_log_step >= outer.log_interval:
+                    outer._last_log_step = step
+                    elapsed = time.time() - outer._start_time
+                    sps = step / elapsed if elapsed > 0 else 0
+                    metrics = {
+                        f"train/{outer.agent_name}/step": step,
+                        f"train/{outer.agent_name}/progress": step / outer.total_timesteps,
+                        f"train/{outer.agent_name}/sps": sps,
+                        "_step": step,
+                    }
+                    # Pull episode reward from SB3's logger if available
+                    if len(cb_self.model.ep_info_buffer) > 0:
+                        ep_rewards = [ep["r"] for ep in cb_self.model.ep_info_buffer]
+                        metrics[f"train/{outer.agent_name}/ep_reward_mean"] = float(np.mean(ep_rewards))
+                        metrics[f"train/{outer.agent_name}/ep_reward_std"] = float(np.std(ep_rewards))
+                    _wandb_log(metrics)
+                return True
+
+        self.callback = _Callback()
 
 
 def _evaluate_agent_on_env(model, env: CryptoPerpEnv) -> tuple[dict, list[float]]:
@@ -420,7 +523,7 @@ def _compute_result_metrics(portfolio_values: list, step_returns: list) -> dict:
 
 
 def _train_and_evaluate(
-    train_env: CryptoPerpEnv,
+    train_arrays: dict,
     val_env: CryptoPerpEnv,
     test_env: CryptoPerpEnv,
     config: dict,
@@ -429,7 +532,7 @@ def _train_and_evaluate(
     the Softmax Arbitrator ensemble on the test set.
 
     Steps:
-    1. Train each agent (SAC, A2C, PPO) on train_env
+    1. Train each agent (SAC, A2C, PPO) on vectorized train env
     2. Evaluate each on val_env → pick Sortino scores
     3. Initialize SoftmaxArbitrator with val performance
     4. Run arbitrator ensemble on test_env → return metrics
@@ -438,8 +541,9 @@ def _train_and_evaluate(
     arb_cfg = config.get("arbitrator", {})
     total_timesteps = agents_cfg.get("total_timesteps", 2_000_000)
     lean_trinity = agents_cfg.get("lean_trinity", ["sac", "a2c", "ppo_gae"])
+    n_envs = agents_cfg.get("n_envs", 1)
 
-    # --- Step 1: Train each agent ---
+    # --- Step 1: Train each agent on vectorized env ---
     trained_agents = {}
     # Top-level network architecture applies to all agents unless overridden
     default_net_arch = agents_cfg.get("network_arch")
@@ -449,15 +553,22 @@ def _train_and_evaluate(
         # Inherit top-level network_arch unless agent has its own
         if default_net_arch and "network_arch" not in agent_specific_cfg:
             agent_specific_cfg["network_arch"] = default_net_arch
-        logger.info(f"    Training {agent_type.upper()} ({total_timesteps} timesteps)...")
+        logger.info(f"    Training {agent_type.upper()} ({total_timesteps} timesteps, {n_envs} envs)...")
 
         try:
-            model = _make_sb3_agent(agent_type, train_env, agent_specific_cfg)
-            model.learn(total_timesteps=total_timesteps)
+            # F1: Vectorized training — n_envs parallel copies for sample diversity
+            vec_env = _make_vec_env(train_arrays, config, n_envs)
+            model = _make_sb3_agent(agent_type, vec_env, agent_specific_cfg)
+            # WandB callback for training progress + heartbeat
+            wb_cb = _WandbStepCallback(agent_type, total_timesteps)
+            model.learn(total_timesteps=total_timesteps, callback=wb_cb.callback)
             trained_agents[agent_type] = model
+            vec_env.close()
             logger.info(f"    {agent_type.upper()} training complete")
+            _wandb_log({f"train/{agent_type}/status": "complete"})
         except Exception as e:
             logger.error(f"    {agent_type.upper()} training failed: {e}")
+            _wandb_log({f"train/{agent_type}/status": "failed", f"train/{agent_type}/error": str(e)})
 
     if not trained_agents:
         logger.error("    All agents failed to train — falling back to random baseline")
@@ -481,6 +592,12 @@ def _train_and_evaluate(
             f"    {name.upper()} val: sortino={val_sortino:.3f}, "
             f"return={val_result['total_return']:.2%}"
         )
+        _wandb_log({
+            f"val/{name}/sortino": val_sortino,
+            f"val/{name}/return": val_result["total_return"],
+            f"val/{name}/sharpe": val_result["sharpe"],
+            f"val/{name}/max_dd": val_result["max_drawdown"],
+        })
 
     # --- Step 3: Initialize Softmax Arbitrator ---
     arbitrator = SoftmaxArbitrator.from_config(arb_cfg)
@@ -501,6 +618,7 @@ def _train_and_evaluate(
 
     weights = arbitrator.get_weights()
     logger.info(f"    Arbitrator weights: {weights}")
+    _wandb_log({f"arbitrator/weight_{k}": v for k, v in weights.items()})
 
     # --- Step 4: Evaluate arbitrator ensemble on test env ---
     logger.info("    Running arbitrator ensemble on test set...")
@@ -509,6 +627,13 @@ def _train_and_evaluate(
     )
     test_result["agent_weights"] = weights
     test_result["n_agents_trained"] = len(trained_agents)
+
+    _wandb_log({
+        "test/return": test_result["total_return"],
+        "test/sharpe": test_result["sharpe"],
+        "test/max_dd": test_result["max_drawdown"],
+        "test/final_value": test_result["final_value"],
+    })
 
     return test_result
 
@@ -537,7 +662,17 @@ def main():
     )
 
     config = load_config(args.config)
+    _init_wandb(config, args)
     results = run_backtest(config, max_windows=args.max_windows)
+
+    # Log final summary to WandB
+    if results.get("status") == "COMPLETED":
+        _wandb_log({
+            "summary/median_sharpe": results["median_sharpe"],
+            "summary/median_return": results["median_return"],
+            "summary/median_max_dd": results["median_max_dd"],
+            "summary/n_windows": results["n_windows"],
+        })
 
     # R6 fix: Persist results to disk for downstream consumption
     out_dir = Path("results") / "crypto_backtest"
@@ -560,6 +695,14 @@ def main():
     with open(out_path, "w") as f:
         json.dump(results, f, indent=2, default=_serialize)
     logger.info(f"Results saved to {out_path}")
+
+    # Finish WandB run
+    try:
+        import wandb
+        if wandb.run is not None:
+            wandb.finish()
+    except Exception:
+        pass
 
     if results["status"] == "COMPLETED":
         logger.info("Backtest COMPLETED successfully")

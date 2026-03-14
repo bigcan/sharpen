@@ -161,9 +161,12 @@ class WandbFinRLEvaluator:
         sharpe = (mean_ret / std_ret * ANN_FACTOR) if (std_ret > 1e-9 and not np.isnan(std_ret)) else 0.0
 
         # FIX WB-02: Correct Sortino formula — sqrt(mean(min(r,0)²)), not std(negative_returns)
+        # FIX XMATH-11: Use ddof=1 (sample) to match Sharpe (.std() uses ddof=1)
+        # and all other modules (statistics.py, crypto_perp_env.py, etc.).
         downside_returns = returns.values
         downside_sq = np.minimum(downside_returns, 0.0) ** 2
-        downside_dev = np.sqrt(np.mean(downside_sq))
+        n_ds = len(downside_sq)
+        downside_dev = np.sqrt(np.sum(downside_sq) / max(n_ds - 1, 1))
         sortino = (mean_ret / downside_dev * ANN_FACTOR) if downside_dev > 1e-9 else 0.0
 
         # Calmar Ratio

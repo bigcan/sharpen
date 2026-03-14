@@ -639,9 +639,11 @@ class DeepScalperTrainer:
                         wandb.log({
                             "hpo/heartbeat_step": global_step,
                             "hpo/heartbeat_sps": round(sps, 1),
-                        })
-                    except Exception:
-                        pass
+                        }, commit=True)
+                    except Exception as e:
+                        if not getattr(self, '_heartbeat_warn_logged', False):
+                            print(f"  [HPO] WandB heartbeat failed (will not repeat): {e}")
+                            self._heartbeat_warn_logged = True
 
                 # 4b. HPO Pruning Check — dual strategy:
                 #   (a) Optuna Hyperband pruner for score-based inter-trial comparison
