@@ -113,10 +113,19 @@ def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = N
     features[:, 2] = np.clip(parkinson, 0.0, 0.1).astype(np.float32)
 
     # 4-7. OHLC z-scores: SymLog → EMA-Z → tanh
+    # FIX MATH-N03: Carry forward warm-up buffer across norm cutoff so EMA-Z
+    # converges before genuine post-cutoff data begins (matching parquet_handler.py).
+    WARMUP_BUFFER = 200  # ~1.7 half-lives for span=120 EMA
+
     def normalize_series(arr):
         if norm_cutoff_idx is not None and 0 < norm_cutoff_idx < len(arr):
             part1 = _ema_zscore_tanh(_symlog(arr[:norm_cutoff_idx]), span)
-            part2 = _ema_zscore_tanh(_symlog(arr[norm_cutoff_idx:]), span)
+            # Carry forward last WARMUP_BUFFER rows from pre-cutoff as warm-up
+            buffer_size = min(WARMUP_BUFFER, norm_cutoff_idx)
+            arr_after_with_buffer = arr[norm_cutoff_idx - buffer_size:]
+            part2_full = _ema_zscore_tanh(_symlog(arr_after_with_buffer), span)
+            # Strip buffer rows — only keep genuine post-cutoff output
+            part2 = part2_full[buffer_size:]
             return np.concatenate([part1, part2])
         return _ema_zscore_tanh(_symlog(arr), span)
 

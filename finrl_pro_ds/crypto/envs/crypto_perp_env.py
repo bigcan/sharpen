@@ -65,6 +65,7 @@ class CryptoPerpEnv(gym.Env):
         min_trade_pct: float = 0.005,    # Skip dust trades < 0.5%
         circuit_breaker_threshold: float = 0.1,
         enable_trade_log: bool = False,
+        action_ema_alpha: float = 0.0,
     ) -> None:
         super().__init__()
 
@@ -108,6 +109,7 @@ class CryptoPerpEnv(gym.Env):
         self.min_trade_pct = float(min_trade_pct)
         self.circuit_breaker_threshold = float(circuit_breaker_threshold)
         self.enable_trade_log = enable_trade_log
+        self.action_ema_alpha = float(action_ema_alpha)
 
         # --- Pre-compute UTC funding hours for each bar ---
         # Funding applies at 00:00, 08:00, 16:00 UTC
@@ -167,6 +169,12 @@ class CryptoPerpEnv(gym.Env):
 
     def step(self, action: np.ndarray):
         action = np.asarray(action, dtype=np.float64).ravel().clip(-1.0, 1.0)
+
+        # F3: Action EMA smoothing — blend raw action toward current position
+        # to reduce churn. alpha=0 disables; alpha=1 uses raw action fully.
+        if self.action_ema_alpha > 0.0:
+            alpha = self.action_ema_alpha
+            action = alpha * action + (1.0 - alpha) * self.positions
 
         # --- Enforce no-leverage constraint via proportional scaling ---
         target_weights = self._enforce_gross_exposure(action)

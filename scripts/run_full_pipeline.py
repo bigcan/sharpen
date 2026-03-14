@@ -1095,6 +1095,9 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         step = 0
         # FIX GMO1-01: Track direction for fee_threshold context
         current_direction = None
+        # FIX XMATH-13: Track trade-level PnL for dual PF reporting (PF-XCHECK)
+        _bt_trade_pnls = []
+        _bt_prev_rpnl = 0.0
 
         while not done and step < 200000:
             if agent_type == "sac":
@@ -1130,6 +1133,18 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             dir_val = info.get("direction")
             if dir_val is not None:
                 current_direction = np.array([float(dir_val)])
+
+            # FIX XMATH-13: Track trade-level PnL for dual PF reporting
+            switched = info.get("switched")
+            if switched is not None:
+                is_switch = bool(switched)
+                if is_switch:
+                    rpnl = info.get("realized_pnl")
+                    if rpnl is not None:
+                        curr_rpnl = float(rpnl)
+                        trade_pnl = curr_rpnl - _bt_prev_rpnl
+                        _bt_trade_pnls.append(trade_pnl)
+                        _bt_prev_rpnl = curr_rpnl
 
             if step % 50000 == 0:
                 logger.info(f"Backtest step {step}: Value={portfolio_values[-1]:.2f}")
@@ -1204,12 +1219,25 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             pyfolio_metrics = {}
 
         # Manual: Profit Factor & Avg Win/Loss Ratio
+        # Bar-level PF (portfolio value changes)
         wins = returns[returns > 0]
         losses = returns[returns < 0]
         gross_profit = np.sum(wins) if len(wins) > 0 else 0.0
         gross_loss = abs(np.sum(losses)) if len(losses) > 0 else 0.0
         # FIX BUG-14: Zero losses with gains = excellent (cap at 10, not 0)
         profit_factor = gross_profit / gross_loss if gross_loss > 1e-12 else (10.0 if gross_profit > 1e-12 else 0.0)
+
+        # FIX XMATH-13: Trade-level PF for PF-XCHECK (matches HPO objective granularity)
+        trade_pnls_arr = np.array(_bt_trade_pnls)
+        if len(trade_pnls_arr) > 0:
+            tp_pos = trade_pnls_arr[trade_pnls_arr > 0]
+            tp_neg = trade_pnls_arr[trade_pnls_arr < 0]
+            tp_profit = float(np.sum(tp_pos))
+            tp_loss = float(np.abs(np.sum(tp_neg)))
+            profit_factor_trade = tp_profit / tp_loss if tp_loss > 1e-12 else (10.0 if tp_profit > 1e-12 else 0.0)
+        else:
+            profit_factor_trade = profit_factor  # Fallback to bar-level
+
         avg_win = np.mean(wins) if len(wins) > 0 else 0.0
         avg_loss = abs(np.mean(losses)) if len(losses) > 0 else 0.0
         avg_win_loss_ratio = avg_win / avg_loss if avg_loss > 1e-12 else 0.0
@@ -1234,6 +1262,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             f"{prefix}/annual_return": pyfolio_metrics.get("annual_return", 0.0),
             # ── Trade quality metrics (manual) ──
             f"{prefix}/profit_factor": profit_factor,
+            f"{prefix}/profit_factor_trade": profit_factor_trade,
             f"{prefix}/avg_win_loss_ratio": avg_win_loss_ratio,
             f"{prefix}/status": "completed"
         }
