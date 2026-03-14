@@ -16,6 +16,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import copy
 import json
 import logging
 import os
@@ -101,6 +102,7 @@ def prepare_data(config: dict) -> dict:
         test_bars=wf_cfg["test_bars"],
         step_bars=wf_cfg["step_bars"],
         embargo_bars=wf_cfg["embargo_bars"],
+        min_windows=wf_cfg.get("min_windows", 10),
     )
     wf_result = wf_validator.validate(ohlcv)
 
@@ -138,6 +140,8 @@ def create_env(arrays: dict, config: dict) -> CryptoPerpEnv:
         circuit_breaker_threshold=float(env_cfg.get("circuit_breaker_threshold", 0.1)),
         enable_trade_log=True,
         action_ema_alpha=float(env_cfg.get("action_ema_alpha", 0.0)),
+        random_start=bool(env_cfg.get("random_start", False)),
+        random_start_pct=float(env_cfg.get("random_start_pct", 0.1)),
     )
 
 
@@ -187,25 +191,34 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
         )
 
         try:
+            # Thread norm_window from features config to array builder
+            norm_window = config.get("features", {}).get("norm_window", 720)
+
             # Build training arrays (vectorized envs created inside _train_and_evaluate)
             train_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["train_start"], window["train_end"],
+                norm_window=norm_window,
             )
 
             # Build validation environment (for model selection / early stopping)
+            # Val/test envs must NOT use random_start (deterministic eval)
             val_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["val_start"], window["val_end"],
+                norm_window=norm_window,
             )
-            val_env = create_env(val_arrays, config)
+            eval_config = copy.deepcopy(config)
+            eval_config["environment"]["random_start"] = False
+            val_env = create_env(val_arrays, eval_config)
 
             # Build test environment
             test_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["test_start"], window["test_end"],
+                norm_window=norm_window,
             )
-            test_env = create_env(test_arrays, config)
+            test_env = create_env(test_arrays, eval_config)
 
             # F1: Pass train_arrays (not train_env) — vectorized envs built inside
             test_result = _train_and_evaluate(

@@ -79,10 +79,15 @@ def define_sac_search_space(trial, base_cfg: dict) -> dict:
 
 
 def _create_env_with_overrides(arrays: dict, config: dict, overrides: dict):
-    """Create a CryptoPerpEnv with env param overrides applied."""
+    """Create a CryptoPerpEnv with env param overrides applied.
+
+    Always forces random_start=False — this is used for val/test evaluation
+    which must be deterministic.
+    """
     cfg = copy.deepcopy(config)
     for k, v in overrides.items():
         cfg["environment"][k] = v
+    cfg["environment"]["random_start"] = False
     return create_env(arrays, cfg)
 
 
@@ -554,17 +559,21 @@ def run_full_hpo_wf(
         logger.info(f"{'='*60}")
 
         try:
+            norm_window = config.get("features", {}).get("norm_window", 720)
             train_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["train_start"], window["train_end"],
+                norm_window=norm_window,
             )
             val_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["val_start"], window["val_end"],
+                norm_window=norm_window,
             )
             test_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["test_start"], window["test_end"],
+                norm_window=norm_window,
             )
 
             result = run_hpo_for_window(

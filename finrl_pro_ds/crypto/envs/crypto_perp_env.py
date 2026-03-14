@@ -66,6 +66,8 @@ class CryptoPerpEnv(gym.Env):
         circuit_breaker_threshold: float = 0.1,
         enable_trade_log: bool = False,
         action_ema_alpha: float = 0.0,
+        random_start: bool = False,
+        random_start_pct: float = 0.1,
     ) -> None:
         super().__init__()
 
@@ -110,6 +112,8 @@ class CryptoPerpEnv(gym.Env):
         self.circuit_breaker_threshold = float(circuit_breaker_threshold)
         self.enable_trade_log = enable_trade_log
         self.action_ema_alpha = float(action_ema_alpha)
+        self.random_start = random_start
+        self.random_start_pct = float(random_start_pct)
 
         # --- Pre-compute UTC funding hours for each bar ---
         # Funding applies at 00:00, 08:00, 16:00 UTC
@@ -129,6 +133,17 @@ class CryptoPerpEnv(gym.Env):
 
         # --- Pre-compute asset availability mask (C2: zero-price protection) ---
         self._asset_available = self.price_ary > 1e-10  # (T, n_assets)
+
+        # --- Pre-allocated working arrays (OPT: avoid per-step allocations) ---
+        self._obs_buffer = np.empty(self.obs_dim, dtype=np.float32)
+        self._pnl_buffer = np.zeros(n_assets, dtype=np.float64)
+        self._closed_frac_buffer = np.zeros(n_assets, dtype=np.float64)
+        self._cost_buffer = np.zeros(n_assets, dtype=np.float32)
+
+        # --- Cached step results (OPT: avoid recomputation in _get_obs) ---
+        self._cached_unrealized: np.ndarray | None = None
+        self._cached_portfolio_value: float = 0.0
+        self._cached_abs_positions: np.ndarray | None = None
 
         # --- Runtime state (initialized in reset) ---
         self.step_idx = 0
@@ -152,11 +167,15 @@ class CryptoPerpEnv(gym.Env):
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
 
-        self.step_idx = 0
+        if self.random_start and self.max_step > 0:
+            max_offset = int(self.max_step * self.random_start_pct)
+            self.step_idx = int(self.np_random.integers(0, max_offset)) if max_offset > 0 else 0
+        else:
+            self.step_idx = 0
         self.margin_balance = self.initial_capital
-        self.positions = np.zeros(self.n_assets, dtype=np.float64)
-        self.entry_prices = np.zeros(self.n_assets, dtype=np.float64)
-        self.entry_notionals = np.zeros(self.n_assets, dtype=np.float64)
+        self.positions[:] = 0.0
+        self.entry_prices[:] = 0.0
+        self.entry_notionals[:] = 0.0
         self.realized_pnl = 0.0
         self.cumulative_fees = 0.0
         self.cumulative_funding = 0.0
@@ -164,6 +183,11 @@ class CryptoPerpEnv(gym.Env):
         self.returns_history = []
         if self.enable_trade_log:
             self.trade_log = []
+
+        # Clear cached step results
+        self._cached_unrealized = None
+        self._cached_portfolio_value = 0.0
+        self._cached_abs_positions = None
 
         return self._get_obs(), {}
 
@@ -209,13 +233,17 @@ class CryptoPerpEnv(gym.Env):
         old_positions = self.positions.copy()
         delta_weights = target_weights - old_positions
 
+        # OPT: Compute abs(delta) once, reuse in dust filter + transaction costs
+        abs_delta = np.abs(delta_weights)
+
         # Filter dust trades
-        dust_mask = np.abs(delta_weights) < self.min_trade_pct
+        dust_mask = abs_delta < self.min_trade_pct
         delta_weights[dust_mask] = 0.0
+        abs_delta[dust_mask] = 0.0  # Keep abs_delta in sync
 
         # Calculate transaction costs (fees + slippage)
-        total_fees, total_slippage = self._calc_transaction_costs(
-            delta_weights, price, portfolio_value_before
+        total_fees, total_slippage = self._calc_transaction_costs_fast(
+            delta_weights, abs_delta, price, portfolio_value_before
         )
 
         # Realize PnL on closed/reduced positions
@@ -251,7 +279,8 @@ class CryptoPerpEnv(gym.Env):
 
         # --- Calculate new portfolio value ---
         new_unrealized = self._calc_unrealized_pnl(price)
-        portfolio_value = self.margin_balance + new_unrealized.sum()
+        unrealized_sum = float(new_unrealized.sum())
+        portfolio_value = self.margin_balance + unrealized_sum
         self.portfolio_values.append(portfolio_value)
 
         # --- Calculate reward ---
@@ -261,22 +290,29 @@ class CryptoPerpEnv(gym.Env):
             step_return = 0.0
         self.returns_history.append(step_return)
 
-        reward = self._calc_reward(step_return, delta_weights, portfolio_value_before)
+        reward = self._calc_reward(step_return, abs_delta, portfolio_value_before)
 
         # --- Trade logging ---
         if self.enable_trade_log and self.trade_log is not None:
             abs_old = np.abs(old_positions).sum()
+            abs_delta_sum = float(abs_delta.sum()) + 1e-10
             for i in range(self.n_assets):
-                if abs(delta_weights[i]) >= self.min_trade_pct:
+                if abs_delta[i] >= self.min_trade_pct:
                     self.trade_log.append({
                         "step": self.step_idx,
                         "asset": i,
                         "delta_weight": float(delta_weights[i]),
                         "price": float(price[i]),
-                        "notional": float(abs(delta_weights[i]) * portfolio_value_before),
-                        "fee": float(total_fees * abs(delta_weights[i]) / (np.abs(delta_weights).sum() + 1e-10)),
+                        "notional": float(abs_delta[i] * portfolio_value_before),
+                        "fee": float(total_fees * abs_delta[i] / abs_delta_sum),
                         "funding": float(funding_cost * abs(old_positions[i]) / (abs_old + 1e-10)) if abs_old > 0 else 0.0,
                     })
+
+        # --- OPT: Cache results for _get_obs() reuse ---
+        abs_pos = np.abs(self.positions)
+        self._cached_unrealized = new_unrealized
+        self._cached_portfolio_value = portfolio_value
+        self._cached_abs_positions = abs_pos
 
         # --- Check termination ---
         # Gymnasium semantics: terminated = MDP terminal state (circuit breaker),
@@ -290,12 +326,12 @@ class CryptoPerpEnv(gym.Env):
         info = {
             "portfolio_value": portfolio_value,
             "margin_balance": self.margin_balance,
-            "unrealized_pnl": float(new_unrealized.sum()),
+            "unrealized_pnl": unrealized_sum,
             "realized_pnl": self.realized_pnl,
             "cumulative_fees": self.cumulative_fees,
             "cumulative_funding": self.cumulative_funding,
             "step_return": step_return,
-            "gross_exposure": float(np.abs(self.positions).sum()),
+            "gross_exposure": float(abs_pos.sum()),
             "net_exposure": float(self.positions.sum()),
             "n_long": int((self.positions > self.min_trade_pct).sum()),
             "n_short": int((self.positions < -self.min_trade_pct).sum()),
@@ -380,7 +416,9 @@ class CryptoPerpEnv(gym.Env):
         if not active.any():
             return 0.0
 
-        closed_fraction = np.zeros(self.n_assets, dtype=np.float64)
+        # OPT: Reuse pre-allocated buffer
+        closed_fraction = self._closed_frac_buffer
+        closed_fraction[:] = 0.0
 
         # Case 1: Position flip — fully close old
         flipped = active & (np.sign(old_positions) != np.sign(new_positions)) & (abs_new > 1e-8)
@@ -458,20 +496,21 @@ class CryptoPerpEnv(gym.Env):
     # -----------------------------------------------------------------------
     # Transaction costs
     # -----------------------------------------------------------------------
-    def _calc_transaction_costs(
+    def _calc_transaction_costs_fast(
         self,
         delta_weights: np.ndarray,
+        abs_delta: np.ndarray,
         price: np.ndarray,
         portfolio_value: float,
     ) -> tuple[float, float]:
         """Calculate fees and slippage for the rebalance.
 
+        OPT: Accepts pre-computed abs_delta to avoid redundant np.abs().
         Vectorized for training performance (called millions of times by SB3).
 
         Returns:
             (total_fees, total_slippage) in quote currency.
         """
-        abs_delta = np.abs(delta_weights)
         active = abs_delta >= 1e-8
         if not active.any():
             return 0.0, 0.0
@@ -522,10 +561,12 @@ class CryptoPerpEnv(gym.Env):
     def _calc_reward(
         self,
         step_return: float,
-        delta_weights: np.ndarray,
+        abs_delta: np.ndarray,
         portfolio_value: float,
     ) -> float:
         """Calculate reward based on the configured reward type.
+
+        OPT: Accepts pre-computed abs_delta to avoid redundant np.abs().
 
         sortino_softmax: Sortino-focused reward with turnover penalty.
         simple: Raw return with turnover penalty.
@@ -535,12 +576,13 @@ class CryptoPerpEnv(gym.Env):
         else:
             reward = step_return * self.reward_scaling
 
-        # Turnover penalty
+        # Turnover penalty (OPT: reuse pre-computed abs_delta)
         if portfolio_value > 1e-6:
-            turnover = float(np.abs(delta_weights).sum())
+            turnover = float(abs_delta.sum())
             reward -= turnover * self.turnover_penalty
 
-        return float(np.clip(reward, *self.reward_clip_range))
+        clip_lo, clip_hi = self.reward_clip_range
+        return max(clip_lo, min(clip_hi, reward))
 
     def _sortino_reward(self, step_return: float) -> float:
         """Sortino-focused reward using true downside deviation.
@@ -572,66 +614,84 @@ class CryptoPerpEnv(gym.Env):
     # Observation
     # -----------------------------------------------------------------------
     def _get_obs(self) -> np.ndarray:
-        """Build the observation vector."""
-        price = self.price_ary[self.step_idx]
-        unrealized = self._calc_unrealized_pnl(price)
-        portfolio_value = self.margin_balance + unrealized.sum()
+        """Build the observation vector.
+
+        OPT: Uses cached unrealized PnL, portfolio value, and abs(positions)
+        from step() to avoid redundant computation. Fills pre-allocated buffer
+        in-place to avoid np.concatenate allocation.
+        """
+        # OPT: Reuse cached values from step() when available
+        if self._cached_unrealized is not None:
+            unrealized = self._cached_unrealized
+            portfolio_value = self._cached_portfolio_value
+            abs_pos = self._cached_abs_positions
+            # Clear cache (one-shot — reset() calls _get_obs without step())
+            self._cached_unrealized = None
+            self._cached_abs_positions = None
+        else:
+            # Fallback for reset() path where step() hasn't run yet
+            price = self.price_ary[self.step_idx]
+            unrealized = self._calc_unrealized_pnl(price)
+            portfolio_value = self.margin_balance + unrealized.sum()
+            abs_pos = np.abs(self.positions)
+
+        inv_cap = 1.0 / self.initial_capital
+        buf = self._obs_buffer
+        n = self.n_assets
+        td = self.tech_dim
 
         # 1. Margin balance as % of initial capital
-        margin_pct = np.array(
-            [portfolio_value / self.initial_capital], dtype=np.float32
-        )
+        buf[0] = portfolio_value * inv_cap
 
-        # 2. Technical features (already flattened: n_assets * tech_dim)
+        # 2. Technical features (already flattened: n_assets * tech_dim, already float32)
+        off = 1
         tech_flat = self.tech_ary[self.step_idx]
-        if not np.isfinite(tech_flat).all():
-            tech_flat = np.nan_to_num(tech_flat, nan=0.0, posinf=0.0, neginf=0.0)
+        buf[off:off + n * td] = tech_flat
+        off += n * td
 
-        # 3. Current positions (signed weights)
-        positions = self.positions.astype(np.float32)
+        # 3. Current positions (signed weights) — float64→float32 copy
+        buf[off:off + n] = self.positions
+        off += n
 
         # 4. Unrealized PnL per asset (normalized by initial capital)
-        unrealized_norm = (unrealized / self.initial_capital).astype(np.float32)
+        buf[off:off + n] = unrealized * inv_cap
+        off += n
 
         # 5. Funding rates per asset
-        funding = self.funding_rate_ary[self.step_idx].astype(np.float32)
+        buf[off:off + n] = self.funding_rate_ary[self.step_idx]
+        off += n
 
         # 6. Cost to rebalance: estimated txn cost if fully rebalanced to zero
-        # Use previous bar's volume to avoid look-ahead bias
-        # Vectorized for training performance.
-        obs_vol_idx = max(self.step_idx - 1, 0)
-        pv_for_cost = max(portfolio_value, self.initial_capital * 0.01)
-        abs_pos = np.abs(self.positions)
+        cost_buf = self._cost_buffer
+        cost_buf[:] = 0.0
         active_pos = abs_pos > 1e-8
-        cost_to_rebal = np.zeros(self.n_assets, dtype=np.float32)
         if active_pos.any():
+            pv_for_cost = max(portfolio_value, self.initial_capital * 0.01)
+            obs_vol_idx = max(self.step_idx - 1, 0)
             notionals = abs_pos[active_pos] * pv_for_cost
             hourly_vols = self.volume_ary[obs_vol_idx, active_pos]
             vol_ratios = np.where(hourly_vols > 1e-6, notionals / hourly_vols, 1.0)
             slip_bps = self.slippage_base_bps + self.slippage_impact_bps * vol_ratios
             costs = notionals * (self.taker_fee_pct + slip_bps * 1e-4)
-            cost_to_rebal[active_pos] = costs / (self.initial_capital + 1e-6)
+            cost_buf[active_pos] = costs / (self.initial_capital + 1e-6)
+        buf[off:off + n] = cost_buf
+        off += n
 
         # 7. Portfolio concentration (Effective Number of Bets = 1/HHI)
-        abs_weights = np.abs(self.positions)
-        total_w = abs_weights.sum()
+        total_w = float(abs_pos.sum())
         if total_w > 1e-8:
-            w_norm = abs_weights / total_w
+            w_norm = abs_pos / total_w
             hhi = float((w_norm ** 2).sum())
-            enb = 1.0 / hhi if hhi > 1e-8 else float(self.n_assets)
+            enb = (1.0 / hhi if hhi > 1e-8 else float(n)) / n
         else:
-            enb = 0.0  # No positions
-        enb_arr = np.array([enb / self.n_assets], dtype=np.float32)  # Normalize to [0, 1]
+            enb = 0.0
+        buf[off] = enb
 
-        return np.concatenate([
-            margin_pct,
-            tech_flat,
-            positions,
-            unrealized_norm,
-            funding,
-            cost_to_rebal,
-            enb_arr,
-        ]).astype(np.float32)
+        # NaN guard (fast path: skip if all finite)
+        if not np.isfinite(buf).all():
+            np.nan_to_num(buf, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+
+        return buf
 
     # -----------------------------------------------------------------------
     # Utilities
