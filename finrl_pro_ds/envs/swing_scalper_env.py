@@ -289,6 +289,7 @@ class SwingScalperEnv(gym.Env):
         # 4. Process action (apply cooldown)
         switched = False
         prev_entry_mid = self.entry_mid  # Save for switch-centric reward
+        direction_for_reward = self.direction  # BUG-04: Save BEFORE potential switch
         desired_direction = 1.0 if action == ACTION_LONG else -1.0
 
         if desired_direction != self.direction:
@@ -331,7 +332,7 @@ class SwingScalperEnv(gym.Env):
                 reward = self.stay_reward_weight * self.direction * price_return_bps
         else:
             # Dense reward (K5 default): per-bar directional PnL
-            reward = self.direction * price_return_bps
+            reward = direction_for_reward * price_return_bps
             if switched:
                 reward -= fee_bps
 

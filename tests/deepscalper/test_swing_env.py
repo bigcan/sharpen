@@ -611,5 +611,107 @@ class TestSwingEnvSwitchCentricReward(unittest.TestCase):
                         "CRRA should compress switch-centric reward")
 
 
+class TestSwingEnvDenseRewardOnSwitch(unittest.TestCase):
+    """BUG-04: Dense reward on switch bars must use direction BEFORE switch."""
+
+    def setUp(self):
+        self.config = {
+            "symbol": "BTCUSDT",
+            "window_size": 5,
+            "initial_balance": 100000.0,
+            "taker_fee": 0.0005,  # 5 bps → 10 bps RT
+            "action": {"cooldown_bars": 0, "max_position": 1.0, "fixed_trade_qty": 0.2},
+            "episode_length": 100,
+            "network": {"micro_config": {"input_size": NUM_MICRO_FEATURES}},
+        }
+        self.mock_handler = MagicMock(spec=ParquetDataHandler)
+        self.mock_handler._len = 1000
+        self.mock_handler._col_to_idx = None
+
+    def test_dense_switch_bar_uses_old_direction(self):
+        """BUG-04: Long→Short switch with price UP must give positive reward (minus fee).
+
+        Before fix: direction updated before reward → Short(-1) × +200bps = -200 - fee = WRONG
+        After fix: saved direction Long(+1) × +200bps = +200 - fee = CORRECT
+        """
+        self.mock_handler.step.return_value = _mock_row(bid=100.0, ask=101.0)
+        env = SwingScalperEnv(self.config, self.mock_handler)
+        env.reset(seed=42)
+
+        # Agent is Long, past cooldown
+        env.direction = 1.0
+        env.bars_since_switch = 10
+        env.current_mid_price = 100.0  # Will become prev_mid in step()
+        env.entry_mid = 99.0
+
+        # Price goes UP: mid = (101.0+102.0)/2 = 101.5
+        # step() sets prev_mid = current_mid(100.0), then updates current_mid = 101.5
+        # bar return = (101.5 - 100.0)/100.0 * 10000 = +150 bps
+        self.mock_handler.step.return_value = _mock_row(bid=101.0, ask=102.0)
+        _, reward, _, _, info = env.step(ACTION_SHORT)  # Switch Long→Short
+
+        self.assertTrue(info["switched"], "Should have switched")
+        # Reward should be POSITIVE: old direction(+1) × +150bps - 10bps fee
+        # (Before BUG-04 fix: Short(-1) × +150 - 10 = -160 → WRONG)
+        self.assertGreater(reward, 0.0,
+                           f"Long→Short with price UP must give positive reward, got {reward}")
+
+        fee_bps = 2.0 * 0.0005 * 10000.0  # 10 bps
+        bar_return_bps = ((101.5 - 100.0) / 100.0) * 10000.0  # 150 bps
+        expected_approx = 1.0 * bar_return_bps - fee_bps  # +140 bps (clipped to 50)
+        # Reward gets clipped to [-50, 50]
+        expected_clipped = min(50.0, expected_approx)
+        self.assertAlmostEqual(reward, expected_clipped, delta=2.0,
+                               msg=f"Expected ~{expected_clipped} bps, got {reward}")
+
+    def test_dense_switch_bar_short_to_long_price_down(self):
+        """Short→Long switch with price DOWN must give positive reward (short profited)."""
+        self.mock_handler.step.return_value = _mock_row(bid=100.0, ask=101.0)
+        env = SwingScalperEnv(self.config, self.mock_handler)
+        env.reset(seed=42)
+
+        # Agent is Short, past cooldown
+        env.direction = -1.0
+        env.bars_since_switch = 10
+        env.current_mid_price = 100.5  # Will become prev_mid in step()
+        env.entry_mid = 101.0
+
+        # Price goes DOWN: mid = (99.0+100.0)/2 = 99.5
+        # bar return = (99.5 - 100.5)/100.5 * 10000 ≈ -99.5 bps
+        self.mock_handler.step.return_value = _mock_row(bid=99.0, ask=100.0)
+        _, reward, _, _, info = env.step(ACTION_LONG)  # Switch Short→Long
+
+        self.assertTrue(info["switched"], "Should have switched")
+        # Short(-1) × -99.5bps = +99.5bps → positive reward (minus fee)
+        self.assertGreater(reward, 0.0,
+                           f"Short→Long with price DOWN must give positive reward, got {reward}")
+
+    def test_dense_reward_sign_matches_holding_direction(self):
+        """On switch bars, reward sign must match the direction the agent WAS holding."""
+        self.mock_handler.step.return_value = _mock_row(bid=100.0, ask=101.0)
+        env = SwingScalperEnv(self.config, self.mock_handler)
+        env.reset(seed=42)
+
+        # Long holding, price goes up → reward must be positive (long profited)
+        env.direction = 1.0
+        env.bars_since_switch = 10
+        env.current_mid_price = 100.0  # Will become prev_mid in step()
+        env.entry_mid = 99.0
+
+        # Price goes up: mid = (100.2+101.2)/2 = 100.7
+        # bar return = (100.7 - 100.0)/100.0 * 10000 = +70 bps
+        self.mock_handler.step.return_value = _mock_row(bid=100.2, ask=101.2)
+        _, reward, _, _, info = env.step(ACTION_SHORT)
+        self.assertTrue(info["switched"])
+
+        # Old direction = Long(+1), bar return = +70 bps, fee = 10 bps → reward ≈ +60
+        # Before BUG-04 fix: Short(-1) × +70 - 10 = -80 → WRONG sign
+        self.assertGreater(reward, 40.0,
+                           f"Long holding with price UP must give positive reward, got {reward}")
+
+        # Verify direction is now Short after switch
+        self.assertEqual(env.direction, -1.0, "Direction should be Short after switch")
+
+
 if __name__ == '__main__':
     unittest.main()
