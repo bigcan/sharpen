@@ -167,6 +167,7 @@ wandb:
 | SHORT-ACCT | Shorts must NOT accumulate `notional_debt`. Buyback = `|pos|*mid` in equity. |
 | MARGIN-CFG | BTC `margin_requirement: 0.05` (20x). `1.0` = starvation. |
 | DATA-CLEAN | All OHLCV must pass `scripts/clean_ohlcv.py` before experiments. `.bak` mandatory. |
+| BUG-04 | Dense reward on switch bars must use direction BEFORE switch. Save `direction_for_reward` before action processing. |
 | PF-XCHECK | Cross-check PF via `mid_price` AND `close`. >30% divergence = halt. |
 
 ## Coding Standards

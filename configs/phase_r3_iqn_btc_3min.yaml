@@ -80,7 +80,7 @@ agents:
     buffer_size: 500000
     learning_starts: 5000
     use_per: false
-    torch_compile: true             # TC-OPT: JIT-fused ops (no List[Tensor] issue on IQN)
+    torch_compile: false            # IQN + NoisyLinear incompatible with torch.compile
     gradient_clip: 10.0
     auxiliary_weight: 0.1
     update_interval: 8
@@ -99,7 +99,7 @@ training:
   total_timesteps: 5000000
   training_epochs: 1
   log_interval: 20480
-  torch_compile: true              # TC-OPT: full-model JIT compile
+  torch_compile: false             # IQN + NoisyLinear incompatible with torch.compile
   use_amp: true
   amp_dtype: "bfloat16"           # TC-OPT: more stable than fp16, native on Ada/Blackwell
 
