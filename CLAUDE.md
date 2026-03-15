@@ -201,7 +201,7 @@ Skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Tri
 |-------|---------|------|
 | **Audit** | **Auto** after ANY code change to `finrl_pro_ds/`, `scripts/`, `configs/`. Skip `.md`-only. | `.agent/skills/audit/SKILL.md` |
 | **Deploy** | User requests GPU launch, instance management, or run deployment. | `.agent/skills/deploy/SKILL.md` |
-| **Memory** | **Auto** at session start (boot) and end (`/sync`). Update `core.md` proactively on findings. Also covers search — use `memory_search` MCP first, grep fallback for exact tags. | `.agent/skills/memory/SKILL.md` |
+| **Memory** | **Auto** at session start (boot) and end (`/sync`). Update `core.md` proactively on findings. Search via grep on `randd_log.md`. | `.agent/skills/memory/SKILL.md` |
 | **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. `python scripts/monitor_fleet.py` | `.agent/skills/monitor/SKILL.md` |
 | **Optimization** | SPS regression, low GPU util, new hardware, new training loop, perf tuning. Profile first (Phase 1). | `.agent/skills/optimization/SKILL.md` |
 | **Math** | Manual ("check math", "verify formulas") + auto after changes to env/agent/feature code that touch formulas. | `.agent/skills/math/SKILL.md` |
@@ -209,21 +209,19 @@ Skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Tri
 **Chaining rules:**
 - Code change → **Audit** (mandatory) → if perf-relevant → **Optimization** → if math-relevant → **Math**
 - Deploy request → **Monitor** (check fleet) → **Deploy** → **Monitor** (verify)
-- Session start → **Memory** boot (core.md loaded automatically) → `memory_search` (agent-memory MCP) if investigating prior work
-- Experiment result → **Memory** update `core.md` → append `randd_log.md` → `memory_store` if significant
+- Session start → **Memory** boot (core.md loaded automatically) → grep `randd_log.md` if investigating prior work
+- Experiment result → **Memory** update `core.md` → append `randd_log.md` → git commit
 
-## Memory Protocol (2-Tier + LanceDB)
+## Memory Protocol (2-Tier File-Based)
 
 ```
 Tier 1: .agent/memory/core.md  — Project status (~100 lines, deterministic boot context)
-Tier 2: randd_log.md            — R&D history (append-only write buffer, feeds LanceDB)
-Search: LanceDB Pro (GCS)       — All reads/retrieval via agent-memory MCP server (311+ rows)
-  Tools: memory_search, memory_store, memory_forget, memory_update, memory_stats, memory_list, memory_count
+Tier 2: randd_log.md            — R&D history (append-only, search via grep)
 ```
 
-**Boot:** `core.md` (always loaded via system prompt hook). Use `memory_search` (agent-memory MCP) for prior context — do NOT read randd_log.md directly.
-**Commit:** Append to `randd_log.md` → update `core.md` → bulk-index to LanceDB → git commit.
-**Deprecated:** Daily logs (`.agent/memory/logs/`), `randd_archive.md`, snapshot rotation. No longer maintained.
+**Boot:** `core.md` (always loaded via system prompt hook). Grep `randd_log.md` for prior context.
+**Commit:** Append to `randd_log.md` → update `core.md` → git commit.
+**Deprecated:** Daily logs (`.agent/memory/logs/`), `randd_archive.md`, snapshot rotation, agent-memory MCP (LanceDB). No longer maintained.
 
 ## Gotchas (Last verified: 2026-03-13)
 
