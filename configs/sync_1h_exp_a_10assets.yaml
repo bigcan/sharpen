@@ -1,27 +1,21 @@
-# Synapse Crypto 1H v2 — Reverted to 12-month train window
-# v2.1.0: Reverted 24mo→12mo train, 2mo→1mo val, 2wk→1mo embargo
-#   - HPO v4 (24mo) regressed vs v3 (12mo): Sharpe -2.85 vs -1.50
-#   - Longer window added regime noise without improving generalization
-#   - Kept hpo_timesteps=500K (v2 improvement)
-#   - random_start=true (DummyVecEnv diversity)
-#   - wandb tags: sync-1h-v2
-# Version: 2.1.0
+# Sync-1H Experiment A — 10 Assets (top by mcap)
+# Hypothesis: fewer assets = less noise, easier optimization
+# Base: synapse_crypto_1h_v2.yaml (v2.1.0, 12-month train window)
+# Success criteria: OOS return > -8.80% (beat v3)
 
 strategy:
-  id: "sync-1H-v2"
-  name: "synapse_crypto_1h_v2"
+  id: "sync-1H-exp-a"
+  name: "sync_1h_exp_a_10assets"
   version: "2.1.0"
   base: "synapse_v9.5"
   instrument: "perpetual_futures"
 
 universe:
-  assets: ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "AVAX", "DOGE",
-           "DOT", "LINK", "ETC", "UNI", "ATOM", "LTC", "FIL", "APT",
-           "ARB", "OP", "NEAR", "INJ"]
+  assets: ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "AVAX", "DOGE", "DOT", "LINK"]
   quote: "USDT"
   data_exchange: "binance"
   execution_broker: "bybit"
-  n_assets: 20
+  n_assets: 10
 
 data:
   source: "ccxt"
@@ -35,59 +29,51 @@ data:
 
 features:
   tech_window: 168       # 1 week in hours
-  norm_window: 720       # 1 month in hours (reverted from 360)
+  norm_window: 720       # 1 month in hours
   norm_clip: [-5, 5]
   log_return_clip: [-0.5, 0.5]
-  tech_dim: 6              # M1: 6 real features (removed 2 zero-constant placeholders)
+  tech_dim: 6
   enable_hmm: true
   hmm_stride: 5
   enable_crypto_features: true
 
 environment:
   type: "perpetual_futures"
-  initial_capital: 100000  # USDT margin balance
-  # --- Perpetual futures settings ---
+  initial_capital: 100000
   long_short_enabled: true
   max_leverage: 1.0
   margin_mode: "cross"
   funding_alignment: "utc"
-  # --- Costs ---
   maker_fee_pct: 0.0002
   taker_fee_pct: 0.0005
   slippage_model: "volume_dependent"
   slippage_base_bps: 3
   slippage_impact_bps: 15
-  # --- Constraints ---
   max_position_pct: 0.15
   max_gross_exposure: 1.0
-  max_net_short_exposure: -0.50   # H3: enforced in env AND risk manager
-  # --- Reward ---
-  turnover_penalty: 0.01     # F2: 5x increase to discourage churn (was 0.002)
-  reward_type: "simple"      # F5: raw return — clearer gradient than sortino_softmax
-  sortino_window: 168        # 1 week for downside deviation
+  max_net_short_exposure: -0.50
+  turnover_penalty: 0.01
+  reward_type: "simple"
+  sortino_window: 168
   reward_scaling: 1.0
   reward_clip_range: [-5.0, 5.0]
-  min_trade_pct: 0.005       # Skip dust trades < 0.5%
+  min_trade_pct: 0.005
   circuit_breaker_threshold: 0.1
-  # --- Action smoothing (F3) ---
-  action_ema_alpha: 0.3      # EMA blend: 30% new action, 70% previous position
-  # --- Training diversity ---
-  random_start: true         # Each DummyVecEnv copy starts at a different offset
-  random_start_pct: 0.1      # Max 10% offset into episode
-
-  # --- Risk management ---
+  action_ema_alpha: 0.3
+  random_start: true
+  random_start_pct: 0.1
   risk_manager:
     enabled_backtest: false
     enabled_paper: true
     enabled_live: true
 
 agents:
-  lean_trinity: ["sac", "a2c"]  # PPO dropped (0/15 main pipeline, worst in pilot v2)
+  lean_trinity: ["sac", "a2c"]
   total_timesteps: 2000000
-  n_envs: 20
+  n_envs: 10
   use_fp16: true
   use_torch_compile: true
-  network_arch: [256, 256]    # F4: right-sized for 962 to 20 mapping (was [1024,1024,512])
+  network_arch: [256, 256]
 
   sac:
     learning_rate: 1.0e-4
@@ -101,13 +87,11 @@ agents:
     n_steps: 24
     gamma: 0.98
 
-  # ppo_gae: REMOVED — 0/15 in main pipeline, worst in sync-1H pilot v2
-
 hpo:
   enabled: true
-  agents: ["sac"]              # HPO SAC only; A2C uses defaults
+  agents: ["sac"]
   n_trials: 50
-  hpo_timesteps: 500000        # 2.5x increase (was 200K — too short for convergence)
+  hpo_timesteps: 500000
   objective: "sortino"
 
 arbitrator:
@@ -122,14 +106,14 @@ arbitrator:
   emergency_spread: 2.0
 
 walk_forward:
-  train_bars: 8760           # 12 months (reverted from 17520/24 months)
-  val_bars: 720              # 1 month (reverted from 1440/2 months)
-  test_bars: 1440            # unchanged
-  step_bars: 720             # unchanged
-  embargo_bars: 720          # 1 month (reverted from 360/2 weeks)
-  min_windows: 1             # Allow single-window pilot (7 windows available, full WF needs data growth)
-  n_hpo_trials: 50           # unchanged
-  hpo_timesteps: 500000      # 2.5x increase (was 200K)
+  train_bars: 8760
+  val_bars: 720
+  test_bars: 1440
+  step_bars: 720
+  embargo_bars: 720
+  min_windows: 1
+  n_hpo_trials: 50
+  hpo_timesteps: 500000
 
 risk:
   max_drawdown_pct: 0.20
@@ -168,7 +152,7 @@ model_staleness:
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["sync-1h-v2"]
+  tags: ["sync-1h-exp-a", "10-assets"]
 
 deployment:
   training_target: "gpuhub"

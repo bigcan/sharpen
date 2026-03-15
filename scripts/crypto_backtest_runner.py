@@ -142,6 +142,7 @@ def create_env(arrays: dict, config: dict) -> CryptoPerpEnv:
         action_ema_alpha=float(env_cfg.get("action_ema_alpha", 0.0)),
         random_start=bool(env_cfg.get("random_start", False)),
         random_start_pct=float(env_cfg.get("random_start_pct", 0.1)),
+        long_only=bool(env_cfg.get("long_only", False)),
     )
 
 

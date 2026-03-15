@@ -68,6 +68,7 @@ class CryptoPerpEnv(gym.Env):
         action_ema_alpha: float = 0.0,
         random_start: bool = False,
         random_start_pct: float = 0.1,
+        long_only: bool = False,
     ) -> None:
         super().__init__()
 
@@ -114,6 +115,9 @@ class CryptoPerpEnv(gym.Env):
         self.action_ema_alpha = float(action_ema_alpha)
         self.random_start = random_start
         self.random_start_pct = float(random_start_pct)
+        self.long_only = long_only
+        if self.long_only:
+            self.max_net_short_exposure = 0.0
 
         # --- Pre-compute UTC funding hours for each bar ---
         # Funding applies at 00:00, 08:00, 16:00 UTC
@@ -126,8 +130,9 @@ class CryptoPerpEnv(gym.Env):
             low=-np.inf, high=np.inf,
             shape=(self.obs_dim,), dtype=np.float32,
         )
+        action_low = 0.0 if self.long_only else -1.0
         self.action_space = gym.spaces.Box(
-            low=-1.0, high=1.0,
+            low=action_low, high=1.0,
             shape=(self.n_assets,), dtype=np.float32,
         )
 
@@ -193,6 +198,8 @@ class CryptoPerpEnv(gym.Env):
 
     def step(self, action: np.ndarray):
         action = np.asarray(action, dtype=np.float64).ravel().clip(-1.0, 1.0)
+        if self.long_only:
+            action = action.clip(0.0, 1.0)
 
         # F3: Action EMA smoothing — blend raw action toward current position
         # to reduce churn. alpha=0 disables; alpha=1 uses raw action fully.
