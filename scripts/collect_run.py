@@ -70,47 +70,47 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
     print(f"{'='*60}\n")
 
     # Step 1: Fetch WandB data → JSON + SQLite
-    print("📥 Step 1/3: Fetching WandB data...")
+    print("[*] Step 1/3: Fetching WandB data...")
     print("-" * 40)
     try:
         fetch_run_data(run_id, full_history=full_history)
         json_path = os.path.join(os.getcwd(), "results", f"run_data_{run_id}.json")
         results["wandb_json"] = json_path
         results["sqlite_updated"] = True
-        print(f"✅ WandB data saved.\n")
+        print(f"[*] WandB data saved.\n")
     except Exception as e:
-        print(f"❌ WandB fetch failed: {e}\n")
+        print(f"[*] WandB fetch failed: {e}\n")
         # Still try other steps
 
     # Step 2: Download remote artifacts via SFTP
     if not skip_remote:
-        print("📦 Step 2/3: Downloading remote artifacts...")
+        print("[*] Step 2/3: Downloading remote artifacts...")
         print("-" * 40)
         try:
             downloaded = download_remote_artifacts(run_id)
             results["remote_artifacts"] = downloaded
             if downloaded:
-                print(f"✅ Downloaded {len(downloaded)} artifact(s).\n")
+                print(f"[*] Downloaded {len(downloaded)} artifact(s).\n")
             else:
-                print("⚠️  No artifacts downloaded.\n")
+                print("[*] No artifacts downloaded.\n")
         except Exception as e:
-            print(f"❌ Remote download failed: {e}\n")
+            print(f"[*] Remote download failed: {e}\n")
     else:
-        print("⏭️  Step 2/3: Skipping remote artifacts (--skip_remote)\n")
+        print("[*] Step 2/3: Skipping remote artifacts (--skip_remote)\n")
 
     # Step 3: Generate markdown report
     if not skip_report:
-        print("📝 Step 3/3: Generating report...")
+        print("[*] Step 3/3: Generating report...")
         print("-" * 40)
         report_path = os.path.join(os.getcwd(), "results", f"DeepScalper_Report_{run_id}.md")
         try:
             generate_report(run_id, report_path)
             results["report"] = report_path
-            print(f"✅ Report generated.\n")
+            print(f"[*] Report generated.\n")
         except Exception as e:
-            print(f"❌ Report generation failed: {e}\n")
+            print(f"[*] Report generation failed: {e}\n")
     else:
-        print("⏭️  Step 3/3: Skipping report (--skip_report)\n")
+        print("[*] Step 3/3: Skipping report (--skip_report)\n")
 
     # Summary
     print(f"{'='*60}")
@@ -118,7 +118,7 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
     print(f"{'='*60}")
     print(f"  Run ID:          {run_id}")
     print(f"  WandB JSON:      {results['wandb_json'] or 'FAILED'}")
-    print(f"  SQLite Updated:  {'✅' if results['sqlite_updated'] else '❌'}")
+    print(f"  SQLite Updated:  {'[*]' if results['sqlite_updated'] else '[*]'}")
     print(f"  Remote Artifacts: {len(results['remote_artifacts'])} file(s)")
     for fname, fpath in results["remote_artifacts"].items():
         print(f"    - {fname}: {fpath}")
@@ -150,7 +150,7 @@ if __name__ == "__main__":
     elif args.run_ids:
         runs_to_collect = args.run_ids
     elif args.batch:
-        print("🔍 Scanning for uncollected runs...")
+        print("[*] Scanning for uncollected runs...")
         # 1. Get local IDs
         local_ids = get_collected_run_ids()
         print(f"  Found {len(local_ids)} runs in local DB.")
@@ -168,9 +168,9 @@ if __name__ == "__main__":
 
     # Process
     if not runs_to_collect:
-        print("✅ No runs to collect.")
+        print("[*] No runs to collect.")
     else:
-        print(f"🚀 Starting collection for {len(runs_to_collect)} runs...")
+        print(f"[*] Starting collection for {len(runs_to_collect)} runs...")
         for i, rid in enumerate(runs_to_collect):
             print(f"\n[{i+1}/{len(runs_to_collect)}] Processing {rid}...")
             collect_run(
