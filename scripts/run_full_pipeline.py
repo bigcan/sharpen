@@ -245,7 +245,8 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
                 macro = torch.tensor(obs["macro"], dtype=torch.float32).to(agent.device, non_blocking=True)
                 # FIX GMO1-01: Pass direction context for fee_threshold filtering
                 ctx = {"current_direction": current_direction} if current_direction is not None else None
-                pred = agent.predict(micro, private, macro, deterministic=True, context=ctx)
+                _eval_eps = getattr(agent, '_eval_epsilon', 0.0)
+                pred = agent.predict(micro, private, macro, deterministic=True, context=ctx, eval_epsilon=_eval_eps)
 
             # PPO returns (actions, log_probs, values), BDQ returns just actions
             if isinstance(pred, tuple):

@@ -84,6 +84,7 @@ class SwingScalperEnv(gym.Env):
         self.reward_mode = reward_cfg.get("mode", "dense")  # "dense" (K5) or "switch_centric" (GMO1)
         self.stay_reward_weight = float(reward_cfg.get("stay_reward_weight", 0.1))
         self.crra_gamma = float(reward_cfg.get("crra_gamma", 0.0))
+        self.reward_clip = float(reward_cfg.get("reward_clip", 50.0))
 
         # Episode config
         self.episode_length = int(config.get("episode_length", 1000))
@@ -324,7 +325,7 @@ class SwingScalperEnv(gym.Env):
             if switched:
                 # SWITCH bar: full realized PnL of the COMPLETED trade minus RT fee
                 # direction_before is the opposite of current (we just switched)
-                direction_before = -self.direction
+                direction_before = direction_for_reward  # SW-01: use saved pre-switch direction
                 if prev_entry_mid > 1e-12:
                     completed_pnl_bps = direction_before * ((self.current_mid_price - prev_entry_mid) / prev_entry_mid) * 10000.0
                 else:
@@ -353,7 +354,7 @@ class SwingScalperEnv(gym.Env):
 
         # Clip reward
         # PERF-OPT S154 (O9): scalar min/max instead of np.clip dispatch
-        reward = max(-50.0, min(50.0, reward))
+        reward = max(-self.reward_clip, min(self.reward_clip, reward))
 
         # 6. Update equity (for drawdown tracking)
         unrealized_pnl = self.direction * (self.current_mid_price - self.entry_mid) * self.position_size

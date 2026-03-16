@@ -133,6 +133,8 @@ class PPOAgent:
         macro: torch.Tensor,
         deterministic: bool = False,
         qty_mask=None,
+        context: Optional[Dict] = None,
+        eval_epsilon: float = 0.0,
     ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Select actions from the current policy.

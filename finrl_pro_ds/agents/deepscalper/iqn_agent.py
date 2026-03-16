@@ -231,6 +231,7 @@ class IQNAgent:
         deterministic: bool = False,
         qty_mask=None,
         context: Optional[Dict] = None,
+        eval_epsilon: float = 0.0,
     ) -> np.ndarray:
         """Select action by averaging over quantile Q-values.
 
@@ -281,6 +282,13 @@ class IQNAgent:
                 q_mean = q_mean.masked_fill(qty_mask_t == 0, float("-inf"))
 
             actions = q_mean.argmax(dim=-1)  # (B,)
+
+            # eval_epsilon: minimal exploration during deterministic eval
+            if deterministic and eval_epsilon > 0:
+                rand_mask = torch.rand(batch_size, device=self.device) < eval_epsilon
+                if rand_mask.any():
+                    random_actions = torch.randint(0, self.n_actions, (batch_size,), device=self.device)
+                    actions = torch.where(rand_mask, random_actions, actions)
 
             # Epsilon-greedy exploration (OPT-C: replaces NoisyNets)
             if not deterministic and self._exploration_mode == "epsilon" and self.epsilon > 0:

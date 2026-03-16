@@ -170,7 +170,7 @@ class DeepScalperBDQ:
         self._hidden_state = (h, c)
 
 
-    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False, qty_mask=None) -> np.ndarray:
+    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False, qty_mask=None, context: Optional[Dict] = None, eval_epsilon: float = 0.0) -> np.ndarray:
         """
         Select action using Epsilon-Greedy strategy.
         Paper-aligned: 2 branches (Price, SignedQty).
@@ -194,6 +194,9 @@ class DeepScalperBDQ:
         if not deterministic:
             rand_vals = torch.rand(batch_size, device=self.device)
             random_mask = rand_vals < self.epsilon
+        elif eval_epsilon > 0:
+            rand_vals = torch.rand(batch_size, device=self.device)
+            random_mask = rand_vals < eval_epsilon
         else:
             random_mask = torch.zeros(batch_size, dtype=torch.bool, device=self.device)
 

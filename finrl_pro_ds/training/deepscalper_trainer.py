@@ -145,6 +145,7 @@ class DeepScalperTrainer:
         # Training Params — read from agent-type-specific config section
         _agent_cfg_key = "iqn" if self._agent_type == "iqn" else "bdq"
         _agent_cfg = config["agents"][_agent_cfg_key]
+        self.agent._eval_epsilon = float(_agent_cfg.get("eval_epsilon", 0.0))
         self.total_timesteps = config["training"]["total_timesteps"]
         self.training_epochs = config["training"].get("training_epochs", 1)  # Paper: ~5 epochs
         self.update_interval = _agent_cfg.get("update_interval", 1.0)
