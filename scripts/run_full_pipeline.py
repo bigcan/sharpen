@@ -511,14 +511,21 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             # IQN hyperparams — optimizer HPs + gamma (discount horizon)
             learning_rate = trial.suggest_float("learning_rate", 1e-4, 1e-3, log=True)
             num_quantiles = trial.suggest_categorical("num_quantiles", [8, 16, 32, 64])
-            noisy_sigma0 = trial.suggest_float("noisy_sigma0", 0.3, 0.7)
             tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
+
+            # Only tune noisy_sigma0 when using NoisyLinear exploration
+            _iqn_exploration = config["agents"]["iqn"].get("exploration_mode", "noisy")
+            if _iqn_exploration == "noisy":
+                noisy_sigma0 = trial.suggest_float("noisy_sigma0", 0.3, 0.7)
+            else:
+                noisy_sigma0 = config["agents"]["iqn"].get("noisy_sigma0", 0.5)
 
             config["env"]["reward"]["sharpe_weight"] = 0.0
             config["env"]["reward"]["hindsight_weight"] = 0.0
             config["agents"]["iqn"]["learning_rate"] = learning_rate
             config["agents"]["iqn"]["num_quantiles"] = num_quantiles
-            config["agents"]["iqn"]["noisy_sigma0"] = noisy_sigma0
+            if _iqn_exploration == "noisy":
+                config["agents"]["iqn"]["noisy_sigma0"] = noisy_sigma0
             config["agents"]["iqn"]["tau"] = tau
 
             # Gamma routing: multi_horizon has separate short/long gammas;
@@ -567,9 +574,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             hpo_log = {
                 f"{trial_prefix}/learning_rate": learning_rate,
                 f"{trial_prefix}/num_quantiles": num_quantiles,
-                f"{trial_prefix}/noisy_sigma0": noisy_sigma0,
                 f"{trial_prefix}/tau": tau,
             }
+            if _iqn_exploration == "noisy":
+                hpo_log[f"{trial_prefix}/noisy_sigma0"] = noisy_sigma0
             if config["env"].get("reward", {}).get("crra_gamma", 0.0) > 0:
                 hpo_log[f"{trial_prefix}/crra_gamma"] = crra_gamma
             if is_multi_horizon:
@@ -1054,6 +1062,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 embedding_dim=iqn_cfg.get("embedding_dim", 64),
                 noisy_sigma0=iqn_cfg.get("noisy_sigma0", 0.5),
                 fee_threshold=iqn_cfg.get("fee_threshold", 0.0),  # FIX GMO1-05
+                exploration_mode=iqn_cfg.get("exploration_mode", "noisy"),  # OPT-C
                 multi_horizon=iqn_cfg.get("multi_horizon", False),  # FIX GMO1-09
                 gamma_short=iqn_cfg.get("gamma_short", 0.95),  # FIX GMO1-09
                 gamma_long=iqn_cfg.get("gamma_long", 0.99),  # FIX GMO1-09
