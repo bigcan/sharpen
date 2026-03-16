@@ -231,13 +231,26 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
             if "scale_0" in obs:
                 # SAC / V7 multi-scale obs — stack into (B,N,W,F) for single H2D transfer
                 n_scales = sum(1 for si in range(100) if f"scale_{si}" in obs)
-                scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=0)  # (N,W,F)
-                scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).unsqueeze(0).to(
-                    agent.device, non_blocking=True
-                )  # (1,N,W,F)
-                priv = torch.as_tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(
-                    agent.device, non_blocking=True
-                )
+                sample = obs["scale_0"]
+                if sample.ndim == 3:
+                    # VectorEnv: obs["scale_i"] is (B,W,F) — stack on axis=1
+                    # FIX BUG-06: Was axis=0 → (N,B,W,F) → Conv1d 4D crash
+                    scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=1)  # (B,N,W,F)
+                    scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).to(
+                        agent.device, non_blocking=True
+                    )
+                    priv = torch.as_tensor(obs["private"], dtype=torch.float32).to(
+                        agent.device, non_blocking=True
+                    )
+                else:
+                    # Single env: obs["scale_i"] is (W,F) — stack on axis=0, add batch dim
+                    scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=0)  # (N,W,F)
+                    scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).unsqueeze(0).to(
+                        agent.device, non_blocking=True
+                    )  # (1,N,W,F)
+                    priv = torch.as_tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(
+                        agent.device, non_blocking=True
+                    )
                 pred = agent.predict(scale_stack, priv, deterministic=True)
             else:
                 micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device, non_blocking=True)
