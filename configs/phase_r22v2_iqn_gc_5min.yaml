@@ -1,0 +1,134 @@
+# Phase R.2.2-v2: IQN Gold 5-min — Switch-Centric (BUG-04 Fix)
+# ==============================================================
+# R.2.2 (`qirxkp2g`) FAILED: 10/10 trials PF<0.63, test PF=0.639.
+# Root cause: Dense reward mode tainted by BUG-04 (direction sign inversion
+# on switch bars). All 3/3 dense-mode Phase R runs falsified.
+# Only switch_centric (GMO1, eval PF=1.359) shows signal.
+#
+# Key changes from R.2.2:
+#   - reward.mode: switch_centric (was dense — BUG-04 tainted)
+#   - stay_reward_weight: 0.1 (HPO range: [0.05, 0.3])
+#   - reward_clip: 200.0 (switch-centric produces larger rewards)
+#   - crra_gamma: 0.0 (isolate reward mode effect)
+#   - n_trials: 50 (was 10 — match R.2.1-v2 scale)
+#
+# OPT-C applied:
+#   - exploration_mode: epsilon (replaces NoisyNets → unlocks torch_compile)
+#   - torch_compile: true (both agent + training)
+#   - use_per: false (SPS), eval_epsilon: 0.02
+#   - n_step: 3, multi_horizon: true, gamma_short/long unchanged
+#
+# Hypothesis: H34-v2 — IQN Gold 5-min with switch-centric reward achieves PF > 1.05
+# Gate: Test PF > 1.10 with >= 200 trades
+# Kill: PF < 0.98 after 2M steps
+
+data:
+  file_path: "data/processed/gc_2025_full_year_5min_front.parquet"
+  ticker: "GC"
+  train_start_date: "2025-01-01 00:00:00"
+  train_end_date:   "2025-10-31 23:59:59"
+  val_start_date:   "2025-11-01 00:00:00"
+  val_end_date:     "2025-11-30 23:59:59"
+  test_start_date:  "2025-12-01 00:00:00"
+  test_end_date:    "2025-12-31 23:59:59"
+  norm_cutoff_date: "2025-11-01 00:00:00"
+
+features:
+  n_levels: 1
+  asset_class: "cme_futures"
+  vol_norm_window: 24            # 24 x 5-min = 120 min
+
+env:
+  symbol: "GC"
+  initial_balance: 100000.0
+  margin_requirement: 0.05
+  taker_fee: 0.0002              # 2 bps (CME Gold all-in, Session 118)
+  maker_fee: 0.000010            # Not used in swing MDP
+  num_envs: 20                    # TC-OPT: RTX 4090 IPC limit (24 for RTX 5090)
+  window_size: 15                # 15 x 5-min = 75 min lookback
+  max_drawdown_pct: 0.30
+  mdp_version: "v6"             # Swing MDP (SwingScalperEnv)
+  episode_length: 600            # 600 x 5-min = 50 hours (same physical duration)
+  random_start: true
+
+  reward:
+    mode: "switch_centric"         # Dense mode FAILED 3/3 runs (BUG-04); switch-centric only mode with signal
+    stay_reward_weight: 0.1        # HPO range: [0.05, 0.3]
+    reward_clip: 200.0             # Switch-centric produces larger rewards (100+ bps winners)
+    crra_gamma: 0.0                # Disable CRRA (isolate reward mode effect)
+    scaling: 1.0
+    volatility_horizon: 20
+    sharpe_weight: 0.0             # Pure PnL reward
+
+  action:
+    discrete_dims: 2             # {Long, Short}
+    cooldown_bars: 2             # 2-bar (10 min) — scaled from 3-min's 3-bar (9 min)
+    max_position: 5.0
+    fixed_trade_qty: 0.2
+
+network:
+  micro_config:
+    input_size: 18
+    private_input_size: 4        # [direction, bars_since_switch, unrealized_pnl, atr]
+    hidden_size: 256
+    encoder_type: "flat"
+
+  macro_config:
+    input_size: 15
+    hidden_sizes: [256, 128]
+
+agents:
+  iqn:
+    type: iqn
+    num_quantiles: 32
+    embedding_dim: 64
+    exploration_mode: "epsilon"      # OPT-C: epsilon-greedy replaces NoisyNets → unlocks torch_compile
+    noisy_sigma0: 0.5                # Ignored when exploration_mode=epsilon
+    epsilon_start: 1.0
+    epsilon_end: 0.05
+    epsilon_decay: 0.99999
+    eval_epsilon: 0.02               # 2% random in HPO eval (prevent Q-lock-in)
+    quantile_huber_kappa: 1.0
+    learning_rate: 0.0003
+    gamma: 0.99                  # Used as gamma_long when multi_horizon=true
+    tau: 0.005
+    batch_size: 512               # TC-OPT: better GPU saturation (was 256)
+    buffer_size: 500000
+    learning_starts: 5000
+    use_per: false                   # PER disabled — kills mega-batch SPS
+    torch_compile: true              # OPT-C: safe without NoisyLinear
+    gradient_clip: 10.0
+    auxiliary_weight: 0.1
+    update_interval: 8
+    checkpoint_interval: 200000
+    n_step: 3                    # KEY FIX: Was missing in K3 — essential per Session 97
+    target_q_clip: 500.0         # KEY FIX: Was missing in K3
+    multi_horizon: true          # KEY FIX: Dual value heads for short/long planning
+    gamma_short: 0.95            # 20-bar momentum horizon (~100 min at 5-min)
+    gamma_long: 0.99             # 100-bar strategic horizon (~8.3 hours at 5-min)
+    horizon_alpha: 0.5           # Equal blend for action selection
+
+replay:
+  stratified_sampling: false
+
+training:
+  total_timesteps: 5000000
+  training_epochs: 1
+  log_interval: 20480
+  torch_compile: true              # OPT-C: safe without NoisyLinear (epsilon-greedy mode)
+  use_amp: true
+  amp_dtype: "bfloat16"           # TC-OPT: more stable than fp16, native on Ada/Blackwell
+
+hpo:
+  enabled: true
+  n_trials: 50                   # Bumped from 10 — match R.2.1-v2 scale
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  mode: "online"
+  tags: ["Gold", "GC", "IQN", "5min", "SwingMDP", "epsilonGreedy",
+         "BinaryAction", "SwitchCentricReward", "CME", "FrontMonth",
+         "r22v2", "rehabilitation", "PhaseR", "nstep3", "multiHorizon",
+         "dualGamma", "qclip500", "2bps", "evalEpsilon", "torchCompile"]
