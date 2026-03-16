@@ -721,8 +721,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             wandb.log({f"{trial_prefix}/status": "pruned"})
             raise  # Re-raise original exception to preserve traceback
         except Exception as e:
-            logger.error(f"Trial {trial.number} failed: {e}")
-            wandb.log({f"{trial_prefix}/error": str(e)})
+            import traceback
+            tb = traceback.format_exc()
+            logger.error(f"Trial {trial.number} failed: {e}\n{tb}")
+            wandb.log({f"{trial_prefix}/error": str(e), f"{trial_prefix}/traceback": tb})
             return 0.0
         finally:
             # FIX: AsyncVectorEnv pipes may already be dead → BrokenPipeError

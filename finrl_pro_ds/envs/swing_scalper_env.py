@@ -325,7 +325,10 @@ class SwingScalperEnv(gym.Env):
                 # SWITCH bar: full realized PnL of the COMPLETED trade minus RT fee
                 # direction_before is the opposite of current (we just switched)
                 direction_before = -self.direction
-                completed_pnl_bps = direction_before * ((self.current_mid_price - prev_entry_mid) / prev_entry_mid) * 10000.0
+                if prev_entry_mid > 1e-12:
+                    completed_pnl_bps = direction_before * ((self.current_mid_price - prev_entry_mid) / prev_entry_mid) * 10000.0
+                else:
+                    completed_pnl_bps = 0.0
                 reward = completed_pnl_bps - fee_bps
             else:
                 # STAY bar: heavily downweighted directional reward (maintain holding value)
