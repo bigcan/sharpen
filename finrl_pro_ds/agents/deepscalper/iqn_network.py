@@ -67,9 +67,28 @@ class QuantileEmbedding(nn.Module):
         return self.activation(self.proj(cos_features))
 
 
-def _make_dueling_heads(fusion_dim: int, n_actions: int, noisy_sigma0: float):
-    """Create a pair of NoisyLinear dueling head layers (V + A streams)."""
+def _make_dueling_heads(
+    fusion_dim: int, n_actions: int, noisy_sigma0: float,
+    exploration_mode: str = "noisy",
+):
+    """Create a pair of dueling head layers (V + A streams).
+
+    When exploration_mode="noisy", uses NoisyLinear (learned exploration).
+    When exploration_mode="epsilon", uses standard nn.Linear (epsilon-greedy).
+    """
     head_hidden = max(fusion_dim // 2, 64)
+    if exploration_mode == "epsilon":
+        def _init_linear(in_f, out_f):
+            layer = nn.Linear(in_f, out_f)
+            nn.init.xavier_uniform_(layer.weight)
+            nn.init.zeros_(layer.bias)
+            return layer
+        return nn.ModuleDict({
+            "value_fc1": _init_linear(fusion_dim, head_hidden),
+            "value_fc2": _init_linear(head_hidden, 1),
+            "adv_fc1": _init_linear(fusion_dim, head_hidden),
+            "adv_fc2": _init_linear(head_hidden, n_actions),
+        })
     return nn.ModuleDict({
         "value_fc1": NoisyLinear(fusion_dim, head_hidden, sigma0=noisy_sigma0),
         "value_fc2": NoisyLinear(head_hidden, 1, sigma0=noisy_sigma0),
@@ -137,11 +156,13 @@ class IQNNetwork(nn.Module):
         embedding_dim: int = 64,
         noisy_sigma0: float = 0.5,
         multi_horizon: bool = False,
+        exploration_mode: str = "noisy",
         **kwargs,
     ):
         super().__init__()
         self.n_actions = n_actions
         self.multi_horizon = multi_horizon
+        self._exploration_mode = exploration_mode
 
         # Encoders (reuse from networks.py)
         encoder_type = micro_config.get("encoder_type", "rnn").lower()
@@ -182,20 +203,21 @@ class IQNNetwork(nn.Module):
 
         if multi_horizon:
             # Short-horizon heads: captures immediate momentum
-            self.heads_short = _make_dueling_heads(fusion_dim, n_actions, noisy_sigma0)
+            self.heads_short = _make_dueling_heads(fusion_dim, n_actions, noisy_sigma0, exploration_mode)
             # Long-horizon heads: captures strategic value
-            self.heads_long = _make_dueling_heads(fusion_dim, n_actions, noisy_sigma0)
+            self.heads_long = _make_dueling_heads(fusion_dim, n_actions, noisy_sigma0, exploration_mode)
             # Backward compat aliases (point to short horizon for single-head code paths)
             self.value_fc1 = self.heads_short["value_fc1"]
             self.value_fc2 = self.heads_short["value_fc2"]
             self.adv_fc1 = self.heads_short["adv_fc1"]
             self.adv_fc2 = self.heads_short["adv_fc2"]
         else:
-            # Single-horizon (original architecture)
-            self.value_fc1 = NoisyLinear(fusion_dim, head_hidden, sigma0=noisy_sigma0)
-            self.value_fc2 = NoisyLinear(head_hidden, 1, sigma0=noisy_sigma0)
-            self.adv_fc1 = NoisyLinear(fusion_dim, head_hidden, sigma0=noisy_sigma0)
-            self.adv_fc2 = NoisyLinear(head_hidden, n_actions, sigma0=noisy_sigma0)
+            # Single-horizon — use shared factory for consistency
+            _heads = _make_dueling_heads(fusion_dim, n_actions, noisy_sigma0, exploration_mode)
+            self.value_fc1 = _heads["value_fc1"]
+            self.value_fc2 = _heads["value_fc2"]
+            self.adv_fc1 = _heads["adv_fc1"]
+            self.adv_fc2 = _heads["adv_fc2"]
 
         # Auxiliary volatility prediction head (from fusion, not quantile-conditional)
         self.vol_head = nn.Sequential(
@@ -308,6 +330,8 @@ class IQNNetwork(nn.Module):
 
     def reset_noise(self):
         """Reset noise in all NoisyLinear layers."""
+        if self._exploration_mode == "epsilon":
+            return  # No NoisyLinear layers to reset
         if self.multi_horizon:
             for heads in [self.heads_short, self.heads_long]:
                 for layer in heads.values():

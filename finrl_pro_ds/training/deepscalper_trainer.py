@@ -79,6 +79,7 @@ class DeepScalperTrainer:
                 noisy_sigma0=iqn_cfg.get("noisy_sigma0", 0.5),
                 quantile_huber_kappa=iqn_cfg.get("quantile_huber_kappa", 1.0),
                 gradient_clip=iqn_cfg.get("gradient_clip", 10.0),
+                target_q_clip=iqn_cfg.get("target_q_clip", 5000.0),
                 auxiliary_weight=iqn_cfg.get("auxiliary_weight", 0.1),
                 use_amp=config["training"].get("use_amp", False),
                 amp_dtype=config["training"].get("amp_dtype", "float16"),
@@ -93,6 +94,9 @@ class DeepScalperTrainer:
                 gamma_long=iqn_cfg.get("gamma_long", 0.99),
                 horizon_alpha=iqn_cfg.get("horizon_alpha", 0.5),
                 fee_threshold=iqn_cfg.get("fee_threshold", 0.0),  # FIX GMO1-05
+                exploration_mode=iqn_cfg.get("exploration_mode", "noisy"),
+                epsilon_start=iqn_cfg.get("epsilon_start", 1.0),
+                epsilon_end=iqn_cfg.get("epsilon_end", 0.01),
                 action_dims=action_dims,
                 device=device,
             )
@@ -332,14 +336,20 @@ class DeepScalperTrainer:
             # Production: compute from total_timesteps
             n_calls = self.total_timesteps // num_envs
 
-        if n_calls > 0 and self._agent_type != "iqn":
+        _iqn_uses_epsilon = (
+            self._agent_type == "iqn"
+            and getattr(self.agent, '_exploration_mode', 'noisy') == 'epsilon'
+        )
+        if n_calls > 0 and (self._agent_type != "iqn" or _iqn_uses_epsilon):
             # Scale epsilon decay to reach epsilon_end at exploration_fraction of total training
-            exploration_fraction = self.config.get("agents", {}).get("bdq", {}).get("exploration_fraction", 0.5)
+            _eps_cfg_key = "iqn" if _iqn_uses_epsilon else "bdq"
+            exploration_fraction = self.config.get("agents", {}).get(_eps_cfg_key, {}).get("exploration_fraction", 0.5)
             total_calls = n_calls * self.training_epochs
             explore_calls = max(int(total_calls * exploration_fraction), 1)
-            epsilon_end = self.config.get("agents", {}).get("bdq", {}).get("epsilon_end", 0.01)
+            epsilon_end = self.config.get("agents", {}).get(_eps_cfg_key, {}).get("epsilon_end", 0.01)
             computed_decay = np.exp(np.log(max(epsilon_end, 1e-10)) / explore_calls)
-            self.agent.epsilon_decay = computed_decay
+            if hasattr(self.agent, 'epsilon_decay'):
+                self.agent.epsilon_decay = computed_decay
             # FIX BUG-07: Store schedule params for closed-form linear decay
             self.agent._epsilon_start = self.agent.epsilon  # current epsilon (should be epsilon_start)
             self.agent._epsilon_decay_steps = explore_calls

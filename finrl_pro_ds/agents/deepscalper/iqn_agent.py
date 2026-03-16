@@ -66,6 +66,9 @@ class IQNAgent:
         gamma_long: float = 0.99,
         horizon_alpha: float = 0.5,
         fee_threshold: float = 0.0,
+        exploration_mode: str = "noisy",
+        epsilon_start: float = 1.0,
+        epsilon_end: float = 0.01,
         action_dims=3,
         device: str = "cpu",
         # Absorb BDQ-specific kwargs for config compatibility
@@ -73,6 +76,7 @@ class IQNAgent:
     ):
         self.device = torch.device(device)
         self.fee_threshold = fee_threshold
+        self._exploration_mode = exploration_mode
         self.gamma = gamma
         self.n_step = n_step
         # Effective gamma for Bellman target: gamma^n for n-step returns
@@ -109,9 +113,15 @@ class IQNAgent:
         self._use_bf16 = (self.amp_dtype == torch.bfloat16)
         self.use_per = use_per
 
-        # IQN has no epsilon — NoisyNets handle exploration
-        self.epsilon = 0.0
-        self.epsilon_end = 0.0
+        # Exploration: NoisyNets (noisy) or epsilon-greedy (epsilon)
+        if exploration_mode == "epsilon":
+            self.epsilon = epsilon_start
+            self.epsilon_end = epsilon_end
+            self._epsilon_start = epsilon_start
+            self._epsilon_decay_steps = 1  # Set by trainer
+        else:
+            self.epsilon = 0.0
+            self.epsilon_end = 0.0
         self.step_count = 0
 
         # Stratified sampling config (set by trainer from config)
@@ -142,6 +152,7 @@ class IQNAgent:
             "embedding_dim": embedding_dim,
             "noisy_sigma0": noisy_sigma0,
             "multi_horizon": multi_horizon,
+            "exploration_mode": exploration_mode,
         }
 
         # Build networks
@@ -270,6 +281,13 @@ class IQNAgent:
                 q_mean = q_mean.masked_fill(qty_mask_t == 0, float("-inf"))
 
             actions = q_mean.argmax(dim=-1)  # (B,)
+
+            # Epsilon-greedy exploration (OPT-C: replaces NoisyNets)
+            if not deterministic and self._exploration_mode == "epsilon" and self.epsilon > 0:
+                rand_mask = torch.rand(batch_size, device=self.device) < self.epsilon
+                if rand_mask.any():
+                    random_actions = torch.randint(0, self.n_actions, (batch_size,), device=self.device)
+                    actions = torch.where(rand_mask, random_actions, actions)
 
             # Fee-threshold switching filter (inference-time only, P3)
             # Suppresses switches unless advantage > fee_threshold
@@ -567,7 +585,7 @@ class IQNAgent:
             "loss_qty": float(_cpu[1]),
             "loss_aux": float(_cpu[2]),
             "q_qty_mean": float(_cpu[3]),
-            "epsilon": 0.0,
+            "epsilon": self.epsilon,
             "q_value/mean": float(_cpu[4]),
             "q_value/std": float(_cpu[5]),
             "q_value/max": float(_cpu[6]),
@@ -589,8 +607,12 @@ class IQNAgent:
         return metrics
 
     def decay_epsilon(self):
-        """No-op for IQN — NoisyNets handle exploration. Increments step_count for compatibility."""
+        """Decay epsilon for epsilon-greedy mode; no-op for NoisyNets."""
         self.step_count += 1
+        if self._exploration_mode == "epsilon":
+            # Linear decay from _epsilon_start to epsilon_end over _epsilon_decay_steps
+            frac = min(self.step_count / max(self._epsilon_decay_steps, 1), 1.0)
+            self.epsilon = self._epsilon_start + frac * (self.epsilon_end - self._epsilon_start)
 
     @torch.no_grad()
     def _polyak_update(self):
