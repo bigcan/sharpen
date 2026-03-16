@@ -217,7 +217,7 @@ Skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Tri
 ```
 Tier 1: .agent/memory/core.md  — Project status (~100 lines, deterministic boot context)
 Tier 2: randd_log.md            — R&D history (append-only, search via grep)
-Cloud:  agent-memory MCP        — GCS LanceDB (316+ rows), semantic vector search via memory_search/memory_store
+Cloud:  agent-memory MCP        — GCS LanceDB (326+ rows), semantic vector search via memory_search/memory_store
 ```
 
 **Boot:** `core.md` (always loaded via system prompt hook). `memory_search` MCP or grep `randd_log.md` for prior context.
