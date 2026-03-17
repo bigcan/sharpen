@@ -10,14 +10,17 @@ Features (per asset):
     2.  funding_rate_annualized   — Annualized funding rate (raw × 3 × 365)
     3.  funding_ema_24h           — EMA(24) short-term funding trend
     4.  funding_ema_168h          — EMA(168) funding regime
-    5.  funding_zscore            — Rolling z-score of funding rate (720h)
-    6.  basis_pct                 — (perp_close - spot_close) / spot_close
-    7.  basis_zscore              — Rolling z-score of basis (720h)
-    8.  oi_change_pct             — Open interest % change (1h, lagged)
-    9.  volume_zscore             — Perp volume rolling z-score (168h)
-    10. btc_correlation           — Rolling correlation with BTC (168h)
-    11. volatility_24h            — Realized hourly vol × sqrt(24) — basis risk proxy
-    12. volume_profile_skew       — Buy vol / total vol ratio (24h proxy)
+    5.  funding_rate_std          — Rolling std of funding rate (720h) — volatility of funding
+    6.  funding_cumsum_ffd        — FFD(d=0.4) on cumsum(funding_rate), normalized
+    7.  basis_pct                 — (perp_close - spot_close) / spot_close
+    8.  basis_ema_168h            — EMA(168) of basis — basis regime
+    9.  basis_ffd                 — FFD(d=0.35) on basis_pct, normalized
+    10. oi_change_pct             — Open interest % change (1h, lagged)
+    11. log_oi_ffd                — FFD(d=0.4) on log(open_interest), normalized
+    12. perp_volume_raw           — Raw perp volume (normalized downstream by array builder)
+    13. btc_correlation           — Rolling correlation with BTC (168h)
+    14. volatility_24h            — Realized hourly vol × sqrt(24) — basis risk proxy
+    15. volume_profile_skew       — Buy vol / total vol ratio (24h proxy)
 """
 
 from __future__ import annotations
@@ -26,6 +29,8 @@ import logging
 
 import numpy as np
 import pandas as pd
+
+from finrl_pro_ds.crypto.features.crypto_features import _fractional_diff
 
 logger = logging.getLogger(__name__)
 
@@ -40,11 +45,14 @@ FUNDING_ARB_FEATURE_COLS = [
     "funding_rate_annualized",
     "funding_ema_24h",
     "funding_ema_168h",
-    "funding_zscore",
+    "funding_rate_std",
+    "funding_cumsum_ffd",
     "basis_pct",
-    "basis_zscore",
+    "basis_ema_168h",
+    "basis_ffd",
     "oi_change_pct",
-    "volume_zscore",
+    "log_oi_ffd",
+    "perp_volume_raw",
     "btc_correlation",
     "volatility_24h",
     "volume_profile_skew",
@@ -124,10 +132,19 @@ def compute_funding_arb_features(
             features["funding_rate_raw"].ewm(span=168, min_periods=24).mean()
         )
 
-        # --- 5. Funding z-score ---
-        features["funding_zscore"] = _rolling_zscore(
-            features["funding_rate_raw"], window=zscore_window
-        ).clip(-5, 5)
+        # --- 5. Funding rate std (rolling volatility of funding) ---
+        min_per = min(max(24, zscore_window // 10), zscore_window)
+        features["funding_rate_std"] = (
+            features["funding_rate_raw"]
+            .rolling(window=zscore_window, min_periods=min_per)
+            .std()
+            .fillna(0.0)
+        )
+
+        # --- 5b. Funding cumsum FFD ---
+        funding_cumsum = features["funding_rate_raw"].cumsum()
+        ffd_funding_raw = _fractional_diff(funding_cumsum, d=0.4, window=100)
+        features["funding_cumsum_ffd"] = _rolling_zscore(ffd_funding_raw, window=zscore_window).clip(-5, 5)
 
         # --- 6. Basis % (perp - spot) / spot ---
         features["basis_pct"] = np.where(
@@ -136,20 +153,45 @@ def compute_funding_arb_features(
             0.0,
         )
 
-        # --- 7. Basis z-score ---
-        features["basis_zscore"] = _rolling_zscore(
-            features["basis_pct"], window=zscore_window
-        ).clip(-5, 5)
+        # --- 7. Basis EMA 168h (basis regime) ---
+        features["basis_ema_168h"] = (
+            features["basis_pct"].ewm(span=168, min_periods=24).mean()
+        )
+
+        # --- 7b. Basis FFD ---
+        ffd_basis_raw = _fractional_diff(features["basis_pct"], d=0.35, window=100)
+        features["basis_ffd"] = _rolling_zscore(ffd_basis_raw, window=zscore_window).clip(-5, 5)
 
         # --- 8. Open interest % change ---
         features["oi_change_pct"] = _compute_oi_change(
             asset_perp.index, oi_df, ticker
         )
 
-        # --- 9. Volume z-score (perp volume) ---
-        features["volume_zscore"] = _rolling_zscore(
-            asset_perp["volume"], window=correlation_window
-        ).clip(-5, 5)
+        # --- 8b. Log OI FFD ---
+        if oi_df is not None and not oi_df.empty:
+            tic_oi = oi_df[oi_df["ticker"] == ticker]
+            if not tic_oi.empty:
+                tic_oi = tic_oi.set_index("timestamp")["open_interest"].sort_index()
+                aligned_oi = tic_oi.reindex(asset_perp.index)
+                oi_last = tic_oi.index.max()
+                aligned_oi.loc[aligned_oi.index > oi_last] = np.nan
+                aligned_oi = aligned_oi.ffill()
+                
+                # Apply publication lag
+                aligned_oi = aligned_oi.shift(PUBLICATION_LAGS.get("oi_change_pct", 1)).ffill()
+                
+                # log of OI (clip lower bound to avoid log(0))
+                # FFD logic
+                log_oi = np.log(aligned_oi.clip(lower=1.0))
+                ffd_oi_raw = _fractional_diff(log_oi, d=0.4, window=100)
+                features["log_oi_ffd"] = _rolling_zscore(ffd_oi_raw, window=zscore_window).clip(-5, 5)
+            else:
+                features["log_oi_ffd"] = 0.0
+        else:
+            features["log_oi_ffd"] = 0.0
+
+        # --- 9. Perp volume raw (normalized downstream by array builder) ---
+        features["perp_volume_raw"] = asset_perp["volume"].fillna(0.0)
 
         # --- 10. BTC correlation ---
         if ticker == "BTC":
