@@ -216,7 +216,9 @@ def _evaluate_agent_on_env(model, env: FundingArbEnv) -> dict:
     }
 
 
-def run_backtest(config: dict, dry_run: bool = False) -> dict:
+def run_backtest(config: dict, dry_run: bool = False,
+                 n_windows: int | None = None,
+                 timesteps_override: int | None = None) -> dict:
     """Run the full walk-forward backtest pipeline."""
     # Step 1: Prepare data
     logger.info("=" * 60)
@@ -253,6 +255,12 @@ def run_backtest(config: dict, dry_run: bool = False) -> dict:
         window_schedule = window_schedule[:1]
         total_timesteps = min(total_timesteps, 10_000)
         logger.info("DRY RUN: 1 window, reduced timesteps")
+    if n_windows is not None:
+        window_schedule = window_schedule[:n_windows]
+        logger.info(f"Limited to {len(window_schedule)} windows")
+    if timesteps_override is not None:
+        total_timesteps = timesteps_override
+        logger.info(f"Timesteps override: {total_timesteps}")
 
     window_results = []
 
@@ -381,6 +389,14 @@ def main():
         "--dry_run", action="store_true",
         help="Run 1 window with reduced timesteps for validation"
     )
+    parser.add_argument(
+        "--n_windows", type=int, default=None,
+        help="Limit to first N walk-forward windows (default: all)"
+    )
+    parser.add_argument(
+        "--timesteps", type=int, default=None,
+        help="Override total_timesteps per window"
+    )
 
     args = parser.parse_args()
 
@@ -390,7 +406,11 @@ def main():
     )
 
     config = load_config(args.config)
-    results = run_backtest(config, dry_run=args.dry_run)
+    results = run_backtest(
+        config, dry_run=args.dry_run,
+        n_windows=args.n_windows,
+        timesteps_override=args.timesteps,
+    )
 
     # Persist results
     out_dir = Path("results") / "funding_arb"
