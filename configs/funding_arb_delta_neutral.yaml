@@ -24,7 +24,7 @@ data:
   cache_dir: "./data/crypto_cache"
 
 features:
-  tech_dim: 12            # 12 funding-arb features per asset
+  tech_dim: 15            # 15 funding-arb features per asset
   norm_window: 720        # 1 month in hours
   zscore_window: 720
   correlation_window: 168  # 1 week

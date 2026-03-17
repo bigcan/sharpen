@@ -174,16 +174,19 @@ def _renormalize_within_window(
 # Funding Arb Array Builder
 # ---------------------------------------------------------------------------
 
-# The 12 funding-arb feature columns produced by funding_arb_features.py.
+# The 15 funding-arb feature columns produced by funding_arb_features.py.
 FUNDING_ARB_FEATURE_COLS = [
     "funding_rate_raw",
     "funding_rate_annualized",
     "funding_ema_24h",
     "funding_ema_168h",
     "funding_rate_std",
+    "funding_cumsum_ffd",
     "basis_pct",
     "basis_ema_168h",
+    "basis_ffd",
     "oi_change_pct",
+    "log_oi_ffd",
     "perp_volume_raw",
     "btc_correlation",
     "volatility_24h",
