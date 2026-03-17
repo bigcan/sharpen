@@ -85,7 +85,7 @@ agents:
     target_update_freq: 100
     tau: 0.005
     auxiliary_weight: 0.1
-    use_per: true
+    use_per: false                  # PER disabled — kills mega-batch SPS (was 41→expect ~90+)
     per_alpha: 0.6
     per_beta_start: 0.4
     per_beta_frames: 100000
@@ -119,4 +119,4 @@ wandb:
   mode: "online"
   tags: ["Gold", "GC", "BDQ", "3min", "SwingMDP", "BinaryAction",
          "SwitchCentricReward", "CME", "FrontMonth", "r21v2", "rehabilitation",
-         "PhaseR", "epsilonGreedy", "PER", "2bps", "evalEpsilon"]
+         "PhaseR", "epsilonGreedy", "noPER", "2bps", "evalEpsilon"]
