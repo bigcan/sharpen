@@ -48,7 +48,7 @@ def load_config(config_path: str | None = None) -> dict:
             PROJECT_ROOT / "configs" / "funding_arb_delta_neutral.yaml"
         )
 
-    with open(config_path, "r") as f:
+    with open(config_path, "r", encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     strategy_id = config["strategy"].get("id", config["strategy"]["name"])

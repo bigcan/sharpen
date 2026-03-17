@@ -423,9 +423,8 @@ class FundingArbEnv(gym.Env):
 
         vol_idx = max(self.step_idx - 1, 0)
         hourly_vols = volume_ary[vol_idx, active]
-        volume_ratios = np.where(
-            hourly_vols > 1e-6, notionals / hourly_vols, 1.0
-        )
+        volume_ratios = np.ones_like(notionals)
+        np.divide(notionals, hourly_vols, out=volume_ratios, where=hourly_vols > 1e-6)
         slippage_bps = self.slippage_base_bps + self.slippage_impact_bps * volume_ratios
         total_slippage = float(np.sum(notionals * slippage_bps * 1e-4))
 
@@ -744,13 +743,15 @@ class FundingArbEnv(gym.Env):
         # Spot leg costs
         vol_idx = max(self.step_idx - 1, 0)
         spot_vols = self.spot_volume_ary[vol_idx, active]
-        spot_ratios = np.where(spot_vols > 1e-6, notionals / spot_vols, 1.0)
+        spot_ratios = np.ones_like(notionals)
+        np.divide(notionals, spot_vols, out=spot_ratios, where=spot_vols > 1e-6)
         spot_slip = self.slippage_base_bps + self.slippage_impact_bps * spot_ratios
         spot_cost = notionals * (self.spot_taker_fee_pct + spot_slip * 1e-4)
 
         # Perp leg costs
         perp_vols = self.perp_volume_ary[vol_idx, active]
-        perp_ratios = np.where(perp_vols > 1e-6, notionals / perp_vols, 1.0)
+        perp_ratios = np.ones_like(notionals)
+        np.divide(notionals, perp_vols, out=perp_ratios, where=perp_vols > 1e-6)
         perp_slip = self.slippage_base_bps + self.slippage_impact_bps * perp_ratios
         perp_cost = notionals * (self.perp_taker_fee_pct + perp_slip * 1e-4)
 
