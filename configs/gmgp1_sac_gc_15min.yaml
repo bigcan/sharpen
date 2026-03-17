@@ -1,6 +1,7 @@
-# GMGP1-R1: SAC + Multi-Scale OHLCV + Continuous Action — Gold 15-min
-# Pivot from 3-min HFT to 15-min swing trading: higher oracle ceiling, fewer trades
-# GPU: RTX 4090 (24GB, Ada Lovelace) — BF16, batch 512, buffer 500K, num_envs 20
+# GMGP1-v3: SAC + Multi-Scale OHLCV + Continuous Action — Gold 15-min
+# Production budget: 50 HPO trials, 8 HP dimensions, 3M full training
+# OPT-10: update_interval NOT scaled by num_envs (SPS ~80 vs ~8)
+# GPU: RTX 4090 (48GB) — BF16, batch 512, buffer 500K, num_envs 20
 
 data:
   file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
@@ -62,13 +63,13 @@ agents:
     buffer_size: 500000
     initial_alpha: 0.2
     learning_starts: 5000        # Reduced: fewer bars than 3-min
-    update_interval: 2              # UTD=2: balanced sample efficiency vs SPS (8 was 96 grad steps → 1.6 SPS)
+    update_interval: 4              # 4 gradient steps per env.step (NOT scaled by num_envs — OPT-10)
     actor_update_freq: 2            # O-B: update actor every 2 critic steps (TD3-style delayed actor)
     gradient_clip: 10.0
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 2000000       # Reduced: 22K bars vs 116K at 3-min — overfitting risk
+  total_timesteps: 3000000       # Extended: 1.5M steps at full 2bps fee (was only 500K)
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -76,9 +77,9 @@ training:
   num_envs: 20
 
 hpo:
-  n_trials: 10                   # 10 trials sufficient for SAC continuous (fewer HPs than IQN)
+  n_trials: 50                   # Production: 10 startup (random) + 40 Bayesian. 8 HP dims.
   steps_per_trial: 500000        # 500K steps: SAC needs long exploration past deadband + learning_starts
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["gmgp1-r1", "Gold", "SAC", "15min", "MultiScale", "OHLCV", "DSR", "FeeCurriculum", "swing", "gmgp1", "4090"]
+  tags: ["gmgp1-v3", "Gold", "SAC", "15min", "MultiScale", "OHLCV", "DSR", "FeeCurriculum", "swing", "gmgp1", "4090", "opt-10", "production"]

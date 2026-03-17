@@ -89,17 +89,14 @@ class SACTrainer:
         self.log_interval = config["training"].get("log_interval", 1000)
         self.checkpoint_interval = sac_cfg.get("checkpoint_interval", 500_000)
         self.learning_starts = sac_cfg.get("learning_starts", 10_000)
-        # update_interval is gradient steps per env step per env.
-        # Scale by num_envs so UTD ≈ update_interval regardless of parallelism.
-        # FIX R2-AUD-02: Read num_envs from actual env, not config (config["training"]
-        # may differ from pipeline's actual env count read from config["env"]).
+        # update_interval is gradient steps per env.step() call (total, not per-env).
+        # FIX OPT-10: Do NOT scale by num_envs. In vectorized RL, all envs share one
+        # model — 20 envs produce 20 transitions per env.step but the model is the same.
+        # Scaling by num_envs caused UTD=40 (2*20), meaning 40 gradient steps per
+        # env.step → replay ratio 1024x, SPS=8 (vs ~80 without scaling).
+        # Standard SAC (Haarnoja, CleanRL, SB3) uses UTD=1-2 regardless of num_envs.
         num_envs = getattr(env, 'num_envs', 1)
-        raw_ui = sac_cfg.get("update_interval", 4)
-        # FIX AUD-S129-03: HPO must use the SAME UTD as full training so that
-        # hyperparameters (especially tau, lr) are tuned in the correct regime.
-        # Previous cap to UTD=1 caused HPO to select HPs for 12 gradient steps
-        # that then ran at 96 — a fundamentally different optimization landscape.
-        self.update_interval = raw_ui * num_envs
+        self.update_interval = sac_cfg.get("update_interval", 4)
 
         # Auto-scale tau for high UTD
         if self.update_interval > 1:

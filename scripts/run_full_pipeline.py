@@ -472,25 +472,36 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         # See: expert DRL audit, "Goodhart's Law" in RL.
         # -----------------------------------------------------------
         if agent_type == "sac":
-            # SAC hyperparams — actor/critic LR, tau, alpha, deadband
+            # SAC hyperparams — 8 dimensions for production-grade HPO
             lr_actor = trial.suggest_float("lr_actor", 1e-4, 1e-3, log=True)
             lr_critic = trial.suggest_float("lr_critic", 1e-4, 1e-3, log=True)
+            lr_alpha = trial.suggest_float("lr_alpha", 1e-4, 1e-3, log=True)
             tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
+            gamma = trial.suggest_float("gamma", 0.95, 0.999, log=True)
             initial_alpha = trial.suggest_float("initial_alpha", 0.05, 0.5, log=True)
             deadband = trial.suggest_categorical("deadband_threshold", [0.15, 0.25, 0.35])
+            dsr_eta = trial.suggest_float("dsr_eta", 0.0005, 0.01, log=True)
 
             config["agents"]["sac"]["lr_actor"] = lr_actor
             config["agents"]["sac"]["lr_critic"] = lr_critic
+            config["agents"]["sac"]["lr_alpha"] = lr_alpha
             config["agents"]["sac"]["tau"] = tau
+            config["agents"]["sac"]["gamma"] = gamma
             config["agents"]["sac"]["initial_alpha"] = initial_alpha
             config["env"]["deadband_threshold"] = deadband
+            if "reward" not in config.get("env", {}):
+                config["env"]["reward"] = {}
+            config["env"]["reward"]["dsr_eta"] = dsr_eta
 
             wandb.log({
                 f"{trial_prefix}/lr_actor": lr_actor,
                 f"{trial_prefix}/lr_critic": lr_critic,
+                f"{trial_prefix}/lr_alpha": lr_alpha,
                 f"{trial_prefix}/tau": tau,
+                f"{trial_prefix}/gamma": gamma,
                 f"{trial_prefix}/initial_alpha": initial_alpha,
                 f"{trial_prefix}/deadband_threshold": deadband,
+                f"{trial_prefix}/dsr_eta": dsr_eta,
             })
         elif agent_type == "ppo":
             # === OPTIMIZER HPs (tunable) ===
