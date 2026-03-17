@@ -1,0 +1,35 @@
+## Multi-Exchange Funding Rate Arbitrage Config
+## Imported from https://github.com/bigcan/Funding-Rate-Arb.git
+## Use with: python scripts/funding_arb_train.py --config configs/funding_arb_multi_exchange.yaml
+
+environment:
+  symbols: [BTC/USDT, ETH/USDT, SOL/USDT, ARB/USDT, DOGE/USDT]
+  exchanges: [binance, bybit, okx]
+  initial_capital: 100000
+  max_open_positions: 3
+  max_steps: 500
+  taker_fee: 0.0004
+  slippage_bps: 0.0001
+
+training:
+  total_timesteps: 300000
+  learning_rate: 0.0003
+  n_steps: 2048
+  batch_size: 64
+  n_epochs: 10
+  gamma: 0.99
+  gae_lambda: 0.95
+  clip_range: 0.2
+  ent_coef: 0.01
+  vf_coef: 0.5
+  max_grad_norm: 0.5
+  net_arch: [256, 256]
+
+data:
+  days: 90
+  train_split: 0.8
+
+execution:
+  hummingbot_host: localhost
+  hummingbot_port: 8000
+  poll_interval_seconds: 30
