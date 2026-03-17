@@ -13,6 +13,10 @@ import logging
 import numpy as np
 import pandas as pd
 
+from finrl_pro_ds.crypto.features.funding_arb_features import (
+    FUNDING_ARB_FEATURE_COLS,
+)
+
 logger = logging.getLogger(__name__)
 
 # The 6 crypto-specific feature columns produced by crypto_features.py.
@@ -173,26 +177,6 @@ def _renormalize_within_window(
 # ---------------------------------------------------------------------------
 # Funding Arb Array Builder
 # ---------------------------------------------------------------------------
-
-# The 15 funding-arb feature columns produced by funding_arb_features.py.
-FUNDING_ARB_FEATURE_COLS = [
-    "funding_rate_raw",
-    "funding_rate_annualized",
-    "funding_ema_24h",
-    "funding_ema_168h",
-    "funding_rate_std",
-    "funding_cumsum_ffd",
-    "basis_pct",
-    "basis_ema_168h",
-    "basis_ffd",
-    "oi_change_pct",
-    "log_oi_ffd",
-    "perp_volume_raw",
-    "btc_correlation",
-    "volatility_24h",
-    "volume_profile_skew",
-]
-
 
 def build_funding_arb_arrays(
     spot_ohlcv: pd.DataFrame,

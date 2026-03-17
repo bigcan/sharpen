@@ -53,8 +53,8 @@ def _make_env(
     spot_volume_ary = np.full((n_bars, n_assets), 1e6, dtype=np.float64)
     perp_volume_ary = np.full((n_bars, n_assets), 1e6, dtype=np.float64)
 
-    # 12 features per asset
-    tech_ary = np.random.randn(n_bars, n_assets * 12).astype(np.float32) * 0.1
+    # 15 features per asset (12 base + 3 FFD: funding_cumsum_ffd, basis_ffd, log_oi_ffd)
+    tech_ary = np.random.randn(n_bars, n_assets * 15).astype(np.float32) * 0.1
 
     return FundingArbEnv(
         spot_price_ary=spot_price_ary,
@@ -86,8 +86,8 @@ class TestSpaces:
         env = _make_env(n_assets=n_assets)
         obs, info = env.reset()
         assert obs.shape == env.observation_space.shape
-        # Expected: 1 + 5*12 + 5 + 5 + 5 + 5 + 1 + 1 + 1 + 1 + 1 = 86
-        expected = 1 + (n_assets * 12) + 4 * n_assets + 5
+        # Expected: 1 + 5*15 + 5 + 5 + 5 + 5 + 1 + 1 + 1 + 1 + 1 = 101
+        expected = 1 + (n_assets * 15) + 4 * n_assets + 5
         assert obs.shape[0] == expected
 
     def test_reset_returns_valid_obs(self):
