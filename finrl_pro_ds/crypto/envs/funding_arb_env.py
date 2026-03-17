@@ -283,14 +283,21 @@ class FundingArbEnv(gym.Env):
         net_delta = self._calc_net_delta(spot_price, perp_price, portfolio_value)
         turnover = float(np.abs(delta_weights).sum())
 
-        reward = self.reward_scaling * np.clip(
-            funding_total / (self.initial_capital + 1e-10)  # Primary: funding
-            - (total_fees + total_slippage) / (self.initial_capital + 1e-10)  # Costs
-            - self.lambda_basis * abs(basis_pnl_change) / (self.initial_capital + 1e-10)
-            - self.lambda_delta * abs(net_delta)
-            - self.lambda_turnover * turnover,
-            *self.reward_clip_range,
+        # Dense funding reward: use expected funding income per bar (reward
+        # shaping) instead of sparse settlement-only signal. This gives the
+        # agent a positive signal every bar for holding correctly-positioned
+        # arb pairs, not just 3x/day at settlement.
+        expected_funding = self._calc_expected_funding_per_bar(perp_price)
+
+        capital = portfolio_value_before + 1e-10
+        raw_reward = self.reward_scaling * (
+            expected_funding / capital                          # Dense funding signal
+            - (total_fees + total_slippage) / capital           # Costs
+            - self.lambda_basis * abs(basis_pnl_change) / capital
+            - self.lambda_delta * net_delta ** 2                # Quadratic: soft on small delta
+            - self.lambda_turnover * turnover / self.n_assets   # Per-asset normalized
         )
+        reward = float(np.clip(raw_reward, *self.reward_clip_range))
 
         # --- Step 6: Termination ---
         circuit_triggered = portfolio_value < self.circuit_breaker_threshold * self.initial_capital
@@ -400,6 +407,32 @@ class FundingArbEnv(gym.Env):
         self.margin_balance += float(earned.sum())
 
         return earned
+
+    def _calc_expected_funding_per_bar(self, perp_price: np.ndarray) -> float:
+        """Calculate expected funding income per bar for reward shaping.
+
+        Spreads the 8-hourly funding signal across all bars proportionally.
+        Standard arb (weight > 0, short perp) earns when funding > 0.
+        Uses currently known funding rate (no look-ahead).
+        """
+        active = np.abs(self.arb_weights) >= 1e-8
+        if not active.any():
+            return 0.0
+
+        funding_rates = self.funding_rate_ary[self.step_idx]
+
+        # Mark-to-market perp notional
+        perp_notional_current = np.where(
+            np.abs(self.perp_entry_prices) > 1e-10,
+            self.perp_notionals * (perp_price / (self.perp_entry_prices + 1e-10)),
+            0.0,
+        )
+
+        # Perp sign: opposite of arb weight (short perp for standard arb)
+        perp_sign = -np.sign(self.arb_weights)
+        # Earned = -cost; divide by 8 to pro-rate from 8-hourly to per-bar
+        expected = -perp_sign * perp_notional_current * funding_rates / 8.0
+        return float(expected[active].sum())
 
     # -------------------------------------------------------------------
     # Transaction costs
