@@ -141,6 +141,7 @@ def create_env(arrays: dict, config: dict) -> FundingArbEnv:
         reward_scaling=env_cfg.get("reward_scaling", 100.0),
         reward_clip_range=tuple(env_cfg.get("reward_clip_range", [-5.0, 5.0])),
         circuit_breaker_threshold=env_cfg.get("circuit_breaker_threshold", 0.05),
+        action_repeat=env_cfg.get("action_repeat", 1),
         enable_trade_log=True,
     )
 

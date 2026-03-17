@@ -71,6 +71,7 @@ class FundingArbEnv(gym.Env):
         reward_scaling: float = 100.0,
         reward_clip_range: tuple = (-5.0, 5.0),
         circuit_breaker_threshold: float = 0.05,
+        action_repeat: int = 1,
         enable_trade_log: bool = False,
     ) -> None:
         super().__init__()
@@ -116,6 +117,7 @@ class FundingArbEnv(gym.Env):
         self.reward_scaling = float(reward_scaling)
         self.reward_clip_range = reward_clip_range
         self.circuit_breaker_threshold = float(circuit_breaker_threshold)
+        self.action_repeat = max(1, int(action_repeat))
         self.enable_trade_log = enable_trade_log
 
         # --- Pre-compute funding mask (UTC 00/08/16) ---
@@ -196,14 +198,41 @@ class FundingArbEnv(gym.Env):
         return self._get_obs(), {}
 
     def step(self, action: np.ndarray):
+        """Execute action then hold for action_repeat bars. Accumulates reward."""
         action = np.asarray(action, dtype=np.float64).ravel().clip(-1.0, 1.0)
 
+        total_reward = 0.0
+        terminated = False
+        truncated = False
+        info = {}
+
+        for repeat_idx in range(self.action_repeat):
+            # Only apply the action on the first bar; hold on subsequent bars
+            if repeat_idx == 0:
+                bar_action = action
+            else:
+                bar_action = self.arb_weights.copy()  # hold current positions
+
+            r, term, trunc, bar_info = self._step_one_bar(bar_action)
+            total_reward += r
+            info = bar_info
+            terminated = term
+            truncated = trunc
+            if terminated or truncated:
+                break
+
+        obs = self._get_obs()
+        return obs, float(total_reward), terminated, truncated, info
+
+    def _step_one_bar(self, action: np.ndarray):
+        """Execute one bar of simulation. Returns (reward, terminated, truncated, info)."""
         # Advance to next bar
         self.step_idx += 1
         spot_price = self.spot_price_ary[self.step_idx]
         perp_price = self.perp_price_ary[self.step_idx]
 
         # Zero out actions for unavailable assets
+        action = action.copy()
         action[~self._asset_available[self.step_idx]] = 0.0
 
         # Portfolio value before this bar
@@ -273,39 +302,21 @@ class FundingArbEnv(gym.Env):
         self.portfolio_values.append(portfolio_value)
 
         # --- Step 5: Compute reward ---
+        # PV-return reward: directly optimize portfolio value growth.
+        # Costs, funding, and basis risk are all reflected in PV changes.
+        # No penalty engineering needed — what grows PV is good.
         funding_total = float(funding_earned_this_step.sum())
-        # FARB-02 fix: use pre-trade snapshot so penalty reflects mark-to-market
-        # change on held positions, not stale new-position-at-old-price artifact.
-        post_trade_basis_pnl = self._calc_total_unrealized_basis_pnl(
-            spot_price, perp_price
-        )
-        basis_pnl_change = post_trade_basis_pnl - pre_trade_basis_pnl
         net_delta = self._calc_net_delta(spot_price, perp_price, portfolio_value)
         turnover = float(np.abs(delta_weights).sum())
 
-        # Dense funding reward: use expected funding income per bar (reward
-        # shaping) instead of sparse settlement-only signal. This gives the
-        # agent a positive signal every bar for holding correctly-positioned
-        # arb pairs, not just 3x/day at settlement.
-        expected_funding = self._calc_expected_funding_per_bar(perp_price)
-
-        capital = portfolio_value_before + 1e-10
-        raw_reward = self.reward_scaling * (
-            expected_funding / capital                          # Dense funding signal
-            - (total_fees + total_slippage) / capital           # Costs
-            - self.lambda_basis * abs(basis_pnl_change) / capital
-            - self.lambda_delta * net_delta ** 2                # Quadratic: soft on small delta
-            - self.lambda_turnover * turnover / self.n_assets   # Per-asset normalized
-        )
+        pv_return = (portfolio_value - portfolio_value_before) / (portfolio_value_before + 1e-10)
+        raw_reward = self.reward_scaling * pv_return
         reward = float(np.clip(raw_reward, *self.reward_clip_range))
 
         # --- Step 6: Termination ---
         circuit_triggered = portfolio_value < self.circuit_breaker_threshold * self.initial_capital
         terminated = circuit_triggered
         truncated = self.step_idx >= self.max_step
-
-        # --- Step 7: Observation ---
-        obs = self._get_obs()
 
         # --- Trade log ---
         if self.enable_trade_log and self.trade_log is not None:
@@ -333,7 +344,7 @@ class FundingArbEnv(gym.Env):
             "funding_applied": self._funding_mask[self.step_idx],
         }
 
-        return obs, float(reward), terminated, truncated, info
+        return reward, terminated, truncated, info
 
     # -------------------------------------------------------------------
     # Constraints

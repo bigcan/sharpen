@@ -40,6 +40,7 @@ environment:
   # --- Constraints ---
   max_gross_exposure: 0.80        # Max 80% of capital deployed
   deadband_threshold: 0.01        # Ignore changes < 1%
+  action_repeat: 8                # Agent decides once per funding settlement (8h)
   # --- Reward ---
   lambda_basis: 0.0               # Disabled: basis MtM overwhelms funding
   lambda_delta: 100.0             # Quadratic delta penalty
