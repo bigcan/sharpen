@@ -21,6 +21,9 @@ from socket import gethostname
 from uuid import uuid4
 
 import requests
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -349,6 +352,7 @@ def main():
     parser = argparse.ArgumentParser(description="Bulk-index markdown into LanceDB memory")
     parser.add_argument("--randd", type=str, default=None, help="Path to randd_log.md")
     parser.add_argument("--plan", type=str, default=None, help="Path to stage3_research_plan.md")
+    parser.add_argument("--archive-dir", type=str, default=None, help="Path to randd_archive/ directory")
     parser.add_argument("--dry-run", action="store_true", help="Parse only, no embed/insert")
     parser.add_argument("--force", action="store_true", help="Delete existing bulk rows first")
     args = parser.parse_args()
@@ -359,6 +363,7 @@ def main():
         args.randd = str(project_root / "randd_log.md")
     if args.plan is None:
         args.plan = str(project_root / ".agent" / "artifacts" / "stage3_research_plan.md")
+    archive_dir = Path(args.archive_dir) if args.archive_dir else project_root / "randd_archive"
 
     # Parse
     all_chunks: list[dict] = []
@@ -369,6 +374,17 @@ def main():
         all_chunks.extend(randd_chunks)
     else:
         log.warning("randd_log not found: %s", args.randd)
+
+    # Auto-discover archive files
+    if archive_dir.exists():
+        for archive_file in sorted(archive_dir.glob("*.md")):
+            archive_chunks = parse_randd_log(str(archive_file))
+            for chunk in archive_chunks:
+                chunk["doc"] = f"randd_archive/{archive_file.name}"
+            log.info("Parsed archive %s: %d entries", archive_file.name, len(archive_chunks))
+            all_chunks.extend(archive_chunks)
+    else:
+        log.info("No archive directory found at %s (skipping)", archive_dir)
 
     if Path(args.plan).exists():
         plan_chunks = parse_research_plan(args.plan)
