@@ -522,7 +522,6 @@ def cmd_deploy(args):
     log_file = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
     hpo_db = f"hpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
     hpo_storage_arg = f"--hpo_storage sqlite:///{REMOTE_WORKSPACE}/{hpo_db}"
-    version_arg = f"--version {version}" if version else ""
     run_name_arg = f"--run_name {full_run_name}"
 
     # Inject platform/location WandB tags into extra_args
@@ -542,7 +541,7 @@ def cmd_deploy(args):
         f"{wandb_env} {discord_env} "
         f"ulimit -n 65535 || true && "
         f"nohup python -u {script_path} --config {config_path} "
-        f"{run_name_arg} {version_arg} {hpo_storage_arg} {extra} "
+        f"{run_name_arg} {hpo_storage_arg} {extra} "
         f"> {log_file} 2>&1 & echo $! > run.pid"
     )
 
@@ -868,7 +867,6 @@ Examples:
     sp_deploy.add_argument("--data_file", default=None, help="Data filename relative to data/ dir")
     sp_deploy.add_argument("--no_kill", action="store_true", help="Do not kill existing processes")
     sp_deploy.add_argument("--fresh_hpo", action="store_true", help="Wipe HPO database for fresh start")
-    sp_deploy.add_argument("--version", default=None, help="Version tag (e.g., V1, V95)")
     sp_deploy.add_argument("--collect", action="store_true", help="Poll WandB until completion then auto-collect (blocking)")
     sp_deploy.add_argument("--extra_args", default="", help="Extra args to pass to the training script")
     sp_deploy.set_defaults(func=cmd_deploy)
