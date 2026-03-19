@@ -133,6 +133,7 @@ def create_env(arrays: dict, config: dict) -> FundingArbEnv:
         perp_margin_rate=env_cfg.get("perp_margin_rate", 0.05),
         slippage_base_bps=env_cfg.get("slippage_base_bps", 2.0),
         slippage_impact_bps=env_cfg.get("slippage_impact_bps", 10.0),
+        spot_borrow_rate_hourly=env_cfg.get("spot_borrow_rate_hourly", 8.33e-6),
         max_gross_exposure=env_cfg["max_gross_exposure"],
         deadband_threshold=env_cfg.get("deadband_threshold", 0.02),
         lambda_basis=env_cfg.get("lambda_basis", 2.0),

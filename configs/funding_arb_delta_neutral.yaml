@@ -38,6 +38,7 @@ environment:
   perp_margin_rate: 0.05          # 5% margin for perp leg (20x leverage)
   slippage_base_bps: 2.0
   slippage_impact_bps: 10.0
+  spot_borrow_rate_hourly: 8.33e-6  # ~0.02%/day ÷ 24h (Binance spot margin interest)
   # --- Constraints ---
   max_gross_exposure: 0.80        # Max 80% of capital deployed
   deadband_threshold: 0.01        # Ignore changes < 1%

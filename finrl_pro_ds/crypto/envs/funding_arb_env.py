@@ -28,7 +28,7 @@ class FundingArbEnv(gym.Env):
 
     Observation space (~326 dims for 20 assets):
         [portfolio_value_pct]                1
-        [tech_features]                      n_assets × 12
+        [tech_features]                      n_assets × tech_dim (currently 15)
         [current_arb_weights]                n_assets (signed)
         [unrealized_basis_pnl]               n_assets
         [cumulative_funding]                 n_assets (normalized)
@@ -63,12 +63,14 @@ class FundingArbEnv(gym.Env):
         perp_margin_rate: float = 0.05,       # 5% margin for perp leg
         slippage_base_bps: float = 2.0,
         slippage_impact_bps: float = 10.0,
+        spot_borrow_rate_hourly: float = 8.33e-6,  # ~0.02%/day ÷ 24h (Binance margin)
         max_gross_exposure: float = 0.80,
-        deadband_threshold: float = 0.02,
-        lambda_basis: float = 2.0,
-        lambda_delta: float = 5.0,
+        deadband_threshold: float = 0.01,
+        # Legacy penalty params -- unused since PV-return reward (S198)
+        lambda_basis: float = 0.0,
+        lambda_delta: float = 100.0,
         lambda_turnover: float = 0.003,
-        reward_scaling: float = 100.0,
+        reward_scaling: float = 10000.0,
         reward_clip_range: tuple = (-5.0, 5.0),
         circuit_breaker_threshold: float = 0.05,
         action_repeat: int = 1,
@@ -109,6 +111,7 @@ class FundingArbEnv(gym.Env):
         self.perp_margin_rate = float(perp_margin_rate)
         self.slippage_base_bps = float(slippage_base_bps)
         self.slippage_impact_bps = float(slippage_impact_bps)
+        self.spot_borrow_rate_hourly = float(spot_borrow_rate_hourly)
         self.max_gross_exposure = float(max_gross_exposure)
         self.deadband_threshold = float(deadband_threshold)
         self.lambda_basis = float(lambda_basis)
@@ -155,6 +158,7 @@ class FundingArbEnv(gym.Env):
         self.perp_notionals = np.zeros(n_assets, dtype=np.float64)
         self.cumulative_funding = np.zeros(n_assets, dtype=np.float64)
         self.cumulative_fees = 0.0
+        self.cumulative_borrow_costs = 0.0
         self.portfolio_values: list[float] = []
         self.trade_log: list[dict] | None = [] if enable_trade_log else None
 
@@ -191,6 +195,7 @@ class FundingArbEnv(gym.Env):
         self.perp_notionals = np.zeros(self.n_assets, dtype=np.float64)
         self.cumulative_funding = np.zeros(self.n_assets, dtype=np.float64)
         self.cumulative_fees = 0.0
+        self.cumulative_borrow_costs = 0.0
         self.portfolio_values = [self.initial_capital]
         if self.enable_trade_log:
             self.trade_log = []
@@ -246,6 +251,9 @@ class FundingArbEnv(gym.Env):
         funding_earned_this_step = np.zeros(self.n_assets, dtype=np.float64)
         if self._funding_mask[self.step_idx]:
             funding_earned_this_step = self._apply_funding(perp_price)
+
+        # --- Step 1b: Apply spot borrowing costs on reverse-arb positions ---
+        borrow_cost = self._apply_spot_borrow_costs(spot_price)
 
         # --- FARB-02 fix: snapshot pre-trade basis PnL for reward penalty ---
         pre_trade_basis_pnl = self._calc_total_unrealized_basis_pnl(
@@ -337,6 +345,8 @@ class FundingArbEnv(gym.Env):
             "total_funding_earned": float(self.cumulative_funding.sum()),
             "step_funding": funding_total,
             "cumulative_fees": self.cumulative_fees,
+            "cumulative_borrow_costs": self.cumulative_borrow_costs,
+            "step_borrow_cost": borrow_cost,
             "net_delta": net_delta,
             "gross_exposure": float(np.abs(self.arb_weights).sum()),
             "n_active_pairs": int((np.abs(self.arb_weights) > self.deadband_threshold).sum()),
@@ -418,6 +428,30 @@ class FundingArbEnv(gym.Env):
         self.margin_balance += float(earned.sum())
 
         return earned
+
+    def _apply_spot_borrow_costs(self, spot_price: np.ndarray) -> float:
+        """Deduct spot margin interest on reverse-arb (short spot) positions.
+
+        Reverse arb (arb_weight < 0) borrows spot to sell short.
+        Cost = spot_notional_current × spot_borrow_rate_hourly per bar (1h).
+        Deducted from margin_balance every bar.
+        """
+        # Reverse arb = arb_weight < 0 (short spot leg)
+        short_spot = self.arb_weights < -1e-8
+        if not short_spot.any() or self.spot_borrow_rate_hourly <= 0:
+            return 0.0
+
+        # Mark-to-market spot notional for short-spot positions
+        spot_notional_current = np.where(
+            np.abs(self.spot_entry_prices) > 1e-10,
+            self.spot_notionals * (spot_price / (self.spot_entry_prices + 1e-10)),
+            0.0,
+        )
+
+        borrow_cost = float((spot_notional_current[short_spot] * self.spot_borrow_rate_hourly).sum())
+        self.cumulative_borrow_costs += borrow_cost
+        self.margin_balance -= borrow_cost
+        return borrow_cost
 
     def _calc_expected_funding_per_bar(self, perp_price: np.ndarray) -> float:
         """Calculate expected funding income per bar for reward shaping.
@@ -662,7 +696,7 @@ class FundingArbEnv(gym.Env):
     def _get_portfolio_value(
         self, spot_price: np.ndarray, perp_price: np.ndarray
     ) -> float:
-        """Total portfolio value = margin + unrealized basis PnL + cumulative funding."""
+        """Total portfolio value = margin_balance (includes realized PnL, funding, fees, borrow costs) + unrealized basis PnL."""
         unrealized = self._calc_total_unrealized_basis_pnl(spot_price, perp_price)
         return max(self.margin_balance + unrealized, 0.0)
 
