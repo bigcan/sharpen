@@ -536,7 +536,8 @@ def main():
     try:
         import wandb
         if not os.environ.get("WANDB_DISABLED"):
-            run_name = args.run_name or f"funding-arb-hpo_{time.strftime('%Y%m%d_%H%M%S')}"
+            from finrl_pro_ds.utils.naming import generate_run_name
+            run_name = args.run_name or generate_run_name(args.config or "funding_arb_hpo")
             tags = list(args.tags or []) + ["funding-arb", "sac", "hpo"]
             wandb_cfg = config.get("wandb", {})
             wandb.init(

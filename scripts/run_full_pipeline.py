@@ -1386,8 +1386,7 @@ def main():
         validate_run_name(args.run_name, raise_on_fail=True)
         run_name = args.run_name
     else:
-        platform = "GPUHub" if os.path.exists("/workspace") else "Local"
-        run_name = generate_run_name(version=args.version, platform=platform)
+        run_name = generate_run_name(args.config)
 
     logger.info(f"Pipeline Run: {run_name}")
 

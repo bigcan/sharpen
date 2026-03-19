@@ -409,10 +409,9 @@ def cmd_deploy(args):
     print(f"  GPU: {gpu_name} | Location: {geo}")
     print(f"  Auto-tags: {platform_tags}")
 
-    # Generate canonical run name
+    # Generate run name from config filename
     from finrl_pro_ds.utils.naming import generate_run_name
-    version = args.version if args.version else "V1"
-    full_run_name = generate_run_name(version=version, platform="VastAI")
+    full_run_name = generate_run_name(args.config)
 
     wandb_key = os.getenv("WANDB_API_KEY", "")
     discord_url = os.getenv("DISCORD_WEBHOOK_URL", "")

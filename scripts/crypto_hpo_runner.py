@@ -675,7 +675,8 @@ def main():
     try:
         import wandb
         if not os.environ.get("WANDB_DISABLED"):
-            run_name = args.run_name or f"sync-1H-hpo_{time.strftime('%Y%m%d_%H%M%S')}"
+            from finrl_pro_ds.utils.naming import generate_run_name
+            run_name = args.run_name or generate_run_name(args.config or "sync_1h_hpo")
             tags = list(args.tags or []) + ["sync-1h", "hpo", "s166"]
             wandb.init(
                 project=config.get("wandb", {}).get("project", "FinRL-Pro-DS"),

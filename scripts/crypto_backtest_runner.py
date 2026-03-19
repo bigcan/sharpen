@@ -306,7 +306,8 @@ def _init_wandb(config: dict, args) -> bool:
     if os.environ.get("WANDB_DISABLED"):
         return False
 
-    run_name = args.run_name or f"sync-1H_{time.strftime('%Y%m%d_%H%M%S')}"
+    from finrl_pro_ds.utils.naming import generate_run_name
+    run_name = args.run_name or generate_run_name(args.config or "sync_1h")
     tags = list(args.tags or []) + ["sync-1h"]
 
     wandb.init(
