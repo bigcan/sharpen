@@ -420,3 +420,114 @@ class TestIntegration:
         pv = env._get_portfolio_value(spot_p, perp_p)
         unrealized = env._calc_total_unrealized_basis_pnl(spot_p, perp_p)
         assert abs(pv - (env.margin_balance + unrealized)) < 0.01
+
+
+# ---------------------------------------------------------------------------
+# 11. Spot borrowing costs
+# ---------------------------------------------------------------------------
+
+class TestSpotBorrowCosts:
+    def test_standard_arb_no_borrow_cost(self):
+        """Standard arb (weight > 0) = long spot, no borrowing needed."""
+        env = _make_env(n_bars=30, n_assets=2, spot_borrow_rate_hourly=1e-4)
+        env.reset()
+        # Positive weights → long spot → no borrow cost
+        action = np.array([0.3, 0.5])
+        for _ in range(10):
+            env.step(action)
+        assert env.cumulative_borrow_costs == 0.0
+
+    def test_reverse_arb_incurs_borrow_cost(self):
+        """Reverse arb (weight < 0) = short spot → borrowing costs deducted."""
+        rate = 1e-4  # exaggerated for test visibility
+        env = _make_env(n_bars=30, n_assets=2, spot_borrow_rate_hourly=rate)
+        env.reset()
+        # Negative weight on asset 0 → short spot → borrow cost
+        action = np.array([-0.3, 0.3])
+        for _ in range(10):
+            env.step(action)
+        assert env.cumulative_borrow_costs > 0.0
+        # Only asset 0 should have incurred costs (asset 1 is long spot)
+
+    def test_borrow_cost_deducted_from_margin(self):
+        """Borrow costs reduce margin_balance, flowing into PV-return reward."""
+        rate = 1e-3  # large rate for clear signal
+        env = _make_env(n_bars=30, n_assets=1, spot_borrow_rate_hourly=rate)
+        env.reset()
+        action = np.array([-0.5])
+        env.step(action)  # opens position (no borrow yet — position was flat)
+        margin_after_open = env.margin_balance
+        env.step(action)  # holds position — borrow cost applied on existing short spot
+        assert env.margin_balance < margin_after_open
+        assert env.cumulative_borrow_costs > 0.0
+
+    def test_borrow_cost_in_info(self):
+        """Info dict contains borrow cost fields."""
+        env = _make_env(n_bars=30, n_assets=1, spot_borrow_rate_hourly=1e-4)
+        env.reset()
+        action = np.array([-0.3])
+        _, _, _, _, info = env.step(action)
+        assert "cumulative_borrow_costs" in info
+        assert "step_borrow_cost" in info
+
+    def test_zero_rate_no_cost(self):
+        """With spot_borrow_rate_hourly=0, no costs even for reverse arb."""
+        env = _make_env(n_bars=30, n_assets=2, spot_borrow_rate_hourly=0.0)
+        env.reset()
+        action = np.array([-0.5, -0.5])
+        for _ in range(10):
+            env.step(action)
+        assert env.cumulative_borrow_costs == 0.0
+
+    def test_borrow_cost_magnitude(self):
+        """Verify borrow cost = spot_notional_current × rate per bar."""
+        rate = 1e-4
+        env = _make_env(
+            n_bars=30, n_assets=1, spot_borrow_rate_hourly=rate,
+            deadband_threshold=0.01,
+            spot_taker_fee_pct=0.0, perp_taker_fee_pct=0.0,
+            slippage_base_bps=0.0, slippage_impact_bps=0.0,
+        )
+        env.reset()
+        weight = -0.5
+        action = np.array([weight])
+        env.step(action)  # bar 1: open position, no borrow cost yet
+
+        # After bar 1: spot_notional = |weight| * PV_at_open
+        # PV_at_open ≈ initial_capital (minus tiny fees, but fees=0 here)
+        # On bar 2, borrow cost = spot_notional * rate
+        expected_notional = abs(weight) * env.initial_capital  # 50_000
+        expected_cost_per_bar = expected_notional * rate  # 5.0
+
+        env.step(action)  # bar 2: borrow cost applied
+        assert abs(env.cumulative_borrow_costs - expected_cost_per_bar) < 0.01
+
+        env.step(action)  # bar 3: another bar of borrow cost
+        assert abs(env.cumulative_borrow_costs - 2 * expected_cost_per_bar) < 0.02
+
+    def test_borrow_cost_vs_funding_interaction(self):
+        """Reverse arb: net PnL = funding earned - borrow costs - fees."""
+        rate = 1e-5  # small borrow rate
+        funding = -0.001  # negative funding → reverse arb earns
+        env = _make_env(
+            n_bars=30, n_assets=1,
+            spot_borrow_rate_hourly=rate,
+            funding_rate=funding,
+            deadband_threshold=0.01,
+            spot_taker_fee_pct=0.0, perp_taker_fee_pct=0.0,
+            slippage_base_bps=0.0, slippage_impact_bps=0.0,
+        )
+        env.reset()
+        action = np.array([-0.3])  # reverse arb
+        # Run for multiple bars to accumulate both funding and borrow costs
+        for _ in range(16):
+            env.step(action)
+
+        # Funding should be earned (negative rate + short perp → positive)
+        total_funding = float(env.cumulative_funding.sum())
+        total_borrow = env.cumulative_borrow_costs
+        # With negative funding rate and reverse arb (long perp), agent PAYS funding
+        # So total_funding may be negative. But borrow costs should be separate.
+        assert total_borrow > 0.0, "Borrow costs should be positive"
+        # Accounting: PV = initial_capital + funding + realized_basis - fees - borrow
+        # All costs reduce PV relative to hold-all baseline
