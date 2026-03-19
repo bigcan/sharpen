@@ -291,10 +291,8 @@ def deploy(args):
     hpo_db = f"hpo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
     hpo_storage_arg = f"--hpo_storage sqlite:///{remote_workspace}/{hpo_db}"
 
-    version_arg = f"--version {version}" if version else ""
-
     # FIX: Remove () around ulimit so it applies to the current shell and subsequent nohup process
-    cmd = f"{export_path} && {gpu_env} {wandb_env} {discord_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {version_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
+    cmd = f"{export_path} && {gpu_env} {wandb_env} {discord_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
 
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
@@ -437,7 +435,6 @@ if __name__ == "__main__":
     parser.add_argument("--extra_args", default="", help="Extra arguments to pass to the script (e.g. '--trials 50 --steps 200000')")
     parser.add_argument("--fresh_hpo", action="store_true", help="Wipe existing HPO database for a fresh start")
     parser.add_argument("--no_kill", action="store_true", help="Do NOT kill existing processes (e.g. preserve Synapse run)")
-    parser.add_argument("--version", default=None, help="Version tag (e.g. V1.1)")
     parser.add_argument("--collect", action="store_true", help="After deploy, poll WandB until completion then auto-collect all data (blocking)")
     parser.add_argument("--instance", default=None, help="Named instance from instances.json (e.g. gpuhub-1, gpuhub-2). Default: uses 'default' key or .env")
     parser.add_argument("--gpu", default=None, help="CUDA_VISIBLE_DEVICES value (e.g. 0, 1, '0,1'). For multi-GPU instances.")

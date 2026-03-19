@@ -1349,7 +1349,6 @@ def main():
     parser.add_argument("--run_name", type=str, default=None, help="Override WandB Run Name")
     parser.add_argument("--trials", type=int, default=None, help="Number of HPO trials")
     parser.add_argument("--steps", type=int, default=None, help="Training steps override")
-    parser.add_argument("--version", type=str, default="V1", help="Version tag")
     parser.add_argument("--hpo_storage", type=str, default=None, help="Optuna storage URL (e.g. sqlite:///hpo.db)")
     parser.add_argument("--backtest_only", action="store_true", help="Skip HPO and training, run backtest only (requires --checkpoint)")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint for --backtest_only mode")
