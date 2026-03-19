@@ -188,9 +188,9 @@ Replay: reproduce <fingerprint_id>
 - Minimal diffs; no drive‑by refactors
 - No secrets or large data in git; use DVC/MLflow for artifacts
 
-## Memory System & MCP Tools
+## Memory System, MCP Tools, & Integration Patterns
 
-This project operates a dual-tier agent memory system to preserve session context and historical R&D:
+This project operates a dual-tier agent memory system and integrates external MCP servers for maximal agent autonomy and observability:
 
 1. **Local Vector Knowledge Base (`agent-memory` MCP)**: 
    - **Purpose**: Semantic search over project history (`randd_log.md` and `core.md`). Fast retrieval of exact experiment parameters and architectural pivots (e.g. "Why did Phase J fail?").
@@ -199,9 +199,16 @@ This project operates a dual-tier agent memory system to preserve session contex
 2. **Cloud Memory (`memory` MCP)**: 
    - **Purpose**: Cross-project user preferences and global rules.
    - **Tools**: `memory_store`, `memory_search`, `memory_forget`.
+3. **AI Debugger (`notebooklm` MCP)**:
+   - **Purpose**: Deep context synthesis, long-term pattern recognition, and trend analysis.
+   - **Protocol**: Utilize NotebookLM when facing novel, complex error loops or needing to synthesize broad context across vast documents/logs.
+4. **Mission Control (`notion` MCP)**:
+   - **Purpose**: Remote dashboarding, real-time command-and-control (steering), and persistent state management.
+   - **Protocol**: Use Notion for high-level experiment tracking, milestone sign-offs, and 'Level 5' autonomous system observability.
 
 - **Core Protocol**: Log key decisions via the native memory skill; read `.agent/memory/core.md` at session start via `/memory-boot`.
 - **Proactive Cloud Saves**: After any significant experiment result, architecture decision, or infrastructure change, proactively call `memory_store`.
+- **Proactive Tooling**: Maximize agent autonomy by proactively invoking specific MCP tools and native workflow skills (`math`, `monitor`, `audit`, etc.) when planning, executing, or debugging. Do not wait for explicit user prompts if a specific tool logically executes a task or resolves an uncertainty.
 
 ## When In Doubt
 
@@ -222,7 +229,9 @@ The following skills are available (in `.agent/skills/` and global skills) to ex
 
 - **audit**: Run this automatically after EVERY implementation to perform a comprehensive post-implementation audit covering correctness, invariants, tests, configs, and memory hygiene.
 - **deploy** / **deployment**: Robustly deploy DeepScalper pilot/production runs to remote GPUHub instances, handling authentication, data syncing, execution monitoring, and autonomous operation via Ralph.
+- **math**: Deep mathematical verification of all formulas — reward functions, financial calculations, feature engineering, normalization, RL algorithms. Proactively use to catch wrong training signals.
 - **memory**: ALWAYS read this skill at the START of every session to load persistent memory context (`/memory-boot` macro).
 - **memory-search**: Search across all memory tiers using grep-based tag and keyword queries.
+- **monitor**: Fleet monitoring for GPUHub instances and WandB runs. Trigger on status check, run health, anomaly detection, or 'how are my runs doing'.
 - **optimization**: Find optimal GPU training settings for RTX GPUs based on NVIDIA guidelines. Run before deploying new configs.
 - **reporting**: Generates standardized performance reports for DeepScalper runs by fetching data from WandB.
