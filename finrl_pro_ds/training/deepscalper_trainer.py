@@ -25,8 +25,8 @@ class DeepScalperTrainer:
         self.env = env
         self.config = config
         self.device = device
-        self.tracker_rewards = []
-        self.tracker_lens = []
+        self.episode_rewards = deque(maxlen=100)
+        self.episode_lengths = deque(maxlen=100)
 
         # Sprint 7: Reward normalizer removed (BUG-3). Raw bps rewards used directly.
         self.run_name = run_name or datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -366,8 +366,8 @@ class DeepScalperTrainer:
                 print(f"[Train] Computed epsilon_decay = {computed_decay:.6f} (explore over {explore_calls}/{total_calls} updates, fraction={exploration_fraction})")
 
         global_step = start_step
-        episode_rewards = deque(maxlen=100)
-        episode_lens = deque(maxlen=100)
+        self.episode_rewards = deque(maxlen=100)
+        self.episode_lengths = deque(maxlen=100)
 
         curr_rewards = np.zeros(num_envs)
         curr_lens = np.zeros(num_envs)
@@ -548,8 +548,8 @@ class DeepScalperTrainer:
                     curr_rewards[i] += rewards[i]
                     curr_lens[i] += 1
                     if dones_for_reset[i]:
-                        episode_rewards.append(curr_rewards[i])
-                        episode_lens.append(curr_lens[i])
+                        self.episode_rewards.append(curr_rewards[i])
+                        self.episode_lengths.append(curr_lens[i])
                         curr_rewards[i] = 0
                         curr_lens[i] = 0
 
@@ -588,8 +588,8 @@ class DeepScalperTrainer:
                         logs = {
                             "step": global_step,
                             "train/epoch": epoch + 1,
-                            "train/reward_mean": np.mean(episode_rewards) if len(episode_rewards) > 0 else 0.0,
-                            "train/len_mean": np.mean(episode_lens) if len(episode_lens) > 0 else 0.0,
+                            "train/reward_mean": np.mean(self.episode_rewards) if len(self.episode_rewards) > 0 else 0.0,
+                            "train/len_mean": np.mean(self.episode_lengths) if len(self.episode_lengths) > 0 else 0.0,
                             **{f"agent/{k}": v for k, v in metrics.items()}
                         }
                         logs["agent/auxiliary_weight"] = self.agent.auxiliary_weight

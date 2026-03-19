@@ -439,6 +439,93 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
     return profit_factor, trade_count
 
 
+def _analyze_hpo_correlation(trial_records, agent_type):
+    """Post-HPO analysis: Spearman correlation between training reward and validation PF.
+
+    Logs a WandB table of all trials, computes reward-PF rank correlation,
+    HP importance rankings, and a scatter plot.
+    """
+    if not trial_records:
+        logger.warning("[HPO-Corr] No trial records to analyze.")
+        return
+
+    # 1. Log WandB table of all trials
+    columns = ["trial", "mean_reward", "val_pf", "trade_count", "status"]
+    table = wandb.Table(columns=columns)
+    for rec in trial_records:
+        table.add_data(rec["trial"], rec["mean_reward"], rec["val_pf"],
+                       rec["trade_count"], rec["status"])
+    wandb.log({"hpo/trial_details": table})
+
+    # 2. Filter to valid trials for correlation
+    valid = [r for r in trial_records
+             if r["status"] == "completed"
+             and not np.isnan(r["mean_reward"])
+             and r["val_pf"] > 0]
+
+    wandb.run.summary["hpo/n_valid_trials"] = len(valid)
+    wandb.run.summary["hpo/n_total_trials"] = len(trial_records)
+
+    if len(valid) < 5:
+        logger.info(f"[HPO-Corr] Only {len(valid)} valid trials (need >= 5). Skipping correlation.")
+        wandb.run.summary["hpo/reward_pf_spearman_rho"] = float('nan')
+        wandb.run.summary["hpo/reward_pf_spearman_p"] = float('nan')
+        wandb.run.summary["hpo/reward_pf_alignment"] = "INSUFFICIENT_DATA"
+        return
+
+    mean_rewards = np.array([r["mean_reward"] for r in valid])
+    val_pfs = np.array([r["val_pf"] for r in valid])
+
+    # 3. Primary: Spearman correlation
+    from scipy.stats import spearmanr
+    rho, p_value = spearmanr(mean_rewards, val_pfs)
+    wandb.run.summary["hpo/reward_pf_spearman_rho"] = float(rho)
+    wandb.run.summary["hpo/reward_pf_spearman_p"] = float(p_value)
+
+    abs_rho = abs(rho)
+    if abs_rho < 0.3:
+        alignment = "WEAK"
+    elif abs_rho < 0.6:
+        alignment = "MODERATE"
+    else:
+        alignment = "STRONG"
+    if rho < 0:
+        alignment = f"NEGATIVE_{alignment}"
+    wandb.run.summary["hpo/reward_pf_alignment"] = alignment
+    logger.info(f"[HPO-Corr] Reward-PF Spearman rho={rho:.3f} (p={p_value:.4f}) → {alignment}")
+
+    # 4. HP importance: per-HP correlation with val_pf
+    if valid[0].get("hps"):
+        hp_names = [k for k, v in valid[0]["hps"].items()
+                    if isinstance(v, (int, float)) and not isinstance(v, bool)]
+        for hp_name in hp_names:
+            hp_vals = np.array([r["hps"].get(hp_name, float('nan')) for r in valid])
+            if np.all(np.isnan(hp_vals)) or np.std(hp_vals) < 1e-12:
+                continue
+            hp_rho, _ = spearmanr(hp_vals, val_pfs)
+            if not np.isnan(hp_rho):
+                wandb.run.summary[f"hpo/hp_importance/{hp_name}_rho"] = float(hp_rho)
+
+    # 5. Scatter plot
+    try:
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as plt
+
+        fig, ax = plt.subplots(figsize=(8, 6))
+        ax.scatter(mean_rewards, val_pfs, alpha=0.7, edgecolors="black", linewidth=0.5)
+        ax.set_xlabel("Mean Training Reward")
+        ax.set_ylabel("Validation Profit Factor")
+        ax.set_title(f"Reward vs PF (Spearman rho={rho:.3f}, p={p_value:.4f})")
+        ax.axhline(y=1.0, color="red", linestyle="--", alpha=0.5, label="PF=1.0 (breakeven)")
+        ax.legend()
+        fig.tight_layout()
+        wandb.log({"hpo/reward_vs_pf_scatter": wandb.Image(fig)})
+        plt.close(fig)
+    except Exception as e:
+        logger.warning(f"[HPO-Corr] Scatter plot failed: {e}")
+
+
 def _create_sampler(hpo_config: dict):
     """Create Optuna sampler from config. Supports 'tpe' (default) and 'random'."""
     sampler_type = hpo_config.get("sampler", "tpe").lower()
@@ -456,7 +543,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     logger.info(f"Starting HPO: {n_trials} trials, {steps_per_trial} steps each")
     wandb.log({"hpo/status": "started", "hpo/n_trials": n_trials})
 
+    trial_records = []  # Per-trial data for post-HPO correlation analysis
+
     def objective(trial):
+        _mean_train_reward = float('nan')  # Default; overwritten after trainer.train()
         trial_prefix = f"hpo/t{trial.number}"
         wandb.log({f"{trial_prefix}/started": True})
 
@@ -719,6 +809,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
 
             trainer.train(optuna_trial=trial, pruning_callback=pruning_callback)
 
+            # Capture mean training reward for reward-PF correlation analysis
+            if hasattr(trainer, 'episode_rewards') and len(trainer.episode_rewards) > 0:
+                _mean_train_reward = float(np.mean(trainer.episode_rewards))
+
             # V4.2: Multi-seed eval for robust PF measurement (3 seeds, median)
             pf_values = []
             tc_values = []
@@ -738,6 +832,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             if trade_count < min_trades:
                 wandb.log({f"{trial_prefix}/killed": "lazy_agent", f"{trial_prefix}/trades": trade_count})
                 logger.info(f"Trial {trial.number}: KILLED (only {trade_count} trades, min={min_trades})")
+                trial_records.append({"trial": trial.number, "mean_reward": _mean_train_reward,
+                                      "val_pf": -999.0, "trade_count": trade_count,
+                                      "status": "killed_lazy", "hps": dict(trial.params)})
                 return -999.0
 
             wandb.log({
@@ -747,17 +844,26 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             })
             logger.info(f"Trial {trial.number}: PF={profit_factor:.4f}, Trades={trade_count}")
 
+            trial_records.append({"trial": trial.number, "mean_reward": _mean_train_reward,
+                                  "val_pf": profit_factor, "trade_count": trade_count,
+                                  "status": "completed", "hps": dict(trial.params)})
             return profit_factor
 
         except optuna.TrialPruned:
             logger.info(f"Trial {trial.number} pruned.")
             wandb.log({f"{trial_prefix}/status": "pruned"})
+            trial_records.append({"trial": trial.number, "mean_reward": _mean_train_reward,
+                                  "val_pf": 0.0, "trade_count": 0,
+                                  "status": "pruned", "hps": dict(trial.params)})
             raise  # Re-raise original exception to preserve traceback
         except Exception as e:
             import traceback
             tb = traceback.format_exc()
             logger.error(f"Trial {trial.number} failed: {e}\n{tb}")
             wandb.log({f"{trial_prefix}/error": str(e), f"{trial_prefix}/traceback": tb})
+            trial_records.append({"trial": trial.number, "mean_reward": _mean_train_reward,
+                                  "val_pf": 0.0, "trade_count": 0,
+                                  "status": "error", "hps": dict(trial.params)})
             return 0.0
         finally:
             # FIX: AsyncVectorEnv pipes may already be dead → BrokenPipeError
@@ -795,6 +901,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         pruner=optuna.pruners.NopPruner()
     )
     study.optimize(objective, n_trials=n_trials)
+
+    # Post-HPO: Reward-PF rank correlation analysis
+    _analyze_hpo_correlation(trial_records, agent_type)
 
     # Log best results
     best = study.best_trial
