@@ -54,6 +54,8 @@ class PPOTrainer:
         self.device = device
         self.hpo_mode = hpo_mode
         self.run_name = run_name or time.strftime("%Y%m%d_%H%M%S")
+        self.episode_rewards = deque(maxlen=100)
+        self.episode_lengths = deque(maxlen=100)
 
         # Read action dims from config
         action_dims = config.get("env", {}).get("action", {}).get("discrete_dims", 6)
@@ -184,8 +186,8 @@ class PPOTrainer:
 
         global_step = start_step
         start_time = time.time()  # AUDIT FIX: Define start_time for SPS metrics
-        episode_rewards = deque(maxlen=100)
-        episode_lens = deque(maxlen=100)
+        self.episode_rewards = deque(maxlen=100)
+        self.episode_lengths = deque(maxlen=100)
         curr_rewards = np.zeros(num_envs)
         curr_lens = np.zeros(num_envs)
 
@@ -273,8 +275,8 @@ class PPOTrainer:
                         curr_rewards[i] += rewards[i]
                         curr_lens[i] += 1
                         if dones_for_reset[i]:
-                            episode_rewards.append(curr_rewards[i])
-                            episode_lens.append(curr_lens[i])
+                            self.episode_rewards.append(curr_rewards[i])
+                            self.episode_lengths.append(curr_lens[i])
                             curr_rewards[i] = 0
                             curr_lens[i] = 0
 
@@ -318,8 +320,8 @@ class PPOTrainer:
                         logs = {
                             "step": global_step,
                             "train/epoch": epoch + 1,
-                            "train/reward_mean": np.mean(episode_rewards) if len(episode_rewards) > 0 else 0.0,
-                            "train/len_mean": np.mean(episode_lens) if len(episode_lens) > 0 else 0.0,
+                            "train/reward_mean": np.mean(self.episode_rewards) if len(self.episode_rewards) > 0 else 0.0,
+                            "train/len_mean": np.mean(self.episode_lengths) if len(self.episode_lengths) > 0 else 0.0,
                             **{f"agent/{k}": v for k, v in metrics.items()},
                         }
 
