@@ -205,12 +205,15 @@ Skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Tri
 | **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. `python scripts/monitor_fleet.py` | `.agent/skills/monitor/SKILL.md` |
 | **Optimization** | SPS regression, low GPU util, new hardware, new training loop, perf tuning. Profile first (Phase 1). | `.agent/skills/optimization/SKILL.md` |
 | **Math** | Manual ("check math", "verify formulas") + auto after changes to env/agent/feature code that touch formulas. | `.agent/skills/math/SKILL.md` |
+| **Dashboard** | **Auto** after `/monitor`. Manual `/dashboard`. During `/sync`. | `.agent/skills/dashboard/SKILL.md` |
 
 **Chaining rules:**
 - Code change → **Audit** (mandatory) → if perf-relevant → **Optimization** → if math-relevant → **Math**
-- Deploy request → **Monitor** (check fleet) → **Deploy** → **Monitor** (verify)
+- `/monitor` → **Monitor** → **Dashboard** (auto-chain, sync Notion)
+- Deploy request → **Monitor** → **Deploy** → **Monitor** → **Dashboard**
 - Session start → **Memory** boot (core.md loaded automatically) → `memory_search` MCP or grep `randd_log.md` + `randd_archive/` for prior context
 - Experiment result → **Memory** update `core.md` → append `randd_log.md` → git commit
+- `/sync` → **Memory** → **Dashboard** → git commit
 
 ## Memory Protocol (2-Tier + Cloud)
 
