@@ -58,46 +58,47 @@ def parse_experiment_name(name: str) -> dict:
 
 
 def generate_run_name(
-    version: str = "V1",
-    platform: str = "GPUHub",
-    timestamp_format: str = "%Y%m%d_%H%M"
+    config_path: str,
+    timestamp_format: str = "%Y%m%d_%H%M%S"
 ) -> str:
     """
-    Generate a standardized WandB run name for DeepScalper experiments.
+    Generate a standardized WandB run name from the config filename.
 
     ╔═══════════════════════════════════════════════════════════════════════════╗
-    ║  CANONICAL FORMAT: DeepScalper_{Version}_{Platform}_{YYYYMMDD}_{HHMM}     ║
+    ║  CANONICAL FORMAT: {descriptive_id}_{YYYYMMDD}_{HHMMSS}                  ║
     ║                                                                           ║
-    ║  NO SUFFIXES ALLOWED! All metadata (Pilot, HPO, etc.) must go in WandB   ║
-    ║  tags, NOT in the run name. This ensures:                                ║
-    ║    1. Deterministic checkpoint paths                                      ║
-    ║    2. Easy querying via WandB dashboard filters                          ║
-    ║    3. Consistent naming across all scripts                               ║
+    ║  descriptive_id is derived from the config filename with underscores     ║
+    ║  replaced by hyphens. All metadata goes in WandB tags, NOT the name.    ║
     ╚═══════════════════════════════════════════════════════════════════════════╝
 
     Args:
-        version: Version tag (e.g., 'V1', 'V95', 'V10')
-        platform: Deployment platform (e.g., 'GPUHub', 'Blackwell', 'Local')
-        timestamp_format: strftime format for timestamp
+        config_path: Path to the YAML config file.
+        timestamp_format: strftime format for timestamp.
 
     Returns:
-        Formatted run name string (e.g., 'DeepScalper_V1_GPUHub_20260202_1415')
+        Formatted run name string.
 
-    Example:
-        >>> generate_run_name('V1', 'GPUHub')
-        'DeepScalper_V1_GPUHub_20260202_1415'
+    Examples:
+        >>> generate_run_name('configs/funding_arb_sac_5assets_hpo.yaml')
+        'funding-arb-sac-5assets-hpo_20260319_080300'
+        >>> generate_run_name('configs/phase_r21v2_bdq_gc_3min.yaml')
+        'phase-r21v2-bdq-gc-3min_20260319_080300'
+        >>> generate_run_name('configs/gmgp1_sac_gc_15min.yaml')
+        'gmgp1-sac-gc-15min_20260319_080300'
     """
+    import os
+    stem = os.path.splitext(os.path.basename(config_path))[0]
+    descriptive_id = stem.replace("_", "-")
     timestamp = datetime.datetime.now().strftime(timestamp_format)
-    return f"DeepScalper_{version}_{platform}_{timestamp}"
+    return f"{descriptive_id}_{timestamp}"
 
 
 def validate_run_name(run_name: str, raise_on_fail: bool = True) -> bool:
     """
     Validate that a run name follows the canonical format.
 
-    Canonical pattern: DeepScalper_{Version}_{Platform}_{YYYYMMDD}_{HHMM}
-
-    This function is used to catch naming violations at runtime.
+    Canonical pattern: {descriptive-id}_{YYYYMMDD}_{HHMMSS}
+    Also accepts legacy: DeepScalper_V{digits}_...
 
     Args:
         run_name: The run name to validate
@@ -109,17 +110,16 @@ def validate_run_name(run_name: str, raise_on_fail: bool = True) -> bool:
     Raises:
         ValueError: If run_name is invalid and raise_on_fail=True
     """
-    # Pattern: DeepScalper_V{digits}_{Platform}_{YYYYMMDD}_{HHMM}
-    # No trailing content after the timestamp (no suffixes)
-    # Pattern: Relaxed to prevent deployment blocking
-    pattern = r"^DeepScalper_V\d+.*$"
+    # New format: {descriptive-id}_{YYYYMMDD}_{HHMMSS}
+    # Legacy format: DeepScalper_V{digits}_...
+    pattern = r"^([a-z0-9-]+_\d{8}_\d{6}|DeepScalper_V\d+.*)$"
 
     is_valid = bool(re.match(pattern, run_name))
 
     if not is_valid and raise_on_fail:
         raise ValueError(
             f"Invalid run name: '{run_name}'. "
-            f"Expected format: 'DeepScalper_V{{version}}_{{Platform}}_{{YYYYMMDD}}_{{HHMM}}'. "
+            f"Expected format: '{{descriptive-id}}_{{YYYYMMDD}}_{{HHMMSS}}'. "
             f"Do NOT add suffixes - use WandB tags for metadata (Pilot, HPO, etc.)."
         )
 
@@ -137,8 +137,8 @@ def standardize_run_name(
     ║  DEPRECATED - DO NOT USE                                                  ║
     ║                                                                           ║
     ║  This function was causing naming convention violations by adding        ║
-    ║  suffixes to run names. Use generate_run_name() instead and pass any    ║
-    ║  descriptive metadata via WandB tags.                                    ║
+    ║  suffixes to run names. Use generate_run_name(config_path) instead.    ║
+    ║  Pass descriptive metadata via WandB tags.                              ║
     ║                                                                           ║
     ║  Deprecated: Feb 2, 2026                                                 ║
     ╚═══════════════════════════════════════════════════════════════════════════╝
@@ -151,5 +151,5 @@ def standardize_run_name(
         stacklevel=2
     )
     # Always return canonical format - ignore user input
-    return generate_run_name(version=version, platform=platform, timestamp_format=timestamp_format)
+    return generate_run_name(config_path="legacy", timestamp_format=timestamp_format)
 

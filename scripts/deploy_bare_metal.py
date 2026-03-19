@@ -104,11 +104,10 @@ def deploy(args):
     password = inst["password"]
     print(f"Target instance: {inst['name']} ({host}:{port})"
           + (f" | GPUs: {inst['gpus']}" if inst['gpus'] else ""))
-    # CANONICAL NAMING: DeepScalper_V1_{Platform}_{YYYYMMDD}_{HHMM}
-    # Suffixes/metadata go in tags, not run name
+    # CANONICAL NAMING: {descriptive-id}_{YYYYMMDD}_{HHMMSS}
+    # Descriptive ID derived from config filename
     from finrl_pro_ds.utils.naming import generate_run_name
-    version = args.version if args.version else "V1"
-    full_run_name = generate_run_name(version=version, platform="GPUHub")
+    full_run_name = generate_run_name(args.config)
 
     # If user provided a custom name, add it as a tag instead
     extra_tags = []
