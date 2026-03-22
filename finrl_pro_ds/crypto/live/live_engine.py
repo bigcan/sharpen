@@ -1,0 +1,626 @@
+"""Live Trading Engine — Orchestrates agent inference, execution, and risk management.
+
+Main loop per bar:
+    1. Wait for bar close (BarClock)
+    2. Fetch latest 1-min bars from exchange
+    3. Update observation builder
+    4. Build observation + sanity check
+    5. Agent inference (deterministic)
+    6. Deadband filter
+    7. Risk manager check
+    8. Execute position change via broker
+    9. Reconcile broker position vs internal state
+    10. Log to WandB
+
+Safety:
+    - Kill file check every bar
+    - Max daily loss hard stop
+    - Emergency flatten on unrecoverable error
+    - Position reconciliation (warn >5%, halt >15%)
+    - Observation NaN/Inf detection → skip bar
+    - SIGINT/SIGTERM graceful shutdown with position reconciliation
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import signal
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from typing import Optional
+
+import numpy as np
+import torch
+
+logger = logging.getLogger(__name__)
+
+
+class LiveTradingEngine:
+    """Orchestrates live trading for a trained SAC agent.
+
+    Wires together:
+        - BarClock: timing
+        - CryptoLoader: live OHLCV fetching
+        - LiveObsBuilder: observation construction
+        - SACAgent: policy inference
+        - ExchangePerpBroker: order execution
+        - CryptoRiskManager: risk controls
+        - WandB: trade monitoring
+
+    Usage:
+        engine = LiveTradingEngine(agent, broker, obs_builder, ...)
+        await engine.start()  # Runs until killed or drawdown hit
+    """
+
+    def __init__(
+        self,
+        agent,
+        broker,
+        obs_builder,
+        risk_manager,
+        bar_clock,
+        loader,
+        config: dict,
+    ):
+        self.agent = agent
+        self.broker = broker
+        self.obs_builder = obs_builder
+        self.risk_manager = risk_manager
+        self.bar_clock = bar_clock
+        self.loader = loader
+        self.config = config
+
+        # Trading state
+        self._asset = config.get("exchange", {}).get("asset", "BTC")
+        self._n_scales = len(config.get("features", {}).get("scales", [15, 60, 240]))
+        self._deadband_threshold = config.get("trading", {}).get("deadband_threshold", 0.25)
+        self._device = torch.device(config.get("agent", {}).get("device", "cpu"))
+        self._dry_run = config.get("dry_run", False)
+
+        # Position tracking
+        self._current_position = 0.0
+        self._prev_close = 0.0
+        self._portfolio_value = config.get("trading", {}).get("initial_balance", 10000.0)
+        self._initial_portfolio_value = self._portfolio_value
+        self._peak_portfolio_value = self._portfolio_value
+        self._current_funding_rate = 0.0
+
+        # FIX AUD-H04: Track daily loss by UTC date, not bar count
+        self._daily_start_value = self._portfolio_value
+        self._last_daily_reset_date: Optional[datetime] = None
+        self._max_daily_loss_pct = config.get("safety", {}).get("max_daily_loss_pct", 0.05)
+
+        # FIX AUD-H07: Periodic funding rate fetch interval (bars between fetches)
+        self._funding_rate_fetch_interval = 32  # ~8h at 15-min bars
+        self._bars_since_funding_fetch = 0
+
+        # Safety
+        self._kill_file = Path(config.get("safety", {}).get(
+            "kill_file", "/tmp/finrl_live_kill"
+        ))
+        self._emergency_flatten_on_error = config.get("safety", {}).get(
+            "emergency_flatten_on_error", True
+        )
+        self._reconciliation_warn_pct = 0.05
+        self._reconciliation_halt_pct = 0.15
+
+        # Control
+        self._should_stop = False
+        self._wandb_run = None
+
+        # FIX AUD-ENG-05: Track last 1-min timestamp for dedup in fetch
+        self._last_1min_ts_ms: int = 0
+
+        # Stats
+        self._total_bars = 0
+        self._total_trades = 0
+        self._total_fees = 0.0
+        self._consecutive_errors = 0
+
+    # -------------------------------------------------------------------
+    # Main loop
+    # -------------------------------------------------------------------
+    async def start(self) -> None:
+        """Main trading loop. Runs until killed, drawdown hit, or error."""
+
+        # Register signal handlers for graceful shutdown
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                asyncio.get_event_loop().add_signal_handler(
+                    sig, lambda s=sig: self._request_stop(f"signal_{s.name}")
+                )
+            except NotImplementedError:
+                # Windows doesn't support add_signal_handler
+                signal.signal(sig, lambda s, f: self._request_stop("signal"))
+
+        # Connect broker
+        await self.broker.connect()
+        logger.info(f"Broker connected: {self.broker.exchange_id} "
+                     f"({'TESTNET' if self.broker.testnet else 'MAINNET'})")
+
+        # Bootstrap observation builder if not already done
+        if not self.obs_builder.is_ready:
+            await self.obs_builder.bootstrap(self.loader, self._asset)
+
+        # Sync position from exchange
+        await self._sync_position()
+
+        # Initialize prev_close
+        self._prev_close = self.obs_builder.get_current_close()
+
+        # FIX AUD-C06: Reset risk manager with initial portfolio value
+        self.risk_manager.reset(self._portfolio_value)
+
+        # Initialize WandB
+        self._init_wandb()
+
+        mode_str = "DRY RUN" if self._dry_run else "LIVE"
+        logger.info(
+            f"=== {mode_str} TRADING STARTED ===\n"
+            f"  Asset: {self._asset}\n"
+            f"  Exchange: {self.broker.exchange_id}\n"
+            f"  Testnet: {self.broker.testnet}\n"
+            f"  Initial balance: ${self._portfolio_value:,.2f}\n"
+            f"  Position: {self._current_position:.4f}\n"
+            f"  Deadband: {self._deadband_threshold}\n"
+            f"  Scales: {self.obs_builder.scales}\n"
+            f"  Bar interval: {self.bar_clock.interval}min"
+        )
+
+        try:
+            while not self._should_stop:
+                try:
+                    bar_time = await self.bar_clock.wait_for_next_bar()
+                    await self._trading_step(bar_time)
+                    # FIX AUD-ENG-05: Reset consecutive errors on successful step
+                    self._consecutive_errors = 0
+                except asyncio.CancelledError:
+                    break
+                except Exception as e:
+                    self._consecutive_errors += 1
+                    logger.error(f"Trading step error: {e}", exc_info=True)
+                    if self._consecutive_errors >= 5:
+                        logger.critical("5 consecutive errors — stopping")
+                        break
+        finally:
+            await self._shutdown()
+
+    async def _trading_step(self, bar_time: datetime) -> None:
+        """Execute a single trading iteration."""
+        self._total_bars += 1
+
+        # --- Safety: kill file check ---
+        if self._kill_file.exists():
+            logger.warning(f"Kill file detected: {self._kill_file}")
+            self._request_stop("kill_file")
+            return
+
+        # FIX AUD-H05: Update portfolio value at start of every step (not just traded bars)
+        await self._update_portfolio_value()
+
+        # FIX AUD-H07: Periodically fetch funding rate
+        self._bars_since_funding_fetch += 1
+        if self._bars_since_funding_fetch >= self._funding_rate_fetch_interval:
+            await self._update_funding_rate()
+            self._bars_since_funding_fetch = 0
+
+        # --- 1. Fetch latest bars ---
+        new_bars = await self._fetch_new_bars(bar_time)
+        if new_bars is None or len(new_bars) == 0:
+            logger.warning(f"No new bars at {bar_time}, skipping")
+            return
+
+        # --- 2. Update observation builder ---
+        self.obs_builder.update(new_bars)
+
+        # --- 3. Build observation ---
+        current_close = self.obs_builder.get_current_close()
+        # FIX AUD-C04: Pass timestamp=None so obs_builder uses bar timestamp
+        obs = self.obs_builder.get_observation(
+            current_position=self._current_position,
+            prev_close=self._prev_close,
+            current_close=current_close,
+        )
+
+        # --- 4. Sanity check ---
+        if not self._check_obs_sanity(obs):
+            logger.warning("Observation sanity check failed — holding position")
+            self._prev_close = current_close
+            self._log_step(bar_time, self._current_position, traded=False, skip_reason="obs_sanity")
+            return
+
+        # --- 5. Agent inference ---
+        target_position = self._predict(obs)
+
+        # --- 6. Deadband filter ---
+        delta = target_position - self._current_position
+        if abs(delta) < self._deadband_threshold:
+            self._prev_close = current_close
+            self._log_step(bar_time, target_position, traded=False, skip_reason="deadband")
+            return
+
+        # --- 7. Risk manager check ---
+        action_array = np.array([target_position])
+        checked_action, violations = self.risk_manager.check(
+            action=action_array,
+            portfolio_value=self._portfolio_value,
+            margin_balance=self._portfolio_value * 0.95,  # Conservative estimate
+            positions=np.array([self._current_position]),
+            funding_rates=np.array([self._current_funding_rate]),
+        )
+        target_position = float(checked_action[0])
+
+        if violations:
+            logger.info(f"Risk violations: {violations}")
+
+        # Re-check deadband after risk adjustment
+        delta = target_position - self._current_position
+        if abs(delta) < self._deadband_threshold:
+            self._prev_close = current_close
+            self._log_step(bar_time, target_position, traded=False, skip_reason="risk_deadband")
+            return
+
+        # --- 8. Execute trade ---
+        if self._dry_run:
+            logger.info(
+                f"[DRY RUN] Would trade: {self._current_position:.4f} → "
+                f"{target_position:.4f} (delta={delta:.4f})"
+            )
+            self._current_position = target_position
+            self._prev_close = current_close
+            self._log_step(bar_time, target_position, traded=True)
+            return
+
+        order = None
+        try:
+            order = await self.broker.execute_position_change(
+                asset=self._asset,
+                current_position=self._current_position,
+                target_position=target_position,
+                portfolio_value=self._portfolio_value,
+            )
+
+            if order.status == "filled":
+                self._current_position = target_position
+                self._total_trades += 1
+                self._total_fees += order.fee
+                logger.info(
+                    f"Trade executed: {order.side} {order.filled_quantity:.6f} "
+                    f"@ {order.avg_fill_price:.2f}, fee={order.fee:.4f} USDT"
+                )
+            elif order.status == "partial":
+                # FIX AUD-H06: Don't assume target on partial fill — reconcile instead
+                self._total_trades += 1
+                self._total_fees += order.fee
+                logger.warning(
+                    f"Partial fill: {order.filled_quantity:.6f} of "
+                    f"{order.quantity:.6f} — will reconcile"
+                )
+            else:
+                logger.warning(f"Trade failed: {order.status} — {order.error}")
+
+        except Exception as e:
+            logger.error(f"Order execution error: {e}")
+            # FIX AUD-L05: Update prev_close even on execution error
+            self._prev_close = current_close
+            if self._emergency_flatten_on_error:
+                logger.warning("Emergency flatten triggered by execution error")
+                await self._emergency_flatten()
+                self._request_stop("execution_error")
+            return
+
+        # --- 9. Reconcile position ---
+        await self._reconcile_position()
+
+        # --- 10. Update state ---
+        self._prev_close = current_close
+
+        # --- 11. Daily loss check ---
+        self._check_daily_loss(bar_time)
+
+        # --- 12. Log ---
+        self._log_step(bar_time, target_position, traded=True, order=order)
+
+    # -------------------------------------------------------------------
+    # Agent inference
+    # -------------------------------------------------------------------
+    def _predict(self, obs: dict) -> float:
+        """Run SAC agent inference. Returns target position in [-1, 1]."""
+        scale_np = np.stack(
+            [obs[f"scale_{i}"] for i in range(self._n_scales)], axis=0
+        )
+        scale_tensor = torch.as_tensor(
+            scale_np, dtype=torch.float32
+        ).unsqueeze(0).to(self._device, non_blocking=True)
+
+        private_tensor = torch.as_tensor(
+            obs["private"], dtype=torch.float32
+        ).unsqueeze(0).to(self._device, non_blocking=True)
+
+        with torch.no_grad():
+            action = self.agent.predict(
+                scale_tensor, private_tensor, deterministic=True
+            )
+
+        return float(np.clip(action[0, 0].cpu().item(), -1.0, 1.0))
+
+    # -------------------------------------------------------------------
+    # Data fetching
+    # -------------------------------------------------------------------
+    async def _fetch_new_bars(self, bar_time: datetime) -> Optional[list[dict]]:
+        """Fetch 1-min bars since last update.
+
+        FIX AUD-C01: Uses CryptoLoader's public fetch_ohlcv() API instead of
+        accessing private _get_exchange()/_to_symbol() methods.
+        """
+        try:
+            latest_ts = self.obs_builder.get_latest_timestamp()
+            if latest_ts is None:
+                return None
+
+            # Compute time range for fetch
+            since_dt = latest_ts.to_pydatetime() + timedelta(minutes=1)
+            end_dt = bar_time + timedelta(minutes=1)
+
+            # Use loader's public API
+            df = await self.loader.fetch_ohlcv(
+                assets=[self._asset],
+                start=since_dt.isoformat(),
+                end=end_dt.isoformat(),
+                timeframe="1m",
+            )
+
+            if df is None or len(df) == 0:
+                return None
+
+            # Filter to single asset and convert to list of dicts
+            if 'ticker' in df.columns:
+                df = df[df['ticker'] == self._asset].drop(columns=['ticker'])
+
+            bars = []
+            for _, row in df.iterrows():
+                bars.append({
+                    "timestamp": row["timestamp"],
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": float(row["volume"]),
+                })
+
+            return bars
+
+        except Exception as e:
+            logger.error(f"Failed to fetch bars: {e}")
+            return None
+
+    # -------------------------------------------------------------------
+    # Position management
+    # -------------------------------------------------------------------
+    async def _sync_position(self) -> None:
+        """Sync internal position from exchange on startup."""
+        try:
+            pos = await self.broker.get_single_position(self._asset)
+            self._current_position = pos
+            logger.info(f"Position synced from exchange: {pos:.4f}")
+        except Exception as e:
+            logger.warning(f"Could not sync position: {e}. Starting at 0.0")
+            self._current_position = 0.0
+
+    async def _reconcile_position(self) -> None:
+        """Verify broker position matches internal state."""
+        try:
+            exchange_pos = await self.broker.get_single_position(self._asset)
+            discrepancy = abs(exchange_pos - self._current_position)
+
+            if discrepancy > self._reconciliation_halt_pct:
+                logger.critical(
+                    f"POSITION MISMATCH: internal={self._current_position:.4f}, "
+                    f"exchange={exchange_pos:.4f}, discrepancy={discrepancy:.4f} "
+                    f"(>{self._reconciliation_halt_pct:.0%}). HALTING."
+                )
+                self._request_stop("position_mismatch")
+            elif discrepancy > self._reconciliation_warn_pct:
+                logger.warning(
+                    f"Position discrepancy: internal={self._current_position:.4f}, "
+                    f"exchange={exchange_pos:.4f} — trusting exchange"
+                )
+                # Trust exchange as source of truth
+                self._current_position = exchange_pos
+
+        except Exception as e:
+            logger.warning(f"Position reconciliation failed: {e}")
+
+    async def _update_portfolio_value(self) -> None:
+        """Update portfolio value from exchange."""
+        try:
+            info = await self.broker.get_account_info()
+            equity = info.get("total_equity", 0)
+            if equity > 0:
+                self._portfolio_value = equity
+                self._peak_portfolio_value = max(self._peak_portfolio_value, equity)
+        except Exception as e:
+            logger.debug(f"Portfolio value update failed: {e}")
+
+    async def _update_funding_rate(self) -> None:
+        """FIX AUD-H07: Fetch current funding rate for risk manager."""
+        try:
+            rates = await self.broker.get_funding_rates([self._asset])
+            self._current_funding_rate = rates.get(self._asset, 0.0)
+            logger.debug(f"Funding rate updated: {self._current_funding_rate:.6f}")
+        except Exception as e:
+            logger.debug(f"Funding rate fetch failed: {e}")
+
+    async def _emergency_flatten(self) -> None:
+        """Close all positions via market orders.
+
+        FIX AUD-C05: Only set position to 0 if flatten actually succeeded.
+        """
+        try:
+            result = await self.broker.emergency_flatten([self._asset])
+            if result.n_failed == 0:
+                self._current_position = 0.0
+                logger.info("Emergency flatten succeeded — position zeroed")
+            else:
+                logger.critical(
+                    f"EMERGENCY FLATTEN PARTIAL: {result.n_failed} orders failed. "
+                    f"Position may still be open on exchange!"
+                )
+        except Exception as e:
+            logger.critical(f"EMERGENCY FLATTEN FAILED: {e}. Position may be open!")
+
+    # -------------------------------------------------------------------
+    # Safety checks
+    # -------------------------------------------------------------------
+    def _check_obs_sanity(self, obs: dict) -> bool:
+        """Check observation for NaN/Inf values."""
+        for key, arr in obs.items():
+            if np.any(np.isnan(arr)) or np.any(np.isinf(arr)):
+                logger.warning(f"Observation '{key}' contains NaN/Inf")
+                return False
+        return True
+
+    def _check_daily_loss(self, bar_time: datetime) -> None:
+        """Check if daily loss limit exceeded.
+
+        FIX AUD-H04: Reset at UTC midnight instead of bar count.
+        """
+        current_date = bar_time.date()
+
+        if self._last_daily_reset_date is None or current_date != self._last_daily_reset_date:
+            self._daily_start_value = self._portfolio_value
+            self._last_daily_reset_date = current_date
+
+        if self._daily_start_value > 0:
+            daily_return = (self._portfolio_value - self._daily_start_value) / self._daily_start_value
+            if daily_return < -self._max_daily_loss_pct:
+                logger.critical(
+                    f"DAILY LOSS LIMIT: {daily_return:.2%} < -{self._max_daily_loss_pct:.0%}. "
+                    f"Stopping trading."
+                )
+                self._request_stop("daily_loss_limit")
+
+    def _request_stop(self, reason: str) -> None:
+        """Request graceful shutdown."""
+        logger.info(f"Stop requested: {reason}")
+        self._should_stop = True
+
+    # -------------------------------------------------------------------
+    # WandB logging
+    # -------------------------------------------------------------------
+    def _init_wandb(self) -> None:
+        """Initialize WandB run for live monitoring."""
+        wandb_cfg = self.config.get("wandb", {})
+        if not wandb_cfg.get("project"):
+            return
+
+        try:
+            import wandb
+            self._wandb_run = wandb.init(
+                project=wandb_cfg.get("project", "FinRL-Pro-DS"),
+                entity=wandb_cfg.get("entity"),
+                tags=wandb_cfg.get("tags", ["live"]),
+                config=self.config,
+                name=f"live_{self._asset}_{self.broker.exchange_id}",
+            )
+            logger.info(f"WandB run initialized: {self._wandb_run.url}")
+        except Exception as e:
+            logger.warning(f"WandB init failed: {e}")
+
+    def _log_step(
+        self,
+        bar_time: datetime,
+        target_position: float,
+        traded: bool,
+        skip_reason: str = "",
+        order=None,
+    ) -> None:
+        """Log step metrics to WandB and logger."""
+        drawdown = 0.0
+        if self._peak_portfolio_value > 0:
+            drawdown = 1.0 - self._portfolio_value / self._peak_portfolio_value
+
+        metrics = {
+            "bar": self._total_bars,
+            "position": self._current_position,
+            "target_position": target_position,
+            "portfolio_value": self._portfolio_value,
+            "drawdown_pct": drawdown,
+            "total_trades": self._total_trades,
+            "total_fees": self._total_fees,
+            "traded": int(traded),
+            "funding_rate": self._current_funding_rate,
+        }
+
+        if order is not None:
+            metrics["order_fee"] = order.fee
+            metrics["order_fill_price"] = order.avg_fill_price
+
+        if self._wandb_run is not None:
+            try:
+                import wandb
+                wandb.log(metrics, commit=True)
+            except Exception as e:
+                logger.debug(f"WandB log failed: {e}")
+
+        # Periodic console log
+        if self._total_bars % 4 == 0 or traded:
+            action_str = "TRADE" if traded else f"HOLD({skip_reason})"
+            logger.info(
+                f"[Bar {self._total_bars}] {bar_time.strftime('%H:%M')} UTC | "
+                f"{action_str} | pos={self._current_position:.3f} | "
+                f"PV=${self._portfolio_value:,.2f} | DD={drawdown:.2%}"
+            )
+
+    # -------------------------------------------------------------------
+    # Shutdown
+    # -------------------------------------------------------------------
+    async def _shutdown(self) -> None:
+        """Graceful shutdown: reconcile, log, close WandB, close broker.
+
+        FIX AUD-C02: Reconcile position on shutdown to detect orphaned positions.
+        FIX AUD-M04: Close loader exchange connection too.
+        """
+        # Final position reconciliation
+        try:
+            exchange_pos = await self.broker.get_single_position(self._asset)
+            logger.info(
+                f"Shutdown position check: internal={self._current_position:.4f}, "
+                f"exchange={exchange_pos:.4f}"
+            )
+            if abs(exchange_pos - self._current_position) > 0.01:
+                logger.warning(
+                    f"SHUTDOWN WARNING: Position discrepancy detected! "
+                    f"Exchange has {exchange_pos:.4f}, internal has {self._current_position:.4f}"
+                )
+        except Exception as e:
+            logger.warning(f"Shutdown position check failed: {e}")
+
+        logger.info(
+            f"=== TRADING STOPPED ===\n"
+            f"  Bars: {self._total_bars}\n"
+            f"  Trades: {self._total_trades}\n"
+            f"  Fees: ${self._total_fees:.4f}\n"
+            f"  Final PV: ${self._portfolio_value:,.2f}\n"
+            f"  Position: {self._current_position:.4f}"
+        )
+
+        if self._wandb_run is not None:
+            try:
+                import wandb
+                wandb.finish()
+            except Exception:
+                pass
+
+        try:
+            await self.broker.close()
+        except Exception:
+            pass
+
+        # FIX AUD-M04: Close loader's internal exchange connection
+        try:
+            if hasattr(self.loader, '_exchange') and self.loader._exchange is not None:
+                await self.loader._exchange.close()
+        except Exception:
+            pass

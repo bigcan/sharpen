@@ -13,6 +13,7 @@ __all__ = [
     "features",
     "eval",
     "execution",
+    "live",
     "mlops",
     "analytics",
 ]

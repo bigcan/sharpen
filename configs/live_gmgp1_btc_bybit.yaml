@@ -1,0 +1,88 @@
+# Live Trading Config — GMGP1 SAC on BTC/USDT via Bybit
+#
+# Usage:
+#   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml
+#   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml --mainnet
+#   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml --dry-run
+
+# --- Exchange ---
+exchange:
+  name: "bybit"                    # "bybit" | "binance" | "okx"
+  testnet: true                     # Overridden by --mainnet CLI flag
+  asset: "BTC"
+  leverage: 1
+  order_type: "limit"
+  limit_offset_pct: 0.0005         # Cross spread for immediate fill
+  market_fallback_timeout: 60.0     # Seconds before limit → market fallback
+  data_exchange: "binance"          # Exchange for data fetching (higher limits)
+
+# --- Agent ---
+agent:
+  checkpoint_path: "checkpoints/gmgp1_sac_v4/checkpoint_final.pth"
+  device: "cuda"                    # "cuda" | "cpu"
+  torch_compile: false              # Must be false for live inference
+
+# --- SAC Hyperparameters (must match training checkpoint) ---
+agents:
+  sac:
+    lr_actor: 3.0e-4
+    lr_critic: 3.0e-4
+    lr_alpha: 3.0e-4
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 256
+    buffer_size: 1000000
+    initial_alpha: 0.2
+
+# --- Network (must match training checkpoint exactly) ---
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# --- Features (must match training config) ---
+features:
+  scales: [15, 60, 240]            # Timescales in minutes
+  window_size: 30
+  features_per_scale: 8
+  norm_span: 120
+  bootstrap_bars: 30000            # 1-min bars for EMA warmup (~20.8 days)
+
+# --- Bar Clock ---
+bar_clock:
+  base_interval_minutes: 15        # Trade every 15 minutes
+  execution_delay_seconds: 5.0     # Wait after bar close for candle finalization
+  max_late_seconds: 30.0           # Skip bar if more than 30s late
+
+# --- Trading ---
+trading:
+  initial_balance: 10000.0         # Portfolio value for position sizing
+  deadband_threshold: 0.25         # Ignore position changes < 25%
+  taker_fee: 0.00055               # Bybit futures taker fee
+
+# --- Risk Management (ENABLED for live) ---
+risk:
+  enabled: true
+  max_drawdown_pct: 0.10           # 10% max drawdown (tighter than training 30%)
+  circuit_breaker_cooldown_bars: 12 # 3 hours at 15-min bars
+  max_position_pct: 1.0            # Single asset = 100% allowed
+  funding_rate_alert: 0.001        # Alert if |rate| > 0.1% per 8h
+  min_margin_reserve_pct: 0.10     # Keep 10% margin reserve
+
+# --- WandB Monitoring ---
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  tags: ["live", "gmgp1", "BTC", "SAC", "15min", "bybit"]
+
+# --- Safety ---
+safety:
+  require_explicit_mainnet: true    # Must pass --mainnet for live
+  max_daily_loss_pct: 0.05          # 5% daily loss → hard stop
+  kill_file: "/tmp/finrl_live_kill" # Touch this file to stop trading
+  emergency_flatten_on_error: true  # Flatten all on unrecoverable error
