@@ -916,8 +916,8 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
 
     # V4.2: Explicit routing for ALL HPO params to prevent silent mis-routing.
     if agent_type == "sac":
-        reward_params = set()
-        agent_params = {"lr_actor", "lr_critic", "tau", "initial_alpha"}
+        reward_params = {"dsr_eta"}
+        agent_params = {"lr_actor", "lr_critic", "lr_alpha", "tau", "initial_alpha", "gamma"}
         # deadband routes to env, not agent
         env_params = {"deadband_threshold"}
     elif agent_type == "ppo":
