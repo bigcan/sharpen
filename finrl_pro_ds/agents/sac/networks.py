@@ -129,6 +129,7 @@ class SACActorNetwork(nn.Module):
     """Gaussian policy with tanh squashing for SAC.
 
     Output: tanh-squashed action in [-1, 1] with log_prob correction.
+    Supports multi-dimensional actions via action_dim parameter.
     """
 
     def __init__(
@@ -137,16 +138,18 @@ class SACActorNetwork(nn.Module):
         private_dim: int = 5,
         fusion_dim: int = 256,
         n_scales: int = 3,
+        action_dim: int = 1,
     ):
         super().__init__()
+        self.action_dim = action_dim
         self.encoder = MultiScaleEncoder(scale_encoder_config, private_dim, fusion_dim, n_scales)
 
         self.head = nn.Sequential(
             nn.Linear(fusion_dim, fusion_dim),
             nn.ReLU(),
         )
-        self.mu_layer = nn.Linear(fusion_dim, 1)
-        self.log_sigma_layer = nn.Linear(fusion_dim, 1)
+        self.mu_layer = nn.Linear(fusion_dim, action_dim)
+        self.log_sigma_layer = nn.Linear(fusion_dim, action_dim)
 
         self._init_weights()
 
@@ -182,8 +185,8 @@ class SACActorNetwork(nn.Module):
         """Sample action with log_prob (tanh correction applied).
 
         Returns:
-            action: (B, 1) in [-1, 1]
-            log_prob: (B, 1)
+            action: (B, action_dim) in [-1, 1]
+            log_prob: (B, 1) — summed over action dims for multi-dim actions
         """
         mu, log_sigma = self.forward(scale_stack, private)
         sigma = log_sigma.exp()
@@ -200,6 +203,10 @@ class SACActorNetwork(nn.Module):
         # Log prob with tanh correction: log_prob - log(1 - tanh(z)^2)
         # FIX R4-AUD-12: Use clamp instead of addition for BF16 numerical safety.
         log_prob = dist.log_prob(z) - torch.log(torch.clamp(1 - action.pow(2), min=1e-6))
+
+        # Sum over action dims for multi-dimensional actions → (B, 1) scalar per sample
+        if self.action_dim > 1:
+            log_prob = log_prob.sum(dim=-1, keepdim=True)
 
         return action, log_prob
 

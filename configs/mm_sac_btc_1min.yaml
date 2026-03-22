@@ -1,0 +1,98 @@
+# Market Making: SAC + Multi-Scale OHLCV + 3D Action — BTC/USDT 1-min
+# Stage 4 — Phase 1: Level 1 (price-cross) fills, OHLCV features
+# GPU: RTX 5090 — BF16, batch 512, buffer 500K, num_envs 20
+
+data:
+  file_path: "data/processed/btc_usdt_mm_1min.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "mm"
+  train_start_date: "2025-03-01"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+  norm_cutoff_date: "2025-09-01"
+
+features:
+  scales: [1, 15]                   # 1-min base (fills), 15-min macro (trend)
+  window_size: 30
+  features_per_scale: 8             # TC-OPT: 8 aligns Conv1d for Tensor Cores
+  asset_class: "crypto"
+
+env:
+  mdp_version: "v8"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  maker_fee: 0.0                    # Start zero (fee curriculum)
+  base_spread_bps: 3.0              # Typical BTC/USDT spread
+  spread_min_mult: 0.5
+  spread_max_mult: 3.0
+  max_skew_bps: 5.0
+  max_order_size: 0.5               # Max order size fraction
+  max_inventory: 0.5
+  inventory_hard_stop: 0.8
+  min_rest_bars: 1
+  deadband_threshold: 0.1
+  episode_length: 1000              # 1000 × 1min ≈ 16.7 hours
+  random_start: true
+  max_drawdown_pct: 0.10            # Tighter than directional
+  fill_model: "price_cross"         # Level 1: deterministic price-cross
+  adverse_slippage_bps: 0.5
+  adverse_velocity_threshold: 0.001
+  queue_depth_multiplier: 5.0
+  scales: [1, 15]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+    phi: 0.1                        # Inventory aversion (A-S γ term)
+  fee_schedule:
+    - {step: 0, maker_fee: 0.0}
+    - {step: 500000, maker_fee: 0.0, ramp_to: 0.0001, ramp_end_step: 1500000}
+    - {step: 1500000, maker_fee: 0.0001}  # 1 bp Binance maker
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 12                   # MM private state: 12 dims
+  fusion_dim: 256
+  window_size: 30
+  n_scales: 2                       # 1-min + 15-min
+  action_dim: 3                     # spread_offset, inventory_skew, quote_intensity
+
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 10000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  n_trials: 50
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["mm", "sac", "btc", "1min", "market-making", "stage4", "price-cross", "avellaneda-stoikov"]

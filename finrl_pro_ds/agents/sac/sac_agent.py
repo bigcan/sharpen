@@ -89,10 +89,13 @@ class SACAgent:
         self._features_per_scale = features_per_scale
         self._n_scales = network_config.get("n_scales", 3)
 
+        # Action dimension — configurable for multi-dim actions (e.g., MM 3D)
+        self._action_dim = network_config.get("action_dim", 1)
+
         # Build networks
-        self.actor = SACActorNetwork(scale_cfg, private_dim, fusion_dim, self._n_scales).to(self.device)
-        self.critic1 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, n_scales=self._n_scales).to(self.device)
-        self.critic2 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, n_scales=self._n_scales).to(self.device)
+        self.actor = SACActorNetwork(scale_cfg, private_dim, fusion_dim, self._n_scales, action_dim=self._action_dim).to(self.device)
+        self.critic1 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales).to(self.device)
+        self.critic2 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales).to(self.device)
 
         # Target critics (Polyak-averaged)
         self.target_critic1 = copy.deepcopy(self.critic1).to(self.device)
@@ -108,7 +111,7 @@ class SACAgent:
         self.log_alpha = nn.Parameter(
             torch.log(torch.tensor(initial_alpha, dtype=torch.float32, device=self.device))
         )
-        self.target_entropy = -1.0  # -dim(action_space)
+        self.target_entropy = -float(self._action_dim)  # -dim(action_space)
 
         # Optimizers — OPT-09: fused=True uses single CUDA kernel for param update
         _fused = self.device.type == "cuda"
@@ -128,7 +131,7 @@ class SACAgent:
             micro_shape=(window_size, features_per_scale),
             macro_shape=(macro_flat_dim,),
             private_shape=(private_dim,),
-            action_shape=(1,),
+            action_shape=(self._action_dim,),
             action_dtype=np.float32,
         )
 

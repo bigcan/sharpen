@@ -86,6 +86,20 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     # V6 swing MDP: binary direction-switching (Phase K)
     # V7 continuous swing MDP: SAC position control (GMGP1)
     mdp_version = env_config.get("mdp_version", "v5")
+    if mdp_version == "v8":
+        from finrl_pro_ds.envs.market_making_env import MarketMakingEnv
+        from finrl_pro_ds.data.mm_data_handler import MMDataHandler
+        features_cfg = config.get("features", {})
+        mm_handler = MMDataHandler(
+            file_path=file_path,
+            ticker=ticker,
+            feature_config=features_cfg,
+            start_date=sd,
+            end_date=ed,
+            norm_cutoff_date=norm_cutoff_date,
+        )
+        return MarketMakingEnv(config=env_config, data_handler=mm_handler)
+
     if mdp_version == "v7":
         from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
         from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
@@ -768,8 +782,13 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             fee_schedule = eval_config.get("env", {}).get("fee_schedule")
             if fee_schedule:
                 final_tier = fee_schedule[-1]
-                final_fee = final_tier.get("ramp_to", final_tier.get("taker_fee", 0.0))
-                eval_config["env"]["taker_fee"] = final_fee
+                mdp_ver_fee = eval_config.get("env", {}).get("mdp_version", "v5")
+                if mdp_ver_fee == "v8":
+                    final_fee = final_tier.get("ramp_to", final_tier.get("maker_fee", 0.0))
+                    eval_config["env"]["maker_fee"] = final_fee
+                else:
+                    final_fee = final_tier.get("ramp_to", final_tier.get("taker_fee", 0.0))
+                    eval_config["env"]["taker_fee"] = final_fee
                 logger.info(f"[AUD-S129-01] HPO eval fee overridden from fee_schedule: {final_fee:.6f}")
             eval_env = create_vector_env(
                 eval_config, num_envs=1, gym_shm=False, use_sync=True,
@@ -783,7 +802,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             # FIX R7-AUD-03: Compute bar_minutes for correct Sharpe annualization
             mdp_ver = config.get("env", {}).get("mdp_version", "v5")
             hpo_scales = config.get("features", {}).get("scales", [])
-            if mdp_ver == "v7" and hpo_scales:
+            if mdp_ver in ("v7", "v8") and hpo_scales:
                 hpo_bar_minutes = min(hpo_scales)
             elif "15min" in config.get("data", {}).get("file_path", ""):
                 hpo_bar_minutes = 15
@@ -1273,7 +1292,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             done = terminated or truncated
 
             portfolio_values.append(info.get("portfolio_value", 100000))
-            positions.append(info.get("position", 0))
+            positions.append(info.get("position", info.get("inventory", 0)))
             # FIX GMO1-01: Update direction for next step's fee_threshold context
             dir_val = info.get("direction")
             if dir_val is not None:
@@ -1309,7 +1328,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         mdp_version = config.get("env", {}).get("mdp_version", "v5")
         scales = config.get("features", {}).get("scales", [])
         data_file = config.get("data", {}).get("file_path", "")
-        if mdp_version == "v7" and scales:
+        if mdp_version in ("v7", "v8") and scales:
             bar_minutes = scales[0]  # First scale is the base (decision) timeframe
         elif "15min" in data_file:
             bar_minutes = 15
@@ -1345,8 +1364,8 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         base_count = np.sum(pos_deltas > 1e-6)
         sign_flips = np.sum((pos_arr[:-1] * pos_arr[1:]) < -1e-9)
         mdp_ver = config.get("env", {}).get("mdp_version", "v5")
-        if mdp_ver == "v7":
-            # V7: continuous positions, count all position changes past deadband
+        if mdp_ver in ("v7", "v8"):
+            # V7/V8: continuous positions, count all position changes past deadband
             trade_count = base_count
         elif mdp_ver == "v6":
             trade_count = sign_flips
