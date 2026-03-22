@@ -88,6 +88,10 @@ class MarketMakingEnv(gym.Env):
         # Scales from config
         self._scales = config.get("scales", [1, 15])
 
+        # LOB features config
+        self._n_lob_features = int(config.get("n_lob_features", 0))
+        self._has_lob = self._n_lob_features > 0
+
         # Spaces
         self.action_space = gym.spaces.Box(
             low=-1.0, high=1.0, shape=(3,), dtype=np.float32
@@ -98,6 +102,11 @@ class MarketMakingEnv(gym.Env):
             obs_spaces[f"scale_{i}"] = gym.spaces.Box(
                 low=-np.inf, high=np.inf,
                 shape=(self.window_size, features_per_scale), dtype=np.float32
+            )
+        if self._has_lob:
+            obs_spaces["lob"] = gym.spaces.Box(
+                low=-1.0, high=1.0,
+                shape=(self.window_size, self._n_lob_features), dtype=np.float32
             )
         obs_spaces["private"] = gym.spaces.Box(
             low=-1.0, high=1.0, shape=(12,), dtype=np.float32
@@ -404,13 +413,16 @@ class MarketMakingEnv(gym.Env):
         return 0.0
 
     def _extract_obs(self, step_data: Dict) -> Dict[str, np.ndarray]:
-        """Extract scale arrays from handler step data."""
+        """Extract scale arrays and LOB features from handler step data."""
         obs = {}
         for i in range(len(self._scales)):
             key = f"scale_{i}"
             if key in step_data:
                 arr = step_data[key]
                 obs[key] = arr if arr.dtype == np.float32 else arr.astype(np.float32)
+        if self._has_lob and "lob_features" in step_data:
+            arr = step_data["lob_features"]
+            obs["lob"] = arr if arr.dtype == np.float32 else arr.astype(np.float32)
         return obs
 
     def _get_private_state(self) -> np.ndarray:
@@ -499,19 +511,29 @@ class MarketMakingEnv(gym.Env):
                     obs[key] = self._current_obs[key]
                 else:
                     obs[key] = np.zeros((self.window_size, features_per_scale), dtype=np.float32)
+            if self._has_lob:
+                if "lob" in self._current_obs:
+                    obs["lob"] = self._current_obs["lob"]
+                else:
+                    obs["lob"] = np.zeros((self.window_size, self._n_lob_features), dtype=np.float32)
         else:
             for i in range(n_scales):
                 obs[f"scale_{i}"] = np.zeros((self.window_size, features_per_scale), dtype=np.float32)
+            if self._has_lob:
+                obs["lob"] = np.zeros((self.window_size, self._n_lob_features), dtype=np.float32)
 
         obs["private"] = self._get_private_state()
         return obs
 
     def _empty_obs(self) -> Dict[str, np.ndarray]:
         features_per_scale = int(self.config.get("features_per_scale", 8))
-        return {
+        obs = {
             f"scale_{i}": np.zeros((self.window_size, features_per_scale), dtype=np.float32)
             for i in range(len(self._scales))
         }
+        if self._has_lob:
+            obs["lob"] = np.zeros((self.window_size, self._n_lob_features), dtype=np.float32)
+        return obs
 
     def _make_info(
         self,
