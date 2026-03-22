@@ -1,5 +1,5 @@
 # Sync-1H Experiment B — Long-Only Mode
-# Hypothesis: long-only removes funding drag + reduces DD in trending crypto
+# Hypothesis: long-only removes funding drag + reduces DD in trending crypto (same 10 assets as Exp A for clean A/B)
 # Base: synapse_crypto_1h_v2.yaml (v2.1.0, 12-month train window)
 # Success criteria: OOS return > -8.80% (beat v3)
 
@@ -11,13 +11,11 @@ strategy:
   instrument: "perpetual_futures"
 
 universe:
-  assets: ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "AVAX", "DOGE",
-           "DOT", "LINK", "ETC", "UNI", "ATOM", "LTC", "FIL", "APT",
-           "ARB", "OP", "NEAR", "INJ"]
+  assets: ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "AVAX", "DOGE", "DOT", "LINK"]
   quote: "USDT"
   data_exchange: "binance"
   execution_broker: "bybit"
-  n_assets: 20
+  n_assets: 10
 
 data:
   source: "ccxt"
@@ -73,7 +71,7 @@ environment:
 agents:
   lean_trinity: ["sac", "a2c"]
   total_timesteps: 2000000
-  n_envs: 20
+  n_envs: 24
   use_fp16: true
   use_torch_compile: true
   network_arch: [256, 256]
