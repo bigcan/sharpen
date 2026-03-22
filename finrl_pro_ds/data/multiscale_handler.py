@@ -194,7 +194,10 @@ class MultiScaleOHLCVHandler:
         if 'timestamp' not in df.columns:
             raise RuntimeError(f"No timestamp column in {self.file_path}")
 
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        ts = pd.to_datetime(df['timestamp'], utc=True)
+        if ts.dt.tz is not None:
+            ts = ts.dt.tz_convert(None)
+        df['timestamp'] = ts
 
         # Apply end_date filter before feature computation (safe — no future leakage)
         if self.end_date is not None:

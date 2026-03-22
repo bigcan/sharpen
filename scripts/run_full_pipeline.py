@@ -88,16 +88,28 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     mdp_version = env_config.get("mdp_version", "v5")
     if mdp_version == "v8":
         from finrl_pro_ds.envs.market_making_env import MarketMakingEnv
-        from finrl_pro_ds.data.mm_data_handler import MMDataHandler
         features_cfg = config.get("features", {})
-        mm_handler = MMDataHandler(
-            file_path=file_path,
-            ticker=ticker,
-            feature_config=features_cfg,
-            start_date=sd,
-            end_date=ed,
-            norm_cutoff_date=norm_cutoff_date,
-        )
+        handler_type = config.get("data", {}).get("handler_type", "mm")
+        if handler_type == "lob":
+            from finrl_pro_ds.data.lob_data_handler import LOBDataHandler
+            mm_handler = LOBDataHandler(
+                file_path=file_path,
+                ticker=ticker,
+                feature_config=features_cfg,
+                start_date=sd,
+                end_date=ed,
+                norm_cutoff_date=norm_cutoff_date,
+            )
+        else:
+            from finrl_pro_ds.data.mm_data_handler import MMDataHandler
+            mm_handler = MMDataHandler(
+                file_path=file_path,
+                ticker=ticker,
+                feature_config=features_cfg,
+                start_date=sd,
+                end_date=ed,
+                norm_cutoff_date=norm_cutoff_date,
+            )
         return MarketMakingEnv(config=env_config, data_handler=mm_handler)
 
     if mdp_version == "v7":
@@ -564,6 +576,15 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         trial_prefix = f"hpo/t{trial.number}"
         wandb.log({f"{trial_prefix}/started": True})
 
+        # FIX BUG-08: Reset torch.compile/Dynamo state between HPO trials.
+        # Without this, Inductor accumulates stale decomposition/fallback
+        # registrations across compilations, causing:
+        #   AssertionError: both a fallback and a decomp for same op: aten.mm.default
+        # GMGP1-v4 lost 48/50 trials to this bug. Reset ensures each trial
+        # starts with a clean compilation cache.
+        if hasattr(torch, '_dynamo'):
+            torch._dynamo.reset()
+
         # Create trial config
         config = copy.deepcopy(base_config)
         config["training"]["total_timesteps"] = steps_per_trial
@@ -902,6 +923,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             # FIX A: Force garbage collection to release PyArrow mmap/FD handles
             import gc
             gc.collect()
+            # FIX BUG-08 (belt-and-suspenders): Also reset after trial cleanup
+            # to ensure compiled kernels from this trial don't pollute the next.
+            if hasattr(torch, '_dynamo'):
+                torch._dynamo.reset()
 
 
     # Run optimization
