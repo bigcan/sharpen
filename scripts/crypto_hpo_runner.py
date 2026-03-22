@@ -3,6 +3,10 @@
 Per-window SAC HPO with Sortino objective, followed by full training of
 SAC (best params) + A2C (defaults) with Softmax Arbitrator ensemble.
 
+Supports warm-start mode (--warm_start) for windows > 0:
+  - HPO: seed Optuna with top-5 params from previous window, run fewer trials
+  - Training: load previous window's model weights, fine-tune with reduced steps
+
 Usage:
     # Smoke test (2 trials, 1K steps)
     python scripts/crypto_hpo_runner.py --max_windows 1 --n_trials 2 --hpo_timesteps 1000
@@ -10,7 +14,10 @@ Usage:
     # Production HPO (50 trials, 200K steps, window 0 only)
     python scripts/crypto_hpo_runner.py --max_windows 1
 
-    # Full walk-forward (all windows)
+    # Full walk-forward with warm-start (recommended for 6+ windows)
+    python scripts/crypto_hpo_runner.py --max_windows 6 --warm_start
+
+    # Full walk-forward cold (all windows from scratch)
     python scripts/crypto_hpo_runner.py
 """
 
@@ -317,36 +324,68 @@ def run_hpo_for_window(
     n_trials: int,
     hpo_timesteps: int,
     out_dir: Path,
-) -> dict:
+    prev_artifacts: dict | None = None,
+) -> tuple[dict, dict]:
     """Run HPO for a single walk-forward window, then full train + eval.
 
     Steps:
     1. HPO: n_trials of SAC → best params (maximize val Sortino)
-    2. Full train: SAC (best params) + A2C (defaults) × total_timesteps
+       - If prev_artifacts provided: seed with top-5 params, run fewer trials
+    2. Full train: SAC (best params) + A2C (defaults)
+       - If prev_artifacts provided: warm-start from previous weights
     3. Eval: val Sortino → arbitrator → test ensemble → metrics
+
+    Returns:
+        (window_result, artifacts) — artifacts dict for warm-starting next window.
     """
     import optuna
 
-    logger.info(f"=== Window {w_idx}: HPO Phase ({n_trials} trials × {hpo_timesteps} steps) ===")
+    is_warm = prev_artifacts is not None
+    warm_tag = " [WARM-START]" if is_warm else " [COLD-START]"
 
     # --- HPO Phase ---
+    # Warm-start: seed with top-5 from previous window, reduce trials
+    if is_warm and prev_artifacts is not None:
+        warm_trials = prev_artifacts.get("top_k_params", [])
+        n_seeded = len(warm_trials)
+        # Fewer random startup trials since we have good seeds
+        n_startup = max(3, n_seeded)
+        effective_trials = max(n_trials, n_seeded + 10)  # at least 10 exploration trials
+    else:
+        warm_trials = []
+        n_seeded = 0
+        n_startup = 10
+        effective_trials = n_trials
+
+    logger.info(
+        f"=== Window {w_idx}: HPO Phase{warm_tag} "
+        f"({effective_trials} trials × {hpo_timesteps} steps"
+        f"{f', {n_seeded} seeded' if n_seeded else ''}) ==="
+    )
+
     storage_path = out_dir / f"hpo_sync1h_w{w_idx}.db"
     study = optuna.create_study(
         study_name=f"sync1h_w{w_idx}_sac",
         direction="maximize",
         sampler=optuna.samplers.TPESampler(
-            seed=42, n_startup_trials=10, multivariate=True,
+            seed=42, n_startup_trials=n_startup, multivariate=True,
         ),
         pruner=optuna.pruners.NopPruner(),
         storage=f"sqlite:///{storage_path}",
         load_if_exists=True,
     )
 
+    # Seed with previous window's top-K params
+    if warm_trials and len(study.trials) == 0:
+        for params in warm_trials:
+            study.enqueue_trial(params)
+        logger.info(f"  Seeded {n_seeded} trials from previous window")
+
     def _objective(trial):
         return hpo_objective(trial, train_arrays, val_arrays, config, hpo_timesteps)
 
     # Skip already-completed trials (resumability)
-    remaining = n_trials - len(study.trials)
+    remaining = effective_trials - len(study.trials)
     if remaining > 0:
         study.optimize(
             _objective,
@@ -389,39 +428,91 @@ def run_hpo_for_window(
     })
 
     # --- Full Training Phase ---
-    logger.info(f"=== Window {w_idx}: Full Training Phase ===")
-
     agents_cfg = config.get("agents", {})
-    total_timesteps = agents_cfg.get("total_timesteps", 2_000_000)
+    cold_timesteps = agents_cfg.get("total_timesteps", 2_000_000)
     n_envs = agents_cfg.get("n_envs", 20)
     network_arch = agents_cfg.get("network_arch", [256, 256])
     lean_trinity = agents_cfg.get("lean_trinity", ["sac", "a2c"])
 
+    # Warm-start: 25% of cold steps (sufficient for fine-tuning)
+    warm_timesteps = max(cold_timesteps // 4, 500_000)
+    train_steps = warm_timesteps if is_warm else cold_timesteps
+
+    logger.info(f"=== Window {w_idx}: Full Training Phase{warm_tag} ({train_steps} steps) ===")
+
     trained_agents = {}
+    model_save_paths = {}
 
     for agent_type in lean_trinity:
-        logger.info(f"  Training {agent_type.upper()} ({total_timesteps} steps, {n_envs} envs)...")
+        logger.info(f"  Training {agent_type.upper()} ({train_steps} steps, {n_envs} envs)...")
 
         try:
-            if agent_type == "sac":
-                # Use HPO best params + locked network
-                agent_cfg = {**best_agent_params, "network_arch": network_arch}
-                vec_env = _make_vec_env_with_overrides(
-                    train_arrays, config, n_envs, best_env_overrides,
-                )
-            else:
-                # A2C/others: use defaults from config
-                agent_cfg = agents_cfg.get(agent_type, {}).copy()
-                if network_arch and "network_arch" not in agent_cfg:
-                    agent_cfg["network_arch"] = network_arch
-                vec_env = _make_vec_env_with_overrides(
-                    train_arrays, config, n_envs, best_env_overrides,
-                )
+            vec_env = _make_vec_env_with_overrides(
+                train_arrays, config, n_envs, best_env_overrides,
+            )
 
-            model = _make_sb3_agent(agent_type, vec_env, agent_cfg)
-            wb_cb = _WandbStepCallback(agent_type, total_timesteps)
-            model.learn(total_timesteps=total_timesteps, callback=wb_cb.callback)
+            prev_model_path = (
+                prev_artifacts.get(f"{agent_type}_path")
+                if is_warm and prev_artifacts is not None else None
+            )
+
+            if prev_model_path and Path(prev_model_path).exists():
+                # Warm-start: load previous weights, attach new env
+                from stable_baselines3 import SAC, A2C
+                if agent_type == "sac":
+                    model = SAC.load(str(prev_model_path), env=vec_env)
+                else:
+                    model = A2C.load(str(prev_model_path), env=vec_env)  # type: ignore[assignment]
+                # Override HPO params for SAC (new window may have new best)
+                if agent_type == "sac":
+                    new_lr = best_agent_params.get(
+                        "learning_rate", model.learning_rate
+                    )
+                    model.learning_rate = new_lr
+                    # Update lr_schedule so optimizer uses new LR
+                    try:
+                        from stable_baselines3.common.utils import ConstantSchedule
+                        model.lr_schedule = ConstantSchedule(new_lr)
+                    except ImportError:
+                        from stable_baselines3.common.utils import get_schedule_fn
+                        model.lr_schedule = get_schedule_fn(new_lr)  # type: ignore[assignment]
+                    model.gamma = best_agent_params.get("gamma", model.gamma)
+                    model.tau = best_agent_params.get("tau", model.tau)
+                    model.batch_size = best_agent_params.get(
+                        "batch_size", model.batch_size
+                    )
+                    # Empty replay buffer — stale data hurts in non-stationary markets
+                    if hasattr(model, "replay_buffer") and model.replay_buffer is not None:
+                        model.replay_buffer.reset()
+                    # Skip learning_starts since network is already initialized
+                    model.learning_starts = 0
+                logger.info(f"    Warm-started from {prev_model_path}")
+            else:
+                # Cold-start: build fresh agent
+                if agent_type == "sac":
+                    agent_cfg = {**best_agent_params, "network_arch": network_arch}
+                else:
+                    agent_cfg = agents_cfg.get(agent_type, {}).copy()
+                    if network_arch and "network_arch" not in agent_cfg:
+                        agent_cfg["network_arch"] = network_arch
+                model = _make_sb3_agent(agent_type, vec_env, agent_cfg)
+                if is_warm:
+                    logger.warning(f"    No previous model found, cold-starting {agent_type.upper()}")
+
+            wb_cb = _WandbStepCallback(agent_type, train_steps)
+            model.learn(
+                total_timesteps=train_steps,
+                callback=wb_cb.callback,
+                reset_num_timesteps=True,
+            )
             trained_agents[agent_type] = model
+
+            # Save model for next window's warm-start
+            save_path = out_dir / f"w{w_idx}_{agent_type}"
+            model.save(str(save_path))
+            model_save_paths[agent_type] = str(save_path)
+            logger.info(f"    Saved model to {save_path}")
+
             vec_env.close()
             logger.info(f"  {agent_type.upper()} training complete")
             _wandb_log({f"train/{agent_type}/status": "complete"})
@@ -431,7 +522,8 @@ def run_hpo_for_window(
 
     if not trained_agents:
         logger.error(f"  Window {w_idx}: all agents failed")
-        return {"window": w_idx, "status": "FAILED", "best_sortino": best_sortino}
+        empty_artifacts: dict = {"top_k_params": [], **{f"{a}_path": None for a in lean_trinity}}
+        return {"window": w_idx, "status": "FAILED", "best_sortino": best_sortino}, empty_artifacts
 
     # --- Eval Phase ---
     logger.info(f"=== Window {w_idx}: Evaluation Phase ===")
@@ -514,11 +606,23 @@ def run_hpo_for_window(
         json.dump(window_result, f, indent=2, default=lambda x: float(x) if isinstance(x, (np.floating,)) else x)
     logger.info(f"  Saved results to {results_path}")
 
+    # Build artifacts for next window's warm-start
+    top_k_trials = sorted(
+        [t for t in study.trials if t.value is not None and t.value > -999],
+        key=lambda t: t.value if t.value is not None else -999.0,
+        reverse=True,
+    )[:5]
+    artifacts = {
+        "top_k_params": [t.params for t in top_k_trials],
+        "best_env_overrides": best_env_overrides,
+        **{f"{a}_path": model_save_paths.get(a) for a in lean_trinity},
+    }
+
     # Cleanup
     del trained_agents
     gc.collect()
 
-    return window_result
+    return window_result, artifacts
 
 
 # ---------------------------------------------------------------------------
@@ -531,8 +635,19 @@ def run_full_hpo_wf(
     n_trials: int,
     hpo_timesteps: int,
     out_dir: Path,
+    warm_start: bool = False,
+    warm_start_trials: int | None = None,
 ) -> dict:
-    """Run HPO + full training across walk-forward windows."""
+    """Run HPO + full training across walk-forward windows.
+
+    Parameters
+    ----------
+    warm_start : bool
+        If True, windows > 0 seed HPO with previous window's top-5 params
+        and warm-start training from previous model weights.
+    warm_start_trials : int, optional
+        Number of HPO trials for warm-started windows. Default: 15.
+    """
     # Prepare data
     logger.info("=" * 60)
     logger.info("PHASE 1: Data Preparation")
@@ -547,10 +662,18 @@ def run_full_hpo_wf(
     schedule = wf["window_schedule"]
     if max_windows is not None:
         schedule = schedule[:max_windows]
-    logger.info(f"Walk-forward: {len(schedule)} windows (of {wf['n_windows']} available)")
+
+    mode_str = "WARM-START" if warm_start else "COLD"
+    logger.info(
+        f"Walk-forward ({mode_str}): {len(schedule)} windows "
+        f"(of {wf['n_windows']} available)"
+    )
+
+    ws_trials = warm_start_trials or 15
 
     assets = config["universe"]["assets"]
     window_results = []
+    prev_artifacts = None
 
     for window in schedule:
         w_idx = window["window"]
@@ -576,11 +699,20 @@ def run_full_hpo_wf(
                 norm_window=norm_window,
             )
 
-            result = run_hpo_for_window(
+            # Determine trial count for this window
+            use_warm = warm_start and prev_artifacts is not None
+            window_n_trials = ws_trials if use_warm else n_trials
+
+            result, artifacts = run_hpo_for_window(
                 w_idx, train_arrays, val_arrays, test_arrays,
-                config, n_trials, hpo_timesteps, out_dir,
+                config, window_n_trials, hpo_timesteps, out_dir,
+                prev_artifacts=prev_artifacts if use_warm else None,
             )
             window_results.append(result)
+
+            # Pass artifacts forward (even on failure, preserve last good)
+            if artifacts.get("top_k_params"):
+                prev_artifacts = artifacts
 
         except Exception as e:
             logger.error(f"Window {w_idx} FAILED: {e}", exc_info=True)
@@ -644,6 +776,10 @@ def main():
     parser.add_argument("--max_windows", type=int, default=None, help="Limit to first N windows")
     parser.add_argument("--n_trials", type=int, default=None, help="HPO trials per window (default: from config)")
     parser.add_argument("--hpo_timesteps", type=int, default=None, help="Steps per HPO trial (default: from config)")
+    parser.add_argument("--warm_start", action="store_true",
+                        help="Warm-start windows > 0: seed HPO + load previous model weights")
+    parser.add_argument("--warm_start_trials", type=int, default=15,
+                        help="HPO trials for warm-started windows (default: 15)")
     parser.add_argument("--out_dir", type=str, default="hpo_results", help="Output directory")
     # WandB / deploy compat
     parser.add_argument("--run_name", default=None)
@@ -685,7 +821,12 @@ def main():
                 tags=tags,
                 config={
                     "strategy": config.get("strategy", {}),
-                    "hpo": {"n_trials": n_trials, "hpo_timesteps": hpo_timesteps},
+                    "hpo": {
+                        "n_trials": n_trials,
+                        "hpo_timesteps": hpo_timesteps,
+                        "warm_start": args.warm_start,
+                        "warm_start_trials": args.warm_start_trials if args.warm_start else None,
+                    },
                     "agents": config.get("agents", {}),
                 },
                 reinit=True,
@@ -694,9 +835,15 @@ def main():
         logger.warning("wandb not installed")
 
     logger.info(f"HPO Config: {n_trials} trials × {hpo_timesteps} steps/trial")
+    if args.warm_start:
+        logger.info(f"Warm-start: ON ({args.warm_start_trials} trials for windows > 0)")
     logger.info(f"Output: {out_dir}")
 
-    results = run_full_hpo_wf(config, args.max_windows, n_trials, hpo_timesteps, out_dir)
+    results = run_full_hpo_wf(
+        config, args.max_windows, n_trials, hpo_timesteps, out_dir,
+        warm_start=args.warm_start,
+        warm_start_trials=args.warm_start_trials,
+    )
 
     # Finish WandB
     try:
