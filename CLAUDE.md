@@ -36,6 +36,20 @@ ruff check finrl_pro_ds && mypy finrl_pro_ds --ignore-missing-imports && pytest
 # Monitoring
 python scripts/monitor_run.py --run_id <ID>
 python scripts/collect_run.py --run_id <ID>  # or --batch
+
+# WandB Analysis (use wandb-primary skill helpers)
+# Entity: bigcan-chiwin-technology | Project: FinRL-Pro-DS
+# Helpers: .agents/skills/wandb-primary/scripts/wandb_helpers.py
+#   runs_to_dataframe(runs, metric_keys=[...])  — MUST override defaults (see below)
+#   diagnose_run(run)  — convergence, overfit, NaN check
+#   compare_configs(run_a, run_b)  — side-by-side config diff
+#
+# FinRL Metric Keys (NOT the default loss/val_loss/accuracy):
+#   HPO pipeline:  "_debug/eval_profit_factor", "_research/sharpe_minute"
+#   Backtest:      "Profit_Factor_Daily", "Sharpe_Ratio", "Sortino_Ratio",
+#                  "Total_Return", "Max_Drawdown", "Win_Rate_Daily"
+#   Summary:       "Ensemble_Sharpe", "Ensemble_Sortino", "Ensemble_Total_Return"
+#   ALWAYS pass metric_keys= explicitly — defaults are ML/DL, not FinRL.
 ```
 
 ## Project Map
@@ -68,6 +82,7 @@ scripts/        # Pipeline entry points, deployment, monitoring, oracles
 configs/        # YAML experiment configs (one per run)
 tests/          # pytest suite
 .agent/skills/  # Agent skills: audit, memory, deploy, optimization, monitor
+.agents/skills/ # External skills: wandb-primary (WandB API helpers + analysis)
 ```
 
 **Boundary:** Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never touch `FinRLPodracer/` or `Podracer/`.
@@ -206,13 +221,16 @@ Skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Tri
 | **Optimization** | SPS regression, low GPU util, new hardware, new training loop, perf tuning. Profile first (Phase 1). | `.agent/skills/optimization/SKILL.md` |
 | **Math** | Manual ("check math", "verify formulas") + auto after changes to env/agent/feature code that touch formulas. | `.agent/skills/math/SKILL.md` |
 | **Dashboard** | **Auto** after `/monitor`. Manual `/dashboard`. During `/sync`. | `.agent/skills/dashboard/SKILL.md` |
+| **WandB** | **Auto** for HPO result analysis, run diagnostics, experiment comparison, config diffing, WandB report generation. Use `wandb_helpers` for programmatic queries — never dump raw run history into context. **Always override `metric_keys`** with FinRL metrics (see Commands section). | `.agents/skills/wandb-primary/SKILL.md` |
 
 **Chaining rules:**
 - Code change → **Audit** (mandatory) → if perf-relevant → **Optimization** → if math-relevant → **Math**
 - `/monitor` → **Monitor** → **Dashboard** (auto-chain, sync Notion)
 - Deploy request → **Monitor** → **Deploy** → **Monitor** → **Dashboard**
 - Session start → **Memory** boot (core.md loaded automatically) → `memory_search` MCP or grep `randd_log.md` + `randd_archive/` for prior context
-- Experiment result → **Memory** update `core.md` → append `randd_log.md` → git commit
+- Experiment result → **WandB** (query HPO trials, extract PF/Sharpe, config diff best vs worst) → **Memory** update `core.md` → append `randd_log.md` → git commit
+- HPO complete → **WandB** (programmatic analysis: `runs_to_dataframe`, `diagnose_run`, `compare_configs`) → report findings
+- Run stall/crash → **Monitor** → **WandB** (`diagnose_run` for convergence/NaN/overfit check)
 - `/sync` → **Memory** → **Dashboard** → git commit
 
 ## Memory Protocol (2-Tier + Cloud)
