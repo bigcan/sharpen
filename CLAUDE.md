@@ -2,16 +2,9 @@
 
 ## Project Brief
 
-**Goal:** Help Keng build a robust, consistent, profitable RL quant trading system across asset classes.
-
-## Current Research State
-
-- **Stage:** 3 — Swing MDP (RL). Phase R.2 (Rehabilitation re-runs) + GMGP1 SAC active.
-- **Active MDP (Design A):** Binary direction-switching `{Long, Short}`, Discrete(2), always in-market, dense per-bar reward, 3-bar cooldown.
-- **Active MDP (Design B / GMGP1):** Continuous position control `Box(-1,1)`, SAC, multi-scale OHLCV, DSR reward, deadband, fee curriculum.
-- **Active Agents:** IQN (distributional, NoisyNets), BDQ (branching dueling), SAC (continuous). PPO definitively falsified (0/15).
-- **Target:** PF 1.1–1.3 OOS. Oracle ceilings: BTC 3.53 (6.5bps), Gold 10.34 (2bps) at 3-min close.
-- **Assets:** BTC/USDT (Binance, 5bps taker) and Gold Futures (CME, 2bps taker).
+**Goal:** Profitable RL quant trading across asset classes.
+Active agent: **SAC only** (IQN/BDQ/PPO all falsified). Workstreams: GMGP1 SAC Gold 15m, Sync-1H crypto, Funding-Arb, Market Making LOB.
+Detailed state: `.agent/memory/core.md` (loaded at boot).
 
 ## Stack
 
@@ -23,33 +16,30 @@ Python 3.11+ · PyTorch 2.8+ · Gymnasium · Optuna · WandB · Parquet · Ruff 
 # Setup
 pip install -e .[dev]
 
-# Pipeline: HPO → Train → Backtest
+# Pipeline: HPO -> Train -> Backtest
 python scripts/run_full_pipeline.py --config configs/<cfg>.yaml
-# Flags: --agent {bdq|ppo} --trials N --steps N --backtest_only --checkpoint PATH
+# Flags: --agent sac --trials N --steps N --backtest_only --checkpoint PATH
+
+# Crypto pipelines
+python scripts/crypto_hpo_runner.py --config <cfg> [--warm_start --max_windows N]
+python scripts/funding_arb_hpo_runner.py --config <cfg>
 
 # Deploy to remote GPU
-python scripts/deploy_bare_metal.py --config <cfg> --instance <name> --gpu <id> --collect
+python scripts/deploy_bare_metal.py --config <cfg> --instance <name> --gpu <id> [--no_kill] --collect
 
 # Quality
 ruff check finrl_pro_ds && mypy finrl_pro_ds --ignore-missing-imports && pytest
 
 # Monitoring
-python scripts/monitor_run.py --run_id <ID>
+python scripts/monitor_fleet.py              # Fleet-wide status
+python scripts/monitor_run.py --run_id <ID>  # Single run
 python scripts/collect_run.py --run_id <ID>  # or --batch
 
-# WandB Analysis (use wandb-primary skill helpers)
-# Entity: bigcan-chiwin-technology | Project: FinRL-Pro-DS
-# Helpers: .agents/skills/wandb-primary/scripts/wandb_helpers.py
-#   runs_to_dataframe(runs, metric_keys=[...])  — MUST override defaults (see below)
-#   diagnose_run(run)  — convergence, overfit, NaN check
-#   compare_configs(run_a, run_b)  — side-by-side config diff
-#
-# FinRL Metric Keys (NOT the default loss/val_loss/accuracy):
-#   HPO pipeline:  "_debug/eval_profit_factor", "_research/sharpe_minute"
-#   Backtest:      "Profit_Factor_Daily", "Sharpe_Ratio", "Sortino_Ratio",
-#                  "Total_Return", "Max_Drawdown", "Win_Rate_Daily"
-#   Summary:       "Ensemble_Sharpe", "Ensemble_Sortino", "Ensemble_Total_Return"
-#   ALWAYS pass metric_keys= explicitly — defaults are ML/DL, not FinRL.
+# WandB: entity=bigcan-chiwin-technology, project=FinRL-Pro-DS
+# Helpers: .agents/skills/wandb-primary/scripts/wandb_helpers.py (see WandB skill)
+# ALWAYS pass metric_keys= explicitly -- FinRL metrics, NOT ML defaults:
+#   HPO: "_debug/eval_profit_factor", "_research/sharpe_minute"
+#   Backtest: "Profit_Factor_Daily", "Sharpe_Ratio", "Sortino_Ratio", "Total_Return", "Max_Drawdown"
 ```
 
 ## Project Map
@@ -57,213 +47,175 @@ python scripts/collect_run.py --run_id <ID>  # or --batch
 ```
 finrl_pro_ds/
   agents/
-    deepscalper/bdq_agent.py      # BDQ — branching dueling Q-network
-    deepscalper/iqn_agent.py      # IQN — implicit quantile network (NoisyNets)
-    deepscalper/iqn_network.py    # IQN network architecture
-    deepscalper/networks.py       # Shared encoder / Q-head networks
-    deepscalper/per_buffer.py     # Prioritized experience replay
-    deepscalper/nstep_buffer.py   # N-step return buffer
-    deepscalper/flat_replay_buffer.py  # Simple uniform replay
-    deepscalper/noisy_linear.py   # NoisyNet linear layer
-    ppo_scalper/ppo_agent.py      # PPO (FALSIFIED — 0/15)
-    sac/sac_agent.py              # SAC — continuous position control
+    sac/sac_agent.py              # SAC -- continuous position control (ACTIVE)
     sac/networks.py               # SAC actor/critic networks
+    deepscalper/                  # Legacy (IQN/BDQ falsified) -- do not extend
+    ppo_scalper/                  # Legacy (PPO falsified) -- do not extend
   envs/
-    swing_scalper_env.py          # V6 — Discrete(2) binary swing MDP (Design A)
-    continuous_swing_env.py       # V7 — Box(-1,1) continuous MDP (Design B / GMGP1)
-    deep_scalper_env.py           # V5 — Discrete(6) flat (Stage 2, legacy)
+    continuous_swing_env.py       # V7 -- Box(-1,1) continuous MDP (GMGP1 SAC)
+    market_making_env.py          # V8 -- Box(-1,1,3) MM with fill simulation
+    swing_scalper_env.py          # V6 -- Discrete(2) legacy (no active runs)
+    deep_scalper_env.py           # V5 -- Discrete(6) legacy (no active runs)
     augmented_wrapper.py          # Obs augmentation wrapper
-  training/                       # Training loops + HPO dispatch
+  crypto/
+    envs/crypto_perp_env.py      # Sync-1H: multi-asset perp futures
+    envs/funding_arb_env.py      # Delta-neutral funding arb
+    envs/multi_exchange_arb_env.py # Cross-exchange arb
+    data/                         # crypto_loader, crypto_collector, crypto_array_builder
+    features/                     # crypto_features, funding_arb_features
+    execution/                    # exchange_perp_broker, bybit_perp_broker, arbitrator
+    live/                         # live_engine, live_obs_builder, bar_clock
+    mlops/                        # crypto_risk_manager
   data/
-    feature_engineering.py        # "Feature Factory" — Micro (LOB) + Macro (OHLCV) features
-    parquet_handler.py            # Shared-memory data streaming (LOB-based envs)
     multiscale_handler.py         # Multi-scale OHLCV handler (SAC / GMGP1)
-scripts/        # Pipeline entry points, deployment, monitoring, oracles
-configs/        # YAML experiment configs (one per run)
+    lob_data_handler.py           # LOB microstructure handler (MM)
+    mm_data_handler.py            # MM-specific data handler
+    fill_model.py                 # L1/L2 fill simulation + adverse selection
+    feature_engineering.py        # Feature Factory -- Micro (LOB) + Macro (OHLCV)
+    parquet_handler.py            # Shared-memory data streaming
+  training/sac_trainer.py         # SAC training loop (+ legacy deepscalper/ppo trainers)
+  analytics/                      # pyfolio_analyzer, wandb_evaluator
+scripts/        # Pipeline, deployment, monitoring, oracles, ETL
+configs/        # YAML experiment configs
 tests/          # pytest suite
-.agent/skills/  # Agent skills: audit, memory, deploy, optimization, monitor
-.agents/skills/ # External skills: wandb-primary (WandB API helpers + analysis)
+.agent/skills/  # Agent skills (audit, memory, deploy, monitor, etc.)
 ```
 
 **Boundary:** Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never touch `FinRLPodracer/` or `Podracer/`.
 
 ## Env Contracts
 
-### SwingScalperEnv (V6) — `swing_scalper_env.py`
+### ContinuousSwingEnv (V7) -- `continuous_swing_env.py`
 | Property | Spec |
 |----------|------|
-| Action | `Discrete(2)` — 0=Long, 1=Short. Always in-market. |
-| Obs | `Dict{ micro: (W, micro_dim), macro: (N_macro,), private: (W, 4) }` |
-| Private | `[direction, bars_since_switch, unrealized_pnl_bps, normalized_atr]` — 4 dims |
-| Reward | Dense per-bar directional PnL (bps) minus RT fee on switch. `reward_mode: "switch_centric"` alternative via config. |
-| Done | Truncated at `episode_length` bars or data exhaustion. Terminated on `max_drawdown_pct` breach. |
-| Cooldown | `cooldown_bars` (default 3) — switch requests during cooldown are silently ignored. |
+| Action | `Box(-1, 1, shape=(1,))` -- target position fraction. -1=full short, 0=flat, +1=full long. |
+| Obs | `Dict{ scale_0: (W, F), scale_1: (W, F), ..., private: (5,) }` -- one key per OHLCV scale. |
+| Private | `[current_position, unrealized_pnl_norm, time_sin, time_cos, atr_ratio]` -- 5 dims |
+| Reward | DSR (default). Deadband 0.25. Fee curriculum via `fee_schedule`. |
+| Done | Truncated at `episode_length`. Terminated on `max_drawdown_pct` breach. |
 
-### ContinuousSwingEnv (V7) — `continuous_swing_env.py`
+### MarketMakingEnv (V8) -- `market_making_env.py`
 | Property | Spec |
 |----------|------|
-| Action | `Box(-1, 1, shape=(1,))` — target position fraction. -1=full short, 0=flat, +1=full long. |
-| Obs | `Dict{ scale_0: (W, F), scale_1: (W, F), ..., private: (5,) }` — one key per OHLCV scale. |
-| Private | `[current_position, unrealized_pnl_norm, time_sin, time_cos, atr_ratio]` — 5 dims |
-| Reward | Differential Sharpe Ratio (DSR). `reward_mode: "dsr"` (default). |
-| Done | Same as V6 (truncation + drawdown). |
-| Deadband | `deadband_threshold: 0.25` — position changes < threshold are ignored (prevents churn). |
+| Action | `Box(-1, 1, shape=(3,))` -- (spread_offset, inventory_skew, quote_intensity). |
+| Obs | `Dict{ scale_0: (W,F), ..., lob: (W,n_lob), private: (12,) }` -- optional LOB encoder. |
+| Private | 12 dims: inventory, fills, quote state, adverse selection metrics. |
+| Reward | DSR on spread_capture + MtM - inventory_penalty - fees. Fill model: L1/L2. |
+| Done | Truncation + drawdown + inventory hard stop. |
 
-### DeepScalperEnv (V5) — `deep_scalper_env.py` (Legacy / Stage 2)
+### CryptoPerpEnv -- `crypto/envs/crypto_perp_env.py`
 | Property | Spec |
 |----------|------|
-| Action | `Discrete(6)` flat (BDQ) — do NOT revert to MultiDiscrete. |
-| Obs | `Dict{ micro: (W, micro_dim), macro: (N_macro,), private: (W, private_dim) }` |
-| Done | Same pattern. |
+| Action | `Box(-1, 1, shape=(n_assets,))` -- signed position weights. `long_only` mode available. |
+| Obs | Flat 1D (~962 dims for 20 assets): margin + tech + positions + unrealized + funding + cost + ENB. |
+| Reward | Sortino (default). Funding at UTC 00/08/16. Circuit breaker on portfolio value. |
+| Done | Truncation at episode end. Termination on circuit breaker or liquidation. |
 
-**All envs return raw numpy dicts, NOT Gymnasium wrappers — preserve this path.**
+### FundingArbEnv -- `crypto/envs/funding_arb_env.py`
+| Property | Spec |
+|----------|------|
+| Action | `Box(-1, 1, shape=(n_assets,))` -- arb weight (>0 standard, <0 reverse). |
+| Obs | Flat 1D (~326 dims for 20 assets): portfolio + tech + weights + basis + funding + cost + delta + margin. |
+| Reward | PV-return + delta penalty + turnover penalty. Funding at UTC 00/08/16. Deadband 0.01. |
+| Done | Truncation. Circuit breaker on portfolio value. |
 
-## Config Schema (Required Keys)
+### Legacy Envs (no active runs)
+- **V6 SwingScalperEnv** (`swing_scalper_env.py`): `Discrete(2)`, binary swing, private: 4 dims, cooldown_bars.
+- **V5 DeepScalperEnv** (`deep_scalper_env.py`): `Discrete(6)` flat. Do NOT revert to MultiDiscrete.
 
-Every YAML config must include these top-level sections and keys. Do NOT invent keys.
+**All envs return raw numpy dicts, NOT Gymnasium wrappers -- preserve this path.**
 
-```yaml
-data:
-  file_path: str          # Path to .parquet data file
-  ticker: str             # Symbol name (used in logging)
-  train_start_date: str   # ISO datetime
-  train_end_date: str
-  val_start_date: str
-  val_end_date: str
-  test_start_date: str
-  test_end_date: str
-  norm_cutoff_date: str   # EMA-Z normalization boundary (= val_start_date)
+## Config Schema
 
-env:
-  symbol: str
-  initial_balance: float
-  taker_fee: float
-  num_envs: int           # Vectorized env count
-  window_size: int
-  max_drawdown_pct: float
-  mdp_version: str        # "v5" | "v6" | "v7"
-  episode_length: int
-  random_start: bool
-  action:
-    discrete_dims: int    # V5/V6 only (2 for swing, 6 for legacy)
-    cooldown_bars: int    # V6 only
+Configs vary by pipeline. Do NOT invent keys -- read a reference config first.
 
-network:
-  micro_config:
-    input_size: int
-    private_input_size: int   # 4 for V6, 5 for V7
-    hidden_size: int          # Must be multiple of 8 (Tensor Core alignment)
-
-training:
-  total_timesteps: int
-  torch_compile: bool     # false for IQN (NoisyLinear incompatible)
-  use_amp: bool
-
-hpo:
-  enabled: bool
-  n_trials: int
-  steps_per_trial: int
-
-wandb:
-  project: str
-  entity: str
-  tags: list              # Always include lowercase experiment ID (e.g. "k5")
-```
-
-**When unsure about a key, check an existing config in `configs/` — do NOT guess.**
+| Pipeline | Reference Config | Top-Level Sections |
+|----------|-----------------|---------------------|
+| GMGP1 (V7) | `configs/gmgp1_sac_gc_15min.yaml` | data / features / env / network / agents.sac / training / hpo / wandb |
+| Sync-1H | `configs/synapse_crypto_1h_v2.yaml` | strategy / universe / environment / agents / arbitrator / walk_forward / risk / execution |
+| Funding Arb | `configs/funding_arb_sac_10assets_hpo.yaml` | strategy / universe / environment / agents / walk_forward |
+| Market Making | `configs/mm_sac_btc_lob_10s.yaml` | data / features / env (fill_model, LOB) / network (lob_encoder, action_dim=3) / agents.sac / training / hpo / wandb |
+| Live Trading | `configs/live_gmgp1_btc_bybit.yaml` | Adds execution / model_staleness / deployment |
 
 ## Critical Invariants
 
 | ID | Rule |
 |----|------|
 | LEAK-1 | Reset EMA-Z normalization at train/val/test split boundaries. Never normalize across splits. |
-| BUG-01 | HPO objective = `profit_factor`. Lock reward params (gamma, sharpe_weight, hindsight_*) during HPO. |
+| BUG-01 | HPO objective = `profit_factor`. Lock reward params during HPO. |
 | BUG-03 | `hindsight_weight` must be `0.0` during backtesting (uses future prices). |
+| BUG-04 | Dense reward on switch bars must use direction BEFORE switch. Save `direction_for_reward` before action processing. |
 | SHORT-ACCT | Shorts must NOT accumulate `notional_debt`. Buyback = `|pos|*mid` in equity. |
 | MARGIN-CFG | BTC `margin_requirement: 0.05` (20x). `1.0` = starvation. |
 | DATA-CLEAN | All OHLCV must pass `scripts/clean_ohlcv.py` before experiments. `.bak` mandatory. |
-| BUG-04 | Dense reward on switch bars must use direction BEFORE switch. Save `direction_for_reward` before action processing. |
 | PF-XCHECK | Cross-check PF via `mid_price` AND `close`. >30% divergence = halt. |
 
 ## Coding Standards
 
 - All `.to(device)` calls **must** use `non_blocking=True`
-- Replay buffers **must** support batch push — no per-sample Python loops in hot paths
+- Replay buffers **must** support batch push -- no per-sample Python loops in hot paths
 - New configs: `torch_compile: true`, `update_interval: 8` (tau auto-scales)
 - Do NOT rewrite vectorized PER with per-element iteration
-- Env returns raw numpy, not dicts — preserve this path
+- Env returns raw numpy, not dicts -- preserve this path
 - All `Linear` layer hidden dims must be **multiples of 8** (Tensor Core alignment)
-- Use `logging` or `MLOpsLogger` — never raw `print()` in production code
+- Use `logging` or `MLOpsLogger` -- never raw `print()` in production code
 
 ## Anti-Patterns (NEVER DO)
 
 - **Never import from** `FinRLPodracer/` or `Podracer/`
-- **Never use** `MultiDiscrete` action space — V5 uses `Discrete(6)` flat
 - **Never normalize** across train/val/test splits (LEAK-1)
 - **Never set** `hindsight_weight > 0` in backtest configs (BUG-03)
-- **Never use** `torch_compile: true` with IQN/NoisyLinear — triggers recompilation storms
-- **Never guess** config keys — read an existing YAML in `configs/` first
+- **Never guess** config keys -- read a reference YAML in `configs/` first
 - **Never use** `mid_price` without validating high/low against open/close (data corruption risk)
-- **Never skip** `n_step: 3` for IQN configs — essential for stability (Session 97 finding)
-- **Never set** `private_input_size: 3` — it's **4** for V6 (changed in Tier 2), **5** for V7
-- **Never revert** action space to `MultiDiscrete` or add Hold/Cancel/Maker actions to V6
+- **Never deploy** without running `monitor_fleet.py` first (check VRAM, active processes)
+- **Never skip** Math skill verification on formula/equation changes in env/agent/reward code
 
-## Agent Skills — Auto-Dispatch
+## Agent Skills -- Auto-Dispatch
 
-Skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Trigger proactively** — don't wait for the user to ask.
+Skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Trigger proactively** -- don't wait for the user to ask.
 
 | Skill | Trigger | Spec |
 |-------|---------|------|
-| **Audit** | **Auto** after ANY code change to `finrl_pro_ds/`, `scripts/`, `configs/`. Skip `.md`-only. **Also auto after implementation of plans, features, or tasks** — audit the full changeset before marking complete. | `.agent/skills/audit/SKILL.md` |
+| **Audit** | **Auto** after ANY code change to `finrl_pro_ds/`, `scripts/`, `configs/`. Skip `.md`-only. **Also auto after plan/feature/task implementation.** | `.agent/skills/audit/SKILL.md` |
 | **Deploy** | User requests GPU launch, instance management, or run deployment. | `.agent/skills/deploy/SKILL.md` |
-| **Memory** | **Auto** at session start (boot) and end (`/sync`). Update `core.md` proactively on findings. Use `memory_search` MCP for semantic retrieval, grep on `randd_log.md` + `randd_archive/` for exact tag matching. | `.agent/skills/memory/SKILL.md` |
-| **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. `python scripts/monitor_fleet.py` | `.agent/skills/monitor/SKILL.md` |
-| **Optimization** | SPS regression, low GPU util, new hardware, new training loop, perf tuning. Profile first (Phase 1). **Auto before each deployment** — verify SPS/throughput baseline and flag regressions before GPU time is committed. | `.agent/skills/optimization/SKILL.md` |
-| **Math** | Manual ("check math", "verify formulas") + **auto after ANY change that touches calculation formulas, equations, or numerical logic** in env/agent/feature/reward code. Verify correctness before deployment. | `.agent/skills/math/SKILL.md` |
-| **Dashboard** | **Auto** after `/monitor`. Manual `/dashboard`. During `/sync`. **Auto whenever an experiment is created, deployed, or finishes** — keep Notion dashboard current with latest experiment state. | `.agent/skills/dashboard/SKILL.md` |
-| **WandB** | **Auto** for HPO result analysis, run diagnostics, experiment comparison, config diffing, WandB report generation. Use `wandb_helpers` for programmatic queries — never dump raw run history into context. **Always override `metric_keys`** with FinRL metrics (see Commands section). | `.agents/skills/wandb-primary/SKILL.md` |
-| **Researcher** | "Should we try X?", algorithm eval, lit review, root cause analysis, microstructure, feature research. **Auto** after Architect needs external context. | `.agent/skills/researcher/SKILL.md` |
-| **Architect** | New module design, pipeline refactor, API/interface changes, migration planning, "design X". **Auto** after Researcher GO verdict. | `.agent/skills/architect/SKILL.md` |
+| **Memory** | **Auto** at session start (boot) and end (`/sync`). Update `core.md` proactively on findings. | `.agent/skills/memory/SKILL.md` |
+| **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. | `.agent/skills/monitor/SKILL.md` |
+| **Optimization** | SPS regression, low GPU util, new hardware, perf tuning. **Auto before each deployment.** | `.agent/skills/optimization/SKILL.md` |
+| **Math** | Manual ("check math") + **auto after ANY formula/equation/numerical logic change.** | `.agent/skills/math/SKILL.md` |
+| **Dashboard** | **Auto** after `/monitor`, during `/sync`, on experiment state changes. | `.agent/skills/dashboard/SKILL.md` |
+| **WandB** | **Auto** for HPO analysis, run diagnostics, config diffing. Always override `metric_keys`. | `.agents/skills/wandb-primary/SKILL.md` |
+| **Researcher** | "Should we try X?", algorithm eval, lit review, root cause analysis. | `.agent/skills/researcher/SKILL.md` |
+| **Architect** | New module design, pipeline refactor, API/interface changes. **Auto** after Researcher GO. | `.agent/skills/architect/SKILL.md` |
 
 **Chaining rules:**
-- Code change → **Audit** (mandatory) → if perf-relevant → **Optimization** → if math-relevant → **Math**
-- Plan/feature/task implementation → **Audit** (mandatory, full changeset review before marking complete)
-- Formula/equation change → **Math** (mandatory, verify numerical correctness)
-- `/monitor` → **Monitor** → **Dashboard** (auto-chain, sync Notion)
-- Deploy request → **Monitor** → **Optimization** (pre-deploy SPS check) → **Deploy** → **Monitor** → **Dashboard**
-- Experiment created/deployed/finished → **Dashboard** (auto-sync Notion with latest state)
-- Session start → **Memory** boot (core.md loaded automatically) → `memory_search` MCP or grep `randd_log.md` + `randd_archive/` for prior context
-- Experiment result → **WandB** (query HPO trials, extract PF/Sharpe, config diff best vs worst) → **Memory** update `core.md` → append `randd_log.md` → **Dashboard** → git commit
-- HPO complete → **WandB** (programmatic analysis: `runs_to_dataframe`, `diagnose_run`, `compare_configs`) → report findings → **Dashboard**
-- Run stall/crash → **Monitor** → **WandB** (`diagnose_run` for convergence/NaN/overfit check)
-- `/sync` → **Memory** → **Dashboard** → git commit
-- Research question → **Researcher** (literature + prior art + recommendation) → if GO → **Architect** (detailed design) → implement → **Audit**
-- New module request → **Architect** (design) → if needs external research → **Researcher** (targeted) → back to **Architect**
-- Root cause analysis → **Researcher** (diagnosis) → if fix requires refactoring → **Architect** (design) → implement → **Audit**
-- "Should we try X?" → **Researcher** → GO/NO-GO + **Memory** update
+- Code change / implementation complete -> **Audit** (mandatory). +**Math** if formulas. +**Optimization** if perf.
+- Deploy request -> **Monitor** -> **Optimization** (SPS check) -> **Deploy** -> **Monitor** -> **Dashboard**
+- `/monitor` -> **Monitor** -> **Dashboard**. Experiment state change -> **Dashboard**.
+- Session start -> **Memory** boot. `/sync` -> **Memory** -> **Dashboard** -> git commit.
+- Experiment result / HPO complete -> **WandB** -> **Memory** -> **Dashboard** -> git commit.
+- Run stall/crash -> **Monitor** -> **WandB** (`diagnose_run`).
+- Research question -> **Researcher** -> if GO -> **Architect** -> implement -> **Audit**.
+- Root cause / new module -> **Researcher** <-> **Architect** -> implement -> **Audit**.
 
 ## Memory Protocol (2-Tier + Cloud)
 
 ```
-Tier 1: .agent/memory/core.md   — Project status (~100 lines, deterministic boot context)
-Tier 2: randd_log.md             — R&D history rolling buffer (current month, search via grep)
-        randd_archive/YYYY-MM.md — Monthly archives (older entries, also searchable via grep)
-Cloud:  agent-memory MCP         — GCS LanceDB (326+ rows), semantic vector search via memory_search/memory_store
+Tier 1: .agent/memory/core.md   -- Project status (~100 lines, deterministic boot context)
+Tier 2: randd_log.md             -- R&D history rolling buffer (search via grep)
+        randd_archive/YYYY-MM.md -- Monthly archives (grep-searchable)
+Cloud:  agent-memory MCP         -- GCS LanceDB, semantic search via memory_search/memory_store
 ```
 
-**Boot:** `core.md` (always loaded via system prompt hook). `memory_search` MCP or grep `randd_log.md` + `randd_archive/` for prior context.
-**Commit:** Append to `randd_log.md` → update `core.md` → `memory_store` key findings → git commit.
-**Rotation:** Run `python scripts/rotate_randd_log.py` when `randd_log.md` exceeds ~300 KB. Moves old entries to `randd_archive/YYYY-MM.md`.
-**Cloud:** agent-memory MCP server (LanceDB on `gs://openclaw-memory-lance/v1`, Gemini embeddings). Requires `GOOGLE_SERVICE_ACCOUNT` env var in `.mcp.json` pointing to `~/.openclaw/gcs-service-account.json`.
-**Deprecated:** Daily logs (`.agent/memory/logs/`), snapshot rotation. No longer maintained.
+**Boot:** `core.md` loaded via system prompt hook. `memory_search` MCP or grep `randd_log.md` + `randd_archive/` for prior context.
+**Commit:** Append `randd_log.md` -> update `core.md` -> `memory_store` key findings -> git commit.
+**Rotation:** `python scripts/rotate_randd_log.py` when >300 KB. Moves to `randd_archive/YYYY-MM.md`.
+**Cloud:** Requires `GOOGLE_SERVICE_ACCOUNT` env var in `.mcp.json` pointing to `~/.openclaw/gcs-service-account.json`.
 
-## Gotchas (Last verified: 2026-03-13)
+## Gotchas (Last verified: 2026-03-23)
 
-- `private_input_size: 4` for V6 SwingScalperEnv, `5` for V7 ContinuousSwingEnv (NOT 3)
-- Action space: V6 `Discrete(2)`, V5 `Discrete(6)` flat — do NOT revert to MultiDiscrete
 - HPO uses NopPruner, no early-kill, 500K steps/trial
-- `n_step: 3` required for IQN stability — **all** IQN configs must include it
-- RTX 5090 + CUDA 13.0 may segfault with `torch.compile`
+- RTX 5090 + CUDA 13.0: run `scripts/patch_torch_compile.py` on fresh deployments
 - Taker fills same-bar; maker pends to next bar
-- GMGP1 SAC: `torch_compile: true` OK (no NoisyLinear). IQN: `torch_compile: false` always.
-- Gold data was corrupted (Session 106) — always validate via `scripts/clean_ohlcv.py` before use
+- Gold data was corrupted (Session 106) -- always validate via `scripts/clean_ohlcv.py`
+- Concurrent GPU runs: check VRAM (not run count) -- 2+ runs can share 1 GPU
+- Legacy envs: V6 `Discrete(2)` private=4, V5 `Discrete(6)` -- do NOT modify action spaces
