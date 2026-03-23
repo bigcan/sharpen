@@ -367,8 +367,9 @@ class SwingScalperEnv(gym.Env):
         self.private_window[-1] = current_private
 
         # 8. Termination checks
-        # Drawdown stop
-        if self.equity < self._stop_loss_threshold * self.initial_balance:
+        # Drawdown stop — FIX AUD-S225: use peak_equity (not initial_balance)
+        # so drawdown is measured from portfolio high, matching V7 behavior.
+        if self.equity < self._stop_loss_threshold * self.peak_equity:
             terminated = True
             logger.warning(f"Hit Max Drawdown Stop ({self.max_drawdown_pct:.0%}). Terminating Episode.")
 

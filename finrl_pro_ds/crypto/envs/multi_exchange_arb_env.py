@@ -272,12 +272,14 @@ class MultiExchangeArbEnv(gym.Env):
 
         # --- 6. Advance step ---
         self.current_step += 1
-        terminated = (
+        # FIX AUD-S225: Gymnasium convention — terminated = MDP terminal (drawdown),
+        # truncated = time limit. Previously swapped, breaking SB3 bootstrapping.
+        drawdown = 1 - self.portfolio_value / cfg.initial_capital
+        terminated = drawdown >= 0.5
+        truncated = (
             self.current_step >= cfg.max_steps
             or self.current_step >= len(self.market_data)
         )
-        drawdown = 1 - self.portfolio_value / cfg.initial_capital
-        truncated = drawdown >= 0.5
 
         obs = self._get_obs()
         info = {"portfolio_value": self.portfolio_value}
