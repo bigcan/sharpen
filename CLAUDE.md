@@ -214,24 +214,33 @@ Skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Tri
 
 | Skill | Trigger | Spec |
 |-------|---------|------|
-| **Audit** | **Auto** after ANY code change to `finrl_pro_ds/`, `scripts/`, `configs/`. Skip `.md`-only. | `.agent/skills/audit/SKILL.md` |
+| **Audit** | **Auto** after ANY code change to `finrl_pro_ds/`, `scripts/`, `configs/`. Skip `.md`-only. **Also auto after implementation of plans, features, or tasks** — audit the full changeset before marking complete. | `.agent/skills/audit/SKILL.md` |
 | **Deploy** | User requests GPU launch, instance management, or run deployment. | `.agent/skills/deploy/SKILL.md` |
 | **Memory** | **Auto** at session start (boot) and end (`/sync`). Update `core.md` proactively on findings. Use `memory_search` MCP for semantic retrieval, grep on `randd_log.md` + `randd_archive/` for exact tag matching. | `.agent/skills/memory/SKILL.md` |
 | **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. `python scripts/monitor_fleet.py` | `.agent/skills/monitor/SKILL.md` |
-| **Optimization** | SPS regression, low GPU util, new hardware, new training loop, perf tuning. Profile first (Phase 1). | `.agent/skills/optimization/SKILL.md` |
-| **Math** | Manual ("check math", "verify formulas") + auto after changes to env/agent/feature code that touch formulas. | `.agent/skills/math/SKILL.md` |
-| **Dashboard** | **Auto** after `/monitor`. Manual `/dashboard`. During `/sync`. | `.agent/skills/dashboard/SKILL.md` |
+| **Optimization** | SPS regression, low GPU util, new hardware, new training loop, perf tuning. Profile first (Phase 1). **Auto before each deployment** — verify SPS/throughput baseline and flag regressions before GPU time is committed. | `.agent/skills/optimization/SKILL.md` |
+| **Math** | Manual ("check math", "verify formulas") + **auto after ANY change that touches calculation formulas, equations, or numerical logic** in env/agent/feature/reward code. Verify correctness before deployment. | `.agent/skills/math/SKILL.md` |
+| **Dashboard** | **Auto** after `/monitor`. Manual `/dashboard`. During `/sync`. **Auto whenever an experiment is created, deployed, or finishes** — keep Notion dashboard current with latest experiment state. | `.agent/skills/dashboard/SKILL.md` |
 | **WandB** | **Auto** for HPO result analysis, run diagnostics, experiment comparison, config diffing, WandB report generation. Use `wandb_helpers` for programmatic queries — never dump raw run history into context. **Always override `metric_keys`** with FinRL metrics (see Commands section). | `.agents/skills/wandb-primary/SKILL.md` |
+| **Researcher** | "Should we try X?", algorithm eval, lit review, root cause analysis, microstructure, feature research. **Auto** after Architect needs external context. | `.agent/skills/researcher/SKILL.md` |
+| **Architect** | New module design, pipeline refactor, API/interface changes, migration planning, "design X". **Auto** after Researcher GO verdict. | `.agent/skills/architect/SKILL.md` |
 
 **Chaining rules:**
 - Code change → **Audit** (mandatory) → if perf-relevant → **Optimization** → if math-relevant → **Math**
+- Plan/feature/task implementation → **Audit** (mandatory, full changeset review before marking complete)
+- Formula/equation change → **Math** (mandatory, verify numerical correctness)
 - `/monitor` → **Monitor** → **Dashboard** (auto-chain, sync Notion)
-- Deploy request → **Monitor** → **Deploy** → **Monitor** → **Dashboard**
+- Deploy request → **Monitor** → **Optimization** (pre-deploy SPS check) → **Deploy** → **Monitor** → **Dashboard**
+- Experiment created/deployed/finished → **Dashboard** (auto-sync Notion with latest state)
 - Session start → **Memory** boot (core.md loaded automatically) → `memory_search` MCP or grep `randd_log.md` + `randd_archive/` for prior context
-- Experiment result → **WandB** (query HPO trials, extract PF/Sharpe, config diff best vs worst) → **Memory** update `core.md` → append `randd_log.md` → git commit
-- HPO complete → **WandB** (programmatic analysis: `runs_to_dataframe`, `diagnose_run`, `compare_configs`) → report findings
+- Experiment result → **WandB** (query HPO trials, extract PF/Sharpe, config diff best vs worst) → **Memory** update `core.md` → append `randd_log.md` → **Dashboard** → git commit
+- HPO complete → **WandB** (programmatic analysis: `runs_to_dataframe`, `diagnose_run`, `compare_configs`) → report findings → **Dashboard**
 - Run stall/crash → **Monitor** → **WandB** (`diagnose_run` for convergence/NaN/overfit check)
 - `/sync` → **Memory** → **Dashboard** → git commit
+- Research question → **Researcher** (literature + prior art + recommendation) → if GO → **Architect** (detailed design) → implement → **Audit**
+- New module request → **Architect** (design) → if needs external research → **Researcher** (targeted) → back to **Architect**
+- Root cause analysis → **Researcher** (diagnosis) → if fix requires refactoring → **Architect** (design) → implement → **Audit**
+- "Should we try X?" → **Researcher** → GO/NO-GO + **Memory** update
 
 ## Memory Protocol (2-Tier + Cloud)
 
