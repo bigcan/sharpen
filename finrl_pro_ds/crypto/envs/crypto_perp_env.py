@@ -289,6 +289,9 @@ class CryptoPerpEnv(gym.Env):
         unrealized_sum = float(new_unrealized.sum())
         portfolio_value = self.margin_balance + unrealized_sum
         self.portfolio_values.append(portfolio_value)
+        # OPT: Trim to prevent unbounded growth
+        if len(self.portfolio_values) > 1000:
+            self.portfolio_values = self.portfolio_values[-500:]
 
         # --- Calculate reward ---
         if portfolio_value_before > 1e-6:
@@ -296,6 +299,9 @@ class CryptoPerpEnv(gym.Env):
         else:
             step_return = 0.0
         self.returns_history.append(step_return)
+        # OPT: Trim to prevent unbounded growth — only need sortino_window for reward
+        if len(self.returns_history) > self.sortino_window * 2:
+            self.returns_history = self.returns_history[-self.sortino_window:]
 
         reward = self._calc_reward(step_return, abs_delta, portfolio_value_before)
 

@@ -531,3 +531,52 @@ class TestSpotBorrowCosts:
         assert total_borrow > 0.0, "Borrow costs should be positive"
         # Accounting: PV = initial_capital + funding + realized_basis - fees - borrow
         # All costs reduce PV relative to hold-all baseline
+
+
+# ---------------------------------------------------------------------------
+# 11. Random start (AUD-S225)
+# ---------------------------------------------------------------------------
+
+class TestRandomStart:
+    def test_random_start_disabled_always_step0(self):
+        """Without random_start, every reset starts at step_idx=0."""
+        env = _make_env(n_bars=500, random_start=False)
+        starts = []
+        for _ in range(10):
+            env.reset(seed=42)
+            starts.append(env.step_idx)
+        assert all(s == 0 for s in starts), f"Expected all 0, got {starts}"
+
+    def test_random_start_enabled_varies_step(self):
+        """With random_start, different seeds produce different start indices."""
+        env = _make_env(n_bars=500, random_start=True, random_start_pct=0.5)
+        starts = set()
+        for seed in range(20):
+            env.reset(seed=seed)
+            starts.add(env.step_idx)
+        assert len(starts) > 1, f"Expected varied starts, got {starts}"
+
+    def test_random_start_within_bounds(self):
+        """Random start index must be < max_step * random_start_pct."""
+        env = _make_env(n_bars=500, random_start=True, random_start_pct=0.2)
+        max_allowed = int(env.max_step * 0.2)
+        for seed in range(50):
+            env.reset(seed=seed)
+            assert 0 <= env.step_idx <= max_allowed, (
+                f"step_idx={env.step_idx} outside [0, {max_allowed}]"
+            )
+
+    def test_random_start_episode_runs_to_completion(self):
+        """Episode should run normally from random start to data end."""
+        env = _make_env(n_bars=200, random_start=True, random_start_pct=0.3)
+        obs, _ = env.reset(seed=7)
+        assert obs is not None
+        # Step until done
+        done = False
+        steps = 0
+        while not done and steps < 200:
+            action = env.action_space.sample()
+            obs, reward, terminated, truncated, info = env.step(action)
+            done = terminated or truncated
+            steps += 1
+        assert steps > 0, "Should take at least 1 step"

@@ -456,3 +456,53 @@ class TestVectorEnvCompat:
         obs, rewards, terminated, truncated, infos = vec_env.step(actions)
         assert rewards.shape == (2,)
         vec_env.close()
+
+
+# ---------------------------------------------------------------------------
+# Cancel-replace latency tests (AUD-S225)
+# ---------------------------------------------------------------------------
+
+class TestQuoteLatency:
+    def test_latency_zero_is_immediate(self):
+        """quote_latency_bars=0 → quotes apply instantly (backward-compatible)."""
+        cfg = _make_config(quote_latency_bars=0, deadband_threshold=0.0)
+        handler = _MockMMHandler(n_bars=200)
+        env = MarketMakingEnv(config=cfg, data_handler=handler)
+        env.reset(seed=42)
+
+        # Wide spread action should apply immediately
+        action = np.array([1.0, 0.0, 0.5], dtype=np.float32)
+        obs, reward, term, trunc, info = env.step(action)
+        # With immediate quotes and high intensity, fills should be possible
+        assert info is not None
+
+    def test_latency_one_delays_quotes(self):
+        """quote_latency_bars=1 → new quotes take 1 bar to become active."""
+        cfg = _make_config(quote_latency_bars=1, deadband_threshold=0.0)
+        handler = _MockMMHandler(n_bars=200)
+        env = MarketMakingEnv(config=cfg, data_handler=handler)
+        env.reset(seed=42)
+
+        # Step 1: submit wide-spread quotes → should use DEFAULT active quotes (1.0, 0.0, 0.0)
+        # Default intensity=0.0, so no fills expected
+        action_wide = np.array([1.0, 0.0, 1.0], dtype=np.float32)
+        _, _, _, _, info1 = env.step(action_wide)
+        fills_step1 = info1.get("total_fills", 0)
+
+        # Step 2: submit same action → previous quotes should now be active
+        _, _, _, _, info2 = env.step(action_wide)
+        # Now intensity > 0 from the promoted pending quotes
+        # (whether fills happen depends on price crossing bid/ask)
+
+        # Verify the latency mechanism is functioning:
+        # the env should have _active_quotes updated after step 2
+        assert env._active_quotes is not None
+        # After 2 steps, pending should become active
+        assert env._active_quotes[2] > 0.0, "Intensity should be > 0 after latency expires"
+
+    def test_latency_backward_compatible_default(self):
+        """Default config has no latency — same behavior as before."""
+        cfg = _make_config()  # No quote_latency_bars key
+        handler = _MockMMHandler(n_bars=200)
+        env = MarketMakingEnv(config=cfg, data_handler=handler)
+        assert env.quote_latency_bars == 0

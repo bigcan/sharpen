@@ -49,9 +49,19 @@ class ContinuousSwingEnv(gym.Env):
         # Deadband: ignore position changes smaller than this
         self.deadband_threshold = float(config.get("deadband_threshold", 0.25))
 
+        # Slippage model: flat bps per unit of position change
+        # V7 uses OHLCV (no volume), so slippage is a flat rate, not volume-dependent.
+        # Set slippage_base_bps > 0 for production backtests (e.g., 0.3 for Gold).
+        self.slippage_base_bps = max(0.0, float(config.get("slippage_base_bps", 0.0)))
+
         # ATR-based position capping
         self.atr_cap_percentile = float(config.get("atr_cap_percentile", 90))
         self.atr_cap_max_position = float(config.get("atr_cap_max_position", 0.5))
+
+        # Gap detection: zero out returns exceeding 3x ATR/price (session gaps, rolls)
+        # Default off — enable for futures with trading halts (Gold, ES).
+        self.gap_detection = bool(config.get("gap_detection", False))
+        self._gap_atr_mult = float(config.get("gap_atr_mult", 3.0))
 
         # Reward config
         reward_cfg = config.get("reward", {})
@@ -238,12 +248,19 @@ class ContinuousSwingEnv(gym.Env):
         price_return = 0.0
         if self.prev_close > 0:
             price_return = (self.current_close - self.prev_close) / self.prev_close
+            # Gap detection: zero out returns from session gaps / contract rolls
+            # that exceed gap_atr_mult × ATR/price. These are non-tradeable artifacts.
+            if (self.gap_detection and self._atr_rolling_mean > 1e-12
+                    and abs(price_return) > self._gap_atr_mult * self._atr_rolling_mean / self.prev_close):
+                price_return = 0.0
             pnl_bps = self.current_position * price_return * 10000.0
 
-        # Transaction cost
+        # Transaction cost (fee + slippage)
         tc_bps = 0.0
         if traded:
             tc_bps = self.taker_fee * 10000.0 * abs(delta)
+            if self.slippage_base_bps > 0:
+                tc_bps += self.slippage_base_bps * abs(delta)
             self.cumulative_fees += tc_bps
 
         # Step return
@@ -261,7 +278,8 @@ class ContinuousSwingEnv(gym.Env):
         # Without this, drawdown recovery is inflated and long backtests diverge from reality.
         equity_delta = self.current_position * price_return * self.equity
         if traded:
-            equity_delta -= self.taker_fee * abs(delta) * self.equity
+            fee_frac = self.taker_fee + self.slippage_base_bps / 10000.0
+            equity_delta -= fee_frac * abs(delta) * self.equity
         self.equity += equity_delta
         self.peak_equity = max(self.peak_equity, self.equity)
 

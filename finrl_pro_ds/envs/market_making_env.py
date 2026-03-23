@@ -63,6 +63,12 @@ class MarketMakingEnv(gym.Env):
         # Deadband on spread/skew changes
         self.deadband_threshold = float(config.get("deadband_threshold", 0.1))
 
+        # Cancel-replace latency: number of bars before new quotes become active.
+        # 0 = instant (default, backward-compatible). 1 = 1-bar delay (realistic).
+        # Simulates the real-world latency between deciding to adjust quotes and
+        # the new quotes being active on the exchange.
+        self.quote_latency_bars = int(config.get("quote_latency_bars", 0))
+
         # Reward config
         reward_cfg = config.get("reward", {})
         self.reward_mode = reward_cfg.get("mode", "dsr")
@@ -133,6 +139,12 @@ class MarketMakingEnv(gym.Env):
         self._prev_spread_mult = 1.0
         self._prev_skew_bps = 0.0
         self._bars_since_quote_change = 0
+
+        # Cancel-replace latency state
+        # Active quotes are what the fill model uses; pending quotes wait for latency
+        self._active_quotes = (1.0, 0.0, 0.0)  # (spread_mult, skew_bps, intensity)
+        self._pending_quotes = None  # (spread_mult, skew_bps, intensity, bars_remaining)
+
 
         # Fill tracking EMAs
         self._bid_fill_ema = 0.0
@@ -209,7 +221,7 @@ class MarketMakingEnv(gym.Env):
         self.current_step += 1
 
         # 1. Map action to quote parameters
-        spread_mult, skew_bps, intensity = self._map_action(raw)
+        new_spread_mult, new_skew_bps, new_intensity = self._map_action(raw)
 
         # 2. Advance data
         step_data = self.handler.step() if self.handler else None
@@ -240,7 +252,25 @@ class MarketMakingEnv(gym.Env):
                 self._atr_buffer = self._atr_buffer[-200:]
             self._atr_rolling_mean = np.mean(self._atr_buffer)
 
-        # 4. Compute quotes
+        # 4. Resolve quote latency: determine which quotes are active for fills
+        if self.quote_latency_bars <= 0:
+            # No latency — new quotes are immediately active
+            spread_mult, skew_bps, intensity = new_spread_mult, new_skew_bps, new_intensity
+        else:
+            # Promote pending → active if latency expired
+            if self._pending_quotes is not None:
+                pq_spread, pq_skew, pq_intensity, bars_left = self._pending_quotes
+                if bars_left <= 1:
+                    self._active_quotes = (pq_spread, pq_skew, pq_intensity)
+                    self._pending_quotes = None
+                else:
+                    self._pending_quotes = (pq_spread, pq_skew, pq_intensity, bars_left - 1)
+            # Queue new quotes as pending
+            self._pending_quotes = (new_spread_mult, new_skew_bps, new_intensity, self.quote_latency_bars)
+            # Use active quotes for this bar's fills
+            spread_mult, skew_bps, intensity = self._active_quotes
+
+        # Compute quote prices from (possibly stale) active quotes
         mid = self.prev_close  # agent's decision was based on previous bar's close
         if mid <= 0:
             mid = self.current_close if self.current_close > 0 else 1.0

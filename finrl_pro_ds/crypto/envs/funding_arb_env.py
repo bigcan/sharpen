@@ -75,6 +75,8 @@ class FundingArbEnv(gym.Env):
         circuit_breaker_threshold: float = 0.05,
         action_repeat: int = 1,
         enable_trade_log: bool = False,
+        random_start: bool = False,
+        random_start_pct: float = 0.1,
     ) -> None:
         super().__init__()
 
@@ -122,6 +124,8 @@ class FundingArbEnv(gym.Env):
         self.circuit_breaker_threshold = float(circuit_breaker_threshold)
         self.action_repeat = max(1, int(action_repeat))
         self.enable_trade_log = enable_trade_log
+        self.random_start = random_start
+        self.random_start_pct = float(random_start_pct)
 
         # --- Pre-compute funding mask (UTC 00/08/16) ---
         self._funding_mask = self._build_funding_mask()
@@ -186,7 +190,11 @@ class FundingArbEnv(gym.Env):
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)
 
-        self.step_idx = 0
+        if self.random_start and self.max_step > 0:
+            max_offset = int(self.max_step * self.random_start_pct)
+            self.step_idx = int(self.np_random.integers(0, max_offset)) if max_offset > 0 else 0
+        else:
+            self.step_idx = 0
         self.margin_balance = self.initial_capital
         self.arb_weights = np.zeros(self.n_assets, dtype=np.float64)
         self.spot_entry_prices = np.zeros(self.n_assets, dtype=np.float64)
@@ -308,6 +316,9 @@ class FundingArbEnv(gym.Env):
         # --- Step 4: Compute new portfolio value ---
         portfolio_value = self._get_portfolio_value(spot_price, perp_price)
         self.portfolio_values.append(portfolio_value)
+        # OPT: Trim to prevent unbounded growth (only need recent values for reward)
+        if len(self.portfolio_values) > 1000:
+            self.portfolio_values = self.portfolio_values[-500:]
 
         # --- Step 5: Compute reward ---
         # PV-return reward: directly optimize portfolio value growth.
