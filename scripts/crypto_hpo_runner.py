@@ -1010,19 +1010,23 @@ def main():
         logger.info(f"Warm-start: ON ({args.warm_start_trials} trials for windows > 0)")
     logger.info(f"Output: {out_dir}")
 
-    results = run_full_hpo_wf(
-        config, args.max_windows, n_trials, hpo_timesteps, out_dir,
-        warm_start=args.warm_start,
-        warm_start_trials=args.warm_start_trials,
-    )
-
-    # Finish WandB
     try:
-        import wandb
-        if wandb.run is not None:
-            wandb.finish()
+        results = run_full_hpo_wf(
+            config, args.max_windows, n_trials, hpo_timesteps, out_dir,
+            warm_start=args.warm_start,
+            warm_start_trials=args.warm_start_trials,
+        )
     except Exception:
-        pass
+        logger.exception("HPO walk-forward crashed")
+        raise
+    finally:
+        # Always finalize WandB — even on crash/OOM/signal
+        try:
+            import wandb
+            if wandb.run is not None:
+                wandb.finish()
+        except Exception:
+            pass
 
     if results["status"] == "COMPLETED":
         logger.info("HPO walk-forward COMPLETED")
