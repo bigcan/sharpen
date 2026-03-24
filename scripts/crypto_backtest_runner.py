@@ -709,46 +709,50 @@ def main():
         logger.info(f"Agent override: {args.agents}")
 
     _init_wandb(config, args)
-    results = run_backtest(config, max_windows=args.max_windows, hpo_results_dir=args.hpo_results_dir)
-
-    # Log final summary to WandB
-    if results.get("status") == "COMPLETED":
-        _wandb_log({
-            "summary/median_sharpe": results["median_sharpe"],
-            "summary/median_return": results["median_return"],
-            "summary/median_max_dd": results["median_max_dd"],
-            "summary/n_windows": results["n_windows"],
-        })
-
-    # R6 fix: Persist results to disk for downstream consumption
-    out_dir = Path("results") / "crypto_backtest"
-    out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "backtest_results.json"
-    # Convert numpy/pandas types for JSON serialization
-    def _serialize(obj):
-        if isinstance(obj, (np.integer,)):
-            return int(obj)
-        if isinstance(obj, (np.floating, np.float64)):
-            return float(obj)
-        if isinstance(obj, (np.bool_,)):
-            return bool(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, pd.Timestamp):
-            return str(obj)
-        return obj
-
-    with open(out_path, "w") as f:
-        json.dump(results, f, indent=2, default=_serialize)
-    logger.info(f"Results saved to {out_path}")
-
-    # Finish WandB run
     try:
-        import wandb
-        if wandb.run is not None:
-            wandb.finish()
+        results = run_backtest(config, max_windows=args.max_windows, hpo_results_dir=args.hpo_results_dir)
+
+        # Log final summary to WandB
+        if results.get("status") == "COMPLETED":
+            _wandb_log({
+                "summary/median_sharpe": results["median_sharpe"],
+                "summary/median_return": results["median_return"],
+                "summary/median_max_dd": results["median_max_dd"],
+                "summary/n_windows": results["n_windows"],
+            })
+
+        # R6 fix: Persist results to disk for downstream consumption
+        out_dir = Path("results") / "crypto_backtest"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        out_path = out_dir / "backtest_results.json"
+        # Convert numpy/pandas types for JSON serialization
+        def _serialize(obj):
+            if isinstance(obj, (np.integer,)):
+                return int(obj)
+            if isinstance(obj, (np.floating, np.float64)):
+                return float(obj)
+            if isinstance(obj, (np.bool_,)):
+                return bool(obj)
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, pd.Timestamp):
+                return str(obj)
+            return obj
+
+        with open(out_path, "w") as f:
+            json.dump(results, f, indent=2, default=_serialize)
+        logger.info(f"Results saved to {out_path}")
     except Exception:
-        pass
+        logger.exception("Backtest crashed")
+        raise
+    finally:
+        # Always finalize WandB — even on crash/OOM/signal
+        try:
+            import wandb
+            if wandb.run is not None:
+                wandb.finish()
+        except Exception:
+            pass
 
     if results["status"] == "COMPLETED":
         logger.info("Backtest COMPLETED successfully")
