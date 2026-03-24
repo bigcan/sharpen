@@ -264,6 +264,7 @@ class MultiScaleOHLCVHandler:
         self._base_close = base_df['close'].values.astype(np.float64)
         self._base_high = base_df['high'].values.astype(np.float64)
         self._base_low = base_df['low'].values.astype(np.float64)
+        self._base_volume = base_df['volume'].values.astype(np.float64)
         self._base_timestamps = base_df['timestamp'].values
 
         # Precompute ATR on base scale for position capping
