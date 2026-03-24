@@ -1,7 +1,11 @@
 """Crypto HPO Runner — Optuna-based hyperparameter optimization for Synapse Crypto 1H.
 
-Per-window SAC HPO with Sortino objective, followed by full training of
-SAC (best params) + A2C (defaults) with Softmax Arbitrator ensemble.
+Per-window per-agent HPO with Sortino objective, followed by full training of
+each agent with its HPO-optimized params and Softmax Arbitrator ensemble.
+
+HPO agents are configurable via ``hpo.agents`` (default: ["sac"]). SAC HPO
+runs first to determine shared env overrides (turnover_penalty, action_ema_alpha);
+A2C/PPO HPO then runs sequentially with those env overrides locked.
 
 Supports warm-start mode (--warm_start) for windows > 0:
   - HPO: seed Optuna with top-5 params from previous window, run fewer trials
@@ -83,6 +87,45 @@ def define_sac_search_space(trial, base_cfg: dict) -> dict:
     }
 
     return {"agent_params": agent_params, "env_overrides": env_overrides}
+
+
+def define_a2c_search_space(trial, base_cfg: dict) -> dict:
+    """Define the 5-dimensional A2C search space.
+
+    Returns a dict with agent_params only — env overrides come from SAC HPO.
+    """
+    agent_params = {
+        "learning_rate": trial.suggest_float("learning_rate", 1e-4, 1e-2, log=True),
+        "n_steps": trial.suggest_categorical("n_steps", [8, 16, 24, 48, 96]),
+        "gamma": trial.suggest_float("gamma", 0.95, 0.999),
+        "ent_coef": trial.suggest_float("ent_coef", 0.0, 0.05),
+        "vf_coef": trial.suggest_float("vf_coef", 0.25, 1.0),
+    }
+    return {"agent_params": agent_params, "env_overrides": {}}
+
+
+def define_ppo_search_space(trial, base_cfg: dict) -> dict:
+    """Define the 7-dimensional PPO search space.
+
+    Returns a dict with agent_params only — env overrides come from SAC HPO.
+    """
+    agent_params = {
+        "learning_rate": trial.suggest_float("learning_rate", 1e-5, 3e-4, log=True),
+        "n_steps": trial.suggest_categorical("n_steps", [24, 48, 96, 192]),
+        "n_epochs": trial.suggest_categorical("n_epochs", [3, 5, 10]),
+        "gamma": trial.suggest_float("gamma", 0.95, 0.999),
+        "gae_lambda": trial.suggest_float("gae_lambda", 0.90, 0.98),
+        "ent_coef": trial.suggest_float("ent_coef", 0.005, 0.1, log=True),
+        "clip_range": trial.suggest_categorical("clip_range", [0.1, 0.2, 0.3]),
+    }
+    return {"agent_params": agent_params, "env_overrides": {}}
+
+
+SEARCH_SPACE_REGISTRY = {
+    "sac": define_sac_search_space,
+    "a2c": define_a2c_search_space,
+    "ppo_gae": define_ppo_search_space,
+}
 
 
 def _create_env_with_overrides(arrays: dict, config: dict, overrides: dict):
@@ -207,11 +250,25 @@ def hpo_objective(
     val_arrays: dict,
     config: dict,
     hpo_timesteps: int,
+    agent_type: str = "sac",
+    fixed_env_overrides: dict | None = None,
 ) -> float:
-    """Optuna objective: train SAC with trial params, return val Sortino."""
-    search = define_sac_search_space(trial, config)
+    """Optuna objective: train agent with trial params, return val Sortino.
+
+    Parameters
+    ----------
+    agent_type : str
+        Agent to tune ("sac", "a2c", or "ppo_gae").
+    fixed_env_overrides : dict, optional
+        Pre-determined env overrides (from SAC HPO). When provided, the trial
+        does NOT sample env overrides — it uses these instead. Used for A2C/PPO
+        HPO where env params are locked to SAC's best.
+    """
+    search_fn = SEARCH_SPACE_REGISTRY[agent_type]
+    search = search_fn(trial, config)
     agent_params = search["agent_params"]
-    env_overrides = search["env_overrides"]
+    # Use fixed env overrides if provided (A2C/PPO), else use trial-sampled (SAC)
+    env_overrides = fixed_env_overrides if fixed_env_overrides is not None else search["env_overrides"]
 
     agents_cfg = config.get("agents", {})
     n_envs = agents_cfg.get("n_envs", 20)
@@ -220,12 +277,12 @@ def hpo_objective(
     network_arch = agents_cfg.get("network_arch", [256, 256])
 
     try:
-        # Build vectorized train env with trial's env overrides
+        # Build vectorized train env with env overrides
         vec_env = _make_vec_env_with_overrides(train_arrays, config, n_envs, env_overrides)
 
-        # Build SAC with trial's agent params + locked network
-        sac_cfg = {**agent_params, "network_arch": network_arch}
-        model = _make_sb3_agent("sac", vec_env, sac_cfg)
+        # Build agent with trial's params + locked network
+        agent_cfg = {**agent_params, "network_arch": network_arch}
+        model = _make_sb3_agent(agent_type, vec_env, agent_cfg)
 
         # Train
         model.learn(total_timesteps=hpo_timesteps)
@@ -242,10 +299,9 @@ def hpo_objective(
 
         # Log to WandB
         _wandb_log({
-            f"hpo/trial_{trial.number}/sortino": val_sort,
-            f"hpo/trial_{trial.number}/lr": agent_params["learning_rate"],
-            f"hpo/trial_{trial.number}/gamma": agent_params["gamma"],
-            f"hpo/trial_{trial.number}/turnover": env_overrides["turnover_penalty"],
+            f"hpo/{agent_type}/trial_{trial.number}/sortino": val_sort,
+            f"hpo/{agent_type}/trial_{trial.number}/lr": agent_params["learning_rate"],
+            f"hpo/{agent_type}/trial_{trial.number}/gamma": agent_params["gamma"],
         })
 
         # Cleanup
@@ -253,11 +309,11 @@ def hpo_objective(
         del model, vec_env
         gc.collect()
 
-        logger.info(f"Trial {trial.number}: val_sortino={val_sort:.4f}")
+        logger.info(f"[{agent_type.upper()}] Trial {trial.number}: val_sortino={val_sort:.4f}")
         return val_sort
 
     except Exception as e:
-        logger.error(f"Trial {trial.number} FAILED: {e}")
+        logger.error(f"[{agent_type.upper()}] Trial {trial.number} FAILED: {e}")
         gc.collect()
         return -999.0
 
@@ -315,57 +371,48 @@ def _generate_backtest_report(
         logger.warning(f"  Backtest report generation failed (non-fatal): {e}")
 
 
-def run_hpo_for_window(
+def _run_agent_hpo(
+    agent_type: str,
     w_idx: int,
     train_arrays: dict,
     val_arrays: dict,
-    test_arrays: dict,
     config: dict,
     n_trials: int,
     hpo_timesteps: int,
     out_dir: Path,
-    prev_artifacts: dict | None = None,
-) -> tuple[dict, dict]:
-    """Run HPO for a single walk-forward window, then full train + eval.
+    fixed_env_overrides: dict | None = None,
+    warm_trials: list[dict] | None = None,
+) -> tuple[dict, dict, list[dict]]:
+    """Run Optuna HPO for a single agent type within a window.
 
-    Steps:
-    1. HPO: n_trials of SAC → best params (maximize val Sortino)
-       - If prev_artifacts provided: seed with top-5 params, run fewer trials
-    2. Full train: SAC (best params) + A2C (defaults)
-       - If prev_artifacts provided: warm-start from previous weights
-    3. Eval: val Sortino → arbitrator → test ensemble → metrics
+    Parameters
+    ----------
+    fixed_env_overrides : dict, optional
+        Pre-determined env overrides (from SAC HPO). Passed through to
+        ``hpo_objective`` so the trial does NOT sample env params.
+    warm_trials : list[dict], optional
+        Top-K param dicts from previous window to seed the study.
 
-    Returns:
-        (window_result, artifacts) — artifacts dict for warm-starting next window.
+    Returns
+    -------
+    (best_agent_params, best_env_overrides, top_k_params)
+        best_env_overrides is empty for A2C/PPO (env locked to SAC's best).
     """
     import optuna
 
-    is_warm = prev_artifacts is not None
-    warm_tag = " [WARM-START]" if is_warm else " [COLD-START]"
-
-    # --- HPO Phase ---
-    # Warm-start: seed with top-5 from previous window, reduce trials
-    if is_warm and prev_artifacts is not None:
-        warm_trials = prev_artifacts.get("top_k_params", [])
-        n_seeded = len(warm_trials)
-        # Fewer random startup trials since we have good seeds
-        n_startup = max(3, n_seeded)
-        effective_trials = max(n_trials, n_seeded + 10)  # at least 10 exploration trials
-    else:
-        warm_trials = []
-        n_seeded = 0
-        n_startup = 10
-        effective_trials = n_trials
+    warm_trials = warm_trials or []
+    n_seeded = len(warm_trials)
+    n_startup = max(3, n_seeded) if n_seeded else 10
+    effective_trials = max(n_trials, n_seeded + 10) if n_seeded else n_trials
 
     logger.info(
-        f"=== Window {w_idx}: HPO Phase{warm_tag} "
-        f"({effective_trials} trials × {hpo_timesteps} steps"
-        f"{f', {n_seeded} seeded' if n_seeded else ''}) ==="
+        f"  [{agent_type.upper()}] HPO: {effective_trials} trials × {hpo_timesteps} steps"
+        f"{f' ({n_seeded} seeded)' if n_seeded else ''}"
     )
 
-    storage_path = out_dir / f"hpo_sync1h_w{w_idx}.db"
+    storage_path = out_dir / f"hpo_sync1h_w{w_idx}_{agent_type}.db"
     study = optuna.create_study(
-        study_name=f"sync1h_w{w_idx}_sac",
+        study_name=f"sync1h_w{w_idx}_{agent_type}",
         direction="maximize",
         sampler=optuna.samplers.TPESampler(
             seed=42, n_startup_trials=n_startup, multivariate=True,
@@ -379,10 +426,13 @@ def run_hpo_for_window(
     if warm_trials and len(study.trials) == 0:
         for params in warm_trials:
             study.enqueue_trial(params)
-        logger.info(f"  Seeded {n_seeded} trials from previous window")
+        logger.info(f"    Seeded {n_seeded} trials from previous window")
 
     def _objective(trial):
-        return hpo_objective(trial, train_arrays, val_arrays, config, hpo_timesteps)
+        return hpo_objective(
+            trial, train_arrays, val_arrays, config, hpo_timesteps,
+            agent_type=agent_type, fixed_env_overrides=fixed_env_overrides,
+        )
 
     # Skip already-completed trials (resumability)
     remaining = effective_trials - len(study.trials)
@@ -398,34 +448,165 @@ def run_hpo_for_window(
     best = study.best_trial
     best_params = best.params
     best_sortino = best.value
-    logger.info(f"Window {w_idx} HPO COMPLETE: best_sortino={best_sortino:.4f} (trial {best.number})")
-    logger.info(f"  Best params: {best_params}")
+    logger.info(
+        f"  [{agent_type.upper()}] HPO COMPLETE: "
+        f"best_sortino={best_sortino:.4f} (trial {best.number})"
+    )
+    logger.info(f"    Best params: {best_params}")
 
     # Split best params into agent vs env
-    agent_keys = {"learning_rate", "buffer_size", "batch_size", "gamma", "tau", "learning_starts"}
     env_keys = {"turnover_penalty", "action_ema_alpha"}
-    best_agent_params = {k: v for k, v in best_params.items() if k in agent_keys}
+    best_agent_params = {k: v for k, v in best_params.items() if k not in env_keys}
     best_env_overrides = {k: v for k, v in best_params.items() if k in env_keys}
 
     # Save best params
     out_dir.mkdir(parents=True, exist_ok=True)
-    best_sac_path = out_dir / f"w{w_idx}_best_sac.json"
-    with open(best_sac_path, "w") as f:
+    best_path = out_dir / f"w{w_idx}_best_{agent_type}.json"
+    with open(best_path, "w") as f:
         json.dump({
             "window": w_idx,
+            "agent_type": agent_type,
             "best_trial": best.number,
             "best_sortino": best_sortino,
             "agent_params": best_agent_params,
             "env_overrides": best_env_overrides,
             "all_params": best_params,
         }, f, indent=2)
-    logger.info(f"  Saved best params to {best_sac_path}")
+    logger.info(f"    Saved best params to {best_path}")
 
     _wandb_log({
-        f"hpo/w{w_idx}/best_sortino": best_sortino,
-        f"hpo/w{w_idx}/best_trial": best.number,
-        **{f"hpo/w{w_idx}/best_{k}": v for k, v in best_params.items()},
+        f"hpo/{agent_type}/w{w_idx}/best_sortino": best_sortino,
+        f"hpo/{agent_type}/w{w_idx}/best_trial": best.number,
+        **{f"hpo/{agent_type}/w{w_idx}/best_{k}": v for k, v in best_params.items()},
     })
+
+    # Top-K for next window's warm-start
+    top_k_trials = sorted(
+        [t for t in study.trials if t.value is not None and t.value > -999],
+        key=lambda t: t.value if t.value is not None else -999.0,
+        reverse=True,
+    )[:5]
+    top_k_params = [t.params for t in top_k_trials]
+
+    return best_agent_params, best_env_overrides, top_k_params
+
+
+def _apply_warm_start_params(model, agent_type: str, hp: dict) -> None:
+    """Apply HPO-tuned params to a warm-started model.
+
+    Updates learning rate (+ lr_schedule), gamma, and agent-specific params
+    like tau/batch_size (SAC) or gae_lambda/clip_range (PPO).
+    """
+    new_lr = hp.get("learning_rate", model.learning_rate)
+    model.learning_rate = new_lr
+    try:
+        from stable_baselines3.common.utils import ConstantSchedule
+        model.lr_schedule = ConstantSchedule(new_lr)
+    except ImportError:
+        from stable_baselines3.common.utils import get_schedule_fn
+        model.lr_schedule = get_schedule_fn(new_lr)  # type: ignore[assignment]
+
+    model.gamma = hp.get("gamma", model.gamma)
+
+    if agent_type == "sac":
+        model.tau = hp.get("tau", model.tau)
+        model.batch_size = hp.get("batch_size", model.batch_size)
+        # Empty replay buffer — stale data hurts in non-stationary markets
+        if hasattr(model, "replay_buffer") and model.replay_buffer is not None:
+            model.replay_buffer.reset()
+        # Skip learning_starts since network is already initialized
+        model.learning_starts = 0
+    elif agent_type == "ppo_gae":
+        if "gae_lambda" in hp:
+            model.gae_lambda = hp["gae_lambda"]
+        if "clip_range" in hp:
+            model.clip_range = hp["clip_range"]  # type: ignore[assignment]
+        if "n_epochs" in hp:
+            model.n_epochs = hp["n_epochs"]
+        if "ent_coef" in hp:
+            model.ent_coef = hp["ent_coef"]
+    elif agent_type == "a2c":
+        if "ent_coef" in hp:
+            model.ent_coef = hp["ent_coef"]
+        if "vf_coef" in hp:
+            model.vf_coef = hp["vf_coef"]
+
+
+def run_hpo_for_window(
+    w_idx: int,
+    train_arrays: dict,
+    val_arrays: dict,
+    test_arrays: dict,
+    config: dict,
+    n_trials: int,
+    hpo_timesteps: int,
+    out_dir: Path,
+    prev_artifacts: dict | None = None,
+) -> tuple[dict, dict]:
+    """Run per-agent HPO for a walk-forward window, then full train + eval.
+
+    Steps:
+    1. HPO: sequential per-agent (SAC first for env overrides, then A2C/PPO)
+       - If prev_artifacts provided: seed each agent with its top-5 params
+    2. Full train: each agent uses its HPO-optimized params
+       - If prev_artifacts provided: warm-start from previous weights
+    3. Eval: val Sortino → arbitrator → test ensemble → metrics
+
+    Returns:
+        (window_result, artifacts) — artifacts dict for warm-starting next window.
+    """
+    is_warm = prev_artifacts is not None
+    warm_tag = " [WARM-START]" if is_warm else " [COLD-START]"
+
+    # --- Per-Agent HPO Phase ---
+    hpo_cfg = config.get("hpo", {})
+    hpo_agents = hpo_cfg.get("agents", ["sac"])
+    trials_per_agent = hpo_cfg.get("trials_per_agent", {})
+
+    logger.info(
+        f"=== Window {w_idx}: HPO Phase{warm_tag} "
+        f"(agents: {', '.join(a.upper() for a in hpo_agents)}) ==="
+    )
+
+    best_env_overrides: dict = {}
+    all_best_params: dict[str, dict] = {}
+    all_top_k: dict[str, list[dict]] = {}
+
+    for agent_type in hpo_agents:
+        # SAC determines env overrides; others inherit them
+        fixed_env = best_env_overrides if agent_type != "sac" else None
+        agent_n_trials = trials_per_agent.get(agent_type, n_trials)
+
+        # Per-agent warm-start seeds
+        agent_warm: list[dict] = []
+        if is_warm and prev_artifacts is not None:
+            agent_warm = prev_artifacts.get(f"{agent_type}_top_k_params", [])
+            # Backward compat: fall back to "top_k_params" for SAC
+            if agent_type == "sac" and not agent_warm:
+                agent_warm = prev_artifacts.get("top_k_params", [])
+
+        best_agent, best_env, top_k = _run_agent_hpo(
+            agent_type, w_idx, train_arrays, val_arrays, config,
+            agent_n_trials, hpo_timesteps, out_dir,
+            fixed_env_overrides=fixed_env,
+            warm_trials=agent_warm if is_warm else None,
+        )
+
+        all_best_params[agent_type] = best_agent
+        all_top_k[agent_type] = top_k
+        if agent_type == "sac":
+            best_env_overrides = best_env
+
+    # Backward compat: expose SAC's best sortino/params at top level
+    best_sortino = 0.0
+    best_params: dict = {}
+    if "sac" in all_best_params:
+        sac_path = out_dir / f"w{w_idx}_best_sac.json"
+        if sac_path.exists():
+            with open(sac_path) as f:
+                sac_best = json.load(f)
+            best_sortino = sac_best.get("best_sortino", 0.0)
+            best_params = sac_best.get("all_params", {})
 
     # --- Full Training Phase ---
     agents_cfg = config.get("agents", {})
@@ -456,56 +637,27 @@ def run_hpo_for_window(
                 if is_warm and prev_artifacts is not None else None
             )
 
+            # Resolve HPO params for this agent (if HPO was run for it)
+            agent_hpo_params = all_best_params.get(agent_type, {})
+
             if prev_model_path and Path(prev_model_path).exists():
                 # Warm-start: load previous weights, attach new env
                 from stable_baselines3 import SAC, A2C, PPO
                 if agent_type == "sac":
                     model = SAC.load(str(prev_model_path), env=vec_env)
                 elif agent_type == "ppo_gae":
-                    model = PPO.load(str(prev_model_path), env=vec_env)
+                    model = PPO.load(str(prev_model_path), env=vec_env)  # type: ignore[assignment]
                 else:
                     model = A2C.load(str(prev_model_path), env=vec_env)  # type: ignore[assignment]
-                # Override HPO params for SAC (new window may have new best)
-                if agent_type == "sac":
-                    new_lr = best_agent_params.get(
-                        "learning_rate", model.learning_rate
-                    )
-                    model.learning_rate = new_lr
-                    # Update lr_schedule so optimizer uses new LR
-                    try:
-                        from stable_baselines3.common.utils import ConstantSchedule
-                        model.lr_schedule = ConstantSchedule(new_lr)
-                    except ImportError:
-                        from stable_baselines3.common.utils import get_schedule_fn
-                        model.lr_schedule = get_schedule_fn(new_lr)  # type: ignore[assignment]
-                    model.gamma = best_agent_params.get("gamma", model.gamma)
-                    model.tau = best_agent_params.get("tau", model.tau)
-                    model.batch_size = best_agent_params.get(
-                        "batch_size", model.batch_size
-                    )
-                    # Empty replay buffer — stale data hurts in non-stationary markets
-                    if hasattr(model, "replay_buffer") and model.replay_buffer is not None:
-                        model.replay_buffer.reset()
-                    # Skip learning_starts since network is already initialized
-                    model.learning_starts = 0
-                elif agent_type == "ppo_gae":
-                    # PPO warm-start: update LR from HPO if available
-                    new_lr = best_agent_params.get(
-                        "learning_rate", model.learning_rate
-                    )
-                    model.learning_rate = new_lr
-                    try:
-                        from stable_baselines3.common.utils import ConstantSchedule
-                        model.lr_schedule = ConstantSchedule(new_lr)
-                    except ImportError:
-                        from stable_baselines3.common.utils import get_schedule_fn
-                        model.lr_schedule = get_schedule_fn(new_lr)  # type: ignore[assignment]
-                    model.gamma = best_agent_params.get("gamma", model.gamma)
+
+                # Apply per-agent HPO params on warm-start
+                if agent_hpo_params:
+                    _apply_warm_start_params(model, agent_type, agent_hpo_params)
                 logger.info(f"    Warm-started from {prev_model_path}")
             else:
                 # Cold-start: build fresh agent
-                if agent_type == "sac":
-                    agent_cfg = {**best_agent_params, "network_arch": network_arch}
+                if agent_hpo_params:
+                    agent_cfg = {**agent_hpo_params, "network_arch": network_arch}
                 else:
                     agent_cfg = agents_cfg.get(agent_type, {}).copy()
                     if network_arch and "network_arch" not in agent_cfg:
@@ -537,7 +689,11 @@ def run_hpo_for_window(
 
     if not trained_agents:
         logger.error(f"  Window {w_idx}: all agents failed")
-        empty_artifacts: dict = {"top_k_params": [], **{f"{a}_path": None for a in lean_trinity}}
+        empty_artifacts: dict = {
+            "top_k_params": [],
+            **{f"{a}_path": None for a in lean_trinity},
+            **{f"{a}_top_k_params": [] for a in hpo_agents},
+        }
         return {"window": w_idx, "status": "FAILED", "best_sortino": best_sortino}, empty_artifacts
 
     # --- Eval Phase ---
@@ -611,6 +767,10 @@ def run_hpo_for_window(
         "status": "COMPLETED",
         "hpo_best_sortino": best_sortino,
         "hpo_best_params": best_params,
+        "hpo_per_agent": {
+            a: {"best_params": all_best_params.get(a, {})}
+            for a in hpo_agents
+        },
         "val_scores": {k: float(v) for k, v in val_scores.items()},
         "agent_weights": {k: float(v) for k, v in weights.items()},
         **test_result,
@@ -622,15 +782,11 @@ def run_hpo_for_window(
     logger.info(f"  Saved results to {results_path}")
 
     # Build artifacts for next window's warm-start
-    top_k_trials = sorted(
-        [t for t in study.trials if t.value is not None and t.value > -999],
-        key=lambda t: t.value if t.value is not None else -999.0,
-        reverse=True,
-    )[:5]
     artifacts = {
-        "top_k_params": [t.params for t in top_k_trials],
         "best_env_overrides": best_env_overrides,
         **{f"{a}_path": model_save_paths.get(a) for a in lean_trinity},
+        **{f"{a}_top_k_params": all_top_k.get(a, []) for a in hpo_agents},
+        "top_k_params": all_top_k.get("sac", []),  # backward compat
     }
 
     # Cleanup

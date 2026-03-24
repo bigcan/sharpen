@@ -371,7 +371,8 @@ def _make_sb3_agent(agent_type: str, env, agent_cfg: dict):
     # Map config keys to SB3 constructor kwargs
     params = {}
     for key in ("learning_rate", "gamma", "tau", "buffer_size", "batch_size",
-                "n_steps", "n_epochs", "gae_lambda", "clip_range"):
+                "n_steps", "n_epochs", "gae_lambda", "clip_range",
+                "vf_coef", "ent_coef", "max_grad_norm"):
         if key in agent_cfg:
             params[key] = agent_cfg[key]
 

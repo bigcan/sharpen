@@ -1,6 +1,11 @@
-# Synapse Crypto 1H v3 — Full Lean Trinity + Ensemble Fixes
-# v3.0.0: Restore PPO, fix arbitrator for 3 agents, reduce trade suppression
-#   Changes from v2.1.0:
+# Synapse Crypto 1H v3 — Full Lean Trinity + Per-Agent HPO + Ensemble Fixes
+# v3.1.0: Per-agent HPO (SAC 50, A2C 20, PPO 20 trials)
+#   Changes from v3.0.0:
+#   - hpo.agents: ["sac", "a2c", "ppo_gae"] (per-agent HPO)
+#   - hpo.trials_per_agent: sac=50, a2c=20, ppo_gae=20
+#   - a2c: explicit ent_coef=0.0, vf_coef=0.5 defaults
+#   - ppo_gae: explicit ent_coef=0.01 default
+#   Changes from v2.1.0 (v3.0.0):
 #   - lean_trinity: ["sac", "a2c", "ppo_gae"] (PPO restored)
 #   - ppo_gae config: n_steps=48, n_epochs=10, gae_lambda=0.95, clip_range=0.2
 #   - arbitrator: min_weight 0.15→0.10 (30% total floor for 3 agents vs 45%)
@@ -10,12 +15,12 @@
 #   - environment: turnover_penalty 0.01→0.005 (less hold bias)
 #   - HPO ranges (in runner): action_ema_alpha [0.5,1.0], turnover [0.001,0.01]
 #   - BUG-09 fix: PPO warm-start routing (was loading as A2C)
-# Version: 3.0.0
+# Version: 3.1.0
 
 strategy:
   id: "sync-1H-v3"
   name: "synapse_crypto_1h_v3"
-  version: "3.0.0"
+  version: "3.1.0"
   base: "synapse_v9.5"
   instrument: "perpetual_futures"
 
@@ -103,6 +108,8 @@ agents:
     learning_rate: 3.0e-4
     n_steps: 24
     gamma: 0.98
+    ent_coef: 0.0
+    vf_coef: 0.5
 
   ppo_gae:                         # v3: restored
     learning_rate: 3.0e-4
@@ -111,11 +118,16 @@ agents:
     gamma: 0.98
     gae_lambda: 0.95
     clip_range: 0.2
+    ent_coef: 0.01
 
 hpo:
   enabled: true
-  agents: ["sac"]                  # HPO SAC only; A2C/PPO use defaults
-  n_trials: 50
+  agents: ["sac", "a2c", "ppo_gae"]  # Per-agent HPO: SAC first (env overrides), then A2C/PPO
+  n_trials: 50                        # Default trial count (SAC)
+  trials_per_agent:                   # Per-agent override
+    sac: 50
+    a2c: 20
+    ppo_gae: 20
   hpo_timesteps: 500000
   objective: "sortino"
 
