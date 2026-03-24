@@ -103,14 +103,28 @@ def probe_instance(name, inst_config, timeout=30):
     ssh = paramiko.SSHClient()
     ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
+    # Resolve password: instance config -> GPUHUB_PASSWORD env var -> .env file
+    password = inst_config.get("password")
+    if not password:
+        password = os.environ.get("GPUHUB_PASSWORD")
+    if not password:
+        env_file = PROJECT_ROOT / ".env"
+        if env_file.exists():
+            for line in env_file.read_text(encoding="utf-8").splitlines():
+                if line.startswith("GPUHUB_PASSWORD="):
+                    password = line.split("=", 1)[1].strip()
+                    break
+
     try:
-        ssh.connect(
-            inst_config["host"],
-            port=inst_config["port"],
-            username='root',
-            password=inst_config["password"],
-            timeout=timeout,
-        )
+        connect_kwargs = {
+            "hostname": inst_config["host"],
+            "port": inst_config["port"],
+            "username": "root",
+            "timeout": timeout,
+        }
+        if password:
+            connect_kwargs["password"] = password
+        ssh.connect(**connect_kwargs)
 
         # 1. GPU metrics
         cmd_gpu = (
