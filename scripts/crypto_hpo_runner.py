@@ -78,8 +78,8 @@ def define_sac_search_space(trial, base_cfg: dict) -> dict:
     }
 
     env_overrides = {
-        "turnover_penalty": trial.suggest_float("turnover_penalty", 0.005, 0.05, log=True),
-        "action_ema_alpha": trial.suggest_float("action_ema_alpha", 0.1, 0.5),
+        "turnover_penalty": trial.suggest_float("turnover_penalty", 0.001, 0.01, log=True),
+        "action_ema_alpha": trial.suggest_float("action_ema_alpha", 0.5, 1.0),
     }
 
     return {"agent_params": agent_params, "env_overrides": env_overrides}
@@ -458,9 +458,11 @@ def run_hpo_for_window(
 
             if prev_model_path and Path(prev_model_path).exists():
                 # Warm-start: load previous weights, attach new env
-                from stable_baselines3 import SAC, A2C
+                from stable_baselines3 import SAC, A2C, PPO
                 if agent_type == "sac":
                     model = SAC.load(str(prev_model_path), env=vec_env)
+                elif agent_type == "ppo_gae":
+                    model = PPO.load(str(prev_model_path), env=vec_env)
                 else:
                     model = A2C.load(str(prev_model_path), env=vec_env)  # type: ignore[assignment]
                 # Override HPO params for SAC (new window may have new best)
@@ -486,6 +488,19 @@ def run_hpo_for_window(
                         model.replay_buffer.reset()
                     # Skip learning_starts since network is already initialized
                     model.learning_starts = 0
+                elif agent_type == "ppo_gae":
+                    # PPO warm-start: update LR from HPO if available
+                    new_lr = best_agent_params.get(
+                        "learning_rate", model.learning_rate
+                    )
+                    model.learning_rate = new_lr
+                    try:
+                        from stable_baselines3.common.utils import ConstantSchedule
+                        model.lr_schedule = ConstantSchedule(new_lr)
+                    except ImportError:
+                        from stable_baselines3.common.utils import get_schedule_fn
+                        model.lr_schedule = get_schedule_fn(new_lr)  # type: ignore[assignment]
+                    model.gamma = best_agent_params.get("gamma", model.gamma)
                 logger.info(f"    Warm-started from {prev_model_path}")
             else:
                 # Cold-start: build fresh agent

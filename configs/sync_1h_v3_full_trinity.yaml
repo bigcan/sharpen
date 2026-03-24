@@ -1,0 +1,186 @@
+# Synapse Crypto 1H v3 — Full Lean Trinity + Ensemble Fixes
+# v3.0.0: Restore PPO, fix arbitrator for 3 agents, reduce trade suppression
+#   Changes from v2.1.0:
+#   - lean_trinity: ["sac", "a2c", "ppo_gae"] (PPO restored)
+#   - ppo_gae config: n_steps=48, n_epochs=10, gae_lambda=0.95, clip_range=0.2
+#   - arbitrator: min_weight 0.15→0.10 (30% total floor for 3 agents vs 45%)
+#   - arbitrator: emergency_sortino_floor 0.3→-1.0 (stop constant firing in crashes)
+#   - environment: min_trade_pct 0.005→0.002 (allow finer rebalancing)
+#   - environment: action_ema_alpha 0.3→0.5 (more responsive)
+#   - environment: turnover_penalty 0.01→0.005 (less hold bias)
+#   - HPO ranges (in runner): action_ema_alpha [0.5,1.0], turnover [0.001,0.01]
+#   - BUG-09 fix: PPO warm-start routing (was loading as A2C)
+# Version: 3.0.0
+
+strategy:
+  id: "sync-1H-v3"
+  name: "synapse_crypto_1h_v3"
+  version: "3.0.0"
+  base: "synapse_v9.5"
+  instrument: "perpetual_futures"
+
+universe:
+  assets: ["BTC", "ETH", "SOL", "BNB", "XRP", "ADA", "AVAX", "DOGE",
+           "DOT", "LINK", "ETC", "UNI", "ATOM", "LTC", "FIL", "APT",
+           "ARB", "OP", "NEAR", "INJ"]
+  quote: "USDT"
+  data_exchange: "binance"
+  execution_broker: "bybit"
+  n_assets: 20
+
+data:
+  source: "ccxt"
+  market_type: "futures"
+  frequency: "1h"
+  start_date: "2022-01-01"
+  end_date: null
+  fields: ["open", "high", "low", "close", "volume"]
+  extra_fields: ["funding_rate", "open_interest", "liquidations"]
+  cache_dir: "./data/crypto_cache"
+
+features:
+  tech_window: 168
+  norm_window: 720
+  norm_clip: [-5, 5]
+  log_return_clip: [-0.5, 0.5]
+  tech_dim: 6
+  enable_hmm: true
+  hmm_stride: 5
+  enable_crypto_features: true
+
+environment:
+  type: "perpetual_futures"
+  initial_capital: 100000
+  long_short_enabled: true
+  max_leverage: 1.0
+  margin_mode: "cross"
+  funding_alignment: "utc"
+  # Costs
+  maker_fee_pct: 0.0002
+  taker_fee_pct: 0.0005
+  slippage_model: "volume_dependent"
+  slippage_base_bps: 3
+  slippage_impact_bps: 15
+  # Constraints
+  max_position_pct: 0.15
+  max_gross_exposure: 1.0
+  max_net_short_exposure: -0.50
+  # Reward (unchanged)
+  turnover_penalty: 0.005          # v3: halved from 0.01 — less hold bias
+  reward_type: "simple"
+  sortino_window: 168
+  reward_scaling: 1.0
+  reward_clip_range: [-5.0, 5.0]
+  min_trade_pct: 0.002             # v3: lowered from 0.005 — allow finer rebalancing
+  circuit_breaker_threshold: 0.1
+  # Action smoothing
+  action_ema_alpha: 0.5            # v3: raised from 0.3 — more responsive to new signals
+  # Training diversity
+  random_start: true
+  random_start_pct: 0.1
+  # Risk management
+  risk_manager:
+    enabled_backtest: false
+    enabled_paper: true
+    enabled_live: true
+
+agents:
+  lean_trinity: ["sac", "a2c", "ppo_gae"]  # v3: full trinity restored
+  total_timesteps: 2000000
+  n_envs: 20
+  use_fp16: true
+  use_torch_compile: true
+  network_arch: [256, 256]
+
+  sac:
+    learning_rate: 1.0e-4
+    buffer_size: 500000
+    batch_size: 512
+    gamma: 0.98
+    tau: 0.005
+
+  a2c:
+    learning_rate: 3.0e-4
+    n_steps: 24
+    gamma: 0.98
+
+  ppo_gae:                         # v3: restored
+    learning_rate: 3.0e-4
+    n_steps: 48                    # Longer rollouts than A2C for stability
+    n_epochs: 10
+    gamma: 0.98
+    gae_lambda: 0.95
+    clip_range: 0.2
+
+hpo:
+  enabled: true
+  agents: ["sac"]                  # HPO SAC only; A2C/PPO use defaults
+  n_trials: 50
+  hpo_timesteps: 500000
+  objective: "sortino"
+
+arbitrator:
+  method: "softmax"
+  lookback_bars: 504
+  temperature: 1.5
+  min_weight: 0.10                 # v3: lowered from 0.15 (30% total floor vs 45%)
+  reweight_every: 24
+  performance_metric: "sortino"
+  emergency_lookback: 72
+  emergency_sortino_floor: -1.0    # v3: lowered from 0.3 (stop constant firing in crashes)
+  emergency_spread: 2.0
+
+walk_forward:
+  train_bars: 8760
+  val_bars: 720
+  test_bars: 1440
+  step_bars: 720
+  embargo_bars: 720
+  min_windows: 1
+  n_hpo_trials: 50
+  hpo_timesteps: 500000
+
+risk:
+  max_drawdown_pct: 0.20
+  circuit_breaker_cooldown_bars: 48
+  max_gross_exposure: 1.0
+  max_position_pct: 0.15
+  max_net_short_exposure: -0.50
+  daily_turnover_limit: 1.50
+  daily_cost_budget_bps: 20
+  flash_crash_threshold: 0.15
+  flash_crash_min_assets: 5
+  funding_rate_alert: 0.001
+  max_cluster_exposure: 0.30
+  min_effective_bets: 4
+  min_margin_reserve_pct: 0.05
+  correlation_window: 168
+  correlation_cluster_threshold: 0.7
+
+execution:
+  broker: "bybit"
+  data_source: "ccxt"
+  order_type: "limit"
+  limit_offset_pct: 0.0005
+  market_fallback_timeout: 60
+  min_trade_pct: 0.005
+  reconciliation_interval: 300
+  paper_trade: true
+  bybit_testnet: true
+  slippage_model_live: "book_depth"
+
+model_staleness:
+  enabled: true
+  monitor_window_bars: 720
+  retrain_trigger_sharpe: 0.5
+  retrain_cooldown_bars: 2160
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sync-1h-v3", "full-trinity", "bug-09-fix"]
+
+deployment:
+  training_target: "gpuhub"
+  collector_target: "vps"
+  execution_target: "vps"
+  docker_image: "synapse_crypto_1h:latest"
