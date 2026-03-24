@@ -124,7 +124,12 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
             end_date=ed,
             norm_cutoff_date=norm_cutoff_date,
         )
-        return ContinuousSwingEnv(config=env_config, data_handler=ms_handler)
+        env = ContinuousSwingEnv(config=env_config, data_handler=ms_handler)
+        gate_cfg = config.get("signal_gate")
+        if gate_cfg and gate_cfg.get("enabled", False):
+            from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+            env = SignalGatedWrapper(env, gate_config=gate_cfg)
+        return env
 
     handler = ParquetDataHandler(
         file_path=file_path,

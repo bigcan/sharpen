@@ -1,0 +1,97 @@
+# SG-1: Signal-Gated SAC — Gold 3-min
+# Hypothesis: Filtering noise bars improves RL agent PF on 3-min Gold.
+# Oracle validation: constrained oracle PF=2.24 at 30% pass rate (target: 1.1-1.3).
+# Compare vs R.2.1-v2 BDQ Gold 3m baseline (PF=0.996).
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "GC"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [3, 15, 60]              # 3-min decision, 15m trend, 1h regime
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cme_futures"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"           # any threshold triggers gate open
+  atr_threshold: 0.3              # atr_norm > 0.3 (30% above EMA)
+  parkinson_threshold: 0.02       # parkinson_vol > 0.02
+  volume_threshold: 0.5           # |volume_z| > 0.5
+  max_hold_bars: 20               # force gate open after 20 bars (1h at 3m)
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0                  # Start zero (fee curriculum)
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500            # 1500 x 3min = 75 hours ~ 3 days
+  random_start: true
+  max_drawdown_pct: 0.30
+  scales: [3, 15, 60]
+  gap_detection: true             # Gold has session gaps
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 300000, taker_fee: 0.0, ramp_to: 0.0002, ramp_end_step: 900000}
+    - {step: 900000, taker_fee: 0.0002}  # 2bps — CME Gold all-in fee
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  n_trials: 50
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "Gold", "SAC", "3min", "signal-gated", "MultiScale", "OHLCV", "DSR", "FeeCurriculum"]
