@@ -260,10 +260,31 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
         while not done and step < max_steps:
             # Dispatch obs keys based on agent type
             if "scale_0" in obs:
-                # SAC / V7 multi-scale obs — stack into (B,N,W,F) for single H2D transfer
+                # SAC / V7 multi-scale obs
                 n_scales = sum(1 for si in range(100) if f"scale_{si}" in obs)
                 sample = obs["scale_0"]
-                if sample.ndim == 3:
+                obs_mode = getattr(agent, '_obs_mode', 'window')
+
+                if obs_mode == "summary_stats":
+                    # v6: Concat scale summaries + private into flat vector
+                    if sample.ndim >= 2 and sample.shape[0] > 1 and sample.ndim == 2:
+                        # VectorEnv: (B, n_summary)
+                        parts = [obs[f"scale_{i}"] for i in range(n_scales)]
+                        parts.append(obs["private"])
+                        flat_np = np.concatenate(parts, axis=1)
+                        scale_stack = torch.as_tensor(flat_np, dtype=torch.float32).to(
+                            agent.device, non_blocking=True
+                        )
+                    else:
+                        # Single env: (n_summary,)
+                        parts = [obs[f"scale_{i}"] for i in range(n_scales)]
+                        parts.append(obs["private"])
+                        flat_np = np.concatenate(parts)
+                        scale_stack = torch.as_tensor(flat_np, dtype=torch.float32).unsqueeze(0).to(
+                            agent.device, non_blocking=True
+                        )
+                    priv = None
+                elif sample.ndim == 3:
                     # VectorEnv: obs["scale_i"] is (B,W,F) — stack on axis=1
                     # FIX BUG-06: Was axis=0 → (N,B,W,F) → Conv1d 4D crash
                     scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=1)  # (B,N,W,F)
@@ -1312,15 +1333,27 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
 
         while not done and step < 200000:
             if agent_type == "sac":
-                # Stack all scales into (1,N,W,F) — single H2D transfer
                 n_scales = sum(1 for si in range(100) if f"scale_{si}" in obs)
-                scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=0)
-                scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).unsqueeze(0).to(
-                    device, non_blocking=True
-                )
-                priv = torch.as_tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(
-                    device, non_blocking=True
-                )
+                obs_mode = getattr(agent, '_obs_mode', 'window')
+
+                if obs_mode == "summary_stats":
+                    # v6: Concat scale summaries + private into flat (1, D)
+                    parts = [obs[f"scale_{i}"] for i in range(n_scales)]
+                    parts.append(obs["private"])
+                    flat_np = np.concatenate(parts)
+                    scale_stack = torch.as_tensor(flat_np, dtype=torch.float32).unsqueeze(0).to(
+                        device, non_blocking=True
+                    )
+                    priv = None
+                else:
+                    # Window mode: stack all scales into (1,N,W,F) — single H2D transfer
+                    scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=0)
+                    scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).unsqueeze(0).to(
+                        device, non_blocking=True
+                    )
+                    priv = torch.as_tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(
+                        device, non_blocking=True
+                    )
                 pred = agent.predict(scale_stack, priv, deterministic=True)
                 action = pred[0].cpu().numpy()  # (1, 1) → numpy scalar
             else:

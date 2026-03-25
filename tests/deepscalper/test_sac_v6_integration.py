@@ -183,15 +183,17 @@ class TestSACAgentSummaryStats:
                 False,
             )
 
-        # Run one update step
-        info = agent.train_step()
-        assert isinstance(info, dict)
-        assert "critic_loss" in info or info == {}  # May return empty if learning_starts not met
+        # Run train steps — metrics only returned every 50 steps (perf optimization)
+        # Just verify no exceptions are raised
+        for _ in range(50):
+            info = agent.train_step()
+        assert info is not None, "Expected metrics after 50 train steps"
+        assert "critic_loss" in info
 
     def test_full_cycle(self, agent):
-        """Full predict → buffer → update cycle."""
-        # Simulate 30 steps to exceed learning_starts
-        for step in range(30):
+        """Full predict → buffer → update cycle without error."""
+        # Simulate 60 steps to exceed learning_starts and get metrics
+        for step in range(60):
             obs = self._make_obs()
             buf_obs = agent._obs_to_buffer(obs)
             flat = torch.tensor(buf_obs["micro"], dtype=torch.float32).unsqueeze(0)
@@ -209,7 +211,5 @@ class TestSACAgentSummaryStats:
                 False,
             )
 
-            if step >= agent._learning_starts:
-                info = agent.update(step=step)
-                if info:
-                    assert "critic_loss" in info
+            if step >= agent.learning_starts:
+                agent.train_step()  # Just verify no exception

@@ -58,6 +58,9 @@ class SACTrainer:
         net_cfg["n_scales"] = len(scales)
         self._n_scales = len(scales)
 
+        # v6: Summary-stats observation mode
+        self._obs_mode = net_cfg.get("obs_mode", "window")
+
         # HPO: cap buffer_size to avoid wasting memory on short trials
         buffer_size = sac_cfg.get("buffer_size", 1_000_000)
         if hpo_mode:
@@ -194,18 +197,29 @@ class SACTrainer:
                     )
                 _deferred_store = None
 
-            # Get actions — stack all scales into ONE (B,N,W,F) tensor, ONE H2D transfer
-            # FIX OPT-01: Was creating N separate tensors + N .to(device) calls per step.
-            # np.stack is cheap (contiguous source from SyncVectorEnv), single torch transfer.
-            scale_np = np.stack(
-                [obs[f"scale_{i}"] for i in range(self._n_scales)], axis=1
-            )  # (B, N, W, F)
-            scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).to(
-                self.device, non_blocking=True
-            )
-            priv = torch.as_tensor(obs["private"], dtype=torch.float32).to(
-                self.device, non_blocking=True
-            )
+            # Get actions — prepare obs for agent.predict()
+            if self._obs_mode == "summary_stats":
+                # v6: Concat all scale summaries + private into flat (B, D) tensor
+                parts = [obs[f"scale_{i}"] for i in range(self._n_scales)]
+                parts.append(obs["private"])
+                flat_np = np.concatenate(parts, axis=1)  # (B, D)
+                scale_stack = torch.as_tensor(flat_np, dtype=torch.float32).to(
+                    self.device, non_blocking=True
+                )
+                priv = None
+            else:
+                # Window mode: stack all scales into ONE (B,N,W,F) tensor, ONE H2D transfer
+                # FIX OPT-01: Was creating N separate tensors + N .to(device) calls per step.
+                # np.stack is cheap (contiguous source from SyncVectorEnv), single torch transfer.
+                scale_np = np.stack(
+                    [obs[f"scale_{i}"] for i in range(self._n_scales)], axis=1
+                )  # (B, N, W, F)
+                scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).to(
+                    self.device, non_blocking=True
+                )
+                priv = torch.as_tensor(obs["private"], dtype=torch.float32).to(
+                    self.device, non_blocking=True
+                )
 
             with torch.no_grad():
                 actions = self.agent.predict(scale_stack, priv, deterministic=False)

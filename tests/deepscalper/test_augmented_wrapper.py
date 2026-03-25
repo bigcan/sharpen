@@ -15,10 +15,9 @@ import numpy as np
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.envs.augmented_wrapper import (
     AugmentedDataWrapper,
-    _LOG_RET_IDX,
     _SPREAD_IDX,
-    _OFI_START,
-    _OFI_END,
+    _OFI_INDICES,
+    _OFI_INT_INDICES,
     _VOL_INDICES,
 )
 
@@ -57,6 +56,7 @@ def _make_mock_handler(n_steps=100, mid=50000.0, spread_bps=2.0):
     """Create a mock data handler that yields consistent step data."""
     handler = MagicMock()
     handler.reset = MagicMock()
+    handler._len = n_steps
     step_data = _make_step_data(mid=mid, spread_bps=spread_bps)
     handler.step = MagicMock(return_value=step_data)
     handler.get_lookahead_price = MagicMock(return_value=mid + 10.0)
@@ -101,7 +101,7 @@ class TestAugmentedDataWrapper(unittest.TestCase):
         np.testing.assert_array_equal(obs_w["private"], obs_b["private"])
 
     def test_volatility_scaling(self):
-        """log_ret column is scaled by the sampled factor."""
+        """OFI columns are scaled by the sampled volatility factor."""
         cfg = {
             "enabled": True,
             "augment_volatility": True,
@@ -112,17 +112,18 @@ class TestAugmentedDataWrapper(unittest.TestCase):
             "augment_ofi": False,
         }
         wrapped, base, _ = _make_env(cfg)
-        
+
         # Get unaugmented reference
         handler2 = _make_mock_handler()
         base2 = DeepScalperEnv(base.config.copy(), data_handler=handler2)
         obs_ref, _ = base2.reset(seed=42)
-        
+
         obs_aug, _ = wrapped.reset(seed=42)
-        
-        # log_ret should be 2x the original
-        expected = obs_ref["micro"][:, _LOG_RET_IDX] * 2.0
-        np.testing.assert_allclose(obs_aug["micro"][:, _LOG_RET_IDX], expected, rtol=1e-5)
+
+        # OFI columns should be 2x the original
+        if _OFI_INDICES:
+            expected = obs_ref["micro"][:, _OFI_INDICES] * 2.0
+            np.testing.assert_allclose(obs_aug["micro"][:, _OFI_INDICES], expected, rtol=1e-5)
 
     def test_spread_perturbation(self):
         """spread_1 column is scaled by the sampled factor."""
@@ -210,7 +211,7 @@ class TestAugmentedDataWrapper(unittest.TestCase):
         obs, _ = wrapped.reset(seed=42)
         
         # Step multiple times — factor should remain the same
-        action = np.array([0, 0, 0])  # Hold
+        action = 0  # Hold (Discrete action for V5 env)
         obs1, _, _, _, _ = wrapped.step(action)
         obs2, _, _, _, _ = wrapped.step(action)
         
@@ -276,7 +277,7 @@ class TestAugmentedDataWrapper(unittest.TestCase):
         wrapped, _, _ = _make_env(cfg)
         wrapped.reset(seed=42)
         
-        action = np.array([0, 0, 0])  # Hold
+        action = 0  # Hold (Discrete action for V5 env)
         _, reward, terminated, truncated, info = wrapped.step(action)
         
         # Reward should be a valid float (not NaN)
