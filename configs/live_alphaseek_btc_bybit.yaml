@@ -1,0 +1,59 @@
+# AlphaSeek Live Trading — BTC Perpetual Futures on Bybit
+# Usage: python scripts/run_alphaseek_live.py --config configs/live_alphaseek_btc_bybit.yaml
+# Live:  python scripts/run_alphaseek_live.py --config configs/live_alphaseek_btc_bybit.yaml --mainnet
+
+exchange:
+  name: bybit
+  testnet: true
+  asset: BTC
+  order_type: limit
+  limit_offset_pct: 0.0005    # 5bps spread crossing for taker fills
+  market_fallback_timeout: 10  # faster fallback for HFT (10s vs 60s)
+
+alphaseek:
+  agents:
+    - type: D3QN
+      net_dims: [256, 256]
+      checkpoint_dir: models/alphaseek/D3QN_tuned
+    - type: DoubleDQN
+      net_dims: [256, 256]
+      checkpoint_dir: models/alphaseek/DoubleDQN_tuned
+    - type: TwinD3QN
+      net_dims: [256, 256]
+      checkpoint_dir: models/alphaseek/TwinD3QN_tuned
+  ensemble_strategy: q_average    # best performing in contest eval
+  confidence_threshold: 0.001
+  # agent_weights: [0.4, 0.3, 0.3]  # optional for weighted strategy
+
+tick_clock:
+  interval_seconds: 2.0
+  max_late_seconds: 1.0
+
+trading:
+  initial_balance: 10000.0
+  position_notional: 10000.0    # $ per position unit
+  max_position: 1               # contest constraint: {-1, 0, +1}
+  max_holding: 1800             # 1 hour at 2s ticks
+  stop_loss_thresh: 0.0001      # EvalTradeSimulator default
+
+risk:
+  enabled: true
+  max_drawdown_pct: 0.05        # 5% total drawdown
+  max_daily_loss_pct: 0.02      # 2% daily hard stop
+  circuit_breaker_cooldown_ticks: 300  # 10 minutes
+  daily_turnover_limit: 500
+  flash_crash_pct: 0.02         # 2% drop in 60s
+  max_spread_multiplier: 5.0
+  max_latency_ms: 500.0
+
+wandb:
+  enabled: true
+  entity: bigcan-chiwin-technology
+  project: FinRL-Pro-DS
+  tags: [alphaseek, btc, live]
+
+safety:
+  kill_file: /tmp/finrl_alphaseek_kill
+  emergency_flatten_on_error: true
+  max_consecutive_errors: 5
+  require_explicit_mainnet: true
