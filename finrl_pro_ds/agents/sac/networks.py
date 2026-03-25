@@ -121,6 +121,44 @@ class MultiScaleEncoder(nn.Module):
         return self.fusion(combined)
 
 
+class SummaryStatsEncoder(nn.Module):
+    """v6: Flat MLP encoder for summary-stats observation mode.
+
+    Replaces DilatedCNNEncoder + MultiScaleEncoder when obs_mode="summary_stats".
+    Input: (B, summary_dim + private_dim) flat vector.
+    Output: (B, fusion_dim).
+
+    ~40K params (vs ~500K for CNN encoder). AlphaSeek-informed: simpler arch wins.
+    """
+
+    def __init__(self, input_dim: int = 50, fusion_dim: int = 256, hidden_dim: int = 128):
+        super().__init__()
+        tc_input = _tc_align(input_dim)
+        self._pad = tc_input - input_dim
+        tc_hidden = _tc_align(hidden_dim)
+
+        self.net = nn.Sequential(
+            nn.Linear(tc_input, tc_hidden),
+            nn.LayerNorm(tc_hidden),
+            nn.ReLU(),
+            nn.Linear(tc_hidden, fusion_dim),
+            nn.LayerNorm(fusion_dim),
+            nn.ReLU(),
+        )
+        self.output_dim = fusion_dim
+
+        for m in self.net:
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                nn.init.zeros_(m.bias)
+
+    def forward(self, flat_obs: torch.Tensor) -> torch.Tensor:
+        """flat_obs: (B, input_dim) — concatenated summary stats + private."""
+        if self._pad > 0:
+            flat_obs = F.pad(flat_obs, (0, self._pad))
+        return self.net(flat_obs)
+
+
 LOG_SIGMA_MIN = -20.0
 LOG_SIGMA_MAX = 2.0
 
@@ -130,6 +168,7 @@ class SACActorNetwork(nn.Module):
 
     Output: tanh-squashed action in [-1, 1] with log_prob correction.
     Supports multi-dimensional actions via action_dim parameter.
+    v6: obs_mode="summary_stats" uses SummaryStatsEncoder (flat MLP, ~40K params).
     """
 
     def __init__(
@@ -139,10 +178,17 @@ class SACActorNetwork(nn.Module):
         fusion_dim: int = 256,
         n_scales: int = 3,
         action_dim: int = 1,
+        obs_mode: str = "window",
     ):
         super().__init__()
         self.action_dim = action_dim
-        self.encoder = MultiScaleEncoder(scale_encoder_config, private_dim, fusion_dim, n_scales)
+        self._obs_mode = obs_mode
+
+        if obs_mode == "summary_stats":
+            summary_dim = scale_encoder_config.get("summary_input_dim", 50)
+            self.encoder = SummaryStatsEncoder(summary_dim, fusion_dim)
+        else:
+            self.encoder = MultiScaleEncoder(scale_encoder_config, private_dim, fusion_dim, n_scales)
 
         self.head = nn.Sequential(
             nn.Linear(fusion_dim, fusion_dim),
@@ -166,10 +212,17 @@ class SACActorNetwork(nn.Module):
     def forward(
         self,
         scale_stack: torch.Tensor,
-        private: torch.Tensor,
+        private: torch.Tensor = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Returns (mu, log_sigma) for the Gaussian policy."""
-        features = self.encoder(scale_stack, private)
+        """Returns (mu, log_sigma) for the Gaussian policy.
+
+        In summary_stats mode, scale_stack is actually a flat (B, input_dim) tensor
+        and private is None (already concatenated).
+        """
+        if self._obs_mode == "summary_stats":
+            features = self.encoder(scale_stack)
+        else:
+            features = self.encoder(scale_stack, private)
         h = self.head(features)
         mu = self.mu_layer(h)
         log_sigma = self.log_sigma_layer(h)
@@ -179,10 +232,12 @@ class SACActorNetwork(nn.Module):
     def sample(
         self,
         scale_stack: torch.Tensor,
-        private: torch.Tensor,
+        private: torch.Tensor = None,
         deterministic: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Sample action with log_prob (tanh correction applied).
+
+        In summary_stats mode, scale_stack is flat (B, input_dim), private is None.
 
         Returns:
             action: (B, action_dim) in [-1, 1]
@@ -215,6 +270,7 @@ class SACCriticNetwork(nn.Module):
     """Q-value network for SAC (one of twin pair).
 
     Input: multi-scale obs + action → scalar Q-value
+    v6: obs_mode="summary_stats" uses SummaryStatsEncoder (flat MLP).
     """
 
     def __init__(
@@ -224,9 +280,16 @@ class SACCriticNetwork(nn.Module):
         fusion_dim: int = 256,
         action_dim: int = 1,
         n_scales: int = 3,
+        obs_mode: str = "window",
     ):
         super().__init__()
-        self.encoder = MultiScaleEncoder(scale_encoder_config, private_dim, fusion_dim, n_scales)
+        self._obs_mode = obs_mode
+
+        if obs_mode == "summary_stats":
+            summary_dim = scale_encoder_config.get("summary_input_dim", 50)
+            self.encoder = SummaryStatsEncoder(summary_dim, fusion_dim)
+        else:
+            self.encoder = MultiScaleEncoder(scale_encoder_config, private_dim, fusion_dim, n_scales)
 
         q_input_dim = fusion_dim + action_dim
         tc_q_dim = _tc_align(q_input_dim)
@@ -249,14 +312,18 @@ class SACCriticNetwork(nn.Module):
     def encode(
         self,
         scale_stack: torch.Tensor,
-        private: torch.Tensor,
+        private: torch.Tensor = None,
     ) -> torch.Tensor:
         """Encode multi-scale obs to fusion features: (B, fusion_dim).
 
         Use with q_head_forward() to avoid redundant encoder passes
         when the same (scale_stack, private) is needed for both critic
         and actor updates (O-A encoder caching).
+
+        In summary_stats mode, scale_stack is flat (B, input_dim), private is None.
         """
+        if self._obs_mode == "summary_stats":
+            return self.encoder(scale_stack)
         return self.encoder(scale_stack, private)
 
     def q_head_forward(
@@ -278,9 +345,12 @@ class SACCriticNetwork(nn.Module):
     def forward(
         self,
         scale_stack: torch.Tensor,
-        private: torch.Tensor,
-        action: torch.Tensor,
+        private: torch.Tensor = None,
+        action: torch.Tensor = None,
     ) -> torch.Tensor:
-        """Returns scalar Q-value: (B, 1)"""
+        """Returns scalar Q-value: (B, 1)
+
+        In summary_stats mode, scale_stack is flat (B, input_dim), private is None.
+        """
         features = self.encode(scale_stack, private)
         return self.q_head_forward(features, action)

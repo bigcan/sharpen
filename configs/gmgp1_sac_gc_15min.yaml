@@ -82,4 +82,4 @@ hpo:
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["gmgp1-v4", "Gold", "SAC", "15min", "MultiScale", "OHLCV", "DSR", "FeeCurriculum", "swing", "gmgp1", "4090", "opt-10", "production", "bug07-fixed"]
+  tags: ["gmgp1-v5", "Gold", "SAC", "15min", "MultiScale", "OHLCV", "DSR", "FeeCurriculum", "swing", "gmgp1", "4090", "opt-10", "production", "bug07-fixed", "bug08-fixed"]

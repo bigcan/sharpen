@@ -92,17 +92,57 @@ async def main(args):
     logging.info("Ensemble loaded: %s", ensemble)
 
     # --- State builder ---
-    # TODO Phase 2: Replace with real AlphaSeekStateBuilder
-    # For now, use a mock for dry-run testing
-    if args.dry_run:
+    sb_cfg = config.get("state_builder", {})
+    sb_type = sb_cfg.get("type", "mock")
+
+    if sb_type == "mock" or args.dry_run:
         from finrl_pro_ds.alphaseek._mock_state_builder import MockStateBuilder
         state_builder = MockStateBuilder(device=device)
-        logging.info("Using MockStateBuilder for dry-run")
-    else:
-        logging.error(
-            "Live state builder not yet implemented (Phase 2). "
-            "Use --dry-run for testing."
+        logging.info("Using MockStateBuilder (dry-run / mock mode)")
+    elif sb_type == "live":
+        from finrl_pro_ds.alphaseek.feature_engine import AlphaSeekFeatureEngine
+        from finrl_pro_ds.alphaseek.lob_feed import BybitLOBFeed
+        from finrl_pro_ds.alphaseek.state_builder import AlphaSeekStateBuilder
+
+        feat_cfg = sb_cfg.get("features", {})
+        feature_engine = AlphaSeekFeatureEngine(
+            norm_span=feat_cfg.get("norm_span", 120),
+            momentum_window=feat_cfg.get("momentum_window", 5),
+            vol_window=feat_cfg.get("vol_window", 30),
         )
+        state_builder = AlphaSeekStateBuilder(
+            feature_engine=feature_engine,
+            device=device,
+            max_position=alphaseek_cfg.get("max_position", 1),
+            max_holding=alphaseek_cfg.get("max_holding", 1800),
+        )
+
+        # Start LOB feed → state builder ingestion loop
+        lob_feed = BybitLOBFeed(
+            symbol=exchange_cfg.get("symbol", "BTC/USDT:USDT"),
+            depth=sb_cfg.get("lob_depth", 20),
+            testnet=exchange_cfg.get("testnet", True),
+        )
+        await lob_feed.connect()
+
+        async def _feed_loop():
+            """Background: ingest LOB snapshots at ~1s cadence."""
+            interval = sb_cfg.get("feed_interval_s", 1.0)
+            while True:
+                try:
+                    snapshot = await lob_feed.get_latest_snapshot()
+                    state_builder.ingest_snapshot(snapshot)
+                except Exception as e:
+                    logging.warning("LOB feed error: %s", e)
+                await asyncio.sleep(interval)
+
+        asyncio.get_event_loop().create_task(_feed_loop())
+        logging.info(
+            "Using AlphaSeekStateBuilder (live LOB feed, warmup=%d ticks)",
+            feature_engine.warmup_ticks,
+        )
+    else:
+        logging.error("Unknown state_builder.type: %s", sb_type)
         sys.exit(1)
 
     # --- Broker ---

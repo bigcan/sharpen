@@ -82,6 +82,12 @@ class SACAgent:
         private_dim = network_config.get("private_dim", 5)
         fusion_dim = network_config.get("fusion_dim", 256)
 
+        # v6: Summary-stats observation mode
+        self._obs_mode = network_config.get("obs_mode", "window")
+        if self._obs_mode == "summary_stats":
+            # Pass summary_input_dim through scale_cfg for encoder construction
+            scale_cfg["summary_input_dim"] = network_config.get("summary_input_dim", 50)
+
         # Window/feature config for replay buffer shapes
         window_size = network_config.get("window_size", 30)
         features_per_scale = scale_cfg.get("input_size", 7)
@@ -93,9 +99,9 @@ class SACAgent:
         self._action_dim = network_config.get("action_dim", 1)
 
         # Build networks
-        self.actor = SACActorNetwork(scale_cfg, private_dim, fusion_dim, self._n_scales, action_dim=self._action_dim).to(self.device)
-        self.critic1 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales).to(self.device)
-        self.critic2 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales).to(self.device)
+        self.actor = SACActorNetwork(scale_cfg, private_dim, fusion_dim, self._n_scales, action_dim=self._action_dim, obs_mode=self._obs_mode).to(self.device)
+        self.critic1 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales, obs_mode=self._obs_mode).to(self.device)
+        self.critic2 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales, obs_mode=self._obs_mode).to(self.device)
 
         # Target critics (Polyak-averaged)
         self.target_critic1 = copy.deepcopy(self.critic1).to(self.device)
@@ -123,17 +129,31 @@ class SACAgent:
         self.alpha_optimizer = optim.Adam([self.log_alpha], lr=lr_alpha, fused=_fused)
 
         # Replay buffer
-        # Store scale_0 as "micro" (W,F), concat of remaining scales as "macro" (flat),
-        # private as "private" (private_dim,)
-        macro_flat_dim = window_size * features_per_scale * (self._n_scales - 1)
-        self.replay_buffer = FlatReplayBuffer(
-            capacity=buffer_size,
-            micro_shape=(window_size, features_per_scale),
-            macro_shape=(macro_flat_dim,),
-            private_shape=(private_dim,),
-            action_shape=(self._action_dim,),
-            action_dtype=np.float32,
-        )
+        # v6: summary_stats mode stores flat (summary_dim,) instead of (W, F) windows
+        if self._obs_mode == "summary_stats":
+            summary_dim = network_config.get("summary_input_dim", 50)
+            self._summary_dim = summary_dim
+            self.replay_buffer = FlatReplayBuffer(
+                capacity=buffer_size,
+                micro_shape=(summary_dim,),
+                macro_shape=(0,),
+                private_shape=(0,),
+                action_shape=(self._action_dim,),
+                action_dtype=np.float32,
+            )
+        else:
+            # Store scale_0 as "micro" (W,F), concat of remaining scales as "macro" (flat),
+            # private as "private" (private_dim,)
+            self._summary_dim = 0
+            macro_flat_dim = window_size * features_per_scale * (self._n_scales - 1)
+            self.replay_buffer = FlatReplayBuffer(
+                capacity=buffer_size,
+                micro_shape=(window_size, features_per_scale),
+                macro_shape=(macro_flat_dim,),
+                private_shape=(private_dim,),
+                action_shape=(self._action_dim,),
+                action_dtype=np.float32,
+            )
 
         # AMP scaler — disabled for BF16 (same dynamic range as FP32, no scaling needed)
         self.scaler = torch.amp.GradScaler(
@@ -152,6 +172,12 @@ class SACAgent:
         # Target critics + actor still use full forward() via __call__.
         if torch_compile and hasattr(torch, 'compile'):
             try:
+                # FIX BUG-08: Disable max_autotune_gemm to prevent Inductor
+                # decomposition/fallback conflict on aten.mm.default.
+                # This removes the ambiguity between fallback ATen mm and
+                # Triton-decomposed mm that caused 48/50 trial crashes in GMGP1-v4.
+                import torch._inductor.config as _inductor_cfg
+                _inductor_cfg.max_autotune_gemm = False
                 self.actor = torch.compile(self.actor, mode='default')
                 # Training critics: NOT compiled (encode/q_head_forward bypass).
                 # O-A caching provides the main gain (2 fewer encoder passes).
@@ -160,7 +186,8 @@ class SACAgent:
                 import logging
                 logging.getLogger(__name__).info(
                     "[torch.compile] actor + 2 targets (full-model). "
-                    "Training critics: eager (O-A encode/q_head split)"
+                    "Training critics: eager (O-A encode/q_head split). "
+                    "max_autotune_gemm=False (BUG-08 workaround)"
                 )
             except Exception as e:
                 import logging
@@ -173,23 +200,26 @@ class SACAgent:
     def predict(
         self,
         scale_input,
-        private: torch.Tensor,
+        private: torch.Tensor = None,
         deterministic: bool = False,
         **kwargs,
     ) -> torch.Tensor:
         """Predict action given multi-scale observations.
 
         Args:
-            scale_input: either a pre-stacked (B, N, W, F) tensor or
-                         a list of N tensors each (B, W, F)
-            private: (B, private_dim)
+            scale_input: either a pre-stacked (B, N, W, F) tensor, a list of
+                         N tensors each (B, W, F), or a flat (B, D) tensor in
+                         summary_stats mode.
+            private: (B, private_dim) or None in summary_stats mode
             deterministic: Use mean action (no sampling)
 
         Returns:
             actions: (B, 1) continuous position fraction
         """
-        # Accept pre-stacked tensor (fast path) or list (backward compat)
-        if isinstance(scale_input, list):
+        if self._obs_mode == "summary_stats":
+            # In summary mode, scale_input is already (B, flat_dim)
+            scale_stack = scale_input
+        elif isinstance(scale_input, list):
             scale_stack = torch.stack(scale_input, dim=1)
         else:
             scale_stack = scale_input
@@ -270,8 +300,13 @@ class SACAgent:
 
         # Transfer ALL data to GPU at once
         all_scale_stack, all_next_scale_stack = self._unpack_buffer_to_stacks(states, next_states)
-        all_priv = self._to_device_pinned(states["private"])
-        all_npriv = self._to_device_pinned(next_states["private"])
+        # v6: In summary_stats mode, private is baked into the flat vector; pass None
+        if self._obs_mode == "summary_stats":
+            all_priv = None
+            all_npriv = None
+        else:
+            all_priv = self._to_device_pinned(states["private"])
+            all_npriv = self._to_device_pinned(next_states["private"])
         all_actions = self._to_device_pinned(actions_np)
         all_rewards = self._to_device_pinned(rewards_np).unsqueeze(1)
         all_dones = self._to_device_pinned(dones_np).unsqueeze(1)
@@ -293,8 +328,8 @@ class SACAgent:
             # Slice mini-batch from GPU-resident mega-batch (views, zero-copy)
             scale_stack = all_scale_stack[start:end]
             next_scale_stack = all_next_scale_stack[start:end]
-            priv = all_priv[start:end]
-            npriv = all_npriv[start:end]
+            priv = all_priv[start:end] if all_priv is not None else None
+            npriv = all_npriv[start:end] if all_npriv is not None else None
             actions = all_actions[start:end]
             rewards = all_rewards[start:end]
             dones = all_dones[start:end]
@@ -405,6 +440,16 @@ class SACAgent:
 
     def _obs_to_buffer(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Convert multi-scale obs dict to replay buffer format."""
+        if self._obs_mode == "summary_stats":
+            # v6: Concat all scale summaries + private into one flat vector
+            parts = [obs[f"scale_{i}"] for i in range(self._n_scales)]
+            parts.append(obs["private"])
+            flat = np.concatenate(parts).astype(np.float32)
+            return {
+                "micro": flat,
+                "macro": np.array([], dtype=np.float32),
+                "private": np.array([], dtype=np.float32),
+            }
         macro_parts = [obs[f"scale_{i}"].flatten() for i in range(1, self._n_scales)]
         return {
             "micro": obs["scale_0"],
@@ -414,6 +459,16 @@ class SACAgent:
 
     def _obs_batch_to_buffer(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
         """Convert batch multi-scale obs dict to replay buffer format."""
+        if self._obs_mode == "summary_stats":
+            n = obs["scale_0"].shape[0]
+            parts = [obs[f"scale_{i}"] for i in range(self._n_scales)]
+            parts.append(obs["private"])
+            flat = np.concatenate(parts, axis=1).astype(np.float32)
+            return {
+                "micro": flat,
+                "macro": np.zeros((n, 0), dtype=np.float32),
+                "private": np.zeros((n, 0), dtype=np.float32),
+            }
         n = obs["scale_0"].shape[0]
         macro_parts = [obs[f"scale_{i}"].reshape(n, -1) for i in range(1, self._n_scales)]
         return {
@@ -425,9 +480,17 @@ class SACAgent:
     def _unpack_buffer_to_stacks(self, states, next_states):
         """Unpack replay buffer micro/macro into stacked (B, N, W, F) tensors.
 
+        v6 summary_stats mode: returns flat (B, D) tensors instead of stacked.
+
         Returns stacked tensors for torch.compile-friendly forward passes.
         Uses pinned memory for true async H2D transfers.
         """
+        if self._obs_mode == "summary_stats":
+            # v6: micro IS the flat summary+private vector — return directly
+            s_flat = self._to_device_pinned(states["micro"])
+            ns_flat = self._to_device_pinned(next_states["micro"])
+            return s_flat, ns_flat
+
         chunk = self._window_size * self._features_per_scale
 
         # Scale 0 is stored as "micro"
