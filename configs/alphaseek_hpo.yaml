@@ -1,0 +1,79 @@
+# AlphaSeek Phase 6 — Production HPO + Walk-Forward Training
+#
+# Per-agent Optuna HPO (D3QN, DoubleDQN, TwinD3QN independently tuned),
+# followed by full training and ensemble evaluation on held-out test segments.
+#
+# Usage:
+#   # Smoke test
+#   python scripts/alphaseek_hpo_runner.py \
+#     --config configs/alphaseek_hpo.yaml \
+#     --max_windows 1 --n_trials 2 --hpo_break_step 1000 --full_break_step 2000
+#
+#   # Production
+#   python scripts/alphaseek_hpo_runner.py \
+#     --config configs/alphaseek_hpo.yaml
+
+strategy:
+  id: "alphaseek-phase6"
+  name: "AlphaSeek DQN Ensemble — LOB HPO"
+  version: "6.0.0"
+
+env:
+  simulator: lob
+  lob_parquet_path: data/lob_parquet/btcusdt_lob_1s.parquet
+  num_sims: 4096             # Full training
+  num_sims_hpo: 512          # Reduced for HPO trials (VRAM budget)
+  num_sims_eval: 64          # Eval sims
+  num_ignore_step: 60
+  max_position: 1
+  step_gap: 2                # HPO-sweepable: {1, 2, 4, 8}
+  slippage: 7.0e-7
+  seq_len: 3600
+  stop_loss_thresh: 1.0e-3   # HPO-sweepable
+
+features:
+  norm_span: 120
+  momentum_window: 5
+  vol_window: 30
+
+agent:
+  # Defaults — each agent type gets independent HPO
+  net_dims: [256, 256]
+  gamma: 0.995
+  explore_rate: 0.02
+  state_value_tau: 0.01
+  soft_update_tau: 5.0e-4
+  learning_rate: 1.0e-4
+  batch_size: 1024
+  repeat_times: 2
+  reward_scale: 4096
+  clip_grad_norm: 3.0
+
+training:
+  full_break_step: 320000    # Full training steps
+  buffer_size: null           # Auto: max_step * 32
+  horizon_len: null           # Auto: max_step * 4
+  eval_per_step: null         # Auto: max_step
+  save_gap: 8
+
+ensemble:
+  agent_classes: [D3QN, DoubleDQN, TwinD3QN]
+  voting: q_average
+
+hpo:
+  enabled: true
+  n_trials: 50               # Per agent type
+  hpo_break_step: 160000     # Half of full training
+  objective: total_return
+
+walk_forward:
+  train_segments: 8          # Number of segments for training
+  val_segments: 1
+  test_segments: 1
+  slide_by: 1
+
+wandb:
+  enabled: true
+  entity: bigcan-chiwin-technology
+  project: FinRL-Pro-DS
+  tags: [alphaseek, phase-6, hpo, lob, dqn-ensemble]

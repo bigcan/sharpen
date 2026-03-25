@@ -1,8 +1,8 @@
 """LOBTradeSimulator — Drop-in TradeSimulator using LOB parquet + FeatureEngine.
 
-Replaces the contest TradeSimulator's dependency on BTC_1sec_predict.npy (LSTM
-features of unknown provenance) with 8 microstructure features computed directly
-from our LOB database via AlphaSeekFeatureEngine.
+Replaces the contest TradeSimulator's dependency on BTC_1sec_predict.npy with
+8 hand-crafted microstructure features computed directly from our LOB database
+via AlphaSeekFeatureEngine.
 
 Usage:
     sim = LOBTradeSimulator(
@@ -12,12 +12,15 @@ Usage:
     )
     state = sim.reset()
     state, reward, done, info = sim.step(action)
+
+    # Walk-forward: filter to specific segments for train/val/test splits
+    train_sim = LOBTradeSimulator(..., segment_filter=[0,1,2,3,4,5,6,7])
+    val_sim   = LOBTradeSimulator(..., segment_filter=[8])
 """
 
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -51,6 +54,7 @@ class LOBTradeSimulator:
         vol_window: int = 30,
         device: th.device = th.device("cpu"),
         gpu_id: int = -1,
+        segment_filter: list[int] | None = None,
     ):
         self.device = th.device(f"cuda:{gpu_id}") if gpu_id >= 0 else device
         self.num_sims = num_sims
@@ -67,6 +71,13 @@ class LOBTradeSimulator:
         logger.info(f"Loading LOB parquet: {lob_parquet_path}")
         df = pd.read_parquet(lob_parquet_path)
         logger.info(f"  Loaded {len(df):,} rows")
+
+        # Filter to specific segments for walk-forward train/val/test splits
+        if segment_filter is not None and "segment_id" in df.columns:
+            df = df[df["segment_id"].isin(segment_filter)].reset_index(drop=True)
+            logger.info(
+                f"  Filtered to segments {segment_filter}: {len(df):,} rows"
+            )
 
         # Extract segment IDs for LEAK-1 compliant normalization
         segment_ids = None
@@ -304,6 +315,44 @@ class LOBTradeSimulator:
             ),
             dim=1,
         )
+
+
+    @staticmethod
+    def get_segment_info(lob_parquet_path: str) -> pd.DataFrame:
+        """Return summary of segments in the LOB parquet file.
+
+        Returns DataFrame with columns:
+            segment_id, n_rows, start_time, end_time, duration_hours
+        """
+        import pyarrow.parquet as pq
+
+        schema = pq.read_schema(lob_parquet_path)
+        col_names = [f.name for f in schema]
+
+        # Detect timestamp column name (timestamp or timestamp_ms)
+        ts_col = "timestamp" if "timestamp" in col_names else "timestamp_ms"
+
+        if "segment_id" not in col_names:
+            n_rows = pq.read_metadata(lob_parquet_path).num_rows
+            return pd.DataFrame(
+                {"segment_id": [0], "n_rows": [n_rows], "duration_hours": [np.nan]}
+            )
+
+        df = pd.read_parquet(lob_parquet_path, columns=["segment_id", ts_col])
+        info = df.groupby("segment_id").agg(
+            n_rows=(ts_col, "count"),
+            start_time=(ts_col, "min"),
+            end_time=(ts_col, "max"),
+        ).reset_index()
+
+        # Handle both epoch ms and datetime timestamps
+        start = pd.to_datetime(info["start_time"], unit="ms", errors="coerce")
+        end = pd.to_datetime(info["end_time"], unit="ms", errors="coerce")
+        if start.isna().all():
+            start = pd.to_datetime(info["start_time"])
+            end = pd.to_datetime(info["end_time"])
+        info["duration_hours"] = (end - start).dt.total_seconds() / 3600
+        return info
 
 
 class EvalLOBTradeSimulator(LOBTradeSimulator):
