@@ -71,7 +71,6 @@ def validate_config(config: dict, args) -> dict:
 
 def build_components(config: dict):
     """Instantiate all live trading components from config."""
-    import torch
     from finrl_pro_ds.agents.sac.sac_agent import SACAgent
     from finrl_pro_ds.crypto.data.crypto_loader import CryptoLoader
     from finrl_pro_ds.crypto.execution.exchange_perp_broker import ExchangePerpBroker
@@ -180,7 +179,7 @@ def main():
     # Build components and run
     engine = build_components(config)
 
-    logger.info(f"Starting live trading engine...")
+    logger.info("Starting live trading engine...")
     asyncio.run(engine.start())
 
 

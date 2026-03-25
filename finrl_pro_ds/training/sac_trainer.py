@@ -31,7 +31,7 @@ class SACTrainer:
         env,
         config: Dict,
         device: str = "cuda",
-        run_name: str = None,
+        run_name: Optional[str] = None,
         hpo_mode: bool = False,
     ):
         self.env = env
@@ -98,7 +98,7 @@ class SACTrainer:
         # Scaling by num_envs caused UTD=40 (2*20), meaning 40 gradient steps per
         # env.step → replay ratio 1024x, SPS=8 (vs ~80 without scaling).
         # Standard SAC (Haarnoja, CleanRL, SB3) uses UTD=1-2 regardless of num_envs.
-        num_envs = getattr(env, 'num_envs', 1)
+        getattr(env, 'num_envs', 1)
         self.update_interval = sac_cfg.get("update_interval", 4)
 
         # Auto-scale tau for high UTD

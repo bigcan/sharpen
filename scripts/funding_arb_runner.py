@@ -29,14 +29,14 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-from finrl_pro_ds.crypto.data.crypto_loader import (
+from finrl_pro_ds.crypto.data.crypto_loader import (  # noqa: E402
     WalkForwardCoverageValidator,
     fetch_crypto_data,
     fetch_spot_data,
 )
-from finrl_pro_ds.crypto.data.crypto_array_builder import build_funding_arb_arrays
-from finrl_pro_ds.crypto.features.funding_arb_features import compute_funding_arb_features
-from finrl_pro_ds.crypto.envs.funding_arb_env import FundingArbEnv
+from finrl_pro_ds.crypto.data.crypto_array_builder import build_funding_arb_arrays  # noqa: E402
+from finrl_pro_ds.crypto.features.funding_arb_features import compute_funding_arb_features  # noqa: E402
+from finrl_pro_ds.crypto.envs.funding_arb_env import FundingArbEnv  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

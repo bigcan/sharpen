@@ -1,7 +1,5 @@
 import unittest
 import torch
-import torch.nn as nn
-import numpy as np
 from unittest.mock import MagicMock
 
 from finrl_pro_ds.agents.deepscalper.networks import (
@@ -172,7 +170,7 @@ class TestNetworkRobustness(unittest.TestCase):
         import warnings
         with warnings.catch_warnings(record=True) as w:
             warnings.simplefilter("always")
-            encoder = MicroEncoder(
+            MicroEncoder(
                 input_size=30, private_input_size=5,
                 hidden_size=64, num_layers=1, dropout=0.5, rnn_type="LSTM"
             )

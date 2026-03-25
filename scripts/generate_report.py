@@ -129,11 +129,11 @@ def _get_comparison_runs(current_run_id, n=5):
             return []
 
         cursor.execute(
-            f"SELECT id, name, created_at, status, "
-            f"  val_sharpe, test_sharpe, test_return, test_trade_count "
-            f"FROM runs "
-            f"WHERE id != ? "
-            f"ORDER BY created_at DESC LIMIT ?",
+            "SELECT id, name, created_at, status, "
+            "  val_sharpe, test_sharpe, test_return, test_trade_count "
+            "FROM runs "
+            "WHERE id != ? "
+            "ORDER BY created_at DESC LIMIT ?",
             (current_run_id, n)
         )
         rows = cursor.fetchall()
@@ -394,7 +394,7 @@ def generate_report(run_id, output_path):
         report += "| Run | Date | Status | Val Sharpe | Test Sharpe | Test Return | Trades |\n"
         report += "| :--- | :--- | :--- | :--- | :--- | :--- | :--- |\n"
         for row in comp_rows:
-            rid, rname, rdate, rstatus = row[0], row[1], row[2], row[3]
+            rid, _rname, rdate, rstatus = row[0], row[1], row[2], row[3]
             r_vs = row[4] if row[4] is not None else "N/A"
             r_ts = row[5] if row[5] is not None else "N/A"
             r_tr = row[6] if row[6] is not None else "N/A"

@@ -1,12 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
-
-def _tc_align(dim: int, multiple: int = 8) -> int:
-    """Round up to next multiple for Tensor Core alignment."""
-    return ((dim + multiple - 1) // multiple) * multiple
+from finrl_pro_ds.agents.common.network_blocks import _CausalConv1dBlock, _tc_align  # noqa: F401, imported for backward compat
 
 class MicroEncoder(nn.Module):
     """
@@ -77,7 +74,7 @@ class MicroEncoder(nn.Module):
         nn.init.xavier_uniform_(self.out_layer.weight)
         nn.init.zeros_(self.out_layer.bias)
 
-    def forward(self, x: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(self, x: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         # x: (Batch, Window, LOB_Features)  — market data only
         if self._tc_pad > 0:
             x = F.pad(x, (0, self._tc_pad))
@@ -220,47 +217,6 @@ class MicroEncoderFlat(nn.Module):
         if self._tc_pad > 0:
             last = F.pad(last, (0, self._tc_pad))
         return self.net(last), None
-
-
-class _CausalConv1dBlock(nn.Module):
-    """Single causal convolution block with residual connection.
-
-    Architecture:
-        x → pad(left) → Conv1d → LayerNorm → GELU → Dropout → + residual → out
-
-    The left-padding ensures causal (no future leakage): output at time t
-    depends only on inputs at times ≤ t.
-    """
-
-    def __init__(self, in_ch: int, out_ch: int, kernel_size: int,
-                 dilation: int, dropout: float = 0.1):
-        super().__init__()
-        # Causal padding: (kernel_size - 1) * dilation on the left side only
-        self.pad_len = (kernel_size - 1) * dilation
-        self.conv = nn.Conv1d(in_ch, out_ch, kernel_size, dilation=dilation)
-        self.norm = nn.LayerNorm(out_ch)
-        self.dropout = nn.Dropout(dropout)
-        # Residual: 1x1 conv if channel dims differ
-        self.residual = nn.Conv1d(in_ch, out_ch, 1) if in_ch != out_ch else nn.Identity()
-
-        self._init_weights()
-
-    def _init_weights(self):
-        nn.init.kaiming_normal_(self.conv.weight, nonlinearity='linear')
-        nn.init.zeros_(self.conv.bias)
-        if isinstance(self.residual, nn.Conv1d):
-            nn.init.kaiming_normal_(self.residual.weight, nonlinearity='linear')
-            nn.init.zeros_(self.residual.bias)
-
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        """x: (B, C, T) → (B, C_out, T)"""
-        # Left-pad for causal convolution
-        padded = torch.nn.functional.pad(x, (self.pad_len, 0))
-        out = self.conv(padded)
-        # LayerNorm expects (B, T, C), so transpose → norm → transpose back
-        out = self.norm(out.transpose(1, 2)).transpose(1, 2)
-        out = self.dropout(torch.nn.functional.gelu(out))
-        return out + self.residual(x)
 
 
 class MicroEncoderTCN(nn.Module):
@@ -482,7 +438,7 @@ class DeepScalperNetwork(nn.Module):
                     if layer.bias is not None:
                         nn.init.zeros_(layer.bias)
 
-    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor, hidden: Tuple[torch.Tensor, torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
         """
         Returns (Q_price, Q_qty, V_state, Pred_Vol, new_hidden)
         For Tier 2 (Discrete), Q_qty will be the single Q-value vector, and Q_price will be None.

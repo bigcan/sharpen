@@ -6,7 +6,6 @@ Skips if LOB parquet data is not available.
 
 import os
 
-import numpy as np
 import pytest
 import torch
 

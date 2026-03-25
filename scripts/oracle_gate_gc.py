@@ -24,17 +24,14 @@ import yaml
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler  # noqa: E402
+from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv  # noqa: E402
 
 
 def run_agent(env, policy_fn, label: str) -> dict:
     """Run one agent through the full episode."""
     obs, info = env.reset()
     total_reward = 0.0
-    trades = 0
-    wins = 0
-    losses = 0
     steps = 0
     portfolio_values = [env.initial_balance]
 

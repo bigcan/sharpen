@@ -389,7 +389,7 @@ def main():
             verdict = res.get("val", {}).get("verdict", "?")
 
             # Compute average absolute return for PF simulation
-            df_tmp = load_ohlcv(asset) if h == args.horizons[0] else None
+            load_ohlcv(asset) if h == args.horizons[0] else None
             # Use simple estimate: 7.4 bps for GC, 6.8 for CL, 3.9 for ES (from oracle analysis)
             avg_ret = {"GC": 7.4, "CL": 6.8, "ES": 3.9}.get(asset, 5.0) * (h ** 0.5)
             rt_cost = {"GC": 0.36, "CL": 2.52, "ES": 0.52}.get(asset, 1.0)

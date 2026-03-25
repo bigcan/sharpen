@@ -17,7 +17,6 @@ from finrl_pro_ds.envs.augmented_wrapper import (
     AugmentedDataWrapper,
     _SPREAD_IDX,
     _OFI_INDICES,
-    _OFI_INT_INDICES,
     _VOL_INDICES,
 )
 

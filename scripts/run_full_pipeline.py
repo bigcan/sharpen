@@ -1147,7 +1147,7 @@ def run_training(config, run_name, device, agent_type="bdq", warm_start=None):
         if data_loader:
             try:
                 data_loader.close_shared_memory(unlink=True)
-            except:
+            except Exception:
                 pass
 
 
@@ -1183,11 +1183,13 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         # Fix Issue #1: Disable Private State Augmentation during backtest
         # We need deterministic starting states (Initial Balance, Pos=0), not random ones.
         backtest_config = copy.deepcopy(config)
-        if "env" not in backtest_config: backtest_config["env"] = {}
+        if "env" not in backtest_config:
+            backtest_config["env"] = {}
         backtest_config["env"]["private_state_augment_prob"] = 0.0
         # FIX BUG-03: Disable hindsight reward during backtest — it uses future prices
         # which inflates evaluation metrics. Hindsight is a training-only shaping signal.
-        if "reward" not in backtest_config["env"]: backtest_config["env"]["reward"] = {}
+        if "reward" not in backtest_config["env"]:
+            backtest_config["env"]["reward"] = {}
         backtest_config["env"]["reward"]["hindsight_weight"] = 0.0
         # FIX BUG-17: Override daily episode settings for backtest — must evaluate
         # full test period sequentially, not a single random day.

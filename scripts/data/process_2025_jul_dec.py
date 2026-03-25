@@ -17,8 +17,8 @@ from glob import glob
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import pandas as pd
-from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
+import pandas as pd  # noqa: E402
+from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer  # noqa: E402
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 RAW_DIR = PROJECT_ROOT / "data" / "raw" / "coinapi_lob"
@@ -153,7 +153,7 @@ def main():
     print(f"  Date range:  {df['timestamp'].min()} → {df['timestamp'].max()}")
     print(f"  NaN total:   {df.isnull().sum().sum()}")
     print(f"  File size:   {file_size_mb:.1f} MB")
-    print(f"\n  Column groups:")
+    print("\n  Column groups:")
 
     lob_cols = [c for c in df.columns if any(c.startswith(p) for p in ('bid_', 'ask_'))]
     norm_cols = [c for c in df.columns if c.startswith('n_')]
@@ -167,10 +167,10 @@ def main():
     print(f"    OFI:            {len(ofi_cols)} cols")
     print(f"    Synthetic OHLCV:{len([c for c in ohlcv_cols if c in df.columns])} cols")
     print(f"    Macro z-scores: {len(macro_z)} cols")
-    print(f"    Other:          mid_price, spread_1, log_ret" + (f", {other_cols}" if other_cols else ""))
+    print("    Other:          mid_price, spread_1, log_ret" + (f", {other_cols}" if other_cols else ""))
 
     # Spot-check macro feature ranges
-    print(f"\n  Macro feature ranges (should be within ±100 bps):")
+    print("\n  Macro feature ranges (should be within ±100 bps):")
     for col in macro_z[:4]:
         vals = df[col].values
         print(f"    {col:12s}: [{vals.min():+8.2f}, {vals.max():+8.2f}]  mean={vals.mean():+.4f}")
@@ -178,7 +178,7 @@ def main():
     # Cross-check with Jan-Jun processed data
     jan_jun_path = PROJECT_ROOT / "data" / "processed" / "btc_2025_jan_jun.parquet"
     if jan_jun_path.exists():
-        print(f"\n  Cross-check with Jan-Jun dataset:")
+        print("\n  Cross-check with Jan-Jun dataset:")
         jj = pd.read_parquet(jan_jun_path, columns=['timestamp'] + list(df.columns[:3]))
         print(f"    Jan-Jun: {jj.shape[0]:,} rows, {jj['timestamp'].min()} → {jj['timestamp'].max()}")
         print(f"    Jul-Dec: {df.shape[0]:,} rows, {df['timestamp'].min()} → {df['timestamp'].max()}")
@@ -197,7 +197,7 @@ def main():
             if extra:
                 print(f"    ⚠️  Extra in Jul-Dec: {extra}")
 
-    print(f"\n  ✓ Dataset ready for DeepScalper training")
+    print("\n  ✓ Dataset ready for DeepScalper training")
     print(f"  → {OUTPUT_PATH}")
 
 

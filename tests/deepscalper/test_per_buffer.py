@@ -8,7 +8,6 @@ Covers:
 """
 import pytest
 import numpy as np
-import torch
 
 from finrl_pro_ds.agents.deepscalper.per_buffer import SumTree, PrioritizedReplayBuffer
 
@@ -285,7 +284,6 @@ class TestSumTreeBatch:
 
     def test_batch_update_matches_sequential(self):
         """Batch update should produce same tree state as sequential updates."""
-        import copy
 
         # Build two identical trees
         tree_seq = SumTree(capacity=32)

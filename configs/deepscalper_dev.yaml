@@ -36,7 +36,7 @@ env:
   reward:
     # Paper-aligned reward (matches production structure)
     scaling: 1.0
-    hindsight_weight: 0.1
+    hindsight_weight: 0.0
     hindsight_horizon: 180
     volatility_horizon: 100
     sharpe_weight: 0.0

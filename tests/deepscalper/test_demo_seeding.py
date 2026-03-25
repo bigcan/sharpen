@@ -9,7 +9,6 @@ Verifies:
 - train() only seeds on start_step==0 (not on HPO resumptions)
 """
 import numpy as np
-import torch
 import unittest
 from unittest.mock import MagicMock, patch
 

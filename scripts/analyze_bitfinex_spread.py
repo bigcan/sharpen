@@ -55,7 +55,7 @@ def overall_stats(df: pd.DataFrame):
     print(f"SPREAD STATISTICS ({len(df):,} observations)")
     print(f"{'='*70}")
 
-    print(f"\n  Distribution:")
+    print("\n  Distribution:")
     print(f"    Mean:    {s.mean():.4f} bps")
     print(f"    Median:  {s.median():.4f} bps")
     print(f"    Mode:    {s.mode().iloc[0] if len(s.mode()) > 0 else 'N/A':.4f} bps")
@@ -63,17 +63,17 @@ def overall_stats(df: pd.DataFrame):
     print(f"    Skew:    {s.skew():.2f}")
     print(f"    Kurt:    {s.kurtosis():.2f}")
 
-    print(f"\n  Percentiles:")
+    print("\n  Percentiles:")
     for p in [1, 5, 10, 25, 50, 75, 90, 95, 99]:
         val = s.quantile(p / 100)
         print(f"    P{p:>2}: {val:.4f} bps")
 
-    print(f"\n  Extremes:")
+    print("\n  Extremes:")
     print(f"    Min:     {s.min():.4f} bps")
     print(f"    Max:     {s.max():.4f} bps")
 
     # Fraction of time at different spread levels
-    print(f"\n  Time at Spread Level:")
+    print("\n  Time at Spread Level:")
     for threshold in [0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 5.0]:
         frac = (s <= threshold).mean() * 100
         print(f"    <= {threshold:>4.2f} bps: {frac:>6.1f}% of time")
@@ -85,7 +85,7 @@ def hourly_profile(df: pd.DataFrame):
     df['hour'] = df['timestamp'].dt.hour
 
     print(f"\n{'='*70}")
-    print(f"HOURLY SPREAD PROFILE (UTC)")
+    print("HOURLY SPREAD PROFILE (UTC)")
     print(f"{'='*70}")
     print(f"  {'Hour':>4} | {'Mean':>7} | {'Median':>7} | {'P95':>7} | {'Count':>7} | "
           f"{'BidDepth5':>9} | {'AskDepth5':>9}")
@@ -122,7 +122,7 @@ def hourly_profile(df: pd.DataFrame):
 def depth_analysis(df: pd.DataFrame):
     """Analyze order book depth (liquidity)."""
     print(f"\n{'='*70}")
-    print(f"DEPTH ANALYSIS (Liquidity)")
+    print("DEPTH ANALYSIS (Liquidity)")
     print(f"{'='*70}")
 
     for col, label in [('bid_depth_5', 'Bid Top-5'),
@@ -141,7 +141,7 @@ def depth_analysis(df: pd.DataFrame):
     # Bid-ask depth imbalance
     if 'bid_depth_5' in df.columns and 'ask_depth_5' in df.columns:
         imbalance = (df['bid_depth_5'] - df['ask_depth_5']) / (df['bid_depth_5'] + df['ask_depth_5'] + 1e-9)
-        print(f"\n  Depth Imbalance (bid-ask / total):")
+        print("\n  Depth Imbalance (bid-ask / total):")
         print(f"    Mean:   {imbalance.mean():+.4f}")
         print(f"    Std:    {imbalance.std():.4f}")
         print(f"    Skew:   {imbalance.skew():.2f}")
@@ -150,7 +150,7 @@ def depth_analysis(df: pd.DataFrame):
 def breakeven_with_measured_spread(df: pd.DataFrame):
     """Recalculate breakeven using MEASURED spread instead of estimated."""
     print(f"\n{'='*70}")
-    print(f"BREAKEVEN RECALCULATION WITH MEASURED SPREAD")
+    print("BREAKEVEN RECALCULATION WITH MEASURED SPREAD")
     print(f"{'='*70}")
 
     measured_median = df['spread_bps'].median()
@@ -174,10 +174,10 @@ def breakeven_with_measured_spread(df: pd.DataFrame):
 
     rf_auc = 0.528  # Our BTC RF test AUC
 
-    print(f"\n  Inputs:")
+    print("\n  Inputs:")
     print(f"    5-min avg |return| (μ): {mu:.2f} bps ({mu_source})")
     print(f"    Our RF AUC:             {rf_auc:.3f}")
-    print(f"    Trading fee:            0.00 bps (Bitfinex zero-fee)")
+    print("    Trading fee:            0.00 bps (Bitfinex zero-fee)")
     print(f"    Measured median spread:  {measured_median:.4f} bps")
     print(f"    Measured P75 spread:     {measured_p75:.4f} bps")
     print(f"    Measured P95 spread:     {measured_p95:.4f} bps")
@@ -223,10 +223,10 @@ def breakeven_with_measured_spread(df: pd.DataFrame):
               f"{margin:>+6.4f} | {pf_str:>7} | {verdict}")
 
     # Also compare to Gold
-    print(f"\n  For comparison — Gold CME:")
-    print(f"    Measured spread: ~0.7 bps (from LOB data)")
-    print(f"    RF AUC: 0.554 (with LOB features)")
-    print(f"    μ (Nov): 10.52 bps")
+    print("\n  For comparison — Gold CME:")
+    print("    Measured spread: ~0.7 bps (from LOB data)")
+    print("    RF AUC: 0.554 (with LOB features)")
+    print("    μ (Nov): 10.52 bps")
     gc_c = 0.7
     gc_mu = 10.52
     gc_p_break = (gc_c / gc_mu + 1) / 2
@@ -240,7 +240,7 @@ def go_nogo_verdict(df: pd.DataFrame):
     p75_spread = df['spread_bps'].quantile(0.75)
 
     print(f"\n{'='*70}")
-    print(f"GO / NO-GO VERDICT")
+    print("GO / NO-GO VERDICT")
     print(f"{'='*70}")
 
     if median_spread < 0.3:
@@ -276,16 +276,16 @@ def go_nogo_verdict(df: pd.DataFrame):
     print(f"\n  {detail}")
 
     # Action items
-    print(f"\n  NEXT STEPS:")
+    print("\n  NEXT STEPS:")
     if "GO" in verdict:
-        print(f"    1. Run oracle gate: python scripts/oracle_gate_gc.py "
-              f"--config configs/phase_h_bitfinex_btc_dev.yaml --split val")
-        print(f"    2. If oracle PF > 1.5 → deploy BDQ training")
-        print(f"    3. Start long-term LOB recording for feature engineering")
+        print("    1. Run oracle gate: python scripts/oracle_gate_gc.py "
+              "--config configs/phase_h_bitfinex_btc_dev.yaml --split val")
+        print("    2. If oracle PF > 1.5 → deploy BDQ training")
+        print("    3. Start long-term LOB recording for feature engineering")
     else:
-        print(f"    1. Focus on Gold G5 BDQ deployment")
-        print(f"    2. Consider Bitfinex only if LOB features significantly boost BTC AUC")
-        print(f"    3. Investigate whether spread narrows at high-volume hours")
+        print("    1. Focus on Gold G5 BDQ deployment")
+        print("    2. Consider Bitfinex only if LOB features significantly boost BTC AUC")
+        print("    3. Investigate whether spread narrows at high-volume hours")
 
 
 def main():

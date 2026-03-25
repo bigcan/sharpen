@@ -485,8 +485,8 @@ def main():
     # Features (computed once on full series)
     features_df = build_features(df)
     features = features_df.values.astype(np.float32)
-    print(f"\n  WARNING: Normalization computed on full dataset "
-          f"(minor leakage, acceptable for research)")
+    print("\n  WARNING: Normalization computed on full dataset "
+          "(minor leakage, acceptable for research)")
 
     # Walk-forward loop
     all_results = {}
@@ -607,7 +607,7 @@ def main():
 
         # Also print the model coefficients for LogReg (interpretability)
         if winner == 'LogReg':
-            print(f"\n  LogReg coefficients (Long class):")
+            print("\n  LogReg coefficients (Long class):")
             coefs = final_clf.coef_[0]
             feat_names = list(features_df.columns)
             sorted_idx = np.argsort(np.abs(coefs))[::-1]

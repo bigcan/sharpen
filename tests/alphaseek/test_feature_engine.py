@@ -2,7 +2,6 @@
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from finrl_pro_ds.alphaseek.feature_engine import (
     AlphaSeekFeatureEngine,

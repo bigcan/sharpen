@@ -100,13 +100,13 @@ def compute_group_stats(X, labels, feature_cols, returns_bps):
     n_hold = hold_mask.sum()
     n_total = len(labels)
 
-    print(f"\n  Oracle distribution:")
+    print("\n  Oracle distribution:")
     print(f"    Long:  {n_long:>6d} ({100*n_long/n_total:.1f}%)")
     print(f"    Short: {n_short:>6d} ({100*n_short/n_total:.1f}%)")
     print(f"    Hold:  {n_hold:>6d} ({100*n_hold/n_total:.1f}%)")
     print(f"    Total: {n_total:>6d}")
 
-    print(f"\n  Return stats (bps):")
+    print("\n  Return stats (bps):")
     print(f"    Long  mean: {returns_bps[long_mask].mean():>+7.2f}, "
           f"median: {np.median(returns_bps[long_mask]):>+7.2f}")
     print(f"    Short mean: {returns_bps[short_mask].mean():>+7.2f}, "
@@ -236,13 +236,13 @@ def save_report(output_dir, stats_df, temporal_df, split_results, fee_bps):
             n_hold = result['n_hold']
             n_total = n_long + n_short + n_hold
 
-            f.write(f"\n  Oracle distribution:\n")
+            f.write("\n  Oracle distribution:\n")
             f.write(f"    Long:  {n_long:>6d} ({100*n_long/n_total:.1f}%)\n")
             f.write(f"    Short: {n_short:>6d} ({100*n_short/n_total:.1f}%)\n")
             f.write(f"    Hold:  {n_hold:>6d} ({100*n_hold/n_total:.1f}%)\n")
 
             # Top features by |Cohen's d| (long vs short discriminability)
-            f.write(f"\n  TOP 20 FEATURES BY |Cohen's d| (long vs short separability):\n")
+            f.write("\n  TOP 20 FEATURES BY |Cohen's d| (long vs short separability):\n")
             f.write(f"  {'#':>3} {'Feature':<25} {'|d|':>6} {'d':>7} {'Direction':<12} "
                     f"{'Mean(L)':>8} {'Mean(S)':>8} {'Mean(H)':>8} {'KS-stat':>8} {'KS-p':>10}\n")
             f.write(f"  {'-' * 110}\n")
@@ -257,7 +257,7 @@ def save_report(output_dir, stats_df, temporal_df, split_results, fee_bps):
                         f"{row['ks_pval']:>10.2e} {sig}\n")
 
             # Bottom features (least discriminating)
-            f.write(f"\n  BOTTOM 10 FEATURES (least discriminating):\n")
+            f.write("\n  BOTTOM 10 FEATURES (least discriminating):\n")
             for rank, (_, row) in enumerate(sdf_sorted.tail(10).iterrows(), 1):
                 f.write(f"  {rank:>3} {row['feature']:<25} |d|={row['abs_cohens_d']:.4f}\n")
 
@@ -265,7 +265,7 @@ def save_report(output_dir, stats_df, temporal_df, split_results, fee_bps):
         if temporal_df is not None and len(temporal_df) > 0:
             f.write(f"\n{'=' * 80}\n")
             f.write("  TEMPORAL LEAD ANALYSIS (train split)\n")
-            f.write(f"  Feature values at t-lag before long/short bars\n")
+            f.write("  Feature values at t-lag before long/short bars\n")
             f.write(f"{'=' * 80}\n\n")
 
             # Show top features by |Cohen's d| at each lag
@@ -286,7 +286,7 @@ def save_report(output_dir, stats_df, temporal_df, split_results, fee_bps):
                 f.write("\n")
 
             # Decay analysis: which features maintain signal across lags?
-            f.write(f"  SIGNAL PERSISTENCE (|d| decay across lags):\n")
+            f.write("  SIGNAL PERSISTENCE (|d| decay across lags):\n")
             line = f"  {'Feature':<25}"
             for lag in sorted(temporal_df['lag'].unique()):
                 line += f" {'t-'+str(lag):>6}"
@@ -390,11 +390,11 @@ def main():
 
         # Temporal analysis only on train (largest split)
         if split_name == "train":
-            print(f"\n  Computing temporal lead analysis (t-1 to t-5)...")
+            print("\n  Computing temporal lead analysis (t-1 to t-5)...")
             temporal_df = compute_temporal_stats(X, labels, feature_cols, lookback=5)
             if len(temporal_df) > 0:
                 top_t1 = temporal_df[temporal_df['lag'] == 1].sort_values('abs_cohens_d', ascending=False)
-                print(f"  Top 5 features by |d| at t-1:")
+                print("  Top 5 features by |d| at t-1:")
                 for _, row in top_t1.head(5).iterrows():
                     print(f"    {row['feature']:<25} |d|={row['abs_cohens_d']:.4f}")
 

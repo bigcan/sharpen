@@ -1,8 +1,6 @@
 """Tests for AlphaSeek HPO runner — search space, window scheduling, smoke HPO."""
 
-import os
 
-import pytest
 
 
 # ===========================================================================

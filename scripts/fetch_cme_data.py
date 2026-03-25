@@ -16,8 +16,8 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / '.env')
 
-import databento as db
-import pandas as pd
+import databento as db  # noqa: E402
+import pandas as pd  # noqa: E402
 
 API_KEY = os.environ.get('DATABENTO_API_KEY')
 if not API_KEY:
@@ -163,7 +163,7 @@ def phase2(client, symbols=None):
 
         info = ASSETS[sym]
         print(f"\n  Fetching MBP-10 for {info['name']} ({info['symbol']})...")
-        print(f"  NOTE: This may take a while for large datasets...")
+        print("  NOTE: This may take a while for large datasets...")
 
         try:
             # Stream to file to manage memory

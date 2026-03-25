@@ -43,7 +43,7 @@ sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), "scripts"))
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-from sklearn.metrics import r2_score, mean_absolute_error
+from sklearn.metrics import r2_score, mean_absolute_error  # noqa: E402
 
 # ── Action constants (Discrete(6)) ──
 TAKER_BUY = 0
@@ -101,10 +101,14 @@ def load_raw_features_gold(file_path, start_date, end_date):
     microprice_basis = np.log(mp_safe / mid_safe) * 10000.0
 
     # DOFI level 1
-    bp_prev = np.roll(bp1, 1); bp_prev[0] = bp1[0]
-    bv_prev = np.roll(bv1, 1); bv_prev[0] = bv1[0]
-    ap_prev = np.roll(ap1, 1); ap_prev[0] = ap1[0]
-    av_prev = np.roll(av1, 1); av_prev[0] = av1[0]
+    bp_prev = np.roll(bp1, 1)
+    bp_prev[0] = bp1[0]
+    bv_prev = np.roll(bv1, 1)
+    bv_prev[0] = bv1[0]
+    ap_prev = np.roll(ap1, 1)
+    ap_prev[0] = ap1[0]
+    av_prev = np.roll(av1, 1)
+    av_prev[0] = av1[0]
 
     w_b = np.where(bp1 > bp_prev, bv1,
             np.where(bp1 < bp_prev, -bv_prev, bv1 - bv_prev))
@@ -577,7 +581,7 @@ def save_results(output_dir, asset, eval_results, backtest_results,
 
         # Backtest results
         if backtest_results:
-            f.write(f"\n\nTHRESHOLD BACKTEST RESULTS\n")
+            f.write("\n\nTHRESHOLD BACKTEST RESULTS\n")
             f.write("=" * 80 + "\n")
             f.write(f"  {'Model':<16} {'T':>5} {'Split':<5} {'PF':>7} "
                     f"{'Sharpe':>8} {'Trades':>6} {'Return':>9} "
@@ -595,7 +599,7 @@ def save_results(output_dir, asset, eval_results, backtest_results,
                         f"{r.get('win_rate',0):>6.1f}%\n")
 
             # Best results summary
-            f.write(f"\n\nBEST RESULTS (>= 20 trades)\n")
+            f.write("\n\nBEST RESULTS (>= 20 trades)\n")
             f.write("=" * 80 + "\n")
             qualified = [r for r in backtest_results
                          if r.get("trade_count", 0) >= 20]
@@ -616,13 +620,13 @@ def save_results(output_dir, asset, eval_results, backtest_results,
 
                 pf = best["profit_factor"]
                 if pf >= 1.10:
-                    f.write(f"    -> STRONG: PF >= 1.10 — ship supervised\n")
+                    f.write("    -> STRONG: PF >= 1.10 — ship supervised\n")
                 elif pf >= 1.02:
-                    f.write(f"    -> MARGINAL: PF 1.02-1.10 — "
-                            f"proceed to J1 (IQN distributional RL)\n")
+                    f.write("    -> MARGINAL: PF 1.02-1.10 — "
+                            "proceed to J1 (IQN distributional RL)\n")
                 else:
-                    f.write(f"    -> WEAK: PF < 1.02 — "
-                            f"signal too thin at 5-min\n")
+                    f.write("    -> WEAK: PF < 1.02 — "
+                            "signal too thin at 5-min\n")
 
     print(f"\n  Results saved to {output_dir}/")
     return report_path
@@ -699,7 +703,7 @@ def main():
     print(f"\n  Feature set: {n_features} features ({args.asset})")
 
     # ── 2. Train & evaluate for each horizon ──
-    print(f"\n[2/4] Training regressors...")
+    print("\n[2/4] Training regressors...")
 
     all_eval_results = []
     models_by_horizon = {}
@@ -753,7 +757,7 @@ def main():
     # ── 3. Threshold backtests ──
     backtest_results = []
     if not args.no_backtest:
-        print(f"\n[3/4] Threshold backtests (taker execution)...")
+        print("\n[3/4] Threshold backtests (taker execution)...")
 
         norm_cutoffs = {
             "val": data_cfg["val_start_date"],
@@ -800,10 +804,10 @@ def main():
                                   f"{model_name} H{h} T={thresh:.2f} "
                                   f"{split_name}: FAILED — {e}")
     else:
-        print(f"\n[3/4] Threshold backtests skipped (--no_backtest)")
+        print("\n[3/4] Threshold backtests skipped (--no_backtest)")
 
     # ── 4. Save results ──
-    print(f"\n[4/4] Saving results...")
+    print("\n[4/4] Saving results...")
     report_path = save_results(
         output_dir, args.asset,
         all_eval_results, backtest_results,
@@ -815,7 +819,7 @@ def main():
     print(f"  PHASE I SUMMARY — {args.asset.upper()}")
     print(f"{'=' * 70}")
 
-    print(f"\n  Regression Quality (val/test):")
+    print("\n  Regression Quality (val/test):")
     for m in all_eval_results:
         if m["split"] in ("val", "test"):
             marker = ""
@@ -831,7 +835,7 @@ def main():
     if backtest_results:
         qualified = [r for r in backtest_results
                      if r.get("trade_count", 0) >= 20]
-        print(f"\n  Best Backtests (>= 20 trades):")
+        print("\n  Best Backtests (>= 20 trades):")
         for split_name in ["val", "test"]:
             split_res = [r for r in qualified
                          if r.get("split") == split_name]
@@ -853,7 +857,7 @@ def main():
             best_test = max(test_qualified,
                             key=lambda r: r["profit_factor"])
             pf = best_test["profit_factor"]
-            print(f"\n  DECISION GATE:")
+            print("\n  DECISION GATE:")
             if pf >= 1.10:
                 print(f"    PF={pf:.3f} >= 1.10 -> SHIP SUPERVISED")
             elif pf >= 1.02:

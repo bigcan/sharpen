@@ -12,7 +12,6 @@ from finrl_pro_ds.data.fill_model import (
     PriceCrossFillModel,
     VolumeBasedFillModel,
     create_fill_model,
-    FillResult,
 )
 
 
@@ -344,7 +343,6 @@ class TestInventory:
         # Set spread_offset to min (narrow) and full intensity
         # action[0]=-1 → spread_min_mult, action[2]=1 → max intensity
         action = np.array([-1.0, 0.0, 1.0], dtype=np.float32)
-        prev_inv = env.inventory
         # Run a few steps — with narrow spread, fills likely
         for _ in range(20):
             env.step(action)
@@ -487,7 +485,7 @@ class TestQuoteLatency:
         # Default intensity=0.0, so no fills expected
         action_wide = np.array([1.0, 0.0, 1.0], dtype=np.float32)
         _, _, _, _, info1 = env.step(action_wide)
-        fills_step1 = info1.get("total_fills", 0)
+        info1.get("total_fills", 0)
 
         # Step 2: submit same action → previous quotes should now be active
         _, _, _, _, info2 = env.step(action_wide)

@@ -2,7 +2,6 @@
 
 import os
 
-import numpy as np
 import pytest
 import torch as th
 
@@ -45,7 +44,7 @@ class TestLOBTradeSimulatorBasic:
 
     def test_step_shape(self):
         sim = self._make_sim()
-        state = sim.reset()
+        sim.reset()
         action = th.ones((4, 1), dtype=th.long)  # all hold
         next_state, reward, done, info = sim.step(action)
         assert next_state.shape == (4, 10)

@@ -238,7 +238,7 @@ def main():
     print(f"  Total augmented: {n_aug}")
 
     # Run experiments for each horizon
-    print(f"\n[3/4] Training models...")
+    print("\n[3/4] Training models...")
 
     all_results = {}
 
@@ -259,7 +259,7 @@ def main():
         valid_val = targets["val"]["valid"]
         valid_test = targets["test"]["valid"]
 
-        print(f"\n  --- A: Baseline (45 features) ---")
+        print("\n  --- A: Baseline (45 features) ---")
         _, baseline_results = train_and_evaluate(
             data["train"]["X"], targets["train"]["y"], valid_train,
             data["val"]["X"], targets["val"]["y"], valid_val,
@@ -331,7 +331,7 @@ def main():
 
         # ── Experiment E: Feature importance on augmented model ──
         # Re-train full model and extract importances
-        print(f"\n  --- Feature importance analysis ---")
+        print("\n  --- Feature importance analysis ---")
         rf_full = RandomForestClassifier(
             n_estimators=500, max_depth=12, min_samples_leaf=100,
             max_features='sqrt', class_weight='balanced',
@@ -353,7 +353,7 @@ def main():
 
         # Top 10 augmented features
         imp_order = np.argsort(importances)[::-1]
-        print(f"  Top 10 augmented features:")
+        print("  Top 10 augmented features:")
         for rank, idx in enumerate(imp_order[:10], 1):
             print(f"    {rank:>2}. {aug_cols[idx]:<30} {importances[idx]:.4f}")
 
@@ -410,12 +410,12 @@ def main():
                         f"{exp_r['val']['auc']:>10.4f} {exp_r['test']['auc']:>10.4f} "
                         f"{delta_str}\n")
 
-            f.write(f"\n  Feature importance share:\n")
+            f.write("\n  Feature importance share:\n")
             f.write(f"    Base (t=0):  {r['base_imp']:.3f} ({100*r['base_imp']:.1f}%)\n")
             f.write(f"    Lagged:      {r['lag_imp']:.3f} ({100*r['lag_imp']:.1f}%)\n")
             f.write(f"    Delta:       {r['delta_imp']:.3f} ({100*r['delta_imp']:.1f}%)\n")
 
-            f.write(f"\n  Top 15 augmented features by importance:\n")
+            f.write("\n  Top 15 augmented features by importance:\n")
             imp = r['importances']
             cols = r['aug_cols']
             imp_order = np.argsort(imp)[::-1]
@@ -456,13 +456,13 @@ def main():
 
         if delta_full > 0.01:
             print(f"    --> Temporal patterns ADD signal (+{delta_full:.4f} AUC)")
-            print(f"        RL agent's TCN/LSTM SHOULD capture this advantage")
+            print("        RL agent's TCN/LSTM SHOULD capture this advantage")
         elif delta_full > 0.003:
             print(f"    --> Weak temporal signal (+{delta_full:.4f} AUC)")
-            print(f"        RL agent has marginal advantage from sequences")
+            print("        RL agent has marginal advantage from sequences")
         else:
             print(f"    --> No temporal signal ({delta_full:+.4f} AUC)")
-            print(f"        RL agent's TCN/LSTM adds NO value over snapshot features")
+            print("        RL agent's TCN/LSTM adds NO value over snapshot features")
 
     print(f"\n  Artifacts: {args.output_dir}/")
     print(f"{'=' * 70}")

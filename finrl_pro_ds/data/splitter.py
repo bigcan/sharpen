@@ -1,7 +1,10 @@
+import logging
 
 import pandas as pd
 from typing import List, Dict
 from dataclasses import dataclass
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class TimeRange:
@@ -77,13 +80,13 @@ class RollingWindowSplitter:
 
     @staticmethod
     def print_schedule(folds):
-        print(f"{'Fold':<5} | {'Train':<25} | {'Validation':<25} | {'Trade (Test)':<25}")
-        print("-" * 85)
+        logger.info(f"{'Fold':<5} | {'Train':<25} | {'Validation':<25} | {'Trade (Test)':<25}")
+        logger.info("-" * 85)
         for i, fold in enumerate(folds):
             t = fold['train']
             v = fold['val']
             e = fold['test']
-            print(f"{i+1:<5} | {t.start[:10]} -> {t.end[:10]} | {v.start[:10]} -> {v.end[:10]} | {e.start[:10]} -> {e.end[:10]}")
+            logger.info(f"{i+1:<5} | {t.start[:10]} -> {t.end[:10]} | {v.start[:10]} -> {v.end[:10]} | {e.start[:10]} -> {e.end[:10]}")
 
 # Example Usage
 if __name__ == "__main__":

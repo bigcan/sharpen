@@ -5,7 +5,7 @@ Pre-allocated numpy arrays for fixed-length trajectory storage.
 Supports GAE computation and minibatch iteration.
 """
 import numpy as np
-from typing import Dict, Generator, Tuple
+from typing import Dict, Generator, Optional, Tuple
 
 
 class RolloutBuffer:
@@ -70,7 +70,7 @@ class RolloutBuffer:
         rewards: np.ndarray,
         values: np.ndarray,
         dones: np.ndarray,
-        qty_masks: np.ndarray = None,
+        qty_masks: Optional[np.ndarray] = None,
     ):
         """
         Store one timestep of data from all environments.

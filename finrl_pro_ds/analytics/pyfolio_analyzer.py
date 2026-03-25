@@ -30,7 +30,7 @@ class PyfolioAnalyzer:
         if not isinstance(self.returns.index, pd.DatetimeIndex):
             try:
                 self.returns.index = pd.to_datetime(self.returns.index)
-            except:
+            except Exception:
                 # Generate 1m freq index starting from now backwards
                 warnings.warn("Returns index is not DatetimeIndex. Generating dummy 1min index.")
                 self.returns.index = pd.date_range(end=pd.Timestamp.now(), periods=len(self.returns), freq='1min')

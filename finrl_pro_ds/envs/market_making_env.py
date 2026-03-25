@@ -25,6 +25,7 @@ import logging
 from typing import Dict, Optional, Any, TYPE_CHECKING
 
 from finrl_pro_ds.data.fill_model import create_fill_model, FillResult
+from finrl_pro_ds.envs.dsr import DSRCalculator
 
 if TYPE_CHECKING:
     from finrl_pro_ds.data.mm_data_handler import MMDataHandler
@@ -158,9 +159,10 @@ class MarketMakingEnv(gym.Env):
         self._inventory_risk_accum = 0.0
 
         # DSR state
-        self._dsr_A = 0.0
-        self._dsr_B = 0.0
-        self._dsr_warmup = 0
+        if not hasattr(self, '_dsr'):
+            self._dsr = DSRCalculator(eta=self.dsr_eta, scale=self.dsr_scale)
+        else:
+            self._dsr.reset()
 
         # ATR tracking
         self._atr_buffer = []
@@ -359,7 +361,7 @@ class MarketMakingEnv(gym.Env):
 
         # 8. Compute reward
         if self.reward_mode == "dsr":
-            reward = self._compute_dsr(R_t)
+            reward = self._dsr.compute(R_t)
         else:
             reward = float(np.clip(R_t, -50.0, 50.0))
 
@@ -422,25 +424,6 @@ class MarketMakingEnv(gym.Env):
         self._bars_since_quote_change += 1
 
         return spread_mult, skew_bps, intensity
-
-    def _compute_dsr(self, R_t: float) -> float:
-        """Differential Sharpe Ratio (Moody & Saffell 2001)."""
-        delta_A = R_t - self._dsr_A
-        delta_B = R_t * R_t - self._dsr_B
-
-        prev_A, prev_B = self._dsr_A, self._dsr_B
-        prev_variance = max(prev_B - prev_A ** 2, 0.0)
-
-        self._dsr_A += self.dsr_eta * delta_A
-        self._dsr_B += self.dsr_eta * delta_B
-        self._dsr_warmup += 1
-
-        if self._dsr_warmup > 1 and prev_variance > 1e-16:
-            denom = prev_variance ** 1.5
-            dsr = (prev_B * delta_A - 0.5 * prev_A * delta_B) / denom
-            return float(np.clip(dsr * self.dsr_scale, -10.0, 10.0))
-
-        return 0.0
 
     def _extract_obs(self, step_data: Dict) -> Dict[str, np.ndarray]:
         """Extract scale arrays and LOB features from handler step data."""

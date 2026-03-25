@@ -1,7 +1,6 @@
 """Tests for BybitLOBFeed — snapshot format, stale detection, error handling."""
 
 import time
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

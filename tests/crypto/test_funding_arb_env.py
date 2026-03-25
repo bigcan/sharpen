@@ -524,7 +524,7 @@ class TestSpotBorrowCosts:
             env.step(action)
 
         # Funding should be earned (negative rate + short perp → positive)
-        total_funding = float(env.cumulative_funding.sum())
+        float(env.cumulative_funding.sum())
         total_borrow = env.cumulative_borrow_costs
         # With negative funding rate and reverse arb (long perp), agent PAYS funding
         # So total_funding may be negative. But borrow costs should be separate.

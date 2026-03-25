@@ -174,7 +174,7 @@ class AlphaSeekReplayBuffer:
         max_sizes = []
         for (item, name), path in zip(item_names, paths):
             logger.info(f"Loading replay buffer: {path}")
-            buf_item = torch.load(path, map_location=self.device, weights_only=False)
+            buf_item = torch.load(path, map_location=self.device, weights_only=True)
             max_size = buf_item.shape[0]
             item[:max_size] = buf_item
             max_sizes.append(max_size)

@@ -6,14 +6,17 @@ API that handles device placement, deterministic mode, and checkpoint loading.
 
 import logging
 import os
-from typing import Optional
 
 import torch
 import torch.nn as nn
 
-from .nets import AGENT_NET_MAP, QNetBase
+from .nets import AGENT_NET_MAP, QNetBase, QNetTwin, QNetTwinDuel
 
 logger = logging.getLogger(__name__)
+
+# Allow safe deserialization of contest model checkpoints (full nn.Module saves)
+_SAFE_GLOBALS = [QNetBase, QNetTwin, QNetTwinDuel]
+torch.serialization.add_safe_globals(_SAFE_GLOBALS)
 
 # Constants matching the contest TradeSimulator environment
 STATE_DIM = 10  # 8 LSTM predictions + position_norm + holding_norm
@@ -79,6 +82,8 @@ class AlphaSeekAgent:
                 f"Expected act.pth or act_target.pth"
             )
 
+        # Contest checkpoints save full nn.Module (not state_dict), requiring
+        # weights_only=False.  These are our own trained models, not untrusted.
         state_dict = torch.load(load_path, map_location=self.device, weights_only=False)
 
         # Handle case where checkpoint is the full model (not just state_dict)

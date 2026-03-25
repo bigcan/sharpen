@@ -31,7 +31,7 @@ import pandas as pd
 from nautilus_trader.backtest.engine import BacktestEngine
 from nautilus_trader.backtest.config import BacktestEngineConfig
 from nautilus_trader.config import StrategyConfig
-from nautilus_trader.model import Bar, BarType, BarSpecification
+from nautilus_trader.model import Bar, BarSpecification
 from nautilus_trader.model.currencies import USD
 from nautilus_trader.model.data import BarType
 from nautilus_trader.model.enums import (
@@ -333,7 +333,7 @@ def print_results(engine, venue, strategy):
             print(positions.columns.tolist())
 
     # Strategy stats
-    print(f"\n  Strategy Stats:")
+    print("\n  Strategy Stats:")
     print(f"    Bars processed:  {strategy.bar_count}")
     print(f"    Signals emitted: {strategy.signal_count}")
     print(f"    Switches:        {strategy.switch_count}")

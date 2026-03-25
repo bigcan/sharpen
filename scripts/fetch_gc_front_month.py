@@ -36,8 +36,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / '.env')
 
-import databento as db
-import pandas as pd
+import databento as db  # noqa: E402
+import pandas as pd  # noqa: E402
 
 API_KEY = os.environ.get('DATABENTO_API_KEY')
 if not API_KEY:
@@ -189,21 +189,21 @@ def validate_stitched(df: pd.DataFrame) -> None:
     # Monthly bar counts
     df_ts = pd.to_datetime(df['timestamp'])
     monthly = df_ts.dt.to_period('M').value_counts().sort_index()
-    print(f"\n  Monthly bar counts:")
+    print("\n  Monthly bar counts:")
     for period, count in monthly.items():
         print(f"    {period}: {count:,} bars")
 
     # Spread analysis
     mid = (df['bid_price_1'] + df['ask_price_1']) / 2
     spread_bps = ((df['ask_price_1'] - df['bid_price_1']) / mid) * 10000
-    print(f"\n  Spread (bps):")
+    print("\n  Spread (bps):")
     print(f"    median={spread_bps.median():.2f}, mean={spread_bps.mean():.2f}")
     print(f"    p5={spread_bps.quantile(0.05):.2f}, p95={spread_bps.quantile(0.95):.2f}")
     tight = (spread_bps < 5).mean() * 100
     print(f"    Bars < 5 bps: {tight:.1f}%")
 
     # Monthly spread
-    print(f"\n  Monthly median spread (bps):")
+    print("\n  Monthly median spread (bps):")
     for month in sorted(df_ts.dt.month.unique()):
         mask = df_ts.dt.month == month
         sp = spread_bps[mask]
@@ -211,7 +211,7 @@ def validate_stitched(df: pd.DataFrame) -> None:
 
     # Contract source breakdown
     if 'contract' in df.columns:
-        print(f"\n  Contract sources:")
+        print("\n  Contract sources:")
         for contract, count in df['contract'].value_counts().sort_index().items():
             print(f"    {contract}: {count:,} bars")
 
@@ -238,12 +238,11 @@ def main():
 
     if OUT_PATH.exists() and not args.force:
         print(f"Already exists: {OUT_PATH}")
-        print(f"Use --force to re-fetch.")
+        print("Use --force to re-fetch.")
         return
 
     client = db.Historical(API_KEY)
     all_segments = []
-    total_ticks = 0
 
     print("="*70)
     print("GOLD FRONT-MONTH LOB FETCH — Individual Delivery Contracts")

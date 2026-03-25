@@ -266,7 +266,7 @@ def run_e1_threshold_sweep(config, data_splits, rf_model, horizon=30,
     """Sweep thresholds on val and test splits."""
     thresholds = [0.50, 0.52, 0.54, 0.56, 0.58, 0.60, 0.62, 0.64]
     maker_fee = config.get("env", {}).get("maker_fee", 0.0002)
-    data_config = config.get("data", {})
+    config.get("data", {})
     results = []
 
     for split_name, split_data in data_splits.items():

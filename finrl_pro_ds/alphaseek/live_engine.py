@@ -22,7 +22,6 @@ import signal
 import time
 from typing import Optional, Protocol
 
-import numpy as np
 import torch
 
 from .ensemble import AlphaSeekEnsemble
@@ -196,7 +195,7 @@ class AlphaSeekLiveEngine:
             return
 
         # --- 1. Wait for next tick ---
-        tick_time = await self.tick_clock.wait_for_next_tick()
+        await self.tick_clock.wait_for_next_tick()
         tick_start = time.perf_counter()
         self._tick_count += 1
 

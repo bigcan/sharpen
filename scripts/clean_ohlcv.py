@@ -36,8 +36,6 @@ Usage:
 
 import argparse
 import shutil
-import sys
-from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -62,7 +60,7 @@ def detect_outliers(df: pd.DataFrame, threshold: float = 0.05) -> dict:
     """
     o = df['open'].values.astype(np.float64)
     h = df['high'].values.astype(np.float64)
-    l = df['low'].values.astype(np.float64)
+    lo = df['low'].values.astype(np.float64)
     c = df['close'].values.astype(np.float64)
 
     max_oc = np.maximum(o, c)
@@ -70,20 +68,20 @@ def detect_outliers(df: pd.DataFrame, threshold: float = 0.05) -> dict:
 
     # Primary detection: ratio-based
     high_ratio = h / np.where(max_oc > 0, max_oc, 1.0)
-    low_ratio = l / np.where(min_oc > 0, min_oc, 1.0)
+    low_ratio = lo / np.where(min_oc > 0, min_oc, 1.0)
 
     bad_high = high_ratio > (1.0 + threshold)
-    bad_low = (low_ratio < (1.0 - threshold)) & (l > 0)
+    bad_low = (low_ratio < (1.0 - threshold)) & (lo > 0)
 
     # Also flag NaN/zero/negative
     bad_high |= np.isnan(h) | (h <= 0)
-    bad_low |= np.isnan(l) | (l <= 0)
+    bad_low |= np.isnan(lo) | (lo <= 0)
 
     # OHLCV invariant violations (should never happen but check)
     inv_high_open = h < o
     inv_high_close = h < c
-    inv_low_open = l > o
-    inv_low_close = l > c
+    inv_low_open = lo > o
+    inv_low_close = lo > c
 
     return {
         'bad_high': bad_high,
@@ -115,7 +113,7 @@ def repair_outliers(df: pd.DataFrame, detection: dict, threshold: float = 0.05) 
     df = df.copy()
     o = df['open'].values.astype(np.float64)
     h = df['high'].values.astype(np.float64)
-    l = df['low'].values.astype(np.float64)
+    lo = df['low'].values.astype(np.float64)
     c = df['close'].values.astype(np.float64)
 
     max_oc = np.maximum(o, c)
@@ -135,7 +133,7 @@ def repair_outliers(df: pd.DataFrame, detection: dict, threshold: float = 0.05) 
         if ref <= 0:
             continue
 
-        ratio = h[i] / ref
+        h[i] / ref
         fixed = False
 
         # Try dividing by powers of 10 (decimal shift error)
@@ -158,31 +156,31 @@ def repair_outliers(df: pd.DataFrame, detection: dict, threshold: float = 0.05) 
         if ref <= 0:
             continue
 
-        ratio = l[i] / ref
+        lo[i] / ref
         fixed = False
 
         # Try multiplying by powers of 10 (decimal shift error)
         for multiplier in [10, 100, 1000]:
-            candidate = l[i] * multiplier
+            candidate = lo[i] * multiplier
             if abs(candidate / ref - 1.0) < threshold:
-                l[i] = candidate
+                lo[i] = candidate
                 n_decimal_fix_l += 1
                 fixed = True
                 break
 
         if not fixed:
             # Clamp to min(O,C)
-            l[i] = ref
+            lo[i] = ref
             n_clamp_l += 1
 
     df['high'] = h
-    df['low'] = l
+    df['low'] = lo
 
     # Ensure OHLCV invariants hold after repair
     df['high'] = np.maximum(df['high'].values, np.maximum(o, c))
     df['low'] = np.minimum(df['low'].values, np.minimum(o, c))
 
-    print(f"  Repair summary:")
+    print("  Repair summary:")
     print(f"    Highs: {n_decimal_fix_h} decimal-fixed, {n_clamp_h} clamped "
           f"(total {bad_high.sum()})")
     print(f"    Lows:  {n_decimal_fix_l} decimal-fixed, {n_clamp_l} clamped "
@@ -199,7 +197,7 @@ def validate_ohlcv(df: pd.DataFrame, name: str = "") -> bool:
     """Run comprehensive OHLCV quality checks. Returns True if clean."""
     o = df['open'].values
     h = df['high'].values
-    l = df['low'].values
+    lo = df['low'].values
     c = df['close'].values
 
     issues = []
@@ -213,12 +211,16 @@ def validate_ohlcv(df: pd.DataFrame, name: str = "") -> bool:
     # OHLCV invariants
     n_h_lt_o = (h < o - 1e-6).sum()
     n_h_lt_c = (h < c - 1e-6).sum()
-    n_l_gt_o = (l > o + 1e-6).sum()
-    n_l_gt_c = (l > c + 1e-6).sum()
-    if n_h_lt_o: issues.append(f"high < open: {n_h_lt_o}")
-    if n_h_lt_c: issues.append(f"high < close: {n_h_lt_c}")
-    if n_l_gt_o: issues.append(f"low > open: {n_l_gt_o}")
-    if n_l_gt_c: issues.append(f"low > close: {n_l_gt_c}")
+    n_l_gt_o = (lo > o + 1e-6).sum()
+    n_l_gt_c = (lo > c + 1e-6).sum()
+    if n_h_lt_o:
+        issues.append(f"high < open: {n_h_lt_o}")
+    if n_h_lt_c:
+        issues.append(f"high < close: {n_h_lt_c}")
+    if n_l_gt_o:
+        issues.append(f"low > open: {n_l_gt_o}")
+    if n_l_gt_c:
+        issues.append(f"low > close: {n_l_gt_c}")
 
     # Range check (no value should be 0 or negative for Gold)
     for col in ['open', 'high', 'low', 'close']:
@@ -230,20 +232,24 @@ def validate_ohlcv(df: pd.DataFrame, name: str = "") -> bool:
     max_oc = np.maximum(o, c)
     min_oc = np.minimum(o, c)
     n_outlier_h = (h > max_oc * 1.05).sum()
-    n_outlier_l = ((l < min_oc * 0.95) & (l > 0)).sum()
-    if n_outlier_h: issues.append(f"high > 5% above max(O,C): {n_outlier_h}")
-    if n_outlier_l: issues.append(f"low < 5% below min(O,C): {n_outlier_l}")
+    n_outlier_l = ((lo < min_oc * 0.95) & (lo > 0)).sum()
+    if n_outlier_h:
+        issues.append(f"high > 5% above max(O,C): {n_outlier_h}")
+    if n_outlier_l:
+        issues.append(f"low < 5% below min(O,C): {n_outlier_l}")
 
     # Mid-price sanity
-    mid = (h + l) / 2.0
+    mid = (h + lo) / 2.0
     mid_close_ratio = np.abs(mid / np.where(c > 0, c, 1.0) - 1.0)
     n_mid_outlier = (mid_close_ratio > 0.1).sum()  # mid > 10% from close
-    if n_mid_outlier: issues.append(f"mid_price > 10% from close: {n_mid_outlier}")
+    if n_mid_outlier:
+        issues.append(f"mid_price > 10% from close: {n_mid_outlier}")
 
     # Volume check
     if 'volume' in df.columns:
         n_neg_vol = (df['volume'] < 0).sum()
-        if n_neg_vol: issues.append(f"volume: {n_neg_vol} negative values")
+        if n_neg_vol:
+            issues.append(f"volume: {n_neg_vol} negative values")
 
     prefix = f"  [{name}] " if name else "  "
     if issues:
@@ -275,7 +281,7 @@ def print_report(df: pd.DataFrame, detection: dict, name: str = ""):
 
     if bad_h.any():
         ratios = high_ratio[bad_h]
-        print(f"\n    High outlier ratios (high / max(O,C)):")
+        print("\n    High outlier ratios (high / max(O,C)):")
         print(f"      min={ratios.min():.2f}, median={np.median(ratios):.2f}, "
               f"max={ratios.max():.2f}")
 
@@ -288,7 +294,7 @@ def print_report(df: pd.DataFrame, detection: dict, name: str = ""):
     if bad_h.any() or bad_l.any():
         # Show first 5 examples
         bad_idx = np.where(bad_h | bad_l)[0][:5]
-        print(f"\n    Sample bad bars:")
+        print("\n    Sample bad bars:")
         ts_col = 'timestamp' if 'timestamp' in df.columns else None
         for i in bad_idx:
             row = df.iloc[i]
@@ -354,7 +360,7 @@ def clean_file(path: str, threshold: float = 0.05, dry_run: bool = False,
 
     n_bad = (detection['bad_high'] | detection['bad_low']).sum()
     if n_bad == 0:
-        print(f"  No outliers detected — file is clean")
+        print("  No outliers detected — file is clean")
         validate_ohlcv(df)
         return df
 

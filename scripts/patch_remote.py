@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 c = paramiko.SSHClient()
-c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+c.set_missing_host_key_policy(paramiko.WarningPolicy())
 c.connect(
     os.getenv("GPUHUB_HOST"),
     int(os.getenv("GPUHUB_PORT")),

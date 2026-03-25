@@ -27,8 +27,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import pandas as pd
-from scipy.stats import skew, kurtosis
+import pandas as pd  # noqa: E402
+from scipy.stats import skew, kurtosis  # noqa: E402
 
 DATA_PATH = PROJECT_ROOT / "data" / "processed" / "btc_2025_jan_jun.parquet"
 
@@ -39,9 +39,10 @@ def get_autocorr(series, lag=1):
     If much less than 1.0 and mean ~ 0, likely Stationary.
     """
     try:
-        if len(series) < 10: return 0.0
+        if len(series) < 10:
+            return 0.0
         return series.autocorr(lag=lag)
-    except:
+    except Exception:
         return 1.0
 
 def main():

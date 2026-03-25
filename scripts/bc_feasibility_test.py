@@ -23,7 +23,7 @@ import numpy as np
 import pandas as pd
 from sklearn.linear_model import LogisticRegression
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.metrics import accuracy_score, f1_score, classification_report
+from sklearn.metrics import accuracy_score, f1_score
 
 # Add project root for dp_oracle import
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -241,7 +241,7 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     # Fill any remaining NaN with 0 (warmup period)
     features = features.fillna(0.0)
 
-    print(f"  Feature ranges (post-norm):")
+    print("  Feature ranges (post-norm):")
     for col in features.columns:
         vals = features[col].values
         print(f"    {col:20s}: [{vals.min():+.3f}, {vals.max():+.3f}]  "
@@ -289,8 +289,8 @@ def time_split(df: pd.DataFrame, features: pd.DataFrame,
               f"dir_balance={dir_balance:.3f} (1=all Long)  |  "
               f"switch_rate={switch_rate:.2f}%")
 
-    print(f"\n  WARNING: Normalization computed on full dataset (minor leakage, "
-          f"acceptable for feasibility)")
+    print("\n  WARNING: Normalization computed on full dataset (minor leakage, "
+          "acceptable for feasibility)")
 
 
     return splits

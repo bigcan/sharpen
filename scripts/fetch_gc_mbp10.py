@@ -11,8 +11,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / '.env')
 
-import databento as db
-import pandas as pd
+import databento as db  # noqa: E402
+import pandas as pd  # noqa: E402
 
 API_KEY = os.environ.get('DATABENTO_API_KEY')
 if not API_KEY:
@@ -44,7 +44,7 @@ def fetch_mbp10():
             return out_path
 
     print(f"  Fetching MBP-10 for {SYMBOL} ({START} to {END})...")
-    print(f"  This may take several minutes for a full year of tick data...")
+    print("  This may take several minutes for a full year of tick data...")
     t0 = time.time()
 
     data = client.timeseries.get_range(
@@ -82,10 +82,10 @@ def resample_mbp10_to_1min(raw_path: Path) -> pd.DataFrame:
     print(f"  Columns: {list(df.columns)}")
 
     # Print first few rows to understand structure
-    print(f"\n  First 3 rows:")
+    print("\n  First 3 rows:")
     print(df.head(3).to_string())
 
-    print(f"\n  Column dtypes:")
+    print("\n  Column dtypes:")
     for col in df.columns:
         print(f"    {col}: {df[col].dtype}")
 
@@ -103,7 +103,7 @@ def build_lob_snapshots(df: pd.DataFrame) -> pd.DataFrame:
     - ask_sz_00 through ask_sz_09 (ask sizes)
     - price, size, action, side (trade info)
     """
-    print(f"\n  Building 1-minute LOB snapshots...")
+    print("\n  Building 1-minute LOB snapshots...")
 
     # Identify bid/ask columns
     bid_px_cols = [f'bid_px_{i:02d}' for i in range(5)]
@@ -242,7 +242,7 @@ def main():
     print(f"\n{'='*60}")
     print("SUMMARY")
     print(f"{'='*60}")
-    print(f"  Asset: Gold (GC.c.2, active month)")
+    print("  Asset: Gold (GC.c.2, active month)")
     print(f"  Period: {START} to {END}")
     print(f"  1-min bars: {len(result):,}")
     print(f"  Trading days: {result['timestamp'].dt.date.nunique()}")
@@ -254,7 +254,7 @@ def main():
     lob_cols = [c for c in result.columns if 'bid_price' in c or 'ask_price' in c]
     print(f"  LOB depth levels: {len(lob_cols) // 2}")
 
-    print(f"\n  Ready for feature engineering and RF signal test.")
+    print("\n  Ready for feature engineering and RF signal test.")
 
 
 if __name__ == "__main__":

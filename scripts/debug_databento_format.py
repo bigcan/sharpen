@@ -4,7 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / '.env')
 
-import databento as db
+import databento as db  # noqa: E402
 
 API_KEY = os.environ['DATABENTO_API_KEY']
 client = db.Historical(API_KEY)
@@ -24,9 +24,9 @@ df = data.to_df()
 print(f"Shape: {df.shape}")
 print(f"Columns: {list(df.columns)}")
 print(f"Dtypes:\n{df.dtypes}")
-print(f"\nFirst 5 rows:")
+print("\nFirst 5 rows:")
 print(df.head())
-print(f"\nPrice stats (raw):")
+print("\nPrice stats (raw):")
 for col in ['open', 'high', 'low', 'close']:
     print(f"  {col}: min={df[col].min()}, max={df[col].max()}, mean={df[col].mean():.2f}")
 print(f"Volume stats: min={df['volume'].min()}, max={df['volume'].max()}, mean={df['volume'].mean():.0f}")
@@ -57,9 +57,9 @@ data_gc = client.timeseries.get_range(
 
 df_gc = data_gc.to_df()
 print(f"Shape: {df_gc.shape}")
-print(f"\nFirst 5 rows:")
+print("\nFirst 5 rows:")
 print(df_gc.head())
-print(f"\nPrice stats (raw):")
+print("\nPrice stats (raw):")
 for col in ['open', 'high', 'low', 'close']:
     print(f"  {col}: min={df_gc[col].min()}, max={df_gc[col].max()}, mean={df_gc[col].mean():.2f}")
 print(f"Volume stats: min={df_gc['volume'].min()}, max={df_gc['volume'].max()}, mean={df_gc['volume'].mean():.0f}")

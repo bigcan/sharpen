@@ -209,7 +209,7 @@ def validate_output(df: pd.DataFrame) -> bool:
         issues.append(f"{n} bars seems too high (expected ~45-50K)")
 
     if issues:
-        print(f"[G0] VALIDATION FAILED:")
+        print("[G0] VALIDATION FAILED:")
         for issue in issues:
             print(f"  - {issue}")
         return False
@@ -261,7 +261,7 @@ def main():
     print(f"[G0] Saved to {output_path}")
 
     # Summary
-    print(f"\n[G0] Summary:")
+    print("\n[G0] Summary:")
     print(f"  Rows: {len(df)}")
     print(f"  Columns: {df.columns.tolist()}")
     print(f"  Date range: {df['timestamp'].min()} → {df['timestamp'].max()}")

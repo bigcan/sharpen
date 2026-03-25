@@ -4,6 +4,9 @@ import numpy as np
 import logging
 from typing import Dict, Optional, Any
 from typing import TYPE_CHECKING
+
+from finrl_pro_ds.envs.dsr import DSRCalculator
+
 if TYPE_CHECKING:
     from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
@@ -340,10 +343,11 @@ class DeepScalperEnv(gym.Env):
         self.step_transaction_costs = 0.0  # Track per-step cost for reward
 
         # DSR state (Differential Sharpe Ratio — EMA statistics)
-        self._dsr_A = 0.0       # EMA of returns
-        self._dsr_B = 0.0       # EMA of squared returns
-        self._dsr_warmup = 0    # steps since reset (need >1 for valid DSR)
-        self._dsr_eta = 1.0 / max(self.sharpe_horizon, 1)  # adaptation rate
+        _dsr_eta = 1.0 / max(self.sharpe_horizon, 1)
+        if not hasattr(self, '_dsr'):
+            self._dsr = DSRCalculator(eta=_dsr_eta, scale=self.dsr_scale)
+        else:
+            self._dsr.reset()
 
         # Cold Start Fix: Fill window with first frame
         self.micro_window = np.zeros((self.window_size, self.micro_dim), dtype=np.float32)
@@ -620,9 +624,11 @@ class DeepScalperEnv(gym.Env):
                             self.avg_price = 0
                             self.position = 0.0
 
-                    if hasattr(self.balance, "item"): self.balance = self.balance.item()
+                    if hasattr(self.balance, "item"):
+                        self.balance = self.balance.item()
                     self.balance = float(self.balance)
-                    if hasattr(self.position, "item"): self.position = self.position.item()
+                    if hasattr(self.position, "item"):
+                        self.position = self.position.item()
                     self.position = float(self.position)
 
         elif order_dir == 2:  # Sell
@@ -702,9 +708,11 @@ class DeepScalperEnv(gym.Env):
                     else:
                         self.avg_price = fill_price
 
-                    if hasattr(self.balance, "item"): self.balance = self.balance.item()
+                    if hasattr(self.balance, "item"):
+                        self.balance = self.balance.item()
                     self.balance = float(self.balance)
-                    if hasattr(self.position, "item"): self.position = self.position.item()
+                    if hasattr(self.position, "item"):
+                        self.position = self.position.item()
                     self.position = float(self.position)
 
         # T1.4 FIX (Finding-02): Only clear pending_order on FILL.
@@ -905,26 +913,7 @@ class DeepScalperEnv(gym.Env):
         if self.sharpe_weight > 0:
             init_bal = self.initial_balance if self.initial_balance > 0 else 1.0
             R_t = nav_delta / init_bal  # fractional return from NAV
-
-            # Update EMA statistics
-            delta_A = R_t - self._dsr_A
-            delta_B = R_t * R_t - self._dsr_B
-            # Finding-10: Cache previous values for DSR formula (Moody & Saffell 2001)
-            prev_A, prev_B = self._dsr_A, self._dsr_B
-            # FIX FIND-V3-20: Compute variance from pre-update values (Moody & Saffell spec)
-            prev_variance = prev_B - prev_A ** 2
-            prev_variance = max(prev_variance, 0.0)
-            self._dsr_A += self._dsr_eta * delta_A
-            self._dsr_B += self._dsr_eta * delta_B
-            self._dsr_warmup += 1
-
-            # Compute DSR after warmup
-            if self._dsr_warmup > 1:
-                variance = prev_variance
-                if variance > 1e-16:
-                    denom = variance ** 1.5
-                    dsr = (prev_B * delta_A - 0.5 * prev_A * delta_B) / denom
-                    reward_sharpe = float(np.clip(dsr * self.dsr_scale, -10.0, 10.0))
+            reward_sharpe = self._dsr.compute(R_t)
 
         # Blend: (1 - w) × paper + w × DSR  (w=0 → pure NAV)
         reward = (1.0 - self.sharpe_weight) * paper_reward + self.sharpe_weight * reward_sharpe
@@ -1005,7 +994,8 @@ class DeepScalperEnv(gym.Env):
             # Short: cash - buyback_cost (debt is 0 for shorts after V3-01 fix)
             val = self.balance - abs(self.position) * mid
         # Force scalar
-        if hasattr(val, "item"): val = val.item()
+        if hasattr(val, "item"):
+            val = val.item()
         return float(val)
 
     def _calculate_slippage(self, trade_size: float, available_liquidity: float) -> float:

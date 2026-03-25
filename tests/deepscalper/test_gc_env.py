@@ -12,7 +12,6 @@ Tests that:
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.data.feature_engineering import (

@@ -77,7 +77,7 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
         json_path = os.path.join(os.getcwd(), "results", f"run_data_{run_id}.json")
         results["wandb_json"] = json_path
         results["sqlite_updated"] = True
-        print(f"[*] WandB data saved.\n")
+        print("[*] WandB data saved.\n")
     except Exception as e:
         print(f"[*] WandB fetch failed: {e}\n")
         # Still try other steps
@@ -106,7 +106,7 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
         try:
             generate_report(run_id, report_path)
             results["report"] = report_path
-            print(f"[*] Report generated.\n")
+            print("[*] Report generated.\n")
         except Exception as e:
             print(f"[*] Report generation failed: {e}\n")
     else:
@@ -114,7 +114,7 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
 
     # Summary
     print(f"{'='*60}")
-    print(f"  Collection Summary")
+    print("  Collection Summary")
     print(f"{'='*60}")
     print(f"  Run ID:          {run_id}")
     print(f"  WandB JSON:      {results['wandb_json'] or 'FAILED'}")

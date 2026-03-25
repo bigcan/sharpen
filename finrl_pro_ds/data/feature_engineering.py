@@ -15,7 +15,7 @@ Bounded features (OBI, RSI, %B, slope asym, sin/cos) bypass normalization.
 """
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 # ─── Column name constants (used by env, parquet_handler, tests) ──────────
 
@@ -129,7 +129,7 @@ class DeepScalperFeatureEngineer:
     Handles Micro-level (LOB) and Macro-level (OHLCV) features.
     """
 
-    def __init__(self, config: Dict = None):
+    def __init__(self, config: Optional[Dict] = None):
         self.config = config or {}
         self.norm_span = int(self.config.get('vol_norm_window', 120))  # EMA span
         self.n_levels = int(self.config.get('n_levels', 5))
@@ -148,7 +148,7 @@ class DeepScalperFeatureEngineer:
         """SymLog transform: sign(x) * log(1 + |x|).  Dampens power-law tails."""
         return np.sign(x) * np.log1p(np.abs(x))
 
-    def _ema_zscore_tanh(self, series: pd.Series, span: int = None) -> np.ndarray:
+    def _ema_zscore_tanh(self, series: pd.Series, span: Optional[int] = None) -> np.ndarray:
         """
         EMA Z-Score with strict causal shift → tanh soft-clip.  (Fix C)
 
@@ -263,10 +263,14 @@ class DeepScalperFeatureEngineer:
             ap = df[f'ask_price_{i}'].values.astype(np.float64)
             av = df[f'ask_vol_{i}'].values.astype(np.float64)
 
-            bp_prev = np.roll(bp, 1); bp_prev[0] = bp[0]
-            bv_prev = np.roll(bv, 1); bv_prev[0] = bv[0]
-            ap_prev = np.roll(ap, 1); ap_prev[0] = ap[0]
-            av_prev = np.roll(av, 1); av_prev[0] = av[0]
+            bp_prev = np.roll(bp, 1)
+            bp_prev[0] = bp[0]
+            bv_prev = np.roll(bv, 1)
+            bv_prev[0] = bv[0]
+            ap_prev = np.roll(ap, 1)
+            ap_prev[0] = ap[0]
+            av_prev = np.roll(av, 1)
+            av_prev[0] = av[0]
 
             w_b = np.where(bp > bp_prev, bv,
                     np.where(bp < bp_prev, -bv_prev, bv - bv_prev))

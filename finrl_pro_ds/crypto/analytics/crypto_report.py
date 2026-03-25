@@ -8,7 +8,6 @@ at 8760 (hourly bars per year).
 from __future__ import annotations
 
 import os
-from typing import Optional
 
 import matplotlib
 matplotlib.use("Agg")

@@ -90,8 +90,10 @@ def create_filtered_zip(source_dir, output_filename):
                 dirs.remove('data')
 
             for file in files:
-                if file.endswith((".pyc", ".pyo", ".zip", ".ds_store")): continue
-                if file in DEPLOY_EXCLUDES or file.startswith("hpo.db"): continue # Exclude specific files like hpo.db*
+                if file.endswith((".pyc", ".pyo", ".zip", ".ds_store")):
+                    continue
+                if file in DEPLOY_EXCLUDES or file.startswith("hpo.db"):
+                    continue  # Exclude specific files like hpo.db*
                 file_path = os.path.join(root, file)
                 arcname = os.path.relpath(file_path, source_dir)
                 zipf.write(file_path, arcname)
@@ -136,7 +138,7 @@ def deploy(args):
     # 2. Connect
     print(f"Connecting to {host}:{port}...")
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
     ssh.connect(host, port=port, username='root', password=password)
     sftp = ssh.open_sftp()
 
@@ -173,7 +175,7 @@ def deploy(args):
                 else:
                      print(f"Cache Miss: Size mismatch (Local: {local_size} vs Remote: {remote_size}). Re-uploading...")
             except IOError:
-                print(f"Cache Miss: Remote file not found. Uploading...")
+                print("Cache Miss: Remote file not found. Uploading...")
 
             if should_upload:
                 print(f"Uploading Data: {local_data} -> {remote_data}...")
@@ -202,7 +204,7 @@ def deploy(args):
         try:
             ssh.exec_command(full_kill_cmd)
             time.sleep(3) # Allow cleanup
-        except:
+        except Exception:
             pass
     else:
         print("SKIPPING kill step (Preserving existing processes)...")
@@ -319,7 +321,7 @@ def deploy(args):
     # ------------------------------------------------------------------
     resolved_run_id = None
     if pid and pid.isdigit():
-        print(f"\nResolving WandB Run ID (waiting for remote init)...")
+        print("\nResolving WandB Run ID (waiting for remote init)...")
         time.sleep(10) # Give WandB a moment to init
 
         # We need a new SSH connection since we closed the main one
@@ -327,7 +329,7 @@ def deploy(args):
         try:
             # Re-connect for registry/monitoring tasks
             ssh_reg = paramiko.SSHClient()
-            ssh_reg.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            ssh_reg.set_missing_host_key_policy(paramiko.WarningPolicy())
             ssh_reg.connect(host, port=int(port), username='root', password=password, timeout=30)
 
             # Check wandb/latest-run symlink target

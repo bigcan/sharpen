@@ -4,7 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / '.env')
 
-import databento as db
+import databento as db  # noqa: E402
 
 API_KEY = os.environ['DATABENTO_API_KEY']
 client = db.Historical(API_KEY)

@@ -14,11 +14,11 @@ from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / '.env')
 
-import databento as db
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score
+import databento as db  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from sklearn.ensemble import RandomForestClassifier  # noqa: E402
+from sklearn.metrics import roc_auc_score  # noqa: E402
 
 API_KEY = os.environ.get('DATABENTO_API_KEY')
 DATA_DIR = Path(__file__).parent.parent / "data" / "cme"
@@ -171,10 +171,14 @@ def compute_all_features(df_5min):
     features['obi_1'] = np.clip((bv1 - av1) / (bv1 + av1 + 1e-8), -1.0, 1.0)
     features['spread_bps'] = ((ap1 - bp1) / mid_safe) * 10000.0
 
-    bp_prev = np.roll(bp1, 1); bp_prev[0] = bp1[0]
-    bv_prev = np.roll(bv1, 1); bv_prev[0] = bv1[0]
-    ap_prev = np.roll(ap1, 1); ap_prev[0] = ap1[0]
-    av_prev = np.roll(av1, 1); av_prev[0] = av1[0]
+    bp_prev = np.roll(bp1, 1)
+    bp_prev[0] = bp1[0]
+    bv_prev = np.roll(bv1, 1)
+    bv_prev[0] = bv1[0]
+    ap_prev = np.roll(ap1, 1)
+    ap_prev[0] = ap1[0]
+    av_prev = np.roll(av1, 1)
+    av_prev[0] = av1[0]
     w_b = np.where(bp1 > bp_prev, bv1, np.where(bp1 < bp_prev, -bv_prev, bv1 - bv_prev))
     w_a = np.where(ap1 < ap_prev, av1, np.where(ap1 > ap_prev, -av_prev, av1 - av_prev))
     features['dofi_1'] = w_b - w_a
@@ -191,7 +195,8 @@ def compute_all_features(df_5min):
 
     # --- OHLCV Features ---
     for h in [1, 2, 3, 5, 10, 15]:
-        ret = np.zeros(n); ret[h:] = np.log(np.maximum(close[h:], 1e-10) / np.maximum(close[:-h], 1e-10))
+        ret = np.zeros(n)
+        ret[h:] = np.log(np.maximum(close[h:], 1e-10) / np.maximum(close[:-h], 1e-10))
         features[f'logret_{h}'] = np.clip(ret, -0.1, 0.1)
 
     log_hl = np.log(np.maximum(high, 1e-10) / np.maximum(low, 1e-10))
@@ -307,7 +312,8 @@ def main():
 
         h_results = {}
         for sn, Xe, ye in [("val", X_va, y_va), ("test", X_te, y_te)]:
-            if len(ye) == 0: continue
+            if len(ye) == 0:
+                continue
             probs = rf.predict_proba(Xe)[:, 1]
             auc = roc_auc_score(ye, probs)
             target = TARGETS[h_label]
@@ -321,7 +327,7 @@ def main():
             imp_df = pd.DataFrame({"feature": feature_names, "importance": rf.feature_importances_})
             imp_df = imp_df.sort_values("importance", ascending=False)
             imp_df.to_csv(RESULTS_DIR / "gc_lob1_feature_importance.csv", index=False)
-            print(f"    Top 10:")
+            print("    Top 10:")
             for _, row in imp_df.head(10).iterrows():
                 print(f"      {row['feature']:<25s} {row['importance']:.4f}")
 

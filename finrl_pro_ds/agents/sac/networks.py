@@ -10,9 +10,9 @@ Architecture:
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
-from finrl_pro_ds.agents.deepscalper.networks import _CausalConv1dBlock, _tc_align
+from finrl_pro_ds.agents.common.network_blocks import _CausalConv1dBlock, _tc_align
 
 
 class DilatedCNNEncoder(nn.Module):
@@ -212,7 +212,7 @@ class SACActorNetwork(nn.Module):
     def forward(
         self,
         scale_stack: torch.Tensor,
-        private: torch.Tensor = None,
+        private: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Returns (mu, log_sigma) for the Gaussian policy.
 
@@ -232,7 +232,7 @@ class SACActorNetwork(nn.Module):
     def sample(
         self,
         scale_stack: torch.Tensor,
-        private: torch.Tensor = None,
+        private: Optional[torch.Tensor] = None,
         deterministic: bool = False,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Sample action with log_prob (tanh correction applied).
@@ -312,7 +312,7 @@ class SACCriticNetwork(nn.Module):
     def encode(
         self,
         scale_stack: torch.Tensor,
-        private: torch.Tensor = None,
+        private: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Encode multi-scale obs to fusion features: (B, fusion_dim).
 
@@ -345,8 +345,8 @@ class SACCriticNetwork(nn.Module):
     def forward(
         self,
         scale_stack: torch.Tensor,
-        private: torch.Tensor = None,
-        action: torch.Tensor = None,
+        private: Optional[torch.Tensor] = None,
+        action: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Returns scalar Q-value: (B, 1)
 

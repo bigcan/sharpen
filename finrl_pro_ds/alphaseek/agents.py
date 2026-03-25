@@ -271,7 +271,7 @@ class AgentDoubleDQN:
                 setattr(
                     self,
                     attr_name,
-                    torch.load(file_path, map_location=self.device, weights_only=False),
+                    torch.load(file_path, map_location=self.device, weights_only=False),  # full nn.Module checkpoint
                 )
         logger.info(f"Agent loaded from {cwd}")
 

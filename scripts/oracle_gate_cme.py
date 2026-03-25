@@ -120,7 +120,7 @@ def run_oracle(df: pd.DataFrame, info: dict, horizon: int = 1) -> list:
     - PnL = -|price_change| - round_trip_cost (would never happen with oracle, but included for completeness)
     """
     closes = df['close'].values
-    timestamps = df['timestamp'].values
+    df['timestamp'].values
     n = len(closes)
 
     # Compute future returns
@@ -377,7 +377,7 @@ def main():
         print(f"  Avg price: ${avg_price:.2f}  |  One-way taker cost: {one_way_cost:.2f} bps")
 
         # Run realistic oracle (trades every bar, comparable to BTC oracle)
-        print(f"\n  --- Realistic Oracle (trades every bar, pays costs) ---")
+        print("\n  --- Realistic Oracle (trades every bar, pays costs) ---")
         print(f"  {'H':>3s} | {'Split':>5s} | {'PF':>7s} | {'Sharpe':>8s} | {'Trades':>7s} | "
               f"{'WinRate':>7s} | {'Return%':>8s} | {'MaxDD%':>7s} | {'AvgWin':>7s} | {'AvgLoss':>8s} | {'Cost':>5s}")
         print(f"  {'-'*3}-+-{'-'*5}-+-{'-'*7}-+-{'-'*8}-+-{'-'*7}-+-"

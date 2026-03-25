@@ -1,8 +1,11 @@
+import logging
 import pandas as pd
 import numpy as np
 import os
 from typing import Dict, Any, Optional, List
 from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
+
+logger = logging.getLogger(__name__)
 
 class ParquetDataHandler:
     """
@@ -10,7 +13,7 @@ class ParquetDataHandler:
     Designed to be a drop-in replacement for DBMarketDataHandler in DeepScalperEnv.
     """
 
-    def __init__(self, file_path: str, ticker: str, feature_config: Dict = None, start_date: str = None, end_date: str = None, shared_memory_config: Dict = None, norm_cutoff_date: str = None):
+    def __init__(self, file_path: str, ticker: str, feature_config: Optional[Dict] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, shared_memory_config: Optional[Dict] = None, norm_cutoff_date: Optional[str] = None):
         self.file_path = file_path
         self.ticker = ticker
         fc = feature_config or {}
@@ -36,7 +39,7 @@ class ParquetDataHandler:
         self._is_shm_owner = False  # Only the creator process should unlink SHM segments
 
         if shared_memory_config:
-            print(f"[Worker {os.getpid()}] ParquetDataHandler received SHM config.", flush=True)
+            logger.info(f"[Worker {os.getpid()}] ParquetDataHandler received SHM config.")
             self._attach_shared_memory(shared_memory_config)
         else:
             self._timestamps: List[Any] = []
@@ -98,7 +101,7 @@ class ParquetDataHandler:
             # Unsorted data silently corrupts DOFI (np.roll), rolling windows,
             # and macro-micro alignment via searchsorted.
             if not df['timestamp'].is_monotonic_increasing:
-                print("[WARN] Data was not sorted by timestamp — sorting in-place", flush=True)
+                logger.warning("Data was not sorted by timestamp — sorting in-place")
                 df = df.sort_values('timestamp').reset_index(drop=True)
 
             # Feature Engineering
@@ -120,7 +123,7 @@ class ParquetDataHandler:
             WARMUP_ROWS = 200
             pre_warmup_len = len(self._feature_data)
             self._feature_data = self._feature_data.iloc[WARMUP_ROWS:].reset_index(drop=True)
-            print(f"[WARMUP] Sliced {WARMUP_ROWS} warm-up rows: {pre_warmup_len} → {len(self._feature_data)}", flush=True)
+            logger.info(f"[WARMUP] Sliced {WARMUP_ROWS} warm-up rows: {pre_warmup_len} → {len(self._feature_data)}")
 
             # Convert to NumPy Dictionary for Fast Access (>20x speedup vs iterrows/iloc)
             self._feature_cols = self._feature_data.columns.tolist()
@@ -144,7 +147,7 @@ class ParquetDataHandler:
                         if np.isnan(prices).any():
                             n_nan = np.isnan(prices).sum()
                             prices = pd.Series(prices).ffill().bfill().values
-                            print(f"[VOL] Forward-filled {n_nan} NaN in {price_col} for volatility computation", flush=True)
+                            logger.warning(f"[VOL] Forward-filled {n_nan} NaN in {price_col} for volatility computation")
 
                         # Log Returns
                         log_ret = np.zeros_like(prices)
@@ -183,7 +186,7 @@ class ParquetDataHandler:
                             self._volatility_target = np.zeros(N, dtype=np.float32)
 
                     except Exception as e:
-                        print(f"Volatility Calc Failed: {e}", flush=True)
+                        logger.error(f"Volatility Calc Failed: {e}")
                         self._volatility_target = np.zeros(len(self._feature_data), dtype=np.float32)
 
             # Convert columns to dict of numpy arrays with deep copies
@@ -206,7 +209,7 @@ class ParquetDataHandler:
                         copied_vals = np.array(raw_vals, dtype=np.float64)
                         self._data_arrays[col] = copied_vals.astype(np.float32)
                 except Exception as e:
-                    print(f"Failed to convert col {col}: {e}", flush=True)
+                    logger.error(f"Failed to convert col {col}: {e}")
                     raise
 
             self._timestamps = self._feature_data.index.tolist()
@@ -246,13 +249,13 @@ class ParquetDataHandler:
             if not self._row_matrix.flags['C_CONTIGUOUS']:
                 self._row_matrix = np.ascontiguousarray(self._row_matrix)
 
-            print(f"Loaded {self._len} rows from {os.path.basename(self.file_path)}")
+            logger.info(f"Loaded {self._len} rows from {os.path.basename(self.file_path)}")
 
             # Fix #30: Log effective start date after warm-up slice + date filter
             if 'timestamp' in self._data_arrays and self._len > 0:
                 eff_start = self._data_arrays['timestamp'][0]
                 eff_end = self._data_arrays['timestamp'][-1]
-                print(f"[DATA] Effective date range: {eff_start} → {eff_end}", flush=True)
+                logger.info(f"[DATA] Effective date range: {eff_start} → {eff_end}")
 
         except Exception as e:
             raise RuntimeError(f"Failed to load parquet data: {e}")
@@ -289,7 +292,8 @@ class ParquetDataHandler:
                     if 'timestamp' in macro_feat:
                         safe_macro['timestamp'] = macro_feat['timestamp'].values
                     for c in macro_feat.columns:
-                        if c == 'timestamp': continue
+                        if c == 'timestamp':
+                            continue
                         safe_macro[c] = np.array(macro_feat[c].values).astype(np.float32)
 
                     try:
@@ -297,13 +301,13 @@ class ParquetDataHandler:
                         for c, arr in aligned_macro_dict.items():
                             df[c] = arr
                     except Exception as e:
-                        print(f"Align/Merge Failed: {e}", flush=True)
+                        logger.error(f"Align/Merge Failed: {e}")
                 else:
-                    print(f"Skipping Macro, missing cols: {[c for c in req_macro if c not in df.columns]}", flush=True)
+                    logger.warning(f"Skipping Macro, missing cols: {[c for c in req_macro if c not in df.columns]}")
             else:
-                print("Skipping Macro, no FE or ticker.", flush=True)
+                logger.warning("Skipping Macro, no FE or ticker.")
         else:
-            print("WARNING: No macro features found. Using raw data columns.", flush=True)
+            logger.warning("No macro features found. Using raw data columns.")
 
         return df
 
@@ -331,14 +335,14 @@ class ParquetDataHandler:
 
         n_before = mask_before.sum()
         n_after = mask_after.sum()
-        print(f"[LEAK-1] Splitting at {cutoff}: {n_before} rows before, {n_after} rows after", flush=True)
+        logger.info(f"[LEAK-1] Splitting at {cutoff}: {n_before} rows before, {n_after} rows after")
 
         if n_after == 0:
-            print("[LEAK-1] No data after cutoff, processing normally", flush=True)
+            logger.info("[LEAK-1] No data after cutoff, processing normally")
             return self._process_features(df)
 
         if n_before == 0:
-            print("[LEAK-1] No data before cutoff, processing normally", flush=True)
+            logger.info("[LEAK-1] No data before cutoff, processing normally")
             return self._process_features(df)
 
         # Split at cutoff
@@ -375,9 +379,9 @@ class ParquetDataHandler:
         # Re-concatenate with original ordering preserved
         df_combined = pd.concat([df_before, df_after_processed], ignore_index=True)
 
-        print(f"[LEAK-1] Combined: {len(df_combined)} rows "
+        logger.info(f"[LEAK-1] Combined: {len(df_combined)} rows "
               f"(before={len(df_before)}, after={len(df_after_processed)}, "
-              f"buffer={buffer_size})", flush=True)
+              f"buffer={buffer_size})")
         return df_combined
 
     def create_shared_memory(self) -> Dict[str, Any]:
@@ -411,7 +415,7 @@ class ParquetDataHandler:
                     'dtype': str(arr.dtype)
                 }
             except Exception as e:
-                print(f"Error creating SHM for col {col}: {e}")
+                logger.error(f"Error creating SHM for col {col}: {e}")
                 for s in self._shm_objects:
                     s.close()
                     s.unlink()
@@ -445,7 +449,7 @@ class ParquetDataHandler:
         else:
             self._timestamps = []
 
-        print(f"[Worker-{os.getpid()}] Attached to Shared Memory ({self._len} rows).")
+        logger.info(f"[Worker-{os.getpid()}] Attached to Shared Memory ({self._len} rows).")
 
     def close_shared_memory(self, unlink=False):
         """Clean up shared memory resources."""
@@ -472,7 +476,7 @@ class ParquetDataHandler:
 
         # Periodic Heartbeat Log
         if self._ptr % 50000 == 0:
-            print(f"[DataHandler-{os.getpid()}] Heartbeat: Ptr={self._ptr}/{self._len} Time={row.get('timestamp', '?')}")
+            logger.debug(f"[DataHandler-{os.getpid()}] Heartbeat: Ptr={self._ptr}/{self._len} Time={row.get('timestamp', '?')}")
 
         self._ptr += 1
         return row

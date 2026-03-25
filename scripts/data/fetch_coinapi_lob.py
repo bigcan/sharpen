@@ -234,7 +234,7 @@ def main():
     completed = load_progress(progress_file)
     remaining = [d for d in all_dates if d not in completed]
 
-    print(f"📊 CoinAPI LOB Fetcher")
+    print("📊 CoinAPI LOB Fetcher")
     print(f"   Symbol:     {args.symbol}")
     print(f"   Date range: {args.start_date} → {args.end_date}")
     print(f"   Total days: {len(all_dates)}")
@@ -268,7 +268,7 @@ def main():
         # Flatten to DataFrame
         df = flatten_snapshots(snapshots, args.levels)
         if df.empty:
-            print(f"  ⚠ Flattening produced empty DataFrame, skipping.")
+            print("  ⚠ Flattening produced empty DataFrame, skipping.")
             completed.add(date_str)
             save_progress(progress_file, completed)
             continue
@@ -343,7 +343,7 @@ def _concat_daily_files(output_dir: Path, final_output: str):
     if missing:
         print(f"  ⚠ WARNING: Missing expected columns: {missing}")
     else:
-        print(f"  ✓ All 20 LOB columns present")
+        print("  ✓ All 20 LOB columns present")
 
     nan_pct = final_df[expected_cols].isna().mean().mean() * 100
     print(f"  NaN coverage: {nan_pct:.1f}%")
