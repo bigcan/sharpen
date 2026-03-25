@@ -30,6 +30,7 @@ MANIFEST
 
 # Virtual environments
 .env
+*.pem
 instances.json
 .venv
 ENV/
