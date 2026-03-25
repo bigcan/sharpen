@@ -26,7 +26,6 @@ import pandas as pd
 from finrl_pro_ds.crypto.data.crypto_loader import (
     CryptoLoader,
     DEFAULT_UNIVERSE,
-    QUOTE,
 )
 
 logger = logging.getLogger(__name__)

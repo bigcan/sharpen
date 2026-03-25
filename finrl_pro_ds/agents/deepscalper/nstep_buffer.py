@@ -17,6 +17,7 @@ Reference: Mnih et al. (2016) "Asynchronous Methods for Deep RL" — n-step retu
 """
 import numpy as np
 from collections import deque
+from typing import Optional
 
 
 class NStepBuffer:
@@ -50,7 +51,7 @@ class NStepBuffer:
         dones: np.ndarray,
         aux_targets: np.ndarray,
         replay_buffer,
-        resets: np.ndarray = None,
+        resets: Optional[np.ndarray] = None,
     ):
         """Add a batch of transitions from vectorized env.
 

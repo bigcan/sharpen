@@ -331,7 +331,7 @@ class BitfinexLOBRecorder:
 
         arr = np.array(self.spread_values)
         elapsed = (time.time() - self.start_time) / 3600
-        remaining = max(0, self.duration_hours - elapsed)
+        max(0, self.duration_hours - elapsed)
 
         now_str = datetime.now(timezone.utc).strftime("%H:%M:%S UTC")
         print(f"[{now_str}] {elapsed:.2f}h/{self.duration_hours}h | "
@@ -343,13 +343,13 @@ class BitfinexLOBRecorder:
 
     def run(self):
         """Main entry: connect, record, reconnect on failure."""
-        print(f"[REC] Bitfinex LOB Recorder")
+        print("[REC] Bitfinex LOB Recorder")
         print(f"[REC] Symbol: {self.symbol}")
         print(f"[REC] Duration: {self.duration_hours}h")
         print(f"[REC] Snapshot interval: {self.snapshot_interval}s")
         print(f"[REC] Flush interval: {self.flush_interval}s")
         print(f"[REC] Output: {self.all_flushed_path}")
-        print(f"[REC] Press Ctrl+C to stop gracefully")
+        print("[REC] Press Ctrl+C to stop gracefully")
         print()
 
         # Start snapshot thread
@@ -391,7 +391,7 @@ class BitfinexLOBRecorder:
         elapsed = (time.time() - self.start_time) / 3600
 
         print(f"\n{'='*70}")
-        print(f"RECORDING COMPLETE")
+        print("RECORDING COMPLETE")
         print(f"{'='*70}")
         print(f"  Duration: {elapsed:.2f} hours")
         print(f"  Total snapshots: {self.total_snapshots:,}")
@@ -419,16 +419,16 @@ class BitfinexLOBRecorder:
                 # Viability verdict
                 median_spread = s.median()
                 if median_spread < 0.5:
-                    print(f"\n  VERDICT: SPREAD < 0.5 bps → BTC Bitfinex VIABLE (strong)")
+                    print("\n  VERDICT: SPREAD < 0.5 bps → BTC Bitfinex VIABLE (strong)")
                 elif median_spread < 1.0:
-                    print(f"\n  VERDICT: SPREAD < 1.0 bps → BTC Bitfinex MARGINAL")
+                    print("\n  VERDICT: SPREAD < 1.0 bps → BTC Bitfinex MARGINAL")
                 elif median_spread < 2.0:
-                    print(f"\n  VERDICT: SPREAD < 2.0 bps → BTC Bitfinex TIGHT (needs LOB features)")
+                    print("\n  VERDICT: SPREAD < 2.0 bps → BTC Bitfinex TIGHT (needs LOB features)")
                 else:
-                    print(f"\n  VERDICT: SPREAD >= 2.0 bps → BTC Bitfinex FAIL (hidden cost too high)")
+                    print("\n  VERDICT: SPREAD >= 2.0 bps → BTC Bitfinex FAIL (hidden cost too high)")
 
-        print(f"\n  Next: python scripts/analyze_bitfinex_spread.py")
-        print(f"        (detailed analysis with hourly breakdown)")
+        print("\n  Next: python scripts/analyze_bitfinex_spread.py")
+        print("        (detailed analysis with hourly breakdown)")
 
 
 def main():

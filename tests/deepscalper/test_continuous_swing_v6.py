@@ -7,8 +7,6 @@ Verifies that:
   - Fees are correctly applied on forced closes
 """
 import numpy as np
-import pytest
-from unittest.mock import MagicMock, patch
 
 from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
 

@@ -13,7 +13,6 @@ Updated for Tier 2: Discrete(6) action space.
 import unittest
 from unittest.mock import MagicMock
 import numpy as np
-import gymnasium as gym
 
 from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv, RunningMeanStd
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler

@@ -253,11 +253,11 @@ def main():
     stats_t0 = compute_oracle_stats(train_X, labels, feat_cols, lag=0)
     stats_t1 = compute_oracle_stats(train_X, labels, feat_cols, lag=1)
 
-    print(f"\n  Top 10 features by |Cohen's d| at t=0:")
+    print("\n  Top 10 features by |Cohen's d| at t=0:")
     for _, row in stats_t0.sort_values('abs_d', ascending=False).head(10).iterrows():
         print(f"    {row['feature']:<25} |d|={row['abs_d']:.4f}")
 
-    print(f"\n  Top 10 features by |Cohen's d| at t-1:")
+    print("\n  Top 10 features by |Cohen's d| at t-1:")
     for _, row in stats_t1.sort_values('abs_d', ascending=False).head(10).iterrows():
         print(f"    {row['feature']:<25} |d|={row['abs_d']:.4f}")
 
@@ -267,7 +267,7 @@ def main():
         'spread_max', 'obi_accel', 'dofi_accel', 'microprice_accel',
         'spread_velocity', 'depth_drain',
     ]
-    print(f"\n  fev3 feature discriminability:")
+    print("\n  fev3 feature discriminability:")
     for feat in fev3_features:
         t0_row = stats_t0[stats_t0['feature'] == feat]
         t1_row = stats_t1[stats_t1['feature'] == feat]
@@ -279,7 +279,7 @@ def main():
               f"decay={decay:.1%}  {tag}")
 
     # ── 3. RF evaluation ──
-    print(f"\n[3/4] RF evaluation...")
+    print("\n[3/4] RF evaluation...")
 
     all_results = {}
     for horizon in args.horizons:
@@ -302,7 +302,7 @@ def main():
         # Feature importance
         importances = rf.feature_importances_
         imp_order = np.argsort(importances)[::-1]
-        print(f"\n  Top 15 features by importance:")
+        print("\n  Top 15 features by importance:")
         for rank, idx in enumerate(imp_order[:15], 1):
             tag = " [fev3]" if feat_cols[idx] in fev3_features else ""
             print(f"    {rank:>2}. {feat_cols[idx]:<25} {importances[idx]:.4f}{tag}")
@@ -321,7 +321,7 @@ def main():
         }
 
     # ── 4. Decision gate ──
-    print(f"\n[4/4] Decision gate...")
+    print("\n[4/4] Decision gate...")
     os.makedirs(args.output_dir, exist_ok=True)
 
     h1_val_auc = all_results.get('H1', {}).get('results', {}).get('val', {}).get('auc', 0.0)
@@ -372,7 +372,7 @@ def main():
 
     # Summary
     print(f"\n{'=' * 70}")
-    print(f"  EXP-F1 VALIDATION SUMMARY")
+    print("  EXP-F1 VALIDATION SUMMARY")
     print(f"{'=' * 70}")
     print(f"  v2 baseline H1 val AUC: {args.v2_baseline_auc:.4f}")
     print(f"  fev3 H1 val AUC:        {h1_val_auc:.4f} ({delta:+.4f})")

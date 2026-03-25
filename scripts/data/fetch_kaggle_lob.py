@@ -5,6 +5,7 @@ Download Bitcoin Perpetual LOB data (250ms coverage) from Kaggle.
 import os
 import argparse
 import glob
+import subprocess
 import pandas as pd
 from pathlib import Path
 
@@ -16,11 +17,11 @@ def download_kaggle_lob(output_dir: str):
 
     print(f"Downloading {dataset} to {output_path}...")
     try:
-        # Using running command via os.system for simplicity with CLI
-        # In production this might use kaggle API python client
-        cmd = f"kaggle datasets download -d {dataset} -p \"{output_path}\" --unzip"
-        ret = os.system(cmd)
-        if ret != 0:
+        ret = subprocess.run(
+            ["kaggle", "datasets", "download", "-d", dataset, "-p", str(output_path), "--unzip"],
+            check=False,
+        )
+        if ret.returncode != 0:
             raise RuntimeError("Kaggle download failed. Is kaggle CLI installed and configured?")
     except Exception as e:
         print(f"Error: {e}")

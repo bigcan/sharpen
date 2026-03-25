@@ -126,7 +126,7 @@ def _ssh_connect(instance_id: str, *, timeout: int = 30):
     key_path = _find_ssh_key()
 
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
     ssh.connect(
         ssh_info["host"],
         port=ssh_info["port"],
@@ -357,7 +357,7 @@ def cmd_create(args):
                 continue
 
         print("\nWARNING: Instance did not reach 'running' state within 5 minutes.")
-        print(f"Check manually: python scripts/deploy_vastai.py list")
+        print("Check manually: python scripts/deploy_vastai.py list")
     else:
         print("\nCould not parse instance ID from output. Check: python scripts/deploy_vastai.py list")
 

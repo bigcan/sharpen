@@ -168,9 +168,9 @@ class IQNAgent:
                 self.policy_net = torch.compile(self.policy_net, mode="default")
                 self.target_net = torch.compile(self.target_net, mode="default")
                 self._torch_compiled = True
-                print("[torch.compile] IQN policy_net + target_net compiled (mode=default)")
+                logger.info("[torch.compile] IQN policy_net + target_net compiled (mode=default)")
             except Exception as e:
-                print(f"[torch.compile] Failed, falling back to eager mode: {e}")
+                logger.warning(f"[torch.compile] Failed, falling back to eager mode: {e}")
 
         # PERF-OPT S154 (O5): Fused Adam — single CUDA kernel per step
         _fused = self.device.type == "cuda"
@@ -543,7 +543,7 @@ class IQNAgent:
             total_loss = main_loss + self.auxiliary_weight * vol_loss
 
         if not torch.isfinite(total_loss):
-            print(f"WARNING: IQN Loss is {total_loss.item()} (NaN/Inf). Skipping update.", flush=True)
+            logger.warning(f"IQN Loss is {total_loss.item()} (NaN/Inf). Skipping update.")
             return None
 
         self.optimizer.zero_grad()
@@ -665,7 +665,7 @@ class IQNAgent:
     def load(self, path: str, strict: bool = True):
         if not os.path.exists(path):
             return
-        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         policy_sd = self._strip_compile_prefix(checkpoint["policy_net"])
         target_sd = self._strip_compile_prefix(checkpoint["target_net"])
         missing_p, unexpected_p = self.policy_net.load_state_dict(policy_sd, strict=strict)

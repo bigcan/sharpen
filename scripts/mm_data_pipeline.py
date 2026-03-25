@@ -12,7 +12,6 @@ import sys
 import argparse
 import logging
 import pandas as pd
-import numpy as np
 from datetime import datetime
 from dateutil.relativedelta import relativedelta
 

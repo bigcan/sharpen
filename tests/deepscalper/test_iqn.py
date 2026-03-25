@@ -9,7 +9,6 @@ Covers:
   5. Stratified sampling — hold ratio enforcement
   6. Daily episodes — truncation + random start
 """
-import pytest
 import numpy as np
 import torch
 import tempfile

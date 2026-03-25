@@ -23,8 +23,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
-import pandas as pd
-from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
+import pandas as pd  # noqa: E402
+from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer  # noqa: E402
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 RAW_PATH = PROJECT_ROOT / "data" / "raw" / "coinapi_lob" / "coinapi_lob_final.parquet"
@@ -138,7 +138,7 @@ def main():
     print(f"  Date range:  {df['timestamp'].min()} → {df['timestamp'].max()}")
     print(f"  NaN total:   {df.isnull().sum().sum()}")
     print(f"  File size:   {file_size_mb:.1f} MB")
-    print(f"\n  Column groups:")
+    print("\n  Column groups:")
 
     # Group columns for readability
     lob_cols = [c for c in df.columns if any(c.startswith(p) for p in ('bid_', 'ask_'))]
@@ -153,15 +153,15 @@ def main():
     print(f"    OFI:            {len(ofi_cols)} cols")
     print(f"    Synthetic OHLCV:{len([c for c in ohlcv_cols if c in df.columns])} cols")
     print(f"    Macro z-scores: {len(macro_z)} cols")
-    print(f"    Other:          mid_price, spread_1, log_ret" + (f", {other_cols}" if other_cols else ""))
+    print("    Other:          mid_price, spread_1, log_ret" + (f", {other_cols}" if other_cols else ""))
 
     # Spot-check macro feature ranges
-    print(f"\n  Macro feature ranges (should be within ±100 bps):")
+    print("\n  Macro feature ranges (should be within ±100 bps):")
     for col in macro_z[:4]:
         vals = df[col].values
         print(f"    {col:12s}: [{vals.min():+8.2f}, {vals.max():+8.2f}]  mean={vals.mean():+.4f}")
 
-    print(f"\n  ✓ Dataset ready for DeepScalper training")
+    print("\n  ✓ Dataset ready for DeepScalper training")
     print(f"  → {OUTPUT_PATH}")
 
 

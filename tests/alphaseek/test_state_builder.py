@@ -1,7 +1,6 @@
 """Tests for AlphaSeekStateBuilder — protocol compliance, warmup, NaN handling."""
 
 import numpy as np
-import pytest
 import torch
 
 from finrl_pro_ds.alphaseek.feature_engine import AlphaSeekFeatureEngine

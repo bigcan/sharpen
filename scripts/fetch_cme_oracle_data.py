@@ -10,9 +10,9 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / '.env')
 
-import databento as db
-import pandas as pd
-import numpy as np
+import databento as db  # noqa: E402
+import pandas as pd  # noqa: E402
+import numpy as np  # noqa: E402
 
 API_KEY = os.environ.get('DATABENTO_API_KEY')
 if not API_KEY:
@@ -122,7 +122,7 @@ def fetch_and_save(sym_key: str, info: dict):
     commission_bps = (info['commission_per_side'] / notional) * 10000
     total_one_way_bps = spread_cost_bps + commission_bps
 
-    print(f"\n  Fee Analysis:")
+    print("\n  Fee Analysis:")
     print(f"    Notional per contract: ${notional:,.0f}")
     print(f"    Spread (1 tick): {spread_cost_bps:.2f} bps")
     print(f"    Commission: {commission_bps:.2f} bps")

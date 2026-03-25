@@ -11,13 +11,10 @@ Tests:
 
 import numpy as np
 import pandas as pd
-import pytest
 from datetime import datetime, timezone
 
 from finrl_pro_ds.data.multiscale_handler import (
     MultiScaleOHLCVHandler,
-    _resample_ohlcv,
-    _compute_scale_features,
 )
 from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder
 
@@ -171,7 +168,7 @@ class TestLiveObsParity:
         assert abs(private[1] - 0.075) < 1e-4
 
         # 2-3: time encoding for 14:30 UTC
-        minutes = 14 * 60 + 30  # = 870
+        14 * 60 + 30  # = 870
         expected_sin = float(np.sin(2 * np.pi * 870 / 1440.0))
         expected_cos = float(np.cos(2 * np.pi * 870 / 1440.0))
         assert abs(private[2] - expected_sin) < 1e-5

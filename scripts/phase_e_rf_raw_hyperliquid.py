@@ -28,11 +28,11 @@ sys.path.append(os.getcwd())
 sys.path.append(os.path.join(os.getcwd(), "scripts"))
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score, accuracy_score, brier_score_loss
-from sklearn.calibration import calibration_curve
+from sklearn.ensemble import RandomForestClassifier  # noqa: E402
+from sklearn.metrics import roc_auc_score, accuracy_score, brier_score_loss  # noqa: E402
+from sklearn.calibration import calibration_curve  # noqa: E402
 
-from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS
+from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS  # noqa: E402
 
 # ── Feature columns ──
 # Exclude fev3 cross-TF features (only use v2 baseline 45 features)
@@ -99,10 +99,14 @@ def load_raw_features(file_path, start_date, end_date):
         ap_i = df[f"ask_price_{i}"].values.astype(np.float64)
         av_i = df[f"ask_vol_{i}"].values.astype(np.float64)
 
-        bp_prev = np.roll(bp, 1); bp_prev[0] = bp[0]
-        bv_prev = np.roll(bv, 1); bv_prev[0] = bv[0]
-        ap_prev = np.roll(ap_i, 1); ap_prev[0] = ap_i[0]
-        av_prev = np.roll(av_i, 1); av_prev[0] = av_i[0]
+        bp_prev = np.roll(bp, 1)
+        bp_prev[0] = bp[0]
+        bv_prev = np.roll(bv, 1)
+        bv_prev[0] = bv[0]
+        ap_prev = np.roll(ap_i, 1)
+        ap_prev[0] = ap_i[0]
+        av_prev = np.roll(av_i, 1)
+        av_prev[0] = av_i[0]
 
         w_b = np.where(bp > bp_prev, bv,
                 np.where(bp < bp_prev, -bv_prev, bv - bv_prev))
@@ -501,7 +505,7 @@ def main():
                   f"({100*n_valid/len(y):.1f}%), P(up)={n_pos/max(n_valid,1):.3f}")
 
     # ── 3. Train RF models ──
-    print(f"\n[3/4] Training Random Forest classifiers...")
+    print("\n[3/4] Training Random Forest classifiers...")
 
     models = {}
     eval_results = []
@@ -532,7 +536,7 @@ def main():
         "importance": importances,
     }).sort_values("importance", ascending=False)
 
-    print(f"\n  Top 10 features (fee_aware_HL):")
+    print("\n  Top 10 features (fee_aware_HL):")
     for _, row in imp_df.head(10).iterrows():
         print(f"    {row['feature']:<25} {row['importance']:.4f}")
 
@@ -598,13 +602,13 @@ def main():
             f.write(f"  {m['label']:<16} {m['split']:<6} {m['auc']:>7.4f} "
                     f"{m['accuracy']:>7.4f} {m['brier']:>7.4f} {m['n_samples']:>7d}\n")
 
-        f.write(f"\nTOP 10 FEATURES (fee_aware_HL model)\n")
+        f.write("\nTOP 10 FEATURES (fee_aware_HL model)\n")
         f.write("-" * 40 + "\n")
         for _, row in imp_df.head(10).iterrows():
             f.write(f"  {row['feature']:<25} {row['importance']:.4f}\n")
 
         if backtest_results:
-            f.write(f"\n\nTHRESHOLD BACKTEST RESULTS\n")
+            f.write("\n\nTHRESHOLD BACKTEST RESULTS\n")
             f.write("=" * 80 + "\n")
             f.write(f"  {'Target':<14} {'Venue':<14} {'T':>5} {'Split':<5} "
                     f"{'PF':>7} {'Sharpe':>8} {'Trades':>6} {'Return':>9} "
@@ -619,7 +623,7 @@ def main():
                         f"{r.get('win_rate',0):>6.1f}%\n")
 
             # Summary: best results per venue
-            f.write(f"\n\nBEST RESULTS SUMMARY\n")
+            f.write("\n\nBEST RESULTS SUMMARY\n")
             f.write("=" * 80 + "\n")
             for venue_name in VENUES:
                 venue_results = [r for r in backtest_results
@@ -652,13 +656,13 @@ def main():
                     if matching_test:
                         tp = matching_test[0]["profit_factor"]
                         if tp >= 1.2:
-                            f.write(f"    VERDICT: STRONG PASS (PF >= 1.2)\n")
+                            f.write("    VERDICT: STRONG PASS (PF >= 1.2)\n")
                         elif tp >= 1.05:
-                            f.write(f"    VERDICT: MARGINAL PASS (PF 1.05-1.2)\n")
+                            f.write("    VERDICT: MARGINAL PASS (PF 1.05-1.2)\n")
                         elif tp >= 1.0:
-                            f.write(f"    VERDICT: BREAKEVEN (PF 1.0-1.05)\n")
+                            f.write("    VERDICT: BREAKEVEN (PF 1.0-1.05)\n")
                         else:
-                            f.write(f"    VERDICT: FAIL (PF < 1.0)\n")
+                            f.write("    VERDICT: FAIL (PF < 1.0)\n")
 
     print(f"\n  Results saved to {report_path}")
 
@@ -686,7 +690,7 @@ def main():
             print(f"    {m['label']:<16} {m['split']:<5}: AUC={m['auc']:.4f}{marker}")
 
     if backtest_results:
-        print(f"\n  Best Backtest Results (>= 20 trades):")
+        print("\n  Best Backtest Results (>= 20 trades):")
         for venue_name in VENUES:
             venue_res = [r for r in backtest_results
                          if r.get("venue") == venue_name

@@ -7,7 +7,7 @@ spread health, latency monitoring, and tighter drawdown limits.
 
 import logging
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)

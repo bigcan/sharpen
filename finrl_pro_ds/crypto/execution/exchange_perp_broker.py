@@ -127,7 +127,7 @@ class ExchangePerpBroker:
         """Raise RuntimeError if exchange is not connected (replaces assert)."""
         if self._exchange is None:
             raise RuntimeError(
-                f"Exchange not connected. Call await broker.connect() first."
+                "Exchange not connected. Call await broker.connect() first."
             )
 
     async def connect(self) -> None:

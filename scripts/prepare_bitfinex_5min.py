@@ -145,7 +145,7 @@ def validate_output(df: pd.DataFrame) -> bool:
         issues.append(f"{n} bars seems too high (expected ~100K)")
 
     if issues:
-        print(f"[PREP] VALIDATION WARNINGS:")
+        print("[PREP] VALIDATION WARNINGS:")
         for issue in issues:
             print(f"  - {issue}")
         return False
@@ -196,7 +196,7 @@ def main():
     print(f"\n[PREP] Saved to {output_path}")
 
     # Summary
-    print(f"\n[PREP] Summary:")
+    print("\n[PREP] Summary:")
     print(f"  Rows: {len(df):,}")
     print(f"  Columns: {df.columns.tolist()}")
     print(f"  Date range: {df['timestamp'].min()} → {df['timestamp'].max()}")
@@ -205,7 +205,7 @@ def main():
 
     # Monthly bar counts
     monthly = df.groupby(df['timestamp'].dt.month).size()
-    print(f"\n  Monthly bar counts:")
+    print("\n  Monthly bar counts:")
     for month, count in monthly.items():
         print(f"    Month {month:>2}: {count:>6,} bars")
 

@@ -17,8 +17,8 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / '.env')
 
-import databento as db
-import pandas as pd
+import databento as db  # noqa: E402
+import pandas as pd  # noqa: E402
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "cme"
 RAW_PATH = DATA_DIR / "raw" / "gc_2025_mbp10.dbn.zst"
@@ -45,7 +45,7 @@ def process_with_replay():
     record_count = 0
     t0 = time.time()
 
-    print(f"  Streaming through records...")
+    print("  Streaming through records...")
 
     for record in store.replay():
         record_count += 1
@@ -386,7 +386,7 @@ def main():
 
     if not RAW_PATH.exists():
         print(f"  Raw file not found: {RAW_PATH}")
-        print(f"  Falling back to quarterly API fetch...")
+        print("  Falling back to quarterly API fetch...")
         df = process_by_quarter()
     else:
         # Try ndarray chunks first (fastest), fall back to quarterly
@@ -394,7 +394,7 @@ def main():
             df = process_with_ndarray_chunks()
         except Exception as e:
             print(f"  ndarray approach failed: {e}")
-            print(f"  Falling back to quarterly API fetch...")
+            print("  Falling back to quarterly API fetch...")
             df = process_by_quarter()
 
     if len(df) == 0:

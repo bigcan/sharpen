@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
@@ -1239,7 +1238,7 @@ class WalkForwardCoverageValidator:
         window_schedule = []
         for w in range(n_windows):
             offset = w * self.step_bars
-            train_start = ref_timestamps.iloc[offset]
+            ref_timestamps.iloc[offset]
             train_end_idx = offset + self.train_bars - 1
             embargo1_end_idx = train_end_idx + self.embargo_bars
             val_start_idx = embargo1_end_idx + 1

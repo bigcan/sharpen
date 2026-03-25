@@ -36,7 +36,7 @@ env:
     # Paper-aligned reward (Section 3.2 + 4.2)
     # r_t = (mid_{t+1} - mid_t) × pos_t - fees + w × pos_t × (mid_{t+h} - mid_t)
     scaling: 1.0              # Applied after bps normalization. HPO range: [0.1, 10.0]
-    hindsight_weight: 0.1     # Paper optimal.      HPO range: [1e-3, 0.2]
+    hindsight_weight: 0.0     # BUG-03: Must be 0 in backtest. Was 0.1 (uses future prices).
     hindsight_horizon: 180    # Paper optimal (min). HPO range: [30..180]
     volatility_horizon: 100   # For Aux Target calculation (Section 4.4)
     # DSR REMOVED (Sprint 5 post-mortem): HPO picked sharpe_weight=0.815 → agent

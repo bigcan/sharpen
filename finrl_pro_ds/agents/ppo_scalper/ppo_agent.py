@@ -91,9 +91,9 @@ class PPOAgent:
             try:
                 self.network = torch.compile(self.network, mode="default")
                 self._torch_compiled = True
-                print("[torch.compile] PPO network compiled (mode=default)")
+                logger.info("[torch.compile] PPO network compiled (mode=default)")
             except Exception as e:
-                print(f"[torch.compile] Failed, falling back to eager mode: {e}")
+                logger.warning(f"[torch.compile] Failed, falling back to eager mode: {e}")
 
         # Optimizer
         self.optimizer = optim.Adam(self.network.parameters(), lr=lr, eps=1e-5)
@@ -346,7 +346,7 @@ class PPOAgent:
         """
         if not os.path.exists(path):
             return
-        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         try:
             # PERF FIX-1: Strip torch.compile prefix from checkpoint keys
             network_sd = self._strip_compile_prefix(checkpoint["network"])

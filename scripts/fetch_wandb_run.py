@@ -152,7 +152,7 @@ def download_remote_artifacts(run_id, remote_workspace=REMOTE_WORKSPACE):
 
     print(f"Connecting to {host}:{port} for artifact download...")
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
 
     try:
         ssh.connect(host, port=int(port), username='root', password=password, timeout=30)

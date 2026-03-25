@@ -84,7 +84,7 @@ def remote_cmd(command: str, timeout: int = 60, instance_name: str = None) -> st
 
     print(f"[{inst['name']}] Connecting to {host}:{port}...")
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
 
     try:
         ssh.connect(host, port=port, username='root', password=password, timeout=30)

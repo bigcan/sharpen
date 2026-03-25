@@ -1,13 +1,17 @@
+import logging
+import os
+from typing import Dict, Tuple, Optional
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
-from typing import Dict, Tuple, Optional
-import os
 
 from finrl_pro_ds.agents.deepscalper.networks import DeepScalperNetwork
 from finrl_pro_ds.agents.deepscalper.per_buffer import PrioritizedReplayBuffer
 from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
+
+logger = logging.getLogger(__name__)
 
 class DeepScalperBDQ:
     """
@@ -76,9 +80,9 @@ class DeepScalperBDQ:
                 self.policy_net = torch.compile(self.policy_net, mode="default")
                 self.target_net = torch.compile(self.target_net, mode="default")
                 self._torch_compiled = True
-                print("[torch.compile] BDQ policy_net + target_net compiled (mode=default)")
+                logger.info("[torch.compile] BDQ policy_net + target_net compiled (mode=default)")
             except Exception as e:
-                print(f"[torch.compile] Failed, falling back to eager mode: {e}")
+                logger.warning(f"[torch.compile] Failed, falling back to eager mode: {e}")
 
         # FIX M2: Validate action dims match between agent and network
         net_action_dims = network_config.get('action_space_dims', (5, 9))
@@ -453,7 +457,7 @@ class DeepScalperBDQ:
             total_loss = total_loss_main + self.auxiliary_weight * loss_vol_pred
 
         if not torch.isfinite(total_loss):
-            print(f"WARNING: BDQ Loss is {total_loss.item()} (NaN/Inf). Skipping update.", flush=True)
+            logger.warning(f"BDQ Loss is {total_loss.item()} (NaN/Inf). Skipping update.")
             return None
 
         self.optimizer.zero_grad()
@@ -594,10 +598,7 @@ class DeepScalperBDQ:
     def load(self, path: str):
         if not os.path.exists(path):
             return
-        # FIX: weights_only=False required for PyTorch ≥2.6 (default changed to True).
-        # Our checkpoints contain numpy scalars (epsilon, LR scheduler state) which
-        # are rejected by the safe unpickler. These are our own trusted checkpoints.
-        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         # PERF FIX-1: Strip torch.compile prefix from checkpoint keys (backward-compatible)
         policy_sd = self._strip_compile_prefix(checkpoint['policy_net'])
         target_sd = self._strip_compile_prefix(checkpoint['target_net'])

@@ -158,9 +158,9 @@ class MultiScaleOHLCVHandler:
         file_path: str,
         ticker: str,
         feature_config: Dict,
-        start_date: str = None,
-        end_date: str = None,
-        norm_cutoff_date: str = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        norm_cutoff_date: Optional[str] = None,
     ):
         self.file_path = file_path
         self.ticker = ticker

@@ -39,13 +39,8 @@ def load_config(config_path: str) -> dict:
 
 
 async def main(args):
-    from finrl_pro_ds.alphaseek.ensemble import AlphaSeekEnsemble, EnsembleStrategy
     from finrl_pro_ds.alphaseek.live_engine import AlphaSeekLiveEngine
     from finrl_pro_ds.alphaseek.model_registry import ModelRegistry
-    from finrl_pro_ds.alphaseek.monitoring import AlphaSeekMonitor
-    from finrl_pro_ds.alphaseek.position_manager import DiscretePositionManager
-    from finrl_pro_ds.alphaseek.risk import AlphaSeekRiskConfig, AlphaSeekRiskManager
-    from finrl_pro_ds.alphaseek.tick_clock import TickClock
 
     config = load_config(args.config)
 

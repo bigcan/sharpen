@@ -136,7 +136,7 @@ def main():
             batch = fetch_candles(args.symbol, args.timeframe, cursor)
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 429:
-                print(f"  Rate limited! Waiting 60s...")
+                print("  Rate limited! Waiting 60s...")
                 time.sleep(60)
                 continue
             raise
@@ -183,7 +183,7 @@ def main():
     # Compute mid_price for consistency with our pipeline
     df['mid_price'] = (df['open'] + df['close']) / 2
 
-    print(f"\n[BITFINEX] Fetch complete:")
+    print("\n[BITFINEX] Fetch complete:")
     print(f"  Total candles: {len(df):,}")
     print(f"  Requests made: {request_count}")
     print(f"  Date range: {df['timestamp'].min()} → {df['timestamp'].max()}")
@@ -194,21 +194,21 @@ def main():
     print(f"  Avg volume/bar: {df['volume'].mean():.2f} BTC")
 
     # Fee analysis
-    avg_price = df['close'].mean()
-    print(f"\n  Fee Analysis (Bitfinex zero-fee model):")
-    print(f"    Maker fee: 0.00 bps")
-    print(f"    Taker fee: 0.00 bps")
-    print(f"    Only cost: spread + funding (8h)")
-    print(f"    vs BTC Binance (5.0 bps/side): ∞x cheaper (zero fee)")
-    print(f"    vs BTC Hyperliquid (2.5 bps/side): ∞x cheaper (zero fee)")
-    print(f"    vs GC CME (0.35 bps/side): still cheaper (zero fee)")
+    df['close'].mean()
+    print("\n  Fee Analysis (Bitfinex zero-fee model):")
+    print("    Maker fee: 0.00 bps")
+    print("    Taker fee: 0.00 bps")
+    print("    Only cost: spread + funding (8h)")
+    print("    vs BTC Binance (5.0 bps/side): ∞x cheaper (zero fee)")
+    print("    vs BTC Hyperliquid (2.5 bps/side): ∞x cheaper (zero fee)")
+    print("    vs GC CME (0.35 bps/side): still cheaper (zero fee)")
 
     # Return analysis (for breakeven comparison)
     closes = df['close'].values
     returns_1 = np.diff(closes) / closes[:-1] * 10000  # 1-min returns in bps
     returns_5 = (closes[5:] - closes[:-5]) / closes[:-5] * 10000  # 5-min approx
 
-    print(f"\n  Return Statistics:")
+    print("\n  Return Statistics:")
     print(f"    1-min avg |return|: {np.abs(returns_1).mean():.2f} bps")
     print(f"    5-min avg |return|: {np.abs(returns_5).mean():.2f} bps")
     print(f"    1-min std:          {returns_1.std():.2f} bps")
@@ -224,7 +224,7 @@ def main():
             print(f"    {horizon_label} breakeven @ {venue}: {p_break*100:.1f}%")
 
     # Save
-    out_path = DATA_DIR / f"btc_usdt_perp_2025_1min.parquet"
+    out_path = DATA_DIR / "btc_usdt_perp_2025_1min.parquet"
     df.to_parquet(out_path, index=False, engine='pyarrow')
     print(f"\n[BITFINEX] Saved: {out_path} ({out_path.stat().st_size / 1e6:.1f} MB)")
 
@@ -239,7 +239,7 @@ def main():
             # Funding rate summary
             if 'current_funding' in funding_df.columns:
                 fr = funding_df['current_funding'].dropna()
-                print(f"\n  Funding Rate Summary:")
+                print("\n  Funding Rate Summary:")
                 print(f"    Records: {len(fr):,}")
                 print(f"    Mean:    {fr.mean()*100:.4f}%")
                 print(f"    Median:  {fr.median()*100:.4f}%")

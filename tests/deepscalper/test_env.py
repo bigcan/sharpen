@@ -643,7 +643,8 @@ class TestForcedLiquidation(unittest.TestCase):
              mock_row_reset[f'ask_price_{i}'] = 102.0
              mock_row_reset[f'ask_vol_{i}'] = 1.0
         # Add macro (optional but good for robustness)
-        for k in range(11): mock_row_reset[f'macro_{k}'] = 0.0
+        for k in range(11):
+            mock_row_reset[f'macro_{k}'] = 0.0
              
         self.mock_handler.step.return_value = mock_row_reset
         self.env.reset()

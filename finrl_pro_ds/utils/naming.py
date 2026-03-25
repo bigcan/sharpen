@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import datetime
 import re
 
@@ -5,8 +7,8 @@ def generate_experiment_name(
     category: str,
     system: str,
     description: str,
-    experiment_id: str = None,
-    date: datetime.date = None
+    experiment_id: str | None = None,
+    date: datetime.date | None = None
 ) -> str:
     """
     Generates a standardized experiment name.

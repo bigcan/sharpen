@@ -254,7 +254,7 @@ def main():
     print(f"\n{'='*90}")
     print("  PHASE FEE-A: ORACLE FEE SENSITIVITY SWEEP")
     print(f"  Config: {args.config}  |  Split: {args.split}  |  Gate: PF ≥ {args.threshold}")
-    print(f"  Current venue: Binance VIP-0 (taker=5bps, maker=2bps, RT-taker=10bps)")
+    print("  Current venue: Binance VIP-0 (taker=5bps, maker=2bps, RT-taker=10bps)")
     print(f"{'='*90}")
 
     if not args.venues_only:
@@ -300,7 +300,7 @@ def main():
     # -----------------------------------------------------------------------
     # Venue comparison
     # -----------------------------------------------------------------------
-    print(f"\n  PHASE FEE-B: VENUE COMPARISON")
+    print("\n  PHASE FEE-B: VENUE COMPARISON")
     venue_results = []
     for v in VENUES:
         vp = df[(df["taker_bps"] == v["taker_bps"]) & (df["maker_bps"] == v["maker_bps"])]
@@ -323,7 +323,7 @@ def main():
     # -----------------------------------------------------------------------
     # Fee-C Gate Decision
     # -----------------------------------------------------------------------
-    print(f"\n  FEE-C GATE DECISION")
+    print("\n  FEE-C GATE DECISION")
     print(f"  {'─'*70}")
 
     best_venue_a6 = max(venue_results, key=lambda x: x["a6_pf"])
@@ -341,30 +341,30 @@ def main():
 
     if a6_clears and a7_clears:
         print(f"  VERDICT: BOTH oracles clear at {best_venue_any['name']}")
-        print(f"           → Update env fees and proceed to Phase B at new venue fees")
+        print("           → Update env fees and proceed to Phase B at new venue fees")
         rec_venue = best_venue_any
         action = "phase_b"
     elif a6_clears and not a7_clears:
         print(f"  VERDICT: Taker oracle clears at {best_venue_a6['name']} (PF={best_venue_a6['a6_pf']:.3f})")
-        print(f"           Maker oracle FAILS at all venues — 2-step fill delay kills signal")
+        print("           Maker oracle FAILS at all venues — 2-step fill delay kills signal")
         print(f"           → Taker-only Phase B config at {best_venue_a6['name']} fees")
         rec_venue = best_venue_a6
         action = "phase_b_taker_only"
     elif a7_clears and not a6_clears:
         print(f"  VERDICT: Maker oracle clears at {best_venue_a7['name']} (PF={best_venue_a7['a7_pf']:.3f})")
-        print(f"           Maker rebate dominates — maker-first action weighting recommended")
-        print(f"           → Phase B with MAKER_BUY/MAKER_SELL prioritized")
+        print("           Maker rebate dominates — maker-first action weighting recommended")
+        print("           → Phase B with MAKER_BUY/MAKER_SELL prioritized")
         rec_venue = best_venue_a7
         action = "phase_b_maker_first"
     else:
         print(f"  VERDICT: NO venue clears PF ≥ {args.threshold} for either oracle")
-        print(f"           Signal is structurally insufficient at 1-min resolution")
-        print(f"           → Pivot: 5-min bars, richer features, or Phase E (RF injection)")
+        print("           Signal is structurally insufficient at 1-min resolution")
+        print("           → Pivot: 5-min bars, richer features, or Phase E (RF injection)")
         rec_venue = None
         action = "pivot"
 
     if rec_venue:
-        print(f"\n  RECOMMENDED ENV CONFIG:")
+        print("\n  RECOMMENDED ENV CONFIG:")
         print(f"    maker_fee: {rec_venue['maker_bps'] / 10000:.6f}  # {rec_venue['maker_bps']:+.1f}bps")
         print(f"    taker_fee: {rec_venue['taker_bps'] / 10000:.6f}  # {rec_venue['taker_bps']:.1f}bps")
 

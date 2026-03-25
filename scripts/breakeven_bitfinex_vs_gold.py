@@ -339,7 +339,7 @@ def rf_signal_comparison(btc_df: pd.DataFrame | None, gc_df: pd.DataFrame | None
         X_test, y_test = features[test_mask], target[test_mask]
 
         if len(X_train) == 0 or len(X_val) == 0:
-            print(f"    Insufficient data for train/val split")
+            print("    Insufficient data for train/val split")
             continue
 
         # Train RF
@@ -364,7 +364,7 @@ def rf_signal_comparison(btc_df: pd.DataFrame | None, gc_df: pd.DataFrame | None
 
         # With LOB features, Gold AUC was 0.6147/0.5542
         # This OHLCV-only baseline shows how much LOB adds
-        print(f"    (For reference: Gold with LOB features achieved 0.6147/0.5542)")
+        print("    (For reference: Gold with LOB features achieved 0.6147/0.5542)")
 
 
 def main():

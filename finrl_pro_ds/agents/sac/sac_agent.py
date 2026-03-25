@@ -17,7 +17,7 @@ import torch.optim as optim
 from typing import Dict, Optional
 
 from finrl_pro_ds.agents.sac.networks import SACActorNetwork, SACCriticNetwork
-from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
+from finrl_pro_ds.agents.common.flat_replay_buffer import FlatReplayBuffer
 
 
 class SACAgent:
@@ -200,7 +200,7 @@ class SACAgent:
     def predict(
         self,
         scale_input,
-        private: torch.Tensor = None,
+        private: Optional[torch.Tensor] = None,
         deterministic: bool = False,
         **kwargs,
     ) -> torch.Tensor:
@@ -547,7 +547,7 @@ class SACAgent:
 
     def load(self, path: str):
         """Load model state from checkpoint."""
-        checkpoint = torch.load(path, map_location=self.device, weights_only=False)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
 
         self._load_state_dict(self.actor, checkpoint["actor"])
         self._load_state_dict(self.critic1, checkpoint["critic1"])

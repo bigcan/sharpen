@@ -7,7 +7,6 @@ Verifies that:
   - Window mode behavior is unchanged
 """
 import numpy as np
-import pytest
 import torch
 
 from finrl_pro_ds.agents.sac.networks import (

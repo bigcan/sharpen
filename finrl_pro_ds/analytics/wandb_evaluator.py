@@ -1,3 +1,4 @@
+import logging
 import pandas as pd
 import numpy as np
 import yfinance as yf
@@ -6,6 +7,8 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 from typing import Dict, Optional
 import warnings
+
+logger = logging.getLogger(__name__)
 
 # Suppress warnings for cleaner output
 warnings.filterwarnings("ignore")
@@ -58,7 +61,7 @@ class WandbFinRLEvaluator:
         Clean, align, and calculate returns for all agents and benchmark.
         Handles timezone mismatches and NaNs.
         """
-        print("Preprocessing data...")
+        logger.info("Preprocessing data...")
 
         # 1. Standardize Dates
         def process_df(df):
@@ -74,7 +77,7 @@ class WandbFinRLEvaluator:
             self.dict_agents[name] = process_df(df)
 
         # 2. Fetch Benchmark Data
-        print(f"Fetching benchmark data for {self.benchmark_ticker}...")
+        logger.info(f"Fetching benchmark data for {self.benchmark_ticker}...")
         try:
             # Fix: Ensure dates are converted to datetime objects and ADD BUFFER
             # yfinance sometimes fails if start==end or for intraday limits
@@ -116,7 +119,7 @@ class WandbFinRLEvaluator:
 
             self.df_benchmark = df_bench
         except Exception as e:
-            print(f"WARNING: Failed to fetch benchmark data '{self.benchmark_ticker}': {e}. Using flat zero-return benchmark.")
+            logger.warning(f"Failed to fetch benchmark data '{self.benchmark_ticker}': {e}. Using flat zero-return benchmark.")
             # Create dummy benchmark matching the ensemble index
             self.df_benchmark = pd.DataFrame({'Close': [100.0] * len(self.df_ensemble)}, index=self.df_ensemble.index)
 
@@ -338,7 +341,7 @@ class WandbFinRLEvaluator:
         else:
             # Use existing run
             run = wandb.run
-            print(f"Logging metrics to active W&B run: {run.name}")
+            logger.info(f"Logging metrics to active W&B run: {run.name}")
 
         try:
             # Ensure metrics are ready
@@ -468,9 +471,9 @@ class WandbFinRLEvaluator:
                 combined_log = pd.concat(trade_logs, ignore_index=True)
                 trade_log_table = wandb.Table(dataframe=combined_log)
                 wandb.log({"Trade Log": trade_log_table})
-                print(f"Logged {len(combined_log)} trade records to W&B.")
+                logger.info(f"Logged {len(combined_log)} trade records to W&B.")
             else:
-                print("No detailed trade data available (missing price/quantity columns).")
+                logger.info("No detailed trade data available (missing price/quantity columns).")
 
             # 8. Account Balance Time-Series (USDT tracking)
             # Log balance progression for Ensemble and all agents
@@ -502,7 +505,7 @@ class WandbFinRLEvaluator:
                 wandb.run.summary["Initial_Balance_USDT"] = initial_balance
                 wandb.run.summary["Final_Balance_USDT"] = final_balance
                 wandb.run.summary["Absolute_PnL_USDT"] = final_balance - initial_balance
-                print(f"Balance: {initial_balance:,.2f} USDT → {final_balance:,.2f} USDT (P&L: {final_balance - initial_balance:+,.2f})")
+                logger.info(f"Balance: {initial_balance:,.2f} USDT → {final_balance:,.2f} USDT (P&L: {final_balance - initial_balance:+,.2f})")
 
             # 6. Summary Attributes
             ens_metrics = self.results.get("Ensemble", {})
@@ -510,7 +513,7 @@ class WandbFinRLEvaluator:
             wandb.run.summary["Ensemble_Sortino"] = ens_metrics.get("Sortino_Ratio", 0)
             wandb.run.summary["Ensemble_Total_Return"] = ens_metrics.get("Total_Return", 0)
 
-            print(f"Results logged to W&B run: {run.name}")
+            logger.info(f"Results logged to W&B run: {run.name}")
 
         finally:
             if should_finish:

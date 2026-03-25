@@ -4,11 +4,14 @@ PPO Trainer for DeepScalper.
 On-policy training loop: collect rollouts → compute GAE → PPO update.
 Fundamentally different from BDQ's off-policy step-by-step pattern.
 """
+import logging
 import os
 import time
 import numpy as np
 import torch
 from collections import deque
+
+logger = logging.getLogger(__name__)
 
 try:
     import wandb
@@ -20,8 +23,8 @@ try:
 except ImportError:
     optuna = None
 
-from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
-from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
+from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent  # noqa: E402
+from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer  # noqa: E402
 
 
 def extract_tensors(obs):
@@ -154,7 +157,7 @@ class PPOTrainer:
             pruning_callback: Function() -> float for HPO pruning
         """
         num_envs = getattr(self.env, "num_envs", 1)
-        print(f"Starting PPO Training | Device: {self.device} | "
+        logger.info(f"Starting PPO Training | Device: {self.device} | "
               f"Envs: {num_envs} | Rollout: {self.rollout_steps} | "
               f"Epochs: {self.training_epochs}")
 
@@ -181,7 +184,7 @@ class PPOTrainer:
             f"obs['micro'] shape mismatch: expected ({B}, {W}, {_micro_dim}), got {obs['micro'].shape}"
         assert obs["private"].shape == (B, W, self._private_dim), \
             f"obs['private'] shape mismatch: expected ({B}, {W}, {self._private_dim}), got {obs['private'].shape}"
-        print(f"✓ Observation shapes verified: micro={obs['micro'].shape}, "
+        logger.info(f"Observation shapes verified: micro={obs['micro'].shape}, "
               f"private={obs['private'].shape}, macro={obs['macro'].shape}")
 
         global_step = start_step
@@ -203,7 +206,7 @@ class PPOTrainer:
 
 
         for epoch in range(self.training_epochs):
-            print(f"\n=== Epoch {epoch+1}/{self.training_epochs} ===")
+            logger.info(f"=== Epoch {epoch+1}/{self.training_epochs} ===")
 
             if epoch == 0 and skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
                 obs = self._current_obs
@@ -239,7 +242,7 @@ class PPOTrainer:
                     # C2 fix: NaN guard on rewards
                     if np.isnan(rewards).any():
                         nan_envs = np.where(np.isnan(rewards))[0]
-                        print(f"  ⚠️ NaN reward detected in envs {nan_envs} at step {global_step}, replacing with 0.0")
+                        logger.warning(f"NaN reward detected in envs {nan_envs} at step {global_step}, replacing with 0.0")
                         rewards = np.nan_to_num(rewards, nan=0.0)
 
                     # Store current qty_mask before extracting next one (B4: for this timestep)
@@ -351,7 +354,7 @@ class PPOTrainer:
                     if global_step > min_pruning_steps and current_rung > self._last_prune_rung:
                         self._last_prune_rung = current_rung
                         score = pruning_callback()
-                        print(f"  [HPO] Step {global_step} Score: {score:.4f}")
+                        logger.info(f"  [HPO] Step {global_step} Score: {score:.4f}")
                         optuna_trial.report(score, global_step)
                         if optuna_trial.should_prune():
                             raise optuna.TrialPruned()
@@ -370,13 +373,13 @@ class PPOTrainer:
         if not self.hpo_mode and wandb and wandb.run:
             wandb.log({"step": global_step, "train/final_step": 1})
 
-        print("PPO Training Complete.")
+        logger.info("PPO Training Complete.")
 
     def save_checkpoint(self, filename):
         path = os.path.join(self.ckpt_dir, filename)
         self.agent.save(path)
-        print(f"Saved checkpoint: {path}")
+        logger.info(f"Saved checkpoint: {path}")
 
     def load_checkpoint(self, path):
         self.agent.load(path)
-        print(f"Loaded checkpoint: {path}")
+        logger.info(f"Loaded checkpoint: {path}")

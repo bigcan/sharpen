@@ -12,6 +12,8 @@ import optuna
 
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
+logger = logging.getLogger(__name__)
+
 # RunningRewardNormalizer REMOVED (Sprint 7 BUG-3):
 # Rewards are already in basis points (~O(1)) from the environment.
 # Double-normalizing with an EMA z-score created a non-stationary target
@@ -139,7 +141,7 @@ class DeepScalperTrainer:
             self.agent.stratified_sampling = True
             self.agent.stratified_hold_action = replay_cfg.get("stratified_hold_action", 1)
             self.agent.stratified_hold_ratio = replay_cfg.get("stratified_hold_ratio", 0.5)
-            print(f"[IQN] Stratified sampling enabled: hold_action={self.agent.stratified_hold_action}, "
+            logger.info(f"[IQN] Stratified sampling enabled: hold_action={self.agent.stratified_hold_action}, "
                   f"hold_ratio={self.agent.stratified_hold_ratio}")
 
         # Training Params — read from agent-type-specific config section
@@ -162,7 +164,7 @@ class DeepScalperTrainer:
             raw_tau = self.agent.tau
             effective_tau = 1.0 - (1.0 - raw_tau) ** (1.0 / self.update_interval)
             self.agent.tau = effective_tau
-            print(f"[UTD] update_interval={self.update_interval:.0f} -> tau auto-scaled: "
+            logger.info(f"[UTD] update_interval={self.update_interval:.0f} -> tau auto-scaled: "
                   f"{raw_tau:.6f} -> {effective_tau:.6f} "
                   f"(effective target shift per env step: "
                   f"{1-(1-effective_tau)**self.update_interval:.4f})")
@@ -246,7 +248,7 @@ class DeepScalperTrainer:
         num_envs = self.env.num_envs
         total_transitions = demo_steps * num_envs
         logger.info(f"[DQfD] Seeding buffer: {demo_steps} steps x {num_envs} envs = {total_transitions} transitions")
-        print(f"[DQfD] Seeding replay buffer with {total_transitions} momentum-policy demos...")
+        logger.info(f"[DQfD] Seeding replay buffer with {total_transitions} momentum-policy demos...")
 
         obs, _ = self.env.reset()
         n_pushed = 0
@@ -282,7 +284,7 @@ class DeepScalperTrainer:
 
             obs = next_obs
 
-        print(f"[DQfD] Buffer seeded: {n_pushed} transitions ({len(self.agent.memory)} in buffer). "
+        logger.info(f"[DQfD] Buffer seeded: {n_pushed} transitions ({len(self.agent.memory)} in buffer). "
               f"Resuming with epsilon-greedy exploration.")
 
     def train(self, start_step=0, skip_reset=False, optuna_trial=None, pruning_callback=None):
@@ -302,12 +304,12 @@ class DeepScalperTrainer:
         if demo_steps > 0 and start_step == 0 and mdp_ver != "v6":
             self._seed_demo_buffer(demo_steps)
 
-        print(f"Starting Training: Single BDQ Agent | Device: {self.device} | Start Step: {start_step} | Epochs: {self.training_epochs}")
+        logger.info(f"Starting Training: Single BDQ Agent | Device: {self.device} | Start Step: {start_step} | Epochs: {self.training_epochs}")
 
         # Init State - Obs is Dict: {'micro': ..., 'macro': ..., 'private': ...}
         if skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
             obs = self._current_obs
-            print(f"  Resuming from stored observation (skip_reset=True)")
+            logger.info("  Resuming from stored observation (skip_reset=True)")
         else:
             obs, _ = self.env.reset()
 
@@ -322,7 +324,7 @@ class DeepScalperTrainer:
             f"obs['private'] shape mismatch: expected ({B}, {W}, {_priv_dim}), got {obs['private'].shape}"
         assert obs["macro"].ndim == 2, \
             f"obs['macro'] expected 2D (B, M), got shape {obs['macro'].shape}"
-        print(f"[OK] Observation shapes verified: micro={obs['micro'].shape}, "
+        logger.info(f"[OK] Observation shapes verified: micro={obs['micro'].shape}, "
               f"private={obs['private'].shape}, macro={obs['macro'].shape}")
 
         # FIX PERF-2: Dynamic epsilon decay for BOTH HPO and production training.
@@ -361,9 +363,9 @@ class DeepScalperTrainer:
                 f"Config was likely mutated after agent creation."
             )
             if self.hpo_mode:
-                print(f"[HPO] Overriding epsilon_decay to {computed_decay:.6f} for {steps_per_trial} steps (~{explore_calls} explore updates of {total_calls} total, {self.training_epochs} epochs)")
+                logger.info(f"[HPO] Overriding epsilon_decay to {computed_decay:.6f} for {steps_per_trial} steps (~{explore_calls} explore updates of {total_calls} total, {self.training_epochs} epochs)")
             else:
-                print(f"[Train] Computed epsilon_decay = {computed_decay:.6f} (explore over {explore_calls}/{total_calls} updates, fraction={exploration_fraction})")
+                logger.info(f"[Train] Computed epsilon_decay = {computed_decay:.6f} (explore over {explore_calls}/{total_calls} updates, fraction={exploration_fraction})")
 
         global_step = start_step
         self.episode_rewards = deque(maxlen=100)
@@ -398,7 +400,7 @@ class DeepScalperTrainer:
                 self._nstep_buffer = NStepBuffer(
                     n=_n_step, gamma=_nstep_gamma, num_envs=num_envs
                 )
-                print(f"[N-Step] Enabled: n={_n_step}, gamma={_nstep_gamma}, "
+                logger.info(f"[N-Step] Enabled: n={_n_step}, gamma={_nstep_gamma}, "
                       f"gamma^n={_nstep_gamma ** _n_step:.6f}"
                       f"{' (multi_horizon: using gamma_long)' if self.agent.multi_horizon else ''}")
 
@@ -413,12 +415,12 @@ class DeepScalperTrainer:
 
         # Paper Section 4.3: Epoch-based training — each epoch replays the data
         for epoch in range(self.training_epochs):
-            print(f"\n=== Epoch {epoch+1}/{self.training_epochs} ===")
+            logger.info(f"=== Epoch {epoch+1}/{self.training_epochs} ===")
 
             # Reset env at start of each epoch (except first if skip_reset)
             if epoch == 0 and skip_reset and hasattr(self, '_current_obs') and self._current_obs is not None:
                 obs = self._current_obs
-                print(f"  Resuming from stored observation (skip_reset=True)")
+                logger.info("  Resuming from stored observation (skip_reset=True)")
             else:
                 obs, _ = self.env.reset()
 
@@ -574,7 +576,7 @@ class DeepScalperTrainer:
                                    "train/taker_fee_bps": t_fee * 10000,
                                    "train/maker_fee_bps": m_fee * 10000,
                                    "step": global_step})
-                        print(f"[FeeCurriculum] Step {global_step}: tier {highest_eligible} activated "
+                        logger.info(f"[FeeCurriculum] Step {global_step}: tier {highest_eligible} activated "
                               f"→ taker={t_fee*10000:.1f}bps, maker={m_fee*10000:.1f}bps")
 
                 # FIX: Decay epsilon every step batch
@@ -653,7 +655,7 @@ class DeepScalperTrainer:
                         }, commit=True)
                     except Exception as e:
                         if not getattr(self, '_heartbeat_warn_logged', False):
-                            print(f"  [HPO] WandB heartbeat failed (will not repeat): {e}")
+                            logger.warning(f"  [HPO] WandB heartbeat failed (will not repeat): {e}")
                             self._heartbeat_warn_logged = True
 
                 # 4b. HPO Pruning Check — dual strategy:
@@ -669,9 +671,9 @@ class DeepScalperTrainer:
 
                     if global_step > min_pruning_steps and current_rung > getattr(self, '_last_prune_rung', -1):
                         self._last_prune_rung = current_rung
-                        print(f"  [HPO] Probing agent at step {global_step} (rung {current_rung})...")
+                        logger.info(f"  [HPO] Probing agent at step {global_step} (rung {current_rung})...")
                         score = pruning_callback()
-                        print(f"  [HPO] Step {global_step} Score: {score:.4f}")
+                        logger.info(f"  [HPO] Step {global_step} Score: {score:.4f}")
 
                         # Track score history for early-kill on flat/diverging trials
                         if not hasattr(self, '_hpo_score_history'):
@@ -687,7 +689,7 @@ class DeepScalperTrainer:
                         optuna_trial.report(score, global_step)
 
                         if optuna_trial.should_prune():
-                            print(f"  [HPO] Pruning trial at step {global_step}")
+                            logger.info(f"  [HPO] Pruning trial at step {global_step}")
                             raise optuna.TrialPruned()
 
                 # 5. Checkpointing
@@ -712,20 +714,20 @@ class DeepScalperTrainer:
         if n_calls > 0:
             self.save_checkpoint("checkpoint_final.pth")
         else:
-            print("⚠ Skipping checkpoint_final.pth save: no training steps executed (n_calls=0)")
+            logger.warning("Skipping checkpoint_final.pth save: no training steps executed (n_calls=0)")
 
         # Always log final step status to ensure graph continuity
         if not self.hpo_mode:
-            print(f"Logging final metrics at step {global_step}")
+            logger.info(f"Logging final metrics at step {global_step}")
             wandb.log({"step": global_step, "train/final_step": 1})
 
-        print("Training Complete.")
+        logger.info("Training Complete.")
 
     def save_checkpoint(self, filename):
         path = os.path.join(self.ckpt_dir, filename)
         self.agent.save(path)
-        print(f"Saved checkpoint: {path}")
+        logger.info(f"Saved checkpoint: {path}")
 
     def load_checkpoint(self, path, strict: bool = True):
         self.agent.load(path, strict=strict)
-        print(f"Loaded checkpoint: {path} (strict={strict})")
+        logger.info(f"Loaded checkpoint: {path} (strict={strict})")

@@ -66,10 +66,14 @@ def compute_1min_raw_features(df_1min: pd.DataFrame) -> pd.DataFrame:
         ap = df_1min[f'ask_price_{i}'].values.astype(np.float64)
         av = df_1min[f'ask_vol_{i}'].values.astype(np.float64)
 
-        bp_prev = np.roll(bp, 1); bp_prev[0] = bp[0]
-        bv_prev = np.roll(bv, 1); bv_prev[0] = bv[0]
-        ap_prev = np.roll(ap, 1); ap_prev[0] = ap[0]
-        av_prev = np.roll(av, 1); av_prev[0] = av[0]
+        bp_prev = np.roll(bp, 1)
+        bp_prev[0] = bp[0]
+        bv_prev = np.roll(bv, 1)
+        bv_prev[0] = bv[0]
+        ap_prev = np.roll(ap, 1)
+        ap_prev[0] = ap[0]
+        av_prev = np.roll(av, 1)
+        av_prev[0] = av[0]
 
         w_b = np.where(bp > bp_prev, bv,
                 np.where(bp < bp_prev, -bv_prev, bv - bv_prev))
@@ -205,7 +209,7 @@ def validate_output(merged: pd.DataFrame, df_5min_orig: pd.DataFrame):
     assert obi_burst.min() >= 0 and obi_burst.max() <= 1.0 + 1e-6, (
         f"obi_burst out of [0,1]: [{obi_burst.min()}, {obi_burst.max()}]"
     )
-    print(f"    obi_burst range [0,1]: OK")
+    print("    obi_burst range [0,1]: OK")
 
     print("  All validation checks passed.")
 
@@ -240,12 +244,12 @@ def main():
         raise ValueError(f"Missing columns in 1-min data: {missing}")
 
     # ── 2. Compute raw 1-min LOB features ──
-    print(f"\n[2/5] Computing raw 1-min LOB features...")
+    print("\n[2/5] Computing raw 1-min LOB features...")
     df_1min_feat = compute_1min_raw_features(df_1min)
     print(f"  Computed {len(df_1min_feat)} rows of 1-min features")
 
     # ── 3. Aggregate to 5-min windows ──
-    print(f"\n[3/5] Aggregating to 5-min windows...")
+    print("\n[3/5] Aggregating to 5-min windows...")
     agg_5min = aggregate_to_5min(df_1min_feat)
     print(f"  Aggregated to {len(agg_5min)} 5-min windows")
 
@@ -255,11 +259,11 @@ def main():
     df_5min['timestamp'] = pd.to_datetime(df_5min['timestamp'])
     print(f"  Rows: {len(df_5min)}, Columns: {len(df_5min.columns)}")
 
-    print(f"\n  Merging cross-TF features...")
+    print("\n  Merging cross-TF features...")
     merged = merge_and_save(df_5min, agg_5min, args.output)
 
     # ── 5. Validate ──
-    print(f"\n[5/5] Validating output...")
+    print("\n[5/5] Validating output...")
     validate_output(merged, df_5min)
 
     print(f"\n{'=' * 70}")

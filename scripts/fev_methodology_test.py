@@ -20,10 +20,10 @@ import pandas as pd
 sys.path.append(os.getcwd())
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
-from sklearn.metrics import roc_auc_score
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.data.feature_engineering import (
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier  # noqa: E402
+from sklearn.metrics import roc_auc_score  # noqa: E402
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler  # noqa: E402
+from finrl_pro_ds.data.feature_engineering import (  # noqa: E402
     MICRO_FEATURE_COLS, MACRO_FEATURE_COLS, DeepScalperFeatureEngineer,
 )
 
@@ -67,7 +67,7 @@ def load_raw(file_path, start, end):
     mask = (df["timestamp"] >= pd.Timestamp(start)) & (df["timestamp"] <= pd.Timestamp(end))
     df = df[mask].reset_index(drop=True)
 
-    fe = DeepScalperFeatureEngineer(config={})
+    DeepScalperFeatureEngineer(config={})
     # process_micro computes features AND normalizes in-place
     # We need the raw values BEFORE normalization
     # Strategy: compute raw features manually from LOB columns
@@ -96,10 +96,14 @@ def load_raw(file_path, start, end):
         ap_i = df[f"ask_price_{i}"].values.astype(np.float64)
         av_i = df[f"ask_vol_{i}"].values.astype(np.float64)
 
-        bp_prev = np.roll(bp, 1); bp_prev[0] = bp[0]
-        bv_prev = np.roll(bv, 1); bv_prev[0] = bv[0]
-        ap_prev = np.roll(ap_i, 1); ap_prev[0] = ap_i[0]
-        av_prev = np.roll(av_i, 1); av_prev[0] = av_i[0]
+        bp_prev = np.roll(bp, 1)
+        bp_prev[0] = bp[0]
+        bv_prev = np.roll(bv, 1)
+        bv_prev[0] = bv[0]
+        ap_prev = np.roll(ap_i, 1)
+        ap_prev[0] = ap_i[0]
+        av_prev = np.roll(av_i, 1)
+        av_prev[0] = av_i[0]
 
         w_b = np.where(bp > bp_prev, bv,
                 np.where(bp < bp_prev, -bv_prev, bv - bv_prev))
@@ -134,7 +138,7 @@ def load_raw(file_path, start, end):
     # Slope asymmetry
     bid_depths = np.column_stack([dist_bid[i] for i in range(1, 6)])
     ask_depths = np.column_stack([dist_ask[i] for i in range(1, 6)])
-    bid_slope = np.polyfit(np.arange(5), bid_depths.mean(axis=0), 1)[0] if len(df) > 5 else 0
+    np.polyfit(np.arange(5), bid_depths.mean(axis=0), 1)[0] if len(df) > 5 else 0
     # Per-row slope is expensive; use simplified version
     slope_asym = np.clip(
         (bid_depths[:, -1] - bid_depths[:, 0]) - (ask_depths[:, -1] - ask_depths[:, 0]),
@@ -359,8 +363,8 @@ def main():
 
     # ── Run all combinations ──
     print(f"\n{'='*90}")
-    print(f"  METHODOLOGY STRESS TEST")
-    print(f"  Does evaluation methodology mask real feature signal?")
+    print("  METHODOLOGY STRESS TEST")
+    print("  Does evaluation methodology mask real feature signal?")
     print(f"{'='*90}\n")
     print(f"  {'Condition':<45} {'Dims':>4}  {'Tr AUC':>7}  {'Val':>7}  {'Test':>7}  {'Time':>6}")
     print(f"  {'-'*85}")
@@ -419,7 +423,7 @@ def main():
 
     # ── Analysis ──
     print(f"\n{'='*90}")
-    print(f"  ANALYSIS: Which methodology axis matters most?")
+    print("  ANALYSIS: Which methodology axis matters most?")
     print(f"{'='*90}")
 
     # Effect of normalization (averaged across other axes)
@@ -429,7 +433,7 @@ def main():
         norm_effect.setdefault(key, {})
         norm_effect[key][e["norm"]] = e["val_auc"]
 
-    print(f"\n  Normalization effect (RAW - NORM):")
+    print("\n  Normalization effect (RAW - NORM):")
     for key, vals in sorted(norm_effect.items()):
         if "NORM" in vals and "RAW" in vals:
             delta = vals["RAW"] - vals["NORM"]
@@ -442,7 +446,7 @@ def main():
         target_effect.setdefault(key, {})
         target_effect[key][e["target"]] = e["val_auc"]
 
-    print(f"\n  Target effect (fee-aware - binary):")
+    print("\n  Target effect (fee-aware - binary):")
     for key, vals in sorted(target_effect.items()):
         if "binary" in vals and "fee-aware" in vals:
             delta = vals["fee-aware"] - vals["binary"]
@@ -455,7 +459,7 @@ def main():
         feat_effect.setdefault(key, {})
         feat_effect[key][e["features"]] = e["val_auc"]
 
-    print(f"\n  Feature effect (v2 - v1):")
+    print("\n  Feature effect (v2 - v1):")
     for key, vals in sorted(feat_effect.items()):
         if "v1(7d)" in vals and "v2(45d)" in vals:
             delta = vals["v2(45d)"] - vals["v1(7d)"]
@@ -468,7 +472,7 @@ def main():
         model_effect.setdefault(key, {})
         model_effect[key][e["model"]] = e["val_auc"]
 
-    print(f"\n  Model effect (XGB - RF):")
+    print("\n  Model effect (XGB - RF):")
     for key, vals in sorted(model_effect.items()):
         if "RF" in vals and "XGB" in vals:
             delta = vals["XGB"] - vals["RF"]

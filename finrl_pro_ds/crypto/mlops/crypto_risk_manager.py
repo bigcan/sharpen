@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Optional
 
 import numpy as np
 
@@ -120,7 +119,7 @@ class CryptoRiskManager:
                 violations.append(crash_msg)
                 self.state.circuit_breaker_active = True
                 self.state.circuit_breaker_cooldown_remaining = self.config.circuit_breaker_cooldown_bars
-                logger.warning(f"Circuit breaker ACTIVATED: flash crash")
+                logger.warning("Circuit breaker ACTIVATED: flash crash")
                 return np.zeros_like(action), violations
 
         # --- Update drawdown tracking ---

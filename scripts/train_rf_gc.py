@@ -220,7 +220,7 @@ def main():
     if best:
         print(f"\n[G4] Best: H={best['horizon']}, threshold={best['threshold']} bps")
         print(f"  Val AUC={best['val_auc']:.4f}, Test AUC={best['test_auc']:.4f}")
-        print(f"  Session 17 comparison: Val 0.6147, Test 0.5542")
+        print("  Session 17 comparison: Val 0.6147, Test 0.5542")
 
 
 if __name__ == "__main__":

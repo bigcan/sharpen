@@ -103,7 +103,7 @@ class LiveObsBuilder:
             loader: CryptoLoader instance (with async fetch_ohlcv).
             asset: Base asset symbol (e.g., "BTC").
         """
-        from datetime import datetime, timedelta, timezone
+        from datetime import datetime, timezone
 
         logger.info(
             f"LiveObsBuilder bootstrapping: fetching {self.bootstrap_bars} "

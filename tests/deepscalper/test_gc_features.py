@@ -13,14 +13,11 @@ Tests that:
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from finrl_pro_ds.data.feature_engineering import (
     DeepScalperFeatureEngineer,
     MICRO_FEATURE_COLS,
     MACRO_FEATURE_COLS,
-    NUM_MICRO_FEATURES,
-    NUM_MACRO_FEATURES,
     get_micro_feature_cols,
     get_macro_feature_cols,
 )

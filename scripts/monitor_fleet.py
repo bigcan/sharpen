@@ -101,7 +101,7 @@ def probe_instance(name, inst_config, timeout=30):
     }
 
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
 
     # Resolve password: instance config -> GPUHUB_PASSWORD env var -> .env file
     password = inst_config.get("password")
@@ -764,6 +764,10 @@ def main():
     # 3. Cross-reference
     if hw_results and wandb_runs:
         wandb_runs = match_runs_to_instances(hw_results, wandb_runs)
+    else:
+        # Ensure 'instance' key exists even without HW probing
+        for run in wandb_runs:
+            run.setdefault("instance", "?")
 
     # 4. Orphan detection
     orphan_alerts = []

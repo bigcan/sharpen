@@ -18,11 +18,11 @@ from pathlib import Path
 from dotenv import load_dotenv
 load_dotenv(Path(__file__).parent.parent / '.env')
 
-import databento as db
-import numpy as np
-import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score, accuracy_score
+import databento as db  # noqa: E402
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+from sklearn.ensemble import RandomForestClassifier  # noqa: E402
+from sklearn.metrics import roc_auc_score, accuracy_score  # noqa: E402
 
 API_KEY = os.environ.get('DATABENTO_API_KEY')
 DATA_DIR = Path(__file__).parent.parent / "data" / "cme"
@@ -39,7 +39,7 @@ def fetch_mbp1():
         print(f"  MBP-1 parquet already exists: {out_path}")
         return pd.read_parquet(out_path)
 
-    print(f"  Fetching MBP-1 for GC.c.2 (full year 2025)...")
+    print("  Fetching MBP-1 for GC.c.2 (full year 2025)...")
     client = db.Historical(API_KEY)
 
     t0 = time.time()
@@ -139,7 +139,7 @@ def compute_lob_features_level1(df: pd.DataFrame) -> pd.DataFrame:
     av1 = df['ask_vol_1'].values.astype(np.float64)
     mid = (bp1 + ap1) / 2.0
     mid_safe = np.where(mid > 0, mid, 1e-9)
-    n = len(df)
+    len(df)
 
     # 1. Microprice basis (bps) — TOP FEATURE in BTC RF
     vol_sum = bv1 + av1
@@ -154,10 +154,14 @@ def compute_lob_features_level1(df: pd.DataFrame) -> pd.DataFrame:
     out['spread_bps'] = ((ap1 - bp1) / mid_safe) * 10000.0
 
     # 4. DOFI level 1 — DEPTH OF FLOW INDICATOR
-    bp_prev = np.roll(bp1, 1); bp_prev[0] = bp1[0]
-    bv_prev = np.roll(bv1, 1); bv_prev[0] = bv1[0]
-    ap_prev = np.roll(ap1, 1); ap_prev[0] = ap1[0]
-    av_prev = np.roll(av1, 1); av_prev[0] = av1[0]
+    bp_prev = np.roll(bp1, 1)
+    bp_prev[0] = bp1[0]
+    bv_prev = np.roll(bv1, 1)
+    bv_prev[0] = bv1[0]
+    ap_prev = np.roll(ap1, 1)
+    ap_prev[0] = ap1[0]
+    av_prev = np.roll(av1, 1)
+    av_prev[0] = av1[0]
 
     w_b = np.where(bp1 > bp_prev, bv1,
             np.where(bp1 < bp_prev, -bv_prev, bv1 - bv_prev))
@@ -386,7 +390,7 @@ def main():
                 "importance": imp,
             }).sort_values("importance", ascending=False)
             imp_df.to_csv(RESULTS_DIR / "gc_lob_feature_importance.csv", index=False)
-            print(f"    Top 10 features:")
+            print("    Top 10 features:")
             for _, row in imp_df.head(10).iterrows():
                 source = "LOB" if row['feature'] in lob_cols else "OHLCV"
                 print(f"      {row['feature']:<25s} {row['importance']:.4f} ({source})")
@@ -396,7 +400,7 @@ def main():
     print("SUMMARY — Gold RF Signal Quality (OHLCV + LOB Level-1)")
     print(f"{'='*70}")
 
-    print(f"\n  Phase 1 (OHLCV only) vs Phase 2 (OHLCV + LOB):")
+    print("\n  Phase 1 (OHLCV only) vs Phase 2 (OHLCV + LOB):")
     print(f"  {'Horizon':>7s} | {'P1 Val':>8s} | {'P2 Val':>8s} | {'Delta':>7s} | "
           f"{'P2 Test':>8s} | {'Target':>7s} | {'Margin':>7s} | Verdict")
     print(f"  {'-'*7}-+-{'-'*8}-+-{'-'*8}-+-{'-'*7}-+-{'-'*8}-+-{'-'*7}-+-{'-'*7}-+-{'-'*10}")
@@ -417,7 +421,7 @@ def main():
         print(f"  {h_label:>7s} | {p1:>8.4f} | {p2_val:>8.4f} | {delta:>+7.4f} | "
               f"{p2_test:>8.4f} | {target:>7.3f} | {margin:>+7.4f} | {verdict}")
 
-    print(f"\n  LOB features should add meaningful signal above OHLCV baseline.")
+    print("\n  LOB features should add meaningful signal above OHLCV baseline.")
     print(f"  Results saved to: {RESULTS_DIR}/")
 
 
