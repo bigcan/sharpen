@@ -169,6 +169,7 @@ Configs vary by pipeline. Do NOT invent keys -- read a reference config first.
 - **Never use** `mid_price` without validating high/low against open/close (data corruption risk)
 - **Never deploy** without running `monitor_fleet.py` first (check VRAM, active processes)
 - **Never skip** Math skill verification on formula/equation changes in env/agent/reward code
+- **Never claim** a file, function, class, config key, or CLI flag exists (or doesn't) without first verifying via Grep/Glob/Read. "I believe X exists" is not acceptable -- look it up.
 
 ## Agent Skills -- Auto-Dispatch
 

@@ -75,8 +75,16 @@ class ContinuousSwingEnv(gym.Env):
         self.max_drawdown_pct = float(config.get("max_drawdown_pct", 0.30))
         self._stop_loss_threshold = 1.0 - self.max_drawdown_pct
 
+        # v6: Hard risk constraints (AlphaSeek-informed). 0 = disabled (backward compat).
+        self.stop_loss_bps = float(config.get("stop_loss_bps", 0))
+        self.max_holding_bars = int(config.get("max_holding_bars", 0))
+
         # Scales from handler (must be set before obs space construction)
         self._scales = config.get("scales", [3, 15, 60])
+
+        # v6: Observation mode
+        self._obs_mode = config.get("obs_mode", "window")
+        self._summary_feature_indices = config.get("summary_feature_indices", [0, 1, 2, 6, 7])
 
         # Spaces
         self.action_space = gym.spaces.Box(
@@ -85,11 +93,20 @@ class ContinuousSwingEnv(gym.Env):
 
         # Build obs space dynamically from scales config
         obs_spaces = {}
-        for i in range(len(self._scales)):
-            obs_spaces[f"scale_{i}"] = gym.spaces.Box(
-                low=-np.inf, high=np.inf,
-                shape=(self.window_size, features_per_scale), dtype=np.float32
-            )
+        if self._obs_mode == "summary_stats":
+            # v6: Each scale returns (n_feat * 3,) summary stats
+            n_summary = len(self._summary_feature_indices) * 3
+            for i in range(len(self._scales)):
+                obs_spaces[f"scale_{i}"] = gym.spaces.Box(
+                    low=-np.inf, high=np.inf,
+                    shape=(n_summary,), dtype=np.float32
+                )
+        else:
+            for i in range(len(self._scales)):
+                obs_spaces[f"scale_{i}"] = gym.spaces.Box(
+                    low=-np.inf, high=np.inf,
+                    shape=(self.window_size, features_per_scale), dtype=np.float32
+                )
         obs_spaces["private"] = gym.spaces.Box(
             low=-1.0, high=1.0, shape=(5,), dtype=np.float32
         )
@@ -106,6 +123,11 @@ class ContinuousSwingEnv(gym.Env):
         self.trade_count = 0
         self.current_step = 0
         self._episode_end = 0
+
+        # v6: Position tracking for hard risk constraints
+        self._entry_equity = self.initial_balance
+        self._position_direction = 0   # +1 long, -1 short, 0 flat
+        self._bars_in_position = 0
 
         # DSR state
         self._dsr_A = 0.0  # EMA of returns
@@ -142,6 +164,11 @@ class ContinuousSwingEnv(gym.Env):
         self.prev_close = 0.0
         self.current_close = 0.0
         self.current_atr = 0.0
+
+        # v6: Position tracking reset
+        self._entry_equity = self.initial_balance
+        self._position_direction = 0
+        self._bars_in_position = 0
 
         # DSR state reset
         self._dsr_A = 0.0
@@ -214,6 +241,7 @@ class ContinuousSwingEnv(gym.Env):
             self._atr_rolling_mean = np.mean(self._atr_buffer)
 
         # 3. Compute position delta with deadband
+        position_before = self.current_position  # v6: track for correct fee computation
         delta = target_position - self.current_position
         traded = False
 
@@ -242,6 +270,37 @@ class ContinuousSwingEnv(gym.Env):
                 traded = True
                 self.trade_count += 1
 
+        # 3b. v6: Track position direction for hard risk constraints
+        new_direction = (1 if self.current_position > 0.01
+                         else (-1 if self.current_position < -0.01 else 0))
+        if new_direction != self._position_direction:
+            self._entry_equity = self.equity
+            self._position_direction = new_direction
+            self._bars_in_position = 0
+
+        # 3c. v6: Position-level stop-loss — force-flat if position loses too much
+        if self.stop_loss_bps > 0 and self._position_direction != 0:
+            loss_bps = ((self._entry_equity - self.equity)
+                        / max(self._entry_equity, 1e-9) * 10000.0)
+            if loss_bps > self.stop_loss_bps:
+                self.current_position = 0.0
+                self._position_direction = 0
+                self._bars_in_position = 0
+                traded = True
+                self.trade_count += 1
+
+        # 3d. v6: Max holding timer — force-flat after N bars
+        if self.max_holding_bars > 0 and self._position_direction != 0:
+            self._bars_in_position += 1
+            if self._bars_in_position >= self.max_holding_bars:
+                self.current_position = 0.0
+                self._position_direction = 0
+                self._bars_in_position = 0
+                traded = True
+                self.trade_count += 1
+        elif self._position_direction == 0:
+            self._bars_in_position = 0
+
         # 4. Compute PnL
         # FIX R5-AUD-01: Compute price_return once, reuse for both reward and equity update
         pnl_bps = 0.0
@@ -256,11 +315,13 @@ class ContinuousSwingEnv(gym.Env):
             pnl_bps = self.current_position * price_return * 10000.0
 
         # Transaction cost (fee + slippage)
+        # v6: Use total position change (covers forced close from stop-loss / max-holding)
+        total_delta = abs(self.current_position - position_before)
         tc_bps = 0.0
-        if traded:
-            tc_bps = self.taker_fee * 10000.0 * abs(delta)
+        if traded and total_delta > 1e-9:
+            tc_bps = self.taker_fee * 10000.0 * total_delta
             if self.slippage_base_bps > 0:
-                tc_bps += self.slippage_base_bps * abs(delta)
+                tc_bps += self.slippage_base_bps * total_delta
             self.cumulative_fees += tc_bps
 
         # Step return
@@ -277,9 +338,9 @@ class ContinuousSwingEnv(gym.Env):
         # FIX R2-AUD-05: Use current equity (not initial_balance) so PnL compounds correctly.
         # Without this, drawdown recovery is inflated and long backtests diverge from reality.
         equity_delta = self.current_position * price_return * self.equity
-        if traded:
+        if traded and total_delta > 1e-9:
             fee_frac = self.taker_fee + self.slippage_base_bps / 10000.0
-            equity_delta -= fee_frac * abs(delta) * self.equity
+            equity_delta -= fee_frac * total_delta * self.equity
         self.equity += equity_delta
         self.peak_equity = max(self.peak_equity, self.equity)
 
@@ -377,22 +438,27 @@ class ContinuousSwingEnv(gym.Env):
             for i in range(n_scales):
                 key = f"scale_{i}"
                 if key in self._current_obs:
-                    # No .copy() needed — SyncVectorEnv stacks (copies) all env obs,
-                    # and _current_obs is overwritten on next handler.step().
                     obs[key] = self._current_obs[key]
                 else:
-                    obs[key] = np.zeros((self.window_size, features_per_scale), dtype=np.float32)
+                    obs[key] = self._zero_scale(features_per_scale)
         else:
             for i in range(n_scales):
-                obs[f"scale_{i}"] = np.zeros((self.window_size, features_per_scale), dtype=np.float32)
+                obs[f"scale_{i}"] = self._zero_scale(features_per_scale)
 
         obs["private"] = self._get_private_state()
         return obs
 
+    def _zero_scale(self, features_per_scale: int) -> np.ndarray:
+        """Return zero array matching current obs_mode shape."""
+        if self._obs_mode == "summary_stats":
+            n_summary = len(self._summary_feature_indices) * 3
+            return np.zeros((n_summary,), dtype=np.float32)
+        return np.zeros((self.window_size, features_per_scale), dtype=np.float32)
+
     def _empty_obs(self) -> Dict[str, np.ndarray]:
         features_per_scale = int(self.config.get("features_per_scale", 7))
         return {
-            f"scale_{i}": np.zeros((self.window_size, features_per_scale), dtype=np.float32)
+            f"scale_{i}": self._zero_scale(features_per_scale)
             for i in range(len(self._scales))
         }
 

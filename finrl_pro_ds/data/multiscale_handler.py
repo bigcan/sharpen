@@ -168,6 +168,12 @@ class MultiScaleOHLCVHandler:
         self.window_size = feature_config.get("window_size", 30)
         self.norm_span = feature_config.get("norm_span", 120)
 
+        # v6: Summary-stats observation mode (725→50 dims)
+        self.obs_mode = feature_config.get("obs_mode", "window")
+        self.summary_feature_indices = feature_config.get(
+            "summary_feature_indices", [0, 1, 2, 6, 7]
+        )  # log_return, atr_norm, parkinson_vol, close_z, volume_z
+
         self.start_date = pd.to_datetime(start_date) if start_date else None
         self.end_date = pd.to_datetime(end_date) if end_date else None
         self.norm_cutoff_date = pd.to_datetime(norm_cutoff_date) if norm_cutoff_date else None
@@ -343,7 +349,10 @@ class MultiScaleOHLCVHandler:
                 window = np.concatenate([pad, window], axis=0)
 
             key = f"scale_{i}"
-            result[key] = window.copy()
+            if self.obs_mode == "summary_stats":
+                result[key] = self._compute_summary_stats(window)
+            else:
+                result[key] = window.copy()
 
         result["close"] = float(self._base_close[self._ptr])
         result["atr"] = float(self._base_atr[self._ptr])
@@ -351,6 +360,22 @@ class MultiScaleOHLCVHandler:
 
         self._ptr += 1
         return result
+
+    def _compute_summary_stats(self, window: np.ndarray) -> np.ndarray:
+        """Compute (mean, std, last) for selected feature columns over window.
+
+        v6 AlphaSeek-informed: reduce (W, 8) window → flat (n_selected * 3,) vector.
+        Default indices [0,1,2,6,7] = log_return, atr_norm, parkinson_vol, close_z, volume_z.
+        Drops redundant open_z(3), high_z(4), low_z(5).
+
+        Returns: flat (n_features * 3,) float32 array
+        """
+        selected = window[:, self.summary_feature_indices]  # (W, n_selected)
+        means = selected.mean(axis=0)
+        stds = selected.std(axis=0)
+        stds = np.where(stds < 1e-8, 0.0, stds)  # Zero out near-zero std
+        last = selected[-1]
+        return np.concatenate([means, stds, last]).astype(np.float32)
 
     def get_lookahead_volatility(self, horizon: int = 100) -> Optional[float]:
         """Lookahead volatility for auxiliary loss (same interface as ParquetDataHandler)."""

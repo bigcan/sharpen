@@ -1,0 +1,54 @@
+# AlphaSeek Retrain — LOB Microstructure Features
+# Retrains the DQN ensemble on 8 direct LOB features computed from
+# data/lob_parquet/btcusdt_lob_1s.parquet (3.05M rows, 7 months).
+#
+# Usage:
+#   python contest/run_contest.py --mode ensemble --config configs/alphaseek_retrain_lob.yaml
+#
+# Differences from contest_tuned.yaml:
+#   - Uses LOBTradeSimulator instead of contest TradeSimulator
+#   - Features computed from LOB parquet (not BTC_1sec_predict.npy)
+#   - step_gap is HPO-sweepable: {1, 2, 4, 8}
+
+env:
+  simulator: lob               # "lob" → LOBTradeSimulator, "contest" → original
+  lob_parquet_path: data/lob_parquet/btcusdt_lob_1s.parquet
+  num_sims: 4096
+  num_ignore_step: 60
+  max_position: 1
+  step_gap: 2                  # HPO-sweepable: {1, 2, 4, 8}
+  slippage: 7.0e-7
+  seq_len: 3600
+
+features:
+  norm_span: 120
+  momentum_window: 5
+  vol_window: 30
+
+agent:
+  net_dims: [256, 256]
+  gamma: 0.995
+  explore_rate: 0.02
+  state_value_tau: 0.01
+  soft_update_tau: 5.0e-4
+  learning_rate: 1.0e-4
+  batch_size: 1024
+  break_step: 320000
+  buffer_size: null
+  repeat_times: 2
+  reward_scale: 4096
+  horizon_len: null
+  eval_per_step: null
+  num_workers: 1
+  save_gap: 8
+
+ensemble:
+  agent_classes: [AgentD3QN, AgentDoubleDQN, AgentTwinD3QN]
+  voting: q_average
+  eval_agents: [AgentD3QN, AgentDoubleDQN, AgentTwinD3QN]
+
+wandb:
+  enabled: true
+  entity: bigcan-chiwin-technology
+  project: FinRL-Pro-DS
+  tags: [alphaseek-crypto, lob-retrain]

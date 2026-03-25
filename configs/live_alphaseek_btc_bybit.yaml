@@ -6,9 +6,19 @@ exchange:
   name: bybit
   testnet: true
   asset: BTC
+  symbol: BTC/USDT:USDT
   order_type: limit
   limit_offset_pct: 0.0005    # 5bps spread crossing for taker fills
   market_fallback_timeout: 10  # faster fallback for HFT (10s vs 60s)
+
+state_builder:
+  type: live                   # "mock" for dry-run, "live" for real LOB feed
+  lob_depth: 20
+  feed_interval_s: 1.0        # LOB snapshot ingestion cadence
+  features:
+    norm_span: 120             # EMA span for EMA-Z-tanh normalization
+    momentum_window: 5         # ticks for momentum feature
+    vol_window: 30             # ticks for realized vol feature
 
 alphaseek:
   agents:

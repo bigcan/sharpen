@@ -602,15 +602,17 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         # See: expert DRL audit, "Goodhart's Law" in RL.
         # -----------------------------------------------------------
         if agent_type == "sac":
-            # SAC hyperparams — 8 dimensions for production-grade HPO
-            lr_actor = trial.suggest_float("lr_actor", 1e-4, 1e-3, log=True)
-            lr_critic = trial.suggest_float("lr_critic", 1e-4, 1e-3, log=True)
-            lr_alpha = trial.suggest_float("lr_alpha", 1e-4, 1e-3, log=True)
-            tau = trial.suggest_float("tau", 0.001, 0.01, log=True)
+            # SAC hyperparams — v6: widened LR/tau lower bounds (AlphaSeek-informed)
+            lr_actor = trial.suggest_float("lr_actor", 2e-6, 1e-3, log=True)
+            lr_critic = trial.suggest_float("lr_critic", 2e-6, 1e-3, log=True)
+            lr_alpha = trial.suggest_float("lr_alpha", 2e-6, 1e-3, log=True)
+            tau = trial.suggest_float("tau", 2e-6, 0.01, log=True)
             gamma = trial.suggest_float("gamma", 0.95, 0.999, log=True)
             initial_alpha = trial.suggest_float("initial_alpha", 0.05, 0.5, log=True)
             deadband = trial.suggest_categorical("deadband_threshold", [0.15, 0.25, 0.35])
             dsr_eta = trial.suggest_float("dsr_eta", 0.0005, 0.01, log=True)
+            # v6: gradient_clip as HPO dimension (AlphaSeek uses 3.0, ours was fixed 10.0)
+            gradient_clip = trial.suggest_float("gradient_clip", 1.0, 10.0, log=True)
 
             config["agents"]["sac"]["lr_actor"] = lr_actor
             config["agents"]["sac"]["lr_critic"] = lr_critic
@@ -618,21 +620,36 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             config["agents"]["sac"]["tau"] = tau
             config["agents"]["sac"]["gamma"] = gamma
             config["agents"]["sac"]["initial_alpha"] = initial_alpha
+            config["agents"]["sac"]["gradient_clip"] = gradient_clip
             config["env"]["deadband_threshold"] = deadband
             if "reward" not in config.get("env", {}):
                 config["env"]["reward"] = {}
             config["env"]["reward"]["dsr_eta"] = dsr_eta
 
-            wandb.log({
+            # v6: Hard risk constraints (opt-in via config)
+            if config.get("env", {}).get("stop_loss_hpo", False):
+                stop_loss_bps = trial.suggest_int("stop_loss_bps", 20, 200)
+                config["env"]["stop_loss_bps"] = stop_loss_bps
+            if config.get("env", {}).get("max_holding_hpo", False):
+                max_holding_bars = trial.suggest_int("max_holding_bars", 5, 40)
+                config["env"]["max_holding_bars"] = max_holding_bars
+
+            hpo_log = {
                 f"{trial_prefix}/lr_actor": lr_actor,
                 f"{trial_prefix}/lr_critic": lr_critic,
                 f"{trial_prefix}/lr_alpha": lr_alpha,
                 f"{trial_prefix}/tau": tau,
                 f"{trial_prefix}/gamma": gamma,
                 f"{trial_prefix}/initial_alpha": initial_alpha,
+                f"{trial_prefix}/gradient_clip": gradient_clip,
                 f"{trial_prefix}/deadband_threshold": deadband,
                 f"{trial_prefix}/dsr_eta": dsr_eta,
-            })
+            }
+            if config.get("env", {}).get("stop_loss_hpo", False):
+                hpo_log[f"{trial_prefix}/stop_loss_bps"] = config["env"]["stop_loss_bps"]
+            if config.get("env", {}).get("max_holding_hpo", False):
+                hpo_log[f"{trial_prefix}/max_holding_bars"] = config["env"]["max_holding_bars"]
+            wandb.log(hpo_log)
         elif agent_type == "ppo":
             # === OPTIMIZER HPs (tunable) ===
             learning_rate = trial.suggest_float("learning_rate", 1e-5, 3e-4, log=True)
@@ -966,9 +983,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     # V4.2: Explicit routing for ALL HPO params to prevent silent mis-routing.
     if agent_type == "sac":
         reward_params = {"dsr_eta"}
-        agent_params = {"lr_actor", "lr_critic", "lr_alpha", "tau", "initial_alpha", "gamma"}
-        # deadband routes to env, not agent
-        env_params = {"deadband_threshold"}
+        agent_params = {"lr_actor", "lr_critic", "lr_alpha", "tau", "initial_alpha", "gamma", "gradient_clip"}
+        # deadband + v6 hard constraints route to env, not agent
+        env_params = {"deadband_threshold", "stop_loss_bps", "max_holding_bars"}
     elif agent_type == "ppo":
         # V4.2: PPO locks reward params — only optimizer HPs are tunable
         reward_params = set()
