@@ -173,20 +173,20 @@ Configs vary by pipeline. Do NOT invent keys -- read a reference config first.
 
 ## Agent Skills -- Auto-Dispatch
 
-Skills in `.agent/skills/`. Read the relevant `SKILL.md` before executing. **Trigger proactively** -- don't wait for the user to ask.
+Skills are split: **user-scope** (`~/.claude/skills/`) for reusable methodology, **project-scope** (`.agent/skills/`) for project-specific logic. Read the relevant `SKILL.md` before executing. **Trigger proactively** -- don't wait for the user to ask.
 
-| Skill | Trigger | Spec |
-|-------|---------|------|
-| **Audit** | **Auto** after ANY code change to `finrl_pro_ds/`, `scripts/`, `configs/`. Skip `.md`-only. **Also auto after plan/feature/task implementation.** | `.agent/skills/audit/SKILL.md` |
-| **Deploy** | User requests GPU launch, instance management, or run deployment. | `.agent/skills/deploy/SKILL.md` |
-| **Memory** | **Auto** at session start (boot) and end (`/sync`). Update `core.md` proactively on findings. | `.agent/skills/memory/SKILL.md` |
-| **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. | `.agent/skills/monitor/SKILL.md` |
-| **Optimization** | SPS regression, low GPU util, new hardware, perf tuning. **Auto before each deployment.** | `.agent/skills/optimization/SKILL.md` |
-| **Math** | Manual ("check math") + **auto after ANY formula/equation/numerical logic change.** | `.agent/skills/math/SKILL.md` |
-| **Dashboard** | **Auto** after `/monitor`, during `/sync`, on experiment state changes. | `.agent/skills/dashboard/SKILL.md` |
-| **WandB** | **Auto** for HPO analysis, run diagnostics, config diffing. Always override `metric_keys`. | `.agents/skills/wandb-primary/SKILL.md` |
-| **Researcher** | "Should we try X?", algorithm eval, lit review, root cause analysis. | `.agent/skills/researcher/SKILL.md` |
-| **Architect** | New module design, pipeline refactor, API/interface changes. **Auto** after Researcher GO. | `.agent/skills/architect/SKILL.md` |
+| Skill | Trigger | Scope | Spec |
+|-------|---------|-------|------|
+| **Audit** | **Auto** after ANY code change to `finrl_pro_ds/`, `scripts/`, `configs/`. Skip `.md`-only. **Also auto after plan/feature/task implementation.** | User + Project | `~/.claude/skills/audit/SKILL.md` + `.agent/skills/audit/SKILL.md` (project addendum) |
+| **Deploy** | User requests GPU launch, instance management, or run deployment. | Project | `.agent/skills/deploy/SKILL.md` |
+| **Memory** | **Auto** at session start (boot) and end (`/sync`). Update `core.md` proactively on findings. | Project | `.agent/skills/memory/SKILL.md` |
+| **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. | Project | `.agent/skills/monitor/SKILL.md` |
+| **Optimization** | SPS regression, low GPU util, new hardware, perf tuning. **Auto before each deployment.** | Project | `.agent/skills/optimization/SKILL.md` |
+| **Math** | Manual ("check math") + **auto after ANY formula/equation/numerical logic change.** | Project | `.agent/skills/math/SKILL.md` |
+| **Dashboard** | **Auto** after `/monitor`, during `/sync`, on experiment state changes. | Project | `.agent/skills/dashboard/SKILL.md` |
+| **WandB** | **Auto** for HPO analysis, run diagnostics, config diffing. Always override `metric_keys`. | User + Project | `~/.claude/skills/wandb/SKILL.md` + `.agents/skills/wandb-primary/SKILL.md` (project addendum) |
+| **Researcher** | "Should we try X?", algorithm eval, lit review, root cause analysis. | User + Project | `~/.claude/skills/researcher/SKILL.md` + `.agent/skills/researcher/REFERENCE.md` |
+| **Architect** | New module design, pipeline refactor, API/interface changes. **Auto** after Researcher GO. | User + Project | `~/.claude/skills/architect/SKILL.md` + `.agent/skills/architect/REFERENCE.md` |
 
 **Chaining rules:**
 - Code change / implementation complete -> **Audit** (mandatory). +**Math** if formulas. +**Optimization** if perf.
