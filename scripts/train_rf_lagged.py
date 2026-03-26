@@ -22,16 +22,17 @@ import argparse
 import os
 import sys
 import time
-import yaml
+
 import numpy as np
+import yaml
 
 sys.path.append(os.getcwd())
 
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score, accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 
+from finrl_pro_ds.data.feature_engineering import MACRO_FEATURE_COLS, MICRO_FEATURE_COLS
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS
 
 
 def load_split(config, start_date, end_date, norm_cutoff_date=None):
@@ -210,7 +211,7 @@ def main():
     data = {}
     for split_name, sdef in splits_def.items():
         X, mid, ts, feat_cols = load_split(
-            config, sdef["start_date"], sdef["end_date"], sdef["norm_cutoff"]
+            config, sdef["start_date"], sdef["end_date"], sdef["norm_cutoff"],
         )
         data[split_name] = {"X": X, "mid": mid, "timestamps": ts}
 

@@ -69,7 +69,7 @@ def build_env_arrays(
     zero_assets = [a for a in assets if (price_pivot[a] == 0.0).all()]
     if zero_assets:
         logger.warning(
-            f"Assets with no price data in window (will be masked in env): {zero_assets}"
+            f"Assets with no price data in window (will be masked in env): {zero_assets}",
         )
 
     timestamps = price_pivot.index
@@ -101,7 +101,7 @@ def build_env_arrays(
     if missing_cols:
         raise ValueError(
             f"OBS-DIM violation: feature columns missing from crypto_features: "
-            f"{missing_cols}. Available: {sorted(available_cols)}"
+            f"{missing_cols}. Available: {sorted(available_cols)}",
         )
 
     # Build per-asset feature arrays and concatenate
@@ -120,7 +120,7 @@ def build_env_arrays(
         raise ValueError(
             f"OBS-DIM violation: tech_ary has {tech_ary.shape[1]} columns but expected "
             f"{len(assets)} assets × {actual_features_per_asset} features = "
-            f"{len(assets) * actual_features_per_asset}"
+            f"{len(assets) * actual_features_per_asset}",
         )
 
     # LEAK-1 fix: Re-normalize ALL features using window-local statistics.
@@ -265,7 +265,7 @@ def build_funding_arb_arrays(
     if missing_cols:
         raise ValueError(
             f"OBS-DIM violation: feature columns missing from arb_features: "
-            f"{missing_cols}. Available: {sorted(available_cols)}"
+            f"{missing_cols}. Available: {sorted(available_cols)}",
         )
 
     tech_frames = []
@@ -282,7 +282,7 @@ def build_funding_arb_arrays(
         raise ValueError(
             f"OBS-DIM violation: tech_ary has {tech_ary.shape[1]} columns but expected "
             f"{len(assets)} assets × {actual_features_per_asset} features = "
-            f"{len(assets) * actual_features_per_asset}"
+            f"{len(assets) * actual_features_per_asset}",
         )
 
     # LEAK-1 fix: Re-normalize within window

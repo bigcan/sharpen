@@ -122,7 +122,7 @@ class AlphaSeekLiveEngine:
                 flash_crash_pct=risk_cfg.get("flash_crash_pct", 0.02),
                 max_spread_multiplier=risk_cfg.get("max_spread_multiplier", 5.0),
                 max_latency_ms=risk_cfg.get("max_latency_ms", 500.0),
-            )
+            ),
         )
 
         wandb_cfg = config.get("wandb", {})

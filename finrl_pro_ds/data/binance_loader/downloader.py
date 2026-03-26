@@ -1,10 +1,11 @@
+import argparse
+import logging
 import os
-import requests
 from datetime import datetime
+
+import requests
 from dateutil.relativedelta import relativedelta
 from tqdm import tqdm
-import logging
-import argparse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -40,19 +41,19 @@ def generate_monthly_urls(symbol, start_date, end_date):
             'date': year_month,
             'type': 'depthUpdate',
             'url': update_url,
-            'filename': f"{symbol}-depthUpdate-{year_month}.zip"
+            'filename': f"{symbol}-depthUpdate-{year_month}.zip",
         })
         urls.append({
             'date': year_month,
             'type': 'depthSnapshot',
             'url': snapshot_url,
-            'filename': f"{symbol}-depthSnapshot-{year_month}.zip"
+            'filename': f"{symbol}-depthSnapshot-{year_month}.zip",
         })
         urls.append({
             'date': year_month,
             'type': 'klines',
             'url': kline_url,
-            'filename': f"{symbol}-1m-{year_month}.zip"
+            'filename': f"{symbol}-1m-{year_month}.zip",
         })
 
         current_date += relativedelta(months=1)
@@ -98,9 +99,7 @@ def verify_checksum(filepath, expected_checksum=None):
     Ideally, we should download the .CHECKSUM file and verify against it.
     For now, this function is a placeholder or can be extended to download the checksum file.
     """
-    # TODO: Implement full checksum logic if typically required.
-    # Binance Vision usually has a .CHECKSUM file alongside the .zip
-    # e.g., .../BTCUSDT-depthUpdate-2023-01.zip.CHECKSUM
+    # Checksum verification not implemented — not required for current pipelines.
     pass
 
 def main():

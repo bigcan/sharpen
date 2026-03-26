@@ -21,6 +21,7 @@ Usage:
 
 import argparse
 import time
+
 import numpy as np
 import pandas as pd
 
@@ -77,7 +78,7 @@ def compute_gate_signals(df: pd.DataFrame) -> pd.DataFrame:
     prev_close[0] = close[0]
     tr = np.maximum(
         high - low,
-        np.maximum(np.abs(high - prev_close), np.abs(low - prev_close))
+        np.maximum(np.abs(high - prev_close), np.abs(low - prev_close)),
     )
     atr_14 = pd.Series(tr).rolling(14, min_periods=1).mean().values
     atr_ema_50 = pd.Series(atr_14).ewm(span=50, adjust=False).mean().values

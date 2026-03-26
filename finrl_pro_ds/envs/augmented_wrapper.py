@@ -23,11 +23,12 @@ re-sampled on reset() and held constant within an episode for regime
 consistency.
 """
 
+from typing import Any, Optional
+
 import gymnasium as gym
 import numpy as np
-from typing import Any, Dict, Optional, Tuple
-from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS
 
+from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS
 
 # FIX BUG-13: Compute augmentation indices from feature_engineering constants
 # instead of hardcoding. Adapts automatically when feature set changes.
@@ -54,7 +55,7 @@ class AugmentedDataWrapper(gym.ObservationWrapper):
     across all steps within that episode for regime consistency.
     """
 
-    def __init__(self, env: gym.Env, augment_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, env: gym.Env, augment_config: Optional[dict[str, Any]] = None):
         super().__init__(env)
         cfg = augment_config or {}
 
@@ -80,7 +81,7 @@ class AugmentedDataWrapper(gym.ObservationWrapper):
         self._ofi_scale = 1.0
         self._rng = np.random.default_rng()
 
-    def reset(self, **kwargs) -> Tuple[Dict[str, np.ndarray], Dict]:
+    def reset(self, **kwargs) -> tuple[dict[str, np.ndarray], dict]:
         obs, info = self.env.reset(**kwargs)
 
         if self.enabled:
@@ -93,7 +94,7 @@ class AugmentedDataWrapper(gym.ObservationWrapper):
 
         return obs, info
 
-    def step(self, action) -> Tuple[Dict[str, np.ndarray], float, bool, bool, Dict]:
+    def step(self, action) -> tuple[dict[str, np.ndarray], float, bool, bool, dict]:
         obs, reward, terminated, truncated, info = self.env.step(action)
 
         if self.enabled:
@@ -101,7 +102,7 @@ class AugmentedDataWrapper(gym.ObservationWrapper):
 
         return obs, reward, terminated, truncated, info
 
-    def observation(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    def observation(self, obs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """Apply perturbations to the observation dict."""
         # Work on copies to avoid mutating env internals
         micro = obs["micro"].copy()  # (window_size, 27)

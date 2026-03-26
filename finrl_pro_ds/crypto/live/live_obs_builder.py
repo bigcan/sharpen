@@ -107,7 +107,7 @@ class LiveObsBuilder:
 
         logger.info(
             f"LiveObsBuilder bootstrapping: fetching {self.bootstrap_bars} "
-            f"1-min bars for {asset}..."
+            f"1-min bars for {asset}...",
         )
 
         # FIX AUD-C01: Use correct CryptoLoader.fetch_ohlcv() signature.
@@ -135,7 +135,7 @@ class LiveObsBuilder:
         if df is None or len(df) < self.window_size * max(self.scales):
             raise RuntimeError(
                 f"Insufficient bootstrap data: got {len(df) if df is not None else 0} bars, "
-                f"need at least {self.window_size * max(self.scales)}"
+                f"need at least {self.window_size * max(self.scales)}",
             )
 
         # FIX AUD-C02: Filter to single asset if multi-asset data returned
@@ -147,7 +147,7 @@ class LiveObsBuilder:
         self._init_from_dataframe(df)
         logger.info(
             f"LiveObsBuilder bootstrapped: {len(self._buffer_1min)} 1-min bars, "
-            f"scales={self.scales}, features ready"
+            f"scales={self.scales}, features ready",
         )
 
     def bootstrap_from_dataframe(self, df_1min: pd.DataFrame) -> None:
@@ -249,7 +249,7 @@ class LiveObsBuilder:
 
         # Append to buffer
         self._buffer_1min = pd.concat(
-            [self._buffer_1min, new_df], ignore_index=True
+            [self._buffer_1min, new_df], ignore_index=True,
         )
 
         # Trim buffer to prevent unbounded growth
@@ -326,7 +326,7 @@ class LiveObsBuilder:
 
         # Private state: [position, unrealized_pnl_norm, time_sin, time_cos, atr_ratio]
         obs["private"] = self._build_private_state(
-            current_position, prev_close, current_close, timestamp
+            current_position, prev_close, current_close, timestamp,
         )
 
         return obs

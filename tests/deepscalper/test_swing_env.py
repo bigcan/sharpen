@@ -2,12 +2,17 @@
 
 import unittest
 from unittest.mock import MagicMock
-import numpy as np
-import gymnasium as gym
 
-from finrl_pro_ds.envs.swing_scalper_env import SwingScalperEnv, ACTION_LONG, ACTION_SHORT
+import gymnasium as gym
+import numpy as np
+
+from finrl_pro_ds.data.feature_engineering import NUM_MACRO_FEATURES, NUM_MICRO_FEATURES
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.data.feature_engineering import NUM_MICRO_FEATURES, NUM_MACRO_FEATURES
+from finrl_pro_ds.envs.swing_scalper_env import (
+    ACTION_LONG,
+    ACTION_SHORT,
+    SwingScalperEnv,
+)
 
 
 def _mock_row(bid=100.0, ask=101.0):

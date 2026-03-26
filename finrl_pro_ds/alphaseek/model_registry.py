@@ -89,7 +89,7 @@ class ModelRegistry:
         act_target_path = os.path.join(checkpoint_dir, "act_target.pth")
         if not (os.path.isfile(act_path) or os.path.isfile(act_target_path)):
             raise FileNotFoundError(
-                f"No act.pth or act_target.pth found in {checkpoint_dir}"
+                f"No act.pth or act_target.pth found in {checkpoint_dir}",
             )
 
         version = 1

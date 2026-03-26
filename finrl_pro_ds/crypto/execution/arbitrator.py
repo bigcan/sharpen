@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from typing import Any, Dict, Optional, Sequence
+from typing import Any, Optional, Sequence
 
 import numpy as np
 
@@ -141,7 +141,7 @@ class _BaseArbitrator:
         self.lookback_bars = lookback_bars
         self.annualization = annualization
         # agent_name -> deque of per-bar returns
-        self._buffers: Dict[str, deque] = {}
+        self._buffers: dict[str, deque] = {}
 
     # -- agent management ---------------------------------------------------
 
@@ -169,7 +169,7 @@ class _BaseArbitrator:
         if agent_name not in self._buffers:
             raise KeyError(
                 f"Unknown agent '{agent_name}'. "
-                f"Call register_agent('{agent_name}') first."
+                f"Call register_agent('{agent_name}') first.",
             )
         self._buffers[agent_name].append(float(step_return))
 
@@ -191,13 +191,13 @@ class _BaseArbitrator:
 
     # -- prediction ---------------------------------------------------------
 
-    def get_weights(self) -> Dict[str, float]:
+    def get_weights(self) -> dict[str, float]:
         raise NotImplementedError
 
     def predict(
         self,
         obs: np.ndarray,
-        agents_dict: Dict[str, Any],
+        agents_dict: dict[str, Any],
         deterministic: bool = True,
     ) -> tuple:
         """Combine agent predictions using current weights.
@@ -225,7 +225,7 @@ class _BaseArbitrator:
         for name, agent in agents_dict.items():
             if name not in weights:
                 _arb_logger.warning(
-                    "Agent '%s' not registered with arbitrator — skipping in predict()", name
+                    "Agent '%s' not registered with arbitrator — skipping in predict()", name,
                 )
                 continue
             action, _ = agent.predict(obs, deterministic=deterministic)
@@ -235,7 +235,7 @@ class _BaseArbitrator:
         if not actions:
             raise ValueError(
                 "No actions produced — ensure agents_dict keys match "
-                "registered agent names."
+                "registered agent names.",
             )
 
         w_arr = np.array(w_vec, dtype=np.float64)
@@ -311,18 +311,18 @@ class SoftmaxArbitrator(_BaseArbitrator):
         if self.performance_metric not in ("sortino", "sharpe"):
             raise ValueError(
                 f"Unsupported performance_metric '{performance_metric}'. "
-                "Use 'sortino' or 'sharpe'."
+                "Use 'sortino' or 'sharpe'.",
             )
 
         # Internal state
         self._step_counter: int = 0
-        self._cached_weights: Dict[str, float] = {}
+        self._cached_weights: dict[str, float] = {}
         self._circuit_breaker_fired: bool = False
 
     # -- factory ------------------------------------------------------------
 
     @classmethod
-    def from_config(cls, cfg: Dict[str, Any]) -> "SoftmaxArbitrator":
+    def from_config(cls, cfg: dict[str, Any]) -> "SoftmaxArbitrator":
         """Instantiate from a flat or nested YAML config dict.
 
         Expected keys (all optional, sensible defaults apply)::
@@ -363,10 +363,10 @@ class SoftmaxArbitrator(_BaseArbitrator):
         return rolling_sharpe(returns, annualization=self.annualization)
 
     def _agent_scores(
-        self, n: Optional[int] = None
-    ) -> Dict[str, float]:
+        self, n: Optional[int] = None,
+    ) -> dict[str, float]:
         """Compute performance scores for all agents."""
-        scores: Dict[str, float] = {}
+        scores: dict[str, float] = {}
         for name in self.agent_names:
             rets = self._get_returns(name, n=n)
             scores[name] = self._score(rets) if len(rets) >= 2 else 0.0
@@ -382,7 +382,7 @@ class SoftmaxArbitrator(_BaseArbitrator):
         exp_s = np.exp(s)
         return exp_s / exp_s.sum()
 
-    def _apply_floor(self, raw_weights: Dict[str, float]) -> Dict[str, float]:
+    def _apply_floor(self, raw_weights: dict[str, float]) -> dict[str, float]:
         """Enforce ``min_weight`` floor per agent.
 
         Strategy: clamp every weight to at least ``min_weight``, then
@@ -422,7 +422,7 @@ class SoftmaxArbitrator(_BaseArbitrator):
 
         return dict(zip(names, weights.tolist()))
 
-    def _compute_weights(self) -> Dict[str, float]:
+    def _compute_weights(self) -> dict[str, float]:
         """Recompute weights from current return buffers."""
         names = self.agent_names
         n = len(names)
@@ -466,7 +466,7 @@ class SoftmaxArbitrator(_BaseArbitrator):
                 sortinos.append(0.0)
             else:
                 sortinos.append(
-                    rolling_sortino(rets, annualization=self.annualization)
+                    rolling_sortino(rets, annualization=self.annualization),
                 )
 
         # Condition 1: any agent below floor
@@ -507,7 +507,7 @@ class SoftmaxArbitrator(_BaseArbitrator):
         if due or not self._cached_weights or self._check_emergency():
             self._cached_weights = self._compute_weights()
 
-    def get_weights(self) -> Dict[str, float]:
+    def get_weights(self) -> dict[str, float]:
         """Return the current agent weight mapping.
 
         If weights have not been computed yet (no ``step()`` called),
@@ -521,7 +521,7 @@ class SoftmaxArbitrator(_BaseArbitrator):
             return {k: 1.0 / n for k in names}
         return dict(self._cached_weights)
 
-    def get_scores(self) -> Dict[str, float]:
+    def get_scores(self) -> dict[str, float]:
         """Return current performance scores for all agents (diagnostic)."""
         return self._agent_scores()
 
@@ -560,7 +560,7 @@ class InvVarArbitrator(_BaseArbitrator):
         self.min_variance = min_variance
 
     @classmethod
-    def from_config(cls, cfg: Dict[str, Any]) -> "InvVarArbitrator":
+    def from_config(cls, cfg: dict[str, Any]) -> "InvVarArbitrator":
         """Instantiate from config dict (same nesting convention)."""
         d = cfg.get("arbitrator", cfg)
         return cls(
@@ -569,7 +569,7 @@ class InvVarArbitrator(_BaseArbitrator):
             min_variance=float(d.get("min_variance", 1e-10)),
         )
 
-    def get_weights(self) -> Dict[str, float]:
+    def get_weights(self) -> dict[str, float]:
         """Compute inverse-variance weights from current buffers.
 
         Returns uniform weights when fewer than 2 returns are available

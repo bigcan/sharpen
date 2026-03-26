@@ -10,8 +10,8 @@ import numpy as np
 import pytest
 import torch
 
-from finrl_pro_ds.agents.sac.sac_agent import SACAgent
 from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
+from finrl_pro_ds.agents.sac.sac_agent import SACAgent
 
 
 class TestFlatReplayBufferZeroDim:

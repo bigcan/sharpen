@@ -9,14 +9,15 @@ Tests:
     3. Assert np.allclose() on all scale features and private state
 """
 
-import numpy as np
-import pandas as pd
 from datetime import datetime, timezone
 
+import numpy as np
+import pandas as pd
+
+from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder
 from finrl_pro_ds.data.multiscale_handler import (
     MultiScaleOHLCVHandler,
 )
-from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder
 
 
 def _generate_synthetic_ohlcv(n_bars: int = 5000, seed: int = 42) -> pd.DataFrame:

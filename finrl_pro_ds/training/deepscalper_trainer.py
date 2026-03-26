@@ -1,15 +1,16 @@
-import torch
-import numpy as np
-import time
-import os
-import wandb
 import logging
+import os
+import time
 from collections import deque
-from concurrent.futures import ThreadPoolExecutor, Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional
-import optuna
 
+import numpy as np
+import optuna
+import torch
+
+import wandb
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 
 logger = logging.getLogger(__name__)
@@ -40,18 +41,18 @@ class DeepScalperTrainer:
             # BDQ "price" branch = size, "qty" branch = direction
             action_dims = (
                 int(action_config["size_dims"]),
-                int(action_config.get("direction_dims", 3))
+                int(action_config.get("direction_dims", 3)),
             )
         elif "discrete_dims" in action_config:
             action_dims = action_config["discrete_dims"]
         else:
             # Fallback for legacy MultiDiscrete
             signed_qty_props = action_config.get(
-                "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+                "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5],
             )
             action_dims = (
                 action_config.get("price_bins", 5),
-                len(signed_qty_props)
+                len(signed_qty_props),
             )
 
         # Inject action_space_dims into network config so BDQ assertion is guaranteed
@@ -123,7 +124,7 @@ class DeepScalperTrainer:
                 exploration_mode=config["agents"]["bdq"].get("exploration_mode", "boltzmann"),
                 tau=config["agents"]["bdq"].get("tau", 0.005),
                 torch_compile=config["training"].get("torch_compile", False),
-                device=device
+                device=device,
             )
 
         # Phase J: Configure stratified sampling for IQN
@@ -135,7 +136,7 @@ class DeepScalperTrainer:
         if _strat_requested and _per_enabled:
             raise ValueError(
                 "FIND-J-02: use_per=True and stratified_sampling=True are mutually exclusive. "
-                "PER branch bypasses stratified logic entirely. Disable one."
+                "PER branch bypasses stratified logic entirely. Disable one.",
             )
         if self._agent_type == "iqn" and _strat_requested:
             self.agent.stratified_sampling = True
@@ -191,7 +192,7 @@ class DeepScalperTrainer:
         effective_steps = max(self.total_timesteps - self.learning_starts, 1)
         total_updates = int(effective_steps * self.training_epochs * self.update_interval / _num_envs) if _num_envs > 0 else 100000
         self.agent._lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            self.agent.optimizer, T_max=total_updates, eta_min=1e-6
+            self.agent.optimizer, T_max=total_updates, eta_min=1e-6,
         )
 
         # FIX FIND-5 + CRIT-1: Private size consistency check
@@ -398,7 +399,7 @@ class DeepScalperTrainer:
                 from finrl_pro_ds.agents.deepscalper.nstep_buffer import NStepBuffer
                 _nstep_gamma = self.agent.gamma_long if self.agent.multi_horizon else self.agent.gamma
                 self._nstep_buffer = NStepBuffer(
-                    n=_n_step, gamma=_nstep_gamma, num_envs=num_envs
+                    n=_n_step, gamma=_nstep_gamma, num_envs=num_envs,
                 )
                 logger.info(f"[N-Step] Enabled: n={_n_step}, gamma={_nstep_gamma}, "
                       f"gamma^n={_nstep_gamma ** _n_step:.6f}"
@@ -410,7 +411,7 @@ class DeepScalperTrainer:
             return (
                 torch.as_tensor(o["micro"], dtype=torch.float32).to(device, non_blocking=True),
                 torch.as_tensor(o["private"], dtype=torch.float32).to(device, non_blocking=True),
-                torch.as_tensor(o["macro"], dtype=torch.float32).to(device, non_blocking=True)
+                torch.as_tensor(o["macro"], dtype=torch.float32).to(device, non_blocking=True),
             )
 
         # Paper Section 4.3: Epoch-based training — each epoch replays the data
@@ -435,7 +436,9 @@ class DeepScalperTrainer:
             # thread while CPU steps the environment. Same pattern as SAC trainer.
             # Deferred store: buffer writes happen AFTER train_future resolves to
             # prevent concurrent read (sample) + write (push) on the replay buffer.
-            from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
+            from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import (
+                FlatReplayBuffer,
+            )
             train_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ds_train")
             train_future: Optional[Future] = None
             _deferred_store = None  # Tuple of args for buffer push, deferred by 1 iteration
@@ -458,7 +461,7 @@ class DeepScalperTrainer:
                         ns = {k: v[i] for k, v in _nobs.items()}
                         self.agent.memory.push(
                             s, _acts[i], float(_rews[i]),
-                            ns, bool(_dones_buf[i]), float(_aux[i])
+                            ns, bool(_dones_buf[i]), float(_aux[i]),
                         )
 
             while epoch_step < self.total_timesteps:
@@ -488,7 +491,7 @@ class DeepScalperTrainer:
                     if n_steps >= 1:
                         self.gradient_accumulator -= n_steps
                         train_future = train_executor.submit(
-                            self.agent.train_step_mega, n_steps
+                            self.agent.train_step_mega, n_steps,
                         )
                         if self.agent._lr_scheduler is not None:
                             for _ in range(n_steps):
@@ -592,7 +595,7 @@ class DeepScalperTrainer:
                             "train/epoch": epoch + 1,
                             "train/reward_mean": np.mean(self.episode_rewards) if len(self.episode_rewards) > 0 else 0.0,
                             "train/len_mean": np.mean(self.episode_lengths) if len(self.episode_lengths) > 0 else 0.0,
-                            **{f"agent/{k}": v for k, v in metrics.items()}
+                            **{f"agent/{k}": v for k, v in metrics.items()},
                         }
                         logs["agent/auxiliary_weight"] = self.agent.auxiliary_weight
                         if "loss_aux" in metrics and "loss_total" in metrics:
@@ -680,11 +683,9 @@ class DeepScalperTrainer:
                             self._hpo_score_history = []
                         self._hpo_score_history.append((global_step, score))
 
-                        # FIX HPO-2: Disabled early-kill for swing MDP validation.
-                        # PF < 0.8 threshold was calibrated for old Discrete(6) MDP.
-                        # IQN+NoisyNets on binary swing MDP needs full trial duration
-                        # to show signal. All K1-K4 trials were killed by this gate.
-                        # TODO: Re-enable with calibrated threshold once swing MDP baseline is established.
+                        # FIX HPO-2: Early-kill disabled. PF < 0.8 threshold was
+                        # calibrated for old Discrete(6) MDP; not valid for swing MDP.
+                        # All discrete agents now falsified — this path is legacy.
 
                         optuna_trial.report(score, global_step)
 

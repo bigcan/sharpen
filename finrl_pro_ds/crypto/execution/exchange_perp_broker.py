@@ -127,7 +127,7 @@ class ExchangePerpBroker:
         """Raise RuntimeError if exchange is not connected (replaces assert)."""
         if self._exchange is None:
             raise RuntimeError(
-                "Exchange not connected. Call await broker.connect() first."
+                "Exchange not connected. Call await broker.connect() first.",
             )
 
     async def connect(self) -> None:
@@ -138,7 +138,7 @@ class ExchangePerpBroker:
         if exchange_class is None:
             raise ValueError(
                 f"Exchange '{self.exchange_id}' not found in CCXT. "
-                f"Available: bybit, binance, okx, ..."
+                f"Available: bybit, binance, okx, ...",
             )
 
         # FIX AUD-M03: Fail fast on empty credentials
@@ -146,7 +146,7 @@ class ExchangePerpBroker:
             raise ValueError(
                 f"Missing API credentials for {self.exchange_id}. "
                 f"Set {self.exchange_id.upper()}_TESTNET_API_KEY and "
-                f"{self.exchange_id.upper()}_TESTNET_API_SECRET env vars."
+                f"{self.exchange_id.upper()}_TESTNET_API_SECRET env vars.",
             )
 
         self._exchange = exchange_class({
@@ -162,17 +162,17 @@ class ExchangePerpBroker:
         if self.testnet:
             self._exchange.set_sandbox_mode(True)
             logger.info(
-                f"{self.exchange_id.upper()} broker: TESTNET mode (paper trading)"
+                f"{self.exchange_id.upper()} broker: TESTNET mode (paper trading)",
             )
         else:
             logger.info(
-                f"{self.exchange_id.upper()} broker: MAINNET mode (LIVE trading)"
+                f"{self.exchange_id.upper()} broker: MAINNET mode (LIVE trading)",
             )
 
         await self._exchange.load_markets()
         logger.info(
             f"{self.exchange_id.upper()} broker connected: "
-            f"{len(self._exchange.markets)} markets loaded"
+            f"{len(self._exchange.markets)} markets loaded",
         )
 
     async def close(self) -> None:
@@ -323,7 +323,7 @@ class ExchangePerpBroker:
         logger.info(
             f"Rebalance complete: {result.n_executed} executed, "
             f"{result.n_skipped} skipped, {result.n_failed} failed, "
-            f"fees={result.total_fees:.4f} USDT"
+            f"fees={result.total_fees:.4f} USDT",
         )
 
         return result
@@ -393,7 +393,7 @@ class ExchangePerpBroker:
 
             # Wait for fill or timeout → fallback to market
             filled_order = await self._wait_for_fill(
-                order["id"], symbol, timeout=self.market_fallback_timeout
+                order["id"], symbol, timeout=self.market_fallback_timeout,
             )
 
             if filled_order and filled_order["status"] == "closed":
@@ -466,7 +466,7 @@ class ExchangePerpBroker:
         )
 
     async def _wait_for_fill(
-        self, order_id: str, symbol: str, timeout: float
+        self, order_id: str, symbol: str, timeout: float,
     ) -> dict | None:
         """Poll order status until filled or timeout."""
         elapsed = 0.0
@@ -621,7 +621,7 @@ class ExchangePerpBroker:
                     break
                 logger.warning(
                     f"Emergency flatten attempt {attempt+1}/3: "
-                    f"{last_result.n_failed} failed, retrying..."
+                    f"{last_result.n_failed} failed, retrying...",
                 )
                 await asyncio.sleep(2.0)
                 # Re-fetch for retry
@@ -631,6 +631,6 @@ class ExchangePerpBroker:
 
         logger.warning(
             f"EMERGENCY FLATTEN complete: {last_result.n_executed} closed, "
-            f"{last_result.n_failed} failed"
+            f"{last_result.n_failed} failed",
         )
         return last_result

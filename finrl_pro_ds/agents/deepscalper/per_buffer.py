@@ -8,8 +8,8 @@ References:
   - Schaul et al. (2016) "Prioritized Experience Replay"
   - Sun et al. (2022) "DeepScalper" Section 4.3
 """
+
 import numpy as np
-from typing import Tuple
 
 
 class SumTree:
@@ -53,7 +53,7 @@ class SumTree:
             tree_idx = (tree_idx - 1) // 2
             self.tree[tree_idx] += change
 
-    def get(self, cumsum: float) -> Tuple[int, float, object]:
+    def get(self, cumsum: float) -> tuple[int, float, object]:
         """Retrieve leaf by cumulative sum (proportional sampling).
 
         Returns:
@@ -80,7 +80,7 @@ class SumTree:
         """Sum of all priorities (root node)."""
         return self.tree[0]
 
-    def get_batch(self, cumsums: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    def get_batch(self, cumsums: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
         """Vectorized batch retrieval — process all queries in lockstep through tree levels.
 
         Args:

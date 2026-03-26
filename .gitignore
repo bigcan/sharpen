@@ -127,5 +127,22 @@ archive/
 .agent/memory/snapshots/*
 !.agent/memory/snapshots/.gitkeep
 
+# Model weights / checkpoints (binary, use DVC or artifact store)
+*.pth
+*.pt
+*.onnx
+alphaseek_train/
+
+# Research papers & large data snapshots (don't bloat git history)
+*.pdf
+*.jsonl
+
+# Contest data snapshots
+contest/*/data/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
 # Claude Code local settings and worktrees
 .claude/

@@ -7,12 +7,13 @@ Usage:
 
 Output: data/processed/btc_usdt_mm_1min.parquet
 """
-import os
-import sys
 import argparse
 import logging
-import pandas as pd
+import os
+import sys
 from datetime import datetime
+
+import pandas as pd
 from dateutil.relativedelta import relativedelta
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -26,7 +27,10 @@ PROCESSED_DIR = os.path.join(PROJECT_ROOT, "data", "processed")
 def download_klines(symbol: str, start_date: str, end_date: str):
     """Download monthly 1-min klines from Binance Vision."""
     sys.path.insert(0, PROJECT_ROOT)
-    from finrl_pro_ds.data.binance_loader.downloader import generate_monthly_urls, download_file
+    from finrl_pro_ds.data.binance_loader.downloader import (
+        download_file,
+        generate_monthly_urls,
+    )
 
     os.makedirs(RAW_DIR, exist_ok=True)
 
@@ -128,7 +132,7 @@ def main():
     args = parser.parse_args()
 
     output = args.output or os.path.join(
-        PROCESSED_DIR, f"{args.symbol.lower()}_mm_1min.parquet"
+        PROCESSED_DIR, f"{args.symbol.lower()}_mm_1min.parquet",
     )
 
     if not args.process_only:

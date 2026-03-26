@@ -13,17 +13,18 @@ Usage:
     python scripts/collect_run.py --run_id <ID> --full_history --skip_report
 """
 
-import sys
-import os
 import argparse
+import os
 import sqlite3
-import wandb
+import sys
 from datetime import datetime
+
+import wandb
 
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from scripts.fetch_wandb_run import fetch_run_data, download_remote_artifacts
+from scripts.fetch_wandb_run import download_remote_artifacts, fetch_run_data
 from scripts.generate_report import generate_report
 
 
@@ -130,7 +131,7 @@ def collect_run(run_id, skip_remote=False, skip_report=False, full_history=False
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Unified post-run collector: WandB data + remote artifacts + report"
+        description="Unified post-run collector: WandB data + remote artifacts + report",
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--run_id", type=str, help="Single WandB Run ID")

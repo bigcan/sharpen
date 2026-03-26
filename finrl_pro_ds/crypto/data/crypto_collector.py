@@ -24,8 +24,8 @@ from pathlib import Path
 import pandas as pd
 
 from finrl_pro_ds.crypto.data.crypto_loader import (
-    CryptoLoader,
     DEFAULT_UNIVERSE,
+    CryptoLoader,
 )
 
 logger = logging.getLogger(__name__)
@@ -73,7 +73,7 @@ class CryptoCollector:
 
             logger.info(f"Collecting OHLCV: {start} → {end}")
             ohlcv = await loader.fetch_ohlcv(
-                self.assets, start, end, self.timeframe
+                self.assets, start, end, self.timeframe,
             )
             ohlcv_path = self.data_dir / "ohlcv_latest.parquet"
             self._append_parquet(ohlcv, ohlcv_path)
@@ -81,7 +81,7 @@ class CryptoCollector:
             # Funding rates (less frequent but collect on every cycle)
             logger.info("Collecting funding rates")
             funding = await loader.fetch_funding_rates(
-                self.assets, start, end
+                self.assets, start, end,
             )
             if not funding.empty:
                 funding_path = self.data_dir / "funding_latest.parquet"
@@ -127,7 +127,7 @@ class CryptoCollector:
 
             logger.info(
                 f"Backfill complete: {len(ohlcv)} OHLCV bars, "
-                f"{len(funding)} funding records"
+                f"{len(funding)} funding records",
             )
         finally:
             await loader.close()
@@ -225,10 +225,10 @@ class CryptoCollector:
                 # Deduplicate on (timestamp, ticker)
                 if "timestamp" in combined.columns and "ticker" in combined.columns:
                     combined = combined.drop_duplicates(
-                        subset=["timestamp", "ticker"], keep="last"
+                        subset=["timestamp", "ticker"], keep="last",
                     )
                     combined = combined.sort_values(
-                        ["ticker", "timestamp"]
+                        ["ticker", "timestamp"],
                     ).reset_index(drop=True)
 
                 # Atomic write: write to temp file, then rename

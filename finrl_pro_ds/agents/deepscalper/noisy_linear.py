@@ -7,6 +7,7 @@ Factorized noise: O(N+M) parameters instead of O(N*M) for full Gaussian.
 In eval mode, noise is suppressed (deterministic inference).
 """
 import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

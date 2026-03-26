@@ -76,7 +76,7 @@ class LOBTradeSimulator:
         if segment_filter is not None and "segment_id" in df.columns:
             df = df[df["segment_id"].isin(segment_filter)].reset_index(drop=True)
             logger.info(
-                f"  Filtered to segments {segment_filter}: {len(df):,} rows"
+                f"  Filtered to segments {segment_filter}: {len(df):,} rows",
             )
 
         # Extract segment IDs for LEAK-1 compliant normalization
@@ -112,7 +112,7 @@ class LOBTradeSimulator:
         logger.info(
             f"  Features: {self.factor_ary.shape}, "
             f"Prices: {self.price_ary.shape}, "
-            f"Valid starts: {self._valid_start_mask.sum():,}"
+            f"Valid starts: {self._valid_start_mask.sum():,}",
         )
 
         # Environment info (matches contest TradeSimulator)
@@ -171,7 +171,7 @@ class LOBTradeSimulator:
         if len(valid_indices) == 0:
             # Fallback: sample from anywhere with enough room
             valid_indices = np.arange(
-                self.seq_len, max(self.seq_len + 1, self.full_seq_len - self.seq_len * 2)
+                self.seq_len, max(self.seq_len + 1, self.full_seq_len - self.seq_len * 2),
             )
         return np.random.choice(valid_indices, size=self.num_sims, replace=True)
 
@@ -225,7 +225,7 @@ class LOBTradeSimulator:
             action_int = -old_position
         else:
             new_position = (old_position + action_int).clip(
-                -self.max_position, self.max_position
+                -self.max_position, self.max_position,
             )
             action_int = new_position - old_position
 
@@ -259,10 +259,10 @@ class LOBTradeSimulator:
             self.best_price[direction_mask2] = _best
 
         sl_mask1 = th.logical_and(
-            direction_mask1, (self.best_price - mid_price).gt(self.stop_loss_thresh)
+            direction_mask1, (self.best_price - mid_price).gt(self.stop_loss_thresh),
         )
         sl_mask2 = th.logical_and(
-            direction_mask2, (mid_price - self.best_price).gt(self.stop_loss_thresh)
+            direction_mask2, (mid_price - self.best_price).gt(self.stop_loss_thresh),
         )
         sl_mask = th.logical_or(sl_mask1, sl_mask2)
         if sl_mask.sum() > 0:
@@ -278,7 +278,7 @@ class LOBTradeSimulator:
         direction = action_int.gt(0)
         cost = action_int * mid_price
         new_cash = old_cash - cost * th.where(
-            direction, 1 + self.slippage, 1 - self.slippage
+            direction, 1 + self.slippage, 1 - self.slippage,
         )
         new_asset = new_cash + new_position * mid_price
 
@@ -335,7 +335,7 @@ class LOBTradeSimulator:
         if "segment_id" not in col_names:
             n_rows = pq.read_metadata(lob_parquet_path).num_rows
             return pd.DataFrame(
-                {"segment_id": [0], "n_rows": [n_rows], "duration_hours": [np.nan]}
+                {"segment_id": [0], "n_rows": [n_rows], "duration_hours": [np.nan]},
             )
 
         df = pd.read_parquet(lob_parquet_path, columns=["segment_id", ts_col])

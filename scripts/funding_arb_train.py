@@ -61,7 +61,7 @@ def make_env(market_data, env_config):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Train PPO agent for multi-exchange funding rate arbitrage"
+        description="Train PPO agent for multi-exchange funding rate arbitrage",
     )
     parser.add_argument(
         "--config", type=str, default="configs/funding_arb_multi_exchange.yaml",
@@ -69,10 +69,10 @@ def main():
     )
     parser.add_argument("--data", type=str, default=None, help="Path to train_data.npy")
     parser.add_argument(
-        "--eval-data", type=str, default=None, help="Path to eval_data.npy"
+        "--eval-data", type=str, default=None, help="Path to eval_data.npy",
     )
     parser.add_argument(
-        "--timesteps", type=int, default=None, help="Override total_timesteps"
+        "--timesteps", type=int, default=None, help="Override total_timesteps",
     )
     parser.add_argument("--lr", type=float, default=None, help="Override learning rate")
     parser.add_argument(

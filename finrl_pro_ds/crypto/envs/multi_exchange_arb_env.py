@@ -21,7 +21,7 @@ from gymnasium import spaces
 class EnvConfig:
     """Configuration for the funding rate arbitrage environment."""
     symbols: list[str] = field(default_factory=lambda: [
-        "BTC/USDT", "ETH/USDT", "SOL/USDT", "ARB/USDT", "DOGE/USDT"
+        "BTC/USDT", "ETH/USDT", "SOL/USDT", "ARB/USDT", "DOGE/USDT",
     ])
     exchanges: list[str] = field(default_factory=lambda: ["binance", "bybit", "okx"])
     initial_capital: float = 100_000
@@ -98,7 +98,7 @@ class MultiExchangeArbEnv(gym.Env):
 
         # Action space: max_open_positions × 3 values each
         self.action_space = spaces.MultiDiscrete(
-            [4, self.n_sym, 3] * cfg.max_open_positions
+            [4, self.n_sym, 3] * cfg.max_open_positions,
         )
 
         # State
@@ -205,7 +205,7 @@ class MultiExchangeArbEnv(gym.Env):
                 pos = self.positions[slot]
                 data_idx = min(self.current_step, len(self.market_data) - 1)
                 current_basis = float(
-                    self.market_data[data_idx, pos.sym_idx, pos.exchange_idx, 4]
+                    self.market_data[data_idx, pos.sym_idx, pos.exchange_idx, 4],
                 )
                 basis_pnl = pos.direction * (current_basis - pos.entry_basis) * pos.size_usd
                 closing_cost = pos.size_usd * (cfg.taker_fee + cfg.slippage_bps) * 2
@@ -245,7 +245,7 @@ class MultiExchangeArbEnv(gym.Env):
             # Update unrealized P&L
             data_idx = min(self.current_step, len(self.market_data) - 1)
             current_basis = float(
-                self.market_data[data_idx, pos.sym_idx, pos.exchange_idx, 4]
+                self.market_data[data_idx, pos.sym_idx, pos.exchange_idx, 4],
             )
             pos.unrealized_pnl = (
                 pos.direction * (current_basis - pos.entry_basis) * pos.size_usd
@@ -319,7 +319,7 @@ class MultiExchangeArbEnv(gym.Env):
                 ]))
             else:
                 pos_parts.append(
-                    np.zeros(self.n_sym + self.n_ex + 4, dtype=np.float32)
+                    np.zeros(self.n_sym + self.n_ex + 4, dtype=np.float32),
                 )
 
         pos_flat = np.concatenate(pos_parts)
@@ -355,7 +355,7 @@ class MultiExchangeArbEnv(gym.Env):
         rng = np.random.default_rng(42)
         n_steps = cfg.max_steps + 50
         data = np.zeros(
-            (n_steps, self.n_sym, self.n_ex, self.n_features), dtype=np.float32
+            (n_steps, self.n_sym, self.n_ex, self.n_features), dtype=np.float32,
         )
 
         for s in range(self.n_sym):
@@ -367,7 +367,7 @@ class MultiExchangeArbEnv(gym.Env):
                 for t in range(1, n_steps):
                     if rng.random() < 0.02:
                         regime = rng.choice(
-                            [-0.0003, -0.0001, 0.0001, 0.0003, 0.0005]
+                            [-0.0003, -0.0001, 0.0001, 0.0003, 0.0005],
                         )
                     fr[t] = (
                         fr[t - 1]

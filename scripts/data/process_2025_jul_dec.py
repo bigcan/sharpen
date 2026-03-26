@@ -10,15 +10,18 @@ Output: data/processed/btc_2025_jul_dec.parquet
 Same pipeline as process_2025_data.py (Jan-Jun), adapted for daily file ingestion.
 """
 import sys
-from pathlib import Path
 from glob import glob
+from pathlib import Path
 
 # Ensure project root is on path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd  # noqa: E402
-from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer  # noqa: E402
+
+from finrl_pro_ds.data.feature_engineering import (  # noqa: E402
+    DeepScalperFeatureEngineer,
+)
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 RAW_DIR = PROJECT_ROOT / "data" / "raw" / "coinapi_lob"

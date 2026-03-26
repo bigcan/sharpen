@@ -52,7 +52,7 @@ ALL_SYMBOLS = ["BTCUSDT", "ETHUSDT", "BNBUSDT", "SOLUSDT", "XRPUSDT"]
 
 
 def load_symbol_from_db(
-    db_path: str, symbol: str, chunk_size: int = 500_000
+    db_path: str, symbol: str, chunk_size: int = 500_000,
 ) -> pd.DataFrame:
     """Stream-load a symbol from SQLite in chunks to manage memory."""
     import sqlite3
@@ -130,7 +130,7 @@ def dedup_timestamps(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def assign_segments(
-    df: pd.DataFrame, gap_threshold_s: float = 60.0
+    df: pd.DataFrame, gap_threshold_s: float = 60.0,
 ) -> pd.DataFrame:
     """Assign segment_id based on timestamp gaps > threshold."""
     deltas_ms = df["timestamp_ms"].diff()
@@ -142,7 +142,7 @@ def assign_segments(
 
 
 def filter_short_segments(
-    df: pd.DataFrame, min_hours: float = 1.0
+    df: pd.DataFrame, min_hours: float = 1.0,
 ) -> pd.DataFrame:
     """Drop segments shorter than min_hours."""
     n_before = len(df)
@@ -155,7 +155,7 @@ def filter_short_segments(
     n_segs_dropped = seg_stats.shape[0] - len(keep_segs)
     logger.info(
         f"  Dropped {n_segs_dropped} segments (<{min_hours}h) = {n_dropped:,} rows. "
-        f"Kept {len(keep_segs)} segments, {len(df):,} rows."
+        f"Kept {len(keep_segs)} segments, {len(df):,} rows.",
     )
 
     # Re-assign sequential segment IDs
@@ -167,7 +167,7 @@ def filter_short_segments(
 
 
 def explode_lob_levels(
-    df: pd.DataFrame, max_depth: int = 20
+    df: pd.DataFrame, max_depth: int = 20,
 ) -> pd.DataFrame:
     """Parse JSON LOB arrays and explode into columnar format.
 
@@ -381,7 +381,7 @@ def export_symbol(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="LOB SQLite → Parquet ETL with cleaning"
+        description="LOB SQLite → Parquet ETL with cleaning",
     )
     parser.add_argument(
         "--symbol", type=str, default="BTCUSDT",

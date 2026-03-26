@@ -21,10 +21,11 @@ LOB feature channels (8 dims, TC-aligned):
   6. n_bbo_changes_z         — EMA-Z-tanh normalized (activity proxy)
   7. microprice_offset       — raw, already in bps scale, clipped
 """
+import logging
+from typing import Optional
+
 import numpy as np
 import pandas as pd
-import logging
-from typing import Dict, Optional
 
 from finrl_pro_ds.data.multiscale_handler import (
     MultiScaleOHLCVHandler,
@@ -51,7 +52,7 @@ class LOBDataHandler(MultiScaleOHLCVHandler):
         self,
         file_path: str,
         ticker: str,
-        feature_config: Dict,
+        feature_config: dict,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         norm_cutoff_date: Optional[str] = None,
@@ -187,11 +188,11 @@ class LOBDataHandler(MultiScaleOHLCVHandler):
             f"LOBDataHandler loaded: {self._len} bars, "
             f"LOB={'YES' if self._has_lob else 'NO'}, "
             f"segments={len(self._trimmed_boundaries) + 1 if self._has_lob else 0}, "
-            f"window={self.window_size}"
+            f"window={self.window_size}",
         )
 
     def _compute_lob_features(
-        self, df: pd.DataFrame, norm_cutoff_idx: Optional[int], trim_start: int
+        self, df: pd.DataFrame, norm_cutoff_idx: Optional[int], trim_start: int,
     ):
         """Compute normalized LOB features aligned to the (already trimmed) base scale.
 
@@ -254,7 +255,7 @@ class LOBDataHandler(MultiScaleOHLCVHandler):
         if "segment_id" in df.columns:
             self._trimmed_segment_ids = df["segment_id"].values.astype(np.int32)
             self._trimmed_boundaries = list(
-                np.where(np.diff(self._trimmed_segment_ids) != 0)[0] + 1
+                np.where(np.diff(self._trimmed_segment_ids) != 0)[0] + 1,
             )
         else:
             self._trimmed_segment_ids = None
@@ -262,7 +263,7 @@ class LOBDataHandler(MultiScaleOHLCVHandler):
 
         logger.info(
             f"  LOB features: shape={self._lob_features.shape}, "
-            f"boundaries={self._trimmed_boundaries}"
+            f"boundaries={self._trimmed_boundaries}",
         )
 
     def get_segment_boundaries(self) -> list:
@@ -275,7 +276,7 @@ class LOBDataHandler(MultiScaleOHLCVHandler):
             return int(self._trimmed_segment_ids[idx])
         return 0
 
-    def step(self) -> Optional[Dict]:
+    def step(self) -> Optional[dict]:
         """Advance one bar. Returns multi-scale obs + OHLCV + LOB features.
 
         Returns None at data exhaustion or segment boundary (env should reset).
@@ -320,7 +321,7 @@ class LOBDataHandler(MultiScaleOHLCVHandler):
             result["lob_features"] = window.copy()
         else:
             result["lob_features"] = np.zeros(
-                (self.window_size, self._n_lob_features), dtype=np.float32
+                (self.window_size, self._n_lob_features), dtype=np.float32,
             )
 
         # Segment ID

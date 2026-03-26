@@ -4,16 +4,17 @@ PPO Agent for DeepScalper.
 On-policy agent using Proximal Policy Optimization with clipped surrogate objective.
 Implements the same interface contract as DeepScalperBDQ for pipeline compatibility.
 """
+import logging
+import os
+from typing import Optional
+
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-import numpy as np
-import os
-from typing import Dict, Tuple, Optional
 
 from finrl_pro_ds.agents.ppo_scalper.networks import PPOActorCritic
 from finrl_pro_ds.agents.ppo_scalper.rollout_buffer import RolloutBuffer
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class PPOAgent:
 
     def __init__(
         self,
-        network_config: Dict,
+        network_config: dict,
         lr: float = 3e-4,
         gamma: float = 0.95,  # T1.2: LOB signal decay alignment
         gae_lambda: float = 0.95,
@@ -133,9 +134,9 @@ class PPOAgent:
         macro: torch.Tensor,
         deterministic: bool = False,
         qty_mask=None,
-        context: Optional[Dict] = None,
+        context: Optional[dict] = None,
         eval_epsilon: float = 0.0,
-    ) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """
         Select actions from the current policy.
 
@@ -182,7 +183,7 @@ class PPOAgent:
     # ------------------------------------------------------------------
     # Interface: train_step()
     # ------------------------------------------------------------------
-    def train_step(self, rollout_buffer: RolloutBuffer) -> Dict[str, float]:
+    def train_step(self, rollout_buffer: RolloutBuffer) -> dict[str, float]:
         """
         Run K epochs of PPO minibatch updates on the rollout buffer.
 
@@ -221,7 +222,7 @@ class PPOAgent:
                 with torch.amp.autocast(device_type=self.device.type, dtype=torch.float16, enabled=self.use_amp):
                     # Evaluate current policy on old actions (with original action mask)
                     new_log_probs, new_values, entropy = self.network.evaluate_actions(
-                        micro, private, macro, old_actions, qty_mask=qty_mask_t
+                        micro, private, macro, old_actions, qty_mask=qty_mask_t,
                     )
 
                     # Policy loss (clipped surrogate)
@@ -235,7 +236,7 @@ class PPOAgent:
                     # Value loss — AUDIT FIX FLAG-3: Toggleable value clipping
                     if self.clip_value_loss:
                         values_clipped = old_values + torch.clamp(
-                            new_values - old_values, -self.clip_eps, self.clip_eps
+                            new_values - old_values, -self.clip_eps, self.clip_eps,
                         )
                         value_loss_unclipped = (new_values - returns) ** 2
                         value_loss_clipped = (values_clipped - returns) ** 2
@@ -354,7 +355,7 @@ class PPOAgent:
         except RuntimeError as e:
             if "Missing key" in str(e) or "Unexpected key" in str(e):
                 logger.warning(
-                    f"Checkpoint architecture mismatch (encoder changed?): {e}"
+                    f"Checkpoint architecture mismatch (encoder changed?): {e}",
                 )
                 logger.warning("Starting with fresh network weights.")
                 return  # Skip optimizer/scheduler restore — fresh start

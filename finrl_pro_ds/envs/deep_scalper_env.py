@@ -1,9 +1,9 @@
-import gymnasium as gym
-import math
-import numpy as np
 import logging
-from typing import Dict, Optional, Any
-from typing import TYPE_CHECKING
+import math
+from typing import TYPE_CHECKING, Any, Optional
+
+import gymnasium as gym
+import numpy as np
 
 from finrl_pro_ds.envs.dsr import DSRCalculator
 
@@ -12,10 +12,14 @@ if TYPE_CHECKING:
 
 # v2 feature columns from feature_engineering.py
 from finrl_pro_ds.data.feature_engineering import (
-    MICRO_FEATURE_COLS, NUM_MICRO_FEATURES,
-    MACRO_FEATURE_COLS, NUM_MACRO_FEATURES,
-    get_micro_feature_cols, get_macro_feature_cols,
+    MACRO_FEATURE_COLS,
+    MICRO_FEATURE_COLS,
+    NUM_MACRO_FEATURES,
+    NUM_MICRO_FEATURES,
+    get_macro_feature_cols,
+    get_micro_feature_cols,
 )
+
 MACRO_COLS = list(MACRO_FEATURE_COLS)
 
 
@@ -61,7 +65,7 @@ class DeepScalperEnv(gym.Env):
     """
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, config: Dict[str, Any], data_handler: Optional["ParquetDataHandler"] = None):
+    def __init__(self, config: dict[str, Any], data_handler: Optional["ParquetDataHandler"] = None):
         super().__init__()
         self.config = config
         self.handler = data_handler
@@ -104,7 +108,7 @@ class DeepScalperEnv(gym.Env):
             logging.warning(
                 f"reward_scaling={self.reward_scaling} != 1.0. "
                 f"Post T1.1 NAV-based reward, scaling should typically be 1.0. "
-                f"Check if this config is outdated (pre-Tier-1)."
+                f"Check if this config is outdated (pre-Tier-1).",
             )
         self.volatility_horizon = int(self.reward_config.get("volatility_horizon", 100))  # Section 4.4
 
@@ -149,7 +153,7 @@ class DeepScalperEnv(gym.Env):
             # H2: Direction × Size branching
             self.direction_dims = int(action_cfg.get("direction_dims", 3))
             self.size_multipliers = [float(x) for x in action_cfg.get(
-                "size_multipliers", [0.25, 0.5, 1.0, 2.0]
+                "size_multipliers", [0.25, 0.5, 1.0, 2.0],
             )]
             assert len(self.size_multipliers) == self.size_dims, (
                 f"size_multipliers length {len(self.size_multipliers)} != size_dims {self.size_dims}"
@@ -177,7 +181,7 @@ class DeepScalperEnv(gym.Env):
         # fev3: Micro dim is config-driven for backward compatibility.
         # v2 configs (input_size: 30) → 30-dim obs. fev3 configs (input_size: 40) → 40-dim obs.
         self.micro_dim = config.get("network", {}).get("micro_config", {}).get(
-            "input_size", NUM_MICRO_FEATURES
+            "input_size", NUM_MICRO_FEATURES,
         )
 
         # FIX F1: Micro is now (Window, L*F) = (15, 20)
@@ -186,13 +190,13 @@ class DeepScalperEnv(gym.Env):
         # Check both nested features key and top-level (depends on how config is passed)
         self._include_spread = bool(
             config.get("features", {}).get("include_spread", False)
-            or config.get("include_spread", False)
+            or config.get("include_spread", False),
         )
         self._private_dim = 6 if self._include_spread else 5
         self.observation_space = gym.spaces.Dict({
             "micro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self.micro_dim), dtype=np.float32),
             "macro": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(NUM_MACRO_FEATURES,), dtype=np.float32),
-            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self._private_dim), dtype=np.float32)
+            "private": gym.spaces.Box(low=-np.inf, high=np.inf, shape=(self.window_size, self._private_dim), dtype=np.float32),
         })
 
         # Price offset mapping (ticks from best)
@@ -372,10 +376,10 @@ class DeepScalperEnv(gym.Env):
             col_idx = self.handler._col_to_idx
             try:
                 self._micro_col_indices = np.array(
-                    [col_idx[k] for k in self._micro_keys], dtype=np.intp
+                    [col_idx[k] for k in self._micro_keys], dtype=np.intp,
                 )
                 self._macro_col_indices = np.array(
-                    [col_idx[k] for k in self._macro_cols], dtype=np.intp
+                    [col_idx[k] for k in self._macro_cols], dtype=np.intp,
                 )
                 self._bid_price_idx = col_idx['bid_price_1']
                 self._ask_price_idx = col_idx['ask_price_1']
@@ -730,7 +734,7 @@ class DeepScalperEnv(gym.Env):
             if mid > 0:
                 post_order_dist = ((limit_px - mid) / mid) * 10000.0  # bps
         self.private_window[-1] = self._normalize_private_state(
-            self.position, self.balance, remaining_time, post_order_dir, post_order_dist
+            self.position, self.balance, remaining_time, post_order_dir, post_order_dist,
         )
 
     def step(self, action):
@@ -783,7 +787,7 @@ class DeepScalperEnv(gym.Env):
                 "qty_action_mask": self._get_qty_action_mask(),
                 "reward_total": reward,
                 "forced_liquidation": True,
-                "portfolio_value": self._get_portfolio_value() # Ensure tracking at end
+                "portfolio_value": self._get_portfolio_value(), # Ensure tracking at end
             }
             return obs, reward, terminated, truncated, info
 
@@ -972,7 +976,7 @@ class DeepScalperEnv(gym.Env):
             "reward_drawdown_penalty": drawdown_penalty,
             "drawdown_pct": drawdown_pct,
             "reward_total": reward,
-            "qty_action_mask": self._get_qty_action_mask()
+            "qty_action_mask": self._get_qty_action_mask(),
         }
 
         return obs, reward, terminated, truncated, info
@@ -1060,7 +1064,7 @@ class DeepScalperEnv(gym.Env):
                 else:
                     nan_cols = [self._micro_keys[i] for i in np.where(np.isnan(frame))[0]]
                     raise ValueError(
-                        f"NaN in _build_frame at step {self.current_step}: {nan_cols}"
+                        f"NaN in _build_frame at step {self.current_step}: {nan_cols}",
                     )
             return frame
 
@@ -1106,7 +1110,7 @@ class DeepScalperEnv(gym.Env):
                 np.nan_to_num(frame, copy=False, nan=0.0)
             else:
                 raise ValueError(
-                    f"NaN in _build_frame at step {self.current_step}: {nan_cols}"
+                    f"NaN in _build_frame at step {self.current_step}: {nan_cols}",
                 )
 
         return frame
@@ -1164,7 +1168,7 @@ class DeepScalperEnv(gym.Env):
 
         remaining_time = max(0.0, 1.0 - (self.current_step / self.total_episode_steps))
         current_private = self._normalize_private_state(
-            self.position, self.balance, remaining_time, order_dir, order_dist
+            self.position, self.balance, remaining_time, order_dir, order_dist,
         )
 
         # FIX PERF-1: In-place shift (same as micro_window above)
@@ -1179,7 +1183,7 @@ class DeepScalperEnv(gym.Env):
         return {
             "micro": self.micro_window.copy(),
             "macro": self.current_macro.copy(),
-            "private": self.private_window.copy()
+            "private": self.private_window.copy(),
         }
 
     def _get_qty_action_mask(self):

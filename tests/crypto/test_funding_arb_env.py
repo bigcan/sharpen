@@ -19,7 +19,6 @@ import numpy as np
 
 from finrl_pro_ds.crypto.envs.funding_arb_env import FundingArbEnv
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -272,7 +271,7 @@ class TestDeadband:
         np.testing.assert_array_almost_equal(
             env.arb_weights, w_after_open,
             decimal=6,
-            err_msg="Small changes should be ignored by deadband"
+            err_msg="Small changes should be ignored by deadband",
         )
 
 

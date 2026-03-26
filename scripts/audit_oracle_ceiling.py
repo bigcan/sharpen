@@ -1,6 +1,8 @@
-import pandas as pd
-import numpy as np
 import os
+
+import numpy as np
+import pandas as pd
+
 
 def oracle_ceiling_test(prices: np.ndarray, taker_fee_bps: float = 5.0, horizon: int = 1):
     T = len(prices)

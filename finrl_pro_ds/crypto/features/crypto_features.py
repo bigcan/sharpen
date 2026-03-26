@@ -87,12 +87,12 @@ def compute_crypto_features(
 
         # --- 1. Funding rate (raw, clipped) ---
         features["funding_rate"] = _merge_funding(
-            asset_ohlcv.index, funding_df, ticker
+            asset_ohlcv.index, funding_df, ticker,
         )
 
         # --- 2. Open interest % change ---
         features["oi_change_pct"] = _compute_oi_change(
-            asset_ohlcv.index, oi_df, ticker
+            asset_ohlcv.index, oi_df, ticker,
         )
 
         # --- 3. BTC correlation (rolling) ---
@@ -118,10 +118,10 @@ def compute_crypto_features(
         # Proxy: if close > open, classify as "buy bar"; ratio over window
         is_buy = (asset_ohlcv["close"] > asset_ohlcv["open"]).astype(float)
         buy_vol = (is_buy * asset_ohlcv["volume"]).rolling(
-            window=volume_profile_window, min_periods=min(max(12, volume_profile_window // 2), volume_profile_window)
+            window=volume_profile_window, min_periods=min(max(12, volume_profile_window // 2), volume_profile_window),
         ).sum()
         total_vol = asset_ohlcv["volume"].rolling(
-            window=volume_profile_window, min_periods=min(max(12, volume_profile_window // 2), volume_profile_window)
+            window=volume_profile_window, min_periods=min(max(12, volume_profile_window // 2), volume_profile_window),
         ).sum()
         features["volume_profile_skew"] = (buy_vol / (total_vol + 1e-10)).clip(0.0, 1.0).fillna(0.5)
 
@@ -170,7 +170,7 @@ def compute_crypto_features(
     logger.info(
         f"Crypto features computed: {len(result)} rows, "
         f"{result['ticker'].nunique()} assets, "
-        f"columns={list(result.columns)}"
+        f"columns={list(result.columns)}",
     )
     return result
 
@@ -218,7 +218,7 @@ def compute_macro_features(
         aligned.loc[aligned.index > last_available] = np.nan
         log_cap = np.log(aligned.clip(lower=1e6))
         macro["total_market_cap_ffd"] = _fractional_diff(
-            log_cap.shift(PUBLICATION_LAGS["total_market_cap_ffd"]), d=ffd_d
+            log_cap.shift(PUBLICATION_LAGS["total_market_cap_ffd"]), d=ffd_d,
         )
     else:
         macro["total_market_cap_ffd"] = 0.0
@@ -241,7 +241,7 @@ def compute_macro_features(
         aligned.loc[aligned.index > last_available] = np.nan
         log_dxy = np.log(aligned.clip(lower=50.0))
         macro["dxy_ffd"] = _fractional_diff(
-            log_dxy.shift(PUBLICATION_LAGS["dxy_ffd"]), d=ffd_d
+            log_dxy.shift(PUBLICATION_LAGS["dxy_ffd"]), d=ffd_d,
         )
     else:
         macro["dxy_ffd"] = 0.0

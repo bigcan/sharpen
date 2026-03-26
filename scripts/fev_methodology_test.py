@@ -12,20 +12,27 @@ changes reveal feature value that the original evaluation missed.
 import os
 import sys
 import time
-import yaml
 import warnings
+
 import numpy as np
 import pandas as pd
+import yaml
 
 sys.path.append(os.getcwd())
 warnings.filterwarnings("ignore", category=FutureWarning)
 
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier  # noqa: E402
-from sklearn.metrics import roc_auc_score  # noqa: E402
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler  # noqa: E402
-from finrl_pro_ds.data.feature_engineering import (  # noqa: E402
-    MICRO_FEATURE_COLS, MACRO_FEATURE_COLS, DeepScalperFeatureEngineer,
+from sklearn.ensemble import (  # noqa: E402
+    GradientBoostingClassifier,
+    RandomForestClassifier,
 )
+from sklearn.metrics import roc_auc_score  # noqa: E402
+
+from finrl_pro_ds.data.feature_engineering import (  # noqa: E402
+    MACRO_FEATURE_COLS,
+    MICRO_FEATURE_COLS,
+    DeepScalperFeatureEngineer,
+)
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler  # noqa: E402
 
 # ── Feature subsets ──
 FEV3_NAMES = {
@@ -142,7 +149,7 @@ def load_raw(file_path, start, end):
     # Per-row slope is expensive; use simplified version
     slope_asym = np.clip(
         (bid_depths[:, -1] - bid_depths[:, 0]) - (ask_depths[:, -1] - ask_depths[:, 0]),
-        -1, 1
+        -1, 1,
     ) / (bid_depths[:, -1] + ask_depths[:, -1] + 1e-8)
 
     # Spread (bps)

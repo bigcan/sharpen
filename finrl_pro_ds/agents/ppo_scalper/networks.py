@@ -6,14 +6,18 @@ Adds Actor (two Categorical heads) and Critic (V(s)) on top of shared fusion.
 
 V5: Supports configurable encoder_type (mlp/lstm) via micro_config.
 """
+from typing import Optional
+
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 from torch.distributions import Categorical
-from typing import Dict, Tuple, Optional
 
 from finrl_pro_ds.agents.deepscalper.networks import (
-    MicroEncoder, MicroEncoderMLP, MicroEncoderTCN, MacroEncoder
+    MacroEncoder,
+    MicroEncoder,
+    MicroEncoderMLP,
+    MicroEncoderTCN,
 )
 
 
@@ -37,11 +41,11 @@ class PPOActorCritic(nn.Module):
 
     def __init__(
         self,
-        micro_config: Dict,
-        macro_config: Dict,
+        micro_config: dict,
+        macro_config: dict,
         fusion_dim: int = 256,
         action_space_dims: int = 6, # Tier 2: Discrete(6)
-        **kwargs
+        **kwargs,
     ):
         super().__init__()
 
@@ -74,7 +78,7 @@ class PPOActorCritic(nn.Module):
         self.fusion = nn.Sequential(
             nn.Linear(fusion_in_dim, fusion_dim),
             nn.LayerNorm(fusion_dim),
-            nn.LeakyReLU()
+            nn.LeakyReLU(),
         )
 
         # Action dimensions
@@ -84,14 +88,14 @@ class PPOActorCritic(nn.Module):
         self.actor = nn.Sequential(
             nn.Linear(fusion_dim, head_hidden),
             nn.Tanh(),
-            nn.Linear(head_hidden, self.action_dim)
+            nn.Linear(head_hidden, self.action_dim),
         )
 
         # Critic head — scalar V(s)
         self.critic = nn.Sequential(
             nn.Linear(fusion_dim, head_hidden),
             nn.Tanh(),
-            nn.Linear(head_hidden, 1)
+            nn.Linear(head_hidden, 1),
         )
 
         # Orthogonal init (PPO best practice)
@@ -117,8 +121,8 @@ class PPOActorCritic(nn.Module):
         private_in: torch.Tensor,
         macro_in: torch.Tensor,
         qty_mask: Optional[torch.Tensor] = None,
-        deterministic: bool = False
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        deterministic: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Forward pass returning actions, log-probs, values, entropy.
 
@@ -184,7 +188,7 @@ class PPOActorCritic(nn.Module):
         macro_in: torch.Tensor,
         actions: torch.Tensor,
         qty_mask: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """
         Evaluate given actions — used during PPO training to recompute log-probs.
 

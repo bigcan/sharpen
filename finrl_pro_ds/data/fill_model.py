@@ -7,9 +7,10 @@ Progressive complexity:
 
 All levels support adverse selection slippage on fills during fast price moves.
 """
-import numpy as np
 from dataclasses import dataclass
 from typing import Optional
+
+import numpy as np
 
 
 @dataclass

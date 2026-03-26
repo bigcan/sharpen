@@ -255,7 +255,7 @@ def backtest_profitability_heuristic(
                 for e_i in range(n_ex):
                     fr = env._get_funding_rate(s_i, e_i)
                     atr = market_data[
-                        min(env.current_step, len(market_data) - 1), s_i, e_i, 5
+                        min(env.current_step, len(market_data) - 1), s_i, e_i, 5,
                     ]
                     atr = max(atr, 0.001)
                     score = abs(fr) / np.sqrt(atr)
@@ -372,7 +372,7 @@ def save_results(results: list[BacktestResult], output_path: str):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Backtest funding rate arb strategies"
+        description="Backtest funding rate arb strategies",
     )
     parser.add_argument("--data", type=str, default=None, help="Path to eval_data.npy")
     parser.add_argument("--model", type=str, default=None, help="Path to trained model")

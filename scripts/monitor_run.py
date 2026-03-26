@@ -17,10 +17,10 @@ Usage:
     python scripts/monitor_run.py --run_id <ID> --poll 60 --no_collect
 """
 
-import sys
-import os
-import time
 import argparse
+import os
+import sys
+import time
 from datetime import datetime
 
 # Add project root

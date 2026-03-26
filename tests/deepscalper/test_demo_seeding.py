@@ -8,9 +8,10 @@ Verifies:
 - demo_seed_steps=0 skips seeding entirely
 - train() only seeds on start_step==0 (not on HPO resumptions)
 """
-import numpy as np
 import unittest
 from unittest.mock import MagicMock, patch
+
+import numpy as np
 
 
 def _make_config(discrete_dims=3, demo_seed_steps=10, num_envs=4):

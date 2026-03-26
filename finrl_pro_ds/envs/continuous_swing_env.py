@@ -17,10 +17,11 @@ Key differences from SwingScalperEnv (V6):
   - DSR reward (not raw PnL)
   - Fee curriculum support
 """
+import logging
+from typing import TYPE_CHECKING, Any, Optional
+
 import gymnasium as gym
 import numpy as np
-import logging
-from typing import Dict, Optional, Any, TYPE_CHECKING
 
 from finrl_pro_ds.envs.dsr import DSRCalculator
 
@@ -35,7 +36,7 @@ class ContinuousSwingEnv(gym.Env):
 
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, config: Dict[str, Any], data_handler: Optional["MultiScaleOHLCVHandler"] = None):
+    def __init__(self, config: dict[str, Any], data_handler: Optional["MultiScaleOHLCVHandler"] = None):
         super().__init__()
         self.config = config
         self.handler = data_handler
@@ -90,7 +91,7 @@ class ContinuousSwingEnv(gym.Env):
 
         # Spaces
         self.action_space = gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(1,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(1,), dtype=np.float32,
         )
 
         # Build obs space dynamically from scales config
@@ -101,16 +102,16 @@ class ContinuousSwingEnv(gym.Env):
             for i in range(len(self._scales)):
                 obs_spaces[f"scale_{i}"] = gym.spaces.Box(
                     low=-np.inf, high=np.inf,
-                    shape=(n_summary,), dtype=np.float32
+                    shape=(n_summary,), dtype=np.float32,
                 )
         else:
             for i in range(len(self._scales)):
                 obs_spaces[f"scale_{i}"] = gym.spaces.Box(
                     low=-np.inf, high=np.inf,
-                    shape=(self.window_size, features_per_scale), dtype=np.float32
+                    shape=(self.window_size, features_per_scale), dtype=np.float32,
                 )
         obs_spaces["private"] = gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(5,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(5,), dtype=np.float32,
         )
         self.observation_space = gym.spaces.Dict(obs_spaces)
 
@@ -256,7 +257,7 @@ class ContinuousSwingEnv(gym.Env):
                     target_position = np.clip(
                         target_position,
                         -self.atr_cap_max_position,
-                        self.atr_cap_max_position
+                        self.atr_cap_max_position,
                     )
                     delta = target_position - self.current_position
                     if abs(delta) < self.deadband_threshold:
@@ -356,7 +357,7 @@ class ContinuousSwingEnv(gym.Env):
 
         return obs, reward, terminated, truncated, info
 
-    def _extract_obs(self, step_data: Dict) -> Dict[str, np.ndarray]:
+    def _extract_obs(self, step_data: dict) -> dict[str, np.ndarray]:
         """Extract scale arrays from handler step data (positional keys)."""
         obs = {}
         for i in range(len(self._scales)):
@@ -407,7 +408,7 @@ class ContinuousSwingEnv(gym.Env):
 
         return np.array([pos, pnl_proxy, time_sin, time_cos, atr_ratio], dtype=np.float32)
 
-    def _get_observation(self) -> Dict[str, np.ndarray]:
+    def _get_observation(self) -> dict[str, np.ndarray]:
         """Build full observation dict."""
         obs = {}
         n_scales = len(self._scales)
@@ -434,14 +435,14 @@ class ContinuousSwingEnv(gym.Env):
             return np.zeros((n_summary,), dtype=np.float32)
         return np.zeros((self.window_size, features_per_scale), dtype=np.float32)
 
-    def _empty_obs(self) -> Dict[str, np.ndarray]:
+    def _empty_obs(self) -> dict[str, np.ndarray]:
         features_per_scale = int(self.config.get("features_per_scale", 7))
         return {
             f"scale_{i}": self._zero_scale(features_per_scale)
             for i in range(len(self._scales))
         }
 
-    def _make_info(self, reward: float, traded: bool) -> Dict:
+    def _make_info(self, reward: float, traded: bool) -> dict:
         drawdown_pct = 1.0 - (self.equity / self.peak_equity) if self.peak_equity > 0 else 0.0
         return {
             "portfolio_value": self.equity,
@@ -459,7 +460,7 @@ class ContinuousSwingEnv(gym.Env):
         print(
             f"Step: {self.current_step}, Pos: {self.current_position:.3f}, "
             f"Equity: {self.equity:.2f}, Trades: {self.trade_count}, "
-            f"Fee: {self.taker_fee:.5f}"
+            f"Fee: {self.taker_fee:.5f}",
         )
 
     def close(self):

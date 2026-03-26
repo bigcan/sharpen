@@ -22,7 +22,6 @@ from __future__ import annotations
 import logging
 import os
 import time
-from typing import Type
 
 import numpy as np
 import torch
@@ -57,7 +56,7 @@ class AlphaSeekTrainer:
 
     def __init__(
         self,
-        agent_class: Type[AgentDoubleDQN],
+        agent_class: type[AgentDoubleDQN],
         train_sim: LOBTradeSimulator,
         eval_sim: LOBTradeSimulator | EvalLOBTradeSimulator,
         config: dict,
@@ -139,7 +138,7 @@ class AlphaSeekTrainer:
         buffer.update(warmup_items)
         logger.info(
             f"Buffer warmup complete: {len(buffer)}/{self.buffer_size} "
-            f"({warmup_len} steps x {self.agent_config.num_envs} sims)"
+            f"({warmup_len} steps x {self.agent_config.num_envs} sims)",
         )
 
         # Training loop
@@ -175,7 +174,7 @@ class AlphaSeekTrainer:
                     f"critic={obj_critic:.4f} | "
                     f"Q_avg={obj_actor:.4f} | "
                     f"return={metrics['total_return']:.6f} | "
-                    f"sharpe={metrics['sharpe']:.4f}"
+                    f"sharpe={metrics['sharpe']:.4f}",
                 )
 
                 # WandB
@@ -204,7 +203,7 @@ class AlphaSeekTrainer:
         elapsed = time.time() - start_time
         logger.info(
             f"Training complete: {total_step} steps in {elapsed:.1f}s "
-            f"({total_step * self.agent_config.num_envs / elapsed:,.0f} SPS)"
+            f"({total_step * self.agent_config.num_envs / elapsed:,.0f} SPS)",
         )
 
         return best_metrics if best_metrics else self.evaluate()

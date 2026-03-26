@@ -7,9 +7,10 @@ Fundamentally different from BDQ's off-policy step-by-step pattern.
 import logging
 import os
 import time
+from collections import deque
+
 import numpy as np
 import torch
-from collections import deque
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +234,7 @@ class PPOTrainer:
                     # Agent prediction
                     actions, log_probs, values = self.agent.predict(
                         micro_t, private_t, macro_t,
-                        deterministic=False, qty_mask=qty_mask
+                        deterministic=False, qty_mask=qty_mask,
                     )
 
                     # Step environment
@@ -298,7 +299,7 @@ class PPOTrainer:
                     # predict() returns 3 numpy arrays: (actions, log_probs, values)
                     _, _, last_values = self.agent.predict(
                         micro_t, private_t, macro_t,
-                        deterministic=True
+                        deterministic=True,
                     )
 
                 self.buffer.compute_gae(

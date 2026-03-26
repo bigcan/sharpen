@@ -2,10 +2,12 @@
 Merge LOB and OHLCV Data
 Combines Micro (LOB) and Macro (OHLCV) features into a single Parquet file for DeepScalper.
 """
-import pandas as pd
 import argparse
 import sys
 from pathlib import Path
+
+import pandas as pd
+
 from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
 
 # Ensure package is in path

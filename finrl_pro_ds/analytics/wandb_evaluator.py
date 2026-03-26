@@ -1,12 +1,14 @@
 import logging
-import pandas as pd
-import numpy as np
-import yfinance as yf
-import wandb
-import seaborn as sns
-import matplotlib.pyplot as plt
-from typing import Dict, Optional
 import warnings
+from typing import Optional
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
+import yfinance as yf
+
+import wandb
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +24,10 @@ class WandbFinRLEvaluator:
     def __init__(
         self,
         df_ensemble: pd.DataFrame,
-        dict_agents: Dict[str, pd.DataFrame],
+        dict_agents: dict[str, pd.DataFrame],
         benchmark_ticker: str = "BTC-USD",
         start_date: Optional[str] = None,
-        end_date: Optional[str] = None
+        end_date: Optional[str] = None,
     ):
         """
         Initialize the evaluator.
@@ -88,7 +90,7 @@ class WandbFinRLEvaluator:
                 self.benchmark_ticker,
                 start=start_dt.strftime('%Y-%m-%d'),
                 end=end_dt.strftime('%Y-%m-%d'),
-                progress=False
+                progress=False,
             )
 
             # Handle yfinance 0.2+ multi-index columns (Ticker, Price)
@@ -146,7 +148,7 @@ class WandbFinRLEvaluator:
         # common_index = self.daily_returns.dropna().index
         # self.daily_returns = self.daily_returns.loc[common_index]
 
-    def calculate_metrics(self, df: pd.DataFrame, name: str) -> Dict:
+    def calculate_metrics(self, df: pd.DataFrame, name: str) -> dict:
         """
         Calculate generic financial metrics for a given DataFrame (Agent or Ensemble).
         """
@@ -237,7 +239,7 @@ class WandbFinRLEvaluator:
             "Profit_Factor_Daily": profit_factor,
             "Total_Action_Count": total_trades,
             "Long_Action_Count": long_trades,
-            "Short_Action_Count": short_trades
+            "Short_Action_Count": short_trades,
         }
 
         return metrics
@@ -521,11 +523,11 @@ class WandbFinRLEvaluator:
 
 def generate_wandb_report(
     df_ensemble: pd.DataFrame,
-    dict_agents: Dict[str, pd.DataFrame],
+    dict_agents: dict[str, pd.DataFrame],
     run_name: str = "ensemble-eval-run",
     project_name: str = "finrl-ensemble",
     benchmark_ticker: str = "BTC-USD",
-    entity: Optional[str] = None
+    entity: Optional[str] = None,
 ):
     """
     Helper function to instantiate and run the evaluator.
@@ -544,7 +546,7 @@ def generate_wandb_report(
     evaluator = WandbFinRLEvaluator(
         df_ensemble=df_ensemble,
         dict_agents=dict_agents,
-        benchmark_ticker=benchmark_ticker
+        benchmark_ticker=benchmark_ticker,
     )
     evaluator.log_to_wandb(run_name=run_name, project_name=project_name, entity=entity)
     return evaluator

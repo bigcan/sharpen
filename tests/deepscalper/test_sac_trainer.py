@@ -10,13 +10,13 @@ Covers:
 """
 import os
 import tempfile
+from unittest.mock import MagicMock, patch
+
 import numpy as np
 import pytest
 import torch
-from unittest.mock import patch, MagicMock
 
 from finrl_pro_ds.training.sac_trainer import SACTrainer
-
 
 # ---------------------------------------------------------------------------
 # Helpers: Fake vectorized environment
@@ -44,7 +44,7 @@ class FakeVecEnv:
         obs = {}
         for i in range(self._n_scales):
             obs[f"scale_{i}"] = np.random.randn(
-                self.num_envs, self._window_size, self._features_per_scale
+                self.num_envs, self._window_size, self._features_per_scale,
             ).astype(np.float32)
         obs["private"] = np.random.randn(self.num_envs, 5).astype(np.float32)
         return obs
@@ -556,7 +556,7 @@ class TestTrainWithWandBDisabled:
         # HPO mode: main log block is guarded by `not self.hpo_mode`
         # Only HPO heartbeat calls wandb.log. Verify no crash.
         assert os.path.isfile(
-            os.path.join(trainer.ckpt_dir, "checkpoint_final.pth")
+            os.path.join(trainer.ckpt_dir, "checkpoint_final.pth"),
         )
 
     @patch("finrl_pro_ds.training.sac_trainer.wandb")

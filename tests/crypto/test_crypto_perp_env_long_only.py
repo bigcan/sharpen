@@ -13,7 +13,6 @@ import numpy as np
 
 from finrl_pro_ds.crypto.envs.crypto_perp_env import CryptoPerpEnv
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

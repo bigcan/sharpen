@@ -78,16 +78,16 @@ class BarClock:
             if next_bar_minute >= 60:
                 # Roll over to next hour
                 next_bar = now_utc.replace(
-                    minute=0, second=0, microsecond=0
+                    minute=0, second=0, microsecond=0,
                 ) + timedelta(hours=1, minutes=next_bar_minute - 60)
             else:
                 next_bar = now_utc.replace(
-                    minute=next_bar_minute, second=0, microsecond=0
+                    minute=next_bar_minute, second=0, microsecond=0,
                 )
         elif self.interval == 60:
             # Hourly: next hour boundary
             next_bar = now_utc.replace(
-                minute=0, second=0, microsecond=0
+                minute=0, second=0, microsecond=0,
             ) + timedelta(hours=1)
         else:
             # Multi-hour (e.g., 240 = 4h): align to interval boundaries from midnight
@@ -99,12 +99,12 @@ class BarClock:
             if next_bar_hour >= 24:
                 # Roll over to next day
                 next_day = now_utc.replace(
-                    hour=0, minute=0, second=0, microsecond=0
+                    hour=0, minute=0, second=0, microsecond=0,
                 ) + timedelta(days=1)
                 next_bar = next_day + timedelta(hours=next_bar_hour - 24)
             else:
                 next_bar = now_utc.replace(
-                    hour=next_bar_hour, minute=0, second=0, microsecond=0
+                    hour=next_bar_hour, minute=0, second=0, microsecond=0,
                 )
 
         return next_bar
@@ -131,7 +131,7 @@ class BarClock:
                 if self._bar_count == 0:
                     logger.info(
                         f"BarClock: waiting {sleep_seconds:.1f}s for next "
-                        f"{self.interval}-min bar close at {next_bar.strftime('%H:%M:%S')} UTC"
+                        f"{self.interval}-min bar close at {next_bar.strftime('%H:%M:%S')} UTC",
                     )
                 await asyncio.sleep(sleep_seconds)
 
@@ -145,7 +145,7 @@ class BarClock:
             logger.warning(
                 f"BarClock: {lateness:.1f}s late for bar at "
                 f"{next_bar.strftime('%H:%M:%S')} UTC (max_late={self.max_late}s). "
-                f"Skipping to next bar."
+                f"Skipping to next bar.",
             )
 
     def get_bar_interval_timedelta(self) -> timedelta:

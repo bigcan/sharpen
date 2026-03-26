@@ -7,10 +7,11 @@ Architecture:
   Actor: fusion → (mu, log_sigma) → tanh-squashed Gaussian
   Critic: fusion + action → scalar Q-value (twin pair)
 """
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Optional, Tuple
 
 from finrl_pro_ds.agents.common.network_blocks import _CausalConv1dBlock, _tc_align
 
@@ -29,7 +30,7 @@ class DilatedCNNEncoder(nn.Module):
     def __init__(
         self,
         input_size: int = 7,
-        channels: Tuple[int, ...] = (32, 64, 64, 64),
+        channels: tuple[int, ...] = (32, 64, 64, 64),
         kernel_size: int = 3,
         output_dim: int = 64,
         dropout: float = 0.1,
@@ -70,7 +71,7 @@ class MultiScaleEncoder(nn.Module):
 
     def __init__(
         self,
-        scale_encoder_config: Dict,
+        scale_encoder_config: dict,
         private_dim: int = 5,
         fusion_dim: int = 256,
         n_scales: int = 3,
@@ -173,7 +174,7 @@ class SACActorNetwork(nn.Module):
 
     def __init__(
         self,
-        scale_encoder_config: Dict,
+        scale_encoder_config: dict,
         private_dim: int = 5,
         fusion_dim: int = 256,
         n_scales: int = 3,
@@ -213,7 +214,7 @@ class SACActorNetwork(nn.Module):
         self,
         scale_stack: torch.Tensor,
         private: Optional[torch.Tensor] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns (mu, log_sigma) for the Gaussian policy.
 
         In summary_stats mode, scale_stack is actually a flat (B, input_dim) tensor
@@ -234,7 +235,7 @@ class SACActorNetwork(nn.Module):
         scale_stack: torch.Tensor,
         private: Optional[torch.Tensor] = None,
         deterministic: bool = False,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sample action with log_prob (tanh correction applied).
 
         In summary_stats mode, scale_stack is flat (B, input_dim), private is None.
@@ -275,7 +276,7 @@ class SACCriticNetwork(nn.Module):
 
     def __init__(
         self,
-        scale_encoder_config: Dict,
+        scale_encoder_config: dict,
         private_dim: int = 5,
         fusion_dim: int = 256,
         action_dim: int = 1,

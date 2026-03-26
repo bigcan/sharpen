@@ -30,7 +30,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 # --- Default batch paths (relative to repo root) ---
 BATCH_JOBS = [
     {
@@ -149,7 +148,7 @@ def resample_to_3min(input_path: str, output_path: str) -> pd.DataFrame:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Resample 1-min parquet data to 3-min bars"
+        description="Resample 1-min parquet data to 3-min bars",
     )
     parser.add_argument("--input", type=str, default=None,
                         help="Path to input 1-min parquet file")

@@ -26,6 +26,7 @@ Usage:
 import argparse
 import os
 import sys
+
 import numpy as np
 import pandas as pd
 
@@ -55,7 +56,7 @@ def compute_1min_raw_features(df_1min: pd.DataFrame) -> pd.DataFrame:
     total_vol_sum = total_bid_vol + total_ask_vol
     obi = np.clip(
         (total_bid_vol - total_ask_vol) / (total_vol_sum + 1e-8),
-        -1.0, 1.0
+        -1.0, 1.0,
     )
 
     # ── total_dofi: sum of DOFI across 5 levels ──
@@ -216,7 +217,7 @@ def validate_output(merged: pd.DataFrame, df_5min_orig: pd.DataFrame):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="EXP-F1: Build Feature Engineering v3 Parquet"
+        description="EXP-F1: Build Feature Engineering v3 Parquet",
     )
     parser.add_argument("--input_1min", type=str, required=True,
                         help="Path to 1-min LOB parquet")

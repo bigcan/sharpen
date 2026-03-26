@@ -14,17 +14,18 @@ Reference:
   Fedus et al. (2019) "Hyperbolic Discounting and Learning over Multiple Horizons"
 """
 import math
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Tuple, Optional
 
 from finrl_pro_ds.agents.deepscalper.networks import (
-    MicroEncoder,
-    MicroEncoderMLP,
-    MicroEncoderFlat,
-    MicroEncoderTCN,
     MacroEncoder,
+    MicroEncoder,
+    MicroEncoderFlat,
+    MicroEncoderMLP,
+    MicroEncoderTCN,
     _tc_align,
 )
 from finrl_pro_ds.agents.deepscalper.noisy_linear import NoisyLinear
@@ -149,8 +150,8 @@ class IQNNetwork(nn.Module):
 
     def __init__(
         self,
-        micro_config: Dict,
-        macro_config: Dict,
+        micro_config: dict,
+        macro_config: dict,
         fusion_dim: int = 256,
         n_actions: int = 3,
         embedding_dim: int = 64,
@@ -195,7 +196,7 @@ class IQNNetwork(nn.Module):
 
         # Quantile embedding (shared across horizons)
         self.quantile_embedding = QuantileEmbedding(
-            embedding_dim=embedding_dim, output_dim=fusion_dim
+            embedding_dim=embedding_dim, output_dim=fusion_dim,
         )
 
         # Dueling heads
@@ -243,8 +244,8 @@ class IQNNetwork(nn.Module):
         private_in: torch.Tensor,
         macro_in: torch.Tensor,
         tau: torch.Tensor,
-        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        hidden: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[tuple[torch.Tensor, torch.Tensor]]]:
         """Shared encoder + fusion + quantile embedding.
 
         Returns:
@@ -271,8 +272,8 @@ class IQNNetwork(nn.Module):
         private_in: torch.Tensor,
         macro_in: torch.Tensor,
         tau: torch.Tensor,
-        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        hidden: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, Optional[tuple[torch.Tensor, torch.Tensor]]]:
         """
         Args:
             micro_in: (B, W, micro_features)
@@ -289,7 +290,7 @@ class IQNNetwork(nn.Module):
             new_hidden: Updated LSTM hidden state (or None)
         """
         x, fused, pred_vol, new_hidden = self._encode_and_fuse(
-            micro_in, private_in, macro_in, tau, hidden
+            micro_in, private_in, macro_in, tau, hidden,
         )
 
         if self.multi_horizon:
@@ -309,8 +310,8 @@ class IQNNetwork(nn.Module):
         private_in: torch.Tensor,
         macro_in: torch.Tensor,
         tau: torch.Tensor,
-        hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[Tuple[torch.Tensor, torch.Tensor]]]:
+        hidden: Optional[tuple[torch.Tensor, torch.Tensor]] = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, Optional[tuple[torch.Tensor, torch.Tensor]]]:
         """Multi-horizon forward pass — returns both short and long Q-values.
 
         Only valid when multi_horizon=True.
@@ -322,7 +323,7 @@ class IQNNetwork(nn.Module):
             new_hidden: Updated LSTM hidden state
         """
         x, fused, pred_vol, new_hidden = self._encode_and_fuse(
-            micro_in, private_in, macro_in, tau, hidden
+            micro_in, private_in, macro_in, tau, hidden,
         )
         q_short = _dueling_forward(self.heads_short, x)
         q_long = _dueling_forward(self.heads_long, x)

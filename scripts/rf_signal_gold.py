@@ -15,10 +15,11 @@ Usage:
 import argparse
 import time
 from pathlib import Path
+
 import numpy as np
 import pandas as pd
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import roc_auc_score, accuracy_score
+from sklearn.metrics import accuracy_score, roc_auc_score
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "cme"
 RESULTS_DIR = Path(__file__).parent.parent / "results" / "rf_signal_gold"

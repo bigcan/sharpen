@@ -12,15 +12,17 @@ Usage:
         --output data/raw/coinapi_lob/ \
         --dry-run
 """
-import os
-import json
-import time
 import argparse
-import requests
-import pandas as pd
-import numpy as np
+import json
+import os
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import requests
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -172,7 +174,7 @@ def save_progress(progress_file: str, completed: set):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fetch CoinAPI LOB Data for DeepScalper"
+        description="Fetch CoinAPI LOB Data for DeepScalper",
     )
     parser.add_argument("--api-key", required=False, help="CoinAPI API key (or set COINAPI_KEY env var)")
     parser.add_argument("--start-date", required=True, help="Start date YYYY-MM-DD")
@@ -189,10 +191,10 @@ def main():
     )
     parser.add_argument("--levels", type=int, default=5, help="LOB depth levels")
     parser.add_argument(
-        "--delay", type=float, default=3.0, help="Delay between daily fetches (seconds)"
+        "--delay", type=float, default=3.0, help="Delay between daily fetches (seconds)",
     )
     parser.add_argument(
-        "--dry-run", action="store_true", help="Fetch 1 day only for testing"
+        "--dry-run", action="store_true", help="Fetch 1 day only for testing",
     )
     parser.add_argument(
         "--concat-only",
@@ -282,7 +284,7 @@ def main():
             prices = df_1min["bid_price_1"].dropna()
             if len(prices) > 0:
                 print(
-                    f"  → Price range: ${prices.min():,.2f} – ${prices.max():,.2f}"
+                    f"  → Price range: ${prices.min():,.2f} – ${prices.max():,.2f}",
                 )
 
             df_1min.to_parquet(daily_file, index=False)
@@ -325,7 +327,7 @@ def _concat_daily_files(output_dir: Path, final_output: str):
 
     final_df = pd.concat(dfs, ignore_index=True)
     final_df = final_df.sort_values("timestamp").drop_duplicates(
-        subset=["timestamp"], keep="last"
+        subset=["timestamp"], keep="last",
     )
 
     final_df.to_parquet(final_output, index=False)
@@ -337,7 +339,7 @@ def _concat_daily_files(output_dir: Path, final_output: str):
     expected_cols = []
     for i in range(1, 6):
         expected_cols.extend(
-            [f"bid_price_{i}", f"bid_vol_{i}", f"ask_price_{i}", f"ask_vol_{i}"]
+            [f"bid_price_{i}", f"bid_vol_{i}", f"ask_price_{i}", f"ask_vol_{i}"],
         )
     missing = [c for c in expected_cols if c not in final_df.columns]
     if missing:

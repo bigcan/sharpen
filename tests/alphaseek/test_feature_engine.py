@@ -4,12 +4,11 @@ import numpy as np
 import pandas as pd
 
 from finrl_pro_ds.alphaseek.feature_engine import (
-    AlphaSeekFeatureEngine,
     N_DEPTH_LEVELS,
+    AlphaSeekFeatureEngine,
     _ema_zscore_tanh,
     _symlog,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -81,7 +80,7 @@ def _make_lob_df(n: int = 200, seed: int = 42) -> pd.DataFrame:
                 spread=spreads[i],
                 bid_qty=bid_qtys[i],
                 ask_qty=ask_qtys[i],
-            )
+            ),
         )
     return pd.DataFrame(rows)
 

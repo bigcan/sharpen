@@ -10,17 +10,17 @@ from __future__ import annotations
 import os
 
 import matplotlib
+
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from finrl_pro_ds.crypto.eval.statistics import (
+    probabilistic_sharpe_ratio,
     sharpe_ratio,
     sortino_ratio,
-    probabilistic_sharpe_ratio,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -176,7 +176,7 @@ class CryptoPerformanceReport:
         cum = np.cumprod(1.0 + r)
         max_dd, max_dd_bars, max_dd_days = _max_drawdown_info(cum)
         calmar = _safe_divide(
-            self._cagr(cum, T), max_dd
+            self._cagr(cum, T), max_dd,
         )
 
         # --- Return metrics ---

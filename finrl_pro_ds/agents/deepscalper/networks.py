@@ -1,9 +1,14 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from typing import Dict, Optional, Tuple
 
-from finrl_pro_ds.agents.common.network_blocks import _CausalConv1dBlock, _tc_align  # noqa: F401, imported for backward compat
+from finrl_pro_ds.agents.common.network_blocks import (  # noqa: F401, imported for backward compat
+    _CausalConv1dBlock,
+    _tc_align,
+)
+
 
 class MicroEncoder(nn.Module):
     """
@@ -47,7 +52,7 @@ class MicroEncoder(nn.Module):
             hidden_size=hidden_size,
             num_layers=num_layers,
             batch_first=True,
-            dropout=rnn_dropout
+            dropout=rnn_dropout,
         )
         # Projection: hidden_size -> hidden_size (maintains interface)
         self.out_layer = nn.Linear(hidden_size, hidden_size)
@@ -74,7 +79,7 @@ class MicroEncoder(nn.Module):
         nn.init.xavier_uniform_(self.out_layer.weight)
         nn.init.zeros_(self.out_layer.bias)
 
-    def forward(self, x: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(self, x: torch.Tensor, hidden: Optional[tuple[torch.Tensor, torch.Tensor]] = None) -> tuple[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         # x: (Batch, Window, LOB_Features)  — market data only
         if self._tc_pad > 0:
             x = F.pad(x, (0, self._tc_pad))
@@ -142,8 +147,8 @@ class MicroEncoderMLP(nn.Module):
                 nn.init.zeros_(layer.bias)
 
     def forward(
-        self, x: torch.Tensor, hidden=None
-    ) -> Tuple[torch.Tensor, None]:
+        self, x: torch.Tensor, hidden=None,
+    ) -> tuple[torch.Tensor, None]:
         """
         Args:
             x: (B, W, F) micro features
@@ -202,8 +207,8 @@ class MicroEncoderFlat(nn.Module):
                 nn.init.zeros_(layer.bias)
 
     def forward(
-        self, x: torch.Tensor, hidden=None
-    ) -> Tuple[torch.Tensor, None]:
+        self, x: torch.Tensor, hidden=None,
+    ) -> tuple[torch.Tensor, None]:
         """
         Args:
             x: (B, W, F) micro features
@@ -243,7 +248,7 @@ class MicroEncoderTCN(nn.Module):
         input_size: int = 30,
         hidden_size: int = 128,
         window_size: int = 15,
-        tcn_channels: Tuple[int, ...] = (64, 64, 128),
+        tcn_channels: tuple[int, ...] = (64, 64, 128),
         kernel_size: int = 3,
         dropout: float = 0.1,
         **kwargs,  # Absorbs rnn_type, num_layers, private_input_size
@@ -258,7 +263,7 @@ class MicroEncoderTCN(nn.Module):
         for i, out_ch in enumerate(tcn_channels):
             dilation = 2 ** i  # 1, 2, 4, 8, ...
             blocks.append(_CausalConv1dBlock(
-                in_ch, out_ch, kernel_size, dilation, dropout
+                in_ch, out_ch, kernel_size, dilation, dropout,
             ))
             in_ch = out_ch
 
@@ -275,8 +280,8 @@ class MicroEncoderTCN(nn.Module):
         self._receptive_field = rf
 
     def forward(
-        self, x: torch.Tensor, hidden=None
-    ) -> Tuple[torch.Tensor, None]:
+        self, x: torch.Tensor, hidden=None,
+    ) -> tuple[torch.Tensor, None]:
         """
         Args:
             x: (B, W, F) micro features
@@ -301,8 +306,8 @@ class MacroEncoder(nn.Module):
     def __init__(
         self,
         input_size: int = 64,
-        hidden_sizes: Tuple[int, ...] = (128, 128),
-        dropout: float = 0.1
+        hidden_sizes: tuple[int, ...] = (128, 128),
+        dropout: float = 0.1,
     ):
         super().__init__()
         self._tc_pad = _tc_align(input_size) - input_size
@@ -334,11 +339,11 @@ class DeepScalperNetwork(nn.Module):
     """
     def __init__(
         self,
-        micro_config: Dict,
-        macro_config: Dict,
+        micro_config: dict,
+        macro_config: dict,
         fusion_dim: int = 256,
-        action_space_dims: Tuple[int, int] = (5, 9), # (Price, SignedQty) — paper-aligned
-        **kwargs
+        action_space_dims: tuple[int, int] = (5, 9), # (Price, SignedQty) — paper-aligned
+        **kwargs,
     ):
         super().__init__()
 
@@ -373,7 +378,7 @@ class DeepScalperNetwork(nn.Module):
         self.fusion = nn.Sequential(
             nn.Linear(fusion_in_dim, fusion_dim),
             nn.LayerNorm(fusion_dim),
-            nn.LeakyReLU()
+            nn.LeakyReLU(),
         )
 
         # Dueling Architecture
@@ -381,7 +386,7 @@ class DeepScalperNetwork(nn.Module):
         self.value_stream = nn.Sequential(
             nn.Linear(fusion_dim, head_hidden),
             nn.LeakyReLU(),
-            nn.Linear(head_hidden, 1)
+            nn.Linear(head_hidden, 1),
         )
 
         # Advantage Streams A(s, a)
@@ -395,14 +400,14 @@ class DeepScalperNetwork(nn.Module):
             self.adv_price = nn.Sequential(
                 nn.Linear(fusion_dim, head_hidden),
                 nn.LeakyReLU(),
-                nn.Linear(head_hidden, self.price_dims)
+                nn.Linear(head_hidden, self.price_dims),
             )
 
             # Signed Quantity Branch (direction implicit in sign)
             self.adv_qty = nn.Sequential(
                 nn.Linear(fusion_dim, head_hidden),
                 nn.LeakyReLU(),
-                nn.Linear(head_hidden, self.qty_dims)
+                nn.Linear(head_hidden, self.qty_dims),
             )
         else:
             # Tier 2: Single head for standard Dueling DQN
@@ -410,14 +415,14 @@ class DeepScalperNetwork(nn.Module):
             self.adv_stream = nn.Sequential(
                 nn.Linear(fusion_dim, head_hidden),
                 nn.LeakyReLU(),
-                nn.Linear(head_hidden, self.action_dim)
+                nn.Linear(head_hidden, self.action_dim),
             )
 
         # FIX FIND-6: Auxiliary Task — 2-layer MLP for volatility prediction (Section 4.4)
         self.vol_head = nn.Sequential(
             nn.Linear(fusion_dim, head_hidden),
             nn.LeakyReLU(),
-            nn.Linear(head_hidden, 1)
+            nn.Linear(head_hidden, 1),
         )
 
         # FIX FIND-3: Initialize all Linear heads with Xavier
@@ -438,7 +443,7 @@ class DeepScalperNetwork(nn.Module):
                     if layer.bias is not None:
                         nn.init.zeros_(layer.bias)
 
-    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor, hidden: Optional[Tuple[torch.Tensor, torch.Tensor]] = None) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
+    def forward(self, micro_in: torch.Tensor, private_in: torch.Tensor, macro_in: torch.Tensor, hidden: Optional[tuple[torch.Tensor, torch.Tensor]] = None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
         """
         Returns (Q_price, Q_qty, V_state, Pred_Vol, new_hidden)
         For Tier 2 (Discrete), Q_qty will be the single Q-value vector, and Q_price will be None.

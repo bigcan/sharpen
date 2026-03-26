@@ -118,7 +118,7 @@ class AlphaSeekRiskManager:
                 logger.info("Circuit breaker deactivated")
             else:
                 violations.append(
-                    f"circuit_breaker_active ({self._circuit_breaker_ticks_remaining} ticks remaining)"
+                    f"circuit_breaker_active ({self._circuit_breaker_ticks_remaining} ticks remaining)",
                 )
                 # Force close if in position, otherwise hold
                 if position != 0:
@@ -132,7 +132,7 @@ class AlphaSeekRiskManager:
                 self._circuit_breaker_active = True
                 self._circuit_breaker_ticks_remaining = self.config.circuit_breaker_cooldown_ticks
                 violations.append(
-                    f"max_drawdown_breach ({drawdown:.4f} >= {self.config.max_drawdown_pct})"
+                    f"max_drawdown_breach ({drawdown:.4f} >= {self.config.max_drawdown_pct})",
                 )
                 logger.warning("MAX DRAWDOWN BREACH: %.4f. Circuit breaker activated.", drawdown)
                 if position != 0:
@@ -144,7 +144,7 @@ class AlphaSeekRiskManager:
             daily_loss = (self._daily_start_value - self._portfolio_value) / self._daily_start_value
             if daily_loss >= self.config.max_daily_loss_pct:
                 violations.append(
-                    f"daily_loss_breach ({daily_loss:.4f} >= {self.config.max_daily_loss_pct})"
+                    f"daily_loss_breach ({daily_loss:.4f} >= {self.config.max_daily_loss_pct})",
                 )
                 if position != 0:
                     return -position, violations
@@ -153,7 +153,7 @@ class AlphaSeekRiskManager:
         # --- 4. Daily turnover limit ---
         if action_int != 0 and self._daily_trade_count >= self.config.daily_turnover_limit:
             violations.append(
-                f"daily_turnover_limit ({self._daily_trade_count} >= {self.config.daily_turnover_limit})"
+                f"daily_turnover_limit ({self._daily_trade_count} >= {self.config.daily_turnover_limit})",
             )
             return 0, violations
 
@@ -171,7 +171,7 @@ class AlphaSeekRiskManager:
                 price_change = (mid_price - oldest_price) / oldest_price
                 if price_change < -self.config.flash_crash_pct:
                     violations.append(
-                        f"flash_crash ({price_change:.4f} in {self.config.flash_crash_window_s}s)"
+                        f"flash_crash ({price_change:.4f} in {self.config.flash_crash_window_s}s)",
                     )
                     if position != 0:
                         return -position, violations
@@ -189,14 +189,14 @@ class AlphaSeekRiskManager:
             if self._spread_ema > 0 and spread > self._spread_ema * self.config.max_spread_multiplier:
                 violations.append(
                     f"spread_unhealthy ({spread:.6f} > {self.config.max_spread_multiplier}x "
-                    f"EMA {self._spread_ema:.6f})"
+                    f"EMA {self._spread_ema:.6f})",
                 )
                 return 0, violations
 
         # --- 7. Latency check ---
         if tick_latency_ms > self.config.max_latency_ms:
             violations.append(
-                f"high_latency ({tick_latency_ms:.1f}ms > {self.config.max_latency_ms}ms)"
+                f"high_latency ({tick_latency_ms:.1f}ms > {self.config.max_latency_ms}ms)",
             )
             return 0, violations
 

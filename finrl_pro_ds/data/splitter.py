@@ -1,8 +1,7 @@
 import logging
+from dataclasses import dataclass
 
 import pandas as pd
-from typing import List, Dict
-from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +24,7 @@ class RollingWindowSplitter:
         val_months: int = 3,
         test_months: int = 1,
         step_months: int = 1,
-        buffer_days: int = 0
+        buffer_days: int = 0,
     ):
         """
         Args:
@@ -41,7 +40,7 @@ class RollingWindowSplitter:
         self.step_months = step_months
         self.buffer_days = buffer_days
 
-    def split(self, start_date: str, end_date: str) -> List[Dict[str, TimeRange]]:
+    def split(self, start_date: str, end_date: str) -> list[dict[str, TimeRange]]:
         """
         Generates rolling window splits within the global start/end range.
 
@@ -70,7 +69,7 @@ class RollingWindowSplitter:
             folds.append({
                 "train": TimeRange(str(current_start), str(train_end)),
                 "val": TimeRange(str(val_start), str(val_end)),
-                "test": TimeRange(str(test_start), str(test_end))
+                "test": TimeRange(str(test_start), str(test_end)),
             })
 
             # 4. Step forward

@@ -7,11 +7,10 @@ Covers:
   3. Memory footprint validation
   4. Drop-in agent integration (train_step with flat buffer)
 """
-import pytest
 import numpy as np
+import pytest
 
 from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
-
 
 # ---------------------------------------------------------------------------
 # Helpers

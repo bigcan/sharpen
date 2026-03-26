@@ -93,7 +93,7 @@ class CryptoLoader:
         await self._exchange.load_markets()
         logger.info(
             f"Initialized {self.exchange_id} ({self.market_type}), "
-            f"{len(self._exchange.markets)} markets loaded"
+            f"{len(self._exchange.markets)} markets loaded",
         )
         return self._exchange
 
@@ -127,7 +127,7 @@ class CryptoLoader:
             raise ValueError(
                 f"{len(unavailable)}/{len(assets)} assets unavailable on "
                 f"{self.exchange_id}: {unavailable}. "
-                f"This exceeds the 10% threshold for silent dropping."
+                f"This exceeds the 10% threshold for silent dropping.",
             )
         return mapping
 
@@ -161,7 +161,7 @@ class CryptoLoader:
         for idx, (asset, symbol) in enumerate(symbol_map.items(), 1):
             logger.info(f"[{idx}/{total_assets}] Fetching OHLCV: {symbol} ({timeframe})")
             asset_candles = await self._paginate_ohlcv(
-                exchange, symbol, timeframe, since_ms, end_ms
+                exchange, symbol, timeframe, since_ms, end_ms,
             )
 
             if not asset_candles:
@@ -185,7 +185,7 @@ class CryptoLoader:
         logger.info(
             f"Bronze OHLCV: {len(result)} total candles, "
             f"{result['ticker'].nunique()} assets, "
-            f"{result['timestamp'].min()} → {result['timestamp'].max()}"
+            f"{result['timestamp'].min()} → {result['timestamp'].max()}",
         )
         return result
 
@@ -293,7 +293,7 @@ class CryptoLoader:
         return result
 
     async def _paginate_funding(
-        self, exchange, symbol: str, since_ms: int, end_ms: int
+        self, exchange, symbol: str, since_ms: int, end_ms: int,
     ) -> list[dict]:
         """Paginate through funding rate history for a single symbol."""
         all_rates = []
@@ -302,7 +302,7 @@ class CryptoLoader:
         while cursor < end_ms:
             try:
                 rates = await exchange.fetch_funding_rate_history(
-                    symbol, since=cursor, limit=1000
+                    symbol, since=cursor, limit=1000,
                 )
             except Exception as e:
                 logger.error(f"Funding rate fetch error for {symbol}: {e}")
@@ -310,7 +310,7 @@ class CryptoLoader:
                 await asyncio.sleep(1.0)
                 try:
                     rates = await exchange.fetch_funding_rate_history(
-                        symbol, since=cursor, limit=1000
+                        symbol, since=cursor, limit=1000,
                     )
                 except Exception as e2:
                     logger.error(f"Funding rate retry failed for {symbol}: {e2}")
@@ -365,7 +365,7 @@ class CryptoLoader:
             await asyncio.sleep(REQUEST_DELAY)
 
         return pd.DataFrame(rows) if rows else pd.DataFrame(
-            columns=["timestamp", "ticker", "open_interest", "open_interest_value"]
+            columns=["timestamp", "ticker", "open_interest", "open_interest_value"],
         )
 
     async def close(self):
@@ -472,13 +472,13 @@ class CryptoDataCleaner:
         n_anomalies = len(anomalies)
         logger.info(
             f"Silver cleaning complete: {len(cleaned_df)} rows, "
-            f"{n_anomalies} anomalies detected"
+            f"{n_anomalies} anomalies detected",
         )
 
         return cleaned_df, anomaly_df
 
     def _fill_time_gaps(
-        self, df: pd.DataFrame, ticker: str
+        self, df: pd.DataFrame, ticker: str,
     ) -> tuple[pd.DataFrame, list[dict]]:
         """Detect and fill gaps in the hourly time series.
 
@@ -523,7 +523,7 @@ class CryptoDataCleaner:
 
             logger.debug(
                 f"{ticker}: {len(missing)} missing bars detected, "
-                f"{len(gap_groups)} gap(s)"
+                f"{len(gap_groups)} gap(s)",
             )
 
         # Reindex to full hourly grid and forward-fill
@@ -546,7 +546,7 @@ class CryptoDataCleaner:
             logger.warning(
                 f"{ticker}: {remaining_nans} bars remain unfilled after "
                 f"limit={self.max_gap_hours * 2} ffill — extending ffill to cover, "
-                f"but data quality is degraded for long outages"
+                f"but data quality is degraded for long outages",
             )
             df[["open", "high", "low", "close"]] = (
                 df[["open", "high", "low", "close"]].ffill()
@@ -556,7 +556,7 @@ class CryptoDataCleaner:
         return df, anomalies
 
     def _fix_ohlcv_consistency(
-        self, df: pd.DataFrame, ticker: str
+        self, df: pd.DataFrame, ticker: str,
     ) -> tuple[pd.DataFrame, list[dict]]:
         """Fix OHLCV consistency violations.
 
@@ -611,7 +611,7 @@ class CryptoDataCleaner:
         return df, anomalies
 
     def _flag_flash_crashes(
-        self, df: pd.DataFrame, ticker: str
+        self, df: pd.DataFrame, ticker: str,
     ) -> tuple[pd.DataFrame, list[dict]]:
         """Flag (but don't remove) candles with extreme price moves.
 
@@ -633,7 +633,7 @@ class CryptoDataCleaner:
                     "return_pct": float(returns.loc[row.name]),
                 })
             logger.warning(
-                f"{ticker}: {flash_mask.sum()} flash crash candle(s) flagged"
+                f"{ticker}: {flash_mask.sum()} flash crash candle(s) flagged",
             )
         else:
             df["_flash_crash"] = False
@@ -646,12 +646,12 @@ class CryptoDataCleaner:
         Same algorithm as equities DataCleaner but tuned for hourly data.
         """
         median = series.rolling(
-            window=self.hampel_window, min_periods=max(5, self.hampel_window // 4)
+            window=self.hampel_window, min_periods=max(5, self.hampel_window // 4),
         ).median()
 
         deviation = (series - median).abs()
         mad = deviation.rolling(
-            window=self.hampel_window, min_periods=max(5, self.hampel_window // 4)
+            window=self.hampel_window, min_periods=max(5, self.hampel_window // 4),
         ).median()
 
         # MAD consistency constant for normal distribution
@@ -729,7 +729,7 @@ class CryptoFundingCleaner:
         all_frames = []
         for ticker in ohlcv_df["ticker"].unique():
             ohlcv_ts = ohlcv_df.loc[
-                ohlcv_df["ticker"] == ticker, "timestamp"
+                ohlcv_df["ticker"] == ticker, "timestamp",
             ].sort_values()
 
             funding_tic = funding_df[funding_df["ticker"] == ticker].copy()
@@ -791,7 +791,7 @@ class CryptoDataValidator:
         n_assets = df["ticker"].nunique()
         if n_assets < self.min_assets:
             issues.append(
-                f"FAIL: Only {n_assets} assets, need ≥ {self.min_assets}"
+                f"FAIL: Only {n_assets} assets, need ≥ {self.min_assets}",
             )
 
         # Per-asset checks
@@ -802,7 +802,7 @@ class CryptoDataValidator:
             if n_bars < self.min_bars_per_asset:
                 issues.append(
                     f"FAIL: {ticker} has only {n_bars} bars, "
-                    f"need ≥ {self.min_bars_per_asset}"
+                    f"need ≥ {self.min_bars_per_asset}",
                 )
                 continue
 
@@ -810,7 +810,7 @@ class CryptoDataValidator:
             nan_pct = group[["open", "high", "low", "close"]].isna().mean().max()
             if nan_pct > self.max_missing_pct:
                 issues.append(
-                    f"FAIL: {ticker} has {nan_pct:.4%} NaN in price columns"
+                    f"FAIL: {ticker} has {nan_pct:.4%} NaN in price columns",
                 )
 
             # Check 4: Zero volume ratio
@@ -818,7 +818,7 @@ class CryptoDataValidator:
             if zero_vol_pct > self.max_zero_volume_pct:
                 issues.append(
                     f"WARN: {ticker} has {zero_vol_pct:.2%} zero-volume bars "
-                    f"(threshold {self.max_zero_volume_pct:.0%})"
+                    f"(threshold {self.max_zero_volume_pct:.0%})",
                 )
 
             # Check 5: Timestamp continuity
@@ -828,7 +828,7 @@ class CryptoDataValidator:
             if len(bad_gaps) > 0:
                 issues.append(
                     f"FAIL: {ticker} has {len(bad_gaps)} non-hourly gaps "
-                    f"after cleaning"
+                    f"after cleaning",
                 )
 
             # Check 6: Price sanity (no zeros or negatives after cleaning)
@@ -848,12 +848,12 @@ class CryptoDataValidator:
         if passed:
             logger.info(
                 f"Validation PASSED: {n_assets} assets, "
-                f"{len(df)} bars, {len(warnings)} warnings"
+                f"{len(df)} bars, {len(warnings)} warnings",
             )
         else:
             logger.error(
                 f"Validation FAILED: {len(failures)} failures, "
-                f"{len(warnings)} warnings"
+                f"{len(warnings)} warnings",
             )
             for f in failures:
                 logger.error(f"  {f}")
@@ -950,7 +950,7 @@ class CryptoDataPipeline:
                         and cache_end >= requested_end - pd.Timedelta(hours=2)):
                     logger.info(
                         f"Silver cache valid: {len(ohlcv_df)} rows, "
-                        f"covers through {cache_end}"
+                        f"covers through {cache_end}",
                     )
                     # Validate
                     passed, issues = self.validator.validate(ohlcv_df)
@@ -965,7 +965,7 @@ class CryptoDataPipeline:
                 else:
                     logger.info(
                         f"Silver cache stale: ends at {cache_end}, "
-                        f"need through {requested_end}. Re-fetching..."
+                        f"need through {requested_end}. Re-fetching...",
                     )
             except Exception as e:
                 logger.warning(f"Failed to load Silver cache: {e}. Re-fetching...")
@@ -977,12 +977,12 @@ class CryptoDataPipeline:
 
         try:
             bronze_ohlcv = await self.loader.fetch_ohlcv(
-                assets, start, end, timeframe
+                assets, start, end, timeframe,
             )
             # Fetch funding separately so OHLCV is preserved on funding failure
             try:
                 bronze_funding = await self.loader.fetch_funding_rates(
-                    assets, start, end
+                    assets, start, end,
                 )
             except Exception as e:
                 logger.warning(f"Funding rate fetch failed: {e}. Continuing with empty funding.")
@@ -1007,7 +1007,7 @@ class CryptoDataPipeline:
 
         # Clean and resample funding rates to 1H
         silver_funding = self.funding_cleaner.clean_and_resample(
-            bronze_funding, silver_ohlcv
+            bronze_funding, silver_ohlcv,
         )
 
         # ----- Validate -----
@@ -1071,7 +1071,7 @@ def fetch_crypto_data(
         funding = data["funding"]
     """
     pipeline = CryptoDataPipeline(
-        exchange=exchange, cache_dir=cache_dir
+        exchange=exchange, cache_dir=cache_dir,
     )
     coro = pipeline.run(
         assets=assets, start=start, end=end,
@@ -1215,7 +1215,7 @@ class WalkForwardCoverageValidator:
             n_windows = 0
             issues.append(
                 f"FAIL: Shortest asset ({min_asset}) has {min_bars} bars, "
-                f"need ≥ {self.bars_per_window} for even 1 window"
+                f"need ≥ {self.bars_per_window} for even 1 window",
             )
         else:
             n_windows = 1 + available_after_first // self.step_bars
@@ -1225,7 +1225,7 @@ class WalkForwardCoverageValidator:
                 f"FAIL: Only {n_windows} walk-forward windows possible, "
                 f"need ≥ {self.min_windows} for statistical power. "
                 f"Need ≥ {self.bars_per_window + (self.min_windows - 1) * self.step_bars} "
-                f"bars per asset."
+                f"bars per asset.",
             )
 
         # Build window schedule using the asset with least data as reference

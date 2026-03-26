@@ -3,35 +3,36 @@
 DeepScalper Unified Pipeline - Single BDQ Agent
 Consolidated: HPO, Training, Backtesting in one process.
 """
-import yaml
 import argparse
+import copy
+import functools
+import json
+import logging
 import os
 import sys
-import copy
-import logging
-import functools
+from urllib.request import Request, urlopen
 
-import json
+import gymnasium as gym
 import numpy as np
+import optuna
 import pandas as pd
 import torch
-import gymnasium as gym
+import yaml
+from optuna.samplers import RandomSampler, TPESampler
+
 import wandb
-import optuna
-from optuna.samplers import TPESampler, RandomSampler
-from urllib.request import Request, urlopen
 
 # Project imports
 sys.path.append(os.getcwd())
-from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
-from finrl_pro_ds.training.ppo_trainer import PPOTrainer
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
-from finrl_pro_ds.envs.swing_scalper_env import SwingScalperEnv
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
 from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
-from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
 from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
+from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+from finrl_pro_ds.envs.swing_scalper_env import SwingScalperEnv
+from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
+from finrl_pro_ds.training.ppo_trainer import PPOTrainer
+from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("DeepScalperPipeline")
@@ -113,8 +114,8 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
         return MarketMakingEnv(config=env_config, data_handler=mm_handler)
 
     if mdp_version == "v7":
-        from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
         from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
+        from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
         features_cfg = config.get("features", {})
         ms_handler = MultiScaleOHLCVHandler(
             file_path=file_path,
@@ -138,7 +139,7 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
         start_date=sd,
         end_date=ed,
         shared_memory_config=shm_config,
-        norm_cutoff_date=norm_cutoff_date  # FIX LEAK-1
+        norm_cutoff_date=norm_cutoff_date,  # FIX LEAK-1
     )
 
     if mdp_version == "v6":
@@ -160,14 +161,14 @@ def create_vector_env(config, num_envs, start_date=None, end_date=None, shm_conf
         # SyncVectorEnv: all envs run in main process. No pipes, no FD issues.
         # Slower but reliable on containers with restricted ulimits.
         env = gym.vector.SyncVectorEnv(
-            [env_factory for _ in range(num_envs)]
+            [env_factory for _ in range(num_envs)],
         )
     else:
         # AsyncVectorEnv for production training (parallel data loading)
         env = gym.vector.AsyncVectorEnv(
             [env_factory for _ in range(num_envs)],
             context="spawn",
-            shared_memory=False
+            shared_memory=False,
         )
 
     return env
@@ -273,7 +274,7 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
                         parts.append(obs["private"])
                         flat_np = np.concatenate(parts, axis=1)
                         scale_stack = torch.as_tensor(flat_np, dtype=torch.float32).to(
-                            agent.device, non_blocking=True
+                            agent.device, non_blocking=True,
                         )
                     else:
                         # Single env: (n_summary,)
@@ -281,7 +282,7 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
                         parts.append(obs["private"])
                         flat_np = np.concatenate(parts)
                         scale_stack = torch.as_tensor(flat_np, dtype=torch.float32).unsqueeze(0).to(
-                            agent.device, non_blocking=True
+                            agent.device, non_blocking=True,
                         )
                     priv = None
                 elif sample.ndim == 3:
@@ -289,19 +290,19 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
                     # FIX BUG-06: Was axis=0 → (N,B,W,F) → Conv1d 4D crash
                     scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=1)  # (B,N,W,F)
                     scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).to(
-                        agent.device, non_blocking=True
+                        agent.device, non_blocking=True,
                     )
                     priv = torch.as_tensor(obs["private"], dtype=torch.float32).to(
-                        agent.device, non_blocking=True
+                        agent.device, non_blocking=True,
                     )
                 else:
                     # Single env: obs["scale_i"] is (W,F) — stack on axis=0, add batch dim
                     scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=0)  # (N,W,F)
                     scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).unsqueeze(0).to(
-                        agent.device, non_blocking=True
+                        agent.device, non_blocking=True,
                     )  # (1,N,W,F)
                     priv = torch.as_tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(
-                        agent.device, non_blocking=True
+                        agent.device, non_blocking=True,
                     )
                 pred = agent.predict(scale_stack, priv, deterministic=True)
             else:
@@ -985,7 +986,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         # (needs 200K+ steps for signal). All 5 trials pruned in K2/K4 runs.
         # Let all trials run to completion so we get clean data points to
         # distinguish "bad hyperparams" from "bad MDP design".
-        pruner=optuna.pruners.NopPruner()
+        pruner=optuna.pruners.NopPruner(),
     )
     study.optimize(objective, n_trials=n_trials)
 
@@ -998,7 +999,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     best_params = {
         "env": {"reward": {}},
         "agents": {agent_key: {}},
-        "training": {}
+        "training": {},
     }
 
     # V4.2: Explicit routing for ALL HPO params to prevent silent mis-routing.
@@ -1045,7 +1046,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         "hpo/best_profit_factor": best.value,
         "hpo/best_trial": best.number,
         "hpo/best_params": str(best.params),
-        "hpo/status": "completed"
+        "hpo/status": "completed",
     })
 
     logger.info(f"HPO Complete. Best Profit Factor: {best.value:.4f} (Trial #{best.number})")
@@ -1079,7 +1080,7 @@ def run_training(config, run_name, device, agent_type="bdq", warm_start=None):
                 ticker=data_config.get("ticker", "BTCUSDT"),
                 feature_config=config.get("features", {}),
                 start_date=data_config.get("train_start_date"),
-                end_date=data_config.get("train_end_date")
+                end_date=data_config.get("train_end_date"),
             )
             shm_config = data_loader.create_shared_memory()
             # Note: Don't store in config dict - pass explicitly to avoid stale refs
@@ -1229,18 +1230,18 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             # H2: Leverage-Aware Sizing — MultiDiscrete([size_dims, direction_dims])
             action_dims = (
                 int(action_config["size_dims"]),
-                int(action_config.get("direction_dims", 3))
+                int(action_config.get("direction_dims", 3)),
             )
         elif "discrete_dims" in action_config:
             action_dims = action_config["discrete_dims"]
         else:
             # BDQ: Legacy MultiDiscrete (price_bins, qty_bins)
             signed_qty_props = action_config.get(
-                "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5]
+                "signed_qty_proportions", [-0.5, -0.2, -0.1, -0.05, 0.0, 0.05, 0.1, 0.2, 0.5],
             )
             action_dims = (
                 action_config.get("price_bins", 5),
-                len(signed_qty_props)
+                len(signed_qty_props),
             )
         # FIX: Inject action_space_dims into network_config (mirrors trainer logic).
         # Without this, the BDQ/PPO agent assertion falls back to default (5,9).
@@ -1311,7 +1312,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                 epsilon_decay=bdq_config.get("epsilon_decay", 0.99999),
                 action_dims=action_dims,
                 use_amp=config.get("training", {}).get("use_amp", False),
-                device=device
+                device=device,
             )
 
         # Load checkpoint
@@ -1344,17 +1345,17 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                     parts.append(obs["private"])
                     flat_np = np.concatenate(parts)
                     scale_stack = torch.as_tensor(flat_np, dtype=torch.float32).unsqueeze(0).to(
-                        device, non_blocking=True
+                        device, non_blocking=True,
                     )
                     priv = None
                 else:
                     # Window mode: stack all scales into (1,N,W,F) — single H2D transfer
                     scale_np = np.stack([obs[f"scale_{i}"] for i in range(n_scales)], axis=0)
                     scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).unsqueeze(0).to(
-                        device, non_blocking=True
+                        device, non_blocking=True,
                     )
                     priv = torch.as_tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(
-                        device, non_blocking=True
+                        device, non_blocking=True,
                     )
                 pred = agent.predict(scale_stack, priv, deterministic=True)
                 action = pred[0].cpu().numpy()  # (1, 1) → numpy scalar
@@ -1510,14 +1511,14 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             f"{prefix}/profit_factor": profit_factor,
             f"{prefix}/profit_factor_trade": profit_factor_trade,
             f"{prefix}/avg_win_loss_ratio": avg_win_loss_ratio,
-            f"{prefix}/status": "completed"
+            f"{prefix}/status": "completed",
         }
 
         wandb.log(metrics)
         logger.info(
             f"{mode} Complete. Return={total_return*100:.2f}%, Sharpe={sharpe:.2f}, "
             f"Sortino={pyfolio_metrics.get('sortino_ratio', 0):.2f}, "
-            f"MaxDD={max_dd*100:.2f}%, WinRate={pyfolio_metrics.get('win_rate', 0):.1f}%"
+            f"MaxDD={max_dd*100:.2f}%, WinRate={pyfolio_metrics.get('win_rate', 0):.1f}%",
         )
 
         return metrics
@@ -1606,7 +1607,7 @@ def main():
         entity=wandb_config.get("entity", "bigcan-chiwin-technology"),
         name=run_name,
         tags=wandb_config.get("tags", []) + args.tags,
-        config=base_config
+        config=base_config,
     )
     logger.info(f"WandB Run: {wandb.run.url}")
 
@@ -1687,7 +1688,7 @@ def main():
                 end_date=data_config.get("val_end_date"),
                 prefix="backtest_val",
                 agent_type=agent_type,
-                norm_cutoff_date=data_config.get("val_start_date")  # Reset stats at val boundary
+                norm_cutoff_date=data_config.get("val_start_date"),  # Reset stats at val boundary
             )
 
             # PHASE 3b: Test Backtest (for Final Evaluation)
@@ -1700,7 +1701,7 @@ def main():
                 device,
                 prefix="backtest_test",
                 agent_type=agent_type,
-                norm_cutoff_date=data_config.get("test_start_date")  # Reset stats at test boundary
+                norm_cutoff_date=data_config.get("test_start_date"),  # Reset stats at test boundary
             )
         else:
             logger.warning("No checkpoint found, skipping backtests")

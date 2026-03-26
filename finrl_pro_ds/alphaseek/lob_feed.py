@@ -65,7 +65,7 @@ class BybitLOBFeed:
                         "defaultType": "swap",
                         "sandboxMode": self.testnet,
                     },
-                }
+                },
             )
             if self.testnet:
                 self._exchange.set_sandbox_mode(True)
@@ -74,12 +74,12 @@ class BybitLOBFeed:
             self._connected = True
             logger.info(
                 f"BybitLOBFeed connected (WS mode): {self.symbol}, "
-                f"depth={self.depth}, testnet={self.testnet}"
+                f"depth={self.depth}, testnet={self.testnet}",
             )
         except ImportError:
             logger.warning(
                 "ccxt.pro not available, falling back to REST polling. "
-                "Install with: pip install ccxt[pro]"
+                "Install with: pip install ccxt[pro]",
             )
             import ccxt.async_support as ccxt_async
 
@@ -92,7 +92,7 @@ class BybitLOBFeed:
                         "defaultType": "swap",
                         "sandboxMode": self.testnet,
                     },
-                }
+                },
             )
             if self.testnet:
                 self._exchange.set_sandbox_mode(True)
@@ -101,7 +101,7 @@ class BybitLOBFeed:
             self._connected = True
             logger.info(
                 f"BybitLOBFeed connected (REST fallback): {self.symbol}, "
-                f"depth={self.depth}, testnet={self.testnet}"
+                f"depth={self.depth}, testnet={self.testnet}",
             )
 
     async def _fetch_orderbook_ws(self) -> dict:

@@ -1,8 +1,7 @@
-import json
 import argparse
+import json
 import os
 import sqlite3
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -134,7 +133,7 @@ def _get_comparison_runs(current_run_id, n=5):
             "FROM runs "
             "WHERE id != ? "
             "ORDER BY created_at DESC LIMIT ?",
-            (current_run_id, n)
+            (current_run_id, n),
         )
         rows = cursor.fetchall()
         conn.close()
@@ -413,7 +412,7 @@ def generate_report(run_id, output_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Generate a standardized DeepScalper report from WandB JSON data."
+        description="Generate a standardized DeepScalper report from WandB JSON data.",
     )
     parser.add_argument("--run_id", required=True, help="WandB 8-char run ID")
     parser.add_argument("--output", required=True, help="Output markdown path")

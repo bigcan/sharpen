@@ -15,13 +15,12 @@ import numpy as np
 import pandas as pd
 
 from finrl_pro_ds.data.feature_engineering import (
-    DeepScalperFeatureEngineer,
-    MICRO_FEATURE_COLS,
     MACRO_FEATURE_COLS,
-    get_micro_feature_cols,
+    MICRO_FEATURE_COLS,
+    DeepScalperFeatureEngineer,
     get_macro_feature_cols,
+    get_micro_feature_cols,
 )
-
 
 # ─── Fixtures ──────────────────────────────────────────────────────────
 
@@ -45,7 +44,7 @@ def _make_lob_df(n_rows: int = 500, n_levels: int = 5, seed: int = 42) -> pd.Dat
     # Ensure no crossed quotes
     for i in range(1, n_levels + 1):
         data[f"ask_price_{i}"] = np.maximum(
-            data[f"ask_price_{i}"], data[f"bid_price_{i}"] + 0.10
+            data[f"ask_price_{i}"], data[f"bid_price_{i}"] + 0.10,
         )
 
     # OHLCV (needed for macro features)

@@ -14,7 +14,9 @@ Output: gc_2025_lob_1min.parquet with 5-level LOB + OHLCV
 import os
 import time
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent / '.env')
 
 import databento as db  # noqa: E402
@@ -279,8 +281,9 @@ def process_by_quarter():
 
 def process_quarter_monthly(client, q_start, q_end):
     """Process a quarter month by month if quarterly is too large."""
-    from dateutil.relativedelta import relativedelta
     from datetime import datetime
+
+    from dateutil.relativedelta import relativedelta
 
     start_dt = datetime.strptime(q_start, "%Y-%m-%d")
     end_dt = datetime.strptime(q_end, "%Y-%m-%d")
@@ -347,7 +350,7 @@ def resample_quarter(df: pd.DataFrame) -> pd.DataFrame:
         trades = df[df['price'] > 0]
         if len(trades) > 0:
             ohlcv = trades['price'].resample('1min').agg(
-                open='first', high='max', low='min', close='last'
+                open='first', high='max', low='min', close='last',
             )
             vol = trades['size'].resample('1min').sum() if 'size' in trades.columns else 0
             df_1min = df_1min.join(ohlcv, how='left')

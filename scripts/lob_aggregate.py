@@ -76,10 +76,10 @@ def aggregate_lob(
     ask_depth_5 = sum(df[f"ask_q_{i}"].fillna(0) for i in range(5))
     total_depth_5 = bid_depth_5 + ask_depth_5
     df["depth_imbalance_5"] = np.where(
-        total_depth_5 > 0, (bid_depth_5 - ask_depth_5) / total_depth_5, 0.0
+        total_depth_5 > 0, (bid_depth_5 - ask_depth_5) / total_depth_5, 0.0,
     )
     df["depth_ratio_5"] = np.where(
-        total_depth_5 > 0, bid_depth_5 / total_depth_5, 0.5
+        total_depth_5 > 0, bid_depth_5 / total_depth_5, 0.5,
     )
 
     # BBO change detection — per-segment diff to avoid cross-segment contamination (AUD-05)
@@ -206,7 +206,7 @@ def aggregate_lob(
     for seg_id, row in seg_stats.iterrows():
         logger.info(
             f"  Seg {seg_id:2d}: {str(row['first_ts'])[:19]} → {str(row['last_ts'])[:19]} "
-            f"| {row['n_bars']:>8,} bars"
+            f"| {row['n_bars']:>8,} bars",
         )
     logger.info(f"{'='*60}")
 
@@ -225,7 +225,7 @@ def main():
     sym = args.symbol.upper()
     input_path = args.input or os.path.join(LOB_DIR, f"{sym.lower()}_lob_1s.parquet")
     output_path = args.output or os.path.join(
-        OUTPUT_DIR, f"{sym.lower()}_lob_{args.bar_size}s.parquet"
+        OUTPUT_DIR, f"{sym.lower()}_lob_{args.bar_size}s.parquet",
     )
 
     aggregate_lob(input_path, output_path, bar_size_s=args.bar_size, min_ticks_per_bar=args.min_ticks)

@@ -97,10 +97,10 @@ class LiveTradingEngine:
 
         # Safety
         self._kill_file = Path(config.get("safety", {}).get(
-            "kill_file", "/tmp/finrl_live_kill"
+            "kill_file", "/tmp/finrl_live_kill",
         ))
         self._emergency_flatten_on_error = config.get("safety", {}).get(
-            "emergency_flatten_on_error", True
+            "emergency_flatten_on_error", True,
         )
         self._reconciliation_warn_pct = 0.05
         self._reconciliation_halt_pct = 0.15
@@ -128,7 +128,7 @@ class LiveTradingEngine:
         for sig in (signal.SIGINT, signal.SIGTERM):
             try:
                 asyncio.get_event_loop().add_signal_handler(
-                    sig, lambda s=sig: self._request_stop(f"signal_{s.name}")
+                    sig, lambda s=sig: self._request_stop(f"signal_{s.name}"),
                 )
             except NotImplementedError:
                 # Windows doesn't support add_signal_handler
@@ -165,7 +165,7 @@ class LiveTradingEngine:
             f"  Position: {self._current_position:.4f}\n"
             f"  Deadband: {self._deadband_threshold}\n"
             f"  Scales: {self.obs_builder.scales}\n"
-            f"  Bar interval: {self.bar_clock.interval}min"
+            f"  Bar interval: {self.bar_clock.interval}min",
         )
 
         try:
@@ -265,7 +265,7 @@ class LiveTradingEngine:
         if self._dry_run:
             logger.info(
                 f"[DRY RUN] Would trade: {self._current_position:.4f} → "
-                f"{target_position:.4f} (delta={delta:.4f})"
+                f"{target_position:.4f} (delta={delta:.4f})",
             )
             self._current_position = target_position
             self._prev_close = current_close
@@ -287,7 +287,7 @@ class LiveTradingEngine:
                 self._total_fees += order.fee
                 logger.info(
                     f"Trade executed: {order.side} {order.filled_quantity:.6f} "
-                    f"@ {order.avg_fill_price:.2f}, fee={order.fee:.4f} USDT"
+                    f"@ {order.avg_fill_price:.2f}, fee={order.fee:.4f} USDT",
                 )
             elif order.status == "partial":
                 # FIX AUD-H06: Don't assume target on partial fill — reconcile instead
@@ -295,7 +295,7 @@ class LiveTradingEngine:
                 self._total_fees += order.fee
                 logger.warning(
                     f"Partial fill: {order.filled_quantity:.6f} of "
-                    f"{order.quantity:.6f} — will reconcile"
+                    f"{order.quantity:.6f} — will reconcile",
                 )
             else:
                 logger.warning(f"Trade failed: {order.status} — {order.error}")
@@ -328,19 +328,19 @@ class LiveTradingEngine:
     def _predict(self, obs: dict) -> float:
         """Run SAC agent inference. Returns target position in [-1, 1]."""
         scale_np = np.stack(
-            [obs[f"scale_{i}"] for i in range(self._n_scales)], axis=0
+            [obs[f"scale_{i}"] for i in range(self._n_scales)], axis=0,
         )
         scale_tensor = torch.as_tensor(
-            scale_np, dtype=torch.float32
+            scale_np, dtype=torch.float32,
         ).unsqueeze(0).to(self._device, non_blocking=True)
 
         private_tensor = torch.as_tensor(
-            obs["private"], dtype=torch.float32
+            obs["private"], dtype=torch.float32,
         ).unsqueeze(0).to(self._device, non_blocking=True)
 
         with torch.no_grad():
             action = self.agent.predict(
-                scale_tensor, private_tensor, deterministic=True
+                scale_tensor, private_tensor, deterministic=True,
             )
 
         return float(np.clip(action[0, 0].cpu().item(), -1.0, 1.0))
@@ -418,13 +418,13 @@ class LiveTradingEngine:
                 logger.critical(
                     f"POSITION MISMATCH: internal={self._current_position:.4f}, "
                     f"exchange={exchange_pos:.4f}, discrepancy={discrepancy:.4f} "
-                    f"(>{self._reconciliation_halt_pct:.0%}). HALTING."
+                    f"(>{self._reconciliation_halt_pct:.0%}). HALTING.",
                 )
                 self._request_stop("position_mismatch")
             elif discrepancy > self._reconciliation_warn_pct:
                 logger.warning(
                     f"Position discrepancy: internal={self._current_position:.4f}, "
-                    f"exchange={exchange_pos:.4f} — trusting exchange"
+                    f"exchange={exchange_pos:.4f} — trusting exchange",
                 )
                 # Trust exchange as source of truth
                 self._current_position = exchange_pos
@@ -465,7 +465,7 @@ class LiveTradingEngine:
             else:
                 logger.critical(
                     f"EMERGENCY FLATTEN PARTIAL: {result.n_failed} orders failed. "
-                    f"Position may still be open on exchange!"
+                    f"Position may still be open on exchange!",
                 )
         except Exception as e:
             logger.critical(f"EMERGENCY FLATTEN FAILED: {e}. Position may be open!")
@@ -497,7 +497,7 @@ class LiveTradingEngine:
             if daily_return < -self._max_daily_loss_pct:
                 logger.critical(
                     f"DAILY LOSS LIMIT: {daily_return:.2%} < -{self._max_daily_loss_pct:.0%}. "
-                    f"Stopping trading."
+                    f"Stopping trading.",
                 )
                 self._request_stop("daily_loss_limit")
 
@@ -570,7 +570,7 @@ class LiveTradingEngine:
             logger.info(
                 f"[Bar {self._total_bars}] {bar_time.strftime('%H:%M')} UTC | "
                 f"{action_str} | pos={self._current_position:.3f} | "
-                f"PV=${self._portfolio_value:,.2f} | DD={drawdown:.2%}"
+                f"PV=${self._portfolio_value:,.2f} | DD={drawdown:.2%}",
             )
 
     # -------------------------------------------------------------------
@@ -587,12 +587,12 @@ class LiveTradingEngine:
             exchange_pos = await self.broker.get_single_position(self._asset)
             logger.info(
                 f"Shutdown position check: internal={self._current_position:.4f}, "
-                f"exchange={exchange_pos:.4f}"
+                f"exchange={exchange_pos:.4f}",
             )
             if abs(exchange_pos - self._current_position) > 0.01:
                 logger.warning(
                     f"SHUTDOWN WARNING: Position discrepancy detected! "
-                    f"Exchange has {exchange_pos:.4f}, internal has {self._current_position:.4f}"
+                    f"Exchange has {exchange_pos:.4f}, internal has {self._current_position:.4f}",
                 )
         except Exception as e:
             logger.warning(f"Shutdown position check failed: {e}")
@@ -603,7 +603,7 @@ class LiveTradingEngine:
             f"  Trades: {self._total_trades}\n"
             f"  Fees: ${self._total_fees:.4f}\n"
             f"  Final PV: ${self._portfolio_value:,.2f}\n"
-            f"  Position: {self._current_position:.4f}"
+            f"  Position: {self._current_position:.4f}",
         )
 
         if self._wandb_run is not None:

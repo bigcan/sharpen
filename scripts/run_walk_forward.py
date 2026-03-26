@@ -15,9 +15,10 @@ import argparse
 import logging
 import os
 import sys
-import yaml
 from datetime import datetime
 from pathlib import Path
+
+import yaml
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -72,8 +73,9 @@ def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dr
     # Phase 1: Training
     # ------------------------------------------------------------------
     try:
-        from scripts.run_full_pipeline import run_training, run_backtest
         import copy
+
+        from scripts.run_full_pipeline import run_backtest, run_training
 
         fold_config = copy.deepcopy(config)
 
@@ -198,7 +200,7 @@ def main():
 
     folds = splitter.split(
         start_date=data_cfg.get("start_date", "2025-01-01"),
-        end_date=data_cfg.get("end_date", "2025-06-30")
+        end_date=data_cfg.get("end_date", "2025-06-30"),
     )
     logger.info(f"Generated {len(folds)} walk-forward folds")
 

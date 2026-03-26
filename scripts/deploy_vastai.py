@@ -13,17 +13,17 @@ Subcommands:
     status   - Check training status on an instance
 """
 
-import os
-import sys
 import argparse
 import json
-import subprocess
-import zipfile
-import time
-import sqlite3
+import os
 import re
-from pathlib import Path
+import sqlite3
+import subprocess
+import sys
+import time
+import zipfile
 from datetime import datetime
+from pathlib import Path
 
 from dotenv import load_dotenv
 
@@ -293,7 +293,7 @@ def cmd_search(args):
             f"{o.get('dph_total', 0):>6.3f}  "
             f"{o.get('reliability2', o.get('reliability', 0)):>5.2f}  "
             f"{o.get('inet_down', 0):>8.1f}  "
-            f"{geo:>20}"
+            f"{geo:>20}",
         )
 
     print(f"\nTotal offers: {len(offers)}")
@@ -452,13 +452,13 @@ def cmd_deploy(args):
                 if remote_attr.st_size == local_size:
                     print(
                         f"Cache Hit: Remote {data_filename} matches size "
-                        f"({local_size / 1024 / 1024:.2f} MB). Skipping upload."
+                        f"({local_size / 1024 / 1024:.2f} MB). Skipping upload.",
                     )
                     should_upload = False
                 else:
                     print(
                         f"Cache Miss: Size mismatch "
-                        f"(local={local_size} vs remote={remote_attr.st_size}). Re-uploading..."
+                        f"(local={local_size} vs remote={remote_attr.st_size}). Re-uploading...",
                     )
             except IOError:
                 print("Cache Miss: Remote file not found. Uploading...")
@@ -636,13 +636,13 @@ def cmd_deploy(args):
         print("  Press Ctrl+C to cancel (run will continue on remote)\n")
 
         try:
-            from scripts.fetch_wandb_run import poll_run_until_complete
             from scripts.collect_run import collect_run
+            from scripts.fetch_wandb_run import poll_run_until_complete
 
             target_run_id = resolved_run_id
             print(f"  Polling Run ID: {target_run_id if target_run_id else 'LATEST (auto-detect)'}")
             result = poll_run_until_complete(
-                run_id=target_run_id, poll_interval=300, max_wait=28800
+                run_id=target_run_id, poll_interval=300, max_wait=28800,
             )
             if result.get("run_id"):
                 print(f"\nRun completed: {result['run_id']} (state: {result['state']})")
@@ -701,7 +701,7 @@ def cmd_list(args):
 
         print(
             f"{inst_id:>10}  {gpu:>12}  {status:>12}  "
-            f"${dph:>6.3f}  {uptime:>10}  {ssh_str}"
+            f"${dph:>6.3f}  {uptime:>10}  {ssh_str}",
         )
 
     print(f"\nTotal instances: {len(instances)}")

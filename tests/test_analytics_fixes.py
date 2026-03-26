@@ -1,8 +1,11 @@
 
 import unittest
-import pandas as pd
+
 import numpy as np
+import pandas as pd
+
 from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
+
 
 class TestAnalyticsFixes(unittest.TestCase):
     """
@@ -18,20 +21,20 @@ class TestAnalyticsFixes(unittest.TestCase):
         np.random.seed(42)
         # Generate symmetric normal returns
         returns = pd.Series(np.random.normal(0.001, 0.02, 10000))
-        
+
         analyzer = PyfolioAnalyzer(returns)
         metrics = analyzer.get_audit_metrics()
-        
+
         sharpe = metrics['sharpe_ratio']
         sortino = metrics['sortino_ratio']
-        
+
         # Check ratio (allow some noise margin)
         ratio = sortino / sharpe
         print(f"Sortino/Sharpe Ratio: {ratio:.4f} (Expected ~1.414)")
-        
+
         # It won't be exactly sqrt(2) due to sampling, but should be close (1.3 - 1.5)
         self.assertTrue(1.3 < ratio < 1.6, f"Sortino ratio {sortino} inconsistent with Sharpe {sharpe} for normal dist")
-        
+
         # Verify it doesn't explode on all-positive returns
         pos_returns = pd.Series(np.random.uniform(0.01, 0.02, 100))
         metrics_pos = PyfolioAnalyzer(pos_returns).get_audit_metrics()
@@ -50,16 +53,16 @@ class TestAnalyticsFixes(unittest.TestCase):
         # (1.0001)^500000 = 5.17e21 (Safely fits in float64, wait. float64 max is 1.8e308)
         # Let's try larger. 200,000 steps of 1% return.
         # (1.01)^200000 = inf
-        
+
         N = 200000
         returns = pd.Series(np.full(N, 0.01)) # 1% per step
-        
+
         analyzer = PyfolioAnalyzer(returns)
         metrics = analyzer.get_audit_metrics()
-        
+
         ann_ret = metrics['annual_return']
         print(f"Annual Return (Log-Space): {ann_ret}")
-        
+
         # It should be a finite number (or inf handled), but definitely NOT crash with OverflowError
         # The fix uses log-space, so it should compute a large number but not crash during intermediate steps.
         # Note: 1% per minute annualized is absurdly high, but tests robustness.
@@ -71,7 +74,7 @@ class TestAnalyticsFixes(unittest.TestCase):
         # If N is large, AnnFactor/N is small. The exponent is scaled down.
         # So even if total return is huge, annual return might be reasonable?
         # No, annual return is for a year.
-        
+
         # Let's just verify it runs without error on the specific case mentioned in bug report (500k steps).
         self.assertIsInstance(ann_ret, float)
 
@@ -82,7 +85,7 @@ class TestAnalyticsFixes(unittest.TestCase):
         returns = pd.Series(np.random.normal(0, 0.01, 1000))
         analyzer = PyfolioAnalyzer(returns)
         metrics = analyzer.get_audit_metrics()
-        
+
         self.assertIn('minute_value_at_risk', metrics)
         self.assertNotIn('daily_value_at_risk', metrics)
 
@@ -102,12 +105,12 @@ class TestAnalyticsFixes(unittest.TestCase):
         # Seq: 0 -> 1 -> 0
         pos1 = np.array([0, 1, 0])
         self.assertEqual(count_trades(pos1), 2) # 0->1 (1), 1->0 (1). Total 2.
-        
+
         # Case 2: Hold (noise)
         # Seq: 1 -> 1 -> 1.0000000001 -> 1
         pos2 = np.array([1, 1, 1.0000000001, 1])
         self.assertEqual(count_trades(pos2), 0) # Deltas < epsilon
-        
+
         # Case 3: Flip (Long to Short)
         # Seq: 1 -> -1 (Direct partial close + open)
         pos3 = np.array([1, -1])
@@ -115,12 +118,12 @@ class TestAnalyticsFixes(unittest.TestCase):
         # 1 * -1 = -1 (<0) -> Flip=1
         # Total = 2. CORRECT.
         self.assertEqual(count_trades(pos3), 2)
-        
+
         # Case 4: Flip (Short to Long)
         # Seq: -0.5 -> 0.5
         pos4 = np.array([-0.5, 0.5])
         self.assertEqual(count_trades(pos4), 2) # Base(1) + Flip(1) = 2
-        
+
         # Case 5: Zero Crossing sequence
         # Seq: 1 -> 0 -> -1
         pos5 = np.array([1, 0, -1])

@@ -17,15 +17,17 @@ Usage:
 import argparse
 import os
 import sys
-import yaml
+
 import numpy as np
 import pandas as pd
+import yaml
 
 sys.path.append(os.getcwd())
 
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
-from finrl_pro_ds.data.feature_engineering import MICRO_FEATURE_COLS, MACRO_FEATURE_COLS
 from scipy import stats
+
+from finrl_pro_ds.data.feature_engineering import MACRO_FEATURE_COLS, MICRO_FEATURE_COLS
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
 
 def load_split(config, start_date, end_date, norm_cutoff_date=None):
@@ -372,7 +374,7 @@ def main():
         print(f"{'=' * 50}")
 
         X, mid, timestamps, feature_cols = load_split(
-            config, sdef["start_date"], sdef["end_date"], sdef["norm_cutoff"]
+            config, sdef["start_date"], sdef["end_date"], sdef["norm_cutoff"],
         )
 
         # Classify bars

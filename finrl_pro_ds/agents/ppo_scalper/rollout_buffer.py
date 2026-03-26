@@ -4,8 +4,9 @@ On-policy Rollout Buffer for PPO.
 Pre-allocated numpy arrays for fixed-length trajectory storage.
 Supports GAE computation and minibatch iteration.
 """
+from typing import Generator, Optional
+
 import numpy as np
-from typing import Dict, Generator, Optional, Tuple
 
 
 class RolloutBuffer:
@@ -28,9 +29,9 @@ class RolloutBuffer:
         self,
         rollout_steps: int,
         num_envs: int,
-        micro_shape: Tuple[int, ...] = (15, 30),
-        private_shape: Tuple[int, ...] = (15, 5),
-        macro_shape: Tuple[int, ...] = (15,),
+        micro_shape: tuple[int, ...] = (15, 30),
+        private_shape: tuple[int, ...] = (15, 5),
+        macro_shape: tuple[int, ...] = (15,),
         n_action_branches: int = 1,
         n_qty_actions: int = 6,
     ):
@@ -64,7 +65,7 @@ class RolloutBuffer:
 
     def store(
         self,
-        obs: Dict[str, np.ndarray],
+        obs: dict[str, np.ndarray],
         actions: np.ndarray,
         log_probs: np.ndarray,
         rewards: np.ndarray,
@@ -146,8 +147,8 @@ class RolloutBuffer:
         self.returns = self.advantages + self.values
 
     def iterate_minibatches(
-        self, batch_size: int, shuffle: bool = True
-    ) -> Generator[Dict[str, np.ndarray], None, None]:
+        self, batch_size: int, shuffle: bool = True,
+    ) -> Generator[dict[str, np.ndarray], None, None]:
         """
         Yield minibatches of flattened rollout data.
 

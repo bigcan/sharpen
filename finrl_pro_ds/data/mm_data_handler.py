@@ -10,9 +10,10 @@ step() returns all fields from MultiScaleOHLCVHandler plus:
   - low: float (base-scale bar low)
   - volume: float (base-scale bar volume)
 """
-import numpy as np
 import logging
-from typing import Dict, Optional
+from typing import Optional
+
+import numpy as np
 
 from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
 
@@ -31,10 +32,10 @@ class MMDataHandler(MultiScaleOHLCVHandler):
         self._base_volume = base_df['volume'].values.astype(np.float64)
 
         logger.info(
-            f"MMDataHandler: added open/volume arrays ({len(self._base_open)} bars)"
+            f"MMDataHandler: added open/volume arrays ({len(self._base_open)} bars)",
         )
 
-    def step(self) -> Optional[Dict]:
+    def step(self) -> Optional[dict]:
         """Advance one bar, return multi-scale obs + full OHLCV bar data.
 
         Returns parent dict augmented with: open, high, low, volume

@@ -28,7 +28,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd  # noqa: E402
-from scipy.stats import skew, kurtosis  # noqa: E402
+from scipy.stats import kurtosis, skew  # noqa: E402
 
 DATA_PATH = PROJECT_ROOT / "data" / "processed" / "btc_2025_jan_jun.parquet"
 
@@ -126,7 +126,7 @@ def main():
         'z_close',
         'z_volume',
         'zd_10',
-        'zd_30'
+        'zd_30',
     ]
 
     for col in audit_cols:

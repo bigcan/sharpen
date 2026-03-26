@@ -104,13 +104,13 @@ class QNetTwinDuel(QNetBase):
         q_val1 = self.net_val1(s_enc)
         q_adv1 = self.net_adv1(s_enc)
         q_duel1 = self.value_re_norm(
-            q_val1 - q_val1.mean(dim=1, keepdim=True) + q_adv1
+            q_val1 - q_val1.mean(dim=1, keepdim=True) + q_adv1,
         )
 
         q_val2 = self.net_val2(s_enc)
         q_adv2 = self.net_adv2(s_enc)
         q_duel2 = self.value_re_norm(
-            q_val2 - q_val2.mean(dim=1, keepdim=True) + q_adv2
+            q_val2 - q_val2.mean(dim=1, keepdim=True) + q_adv2,
         )
         return q_duel1, q_duel2
 
@@ -126,7 +126,7 @@ class QNetTwinDuel(QNetBase):
 
 
 def build_mlp(
-    dims: list[int], activation: type[nn.Module] | None = None, if_raw_out: bool = True
+    dims: list[int], activation: type[nn.Module] | None = None, if_raw_out: bool = True,
 ) -> nn.Sequential:
     if activation is None:
         activation = nn.ReLU

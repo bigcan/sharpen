@@ -29,14 +29,18 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from finrl_pro_ds.crypto.data.crypto_array_builder import (  # noqa: E402
+    build_funding_arb_arrays,
+)
 from finrl_pro_ds.crypto.data.crypto_loader import (  # noqa: E402
     WalkForwardCoverageValidator,
     fetch_crypto_data,
     fetch_spot_data,
 )
-from finrl_pro_ds.crypto.data.crypto_array_builder import build_funding_arb_arrays  # noqa: E402
-from finrl_pro_ds.crypto.features.funding_arb_features import compute_funding_arb_features  # noqa: E402
 from finrl_pro_ds.crypto.envs.funding_arb_env import FundingArbEnv  # noqa: E402
+from finrl_pro_ds.crypto.features.funding_arb_features import (  # noqa: E402
+    compute_funding_arb_features,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +49,7 @@ def load_config(config_path: str | None = None) -> dict:
     """Load experiment configuration from YAML."""
     if config_path is None:
         config_path = str(
-            PROJECT_ROOT / "configs" / "funding_arb_delta_neutral.yaml"
+            PROJECT_ROOT / "configs" / "funding_arb_delta_neutral.yaml",
         )
 
     with open(config_path, "r", encoding="utf-8") as f:
@@ -149,7 +153,7 @@ def create_env(arrays: dict, config: dict) -> FundingArbEnv:
 
 def _make_sb3_agent(agent_type: str, env: FundingArbEnv, agent_cfg: dict):
     """Instantiate an SB3 agent from config."""
-    from stable_baselines3 import PPO, SAC, A2C
+    from stable_baselines3 import A2C, PPO, SAC
 
     cls_map = {"ppo": PPO, "sac": SAC, "a2c": A2C}
     cls = cls_map[agent_type]
@@ -304,7 +308,7 @@ def run_backtest(config: dict, dry_run: bool = False,
             val_metrics = _evaluate_agent_on_env(model, val_env)
             logger.info(
                 f"  Val: return={val_metrics['total_return']:.2%}, "
-                f"funding/costs={val_metrics['funding_vs_costs_ratio']:.2f}"
+                f"funding/costs={val_metrics['funding_vs_costs_ratio']:.2f}",
             )
 
             # Evaluate on test
@@ -320,7 +324,7 @@ def run_backtest(config: dict, dry_run: bool = False,
                 f"  Test: return={test_metrics['total_return']:.2%}, "
                 f"sharpe={test_metrics['sharpe']:.3f}, "
                 f"funding/costs={test_metrics['funding_vs_costs_ratio']:.2f}, "
-                f"max_delta={test_metrics['max_delta_exposure']:.4f}"
+                f"max_delta={test_metrics['max_delta_exposure']:.4f}",
             )
 
         except Exception as e:
@@ -359,13 +363,13 @@ def run_backtest(config: dict, dry_run: bool = False,
         "median_return": float(results_df["total_return"].median()),
         "median_max_dd": float(results_df["max_drawdown"].median()),
         "median_funding_vs_costs": float(
-            results_df.get("funding_vs_costs_ratio", pd.Series([0.0])).median()
+            results_df.get("funding_vs_costs_ratio", pd.Series([0.0])).median(),
         ),
         "median_max_delta": float(
-            results_df.get("max_delta_exposure", pd.Series([0.0])).median()
+            results_df.get("max_delta_exposure", pd.Series([0.0])).median(),
         ),
         "median_avg_active_pairs": float(
-            results_df.get("avg_active_pairs", pd.Series([0.0])).median()
+            results_df.get("avg_active_pairs", pd.Series([0.0])).median(),
         ),
         "results": results_df.to_dict("records"),
     }
@@ -385,19 +389,19 @@ def main():
     parser = argparse.ArgumentParser(description="Funding Rate Arbitrage Backtest Runner")
     parser.add_argument(
         "--config", type=str, default=None,
-        help="Path to experiment config YAML"
+        help="Path to experiment config YAML",
     )
     parser.add_argument(
         "--dry_run", action="store_true",
-        help="Run 1 window with reduced timesteps for validation"
+        help="Run 1 window with reduced timesteps for validation",
     )
     parser.add_argument(
         "--n_windows", type=int, default=None,
-        help="Limit to first N walk-forward windows (default: all)"
+        help="Limit to first N walk-forward windows (default: all)",
     )
     parser.add_argument(
         "--timesteps", type=int, default=None,
-        help="Override total_timesteps per window"
+        help="Override total_timesteps per window",
     )
 
     args = parser.parse_args()

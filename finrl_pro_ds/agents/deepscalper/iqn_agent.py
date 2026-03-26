@@ -17,15 +17,16 @@ Interface is identical to DeepScalperBDQ for trainer/pipeline compatibility.
 """
 import logging
 import os
+from typing import Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from typing import Dict, Optional
 
+from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 from finrl_pro_ds.agents.deepscalper.iqn_network import IQNNetwork
 from finrl_pro_ds.agents.deepscalper.per_buffer import PrioritizedReplayBuffer
-from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class IQNAgent:
 
     def __init__(
         self,
-        network_config: Dict,
+        network_config: dict,
         lr: float = 3e-4,
         gamma: float = 0.99,
         tau: float = 0.005,
@@ -230,7 +231,7 @@ class IQNAgent:
         macro: torch.Tensor,
         deterministic: bool = False,
         qty_mask=None,
-        context: Optional[Dict] = None,
+        context: Optional[dict] = None,
         eval_epsilon: float = 0.0,
     ) -> np.ndarray:
         """Select action by averaging over quantile Q-values.
@@ -259,7 +260,7 @@ class IQNAgent:
 
             if self.multi_horizon:
                 q_short, q_long, _, new_hidden = self.policy_net.forward_dual(
-                    micro, private_in, macro, tau, hidden=self._hidden_state
+                    micro, private_in, macro, tau, hidden=self._hidden_state,
                 )
                 self._hidden_state = new_hidden
                 # Blend: alpha * short + (1-alpha) * long
@@ -269,7 +270,7 @@ class IQNAgent:
                 )
             else:
                 q_tau, _, new_hidden = self.policy_net(
-                    micro, private_in, macro, tau, hidden=self._hidden_state
+                    micro, private_in, macro, tau, hidden=self._hidden_state,
                 )
                 self._hidden_state = new_hidden
                 q_mean = q_tau.mean(dim=1)
@@ -357,11 +358,11 @@ class IQNAgent:
         weight = (tau_expanded - (delta < 0).float()).abs()
         return (weight * huber).mean(dim=1).mean(dim=1)  # (B,)
 
-    def train_step(self) -> Optional[Dict[str, float]]:
+    def train_step(self) -> Optional[dict[str, float]]:
         """Single gradient step (backward compat). Prefer train_step_mega()."""
         return self.train_step_mega(1)
 
-    def train_step_mega(self, n_steps: int = 1) -> Optional[Dict[str, float]]:
+    def train_step_mega(self, n_steps: int = 1) -> Optional[dict[str, float]]:
         """Run n_steps IQN gradient updates from a single mega-batch.
 
         PERF-OPT S154 (O1): Samples n_steps * batch_size transitions ONCE,
@@ -421,7 +422,7 @@ class IQNAgent:
             )
         return metrics
 
-    def _train_step_single_per(self) -> Optional[Dict[str, float]]:
+    def _train_step_single_per(self) -> Optional[dict[str, float]]:
         """Single gradient step with PER sampling (not mega-batchable)."""
         (state_batch, action_batch, reward_batch, next_state_batch,
          done_batch, aux_target_batch, per_indices, is_weights) = self.memory.sample(self.batch_size)
@@ -449,7 +450,7 @@ class IQNAgent:
     def _train_step_on_batch(
         self, micro_s, private_s, macro_s, micro_ns, private_ns, macro_ns,
         actions, rewards, dones, aux_targets, per_indices, is_weights_t,
-    ) -> Optional[Dict[str, float]]:
+    ) -> Optional[dict[str, float]]:
         """GPU-only gradient step on pre-transferred batch tensors."""
 
         B = micro_s.shape[0]
@@ -467,7 +468,7 @@ class IQNAgent:
                 # --- Multi-Horizon Training ---
                 # Policy net: both horizons
                 q_short, q_long, pred_vol, _ = self.policy_net.forward_dual(
-                    micro_s, private_s, macro_s, tau
+                    micro_s, private_s, macro_s, tau,
                 )
                 q_short_a = q_short.gather(2, actions_flat.unsqueeze(1).expand(-1, N, -1)).squeeze(2)
                 q_long_a = q_long.gather(2, actions_flat.unsqueeze(1).expand(-1, N, -1)).squeeze(2)
@@ -475,7 +476,7 @@ class IQNAgent:
                 with torch.no_grad():
                     # Double DQN: use BLENDED Q from policy net to select action
                     q_next_short, q_next_long, _, _ = self.policy_net.forward_dual(
-                        micro_ns, private_ns, macro_ns, tau_prime
+                        micro_ns, private_ns, macro_ns, tau_prime,
                     )
                     q_next_blended = (
                         self.horizon_alpha * q_next_short.mean(dim=1)
@@ -485,7 +486,7 @@ class IQNAgent:
 
                     # Target net: both horizons
                     tgt_short, tgt_long, _, _ = self.target_net.forward_dual(
-                        micro_ns, private_ns, macro_ns, tau_prime
+                        micro_ns, private_ns, macro_ns, tau_prime,
                     )
                     tgt_short_a = tgt_short.gather(2, a_star.unsqueeze(1).expand(-1, N_prime, -1)).squeeze(2)
                     tgt_long_a = tgt_long.gather(2, a_star.unsqueeze(1).expand(-1, N_prime, -1)).squeeze(2)
@@ -518,7 +519,7 @@ class IQNAgent:
 
                     q_next_target, _, _ = self.target_net(micro_ns, private_ns, macro_ns, tau_prime)
                     q_target_a = q_next_target.gather(
-                        2, a_star.unsqueeze(1).expand(-1, N_prime, -1)
+                        2, a_star.unsqueeze(1).expand(-1, N_prime, -1),
                     ).squeeze(2)
 
                     T_tau = r + self.gamma_n * (1.0 - d) * q_target_a
