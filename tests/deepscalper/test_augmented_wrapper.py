@@ -10,15 +10,16 @@ Verifies that:
 
 import unittest
 from unittest.mock import MagicMock
+
 import numpy as np
 
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 from finrl_pro_ds.envs.augmented_wrapper import (
-    AugmentedDataWrapper,
-    _SPREAD_IDX,
     _OFI_INDICES,
+    _SPREAD_IDX,
     _VOL_INDICES,
+    AugmentedDataWrapper,
 )
+from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 
 
 def _make_step_data(mid=50000.0, spread_bps=2.0):
@@ -85,10 +86,10 @@ class TestAugmentedDataWrapper(unittest.TestCase):
     def test_wrapper_disabled_passthrough(self):
         """When enabled=False, observations match unwrapped env exactly."""
         wrapped, base, handler = _make_env({"enabled": False})
-        
+
         # Reset both and compare
         obs_w, _ = wrapped.reset(seed=42)
-        
+
         # Re-create to get clean base observation
         handler2 = _make_mock_handler()
         config = base.config.copy()
@@ -136,13 +137,13 @@ class TestAugmentedDataWrapper(unittest.TestCase):
             "augment_ofi": False,
         }
         wrapped, base, _ = _make_env(cfg)
-        
+
         handler2 = _make_mock_handler()
         base2 = DeepScalperEnv(base.config.copy(), data_handler=handler2)
         obs_ref, _ = base2.reset(seed=42)
-        
+
         obs_aug, _ = wrapped.reset(seed=42)
-        
+
         expected = obs_ref["micro"][:, _SPREAD_IDX] * 1.5
         np.testing.assert_allclose(obs_aug["micro"][:, _SPREAD_IDX], expected, rtol=1e-5)
 
@@ -158,17 +159,17 @@ class TestAugmentedDataWrapper(unittest.TestCase):
             "augment_ofi": False,
         }
         wrapped, base, _ = _make_env(cfg)
-        
+
         handler2 = _make_mock_handler()
         base2 = DeepScalperEnv(base.config.copy(), data_handler=handler2)
         obs_ref, _ = base2.reset(seed=42)
-        
+
         obs_aug, _ = wrapped.reset(seed=42)
-        
+
         # Volume columns should differ (noise added)
         vol_ref = obs_ref["micro"][:, _VOL_INDICES]
         vol_aug = obs_aug["micro"][:, _VOL_INDICES]
-        
+
         # At least some values should differ
         self.assertFalse(np.allclose(vol_ref, vol_aug, atol=1e-6),
                          "Volume columns should be perturbed")
@@ -185,13 +186,13 @@ class TestAugmentedDataWrapper(unittest.TestCase):
             "augment_ofi": False,
         }
         wrapped, base, _ = _make_env(cfg)
-        
+
         handler2 = _make_mock_handler()
         base2 = DeepScalperEnv(base.config.copy(), data_handler=handler2)
         obs_ref, _ = base2.reset(seed=42)
-        
+
         obs_aug, _ = wrapped.reset(seed=42)
-        
+
         self.assertFalse(np.allclose(obs_ref["macro"], obs_aug["macro"], atol=1e-6),
                          "Macro features should be perturbed")
 
@@ -208,12 +209,12 @@ class TestAugmentedDataWrapper(unittest.TestCase):
         }
         wrapped, _, _ = _make_env(cfg)
         obs, _ = wrapped.reset(seed=42)
-        
+
         # Step multiple times — factor should remain the same
         action = 0  # Hold (Discrete action for V5 env)
         obs1, _, _, _, _ = wrapped.step(action)
         obs2, _, _, _, _ = wrapped.step(action)
-        
+
         # The wrapper's internal _vol_scale should not have changed
         self.assertEqual(wrapped._vol_scale, 2.0)
 
@@ -229,12 +230,12 @@ class TestAugmentedDataWrapper(unittest.TestCase):
             "augment_ofi": False,
         }
         wrapped, _, _ = _make_env(cfg)
-        
+
         scales = []
         for _ in range(10):
             wrapped.reset()
             scales.append(wrapped._vol_scale)
-        
+
         # At least 2 distinct values (probabilistically certain with 10 draws)
         unique_scales = len(set(scales))
         self.assertGreater(unique_scales, 1,
@@ -253,13 +254,13 @@ class TestAugmentedDataWrapper(unittest.TestCase):
             "macro_noise_std": 1.0,
         }
         wrapped, base, _ = _make_env(cfg)
-        
+
         handler2 = _make_mock_handler()
         base2 = DeepScalperEnv(base.config.copy(), data_handler=handler2)
         obs_ref, _ = base2.reset(seed=42)
-        
+
         obs_aug, _ = wrapped.reset(seed=42)
-        
+
         np.testing.assert_array_equal(obs_aug["private"], obs_ref["private"],
                                       "Private state must never be perturbed")
 
@@ -275,10 +276,10 @@ class TestAugmentedDataWrapper(unittest.TestCase):
         }
         wrapped, _, _ = _make_env(cfg)
         wrapped.reset(seed=42)
-        
+
         action = 0  # Hold (Discrete action for V5 env)
         _, reward, terminated, truncated, info = wrapped.step(action)
-        
+
         # Reward should be a valid float (not NaN)
         self.assertFalse(np.isnan(reward), "Reward should not be NaN")
         # Info should contain standard keys

@@ -6,8 +6,8 @@ Eliminates per-object overhead: 2M entries uses ~22 GB instead of ~60-100 GB.
 
 Drop-in replacement for ReplayBuffer (same push/sample/__len__ interface).
 """
+
 import numpy as np
-from typing import Dict, Tuple
 
 
 class FlatReplayBuffer:
@@ -34,10 +34,10 @@ class FlatReplayBuffer:
     def __init__(
         self,
         capacity: int,
-        micro_shape: Tuple[int, ...] = (15, 30),
-        macro_shape: Tuple[int, ...] = (15,),
-        private_shape: Tuple[int, ...] = (15, 3),
-        action_shape: Tuple[int, ...] = (3,),
+        micro_shape: tuple[int, ...] = (15, 30),
+        macro_shape: tuple[int, ...] = (15,),
+        private_shape: tuple[int, ...] = (15, 3),
+        action_shape: tuple[int, ...] = (3,),
         action_dtype=np.int64,
     ):
         self.capacity = capacity
@@ -60,8 +60,8 @@ class FlatReplayBuffer:
         self._dones = np.zeros(capacity, dtype=np.float32)
         self._aux_targets = np.zeros(capacity, dtype=np.float32)
 
-    def push(self, state: Dict, action, reward: float,
-             next_state: Dict, done: bool, aux_target: float = 0.0):
+    def push(self, state: dict, action, reward: float,
+             next_state: dict, done: bool, aux_target: float = 0.0):
         """Store a transition by writing directly to pre-allocated arrays.
 
         Interface is identical to the old ReplayBuffer.push() — accepts
@@ -92,15 +92,15 @@ class FlatReplayBuffer:
         if self._ptr == 0 and self._size == self.capacity:
             import logging
             logging.getLogger(__name__).info(
-                f"Replay buffer full ({self.capacity}). Oldest transitions now being overwritten."
+                f"Replay buffer full ({self.capacity}). Oldest transitions now being overwritten.",
             )
 
     def push_batch(
         self,
-        states: Dict[str, np.ndarray],
+        states: dict[str, np.ndarray],
         actions: np.ndarray,
         rewards: np.ndarray,
-        next_states: Dict[str, np.ndarray],
+        next_states: dict[str, np.ndarray],
         dones: np.ndarray,
         aux_targets: np.ndarray,
     ):
@@ -159,8 +159,8 @@ class FlatReplayBuffer:
         self._ptr = (ptr + n) % cap
         self._size = min(self._size + n, cap)
 
-    def sample(self, batch_size: int) -> Tuple[Dict, np.ndarray, np.ndarray,
-                                                Dict, np.ndarray, np.ndarray]:
+    def sample(self, batch_size: int) -> tuple[dict, np.ndarray, np.ndarray,
+                                                dict, np.ndarray, np.ndarray]:
         """Sample a random batch. Returns pre-stacked numpy arrays.
 
         Returns:
@@ -192,8 +192,8 @@ class FlatReplayBuffer:
         )
 
     def sample_stratified(self, batch_size: int, hold_action: int = 1,
-                          hold_ratio: float = 0.5) -> Tuple[Dict, np.ndarray,
-                                                             np.ndarray, Dict,
+                          hold_ratio: float = 0.5) -> tuple[dict, np.ndarray,
+                                                             np.ndarray, dict,
                                                              np.ndarray, np.ndarray]:
         """Sample with stratified hold/non-hold ratio.
 

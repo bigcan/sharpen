@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Tuple
 
 import torch
 from torch import Tensor
@@ -55,26 +54,26 @@ class AlphaSeekReplayBuffer:
         self.max_size = max_size
         self.num_seqs = num_seqs
         self.device = torch.device(
-            f"cuda:{gpu_id}" if (torch.cuda.is_available() and gpu_id >= 0) else "cpu"
+            f"cuda:{gpu_id}" if (torch.cuda.is_available() and gpu_id >= 0) else "cpu",
         )
 
         self.states = torch.empty(
-            (max_size, num_seqs, state_dim), dtype=torch.float32, device=self.device
+            (max_size, num_seqs, state_dim), dtype=torch.float32, device=self.device,
         )
         self.actions = torch.empty(
-            (max_size, num_seqs, action_dim), dtype=torch.float32, device=self.device
+            (max_size, num_seqs, action_dim), dtype=torch.float32, device=self.device,
         )
         self.rewards = torch.empty(
-            (max_size, num_seqs), dtype=torch.float32, device=self.device
+            (max_size, num_seqs), dtype=torch.float32, device=self.device,
         )
         self.undones = torch.empty(
-            (max_size, num_seqs), dtype=torch.float32, device=self.device
+            (max_size, num_seqs), dtype=torch.float32, device=self.device,
         )
 
     def __len__(self) -> int:
         return self.cur_size
 
-    def update(self, items: Tuple[Tensor, ...]) -> None:
+    def update(self, items: tuple[Tensor, ...]) -> None:
         """Push a batch of transitions into the ring buffer.
 
         Parameters
@@ -110,7 +109,7 @@ class AlphaSeekReplayBuffer:
         self.p = p
         self.cur_size = self.max_size if self.if_full else self.p
 
-    def sample(self, batch_size: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    def sample(self, batch_size: int) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
         """Sample a uniform random batch of (s, a, r, undone, s') transitions.
 
         Returns
@@ -125,7 +124,7 @@ class AlphaSeekReplayBuffer:
         sample_len = self.cur_size - 1
 
         ids = torch.randint(
-            sample_len * self.num_seqs, size=(batch_size,), requires_grad=False
+            sample_len * self.num_seqs, size=(batch_size,), requires_grad=False,
         )
         ids0 = torch.fmod(ids, sample_len)  # timestep index
         ids1 = torch.div(ids, sample_len, rounding_mode="floor")  # seq index
@@ -152,7 +151,7 @@ class AlphaSeekReplayBuffer:
                 buf_item = item[: self.cur_size]
             else:
                 buf_item = torch.vstack(
-                    (item[self.p : self.cur_size], item[0 : self.p])
+                    (item[self.p : self.cur_size], item[0 : self.p]),
                 )
             file_path = os.path.join(cwd, f"replay_buffer_{name}.pth")
             logger.info(f"Saving replay buffer: {file_path}")

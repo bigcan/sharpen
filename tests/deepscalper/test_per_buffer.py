@@ -6,11 +6,10 @@ Covers:
   2. PrioritizedReplayBuffer sampling and IS weights
   3. BDQ agent integration with PER buffer
 """
-import pytest
 import numpy as np
+import pytest
 
-from finrl_pro_ds.agents.deepscalper.per_buffer import SumTree, PrioritizedReplayBuffer
-
+from finrl_pro_ds.agents.deepscalper.per_buffer import PrioritizedReplayBuffer, SumTree
 
 # ---------------------------------------------------------------------------
 # 1. SumTree Unit Tests
@@ -195,7 +194,7 @@ class TestPrioritizedReplayBuffer:
     def test_beta_annealing(self):
         """Beta should anneal from beta_start toward 1.0 as frames progress."""
         buf = PrioritizedReplayBuffer(
-            capacity=100, alpha=0.6, beta_start=0.4, beta_frames=1000
+            capacity=100, alpha=0.6, beta_start=0.4, beta_frames=1000,
         )
         for i in range(100):
             s, a, r, ns, d, aux = _make_dummy_transition(i)

@@ -44,7 +44,7 @@ class AlphaSeekAgent:
         if agent_type not in AGENT_NET_MAP:
             raise ValueError(
                 f"Unknown agent_type '{agent_type}'. "
-                f"Valid: {list(AGENT_NET_MAP.keys())}"
+                f"Valid: {list(AGENT_NET_MAP.keys())}",
             )
 
         self.agent_type = agent_type
@@ -57,7 +57,7 @@ class AlphaSeekAgent:
         # Instantiate the Q-network
         net_class = AGENT_NET_MAP[agent_type]
         self.act: QNetBase = net_class(
-            dims=list(net_dims), state_dim=state_dim, action_dim=action_dim
+            dims=list(net_dims), state_dim=state_dim, action_dim=action_dim,
         )
         self.act.to(self.device, non_blocking=True)
         self.act.explore_rate = 0.0  # deterministic inference
@@ -79,7 +79,7 @@ class AlphaSeekAgent:
         else:
             raise FileNotFoundError(
                 f"No checkpoint found in {checkpoint_dir}. "
-                f"Expected act.pth or act_target.pth"
+                f"Expected act.pth or act_target.pth",
             )
 
         # Contest checkpoints save full nn.Module (not state_dict), requiring

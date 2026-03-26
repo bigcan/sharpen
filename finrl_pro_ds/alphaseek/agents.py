@@ -18,7 +18,6 @@ import logging
 import os
 from copy import deepcopy
 from dataclasses import dataclass
-from typing import Tuple
 
 import torch
 from torch import Tensor
@@ -113,7 +112,7 @@ class AgentDoubleDQN:
         self.action_dim = action_dim
         self.last_state = None
         self.device = torch.device(
-            f"cuda:{gpu_id}" if (torch.cuda.is_available() and gpu_id >= 0) else "cpu"
+            f"cuda:{gpu_id}" if (torch.cuda.is_available() and gpu_id >= 0) else "cpu",
         )
 
         # Build networks
@@ -121,11 +120,11 @@ class AgentDoubleDQN:
         cri_class = getattr(self, "cri_class", None)
 
         self.act = act_class(list(net_dims), state_dim, action_dim).to(
-            self.device, non_blocking=True
+            self.device, non_blocking=True,
         )
         self.cri = (
             cri_class(list(net_dims), state_dim, action_dim).to(
-                self.device, non_blocking=True
+                self.device, non_blocking=True,
             )
             if cri_class
             else self.act
@@ -152,8 +151,8 @@ class AgentDoubleDQN:
         }
 
     def explore_env(
-        self, env, horizon_len: int, if_random: bool = False
-    ) -> Tuple[Tensor, ...]:
+        self, env, horizon_len: int, if_random: bool = False,
+    ) -> tuple[Tensor, ...]:
         """Collect trajectories from vectorized env.
 
         Returns
@@ -187,7 +186,7 @@ class AgentDoubleDQN:
         for t in range(horizon_len):
             if if_random:
                 action = torch.randint(
-                    self.action_dim, size=(self.num_envs, 1), device=self.device
+                    self.action_dim, size=(self.num_envs, 1), device=self.device,
                 )
             else:
                 action = get_action(state).detach()
@@ -205,8 +204,8 @@ class AgentDoubleDQN:
         return states, actions, rewards, undones
 
     def get_obj_critic(
-        self, buffer: AlphaSeekReplayBuffer, batch_size: int
-    ) -> Tuple[Tensor, Tensor]:
+        self, buffer: AlphaSeekReplayBuffer, batch_size: int,
+    ) -> tuple[Tensor, Tensor]:
         """Compute Double DQN critic loss.
 
         Returns (loss, q_values) tuple.
@@ -227,7 +226,7 @@ class AgentDoubleDQN:
         obj_critic = self.criterion(q1, q_labels) + self.criterion(q2, q_labels)
         return obj_critic, q1
 
-    def update_net(self, buffer: AlphaSeekReplayBuffer) -> Tuple[float, ...]:
+    def update_net(self, buffer: AlphaSeekReplayBuffer) -> tuple[float, ...]:
         """Run SGD updates on the Q-network using replay buffer data.
 
         Returns (avg_critic_loss, avg_q_value) tuple.
@@ -237,7 +236,7 @@ class AgentDoubleDQN:
             self._update_avg_std_for_normalization(
                 states=states.reshape((-1, self.state_dim)),
                 returns=self._get_cumulative_rewards(
-                    rewards=rewards, undones=undones
+                    rewards=rewards, undones=undones,
                 ).reshape((-1,)),
             )
 
@@ -279,7 +278,7 @@ class AgentDoubleDQN:
 
     @staticmethod
     def _soft_update(
-        target_net: torch.nn.Module, current_net: torch.nn.Module, tau: float
+        target_net: torch.nn.Module, current_net: torch.nn.Module, tau: float,
     ) -> None:
         for tar, cur in zip(target_net.parameters(), current_net.parameters()):
             tar.data.copy_(cur.data * tau + tar.data * (1.0 - tau))
@@ -305,7 +304,7 @@ class AgentDoubleDQN:
         return returns
 
     def _update_avg_std_for_normalization(
-        self, states: Tensor, returns: Tensor
+        self, states: Tensor, returns: Tensor,
     ) -> None:
         tau = self.state_value_tau
         if tau == 0:

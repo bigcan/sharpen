@@ -32,14 +32,16 @@ import pandas as pd
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from finrl_pro_ds.crypto.data.crypto_array_builder import (  # noqa: E402
+    build_funding_arb_arrays,
+)
 from scripts.funding_arb_runner import (  # noqa: E402
+    _evaluate_agent_on_env,
+    _make_sb3_agent,
+    create_env,
     load_config,
     prepare_data,
-    create_env,
-    _make_sb3_agent,
-    _evaluate_agent_on_env,
 )
-from finrl_pro_ds.crypto.data.crypto_array_builder import build_funding_arb_arrays  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -198,7 +200,7 @@ def hpo_objective(
 
         logger.info(
             f"Trial {trial.number}: total_return={total_return:.4f}, "
-            f"sharpe={val_metrics.get('sharpe', 0):.3f}"
+            f"sharpe={val_metrics.get('sharpe', 0):.3f}",
         )
         return total_return
 
@@ -325,7 +327,7 @@ def run_hpo_for_window(
     logger.info(
         f"  Val: return={val_metrics['total_return']:.2%}, "
         f"sharpe={val_metrics.get('sharpe', 0):.3f}, "
-        f"funding/costs={val_metrics.get('funding_vs_costs_ratio', 0):.2f}"
+        f"funding/costs={val_metrics.get('funding_vs_costs_ratio', 0):.2f}",
     )
     _wandb_log({
         f"val/w{w_idx}/return": val_metrics["total_return"],
@@ -339,7 +341,7 @@ def run_hpo_for_window(
         f"  Test: return={test_metrics['total_return']:.2%}, "
         f"sharpe={test_metrics.get('sharpe', 0):.3f}, "
         f"funding/costs={test_metrics.get('funding_vs_costs_ratio', 0):.2f}, "
-        f"max_dd={test_metrics.get('max_drawdown', 0):.2%}"
+        f"max_dd={test_metrics.get('max_drawdown', 0):.2%}",
     )
 
     _wandb_log({

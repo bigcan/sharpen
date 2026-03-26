@@ -10,9 +10,9 @@ import numpy as np
 import torch
 
 from finrl_pro_ds.agents.sac.networks import (
-    SummaryStatsEncoder,
     SACActorNetwork,
     SACCriticNetwork,
+    SummaryStatsEncoder,
 )
 from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
 

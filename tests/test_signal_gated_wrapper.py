@@ -36,7 +36,7 @@ class MockHandler:
         self._base_atr = np.ones(n_bars) * 0.5
         self._base_timestamps = np.arange(
             np.datetime64('2025-01-01'), np.datetime64('2025-01-01') + np.timedelta64(n_bars, 'm'),
-            np.timedelta64(1, 'm')
+            np.timedelta64(1, 'm'),
         )
 
     def reset(self):

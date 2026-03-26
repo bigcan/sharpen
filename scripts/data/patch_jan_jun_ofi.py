@@ -1,6 +1,7 @@
 """Patch btc_2025_jan_jun.parquet: rename vol_imbalance_* → ofi_*"""
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
 
 path = Path("data/processed/btc_2025_jan_jun.parquet")
 df = pd.read_parquet(path)

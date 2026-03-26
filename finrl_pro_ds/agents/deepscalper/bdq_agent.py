@@ -1,15 +1,15 @@
 import logging
 import os
-from typing import Dict, Tuple, Optional
+from typing import Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
 
+from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 from finrl_pro_ds.agents.deepscalper.networks import DeepScalperNetwork
 from finrl_pro_ds.agents.deepscalper.per_buffer import PrioritizedReplayBuffer
-from finrl_pro_ds.agents.deepscalper.flat_replay_buffer import FlatReplayBuffer
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +19,7 @@ class DeepScalperBDQ:
     """
     def __init__(
         self,
-        network_config: Dict,
+        network_config: dict,
         lr: float = 1e-4,
         gamma: float = 0.99,
         epsilon_start: float = 1.0,
@@ -31,7 +31,7 @@ class DeepScalperBDQ:
         target_update_freq: int = 100,
         tau: float = 0.005,  # Polyak averaging coefficient (0 = no update, 1 = hard copy)
         auxiliary_weight: float = 0.1, # Section 4.4
-        action_dims: Tuple[int, int] = (5, 9),  # Paper-aligned: (Price, SignedQty)
+        action_dims: tuple[int, int] = (5, 9),  # Paper-aligned: (Price, SignedQty)
         use_amp: bool = False,
         use_per: bool = False,          # Paper Section 4.3: Prioritized Experience Replay
         per_alpha: float = 0.6,         # Prioritization exponent (0=uniform, 1=full)
@@ -39,7 +39,7 @@ class DeepScalperBDQ:
         per_beta_frames: int = 100000,  # Anneal beta to 1.0 over this many frames
         target_q_clip: float = 5000.0,  # Sprint 3: Clip target Q-values (default for gamma=0.99, R=50)
         torch_compile: bool = False,    # PERF FIX-1: torch.compile for GPU kernel fusion
-        device: str = "cpu"
+        device: str = "cpu",
     ):
         self.device = torch.device(device)
         self.use_amp = use_amp
@@ -111,7 +111,7 @@ class DeepScalperBDQ:
                 capacity=buffer_size,
                 alpha=per_alpha,
                 beta_start=per_beta_start,
-                beta_frames=per_beta_frames
+                beta_frames=per_beta_frames,
             )
         else:
             # FIX BUF-1: Pre-allocated numpy arrays instead of Python list.
@@ -141,7 +141,7 @@ class DeepScalperBDQ:
                 import warnings
                 warnings.warn(
                     f"FlatReplayBuffer capacity={buffer_size} pre-allocated {est_gb:.1f}GB RAM.",
-                    ResourceWarning
+                    ResourceWarning,
                 )
 
         # PERF-OPT: Enable pinned memory staging for async H2D transfers.
@@ -174,7 +174,7 @@ class DeepScalperBDQ:
         self._hidden_state = (h, c)
 
 
-    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False, qty_mask=None, context: Optional[Dict] = None, eval_epsilon: float = 0.0) -> np.ndarray:
+    def predict(self, micro: torch.Tensor, private_in: torch.Tensor, macro: torch.Tensor, deterministic: bool = False, qty_mask=None, context: Optional[dict] = None, eval_epsilon: float = 0.0) -> np.ndarray:
         """
         Select action using Epsilon-Greedy strategy.
         Paper-aligned: 2 branches (Price, SignedQty).
@@ -285,11 +285,11 @@ class DeepScalperBDQ:
             return t.pin_memory().to(self.device, non_blocking=True)
         return t.to(self.device)
 
-    def train_step(self) -> Optional[Dict[str, float]]:
+    def train_step(self) -> Optional[dict[str, float]]:
         """Single gradient step (backward compat). Prefer train_step_mega()."""
         return self.train_step_mega(1)
 
-    def train_step_mega(self, n_steps: int = 1) -> Optional[Dict[str, float]]:
+    def train_step_mega(self, n_steps: int = 1) -> Optional[dict[str, float]]:
         """Run n_steps BDQ gradient updates from a single mega-batch.
 
         PERF-OPT S154 (O1): Samples n_steps * batch_size transitions ONCE,
@@ -339,7 +339,7 @@ class DeepScalperBDQ:
             )
         return metrics
 
-    def _train_step_single_per(self) -> Optional[Dict[str, float]]:
+    def _train_step_single_per(self) -> Optional[dict[str, float]]:
         """Single gradient step with PER sampling (not mega-batchable)."""
         (state_batch, action_batch, reward_batch, next_state_batch,
          done_batch, aux_target_batch, per_indices, is_weights) = self.memory.sample(self.batch_size)
@@ -367,7 +367,7 @@ class DeepScalperBDQ:
     def _train_step_on_batch(
         self, micro_state, private_state, macro_state, micro_next, private_next, macro_next,
         actions, rewards, dones, aux_targets, per_indices, is_weights_t,
-    ) -> Optional[Dict[str, float]]:
+    ) -> Optional[dict[str, float]]:
         """GPU-only gradient step on pre-transferred batch tensors."""
 
         # Current Q-Values — 2 branches (Paper-aligned)
@@ -389,7 +389,7 @@ class DeepScalperBDQ:
             with torch.no_grad():
                 # Policy net selects best actions for next state
                 next_q_price_policy, next_q_qty_policy, _, _, _ = self.policy_net(
-                    micro_next, private_next, macro_next
+                    micro_next, private_next, macro_next,
                 )
 
                 if q_price is not None:
@@ -398,7 +398,7 @@ class DeepScalperBDQ:
 
                     # Target net evaluates those actions
                     next_q_price_target, next_q_qty_target, _, _, _ = self.target_net(
-                        micro_next, private_next, macro_next
+                        micro_next, private_next, macro_next,
                     )
                     max_next_q_price = next_q_price_target.gather(1, best_next_price)
                     max_next_q_qty = next_q_qty_target.gather(1, best_next_qty)

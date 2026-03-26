@@ -265,7 +265,7 @@ class FundingArbEnv(gym.Env):
 
         # --- FARB-02 fix: snapshot pre-trade basis PnL for reward penalty ---
         self._calc_total_unrealized_basis_pnl(
-            spot_price, perp_price
+            spot_price, perp_price,
         )
 
         # --- Step 2: Apply deadband and capital constraints ---
@@ -290,7 +290,7 @@ class FundingArbEnv(gym.Env):
 
         # Realize basis PnL on closed/reduced positions
         realized_basis_pnl = self._realize_basis_pnl(
-            old_weights, delta_weights, spot_price, perp_price
+            old_weights, delta_weights, spot_price, perp_price,
         )
 
         # Update positions and entry prices
@@ -371,7 +371,7 @@ class FundingArbEnv(gym.Env):
     # Constraints
     # -------------------------------------------------------------------
     def _apply_deadband(
-        self, target: np.ndarray, current: np.ndarray
+        self, target: np.ndarray, current: np.ndarray,
     ) -> np.ndarray:
         """Apply deadband: ignore small changes in allocation."""
         result = target.copy()
@@ -578,7 +578,7 @@ class FundingArbEnv(gym.Env):
         return float((spot_pnl + perp_pnl).sum())
 
     def _calc_total_unrealized_basis_pnl(
-        self, spot_price: np.ndarray, perp_price: np.ndarray
+        self, spot_price: np.ndarray, perp_price: np.ndarray,
     ) -> float:
         """Calculate total unrealized basis PnL across all positions."""
         active = (np.abs(self.arb_weights) >= 1e-8)
@@ -604,7 +604,7 @@ class FundingArbEnv(gym.Env):
         return float((spot_pnl[active] + perp_pnl[active]).sum())
 
     def _calc_net_delta(
-        self, spot_price: np.ndarray, perp_price: np.ndarray, portfolio_value: float
+        self, spot_price: np.ndarray, perp_price: np.ndarray, portfolio_value: float,
     ) -> float:
         """Calculate net directional exposure as fraction of portfolio value.
 
@@ -705,7 +705,7 @@ class FundingArbEnv(gym.Env):
     # Portfolio value
     # -------------------------------------------------------------------
     def _get_portfolio_value(
-        self, spot_price: np.ndarray, perp_price: np.ndarray
+        self, spot_price: np.ndarray, perp_price: np.ndarray,
     ) -> float:
         """Total portfolio value = margin_balance (includes realized PnL, funding, fees, borrow costs) + unrealized basis PnL."""
         unrealized = self._calc_total_unrealized_basis_pnl(spot_price, perp_price)
@@ -722,7 +722,7 @@ class FundingArbEnv(gym.Env):
 
         # 1. Portfolio value as % of initial capital
         pv_pct = np.array(
-            [portfolio_value / self.initial_capital], dtype=np.float32
+            [portfolio_value / self.initial_capital], dtype=np.float32,
         )
 
         # 2. Technical features
@@ -745,7 +745,7 @@ class FundingArbEnv(gym.Env):
 
         # 7. Time to next funding (scalar, normalized [0,1])
         time_to_fund = np.array(
-            [self._hours_to_funding[self.step_idx]], dtype=np.float32
+            [self._hours_to_funding[self.step_idx]], dtype=np.float32,
         )
 
         # 8. Total delta %
@@ -755,13 +755,13 @@ class FundingArbEnv(gym.Env):
         # 9. Margin usage %
         perp_margin_used = float(self.perp_notionals.sum()) * self.perp_margin_rate
         margin_pct = np.array(
-            [perp_margin_used / (portfolio_value + 1e-10)], dtype=np.float32
+            [perp_margin_used / (portfolio_value + 1e-10)], dtype=np.float32,
         )
 
         # 10. Capital deployed %
         capital_deployed = float(self.spot_notionals.sum()) + perp_margin_used
         capital_pct = np.array(
-            [capital_deployed / (portfolio_value + 1e-10)], dtype=np.float32
+            [capital_deployed / (portfolio_value + 1e-10)], dtype=np.float32,
         )
 
         # 11. Portfolio concentration (ENB)
@@ -790,7 +790,7 @@ class FundingArbEnv(gym.Env):
         ]).astype(np.float32)
 
     def _calc_per_asset_basis_pnl(
-        self, spot_price: np.ndarray, perp_price: np.ndarray
+        self, spot_price: np.ndarray, perp_price: np.ndarray,
     ) -> np.ndarray:
         """Per-asset unrealized basis PnL."""
         pnl = np.zeros(self.n_assets, dtype=np.float64)
@@ -818,7 +818,7 @@ class FundingArbEnv(gym.Env):
         return pnl
 
     def _calc_cost_to_exit(
-        self, spot_price: np.ndarray, perp_price: np.ndarray, portfolio_value: float
+        self, spot_price: np.ndarray, perp_price: np.ndarray, portfolio_value: float,
     ) -> np.ndarray:
         """Estimated cost to close each arb position (both legs)."""
         cost = np.zeros(self.n_assets, dtype=np.float32)
@@ -857,7 +857,7 @@ class FundingArbEnv(gym.Env):
             f"Step {summary['step']:>5d} | "
             f"PV {summary['portfolio_value']:>12,.2f} | "
             f"Fund {summary['total_funding_earned']:>8,.2f} | "
-            f"Pairs {summary['n_active_pairs']}"
+            f"Pairs {summary['n_active_pairs']}",
         )
 
     def get_portfolio_summary(self) -> dict:

@@ -202,7 +202,7 @@ def hpo_objective(
 
         logger.info(
             f"  Trial {trial.number} | {agent_name} | "
-            f"return={total_return:.6f} | sharpe={metrics.get('sharpe', 0):.4f}"
+            f"return={total_return:.6f} | sharpe={metrics.get('sharpe', 0):.4f}",
         )
 
     except Exception as e:
@@ -239,8 +239,8 @@ def run_agent_hpo(
     Returns dict with best_params and best_value.
     """
     import optuna
-    from optuna.samplers import TPESampler
     from optuna.pruners import NopPruner
+    from optuna.samplers import TPESampler
 
     study_name = f"alphaseek_w{window_idx}_{agent_name}"
     db_path = os.path.join(out_dir, f"w{window_idx}", f"hpo_{agent_name}.db")
@@ -259,7 +259,7 @@ def run_agent_hpo(
     if remaining > 0:
         logger.info(
             f"[W{window_idx}] {agent_name} HPO: {remaining} trials "
-            f"({len(study.trials)} existing)"
+            f"({len(study.trials)} existing)",
         )
         study.optimize(
             lambda trial: hpo_objective(
@@ -272,18 +272,18 @@ def run_agent_hpo(
     else:
         logger.info(
             f"[W{window_idx}] {agent_name} HPO: already complete "
-            f"({len(study.trials)} trials)"
+            f"({len(study.trials)} trials)",
         )
 
     best = study.best_trial
     logger.info(
         f"[W{window_idx}] {agent_name} HPO BEST: "
-        f"T{best.number} return={best.value:.6f}"
+        f"T{best.number} return={best.value:.6f}",
     )
 
     # Save best params
     best_params_path = os.path.join(
-        out_dir, f"w{window_idx}", f"best_{agent_name}.json"
+        out_dir, f"w{window_idx}", f"best_{agent_name}.json",
     )
     with open(best_params_path, "w") as f:
         json.dump({"trial": best.number, "value": best.value, "params": best.params}, f, indent=2)
@@ -365,7 +365,7 @@ def full_train_agent(
         f"[W{window_idx}] {agent_name} TEST: "
         f"return={metrics['total_return']:.6f} | "
         f"sharpe={metrics['sharpe']:.4f} | "
-        f"PF={metrics['profit_factor']:.3f}"
+        f"PF={metrics['profit_factor']:.3f}",
     )
 
     gc.collect()
@@ -399,7 +399,7 @@ def run_window(
     logger.info(
         f"\n{'='*60}\n"
         f"Window {w_idx}: train={train_segs} val={val_segs} test={test_segs}\n"
-        f"{'='*60}"
+        f"{'='*60}",
     )
 
     agent_names = config.get("ensemble", {}).get("agent_classes", ["D3QN", "DoubleDQN", "TwinD3QN"])
@@ -586,7 +586,7 @@ def main():
             logger.info(
                 f"{agent_name}: median_return={np.median(returns):.6f} "
                 f"median_sharpe={np.median(sharpes):.4f} "
-                f"({sum(1 for r in returns if r > 0)}/{len(returns)} profitable)"
+                f"({sum(1 for r in returns if r > 0)}/{len(returns)} profitable)",
             )
             _wandb_log({
                 f"summary/{agent_name}/median_return": float(np.median(returns)),

@@ -18,20 +18,21 @@ Usage:
   python scripts/run_baselines.py --config configs/postaudit_hpo.yaml --baselines A6 A7 A8
   python scripts/run_baselines.py --config configs/postaudit_hpo.yaml --baselines A8 --horizons 1 5 10 15 30 60
 """
-import yaml
 import argparse
-import os
-import sys
 import copy
 import logging
+import os
+import sys
+
 import numpy as np
 import pandas as pd
+import yaml
 
 sys.path.append(os.getcwd())
 
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
+from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("Baselines")
@@ -666,7 +667,7 @@ def main():
         wandb.log({"baseline/summary": wandb.Table(
             columns=["baseline", "split", "return", "sharpe", "trades", "pf", "max_dd"],
             data=[[r['baseline'], r.get('split',''), r['total_return'], r['sharpe'],
-                   r['trade_count'], r['profit_factor'], r['max_drawdown']] for r in results]
+                   r['trade_count'], r['profit_factor'], r['max_drawdown']] for r in results],
         )})
         wandb.finish()
 

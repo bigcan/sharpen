@@ -24,10 +24,10 @@ Usage:
     python scripts/monitor_fleet.py --json        # JSON output
 """
 
-import sys
-import os
-import json
 import argparse
+import json
+import os
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -245,13 +245,13 @@ def probe_instance(name, inst_config, timeout=30):
 
             if has_active_run and isinstance(util, int) and util < GPU_UTIL_LOW:
                 result["alerts"].append(
-                    f"LOW GPU UTIL: GPU {gpu_idx} at {util}% (threshold: {GPU_UTIL_LOW}%)"
+                    f"LOW GPU UTIL: GPU {gpu_idx} at {util}% (threshold: {GPU_UTIL_LOW}%)",
                 )
 
             if isinstance(mem_pct, (int, float)) and mem_pct > GPU_MEM_HIGH:
                 result["alerts"].append(
                     f"HIGH GPU MEM: GPU {gpu_idx} at {mem_pct:.0f}% ({gpu['mem_used_mb']}/"
-                    f"{gpu['mem_total_mb']} MB)"
+                    f"{gpu['mem_total_mb']} MB)",
                 )
 
     except Exception as e:
@@ -575,7 +575,7 @@ def format_hw_table(hw_results):
 
             lines.append(
                 f"{hw['instance']:<12} {gpu['index']:<4} {gpu_model:<10} "
-                f"{util_str:>6} {mem_str:>12} {mem_pct_str:>5} {temp_str:>5} {status:<12}"
+                f"{util_str:>6} {mem_str:>12} {mem_pct_str:>5} {temp_str:>5} {status:<12}",
             )
 
     lines.append("")
@@ -635,7 +635,7 @@ def format_wandb_table(wandb_runs):
             lines.append(
                 f"{run['exp_tag']:<8} {run['run_id']:<10} {run['instance']:<12} "
                 f"{step_str:>10} {sps_str:>6} {pf_str:>7} {q_str:>8} {loss_str:>8} "
-                f"{phase_str:<10} {updated_str:>8} {eta_str:>8} {status:<10}"
+                f"{phase_str:<10} {updated_str:>8} {eta_str:>8} {status:<10}",
             )
 
     lines.append("")
@@ -713,7 +713,7 @@ def detect_orphans(hw_results, wandb_runs):
     for rid in unmatched_ids:
         run = next(r for r in wandb_runs if r["run_id"] == rid)
         alerts.append(
-            f"GHOST RUN: WandB run {run['exp_tag']} ({rid}) is 'running' but not found on any instance"
+            f"GHOST RUN: WandB run {run['exp_tag']} ({rid}) is 'running' but not found on any instance",
         )
 
     # Check for GPUs with high memory but no WandB run
@@ -729,7 +729,7 @@ def detect_orphans(hw_results, wandb_runs):
             for gpu in active_gpus[total_tracked:]:
                 alerts.append(
                     f"UNTRACKED: {hw['instance']} GPU {gpu['index']} using "
-                    f"{gpu['mem_used_mb']}MB but no WandB run found"
+                    f"{gpu['mem_used_mb']}MB but no WandB run found",
                 )
 
     return alerts

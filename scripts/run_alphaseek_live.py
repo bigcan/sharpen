@@ -142,7 +142,9 @@ async def main(args):
 
     # --- Broker ---
     if not args.dry_run:
-        from finrl_pro_ds.crypto.execution.exchange_perp_broker import ExchangePerpBroker
+        from finrl_pro_ds.crypto.execution.exchange_perp_broker import (
+            ExchangePerpBroker,
+        )
         broker = ExchangePerpBroker(
             exchange=exchange_cfg.get("name", "bybit"),
             testnet=exchange_cfg.get("testnet", True),

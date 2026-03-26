@@ -43,20 +43,22 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 import pandas as pd  # noqa: E402
 
-from scripts.crypto_backtest_runner import (  # noqa: E402
-    load_config,
-    prepare_data,
-    create_env,
-    _make_sb3_agent,
-    _evaluate_agent_on_env,
-    _compute_result_metrics,
-    _wandb_log,
-    _WandbStepCallback,
+from finrl_pro_ds.crypto.analytics.crypto_report import (  # noqa: E402
+    CryptoPerformanceReport,
 )
 from finrl_pro_ds.crypto.data.crypto_array_builder import build_env_arrays  # noqa: E402
 from finrl_pro_ds.crypto.eval.statistics import sortino_ratio  # noqa: E402
 from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: E402
-from finrl_pro_ds.crypto.analytics.crypto_report import CryptoPerformanceReport  # noqa: E402
+from scripts.crypto_backtest_runner import (  # noqa: E402
+    _compute_result_metrics,
+    _evaluate_agent_on_env,
+    _make_sb3_agent,
+    _wandb_log,
+    _WandbStepCallback,
+    create_env,
+    load_config,
+    prepare_data,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -364,7 +366,7 @@ def _generate_backtest_report(
         logger.info(
             f"  Report metrics: Sharpe={metrics.get('sharpe_ratio', 0):.3f}, "
             f"Sortino={metrics.get('sortino_ratio', 0):.3f}, "
-            f"MaxDD={metrics.get('max_drawdown', 0):.2%}"
+            f"MaxDD={metrics.get('max_drawdown', 0):.2%}",
         )
     except Exception as e:
         logger.warning(f"  Backtest report generation failed (non-fatal): {e}")
@@ -406,7 +408,7 @@ def _run_agent_hpo(
 
     logger.info(
         f"  [{agent_type.upper()}] HPO: {effective_trials} trials × {hpo_timesteps} steps"
-        f"{f' ({n_seeded} seeded)' if n_seeded else ''}"
+        f"{f' ({n_seeded} seeded)' if n_seeded else ''}",
     )
 
     storage_path = out_dir / f"hpo_sync1h_w{w_idx}_{agent_type}.db"
@@ -449,7 +451,7 @@ def _run_agent_hpo(
     best_sortino = best.value
     logger.info(
         f"  [{agent_type.upper()}] HPO COMPLETE: "
-        f"best_sortino={best_sortino:.4f} (trial {best.number})"
+        f"best_sortino={best_sortino:.4f} (trial {best.number})",
     )
     logger.info(f"    Best params: {best_params}")
 
@@ -564,7 +566,7 @@ def run_hpo_for_window(
 
     logger.info(
         f"=== Window {w_idx}: HPO Phase{warm_tag} "
-        f"(agents: {', '.join(a.upper() for a in hpo_agents)}) ==="
+        f"(agents: {', '.join(a.upper() for a in hpo_agents)}) ===",
     )
 
     best_env_overrides: dict = {}
@@ -641,7 +643,7 @@ def run_hpo_for_window(
 
             if prev_model_path and Path(prev_model_path).exists():
                 # Warm-start: load previous weights, attach new env
-                from stable_baselines3 import SAC, A2C, PPO
+                from stable_baselines3 import A2C, PPO, SAC
                 if agent_type == "sac":
                     model = SAC.load(str(prev_model_path), env=vec_env)
                 elif agent_type == "ppo_gae":
@@ -746,7 +748,7 @@ def run_hpo_for_window(
 
     logger.info(
         f"  Window {w_idx} RESULT: return={test_result['total_return']:.2%}, "
-        f"sharpe={test_result['sharpe']:.3f}, max_dd={test_result['max_drawdown']:.2%}"
+        f"sharpe={test_result['sharpe']:.3f}, max_dd={test_result['max_drawdown']:.2%}",
     )
 
     # --- Backtest Report ---
@@ -836,7 +838,7 @@ def run_full_hpo_wf(
     mode_str = "WARM-START" if warm_start else "COLD"
     logger.info(
         f"Walk-forward ({mode_str}): {len(schedule)} windows "
-        f"(of {wf['n_windows']} available)"
+        f"(of {wf['n_windows']} available)",
     )
 
     ws_trials = warm_start_trials or 15

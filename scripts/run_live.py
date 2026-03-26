@@ -47,7 +47,7 @@ def validate_config(config: dict, args) -> dict:
             "\n"
             "  ╔══════════════════════════════════════════════╗\n"
             "  ║   ⚠  MAINNET MODE — REAL MONEY AT RISK  ⚠   ║\n"
-            "  ╚══════════════════════════════════════════════╝"
+            "  ╚══════════════════════════════════════════════╝",
         )
     else:
         exchange_cfg["testnet"] = True

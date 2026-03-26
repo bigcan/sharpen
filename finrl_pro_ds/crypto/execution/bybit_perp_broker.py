@@ -204,7 +204,7 @@ class BybitPerpBroker:
         logger.info(
             f"Rebalance complete: {result.n_executed} executed, "
             f"{result.n_skipped} skipped, {result.n_failed} failed, "
-            f"fees={result.total_fees:.4f} USDT"
+            f"fees={result.total_fees:.4f} USDT",
         )
 
         return result
@@ -271,7 +271,7 @@ class BybitPerpBroker:
 
             # Wait for fill or timeout → fallback to market
             filled_order = await self._wait_for_fill(
-                order["id"], symbol, timeout=self.market_fallback_timeout
+                order["id"], symbol, timeout=self.market_fallback_timeout,
             )
 
             if filled_order and filled_order["status"] == "closed":
@@ -344,7 +344,7 @@ class BybitPerpBroker:
         )
 
     async def _wait_for_fill(
-        self, order_id: str, symbol: str, timeout: float
+        self, order_id: str, symbol: str, timeout: float,
     ) -> dict | None:
         """Poll order status until filled or timeout."""
         elapsed = 0.0

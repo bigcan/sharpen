@@ -2,12 +2,14 @@
 Fetch Binance OHLCV Data
 Fetch 6 months of 1-minute BTCUSDT Perpetual Futures data.
 """
+import argparse
+import time
+from datetime import datetime, timedelta
+from pathlib import Path
+
 import ccxt
 import pandas as pd
-import argparse
-from datetime import datetime, timedelta
-import time
-from pathlib import Path
+
 
 def fetch_binance_ohlcv(symbol: str, days: int = None, start_date: str = None, end_date: str = None, output_file: str = None, dry_run: bool = False):
     """
@@ -16,7 +18,7 @@ def fetch_binance_ohlcv(symbol: str, days: int = None, start_date: str = None, e
     print(f"Initializing Binance client for {symbol}...")
     exchange = ccxt.binance({
         'enableRateLimit': True,
-        'options': {'defaultType': 'future'}
+        'options': {'defaultType': 'future'},
     })
 
     timeframe = '1m'

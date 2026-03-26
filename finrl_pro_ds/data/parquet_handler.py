@@ -1,8 +1,10 @@
 import logging
-import pandas as pd
-import numpy as np
 import os
-from typing import Dict, Any, Optional, List
+from typing import Any, Optional
+
+import numpy as np
+import pandas as pd
+
 from finrl_pro_ds.data.feature_engineering import DeepScalperFeatureEngineer
 
 logger = logging.getLogger(__name__)
@@ -13,7 +15,7 @@ class ParquetDataHandler:
     Designed to be a drop-in replacement for DBMarketDataHandler in DeepScalperEnv.
     """
 
-    def __init__(self, file_path: str, ticker: str, feature_config: Optional[Dict] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, shared_memory_config: Optional[Dict] = None, norm_cutoff_date: Optional[str] = None):
+    def __init__(self, file_path: str, ticker: str, feature_config: Optional[dict] = None, start_date: Optional[str] = None, end_date: Optional[str] = None, shared_memory_config: Optional[dict] = None, norm_cutoff_date: Optional[str] = None):
         self.file_path = file_path
         self.ticker = ticker
         fc = feature_config or {}
@@ -42,7 +44,7 @@ class ParquetDataHandler:
             logger.info(f"[Worker {os.getpid()}] ParquetDataHandler received SHM config.")
             self._attach_shared_memory(shared_memory_config)
         else:
-            self._timestamps: List[Any] = []
+            self._timestamps: list[Any] = []
             self._feature_data: pd.DataFrame = pd.DataFrame()
             self.load_data()
 
@@ -243,7 +245,7 @@ class ParquetDataHandler:
             self._numeric_cols = [c for c in self._feature_cols if c != 'timestamp']
             self._col_to_idx = {c: i for i, c in enumerate(self._numeric_cols)}
             self._row_matrix = np.column_stack(
-                [self._data_arrays[c] for c in self._numeric_cols]
+                [self._data_arrays[c] for c in self._numeric_cols],
             ).astype(np.float32, copy=False)
             # Ensure C-contiguous for cache-friendly row access
             if not self._row_matrix.flags['C_CONTIGUOUS']:
@@ -367,7 +369,7 @@ class ParquetDataHandler:
             if col in raw_buffer.columns:
                 raw_buffer[col] = np.nan
         df_after_with_buffer = pd.concat(
-            [raw_buffer, df_after_raw], ignore_index=True
+            [raw_buffer, df_after_raw], ignore_index=True,
         )
 
         # Process the combined buffer+after data
@@ -384,7 +386,7 @@ class ParquetDataHandler:
               f"buffer={buffer_size})")
         return df_combined
 
-    def create_shared_memory(self) -> Dict[str, Any]:
+    def create_shared_memory(self) -> dict[str, Any]:
         """
         Creates shared memory blocks for all data arrays and returns configuration for workers.
         Call this from the main process after loading data.
@@ -394,7 +396,7 @@ class ParquetDataHandler:
         config = {
             'length': self._len,
             'cols': self._feature_cols,
-            'buffers': {}
+            'buffers': {},
         }
 
         self._shm_objects = []
@@ -412,7 +414,7 @@ class ParquetDataHandler:
                 config['buffers'][col] = {
                     'name': shm.name,
                     'shape': arr.shape,
-                    'dtype': str(arr.dtype)
+                    'dtype': str(arr.dtype),
                 }
             except Exception as e:
                 logger.error(f"Error creating SHM for col {col}: {e}")
@@ -423,7 +425,7 @@ class ParquetDataHandler:
 
         return config
 
-    def _attach_shared_memory(self, config: Dict[str, Any]):
+    def _attach_shared_memory(self, config: dict[str, Any]):
         """Attaches to existing shared memory blocks (for workers)."""
         from multiprocessing.shared_memory import SharedMemory
 
@@ -467,7 +469,7 @@ class ParquetDataHandler:
         """Reset stream pointer."""
         self._ptr = 0
 
-    def step(self) -> Optional[Dict[str, Any]]:
+    def step(self) -> Optional[dict[str, Any]]:
         """Return next row."""
         if self._ptr >= self._len:
             return None
@@ -494,7 +496,7 @@ class ParquetDataHandler:
         self._ptr += 1
         return row
 
-    def peek(self) -> Optional[Dict[str, Any]]:
+    def peek(self) -> Optional[dict[str, Any]]:
         """Peek at current step without advancing."""
         if self._ptr >= self._len:
             return None

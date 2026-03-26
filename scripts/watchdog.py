@@ -24,9 +24,9 @@ Usage:
     python scripts/watchdog.py --collect      # Also collect finished runs
 """
 
-import sys
-import os
 import argparse
+import os
+import sys
 from datetime import datetime, timezone
 
 # Add project root
@@ -70,8 +70,9 @@ def get_active_runs(tag=None):
 
 def get_recently_finished(since_minutes=35):
     """Fetch runs that finished in the last N minutes (catch completions between polls)."""
-    import wandb
     from datetime import timedelta
+
+    import wandb
     api = wandb.Api()
     project = "bigcan-chiwin-technology/FinRL-Pro-DS"
 
@@ -82,7 +83,7 @@ def get_recently_finished(since_minutes=35):
     for state in ['finished', 'crashed', 'failed']:
         runs = api.runs(project, filters={
             "state": state,
-            "updatedAt": {"$gte": cutoff_str}
+            "updatedAt": {"$gte": cutoff_str},
         }, order="-updated_at")
         results.extend(list(runs))
     return results
@@ -115,7 +116,7 @@ def check_run_health(run):
         result["metrics"]["minutes_since_update"] = round(minutes_since, 1)
         if minutes_since > STALL_MINUTES:
             result["alerts"].append(
-                f"STALL: No new data for {minutes_since:.0f} min (last step: {step:,})"
+                f"STALL: No new data for {minutes_since:.0f} min (last step: {step:,})",
             )
             result["verdict"] = "CRITICAL"
 
@@ -136,7 +137,7 @@ def check_run_health(run):
         result["metrics"]["q_mean"] = q_mean
         if abs(q_mean) > Q_DIVERGENCE_THRESHOLD:
             result["alerts"].append(
-                f"Q-DIVERGENCE: |q_mean| = {abs(q_mean):.2e} > {Q_DIVERGENCE_THRESHOLD:.0e}"
+                f"Q-DIVERGENCE: |q_mean| = {abs(q_mean):.2e} > {Q_DIVERGENCE_THRESHOLD:.0e}",
             )
             result["verdict"] = "CRITICAL"
 
@@ -147,7 +148,7 @@ def check_run_health(run):
         result["metrics"]["target_max"] = target_max
         if abs(target_max) > Q_DIVERGENCE_THRESHOLD * 5:
             result["alerts"].append(
-                f"TARGET Q EXPLODING: target_max = {target_max:.0f}"
+                f"TARGET Q EXPLODING: target_max = {target_max:.0f}",
             )
             result["verdict"] = "CRITICAL"
 
@@ -160,7 +161,7 @@ def check_run_health(run):
         result["metrics"]["best_pf"] = round(best_pf, 4)
         if step > MIN_STEPS_FOR_EARLY_PF and best_pf < PF_EARLY_KILL_THRESHOLD:
             result["alerts"].append(
-                f"LOW PF: Best PF = {best_pf:.4f} after {step:,} steps (< {PF_EARLY_KILL_THRESHOLD})"
+                f"LOW PF: Best PF = {best_pf:.4f} after {step:,} steps (< {PF_EARLY_KILL_THRESHOLD})",
             )
             if result["verdict"] != "CRITICAL":
                 result["verdict"] = "WARNING"

@@ -1,9 +1,11 @@
-import wandb
+import argparse
 import json
 import os
-import argparse
+
 import paramiko
 from dotenv import load_dotenv
+
+import wandb
 
 load_dotenv()
 
@@ -248,7 +250,7 @@ def fetch_run_data(run_id, entity="bigcan-chiwin-technology", project="FinRL-Pro
             "tags": run.tags,
             "created_at": run.created_at,
             "url": run.url,
-            "history": []
+            "history": [],
         }
 
         # Fetch history

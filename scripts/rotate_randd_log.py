@@ -124,7 +124,7 @@ def dedup_entries(entries: list[dict]) -> list[dict]:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Rotate old randd_log.md entries into monthly archive files"
+        description="Rotate old randd_log.md entries into monthly archive files",
     )
     parser.add_argument(
         "--dry-run",

@@ -27,9 +27,8 @@ from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
-
-from nautilus_trader.backtest.engine import BacktestEngine
 from nautilus_trader.backtest.config import BacktestEngineConfig
+from nautilus_trader.backtest.engine import BacktestEngine
 from nautilus_trader.config import StrategyConfig
 from nautilus_trader.model import Bar, BarSpecification
 from nautilus_trader.model.currencies import USD
@@ -49,7 +48,6 @@ from nautilus_trader.trading.strategy import Strategy
 # Add project root
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts.bc_feasibility_test import build_features
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # Section 1: Feature Computer (batch-precomputed)
@@ -198,7 +196,7 @@ class LogRegStrategy(Strategy):
         self.close_all_positions(self.instrument_id)
         self.log.info(
             f"Strategy stopped. Bars={self.bar_count}, "
-            f"Signals={self.signal_count}, Switches={self.switch_count}"
+            f"Signals={self.signal_count}, Switches={self.switch_count}",
         )
 
 
@@ -239,9 +237,9 @@ def make_bars(
 
 def create_gold_futures_instrument(venue: Venue, fee_bps: float = 6.5):
     """Create a Gold Futures (GC) instrument for backtesting."""
-    from nautilus_trader.model.instruments import FuturesContract
-    from nautilus_trader.model.identifiers import Symbol
     from nautilus_trader.model.enums import AssetClass
+    from nautilus_trader.model.identifiers import Symbol
+    from nautilus_trader.model.instruments import FuturesContract
 
     instrument_id = InstrumentId(Symbol("GC"), venue)
     fee_frac = Decimal(str(fee_bps / 10000.0))
@@ -307,7 +305,7 @@ def print_results(engine, venue, strategy):
         if 'realized_pnl' in positions.columns:
             # NT returns Money strings like "1234.56 USD" — extract numeric part
             pnls = positions['realized_pnl'].apply(
-                lambda x: float(str(x).split()[0]) if pd.notna(x) else 0.0
+                lambda x: float(str(x).split()[0]) if pd.notna(x) else 0.0,
             )
             gross_profit = pnls[pnls > 0].sum()
             gross_loss = abs(pnls[pnls < 0].sum())

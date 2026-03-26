@@ -156,7 +156,7 @@ class AlphaSeekFeatureEngine:
         total_depth_5 = bid_depth_5 + ask_depth_5
         total_depth_5 = np.where(total_depth_5 < 1e-12, 1e-12, total_depth_5)
         features[:, 1] = np.clip(
-            (bid_depth_5 - ask_depth_5) / total_depth_5, -1.0, 1.0
+            (bid_depth_5 - ask_depth_5) / total_depth_5, -1.0, 1.0,
         )
 
         # --- Dim 2: Microprice offset (bps, scaled to [-1, 1]) ---
@@ -176,7 +176,7 @@ class AlphaSeekFeatureEngine:
         ofi_symlog = _symlog(ofi_raw)
         if segment_ids is not None:
             features[:, 3] = self._batch_normalize_with_segments(
-                ofi_symlog, segment_ids
+                ofi_symlog, segment_ids,
             )
         else:
             features[:, 3] = _ema_zscore_tanh(ofi_symlog, self.norm_span)
@@ -185,7 +185,7 @@ class AlphaSeekFeatureEngine:
         spread_symlog = _symlog(spread)
         if segment_ids is not None:
             features[:, 4] = self._batch_normalize_with_segments(
-                spread_symlog, segment_ids
+                spread_symlog, segment_ids,
             )
         else:
             features[:, 4] = _ema_zscore_tanh(spread_symlog, self.norm_span)
@@ -199,7 +199,7 @@ class AlphaSeekFeatureEngine:
         mom_symlog = _symlog(momentum)
         if segment_ids is not None:
             features[:, 5] = self._batch_normalize_with_segments(
-                mom_symlog, segment_ids
+                mom_symlog, segment_ids,
             )
         else:
             features[:, 5] = _ema_zscore_tanh(mom_symlog, self.norm_span)
@@ -207,12 +207,12 @@ class AlphaSeekFeatureEngine:
         # --- Dim 6: Realized vol (30-tick rolling std of log returns) — EMA-Z-tanh ---
         log_ret = np.diff(log_mid, prepend=log_mid[0])
         vol_series = pd.Series(log_ret).rolling(
-            self.vol_window, min_periods=1
+            self.vol_window, min_periods=1,
         ).std().fillna(0.0).values
         vol_symlog = _symlog(vol_series)
         if segment_ids is not None:
             features[:, 6] = self._batch_normalize_with_segments(
-                vol_symlog, segment_ids
+                vol_symlog, segment_ids,
             )
         else:
             features[:, 6] = _ema_zscore_tanh(vol_symlog, self.norm_span)
@@ -220,11 +220,11 @@ class AlphaSeekFeatureEngine:
         # --- Dim 7: Depth ratio (top 5), centered [-1, 1] ---
         depth_ratio = bid_depth_5 / total_depth_5  # [0, 1]
         features[:, 7] = np.clip((depth_ratio - 0.5) * 2.0, -1.0, 1.0).astype(
-            np.float32
+            np.float32,
         )
 
         logger.info(
-            f"FeatureEngine.process_batch: {n:,} rows → ({n}, {self.N_FEATURES}) features"
+            f"FeatureEngine.process_batch: {n:,} rows → ({n}, {self.N_FEATURES}) features",
         )
         return features
 
@@ -293,7 +293,7 @@ class AlphaSeekFeatureEngine:
         total_depth = bid_depth_5 + ask_depth_5
         if total_depth > 1e-12:
             features[1] = np.clip(
-                (bid_depth_5 - ask_depth_5) / total_depth, -1.0, 1.0
+                (bid_depth_5 - ask_depth_5) / total_depth, -1.0, 1.0,
             )
 
         # --- Dim 2: Microprice offset ---

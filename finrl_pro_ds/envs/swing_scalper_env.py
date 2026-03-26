@@ -22,20 +22,22 @@ Key differences from DeepScalperEnv (V5):
   - Random initial direction (Long or Short) with no entry fee
 """
 
+import logging
 import math
+from typing import TYPE_CHECKING, Any, Optional
 
 import gymnasium as gym
 import numpy as np
-import logging
-from typing import Dict, Optional, Any
-from typing import TYPE_CHECKING
+
 if TYPE_CHECKING:
     from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
 
 from finrl_pro_ds.data.feature_engineering import (
-    MICRO_FEATURE_COLS, NUM_MICRO_FEATURES,
+    MICRO_FEATURE_COLS,
     NUM_MACRO_FEATURES,
-    get_micro_feature_cols, get_macro_feature_cols,
+    NUM_MICRO_FEATURES,
+    get_macro_feature_cols,
+    get_micro_feature_cols,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,7 +57,7 @@ class SwingScalperEnv(gym.Env):
     """
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, config: Dict[str, Any], data_handler: Optional["ParquetDataHandler"] = None):
+    def __init__(self, config: dict[str, Any], data_handler: Optional["ParquetDataHandler"] = None):
         super().__init__()
         self.config = config
         self.handler = data_handler
@@ -100,7 +102,7 @@ class SwingScalperEnv(gym.Env):
 
         # Observation: same Dict structure as V5 for network compatibility
         self.micro_dim = config.get("network", {}).get("micro_config", {}).get(
-            "input_size", NUM_MICRO_FEATURES
+            "input_size", NUM_MICRO_FEATURES,
         )
         self._private_dim = 4  # direction, bars_since_switch, unrealized_pnl, atr
         self.observation_space = gym.spaces.Dict({
@@ -206,10 +208,10 @@ class SwingScalperEnv(gym.Env):
             col_idx = self.handler._col_to_idx
             try:
                 self._micro_col_indices = np.array(
-                    [col_idx[k] for k in self._micro_keys], dtype=np.intp
+                    [col_idx[k] for k in self._micro_keys], dtype=np.intp,
                 )
                 self._macro_col_indices = np.array(
-                    [col_idx[k] for k in self._macro_cols], dtype=np.intp
+                    [col_idx[k] for k in self._macro_cols], dtype=np.intp,
                 )
                 self._bid_price_idx = col_idx['bid_price_1']
                 self._ask_price_idx = col_idx['ask_price_1']

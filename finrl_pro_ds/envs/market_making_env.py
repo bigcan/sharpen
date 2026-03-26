@@ -19,12 +19,13 @@ Key differences from ContinuousSwingEnv (V7):
   - 12-dim private state (not 5)
   - Maker fees (not taker fees)
 """
+import logging
+from typing import TYPE_CHECKING, Any, Optional
+
 import gymnasium as gym
 import numpy as np
-import logging
-from typing import Dict, Optional, Any, TYPE_CHECKING
 
-from finrl_pro_ds.data.fill_model import create_fill_model, FillResult
+from finrl_pro_ds.data.fill_model import FillResult, create_fill_model
 from finrl_pro_ds.envs.dsr import DSRCalculator
 
 if TYPE_CHECKING:
@@ -38,7 +39,7 @@ class MarketMakingEnv(gym.Env):
 
     metadata = {'render.modes': ['human']}
 
-    def __init__(self, config: Dict[str, Any], data_handler: Optional["MMDataHandler"] = None):
+    def __init__(self, config: dict[str, Any], data_handler: Optional["MMDataHandler"] = None):
         super().__init__()
         self.config = config
         self.handler = data_handler
@@ -101,22 +102,22 @@ class MarketMakingEnv(gym.Env):
 
         # Spaces
         self.action_space = gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(3,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(3,), dtype=np.float32,
         )
 
         obs_spaces = {}
         for i in range(len(self._scales)):
             obs_spaces[f"scale_{i}"] = gym.spaces.Box(
                 low=-np.inf, high=np.inf,
-                shape=(self.window_size, features_per_scale), dtype=np.float32
+                shape=(self.window_size, features_per_scale), dtype=np.float32,
             )
         if self._has_lob:
             obs_spaces["lob"] = gym.spaces.Box(
                 low=-1.0, high=1.0,
-                shape=(self.window_size, self._n_lob_features), dtype=np.float32
+                shape=(self.window_size, self._n_lob_features), dtype=np.float32,
             )
         obs_spaces["private"] = gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(12,), dtype=np.float32
+            low=-1.0, high=1.0, shape=(12,), dtype=np.float32,
         )
         self.observation_space = gym.spaces.Dict(obs_spaces)
 
@@ -425,7 +426,7 @@ class MarketMakingEnv(gym.Env):
 
         return spread_mult, skew_bps, intensity
 
-    def _extract_obs(self, step_data: Dict) -> Dict[str, np.ndarray]:
+    def _extract_obs(self, step_data: dict) -> dict[str, np.ndarray]:
         """Extract scale arrays and LOB features from handler step data."""
         obs = {}
         for i in range(len(self._scales)):
@@ -511,7 +512,7 @@ class MarketMakingEnv(gym.Env):
             fee_level, inv_risk, atr_ratio,
         ], dtype=np.float32)
 
-    def _get_observation(self) -> Dict[str, np.ndarray]:
+    def _get_observation(self) -> dict[str, np.ndarray]:
         """Build full observation dict."""
         obs = {}
         n_scales = len(self._scales)
@@ -538,7 +539,7 @@ class MarketMakingEnv(gym.Env):
         obs["private"] = self._get_private_state()
         return obs
 
-    def _empty_obs(self) -> Dict[str, np.ndarray]:
+    def _empty_obs(self) -> dict[str, np.ndarray]:
         features_per_scale = int(self.config.get("features_per_scale", 8))
         obs = {
             f"scale_{i}": np.zeros((self.window_size, features_per_scale), dtype=np.float32)
@@ -557,7 +558,7 @@ class MarketMakingEnv(gym.Env):
         R_mtm: float = 0.0,
         C_inventory: float = 0.0,
         C_fees: float = 0.0,
-    ) -> Dict:
+    ) -> dict:
         drawdown_pct = 1.0 - (self.equity / self.peak_equity) if self.peak_equity > 0 else 0.0
         info = {
             "portfolio_value": self.equity,
@@ -586,7 +587,7 @@ class MarketMakingEnv(gym.Env):
             f"Step: {self.current_step}, Inv: {self.inventory:.4f}, "
             f"Equity: {self.equity:.2f}, Trades: {self.trade_count}, "
             f"SpreadCapture: {self._total_spread_capture_bps:.2f}bps, "
-            f"Fee: {self.maker_fee:.5f}"
+            f"Fee: {self.maker_fee:.5f}",
         )
 
     def close(self):

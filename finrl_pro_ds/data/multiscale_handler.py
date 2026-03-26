@@ -13,10 +13,11 @@ Features per scale (8 dims, TC-aligned):
 
 LEAK-1 compliant: norm_cutoff_date splits normalization.
 """
+import logging
+from typing import Optional
+
 import numpy as np
 import pandas as pd
-import logging
-from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -98,7 +99,7 @@ def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = N
     # 2. atr_norm = ATR(14) / EMA(ATR, 50)
     tr = np.maximum(
         high - low,
-        np.maximum(np.abs(high - prev_close), np.abs(low - prev_close))
+        np.maximum(np.abs(high - prev_close), np.abs(low - prev_close)),
     )
     tr[0] = high[0] - low[0] if high[0] > low[0] else 0.0
     atr_14 = pd.Series(tr).rolling(14, min_periods=1).mean().values
@@ -157,7 +158,7 @@ class MultiScaleOHLCVHandler:
         self,
         file_path: str,
         ticker: str,
-        feature_config: Dict,
+        feature_config: dict,
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         norm_cutoff_date: Optional[str] = None,
@@ -171,7 +172,7 @@ class MultiScaleOHLCVHandler:
         # v6: Summary-stats observation mode (725→50 dims)
         self.obs_mode = feature_config.get("obs_mode", "window")
         self.summary_feature_indices = feature_config.get(
-            "summary_feature_indices", [0, 1, 2, 6, 7]
+            "summary_feature_indices", [0, 1, 2, 6, 7],
         )  # log_return, atr_norm, parkinson_vol, close_z, volume_z
 
         self.start_date = pd.to_datetime(start_date) if start_date else None
@@ -261,7 +262,7 @@ class MultiScaleOHLCVHandler:
         if len(base_features) < self.window_size + 10:
             raise ValueError(
                 f"Insufficient data after date filtering: {len(base_features)} bars "
-                f"(need at least {self.window_size + 10})"
+                f"(need at least {self.window_size + 10})",
             )
 
         # Base scale data for stepping
@@ -280,8 +281,8 @@ class MultiScaleOHLCVHandler:
             self._base_high - self._base_low,
             np.maximum(
                 np.abs(self._base_high - prev_close),
-                np.abs(self._base_low - prev_close)
-            )
+                np.abs(self._base_low - prev_close),
+            ),
         )
         self._base_atr = pd.Series(tr).rolling(14, min_periods=1).mean().values
 
@@ -304,14 +305,14 @@ class MultiScaleOHLCVHandler:
 
         logger.info(
             f"MultiScaleOHLCVHandler loaded: {self._len} base bars ({base_scale}min), "
-            f"scales={self.scales}, window={self.window_size}"
+            f"scales={self.scales}, window={self.window_size}",
         )
 
     def reset(self):
         """Reset pointer to start."""
         self._ptr = self.window_size
 
-    def step(self) -> Optional[Dict]:
+    def step(self) -> Optional[dict]:
         """Advance one base-scale bar, return multi-scale obs.
 
         Returns:

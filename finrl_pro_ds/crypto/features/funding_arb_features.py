@@ -116,7 +116,7 @@ def compute_funding_arb_features(
 
         # --- 1. Funding rate raw (clipped) ---
         features["funding_rate_raw"] = _merge_funding(
-            asset_perp.index, funding_df, ticker
+            asset_perp.index, funding_df, ticker,
         )
 
         # --- 2. Funding rate annualized ---
@@ -164,7 +164,7 @@ def compute_funding_arb_features(
 
         # --- 8. Open interest % change ---
         features["oi_change_pct"] = _compute_oi_change(
-            asset_perp.index, oi_df, ticker
+            asset_perp.index, oi_df, ticker,
         )
 
         # --- 8b. Log OI FFD ---
@@ -176,10 +176,10 @@ def compute_funding_arb_features(
                 oi_last = tic_oi.index.max()
                 aligned_oi.loc[aligned_oi.index > oi_last] = np.nan
                 aligned_oi = aligned_oi.ffill()
-                
+
                 # Apply publication lag
                 aligned_oi = aligned_oi.shift(PUBLICATION_LAGS.get("oi_change_pct", 1)).ffill()
-                
+
                 # log of OI (clip lower bound to avoid log(0))
                 # FFD logic
                 log_oi = np.log(aligned_oi.clip(lower=1.0))
@@ -220,10 +220,10 @@ def compute_funding_arb_features(
         is_buy = (asset_perp["close"] > asset_perp["open"]).astype(float)
         min_vp = min(max(12, volume_profile_window // 2), volume_profile_window)
         buy_vol = (is_buy * asset_perp["volume"]).rolling(
-            window=volume_profile_window, min_periods=min_vp
+            window=volume_profile_window, min_periods=min_vp,
         ).sum()
         total_vol = asset_perp["volume"].rolling(
-            window=volume_profile_window, min_periods=min_vp
+            window=volume_profile_window, min_periods=min_vp,
         ).sum()
         features["volume_profile_skew"] = (
             (buy_vol / (total_vol + 1e-10)).clip(0.0, 1.0).fillna(0.5)
@@ -241,7 +241,7 @@ def compute_funding_arb_features(
     logger.info(
         f"Funding arb features computed: {len(result)} rows, "
         f"{result['ticker'].nunique()} assets, "
-        f"columns={list(result.columns)}"
+        f"columns={list(result.columns)}",
     )
     return result
 

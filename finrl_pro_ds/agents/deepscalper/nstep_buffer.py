@@ -15,9 +15,10 @@ When n=1, degrades to direct push (no overhead).
 
 Reference: Mnih et al. (2016) "Asynchronous Methods for Deep RL" — n-step returns.
 """
-import numpy as np
 from collections import deque
 from typing import Optional
+
+import numpy as np
 
 
 class NStepBuffer:
@@ -142,7 +143,7 @@ class NStepBuffer:
         else:
             # PER: per-item push
             replay_buffer.push(
-                s0, a0, n_step_return, s_n, done_any > 0.5, aux
+                s0, a0, n_step_return, s_n, done_any > 0.5, aux,
             )
 
         # Remove the oldest transition (shift the window)

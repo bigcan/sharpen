@@ -1,7 +1,9 @@
 """Check gold liquidity - maybe we need the active month, not front month."""
 import os
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent / '.env')
 
 import databento as db  # noqa: E402

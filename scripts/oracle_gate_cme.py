@@ -14,11 +14,11 @@ Usage:
     python scripts/oracle_gate_cme.py --assets CL GC
 """
 import argparse
-from pathlib import Path
-import pandas as pd
-import numpy as np
 from dataclasses import dataclass
+from pathlib import Path
 
+import numpy as np
+import pandas as pd
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "cme"
 
@@ -421,7 +421,7 @@ def main():
             vals[key] = r.pf
 
         one_way = compute_taker_cost_bps(
-            pd.read_parquet(DATA_DIR / info['file'])['close'].mean(), info
+            pd.read_parquet(DATA_DIR / info['file'])['close'].mean(), info,
         )
 
         h1v = vals.get('H1_val', 0)

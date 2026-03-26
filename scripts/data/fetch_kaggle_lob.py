@@ -2,12 +2,14 @@
 Fetch Kaggle LOB Data
 Download Bitcoin Perpetual LOB data (250ms coverage) from Kaggle.
 """
-import os
 import argparse
 import glob
+import os
 import subprocess
-import pandas as pd
 from pathlib import Path
+
+import pandas as pd
+
 
 def download_kaggle_lob(output_dir: str):
     """Downloads dataset using Kaggle CLI."""

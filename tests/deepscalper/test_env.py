@@ -1,12 +1,14 @@
 
 import unittest
 from unittest.mock import MagicMock
-import numpy as np
-import gymnasium as gym
 
-from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
-from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
+import gymnasium as gym
+import numpy as np
+
 from finrl_pro_ds.data.feature_engineering import NUM_MICRO_FEATURES
+from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
+from finrl_pro_ds.envs.deep_scalper_env import DeepScalperEnv
+
 
 class TestDeepScalperEnv(unittest.TestCase):
     def setUp(self):
@@ -14,7 +16,7 @@ class TestDeepScalperEnv(unittest.TestCase):
             "symbol": "BTCUSDT",
             "window_size": 15,
             "tick_size": 0.1,
-            "lot_size": 0.001
+            "lot_size": 0.001,
         }
         self.mock_handler = MagicMock(spec=ParquetDataHandler)
         self.env = DeepScalperEnv(self.config, self.mock_handler)
@@ -24,7 +26,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.assertIsInstance(self.env.observation_space, gym.spaces.Dict)
         # Tier 2: Flattened action space Discrete(6), not MultiDiscrete
         self.assertIsInstance(self.env.action_space, gym.spaces.Discrete)
-        
+
     def test_reset(self):
         obs, info = self.env.reset()
         self.assertIn("micro", obs)
@@ -36,15 +38,15 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Tier 2: 5-dim private state (pos, bal, remaining_time, order_dir, order_dist)
         self.assertEqual(obs["private"].shape, (15, 5))
         self.mock_handler.reset.assert_called_once()
-    
+
     def test_step_logic(self):
         self.env.reset()
-        
+
         # Mock Handler Data (Feature Row)
         mock_row = {
             'bid_price_1': 100.0, 'bid_vol_1': 1.0, 
             'ask_price_1': 101.0, 'ask_vol_1': 1.0,
-            'timestamp': '2023-01-01T00:00:00'
+            'timestamp': '2023-01-01T00:00:00',
         }
         # Populate other levels to avoid errors or zero
         for i in range(2, 6):
@@ -52,9 +54,9 @@ class TestDeepScalperEnv(unittest.TestCase):
             mock_row[f'bid_vol_{i}'] = 1.0
             mock_row[f'ask_price_{i}'] = 102.0
             mock_row[f'ask_vol_{i}'] = 1.0
-            
+
         self.mock_handler.step.return_value = mock_row
-        
+
         # Tier 2: TakerBuy (action 0)
         action = 0
         obs, reward, terminated, truncated, info = self.env.step(action)
@@ -64,7 +66,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # so pending_order is cleared to None after execution.
         self.assertIsNone(self.env.pending_order)
         # Check execution logic placeholder
-        
+
     def test_done_when_no_data(self):
         self.env.reset()
         self.mock_handler.step.return_value = None
@@ -78,11 +80,11 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.config["initial_balance"] = 100000.0
         self.env = DeepScalperEnv(self.config, self.mock_handler)
         self.env.reset()
-        
+
         # Mock step data (price = 100)
         mock_row = {'bid_price_1': 100.0, 'ask_price_1': 100.0}
         self.mock_handler.step.return_value = mock_row
-        
+
         # Set up: agent holds 2.0 BTC, prev mid was 99.0
         self.env.current_best_bid = 99.0
         self.env.current_best_ask = 99.0
@@ -90,10 +92,10 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.env.position = 2.0
         self.env.prev_portfolio_value = self.env._get_portfolio_value()  # 100000 + 2*99 = 100198
         self.env.step_transaction_costs = 0.0
-        
+
         action = 2  # Tier 2 Discrete(6): Hold
         obs, reward, terminated, truncated, info = self.env.step(action)
-        
+
         # NAV delta = (100000 + 2*100) - (100000 + 2*99) = 2.0 USDT
         # bps ≈ (2.0 / ~100198) × 10000 ≈ 0.2
         self.assertAlmostEqual(reward, 0.2, places=1)
@@ -106,7 +108,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.config["taker_fee"] = 0.0005  # 5 bps
         self.env = DeepScalperEnv(self.config, self.mock_handler)
         self.env.reset()
-        
+
         # Set up: no position, price constant
         mock_row = {'bid_price_1': 100.0, 'ask_price_1': 100.0,
                      'bid_vol_1': 10.0, 'ask_vol_1': 10.0}
@@ -116,12 +118,12 @@ class TestDeepScalperEnv(unittest.TestCase):
             mock_row[f'ask_price_{i}'] = 101.0
             mock_row[f'ask_vol_{i}'] = 10.0
         self.mock_handler.step.return_value = mock_row
-        
+
         self.env.prev_position = 0.0
-        
+
         action = 2  # Tier 2 Discrete(6): Hold
         obs, reward, terminated, truncated, info = self.env.step(action)
-        
+
         # With hold + no position: NAV delta ≈ 0
         self.assertIn("reward_nav", info)
         self.assertIn("reward_total", info)
@@ -133,7 +135,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         """Equal +$1 and -$1 price moves produce symmetric NAV rewards."""
         self.config["reward"] = {"scaling": 1.0}
         self.config["initial_balance"] = 100000.0
-        
+
         # Test +$1 move
         env1 = DeepScalperEnv(self.config, self.mock_handler)
         env1.reset()
@@ -145,7 +147,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         mock_row = {'bid_price_1': 101.0, 'ask_price_1': 101.0}
         self.mock_handler.step.return_value = mock_row
         obs1, reward1, _, _, _ = env1.step(2)  # Tier 2: Hold
-        
+
         # Test -$1 move
         env2 = DeepScalperEnv(self.config, self.mock_handler)
         env2.reset()
@@ -157,7 +159,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         mock_row2 = {'bid_price_1': 99.0, 'ask_price_1': 99.0}
         self.mock_handler.step.return_value = mock_row2
         obs2, reward2, _, _, _ = env2.step(2)  # Tier 2: Hold
-        
+
         # |reward1| ≈ |reward2| (symmetric)
         # bps ≈ (1.0 / ~100100) × 10000 ≈ 0.1
         self.assertAlmostEqual(abs(reward1), abs(reward2), places=4)
@@ -180,10 +182,10 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.config["initial_balance"] = 100000.0
         self.env = DeepScalperEnv(self.config, self.mock_handler)
         self.env.reset()
-        
+
         mock_row = {'bid_price_1': 100.0, 'ask_price_1': 100.0}
         self.mock_handler.step.return_value = mock_row
-        
+
         # Large position, price unchanged (set BBO to match)
         self.env.current_best_bid = 100.0
         self.env.current_best_ask = 100.0
@@ -191,7 +193,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.env.position = 5.0
         self.env.prev_portfolio_value = self.env._get_portfolio_value()
         self.env.step_transaction_costs = 0.0
-        
+
         action = 2  # Tier 2: Hold
         obs, reward, terminated, truncated, info = self.env.step(action)
 
@@ -206,20 +208,20 @@ class TestDeepScalperEnv(unittest.TestCase):
         config_nested = {
             "symbol": "BTCUSDT",
             "window_size": 15,
-            "action": {"max_position": 5.0}
+            "action": {"max_position": 5.0},
         }
         env = DeepScalperEnv(config_nested, self.mock_handler)
         self.assertEqual(env.max_position, 5.0)
-        
+
         # Flat config (backward compatibility)
         config_flat = {
             "symbol": "BTCUSDT",
             "window_size": 15,
-            "max_position": 3.0
+            "max_position": 3.0,
         }
         env_flat = DeepScalperEnv(config_flat, self.mock_handler)
         self.assertEqual(env_flat.max_position, 3.0)
-        
+
         # Default (no max_position anywhere)
         config_default = {
             "symbol": "BTCUSDT",
@@ -240,7 +242,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         env = DeepScalperEnv(config, self.mock_handler)
         self.assertAlmostEqual(env.maker_fee, 0.0002)
         self.assertAlmostEqual(env.taker_fee, 0.0005)
-        
+
         # When only transaction_fee is set (legacy behavior)
         config_flat = {
             "symbol": "BTCUSDT",
@@ -363,7 +365,7 @@ class TestDeepScalperEnv(unittest.TestCase):
     def test_reward_bps_scale_invariance(self):
         """Doubling price and portfolio value produces the same bps reward."""
         self.config["reward"] = {"scaling": 1.0}
-        
+
         # Scenario A: BTC @ $100, $100K portfolio, +$1 move, 1 BTC
         self.config["initial_balance"] = 100000.0
         env_a = DeepScalperEnv(self.config, self.mock_handler)
@@ -376,7 +378,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         mock_row_a = {'bid_price_1': 101.0, 'ask_price_1': 101.0}
         self.mock_handler.step.return_value = mock_row_a
         _, reward_a, _, _, _ = env_a.step(2)  # Tier 2: Hold
-        
+
         # Scenario B: BTC @ $200, $200K portfolio, +$2 move, 1 BTC
         # Same fractional return → same bps
         self.config["initial_balance"] = 200000.0
@@ -390,7 +392,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         mock_row_b = {'bid_price_1': 202.0, 'ask_price_1': 202.0}
         self.mock_handler.step.return_value = mock_row_b
         _, reward_b, _, _, _ = env_b.step(2)  # Tier 2: Hold
-        
+
         # Both should be ~1 bps (Δ1/100100 ≈ Δ2/200200)
         self.assertAlmostEqual(reward_a, reward_b, places=4,
                                msg=f"bps rewards should be equal: {reward_a} vs {reward_b}")
@@ -401,17 +403,17 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.config["initial_balance"] = 1000.0
         env = DeepScalperEnv(self.config, self.mock_handler)
         env.reset()
-        
+
         # Setup: Long 2.0 @ 100.0
         env.position = 2.0
         env.balance = 50.0  # Cash=50.
-        
+
         # Action: Sell 3.0 @ 100.0 (Net Short 1.0)
         # Required Margin = 1.0 * 100 * 1.0 = 100.0
         # Balance 50 < 100 -> Reject.
         allowed = env._check_margin(2.0, 3.0, 100.0, 2)
         self.assertFalse(allowed, "Should reject flip if balance insufficient for net new short")
-        
+
         # Case 2: Sufficient Balance
         env.balance = 150.0
         allowed = env._check_margin(2.0, 3.0, 100.0, 2)
@@ -423,17 +425,17 @@ class TestDeepScalperEnv(unittest.TestCase):
         self.config["initial_balance"] = 1000.0
         env = DeepScalperEnv(self.config, self.mock_handler)
         env.reset()
-        
+
         # Setup: Short 2.0
         env.position = -2.0
         env.balance = 50.0
-        
+
         # Action: Buy 3.0 @ 100.0 (Net Long 1.0)
         # Required: 1.0 * 100 = 100.0
         # Balance 50 < 100 -> Reject.
         allowed = env._check_margin(-2.0, 3.0, 100.0, 1)
         self.assertFalse(allowed, "Should reject flip if balance insufficient for net new long")
-        
+
         # Case 2: Sufficient Balance
         env.balance = 150.0
         allowed = env._check_margin(-2.0, 3.0, 100.0, 1)
@@ -454,21 +456,21 @@ class TestDeepScalperEnv(unittest.TestCase):
         config_custom = {
             "symbol": "BTCUSDT",
             "window_size": 15,
-            "action": {"fixed_trade_qty": 0.5}
+            "action": {"fixed_trade_qty": 0.5},
         }
         env_custom = DeepScalperEnv(config_custom, self.mock_handler)
         self.assertAlmostEqual(env_custom.fixed_trade_qty, 0.5)
-    
+
     def test_hold_bonus_flat_position(self):
         """Fix 2: Hold bonus should only apply when agent holds AND is flat."""
         self.config["reward"] = {"scaling": 1.0, "hold_bonus_bps": 0.1}
         self.config["initial_balance"] = 100000.0
         env = DeepScalperEnv(self.config, self.mock_handler)
         env.reset()
-        
+
         mock_row = {'bid_price_1': 100.0, 'ask_price_1': 100.0}
         self.mock_handler.step.return_value = mock_row
-        
+
         # Case 1: Hold while flat → should get hold bonus
         env.prev_position = 0.0
         env.position = 0.0
@@ -477,7 +479,7 @@ class TestDeepScalperEnv(unittest.TestCase):
                                msg="Hold bonus should be 0.1 bps when flat")
         self.assertAlmostEqual(reward, 0.1, places=4,
                                msg="Total reward should include hold bonus")
-        
+
         # Case 2: Hold while positioned → NO hold bonus
         env.current_best_bid = 100.0
         env.current_best_ask = 100.0
@@ -487,7 +489,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         obs, reward2, _, _, info2 = env.step(2)  # Tier 2: Hold
         self.assertAlmostEqual(info2["reward_hold_bonus"], 0.0,
                                msg="Hold bonus should be 0 when positioned")
-        
+
         # Case 3: Trade while flat → NO hold bonus
         env.prev_position = 0.0
         env.position = 0.0
@@ -507,7 +509,7 @@ class TestDeepScalperEnv(unittest.TestCase):
         # Set up market data so we can verify order quantity
         mock_row = {
             'bid_price_1': 100.0, 'ask_price_1': 100.0,
-            'bid_vol_1': 10.0, 'ask_vol_1': 10.0
+            'bid_vol_1': 10.0, 'ask_vol_1': 10.0,
         }
         for i in range(2, 6):
             mock_row[f'bid_price_{i}'] = 99.0
@@ -537,7 +539,7 @@ class TestActionMasking(unittest.TestCase):
             "lot_size": 0.001,
             "action": {
                 "max_position": 1.0,
-            }
+            },
         }
         self.mock_handler = MagicMock(spec=ParquetDataHandler)
         self.env = DeepScalperEnv(self.config, self.mock_handler)
@@ -588,7 +590,7 @@ class TestActionMasking(unittest.TestCase):
         mock_row = {
             'bid_price_1': 100.0, 'bid_vol_1': 1.0,
             'ask_price_1': 101.0, 'ask_vol_1': 1.0,
-            'timestamp': '2023-01-01T00:00:00'
+            'timestamp': '2023-01-01T00:00:00',
         }
         for i in range(2, 6):
             mock_row[f'bid_price_{i}'] = 100.0 - i * 0.1
@@ -622,11 +624,11 @@ class TestForcedLiquidation(unittest.TestCase):
             # ARCH-2 requires observing spread/fee impact
             "action": {
                 "max_position": 1.0,
-            }
+            },
         }
         self.mock_handler = MagicMock(spec=ParquetDataHandler)
         self.env = DeepScalperEnv(self.config, self.mock_handler)
-    
+
     def test_forced_liquidation_cost(self):
         """ARCH-2: Verify forced liquidation penalty at truncation."""
         # 1. Setup env in state where truncation is imminent
@@ -635,7 +637,7 @@ class TestForcedLiquidation(unittest.TestCase):
         mock_row_reset = {
              'bid_price_1': 100.0, 'bid_vol_1': 1.0,
              'ask_price_1': 101.0, 'ask_vol_1': 1.0,
-             'timestamp': '2023-01-01T00:00:00'
+             'timestamp': '2023-01-01T00:00:00',
         }
         for i in range(2, 6):
              mock_row_reset[f'bid_price_{i}'] = 99.0
@@ -645,17 +647,17 @@ class TestForcedLiquidation(unittest.TestCase):
         # Add macro (optional but good for robustness)
         for k in range(11):
             mock_row_reset[f'macro_{k}'] = 0.0
-             
+
         self.mock_handler.step.return_value = mock_row_reset
         self.env.reset()
-        
+
         # Force near end
         self.env.current_step = 100
         self.env.end_step = 101  # Next step triggers truncation
-        
+
         # Make handler return None (End of Data)
         self.mock_handler.step.return_value = None
-        
+
         # 2. Open a position
         self.env.position = 1.0 # Long
         self.env.cash = 10000.0
@@ -668,20 +670,20 @@ class TestForcedLiquidation(unittest.TestCase):
         # def _get_portfolio_value(self):
         #    price = (self.current_best_bid + self.current_best_ask) / 2
         #    return self.cash + self.position * price
-        
+
         self.env.portfolio_value = 10000.0 + (1.0 * 100.5) # Based on 100/101 mid
-        
+
         # 3. Take HOLD action
         action = 2  # Tier 2: Hold
-        
+
         # 4. Step -> Truncation
         # The env calls data_handler.step() -> returns None -> truncated
         obs, reward, term, trunc, info = self.env.step(action)
-        
+
         self.assertTrue(trunc, "Environment should truncate when handler returns None")
         self.assertTrue(info.get("forced_liquidation", False), 
             "Should flag forced liquidation in info dict")
-            
+
         # 5. Check Reward (Exit Cost)
         # We exited a Long position at Bid Price (100.0).
         # We paid Taker Fee (0.0003).

@@ -6,10 +6,9 @@ import tempfile
 import pytest
 import torch
 
-from finrl_pro_ds.alphaseek.agent_wrapper import AlphaSeekAgent, STATE_DIM, ACTION_DIM
+from finrl_pro_ds.alphaseek.agent_wrapper import ACTION_DIM, STATE_DIM, AlphaSeekAgent
 from finrl_pro_ds.alphaseek.ensemble import AlphaSeekEnsemble, EnsembleStrategy
 from finrl_pro_ds.alphaseek.nets import QNetTwin, QNetTwinDuel
-
 
 # ─── Fixtures ────────────────────────────────────────────────────────────────
 

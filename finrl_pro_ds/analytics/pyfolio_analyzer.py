@@ -1,9 +1,9 @@
 
-import pandas as pd
-import numpy as np
 import warnings
+
 import matplotlib.pyplot as plt
-from typing import Dict
+import numpy as np
+import pandas as pd
 
 
 class PyfolioAnalyzer:
@@ -35,7 +35,7 @@ class PyfolioAnalyzer:
                 warnings.warn("Returns index is not DatetimeIndex. Generating dummy 1min index.")
                 self.returns.index = pd.date_range(end=pd.Timestamp.now(), periods=len(self.returns), freq='1min')
 
-    def get_audit_metrics(self) -> Dict[str, float]:
+    def get_audit_metrics(self) -> dict[str, float]:
         """
         Compute institutional metrics using pure numpy (no pyfolio/empyrical).
 
@@ -130,7 +130,7 @@ class PyfolioAnalyzer:
         cum_ret = (1 + self.returns).prod() - 1
         return {
             "total_return": cum_ret * 100,
-            "win_rate": (self.returns > 0).mean() * 100
+            "win_rate": (self.returns > 0).mean() * 100,
         }
 
     def generate_tear_sheet(self, save_path: str = "results/pyfolio_tear_sheet.png"):

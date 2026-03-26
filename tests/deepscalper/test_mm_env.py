@@ -3,16 +3,16 @@ Unit tests for MarketMakingEnv (V8) and fill models.
 
 Tests: spaces, fills, inventory, reward, drawdown, fee curriculum, deadband, vectorized compat.
 """
+import gymnasium as gym
 import numpy as np
 import pytest
-import gymnasium as gym
 
-from finrl_pro_ds.envs.market_making_env import MarketMakingEnv
 from finrl_pro_ds.data.fill_model import (
     PriceCrossFillModel,
     VolumeBasedFillModel,
     create_fill_model,
 )
+from finrl_pro_ds.envs.market_making_env import MarketMakingEnv
 
 
 # ---------------------------------------------------------------------------
@@ -43,7 +43,7 @@ class _MockMMHandler:
         # Precompute ATR
         tr = np.maximum(
             self._high - self._low,
-            np.maximum(np.abs(self._high - self._open), np.abs(self._low - self._open))
+            np.maximum(np.abs(self._high - self._open), np.abs(self._low - self._open)),
         )
         import pandas as pd
         self._atr = pd.Series(tr).rolling(14, min_periods=1).mean().values

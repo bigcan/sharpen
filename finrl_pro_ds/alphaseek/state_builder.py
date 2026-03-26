@@ -80,18 +80,18 @@ class AlphaSeekStateBuilder:
         if self._latest_features is None:
             # Pre-warmup: return zeros
             return torch.zeros(
-                1, 10, dtype=torch.float32, device=self._device
+                1, 10, dtype=torch.float32, device=self._device,
             )
 
         position_norm = float(position) / max(self._max_position, 1)
         holding_norm = float(holding) / max(self._max_holding, 1)
 
         state = np.concatenate(
-            [[position_norm, holding_norm], self._latest_features]
+            [[position_norm, holding_norm], self._latest_features],
         )
 
         return torch.tensor(
-            state, dtype=torch.float32, device=self._device
+            state, dtype=torch.float32, device=self._device,
         ).unsqueeze(0)
 
     @property

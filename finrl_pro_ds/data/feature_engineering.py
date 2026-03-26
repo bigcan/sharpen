@@ -13,15 +13,16 @@ Normalization Pipeline (all unbounded features):
 
 Bounded features (OBI, RSI, %B, slope asym, sin/cos) bypass normalization.
 """
+from typing import Optional, Union
+
 import numpy as np
 import pandas as pd
-from typing import Dict, List, Optional, Union
 
 # ─── Column name constants (used by env, parquet_handler, tests) ──────────
 
 # 40 micro features consumed by the env's _build_frame()
 # v2: dims 0-29 (base), fev3: dims 30-34 (cross-TF), dims 35-39 (acceleration)
-MICRO_FEATURE_COLS: List[str] = (
+MICRO_FEATURE_COLS: list[str] = (
     ['microprice_basis']                                     # 1   dim  0
     + [f'dofi_{i}' for i in range(1, 6)]                     # 5   dims 1-5
     + [f'dofi_int_{i}' for i in range(1, 6)]                 # 5   dims 6-10
@@ -48,7 +49,7 @@ MICRO_FEATURE_COLS: List[str] = (
 NUM_MICRO_FEATURES = len(MICRO_FEATURE_COLS)  # 40
 
 # 15 macro features consumed by the env's _update_macro_state()
-MACRO_FEATURE_COLS: List[str] = [
+MACRO_FEATURE_COLS: list[str] = [
     'logret_1', 'logret_3', 'logret_5', 'logret_15',        # 4  multi-horizon returns
     'parkinson_vol',                                         # 1  realized volatility
     'vol_regime_ratio',                                      # 1  15m/60m Parkinson ratio
@@ -75,13 +76,13 @@ _BOUNDED_FEATURES = {
 }
 
 
-def get_micro_feature_cols(n_levels: int = 5) -> List[str]:
+def get_micro_feature_cols(n_levels: int = 5) -> list[str]:
     """Return the micro feature column list for a given LOB depth.
 
     n_levels=5 (BTC, default): 40 dims (full 5-level LOB)
     n_levels=1 (Gold/CME):     18 dims (Level-1 only, no slope_asym/depth_drain)
     """
-    cols: List[str] = ['microprice_basis']
+    cols: list[str] = ['microprice_basis']
     cols += [f'dofi_{i}' for i in range(1, n_levels + 1)]
     cols += [f'dofi_int_{i}' for i in range(1, n_levels + 1)]
     cols += ['total_obi']
@@ -100,7 +101,7 @@ def get_micro_feature_cols(n_levels: int = 5) -> List[str]:
     return cols
 
 
-def get_macro_feature_cols(asset_class: str = 'crypto') -> List[str]:
+def get_macro_feature_cols(asset_class: str = 'crypto') -> list[str]:
     """Return the macro feature column list for a given asset class.
 
     crypto (default): funding_sin/cos (8h Binance cycle)
@@ -129,7 +130,7 @@ class DeepScalperFeatureEngineer:
     Handles Micro-level (LOB) and Macro-level (OHLCV) features.
     """
 
-    def __init__(self, config: Optional[Dict] = None):
+    def __init__(self, config: Optional[dict] = None):
         self.config = config or {}
         self.norm_span = int(self.config.get('vol_norm_window', 120))  # EMA span
         self.n_levels = int(self.config.get('n_levels', 5))
@@ -192,7 +193,7 @@ class DeepScalperFeatureEngineer:
         # Saturation at |z|>4 instead of |z|>2, preserving tail info.
         return np.tanh(z * 0.5).astype(np.float32)
 
-    def _normalize_features(self, df: pd.DataFrame, cols: List[str]) -> pd.DataFrame:
+    def _normalize_features(self, df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
         """
         Apply the full normalization pipeline to a list of columns:
           raw → SymLog → EMA-Z(span, shift=1) → tanh
@@ -298,7 +299,7 @@ class DeepScalperFeatureEngineer:
         total_vol_sum = total_bid_vol + total_ask_vol
         df['total_obi'] = np.clip(
             (total_bid_vol - total_ask_vol) / (total_vol_sum + 1e-8),
-            -1.0, 1.0
+            -1.0, 1.0,
         ).astype(np.float32)
 
         # ── 5. Price Distances from Mid (bps) — n_levels bid + n_levels ask ──
@@ -314,7 +315,7 @@ class DeepScalperFeatureEngineer:
             bv_i = df[f'bid_vol_{i}'].values.astype(np.float64)
             av_i = df[f'ask_vol_{i}'].values.astype(np.float64)
             df[f'obi_{i}'] = np.clip(
-                (bv_i - av_i) / (bv_i + av_i + 1e-8), -1.0, 1.0  # Fix D: epsilon
+                (bv_i - av_i) / (bv_i + av_i + 1e-8), -1.0, 1.0,  # Fix D: epsilon
             ).astype(np.float32)
 
         # ── 7. LOB Slope Asymmetry (1 dim) — requires n_levels >= 5 ──
@@ -382,7 +383,7 @@ class DeepScalperFeatureEngineer:
 
         # spread_velocity: diff(spread_bps)
         df['spread_velocity'] = np.diff(
-            df['spread_bps'].values.astype(np.float64), prepend=0.0
+            df['spread_bps'].values.astype(np.float64), prepend=0.0,
         )
 
         # depth_drain: diff(mean near-book liquidity) — requires n_levels >= 3

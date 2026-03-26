@@ -34,6 +34,7 @@ import time
 from pathlib import Path
 
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent / '.env')
 
 import databento as db  # noqa: E402
@@ -101,7 +102,7 @@ def fetch_and_resample(client, symbol: str, start: str, end: str) -> pd.DataFram
         if trade_mask.any():
             trades = df.loc[trade_mask]
             ohlcv = trades['price'].resample('1min').agg(
-                open='first', high='max', low='min', close='last'
+                open='first', high='max', low='min', close='last',
             )
             if 'size' in trades.columns:
                 ohlcv['volume'] = trades['size'].resample('1min').sum()
@@ -148,8 +149,9 @@ def fetch_and_resample(client, symbol: str, start: str, end: str) -> pd.DataFram
 
 def fetch_contract_period(client, symbol: str, start: str, end: str) -> pd.DataFrame:
     """Fetch a contract's full front-month period, month by month."""
-    from dateutil.relativedelta import relativedelta
     from datetime import datetime
+
+    from dateutil.relativedelta import relativedelta
 
     all_chunks = []
     current = datetime.strptime(start, "%Y-%m-%d")

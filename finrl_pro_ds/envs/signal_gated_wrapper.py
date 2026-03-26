@@ -16,10 +16,11 @@ Design rationale:
   - DSR accumulates naturally across skipped bars (inner env computes per-bar)
   - Compatible with SyncVectorEnv, SACTrainer, fee curriculum, HPO, backtest
 """
+import logging
+from typing import Any
+
 import gymnasium as gym
 import numpy as np
-import logging
-from typing import Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +41,7 @@ class SignalGatedWrapper(gym.Wrapper):
       idx 7: volume_z    — SymLog -> EMA-Z -> tanh normalized volume
     """
 
-    def __init__(self, env: gym.Env, gate_config: Dict[str, Any]):
+    def __init__(self, env: gym.Env, gate_config: dict[str, Any]):
         super().__init__(env)
         self.gate_config = gate_config
 
@@ -80,7 +81,7 @@ class SignalGatedWrapper(gym.Wrapper):
         if self._scale_features is None:
             logger.warning(
                 "SignalGatedWrapper: Could not access handler scale features. "
-                "Gate will always be open (passthrough mode)."
+                "Gate will always be open (passthrough mode).",
             )
 
     def reset(self, **kwargs):

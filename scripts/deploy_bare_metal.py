@@ -1,12 +1,13 @@
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
-import paramiko
-import zipfile
 import time
+import zipfile
 from pathlib import Path
+
+import paramiko
 from dotenv import load_dotenv
 
 # Load Environment Variables from Root
@@ -20,7 +21,7 @@ PROJECT_ROOT = Path(os.getcwd())
 DEPLOY_EXCLUDES = [
     'mlruns', 'logs', 'wandb', 'results', 'checkpoints', '.git', '.venv', 'venv', '__pycache__',
     'market_data.parquet', 'btc_lob_jan2023.parquet', 'finrl_pro_ds.egg-info', # Exclude massive data & stale metadata
-    'hpo.db', 'hpo.db-journal' # Exclude local HPO state to prevent overwriting remote clean start
+    'hpo.db', 'hpo.db-journal', # Exclude local HPO state to prevent overwriting remote clean start
 ]
 ROOT_DATA_EXCLUDE = ['data'] # Only exclude root data folder
 
@@ -195,7 +196,7 @@ def deploy(args):
             "train_deepscalper.py",     # The specialized trainer
             "tune_deepscalper.py",      # The HPO tuner
             "backtest_deepscalper.py",  # The backtester
-            "wandb-service"             # Optional: Cleanup wandb internal process if stuck
+            "wandb-service",             # Optional: Cleanup wandb internal process if stuck
         ]
         unique_targets = list(set(targets))
         kill_cmd_parts = [f"pkill -f {t}" for t in unique_targets]
@@ -238,7 +239,7 @@ def deploy(args):
         # Base Image is PyTorch 2.8.0 + CUDA 12.8
         "/root/miniconda3/bin/pip install -q --upgrade -r requirements.txt",
         "echo 'STEP: INSTALL PKG'",
-        f"/root/miniconda3/bin/pip install -q -e '.[{args.pip_extras}]'" if args.pip_extras else "/root/miniconda3/bin/pip install -q -e ."  # Editable install
+        f"/root/miniconda3/bin/pip install -q -e '.[{args.pip_extras}]'" if args.pip_extras else "/root/miniconda3/bin/pip install -q -e .",  # Editable install
     ]
 
     cmd_chain = " && ".join(setup_cmds) + " && echo SETUP_SUCCESS"
@@ -384,7 +385,7 @@ def deploy(args):
                 host,
                 datetime.now().isoformat(),
                 args.extra_args,
-                "deployed"
+                "deployed",
             ))
             conn.commit()
             conn.close()
@@ -407,8 +408,8 @@ def deploy(args):
         print("  Press Ctrl+C to cancel (run will continue on remote)\n")
 
         try:
-            from scripts.fetch_wandb_run import poll_run_until_complete
             from scripts.collect_run import collect_run
+            from scripts.fetch_wandb_run import poll_run_until_complete
 
             # Wait for run to appear in WandB and complete
             # Use resolved ID if we have it, otherwise poll latest

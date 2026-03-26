@@ -7,12 +7,14 @@ Total cost: ~$3.14
 import os
 import sys
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent / '.env')
 
 import databento as db  # noqa: E402
-import pandas as pd  # noqa: E402
 import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
 
 API_KEY = os.environ.get('DATABENTO_API_KEY')
 if not API_KEY:

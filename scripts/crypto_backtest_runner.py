@@ -32,14 +32,16 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
+from finrl_pro_ds.crypto.data.crypto_array_builder import build_env_arrays  # noqa: E402
 from finrl_pro_ds.crypto.data.crypto_loader import (  # noqa: E402
     WalkForwardCoverageValidator,
     fetch_crypto_data,
 )
-from finrl_pro_ds.crypto.data.crypto_array_builder import build_env_arrays  # noqa: E402
-from finrl_pro_ds.crypto.features.crypto_features import compute_crypto_features  # noqa: E402
 from finrl_pro_ds.crypto.envs.crypto_perp_env import CryptoPerpEnv  # noqa: E402
 from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: E402
+from finrl_pro_ds.crypto.features.crypto_features import (  # noqa: E402
+    compute_crypto_features,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +50,7 @@ def load_config(config_path: str | None = None) -> dict:
     """Load experiment configuration from YAML."""
     if config_path is None:
         config_path = str(
-            PROJECT_ROOT / "configs" / "synapse_crypto_1h.yaml"
+            PROJECT_ROOT / "configs" / "synapse_crypto_1h.yaml",
         )
 
     with open(config_path, "r") as f:
@@ -182,13 +184,13 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
         w_idx = window["window"]
         logger.info(f"\n--- Window {w_idx} ---")
         logger.info(
-            f"  Train: {window['train_start']} → {window['train_end']}"
+            f"  Train: {window['train_start']} → {window['train_end']}",
         )
         logger.info(
-            f"  Val:   {window['val_start']} → {window['val_end']}"
+            f"  Val:   {window['val_start']} → {window['val_end']}",
         )
         logger.info(
-            f"  Test:  {window['test_start']} → {window['test_end']}"
+            f"  Test:  {window['test_start']} → {window['test_end']}",
         )
 
         try:
@@ -237,7 +239,7 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
             logger.info(
                 f"  Window {w_idx} result: "
                 f"return={test_result['total_return']:.2%}, "
-                f"sharpe={test_result['sharpe']:.3f}"
+                f"sharpe={test_result['sharpe']:.3f}",
             )
             _wandb_log({
                 f"window/{w_idx}/return": test_result["total_return"],
@@ -363,7 +365,7 @@ def _make_sb3_agent(agent_type: str, env, agent_cfg: dict):
     agent_cfg : dict
         Agent-specific hyperparameters from YAML.
     """
-    from stable_baselines3 import SAC, A2C, PPO
+    from stable_baselines3 import A2C, PPO, SAC
 
     cls_map = {"sac": SAC, "a2c": A2C, "ppo_gae": PPO}
     cls = cls_map[agent_type]
@@ -605,7 +607,7 @@ def _train_and_evaluate(
     if not trained_agents:
         logger.error("    All agents failed to train — falling back to random baseline")
         return _compute_result_metrics(
-            [test_env.initial_capital], []
+            [test_env.initial_capital], [],
         )
 
     # --- Step 2: Evaluate each agent on validation env ---
@@ -622,7 +624,7 @@ def _train_and_evaluate(
         val_returns_per_agent[name] = val_rets
         logger.info(
             f"    {name.upper()} val: sortino={val_sortino:.3f}, "
-            f"return={val_result['total_return']:.2%}"
+            f"return={val_result['total_return']:.2%}",
         )
         _wandb_log({
             f"val/{name}/sortino": val_sortino,
@@ -655,7 +657,7 @@ def _train_and_evaluate(
     # --- Step 4: Evaluate arbitrator ensemble on test env ---
     logger.info("    Running arbitrator ensemble on test set...")
     test_result = _evaluate_arbitrator_on_env(
-        arbitrator, trained_agents, test_env
+        arbitrator, trained_agents, test_env,
     )
     test_result["agent_weights"] = weights
     test_result["n_agents_trained"] = len(trained_agents)
@@ -674,19 +676,19 @@ def main():
     parser = argparse.ArgumentParser(description="Synapse Crypto 1H Backtest Runner")
     parser.add_argument(
         "--config", type=str, default=None,
-        help="Path to experiment config YAML"
+        help="Path to experiment config YAML",
     )
     parser.add_argument(
         "--max_windows", type=int, default=None,
-        help="Limit walk-forward to first N windows (pilot mode)"
+        help="Limit walk-forward to first N windows (pilot mode)",
     )
     parser.add_argument(
         "--agents", nargs="*", default=None,
-        help="Override which agents to train (e.g. --agents sac a2c). Default: from config lean_trinity"
+        help="Override which agents to train (e.g. --agents sac a2c). Default: from config lean_trinity",
     )
     parser.add_argument(
         "--hpo_results_dir", type=str, default=None,
-        help="Directory with HPO best params (w{N}_best_sac.json). If present, SAC uses HPO params."
+        help="Directory with HPO best params (w{N}_best_sac.json). If present, SAC uses HPO params.",
     )
     # Compatibility with deploy_bare_metal.py injected args (ignored)
     parser.add_argument("--run_name", default=None, help=argparse.SUPPRESS)

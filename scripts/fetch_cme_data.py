@@ -8,10 +8,11 @@ Usage:
     python scripts/fetch_cme_data.py --phase 1    # OHLCV only (~$1.22)
     python scripts/fetch_cme_data.py --phase 2    # MBP-10 full book (~$69)
 """
+import argparse
 import os
 import sys
-import argparse
 from pathlib import Path
+
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / '.env')

@@ -9,8 +9,9 @@ and round-trip cost c:
 This tells us: how good does our model need to be on each asset?
 """
 from pathlib import Path
-import pandas as pd
+
 import numpy as np
+import pandas as pd
 
 DATA_DIR = Path(__file__).parent.parent / "data" / "cme"
 

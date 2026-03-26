@@ -67,7 +67,7 @@ class OrderBook:
 
         return {
             "bids": sorted_bids,
-            "asks": sorted_asks
+            "asks": sorted_asks,
         }
 
 class OrderBookReplayer:

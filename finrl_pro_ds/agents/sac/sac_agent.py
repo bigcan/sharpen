@@ -8,16 +8,17 @@ Interface matches IQN/BDQ contract for pipeline compatibility:
   predict(), train_step(), save(), load(), reset_hidden_state(),
   mask_hidden_state(), decay_epsilon()
 """
-import os
 import copy
+import os
+from typing import Optional
+
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from typing import Dict, Optional
 
-from finrl_pro_ds.agents.sac.networks import SACActorNetwork, SACCriticNetwork
 from finrl_pro_ds.agents.common.flat_replay_buffer import FlatReplayBuffer
+from finrl_pro_ds.agents.sac.networks import SACActorNetwork, SACCriticNetwork
 
 
 class SACAgent:
@@ -29,7 +30,7 @@ class SACAgent:
 
     def __init__(
         self,
-        network_config: Dict,
+        network_config: dict,
         lr_actor: float = 3e-4,
         lr_critic: float = 3e-4,
         lr_alpha: float = 3e-4,
@@ -115,7 +116,7 @@ class SACAgent:
         # FIX R2-AUD-08: Create Parameter directly on target device to preserve
         # nn.Parameter type (nn.Parameter.to() returns plain Tensor on device change).
         self.log_alpha = nn.Parameter(
-            torch.log(torch.tensor(initial_alpha, dtype=torch.float32, device=self.device))
+            torch.log(torch.tensor(initial_alpha, dtype=torch.float32, device=self.device)),
         )
         self.target_entropy = -float(self._action_dim)  # -dim(action_space)
 
@@ -187,7 +188,7 @@ class SACAgent:
                 logging.getLogger(__name__).info(
                     "[torch.compile] actor + 2 targets (full-model). "
                     "Training critics: eager (O-A encode/q_head split). "
-                    "max_autotune_gemm=False (BUG-08 workaround)"
+                    "max_autotune_gemm=False (BUG-08 workaround)",
                 )
             except Exception as e:
                 import logging
@@ -239,25 +240,25 @@ class SACAgent:
 
     def store_transition(
         self,
-        obs: Dict[str, np.ndarray],
+        obs: dict[str, np.ndarray],
         action: np.ndarray,
         reward: float,
-        next_obs: Dict[str, np.ndarray],
+        next_obs: dict[str, np.ndarray],
         done: bool,
     ):
         """Store a single transition in the replay buffer."""
         state = self._obs_to_buffer(obs)
         next_state = self._obs_to_buffer(next_obs)
         self.replay_buffer.push(
-            state, action, reward, next_state, done, aux_target=0.0
+            state, action, reward, next_state, done, aux_target=0.0,
         )
 
     def store_batch(
         self,
-        obs_batch: Dict[str, np.ndarray],
+        obs_batch: dict[str, np.ndarray],
         actions: np.ndarray,
         rewards: np.ndarray,
-        next_obs_batch: Dict[str, np.ndarray],
+        next_obs_batch: dict[str, np.ndarray],
         dones: np.ndarray,
     ):
         """Store N transitions at once using batch push."""
@@ -265,10 +266,10 @@ class SACAgent:
         next_states = self._obs_batch_to_buffer(next_obs_batch)
         aux = np.zeros(len(rewards), dtype=np.float32)
         self.replay_buffer.push_batch(
-            states, actions, rewards, next_states, dones, aux
+            states, actions, rewards, next_states, dones, aux,
         )
 
-    def train_step(self) -> Optional[Dict[str, float]]:
+    def train_step(self) -> Optional[dict[str, float]]:
         """One SAC update step. Returns metrics dict or None if buffer too small.
 
         For better throughput, prefer train_step_mega(n_steps) which samples
@@ -276,7 +277,7 @@ class SACAgent:
         """
         return self.train_step_mega(1)
 
-    def train_step_mega(self, n_steps: int = 1) -> Optional[Dict[str, float]]:
+    def train_step_mega(self, n_steps: int = 1) -> Optional[dict[str, float]]:
         """Run n_steps SAC gradient updates from a single mega-batch.
 
         OPT-07: Samples n_steps * batch_size transitions ONCE, transfers to
@@ -438,7 +439,7 @@ class SACAgent:
             return t.pin_memory().to(self.device, non_blocking=True)
         return t.to(self.device, non_blocking=True)
 
-    def _obs_to_buffer(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    def _obs_to_buffer(self, obs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """Convert multi-scale obs dict to replay buffer format."""
         if self._obs_mode == "summary_stats":
             # v6: Concat all scale summaries + private into one flat vector
@@ -457,7 +458,7 @@ class SACAgent:
             "private": obs["private"],
         }
 
-    def _obs_batch_to_buffer(self, obs: Dict[str, np.ndarray]) -> Dict[str, np.ndarray]:
+    def _obs_batch_to_buffer(self, obs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
         """Convert batch multi-scale obs dict to replay buffer format."""
         if self._obs_mode == "summary_stats":
             n = obs["scale_0"].shape[0]
@@ -509,13 +510,13 @@ class SACAgent:
                 nflat = nmacro[:, offset:offset + chunk]
                 scale_list.append(
                     self._to_device_pinned(
-                        flat.reshape(-1, self._window_size, self._features_per_scale)
-                    )
+                        flat.reshape(-1, self._window_size, self._features_per_scale),
+                    ),
                 )
                 next_scale_list.append(
                     self._to_device_pinned(
-                        nflat.reshape(-1, self._window_size, self._features_per_scale)
-                    )
+                        nflat.reshape(-1, self._window_size, self._features_per_scale),
+                    ),
                 )
 
         # Stack into (B, N, W, F) for compile-friendly forward

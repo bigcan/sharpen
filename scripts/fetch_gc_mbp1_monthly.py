@@ -5,13 +5,15 @@ Fetch GC MBP-1 month by month to avoid memory issues.
 Processes each month to 1-min LOB snapshots, then concatenates.
 Then runs the RF signal quality test.
 """
+import gc as garbage_collect
 import os
 import time
-import gc as garbage_collect
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
+
 from dateutil.relativedelta import relativedelta
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent / '.env')
 
 import databento as db  # noqa: E402
@@ -64,7 +66,7 @@ def fetch_and_resample_month(client, start_str, end_str):
 
         if len(trades) > 0:
             ohlcv = trades['price'].resample('1min').agg(
-                open='first', high='max', low='min', close='last'
+                open='first', high='max', low='min', close='last',
             )
             if 'size' in trades.columns:
                 ohlcv['volume'] = trades['size'].resample('1min').sum()

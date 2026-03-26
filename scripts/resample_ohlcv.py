@@ -34,7 +34,6 @@ from pathlib import Path
 
 import pandas as pd
 
-
 # --- Default batch paths (relative to repo root) ---
 # Output paths have {res} placeholder replaced at runtime
 BATCH_JOBS = [
@@ -160,7 +159,7 @@ def resample_ohlcv(input_path: str, output_path: str, resolution: str = "3min") 
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Resample 1-min parquet data to any resolution"
+        description="Resample 1-min parquet data to any resolution",
     )
     parser.add_argument("--input", type=str, default=None,
                         help="Path to input 1-min parquet file")

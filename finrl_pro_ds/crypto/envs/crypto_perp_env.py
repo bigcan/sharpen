@@ -250,12 +250,12 @@ class CryptoPerpEnv(gym.Env):
 
         # Calculate transaction costs (fees + slippage)
         total_fees, total_slippage = self._calc_transaction_costs_fast(
-            delta_weights, abs_delta, price, portfolio_value_before
+            delta_weights, abs_delta, price, portfolio_value_before,
         )
 
         # Realize PnL on closed/reduced positions
         realized_this_step = self._realize_pnl(
-            old_positions, delta_weights, price
+            old_positions, delta_weights, price,
         )
 
         # Update positions
@@ -717,7 +717,7 @@ class CryptoPerpEnv(gym.Env):
             f"PV {summary['portfolio_value']:>12,.2f} | "
             f"Ret {summary['total_return']:>+8.2%} | "
             f"Gross {summary['gross_exposure']:.2f} | "
-            f"Pos {summary['n_positions']}"
+            f"Pos {summary['n_positions']}",
         )
 
     def get_portfolio_summary(self) -> dict:

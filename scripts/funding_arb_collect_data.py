@@ -73,7 +73,7 @@ def fetch_funding_rates(
     try:
         while True:
             batch = exchange.fetch_funding_rate_history(
-                symbol=psym, since=since_ms, limit=100
+                symbol=psym, since=since_ms, limit=100,
             )
             if not batch:
                 break
@@ -129,7 +129,7 @@ def fetch_ohlcv(
         return pd.DataFrame()
 
     df = pd.DataFrame(
-        all_candles, columns=["timestamp", "open", "high", "low", "close", "volume"]
+        all_candles, columns=["timestamp", "open", "high", "low", "close", "volume"],
     )
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
     df["symbol"] = symbol
@@ -172,7 +172,7 @@ def fetch_perp_ohlcv(
         return pd.DataFrame()
 
     df = pd.DataFrame(
-        all_candles, columns=["timestamp", "open", "high", "low", "close", "volume"]
+        all_candles, columns=["timestamp", "open", "high", "low", "close", "volume"],
     )
     df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms", utc=True)
     df["symbol"] = symbol
@@ -399,7 +399,7 @@ def collect_all(
     # 5. Build 4D market data array
     if not fr_df.empty:
         market_data = build_market_array(
-            fr_df, ohlcv_dict, perp_ohlcv_dict, symbols, exchanges
+            fr_df, ohlcv_dict, perp_ohlcv_dict, symbols, exchanges,
         )
         np.save(output_path / "market_data.npy", market_data)
         logger.info(f"Saved market_data.npy: shape {market_data.shape}")
@@ -414,7 +414,7 @@ def collect_all(
     if not fr_df.empty:
         logger.info("\n=== Funding Rate Summary ===")
         summary = fr_df.groupby(["symbol", "exchange"])["funding_rate"].agg(
-            ["mean", "std", "min", "max", "count"]
+            ["mean", "std", "min", "max", "count"],
         )
         logger.info(f"\n{summary.to_string()}")
 
@@ -430,7 +430,7 @@ def collect_all(
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Collect funding rate data for RL training"
+        description="Collect funding rate data for RL training",
     )
     parser.add_argument("--days", type=int, default=90, help="Days of history to fetch")
     parser.add_argument("--symbols", nargs="+", default=DEFAULT_SYMBOLS)

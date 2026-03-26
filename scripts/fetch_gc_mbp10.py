@@ -8,7 +8,9 @@ import os
 import sys
 import time
 from pathlib import Path
+
 from dotenv import load_dotenv
+
 load_dotenv(Path(__file__).parent.parent / '.env')
 
 import databento as db  # noqa: E402
@@ -155,7 +157,7 @@ def build_lob_snapshots(df: pd.DataFrame) -> pd.DataFrame:
         # Filter to actual trades (non-zero price)
         trades = df[df[price_col] > 0][[price_col, size_col]]
         ohlcv = trades[price_col].resample('1min').agg(
-            open='first', high='max', low='min', close='last'
+            open='first', high='max', low='min', close='last',
         )
         vol = trades[size_col].resample('1min').sum()
         ohlcv['volume'] = vol
@@ -164,7 +166,7 @@ def build_lob_snapshots(df: pd.DataFrame) -> pd.DataFrame:
         if bid_px_cols[0] in df.columns and ask_px_cols[0] in df.columns:
             mid = (df[bid_px_cols[0]] + df[ask_px_cols[0]]) / 2
             ohlcv = mid.resample('1min').agg(
-                open='first', high='max', low='min', close='last'
+                open='first', high='max', low='min', close='last',
             )
             ohlcv['volume'] = 0
 

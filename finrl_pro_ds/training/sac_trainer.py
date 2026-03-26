@@ -8,16 +8,17 @@ Handles:
   - WandB logging
   - Checkpointing
 """
+import logging
 import os
 import time
+from collections import deque
+from concurrent.futures import Future, ThreadPoolExecutor
+from typing import Optional
+
 import numpy as np
 import torch
-import wandb
-import logging
-from typing import Dict, Optional
-from collections import deque
-from concurrent.futures import ThreadPoolExecutor, Future
 
+import wandb
 from finrl_pro_ds.agents.sac.sac_agent import SACAgent
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class SACTrainer:
     def __init__(
         self,
         env,
-        config: Dict,
+        config: dict,
         device: str = "cuda",
         run_name: Optional[str] = None,
         hpo_mode: bool = False,
@@ -108,7 +109,7 @@ class SACTrainer:
             self.agent.tau = effective_tau
             logger.info(
                 f"[UTD] update_interval={self.update_interval} → tau auto-scaled: "
-                f"{raw_tau:.6f} → {effective_tau:.6f}"
+                f"{raw_tau:.6f} → {effective_tau:.6f}",
             )
 
         # Fee curriculum
@@ -150,7 +151,7 @@ class SACTrainer:
         logger.info(
             f"SAC Training: {self.total_timesteps} steps, "
             f"{num_envs} envs, device={self.device}, "
-            f"torch_threads={torch.get_num_threads()}"
+            f"torch_threads={torch.get_num_threads()}",
         )
 
         # OPT-08: Pipeline overlap — GPU training runs in background thread while
@@ -204,7 +205,7 @@ class SACTrainer:
                 parts.append(obs["private"])
                 flat_np = np.concatenate(parts, axis=1)  # (B, D)
                 scale_stack = torch.as_tensor(flat_np, dtype=torch.float32).to(
-                    self.device, non_blocking=True
+                    self.device, non_blocking=True,
                 )
                 priv = None
             else:
@@ -212,13 +213,13 @@ class SACTrainer:
                 # FIX OPT-01: Was creating N separate tensors + N .to(device) calls per step.
                 # np.stack is cheap (contiguous source from SyncVectorEnv), single torch transfer.
                 scale_np = np.stack(
-                    [obs[f"scale_{i}"] for i in range(self._n_scales)], axis=1
+                    [obs[f"scale_{i}"] for i in range(self._n_scales)], axis=1,
                 )  # (B, N, W, F)
                 scale_stack = torch.as_tensor(scale_np, dtype=torch.float32).to(
-                    self.device, non_blocking=True
+                    self.device, non_blocking=True,
                 )
                 priv = torch.as_tensor(obs["private"], dtype=torch.float32).to(
-                    self.device, non_blocking=True
+                    self.device, non_blocking=True,
                 )
 
             with torch.no_grad():
@@ -275,7 +276,7 @@ class SACTrainer:
                 logger.info(
                     f"[HPO] step {total_steps}/{self.total_timesteps} "
                     f"({100*total_steps/self.total_timesteps:.0f}%) | "
-                    f"SPS={sps:.0f} | buf={len(self.agent.replay_buffer)}"
+                    f"SPS={sps:.0f} | buf={len(self.agent.replay_buffer)}",
                 )
                 # WandB heartbeat so fleet monitor doesn't flag as stalled
                 try:

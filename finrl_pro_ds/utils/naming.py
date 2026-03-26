@@ -3,12 +3,13 @@ from __future__ import annotations
 import datetime
 import re
 
+
 def generate_experiment_name(
     category: str,
     system: str,
     description: str,
     experiment_id: str | None = None,
-    date: datetime.date | None = None
+    date: datetime.date | None = None,
 ) -> str:
     """
     Generates a standardized experiment name.
@@ -42,26 +43,10 @@ def generate_experiment_name(
 
     return "_".join(parts)
 
-def parse_experiment_name(name: str) -> dict:
-    """
-    Parses a standardized experiment name into its components.
-    """
-    parts = name.split("_")
-    if len(parts) < 4:
-        return {}
-
-    return {
-        "date": parts[0],
-        "category": parts[1],
-        "system": parts[2],
-        "description": "_".join(parts[3:]).split("_exp")[0] if "exp" in parts[-1] else "_".join(parts[3:]),
-        "id": parts[-1] if len(parts) > 4 else None
-    }
-
 
 def generate_run_name(
     config_path: str,
-    timestamp_format: str = "%Y%m%d_%H%M%S"
+    timestamp_format: str = "%Y%m%d_%H%M%S",
 ) -> str:
     """
     Generate a standardized WandB run name from the config filename.
@@ -122,36 +107,10 @@ def validate_run_name(run_name: str, raise_on_fail: bool = True) -> bool:
         raise ValueError(
             f"Invalid run name: '{run_name}'. "
             f"Expected format: '{{descriptive-id}}_{{YYYYMMDD}}_{{HHMMSS}}'. "
-            f"Do NOT add suffixes - use WandB tags for metadata (Pilot, HPO, etc.)."
+            f"Do NOT add suffixes - use WandB tags for metadata (Pilot, HPO, etc.).",
         )
 
     return is_valid
 
 
-def standardize_run_name(
-    run_name: str,
-    version: str = "V1",
-    platform: str = "GPUHub",
-    timestamp_format: str = "%Y%m%d_%H%M"
-) -> str:
-    """
-    ╔═══════════════════════════════════════════════════════════════════════════╗
-    ║  DEPRECATED - DO NOT USE                                                  ║
-    ║                                                                           ║
-    ║  This function was causing naming convention violations by adding        ║
-    ║  suffixes to run names. Use generate_run_name(config_path) instead.    ║
-    ║  Pass descriptive metadata via WandB tags.                              ║
-    ║                                                                           ║
-    ║  Deprecated: Feb 2, 2026                                                 ║
-    ╚═══════════════════════════════════════════════════════════════════════════╝
-    """
-    import warnings
-    warnings.warn(
-        "standardize_run_name() is DEPRECATED! Use generate_run_name() instead. "
-        "Pass descriptive info via WandB tags, not the run name.",
-        DeprecationWarning,
-        stacklevel=2
-    )
-    # Always return canonical format - ignore user input
-    return generate_run_name(config_path="legacy", timestamp_format=timestamp_format)
 

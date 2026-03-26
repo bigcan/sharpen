@@ -124,7 +124,7 @@ class CryptoRiskManager:
 
         # --- Update drawdown tracking ---
         self.state.peak_portfolio_value = max(
-            self.state.peak_portfolio_value, portfolio_value
+            self.state.peak_portfolio_value, portfolio_value,
         )
         if self.state.peak_portfolio_value > 0:
             self.state.current_drawdown = (
@@ -139,7 +139,7 @@ class CryptoRiskManager:
                 logger.info("Circuit breaker cooldown expired — resuming trading")
             else:
                 violations.append(
-                    f"CIRCUIT_BREAKER: Active, {self.state.circuit_breaker_cooldown_remaining} bars remaining"
+                    f"CIRCUIT_BREAKER: Active, {self.state.circuit_breaker_cooldown_remaining} bars remaining",
                 )
                 return np.zeros_like(action), violations
 
@@ -147,7 +147,7 @@ class CryptoRiskManager:
         if self.state.current_drawdown > self.config.max_drawdown_pct:
             violations.append(
                 f"MAX_DRAWDOWN: {self.state.current_drawdown:.2%} > "
-                f"{self.config.max_drawdown_pct:.0%} — circuit breaker activated"
+                f"{self.config.max_drawdown_pct:.0%} — circuit breaker activated",
             )
             self.state.circuit_breaker_active = True
             self.state.circuit_breaker_cooldown_remaining = self.config.circuit_breaker_cooldown_bars
@@ -164,7 +164,7 @@ class CryptoRiskManager:
                     sign = np.sign(modified[i])
                     violations.append(
                         f"POSITION_LIMIT: Asset {i} weight {modified[i]:.3f} "
-                        f"exceeds {self.config.max_position_pct:.0%}"
+                        f"exceeds {self.config.max_position_pct:.0%}",
                     )
                     modified[i] = sign * self.config.max_position_pct
 
@@ -172,7 +172,7 @@ class CryptoRiskManager:
         net = modified.sum()
         if net < self.config.max_net_short_exposure:
             violations.append(
-                f"NET_SHORT: {net:.3f} below limit {self.config.max_net_short_exposure}"
+                f"NET_SHORT: {net:.3f} below limit {self.config.max_net_short_exposure}",
             )
             # Scale short positions to meet constraint
             short_mask = modified < 0
@@ -201,7 +201,7 @@ class CryptoRiskManager:
         if pre_delta_accumulated + delta > self.config.daily_turnover_limit:
             violations.append(
                 f"DAILY_TURNOVER: {pre_delta_accumulated + delta:.2f} > "
-                f"{self.config.daily_turnover_limit:.2f}"
+                f"{self.config.daily_turnover_limit:.2f}",
             )
             # Scale action to use exactly the remaining turnover budget
             remaining = max(0, self.config.daily_turnover_limit - pre_delta_accumulated)
@@ -221,7 +221,7 @@ class CryptoRiskManager:
                 if abs(modified[i]) > 0.01 and np.sign(modified[i]) == np.sign(funding_rates[i]):
                     violations.append(
                         f"FUNDING_ALERT: Asset {i} rate={funding_rates[i]:.5f} "
-                        f"(paying funding)"
+                        f"(paying funding)",
                     )
                     modified[i] *= 0.5  # Halve exposure
 
@@ -229,7 +229,7 @@ class CryptoRiskManager:
         if portfolio_value > 0 and margin_balance / portfolio_value < self.config.min_margin_reserve_pct:
             violations.append(
                 f"MARGIN_LOW: {margin_balance/portfolio_value:.2%} < "
-                f"{self.config.min_margin_reserve_pct:.0%}"
+                f"{self.config.min_margin_reserve_pct:.0%}",
             )
             # Reduce gross exposure by 20%
             modified *= 0.8
@@ -244,7 +244,7 @@ class CryptoRiskManager:
 
             if enb < self.config.min_effective_bets:
                 violations.append(
-                    f"CONCENTRATION: ENB={enb:.1f} < {self.config.min_effective_bets}"
+                    f"CONCENTRATION: ENB={enb:.1f} < {self.config.min_effective_bets}",
                 )
                 # M1: Blend toward equal-sized positions (preserve signs)
                 n_active = max(1, int((np.abs(modified) > 0.01).sum()))

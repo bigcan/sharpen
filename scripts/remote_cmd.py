@@ -4,12 +4,13 @@ Executes shell commands on the remote GPU server via SSH.
 Supports multiple instances via instances.json (--instance flag).
 """
 
+import argparse
+import json
 import os
 import sys
-import json
-import argparse
-import paramiko
 from pathlib import Path
+
+import paramiko
 from dotenv import load_dotenv
 
 load_dotenv()

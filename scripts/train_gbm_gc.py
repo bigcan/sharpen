@@ -178,7 +178,10 @@ def main():
     }
 
     sys.path.insert(0, project_root)
-    from finrl_pro_ds.data.feature_engineering import get_micro_feature_cols, get_macro_feature_cols
+    from finrl_pro_ds.data.feature_engineering import (
+        get_macro_feature_cols,
+        get_micro_feature_cols,
+    )
     micro_cols = get_micro_feature_cols(n_levels=1)
     macro_cols = get_macro_feature_cols(asset_class='cme_futures')
 

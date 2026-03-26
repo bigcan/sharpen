@@ -8,10 +8,10 @@ import numpy as np
 import pytest
 
 from finrl_pro_ds.crypto.execution.exchange_perp_broker import (
+    _FEE_TABLE,
     ExchangePerpBroker,
     OrderResult,
     RebalanceResult,
-    _FEE_TABLE,
 )
 
 

@@ -174,14 +174,14 @@ class DiscretePositionManager:
         """Force-close the current position (for emergency/shutdown)."""
         if self._position == 0:
             return PositionAction(
-                new_position=0, trade_delta=0, reason="already_flat"
+                new_position=0, trade_delta=0, reason="already_flat",
             )
         delta = -self._position
         self._position = 0
         self._holding = 0
         self._total_trades += 1
         return PositionAction(
-            new_position=0, trade_delta=delta, reason="force_flatten"
+            new_position=0, trade_delta=delta, reason="force_flatten",
         )
 
     def sync_position(self, exchange_position: int):

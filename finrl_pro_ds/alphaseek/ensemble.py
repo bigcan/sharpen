@@ -53,7 +53,7 @@ class AlphaSeekEnsemble:
         for agent in agents:
             if not agent.is_loaded:
                 raise RuntimeError(
-                    f"Agent {agent} is not loaded. Call .load() before creating ensemble."
+                    f"Agent {agent} is not loaded. Call .load() before creating ensemble.",
                 )
 
         self.agents = agents
@@ -68,7 +68,7 @@ class AlphaSeekEnsemble:
             if len(agent_weights) != self.n_agents:
                 raise ValueError(
                     f"agent_weights length ({len(agent_weights)}) != "
-                    f"number of agents ({self.n_agents})"
+                    f"number of agents ({self.n_agents})",
                 )
             total = sum(agent_weights)
             self.agent_weights = [w / total for w in agent_weights]
