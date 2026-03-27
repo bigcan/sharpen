@@ -1457,9 +1457,10 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         market_exposure = np.mean(np.abs(pos_arr) > 1e-6)
 
         # ── Institutional Metrics via PyfolioAnalyzer (Blueprint mandate) ──
+        # FIX BUG-10: Pass bar_minutes for correct annualization (was hardcoded 1-min)
         returns_series = pd.Series(returns)
         try:
-            analyzer = PyfolioAnalyzer(returns_series)
+            analyzer = PyfolioAnalyzer(returns_series, bar_minutes=bar_minutes)
             pyfolio_metrics = analyzer.get_audit_metrics()
         except Exception as e:
             logger.warning(f"PyfolioAnalyzer failed, using fallback: {e}")
@@ -1489,10 +1490,15 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         avg_loss = abs(np.mean(losses)) if len(losses) > 0 else 0.0
         avg_win_loss_ratio = avg_win / avg_loss if avg_loss > 1e-12 else 0.0
 
+        # FIX BUG-10: Add daily-equivalent Sharpe for industry-standard comparison
+        raw_ratio = sharpe / np.sqrt(bars_per_year) if bars_per_year > 0 else 0.0
+        sharpe_daily = raw_ratio * np.sqrt(252)
+
         metrics = {
             # ── Core metrics (manual, crypto-specific annualization) ──
             f"{prefix}/total_return": total_return,
             f"{prefix}/sharpe": sharpe,
+            f"{prefix}/sharpe_daily": sharpe_daily,
             f"{prefix}/sharpe_hourly": sharpe_hourly,
             f"{prefix}/max_drawdown": max_dd,
             f"{prefix}/final_value": pv[-1] if len(pv) > 0 else 0,

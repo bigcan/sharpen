@@ -14,14 +14,17 @@ class PyfolioAnalyzer:
     Root cause: pyfolio → empyrical → pandas_datareader → deprecate_kwarg crash.
     All metrics are now computed directly using numpy for reliability.
     """
-    def __init__(self, returns: pd.Series):
+    def __init__(self, returns: pd.Series, bar_minutes: int = 1):
         """
         Initialize the analyzer with returns data.
 
         Args:
             returns (pd.Series): Time-indexed pd.Series of percentage returns.
+            bar_minutes (int): Duration of each bar in minutes. Default 1.
+                Used for correct annualization (e.g., 15 for 15-min bars).
         """
         self.returns = returns
+        self.bar_minutes = bar_minutes
         # Ensure returns are a Series
         if not isinstance(self.returns, pd.Series):
             self.returns = pd.Series(self.returns)
@@ -42,7 +45,9 @@ class PyfolioAnalyzer:
         Metrics: Sharpe, Sortino, Calmar, Omega, Stability, VaR, Win Rate,
         Annual Return, Max Drawdown, Cumulative Return.
 
-        Annualization: 525,600 minutes/year (365.25 × 24 × 60).
+        Annualization: bars_per_year = 525,600 / bar_minutes.
+        FIX BUG-10: Previously hardcoded sqrt(525600) assuming 1-min bars.
+        Now uses bar_minutes for correct annualization at any timeframe.
         """
         r = self.returns.values.astype(np.float64)
         n = len(r)
@@ -54,10 +59,12 @@ class PyfolioAnalyzer:
         # used by wandb_evaluator. Ensures consistent Sharpe across all analytics modules.
         std_r = np.std(r, ddof=1)
 
-        # Annualization factor: 525,600 minutes per year (365.25 × 24 × 60)
-        ann_factor = np.sqrt(525600)
+        # FIX BUG-10: Annualize using actual bar duration, not hardcoded 1-min.
+        # bars_per_year = 525600 / bar_minutes (e.g., 35040 for 15-min bars)
+        bars_per_year = 525600 / self.bar_minutes
+        ann_factor = np.sqrt(bars_per_year)
 
-        # Sharpe Ratio (annualized, minute-level)
+        # Sharpe Ratio (annualized)
         sharpe = (mean_r / std_r) * ann_factor if std_r > 1e-9 else 0.0
 
         # Sortino Ratio (lower partial moment — standard definition)
@@ -79,9 +86,10 @@ class PyfolioAnalyzer:
         # Annual Return (compound, log-space to prevent overflow)
         # FIX BUG-A2: np.prod(1+r) overflows float64 for 100K+ minute returns.
         # Log-space: exp(sum(log(1+r)) * ann_periods/n) - 1
+        # FIX BUG-10: Use bars_per_year (not 525600) for correct annualization.
         try:
             log_cum = np.sum(np.log1p(r))
-            annual_ret = float(np.exp(log_cum * (525600 / n)) - 1) if n > 0 else 0.0
+            annual_ret = float(np.exp(log_cum * (bars_per_year / n)) - 1) if n > 0 else 0.0
         except (OverflowError, FloatingPointError):
             annual_ret = 0.0
 
