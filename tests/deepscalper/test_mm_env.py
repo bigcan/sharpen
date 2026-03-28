@@ -423,7 +423,8 @@ class TestInfo:
 class TestMultiStep:
     def test_200_step_episode(self):
         """Run a full episode without crash."""
-        env = _make_env(episode_length=200, random_start=False)
+        # Use high inventory_hard_stop to avoid early termination from random actions
+        env = _make_env(episode_length=200, random_start=False, inventory_hard_stop=10.0)
         obs, _ = env.reset()
         rng = np.random.default_rng(123)
         done = False
