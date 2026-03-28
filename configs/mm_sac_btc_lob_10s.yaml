@@ -25,6 +25,7 @@ features:
 
 env:
   mdp_version: "v8"
+  bar_duration_seconds: 10            # Actual bar duration (scales=[1] means 1 scale, not 1 min)
   initial_balance: 100000.0
   window_size: 30
   features_per_scale: 8

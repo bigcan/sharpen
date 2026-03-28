@@ -212,6 +212,8 @@ class FundingArbEnv(gym.Env):
 
     def step(self, action: np.ndarray):
         """Execute action then hold for action_repeat bars. Accumulates reward."""
+        if hasattr(action, 'cpu'):
+            action = action.cpu()
         action = np.asarray(action, dtype=np.float64).ravel().clip(-1.0, 1.0)
 
         total_reward = 0.0

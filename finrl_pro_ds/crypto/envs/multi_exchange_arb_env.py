@@ -126,6 +126,8 @@ class MultiExchangeArbEnv(gym.Env):
         return obs, info
 
     def step(self, action):
+        if hasattr(action, 'cpu'):
+            action = action.cpu()
         action = np.asarray(action, dtype=int).flatten()
         cfg = self.config
 
