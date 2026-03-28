@@ -222,8 +222,15 @@ class SACTrainer:
                     self.device, non_blocking=True,
                 )
 
+            # Optional LOB microstructure features (Market Making V8)
+            lob = None
+            if "lob" in obs:
+                lob = torch.as_tensor(obs["lob"], dtype=torch.float32).to(
+                    self.device, non_blocking=True,
+                )
+
             with torch.no_grad():
-                actions = self.agent.predict(scale_stack, priv, deterministic=False)
+                actions = self.agent.predict(scale_stack, priv, deterministic=False, lob=lob)
                 actions_np = actions.cpu().numpy()
 
             # Training updates — OPT-07+08: submit BEFORE env.step so GPU training

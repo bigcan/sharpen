@@ -304,7 +304,16 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
                     priv = torch.as_tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(
                         agent.device, non_blocking=True,
                     )
-                pred = agent.predict(scale_stack, priv, deterministic=True)
+                # Optional LOB microstructure features (Market Making V8)
+                lob = None
+                if "lob" in obs:
+                    lob_np = obs["lob"]
+                    if lob_np.ndim == 2:
+                        lob_np = lob_np[np.newaxis]  # (1, W, n_lob)
+                    lob = torch.as_tensor(lob_np, dtype=torch.float32).to(
+                        agent.device, non_blocking=True,
+                    )
+                pred = agent.predict(scale_stack, priv, deterministic=True, lob=lob)
             else:
                 micro = torch.tensor(obs["micro"], dtype=torch.float32).to(agent.device, non_blocking=True)
                 private = torch.tensor(obs["private"], dtype=torch.float32).to(agent.device, non_blocking=True)
@@ -364,7 +373,8 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
                 current_direction = np.array([float(dir_val[0])]) if hasattr(dir_val, "__len__") else np.array([float(dir_val)])
 
             # V4.2: Track position for trade counting
-            pos = info.get("position")
+            # BUG-13: V8 MarketMakingEnv returns "inventory", not "position"
+            pos = info.get("position", info.get("inventory"))
             if pos is not None:
                 if hasattr(pos, "__len__") and not isinstance(pos, str):
                     positions.append(float(pos[0]))
@@ -463,7 +473,8 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
         bars_per_year = 525600 / bar_minutes
         sharpe_minute = raw_ratio * np.sqrt(bars_per_year)
         # FIX R7-AUD-04: Correct hourly aggregation for bar duration
-        n_per_hour = max(1, 60 // bar_minutes)
+        # FIX BUG-12: Use int division that works for sub-minute bars (e.g. 10s → 360/hr)
+        n_per_hour = max(1, int(60 / bar_minutes))
         hourly_returns = np.add.reduceat(returns, np.arange(0, len(returns), n_per_hour))
         # FIX BUG-05: Drop last partial bucket to avoid upward Sharpe bias
         # A partial bucket with fewer than 60 samples has lower variance, inflating Sharpe.
@@ -865,9 +876,14 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             )
 
             # FIX R7-AUD-03: Compute bar_minutes for correct Sharpe annualization
+            # FIX BUG-12: V8 with 10s bars has scales=[1] but actual bar is 10 seconds,
+            # not 1 minute. Check bar_duration_seconds first for sub-minute bars.
             mdp_ver = config.get("env", {}).get("mdp_version", "v5")
             hpo_scales = config.get("features", {}).get("scales", [])
-            if mdp_ver in ("v7", "v8") and hpo_scales:
+            bar_duration_seconds = config.get("env", {}).get("bar_duration_seconds")
+            if bar_duration_seconds is not None:
+                hpo_bar_minutes = bar_duration_seconds / 60.0
+            elif mdp_ver in ("v7", "v8") and hpo_scales:
                 hpo_bar_minutes = min(hpo_scales)
             elif "15min" in config.get("data", {}).get("file_path", ""):
                 hpo_bar_minutes = 15
@@ -1198,11 +1214,17 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         backtest_config["env"]["random_start"] = False  # Sequential from start
         # FIX R2-AUD-03: Backtest must use final fee from fee_schedule, not initial 0.
         # Fee curriculum is a training concept; backtest evaluates at production fee level.
+        # FIX BUG-12: V8 (MarketMakingEnv) reads `maker_fee`, not `taker_fee`.
         fee_schedule = backtest_config.get("env", {}).get("fee_schedule")
         if fee_schedule:
             final_tier = fee_schedule[-1]
-            final_fee = final_tier.get("ramp_to", final_tier.get("taker_fee", 0.0))
-            backtest_config["env"]["taker_fee"] = final_fee
+            mdp_ver_fee = backtest_config.get("env", {}).get("mdp_version", "v5")
+            if mdp_ver_fee == "v8":
+                final_fee = final_tier.get("ramp_to", final_tier.get("maker_fee", 0.0))
+                backtest_config["env"]["maker_fee"] = final_fee
+            else:
+                final_fee = final_tier.get("ramp_to", final_tier.get("taker_fee", 0.0))
+                backtest_config["env"]["taker_fee"] = final_fee
             logger.info(f"[R2-AUD-03] Backtest fee overridden from fee_schedule: {final_fee:.6f}")
 
         env = make_env(backtest_config, start_date=start_date, end_date=end_date, norm_cutoff_date=norm_cutoff_date)
@@ -1357,7 +1379,13 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
                     priv = torch.as_tensor(obs["private"], dtype=torch.float32).unsqueeze(0).to(
                         device, non_blocking=True,
                     )
-                pred = agent.predict(scale_stack, priv, deterministic=True)
+                # Optional LOB microstructure features (Market Making V8)
+                lob = None
+                if "lob" in obs:
+                    lob = torch.as_tensor(obs["lob"], dtype=torch.float32).unsqueeze(0).to(
+                        device, non_blocking=True,
+                    )
+                pred = agent.predict(scale_stack, priv, deterministic=True, lob=lob)
                 action = pred[0].cpu().numpy()  # (1, 1) → numpy scalar
             else:
                 micro = torch.tensor(obs["micro"], dtype=torch.float32).unsqueeze(0).to(device, non_blocking=True)
@@ -1408,10 +1436,15 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         # FIX K04 + AUD-S129-02: Detect bar duration for correct annualization.
         # For multi-scale (v7), the base scale IS the bar duration. For v5/v6,
         # infer from the data file path.
+        # FIX BUG-12: V8 with 10s bars has scales=[1] but actual bar is 10 seconds.
+        # Check bar_duration_seconds first for sub-minute bars.
         mdp_version = config.get("env", {}).get("mdp_version", "v5")
         scales = config.get("features", {}).get("scales", [])
         data_file = config.get("data", {}).get("file_path", "")
-        if mdp_version in ("v7", "v8") and scales:
+        bar_duration_seconds = config.get("env", {}).get("bar_duration_seconds")
+        if bar_duration_seconds is not None:
+            bar_minutes = bar_duration_seconds / 60.0
+        elif mdp_version in ("v7", "v8") and scales:
             bar_minutes = scales[0]  # First scale is the base (decision) timeframe
         elif "15min" in data_file:
             bar_minutes = 15
@@ -1422,7 +1455,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         else:
             bar_minutes = 1  # Default: 1-min bars
         bars_per_year = 525600 / bar_minutes
-        n_per_hour = 60 // bar_minutes
+        n_per_hour = int(60 / bar_minutes)
         sharpe = 0.0
         sharpe_hourly = 0.0
         if np.std(returns) > 1e-9:

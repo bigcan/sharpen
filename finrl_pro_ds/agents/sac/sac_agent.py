@@ -10,7 +10,7 @@ Interface matches IQN/BDQ contract for pipeline compatibility:
 """
 import copy
 import os
-from typing import Optional
+from typing import NamedTuple, Optional
 
 import numpy as np
 import torch
@@ -19,6 +19,13 @@ import torch.optim as optim
 
 from finrl_pro_ds.agents.common.flat_replay_buffer import FlatReplayBuffer
 from finrl_pro_ds.agents.sac.networks import SACActorNetwork, SACCriticNetwork
+
+
+class _UnpackedObs(NamedTuple):
+    scale_stack: torch.Tensor
+    next_scale_stack: torch.Tensor
+    lob: Optional[torch.Tensor] = None
+    next_lob: Optional[torch.Tensor] = None
 
 
 class SACAgent:
@@ -99,10 +106,20 @@ class SACAgent:
         # Action dimension — configurable for multi-dim actions (e.g., MM 3D)
         self._action_dim = network_config.get("action_dim", 1)
 
+        # Optional LOB encoder config (Market Making V8)
+        lob_cfg = network_config.get("lob_encoder")
+        if lob_cfg is not None:
+            if isinstance(lob_cfg.get("channels"), list):
+                lob_cfg["channels"] = tuple(lob_cfg["channels"])
+        self._has_lob = lob_cfg is not None
+        self._n_lob_features = network_config.get("n_lob_features", 0)
+        if self._has_lob and self._obs_mode == "summary_stats":
+            raise ValueError("LOB encoder is not compatible with summary_stats obs_mode")
+
         # Build networks
-        self.actor = SACActorNetwork(scale_cfg, private_dim, fusion_dim, self._n_scales, action_dim=self._action_dim, obs_mode=self._obs_mode).to(self.device)
-        self.critic1 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales, obs_mode=self._obs_mode).to(self.device)
-        self.critic2 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales, obs_mode=self._obs_mode).to(self.device)
+        self.actor = SACActorNetwork(scale_cfg, private_dim, fusion_dim, self._n_scales, action_dim=self._action_dim, obs_mode=self._obs_mode, lob_encoder_config=lob_cfg).to(self.device)
+        self.critic1 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales, obs_mode=self._obs_mode, lob_encoder_config=lob_cfg).to(self.device)
+        self.critic2 = SACCriticNetwork(scale_cfg, private_dim, fusion_dim, action_dim=self._action_dim, n_scales=self._n_scales, obs_mode=self._obs_mode, lob_encoder_config=lob_cfg).to(self.device)
 
         # Target critics (Polyak-averaged)
         self.target_critic1 = copy.deepcopy(self.critic1).to(self.device)
@@ -147,6 +164,8 @@ class SACAgent:
             # private as "private" (private_dim,)
             self._summary_dim = 0
             macro_flat_dim = window_size * features_per_scale * (self._n_scales - 1)
+            if self._has_lob:
+                macro_flat_dim += window_size * self._n_lob_features
             self.replay_buffer = FlatReplayBuffer(
                 capacity=buffer_size,
                 micro_shape=(window_size, features_per_scale),
@@ -203,6 +222,7 @@ class SACAgent:
         scale_input,
         private: Optional[torch.Tensor] = None,
         deterministic: bool = False,
+        lob: Optional[torch.Tensor] = None,
         **kwargs,
     ) -> torch.Tensor:
         """Predict action given multi-scale observations.
@@ -213,6 +233,7 @@ class SACAgent:
                          summary_stats mode.
             private: (B, private_dim) or None in summary_stats mode
             deterministic: Use mean action (no sampling)
+            lob: (B, W, n_lob_features) optional LOB microstructure tensor
 
         Returns:
             actions: (B, 1) continuous position fraction
@@ -233,6 +254,7 @@ class SACAgent:
             action, _ = self.actor.sample(
                 scale_stack, private,
                 deterministic=deterministic,
+                lob=lob,
             )
         if deterministic:
             self.actor.train()
@@ -300,7 +322,11 @@ class SACAgent:
             self.replay_buffer.sample(mega_batch_size)
 
         # Transfer ALL data to GPU at once
-        all_scale_stack, all_next_scale_stack = self._unpack_buffer_to_stacks(states, next_states)
+        unpacked = self._unpack_buffer_to_stacks(states, next_states)
+        all_scale_stack = unpacked.scale_stack
+        all_next_scale_stack = unpacked.next_scale_stack
+        all_lob = unpacked.lob          # None if no LOB config
+        all_next_lob = unpacked.next_lob
         # v6: In summary_stats mode, private is baked into the flat vector; pass None
         if self._obs_mode == "summary_stats":
             all_priv = None
@@ -331,6 +357,8 @@ class SACAgent:
             next_scale_stack = all_next_scale_stack[start:end]
             priv = all_priv[start:end] if all_priv is not None else None
             npriv = all_npriv[start:end] if all_npriv is not None else None
+            lob_mb = all_lob[start:end] if all_lob is not None else None
+            next_lob_mb = all_next_lob[start:end] if all_next_lob is not None else None
             actions = all_actions[start:end]
             rewards = all_rewards[start:end]
             dones = all_dones[start:end]
@@ -341,15 +369,15 @@ class SACAgent:
             # OPT-OA: Encode current state ONCE, reuse features for actor update
             with torch.no_grad():
                 with amp_ctx:
-                    next_action, next_log_prob = self.actor.sample(next_scale_stack, npriv)
-                    target_q1 = self.target_critic1(next_scale_stack, npriv, next_action)
-                    target_q2 = self.target_critic2(next_scale_stack, npriv, next_action)
+                    next_action, next_log_prob = self.actor.sample(next_scale_stack, npriv, lob=next_lob_mb)
+                    target_q1 = self.target_critic1(next_scale_stack, npriv, next_action, lob=next_lob_mb)
+                    target_q2 = self.target_critic2(next_scale_stack, npriv, next_action, lob=next_lob_mb)
                     target_q = torch.min(target_q1, target_q2) - alpha * next_log_prob
                     target_value = rewards + (1.0 - dones) * self.gamma * target_q
 
             with amp_ctx:
-                c1_feat = self.critic1.encode(scale_stack, priv)
-                c2_feat = self.critic2.encode(scale_stack, priv)
+                c1_feat = self.critic1.encode(scale_stack, priv, lob=lob_mb)
+                c2_feat = self.critic2.encode(scale_stack, priv, lob=lob_mb)
                 q1 = self.critic1.q_head_forward(c1_feat, actions)
                 q2 = self.critic2.q_head_forward(c2_feat, actions)
                 critic_loss = nn.functional.mse_loss(q1, target_value) + nn.functional.mse_loss(q2, target_value)
@@ -372,7 +400,7 @@ class SACAgent:
             # --- Actor + Alpha update (O-B: delayed, every actor_update_freq steps) ---
             if self._train_step_count % self.actor_update_freq == 0:
                 with amp_ctx:
-                    new_action, log_prob = self.actor.sample(scale_stack, priv)
+                    new_action, log_prob = self.actor.sample(scale_stack, priv, lob=lob_mb)
                     # OPT-OA: Reuse cached encoder features — .detach() prevents
                     # critic encoder gradients from flowing into actor update
                     q1_new = self.critic1.q_head_forward(c1_feat.detach(), new_action)
@@ -452,6 +480,8 @@ class SACAgent:
                 "private": np.array([], dtype=np.float32),
             }
         macro_parts = [obs[f"scale_{i}"].flatten() for i in range(1, self._n_scales)]
+        if self._has_lob and "lob" in obs:
+            macro_parts.append(obs["lob"].flatten())
         return {
             "micro": obs["scale_0"],
             "macro": np.concatenate(macro_parts) if macro_parts else np.array([], dtype=np.float32),
@@ -472,27 +502,48 @@ class SACAgent:
             }
         n = obs["scale_0"].shape[0]
         macro_parts = [obs[f"scale_{i}"].reshape(n, -1) for i in range(1, self._n_scales)]
+        if self._has_lob and "lob" in obs:
+            macro_parts.append(obs["lob"].reshape(n, -1))
         return {
             "micro": obs["scale_0"],
             "macro": np.concatenate(macro_parts, axis=1) if macro_parts else np.zeros((n, 0), dtype=np.float32),
             "private": obs["private"],
         }
 
-    def _unpack_buffer_to_stacks(self, states, next_states):
+    def _unpack_buffer_to_stacks(self, states, next_states) -> _UnpackedObs:
         """Unpack replay buffer micro/macro into stacked (B, N, W, F) tensors.
 
         v6 summary_stats mode: returns flat (B, D) tensors instead of stacked.
+        LOB (if present) is extracted from the end of macro before scale unpacking.
 
-        Returns stacked tensors for torch.compile-friendly forward passes.
-        Uses pinned memory for true async H2D transfers.
+        Returns _UnpackedObs namedtuple with scale_stack, next_scale_stack,
+        and optional lob/next_lob tensors.
         """
         if self._obs_mode == "summary_stats":
             # v6: micro IS the flat summary+private vector — return directly
             s_flat = self._to_device_pinned(states["micro"])
             ns_flat = self._to_device_pinned(next_states["micro"])
-            return s_flat, ns_flat
+            return _UnpackedObs(s_flat, ns_flat)
 
         chunk = self._window_size * self._features_per_scale
+
+        # Extract LOB from end of macro before scale unpacking
+        lob = None
+        next_lob = None
+        macro = states["macro"]
+        nmacro = next_states["macro"]
+        if self._has_lob and self._n_lob_features > 0:
+            lob_flat_dim = self._window_size * self._n_lob_features
+            lob_offset = macro.shape[1] - lob_flat_dim
+            lob = self._to_device_pinned(
+                macro[:, lob_offset:].reshape(-1, self._window_size, self._n_lob_features),
+            )
+            next_lob = self._to_device_pinned(
+                nmacro[:, lob_offset:].reshape(-1, self._window_size, self._n_lob_features),
+            )
+            # Trim macro to only contain scale data
+            macro = macro[:, :lob_offset]
+            nmacro = nmacro[:, :lob_offset]
 
         # Scale 0 is stored as "micro"
         s0 = self._to_device_pinned(states["micro"])
@@ -502,8 +553,6 @@ class SACAgent:
 
         # Remaining scales are packed in "macro"
         if self._n_scales > 1:
-            macro = states["macro"]
-            nmacro = next_states["macro"]
             for i in range(1, self._n_scales):
                 offset = (i - 1) * chunk
                 flat = macro[:, offset:offset + chunk]
@@ -520,7 +569,12 @@ class SACAgent:
                 )
 
         # Stack into (B, N, W, F) for compile-friendly forward
-        return torch.stack(scale_list, dim=1), torch.stack(next_scale_list, dim=1)
+        return _UnpackedObs(
+            torch.stack(scale_list, dim=1),
+            torch.stack(next_scale_list, dim=1),
+            lob,
+            next_lob,
+        )
 
     def save(self, path: str):
         """Save all model state to checkpoint."""

@@ -62,10 +62,10 @@ class DilatedCNNEncoder(nn.Module):
 
 
 class MultiScaleEncoder(nn.Module):
-    """Fusion of N timescale encoders + private state.
+    """Fusion of N timescale encoders + optional LOB encoder + private state.
 
     Forward:
-        encode each scale → concat [h_0, h_1, ..., h_N-1, private]
+        encode each scale → [optional: encode LOB] → concat + private
         → TC-align → fusion MLP → LayerNorm → ReLU → (B, fusion_dim)
     """
 
@@ -75,6 +75,7 @@ class MultiScaleEncoder(nn.Module):
         private_dim: int = 5,
         fusion_dim: int = 256,
         n_scales: int = 3,
+        lob_encoder_config: Optional[dict] = None,
     ):
         super().__init__()
         output_dim = scale_encoder_config.get("output_dim", 64)
@@ -84,7 +85,15 @@ class MultiScaleEncoder(nn.Module):
             DilatedCNNEncoder(**scale_encoder_config) for _ in range(n_scales)
         ])
 
-        concat_dim = output_dim * n_scales + private_dim
+        # Optional LOB encoder — separate DilatedCNN for microstructure features
+        self._lob_encoder: Optional[DilatedCNNEncoder] = None
+        self._lob_output_dim = 0
+        if lob_encoder_config is not None:
+            self._lob_encoder = DilatedCNNEncoder(**lob_encoder_config)
+            self._lob_output_dim = lob_encoder_config.get("output_dim", 64)
+        lob_output_dim = self._lob_output_dim
+
+        concat_dim = output_dim * n_scales + lob_output_dim + private_dim
         tc_dim = _tc_align(concat_dim)
         self._fusion_pad = tc_dim - concat_dim
 
@@ -107,15 +116,26 @@ class MultiScaleEncoder(nn.Module):
         self,
         scale_stack: torch.Tensor,
         private: torch.Tensor,
+        lob: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         Args:
             scale_stack: (B, N, W, F) stacked scale tensors
             private: (B, private_dim)
+            lob: (B, W, n_lob_features) optional LOB microstructure tensor
         Returns:
             (B, fusion_dim)
         """
         encoded = [enc(scale_stack[:, i]) for i, enc in enumerate(self.encoders)]
+        if self._lob_encoder is not None:
+            if lob is not None:
+                encoded.append(self._lob_encoder(lob))
+            else:
+                # Zero-fill: fusion Linear expects fixed input dim even without LOB data
+                encoded.append(torch.zeros(
+                    scale_stack.shape[0], self._lob_output_dim,
+                    device=scale_stack.device, dtype=scale_stack.dtype,
+                ))
         combined = torch.cat(encoded + [private], dim=1)
         if self._fusion_pad > 0:
             combined = F.pad(combined, (0, self._fusion_pad))
@@ -180,6 +200,7 @@ class SACActorNetwork(nn.Module):
         n_scales: int = 3,
         action_dim: int = 1,
         obs_mode: str = "window",
+        lob_encoder_config: Optional[dict] = None,
     ):
         super().__init__()
         self.action_dim = action_dim
@@ -189,7 +210,10 @@ class SACActorNetwork(nn.Module):
             summary_dim = scale_encoder_config.get("summary_input_dim", 50)
             self.encoder = SummaryStatsEncoder(summary_dim, fusion_dim)
         else:
-            self.encoder = MultiScaleEncoder(scale_encoder_config, private_dim, fusion_dim, n_scales)
+            self.encoder = MultiScaleEncoder(
+                scale_encoder_config, private_dim, fusion_dim, n_scales,
+                lob_encoder_config=lob_encoder_config,
+            )
 
         self.head = nn.Sequential(
             nn.Linear(fusion_dim, fusion_dim),
@@ -214,6 +238,7 @@ class SACActorNetwork(nn.Module):
         self,
         scale_stack: torch.Tensor,
         private: Optional[torch.Tensor] = None,
+        lob: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Returns (mu, log_sigma) for the Gaussian policy.
 
@@ -223,7 +248,7 @@ class SACActorNetwork(nn.Module):
         if self._obs_mode == "summary_stats":
             features = self.encoder(scale_stack)
         else:
-            features = self.encoder(scale_stack, private)
+            features = self.encoder(scale_stack, private, lob=lob)
         h = self.head(features)
         mu = self.mu_layer(h)
         log_sigma = self.log_sigma_layer(h)
@@ -235,6 +260,7 @@ class SACActorNetwork(nn.Module):
         scale_stack: torch.Tensor,
         private: Optional[torch.Tensor] = None,
         deterministic: bool = False,
+        lob: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Sample action with log_prob (tanh correction applied).
 
@@ -244,7 +270,7 @@ class SACActorNetwork(nn.Module):
             action: (B, action_dim) in [-1, 1]
             log_prob: (B, 1) — summed over action dims for multi-dim actions
         """
-        mu, log_sigma = self.forward(scale_stack, private)
+        mu, log_sigma = self.forward(scale_stack, private, lob=lob)
         sigma = log_sigma.exp()
 
         if deterministic:
@@ -282,6 +308,7 @@ class SACCriticNetwork(nn.Module):
         action_dim: int = 1,
         n_scales: int = 3,
         obs_mode: str = "window",
+        lob_encoder_config: Optional[dict] = None,
     ):
         super().__init__()
         self._obs_mode = obs_mode
@@ -290,7 +317,10 @@ class SACCriticNetwork(nn.Module):
             summary_dim = scale_encoder_config.get("summary_input_dim", 50)
             self.encoder = SummaryStatsEncoder(summary_dim, fusion_dim)
         else:
-            self.encoder = MultiScaleEncoder(scale_encoder_config, private_dim, fusion_dim, n_scales)
+            self.encoder = MultiScaleEncoder(
+                scale_encoder_config, private_dim, fusion_dim, n_scales,
+                lob_encoder_config=lob_encoder_config,
+            )
 
         q_input_dim = fusion_dim + action_dim
         tc_q_dim = _tc_align(q_input_dim)
@@ -314,6 +344,7 @@ class SACCriticNetwork(nn.Module):
         self,
         scale_stack: torch.Tensor,
         private: Optional[torch.Tensor] = None,
+        lob: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Encode multi-scale obs to fusion features: (B, fusion_dim).
 
@@ -325,7 +356,7 @@ class SACCriticNetwork(nn.Module):
         """
         if self._obs_mode == "summary_stats":
             return self.encoder(scale_stack)
-        return self.encoder(scale_stack, private)
+        return self.encoder(scale_stack, private, lob=lob)
 
     def q_head_forward(
         self,
@@ -348,10 +379,11 @@ class SACCriticNetwork(nn.Module):
         scale_stack: torch.Tensor,
         private: Optional[torch.Tensor] = None,
         action: Optional[torch.Tensor] = None,
+        lob: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """Returns scalar Q-value: (B, 1)
 
         In summary_stats mode, scale_stack is flat (B, input_dim), private is None.
         """
-        features = self.encode(scale_stack, private)
+        features = self.encode(scale_stack, private, lob=lob)
         return self.q_head_forward(features, action)
