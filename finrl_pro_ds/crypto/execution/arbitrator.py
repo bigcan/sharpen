@@ -229,6 +229,8 @@ class _BaseArbitrator:
                 )
                 continue
             action, _ = agent.predict(obs, deterministic=deterministic)
+            if hasattr(action, 'cpu'):
+                action = action.cpu()
             actions.append(np.asarray(action, dtype=np.float64))
             w_vec.append(weights[name])
 

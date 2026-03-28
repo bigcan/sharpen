@@ -198,7 +198,10 @@ class MarketMakingEnv(gym.Env):
             ws = getattr(self.handler, 'window_size', self.window_size)
             if self.episode_length > 0 and data_len > 0 and self.random_start:
                 max_start = max(ws, data_len - self.episode_length - ws)
-                start_idx = self.np_random.integers(ws, max_start)
+                if max_start <= ws:
+                    start_idx = ws
+                else:
+                    start_idx = self.np_random.integers(ws, max_start)
                 self.handler._ptr = start_idx
 
             self._episode_end = self.episode_length if self.episode_length > 0 else 0
@@ -218,6 +221,8 @@ class MarketMakingEnv(gym.Env):
 
     def step(self, action):
         # Parse 3D action
+        if hasattr(action, 'cpu'):
+            action = action.cpu()
         raw = np.asarray(action, dtype=np.float32).flatten()[:3]
         raw = np.clip(raw, -1.0, 1.0)
 
@@ -323,6 +328,10 @@ class MarketMakingEnv(gym.Env):
         if not traded:
             self._bars_since_last_fill += 1
 
+        # Inventory hard stop termination (contract: terminate on breach)
+        if abs(self.inventory) >= self.inventory_hard_stop:
+            terminated = True
+
         # Clamp inventory
         self.inventory = np.clip(self.inventory, -self.inventory_hard_stop, self.inventory_hard_stop)
 
@@ -331,6 +340,8 @@ class MarketMakingEnv(gym.Env):
         self._ask_fill_ema = self._ema_decay * self._ask_fill_ema + (1 - self._ema_decay) * float(fill_result.ask_filled)
         if traded:
             self._spread_earned_ema = self._ema_decay * self._spread_earned_ema + (1 - self._ema_decay) * spread_capture_bps
+        else:
+            self._spread_earned_ema *= self._ema_decay
         adv_sel_bps = fill_result.adverse_selection_cost / mid * 10000.0 if mid > 0 else 0.0
         self._adverse_sel_ema = self._ema_decay * self._adverse_sel_ema + (1 - self._ema_decay) * adv_sel_bps
 
@@ -369,6 +380,12 @@ class MarketMakingEnv(gym.Env):
         # 9. Update equity
         equity_delta = self.inventory * price_return * self.equity
         if traded:
+            # Spread capture: dollar value of half-spread earned per fill
+            if fill_result.bid_filled and mid > 0:
+                equity_delta += (mid - fill_result.bid_fill_price) / mid * fill_result.bid_fill_qty * self.equity
+            if fill_result.ask_filled and mid > 0:
+                equity_delta += (fill_result.ask_fill_price - mid) / mid * fill_result.ask_fill_qty * self.equity
+            # Maker fees
             fill_notional = 0.0
             if fill_result.bid_filled:
                 fill_notional += fill_result.bid_fill_qty

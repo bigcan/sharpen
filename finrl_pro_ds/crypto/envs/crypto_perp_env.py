@@ -197,6 +197,8 @@ class CryptoPerpEnv(gym.Env):
         return self._get_obs(), {}
 
     def step(self, action: np.ndarray):
+        if hasattr(action, 'cpu'):
+            action = action.cpu()
         action = np.asarray(action, dtype=np.float64).ravel().clip(-1.0, 1.0)
         if self.long_only:
             action = action.clip(0.0, 1.0)
