@@ -268,7 +268,7 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
 
                 if obs_mode == "summary_stats":
                     # v6: Concat scale summaries + private into flat vector
-                    if sample.ndim >= 2 and sample.shape[0] > 1 and sample.ndim == 2:
+                    if sample.ndim == 2:
                         # VectorEnv: (B, n_summary)
                         parts = [obs[f"scale_{i}"] for i in range(n_scales)]
                         parts.append(obs["private"])
@@ -635,17 +635,34 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         # See: expert DRL audit, "Goodhart's Law" in RL.
         # -----------------------------------------------------------
         if agent_type == "sac":
-            # SAC hyperparams — v6: widened LR/tau lower bounds (AlphaSeek-informed)
-            lr_actor = trial.suggest_float("lr_actor", 2e-6, 1e-3, log=True)
-            lr_critic = trial.suggest_float("lr_critic", 2e-6, 1e-3, log=True)
-            lr_alpha = trial.suggest_float("lr_alpha", 2e-6, 1e-3, log=True)
-            tau = trial.suggest_float("tau", 2e-6, 0.01, log=True)
-            gamma = trial.suggest_float("gamma", 0.95, 0.999, log=True)
-            initial_alpha = trial.suggest_float("initial_alpha", 0.05, 0.5, log=True)
-            deadband = trial.suggest_categorical("deadband_threshold", [0.15, 0.25, 0.35])
-            dsr_eta = trial.suggest_float("dsr_eta", 0.0005, 0.01, log=True)
-            # v6: gradient_clip as HPO dimension (AlphaSeek uses 3.0, ours was fixed 10.0)
-            gradient_clip = trial.suggest_float("gradient_clip", 1.0, 10.0, log=True)
+            narrow = base_config.get("hpo", {}).get("narrow_mode", False)
+            if narrow:
+                # Narrow-range HPO: +-20% around base config HPs (walk-forward HP stability check)
+                bs = base_config["agents"]["sac"]
+                be = base_config["env"]
+                be_r = be["reward"]
+                nf = 0.2
+                lr_actor = trial.suggest_float("lr_actor", bs["lr_actor"] * (1 - nf), bs["lr_actor"] * (1 + nf), log=True)
+                lr_critic = trial.suggest_float("lr_critic", bs["lr_critic"] * (1 - nf), bs["lr_critic"] * (1 + nf), log=True)
+                lr_alpha = trial.suggest_float("lr_alpha", bs["lr_alpha"] * (1 - nf), bs["lr_alpha"] * (1 + nf), log=True)
+                tau = trial.suggest_float("tau", bs["tau"] * (1 - nf), bs["tau"] * (1 + nf), log=True)
+                gamma = trial.suggest_float("gamma", max(0.90, bs["gamma"] - 0.02), min(0.999, bs["gamma"] + 0.02), log=True)
+                initial_alpha = trial.suggest_float("initial_alpha", bs["initial_alpha"] * (1 - nf), bs["initial_alpha"] * (1 + nf), log=True)
+                deadband = trial.suggest_categorical("deadband_threshold", [be["deadband_threshold"]])
+                dsr_eta = trial.suggest_float("dsr_eta", be_r["dsr_eta"] * (1 - nf), be_r["dsr_eta"] * (1 + nf), log=True)
+                gradient_clip = trial.suggest_float("gradient_clip", bs["gradient_clip"] * (1 - nf), bs["gradient_clip"] * (1 + nf), log=True)
+            else:
+                # SAC hyperparams — v6: widened LR/tau lower bounds (AlphaSeek-informed)
+                lr_actor = trial.suggest_float("lr_actor", 2e-6, 1e-3, log=True)
+                lr_critic = trial.suggest_float("lr_critic", 2e-6, 1e-3, log=True)
+                lr_alpha = trial.suggest_float("lr_alpha", 2e-6, 1e-3, log=True)
+                tau = trial.suggest_float("tau", 2e-6, 0.01, log=True)
+                gamma = trial.suggest_float("gamma", 0.95, 0.999, log=True)
+                initial_alpha = trial.suggest_float("initial_alpha", 0.05, 0.5, log=True)
+                deadband = trial.suggest_categorical("deadband_threshold", [0.15, 0.25, 0.35])
+                dsr_eta = trial.suggest_float("dsr_eta", 0.0005, 0.01, log=True)
+                # v6: gradient_clip as HPO dimension (AlphaSeek uses 3.0, ours was fixed 10.0)
+                gradient_clip = trial.suggest_float("gradient_clip", 1.0, 10.0, log=True)
 
             config["agents"]["sac"]["lr_actor"] = lr_actor
             config["agents"]["sac"]["lr_critic"] = lr_critic
@@ -1004,6 +1021,25 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
         # distinguish "bad hyperparams" from "bad MDP design".
         pruner=optuna.pruners.NopPruner(),
     )
+    # Narrow-mode HPO: seed Trial 0 with baseline HPs from config (guaranteed baseline)
+    if base_config.get("hpo", {}).get("enqueue_baseline", False) and agent_type == "sac":
+        bs = base_config["agents"]["sac"]
+        be = base_config["env"]
+        be_r = be["reward"]
+        baseline_params = {
+            "lr_actor": bs["lr_actor"],
+            "lr_critic": bs["lr_critic"],
+            "lr_alpha": bs["lr_alpha"],
+            "tau": bs["tau"],
+            "gamma": bs["gamma"],
+            "initial_alpha": bs["initial_alpha"],
+            "deadband_threshold": be["deadband_threshold"],
+            "dsr_eta": be_r["dsr_eta"],
+            "gradient_clip": bs["gradient_clip"],
+        }
+        study.enqueue_trial(baseline_params)
+        logger.info(f"Enqueued baseline trial with config HPs: {baseline_params}")
+
     study.optimize(objective, n_trials=n_trials)
 
     # Post-HPO: Reward-PF rank correlation analysis
