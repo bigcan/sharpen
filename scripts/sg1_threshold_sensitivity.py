@@ -16,7 +16,6 @@ import copy
 import logging
 import sys
 import time
-from itertools import product
 from pathlib import Path
 
 import numpy as np

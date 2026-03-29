@@ -349,7 +349,7 @@ class TestSignalGatedWrapper:
         """Each gate mode should work without errors."""
         from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
 
-        for mode in ["composite", "atr", "parkinson", "volume"]:
+        for mode in ["composite", "atr", "parkinson", "volume", "return"]:
             config = {
                 "enabled": True,
                 "gate_mode": mode,
