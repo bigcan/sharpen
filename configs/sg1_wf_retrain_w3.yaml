@@ -1,0 +1,96 @@
+# SG-1 Walk-Forward Phase 1 — Window W3: Fixed-HP Retraining
+# Train: Jan-Oct, Val: Nov, Test: Dec
+# Longest training period (10 months) — tests data quantity effect
+# HPs: T6 best from SG-1 (zr4ecfz5). No HPO.
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "GC"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-10-31"
+  val_start_date: "2025-11-01"
+  val_end_date: "2025-11-30"
+  test_start_date: "2025-12-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cme_futures"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.3
+  parkinson_threshold: 0.02
+  volume_threshold: 0.5
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.30
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.009614783537271694
+    dsr_scale: 1.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 300000, taker_fee: 0.0, ramp_to: 0.0002, ramp_end_step: 900000}
+    - {step: 900000, taker_fee: 0.0002}
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.00024472440973990144
+    lr_critic: 0.000186788025710707
+    lr_alpha: 0.0006741204610702762
+    gamma: 0.9635178038895
+    tau: 0.0022738055735631833
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.17444803725696106
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "Gold", "SAC", "3min", "signal-gated", "walkforward", "wf-retrain", "wf-w3", "fixed-hp", "phase1", "long-train"]
