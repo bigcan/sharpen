@@ -1,0 +1,88 @@
+# GMGP1-v5 Walk-Forward Phase 2b — Narrow HPO Verification
+# Window R2: Train Mar-Aug, Val Sep-Oct, Test Nov-Dec
+# 10 HPO trials with +-20% search around T29 best HPs
+# Purpose: verify HP stability across different training windows
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "GC"
+  handler_type: "multiscale"
+  train_start_date: "2025-03-01"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cme_futures"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0
+  deadband_threshold: 0.35
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.003159755401614352
+    dsr_scale: 1.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 500000, taker_fee: 0.0, ramp_to: 0.0002, ramp_end_step: 1500000}
+    - {step: 1500000, taker_fee: 0.0002}
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.0005462612695421805
+    lr_critic: 0.000866154995794675
+    lr_alpha: 0.0009625164717779418
+    gamma: 0.9535315530021778
+    tau: 0.00212659146992685
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.15930606967484204
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  n_trials: 10
+  steps_per_trial: 500000
+  narrow_mode: true
+  enqueue_baseline: true
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-v5", "Gold", "SAC", "15min", "walkforward", "wf-narrow-hpo", "wf-r2", "phase2b", "hp-stability"]
