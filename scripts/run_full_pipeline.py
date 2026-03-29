@@ -1640,6 +1640,8 @@ def main():
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to checkpoint for --backtest_only mode")
     parser.add_argument("--warm_start", type=str, default=None,
                         help="Path to checkpoint for warm-starting training (encoder weights)")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Global random seed for reproducibility (torch, numpy, random, env)")
     args = parser.parse_args()
 
     base_config = load_config(args.config)
@@ -1697,6 +1699,16 @@ def main():
     # cuDNN auto-tuner: caches fastest kernel for fixed input shapes (our envs have constant obs dims)
     torch.backends.cudnn.benchmark = True
     logger.info("cuDNN benchmark enabled")
+
+    # Global seed for reproducibility (multi-seed stability tests)
+    if args.seed is not None:
+        import random
+        torch.manual_seed(args.seed)
+        np.random.seed(args.seed)
+        random.seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(args.seed)
+        logger.info(f"Global seed set: {args.seed}")
 
     try:
         # =====================================================================

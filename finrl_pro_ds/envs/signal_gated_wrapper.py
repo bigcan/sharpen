@@ -50,6 +50,9 @@ class SignalGatedWrapper(gym.Wrapper):
         self.parkinson_threshold = float(gate_config.get("parkinson_threshold", 0.02))
         self.volume_threshold = float(gate_config.get("volume_threshold", 0.5))
 
+        # abs_log_return threshold (for gate_mode="return")
+        self.return_threshold = float(gate_config.get("return_threshold", 0.002))
+
         # Safety cap: force gate open after this many consecutive hold bars
         self.max_hold_bars = int(gate_config.get("max_hold_bars", 20))
 
@@ -175,6 +178,10 @@ class SignalGatedWrapper(gym.Wrapper):
             return parkinson > self.parkinson_threshold
         elif self.gate_mode == "volume":
             return abs(volume_z) > self.volume_threshold
+        elif self.gate_mode == "return":
+            # abs_log_return gate — oracle-validated best single signal
+            log_return = float(features[0])
+            return abs(log_return) > self.return_threshold
         else:
             # Composite: ANY signal exceeding threshold opens the gate
             if atr_norm > self.atr_threshold:
