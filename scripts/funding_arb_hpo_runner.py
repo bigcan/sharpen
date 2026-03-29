@@ -312,6 +312,11 @@ def run_hpo_for_window(
         model.learn(total_timesteps=total_timesteps, callback=wb_cb.callback)
         vec_env.close()
         logger.info(f"  SAC full training complete ({total_timesteps} steps)")
+
+        # Save model checkpoint (before eval, before cleanup)
+        checkpoint_path = out_dir / f"w{w_idx}_sac_full.zip"
+        model.save(str(checkpoint_path))
+        logger.info(f"  Model checkpoint saved: {checkpoint_path}")
         _wandb_log({f"train/sac/w{w_idx}/status": "complete"})
     except Exception as e:
         logger.error(f"  SAC full training failed: {e}")
@@ -419,6 +424,19 @@ def run_full_hpo_wf(
         logger.info(f"\n{'=' * 60}")
         logger.info(f"WINDOW {w_idx}: {window['train_start']} -> {window['test_end']}")
         logger.info(f"{'=' * 60}")
+
+        # Skip windows that already have completed results (resumability)
+        existing_results = out_dir / f"w{w_idx}_results.json"
+        if existing_results.exists():
+            try:
+                with open(existing_results) as f:
+                    prev = json.load(f)
+                if prev.get("status") == "COMPLETED":
+                    logger.info(f"  Window {w_idx} already completed — skipping (resume mode)")
+                    window_results.append(prev)
+                    continue
+            except (json.JSONDecodeError, KeyError):
+                logger.warning(f"  Corrupt results for window {w_idx}, re-running")
 
         try:
             train_arrays = build_funding_arb_arrays(
