@@ -1,0 +1,76 @@
+# GMGP1-v5 SAC Gold 15-min — Live/Paper Trading Engine
+# CPU-only PyTorch inference (~800MB image vs ~6GB CUDA)
+#
+# Build:
+#   docker compose -f docker-compose.yaml build trading-engine
+#
+# The checkpoint is bind-mounted at runtime, NOT baked into the image.
+
+FROM python:3.11-slim AS base
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    OMP_NUM_THREADS=1 \
+    MKL_NUM_THREADS=1 \
+    PIP_NO_CACHE_DIR=1 \
+    TZ=UTC
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    git \
+    curl \
+    procps \
+    tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ---- Dependencies layer (cached) ----
+# PyTorch CPU-only (~200MB vs ~2GB CUDA)
+RUN pip install --upgrade pip && \
+    pip install \
+    torch --index-url https://download.pytorch.org/whl/cpu
+
+# Trading engine dependencies
+RUN pip install \
+    "ib-insync>=0.9.86" \
+    "wandb>=0.16.0" \
+    "pandas>=2.1.0" \
+    "pyarrow>=14.0.1" \
+    "pyyaml>=6.0" \
+    "numpy>=1.24" \
+    "gymnasium>=0.29" \
+    "stockstats>=0.6" \
+    "scipy>=1.11" \
+    "python-dotenv>=1.0"
+
+# ---- Application layer ----
+COPY finrl_pro_ds /app/finrl_pro_ds
+COPY scripts /app/scripts
+COPY configs /app/configs
+COPY pyproject.toml /app/
+
+RUN pip install -e .
+
+# ---- Runtime setup ----
+# Non-root user for security
+RUN groupadd -r finrl && useradd -r -g finrl -d /app finrl \
+    && mkdir -p /app/logs /tmp \
+    && chown -R finrl:finrl /app /tmp
+
+# Entrypoint and healthcheck scripts
+COPY docker/live/entrypoint.sh /app/entrypoint.sh
+COPY docker/live/healthcheck.sh /app/healthcheck.sh
+RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh
+
+USER finrl
+
+ENV PYTHONPATH=/app
+
+HEALTHCHECK --interval=5m --timeout=10s --start-period=5m --retries=3 \
+    CMD /app/healthcheck.sh
+
+ENTRYPOINT ["/app/entrypoint.sh"]
+CMD ["--config", "configs/live_gmgp1_gc_ib.yaml"]

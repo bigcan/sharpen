@@ -1,0 +1,28 @@
+# Cloud VPS overrides — restricted ports, absolute paths
+#
+# Usage:
+#   docker compose -f docker-compose.yaml -f docker-compose.cloud.yaml up -d
+#
+# VNC access via SSH tunnel only:
+#   ssh -L 5900:localhost:5900 user@vps
+#   Then connect VNC client to localhost:5900
+#
+# Setup on VPS:
+#   mkdir -p /opt/finrl/checkpoints/gmgp1_v5_l1_seed456
+#   mkdir -p /opt/finrl/configs
+#   mkdir -p /var/log/finrl
+#   scp checkpoint_final.pth vps:/opt/finrl/checkpoints/gmgp1_v5_l1_seed456/
+#   scp live_gmgp1_gc_ib.yaml vps:/opt/finrl/configs/
+
+services:
+  ibgateway:
+    # No VNC port exposed — SSH tunnel only
+    ports: []
+    mem_limit: 2g
+
+  trading-engine:
+    volumes:
+      - /opt/finrl/checkpoints/gmgp1_v5_l1_seed456:/app/checkpoints/gmgp1_v5_l1_seed456:ro
+      - /opt/finrl/configs/live_gmgp1_gc_ib.yaml:/app/configs/live_gmgp1_gc_ib.yaml:ro
+      - /var/log/finrl:/app/logs
+    mem_limit: 2g
