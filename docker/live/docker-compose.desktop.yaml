@@ -12,7 +12,7 @@ services:
   ibgateway:
     ports:
       - "127.0.0.1:5900:5900"    # VNC — SSH tunnel only (security)
-      - "127.0.0.1:4002:4002"    # IB API — localhost only (security)
+      - "0.0.0.0:4002:4002"      # IB API — Tailscale-accessible for monitoring
 
   portainer:
     ports:
