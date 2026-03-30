@@ -1,0 +1,101 @@
+# Live Trading Config — GMGP1-v5 SAC on Gold Futures via Interactive Brokers
+#
+# Usage:
+#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml
+#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml --mainnet
+#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml --dry-run
+
+# --- IB Connection ---
+exchange:
+  name: "ib"
+  testnet: true                        # true=paper(4002), false=live(4001)
+  asset: "GC"                          # Logical asset name (for logging/WandB)
+  host: "127.0.0.1"
+  paper_port: 4002                     # IB Gateway paper trading
+  live_port: 4001                      # IB Gateway live trading
+  client_id: 1
+
+# --- Contract Specification ---
+contract:
+  symbol: "MGC"                        # "MGC" for micro (10 oz), "GC" for full (100 oz)
+  exchange: "COMEX"
+  currency: "USD"
+  multiplier: 10                       # MGC=10, GC=100
+  tick_size: 0.10
+  commission_per_side: 0.62            # MGC exchange + clearing + NFA (~$0.62/side)
+  roll_days_before_expiry: 5           # Roll 5 business days before first notice
+  order_type: "LMT"                    # "LMT" (limit) or "MKT" (market)
+  limit_offset_ticks: 2                # Cross 2 ticks ($0.20) into book for limit fills
+  market_fallback_timeout: 30.0        # Seconds before limit -> market fallback
+
+# --- Agent ---
+agent:
+  # Point to L1 multi-seed checkpoint (seed 456 = best PF 1.974)
+  checkpoint_path: "checkpoints/gmgp1_v5_l1_seed456/checkpoint_final.pth"
+  device: "cpu"                        # CPU for inference (no CUDA needed)
+  torch_compile: false                 # Must be false for live inference
+
+# --- SAC Hyperparameters (must match training checkpoint, T29 HPs) ---
+agents:
+  sac:
+    lr_actor: 3.0e-4
+    lr_critic: 3.0e-4
+    lr_alpha: 3.0e-4
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 256
+    buffer_size: 1000000
+    initial_alpha: 0.2
+
+# --- Network (must match training checkpoint exactly) ---
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# --- Features (must match training config) ---
+features:
+  scales: [15, 60, 240]               # 15-min decision, 1h trend, 4h regime
+  window_size: 30
+  features_per_scale: 8
+  norm_span: 120
+  bootstrap_bars: 30000               # 1-min bars for EMA warmup (~22 trading days)
+
+# --- Bar Clock (CME-aware) ---
+bar_clock:
+  base_interval_minutes: 15            # Trade every 15 minutes
+  execution_delay_seconds: 10.0        # Wait 10s after bar close (IB data finalization)
+  max_late_seconds: 60.0               # More lenient for IB reconnect scenarios
+
+# --- Trading ---
+trading:
+  initial_balance: 100000.0            # IB paper account default ($100K)
+  deadband_threshold: 0.25             # Ignore position changes < 25% (matches training)
+  taker_fee: 0.000004                  # ~0.4bps for MGC ($0.62 / ~$15K half-notional)
+
+# --- Risk Management ---
+risk:
+  enabled: true
+  max_drawdown_pct: 0.10               # 10% max DD, halt (tighter than training 30%)
+  circuit_breaker_cooldown_bars: 12    # 3 hours at 15-min bars
+  max_position_pct: 1.0                # Single asset = 100% allowed
+  funding_rate_alert: 999.0            # Effectively disabled (futures have no funding)
+  min_margin_reserve_pct: 0.20         # Keep 20% margin reserve (futures need more)
+
+# --- WandB Monitoring ---
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  tags: ["live", "gmgp1-v5", "Gold", "SAC", "15min", "IB", "paper", "MGC", "COMEX"]
+
+# --- Safety ---
+safety:
+  require_explicit_mainnet: true       # Must pass --mainnet for live trading
+  max_daily_loss_pct: 0.05             # 5% daily loss, hard stop
+  kill_file: "/tmp/finrl_live_gc_kill" # Touch this file to stop trading gracefully
+  emergency_flatten_on_error: true     # Flatten all positions on unrecoverable error
