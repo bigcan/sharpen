@@ -1,0 +1,20 @@
+# Desktop overrides — exposes VNC and IB API ports on localhost
+#
+# Usage:
+#   docker compose -f docker-compose.yaml -f docker-compose.desktop.yaml up -d
+#
+# VNC into IB Gateway for debugging:
+#   Connect VNC client to localhost:5900
+
+services:
+  ibgateway:
+    ports:
+      - "127.0.0.1:5900:5900"   # VNC (IB Gateway GUI for debugging)
+      - "127.0.0.1:4002:4002"   # IB API (direct access for local testing)
+
+  trading-engine:
+    # On desktop, checkpoint and config are relative to project root
+    volumes:
+      - ../../checkpoints/gmgp1_v5_l1_seed456:/app/checkpoints/gmgp1_v5_l1_seed456:ro
+      - ../../configs/live_gmgp1_gc_ib.yaml:/app/configs/live_gmgp1_gc_ib.yaml:ro
+      - finrl-logs:/app/logs

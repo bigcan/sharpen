@@ -1,0 +1,64 @@
+# GMGP1-v5 Paper Trading — Base Docker Compose
+#
+# Two services: IB Gateway (headless) + Trading Engine (CPU-only SAC inference)
+#
+# Usage:
+#   Desktop:  docker compose -f docker-compose.yaml -f docker-compose.desktop.yaml up -d
+#   Cloud:    docker compose -f docker-compose.yaml -f docker-compose.cloud.yaml up -d
+#
+# Secrets: copy .env.example to .env and fill in credentials before starting.
+
+services:
+  # --- IB Gateway (headless via IBC + Xvfb) ---
+  ibgateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    container_name: ibgateway
+    environment:
+      TWS_USERID: ${TWS_USERID}
+      TWS_PASSWORD: ${TWS_PASSWORD}
+      TRADING_MODE: ${TRADING_MODE:-paper}
+      TWS_ACCEPT_INCOMING: "true"
+      READ_ONLY_API: "no"
+      VNC_SERVER_PASSWORD: ${VNC_PASSWORD:-}
+      TWOFA_TIMEOUT_ACTION: restart
+    volumes:
+      - ibgateway-data:/home/ibgateway/ibc
+    networks:
+      - finrl-live-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/4002'"]
+      interval: 30s
+      timeout: 10s
+      start_period: 120s
+      retries: 5
+
+  # --- Trading Engine (GMGP1-v5 SAC, CPU-only) ---
+  trading-engine:
+    build:
+      context: ../..
+      dockerfile: docker/live/Dockerfile.live-engine
+    container_name: trading-engine
+    depends_on:
+      ibgateway:
+        condition: service_healthy
+    environment:
+      IB_HOST: ibgateway
+      IB_PORT: "4002"
+      WANDB_API_KEY: ${WANDB_API_KEY}
+      PYTHONPATH: /app
+    volumes:
+      - ../../checkpoints/gmgp1_v5_l1_seed456:/app/checkpoints/gmgp1_v5_l1_seed456:ro
+      - ../../configs/live_gmgp1_gc_ib.yaml:/app/configs/live_gmgp1_gc_ib.yaml:ro
+      - finrl-logs:/app/logs
+    networks:
+      - finrl-live-net
+    restart: unless-stopped
+
+networks:
+  finrl-live-net:
+    driver: bridge
+
+volumes:
+  ibgateway-data:
+  finrl-logs:
