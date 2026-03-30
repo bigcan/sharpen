@@ -1,0 +1,85 @@
+# GMGP1-BTC: SAC + Multi-Scale OHLCV + Continuous Action — BTC/USDT 15-min
+# Adapted from GMGP1-v5 Gold config. Key diff: 5bps taker (Binance) vs 2bps (CME Gold).
+# Production budget: 50 HPO trials, 8 HP dimensions, 3M full training
+# GPU: RTX 4090/5090 — BF16, batch 512, buffer 500K, num_envs 20
+
+data:
+  file_path: "data/bitfinex/btc_usdt_perp_2025_1min.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [15, 60, 240]          # 15-min decision, 1h trend, 4h regime
+  window_size: 30
+  features_per_scale: 8           # TC-OPT: 8 aligns Conv1d input for Tensor Cores
+  asset_class: "crypto"           # Uses funding_sin/cos (8h Binance cycle)
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8           # TC-OPT: must match features.features_per_scale
+  taker_fee: 0.0                 # Start zero (fee curriculum)
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500            # 500 x 15min = 125 hours ~ 5 days
+  random_start: true
+  max_drawdown_pct: 0.30
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 500000, taker_fee: 0.0, ramp_to: 0.0005, ramp_end_step: 1500000}
+    - {step: 1500000, taker_fee: 0.0005}  # 5bps — Binance taker fee
+
+network:
+  scale_encoder:
+    input_size: 8                  # TC-OPT: 8 aligns Conv1d for Tensor Cores
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 5000
+    update_interval: 4              # 4 gradient steps per env.step (NOT scaled by num_envs — OPT-10)
+    actor_update_freq: 2            # TD3-style delayed actor
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  n_trials: 50
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-btc", "BTC", "SAC", "15min", "MultiScale", "OHLCV", "DSR", "FeeCurriculum", "swing", "gmgp1", "crypto"]
