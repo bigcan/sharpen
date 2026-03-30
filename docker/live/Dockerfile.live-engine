@@ -1,17 +1,18 @@
-# GMGP1-v5 SAC Gold 15-min — Live/Paper Trading Engine
-# CPU-only PyTorch inference (~800MB image vs ~6GB CUDA)
+# FinRL Strategy Engine — CPU-only PyTorch inference
+#
+# Single image for ALL strategies (IB futures + crypto).
+# Checkpoints and configs are bind-mounted at runtime.
 #
 # Build:
-#   docker compose -f docker-compose.yaml build trading-engine
-#
-# The checkpoint is bind-mounted at runtime, NOT baked into the image.
+#   docker compose build engine-base
+#   OR: docker build -t finrl-live-engine:latest -f docker/live/Dockerfile.live-engine .
 
 FROM python:3.11-slim AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    OMP_NUM_THREADS=1 \
-    MKL_NUM_THREADS=1 \
+    OMP_NUM_THREADS=2 \
+    MKL_NUM_THREADS=2 \
     PIP_NO_CACHE_DIR=1 \
     TZ=UTC
 
@@ -30,12 +31,15 @@ WORKDIR /app
 # ---- Dependencies layer (cached) ----
 # PyTorch CPU-only (~200MB vs ~2GB CUDA)
 RUN pip install --upgrade pip && \
-    pip install \
-    torch --index-url https://download.pytorch.org/whl/cpu
+    pip install torch --index-url https://download.pytorch.org/whl/cpu
 
-# Trading engine dependencies
+# All strategy dependencies — IB + crypto in one image
 RUN pip install \
     "ib-insync>=0.9.86" \
+    "ccxt>=4.0.0" \
+    "websockets>=12.0" \
+    "aiohttp>=3.9.0" \
+    "stable-baselines3>=2.3.0" \
     "wandb>=0.16.0" \
     "pandas>=2.1.0" \
     "pyarrow>=14.0.1" \
@@ -55,12 +59,10 @@ COPY pyproject.toml /app/
 RUN pip install -e .
 
 # ---- Runtime setup ----
-# Non-root user for security
 RUN groupadd -r finrl && useradd -r -g finrl -d /app finrl \
     && mkdir -p /app/logs /tmp \
     && chown -R finrl:finrl /app /tmp
 
-# Entrypoint and healthcheck scripts
 COPY docker/live/entrypoint.sh /app/entrypoint.sh
 COPY docker/live/healthcheck.sh /app/healthcheck.sh
 RUN chmod +x /app/entrypoint.sh /app/healthcheck.sh
@@ -73,4 +75,3 @@ HEALTHCHECK --interval=5m --timeout=10s --start-period=5m --retries=3 \
     CMD /app/healthcheck.sh
 
 ENTRYPOINT ["/app/entrypoint.sh"]
-CMD ["--config", "configs/live_gmgp1_gc_ib.yaml"]

@@ -1,12 +1,61 @@
-# GMGP1-v5 Paper Trading — Base Docker Compose
+# FinRL Multi-Strategy Orchestrator
 #
-# Two services: IB Gateway (headless) + Trading Engine (CPU-only SAC inference)
+# Manages IB Gateway + Portainer + N trading strategy containers.
+# Single image (finrl-live-engine) serves all strategies via env vars.
 #
-# Usage:
-#   Desktop:  docker compose -f docker-compose.yaml -f docker-compose.desktop.yaml up -d
-#   Cloud:    docker compose -f docker-compose.yaml -f docker-compose.cloud.yaml up -d
+# Preferred: use the management script (auto-detects compose version):
+#   ./scripts/manage_strategies.sh build
+#   ./scripts/manage_strategies.sh up all
+#   ./scripts/manage_strategies.sh up ib
+#   ./scripts/manage_strategies.sh up gmgp1-gold
+#   ./scripts/manage_strategies.sh logs gmgp1-gold -f
+#   ./scripts/manage_strategies.sh ps
 #
-# Secrets: copy .env.example to .env and fill in credentials before starting.
+# Or directly (use docker-compose or docker compose depending on install):
+#   docker-compose -f docker/live/docker-compose.yaml \
+#                  -f docker/live/docker-compose.desktop.yaml \
+#                  --profile all up -d
+#
+# Adding a new strategy:
+#   1. Copy an IB or crypto service block above the "Add new strategies" comment
+#   2. Change: container_name, STRATEGY_NAME, STRATEGY_RUNNER, STRATEGY_CONFIG
+#   3. Point checkpoint volume to the correct local directory
+#   4. Create matching live config YAML in configs/
+
+# ============================================================
+#  Strategy templates (YAML anchors)
+# ============================================================
+
+x-common-env: &common-env
+  WANDB_API_KEY: ${WANDB_API_KEY:?Set WANDB_API_KEY in .env}
+  PYTHONPATH: /app
+  TZ: UTC
+
+x-healthcheck: &strategy-healthcheck
+  test: ["CMD-SHELL", "pgrep -f 'run_live|_runner' || exit 1"]
+  interval: 5m
+  timeout: 10s
+  start_period: 5m
+  retries: 3
+
+x-ib-strategy: &ib-strategy
+  image: finrl-live-engine:latest
+  depends_on:
+    ibgateway:
+      condition: service_healthy
+  networks: [finrl-net]
+  restart: unless-stopped
+  healthcheck: *strategy-healthcheck
+
+x-crypto-strategy: &crypto-strategy
+  image: finrl-live-engine:latest
+  networks: [finrl-net]
+  restart: unless-stopped
+  healthcheck: *strategy-healthcheck
+
+# ============================================================
+#  Infrastructure
+# ============================================================
 
 services:
   # --- IB Gateway (headless via IBC + Xvfb) ---
@@ -14,17 +63,16 @@ services:
     image: ghcr.io/gnzsnz/ib-gateway:stable
     container_name: ibgateway
     environment:
-      TWS_USERID: ${TWS_USERID}
-      TWS_PASSWORD: ${TWS_PASSWORD}
+      TWS_USERID: ${TWS_USERID:?Set TWS_USERID in .env}
+      TWS_PASSWORD: ${TWS_PASSWORD:?Set TWS_PASSWORD in .env}
       TRADING_MODE: ${TRADING_MODE:-paper}
       TWS_ACCEPT_INCOMING: "true"
       READ_ONLY_API: "no"
-      VNC_SERVER_PASSWORD: ${VNC_PASSWORD:-}
+      VNC_SERVER_PASSWORD: ${VNC_PASSWORD:?Set VNC_PASSWORD in .env}
       TWOFA_TIMEOUT_ACTION: restart
     volumes:
       - ibgateway-data:/home/ibgateway/ibc
-    networks:
-      - finrl-live-net
+    networks: [finrl-net]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/4002'"]
@@ -33,32 +81,137 @@ services:
       start_period: 120s
       retries: 5
 
-  # --- Trading Engine (GMGP1-v5 SAC, CPU-only) ---
-  trading-engine:
+  # --- Portainer CE (web UI for remote management) ---
+  portainer:
+    image: portainer/portainer-ce:lts
+    container_name: portainer
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - portainer-data:/data
+    networks: [finrl-net]
+    restart: unless-stopped
+
+  # --- Build-only service (builds the shared image) ---
+  engine-base:
     build:
       context: ../..
       dockerfile: docker/live/Dockerfile.live-engine
-    container_name: trading-engine
-    depends_on:
-      ibgateway:
-        condition: service_healthy
+    image: finrl-live-engine:latest
+    profiles: [build]
+    entrypoint: ["echo", "Image built successfully"]
+
+  # ============================================================
+  #  IB Strategies (Gold / Futures via Interactive Brokers)
+  # ============================================================
+
+  gmgp1-gold:
+    <<: *ib-strategy
+    container_name: gmgp1-gold
+    profiles: [ib, all]
     environment:
+      <<: *common-env
+      BROKER_TYPE: ib
       IB_HOST: ibgateway
       IB_PORT: "4002"
-      WANDB_API_KEY: ${WANDB_API_KEY}
-      PYTHONPATH: /app
+      STRATEGY_NAME: gmgp1-gold
+      STRATEGY_RUNNER: scripts/run_live_ib.py
+      STRATEGY_CONFIG: /app/configs/live_gmgp1_gc_ib.yaml
     volumes:
-      - ../../checkpoints/gmgp1_v5_l1_seed456:/app/checkpoints/gmgp1_v5_l1_seed456:ro
-      - ../../configs/live_gmgp1_gc_ib.yaml:/app/configs/live_gmgp1_gc_ib.yaml:ro
-      - finrl-logs:/app/logs
-    networks:
-      - finrl-live-net
-    restart: unless-stopped
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1_v5_l1_seed456:/app/checkpoints/gmgp1_v5_l1_seed456:ro
+      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_gmgp1_gc_ib.yaml:/app/configs/live_gmgp1_gc_ib.yaml:ro
+      - gmgp1-gold-logs:/app/logs
+
+  sg1-gold:
+    <<: *ib-strategy
+    container_name: sg1-gold
+    profiles: [ib, all]
+    environment:
+      <<: *common-env
+      BROKER_TYPE: ib
+      IB_HOST: ibgateway
+      IB_PORT: "4002"
+      STRATEGY_NAME: sg1-gold
+      STRATEGY_RUNNER: scripts/run_live_ib.py
+      STRATEGY_CONFIG: /app/configs/live_sg1_gc_ib.yaml
+    volumes:
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/sg1_best:/app/checkpoints/sg1_best:ro
+      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_sg1_gc_ib.yaml:/app/configs/live_sg1_gc_ib.yaml:ro
+      - sg1-gold-logs:/app/logs
+
+  # ============================================================
+  #  Crypto Strategies (Bybit / CCXT)
+  # ============================================================
+
+  gmgp1-btc:
+    <<: *crypto-strategy
+    container_name: gmgp1-btc
+    profiles: [crypto, all]
+    environment:
+      <<: *common-env
+      BROKER_TYPE: crypto
+      STRATEGY_NAME: gmgp1-btc
+      STRATEGY_RUNNER: scripts/run_live.py
+      STRATEGY_CONFIG: /app/configs/live_gmgp1_btc_bybit.yaml
+      BYBIT_API_KEY: ${BYBIT_API_KEY:-}
+      BYBIT_API_SECRET: ${BYBIT_API_SECRET:-}
+    volumes:
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1_btc_best:/app/checkpoints/gmgp1_btc_best:ro
+      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_gmgp1_btc_bybit.yaml:/app/configs/live_gmgp1_btc_bybit.yaml:ro
+      - gmgp1-btc-logs:/app/logs
+
+  funding-arb:
+    <<: *crypto-strategy
+    container_name: funding-arb
+    profiles: [crypto, all]
+    environment:
+      <<: *common-env
+      BROKER_TYPE: crypto
+      STRATEGY_NAME: funding-arb
+      STRATEGY_RUNNER: scripts/run_live.py
+      STRATEGY_CONFIG: /app/configs/live_funding_arb.yaml
+      BYBIT_API_KEY: ${BYBIT_API_KEY:-}
+      BYBIT_API_SECRET: ${BYBIT_API_SECRET:-}
+    volumes:
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/funding_arb_best:/app/checkpoints/funding_arb_best:ro
+      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_funding_arb.yaml:/app/configs/live_funding_arb.yaml:ro
+      - funding-arb-logs:/app/logs
+
+  sync-1h:
+    <<: *crypto-strategy
+    container_name: sync-1h
+    profiles: [crypto, all]
+    environment:
+      <<: *common-env
+      BROKER_TYPE: crypto
+      STRATEGY_NAME: sync-1h
+      STRATEGY_RUNNER: scripts/run_live.py
+      STRATEGY_CONFIG: /app/configs/live_sync_1h.yaml
+      BYBIT_API_KEY: ${BYBIT_API_KEY:-}
+      BYBIT_API_SECRET: ${BYBIT_API_SECRET:-}
+    volumes:
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/sync_1h_best:/app/checkpoints/sync_1h_best:ro
+      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_sync_1h.yaml:/app/configs/live_sync_1h.yaml:ro
+      - sync-1h-logs:/app/logs
+
+  # ============================================================
+  #  Add new strategies here. Copy a template above and change:
+  #    container_name, STRATEGY_NAME, STRATEGY_RUNNER,
+  #    STRATEGY_CONFIG, checkpoint volume mount, log volume.
+  #
+  #  IB strategies: use <<: *ib-strategy, profiles: [ib, all]
+  #  Crypto strategies: use <<: *crypto-strategy, profiles: [crypto, all]
+  #  Each strategy gets its own log volume (add to volumes: below).
+  # ============================================================
 
 networks:
-  finrl-live-net:
+  finrl-net:
     driver: bridge
 
 volumes:
   ibgateway-data:
-  finrl-logs:
+  portainer-data:
+  gmgp1-gold-logs:
+  sg1-gold-logs:
+  gmgp1-btc-logs:
+  funding-arb-logs:
+  sync-1h-logs:
