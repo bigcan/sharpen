@@ -43,7 +43,7 @@ x-ib-strategy: &ib-strategy
   depends_on:
     ibgateway:
       condition: service_healthy
-  networks: [finrl-net]
+  network_mode: "service:ibgateway"
   restart: unless-stopped
   healthcheck: *strategy-healthcheck
 
@@ -70,8 +70,10 @@ services:
       READ_ONLY_API: "no"
       VNC_SERVER_PASSWORD: ${VNC_PASSWORD:?Set VNC_PASSWORD in .env}
       TWOFA_TIMEOUT_ACTION: restart
+      EXISTING_SESSION_DETECTED_ACTION: primaryoverride
     volumes:
       - ibgateway-data:/home/ibgateway/ibc
+      - ibgateway-jts:/home/ibgateway/Jts
     networks: [finrl-net]
     restart: unless-stopped
     healthcheck:
@@ -111,7 +113,7 @@ services:
     environment:
       <<: *common-env
       BROKER_TYPE: ib
-      IB_HOST: ibgateway
+      IB_HOST: localhost
       IB_PORT: "4002"
       STRATEGY_NAME: gmgp1-gold
       STRATEGY_RUNNER: scripts/run_live_ib.py
@@ -128,7 +130,7 @@ services:
     environment:
       <<: *common-env
       BROKER_TYPE: ib
-      IB_HOST: ibgateway
+      IB_HOST: localhost
       IB_PORT: "4002"
       STRATEGY_NAME: sg1-gold
       STRATEGY_RUNNER: scripts/run_live_ib.py
@@ -209,6 +211,7 @@ networks:
 
 volumes:
   ibgateway-data:
+  ibgateway-jts:
   portainer-data:
   gmgp1-gold-logs:
   sg1-gold-logs:
