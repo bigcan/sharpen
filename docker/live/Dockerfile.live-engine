@@ -48,7 +48,8 @@ RUN pip install \
     "gymnasium>=0.29" \
     "stockstats>=0.6" \
     "scipy>=1.11" \
-    "python-dotenv>=1.0"
+    "python-dotenv>=1.0" \
+    "tzdata>=2024.1"
 
 # ---- Application layer ----
 COPY finrl_pro_ds /app/finrl_pro_ds
