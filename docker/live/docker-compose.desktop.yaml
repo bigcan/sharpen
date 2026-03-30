@@ -16,4 +16,4 @@ services:
 
   portainer:
     ports:
-      - "127.0.0.1:9443:9443"    # Portainer HTTPS — SSH tunnel only
+      - "0.0.0.0:9443:9443"      # Portainer HTTPS — Tailscale accessible
