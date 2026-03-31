@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-import pytest
-
 from finrl_pro_ds.cfd.live.cfd_bar_clock import CFDBarClock
 
 
