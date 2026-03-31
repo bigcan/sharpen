@@ -17,12 +17,12 @@ exchange:
 
 # --- Contract Specification ---
 contract:
-  symbol: "MGC"                        # "MGC" for micro (10 oz), "GC" for full (100 oz)
+  symbol: "GC"                         # "GC" for full (100 oz), "MGC" for micro (10 oz)
   exchange: "COMEX"
   currency: "USD"
-  multiplier: 10                       # MGC=10, GC=100
+  multiplier: 100                      # GC=100, MGC=10
   tick_size: 0.10
-  commission_per_side: 0.62            # MGC exchange + clearing + NFA (~$0.62/side)
+  commission_per_side: 2.50            # GC exchange + clearing + NFA (~$2.50/side)
   roll_days_before_expiry: 5           # Roll 5 business days before first notice
   order_type: "LMT"                    # "LMT" (limit) or "MKT" (market)
   limit_offset_ticks: 2                # Cross 2 ticks ($0.20) into book for limit fills
@@ -74,9 +74,9 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 100000.0            # IB paper account default ($100K)
+  initial_balance: 1000000.0            # IB paper account ($1M)
   deadband_threshold: 0.25             # Ignore position changes < 25% (matches training)
-  taker_fee: 0.000004                  # ~0.4bps for MGC ($0.62 / ~$15K half-notional)
+  taker_fee: 0.0000017                 # ~0.17bps for GC ($2.50 / ~$150K half-notional)
 
 # --- Risk Management ---
 risk:
@@ -91,7 +91,7 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "gmgp1-v5", "Gold", "SAC", "15min", "IB", "paper", "MGC", "COMEX"]
+  tags: ["live", "gmgp1-v5", "Gold", "SAC", "15min", "IB", "paper", "GC", "COMEX"]
 
 # --- Safety ---
 safety:

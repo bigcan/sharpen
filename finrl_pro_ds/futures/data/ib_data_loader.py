@@ -15,8 +15,6 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Optional
-
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -108,16 +106,19 @@ class IBDataLoader:
             duration = "1 D" if timeframe == "1m" else "2 D"
 
             try:
-                bars = await self._ib.reqHistoricalDataAsync(
-                    contract,
-                    endDateTime=current_end.strftime("%Y%m%d-%H:%M:%S"),
-                    durationStr=duration,
-                    barSizeSetting=bar_size,
-                    whatToShow=self._what_to_show,
-                    useRTH=self._use_rth,
-                    formatDate=2,  # UTC timestamps
+                bars = await asyncio.wait_for(
+                    self._ib.reqHistoricalDataAsync(
+                        contract,
+                        endDateTime=current_end.strftime("%Y%m%d-%H:%M:%S"),
+                        durationStr=duration,
+                        barSizeSetting=bar_size,
+                        whatToShow=self._what_to_show,
+                        useRTH=self._use_rth,
+                        formatDate=2,  # UTC timestamps
+                    ),
+                    timeout=30.0,
                 )
-            except Exception as e:
+            except (asyncio.TimeoutError, Exception) as e:
                 logger.warning(f"IB historical data request failed: {e}")
                 bars = []
 
