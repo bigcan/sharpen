@@ -76,7 +76,10 @@ class MarketMakingEnv(gym.Env):
         self.reward_mode = reward_cfg.get("mode", "dsr")
         self.dsr_eta = float(reward_cfg.get("dsr_eta", 0.001))
         self.dsr_scale = float(reward_cfg.get("dsr_scale", 1.0))
-        self.phi = float(reward_cfg.get("phi", 0.1))  # inventory aversion
+        self.phi = float(reward_cfg.get("phi", 0.1))  # inventory aversion (legacy "dsr" mode only)
+        self.reward_scaling = float(reward_cfg.get("scaling", 10000.0))  # for "pv_return" mode
+        self.reward_clip_min = float(reward_cfg.get("clip_min", -5.0))
+        self.reward_clip_max = float(reward_cfg.get("clip_max", 5.0))
 
         # Fill model
         fill_model_type = config.get("fill_model", "price_cross")
@@ -369,15 +372,7 @@ class MarketMakingEnv(gym.Env):
         if fill_result.ask_filled:
             C_fees += self.maker_fee * 10000.0 * fill_result.ask_fill_qty
 
-        R_t = R_spread + R_mtm - C_inventory - C_fees
-
-        # 8. Compute reward
-        if self.reward_mode == "dsr":
-            reward = self._dsr.compute(R_t)
-        else:
-            reward = float(np.clip(R_t, -50.0, 50.0))
-
-        # 9. Update equity
+        # 8. Compute equity_delta (before reward, so PV-return modes can use it)
         equity_delta = self.inventory * price_return * self.equity
         if traded:
             # Spread capture: dollar value of half-spread earned per fill
@@ -392,6 +387,29 @@ class MarketMakingEnv(gym.Env):
             if fill_result.ask_filled:
                 fill_notional += fill_result.ask_fill_qty
             equity_delta -= self.maker_fee * fill_notional * self.equity
+
+        # 9. Compute reward
+        R_t_legacy = R_spread + R_mtm - C_inventory - C_fees
+
+        if self.reward_mode == "dsr":
+            # Legacy: DSR on 4-component signal (backward compatible)
+            reward = self._dsr.compute(R_t_legacy)
+        elif self.reward_mode == "pv_return":
+            # Pure PV-return: directly aligned with equity change (FundingArb-style)
+            pv_return_bps = equity_delta / (self.equity + 1e-10) * self.reward_scaling
+            reward = float(np.clip(pv_return_bps, self.reward_clip_min, self.reward_clip_max))
+        elif self.reward_mode == "dsr_pv":
+            # DSR on PV-return: Sharpe optimization on equity change
+            pv_return_bps = equity_delta / (self.equity + 1e-10) * 10000.0
+            reward = self._dsr.compute(pv_return_bps)
+        elif self.reward_mode == "dsr_simple":
+            # DSR without inventory penalty (ablation)
+            reward = self._dsr.compute(R_spread + R_mtm - C_fees)
+        else:
+            # Raw mode (backward compatible)
+            reward = float(np.clip(R_t_legacy, -50.0, 50.0))
+
+        # 10. Apply equity update
         self.equity += equity_delta
         self.peak_equity = max(self.peak_equity, self.equity)
         self.cumulative_fees += C_fees
@@ -400,7 +418,7 @@ class MarketMakingEnv(gym.Env):
         self._inventory_risk_accum += abs(self.inventory) * 0.01
         self._inventory_risk_accum = min(self._inventory_risk_accum, 1.0)
 
-        # 10. Termination
+        # 11. Termination
         if self.equity < self._stop_loss_threshold * self.peak_equity:
             terminated = True
 
@@ -408,7 +426,7 @@ class MarketMakingEnv(gym.Env):
             truncated = True
 
         obs = self._get_observation()
-        info = self._make_info(reward, traded, fill_result, R_spread, R_mtm, C_inventory, C_fees)
+        info = self._make_info(reward, traded, fill_result, R_spread, R_mtm, C_inventory, C_fees, equity_delta)
 
         return obs, reward, terminated, truncated, info
 
@@ -575,8 +593,12 @@ class MarketMakingEnv(gym.Env):
         R_mtm: float = 0.0,
         C_inventory: float = 0.0,
         C_fees: float = 0.0,
+        equity_delta: float = 0.0,
     ) -> dict:
         drawdown_pct = 1.0 - (self.equity / self.peak_equity) if self.peak_equity > 0 else 0.0
+        # PV-return in bps (equity already updated, so use equity - delta as base)
+        equity_base = self.equity - equity_delta
+        pv_return_bps = equity_delta / (equity_base + 1e-10) * 10000.0
         info = {
             "portfolio_value": self.equity,
             "inventory": self.inventory,
@@ -593,6 +615,7 @@ class MarketMakingEnv(gym.Env):
             "R_mtm": R_mtm,
             "C_inventory": C_inventory,
             "C_fees": C_fees,
+            "pv_return_bps": pv_return_bps,
         }
         if fill_result:
             info["bid_filled"] = fill_result.bid_filled

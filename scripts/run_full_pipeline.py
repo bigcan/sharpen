@@ -676,6 +676,13 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 config["env"]["reward"] = {}
             config["env"]["reward"]["dsr_eta"] = dsr_eta
 
+            # V8 MM: reward mode is an HPO categorical dimension
+            if config.get("env", {}).get("mdp_version") == "v8":
+                reward_mode = trial.suggest_categorical(
+                    "reward_mode", ["dsr_pv", "pv_return", "dsr_simple"]
+                )
+                config["env"]["reward"]["mode"] = reward_mode
+
             # v6: Hard risk constraints (opt-in via config)
             if config.get("env", {}).get("stop_loss_hpo", False):
                 stop_loss_bps = trial.suggest_int("stop_loss_bps", 20, 200)
@@ -699,6 +706,8 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 hpo_log[f"{trial_prefix}/stop_loss_bps"] = config["env"]["stop_loss_bps"]
             if config.get("env", {}).get("max_holding_hpo", False):
                 hpo_log[f"{trial_prefix}/max_holding_bars"] = config["env"]["max_holding_bars"]
+            if config.get("env", {}).get("mdp_version") == "v8":
+                hpo_log[f"{trial_prefix}/reward_mode"] = config["env"]["reward"]["mode"]
             wandb.log(hpo_log)
         elif agent_type == "ppo":
             # === OPTIMIZER HPs (tunable) ===
@@ -1056,7 +1065,7 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
 
     # V4.2: Explicit routing for ALL HPO params to prevent silent mis-routing.
     if agent_type == "sac":
-        reward_params = {"dsr_eta"}
+        reward_params = {"dsr_eta", "reward_mode"}
         agent_params = {"lr_actor", "lr_critic", "lr_alpha", "tau", "initial_alpha", "gamma", "gradient_clip"}
         # deadband + v6 hard constraints route to env, not agent
         env_params = {"deadband_threshold", "stop_loss_bps", "max_holding_bars"}
@@ -1079,7 +1088,10 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     network_params = {"hidden_dim"}
 
     for key, val in best.params.items():
-        if key in reward_params:
+        if key == "reward_mode":
+            # V8 MM: reward_mode maps to env.reward.mode (not env.reward.reward_mode)
+            best_params["env"]["reward"]["mode"] = val
+        elif key in reward_params:
             best_params["env"]["reward"][key] = val
         elif key in agent_params:
             best_params["agents"][agent_key][key] = val
