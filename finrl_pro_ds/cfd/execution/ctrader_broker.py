@@ -467,6 +467,7 @@ class CTraderBroker:
         """Fetch account equity, available balance, and used margin."""
         from ctrader_open_api import Protobuf
         from ctrader_open_api.messages.OpenApiMessages_pb2 import (
+            ProtoOAGetPositionUnrealizedPnLReq,
             ProtoOAReconcileReq,
             ProtoOATraderReq,
         )
@@ -488,13 +489,24 @@ class CTraderBroker:
 
             recon_payload = Protobuf.extract(recon_res)
             used_margin = 0.0
-            unrealized_pnl = 0.0
-
             for pos in recon_payload.position:
                 if pos.usedMargin:
                     used_margin += pos.usedMargin / (10 ** self._money_digits)
-                if pos.swap:
-                    unrealized_pnl += pos.swap / (10 ** self._money_digits)
+
+            # Get unrealized PnL (NOT swap — swap is overnight financing)
+            unrealized_pnl = 0.0
+            if recon_payload.position:
+                try:
+                    pnl_req = ProtoOAGetPositionUnrealizedPnLReq()
+                    pnl_req.ctidTraderAccountId = self._account_id
+                    pnl_res = await self._send_request(pnl_req, timeout=10.0)
+                    pnl_payload = Protobuf.extract(pnl_res)
+
+                    pnl_digits = pnl_payload.moneyDigits or self._money_digits
+                    for pnl in pnl_payload.positionUnrealizedPnL:
+                        unrealized_pnl += pnl.netUnrealizedPnL / (10 ** pnl_digits)
+                except Exception as e:
+                    logger.warning(f"Failed to fetch unrealized PnL: {e}")
 
             total_equity = balance + unrealized_pnl
             available = total_equity - used_margin
@@ -546,6 +558,8 @@ class CTraderBroker:
                     self._position_lots = 0.0
                     break
 
+                # Reset per-attempt counters (orders accumulate across retries
+                # intentionally for full audit trail, but n_failed resets)
                 n_failed = 0
                 for pos in open_positions:
                     try:
