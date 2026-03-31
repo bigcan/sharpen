@@ -1,0 +1,100 @@
+# Live Trading Config — GMGP1-XAUUSD SAC on Gold CFD via cTrader (IC Markets / FTMO)
+#
+# Usage:
+#   python scripts/run_live_ctrader.py --config configs/live_gmgp1_xauusd_ctrader.yaml
+#   python scripts/run_live_ctrader.py --config configs/live_gmgp1_xauusd_ctrader.yaml --mainnet
+#   python scripts/run_live_ctrader.py --config configs/live_gmgp1_xauusd_ctrader.yaml --dry-run
+#
+# cTrader credentials via env vars:
+#   CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN, CTRADER_ACCOUNT_ID
+
+# --- cTrader Connection ---
+exchange:
+  name: "ctrader"
+  testnet: true                        # true=IC Markets demo, false=FTMO live
+  asset: "XAUUSD"
+  # OAuth 2.0 credentials (from env vars, NOT hardcoded)
+
+# --- Contract Specification ---
+contract:
+  symbol: "XAUUSD"
+  lot_size: 100                        # 1 standard lot = 100 oz
+  min_lot: 0.01                        # 0.01 lots = 1 oz minimum
+  tick_size: 0.01                      # CFD tick ($0.01 vs CME $0.10)
+  leverage: 30                         # FTMO Gold leverage 1:30
+  order_type: "MKT"                    # Market orders (CFD spreads tight enough)
+  market_fallback_timeout: 10.0        # Seconds before retry
+
+# --- Agent ---
+agent:
+  # Point to best XAUUSD checkpoint (UPDATE after WF/L1 validation)
+  checkpoint_path: "checkpoints/gmgp1_xauusd_best/checkpoint_final.pth"
+  device: "cpu"                        # CPU for inference (no CUDA needed)
+  torch_compile: false                 # Must be false for live inference
+
+# --- SAC Hyperparameters (must match training checkpoint) ---
+# UPDATE with best HPs from XAUUSD HPO after Phase 1 completes
+agents:
+  sac:
+    lr_actor: 3.0e-4
+    lr_critic: 3.0e-4
+    lr_alpha: 3.0e-4
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 256
+    buffer_size: 1000000
+    initial_alpha: 0.2
+
+# --- Network (must match training checkpoint exactly) ---
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# --- Features (must match training config) ---
+features:
+  scales: [15, 60, 240]               # 15-min decision, 1h trend, 4h regime
+  window_size: 30
+  features_per_scale: 8
+  norm_span: 120
+  bootstrap_bars: 30000               # 1-min bars for EMA warmup (~22 trading days)
+
+# --- Bar Clock (CFD 24h market) ---
+bar_clock:
+  base_interval_minutes: 15            # Trade every 15 minutes
+  execution_delay_seconds: 5.0         # CFD data faster than IB
+  max_late_seconds: 30.0               # Shorter for 24h market
+  # XAUUSD: Sun 22:00 UTC → Fri 22:00 UTC, 1h daily break ~21:00-22:00 UTC
+
+# --- Trading ---
+trading:
+  initial_balance: 100000.0            # FTMO $100K account
+  deadband_threshold: 0.25             # Matches training
+  taker_fee: 0.00015                   # 1.5bps effective spread
+
+# --- Risk Management (FTMO-safe limits) ---
+risk:
+  enabled: true
+  max_drawdown_pct: 0.08               # 8% hard stop (2% below FTMO 10% limit)
+  circuit_breaker_cooldown_bars: 12    # 3 hours at 15-min bars
+  max_position_pct: 1.0                # Single asset = 100% allowed
+  funding_rate_alert: 999.0            # Disabled (CFDs have no funding)
+  min_margin_reserve_pct: 0.10         # 10% margin reserve
+
+# --- WandB Monitoring ---
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  tags: ["live", "gmgp1-xauusd", "Gold", "SAC", "15min", "cTrader", "paper", "CFD", "FTMO"]
+
+# --- Safety ---
+safety:
+  require_explicit_mainnet: true       # Must pass --mainnet for live/challenge trading
+  max_daily_loss_pct: 0.04             # 4% daily loss (1% below FTMO 5% limit)
+  kill_file: "/tmp/finrl_live_xauusd_kill"
+  emergency_flatten_on_error: true     # Flatten all positions on unrecoverable error
