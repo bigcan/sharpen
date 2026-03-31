@@ -195,6 +195,25 @@ services:
       - ${CONFIG_DIR:?Set CONFIG_DIR}/live_sync_1h.yaml:/app/configs/live_sync_1h.yaml:ro
       - sync-1h-logs:/app/logs
 
+  gmgp1-xauusd:
+    <<: *crypto-strategy
+    container_name: gmgp1-xauusd
+    profiles: [ctrader, all]
+    environment:
+      <<: *common-env
+      BROKER_TYPE: ctrader
+      STRATEGY_NAME: gmgp1-xauusd
+      STRATEGY_RUNNER: scripts/run_live_ctrader.py
+      STRATEGY_CONFIG: /app/configs/live_gmgp1_xauusd_ctrader.yaml
+      CTRADER_CLIENT_ID: ${CTRADER_CLIENT_ID:-}
+      CTRADER_CLIENT_SECRET: ${CTRADER_CLIENT_SECRET:-}
+      CTRADER_ACCESS_TOKEN: ${CTRADER_ACCESS_TOKEN:-}
+      CTRADER_ACCOUNT_ID: ${CTRADER_ACCOUNT_ID:-}
+    volumes:
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1_xauusd_best:/app/checkpoints/gmgp1_xauusd_best:ro
+      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_gmgp1_xauusd_ctrader.yaml:/app/configs/live_gmgp1_xauusd_ctrader.yaml:ro
+      - gmgp1-xauusd-logs:/app/logs
+
   # ============================================================
   #  Add new strategies here. Copy a template above and change:
   #    container_name, STRATEGY_NAME, STRATEGY_RUNNER,
@@ -218,3 +237,4 @@ volumes:
   gmgp1-btc-logs:
   funding-arb-logs:
   sync-1h-logs:
+  gmgp1-xauusd-logs:
