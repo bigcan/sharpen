@@ -270,7 +270,6 @@ class IBFuturesBroker:
         # Wait for snapshot with timeout
         for _ in range(50):
             await asyncio.sleep(0.1)
-            self._ib.sleep(0)
 
             # Try midpoint first
             mid = ticker.midpoint()
@@ -387,7 +386,6 @@ class IBFuturesBroker:
             if trade.isDone():
                 return trade.orderStatus.status == "Filled"
             await asyncio.sleep(interval)
-            self._ib.sleep(0)  # Process IB events
             elapsed += interval
         return False
 
