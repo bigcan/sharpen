@@ -40,6 +40,14 @@ crypto = [
     "stable-baselines3>=2.3.0",
     "matplotlib>=3.7",
 ]
+ib = [
+    "ib-insync>=0.9.86",
+]
+ctrader = [
+    "ctrader-open-api>=0.9.0",
+    "twisted>=24.0",
+    "service-identity>=24.0",
+]
 dev = [
     "pytest>=7.0",
     "ruff>=0.1.8",
