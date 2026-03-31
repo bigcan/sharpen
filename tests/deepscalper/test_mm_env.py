@@ -505,3 +505,95 @@ class TestQuoteLatency:
         handler = _MockMMHandler(n_bars=200)
         env = MarketMakingEnv(config=cfg, data_handler=handler)
         assert env.quote_latency_bars == 0
+
+
+# ---------------------------------------------------------------------------
+# Reward Mode Tests (reward v2 — Session 284)
+# ---------------------------------------------------------------------------
+
+class TestRewardModes:
+    def test_pv_return_mode(self):
+        """PV-return reward is float and within clip bounds."""
+        cfg = _make_config(reward={
+            "mode": "pv_return", "dsr_eta": 0.001, "dsr_scale": 1.0,
+            "phi": 0.1, "scaling": 10000.0, "clip_min": -5.0, "clip_max": 5.0,
+        })
+        handler = _MockMMHandler(n_bars=200)
+        env = MarketMakingEnv(config=cfg, data_handler=handler)
+        env.reset()
+        _, reward, _, _, _ = env.step(np.array([0.0, 0.0, 0.5]))
+        assert isinstance(reward, float)
+        assert -5.0 <= reward <= 5.0
+
+    def test_dsr_pv_mode(self):
+        """DSR-on-PV-return reward is float."""
+        cfg = _make_config(reward={
+            "mode": "dsr_pv", "dsr_eta": 0.001, "dsr_scale": 1.0, "phi": 0.1,
+        })
+        handler = _MockMMHandler(n_bars=200)
+        env = MarketMakingEnv(config=cfg, data_handler=handler)
+        env.reset()
+        _, reward, _, _, _ = env.step(np.array([0.0, 0.0, 0.5]))
+        assert isinstance(reward, float)
+
+    def test_dsr_simple_mode(self):
+        """DSR-simple (no inventory penalty) reward is float."""
+        cfg = _make_config(reward={
+            "mode": "dsr_simple", "dsr_eta": 0.001, "dsr_scale": 1.0, "phi": 0.1,
+        })
+        handler = _MockMMHandler(n_bars=200)
+        env = MarketMakingEnv(config=cfg, data_handler=handler)
+        env.reset()
+        _, reward, _, _, _ = env.step(np.array([0.0, 0.0, 0.5]))
+        assert isinstance(reward, float)
+
+    def test_info_has_components_all_modes(self):
+        """All reward modes still report R_spread, R_mtm, C_inventory, C_fees, pv_return_bps."""
+        modes = ["dsr", "pv_return", "dsr_pv", "dsr_simple", "raw"]
+        required_keys = ["R_spread", "R_mtm", "C_inventory", "C_fees", "pv_return_bps"]
+        for mode in modes:
+            cfg = _make_config(reward={
+                "mode": mode, "dsr_eta": 0.001, "dsr_scale": 1.0,
+                "phi": 0.1, "scaling": 10000.0, "clip_min": -5.0, "clip_max": 5.0,
+            })
+            handler = _MockMMHandler(n_bars=200)
+            env = MarketMakingEnv(config=cfg, data_handler=handler)
+            env.reset()
+            _, _, _, _, info = env.step(np.array([0.0, 0.0, 0.5]))
+            for key in required_keys:
+                assert key in info, f"Missing {key} in mode={mode}"
+
+    def test_200_step_episode_all_new_modes(self):
+        """Full episode completes without crash or NaN for all new reward modes."""
+        for mode in ["dsr_pv", "pv_return", "dsr_simple"]:
+            cfg = _make_config(
+                episode_length=200, random_start=False, inventory_hard_stop=10.0,
+                reward={
+                    "mode": mode, "dsr_eta": 0.001, "dsr_scale": 1.0,
+                    "phi": 0.1, "scaling": 10000.0, "clip_min": -5.0, "clip_max": 5.0,
+                },
+            )
+            handler = _MockMMHandler(n_bars=300)
+            env = MarketMakingEnv(config=cfg, data_handler=handler)
+            obs, _ = env.reset()
+            rng = np.random.default_rng(123)
+            done = False
+            steps = 0
+            while not done:
+                action = rng.uniform(-1, 1, size=3).astype(np.float32)
+                obs, reward, terminated, truncated, info = env.step(action)
+                done = terminated or truncated
+                steps += 1
+                assert np.isfinite(reward), f"Non-finite reward at step {steps} in mode={mode}"
+            assert steps == 200, f"Expected 200 steps, got {steps} for mode={mode}"
+
+    def test_legacy_dsr_mode_unchanged(self):
+        """Legacy DSR mode still produces valid float rewards (backward compat)."""
+        env = _make_env()  # Default mode="dsr"
+        env.reset(seed=42)
+        rewards = []
+        for _ in range(10):
+            _, r, _, _, _ = env.step(np.array([0.0, 0.0, 0.5]))
+            rewards.append(r)
+        assert all(isinstance(r, float) for r in rewards)
+        assert all(np.isfinite(r) for r in rewards)

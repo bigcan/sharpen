@@ -1,5 +1,5 @@
 # Market Making: SAC + LOB Microstructure + 3D Action — BTC/USDT 10s
-# Stage 4 — Phase 2: LOB-informed fills, microstructure features
+# Stage 4 — Phase 3: Reward v2 (PV-return aligned), LOB-informed fills
 # Data: secure_lob_collection.db → lob_etl.py → lob_aggregate.py → btcusdt_lob_10s.parquet
 
 data:
@@ -49,10 +49,13 @@ env:
   queue_depth_multiplier: 15.0     # EDA-calibrated: $200K BBO depth, 45% fill@10s → ~15x
   scales: [1]
   reward:
-    mode: "dsr"
+    mode: "dsr_pv"                 # DSR on PV-return (reward v2 — aligned with equity change)
     dsr_eta: 0.001
     dsr_scale: 1.0
-    phi: 0.1                       # Inventory aversion (A-S γ term)
+    phi: 0.1                       # Inventory aversion — only used by legacy "dsr" mode
+    scaling: 10000.0               # For "pv_return" mode
+    clip_min: -5.0                 # For "pv_return" mode
+    clip_max: 5.0                  # For "pv_return" mode
   fee_schedule:
     - {step: 0, taker_fee: 0.0}
     - {step: 500000, taker_fee: 0.0, ramp_to: 0.0001, ramp_end_step: 1500000}
@@ -108,4 +111,4 @@ hpo:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["mm", "sac", "btc", "10s", "lob", "market-making", "stage4", "volume-based"]
+  tags: ["mm", "sac", "btc", "10s", "lob", "market-making", "stage4", "volume-based", "reward-v2"]
