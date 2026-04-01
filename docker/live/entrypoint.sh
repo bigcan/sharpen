@@ -2,7 +2,7 @@
 # Strategy-agnostic entrypoint for all live/paper trading strategies.
 #
 # Environment variables:
-#   BROKER_TYPE       — "ib" or "crypto" (default: "crypto")
+#   BROKER_TYPE       — "ib", "crypto", or "ctrader" (default: "crypto")
 #   STRATEGY_RUNNER   — Python script path, e.g. "scripts/run_live_ib.py"
 #   STRATEGY_CONFIG   — Config YAML path, e.g. "configs/live_gmgp1_gc_ib.yaml"
 #   IB_HOST           — IB Gateway hostname (default: "127.0.0.1")

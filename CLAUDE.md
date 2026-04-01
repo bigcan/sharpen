@@ -86,6 +86,14 @@ finrl_pro_ds/
     execution/                    # exchange_perp_broker, bybit_perp_broker, arbitrator
     live/                         # live_engine, live_obs_builder, bar_clock, metrics
     mlops/                        # crypto_risk_manager
+  futures/
+    execution/                    # ib_futures_broker, contract_manager
+    live/                         # cme_bar_clock, cme_calendar
+    data/                         # ib_data_loader
+  cfd/
+    execution/                    # ctrader_broker
+    live/                         # cfd_bar_clock
+    data/                         # ctrader_data_loader
   data/
     multiscale_handler.py         # Multi-scale OHLCV handler (SAC / GMGP1)
     lob_data_handler.py           # LOB microstructure handler (MM)
@@ -166,7 +174,7 @@ Configs vary by pipeline. Do NOT invent keys -- read a reference config first.
 | Sync-1H | `configs/synapse_crypto_1h_v2.yaml` | strategy / universe / environment / agents / arbitrator / walk_forward / risk / execution |
 | Funding Arb | `configs/funding_arb_sac_10assets_hpo.yaml` | strategy / universe / environment / agents / walk_forward |
 | Market Making | `configs/mm_sac_btc_lob_10s.yaml` | data / features / env (fill_model, LOB) / network (lob_encoder, action_dim=3) / agents.sac / training / hpo / wandb |
-| Live Trading | `configs/live_gmgp1_btc_bybit.yaml` | Adds execution / model_staleness / deployment / monitoring |
+| Live Trading | `configs/live_gmgp1_btc_bybit.yaml` | exchange / agent / agents.sac / network / features / bar_clock / trading / risk / wandb / safety (+ contract for IB/cTrader) |
 
 ## Critical Invariants
 
