@@ -1,0 +1,4 @@
+# Custom Prometheus with baked-in config.
+# Workaround for Docker Desktop Windows bind mount issues.
+FROM prom/prometheus:latest
+COPY prometheus/prometheus.yml /etc/prometheus/prometheus.yml

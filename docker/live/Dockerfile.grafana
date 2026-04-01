@@ -1,0 +1,5 @@
+# Custom Grafana with baked-in provisioning + dashboards.
+# Workaround for Docker Desktop Windows bind mount issues.
+FROM grafana/grafana-oss:latest
+COPY grafana/provisioning /etc/grafana/provisioning
+COPY grafana/dashboards /var/lib/grafana/dashboards

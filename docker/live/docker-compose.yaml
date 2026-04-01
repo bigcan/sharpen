@@ -260,25 +260,28 @@ services:
   # ============================================================
 
   prometheus:
-    image: prom/prometheus:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.prometheus
+    image: finrl-prometheus:latest
     container_name: prometheus
     profiles: [monitoring, all]
     volumes:
-      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - prometheus-data:/prometheus
     networks: [finrl-net]
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana-oss:latest
+    build:
+      context: .
+      dockerfile: Dockerfile.grafana
+    image: finrl-grafana:latest
     container_name: grafana
     profiles: [monitoring, all]
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-finrl}
     volumes:
       - grafana-data:/var/lib/grafana
-      - ./grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
     networks: [finrl-net]
     restart: unless-stopped
 
