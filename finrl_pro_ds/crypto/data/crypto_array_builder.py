@@ -28,6 +28,15 @@ CRYPTO_FEATURE_COLS = [
     "btc_dominance_regime",
 ]
 
+# 13 SAFFS features: Chronos-2 quantiles + GAHMM regime probabilities
+SAFFS_FEATURE_COLS = [
+    "chronos_p10", "chronos_p30", "chronos_p50", "chronos_p70", "chronos_p90",
+    "chronos_spread",
+    "gahmm_price_bear", "gahmm_price_neutral", "gahmm_price_bull",
+    "gahmm_vol_low", "gahmm_vol_normal", "gahmm_vol_high",
+    "gahmm_composite_code",
+]
+
 
 def build_env_arrays(
     ohlcv: pd.DataFrame,
