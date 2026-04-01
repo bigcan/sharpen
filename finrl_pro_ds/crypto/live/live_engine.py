@@ -505,7 +505,7 @@ class LiveTradingEngine:
                 self._portfolio_value = equity
                 self._peak_portfolio_value = max(self._peak_portfolio_value, equity)
         except Exception as e:
-            logger.debug(f"Portfolio value update failed: {e}")
+            logger.warning(f"Portfolio value update failed: {e}")
 
     async def _update_funding_rate(self) -> None:
         """FIX AUD-H07: Fetch current funding rate for risk manager."""
