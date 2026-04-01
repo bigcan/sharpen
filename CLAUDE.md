@@ -8,7 +8,7 @@ Detailed state: `.agent/memory/core.md` (loaded at boot).
 
 ## Stack
 
-Python 3.11+ · PyTorch 2.8+ · Gymnasium · Optuna · WandB · Parquet · Ruff · Mypy · Pytest
+Python 3.11+ · PyTorch 2.8+ · Gymnasium · Optuna · WandB · Parquet · Prometheus · Grafana · Docker · Ruff · Mypy · Pytest
 
 ## Commands
 
@@ -30,10 +30,23 @@ python scripts/deploy_bare_metal.py --config <cfg> --instance <name> --gpu <id> 
 # Quality
 ruff check finrl_pro_ds && mypy finrl_pro_ds --ignore-missing-imports && pytest
 
-# Monitoring
-python scripts/monitor_fleet.py              # Fleet-wide status
+# Monitoring (scripts)
+python scripts/monitor_fleet.py              # Fleet-wide status (SSH + WandB)
 python scripts/monitor_run.py --run_id <ID>  # Single run
 python scripts/collect_run.py --run_id <ID>  # or --batch
+
+# Docker Live Trading (docker/live/)
+# Manage via: ./scripts/manage_strategies.sh {build|up|ps|logs} <target>
+docker compose -f docker/live/docker-compose.yaml \
+               -f docker/live/docker-compose.desktop.yaml \
+               --profile all up -d                        # Start everything
+# Profiles: ib, crypto, ctrader, monitoring, all
+# Monitoring stack: Prometheus (:9090), Grafana (:3000), Watchdog (Telegram alerts)
+docker compose -f docker/live/docker-compose.yaml \
+               -f docker/live/docker-compose.desktop.yaml \
+               --profile monitoring up -d                 # Start monitoring only
+docker compose -f docker/live/docker-compose.yaml \
+               --profile monitoring build                 # Rebuild after config changes
 
 # Checkpoint collection (auto-secure to local, synced to GCS)
 python scripts/auto_collect_checkpoints.py                    # WandB-based, last 24h
@@ -71,7 +84,7 @@ finrl_pro_ds/
     data/                         # crypto_loader, crypto_collector, crypto_array_builder
     features/                     # crypto_features, funding_arb_features
     execution/                    # exchange_perp_broker, bybit_perp_broker, arbitrator
-    live/                         # live_engine, live_obs_builder, bar_clock
+    live/                         # live_engine, live_obs_builder, bar_clock, metrics
     mlops/                        # crypto_risk_manager
   data/
     multiscale_handler.py         # Multi-scale OHLCV handler (SAC / GMGP1)
@@ -86,6 +99,17 @@ scripts/        # Pipeline, deployment, monitoring, checkpoint collection, oracl
 configs/        # YAML experiment configs
 tests/          # pytest suite
 .agent/skills/  # Agent skills (audit, memory, deploy, monitor, etc.)
+docker/live/    # Docker Compose live trading orchestration
+  docker-compose.yaml           # Multi-strategy orchestrator (6 strategies + infra)
+  docker-compose.desktop.yaml   # Desktop overlay (port bindings for Win11 dev)
+  Dockerfile.live-engine        # Shared image for all strategies (PyTorch CPU + prometheus_client)
+  Dockerfile.watchdog           # Health watchdog (docker-py + Telegram alerts)
+  Dockerfile.prometheus         # Prometheus with baked-in scrape config
+  Dockerfile.grafana            # Grafana with baked-in provisioning + dashboards
+  healthcheck.sh                # Trading-aware healthcheck (JSON state, not just pgrep)
+  prometheus/prometheus.yml     # Scrape config for strategy metrics endpoints
+  grafana/                      # Provisioning (datasources, dashboards) + dashboard JSON
+  .env.example                  # Template for credentials and config
 ```
 
 **Boundary:** Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never touch `FinRLPodracer/` or `Podracer/`.
@@ -142,7 +166,7 @@ Configs vary by pipeline. Do NOT invent keys -- read a reference config first.
 | Sync-1H | `configs/synapse_crypto_1h_v2.yaml` | strategy / universe / environment / agents / arbitrator / walk_forward / risk / execution |
 | Funding Arb | `configs/funding_arb_sac_10assets_hpo.yaml` | strategy / universe / environment / agents / walk_forward |
 | Market Making | `configs/mm_sac_btc_lob_10s.yaml` | data / features / env (fill_model, LOB) / network (lob_encoder, action_dim=3) / agents.sac / training / hpo / wandb |
-| Live Trading | `configs/live_gmgp1_btc_bybit.yaml` | Adds execution / model_staleness / deployment |
+| Live Trading | `configs/live_gmgp1_btc_bybit.yaml` | Adds execution / model_staleness / deployment / monitoring |
 
 ## Critical Invariants
 
@@ -220,7 +244,56 @@ Cloud:  agent-memory MCP         -- LanceDB on GCS, search index over ALL R&D en
 **Bulk re-index:** `python scripts/bulk_index_memory.py --force` after archive rotation or to rebuild the search index.
 **Cloud:** Requires `GOOGLE_SERVICE_ACCOUNT` env var in `.mcp.json` pointing to `~/.openclaw/gcs-service-account.json`. Flat files remain authoritative — LanceDB is a search acceleration layer.
 
-## Gotchas (Last verified: 2026-03-23)
+## Docker Monitoring Architecture
+
+Live trading containers export health + metrics for observability.
+
+### Health Check (Layer 0)
+`LiveTradingEngine` writes `/tmp/health_status.json` every bar with: timestamp, position, PV, drawdown, broker_connected, consecutive_errors, should_stop. `healthcheck.sh` reads this JSON and checks staleness (`MAX_STALE_SECONDS`, default 600s), broker connection, error count. Falls back to `pgrep` during bootstrap.
+
+### Prometheus Metrics (Layer 1)
+`finrl_pro_ds/crypto/live/metrics.py` — `TradingMetrics` class runs `prometheus_client` HTTP server on a **daemon thread** (completely decoupled from the async trading loop). `Gauge.set()` is thread-safe. Each strategy gets a unique port via `METRICS_PORT` env var (9101-9106). Disabled by default (`METRICS_PORT=0`).
+
+**Exported metrics:** `finrl_position`, `finrl_portfolio_value`, `finrl_drawdown_pct`, `finrl_daily_loss_pct`, `finrl_broker_connected`, `finrl_bar_count`, `finrl_total_trades`, `finrl_total_fees`, `finrl_consecutive_errors`, `finrl_last_bar_timestamp`, `finrl_funding_rate`.
+
+### Grafana Dashboard (Layer 2)
+Auto-provisioned via baked Dockerfile (`Dockerfile.grafana`). Dashboard: "FinRL Trading Overview" — 10 panels (PV, drawdown, position, daily P&L, broker status, bars, trades, errors, funding rate, fees). Alerting via Telegram contact point.
+
+### Watchdog Container (Layer 3)
+`scripts/watchdog_docker.py` — Docker events listener + 5-min periodic sweep + 30-min WandB check. Sends Telegram alerts on unhealthy/died/restart events. Read-only (never sends commands to trading containers). Requires `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in `.env`.
+
+### Config Keys (monitoring section in live YAML)
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `monitoring.metrics_port` | int | 0 | Prometheus HTTP port (0=disabled, also reads `METRICS_PORT` env var) |
+| `monitoring.health_file` | str | `/tmp/health_status.json` | Health status JSON path |
+
+### Docker Env Vars
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `METRICS_PORT` | 0 | Prometheus metrics port per strategy |
+| `MAX_STALE_SECONDS` | 600 | Healthcheck staleness threshold |
+| `TELEGRAM_BOT_TOKEN` | (empty) | Watchdog Telegram bot token |
+| `TELEGRAM_CHAT_ID` | (empty) | Watchdog Telegram chat ID |
+| `GRAFANA_ADMIN_PASSWORD` | finrl | Grafana admin password |
+
+### Port Assignments
+
+| Container | Metrics Port | Service Port |
+|-----------|-------------|-------------|
+| gmgp1-gold | 9101 | — (shares ibgateway network) |
+| sg1-gold | 9102 | — (shares ibgateway network) |
+| gmgp1-btc | 9103 | — |
+| funding-arb | 9104 | — |
+| sync-1h | 9105 | — |
+| gmgp1-xauusd | 9106 | — |
+| Prometheus | — | 9090 |
+| Grafana | — | 3000 |
+| Portainer | — | 9443 |
+
+## Gotchas (Last verified: 2026-04-01)
 
 - HPO uses NopPruner, no early-kill, 500K steps/trial
 - RTX 5090 + CUDA 13.0: run `scripts/patch_torch_compile.py` on fresh deployments
@@ -228,3 +301,6 @@ Cloud:  agent-memory MCP         -- LanceDB on GCS, search index over ALL R&D en
 - Gold data was corrupted (Session 106) -- always validate via `scripts/clean_ohlcv.py`
 - Concurrent GPU runs: check VRAM (not run count) -- 2+ runs can share 1 GPU
 - Legacy envs: V6 `Discrete(2)` private=4, V5 `Discrete(6)` -- do NOT modify action spaces
+- Docker Desktop Windows: file bind mounts fail silently -- use baked Dockerfiles (COPY at build) instead of volume mounts for config files
+- Prometheus/Grafana configs: edit source files in `docker/live/` then rebuild (`docker compose --profile monitoring build`)
+- IB strategies share `ibgateway` network namespace -- Prometheus scrapes them via `ibgateway:<port>`, not by container name

@@ -1,3 +1,6 @@
+#claude --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official
+
+
 # DeepScalper
 
 **High-Frequency Crypto Scalping with Deep Reinforcement Learning (Bitcoin Futures)**
@@ -200,6 +203,58 @@ This project includes a **persistent long-term memory system** that gives the AI
 To update project facts or preferences, just tell the agent (e.g., "update my preferences: I prefer verbose logging"). It will modify `core.md` under the relevant section.
 
 ---
+
+## Docker Live Trading & Monitoring
+
+The live trading stack runs multiple SAC agents in Docker containers with full observability.
+
+### Quick Start
+
+```bash
+cd docker/live
+cp .env.example .env
+# Edit .env: fill in TWS_USERID, TWS_PASSWORD, WANDB_API_KEY, etc.
+
+# Build images
+docker compose build engine-base
+docker compose --profile monitoring build
+
+# Start IB Gateway + monitoring
+docker compose -f docker-compose.yaml -f docker-compose.desktop.yaml \
+    --profile ib --profile monitoring up -d
+
+# Start a strategy
+docker compose -f docker-compose.yaml -f docker-compose.desktop.yaml \
+    --profile ib up -d gmgp1-gold
+```
+
+### Services
+
+| Service | Description | URL |
+|---------|-------------|-----|
+| **IB Gateway** | Headless IB Gateway (IBC + Xvfb) | Port 4002 (paper) |
+| **Prometheus** | Metrics collection (scrapes strategies every 15s) | http://localhost:9090 |
+| **Grafana** | Dashboards + alerting | http://localhost:3000 |
+| **Watchdog** | Docker health event listener + Telegram alerts | Logs only |
+| **Portainer** | Container management web UI | https://localhost:9443 |
+
+### Monitoring Features
+
+- **Trading-aware health checks** -- JSON health file with position, P&L, drawdown, broker status (not just process existence)
+- **Prometheus metrics** -- 11 real-time gauges per strategy (portfolio value, position, drawdown, daily P&L, broker connection, etc.)
+- **Grafana dashboard** -- "FinRL Trading Overview" auto-provisioned with 10 panels
+- **Watchdog alerts** -- Instant Telegram notifications on container crash, unhealthy state, or restart
+- **Docker profiles** -- `ib`, `crypto`, `ctrader`, `monitoring`, `all`
+
+### Adding Telegram Alerts
+
+```bash
+# In docker/live/.env:
+TELEGRAM_BOT_TOKEN=your_bot_token
+TELEGRAM_CHAT_ID=your_chat_id
+
+docker compose restart watchdog
+```
 
 ## Testing
 
