@@ -42,6 +42,11 @@ from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: 
 from finrl_pro_ds.crypto.features.crypto_features import (  # noqa: E402
     compute_crypto_features,
 )
+from finrl_pro_ds.crypto.features.saffs_features import (  # noqa: E402
+    compute_saffs_features,
+    get_saffs_feature_cols,
+    unload_saffs,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -96,6 +101,39 @@ def prepare_data(config: dict) -> dict:
         correlation_window=config["features"]["tech_window"],
     )
 
+    # Compute SAFFS features (Chronos-2 + GAHMM) if enabled
+    saffs_cfg = config.get("saffs", {})
+    enable_saffs = saffs_cfg.get("enabled", False)
+    feature_cols = None  # defaults to CRYPTO_FEATURE_COLS in build_env_arrays
+
+    if enable_saffs:
+        logger.info("Computing SAFFS features (Chronos-2 + GAHMM)...")
+        ts_range = ohlcv["timestamp"]
+        saffs_feats = compute_saffs_features(
+            ohlcv_df=ohlcv,
+            assets=assets,
+            start_ts=ts_range.min(),
+            end_ts=ts_range.max(),
+            config=saffs_cfg,
+        )
+        # Merge SAFFS features into crypto_feats on (timestamp, ticker)
+        crypto_feats = crypto_feats.merge(
+            saffs_feats, on=["timestamp", "ticker"], how="left",
+        )
+        # Fill any missing SAFFS features (assets with no SAFFS data) with 0
+        saffs_cols = get_saffs_feature_cols()
+        for col in saffs_cols:
+            if col in crypto_feats.columns:
+                crypto_feats[col] = crypto_feats[col].fillna(0.0)
+
+        # Use combined feature columns
+        from finrl_pro_ds.crypto.data.crypto_array_builder import (
+            CRYPTO_FEATURE_COLS,
+            SAFFS_FEATURE_COLS,
+        )
+        feature_cols = CRYPTO_FEATURE_COLS + SAFFS_FEATURE_COLS
+        logger.info(f"SAFFS enabled: {len(feature_cols)} total features per asset")
+
     # Validate walk-forward coverage
     wf_cfg = config["walk_forward"]
     wf_validator = WalkForwardCoverageValidator(
@@ -113,6 +151,7 @@ def prepare_data(config: dict) -> dict:
         "funding": funding,
         "crypto_features": crypto_feats,
         "walk_forward": wf_result,
+        "feature_cols": feature_cols,
     }
 
 
@@ -166,6 +205,8 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
             logger.error(f"  {issue}")
         return {"status": "FAILED", "reason": "insufficient_data"}
 
+    feature_cols = data.get("feature_cols")  # None = default CRYPTO_FEATURE_COLS
+
     logger.info(f"Walk-forward: {wf['n_windows']} windows available")
 
     if max_windows is not None:
@@ -201,6 +242,7 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
             train_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["train_start"], window["train_end"],
+                feature_cols=feature_cols,
                 norm_window=norm_window,
             )
 
@@ -209,6 +251,7 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
             val_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["val_start"], window["val_end"],
+                feature_cols=feature_cols,
                 norm_window=norm_window,
             )
             eval_config = copy.deepcopy(config)
@@ -219,6 +262,7 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
             test_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["test_start"], window["test_end"],
+                feature_cols=feature_cols,
                 norm_window=norm_window,
             )
             test_env = create_env(test_arrays, eval_config)
@@ -748,6 +792,11 @@ def main():
         logger.exception("Backtest crashed")
         raise
     finally:
+        # Free SAFFS GPU resources
+        try:
+            unload_saffs()
+        except Exception:
+            pass
         # Always finalize WandB — even on crash/OOM/signal
         try:
             import wandb

@@ -38,10 +38,18 @@ features:
   norm_window: 720       # 1 month in hours (reverted from 360)
   norm_clip: [-5, 5]
   log_return_clip: [-0.5, 0.5]
-  tech_dim: 6              # M1: 6 real features (removed 2 zero-constant placeholders)
+  tech_dim: 19             # 6 crypto + 13 SAFFS (when saffs.enabled=true); 6 without SAFFS
   enable_hmm: true
   hmm_stride: 5
   enable_crypto_features: true
+
+saffs:
+  enabled: true
+  chronos_device: "cuda"
+  chronos_context_length: 512
+  gahmm_refit_every: 720       # Refit GAHMM every 720 bars (1 month at 1H)
+  gahmm_min_bars: 60           # Minimum bars before first GAHMM fit
+  gahmm: {}                    # Empty = use GAHMM v6 defaults (Student-t(10), v2a features)
 
 environment:
   type: "perpetual_futures"
