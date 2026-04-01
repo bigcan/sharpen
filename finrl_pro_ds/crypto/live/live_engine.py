@@ -164,7 +164,12 @@ class LiveTradingEngine:
 
         # Bootstrap observation builder if not already done
         if not self.obs_builder.is_ready:
-            await self.obs_builder.bootstrap(self.loader, self._asset)
+            await self._bootstrap_with_retry()
+
+        # FIX BUG-15: Fetch portfolio value BEFORE syncing position so that
+        # broker._portfolio_value is set (otherwise get_single_position()
+        # returns 0.0 because _contracts_to_position divides by zero PV).
+        await self._update_portfolio_value()
 
         # Sync position from exchange
         await self._sync_position()
@@ -379,6 +384,37 @@ class LiveTradingEngine:
             )
 
         return float(np.clip(action[0, 0].cpu().item(), -1.0, 1.0))
+
+    # -------------------------------------------------------------------
+    # Bootstrap
+    # -------------------------------------------------------------------
+    async def _bootstrap_with_retry(
+        self,
+        max_retries: int = 5,
+        base_delay: float = 60.0,
+    ) -> None:
+        """Bootstrap obs builder with exponential-backoff retry.
+
+        HMDS can fail during CME maintenance windows or IB pacing hits.
+        Instead of crashing, retry with increasing delays so the engine
+        can start once data becomes available again.
+        """
+        for attempt in range(1, max_retries + 1):
+            try:
+                await self.obs_builder.bootstrap(self.loader, self._asset)
+                return
+            except Exception as e:
+                if attempt == max_retries:
+                    logger.critical(
+                        f"Bootstrap failed after {max_retries} attempts: {e}"
+                    )
+                    raise
+                delay = base_delay * (2 ** (attempt - 1))
+                logger.warning(
+                    f"Bootstrap attempt {attempt}/{max_retries} failed: {e}. "
+                    f"Retrying in {delay:.0f}s..."
+                )
+                await asyncio.sleep(delay)
 
     # -------------------------------------------------------------------
     # Data fetching

@@ -13,7 +13,7 @@ exchange:
   host: "127.0.0.1"
   paper_port: 4002
   live_port: 4001
-  client_id: 1
+  client_id: 2                          # Must differ from gmgp1-gold (client_id=1)
 
 # --- Contract Specification ---
 contract:
