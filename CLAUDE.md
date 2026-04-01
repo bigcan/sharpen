@@ -218,16 +218,34 @@ Skills are split: **user-scope** (`~/.claude/skills/`) for reusable methodology,
 | **WandB** | **Auto** for HPO analysis, run diagnostics, config diffing. Always override `metric_keys`. | User + Project | `~/.claude/skills/wandb/SKILL.md` + `.agents/skills/wandb-primary/SKILL.md` (project addendum) |
 | **Researcher** | "Should we try X?", algorithm eval, lit review, root cause analysis. | User + Project | `~/.claude/skills/researcher/SKILL.md` + `.agent/skills/researcher/REFERENCE.md` |
 | **Architect** | New module design, pipeline refactor, API/interface changes. **Auto** after Researcher GO. | User + Project | `~/.claude/skills/architect/SKILL.md` + `.agent/skills/architect/REFERENCE.md` |
+| **Docker** | Docker, containers, compose, build, start/stop strategies, IBGateway, VNC, Portainer. **Auto** before live-trading container launch. | Project | `.agent/skills/docker/SKILL.md` |
+| **Live-Trading** | Start/stop paper/live trading, launch strategy, `--mainnet`, graduation, kill file, risk config, cTrader OAuth. | Project | `.agent/skills/live-trading/SKILL.md` |
+| **Live-Monitor** | Live P&L, positions, drawdown, "how are my strategies", container health, Grafana, Telegram alerts. **Auto** after live-trading launch. Periodic via `/loop`. | Project | `.agent/skills/live-monitor/SKILL.md` |
 
 **Chaining rules:**
 - Code change / implementation complete -> **Audit** (mandatory). +**Math** if formulas. +**Optimization** if perf.
 - Deploy request -> **Monitor** -> **Optimization** (SPS check) -> **Deploy** -> **Monitor** -> **Dashboard**
 - `/monitor` -> **Monitor** -> **Dashboard**. Experiment state change -> **Dashboard**.
+- `/monitor` (with live trading active) -> **Monitor** (training) + **Live-Monitor** (trading) -> **Dashboard**
 - Session start -> **Memory** boot. `/sync` -> **Memory** -> **Dashboard** -> git commit.
 - Experiment result / HPO complete -> **WandB** -> **Memory** -> **Dashboard** -> git commit.
 - Run stall/crash -> **Monitor** -> **WandB** (`diagnose_run`).
 - Research question -> **Researcher** -> if GO -> **Architect** -> implement -> **Audit**.
 - Root cause / new module -> **Researcher** <-> **Architect** -> implement -> **Audit**.
+- Live trading launch -> **Live-Trading** pre-flight -> **Docker** (if container) -> **Live-Monitor** (verify startup) -> **Dashboard**
+- "How are my strategies" (live) -> **Live-Monitor** -> **Dashboard**
+- Paper graduation -> **Live-Monitor** (verify paper metrics) -> **Live-Trading** (switch to `--mainnet`)
+- Container issue / alert triage -> **Live-Monitor** -> **Docker** (restart if needed)
+
+**Disambiguation (Monitor vs Live-Monitor):**
+
+| User Says | Route To |
+|-----------|----------|
+| "how are my runs" / SPS / Q-value / loss | **Monitor** (GPU training) |
+| "how are my strategies" / P&L / positions / drawdown | **Live-Monitor** (live trading) |
+| "check containers" / Docker status | **Docker** |
+| "deploy to GPU" | **Deploy** |
+| "start trading" / "go live" | **Live-Trading** + **Docker** |
 
 ## Memory Protocol (2-Tier + Cloud Search Index)
 
