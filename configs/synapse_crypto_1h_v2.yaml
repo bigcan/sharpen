@@ -43,7 +43,7 @@ features:
   hmm_stride: 5
   enable_crypto_features: true
 
-saffs:
+prism:
   enabled: true
   chronos_device: "cuda"
   chronos_context_length: 512

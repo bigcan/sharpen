@@ -207,7 +207,7 @@ def main():
         logger.error(f"Config not found: {config_path}")
         sys.exit(1)
 
-    with open(config_path) as f:
+    with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
     # Validate and patch
