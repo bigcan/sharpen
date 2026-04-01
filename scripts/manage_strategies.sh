@@ -48,7 +48,7 @@ Commands:
   setup <ip> [user]     Set up Docker context for remote desktop
   context [local|desktop] Switch Docker context
   build                 Build the shared engine image
-  up [profile|service]  Start strategies (profile: ib, crypto, all; or service name)
+  up [profile|service]  Start strategies (profile: ib, crypto, ctrader, monitoring, all; or service name)
   down                  Stop all strategies
   stop <service>        Stop a single strategy
   restart <service>     Restart a single strategy
@@ -134,7 +134,7 @@ cmd_up() {
     if [ -z "$target" ]; then
         echo "Starting all strategies..."
         $DC --profile all up -d
-    elif [[ "$target" == "ib" || "$target" == "crypto" || "$target" == "all" ]]; then
+    elif [[ "$target" == "ib" || "$target" == "crypto" || "$target" == "ctrader" || "$target" == "monitoring" || "$target" == "all" ]]; then
         echo "Starting profile: $target"
         $DC --profile "$target" up -d
     else

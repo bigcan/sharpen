@@ -42,6 +42,12 @@ def validate_config(config: dict, args) -> dict:
     # --- Mainnet safety ---
     exchange_cfg = config.setdefault("exchange", {})
     if args.mainnet:
+        if not config.get("safety", {}).get("require_explicit_mainnet", True):
+            logger.error(
+                "safety.require_explicit_mainnet is false — refusing mainnet launch. "
+                "Set to true in config to confirm intent."
+            )
+            sys.exit(1)
         exchange_cfg["testnet"] = False
         logger.warning(
             "\n"

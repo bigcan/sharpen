@@ -1,0 +1,89 @@
+# Live Trading Config — Synapse Crypto 1H Multi-Asset Ensemble via Bybit
+#
+# Usage:
+#   python scripts/run_live.py --config configs/live_sync_1h.yaml
+#   python scripts/run_live.py --config configs/live_sync_1h.yaml --mainnet
+#   python scripts/run_live.py --config configs/live_sync_1h.yaml --dry-run
+
+# --- Exchange ---
+exchange:
+  name: "bybit"
+  testnet: true
+  asset: "MULTI"                    # Multi-asset perp portfolio
+  leverage: 1
+  order_type: "limit"
+  limit_offset_pct: 0.0005
+  market_fallback_timeout: 60.0
+  data_exchange: "binance"
+
+# --- Agent ---
+agent:
+  # UPDATE: point to best sync-1h checkpoint after WF validation
+  checkpoint_path: "checkpoints/sync_1h_best/checkpoint_final.pth"
+  device: "cpu"
+  torch_compile: false              # Must be false for live inference
+
+# --- SAC Hyperparameters (must match training checkpoint) ---
+agents:
+  sac:
+    lr_actor: 3.0e-4
+    lr_critic: 3.0e-4
+    lr_alpha: 3.0e-4
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 256
+    buffer_size: 1000000
+    initial_alpha: 0.2
+
+# --- Network (UPDATE: must match training checkpoint exactly) ---
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# --- Features (UPDATE: must match training config) ---
+features:
+  scales: [60]                      # 1h decision frequency
+  window_size: 30
+  features_per_scale: 19            # 6 crypto + 13 PRISM features
+  norm_span: 720
+  bootstrap_bars: 30000
+
+# --- Bar Clock ---
+bar_clock:
+  base_interval_minutes: 60         # 1h bars (matches training)
+  execution_delay_seconds: 5.0
+  max_late_seconds: 30.0
+
+# --- Trading ---
+trading:
+  initial_balance: 100000.0
+  deadband_threshold: 0.25
+  taker_fee: 0.0005                 # Bybit futures taker
+
+# --- Risk Management ---
+risk:
+  enabled: true
+  max_drawdown_pct: 0.10
+  circuit_breaker_cooldown_bars: 12
+  max_position_pct: 1.0
+  funding_rate_alert: 0.001
+  min_margin_reserve_pct: 0.10
+
+# --- WandB Monitoring ---
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  tags: ["live", "sync-1h", "SAC", "1h", "bybit", "paper", "20-asset"]
+
+# --- Safety ---
+safety:
+  require_explicit_mainnet: true
+  max_daily_loss_pct: 0.05
+  kill_file: "/tmp/finrl_live_sync_1h_kill"
+  emergency_flatten_on_error: true
