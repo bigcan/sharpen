@@ -132,7 +132,7 @@ services:
   sg1-gold:
     <<: *ib-strategy
     container_name: sg1-gold
-    profiles: [ib, all]
+    profiles: [sg1, all]
     labels:
       finrl.monitor: "true"
       finrl.strategy: "sg1-gold"
