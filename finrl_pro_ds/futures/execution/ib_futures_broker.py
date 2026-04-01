@@ -207,20 +207,28 @@ class IBFuturesBroker:
         Returns:
             dict with keys: total_equity, available_balance, used_margin
         """
-        summary = self._ib.accountSummary()
+        # BUG-08: accountSummary() returns a stale/empty cache.
+        # accountValues() is fed by the automatic account subscription
+        # that ib_insync maintains once connected.
+        values = self._ib.accountValues()
         result = {
             "total_equity": 0.0,
             "available_balance": 0.0,
             "used_margin": 0.0,
         }
 
-        for item in summary:
-            if item.tag == "NetLiquidation" and item.currency == "USD":
+        for item in values:
+            if item.currency != "USD":
+                continue
+            if item.tag == "NetLiquidation":
                 result["total_equity"] = float(item.value)
-            elif item.tag == "AvailableFunds" and item.currency == "USD":
+            elif item.tag == "AvailableFunds":
                 result["available_balance"] = float(item.value)
-            elif item.tag == "InitMarginReq" and item.currency == "USD":
+            elif item.tag == "InitMarginReq":
                 result["used_margin"] = float(item.value)
+
+        if result["total_equity"] == 0.0:
+            logger.warning("get_account_info: NetLiquidation is 0 — IB subscription may not be ready")
 
         self._portfolio_value = result["total_equity"]
         return result
