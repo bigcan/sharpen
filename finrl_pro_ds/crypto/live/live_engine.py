@@ -24,8 +24,11 @@ Safety:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
+import os
 import signal
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
@@ -118,6 +121,26 @@ class LiveTradingEngine:
         self._total_fees = 0.0
         self._consecutive_errors = 0
 
+        # Health status file for Docker HEALTHCHECK
+        monitoring_cfg = config.get("monitoring", {})
+        self._health_file = Path(monitoring_cfg.get(
+            "health_file", "/tmp/health_status.json",
+        ))
+        self._strategy_name = (
+            config.get("strategy_name")
+            or os.environ.get("STRATEGY_NAME", "unknown")
+        )
+
+        # Prometheus metrics (started in start(), no-op if port=0 or missing lib)
+        from finrl_pro_ds.crypto.live.metrics import TradingMetrics
+        metrics_port = monitoring_cfg.get("metrics_port") or int(
+            os.environ.get("METRICS_PORT", "0"),
+        )
+        self._metrics = TradingMetrics(
+            port=metrics_port,
+            strategy_name=self._strategy_name,
+        )
+
     # -------------------------------------------------------------------
     # Main loop
     # -------------------------------------------------------------------
@@ -154,6 +177,9 @@ class LiveTradingEngine:
 
         # Initialize WandB
         self._init_wandb()
+
+        # Start Prometheus metrics server (no-op if port=0)
+        self._metrics.start()
 
         mode_str = "DRY RUN" if self._dry_run else "LIVE"
         logger.info(
@@ -626,6 +652,35 @@ class LiveTradingEngine:
             except Exception as e:
                 logger.debug(f"WandB log failed: {e}")
 
+        # Shared state for health file + Prometheus (compute once)
+        broker_connected = self._check_broker_alive()
+        daily_loss_pct = (
+            (self._portfolio_value - self._daily_start_value)
+            / self._daily_start_value
+            if self._daily_start_value > 0
+            else 0.0
+        )
+
+        # Health status file for Docker HEALTHCHECK
+        self._write_health_status(
+            bar_time, drawdown, daily_loss_pct, broker_connected,
+        )
+
+        # Prometheus metrics (thread-safe, no-op if disabled)
+        self._metrics.update(
+            position=self._current_position,
+            portfolio_value=self._portfolio_value,
+            drawdown_pct=drawdown,
+            daily_loss_pct=daily_loss_pct,
+            broker_connected=broker_connected,
+            bar_count=self._total_bars,
+            total_trades=self._total_trades,
+            total_fees=self._total_fees,
+            consecutive_errors=self._consecutive_errors,
+            last_bar_timestamp=bar_time.timestamp(),
+            funding_rate=self._current_funding_rate,
+        )
+
         # Periodic console log
         if self._total_bars % 4 == 0 or traded:
             action_str = "TRADE" if traded else f"HOLD({skip_reason})"
@@ -634,6 +689,56 @@ class LiveTradingEngine:
                 f"{action_str} | pos={self._current_position:.3f} | "
                 f"PV=${self._portfolio_value:,.2f} | DD={drawdown:.2%}",
             )
+
+    # -------------------------------------------------------------------
+    # Health status file
+    # -------------------------------------------------------------------
+    def _check_broker_alive(self) -> bool:
+        """Check broker connection status without async call.
+
+        IB brokers have a persistent TCP connection that can drop.
+        CCXT/HTTP brokers are stateless — always returns True.
+        """
+        ib = getattr(self.broker, "_ib", None)
+        if ib is not None:
+            return ib.isConnected()
+        return True
+
+    def _write_health_status(
+        self,
+        bar_time: datetime,
+        drawdown: float,
+        daily_loss_pct: float,
+        broker_connected: bool,
+    ) -> None:
+        """Write health status JSON for Docker HEALTHCHECK.
+
+        Non-critical: if this fails, trading continues unaffected.
+        The healthcheck.sh script reads this file and checks:
+          - staleness (file age > MAX_STALE_SECONDS)
+          - broker_connected, consecutive_errors, should_stop
+        """
+        status = {
+            "timestamp": time.time(),
+            "bar_count": self._total_bars,
+            "last_bar_time": bar_time.strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "position": round(self._current_position, 6),
+            "portfolio_value": round(self._portfolio_value, 2),
+            "drawdown_pct": round(drawdown, 6),
+            "daily_loss_pct": round(daily_loss_pct, 6),
+            "broker_connected": broker_connected,
+            "consecutive_errors": self._consecutive_errors,
+            "total_trades": self._total_trades,
+            "should_stop": self._should_stop,
+            "strategy_name": self._strategy_name,
+        }
+
+        try:
+            tmp = self._health_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps(status), encoding="utf-8")
+            tmp.replace(self._health_file)
+        except Exception as e:
+            logger.debug(f"Health status write failed: {e}")
 
     # -------------------------------------------------------------------
     # Shutdown

@@ -1,0 +1,30 @@
+# FinRL Docker Watchdog — monitors trading container health + alerts
+#
+# Build:
+#   docker build -t finrl-watchdog:latest -f docker/live/Dockerfile.watchdog .
+
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TZ=UTC
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tzdata \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN pip install --upgrade pip && \
+    pip install \
+    "docker>=7.0" \
+    "requests>=2.31" \
+    "wandb>=0.16.0"
+
+# Copy watchdog scripts + existing watchdog.py for WandB checks
+COPY scripts/watchdog_docker.py /app/scripts/watchdog_docker.py
+COPY scripts/watchdog.py /app/scripts/watchdog.py
+
+ENV PYTHONPATH=/app
+
+CMD ["python", "scripts/watchdog_docker.py"]

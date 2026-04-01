@@ -30,9 +30,10 @@ x-common-env: &common-env
   WANDB_API_KEY: ${WANDB_API_KEY:?Set WANDB_API_KEY in .env}
   PYTHONPATH: /app
   TZ: UTC
+  MAX_STALE_SECONDS: ${MAX_STALE_SECONDS:-600}
 
 x-healthcheck: &strategy-healthcheck
-  test: ["CMD-SHELL", "pgrep -f 'run_live|_runner' || exit 1"]
+  test: ["CMD-SHELL", "/app/healthcheck.sh"]
   interval: 5m
   timeout: 10s
   start_period: 5m
@@ -110,6 +111,10 @@ services:
     <<: *ib-strategy
     container_name: gmgp1-gold
     profiles: [ib, all]
+    labels:
+      finrl.monitor: "true"
+      finrl.strategy: "gmgp1-gold"
+      finrl.broker: "ib"
     environment:
       <<: *common-env
       BROKER_TYPE: ib
@@ -118,6 +123,7 @@ services:
       STRATEGY_NAME: gmgp1-gold
       STRATEGY_RUNNER: scripts/run_live_ib.py
       STRATEGY_CONFIG: /app/configs/live_gmgp1_gc_ib.yaml
+      METRICS_PORT: "9101"
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1_v5_l1_seed456:/app/checkpoints/gmgp1_v5_l1_seed456:ro
       - ${CONFIG_DIR:?Set CONFIG_DIR}/live_gmgp1_gc_ib.yaml:/app/configs/live_gmgp1_gc_ib.yaml:ro
@@ -127,6 +133,10 @@ services:
     <<: *ib-strategy
     container_name: sg1-gold
     profiles: [ib, all]
+    labels:
+      finrl.monitor: "true"
+      finrl.strategy: "sg1-gold"
+      finrl.broker: "ib"
     environment:
       <<: *common-env
       BROKER_TYPE: ib
@@ -135,6 +145,7 @@ services:
       STRATEGY_NAME: sg1-gold
       STRATEGY_RUNNER: scripts/run_live_ib.py
       STRATEGY_CONFIG: /app/configs/live_sg1_gc_ib.yaml
+      METRICS_PORT: "9102"
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/sg1_best:/app/checkpoints/sg1_best:ro
       - ${CONFIG_DIR:?Set CONFIG_DIR}/live_sg1_gc_ib.yaml:/app/configs/live_sg1_gc_ib.yaml:ro
@@ -148,12 +159,17 @@ services:
     <<: *crypto-strategy
     container_name: gmgp1-btc
     profiles: [crypto, all]
+    labels:
+      finrl.monitor: "true"
+      finrl.strategy: "gmgp1-btc"
+      finrl.broker: "crypto"
     environment:
       <<: *common-env
       BROKER_TYPE: crypto
       STRATEGY_NAME: gmgp1-btc
       STRATEGY_RUNNER: scripts/run_live.py
       STRATEGY_CONFIG: /app/configs/live_gmgp1_btc_bybit.yaml
+      METRICS_PORT: "9103"
       BYBIT_API_KEY: ${BYBIT_API_KEY:-}
       BYBIT_API_SECRET: ${BYBIT_API_SECRET:-}
     volumes:
@@ -165,12 +181,17 @@ services:
     <<: *crypto-strategy
     container_name: funding-arb
     profiles: [crypto, all]
+    labels:
+      finrl.monitor: "true"
+      finrl.strategy: "funding-arb"
+      finrl.broker: "crypto"
     environment:
       <<: *common-env
       BROKER_TYPE: crypto
       STRATEGY_NAME: funding-arb
       STRATEGY_RUNNER: scripts/run_live.py
       STRATEGY_CONFIG: /app/configs/live_funding_arb.yaml
+      METRICS_PORT: "9104"
       BYBIT_API_KEY: ${BYBIT_API_KEY:-}
       BYBIT_API_SECRET: ${BYBIT_API_SECRET:-}
     volumes:
@@ -182,12 +203,17 @@ services:
     <<: *crypto-strategy
     container_name: sync-1h
     profiles: [crypto, all]
+    labels:
+      finrl.monitor: "true"
+      finrl.strategy: "sync-1h"
+      finrl.broker: "crypto"
     environment:
       <<: *common-env
       BROKER_TYPE: crypto
       STRATEGY_NAME: sync-1h
       STRATEGY_RUNNER: scripts/run_live.py
       STRATEGY_CONFIG: /app/configs/live_sync_1h.yaml
+      METRICS_PORT: "9105"
       BYBIT_API_KEY: ${BYBIT_API_KEY:-}
       BYBIT_API_SECRET: ${BYBIT_API_SECRET:-}
     volumes:
@@ -199,12 +225,17 @@ services:
     <<: *crypto-strategy
     container_name: gmgp1-xauusd
     profiles: [ctrader, all]
+    labels:
+      finrl.monitor: "true"
+      finrl.strategy: "gmgp1-xauusd"
+      finrl.broker: "ctrader"
     environment:
       <<: *common-env
       BROKER_TYPE: ctrader
       STRATEGY_NAME: gmgp1-xauusd
       STRATEGY_RUNNER: scripts/run_live_ctrader.py
       STRATEGY_CONFIG: /app/configs/live_gmgp1_xauusd_ctrader.yaml
+      METRICS_PORT: "9106"
       CTRADER_CLIENT_ID: ${CTRADER_CLIENT_ID:-}
       CTRADER_CLIENT_SECRET: ${CTRADER_CLIENT_SECRET:-}
       CTRADER_ACCESS_TOKEN: ${CTRADER_ACCESS_TOKEN:-}
@@ -224,6 +255,52 @@ services:
   #  Each strategy gets its own log volume (add to volumes: below).
   # ============================================================
 
+  # ============================================================
+  #  Monitoring (Prometheus + Grafana)
+  # ============================================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    profiles: [monitoring, all]
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks: [finrl-net]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana-oss:latest
+    container_name: grafana
+    profiles: [monitoring, all]
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-finrl}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+    networks: [finrl-net]
+    restart: unless-stopped
+
+  watchdog:
+    build:
+      context: ../..
+      dockerfile: docker/live/Dockerfile.watchdog
+    image: finrl-watchdog:latest
+    container_name: watchdog
+    profiles: [monitoring, all]
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      WANDB_API_KEY: ${WANDB_API_KEY:?Set WANDB_API_KEY in .env}
+      SWEEP_INTERVAL: "300"
+      WANDB_CHECK_INTERVAL: "1800"
+      ALERT_COOLDOWN: "300"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [finrl-net]
+    restart: unless-stopped
+
 networks:
   finrl-net:
     driver: bridge
@@ -232,6 +309,8 @@ volumes:
   ibgateway-data:
   ibgateway-jts:
   portainer-data:
+  prometheus-data:
+  grafana-data:
   gmgp1-gold-logs:
   sg1-gold-logs:
   gmgp1-btc-logs:
