@@ -35,6 +35,13 @@ python scripts/monitor_fleet.py              # Fleet-wide status
 python scripts/monitor_run.py --run_id <ID>  # Single run
 python scripts/collect_run.py --run_id <ID>  # or --batch
 
+# Checkpoint collection (auto-secure to local, synced to GCS)
+python scripts/auto_collect_checkpoints.py                    # WandB-based, last 24h
+python scripts/auto_collect_checkpoints.py --hours 48         # Longer lookback
+python scripts/auto_collect_checkpoints.py --run_id <ID>      # Specific run
+python scripts/auto_collect_checkpoints.py --all_instances    # Scan all GPUHub instances
+# Flags: --dry_run (preview), --include_all (include HPO trial timestamp dirs)
+
 # WandB: entity=bigcan-chiwin-technology, project=FinRL-Pro-DS
 # Helpers: .agents/skills/wandb-primary/scripts/wandb_helpers.py (see WandB skill)
 # ALWAYS pass metric_keys= explicitly -- FinRL metrics, NOT ML defaults:
@@ -75,7 +82,7 @@ finrl_pro_ds/
     parquet_handler.py            # Shared-memory data streaming
   training/sac_trainer.py         # SAC training loop (+ legacy deepscalper/ppo trainers)
   analytics/                      # pyfolio_analyzer, wandb_evaluator
-scripts/        # Pipeline, deployment, monitoring, oracles, ETL
+scripts/        # Pipeline, deployment, monitoring, checkpoint collection, oracles, ETL
 configs/        # YAML experiment configs
 tests/          # pytest suite
 .agent/skills/  # Agent skills (audit, memory, deploy, monitor, etc.)
@@ -198,19 +205,20 @@ Skills are split: **user-scope** (`~/.claude/skills/`) for reusable methodology,
 - Research question -> **Researcher** -> if GO -> **Architect** -> implement -> **Audit**.
 - Root cause / new module -> **Researcher** <-> **Architect** -> implement -> **Audit**.
 
-## Memory Protocol (2-Tier + Cloud)
+## Memory Protocol (2-Tier + Cloud Search Index)
 
 ```
 Tier 1: .agent/memory/core.md   -- Project status (~100 lines, deterministic boot context)
-Tier 2: randd_log.md             -- R&D history rolling buffer (search via grep)
-        randd_archive/YYYY-MM.md -- Monthly archives (grep-searchable)
-Cloud:  agent-memory MCP         -- GCS LanceDB, semantic search via memory_search/memory_store
+Tier 2: randd_log.md             -- R&D write buffer (~20 entries, auto-rotated at 150 KB)
+        randd_archive/YYYY-MM.md -- Monthly archives (cold backup, grep-searchable)
+Cloud:  agent-memory MCP         -- LanceDB on GCS, search index over ALL R&D entries
 ```
 
-**Boot:** `core.md` loaded via system prompt hook. `memory_search` MCP or grep `randd_log.md` + `randd_archive/` for prior context.
-**Commit:** Append `randd_log.md` -> update `core.md` -> `memory_store` key findings -> git commit.
-**Rotation:** `python scripts/rotate_randd_log.py` when >300 KB. Moves to `randd_archive/YYYY-MM.md`.
-**Cloud:** Requires `GOOGLE_SERVICE_ACCOUNT` env var in `.mcp.json` pointing to `~/.openclaw/gcs-service-account.json`.
+**Boot:** `core.md` loaded via system prompt hook. `memory_search` for semantic retrieval → grep `randd_log.md` for recent exact matches → grep `randd_archive/` as fallback.
+**Commit:** Append `randd_log.md` → `memory_store` new entry to LanceDB → auto-rotate if >150 KB → update `core.md` → git commit.
+**Auto-rotate:** `python scripts/rotate_randd_log.py --keep-months 1 --max-entries 20` (triggered during `/sync` when >150 KB). `--max-entries` acts as both cap and floor at month boundaries.
+**Bulk re-index:** `python scripts/bulk_index_memory.py --force` after archive rotation or to rebuild the search index.
+**Cloud:** Requires `GOOGLE_SERVICE_ACCOUNT` env var in `.mcp.json` pointing to `~/.openclaw/gcs-service-account.json`. Flat files remain authoritative — LanceDB is a search acceleration layer.
 
 ## Gotchas (Last verified: 2026-03-23)
 
