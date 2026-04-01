@@ -17,3 +17,11 @@ services:
   portainer:
     ports:
       - "0.0.0.0:9443:9443"      # Portainer HTTPS — Tailscale accessible
+
+  prometheus:
+    ports:
+      - "0.0.0.0:9090:9090"      # Prometheus UI — Tailscale accessible
+
+  grafana:
+    ports:
+      - "0.0.0.0:3000:3000"      # Grafana UI — Tailscale accessible
