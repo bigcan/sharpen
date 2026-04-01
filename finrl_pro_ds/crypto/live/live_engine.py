@@ -172,6 +172,15 @@ class LiveTradingEngine:
             while not self._should_stop:
                 try:
                     bar_time = await self.bar_clock.wait_for_next_bar()
+
+                    # Ensure broker connection is alive before trading step
+                    if not await self._ensure_broker_connected():
+                        self._consecutive_errors += 1
+                        if self._consecutive_errors >= 5:
+                            logger.critical("5 consecutive reconnect failures — stopping")
+                            break
+                        continue
+
                     await self._trading_step(bar_time)
                     # FIX AUD-ENG-05: Reset consecutive errors on successful step
                     self._consecutive_errors = 0
@@ -398,6 +407,35 @@ class LiveTradingEngine:
     # -------------------------------------------------------------------
     # Position management
     # -------------------------------------------------------------------
+    async def _ensure_broker_connected(self) -> bool:
+        """Check broker connection and reconnect if dropped.
+
+        IB Gateway can silently drop connections during long idle waits
+        between bars. This detects the drop and reconnects before the
+        next trading step, preventing cascading errors.
+        """
+        try:
+            # IB brokers have a persistent TCP connection that can drop;
+            # CCXT/HTTP brokers are stateless and don't need this check.
+            ib = getattr(self.broker, "_ib", None)
+            if ib is None:
+                return True
+            if ib.isConnected():
+                return True
+
+            logger.warning("Broker connection lost — attempting reconnect")
+            await self.broker.connect()
+
+            # Re-wire loader references that point to the old IB session
+            if hasattr(self.loader, "_ib"):
+                self.loader._ib = self.broker._ib
+            if hasattr(self.loader, "_contract_manager"):
+                self.loader._contract_manager = self.broker._contract_manager
+            return True
+        except Exception as e:
+            logger.error(f"Broker reconnect failed: {e}")
+            return False
+
     async def _sync_position(self) -> None:
         """Sync internal position from exchange on startup."""
         try:
@@ -510,23 +548,47 @@ class LiveTradingEngine:
     # WandB logging
     # -------------------------------------------------------------------
     def _init_wandb(self) -> None:
-        """Initialize WandB run for live monitoring."""
+        """Initialize WandB run for live monitoring.
+
+        Uses a deterministic run ID so restarts resume the same WandB run
+        instead of creating duplicates. One run per strategy.
+        """
         wandb_cfg = self.config.get("wandb", {})
         if not wandb_cfg.get("project"):
             return
 
         try:
             import wandb
+
+            # Deterministic ID: one WandB run per (asset, exchange, mode) tuple
+            run_id = wandb_cfg.get("run_id") or self._make_wandb_run_id()
+
             self._wandb_run = wandb.init(
                 project=wandb_cfg.get("project", "FinRL-Pro-DS"),
                 entity=wandb_cfg.get("entity"),
                 tags=wandb_cfg.get("tags", ["live"]),
                 config=self.config,
                 name=f"live_{self._asset}_{self.broker.exchange_id}",
+                id=run_id,
+                resume="allow",
             )
-            logger.info(f"WandB run initialized: {self._wandb_run.url}")
+            logger.info(
+                f"WandB run initialized: {self._wandb_run.url} "
+                f"(id={run_id}, resume=allow)",
+            )
         except Exception as e:
             logger.warning(f"WandB init failed: {e}")
+
+    def _make_wandb_run_id(self) -> str:
+        """Generate deterministic WandB run ID from strategy config.
+
+        Format: ``live-{asset}-{exchange}-{mode}``
+        e.g. ``live-gc-ib-paper`` or ``live-btc-bybit-live``
+        """
+        asset = self._asset.lower()
+        exchange = self.broker.exchange_id.lower()
+        mode = "paper" if getattr(self.broker, "testnet", True) else "live"
+        return f"live-{asset}-{exchange}-{mode}"
 
     def _log_step(
         self,
