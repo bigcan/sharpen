@@ -194,8 +194,16 @@ class IBFuturesBroker:
 
         self._position_contracts = n_contracts
 
+        # BUG-15: If _portfolio_value is uninitialized, fetch it now.
+        # Without this, position always returns 0.0 on first call.
         if self._portfolio_value <= 0:
-            return 0.0
+            await self.get_account_info()
+        if self._portfolio_value <= 0:
+            logger.warning(
+                f"Portfolio value still 0 after account fetch — "
+                f"returning raw contract count {n_contracts} as position"
+            )
+            return float(np.clip(n_contracts, -1.0, 1.0))
 
         price = await self._get_mid_price()
         fraction = self._contracts_to_position(n_contracts, self._portfolio_value, price)
