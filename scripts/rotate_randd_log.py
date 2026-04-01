@@ -138,6 +138,17 @@ def main():
         help="Number of recent months to keep in randd_log.md (default: 1 = current month only)",
     )
     parser.add_argument(
+        "--max-entries",
+        type=int,
+        default=None,
+        help=(
+            "Hard cap AND floor for entries kept in randd_log.md. "
+            "If month filter keeps more than N, oldest are archived. "
+            "If month filter keeps fewer than N, most recent archived entries are rescued. "
+            "Useful at month boundaries to avoid near-empty buffer."
+        ),
+    )
+    parser.add_argument(
         "--randd",
         type=str,
         default=None,
@@ -183,6 +194,35 @@ def main():
             keep_entries.append(entry)
         else:
             archive_groups[entry["month"]].append(entry)
+
+    # Apply --max-entries as cap and floor
+    if args.max_entries is not None:
+        keep_entries = sort_entries_desc(keep_entries)
+
+        if len(keep_entries) > args.max_entries:
+            # Cap: too many kept — archive the oldest excess
+            overflow = keep_entries[args.max_entries:]
+            keep_entries = keep_entries[:args.max_entries]
+            for entry in overflow:
+                archive_groups[entry["month"]].append(entry)
+            log.info("--max-entries cap: moved %d excess entries to archive", len(overflow))
+
+        elif len(keep_entries) < args.max_entries:
+            # Floor: too few kept — rescue recent entries from archive
+            deficit = args.max_entries - len(keep_entries)
+            all_archived: list[dict] = []
+            for month_entries in archive_groups.values():
+                all_archived.extend(month_entries)
+            all_archived = sort_entries_desc(all_archived)
+
+            rescued = all_archived[:deficit]
+            for entry in rescued:
+                archive_groups[entry["month"]].remove(entry)
+                keep_entries.append(entry)
+            # Clean up empty archive groups
+            archive_groups = {k: v for k, v in archive_groups.items() if v}
+            if rescued:
+                log.info("--max-entries floor: rescued %d recent entries from archive", len(rescued))
 
     if not archive_groups:
         log.info("Nothing to archive — all %d entries are within the keep window", len(keep_entries))
