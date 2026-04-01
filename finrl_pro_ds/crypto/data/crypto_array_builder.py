@@ -28,14 +28,8 @@ CRYPTO_FEATURE_COLS = [
     "btc_dominance_regime",
 ]
 
-# 13 SAFFS features: Chronos-2 quantiles + GAHMM regime probabilities
-SAFFS_FEATURE_COLS = [
-    "chronos_p10", "chronos_p30", "chronos_p50", "chronos_p70", "chronos_p90",
-    "chronos_spread",
-    "gahmm_price_bear", "gahmm_price_neutral", "gahmm_price_bull",
-    "gahmm_vol_low", "gahmm_vol_normal", "gahmm_vol_high",
-    "gahmm_composite_code",
-]
+# Note: SAFFS feature column names are imported from
+# finrl_pro_ds.crypto.features.saffs_features (single source of truth).
 
 
 def build_env_arrays(
@@ -46,6 +40,7 @@ def build_env_arrays(
     start_ts: pd.Timestamp,
     end_ts: pd.Timestamp,
     feature_cols: list[str] | None = None,
+    passthrough_cols: list[str] | None = None,
     norm_window: int = 720,
 ) -> dict:
     """Build numpy arrays for CryptoPerpEnv from a time window.
@@ -58,6 +53,8 @@ def build_env_arrays(
         start_ts: Window start timestamp (inclusive).
         end_ts: Window end timestamp (inclusive).
         feature_cols: Feature columns to use. Defaults to CRYPTO_FEATURE_COLS.
+        passthrough_cols: Feature columns to exempt from z-score normalization
+            (e.g. GAHMM probability features that are already bounded [0,1]).
         norm_window: Rolling z-score window for per-window re-normalization (LEAK-1 fix).
 
     Returns:
@@ -132,11 +129,22 @@ def build_env_arrays(
             f"{len(assets) * actual_features_per_asset}",
         )
 
-    # LEAK-1 fix: Re-normalize ALL features using window-local statistics.
+    # LEAK-1 fix: Re-normalize features using window-local statistics.
     # Features computed on the full dataset carry rolling z-score / rolling
     # correlation statistics from prior windows.  Re-applying rolling z-score
     # here uses only data within this window, breaking cross-window leakage.
-    tech_ary = _renormalize_within_window(tech_ary, norm_window)
+    # Passthrough columns (e.g. GAHMM probabilities) are exempt — they're
+    # already bounded and sum-normalized, z-scoring destroys their semantics.
+    passthrough_indices = None
+    if passthrough_cols and feature_cols:
+        n_feats = len(feature_cols)
+        pt_local = [feature_cols.index(c) for c in passthrough_cols if c in feature_cols]
+        if pt_local:
+            passthrough_indices = set()
+            for asset_idx in range(len(assets)):
+                for local_idx in pt_local:
+                    passthrough_indices.add(asset_idx * n_feats + local_idx)
+    tech_ary = _renormalize_within_window(tech_ary, norm_window, passthrough=passthrough_indices)
 
     # Convert timestamps to epoch seconds
     ts_epoch = timestamps.astype(np.int64) // 10**9
@@ -154,6 +162,7 @@ def _renormalize_within_window(
     tech_ary: np.ndarray,
     norm_window: int,
     clip: float = 5.0,
+    passthrough: set[int] | None = None,
 ) -> np.ndarray:
     """Re-normalize feature columns using window-local rolling z-score.
 
@@ -165,6 +174,8 @@ def _renormalize_within_window(
         tech_ary: Feature array of shape (T, n_cols).
         norm_window: Rolling window size for mean/std.
         clip: Symmetric clip range for z-scores.
+        passthrough: Set of column indices to copy through WITHOUT z-scoring
+            (e.g. probability features that are already bounded [0,1]).
 
     Returns:
         Normalized array (same shape), float32.
@@ -174,6 +185,9 @@ def _renormalize_within_window(
     min_periods = max(24, norm_window // 10)
 
     for col_idx in range(n_cols):
+        if passthrough and col_idx in passthrough:
+            result[:, col_idx] = tech_ary[:, col_idx]
+            continue
         col = pd.Series(tech_ary[:, col_idx], dtype=np.float64)
         roll_mean = col.rolling(window=norm_window, min_periods=min_periods).mean()
         roll_std = col.rolling(window=norm_window, min_periods=min_periods).std()

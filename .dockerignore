@@ -14,3 +14,9 @@ reports
 figs
 .idea
 .vscode
+.claude
+.agent/memory
+docker/live/.env
+*.pth
+randd_log.md
+randd_archive

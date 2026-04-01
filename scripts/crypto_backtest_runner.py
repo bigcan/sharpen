@@ -42,10 +42,11 @@ from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: 
 from finrl_pro_ds.crypto.features.crypto_features import (  # noqa: E402
     compute_crypto_features,
 )
-from finrl_pro_ds.crypto.features.saffs_features import (  # noqa: E402
-    compute_saffs_features,
-    get_saffs_feature_cols,
-    unload_saffs,
+from finrl_pro_ds.crypto.features.prism_features import (  # noqa: E402
+    compute_prism_features,
+    get_prism_feature_cols,
+    get_prism_passthrough_cols,
+    unload_prism,
 )
 
 logger = logging.getLogger(__name__)
@@ -101,37 +102,45 @@ def prepare_data(config: dict) -> dict:
         correlation_window=config["features"]["tech_window"],
     )
 
-    # Compute SAFFS features (Chronos-2 + GAHMM) if enabled
-    saffs_cfg = config.get("saffs", {})
-    enable_saffs = saffs_cfg.get("enabled", False)
+    # Compute PRISM features (Chronos-2 + GAHMM) if enabled
+    prism_cfg = config.get("prism", {})
+    enable_prism = prism_cfg.get("enabled", False)
     feature_cols = None  # defaults to CRYPTO_FEATURE_COLS in build_env_arrays
+    passthrough_cols = None  # columns exempt from z-score normalization
 
-    if enable_saffs:
-        logger.info("Computing SAFFS features (Chronos-2 + GAHMM)...")
+    if enable_prism:
+        logger.info("Computing PRISM features (Chronos-2 + GAHMM)...")
         ts_range = ohlcv["timestamp"]
-        saffs_feats = compute_saffs_features(
+        prism_feats = compute_prism_features(
             ohlcv_df=ohlcv,
             assets=assets,
             start_ts=ts_range.min(),
             end_ts=ts_range.max(),
-            config=saffs_cfg,
+            config=prism_cfg,
         )
-        # Merge SAFFS features into crypto_feats on (timestamp, ticker)
+        # Merge PRISM features into crypto_feats on (timestamp, ticker)
         crypto_feats = crypto_feats.merge(
-            saffs_feats, on=["timestamp", "ticker"], how="left",
+            prism_feats, on=["timestamp", "ticker"], how="left",
         )
-        # Fill any missing SAFFS features (assets with no SAFFS data) with 0
-        saffs_cols = get_saffs_feature_cols()
-        for col in saffs_cols:
+        # Fill missing PRISM features with semantically correct defaults:
+        # GAHMM probabilities → uniform prior, Chronos quantiles → 0.0
+        prism_cols = get_prism_feature_cols()
+        gahmm_pt_cols = set(get_prism_passthrough_cols())
+        _GAHMM_FILL_DEFAULTS = {
+            "gahmm_price_bear": 1 / 3, "gahmm_price_neutral": 1 / 3,
+            "gahmm_price_bull": 1 / 3, "gahmm_vol_low": 1 / 3,
+            "gahmm_vol_normal": 1 / 3, "gahmm_vol_high": 1 / 3,
+            "gahmm_composite_code": 0.5,
+        }
+        for col in prism_cols:
             if col in crypto_feats.columns:
-                crypto_feats[col] = crypto_feats[col].fillna(0.0)
+                default = _GAHMM_FILL_DEFAULTS.get(col, 0.0)
+                crypto_feats[col] = crypto_feats[col].fillna(default)
 
         # Use combined feature columns
-        from finrl_pro_ds.crypto.data.crypto_array_builder import (
-            CRYPTO_FEATURE_COLS,
-            SAFFS_FEATURE_COLS,
-        )
-        feature_cols = CRYPTO_FEATURE_COLS + SAFFS_FEATURE_COLS
+        from finrl_pro_ds.crypto.data.crypto_array_builder import CRYPTO_FEATURE_COLS
+        feature_cols = CRYPTO_FEATURE_COLS + prism_cols
+        passthrough_cols = list(gahmm_pt_cols)
         logger.info(f"SAFFS enabled: {len(feature_cols)} total features per asset")
 
     # Validate walk-forward coverage
@@ -152,6 +161,7 @@ def prepare_data(config: dict) -> dict:
         "crypto_features": crypto_feats,
         "walk_forward": wf_result,
         "feature_cols": feature_cols,
+        "passthrough_cols": passthrough_cols,
     }
 
 
@@ -206,6 +216,7 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
         return {"status": "FAILED", "reason": "insufficient_data"}
 
     feature_cols = data.get("feature_cols")  # None = default CRYPTO_FEATURE_COLS
+    passthrough_cols = data.get("passthrough_cols")  # GAHMM prob cols exempt from z-score
 
     logger.info(f"Walk-forward: {wf['n_windows']} windows available")
 
@@ -243,6 +254,7 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["train_start"], window["train_end"],
                 feature_cols=feature_cols,
+                passthrough_cols=passthrough_cols,
                 norm_window=norm_window,
             )
 
@@ -252,6 +264,7 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["val_start"], window["val_end"],
                 feature_cols=feature_cols,
+                passthrough_cols=passthrough_cols,
                 norm_window=norm_window,
             )
             eval_config = copy.deepcopy(config)
@@ -263,6 +276,7 @@ def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: 
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["test_start"], window["test_end"],
                 feature_cols=feature_cols,
+                passthrough_cols=passthrough_cols,
                 norm_window=norm_window,
             )
             test_env = create_env(test_arrays, eval_config)
@@ -794,7 +808,7 @@ def main():
     finally:
         # Free SAFFS GPU resources
         try:
-            unload_saffs()
+            unload_prism()
         except Exception:
             pass
         # Always finalize WandB — even on crash/OOM/signal
