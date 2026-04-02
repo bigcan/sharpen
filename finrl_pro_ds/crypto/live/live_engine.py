@@ -24,6 +24,7 @@ Safety:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -202,6 +203,10 @@ class LiveTradingEngine:
             f"  Bar interval: {self.bar_clock.interval}min",
         )
 
+        # Background task: update Prometheus metrics between bars so Grafana
+        # shows real-time PV changes (IB sends portfolio updates every ~3 min).
+        metrics_task = asyncio.create_task(self._inter_bar_metrics_loop())
+
         try:
             while not self._should_stop:
                 try:
@@ -227,6 +232,9 @@ class LiveTradingEngine:
                         logger.critical("5 consecutive errors — stopping")
                         break
         finally:
+            metrics_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await metrics_task
             await self._shutdown()
 
     async def _trading_step(self, bar_time: datetime) -> None:
@@ -557,6 +565,42 @@ class LiveTradingEngine:
                 self._peak_portfolio_value = max(self._peak_portfolio_value, equity)
         except Exception as e:
             logger.warning(f"Portfolio value update failed: {e}")
+
+    async def _inter_bar_metrics_loop(self) -> None:
+        """Background task: refresh Prometheus metrics every 30s between bars.
+
+        Fetches the latest portfolio value from the broker so Grafana shows
+        real-time PV/drawdown changes instead of stale values from the last
+        bar close.
+        """
+        while True:
+            await asyncio.sleep(30)
+            try:
+                await self._update_portfolio_value()
+                drawdown = 0.0
+                if self._peak_portfolio_value > 0:
+                    drawdown = 1.0 - self._portfolio_value / self._peak_portfolio_value
+                daily_loss_pct = (
+                    (self._portfolio_value - self._daily_start_value)
+                    / self._daily_start_value
+                    if self._daily_start_value > 0
+                    else 0.0
+                )
+                self._metrics.update(
+                    position=self._current_position,
+                    portfolio_value=self._portfolio_value,
+                    drawdown_pct=drawdown,
+                    daily_loss_pct=daily_loss_pct,
+                    broker_connected=self._check_broker_alive(),
+                    bar_count=self._total_bars,
+                    total_trades=self._total_trades,
+                    total_fees=self._total_fees,
+                    consecutive_errors=self._consecutive_errors,
+                    last_bar_timestamp=time.time(),
+                    funding_rate=self._current_funding_rate,
+                )
+            except Exception:
+                pass  # Never crash the background loop
 
     async def _update_funding_rate(self) -> None:
         """FIX AUD-H07: Fetch current funding rate for risk manager."""
