@@ -150,6 +150,13 @@ class TradingMetrics:
             start_http_server(self._port)
             self._started = True
             logger.info(f"Prometheus metrics server started on :{self._port}")
+
+            # Initialize counter labels so they appear in /metrics with 0
+            # (Counters are invisible until .inc() is called otherwise)
+            s = self._labels.get("strategy", "unknown")
+            self._total_trades.labels(strategy=s)
+            self._total_fees.labels(strategy=s)
+            self._prism_api_errors.labels(strategy=s)
         except Exception as e:
             logger.warning(f"Prometheus server failed to start: {e}")
             self._enabled = False
