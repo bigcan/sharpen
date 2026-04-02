@@ -325,6 +325,49 @@ def _count_completed_trials(summary):
     return max_trial + 1 if max_trial >= 0 else 0
 
 
+def _detect_alphaseek(tags, run_config):
+    """Detect if a run is an AlphaSeek contest run."""
+    return 'alphaseek' in [t.lower() for t in (tags or [])]
+
+
+def _alphaseek_best_pf(summary):
+    """
+    Extract best PF from AlphaSeek-style nested summary keys.
+
+    AlphaSeek logs per-trial PFs as: hpo/w{W}/{Agent}/t{N}/pf
+    e.g. hpo/w0/D3QN/t27/pf = 2.63
+    """
+    import re
+    best_pf = None
+    for key, val in summary.items():
+        if re.match(r'hpo/w\d+/.+/t\d+/pf$', key):
+            if isinstance(val, (int, float)) and val == val:  # skip NaN
+                if best_pf is None or val > best_pf:
+                    best_pf = val
+    return best_pf
+
+
+def _alphaseek_progress(summary):
+    """
+    Determine AlphaSeek walk-forward progress from summary keys.
+
+    Returns (windows_done, total_trials) where windows_done is the number of
+    completed WF windows, and total_trials is the total trial count across
+    all windows and agents.
+    """
+    import re
+    windows = set()
+    trial_count = 0
+    for key in summary:
+        m = re.match(r'hpo/w(\d+)/(.+)/t(\d+)/pf$', key)
+        if m:
+            windows.add(int(m.group(1)))
+            trial_count += 1
+    # The highest window with completed trials
+    max_window = max(windows) if windows else -1
+    return max_window + 1 if max_window >= 0 else 0, trial_count
+
+
 def _compute_eta(run_config, summary, step, sps, run=None):
     """
     Compute ETA (seconds remaining) based on run phase and progress.
@@ -344,6 +387,25 @@ def _compute_eta(run_config, summary, step, sps, run=None):
     steps_per_trial = cfg_hpo.get('steps_per_trial')
     n_trials = cfg_hpo.get('n_trials')
     hpo_enabled = cfg_hpo.get('enabled', False)
+
+    # AlphaSeek: time-based ETA using walk-forward window progress
+    is_alphaseek = _detect_alphaseek(run.tags if run else [], run_config)
+    if is_alphaseek:
+        elapsed_secs = _get_run_elapsed(run)
+        windows_done, total_trials = _alphaseek_progress(summary)
+        n_windows = cfg_hpo.get('n_windows') or run_config.get('walk_forward', {}).get('n_windows')
+        n_agents = cfg_hpo.get('n_agents') or len(cfg_hpo.get('agents', []))
+        if not n_agents and total_trials and windows_done:
+            n_agents = total_trials // (windows_done * (n_trials or 50))
+        n_agents = n_agents or 3  # AlphaSeek default: 3-agent ensemble
+        n_windows = n_windows or 4  # default from run name
+        trials_per_window = (n_trials or 50) * n_agents
+        total_all_trials = trials_per_window * n_windows
+        if elapsed_secs and elapsed_secs > 60 and total_trials > 0:
+            secs_per_trial = elapsed_secs / total_trials
+            remaining = max(0, total_all_trials - total_trials)
+            return remaining * secs_per_trial
+        return None
 
     # HPO phase: estimate from trial completion rate (no SPS needed)
     if hpo_enabled and hpo_status == 'started' and n_trials:
@@ -427,20 +489,50 @@ def _extract_wandb_metrics(run):
 
     # Q-values
     q_mean = summary.get('agent/q_value/mean', summary.get('agent/q_qty_mean'))
+    if q_mean is None:
+        q_mean = summary.get('train/q_avg')  # AlphaSeek key
     q_max = summary.get('agent/q_value/max')
 
     # Loss
     loss = summary.get('agent/loss_total')
+    if loss is None:
+        loss = summary.get('train/obj_critic')  # AlphaSeek key
+
+    # Detect AlphaSeek runs (different metric schema)
+    is_alphaseek = _detect_alphaseek(run.tags, run.config)
 
     # PF
     hpo_pf = summary.get('hpo/best_profit_factor', summary.get('hpo/best_pf'))
     eval_pf = summary.get('eval/profit_factor')
     best_pf = hpo_pf or eval_pf
+    if not best_pf and is_alphaseek:
+        best_pf = _alphaseek_best_pf(summary)
 
     # HPO
     hpo_trials = summary.get('hpo/n_trials')
     hpo_status = summary.get('hpo/status')
     train_status = summary.get('train/status')
+
+    # AlphaSeek: infer phase and trial count from nested summary keys
+    if is_alphaseek and not hpo_status:
+        windows_done, total_trials = _alphaseek_progress(summary)
+        run_config = run.config or {}
+        cfg_hpo = run_config.get('hpo', {}) or {}
+        n_trials_cfg = cfg_hpo.get('n_trials', 50)
+        n_windows = cfg_hpo.get('n_windows') or run_config.get('walk_forward', {}).get('n_windows')
+        n_agents = cfg_hpo.get('n_agents') or len(cfg_hpo.get('agents', []))
+        if not n_agents:
+            # Count distinct agent names from summary keys
+            import re
+            agents_seen = set()
+            for key in summary:
+                m = re.match(r'hpo/w\d+/(.+)/t\d+/', key)
+                if m:
+                    agents_seen.add(m.group(1))
+            n_agents = len(agents_seen) or 1
+        n_windows = n_windows or 4
+        hpo_trials = f"{n_trials_cfg}t×{n_agents}a"
+        hpo_status = f"W{windows_done}/{n_windows}"
 
     # Staleness
     last_ts = summary.get('_timestamp')
@@ -627,7 +719,12 @@ def format_wandb_table(wandb_runs):
             loss_str = f"{run['loss']:.4f}" if run['loss'] and isinstance(run['loss'], (int, float)) else "--"
             phase_str = run['train_status'] or run['hpo_status'] or "--"
             if run['hpo_trials']:
-                phase_str = f"HPO {run['hpo_trials']}t"
+                trials_val = run['hpo_trials']
+                if isinstance(trials_val, str):
+                    # AlphaSeek: show "HPO W1/4" (window progress)
+                    phase_str = f"HPO {run.get('hpo_status', '')}"
+                else:
+                    phase_str = f"HPO {trials_val}t"
             updated_str = f"{run['minutes_since']:.0f}m" if run['minutes_since'] is not None else "--"
 
             eta_str = run.get('eta_str', '--')
