@@ -149,6 +149,8 @@ def build_components(config: dict):
         max_drawdown_pct=risk_cfg.get("max_drawdown_pct", 0.10),
         circuit_breaker_cooldown_bars=risk_cfg.get("circuit_breaker_cooldown_bars", 12),
         max_position_pct=risk_cfg.get("max_position_pct", 1.0),
+        max_net_short_exposure=risk_cfg.get("max_net_short_exposure", -0.50),
+        min_effective_bets=risk_cfg.get("min_effective_bets", 4.0),
         funding_rate_alert=risk_cfg.get("funding_rate_alert", 999.0),
         min_margin_reserve_pct=risk_cfg.get("min_margin_reserve_pct", 0.20),
     ))

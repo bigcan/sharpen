@@ -82,6 +82,11 @@ class IBFuturesBroker:
         self._position_contracts: int = 0
         self._portfolio_value: float = 0.0
 
+        # Cached market price from updatePortfolio events.
+        # ib_insync removes zero-position items from its portfolio cache,
+        # so we must maintain our own price cache.
+        self._cached_market_price: float = 0.0
+
     async def connect(self) -> None:
         """Connect to IB Gateway/TWS. No-op if already connected."""
         if self._ib is not None and self._ib.isConnected():
@@ -102,6 +107,11 @@ class IBFuturesBroker:
             roll_days_before_expiry=5,
         )
         await self._contract_manager.resolve_front_month()
+
+        # Cache market price from portfolio updates (ib_insync discards
+        # zero-position items, so we listen and cache ourselves).
+        self._ib.updatePortfolioEvent += self._on_portfolio_update
+
         logger.info(
             f"IBFuturesBroker ready: {self._contract_manager.contract.local_symbol} "
             f"({'PAPER' if self.testnet else 'LIVE'})"
@@ -274,8 +284,9 @@ class IBFuturesBroker:
     async def _get_mid_price(self) -> float:
         """Get current mid price from IB market data.
 
-        Tries live data first, then falls back to delayed data
-        (IB error 354 means live data not subscribed).
+        Tries snapshot first, then falls back to portfolio market price
+        (IB error 322/354 workaround — snapshot fails for some contracts
+        but updatePortfolio events always carry a valid marketPrice).
         """
         contract = self._contract_manager.ib_contract
 
@@ -310,7 +321,38 @@ class IBFuturesBroker:
 
         self._ib.cancelMktData(contract)
         self._ib.reqMarketDataType(1)
+
+        # Fallback: portfolio market price (maintained by IB's automatic
+        # account subscription — no extra API request needed)
+        portfolio_price = self._get_portfolio_market_price()
+        if portfolio_price > 0:
+            logger.warning(
+                f"reqMktData snapshot failed — using portfolio price: "
+                f"{portfolio_price:.2f}"
+            )
+            return portfolio_price
+
         raise RuntimeError("Failed to get market price from IB within 5s")
+
+    def _on_portfolio_update(self, item) -> None:
+        """Cache market price from updatePortfolio events.
+
+        ib_insync removes zero-position items from its internal cache,
+        but updatePortfolio events still carry a valid marketPrice.
+        We cache it here so _get_mid_price() can use it as a fallback.
+        """
+        if self._contract_manager is None:
+            return
+        contract = self._contract_manager.ib_contract
+        if (item.contract.conId == contract.conId
+                or item.contract.localSymbol == contract.localSymbol):
+            price = item.marketPrice
+            if price is not None and not np.isnan(price) and price > 0:
+                self._cached_market_price = float(price)
+
+    def _get_portfolio_market_price(self) -> float:
+        """Return cached market price from updatePortfolio events."""
+        return self._cached_market_price
 
     async def _place_order(
         self,
@@ -418,6 +460,12 @@ class IBFuturesBroker:
 
         For MGC at $3000/oz, multiplier=10: contract_notional = $30,000.
         With $100K portfolio, position=1.0 => round(100000/30000) = 3 contracts.
+
+        When portfolio < contract notional (e.g. GC at $465K vs $262K portfolio),
+        round() gives 0 for most fractions. We round up to 1 contract when the
+        agent expresses meaningful conviction (fraction >= 0.1), since reaching
+        here means the position change already passed the deadband check.
+        IB margin requirements provide the real leverage safety net.
         """
         if abs(position_fraction) < 1e-6 or portfolio_value <= 0 or price <= 0:
             return 0
@@ -425,6 +473,10 @@ class IBFuturesBroker:
         multiplier = self._contract_manager.multiplier
         contract_notional = price * multiplier
         n_contracts = round(abs(position_fraction) * portfolio_value / contract_notional)
+
+        # Floor: ensure at least 1 contract when agent has conviction
+        if n_contracts == 0 and abs(position_fraction) >= 0.1:
+            n_contracts = 1
 
         return int(np.sign(position_fraction)) * n_contracts
 
