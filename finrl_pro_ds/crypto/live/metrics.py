@@ -25,7 +25,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 try:
-    from prometheus_client import Counter, Gauge, start_http_server
+    from prometheus_client import Counter, Gauge, Histogram, start_http_server
 
     _HAS_PROMETHEUS = True
 except ImportError:
@@ -108,6 +108,34 @@ class TradingMetrics:
             ["strategy"],
         )
 
+        # PRISM regime overlay metrics
+        self._prism_multiplier = Gauge(
+            "prism_position_multiplier",
+            "PRISM vol-regime position multiplier",
+            ["strategy"],
+        )
+        self._prism_composite_code = Gauge(
+            "prism_composite_code",
+            "PRISM composite regime code (0-8, -1=fallback)",
+            ["strategy"],
+        )
+        self._prism_api_latency = Histogram(
+            "prism_api_latency_seconds",
+            "PRISM API call latency",
+            ["strategy"],
+            buckets=(0.1, 0.5, 1.0, 2.0, 5.0),
+        )
+        self._prism_api_errors = Counter(
+            "prism_api_errors_total",
+            "PRISM API error count",
+            ["strategy"],
+        )
+        self._prism_fallback_active = Gauge(
+            "prism_fallback_active",
+            "PRISM fallback mode (1=active, 0=normal)",
+            ["strategy"],
+        )
+
         self._labels = labels
         self._prev_trades: int = 0
         self._prev_fees: float = 0.0
@@ -169,3 +197,30 @@ class TradingMetrics:
         if fee_delta > 0:
             self._total_fees.labels(strategy=s).inc(fee_delta)
             self._prev_fees = total_fees
+
+    def update_prism(
+        self,
+        *,
+        multiplier: float = 1.0,
+        composite_code: int = -1,
+        latency_ms: float = 0.0,
+        is_fallback: bool = False,
+        is_error: bool = False,
+    ) -> None:
+        """Update PRISM regime overlay metrics. Thread-safe."""
+        if not self._enabled:
+            return
+
+        s = self._labels["strategy"]
+
+        self._prism_multiplier.labels(strategy=s).set(multiplier)
+        self._prism_composite_code.labels(strategy=s).set(composite_code)
+        self._prism_fallback_active.labels(strategy=s).set(
+            1.0 if is_fallback else 0.0,
+        )
+
+        if latency_ms > 0:
+            self._prism_api_latency.labels(strategy=s).observe(latency_ms / 1000.0)
+
+        if is_error:
+            self._prism_api_errors.labels(strategy=s).inc()

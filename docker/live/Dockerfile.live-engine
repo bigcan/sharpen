@@ -52,6 +52,10 @@ RUN pip install \
     "tzdata>=2024.1" \
     "prometheus_client>=0.20"
 
+# PRISM client SDK (regime detection overlay)
+COPY docker/live/prism_sdk/ /tmp/prism_sdk/
+RUN pip install /tmp/prism_sdk/ && rm -rf /tmp/prism_sdk/
+
 # ---- Application layer ----
 COPY finrl_pro_ds /app/finrl_pro_ds
 COPY scripts /app/scripts

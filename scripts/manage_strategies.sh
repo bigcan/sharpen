@@ -26,6 +26,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 COMPOSE_DIR="$PROJECT_ROOT/docker/live"
 COMPOSE_BASE="$COMPOSE_DIR/docker-compose.yaml"
+COMPOSE_PRISM="$COMPOSE_DIR/docker-compose.prism.yaml"
 COMPOSE_DESKTOP="$COMPOSE_DIR/docker-compose.desktop.yaml"
 CONTEXT_NAME="finrl-desktop"
 
@@ -38,7 +39,7 @@ else
     echo "ERROR: docker compose not found. Install Docker Desktop."
     exit 1
 fi
-DC="$DC_BIN -f $COMPOSE_BASE -f $COMPOSE_DESKTOP"
+DC="$DC_BIN -f $COMPOSE_BASE -f $COMPOSE_PRISM -f $COMPOSE_DESKTOP"
 
 usage() {
     cat <<'EOF'
@@ -134,7 +135,7 @@ cmd_up() {
     if [ -z "$target" ]; then
         echo "Starting all strategies..."
         $DC --profile all up -d
-    elif [[ "$target" == "ib" || "$target" == "crypto" || "$target" == "ctrader" || "$target" == "monitoring" || "$target" == "all" ]]; then
+    elif [[ "$target" == "ib" || "$target" == "crypto" || "$target" == "ctrader" || "$target" == "monitoring" || "$target" == "prism" || "$target" == "all" ]]; then
         echo "Starting profile: $target"
         $DC --profile "$target" up -d
     else

@@ -66,5 +66,30 @@ if [ "$BROKER_TYPE" = "ib" ]; then
     fi
 fi
 
+# --- Wait for PRISM API (soft check — strategy starts regardless) ---
+if python3 -c "
+import yaml, sys
+with open('${CONFIG_RUNTIME}') as f:
+    cfg = yaml.safe_load(f)
+sys.exit(0 if cfg.get('prism', {}).get('enabled', False) else 1)
+" 2>/dev/null; then
+    PRISM_URL="${PRISM_BASE_URL:-http://prism-api:8001}"
+    PRISM_TIMEOUT="${PRISM_WAIT_TIMEOUT:-300}"
+    echo "PRISM overlay enabled — waiting for ${PRISM_URL} (timeout ${PRISM_TIMEOUT}s)..."
+    elapsed=0
+    while ! python3 -c "import urllib.request; urllib.request.urlopen('${PRISM_URL}/health')" 2>/dev/null; do
+        if [ "$elapsed" -ge "$PRISM_TIMEOUT" ]; then
+            echo "WARNING: PRISM API not ready after ${PRISM_TIMEOUT}s — starting with fallback mode"
+            break
+        fi
+        echo "PRISM not ready... (${elapsed}s/${PRISM_TIMEOUT}s)"
+        sleep 10
+        elapsed=$((elapsed + 10))
+    done
+    if [ "$elapsed" -lt "$PRISM_TIMEOUT" ]; then
+        echo "PRISM API ready at ${PRISM_URL}"
+    fi
+fi
+
 echo "Starting ${STRATEGY_NAME}..."
 exec python "$RUNNER" --config "$CONFIG_RUNTIME"

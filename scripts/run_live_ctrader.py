@@ -190,6 +190,13 @@ def build_components(config: dict):
         config=config,
     )
 
+    # --- PRISM Overlay (optional L2 position sizing) ---
+    prism_cfg = config.get("prism", {})
+    if prism_cfg.get("enabled", False):
+        from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
+        engine._prism_overlay = PRISMOverlay(prism_cfg)
+        logger.info(f"PRISM L2 overlay enabled: {prism_cfg.get('base_url', 'http://prism-api:8001')}")
+
     return engine, broker
 
 

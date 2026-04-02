@@ -141,6 +141,9 @@ class LiveTradingEngine:
             strategy_name=self._strategy_name,
         )
 
+        # PRISM L2 regime overlay (optional, attached by runner script)
+        self._prism_overlay = None
+
     # -------------------------------------------------------------------
     # Main loop
     # -------------------------------------------------------------------
@@ -273,11 +276,23 @@ class LiveTradingEngine:
         # --- 5. Agent inference ---
         target_position = self._predict(obs)
 
+        # --- 5b. PRISM L2 regime overlay ---
+        regime_info: dict = {}
+        if self._prism_overlay is not None:
+            multiplier, regime_info = self._prism_overlay.get_position_multiplier()
+            if multiplier != 1.0:
+                pre_prism = target_position
+                target_position = float(np.clip(target_position * multiplier, -1.0, 1.0))
+                logger.info(
+                    f"PRISM overlay: {pre_prism:.4f} * {multiplier:.2f} = "
+                    f"{target_position:.4f} ({regime_info.get('composite_label', 'n/a')})",
+                )
+
         # --- 6. Deadband filter ---
         delta = target_position - self._current_position
         if abs(delta) < self._deadband_threshold:
             self._prev_close = current_close
-            self._log_step(bar_time, target_position, traded=False, skip_reason="deadband")
+            self._log_step(bar_time, target_position, traded=False, skip_reason="deadband", regime_info=regime_info)
             return
 
         # --- 7. Risk manager check ---
@@ -298,7 +313,7 @@ class LiveTradingEngine:
         delta = target_position - self._current_position
         if abs(delta) < self._deadband_threshold:
             self._prev_close = current_close
-            self._log_step(bar_time, target_position, traded=False, skip_reason="risk_deadband")
+            self._log_step(bar_time, target_position, traded=False, skip_reason="risk_deadband", regime_info=regime_info)
             return
 
         # --- 8. Execute trade ---
@@ -309,7 +324,7 @@ class LiveTradingEngine:
             )
             self._current_position = target_position
             self._prev_close = current_close
-            self._log_step(bar_time, target_position, traded=True)
+            self._log_step(bar_time, target_position, traded=True, regime_info=regime_info)
             return
 
         order = None
@@ -360,7 +375,7 @@ class LiveTradingEngine:
         self._check_daily_loss(bar_time)
 
         # --- 12. Log ---
-        self._log_step(bar_time, target_position, traded=True, order=order)
+        self._log_step(bar_time, target_position, traded=True, order=order, regime_info=regime_info)
 
     # -------------------------------------------------------------------
     # Agent inference
@@ -659,6 +674,7 @@ class LiveTradingEngine:
         traded: bool,
         skip_reason: str = "",
         order=None,
+        regime_info: dict | None = None,
     ) -> None:
         """Log step metrics to WandB and logger."""
         drawdown = 0.0
@@ -680,6 +696,14 @@ class LiveTradingEngine:
         if order is not None:
             metrics["order_fee"] = order.fee
             metrics["order_fill_price"] = order.avg_fill_price
+
+        # PRISM regime info (if available)
+        if regime_info and not regime_info.get("fallback", False):
+            metrics["prism_composite_code"] = regime_info.get("composite_code", -1)
+            metrics["prism_vol_regime"] = regime_info.get("vol_regime", "unknown")
+            metrics["prism_price_regime"] = regime_info.get("price_regime", "unknown")
+            metrics["prism_multiplier"] = regime_info.get("multiplier", 1.0)
+            metrics["prism_confidence"] = regime_info.get("confidence", 0.0)
 
         if self._wandb_run is not None:
             try:
@@ -716,6 +740,16 @@ class LiveTradingEngine:
             last_bar_timestamp=bar_time.timestamp(),
             funding_rate=self._current_funding_rate,
         )
+
+        # PRISM Prometheus metrics (no-op if disabled)
+        if regime_info:
+            self._metrics.update_prism(
+                multiplier=regime_info.get("multiplier", 1.0),
+                composite_code=regime_info.get("composite_code", -1),
+                latency_ms=regime_info.get("latency_ms", 0.0),
+                is_fallback=regime_info.get("fallback", False),
+                is_error="error" in regime_info,
+            )
 
         # Periodic console log
         if self._total_bars % 4 == 0 or traded:

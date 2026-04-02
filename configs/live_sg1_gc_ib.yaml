@@ -99,3 +99,18 @@ safety:
   max_daily_loss_pct: 0.05
   kill_file: "/tmp/finrl_live_sg1_gc_kill"
   emergency_flatten_on_error: true
+
+# --- PRISM Regime Overlay (L2 position sizing) ---
+prism:
+  enabled: false                        # Set true to activate regime overlay
+  base_url: "http://prism-api:8001"     # Docker DNS (inside finrl-net)
+  api_key: ""                           # Empty = no auth (internal network)
+  ticker: "GC=F"                        # PRISM ticker (yfinance format)
+  timeframe: "daily"
+  timeout: 5                            # API call timeout in seconds
+  cache_ttl: 60                         # Seconds to cache regime result
+  crisis_flatten: true                  # Flatten to 0 on BEARISH+HIGH_VOL
+  multipliers:
+    LOW_VOL: 1.3
+    NORMAL_VOL: 1.0
+    HIGH_VOL: 0.3
