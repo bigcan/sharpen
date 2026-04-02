@@ -1,14 +1,14 @@
 # SG-1 Phase 2 — L1 Multi-Seed Stability
-# Original window: Train Jan-Aug, Val Sep-Oct, Test Nov-Dec
-# Same as original SG-1 run (zr4ecfz5). Run with --seed 123 and --seed 456.
-# HPs: T6 best from SG-1. No HPO.
-# Gate: both seeds must achieve test PF > 1.0.
+# Window W2: Train Mar-Aug, Val Sep-Oct, Test Nov-Dec (median WF window)
+# Run with --seed 123 and --seed 456 (Phase 1b default = no explicit seed).
+# HPs: Phase 1b narrow HPO best (W2 T3/10, identical to W3).
+# Gate: PF CV < 30%, Sharpe CV < 30% across 3 seeds.
 
 data:
   file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
   ticker: "GC"
   handler_type: "multiscale"
-  train_start_date: "2025-01-06"
+  train_start_date: "2025-03-01"
   train_end_date: "2025-08-31"
   val_start_date: "2025-09-01"
   val_end_date: "2025-10-31"
@@ -48,7 +48,7 @@ env:
   gap_atr_mult: 3.0
   reward:
     mode: "dsr"
-    dsr_eta: 0.009614783537271694
+    dsr_eta: 0.008659117187237308
     dsr_scale: 1.0
   fee_schedule:
     - {step: 0, taker_fee: 0.0}
@@ -67,18 +67,18 @@ network:
 
 agents:
   sac:
-    lr_actor: 0.00024472440973990144
-    lr_critic: 0.000186788025710707
-    lr_alpha: 0.0006741204610702762
-    gamma: 0.9635178038895
-    tau: 0.0022738055735631833
+    lr_actor: 0.00022148365220787234
+    lr_critic: 0.00018486046430982398
+    lr_alpha: 0.000642523828301745
+    gamma: 0.9677944079144885
+    tau: 0.0020470394844356323
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.17444803725696106
+    initial_alpha: 0.1476793336332415
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 10.0
+    gradient_clip: 9.281178071284028
     checkpoint_interval: 250000
 
 training:
@@ -94,4 +94,4 @@ hpo:
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["sg-1", "Gold", "SAC", "3min", "signal-gated", "multiseed", "l1", "phase2"]
+  tags: ["sg-1", "Gold", "SAC", "3min", "signal-gated", "multiseed", "l1", "phase2", "wf-w2"]
