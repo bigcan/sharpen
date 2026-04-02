@@ -86,6 +86,7 @@ risk:
   max_position_pct: 1.0                # Single asset = 100% allowed
   max_net_short_exposure: -1.0         # Single asset — allow full short
   min_effective_bets: 1.0              # Single asset — ENB=1 by definition
+  daily_turnover_limit: 4.0            # Single-asset GC: allow 4x turnover/day (4 round-trips)
   funding_rate_alert: 999.0            # Effectively disabled (futures have no funding)
   min_margin_reserve_pct: 0.20         # Keep 20% margin reserve (futures need more)
 

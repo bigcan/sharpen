@@ -54,6 +54,14 @@ fi
 CONFIG_RUNTIME="/tmp/strategy_config_runtime.yaml"
 cp "$CONFIG" "$CONFIG_RUNTIME"
 
+# Apply config override if present (workaround for Docker Desktop Windows
+# bind mount caching that can serve stale file contents)
+CONFIG_OVERRIDE="/tmp/config_override.yaml"
+if [ -f "$CONFIG_OVERRIDE" ]; then
+    echo "Applying config override from $CONFIG_OVERRIDE"
+    cp "$CONFIG_OVERRIDE" "$CONFIG_RUNTIME"
+fi
+
 # Override IB host/port in config if non-default
 if [ "$BROKER_TYPE" = "ib" ]; then
     if [ "$IB_HOST" != "127.0.0.1" ]; then

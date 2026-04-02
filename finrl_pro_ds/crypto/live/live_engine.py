@@ -362,6 +362,10 @@ class LiveTradingEngine:
                 )
             else:
                 logger.warning(f"Trade failed: {order.status} — {order.error}")
+                # FIX S307: Skipped/failed orders are not actual trades
+                self._prev_close = current_close
+                self._log_step(bar_time, target_position, traded=False, skip_reason="broker_skipped", regime_info=regime_info)
+                return
 
         except Exception as e:
             logger.error(f"Order execution error: {e}")
