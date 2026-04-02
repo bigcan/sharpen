@@ -47,7 +47,7 @@ from finrl_pro_ds.crypto.analytics.crypto_report import (  # noqa: E402
     CryptoPerformanceReport,
 )
 from finrl_pro_ds.crypto.data.crypto_array_builder import build_env_arrays  # noqa: E402
-from finrl_pro_ds.crypto.eval.statistics import sortino_ratio  # noqa: E402
+from finrl_pro_ds.crypto.eval.statistics import calmar_ratio, sortino_ratio  # noqa: E402
 from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: E402
 from scripts.crypto_backtest_runner import (  # noqa: E402
     _compute_result_metrics,
@@ -254,7 +254,12 @@ def hpo_objective(
     agent_type: str = "sac",
     fixed_env_overrides: dict | None = None,
 ) -> float:
-    """Optuna objective: train agent with trial params, return val Sortino.
+    """Optuna objective: train agent with trial params, return val metric.
+
+    The objective metric is configurable via ``config["hpo"]["objective"]``:
+    - ``"sortino"`` (default): Sortino ratio on validation returns.
+    - ``"calmar"``: Calmar ratio (annualized return / max drawdown).
+    - ``"total_return"``: Raw total return on validation set.
 
     Parameters
     ----------
@@ -265,6 +270,9 @@ def hpo_objective(
         does NOT sample env overrides — it uses these instead. Used for A2C/PPO
         HPO where env params are locked to SAC's best.
     """
+    hpo_cfg = config.get("hpo", {})
+    objective_name = hpo_cfg.get("objective", "sortino")
+
     search_fn = SEARCH_SPACE_REGISTRY[agent_type]
     search = search_fn(trial, config)
     agent_params = search["agent_params"]
@@ -290,7 +298,7 @@ def hpo_objective(
 
         # Evaluate on val
         val_env = _create_env_with_overrides(val_arrays, config, env_overrides)
-        _, val_rets = _evaluate_agent_on_env(model, val_env)
+        val_metrics, val_rets = _evaluate_agent_on_env(model, val_env)
 
         if not val_rets or len(val_rets) < 50:
             logger.warning(f"Trial {trial.number}: too few val steps ({len(val_rets) if val_rets else 0})")
@@ -298,9 +306,18 @@ def hpo_objective(
 
         val_sort = sortino_ratio(val_rets, periods_per_year=8760)
 
+        # Select objective value
+        if objective_name == "calmar":
+            val_objective = calmar_ratio(val_rets, periods_per_year=8760)
+        elif objective_name == "total_return":
+            val_objective = val_metrics["total_return"]
+        else:
+            val_objective = val_sort
+
         # Log to WandB
         _wandb_log({
             f"hpo/{agent_type}/trial_{trial.number}/sortino": val_sort,
+            f"hpo/{agent_type}/trial_{trial.number}/objective_{objective_name}": val_objective,
             f"hpo/{agent_type}/trial_{trial.number}/lr": agent_params["learning_rate"],
             f"hpo/{agent_type}/trial_{trial.number}/gamma": agent_params["gamma"],
         })
@@ -310,8 +327,11 @@ def hpo_objective(
         del model, vec_env
         gc.collect()
 
-        logger.info(f"[{agent_type.upper()}] Trial {trial.number}: val_sortino={val_sort:.4f}")
-        return val_sort
+        logger.info(
+            f"[{agent_type.upper()}] Trial {trial.number}: "
+            f"val_{objective_name}={val_objective:.4f} (sortino={val_sort:.4f})"
+        )
+        return val_objective
 
     except Exception as e:
         logger.error(f"[{agent_type.upper()}] Trial {trial.number} FAILED: {e}")

@@ -87,6 +87,30 @@ def sortino_ratio(returns: Iterable[float], target: float = 0.0, periods_per_yea
     return (mu / ds) * (periods_per_year ** 0.5)
 
 
+def calmar_ratio(returns: Iterable[float], periods_per_year: int = 8760) -> float:
+    """Calmar ratio = annualized return / max drawdown.
+
+    Returns 0.0 if max drawdown is zero or returns are empty.
+    Computed from cumulative returns (not portfolio values).
+    """
+    import numpy as _np
+
+    r = _to_list(returns)
+    if not r:
+        return 0.0
+    cum = _np.cumprod([1.0 + v for v in r])
+    total_return = cum[-1] / cum[0] - 1.0
+    peak = _np.maximum.accumulate(cum)
+    dd = 1.0 - cum / _np.where(peak == 0, 1.0, peak)
+    max_dd = float(dd.max())
+    if max_dd < 1e-10:
+        return 0.0
+    # Annualize: scale total_return to yearly rate
+    n_periods = len(r)
+    ann_return = (1.0 + total_return) ** (periods_per_year / max(1, n_periods)) - 1.0
+    return ann_return / max_dd
+
+
 def probabilistic_sharpe_ratio(
     returns: Iterable[float],
     *,
