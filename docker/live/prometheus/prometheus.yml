@@ -42,6 +42,15 @@ scrape_configs:
           strategy: "gmgp1-xauusd"
           broker: "ctrader"
 
+  # --- PRISM API ---
+  - job_name: "prism"
+    static_configs:
+      - targets: ["prism-api:8001"]
+        labels:
+          service: "prism-api"
+    metrics_path: /health
+    scrape_interval: 30s
+
   # --- Prometheus self-monitoring ---
   - job_name: "prometheus"
     static_configs:

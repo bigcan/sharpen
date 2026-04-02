@@ -1,0 +1,4 @@
+# PRISM PostgreSQL — baked schema (no bind mounts on Windows Docker)
+FROM postgres:15.13-alpine
+
+COPY docker/live/prism/schema.sql /docker-entrypoint-initdb.d/01-schema.sql

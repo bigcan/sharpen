@@ -1,6 +1,6 @@
 # GMGP2-XAUUSD Phase 3 — L1 Multi-Seed Stability
 # Data window: Same as R3 (longest training, Jan-Oct / Nov / Dec)
-# HPs: Best trial from GMGP2-XAUUSD HPO. No HPO.
+# HPs: T24 best trial from GMGP2-XAUUSD HPO (run v45etaie, PF=2.785). No HPO.
 # Deploy twice: --seed 123 and --seed 456
 # Gate: both seeds must achieve test PF > 1.0, CV < 30%.
 # v6 architecture: summary-stats obs, hard risk constraints
@@ -31,22 +31,22 @@ env:
   window_size: 30
   features_per_scale: 8
   taker_fee: 0.0
-  deadband_threshold: 0.25        # UPDATE from HPO best trial
+  deadband_threshold: 0.25        # T24 best (unchanged from default)
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
   episode_length: 500
   random_start: true
   max_drawdown_pct: 0.10          # FTMO 10% max DD
   scales: [15, 60, 240]
-  stop_loss_bps: 50               # UPDATE from HPO best trial
+  stop_loss_bps: 125              # T24 best (was 50)
   stop_loss_hpo: false
-  max_holding_bars: 20            # UPDATE from HPO best trial
+  max_holding_bars: 15            # T24 best (was 20)
   max_holding_hpo: false
   obs_mode: "summary_stats"
   summary_feature_indices: [0, 1, 2, 6, 7]
   reward:
     mode: "dsr"
-    dsr_eta: 0.001                # UPDATE from HPO best trial
+    dsr_eta: 0.001354             # T24 best
     dsr_scale: 1.0
   fee_schedule:
     - {step: 0, taker_fee: 0.0}
@@ -65,21 +65,21 @@ network:
   fusion_dim: 256
   window_size: 30
 
-# UPDATE all SAC HPs below with best trial from GMGP2-XAUUSD HPO
+# SAC HPs from T24 best trial (GMGP2-XAUUSD HPO, run v45etaie)
 agents:
   sac:
-    lr_actor: 0.0003              # UPDATE from HPO best trial
-    lr_critic: 0.0003             # UPDATE from HPO best trial
-    lr_alpha: 0.0003              # UPDATE from HPO best trial
-    gamma: 0.99                   # UPDATE from HPO best trial
-    tau: 0.005                    # UPDATE from HPO best trial
+    lr_actor: 0.000728            # T24 best
+    lr_critic: 0.000130           # T24 best
+    lr_alpha: 0.0000165           # T24 best
+    gamma: 0.9638                 # T24 best
+    tau: 0.00820                  # T24 best
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.2            # UPDATE from HPO best trial
+    initial_alpha: 0.0536         # T24 best
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 5.0            # UPDATE from HPO best trial
+    gradient_clip: 7.967          # T24 best
     checkpoint_interval: 250000
 
 training:

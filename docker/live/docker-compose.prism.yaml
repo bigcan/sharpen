@@ -1,0 +1,100 @@
+# PRISM Server Overlay — Chronos-2 + Dual GAHMM regime detection
+#
+# Deploy alongside the main stack:
+#   docker compose -f docker/live/docker-compose.yaml \
+#                  -f docker/live/docker-compose.prism.yaml \
+#                  -f docker/live/docker-compose.desktop.yaml \
+#                  --profile prism up -d
+#
+# Strategies reach PRISM at http://prism-api:8001 via finrl-net DNS.
+
+services:
+  # --- PostgreSQL for PRISM (HMM models, regime history, market data cache) ---
+  prism-db:
+    build:
+      context: ../..
+      dockerfile: docker/live/Dockerfile.prism-db
+    image: finrl-prism-db:latest
+    container_name: prism-db
+    profiles: [prism, all]
+    environment:
+      POSTGRES_USER: prism_user
+      POSTGRES_PASSWORD: ${PRISM_DB_PASSWORD:?Set PRISM_DB_PASSWORD in .env}
+      POSTGRES_DB: prism_db
+    volumes:
+      - prism-db-data:/var/lib/postgresql/data
+    networks: [finrl-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U prism_user -d prism_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "1.0"
+
+  # --- PRISM API (FastAPI + Chronos-2 + Dual GAHMM) ---
+  prism-api:
+    build:
+      context: C:\FinRL\SAFFS
+      dockerfile: Dockerfile
+    image: finrl-prism-api:latest
+    container_name: prism-api
+    profiles: [prism, all]
+    depends_on:
+      prism-db:
+        condition: service_healthy
+    environment:
+      PRISM_DB_HOST: prism-db
+      PRISM_DB_PORT: "5432"
+      PRISM_DB_NAME: prism_db
+      PRISM_DB_USER: prism_user
+      PRISM_DB_PASSWORD: ${PRISM_DB_PASSWORD:?Set PRISM_DB_PASSWORD in .env}
+      PRISM_USE_DB: "true"
+      PRISM_DEVICE: cpu
+      PRISM_API_KEY: ${PRISM_API_KEY:-}
+      PRISM_HMM_TICKERS: ${PRISM_HMM_TICKERS:-BTC-USD}
+    networks: [finrl-net]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 30s
+      timeout: 10s
+      start_period: 180s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
+
+  # --- PRISM Refit Worker (periodic HMM retraining: price 24h, vol 12h) ---
+  prism-refit-worker:
+    image: finrl-prism-api:latest
+    container_name: prism-refit-worker
+    profiles: [prism, all]
+    command: ["python", "-m", "services.refit_worker"]
+    depends_on:
+      prism-db:
+        condition: service_healthy
+    environment:
+      PRISM_DB_HOST: prism-db
+      PRISM_DB_PORT: "5432"
+      PRISM_DB_NAME: prism_db
+      PRISM_DB_USER: prism_user
+      PRISM_DB_PASSWORD: ${PRISM_DB_PASSWORD:?Set PRISM_DB_PASSWORD in .env}
+      PRISM_USE_DB: "true"
+      PRISM_HMM_TICKERS: ${PRISM_HMM_TICKERS:-BTC-USD}
+    networks: [finrl-net]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "1.0"
+
+volumes:
+  prism-db-data:
