@@ -156,7 +156,18 @@ def hpo_objective(
     config: dict,
     hpo_timesteps: int,
 ) -> float:
-    """Optuna objective: train SAC with trial params, return val total_return."""
+    """Optuna objective: train SAC with trial params, return val metric.
+
+    Objective metric configurable via ``config["hpo"]["objective"]``:
+    - ``"total_return"`` (default): Raw total return.
+    - ``"calmar"``: Calmar ratio (annualized return / max drawdown).
+    - ``"sortino"``: Sortino ratio.
+    """
+    from finrl_pro_ds.crypto.eval.statistics import calmar_ratio, sortino_ratio
+
+    hpo_cfg = config.get("hpo", {})
+    objective_name = hpo_cfg.get("objective", "total_return")
+
     search = define_funding_arb_search_space(trial)
     agent_params = search["agent_params"]
     env_overrides = search["env_overrides"]
@@ -184,9 +195,26 @@ def hpo_objective(
 
         total_return = val_metrics["total_return"]
 
+        # Compute step returns from portfolio values for ratio-based metrics
+        pv = val_metrics.get("_portfolio_values")
+        if pv is not None and len(pv) > 1:
+            pv_arr = np.array(pv)
+            step_rets = list((pv_arr[1:] / np.maximum(pv_arr[:-1], 1e-10)) - 1.0)
+        else:
+            step_rets = []
+
+        # Select objective value
+        if objective_name == "calmar" and step_rets:
+            val_objective = calmar_ratio(step_rets, periods_per_year=8760)
+        elif objective_name == "sortino" and step_rets:
+            val_objective = sortino_ratio(step_rets, periods_per_year=8760)
+        else:
+            val_objective = total_return
+
         # Log to WandB
         _wandb_log({
             f"hpo/trial_{trial.number}/total_return": total_return,
+            f"hpo/trial_{trial.number}/objective_{objective_name}": val_objective,
             f"hpo/trial_{trial.number}/sharpe": val_metrics.get("sharpe", 0.0),
             f"hpo/trial_{trial.number}/lr": agent_params["learning_rate"],
             f"hpo/trial_{trial.number}/gamma": agent_params["gamma"],
@@ -199,10 +227,10 @@ def hpo_objective(
         gc.collect()
 
         logger.info(
-            f"Trial {trial.number}: total_return={total_return:.4f}, "
-            f"sharpe={val_metrics.get('sharpe', 0):.3f}",
+            f"Trial {trial.number}: {objective_name}={val_objective:.4f}, "
+            f"total_return={total_return:.4f}, sharpe={val_metrics.get('sharpe', 0):.3f}",
         )
-        return total_return
+        return val_objective
 
     except Exception as e:
         logger.error(f"Trial {trial.number} FAILED: {e}")

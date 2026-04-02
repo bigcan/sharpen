@@ -1,0 +1,113 @@
+# Live Trading Config — Velotrade BTC SAC via DXtrade
+#
+# Velotrade 2-step challenge: 10% target, 10% max EOD trailing DD, 6x leverage
+# Risk buffers: 8% DD trigger (2% below 10% limit), no daily loss in 2-step
+#
+# Usage:
+#   python scripts/run_live_dxtrade.py --config configs/live_velotrade_btc.yaml
+#   python scripts/run_live_dxtrade.py --config configs/live_velotrade_btc.yaml --mainnet
+#   python scripts/run_live_dxtrade.py --config configs/live_velotrade_btc.yaml --dry-run
+
+# --- Exchange ---
+exchange:
+  name: "dxtrade"
+  testnet: true
+  asset: "BTC"
+  leverage: 6
+  order_type: "market"
+  data_exchange: "binance"           # OHLCV data from Binance (DXtrade = execution only)
+
+# --- Agent ---
+agent:
+  # UPDATE: point to best velotrade checkpoint after HPO/training
+  checkpoint_path: "checkpoints/velotrade_btc_best/checkpoint_final.pth"
+  device: "cpu"
+  torch_compile: false
+
+# --- SAC Hyperparameters (must match training checkpoint) ---
+agents:
+  sac:
+    lr_actor: 3.0e-4
+    lr_critic: 3.0e-4
+    lr_alpha: 3.0e-4
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+
+# --- Network (must match training checkpoint) ---
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 128
+  window_size: 30
+
+# --- Features ---
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  norm_span: 120
+  bootstrap_bars: 30000
+
+# --- Bar Clock ---
+bar_clock:
+  base_interval_minutes: 15
+  execution_delay_seconds: 5.0
+  max_late_seconds: 30.0
+
+# --- Trading ---
+trading:
+  initial_balance: 100000.0          # Velotrade challenge account size
+  deadband_threshold: 0.25
+  taker_fee: 0.0005
+
+# --- Risk Management (with buffers below challenge limits) ---
+risk:
+  enabled: true
+  max_drawdown_pct: 0.08             # 8% trigger (2% buffer below 10% limit)
+  eod_trailing_drawdown: true        # Velotrade uses EOD trailing DD
+  eod_hour_utc: 0
+  circuit_breaker_cooldown_bars: 0   # Prop firm: stay flat once breached
+  max_position_pct: 1.0              # Single asset
+  max_net_short_exposure: -1.0       # Full short allowed
+  max_gross_exposure: 6.0            # 6x leverage
+  funding_rate_alert: 999.0          # Disabled (DXtrade doesn't expose)
+  min_margin_reserve_pct: 0.15       # Higher reserve for leveraged trading
+
+# --- WandB Monitoring ---
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  tags: ["live", "velotrade", "BTC", "SAC", "15min", "dxtrade", "paper", "2-step", "prop-firm"]
+
+# --- Safety ---
+safety:
+  require_explicit_mainnet: true
+  max_daily_loss_pct: 0.0            # No daily loss limit in 2-step
+  kill_file: "/tmp/finrl_live_velotrade_btc_kill"
+  emergency_flatten_on_error: true
+
+# --- PRISM Regime Overlay (optional) ---
+prism:
+  enabled: false
+  base_url: "http://prism-api:8001"
+  api_key: ""
+  ticker: "BTC-USD"
+  timeframe: "daily"
+  timeout: 5
+  cache_ttl: 60
+  crisis_flatten: true
+  multipliers:
+    LOW_VOL: 1.3
+    NORMAL_VOL: 1.0
+    HIGH_VOL: 0.3
+
+# --- Monitoring ---
+monitoring:
+  metrics_port: 9107

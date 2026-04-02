@@ -1,0 +1,121 @@
+# Velotrade 2-Step Challenge — Single-Asset BTC SAC (15-min)
+#
+# Target: 10% profit (step 1), 5% profit (step 2), 10% max EOD trailing DD
+# Platform: DXtrade (REST API), 6x leverage on BTC
+# No consistency rules, no time limits
+#
+# Usage:
+#   # HPO (Calmar objective)
+#   python scripts/crypto_hpo_runner.py --config configs/velotrade_btc_sac_2step.yaml
+#
+#   # Full pipeline
+#   python scripts/run_full_pipeline.py --config configs/velotrade_btc_sac_2step.yaml
+
+strategy:
+  id: "velotrade-btc-2step"
+  name: "velotrade_btc_sac_2step"
+  version: "1.0.0"
+  instrument: "perpetual_futures"
+
+universe:
+  assets: ["BTC"]
+  quote: "USDT"
+  data_exchange: "binance"
+  execution_broker: "dxtrade"
+  n_assets: 1
+
+data:
+  source: "ccxt"
+  market_type: "futures"
+  frequency: "15m"
+  start_date: "2022-01-01"
+  end_date: null
+  fields: ["open", "high", "low", "close", "volume"]
+  extra_fields: ["funding_rate"]
+  cache_dir: "./data/crypto_cache"
+
+features:
+  scales: [15, 60, 240]          # 15-min decision, 1h trend, 4h regime
+  window_size: 30
+  features_per_scale: 8
+  norm_span: 120
+  bootstrap_bars: 30000
+
+environment:
+  type: "perpetual_futures"
+  initial_capital: 100000
+  # --- Leverage: Velotrade 6x ---
+  max_gross_exposure: 6.0
+  max_net_short_exposure: -6.0   # Full short allowed with leverage
+  # --- Costs ---
+  taker_fee_pct: 0.0005          # 5 bps crypto taker
+  slippage_base_bps: 3
+  slippage_impact_bps: 15
+  # --- Reward ---
+  turnover_penalty: 0.005
+  reward_type: "simple"
+  reward_scaling: 1.0
+  reward_clip_range: [-5.0, 5.0]
+  min_trade_pct: 0.005
+  circuit_breaker_threshold: 0.05   # 5% hard stop (below wrapper's 10% EOD DD)
+  # --- Action smoothing ---
+  action_ema_alpha: 0.5             # Moderate smoothing for DD control
+  random_start: true
+  random_start_pct: 0.1
+
+  # --- Prop firm wrapper ---
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10          # 10% profit target (step 1)
+    max_trailing_drawdown_pct: 0.10  # 10% EOD trailing DD
+    max_daily_loss_pct: 0.0          # No daily loss limit in 2-step
+    eod_hour_utc: 0
+    drawdown_penalty_start: 0.05     # Start penalty at 5% DD
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5                     # +3 prop firm dims handled by wrapper
+  fusion_dim: 128                    # Smaller for single asset
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 3.0e-4
+    lr_critic: 3.0e-4
+    lr_alpha: 3.0e-4
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+    network_arch: [128, 128]         # Smaller for single asset
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  n_trials: 50
+  steps_per_trial: 500000
+  objective: "calmar"                # Calmar = return/drawdown (prop firm optimal)
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  tags: ["velotrade", "2-step", "BTC", "SAC", "15min", "prop-firm", "calmar", "6x-leverage"]

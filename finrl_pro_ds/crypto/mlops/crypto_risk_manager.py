@@ -51,6 +51,10 @@ class CryptoRiskConfig:
     # Margin
     min_margin_reserve_pct: float = 0.05  # 5% of initial capital
 
+    # Prop firm: EOD trailing drawdown mode
+    eod_trailing_drawdown: bool = False   # If true, floor updates at EOD only
+    eod_hour_utc: int = 0                 # UTC hour for EOD floor update
+
 
 @dataclass
 class RiskState:
@@ -63,6 +67,9 @@ class RiskState:
     daily_cost_accumulated: float = 0.0
     bars_since_day_start: int = 0
     violations: list = field(default_factory=list)
+    # EOD trailing drawdown (prop firm mode)
+    eod_peak_value: float = 0.0
+    last_eod_date: str = ""
 
 
 class CryptoRiskManager:
@@ -82,7 +89,10 @@ class CryptoRiskManager:
 
     def reset(self, initial_capital: float) -> None:
         """Reset risk state for a new episode."""
-        self.state = RiskState(peak_portfolio_value=initial_capital)
+        self.state = RiskState(
+            peak_portfolio_value=initial_capital,
+            eod_peak_value=initial_capital,
+        )
 
     def check(
         self,
@@ -92,6 +102,7 @@ class CryptoRiskManager:
         positions: np.ndarray,
         funding_rates: np.ndarray,
         recent_returns: np.ndarray | None = None,
+        **kwargs,
     ) -> tuple[np.ndarray, list[str]]:
         """Check and potentially modify action based on risk controls.
 
@@ -102,6 +113,8 @@ class CryptoRiskManager:
             positions: Current positions (signed weights).
             funding_rates: Current funding rates per asset.
             recent_returns: Last 1h per-asset returns for flash crash detection.
+            **kwargs: Optional ``bar_time`` (epoch int or datetime) for EOD
+                trailing drawdown mode.
 
         Returns:
             (modified_action, violations) — action may be unchanged if no risks.
@@ -123,13 +136,45 @@ class CryptoRiskManager:
                 return np.zeros_like(action), violations
 
         # --- Update drawdown tracking ---
-        self.state.peak_portfolio_value = max(
-            self.state.peak_portfolio_value, portfolio_value,
-        )
-        if self.state.peak_portfolio_value > 0:
-            self.state.current_drawdown = (
-                1.0 - portfolio_value / self.state.peak_portfolio_value
+        if self.config.eod_trailing_drawdown:
+            # Prop firm EOD mode: peak only updates at end-of-day boundary.
+            # Requires bar_time kwarg or falls back to tick-by-tick.
+            from datetime import datetime, timezone
+            bar_time = kwargs.get("bar_time")
+            if bar_time is not None:
+                if isinstance(bar_time, (int, float)):
+                    dt = datetime.fromtimestamp(bar_time, tz=timezone.utc)
+                else:
+                    dt = bar_time
+                today = dt.strftime("%Y%m%d")
+                if today != self.state.last_eod_date:
+                    # Day boundary: update EOD peak from previous day's close
+                    self.state.eod_peak_value = max(
+                        self.state.eod_peak_value, portfolio_value,
+                    )
+                    self.state.last_eod_date = today
+                # Drawdown measured against EOD peak (not tick-by-tick peak)
+                if self.state.eod_peak_value > 0:
+                    self.state.current_drawdown = (
+                        1.0 - portfolio_value / self.state.eod_peak_value
+                    )
+            else:
+                # No bar_time: fall back to standard tick-by-tick tracking
+                self.state.peak_portfolio_value = max(
+                    self.state.peak_portfolio_value, portfolio_value,
+                )
+                if self.state.peak_portfolio_value > 0:
+                    self.state.current_drawdown = (
+                        1.0 - portfolio_value / self.state.peak_portfolio_value
+                    )
+        else:
+            self.state.peak_portfolio_value = max(
+                self.state.peak_portfolio_value, portfolio_value,
             )
+            if self.state.peak_portfolio_value > 0:
+                self.state.current_drawdown = (
+                    1.0 - portfolio_value / self.state.peak_portfolio_value
+                )
 
         # --- Circuit breaker check ---
         if self.state.circuit_breaker_active:

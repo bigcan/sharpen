@@ -126,7 +126,7 @@ services:
       METRICS_PORT: "9101"
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1_v5_l1_seed456:/app/checkpoints/gmgp1_v5_l1_seed456:ro
-      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_gmgp1_gc_ib.yaml:/app/configs/live_gmgp1_gc_ib.yaml:ro
+      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_gmgp1_gc_ib.yaml:/app/configs/live_gmgp1_gc_ib.yaml
       - gmgp1-gold-logs:/app/logs
 
   sg1-gold:
@@ -220,6 +220,31 @@ services:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/sync_1h_best:/app/checkpoints/sync_1h_best:ro
       - ${CONFIG_DIR:?Set CONFIG_DIR}/live_sync_1h.yaml:/app/configs/live_sync_1h.yaml:ro
       - sync-1h-logs:/app/logs
+
+  # --- Velotrade Prop Firm (DXtrade) ---
+  velotrade-btc:
+    <<: *crypto-strategy
+    container_name: velotrade-btc
+    profiles: [velotrade, all]
+    labels:
+      finrl.monitor: "true"
+      finrl.strategy: "velotrade-btc"
+      finrl.broker: "dxtrade"
+    environment:
+      <<: *common-env
+      BROKER_TYPE: dxtrade
+      STRATEGY_NAME: velotrade-btc
+      STRATEGY_RUNNER: scripts/run_live_dxtrade.py
+      STRATEGY_CONFIG: /app/configs/live_velotrade_btc.yaml
+      METRICS_PORT: "9107"
+      DXTRADE_SERVER: ${DXTRADE_SERVER:-}
+      DXTRADE_USERNAME: ${DXTRADE_USERNAME:-}
+      DXTRADE_PASSWORD: ${DXTRADE_PASSWORD:-}
+      DXTRADE_ACCOUNT_ID: ${DXTRADE_ACCOUNT_ID:-}
+    volumes:
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/velotrade_btc_best:/app/checkpoints/velotrade_btc_best:ro
+      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_velotrade_btc.yaml:/app/configs/live_velotrade_btc.yaml:ro
+      - velotrade-btc-logs:/app/logs
 
   gmgp1-xauusd:
     <<: *crypto-strategy
@@ -320,3 +345,4 @@ volumes:
   funding-arb-logs:
   sync-1h-logs:
   gmgp1-xauusd-logs:
+  velotrade-btc-logs:
