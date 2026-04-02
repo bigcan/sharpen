@@ -239,6 +239,7 @@
   "schemaVersion": 39,
   "tags": ["finrl", "trading", "live"],
   "templating": { "list": [] },
+  "refresh": "15s",
   "time": { "from": "now-6h", "to": "now" },
   "title": "FinRL Trading Overview",
   "uid": "finrl-trading-overview"

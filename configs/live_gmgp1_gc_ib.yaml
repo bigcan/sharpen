@@ -74,7 +74,7 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 1000000.0            # IB paper account ($1M)
+  initial_balance: 262945.0             # IB paper account (reset 2026-04-02)
   deadband_threshold: 0.25             # Ignore position changes < 25% (matches training)
   taker_fee: 0.0000017                 # ~0.17bps for GC ($2.50 / ~$150K half-notional)
 
@@ -84,6 +84,8 @@ risk:
   max_drawdown_pct: 0.10               # 10% max DD, halt (tighter than training 30%)
   circuit_breaker_cooldown_bars: 12    # 3 hours at 15-min bars
   max_position_pct: 1.0                # Single asset = 100% allowed
+  max_net_short_exposure: -1.0         # Single asset — allow full short
+  min_effective_bets: 1.0              # Single asset — ENB=1 by definition
   funding_rate_alert: 999.0            # Effectively disabled (futures have no funding)
   min_margin_reserve_pct: 0.20         # Keep 20% margin reserve (futures need more)
 
