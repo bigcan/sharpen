@@ -40,11 +40,15 @@ python scripts/collect_run.py --run_id <ID>  # or --batch
 docker compose -f docker/live/docker-compose.yaml \
                -f docker/live/docker-compose.desktop.yaml \
                --profile all up -d                        # Start everything
-# Profiles: ib, crypto, ctrader, monitoring, all
+# Profiles: ib, crypto, ctrader, monitoring, prism, all
 # Monitoring stack: Prometheus (:9090), Grafana (:3000), Watchdog (Telegram alerts)
 docker compose -f docker/live/docker-compose.yaml \
                -f docker/live/docker-compose.desktop.yaml \
                --profile monitoring up -d                 # Start monitoring only
+docker compose -f docker/live/docker-compose.yaml \
+               -f docker/live/docker-compose.prism.yaml \
+               -f docker/live/docker-compose.desktop.yaml \
+               --profile prism up -d                      # Start PRISM stack only
 docker compose -f docker/live/docker-compose.yaml \
                --profile monitoring build                 # Rebuild after config changes
 
@@ -83,8 +87,10 @@ finrl_pro_ds/
     envs/multi_exchange_arb_env.py # Cross-exchange arb
     data/                         # crypto_loader, crypto_collector, crypto_array_builder
     features/                     # crypto_features, funding_arb_features
+    features/prism_features.py    # PRISM feature integration (Chronos-2 + GAHMM)
     execution/                    # exchange_perp_broker, bybit_perp_broker, arbitrator
     live/                         # live_engine, live_obs_builder, bar_clock, metrics
+    live/prism_overlay.py         # PRISM L2 position sizing overlay (regime-based)
     mlops/                        # crypto_risk_manager
   futures/
     execution/                    # ib_futures_broker, contract_manager
@@ -110,11 +116,15 @@ tests/          # pytest suite
 docker/live/    # Docker Compose live trading orchestration
   docker-compose.yaml           # Multi-strategy orchestrator (6 strategies + infra)
   docker-compose.desktop.yaml   # Desktop overlay (port bindings for Win11 dev)
+  docker-compose.prism.yaml     # PRISM overlay (prism-db, prism-api, prism-refit-worker)
   Dockerfile.live-engine        # Shared image for all strategies (PyTorch CPU + prometheus_client)
+  Dockerfile.prism-db           # PostgreSQL 15 with baked schema for PRISM
   Dockerfile.watchdog           # Health watchdog (docker-py + Telegram alerts)
   Dockerfile.prometheus         # Prometheus with baked-in scrape config
   Dockerfile.grafana            # Grafana with baked-in provisioning + dashboards
   healthcheck.sh                # Trading-aware healthcheck (JSON state, not just pgrep)
+  prism/schema.sql              # PRISM DB schema (6 tables: HMM models, predictions, market data)
+  prism_sdk/                    # PRISM Python SDK (PRISMClient, types, vendored in Docker)
   prometheus/prometheus.yml     # Scrape config for strategy metrics endpoints
   grafana/                      # Provisioning (datasources, dashboards) + dashboard JSON
   .env.example                  # Template for credentials and config
@@ -174,7 +184,7 @@ Configs vary by pipeline. Do NOT invent keys -- read a reference config first.
 | Sync-1H | `configs/synapse_crypto_1h_v2.yaml` | strategy / universe / environment / agents / arbitrator / walk_forward / risk / execution |
 | Funding Arb | `configs/funding_arb_sac_10assets_hpo.yaml` | strategy / universe / environment / agents / walk_forward |
 | Market Making | `configs/mm_sac_btc_lob_10s.yaml` | data / features / env (fill_model, LOB) / network (lob_encoder, action_dim=3) / agents.sac / training / hpo / wandb |
-| Live Trading | `configs/live_gmgp1_btc_bybit.yaml` | exchange / agent / agents.sac / network / features / bar_clock / trading / risk / wandb / safety (+ contract for IB/cTrader) |
+| Live Trading | `configs/live_gmgp1_btc_bybit.yaml` | exchange / agent / agents.sac / network / features / bar_clock / trading / risk / wandb / safety / prism (+ contract for IB/cTrader) |
 
 ## Critical Invariants
 
@@ -280,7 +290,7 @@ Live trading containers export health + metrics for observability.
 ### Prometheus Metrics (Layer 1)
 `finrl_pro_ds/crypto/live/metrics.py` — `TradingMetrics` class runs `prometheus_client` HTTP server on a **daemon thread** (completely decoupled from the async trading loop). `Gauge.set()` is thread-safe. Each strategy gets a unique port via `METRICS_PORT` env var (9101-9106). Disabled by default (`METRICS_PORT=0`).
 
-**Exported metrics:** `finrl_position`, `finrl_portfolio_value`, `finrl_drawdown_pct`, `finrl_daily_loss_pct`, `finrl_broker_connected`, `finrl_bar_count`, `finrl_total_trades`, `finrl_total_fees`, `finrl_consecutive_errors`, `finrl_last_bar_timestamp`, `finrl_funding_rate`.
+**Exported metrics:** `finrl_position`, `finrl_portfolio_value`, `finrl_drawdown_pct`, `finrl_daily_loss_pct`, `finrl_broker_connected`, `finrl_bar_count`, `finrl_total_trades`, `finrl_total_fees`, `finrl_consecutive_errors`, `finrl_last_bar_timestamp`, `finrl_funding_rate`, `prism_position_multiplier`, `prism_composite_code`, `prism_api_latency_seconds`, `prism_api_errors_total`, `prism_fallback_active`.
 
 ### Grafana Dashboard (Layer 2)
 Auto-provisioned via baked Dockerfile (`Dockerfile.grafana`). Dashboard: "FinRL Trading Overview" — 10 panels (PV, drawdown, position, daily P&L, broker status, bars, trades, errors, funding rate, fees). Alerting via Telegram contact point.
@@ -319,6 +329,91 @@ Auto-provisioned via baked Dockerfile (`Dockerfile.grafana`). Dashboard: "FinRL 
 | Grafana | — | 3000 |
 | Portainer | — | 9443 |
 
+## PRISM Integration (Probabilistic Regime-Informed System for Markets)
+
+PRISM provides L2 position sizing via regime detection. It scales agent positions based on volatility regimes without requiring model retraining.
+
+### Architecture
+
+**Dual GAHMM** (Gaussian-Autoregressive HMM):
+- Price Regime: 3 states (BEARISH, NEUTRAL, BULLISH)
+- Vol Regime: 3 states (LOW_VOL, NORMAL_VOL, HIGH_VOL)
+- Composite Code: 9-state grid (price × 3 + vol). Code 2 (BEARISH + HIGH_VOL) = crisis flatten.
+
+**Chronos-2** forecasting: p10/p30/p50/p70/p90 quantile log-returns (available but not yet used in L2).
+
+### L2 Overlay — Position Sizing
+
+Injected at Step 5b in `LiveTradingEngine` (after SAC inference, before deadband):
+
+```
+target_position *= vol_regime_multiplier
+```
+
+| Vol Regime | Default Multiplier | Effect |
+|------------|-------------------|--------|
+| LOW_VOL | 1.3 | Confidence boost |
+| NORMAL_VOL | 1.0 | No change |
+| HIGH_VOL | 0.3 | De-risk |
+| Crisis (code 2) | 0.0 | Flatten position |
+
+Fallback on API error: multiplier = 1.0 (no overlay). 60-second cache TTL.
+
+### Config Keys (`prism:` section in live YAMLs)
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `prism.enabled` | bool | false | Activation flag |
+| `prism.base_url` | str | `http://prism-api:8001` | PRISM API endpoint (Docker DNS) |
+| `prism.api_key` | str | `""` | API key (empty = no auth, internal network) |
+| `prism.ticker` | str | `"BTC-USD"` | Asset for regime detection |
+| `prism.timeframe` | str | `"daily"` | HMM training window |
+| `prism.timeout` | int | 5 | API call timeout (seconds) |
+| `prism.cache_ttl` | int | 60 | Regime cache duration (seconds) |
+| `prism.crisis_flatten` | bool | true | Enable code-2 position flattening |
+| `prism.multipliers.LOW_VOL` | float | 1.3 | Low-vol regime multiplier |
+| `prism.multipliers.NORMAL_VOL` | float | 1.0 | Normal-vol regime multiplier |
+| `prism.multipliers.HIGH_VOL` | float | 0.3 | High-vol regime multiplier |
+
+### Docker Stack (Profile: `prism`)
+
+3 services in `docker-compose.prism.yaml`, all on `finrl-net`:
+
+| Container | Image | Resources | Healthcheck |
+|-----------|-------|-----------|-------------|
+| prism-db | PostgreSQL 15 (baked schema) | 512 MB, 1 CPU | `pg_isready` 5s interval |
+| prism-api | FastAPI (Chronos-2 + HMMs) | 4 GB, 2 CPU | HTTP `/health` 30s interval, 180s startup |
+| prism-refit-worker | HMM refit scheduler | 2 GB, 1 CPU | Auto-restart on refit completion |
+
+Refit schedule: price HMM every 24h, vol HMM every 12h.
+
+### PRISM Docker Env Vars
+
+| Var | Default | Description |
+|-----|---------|-------------|
+| `PRISM_DB_PASSWORD` | (required) | PostgreSQL password |
+| `PRISM_API_KEY` | (empty) | API auth key |
+| `PRISM_HMM_TICKERS` | `"BTC-USD,GC=F"` | Tickers for HMM fitting |
+
+### PRISM Port Assignments
+
+| Container | Service Port |
+|-----------|-------------|
+| prism-db | 5432 (internal) |
+| prism-api | 8001 |
+
+### PRISM Feature Columns (13 features, for future L1 integration)
+
+`chronos_p10`, `chronos_p30`, `chronos_p50`, `chronos_p70`, `chronos_p90`, `chronos_spread`, `gahmm_price_bear`, `gahmm_price_neutral`, `gahmm_price_bull`, `gahmm_vol_low`, `gahmm_vol_normal`, `gahmm_vol_high`, `gahmm_composite_code`.
+
+GAHMM probability features are passthrough (skip z-score normalization).
+
+### Status
+
+- **Deployed**: All 3 containers healthy (S299). HMMs fitted for BTC-USD + GC=F.
+- **Disabled by default**: `prism.enabled: false` in all 7 live configs. Awaiting backtest validation.
+- **Next**: Backtest with PRISM features (L1) → enable `prism.enabled: true` per strategy.
+
 ## Gotchas (Last verified: 2026-04-01)
 
 - HPO uses NopPruner, no early-kill, 500K steps/trial
@@ -330,3 +425,6 @@ Auto-provisioned via baked Dockerfile (`Dockerfile.grafana`). Dashboard: "FinRL 
 - Docker Desktop Windows: file bind mounts fail silently -- use baked Dockerfiles (COPY at build) instead of volume mounts for config files
 - Prometheus/Grafana configs: edit source files in `docker/live/` then rebuild (`docker compose --profile monitoring build`)
 - IB strategies share `ibgateway` network namespace -- Prometheus scrapes them via `ibgateway:<port>`, not by container name
+- PRISM overlay is disabled by default (`prism.enabled: false`) -- must enable per-strategy after backtest validation
+- PRISM API uses Docker DNS (`prism-api:8001`) -- only reachable inside `finrl-net`, not from host
+- PRISM compose overlay (`docker-compose.prism.yaml`) must be included with `-f` flag alongside main compose
