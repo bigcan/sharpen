@@ -89,6 +89,36 @@ class LiveObsBuilder:
 
         self._bootstrapped = False
 
+        # EMA convergence: need ~3x norm_span bars per scale for 95% convergence
+        self._ema_convergence_factor = 3
+
+    # -------------------------------------------------------------------
+    # Warmup quality
+    # -------------------------------------------------------------------
+    def compute_min_bootstrap_bars(self) -> int:
+        """Minimum 1-min bars needed for EMA convergence on all scales.
+
+        For EMA(span=N), ~3*N bars gives ~95% convergence.
+        We need this many bars on the COARSEST scale, so multiply by max scale.
+        """
+        min_scale_bars = self._ema_convergence_factor * self.norm_span + self.window_size
+        return int(max(self.scales) * min_scale_bars)
+
+    def get_warmup_quality(self) -> dict[int, float]:
+        """Check EMA convergence quality per scale.
+
+        Returns:
+            Dict of {scale_minutes: convergence_ratio} where 1.0 = fully converged.
+            Values below 1.0 indicate the EMA z-scores are still biased toward
+            initialization and not representative of the true running statistics.
+        """
+        convergence_threshold = self._ema_convergence_factor * self.norm_span
+        result = {}
+        for scale in self.scales:
+            n_bars = len(self._scale_features.get(scale, []))
+            result[scale] = min(n_bars / convergence_threshold, 1.0) if convergence_threshold > 0 else 1.0
+        return result
+
     # -------------------------------------------------------------------
     # Bootstrap
     # -------------------------------------------------------------------
@@ -192,6 +222,24 @@ class LiveObsBuilder:
             self._atr_rolling_mean = float(np.mean(recent_atr))
 
         self._bootstrapped = True
+
+        # Log warmup quality per scale
+        warmup_quality = self.get_warmup_quality()
+        min_bootstrap = self.compute_min_bootstrap_bars()
+        for scale, quality in sorted(warmup_quality.items()):
+            n_bars = len(self._scale_features.get(scale, []))
+            needed = self._ema_convergence_factor * self.norm_span
+            if quality < 1.0:
+                logger.warning(
+                    f"WARMUP INCOMPLETE — scale {scale}min: {quality:.0%} converged "
+                    f"({n_bars}/{needed} bars). Agent features on this scale are "
+                    f"unreliable. Increase bootstrap_bars to >= {min_bootstrap}.",
+                )
+            else:
+                logger.info(
+                    f"Warmup OK — scale {scale}min: {n_bars} bars "
+                    f"(need {needed}, {quality:.0%} converged)",
+                )
 
     def _recompute_all_scales(self) -> None:
         """Resample and compute features for every scale."""
