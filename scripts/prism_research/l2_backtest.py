@@ -55,7 +55,7 @@ VOL_REGIME_MAP = {0: "LOW_VOL", 1: "NORMAL_VOL", 2: "HIGH_VOL"}
 
 
 def load_config(path: Path) -> dict:
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         return yaml.safe_load(f)
 
 
