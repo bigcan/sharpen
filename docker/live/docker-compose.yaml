@@ -256,29 +256,29 @@ services:
       - ${CONFIG_DIR:?Set CONFIG_DIR}/live_velotrade_btc.yaml:/app/configs/live_velotrade_btc.yaml:ro
       - velotrade-btc-logs:/app/logs
 
-  gmgp1-xauusd:
+  gmgp2-xauusd:
     <<: *crypto-strategy
-    container_name: gmgp1-xauusd
+    container_name: gmgp2-xauusd
     profiles: [ctrader, all]
     labels:
       finrl.monitor: "true"
-      finrl.strategy: "gmgp1-xauusd"
+      finrl.strategy: "gmgp2-xauusd"
       finrl.broker: "ctrader"
     environment:
       <<: *common-env
       BROKER_TYPE: ctrader
-      STRATEGY_NAME: gmgp1-xauusd
+      STRATEGY_NAME: gmgp2-xauusd
       STRATEGY_RUNNER: scripts/run_live_ctrader.py
-      STRATEGY_CONFIG: /app/configs/live_gmgp1_xauusd_ctrader.yaml
+      STRATEGY_CONFIG: /app/configs/live_gmgp2_xauusd_ctrader.yaml
       METRICS_PORT: "9106"
       CTRADER_CLIENT_ID: ${CTRADER_CLIENT_ID:-}
       CTRADER_CLIENT_SECRET: ${CTRADER_CLIENT_SECRET:-}
       CTRADER_ACCESS_TOKEN: ${CTRADER_ACCESS_TOKEN:-}
       CTRADER_ACCOUNT_ID: ${CTRADER_ACCOUNT_ID:-}
     volumes:
-      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1_xauusd_best:/app/checkpoints/gmgp1_xauusd_best:ro
-      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_gmgp1_xauusd_ctrader.yaml:/app/configs/live_gmgp1_xauusd_ctrader.yaml:ro
-      - gmgp1-xauusd-logs:/app/logs
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp2-xauusd-l1-multiseed_20260403_083331:/app/checkpoints/gmgp2-xauusd-l1-multiseed_20260403_083331:ro
+      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_gmgp2_xauusd_ctrader.yaml:/app/configs/live_gmgp2_xauusd_ctrader.yaml:ro
+      - gmgp2-xauusd-logs:/app/logs
 
   # ============================================================
   #  Add new strategies here. Copy a template above and change:
@@ -354,5 +354,5 @@ volumes:
   gmgp1-btc-logs:
   funding-arb-logs:
   sync-1h-logs:
-  gmgp1-xauusd-logs:
+  gmgp2-xauusd-logs:
   velotrade-btc-logs:
