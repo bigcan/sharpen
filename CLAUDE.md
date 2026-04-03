@@ -112,7 +112,7 @@ finrl_pro_ds/
 scripts/        # Pipeline, deployment, monitoring, checkpoint collection, oracles, ETL
 configs/        # YAML experiment configs
 tests/          # pytest suite
-# Agent skills live in ~/.claude/skills/ (user-scope, shared across projects)
+# Generic skills: ~/.claude/skills/ (user-scope). FinRL infra skills: .claude/skills/ (project-scope)
 docker/live/    # Docker Compose live trading orchestration
   docker-compose.yaml           # Multi-strategy orchestrator (6 strategies + infra)
   docker-compose.desktop.yaml   # Desktop overlay (port bindings for Win11 dev)
@@ -222,24 +222,31 @@ Configs vary by pipeline. Do NOT invent keys -- read a reference config first.
 
 ## Agent Skills -- Auto-Dispatch
 
-All skills live in `~/.claude/skills/`. Skills with a `FINRL.md` companion contain project-specific addendums -- read both `SKILL.md` and `FINRL.md` when triggered. **Trigger proactively** -- don't wait for the user to ask.
+Skills are split by scope. **User-scope** (`~/.claude/skills/`): generic methodology/SDK skills, shared across projects. **Project-scope** (`.claude/skills/`): FinRL-specific infrastructure and operations skills. Skills with a `FINRL.md` companion contain project-specific addendums -- read both `SKILL.md` and `FINRL.md` when triggered. **Trigger proactively** -- don't wait for the user to ask.
+
+### User-scope (generic, `~/.claude/skills/`)
 
 | Skill | Trigger | Spec |
 |-------|---------|------|
 | **Audit** | **Auto** after ANY code change to `finrl_pro_ds/`, `scripts/`, `configs/`. Skip `.md`-only. **Also auto after plan/feature/task implementation.** | `~/.claude/skills/audit/SKILL.md` + `FINRL.md` |
-| **Deploy** | User requests GPU launch, instance management, or run deployment. | `~/.claude/skills/deploy/SKILL.md` |
 | **Memory** | **Auto** at session start (boot) and end (`/sync`). Update `core.md` proactively on findings. | `~/.claude/skills/memory/SKILL.md` |
-| **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. | `~/.claude/skills/monitor/SKILL.md` |
 | **Optimization** | SPS regression, low GPU util, new hardware, perf tuning. **Auto before each deployment.** | `~/.claude/skills/optimization/SKILL.md` |
 | **Math** | Manual ("check math") + **auto after ANY formula/equation/numerical logic change.** | `~/.claude/skills/math/SKILL.md` |
-| **Dashboard** | **Auto** after `/monitor`, during `/sync`, on experiment state changes. | `~/.claude/skills/dashboard/SKILL.md` |
 | **WandB** | **Auto** for HPO analysis, run diagnostics, config diffing. Always override `metric_keys`. | `~/.claude/skills/wandb/SKILL.md` + `FINRL.md` |
 | **Researcher** | "Should we try X?", algorithm eval, lit review, root cause analysis. | `~/.claude/skills/researcher/SKILL.md` + `FINRL.md` |
 | **Architect** | New module design, pipeline refactor, API/interface changes. **Auto** after Researcher GO. | `~/.claude/skills/architect/SKILL.md` + `FINRL.md` |
-| **Docker** | Docker, containers, compose, build, start/stop strategies, IBGateway, VNC, Portainer. **Auto** before live-trading container launch. | `~/.claude/skills/docker/SKILL.md` |
-| **Live-Trading** | Start/stop paper/live trading, launch strategy, `--mainnet`, graduation, kill file, risk config, cTrader OAuth. | `~/.claude/skills/live-trading/SKILL.md` |
-| **Live-Monitor** | Live P&L, positions, drawdown, "how are my strategies", container health, Grafana, Telegram alerts. **Auto** after live-trading launch. Periodic via `/loop`. | `~/.claude/skills/live-monitor/SKILL.md` |
 | **Skill-Evolve** | "audit skills", "skill health", "improve skills". **Auto** during `/sync` staleness check. **Auto** after new skill creation. | `~/.claude/skills/skill-evolve/SKILL.md` |
+
+### Project-scope (FinRL infra/ops, `.claude/skills/`)
+
+| Skill | Trigger | Spec |
+|-------|---------|------|
+| **Deploy** | User requests GPU launch, instance management, or run deployment. | `.claude/skills/deploy/SKILL.md` |
+| **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. | `.claude/skills/monitor/SKILL.md` |
+| **Dashboard** | **Auto** after `/monitor`, during `/sync`, on experiment state changes. | `.claude/skills/dashboard/SKILL.md` |
+| **Docker** | Docker, containers, compose, build, start/stop strategies, IBGateway, VNC, Portainer. **Auto** before live-trading container launch. | `.claude/skills/docker/SKILL.md` |
+| **Live-Trading** | Start/stop paper/live trading, launch strategy, `--mainnet`, graduation, kill file, risk config, cTrader OAuth. | `.claude/skills/live-trading/SKILL.md` |
+| **Live-Monitor** | Live P&L, positions, drawdown, "how are my strategies", container health, Grafana, Telegram alerts. **Auto** after live-trading launch. Periodic via `/loop`. | `.claude/skills/live-monitor/SKILL.md` |
 
 **Chaining rules:**
 - Code change / implementation complete -> **Audit** (mandatory). +**Math** if formulas. +**Optimization** if perf.
