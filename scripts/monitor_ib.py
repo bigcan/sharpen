@@ -5,11 +5,11 @@ Connects to an already-running IB Gateway with a separate clientId (99)
 so it does NOT interfere with the live trading session (clientId=1).
 
 Due to IB Gateway TrustedIPs=127.0.0.1, the monitor must connect from
-inside the Docker network. Use --docker mode (default) which runs the
-query inside the gmgp1-gold container via `docker exec`.
+inside the Docker network. Uses `docker --context finrl-desktop exec`
+to run the query inside a container on the remote desktop (<TAILSCALE_HOST>).
 
 Usage:
-    # Default: runs via docker exec on remote desktop
+    # Default: runs via docker exec on remote desktop (finrl-desktop context)
     python scripts/monitor_ib.py
 
     # Watch mode — refresh every N seconds
@@ -106,10 +106,12 @@ asyncio.run(snapshot())
 ''')
 
 
-def run_in_docker(container: str, port: int, client_id: int) -> dict | None:
-    """Execute the monitor snippet inside a Docker container."""
+def run_in_docker(
+    container: str, port: int, client_id: int, context: str = "finrl-desktop",
+) -> dict | None:
+    """Execute the monitor snippet inside a Docker container on the remote desktop."""
     script = _CONTAINER_SCRIPT.format(port=port, client_id=client_id)
-    cmd = ["docker", "exec", container, "python", "-c", script]
+    cmd = ["docker", "--context", context, "exec", container, "python", "-c", script]
     try:
         result = subprocess.run(
             cmd, capture_output=True, text=True, timeout=30,
@@ -242,11 +244,15 @@ def main():
         "--json", action="store_true", dest="as_json",
         help="Output as JSON",
     )
+    parser.add_argument(
+        "--context", default="finrl-desktop",
+        help="Docker context name (default: finrl-desktop for remote desktop)",
+    )
     args = parser.parse_args()
 
     import time
     while True:
-        data = run_in_docker(args.container, args.port, args.client_id)
+        data = run_in_docker(args.container, args.port, args.client_id, args.context)
         if data is None:
             sys.exit(1)
 

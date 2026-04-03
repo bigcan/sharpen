@@ -282,6 +282,8 @@ Cloud:  agent-memory MCP         -- LanceDB on GCS, search index over ALL R&D en
 
 ## Docker Monitoring Architecture
 
+Live trading containers run on a **remote desktop** (<TAILSCALE_HOST>), accessed via Docker context `finrl-desktop` (`ssh://user@<TAILSCALE_HOST>`). Use `docker --context finrl-desktop` or `./scripts/manage_strategies.sh` (auto-sets context) for all monitoring commands. **Never use bare `docker ps`/`docker exec`** — that targets local Docker Desktop which has no trading containers.
+
 Live trading containers export health + metrics for observability.
 
 ### Health Check (Layer 0)
