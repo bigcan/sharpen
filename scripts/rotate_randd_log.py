@@ -30,7 +30,7 @@ RANDD_HEADER = """\
 **Purpose:** Rolling write buffer for R&D history.  Older entries are archived
 to `randd_archive/YYYY-MM.md` via `scripts/rotate_randd_log.py`.
 **Sorting Protocol:** Reverse chronological order.  New entries go at the TOP,
-immediately after this header.  Run `rotate_randd_log.py` when the file exceeds ~300 KB.
+immediately after this header.  Run `rotate_randd_log.py` when the file exceeds ~150 KB.
 
 ---
 """
