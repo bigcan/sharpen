@@ -89,6 +89,11 @@ class ContinuousSwingEnv(gym.Env):
         self._obs_mode = config.get("obs_mode", "window")
         self._summary_feature_indices = config.get("summary_feature_indices", [0, 1, 2, 6, 7])
 
+        # PRISM L1: Regime features injected into private state
+        self._prism_enabled = bool(config.get("prism_enabled", False))
+        self._prism_dim = 13  # GAHMM probs (6) + composite (1) + Chronos (6)
+        self._private_dim = 5 + (self._prism_dim if self._prism_enabled else 0)
+
         # Spaces
         self.action_space = gym.spaces.Box(
             low=-1.0, high=1.0, shape=(1,), dtype=np.float32,
@@ -111,7 +116,7 @@ class ContinuousSwingEnv(gym.Env):
                     shape=(self.window_size, features_per_scale), dtype=np.float32,
                 )
         obs_spaces["private"] = gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(5,), dtype=np.float32,
+            low=-np.inf, high=np.inf, shape=(self._private_dim,), dtype=np.float32,
         )
         self.observation_space = gym.spaces.Dict(obs_spaces)
 
@@ -366,6 +371,9 @@ class ContinuousSwingEnv(gym.Env):
                 arr = step_data[key]
                 # Avoid redundant copy if already float32 (handler typically returns f32)
                 obs[key] = arr if arr.dtype == np.float32 else arr.astype(np.float32)
+        # PRISM L1: Pass through regime features for private state
+        if "prism" in step_data:
+            obs["prism"] = step_data["prism"]
         return obs
 
     def _get_private_state(self) -> np.ndarray:
@@ -406,7 +414,17 @@ class ContinuousSwingEnv(gym.Env):
         else:
             atr_ratio = 0.5
 
-        return np.array([pos, pnl_proxy, time_sin, time_cos, atr_ratio], dtype=np.float32)
+        base = np.array([pos, pnl_proxy, time_sin, time_cos, atr_ratio], dtype=np.float32)
+
+        # PRISM L1: Append regime features from handler step data
+        if self._prism_enabled:
+            if self._current_obs and "prism" in self._current_obs:
+                prism = self._current_obs["prism"]
+            else:
+                prism = np.zeros(self._prism_dim, dtype=np.float32)
+            return np.concatenate([base, prism])
+
+        return base
 
     def _get_observation(self) -> dict[str, np.ndarray]:
         """Build full observation dict."""
