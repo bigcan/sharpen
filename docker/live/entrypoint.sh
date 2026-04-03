@@ -62,15 +62,23 @@ if [ -f "$CONFIG_OVERRIDE" ]; then
     cp "$CONFIG_OVERRIDE" "$CONFIG_RUNTIME"
 fi
 
-# Override IB host/port in config if non-default
+# Override IB host/port in config if non-default (uses PyYAML for safe YAML mutation)
 if [ "$BROKER_TYPE" = "ib" ]; then
-    if [ "$IB_HOST" != "127.0.0.1" ]; then
-        sed -i "s|host:.*\"127.0.0.1\"|host: \"${IB_HOST}\"|" "$CONFIG_RUNTIME"
-        echo "Overrode exchange.host -> ${IB_HOST}"
-    fi
-    if [ "$IB_PORT" != "4002" ]; then
-        sed -i "s|paper_port:.*4002|paper_port: ${IB_PORT}|" "$CONFIG_RUNTIME"
-        echo "Overrode paper_port -> ${IB_PORT}"
+    if [ "$IB_HOST" != "127.0.0.1" ] || [ "$IB_PORT" != "4002" ]; then
+        python3 -c "
+import yaml, sys
+with open('${CONFIG_RUNTIME}') as f:
+    cfg = yaml.safe_load(f)
+host, port = '${IB_HOST}', int('${IB_PORT}')
+if host != '127.0.0.1':
+    cfg.setdefault('exchange', {})['host'] = host
+    print(f'Overrode exchange.host -> {host}')
+if port != 4002:
+    cfg.setdefault('exchange', {})['paper_port'] = port
+    print(f'Overrode exchange.paper_port -> {port}')
+with open('${CONFIG_RUNTIME}', 'w') as f:
+    yaml.dump(cfg, f, default_flow_style=False, sort_keys=False)
+"
     fi
 fi
 
@@ -100,4 +108,4 @@ sys.exit(0 if cfg.get('prism', {}).get('enabled', False) else 1)
 fi
 
 echo "Starting ${STRATEGY_NAME}..."
-exec python "$RUNNER" --config "$CONFIG_RUNTIME"
+exec python3 "$RUNNER" --config "$CONFIG_RUNTIME"

@@ -246,12 +246,50 @@ class PRISMClient:
 
     def _get(self, path: str, params: Dict | None = None) -> Dict:
         url = f"{self.base_url}{path}"
-        resp = self._session.get(url, params=params, timeout=self.timeout)
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_with_retry(
+            lambda: self._session.get(url, params=params, timeout=self.timeout),
+        )
 
     def _post(self, path: str, json_data: Dict) -> Dict:
         url = f"{self.base_url}{path}"
-        resp = self._session.post(url, json=json_data, timeout=self.timeout)
-        resp.raise_for_status()
-        return resp.json()
+        return self._request_with_retry(
+            lambda: self._session.post(url, json=json_data, timeout=self.timeout),
+        )
+
+    def _request_with_retry(
+        self,
+        request_fn,
+        max_retries: int = 2,
+        retry_delay: float = 0.5,
+    ) -> Dict:
+        """Execute an HTTP request with retry on transient 5xx errors."""
+        import time as _time
+
+        last_exc: Optional[Exception] = None
+        for attempt in range(max_retries):
+            try:
+                resp = request_fn()
+                resp.raise_for_status()
+                return resp.json()
+            except requests.exceptions.HTTPError as e:
+                status = e.response.status_code if e.response is not None else 0
+                if status in (502, 503, 504) and attempt < max_retries - 1:
+                    logger.debug(
+                        f"PRISM API {status} (attempt {attempt + 1}/{max_retries}), "
+                        f"retrying in {retry_delay}s",
+                    )
+                    _time.sleep(retry_delay)
+                    last_exc = e
+                    continue
+                raise
+            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as e:
+                if attempt < max_retries - 1:
+                    logger.debug(
+                        f"PRISM API connection error (attempt {attempt + 1}/{max_retries}), "
+                        f"retrying in {retry_delay}s",
+                    )
+                    _time.sleep(retry_delay)
+                    last_exc = e
+                    continue
+                raise
+        raise last_exc  # type: ignore[misc]

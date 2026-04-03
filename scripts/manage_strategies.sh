@@ -140,7 +140,7 @@ cmd_up() {
     if [ -z "$target" ]; then
         echo "Starting all strategies..."
         $DC --profile all up -d
-    elif [[ "$target" == "ib" || "$target" == "crypto" || "$target" == "ctrader" || "$target" == "monitoring" || "$target" == "prism" || "$target" == "all" ]]; then
+    elif [[ "$target" == "ib" || "$target" == "crypto" || "$target" == "ctrader" || "$target" == "velotrade" || "$target" == "sg1" || "$target" == "monitoring" || "$target" == "prism" || "$target" == "all" ]]; then
         echo "Starting profile: $target"
         $DC --profile "$target" up -d
     else

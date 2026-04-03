@@ -19,7 +19,7 @@ exchange:
 # --- Agent ---
 agent:
   checkpoint_path: "checkpoints/gmgp1_sac_v4/checkpoint_final.pth"
-  device: "cuda"                    # "cuda" | "cpu"
+  device: "cpu"                     # CPU inference (Docker image is CPU-only PyTorch)
   torch_compile: false              # Must be false for live inference
 
 # --- SAC Hyperparameters (must match training checkpoint) ---

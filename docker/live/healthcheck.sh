@@ -22,7 +22,8 @@ if [ ! -f "$HEALTH_FILE" ]; then
 fi
 
 # --- Read health file with jq-free parsing (python is available in our image) ---
-STATUS=$(python3 -c "
+PYTHON=$(command -v python3 || command -v python)
+STATUS=$($PYTHON -c "
 import json, sys, time
 
 try:
