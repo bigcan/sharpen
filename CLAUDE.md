@@ -243,7 +243,7 @@ Skills are split by scope. **User-scope** (`~/.claude/skills/`): generic methodo
 |-------|---------|------|
 | **Deploy** | User requests GPU launch, instance management, or run deployment. | `.claude/skills/deploy/SKILL.md` |
 | **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. | `.claude/skills/monitor/SKILL.md` |
-| **Dashboard** | **Auto** after `/monitor`, during `/sync`, on experiment state changes. | `.claude/skills/dashboard/SKILL.md` |
+| **Dashboard** | **Auto** after `/monitor`, on experiment state changes. | `.claude/skills/dashboard/SKILL.md` |
 | **Docker** | Docker, containers, compose, build, start/stop strategies, IBGateway, VNC, Portainer. **Auto** before live-trading container launch. | `.claude/skills/docker/SKILL.md` |
 | **Live-Trading** | Start/stop paper/live trading, launch strategy, `--mainnet`, graduation, kill file, risk config, cTrader OAuth. | `.claude/skills/live-trading/SKILL.md` |
 | **Live-Monitor** | Live P&L, positions, drawdown, "how are my strategies", container health, Grafana, Telegram alerts. **Auto** after live-trading launch. Periodic via `/loop`. | `.claude/skills/live-monitor/SKILL.md` |
@@ -253,7 +253,7 @@ Skills are split by scope. **User-scope** (`~/.claude/skills/`): generic methodo
 - Deploy request -> **Monitor** -> **Optimization** (SPS check) -> **Deploy** -> **Monitor** -> **Dashboard**
 - `/monitor` -> **Monitor** -> **Dashboard**. Experiment state change -> **Dashboard**.
 - `/monitor` (with live trading active) -> **Monitor** (training) + **Live-Monitor** (trading) -> **Dashboard**
-- Session start -> **Memory** boot. `/sync` -> **Memory** -> **Dashboard** -> git commit.
+- Session start -> **Memory** boot. `/sync` -> **Memory** -> git commit.
 - Experiment result / HPO complete -> **WandB** -> **Memory** -> **Dashboard** -> git commit.
 - Run stall/crash -> **Monitor** -> **WandB** (`diagnose_run`).
 - Research question -> **Researcher** -> if GO -> **Architect** -> implement -> **Audit**.
@@ -263,7 +263,7 @@ Skills are split by scope. **User-scope** (`~/.claude/skills/`): generic methodo
 - Paper graduation -> **Live-Monitor** (verify paper metrics) -> **Live-Trading** (switch to `--mainnet`)
 - Container issue / alert triage -> **Live-Monitor** -> **Docker** (restart if needed)
 - "audit skills" / "skill health" -> **Skill-Evolve** (full) -> **Memory** (log findings).
-- `/sync` -> Memory -> **Skill-Evolve** (staleness check only, lightweight) -> Dashboard -> git commit.
+- `/sync` -> Memory -> **Skill-Evolve** (staleness check only, lightweight) -> git commit.
 - New skill created -> **Skill-Evolve** (onboarding structural check).
 
 **Disambiguation (Monitor vs Live-Monitor):**

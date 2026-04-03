@@ -39,6 +39,7 @@ Q_DIVERGENCE_THRESHOLD = 1e4
 STALL_MINUTES = 30
 GPU_UTIL_LOW = 30          # % — warn if GPU < 30% with active run
 GPU_MEM_HIGH = 95          # % — warn if GPU memory > 95%
+RECENT_FINISHED_HOURS = 24 # lookback window for recently finished runs
 
 # SPS thresholds by GPU tier and algorithm
 # BDQ/IQN are env-step-bound (~500+ SPS); SAC is gradient-bound (~4 SPS)
@@ -281,6 +282,105 @@ def fetch_wandb_runs():
         log(f"WandB fetch error: {e}", "ERROR")
 
     return runs
+
+
+def fetch_recently_finished_runs(hours=RECENT_FINISHED_HOURS):
+    """Fetch WandB runs that finished/crashed/failed in the last N hours."""
+    import wandb
+    from datetime import timedelta
+
+    api = wandb.Api()
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    cutoff_iso = cutoff.strftime('%Y-%m-%dT%H:%M:%S')
+
+    runs = []
+    try:
+        finished = api.runs(
+            WANDB_PROJECT,
+            filters={
+                "state": {"$in": ["finished", "crashed", "failed"]},
+                "updatedAt": {"$gte": cutoff_iso},
+            },
+            order="-updated_at",
+        )
+        for run in finished:
+            runs.append(_extract_finished_summary(run))
+    except Exception as e:
+        log(f"WandB recently-finished fetch error: {e}", "ERROR")
+
+    return runs
+
+
+def _extract_finished_summary(run):
+    """Extract final metrics from a completed WandB run."""
+    summary = run.summary._json_dict
+    step = summary.get('_step', summary.get('step', 0))
+
+    # Experiment tag
+    exp_tags = [t for t in (run.tags or []) if not t.startswith('gpuhub') and not t.startswith('rtx')]
+    exp_tag = exp_tags[0].upper() if exp_tags else "?"
+
+    # Final PF
+    is_alphaseek = _detect_alphaseek(run.tags, run.config or {})
+    hpo_pf = summary.get('hpo/best_profit_factor', summary.get('hpo/best_pf'))
+    eval_pf = summary.get('eval/profit_factor')
+    bt_pf = summary.get('Profit_Factor_Daily')
+    best_pf = bt_pf or hpo_pf or eval_pf
+    if not best_pf and is_alphaseek:
+        best_pf = _alphaseek_best_pf(summary)
+
+    # Duration
+    elapsed_secs = _get_run_elapsed(run)
+    # For finished runs, compute actual duration from created_at to updated_at
+    duration_str = "--"
+    try:
+        created = run.created_at
+        updated_at = run.summary._json_dict.get('_timestamp')
+        if isinstance(created, str):
+            created_dt = datetime.fromisoformat(created.replace('Z', '+00:00'))
+            if updated_at and isinstance(updated_at, (int, float)):
+                end_dt = datetime.fromtimestamp(updated_at, tz=timezone.utc)
+            else:
+                end_dt = datetime.now(timezone.utc)
+            dur_secs = (end_dt - created_dt).total_seconds()
+            duration_str = _format_eta(max(0, dur_secs))
+        elif isinstance(created, (int, float)):
+            end_ts = updated_at if isinstance(updated_at, (int, float)) else time.time()
+            dur_secs = end_ts - created
+            duration_str = _format_eta(max(0, dur_secs))
+    except Exception:
+        pass
+
+    # Finished-ago
+    finished_ago_str = "--"
+    last_ts = summary.get('_timestamp')
+    if last_ts and isinstance(last_ts, (int, float)):
+        ago_mins = (time.time() - last_ts) / 60
+        if ago_mins < 60:
+            finished_ago_str = f"{ago_mins:.0f}m ago"
+        elif ago_mins < 1440:
+            finished_ago_str = f"{ago_mins / 60:.1f}h ago"
+        else:
+            finished_ago_str = f"{ago_mins / 1440:.1f}d ago"
+
+    # SPS (final)
+    sps = summary.get('train/sps') or summary.get('hpo/heartbeat_sps')
+
+    # Exit status
+    state = run.state  # "finished", "crashed", "failed"
+
+    return {
+        "run_id": run.id,
+        "run_name": run.name,
+        "exp_tag": exp_tag,
+        "state": state,
+        "tags": run.tags or [],
+        "step": step,
+        "sps": round(sps, 1) if sps else None,
+        "best_pf": round(best_pf, 4) if best_pf else None,
+        "duration": duration_str,
+        "finished_ago": finished_ago_str,
+    }
 
 
 def _format_eta(seconds):
@@ -751,7 +851,44 @@ def format_wandb_table(wandb_runs):
     return "\n".join(lines)
 
 
-def format_summary(hw_results, wandb_runs):
+def format_finished_table(finished_runs, hours):
+    """Format recently finished WandB runs as a table."""
+    lines = []
+    lines.append("=" * 100)
+    lines.append(f"  RECENTLY FINISHED RUNS (last {hours}h)")
+    lines.append("=" * 100)
+
+    if not finished_runs:
+        lines.append("  (none)")
+        lines.append("")
+        return "\n".join(lines)
+
+    header = (
+        f"{'Tag':<10} {'RunID':<10} {'Name':<28} "
+        f"{'Step':>10} {'PF':>7} {'Duration':>9} {'Finished':>10} {'Exit':<8}"
+    )
+    lines.append(header)
+    lines.append("-" * 100)
+
+    for run in finished_runs:
+        step_str = f"{run['step']:,}" if run['step'] else "--"
+        pf_str = f"{run['best_pf']:.4f}" if run['best_pf'] else "--"
+        name_str = (run['run_name'] or run['run_id'])[:28]
+        exit_str = run['state'].upper()
+        if exit_str == "FINISHED":
+            exit_str = "OK"
+
+        lines.append(
+            f"{run['exp_tag']:<10} {run['run_id']:<10} {name_str:<28} "
+            f"{step_str:>10} {pf_str:>7} {run['duration']:>9} "
+            f"{run['finished_ago']:>10} {exit_str:<8}",
+        )
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_summary(hw_results, wandb_runs, finished_runs=None):
     """One-line summary."""
     total_gpus = sum(len(hw["gpus"]) for hw in hw_results)
     active_gpus = sum(
@@ -768,12 +905,21 @@ def format_summary(hw_results, wandb_runs):
     hw_alerts = sum(len(hw.get("alerts", [])) for hw in hw_results)
     run_alerts = sum(len(r.get("alerts", [])) for r in wandb_runs)
 
+    finished_runs = finished_runs or []
+    n_finished = len(finished_runs)
+    n_crashed = sum(1 for r in finished_runs if r["state"] in ("crashed", "failed"))
+
     parts = [
         f"GPUs: {active_gpus}/{total_gpus} active",
         f"Instances: {len(hw_results) - unreachable}/{len(hw_results)} reachable",
         f"Runs: {n_runs} (OK:{n_ok} WARN:{n_warn} CRIT:{n_crit})",
-        f"Alerts: {hw_alerts + run_alerts}",
     ]
+    if n_finished:
+        finished_detail = f"Finished: {n_finished}"
+        if n_crashed:
+            finished_detail += f" ({n_crashed} crashed)"
+        parts.append(finished_detail)
+    parts.append(f"Alerts: {hw_alerts + run_alerts}")
 
     lines = [
         "-" * 120,
@@ -784,13 +930,16 @@ def format_summary(hw_results, wandb_runs):
     return "\n".join(lines)
 
 
-def format_json(hw_results, wandb_runs):
+def format_json(hw_results, wandb_runs, finished_runs=None):
     """JSON output for programmatic consumption."""
-    return json.dumps({
+    data = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "hardware": hw_results,
         "runs": wandb_runs,
-    }, indent=2, default=str)
+    }
+    if finished_runs is not None:
+        data["recently_finished"] = finished_runs
+    return json.dumps(data, indent=2, default=str)
 
 
 # ─── Anomaly: Orphan Detection ───────────────────────────────────────────────
@@ -844,10 +993,15 @@ def main():
     parser.add_argument("--hw-only", action="store_true", help="Skip WandB queries")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--timeout", type=int, default=30, help="SSH timeout in seconds")
+    parser.add_argument("--recent", type=int, default=RECENT_FINISHED_HOURS,
+                        help=f"Lookback hours for recently finished runs (default: {RECENT_FINISHED_HOURS})")
+    parser.add_argument("--no-finished", action="store_true",
+                        help="Skip recently-finished runs query")
     args = parser.parse_args()
 
     hw_results = []
     wandb_runs = []
+    finished_runs = []
 
     # 1. Probe hardware
     if not args.wandb_only:
@@ -858,9 +1012,11 @@ def main():
             for name, config in instances.items():
                 hw_results.append(probe_instance(name, config, timeout=args.timeout))
 
-    # 2. Fetch WandB runs
+    # 2. Fetch WandB runs (active + recently finished)
     if not args.hw_only:
         wandb_runs = fetch_wandb_runs()
+        if not args.no_finished:
+            finished_runs = fetch_recently_finished_runs(hours=args.recent)
 
     # 3. Cross-reference
     if hw_results and wandb_runs:
@@ -877,7 +1033,7 @@ def main():
 
     # 5. Output
     if args.json:
-        output = format_json(hw_results, wandb_runs)
+        output = format_json(hw_results, wandb_runs, finished_runs)
     else:
         parts = []
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -887,12 +1043,14 @@ def main():
             parts.append(format_hw_table(hw_results))
         if wandb_runs or not args.hw_only:
             parts.append(format_wandb_table(wandb_runs))
+        if finished_runs:
+            parts.append(format_finished_table(finished_runs, args.recent))
         if orphan_alerts:
             parts.append("  ORPHAN ALERTS:")
             parts.extend(f"    {a}" for a in orphan_alerts)
             parts.append("")
-        if hw_results or wandb_runs:
-            parts.append(format_summary(hw_results, wandb_runs))
+        if hw_results or wandb_runs or finished_runs:
+            parts.append(format_summary(hw_results, wandb_runs, finished_runs))
 
         output = "\n".join(parts)
 
@@ -900,6 +1058,7 @@ def main():
 
     # Log
     log(f"Fleet check: {len(hw_results)} instances, {len(wandb_runs)} runs, "
+        f"{len(finished_runs)} recently finished, "
         f"{sum(len(r.get('alerts', [])) for r in wandb_runs)} run alerts, "
         f"{sum(len(h.get('alerts', [])) for h in hw_results)} hw alerts")
 
