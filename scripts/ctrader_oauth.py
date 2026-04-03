@@ -323,6 +323,8 @@ def run_refresh(client_id: str, client_secret: str) -> None:
 
 
 def main():
+    global CALLBACK_PORT, REDIRECT_URI, ENV_FILE
+
     parser = argparse.ArgumentParser(
         description="cTrader Open API OAuth helper — get/refresh trading credentials",
     )
@@ -340,7 +342,6 @@ def main():
     )
     args = parser.parse_args()
 
-    global CALLBACK_PORT, REDIRECT_URI, ENV_FILE
     CALLBACK_PORT = args.port
     REDIRECT_URI = f"http://localhost:{CALLBACK_PORT}/callback"
     ENV_FILE = args.env_file
