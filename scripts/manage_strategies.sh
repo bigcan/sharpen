@@ -30,6 +30,11 @@ COMPOSE_PRISM="$COMPOSE_DIR/docker-compose.prism.yaml"
 COMPOSE_DESKTOP="$COMPOSE_DIR/docker-compose.desktop.yaml"
 CONTEXT_NAME="finrl-desktop"
 
+# Always target the remote desktop for operational commands.
+# The DOCKER_CONTEXT env var is respected by both `docker` and `docker compose`.
+# Override with: DOCKER_CONTEXT=default ./scripts/manage_strategies.sh ps  (for local)
+export DOCKER_CONTEXT="${DOCKER_CONTEXT:-$CONTEXT_NAME}"
+
 # Detect docker compose command (v2 plugin vs v1 standalone)
 if docker compose version &>/dev/null; then
     DC_BIN="docker compose"
@@ -99,8 +104,8 @@ cmd_setup() {
 cmd_context() {
     local target="${1:-}"
     if [ -z "$target" ]; then
-        echo "Current context:"
-        docker context show
+        echo "Current context (DOCKER_CONTEXT env): ${DOCKER_CONTEXT:-<unset>}"
+        echo "Active context (docker context show): $(docker context show)"
         echo ""
         echo "Available contexts:"
         docker context ls
