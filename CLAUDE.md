@@ -239,6 +239,7 @@ Skills are split: **user-scope** (`~/.claude/skills/`) for reusable methodology,
 | **Docker** | Docker, containers, compose, build, start/stop strategies, IBGateway, VNC, Portainer. **Auto** before live-trading container launch. | Project | `.agent/skills/docker/SKILL.md` |
 | **Live-Trading** | Start/stop paper/live trading, launch strategy, `--mainnet`, graduation, kill file, risk config, cTrader OAuth. | Project | `.agent/skills/live-trading/SKILL.md` |
 | **Live-Monitor** | Live P&L, positions, drawdown, "how are my strategies", container health, Grafana, Telegram alerts. **Auto** after live-trading launch. Periodic via `/loop`. | Project | `.agent/skills/live-monitor/SKILL.md` |
+| **Skill-Evolve** | "audit skills", "skill health", "improve skills". **Auto** during `/sync` staleness check. **Auto** after new skill creation. | Project | `.agent/skills/skill-evolve/SKILL.md` |
 
 **Chaining rules:**
 - Code change / implementation complete -> **Audit** (mandatory). +**Math** if formulas. +**Optimization** if perf.
@@ -254,6 +255,9 @@ Skills are split: **user-scope** (`~/.claude/skills/`) for reusable methodology,
 - "How are my strategies" (live) -> **Live-Monitor** -> **Dashboard**
 - Paper graduation -> **Live-Monitor** (verify paper metrics) -> **Live-Trading** (switch to `--mainnet`)
 - Container issue / alert triage -> **Live-Monitor** -> **Docker** (restart if needed)
+- "audit skills" / "skill health" -> **Skill-Evolve** (full) -> **Memory** (log findings).
+- `/sync` -> Memory -> **Skill-Evolve** (staleness check only, lightweight) -> Dashboard -> git commit.
+- New skill created -> **Skill-Evolve** (onboarding structural check).
 
 **Disambiguation (Monitor vs Live-Monitor):**
 
@@ -264,6 +268,7 @@ Skills are split: **user-scope** (`~/.claude/skills/`) for reusable methodology,
 | "check containers" / Docker status | **Docker** |
 | "deploy to GPU" | **Deploy** |
 | "start trading" / "go live" | **Live-Trading** + **Docker** |
+| "audit skills" / "skill health" | **Skill-Evolve** (ecosystem) |
 
 ## Memory Protocol (2-Tier + Cloud Search Index)
 

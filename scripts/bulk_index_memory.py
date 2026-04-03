@@ -303,13 +303,49 @@ def get_table(db):
         return None
 
 
-def get_existing_prefixes(table, source: str) -> set[str]:
-    """Get first 200 chars of all existing bulk rows for dedup."""
+def _dedup_key(chunk: dict) -> str:
+    """Build dedup key from (date, session) or fall back to header prefix.
+
+    Using date+session is robust to entry edits (corrections don't create
+    duplicates).  For non-R&D chunks (research plan) we fall back to
+    section_path which is stable across re-indexing.
+    """
+    date = chunk.get("date") or ""
+    session = chunk.get("session")
+    if date and session is not None:
+        return f"{date}|S{session}"
+    # Fallback for plan chunks or entries without session numbers
+    section = chunk.get("section_path", "")
+    return f"{chunk.get('doc', '')}|{section[:120]}"
+
+
+def get_existing_keys(table, source: str) -> set[str]:
+    """Get dedup keys for all existing bulk rows."""
     if table is None:
         return set()
     try:
-        rows = table.search().where(f"source = '{source}'").select(["text"]).limit(5000).to_list()
-        return {r["text"][:200] for r in rows}
+        rows = table.search().where(f"source = '{source}'").select(["metadata", "text"]).limit(5000).to_list()
+        keys: set[str] = set()
+        for r in rows:
+            meta = json.loads(r["metadata"]) if isinstance(r["metadata"], str) else r["metadata"]
+            date = meta.get("date") or ""
+            session = meta.get("session")
+            section = meta.get("section_path", "")
+            doc = meta.get("doc", "")
+            # Migration: old rows lack 'date' in metadata — extract from text
+            if not date and r.get("text"):
+                m = re.search(r"^## (\d{4}-\d{2}-\d{2})", r["text"])
+                if m:
+                    date = m.group(1)
+                if session is None:
+                    sm = re.search(r"Session (\d+)", r["text"])
+                    if sm:
+                        session = int(sm.group(1))
+            if date and session is not None:
+                keys.add(f"{date}|S{session}")
+            else:
+                keys.add(f"{doc}|{section[:120]}")
+        return keys
     except Exception as e:
         log.warning("Could not query existing rows: %s", e)
         return set()
@@ -428,8 +464,8 @@ def main():
         log.info("Deleted %d existing bulk rows (--force)", deleted)
 
     # Dedup check
-    existing = get_existing_prefixes(table, SOURCE)
-    new_chunks = [c for c in all_chunks if c["text"][:200] not in existing]
+    existing = get_existing_keys(table, SOURCE)
+    new_chunks = [c for c in all_chunks if _dedup_key(c) not in existing]
     log.info("New chunks to index: %d (skipping %d existing)", len(new_chunks), len(all_chunks) - len(new_chunks))
 
     if not new_chunks:
@@ -458,6 +494,7 @@ def main():
             "scope": None,
             "metadata": json.dumps({
                 "doc": chunk["doc"],
+                "date": chunk.get("date"),
                 "session": chunk.get("session"),
                 "tags": chunk.get("tags", []),
                 "section_path": chunk.get("section_path", ""),
