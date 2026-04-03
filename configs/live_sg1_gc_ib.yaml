@@ -64,7 +64,7 @@ features:
   window_size: 30
   features_per_scale: 8
   norm_span: 120
-  bootstrap_bars: 30000
+  bootstrap_bars: 100000              # 240-min scale needs 360+ bars for EMA(120) convergence
 
 # --- Bar Clock (CME-aware) ---
 bar_clock:

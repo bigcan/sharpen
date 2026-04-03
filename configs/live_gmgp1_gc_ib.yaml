@@ -64,7 +64,10 @@ features:
   window_size: 30
   features_per_scale: 8
   norm_span: 120
-  bootstrap_bars: 30000               # 1-min bars for EMA warmup (~22 trading days)
+  bootstrap_bars: 100000              # 1-min bars for EMA warmup (~73 trading days)
+                                       # 240-min scale needs 360+ bars (3x EMA span=120)
+                                       # 100K / 240 = 417 bars → fully converged
+                                       # IB fetch: ~73 requests @ 11s pacing = ~13 min bootstrap
 
 # --- Bar Clock (CME-aware) ---
 bar_clock:

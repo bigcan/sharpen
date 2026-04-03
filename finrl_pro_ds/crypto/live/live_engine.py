@@ -145,6 +145,10 @@ class LiveTradingEngine:
         # PRISM L2 regime overlay (optional, attached by runner script)
         self._prism_overlay = None
 
+        # Feature warmup: skip trading for N bars after bootstrap if EMA not converged
+        self._warmup_bars = config.get("features", {}).get("warmup_bars", 0)
+        self._warmup_bars_remaining = 0
+
     # -------------------------------------------------------------------
     # Main loop
     # -------------------------------------------------------------------
@@ -169,6 +173,29 @@ class LiveTradingEngine:
         # Bootstrap observation builder if not already done
         if not self.obs_builder.is_ready:
             await self._bootstrap_with_retry()
+
+        # Check feature warmup quality after bootstrap
+        warmup_quality = self.obs_builder.get_warmup_quality()
+        min_quality = min(warmup_quality.values()) if warmup_quality else 1.0
+        if min_quality < 1.0:
+            # Auto-calculate warmup bars if not explicitly configured
+            if self._warmup_bars > 0:
+                self._warmup_bars_remaining = self._warmup_bars
+            else:
+                # Default: skip 10 bars (~2.5h at 15-min) to stabilize
+                self._warmup_bars_remaining = 10
+            logger.warning(
+                f"Feature warmup incomplete (min quality {min_quality:.0%}). "
+                f"Skipping first {self._warmup_bars_remaining} trading bars. "
+                f"Quality per scale: {warmup_quality}",
+            )
+        elif self._warmup_bars > 0:
+            self._warmup_bars_remaining = self._warmup_bars
+            logger.info(
+                f"Feature warmup OK. Explicit warmup_bars={self._warmup_bars} configured.",
+            )
+        else:
+            logger.info(f"Feature warmup OK. Quality: {warmup_quality}")
 
         # FIX BUG-15: Fetch portfolio value BEFORE syncing position so that
         # broker._portfolio_value is set (otherwise get_single_position()
@@ -264,6 +291,21 @@ class LiveTradingEngine:
 
         # --- 2. Update observation builder ---
         self.obs_builder.update(new_bars)
+
+        # --- 2b. Feature warmup skip ---
+        if self._warmup_bars_remaining > 0:
+            self._warmup_bars_remaining -= 1
+            current_close = self.obs_builder.get_current_close()
+            self._prev_close = current_close
+            logger.info(
+                f"[WARMUP] Bar {self._total_bars}: features warming up, "
+                f"holding position. {self._warmup_bars_remaining} bars remaining.",
+            )
+            self._log_step(
+                bar_time, self._current_position,
+                traded=False, skip_reason="feature_warmup",
+            )
+            return
 
         # --- 3. Build observation ---
         current_close = self.obs_builder.get_current_close()
