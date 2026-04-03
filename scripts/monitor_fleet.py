@@ -807,8 +807,12 @@ def detect_orphans(hw_results, wandb_runs):
     unmatched_ids = {r["run_id"] for r in wandb_runs if r.get("instance") == "?"}
 
     # Check for unmatched WandB runs (ghost runs)
+    # Skip live-trading runs — they run on the remote desktop, not GPUHub
     for rid in unmatched_ids:
         run = next(r for r in wandb_runs if r["run_id"] == rid)
+        run_tags = [t.lower() for t in (run.get("tags") or [])]
+        if "live" in run_tags:
+            continue
         alerts.append(
             f"GHOST RUN: WandB run {run['exp_tag']} ({rid}) is 'running' but not found on any instance",
         )
