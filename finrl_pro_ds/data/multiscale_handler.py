@@ -175,6 +175,11 @@ class MultiScaleOHLCVHandler:
             "summary_feature_indices", [0, 1, 2, 6, 7],
         )  # log_return, atr_norm, parkinson_vol, close_z, volume_z
 
+        # PRISM L1: Pre-computed regime features (13 dims)
+        self._prism_features_path = feature_config.get("prism_features_path", None)
+        self._prism_lookup: dict | None = None
+        self._prism_default = np.zeros(13, dtype=np.float32)
+
         self.start_date = pd.to_datetime(start_date) if start_date else None
         self.end_date = pd.to_datetime(end_date) if end_date else None
         self.norm_cutoff_date = pd.to_datetime(norm_cutoff_date) if norm_cutoff_date else None
@@ -183,6 +188,10 @@ class MultiScaleOHLCVHandler:
 
         # Load and process data
         self._load_data()
+
+        # PRISM L1: Load pre-computed regime features if path provided
+        if self._prism_features_path:
+            self._load_prism_features(self._prism_features_path)
 
     def _load_data(self):
         """Load 1-min parquet, resample to each scale, compute features."""
@@ -359,6 +368,11 @@ class MultiScaleOHLCVHandler:
         result["atr"] = float(self._base_atr[self._ptr])
         result["timestamp"] = self._base_timestamps[self._ptr]
 
+        # PRISM L1: Lookup daily regime features for current bar
+        if self._prism_lookup is not None:
+            bar_day = np.datetime64(self._base_timestamps[self._ptr], "D")
+            result["prism"] = self._prism_lookup.get(bar_day, self._prism_default)
+
         self._ptr += 1
         return result
 
@@ -377,6 +391,61 @@ class MultiScaleOHLCVHandler:
         stds = np.where(stds < 1e-8, 0.0, stds)  # Zero out near-zero std
         last = selected[-1]
         return np.concatenate([means, stds, last]).astype(np.float32)
+
+    def _load_prism_features(self, path: str) -> None:
+        """Load pre-computed PRISM features and build date→features lookup.
+
+        Expected parquet columns: gahmm_price_bear/neutral/bull, gahmm_vol_low/normal/high,
+        gahmm_composite_code, chronos_p10/p30/p50/p70/p90, chronos_spread.
+
+        Features are normalized for training:
+        - GAHMM probs: passthrough [0, 1]
+        - Composite code: / 8.0 → [0, 1]
+        - Chronos log-returns: tanh(x * 100) → [-1, 1]
+        - Chronos spread: tanh(x * 50) → [0, 1]
+        """
+        import os
+        if not os.path.exists(path):
+            logger.warning(f"PRISM features file not found: {path} — disabling PRISM L1")
+            return
+
+        prism_df = pd.read_parquet(path)
+        if "date" in prism_df.columns:
+            prism_df["date"] = pd.to_datetime(prism_df["date"])
+            prism_df = prism_df.set_index("date")
+
+        # Build normalized feature vectors per date
+        self._prism_lookup = {}
+        for date, row in prism_df.iterrows():
+            features = np.array([
+                # GAHMM price regime probs (passthrough, already [0, 1])
+                float(row.get("price_bear_prob", 1 / 3)),
+                float(row.get("price_neutral_prob", 1 / 3)),
+                float(row.get("price_bull_prob", 1 / 3)),
+                # GAHMM vol regime probs (passthrough, already [0, 1])
+                float(row.get("vol_low_prob", 1 / 3)),
+                float(row.get("vol_normal_prob", 1 / 3)),
+                float(row.get("vol_high_prob", 1 / 3)),
+                # Composite code: scale to [0, 1]
+                float(row.get("composite_code", 4)) / 8.0,
+                # Chronos log-return quantiles: tanh(x * 100) → [-1, 1]
+                float(np.tanh(row.get("chronos_p10", 0.0) * 100)),
+                float(np.tanh(row.get("chronos_p30", 0.0) * 100)),
+                float(np.tanh(row.get("chronos_p50", 0.0) * 100)),
+                float(np.tanh(row.get("chronos_p70", 0.0) * 100)),
+                float(np.tanh(row.get("chronos_p90", 0.0) * 100)),
+                # Chronos spread: tanh(x * 50) → [0, 1]
+                float(np.tanh(row.get("chronos_spread", 0.0) * 50)),
+            ], dtype=np.float32)
+
+            # Key by numpy datetime64 day for fast lookup
+            day = np.datetime64(pd.Timestamp(date).normalize(), "D")
+            self._prism_lookup[day] = features
+
+        logger.info(
+            f"PRISM L1 features loaded: {len(self._prism_lookup)} dates "
+            f"from {path}",
+        )
 
     def get_lookahead_volatility(self, horizon: int = 100) -> Optional[float]:
         """Lookahead volatility for auxiliary loss (same interface as ParquetDataHandler)."""
