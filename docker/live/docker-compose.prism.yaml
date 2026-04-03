@@ -39,7 +39,7 @@ services:
   # --- PRISM API (FastAPI + Chronos-2 + Dual GAHMM) ---
   prism-api:
     build:
-      context: C:\FinRL\SAFFS
+      context: ../../SAFFS
       dockerfile: Dockerfile
     image: finrl-prism-api:latest
     container_name: prism-api

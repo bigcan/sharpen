@@ -62,12 +62,6 @@ class BarClock:
 
         if self.interval < 60:
             # Sub-hourly: align to minute boundaries within each hour
-            # FIX: Use total minutes from midnight for correct cross-hour alignment
-            total_minutes = now_utc.hour * 60 + now_utc.minute
-            # If exactly on a boundary with 0 seconds, the bar just closed
-            (total_minutes % self.interval == 0
-                           and now_utc.second == 0 and now_utc.microsecond == 0)
-
             current_minute = now_utc.minute
             bars_elapsed = current_minute // self.interval
             next_bar_minute = (bars_elapsed + 1) * self.interval

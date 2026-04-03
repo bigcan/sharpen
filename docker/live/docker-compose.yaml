@@ -47,12 +47,22 @@ x-ib-strategy: &ib-strategy
   network_mode: "service:ibgateway"
   restart: unless-stopped
   healthcheck: *strategy-healthcheck
+  deploy:
+    resources:
+      limits:
+        memory: 2G
+        cpus: "2.0"
 
 x-crypto-strategy: &crypto-strategy
   image: finrl-live-engine:latest
   networks: [finrl-net]
   restart: unless-stopped
   healthcheck: *strategy-healthcheck
+  deploy:
+    resources:
+      limits:
+        memory: 2G
+        cpus: "2.0"
 
 # ============================================================
 #  Infrastructure
@@ -126,7 +136,7 @@ services:
       METRICS_PORT: "9101"
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1_v5_l1_seed456:/app/checkpoints/gmgp1_v5_l1_seed456:ro
-      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_gmgp1_gc_ib.yaml:/app/configs/live_gmgp1_gc_ib.yaml
+      - ${CONFIG_DIR:?Set CONFIG_DIR}/live_gmgp1_gc_ib.yaml:/app/configs/live_gmgp1_gc_ib.yaml:ro
       - gmgp1-gold-logs:/app/logs
 
   sg1-gold:

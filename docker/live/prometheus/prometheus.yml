@@ -41,14 +41,18 @@ scrape_configs:
         labels:
           strategy: "gmgp1-xauusd"
           broker: "ctrader"
+      - targets: ["velotrade-btc:9107"]
+        labels:
+          strategy: "velotrade-btc"
+          broker: "dxtrade"
 
-  # --- PRISM API ---
+  # --- PRISM API (scrape /metrics if exposed; /health is JSON not Prometheus format) ---
   - job_name: "prism"
     static_configs:
       - targets: ["prism-api:8001"]
         labels:
           service: "prism-api"
-    metrics_path: /health
+    metrics_path: /metrics
     scrape_interval: 30s
 
   # --- Prometheus self-monitoring ---
