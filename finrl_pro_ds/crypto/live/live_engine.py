@@ -145,6 +145,22 @@ class LiveTradingEngine:
         # PRISM L2 regime overlay (optional, attached by runner script)
         self._prism_overlay = None
 
+        # Signal gate (SG-1): skip low-signal bars, mirroring training wrapper
+        gate_cfg = config.get("signal_gate", {})
+        self._signal_gate_enabled = gate_cfg.get("enabled", False)
+        if self._signal_gate_enabled:
+            self._gate_mode = gate_cfg.get("gate_mode", "composite")
+            self._gate_atr_threshold = float(gate_cfg.get("atr_threshold", 0.3))
+            self._gate_parkinson_threshold = float(gate_cfg.get("parkinson_threshold", 0.02))
+            self._gate_volume_threshold = float(gate_cfg.get("volume_threshold", 0.5))
+            self._gate_return_threshold = float(gate_cfg.get("return_threshold", 0.002))
+            self._gate_max_hold_bars = int(gate_cfg.get("max_hold_bars", 20))
+            self._gate_always_on_first = bool(gate_cfg.get("gate_always_on_first", True))
+            self._gate_base_scale = config.get("features", {}).get("scales", [3])[0]
+            self._gate_consecutive_holds = 0
+            self._gate_total_skipped = 0
+            self._gate_is_first_bar = True
+
         # Feature warmup: skip trading for N bars after bootstrap if EMA not converged
         self._warmup_bars = config.get("features", {}).get("warmup_bars", 0)
         self._warmup_bars_remaining = 0
@@ -227,7 +243,8 @@ class LiveTradingEngine:
             f"  Position: {self._current_position:.4f}\n"
             f"  Deadband: {self._deadband_threshold}\n"
             f"  Scales: {self.obs_builder.scales}\n"
-            f"  Bar interval: {self.bar_clock.interval}min",
+            f"  Bar interval: {self.bar_clock.interval}min\n"
+            f"  Signal gate: {'enabled (' + self._gate_mode + ')' if self._signal_gate_enabled else 'disabled'}",
         )
 
         # Background task: update Prometheus metrics between bars so Grafana
@@ -304,6 +321,16 @@ class LiveTradingEngine:
             self._log_step(
                 bar_time, self._current_position,
                 traded=False, skip_reason="feature_warmup",
+            )
+            return
+
+        # --- 2c. Signal gate check (SG-1: skip low-signal bars) ---
+        if not self._check_signal_gate():
+            current_close = self.obs_builder.get_current_close()
+            self._prev_close = current_close
+            self._log_step(
+                bar_time, self._current_position,
+                traded=False, skip_reason="signal_gate_closed",
             )
             return
 
@@ -453,6 +480,58 @@ class LiveTradingEngine:
             )
 
         return float(np.clip(action[0, 0].cpu().item(), -1.0, 1.0))
+
+    def _check_signal_gate(self) -> bool:
+        """Check if current bar passes signal gate. Returns True if gate open.
+
+        Mirrors SignalGatedWrapper._gate_open() from training. Feature layout:
+            idx 0: log_return, 1: atr_norm, 2: parkinson_vol, 7: volume_z
+        """
+        if not self._signal_gate_enabled:
+            return True
+
+        # First bar after startup always passes (matches training wrapper)
+        if self._gate_is_first_bar and self._gate_always_on_first:
+            self._gate_is_first_bar = False
+            return True
+
+        # Safety cap: force open after max consecutive holds
+        if self._gate_consecutive_holds >= self._gate_max_hold_bars:
+            self._gate_consecutive_holds = 0
+            return True
+
+        features = self.obs_builder._scale_features.get(self._gate_base_scale)
+        if features is None or len(features) == 0:
+            return True  # Passthrough if no features
+
+        latest = features[-1]
+        atr_norm = float(latest[1])
+        parkinson = float(latest[2])
+        volume_z = float(latest[7]) if len(latest) > 7 else 0.0
+
+        if self._gate_mode == "return":
+            gate_open = abs(float(latest[0])) > self._gate_return_threshold
+        elif self._gate_mode == "atr":
+            gate_open = atr_norm > self._gate_atr_threshold
+        elif self._gate_mode == "parkinson":
+            gate_open = parkinson > self._gate_parkinson_threshold
+        elif self._gate_mode == "volume":
+            gate_open = abs(volume_z) > self._gate_volume_threshold
+        else:
+            # Composite: ANY signal exceeding threshold opens the gate
+            gate_open = (
+                atr_norm > self._gate_atr_threshold
+                or parkinson > self._gate_parkinson_threshold
+                or abs(volume_z) > self._gate_volume_threshold
+            )
+
+        if gate_open:
+            self._gate_consecutive_holds = 0
+        else:
+            self._gate_consecutive_holds += 1
+            self._gate_total_skipped += 1
+
+        return gate_open
 
     # -------------------------------------------------------------------
     # Bootstrap

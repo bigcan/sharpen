@@ -35,17 +35,18 @@ agent:
   device: "cpu"
   torch_compile: false                 # Must be false for live inference
 
-# --- SAC Hyperparameters (must match training checkpoint) ---
+# --- SAC Hyperparameters (Phase 1b W2 narrow HPO best — must match checkpoint) ---
 agents:
   sac:
-    lr_actor: 3.0e-4
-    lr_critic: 3.0e-4
-    lr_alpha: 3.0e-4
-    gamma: 0.99
-    tau: 0.005
-    batch_size: 256
-    buffer_size: 1000000
-    initial_alpha: 0.2
+    lr_actor: 0.00022148365220787234
+    lr_critic: 0.00018486046430982398
+    lr_alpha: 0.000642523828301745
+    gamma: 0.9677944079144885
+    tau: 0.0020470394844356323
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.1476793336332415
+    gradient_clip: 9.281178071284028
 
 # --- Network (must match training checkpoint exactly) ---
 network:
@@ -58,17 +59,28 @@ network:
   fusion_dim: 256
   window_size: 30
 
-# --- Features (must match training config) ---
+# --- Features (must match training config: sg1_l1_multiseed.yaml) ---
 features:
-  scales: [15, 60, 240]
+  scales: [3, 15, 60]
   window_size: 30
   features_per_scale: 8
   norm_span: 120
-  bootstrap_bars: 100000              # 240-min scale needs 360+ bars for EMA(120) convergence
+  asset_class: "cme_futures"
+  bootstrap_bars: 30000               # 60-min scale needs ~7200 1-min bars for EMA(120). 30K is 2x safe.
 
-# --- Bar Clock (CME-aware) ---
+# --- Signal Gate (must match training — agent trained with composite gating) ---
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.3
+  parkinson_threshold: 0.02
+  volume_threshold: 0.5
+  max_hold_bars: 20
+  gate_always_on_first: true
+
+# --- Bar Clock (CME-aware, 3-min bars for SG-1) ---
 bar_clock:
-  base_interval_minutes: 15
+  base_interval_minutes: 3
   execution_delay_seconds: 10.0
   max_late_seconds: 60.0
 
@@ -91,7 +103,7 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "sg1", "Gold", "SAC", "15min", "IB", "paper", "GC", "COMEX"]
+  tags: ["live", "sg1", "Gold", "SAC", "3min", "IB", "paper", "GC", "COMEX", "signal-gated"]
 
 # --- Safety ---
 safety:
