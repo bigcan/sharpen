@@ -1,0 +1,127 @@
+# Market Making: SAC + LOB Microstructure + 3D Action — BTC/USDT 10s
+# Stage 4 — Phase 4: dYdX v4 Maker Rebate Economics
+# Venue: dYdX v4 (Tier 7 steady-state: -1.1 bps maker rebate)
+#
+# Key insight: MM bot generates ~$48M/day notional → reaches Tier 7 in ~4 days.
+# Steady-state economics: net per fill = -1.1bp rebate + 0.5bp adverse = +0.6bp INCOME.
+# The rebate alone exceeds adverse selection cost → every fill is profitable by default.
+#
+# Changes from mm_sac_btc_lob_10s.yaml (v3, Binance):
+#   1. maker_fee: -0.00011 (dYdX Tier 7 rebate) instead of 0.0
+#   2. fee_schedule: steady-state -1.1bp from step 0 (no zero-fee HPO mistake)
+#   3. Reward mode: HPO searches {dsr_pv, pv_return} (best v3 modes)
+#   4. Wider deadband HPO range (v3 showed 0.15-0.25 optimal)
+#
+# Data: same BTC LOB 10s parquet (venue-agnostic OHLCV, Binance LOB proxy)
+# TODO: Collect dYdX-specific LOB data for calibration
+
+data:
+  file_path: "data/processed/btcusdt_lob_10s.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "lob"
+  train_start_date: "2025-10-24"
+  train_end_date: "2025-11-03"
+  val_start_date: "2026-02-07"
+  val_end_date: "2026-02-24"
+  test_start_date: "2026-03-15"
+  test_end_date: "2026-03-21"
+  norm_cutoff_date: "2026-02-07"
+
+features:
+  scales: [1]
+  window_size: 30
+  features_per_scale: 8
+  n_lob_features: 8
+  asset_class: "crypto"
+
+env:
+  mdp_version: "v8"
+  bar_duration_seconds: 10
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  n_lob_features: 8
+  # dYdX Tier 7 maker rebate: -0.011% = -1.1 bps
+  # Agent EARNS money on every fill (rebate > adverse selection)
+  maker_fee: -0.00011
+  base_spread_bps: 0.15          # BTC spread similar on dYdX vs Binance
+  spread_min_mult: 0.5
+  spread_max_mult: 5.0
+  max_skew_bps: 2.0
+  max_order_size: 0.5
+  max_inventory: 0.5
+  inventory_hard_stop: 0.8
+  min_rest_bars: 1
+  deadband_threshold: 0.1
+  episode_length: 3600
+  random_start: true
+  max_drawdown_pct: 0.10
+  fill_model: "volume_based"
+  adverse_slippage_bps: 0.5      # TODO: recalibrate from dYdX LOB data
+  adverse_velocity_threshold: 0.001
+  queue_depth_multiplier: 15.0   # TODO: recalibrate from dYdX LOB data
+  scales: [1]
+  reward:
+    mode: "dsr_pv"               # HPO searches {dsr_pv, pv_return}
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+    phi: 0.1
+    scaling: 10000.0
+    clip_min: -5.0
+    clip_max: 5.0
+  # Steady-state fee from step 0 — no zero-fee HPO mistake
+  # dYdX Tier 7 rebate: -0.011% = -1.1 bps
+  fee_schedule:
+    - {step: 0, taker_fee: -0.00011}
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  lob_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 12
+  fusion_dim: 256
+  window_size: 30
+  n_scales: 1
+  n_lob_features: 8
+  action_dim: 3
+
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 10000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  n_trials: 50
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  tags: ["mm", "sac", "btc", "10s", "lob", "market-making", "stage4", "dydx", "maker-rebate", "volume-based"]

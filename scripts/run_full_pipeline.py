@@ -886,7 +886,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 final_tier = fee_schedule[-1]
                 mdp_ver_fee = eval_config.get("env", {}).get("mdp_version", "v5")
                 if mdp_ver_fee == "v8":
-                    final_fee = final_tier.get("ramp_to", final_tier.get("maker_fee", 0.0))
+                    # fee_schedule uses generic "taker_fee" key for all envs;
+                    # also check "maker_fee" for explicit V8 entries.
+                    final_fee = final_tier.get("ramp_to", final_tier.get("maker_fee", final_tier.get("taker_fee", 0.0)))
                     eval_config["env"]["maker_fee"] = final_fee
                 else:
                     final_fee = final_tier.get("ramp_to", final_tier.get("taker_fee", 0.0))
