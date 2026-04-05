@@ -96,7 +96,9 @@ class LiveTradingEngine:
         self._max_daily_loss_pct = config.get("safety", {}).get("max_daily_loss_pct", 0.05)
 
         # FIX AUD-H07: Periodic funding rate fetch interval (bars between fetches)
-        self._funding_rate_fetch_interval = 32  # ~8h at 15-min bars
+        # FIX AUD-FR-02: Scale interval by bar size (target ~8h between fetches)
+        bar_minutes = config.get("bar_clock", {}).get("base_interval_minutes", 15)
+        self._funding_rate_fetch_interval = max(1, 480 // bar_minutes)  # 480min = 8h
         self._bars_since_funding_fetch = 0
 
         # Safety
@@ -366,25 +368,12 @@ class LiveTradingEngine:
                     f"Funding gate closed with position {self._current_position:.4f} "
                     f"— flattening",
                 )
-                target_position = 0.0
-                delta = target_position - self._current_position
-                if abs(delta) >= self._deadband_threshold:
-                    action_array = np.array([target_position])
-                    checked_action, _ = self.risk_manager.check(
-                        action=action_array,
-                        portfolio_value=self._portfolio_value,
-                        margin_balance=self._portfolio_value * 0.95,
-                        positions=np.array([self._current_position]),
-                        funding_rates=np.array([self._current_funding_rate]),
-                    )
-                    await self._execute_trade(
-                        bar_time, float(checked_action[0]), current_close,
-                    )
-                    self._log_step(
-                        bar_time, target_position,
-                        traded=True, skip_reason="funding_gate_flatten",
-                    )
-                    return
+                await self._emergency_flatten()
+                self._log_step(
+                    bar_time, 0.0,
+                    traded=True, skip_reason="funding_gate_flatten",
+                )
+                return
             self._log_step(
                 bar_time, self._current_position,
                 traded=False, skip_reason="funding_gate_closed",
