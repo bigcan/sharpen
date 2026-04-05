@@ -61,12 +61,23 @@ def _wandb_log(metrics: dict) -> None:
 
 
 class _WandbStepCallback:
-    """SB3 callback for WandB heartbeat + SPS logging."""
+    """SB3 callback for WandB heartbeat + SPS logging.
 
-    def __init__(self, agent_name: str, total_timesteps: int, log_interval: int = 5000):
+    Logs both agent-specific keys (train/{agent}/step) and top-level keys
+    (_step, train/sps) so the fleet monitor can track progress and SPS.
+    """
+
+    def __init__(
+        self,
+        agent_name: str,
+        total_timesteps: int,
+        log_interval: int = 5000,
+        global_step_offset: int = 0,
+    ):
         self.agent_name = agent_name
         self.total_timesteps = total_timesteps
         self.log_interval = log_interval
+        self.global_step_offset = global_step_offset
         self._start_time = time.time()
         self._last_log_step = 0
 
@@ -78,10 +89,14 @@ class _WandbStepCallback:
         if n_calls - self._last_log_step >= self.log_interval:
             elapsed = time.time() - self._start_time
             sps = n_calls / max(elapsed, 1e-6)
+            global_step = self.global_step_offset + n_calls
             _wandb_log({
                 f"train/{self.agent_name}/step": n_calls,
                 f"train/{self.agent_name}/sps": sps,
                 f"train/{self.agent_name}/progress": n_calls / max(self.total_timesteps, 1),
+                # Top-level keys for fleet monitor compatibility
+                "_step": global_step,
+                "train/sps": sps,
             })
             self._last_log_step = n_calls
         return True
@@ -155,6 +170,7 @@ def hpo_objective(
     val_arrays: dict,
     config: dict,
     hpo_timesteps: int,
+    global_step_offset: int = 0,
 ) -> float:
     """Optuna objective: train SAC with trial params, return val metric.
 
@@ -186,8 +202,12 @@ def hpo_objective(
         sac_cfg = {**agent_params, "network_arch": network_arch}
         model = _make_sb3_agent("sac", vec_env, sac_cfg)
 
-        # Train
-        model.learn(total_timesteps=hpo_timesteps)
+        # Train with WandB callback for heartbeat + monitor visibility
+        wb_cb = _WandbStepCallback(
+            "sac", hpo_timesteps,
+            global_step_offset=global_step_offset,
+        )
+        model.learn(total_timesteps=hpo_timesteps, callback=wb_cb.callback)
 
         # Evaluate on val
         val_env = _create_eval_env(val_arrays, config, env_overrides)
@@ -277,7 +297,19 @@ def run_hpo_for_window(
     )
 
     def _objective(trial):
-        return hpo_objective(trial, train_arrays, val_arrays, config, hpo_timesteps)
+        # Offset global step so monitor sees cumulative progress across trials
+        step_offset = trial.number * hpo_timesteps
+        return hpo_objective(
+            trial, train_arrays, val_arrays, config, hpo_timesteps,
+            global_step_offset=step_offset,
+        )
+
+    # Log HPO phase info for fleet monitor
+    _wandb_log({
+        "hpo/status": "started",
+        "hpo/n_trials": n_trials,
+        "hpo/steps_per_trial": hpo_timesteps,
+    })
 
     # Skip already-completed trials (resumability)
     remaining = n_trials - len(study.trials)
@@ -336,7 +368,12 @@ def run_hpo_for_window(
             train_arrays, config, n_envs, best_env_overrides,
         )
         model = _make_sb3_agent("sac", vec_env, sac_cfg)
-        wb_cb = _WandbStepCallback("sac", total_timesteps)
+        # Offset past HPO steps so _step stays monotonic
+        full_train_offset = n_trials * hpo_timesteps
+        wb_cb = _WandbStepCallback(
+            "sac", total_timesteps,
+            global_step_offset=full_train_offset,
+        )
         model.learn(total_timesteps=total_timesteps, callback=wb_cb.callback)
         vec_env.close()
         logger.info(f"  SAC full training complete ({total_timesteps} steps)")
