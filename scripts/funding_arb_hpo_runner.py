@@ -426,6 +426,7 @@ def run_full_hpo_wf(
     n_trials: int,
     hpo_timesteps: int,
     out_dir: Path,
+    start_window: int = 0,
 ) -> dict:
     """Run HPO + full training across walk-forward windows."""
     # Prepare data
@@ -440,6 +441,8 @@ def run_full_hpo_wf(
         return {"status": "FAILED", "reason": "insufficient_data"}
 
     schedule = wf["window_schedule"]
+    if start_window > 0:
+        schedule = [w for w in schedule if w["window"] >= start_window]
     if max_windows is not None:
         schedule = schedule[:max_windows]
     logger.info(f"Walk-forward: {len(schedule)} windows (of {wf['n_windows']} available)")
@@ -551,7 +554,8 @@ def run_full_hpo_wf(
 def main():
     parser = argparse.ArgumentParser(description="Funding Rate Arbitrage - HPO Runner")
     parser.add_argument("--config", type=str, default=None, help="Config YAML path")
-    parser.add_argument("--max_windows", type=int, default=None, help="Limit to first N windows")
+    parser.add_argument("--max_windows", type=int, default=None, help="Limit to N windows (after start)")
+    parser.add_argument("--start_window", type=int, default=0, help="Start from window index N")
     parser.add_argument("--n_trials", type=int, default=None, help="HPO trials per window")
     parser.add_argument("--hpo_timesteps", type=int, default=None, help="Steps per HPO trial")
     parser.add_argument("--out_dir", type=str, default="hpo_results/funding_arb", help="Output directory")
@@ -608,7 +612,10 @@ def main():
     logger.info(f"Output: {out_dir}")
 
     try:
-        results = run_full_hpo_wf(config, args.max_windows, n_trials, hpo_timesteps, out_dir)
+        results = run_full_hpo_wf(
+            config, args.max_windows, n_trials, hpo_timesteps, out_dir,
+            start_window=args.start_window,
+        )
     except Exception:
         logger.exception("Funding-arb HPO walk-forward crashed")
         raise
