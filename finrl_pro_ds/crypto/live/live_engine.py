@@ -145,6 +145,28 @@ class LiveTradingEngine:
         # PRISM L2 regime overlay (optional, attached by runner script)
         self._prism_overlay = None
 
+        # Funding rate EMA gate (Option C): flatten when funding < borrow cost
+        fr_gate_cfg = config.get("funding_rate_gate", {})
+        self._fr_gate_enabled = fr_gate_cfg.get("enabled", False)
+        if self._fr_gate_enabled:
+            self._fr_gate_ema_span = int(fr_gate_cfg.get("ema_span", 168))
+            self._fr_gate_borrow_cost_hourly = float(
+                fr_gate_cfg.get("borrow_cost_hourly", 8.33e-6),
+            )
+            # Annualized threshold: hourly_rate * 8760
+            self._fr_gate_threshold = self._fr_gate_borrow_cost_hourly * 8760
+            self._fr_gate_ema_value: float = 0.0
+            self._fr_gate_ema_alpha = 2.0 / (self._fr_gate_ema_span + 1)
+            self._fr_gate_n_updates = 0
+            self._fr_gate_min_warmup = int(fr_gate_cfg.get("min_warmup", 24))
+            self._fr_gate_flatten_on_close = bool(fr_gate_cfg.get("flatten_on_close", True))
+            self._fr_gate_total_skipped = 0
+            logger.info(
+                f"Funding rate gate enabled: EMA span={self._fr_gate_ema_span}h, "
+                f"threshold={self._fr_gate_threshold * 100:.1f}% ann "
+                f"(borrow={self._fr_gate_borrow_cost_hourly:.2e}/h)",
+            )
+
         # Signal gate (SG-1): skip low-signal bars, mirroring training wrapper
         gate_cfg = config.get("signal_gate", {})
         self._signal_gate_enabled = gate_cfg.get("enabled", False)
@@ -331,6 +353,41 @@ class LiveTradingEngine:
             self._log_step(
                 bar_time, self._current_position,
                 traded=False, skip_reason="signal_gate_closed",
+            )
+            return
+
+        # --- 2d. Funding rate EMA gate (Option C) ---
+        if not self._check_funding_rate_gate():
+            current_close = self.obs_builder.get_current_close()
+            self._prev_close = current_close
+            # If gate closed and we hold a position, flatten it
+            if self._fr_gate_flatten_on_close and abs(self._current_position) > 0.01:
+                logger.info(
+                    f"Funding gate closed with position {self._current_position:.4f} "
+                    f"— flattening",
+                )
+                target_position = 0.0
+                delta = target_position - self._current_position
+                if abs(delta) >= self._deadband_threshold:
+                    action_array = np.array([target_position])
+                    checked_action, _ = self.risk_manager.check(
+                        action=action_array,
+                        portfolio_value=self._portfolio_value,
+                        margin_balance=self._portfolio_value * 0.95,
+                        positions=np.array([self._current_position]),
+                        funding_rates=np.array([self._current_funding_rate]),
+                    )
+                    await self._execute_trade(
+                        bar_time, float(checked_action[0]), current_close,
+                    )
+                    self._log_step(
+                        bar_time, target_position,
+                        traded=True, skip_reason="funding_gate_flatten",
+                    )
+                    return
+            self._log_step(
+                bar_time, self._current_position,
+                traded=False, skip_reason="funding_gate_closed",
             )
             return
 
@@ -733,8 +790,48 @@ class LiveTradingEngine:
             rates = await self.broker.get_funding_rates([self._asset])
             self._current_funding_rate = rates.get(self._asset, 0.0)
             logger.debug(f"Funding rate updated: {self._current_funding_rate:.6f}")
+            # Update funding rate EMA for gate + metrics
+            if self._fr_gate_enabled:
+                self._update_funding_ema(self._current_funding_rate)
+                self._metrics.update_funding_gate(
+                    ema_value=self._fr_gate_ema_value,
+                    gate_open=self._fr_gate_ema_value > self._fr_gate_threshold,
+                )
         except Exception as e:
             logger.debug(f"Funding rate fetch failed: {e}")
+
+    def _update_funding_ema(self, raw_rate: float) -> None:
+        """Update EMA of annualized funding rate for the gate."""
+        ann_rate = raw_rate * 3 * 365  # per-8h → annualized
+        if self._fr_gate_n_updates == 0:
+            self._fr_gate_ema_value = ann_rate
+        else:
+            alpha = self._fr_gate_ema_alpha
+            self._fr_gate_ema_value = alpha * ann_rate + (1 - alpha) * self._fr_gate_ema_value
+        self._fr_gate_n_updates += 1
+
+    def _check_funding_rate_gate(self) -> bool:
+        """Check if funding rate EMA is above borrow cost threshold.
+
+        Returns True if trading should proceed, False if gate is closed.
+        """
+        if not self._fr_gate_enabled:
+            return True
+
+        # Warmup: allow trading until we have enough EMA samples
+        if self._fr_gate_n_updates < self._fr_gate_min_warmup:
+            return True
+
+        is_open = self._fr_gate_ema_value > self._fr_gate_threshold
+        if not is_open:
+            self._fr_gate_total_skipped += 1
+            if self._fr_gate_total_skipped % 10 == 1:
+                logger.info(
+                    f"Funding gate CLOSED: EMA={self._fr_gate_ema_value * 100:.1f}% "
+                    f"< threshold={self._fr_gate_threshold * 100:.1f}% "
+                    f"(skipped {self._fr_gate_total_skipped} bars)",
+                )
+        return is_open
 
     async def _emergency_flatten(self) -> None:
         """Close all positions via market orders.

@@ -136,6 +136,18 @@ class TradingMetrics:
             ["strategy"],
         )
 
+        # Funding rate EMA gate metrics
+        self._funding_ema = Gauge(
+            "finrl_funding_ema_ann",
+            "Funding rate EMA (annualized)",
+            ["strategy"],
+        )
+        self._funding_gate_open = Gauge(
+            "finrl_funding_gate_open",
+            "Funding rate gate state (1=open/trading, 0=closed/flat)",
+            ["strategy"],
+        )
+
         self._labels = labels
         self._prev_trades: int = 0
         self._prev_fees: float = 0.0
@@ -204,6 +216,19 @@ class TradingMetrics:
         if fee_delta > 0:
             self._total_fees.labels(strategy=s).inc(fee_delta)
             self._prev_fees = total_fees
+
+    def update_funding_gate(
+        self,
+        *,
+        ema_value: float = 0.0,
+        gate_open: bool = True,
+    ) -> None:
+        """Update funding rate gate metrics."""
+        if not self._enabled:
+            return
+        s = self._labels["strategy"]
+        self._funding_ema.labels(strategy=s).set(ema_value)
+        self._funding_gate_open.labels(strategy=s).set(1.0 if gate_open else 0.0)
 
     def update_prism(
         self,
