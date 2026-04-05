@@ -35,6 +35,7 @@ import optuna  # noqa: E402
 import pandas as pd  # noqa: E402
 import yaml  # noqa: E402
 
+import torch  # noqa: E402
 import wandb  # noqa: E402
 from finrl_pro_ds.crypto.data.multiscale_crypto_handler import (  # noqa: E402
     MultiScaleCryptoHandler,
@@ -285,6 +286,8 @@ def run_hpo_trial(
         norm_cutoff_date=str(window["norm_cutoff"]),
         random_start=False,
     )
+    # FIX FIND-CMGP1-02: Eval at production fees, not curriculum start (0%)
+    val_env.set_fees(_get_final_fee(trial_cfg))
 
     try:
         metrics = evaluate_agent(trainer.agent, val_env)
@@ -310,17 +313,25 @@ def run_hpo_trial(
     return -pf
 
 
-def evaluate_agent(agent, env: CryptoPerpSwingEnv) -> dict:
+def evaluate_agent(agent, env: CryptoPerpSwingEnv, device: str = "cuda") -> dict:
     """Run deterministic evaluation and compute metrics."""
+    n_scales = len(env.config.get("scales", [1, 4, 24]))
     obs, _ = env.reset()
     done = False
     portfolio_values = [env.initial_balance]
 
     while not done:
-        # Predict deterministic action
-        with __import__("torch").no_grad():
-            action = agent.predict(obs, deterministic=True)
-        obs, reward, terminated, truncated, info = env.step(action)
+        # FIX FIND-CMGP1-01: Convert dict obs to tensor (matching SACTrainer path)
+        parts = [obs[f"scale_{i}"] for i in range(n_scales)]
+        parts.append(obs["private"])
+        flat = np.concatenate(parts)[None, :]  # (1, D) — add batch dim
+        scale_input = torch.as_tensor(flat, dtype=torch.float32).to(
+            device, non_blocking=True,
+        )
+        with torch.no_grad():
+            action = agent.predict(scale_input, deterministic=True)
+        action_np = action.cpu().numpy().ravel()
+        obs, reward, terminated, truncated, info = env.step(action_np)
         portfolio_values.append(info["portfolio_value"])
         done = terminated or truncated
 
@@ -372,6 +383,15 @@ def _profit_factor(returns: np.ndarray) -> float:
     return gains / losses
 
 
+def _get_final_fee(config: dict) -> float:
+    """Get the final fee from fee_schedule (end of curriculum), or env.taker_fee."""
+    schedule = config.get("env", {}).get("fee_schedule", [])
+    if schedule:
+        last = sorted(schedule, key=lambda x: x["step"])[-1]
+        return float(last.get("ramp_to", last.get("taker_fee", 0.0)))
+    return float(config.get("env", {}).get("taker_fee", 0.0))
+
+
 # ---------------------------------------------------------------------------
 # Full training
 # ---------------------------------------------------------------------------
@@ -417,6 +437,8 @@ def train_full(
             norm_cutoff_date=str(window["norm_cutoff"]),
             random_start=False,
         )
+        # FIX FIND-CMGP1-02: Eval at production fees
+        eval_env.set_fees(_get_final_fee(trial_cfg))
         results[split] = evaluate_agent(trainer.agent, eval_env)
         eval_env.close()
 
