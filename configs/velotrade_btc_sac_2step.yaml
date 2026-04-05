@@ -39,6 +39,7 @@ features:
   window_size: 30
   features_per_scale: 8
   norm_span: 120
+  tech_window: 672               # 1 week in 15-min bars (7 × 24 × 4 = 672)
   bootstrap_bars: 30000
 
 environment:
@@ -86,6 +87,10 @@ network:
   window_size: 30
 
 agents:
+  n_envs: 20
+  network_arch: [128, 128]           # Smaller for single asset
+  lean_trinity: ["sac"]              # SAC only for prop firm
+  total_timesteps: 3000000
   sac:
     lr_actor: 3.0e-4
     lr_critic: 3.0e-4
@@ -109,6 +114,14 @@ training:
   amp_dtype: "bfloat16"
   torch_compile: true
   num_envs: 20
+
+walk_forward:
+  train_bars: 8760               # ~91 days at 15-min
+  val_bars: 720                  # ~7.5 days
+  test_bars: 1440                # ~15 days
+  step_bars: 720                 # ~7.5 days
+  embargo_bars: 96               # 1 day (24h × 4 bars/h)
+  min_windows: 1                 # Allow single-window pilot
 
 hpo:
   n_trials: 50

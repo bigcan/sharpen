@@ -38,6 +38,7 @@ from finrl_pro_ds.crypto.data.crypto_loader import (  # noqa: E402
     fetch_crypto_data,
 )
 from finrl_pro_ds.crypto.envs.crypto_perp_env import CryptoPerpEnv  # noqa: E402
+from finrl_pro_ds.crypto.envs.prop_firm_wrapper import PropFirmWrapper  # noqa: E402
 from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: E402
 from finrl_pro_ds.crypto.features.crypto_features import (  # noqa: E402
     compute_crypto_features,
@@ -165,18 +166,23 @@ def prepare_data(config: dict) -> dict:
     }
 
 
-def create_env(arrays: dict, config: dict) -> CryptoPerpEnv:
-    """Create a CryptoPerpEnv from prepared arrays and config."""
+def create_env(arrays: dict, config: dict) -> CryptoPerpEnv | PropFirmWrapper:
+    """Create a CryptoPerpEnv from prepared arrays and config.
+
+    If ``environment.prop_firm.enabled`` is true, wraps the base env with
+    :class:`PropFirmWrapper` to impose prop-firm challenge constraints
+    (EOD trailing drawdown, daily loss limit, profit target).
+    """
     env_cfg = config["environment"]
 
-    return CryptoPerpEnv(
+    env = CryptoPerpEnv(
         price_ary=arrays["price_ary"],
         tech_ary=arrays["tech_ary"],
         funding_rate_ary=arrays["funding_rate_ary"],
         volume_ary=arrays["volume_ary"],
         timestamps=arrays["timestamps"],
         initial_capital=env_cfg["initial_capital"],
-        maker_fee_pct=env_cfg["maker_fee_pct"],
+        maker_fee_pct=env_cfg.get("maker_fee_pct", 0.0),
         taker_fee_pct=env_cfg["taker_fee_pct"],
         slippage_base_bps=env_cfg["slippage_base_bps"],
         slippage_impact_bps=env_cfg["slippage_impact_bps"],
@@ -195,6 +201,27 @@ def create_env(arrays: dict, config: dict) -> CryptoPerpEnv:
         random_start_pct=float(env_cfg.get("random_start_pct", 0.1)),
         long_only=bool(env_cfg.get("long_only", False)),
     )
+
+    # Wrap with PropFirmWrapper if prop firm mode is enabled
+    pf_cfg = env_cfg.get("prop_firm", {})
+    if pf_cfg.get("enabled", False):
+        env = PropFirmWrapper(
+            env,
+            profit_target_pct=float(pf_cfg.get("profit_target_pct", 0.10)),
+            max_trailing_drawdown_pct=float(pf_cfg.get("max_trailing_drawdown_pct", 0.10)),
+            max_daily_loss_pct=float(pf_cfg.get("max_daily_loss_pct", 0.0)),
+            eod_hour_utc=int(pf_cfg.get("eod_hour_utc", 0)),
+            drawdown_penalty_start=float(pf_cfg.get("drawdown_penalty_start", 0.05)),
+            drawdown_penalty_scale=float(pf_cfg.get("drawdown_penalty_scale", 5.0)),
+            success_bonus=float(pf_cfg.get("success_bonus", 10.0)),
+            augment_obs=bool(pf_cfg.get("augment_obs", True)),
+        )
+        logger.info(
+            f"PropFirmWrapper enabled: target={pf_cfg.get('profit_target_pct', 0.10):.0%}, "
+            f"max_dd={pf_cfg.get('max_trailing_drawdown_pct', 0.10):.0%}"
+        )
+
+    return env
 
 
 def run_backtest(config: dict, max_windows: int | None = None, hpo_results_dir: str | None = None) -> dict:
