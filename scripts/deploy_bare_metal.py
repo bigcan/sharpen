@@ -131,7 +131,7 @@ def deploy(args):
     config_path = args.config
 
     remote_workspace = "/workspace/DeepScalper"
-    zip_name = "deploy_package.zip"
+    zip_name = f"deploy_package_{os.getpid()}.zip"
 
     # 1. Create Zip
     create_filtered_zip(PROJECT_ROOT, zip_name)
@@ -232,7 +232,7 @@ def deploy(args):
         "rm -rf finrl_pro_ds.egg-info build dist",
         "echo 'STEP: UNZIP'",
         f"unzip -o {zip_name}",
-        "rm deploy_package.zip",
+        f"rm -f {zip_name}",
         # Verify setup.py content
         "grep -C 2 'install_requires' setup.py || echo 'setup.py missing'",
         "echo 'STEP: INSTALL REQS'",
@@ -315,7 +315,10 @@ def deploy(args):
         print(stdout.read().decode("utf-8", errors="replace").encode("ascii", errors="replace").decode("ascii"))
 
     ssh.close()
-    os.remove(zip_name)
+    try:
+        os.remove(zip_name)
+    except FileNotFoundError:
+        pass
 
     # ------------------------------------------------------------------
     # Gap #2 & #3: Resolve Run ID & Log to Registry
