@@ -1,7 +1,7 @@
 # GMGP1-XAUUSD Walk-Forward — Window R3: Fixed-HP Retraining
 # Train: Jan-Oct, Val: Nov, Test: Dec
 # Longest training period (10 months) — tests data quantity effect
-# HPs: UPDATE with best trial from XAUUSD HPO (gmgp1_xauusd_sac_15min.yaml)
+# HPs: T34 best trial from GMGP1-XAUUSD HPO (run 1fprvttn, PF=2.886)
 # Fee: 1.5bps (CFD), DD: 10% (FTMO)
 
 data:
@@ -27,7 +27,7 @@ env:
   window_size: 30
   features_per_scale: 8
   taker_fee: 0.0
-  deadband_threshold: 0.25        # UPDATE from HPO best trial
+  deadband_threshold: 0.25        # T34 best (unchanged from default)
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
   episode_length: 500
@@ -36,7 +36,7 @@ env:
   scales: [15, 60, 240]
   reward:
     mode: "dsr"
-    dsr_eta: 0.001                # UPDATE from HPO best trial
+    dsr_eta: 0.00092668           # T34 best
     dsr_scale: 1.0
   fee_schedule:
     - {step: 0, taker_fee: 0.0}
@@ -53,21 +53,21 @@ network:
   fusion_dim: 256
   window_size: 30
 
-# UPDATE all SAC HPs below with best trial from XAUUSD HPO
+# SAC HPs from T34 best trial (GMGP1-XAUUSD HPO, run 1fprvttn)
 agents:
   sac:
-    lr_actor: 0.0003              # UPDATE from HPO best trial
-    lr_critic: 0.0003             # UPDATE from HPO best trial
-    lr_alpha: 0.0003              # UPDATE from HPO best trial
-    gamma: 0.99                   # UPDATE from HPO best trial
-    tau: 0.005                    # UPDATE from HPO best trial
+    lr_actor: 0.00034069          # T34 best
+    lr_critic: 0.000027372        # T34 best
+    lr_alpha: 0.0000020265        # T34 best (near floor — low alpha LR optimal)
+    gamma: 0.99826                # T34 best (most important HP, rho=+0.43)
+    tau: 0.0019716                # T34 best
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.2            # UPDATE from HPO best trial
+    initial_alpha: 0.37652        # T34 best (high entropy essential)
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 10.0           # UPDATE from HPO best trial
+    gradient_clip: 1.2302         # T34 best (tight clipping helps)
     checkpoint_interval: 250000
 
 training:
