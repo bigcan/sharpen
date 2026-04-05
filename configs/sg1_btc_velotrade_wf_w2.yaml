@@ -1,0 +1,105 @@
+# SG-1 BTC Velotrade — Walk-Forward Window W2
+# Train: Apr-Sep 2024, Val: Oct-Nov 2024, Test: Dec 2024 - Jan 2025
+# Shifted window. PropFirmWrapper enabled.
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "multiscale"
+  train_start_date: "2024-04-01"
+  train_end_date: "2024-09-30"
+  val_start_date: "2024-10-01"
+  val_end_date: "2024-11-30"
+  test_start_date: "2024-12-01"
+  test_end_date: "2025-01-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.5
+  parkinson_threshold: 0.03
+  volume_threshold: 0.5
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 3000
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: false
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 300000, taker_fee: 0.0, ramp_to: 0.0005, ramp_end_step: 900000}
+    - {step: 900000, taker_fee: 0.0005}
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10
+    max_trailing_drawdown_pct: 0.10
+    max_daily_loss_pct: 0.0
+    eod_hour_utc: 0
+    drawdown_penalty_start: 0.05
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs: PLACEHOLDER — update with HPO best trial results
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade", "prop-firm", "walkforward", "wf-w2"]

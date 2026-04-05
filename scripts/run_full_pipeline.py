@@ -184,6 +184,21 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
         if gate_cfg and gate_cfg.get("enabled", False):
             from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
             env = SignalGatedWrapper(env, gate_config=gate_cfg)
+        # Prop firm wrapper (outermost — after signal gate)
+        pf_cfg = env_config.get("prop_firm", {})
+        if pf_cfg.get("enabled", False):
+            from finrl_pro_ds.envs.prop_firm_wrapper import PropFirmWrapperV7
+            env = PropFirmWrapperV7(
+                env,
+                profit_target_pct=float(pf_cfg.get("profit_target_pct", 0.10)),
+                max_trailing_drawdown_pct=float(pf_cfg.get("max_trailing_drawdown_pct", 0.10)),
+                max_daily_loss_pct=float(pf_cfg.get("max_daily_loss_pct", 0.0)),
+                eod_hour_utc=int(pf_cfg.get("eod_hour_utc", 0)),
+                drawdown_penalty_start=float(pf_cfg.get("drawdown_penalty_start", 0.05)),
+                drawdown_penalty_scale=float(pf_cfg.get("drawdown_penalty_scale", 5.0)),
+                success_bonus=float(pf_cfg.get("success_bonus", 10.0)),
+                augment_obs=bool(pf_cfg.get("augment_obs", False)),
+            )
         return env
 
     handler = ParquetDataHandler(

@@ -1,0 +1,116 @@
+# SG-1 BTC Velotrade — HPO
+# 50 trials x 500K steps. PropFirmWrapper enabled (10% EOD trailing DD).
+# 3-min multi-scale + signal gate (thresholds calibrated for BTC volatility).
+# Fee: 5bps crypto taker. No gap detection (24/7 market).
+# Data: BTC/USDT 1-min from Bybit (resampled to 3/15/60-min by handler).
+#
+# Usage:
+#   python scripts/run_full_pipeline.py --config configs/sg1_btc_velotrade_hpo.yaml --agent sac --trials 50
+#
+# PRE-REQUISITE: BTC 1-min data must exist at data/btc_usdt_1min_bybit.parquet
+# PRE-REQUISITE: Signal gate thresholds must be calibrated via oracle_signal_gate.py
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "multiscale"
+  train_start_date: "2024-01-01"
+  train_end_date: "2025-06-30"
+  val_start_date: "2025-07-01"
+  val_end_date: "2025-09-30"
+  test_start_date: "2025-10-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  # CALIBRATE: Run oracle_signal_gate.py on BTC 3-min data.
+  # BTC baseline vol ~3x Gold — thresholds raised accordingly.
+  atr_threshold: 0.5
+  parkinson_threshold: 0.03
+  volume_threshold: 0.5
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 3000                 # BTC 24/7: 480 bars/day x 6.25 days
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: false                 # BTC is 24/7 — no session gaps
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 300000, taker_fee: 0.0, ramp_to: 0.0005, ramp_end_step: 900000}
+    - {step: 900000, taker_fee: 0.0005}
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10            # 10% target (step 1)
+    max_trailing_drawdown_pct: 0.10    # 10% EOD trailing DD
+    max_daily_loss_pct: 0.0            # No daily loss limit in 2-step
+    eod_hour_utc: 0                    # UTC midnight for EOD floor
+    drawdown_penalty_start: 0.05
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  n_trials: 50
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade", "prop-firm", "hpo", "2-step"]
