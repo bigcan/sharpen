@@ -123,7 +123,12 @@ class SignalGatedWrapper(gym.Wrapper):
                 break
 
             # Gate closed: hold current position
-            hold_action = np.array([self.env.current_position], dtype=np.float32)
+            # Multi-asset: use positions array; single-asset: scalar
+            positions = getattr(self.env, 'positions', None)
+            if positions is not None and hasattr(positions, '__len__') and len(positions) > 1:
+                hold_action = positions.astype(np.float32)
+            else:
+                hold_action = np.array([getattr(self.env, 'current_position', 0.0)], dtype=np.float32)
             obs, r, terminated, truncated, info = self.env.step(hold_action)
             total_reward += r
             skipped += 1
@@ -150,6 +155,9 @@ class SignalGatedWrapper(gym.Wrapper):
 
         Features are pre-computed by MultiScaleOHLCVHandler and are already causal
         (EMA-Z with shift=1) and LEAK-1 compliant.
+
+        Supports both single-asset (T, 8) and multi-asset (T, N, 8) features.
+        For multi-asset, averages signal across assets for portfolio-level gating.
         """
         # Passthrough if no features available
         if self._scale_features is None:
@@ -164,6 +172,10 @@ class SignalGatedWrapper(gym.Wrapper):
             return True
 
         features = self._scale_features[ptr]
+
+        # Multi-asset features: (N, 8) — average across assets
+        if features.ndim == 2:
+            features = features.mean(axis=0)
 
         # Feature indices in MultiScaleOHLCVHandler:
         #   0: log_return, 1: atr_norm, 2: parkinson_vol,
