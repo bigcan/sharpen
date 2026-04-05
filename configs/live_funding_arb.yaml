@@ -88,6 +88,16 @@ safety:
   kill_file: "/tmp/finrl_live_funding_arb_kill"
   emergency_flatten_on_error: true
 
+# --- Funding Rate EMA Gate (Option C) ---
+# Flatten positions when funding EMA falls below borrow cost.
+# Validated: flips OOS from -2.79% to +2.19% (6/7 wins) on w15-w21.
+funding_rate_gate:
+  enabled: true
+  ema_span: 168                         # EMA span in hours (~1 week)
+  borrow_cost_hourly: 8.33e-6           # Spot borrow rate (Binance margin ~7.3% ann)
+  min_warmup: 24                        # Min EMA updates before gate activates
+  flatten_on_close: true                # Flatten existing position when gate closes
+
 # --- PRISM Regime Overlay (L2 position sizing) ---
 prism:
   enabled: false                        # Set true to activate regime overlay
