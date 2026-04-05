@@ -481,5 +481,21 @@ class ContinuousSwingEnv(gym.Env):
             f"Fee: {self.taker_fee:.5f}",
         )
 
+    # --- PropFirmWrapper compatibility ---
+
+    @property
+    def timestamps(self) -> Optional[np.ndarray]:
+        """Expose handler timestamps for PropFirmWrapper EOD boundary detection."""
+        if self.handler and hasattr(self.handler, '_base_timestamps'):
+            return self.handler._base_timestamps
+        return None
+
+    @property
+    def step_idx(self) -> int:
+        """Expose current data pointer for PropFirmWrapper."""
+        if self.handler:
+            return getattr(self.handler, '_ptr', 0)
+        return 0
+
     def close(self):
         super().close()

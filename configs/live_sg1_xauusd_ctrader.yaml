@@ -1,0 +1,127 @@
+# Live Trading Config — SG-1 XAUUSD SAC on Gold CFD via cTrader (FTMO)
+# 3-min bars, signal-gated, prop-firm trained (10% DD, 5% daily loss)
+# Checkpoint: PLACEHOLDER — update with L1 multi-seed best
+#
+# Usage:
+#   python scripts/run_live_ctrader.py --config configs/live_sg1_xauusd_ctrader.yaml
+#   python scripts/run_live_ctrader.py --config configs/live_sg1_xauusd_ctrader.yaml --mainnet
+#   python scripts/run_live_ctrader.py --config configs/live_sg1_xauusd_ctrader.yaml --dry-run
+#
+# cTrader credentials via env vars:
+#   CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN, CTRADER_ACCOUNT_ID
+
+# --- cTrader Connection ---
+exchange:
+  name: "ctrader"
+  testnet: true                        # true=IC Markets demo, false=FTMO live
+  asset: "XAUUSD"
+
+# --- Contract Specification ---
+contract:
+  symbol: "XAUUSD"
+  lot_size: 100                        # 1 standard lot = 100 oz
+  min_lot: 0.01                        # 0.01 lots = 1 oz minimum
+  tick_size: 0.01                      # CFD tick ($0.01 vs CME $0.10)
+  leverage: 30                         # FTMO Gold leverage 1:30
+  order_type: "MKT"                    # Market orders (CFD spreads tight enough)
+  market_fallback_timeout: 10.0
+
+# --- Agent ---
+agent:
+  # PLACEHOLDER — update with L1 multi-seed best checkpoint
+  checkpoint_path: "checkpoints/sg1_xauusd_ftmo_best/checkpoint_final.pth"
+  device: "cpu"
+  torch_compile: false                 # Must be false for live inference
+
+# --- SAC Hyperparameters (PLACEHOLDER — update with HPO best trial) ---
+agents:
+  sac:
+    lr_actor: 0.00022148365220787234
+    lr_critic: 0.00018486046430982398
+    lr_alpha: 0.000642523828301745
+    gamma: 0.9677944079144885
+    tau: 0.0020470394844356323
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.1476793336332415
+    gradient_clip: 9.281178071284028
+
+# --- Network (must match training checkpoint exactly) ---
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# --- Features (SG-1 3-min multi-scale — must match training) ---
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+  norm_span: 120
+  bootstrap_bars: 30000               # 60-min scale needs ~7200 1-min bars. 30K is 2x safe.
+
+# --- Signal Gate (must match training — agent trained with composite gating) ---
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.3
+  parkinson_threshold: 0.02
+  volume_threshold: 0.5
+  max_hold_bars: 20
+  gate_always_on_first: true
+
+# --- Bar Clock (3-min bars for SG-1) ---
+bar_clock:
+  base_interval_minutes: 3
+  execution_delay_seconds: 10.0
+  max_late_seconds: 60.0
+
+# --- Trading ---
+trading:
+  initial_balance: 100000.0            # FTMO $100K account
+  deadband_threshold: 0.25
+  taker_fee: 0.00035                   # 3.5bps effective CFD spread
+
+# --- Risk Management (FTMO-safe limits) ---
+risk:
+  enabled: true
+  max_drawdown_pct: 0.08               # 8% hard stop (2% below FTMO 10% limit)
+  circuit_breaker_cooldown_bars: 12
+  max_position_pct: 1.0
+  funding_rate_alert: 999.0
+  min_margin_reserve_pct: 0.10
+
+# --- WandB Monitoring ---
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  tags: ["live", "sg-1", "XAUUSD", "Gold", "SAC", "3min", "cTrader", "paper",
+         "CFD", "FTMO", "signal-gated", "prop-firm"]
+
+# --- Safety ---
+safety:
+  require_explicit_mainnet: true
+  max_daily_loss_pct: 0.04             # 4% daily loss (1% below FTMO 5% limit)
+  kill_file: "/tmp/finrl_live_sg1_xauusd_kill"
+  emergency_flatten_on_error: true
+
+# --- PRISM Regime Overlay (L2 position sizing) ---
+prism:
+  enabled: false
+  base_url: "http://prism-api:8001"
+  api_key: ""
+  ticker: "XAUUSD=X"
+  timeframe: "daily"
+  timeout: 5
+  cache_ttl: 60
+  crisis_flatten: true
+  multipliers:
+    LOW_VOL: 1.3
+    NORMAL_VOL: 1.0
+    HIGH_VOL: 0.3

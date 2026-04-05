@@ -1,0 +1,107 @@
+# SG-1 XAUUSD FTMO — Walk-Forward Window W2
+# Train: Mar-Aug, Val: Sep-Oct, Test: Nov-Dec
+# Fixed HPs from HPO best trial. PropFirmWrapper enabled.
+# Run: python scripts/run_full_pipeline.py --config configs/sg1_xauusd_ftmo_wf_w2.yaml --agent sac
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-03-01"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.3
+  parkinson_threshold: 0.02
+  volume_threshold: 0.5
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 300000, taker_fee: 0.0, ramp_to: 0.00035, ramp_end_step: 900000}
+    - {step: 900000, taker_fee: 0.00035}
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10
+    max_trailing_drawdown_pct: 0.10
+    max_daily_loss_pct: 0.05
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.05
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs: PLACEHOLDER — update with HPO best trial results
+agents:
+  sac:
+    lr_actor: 0.00022148365220787234
+    lr_critic: 0.00018486046430982398
+    lr_alpha: 0.000642523828301745
+    gamma: 0.9677944079144885
+    tau: 0.0020470394844356323
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.1476793336332415
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 9.281178071284028
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm", "walkforward", "wf-w2"]
