@@ -915,6 +915,9 @@ class CryptoDataPipeline:
         if end is None:
             end = datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
+        # Scale min_assets threshold to match requested universe size
+        self.validator.min_assets = len(assets)
+
         # ----- Try Silver cache first -----
         silver_ohlcv_path = self.cache_dir / "silver_ohlcv.parquet"
         silver_funding_path = self.cache_dir / "silver_funding.parquet"
@@ -1118,7 +1121,18 @@ def fetch_spot_data(
             df["timestamp"] = df["timestamp"].dt.tz_localize("UTC")
         else:
             df["timestamp"] = df["timestamp"].dt.tz_convert("UTC")
-        return df
+
+        # Validate cache covers all requested assets
+        requested = set(assets) if assets else set(DEFAULT_UNIVERSE)
+        cached_assets = set(df["ticker"].unique()) if "ticker" in df.columns else set()
+        missing = requested - cached_assets
+        if missing:
+            logger.warning(
+                f"Spot cache missing {len(missing)} assets: {sorted(missing)}. "
+                f"Re-fetching...",
+            )
+        else:
+            return df
 
     async def _fetch():
         loader = CryptoLoader(exchange=exchange, market_type="spot")
