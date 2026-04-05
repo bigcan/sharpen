@@ -20,7 +20,16 @@ data:
   source: "ccxt"
   market_type: "futures"
   frequency: "1h"
+  start_date: "2022-01-01"
+  end_date: null                    # rolling (fetch up to now)
   cache_dir: "./data/crypto_cache"
+  # HPO train/val/test splits (1H bars: 8760/yr, 720/mo)
+  train_start_date: "2022-03-01"    # After warmup
+  train_end_date: "2025-06-30"
+  val_start_date: "2025-07-01"
+  val_end_date: "2025-09-30"
+  test_start_date: "2025-10-01"
+  test_end_date: "2025-12-31"
 
 features:
   scales: [1, 4, 24]              # 1H decision, 4H trend, 1D regime
@@ -111,6 +120,7 @@ training:
   amp_dtype: "bfloat16"
   torch_compile: true
   num_envs: 10                    # Fewer than GMGP1's 20 (larger obs per env)
+  use_sync: true                  # SyncVectorEnv — avoids 10x crypto data fetch in async subprocesses
 
 hpo:
   n_trials: 30                    # 8 HP dims, 30 trials sufficient

@@ -56,6 +56,20 @@ def merge_configs(base, overrides):
     return base
 
 
+def _parse_frequency_to_minutes(freq: str) -> float:
+    """Parse a frequency string (e.g. '1h', '15min', '4H', '30m') to minutes."""
+    freq = freq.lower().strip()
+    if freq.endswith("h"):
+        return int(freq[:-1]) * 60
+    if freq.endswith("min"):
+        return int(freq[:-3])
+    if freq.endswith("m"):
+        return int(freq[:-1])
+    if freq.endswith("d"):
+        return int(freq[:-1]) * 1440
+    return 1  # fallback
+
+
 # ============================================================================
 # ENVIRONMENT FACTORY
 # ============================================================================
@@ -71,9 +85,6 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     file_path = data_config.get("file_path")
     ticker = data_config.get("ticker", "BTCUSDT")
 
-    if not file_path or not os.path.exists(file_path):
-        raise ValueError(f"Invalid data file path: {file_path}")
-
     sd = start_date or data_config.get("train_start_date")
     ed = end_date or data_config.get("train_end_date")
 
@@ -87,6 +98,11 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     # V6 swing MDP: binary direction-switching (Phase K)
     # V7 continuous swing MDP: SAC position control (GMGP1)
     mdp_version = env_config.get("mdp_version", "v5")
+
+    # CMGP1 uses crypto data pipeline (ccxt), not local parquet — skip file_path check
+    if mdp_version != "cmgp1":
+        if not file_path or not os.path.exists(file_path):
+            raise ValueError(f"Invalid data file path: {file_path}")
     if mdp_version == "v8":
         from finrl_pro_ds.envs.market_making_env import MarketMakingEnv
         features_cfg = config.get("features", {})
@@ -112,6 +128,44 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
                 norm_cutoff_date=norm_cutoff_date,
             )
         return MarketMakingEnv(config=env_config, data_handler=mm_handler)
+
+    if mdp_version == "cmgp1":
+        from finrl_pro_ds.crypto.data.multiscale_crypto_handler import MultiScaleCryptoHandler
+        from finrl_pro_ds.crypto.envs.crypto_perp_swing_env import CryptoPerpSwingEnv
+
+        # Fetch crypto data (auto-cached to data/crypto_cache/)
+        data_cfg = config.get("data", {})
+        universe_cfg = config.get("universe", {})
+        assets = universe_cfg.get("assets", [])
+        cache_key = f"_cmgp1_cache_{data_cfg.get('start_date', '')}"
+        if not hasattr(make_env, cache_key):
+            from finrl_pro_ds.crypto.data.crypto_loader import fetch_crypto_data
+            crypto_data = fetch_crypto_data(
+                assets=assets,
+                start=data_cfg.get("start_date", "2022-01-01"),
+                end=data_cfg.get("end_date"),
+                exchange=universe_cfg.get("data_exchange", "binance"),
+                cache_dir=data_cfg.get("cache_dir", "./data/crypto_cache"),
+            )
+            setattr(make_env, cache_key, crypto_data)
+        crypto_data = getattr(make_env, cache_key)
+
+        features_cfg = config.get("features", {})
+        handler = MultiScaleCryptoHandler(
+            ohlcv_df=crypto_data["ohlcv"],
+            funding_df=crypto_data["funding"],
+            assets=assets,
+            feature_config=features_cfg,
+            start_date=sd,
+            end_date=ed,
+            norm_cutoff_date=norm_cutoff_date,
+        )
+        env = CryptoPerpSwingEnv(config=env_config, data_handler=handler)
+        gate_cfg = config.get("signal_gate")
+        if gate_cfg and gate_cfg.get("enabled", False):
+            from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
+            env = SignalGatedWrapper(env, gate_config=gate_cfg)
+        return env
 
     if mdp_version == "v7":
         from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
@@ -653,13 +707,21 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 gradient_clip = trial.suggest_float("gradient_clip", bs["gradient_clip"] * (1 - nf), bs["gradient_clip"] * (1 + nf), log=True)
             else:
                 # SAC hyperparams — v6: widened LR/tau lower bounds (AlphaSeek-informed)
-                lr_actor = trial.suggest_float("lr_actor", 2e-6, 1e-3, log=True)
-                lr_critic = trial.suggest_float("lr_critic", 2e-6, 1e-3, log=True)
-                lr_alpha = trial.suggest_float("lr_alpha", 2e-6, 1e-3, log=True)
-                tau = trial.suggest_float("tau", 2e-6, 0.01, log=True)
-                gamma = trial.suggest_float("gamma", 0.95, 0.999, log=True)
+                # Config-driven search space: hpo.search_space overrides defaults
+                ss = base_config.get("hpo", {}).get("search_space", {})
+                _ss_f = lambda name, lo, hi, **kw: trial.suggest_float(name, ss.get(name, {}).get("low", lo), ss.get(name, {}).get("high", hi), **kw)
+                lr_actor = _ss_f("lr_actor", 2e-6, 1e-3, log=True)
+                lr_critic = _ss_f("lr_critic", 2e-6, 1e-3, log=True)
+                lr_alpha = _ss_f("lr_alpha", 2e-6, 1e-3, log=True)
+                tau = _ss_f("tau", 2e-6, 0.01, log=True)
+                gamma = _ss_f("gamma", 0.95, 0.999)
                 initial_alpha = trial.suggest_float("initial_alpha", 0.05, 0.5, log=True)
-                deadband = trial.suggest_categorical("deadband_threshold", [0.15, 0.25, 0.35])
+                # Deadband: config-driven range or categorical default
+                db_ss = ss.get("deadband_threshold", {})
+                if db_ss.get("type") == "float":
+                    deadband = trial.suggest_float("deadband_threshold", db_ss["low"], db_ss["high"])
+                else:
+                    deadband = trial.suggest_categorical("deadband_threshold", [0.15, 0.25, 0.35])
                 dsr_eta = trial.suggest_float("dsr_eta", 0.0005, 0.01, log=True)
                 # v6: gradient_clip as HPO dimension (AlphaSeek uses 3.0, ours was fixed 10.0)
                 gradient_clip = trial.suggest_float("gradient_clip", 1.0, 10.0, log=True)
@@ -676,6 +738,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 config["env"]["reward"] = {}
             config["env"]["reward"]["dsr_eta"] = dsr_eta
 
+            # Config-driven batch_size HPO (CMGP1+)
+            bs_ss = ss.get("batch_size", {})
+            if bs_ss.get("type") == "categorical" and bs_ss.get("choices"):
+                batch_size = trial.suggest_categorical("batch_size", bs_ss["choices"])
+                config["agents"]["sac"]["batch_size"] = batch_size
+
             # V8 MM: reward mode is an HPO categorical dimension
             if config.get("env", {}).get("mdp_version") == "v8":
                 reward_mode = trial.suggest_categorical(
@@ -683,12 +751,14 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 )
                 config["env"]["reward"]["mode"] = reward_mode
 
-            # v6: Hard risk constraints (opt-in via config)
-            if config.get("env", {}).get("stop_loss_hpo", False):
-                stop_loss_bps = trial.suggest_int("stop_loss_bps", 20, 200)
+            # v6: Hard risk constraints (opt-in via config or search_space)
+            sl_ss = ss.get("stop_loss_bps", {})
+            if config.get("env", {}).get("stop_loss_hpo", False) or sl_ss:
+                stop_loss_bps = trial.suggest_int("stop_loss_bps", sl_ss.get("low", 20), sl_ss.get("high", 200))
                 config["env"]["stop_loss_bps"] = stop_loss_bps
-            if config.get("env", {}).get("max_holding_hpo", False):
-                max_holding_bars = trial.suggest_int("max_holding_bars", 5, 40)
+            mh_ss = ss.get("max_holding_bars", {})
+            if config.get("env", {}).get("max_holding_hpo", False) or mh_ss:
+                max_holding_bars = trial.suggest_int("max_holding_bars", mh_ss.get("low", 5), mh_ss.get("high", 40))
                 config["env"]["max_holding_bars"] = max_holding_bars
 
             hpo_log = {
@@ -702,10 +772,12 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
                 f"{trial_prefix}/deadband_threshold": deadband,
                 f"{trial_prefix}/dsr_eta": dsr_eta,
             }
-            if config.get("env", {}).get("stop_loss_hpo", False):
+            if config.get("env", {}).get("stop_loss_hpo", False) or ss.get("stop_loss_bps"):
                 hpo_log[f"{trial_prefix}/stop_loss_bps"] = config["env"]["stop_loss_bps"]
-            if config.get("env", {}).get("max_holding_hpo", False):
+            if config.get("env", {}).get("max_holding_hpo", False) or ss.get("max_holding_bars"):
                 hpo_log[f"{trial_prefix}/max_holding_bars"] = config["env"]["max_holding_bars"]
+            if ss.get("batch_size") and "batch_size" in config.get("agents", {}).get("sac", {}):
+                hpo_log[f"{trial_prefix}/batch_size"] = config["agents"]["sac"]["batch_size"]
             if config.get("env", {}).get("mdp_version") == "v8":
                 hpo_log[f"{trial_prefix}/reward_mode"] = config["env"]["reward"]["mode"]
             wandb.log(hpo_log)
@@ -911,6 +983,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             bar_duration_seconds = config.get("env", {}).get("bar_duration_seconds")
             if bar_duration_seconds is not None:
                 hpo_bar_minutes = bar_duration_seconds / 60.0
+            elif mdp_ver == "cmgp1":
+                # CMGP1 scales are in hours (1H bars); frequency from data config
+                hpo_bar_minutes = _parse_frequency_to_minutes(config.get("data", {}).get("frequency", "1h"))
             elif mdp_ver in ("v7", "v8") and hpo_scales:
                 hpo_bar_minutes = min(hpo_scales)
             elif "15min" in config.get("data", {}).get("file_path", ""):
@@ -1494,6 +1569,8 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         bar_duration_seconds = config.get("env", {}).get("bar_duration_seconds")
         if bar_duration_seconds is not None:
             bar_minutes = bar_duration_seconds / 60.0
+        elif mdp_version == "cmgp1":
+            bar_minutes = _parse_frequency_to_minutes(config.get("data", {}).get("frequency", "1h"))
         elif mdp_version in ("v7", "v8") and scales:
             bar_minutes = scales[0]  # First scale is the base (decision) timeframe
         elif "15min" in data_file:
@@ -1505,7 +1582,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         else:
             bar_minutes = 1  # Default: 1-min bars
         bars_per_year = 525600 / bar_minutes
-        n_per_hour = int(60 / bar_minutes)
+        n_per_hour = max(1, int(60 / bar_minutes))
         sharpe = 0.0
         sharpe_hourly = 0.0
         if np.std(returns) > 1e-9:
@@ -1530,8 +1607,8 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         base_count = np.sum(pos_deltas > 1e-6)
         sign_flips = np.sum((pos_arr[:-1] * pos_arr[1:]) < -1e-9)
         mdp_ver = config.get("env", {}).get("mdp_version", "v5")
-        if mdp_ver in ("v7", "v8"):
-            # V7/V8: continuous positions, count all position changes past deadband
+        if mdp_ver in ("v7", "v8", "cmgp1"):
+            # V7/V8/CMGP1: continuous positions, count all position changes past deadband
             trade_count = base_count
         elif mdp_ver == "v6":
             trade_count = sign_flips

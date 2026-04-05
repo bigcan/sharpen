@@ -711,6 +711,7 @@ class CryptoPerpSwingEnv(gym.Env):
         return {
             "portfolio_value": self.equity,
             "margin_balance": self.margin_balance,
+            "position": float(self.positions.sum()),  # net position (scalar proxy for trade counting)
             "gross_exposure": float(abs_pos.sum()),
             "net_exposure": float(self.positions.sum()),
             "drawdown_pct": float(drawdown_pct),
