@@ -141,7 +141,6 @@ class CryptoPerpSwingEnv(gym.Env):
         self.entry_notionals = np.zeros(self.n_assets, dtype=np.float64)
 
         # Per-asset risk tracking
-        self._entry_equities = np.zeros(self.n_assets, dtype=np.float64)
         self._bars_in_position = np.zeros(self.n_assets, dtype=np.int32)
 
         # DSR calculator
@@ -188,7 +187,6 @@ class CryptoPerpSwingEnv(gym.Env):
         self.positions[:] = 0.0
         self.entry_prices[:] = 0.0
         self.entry_notionals[:] = 0.0
-        self._entry_equities[:] = 0.0
         self._bars_in_position[:] = 0
 
         # Reset scalar state
@@ -550,12 +548,10 @@ class CryptoPerpSwingEnv(gym.Env):
         from_flat = ~closed & (abs_old < 1e-8)
         self.entry_prices[from_flat] = current_price[from_flat]
         self.entry_notionals[from_flat] = abs_new[from_flat] * portfolio_value
-        self._entry_equities[from_flat] = self.equity
 
         flipped = ~closed & ~from_flat & (np.sign(old_positions) != np.sign(new_positions))
         self.entry_prices[flipped] = current_price[flipped]
         self.entry_notionals[flipped] = abs_new[flipped] * portfolio_value
-        self._entry_equities[flipped] = self.equity
 
         increased = ~closed & ~from_flat & ~flipped & (abs_new > abs_old)
         if increased.any():
@@ -729,7 +725,7 @@ class CryptoPerpSwingEnv(gym.Env):
 
     def render(self, mode="human"):
         abs_pos = np.abs(self.positions)
-        print(
+        logger.info(
             f"Step {self.current_step}: equity={self.equity:.2f}, "
             f"gross={abs_pos.sum():.3f}, trades={self.trade_count}",
         )

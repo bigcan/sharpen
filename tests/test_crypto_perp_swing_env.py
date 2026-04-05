@@ -390,3 +390,49 @@ class TestDrawdownTermination:
         action = np.zeros(3, dtype=np.float32)
         _, _, terminated, _, _ = env.step(action)
         assert terminated, "Should terminate on drawdown"
+
+
+class TestEvalObsConversion:
+    """Verify obs-to-tensor conversion matches SACTrainer path (FIND-CMGP1-01)."""
+
+    def test_obs_concat_produces_correct_dim(self):
+        """Summary-stats obs concat should match network.summary_input_dim formula."""
+        env = _make_env(n_assets=3)
+        obs, _ = env.reset()
+
+        n_scales = 3
+        parts = [obs[f"scale_{i}"] for i in range(n_scales)]
+        parts.append(obs["private"])
+        flat = np.concatenate(parts)
+
+        # Expected: 3 scales × (3 assets × 5 features × 3 stats) + (7 + 3 private)
+        expected = 3 * 45 + 10  # 145
+        assert flat.shape == (expected,), f"Expected ({expected},) got {flat.shape}"
+        assert np.all(np.isfinite(flat))
+
+    def test_obs_concat_with_batch_dim(self):
+        """Adding batch dim should produce (1, D) for agent.predict()."""
+        env = _make_env(n_assets=3)
+        obs, _ = env.reset()
+
+        parts = [obs[f"scale_{i}"] for i in range(3)]
+        parts.append(obs["private"])
+        flat = np.concatenate(parts)[None, :]  # (1, D)
+        assert flat.ndim == 2
+        assert flat.shape[0] == 1
+
+
+class TestEvalFees:
+    """Verify eval envs use production fees (FIND-CMGP1-02)."""
+
+    def test_set_fees_for_eval(self):
+        env = _make_env(n_assets=3)
+        assert env.taker_fee == 0.0  # curriculum start
+        env.set_fees(0.0005)
+        assert env.taker_fee == 0.0005
+
+        # With fees, a trade should incur costs
+        env.reset()
+        action = np.array([0.5, 0.0, 0.0], dtype=np.float32)
+        env.step(action)
+        assert env.cumulative_fees > 0.0, "Non-zero fees should produce costs on trade"
