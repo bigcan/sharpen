@@ -62,7 +62,7 @@ COPY scripts /app/scripts
 COPY configs /app/configs
 COPY pyproject.toml /app/
 
-RUN pip install -e .
+RUN pip install -e ".[ctrader]"
 
 # ---- Runtime setup ----
 RUN groupadd -r finrl && useradd -r -g finrl -d /app finrl \
