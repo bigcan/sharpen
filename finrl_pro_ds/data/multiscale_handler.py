@@ -175,6 +175,13 @@ class MultiScaleOHLCVHandler:
             "summary_feature_indices", [0, 1, 2, 6, 7],
         )  # log_return, atr_norm, parkinson_vol, close_z, volume_z
 
+        # v7/FQ-1: Feature subsetting for window mode
+        # Indices into the 8-feature vector: 0=log_return, 1=atr_norm,
+        # 2=parkinson_vol, 3=open_z, 4=high_z, 5=low_z, 6=close_z, 7=volume_z
+        self.feature_indices = feature_config.get("feature_indices", None)
+        if self.feature_indices is not None:
+            self.feature_indices = np.array(self.feature_indices, dtype=np.intp)
+
         # PRISM L1: Pre-computed regime features (13 dims)
         self._prism_features_path = feature_config.get("prism_features_path", None)
         self._prism_lookup: dict | None = None
@@ -357,6 +364,10 @@ class MultiScaleOHLCVHandler:
                 pad_len = self.window_size - len(window)
                 pad = np.tile(window[0:1], (pad_len, 1))
                 window = np.concatenate([pad, window], axis=0)
+
+            # v7/FQ-1: Subset features in window mode if feature_indices configured
+            if self.feature_indices is not None and self.obs_mode != "summary_stats":
+                window = window[:, self.feature_indices]
 
             key = f"scale_{i}"
             if self.obs_mode == "summary_stats":

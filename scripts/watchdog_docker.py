@@ -44,6 +44,23 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN", "300"))  # 5 min per container
 
+# Comma-separated container names to ignore (intentionally stopped / shelved workstreams).
+# Empty string means monitor everything (backward compatible).
+_IGNORE_CONTAINERS_RAW = os.environ.get("IGNORE_CONTAINERS", "")
+IGNORE_CONTAINERS: set[str] = {
+    name.strip()
+    for name in _IGNORE_CONTAINERS_RAW.split(",")
+    if name.strip()
+}
+
+def _is_ignored(container_name: str) -> bool:
+    """Return True if container_name is in the ignore list."""
+    if container_name in IGNORE_CONTAINERS:
+        logger.debug(f"Skipping ignored container: {container_name}")
+        return True
+    return False
+
+
 # ---------------------------------------------------------------------------
 # Telegram alerting
 # ---------------------------------------------------------------------------
@@ -154,6 +171,9 @@ def handle_health_event(client: docker.DockerClient, event: dict) -> None:
     if "finrl.monitor" not in attrs:
         return
 
+    if _is_ignored(container_name):
+        return
+
     strategy = attrs.get("finrl.strategy", container_name)
 
     if "unhealthy" in action:
@@ -189,6 +209,9 @@ def handle_container_event(event: dict) -> None:
     container_name = attrs.get("name", "unknown")
 
     if "finrl.monitor" not in attrs:
+        return
+
+    if _is_ignored(container_name):
         return
 
     strategy = attrs.get("finrl.strategy", container_name)
@@ -232,6 +255,10 @@ def sweep(client: docker.DockerClient) -> None:
 
     for container in containers:
         info = inspect_container(container)
+
+        if _is_ignored(info["name"]):
+            continue
+
         status_str = f"{info['name']}: {info['status']} / {info['health']}"
 
         if info["health"] == "unhealthy":
@@ -265,6 +292,10 @@ def main() -> None:
         f"Config: sweep={SWEEP_INTERVAL}s, wandb_check={WANDB_CHECK_INTERVAL}s, "
         f"telegram={'configured' if TELEGRAM_BOT_TOKEN else 'disabled'}",
     )
+    if IGNORE_CONTAINERS:
+        logger.info(f"Ignoring containers: {sorted(IGNORE_CONTAINERS)}")
+    else:
+        logger.info("No containers in ignore list — monitoring everything")
 
     client = docker.from_env()
 

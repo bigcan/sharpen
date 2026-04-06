@@ -8,9 +8,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
-from finrl_pro_ds.crypto.live.bar_clock import BarClock
+from finrl_pro_ds.crypto.live.bar_clock import (
+    BarClock,
+    _JUMP_ERROR_THRESHOLD,
+    _JUMP_WARN_THRESHOLD,
+)
 from finrl_pro_ds.futures.live.cme_calendar import CMEGlobexCalendar
 
 logger = logging.getLogger(__name__)
@@ -61,6 +66,15 @@ class CMEBarClock:
         """Number of bars skipped due to market closure."""
         return self._skipped_bars
 
+    @property
+    def clock_jump_detected(self) -> bool:
+        """True if a large clock jump was detected (delegates to inner BarClock)."""
+        return self._inner.clock_jump_detected
+
+    def clear_clock_jump(self) -> None:
+        """Reset the clock jump flag after the engine has handled it."""
+        self._inner.clear_clock_jump()
+
     def get_bar_interval_timedelta(self) -> timedelta:
         return self._inner.get_bar_interval_timedelta()
 
@@ -89,7 +103,12 @@ class CMEBarClock:
                     )
 
                 # Sleep until market opens, plus a small buffer
-                await asyncio.sleep(max(sleep_secs + 2.0, 0))
+                # Record clocks for jump detection around long market-closed sleeps
+                actual_sleep = max(sleep_secs + 2.0, 0)
+                mono_before = time.monotonic()
+                wall_before = time.time()
+                await asyncio.sleep(actual_sleep)
+                self._check_gate_clock_jump(wall_before, mono_before)
                 continue
 
             # Market is open — delegate to inner BarClock
@@ -107,6 +126,30 @@ class CMEBarClock:
             )
 
         raise RuntimeError("CMEBarClock: exceeded max retries waiting for valid bar")
+
+    def _check_gate_clock_jump(
+        self, wall_before: float, mono_before: float,
+    ) -> None:
+        """Detect clock jumps during market-closed gate sleeps."""
+        wall_elapsed = time.time() - wall_before
+        mono_elapsed = time.monotonic() - mono_before
+        delta = abs(wall_elapsed - mono_elapsed)
+
+        if delta > _JUMP_ERROR_THRESHOLD:
+            # Propagate to inner clock so the flag is visible via property
+            self._inner._clock_jump_detected = True
+            logger.error(
+                f"CMEBarClock: Large clock jump detected during market-closed sleep: "
+                f"wall={wall_elapsed:.1f}s, monotonic={mono_elapsed:.1f}s, "
+                f"delta={delta:.1f}s (>{_JUMP_ERROR_THRESHOLD}s). "
+                f"Trading on stale/future bars is possible.",
+            )
+        elif delta > _JUMP_WARN_THRESHOLD:
+            logger.warning(
+                f"CMEBarClock: Clock jump detected during market-closed sleep: "
+                f"wall={wall_elapsed:.1f}s, monotonic={mono_elapsed:.1f}s, "
+                f"delta={delta:.1f}s",
+            )
 
     def _closure_reason(self, dt_utc: datetime) -> str:
         """Human-readable reason why the market is closed."""

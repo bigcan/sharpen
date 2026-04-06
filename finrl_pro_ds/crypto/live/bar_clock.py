@@ -11,9 +11,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
+
+# Clock jump detection thresholds (seconds)
+_JUMP_WARN_THRESHOLD = 60.0  # Warn if wall vs monotonic diverge by >60s
+_JUMP_ERROR_THRESHOLD = 300.0  # Error + flag if divergence >300s
 
 
 class BarClock:
@@ -46,6 +51,7 @@ class BarClock:
         self.delay = execution_delay_seconds
         self.max_late = max_late_seconds
         self._bar_count = 0
+        self._clock_jump_detected = False
 
     def _next_bar_close(self, now: datetime) -> datetime:
         """Calculate the next bar close time aligned to UTC boundaries.
@@ -109,6 +115,10 @@ class BarClock:
         FIX AUD-H02: Uses iterative loop instead of recursion to handle
         late wakeups (e.g., system suspend) without stack overflow risk.
 
+        Uses time.monotonic() as authoritative sleep timer (immune to NTP
+        adjustments). Detects wall-clock vs monotonic divergence to catch
+        system clock jumps (NTP corrections, VM resume, manual changes).
+
         Returns:
             The bar close timestamp (UTC). This is the timestamp of the
             completed candle that should be fetched.
@@ -127,7 +137,15 @@ class BarClock:
                         f"BarClock: waiting {sleep_seconds:.1f}s for next "
                         f"{self.interval}-min bar close at {next_bar.strftime('%H:%M:%S')} UTC",
                     )
+
+                # Record both clocks before sleep for jump detection
+                mono_before = time.monotonic()
+                wall_before = time.time()
+
                 await asyncio.sleep(sleep_seconds)
+
+                # Check for clock jump after waking
+                self._check_clock_jump(wall_before, mono_before)
 
             # Check if we're too late (e.g., system was suspended)
             actual_time = datetime.now(timezone.utc)
@@ -141,6 +159,47 @@ class BarClock:
                 f"{next_bar.strftime('%H:%M:%S')} UTC (max_late={self.max_late}s). "
                 f"Skipping to next bar.",
             )
+
+    def _check_clock_jump(
+        self, wall_before: float, mono_before: float,
+    ) -> None:
+        """Detect system clock jumps by comparing wall-clock vs monotonic elapsed.
+
+        Called after waking from sleep. A large divergence between the two
+        indicates an NTP correction, manual clock change, or VM resume.
+        """
+        wall_elapsed = time.time() - wall_before
+        mono_elapsed = time.monotonic() - mono_before
+        delta = abs(wall_elapsed - mono_elapsed)
+
+        if delta > _JUMP_ERROR_THRESHOLD:
+            self._clock_jump_detected = True
+            logger.error(
+                f"BarClock: Large clock jump detected: "
+                f"wall={wall_elapsed:.1f}s, monotonic={mono_elapsed:.1f}s, "
+                f"delta={delta:.1f}s (>{_JUMP_ERROR_THRESHOLD}s). "
+                f"Trading on stale/future bars is possible.",
+            )
+        elif delta > _JUMP_WARN_THRESHOLD:
+            logger.warning(
+                f"BarClock: Clock jump detected: "
+                f"wall={wall_elapsed:.1f}s, monotonic={mono_elapsed:.1f}s, "
+                f"delta={delta:.1f}s",
+            )
+
+    @property
+    def clock_jump_detected(self) -> bool:
+        """True if a large clock jump (>{threshold}s) was detected.
+
+        The engine can check this flag after wait_for_next_bar() returns
+        to decide whether to skip trading on the current bar.
+        Reset via clear_clock_jump().
+        """
+        return self._clock_jump_detected
+
+    def clear_clock_jump(self) -> None:
+        """Reset the clock jump flag after the engine has handled it."""
+        self._clock_jump_detected = False
 
     def get_bar_interval_timedelta(self) -> timedelta:
         """Return the bar interval as a timedelta."""

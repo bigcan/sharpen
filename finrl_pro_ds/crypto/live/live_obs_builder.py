@@ -16,6 +16,7 @@ The full recompute strategy (vs incremental EMA) eliminates numerical drift risk
 from __future__ import annotations
 
 import logging
+from collections import deque
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -54,6 +55,8 @@ class LiveObsBuilder:
         norm_span: int = 120,
         n_features: int = 8,
         bootstrap_bars: int = 30_000,
+        drift_detection: bool = True,
+        drift_window: int = 100,
     ):
         """
         Args:
@@ -64,6 +67,8 @@ class LiveObsBuilder:
             bootstrap_bars: 1-min bars to pre-load for EMA warmup.
                             Default 30_000 (~20.8 days) ensures warmup
                             for EMA span=120 at 240-min scale.
+            drift_detection: Enable EMA drift detection (variance monitoring).
+            drift_window: Rolling window size for variance tracking.
         """
         self.scales = sorted(scales)
         self.window_size = window_size
@@ -91,6 +96,16 @@ class LiveObsBuilder:
 
         # EMA convergence: need ~3x norm_span bars per scale for 95% convergence
         self._ema_convergence_factor = 3
+
+        # ---- Drift detection state ----
+        self._drift_detection_enabled = drift_detection
+        self._drift_window = drift_window
+        # Per-scale deque of variance values, one entry per update() call
+        self._variance_history: dict[int, deque[float]] = {}
+        self._drift_detected = False
+        # Thresholds: current variance vs rolling median
+        self._drift_flat_threshold = 0.01   # <1% of median = features going flat
+        self._drift_explode_threshold = 100.0  # >100x median = explosion
 
     # -------------------------------------------------------------------
     # Warmup quality
@@ -273,6 +288,80 @@ class LiveObsBuilder:
         self._base_atr_values = pd.Series(tr).rolling(14, min_periods=1).mean().values
 
     # -------------------------------------------------------------------
+    # Drift detection
+    # -------------------------------------------------------------------
+    @property
+    def drift_detected(self) -> bool:
+        """True if any scale has anomalous feature variance (flat or exploding)."""
+        return self._drift_detected
+
+    def _check_drift(self) -> bool:
+        """Check per-scale feature variance against rolling median.
+
+        Appends the current variance of the latest feature row for each scale
+        to a rolling window. If the current variance drops below 1% of the
+        rolling median (features going constant/stale) or exceeds 100x the
+        rolling median (numerical explosion), logs a WARNING and returns True.
+
+        Returns:
+            True if drift detected on ANY scale, False otherwise.
+        """
+        if not self._drift_detection_enabled:
+            return False
+
+        any_drift = False
+
+        for scale in self.scales:
+            features = self._scale_features.get(scale)
+            if features is None or len(features) == 0:
+                continue
+
+            # Variance of the latest feature row (across all feature columns)
+            latest_row = features[-1]
+            current_var = float(np.var(latest_row))
+
+            # Initialize deque on first call for this scale
+            if scale not in self._variance_history:
+                self._variance_history[scale] = deque(maxlen=self._drift_window)
+
+            history = self._variance_history[scale]
+            history.append(current_var)
+
+            # Need at least 10 samples to establish a baseline
+            if len(history) < 10:
+                continue
+
+            rolling_median = float(np.median(list(history)))
+
+            # Guard against zero median (all-constant features from the start)
+            if rolling_median < 1e-15:
+                # If median is ~0 and current is also ~0, no drift.
+                # If median is ~0 but current is nonzero, that's a regime change, not drift.
+                continue
+
+            variance_ratio = current_var / rolling_median
+
+            if variance_ratio < self._drift_flat_threshold:
+                logger.warning(
+                    "EMA drift detected — scale %dmin: feature variance FLAT "
+                    "(ratio=%.4f, current=%.2e, median=%.2e). "
+                    "Possible stale or corrupted data feed.",
+                    scale, variance_ratio, current_var, rolling_median,
+                )
+                any_drift = True
+            elif variance_ratio > self._drift_explode_threshold:
+                logger.warning(
+                    "EMA drift detected — scale %dmin: feature variance EXPLOSION "
+                    "(ratio=%.1f, current=%.2e, median=%.2e). "
+                    "Possible data corruption or extreme market event.",
+                    scale, variance_ratio, current_var, rolling_median,
+                )
+                any_drift = True
+
+        self._drift_detected = any_drift
+        return any_drift
+
+    # -------------------------------------------------------------------
     # Live update
     # -------------------------------------------------------------------
     def update(self, bars_1min: list[dict] | pd.DataFrame) -> None:
@@ -316,6 +405,9 @@ class LiveObsBuilder:
             if len(self._atr_buffer) > 200:
                 self._atr_buffer = self._atr_buffer[-200:]
             self._atr_rolling_mean = float(np.mean(self._atr_buffer))
+
+        # Drift detection — lightweight variance check per scale
+        self._check_drift()
 
     # -------------------------------------------------------------------
     # Observation construction
