@@ -72,6 +72,17 @@ class ContinuousSwingEnv(gym.Env):
         self.dsr_eta = float(reward_cfg.get("dsr_eta", 0.001))
         self.dsr_scale = float(reward_cfg.get("dsr_scale", 1.0))
 
+        # Path 2: Regime-adaptive DSR
+        self._regime_adaptive_dsr = bool(reward_cfg.get("regime_adaptive_dsr", False))
+        raw_mults = reward_cfg.get("regime_eta_multipliers", None)
+        self._regime_eta_mults: dict[int, float] | None = None
+        if raw_mults and self._regime_adaptive_dsr:
+            # Config uses string keys; convert to int vol-regime codes
+            name_to_code = {"LOW_VOL": 0, "NORMAL_VOL": 1, "HIGH_VOL": 2}
+            self._regime_eta_mults = {
+                name_to_code.get(k, int(k)): float(v) for k, v in raw_mults.items()
+            }
+
         # Episode config
         self.episode_length = int(config.get("episode_length", 1000))
         self.random_start = bool(config.get("random_start", True))
@@ -138,11 +149,19 @@ class ContinuousSwingEnv(gym.Env):
         self._bars_in_position = 0
 
         # DSR state
-        self._dsr = DSRCalculator(eta=self.dsr_eta, scale=self.dsr_scale)
+        self._dsr = DSRCalculator(
+            eta=self.dsr_eta,
+            scale=self.dsr_scale,
+            regime_eta_multipliers=self._regime_eta_mults,
+            regime_blend=float(reward_cfg.get("regime_blend", 0.5)),
+        )
 
         # ATR tracking for private state
         self._atr_buffer = []
         self._atr_rolling_mean = 0.0
+
+        # Current regime code from PRISM (-1 = unknown)
+        self._current_regime_code = -1
 
         # Time encoding cache — avoid np.datetime64 computation every step
         self._cached_time_ptr = -1
@@ -178,6 +197,9 @@ class ContinuousSwingEnv(gym.Env):
 
         # DSR state reset
         self._dsr.reset()
+
+        # Regime code reset
+        self._current_regime_code = -1
 
         # ATR tracking
         self._atr_buffer = []
@@ -237,6 +259,8 @@ class ContinuousSwingEnv(gym.Env):
             self.current_close = step_data["close"]
             self.current_atr = step_data["atr"]
             self._current_obs = self._extract_obs(step_data)
+            # RCRP + Path 2: Track current regime code from handler
+            self._current_regime_code = step_data.get("regime_code", -1)
 
             # Update ATR rolling stats
             self._atr_buffer.append(self.current_atr)
@@ -333,6 +357,9 @@ class ContinuousSwingEnv(gym.Env):
 
         # 5. Compute reward
         if self.reward_mode == "dsr":
+            # Path 2: Set regime context before DSR compute (vol_regime = code % 3)
+            if self._regime_adaptive_dsr and self._current_regime_code >= 0:
+                self._dsr.set_regime_context(self._current_regime_code % 3)
             reward = self._dsr.compute(R_t)
         else:
             # Raw PnL mode
@@ -472,6 +499,7 @@ class ContinuousSwingEnv(gym.Env):
             "reward_total": reward,
             "reward_nav": reward,
             "taker_fee": self.taker_fee,
+            "regime_code": self._current_regime_code,
         }
 
     def render(self, mode='human'):

@@ -185,6 +185,7 @@ class MultiScaleOHLCVHandler:
         # PRISM L1: Pre-computed regime features (13 dims)
         self._prism_features_path = feature_config.get("prism_features_path", None)
         self._prism_lookup: dict | None = None
+        self._prism_raw_codes: dict = {}  # date → raw composite code (0-8)
         self._prism_default = np.zeros(13, dtype=np.float32)
 
         self.start_date = pd.to_datetime(start_date) if start_date else None
@@ -383,6 +384,9 @@ class MultiScaleOHLCVHandler:
         if self._prism_lookup is not None:
             bar_day = np.datetime64(self._base_timestamps[self._ptr], "D")
             result["prism"] = self._prism_lookup.get(bar_day, self._prism_default)
+            # RCRP + Path 2: Raw composite code (0-8) for replay balancing / DSR shaping
+            raw_code = self._prism_raw_codes.get(bar_day, -1)
+            result["regime_code"] = int(raw_code)
 
         self._ptr += 1
         return result
@@ -452,6 +456,8 @@ class MultiScaleOHLCVHandler:
             # Key by numpy datetime64 day for fast lookup
             day = np.datetime64(pd.Timestamp(date).normalize(), "D")
             self._prism_lookup[day] = features
+            # RCRP: Store raw composite code (0-8) for replay balancing / DSR shaping
+            self._prism_raw_codes[day] = int(row.get("composite_code", -1))
 
         logger.info(
             f"PRISM L1 features loaded: {len(self._prism_lookup)} dates "
