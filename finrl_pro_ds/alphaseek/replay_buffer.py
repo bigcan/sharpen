@@ -124,7 +124,8 @@ class AlphaSeekReplayBuffer:
         sample_len = self.cur_size - 1
 
         ids = torch.randint(
-            sample_len * self.num_seqs, size=(batch_size,), requires_grad=False,
+            sample_len * self.num_seqs, size=(batch_size,),
+            requires_grad=False, device=self.device,
         )
         ids0 = torch.fmod(ids, sample_len)  # timestep index
         ids1 = torch.div(ids, sample_len, rounding_mode="floor")  # seq index

@@ -134,10 +134,20 @@ class AgentDoubleDQN:
         self.act_target = self.cri_target = deepcopy(self.act)
         self.act.explore_rate = args.explore_rate
 
-        # Optimizers
-        self.act_optimizer = torch.optim.AdamW(self.act.parameters(), self.learning_rate)
+        # torch.compile: simple MLP with static shapes — compiles cleanly
+        if self.device.type == "cuda":
+            self.act = torch.compile(self.act)
+            self.act_target = self.cri_target = torch.compile(self.act_target)
+
+        # Optimizers (fused=True for CUDA tensors)
+        use_fused = self.device.type == "cuda"
+        self.act_optimizer = torch.optim.AdamW(
+            self.act.parameters(), self.learning_rate, fused=use_fused,
+        )
         self.cri_optimizer = (
-            torch.optim.AdamW(self.cri.parameters(), self.learning_rate)
+            torch.optim.AdamW(
+                self.cri.parameters(), self.learning_rate, fused=use_fused,
+            )
             if cri_class
             else self.act_optimizer
         )
@@ -259,7 +269,11 @@ class AgentDoubleDQN:
         os.makedirs(cwd, exist_ok=True)
         for attr_name in self.save_attr_names:
             file_path = os.path.join(cwd, f"{attr_name}.pth")
-            torch.save(getattr(self, attr_name), file_path)
+            obj = getattr(self, attr_name)
+            # Unwrap torch.compile wrapper for serialization
+            if hasattr(obj, "_orig_mod"):
+                obj = obj._orig_mod
+            torch.save(obj, file_path)
         logger.info(f"Agent saved to {cwd}")
 
     def load_agent(self, cwd: str) -> None:
@@ -267,11 +281,11 @@ class AgentDoubleDQN:
         for attr_name in self.save_attr_names:
             file_path = os.path.join(cwd, f"{attr_name}.pth")
             if os.path.isfile(file_path):
-                setattr(
-                    self,
-                    attr_name,
-                    torch.load(file_path, map_location=self.device, weights_only=False),  # full nn.Module checkpoint
-                )
+                obj = torch.load(file_path, map_location=self.device, weights_only=False)
+                # Re-apply torch.compile on CUDA
+                if self.device.type == "cuda" and isinstance(obj, torch.nn.Module):
+                    obj = torch.compile(obj)
+                setattr(self, attr_name, obj)
         logger.info(f"Agent loaded from {cwd}")
 
     # --- Private helpers ---
@@ -281,7 +295,7 @@ class AgentDoubleDQN:
         target_net: torch.nn.Module, current_net: torch.nn.Module, tau: float,
     ) -> None:
         for tar, cur in zip(target_net.parameters(), current_net.parameters()):
-            tar.data.copy_(cur.data * tau + tar.data * (1.0 - tau))
+            tar.data.lerp_(cur.data, tau)
 
     def _optimizer_update(self, optimizer: torch.optim.Optimizer, objective: Tensor) -> None:
         optimizer.zero_grad()
