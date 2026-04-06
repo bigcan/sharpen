@@ -24,11 +24,13 @@ Safety:
 from __future__ import annotations
 
 import asyncio
+import collections
 import contextlib
 import json
 import logging
 import os
 import signal
+import tempfile
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -110,6 +112,15 @@ class LiveTradingEngine:
         )
         self._reconciliation_warn_pct = 0.05
         self._reconciliation_halt_pct = 0.15
+
+        # Position persistence file (crash recovery)
+        self._position_file = Path(config.get("safety", {}).get(
+            "position_file", "/tmp/finrl_last_position.json",
+        ))
+
+        # Daily loss smoothing: median of last 3 PV readings prevents false
+        # triggers from broker API hiccups returning anomalous portfolio values
+        self._pv_buffer: collections.deque[float] = collections.deque(maxlen=3)
 
         # Control
         self._should_stop = False
@@ -244,6 +255,9 @@ class LiveTradingEngine:
 
         # Sync position from exchange
         await self._sync_position()
+
+        # Check persisted position file for crash-recovery mismatch
+        self._check_persisted_position()
 
         # Initialize prev_close
         self._prev_close = self.obs_builder.get_current_close()
@@ -491,6 +505,9 @@ class LiveTradingEngine:
                 await self._emergency_flatten()
                 self._request_stop("execution_error")
             return
+
+        # --- 8b. Persist position to file (crash recovery) ---
+        self._write_position_file()
 
         # --- 9. Reconcile position ---
         await self._reconcile_position()
@@ -852,24 +869,113 @@ class LiveTradingEngine:
         return True
 
     def _check_daily_loss(self, bar_time: datetime) -> None:
-        """Check if daily loss limit exceeded.
+        """Check if daily loss limit exceeded using median-smoothed PV.
 
         FIX AUD-H04: Reset at UTC midnight instead of bar count.
+
+        Uses median of the last 3 portfolio value readings to prevent false
+        triggers from broker API hiccups returning anomalous values. A single
+        bad reading cannot trip the limit on its own.
         """
         current_date = bar_time.date()
 
         if self._last_daily_reset_date is None or current_date != self._last_daily_reset_date:
             self._daily_start_value = self._portfolio_value
             self._last_daily_reset_date = current_date
+            # Reset PV buffer on new day to avoid stale cross-day values
+            self._pv_buffer.clear()
+
+        # Append current reading to smoothing buffer
+        self._pv_buffer.append(self._portfolio_value)
 
         if self._daily_start_value > 0:
-            daily_return = (self._portfolio_value - self._daily_start_value) / self._daily_start_value
-            if daily_return < -self._max_daily_loss_pct:
+            # Use median of buffered readings for robustness
+            smoothed_pv = float(np.median(list(self._pv_buffer)))
+            smoothed_return = (smoothed_pv - self._daily_start_value) / self._daily_start_value
+
+            # Also compute single-reading return for comparison
+            raw_return = (self._portfolio_value - self._daily_start_value) / self._daily_start_value
+
+            if smoothed_return < -self._max_daily_loss_pct:
                 logger.critical(
-                    f"DAILY LOSS LIMIT: {daily_return:.2%} < -{self._max_daily_loss_pct:.0%}. "
+                    f"DAILY LOSS LIMIT: smoothed={smoothed_return:.2%} "
+                    f"(raw={raw_return:.2%}) < -{self._max_daily_loss_pct:.0%}. "
                     f"Stopping trading.",
                 )
                 self._request_stop("daily_loss_limit")
+            elif raw_return < -self._max_daily_loss_pct:
+                # Single reading breached but median didn't — likely API hiccup
+                logger.debug(
+                    f"Daily loss: raw={raw_return:.2%} breached limit but "
+                    f"smoothed={smoothed_return:.2%} did not "
+                    f"(buffer={[round(v, 2) for v in self._pv_buffer]}). "
+                    f"Suppressing false trigger.",
+                )
+
+    # -------------------------------------------------------------------
+    # Position persistence (crash recovery)
+    # -------------------------------------------------------------------
+    def _write_position_file(self) -> None:
+        """Atomically write current position to disk for crash recovery.
+
+        Uses write-to-tmpfile + os.rename for atomicity. Non-critical:
+        if this fails, trading continues unaffected.
+        """
+        data = {
+            "position": round(self._current_position, 6),
+            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "strategy": self._strategy_name,
+            "broker_position": round(self._current_position, 6),
+        }
+        try:
+            parent = self._position_file.parent
+            parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp_path = tempfile.mkstemp(
+                dir=str(parent), suffix=".tmp",
+            )
+            try:
+                with os.fdopen(fd, "w") as f:
+                    json.dump(data, f)
+                os.replace(tmp_path, str(self._position_file))
+            except BaseException:
+                # Clean up tmpfile on any error
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp_path)
+                raise
+        except Exception as e:
+            logger.debug(f"Position file write failed: {e}")
+
+    def _check_persisted_position(self) -> None:
+        """On startup, compare persisted position file with broker position.
+
+        Logs WARNING if they differ by more than 5%, indicating a potential
+        crash-recovery mismatch that needs manual attention.
+        """
+        if not self._position_file.exists():
+            logger.info("No persisted position file found — clean start")
+            return
+
+        try:
+            data = json.loads(self._position_file.read_text(encoding="utf-8"))
+            persisted_pos = float(data.get("position", 0.0))
+            broker_pos = self._current_position  # Already synced from exchange
+
+            discrepancy = abs(persisted_pos - broker_pos)
+            if discrepancy > 0.05:
+                logger.warning(
+                    f"POSITION MISMATCH on startup: persisted={persisted_pos:.4f} "
+                    f"(from {data.get('timestamp', 'unknown')}), "
+                    f"broker={broker_pos:.4f}, "
+                    f"discrepancy={discrepancy:.4f} (>{0.05:.0%}). "
+                    f"Trusting broker position. Investigate if unexpected.",
+                )
+            else:
+                logger.info(
+                    f"Persisted position matches broker: "
+                    f"persisted={persisted_pos:.4f}, broker={broker_pos:.4f}",
+                )
+        except Exception as e:
+            logger.warning(f"Could not read persisted position file: {e}")
 
     def _request_stop(self, reason: str) -> None:
         """Request graceful shutdown."""

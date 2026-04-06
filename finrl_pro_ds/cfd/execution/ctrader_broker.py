@@ -21,6 +21,7 @@ Requires env vars: CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET,
 from __future__ import annotations
 
 import asyncio
+import functools
 import logging
 import os
 import time
@@ -34,6 +35,39 @@ from finrl_pro_ds.crypto.execution.exchange_perp_broker import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _with_reconnect(method):
+    """Decorator: check connection before API call, reconnect on failure.
+
+    Wraps async methods that use ``_send_request`` so that a dropped TCP
+    connection triggers an automatic reconnect-and-retry cycle instead of
+    propagating the error immediately.
+    """
+
+    @functools.wraps(method)
+    async def wrapper(self: "CTraderBroker", *args, **kwargs):
+        # Fast-path: connection looks healthy
+        if self._connected and self._client is not None:
+            try:
+                return await method(self, *args, **kwargs)
+            except (RuntimeError, asyncio.TimeoutError, OSError) as exc:
+                # First failure — fall through to reconnect path
+                logger.warning(
+                    "API call %s failed (%s), attempting reconnect",
+                    method.__name__,
+                    exc,
+                )
+
+        # Connection is down — try to restore it
+        reconnected = await self._reconnect()
+        if not reconnected:
+            raise RuntimeError(
+                f"cTrader reconnect failed — cannot execute {method.__name__}"
+            )
+        return await method(self, *args, **kwargs)
+
+    return wrapper
 
 # Volume encoding: cTrader API represents volume in hundredths of a lot.
 # 1.00 lot = volume 100, 0.01 lot = volume 1.
@@ -58,6 +92,7 @@ class CTraderBroker:
         order_type: str = "MKT",
         taker_fee: float = 0.00015,
         market_fallback_timeout: float = 10.0,
+        max_reconnect_attempts: int = 3,
     ):
         """
         Args:
@@ -70,6 +105,8 @@ class CTraderBroker:
             order_type: Order type ("MKT" for market).
             taker_fee: Effective spread as fraction (1.5bps = 0.00015).
             market_fallback_timeout: Seconds to wait for order fill.
+            max_reconnect_attempts: Max reconnect attempts with exponential
+                backoff (5s, 10s, 20s, ...) before giving up.
         """
         self._testnet = testnet
         self._symbol_name = symbol
@@ -80,6 +117,7 @@ class CTraderBroker:
         self._order_type = order_type
         self._taker_fee = taker_fee
         self._market_fallback_timeout = market_fallback_timeout
+        self._max_reconnect_attempts = max_reconnect_attempts
 
         # Required by LiveTradingEngine
         self.exchange_id = "ctrader"
@@ -107,6 +145,10 @@ class CTraderBroker:
         self._response_events: dict[int, asyncio.Event] = {}
         self._response_data: dict[int, object] = {}
         self._msg_id_counter = 0
+
+        # Reconnect state
+        self._reconnect_lock = asyncio.Lock()
+        self._consecutive_reconnects = 0
 
     async def connect(self) -> None:
         """Connect to cTrader Open API and authenticate."""
@@ -266,6 +308,144 @@ class CTraderBroker:
         self._connected = False
         logger.info("CTraderBroker disconnected")
 
+    # ---------------------------------------------------------------
+    # Connection health check + auto-reconnect
+    # ---------------------------------------------------------------
+
+    def _check_connection(self) -> bool:
+        """Check whether the TCP connection to cTrader is alive.
+
+        Returns True if the client exists and is marked connected.
+        The ``_on_disconnected`` callback sets ``_connected = False``
+        when the Twisted transport drops, so this is a reliable check.
+        """
+        if self._client is None:
+            return False
+        if not self._connected:
+            return False
+        # Twisted transport-level check (if available)
+        try:
+            transport = getattr(self._client, "_TcpClient__transport", None)
+            if transport is not None and getattr(transport, "connected", None) is False:
+                return False
+        except Exception:
+            pass
+        return True
+
+    async def _reconnect(self) -> bool:
+        """Re-establish the cTrader TCP connection and full auth flow.
+
+        Uses exponential backoff: 5s, 10s, 20s, ... between attempts.
+        Returns True if reconnection succeeded, False if all attempts
+        exhausted.
+
+        Thread-safe: only one reconnect attempt runs at a time via an
+        asyncio lock. Concurrent callers wait for the result.
+        """
+        async with self._reconnect_lock:
+            # Another coroutine may have reconnected while we waited
+            if self._check_connection():
+                return True
+
+            base_delay = 5.0
+            for attempt in range(1, self._max_reconnect_attempts + 1):
+                delay = base_delay * (2 ** (attempt - 1))  # 5, 10, 20, ...
+                self._consecutive_reconnects += 1
+
+                logger.warning(
+                    "cTrader reconnect attempt %d/%d "
+                    "(backoff %.0fs, consecutive=%d)",
+                    attempt,
+                    self._max_reconnect_attempts,
+                    delay,
+                    self._consecutive_reconnects,
+                )
+
+                # Tear down old client cleanly
+                await self._teardown_client()
+
+                if attempt > 1:
+                    await asyncio.sleep(delay)
+
+                try:
+                    # Refresh the OAuth token before reconnecting if we
+                    # have a refresh token — the old access token may
+                    # have expired while the connection was down.
+                    if self._refresh_token:
+                        await self._try_refresh_token()
+
+                    # Reuse the existing connect() method which handles
+                    # the full 7-step auth flow.
+                    await self.connect()
+
+                    if self._connected:
+                        logger.warning(
+                            "cTrader reconnected successfully on attempt %d",
+                            attempt,
+                        )
+                        self._consecutive_reconnects = 0
+                        return True
+
+                except Exception as exc:
+                    logger.warning(
+                        "cTrader reconnect attempt %d failed: %s",
+                        attempt,
+                        exc,
+                    )
+
+            logger.error(
+                "cTrader reconnect FAILED after %d attempts",
+                self._max_reconnect_attempts,
+            )
+            return False
+
+    async def _teardown_client(self) -> None:
+        """Stop the old Twisted client and cancel the token refresh task.
+
+        Called before reconnecting to ensure a clean slate.  Does NOT
+        reset ``_position_lots`` or ``_portfolio_value`` — those must
+        survive reconnection so the broker doesn't lose position state.
+        """
+        # Cancel token refresh task
+        if self._token_refresh_task and not self._token_refresh_task.done():
+            self._token_refresh_task.cancel()
+            try:
+                await self._token_refresh_task
+            except asyncio.CancelledError:
+                pass
+            self._token_refresh_task = None
+
+        # Stop Twisted client
+        if self._client is not None:
+            try:
+                self._client.stopService()
+            except Exception as e:
+                logger.debug("Error stopping cTrader client during teardown: %s", e)
+            self._client = None
+
+        self._connected = False
+
+    async def _try_refresh_token(self) -> None:
+        """Attempt a single token refresh.  Non-fatal on failure."""
+        try:
+            from ctrader_open_api import Auth
+
+            token_data = Auth.refreshToken(
+                refreshToken=self._refresh_token,
+                clientId=self._client_id,
+                clientSecret=self._client_secret,
+            )
+            if "accessToken" in token_data:
+                self._access_token = token_data["accessToken"]
+                if "refreshToken" in token_data:
+                    self._refresh_token = token_data["refreshToken"]
+                logger.info("Access token refreshed during reconnect")
+            else:
+                logger.warning("Token refresh returned no accessToken: %s", token_data)
+        except Exception as exc:
+            logger.warning("Token refresh failed during reconnect: %s", exc)
+
+    @_with_reconnect
     async def execute_position_change(
         self,
         asset: str,
@@ -437,6 +617,7 @@ class CTraderBroker:
                 error=str(e),
             )
 
+    @_with_reconnect
     async def get_single_position(self, asset: str) -> float:
         """Fetch current position for XAUUSD as a signed fraction [-1, 1]."""
         from ctrader_open_api import Protobuf
@@ -471,6 +652,7 @@ class CTraderBroker:
             logger.error(f"Failed to fetch position: {e}")
             return 0.0
 
+    @_with_reconnect
     async def get_account_info(self) -> dict:
         """Fetch account equity, available balance, and used margin."""
         from ctrader_open_api import Protobuf
@@ -538,6 +720,7 @@ class CTraderBroker:
         """CFDs have no funding rates. Return zeros."""
         return {a: 0.0 for a in assets}
 
+    @_with_reconnect
     async def emergency_flatten(self, assets: list[str]) -> RebalanceResult:
         """Close all positions via market orders."""
         from ctrader_open_api import Protobuf
@@ -708,8 +891,11 @@ class CTraderBroker:
 
         Uses the SDK's built-in Deferred-based send() method with a
         client message ID to match request/response pairs.
+
+        Raises RuntimeError if the connection is down, which is caught
+        by the ``@_with_reconnect`` decorator on public API methods.
         """
-        if self._client is None:
+        if self._client is None or not self._connected:
             raise RuntimeError("Not connected to cTrader")
 
         msg_id = self._next_msg_id()
@@ -799,9 +985,21 @@ class CTraderBroker:
                 logger.error(f"cTrader error (payloadType={payload_type})")
 
     def _on_disconnected(self, client, reason):
-        """Callback when connection drops."""
+        """Callback when connection drops.
+
+        Sets ``_connected = False`` so that the next API call via
+        ``@_with_reconnect`` triggers an automatic reconnection.
+        """
+        was_connected = self._connected
         self._connected = False
-        logger.warning(f"cTrader disconnected: {reason}")
+        if was_connected:
+            logger.warning(
+                "cTrader TCP connection lost (reason: %s). "
+                "Next API call will trigger auto-reconnect.",
+                reason,
+            )
+        else:
+            logger.debug("cTrader disconnected callback (was already disconnected): %s", reason)
 
     async def _token_refresh_loop(self) -> None:
         """Background task to refresh OAuth access token before expiry.

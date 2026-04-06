@@ -1,7 +1,12 @@
 # FinRL Strategy Engine — CPU-only PyTorch inference
 #
 # Single image for ALL strategies (IB futures + crypto).
-# Checkpoints and configs are bind-mounted at runtime.
+# Configs are baked into the image at build time (COPY configs/).
+# Checkpoints are bind-mounted at runtime (too large to bake).
+#
+# NOTE: Windows Docker Desktop silently fails on bind-mount configs,
+# so we rely on the baked copy. Rebuild after config changes:
+#   docker compose build engine-base
 #
 # Build:
 #   docker compose build engine-base

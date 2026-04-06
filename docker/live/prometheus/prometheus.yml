@@ -17,43 +17,48 @@ scrape_configs:
         labels:
           strategy: "gmgp1-gold"
           broker: "ib"
-      - targets: ["ibgateway:9102"]
-        labels:
-          strategy: "sg1-gold"
-          broker: "ib"
+      # INACTIVE: sg1-gold — never started
+      # - targets: ["ibgateway:9102"]
+      #   labels:
+      #     strategy: "sg1-gold"
+      #     broker: "ib"
 
   # --- Crypto Strategies (own network namespace) ---
   - job_name: "crypto-strategies"
     static_configs:
-      - targets: ["gmgp1-btc:9103"]
-        labels:
-          strategy: "gmgp1-btc"
-          broker: "crypto"
-      - targets: ["funding-arb:9104"]
-        labels:
-          strategy: "funding-arb"
-          broker: "crypto"
-      - targets: ["sync-1h:9105"]
-        labels:
-          strategy: "sync-1h"
-          broker: "crypto"
+      # INACTIVE: gmgp1-btc — crashed/removed
+      # - targets: ["gmgp1-btc:9103"]
+      #   labels:
+      #     strategy: "gmgp1-btc"
+      #     broker: "crypto"
+      # INACTIVE: funding-arb — shelved
+      # - targets: ["funding-arb:9104"]
+      #   labels:
+      #     strategy: "funding-arb"
+      #     broker: "crypto"
+      # INACTIVE: sync-1h — shelved
+      # - targets: ["sync-1h:9105"]
+      #   labels:
+      #     strategy: "sync-1h"
+      #     broker: "crypto"
       - targets: ["gmgp2-xauusd:9106"]
         labels:
           strategy: "gmgp2-xauusd"
           broker: "ctrader"
-      - targets: ["velotrade-btc:9107"]
-        labels:
-          strategy: "velotrade-btc"
-          broker: "dxtrade"
+      # INACTIVE: velotrade-btc — crashed/removed
+      # - targets: ["velotrade-btc:9107"]
+      #   labels:
+      #     strategy: "velotrade-btc"
+      #     broker: "dxtrade"
 
-  # --- PRISM API (scrape /metrics if exposed; /health is JSON not Prometheus format) ---
-  - job_name: "prism"
-    static_configs:
-      - targets: ["prism-api:8001"]
-        labels:
-          service: "prism-api"
-    metrics_path: /metrics
-    scrape_interval: 30s
+  # INACTIVE: PRISM API — PRISM falsified (Session 345)
+  # - job_name: "prism"
+  #   static_configs:
+  #     - targets: ["prism-api:8001"]
+  #       labels:
+  #         service: "prism-api"
+  #   metrics_path: /metrics
+  #   scrape_interval: 30s
 
   # --- Prometheus self-monitoring ---
   - job_name: "prometheus"
