@@ -37,9 +37,9 @@ scrape_configs:
         labels:
           strategy: "sync-1h"
           broker: "crypto"
-      - targets: ["gmgp1-xauusd:9106"]
+      - targets: ["gmgp2-xauusd:9106"]
         labels:
-          strategy: "gmgp1-xauusd"
+          strategy: "gmgp2-xauusd"
           broker: "ctrader"
       - targets: ["velotrade-btc:9107"]
         labels:
