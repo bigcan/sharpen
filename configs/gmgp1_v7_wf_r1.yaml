@@ -1,13 +1,14 @@
-# GMGP1-v7 Walk-Forward Window R1 — FQ-1 Feature Pruning A/B Test
+# GMGP1-v7 Walk-Forward Window R1 — FQ-1 Feature Pruning A/B Test (XAUUSD)
 # Train: Jan-Jun, Val: Jul-Aug, Test: Sep-Oct
-# IDENTICAL to gmgp1_wf_retrain_r1.yaml except: 8→5 features (FQ-1 pruning)
+# v7 architecture: window-mode obs with FQ-1 pruned features (8→5)
 # Dropped: open_z(3), high_z(4), low_z(5) — redundant with close_z (90%+ corr)
 # Kept: log_return(0), atr_norm(1), parkinson_vol(2), close_z(6), volume_z(7)
-# HPs: T29 best from v5 (6xluh826). No HPO.
+# HPs: T24 best from GMGP2-XAUUSD HPO (run v45etaie, PF=2.785)
+# Fee: 1.5bps (CFD), DD: 10% (FTMO)
 
 data:
-  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
-  ticker: "GC"
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"  # CME proxy
+  ticker: "XAUUSD"
   handler_type: "multiscale"
   train_start_date: "2025-01-06"
   train_end_date: "2025-06-30"
@@ -21,7 +22,7 @@ features:
   window_size: 30
   features_per_scale: 5            # FQ-1: 8→5 (drop open_z, high_z, low_z)
   feature_indices: [0, 1, 2, 6, 7] # log_return, atr_norm, parkinson_vol, close_z, volume_z
-  asset_class: "cme_futures"
+  asset_class: "cfd_gold"
 
 env:
   mdp_version: "v7"
@@ -29,21 +30,25 @@ env:
   window_size: 30
   features_per_scale: 5            # Must match features.features_per_scale
   taker_fee: 0.0
-  deadband_threshold: 0.35
+  deadband_threshold: 0.25         # T24 best
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
   episode_length: 500
   random_start: true
-  max_drawdown_pct: 0.30
+  max_drawdown_pct: 0.10           # FTMO 10% max DD
   scales: [15, 60, 240]
+  stop_loss_bps: 125               # T24 best
+  stop_loss_hpo: false
+  max_holding_bars: 15             # T24 best
+  max_holding_hpo: false
   reward:
     mode: "dsr"
-    dsr_eta: 0.003159755401614352
+    dsr_eta: 0.001354              # T24 best
     dsr_scale: 1.0
   fee_schedule:
     - {step: 0, taker_fee: 0.0}
-    - {step: 500000, taker_fee: 0.0, ramp_to: 0.0002, ramp_end_step: 1500000}
-    - {step: 1500000, taker_fee: 0.0002}
+    - {step: 500000, taker_fee: 0.0, ramp_to: 0.00015, ramp_end_step: 1500000}
+    - {step: 1500000, taker_fee: 0.00015}  # 1.5bps CFD
 
 network:
   scale_encoder:
@@ -55,24 +60,25 @@ network:
   fusion_dim: 256
   window_size: 30
 
+# SAC HPs from T24 best trial (GMGP2-XAUUSD HPO, run v45etaie)
 agents:
   sac:
-    lr_actor: 0.0005462612695421805
-    lr_critic: 0.000866154995794675
-    lr_alpha: 0.0009625164717779418
-    gamma: 0.9535315530021778
-    tau: 0.00212659146992685
+    lr_actor: 0.000728             # T24 best
+    lr_critic: 0.000130            # T24 best
+    lr_alpha: 0.0000165            # T24 best
+    gamma: 0.9638                  # T24 best
+    tau: 0.00820                   # T24 best
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.15930606967484204
+    initial_alpha: 0.0536          # T24 best
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 10.0
+    gradient_clip: 7.967           # T24 best
     checkpoint_interval: 250000
 
 training:
-  total_timesteps: 3000000
+  total_timesteps: 5000000
   log_interval: 1000
   use_amp: true
   amp_dtype: "bfloat16"
@@ -84,4 +90,5 @@ hpo:
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["gmgp1-v7", "Gold", "SAC", "15min", "walkforward", "wf-r1", "fixed-hp", "fq1-pruning", "5-features", "ab-test"]
+  tags: ["gmgp1-v7", "XAUUSD", "SAC", "15min", "CFD", "FTMO",
+         "walkforward", "wf-r1", "fixed-hp", "fq1-pruning", "5-features", "ab-test"]
