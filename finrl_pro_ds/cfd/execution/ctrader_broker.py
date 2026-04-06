@@ -110,6 +110,8 @@ class CTraderBroker:
 
     async def connect(self) -> None:
         """Connect to cTrader Open API and authenticate."""
+        if self._connected:
+            return
         if not self._client_id or not self._client_secret:
             raise ValueError(
                 "Missing cTrader credentials. Set CTRADER_CLIENT_ID and "
@@ -148,8 +150,11 @@ class CTraderBroker:
         self._client.setMessageReceivedCallback(self._on_message)
         self._client.setDisconnectedCallback(self._on_disconnected)
 
-        # Start Twisted service
-        self._client.startService()
+        # Start Twisted service — must run on the reactor thread since
+        # startService() calls reactor.connectTCP() internally.
+        from twisted.internet import reactor
+
+        reactor.callFromThread(self._client.startService)
 
         # Wait for TCP connection
         connected_deferred = self._client.whenConnected(failAfterFailures=3)
@@ -160,14 +165,16 @@ class CTraderBroker:
         app_auth = ProtoOAApplicationAuthReq()
         app_auth.clientId = self._client_id
         app_auth.clientSecret = self._client_secret
-        await self._send_request(app_auth, timeout=10.0)
+        app_res = await self._send_request(app_auth, timeout=10.0)
+        self._check_error(Protobuf.extract(app_res), "Application auth")
         logger.info("Application authenticated")
 
         # Step 2: Account auth
         acct_auth = ProtoOAAccountAuthReq()
         acct_auth.ctidTraderAccountId = self._account_id
         acct_auth.accessToken = self._access_token
-        await self._send_request(acct_auth, timeout=10.0)
+        acct_res = await self._send_request(acct_auth, timeout=10.0)
+        self._check_error(Protobuf.extract(acct_res), "Account auth")
         logger.info(f"Account {self._account_id} authenticated")
 
         # Step 3: Resolve symbol
@@ -176,6 +183,7 @@ class CTraderBroker:
         sym_list_res = await self._send_request(sym_list_req, timeout=15.0)
 
         sym_res_payload = Protobuf.extract(sym_list_res)
+        self._check_error(sym_res_payload, "Symbol list")
         for sym in sym_res_payload.symbol:
             if sym.symbolName.upper() == self._symbol_name.upper():
                 self._symbol_id = sym.symbolId
@@ -680,6 +688,15 @@ class CTraderBroker:
     # ---------------------------------------------------------------
     # Twisted/asyncio bridge + message handling
     # ---------------------------------------------------------------
+
+    @staticmethod
+    def _check_error(payload, step: str) -> None:
+        """Raise on ProtoOAErrorRes with a clear message."""
+        if hasattr(payload, "errorCode"):
+            raise RuntimeError(
+                f"cTrader {step} failed: {payload.errorCode} — "
+                f"{getattr(payload, 'description', 'no description')}"
+            )
 
     def _next_msg_id(self) -> str:
         """Generate a unique client message ID."""

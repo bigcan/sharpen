@@ -230,13 +230,16 @@ docker compose -f docker-compose.yaml -f docker-compose.desktop.yaml \
 
 ### Services
 
-| Service | Description | URL |
-|---------|-------------|-----|
-| **IB Gateway** | Headless IB Gateway (IBC + Xvfb) | Port 4002 (paper) |
-| **Prometheus** | Metrics collection (scrapes strategies every 15s) | http://localhost:9090 |
-| **Grafana** | Dashboards + alerting | http://localhost:3000 |
-| **Watchdog** | Docker health event listener + Telegram alerts | Logs only |
-| **Portainer** | Container management web UI | https://localhost:9443 |
+> **Remote access**: Services run on the remote desktop (`<TAILSCALE_HOST>` via Tailscale).
+> Use the Tailscale IP URLs below from any device on your tailnet.
+
+| Service | Description | Local (on desktop) | Remote (Tailscale) |
+|---------|-------------|--------------------|--------------------|
+| **IB Gateway** | Headless IB Gateway (IBC + Xvfb) | Port 4002 (paper) | N/A (API only) |
+| **Prometheus** | Metrics collection (scrapes strategies every 15s) | http://localhost:9090 | http://<TAILSCALE_HOST>:9090 |
+| **Grafana** | Dashboards + alerting | http://localhost:3000 | http://<TAILSCALE_HOST>:3000 |
+| **Watchdog** | Docker health event listener + Telegram alerts | Logs only | Logs only |
+| **Portainer** | Container management web UI | https://localhost:9443 | https://<TAILSCALE_HOST>:9443 |
 
 ### Monitoring Features
 
