@@ -117,6 +117,12 @@ class SACTrainer:
         self._fee_schedule = sorted(raw_schedule, key=lambda x: x["step"]) if raw_schedule else []
         self._fee_tier_applied = -1
 
+        # RCRP: Regime-balanced replay (Path 1)
+        rbrp_mode = config["training"].get("regime_balanced_replay", None)
+        if rbrp_mode:
+            self.agent.regime_balanced_replay = rbrp_mode
+            logger.info(f"[RCRP] Regime-balanced replay enabled: mode={rbrp_mode}")
+
         # Checkpoint dir
         self.ckpt_dir = os.path.join("checkpoints", self.run_name)
         os.makedirs(self.ckpt_dir, exist_ok=True)
@@ -186,15 +192,17 @@ class SACTrainer:
             # Store PREVIOUS iteration's transitions (deferred from last loop).
             # Buffer write is safe here: training future is resolved above.
             if _deferred_store is not None:
-                d_obs, d_act, d_rew, d_nobs, d_dones, d_vmask = _deferred_store
+                d_obs, d_act, d_rew, d_nobs, d_dones, d_vmask, d_rc = _deferred_store
                 if np.all(d_vmask):
-                    self.agent.store_batch(d_obs, d_act, d_rew, d_nobs, d_dones)
+                    self.agent.store_batch(d_obs, d_act, d_rew, d_nobs, d_dones, regime_codes=d_rc)
                 elif np.any(d_vmask):
                     v_obs = {k: v[d_vmask] for k, v in d_obs.items()}
                     v_next = {k: v[d_vmask] for k, v in d_nobs.items()}
+                    v_rc = d_rc[d_vmask] if d_rc is not None else None
                     self.agent.store_batch(
                         v_obs, d_act[d_vmask], d_rew[d_vmask],
                         v_next, d_dones[d_vmask],
+                        regime_codes=v_rc,
                     )
                 _deferred_store = None
 
@@ -250,7 +258,10 @@ class SACTrainer:
             dones_for_buffer = terms.astype(np.float32)
             # FIX R7-AUD-01: valid_mask filters phantom auto-reset transitions
             valid_mask = ~prev_any_done
-            _deferred_store = (obs, actions_np, rewards, next_obs, dones_for_buffer, valid_mask)
+            # RCRP: Extract regime codes from infos for replay balancing
+            rc = infos.get("regime_code")
+            regime_codes = rc.astype(np.int8) if rc is not None else None
+            _deferred_store = (obs, actions_np, rewards, next_obs, dones_for_buffer, valid_mask, regime_codes)
 
             # Episode tracking uses actual episode boundaries (term OR trunc)
             any_done = np.logical_or(terms, truncs)
@@ -343,15 +354,17 @@ class SACTrainer:
         if train_future is not None:
             train_future.result()
         if _deferred_store is not None:
-            d_obs, d_act, d_rew, d_nobs, d_dones, d_vmask = _deferred_store
+            d_obs, d_act, d_rew, d_nobs, d_dones, d_vmask, d_rc = _deferred_store
             if np.all(d_vmask):
-                self.agent.store_batch(d_obs, d_act, d_rew, d_nobs, d_dones)
+                self.agent.store_batch(d_obs, d_act, d_rew, d_nobs, d_dones, regime_codes=d_rc)
             elif np.any(d_vmask):
                 v_obs = {k: v[d_vmask] for k, v in d_obs.items()}
                 v_next = {k: v[d_vmask] for k, v in d_nobs.items()}
+                v_rc = d_rc[d_vmask] if d_rc is not None else None
                 self.agent.store_batch(
                     v_obs, d_act[d_vmask], d_rew[d_vmask],
                     v_next, d_dones[d_vmask],
+                    regime_codes=v_rc,
                 )
         train_executor.shutdown(wait=False)
 

@@ -29,6 +29,7 @@ class FlatReplayBuffer:
         '_micro', '_macro', '_private',
         '_next_micro', '_next_macro', '_next_private',
         '_actions', '_rewards', '_dones', '_aux_targets',
+        '_regime_codes',
     )
 
     def __init__(
@@ -60,8 +61,13 @@ class FlatReplayBuffer:
         self._dones = np.zeros(capacity, dtype=np.float32)
         self._aux_targets = np.zeros(capacity, dtype=np.float32)
 
+        # RCRP: PRISM regime codes for regime-balanced replay sampling.
+        # -1 = unknown (no PRISM data). 0-8 = GAHMM composite code.
+        self._regime_codes = np.full(capacity, -1, dtype=np.int8)
+
     def push(self, state: dict, action, reward: float,
-             next_state: dict, done: bool, aux_target: float = 0.0):
+             next_state: dict, done: bool, aux_target: float = 0.0,
+             regime_code: int = -1):
         """Store a transition by writing directly to pre-allocated arrays.
 
         Interface is identical to the old ReplayBuffer.push() — accepts
@@ -84,6 +90,7 @@ class FlatReplayBuffer:
         self._rewards[i] = reward
         self._dones[i] = float(done)
         self._aux_targets[i] = aux_target
+        self._regime_codes[i] = regime_code
 
         # Advance circular pointer
         self._ptr = (self._ptr + 1) % self.capacity
@@ -103,6 +110,7 @@ class FlatReplayBuffer:
         next_states: dict[str, np.ndarray],
         dones: np.ndarray,
         aux_targets: np.ndarray,
+        regime_codes: np.ndarray | None = None,
     ):
         """Store N transitions at once using numpy slice assignment.
 
@@ -115,6 +123,12 @@ class FlatReplayBuffer:
 
         ptr = self._ptr
         cap = self.capacity
+
+        # Default regime codes to -1 (unknown) if not provided
+        if regime_codes is None:
+            rc = np.full(n, -1, dtype=np.int8)
+        else:
+            rc = regime_codes
 
         if ptr + n <= cap:
             # Simple case: fits without wrapping
@@ -129,6 +143,7 @@ class FlatReplayBuffer:
             self._rewards[s] = rewards
             self._dones[s] = dones
             self._aux_targets[s] = aux_targets
+            self._regime_codes[s] = rc
         else:
             # Wraparound: split into two writes
             first = cap - ptr
@@ -143,6 +158,7 @@ class FlatReplayBuffer:
             self._rewards[ptr:cap] = rewards[:first]
             self._dones[ptr:cap] = dones[:first]
             self._aux_targets[ptr:cap] = aux_targets[:first]
+            self._regime_codes[ptr:cap] = rc[:first]
             # Second chunk: 0 → remainder
             second = n - first
             self._micro[:second] = states["micro"][first:]
@@ -155,6 +171,7 @@ class FlatReplayBuffer:
             self._rewards[:second] = rewards[first:]
             self._dones[:second] = dones[first:]
             self._aux_targets[:second] = aux_targets[first:]
+            self._regime_codes[:second] = rc[first:]
 
         self._ptr = (ptr + n) % cap
         self._size = min(self._size + n, cap)
@@ -250,13 +267,120 @@ class FlatReplayBuffer:
             self._aux_targets[indices],
         )
 
+    def sample_regime_balanced(
+        self,
+        batch_size: int,
+        mode: str = "balanced",
+    ) -> tuple[dict, np.ndarray, np.ndarray, dict, np.ndarray, np.ndarray]:
+        """Sample with regime-balanced distribution using PRISM composite codes.
+
+        Rebalances experience replay so underrepresented vol regimes (HIGH_VOL)
+        get equal training exposure. Falls back to uniform if regime codes are
+        unavailable (all -1).
+
+        Args:
+            batch_size: Total samples to return.
+            mode: Sampling strategy:
+                - "balanced": Equal draws from each vol-regime bucket (LOW/NORMAL/HIGH).
+                - "inverse_freq": Over-sample rare regimes proportional to 1/frequency.
+                - "transition_boosted": 2x weight for regime-transition bars.
+
+        Returns:
+            Same format as sample().
+        """
+        size = self._size
+        codes = self._regime_codes[:size]
+
+        # Vol regime from composite code: LOW=0,3,6  NORMAL=1,4,7  HIGH=2,5,8
+        # -1 = unknown
+        vol_regime = np.where(codes >= 0, codes % 3, -1)
+
+        low_idx = np.where(vol_regime == 0)[0]
+        normal_idx = np.where(vol_regime == 1)[0]
+        high_idx = np.where(vol_regime == 2)[0]
+
+        known_buckets = [b for b in [low_idx, normal_idx, high_idx] if len(b) >= 2]
+
+        # Fallback: not enough regime-labeled data
+        if len(known_buckets) < 2:
+            return self.sample(batch_size)
+
+        if mode == "balanced":
+            # Equal draws per vol-regime bucket
+            per_bucket = batch_size // len(known_buckets)
+            remainder = batch_size - per_bucket * len(known_buckets)
+            parts = []
+            for i, bucket in enumerate(known_buckets):
+                n = per_bucket + (1 if i < remainder else 0)
+                parts.append(bucket[np.random.randint(0, len(bucket), size=n)])
+            indices = np.concatenate(parts)
+
+        elif mode == "inverse_freq":
+            # Weight inversely proportional to frequency
+            total_known = sum(len(b) for b in known_buckets)
+            weights = [total_known / max(len(b), 1) for b in known_buckets]
+            w_sum = sum(weights)
+            counts = [max(1, int(batch_size * w / w_sum)) for w in weights]
+            # Fix rounding
+            counts[-1] = batch_size - sum(counts[:-1])
+            parts = []
+            for bucket, n in zip(known_buckets, counts):
+                parts.append(bucket[np.random.randint(0, len(bucket), size=n)])
+            indices = np.concatenate(parts)
+
+        elif mode == "transition_boosted":
+            # 2x weight for regime-change bars
+            transitions = np.zeros(size, dtype=bool)
+            transitions[1:] = codes[1:] != codes[:-1]
+            transitions[0] = False
+            # Only count real transitions (not -1 → -1)
+            transitions &= (codes >= 0)
+            trans_idx = np.where(transitions)[0]
+            non_trans_idx = np.where(~transitions & (codes >= 0))[0]
+
+            if len(trans_idx) < 2 or len(non_trans_idx) < 2:
+                return self.sample(batch_size)
+
+            # 2x weight for transitions → ~33% transitions if 15% of data
+            n_trans = min(batch_size // 3, len(trans_idx))
+            n_non_trans = batch_size - n_trans
+            t_idx = trans_idx[np.random.randint(0, len(trans_idx), size=n_trans)]
+            nt_idx = non_trans_idx[np.random.randint(0, len(non_trans_idx), size=n_non_trans)]
+            indices = np.concatenate([t_idx, nt_idx])
+
+        else:
+            return self.sample(batch_size)
+
+        np.random.shuffle(indices)
+
+        states = {
+            "micro": self._micro[indices],
+            "macro": self._macro[indices],
+            "private": self._private[indices],
+        }
+        next_states = {
+            "micro": self._next_micro[indices],
+            "macro": self._next_macro[indices],
+            "private": self._next_private[indices],
+        }
+
+        return (
+            states,
+            self._actions[indices],
+            self._rewards[indices],
+            next_states,
+            self._dones[indices],
+            self._aux_targets[indices],
+        )
+
     def nbytes(self) -> int:
         """Total pre-allocated memory in bytes."""
         return (
             self._micro.nbytes + self._macro.nbytes + self._private.nbytes +
             self._next_micro.nbytes + self._next_macro.nbytes + self._next_private.nbytes +
             self._actions.nbytes + self._rewards.nbytes +
-            self._dones.nbytes + self._aux_targets.nbytes
+            self._dones.nbytes + self._aux_targets.nbytes +
+            self._regime_codes.nbytes
         )
 
     def __len__(self) -> int:

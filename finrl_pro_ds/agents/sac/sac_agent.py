@@ -175,6 +175,9 @@ class SACAgent:
                 action_dtype=np.float32,
             )
 
+        # RCRP: Regime-balanced replay sampling (set from training config)
+        self.regime_balanced_replay: str | None = None  # None/"balanced"/"inverse_freq"/"transition_boosted"
+
         # AMP scaler — disabled for BF16 (same dynamic range as FP32, no scaling needed)
         self.scaler = torch.amp.GradScaler(
             'cuda',
@@ -282,6 +285,7 @@ class SACAgent:
         rewards: np.ndarray,
         next_obs_batch: dict[str, np.ndarray],
         dones: np.ndarray,
+        regime_codes: np.ndarray | None = None,
     ):
         """Store N transitions at once using batch push."""
         states = self._obs_batch_to_buffer(obs_batch)
@@ -289,6 +293,7 @@ class SACAgent:
         aux = np.zeros(len(rewards), dtype=np.float32)
         self.replay_buffer.push_batch(
             states, actions, rewards, next_states, dones, aux,
+            regime_codes=regime_codes,
         )
 
     def train_step(self) -> Optional[dict[str, float]]:
@@ -318,8 +323,12 @@ class SACAgent:
         mega_batch_size = n_steps * self.batch_size
 
         # --- ONE CPU phase: sample + transfer ---
-        states, actions_np, rewards_np, next_states, dones_np, _ = \
-            self.replay_buffer.sample(mega_batch_size)
+        if self.regime_balanced_replay:
+            states, actions_np, rewards_np, next_states, dones_np, _ = \
+                self.replay_buffer.sample_regime_balanced(mega_batch_size, mode=self.regime_balanced_replay)
+        else:
+            states, actions_np, rewards_np, next_states, dones_np, _ = \
+                self.replay_buffer.sample(mega_batch_size)
 
         # Transfer ALL data to GPU at once
         unpacked = self._unpack_buffer_to_stacks(states, next_states)
