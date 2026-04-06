@@ -42,7 +42,7 @@ logger = logging.getLogger("prism_research.l2_backtest")
 CONFIG_PATH = PROJECT_ROOT / "configs" / "gmgp2_xauusd_sac_15min.yaml"
 CHECKPOINT_PATH = (
     PROJECT_ROOT / "checkpoints"
-    / "gmgp2-xauusd-l1-multiseed_20260403_083331"
+    / "gmgp2-xauusd-sac-15min_20260331_160506"
     / "checkpoint_final.pth"
 )
 PRISM_DATA = PROJECT_ROOT / "results" / "prism_research" / "prism_features_gc_2025.parquet"
