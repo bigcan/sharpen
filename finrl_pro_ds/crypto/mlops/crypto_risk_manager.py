@@ -82,6 +82,7 @@ class CryptoRiskManager:
     def __init__(self, config: CryptoRiskConfig | None = None):
         self.config = config or CryptoRiskConfig()
         self.state = RiskState()
+        self._last_accumulated_delta: float = 0.0
 
     @property
     def enabled(self) -> bool:
@@ -93,6 +94,7 @@ class CryptoRiskManager:
             peak_portfolio_value=initial_capital,
             eod_peak_value=initial_capital,
         )
+        self._last_accumulated_delta = 0.0
 
     def check(
         self,
@@ -310,12 +312,25 @@ class CryptoRiskManager:
         # after Check 4 only, understating/overstating actual turnover.
         final_delta = np.abs(modified - positions).sum()
         self.state.daily_turnover_accumulated = pre_delta_accumulated + final_delta
+        self._last_accumulated_delta = float(final_delta)
 
         self.state.violations = violations
         if violations:
             logger.debug(f"Risk violations: {violations}")
 
         return modified, violations
+
+    def rollback_last_turnover(self) -> None:
+        """Undo turnover accumulated by the last check() call.
+
+        Call this when the broker skips/rejects a trade so that
+        the turnover budget is not consumed by orders that never executed.
+        """
+        self.state.daily_turnover_accumulated = max(
+            0.0,
+            self.state.daily_turnover_accumulated - self._last_accumulated_delta,
+        )
+        self._last_accumulated_delta = 0.0
 
     def check_flash_crash(
         self,

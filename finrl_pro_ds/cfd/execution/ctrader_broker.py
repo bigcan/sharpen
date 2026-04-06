@@ -835,6 +835,12 @@ class CTraderBroker:
 
         Example: $100K portfolio, Gold @ $3000/oz, 100 oz/lot
             fraction=1.0 → notional=$100K → lots = 100000/(3000*100) = 0.333
+
+        When portfolio < lot notional (e.g. XAUUSD lot=$470K vs $200K portfolio),
+        round() gives 0 for most fractions.  We round up to min_lot when the
+        agent expresses meaningful conviction (fraction >= 0.1), matching
+        the IB broker's contract-floor logic.  The broker's margin system
+        provides the real leverage safety net.
         """
         if price <= 0 or portfolio_value <= 0:
             return 0.0
@@ -842,6 +848,9 @@ class CTraderBroker:
         lots = notional / (price * self._lot_size)
         # Round to min_lot precision
         lots = round(lots / self._min_lot) * self._min_lot
+        # Floor: at least min_lot when agent has conviction (BUG-18 fix)
+        if lots < self._min_lot and abs(fraction) >= 0.1:
+            lots = self._min_lot
         return lots * np.sign(fraction)
 
     def _lots_to_position(
