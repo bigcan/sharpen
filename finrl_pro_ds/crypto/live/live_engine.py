@@ -508,12 +508,17 @@ class LiveTradingEngine:
             else:
                 logger.warning(f"Trade failed: {order.status} — {order.error}")
                 # FIX S307: Skipped/failed orders are not actual trades
+                # BUG-18: Rollback turnover so failed trades don't consume
+                # the risk budget and block subsequent bars.
+                self.risk_manager.rollback_last_turnover()
                 self._prev_close = current_close
                 self._log_step(bar_time, target_position, traded=False, skip_reason="broker_skipped", regime_info=regime_info)
                 return
 
         except Exception as e:
             logger.error(f"Order execution error: {e}")
+            # BUG-18: Rollback turnover on execution exception too
+            self.risk_manager.rollback_last_turnover()
             # FIX AUD-L05: Update prev_close even on execution error
             self._prev_close = current_close
             if self._emergency_flatten_on_error:

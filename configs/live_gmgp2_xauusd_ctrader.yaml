@@ -80,7 +80,7 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 100000.0            # FTMO $100K account
+  initial_balance: 200000.0            # IC Markets demo (FTMO: change to 100000)
   deadband_threshold: 0.25
   taker_fee: 0.00015                   # 1.5bps effective spread
 
