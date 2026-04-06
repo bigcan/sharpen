@@ -154,6 +154,8 @@ def build_components(config: dict):
         norm_span=feat_cfg.get("norm_span", 120),
         n_features=feat_cfg.get("features_per_scale", 8),
         bootstrap_bars=feat_cfg.get("bootstrap_bars", 30_000),
+        obs_mode=feat_cfg.get("obs_mode", "window"),
+        summary_feature_indices=feat_cfg.get("summary_feature_indices"),
     )
 
     # --- Bar Clock (CFD 24h market) ---

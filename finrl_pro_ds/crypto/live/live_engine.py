@@ -80,6 +80,7 @@ class LiveTradingEngine:
         # Trading state
         self._asset = config.get("exchange", {}).get("asset", "BTC")
         self._n_scales = len(config.get("features", {}).get("scales", [15, 60, 240]))
+        self._obs_mode = config.get("features", {}).get("obs_mode", "window")
         self._deadband_threshold = config.get("trading", {}).get("deadband_threshold", 0.25)
         self._device = torch.device(config.get("agent", {}).get("device", "cpu"))
         self._dry_run = config.get("dry_run", False)
@@ -474,7 +475,22 @@ class LiveTradingEngine:
             )
 
             if order.status == "filled":
-                self._current_position = target_position
+                # BUG-16: Discrete contract rounding (esp. when portfolio <
+                # contract notional) means the actual exchange position fraction
+                # can differ significantly from the agent's target.  Sync from
+                # broker so _current_position matches reality and reconciliation
+                # won't false-trigger.
+                try:
+                    exchange_pos = await self.broker.get_single_position(self._asset)
+                except Exception as e:
+                    logger.warning(f"Post-fill position query failed: {e} — using target")
+                    exchange_pos = target_position
+                if abs(exchange_pos - target_position) > 0.01:
+                    logger.info(
+                        f"Position quantized: target={target_position:.4f} → "
+                        f"actual={exchange_pos:.4f} (contract rounding)",
+                    )
+                self._current_position = exchange_pos
                 self._total_trades += 1
                 self._total_fees += order.fee
                 logger.info(
@@ -526,21 +542,35 @@ class LiveTradingEngine:
     # -------------------------------------------------------------------
     def _predict(self, obs: dict) -> float:
         """Run SAC agent inference. Returns target position in [-1, 1]."""
-        scale_np = np.stack(
-            [obs[f"scale_{i}"] for i in range(self._n_scales)], axis=0,
-        )
-        scale_tensor = torch.as_tensor(
-            scale_np, dtype=torch.float32,
-        ).unsqueeze(0).to(self._device, non_blocking=True)
+        if self._obs_mode == "summary_stats":
+            # Flat mode: concatenate all scale summary stats + private → (1, D)
+            parts = [obs[f"scale_{i}"] for i in range(self._n_scales)]
+            parts.append(obs["private"])
+            flat = np.concatenate(parts)
+            flat_tensor = torch.as_tensor(
+                flat, dtype=torch.float32,
+            ).unsqueeze(0).to(self._device, non_blocking=True)
 
-        private_tensor = torch.as_tensor(
-            obs["private"], dtype=torch.float32,
-        ).unsqueeze(0).to(self._device, non_blocking=True)
-
-        with torch.no_grad():
-            action = self.agent.predict(
-                scale_tensor, private_tensor, deterministic=True,
+            with torch.no_grad():
+                action = self.agent.predict(
+                    flat_tensor, None, deterministic=True,
+                )
+        else:
+            scale_np = np.stack(
+                [obs[f"scale_{i}"] for i in range(self._n_scales)], axis=0,
             )
+            scale_tensor = torch.as_tensor(
+                scale_np, dtype=torch.float32,
+            ).unsqueeze(0).to(self._device, non_blocking=True)
+
+            private_tensor = torch.as_tensor(
+                obs["private"], dtype=torch.float32,
+            ).unsqueeze(0).to(self._device, non_blocking=True)
+
+            with torch.no_grad():
+                action = self.agent.predict(
+                    scale_tensor, private_tensor, deterministic=True,
+                )
 
         return float(np.clip(action[0, 0].cpu().item(), -1.0, 1.0))
 
