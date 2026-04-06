@@ -91,14 +91,14 @@ class LOBTradeSimulator:
             vol_window=vol_window,
         )
         factor_ary = engine.process_batch(df, segment_ids=segment_ids)
-        self.factor_ary = th.tensor(factor_ary, dtype=th.float32)  # CPU
+        self.factor_ary = th.tensor(factor_ary, dtype=th.float32, device=self.device)
 
         # Extract price arrays: [bid, ask, mid]
         mid = df["mid_price"].values.astype(np.float64)
         best_bid = df["best_bid_price"].values.astype(np.float64)
         best_ask = df["best_ask_price"].values.astype(np.float64)
         price_ary = np.stack([best_bid, best_ask, mid], axis=1)
-        self.price_ary = th.tensor(price_ary, dtype=th.float32)  # CPU
+        self.price_ary = th.tensor(price_ary, dtype=th.float32, device=self.device)
 
         assert self.price_ary.shape[0] == self.factor_ary.shape[0], (
             f"Price/factor length mismatch: {self.price_ary.shape[0]} vs {self.factor_ary.shape[0]}"
@@ -151,17 +151,10 @@ class LOBTradeSimulator:
         # Must not start too early (warmup)
         valid[: self.seq_len] = False
 
-        # Segment-aware: episode must not cross segment boundaries
+        # Segment-aware: episode must not cross segment boundaries (vectorized)
         if self._segment_ids is not None:
-            for i in range(n):
-                if not valid[i]:
-                    continue
-                end_idx = min(i + self.seq_len, n)
-                if end_idx >= n:
-                    valid[i] = False
-                    continue
-                if self._segment_ids[i] != self._segment_ids[end_idx - 1]:
-                    valid[i] = False
+            end_indices = np.minimum(np.arange(n) + self.seq_len - 1, n - 1)
+            valid &= self._segment_ids == self._segment_ids[end_indices]
 
         return valid
 
@@ -201,13 +194,12 @@ class LOBTradeSimulator:
         self.best_price = th.zeros((num_sims,), dtype=th.float32, device=self.device)
 
         step_is = self.step_is + self.step_i
-        state = self.get_state(step_is_cpu=step_is.to(th.device("cpu")))
+        state = self.get_state(step_is)
         return state
 
     def _step(self, action, _if_random=True):
         self.step_i += self.step_gap
         step_is = self.step_is + self.step_i
-        step_is_cpu = step_is.to(th.device("cpu"))
 
         action = action.squeeze(1).to(self.device)
         action_int = action - 1  # map (0,1,2) → (-1,0,+1)
@@ -217,7 +209,7 @@ class LOBTradeSimulator:
         old_asset = self.asset
         old_position = self.position
 
-        mid_price = self.price_ary[step_is_cpu, 2].to(self.device)
+        mid_price = self.price_ary[step_is, 2]
 
         # Truncation: force close at episode end
         truncated = self.step_i >= (self.max_step * self.step_gap)
@@ -289,7 +281,7 @@ class LOBTradeSimulator:
         self.position = new_position
         self.action_int = action_int
 
-        state = self.get_state(step_is_cpu)
+        state = self.get_state(step_is)
         info_dict = {}
         if truncated:
             terminal = th.ones_like(self.position, dtype=th.bool)
@@ -305,8 +297,8 @@ class LOBTradeSimulator:
     def step(self, action):
         return self._step(action, _if_random=True)
 
-    def get_state(self, step_is_cpu):
-        factor_ary = self.factor_ary[step_is_cpu, :].to(self.device)
+    def get_state(self, step_is):
+        factor_ary = self.factor_ary[step_is, :]
         return th.concat(
             (
                 (self.position.float() / self.max_position)[:, None],
