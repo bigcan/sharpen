@@ -24,6 +24,7 @@ import logging
 import os
 import sys
 import time
+from multiprocessing import Process, Queue
 from pathlib import Path
 
 import numpy as np
@@ -380,6 +381,75 @@ def full_train_agent(
 # Per-Window Orchestration
 # ---------------------------------------------------------------------------
 
+def _run_agent_pipeline(
+    agent_name: str,
+    agent_class_name: str,
+    window: dict,
+    config: dict,
+    lob_path: str,
+    n_trials: int,
+    hpo_break_step: int,
+    full_break_step: int,
+    gpu_id: int,
+    out_dir: str,
+    result_queue: Queue | None = None,
+) -> dict:
+    """Run HPO + full train for a single agent on a single GPU.
+
+    Designed to run either in-process (serial) or as a subprocess (parallel).
+    When result_queue is provided, pushes result to queue instead of returning.
+    """
+    from finrl_pro_ds.alphaseek.agents import AGENT_MAP as _AGENT_MAP
+
+    agent_class = _AGENT_MAP[agent_name]
+    w_idx = window["window"]
+    train_segs = window["train_segs"]
+    val_segs = window["val_segs"]
+    test_segs = window["test_segs"]
+
+    logger.info(f"[W{w_idx}] {agent_name} starting on GPU {gpu_id}")
+
+    hpo_result = run_agent_hpo(
+        agent_class=agent_class,
+        agent_name=agent_name,
+        window_idx=w_idx,
+        lob_path=lob_path,
+        train_segs=train_segs,
+        val_segs=val_segs,
+        config=config,
+        n_trials=n_trials,
+        hpo_break_step=hpo_break_step,
+        gpu_id=gpu_id,
+        out_dir=out_dir,
+    )
+
+    test_metrics = full_train_agent(
+        agent_class=agent_class,
+        agent_name=agent_name,
+        best_params=hpo_result["best_params"],
+        window_idx=w_idx,
+        lob_path=lob_path,
+        train_segs=train_segs,
+        test_segs=test_segs,
+        config=config,
+        full_break_step=full_break_step,
+        gpu_id=gpu_id,
+        out_dir=out_dir,
+    )
+
+    result = {
+        "agent_name": agent_name,
+        "hpo_best_trial": hpo_result["best_trial"],
+        "hpo_best_value": hpo_result["best_value"],
+        "hpo_best_params": hpo_result["best_params"],
+        "test_metrics": test_metrics,
+    }
+
+    if result_queue is not None:
+        result_queue.put(result)
+    return result
+
+
 def run_window(
     window: dict,
     config: dict,
@@ -389,8 +459,19 @@ def run_window(
     full_break_step: int,
     gpu_id: int,
     out_dir: str,
+    gpu_ids: list[int] | None = None,
+    agent_filter: list[str] | None = None,
 ) -> dict:
-    """Run HPO + full train for all agent types on one window."""
+    """Run HPO + full train for all agent types on one window.
+
+    Parameters
+    ----------
+    gpu_ids : list[int] | None
+        If provided, agents are distributed across GPUs in parallel.
+        e.g. [0, 1] runs 2 agents in parallel on GPU 0 and GPU 1.
+    agent_filter : list[str] | None
+        If provided, only run these agent types (e.g. ["D3QN"]).
+    """
     w_idx = window["window"]
     train_segs = window["train_segs"]
     val_segs = window["val_segs"]
@@ -403,47 +484,76 @@ def run_window(
     )
 
     agent_names = config.get("ensemble", {}).get("agent_classes", ["D3QN", "DoubleDQN", "TwinD3QN"])
+    if agent_filter:
+        agent_names = [a for a in agent_names if a in agent_filter]
     window_results = {"window": w_idx, "agents": {}}
 
-    for agent_name in agent_names:
-        agent_class = AGENT_MAP[agent_name]
+    effective_gpu_ids = gpu_ids if gpu_ids else [gpu_id]
+    use_parallel = len(effective_gpu_ids) > 1 and len(agent_names) > 1
 
-        # HPO
-        hpo_result = run_agent_hpo(
-            agent_class=agent_class,
-            agent_name=agent_name,
-            window_idx=w_idx,
-            lob_path=lob_path,
-            train_segs=train_segs,
-            val_segs=val_segs,
-            config=config,
-            n_trials=n_trials,
-            hpo_break_step=hpo_break_step,
-            gpu_id=gpu_id,
-            out_dir=out_dir,
+    if use_parallel:
+        # Parallel: distribute agents across GPUs
+        logger.info(
+            f"[W{w_idx}] Parallel mode: {len(agent_names)} agents across GPUs {effective_gpu_ids}",
         )
+        result_queue = Queue()
+        processes = []
 
-        # Full training with best params
-        test_metrics = full_train_agent(
-            agent_class=agent_class,
-            agent_name=agent_name,
-            best_params=hpo_result["best_params"],
-            window_idx=w_idx,
-            lob_path=lob_path,
-            train_segs=train_segs,
-            test_segs=test_segs,
-            config=config,
-            full_break_step=full_break_step,
-            gpu_id=gpu_id,
-            out_dir=out_dir,
-        )
+        for i, agent_name in enumerate(agent_names):
+            assigned_gpu = effective_gpu_ids[i % len(effective_gpu_ids)]
+            p = Process(
+                target=_run_agent_pipeline,
+                kwargs={
+                    "agent_name": agent_name,
+                    "agent_class_name": agent_name,
+                    "window": window,
+                    "config": config,
+                    "lob_path": lob_path,
+                    "n_trials": n_trials,
+                    "hpo_break_step": hpo_break_step,
+                    "full_break_step": full_break_step,
+                    "gpu_id": assigned_gpu,
+                    "out_dir": out_dir,
+                    "result_queue": result_queue,
+                },
+                name=f"alphaseek-{agent_name}-gpu{assigned_gpu}",
+            )
+            processes.append(p)
+            p.start()
+            logger.info(f"[W{w_idx}] Spawned {agent_name} on GPU {assigned_gpu} (PID {p.pid})")
 
-        window_results["agents"][agent_name] = {
-            "hpo_best_trial": hpo_result["best_trial"],
-            "hpo_best_value": hpo_result["best_value"],
-            "hpo_best_params": hpo_result["best_params"],
-            "test_metrics": test_metrics,
-        }
+        # Collect results
+        for p in processes:
+            p.join()
+        while not result_queue.empty():
+            result = result_queue.get()
+            window_results["agents"][result["agent_name"]] = {
+                "hpo_best_trial": result["hpo_best_trial"],
+                "hpo_best_value": result["hpo_best_value"],
+                "hpo_best_params": result["hpo_best_params"],
+                "test_metrics": result["test_metrics"],
+            }
+    else:
+        # Serial: single GPU
+        for agent_name in agent_names:
+            result = _run_agent_pipeline(
+                agent_name=agent_name,
+                agent_class_name=agent_name,
+                window=window,
+                config=config,
+                lob_path=lob_path,
+                n_trials=n_trials,
+                hpo_break_step=hpo_break_step,
+                full_break_step=full_break_step,
+                gpu_id=gpu_id,
+                out_dir=out_dir,
+            )
+            window_results["agents"][agent_name] = {
+                "hpo_best_trial": result["hpo_best_trial"],
+                "hpo_best_value": result["hpo_best_value"],
+                "hpo_best_params": result["hpo_best_params"],
+                "test_metrics": result["test_metrics"],
+            }
 
     # Log window summary
     for name, res in window_results["agents"].items():
@@ -475,7 +585,9 @@ def main():
     parser.add_argument("--hpo_break_step", type=int, default=None, help="Steps per HPO trial")
     parser.add_argument("--full_break_step", type=int, default=None, help="Steps for full training")
     parser.add_argument("--out_dir", type=str, default="outputs/alphaseek_hpo", help="Output directory")
-    parser.add_argument("--gpu_id", type=int, default=0, help="GPU device ID")
+    parser.add_argument("--gpu_id", type=int, default=0, help="GPU device ID (single GPU mode)")
+    parser.add_argument("--gpu_ids", type=str, default=None, help="Comma-separated GPU IDs for parallel agents (e.g. '0,1,2')")
+    parser.add_argument("--agent_filter", type=str, default=None, help="Comma-separated agent names to run (e.g. 'D3QN,DoubleDQN')")
     parser.add_argument("--wandb", action="store_true", help="Enable WandB logging")
     parser.add_argument("--tags", nargs="*", default=[], help="Additional WandB tags")
     # Compatibility with deploy_bare_metal.py (auto-added flags)
@@ -548,6 +660,15 @@ def main():
         except Exception as e:
             logger.warning(f"WandB init failed: {e}")
 
+    # Parse multi-GPU and agent filter
+    gpu_ids = [int(x) for x in args.gpu_ids.split(",")] if args.gpu_ids else None
+    agent_filter = [x.strip() for x in args.agent_filter.split(",")] if args.agent_filter else None
+
+    if gpu_ids:
+        logger.info(f"Multi-GPU mode: agents distributed across GPUs {gpu_ids}")
+    if agent_filter:
+        logger.info(f"Agent filter: only running {agent_filter}")
+
     # Run windows
     os.makedirs(args.out_dir, exist_ok=True)
     all_results = []
@@ -563,6 +684,8 @@ def main():
             full_break_step=full_break_step,
             gpu_id=args.gpu_id,
             out_dir=args.out_dir,
+            gpu_ids=gpu_ids,
+            agent_filter=agent_filter,
         )
         all_results.append(window_result)
 
