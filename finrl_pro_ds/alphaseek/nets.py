@@ -67,7 +67,7 @@ class QNetTwin(QNetBase):
         if self.explore_rate < torch.rand(1):
             action = q_val.argmax(dim=1, keepdim=True)
         else:
-            action = torch.randint(self.action_dim, size=(state.shape[0], 1))
+            action = torch.randint(self.action_dim, size=(state.shape[0], 1), device=state.device)
         return action
 
 
@@ -121,7 +121,7 @@ class QNetTwinDuel(QNetBase):
         if self.explore_rate < torch.rand(1):
             action = q_val.argmax(dim=1, keepdim=True)
         else:
-            action = torch.randint(self.action_dim, size=(state.shape[0], 1))
+            action = torch.randint(self.action_dim, size=(state.shape[0], 1), device=state.device)
         return action
 
 
