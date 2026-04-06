@@ -262,13 +262,20 @@ def main():
         f"  Dry run: {config.get('dry_run', False)}"
     )
 
-    # Install Twisted asyncio reactor BEFORE any Twisted imports.
-    # This must happen before build_components() which imports ctrader_broker.
-    try:
-        from twisted.internet import asyncioreactor
-        asyncioreactor.install()
-    except Exception:
-        pass  # May already be installed
+    # Start Twisted reactor in a daemon thread. The default reactor handles
+    # TCP/TLS I/O for the ctrader-open-api Client. We cannot use asyncioreactor
+    # because asyncio.run() creates a new event loop, leaving the reactor bound
+    # to a stale loop (deferreds never fire → connection timeout).
+    # The polling bridge in CTraderBroker._deferred_to_future already handles
+    # cross-thread deferred → asyncio communication safely.
+    import threading
+
+    from twisted.internet import reactor
+
+    reactor_thread = threading.Thread(
+        target=reactor.run, args=(False,), daemon=True
+    )
+    reactor_thread.start()
 
     asyncio.run(main_async(config))
 
