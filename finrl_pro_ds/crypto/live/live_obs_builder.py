@@ -57,6 +57,8 @@ class LiveObsBuilder:
         bootstrap_bars: int = 30_000,
         drift_detection: bool = True,
         drift_window: int = 100,
+        obs_mode: str = "window",
+        summary_feature_indices: Optional[list[int]] = None,
     ):
         """
         Args:
@@ -69,12 +71,17 @@ class LiveObsBuilder:
                             for EMA span=120 at 240-min scale.
             drift_detection: Enable EMA drift detection (variance monitoring).
             drift_window: Rolling window size for variance tracking.
+            obs_mode: "window" (raw windows) or "summary_stats" (flat summary).
+            summary_feature_indices: Feature column indices for summary stats
+                (default [0,1,2,6,7] = log_return, atr_norm, parkinson, close_z, volume_z).
         """
         self.scales = sorted(scales)
         self.window_size = window_size
         self.norm_span = norm_span
         self.n_features = n_features
         self.bootstrap_bars = bootstrap_bars
+        self.obs_mode = obs_mode
+        self.summary_feature_indices = summary_feature_indices or [0, 1, 2, 6, 7]
 
         # Rolling 1-min OHLCV buffer (DataFrame)
         self._buffer_1min: Optional[pd.DataFrame] = None
@@ -429,9 +436,14 @@ class LiveObsBuilder:
                        from the buffer (recommended for parity with training).
 
         Returns:
-            Dict with keys:
+            Dict with keys (window mode):
                 scale_0: (window_size, n_features) float32
                 scale_1: (window_size, n_features) float32
+                ...
+                private: (5,) float32
+            Dict with keys (summary_stats mode):
+                scale_0: (n_selected * 3,) float32
+                scale_1: (n_selected * 3,) float32
                 ...
                 private: (5,) float32
         """
@@ -453,7 +465,10 @@ class LiveObsBuilder:
                 pad = np.tile(features[0:1], (pad_len, 1))
                 window = np.concatenate([pad, features], axis=0)
 
-            obs[f"scale_{i}"] = window.copy()
+            if self.obs_mode == "summary_stats":
+                obs[f"scale_{i}"] = self._compute_summary_stats(window)
+            else:
+                obs[f"scale_{i}"] = window.copy()
 
         # FIX AUD-C04: Use bar timestamp from buffer for time encoding parity.
         # The training env uses handler._base_timestamps[ptr-1], not an external clock.
@@ -470,6 +485,19 @@ class LiveObsBuilder:
         )
 
         return obs
+
+    def _compute_summary_stats(self, window: np.ndarray) -> np.ndarray:
+        """Compute (mean, std, last) for selected feature columns over window.
+
+        Mirrors MultiScaleOHLCVHandler._compute_summary_stats() exactly.
+        Returns: flat (n_selected * 3,) float32 array.
+        """
+        selected = window[:, self.summary_feature_indices]  # (W, n_selected)
+        means = selected.mean(axis=0)
+        stds = selected.std(axis=0)
+        stds = np.where(stds < 1e-8, 0.0, stds)
+        last = selected[-1]
+        return np.concatenate([means, stds, last]).astype(np.float32)
 
     def _build_private_state(
         self,
