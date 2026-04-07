@@ -1,0 +1,165 @@
+# CMGP1 V1.1: Feature-upgraded SAC Multi-Asset Crypto Perpetual Futures — 1H bars
+# Extends V1 with 5 additional crypto-native features (11 total per asset):
+#   - funding_ema_24h, funding_ema_168h, funding_cumsum_ffd (funding regime)
+#   - momentum_spread_24h, momentum_spread_168h (BTC divergence)
+# Research gate: A/B walk-forward vs V1 baseline. Promote if PF improves.
+
+strategy:
+  id: "CMGP1"
+  name: "crypto_multiscale_gaussian_policy_1"
+  version: "1.1.0"
+
+universe:
+  # Top-10 by liquidity (reduced from 20 — halves action space complexity)
+  assets: ["BTC", "ETH", "SOL", "BNB", "XRP", "DOGE", "LINK", "AVAX", "ADA", "DOT"]
+  quote: "USDT"
+  data_exchange: "binance"
+  n_assets: 10
+
+data:
+  source: "ccxt"
+  market_type: "futures"
+  frequency: "1h"
+  start_date: "2022-01-01"
+  end_date: null                    # rolling (fetch up to now)
+  cache_dir: "./data/crypto_cache"
+  # HPO train/val/test splits (1H bars: 8760/yr, 720/mo)
+  train_start_date: "2022-03-01"    # After warmup
+  train_end_date: "2025-06-30"
+  val_start_date: "2025-07-01"
+  val_end_date: "2025-09-30"
+  test_start_date: "2025-10-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [1, 4, 24]              # 1H decision, 4H trend, 1D regime
+  window_size: 30
+  features_per_scale: 8           # TC-aligned (same Feature Factory as GMGP1)
+  obs_mode: "summary_stats"       # GMGP2's proven approach (50 dims/asset vs 720)
+  summary_feature_indices: [0, 1, 2, 6, 7]  # log_return, atr_norm, parkinson, close_z, vol_z
+  norm_span: 120
+  feature_set_version: "v1.1"     # V1.1: 11 crypto features per asset (up from 6)
+
+env:
+  mdp_version: "cmgp1"
+  initial_balance: 100000.0
+  n_assets: 10
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0                  # Start zero (fee curriculum)
+  deadband_threshold: 0.03        # Per-asset (smaller than GMGP1's 0.25 — portfolio fraction)
+  slippage_base_bps: 3.0
+  slippage_impact_bps: 15.0
+  max_gross_exposure: 1.0
+  max_net_short_exposure: -0.50
+  episode_length: 720             # 720 x 1H = 30 days
+  random_start: true
+  max_drawdown_pct: 0.20          # 20% peak-based drawdown termination
+  circuit_breaker_threshold: 0.1  # 10% of initial capital absolute floor
+  scales: [1, 4, 24]
+  obs_mode: "summary_stats"
+  summary_feature_indices: [0, 1, 2, 6, 7]
+
+  # Hard risk constraints (GMGP2-ported)
+  stop_loss_bps: 100              # Per-asset position stop (HPO: 20-300)
+  max_holding_bars: 48            # Per-asset max hold = 2 days (HPO: 10-100)
+
+  # Vol-regime exposure scaling (from GMGP1 ATR cap + PRISM L2 concept)
+  vol_scaling:
+    enabled: true
+    high_vol_threshold: 1.5       # ATR ratio > 1.5 = high vol -> reduce exposure
+    high_vol_scale: 0.3           # Scale gross to 30%
+    low_vol_threshold: 0.7        # ATR ratio < 0.7 = low vol -> boost
+    low_vol_scale: 1.3            # Boost to 130%
+    warmup_bars: 100              # Min bars before vol scaling activates
+
+  # Reward: DSR (self-normalizing, natural curriculum)
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+
+  # Fee curriculum: 0 -> 5bps over first 2M steps
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 500000, taker_fee: 0.0, ramp_to: 0.0005, ramp_end_step: 2000000}
+    - {step: 2000000, taker_fee: 0.0005}  # 5bps — Binance perp taker
+
+network:
+  obs_mode: "summary_stats"
+  summary_input_dim: 467          # 10 assets x 3 scales x 15 summary + 17 private
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 17                 # 7 base + 10 positions
+  fusion_dim: 256
+  window_size: 30
+  action_dim: 10                  # n_assets
+
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 10000        # More warmup than GMGP1 (multi-asset needs more exploration)
+    update_interval: 4            # NOT scaled by num_envs (OPT-10)
+    actor_update_freq: 2          # TD3-style delayed actor
+    gradient_clip: 5.0            # Tighter (GMGP2-style)
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 5000000        # 5M (longer for multi-asset complexity)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 10                    # Fewer than GMGP1's 20 (larger obs per env)
+  use_sync: true                  # SyncVectorEnv — avoids 10x crypto data fetch in async subprocesses
+
+hpo:
+  n_trials: 30                    # 8 HP dims, 30 trials sufficient
+  steps_per_trial: 500000
+  objective: "profit_factor"      # BUG-01: HPO objective = PF, lock reward params
+  search_space:
+    lr_actor: {type: "float", low: 1.0e-5, high: 1.0e-3, log: true}
+    lr_critic: {type: "float", low: 1.0e-5, high: 1.0e-3, log: true}
+    gamma: {type: "float", low: 0.95, high: 0.999}
+    tau: {type: "float", low: 0.001, high: 0.02, log: true}
+    batch_size: {type: "categorical", choices: [256, 512, 1024]}
+    deadband_threshold: {type: "float", low: 0.01, high: 0.10}
+    stop_loss_bps: {type: "int", low: 20, high: 300}
+    max_holding_bars: {type: "int", low: 10, high: 100}
+
+walk_forward:
+  train_bars: 8760                # 12 months (1 year)
+  val_bars: 720                   # 1 month
+  test_bars: 1440                 # 2 months
+  step_bars: 720                  # 1 month roll-forward
+  embargo_bars: 168               # 1 week (crypto: no session breaks, just info leakage buffer)
+
+# Signal gate (optional wrapper, disabled by default for V1)
+signal_gate:
+  enabled: false
+  gate_mode: "composite"
+  atr_threshold: 0.3
+  parkinson_threshold: 0.02
+  volume_threshold: 0.5
+  max_hold_bars: 12               # 12 hours max skip
+
+# PRISM integration (Phase 2, disabled for V1)
+prism:
+  l1_enabled: false               # Phase 2: add 13 regime features to private state
+  l2_enabled: false               # Phase 3: position scaling overlay
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["cmgp1", "v1.1", "feature-upgrade", "crypto", "sac", "1h",
+         "multi-asset", "dsr", "deadband", "vol-scaling", "fee-curriculum",
+         "hard-constraints", "funding-regime", "momentum-spread"]

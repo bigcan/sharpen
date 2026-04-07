@@ -19,14 +19,23 @@ from finrl_pro_ds.crypto.features.funding_arb_features import (
 
 logger = logging.getLogger(__name__)
 
-# The 6 crypto-specific feature columns produced by crypto_features.py.
-# M1 fix: Removed exchange_netflow and cost_to_rebalance (always zero —
-# wasted 25% of feature capacity and could confuse the agent).
-CRYPTO_FEATURE_COLS = [
+# V1: Original 6 crypto-specific features (M1 fix: removed exchange_netflow
+# and cost_to_rebalance — always zero, wasted feature capacity).
+CRYPTO_FEATURE_COLS_V1 = [
     "funding_rate", "oi_change_pct", "btc_correlation",
     "volume_profile_skew", "liquidation_intensity",
     "btc_dominance_regime",
 ]
+
+# V1.1: +3 funding regime features + 2 momentum spread = 11 per asset.
+# Gated by config features.feature_set_version: "v1.1".
+CRYPTO_FEATURE_COLS_V1_1 = CRYPTO_FEATURE_COLS_V1 + [
+    "funding_ema_24h", "funding_ema_168h", "funding_cumsum_ffd",
+    "momentum_spread_24h", "momentum_spread_168h",
+]
+
+# Default = V1 until research gate passes (A/B walk-forward validation).
+CRYPTO_FEATURE_COLS = CRYPTO_FEATURE_COLS_V1
 
 # Note: SAFFS feature column names are imported from
 # finrl_pro_ds.crypto.features.saffs_features (single source of truth).

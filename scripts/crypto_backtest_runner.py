@@ -103,11 +103,19 @@ def prepare_data(config: dict) -> dict:
         correlation_window=config["features"]["tech_window"],
     )
 
+    # Select feature set version (V1 default, V1.1 via config)
+    feature_set_version = config.get("features", {}).get("feature_set_version", "v1")
+    if feature_set_version == "v1.1":
+        from finrl_pro_ds.crypto.data.crypto_array_builder import CRYPTO_FEATURE_COLS_V1_1
+        feature_cols = list(CRYPTO_FEATURE_COLS_V1_1)
+        logger.info(f"Feature set V1.1: {len(feature_cols)} features per asset")
+    else:
+        feature_cols = None  # defaults to CRYPTO_FEATURE_COLS (V1) in build_env_arrays
+    passthrough_cols = None  # columns exempt from z-score normalization
+
     # Compute PRISM features (Chronos-2 + GAHMM) if enabled
     prism_cfg = config.get("prism", {})
     enable_prism = prism_cfg.get("enabled", False)
-    feature_cols = None  # defaults to CRYPTO_FEATURE_COLS in build_env_arrays
-    passthrough_cols = None  # columns exempt from z-score normalization
 
     if enable_prism:
         logger.info("Computing PRISM features (Chronos-2 + GAHMM)...")
@@ -138,9 +146,11 @@ def prepare_data(config: dict) -> dict:
                 default = _GAHMM_FILL_DEFAULTS.get(col, 0.0)
                 crypto_feats[col] = crypto_feats[col].fillna(default)
 
-        # Use combined feature columns
-        from finrl_pro_ds.crypto.data.crypto_array_builder import CRYPTO_FEATURE_COLS
-        feature_cols = CRYPTO_FEATURE_COLS + prism_cols
+        # Use combined feature columns (extend V1.1 if already set, else V1 base)
+        if feature_cols is None:
+            from finrl_pro_ds.crypto.data.crypto_array_builder import CRYPTO_FEATURE_COLS
+            feature_cols = list(CRYPTO_FEATURE_COLS)
+        feature_cols = feature_cols + prism_cols
         passthrough_cols = list(gahmm_pt_cols)
         logger.info(f"SAFFS enabled: {len(feature_cols)} total features per asset")
 
