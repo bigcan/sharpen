@@ -34,6 +34,13 @@ from pathlib import Path
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
+try:
+    import optuna
+    from optuna.trial import TrialState
+    HAS_OPTUNA = True
+except ImportError:
+    HAS_OPTUNA = False
+
 # ─── Thresholds ───────────────────────────────────────────────────────────────
 Q_DIVERGENCE_THRESHOLD = 1e4
 STALL_MINUTES = 30
@@ -983,6 +990,73 @@ def detect_orphans(hw_results, wandb_runs):
                 )
 
     return alerts
+
+
+# ─── Distributed HPO ─────────────────────────────────────────────────────────
+
+def fetch_distributed_hpo_status(db_url: str, study_name: str) -> dict | None:
+    """
+    Fetch status of a distributed HPO study from Optuna RDB storage.
+
+    Parameters
+    ----------
+    db_url : str
+        PostgreSQL connection string for Optuna RDBStorage
+        (e.g. "postgresql+psycopg://user:pass@host:5432/optuna").
+    study_name : str
+        Name of the Optuna study to query.
+
+    Returns
+    -------
+    dict or None
+        Dictionary with study status, or None if connection/query fails.
+        Keys: study_name, total_trials, completed, running, failed,
+              best_pf, best_trial, best_params, running_trial_numbers.
+    """
+    if not HAS_OPTUNA:
+        log("optuna not installed -- cannot fetch distributed HPO status", "ERROR")
+        return None
+
+    try:
+        storage = optuna.storages.RDBStorage(url=db_url)
+        study = optuna.load_study(study_name=study_name, storage=storage)
+    except Exception as e:
+        log(f"Failed to connect to distributed HPO storage: {e}", "ERROR")
+        return None
+
+    try:
+        trials = study.trials
+
+        completed = [t for t in trials if t.state == TrialState.COMPLETE]
+        running = [t for t in trials if t.state == TrialState.RUNNING]
+        failed = [t for t in trials if t.state == TrialState.FAIL]
+
+        # Best trial (by value, which is profit_factor for our HPO)
+        best_pf = None
+        best_trial_number = None
+        best_params = None
+        if completed:
+            best = study.best_trial
+            best_pf = best.value
+            best_trial_number = best.number
+            best_params = best.params
+
+        running_trial_numbers = [t.number for t in running]
+
+        return {
+            "study_name": study_name,
+            "total_trials": len(trials),
+            "completed": len(completed),
+            "running": len(running),
+            "failed": len(failed),
+            "best_pf": round(best_pf, 4) if best_pf is not None else None,
+            "best_trial": best_trial_number,
+            "best_params": best_params,
+            "running_trial_numbers": running_trial_numbers,
+        }
+    except Exception as e:
+        log(f"Error querying distributed HPO study '{study_name}': {e}", "ERROR")
+        return None
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────

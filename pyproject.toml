@@ -48,6 +48,9 @@ ctrader = [
     "twisted>=24.0",
     "service-identity>=24.0",
 ]
+distributed = [
+    "psycopg[binary]>=3.1",
+]
 dev = [
     "pytest>=7.0",
     "ruff>=0.1.8",
