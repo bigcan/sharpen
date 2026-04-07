@@ -3,12 +3,12 @@
 Wraps the existing BarClock via composition (same pattern as CMEBarClock).
 Adds a market-hours gate for the XAUUSD CFD schedule:
 
-    Open:  Sunday 22:00 UTC
-    Close: Friday 22:00 UTC
-    Daily break: 21:00-22:00 UTC (Mon-Fri, server rollover)
+    IC Markets server time: EET (UTC+2 winter / UTC+3 summer DST)
+    Daily break: server 00:00-01:00 → 22:00-23:00 UTC (winter) / 21:00-22:00 UTC (summer)
+    Open:  Sunday 22:00/23:00 UTC (DST dependent)
+    Close: Friday 22:00/23:00 UTC (DST dependent)
 
 No holidays — forex/CFD market doesn't close for CME or bank holidays.
-No DST handling — schedule is fixed in UTC (unlike CME which uses ET).
 """
 
 from __future__ import annotations
@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from finrl_pro_ds.crypto.live.bar_clock import (
     BarClock,
@@ -26,11 +27,24 @@ from finrl_pro_ds.crypto.live.bar_clock import (
 
 logger = logging.getLogger(__name__)
 
-# XAUUSD CFD schedule (UTC)
-_MARKET_OPEN_HOUR = 22  # Sunday 22:00 UTC
-_MARKET_CLOSE_HOUR = 22  # Friday 22:00 UTC
-_DAILY_BREAK_START = 21  # 21:00 UTC daily
-_DAILY_BREAK_END = 22  # 22:00 UTC daily
+# IC Markets server timezone (EET/EEST) — daily break is at server midnight.
+_SERVER_TZ = ZoneInfo("Europe/Athens")
+
+
+def _get_schedule_hours(dt_utc: datetime) -> tuple[int, int, int]:
+    """Return (market_open_hour, break_start_hour, break_end_hour) in UTC.
+
+    IC Markets server follows EET (UTC+2 winter, UTC+3 summer DST).
+    Daily break is server 00:00-01:00 → shifts in UTC with DST.
+    """
+    server_dt = dt_utc.astimezone(_SERVER_TZ)
+    offset_hours = int(server_dt.utcoffset().total_seconds()) // 3600
+    # Server midnight (00:00) in UTC
+    break_start = (24 - offset_hours) % 24  # 22 winter, 21 summer
+    break_end = (break_start + 1) % 24
+    # Market open/close at same hour as break end
+    market_hour = break_start
+    return market_hour, break_start, break_end
 
 
 class CFDBarClock:
@@ -164,29 +178,32 @@ class CFDBarClock:
     def is_market_open(dt_utc: datetime) -> bool:
         """Check if XAUUSD CFD market is open at the given UTC time.
 
-        Schedule:
-            Sunday 22:00 UTC → Friday 22:00 UTC (continuous)
-            Daily break: 21:00-22:00 UTC (Mon-Fri)
+        Schedule adapts to DST (IC Markets EET/EEST server time):
+            Sunday open: 22:00 UTC (winter) / 21:00 UTC (summer)
+            Friday close: same hour
+            Daily break: 1 hour starting at server midnight
             Saturday: closed all day
         """
         dt = dt_utc.astimezone(timezone.utc)
         weekday = dt.weekday()  # 0=Mon, 6=Sun
         hour = dt.hour
 
+        market_hour, break_start, break_end = _get_schedule_hours(dt)
+
         # Saturday: always closed
         if weekday == 5:
             return False
 
-        # Sunday: open only from 22:00
+        # Sunday: open only from market_hour
         if weekday == 6:
-            return hour >= _MARKET_OPEN_HOUR
+            return hour >= market_hour
 
-        # Friday: closed from 22:00
-        if weekday == 4 and hour >= _MARKET_CLOSE_HOUR:
+        # Friday: closed from market_hour
+        if weekday == 4 and hour >= market_hour:
             return False
 
-        # Mon-Fri: daily break 21:00-22:00
-        if _DAILY_BREAK_START <= hour < _DAILY_BREAK_END:
+        # Mon-Fri: daily break
+        if break_start <= hour < break_end:
             return False
 
         return True
@@ -202,39 +219,43 @@ class CFDBarClock:
         weekday = dt.weekday()
         hour = dt.hour
 
-        # In daily break (21:00-22:00): opens at 22:00 same day
-        if weekday not in (5, 6) and _DAILY_BREAK_START <= hour < _DAILY_BREAK_END:
-            # But not Friday (Friday 21-22 → weekend → Sunday 22:00)
+        market_hour, break_start, break_end = _get_schedule_hours(dt)
+
+        # In daily break: opens at break_end same day
+        if weekday not in (5, 6) and break_start <= hour < break_end:
+            # But not Friday (Friday break → weekend → Sunday)
             if weekday == 4:
-                # Friday close → Sunday 22:00
-                days_until_sunday = 2
-                return dt.replace(
-                    hour=_MARKET_OPEN_HOUR, minute=0, second=0, microsecond=0
-                ) + timedelta(days=days_until_sunday)
+                # Friday close → Sunday at market_hour
+                # Recompute for Sunday's DST state
+                sunday = dt.replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                ) + timedelta(days=2)
+                sun_hour, _, _ = _get_schedule_hours(sunday)
+                return sunday.replace(hour=sun_hour)
             return dt.replace(
-                hour=_DAILY_BREAK_END, minute=0, second=0, microsecond=0
+                hour=break_end, minute=0, second=0, microsecond=0
             )
 
-        # Weekend: Friday 22:00+ → Sunday 22:00
-        if weekday == 4 and hour >= _MARKET_CLOSE_HOUR:
-            # Friday after close → Sunday 22:00
-            return dt.replace(
-                hour=_MARKET_OPEN_HOUR, minute=0, second=0, microsecond=0
+        # Weekend: Friday close+ → Sunday at market_hour
+        if weekday == 4 and hour >= market_hour:
+            sunday = dt.replace(
+                hour=0, minute=0, second=0, microsecond=0
             ) + timedelta(days=2)
+            sun_hour, _, _ = _get_schedule_hours(sunday)
+            return sunday.replace(hour=sun_hour)
 
         if weekday == 5:
-            # Saturday → Sunday 22:00
-            return dt.replace(
-                hour=_MARKET_OPEN_HOUR, minute=0, second=0, microsecond=0
+            sunday = dt.replace(
+                hour=0, minute=0, second=0, microsecond=0
             ) + timedelta(days=1)
+            sun_hour, _, _ = _get_schedule_hours(sunday)
+            return sunday.replace(hour=sun_hour)
 
-        if weekday == 6 and hour < _MARKET_OPEN_HOUR:
-            # Sunday before 22:00 → Sunday 22:00
+        if weekday == 6 and hour < market_hour:
             return dt.replace(
-                hour=_MARKET_OPEN_HOUR, minute=0, second=0, microsecond=0
+                hour=market_hour, minute=0, second=0, microsecond=0
             )
 
-        # Shouldn't reach here if is_market_open returned False
         # Fallback: advance 1 hour and retry
         return dt + timedelta(hours=1)
 
@@ -243,13 +264,14 @@ class CFDBarClock:
         dt = dt_utc.astimezone(timezone.utc)
         weekday = dt.weekday()
         hour = dt.hour
+        market_hour, break_start, break_end = _get_schedule_hours(dt)
 
         if weekday == 5:
             return "weekend (Saturday)"
-        if weekday == 6 and hour < _MARKET_OPEN_HOUR:
+        if weekday == 6 and hour < market_hour:
             return "weekend (Sunday pre-open)"
-        if weekday == 4 and hour >= _MARKET_CLOSE_HOUR:
+        if weekday == 4 and hour >= market_hour:
             return "weekend (Friday close)"
-        if _DAILY_BREAK_START <= hour < _DAILY_BREAK_END:
+        if break_start <= hour < break_end:
             return "daily rollover break"
         return "closed"
