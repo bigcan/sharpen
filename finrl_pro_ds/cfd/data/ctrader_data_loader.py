@@ -173,11 +173,14 @@ class CTraderDataLoader:
                         "volume": volume,
                     })
 
-                # Move window backward
+                # FIX CFD-D-01: Move window backward using the exact bar
+                # timestamp instead of subtracting 1 second, which created a
+                # gap that could silently drop bars at chunk boundaries.
+                # drop_duplicates() at the end handles any overlap.
                 earliest_ts = min(bar.utcTimestampInMinutes for bar in bars)
                 current_end = datetime.fromtimestamp(
                     earliest_ts * 60, tz=timezone.utc
-                ) - timedelta(seconds=1)
+                )
 
                 chunk_retries = 0
                 logger.debug(

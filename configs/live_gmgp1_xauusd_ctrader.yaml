@@ -96,7 +96,7 @@ wandb:
 safety:
   require_explicit_mainnet: true       # Must pass --mainnet for live/challenge trading
   max_daily_loss_pct: 0.04             # 4% daily loss (1% below FTMO 5% limit)
-  kill_file: "/tmp/finrl_live_xauusd_kill"
+  kill_file: "/tmp/finrl_live_gmgp1_xauusd_kill"  # FIX CRIT-02: was shared with GMGP2
   emergency_flatten_on_error: true     # Flatten all positions on unrecoverable error
 
 # --- PRISM Regime Overlay (L2 position sizing) ---

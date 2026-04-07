@@ -307,24 +307,36 @@ def main() -> None:
 
     while True:
         try:
-            # Subscribe to Docker events with a timeout so we can do periodic work
-            events = client.events(
-                decode=True,
-                filters={
-                    "type": ["container"],
-                    "event": ["health_status", "die", "start", "restart"],
-                },
-            )
+            # FIX WD-01: Use since/until windowed event polling instead of an
+            # infinite blocking iterator. This ensures periodic tasks (sweep,
+            # WandB check) run even when no Docker events occur.
+            since = time.time()
+            poll_interval = min(SWEEP_INTERVAL, 60)  # Poll at most every 60s
 
-            for event in events:
-                action = event.get("Action", "")
+            while True:
+                until = time.time()
+                try:
+                    events = client.events(
+                        decode=True,
+                        since=since,
+                        until=until,
+                        filters={
+                            "type": ["container"],
+                            "event": ["health_status", "die", "start", "restart"],
+                        },
+                    )
+                    for event in events:
+                        action = event.get("Action", "")
+                        if "health_status" in action:
+                            handle_health_event(client, event)
+                        elif action in ("die", "start", "restart"):
+                            handle_container_event(event)
+                except docker.errors.APIError:
+                    pass  # Transient — will retry next poll
 
-                if "health_status" in action:
-                    handle_health_event(client, event)
-                elif action in ("die", "start", "restart"):
-                    handle_container_event(event)
+                since = until
 
-                # Check if periodic tasks are due
+                # Run periodic tasks unconditionally
                 now = time.time()
                 if now - last_sweep >= SWEEP_INTERVAL:
                     sweep(client)
@@ -333,6 +345,8 @@ def main() -> None:
                 if now - last_wandb_check >= WANDB_CHECK_INTERVAL:
                     _run_wandb_check()
                     last_wandb_check = now
+
+                time.sleep(poll_interval)
 
         except docker.errors.APIError as e:
             logger.error(f"Docker API error: {e} — reconnecting in 10s")

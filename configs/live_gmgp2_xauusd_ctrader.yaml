@@ -112,7 +112,7 @@ wandb:
 safety:
   require_explicit_mainnet: true
   max_daily_loss_pct: 0.04             # 4% daily loss (1% below FTMO 5% limit)
-  kill_file: "/tmp/finrl_live_xauusd_kill"
+  kill_file: "/tmp/finrl_live_gmgp2_xauusd_kill"  # FIX CRIT-02: was shared with GMGP1
   emergency_flatten_on_error: true
 
 # --- PRISM Regime Overlay (L2 position sizing) ---

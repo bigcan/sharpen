@@ -39,6 +39,7 @@ CME_HOLIDAYS_2026: set[date] = {
     date(2026, 2, 16),   # Presidents' Day
     date(2026, 4, 3),    # Good Friday
     date(2026, 5, 25),   # Memorial Day
+    date(2026, 6, 19),   # Juneteenth National Independence Day  # FIX IB-12
     date(2026, 7, 3),    # Independence Day (observed)
     date(2026, 9, 7),    # Labor Day
     date(2026, 11, 26),  # Thanksgiving Day
@@ -46,9 +47,12 @@ CME_HOLIDAYS_2026: set[date] = {
 }
 
 # Early close days (close at 1:00 PM ET instead of 5:00 PM ET)
+# FIX IB-14: Added July 2 and Dec 31 (CME metals early close days)
 CME_EARLY_CLOSE_2026: set[date] = {
+    date(2026, 7, 2),    # Day before Independence Day (observed)
     date(2026, 11, 27),  # Black Friday
     date(2026, 12, 24),  # Christmas Eve
+    date(2026, 12, 31),  # New Year's Eve
 }
 
 
@@ -93,7 +97,18 @@ class CMEGlobexCalendar:
             return not self._in_maintenance(et)
 
         # Monday-Thursday: open except during maintenance (5-6 PM ET)
-        return not self._in_maintenance(et)
+        if self._in_maintenance(et):
+            return False
+
+        # FIX IB-13: After maintenance (6 PM+ ET), check if the NEXT trading
+        # date is a holiday. If so, no Globex session opens — the entire
+        # evening session is cancelled (e.g., Dec 24 evening before Dec 25).
+        if et_time >= _MAINTENANCE_END:
+            next_date = (et + timedelta(days=1)).date()
+            if next_date in self._holidays:
+                return False
+
+        return True
 
     def _in_maintenance(self, et: datetime) -> bool:
         """Check if we're in the daily 5-6 PM ET maintenance window."""

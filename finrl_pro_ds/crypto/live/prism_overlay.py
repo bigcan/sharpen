@@ -12,6 +12,7 @@ Usage::
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -76,8 +77,12 @@ class PRISMOverlay:
     def enabled(self) -> bool:
         return True
 
-    def get_position_multiplier(self) -> tuple[float, dict[str, Any]]:
+    async def get_position_multiplier(self) -> tuple[float, dict[str, Any]]:
         """Get vol-regime position multiplier.
+
+        FIX PRS-01: Made async — the underlying PRISMClient uses synchronous
+        requests which would block the event loop. Now runs the blocking call
+        in a thread executor.
 
         Returns:
             (multiplier, regime_info) where multiplier is in [0.0, 1.3]
@@ -87,15 +92,21 @@ class PRISMOverlay:
         # Check cache
         now = time.monotonic()
         if self._cached_result is not None and (now - self._cache_ts) < self._cache_ttl:
+            self._total_cache_hits = getattr(self, "_total_cache_hits", 0) + 1
             return self._cached_result["multiplier"], self._cached_result["info"]
 
         self._total_calls += 1
         t0 = time.monotonic()
 
         try:
-            regime = self._client.get_regime(
-                ticker=self._ticker,
-                timeframe=self._timeframe,
+            # FIX PRS-01: Run blocking HTTP call in thread executor
+            loop = asyncio.get_running_loop()
+            regime = await loop.run_in_executor(
+                None,
+                lambda: self._client.get_regime(
+                    ticker=self._ticker,
+                    timeframe=self._timeframe,
+                ),
             )
             latency = time.monotonic() - t0
 
@@ -133,15 +144,22 @@ class PRISMOverlay:
             logger.warning(
                 f"PRISM API error ({latency:.1f}s): {e} — using fallback multiplier=1.0",
             )
-            return 1.0, {"fallback": True, "error": str(e)}
+            # FIX PRS-03: Cache the fallback to avoid hammering a down API
+            # every bar. Uses a 5-minute error cache TTL.
+            fallback_info: dict[str, Any] = {"fallback": True, "error": str(e)}
+            self._cached_result = {"multiplier": 1.0, "info": fallback_info}
+            self._cache_ts = time.monotonic()
+            self._cache_ttl_override = 300  # 5 min error cache
+            return 1.0, fallback_info
 
     def get_stats(self) -> dict[str, Any]:
         """Return overlay usage statistics."""
+        # FIX PRS-02: Correct cache hit rate formula
+        cache_hits = getattr(self, "_total_cache_hits", 0)
+        total = cache_hits + self._total_calls
         return {
             "total_calls": self._total_calls,
             "total_errors": self._total_errors,
             "total_fallbacks": self._total_fallbacks,
-            "cache_hit_rate": (
-                1.0 - self._total_calls / max(self._total_calls + 1, 1)
-            ),
+            "cache_hit_rate": cache_hits / max(total, 1),
         }

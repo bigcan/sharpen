@@ -31,20 +31,26 @@ logger = logging.getLogger(__name__)
 _SERVER_TZ = ZoneInfo("Europe/Athens")
 
 
-def _get_schedule_hours(dt_utc: datetime) -> tuple[int, int, int]:
-    """Return (market_open_hour, break_start_hour, break_end_hour) in UTC.
+def _get_schedule_hours(dt_utc: datetime) -> tuple[int, int, int, int]:
+    """Return (sunday_open_hour, friday_close_hour, break_start_hour, break_end_hour) in UTC.
 
     IC Markets server follows EET (UTC+2 winter, UTC+3 summer DST).
     Daily break is server 00:00-01:00 → shifts in UTC with DST.
+
+    FIX CFD-C-02: Sunday open and Friday close are at DIFFERENT UTC hours.
+    Sunday open = break_end (server 01:00, when trading resumes after break).
+    Friday close = break_start (server 00:00, when the last daily break begins).
+    Using a single `market_hour` conflated the two, opening 1 hour early on
+    Sundays or closing 1 hour late on Fridays.
     """
     server_dt = dt_utc.astimezone(_SERVER_TZ)
     offset_hours = int(server_dt.utcoffset().total_seconds()) // 3600
     # Server midnight (00:00) in UTC
     break_start = (24 - offset_hours) % 24  # 22 winter, 21 summer
-    break_end = (break_start + 1) % 24
-    # Market open/close at same hour as break end
-    market_hour = break_start
-    return market_hour, break_start, break_end
+    break_end = (break_start + 1) % 24      # 23 winter, 22 summer
+    sunday_open = break_end    # Market opens AFTER daily break ends
+    friday_close = break_start  # Market closes when daily break begins
+    return sunday_open, friday_close, break_start, break_end
 
 
 class CFDBarClock:
@@ -179,8 +185,8 @@ class CFDBarClock:
         """Check if XAUUSD CFD market is open at the given UTC time.
 
         Schedule adapts to DST (IC Markets EET/EEST server time):
-            Sunday open: 22:00 UTC (winter) / 21:00 UTC (summer)
-            Friday close: same hour
+            Sunday open: 23:00 UTC (winter) / 22:00 UTC (summer)
+            Friday close: 22:00 UTC (winter) / 21:00 UTC (summer)
             Daily break: 1 hour starting at server midnight
             Saturday: closed all day
         """
@@ -188,18 +194,18 @@ class CFDBarClock:
         weekday = dt.weekday()  # 0=Mon, 6=Sun
         hour = dt.hour
 
-        market_hour, break_start, break_end = _get_schedule_hours(dt)
+        sunday_open, friday_close, break_start, break_end = _get_schedule_hours(dt)
 
         # Saturday: always closed
         if weekday == 5:
             return False
 
-        # Sunday: open only from market_hour
+        # Sunday: open only from sunday_open hour (break_end)
         if weekday == 6:
-            return hour >= market_hour
+            return hour >= sunday_open
 
-        # Friday: closed from market_hour
-        if weekday == 4 and hour >= market_hour:
+        # Friday: closed from friday_close hour (break_start)
+        if weekday == 4 and hour >= friday_close:
             return False
 
         # Mon-Fri: daily break
@@ -219,41 +225,41 @@ class CFDBarClock:
         weekday = dt.weekday()
         hour = dt.hour
 
-        market_hour, break_start, break_end = _get_schedule_hours(dt)
+        sunday_open, friday_close, break_start, break_end = _get_schedule_hours(dt)
 
         # In daily break: opens at break_end same day
         if weekday not in (5, 6) and break_start <= hour < break_end:
-            # But not Friday (Friday break → weekend → Sunday)
+            # But not Friday (Friday break = weekend close → Sunday)
             if weekday == 4:
-                # Friday close → Sunday at market_hour
+                # Friday close → Sunday at sunday_open
                 # Recompute for Sunday's DST state
                 sunday = dt.replace(
                     hour=0, minute=0, second=0, microsecond=0
                 ) + timedelta(days=2)
-                sun_hour, _, _ = _get_schedule_hours(sunday)
-                return sunday.replace(hour=sun_hour)
+                sun_open, _, _, _ = _get_schedule_hours(sunday)
+                return sunday.replace(hour=sun_open)
             return dt.replace(
                 hour=break_end, minute=0, second=0, microsecond=0
             )
 
-        # Weekend: Friday close+ → Sunday at market_hour
-        if weekday == 4 and hour >= market_hour:
+        # Weekend: Friday close+ → Sunday at sunday_open
+        if weekday == 4 and hour >= friday_close:
             sunday = dt.replace(
                 hour=0, minute=0, second=0, microsecond=0
             ) + timedelta(days=2)
-            sun_hour, _, _ = _get_schedule_hours(sunday)
-            return sunday.replace(hour=sun_hour)
+            sun_open, _, _, _ = _get_schedule_hours(sunday)
+            return sunday.replace(hour=sun_open)
 
         if weekday == 5:
             sunday = dt.replace(
                 hour=0, minute=0, second=0, microsecond=0
             ) + timedelta(days=1)
-            sun_hour, _, _ = _get_schedule_hours(sunday)
-            return sunday.replace(hour=sun_hour)
+            sun_open, _, _, _ = _get_schedule_hours(sunday)
+            return sunday.replace(hour=sun_open)
 
-        if weekday == 6 and hour < market_hour:
+        if weekday == 6 and hour < sunday_open:
             return dt.replace(
-                hour=market_hour, minute=0, second=0, microsecond=0
+                hour=sunday_open, minute=0, second=0, microsecond=0
             )
 
         # Fallback: advance 1 hour and retry
@@ -264,13 +270,13 @@ class CFDBarClock:
         dt = dt_utc.astimezone(timezone.utc)
         weekday = dt.weekday()
         hour = dt.hour
-        market_hour, break_start, break_end = _get_schedule_hours(dt)
+        sunday_open, friday_close, break_start, break_end = _get_schedule_hours(dt)
 
         if weekday == 5:
             return "weekend (Saturday)"
-        if weekday == 6 and hour < market_hour:
+        if weekday == 6 and hour < sunday_open:
             return "weekend (Sunday pre-open)"
-        if weekday == 4 and hour >= market_hour:
+        if weekday == 4 and hour >= friday_close:
             return "weekend (Friday close)"
         if break_start <= hour < break_end:
             return "daily rollover break"

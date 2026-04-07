@@ -72,6 +72,7 @@ class IBFuturesBroker:
         self._limit_offset_ticks = limit_offset_ticks
         self._market_fallback_timeout = market_fallback_timeout
         self._commission = commission_per_side
+        self._roll_days_before_expiry = roll_days_before_expiry
         self._contract_manager: Optional[FuturesContractManager] = None
 
         # Required by LiveTradingEngine
@@ -88,10 +89,28 @@ class IBFuturesBroker:
         self._cached_market_price: float = 0.0
 
     async def connect(self) -> None:
-        """Connect to IB Gateway/TWS. No-op if already connected."""
+        """Connect to IB Gateway/TWS. No-op if already connected.
+
+        FIX IB-01: Clean up old IB instance before creating a new one to
+        prevent event handler leaks and thread accumulation on reconnect.
+        This was the root cause of the 5d10h crash (Session 356).
+        """
         if self._ib is not None and self._ib.isConnected():
             logger.info("IB already connected, skipping connect()")
         else:
+            # FIX IB-01: Tear down stale IB instance before creating a new one
+            if self._ib is not None:
+                try:
+                    self._ib.updatePortfolioEvent -= self._on_portfolio_update
+                except Exception:
+                    pass
+                try:
+                    self._ib.disconnect()
+                except Exception:
+                    pass
+                self._ib = None
+                logger.info("Cleaned up stale IB instance before reconnect")
+
             from ib_insync import IB
             self._ib = IB()
             await self._ib.connectAsync(
@@ -104,7 +123,7 @@ class IBFuturesBroker:
         self._contract_manager = FuturesContractManager(
             ib=self._ib,
             symbol=self._symbol,
-            roll_days_before_expiry=5,
+            roll_days_before_expiry=self._roll_days_before_expiry,
         )
         await self._contract_manager.resolve_front_month()
 
@@ -119,8 +138,14 @@ class IBFuturesBroker:
 
     async def close(self) -> None:
         """Disconnect from IB."""
-        if self._ib and self._ib.isConnected():
-            self._ib.disconnect()
+        if self._ib:
+            # FIX IB-07: Unsubscribe event handler to prevent leak
+            try:
+                self._ib.updatePortfolioEvent -= self._on_portfolio_update
+            except Exception:
+                pass
+            if self._ib.isConnected():
+                self._ib.disconnect()
             logger.info("Disconnected from IB")
 
     async def execute_position_change(
@@ -183,7 +208,13 @@ class IBFuturesBroker:
 
         result = await self._place_order(side, quantity, price)
         if result.status == "filled":
-            self._position_contracts = target_contracts
+            # FIX IB-06: Use actual filled qty instead of assuming target was met.
+            # In the limit-to-market fallback path, actual fill can differ from target.
+            actual_filled = int(result.filled_quantity)
+            if side == "BUY":
+                self._position_contracts = current_contracts + actual_filled
+            else:
+                self._position_contracts = current_contracts - actual_filled
 
         return result
 
@@ -405,27 +436,50 @@ class IBFuturesBroker:
 
         # Wait for fill with timeout
         filled = await self._wait_for_fill(trade, timeout=self._market_fallback_timeout)
+        # FIX IB-04: Track partial fills across limit-to-market fallback
+        limit_filled = 0
+        market_filled = 0
+        limit_avg_price = 0.0
+        market_avg_price = 0.0
 
         if not filled and order_type_str == "limit":
             # Fallback to market order for unfilled remainder
             logger.warning(f"Limit order not filled in {self._market_fallback_timeout}s, switching to market")
-            self._ib.cancelOrder(order)
-            await asyncio.sleep(1.0)
+            # FIX IB-04: Wait for limit trade to reach terminal state after cancel
+            # to get accurate partial fill count. The 1s sleep was insufficient.
+            self._ib.cancelOrder(trade.order)
+            for _ in range(20):  # Wait up to 2s for terminal state
+                if trade.isDone():
+                    break
+                await asyncio.sleep(0.1)
 
             # Account for partial fills before cancellation
-            already_filled = int(trade.orderStatus.filled)
-            remaining = quantity - already_filled
+            limit_filled = int(trade.orderStatus.filled)
+            limit_avg_price = trade.orderStatus.avgFillPrice if limit_filled > 0 else 0.0
+            remaining = quantity - limit_filled
+            market_filled = 0
+            market_avg_price = 0.0
             if remaining > 0:
                 market_order = MarketOrder(side, remaining)
                 trade = self._ib.placeOrder(contract, market_order)
                 filled = await self._wait_for_fill(trade, timeout=30.0)
+                if filled:
+                    market_filled = int(trade.orderStatus.filled)
+                    market_avg_price = trade.orderStatus.avgFillPrice
             else:
                 filled = True  # Limit order fully filled before cancel completed
             order_type_str = "market_fallback"
 
         if filled:
-            avg_price = trade.orderStatus.avgFillPrice
-            filled_qty = int(trade.orderStatus.filled)
+            # FIX IB-04: Combine fills from limit + market for accurate tracking
+            if order_type_str == "market_fallback" and limit_filled > 0:
+                filled_qty = limit_filled + market_filled
+                total_notional = (limit_avg_price * limit_filled
+                                  + market_avg_price * market_filled)
+                avg_price = total_notional / filled_qty if filled_qty > 0 else 0.0
+            else:
+                avg_price = trade.orderStatus.avgFillPrice
+                filled_qty = int(trade.orderStatus.filled)
             fee = self._commission * filled_qty
             status = "filled"
         else:
