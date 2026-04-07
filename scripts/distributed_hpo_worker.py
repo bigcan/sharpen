@@ -1,0 +1,337 @@
+"""Distributed HPO Worker — runs Optuna trials on a remote GPU instance.
+
+Connects to a shared Optuna PostgreSQL study (created by the coordinator) and
+pulls trials dynamically until the global target is reached or SIGTERM is
+received.  Uses the **identical** objective function as serial HPO via
+``finrl_pro_ds.hpo.objective.make_objective``.
+
+All project invariants are preserved:
+  - LEAK-1: EMA-Z normalization reset at split boundaries (via objective)
+  - BUG-01: HPO objective = profit_factor (via objective)
+  - BUG-03: hindsight_weight=0.0 during HPO (via objective)
+  - HPO-2: 3-seed median PF evaluation (via objective)
+  - HPO-3: <30 trades = -999.0 lazy-kill (via objective)
+
+Usage (launched by coordinator via SSH):
+    python scripts/distributed_hpo_worker.py \\
+        --config configs/gmgp1_sac_gc_15min.yaml \\
+        --db_url "postgresql+psycopg://user:pass@host/optuna" \\
+        --study_name "gmgp1_hpo_distributed" \\
+        --worker_id 3 \\
+        --target_trials 50 \\
+        --wandb_group "dhpo_gmgp1_20260407"
+"""
+
+from __future__ import annotations
+
+import argparse
+import copy
+import logging
+import signal
+import sys
+from pathlib import Path
+
+import yaml
+
+# Ensure project root is importable when launched standalone on remote instances
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(PROJECT_ROOT))
+
+import optuna  # noqa: E402
+from optuna.storages import RDBStorage  # noqa: E402
+from optuna.trial import TrialState  # noqa: E402
+
+import wandb  # noqa: E402
+
+from finrl_pro_ds.hpo.objective import make_objective  # noqa: E402
+from finrl_pro_ds.hpo.sampler import create_sampler  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
+logger = logging.getLogger("FinRL.HPO.Worker")
+
+# ---------------------------------------------------------------------------
+# Graceful shutdown
+# ---------------------------------------------------------------------------
+_shutdown = False
+
+
+def _sigterm_handler(signum, frame):
+    """Handle SIGTERM: let the current trial finish, then exit."""
+    global _shutdown
+    logger.info("SIGTERM received — will exit after current trial completes.")
+    _shutdown = True
+
+
+signal.signal(signal.SIGTERM, _sigterm_handler)
+# Also handle SIGINT (Ctrl-C) for interactive debugging
+signal.signal(signal.SIGINT, _sigterm_handler)
+
+
+# ---------------------------------------------------------------------------
+# Worker
+# ---------------------------------------------------------------------------
+def run_worker(
+    config_path: str,
+    db_url: str,
+    study_name: str,
+    worker_id: int,
+    target_trials: int,
+    wandb_group: str,
+    device: str = "cuda",
+    agent_type: str = "sac",
+) -> None:
+    """Connect to shared Optuna study and run HPO trials until target reached.
+
+    Args:
+        config_path: Path to experiment YAML config.
+        db_url: PostgreSQL connection string for Optuna RDBStorage.
+        study_name: Name of the Optuna study (must already exist).
+        worker_id: Unique integer ID for this worker.
+        target_trials: Global target — stop when study has this many completed trials.
+        wandb_group: WandB group name for grouping distributed workers.
+        device: PyTorch device string ("cuda" or "cpu").
+        agent_type: Agent type ("sac", "ppo", "iqn", "bdq").
+    """
+    global _shutdown
+
+    # ------------------------------------------------------------------
+    # 1. Load config
+    # ------------------------------------------------------------------
+    config_path = str(Path(config_path).resolve())
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
+    logger.info("Loaded config from %s", config_path)
+
+    steps_per_trial = config.get("hpo", {}).get("steps_per_trial",
+                                                 config.get("training", {}).get("total_timesteps", 500_000))
+    logger.info("Steps per trial: %d", steps_per_trial)
+
+    # ------------------------------------------------------------------
+    # 2. Connect to shared Optuna storage
+    # ------------------------------------------------------------------
+    storage = RDBStorage(
+        url=db_url,
+        heartbeat_interval=60,
+        grace_period=600,
+        failed_trial_callback=optuna.storages.RetryFailedTrialCallback(max_retry=1),
+    )
+    logger.info("Connected to Optuna storage: %s", db_url.split("@")[-1])  # Log host only, not credentials
+
+    # ------------------------------------------------------------------
+    # 3. Load existing study (coordinator already created it)
+    # ------------------------------------------------------------------
+    study = optuna.load_study(
+        study_name=study_name,
+        storage=storage,
+        sampler=create_sampler(config.get("hpo", {}), distributed=True),
+    )
+    logger.info(
+        "Loaded study '%s' — %d trials so far (completed: %d)",
+        study_name,
+        len(study.trials),
+        len([t for t in study.trials if t.state == TrialState.COMPLETE]),
+    )
+
+    # ------------------------------------------------------------------
+    # 4. Init WandB
+    # ------------------------------------------------------------------
+    wandb_config = config.get("wandb", {})
+    wandb.init(
+        entity=wandb_config.get("entity", "bigcan-chiwin-technology"),
+        project=wandb_config.get("project", "FinRL-Pro-DS"),
+        group=wandb_group,
+        job_type="hpo_worker",
+        name=f"worker_{worker_id}",
+        tags=["distributed_hpo", study_name, f"worker_{worker_id}"],
+        config={
+            "worker_id": worker_id,
+            "study_name": study_name,
+            "target_trials": target_trials,
+            "steps_per_trial": steps_per_trial,
+            "agent_type": agent_type,
+            "device": device,
+            "experiment_config": config,
+        },
+    )
+    logger.info(
+        "WandB initialized — group=%s, worker_%d",
+        wandb_group,
+        worker_id,
+    )
+
+    # ------------------------------------------------------------------
+    # 5. Create objective function
+    # ------------------------------------------------------------------
+    trial_records: list[dict] = []
+    objective = make_objective(
+        base_config=copy.deepcopy(config),
+        steps_per_trial=steps_per_trial,
+        agent_type=agent_type,
+        device=device,
+        trial_records=trial_records,
+    )
+    logger.info("Objective function created (agent_type=%s, device=%s)", agent_type, device)
+
+    # ------------------------------------------------------------------
+    # 6. Dynamic pull loop — run trials until global target reached
+    # ------------------------------------------------------------------
+    local_trials_completed = 0
+    local_trials_started = 0
+
+    while not _shutdown:
+        # Check global progress
+        completed_trials = len([
+            t for t in study.trials
+            if t.state == TrialState.COMPLETE
+        ])
+        if completed_trials >= target_trials:
+            logger.info(
+                "Global target reached: %d/%d completed trials. Stopping.",
+                completed_trials,
+                target_trials,
+            )
+            break
+
+        logger.info(
+            "Worker %d: starting trial (global progress: %d/%d completed, local: %d completed)",
+            worker_id,
+            completed_trials,
+            target_trials,
+            local_trials_completed,
+        )
+
+        # Run exactly 1 trial, then re-check global progress
+        local_trials_started += 1
+        try:
+            study.optimize(objective, n_trials=1, gc_after_trial=True)
+            local_trials_completed += 1
+        except Exception as e:
+            logger.error("Trial failed with exception: %s", e)
+            # The objective itself handles errors and returns 0.0,
+            # so this catches unexpected Optuna-level errors only.
+            local_trials_completed += 1  # Count it as done (Optuna recorded the failure)
+
+    # ------------------------------------------------------------------
+    # 7. Summary logging
+    # ------------------------------------------------------------------
+    completed_trials = len([
+        t for t in study.trials
+        if t.state == TrialState.COMPLETE
+    ])
+
+    best_trial = None
+    try:
+        best_trial = study.best_trial
+    except ValueError:
+        logger.warning("No completed trials in study — cannot determine best trial.")
+
+    summary = {
+        "worker_id": worker_id,
+        "local_trials_started": local_trials_started,
+        "local_trials_completed": local_trials_completed,
+        "global_trials_completed": completed_trials,
+        "target_trials": target_trials,
+        "shutdown_requested": _shutdown,
+    }
+    if best_trial is not None:
+        summary["best_trial_number"] = best_trial.number
+        summary["best_trial_value"] = best_trial.value
+        summary["best_trial_params"] = best_trial.params
+
+    wandb.log({"worker_summary": summary})
+    logger.info("Worker %d finished — %d local trials, %d global completed",
+                worker_id, local_trials_completed, completed_trials)
+    if best_trial is not None:
+        logger.info("Study best: trial %d, PF=%.4f, params=%s",
+                     best_trial.number, best_trial.value, best_trial.params)
+
+    # Log local trial records table
+    if trial_records:
+        wandb.log({"trial_records": wandb.Table(
+            columns=list(trial_records[0].keys()),
+            data=[list(r.values()) for r in trial_records],
+        )})
+
+    wandb.finish()
+    logger.info("Worker %d — WandB run finished. Exiting.", worker_id)
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Distributed HPO Worker — run Optuna trials on a remote GPU instance.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--config",
+        type=str,
+        required=True,
+        help="Path to experiment YAML config.",
+    )
+    parser.add_argument(
+        "--db_url",
+        type=str,
+        required=True,
+        help="PostgreSQL connection string (e.g. postgresql+psycopg://user:pass@host/optuna).",
+    )
+    parser.add_argument(
+        "--study_name",
+        type=str,
+        required=True,
+        help="Name of the Optuna study (must already exist, created by coordinator).",
+    )
+    parser.add_argument(
+        "--worker_id",
+        type=int,
+        required=True,
+        help="Unique integer ID for this worker.",
+    )
+    parser.add_argument(
+        "--target_trials",
+        type=int,
+        required=True,
+        help="Global target — worker stops when study has this many completed trials.",
+    )
+    parser.add_argument(
+        "--wandb_group",
+        type=str,
+        required=True,
+        help="WandB group name for grouping distributed workers.",
+    )
+    parser.add_argument(
+        "--device",
+        type=str,
+        default="cuda",
+        help="PyTorch device (default: cuda).",
+    )
+    parser.add_argument(
+        "--agent_type",
+        type=str,
+        default="sac",
+        choices=["sac", "ppo", "iqn", "bdq"],
+        help="Agent type for HPO (default: sac).",
+    )
+    return parser.parse_args()
+
+
+if __name__ == "__main__":
+    args = parse_args()
+    run_worker(
+        config_path=args.config,
+        db_url=args.db_url,
+        study_name=args.study_name,
+        worker_id=args.worker_id,
+        target_trials=args.target_trials,
+        wandb_group=args.wandb_group,
+        device=args.device,
+        agent_type=args.agent_type,
+    )

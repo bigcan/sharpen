@@ -1,0 +1,71 @@
+# Distributed HPO Configuration Overlay
+# Parallelizes Optuna HPO across multiple GPU workers (Vast.ai or GPUHub).
+# Usage: merge with experiment config via crypto_hpo_runner.py --distributed
+#
+# Architecture:
+#   - Central Optuna storage: PostgreSQL (Neon free tier or self-hosted)
+#   - Workers: each runs crypto_hpo_runner.py pointed at shared storage
+#   - Coordinator: local machine provisions workers and monitors progress
+#
+# Env vars:
+#   DISTRIBUTED_HPO_DB_URL  — PostgreSQL connection string for Optuna storage
+#   VASTAI_API_KEY          — Vast.ai API key (if platform=vastai)
+
+distributed_hpo:
+  platform: "vastai"                  # "vastai" | "gpuhub"
+  n_workers: 10                       # Number of parallel workers
+  n_trials: 50                        # Total trials across all workers
+
+  # --- Optuna PostgreSQL Storage ---
+  storage:
+    backend: "postgresql"
+    url: "${DISTRIBUTED_HPO_DB_URL}"  # Env var interpolation at runtime
+    heartbeat_interval: 60            # Seconds between worker heartbeats
+    grace_period: 600                 # Seconds before dead worker's trial is retried
+    max_retry: 1                      # Max retries for a failed/dead trial
+
+  # --- Vast.ai Worker Provisioning ---
+  vastai:
+    gpu_filter: ["RTX_3090", "RTX_4070", "RTX_4060_Ti"]
+    min_cpu_cores: 8
+    min_ram_gb: 32
+    max_price_per_hour: 0.30
+    min_cuda_version: 12.0
+    min_reliability: 0.95
+    disk_gb: 30
+    docker_image: "pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime"
+
+  # --- GPUHub Worker Mapping ---
+  gpuhub:
+    instances: ["gpuhub-1:0", "gpuhub-2:0", "gpuhub-2:1", "gpuhub-3:0"]
+
+  # --- Per-Worker Settings ---
+  worker:
+    target_trials: null               # Trials per worker (null = n_trials / n_workers)
+    trial_timeout: 7200               # Max seconds per trial before timeout
+    graceful_shutdown_timeout: 60     # Seconds to wait for clean shutdown
+    pip_extras: ""                    # Additional pip packages (space-separated)
+
+  # --- Data Distribution ---
+  data:
+    upload_method: "sftp"             # "sftp" | "gcs" | "preloaded"
+    data_files: []                    # Paths to upload (empty = use worker cache)
+    cache_by_size: true               # Skip upload if remote file size matches
+
+  # --- WandB Integration ---
+  wandb:
+    entity: "bigcan-chiwin-technology"
+    project: "FinRL-Pro-DS"
+    group_prefix: "dhpo"              # WandB group = {group_prefix}_{study_name}
+    tags: ["distributed_hpo"]
+
+  # --- Fault Tolerance ---
+  fault_tolerance:
+    max_worker_retries: 2             # Times to replace a dead worker
+    worker_replace_on_death: true     # Auto-provision replacement on worker death
+    monitor_poll_interval: 300        # Seconds between coordinator health checks
+
+  # --- Cost Controls ---
+  cost:
+    max_total_spend: 20.0             # USD budget cap (Vast.ai only)
+    auto_teardown: true               # Destroy all workers when trials complete or budget hit
