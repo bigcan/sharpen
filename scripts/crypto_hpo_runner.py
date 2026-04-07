@@ -875,19 +875,27 @@ def run_full_hpo_wf(
 
         try:
             norm_window = config.get("features", {}).get("norm_window", 720)
+            feature_cols = data.get("feature_cols")
+            passthrough_cols = data.get("passthrough_cols")
             train_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["train_start"], window["train_end"],
+                feature_cols=feature_cols,
+                passthrough_cols=passthrough_cols,
                 norm_window=norm_window,
             )
             val_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["val_start"], window["val_end"],
+                feature_cols=feature_cols,
+                passthrough_cols=passthrough_cols,
                 norm_window=norm_window,
             )
             test_arrays = build_env_arrays(
                 data["ohlcv"], data["crypto_features"], data["funding"],
                 assets, window["test_start"], window["test_end"],
+                feature_cols=feature_cols,
+                passthrough_cols=passthrough_cols,
                 norm_window=norm_window,
             )
 

@@ -1,18 +1,27 @@
 """Crypto-specific features for Synapse Crypto 1H.
 
-Produces 8 crypto-specific features per asset on top of the standard
+Produces crypto-specific features per asset on top of the standard
 technical indicator set. All features respect point-in-time safety
 (no look-ahead bias).
 
-Features:
-    1. funding_rate          — Perpetual swap funding rate (raw)
-    2. oi_change_pct         — Open interest % change (1h)
-    3. btc_correlation       — Rolling correlation with BTC (168h)
-    4. volume_profile_skew   — Buy vol / total vol ratio (24h proxy)
-    5. liquidation_intensity — Normalized liquidation volume (24h)
-    6. exchange_netflow       — Net exchange inflow/outflow (24h, if available)
-    7. btc_dominance_regime  — BTC dominance regime indicator
-    8. cost_to_rebalance     — Estimated txn cost (derived per-step in env)
+V1 Features (6 active in CRYPTO_FEATURE_COLS):
+    1.  funding_rate          — Perpetual swap funding rate (raw)
+    2.  oi_change_pct         — Open interest % change (1h)
+    3.  btc_correlation       — Rolling correlation with BTC (168h)
+    4.  volume_profile_skew   — Buy vol / total vol ratio (24h proxy)
+    5.  liquidation_intensity — Normalized liquidation volume (24h, proxy)
+    6.  btc_dominance_regime  — BTC dominance regime indicator
+
+V1.1 Features (5 additional, selected via feature_set_version config):
+    1b. funding_ema_24h       — Short-term funding trend (EMA span=24)
+    1c. funding_ema_168h      — Long-term funding regime (EMA span=168)
+    1d. funding_cumsum_ffd    — FFD(d=0.4) on cumulative funding, z-scored
+    3b. momentum_spread_24h   — Asset return - BTC return (24h)
+    3c. momentum_spread_168h  — Asset return - BTC return (168h)
+
+Placeholders (not in CRYPTO_FEATURE_COLS, computed but unused):
+    6.  exchange_netflow       — Zero placeholder (M1 fix: removed)
+    8.  cost_to_rebalance     — Zero placeholder (computed per-step in env)
 """
 
 from __future__ import annotations
@@ -60,16 +69,19 @@ def compute_crypto_features(
 
     Returns:
         DataFrame with crypto features merged onto OHLCV timestamps.
-        Columns: [timestamp, ticker, funding_rate, oi_change_pct, btc_correlation,
-                  volume_profile_skew, liquidation_intensity, exchange_netflow,
-                  btc_dominance_regime, cost_to_rebalance]
+        Columns include V1 features (funding_rate, oi_change_pct, btc_correlation,
+        volume_profile_skew, liquidation_intensity, btc_dominance_regime) plus
+        V1.1 features (funding_ema_24h, funding_ema_168h, funding_cumsum_ffd,
+        momentum_spread_24h, momentum_spread_168h) and placeholders.
     """
     tickers = sorted(ohlcv_df["ticker"].unique())
     all_frames = []
 
-    # Pre-compute BTC returns for correlation
+    # Pre-compute BTC returns for correlation and momentum spread
     btc_ohlcv = ohlcv_df[ohlcv_df["ticker"] == "BTC"].set_index("timestamp").sort_index()
     btc_returns = btc_ohlcv["close"].pct_change() if not btc_ohlcv.empty else pd.Series(dtype=float)
+    btc_ret_24h = btc_ohlcv["close"].pct_change(24) if not btc_ohlcv.empty else pd.Series(dtype=float)
+    btc_ret_168h = btc_ohlcv["close"].pct_change(168) if not btc_ohlcv.empty else pd.Series(dtype=float)
 
     for ticker in tickers:
         asset_ohlcv = (
@@ -88,6 +100,23 @@ def compute_crypto_features(
         # --- 1. Funding rate (raw, clipped) ---
         features["funding_rate"] = _merge_funding(
             asset_ohlcv.index, funding_df, ticker,
+        )
+
+        # --- 1b. Funding EMA 24h (short-term trend) ---
+        features["funding_ema_24h"] = (
+            features["funding_rate"].ewm(span=24, min_periods=6).mean().fillna(0.0)
+        )
+
+        # --- 1c. Funding EMA 168h (regime) ---
+        features["funding_ema_168h"] = (
+            features["funding_rate"].ewm(span=168, min_periods=24).mean().fillna(0.0)
+        )
+
+        # --- 1d. Funding cumsum FFD (structural regime shift) ---
+        funding_cumsum = features["funding_rate"].cumsum()
+        ffd_raw = _fractional_diff(funding_cumsum, d=0.4, window=100)
+        features["funding_cumsum_ffd"] = (
+            _rolling_zscore(ffd_raw, window=720).clip(-5, 5).fillna(0.0)
         )
 
         # --- 2. Open interest % change ---
@@ -112,6 +141,29 @@ def compute_crypto_features(
                 asset_returns.rolling(window=correlation_window, min_periods=min_corr_periods)
                 .corr(aligned_btc)
                 .fillna(0.0)
+            )
+
+        # --- 3b. Momentum spread vs BTC (24h & 168h) ---
+        if ticker == "BTC":
+            features["momentum_spread_24h"] = 0.0
+            features["momentum_spread_168h"] = 0.0
+        else:
+            asset_ret_24h = asset_ohlcv["close"].pct_change(24).fillna(0.0)
+            asset_ret_168h = asset_ohlcv["close"].pct_change(168).fillna(0.0)
+            aligned_btc_24h = btc_ret_24h.reindex(asset_ohlcv.index)
+            aligned_btc_168h = btc_ret_168h.reindex(asset_ohlcv.index)
+            # LEAK-2: Truncate forward-fill to BTC data extent
+            if not btc_ohlcv.empty:
+                btc_last_ts = btc_ohlcv.index.max()
+                aligned_btc_24h.loc[aligned_btc_24h.index > btc_last_ts] = np.nan
+                aligned_btc_168h.loc[aligned_btc_168h.index > btc_last_ts] = np.nan
+            aligned_btc_24h = aligned_btc_24h.ffill().fillna(0.0)
+            aligned_btc_168h = aligned_btc_168h.ffill().fillna(0.0)
+            features["momentum_spread_24h"] = (
+                (asset_ret_24h - aligned_btc_24h).clip(-1.0, 1.0)
+            )
+            features["momentum_spread_168h"] = (
+                (asset_ret_168h - aligned_btc_168h).clip(-1.0, 1.0)
             )
 
         # --- 4. Volume profile skew (buy volume proxy) ---
