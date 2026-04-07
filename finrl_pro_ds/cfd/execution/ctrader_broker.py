@@ -73,6 +73,11 @@ def _with_reconnect(method):
 # 1.00 lot = volume 100, 0.01 lot = volume 1.
 _VOLUME_SCALE = 100
 
+# Price encoding: cTrader spot event bid/ask (uint64) are always scaled by 10^5,
+# regardless of the symbol's display digits.  E.g. XAUUSD at $4686.055 → 468605500.
+# Double fields (Position.price, Deal/Order.executionPrice) are already decimal.
+_SPOT_PRICE_SCALE = 100_000
+
 
 class CTraderBroker:
     """cTrader CFD broker for XAUUSD paper and live trading.
@@ -364,8 +369,7 @@ class CTraderBroker:
                 # Tear down old client cleanly
                 await self._teardown_client()
 
-                if attempt > 1:
-                    await asyncio.sleep(delay)
+                await asyncio.sleep(min(delay, 2.0) if attempt == 1 else delay)
 
                 try:
                     # Refresh the OAuth token before reconnecting if we
@@ -560,15 +564,15 @@ class CTraderBroker:
             if exec_payload.HasField("order"):
                 order = exec_payload.order
                 order_id = str(order.orderId)
-                if order.executionPrice:
-                    fill_price = order.executionPrice / (10 ** self._symbol_digits)
+                if order.HasField("executionPrice"):
+                    fill_price = order.executionPrice  # double, already decimal
                 if order.executedVolume:
                     filled_volume = order.executedVolume
 
             if exec_payload.HasField("deal"):
                 deal = exec_payload.deal
-                if deal.executionPrice:
-                    fill_price = deal.executionPrice / (10 ** self._symbol_digits)
+                if deal.HasField("executionPrice"):
+                    fill_price = deal.executionPrice  # double, already decimal
                 if deal.filledVolume:
                     filled_volume = deal.filledVolume
 
@@ -650,14 +654,18 @@ class CTraderBroker:
 
         except Exception as e:
             logger.error(f"Failed to fetch position: {e}")
-            return 0.0
+            # Return last known position — returning 0.0 (fake flat) would
+            # cause the engine to open new positions, creating double exposure.
+            price = self._mid_price if self._mid_price > 0 else 1.0
+            return self._lots_to_position(
+                self._position_lots, self._portfolio_value, price
+            )
 
     @_with_reconnect
     async def get_account_info(self) -> dict:
         """Fetch account equity, available balance, and used margin."""
         from ctrader_open_api import Protobuf
         from ctrader_open_api.messages.OpenApiMessages_pb2 import (
-            ProtoOAGetPositionUnrealizedPnLReq,
             ProtoOAReconcileReq,
             ProtoOATraderReq,
         )
@@ -672,31 +680,45 @@ class CTraderBroker:
             trader = trader_payload.trader
             balance = trader.balance / (10 ** self._money_digits)
 
-            # Get used margin from open positions
+            # Get open positions (used margin + unrealized PnL)
             recon_req = ProtoOAReconcileReq()
             recon_req.ctidTraderAccountId = self._account_id
             recon_res = await self._send_request(recon_req, timeout=10.0)
 
             recon_payload = Protobuf.extract(recon_res)
             used_margin = 0.0
+            unrealized_pnl = 0.0
+            n_positions = 0
+            pnl = 0.0
+            current_price = self._mid_price
+
             for pos in recon_payload.position:
                 if pos.usedMargin:
                     used_margin += pos.usedMargin / (10 ** self._money_digits)
 
-            # Get unrealized PnL (NOT swap — swap is overnight financing)
-            unrealized_pnl = 0.0
-            if recon_payload.position:
-                try:
-                    pnl_req = ProtoOAGetPositionUnrealizedPnLReq()
-                    pnl_req.ctidTraderAccountId = self._account_id
-                    pnl_res = await self._send_request(pnl_req, timeout=10.0)
-                    pnl_payload = Protobuf.extract(pnl_res)
+                # Calculate unrealized PnL locally from position entry price
+                # and current mid_price.  The old ProtoOAGetPositionUnrealizedPnLReq
+                # call silently failed on many brokers, leaving PnL at 0.
+                # pos.price is a protobuf double — already decimal.
+                trade_data = pos.tradeData
+                if trade_data.symbolId == self._symbol_id and current_price > 0:
+                    lots = trade_data.volume / _VOLUME_SCALE
+                    entry_price = pos.price  # double, already decimal
+                    # BUY=1, SELL=2
+                    direction = 1.0 if trade_data.tradeSide == 1 else -1.0
+                    if entry_price and entry_price > 0:
+                        pnl = direction * lots * self._lot_size * (
+                            current_price - entry_price
+                        )
+                        unrealized_pnl += pnl
+                    n_positions += 1
 
-                    pnl_digits = pnl_payload.moneyDigits or self._money_digits
-                    for pnl in pnl_payload.positionUnrealizedPnL:
-                        unrealized_pnl += pnl.netUnrealizedPnL / (10 ** pnl_digits)
-                except Exception as e:
-                    logger.warning(f"Failed to fetch unrealized PnL: {e}")
+            if recon_payload.position and current_price > 0:
+                logger.info(
+                    f"Account: balance=${balance:,.2f}, "
+                    f"unrealized_pnl=${unrealized_pnl:,.2f}, "
+                    f"n_positions={n_positions}, mid=${current_price:,.2f}"
+                )
 
             total_equity = balance + unrealized_pnl
             available = total_equity - used_margin
@@ -969,9 +991,9 @@ class CTraderBroker:
                 spot = Protobuf.extract(message)
                 if spot.symbolId == self._symbol_id:
                     if spot.HasField("bid"):
-                        self._bid = spot.bid / (10 ** self._symbol_digits)
+                        self._bid = spot.bid / _SPOT_PRICE_SCALE
                     if spot.HasField("ask"):
-                        self._ask = spot.ask / (10 ** self._symbol_digits)
+                        self._ask = spot.ask / _SPOT_PRICE_SCALE
                     if self._bid > 0 and self._ask > 0:
                         self._mid_price = (self._bid + self._ask) / 2.0
             except Exception as e:
@@ -1052,6 +1074,8 @@ class CTraderBroker:
                         )
                         if "accessToken" in token_data:
                             self._access_token = token_data["accessToken"]
+                            if "refreshToken" in token_data:
+                                self._refresh_token = token_data["refreshToken"]
                             logger.info("Token refresh succeeded on retry")
                             break
                     else:

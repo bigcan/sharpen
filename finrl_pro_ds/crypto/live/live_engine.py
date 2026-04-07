@@ -254,6 +254,13 @@ class LiveTradingEngine:
         # returns 0.0 because _contracts_to_position divides by zero PV).
         await self._update_portfolio_value()
 
+        # FIX AUD-M01: Re-calibrate peak/initial from broker equity, not config.
+        # Config initial_balance may differ from actual account balance,
+        # causing false drawdown triggers on startup.
+        self._initial_portfolio_value = self._portfolio_value
+        self._peak_portfolio_value = self._portfolio_value
+        self._daily_start_value = self._portfolio_value
+
         # Sync position from exchange
         await self._sync_position()
 
@@ -332,6 +339,11 @@ class LiveTradingEngine:
 
         # FIX AUD-H05: Update portfolio value at start of every step (not just traded bars)
         await self._update_portfolio_value()
+
+        # FIX AUD-H11: Check daily loss on EVERY bar (not just traded bars).
+        # Previously only ran at step 11 after trade execution, so holding bars
+        # could breach the daily loss limit without detection.
+        self._check_daily_loss(bar_time)
 
         # FIX AUD-H07: Periodically fetch funding rate
         self._bars_since_funding_fetch += 1
@@ -450,6 +462,8 @@ class LiveTradingEngine:
         # Re-check deadband after risk adjustment
         delta = target_position - self._current_position
         if abs(delta) < self._deadband_threshold:
+            # Trade won't execute — rollback turnover budget consumed by check()
+            self.risk_manager.rollback_last_turnover()
             self._prev_close = current_close
             self._log_step(bar_time, target_position, traded=False, skip_reason="risk_deadband", regime_info=regime_info)
             return
@@ -536,10 +550,9 @@ class LiveTradingEngine:
         # --- 10. Update state ---
         self._prev_close = current_close
 
-        # --- 11. Daily loss check ---
-        self._check_daily_loss(bar_time)
+        # (Daily loss check moved to start of _trading_step — runs on ALL bars)
 
-        # --- 12. Log ---
+        # --- 11. Log ---
         self._log_step(bar_time, target_position, traded=True, order=order, regime_info=regime_info)
 
     # -------------------------------------------------------------------
@@ -1215,17 +1228,20 @@ class LiveTradingEngine:
         FIX AUD-C02: Reconcile position on shutdown to detect orphaned positions.
         FIX AUD-M04: Close loader exchange connection too.
         """
-        # Final position reconciliation
+        # Final position reconciliation — warn if positions remain open
         try:
             exchange_pos = await self.broker.get_single_position(self._asset)
-            logger.info(
-                f"Shutdown position check: internal={self._current_position:.4f}, "
-                f"exchange={exchange_pos:.4f}",
-            )
+            if abs(exchange_pos) > 0.01:
+                logger.warning(
+                    f"SHUTDOWN: POSITION STILL OPEN on exchange: {exchange_pos:.4f}. "
+                    f"Position will be ORPHANED. Flatten manually or restart.",
+                )
+            else:
+                logger.info(f"Shutdown: exchange position is flat ({exchange_pos:.4f})")
             if abs(exchange_pos - self._current_position) > 0.01:
                 logger.warning(
-                    f"SHUTDOWN WARNING: Position discrepancy detected! "
-                    f"Exchange has {exchange_pos:.4f}, internal has {self._current_position:.4f}",
+                    f"SHUTDOWN: Position discrepancy: internal={self._current_position:.4f}, "
+                    f"exchange={exchange_pos:.4f}",
                 )
         except Exception as e:
             logger.warning(f"Shutdown position check failed: {e}")

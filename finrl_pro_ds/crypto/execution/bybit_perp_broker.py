@@ -398,7 +398,7 @@ class BybitPerpBroker:
 
                 if base in assets:
                     idx = assets.index(base)
-                    notional = float(pos.get("notional", 0))
+                    notional = float(pos.get("notional") or 0)
                     side = pos.get("side", "")
 
                     weight = notional / total_equity

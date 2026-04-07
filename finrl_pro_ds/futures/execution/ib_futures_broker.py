@@ -253,6 +253,13 @@ class IBFuturesBroker:
 
     async def emergency_flatten(self, assets: list[str]) -> RebalanceResult:
         """Close all positions via market orders."""
+        # Refresh position from IB before flattening — internal tracking
+        # may have drifted (e.g. after crash recovery).
+        try:
+            await self.get_single_position(assets[0] if assets else "")
+        except Exception as e:
+            logger.warning(f"Could not refresh position before flatten: {e}")
+
         orders = []
         if self._position_contracts != 0:
             side = "SELL" if self._position_contracts > 0 else "BUY"
@@ -400,14 +407,20 @@ class IBFuturesBroker:
         filled = await self._wait_for_fill(trade, timeout=self._market_fallback_timeout)
 
         if not filled and order_type_str == "limit":
-            # Fallback to market order
+            # Fallback to market order for unfilled remainder
             logger.warning(f"Limit order not filled in {self._market_fallback_timeout}s, switching to market")
             self._ib.cancelOrder(order)
             await asyncio.sleep(1.0)
 
-            market_order = MarketOrder(side, quantity)
-            trade = self._ib.placeOrder(contract, market_order)
-            filled = await self._wait_for_fill(trade, timeout=30.0)
+            # Account for partial fills before cancellation
+            already_filled = int(trade.orderStatus.filled)
+            remaining = quantity - already_filled
+            if remaining > 0:
+                market_order = MarketOrder(side, remaining)
+                trade = self._ib.placeOrder(contract, market_order)
+                filled = await self._wait_for_fill(trade, timeout=30.0)
+            else:
+                filled = True  # Limit order fully filled before cancel completed
             order_type_str = "market_fallback"
 
         if filled:

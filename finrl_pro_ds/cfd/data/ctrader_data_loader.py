@@ -38,6 +38,10 @@ _MAX_BARS_PER_REQUEST = 4000
 # Minimum seconds between requests (pacing)
 _MIN_REQUEST_INTERVAL = 0.5
 
+# cTrader trendbar prices are ALWAYS scaled by 10^5, same as spot events.
+# This is independent of the symbol's display digits.
+_TRENDBAR_PRICE_SCALE = 100_000
+
 
 class CTraderDataLoader:
     """Fetches OHLCV bars from cTrader Open API for XAUUSD CFD.
@@ -115,6 +119,7 @@ class CTraderDataLoader:
 
         all_rows = []
         current_end = end_dt
+        chunk_retries = 0
 
         while current_end > start_dt:
             await self._enforce_pacing()
@@ -142,15 +147,16 @@ class CTraderDataLoader:
                     continue
 
                 for bar in bars:
-                    # Decode relative prices
-                    # low is absolute (in 1/10^digits units)
-                    # deltaOpen, deltaClose, deltaHigh are offsets from low
-                    price_divisor = 10 ** self._symbol_digits
-                    low = bar.low / price_divisor
-                    high = low + bar.deltaHigh / price_divisor
-                    open_price = low + bar.deltaOpen / price_divisor
-                    close = low + bar.deltaClose / price_divisor
-                    volume = bar.volume / 100.0  # API volume in hundredths
+                    # Decode relative prices.
+                    # cTrader trendbar prices are ALWAYS scaled by 10^5
+                    # (same as spot events), NOT by 10^digits.
+                    # low is absolute; deltaOpen/deltaClose/deltaHigh are
+                    # offsets from low (all in 10^5 units).
+                    low = bar.low / _TRENDBAR_PRICE_SCALE
+                    high = low + bar.deltaHigh / _TRENDBAR_PRICE_SCALE
+                    open_price = low + bar.deltaOpen / _TRENDBAR_PRICE_SCALE
+                    close = low + bar.deltaClose / _TRENDBAR_PRICE_SCALE
+                    volume = bar.volume  # Tick volume (price change count)
 
                     # Timestamp: utcTimestampInMinutes is minutes since epoch
                     ts = datetime.fromtimestamp(
@@ -173,13 +179,26 @@ class CTraderDataLoader:
                     earliest_ts * 60, tz=timezone.utc
                 ) - timedelta(seconds=1)
 
+                chunk_retries = 0
                 logger.debug(
                     f"Fetched {len(bars)} bars, total {len(all_rows)}, "
                     f"moving end to {current_end}"
                 )
 
             except Exception as e:
-                logger.warning(f"cTrader historical data request failed: {e}")
+                # Retry failed chunks before skipping to avoid silent data gaps
+                if chunk_retries < 2:
+                    chunk_retries += 1
+                    logger.warning(
+                        f"cTrader data request failed (attempt {chunk_retries}/3): {e}"
+                    )
+                    await asyncio.sleep(1.0 * chunk_retries)
+                    continue
+                logger.error(
+                    f"cTrader data chunk DROPPED after 3 attempts: "
+                    f"{chunk_start} to {current_end}. Gap in data!"
+                )
+                chunk_retries = 0
                 current_end = chunk_start - timedelta(seconds=1)
 
         if not all_rows:
