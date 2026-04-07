@@ -129,6 +129,8 @@ class LiveTradingEngine:
 
         # FIX AUD-ENG-05: Track last 1-min timestamp for dedup in fetch
         self._last_1min_ts_ms: int = 0
+        # FIX LIVE-02: Prevent PV race between _inter_bar_metrics_loop and _trading_step
+        self._trading_step_active: bool = False
 
         # Stats
         self._total_bars = 0
@@ -330,7 +332,14 @@ class LiveTradingEngine:
     async def _trading_step(self, bar_time: datetime) -> None:
         """Execute a single trading iteration."""
         self._total_bars += 1
+        self._trading_step_active = True  # FIX LIVE-02: guard against PV race
+        try:
+            await self._trading_step_inner(bar_time)
+        finally:
+            self._trading_step_active = False
 
+    async def _trading_step_inner(self, bar_time: datetime) -> None:
+        """Inner trading step logic (wrapped by _trading_step for PV race guard)."""
         # --- Safety: kill file check ---
         if self._kill_file.exists():
             logger.warning(f"Kill file detected: {self._kill_file}")
@@ -396,6 +405,9 @@ class LiveTradingEngine:
                     f"— flattening",
                 )
                 await self._emergency_flatten()
+                # FIX LIVE-04: Re-sync risk manager after emergency flatten so
+                # its internal position/turnover state matches reality.
+                self.risk_manager.reset(self._portfolio_value)
                 self._log_step(
                     bar_time, 0.0,
                     traded=True, skip_reason="funding_gate_flatten",
@@ -429,7 +441,7 @@ class LiveTradingEngine:
         # --- 5b. PRISM L2 regime overlay ---
         regime_info: dict = {}
         if self._prism_overlay is not None:
-            multiplier, regime_info = self._prism_overlay.get_position_multiplier()
+            multiplier, regime_info = await self._prism_overlay.get_position_multiplier()
             if multiplier != 1.0:
                 pre_prism = target_position
                 target_position = float(np.clip(target_position * multiplier, -1.0, 1.0))
@@ -512,12 +524,20 @@ class LiveTradingEngine:
                     f"@ {order.avg_fill_price:.2f}, fee={order.fee:.4f} USDT",
                 )
             elif order.status == "partial":
-                # FIX AUD-H06: Don't assume target on partial fill — reconcile instead
+                # FIX AUD-H06 + LIVE-01: Don't assume target on partial fill.
+                # Sync actual position from exchange immediately so
+                # _current_position reflects reality. Without this, the next
+                # bar computes delta from stale position → double execution.
                 self._total_trades += 1
                 self._total_fees += order.fee
+                try:
+                    exchange_pos = await self.broker.get_single_position(self._asset)
+                    self._current_position = exchange_pos
+                except Exception as e:
+                    logger.warning(f"Post-partial-fill position query failed: {e}")
                 logger.warning(
                     f"Partial fill: {order.filled_quantity:.6f} of "
-                    f"{order.quantity:.6f} — will reconcile",
+                    f"{order.quantity:.6f} — synced position to {self._current_position:.4f}",
                 )
             else:
                 logger.warning(f"Trade failed: {order.status} — {order.error}")
@@ -792,13 +812,27 @@ class LiveTradingEngine:
             logger.warning(f"Position reconciliation failed: {e}")
 
     async def _update_portfolio_value(self) -> None:
-        """Update portfolio value from exchange."""
+        """Update portfolio value from exchange.
+
+        FIX LIVE-03: Track consecutive zero-equity readings. If the broker
+        returns 0 repeatedly, it's a real problem (not a glitch). Log critical
+        after 3 consecutive zeros so it doesn't go unnoticed.
+        """
         try:
             info = await self.broker.get_account_info()
             equity = info.get("total_equity", 0)
             if equity > 0:
                 self._portfolio_value = equity
                 self._peak_portfolio_value = max(self._peak_portfolio_value, equity)
+                self._consecutive_zero_equity = 0
+            else:
+                self._consecutive_zero_equity = getattr(self, "_consecutive_zero_equity", 0) + 1
+                if self._consecutive_zero_equity >= 3:
+                    logger.critical(
+                        f"Broker returned zero equity {self._consecutive_zero_equity} "
+                        f"consecutive times — PV frozen at {self._portfolio_value:.2f}. "
+                        f"Possible API issue or margin call.",
+                    )
         except Exception as e:
             logger.warning(f"Portfolio value update failed: {e}")
 
@@ -812,7 +846,11 @@ class LiveTradingEngine:
         while True:
             await asyncio.sleep(30)
             try:
-                await self._update_portfolio_value()
+                # FIX LIVE-02: Skip PV update if trading step is active to
+                # prevent the metrics loop from mutating _portfolio_value
+                # mid-calculation (used for risk checks + trade sizing).
+                if not self._trading_step_active:
+                    await self._update_portfolio_value()
                 drawdown = 0.0
                 if self._peak_portfolio_value > 0:
                     drawdown = 1.0 - self._portfolio_value / self._peak_portfolio_value
@@ -1227,15 +1265,26 @@ class LiveTradingEngine:
 
         FIX AUD-C02: Reconcile position on shutdown to detect orphaned positions.
         FIX AUD-M04: Close loader exchange connection too.
+        FIX LIVE-08: Flatten open positions on safety stops (daily loss, consecutive
+        errors) to prevent orphaned exposure. Configurable via safety.flatten_on_stop.
         """
-        # Final position reconciliation — warn if positions remain open
+        flatten_on_stop = self.config.get("safety", {}).get("flatten_on_stop", True)
+
+        # Final position reconciliation — flatten if configured
         try:
             exchange_pos = await self.broker.get_single_position(self._asset)
             if abs(exchange_pos) > 0.01:
-                logger.warning(
-                    f"SHUTDOWN: POSITION STILL OPEN on exchange: {exchange_pos:.4f}. "
-                    f"Position will be ORPHANED. Flatten manually or restart.",
-                )
+                if flatten_on_stop:
+                    logger.warning(
+                        f"SHUTDOWN: Flattening open position {exchange_pos:.4f} "
+                        f"(safety.flatten_on_stop=true)",
+                    )
+                    await self._emergency_flatten()
+                else:
+                    logger.warning(
+                        f"SHUTDOWN: POSITION STILL OPEN on exchange: {exchange_pos:.4f}. "
+                        f"Position will be ORPHANED. Flatten manually or restart.",
+                    )
             else:
                 logger.info(f"Shutdown: exchange position is flat ({exchange_pos:.4f})")
             if abs(exchange_pos - self._current_position) > 0.01:

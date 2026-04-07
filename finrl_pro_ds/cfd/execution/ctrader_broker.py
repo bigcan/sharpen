@@ -1052,10 +1052,16 @@ class CTraderBroker:
                     return
 
                 logger.info("Refreshing cTrader access token...")
-                token_data = Auth.refreshToken(
-                    refreshToken=self._refresh_token,
-                    clientId=self._client_id,
-                    clientSecret=self._client_secret,
+                # FIX CFD-B-01: Run blocking HTTP call in thread executor
+                # to avoid blocking the asyncio event loop for up to 30s.
+                loop = asyncio.get_running_loop()
+                token_data = await loop.run_in_executor(
+                    None,
+                    lambda: Auth.refreshToken(
+                        refreshToken=self._refresh_token,
+                        clientId=self._client_id,
+                        clientSecret=self._client_secret,
+                    ),
                 )
 
                 if "accessToken" in token_data:
@@ -1067,10 +1073,14 @@ class CTraderBroker:
                     logger.error(f"Token refresh failed: {token_data}")
                     for delay in retry_delays:
                         await asyncio.sleep(delay)
-                        token_data = Auth.refreshToken(
-                            refreshToken=self._refresh_token,
-                            clientId=self._client_id,
-                            clientSecret=self._client_secret,
+                        # FIX CFD-B-01: Retry also in executor
+                        token_data = await loop.run_in_executor(
+                            None,
+                            lambda: Auth.refreshToken(
+                                refreshToken=self._refresh_token,
+                                clientId=self._client_id,
+                                clientSecret=self._client_secret,
+                            ),
                         )
                         if "accessToken" in token_data:
                             self._access_token = token_data["accessToken"]

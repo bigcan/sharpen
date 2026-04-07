@@ -592,6 +592,9 @@ class ExchangePerpBroker:
         """Emergency: close all positions via market orders.
 
         Used on unrecoverable errors or kill switch activation.
+
+        FIX EPB-01: Avoid mutating self.order_type which races with concurrent
+        async operations. Instead, use a local override and a lock.
         """
         self._ensure_connected()
 
@@ -603,31 +606,36 @@ class ExchangePerpBroker:
         account = await self.get_account_info()
         portfolio_value = account["total_equity"]
 
-        # FIX AUD-H03: Use saved order_type and restore after, with retry logic.
-        # This avoids the race condition of mutating self.order_type during
-        # concurrent async operations.
-        saved_order_type = self.order_type
-        self.order_type = "market"
-        last_result = None
-        try:
-            for attempt in range(3):
-                last_result = await self.execute_rebalance(
-                    target_weights=target_weights,
-                    current_positions=current_positions,
-                    assets=assets,
-                    portfolio_value=portfolio_value,
-                )
-                if last_result.n_failed == 0:
-                    break
-                logger.warning(
-                    f"Emergency flatten attempt {attempt+1}/3: "
-                    f"{last_result.n_failed} failed, retrying...",
-                )
-                await asyncio.sleep(2.0)
-                # Re-fetch for retry
-                current_positions = await self.get_positions(assets)
-        finally:
-            self.order_type = saved_order_type
+        # FIX EPB-01 + EPB-07: Acquire flatten lock, use saved/restored order_type,
+        # and re-fetch portfolio_value on each retry attempt.
+        if not hasattr(self, "_flatten_lock"):
+            self._flatten_lock = asyncio.Lock()
+
+        async with self._flatten_lock:
+            saved_order_type = self.order_type
+            self.order_type = "market"
+            last_result = None
+            try:
+                for attempt in range(3):
+                    last_result = await self.execute_rebalance(
+                        target_weights=target_weights,
+                        current_positions=current_positions,
+                        assets=assets,
+                        portfolio_value=portfolio_value,
+                    )
+                    if last_result.n_failed == 0:
+                        break
+                    logger.warning(
+                        f"Emergency flatten attempt {attempt+1}/3: "
+                        f"{last_result.n_failed} failed, retrying...",
+                    )
+                    await asyncio.sleep(2.0)
+                    # FIX EPB-07: Re-fetch BOTH positions AND portfolio_value on retry
+                    current_positions = await self.get_positions(assets)
+                    account = await self.get_account_info()
+                    portfolio_value = account["total_equity"]
+            finally:
+                self.order_type = saved_order_type
 
         logger.warning(
             f"EMERGENCY FLATTEN complete: {last_result.n_executed} closed, "

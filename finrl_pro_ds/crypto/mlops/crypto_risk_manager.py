@@ -150,11 +150,18 @@ class CryptoRiskManager:
                     dt = bar_time
                 today = dt.strftime("%Y%m%d")
                 if today != self.state.last_eod_date:
-                    # Day boundary: update EOD peak from previous day's close
+                    # FIX CRM-01: Day boundary — update EOD peak using the
+                    # PREVIOUS bar's PV (last_day_close_value), not the current
+                    # bar's PV. Current bar is the first bar of the new day,
+                    # which may have gapped. Prop firm EOD trailing DD uses
+                    # the previous day's closing equity.
+                    last_day_pv = getattr(self.state, "last_day_close_value", portfolio_value)
                     self.state.eod_peak_value = max(
-                        self.state.eod_peak_value, portfolio_value,
+                        self.state.eod_peak_value, last_day_pv,
                     )
                     self.state.last_eod_date = today
+                # Always track latest PV as candidate for next day's close
+                self.state.last_day_close_value = portfolio_value
                 # Drawdown measured against EOD peak (not tick-by-tick peak)
                 if self.state.eod_peak_value > 0:
                     self.state.current_drawdown = (
@@ -221,15 +228,26 @@ class CryptoRiskManager:
             violations.append(
                 f"NET_SHORT: {net:.3f} below limit {self.config.max_net_short_exposure}",
             )
-            # Scale short positions to meet constraint
+            # FIX CRM-02: Scale short positions to meet constraint. If scaling
+            # shorts alone can't fix it (scale >= 1.0 because violation is driven
+            # by large longs), proportionally reduce ALL positions.
             short_mask = modified < 0
             if short_mask.any():
                 short_sum = modified[short_mask].sum()
                 long_sum = modified[~short_mask].sum()
                 target_short = self.config.max_net_short_exposure - long_sum
                 if short_sum < -1e-8:
-                    scale = min(target_short / short_sum, 1.0)
-                    modified[short_mask] *= scale
+                    scale = target_short / short_sum
+                    if scale <= 1.0:
+                        # Can fix by reducing shorts
+                        modified[short_mask] *= scale
+                    else:
+                        # Can't fix by shorts alone — scale everything down
+                        net_after = modified.sum()
+                        if abs(net_after) > 1e-8:
+                            target_net = self.config.max_net_short_exposure
+                            overall_scale = target_net / net_after
+                            modified *= min(overall_scale, 1.0)
 
         # --- Check 4: Daily turnover limit ---
         # Note: "daily" = 24 consecutive bars (~1 day for 1H bars).
