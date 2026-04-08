@@ -236,6 +236,7 @@ Skills are split by scope. **User-scope** (`~/.claude/skills/`): generic methodo
 | **Researcher** | "Should we try X?", algorithm eval, lit review, root cause analysis. | `~/.claude/skills/researcher/SKILL.md` + `FINRL.md` |
 | **Architect** | New module design, pipeline refactor, API/interface changes. **Auto** after Researcher GO. | `~/.claude/skills/architect/SKILL.md` + `FINRL.md` |
 | **Skill-Evolve** | "audit skills", "skill health", "improve skills". **Auto** during `/sync` staleness check. **Auto** after new skill creation. | `~/.claude/skills/skill-evolve/SKILL.md` |
+| **R&D Assistant** | Nanobot status, R&D scheduling, auto-update. **Auto** memory sync during `/sync`. | `~/.claude/skills/rd-assistant/SKILL.md` + `FINRL.md` |
 
 ### Project-scope (FinRL infra/ops, `.claude/skills/`)
 
@@ -263,8 +264,9 @@ Skills are split by scope. **User-scope** (`~/.claude/skills/`): generic methodo
 - Paper graduation -> **Live-Monitor** (verify paper metrics) -> **Live-Trading** (switch to `--mainnet`)
 - Container issue / alert triage -> **Live-Monitor** -> **Docker** (restart if needed)
 - "audit skills" / "skill health" -> **Skill-Evolve** (full) -> **Memory** (log findings).
-- `/sync` -> Memory -> **Skill-Evolve** (staleness check only, lightweight) -> git commit.
+- `/sync` -> Memory -> **R&D Assistant** (sync_memory.py, if gateway running) -> **Skill-Evolve** (staleness check only, lightweight) -> git commit.
 - New skill created -> **Skill-Evolve** (onboarding structural check).
+- "nanobot status" / "assistant status" -> **R&D Assistant** (check_status.py).
 
 **Disambiguation (Monitor vs Live-Monitor):**
 
@@ -276,6 +278,7 @@ Skills are split by scope. **User-scope** (`~/.claude/skills/`): generic methodo
 | "deploy to GPU" | **Deploy** |
 | "start trading" / "go live" | **Live-Trading** + **Docker** |
 | "audit skills" / "skill health" | **Skill-Evolve** (ecosystem) |
+| "nanobot status" / "assistant" | **R&D Assistant** (Nanobot daemon) |
 
 ## Memory Protocol (2-Tier + Cloud Search Index)
 
