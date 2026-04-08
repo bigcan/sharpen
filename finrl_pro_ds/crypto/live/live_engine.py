@@ -322,6 +322,11 @@ class LiveTradingEngine:
         # during the up-to-15-min wait.
         self._write_bootstrap_health("waiting_for_first_bar")
 
+        # Wire heartbeat callback on CMEBarClock so health file stays fresh
+        # during market-closed sleeps (prevents false UNHEALTHY alerts).
+        if hasattr(self.bar_clock, "_heartbeat_callback"):
+            self.bar_clock._heartbeat_callback = self._write_bootstrap_health
+
         # Background task: update Prometheus metrics between bars so Grafana
         # shows real-time PV changes (IB sends portfolio updates every ~3 min).
         metrics_task = asyncio.create_task(self._inter_bar_metrics_loop())

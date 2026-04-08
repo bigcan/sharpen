@@ -134,6 +134,7 @@ services:
       STRATEGY_RUNNER: scripts/run_live_ib.py
       STRATEGY_CONFIG: /app/configs/live_gmgp1_gc_ib.yaml
       METRICS_PORT: "9101"
+      MAX_STALE_SECONDS: "4500"  # 75min: covers 60-min CME maintenance + 15-min bar
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1_v5_l1_seed456:/app/checkpoints/gmgp1_v5_l1_seed456:ro
       - gmgp1-gold-logs:/app/logs
@@ -155,6 +156,7 @@ services:
       STRATEGY_RUNNER: scripts/run_live_ib.py
       STRATEGY_CONFIG: /app/configs/live_sg1_gc_ib.yaml
       METRICS_PORT: "9102"
+      MAX_STALE_SECONDS: "4500"  # 75min: covers 60-min CME maintenance + 3-min bar
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/sg1_best:/app/checkpoints/sg1_best:ro
       - sg1-gold-logs:/app/logs
