@@ -70,6 +70,9 @@ class RiskState:
     # EOD trailing drawdown (prop firm mode)
     eod_peak_value: float = 0.0
     last_eod_date: str = ""
+    # FIX RSK-01: Declare field properly — was dynamically added via setattr,
+    # which breaks frozen dataclasses and confuses static analysis.
+    last_day_close_value: float = 0.0
 
 
 class CryptoRiskManager:

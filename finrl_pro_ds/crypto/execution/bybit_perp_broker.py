@@ -127,6 +127,64 @@ class BybitPerpBroker:
     # -------------------------------------------------------------------
     # Portfolio operations
     # -------------------------------------------------------------------
+    def _ensure_connected(self) -> None:
+        """FIX BB-02: Raise RuntimeError if exchange is not connected (replaces assert)."""
+        if self._exchange is None:
+            raise RuntimeError(
+                "Exchange not connected. Call await broker.connect() first.",
+            )
+
+    # -------------------------------------------------------------------
+    # Single-asset operations (FIX BB-01: was missing, required by LiveTradingEngine)
+    # -------------------------------------------------------------------
+    async def execute_position_change(
+        self,
+        asset: str,
+        current_position: float,
+        target_position: float,
+        portfolio_value: float,
+    ) -> OrderResult:
+        """Execute a single-asset position change.
+
+        FIX BB-01: Added to match ExchangePerpBroker / LiveTradingEngine interface.
+        """
+        self._ensure_connected()
+
+        delta = target_position - current_position
+
+        # Skip dust trades
+        if abs(delta) < self.min_trade_pct:
+            return OrderResult(
+                asset=asset,
+                symbol=self._to_symbol(asset),
+                side="buy" if delta > 0 else "sell",
+                order_type="skipped",
+                quantity=0,
+                price=0,
+                filled_quantity=0,
+                avg_fill_price=0,
+                fee=0,
+                status="skipped",
+                error=f"delta {delta:.4f} < min_trade_pct {self.min_trade_pct}",
+            )
+
+        # Ensure leverage is set
+        await self.set_leverage([asset])
+
+        symbol = self._to_symbol(asset)
+        notional = abs(delta) * portfolio_value
+        side = "buy" if delta > 0 else "sell"
+
+        return await self._execute_order(
+            asset=asset,
+            symbol=symbol,
+            side=side,
+            notional=notional,
+        )
+
+    # -------------------------------------------------------------------
+    # Portfolio operations
+    # -------------------------------------------------------------------
     async def execute_rebalance(
         self,
         target_weights: np.ndarray,
@@ -147,7 +205,7 @@ class BybitPerpBroker:
         Returns:
             RebalanceResult with execution details.
         """
-        assert self._exchange is not None, "Call connect() first"
+        self._ensure_connected()
         assert len(target_weights) == len(assets) == len(current_positions)
 
         # Ensure leverage is set to 1x for all assets being traded
@@ -377,7 +435,7 @@ class BybitPerpBroker:
         Returns:
             Array of signed weights per asset.
         """
-        assert self._exchange is not None
+        self._ensure_connected()
 
         positions = np.zeros(len(assets), dtype=np.float64)
 
@@ -414,7 +472,7 @@ class BybitPerpBroker:
 
     async def get_account_info(self) -> dict:
         """Fetch account balance and margin info."""
-        assert self._exchange is not None
+        self._ensure_connected()
 
         balance = await self._exchange.fetch_balance()
 
@@ -426,7 +484,7 @@ class BybitPerpBroker:
 
     async def set_leverage(self, assets: list[str], leverage: int = 1) -> None:
         """Set leverage to 1x for all traded symbols."""
-        assert self._exchange is not None
+        self._ensure_connected()
 
         for asset in assets:
             symbol = self._to_symbol(asset)
@@ -440,9 +498,20 @@ class BybitPerpBroker:
                 else:
                     logger.warning(f"Failed to set leverage for {symbol}: {e}")
 
+    async def get_single_position(self, asset: str) -> float:
+        """Fetch current position for a single asset as signed weight.
+
+        FIX BB-01: Added to match ExchangePerpBroker / LiveTradingEngine interface.
+
+        Returns:
+            Signed weight in [-1, 1]. 0.0 if no position or error.
+        """
+        positions = await self.get_positions([asset])
+        return float(positions[0])
+
     async def get_funding_rates(self, assets: list[str]) -> dict[str, float]:
         """Fetch current funding rates for all assets."""
-        assert self._exchange is not None
+        self._ensure_connected()
 
         rates = {}
         for asset in assets:
@@ -455,3 +524,36 @@ class BybitPerpBroker:
                 rates[asset] = 0.0
 
         return rates
+
+    async def emergency_flatten(self, assets: list[str]) -> RebalanceResult:
+        """Emergency: close all positions via market orders.
+
+        FIX BB-01: Added to match ExchangePerpBroker / LiveTradingEngine interface.
+        """
+        self._ensure_connected()
+
+        logger.warning(f"EMERGENCY FLATTEN: Closing all positions for {assets}")
+
+        current_positions = await self.get_positions(assets)
+        target_weights = np.zeros(len(assets), dtype=np.float64)
+
+        account = await self.get_account_info()
+        portfolio_value = account["total_equity"]
+
+        saved_order_type = self.order_type
+        self.order_type = "market"
+        try:
+            result = await self.execute_rebalance(
+                target_weights=target_weights,
+                current_positions=current_positions,
+                assets=assets,
+                portfolio_value=portfolio_value,
+            )
+        finally:
+            self.order_type = saved_order_type
+
+        logger.warning(
+            f"EMERGENCY FLATTEN complete: {result.n_executed} closed, "
+            f"{result.n_failed} failed",
+        )
+        return result

@@ -32,7 +32,7 @@ import os
 import signal
 import tempfile
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -752,26 +752,49 @@ class LiveTradingEngine:
         """Check broker connection and reconnect if dropped.
 
         IB Gateway can silently drop connections during long idle waits
-        between bars. This detects the drop and reconnects before the
-        next trading step, preventing cascading errors.
+        between bars. cTrader TCP connections can also drop silently.
+        This detects the drop and reconnects BEFORE the trading step,
+        preventing cascading errors.
+
+        FIX CT-03: Added cTrader connection check. Previously only checked
+        IB, causing dropped cTrader connections to fail on the first API call
+        and skip the entire bar.
         """
         try:
-            # IB brokers have a persistent TCP connection that can drop;
-            # CCXT/HTTP brokers are stateless and don't need this check.
+            # --- IB broker check ---
             ib = getattr(self.broker, "_ib", None)
-            if ib is None:
-                return True
-            if ib.isConnected():
+            if ib is not None:
+                if ib.isConnected():
+                    return True
+                logger.warning("IB connection lost — attempting reconnect")
+                await self.broker.connect()
+                # Re-wire loader references that point to the old IB session
+                if hasattr(self.loader, "_ib"):
+                    self.loader._ib = self.broker._ib
+                if hasattr(self.loader, "_contract_manager"):
+                    self.loader._contract_manager = self.broker._contract_manager
                 return True
 
-            logger.warning("Broker connection lost — attempting reconnect")
-            await self.broker.connect()
+            # --- cTrader broker check ---
+            ct_connected = getattr(self.broker, "_connected", None)
+            if ct_connected is not None:
+                if ct_connected:
+                    return True
+                logger.warning("cTrader connection lost — attempting reconnect")
+                reconnect_fn = getattr(self.broker, "_reconnect", None)
+                if reconnect_fn is not None:
+                    success = await reconnect_fn()
+                    if success:
+                        # Re-wire loader's shared client reference
+                        if hasattr(self.loader, "_client"):
+                            self.loader._client = self.broker._client
+                        return True
+                    return False
+                # Fallback: full reconnect via connect()
+                await self.broker.connect()
+                return getattr(self.broker, "_connected", False)
 
-            # Re-wire loader references that point to the old IB session
-            if hasattr(self.loader, "_ib"):
-                self.loader._ib = self.broker._ib
-            if hasattr(self.loader, "_contract_manager"):
-                self.loader._contract_manager = self.broker._contract_manager
+            # CCXT/HTTP brokers are stateless — always connected
             return True
         except Exception as e:
             logger.error(f"Broker reconnect failed: {e}")
@@ -873,8 +896,10 @@ class LiveTradingEngine:
                     last_bar_timestamp=time.time(),
                     funding_rate=self._current_funding_rate,
                 )
-            except Exception:
-                pass  # Never crash the background loop
+            except Exception as e:
+                # FIX ENG-02: Log instead of silently swallowing — systematic
+                # failures (e.g., bad metric name) would otherwise go unnoticed
+                logger.debug(f"Inter-bar metrics update failed: {e}")
 
     async def _update_funding_rate(self) -> None:
         """FIX AUD-H07: Fetch current funding rate for risk manager."""
@@ -1009,7 +1034,7 @@ class LiveTradingEngine:
         """
         data = {
             "position": round(self._current_position, 6),
-            "timestamp": datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "timestamp": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "strategy": self._strategy_name,
             "broker_position": round(self._current_position, 6),
         }
@@ -1214,11 +1239,21 @@ class LiveTradingEngine:
         """Check broker connection status without async call.
 
         IB brokers have a persistent TCP connection that can drop.
+        cTrader brokers have a Twisted TCP connection with _connected flag.
         CCXT/HTTP brokers are stateless — always returns True.
+
+        FIX CT-02: Added cTrader connection check. Previously always returned
+        True for cTrader, causing health JSON + Prometheus to show false-positive
+        broker_connected=True when the TCP connection was actually down.
         """
+        # IB broker check
         ib = getattr(self.broker, "_ib", None)
         if ib is not None:
             return ib.isConnected()
+        # cTrader broker check
+        ct_connected = getattr(self.broker, "_connected", None)
+        if ct_connected is not None:
+            return bool(ct_connected)
         return True
 
     def _write_health_status(

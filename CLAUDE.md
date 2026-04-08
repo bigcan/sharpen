@@ -339,6 +339,7 @@ Auto-provisioned via baked Dockerfile (`Dockerfile.grafana`). Dashboard: "FinRL 
 | funding-arb | 9104 | — |
 | sync-1h | 9105 | — |
 | gmgp1-xauusd | 9106 | — |
+| velotrade-btc | 9107 | — |
 | Prometheus | — | 9090 |
 | Grafana | — | 3000 |
 | Portainer | — | 9443 |

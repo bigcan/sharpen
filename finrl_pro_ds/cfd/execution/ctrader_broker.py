@@ -774,6 +774,7 @@ class CTraderBroker:
                 # Reset per-attempt counters (orders accumulate across retries
                 # intentionally for full audit trail, but n_failed resets)
                 n_failed = 0
+                lots_closed_this_attempt = 0.0
                 for pos in open_positions:
                     try:
                         close_req = ProtoOAClosePositionReq()
@@ -799,6 +800,8 @@ class CTraderBroker:
                             fee=lots * self._lot_size * self._mid_price * self._taker_fee,
                             status="filled",
                         ))
+                        # FIX CT-01: Track lots closed for partial-success position update
+                        lots_closed_this_attempt += lots
                         logger.info(
                             f"Emergency flatten: closed position {pos.positionId} "
                             f"({lots:.2f} lots)"
@@ -822,6 +825,15 @@ class CTraderBroker:
                             status="failed",
                             error=str(e),
                         ))
+
+                # FIX CT-01: Update _position_lots even on partial success.
+                # Previously only zeroed on full success, leaving stale state
+                # that caused wrong trade sizing after partial flatten.
+                if lots_closed_this_attempt > 0:
+                    sign = 1.0 if self._position_lots >= 0 else -1.0
+                    self._position_lots = sign * max(
+                        0.0, abs(self._position_lots) - lots_closed_this_attempt
+                    )
 
                 if n_failed == 0:
                     self._position_lots = 0.0
