@@ -159,5 +159,7 @@ prism:
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["cmgp1", "crypto", "sac", "1h", "multi-asset", "dsr",
-         "deadband", "vol-scaling", "fee-curriculum", "hard-constraints"]
+  group: "CMGP1-AB-SigBoost-01"
+  tags: ["cmgp1", "v1", "ab-control", "sigboost-exp", "crypto", "sac", "1h",
+         "multi-asset", "dsr", "deadband", "vol-scaling", "fee-curriculum",
+         "hard-constraints"]

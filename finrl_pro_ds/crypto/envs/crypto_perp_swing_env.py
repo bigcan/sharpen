@@ -106,10 +106,14 @@ class CryptoPerpSwingEnv(gym.Env):
         self._summary_feature_indices = config.get("summary_feature_indices", [0, 1, 2, 6, 7])
         n_summary_per_asset = len(self._summary_feature_indices) * 3
 
+        # --- SigBoost V1.1: per-asset crypto features in private state ---
+        self._feature_set_version = config.get("feature_set_version", "v1")
+        self._sigboost_dim = 5 * self.n_assets if self._feature_set_version == "v1.1" else 0
+
         # --- Private state dimension ---
         # [gross_exposure, net_exposure, margin_pct, portfolio_atr_ratio,
-        #  drawdown_pct, time_sin, time_cos, pos_0..pos_N-1]
-        self._private_dim = 7 + self.n_assets
+        #  drawdown_pct, time_sin, time_cos, pos_0..pos_N-1, sigboost_0..sigboost_K-1]
+        self._private_dim = 7 + self.n_assets + self._sigboost_dim
 
         # --- Spaces ---
         self.action_space = gym.spaces.Box(
@@ -163,6 +167,12 @@ class CryptoPerpSwingEnv(gym.Env):
         self._current_volume = np.zeros(self.n_assets, dtype=np.float64)
         self._prev_close = np.zeros(self.n_assets, dtype=np.float64)
 
+        # SigBoost V1.1: per-asset crypto features
+        self._current_sigboost: np.ndarray | None = (
+            np.zeros((self.n_assets, 5), dtype=np.float32)
+            if self._sigboost_dim > 0 else None
+        )
+
         # Scalar state
         self.margin_balance = self.initial_balance
         self.equity = self.initial_balance
@@ -210,6 +220,8 @@ class CryptoPerpSwingEnv(gym.Env):
         self._current_close[:] = 0.0
         self._current_atr[:] = 0.0
         self._prev_close[:] = 0.0
+        if self._current_sigboost is not None:
+            self._current_sigboost[:] = 0.0
 
         if self.handler:
             self.handler.reset()
@@ -242,6 +254,8 @@ class CryptoPerpSwingEnv(gym.Env):
                 self._current_funding = first["funding_rate"].copy()
                 self._current_volume = first["volume"].copy()
                 self._current_obs = self._extract_obs(first)
+                if self._current_sigboost is not None and "sigboost_features" in first:
+                    self._current_sigboost = first["sigboost_features"].astype(np.float32)
             else:
                 self._current_obs = self._empty_obs()
         else:
@@ -275,6 +289,8 @@ class CryptoPerpSwingEnv(gym.Env):
             self._current_funding = step_data["funding_rate"].copy()
             self._current_volume = step_data["volume"].copy()
             self._current_obs = self._extract_obs(step_data)
+            if self._current_sigboost is not None and "sigboost_features" in step_data:
+                self._current_sigboost = step_data["sigboost_features"].astype(np.float32)
 
             # Update portfolio ATR for vol-regime scaling
             portfolio_atr = float(np.mean(self._current_atr))
@@ -670,7 +686,13 @@ class CryptoPerpSwingEnv(gym.Env):
         )
 
         # Append per-asset positions (already in [-1, 1])
-        return np.concatenate([base, self.positions.astype(np.float32)])
+        parts = [base, self.positions.astype(np.float32)]
+
+        # SigBoost V1.1: append per-asset crypto features
+        if self._current_sigboost is not None:
+            parts.append(self._current_sigboost.ravel())
+
+        return np.concatenate(parts)
 
     def _get_observation(self) -> dict[str, np.ndarray]:
         """Build full observation dict."""

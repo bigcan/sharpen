@@ -1,4 +1,4 @@
-# CMGP1 V1.1: Feature-upgraded SAC Multi-Asset Crypto Perpetual Futures — 1H bars
+# CMGP1 V1.1 "SigBoost": Feature-upgraded SAC Multi-Asset Crypto Perpetual Futures — 1H bars
 # Extends V1 with 5 additional crypto-native features (11 total per asset):
 #   - funding_ema_24h, funding_ema_168h, funding_cumsum_ffd (funding regime)
 #   - momentum_spread_24h, momentum_spread_168h (BTC divergence)
@@ -87,13 +87,13 @@ env:
 
 network:
   obs_mode: "summary_stats"
-  summary_input_dim: 467          # 10 assets x 3 scales x 15 summary + 17 private
+  summary_input_dim: 517          # 10 assets x 3 scales x 15 summary + 67 private (17 base + 50 sigboost)
   scale_encoder:
     input_size: 8
     channels: [32, 64, 64, 64]
     kernel_size: 3
     output_dim: 64
-  private_dim: 17                 # 7 base + 10 positions
+  private_dim: 67                 # 7 base + 10 positions + 50 sigboost (5 features x 10 assets)
   fusion_dim: 256
   window_size: 30
   action_dim: 10                  # n_assets
@@ -160,6 +160,7 @@ prism:
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["cmgp1", "v1.1", "feature-upgrade", "crypto", "sac", "1h",
+  group: "CMGP1-AB-SigBoost-01"
+  tags: ["cmgp1", "v1.1", "sigboost", "ab-treatment", "sigboost-exp", "crypto", "sac", "1h",
          "multi-asset", "dsr", "deadband", "vol-scaling", "fee-curriculum",
          "hard-constraints", "funding-regime", "momentum-spread"]
