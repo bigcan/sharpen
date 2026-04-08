@@ -89,9 +89,10 @@ class PRISMOverlay:
             and regime_info is a dict with regime details for logging.
             On error: (1.0, {"fallback": True}).
         """
-        # Check cache
+        # Check cache (FIX PRISM-01: use _effective_cache_ttl which respects error backoff)
         now = time.monotonic()
-        if self._cached_result is not None and (now - self._cache_ts) < self._cache_ttl:
+        effective_ttl = getattr(self, "_effective_cache_ttl", self._cache_ttl)
+        if self._cached_result is not None and (now - self._cache_ts) < effective_ttl:
             self._total_cache_hits = getattr(self, "_total_cache_hits", 0) + 1
             return self._cached_result["multiplier"], self._cached_result["info"]
 
@@ -131,9 +132,10 @@ class PRISMOverlay:
                 "fallback": False,
             }
 
-            # Update cache
+            # Update cache + reset to normal TTL on success
             self._cached_result = {"multiplier": multiplier, "info": info}
             self._cache_ts = now
+            self._effective_cache_ttl = self._cache_ttl  # FIX PRISM-01: restore normal TTL
 
             return multiplier, info
 
@@ -144,12 +146,13 @@ class PRISMOverlay:
             logger.warning(
                 f"PRISM API error ({latency:.1f}s): {e} — using fallback multiplier=1.0",
             )
-            # FIX PRS-03: Cache the fallback to avoid hammering a down API
-            # every bar. Uses a 5-minute error cache TTL.
+            # FIX PRS-03 + PRISM-01: Cache the fallback with a 5-minute error TTL.
+            # Previously set _cache_ttl_override which was never read by the cache
+            # check. Now uses _effective_cache_ttl which IS read.
             fallback_info: dict[str, Any] = {"fallback": True, "error": str(e)}
             self._cached_result = {"multiplier": 1.0, "info": fallback_info}
             self._cache_ts = time.monotonic()
-            self._cache_ttl_override = 300  # 5 min error cache
+            self._effective_cache_ttl = 300  # 5 min error backoff
             return 1.0, fallback_info
 
     def get_stats(self) -> dict[str, Any]:
