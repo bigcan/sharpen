@@ -86,6 +86,10 @@ class CTraderBroker:
     Supports IC Markets demo (paper) and FTMO live (challenge) accounts.
     """
 
+    # FIX CT-04: Reconnect timing constants
+    _RECONNECT_COOLDOWN_SECS = 120  # Cooldown after exhausting all attempts
+    _ALREADY_LOGGED_IN_WAIT = 90  # Wait for server ghost-session to expire
+
     def __init__(
         self,
         testnet: bool = True,
@@ -154,6 +158,7 @@ class CTraderBroker:
         # Reconnect state
         self._reconnect_lock = asyncio.Lock()
         self._consecutive_reconnects = 0
+        self._reconnect_cooldown_until = 0.0  # FIX CT-04: prevent reconnect spam
 
     async def connect(self) -> None:
         """Connect to cTrader Open API and authenticate."""
@@ -303,6 +308,13 @@ class CTraderBroker:
             except asyncio.CancelledError:
                 pass
 
+        # FIX CT-04: Send account logout so server releases session
+        if self._client is not None and self._connected:
+            try:
+                await self._send_account_logout()
+            except Exception:
+                pass  # Best-effort
+
         if self._client is not None:
             try:
                 self._client.stopService()
@@ -344,6 +356,11 @@ class CTraderBroker:
         Returns True if reconnection succeeded, False if all attempts
         exhausted.
 
+        FIX CT-04: After exhausting attempts, enters a cooldown period
+        to prevent reconnect spam. On ALREADY_LOGGED_IN, waits for the
+        server ghost-session to expire instead of hammering new TCP
+        connections (which reset the server's idle timer).
+
         Thread-safe: only one reconnect attempt runs at a time via an
         asyncio lock. Concurrent callers wait for the result.
         """
@@ -352,7 +369,19 @@ class CTraderBroker:
             if self._check_connection():
                 return True
 
+            # FIX CT-04: Respect cooldown from previous failed cycle
+            now = time.time()
+            if now < self._reconnect_cooldown_until:
+                remaining = self._reconnect_cooldown_until - now
+                logger.debug(
+                    "cTrader reconnect in cooldown (%.0fs remaining)",
+                    remaining,
+                )
+                return False
+
             base_delay = 5.0
+            already_logged_in_seen = False
+
             for attempt in range(1, self._max_reconnect_attempts + 1):
                 delay = base_delay * (2 ** (attempt - 1))  # 5, 10, 20, ...
                 self._consecutive_reconnects += 1
@@ -388,18 +417,66 @@ class CTraderBroker:
                             attempt,
                         )
                         self._consecutive_reconnects = 0
+                        self._reconnect_cooldown_until = 0.0
                         return True
 
                 except Exception as exc:
+                    exc_str = str(exc)
                     logger.warning(
                         "cTrader reconnect attempt %d failed: %s",
                         attempt,
                         exc,
                     )
 
+                    # FIX CT-04: On ALREADY_LOGGED_IN, stop immediately —
+                    # more TCP connections just reset the server's idle
+                    # timer on the ghost session.  Wait for it to expire,
+                    # then make one final attempt.
+                    if "ALREADY_LOGGED_IN" in exc_str:
+                        already_logged_in_seen = True
+                        logger.warning(
+                            "Ghost session detected — waiting %ds for "
+                            "server-side expiry before final attempt",
+                            self._ALREADY_LOGGED_IN_WAIT,
+                        )
+                        await self._teardown_client()
+                        await asyncio.sleep(self._ALREADY_LOGGED_IN_WAIT)
+
+                        try:
+                            if self._refresh_token:
+                                await self._try_refresh_token()
+                            await self.connect()
+                            if self._connected:
+                                logger.warning(
+                                    "cTrader reconnected after ghost-session wait"
+                                )
+                                self._consecutive_reconnects = 0
+                                self._reconnect_cooldown_until = 0.0
+                                return True
+                        except Exception as exc2:
+                            logger.error(
+                                "Final reconnect after ghost-session wait "
+                                "failed: %s",
+                                exc2,
+                            )
+                        break  # Don't retry further — enter cooldown
+
             logger.error(
-                "cTrader reconnect FAILED after %d attempts",
+                "cTrader reconnect FAILED after %d attempts%s",
                 self._max_reconnect_attempts,
+                " (ghost session)" if already_logged_in_seen else "",
+            )
+
+            # FIX CT-04: Enter cooldown to prevent reconnect spam.
+            # The engine loop and @_with_reconnect both trigger _reconnect()
+            # on every API call — without cooldown this creates non-stop
+            # reconnect cycles that waste resources and spam the server.
+            self._reconnect_cooldown_until = (
+                time.time() + self._RECONNECT_COOLDOWN_SECS
+            )
+            logger.warning(
+                "cTrader entering %ds reconnect cooldown",
+                self._RECONNECT_COOLDOWN_SECS,
             )
             return False
 
@@ -409,6 +486,9 @@ class CTraderBroker:
         Called before reconnecting to ensure a clean slate.  Does NOT
         reset ``_position_lots`` or ``_portfolio_value`` — those must
         survive reconnection so the broker doesn't lose position state.
+
+        FIX CT-04: Sends account logout before closing TCP so the server
+        releases the session immediately instead of waiting for timeout.
         """
         # Cancel token refresh task
         if self._token_refresh_task and not self._token_refresh_task.done():
@@ -418,6 +498,15 @@ class CTraderBroker:
             except asyncio.CancelledError:
                 pass
             self._token_refresh_task = None
+
+        # FIX CT-04: Send account logout before closing TCP.
+        # This tells the server to release the session so the next
+        # connect() doesn't get ALREADY_LOGGED_IN.
+        if self._client is not None and self._connected:
+            try:
+                await self._send_account_logout()
+            except Exception:
+                pass  # Best-effort — connection may already be dead
 
         # Stop Twisted client
         if self._client is not None:
@@ -448,6 +537,25 @@ class CTraderBroker:
                 logger.warning("Token refresh returned no accessToken: %s", token_data)
         except Exception as exc:
             logger.warning("Token refresh failed during reconnect: %s", exc)
+
+    async def _send_account_logout(self) -> None:
+        """FIX CT-04: Send account logout so server releases the session.
+
+        Best-effort — if the connection is already dead this will fail
+        silently.  The goal is to prevent ALREADY_LOGGED_IN on the next
+        connect() after a restart or reconnect.
+        """
+        try:
+            from ctrader_open_api.messages.OpenApiMessages_pb2 import (
+                ProtoOAAccountLogoutReq,
+            )
+
+            logout_req = ProtoOAAccountLogoutReq()
+            logout_req.ctidTraderAccountId = self._account_id
+            await self._send_request(logout_req, timeout=5.0)
+            logger.debug("Account logout sent")
+        except Exception as exc:
+            logger.debug("Account logout failed (expected if connection dead): %s", exc)
 
     @_with_reconnect
     async def execute_position_change(
