@@ -238,9 +238,13 @@ class LiveTradingEngine:
         logger.info(f"Broker connected: {self.broker.exchange_id} "
                      f"({'TESTNET' if self.broker.testnet else 'MAINNET'})")
 
+        # Write health file early so Docker doesn't kill us during bootstrap
+        self._write_bootstrap_health("bootstrapping")
+
         # Bootstrap observation builder if not already done
         if not self.obs_builder.is_ready:
             await self._bootstrap_with_retry()
+            self._write_bootstrap_health("bootstrap_done")
 
         # Check feature warmup quality after bootstrap
         warmup_quality = self.obs_builder.get_warmup_quality()
@@ -308,6 +312,11 @@ class LiveTradingEngine:
             f"  Bar interval: {self.bar_clock.interval}min\n"
             f"  Signal gate: {'enabled (' + self._gate_mode + ')' if self._signal_gate_enabled else 'disabled'}",
         )
+
+        # Final bootstrap health write — engine is fully initialized, waiting
+        # for first bar. Keeps health file fresh so Docker doesn't kill us
+        # during the up-to-15-min wait.
+        self._write_bootstrap_health("waiting_for_first_bar")
 
         # Background task: update Prometheus metrics between bars so Grafana
         # shows real-time PV changes (IB sends portfolio updates every ~3 min).
@@ -1314,6 +1323,36 @@ class LiveTradingEngine:
         if ct_connected is not None:
             return bool(ct_connected)
         return True
+
+    def _write_bootstrap_health(self, phase: str = "bootstrapping") -> None:
+        """Write health file during startup so Docker doesn't kill us.
+
+        Called before/after bootstrap and after init — keeps the health
+        file fresh while we wait (up to 15 min) for the first bar.
+        """
+        status = {
+            "timestamp": time.time(),
+            "bar_count": 0,
+            "last_bar_time": datetime.now(tz=timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ",
+            ),
+            "position": 0.0,
+            "portfolio_value": 0.0,
+            "drawdown_pct": 0.0,
+            "daily_loss_pct": 0.0,
+            "broker_connected": True,
+            "consecutive_errors": 0,
+            "total_trades": 0,
+            "should_stop": False,
+            "strategy_name": self._strategy_name,
+            "phase": phase,
+        }
+        try:
+            tmp = self._health_file.with_suffix(".tmp")
+            tmp.write_text(json.dumps(status), encoding="utf-8")
+            tmp.replace(self._health_file)
+        except Exception as e:
+            logger.debug(f"Bootstrap health write failed: {e}")
 
     def _write_health_status(
         self,
