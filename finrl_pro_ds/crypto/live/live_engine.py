@@ -284,6 +284,10 @@ class LiveTradingEngine:
         # Sync position from exchange
         await self._sync_position()
 
+        # FIX CT-05: On cTrader hedging-mode accounts, check for orphaned
+        # positions that get_single_position() hides behind a net-zero sum.
+        await self._check_orphaned_positions()
+
         # Check persisted position file for crash-recovery mismatch
         self._check_persisted_position()
 
@@ -834,6 +838,65 @@ class LiveTradingEngine:
         except Exception as e:
             logger.warning(f"Could not sync position: {e}. Starting at 0.0")
             self._current_position = 0.0
+
+    async def _check_orphaned_positions(self) -> None:
+        """FIX CT-05: Detect orphaned positions on hedging-mode accounts.
+
+        On cTrader hedging accounts, ``get_single_position()`` returns the
+        NET of all positions — which can be 0.0 even with multiple opposing
+        positions open.  This method calls ``check_orphaned_positions()``
+        (if the broker supports it) to enumerate individual positions and
+        warn about orphans at startup.
+
+        Does NOT auto-close: orphan cleanup requires human review because
+        closing the wrong side could realize a large loss.  The CRITICAL
+        log ensures the operator is alerted immediately.
+        """
+        check_fn = getattr(self.broker, "check_orphaned_positions", None)
+        if check_fn is None:
+            # Broker doesn't support individual position enumeration
+            # (e.g., CCXT, IB) — skip silently.
+            return
+
+        try:
+            positions = await check_fn()
+            n_positions = len(positions)
+
+            if n_positions > 1:
+                # Multiple individual positions — likely orphans from
+                # hedging-mode NewOrderReq creating opposing positions.
+                net_position = self._current_position
+                logger.critical(
+                    "CT-05: %d individual positions detected at startup "
+                    "but net position = %.4f. This indicates orphaned "
+                    "positions on a hedging-mode account. Positions: %s. "
+                    "ACTION REQUIRED: Review and close orphans manually "
+                    "or via emergency_flatten().",
+                    n_positions,
+                    net_position,
+                    positions,
+                )
+            elif n_positions == 1 and abs(self._current_position) < 1e-6:
+                # Single position exists but engine thinks it's flat —
+                # net calculation may have zeroed it incorrectly.
+                logger.warning(
+                    "CT-05: 1 position exists on exchange but synced "
+                    "position = %.4f. Position details: %s",
+                    self._current_position,
+                    positions[0],
+                )
+            elif n_positions == 0 and abs(self._current_position) > 1e-6:
+                logger.warning(
+                    "CT-05: No positions on exchange but synced "
+                    "position = %.4f. Resetting to flat.",
+                    self._current_position,
+                )
+                self._current_position = 0.0
+
+        except Exception as e:
+            logger.warning(
+                "CT-05: Could not check for orphaned positions: %s", e
+            )
 
     async def _reconcile_all(self, bar_time: datetime) -> None:
         """XVal Layer 1: Periodic broker position + PV cross-validation.
