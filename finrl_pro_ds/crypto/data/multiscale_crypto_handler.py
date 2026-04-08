@@ -11,6 +11,14 @@ Features per scale per asset (8 dims, TC-aligned):
   3-6. open_z, high_z, low_z, close_z = SymLog -> EMA-Z(120) -> tanh
   7. volume_z = SymLog -> EMA-Z(120) -> tanh
 
+Optional SigBoost features (V1.1, gated by feature_set_version):
+  Per asset, injected into env private state (5 dims each):
+    0. funding_ema_24h   -- EMA(24) on funding rate
+    1. funding_ema_168h  -- EMA(168) on funding rate
+    2. funding_cumsum_ffd -- FFD(d=0.4) on cumsum(funding), z-scored
+    3. momentum_spread_24h  -- asset return - BTC return (24h)
+    4. momentum_spread_168h -- asset return - BTC return (168h)
+
 LEAK-1 compliant: norm_cutoff_date splits normalization per asset.
 """
 import logging
@@ -19,6 +27,10 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+from finrl_pro_ds.crypto.features.crypto_features import (
+    _fractional_diff,
+    _rolling_zscore,
+)
 from finrl_pro_ds.data.multiscale_handler import (
     _compute_scale_features,
     _resample_ohlcv,
@@ -62,6 +74,7 @@ class MultiScaleCryptoHandler:
         """
         self.assets = assets
         self.n_assets = len(assets)
+        self.feature_config = feature_config
         self.scales = feature_config.get("scales", [1, 4, 24])
         self.window_size = feature_config.get("window_size", 30)
         self.norm_span = feature_config.get("norm_span", 120)
@@ -248,11 +261,15 @@ class MultiScaleCryptoHandler:
         if funding_df is not None and not funding_df.empty:
             self._load_funding(funding_df)
 
+        # SigBoost V1.1: compute crypto-specific features (gated by config)
+        self._compute_sigboost_features()
+
         self._ptr = self.window_size
 
+        sigboost_str = f", sigboost={self._sigboost_features.shape}" if self._sigboost_features is not None else ""
         logger.info(
             f"MultiScaleCryptoHandler loaded: {self._len} base bars ({base_scale}h), "
-            f"{self.n_assets} assets, scales={self.scales}, window={self.window_size}",
+            f"{self.n_assets} assets, scales={self.scales}, window={self.window_size}{sigboost_str}",
         )
 
         # Verify sufficient data
@@ -282,6 +299,74 @@ class MultiScaleCryptoHandler:
 
         # Clip extreme funding rates
         self._base_funding = np.clip(self._base_funding, -0.5, 0.5)
+
+    def _compute_sigboost_features(self):
+        """Compute V1.1 SigBoost crypto features per asset at base scale.
+
+        Gated by feature_config["feature_set_version"]. Produces (T, n_assets, 5):
+          0: funding_ema_24h, 1: funding_ema_168h, 2: funding_cumsum_ffd,
+          3: momentum_spread_24h, 4: momentum_spread_168h.
+
+        Stores result in self._sigboost_features (None if V1).
+        """
+        version = self.feature_config.get("feature_set_version", "v1")
+        if version != "v1.1":
+            self._sigboost_features = None
+            return
+
+        T = self._len
+        N = self.n_assets
+        feats = np.zeros((T, N, 5), dtype=np.float32)
+
+        # Find BTC index for momentum spread reference
+        btc_idx = None
+        for i, asset in enumerate(self.assets):
+            if asset == "BTC":
+                btc_idx = i
+                break
+
+        # Pre-compute BTC returns for momentum spread
+        if btc_idx is not None:
+            btc_close = pd.Series(self._base_close[:, btc_idx], dtype=np.float64)
+            btc_ret_24 = btc_close.pct_change(24).fillna(0.0)
+            btc_ret_168 = btc_close.pct_change(168).fillna(0.0)
+        else:
+            btc_ret_24 = pd.Series(0.0, index=range(T))
+            btc_ret_168 = pd.Series(0.0, index=range(T))
+
+        for ai in range(N):
+            funding = pd.Series(self._base_funding[:, ai], dtype=np.float64)
+
+            # 0: funding_ema_24h
+            feats[:, ai, 0] = funding.ewm(span=24, min_periods=6).mean().fillna(0.0).values
+
+            # 1: funding_ema_168h
+            feats[:, ai, 1] = funding.ewm(span=168, min_periods=24).mean().fillna(0.0).values
+
+            # 2: funding_cumsum_ffd (cumsum -> FFD -> rolling z-score -> clip)
+            funding_cumsum = funding.cumsum()
+            ffd_raw = _fractional_diff(funding_cumsum, d=0.4, window=100)
+            feats[:, ai, 2] = (
+                _rolling_zscore(ffd_raw, window=720).clip(-5, 5).fillna(0.0).values
+            )
+
+            # 3-4: momentum spread vs BTC
+            if ai == btc_idx:
+                # BTC vs itself = 0
+                feats[:, ai, 3] = 0.0
+                feats[:, ai, 4] = 0.0
+            else:
+                asset_close = pd.Series(self._base_close[:, ai], dtype=np.float64)
+                asset_ret_24 = asset_close.pct_change(24).fillna(0.0)
+                asset_ret_168 = asset_close.pct_change(168).fillna(0.0)
+                feats[:, ai, 3] = (asset_ret_24 - btc_ret_24).clip(-1.0, 1.0).fillna(0.0).values
+                feats[:, ai, 4] = (asset_ret_168 - btc_ret_168).clip(-1.0, 1.0).fillna(0.0).values
+
+        self._sigboost_features = feats
+        logger.info(
+            f"SigBoost V1.1 features computed: {feats.shape} "
+            f"(btc_idx={btc_idx}, 5 features per asset)",
+        )
 
     def reset(self):
         """Reset pointer to start of data."""
@@ -339,6 +424,9 @@ class MultiScaleCryptoHandler:
         result["funding_rate"] = self._base_funding[self._ptr].copy()
         result["volume"] = self._base_volume[self._ptr].copy()
         result["timestamp"] = self._base_timestamps[self._ptr]
+
+        if self._sigboost_features is not None:
+            result["sigboost_features"] = self._sigboost_features[self._ptr].copy()
 
         self._ptr += 1
         return result

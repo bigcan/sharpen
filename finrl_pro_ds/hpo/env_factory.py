@@ -102,6 +102,8 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
             end_date=ed,
             norm_cutoff_date=norm_cutoff_date,
         )
+        # Forward feature_set_version for SigBoost V1.1 gate
+        env_config.setdefault("feature_set_version", features_cfg.get("feature_set_version", "v1"))
         env = CryptoPerpSwingEnv(config=env_config, data_handler=handler)
         gate_cfg = config.get("signal_gate")
         if gate_cfg and gate_cfg.get("enabled", False):

@@ -175,6 +175,8 @@ def create_env(
     env_cfg = copy.deepcopy(config["env"])
     env_cfg["random_start"] = random_start
     env_cfg["n_assets"] = len(assets)
+    # Forward feature_set_version for SigBoost V1.1 gate
+    env_cfg.setdefault("feature_set_version", feature_config.get("feature_set_version", "v1"))
 
     return CryptoPerpSwingEnv(config=env_cfg, data_handler=handler)
 
