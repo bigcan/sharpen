@@ -136,6 +136,28 @@ class TradingMetrics:
             ["strategy"],
         )
 
+        # Reconciliation cross-validation metrics (XVal Layer 1)
+        self._broker_position = Gauge(
+            "finrl_broker_position",
+            "Last broker-reported position fraction [-1, 1]",
+            ["strategy"],
+        )
+        self._position_divergence = Gauge(
+            "finrl_position_divergence_abs",
+            "Absolute divergence between engine and broker position",
+            ["strategy"],
+        )
+        self._pv_divergence = Gauge(
+            "finrl_pv_divergence_pct",
+            "Portfolio value divergence pct (engine vs broker)",
+            ["strategy"],
+        )
+        self._reconcile_timestamp = Gauge(
+            "finrl_last_reconcile_timestamp",
+            "Unix timestamp of last successful reconciliation",
+            ["strategy"],
+        )
+
         # Funding rate EMA gate metrics
         self._funding_ema = Gauge(
             "finrl_funding_ema_ann",
@@ -229,6 +251,23 @@ class TradingMetrics:
         s = self._labels["strategy"]
         self._funding_ema.labels(strategy=s).set(ema_value)
         self._funding_gate_open.labels(strategy=s).set(1.0 if gate_open else 0.0)
+
+    def update_reconciliation(
+        self,
+        *,
+        broker_position: float = 0.0,
+        position_divergence: float = 0.0,
+        pv_divergence_pct: float = 0.0,
+        reconcile_timestamp: float = 0.0,
+    ) -> None:
+        """Update reconciliation cross-validation metrics. Thread-safe."""
+        if not self._enabled:
+            return
+        s = self._labels["strategy"]
+        self._broker_position.labels(strategy=s).set(broker_position)
+        self._position_divergence.labels(strategy=s).set(position_divergence)
+        self._pv_divergence.labels(strategy=s).set(pv_divergence_pct)
+        self._reconcile_timestamp.labels(strategy=s).set(reconcile_timestamp)
 
     def update_prism(
         self,

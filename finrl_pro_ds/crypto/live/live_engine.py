@@ -111,8 +111,20 @@ class LiveTradingEngine:
         self._emergency_flatten_on_error = config.get("safety", {}).get(
             "emergency_flatten_on_error", True,
         )
-        self._reconciliation_warn_pct = 0.05
-        self._reconciliation_halt_pct = 0.15
+        self._reconciliation_warn_pct = config.get("safety", {}).get(
+            "reconciliation_warn_pct", 0.05,
+        )
+        self._reconciliation_halt_pct = config.get("safety", {}).get(
+            "reconciliation_halt_pct", 0.15,
+        )
+        self._pv_divergence_warn_pct = config.get("safety", {}).get(
+            "pv_divergence_warn_pct", 0.03,
+        )
+        # XVal: reconcile every N bars (default 4 = hourly for 15-min bars)
+        self._reconcile_interval = config.get("safety", {}).get(
+            "reconcile_interval", 4,
+        )
+        self._last_reconcile_bar: int = 0
 
         # Position persistence file (crash recovery)
         self._position_file = Path(config.get("safety", {}).get(
@@ -131,6 +143,8 @@ class LiveTradingEngine:
         self._last_1min_ts_ms: int = 0
         # FIX LIVE-02: Prevent PV race between _inter_bar_metrics_loop and _trading_step
         self._trading_step_active: bool = False
+        # XVal: Track last bar timestamp for inter-bar metrics (fixes timestamp bug)
+        self._last_bar_timestamp: float = 0.0
 
         # Stats
         self._total_bars = 0
@@ -349,6 +363,9 @@ class LiveTradingEngine:
         # FIX AUD-H05: Update portfolio value at start of every step (not just traded bars)
         await self._update_portfolio_value()
 
+        # XVal Layer 1: Periodic broker reconciliation on ALL bars (not just trade bars)
+        await self._reconcile_all(bar_time)
+
         # FIX AUD-H11: Check daily loss on EVERY bar (not just traded bars).
         # Previously only ran at step 11 after trade execution, so holding bars
         # could breach the daily loss limit without detection.
@@ -564,8 +581,7 @@ class LiveTradingEngine:
         # --- 8b. Persist position to file (crash recovery) ---
         self._write_position_file()
 
-        # --- 9. Reconcile position ---
-        await self._reconcile_position()
+        # --- 9. (Reconciliation moved to _reconcile_all() at top of step) ---
 
         # --- 10. Update state ---
         self._prev_close = current_close
@@ -810,29 +826,71 @@ class LiveTradingEngine:
             logger.warning(f"Could not sync position: {e}. Starting at 0.0")
             self._current_position = 0.0
 
-    async def _reconcile_position(self) -> None:
-        """Verify broker position matches internal state."""
+    async def _reconcile_all(self, bar_time: datetime) -> None:
+        """XVal Layer 1: Periodic broker position + PV cross-validation.
+
+        Runs every ``_reconcile_interval`` bars.  On trade bars the post-fill
+        broker sync (lines 510/534) already corrects position immediately, so
+        this catches drift on *hold/deadband* bars where no trade executes.
+
+        Emits Prometheus gauges for external cross-validation (Layer 2).
+        """
+        # Fast path: skip unless reconcile interval reached
+        bars_since = self._total_bars - self._last_reconcile_bar
+        if bars_since < self._reconcile_interval:
+            return
+
+        # Skip if broker is disconnected (would fail anyway)
+        if not self._check_broker_alive():
+            return
+
+        self._last_reconcile_bar = self._total_bars
+
         try:
             exchange_pos = await self.broker.get_single_position(self._asset)
-            discrepancy = abs(exchange_pos - self._current_position)
+            pos_divergence = abs(exchange_pos - self._current_position)
 
-            if discrepancy > self._reconciliation_halt_pct:
+            # PV cross-check
+            info = await self.broker.get_account_info()
+            broker_pv = info.get("total_equity", 0.0)
+            pv_divergence_pct = (
+                abs(broker_pv - self._portfolio_value) / self._portfolio_value
+                if self._portfolio_value > 0
+                else 0.0
+            )
+
+            # Emit Prometheus gauges (always, even if OK)
+            self._metrics.update_reconciliation(
+                broker_position=exchange_pos,
+                position_divergence=pos_divergence,
+                pv_divergence_pct=pv_divergence_pct,
+                reconcile_timestamp=time.time(),
+            )
+
+            # Position divergence thresholds
+            if pos_divergence > self._reconciliation_halt_pct:
                 logger.critical(
                     f"POSITION MISMATCH: internal={self._current_position:.4f}, "
-                    f"exchange={exchange_pos:.4f}, discrepancy={discrepancy:.4f} "
+                    f"exchange={exchange_pos:.4f}, divergence={pos_divergence:.4f} "
                     f"(>{self._reconciliation_halt_pct:.0%}). HALTING.",
                 )
                 self._request_stop("position_mismatch")
-            elif discrepancy > self._reconciliation_warn_pct:
+            elif pos_divergence > self._reconciliation_warn_pct:
                 logger.warning(
-                    f"Position discrepancy: internal={self._current_position:.4f}, "
+                    f"Position divergence: internal={self._current_position:.4f}, "
                     f"exchange={exchange_pos:.4f} — trusting exchange",
                 )
-                # Trust exchange as source of truth
                 self._current_position = exchange_pos
 
+            # PV divergence warning (informational, no auto-correction)
+            if pv_divergence_pct > self._pv_divergence_warn_pct:
+                logger.warning(
+                    f"PV divergence: cached=${self._portfolio_value:,.2f}, "
+                    f"broker=${broker_pv:,.2f} ({pv_divergence_pct:.1%})",
+                )
+
         except Exception as e:
-            logger.warning(f"Position reconciliation failed: {e}")
+            logger.warning(f"Reconciliation failed: {e}")
 
     async def _update_portfolio_value(self) -> None:
         """Update portfolio value from exchange.
@@ -893,7 +951,7 @@ class LiveTradingEngine:
                     total_trades=self._total_trades,
                     total_fees=self._total_fees,
                     consecutive_errors=self._consecutive_errors,
-                    last_bar_timestamp=time.time(),
+                    last_bar_timestamp=self._last_bar_timestamp or time.time(),
                     funding_rate=self._current_funding_rate,
                 )
             except Exception as e:
@@ -1199,6 +1257,7 @@ class LiveTradingEngine:
         )
 
         # Prometheus metrics (thread-safe, no-op if disabled)
+        self._last_bar_timestamp = bar_time.timestamp()
         self._metrics.update(
             position=self._current_position,
             portfolio_value=self._portfolio_value,
@@ -1209,7 +1268,7 @@ class LiveTradingEngine:
             total_trades=self._total_trades,
             total_fees=self._total_fees,
             consecutive_errors=self._consecutive_errors,
-            last_bar_timestamp=bar_time.timestamp(),
+            last_bar_timestamp=self._last_bar_timestamp,
             funding_rate=self._current_funding_rate,
         )
 
