@@ -26,11 +26,10 @@ scrape_configs:
   # --- Crypto Strategies (own network namespace) ---
   - job_name: "crypto-strategies"
     static_configs:
-      # INACTIVE: gmgp1-btc — crashed/removed
-      # - targets: ["gmgp1-btc:9103"]
-      #   labels:
-      #     strategy: "gmgp1-btc"
-      #     broker: "crypto"
+      - targets: ["gmgp1-btc:9103"]
+        labels:
+          strategy: "gmgp1-btc"
+          broker: "crypto"
       # INACTIVE: funding-arb — shelved
       # - targets: ["funding-arb:9104"]
       #   labels:
