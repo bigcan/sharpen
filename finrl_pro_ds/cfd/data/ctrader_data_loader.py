@@ -120,8 +120,29 @@ class CTraderDataLoader:
         all_rows = []
         current_end = end_dt
         chunk_retries = 0
+        empty_chunks = 0
+        fetch_start = time.monotonic()
+        # Safety: cap total fetch time at 10 minutes and empty chunks at 20
+        _MAX_FETCH_SECONDS = 600
+        _MAX_EMPTY_CHUNKS = 20
 
         while current_end > start_dt:
+            # Guard: total time limit
+            elapsed = time.monotonic() - fetch_start
+            if elapsed > _MAX_FETCH_SECONDS:
+                logger.warning(
+                    f"cTrader fetch_ohlcv timed out after {elapsed:.0f}s "
+                    f"({len(all_rows)} bars collected so far)"
+                )
+                break
+            # Guard: too many consecutive empty responses
+            if empty_chunks >= _MAX_EMPTY_CHUNKS:
+                logger.warning(
+                    f"cTrader fetch_ohlcv stopped after {empty_chunks} "
+                    f"consecutive empty chunks ({len(all_rows)} bars collected)"
+                )
+                break
+
             await self._enforce_pacing()
 
             chunk_start = max(current_end - chunk_delta, start_dt)
@@ -143,8 +164,15 @@ class CTraderDataLoader:
 
                 bars = res_payload.trendbar
                 if not bars:
+                    empty_chunks += 1
+                    logger.info(
+                        f"Empty trendbar response for {chunk_start} to "
+                        f"{current_end} (empty streak: {empty_chunks})"
+                    )
                     current_end = chunk_start - timedelta(seconds=1)
                     continue
+
+                empty_chunks = 0
 
                 for bar in bars:
                     # Decode relative prices.
@@ -173,17 +201,19 @@ class CTraderDataLoader:
                         "volume": volume,
                     })
 
-                # FIX CFD-D-01: Move window backward using the exact bar
-                # timestamp instead of subtracting 1 second, which created a
-                # gap that could silently drop bars at chunk boundaries.
-                # drop_duplicates() at the end handles any overlap.
+                # Move window backward past the earliest bar we received.
+                # Subtract 1 second to guarantee forward progress — without
+                # this, the loop stalls forever when the API returns a bar
+                # whose timestamp equals current_end (CFD-D-02 fix).
+                # drop_duplicates() at the end handles any overlap from the
+                # 1-second shift.
                 earliest_ts = min(bar.utcTimestampInMinutes for bar in bars)
                 current_end = datetime.fromtimestamp(
                     earliest_ts * 60, tz=timezone.utc
-                )
+                ) - timedelta(seconds=1)
 
                 chunk_retries = 0
-                logger.debug(
+                logger.info(
                     f"Fetched {len(bars)} bars, total {len(all_rows)}, "
                     f"moving end to {current_end}"
                 )
@@ -222,39 +252,72 @@ class CTraderDataLoader:
         return df
 
     async def _send_request(self, message, timeout: float = 30.0):
-        """Send a protobuf request via the shared client and await response."""
-        import time as _time
+        """Send a protobuf request via the shared client and await response.
 
-        msg_id = f"loader_{int(_time.time() * 1000)}_{id(message)}"
+        IMPORTANT: ``client.send()`` and ``Deferred.addCallback/addErrback``
+        must run on the Twisted reactor thread — Deferreds are NOT thread-safe.
+        Calling them from the asyncio thread causes silent callback corruption
+        under concurrent load (e.g., rapid bootstrap chunk requests while spot
+        events stream in on the reactor thread).
 
-        response_deferred = self._client.send(
-            message,
-            clientMsgId=msg_id,
-            responseTimeoutInSeconds=timeout,
-        )
+        We use ``reactor.callFromThread()`` to schedule the send + callback
+        attachment atomically on the reactor thread, then poll the result
+        container from the asyncio side.
+        """
+        from twisted.internet import reactor
 
-        # Poll Deferred until resolved (same bridge pattern as broker)
+        msg_id = f"loader_{int(time.time() * 1000)}_{id(message)}"
+
         result_container = {"value": None, "error": None, "done": False}
 
-        def on_success(result):
-            result_container["value"] = result
-            result_container["done"] = True
-            return result
-
-        def on_error(failure):
-            result_container["error"] = failure
-            result_container["done"] = True
-
-        response_deferred.addCallback(on_success)
-        response_deferred.addErrback(on_error)
-
-        deadline = time.monotonic() + timeout
-        while not result_container["done"]:
-            if time.monotonic() > deadline:
-                raise asyncio.TimeoutError(
-                    f"cTrader data request timed out after {timeout}s"
+        def _do_send():
+            """Runs on the Twisted reactor thread."""
+            try:
+                d = self._client.send(
+                    message,
+                    clientMsgId=msg_id,
+                    responseTimeoutInSeconds=timeout,
                 )
-            await asyncio.sleep(0.05)
+
+                def on_success(result):
+                    result_container["value"] = result
+                    result_container["done"] = True
+                    return result
+
+                def on_error(failure):
+                    result_container["error"] = failure
+                    result_container["done"] = True
+
+                d.addCallback(on_success)
+                d.addErrback(on_error)
+            except Exception as exc:
+                result_container["error"] = exc
+                result_container["done"] = True
+
+        # Schedule send on reactor thread (thread-safe entry point)
+        reactor.callFromThread(_do_send)
+
+        # Poll from asyncio thread until resolved.
+        # Use asyncio.wait_for as a hard safety net — the manual deadline
+        # check is the primary timeout, but wait_for guarantees the event
+        # loop can't be permanently blocked by a stalled callFromThread.
+        async def _poll():
+            deadline = time.monotonic() + timeout + 2
+            while not result_container["done"]:
+                if time.monotonic() > deadline:
+                    raise asyncio.TimeoutError(
+                        f"cTrader data request timed out after {timeout}s"
+                    )
+                await asyncio.sleep(0.05)
+
+        try:
+            await asyncio.wait_for(_poll(), timeout=timeout + 10)
+        except asyncio.TimeoutError:
+            if not result_container["done"]:
+                raise asyncio.TimeoutError(
+                    f"cTrader data request hard-timed-out after {timeout + 10}s "
+                    f"(callFromThread may have stalled)"
+                )
 
         if result_container["error"] is not None:
             failure = result_container["error"]

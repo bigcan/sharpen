@@ -932,8 +932,10 @@ class CTraderBroker:
     async def _send_request(self, message, timeout: float = 10.0):
         """Send a protobuf request and await the response.
 
-        Uses the SDK's built-in Deferred-based send() method with a
-        client message ID to match request/response pairs.
+        IMPORTANT: ``client.send()`` and ``Deferred.addCallback/addErrback``
+        must run on the Twisted reactor thread — Deferreds are NOT thread-safe.
+        We use ``reactor.callFromThread()`` to schedule the send + callback
+        attachment atomically on the reactor thread.
 
         Raises RuntimeError if the connection is down, which is caught
         by the ``@_with_reconnect`` decorator on public API methods.
@@ -941,44 +943,91 @@ class CTraderBroker:
         if self._client is None or not self._connected:
             raise RuntimeError("Not connected to cTrader")
 
+        from twisted.internet import reactor
+
         msg_id = self._next_msg_id()
 
-        response_deferred = self._client.send(
-            message,
-            clientMsgId=msg_id,
-            responseTimeoutInSeconds=timeout,
-        )
+        result_container = {"value": None, "error": None, "done": False}
 
-        return await self._deferred_to_future(response_deferred, timeout=timeout + 2)
+        def _do_send():
+            """Runs on the Twisted reactor thread."""
+            try:
+                d = self._client.send(
+                    message,
+                    clientMsgId=msg_id,
+                    responseTimeoutInSeconds=timeout,
+                )
+
+                def on_success(result):
+                    result_container["value"] = result
+                    result_container["done"] = True
+                    return result
+
+                def on_error(failure):
+                    result_container["error"] = failure
+                    result_container["done"] = True
+
+                d.addCallback(on_success)
+                d.addErrback(on_error)
+            except Exception as exc:
+                result_container["error"] = exc
+                result_container["done"] = True
+
+        reactor.callFromThread(_do_send)
+
+        return await self._poll_result(result_container, timeout=timeout + 2)
 
     async def _deferred_to_future(self, deferred, timeout: float = 15.0):
         """Convert a Twisted Deferred to an asyncio-awaitable result.
 
-        Works by polling the Deferred's callback chain. This avoids
-        needing the asyncio reactor to be installed (which is fragile).
+        Attaches callbacks on the reactor thread for thread safety,
+        then polls from the asyncio side.
         """
+        from twisted.internet import reactor
+
         result_container = {"value": None, "error": None, "done": False}
 
-        def on_success(result):
-            result_container["value"] = result
-            result_container["done"] = True
-            return result
+        def _attach_callbacks():
+            """Runs on the Twisted reactor thread."""
+            def on_success(result):
+                result_container["value"] = result
+                result_container["done"] = True
+                return result
 
-        def on_error(failure):
-            result_container["error"] = failure
-            result_container["done"] = True
+            def on_error(failure):
+                result_container["error"] = failure
+                result_container["done"] = True
 
-        deferred.addCallback(on_success)
-        deferred.addErrback(on_error)
+            deferred.addCallback(on_success)
+            deferred.addErrback(on_error)
 
-        # Poll until resolved
-        deadline = time.monotonic() + timeout
-        while not result_container["done"]:
-            if time.monotonic() > deadline:
+        reactor.callFromThread(_attach_callbacks)
+
+        return await self._poll_result(result_container, timeout=timeout)
+
+    async def _poll_result(self, result_container: dict, timeout: float = 15.0):
+        """Poll a result container until resolved or timeout.
+
+        Uses asyncio.wait_for as a hard safety net in case the manual
+        deadline check fails to fire (e.g., callFromThread stall).
+        """
+        async def _poll():
+            deadline = time.monotonic() + timeout
+            while not result_container["done"]:
+                if time.monotonic() > deadline:
+                    raise asyncio.TimeoutError(
+                        f"cTrader request timed out after {timeout}s"
+                    )
+                await asyncio.sleep(0.05)
+
+        try:
+            await asyncio.wait_for(_poll(), timeout=timeout + 10)
+        except asyncio.TimeoutError:
+            if not result_container["done"]:
                 raise asyncio.TimeoutError(
-                    f"cTrader request timed out after {timeout}s"
+                    f"cTrader request hard-timed-out after {timeout + 10}s "
+                    f"(callFromThread may have stalled)"
                 )
-            await asyncio.sleep(0.05)
 
         if result_container["error"] is not None:
             failure = result_container["error"]
