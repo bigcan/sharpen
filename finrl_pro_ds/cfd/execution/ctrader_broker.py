@@ -567,6 +567,12 @@ class CTraderBroker:
     ) -> OrderResult:
         """Execute a position change on XAUUSD CFD.
 
+        FIX CT-06: On hedging-mode accounts, direction changes (long->short
+        or short->long) CLOSE existing positions first via
+        ``ProtoOAClosePositionReq``, then open the new position.  This
+        prevents accumulating opposing positions.  Same-direction size
+        changes still use ``ProtoOANewOrderReq`` for efficiency.
+
         Args:
             asset: Asset symbol (used for logging).
             current_position: Current position fraction [-1, 1].
@@ -578,7 +584,9 @@ class CTraderBroker:
         """
         from ctrader_open_api import Protobuf
         from ctrader_open_api.messages.OpenApiMessages_pb2 import (
+            ProtoOAClosePositionReq,
             ProtoOANewOrderReq,
+            ProtoOAReconcileReq,
         )
         from ctrader_open_api.messages.OpenApiModelMessages_pb2 import (
             ProtoOAOrderType,
@@ -646,6 +654,150 @@ class CTraderBroker:
                 error="Volume rounds to 0",
             )
 
+        # ---------------------------------------------------------------
+        # FIX CT-06: Close existing positions before opening in the
+        # opposite direction.  On hedging accounts, ProtoOANewOrderReq
+        # always creates a NEW position — it never closes an existing one.
+        # Detect direction change and close first.
+        # ---------------------------------------------------------------
+        direction_change = (
+            current_lots > self._min_lot and delta_lots_rounded < 0
+        ) or (
+            current_lots < -self._min_lot and delta_lots_rounded > 0
+        )
+
+        total_fee = 0.0
+        close_fill_price = price  # Default for fee calculation
+
+        if direction_change:
+            logger.info(
+                "CT-06: Direction change detected (current=%.2f lots, "
+                "delta=%.2f lots). Closing existing positions first.",
+                current_lots,
+                delta_lots_rounded,
+            )
+
+            # Enumerate actual open positions via reconcile
+            try:
+                recon_req = ProtoOAReconcileReq()
+                recon_req.ctidTraderAccountId = self._account_id
+                recon_res = await self._send_request(recon_req, timeout=10.0)
+                recon_payload = Protobuf.extract(recon_res)
+
+                open_positions = [
+                    p for p in recon_payload.position
+                    if p.tradeData.symbolId == self._symbol_id
+                ]
+
+                for pos in open_positions:
+                    try:
+                        close_req = ProtoOAClosePositionReq()
+                        close_req.ctidTraderAccountId = self._account_id
+                        close_req.positionId = pos.positionId
+                        close_req.volume = pos.tradeData.volume
+
+                        close_res = await self._send_request(
+                            close_req,
+                            timeout=self._market_fallback_timeout,
+                        )
+                        close_payload = Protobuf.extract(close_res)
+
+                        # Extract fill price from close response
+                        if close_payload.HasField("deal"):
+                            deal = close_payload.deal
+                            if deal.HasField("executionPrice"):
+                                close_fill_price = deal.executionPrice
+
+                        lots = pos.tradeData.volume / _VOLUME_SCALE
+                        close_notional = lots * self._lot_size * close_fill_price
+                        total_fee += close_notional * self._taker_fee
+
+                        logger.info(
+                            "CT-06: Closed position %d (%.2f lots) "
+                            "@ %.2f before direction change",
+                            pos.positionId,
+                            lots,
+                            close_fill_price,
+                        )
+
+                    except Exception as e:
+                        logger.error(
+                            "CT-06: Failed to close position %d: %s. "
+                            "Aborting direction change to avoid orphans.",
+                            pos.positionId,
+                            e,
+                        )
+                        # Abort: don't open the new position if we can't
+                        # close the old one — that would create more orphans.
+                        return OrderResult(
+                            asset=asset,
+                            symbol=self._symbol_name,
+                            side=side,
+                            order_type="market",
+                            quantity=abs(delta_lots_rounded),
+                            price=price,
+                            filled_quantity=0.0,
+                            avg_fill_price=0.0,
+                            fee=total_fee,
+                            status="failed",
+                            error=(
+                                f"CT-06: Could not close position "
+                                f"{pos.positionId} before reversal: {e}"
+                            ),
+                        )
+
+                # All positions closed — update internal state
+                self._position_lots = 0.0
+
+                # Recalculate: we need to open target_lots from flat
+                new_volume = int(round(abs(target_lots) * _VOLUME_SCALE))
+                if new_volume < 1:
+                    # Target is effectively flat after closing
+                    logger.info(
+                        "CT-06: Target position rounds to 0 after close. "
+                        "Staying flat."
+                    )
+                    return OrderResult(
+                        asset=asset,
+                        symbol=self._symbol_name,
+                        side=side,
+                        order_type="market",
+                        quantity=0.0,
+                        price=price,
+                        filled_quantity=0.0,
+                        avg_fill_price=close_fill_price,
+                        fee=total_fee,
+                        status="filled",
+                        error="Closed to flat (target rounds to 0)",
+                    )
+
+                # Update side and volume for the new position
+                api_side = (
+                    ProtoOATradeSide.BUY
+                    if target_lots > 0
+                    else ProtoOATradeSide.SELL
+                )
+                side = "buy" if target_lots > 0 else "sell"
+                api_volume = new_volume
+
+                logger.info(
+                    "CT-06: Opening new %s position: %.2f lots "
+                    "(volume=%d) after closing old positions",
+                    side.upper(),
+                    abs(target_lots),
+                    api_volume,
+                )
+
+            except Exception as e:
+                logger.error(
+                    "CT-06: Reconcile failed during direction change: %s. "
+                    "Falling back to direct NewOrderReq (may create orphan).",
+                    e,
+                )
+                # Fall through to the normal new-order path as a last resort.
+                # This is worse than clean close-then-open, but better than
+                # refusing to trade entirely.
+
         logger.info(
             f"Placing {side.upper()} {abs(delta_lots_rounded):.2f} lots "
             f"{self._symbol_name} @ ~{price:.2f} (volume={api_volume})"
@@ -686,7 +838,7 @@ class CTraderBroker:
 
             filled_lots = filled_volume / _VOLUME_SCALE
             filled_notional = filled_lots * self._lot_size * fill_price
-            fee = filled_notional * self._taker_fee
+            fee = filled_notional * self._taker_fee + total_fee
 
             # Update internal position
             if side == "buy":
@@ -724,7 +876,7 @@ class CTraderBroker:
                 price=price,
                 filled_quantity=0.0,
                 avg_fill_price=0.0,
-                fee=0.0,
+                fee=total_fee,
                 status="failed",
                 error=str(e),
             )
@@ -845,6 +997,110 @@ class CTraderBroker:
                 "available_balance": self._portfolio_value,
                 "used_margin": 0.0,
             }
+
+    @_with_reconnect
+    async def check_orphaned_positions(self) -> list[dict]:
+        """FIX CT-05: Enumerate ALL individual positions for this symbol.
+
+        On hedging-mode accounts, ``get_single_position()`` returns the NET
+        of all positions — which can be 0.0 even with multiple opposing
+        positions open.  This method returns each position individually so
+        the caller can detect and warn about orphaned positions.
+
+        Returns:
+            List of dicts with keys: position_id, side, lots, entry_price.
+            Empty list if no positions.
+        """
+        from ctrader_open_api import Protobuf
+        from ctrader_open_api.messages.OpenApiMessages_pb2 import (
+            ProtoOAReconcileReq,
+        )
+
+        try:
+            recon_req = ProtoOAReconcileReq()
+            recon_req.ctidTraderAccountId = self._account_id
+            recon_res = await self._send_request(recon_req, timeout=10.0)
+
+            recon_payload = Protobuf.extract(recon_res)
+            positions = []
+
+            for pos in recon_payload.position:
+                trade_data = pos.tradeData
+                if trade_data.symbolId == self._symbol_id:
+                    lots = trade_data.volume / _VOLUME_SCALE
+                    side = "BUY" if trade_data.tradeSide == 1 else "SELL"
+                    entry_price = pos.price if pos.HasField("price") else 0.0
+                    positions.append({
+                        "position_id": pos.positionId,
+                        "side": side,
+                        "lots": lots,
+                        "entry_price": entry_price,
+                    })
+
+            if len(positions) > 1:
+                logger.critical(
+                    "CT-05 ORPHANED POSITIONS DETECTED: %d individual positions "
+                    "open for %s on hedging-mode account. Net position may "
+                    "appear flat while real exposure exists. Positions: %s",
+                    len(positions),
+                    self._symbol_name,
+                    positions,
+                )
+            elif len(positions) == 1:
+                p = positions[0]
+                logger.info(
+                    "Single position confirmed: %s %.2f lots @ %.2f "
+                    "(positionId=%d)",
+                    p["side"],
+                    p["lots"],
+                    p["entry_price"],
+                    p["position_id"],
+                )
+            else:
+                logger.info("No open positions for %s", self._symbol_name)
+
+            return positions
+
+        except Exception as e:
+            logger.error("Failed to enumerate positions: %s", e)
+            return []
+
+    @_with_reconnect
+    async def close_position_by_id(self, position_id: int, volume: int) -> bool:
+        """Close a specific position by ID using ProtoOAClosePositionReq.
+
+        Used by CT-06 (close-before-reverse) and CT-05 (orphan cleanup).
+
+        Args:
+            position_id: The cTrader position ID.
+            volume: Volume to close in API units (hundredths of a lot).
+
+        Returns:
+            True if closed successfully, False on failure.
+        """
+        from ctrader_open_api.messages.OpenApiMessages_pb2 import (
+            ProtoOAClosePositionReq,
+        )
+
+        try:
+            close_req = ProtoOAClosePositionReq()
+            close_req.ctidTraderAccountId = self._account_id
+            close_req.positionId = position_id
+            close_req.volume = volume
+
+            await self._send_request(
+                close_req, timeout=self._market_fallback_timeout
+            )
+
+            lots = volume / _VOLUME_SCALE
+            logger.info(
+                "Closed position %d (%.2f lots)", position_id, lots
+            )
+            return True
+
+        except Exception as e:
+            logger.error("Failed to close position %d: %s", position_id, e)
+            return False
 
     async def get_funding_rates(self, assets: list[str]) -> dict[str, float]:
         """CFDs have no funding rates. Return zeros."""
