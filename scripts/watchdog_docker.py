@@ -40,6 +40,8 @@ logger = logging.getLogger("watchdog_docker")
 # ---------------------------------------------------------------------------
 SWEEP_INTERVAL = int(os.environ.get("SWEEP_INTERVAL", "300"))  # 5 min
 WANDB_CHECK_INTERVAL = int(os.environ.get("WANDB_CHECK_INTERVAL", "1800"))  # 30 min
+XVAL_INTERVAL = int(os.environ.get("XVAL_INTERVAL", "900"))  # 15 min
+XVAL_PROMETHEUS_URL = os.environ.get("XVAL_PROMETHEUS_URL", "http://prometheus:9090")
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN", "300"))  # 5 min per container
@@ -304,6 +306,7 @@ def main() -> None:
 
     last_sweep = time.time()
     last_wandb_check = time.time()
+    last_xval_check = time.time()
 
     while True:
         try:
@@ -346,6 +349,10 @@ def main() -> None:
                     _run_wandb_check()
                     last_wandb_check = now
 
+                if now - last_xval_check >= XVAL_INTERVAL:
+                    _run_xval_check()
+                    last_xval_check = now
+
                 time.sleep(poll_interval)
 
         except docker.errors.APIError as e:
@@ -386,6 +393,49 @@ def _run_wandb_check() -> None:
         logger.debug("WandB check skipped (watchdog module not available)")
     except Exception as e:
         logger.warning(f"WandB check failed: {e}")
+
+
+def _run_xval_check() -> None:
+    """XVal Layer 3: Run multi-channel cross-validation and alert on CRIT."""
+    try:
+        from scripts.cross_validate_live import CrossValidator
+
+        validator = CrossValidator(
+            prometheus_url=XVAL_PROMETHEUS_URL,
+        )
+        report = validator.run()
+
+        for strategy, sr in report.strategies.items():
+            if sr.verdict == "CRIT":
+                issues = [
+                    f"{c.pair}/{c.field_name}: delta={c.delta:.4f}"
+                    for c in sr.comparisons
+                    if c.verdict == "CRIT"
+                ]
+                issues_str = "; ".join(issues)
+                msg = (
+                    f"<b>[XVAL CRIT] {strategy}</b>\n"
+                    f"Channel divergence detected:\n"
+                    f"{issues_str}"
+                )
+                alert(f"xval-{strategy}", msg)
+                logger.warning(f"XVal CRIT: {strategy} — {issues_str}")
+            elif sr.verdict == "WARN":
+                issues = [
+                    f"{c.pair}/{c.field_name}: delta={c.delta:.4f}"
+                    for c in sr.comparisons
+                    if c.verdict == "WARN"
+                ]
+                logger.info(f"XVal WARN: {strategy} — {'; '.join(issues)}")
+
+        logger.info(
+            f"XVal check: {len(report.strategies)} strategies, "
+            f"verdict={report.verdict}",
+        )
+    except ImportError:
+        logger.debug("XVal check skipped (cross_validate_live module not available)")
+    except Exception as e:
+        logger.warning(f"XVal check failed: {e}")
 
 
 if __name__ == "__main__":
