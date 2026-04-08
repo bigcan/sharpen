@@ -1,4 +1,7 @@
-# Live Trading Config — GMGP1 SAC on BTC/USDT via Bybit
+# Live Trading Config — GMGP1 SAC on BTC/USDT via Bybit (Velotrade contender)
+# L1 multi-seed GATE PASS: seed-123 PF=2.19/Sharpe=3.97/DD=-1.88%, CV=1%
+# HPs: T34 best from GMGP1-BTC HPO (run 8v4mueuf, PF=2.558)
+# Checkpoint: L1 seed-123 (run 1jazzser)
 #
 # Usage:
 #   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml
@@ -7,7 +10,7 @@
 
 # --- Exchange ---
 exchange:
-  name: "bybit"                    # "bybit" | "binance" | "okx"
+  name: "binance"                   # Binance testnet for paper trading
   testnet: true                     # Overridden by --mainnet CLI flag
   asset: "BTC"
   leverage: 1
@@ -18,21 +21,22 @@ exchange:
 
 # --- Agent ---
 agent:
-  checkpoint_path: "checkpoints/gmgp1_sac_v4/checkpoint_final.pth"
+  checkpoint_path: "checkpoints/gmgp1-btc-l1-multiseed_20260407_070227/checkpoint_final.pth"
   device: "cpu"                     # CPU inference (Docker image is CPU-only PyTorch)
   torch_compile: false              # Must be false for live inference
 
-# --- SAC Hyperparameters (must match training checkpoint) ---
+# --- SAC Hyperparameters (T34 best — must match training checkpoint) ---
 agents:
   sac:
-    lr_actor: 3.0e-4
-    lr_critic: 3.0e-4
-    lr_alpha: 3.0e-4
-    gamma: 0.99
-    tau: 0.005
-    batch_size: 256
-    buffer_size: 1000000
-    initial_alpha: 0.2
+    lr_actor: 0.00050182              # T34 best
+    lr_critic: 0.000027779            # T34 best
+    lr_alpha: 0.0000035704            # T34 best
+    gamma: 0.97127                    # T34 best
+    tau: 0.0038951                    # T34 best
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.49701            # T34 best
+    gradient_clip: 3.0198             # T34 best
 
 # --- Network (must match training checkpoint exactly) ---
 network:
@@ -78,7 +82,7 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "gmgp1", "BTC", "SAC", "15min", "bybit"]
+  tags: ["live", "paper", "gmgp1-btc", "BTC", "SAC", "15min", "bybit", "velotrade", "l1-seed123"]
 
 # --- Safety ---
 safety:
