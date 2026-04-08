@@ -178,10 +178,10 @@ services:
       STRATEGY_RUNNER: scripts/run_live.py
       STRATEGY_CONFIG: /app/configs/live_gmgp1_btc_bybit.yaml
       METRICS_PORT: "9103"
-      BYBIT_API_KEY: ${BYBIT_API_KEY:-}
-      BYBIT_API_SECRET: ${BYBIT_API_SECRET:-}
+      BINANCE_TESTNET_API_KEY: ${BINANCE_TESTNET_API_KEY:-}
+      BINANCE_TESTNET_API_SECRET: ${BINANCE_TESTNET_API_SECRET:-}
     volumes:
-      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1_btc_best:/app/checkpoints/gmgp1_btc_best:ro
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1-btc-l1-multiseed_20260407_070227:/app/checkpoints/gmgp1-btc-l1-multiseed_20260407_070227:ro
       - gmgp1-btc-logs:/app/logs
 
   funding-arb:
