@@ -70,7 +70,7 @@ features:
   obs_mode: "summary_stats"
   summary_feature_indices: [0, 1, 2, 6, 7]
   norm_span: 120
-  bootstrap_bars: 100000
+  bootstrap_bars: 30000
 
 # --- Bar Clock (CFD 24h market) ---
 bar_clock:
@@ -105,7 +105,7 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "gmgp2-xauusd", "Gold", "SAC", "15min", "cTrader", "paper",
+  tags: ["live", "paper", "gmgp1-xauusd", "cTrader", "XAUUSD", "Gold", "SAC", "15min",
          "CFD", "FTMO", "summary-stats", "hard-constraints", "seed-456"]
 
 # --- Safety ---
