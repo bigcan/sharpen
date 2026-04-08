@@ -10,8 +10,9 @@
 
 # --- Exchange ---
 exchange:
-  name: "binance"                   # Binance testnet for paper trading
-  testnet: true                     # Overridden by --mainnet CLI flag
+  name: "binance"                   # Binance demo trading (testnet deprecated for futures)
+  testnet: false                    # Testnet deprecated — use demo instead
+  demo: true                       # Uses demo-fapi.binance.com (paper trading)
   asset: "BTC"
   leverage: 1
   order_type: "limit"

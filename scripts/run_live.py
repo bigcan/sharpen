@@ -109,6 +109,7 @@ def build_components(config: dict):
     broker = ExchangePerpBroker(
         exchange=ex_cfg.get("name", "bybit"),
         testnet=ex_cfg.get("testnet", True),
+        demo=ex_cfg.get("demo", False),
         order_type=ex_cfg.get("order_type", "limit"),
         limit_offset_pct=ex_cfg.get("limit_offset_pct", 0.0005),
         market_fallback_timeout=ex_cfg.get("market_fallback_timeout", 60.0),

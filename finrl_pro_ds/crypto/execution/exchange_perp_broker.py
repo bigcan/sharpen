@@ -81,6 +81,7 @@ class ExchangePerpBroker:
         self,
         exchange: str = "bybit",
         testnet: bool = True,
+        demo: bool = False,
         api_key: str | None = None,
         api_secret: str | None = None,
         order_type: str = "limit",
@@ -91,12 +92,26 @@ class ExchangePerpBroker:
     ):
         self.exchange_id = exchange.lower()
         self.testnet = testnet
+        self.demo = demo
+
+        # demo implies not testnet (demo uses production URLs, not sandbox)
+        if demo:
+            self.testnet = False
 
         # Resolve API credentials from env vars with exchange-specific naming
-        # Convention: {EXCHANGE}_TESTNET_API_KEY / {EXCHANGE}_MAINNET_API_KEY
+        # Convention: {EXCHANGE}_DEMO_API_KEY / {EXCHANGE}_TESTNET_API_KEY / {EXCHANGE}_MAINNET_API_KEY
         # Fallback: {EXCHANGE}_API_KEY (generic)
         ex_upper = self.exchange_id.upper()
-        if testnet:
+        if demo:
+            self.api_key = api_key or os.getenv(
+                f"{ex_upper}_DEMO_API_KEY",
+                os.getenv(f"{ex_upper}_API_KEY", ""),
+            )
+            self.api_secret = api_secret or os.getenv(
+                f"{ex_upper}_DEMO_API_SECRET",
+                os.getenv(f"{ex_upper}_API_SECRET", ""),
+            )
+        elif testnet:
             self.api_key = api_key or os.getenv(
                 f"{ex_upper}_TESTNET_API_KEY",
                 os.getenv(f"{ex_upper}_API_KEY", ""),
@@ -143,10 +158,11 @@ class ExchangePerpBroker:
 
         # FIX AUD-M03: Fail fast on empty credentials
         if not self.api_key or not self.api_secret:
+            mode = "DEMO" if self.demo else ("TESTNET" if self.testnet else "MAINNET")
             raise ValueError(
                 f"Missing API credentials for {self.exchange_id}. "
-                f"Set {self.exchange_id.upper()}_TESTNET_API_KEY and "
-                f"{self.exchange_id.upper()}_TESTNET_API_SECRET env vars.",
+                f"Set {self.exchange_id.upper()}_{mode}_API_KEY and "
+                f"{self.exchange_id.upper()}_{mode}_API_SECRET env vars.",
             )
 
         self._exchange = exchange_class({
@@ -159,7 +175,12 @@ class ExchangePerpBroker:
             },
         })
 
-        if self.testnet:
+        if self.demo:
+            self._exchange.enable_demo_trading(True)
+            logger.info(
+                f"{self.exchange_id.upper()} broker: DEMO mode (paper trading)",
+            )
+        elif self.testnet:
             self._exchange.set_sandbox_mode(True)
             logger.info(
                 f"{self.exchange_id.upper()} broker: TESTNET mode (paper trading)",

@@ -246,7 +246,7 @@ Skills are split by scope. **User-scope** (`~/.claude/skills/`): generic methodo
 | **Monitor** | Status checks, "how are runs", before deploying new runs, anomaly triage. | `.claude/skills/monitor/SKILL.md` |
 | **Dashboard** | **Auto** after `/monitor`, on experiment state changes. | `.claude/skills/dashboard/SKILL.md` |
 | **Docker** | Docker, containers, compose, build, start/stop strategies, IBGateway, VNC, Portainer. **Auto** before live-trading container launch. | `.claude/skills/docker/SKILL.md` |
-| **Live-Trading** | Start/stop paper/live trading, launch strategy, `--mainnet`, graduation, kill file, risk config, cTrader OAuth. | `.claude/skills/live-trading/SKILL.md` |
+| **Live-Trading** | Start/stop paper/live trading, launch strategy, `--mainnet`, graduation, kill file, risk config, cTrader OAuth. **Also**: stack health, container crashes, strategy not trading, post-launch verification. | `.claude/skills/live-trading/SKILL.md` |
 | **Live-Monitor** | Live P&L, positions, drawdown, "how are my strategies", container health, Grafana, Telegram alerts. **Auto** after live-trading launch. Periodic via `/loop`. | `.claude/skills/live-monitor/SKILL.md` |
 
 **Chaining rules:**
@@ -259,10 +259,10 @@ Skills are split by scope. **User-scope** (`~/.claude/skills/`): generic methodo
 - Run stall/crash -> **Monitor** -> **WandB** (`diagnose_run`).
 - Research question -> **Researcher** -> if GO -> **Architect** -> implement -> **Audit**.
 - Root cause / new module -> **Researcher** <-> **Architect** -> implement -> **Audit**.
-- Live trading launch -> **Live-Trading** pre-flight -> **Docker** (if container) -> **Live-Monitor** (verify startup) -> **Dashboard**
-- "How are my strategies" (live) -> **Live-Monitor** -> **Dashboard**
+- Live trading launch -> **Live-Trading** pre-flight -> **Docker** (if container) -> **Live-Trading** post-launch verification -> **Live-Monitor** (ongoing) -> **Dashboard**
+- "How are my strategies" / "check the stack" -> **Live-Trading** periodic health check -> **Live-Monitor** (detailed P&L) -> **Dashboard**
+- Container crash / alert triage -> **Live-Trading** stack diagnostics -> fix -> restart -> post-launch verification
 - Paper graduation -> **Live-Monitor** (verify paper metrics) -> **Live-Trading** (switch to `--mainnet`)
-- Container issue / alert triage -> **Live-Monitor** -> **Docker** (restart if needed)
 - "audit skills" / "skill health" -> **Skill-Evolve** (full) -> **Memory** (log findings).
 - `/sync` -> Memory -> **Randy** (sync_memory.py, if gateway running) -> **Skill-Evolve** (staleness check only, lightweight) -> git commit.
 - New skill created -> **Skill-Evolve** (onboarding structural check).
@@ -274,6 +274,7 @@ Skills are split by scope. **User-scope** (`~/.claude/skills/`): generic methodo
 |-----------|----------|
 | "how are my runs" / SPS / Q-value / loss | **Monitor** (GPU training) |
 | "how are my strategies" / P&L / positions / drawdown | **Live-Monitor** (live trading) |
+| "check the stack" / container crash / "not trading" | **Live-Trading** (stack diagnostics) |
 | "check containers" / Docker status | **Docker** |
 | "deploy to GPU" | **Deploy** |
 | "start trading" / "go live" | **Live-Trading** + **Docker** |
