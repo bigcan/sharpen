@@ -211,8 +211,34 @@ async def main_async(config: dict) -> None:
 
     engine, broker = build_components(config)
 
-    # Connect cTrader first (authenticates, resolves symbol, subscribes to spots)
-    await broker.connect()
+    # FIX CT-08: Connect with retry logic to prevent Docker restart-loops
+    # when the cTrader server has a ghost session or transient issue.
+    max_connect_attempts = 5
+    for attempt in range(1, max_connect_attempts + 1):
+        try:
+            # Check if a ghost session was detected on a prior attempt
+            if broker._already_logged_in_seen:
+                wait_secs = broker._ALREADY_LOGGED_IN_WAIT
+                logger.warning(
+                    "CT-08: Ghost session detected — waiting %ds before retry",
+                    wait_secs,
+                )
+                broker._already_logged_in_seen = False
+                await asyncio.sleep(wait_secs)
+
+            await broker.connect()
+            break  # Success
+        except Exception as exc:
+            logger.error(
+                "CT-08: connect() attempt %d/%d failed: %s",
+                attempt, max_connect_attempts, exc,
+            )
+            if attempt == max_connect_attempts:
+                raise
+            # Exponential backoff: 5, 10, 20, 40s
+            delay = 5.0 * (2 ** (attempt - 1))
+            logger.info("CT-08: Retrying in %.0fs...", delay)
+            await asyncio.sleep(delay)
 
     # Now create the data loader with the live cTrader connection
     loader = CTraderDataLoader(

@@ -159,6 +159,7 @@ class CTraderBroker:
         self._reconnect_lock = asyncio.Lock()
         self._consecutive_reconnects = 0
         self._reconnect_cooldown_until = 0.0  # FIX CT-04: prevent reconnect spam
+        self._already_logged_in_seen = False  # FIX CT-07: flag set by _on_message
 
     async def connect(self) -> None:
         """Connect to cTrader Open API and authenticate."""
@@ -296,6 +297,28 @@ class CTraderBroker:
                 self._token_refresh_loop()
             )
 
+        # FIX CT-09: Post-connect health verification — ensure account API
+        # works before declaring the connection ready.  Catches partial
+        # connections where data API works but account API times out.
+        try:
+            await self.get_account_info()
+        except Exception as exc:
+            logger.error(
+                "CT-09: Post-connect health check failed (get_account_info): %s",
+                exc,
+            )
+            # Tear down the partial connection so the caller retries cleanly
+            self._connected = False
+            if self._client is not None:
+                try:
+                    self._client.stopService()
+                except Exception:
+                    pass
+                self._client = None
+            raise RuntimeError(
+                f"cTrader connected but account API is unresponsive: {exc}"
+            ) from exc
+
         mode = "DEMO (IC Markets)" if self._testnet else "LIVE (FTMO)"
         logger.info(f"CTraderBroker ready: {self._symbol_name} CFD ({mode})")
 
@@ -381,6 +404,8 @@ class CTraderBroker:
 
             base_delay = 5.0
             already_logged_in_seen = False
+            # FIX CT-07: Reset the async flag before the reconnect cycle
+            self._already_logged_in_seen = False
 
             for attempt in range(1, self._max_reconnect_attempts + 1):
                 delay = base_delay * (2 ** (attempt - 1))  # 5, 10, 20, ...
@@ -428,11 +453,17 @@ class CTraderBroker:
                         exc,
                     )
 
-                    # FIX CT-04: On ALREADY_LOGGED_IN, stop immediately —
-                    # more TCP connections just reset the server's idle
+                    # FIX CT-04/CT-07: On ALREADY_LOGGED_IN, stop immediately
+                    # — more TCP connections just reset the server's idle
                     # timer on the ghost session.  Wait for it to expire,
                     # then make one final attempt.
-                    if "ALREADY_LOGGED_IN" in exc_str:
+                    # CT-07: Also check _already_logged_in_seen flag set by
+                    # _on_message, since the Deferred may time out with a
+                    # generic TimeoutError instead of propagating the error.
+                    if (
+                        "ALREADY_LOGGED_IN" in exc_str
+                        or self._already_logged_in_seen
+                    ):
                         already_logged_in_seen = True
                         logger.warning(
                             "Ghost session detected — waiting %ds for "
@@ -440,6 +471,7 @@ class CTraderBroker:
                             self._ALREADY_LOGGED_IN_WAIT,
                         )
                         await self._teardown_client()
+                        self._already_logged_in_seen = False  # CT-07: reset
                         await asyncio.sleep(self._ALREADY_LOGGED_IN_WAIT)
 
                         try:
@@ -1432,11 +1464,23 @@ class CTraderBroker:
         elif payload_type == ProtoOAPayloadType.PROTO_OA_ERROR_RES:
             try:
                 err = Protobuf.extract(message)
+                err_code = getattr(err, "errorCode", "")
+                err_desc = getattr(err, "description", "")
                 logger.error(
-                    f"cTrader error: {err.errorCode} — {err.description}"
-                    if hasattr(err, "description") else
-                    f"cTrader error: {err.errorCode}"
+                    f"cTrader error: {err_code} — {err_desc}"
+                    if err_desc else
+                    f"cTrader error: {err_code}"
                 )
+                # FIX CT-07: Set flag so _reconnect() / connect() callers
+                # can detect ghost-session without relying on exception
+                # string matching (the Deferred times out with a generic
+                # TimeoutError, not a RuntimeError containing the error code).
+                if "ALREADY_LOGGED_IN" in str(err_code):
+                    self._already_logged_in_seen = True
+                    logger.warning(
+                        "CT-07: ALREADY_LOGGED_IN detected in _on_message — "
+                        "ghost session flag set"
+                    )
             except Exception:
                 logger.error(f"cTrader error (payloadType={payload_type})")
 

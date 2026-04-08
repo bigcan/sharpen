@@ -11,6 +11,8 @@ import logging
 import time
 from datetime import datetime, timedelta, timezone
 
+from typing import Callable, Optional
+
 from finrl_pro_ds.crypto.live.bar_clock import (
     BarClock,
     _JUMP_ERROR_THRESHOLD,
@@ -38,12 +40,17 @@ class CMEBarClock:
             # bar_time is guaranteed to be during CME trading hours
     """
 
+    # Max seconds between health heartbeats during market-closed sleeps.
+    # Keeps the health file fresh so Docker doesn't mark us UNHEALTHY.
+    _HEARTBEAT_INTERVAL = 120
+
     def __init__(
         self,
         bar_interval_minutes: int = 15,
         execution_delay_seconds: float = 10.0,
         max_late_seconds: float = 60.0,
         calendar: CMEGlobexCalendar | None = None,
+        heartbeat_callback: Optional[Callable[[str], None]] = None,
     ):
         self._inner = BarClock(
             bar_interval_minutes=bar_interval_minutes,
@@ -52,6 +59,7 @@ class CMEBarClock:
         )
         self._calendar = calendar or CMEGlobexCalendar()
         self._skipped_bars = 0
+        self._heartbeat_callback = heartbeat_callback
 
     @property
     def interval(self) -> int:
@@ -102,12 +110,21 @@ class CMEBarClock:
                         f"{next_open.strftime('%Y-%m-%d %H:%M')} UTC",
                     )
 
-                # Sleep until market opens, plus a small buffer
-                # Record clocks for jump detection around long market-closed sleeps
+                # Sleep until market opens in chunks, writing health
+                # heartbeats so Docker doesn't mark us UNHEALTHY.
                 actual_sleep = max(sleep_secs + 2.0, 0)
                 mono_before = time.monotonic()
                 wall_before = time.time()
-                await asyncio.sleep(actual_sleep)
+                remaining = actual_sleep
+                while remaining > 0:
+                    chunk = min(remaining, self._HEARTBEAT_INTERVAL)
+                    await asyncio.sleep(chunk)
+                    remaining -= chunk
+                    if remaining > 0 and self._heartbeat_callback is not None:
+                        try:
+                            self._heartbeat_callback("market_closed")
+                        except Exception:
+                            pass  # Non-critical
                 self._check_gate_clock_jump(wall_before, mono_before)
                 continue
 
