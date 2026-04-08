@@ -1,0 +1,98 @@
+# GMGP2-BTC Walk-Forward — Window R2: Fixed-HP Retraining
+# Train: Mar-Aug, Val: Sep-Oct, Test: Nov-Dec
+# Shifted window — tests generalization to different market regime
+# HPs: T41 best trial from GMGP2-BTC HPO (run 0ugd38uo, PF=2.213)
+# v6 architecture: summary-stats obs, hard risk constraints
+# Fee: 5bps (Binance taker), DD: 10% (Velotrade)
+
+data:
+  file_path: "data/bitfinex/btc_usdt_perp_2025_1min.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  train_start_date: "2025-03-01"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+  obs_mode: "summary_stats"
+  summary_feature_indices: [0, 1, 2, 6, 7]
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0
+  deadband_threshold: 0.15              # T41 best
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10                # Velotrade 10% max DD
+  scales: [15, 60, 240]
+  stop_loss_bps: 101                    # T41 best
+  stop_loss_hpo: false
+  max_holding_bars: 30                  # T41 best
+  max_holding_hpo: false
+  obs_mode: "summary_stats"
+  summary_feature_indices: [0, 1, 2, 6, 7]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0023682                  # T41 best
+    dsr_scale: 1.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 500000, taker_fee: 0.0, ramp_to: 0.0005, ramp_end_step: 1500000}
+    - {step: 1500000, taker_fee: 0.0005}  # 5bps — Binance taker fee
+
+network:
+  obs_mode: "summary_stats"
+  summary_input_dim: 50
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# SAC HPs from T41 best trial (GMGP2-BTC HPO, run 0ugd38uo)
+agents:
+  sac:
+    lr_actor: 0.00002412                # T41 best
+    lr_critic: 0.00003349               # T41 best
+    lr_alpha: 0.0000031430              # T41 best
+    gamma: 0.96809                      # T41 best
+    tau: 0.00039980                     # T41 best
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.43034              # T41 best
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 3.8798               # T41 best
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 5000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp2-btc", "BTC", "SAC", "15min", "crypto", "velotrade",
+         "summary-stats", "hard-constraints", "walkforward", "wf-retrain", "wf-r2", "fixed-hp"]
