@@ -105,7 +105,7 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "paper", "gmgp1-xauusd", "cTrader", "XAUUSD", "Gold", "SAC", "15min",
+  tags: ["live", "paper", "gmgp2-xauusd", "cTrader", "XAUUSD", "Gold", "SAC", "15min",
          "CFD", "FTMO", "summary-stats", "hard-constraints", "seed-456"]
 
 # --- Safety ---
