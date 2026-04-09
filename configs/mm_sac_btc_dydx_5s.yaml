@@ -1,0 +1,124 @@
+# Market Making V5: SAC + 1D Skew-Only + 5s LOB Micro Features — BTC/USDT
+# Stage 4 — Phase 5: F3 fix (1D action) + finer granularity (5s bars, 40-dim LOB)
+# Venue: dYdX v4 (Tier 7 steady-state: -1.1 bps maker rebate)
+#
+# Key changes from mm_sac_btc_dydx_10s.yaml (v4, GATE FAIL):
+#   1. mdp_version: v9 (1D skew-only action, fixes directional collapse)
+#   2. handler_type: lob_micro (40-dim FeatureFactory micro features, not 8-dim aggregated)
+#   3. bar_size: 5s (2x finer than 10s, with real OHLCV from mid_price movement)
+#   4. action_dim: 1 (skew only — spread fixed at base_spread_bps, intensity fixed)
+#   5. reward_mode: dsr_simple fixed (best from v4 analysis, no HPO search)
+#   6. HPO searches base_spread_bps + max_skew_bps (new V9-specific params)
+#
+# Data: 1s LOB parquet → aggregated to 5s bars in LOBMicroDataHandler
+# Architecture: .agent/artifacts/mm_v5_architecture.md
+
+data:
+  file_path: "data/lob_parquet/btcusdt_lob_1s.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "lob_micro"
+  train_start_date: "2025-10-24"
+  train_end_date: "2025-11-03"
+  val_start_date: "2026-02-07"
+  val_end_date: "2026-02-24"
+  test_start_date: "2026-03-15"
+  test_end_date: "2026-03-21"
+  norm_cutoff_date: "2026-02-07"
+
+features:
+  scales: [1]
+  window_size: 30                     # 30 x 5s = 150s lookback
+  features_per_scale: 8
+  n_lob_features: 40                  # FeatureFactory 40-dim micro features
+  n_levels: 5                         # LOB depth for FeatureFactory
+  bar_size_s: 5                       # Aggregate 1s snapshots to 5s bars
+  asset_class: "crypto"
+
+env:
+  mdp_version: "v9"                   # 1D skew-only action (F3 fix)
+  bar_duration_seconds: 5
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  n_lob_features: 40
+  # dYdX Tier 7 maker rebate: -0.011% = -1.1 bps
+  maker_fee: -0.00011
+  base_spread_bps: 1.0               # HPO searchable [0.5, 5.0] — fixed by env, not agent
+  max_skew_bps: 3.0                  # HPO searchable [1.0, 5.0]
+  max_order_size: 0.5                # Fixed intensity (always quoting)
+  max_inventory: 0.5
+  inventory_hard_stop: 0.8
+  min_rest_bars: 1
+  deadband_threshold: 0.15
+  episode_length: 7200                # 10 hours at 5s
+  random_start: true
+  max_drawdown_pct: 0.10
+  fill_model: "volume_based"
+  adverse_slippage_bps: 0.5
+  adverse_velocity_threshold: 0.001
+  queue_depth_multiplier: 15.0
+  scales: [1]
+  reward:
+    mode: "dsr_simple"                # Fixed — best from v4 analysis (mean PF=0.68 vs 0.26/0.36)
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+    phi: 0.1
+    scaling: 10000.0
+    clip_min: -5.0
+    clip_max: 5.0
+  fee_schedule:
+    - {step: 0, taker_fee: -0.00011}
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  lob_encoder:
+    input_size: 40                    # 40-dim FeatureFactory micro features
+    channels: [64, 128, 128, 128]     # Wider channels for richer features
+    kernel_size: 3
+    output_dim: 128
+  private_dim: 12
+  fusion_dim: 256
+  window_size: 30
+  n_scales: 1
+  n_lob_features: 40
+  action_dim: 1                       # 1D skew-only
+
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 10000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 5000000
+  log_interval: 5000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 8                         # Reduced from 20 — 1s→5s aggregation is memory-heavy
+  use_sync: true                      # SyncVectorEnv — share data across envs, no spawn copies
+
+hpo:
+  enabled: true
+  n_trials: 50
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  tags: ["mm", "sac", "btc", "5s", "lob-micro", "market-making", "stage4", "v5",
+         "dydx", "skew-only", "40-dim", "f3-fix"]

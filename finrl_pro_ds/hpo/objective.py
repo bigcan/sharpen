@@ -126,6 +126,15 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                 )
                 config["env"]["reward"]["mode"] = reward_mode
 
+            # V9 MM: 1D skew-only — HPO searches base_spread_bps + max_skew_bps
+            # Reward mode fixed to dsr_simple (best from v4 analysis)
+            if config.get("env", {}).get("mdp_version") == "v9":
+                base_spread = trial.suggest_float("base_spread_bps", 0.5, 5.0)
+                max_skew = trial.suggest_float("max_skew_bps", 1.0, 5.0)
+                config["env"]["base_spread_bps"] = base_spread
+                config["env"]["max_skew_bps"] = max_skew
+                config["env"]["reward"]["mode"] = "dsr_simple"
+
             # v6: Hard risk constraints (opt-in via config or search_space)
             sl_ss = ss.get("stop_loss_bps", {})
             if config.get("env", {}).get("stop_loss_hpo", False) or sl_ss:
@@ -155,6 +164,9 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                 hpo_log[f"{trial_prefix}/batch_size"] = config["agents"]["sac"]["batch_size"]
             if config.get("env", {}).get("mdp_version") == "v8":
                 hpo_log[f"{trial_prefix}/reward_mode"] = config["env"]["reward"]["mode"]
+            if config.get("env", {}).get("mdp_version") == "v9":
+                hpo_log[f"{trial_prefix}/base_spread_bps"] = config["env"]["base_spread_bps"]
+                hpo_log[f"{trial_prefix}/max_skew_bps"] = config["env"]["max_skew_bps"]
             wandb.log(hpo_log)
 
         elif agent_type == "ppo":
