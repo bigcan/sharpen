@@ -1,4 +1,6 @@
 # Live Trading Config — GMGP1-XAUUSD SAC on Gold CFD via cTrader (IC Markets / FTMO)
+# Seed 123 checkpoint (test PF 2.31, Sharpe 3.82, MDD -1.30%)
+# HPs from T34 best trial (GMGP1-XAUUSD HPO, run 1fprvttn, PF=2.886)
 #
 # Usage:
 #   python scripts/run_live_ctrader.py --config configs/live_gmgp1_xauusd_ctrader.yaml
@@ -27,25 +29,28 @@ contract:
 
 # --- Agent ---
 agent:
-  # Point to best XAUUSD checkpoint (UPDATE after WF/L1 validation)
-  checkpoint_path: "checkpoints/gmgp1_xauusd_best/checkpoint_final.pth"
-  device: "cpu"                        # CPU for inference (no CUDA needed)
+  checkpoint_path: "checkpoints/gmgp1-xauusd-l1-multiseed_20260408_163103/checkpoint_final.pth"
+  device: "cpu"
   torch_compile: false                 # Must be false for live inference
 
-# --- SAC Hyperparameters (must match training checkpoint) ---
-# UPDATE with best HPs from XAUUSD HPO after Phase 1 completes
+# --- SAC Hyperparameters (T34 best trial — must match training checkpoint) ---
 agents:
   sac:
-    lr_actor: 3.0e-4
-    lr_critic: 3.0e-4
-    lr_alpha: 3.0e-4
-    gamma: 0.99
-    tau: 0.005
-    batch_size: 256
-    buffer_size: 1000000
-    initial_alpha: 0.2
+    lr_actor: 0.00034069
+    lr_critic: 0.000027372
+    lr_alpha: 0.0000020265
+    gamma: 0.99826
+    tau: 0.0019716
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.37652
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.2302
 
 # --- Network (must match training checkpoint exactly) ---
+# GMGP1 uses full multi-scale TCN encoder (NOT summary_stats like GMGP2)
 network:
   scale_encoder:
     input_size: 8
@@ -58,11 +63,12 @@ network:
 
 # --- Features (must match training config) ---
 features:
-  scales: [15, 60, 240]               # 15-min decision, 1h trend, 4h regime
+  scales: [15, 60, 240]
   window_size: 30
   features_per_scale: 8
+  asset_class: "cfd_gold"
   norm_span: 120
-  bootstrap_bars: 100000              # 240-min scale needs 360+ bars for EMA(120) convergence
+  bootstrap_bars: 100000
 
 # --- Bar Clock (CFD 24h market) ---
 bar_clock:
@@ -74,8 +80,16 @@ bar_clock:
 # --- Trading ---
 trading:
   initial_balance: 100000.0            # FTMO $100K account
-  deadband_threshold: 0.25             # Matches training
+  deadband_threshold: 0.25
   taker_fee: 0.00015                   # 1.5bps effective spread
+
+# --- Hard Constraints (match training) ---
+env:
+  stop_loss_bps: 125
+  max_holding_bars: 15
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  max_drawdown_pct: 0.10
 
 # --- Risk Management (FTMO-safe limits) ---
 risk:
@@ -90,7 +104,8 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "gmgp1-xauusd", "Gold", "SAC", "15min", "cTrader", "paper", "CFD", "FTMO"]
+  tags: ["live", "paper", "gmgp1-xauusd", "cTrader", "XAUUSD", "Gold", "SAC", "15min",
+         "CFD", "FTMO", "multiscale-tcn", "hard-constraints", "seed-123"]
 
 # --- Safety ---
 safety:

@@ -40,9 +40,9 @@ scrape_configs:
       #   labels:
       #     strategy: "sync-1h"
       #     broker: "crypto"
-      - targets: ["gmgp2-xauusd:9106"]
+      - targets: ["gmgp1-xauusd:9106"]
         labels:
-          strategy: "gmgp2-xauusd"
+          strategy: "gmgp1-xauusd"
           broker: "ctrader"
       # INACTIVE: velotrade-btc — crashed/removed
       # - targets: ["velotrade-btc:9107"]
