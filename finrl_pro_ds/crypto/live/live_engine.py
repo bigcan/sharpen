@@ -384,6 +384,12 @@ class LiveTradingEngine:
         # XVal Layer 1: Periodic broker reconciliation on ALL bars (not just trade bars)
         await self._reconcile_all(bar_time)
 
+        # FIX CT-10: Bail out immediately if reconciliation requested a halt.
+        # Previously the trading step continued to execute trades after a
+        # position-mismatch HALT, worsening the orphan state.
+        if self._should_stop:
+            return
+
         # FIX AUD-H11: Check daily loss on EVERY bar (not just traded bars).
         # Previously only ran at step 11 after trade execution, so holding bars
         # could breach the daily loss limit without detection.
