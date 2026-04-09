@@ -135,8 +135,9 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     if agent_type == "sac":
         reward_params = {"dsr_eta", "reward_mode"}
         agent_params = {"lr_actor", "lr_critic", "lr_alpha", "tau", "initial_alpha", "gamma", "gradient_clip", "batch_size"}
-        # deadband + v6 hard constraints route to env, not agent
-        env_params = {"deadband_threshold", "stop_loss_bps", "max_holding_bars"}
+        # deadband + v6 hard constraints + v9 MM params route to env, not agent
+        env_params = {"deadband_threshold", "stop_loss_bps", "max_holding_bars",
+                      "base_spread_bps", "max_skew_bps"}
     elif agent_type == "ppo":
         # V4.2: PPO locks reward params — only optimizer HPs are tunable
         reward_params = set()
@@ -330,12 +331,12 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         backtest_config["env"]["random_start"] = False  # Sequential from start
         # FIX R2-AUD-03: Backtest must use final fee from fee_schedule, not initial 0.
         # Fee curriculum is a training concept; backtest evaluates at production fee level.
-        # FIX BUG-12: V8 (MarketMakingEnv) reads `maker_fee`, not `taker_fee`.
+        # FIX BUG-12: V8/V9 (MarketMakingEnv) reads `maker_fee`, not `taker_fee`.
         fee_schedule = backtest_config.get("env", {}).get("fee_schedule")
         if fee_schedule:
             final_tier = fee_schedule[-1]
             mdp_ver_fee = backtest_config.get("env", {}).get("mdp_version", "v5")
-            if mdp_ver_fee == "v8":
+            if mdp_ver_fee in ("v8", "v9"):
                 final_fee = final_tier.get("ramp_to", final_tier.get("maker_fee", 0.0))
                 backtest_config["env"]["maker_fee"] = final_fee
             else:
@@ -562,7 +563,7 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
             bar_minutes = bar_duration_seconds / 60.0
         elif mdp_version == "cmgp1":
             bar_minutes = _parse_frequency_to_minutes(config.get("data", {}).get("frequency", "1h"))
-        elif mdp_version in ("v7", "v8") and scales:
+        elif mdp_version in ("v7", "v8", "v9") and scales:
             bar_minutes = scales[0]  # First scale is the base (decision) timeframe
         elif "15min" in data_file:
             bar_minutes = 15
@@ -598,8 +599,8 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
         base_count = np.sum(pos_deltas > 1e-6)
         sign_flips = np.sum((pos_arr[:-1] * pos_arr[1:]) < -1e-9)
         mdp_ver = config.get("env", {}).get("mdp_version", "v5")
-        if mdp_ver in ("v7", "v8", "cmgp1"):
-            # V7/V8/CMGP1: continuous positions, count all position changes past deadband
+        if mdp_ver in ("v7", "v8", "v9", "cmgp1"):
+            # V7/V8/V9/CMGP1: continuous positions, count all position changes past deadband
             trade_count = base_count
         elif mdp_ver == "v6":
             trade_count = sign_flips

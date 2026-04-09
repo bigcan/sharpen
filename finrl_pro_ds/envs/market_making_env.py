@@ -1,23 +1,23 @@
 """
-Market Making Environment (V8) — RL Market Making with Avellaneda-Stoikov Framework
+Market Making Environment (V8/V9) — RL Market Making with Avellaneda-Stoikov Framework
 
-3D continuous action space: (spread_offset, inventory_skew, quote_intensity)
+V8: 3D continuous action space: (spread_offset, inventory_skew, quote_intensity)
+V9: 1D continuous action space: (inventory_skew) — spread + intensity fixed analytically
+
 Fills simulated via configurable fill model (L1 price-cross / L2 volume-based).
 Inventory accumulated from fills. DSR reward on spread capture + MtM - penalty - fees.
 
-Action Space: Box(-1, 1, shape=(3,))
+V8 Action Space: Box(-1, 1, shape=(3,))
   dim 0: spread_offset  → [spread_min_mult, spread_max_mult] × base_spread
   dim 1: inventory_skew → [-max_skew_bps, +max_skew_bps] shift on both quotes
   dim 2: quote_intensity → [0, max_order_size] fraction
 
-Reward: DSR(R_spread + R_mtm - C_inventory - C_fees)
+V9 Action Space: Box(-1, 1, shape=(1,))  — skew only
+  dim 0: inventory_skew → [-max_skew_bps, +max_skew_bps]
+  Spread: fixed at base_spread_bps (HPO-searchable, not agent-controlled)
+  Intensity: fixed at max_order_size (always quoting)
 
-Key differences from ContinuousSwingEnv (V7):
-  - 3D action (spread, skew, intensity) vs 1D (position)
-  - Inventory from fills (not action-driven)
-  - Fill simulation (not direct execution)
-  - 12-dim private state (not 5)
-  - Maker fees (not taker fees)
+Reward: DSR(R_spread + R_mtm - C_inventory - C_fees)
 """
 import logging
 from typing import TYPE_CHECKING, Any, Optional
@@ -103,9 +103,14 @@ class MarketMakingEnv(gym.Env):
         self._n_lob_features = int(config.get("n_lob_features", 0))
         self._has_lob = self._n_lob_features > 0
 
+        # V9: 1D skew-only action (spread + intensity fixed)
+        mdp_version = config.get("mdp_version", "v8")
+        self._skew_only = mdp_version == "v9"
+
         # Spaces
+        action_dim = 1 if self._skew_only else 3
         self.action_space = gym.spaces.Box(
-            low=-1.0, high=1.0, shape=(3,), dtype=np.float32,
+            low=-1.0, high=1.0, shape=(action_dim,), dtype=np.float32,
         )
 
         obs_spaces = {}
@@ -223,10 +228,11 @@ class MarketMakingEnv(gym.Env):
         return self._get_observation(), {}
 
     def step(self, action):
-        # Parse 3D action
+        # Parse action (1D for V9 skew-only, 3D for V8)
         if hasattr(action, 'cpu'):
             action = action.cpu()
-        raw = np.asarray(action, dtype=np.float32).flatten()[:3]
+        n_dims = 1 if self._skew_only else 3
+        raw = np.asarray(action, dtype=np.float32).flatten()[:n_dims]
         raw = np.clip(raw, -1.0, 1.0)
 
         self.current_step += 1
@@ -431,21 +437,29 @@ class MarketMakingEnv(gym.Env):
         return obs, reward, terminated, truncated, info
 
     def _map_action(self, raw_action: np.ndarray):
-        """Map raw [-1,1]^3 action to quote parameters.
+        """Map raw action to quote parameters.
+
+        V8 (3D): raw[-1,1]^3 → (spread_mult, skew_bps, intensity)
+        V9 (1D): raw[-1,1]^1 → skew_bps only; spread + intensity fixed
 
         Returns:
             spread_mult: multiplier for base_spread_bps
             skew_bps: quote skew in bps
             intensity: order size fraction [0, max_order_size]
         """
-        # Spread: [-1,1] → [spread_min_mult, spread_max_mult]
-        spread_mult = self.spread_min_mult + (raw_action[0] + 1.0) * 0.5 * (self.spread_max_mult - self.spread_min_mult)
-
-        # Skew: [-1,1] → [-max_skew_bps, +max_skew_bps]
-        skew_bps = raw_action[1] * self.max_skew_bps
-
-        # Intensity: [-1,1] → [0, max_order_size]
-        intensity = (raw_action[2] + 1.0) * 0.5 * self.max_order_size
+        if self._skew_only:
+            # V9: fixed spread (1.0 × base_spread_bps), fixed intensity, agent controls skew only
+            spread_mult = 1.0
+            skew_bps = raw_action[0] * self.max_skew_bps
+            intensity = self.max_order_size
+        else:
+            # V8: full 3D action
+            # Spread: [-1,1] → [spread_min_mult, spread_max_mult]
+            spread_mult = self.spread_min_mult + (raw_action[0] + 1.0) * 0.5 * (self.spread_max_mult - self.spread_min_mult)
+            # Skew: [-1,1] → [-max_skew_bps, +max_skew_bps]
+            skew_bps = raw_action[1] * self.max_skew_bps
+            # Intensity: [-1,1] → [0, max_order_size]
+            intensity = (raw_action[2] + 1.0) * 0.5 * self.max_order_size
 
         # Apply deadband on spread/skew changes
         if (abs(spread_mult - self._prev_spread_mult) < self.deadband_threshold * (self.spread_max_mult - self.spread_min_mult)

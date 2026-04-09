@@ -45,11 +45,21 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
     if mdp_version != "cmgp1":
         if not file_path or not os.path.exists(file_path):
             raise ValueError(f"Invalid data file path: {file_path}")
-    if mdp_version == "v8":
+    if mdp_version in ("v8", "v9"):
         from finrl_pro_ds.envs.market_making_env import MarketMakingEnv
         features_cfg = config.get("features", {})
         handler_type = config.get("data", {}).get("handler_type", "mm")
-        if handler_type == "lob":
+        if handler_type == "lob_micro":
+            from finrl_pro_ds.data.lob_micro_handler import LOBMicroDataHandler
+            mm_handler = LOBMicroDataHandler(
+                file_path=file_path,
+                ticker=ticker,
+                feature_config=features_cfg,
+                start_date=sd,
+                end_date=ed,
+                norm_cutoff_date=norm_cutoff_date,
+            )
+        elif handler_type == "lob":
             from finrl_pro_ds.data.lob_data_handler import LOBDataHandler
             mm_handler = LOBDataHandler(
                 file_path=file_path,
