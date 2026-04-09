@@ -902,6 +902,64 @@ class CTraderBroker:
 
         except Exception as e:
             logger.error(f"Order execution failed: {e}")
+
+            # ---------------------------------------------------------
+            # FIX CT-12: The order protobuf was already sent to cTrader
+            # before the Deferred timed out.  The server may have filled
+            # it even though we never got the response.  Reconcile to
+            # detect ghost fills and sync internal state.
+            # ---------------------------------------------------------
+            pre_lots = self._position_lots
+            try:
+                await asyncio.sleep(2)  # Give cTrader time to process
+                recon_req = ProtoOAReconcileReq()
+                recon_req.ctidTraderAccountId = self._account_id
+                recon_res = await self._send_request(recon_req, timeout=10.0)
+                recon_payload = Protobuf.extract(recon_res)
+
+                broker_lots = 0.0
+                for pos in recon_payload.position:
+                    td = pos.tradeData
+                    if td.symbolId == self._symbol_id:
+                        lots = td.volume / _VOLUME_SCALE
+                        if td.tradeSide == 2:  # SELL
+                            lots = -lots
+                        broker_lots += lots
+
+                delta = abs(broker_lots - pre_lots)
+                if delta >= self._min_lot * 0.5:
+                    # Ghost fill detected — order DID execute
+                    self._position_lots = broker_lots
+                    filled_lots = abs(broker_lots - pre_lots)
+                    filled_notional = filled_lots * self._lot_size * price
+                    fee = filled_notional * self._taker_fee + total_fee
+                    logger.warning(
+                        "CT-12: Post-timeout reconcile detected ghost fill. "
+                        "Broker=%.2f lots, expected=%.2f lots. "
+                        "Treating as filled.",
+                        broker_lots,
+                        pre_lots,
+                    )
+                    return OrderResult(
+                        asset=asset,
+                        symbol=self._symbol_name,
+                        side=side,
+                        order_type="market",
+                        quantity=abs(delta_lots_rounded),
+                        price=price,
+                        filled_quantity=filled_lots,
+                        avg_fill_price=price,
+                        fee=fee,
+                        status="filled",
+                        error="CT-12: ghost fill recovered via reconcile",
+                    )
+            except Exception as recon_exc:
+                logger.warning(
+                    "CT-12: Post-timeout reconcile also failed: %s. "
+                    "Returning failed — position may be desynced.",
+                    recon_exc,
+                )
+
             return OrderResult(
                 asset=asset,
                 symbol=self._symbol_name,
