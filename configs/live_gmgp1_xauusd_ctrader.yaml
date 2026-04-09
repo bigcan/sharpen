@@ -82,6 +82,9 @@ trading:
   initial_balance: 100000.0            # FTMO $100K account
   deadband_threshold: 0.25
   taker_fee: 0.00015                   # 1.5bps effective spread
+  weekend_flatten:
+    enabled: true
+    minutes_before_close: 30           # Flatten 30 min before Friday close
 
 # --- Hard Constraints (match training) ---
 env:

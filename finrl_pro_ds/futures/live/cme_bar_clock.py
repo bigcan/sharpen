@@ -168,6 +168,27 @@ class CMEBarClock:
                 f"delta={delta:.1f}s",
             )
 
+    def minutes_to_friday_close(self, dt_utc: datetime) -> float | None:
+        """Return minutes until Friday market close, or None if not Friday.
+
+        CME Gold closes Friday at 5:00 PM ET (or 1:00 PM ET on early close).
+        Used by the live engine to trigger pre-weekend position flattening.
+        """
+        from zoneinfo import ZoneInfo
+        _ET = ZoneInfo("America/New_York")
+        et = dt_utc.astimezone(_ET)
+        if et.weekday() != 4:  # Not Friday
+            return None
+        # Use calendar's next_close which handles early close days
+        try:
+            close_utc = self._calendar.next_close(dt_utc)
+        except RuntimeError:
+            return None
+        remaining = (close_utc - dt_utc.astimezone(timezone.utc)).total_seconds() / 60.0
+        if remaining <= 0:
+            return 0.0
+        return remaining
+
     def _closure_reason(self, dt_utc: datetime) -> str:
         """Human-readable reason why the market is closed."""
         if self._calendar.is_holiday(dt_utc):
