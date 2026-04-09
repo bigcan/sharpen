@@ -80,6 +80,9 @@ trading:
   initial_balance: 262945.0             # IB paper account (reset 2026-04-02)
   deadband_threshold: 0.25             # Ignore position changes < 25% (matches training)
   taker_fee: 0.0000017                 # ~0.17bps for GC ($2.50 / ~$150K half-notional)
+  weekend_flatten:
+    enabled: true
+    minutes_before_close: 30           # Flatten 30 min before Friday close
 
 # --- Risk Management ---
 risk:

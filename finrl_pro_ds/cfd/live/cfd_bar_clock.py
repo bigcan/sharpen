@@ -265,6 +265,23 @@ class CFDBarClock:
         # Fallback: advance 1 hour and retry
         return dt + timedelta(hours=1)
 
+    @staticmethod
+    def minutes_to_friday_close(dt_utc: datetime) -> float | None:
+        """Return minutes until Friday market close, or None if not Friday.
+
+        Only returns a value on Fridays when the market is still open.
+        Used by the live engine to trigger pre-weekend position flattening.
+        """
+        dt = dt_utc.astimezone(timezone.utc)
+        if dt.weekday() != 4:  # Not Friday
+            return None
+        _, friday_close, _, _ = _get_schedule_hours(dt)
+        close_dt = dt.replace(hour=friday_close, minute=0, second=0, microsecond=0)
+        remaining = (close_dt - dt).total_seconds() / 60.0
+        if remaining <= 0:
+            return 0.0  # Already past close
+        return remaining
+
     def _closure_reason(self, dt_utc: datetime) -> str:
         """Human-readable reason why the market is closed."""
         dt = dt_utc.astimezone(timezone.utc)

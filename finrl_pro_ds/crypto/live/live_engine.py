@@ -175,6 +175,12 @@ class LiveTradingEngine:
         # PRISM L2 regime overlay (optional, attached by runner script)
         self._prism_overlay = None
 
+        # Weekend flatten (CFD markets only): flatten positions before Friday close
+        wf_cfg = config.get("trading", {}).get("weekend_flatten", {})
+        self._weekend_flatten_enabled = wf_cfg.get("enabled", False)
+        self._weekend_flatten_minutes = float(wf_cfg.get("minutes_before_close", 30))
+        self._weekend_flatten_done = False  # Reset each week at Sunday open
+
         # Funding rate EMA gate (Option C): flatten when funding < borrow cost
         fr_gate_cfg = config.get("funding_rate_gate", {})
         self._fr_gate_enabled = fr_gate_cfg.get("enabled", False)
@@ -394,6 +400,10 @@ class LiveTradingEngine:
         # Previously only ran at step 11 after trade execution, so holding bars
         # could breach the daily loss limit without detection.
         self._check_daily_loss(bar_time)
+
+        # --- Weekend flatten (CFD only): close positions before Friday close ---
+        if await self._check_weekend_flatten(bar_time):
+            return
 
         # FIX AUD-H07: Periodically fetch funding rate
         self._bars_since_funding_fetch += 1
@@ -1163,6 +1173,62 @@ class LiveTradingEngine:
                     f"(buffer={[round(v, 2) for v in self._pv_buffer]}). "
                     f"Suppressing false trigger.",
                 )
+
+    # -------------------------------------------------------------------
+    # Weekend flatten (CFD markets)
+    # -------------------------------------------------------------------
+    async def _check_weekend_flatten(self, bar_time: datetime) -> bool:
+        """Flatten positions before Friday market close to avoid weekend gap risk.
+
+        Returns True if the bar was handled (flattened or held flat), meaning
+        the caller should skip normal trading logic for this bar.
+
+        Resets the flatten flag on non-Friday bars so the strategy resumes
+        normally when the market reopens on Sunday.
+        """
+        if not self._weekend_flatten_enabled:
+            return False
+
+        # Reset the weekly flag on non-Friday bars (market reopened)
+        if bar_time.weekday() != 4:
+            self._weekend_flatten_done = False
+            return False
+
+        # Friday: check if we're within the flatten window
+        if hasattr(self.bar_clock, "minutes_to_friday_close"):
+            remaining = self.bar_clock.minutes_to_friday_close(bar_time)
+            if remaining is None:
+                return False  # Not Friday per the clock (shouldn't happen)
+        else:
+            # Not a CFD bar clock — skip
+            return False
+
+        if remaining > self._weekend_flatten_minutes:
+            return False  # Still far from close, trade normally
+
+        # Within flatten window
+        if not self._weekend_flatten_done and abs(self._current_position) > 0.01:
+            logger.warning(
+                f"WEEKEND FLATTEN: {remaining:.0f} min to Friday close. "
+                f"Flattening position {self._current_position:.4f} to avoid "
+                f"weekend gap risk.",
+            )
+            await self._emergency_flatten()
+            self.risk_manager.reset(self._portfolio_value)
+            self._weekend_flatten_done = True
+            self._log_step(
+                bar_time, 0.0,
+                traded=True, skip_reason="weekend_flatten",
+            )
+        elif not self._weekend_flatten_done:
+            logger.info(
+                f"Weekend flatten window active ({remaining:.0f} min to close) "
+                f"but already flat.",
+            )
+            self._weekend_flatten_done = True
+        # else: already flattened this week, just hold
+
+        return True  # Skip normal trading — we're in pre-close hold
 
     # -------------------------------------------------------------------
     # Position persistence (crash recovery)
