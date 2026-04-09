@@ -214,110 +214,113 @@ class CTraderBroker:
         await self._deferred_to_future(connected_deferred, timeout=15.0)
         self._connected = True
 
-        # Step 1: Application auth
-        app_auth = ProtoOAApplicationAuthReq()
-        app_auth.clientId = self._client_id
-        app_auth.clientSecret = self._client_secret
-        app_res = await self._send_request(app_auth, timeout=10.0)
-        self._check_error(Protobuf.extract(app_res), "Application auth")
-        logger.info("Application authenticated")
-
-        # Step 2: Account auth
-        acct_auth = ProtoOAAccountAuthReq()
-        acct_auth.ctidTraderAccountId = self._account_id
-        acct_auth.accessToken = self._access_token
-        acct_res = await self._send_request(acct_auth, timeout=10.0)
-        self._check_error(Protobuf.extract(acct_res), "Account auth")
-        logger.info(f"Account {self._account_id} authenticated")
-
-        # Step 3: Resolve symbol
-        sym_list_req = ProtoOASymbolsListReq()
-        sym_list_req.ctidTraderAccountId = self._account_id
-        sym_list_res = await self._send_request(sym_list_req, timeout=15.0)
-
-        sym_res_payload = Protobuf.extract(sym_list_res)
-        self._check_error(sym_res_payload, "Symbol list")
-        for sym in sym_res_payload.symbol:
-            if sym.symbolName.upper() == self._symbol_name.upper():
-                self._symbol_id = sym.symbolId
-                break
-
-        if self._symbol_id is None:
-            available = [s.symbolName for s in sym_res_payload.symbol[:20]]
-            raise ValueError(
-                f"Symbol '{self._symbol_name}' not found. "
-                f"Available (first 20): {available}"
-            )
-
-        # Step 4: Get symbol details (digits, lot size)
-        sym_detail_req = ProtoOASymbolByIdReq()
-        sym_detail_req.ctidTraderAccountId = self._account_id
-        sym_detail_req.symbolId.append(self._symbol_id)
-        sym_detail_res = await self._send_request(sym_detail_req, timeout=10.0)
-
-        sym_detail_payload = Protobuf.extract(sym_detail_res)
-        if sym_detail_payload.symbol:
-            sym_info = sym_detail_payload.symbol[0]
-            self._symbol_digits = sym_info.digits
-            if sym_info.lotSize:
-                self._lot_size = sym_info.lotSize / _VOLUME_SCALE
-            if sym_info.minVolume:
-                self._min_lot = sym_info.minVolume / _VOLUME_SCALE
-            logger.info(
-                f"Symbol {self._symbol_name}: id={self._symbol_id}, "
-                f"digits={self._symbol_digits}, lot_size={self._lot_size}, "
-                f"min_lot={self._min_lot}"
-            )
-
-        # Step 5: Get trader info (balance, moneyDigits)
-        trader_req = ProtoOATraderReq()
-        trader_req.ctidTraderAccountId = self._account_id
-        trader_res = await self._send_request(trader_req, timeout=10.0)
-
-        trader_payload = Protobuf.extract(trader_res)
-        trader = trader_payload.trader
-        self._money_digits = trader.moneyDigits
-        balance = trader.balance / (10 ** self._money_digits)
-        self._portfolio_value = balance
-        logger.info(
-            f"Trader: balance={balance:.2f}, moneyDigits={self._money_digits}, "
-            f"leverage={trader.leverageInCents / 100}"
-        )
-
-        # Step 6: Subscribe to live spot prices
-        spot_req = ProtoOASubscribeSpotsReq()
-        spot_req.ctidTraderAccountId = self._account_id
-        spot_req.symbolId.append(self._symbol_id)
-        await self._send_request(spot_req, timeout=10.0)
-        logger.info(f"Subscribed to {self._symbol_name} spot prices")
-
-        # Step 7: Start token refresh background task
-        if self._refresh_token:
-            self._token_refresh_task = asyncio.create_task(
-                self._token_refresh_loop()
-            )
-
-        # FIX CT-09: Post-connect health verification — ensure account API
-        # works before declaring the connection ready.  Catches partial
-        # connections where data API works but account API times out.
+        # FIX CT-11: Wrap handshake in try/except so a timeout during any
+        # protocol step (app auth, symbol resolve, etc.) tears down the
+        # connection.  Without this, _connected stays True after a partial
+        # handshake, and CT-08 retries skip everything via the early-return
+        # at the top of connect(), leaving symbol_id=None.
         try:
+            # Step 1: Application auth
+            app_auth = ProtoOAApplicationAuthReq()
+            app_auth.clientId = self._client_id
+            app_auth.clientSecret = self._client_secret
+            app_res = await self._send_request(app_auth, timeout=10.0)
+            self._check_error(Protobuf.extract(app_res), "Application auth")
+            logger.info("Application authenticated")
+
+            # Step 2: Account auth
+            acct_auth = ProtoOAAccountAuthReq()
+            acct_auth.ctidTraderAccountId = self._account_id
+            acct_auth.accessToken = self._access_token
+            acct_res = await self._send_request(acct_auth, timeout=10.0)
+            self._check_error(Protobuf.extract(acct_res), "Account auth")
+            logger.info(f"Account {self._account_id} authenticated")
+
+            # Step 3: Resolve symbol
+            sym_list_req = ProtoOASymbolsListReq()
+            sym_list_req.ctidTraderAccountId = self._account_id
+            sym_list_res = await self._send_request(sym_list_req, timeout=15.0)
+
+            sym_res_payload = Protobuf.extract(sym_list_res)
+            self._check_error(sym_res_payload, "Symbol list")
+            for sym in sym_res_payload.symbol:
+                if sym.symbolName.upper() == self._symbol_name.upper():
+                    self._symbol_id = sym.symbolId
+                    break
+
+            if self._symbol_id is None:
+                available = [s.symbolName for s in sym_res_payload.symbol[:20]]
+                raise ValueError(
+                    f"Symbol '{self._symbol_name}' not found. "
+                    f"Available (first 20): {available}"
+                )
+
+            # Step 4: Get symbol details (digits, lot size)
+            sym_detail_req = ProtoOASymbolByIdReq()
+            sym_detail_req.ctidTraderAccountId = self._account_id
+            sym_detail_req.symbolId.append(self._symbol_id)
+            sym_detail_res = await self._send_request(sym_detail_req, timeout=10.0)
+
+            sym_detail_payload = Protobuf.extract(sym_detail_res)
+            if sym_detail_payload.symbol:
+                sym_info = sym_detail_payload.symbol[0]
+                self._symbol_digits = sym_info.digits
+                if sym_info.lotSize:
+                    self._lot_size = sym_info.lotSize / _VOLUME_SCALE
+                if sym_info.minVolume:
+                    self._min_lot = sym_info.minVolume / _VOLUME_SCALE
+                logger.info(
+                    f"Symbol {self._symbol_name}: id={self._symbol_id}, "
+                    f"digits={self._symbol_digits}, lot_size={self._lot_size}, "
+                    f"min_lot={self._min_lot}"
+                )
+
+            # Step 5: Get trader info (balance, moneyDigits)
+            trader_req = ProtoOATraderReq()
+            trader_req.ctidTraderAccountId = self._account_id
+            trader_res = await self._send_request(trader_req, timeout=10.0)
+
+            trader_payload = Protobuf.extract(trader_res)
+            trader = trader_payload.trader
+            self._money_digits = trader.moneyDigits
+            balance = trader.balance / (10 ** self._money_digits)
+            self._portfolio_value = balance
+            logger.info(
+                f"Trader: balance={balance:.2f}, moneyDigits={self._money_digits}, "
+                f"leverage={trader.leverageInCents / 100}"
+            )
+
+            # Step 6: Subscribe to live spot prices
+            spot_req = ProtoOASubscribeSpotsReq()
+            spot_req.ctidTraderAccountId = self._account_id
+            spot_req.symbolId.append(self._symbol_id)
+            await self._send_request(spot_req, timeout=10.0)
+            logger.info(f"Subscribed to {self._symbol_name} spot prices")
+
+            # Step 7: Start token refresh background task
+            if self._refresh_token:
+                self._token_refresh_task = asyncio.create_task(
+                    self._token_refresh_loop()
+                )
+
+            # FIX CT-09: Post-connect health verification
             await self.get_account_info()
+
         except Exception as exc:
             logger.error(
-                "CT-09: Post-connect health check failed (get_account_info): %s",
+                "CT-11: Protocol handshake failed after TCP connect — "
+                "tearing down so retry starts fresh: %s",
                 exc,
             )
-            # Tear down the partial connection so the caller retries cleanly
             self._connected = False
+            self._symbol_id = None
             if self._client is not None:
                 try:
                     self._client.stopService()
                 except Exception:
                     pass
                 self._client = None
-            raise RuntimeError(
-                f"cTrader connected but account API is unresponsive: {exc}"
-            ) from exc
+            raise
 
         mode = "DEMO (IC Markets)" if self._testnet else "LIVE (FTMO)"
         logger.info(f"CTraderBroker ready: {self._symbol_name} CFD ({mode})")
@@ -693,9 +696,9 @@ class CTraderBroker:
         # Detect direction change and close first.
         # ---------------------------------------------------------------
         direction_change = (
-            current_lots > self._min_lot and delta_lots_rounded < 0
+            current_lots >= self._min_lot and delta_lots_rounded < 0
         ) or (
-            current_lots < -self._min_lot and delta_lots_rounded > 0
+            current_lots <= -self._min_lot and delta_lots_rounded > 0
         )
 
         total_fee = 0.0
