@@ -5,9 +5,9 @@
 # Target: 5+/7 OOS windows profitable in walk-forward backtest.
 
 strategy:
-  id: "funding-arb-dsac10-hpo"
-  name: "funding_arb_dsac_10assets_hpo"
-  version: "1.0.0"
+  id: "funding-arb-v3-dsac10-hpo"
+  name: "funding_arb_v3_dsac_10assets_hpo"
+  version: "3.0.0"
 
 universe:
   # Top-10 by mean |funding rate| (2022-01 -> 2026-03):
