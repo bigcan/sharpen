@@ -154,6 +154,9 @@ class DistributionalSACAgent(SACAgent):
             except Exception as e:
                 logger.warning(f"torch.compile failed: {e}")
 
+        # Cache for metrics on non-actor-update steps (BUG-DSAC-02 fix)
+        self._last_q_cvar = None
+
         logger.info(
             f"[DSAC] Distributional SAC initialized: n_quantiles={n_quantiles}, "
             f"cvar_alpha={cvar_alpha}, kappa={kappa}, embed_dim={quantile_embed_dim}"
@@ -329,6 +332,7 @@ class DistributionalSACAgent(SACAgent):
 
                     # Actor loss: maximize CVaR (mean of worst-alpha quantiles)
                     actor_loss = (alpha * log_prob - q_cvar.mean(dim=1, keepdim=True)).mean()
+                    self._last_q_cvar = q_cvar
 
                 self.actor_optimizer.zero_grad()
                 if self.scaler.is_enabled():
@@ -372,25 +376,41 @@ class DistributionalSACAgent(SACAgent):
                     "entropy": -self._last_log_prob.mean().item() if self._last_log_prob is not None else 0.0,
                     "q1_mean": q1_quantiles.mean().item(),
                     "q1_std": q1_quantiles.std().item(),
-                    "cvar_q_mean": q_cvar.mean().item() if self._train_step_count % self.actor_update_freq == 0 else 0.0,
+                    "cvar_q_mean": self._last_q_cvar.mean().item() if self._last_q_cvar is not None else 0.0,
                     "quantile_spread": (q1_quantiles.max(dim=1).values - q1_quantiles.min(dim=1).values).mean().item(),
                 }
 
         return metrics
 
     def save(self, path: str):
-        """Save with distributional config metadata."""
-        # Use parent save (handles unwrap, state dicts, optimizers)
-        super().save(path)
-        # Append distributional config
-        checkpoint = torch.load(path, map_location="cpu", weights_only=True)
-        checkpoint["dsac_config"] = {
-            "n_quantiles": self._n_quantiles,
-            "cvar_alpha": self._cvar_alpha,
-            "kappa": self.kappa,
-            "quantile_embed_dim": self._quantile_embed_dim,
-        }
-        torch.save(checkpoint, path)
+        """Save with distributional config metadata (single write)."""
+        import os
+        os.makedirs(os.path.dirname(path) if os.path.dirname(path) else '.', exist_ok=True)
+
+        actor_sd = self._unwrap_state_dict(self.actor)
+        critic1_sd = self._unwrap_state_dict(self.critic1)
+        critic2_sd = self._unwrap_state_dict(self.critic2)
+        tc1_sd = self._unwrap_state_dict(self.target_critic1)
+        tc2_sd = self._unwrap_state_dict(self.target_critic2)
+
+        torch.save({
+            "actor": actor_sd,
+            "critic1": critic1_sd,
+            "critic2": critic2_sd,
+            "target_critic1": tc1_sd,
+            "target_critic2": tc2_sd,
+            "log_alpha": self.log_alpha.data,
+            "actor_optimizer": self.actor_optimizer.state_dict(),
+            "critic_optimizer": self.critic_optimizer.state_dict(),
+            "alpha_optimizer": self.alpha_optimizer.state_dict(),
+            "step_count": self.step_count,
+            "dsac_config": {
+                "n_quantiles": self._n_quantiles,
+                "cvar_alpha": self._cvar_alpha,
+                "kappa": self.kappa,
+                "quantile_embed_dim": self._quantile_embed_dim,
+            },
+        }, path)
 
     def load(self, path: str):
         """Load with distributional config validation."""
