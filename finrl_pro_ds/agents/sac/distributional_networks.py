@@ -16,8 +16,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from finrl_pro_ds.agents.common.network_blocks import _tc_align
-from finrl_pro_ds.agents.deepscalper.iqn_network import QuantileEmbedding
+from finrl_pro_ds.agents.common.network_blocks import QuantileEmbedding, _tc_align
 from finrl_pro_ds.agents.sac.networks import MultiScaleEncoder, SummaryStatsEncoder
 
 logger = logging.getLogger(__name__)

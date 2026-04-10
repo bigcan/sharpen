@@ -332,7 +332,7 @@ class DistributionalSACAgent(SACAgent):
 
                     # Actor loss: maximize CVaR (mean of worst-alpha quantiles)
                     actor_loss = (alpha * log_prob - q_cvar.mean(dim=1, keepdim=True)).mean()
-                    self._last_q_cvar = q_cvar
+                    self._last_q_cvar = q_cvar.detach()  # BUG-DSAC-06: detach to free graph
 
                 self.actor_optimizer.zero_grad()
                 if self.scaler.is_enabled():

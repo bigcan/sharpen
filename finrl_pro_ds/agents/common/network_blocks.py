@@ -1,4 +1,6 @@
 """Shared network building blocks used across agent implementations."""
+import math
+
 import torch
 import torch.nn as nn
 
@@ -47,3 +49,41 @@ class _CausalConv1dBlock(nn.Module):
         out = self.norm(out.transpose(1, 2)).transpose(1, 2)
         out = self.dropout(torch.nn.functional.gelu(out))
         return out + self.residual(x)
+
+
+class QuantileEmbedding(nn.Module):
+    """Cosine basis embedding for quantile fractions tau in [0, 1].
+
+    Maps tau -> cos(pi * i * tau) for i in [1..embedding_dim], then
+    projects through a linear layer to match the output dimension.
+
+    Input:  tau (B, N) where N = num_quantiles
+    Output: (B, N, output_dim)
+
+    Moved from deepscalper/iqn_network.py to common for reuse by DSAC.
+    """
+
+    def __init__(self, embedding_dim: int = 64, output_dim: int = 256):
+        super().__init__()
+        self.embedding_dim = embedding_dim
+        self.register_buffer(
+            "i_pi",
+            torch.arange(1, embedding_dim + 1, dtype=torch.float32) * math.pi,
+        )
+        self.proj = nn.Linear(embedding_dim, output_dim)
+        self.activation = nn.ReLU()
+
+        nn.init.xavier_uniform_(self.proj.weight)
+        nn.init.zeros_(self.proj.bias)
+
+    def forward(self, tau: torch.Tensor) -> torch.Tensor:
+        """
+        Args:
+            tau: (B, N) quantile fractions in [0, 1]
+        Returns:
+            (B, N, output_dim) quantile embeddings
+        """
+        # (B, N, 1) * (embedding_dim,) -> (B, N, embedding_dim)
+        cos_features = torch.cos(tau.unsqueeze(-1) * self.i_pi)
+        # (B, N, embedding_dim) -> (B, N, output_dim)
+        return self.activation(self.proj(cos_features))

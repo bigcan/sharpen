@@ -219,6 +219,8 @@ def _evaluate_agent_on_env(model, env: FundingArbEnv) -> dict:
         ),
         "max_delta_exposure": max_delta,
         "avg_active_pairs": float(np.mean(active_pairs_history)) if active_pairs_history else 0.0,
+        # BUG-DSAC-05 fix: expose portfolio values for calmar/sortino HPO objectives
+        "_portfolio_values": portfolio_values,
     }
 
 
