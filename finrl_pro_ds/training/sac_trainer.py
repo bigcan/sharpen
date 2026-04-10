@@ -67,7 +67,8 @@ class SACTrainer:
         if hpo_mode:
             buffer_size = min(buffer_size, 100_000)
 
-        self.agent = SACAgent(
+        # Common agent kwargs shared by SACAgent and DistributionalSACAgent
+        _agent_kwargs = dict(
             network_config=net_cfg,
             lr_actor=sac_cfg.get("lr_actor", 3e-4),
             lr_critic=sac_cfg.get("lr_critic", 3e-4),
@@ -87,6 +88,18 @@ class SACTrainer:
             device=device,
             actor_update_freq=sac_cfg.get("actor_update_freq", 2),
         )
+
+        if sac_cfg.get("distributional", False):
+            from finrl_pro_ds.agents.sac.dsac_agent import DistributionalSACAgent
+            self.agent = DistributionalSACAgent(
+                **_agent_kwargs,
+                n_quantiles=sac_cfg.get("n_quantiles", 32),
+                cvar_alpha=sac_cfg.get("cvar_alpha", 0.25),
+                quantile_embed_dim=sac_cfg.get("quantile_embed_dim", 64),
+                kappa=sac_cfg.get("kappa", 1.0),
+            )
+        else:
+            self.agent = SACAgent(**_agent_kwargs)
 
         # Training config
         self.total_timesteps = config["training"]["total_timesteps"]
