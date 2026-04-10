@@ -352,6 +352,7 @@ class CryptoPerpEnv(gym.Env):
             "n_short": int((self.positions < -self.min_trade_pct).sum()),
             "circuit_triggered": circuit_triggered,
             "funding_applied": self._funding_mask[self.step_idx],
+            "position": self.positions.copy(),
         }
 
         return obs, float(reward), terminated, truncated, info

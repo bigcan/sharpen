@@ -359,6 +359,7 @@ class FundingArbEnv(gym.Env):
             "n_active_pairs": int((np.abs(self.arb_weights) > self.deadband_threshold).sum()),
             "circuit_triggered": circuit_triggered,
             "funding_applied": self._funding_mask[self.step_idx],
+            "position": self.arb_weights.copy(),
         }
 
         return reward, terminated, truncated, info
