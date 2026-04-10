@@ -265,11 +265,6 @@ class FundingArbEnv(gym.Env):
         # --- Step 1b: Apply spot borrowing costs on reverse-arb positions ---
         borrow_cost = self._apply_spot_borrow_costs(spot_price)
 
-        # --- FARB-02 fix: snapshot pre-trade basis PnL for reward penalty ---
-        self._calc_total_unrealized_basis_pnl(
-            spot_price, perp_price,
-        )
-
         # --- Step 2: Apply deadband and capital constraints ---
         target_weights = self._apply_deadband(action, self.arb_weights)
         target_weights = self._enforce_capital_constraint(target_weights)
@@ -328,7 +323,6 @@ class FundingArbEnv(gym.Env):
         # No penalty engineering needed — what grows PV is good.
         funding_total = float(funding_earned_this_step.sum())
         net_delta = self._calc_net_delta(spot_price, perp_price, portfolio_value)
-        float(np.abs(delta_weights).sum())
 
         pv_return = (portfolio_value - portfolio_value_before) / (portfolio_value_before + 1e-10)
         raw_reward = self.reward_scaling * pv_return

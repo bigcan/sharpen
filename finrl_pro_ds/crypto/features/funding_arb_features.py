@@ -1,6 +1,6 @@
 """Funding rate arbitrage features for the delta-neutral spot-perp strategy.
 
-Produces 12 features per asset tailored for funding arb timing, basis risk
+Produces 15 features per asset tailored for funding arb timing, basis risk
 assessment, and pair selection. All features respect point-in-time safety
 (no look-ahead bias) and LEAK-1 compliance (window-local normalization
 applied downstream in the array builder).
