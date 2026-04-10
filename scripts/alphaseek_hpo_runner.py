@@ -24,7 +24,7 @@ import logging
 import os
 import sys
 import time
-from multiprocessing import Process, Queue
+import multiprocessing as mp
 from pathlib import Path
 
 import numpy as np
@@ -34,7 +34,6 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from finrl_pro_ds.alphaseek.agents import (  # noqa: E402
-    AGENT_MAP,
     AgentDoubleDQN,
 )
 from finrl_pro_ds.alphaseek.lob_trade_simulator import (  # noqa: E402
@@ -392,13 +391,21 @@ def _run_agent_pipeline(
     full_break_step: int,
     gpu_id: int,
     out_dir: str,
-    result_queue: Queue | None = None,
+    result_queue: mp.Queue | None = None,
 ) -> dict:
     """Run HPO + full train for a single agent on a single GPU.
 
     Designed to run either in-process (serial) or as a subprocess (parallel).
     When result_queue is provided, pushes result to queue instead of returning.
     """
+    # Re-init logging for spawn'd child processes
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,
+    )
+
     from finrl_pro_ds.alphaseek.agents import AGENT_MAP as _AGENT_MAP
 
     agent_class = _AGENT_MAP[agent_name]
@@ -496,12 +503,13 @@ def run_window(
         logger.info(
             f"[W{w_idx}] Parallel mode: {len(agent_names)} agents across GPUs {effective_gpu_ids}",
         )
-        result_queue = Queue()
+        ctx = mp.get_context("spawn")
+        result_queue = ctx.Queue()
         processes = []
 
         for i, agent_name in enumerate(agent_names):
             assigned_gpu = effective_gpu_ids[i % len(effective_gpu_ids)]
-            p = Process(
+            p = ctx.Process(
                 target=_run_agent_pipeline,
                 kwargs={
                     "agent_name": agent_name,
