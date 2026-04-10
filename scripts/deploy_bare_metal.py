@@ -145,10 +145,12 @@ def deploy(args):
 
     # 3. Clean & Upload
     print("Ensuring remote workspace exists...")
-    ssh.exec_command(f"mkdir -p {remote_workspace}")
+    stdin_mk, stdout_mk, stderr_mk = ssh.exec_command(f"mkdir -p {remote_workspace}")
+    stdout_mk.channel.recv_exit_status()  # Wait for mkdir to complete
 
     print("Cleaning remote workspace of old zips...")
-    ssh.exec_command(f"rm -rf {remote_workspace}/*.zip")
+    stdin_rm, stdout_rm, stderr_rm = ssh.exec_command(f"rm -rf {remote_workspace}/*.zip")
+    stdout_rm.channel.recv_exit_status()  # Wait for rm to complete before uploading
 
     if args.upload_data:
         # Use absolute paths for robust deployment
