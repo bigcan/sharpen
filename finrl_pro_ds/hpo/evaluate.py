@@ -188,7 +188,12 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
             pos = info.get("position", info.get("inventory"))
             if pos is not None:
                 if hasattr(pos, "__len__") and not isinstance(pos, str):
-                    positions.append(float(pos[0]))
+                    p0 = pos[0]  # VectorEnv: take env 0
+                    if hasattr(p0, "__len__") and not isinstance(p0, str):
+                        # Multi-asset: store full position array
+                        positions.append(np.asarray(p0, dtype=np.float64))
+                    else:
+                        positions.append(float(p0))
                 else:
                     positions.append(float(pos))
 
@@ -218,10 +223,18 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
         return 0.0, 0
 
     returns = np.array(all_returns)
-    pos_arr = np.array(positions) if positions else np.array([0.0])
 
-    # V4.2: Count trades (position changes)
-    pos_deltas = np.abs(np.diff(pos_arr))
+    # Build position array — handles both single-asset (scalar) and multi-asset (vector)
+    if positions:
+        if hasattr(positions[0], "__len__"):
+            pos_arr = np.stack(positions)  # (T, n_assets)
+        else:
+            pos_arr = np.array(positions)  # (T,)
+    else:
+        pos_arr = np.array([0.0])
+
+    # V4.2: Count trades (position changes) — axis=0 works for both 1D and 2D
+    pos_deltas = np.abs(np.diff(pos_arr, axis=0))
     base_count = int(np.sum(pos_deltas > 1e-6))
     sign_flips = int(np.sum((pos_arr[:-1] * pos_arr[1:]) < -1e-9))
     if discrete_dims == -1:
