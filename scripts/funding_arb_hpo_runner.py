@@ -136,12 +136,13 @@ def _create_eval_env(arrays: dict, config: dict, env_overrides: dict | None = No
 # HPO search space
 # ---------------------------------------------------------------------------
 
-def define_funding_arb_search_space(trial) -> dict:
-    """Define 8-dimensional funding-arb SAC search space.
+def define_funding_arb_search_space(trial, distributional: bool = False) -> dict:
+    """Define funding-arb SAC/DSAC search space.
 
     Returns dict with:
-      - agent_params: SB3 SAC constructor kwargs
+      - agent_params: SAC constructor kwargs
       - env_overrides: params to patch into env config per trial
+      - dsac_params: distributional SAC params (only when distributional=True)
     """
     agent_params = {
         "learning_rate": trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True),
@@ -157,7 +158,16 @@ def define_funding_arb_search_space(trial) -> dict:
         "deadband_threshold": trial.suggest_float("deadband_threshold", 0.005, 0.05),
     }
 
-    return {"agent_params": agent_params, "env_overrides": env_overrides}
+    result = {"agent_params": agent_params, "env_overrides": env_overrides}
+
+    if distributional:
+        result["dsac_params"] = {
+            "cvar_alpha": trial.suggest_float("cvar_alpha", 0.10, 0.50),
+            "n_quantiles": trial.suggest_categorical("n_quantiles", [16, 32, 64]),
+            "kappa": trial.suggest_float("kappa", 0.5, 2.0),
+        }
+
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -184,9 +194,11 @@ def hpo_objective(
     hpo_cfg = config.get("hpo", {})
     objective_name = hpo_cfg.get("objective", "total_return")
 
-    search = define_funding_arb_search_space(trial)
+    is_distributional = config.get("agents", {}).get("sac", {}).get("distributional", False)
+    search = define_funding_arb_search_space(trial, distributional=is_distributional)
     agent_params = search["agent_params"]
     env_overrides = search["env_overrides"]
+    dsac_params = search.get("dsac_params", {})
 
     agents_cfg = config.get("agents", {})
     n_envs = agents_cfg.get("n_envs", 4)
@@ -328,11 +340,13 @@ def run_hpo_for_window(
     logger.info(f"Window {w_idx} HPO COMPLETE: best_return={best_return:.4f} (trial {best.number})")
     logger.info(f"  Best params: {best_params}")
 
-    # Split best params into agent vs env
+    # Split best params into agent vs env vs dsac
     agent_keys = {"learning_rate", "buffer_size", "batch_size", "gamma", "tau"}
     env_keys = {"reward_scaling", "lambda_delta", "deadband_threshold"}
+    dsac_keys = {"cvar_alpha", "n_quantiles", "kappa"}
     best_agent_params = {k: v for k, v in best_params.items() if k in agent_keys}
     best_env_overrides = {k: v for k, v in best_params.items() if k in env_keys}
+    best_dsac_params = {k: v for k, v in best_params.items() if k in dsac_keys}
 
     # Save best params
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -344,6 +358,7 @@ def run_hpo_for_window(
             "best_return": best_return,
             "agent_params": best_agent_params,
             "env_overrides": best_env_overrides,
+            "dsac_params": best_dsac_params,
             "all_params": best_params,
         }, f, indent=2)
     logger.info(f"  Saved best params to {best_path}")

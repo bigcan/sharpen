@@ -1,0 +1,92 @@
+# Funding Rate Arbitrage — Distributional SAC (QR-SAC + CVaR) HPO
+# Fixes regime decay: standard SAC optimizes mean return (dominated by high-funding
+# periods, only 2-3/7 OOS windows profitable). DSAC optimizes CVaR (worst-alpha%
+# of return distribution) for regime-robust policies.
+# Target: 5+/7 OOS windows profitable in walk-forward backtest.
+
+strategy:
+  id: "funding-arb-dsac10-hpo"
+  name: "funding_arb_dsac_10assets_hpo"
+  version: "1.0.0"
+
+universe:
+  # Top-10 by mean |funding rate| (2022-01 -> 2026-03):
+  # ARB 9.0e-5, UNI 7.9e-5, LINK 7.6e-5, OP 7.3e-5, LTC 7.1e-5,
+  # FIL 7.0e-5, DOGE 6.7e-5, BTC 6.4e-5, ETH 5.7e-5, BNB 5.4e-5
+  assets: ["ARB", "UNI", "LINK", "OP", "LTC", "FIL", "DOGE", "BTC", "ETH", "BNB"]
+  quote: "USDT"
+  data_exchange: "binance"
+  n_assets: 10
+
+data:
+  source: "ccxt"
+  market_type: "futures"
+  frequency: "1h"
+  start_date: "2022-01-01"
+  end_date: null  # rolling
+  cache_dir: "./data/crypto_cache"
+
+features:
+  tech_dim: 15            # 15 funding-arb features per asset
+  norm_window: 720        # 1 month in hours
+  zscore_window: 720
+  correlation_window: 168  # 1 week
+
+environment:
+  type: "funding_arb"
+  initial_capital: 100000
+  # --- Cost model (identical to scalar SAC baseline) ---
+  spot_taker_fee_pct: 0.0001     # 1 bp Binance spot
+  perp_taker_fee_pct: 0.0005     # 5 bp Binance futures
+  perp_margin_rate: 0.05          # 5% margin for perp leg (20x leverage)
+  slippage_base_bps: 2.0
+  slippage_impact_bps: 10.0
+  spot_borrow_rate_hourly: 8.33e-6  # ~0.02%/day / 24h
+  # --- Constraints ---
+  max_gross_exposure: 0.80
+  deadband_threshold: 0.01
+  action_repeat: 8
+  # --- Reward ---
+  lambda_basis: 0.0
+  lambda_delta: 100.0
+  lambda_turnover: 0.1
+  reward_scaling: 10000.0
+  reward_clip_range: [-5.0, 5.0]
+  circuit_breaker_threshold: 0.05
+
+agents:
+  primary: "sac"
+  total_timesteps: 2000000
+  n_envs: 4
+  sac:
+    # --- Distributional SAC (QR-SAC + CVaR) ---
+    distributional: true
+    n_quantiles: 32             # Number of quantile fractions
+    cvar_alpha: 0.25            # CVaR tail fraction (bottom 25% of returns)
+    quantile_embed_dim: 64      # Cosine basis embedding dimension
+    kappa: 1.0                  # Huber loss threshold for quantile regression
+    # --- Standard SAC hyperparams ---
+    learning_rate: 3.0e-4
+    buffer_size: 100000
+    batch_size: 256
+    tau: 0.005
+    gamma: 0.99
+    network_arch: [256, 256]
+
+hpo:
+  enabled: true
+  n_trials: 50
+  hpo_timesteps: 500000
+  objective: "total_return"
+
+walk_forward:
+  train_bars: 8760        # 1 year
+  val_bars: 720           # 1 month
+  test_bars: 1440         # 2 months
+  step_bars: 720          # 1 month step
+  embargo_bars: 0
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: null
+  tags: ["funding-arb", "dsac", "cvar", "hpo", "10-assets", "regime-robust"]
