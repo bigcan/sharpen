@@ -88,7 +88,8 @@ class CTraderBroker:
 
     # FIX CT-04: Reconnect timing constants
     _RECONNECT_COOLDOWN_SECS = 120  # Cooldown after exhausting all attempts
-    _ALREADY_LOGGED_IN_WAIT = 90  # Wait for server ghost-session to expire
+    _ALREADY_LOGGED_IN_WAIT = 150  # Wait for server ghost-session to expire
+    _SERVER_ISSUE_COOLDOWN_SECS = 300  # Longer cooldown for CANT_ROUTE_REQUEST
 
     def __init__(
         self,
@@ -161,6 +162,11 @@ class CTraderBroker:
         self._reconnect_cooldown_until = 0.0  # FIX CT-04: prevent reconnect spam
         self._already_logged_in_seen = False  # FIX CT-07: flag set by _on_message
 
+    @property
+    def client(self):
+        """Active ctrader_open_api.Client instance (None if disconnected)."""
+        return self._client
+
     async def connect(self) -> None:
         """Connect to cTrader Open API and authenticate."""
         if self._connected:
@@ -209,17 +215,14 @@ class CTraderBroker:
 
         reactor.callFromThread(self._client.startService)
 
-        # Wait for TCP connection
-        connected_deferred = self._client.whenConnected(failAfterFailures=3)
-        await self._deferred_to_future(connected_deferred, timeout=15.0)
-        self._connected = True
-
-        # FIX CT-11: Wrap handshake in try/except so a timeout during any
-        # protocol step (app auth, symbol resolve, etc.) tears down the
-        # connection.  Without this, _connected stays True after a partial
-        # handshake, and CT-08 retries skip everything via the early-return
-        # at the top of connect(), leaving symbol_id=None.
+        # FIX CT-11: Wrap TCP connect + handshake in try/except so any failure
+        # (timeout, auth, symbol resolve) tears down the connection.
         try:
+            # Wait for TCP connection
+            connected_deferred = self._client.whenConnected(failAfterFailures=3)
+            await self._deferred_to_future(connected_deferred, timeout=15.0)
+            self._connected = True
+
             # Step 1: Application auth
             app_auth = ProtoOAApplicationAuthReq()
             app_auth.clientId = self._client_id
@@ -314,6 +317,9 @@ class CTraderBroker:
             )
             self._connected = False
             self._symbol_id = None
+            if self._token_refresh_task and not self._token_refresh_task.done():
+                self._token_refresh_task.cancel()
+                self._token_refresh_task = None
             if self._client is not None:
                 try:
                     self._client.stopService()
@@ -469,12 +475,12 @@ class CTraderBroker:
                     ):
                         already_logged_in_seen = True
                         logger.warning(
-                            "Ghost session detected — waiting %ds for "
-                            "server-side expiry before final attempt",
+                            "CT-07/AUD: Ghost session detected (ALREADY_LOGGED_IN) — "
+                            "waiting %ds for server-side expiry before FINAL attempt",
                             self._ALREADY_LOGGED_IN_WAIT,
                         )
                         await self._teardown_client()
-                        self._already_logged_in_seen = False  # CT-07: reset
+                        self._already_logged_in_seen = False  # Reset for final try
                         await asyncio.sleep(self._ALREADY_LOGGED_IN_WAIT)
 
                         try:
@@ -495,6 +501,21 @@ class CTraderBroker:
                                 exc2,
                             )
                         break  # Don't retry further — enter cooldown
+
+                    # FIX AUD: Handle CANT_ROUTE_REQUEST server-side infrastructure issue.
+                    # Usually happens when IC Markets Demo is disconnected from Open API.
+                    if "CANT_ROUTE_REQUEST" in exc_str:
+                        logger.error(
+                            "AUD: cTrader server error (CANT_ROUTE_REQUEST) — "
+                            "IC Markets Demo server likely down. Entering "
+                            "longer %ds cooldown.",
+                            self._SERVER_ISSUE_COOLDOWN_SECS,
+                        )
+                        self._reconnect_cooldown_until = (
+                            time.time() + self._SERVER_ISSUE_COOLDOWN_SECS
+                        )
+                        await self._teardown_client()
+                        return False
 
             logger.error(
                 "cTrader reconnect FAILED after %d attempts%s",

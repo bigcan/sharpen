@@ -44,7 +44,7 @@ agents:
     gamma: 0.9677944079144885
     tau: 0.0020470394844356323
     batch_size: 512
-    buffer_size: 500000
+    buffer_size: 100
     initial_alpha: 0.1476793336332415
     gradient_clip: 9.281178071284028
 

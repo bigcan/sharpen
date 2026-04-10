@@ -35,7 +35,7 @@ agents:
     gamma: 0.97127                    # T34 best
     tau: 0.0038951                    # T34 best
     batch_size: 512
-    buffer_size: 500000
+    buffer_size: 100
     initial_alpha: 0.49701            # T34 best
     gradient_clip: 3.0198             # T34 best
 

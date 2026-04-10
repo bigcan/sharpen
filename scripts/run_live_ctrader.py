@@ -229,20 +229,29 @@ async def main_async(config: dict) -> None:
             await broker.connect()
             break  # Success
         except Exception as exc:
+            exc_str = str(exc)
             logger.error(
                 "CT-08: connect() attempt %d/%d failed: %s",
                 attempt, max_connect_attempts, exc,
             )
             if attempt == max_connect_attempts:
                 raise
-            # Exponential backoff: 5, 10, 20, 40s
-            delay = 5.0 * (2 ** (attempt - 1))
+
+            # FIX AUD: Special handling for server-side routing failures.
+            # If the IC Markets server is down, don't spam TCP connections.
+            if "CANT_ROUTE_REQUEST" in exc_str:
+                delay = 300.0  # 5 minutes
+                logger.warning("AUD: Server routing failure — waiting 5 min before retry")
+            else:
+                # Exponential backoff: 5, 10, 20, 40s
+                delay = 5.0 * (2 ** (attempt - 1))
+
             logger.info("CT-08: Retrying in %.0fs...", delay)
             await asyncio.sleep(delay)
 
     # Now create the data loader with the live cTrader connection
     loader = CTraderDataLoader(
-        client=broker._client,
+        broker=broker,
         account_id=broker._account_id,
         symbol_id=broker._symbol_id,
         symbol_digits=broker._symbol_digits,
