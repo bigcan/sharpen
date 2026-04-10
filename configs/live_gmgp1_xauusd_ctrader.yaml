@@ -42,7 +42,7 @@ agents:
     gamma: 0.99826
     tau: 0.0019716
     batch_size: 512
-    buffer_size: 500000
+    buffer_size: 100
     initial_alpha: 0.37652
     learning_starts: 5000
     update_interval: 4

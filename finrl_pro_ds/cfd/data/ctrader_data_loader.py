@@ -52,19 +52,19 @@ class CTraderDataLoader:
 
     def __init__(
         self,
-        client,
+        broker,
         account_id: int,
         symbol_id: int,
         symbol_digits: int = 2,
     ):
         """
         Args:
-            client: Connected ctrader_open_api.Client instance (shared with broker).
+            broker: CTraderBroker instance (provides active _client).
             account_id: cTrader trading account ID.
             symbol_id: Resolved symbol ID for XAUUSD.
             symbol_digits: Price decimal precision (2 for XAUUSD).
         """
-        self._client = client
+        self._broker = broker
         self._account_id = account_id
         self._symbol_id = symbol_id
         self._symbol_digits = symbol_digits
@@ -72,6 +72,11 @@ class CTraderDataLoader:
 
         # Compatibility: LiveTradingEngine may access loader._exchange
         self._exchange = None
+
+    @property
+    def _client(self):
+        """Dynamically fetch active client from broker (handles reconnects)."""
+        return self._broker.client
 
     async def fetch_ohlcv(
         self,

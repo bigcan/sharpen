@@ -33,7 +33,7 @@ agents:
     gamma: 0.99
     tau: 0.005
     batch_size: 512
-    buffer_size: 500000
+    buffer_size: 100
     initial_alpha: 0.2
 
 # --- Network (must match training checkpoint) ---

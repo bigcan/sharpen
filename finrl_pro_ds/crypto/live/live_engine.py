@@ -346,8 +346,7 @@ class LiveTradingEngine:
                     if not await self._ensure_broker_connected():
                         self._consecutive_errors += 1
                         if self._consecutive_errors >= 5:
-                            logger.critical("5 consecutive reconnect failures — stopping")
-                            break
+                            raise RuntimeError("5 consecutive reconnect failures — stopping")
                         continue
 
                     await self._trading_step(bar_time)
@@ -356,11 +355,12 @@ class LiveTradingEngine:
                 except asyncio.CancelledError:
                     break
                 except Exception as e:
+                    if isinstance(e, RuntimeError) and "5 consecutive" in str(e):
+                        raise # Re-raise my own error to bypass the catch-all
                     self._consecutive_errors += 1
                     logger.error(f"Trading step error: {e}", exc_info=True)
                     if self._consecutive_errors >= 5:
-                        logger.critical("5 consecutive errors — stopping")
-                        break
+                        raise RuntimeError("5 consecutive errors — stopping")
         finally:
             metrics_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
@@ -730,7 +730,15 @@ class LiveTradingEngine:
         """
         for attempt in range(1, max_retries + 1):
             try:
-                await self.obs_builder.bootstrap(self.loader, self._asset)
+                # FIX AUD: Start a background task to keep health file fresh
+                # during long bootstraps (fetching 100K bars takes time).
+                health_task = asyncio.create_task(self._health_heartbeat_loop())
+                try:
+                    await self.obs_builder.bootstrap(self.loader, self._asset)
+                finally:
+                    health_task.cancel()
+                    with contextlib.suppress(asyncio.CancelledError):
+                        await health_task
                 return
             except Exception as e:
                 if attempt == max_retries:
@@ -744,6 +752,12 @@ class LiveTradingEngine:
                     f"Retrying in {delay:.0f}s..."
                 )
                 await asyncio.sleep(delay)
+
+    async def _health_heartbeat_loop(self) -> None:
+        """Keep health file fresh during long blocking operations."""
+        while True:
+            self._write_bootstrap_health("bootstrapping")
+            await asyncio.sleep(60)  # Refresh every minute
 
     # -------------------------------------------------------------------
     # Data fetching
