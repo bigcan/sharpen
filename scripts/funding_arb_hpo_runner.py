@@ -1,7 +1,10 @@
 """Funding Rate Arbitrage HPO Runner — Optuna-based walk-forward pipeline.
 
-Per-window SAC HPO with total_return objective, followed by full 2M training.
-No ensemble/arbitrator — single SAC agent per window.
+Per-window SAC/DSAC HPO with total_return objective, followed by full 2M training.
+No ensemble/arbitrator — single agent per window.
+
+Supports both SB3 SAC (default) and custom DistributionalSACAgent (QR-SAC + CVaR)
+when ``config["agents"]["sac"]["distributional"] = true``.
 
 Usage:
     # Smoke test (2 trials, 1K steps)
@@ -12,6 +15,10 @@ Usage:
     # Production HPO (50 trials, 500K steps, 5 windows)
     python scripts/funding_arb_hpo_runner.py \
       --config configs/funding_arb_sac_5assets_hpo.yaml
+
+    # DSAC HPO (distributional SAC with CVaR)
+    python scripts/funding_arb_hpo_runner.py \
+      --config configs/funding_arb_dsac_10assets_hpo.yaml
 """
 
 from __future__ import annotations
@@ -133,6 +140,147 @@ def _create_eval_env(arrays: dict, config: dict, env_overrides: dict | None = No
 
 
 # ---------------------------------------------------------------------------
+# DSAC agent builder + training loop (BUG-DSAC-01 fix)
+# ---------------------------------------------------------------------------
+
+def _make_dsac_agent(env, config: dict, agent_params: dict, dsac_params: dict):
+    """Build DistributionalSACAgent configured for flat-obs FundingArbEnv.
+
+    Uses obs_mode="summary_stats" so the SummaryStatsEncoder handles
+    the flat 1D observation vector directly (no multi-scale windowing).
+    """
+    import torch
+    from finrl_pro_ds.agents.sac.dsac_agent import DistributionalSACAgent
+
+    obs_dim = env.observation_space.shape[0]
+    action_dim = env.action_space.shape[0]
+    agents_cfg = config.get("agents", {}).get("sac", {})
+    network_arch = agents_cfg.get("network_arch", [256, 256])
+    fusion_dim = network_arch[0] if network_arch else 256
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    network_config = {
+        "obs_mode": "summary_stats",
+        "summary_input_dim": obs_dim,
+        "scale_encoder": {"summary_input_dim": obs_dim},
+        "private_dim": 0,
+        "fusion_dim": fusion_dim,
+        "n_scales": 1,
+        "window_size": 1,
+        "action_dim": action_dim,
+    }
+
+    return DistributionalSACAgent(
+        network_config=network_config,
+        n_quantiles=dsac_params.get("n_quantiles", 32),
+        cvar_alpha=dsac_params.get("cvar_alpha", 0.25),
+        quantile_embed_dim=agents_cfg.get("quantile_embed_dim", 64),
+        kappa=dsac_params.get("kappa", 1.0),
+        lr_actor=agent_params.get("learning_rate", 3e-4),
+        lr_critic=agent_params.get("learning_rate", 3e-4),
+        gamma=agent_params.get("gamma", 0.99),
+        tau=agent_params.get("tau", 0.005),
+        batch_size=agent_params.get("batch_size", 256),
+        buffer_size=agent_params.get("buffer_size", 100_000),
+        learning_starts=agent_params.get("learning_starts", 1000),
+        update_interval=agents_cfg.get("update_interval", 4),
+        device=device,
+    )
+
+
+def _flat_obs_to_dict(obs: np.ndarray) -> dict:
+    """Wrap flat numpy obs into dict format for SACAgent.store_transition."""
+    return {
+        "scale_0": obs.astype(np.float32),
+        "private": np.array([], dtype=np.float32),
+    }
+
+
+def _train_dsac_agent(
+    agent,
+    env,
+    total_timesteps: int,
+    global_step_offset: int = 0,
+    log_interval: int = 5000,
+):
+    """Collect-and-train loop for DistributionalSACAgent on FundingArbEnv.
+
+    Mirrors SB3's .learn() but uses the custom agent's replay buffer
+    and train_step_mega for distributional training.
+    """
+    import torch
+
+    obs, _ = env.reset()
+    start_time = time.time()
+    last_log_step = 0
+
+    update_interval = agent.update_interval
+    mega_steps = max(update_interval, 1)
+
+    for step in range(1, total_timesteps + 1):
+        # Collect transition
+        with torch.no_grad():
+            obs_tensor = torch.as_tensor(
+                obs, dtype=torch.float32,
+            ).unsqueeze(0).to(agent.device, non_blocking=True)
+            action = agent.predict(obs_tensor, private=None, deterministic=False)
+            action_np = action.squeeze(0).cpu().numpy()
+
+        next_obs, reward, terminated, truncated, info = env.step(action_np)
+        done = terminated or truncated
+
+        agent.store_transition(
+            _flat_obs_to_dict(obs), action_np, float(reward),
+            _flat_obs_to_dict(next_obs), done,
+        )
+
+        if done:
+            obs, _ = env.reset()
+        else:
+            obs = next_obs
+
+        # Train
+        if step % update_interval == 0:
+            metrics = agent.train_step_mega(mega_steps)
+            if metrics and step - last_log_step >= log_interval:
+                global_step = global_step_offset + step
+                elapsed = time.time() - start_time
+                sps = step / max(elapsed, 1e-6)
+                _wandb_log({
+                    "train/dsac/step": step,
+                    "train/dsac/sps": sps,
+                    "train/dsac/progress": step / total_timesteps,
+                    "_step": global_step,
+                    "train/sps": sps,
+                    **{f"train/dsac/{k}": v for k, v in metrics.items()},
+                })
+                last_log_step = step
+
+    return agent
+
+
+class _DSACModelWrapper:
+    """Wraps DistributionalSACAgent to match SB3's model.predict(obs) API.
+
+    This lets _evaluate_agent_on_env work with both SB3 and custom agents.
+    """
+
+    def __init__(self, agent):
+        self.agent = agent
+
+    def predict(self, obs, deterministic=True):
+        import torch
+        obs_tensor = torch.as_tensor(
+            obs, dtype=torch.float32,
+        ).unsqueeze(0).to(self.agent.device, non_blocking=True)
+        action = self.agent.predict(obs_tensor, private=None, deterministic=deterministic)
+        return action.squeeze(0).cpu().numpy(), None
+
+    def save(self, path: str):
+        self.agent.save(path)
+
+
+# ---------------------------------------------------------------------------
 # HPO search space
 # ---------------------------------------------------------------------------
 
@@ -205,21 +353,28 @@ def hpo_objective(
     network_arch = agents_cfg.get("sac", {}).get("network_arch", [256, 256])
 
     try:
-        # Build vectorized train env with trial's env overrides
-        vec_env = _make_vec_funding_arb_env(
-            train_arrays, config, n_envs, env_overrides,
-        )
-
-        # Build SAC with trial's agent params + locked network
-        sac_cfg = {**agent_params, "network_arch": network_arch}
-        model = _make_sb3_agent("sac", vec_env, sac_cfg)
-
-        # Train with WandB callback for heartbeat + monitor visibility
-        wb_cb = _WandbStepCallback(
-            "sac", hpo_timesteps,
-            global_step_offset=global_step_offset,
-        )
-        model.learn(total_timesteps=hpo_timesteps, callback=wb_cb.callback)
+        if is_distributional:
+            # --- DSAC path: custom DistributionalSACAgent ---
+            train_env = _create_eval_env(train_arrays, config, env_overrides)
+            agent = _make_dsac_agent(train_env, config, agent_params, dsac_params)
+            _train_dsac_agent(
+                agent, train_env, hpo_timesteps,
+                global_step_offset=global_step_offset,
+            )
+            model = _DSACModelWrapper(agent)
+        else:
+            # --- SB3 SAC path (original) ---
+            vec_env = _make_vec_funding_arb_env(
+                train_arrays, config, n_envs, env_overrides,
+            )
+            sac_cfg = {**agent_params, "network_arch": network_arch}
+            model = _make_sb3_agent("sac", vec_env, sac_cfg)
+            wb_cb = _WandbStepCallback(
+                "sac", hpo_timesteps,
+                global_step_offset=global_step_offset,
+            )
+            model.learn(total_timesteps=hpo_timesteps, callback=wb_cb.callback)
+            vec_env.close()
 
         # Evaluate on val
         val_env = _create_eval_env(val_arrays, config, env_overrides)
@@ -244,6 +399,7 @@ def hpo_objective(
             val_objective = total_return
 
         # Log to WandB
+        agent_label = "dsac" if is_distributional else "sac"
         _wandb_log({
             f"hpo/trial_{trial.number}/total_return": total_return,
             f"hpo/trial_{trial.number}/objective_{objective_name}": val_objective,
@@ -254,12 +410,11 @@ def hpo_objective(
         })
 
         # Cleanup
-        vec_env.close()
-        del model, vec_env
+        del model
         gc.collect()
 
         logger.info(
-            f"Trial {trial.number}: {objective_name}={val_objective:.4f}, "
+            f"Trial {trial.number} ({agent_label}): {objective_name}={val_objective:.4f}, "
             f"total_return={total_return:.4f}, sharpe={val_metrics.get('sharpe', 0):.3f}",
         )
         return val_objective
@@ -376,31 +531,46 @@ def run_hpo_for_window(
     total_timesteps = agents_cfg.get("total_timesteps", 2_000_000)
     n_envs = agents_cfg.get("n_envs", 4)
     network_arch = agents_cfg.get("sac", {}).get("network_arch", [256, 256])
+    is_distributional = agents_cfg.get("sac", {}).get("distributional", False)
+    full_train_offset = n_trials * hpo_timesteps
 
     try:
-        sac_cfg = {**best_agent_params, "network_arch": network_arch}
-        vec_env = _make_vec_funding_arb_env(
-            train_arrays, config, n_envs, best_env_overrides,
-        )
-        model = _make_sb3_agent("sac", vec_env, sac_cfg)
-        # Offset past HPO steps so _step stays monotonic
-        full_train_offset = n_trials * hpo_timesteps
-        wb_cb = _WandbStepCallback(
-            "sac", total_timesteps,
-            global_step_offset=full_train_offset,
-        )
-        model.learn(total_timesteps=total_timesteps, callback=wb_cb.callback)
-        vec_env.close()
-        logger.info(f"  SAC full training complete ({total_timesteps} steps)")
+        if is_distributional:
+            # --- DSAC full training ---
+            train_env = _create_eval_env(train_arrays, config, best_env_overrides)
+            agent = _make_dsac_agent(train_env, config, best_agent_params, best_dsac_params)
+            _train_dsac_agent(
+                agent, train_env, total_timesteps,
+                global_step_offset=full_train_offset,
+            )
+            model = _DSACModelWrapper(agent)
+            checkpoint_path = out_dir / f"w{w_idx}_dsac_full.pt"
+            model.save(str(checkpoint_path))
+            logger.info(f"  DSAC full training complete ({total_timesteps} steps)")
+        else:
+            # --- SB3 SAC full training ---
+            sac_cfg = {**best_agent_params, "network_arch": network_arch}
+            vec_env = _make_vec_funding_arb_env(
+                train_arrays, config, n_envs, best_env_overrides,
+            )
+            model = _make_sb3_agent("sac", vec_env, sac_cfg)
+            wb_cb = _WandbStepCallback(
+                "sac", total_timesteps,
+                global_step_offset=full_train_offset,
+            )
+            model.learn(total_timesteps=total_timesteps, callback=wb_cb.callback)
+            vec_env.close()
+            checkpoint_path = out_dir / f"w{w_idx}_sac_full.zip"
+            model.save(str(checkpoint_path))
+            logger.info(f"  SAC full training complete ({total_timesteps} steps)")
 
-        # Save model checkpoint (before eval, before cleanup)
-        checkpoint_path = out_dir / f"w{w_idx}_sac_full.zip"
-        model.save(str(checkpoint_path))
         logger.info(f"  Model checkpoint saved: {checkpoint_path}")
-        _wandb_log({f"train/sac/w{w_idx}/status": "complete"})
+        agent_label = "dsac" if is_distributional else "sac"
+        _wandb_log({f"train/{agent_label}/w{w_idx}/status": "complete"})
     except Exception as e:
-        logger.error(f"  SAC full training failed: {e}")
-        _wandb_log({f"train/sac/w{w_idx}/status": "failed"})
+        agent_label = "dsac" if is_distributional else "sac"
+        logger.error(f"  {agent_label.upper()} full training failed: {e}")
+        _wandb_log({f"train/{agent_label}/w{w_idx}/status": "failed"})
         return {"window": w_idx, "status": "FAILED", "best_return": best_return, "error": str(e)}
 
     # --- Eval Phase ---
@@ -642,7 +812,9 @@ def main():
         if not os.environ.get("WANDB_DISABLED"):
             from finrl_pro_ds.utils.naming import generate_run_name
             run_name = args.run_name or generate_run_name(args.config or "funding_arb_hpo")
-            tags = list(args.tags or []) + ["funding-arb", "sac", "hpo"]
+            is_dist = config.get("agents", {}).get("sac", {}).get("distributional", False)
+            agent_tag = "dsac" if is_dist else "sac"
+            tags = list(args.tags or []) + ["funding-arb", agent_tag, "hpo"]
             wandb_cfg = config.get("wandb", {})
             wandb.init(
                 project=wandb_cfg.get("project", "FinRL-Pro-DS"),
