@@ -147,9 +147,15 @@ class BarClock:
                 # Check for clock jump after waking
                 self._check_clock_jump(wall_before, mono_before)
 
-            # Check if we're too late (e.g., system was suspended)
-            actual_time = datetime.now(timezone.utc)
-            lateness = (actual_time - target).total_seconds()
+                # Lateness = monotonic overshoot beyond requested sleep.
+                # Immune to NTP / VM clock jumps that inflate wall-clock
+                # lateness while the actual sleep duration was correct.
+                mono_elapsed = time.monotonic() - mono_before
+                lateness = mono_elapsed - sleep_seconds
+            else:
+                # Already past target — use wall-clock deficit (no sleep to measure)
+                lateness = -sleep_seconds
+
             if lateness <= self.max_late:
                 self._bar_count += 1
                 return next_bar
