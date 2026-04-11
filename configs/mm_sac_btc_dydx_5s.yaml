@@ -109,7 +109,7 @@ training:
   use_amp: true
   amp_dtype: "bfloat16"
   torch_compile: true
-  num_envs: 8                         # Reduced from 20 — 1s→5s aggregation is memory-heavy
+  num_envs: 24                        # OPT: was 8 (874MB/49GB VRAM). Replay ratio 256x→85x.
   use_sync: true                      # SyncVectorEnv — share data across envs, no spawn copies
 
 hpo:
