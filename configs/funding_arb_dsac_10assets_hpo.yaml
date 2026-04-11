@@ -57,7 +57,7 @@ environment:
 agents:
   primary: "sac"
   total_timesteps: 2000000
-  n_envs: 4
+  n_envs: 24                    # OPT: was 4, massively underutilizing GPU
   sac:
     # --- Distributional SAC (QR-SAC + CVaR) ---
     distributional: true
@@ -67,11 +67,18 @@ agents:
     kappa: 1.0                  # Huber loss threshold for quantile regression
     # --- Standard SAC hyperparams ---
     learning_rate: 3.0e-4
-    buffer_size: 100000
-    batch_size: 256
+    buffer_size: 500000         # OPT: was 100K, too small for 2M steps
+    batch_size: 512             # OPT: was 256, Tensor Core aligned
     tau: 0.005
     gamma: 0.99
     network_arch: [256, 256]
+    update_interval: 4          # OPT: 4 gradient steps per env.step (tau auto-scales). Replay ratio = (4×512)/24 = 85x, justified for 32-quantile DSAC.
+    gradient_clip: 10.0
+
+training:
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true           # OPT: full-model compile for ~2-3x SPS boost
 
 hpo:
   enabled: true
