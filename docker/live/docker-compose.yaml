@@ -136,6 +136,7 @@ services:
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1_v5_l1_seed456:/app/checkpoints/gmgp1_v5_l1_seed456:ro
       - gmgp1-gold-logs:/app/logs
+      - gmgp1-gold-state:/app/state
 
   sg1-gold:
     <<: *ib-strategy
@@ -158,6 +159,7 @@ services:
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/sg1_best:/app/checkpoints/sg1_best:ro
       - sg1-gold-logs:/app/logs
+      - sg1-gold-state:/app/state
 
   # ============================================================
   #  Crypto Strategies (Bybit / CCXT)
@@ -183,6 +185,7 @@ services:
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1-btc-l1-multiseed_20260407_070227:/app/checkpoints/gmgp1-btc-l1-multiseed_20260407_070227:ro
       - gmgp1-btc-logs:/app/logs
+      - gmgp1-btc-state:/app/state
 
   funding-arb:
     <<: *crypto-strategy
@@ -204,6 +207,7 @@ services:
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/funding_arb_best:/app/checkpoints/funding_arb_best:ro
       - funding-arb-logs:/app/logs
+      - funding-arb-state:/app/state
 
   sync-1h:
     <<: *crypto-strategy
@@ -225,6 +229,7 @@ services:
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/sync_1h_best:/app/checkpoints/sync_1h_best:ro
       - sync-1h-logs:/app/logs
+      - sync-1h-state:/app/state
 
   # --- Velotrade Prop Firm (DXtrade) ---
   velotrade-btc:
@@ -249,6 +254,7 @@ services:
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/velotrade_btc_best:/app/checkpoints/velotrade_btc_best:ro
       - velotrade-btc-logs:/app/logs
+      - velotrade-btc-state:/app/state
 
   gmgp1-xauusd:
     <<: *crypto-strategy
@@ -272,6 +278,7 @@ services:
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1-xauusd-l1-multiseed_20260408_163103:/app/checkpoints/gmgp1-xauusd-l1-multiseed_20260408_163103:ro
       - gmgp1-xauusd-logs:/app/logs
+      - gmgp1-xauusd-state:/app/state
 
   # ============================================================
   #  Add new strategies here. Copy a template above and change:
@@ -349,3 +356,10 @@ volumes:
   sync-1h-logs:
   gmgp1-xauusd-logs:
   velotrade-btc-logs:
+  gmgp1-gold-state:
+  sg1-gold-state:
+  gmgp1-btc-state:
+  funding-arb-state:
+  sync-1h-state:
+  gmgp1-xauusd-state:
+  velotrade-btc-state:

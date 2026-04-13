@@ -138,6 +138,21 @@ class LiveTradingEngine:
             "position_file", "/tmp/finrl_last_position.json",
         ))
 
+        # Persistent risk-halt state (S427 revive-after-halt fix).
+        # When daily-loss / MAX_DD trips, we write halted_until so that
+        # docker `restart: unless-stopped` can't revive a halted engine
+        # before UTC day rollover. Engine gates on this file at startup.
+        self._halt_state_file = Path(config.get("safety", {}).get(
+            "halt_state_file", "/app/state/risk_state.json",
+        ))
+
+        # Intra-bar DD projection (S427 follow-up): project worst-case PV
+        # using the bar's adverse extreme (low for long, high for short).
+        # Disabled by setting safety.intrabar_dd_projection=false.
+        self._intrabar_dd_enabled = bool(config.get("safety", {}).get(
+            "intrabar_dd_projection", True,
+        ))
+
         # Daily loss smoothing: median of last 3 PV readings prevents false
         # triggers from broker API hiccups returning anomalous portfolio values
         self._pv_buffer: collections.deque[float] = collections.deque(maxlen=3)
@@ -314,6 +329,12 @@ class LiveTradingEngine:
         # FIX AUD-C06: Reset risk manager with initial portfolio value
         self.risk_manager.reset(self._portfolio_value)
 
+        # S427: gate on persistent halt state before entering main loop.
+        # If a prior process tripped daily-loss / MAX_DD, stay halted
+        # until halted_until so `restart: unless-stopped` can't revive us.
+        if await self._check_persistent_halt():
+            return
+
         # Initialize WandB
         self._init_wandb()
 
@@ -436,6 +457,13 @@ class LiveTradingEngine:
         # --- 2. Update observation builder ---
         self.obs_builder.update(new_bars)
 
+        # S427: intra-bar DD projection against the bar just closed.
+        # Closing-price DD checks miss max adverse excursion within the bar,
+        # which is the realistic worst case a broker / prop firm monitors.
+        await self._check_intrabar_dd(bar_time)
+        if self._should_stop:
+            return
+
         # --- 2b. Feature warmup skip ---
         if self._warmup_bars_remaining > 0:
             self._warmup_bars_remaining -= 1
@@ -553,6 +581,11 @@ class LiveTradingEngine:
                 try:
                     await self._emergency_flatten()
                 finally:
+                    self._write_halt_state(
+                        reason="risk_halt",
+                        detail=",".join(violations),
+                        now_utc=datetime.now(timezone.utc),
+                    )
                     self._request_stop("risk_halt")
                 return
 
@@ -1281,6 +1314,11 @@ class LiveTradingEngine:
                 try:
                     await self._emergency_flatten()
                 finally:
+                    self._write_halt_state(
+                        reason="daily_loss_limit",
+                        detail=f"smoothed_return={smoothed_return:.4f}",
+                        now_utc=datetime.now(timezone.utc),
+                    )
                     self._request_stop("daily_loss_limit")
             elif raw_return < -self._max_daily_loss_pct:
                 # Single reading breached but median didn't — likely API hiccup
@@ -1416,6 +1454,159 @@ class LiveTradingEngine:
         """Request graceful shutdown."""
         logger.info(f"Stop requested: {reason}")
         self._should_stop = True
+
+    # -------------------------------------------------------------------
+    # S427: Persistent halt state + intra-bar DD projection
+    # -------------------------------------------------------------------
+    @staticmethod
+    def _next_utc_midnight(now_utc: datetime) -> datetime:
+        return (now_utc + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        )
+
+    def _write_halt_state(
+        self, reason: str, detail: str, now_utc: datetime,
+    ) -> None:
+        """Persist halt metadata so restarts stay halted until UTC day rollover."""
+        try:
+            self._halt_state_file.parent.mkdir(parents=True, exist_ok=True)
+            halted_until = self._next_utc_midnight(now_utc)
+            payload = {
+                "halted_until": halted_until.isoformat(),
+                "halted_at": now_utc.isoformat(),
+                "reason": reason,
+                "detail": detail,
+                "strategy": self._strategy_name,
+                "daily_start_value": self._daily_start_value,
+                "portfolio_value": self._portfolio_value,
+            }
+            tmp = self._halt_state_file.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(payload, indent=2))
+            tmp.replace(self._halt_state_file)
+            logger.critical(
+                f"HALT STATE WRITTEN: {self._halt_state_file} "
+                f"halted_until={halted_until.isoformat()} reason={reason}",
+            )
+        except Exception as e:
+            logger.error(f"Failed to write halt state: {e}", exc_info=True)
+
+    def _clear_halt_state(self) -> None:
+        try:
+            if self._halt_state_file.exists():
+                self._halt_state_file.unlink()
+                logger.info(f"Cleared halt state: {self._halt_state_file}")
+        except Exception as e:
+            logger.warning(f"Failed to clear halt state: {e}")
+
+    async def _check_persistent_halt(self) -> bool:
+        """Gate startup on a prior halt. Returns True if start() should exit."""
+        if not self._halt_state_file.exists():
+            return False
+        try:
+            data = json.loads(self._halt_state_file.read_text())
+            halted_until = datetime.fromisoformat(data["halted_until"])
+            if halted_until.tzinfo is None:
+                halted_until = halted_until.replace(tzinfo=timezone.utc)
+        except Exception as e:
+            logger.error(
+                f"Halt state file unreadable ({e}); removing and continuing.",
+            )
+            with contextlib.suppress(Exception):
+                self._halt_state_file.unlink()
+            return False
+
+        now = datetime.now(timezone.utc)
+        if halted_until <= now:
+            logger.info(
+                f"Halt expired at {halted_until.isoformat()} "
+                f"(reason={data.get('reason')}). Clearing state and starting.",
+            )
+            self._clear_halt_state()
+            return False
+
+        sleep_seconds = (halted_until - now).total_seconds()
+        logger.critical(
+            f"PERSISTENT HALT ACTIVE: reason={data.get('reason')} "
+            f"detail={data.get('detail')} halted_at={data.get('halted_at')} "
+            f"halted_until={halted_until.isoformat()} "
+            f"sleeping {sleep_seconds:.0f}s before release.",
+        )
+
+        # Heartbeat every 30s so healthcheck.sh doesn't flag us UNHEALTHY
+        # and docker doesn't kill+restart the container in a tight loop.
+        self._write_bootstrap_health("risk_halt_sleeping")
+        heartbeat_interval = 30.0
+        remaining = sleep_seconds
+        while remaining > 0 and not self._should_stop:
+            chunk = min(heartbeat_interval, remaining)
+            try:
+                await asyncio.sleep(chunk)
+            except asyncio.CancelledError:
+                logger.info("Halt sleep cancelled.")
+                return True
+            remaining -= chunk
+            self._write_bootstrap_health("risk_halt_sleeping")
+
+        if self._should_stop:
+            return True
+
+        self._clear_halt_state()
+        logger.info("Persistent halt released — resuming normal startup.")
+        return False
+
+    async def _check_intrabar_dd(self, bar_time: datetime) -> None:
+        """Project worst-case intra-bar PV against daily-loss limit.
+
+        Uses the latest base-scale bar's adverse extreme (low for long,
+        high for short) to estimate the maximum adverse excursion that
+        occurred within the bar. If projected daily return would breach
+        the limit, flatten and halt (persistently).
+        """
+        if not self._intrabar_dd_enabled:
+            return
+        if abs(self._current_position) < 1e-9:
+            return
+        if self._daily_start_value <= 0:
+            return
+
+        high, low = self.obs_builder.get_current_hl()
+        close = self.obs_builder.get_current_close()
+        if close <= 0 or high <= 0 or low <= 0:
+            return
+
+        # Position is a unit-less target in [-1, 1] representing fraction of
+        # portfolio_value deployed as notional. Worst-case intra-bar PnL:
+        #   long  → price visits `low`   → pnl = pos * pv * (low  - close) / close
+        #   short → price visits `high`  → pnl = pos * pv * (high - close) / close
+        adverse_price = low if self._current_position > 0 else high
+        adverse_pnl = (
+            self._current_position * self._portfolio_value
+            * (adverse_price - close) / close
+        )
+        worst_pv = self._portfolio_value + adverse_pnl
+        projected_return = (worst_pv - self._daily_start_value) / self._daily_start_value
+
+        if projected_return < -self._max_daily_loss_pct:
+            logger.critical(
+                f"INTRA-BAR DD PROJECTION: pos={self._current_position:+.4f} "
+                f"close={close:.4f} adverse={adverse_price:.4f} "
+                f"worst_pv={worst_pv:.2f} daily_start={self._daily_start_value:.2f} "
+                f"projected_return={projected_return:.2%} < -{self._max_daily_loss_pct:.0%}. "
+                f"Flattening and halting.",
+            )
+            try:
+                await self._emergency_flatten()
+            finally:
+                self._write_halt_state(
+                    reason="intrabar_dd_projection",
+                    detail=(
+                        f"projected_return={projected_return:.4f} "
+                        f"pos={self._current_position:.4f} "
+                        f"adverse={adverse_price:.4f} close={close:.4f}"
+                    ),
+                    now_utc=datetime.now(timezone.utc),
+                )
+                self._request_stop("intrabar_dd_projection")
 
     # -------------------------------------------------------------------
     # WandB logging

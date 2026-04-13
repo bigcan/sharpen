@@ -558,6 +558,16 @@ class LiveObsBuilder:
             return float(base_df['close'].iloc[-1])
         return 0.0
 
+    def get_current_hl(self) -> tuple[float, float]:
+        """Return (high, low) of the most recent base-scale bar. (0.0, 0.0) if unavailable."""
+        base_df = self._scale_dfs.get(self._base_scale)
+        if base_df is not None and len(base_df) > 0:
+            return (
+                float(base_df['high'].iloc[-1]),
+                float(base_df['low'].iloc[-1]),
+            )
+        return (0.0, 0.0)
+
     def get_latest_timestamp(self) -> Optional[pd.Timestamp]:
         """Get timestamp of the most recent base-scale bar."""
         base_df = self._scale_dfs.get(self._base_scale)
