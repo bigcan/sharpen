@@ -77,7 +77,7 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 262945.0             # IB paper account (reset 2026-04-02)
+  initial_balance: 10000.0              # IB paper account (reset 2026-04-13)
   deadband_threshold: 0.25             # Ignore position changes < 25% (matches training)
   taker_fee: 0.0000017                 # ~0.17bps for GC ($2.50 / ~$150K half-notional)
   weekend_flatten:
@@ -100,7 +100,8 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "gmgp1-v5", "Gold", "SAC", "15min", "IB", "paper", "GC", "COMEX"]
+  tags: ["live", "gmgp1-v5", "Gold", "SAC", "15min", "IB", "paper", "GC", "COMEX", "reset-20260413"]
+  run_id: "live-gold-ib-paper-20260413"
 
 # --- Safety ---
 safety:
