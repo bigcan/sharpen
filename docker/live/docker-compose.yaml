@@ -50,7 +50,7 @@ x-ib-strategy: &ib-strategy
   deploy:
     resources:
       limits:
-        memory: 4G
+        memory: 1536M
         cpus: "2.0"
 x-crypto-strategy: &crypto-strategy
   image: finrl-live-engine:latest
@@ -60,7 +60,7 @@ x-crypto-strategy: &crypto-strategy
   deploy:
     resources:
       limits:
-        memory: 4G
+        memory: 1536M
         cpus: "2.0"
 # ============================================================
 #  Infrastructure
