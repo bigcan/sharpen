@@ -26,6 +26,7 @@ Usage:
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -744,37 +745,42 @@ def format_hw_table(hw_results):
     """Format hardware status as a table."""
     lines = []
     lines.append("")
-    lines.append("=" * 90)
+    lines.append("=" * 120)
     lines.append("  FLEET HARDWARE STATUS")
-    lines.append("=" * 90)
+    lines.append("=" * 120)
 
-    header = f"{'Instance':<12} {'GPU':<4} {'Model':<10} {'Util%':>6} {'Mem':>12} {'Mem%':>5} {'Temp':>5} {'Status':<12}"
+    header = (
+        f"{'Instance':<12} {'GPU':<4} {'Model':<10} {'Util%':>6} "
+        f"{'Mem':>14} {'Mem%':>6} {'Temp':>6} {'Status':<12}"
+    )
     lines.append(header)
-    lines.append("-" * 90)
+    lines.append("-" * 120)
 
     for hw in hw_results:
         if hw["status"] == "UNREACHABLE":
-            lines.append(f"{hw['instance']:<12} {'--':<4} {'--':<10} {'--':>6} {'--':>12} {'--':>5} {'--':>5} {'UNREACHABLE':<12}")
+            lines.append(
+                f"{hw['instance']:<12} {'--':<4} {'--':<10} {'--':>6} "
+                f"{'--':>14} {'--':>6} {'--':>6} {'UNREACHABLE':<12}",
+            )
             continue
 
         for i, gpu in enumerate(hw["gpus"]):
-            gpu_model = hw["gpus_config"][i] if i < len(hw["gpus_config"]) else "?"
+            gpu_model = hw["gpus_config"][i] if i < len(hw["gpus_config"]) else "--"
             mem_str = f"{gpu['mem_used_mb']}/{gpu['mem_total_mb']}MB"
-            util_str = f"{gpu['util_pct']}%" if isinstance(gpu['util_pct'], int) else str(gpu['util_pct'])
-            temp_str = f"{gpu['temp_c']}C" if isinstance(gpu['temp_c'], int) else str(gpu['temp_c'])
+            util_str = f"{gpu['util_pct']}%" if isinstance(gpu['util_pct'], int) else "--"
+            temp_str = f"{gpu['temp_c']}C" if isinstance(gpu['temp_c'], int) else "--"
             mem_pct_str = f"{gpu['mem_pct']:.0f}%"
 
             procs = gpu.get("process_count", None)
             if procs is not None:
                 status = f"{procs} proc" if procs > 0 else "idle"
             else:
-                # Fallback to instance-level count (shared)
                 inst_procs = len(hw["processes"])
                 status = f"{inst_procs} proc" if inst_procs > 0 else "idle"
 
             lines.append(
                 f"{hw['instance']:<12} {gpu['index']:<4} {gpu_model:<10} "
-                f"{util_str:>6} {mem_str:>12} {mem_pct_str:>5} {temp_str:>5} {status:<12}",
+                f"{util_str:>6} {mem_str:>14} {mem_pct_str:>6} {temp_str:>6} {status:<12}",
             )
 
     lines.append("")
@@ -801,9 +807,9 @@ def format_wandb_table(wandb_runs):
     lines.append("=" * 120)
 
     header = (
-        f"{'Tag':<8} {'RunID':<10} {'Instance':<12} {'Step':>10} "
-        f"{'SPS':>6} {'PF':>7} {'Q_mean':>8} {'Loss':>8} "
-        f"{'Phase':<10} {'Updated':>8} {'ETA':>8} {'Status':<10}"
+        f"{'Tag':<10} {'RunID':<10} {'Instance':<12} {'Step':>10} "
+        f"{'SPS':>6} {'PF':>7} {'Q_mean':>8} {'Loss':>10} "
+        f"{'Phase':<12} {'Updated':>8} {'ETA':>8} {'Status':<6}"
     )
     lines.append(header)
     lines.append("-" * 120)
@@ -823,7 +829,16 @@ def format_wandb_table(wandb_runs):
             sps_str = f"{run['sps']:.0f}" if run['sps'] else "--"
             pf_str = f"{run['best_pf']:.4f}" if run['best_pf'] else "--"
             q_str = f"{run['q_mean']:.1f}" if run['q_mean'] is not None else "--"
-            loss_str = f"{run['loss']:.4f}" if run['loss'] and isinstance(run['loss'], (int, float)) else "--"
+            loss_val = run.get('loss')
+            if isinstance(loss_val, (int, float)):
+                if math.isnan(loss_val):
+                    loss_str = "NaN"
+                elif math.isinf(loss_val):
+                    loss_str = "Inf"
+                else:
+                    loss_str = f"{loss_val:.4f}"
+            else:
+                loss_str = "--"
             phase_str = run['train_status'] or run['hpo_status'] or "--"
             if run['hpo_trials']:
                 trials_val = run['hpo_trials']
@@ -836,10 +851,12 @@ def format_wandb_table(wandb_runs):
 
             eta_str = run.get('eta_str', '--')
 
+            tag_str = (run['exp_tag'] or "--")[:10]
+            rid_str = (run['run_id'] or "--")[:10]
             lines.append(
-                f"{run['exp_tag']:<8} {run['run_id']:<10} {run['instance']:<12} "
-                f"{step_str:>10} {sps_str:>6} {pf_str:>7} {q_str:>8} {loss_str:>8} "
-                f"{phase_str:<10} {updated_str:>8} {eta_str:>8} {status:<10}",
+                f"{tag_str:<10} {rid_str:<10} {run['instance']:<12} "
+                f"{step_str:>10} {sps_str:>6} {pf_str:>7} {q_str:>8} {loss_str:>10} "
+                f"{phase_str:<12} {updated_str:>8} {eta_str:>8} {status:<6}",
             )
 
     lines.append("")
@@ -861,9 +878,9 @@ def format_wandb_table(wandb_runs):
 def format_finished_table(finished_runs, hours):
     """Format recently finished WandB runs as a table."""
     lines = []
-    lines.append("=" * 100)
+    lines.append("=" * 120)
     lines.append(f"  RECENTLY FINISHED RUNS (last {hours}h)")
-    lines.append("=" * 100)
+    lines.append("=" * 120)
 
     if not finished_runs:
         lines.append("  (none)")
@@ -871,24 +888,26 @@ def format_finished_table(finished_runs, hours):
         return "\n".join(lines)
 
     header = (
-        f"{'Tag':<10} {'RunID':<10} {'Name':<28} "
-        f"{'Step':>10} {'PF':>7} {'Duration':>9} {'Finished':>10} {'Exit':<8}"
+        f"{'Tag':<10} {'RunID':<10} {'Name':<32} "
+        f"{'Step':>10} {'PF':>7} {'Duration':>10} {'Finished':>12} {'Exit':<6}"
     )
     lines.append(header)
-    lines.append("-" * 100)
+    lines.append("-" * 120)
 
     for run in finished_runs:
         step_str = f"{run['step']:,}" if run['step'] else "--"
         pf_str = f"{run['best_pf']:.4f}" if run['best_pf'] else "--"
-        name_str = (run['run_name'] or run['run_id'])[:28]
+        name_str = (run['run_name'] or run['run_id'])[:32]
         exit_str = run['state'].upper()
         if exit_str == "FINISHED":
             exit_str = "OK"
 
+        tag_str = (run['exp_tag'] or "--")[:10]
+        rid_str = (run['run_id'] or "--")[:10]
         lines.append(
-            f"{run['exp_tag']:<10} {run['run_id']:<10} {name_str:<28} "
-            f"{step_str:>10} {pf_str:>7} {run['duration']:>9} "
-            f"{run['finished_ago']:>10} {exit_str:<8}",
+            f"{tag_str:<10} {rid_str:<10} {name_str:<32} "
+            f"{step_str:>10} {pf_str:>7} {run['duration']:>10} "
+            f"{run['finished_ago']:>12} {exit_str:<6}",
         )
 
     lines.append("")
@@ -929,10 +948,9 @@ def format_summary(hw_results, wandb_runs, finished_runs=None):
     parts.append(f"Alerts: {hw_alerts + run_alerts}")
 
     lines = [
-        "-" * 120,
+        "=" * 120,
         f"  SUMMARY: {' | '.join(parts)}",
-        f"  Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        "-" * 120,
+        "=" * 120,
     ]
     return "\n".join(lines)
 
@@ -1120,8 +1138,10 @@ def main():
         if finished_runs:
             parts.append(format_finished_table(finished_runs, args.recent))
         if orphan_alerts:
-            parts.append("  ORPHAN ALERTS:")
-            parts.extend(f"    {a}" for a in orphan_alerts)
+            parts.append("=" * 120)
+            parts.append("  ORPHAN ALERTS")
+            parts.append("=" * 120)
+            parts.extend(f"  {a}" for a in orphan_alerts)
             parts.append("")
         if hw_results or wandb_runs or finished_runs:
             parts.append(format_summary(hw_results, wandb_runs, finished_runs))
