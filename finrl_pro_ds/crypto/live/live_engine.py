@@ -32,7 +32,7 @@ import os
 import signal
 import tempfile
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -111,6 +111,13 @@ class LiveTradingEngine:
         self._emergency_flatten_on_error = config.get("safety", {}).get(
             "emergency_flatten_on_error", True,
         )
+        # Session 426: require N consecutive execution errors before emergency
+        # flatten. Transient IB HMDS stalls (Error 162/322) produced a single
+        # market-price timeout that killed the container (exit=0) mid-run.
+        self._execution_error_threshold = int(config.get("safety", {}).get(
+            "execution_error_threshold", 3,
+        ))
+        self._consecutive_execution_errors = 0
         self._reconciliation_warn_pct = config.get("safety", {}).get(
             "reconciliation_warn_pct", 0.05,
         )
@@ -138,6 +145,10 @@ class LiveTradingEngine:
         # Control
         self._should_stop = False
         self._wandb_run = None
+
+        # Session 426: per-day contract roll check (futures brokers only).
+        # Stores the UTC date of the last check so we run it once per day.
+        self._last_roll_check_date: date | None = None
 
         # FIX AUD-ENG-05: Track last 1-min timestamp for dedup in fetch
         self._last_1min_ts_ms: int = 0
@@ -384,6 +395,11 @@ class LiveTradingEngine:
             self._request_stop("kill_file")
             return
 
+        # Session 426: once-per-day futures contract roll check.
+        await self._maybe_roll_contract(bar_time)
+        if self._should_stop:
+            return
+
         # FIX AUD-H05: Update portfolio value at start of every step (not just traded bars)
         await self._update_portfolio_value()
 
@@ -615,20 +631,36 @@ class LiveTradingEngine:
                 # the risk budget and block subsequent bars.
                 self.risk_manager.rollback_last_turnover()
                 self._prev_close = current_close
+                # F-03: broker returned without raising — reset execution-error
+                # counter so a prior transient HMDS error doesn't persist.
+                self._consecutive_execution_errors = 0
                 self._log_step(bar_time, target_position, traded=False, skip_reason="broker_skipped", regime_info=regime_info)
                 return
 
         except Exception as e:
-            logger.error(f"Order execution error: {e}")
+            self._consecutive_execution_errors += 1
+            logger.error(
+                f"Order execution error ({self._consecutive_execution_errors}/"
+                f"{self._execution_error_threshold}): {e}",
+            )
             # BUG-18: Rollback turnover on execution exception too
             self.risk_manager.rollback_last_turnover()
             # FIX AUD-L05: Update prev_close even on execution error
             self._prev_close = current_close
-            if self._emergency_flatten_on_error:
-                logger.warning("Emergency flatten triggered by execution error")
+            if (
+                self._emergency_flatten_on_error
+                and self._consecutive_execution_errors >= self._execution_error_threshold
+            ):
+                logger.warning(
+                    "Emergency flatten triggered: "
+                    f"{self._consecutive_execution_errors} consecutive execution errors",
+                )
                 await self._emergency_flatten()
                 self._request_stop("execution_error")
             return
+
+        # Successful execution: reset consecutive-error counter.
+        self._consecutive_execution_errors = 0
 
         # --- 8b. Persist position to file (crash recovery) ---
         self._write_position_file()
@@ -1133,6 +1165,54 @@ class LiveTradingEngine:
                 )
         return is_open
 
+    async def _maybe_roll_contract(self, bar_time: datetime) -> None:
+        """Check once per UTC day whether the futures front-month needs to roll.
+
+        Only runs when the broker exposes a ``_contract_manager`` (futures).
+        If a roll is needed, flatten any open position first (required by
+        ``FuturesContractManager.roll_contract``), then roll. If the flatten
+        partially fails, request stop rather than trading across two contracts.
+        """
+        cm = getattr(self.broker, "_contract_manager", None)
+        if cm is None:
+            return
+        today = bar_time.astimezone(timezone.utc).date()
+        if self._last_roll_check_date == today:
+            return
+        self._last_roll_check_date = today
+        try:
+            if not cm.check_roll_needed(as_of=today):
+                return
+        except Exception as e:
+            logger.warning(f"Roll check failed: {e}")
+            return
+
+        old_symbol = getattr(cm.contract, "local_symbol", "?")
+        logger.warning(f"Contract roll required for {old_symbol} — flattening first")
+        if abs(self._current_position) > 1e-6:
+            try:
+                result = await self.broker.emergency_flatten([self._asset])
+                if result.n_failed != 0:
+                    logger.critical(
+                        "Roll flatten partially failed — refusing to roll, "
+                        "requesting stop to avoid cross-contract exposure",
+                    )
+                    self._request_stop("roll_flatten_failed")
+                    return
+                self._current_position = 0.0
+            except Exception as e:
+                logger.critical(f"Roll flatten raised: {e} — requesting stop")
+                self._request_stop("roll_flatten_error")
+                return
+        try:
+            new_info = await cm.roll_contract()
+            logger.warning(
+                f"Rolled futures contract: {old_symbol} -> {new_info.local_symbol}",
+            )
+        except Exception as e:
+            logger.critical(f"Roll failed: {e} — requesting stop")
+            self._request_stop("roll_failed")
+
     async def _emergency_flatten(self) -> None:
         """Close all positions via market orders.
 
@@ -1555,6 +1635,7 @@ class LiveTradingEngine:
             "daily_loss_pct": round(daily_loss_pct, 6),
             "broker_connected": broker_connected,
             "consecutive_errors": self._consecutive_errors,
+            "consecutive_execution_errors": self._consecutive_execution_errors,
             "total_trades": self._total_trades,
             "should_stop": self._should_stop,
             "strategy_name": self._strategy_name,

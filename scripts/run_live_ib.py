@@ -120,6 +120,7 @@ def build_components(config: dict):
         market_fallback_timeout=contract_cfg.get("market_fallback_timeout", 30.0),
         commission_per_side=contract_cfg.get("commission_per_side", 0.62),
         roll_days_before_expiry=contract_cfg.get("roll_days_before_expiry", 5),
+        market_data_timeout=contract_cfg.get("market_data_timeout", 10.0),
     )
 
     # --- Observation Builder (reused from crypto, asset-agnostic) ---

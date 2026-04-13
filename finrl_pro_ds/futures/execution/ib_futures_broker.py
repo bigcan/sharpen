@@ -49,6 +49,7 @@ class IBFuturesBroker:
         market_fallback_timeout: float = 30.0,
         commission_per_side: float = 0.62,
         roll_days_before_expiry: int = 5,
+        market_data_timeout: float = 10.0,
     ):
         """
         Args:
@@ -73,6 +74,7 @@ class IBFuturesBroker:
         self._market_fallback_timeout = market_fallback_timeout
         self._commission = commission_per_side
         self._roll_days_before_expiry = roll_days_before_expiry
+        self._market_data_timeout = max(1.0, float(market_data_timeout))
         self._contract_manager: Optional[FuturesContractManager] = None
 
         # Required by LiveTradingEngine
@@ -332,8 +334,11 @@ class IBFuturesBroker:
         self._ib.reqMarketDataType(3)
         ticker = self._ib.reqMktData(contract, genericTickList="", snapshot=True)
 
-        # Wait for snapshot with timeout
-        for _ in range(50):
+        # Wait for snapshot with configurable timeout (default 10s).
+        # HMDS data farms idle and occasionally return empty on first wake-up;
+        # a longer window reduces false emergency_flatten trips (Session 426).
+        n_iters = int(self._market_data_timeout / 0.1)
+        for _ in range(n_iters):
             await asyncio.sleep(0.1)
 
             # Try midpoint first
@@ -370,7 +375,9 @@ class IBFuturesBroker:
             )
             return portfolio_price
 
-        raise RuntimeError("Failed to get market price from IB within 5s")
+        raise RuntimeError(
+            f"Failed to get market price from IB within {self._market_data_timeout:.0f}s"
+        )
 
     def _on_portfolio_update(self, item) -> None:
         """Cache market price from updatePortfolio events.

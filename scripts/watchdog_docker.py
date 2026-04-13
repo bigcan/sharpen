@@ -20,6 +20,7 @@ Usage:
 
 from __future__ import annotations
 
+import html
 import json
 import logging
 import os
@@ -203,6 +204,31 @@ def handle_health_event(client: docker.DockerClient, event: dict) -> None:
             logger.info(f"RECOVERED: {container_name}")
 
 
+def _detect_stop_reason(container_name: str, exit_code) -> str:
+    """Scan recent container logs for 'Stop requested: <reason>' (Session 426).
+
+    Returns the reason if found, empty otherwise. Only meaningful for exit=0 —
+    on exit=137 (OOM) the engine had no chance to log.
+    """
+    try:
+        code = int(exit_code)
+    except (TypeError, ValueError):
+        return ""
+    if code != 0:
+        return ""
+    try:
+        client = docker.from_env()
+        container = client.containers.get(container_name)
+        logs = container.logs(tail=200).decode(errors="replace")
+    except Exception:
+        return ""
+    marker = "Stop requested: "
+    idx = logs.rfind(marker)
+    if idx < 0:
+        return ""
+    return logs[idx + len(marker):].splitlines()[0].strip()[:64]
+
+
 def handle_container_event(event: dict) -> None:
     """Handle container lifecycle events (die, start, restart)."""
     action = event.get("Action", "")
@@ -220,13 +246,22 @@ def handle_container_event(event: dict) -> None:
 
     if action == "die":
         exit_code = attrs.get("exitCode", "?")
+        # Session 426: a clean exit (0) from a trading container usually means
+        # the engine self-stopped via _request_stop(). Tag the reason from
+        # recent logs so execution_error / roll_failed / risk_halt are visible
+        # instead of blending in with normal stops.
+        stop_reason = _detect_stop_reason(container_name, exit_code)
+        tag = "DIED"
+        if stop_reason:
+            # F-01: escape to prevent log content from breaking Telegram HTML parse.
+            tag = f"DIED: SELF-STOP ({html.escape(stop_reason)})"
         msg = (
-            f"<b>[DIED] {strategy}</b>\n"
+            f"<b>[{tag}] {strategy}</b>\n"
             f"Container: {container_name}\n"
             f"Exit code: {exit_code}"
         )
         alert(container_name, msg)
-        logger.warning(f"DIED: {container_name} (exit={exit_code})")
+        logger.warning(f"{tag}: {container_name} (exit={exit_code})")
 
     elif action == "start":
         logger.info(f"STARTED: {container_name}")
