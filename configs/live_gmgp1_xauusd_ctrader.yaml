@@ -79,7 +79,7 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 100000.0            # FTMO $100K account
+  initial_balance: 10000.0             # cTrader demo (reset 2026-04-13)
   deadband_threshold: 0.25
   taker_fee: 0.00015                   # 1.5bps effective spread
   weekend_flatten:
@@ -108,7 +108,8 @@ wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   tags: ["live", "paper", "gmgp1-xauusd", "cTrader", "XAUUSD", "Gold", "SAC", "15min",
-         "CFD", "FTMO", "multiscale-tcn", "hard-constraints", "seed-123"]
+         "CFD", "FTMO", "multiscale-tcn", "hard-constraints", "seed-123", "reset-20260413"]
+  run_id: "live-xauusd-ctrader-paper-20260413"
 
 # --- Safety ---
 safety:
