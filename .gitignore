@@ -97,6 +97,8 @@ results/
 models/
 tmp/
 figs/
+collected/
+hpo_results/
 
 # Generated configs / state files
 best_params.yaml
