@@ -399,7 +399,7 @@ class LiveTradingEngine:
         # FIX AUD-H11: Check daily loss on EVERY bar (not just traded bars).
         # Previously only ran at step 11 after trade execution, so holding bars
         # could breach the daily loss limit without detection.
-        self._check_daily_loss(bar_time)
+        await self._check_daily_loss(bar_time)
 
         # --- Weekend flatten (CFD only): close positions before Friday close ---
         if await self._check_weekend_flatten(bar_time):
@@ -521,6 +521,24 @@ class LiveTradingEngine:
 
         if violations:
             logger.info(f"Risk violations: {violations}")
+            # FIX RSK-02: Target-action=0 is not enough when DD/circuit breach
+            # fires — broker order may fail, deadband may block, or position
+            # may persist through cooldown accumulating more loss. On any
+            # drawdown / circuit-breaker violation, force-close via broker and
+            # stop the engine immediately. FTMO-safe.
+            if any(
+                v.startswith(("MAX_DRAWDOWN", "CIRCUIT_BREAKER", "FLASH_CRASH"))
+                for v in violations
+            ):
+                logger.critical(
+                    f"RISK HALT: violations={violations} — force-flattening "
+                    f"position {self._current_position:.4f} and stopping.",
+                )
+                try:
+                    await self._emergency_flatten()
+                finally:
+                    self._request_stop("risk_halt")
+                return
 
         # Re-check deadband after risk adjustment
         delta = target_position - self._current_position
@@ -1144,7 +1162,7 @@ class LiveTradingEngine:
                 return False
         return True
 
-    def _check_daily_loss(self, bar_time: datetime) -> None:
+    async def _check_daily_loss(self, bar_time: datetime) -> None:
         """Check if daily loss limit exceeded using median-smoothed PV.
 
         FIX AUD-H04: Reset at UTC midnight instead of bar count.
@@ -1176,9 +1194,14 @@ class LiveTradingEngine:
                 logger.critical(
                     f"DAILY LOSS LIMIT: smoothed={smoothed_return:.2%} "
                     f"(raw={raw_return:.2%}) < -{self._max_daily_loss_pct:.0%}. "
-                    f"Stopping trading.",
+                    f"Flattening and stopping trading.",
                 )
-                self._request_stop("daily_loss_limit")
+                # FIX RSK-02: Flatten before stop — main loop exits on
+                # should_stop without closing open positions otherwise.
+                try:
+                    await self._emergency_flatten()
+                finally:
+                    self._request_stop("daily_loss_limit")
             elif raw_return < -self._max_daily_loss_pct:
                 # Single reading breached but median didn't — likely API hiccup
                 logger.debug(

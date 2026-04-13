@@ -156,6 +156,9 @@ def build_components(config: dict):
         daily_turnover_limit=risk_cfg.get("daily_turnover_limit", 4.0),
         funding_rate_alert=risk_cfg.get("funding_rate_alert", 999.0),
         min_margin_reserve_pct=risk_cfg.get("min_margin_reserve_pct", 0.20),
+        static_peak=risk_cfg.get("static_peak", False),
+        eod_trailing_drawdown=risk_cfg.get("eod_trailing_drawdown", False),
+        eod_hour_utc=risk_cfg.get("eod_hour_utc", 0),
     ))
 
     # --- Data Loader ---

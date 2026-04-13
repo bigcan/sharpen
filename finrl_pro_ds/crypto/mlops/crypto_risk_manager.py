@@ -55,6 +55,10 @@ class CryptoRiskConfig:
     eod_trailing_drawdown: bool = False   # If true, floor updates at EOD only
     eod_hour_utc: int = 0                 # UTC hour for EOD floor update
 
+    # Prop firm: static peak (FTMO max-loss). Peak = initial_capital, never ratchets.
+    # Overrides both tick-by-tick and EOD trailing modes when true.
+    static_peak: bool = False
+
 
 @dataclass
 class RiskState:
@@ -141,7 +145,14 @@ class CryptoRiskManager:
                 return np.zeros_like(action), violations
 
         # --- Update drawdown tracking ---
-        if self.config.eod_trailing_drawdown:
+        if self.config.static_peak:
+            # FTMO max-loss: peak fixed at initial_capital, never ratchets.
+            # peak_portfolio_value was seeded in reset(). DD from start balance.
+            if self.state.peak_portfolio_value > 0:
+                self.state.current_drawdown = (
+                    1.0 - portfolio_value / self.state.peak_portfolio_value
+                )
+        elif self.config.eod_trailing_drawdown:
             # Prop firm EOD mode: peak only updates at end-of-day boundary.
             # Requires bar_time kwarg or falls back to tick-by-tick.
             from datetime import datetime, timezone

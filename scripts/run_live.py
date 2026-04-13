@@ -144,6 +144,9 @@ def build_components(config: dict):
         max_position_pct=risk_cfg.get("max_position_pct", 1.0),
         funding_rate_alert=risk_cfg.get("funding_rate_alert", 0.001),
         min_margin_reserve_pct=risk_cfg.get("min_margin_reserve_pct", 0.10),
+        static_peak=risk_cfg.get("static_peak", False),
+        eod_trailing_drawdown=risk_cfg.get("eod_trailing_drawdown", False),
+        eod_hour_utc=risk_cfg.get("eod_hour_utc", 0),
     ))
 
     # --- Data Loader ---

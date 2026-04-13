@@ -87,7 +87,8 @@ trading:
 # --- Risk Management ---
 risk:
   enabled: true
-  max_drawdown_pct: 0.10               # 10% max DD, halt (tighter than training 30%)
+  max_drawdown_pct: 0.08               # 8% hard stop (2% below FTMO 10% limit)
+  static_peak: true                    # FTMO max-loss: DD from initial balance, never ratchets
   circuit_breaker_cooldown_bars: 12    # 3 hours at 15-min bars
   max_position_pct: 1.0                # Single asset = 100% allowed
   max_net_short_exposure: -1.0         # Single asset — allow full short

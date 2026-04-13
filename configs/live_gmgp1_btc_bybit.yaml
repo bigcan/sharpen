@@ -73,7 +73,8 @@ trading:
 # --- Risk Management (ENABLED for live) ---
 risk:
   enabled: true
-  max_drawdown_pct: 0.10           # 10% max drawdown (tighter than training 30%)
+  max_drawdown_pct: 0.08           # 8% hard stop (prop-firm safe, 2% buffer under 10% gate)
+  static_peak: true                # Prop-firm max-loss: DD from initial balance, never ratchets
   circuit_breaker_cooldown_bars: 12 # 3 hours at 15-min bars
   max_position_pct: 1.0            # Single asset = 100% allowed
   funding_rate_alert: 0.001        # Alert if |rate| > 0.1% per 8h
