@@ -71,7 +71,7 @@ RUN pip install -e ".[ctrader]"
 
 # ---- Runtime setup ----
 RUN groupadd -r finrl && useradd -r -g finrl -d /app finrl \
-    && mkdir -p /app/logs /tmp \
+    && mkdir -p /app/logs /app/state /tmp \
     && chown -R finrl:finrl /app /tmp
 
 COPY docker/live/entrypoint.sh /app/entrypoint.sh
