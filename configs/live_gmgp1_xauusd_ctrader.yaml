@@ -119,6 +119,22 @@ safety:
   kill_file: "/tmp/finrl_live_gmgp1_xauusd_kill"  # FIX CRIT-02: was shared with GMGP2
   emergency_flatten_on_error: true     # Flatten all positions on unrecoverable error
 
+# --- Retrain Policy (hybrid trigger + 12mo cap) ---
+# See scripts/check_retrain_triggers.py. Live DD checks delegated to live-monitor.
+retrain_policy:
+  enabled: true
+  last_trained_date: "2026-04-08"        # gmgp1-xauusd-l1-multiseed_20260408_163103
+  staleness_cap_days: 365
+  validation_pf_baseline: 2.31           # seed-123 Dec 2025 OOS PF
+  oos_pf_floor_ratio: 0.70               # floor: 1.62
+  dd_trigger_ratio: 0.50                 # 4% live DD trigger (vs 8% hard stop)
+  gate_window_days: 90
+  gate_lag_days: 1
+  feature_drift_p_threshold: 0.01
+  feature_drift_ks_stat_threshold: 0.20  # PRIMARY trigger: max CDF gap ≥ 0.20
+  backtest_config_ref: "configs/gmgp1_xauusd_l1_backtest_q1_2026.yaml"
+  data_file_path: "data/cme/gold_2025_2026q1_15min_stitched.parquet"
+
 # --- PRISM Regime Overlay (L2 position sizing) ---
 prism:
   enabled: false                        # Set true to activate regime overlay

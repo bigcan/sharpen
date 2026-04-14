@@ -94,6 +94,24 @@ safety:
   kill_file: "/tmp/finrl_live_kill" # Touch this file to stop trading
   emergency_flatten_on_error: true  # Flatten all on unrecoverable error
 
+# --- Retrain Policy (hybrid trigger + 12mo cap) ---
+# Used by scripts/check_retrain_triggers.py — runs rolling OOS backtest, checks
+# staleness, emits HOLD or trigger reason. Live DD checks are delegated to the
+# live-monitor skill (broker is the source of truth).
+retrain_policy:
+  enabled: true
+  last_trained_date: "2026-04-07"        # gmgp1-btc-l1-multiseed_20260407_070227
+  staleness_cap_days: 365                # hard floor: force retrain after 12 months
+  validation_pf_baseline: 2.19           # seed-123 Dec 2025 OOS PF
+  oos_pf_floor_ratio: 0.70               # trigger if rolling-OOS PF < 0.70 × baseline (1.53)
+  dd_trigger_ratio: 0.50                 # trigger if live DD > 0.50 × risk.max_drawdown_pct (4%)
+  gate_window_days: 90                   # rolling OOS window length
+  gate_lag_days: 1                       # end window at today − lag (avoid partial-day data)
+  feature_drift_p_threshold: 0.01        # KS-test p-value floor (reported, secondary)
+  feature_drift_ks_stat_threshold: 0.20  # PRIMARY trigger: max CDF gap ≥ 0.20 = practical regime shift
+  backtest_config_ref: "configs/gmgp1_btc_l1_backtest_q1_2026.yaml"
+  data_file_path: "data/bitfinex/btc_usdt_perp_2025_2026q1_1min.parquet"
+
 # --- PRISM Regime Overlay (L2 position sizing) ---
 prism:
   enabled: false                        # Set true to activate regime overlay
