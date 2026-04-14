@@ -54,8 +54,10 @@ def _load_yaml(path: Path) -> dict:
 
 def _load_ohlcv_window(parquet_path: Path, start: date, end: date):
     """Load OHLCV rows in [start, end] from a parquet file. Returns a pandas DataFrame
-    indexed by timestamp, or None on failure."""
+    indexed by timestamp, or None on failure. Rows with NaN/inf in OHLC are dropped
+    so downstream KS tests aren't silently poisoned by missing bars (FIND-01/03)."""
     try:
+        import numpy as np
         import pandas as pd
         import pyarrow.parquet as pq
         pf = pq.ParquetFile(parquet_path)
@@ -68,7 +70,15 @@ def _load_ohlcv_window(parquet_path: Path, start: date, end: date):
         df = pf.read().to_pandas()
         df[ts_col] = pd.to_datetime(df[ts_col])
         mask = (df[ts_col].dt.date >= start) & (df[ts_col].dt.date <= end)
-        return df.loc[mask].set_index(ts_col)
+        df = df.loc[mask].set_index(ts_col)
+        ohlc_cols = [c for c in df.columns if c.lower() in {"open", "high", "low", "close"}]
+        if ohlc_cols:
+            finite = np.isfinite(df[ohlc_cols].astype(float)).all(axis=1)
+            dropped = int((~finite).sum())
+            if dropped:
+                logger.info(f"Dropped {dropped} non-finite OHLC rows from {parquet_path.name}")
+            df = df.loc[finite]
+        return df
     except Exception as e:
         logger.warning(f"Could not load OHLCV window from {parquet_path}: {e}")
         return None
@@ -132,18 +142,26 @@ def _feature_drift_ks(
     if not common:
         return {"skipped": True, "reason": "no overlapping regime features"}
 
+    import numpy as np
     n = len(common)
-    corrected = p_threshold / n  # Bonferroni
     per_feature = {}
     max_stat = 0.0
     max_feat = None
     for feat in common:
-        a, b = train_feats[feat], recent_feats[feat]
+        a = np.asarray(train_feats[feat], dtype=float)
+        b = np.asarray(recent_feats[feat], dtype=float)
+        # FIND-01: drop non-finite before KS so a single NaN bar can't silently
+        # mask drift detection (ks_2samp returns NaN on any NaN input).
+        a = a[np.isfinite(a)]
+        b = b[np.isfinite(b)]
         if len(a) < 30 or len(b) < 30:
+            per_feature[feat] = {"skipped": True, "reason": "n<30 after NaN drop",
+                                 "n_train": int(len(a)), "n_recent": int(len(b))}
             continue
         stat, p = ks_2samp(a, b)
-        per_feature[feat] = {"ks_stat": float(stat), "p_value": float(p), "n_train": int(len(a)), "n_recent": int(len(b))}
-        if stat > max_stat:
+        per_feature[feat] = {"ks_stat": float(stat), "p_value": float(p),
+                             "n_train": int(len(a)), "n_recent": int(len(b))}
+        if np.isfinite(stat) and stat > max_stat:
             max_stat = float(stat)
             max_feat = feat
 
@@ -151,7 +169,6 @@ def _feature_drift_ks(
         "skipped": False,
         "n_features": n,
         "p_threshold": p_threshold,
-        "corrected_threshold": corrected,
         "max_ks_stat": max_stat,
         "max_ks_feature": max_feat,
         "per_feature": per_feature,
@@ -304,14 +321,23 @@ def evaluate(live_cfg_path: Path, live_dd_pct: float | None, report_dir: Path) -
     # 4. Feature-drift KS-test (regime shift early-warning)
     train_start = datetime.fromisoformat(backtest_cfg["data"]["train_start_date"]).date()
     train_end = datetime.fromisoformat(backtest_cfg["data"]["train_end_date"]).date()
-    drift_result = _feature_drift_ks(
-        data_path=data_path,
-        train_start=train_start,
-        train_end=train_end,
-        recent_start=window_start,
-        recent_end=window_end,
-        p_threshold=float(policy["feature_drift_p_threshold"]),
-    )
+    if window_start <= train_end:
+        # FIND-02: clipping against very stale data can pull the recent window
+        # back into the training period — KS would then compare overlapping
+        # samples and bias toward "no drift". Skip rather than emit a false negative.
+        drift_result = {
+            "skipped": True,
+            "reason": f"recent window start {window_start} <= train_end {train_end} (data too stale)",
+        }
+    else:
+        drift_result = _feature_drift_ks(
+            data_path=data_path,
+            train_start=train_start,
+            train_end=train_end,
+            recent_start=window_start,
+            recent_end=window_end,
+            p_threshold=float(policy["feature_drift_p_threshold"]),
+        )
     # Practical-significance floor: KS p-values are noise at large N (290K bars
     # → near-zero p on benign distribution shifts). Gate on effect size (max CDF
     # gap) primarily; p-value is reported but secondary.
