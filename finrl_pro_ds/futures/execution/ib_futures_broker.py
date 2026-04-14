@@ -349,49 +349,54 @@ class IBFuturesBroker:
     async def _get_mid_price(self) -> float:
         """Get current mid price from IB market data.
 
-        Tries snapshot first, then falls back to portfolio market price
-        (IB error 322/354 workaround — snapshot fails for some contracts
-        but updatePortfolio events always carry a valid marketPrice).
+        Tries snapshot (2 attempts to ride through ushmds idle/wake cycles),
+        then falls back to portfolio market price, then to reqHistoricalTicks.
+        IB error 322 on snapshot + Error 162 "HMDS no data" during ushmds
+        "inactive" phases are transient; a single retry avoids false
+        emergency_flatten trips (Session 434).
         """
         contract = self._contract_manager.ib_contract
+        n_attempts = 2
+        per_attempt_timeout = self._market_data_timeout
+        n_iters = int(per_attempt_timeout / 0.1)
 
-        # Request delayed data as fallback (market type 3 = delayed)
-        self._ib.reqMarketDataType(3)
-        ticker = self._ib.reqMktData(contract, genericTickList="", snapshot=True)
+        for attempt in range(1, n_attempts + 1):
+            self._ib.reqMarketDataType(3)  # delayed as fallback
+            ticker = self._ib.reqMktData(contract, genericTickList="", snapshot=True)
 
-        # Wait for snapshot with configurable timeout (default 10s).
-        # HMDS data farms idle and occasionally return empty on first wake-up;
-        # a longer window reduces false emergency_flatten trips (Session 426).
-        n_iters = int(self._market_data_timeout / 0.1)
-        for _ in range(n_iters):
-            await asyncio.sleep(0.1)
+            for _ in range(n_iters):
+                await asyncio.sleep(0.1)
 
-            # Try midpoint first
-            mid = ticker.midpoint()
-            if mid is not None and not np.isnan(mid) and mid > 0:
-                self._ib.cancelMktData(contract)
-                self._ib.reqMarketDataType(1)  # Reset to live
-                return mid
+                mid = ticker.midpoint()
+                if mid is not None and not np.isnan(mid) and mid > 0:
+                    self._ib.cancelMktData(contract)
+                    self._ib.reqMarketDataType(1)
+                    return mid
 
-            # Try last trade price
-            last = ticker.last
-            if last is not None and not np.isnan(last) and last > 0:
-                self._ib.cancelMktData(contract)
-                self._ib.reqMarketDataType(1)
-                return last
+                last = ticker.last
+                if last is not None and not np.isnan(last) and last > 0:
+                    self._ib.cancelMktData(contract)
+                    self._ib.reqMarketDataType(1)
+                    return last
 
-            # Try close price (available when market is closed)
-            close = ticker.close
-            if close is not None and not np.isnan(close) and close > 0:
-                self._ib.cancelMktData(contract)
-                self._ib.reqMarketDataType(1)
-                return close
+                close = ticker.close
+                if close is not None and not np.isnan(close) and close > 0:
+                    self._ib.cancelMktData(contract)
+                    self._ib.reqMarketDataType(1)
+                    return close
 
-        self._ib.cancelMktData(contract)
+            self._ib.cancelMktData(contract)
+            if attempt < n_attempts:
+                logger.warning(
+                    f"reqMktData snapshot empty (attempt {attempt}/{n_attempts}) "
+                    f"— retrying after {per_attempt_timeout:.0f}s farm-wake wait"
+                )
+                await asyncio.sleep(2.0)
+
         self._ib.reqMarketDataType(1)
 
-        # Fallback: portfolio market price (maintained by IB's automatic
-        # account subscription — no extra API request needed)
+        # Fallback 1: portfolio market price (populated by updatePortfolio
+        # events — requires an open position)
         portfolio_price = self._get_portfolio_market_price()
         if portfolio_price > 0:
             logger.warning(
@@ -400,8 +405,37 @@ class IBFuturesBroker:
             )
             return portfolio_price
 
+        # Fallback 2: historical last tick (bypasses snapshot bug; uses
+        # ushmds which is the same farm that flickers but a different code
+        # path that succeeds when snapshot returns Error 322)
+        try:
+            ticks = await asyncio.wait_for(
+                asyncio.to_thread(
+                    self._ib.reqHistoricalTicks,
+                    contract,
+                    "",
+                    "",
+                    1,
+                    "TRADES",
+                    useRth=False,
+                    ignoreSize=True,
+                ),
+                timeout=5.0,
+            )
+            if ticks:
+                price = float(ticks[-1].price)
+                if price > 0:
+                    logger.warning(
+                        f"reqMktData snapshot failed — using historical tick: "
+                        f"{price:.2f}"
+                    )
+                    return price
+        except Exception as exc:
+            logger.warning(f"reqHistoricalTicks fallback failed: {exc}")
+
         raise RuntimeError(
-            f"Failed to get market price from IB within {self._market_data_timeout:.0f}s"
+            f"Failed to get market price from IB within "
+            f"{n_attempts * per_attempt_timeout:.0f}s (snapshot + hist-tick exhausted)"
         )
 
     def _on_portfolio_update(self, item) -> None:

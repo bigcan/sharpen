@@ -13,7 +13,7 @@ exchange:
   name: "dxtrade"
   testnet: true
   asset: "BTC"
-  leverage: 6
+  leverage: 1                          # 1:1 (user policy — Velotrade 6x is cap not floor)
   order_type: "market"
   data_exchange: "binance"           # OHLCV data from Binance (DXtrade = execution only)
 
@@ -76,7 +76,7 @@ risk:
   circuit_breaker_cooldown_bars: 0   # Prop firm: stay flat once breached
   max_position_pct: 1.0              # Single asset
   max_net_short_exposure: -1.0       # Full short allowed
-  max_gross_exposure: 6.0            # 6x leverage
+  max_gross_exposure: 1.0            # 1:1 leverage (user policy)
   funding_rate_alert: 999.0          # Disabled (DXtrade doesn't expose)
   min_margin_reserve_pct: 0.15       # Higher reserve for leveraged trading
 

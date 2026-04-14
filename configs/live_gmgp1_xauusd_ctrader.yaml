@@ -23,7 +23,7 @@ contract:
   lot_size: 100                        # 1 standard lot = 100 oz
   min_lot: 0.01                        # 0.01 lots = 1 oz minimum
   tick_size: 0.01                      # CFD tick ($0.01 vs CME $0.10)
-  leverage: 30                         # FTMO Gold leverage 1:30
+  leverage: 1                          # 1:1 (user policy — FTMO 1:30 is cap not floor)
   order_type: "MKT"                    # Market orders (CFD spreads tight enough)
   market_fallback_timeout: 10.0        # Seconds before retry
 
