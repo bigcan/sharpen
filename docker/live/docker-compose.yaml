@@ -334,6 +334,8 @@ services:
       SWEEP_INTERVAL: "300"
       WANDB_CHECK_INTERVAL: "1800"
       ALERT_COOLDOWN: "300"
+      IGNORE_WANDB_RUNS: ${IGNORE_WANDB_RUNS:-}
+      IGNORE_CONTAINERS: ${IGNORE_CONTAINERS:-}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [finrl-net]

@@ -56,6 +56,16 @@ IGNORE_CONTAINERS: set[str] = {
     if name.strip()
 }
 
+# Comma-separated WandB run IDs to suppress alerts for (known false-positive stalls,
+# e.g. ALPHASEEK HPO parent runs whose _step is intentionally silent — child Optuna
+# trials log locally, not to WandB). See project_alphaseek_false_crit.md.
+_IGNORE_WANDB_RUNS_RAW = os.environ.get("IGNORE_WANDB_RUNS", "")
+IGNORE_WANDB_RUNS: set[str] = {
+    rid.strip()
+    for rid in _IGNORE_WANDB_RUNS_RAW.split(",")
+    if rid.strip()
+}
+
 def _is_ignored(container_name: str) -> bool:
     """Return True if container_name is in the ignore list."""
     if container_name in IGNORE_CONTAINERS:
@@ -411,9 +421,17 @@ def _run_wandb_check() -> None:
         from scripts.watchdog import get_active_runs, check_run_health
 
         runs = get_active_runs()
+        suppressed = 0
         for run in runs:
             health = check_run_health(run)
             if health["verdict"] == "CRITICAL":
+                if health["run_id"] in IGNORE_WANDB_RUNS:
+                    logger.info(
+                        f"WandB CRITICAL suppressed (in IGNORE_WANDB_RUNS): "
+                        f"{health['run_name']} ({health['run_id']})"
+                    )
+                    suppressed += 1
+                    continue
                 alerts_str = "; ".join(health["alerts"])
                 msg = (
                     f"<b>[WANDB CRITICAL] {health['run_name']}</b>\n"
@@ -423,7 +441,10 @@ def _run_wandb_check() -> None:
                 alert(health["run_id"], msg)
                 logger.warning(f"WandB CRITICAL: {health['run_name']} — {alerts_str}")
 
-        logger.info(f"WandB check: {len(runs)} active runs scanned")
+        logger.info(
+            f"WandB check: {len(runs)} active runs scanned"
+            + (f" ({suppressed} suppressed)" if suppressed else "")
+        )
     except ImportError:
         logger.debug("WandB check skipped (watchdog module not available)")
     except Exception as e:
