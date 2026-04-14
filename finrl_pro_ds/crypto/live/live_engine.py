@@ -1467,28 +1467,59 @@ class LiveTradingEngine:
     def _write_halt_state(
         self, reason: str, detail: str, now_utc: datetime,
     ) -> None:
-        """Persist halt metadata so restarts stay halted until UTC day rollover."""
-        try:
-            self._halt_state_file.parent.mkdir(parents=True, exist_ok=True)
-            halted_until = self._next_utc_midnight(now_utc)
-            payload = {
-                "halted_until": halted_until.isoformat(),
-                "halted_at": now_utc.isoformat(),
-                "reason": reason,
-                "detail": detail,
-                "strategy": self._strategy_name,
-                "daily_start_value": self._daily_start_value,
-                "portfolio_value": self._portfolio_value,
-            }
-            tmp = self._halt_state_file.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps(payload, indent=2))
-            tmp.replace(self._halt_state_file)
-            logger.critical(
-                f"HALT STATE WRITTEN: {self._halt_state_file} "
-                f"halted_until={halted_until.isoformat()} reason={reason}",
-            )
-        except Exception as e:
-            logger.error(f"Failed to write halt state: {e}", exc_info=True)
+        """Persist halt metadata so restarts stay halted until UTC day rollover.
+
+        On permission errors (misconfigured container with non-writable
+        state dir), fall back to /tmp/risk_state.json and rewrite
+        ``self._halt_state_file`` so the persistent-halt gate on the next
+        startup reads from the same location. A disarmed gate would let
+        Docker ``restart: unless-stopped`` revive a halted engine into
+        another breach — log CRITICAL so the regression is visible.
+        """
+        halted_until = self._next_utc_midnight(now_utc)
+        payload = {
+            "halted_until": halted_until.isoformat(),
+            "halted_at": now_utc.isoformat(),
+            "reason": reason,
+            "detail": detail,
+            "strategy": self._strategy_name,
+            "daily_start_value": self._daily_start_value,
+            "portfolio_value": self._portfolio_value,
+        }
+
+        candidates = [self._halt_state_file]
+        fallback = Path("/tmp/risk_state.json")
+        if self._halt_state_file != fallback:
+            candidates.append(fallback)
+
+        for idx, target in enumerate(candidates):
+            try:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                tmp = target.with_suffix(".json.tmp")
+                tmp.write_text(json.dumps(payload, indent=2))
+                tmp.replace(target)
+                if idx > 0:
+                    logger.critical(
+                        f"HALT STATE FALLBACK: {self._halt_state_file} "
+                        f"not writable; persisted to {target}. "
+                        f"Fix container state-dir permissions.",
+                    )
+                    self._halt_state_file = target
+                logger.critical(
+                    f"HALT STATE WRITTEN: {target} "
+                    f"halted_until={halted_until.isoformat()} reason={reason}",
+                )
+                return
+            except Exception as e:
+                logger.error(
+                    f"Failed to write halt state to {target}: {e}",
+                    exc_info=True,
+                )
+
+        logger.critical(
+            "HALT STATE NOT PERSISTED: all write targets failed. "
+            "Docker may revive a halted engine — manual intervention required.",
+        )
 
     def _clear_halt_state(self) -> None:
         try:
