@@ -32,7 +32,7 @@ import json
 import logging
 import os
 import sys
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import yaml
@@ -98,10 +98,14 @@ def _regime_features(df) -> dict:
         if len(c) > 2:
             ret = np.diff(np.log(c))
             out["log_return"] = ret
-            # Realized vol: rolling 60-bar std of log-returns (drop NaNs).
-            if len(ret) >= 60:
-                rv = np.array([ret[i - 60:i].std() for i in range(60, len(ret))])
-                out["realized_vol_60"] = rv
+            # Realized vol: non-overlapping 60-bar std of log-returns.
+            # FIND-04: overlapping windows produce autocorrelated samples that
+            # bias the KS p-value. Striding by window length makes samples iid.
+            win = 60
+            if len(ret) >= win:
+                n_blocks = len(ret) // win
+                blocks = ret[: n_blocks * win].reshape(n_blocks, win)
+                out["realized_vol_60"] = blocks.std(axis=1)
     if "high" in cols and "low" in cols and "close" in cols:
         h = df[cols["high"]].astype(float).values
         low = df[cols["low"]].astype(float).values
@@ -202,9 +206,11 @@ def _run_oos_backtest(
 ) -> dict:
     """Invoke run_full_pipeline.run_backtest on the rolling window.
 
-    Initializes WandB in offline mode so the gate is hermetic and cron-safe.
+    Initializes WandB in disabled mode (FIND-07): the gate runs monthly under
+    cron and we only need the return value from run_backtest — writing offline
+    run dirs accumulates disk without any consumer.
     """
-    os.environ.setdefault("WANDB_MODE", "offline")
+    os.environ.setdefault("WANDB_MODE", "disabled")
     os.environ.setdefault("WANDB_SILENT", "true")
 
     import wandb
@@ -220,7 +226,7 @@ def _run_oos_backtest(
     run = wandb.init(
         project=cfg["wandb"].get("project", "FinRL-Pro-DS"),
         entity=cfg["wandb"].get("entity"),
-        mode="offline",
+        mode="disabled",
         reinit=True,
         config=cfg,
         tags=cfg["wandb"]["tags"],
@@ -358,7 +364,7 @@ def evaluate(live_cfg_path: Path, live_dd_pct: float | None, report_dir: Path) -
     decision = "HOLD" if not triggers else triggers[0]["type"]
     report = {
         "strategy_config": str(live_cfg_path.relative_to(REPO_ROOT)),
-        "evaluated_at": datetime.utcnow().isoformat() + "Z",
+        "evaluated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "decision": decision,
         "triggers": triggers,
         "staleness_age_days": age_days,

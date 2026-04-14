@@ -179,6 +179,26 @@ class IBFuturesBroker:
             await self._flatten_for_roll()
             await self._contract_manager.roll_contract()
 
+        # Short-circuit no-op trades: when target and current position are both
+        # zero, no trade is possible regardless of price. Skipping the mid-price
+        # fetch keeps the engine alive through IB HMDS stalls (Error 162/322)
+        # during bootstrap on a freshly-rolled contract, where _get_mid_price
+        # has no portfolio-price fallback (updatePortfolio only fires on
+        # non-zero positions).
+        if target_position == 0.0 and self._position_contracts == 0:
+            return OrderResult(
+                asset=asset,
+                symbol=self._contract_manager.contract.local_symbol,
+                side="none",
+                order_type="skipped",
+                quantity=0,
+                price=0.0,
+                filled_quantity=0,
+                avg_fill_price=0.0,
+                fee=0.0,
+                status="skipped",
+            )
+
         # Convert fractions to contracts
         price = await self._get_mid_price()
         target_contracts = self._position_to_contracts(target_position, portfolio_value, price)
@@ -247,6 +267,11 @@ class IBFuturesBroker:
                 f"returning raw contract count {n_contracts} as position"
             )
             return float(np.clip(n_contracts, -1.0, 1.0))
+
+        # Zero position → fraction is 0 regardless of price. Skip the mid-price
+        # fetch so HMDS stalls don't raise on every bar during bootstrap.
+        if n_contracts == 0:
+            return 0.0
 
         price = await self._get_mid_price()
         fraction = self._contracts_to_position(n_contracts, self._portfolio_value, price)
