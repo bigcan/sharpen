@@ -1,0 +1,85 @@
+# GMGP1-XAUUSD Q1 2026 OOS Backtest — regime drift quantification
+# Checkpoint: gmgp1-xauusd-l1-multiseed_20260408_163103 (live gmgp1-xauusd paper)
+# Base: configs/gmgp1_xauusd_l1_multiseed.yaml
+# Data: shared yfinance GC=F proxy (Gold ≈ XAUUSD per user direction).
+# Test window: 2026-02-02 → 2026-04-12 (60d yfinance limit).
+
+data:
+  file_path: "data/cme/gold_2025_2026q1_15min_stitched.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-10-31"
+  val_start_date: "2025-11-01"
+  val_end_date: "2025-11-30"
+  test_start_date: "2026-02-02"
+  test_end_date: "2026-04-12"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00015
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: false
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.00092668
+    dsr_scale: 1.0
+    hindsight_weight: 0.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.00015}
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.00034069
+    lr_critic: 0.000027372
+    lr_alpha: 0.0000020265
+    gamma: 0.99826
+    tau: 0.0019716
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.37652
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.2302
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 0
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: false
+  num_envs: 1
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-xauusd", "Gold", "SAC", "15min", "CFD", "backtest",
+         "q1-2026-oos", "regime-drift", "l1-seed123", "yfinance-gc-proxy"]
