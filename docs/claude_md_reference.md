@@ -195,8 +195,12 @@ Live trading containers run on a **remote desktop** (<TAILSCALE_HOST>), accessed
 
 **Exported metrics:** `finrl_position`, `finrl_portfolio_value`, `finrl_drawdown_pct`, `finrl_daily_loss_pct`, `finrl_broker_connected`, `finrl_bar_count`, `finrl_total_trades`, `finrl_total_fees`, `finrl_consecutive_errors`, `finrl_last_bar_timestamp`, `finrl_funding_rate`, `prism_position_multiplier`, `prism_composite_code`, `prism_api_latency_seconds`, `prism_api_errors_total`, `prism_fallback_active`.
 
-### Grafana Dashboard (Layer 2)
-Auto-provisioned via baked Dockerfile (`Dockerfile.grafana`). Dashboard: "FinRL Trading Overview" -- 10 panels (PV, drawdown, position, daily P&L, broker status, bars, trades, errors, funding rate, fees). Alerting via Telegram contact point.
+### Grafana Dashboards (Layer 2)
+Auto-provisioned via baked Dockerfile (`Dockerfile.grafana`). Two tiers:
+- **Fleet Overview** (`dashboards/trading_overview.json`) -- all strategies overlaid on shared panels. 12 panels: PV, drawdown, position, daily P&L, broker status, bars, trades, errors, funding rate, fees, position divergence, PV divergence.
+- **Per-strategy dashboards** (`dashboards/strategies/<name>.json`) -- one dashboard per active strategy, same 12 panels with `{strategy="<name>"}` pre-filtered. Generated from the fleet template + `docker/live/grafana/strategies.yml` registry via `python scripts/generate_grafana_dashboards.py`. Edit template / registry then rerun + rebuild -- do NOT hand-edit the generated files. `foldersFromFilesStructure: true` places them in a "strategies" folder in the Grafana UI.
+
+Alerting via Telegram contact point.
 
 ### Watchdog Container (Layer 3)
 `scripts/watchdog_docker.py` -- Docker events listener + 5-min periodic sweep + 30-min WandB check. Sends Telegram alerts on unhealthy/died/restart events. Read-only (never sends commands to trading containers). Requires `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` in `.env`.

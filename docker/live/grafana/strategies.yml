@@ -1,0 +1,25 @@
+# Per-strategy Grafana dashboard registry.
+# Consumed by scripts/generate_grafana_dashboards.py to produce one dashboard
+# per strategy from trading_overview.json. Mirrors active targets in
+# docker/live/prometheus/prometheus.yml -- keep in sync.
+#
+# Add a strategy by uncommenting / adding an entry, then run:
+#   python scripts/generate_grafana_dashboards.py
+# and rebuild the grafana image.
+
+strategies:
+  - name: gmgp1-gold
+    uid: finrl-gmgp1-gold
+  - name: gmgp1-btc
+    uid: finrl-gmgp1-btc
+  - name: gmgp1-xauusd
+    uid: finrl-gmgp1-xauusd
+  # INACTIVE -- uncomment when the corresponding prometheus target is active.
+  # - name: sg1-gold
+  #   uid: finrl-sg1-gold
+  # - name: funding-arb
+  #   uid: finrl-funding-arb
+  # - name: sync-1h
+  #   uid: finrl-sync-1h
+  # - name: velotrade-btc
+  #   uid: finrl-velotrade-btc
