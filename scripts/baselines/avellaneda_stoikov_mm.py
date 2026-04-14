@@ -47,7 +47,7 @@ from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
 # Config (mirrors configs/mm_sac_btc_lob_10s.yaml)
 # --------------------------------------------------------------------------
 DATA_PATH = ROOT / "data" / "processed" / "btcusdt_lob_10s.parquet"
-BAR_SECONDS = 10
+BAR_SECONDS = 10  # default; override with --bar_seconds
 SPLITS = {
     "train": ("2025-10-24", "2025-11-03"),
     "val":   ("2026-02-07", "2026-02-24"),
@@ -121,6 +121,7 @@ def backtest(
     gamma: float,
     kappa: float,
     split_name: str,
+    bar_seconds: float = BAR_SECONDS,
 ) -> BacktestResult:
     n = len(df)
     if n < VOL_WINDOW + 2:
@@ -228,7 +229,7 @@ def backtest(
     try:
         analyzer = PyfolioAnalyzer(
             returns=pd.Series(returns),
-            bar_minutes=BAR_SECONDS / 60.0,
+            bar_minutes=bar_seconds / 60.0,
         )
         metrics = analyzer.get_audit_metrics()
         sharpe = float(metrics.get("sharpe_ratio", 0.0))
@@ -236,10 +237,10 @@ def backtest(
         mdd = float(metrics.get("max_drawdown", 0.0))
     except Exception:
         std_r = returns.std()
-        sharpe = float(returns.mean() / std_r * math.sqrt(525600 / (BAR_SECONDS / 60.0))) if std_r > 0 else 0.0
+        sharpe = float(returns.mean() / std_r * math.sqrt(525600 / (bar_seconds / 60.0))) if std_r > 0 else 0.0
         neg = returns[returns < 0]
         dstd = neg.std() if len(neg) > 0 else 0.0
-        sortino = float(returns.mean() / dstd * math.sqrt(525600 / (BAR_SECONDS / 60.0))) if dstd > 0 else 0.0
+        sortino = float(returns.mean() / dstd * math.sqrt(525600 / (bar_seconds / 60.0))) if dstd > 0 else 0.0
         mdd = 0.0
 
     total_return = (equity_curve[-1] - INITIAL_BALANCE) / INITIAL_BALANCE
@@ -271,8 +272,13 @@ def apply_gate(val_pf: float, test_pf: float) -> str:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--data", type=Path, default=DATA_PATH)
-    parser.add_argument("--out", type=Path, default=ROOT / "data" / "baselines" / "avellaneda_stoikov_10s.csv")
+    parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--bar_seconds", type=float, default=BAR_SECONDS)
+    parser.add_argument("--tag", default=None, help="label used in default --out filename")
     args = parser.parse_args()
+    if args.out is None:
+        tag = args.tag or args.data.stem
+        args.out = ROOT / "data" / "baselines" / f"avellaneda_stoikov_{tag}.csv"
 
     splits = load_and_split(args.data)
     for name, sub in splits.items():
@@ -285,7 +291,7 @@ def main() -> int:
     results: List[BacktestResult] = []
     for gamma in GAMMAS:
         for split_name in ["train", "val", "test"]:
-            r = backtest(splits[split_name], gamma=gamma, kappa=kappa, split_name=split_name)
+            r = backtest(splits[split_name], gamma=gamma, kappa=kappa, split_name=split_name, bar_seconds=args.bar_seconds)
             results.append(r)
             print(
                 f"[bt] gamma={gamma:<5}  split={r.split:<5}  "

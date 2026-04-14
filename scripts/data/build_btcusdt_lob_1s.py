@@ -28,7 +28,7 @@ import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 DB = ROOT / "data" / "secure_lob_collection.db"
-OUT = ROOT / "data" / "processed" / "btcusdt_lob_1s.parquet"
+OUT_DIR = ROOT / "data" / "processed"
 SYMBOL = "BTCUSDT"
 GAP_SECONDS = 5
 
@@ -36,9 +36,12 @@ GAP_SECONDS = 5
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--db", type=Path, default=DB)
-    ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--out", type=Path, default=None)
     ap.add_argument("--symbol", default=SYMBOL)
     args = ap.parse_args()
+
+    if args.out is None:
+        args.out = OUT_DIR / f"{args.symbol.lower()}_lob_1s.parquet"
 
     t0 = time.time()
     print(f"[load] reading {args.symbol} snapshots from {args.db}")
