@@ -281,6 +281,33 @@ services:
       - gmgp1-xauusd-state:/app/state
 
   # ============================================================
+  #  Data Collectors (no trading, no checkpoints)
+  # ============================================================
+
+  hl-lob-recorder:
+    image: finrl-live-engine:latest
+    container_name: hl-lob-recorder
+    profiles: [hl-recorder, all]
+    networks: [finrl-net]
+    restart: unless-stopped
+    command: >
+      python scripts/record_hyperliquid_lob.py
+      --coin ${HL_COIN:-BTC}
+      --duration-hours ${HL_DURATION_HOURS:-168}
+      --interval ${HL_SNAPSHOT_INTERVAL:-1.0}
+      --flush-interval ${HL_FLUSH_INTERVAL:-300}
+      --depth ${HL_DEPTH:-10}
+    environment:
+      <<: *common-env
+    volumes:
+      - hyperliquid-data:/app/data/hyperliquid
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  # ============================================================
   #  Add new strategies here. Copy a template above and change:
   #    container_name, STRATEGY_NAME, STRATEGY_RUNNER,
   #    STRATEGY_CONFIG, checkpoint volume mount, log volume.
@@ -365,3 +392,4 @@ volumes:
   sync-1h-state:
   gmgp1-xauusd-state:
   velotrade-btc-state:
+  hyperliquid-data:
