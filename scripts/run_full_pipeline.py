@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 from urllib.request import Request, urlopen
 
 import numpy as np
@@ -693,17 +694,48 @@ def run_backtest(config, checkpoint_path, device, start_date=None, end_date=None
 # ============================================================================
 # NOTIFICATIONS
 # ============================================================================
-def _notify_discord(title: str, message: str, color: int = 0x00FF00):
-    """Send a Discord webhook notification. Silent no-op if URL not configured."""
-    url = os.environ.get("DISCORD_WEBHOOK_URL")
-    if not url:
-        return
-    payload = json.dumps({"content": "<@792547494453575693>", "embeds": [{"title": title, "description": message, "color": color}]})
+def _load_telegram_creds() -> tuple[str | None, str | None]:
+    """Read TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID from env, falling back to docker/live/.env."""
+    token = os.environ.get("TELEGRAM_BOT_TOKEN")
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID")
+    if token and chat_id:
+        return token, chat_id
+    env_path = Path(__file__).resolve().parent.parent / "docker" / "live" / ".env"
+    if not env_path.exists():
+        return token, chat_id
     try:
-        req = Request(url, data=payload.encode(), headers={"Content-Type": "application/json", "User-Agent": "DeepScalper/1.0"})
+        for line in env_path.read_text().splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            v = v.strip().strip('"').strip("'")
+            if k.strip() == "TELEGRAM_BOT_TOKEN" and not token:
+                token = v
+            elif k.strip() == "TELEGRAM_CHAT_ID" and not chat_id:
+                chat_id = v
+    except Exception:
+        pass
+    return token, chat_id
+
+
+def _notify_telegram(title: str, message: str, ok: bool = True):
+    """Send a Telegram bot notification. Silent no-op if token/chat not configured."""
+    token, chat_id = _load_telegram_creds()
+    if not token or not chat_id:
+        return
+    icon = "✅" if ok else "❌"
+    text = f"{icon} <b>{title}</b>\n{message}"
+    payload = json.dumps({"chat_id": chat_id, "text": text, "parse_mode": "HTML"})
+    try:
+        req = Request(
+            f"https://api.telegram.org/bot{token}/sendMessage",
+            data=payload.encode(),
+            headers={"Content-Type": "application/json"},
+        )
         urlopen(req, timeout=10)
     except Exception as e:
-        print(f"[notify] Discord webhook failed: {e}")
+        print(f"[notify] Telegram send failed: {e}")
 
 
 # ============================================================================
@@ -882,14 +914,14 @@ def main():
 
         # Notify on completion
         run_name = wandb.run.name if wandb.run else "unknown"
-        _notify_discord("Pipeline Complete", f"**{run_name}** finished successfully.")
+        _notify_telegram("Pipeline Complete", f"<code>{run_name}</code> finished successfully.")
 
     except Exception as e:
         logger.error(f"Pipeline failed: {e}")
         if wandb.run:
             wandb.log({"pipeline/status": "failed", "pipeline/error": str(e)})
         run_name = wandb.run.name if wandb.run else "unknown"
-        _notify_discord("Pipeline FAILED", f"**{run_name}** crashed: {e}", color=0xFF0000)
+        _notify_telegram("Pipeline FAILED", f"<code>{run_name}</code> crashed: {e}", ok=False)
         raise
     finally:
         wandb.finish()

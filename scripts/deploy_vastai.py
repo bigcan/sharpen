@@ -414,7 +414,6 @@ def cmd_deploy(args):
     full_run_name = generate_run_name(args.config)
 
     wandb_key = os.getenv("WANDB_API_KEY", "")
-    discord_url = os.getenv("DISCORD_WEBHOOK_URL", "")
     config_path = args.config
     script_path = "scripts/run_full_pipeline.py"
 
@@ -534,11 +533,10 @@ def cmd_deploy(args):
             extra = f"{extra} --tags {tag_str}".strip()
 
     wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
-    discord_env = f"export DISCORD_WEBHOOK_URL='{discord_url}' &&" if discord_url else ""
 
     launch_cmd = (
         f"cd {REMOTE_WORKSPACE} && "
-        f"{wandb_env} {discord_env} "
+        f"{wandb_env} "
         f"ulimit -n 65535 || true && "
         f"nohup python -u {script_path} --config {config_path} "
         f"{run_name_arg} {hpo_storage_arg} {extra} "
