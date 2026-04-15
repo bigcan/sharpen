@@ -1,7 +1,7 @@
 # SG-1 XAUUSD FTMO — L1 Multi-Seed Stability
 # Window W2 (median WF): Train Mar-Aug, Val Sep-Oct, Test Nov-Dec
 # Run with --seed 123 and --seed 456.
-# HPs: PLACEHOLDER — update with HPO best trial results.
+# HPs: HPO `0goru53f` trial #40 (best, PF=3.071 HPO / 1.93 test).
 # Gate: PF CV < 30%, Sharpe CV < 30% across seeds.
 
 data:
@@ -37,7 +37,7 @@ env:
   window_size: 30
   features_per_scale: 8
   taker_fee: 0.0
-  deadband_threshold: 0.25
+  deadband_threshold: 0.35
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
   episode_length: 1500
@@ -48,7 +48,7 @@ env:
   gap_atr_mult: 3.0
   reward:
     mode: "dsr"
-    dsr_eta: 0.001
+    dsr_eta: 0.0020291052928078555
     dsr_scale: 1.0
   fee_schedule:
     - {step: 0, taker_fee: 0.0}
@@ -75,21 +75,21 @@ network:
   fusion_dim: 256
   window_size: 30
 
-# HPs: PLACEHOLDER — update with HPO best trial results
+# HPs from HPO `0goru53f` trial #40 (best PF=3.071)
 agents:
   sac:
-    lr_actor: 0.00022148365220787234
-    lr_critic: 0.00018486046430982398
-    lr_alpha: 0.000642523828301745
-    gamma: 0.9677944079144885
-    tau: 0.0020470394844356323
+    lr_actor: 0.0008992962313589642
+    lr_critic: 7.283682996733586e-06
+    lr_alpha: 2.6652717572612864e-06
+    gamma: 0.9733546180904501
+    tau: 0.003864460258363332
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.1476793336332415
+    initial_alpha: 0.22856781836103585
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 9.281178071284028
+    gradient_clip: 1.0607772108570277
     checkpoint_interval: 250000
 
 training:
