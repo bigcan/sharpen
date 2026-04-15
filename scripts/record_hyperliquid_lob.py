@@ -9,15 +9,23 @@ Persists 1-per-second BBO + 10-level-depth snapshots to parquet (daily-rotated).
 Purpose: Phase 1 data collection for MM venue reframe validation.
 Gate: A-S baseline @ 1.5 bps maker cost, PF >= 1.05 required (else MM closed).
 
-Output: data/hyperliquid/<coin>/lob_YYYYMMDD.parquet  (one file per UTC day)
-  Columns: timestamp_ms, coin, bid_price_1, bid_size_1, bid_count_1,
-           ask_price_1, ask_size_1, ask_count_1, mid_price, spread, spread_bps,
-           bid_depth_5, ask_depth_5, bid_depth_10, ask_depth_10,
-           bid_prices (JSON list, 10 levels), bid_quantities (JSON list),
-           ask_prices, ask_quantities, n_bid_levels, n_ask_levels
+Output layout (atomic per-flush parts — crash-safe, never reopens a file):
+  data/hyperliquid/<coin>/lob_YYYYMMDD_part_HHMMSS.parquet
+  data/hyperliquid/<coin>/trades_YYYYMMDD_part_HHMMSS.parquet
 
-Trades (separate file): data/hyperliquid/<coin>/trades_YYYYMMDD.parquet
-  Columns: timestamp_ms, coin, side, px, sz, tid, users (JSON list)
+Each flush writes a small, self-contained parquet via tmp+rename. Loss window
+is at most `flush_interval` seconds. Merge with:
+  pd.concat([pd.read_parquet(f) for f in sorted(glob("lob_YYYYMMDD_part_*.parquet"))])
+or use `scripts/baselines/hl_lob_to_as_schema.py` for A-S input.
+
+LOB columns: timestamp_ms, exchange_time_ms, coin,
+  bid_price_1, bid_size_1, bid_count_1, ask_price_1, ask_size_1, ask_count_1,
+  mid_price, spread, spread_bps,
+  bid_depth_5, ask_depth_5, bid_depth_10, ask_depth_10,
+  bid_prices (JSON), bid_quantities (JSON), ask_prices, ask_quantities,
+  n_bid_levels, n_ask_levels
+
+Trades columns: timestamp_ms, exchange_time_ms, coin, side, px, sz, tid, users
 
 Usage:
   python scripts/record_hyperliquid_lob.py --coin BTC --duration-hours 168
@@ -80,13 +88,15 @@ class HLRecorder:
         out_root.mkdir(parents=True, exist_ok=True)
         self.out_root = out_root
 
-    def _current_lob_path(self) -> Path:
-        day = datetime.now(timezone.utc).strftime("%Y%m%d")
-        return self.out_root / f"lob_{day}.parquet"
+    def _new_part_path(self, kind: str) -> Path:
+        now = datetime.now(timezone.utc)
+        return self.out_root / f"{kind}_{now.strftime('%Y%m%d')}_part_{now.strftime('%H%M%S')}.parquet"
 
-    def _current_trades_path(self) -> Path:
-        day = datetime.now(timezone.utc).strftime("%Y%m%d")
-        return self.out_root / f"trades_{day}.parquet"
+    @staticmethod
+    def _atomic_write_parquet(df: pd.DataFrame, path: Path) -> None:
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        df.to_parquet(tmp, index=False, engine="pyarrow")
+        tmp.replace(path)
 
     def _handle_l2book(self, data: dict) -> None:
         # data = {"coin": "BTC", "time": int_ms, "levels": [[bids], [asks]]}
@@ -180,27 +190,24 @@ class HLRecorder:
         }
 
     def _flush(self) -> None:
+        # Per-flush part files (atomic tmp+rename). Never reopens a file, so
+        # a SIGKILL can lose at most one in-flight part (<= flush_interval).
         if self.snapshots:
-            path = self._current_lob_path()
+            path = self._new_part_path("lob")
             df = pd.DataFrame(self.snapshots)
-            if path.exists():
-                df = pd.concat([pd.read_parquet(path), df], ignore_index=True)
-            df.to_parquet(path, index=False, engine="pyarrow")
+            self._atomic_write_parquet(df, path)
             n = len(self.snapshots)
             self.snapshots = []
             elapsed = (asyncio.get_event_loop().time() - self.start_time) / 3600
-            print(f"[FLUSH] {n} snaps -> {path.name} "
-                  f"(file_total={len(df):,}, {elapsed:.2f}h elapsed)")
+            print(f"[FLUSH] {n} snaps -> {path.name} ({elapsed:.2f}h elapsed)")
 
         if self.trade_buffer:
-            path = self._current_trades_path()
+            path = self._new_part_path("trades")
             df = pd.DataFrame(self.trade_buffer)
-            if path.exists():
-                df = pd.concat([pd.read_parquet(path), df], ignore_index=True)
-            df.to_parquet(path, index=False, engine="pyarrow")
+            self._atomic_write_parquet(df, path)
             n = len(self.trade_buffer)
             self.trade_buffer = []
-            print(f"[FLUSH] {n} trades -> {path.name} (file_total={len(df):,})")
+            print(f"[FLUSH] {n} trades -> {path.name}")
 
     async def _snapshot_loop(self, loop_start: float) -> None:
         while self.running:
@@ -264,6 +271,7 @@ class HLRecorder:
                         "subscription": {"type": "trades", "coin": self.coin},
                     }))
 
+                    stable = False
                     async for raw in ws:
                         if not self.running:
                             break
@@ -275,6 +283,11 @@ class HLRecorder:
                         data = msg.get("data")
                         if ch == "l2Book":
                             self._handle_l2book(data)
+                            if not stable and self.total_book_msgs >= 5:
+                                # Session is healthy; reset backoff so a later
+                                # transient drop doesn't inherit old backoff.
+                                self.reconnect_count = 0
+                                stable = True
                         elif ch == "trades":
                             self._handle_trades(data)
                         elif ch == "subscriptionResponse":
@@ -328,7 +341,7 @@ class HLRecorder:
         print(f"  Book msgs: {self.total_book_msgs:,}")
         print(f"  Trades:    {self.total_trades:,}")
         print(f"  Reconnects: {self.reconnect_count}")
-        files = sorted(self.out_root.glob("lob_*.parquet"))
+        files = sorted(self.out_root.glob("lob_*_part_*.parquet"))
         if files:
             total_rows = 0
             for f in files:

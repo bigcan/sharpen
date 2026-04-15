@@ -301,6 +301,19 @@ services:
       <<: *common-env
     volumes:
       - hyperliquid-data:/app/data/hyperliquid
+    # Healthcheck: a parquet part file must have been written in the last 15 min
+    # (flush_interval default = 5 min). If the WS stalled silently, this flags it.
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >
+          python -c "import glob,os,time,sys;
+          fs=glob.glob('/app/data/hyperliquid/**/*.parquet', recursive=True);
+          sys.exit(0 if any(time.time()-os.path.getmtime(f)<900 for f in fs) else 1)"
+      interval: 5m
+      timeout: 10s
+      start_period: 10m
+      retries: 3
     deploy:
       resources:
         limits:
