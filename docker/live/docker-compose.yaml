@@ -290,6 +290,14 @@ services:
     profiles: [hl-recorder, all]
     networks: [finrl-net]
     restart: unless-stopped
+    # Override the strategy entrypoint (which requires STRATEGY_RUNNER / _CONFIG)
+    # — this service is a pure data collector, not a trading strategy.
+    entrypoint: []
+    working_dir: /app
+    # Named volume mount point is created root-owned; image's finrl user cannot
+    # mkdir inside. Collector has no broker credentials / trading surface, so
+    # running as root is acceptable here.
+    user: "0:0"
     command: >
       python scripts/record_hyperliquid_lob.py
       --coin ${HL_COIN:-BTC}
