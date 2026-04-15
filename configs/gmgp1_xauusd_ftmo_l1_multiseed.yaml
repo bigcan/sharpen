@@ -1,0 +1,102 @@
+# GMGP1-XAUUSD FTMO-Wrapped L1 Multi-Seed — stability check with PropFirmWrapperV7
+# Deploy twice: --seed 123 and --seed 456
+# Gate (both seeds must pass):
+#   - test PF > 1.5
+#   - max EOD trailing DD < 6%
+#   - 0 daily-loss wrapper trips in test window
+#   - CV(PF) across seeds < 30%
+# HPs: PLACEHOLDER — fill from gmgp1_xauusd_ftmo_hpo best trial before deploying.
+# Currently seeded with SG-1 FTMO best (identical to HPO config seed) as a safety fallback.
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"  # CME proxy
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-10-31"       # longer training window (L1 vs HPO)
+  val_start_date: "2025-11-01"
+  val_end_date: "2025-11-30"
+  test_start_date: "2025-12-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0
+  deadband_threshold: 0.25            # update from HPO winner if HPO sweeps it
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10              # second-line safety
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001                    # UPDATE FROM HPO WINNER
+    dsr_scale: 1.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 500000, taker_fee: 0.0, ramp_to: 0.00015, ramp_end_step: 1500000}
+    - {step: 1500000, taker_fee: 0.00015}
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false                # keep private_dim=5 (live compat)
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs: PLACEHOLDER — UPDATE FROM gmgp1_xauusd_ftmo_hpo best trial.
+# Current values = SG-1 FTMO seed (used in HPO config); will converge near here ±20%.
+agents:
+  sac:
+    lr_actor: 0.00022148
+    lr_critic: 0.00018486
+    lr_alpha: 0.00064252
+    gamma: 0.96779
+    tau: 0.00204704
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.14768
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 9.28118
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 5000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-xauusd", "Gold", "SAC", "15min", "CFD", "FTMO",
+         "ftmo-wrapped", "propfirm", "multiseed", "l1", "phase3"]

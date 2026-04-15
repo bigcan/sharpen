@@ -1,0 +1,110 @@
+# GMGP1-XAUUSD FTMO-Wrapped HPO — narrow-mode around SG-1 FTMO seed HPs
+# Motivation: Paper live (2026-04-13, S426/S427) blew past FTMO rails 3× in one UTC day
+# (raw DD -25.65%, daily-loss trips at -11.74% / -5.84%). Base V7 env has no daily-loss
+# awareness, no EOD trailing DD, no profit-target shaping. Retrain with PropFirmWrapperV7
+# so policy learns to respect rails, not rely on live circuit-breakers (S422+S427).
+#
+# Wrapper thresholds: 8% trailing DD / 4% daily loss (buffered vs FTMO 10%/5%).
+#   Matches live risk-manager config — policy learns the same rails runtime enforces.
+# augment_obs: false — live_obs_builder.py:509-511 hard-codes private_dim=5.
+# Seed HPs: SG-1 XAUUSD FTMO best (wf_w1.yaml:78-92, WandB ljx1r5up/0goru53f).
+#   Reason: wrapper reward magnitude ~25× base DSR (quadratic 5.0× penalty + 10.0 success
+#   bonus); GMGP1-T34 HPs (lr_alpha=2e-6) will not transfer. SG-1 already converged under
+#   identical wrapper shape.
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"  # CME proxy
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10            # second-line safety — wrapper is primary
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001                  # SG-1 FTMO validated under wrapper
+    dsr_scale: 1.0
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0}
+    - {step: 500000, taker_fee: 0.0, ramp_to: 0.00015, ramp_end_step: 1500000}
+    - {step: 1500000, taker_fee: 0.00015}   # 1.5bps CFD effective
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10         # FTMO Phase 1 target
+    max_trailing_drawdown_pct: 0.08 # buffered (FTMO=10%)
+    max_daily_loss_pct: 0.04        # buffered (FTMO=5%)
+    eod_hour_utc: 21                # NY close
+    drawdown_penalty_start: 0.04    # start quadratic penalty at daily-loss line
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false              # keep private_dim=5 (live_obs_builder compat)
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5                    # unchanged (augment_obs: false)
+  fusion_dim: 256
+  window_size: 30
+
+# Seed HPs — SG-1 XAUUSD FTMO best trial (wf_w1.yaml:78-92)
+# narrow_mode explores ±20% log-uniform around these values for all 9 SAC dims
+agents:
+  sac:
+    lr_actor: 0.00022148
+    lr_critic: 0.00018486
+    lr_alpha: 0.00064252
+    gamma: 0.96779
+    tau: 0.00204704
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.14768
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 9.28118
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000           # overridden to steps_per_trial during HPO
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  n_trials: 30                      # 10 random + 20 TPE
+  steps_per_trial: 500000
+  narrow_mode: true                 # ±20% around agents.sac seed values
+  enqueue_baseline: true            # Trial 0 = exact seed HPs (guaranteed anchor)
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-xauusd", "Gold", "SAC", "15min", "CFD", "FTMO",
+         "ftmo-wrapped", "propfirm", "hpo", "narrow", "xauusd"]
