@@ -156,6 +156,11 @@ class LiveTradingEngine:
         # Daily loss smoothing: median of last 3 PV readings prevents false
         # triggers from broker API hiccups returning anomalous portfolio values
         self._pv_buffer: collections.deque[float] = collections.deque(maxlen=3)
+        # S448 Defect 3 fix: consecutive raw-breach counter. Trip when raw
+        # breach persists ≥2 bars even if median hasn't caught up — kills the
+        # 2-bar lag that let XAUUSD run to -11.74% DD on 2026-04-13 while
+        # smoothed sat at -9.37%.
+        self._consecutive_raw_breach_count: int = 0
 
         # Control
         self._should_stop = False
@@ -1280,17 +1285,21 @@ class LiveTradingEngine:
 
         FIX AUD-H04: Reset at UTC midnight instead of bar count.
 
-        Uses median of the last 3 portfolio value readings to prevent false
-        triggers from broker API hiccups returning anomalous values. A single
-        bad reading cannot trip the limit on its own.
+        Median of last 3 PV readings prevents API-hiccup false triggers.
+        S448 Defect 3 fix: also trip when the raw reading has breached the
+        limit on ≥2 consecutive bars — median lags raw by up to 2 bars on
+        fast adverse moves, and that lag let XAUUSD run past FTMO's 10% DD
+        line on 2026-04-13 (raw -11.74% final vs smoothed -9.37% at trip).
+        Two-consecutive-bar requirement preserves single-spike robustness.
         """
         current_date = bar_time.date()
 
         if self._last_daily_reset_date is None or current_date != self._last_daily_reset_date:
             self._daily_start_value = self._portfolio_value
             self._last_daily_reset_date = current_date
-            # Reset PV buffer on new day to avoid stale cross-day values
+            # Reset PV buffer + breach counter on new day
             self._pv_buffer.clear()
+            self._consecutive_raw_breach_count = 0
 
         # Append current reading to smoothing buffer
         self._pv_buffer.append(self._portfolio_value)
@@ -1302,12 +1311,26 @@ class LiveTradingEngine:
 
             # Also compute single-reading return for comparison
             raw_return = (self._portfolio_value - self._daily_start_value) / self._daily_start_value
+            limit = self._max_daily_loss_pct
 
-            if smoothed_return < -self._max_daily_loss_pct:
+            raw_breach = raw_return < -limit
+            smoothed_breach = smoothed_return < -limit
+
+            if raw_breach:
+                self._consecutive_raw_breach_count += 1
+            else:
+                self._consecutive_raw_breach_count = 0
+
+            persisted_raw = self._consecutive_raw_breach_count >= 2
+
+            if smoothed_breach or persisted_raw:
+                worst_return = min(raw_return, smoothed_return)
+                trip_source = "smoothed" if smoothed_breach else "raw_persisted"
                 logger.critical(
-                    f"DAILY LOSS LIMIT: smoothed={smoothed_return:.2%} "
-                    f"(raw={raw_return:.2%}) < -{self._max_daily_loss_pct:.0%}. "
-                    f"Flattening and stopping trading.",
+                    f"DAILY LOSS LIMIT ({trip_source}): "
+                    f"smoothed={smoothed_return:.2%} raw={raw_return:.2%} "
+                    f"consec_raw={self._consecutive_raw_breach_count} "
+                    f"< -{limit:.0%}. Flattening and stopping trading.",
                 )
                 # FIX RSK-02: Flatten before stop — main loop exits on
                 # should_stop without closing open positions otherwise.
@@ -1316,17 +1339,25 @@ class LiveTradingEngine:
                 finally:
                     self._write_halt_state(
                         reason="daily_loss_limit",
-                        detail=f"smoothed_return={smoothed_return:.4f}",
+                        detail=(
+                            f"trip={trip_source} "
+                            f"worst_return={worst_return:.4f} "
+                            f"smoothed={smoothed_return:.4f} "
+                            f"raw={raw_return:.4f} "
+                            f"consec_raw={self._consecutive_raw_breach_count}"
+                        ),
                         now_utc=datetime.now(timezone.utc),
                     )
                     self._request_stop("daily_loss_limit")
-            elif raw_return < -self._max_daily_loss_pct:
-                # Single reading breached but median didn't — likely API hiccup
+            elif raw_breach:
+                # First-bar raw breach, median hasn't caught up yet — likely
+                # API hiccup. Waiting one more bar to confirm.
                 logger.debug(
                     f"Daily loss: raw={raw_return:.2%} breached limit but "
                     f"smoothed={smoothed_return:.2%} did not "
-                    f"(buffer={[round(v, 2) for v in self._pv_buffer]}). "
-                    f"Suppressing false trigger.",
+                    f"(consec_raw={self._consecutive_raw_breach_count}, "
+                    f"buffer={[round(v, 2) for v in self._pv_buffer]}). "
+                    f"Awaiting confirmation.",
                 )
 
     # -------------------------------------------------------------------
