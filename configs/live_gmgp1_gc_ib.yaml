@@ -77,7 +77,7 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 10000.0              # IB paper account (reset 2026-04-13)
+  initial_balance: 100000.0             # IB paper account (funded to $100K 2026-04-15)
   deadband_threshold: 0.25             # Ignore position changes < 25% (matches training)
   taker_fee: 0.0000017                 # ~0.17bps for GC ($2.50 / ~$150K half-notional)
   weekend_flatten:
