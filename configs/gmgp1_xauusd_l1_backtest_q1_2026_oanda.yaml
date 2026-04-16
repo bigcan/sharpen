@@ -26,7 +26,9 @@ env:
   initial_balance: 100000.0
   window_size: 30
   features_per_scale: 8
-  taker_fee: 0.00015
+  # OOS realism: IC Markets Raw XAUUSD ≈ 2.35 bps/side (commission + spread).
+  # Updated from 1.5 bps under S463 audit — prior value under-modeled real cost.
+  taker_fee: 0.000235
   deadband_threshold: 0.25
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
@@ -39,8 +41,6 @@ env:
     dsr_eta: 0.00092668
     dsr_scale: 1.0
     hindsight_weight: 0.0
-  fee_schedule:
-    - {step: 0, taker_fee: 0.00015}
 
 network:
   scale_encoder:
