@@ -69,8 +69,17 @@ def _with_reconnect(method):
 
     return wrapper
 
-# Volume encoding: cTrader API represents volume in hundredths of a lot.
-# 1.00 lot = volume 100, 0.01 lot = volume 1.
+# Volume encoding: cTrader Open API represents order/position `volume` in
+# 0.01 of a base-currency unit (centi-units). `lotSize` and `minVolume` on
+# ProtoOASymbol are also in centi-units.  So:
+#   api_volume   = lots × lotSize_raw          (cents of base / lot × lots)
+#   lots         = api_volume / lotSize_raw
+#   units_per_lot = lotSize_raw / _VOLUME_SCALE (e.g. XAUUSD: 10000 → 100 oz)
+# The lot↔volume conversion therefore needs `_lot_size_raw` (instance state),
+# NOT a constant — earlier code multiplied lots by _VOLUME_SCALE directly,
+# which produced volume=100 for 1 XAUUSD lot and caused the broker to fill
+# only 1 oz while engine bookkeeping counted 100 oz (100× phantom sizing,
+# root cause of the S458 gmgp1-xauusd halt).
 _VOLUME_SCALE = 100
 
 # Price encoding: cTrader spot event bid/ask (uint64) are always scaled by 10^5,
@@ -121,6 +130,11 @@ class CTraderBroker:
         self._testnet = testnet
         self._symbol_name = symbol
         self._lot_size = lot_size
+        # Raw cTrader `lotSize` in centi-units of the base currency — the
+        # authoritative scale for every lot↔volume conversion on this broker.
+        # Populated on connect() from ProtoOASymbol.lotSize; seeded here from
+        # the constructor default so tests that skip connect() still work.
+        self._lot_size_raw = int(round(lot_size * _VOLUME_SCALE))
         self._min_lot = min_lot
         self._tick_size = tick_size
         self._leverage = leverage
@@ -269,13 +283,19 @@ class CTraderBroker:
                 sym_info = sym_detail_payload.symbol[0]
                 self._symbol_digits = sym_info.digits
                 if sym_info.lotSize:
-                    self._lot_size = sym_info.lotSize / _VOLUME_SCALE
-                if sym_info.minVolume:
-                    self._min_lot = sym_info.minVolume / _VOLUME_SCALE
+                    self._lot_size_raw = int(sym_info.lotSize)
+                    self._lot_size = self._lot_size_raw / _VOLUME_SCALE
+                # minVolume is in centi-units; convert to lots via lotSize_raw
+                # (NOT via _VOLUME_SCALE — that confuses centi-units with lots
+                # and under-reports min_lot by a factor of units-per-lot).
+                if sym_info.minVolume and self._lot_size_raw > 0:
+                    self._min_lot = sym_info.minVolume / self._lot_size_raw
                 logger.info(
                     f"Symbol {self._symbol_name}: id={self._symbol_id}, "
-                    f"digits={self._symbol_digits}, lot_size={self._lot_size}, "
-                    f"min_lot={self._min_lot}"
+                    f"digits={self._symbol_digits}, "
+                    f"lot_size={self._lot_size} units/lot, "
+                    f"min_lot={self._min_lot:.4f} lots, "
+                    f"lot_size_raw={self._lot_size_raw} centi-units/lot"
                 )
 
             # Step 5: Get trader info (balance, moneyDigits)
@@ -693,7 +713,7 @@ class CTraderBroker:
 
         side = "buy" if delta_lots_rounded > 0 else "sell"
         api_side = ProtoOATradeSide.BUY if delta_lots_rounded > 0 else ProtoOATradeSide.SELL
-        api_volume = int(round(abs(delta_lots_rounded) * _VOLUME_SCALE))
+        api_volume = self.lots_to_api_volume(delta_lots_rounded)
 
         if api_volume < 1:
             return OrderResult(
@@ -764,7 +784,7 @@ class CTraderBroker:
                             if deal.HasField("executionPrice"):
                                 close_fill_price = deal.executionPrice
 
-                        lots = pos.tradeData.volume / _VOLUME_SCALE
+                        lots = self.api_volume_to_lots(pos.tradeData.volume)
                         close_notional = lots * self._lot_size * close_fill_price
                         total_fee += close_notional * self._taker_fee
 
@@ -806,7 +826,7 @@ class CTraderBroker:
                 self._position_lots = 0.0
 
                 # Recalculate: we need to open target_lots from flat
-                new_volume = int(round(abs(target_lots) * _VOLUME_SCALE))
+                new_volume = self.lots_to_api_volume(target_lots)
                 if new_volume < 1:
                     # Target is effectively flat after closing
                     logger.info(
@@ -892,7 +912,7 @@ class CTraderBroker:
                 if deal.filledVolume:
                     filled_volume = deal.filledVolume
 
-            filled_lots = filled_volume / _VOLUME_SCALE
+            filled_lots = self.api_volume_to_lots(filled_volume)
             filled_notional = filled_lots * self._lot_size * fill_price
             fee = filled_notional * self._taker_fee + total_fee
 
@@ -942,7 +962,7 @@ class CTraderBroker:
                 for pos in recon_payload.position:
                     td = pos.tradeData
                     if td.symbolId == self._symbol_id:
-                        lots = td.volume / _VOLUME_SCALE
+                        lots = self.api_volume_to_lots(td.volume)
                         if td.tradeSide == 2:  # SELL
                             lots = -lots
                         broker_lots += lots
@@ -1014,7 +1034,7 @@ class CTraderBroker:
             for pos in recon_payload.position:
                 trade_data = pos.tradeData
                 if trade_data.symbolId == self._symbol_id:
-                    lots = trade_data.volume / _VOLUME_SCALE
+                    lots = self.api_volume_to_lots(trade_data.volume)
                     if trade_data.tradeSide == 2:  # SELL
                         lots = -lots
                     signed_lots += lots
@@ -1076,7 +1096,7 @@ class CTraderBroker:
                 # pos.price is a protobuf double — already decimal.
                 trade_data = pos.tradeData
                 if trade_data.symbolId == self._symbol_id and current_price > 0:
-                    lots = trade_data.volume / _VOLUME_SCALE
+                    lots = self.api_volume_to_lots(trade_data.volume)
                     entry_price = pos.price  # double, already decimal
                     # BUY=1, SELL=2
                     direction = 1.0 if trade_data.tradeSide == 1 else -1.0
@@ -1141,7 +1161,7 @@ class CTraderBroker:
             for pos in recon_payload.position:
                 trade_data = pos.tradeData
                 if trade_data.symbolId == self._symbol_id:
-                    lots = trade_data.volume / _VOLUME_SCALE
+                    lots = self.api_volume_to_lots(trade_data.volume)
                     side = "BUY" if trade_data.tradeSide == 1 else "SELL"
                     entry_price = pos.price if pos.HasField("price") else 0.0
                     positions.append({
@@ -1206,7 +1226,7 @@ class CTraderBroker:
                 close_req, timeout=self._market_fallback_timeout
             )
 
-            lots = volume / _VOLUME_SCALE
+            lots = self.api_volume_to_lots(volume)
             logger.info(
                 "Closed position %d (%.2f lots)", position_id, lots
             )
@@ -1264,7 +1284,7 @@ class CTraderBroker:
                             close_req, timeout=self._market_fallback_timeout
                         )
 
-                        lots = pos.tradeData.volume / _VOLUME_SCALE
+                        lots = self.api_volume_to_lots(pos.tradeData.volume)
                         side = "sell" if pos.tradeData.tradeSide == 1 else "buy"
                         orders.append(OrderResult(
                             asset=self._symbol_name,
@@ -1295,7 +1315,7 @@ class CTraderBroker:
                             symbol=self._symbol_name,
                             side="unknown",
                             order_type="market",
-                            quantity=pos.tradeData.volume / _VOLUME_SCALE,
+                            quantity=self.api_volume_to_lots(pos.tradeData.volume),
                             price=0.0,
                             filled_quantity=0.0,
                             avg_fill_price=0.0,
@@ -1349,13 +1369,13 @@ class CTraderBroker:
         Example: $100K portfolio, Gold @ $3000/oz, 100 oz/lot, leverage 30x
             fraction=1.0 → notional=$100K → lots = 100000/(3000*100) = 0.333
 
-        The agent's ``fraction`` targets notional = |fraction| × PV (unleveraged
-        fraction of equity).  When the broker's ``min_lot`` * price * lot_size
-        exceeds the configured leverage cap (e.g. IC Markets XAUUSD standard
-        account: min_lot=1.0 lot = 100 oz = $482k notional on a $10k paper
-        balance = 48× leverage), rounding up to ``min_lot`` would silently
-        over-leverage the account.  S458 gmgp1-xauusd intrabar_dd_projection
-        halt was caused by exactly this path.  Now we skip the trade instead.
+        The agent's ``fraction`` targets notional = |fraction| × PV
+        (unleveraged fraction of equity).  Defensive guard: if the broker's
+        minimum lot × lot_size × price ever exceeds the configured leverage
+        cap, skip rather than floor up (so a mis-parameterized symbol or
+        small account can't silently over-leverage via the floor-up path).
+        With correctly-parsed min_lot (0.01 for XAUUSD on IC Markets), this
+        is inert on a $10k+ account — it's a belt-and-braces check.
         """
         if price <= 0 or portfolio_value <= 0:
             return 0.0
@@ -1405,19 +1425,23 @@ class CTraderBroker:
         fraction = notional / portfolio_value
         return float(np.clip(fraction * np.sign(lots), -1.0, 1.0))
 
-    @staticmethod
-    def lots_to_api_volume(lots: float) -> int:
-        """Convert lots to cTrader API volume units (hundredths).
+    def lots_to_api_volume(self, lots: float) -> int:
+        """Convert lots to cTrader API `volume` (centi-units of base).
 
-        1.00 lot = volume 100
-        0.01 lot = volume 1
+        cTrader Open API: `volume = lots × lotSize_raw`.  For XAUUSD where
+        `lotSize_raw = 10000` (100 oz/lot × 100 centi/oz), 1.00 lot sends
+        volume=10000, 0.01 lot sends volume=100.  Signed input accepted;
+        magnitude only is returned (the API takes a separate `tradeSide`).
         """
-        return int(round(abs(lots) * _VOLUME_SCALE))
+        if self._lot_size_raw <= 0:
+            return 0
+        return int(round(abs(lots) * self._lot_size_raw))
 
-    @staticmethod
-    def api_volume_to_lots(volume: int) -> float:
-        """Convert cTrader API volume units back to lots."""
-        return volume / _VOLUME_SCALE
+    def api_volume_to_lots(self, volume: int) -> float:
+        """Convert cTrader API `volume` (centi-units) back to lots."""
+        if self._lot_size_raw <= 0:
+            return 0.0
+        return volume / self._lot_size_raw
 
     # ---------------------------------------------------------------
     # Twisted/asyncio bridge + message handling

@@ -100,36 +100,16 @@ def test_lots_to_position_roundtrip(broker):
     assert abs(recovered_lots - original_lots) < 0.02
 
 
-def test_position_to_lots_skips_when_min_lot_exceeds_leverage(broker):
-    """S458 regression: small account + standard-account min_lot must not
-    silently over-leverage via the floor-up path.
+def test_position_to_lots_skips_when_min_lot_exceeds_leverage():
+    """Defensive guard: if broker's min_lot × price × lot_size exceeds the
+    configured leverage cap, skip instead of silently floor-up.  Post-fix
+    this only fires on mis-parameterized / absurd symbol configs, but it's
+    kept as belt-and-braces.
 
-    $10k equity, XAUUSD at $4820, min_lot=1.0 lot=100 oz, leverage=1:
-        min_lot_notional = $482k, max_notional = $10k → must skip (return 0).
-    """
-    env = {
-        "CTRADER_CLIENT_ID": "id",
-        "CTRADER_CLIENT_SECRET": "s",
-        "CTRADER_ACCESS_TOKEN": "t",
-        "CTRADER_ACCOUNT_ID": "1",
-    }
-    with patch.dict(os.environ, env):
-        b = CTraderBroker(
-            testnet=True,
-            symbol="XAUUSD",
-            lot_size=100.0,
-            min_lot=1.0,   # IC Markets standard account reports minVolume=100
-            leverage=1,    # Config default for FTMO prep
-        )
-    assert b._position_to_lots(0.889, 10_012.0, 4820.0) == 0.0
-    assert b._position_to_lots(-0.889, 10_012.0, 4820.0) == 0.0
-
-
-def test_position_to_lots_floors_up_when_leverage_permits(broker):
-    """Floor-up is still allowed when min_lot_notional fits under the cap.
-
-    $10k equity, XAUUSD at $4820, min_lot=1.0 lot, leverage=50:
-        max_notional = $500k, min_lot_notional = $482k → floor-up to 1.0 lot.
+    Construction: tiny account ($100) at XAUUSD $4820, min_lot=0.01
+    (1 oz = $48 notional), leverage=1 → max_notional=$100.  min_lot
+    notional ($48) < max ($100), so this still trades.  Force a skip
+    by setting min_lot=1.0 (100 oz = $482k) with leverage=1 on $10k.
     """
     env = {
         "CTRADER_CLIENT_ID": "id",
@@ -143,10 +123,10 @@ def test_position_to_lots_floors_up_when_leverage_permits(broker):
             symbol="XAUUSD",
             lot_size=100.0,
             min_lot=1.0,
-            leverage=50,
+            leverage=1,
         )
-    lots = b._position_to_lots(0.889, 10_000.0, 4820.0)
-    assert abs(lots - 1.0) < 1e-9
+    assert b._position_to_lots(0.889, 10_012.0, 4820.0) == 0.0
+    assert b._position_to_lots(-0.889, 10_012.0, 4820.0) == 0.0
 
 
 def test_position_to_lots_caps_at_leverage(broker):
@@ -166,8 +146,7 @@ def test_position_to_lots_caps_at_leverage(broker):
             leverage=1,
         )
     # PV $100k, price $3000, fraction=1.0 → notional $100k → 0.333 lots.
-    # leverage=1 cap: max_notional = $100k → max_lots = 100k/300k = 0.33 (same).
-    # Sanity: existing full_long behavior is preserved for leverage=1.
+    # leverage=1 cap: max_notional = $100k → max_lots = 100k/300k = 0.33.
     lots = b._position_to_lots(1.0, 100_000.0, 3000.0)
     assert 0.32 <= lots <= 0.34
 
@@ -184,33 +163,60 @@ def test_lots_to_position_clamps(broker):
 
 
 # ---------------------------------------------------------------
-# Volume encoding
+# Volume encoding — cTrader API `volume` is centi-units of base currency.
+# For XAUUSD lotSize_raw=10000 (100 oz/lot × 100 centi/oz):
+#   1 lot = 10000 volume, 0.01 lot = 100 volume (= 1 oz).
 # ---------------------------------------------------------------
 
-def test_volume_encoding():
-    """1.50 lots -> API volume 150."""
-    assert CTraderBroker.lots_to_api_volume(1.50) == 150
+def test_volume_encoding_xauusd(broker):
+    """1.50 lots XAUUSD -> API volume 15000 (= 150 oz in centi-oz)."""
+    assert broker.lots_to_api_volume(1.50) == 15000
 
 
-def test_volume_encoding_min_lot():
-    """0.01 lots -> API volume 1."""
-    assert CTraderBroker.lots_to_api_volume(0.01) == 1
+def test_volume_encoding_min_lot(broker):
+    """0.01 lot XAUUSD -> API volume 100 (= 1 oz = minimum)."""
+    assert broker.lots_to_api_volume(0.01) == 100
 
 
-def test_volume_encoding_zero():
-    assert CTraderBroker.lots_to_api_volume(0.0) == 0
+def test_volume_encoding_zero(broker):
+    assert broker.lots_to_api_volume(0.0) == 0
 
 
-def test_volume_decoding():
-    """API volume 150 -> 1.50 lots."""
-    assert CTraderBroker.api_volume_to_lots(150) == 1.50
+def test_volume_encoding_negative(broker):
+    """Sign is discarded — API takes tradeSide separately."""
+    assert broker.lots_to_api_volume(-0.50) == 5000
 
 
-def test_volume_roundtrip():
+def test_volume_decoding_xauusd(broker):
+    """API volume 15000 -> 1.50 lots XAUUSD."""
+    assert broker.api_volume_to_lots(15000) == 1.50
+
+
+def test_volume_roundtrip_xauusd(broker):
     for lots in [0.01, 0.05, 0.10, 0.33, 1.00, 5.50]:
-        vol = CTraderBroker.lots_to_api_volume(lots)
-        recovered = CTraderBroker.api_volume_to_lots(vol)
+        vol = broker.lots_to_api_volume(lots)
+        recovered = broker.api_volume_to_lots(vol)
         assert abs(recovered - lots) < 0.005
+
+
+def test_lot_size_raw_default_from_lot_size(broker):
+    """_lot_size_raw is seeded from constructor lot_size × 100."""
+    assert broker._lot_size_raw == 10000
+
+
+def test_volume_encoding_returns_zero_when_uninitialized():
+    """If _lot_size_raw is 0 (pre-connect with bad config), conversion is
+    safe and returns 0 rather than dividing by zero downstream."""
+    env = {
+        "CTRADER_CLIENT_ID": "id",
+        "CTRADER_CLIENT_SECRET": "s",
+        "CTRADER_ACCESS_TOKEN": "t",
+        "CTRADER_ACCOUNT_ID": "1",
+    }
+    with patch.dict(os.environ, env):
+        b = CTraderBroker(testnet=True, symbol="XAUUSD", lot_size=0.0)
+    assert b.lots_to_api_volume(1.0) == 0
+    assert b.api_volume_to_lots(10000) == 0.0
 
 
 # ---------------------------------------------------------------
