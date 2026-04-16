@@ -100,6 +100,78 @@ def test_lots_to_position_roundtrip(broker):
     assert abs(recovered_lots - original_lots) < 0.02
 
 
+def test_position_to_lots_skips_when_min_lot_exceeds_leverage(broker):
+    """S458 regression: small account + standard-account min_lot must not
+    silently over-leverage via the floor-up path.
+
+    $10k equity, XAUUSD at $4820, min_lot=1.0 lot=100 oz, leverage=1:
+        min_lot_notional = $482k, max_notional = $10k → must skip (return 0).
+    """
+    env = {
+        "CTRADER_CLIENT_ID": "id",
+        "CTRADER_CLIENT_SECRET": "s",
+        "CTRADER_ACCESS_TOKEN": "t",
+        "CTRADER_ACCOUNT_ID": "1",
+    }
+    with patch.dict(os.environ, env):
+        b = CTraderBroker(
+            testnet=True,
+            symbol="XAUUSD",
+            lot_size=100.0,
+            min_lot=1.0,   # IC Markets standard account reports minVolume=100
+            leverage=1,    # Config default for FTMO prep
+        )
+    assert b._position_to_lots(0.889, 10_012.0, 4820.0) == 0.0
+    assert b._position_to_lots(-0.889, 10_012.0, 4820.0) == 0.0
+
+
+def test_position_to_lots_floors_up_when_leverage_permits(broker):
+    """Floor-up is still allowed when min_lot_notional fits under the cap.
+
+    $10k equity, XAUUSD at $4820, min_lot=1.0 lot, leverage=50:
+        max_notional = $500k, min_lot_notional = $482k → floor-up to 1.0 lot.
+    """
+    env = {
+        "CTRADER_CLIENT_ID": "id",
+        "CTRADER_CLIENT_SECRET": "s",
+        "CTRADER_ACCESS_TOKEN": "t",
+        "CTRADER_ACCOUNT_ID": "1",
+    }
+    with patch.dict(os.environ, env):
+        b = CTraderBroker(
+            testnet=True,
+            symbol="XAUUSD",
+            lot_size=100.0,
+            min_lot=1.0,
+            leverage=50,
+        )
+    lots = b._position_to_lots(0.889, 10_000.0, 4820.0)
+    assert abs(lots - 1.0) < 1e-9
+
+
+def test_position_to_lots_caps_at_leverage(broker):
+    """Computed lots above leverage cap are rounded down to the cap."""
+    env = {
+        "CTRADER_CLIENT_ID": "id",
+        "CTRADER_CLIENT_SECRET": "s",
+        "CTRADER_ACCESS_TOKEN": "t",
+        "CTRADER_ACCOUNT_ID": "1",
+    }
+    with patch.dict(os.environ, env):
+        b = CTraderBroker(
+            testnet=True,
+            symbol="XAUUSD",
+            lot_size=100.0,
+            min_lot=0.01,
+            leverage=1,
+        )
+    # PV $100k, price $3000, fraction=1.0 → notional $100k → 0.333 lots.
+    # leverage=1 cap: max_notional = $100k → max_lots = 100k/300k = 0.33 (same).
+    # Sanity: existing full_long behavior is preserved for leverage=1.
+    lots = b._position_to_lots(1.0, 100_000.0, 3000.0)
+    assert 0.32 <= lots <= 0.34
+
+
 def test_lots_to_position_clamps(broker):
     """Position fraction should be clamped to [-1, 1]."""
     # Huge position: 10 lots * 3000 * 100 = $3M on $100K → clamp to 1.0
