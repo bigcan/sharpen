@@ -25,7 +25,10 @@ env:
   initial_balance: 100000.0
   window_size: 30
   features_per_scale: 8           # TC-OPT: must match features.features_per_scale
-  taker_fee: 0.0                 # Start zero (fee curriculum)
+  # IC Markets Raw XAUUSD ≈ 2.35 bps/side (commission + spread). S463 audit:
+  # curriculum removed — it never ramped within a 500K HPO budget (trainer-step
+  # keyed, num_envs>1 truncates before the ramp starts).
+  taker_fee: 0.000235
   deadband_threshold: 0.25
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
@@ -37,10 +40,6 @@ env:
     mode: "dsr"
     dsr_eta: 0.001
     dsr_scale: 1.0
-  fee_schedule:
-    - {step: 0, taker_fee: 0.0}
-    - {step: 500000, taker_fee: 0.0, ramp_to: 0.00015, ramp_end_step: 1500000}
-    - {step: 1500000, taker_fee: 0.00015}  # 1.5bps — XAUUSD CFD effective spread
 
 network:
   scale_encoder:

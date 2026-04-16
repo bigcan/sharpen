@@ -1241,6 +1241,83 @@ class CTraderBroker:
         return {a: 0.0 for a in assets}
 
     @_with_reconnect
+    async def get_deal_list(self, from_days_ago: int = 7) -> list[dict]:
+        """Fetch historical deals (fills) for this account.
+
+        Read-only account query used by
+        ``scripts/analyze_xauusd_fill_costs.py`` to measure real per-side
+        commission + spread so HPO configs can plug a measured steady-state
+        ``taker_fee`` instead of a curriculum that never ramps (S461/S463).
+
+        Commission is converted to deposit-currency units
+        (``commission_raw / 10^money_digits``) and returned as a positive
+        number — the raw payload reports it as a signed int where negative
+        means "charged to trader".
+
+        Args:
+            from_days_ago: Lookback window in days.
+
+        Returns:
+            List of deal dicts filtered to this broker's symbol. Keys:
+            ``dealId``, ``orderId``, ``positionId``, ``executionTimestamp``
+            (ms), ``tradeSide`` ("BUY"/"SELL"), ``lots`` (unsigned float),
+            ``executionPrice`` (float), ``commission`` (float, deposit
+            currency, positive = charged).
+        """
+        from ctrader_open_api import Protobuf
+        from ctrader_open_api.messages.OpenApiMessages_pb2 import (
+            ProtoOADealListReq,
+        )
+
+        now_ms = int(time.time() * 1000)
+        from_ms = now_ms - from_days_ago * 86_400_000
+
+        req = ProtoOADealListReq()
+        req.ctidTraderAccountId = self._account_id
+        req.fromTimestamp = from_ms
+        req.toTimestamp = now_ms
+
+        res = await self._send_request(req, timeout=30.0)
+        payload = Protobuf.extract(res)
+        self._check_error(payload, "get_deal_list")
+
+        deals: list[dict] = []
+
+        for deal in payload.deal:
+            if self._symbol_id is not None and deal.symbolId != self._symbol_id:
+                continue
+
+            lots = self.api_volume_to_lots(deal.filledVolume)
+            side = "BUY" if deal.tradeSide == 1 else "SELL"
+            exec_price = float(getattr(deal, "executionPrice", 0.0) or 0.0)
+            commission_raw = int(getattr(deal, "commission", 0) or 0)
+            # Prefer per-deal moneyDigits (authoritative per fill) over the
+            # account-level scaling stored on the broker.
+            money_digits = (
+                deal.moneyDigits
+                if deal.HasField("moneyDigits")
+                else self._money_digits
+            )
+            commission = abs(commission_raw) / (10 ** money_digits)
+
+            deals.append({
+                "dealId": deal.dealId,
+                "orderId": deal.orderId,
+                "positionId": deal.positionId,
+                "executionTimestamp": deal.executionTimestamp,
+                "tradeSide": side,
+                "lots": lots,
+                "executionPrice": exec_price,
+                "commission": commission,
+            })
+
+        logger.info(
+            "get_deal_list: %d deals over %d days (symbol=%s)",
+            len(deals), from_days_ago, self._symbol_name,
+        )
+        return deals
+
+    @_with_reconnect
     async def emergency_flatten(self, assets: list[str]) -> RebalanceResult:
         """Close all positions via market orders."""
         from ctrader_open_api import Protobuf
