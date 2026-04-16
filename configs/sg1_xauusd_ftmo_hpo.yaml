@@ -1,7 +1,10 @@
 # SG-1 XAUUSD FTMO — HPO
 # 50 trials x 500K steps. PropFirmWrapper enabled (10% DD, 5% daily loss).
 # 3-min multi-scale + signal gate (same as SG-1 Gold).
-# Fee: 3.5bps CFD spread (higher than 2bps CME futures).
+# Fee: steady-state 2.35 bps since S468; legacy fee_schedule removed — never ramped
+# within 500K HPO budget (trainer-step keyed + num_envs=20 → trials terminated at
+# step 25K while ramp started at 300K). IC Markets Raw XAUUSD basis: commission
+# $3.50/lot/side (≈1.75 bps at $2000/oz) + typical spread 0.6 bps/side ≈ 2.35 bps/side.
 # Data: CME GC proxy (99%+ correlation with XAUUSD CFD at 3-min).
 
 data:
@@ -36,7 +39,7 @@ env:
   initial_balance: 100000.0
   window_size: 30
   features_per_scale: 8
-  taker_fee: 0.0
+  taker_fee: 0.000235
   deadband_threshold: 0.25
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
@@ -50,10 +53,6 @@ env:
     mode: "dsr"
     dsr_eta: 0.001
     dsr_scale: 1.0
-  fee_schedule:
-    - {step: 0, taker_fee: 0.0}
-    - {step: 300000, taker_fee: 0.0, ramp_to: 0.00035, ramp_end_step: 900000}
-    - {step: 900000, taker_fee: 0.00035}
   prop_firm:
     enabled: true
     profit_target_pct: 0.10
@@ -106,4 +105,4 @@ hpo:
 
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm", "hpo"]
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm", "hpo", "steady-state", "re-hpo"]

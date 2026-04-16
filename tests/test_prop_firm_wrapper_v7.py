@@ -332,3 +332,62 @@ class TestBaseEnvTermination:
 
         _, _, terminated, _, _ = wrapped.step(np.array([0.0]))
         assert terminated
+
+
+class TestStaticPeak:
+    """FTMO Phase 1 Challenge: peak must lock at initial_capital."""
+
+    def test_static_peak_default_is_true(self):
+        env = MockDictEnv()
+        wrapped = PropFirmWrapperV7(env, augment_obs=False)
+        assert wrapped.static_peak is True
+
+    def test_static_peak_locks_across_day_boundary(self):
+        """Peak stays at initial_capital even after profit + day boundary."""
+        env = MockDictEnv()
+        wrapped = PropFirmWrapperV7(
+            env,
+            max_trailing_drawdown_pct=0.10,
+            profit_target_pct=1.0,  # disable
+            augment_obs=False,
+            static_peak=True,
+        )
+        wrapped.reset()
+
+        # Ramp to 110K on day 1
+        env.set_equity(110_000.0)
+        wrapped.step(np.array([0.0]))
+        # Advance ~1 day (480 bars at 3-min) — mock.step() recomputes step_idx from _step
+        env._step += 480
+        env.set_equity(95_000.0)  # 5% below static $100K floor
+        _, _, terminated, _, info = wrapped.step(np.array([0.0]))
+
+        assert info["eod_peak_equity"] == 100_000.0, "static peak must not ratchet"
+        assert not terminated, "5% DD from static $100K is within 10% limit"
+
+    def test_rolling_peak_ratchets_when_opt_in(self):
+        """static_peak=False restores legacy funded-account trailing behavior."""
+        env = MockDictEnv()
+        wrapped = PropFirmWrapperV7(
+            env,
+            max_trailing_drawdown_pct=0.10,
+            profit_target_pct=1.0,
+            augment_obs=False,
+            static_peak=False,
+        )
+        wrapped.reset()
+
+        # Day 1: accumulate profit
+        env.set_equity(110_000.0)
+        wrapped.step(np.array([0.0]))
+
+        # Day boundary crossing step — wrapper ratchets peak to current equity (110K)
+        env._step += 480
+        env.set_equity(110_000.0)
+        _, _, _, _, info = wrapped.step(np.array([0.0]))
+        assert info["eod_peak_equity"] == pytest.approx(110_000.0), "peak should ratchet to 110K"
+
+        # Now drop to 95K — 13.6% below rolling $110K peak, breach 10% DD
+        env.set_equity(95_000.0)
+        _, _, terminated, _, info = wrapped.step(np.array([0.0]))
+        assert terminated, "rolling peak must enforce 10% DD from ratcheted $110K"

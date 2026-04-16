@@ -225,6 +225,7 @@ def create_env(arrays: dict, config: dict) -> CryptoPerpEnv | PropFirmWrapper:
             drawdown_penalty_scale=float(pf_cfg.get("drawdown_penalty_scale", 5.0)),
             success_bonus=float(pf_cfg.get("success_bonus", 10.0)),
             augment_obs=bool(pf_cfg.get("augment_obs", True)),
+            static_peak=bool(pf_cfg.get("static_peak", True)),
         )
         logger.info(
             f"PropFirmWrapper enabled: target={pf_cfg.get('profit_target_pct', 0.10):.0%}, "
