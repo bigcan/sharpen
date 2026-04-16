@@ -27,7 +27,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# cTrader volume encoding: 1 lot = 100, 0.01 lot = 1
+# cTrader volume encoding: api `volume` is in centi-units of the base
+# currency, NOT hundredths of a lot.  For a correct lots display we need
+# `lotSize` from ProtoOASymbol per position.  This admin script currently
+# skips that lookup — the `lots` field below is really "centi-units / 100"
+# which for XAUUSD happens to print 100× larger than the real lot count.
+# The CLOSE action passes td.volume through unchanged, so closes work
+# correctly regardless of the display glitch.
 _VOLUME_SCALE = 100
 _SPOT_PRICE_SCALE = 100_000
 
