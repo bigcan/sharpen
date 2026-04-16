@@ -55,7 +55,30 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
     def objective(trial):
         _mean_train_reward = float('nan')
         trial_prefix = f"hpo/t{trial.number}"
-        wandb.log({f"{trial_prefix}/started": True})
+        # Trial-role tagging: when `hpo.enqueue_baseline: true`, Optuna seeds
+        # trial 0 with the config's baseline HPs (see run_full_pipeline.run_hpo
+        # and distributed_hpo_coordinator). Tag it distinctly so top-K filters
+        # in WandB don't confuse the anchor with a representative search trial.
+        _enqueue_baseline = bool(base_config.get("hpo", {}).get("enqueue_baseline", False))
+        _is_baseline_anchor = _enqueue_baseline and trial.number == 0
+        _trial_role = "baseline" if _is_baseline_anchor else "search"
+        wandb.log({
+            f"{trial_prefix}/started": True,
+            f"{trial_prefix}/trial_role": _trial_role,
+        })
+        if _is_baseline_anchor and wandb.run is not None:
+            # Append 'baseline-anchor' tag + set baseline_anchor_trial config
+            # on the parent run (idempotent, best-effort).
+            try:
+                existing_tags = list(wandb.run.tags or [])
+                if "baseline-anchor" not in existing_tags:
+                    wandb.run.tags = tuple(existing_tags + ["baseline-anchor"])
+                wandb.config.update(
+                    {"baseline_anchor_trial": int(trial.number)},
+                    allow_val_change=True,
+                )
+            except Exception as _e:  # pragma: no cover — tag update is best-effort
+                logger.warning("Failed to append baseline-anchor tag: %s", _e)
 
         # FIX BUG-08: Reset torch.compile/Dynamo state between HPO trials.
         if hasattr(torch, '_dynamo'):

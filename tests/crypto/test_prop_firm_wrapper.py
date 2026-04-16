@@ -149,7 +149,7 @@ class TestEODTrailingDrawdown:
         )
 
     def test_eod_floor_ratchets_at_day_boundary(self):
-        """Floor should update when a new day starts."""
+        """Floor should update when a new day starts — only with static_peak=False."""
         # Day 1 (24h bars): PV = 110K at end
         # Day 2 (24h bars): PV drops — floor should now be 110K
         day1 = [110_000.0] * 24
@@ -161,6 +161,7 @@ class TestEODTrailingDrawdown:
             max_trailing_drawdown_pct=0.10,
             max_daily_loss_pct=0.0,
             profit_target_pct=1.0,
+            static_peak=False,  # funded-account trailing DD
         )
         env.reset()
 
@@ -172,6 +173,37 @@ class TestEODTrailingDrawdown:
 
         # EOD peak should be 110K (set at day 1→2 boundary)
         assert last_info.get("eod_peak_equity", 0) >= 109_000.0
+
+    def test_static_peak_locks_at_initial_capital(self):
+        """FTMO Phase 1 Challenge rule: peak locked at initial_capital forever."""
+        # Day 1: PV ramps to 110K (profit target hit, but target disabled here)
+        # Day 2: PV = 95K — 5% below initial 100K (static floor), 13.6% below rolling 110K
+        day1 = [110_000.0] * 24
+        day2 = [95_000.0] * 24
+        pv = day1 + day2
+        base_env = _MockCryptoEnv(obs_dim=5, pv_sequence=pv, bar_interval_hours=1)
+        env = PropFirmWrapper(
+            base_env,
+            max_trailing_drawdown_pct=0.10,
+            max_daily_loss_pct=0.0,
+            profit_target_pct=1.0,  # Disable profit target
+            static_peak=True,  # FTMO-compliant (default)
+        )
+        env.reset()
+
+        last_info = {}
+        terminated = False
+        for _ in range(len(pv)):
+            _, _, terminated, _, last_info = env.step(np.array([0.0]))
+            if terminated:
+                break
+
+        # Static peak must remain at initial_capital ($100K), never ratchet to $110K
+        assert last_info.get("eod_peak_equity") == 100_000.0, (
+            f"static_peak=True must lock peak at initial_capital; got {last_info.get('eod_peak_equity')}"
+        )
+        # 95K is 5% below static 100K floor — within 10% limit → no termination
+        assert not terminated, "Should not terminate: 5% DD from static $100K is within 10% limit"
 
     def test_terminates_on_drawdown_breach(self):
         """Should terminate when EOD drawdown exceeds limit."""

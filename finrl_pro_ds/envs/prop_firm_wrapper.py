@@ -68,6 +68,11 @@ class PropFirmWrapperV7(gym.Wrapper):
         One-time reward bonus when profit target is reached.
     augment_obs : bool
         If True, append 3 constraint-awareness dims to observation.
+    static_peak : bool
+        If True (default), peak equity locks at ``initial_capital`` for the
+        whole episode — matching FTMO Phase 1 Challenge's static Maximum Loss
+        rule (10% floor measured from starting balance forever). If False,
+        peak ratchets up at each EOD boundary (funded-account trailing style).
     """
 
     def __init__(
@@ -82,6 +87,7 @@ class PropFirmWrapperV7(gym.Wrapper):
         drawdown_penalty_scale: float = 5.0,
         success_bonus: float = 10.0,
         augment_obs: bool = True,
+        static_peak: bool = True,
     ) -> None:
         super().__init__(env)
 
@@ -93,6 +99,7 @@ class PropFirmWrapperV7(gym.Wrapper):
         self.dd_penalty_scale = float(drawdown_penalty_scale)
         self.success_bonus = float(success_bonus)
         self.augment_obs = augment_obs
+        self.static_peak = bool(static_peak)
 
         # Detect obs type and extend space if augmenting
         self._dict_obs = isinstance(env.observation_space, gym.spaces.Dict)
@@ -184,11 +191,15 @@ class PropFirmWrapperV7(gym.Wrapper):
             current_date = _epoch_to_utc_date(ts_epoch)
 
         # --- EOD trailing drawdown ---
-        # Floor only ratchets up at end-of-day boundary crossings
-        if current_date != self._last_eod_date and self._last_eod_date > 0:
-            # Day boundary crossed: update EOD peak from PREVIOUS day's closing equity
-            self._peak_eod_equity = max(self._peak_eod_equity, self._current_equity)
-            self._last_eod_date = current_date
+        # FTMO Phase 1 Challenge rule: Maximum Loss is measured from initial
+        # balance (static floor at initial_capital × (1 - max_trailing_dd_pct)).
+        # When static_peak=True, peak stays locked at initial_capital forever.
+        # When False (funded-account style), peak ratchets up at EOD boundaries.
+        if not self.static_peak:
+            if current_date != self._last_eod_date and self._last_eod_date > 0:
+                # Day boundary crossed: update peak from PREVIOUS day's closing equity
+                self._peak_eod_equity = max(self._peak_eod_equity, self._current_equity)
+                self._last_eod_date = current_date
 
         eod_drawdown = 0.0
         if self._peak_eod_equity > 0:

@@ -152,6 +152,7 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
                 drawdown_penalty_scale=float(pf_cfg.get("drawdown_penalty_scale", 5.0)),
                 success_bonus=float(pf_cfg.get("success_bonus", 10.0)),
                 augment_obs=bool(pf_cfg.get("augment_obs", False)),
+                static_peak=bool(pf_cfg.get("static_peak", True)),
             )
         return env
 
