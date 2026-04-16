@@ -4,7 +4,7 @@ Detailed reference: `docs/claude_md_reference.md` (project map, env contracts, s
 
 ## Project Brief
 
-Profitable RL quant trading. Active agent: **SAC only** (IQN/BDQ/PPO falsified).
+RL Quant Strategy Development Platform. Active agent: **SAC only** — IQN/BDQ/PPO code present but none profitable yet; propose alternatives with evidence.
 Workstreams: GMGP1 SAC Gold 15m, Sync-1H crypto, Funding-Arb, Market Making LOB.
 State: `.agent/memory/core.md` (loaded at boot). R&D log: `randd_log.md`.
 
