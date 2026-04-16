@@ -1343,26 +1343,56 @@ class CTraderBroker:
     def _position_to_lots(
         self, fraction: float, portfolio_value: float, price: float
     ) -> float:
-        """Convert position fraction [-1, 1] to signed lots.
+        """Convert position fraction [-1, 1] to signed lots, capped by
+        the configured leverage.
 
-        Example: $100K portfolio, Gold @ $3000/oz, 100 oz/lot
+        Example: $100K portfolio, Gold @ $3000/oz, 100 oz/lot, leverage 30x
             fraction=1.0 → notional=$100K → lots = 100000/(3000*100) = 0.333
 
-        When portfolio < lot notional (e.g. XAUUSD lot=$470K vs $200K portfolio),
-        round() gives 0 for most fractions.  We round up to min_lot when the
-        agent expresses meaningful conviction (fraction >= 0.1), matching
-        the IB broker's contract-floor logic.  The broker's margin system
-        provides the real leverage safety net.
+        The agent's ``fraction`` targets notional = |fraction| × PV (unleveraged
+        fraction of equity).  When the broker's ``min_lot`` * price * lot_size
+        exceeds the configured leverage cap (e.g. IC Markets XAUUSD standard
+        account: min_lot=1.0 lot = 100 oz = $482k notional on a $10k paper
+        balance = 48× leverage), rounding up to ``min_lot`` would silently
+        over-leverage the account.  S458 gmgp1-xauusd intrabar_dd_projection
+        halt was caused by exactly this path.  Now we skip the trade instead.
         """
         if price <= 0 or portfolio_value <= 0:
             return 0.0
+
+        # Leverage cap: max notional the config allows
+        leverage = max(float(self._leverage), 1.0)
+        max_notional = portfolio_value * leverage
+        min_lot_notional = self._min_lot * self._lot_size * price
+
+        # Account too small to hold even one min_lot under the leverage cap —
+        # can't express any position without over-leveraging.  Skip.
+        if min_lot_notional > max_notional:
+            if abs(fraction) >= 0.1:
+                logger.warning(
+                    "Sizing skip: min_lot %.4f @ $%.2f (notional $%.0f) "
+                    "exceeds leverage cap ($%.0f = PV $%.0f × %.1fx). "
+                    "Agent fraction=%.3f. Request micro-lot (0.01) account "
+                    "or increase paper balance.",
+                    self._min_lot, price, min_lot_notional,
+                    max_notional, portfolio_value, leverage, fraction,
+                )
+            return 0.0
+
         notional = abs(fraction) * portfolio_value
         lots = notional / (price * self._lot_size)
-        # Round to min_lot precision
         lots = round(lots / self._min_lot) * self._min_lot
-        # Floor: at least min_lot when agent has conviction (BUG-18 fix)
+
+        # Cap at max allowed under leverage (round down so we stay within cap)
+        max_lots = int((max_notional / (price * self._lot_size)) / self._min_lot) * self._min_lot
+        if lots > max_lots:
+            lots = max_lots
+
+        # Floor up to min_lot when agent has conviction.  Safe now — the
+        # skip-guard above already verified min_lot_notional ≤ max_notional.
         if lots < self._min_lot and abs(fraction) >= 0.1:
             lots = self._min_lot
+
         return lots * np.sign(fraction)
 
     def _lots_to_position(
