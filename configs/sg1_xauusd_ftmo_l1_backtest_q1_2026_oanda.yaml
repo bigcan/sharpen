@@ -1,0 +1,111 @@
+# SG-1 XAUUSD FTMO Q1 2026 OOS Backtest — OANDA XAU/USD spot
+# Checkpoint: sg1-xauusd-ftmo-l1-multiseed_20260416_053247 (wandb lfr1whsf)
+# Base: configs/sg1_xauusd_ftmo_l1_multiseed.yaml
+# Data: OANDA v20 practice XAU_USD M1 mid, 2025-01-01 -> 2026-04-15.
+# Test window: 2026-01-01 -> 2026-04-15 (Q1 2026, fully post-train/val, true OOS).
+# Purpose: verify checkpoint survives production fees (S464 decision) on unseen regime.
+
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-03-01"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2026-01-01"
+  test_end_date: "2026-04-15"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.3
+  parkinson_threshold: 0.02
+  volume_threshold: 0.5
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  # Production fee: IC Markets Raw XAUUSD ~2.35 bps/side (commission + spread).
+  # Steady-state (S464): no fee_schedule — measures checkpoint at real deployment cost.
+  taker_fee: 0.000235
+  deadband_threshold: 0.35
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: false
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0020291052928078555
+    dsr_scale: 1.0
+    hindsight_weight: 0.0
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10
+    max_trailing_drawdown_pct: 0.10
+    max_daily_loss_pct: 0.05
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.05
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs from HPO 0goru53f trial #40 — S465 flagged as partial-ramp-biased
+# (trials eval at ~1.17 bps mid-ramp, not terminal 3.5 bps). This backtest
+# tests whether biased HPs still generalize under real 2.35 bps fees.
+agents:
+  sac:
+    lr_actor: 0.0008992962313589642
+    lr_critic: 7.283682996733586e-06
+    lr_alpha: 2.6652717572612864e-06
+    gamma: 0.9733546180904501
+    tau: 0.003864460258363332
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.22856781836103585
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.0607772108570277
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 0
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: false
+  num_envs: 1
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "backtest", "q1-2026-oos", "oanda-xau-spot", "steady-state-fee"]
