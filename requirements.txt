@@ -5,6 +5,7 @@ opencv-python
 yfinance
 stockstats
 wandb
+protobuf>=6.32.1
 pandas<3.0
 pyarrow<20
 seaborn

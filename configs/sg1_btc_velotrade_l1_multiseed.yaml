@@ -36,7 +36,7 @@ env:
   window_size: 30
   features_per_scale: 8
   taker_fee: 0.0
-  deadband_threshold: 0.25
+  deadband_threshold: 0.35
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
   episode_length: 3000
@@ -46,7 +46,7 @@ env:
   gap_detection: false
   reward:
     mode: "dsr"
-    dsr_eta: 0.001
+    dsr_eta: 0.00444
     dsr_scale: 1.0
   fee_schedule:
     - {step: 0, taker_fee: 0.0}
@@ -73,21 +73,21 @@ network:
   fusion_dim: 256
   window_size: 30
 
-# HPs: PLACEHOLDER — update with HPO best trial results
+# HPs: HPO 38hpavja trial #38 (PF=2.133, Test PF=2.16, MDD -0.53%)
 agents:
   sac:
-    lr_actor: 0.0003
-    lr_critic: 0.0003
-    lr_alpha: 0.0003
-    gamma: 0.99
-    tau: 0.005
+    lr_actor: 1.44e-4
+    lr_critic: 1.95e-4
+    lr_alpha: 2.56e-6
+    gamma: 0.9555
+    tau: 2.01e-3
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.2
+    initial_alpha: 0.473
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 10.0
+    gradient_clip: 1.49
     checkpoint_interval: 250000
 
 training:
