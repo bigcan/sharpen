@@ -25,17 +25,15 @@ python scripts/run_full_pipeline.py --config configs/<cfg>.yaml
 python scripts/crypto_hpo_runner.py --config <cfg> [--warm_start --max_windows N]
 python scripts/funding_arb_hpo_runner.py --config <cfg>
 
-# Deploy / quality / monitor
-python scripts/deploy_bare_metal.py --config <cfg> --instance <name> --gpu <id> [--no_kill] --collect
-ruff check finrl_pro_ds && mypy finrl_pro_ds --ignore-missing-imports && pytest
+# Deploy / monitor
+python scripts/deploy_bare_metal.py --config <cfg> --instance <name> --gpu <id> --collect
 python scripts/monitor_fleet.py
 python scripts/monitor_run.py --run_id <ID>
 python scripts/collect_run.py --run_id <ID>
-python scripts/auto_collect_checkpoints.py [--hours N | --run_id ID | --all_instances | --dry_run]
+python scripts/auto_collect_checkpoints.py [--hours N | --run_id ID | --all_instances]
 
-# Docker live trading — prefer wrapper (verbose forms in docs/claude_md_reference.md)
+# Docker live trading — prefer wrapper (verbose forms in reference doc)
 ./scripts/manage_strategies.sh {build|up|ps|logs} <target>
-# Profiles: ib, crypto, ctrader, monitoring, prism, all
 ```
 
 **WandB:** entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Helpers at `.agents/skills/wandb-primary/scripts/wandb_helpers.py`.
@@ -56,11 +54,10 @@ Full tree + per-file notes: `docs/claude_md_reference.md`.
 | Env | File | Action | Notes |
 |-----|------|--------|-------|
 | V7 ContinuousSwing | `envs/continuous_swing_env.py` | `Box(-1,1,(1,))` | GMGP1 SAC. Private=5 dims. DSR reward, deadband 0.25. |
-| V8 MarketMaking | `envs/market_making_env.py` | `Box(-1,1,(3,))` | Spread/skew/intensity. Private=12. L1/L2 fill model. |
+| V8 MarketMaking | `envs/market_making_env.py` | `Box(-1,1,(3,))` | **RETIRED S442** (MM-SAC workstream closed). Spread/skew/intensity. |
 | CryptoPerp | `crypto/envs/crypto_perp_env.py` | `Box(-1,1,(n_assets,))` | Sync-1H. Flat obs ~962 dims (20 assets). Sortino. |
 | FundingArb | `crypto/envs/funding_arb_env.py` | `Box(-1,1,(n_assets,))` | Flat ~326 dims. Delta+turnover penalties. |
-| V6 SwingScalper (legacy) | `envs/swing_scalper_env.py` | `Discrete(2)` | Private=4. No active runs. |
-| V5 DeepScalper (legacy) | `envs/deep_scalper_env.py` | `Discrete(6)` | No active runs. Do NOT revert to MultiDiscrete. |
+| Legacy (V5/V6) | `envs/{deep_scalper,swing_scalper}_env.py` | `Discrete` | No active runs. Do NOT modify action spaces. |
 
 **All envs return raw numpy dicts, NOT Gymnasium wrappers — preserve this path.** Full contracts in `docs/claude_md_reference.md`.
 
@@ -73,7 +70,7 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 | GMGP1 (V7) | `configs/gmgp1_sac_gc_15min.yaml` |
 | Sync-1H | `configs/synapse_crypto_1h_v2.yaml` |
 | Funding Arb | `configs/funding_arb_sac_10assets_hpo.yaml` |
-| Market Making | `configs/mm_sac_btc_lob_10s.yaml` |
+| Market Making | `configs/mm_sac_btc_lob_10s.yaml` *(retired — baseline only)* |
 | Live Trading | `configs/live_gmgp1_btc_bybit.yaml` |
 
 ## Critical Invariants
@@ -129,24 +126,18 @@ Full tables + every chaining rule: `docs/claude_md_reference.md`.
 
 ## Memory Protocol
 
-Tier 1: `.agent/memory/core.md` (project status, boot context).
-Tier 2: `randd_log.md` at project root (R&D write buffer, auto-rotated at 150 KB into `randd_archive/YYYY-MM.md`).
+Tier 1: `.agent/memory/core.md` (boot context). Tier 2: `randd_log.md` at project root (R&D write buffer, auto-rotated at 150 KB into `randd_archive/YYYY-MM.md`).
 Cloud: agent-memory MCP (LanceDB on GCS) — search index; flat files are authoritative.
-
-Commit flow: append `randd_log.md` → `memory_store` → auto-rotate if >150 KB → update `core.md` → git commit.
-Rotate: `python scripts/rotate_randd_log.py --keep-months 1 --max-entries 20`.
-Re-index: `python scripts/bulk_index_memory.py --force`.
-Needs `GOOGLE_SERVICE_ACCOUNT` env in `.mcp.json`. Full detail in `docs/claude_md_reference.md`.
+Full detail (commit flow, rotation, re-index, GCS env setup): `docs/claude_md_reference.md`.
 
 ## Live Trading / Docker / PRISM
 
 Live trading containers run on remote desktop (`<TAILSCALE_HOST>`) via Docker context `finrl-desktop`. Always use `./scripts/manage_strategies.sh` or `docker --context finrl-desktop` — **bare `docker ps` targets local Docker Desktop which has no trading containers.**
 
-Observability layers (health JSON → Prometheus :9090 → Grafana :3000 → Watchdog Telegram). Per-strategy metrics ports 9101-9107. Full port map, env var table, Grafana/watchdog details: `docs/claude_md_reference.md`.
+Observability (Prometheus :9090 / Grafana :3000 / Watchdog Telegram, per-strategy metrics 9101-9107): see reference.
+**PRISM: falsified (S413+), `prism.enabled: false` in all configs.** Containers still deployed; see reference for archive.
 
-**PRISM: falsified (S413+), `prism.enabled: false` in all configs.** Do not revive without new evidence. Containers still deployed. Full reference: `docs/claude_md_reference.md`.
-
-## Gotchas (last verified 2026-04-01)
+## Gotchas (last verified 2026-04-16)
 
 - HPO uses NopPruner, no early-kill, 500K steps/trial
 - RTX 5090 + CUDA 13.0: run `scripts/patch_torch_compile.py` on fresh deployments
