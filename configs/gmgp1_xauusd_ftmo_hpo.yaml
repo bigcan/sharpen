@@ -1,4 +1,6 @@
 # GMGP1-XAUUSD FTMO-Wrapped HPO — narrow-mode around SG-1 FTMO seed HPs
+# Steady-state 2.35 bps since S463; this is the re-HPO config replacing the partial-ramp
+# HPO `0goru53f` (S465 audit — trials trained at ~1.17 bps, 33% of terminal fee).
 # Motivation: Paper live (2026-04-13, S426/S427) blew past FTMO rails 3× in one UTC day
 # (raw DD -25.65%, daily-loss trips at -11.74% / -5.84%). Base V7 env has no daily-loss
 # awareness, no EOD trailing DD, no profit-target shaping. Retrain with PropFirmWrapperV7
@@ -108,4 +110,5 @@ hpo:
 wandb:
   project: "FinRL-Pro-DS"
   tags: ["gmgp1-xauusd", "Gold", "SAC", "15min", "CFD", "FTMO",
-         "ftmo-wrapped", "propfirm", "hpo", "narrow", "xauusd"]
+         "ftmo-wrapped", "propfirm", "hpo", "narrow", "xauusd",
+         "steady-state", "re-hpo"]

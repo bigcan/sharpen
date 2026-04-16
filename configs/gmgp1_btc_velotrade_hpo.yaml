@@ -1,0 +1,115 @@
+# GMGP1-BTC Velotrade-Wrapped HPO — steady-state fees + 2-Step Phase 1 rails
+# Motivation: The prior BTC HPO (configs/gmgp1_btc_sac_15min.yaml, run 8v4mueuf, T34 best
+# PF=2.558) selected HPs under a fee_schedule that never ramped within the 500K HPO
+# budget — trials trained at 100% frictionless fees. S464 locked steady-state taker_fee
+# from step 0 as the project standard (Funding-Arb v3 pattern). This re-HPO samples the
+# real 5 bps reward landscape from step 0.
+#
+# Also adds PropFirmWrapperV7 (Velotrade 2-Step Phase 1 rails) so the policy learns the
+# same EOD trailing-DD line the live risk manager enforces — parallel to the S427
+# GMGP1-XAUUSD-FTMO upgrade (see configs/gmgp1_xauusd_ftmo_hpo.yaml).
+#
+# Wrapper thresholds: 8% EOD trailing DD / no daily loss (Velotrade 2-Step has no daily
+# loss limit; max_daily_loss_pct=0.0 = disabled per prop_firm_wrapper.py:60,207).
+# 8% trailing matches live risk-manager buffer below Velotrade's 10% limit.
+#
+# Broad search (50 trials, no narrow_mode): T34 HPs were selected under frictionless
+# reward — topology is materially different at 5 bps, no reliable anchor. T34 values
+# kept as starting agents.sac defaults only (informative, not enqueued).
+# augment_obs: false — live_obs_builder.py hard-codes private_dim=5.
+
+data:
+  file_path: "data/bitfinex/btc_usdt_perp_2025_1min.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [15, 60, 240]              # 15-min decision, 1h trend, 4h regime
+  window_size: 30
+  features_per_scale: 8               # TC-OPT: 8 aligns Conv1d input for Tensor Cores
+  asset_class: "crypto"               # enables funding_sin/cos (8h Binance cycle)
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8               # TC-OPT: must match features.features_per_scale
+  # Binance/DXtrade taker = 5 bps/side. S464 steady-state standard: no fee_schedule,
+  # constant fee from step 0 so HPO samples the production reward topology.
+  taker_fee: 0.0005
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500                 # 500 x 15min = 125 hours ~ 5 days
+  random_start: true
+  max_drawdown_pct: 0.10              # second-line safety — wrapper is primary
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001                    # HPO will sweep
+    dsr_scale: 1.0
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10           # Velotrade 2-Step Step 1 target
+    max_trailing_drawdown_pct: 0.08   # buffered (Velotrade=10%)
+    max_daily_loss_pct: 0.0           # disabled: Velotrade 2-Step has no daily loss
+    eod_hour_utc: 0                   # crypto 24/7 — roll at UTC midnight
+    drawdown_penalty_start: 0.04      # quadratic at half the trailing line
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false                # keep private_dim=5 (live_obs_builder compat)
+
+network:
+  scale_encoder:
+    input_size: 8                     # TC-OPT: Conv1d Tensor Core alignment
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5                      # unchanged (augment_obs: false)
+  fusion_dim: 256
+  window_size: 30
+
+# Starting HPs — T34 best trial from prior biased HPO (run 8v4mueuf, PF=2.558 frictionless).
+# Informative only: narrow_mode: false means these are NOT enqueued as Trial 0. Reward
+# topology is different at 5 bps, so HPO searches the full parameter space.
+agents:
+  sac:
+    lr_actor: 0.00050182
+    lr_critic: 0.000027779
+    lr_alpha: 0.0000035704
+    gamma: 0.97127
+    tau: 0.0038951
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.49701
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 3.0198
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000             # overridden to steps_per_trial during HPO
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  n_trials: 50                        # broad: 10 random + 40 TPE (per objective.py)
+  steps_per_trial: 500000
+  narrow_mode: false                  # full parameter space — T34 anchor invalid at 5 bps
+  enqueue_baseline: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-btc", "BTC", "SAC", "15min", "crypto", "velotrade",
+         "velotrade-wrapped", "propfirm", "hpo", "steady-state", "re-hpo"]
