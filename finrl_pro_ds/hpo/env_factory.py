@@ -150,6 +150,8 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
                 eod_hour_utc=int(pf_cfg.get("eod_hour_utc", 0)),
                 drawdown_penalty_start=float(pf_cfg.get("drawdown_penalty_start", 0.05)),
                 drawdown_penalty_scale=float(pf_cfg.get("drawdown_penalty_scale", 5.0)),
+                daily_loss_penalty_start=float(pf_cfg.get("daily_loss_penalty_start", 0.0)),
+                daily_loss_penalty_scale=float(pf_cfg.get("daily_loss_penalty_scale", 0.0)),
                 success_bonus=float(pf_cfg.get("success_bonus", 10.0)),
                 augment_obs=bool(pf_cfg.get("augment_obs", False)),
                 static_peak=bool(pf_cfg.get("static_peak", True)),

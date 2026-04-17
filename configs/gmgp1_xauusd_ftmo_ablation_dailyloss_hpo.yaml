@@ -1,0 +1,125 @@
+# GMGP1-XAUUSD FTMO — Daily-Loss Proximity Shaping Ablation (Arm B)
+# S472 / 2026-04-17 — 10-trial mini-HPO to validate daily-loss quadratic
+# shaping on 15-min GMGP1, separately from SG-1 3-min ablation (`01imgvm7`).
+#
+# Pre-staged per user request; LAUNCH ONLY AFTER SG-1 ablation clears gate.
+#
+# Research artifact: `.agent/artifacts/constrained_rl_prop_firm_research.md`
+# Why per-timeframe ablation: 15-min GMGP1 has ~26 decision bars/day vs
+# ~130 at 3-min SG-1 — same `scale=5.0` compounds ~5× slower in wall-clock
+# per-day terms. Could be too sparse (no gradient before hard-term), just
+# right, or (less likely) too aggressive per-bar. Unknown without evidence.
+#
+# Arm A (control): historical `1fprvttn` 50-trial HPO (best PF=2.88, T34).
+# CAVEAT: predates static_peak fix (S468), steady-state fee change (S461).
+# Consider 10-trial matched Arm A (this config with scale=0.0) if the
+# historical baseline proves too confounded to compare against.
+#
+# Gate for promotion (all three):
+#   - Test PF (best trial) within ±5% of Arm A baseline
+#   - Worst intraday daily DD wider by ≥0.5pp on Q1 2026 OOS (OANDA spot)
+#   - FTMO compliance rate (active_days≥4 AND max_single_day_share≤0.5) ≥ Arm A
+#
+# Expected runtime: 10 × 500K = 5M steps @ ~1500 SPS on RTX 4090 → ~9-10h
+# (15-min SPS is ~25× 3-min SPS per GMGP1-BTC L1 seed 123 reference).
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"  # CME proxy
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10
+    max_trailing_drawdown_pct: 0.08    # buffered (FTMO=10%)
+    max_daily_loss_pct: 0.04           # buffered (FTMO=5%)
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.04       # 50% of 0.08 cap (GMGP1 convention)
+    drawdown_penalty_scale: 5.0
+    # --- NEW (S472 ablation) ---
+    # 50%-of-cap start (GMGP1 internal convention — matches DD penalty ratio).
+    # 2pp band before hard-term at 0.04 cap; at 15-min 26 bars/day gives
+    # ~13 bars in the penalty zone for gradient signal.
+    daily_loss_penalty_start: 0.02
+    daily_loss_penalty_scale: 5.0      # quadratic, max -5.0/step at cap
+    # ---------------------------
+    success_bonus: 10.0
+    augment_obs: false                 # live_obs_builder private_dim=5 compat
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# Seed HPs — SG-1 XAUUSD FTMO best trial (same anchor as main
+# gmgp1_xauusd_ftmo_hpo.yaml for reproducibility across ablation + re-HPO).
+agents:
+  sac:
+    lr_actor: 0.00022148
+    lr_critic: 0.00018486
+    lr_alpha: 0.00064252
+    gamma: 0.96779
+    tau: 0.00204704
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.14768
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 9.28118
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000              # overridden to steps_per_trial during HPO
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  n_trials: 10                         # ablation budget (vs full re-HPO 30)
+  steps_per_trial: 500000
+  narrow_mode: true                    # ±20% around agents.sac seed values
+  enqueue_baseline: true               # Trial 0 = exact seed HPs (anchor)
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-xauusd", "Gold", "SAC", "15min", "CFD", "FTMO",
+         "ftmo-wrapped", "propfirm", "hpo", "narrow", "xauusd",
+         "steady-state", "ablation", "daily-loss-shaping", "arm-b", "s472"]

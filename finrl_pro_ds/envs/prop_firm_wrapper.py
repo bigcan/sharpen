@@ -64,6 +64,10 @@ class PropFirmWrapperV7(gym.Wrapper):
         Drawdown fraction at which reward penalty begins.
     drawdown_penalty_scale : float
         Multiplier for the quadratic drawdown penalty.
+    daily_loss_penalty_start : float
+        Daily-loss fraction at which reward penalty begins (0.0 disables).
+    daily_loss_penalty_scale : float
+        Multiplier for the quadratic daily-loss penalty (0.0 disables).
     success_bonus : float
         One-time reward bonus when profit target is reached.
     augment_obs : bool
@@ -85,6 +89,8 @@ class PropFirmWrapperV7(gym.Wrapper):
         eod_hour_utc: int = 0,
         drawdown_penalty_start: float = 0.05,
         drawdown_penalty_scale: float = 5.0,
+        daily_loss_penalty_start: float = 0.0,
+        daily_loss_penalty_scale: float = 0.0,
         success_bonus: float = 10.0,
         augment_obs: bool = True,
         static_peak: bool = True,
@@ -97,6 +103,8 @@ class PropFirmWrapperV7(gym.Wrapper):
         self.eod_hour_utc = int(eod_hour_utc)
         self.dd_penalty_start = float(drawdown_penalty_start)
         self.dd_penalty_scale = float(drawdown_penalty_scale)
+        self.daily_loss_penalty_start = float(daily_loss_penalty_start)
+        self.daily_loss_penalty_scale = float(daily_loss_penalty_scale)
         self.success_bonus = float(success_bonus)
         self.augment_obs = augment_obs
         self.static_peak = bool(static_peak)
@@ -254,6 +262,18 @@ class PropFirmWrapperV7(gym.Wrapper):
             )
             penalty = -self.dd_penalty_scale * dd_frac * dd_frac
             reward += penalty
+
+        # --- Reward shaping: daily-loss proximity penalty (S469 ablation) ---
+        # Bounded quadratic, symmetric with the total-DD penalty above.
+        # Scale default 0.0 = disabled for backward compatibility.
+        if (not terminated and self.daily_loss_penalty_scale > 0
+                and self.max_daily_loss_pct > 0 and self._daily_start_equity > 0):
+            daily_loss_frac = 1.0 - self._current_equity / self._daily_start_equity
+            if daily_loss_frac > self.daily_loss_penalty_start:
+                dl_frac = (daily_loss_frac - self.daily_loss_penalty_start) / (
+                    self.max_daily_loss_pct - self.daily_loss_penalty_start + 1e-10
+                )
+                reward += -self.daily_loss_penalty_scale * dl_frac * dl_frac
 
         # --- Prop firm info ---
         info["eod_drawdown"] = eod_drawdown
