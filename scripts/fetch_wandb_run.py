@@ -125,16 +125,21 @@ def poll_run_until_complete(run_id=None, entity="bigcan-chiwin-technology", proj
     return {"state": "timeout", "error": f"Run did not complete within {max_wait}s"}
 
 
-def download_remote_artifacts(run_id, remote_workspace=REMOTE_WORKSPACE):
+def download_remote_artifacts(run_id, remote_workspace=REMOTE_WORKSPACE, run_name=None,
+                              entity="bigcan-chiwin-technology", project="FinRL-Pro-DS"):
     """
     Download run artifacts from remote GPUHub via SFTP.
 
-    Downloads checkpoint, logs, and HPO database to results/{run_id}/.
+    Checkpoint lives under {remote_workspace}/checkpoints/{run_name}/checkpoint_final.pth
+    and is saved locally to checkpoints/{run_name}/checkpoint_final.pth (GCS-synced layout).
+    Logs and hpo.db (legacy workspace-root locations) go to results/{run_id}/.
+
     Requires GPUHUB_HOST, GPUHUB_PORT, GPUHUB_PASSWORD in .env.
 
     Args:
         run_id: WandB run ID (used for local directory naming)
         remote_workspace: Remote workspace path
+        run_name: WandB run name. If None, resolved from WandB API.
 
     Returns:
         dict of {filename: local_path} for successfully downloaded files
@@ -146,6 +151,13 @@ def download_remote_artifacts(run_id, remote_workspace=REMOTE_WORKSPACE):
     if not all([host, port, password]):
         print("WARNING: GPUHUB credentials not found in .env. Skipping remote artifact download.")
         return {}
+
+    if run_name is None:
+        try:
+            run_name = wandb.Api().run(f"{entity}/{project}/{run_id}").name
+        except Exception as e:
+            print(f"WARNING: could not resolve run_name for {run_id}: {e}")
+            run_name = None
 
     local_dir = os.path.join(os.getcwd(), "results", run_id)
     os.makedirs(local_dir, exist_ok=True)
@@ -161,8 +173,16 @@ def download_remote_artifacts(run_id, remote_workspace=REMOTE_WORKSPACE):
         sftp = ssh.open_sftp()
 
         for filename, description in REMOTE_ARTIFACTS.items():
-            remote_path = f"{remote_workspace}/{filename}"
-            local_path = os.path.join(local_dir, filename)
+            # checkpoint_final.pth lives under checkpoints/<run_name>/ on remote,
+            # and is mirrored to checkpoints/<run_name>/ locally (GCS-synced).
+            if filename == "checkpoint_final.pth" and run_name:
+                remote_path = f"{remote_workspace}/checkpoints/{run_name}/{filename}"
+                ckpt_local_dir = os.path.join(os.getcwd(), "checkpoints", run_name)
+                os.makedirs(ckpt_local_dir, exist_ok=True)
+                local_path = os.path.join(ckpt_local_dir, filename)
+            else:
+                remote_path = f"{remote_workspace}/{filename}"
+                local_path = os.path.join(local_dir, filename)
 
             try:
                 remote_attr = sftp.stat(remote_path)
