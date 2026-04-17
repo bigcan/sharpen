@@ -9,7 +9,7 @@
 exchange:
   name: "ib"
   testnet: true                        # true=paper(4002), false=live(4001)
-  asset: "GC"                          # Logical asset name (for logging/WandB)
+  asset: "MGC"                         # Logical asset name (for logging/WandB)
   host: "127.0.0.1"
   paper_port: 4002                     # IB Gateway paper trading
   live_port: 4001                      # IB Gateway live trading
@@ -17,12 +17,12 @@ exchange:
 
 # --- Contract Specification ---
 contract:
-  symbol: "GC"                         # "GC" for full (100 oz), "MGC" for micro (10 oz)
+  symbol: "MGC"                        # "GC" for full (100 oz), "MGC" for micro (10 oz)
   exchange: "COMEX"
   currency: "USD"
-  multiplier: 100                      # GC=100, MGC=10
+  multiplier: 10                       # GC=100, MGC=10
   tick_size: 0.10
-  commission_per_side: 2.50            # GC exchange + clearing + NFA (~$2.50/side)
+  commission_per_side: 0.88            # MGC IB Fixed ~$0.88/side (S471 switch from GC)
   roll_days_before_expiry: 5           # Roll 5 business days before first notice
   order_type: "LMT"                    # "LMT" (limit) or "MKT" (market)
   limit_offset_ticks: 2                # Cross 2 ticks ($0.20) into book for limit fills
@@ -79,7 +79,7 @@ bar_clock:
 trading:
   initial_balance: 100000.0             # IB paper account (funded to $100K 2026-04-15)
   deadband_threshold: 0.25             # Ignore position changes < 25% (matches training)
-  taker_fee: 0.0000017                 # ~0.17bps for GC ($2.50 / ~$150K half-notional)
+  taker_fee: 0.000068                  # ~6.8bps for MGC ($0.88 / ~$13K half-notional) — S471 switch; sim trained ~frictionless, expect modest live PF haircut
   weekend_flatten:
     enabled: true
     minutes_before_close: 30           # Flatten 30 min before Friday close
@@ -101,8 +101,8 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "gmgp1-v5", "Gold", "SAC", "15min", "IB", "paper", "GC", "COMEX", "reset-20260413"]
-  run_id: "live-gold-ib-paper-20260413"
+  tags: ["live", "gmgp1-v5", "Gold", "SAC", "15min", "IB", "paper", "MGC", "COMEX", "reset-20260417"]
+  run_id: "live-gold-ib-paper-20260417-mgc"
 
 # --- Safety ---
 safety:
