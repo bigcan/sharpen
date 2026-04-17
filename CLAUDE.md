@@ -109,7 +109,7 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 
 ## Skills (auto-dispatch)
 
-Project skills at `.claude/skills/` (Deploy, Monitor, Dashboard, Docker, Live-Trading, Live-Monitor).
+Project skills at `.claude/skills/` (Deploy, Monitor, Dashboard, Docker, Live-Trading, Live-Monitor, Collect-Run).
 User skills at `~/.claude/skills/` (Audit, Memory, Optimization, Math, WandB, Researcher, Architect, Skill-Evolve, Randy).
 Both `SKILL.md` and (if present) `FINRL.md` must be read when triggered.
 
@@ -118,10 +118,11 @@ Both `SKILL.md` and (if present) `FINRL.md` must be read when triggered.
 - Deploy → Monitor → Optimization → Deploy → Monitor → Dashboard
 - Session start → Memory boot. `/sync` → Memory → Randy (if gateway) → Skill-Evolve (staleness) → git commit
 - HPO complete → WandB → Memory → Dashboard → git commit
+- Run finished → **Collect-Run** (fetch metrics + checkpoint + report) → Dashboard → (Audit if reward/formula changed)
 - Research question → Researcher → (GO) → Architect → implement → Audit
 - Live launch → Live-Trading pre-flight → Docker → Live-Trading verify → Live-Monitor → Dashboard
 
-**Disambiguation:** "how are my runs / SPS / Q" → **Monitor** (training). "how are my strategies / P&L / drawdown" → **Live-Monitor**. "check the stack / not trading" → **Live-Trading**. "deploy to GPU" → **Deploy**. "start trading" → **Live-Trading** + **Docker**.
+**Disambiguation:** "how are my runs / SPS / Q" → **Monitor** (training). "how are my strategies / P&L / drawdown" → **Live-Monitor**. "check the stack / not trading" → **Live-Trading**. "deploy to GPU" → **Deploy**. "start trading" → **Live-Trading** + **Docker**. "run is done / pull results / fetch checkpoint" → **Collect-Run**.
 
 Full tables + every chaining rule: `docs/claude_md_reference.md`.
 
