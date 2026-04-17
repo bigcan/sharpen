@@ -1,0 +1,124 @@
+# SG-1 XAUUSD FTMO — Daily-Loss Proximity Shaping Ablation (Arm B)
+# S469 / 2026-04-17 — 10-trial mini-HPO to validate daily-loss quadratic shaping
+# before promoting the wrapper patch to main and running full 30/50-trial re-HPO.
+#
+# Research artifact: `.agent/artifacts/constrained_rl_prop_firm_research.md`
+# Motivation: S466 SG-1 XAUUSD Q1 fixed-lot analysis hit worst-intraday -4.59%
+# (0.41pp buffer from FTMO 5% daily cap). Current wrapper shapes only TOTAL DD,
+# not DAILY LOSS — agent never gradient-signalled to widen that buffer.
+#
+# Arm A (control): `sg1_xauusd_ftmo_hpo.yaml` — same config WITHOUT these two
+# keys; when run, daily-loss shaping stays disabled by default (scale=0.0).
+# Arm B (this config): adds daily_loss_penalty_start=0.03 + scale=5.0.
+#
+# Gate for promotion (all three):
+#   - Test PF (best trial) within ±5% of Arm A baseline
+#   - Worst intraday daily DD wider by ≥0.5pp on Q1 2026 OOS (OANDA spot)
+#   - FTMO compliance rate (active_days≥4 AND max_single_day_share≤0.5) ≥ Arm A
+#
+# Expected runtime: 10 × 500K = 5M steps @ ~63 SPS on RTX 4090 → ~22h.
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-06-30"
+  val_start_date: "2025-07-01"
+  val_end_date: "2025-08-31"
+  test_start_date: "2025-09-01"
+  test_end_date: "2025-10-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.3
+  parkinson_threshold: 0.02
+  volume_threshold: 0.5
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10
+    max_trailing_drawdown_pct: 0.10
+    max_daily_loss_pct: 0.05
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.05
+    drawdown_penalty_scale: 5.0
+    # --- NEW (S469 ablation) ---
+    daily_loss_penalty_start: 0.03   # start penalty at 3% daily loss (below 5% cap)
+    daily_loss_penalty_scale: 5.0    # quadratic, max -5.0 per step at cap
+    # ---------------------------
+    success_bonus: 10.0
+    augment_obs: false
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  n_trials: 10                       # ablation budget (vs full re-HPO 50)
+  steps_per_trial: 500000
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "hpo", "steady-state", "ablation", "daily-loss-shaping", "arm-b"]

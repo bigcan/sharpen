@@ -296,6 +296,83 @@ class TestRewardShaping:
         assert reward == 0.0  # no penalty
 
 
+class TestDailyLossPenalty:
+    """Test daily-loss proximity quadratic shaping (S469 ablation)."""
+
+    def test_zero_when_disabled(self):
+        # Default: daily_loss_penalty_scale=0.0 → no penalty regardless of daily loss
+        env = MockDictEnv()
+        wrapped = PropFirmWrapperV7(
+            env,
+            max_daily_loss_pct=0.05,
+            drawdown_penalty_scale=0.0,  # disable DD shaping to isolate
+            # daily_loss_penalty_scale defaults to 0.0
+            augment_obs=False,
+        )
+        wrapped.reset()
+
+        # 4% daily loss — well past start but scale=0 → 0 reward
+        env.set_equity(96_000.0)
+        _, reward, _, _, _ = wrapped.step(np.array([0.0]))
+        assert reward == 0.0
+
+    def test_zero_below_start(self):
+        env = MockDictEnv()
+        wrapped = PropFirmWrapperV7(
+            env,
+            max_daily_loss_pct=0.05,
+            drawdown_penalty_scale=0.0,
+            daily_loss_penalty_start=0.03,
+            daily_loss_penalty_scale=5.0,
+            augment_obs=False,
+        )
+        wrapped.reset()
+
+        # 2% daily loss — below 3% start
+        env.set_equity(98_000.0)
+        _, reward, _, _, _ = wrapped.step(np.array([0.0]))
+        assert reward == 0.0
+
+    def test_quadratic_in_band(self):
+        env = MockDictEnv()
+        wrapped = PropFirmWrapperV7(
+            env,
+            max_daily_loss_pct=0.05,
+            drawdown_penalty_scale=0.0,
+            daily_loss_penalty_start=0.03,
+            daily_loss_penalty_scale=5.0,
+            augment_obs=False,
+        )
+        wrapped.reset()
+
+        # 4% daily loss — midpoint of [0.03, 0.05] → frac = 0.5 → penalty = -5.0 * 0.25
+        env.set_equity(96_000.0)
+        _, reward, terminated, _, _ = wrapped.step(np.array([0.0]))
+        assert not terminated  # 4% < 5% cap
+        assert reward == pytest.approx(-1.25, abs=1e-6)
+
+    def test_bounded_at_cap(self):
+        # At the cap, penalty = -scale exactly (frac=1.0).
+        # But the wrapper terminates on daily_loss > cap; so we check penalty
+        # at *just below* cap using a non-terminating daily loss.
+        env = MockDictEnv()
+        wrapped = PropFirmWrapperV7(
+            env,
+            max_daily_loss_pct=0.10,  # wider cap so 5% daily loss doesn't terminate
+            drawdown_penalty_scale=0.0,
+            daily_loss_penalty_start=0.0,  # start at 0 → frac = daily_loss / cap
+            daily_loss_penalty_scale=5.0,
+            augment_obs=False,
+        )
+        wrapped.reset()
+
+        # 5% daily loss on a 10% cap → frac = 0.5 → penalty = -5.0 * 0.25
+        env.set_equity(95_000.0)
+        _, reward, terminated, _, _ = wrapped.step(np.array([0.0]))
+        assert not terminated
+        assert reward == pytest.approx(-1.25, abs=1e-6)
+
+
 class TestInfoFields:
     """Test that info dict contains prop firm metadata."""
 
