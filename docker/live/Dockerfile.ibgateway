@@ -1,0 +1,23 @@
+# Custom IB Gateway image with IBC config template patches (S471).
+#
+# Upstream `ghcr.io/gnzsnz/ib-gateway:stable` ships with a config template that
+# leaves the TWS API settings at TWS defaults. On a fresh Jts volume, the
+# "Enable ActiveX and Socket Clients" master checkbox is OFF, so TWS never
+# binds the API port (4002 paper / 4001 live). IBC has no headless way to
+# toggle that checkbox from the default `config.ini.tmpl`.
+#
+# This image patches the template to:
+#   - OverrideTwsApiPort=4002 — forces TWS API port; side-effects enable API
+#   - CommandServerPort=7462  — enables IBC CommandServer so `enableapi.sh`
+#     can send ENABLEAPI as a recovery path if API ever goes off
+#
+# Without these, a Jts wipe requires a manual VNC-in click to re-enable.
+FROM ghcr.io/gnzsnz/ib-gateway:stable
+
+USER root
+RUN sed -i 's/^OverrideTwsApiPort=\r\?$/OverrideTwsApiPort=4002/' /home/ibgateway/ibc/config.ini.tmpl \
+ && sed -i 's/^CommandServerPort=0\r\?$/CommandServerPort=7462/' /home/ibgateway/ibc/config.ini.tmpl \
+ && grep -q '^OverrideTwsApiPort=4002\r\?$' /home/ibgateway/ibc/config.ini.tmpl \
+ && grep -q '^CommandServerPort=7462\r\?$' /home/ibgateway/ibc/config.ini.tmpl \
+ && echo "Template patches verified: OverrideTwsApiPort=4002, CommandServerPort=7462"
+USER ibgateway
