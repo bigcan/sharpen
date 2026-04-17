@@ -49,6 +49,7 @@ trading:
 risk:
   enabled: true
   max_drawdown_pct: 0.05        # 5% total drawdown
+  static_peak: true             # Match training: DD from initial balance, never ratchets (S468)
   max_daily_loss_pct: 0.02      # 2% daily hard stop
   circuit_breaker_cooldown_ticks: 300  # 10 minutes
   daily_turnover_limit: 500

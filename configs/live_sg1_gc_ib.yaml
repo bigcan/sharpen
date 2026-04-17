@@ -97,6 +97,7 @@ trading:
 risk:
   enabled: true
   max_drawdown_pct: 0.10
+  static_peak: true                    # Match training: DD from initial balance, never ratchets (S468)
   circuit_breaker_cooldown_bars: 12
   max_position_pct: 1.0
   funding_rate_alert: 999.0

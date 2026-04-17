@@ -71,6 +71,7 @@ trading:
 risk:
   enabled: true
   max_drawdown_pct: 0.08             # 8% trigger (2% buffer below 10% limit)
+  static_peak: true                  # Match training: DD from initial balance, never ratchets (S468)
   eod_trailing_drawdown: true        # Velotrade uses EOD trailing DD
   eod_hour_utc: 0
   circuit_breaker_cooldown_bars: 0   # Prop firm: stay flat once breached
