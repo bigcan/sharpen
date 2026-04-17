@@ -68,8 +68,14 @@ x-crypto-strategy: &crypto-strategy
 
 services:
   # --- IB Gateway (headless via IBC + Xvfb) ---
+  # Custom image bakes IBC config template patches (OverrideTwsApiPort=4002,
+  # CommandServerPort=7462) so a fresh Jts volume still opens the TWS API
+  # without a manual VNC-in click. See docker/live/Dockerfile.ibgateway.
   ibgateway:
-    image: ghcr.io/gnzsnz/ib-gateway:stable
+    build:
+      context: .
+      dockerfile: Dockerfile.ibgateway
+    image: finrl-ibgateway:latest
     container_name: ibgateway
     environment:
       TWS_USERID: ${TWS_USERID:?Set TWS_USERID in .env}
@@ -81,7 +87,6 @@ services:
       TWOFA_TIMEOUT_ACTION: restart
       EXISTING_SESSION_DETECTED_ACTION: primaryoverride
     volumes:
-      - ibgateway-data:/home/ibgateway/ibc
       - ibgateway-jts:/home/ibgateway/Jts
     networks: [finrl-net]
     restart: unless-stopped
@@ -394,7 +399,6 @@ networks:
     driver: bridge
 
 volumes:
-  ibgateway-data:
   ibgateway-jts:
   portainer-data:
   prometheus-data:
