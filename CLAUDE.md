@@ -134,7 +134,7 @@ Both `SKILL.md` and (if present) `FINRL.md` must be read when triggered.
 - Session start → Memory boot. `/sync` → Memory → Randy (if gateway) → Skill-Evolve (staleness) → git commit
 - HPO complete → WandB → Memory → Dashboard → git commit
 - Run finished → **Collect-Run** (fetch metrics + checkpoint + report) → Dashboard → (Audit if reward/formula changed)
-- Research question → Researcher → (GO) → Architect → implement → Audit
+- Research question → Researcher (query NotebookLM KB `4aef5475-7fec-4d1f-96a7-efb3cafbb371` before web search — see `reference_notebooklm_knowledge_base` memory) → (GO) → Architect → implement → Audit
 - Live launch → Live-Trading pre-flight → Docker → Live-Trading verify → Live-Monitor → Dashboard
 
 **Disambiguation:** "how are my runs / SPS / Q" → **Monitor** (training). "how are my strategies / P&L / drawdown" → **Live-Monitor**. "check the stack / not trading" → **Live-Trading**. "deploy to GPU" → **Deploy**. "start trading" → **Live-Trading** + **Docker**. "run is done / pull results / fetch checkpoint" → **Collect-Run**.
