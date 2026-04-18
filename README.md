@@ -1,279 +1,174 @@
-#claude --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official
+# FinRL-Pro-DS
 
+**RL Quant Trading Development Platform**
 
-# DeepScalper
+An institutional-grade research and deployment platform for reinforcement learning trading strategies across multiple asset classes (crypto spot/perp, CFD, futures) and timeframes. The platform takes a strategy from idea to live paper/real trading via a standardized staged pipeline: data prep → HPO → multiseed training → walk-forward + stress → recent-OOS + compliance → paper deploy.
 
-**High-Frequency Crypto Scalping with Deep Reinforcement Learning (Bitcoin Futures)**
-
-DeepScalper is an institutional-grade reinforcement learning pipeline for sub-second intraday trading. It implements a **Branching Dueling Q-Network (BDQ)** agent trained on Limit Order Book (LOB) micro-structure data, following [Sun et al. (2022)](docs/2201.09058v3.pdf).
+**Ultimate goal:** a diversified portfolio of live-deployed RL strategies — uncorrelated across asset classes and timeframes — each generating sustained risk-adjusted alpha net of fees.
+**Short-term milestone:** pass prop-firm challenges (FTMO, Velotrade, The5ers, HyroTrader, FundingPips, MFFU) as proof-of-capital.
 
 ---
 
-## Key Features
+## Active Workstreams
 
-- **End-to-End Pipeline**: HPO → Training → Backtesting in a single script
-- **Multi-Modal Observations**: Fuses LOB micro-features (5-level OFI, spread, returns) with macro technical indicators (SMAs, z-scores)
-- **Branching Dueling DQN**: Three action branches (direction, price, volume) with value-advantage decomposition
-- **Auxiliary Volatility Prediction**: Side-task head improves representation learning (Section 4.4)
-- **Optional Risk-Aware Reward**: Differential Sharpe Ratio (Moody & Saffell 2001) — blendable, opt-in risk signal
-- **Shared Memory Data Streaming**: Zero-copy `ParquetDataHandler` for multi-env training throughput
-- **WandB Integration**: Canonical run naming, metric logging, and institutional-grade reporting
-- **RTX 5090 Optimized**: AMP, Torch Compile, and tuned batch sizes for 32GB VRAM
-- **GPU Optimization Skill**: NVIDIA-grounded 10-phase protocol for Tensor Core alignment, mixed precision, and per-agent tuning
+| Workstream | Env | Asset(s) | Timeframe | Status |
+|------------|-----|----------|-----------|--------|
+| **GMGP1** | V7 ContinuousSwing (SAC) | Gold / XAUUSD / BTC | 15 min | FTMO + Velotrade contender; paper trading live |
+| **SG-1** | V7 ContinuousSwing (SAC) | XAUUSD / BTC | 3 min | Intraday diversity strategy; Arm B ablation in progress |
+| **Sync-1H** | CryptoPerp (SAC) | 20 crypto perps | 1 hour | Multi-asset crypto; fix set F1–F5 integrated |
+| **Funding-Arb** | FundingArb (DSAC) | 10 crypto perps | Funding cycle | v3 DSAC implemented; HPO pending |
+
+> **Active agent: SAC only.** IQN / BDQ / PPO code is present but none are profitable yet. Other algorithms (DSAC, PPG, CQL) are researched per gated plans.
+
+**Retired:** DeepScalper (V5/V6), Market Making (V8), AlphaSeek HFT, PRISM ensemble — all archived with decision docs.
+
+---
+
+## Stack
+
+Python 3.11+ · PyTorch 2.8+ · Gymnasium · Optuna · Weights & Biases · Parquet · Prometheus · Grafana · Docker · Ruff · Mypy · Pytest
 
 ---
 
 ## Installation
 
-Requires **Python 3.10+** and a CUDA-capable GPU.
+Requires **Python 3.11+** and a CUDA-capable GPU (tested on RTX 4090 / 5090).
 
 ```bash
-# Clone & Setup
-git clone https://github.com/bigcan/FinRL-Pro-DS.git
+git clone https://github.com/Chiwin-Technology/FinRL-Pro-DS.git
 cd FinRL-Pro-DS
 python -m venv .venv
-.\.venv\Scripts\Activate.ps1  # or: source .venv/bin/activate
-
-# Install
-pip install -r requirements.txt
-pip install -e .
+source .venv/bin/activate   # Windows: .\.venv\Scripts\Activate.ps1
+pip install -e .[dev]
 ```
 
 ---
 
 ## Quick Start
 
-### Run the Full Pipeline (Recommended)
+All training work follows the staged **Training Protocol v2** (`docs/protocol_v2.md`). Each stage is one WandB run producing one decision artifact — bare unstaged pipelines are rejected by `scripts/validate_config.py`.
+
+### Run a pipeline stage
 
 ```bash
-# Development (fast iteration, 50k steps)
-python scripts/run_full_pipeline.py --config configs/deepscalper_dev.yaml
+# Validate config for a stage (required before launch)
+python scripts/validate_config.py --config configs/<cfg>.yaml --stage hpo
 
-# Production (RTX 5090, full training)
-python scripts/run_full_pipeline.py --config configs/deepscalper_rtx5090_production.yaml
+# Staged run (hpo | l1-multiseed | walk-forward | recent-oos | paper-deploy)
+python scripts/run_full_pipeline.py --config configs/<cfg>.yaml --stage hpo
 ```
 
-### Deploy to Remote GPU (GPUHub)
+Reference configs per pipeline:
+
+| Pipeline | Reference Config |
+|----------|-----------------|
+| GMGP1 (V7) | `configs/gmgp1_sac_gc_15min.yaml` |
+| Sync-1H | `configs/synapse_crypto_1h_v2.yaml` |
+| Funding-Arb | `configs/funding_arb_sac_10assets_hpo.yaml` |
+| Live Trading | `configs/live_gmgp1_btc_bybit.yaml` |
+
+### Deploy to remote GPU
 
 ```bash
 python scripts/deploy_bare_metal.py \
-    --script scripts/run_full_pipeline.py \
-    --config configs/deepscalper_rtx5090_production.yaml \
-    --run_name DS_Production_V1
+    --config configs/<cfg>.yaml \
+    --instance <gpuhub-instance> \
+    --gpu <id> --collect
+```
+
+### Monitor & collect
+
+```bash
+python scripts/monitor_fleet.py                 # fleet-wide GPU + run health
+python scripts/monitor_run.py --run_id <ID>     # single run
+python scripts/collect_run.py --run_id <ID>     # pull metrics + checkpoint + report
+python scripts/auto_collect_checkpoints.py      # polls WandB, SFTPs from GPUHub
 ```
 
 ---
 
-## Architecture
+## Project Layout
 
 ```
-Observation Space                    Agent
-─────────────────                    ─────
-                                     ┌──────────────────┐
-Micro (LOB × 5 levels)             │  MicroEncoder     │
-  • Normalized prices (bps)    ────▶│  (LSTM/GRU)       │──┐
-  • Log volumes (z-scored)          └──────────────────┘  │
-  • OFI, Spread, Log-Returns                              │  ┌───────────┐
-                                                          ├─▶│  Fusion   │
-Private State                                             │  │  (MLP)    │
-  • Position / Max Position    ─────────────────────────┘  └─────┬─────┘
-  • Balance / Initial Balance                                     │
-                                     ┌──────────────────┐        │
-Macro (OHLCV)                       │  MacroEncoder     │        ▼
-  • z_open, z_high, z_low     ────▶│  (MLP)            │──┐  ┌────────────────┐
-  • z_close, z_adj_close            └──────────────────┘  │  │ Dueling Heads  │
-  • SMA zd_{5..30}                                        ┘  │ • V(s)         │
-                                                              │ • A_dir(s,a)   │
-                                                              │ • A_price(s,a) │
-                                                              │ • A_vol(s,a)   │
-                                                              │ • σ_pred (aux) │
-                                                              └────────────────┘
+finrl_pro_ds/
+├── agents/        # SAC, IQN, BDQ, PPO, DSAC implementations
+├── envs/          # V7 ContinuousSwing, legacy V5/V6
+├── crypto/        # CryptoPerp, FundingArb envs + execution (Bybit, Binance)
+├── futures/       # IB futures (GC, MGC) execution
+├── cfd/           # cTrader CFD execution (XAUUSD)
+├── data/          # Loaders, feature engineering, splitter, Parquet handler
+├── training/      # Trainers, HPO runners, accumulators
+└── analytics/     # Pyfolio, WandB evaluator, gate evaluation
+configs/  scripts/  tests/  docs/  docker/live/
 ```
+
+**Boundary:** Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never touch `FinRLPodracer/` or `Podracer/`.
 
 ---
 
-## Project Structure
+## Critical Invariants
 
-```
-FinRL-Pro-DS/
-├── configs/
-│   ├── deepscalper_dev.yaml              # Fast local development (50k steps)
-│   └── deepscalper_rtx5090_production.yaml  # Full production training
-├── finrl_pro_ds/                         # Core Package
-│   ├── agents/deepscalper/
-│   │   ├── bdq_agent.py                  # BDQ agent (replay buffer, ε-greedy)
-│   │   └── networks.py                   # MicroEncoder, MacroEncoder, DeepScalperNetwork
-│   ├── analytics/
-│   │   ├── pyfolio_analyzer.py           # Performance metrics & tear sheets
-│   │   └── wandb_evaluator.py            # WandB metric logging & analysis
-│   ├── data/
-│   │   ├── feature_engineering.py        # Micro (LOB) & Macro (OHLCV) features
-│   │   ├── parquet_handler.py            # Shared-memory Parquet data streaming
-│   │   ├── splitter.py                   # Rolling window train/val/test splits
-│   │   └── binance_loader/              # Binance data download & processing
-│   ├── envs/
-│   │   └── deep_scalper_env.py           # Gymnasium trading environment
-│   ├── training/
-│   │   ├── deepscalper_trainer.py        # Training loop, HPO, checkpointing
-│   │   └── accumulators.py              # Metric accumulators
-│   └── utils/
-│       └── naming.py                     # WandB run name standardization
-├── scripts/
-│   ├── run_full_pipeline.py              # Main entry: HPO → Train → Backtest
-│   ├── deploy_bare_metal.py              # Remote GPU deployment
-│   ├── fetch_wandb_run.py                # WandB run data fetcher
-│   ├── notion_sync.py                    # Notion integration
-│   └── data/                            # Data acquisition scripts
-├── tests/                               # Pytest test suite
-├── docs/2201.09058v3.pdf                # Original paper
-└── requirements.txt
-```
+| ID | Rule |
+|----|------|
+| LEAK-1 | Reset EMA-Z normalization at train/val/test split boundaries |
+| BUG-01 | HPO objective = `profit_factor`; lock reward params during HPO |
+| BUG-03 | `hindsight_weight` must be `0.0` during backtesting |
+| BUG-04 | Dense reward on switch bars must use direction BEFORE switch |
+| SHORT-ACCT | Shorts must NOT accumulate `notional_debt` |
+| MARGIN-CFG | BTC `margin_requirement: 0.05` (20×); `1.0` = starvation |
+| DATA-CLEAN | All OHLCV must pass `scripts/clean_ohlcv.py` before experiments |
+| PF-XCHECK | Cross-check PF via `mid_price` AND `close`; >30% divergence = halt |
 
----
-
-## Configuration
-
-Two configuration modes:
-
-| Config | Use Case | Steps | Envs | Purpose |
-|--------|----------|-------|------|---------|
-| `deepscalper_dev.yaml` | Local dev | 50k | 4 | Fast iteration & debugging |
-| `deepscalper_rtx5090_production.yaml` | Production | 10M+ | 24 | Full convergence on RTX 5090 |
-
-Both share the same fee structure (`maker_fee: 0.0002`, `taker_fee: 0.0005`) to ensure consistency.
-
----
-
-## Reward Function
-
-The reward follows [Sun et al. (2022)](docs/2201.09058v3.pdf) Section 3.2 + 4.2:
-
-```
-r_t = (mid_{t+1} - mid_t) × pos_t − fees + w × pos_t × (mid_{t+h} - mid_t)
-```
-
-### Optional: Differential Sharpe Ratio (DSR)
-
-An opt-in risk-aware reward component (Moody & Saffell 2001) that provides a dense, per-step signal
-approximating the marginal contribution to the Sharpe ratio. When enabled, the final reward becomes:
-
-```
-reward = (1 − sharpe_weight) × paper_reward + sharpe_weight × DSR_t
-```
-
-| Parameter | Default | Description |
-|-----------|---------|-------------|
-| `sharpe_weight` | `0.0` | Disabled by default. Set `0.1–0.5` to enable risk-aware training. |
-| `sharpe_horizon` | `100` | EMA lookback window. Lower = faster adaptation, noisier signal. |
-
-Configure in `env.reward` section of your YAML config. See `randd_log.md` for full design notes.
-
----
-
-## Agent Memory System
-
-This project includes a **persistent long-term memory system** that gives the AI agent continuity across chat sessions. It stores project context, daily session logs, and milestone snapshots in plain Markdown files.
-
-### How It Works
-
-```
-.agent/memory/
-├── core.md           ← Project facts, preferences, active decisions (git-tracked)
-├── logs/
-│   └── YYYY-MM-DD.md ← Daily session logs with timestamped entries (gitignored)
-└── snapshots/
-    └── YYYY-MM-DD-topic.md ← Session summaries (gitignored)
-```
-
-- **`core.md`** is the agent's ground truth — project context, your preferences, and active architectural decisions.
-- **Daily logs** record key decisions, bug fixes, and deployments as timestamped entries.
-- **Snapshots** capture end-of-session summaries with what was accomplished and next steps.
-
-### User Commands
-
-| Command | What It Does |
-|---|---|
-| `/memory-boot` | Loads core memory + recent logs at session start. Run this first in any new chat. |
-| `//save` | Generates a session snapshot and appends it to today's log. Use at end of session. |
-
-> **Tip**: The agent's skill description includes a directive to self-load memory at session start, but saying `/memory-boot` guarantees it.
-
-### Editing Core Memory
-
-To update project facts or preferences, just tell the agent (e.g., "update my preferences: I prefer verbose logging"). It will modify `core.md` under the relevant section.
+See `CLAUDE.md` for the full rule set and coding standards (Tensor Core alignment, `non_blocking=True`, no per-sample PER loops, etc.).
 
 ---
 
 ## Docker Live Trading & Monitoring
 
-The live trading stack runs multiple SAC agents in Docker containers with full observability.
-
-### Quick Start
+The live stack runs SAC agents in Docker containers with full observability on a remote desktop (`<TAILSCALE_HOST>` via Tailscale).
 
 ```bash
-cd docker/live
-cp .env.example .env
-# Edit .env: fill in TWS_USERID, TWS_PASSWORD, WANDB_API_KEY, etc.
-
-# Build images
-docker compose build engine-base
-docker compose --profile monitoring build
-
-# Start IB Gateway + monitoring
-docker compose -f docker-compose.yaml -f docker-compose.desktop.yaml \
-    --profile ib --profile monitoring up -d
-
-# Start a strategy
-docker compose -f docker-compose.yaml -f docker-compose.desktop.yaml \
-    --profile ib up -d gmgp1-gold
+# Wrapper (preferred)
+./scripts/manage_strategies.sh build <target>
+./scripts/manage_strategies.sh up    <target>
+./scripts/manage_strategies.sh logs  <target>
+./scripts/manage_strategies.sh ps
 ```
 
-### Services
+| Service | Port | Purpose |
+|---------|------|---------|
+| IB Gateway | 4002 (paper) | Headless IB Gateway (IBC + Xvfb) for GC/MGC futures |
+| Prometheus | 9090 | 15 s scrape of per-strategy metrics (9101–9107) |
+| Grafana | 3000 | "FinRL Trading Overview" dashboard, alerting |
+| Watchdog | — | Docker health event listener → Telegram alerts |
+| Portainer | 9443 | Container management web UI |
 
-> **Remote access**: Services run on the remote desktop (`<TAILSCALE_HOST>` via Tailscale).
-> Use the Tailscale IP URLs below from any device on your tailnet.
+Per-strategy metrics include portfolio value, position, drawdown, daily P&L, broker connection state, and trading-aware health JSON (not just process existence). Telegram alerts suppressed for TradFi strategies during market closure (Fri 21Z → Sun 22Z UTC).
 
-| Service | Description | Local (on desktop) | Remote (Tailscale) |
-|---------|-------------|--------------------|--------------------|
-| **IB Gateway** | Headless IB Gateway (IBC + Xvfb) | Port 4002 (paper) | N/A (API only) |
-| **Prometheus** | Metrics collection (scrapes strategies every 15s) | http://localhost:9090 | http://<TAILSCALE_HOST>:9090 |
-| **Grafana** | Dashboards + alerting | http://localhost:3000 | http://<TAILSCALE_HOST>:3000 |
-| **Watchdog** | Docker health event listener + Telegram alerts | Logs only | Logs only |
-| **Portainer** | Container management web UI | https://localhost:9443 | https://<TAILSCALE_HOST>:9443 |
+---
 
-### Monitoring Features
+## Agent Memory System
 
-- **Trading-aware health checks** -- JSON health file with position, P&L, drawdown, broker status (not just process existence)
-- **Prometheus metrics** -- 11 real-time gauges per strategy (portfolio value, position, drawdown, daily P&L, broker connection, etc.)
-- **Grafana dashboard** -- "FinRL Trading Overview" auto-provisioned with 10 panels
-- **Watchdog alerts** -- Instant Telegram notifications on container crash, unhealthy state, or restart
-- **Docker profiles** -- `ib`, `crypto`, `ctrader`, `monitoring`, `all`
+The repo includes a tiered persistent memory system that gives the AI agent continuity across chat sessions.
 
-### Adding Telegram Alerts
-
-```bash
-# In docker/live/.env:
-TELEGRAM_BOT_TOKEN=your_bot_token
-TELEGRAM_CHAT_ID=your_chat_id
-
-docker compose restart watchdog
 ```
+.agent/memory/core.md    # Project ground truth — status, decisions, runs (git-tracked)
+randd_log.md             # Append-only R&D write buffer (rotates at 150 KB)
+randd_archive/YYYY-MM.md # Rotated archives
+```
+
+Cloud tier: agent-memory MCP (LanceDB on GCS) as a search index; flat files remain authoritative. End-of-session `/sync` writes to memory → optional Randy gateway → `Skill-Evolve` staleness check → git commit.
+
+---
 
 ## Testing
 
 ```bash
-# Run full test suite
 python -m pytest tests/ -v
-
-# Expected: 40 passed (16 env + 24 regression)
 ```
 
 ---
 
 ## Risk Disclaimer
 
-This software is for educational and research purposes only. **Deep Reinforcement Learning involves significant financial risk.** The authors are not responsible for trading losses.
-
----
-
-*Based on "DeepScalper: A Risk-Aware Reinforcement Learning Framework for High-Frequency Trading" (Sun et al., 2022).*
+This software is for educational and research purposes only. **Reinforcement learning trading involves significant financial risk.** The authors are not responsible for trading losses.
