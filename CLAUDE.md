@@ -6,7 +6,7 @@ Detailed reference: `docs/claude_md_reference.md` (project map, env contracts, s
 
 RL Quant Strategy Development Platform. Active agent: **SAC only** — IQN/BDQ/PPO code present but none profitable yet; propose alternatives with evidence.
 **Ultimate goal:** a diversified portfolio of live-deployed RL strategies — uncorrelated across asset classes and timeframes — each generating sustained risk-adjusted alpha net of fees. Short-term milestone: pass FTMO + Velotrade prop-firm challenges as proof-of-capital.
-Workstreams: GMGP1 SAC Gold 15m, Sync-1H crypto, Funding-Arb, Market Making LOB.
+/radWorkstreams: GMGP1 SAC Gold 15m, Sync-1H crypto, Funding-Arb, Market Making LOB.
 State: `.agent/memory/core.md` (loaded at boot). R&D log: `randd_log.md`.
 
 ## Stack
@@ -106,6 +106,21 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 - Never deploy without running `monitor_fleet.py` first (VRAM, active processes)
 - Never skip Math skill verification on formula/equation changes
 - Never claim a file/function/class/config key/CLI flag exists without verifying via Grep/Glob/Read
+- **Never launch a fused HPO+train+eval pipeline.** All training work follows `docs/protocol_v2.md` (6 stages, manifest contract). AlphaSeek `k28l6ef8` is the cautionary tale.
+- **Never hardcode gate thresholds in code or scripts.** All numeric gates (PF floors, DD buffers, retrain triggers) live in `configs/<workstream>.gates.yaml`.
+
+## Training Protocol v2 (mandatory)
+
+All training work — HPO, walk-forward, multiseed, OOS — uses the staged protocol in `docs/protocol_v2.md`. Six stages: data-prep → hpo → l1-multiseed → walk-forward (+stress) → recent-oos (+compliance) → paper-deploy. One stage = one WandB run = one decision artifact.
+
+**Before launching any training run:**
+1. Run `python scripts/validate_config.py --config <cfg> --stage <stage>` — exits non-zero on protocol violations
+2. Confirm upstream manifest `status == "PASS"` for any `--upstream-run` references
+3. Off-policy resume (SAC, IQN) requires upstream `outputs.replay_buffer` — cold-buffer resume rejected unless `--allow-cold-replay` is set
+
+**Bare `run_full_pipeline.py` without `--stage` is a v2 violation.** Backward-compat default (`--stage all`) is permitted only with explicit operator awareness; CI/scheduled jobs must name the stage.
+
+Skill chain extension: code change to training pipeline → **validate_config** → Audit → (Math if formulas).
 
 ## Skills (auto-dispatch)
 
