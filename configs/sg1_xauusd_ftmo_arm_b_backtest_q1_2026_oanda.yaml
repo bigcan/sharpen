@@ -1,0 +1,111 @@
+# SG-1 XAUUSD FTMO Q1 2026 OOS Backtest — Arm B (daily-loss shaping)
+# Checkpoint: sg1-xauusd-ftmo-ablation-dailyloss-hpo_20260417_120915 (wandb 01imgvm7)
+# Purpose: evaluate Arm B gate on actual required data — OANDA spot, Q1 2026 OOS,
+#          worst intraday daily DD + FTMO compliance rate.
+# Sibling of `sg1_xauusd_ftmo_l1_backtest_q1_2026_oanda.yaml` (Arm A = lfr1whsf).
+
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-03-01"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2026-01-01"
+  test_end_date: "2026-04-15"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.3
+  parkinson_threshold: 0.02
+  volume_threshold: 0.5
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: false
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.004170553216181044
+    dsr_scale: 1.0
+    hindsight_weight: 0.0
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10
+    max_trailing_drawdown_pct: 0.10
+    max_daily_loss_pct: 0.05
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.05
+    drawdown_penalty_scale: 5.0
+    # --- Arm B shaping (match training) ---
+    daily_loss_penalty_start: 0.03
+    daily_loss_penalty_scale: 5.0
+    # ---------------------------------------
+    success_bonus: 10.0
+    augment_obs: false
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs from Arm B HPO 01imgvm7, best trial T0 (PF=2.69 HPO objective).
+agents:
+  sac:
+    lr_actor: 2.0507019380336995e-05
+    lr_critic: 0.0007361721629755222
+    lr_alpha: 0.0001890861363907233
+    gamma: 0.9576449133816793
+    tau: 0.00032767987670564595
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.07160849144555757
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.0485387725194617
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 0
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: false
+  num_envs: 1
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "backtest", "q1-2026-oos", "oanda-xau-spot", "steady-state-fee",
+         "arm-b", "daily-loss-shaping", "s478-gate-eval"]
