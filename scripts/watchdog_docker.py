@@ -74,6 +74,52 @@ def _is_ignored(container_name: str) -> bool:
     return False
 
 
+# TradFi instrument markers on WandB run tags. Presence of any one of these
+# means the run trades an instrument with scheduled market closes (weekend,
+# daily session break) — stalls during those windows are expected, not failure.
+_TRADFI_TAGS = {"Gold", "XAUUSD", "MGC", "GC", "cTrader", "IB", "COMEX", "FTMO", "CFD"}
+
+# Container-name prefixes for TradFi strategies — used for sweep-path suppression
+# (sweep has no WandB tags available, only container names).
+_TRADFI_CONTAINER_PREFIXES = ("gmgp1-gold", "gmgp1-xauusd", "gmgp2-xauusd", "sg1-gold")
+
+
+def _tradfi_market_closed_utc(now_utc: time.struct_time | None = None) -> bool:
+    """Approximate market-closed predicate covering both cTrader XAUUSD and CME MGC.
+
+    Closed window (UTC):
+      - Fri 21:00  →  Sun 22:00
+    Covers XAUUSD (Fri ~21Z close / Sun 22Z reopen) and MGC/CME (Fri 22Z /
+    Sun 23Z reopen — we suppress slightly ahead, reopening Mon stalls still
+    alert because bar_count resumes within STALL_MINUTES).
+    """
+    t = now_utc or time.gmtime()
+    wday = t.tm_wday  # Mon=0 .. Sun=6
+    hour = t.tm_hour
+    if wday == 5:  # Saturday
+        return True
+    if wday == 4 and hour >= 21:  # Friday 21:00+
+        return True
+    if wday == 6 and hour < 22:  # Sunday before 22:00
+        return True
+    return False
+
+
+def _is_stall_only(alerts: list[str]) -> bool:
+    """True if every CRITICAL alert is a stall — real problems must still fire."""
+    return bool(alerts) and all(a.startswith("STALL:") for a in alerts)
+
+
+def _should_suppress_tradfi_weekend(health: dict) -> bool:
+    """Suppress a STALL-only CRITICAL on a TradFi run during market-closed UTC window."""
+    tags = set(health.get("tags") or [])
+    if not (tags & _TRADFI_TAGS):
+        return False
+    if not _is_stall_only(health.get("alerts") or []):
+        return False
+    return _tradfi_market_closed_utc()
+
+
 # ---------------------------------------------------------------------------
 # Telegram alerting
 # ---------------------------------------------------------------------------
@@ -309,6 +355,11 @@ def sweep(client: docker.DockerClient) -> None:
         status_str = f"{info['name']}: {info['status']} / {info['health']}"
 
         if info["health"] == "unhealthy":
+            if info["name"].startswith(_TRADFI_CONTAINER_PREFIXES) and _tradfi_market_closed_utc():
+                logger.info(
+                    f"Sweep UNHEALTHY suppressed (TradFi market closed): {status_str}"
+                )
+                continue
             detail = get_health_detail(container)
             msg = (
                 f"<b>[SWEEP: UNHEALTHY] {info['strategy']}</b>\n"
@@ -429,6 +480,14 @@ def _run_wandb_check() -> None:
                     logger.info(
                         f"WandB CRITICAL suppressed (in IGNORE_WANDB_RUNS): "
                         f"{health['run_name']} ({health['run_id']})"
+                    )
+                    suppressed += 1
+                    continue
+                if _should_suppress_tradfi_weekend(health):
+                    logger.info(
+                        f"WandB CRITICAL suppressed (TradFi market closed): "
+                        f"{health['run_name']} ({health['run_id']}) — "
+                        f"{'; '.join(health['alerts'])}"
                     )
                     suppressed += 1
                     continue
