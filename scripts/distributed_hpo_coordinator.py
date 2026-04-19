@@ -1002,14 +1002,15 @@ def main():
     # =========================================================================
     cost_tracker = CostTracker()
 
-    # Distribute trials across workers (round-robin, roughly equal)
-    remaining_trials = max(0, args.n_trials - existing)
-    trials_per_worker = max(1, remaining_trials // len(running_workers))
-    # Last worker picks up the remainder
-    trial_assignments = [trials_per_worker] * len(running_workers)
-    leftover = remaining_trials - (trials_per_worker * len(running_workers))
-    if leftover > 0:
-        trial_assignments[-1] += leftover
+    # Per arch doc ADR-3: pass --target_trials = args.n_trials to every worker.
+    # The worker's dynamic-pull loop checks GLOBAL completed trials against the
+    # target (worker.py: `if completed_trials >= target_trials: break`), so all
+    # workers naturally stop together when the study hits n_trials. Dividing
+    # n_trials // n_workers (the previous behavior) was a semantic bug — workers
+    # treated their share as the global cap and stopped collectively at
+    # n_trials // n_workers, not n_trials. Existing trials from --resume already
+    # count toward the global completion total in the worker's check.
+    trial_assignments = [args.n_trials] * len(running_workers)
 
     wandb_group = args.study_name
     data_files = dist_config.get("data_files", [])
