@@ -52,8 +52,12 @@ def test_connectivity(db_url: str) -> bool:
     logger.info("Testing PostgreSQL connectivity...")
     logger.info("URL (masked): %s", _mask_url(db_url))
 
+    # connect_timeout is a libpq kwarg — only forward it for PostgreSQL URLs.
+    connect_args: dict = {}
+    if db_url.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")):
+        connect_args["connect_timeout"] = 10
     try:
-        engine = sqlalchemy.create_engine(db_url, connect_args={"connect_timeout": 10})
+        engine = sqlalchemy.create_engine(db_url, connect_args=connect_args)
         t0 = time.monotonic()
         with engine.connect() as conn:
             result = conn.execute(sqlalchemy.text("SELECT 1"))
