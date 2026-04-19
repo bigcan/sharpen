@@ -73,19 +73,46 @@ def check_no_fee_curriculum(cfg: dict, r: ValidationResult) -> None:
     """Steady-state fees from step 0; `fee_schedule` curriculum is banned.
 
     See decision_steady_state_fees_pattern.md (S464).
-    """
-    env = cfg.get("env", {})
-    if "fee_schedule" in env:
-        r.fail(
-            "env.fee_schedule found — steady-state fees only. "
-            "Set env.taker_fee directly and remove fee_schedule. "
-            "(decision_steady_state_fees_pattern.md)"
-        )
-    else:
-        r.ok("steady-state fees (no fee_schedule curriculum)")
 
-    if "taker_fee" not in env:
-        r.fail("env.taker_fee missing — required for steady-state fees")
+    Accepts two cost-model schemas:
+      - Single-leg (GMGP1, SG-1, CMGP1):   env.taker_fee
+      - Two-leg spot+perp (Funding-Arb):   environment.{spot,perp}_taker_fee_pct
+
+    Both blocks are checked for the banned `fee_schedule:` curriculum key.
+    """
+    env = cfg.get("env", {}) or {}
+    environment = cfg.get("environment", {}) or {}
+
+    for block_name, block in (("env", env), ("environment", environment)):
+        if "fee_schedule" in block:
+            r.fail(
+                f"{block_name}.fee_schedule found — steady-state fees only. "
+                "Set taker_fee (or {spot,perp}_taker_fee_pct for funding-arb) "
+                "directly and remove fee_schedule. "
+                "(decision_steady_state_fees_pattern.md)"
+            )
+
+    one_leg = "taker_fee" in env
+    two_leg = (
+        "spot_taker_fee_pct" in environment
+        and "perp_taker_fee_pct" in environment
+    )
+
+    if one_leg and two_leg:
+        r.fail(
+            "Both env.taker_fee (1-leg) and environment.{spot,perp}_taker_fee_pct "
+            "(2-leg) declared. Pick one cost model."
+        )
+    elif one_leg:
+        r.ok("steady-state fees (1-leg env.taker_fee)")
+    elif two_leg:
+        r.ok("steady-state fees (2-leg environment.{spot,perp}_taker_fee_pct)")
+    else:
+        r.fail(
+            "No cost model declared. Expected env.taker_fee (1-leg) or "
+            "environment.{spot_taker_fee_pct, perp_taker_fee_pct} (2-leg, "
+            "funding-arb)."
+        )
 
 
 def check_no_hindsight_outside_hpo(cfg: dict, stage: str, r: ValidationResult) -> None:
@@ -119,6 +146,19 @@ def check_gates_block(cfg: dict, r: ValidationResult) -> None:
 def check_data_manifest(cfg: dict, stage: str, r: ValidationResult) -> None:
     """Stage 0 rejection rules from §3 of protocol_v2.md."""
     data = cfg.get("data", {})
+
+    # ccxt-at-runtime pipelines (funding-arb, sync-1h crypto) don't ship a
+    # pre-built parquet; skip file/manifest gating. Freshness is validated by
+    # the data loader at fetch time. Exchange + frequency must still be declared.
+    if data.get("source") == "ccxt":
+        if not data.get("data_exchange") and not cfg.get("universe", {}).get("data_exchange"):
+            r.fail("data.source=ccxt but no data_exchange declared (data.* or universe.*)")
+        if not data.get("frequency"):
+            r.fail("data.source=ccxt but data.frequency missing")
+        r.ok(f"data source=ccxt (runtime fetch, skip manifest; stage={stage})")
+        # ccxt pipelines manage gaps internally; don't require env.gap_detection.
+        return
+
     file_path = data.get("file_path")
     if not file_path:
         r.fail("data.file_path missing")
