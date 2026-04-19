@@ -1,18 +1,19 @@
-# Distributed HPO overlay — SG-1 XAUUSD FTMO re-HPO (S480)
+# Distributed HPO overlay — SG-1 XAUUSD FTMO re-HPO (S480, 3-replica scale-up S481)
 # Extends configs/distributed_hpo.yaml with workstream-specific data files.
-# Launch:
+# Launch (3 workers per GPU = 6 workers total):
 #   set -a; source .env; set +a
 #   python scripts/distributed_hpo_coordinator.py \
 #     --config configs/sg1_xauusd_ftmo_hpo.yaml \
 #     --platform gpuhub \
-#     --n_workers 2 --n_trials 50 \
+#     --n_workers 6 --n_trials 50 \
 #     --db_url "$DISTRIBUTED_HPO_DB_URL" \
 #     --study_name sg1_xauusd_ftmo_rehpo_20260419 \
-#     --distributed_config configs/dhpo_sg1_xauusd_ftmo.yaml
+#     --distributed_config configs/dhpo_sg1_xauusd_ftmo.yaml \
+#     --resume
 
 distributed_hpo:
   platform: "gpuhub"
-  n_workers: 2
+  n_workers: 6
   n_trials: 50
 
   storage:
@@ -23,8 +24,17 @@ distributed_hpo:
     max_retry: 1
 
   # Safe slots per S480 monitor_fleet snapshot (gpuhub-1:1 has active DSAC wl7ir7ia).
+  # 3 replicas per GPU — SAC HPO is CPU-bound (~25% GPU util per worker);
+  # 3x co-location targets ~75% util / ~2-2.5x aggregate throughput.
+  # See feat(dhpo) commit 198c0f15 for replica syntax details.
   gpuhub:
-    instances: ["gpuhub-1:0", "gpuhub-2:0"]
+    instances:
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-2:0"
+      - "gpuhub-2:0"
+      - "gpuhub-2:0"
 
   worker:
     target_trials: null
