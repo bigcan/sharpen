@@ -56,10 +56,10 @@ env:
   prop_firm:
     enabled: true
     profit_target_pct: 0.10
-    max_trailing_drawdown_pct: 0.10
-    max_daily_loss_pct: 0.05
+    max_trailing_drawdown_pct: 0.08   # buffered from FTMO 10% hard rail (S478 Stage 0)
+    max_daily_loss_pct: 0.04           # buffered from FTMO 5% hard rail (S478 Stage 0)
     eod_hour_utc: 21
-    drawdown_penalty_start: 0.05
+    drawdown_penalty_start: 0.03       # shaping triggers before hard rail (S478 Stage 0)
     drawdown_penalty_scale: 5.0
     success_bonus: 10.0
     augment_obs: false
@@ -100,8 +100,31 @@ training:
 
 hpo:
   enabled: true
-  n_trials: 50
+  objective: "profit_factor"           # BUG-01: HPO objective must be profit_factor
+  trials: 50                           # Protocol v2 naming (was n_trials)
   steps_per_trial: 500000
+
+gates:                                 # Protocol v2 §4 — per-workstream numeric gates
+  # HPO stage
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01                  # training-health hard fails
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  # L1 multi-seed stage
+  l1_seeds: 3                          # Protocol v2 minimum (SG-1 prior used 2, raised going forward)
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  # Walk-forward stage
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  # FTMO compliance
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5         # breach if intraday DD > (4% + 0.5pp) = 4.5%
+  ftmo_trailing_dd_buffer_pp: 0.5
+  # Recent-OOS stage
+  oos_pf_floor: 1.1
 
 wandb:
   project: "FinRL-Pro-DS"
