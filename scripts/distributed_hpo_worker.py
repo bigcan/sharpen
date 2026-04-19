@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import copy
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
@@ -285,8 +286,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--db_url",
         type=str,
-        required=True,
-        help="PostgreSQL connection string (e.g. postgresql+psycopg://user:pass@host/optuna).",
+        required=False,
+        default=None,
+        help=(
+            "PostgreSQL connection string. If omitted, reads DISTRIBUTED_HPO_DB_URL "
+            "from env. Prefer the env path on shared hosts — secrets in argv are "
+            "readable to any user via `ps -ef`."
+        ),
     )
     parser.add_argument(
         "--study_name",
@@ -330,9 +336,17 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    db_url = args.db_url or os.environ.get("DISTRIBUTED_HPO_DB_URL")
+    if not db_url:
+        print(
+            "error: --db_url not provided and DISTRIBUTED_HPO_DB_URL env var "
+            "not set. The coordinator should set it via the launch script.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     run_worker(
         config_path=args.config,
-        db_url=args.db_url,
+        db_url=db_url,
         study_name=args.study_name,
         worker_id=args.worker_id,
         target_trials=args.target_trials,

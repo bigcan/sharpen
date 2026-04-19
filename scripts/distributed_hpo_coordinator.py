@@ -27,6 +27,7 @@ import logging
 import os
 import re
 import shlex
+import socket
 import subprocess
 import sys
 import time
@@ -233,6 +234,24 @@ def _ssh_connect_vastai(instance_id: str, timeout: int = 30):
 def _exec_ssh(ssh, cmd: str, timeout: int = 300) -> tuple[str, str]:
     """Execute a command over SSH and return (stdout, stderr)."""
     stdin, stdout, stderr = ssh.exec_command(cmd, timeout=timeout)
+    out = stdout.read().decode()
+    err = stderr.read().decode()
+    return out, err
+
+
+def _exec_ssh_stdin(ssh, script: str, timeout: int = 30) -> tuple[str, str]:
+    """Execute ``bash -s`` and pipe ``script`` via stdin.
+
+    Use this for any launch that embeds secrets — argv only contains
+    ``bash -s`` (the script body is on stdin, not on the command line), so
+    secrets never appear in remote ``ps -ef`` output. The script's own
+    ``export VAR=...`` lines put the values into the shell's environment;
+    any forked python child inherits them via the env, not via argv.
+    """
+    stdin, stdout, stderr = ssh.exec_command("bash -s", timeout=timeout)
+    stdin.write(script)
+    stdin.flush()
+    stdin.channel.shutdown_write()  # signal EOF to bash
     out = stdout.read().decode()
     err = stderr.read().decode()
     return out, err
@@ -512,56 +531,105 @@ def deploy_to_worker(
             return False
         logger.info("  [%s] Setup complete", worker_id)
 
-        # Launch worker
+        # Build launch script (multi-line bash, secrets via `export`, then
+        # nohup'd python). DHP-CRED-LEAK fix: secrets go into bash env via
+        # heredoc-style stdin (not into argv), so remote `ps -ef` shows only
+        # `bash -s` — neither db_url nor WANDB_API_KEY is visible. The python
+        # child inherits the env vars and reads DISTRIBUTED_HPO_DB_URL itself
+        # (worker.py: --db_url is now optional, falls back to env).
         wandb_key = os.environ.get("WANDB_API_KEY", "")
-        wandb_env = f"export WANDB_API_KEY={shlex.quote(wandb_key)} &&" if wandb_key else ""
-        gpu_env = f"export CUDA_VISIBLE_DEVICES={worker.get('gpu_idx', 0)} &&"
-
         log_file = f"worker_{worker_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
-        # shlex.quote everything that came from config/discovery — worker_id may
-        # contain hyphens, db_url contains punctuation, etc.
-        # `< /dev/null` closes stdin on the python child so the SSH channel
-        # closes immediately when the bash shell exits — without it, paramiko's
-        # stdout.read() blocks until exec timeout (S480: 5-min false failure).
-        launch_cmd = (
-            f"cd {REMOTE_WORKSPACE} && "
-            f"{path_export} && {gpu_env} {wandb_env} "
-            f"ulimit -n 65535 || true && "
-            f"nohup {python_cmd} -u scripts/distributed_hpo_worker.py "
-            f"--config {shlex.quote(config_path)} "
-            f"--db_url {shlex.quote(db_url)} "
-            f"--study_name {shlex.quote(study_name)} "
-            f"--worker_id {shlex.quote(str(worker_id))} "
-            f"--target_trials {int(target_trials)} "
-            f"--wandb_group {shlex.quote(wandb_group)} "
-            f"--agent_type {shlex.quote(agent_type)} "
-            f"< /dev/null > {log_file} 2>&1 & echo $! > worker_{worker_id}.pid"
-        )
+        export_lines = [
+            f"export PATH={shlex.quote('/root/miniconda3/bin')}:$PATH"
+            if worker["platform"] == "gpuhub" else "true",
+            f"export CUDA_VISIBLE_DEVICES={worker.get('gpu_idx', 0)}",
+            f"export DISTRIBUTED_HPO_DB_URL={shlex.quote(db_url)}",
+        ]
+        if wandb_key:
+            export_lines.append(f"export WANDB_API_KEY={shlex.quote(wandb_key)}")
+
+        # `< /dev/null > log 2>&1 &` keeps the python child detached from the
+        # SSH channel so bash exits cleanly. Even so, paramiko's stdout.read()
+        # often hangs until our 30s timeout — that's tolerated below by
+        # catching socket.timeout and verifying via PID file (DHP-FALSE-FAIL
+        # fix: positive PID verification is the source of truth, not the
+        # exec_command return).
+        launch_script = "\n".join([
+            f"cd {REMOTE_WORKSPACE}",
+            *export_lines,
+            "ulimit -n 65535 || true",
+            (
+                f"nohup {python_cmd} -u scripts/distributed_hpo_worker.py "
+                f"--config {shlex.quote(config_path)} "
+                f"--study_name {shlex.quote(study_name)} "
+                f"--worker_id {shlex.quote(str(worker_id))} "
+                f"--target_trials {int(target_trials)} "
+                f"--wandb_group {shlex.quote(wandb_group)} "
+                f"--agent_type {shlex.quote(agent_type)} "
+                f"< /dev/null > {log_file} 2>&1 &"
+            ),
+            f"echo $! > worker_{worker_id}.pid",
+            "",  # trailing newline
+        ])
 
         logger.info("  [%s] Launching worker (target_trials=%d)...", worker_id, target_trials)
-        # Short timeout — bash should exit in <1s once nohup'd python is detached.
-        # If it doesn't, something is wrong; failing fast beats a 5-min phantom block.
-        _exec_ssh(ssh, launch_cmd, timeout=30)
+        try:
+            _exec_ssh_stdin(ssh, launch_script, timeout=30)
+        except (socket.timeout, TimeoutError) as e:
+            # Expected when nohup'd python keeps the channel's stdout pipe
+            # open. The PID file is the source of truth — verified next.
+            logger.info(
+                "  [%s] launch_cmd hit %s after 30s (expected for nohup; verifying via PID file)",
+                worker_id, type(e).__name__,
+            )
 
-        # Verify PID
+        # Positive verification: PID file written and process alive.
         time.sleep(5)
-        pid_out, _ = _exec_ssh(ssh, f"cat {REMOTE_WORKSPACE}/worker_{worker_id}.pid")
-        pid = pid_out.strip()
-
-        if pid and pid.isdigit():
-            worker["pid"] = pid
-            worker["log_file"] = log_file
-            worker["status"] = "running"
-            worker["launched_at"] = datetime.now().isoformat()
-            logger.info("  [%s] Worker launched. PID=%s", worker_id, pid)
+        try:
+            pid_out, _ = _exec_ssh(
+                ssh, f"cat {REMOTE_WORKSPACE}/worker_{worker_id}.pid 2>/dev/null", timeout=10,
+            )
+        except (socket.timeout, TimeoutError):
             ssh.close()
-            return True
-        else:
-            logger.error("  [%s] Worker PID not found. Check remote logs.", worker_id)
-            out, _ = _exec_ssh(ssh, f"tail -20 {REMOTE_WORKSPACE}/{log_file}")
-            logger.error("  [%s] Last log lines: %s", worker_id, out[:1000])
+            ssh = (
+                _ssh_connect_vastai(worker["instance_id"], timeout=ssh_timeout)
+                if worker["platform"] == "vastai"
+                else _ssh_connect_gpuhub(
+                    worker["host"], worker["port"], worker["password"], timeout=ssh_timeout,
+                )
+            )
+            pid_out, _ = _exec_ssh(
+                ssh, f"cat {REMOTE_WORKSPACE}/worker_{worker_id}.pid 2>/dev/null", timeout=10,
+            )
+
+        pid = pid_out.strip()
+        if pid and pid.isdigit():
+            alive_out, _ = _exec_ssh(ssh, f"ps -p {pid} -o pid= 2>/dev/null", timeout=10)
+            if pid in alive_out:
+                worker["pid"] = pid
+                worker["log_file"] = log_file
+                worker["status"] = "running"
+                worker["launched_at"] = datetime.now().isoformat()
+                logger.info("  [%s] Worker launched. PID=%s", worker_id, pid)
+                ssh.close()
+                return True
+            logger.error(
+                "  [%s] PID %s in file but process not alive. Tail of log:",
+                worker_id, pid,
+            )
+            tail, _ = _exec_ssh(ssh, f"tail -20 {REMOTE_WORKSPACE}/{log_file}", timeout=10)
+            logger.error("  [%s] %s", worker_id, tail[:1000])
             ssh.close()
             return False
+
+        logger.error("  [%s] Worker PID not found. Check remote logs.", worker_id)
+        try:
+            tail, _ = _exec_ssh(ssh, f"tail -20 {REMOTE_WORKSPACE}/{log_file}", timeout=10)
+            logger.error("  [%s] Last log lines: %s", worker_id, tail[:1000])
+        except Exception:
+            pass
+        ssh.close()
+        return False
 
     except Exception as e:
         logger.error(
