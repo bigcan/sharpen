@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""Queue GMGP1 XAUUSD + BTC re-HPOs after SG-1 re-HPO completes.
+"""Queue GMGP1 XAUUSD + BTC + Funding-Arb DSAC re-HPOs after SG-1 completes.
 
 Pipeline:
     1. Poll SG-1 Optuna study until target_trials completed.
@@ -8,6 +8,8 @@ Pipeline:
     3. Re-validate refreshed XAUUSD config (protocol v2).
     4. Launch `distributed_hpo_coordinator.py` for XAUUSD; wait for exit.
     5. Launch `distributed_hpo_coordinator.py` for BTC; wait for exit.
+    6. Launch `distributed_hpo_coordinator.py` for Funding-Arb DSAC re-HPO.
+       (S485: queued after wl7ir7ia killed — 199h/6 trials/BUG-01/monolithic.)
 
 Usage (all default launches on GPUHub with 6 workers):
     python scripts/queue_post_sg1_rehpo.py \\
@@ -15,11 +17,14 @@ Usage (all default launches on GPUHub with 6 workers):
         --db_url "$DISTRIBUTED_HPO_DB_URL"
 
 Skip flags for partial resumption:
-    --skip_wait       # SG-1 already done
-    --skip_refresh    # config already seed-refreshed
-    --skip_xauusd     # jump straight to BTC
-    --skip_btc        # stop after XAUUSD
-    --dry_run         # print planned actions, do nothing
+    --skip_wait          # SG-1 already done
+    --skip_refresh       # config already seed-refreshed
+    --skip_xauusd        # jump to BTC
+    --skip_btc           # skip GMGP1 BTC
+    --skip_funding_arb   # skip funding-arb stage (default: disabled,
+                         #   audit pre-req blocks auto-launch)
+    --enable_funding_arb # opt-in gate for stage 5 (requires audit first)
+    --dry_run            # print planned actions, do nothing
 """
 from __future__ import annotations
 
@@ -195,6 +200,9 @@ def main() -> int:
     p.add_argument("--xauusd_trials", type=int, default=30)
     p.add_argument("--btc_study", default="gmgp1_btc_velotrade_rehpo_20260419")
     p.add_argument("--btc_trials", type=int, default=50)
+    p.add_argument("--funding_arb_study",
+                   default="funding_arb_dsac_rehpo_20260419")
+    p.add_argument("--funding_arb_trials", type=int, default=50)
     p.add_argument("--n_workers", type=int, default=6)
     p.add_argument("--poll_interval", type=int, default=600,
                    help="Seconds between Optuna polls (default 600 = 10 min)")
@@ -204,6 +212,11 @@ def main() -> int:
     p.add_argument("--skip_refresh", action="store_true")
     p.add_argument("--skip_xauusd", action="store_true")
     p.add_argument("--skip_btc", action="store_true")
+    p.add_argument("--skip_funding_arb", action="store_true",
+                   help="(default true — requires --enable_funding_arb)")
+    p.add_argument("--enable_funding_arb", action="store_true",
+                   help="Opt-in gate for stage 5. Requires pre-launch audit "
+                        "(see configs/funding_arb_dsac_10assets_rehpo.yaml header).")
     p.add_argument("--dry_run", action="store_true")
     args = p.parse_args()
 
@@ -215,7 +228,9 @@ def main() -> int:
     xauusd_dhpo = PROJECT_ROOT / "configs" / "dhpo_gmgp1_xauusd_ftmo.yaml"
     btc_cfg = PROJECT_ROOT / "configs" / "gmgp1_btc_velotrade_hpo.yaml"
     btc_dhpo = PROJECT_ROOT / "configs" / "dhpo_gmgp1_btc_velotrade.yaml"
-    for f in (xauusd_cfg, xauusd_dhpo, btc_cfg, btc_dhpo):
+    fa_cfg = PROJECT_ROOT / "configs" / "funding_arb_dsac_10assets_rehpo.yaml"
+    fa_dhpo = PROJECT_ROOT / "configs" / "dhpo_funding_arb_dsac.yaml"
+    for f in (xauusd_cfg, xauusd_dhpo, btc_cfg, btc_dhpo, fa_cfg, fa_dhpo):
         if not f.exists():
             logger.error("missing required config: %s", f)
             return 2
@@ -259,6 +274,21 @@ def main() -> int:
         )
     else:
         logger.info("skip_btc: skipping BTC coordinator")
+
+    # Stage 5: Funding-Arb DSAC re-HPO (S485). Opt-in only — default skipped
+    # until pre-launch audit completes (see fa_cfg header TODO list).
+    if args.enable_funding_arb and not args.skip_funding_arb:
+        logger.warning("stage 5: Funding-Arb DSAC re-HPO launch requires "
+                       "completed pre-launch audit — proceeding per "
+                       "--enable_funding_arb flag.")
+        run_coordinator(
+            config=fa_cfg, dhpo_overlay=fa_dhpo,
+            study_name=args.funding_arb_study, n_trials=args.funding_arb_trials,
+            n_workers=args.n_workers, db_url=args.db_url, dry_run=args.dry_run,
+        )
+    else:
+        logger.info("stage 5 skipped: Funding-Arb DSAC re-HPO (enable with "
+                    "--enable_funding_arb after pre-launch audit)")
 
     logger.info("queue complete")
     return 0

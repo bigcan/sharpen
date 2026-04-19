@@ -1,0 +1,125 @@
+# Funding-Arb DSAC re-HPO (S485 2026-04-19)
+# Replacement for `funding_arb_dsac_10assets_hpo.yaml` (WandB wl7ir7ia — killed
+# S485 after 199h / 6 trials / SPS=50 / BUG-01 violation / monolithic pipeline).
+#
+# This config is queued to launch after GMGP1 BTC re-HPO completes (see
+# `scripts/queue_post_sg1_rehpo.py` stage 5). Full protocol v2 audit is DEFERRED
+# until just before launch — current file is a staging skeleton with BUG-01 fix
+# and `gates:` placeholders. validate_config.py --stage hpo is expected to FAIL
+# on `env.taker_fee` (funding-arb uses 2-leg spot+perp cost model; validator
+# assumes 1-leg) — this mismatch is a known gap, resolve at launch time.
+#
+# Pre-launch TODO (owner: next session after GMGP1 BTC completes):
+#   1. Reconcile `environment.{spot,perp}_taker_fee_pct` vs `env.taker_fee`
+#      (adapt validator, or document exemption in docs/protocol_v2.md).
+#   2. Fill `gates:` block with real values (currently placeholders).
+#   3. Run optimization audit (OPT-01→10): n_envs, update_interval, AMP, compile
+#      all already set — verify 4090 SPS target ≥300.
+#   4. Seed refresh: if GMGP1 seed-refresh pattern applies, copy SAC HPs from
+#      GMGP1-BTC best trial (shared SAC backbone). NOT applicable if DSAC-only.
+
+strategy:
+  id: "funding-arb-v3-dsac10-rehpo"
+  name: "funding_arb_v3_dsac_10assets_rehpo"
+  version: "3.1.0"
+
+universe:
+  # Top-10 by mean |funding rate| (2022-01 -> 2026-03):
+  assets: ["ARB", "UNI", "LINK", "OP", "LTC", "FIL", "DOGE", "BTC", "ETH", "BNB"]
+  quote: "USDT"
+  data_exchange: "binance"
+  n_assets: 10
+
+data:
+  source: "ccxt"
+  market_type: "futures"
+  frequency: "1h"
+  start_date: "2022-01-01"
+  end_date: null
+  cache_dir: "./data/crypto_cache"
+
+features:
+  tech_dim: 15
+  norm_window: 720
+  zscore_window: 720
+  correlation_window: 168
+
+environment:
+  type: "funding_arb"
+  initial_capital: 100000
+  # --- Cost model (2-leg: spot + perp) ---
+  spot_taker_fee_pct: 0.0001     # 1 bp Binance spot
+  perp_taker_fee_pct: 0.0005     # 5 bp Binance futures
+  perp_margin_rate: 0.05
+  slippage_base_bps: 2.0
+  slippage_impact_bps: 10.0
+  spot_borrow_rate_hourly: 8.33e-6
+  max_gross_exposure: 0.80
+  deadband_threshold: 0.01
+  action_repeat: 8
+  lambda_basis: 0.0
+  lambda_delta: 100.0
+  lambda_turnover: 0.1
+  reward_scaling: 10000.0
+  reward_clip_range: [-5.0, 5.0]
+  circuit_breaker_threshold: 0.05
+
+agents:
+  primary: "sac"
+  total_timesteps: 2000000
+  n_envs: 24
+  sac:
+    distributional: true
+    n_quantiles: 32
+    cvar_alpha: 0.25
+    quantile_embed_dim: 64
+    kappa: 1.0
+    learning_rate: 3.0e-4
+    buffer_size: 500000
+    batch_size: 512
+    tau: 0.005
+    gamma: 0.99
+    network_arch: [256, 256]
+    update_interval: 4
+    gradient_clip: 10.0
+
+training:
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+
+hpo:
+  enabled: true
+  # BUG-01 FIX: profit_factor, not total_return (wl7ir7ia violation).
+  objective: "profit_factor"
+  # Keys below use runner-compat names (funding_arb_hpo_runner.py reads these).
+  # Pre-launch TODO: migrate runner to protocol v2 keys (trials / steps_per_trial).
+  n_trials: 50
+  hpo_timesteps: 500000
+
+walk_forward:
+  train_bars: 8760
+  val_bars: 720
+  test_bars: 1440
+  step_bars: 720
+  embargo_bars: 0
+
+gates:                              # Protocol v2 §4 — PLACEHOLDER values, audit before launch
+  # HPO stage
+  hpo_pf_floor: 1.1                 # lower than GMGP1 — funding-arb is delta-neutral
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  # Walk-forward stage (7-window gate per strategy docs)
+  wf_windows: 7
+  wf_pf_floor: 1.0
+  wf_profitable_windows_min: 5      # 5/7 OOS profitable = regime-robust threshold
+  # Recent-OOS stage
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: null
+  tags: ["funding-arb", "dsac", "cvar", "hpo", "10-assets",
+         "regime-robust", "re-hpo", "s485-queued"]
