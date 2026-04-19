@@ -63,14 +63,19 @@ _shutdown = False
 
 
 def _sigterm_handler(signum, frame):
-    """Handle SIGTERM: let the current trial finish, then exit."""
+    """Handle SIGTERM/SIGINT: set shutdown flag; loop checks it after each trial.
+
+    Note: study.optimize(n_trials=1) is blocking — a long-running trial will run
+    to completion before the shutdown flag is observed. Send SIGKILL (kill -9)
+    to force-stop a stuck worker; the trial will be marked stale by Optuna's
+    heartbeat (grace_period=600s) and retried by another worker.
+    """
     global _shutdown
-    logger.info("SIGTERM received — will exit after current trial completes.")
+    logger.info("Signal %d received — will exit after current trial completes.", signum)
     _shutdown = True
 
 
 signal.signal(signal.SIGTERM, _sigterm_handler)
-# Also handle SIGINT (Ctrl-C) for interactive debugging
 signal.signal(signal.SIGINT, _sigterm_handler)
 
 
@@ -81,7 +86,7 @@ def run_worker(
     config_path: str,
     db_url: str,
     study_name: str,
-    worker_id: int,
+    worker_id: str,
     target_trials: int,
     wandb_group: str,
     device: str = "cuda",
@@ -93,7 +98,7 @@ def run_worker(
         config_path: Path to experiment YAML config.
         db_url: PostgreSQL connection string for Optuna RDBStorage.
         study_name: Name of the Optuna study (must already exist).
-        worker_id: Unique integer ID for this worker.
+        worker_id: Unique worker ID string (e.g. "vastai-12345" or "gpuhub-1-gpu0").
         target_trials: Global target — stop when study has this many completed trials.
         wandb_group: WandB group name for grouping distributed workers.
         device: PyTorch device string ("cuda" or "cpu").
@@ -161,7 +166,7 @@ def run_worker(
         },
     )
     logger.info(
-        "WandB initialized — group=%s, worker_%d",
+        "WandB initialized — group=%s, worker_%s",
         wandb_group,
         worker_id,
     )
@@ -200,7 +205,7 @@ def run_worker(
             break
 
         logger.info(
-            "Worker %d: starting trial (global progress: %d/%d completed, local: %d completed)",
+            "Worker %s: starting trial (global progress: %d/%d completed, local: %d completed)",
             worker_id,
             completed_trials,
             target_trials,
@@ -232,7 +237,7 @@ def run_worker(
     except ValueError:
         logger.warning("No completed trials in study — cannot determine best trial.")
 
-    summary = {
+    summary: dict = {
         "worker_id": worker_id,
         "local_trials_started": local_trials_started,
         "local_trials_completed": local_trials_completed,
@@ -246,7 +251,7 @@ def run_worker(
         summary["best_trial_params"] = best_trial.params
 
     wandb.log({"worker_summary": summary})
-    logger.info("Worker %d finished — %d local trials, %d global completed",
+    logger.info("Worker %s finished — %d local trials, %d global completed",
                 worker_id, local_trials_completed, completed_trials)
     if best_trial is not None:
         logger.info("Study best: trial %d, PF=%.4f, params=%s",
@@ -260,7 +265,7 @@ def run_worker(
         )})
 
     wandb.finish()
-    logger.info("Worker %d — WandB run finished. Exiting.", worker_id)
+    logger.info("Worker %s — WandB run finished. Exiting.", worker_id)
 
 
 # ---------------------------------------------------------------------------
@@ -291,9 +296,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--worker_id",
-        type=int,
+        type=str,
         required=True,
-        help="Unique integer ID for this worker.",
+        help="Unique worker ID string (e.g. vastai-12345, gpuhub-1-gpu0).",
     )
     parser.add_argument(
         "--target_trials",

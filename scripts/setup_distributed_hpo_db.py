@@ -25,6 +25,11 @@ import logging
 import sys
 import time
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger("setup_distributed_hpo_db")
 
 
@@ -38,7 +43,9 @@ def test_connectivity(db_url: str) -> bool:
         import sqlalchemy
     except ImportError:
         logger.error(
-            "sqlalchemy is not installed. Install with: pip install sqlalchemy psycopg2-binary"
+            "sqlalchemy is not installed. Install the project's [distributed] "
+            "extra: pip install -e .[distributed]  (ships psycopg[binary] v3 "
+            "for the postgresql+psycopg:// URL scheme)."
         )
         return False
 
@@ -299,13 +306,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
 
     # --- Instructions mode ---
     if args.instructions:
