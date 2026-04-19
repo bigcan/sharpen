@@ -144,12 +144,22 @@ def check_data_manifest(cfg: dict, stage: str, r: ValidationResult) -> None:
     if manifest.get("nan_count", 0) > 0:
         r.fail(f"data manifest: nan_count={manifest['nan_count']} (must be 0)")
 
-    # Recency
+    # Recency — thresholds match stage semantics: data-prep = fresh ingestion,
+    # hpo/l1-multiseed train on historical snapshots, wf needs moderately recent
+    # windows, oos/paper-deploy must be live.
+    recency_by_stage = {
+        "data-prep": 7,
+        "hpo": 180,
+        "l1-multiseed": 180,
+        "wf": 90,
+        "oos": 1,
+        "paper-deploy": 1,
+    }
     last_ts_str = manifest.get("last_ts")
     if last_ts_str:
         last_ts = datetime.fromisoformat(last_ts_str.replace("Z", "+00:00"))
         age_days = (datetime.now(timezone.utc) - last_ts).days
-        max_age = 1 if stage in ("oos", "paper-deploy") else 7
+        max_age = recency_by_stage.get(stage, 7)
         if age_days > max_age:
             r.fail(
                 f"data manifest: last_ts={last_ts_str} is {age_days}d old; "
