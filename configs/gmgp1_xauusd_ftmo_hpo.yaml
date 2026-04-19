@@ -49,6 +49,8 @@ env:
   random_start: true
   max_drawdown_pct: 0.10            # second-line safety — wrapper is primary
   scales: [15, 60, 240]
+  gap_detection: true               # S468/S478 Stage 0: CFD weekend gaps ~60h in manifest
+  gap_atr_mult: 3.0                 # zero returns exceeding 3× ATR (non-tradeable)
   reward:
     mode: "dsr"
     dsr_eta: 0.001                  # SG-1 FTMO validated under wrapper
@@ -102,10 +104,33 @@ training:
 
 hpo:
   enabled: true
-  n_trials: 30                      # 10 random + 20 TPE
+  objective: "profit_factor"        # BUG-01 / Protocol v2 §4 stage 1
+  trials: 30                        # 10 random + 20 TPE (Protocol v2 naming, was n_trials)
   steps_per_trial: 500000
   narrow_mode: true                 # ±20% around agents.sac seed values
   enqueue_baseline: true            # Trial 0 = exact seed HPs (guaranteed anchor)
+
+gates:                              # Protocol v2 §4 — per-workstream numeric gates
+  # HPO stage
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 20
+  entropy_floor: 0.01               # training-health hard fails
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  # L1 multi-seed stage
+  l1_seeds: 3                       # Protocol v2 minimum
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.5                  # matches l1_multiseed gate doc
+  # Walk-forward stage
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  # FTMO compliance (buffered from FTMO 10%/5% hard rails)
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5      # breach if intraday DD > (4% + 0.5pp) = 4.5%
+  ftmo_trailing_dd_buffer_pp: 0.5
+  # Recent-OOS stage
+  oos_pf_floor: 1.1
 
 wandb:
   project: "FinRL-Pro-DS"
