@@ -330,14 +330,35 @@ def provision_vastai_instances(n_workers: int, gpu_filter: str | None) -> list[d
     return workers
 
 
-def resolve_gpuhub_instances(gpu_filter: str | None) -> list[dict]:
-    """Read GPUHub instances from instances.json, optionally filtered by GPU name."""
+def resolve_gpuhub_instances(
+    gpu_filter: str | None,
+    safe_slots: list[str] | None = None,
+) -> list[dict]:
+    """Read GPUHub instances from instances.json, optionally filtered.
+
+    Args:
+        gpu_filter: Comma-separated GPU name filter (e.g. "RTX_4090").
+        safe_slots: Allow-list of "name:gpu_idx" strings (e.g. "gpuhub-1:0").
+            When provided, only slots in the list are returned. This is the
+            overlay's ``distributed_hpo.gpuhub.instances`` field — it lets
+            operators carve out specific GPUs that are running other work.
+    """
     instances_file = PROJECT_ROOT / "instances.json"
     if not instances_file.exists():
         raise FileNotFoundError(f"instances.json not found at {instances_file}")
 
     with open(instances_file, encoding="utf-8") as f:
         registry = json.load(f)
+
+    safe_set: set[tuple[str, int]] | None = None
+    if safe_slots:
+        safe_set = set()
+        for slot in safe_slots:
+            try:
+                name, idx = slot.rsplit(":", 1)
+                safe_set.add((name.strip(), int(idx)))
+            except (ValueError, AttributeError):
+                logger.warning("Skipping malformed safe-slot entry: %r", slot)
 
     workers = []
     for name, inst in registry.get("instances", {}).items():
@@ -350,6 +371,9 @@ def resolve_gpuhub_instances(gpu_filter: str | None) -> list[dict]:
 
         # Create one worker entry per GPU in the instance
         for gpu_idx, gpu_name in enumerate(gpus):
+            if safe_set is not None and (name, gpu_idx) not in safe_set:
+                logger.info("Skipping %s:gpu%d (not in safe-slot list)", name, gpu_idx)
+                continue
             workers.append({
                 "worker_id": f"{name}-gpu{gpu_idx}",
                 "platform": "gpuhub",
@@ -362,7 +386,10 @@ def resolve_gpuhub_instances(gpu_filter: str | None) -> list[dict]:
                 "status": "running",  # GPUHub instances are always-on
             })
 
-    logger.info("Resolved %d GPUHub worker slots (filter=%s)", len(workers), gpu_filter)
+    logger.info(
+        "Resolved %d GPUHub worker slots (filter=%s, safe_slots=%s)",
+        len(workers), gpu_filter, safe_slots,
+    )
     return workers
 
 
@@ -479,6 +506,9 @@ def deploy_to_worker(
         log_file = f"worker_{worker_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
         # shlex.quote everything that came from config/discovery — worker_id may
         # contain hyphens, db_url contains punctuation, etc.
+        # `< /dev/null` closes stdin on the python child so the SSH channel
+        # closes immediately when the bash shell exits — without it, paramiko's
+        # stdout.read() blocks until exec timeout (S480: 5-min false failure).
         launch_cmd = (
             f"cd {REMOTE_WORKSPACE} && "
             f"{path_export} && {gpu_env} {wandb_env} "
@@ -491,11 +521,13 @@ def deploy_to_worker(
             f"--target_trials {int(target_trials)} "
             f"--wandb_group {shlex.quote(wandb_group)} "
             f"--agent_type {shlex.quote(agent_type)} "
-            f"> {log_file} 2>&1 & echo $! > worker_{worker_id}.pid"
+            f"< /dev/null > {log_file} 2>&1 & echo $! > worker_{worker_id}.pid"
         )
 
         logger.info("  [%s] Launching worker (target_trials=%d)...", worker_id, target_trials)
-        _exec_ssh(ssh, launch_cmd)
+        # Short timeout — bash should exit in <1s once nohup'd python is detached.
+        # If it doesn't, something is wrong; failing fast beats a 5-min phantom block.
+        _exec_ssh(ssh, launch_cmd, timeout=30)
 
         # Verify PID
         time.sleep(5)
@@ -518,7 +550,10 @@ def deploy_to_worker(
             return False
 
     except Exception as e:
-        logger.error("  [%s] Deployment failed: %s", worker_id, e)
+        logger.error(
+            "  [%s] Deployment failed: %s: %s",
+            worker_id, type(e).__name__, e or "<no message>",
+        )
         worker["status"] = "failed"
         return False
 
@@ -935,7 +970,8 @@ def main():
     if args.platform == "vastai":
         workers = provision_vastai_instances(args.n_workers, args.gpu_filter)
     else:
-        workers = resolve_gpuhub_instances(args.gpu_filter)
+        safe_slots = dist_config.get("gpuhub_instances")
+        workers = resolve_gpuhub_instances(args.gpu_filter, safe_slots=safe_slots)
         # Limit to requested n_workers
         workers = workers[:args.n_workers]
 
