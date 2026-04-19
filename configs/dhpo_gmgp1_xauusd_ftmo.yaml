@@ -1,0 +1,77 @@
+# Distributed HPO overlay — GMGP1 XAUUSD FTMO re-HPO
+# Extends configs/distributed_hpo.yaml with workstream-specific data files.
+# Pattern: mirrors configs/dhpo_sg1_xauusd_ftmo.yaml (S481, 3 replicas/GPU co-location).
+#
+# PREREQUISITES BEFORE LAUNCH:
+#   1. SG-1 re-HPO (`sg1_xauusd_ftmo_rehpo_20260419`) completed — seeds GMGP1 narrow search.
+#   2. `agents.sac:` block in configs/gmgp1_xauusd_ftmo_hpo.yaml refreshed from new SG-1 best.
+#   3. `python scripts/monitor_fleet.py` — re-verify gpuhub-1:0 + gpuhub-2:0 free.
+#   4. `python scripts/validate_config.py --config configs/gmgp1_xauusd_ftmo_hpo.yaml --stage hpo` → PASS.
+#
+# Launch (6 workers = 3 replicas × 2 GPUs):
+#   set -a; source .env; set +a
+#   python scripts/distributed_hpo_coordinator.py \
+#     --config configs/gmgp1_xauusd_ftmo_hpo.yaml \
+#     --platform gpuhub \
+#     --n_workers 6 --n_trials 30 \
+#     --db_url "$DISTRIBUTED_HPO_DB_URL" \
+#     --study_name gmgp1_xauusd_ftmo_rehpo_20260419 \
+#     --distributed_config configs/dhpo_gmgp1_xauusd_ftmo.yaml \
+#     --resume
+
+distributed_hpo:
+  platform: "gpuhub"
+  n_workers: 6
+  n_trials: 30                       # narrow-mode seed + 29 ±20% search trials
+
+  storage:
+    backend: "postgresql"
+    url: "${DISTRIBUTED_HPO_DB_URL}"
+    heartbeat_interval: 60
+    grace_period: 600
+    max_retry: 1
+
+  # Safe slots layout — mirrors dhpo_sg1 (3 replicas/GPU; SAC HPO ~25% GPU util per worker;
+  # 3x co-location ≈ 75% util, ~2-2.5x aggregate throughput). Re-check monitor_fleet.py
+  # before launch in case fleet state shifted.
+  gpuhub:
+    instances:
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-2:0"
+      - "gpuhub-2:0"
+      - "gpuhub-2:0"
+
+  worker:
+    target_trials: null
+    trial_timeout: 7200
+    graceful_shutdown_timeout: 60
+    pip_extras: ""
+
+  data:
+    upload_method: "sftp"
+    data_files:
+      - "cme/gc_2025_lob1_1min_stitched.parquet"
+      - "cme/gc_2025_lob1_1min_stitched.manifest.json"
+    cache_by_size: true
+
+  wandb:
+    entity: "bigcan-chiwin-technology"
+    project: "FinRL-Pro-DS"
+    group_prefix: "dhpo"
+    tags: ["distributed_hpo", "gmgp1-xauusd", "XAUUSD", "FTMO", "re-hpo",
+           "steady-state", "15min", "ftmo-wrapped"]
+
+  fault_tolerance:
+    max_worker_retries: 2
+    worker_replace_on_death: false   # GPUHub fixed fleet — manual replace if worker dies
+    monitor_poll_interval: 300
+
+  cost:
+    # max_total_spend omitted — GPUHub slots are prepaid; no $ cap needed
+    auto_teardown: false             # never auto-destroy GPUHub instances
+
+# Expected wall-clock (per optimization audit):
+#   30 trials × 500K steps = 15M steps / ~600 SPS aggregate (6-worker 4090 fleet)
+#   ≈ 7-9h wall-clock (vs ~32h serial on one 4090).
