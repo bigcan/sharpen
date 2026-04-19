@@ -26,6 +26,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -70,21 +71,88 @@ def load_config(path: str) -> dict:
 
 
 def load_distributed_config(path: str | None) -> dict:
-    """Load optional distributed HPO overlay config."""
+    """Load optional distributed HPO overlay config.
+
+    Reads the nested ``distributed_hpo:`` schema documented in
+    ``configs/distributed_hpo.yaml`` and flattens it into the operational keys
+    the coordinator consumes. Unknown top-level keys are also merged in
+    (back-compat with flat overlays).
+    """
     defaults = {
         "poll_interval_seconds": 300,
         "max_reprovision_attempts": 2,
         "ssh_timeout": 30,
         "setup_timeout": 600,
         "worker_launch_delay": 5,
-        "cost_per_hour": {},  # GPU model -> $/hr overrides
-        "baseline_trial": None,  # dict of params to enqueue
-        "data_files": [],  # list of data file paths to upload
+        "cost_per_hour": {},      # GPU model -> $/hr overrides
+        "baseline_trial": None,   # dict of params to enqueue
+        "data_files": [],         # data file paths (relative to data/) to upload
+        "cost_cap_usd": None,     # hard spend cap; None = no cap
+        "auto_teardown": False,   # overlay default for --auto_teardown CLI flag
+        "vastai_gpu_filter": None,
+        "vastai_max_price_per_hour": None,
+        "vastai_disk_gb": 50,
+        "vastai_docker_image": "pytorch/pytorch:2.5.1-cuda12.4-cudnn9-devel",
+        "gpuhub_instances": None,  # explicit list "name:gpu_idx", overrides instances.json
+        "wandb_entity": WANDB_ENTITY,
+        "wandb_project": WANDB_PROJECT,
+        "wandb_group_prefix": "dhpo",
+        "trial_timeout_seconds": None,  # passed through to worker for visibility
     }
-    if path and os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            overlay = yaml.safe_load(f) or {}
-        defaults.update(overlay)
+    if not (path and os.path.exists(path)):
+        return defaults
+
+    with open(path, "r", encoding="utf-8") as f:
+        overlay = yaml.safe_load(f) or {}
+
+    nested = overlay.get("distributed_hpo")
+    if isinstance(nested, dict):
+        ft = nested.get("fault_tolerance", {}) or {}
+        cost = nested.get("cost", {}) or {}
+        data = nested.get("data", {}) or {}
+        worker = nested.get("worker", {}) or {}
+        vastai = nested.get("vastai", {}) or {}
+        gpuhub = nested.get("gpuhub", {}) or {}
+        wb = nested.get("wandb", {}) or {}
+
+        if "monitor_poll_interval" in ft:
+            defaults["poll_interval_seconds"] = int(ft["monitor_poll_interval"])
+        if "max_worker_retries" in ft:
+            defaults["max_reprovision_attempts"] = int(ft["max_worker_retries"])
+        if "max_total_spend" in cost:
+            defaults["cost_cap_usd"] = float(cost["max_total_spend"])
+        if "auto_teardown" in cost:
+            defaults["auto_teardown"] = bool(cost["auto_teardown"])
+        if "data_files" in data:
+            defaults["data_files"] = list(data["data_files"] or [])
+        if "graceful_shutdown_timeout" in worker:
+            defaults["worker_launch_delay"] = max(
+                defaults["worker_launch_delay"], int(worker["graceful_shutdown_timeout"]) // 12 or 5
+            )
+        if "trial_timeout" in worker:
+            defaults["trial_timeout_seconds"] = int(worker["trial_timeout"])
+        if "gpu_filter" in vastai:
+            gf = vastai["gpu_filter"]
+            defaults["vastai_gpu_filter"] = ",".join(gf) if isinstance(gf, list) else str(gf)
+        if "max_price_per_hour" in vastai:
+            defaults["vastai_max_price_per_hour"] = float(vastai["max_price_per_hour"])
+        if "disk_gb" in vastai:
+            defaults["vastai_disk_gb"] = int(vastai["disk_gb"])
+        if "docker_image" in vastai:
+            defaults["vastai_docker_image"] = str(vastai["docker_image"])
+        if "instances" in gpuhub:
+            defaults["gpuhub_instances"] = list(gpuhub["instances"] or [])
+        if "entity" in wb:
+            defaults["wandb_entity"] = str(wb["entity"])
+        if "project" in wb:
+            defaults["wandb_project"] = str(wb["project"])
+        if "group_prefix" in wb:
+            defaults["wandb_group_prefix"] = str(wb["group_prefix"])
+
+    # Back-compat: also accept flat top-level keys (override nested values)
+    for k in list(defaults.keys()):
+        if k in overlay:
+            defaults[k] = overlay[k]
     return defaults
 
 
@@ -122,7 +190,7 @@ def _ssh_connect_gpuhub(host: str, port: int, password: str, timeout: int = 30):
     """Open paramiko SSH to a GPUHub instance (password auth)."""
     import paramiko
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(host, port=port, username="root", password=password, timeout=timeout)
     return ssh
 
@@ -157,7 +225,7 @@ def _ssh_connect_vastai(instance_id: str, timeout: int = 30):
         raise FileNotFoundError("No SSH key found (~/.ssh/id_ed25519 or ~/.ssh/id_rsa)")
 
     ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.WarningPolicy())
+    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     ssh.connect(host, port=port, username="root", key_filename=key_path, timeout=timeout)
     return ssh
 
@@ -312,6 +380,7 @@ def deploy_to_worker(
     target_trials: int,
     wandb_group: str,
     dist_config: dict,
+    agent_type: str = "sac",
 ) -> bool:
     """Deploy code and launch distributed_hpo_worker.py on a single worker.
     Returns True on success."""
@@ -385,13 +454,13 @@ def deploy_to_worker(
             f"cd {REMOTE_WORKSPACE}",
             path_export,
             "ulimit -n 65536",
-            "mount -o remount,size=2G /dev/shm || echo 'WARN: /dev/shm remount failed'",
             f"{pip_cmd} uninstall finrl-pro-ds -y || true",
             "rm -rf finrl_pro_ds.egg-info build dist",
             f"unzip -o {zip_name}",
             f"rm -f {zip_name}",
             f"{pip_cmd} install -q --upgrade -r requirements.txt",
-            f"{pip_cmd} install -q -e .",
+            # [distributed] extra ships psycopg[binary] for Optuna RDBStorage
+            f"{pip_cmd} install -q -e .[distributed]",
         ]
         setup_chain = " && ".join(setup_cmds) + " && echo SETUP_SUCCESS"
         out, err = _exec_ssh(ssh, setup_chain, timeout=setup_timeout)
@@ -404,21 +473,24 @@ def deploy_to_worker(
 
         # Launch worker
         wandb_key = os.environ.get("WANDB_API_KEY", "")
-        wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
+        wandb_env = f"export WANDB_API_KEY={shlex.quote(wandb_key)} &&" if wandb_key else ""
         gpu_env = f"export CUDA_VISIBLE_DEVICES={worker.get('gpu_idx', 0)} &&"
 
         log_file = f"worker_{worker_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+        # shlex.quote everything that came from config/discovery — worker_id may
+        # contain hyphens, db_url contains punctuation, etc.
         launch_cmd = (
             f"cd {REMOTE_WORKSPACE} && "
             f"{path_export} && {gpu_env} {wandb_env} "
             f"ulimit -n 65535 || true && "
             f"nohup {python_cmd} -u scripts/distributed_hpo_worker.py "
-            f"--config {config_path} "
-            f"--db_url '{db_url}' "
-            f"--study_name {study_name} "
-            f"--worker_id {worker_id} "
-            f"--target_trials {target_trials} "
-            f"--wandb_group {wandb_group} "
+            f"--config {shlex.quote(config_path)} "
+            f"--db_url {shlex.quote(db_url)} "
+            f"--study_name {shlex.quote(study_name)} "
+            f"--worker_id {shlex.quote(str(worker_id))} "
+            f"--target_trials {int(target_trials)} "
+            f"--wandb_group {shlex.quote(wandb_group)} "
+            f"--agent_type {shlex.quote(agent_type)} "
             f"> {log_file} 2>&1 & echo $! > worker_{worker_id}.pid"
         )
 
@@ -580,11 +652,15 @@ def extract_and_route_best_params(study, agent_type: str = "sac") -> dict:
             best_params["network"]["micro_config"]["hidden_size"] = val
             best_params["network"]["macro_config"] = {"hidden_sizes": [val, val // 2]}
         else:
-            logger.warning(
-                "HPO param '%s' has no routing rule — storing under agents.%s",
-                key, agent_key,
+            # Mirror serial run_full_pipeline.run_hpo: fail loudly on unknown
+            # params so silently mis-routed best_params YAMLs never reach
+            # downstream training.
+            raise ValueError(
+                f"HPO param '{key}' has no routing rule for agent_type='{agent_type}'. "
+                f"Add it to reward_params/agent_params/env_params in "
+                f"extract_and_route_best_params() (and the matching block in "
+                f"run_full_pipeline.run_hpo)."
             )
-            best_params["agents"][agent_key][key] = val
 
     return best_params
 
@@ -601,11 +677,19 @@ def run_monitor_loop(
     cost_tracker: CostTracker,
     poll_interval: int = 300,
     max_reprovision: int = 2,
+    cost_cap_usd: float | None = None,
+    wandb_entity: str = WANDB_ENTITY,
+    wandb_project: str = WANDB_PROJECT,
 ):
-    """Poll Optuna study and worker health until all trials complete."""
+    """Poll Optuna study and worker health until all trials complete.
+
+    If ``cost_cap_usd`` is provided, exits the loop as soon as estimated spend
+    exceeds the cap so the caller can tear down workers before further charges.
+    """
     import optuna
 
     reprovision_counts: dict[str, int] = {}
+    completed = 0
 
     while True:
         # --- Optuna progress ---
@@ -631,6 +715,14 @@ def run_monitor_loop(
 
             if completed >= n_trials:
                 logger.info("All %d trials complete. Exiting monitor loop.", n_trials)
+                return study
+
+            # Cost cap enforcement (Vast.ai mainly — GPUHub dph defaults to 0)
+            if cost_cap_usd is not None and cost["estimated_cost_usd"] >= cost_cap_usd:
+                logger.error(
+                    "Cost cap hit: $%.2f >= $%.2f. Stopping monitor — caller should tear down.",
+                    cost["estimated_cost_usd"], cost_cap_usd,
+                )
                 return study
 
         except Exception as e:
@@ -677,7 +769,7 @@ def run_monitor_loop(
             import wandb
             api = wandb.Api()
             runs = api.runs(
-                f"{WANDB_ENTITY}/{WANDB_PROJECT}",
+                f"{wandb_entity}/{wandb_project}",
                 filters={"group": study_name, "state": "running"},
             )
             wandb_running = len(list(runs))
@@ -736,6 +828,8 @@ def main():
                         help="Resume an existing study (load_if_exists=True)")
     parser.add_argument("--distributed_config", default=None,
                         help="Path to distributed HPO overlay YAML (e.g., configs/distributed_hpo.yaml)")
+    parser.add_argument("--agent_type", choices=["sac", "ppo", "iqn", "bdq"], default=None,
+                        help="HPO agent type. If omitted, inferred from base_config.agents.* (sac > ppo > iqn > bdq).")
 
     args = parser.parse_args()
 
@@ -744,6 +838,28 @@ def main():
     dist_config = load_distributed_config(args.distributed_config)
     poll_interval = dist_config.get("poll_interval_seconds", 300)
     max_reprovision = dist_config.get("max_reprovision_attempts", 2)
+    cost_cap_usd = dist_config.get("cost_cap_usd")
+    wandb_entity = dist_config.get("wandb_entity", WANDB_ENTITY)
+    wandb_project = dist_config.get("wandb_project", WANDB_PROJECT)
+
+    # Resolve agent_type once — used both for worker launch and best-param routing
+    if args.agent_type:
+        agent_type = args.agent_type
+    else:
+        agents_section = base_config.get("agents", {}) or {}
+        for candidate in ("sac", "ppo", "iqn", "bdq"):
+            if candidate in agents_section:
+                agent_type = candidate
+                break
+        else:
+            agent_type = "sac"
+    logger.info("Resolved agent_type=%s", agent_type)
+
+    if not os.environ.get("WANDB_API_KEY"):
+        logger.warning(
+            "WANDB_API_KEY not set in coordinator environment — workers will run "
+            "without WandB credentials and may fail to log metrics."
+        )
 
     logger.info("=" * 70)
     logger.info("  Distributed HPO Coordinator")
@@ -860,6 +976,7 @@ def main():
             target_trials=trial_assignments[i],
             wandb_group=wandb_group,
             dist_config=dist_config,
+            agent_type=agent_type,
         )
         if success:
             dph = worker.get("dph", 0.0)
@@ -897,6 +1014,9 @@ def main():
             cost_tracker=cost_tracker,
             poll_interval=poll_interval,
             max_reprovision=max_reprovision,
+            cost_cap_usd=cost_cap_usd,
+            wandb_entity=wandb_entity,
+            wandb_project=wandb_project,
         )
     except KeyboardInterrupt:
         logger.info("Monitor interrupted by user (Ctrl+C). Collecting results so far...")
@@ -916,16 +1036,7 @@ def main():
                 best.number, best.value, best.params,
             )
 
-            # Route best params to config structure
-            agent_type = "sac"  # Primary agent for distributed HPO
-            agents_section = base_config.get("agents", {})
-            if "sac" in agents_section:
-                agent_type = "sac"
-            elif "ppo" in agents_section:
-                agent_type = "ppo"
-            elif "iqn" in agents_section:
-                agent_type = "iqn"
-
+            # Route best params using the same agent_type the workers ran under
             best_routed = extract_and_route_best_params(final_study, agent_type)
 
             # Save best params to YAML
@@ -960,7 +1071,8 @@ def main():
     # =========================================================================
     # Step 7: Auto-teardown
     # =========================================================================
-    if args.auto_teardown:
+    teardown_now = args.auto_teardown or bool(dist_config.get("auto_teardown"))
+    if teardown_now:
         logger.info("Auto-teardown enabled. Destroying instances...")
         teardown_vastai_instances(workers)
     else:

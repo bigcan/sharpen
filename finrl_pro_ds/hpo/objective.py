@@ -108,7 +108,11 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                 gradient_clip = trial.suggest_float("gradient_clip", bs["gradient_clip"] * (1 - nf), bs["gradient_clip"] * (1 + nf), log=True)
             else:
                 ss = base_config.get("hpo", {}).get("search_space", {})
-                _ss_f = lambda name, lo, hi, **kw: trial.suggest_float(name, ss.get(name, {}).get("low", lo), ss.get(name, {}).get("high", hi), **kw)
+
+                def _ss_f(name, lo, hi, **kw):
+                    bounds = ss.get(name, {})
+                    return trial.suggest_float(name, bounds.get("low", lo), bounds.get("high", hi), **kw)
+
                 lr_actor = _ss_f("lr_actor", 2e-6, 1e-3, log=True)
                 lr_critic = _ss_f("lr_critic", 2e-6, 1e-3, log=True)
                 lr_alpha = _ss_f("lr_alpha", 2e-6, 1e-3, log=True)
