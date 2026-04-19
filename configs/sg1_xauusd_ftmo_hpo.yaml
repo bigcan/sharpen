@@ -27,9 +27,14 @@ features:
 signal_gate:
   enabled: true
   gate_mode: "composite"
-  atr_threshold: 0.3
-  parkinson_threshold: 0.02
-  volume_threshold: 0.5
+  # Calibrated S479 via feature-distribution analysis on CME GC 3-min 2025-01-06→06-30
+  # train window (56K bars, vol>0). Target ~75% composite pass rate per GC oracle
+  # "MARGINAL GO permissive" verdict. Prior values (atr:0.3, parkinson:0.02, vol:0.5)
+  # were inherited from SG-1 Gold and effectively no-ops (parkinson:0.02 > p90=0.012
+  # never triggered; vol:0.5 alone opened ~85% of bars).
+  atr_threshold: 0.35          # atr_norm > 0.35 ~ top 37% (p63 interpolated 0.33)
+  parkinson_threshold: 0.0107  # ~ p55 (median 0.0105, just above)
+  volume_threshold: 0.75       # |volume_z| > 0.75 ~ top 25% (p70=0.82, p80=0.99)
   max_hold_bars: 20
   gate_always_on_first: true
   normalize_accumulated_reward: true

@@ -30,11 +30,14 @@ features:
 signal_gate:
   enabled: true
   gate_mode: "composite"
-  # CALIBRATE: Run oracle_signal_gate.py on BTC 3-min data.
-  # BTC baseline vol ~3x Gold — thresholds raised accordingly.
-  atr_threshold: 0.5
-  parkinson_threshold: 0.03
-  volume_threshold: 0.5
+  # Calibrated S479 via feature-distribution analysis on BTC Bybit 3-min
+  # 2024-01-01→2025-06-30 train window (262K bars, vol>0). Target ~75% composite
+  # pass rate. Prior values (atr:0.5, parkinson:0.03, vol:0.5) were placeholder
+  # "BTC vol ~3× Gold" — WRONG direction: BTC parkinson distribution is ~10× SMALLER
+  # than XAUUSD at 3-min (p90=0.00179 vs 0.012), so 0.03 never triggered.
+  atr_threshold: 0.15          # atr_norm > 0.15 ~ top 40% (p63 interpolated 0.14)
+  parkinson_threshold: 0.0009  # ~ p58 (median 0.00070, between p50 and p70)
+  volume_threshold: 0.60       # |volume_z| > 0.60 ~ top 35% (p50=0.49, p70=0.66)
   max_hold_bars: 20
   gate_always_on_first: true
   normalize_accumulated_reward: true
