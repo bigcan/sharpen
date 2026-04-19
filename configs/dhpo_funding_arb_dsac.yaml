@@ -2,14 +2,17 @@
 # Extends configs/distributed_hpo.yaml with funding-arb data files.
 # Queued to launch after GMGP1 BTC re-HPO (see scripts/queue_post_sg1_rehpo.py stage 5).
 #
-# PREREQUISITES BEFORE LAUNCH:
-#   1. GMGP1 BTC re-HPO (`gmgp1_btc_velotrade_rehpo_20260419`) completed.
-#   2. Full audit pass on configs/funding_arb_dsac_10assets_rehpo.yaml
-#      (validator reconciliation + gates values + optimization audit OPT-01→10).
-#   3. Runner migration: funding_arb_hpo_runner.py must support protocol v2
-#      HPO key names OR this overlay passes explicit --n_trials/--hpo_timesteps.
-#   4. `python scripts/monitor_fleet.py` — verify gpuhub-1:0 + gpuhub-2:0 free
-#      (DSAC queues on SG-1/GMGP1 completion; re-check fleet state at that point).
+# PREREQUISITES BEFORE LAUNCH (status 2026-04-19):
+#   [x] Full audit pass on configs/funding_arb_dsac_10assets_rehpo.yaml
+#       (validator 2-leg fix + gates populated + OPT-09/10 plumb-through).
+#   [x] Runner migration: funding_arb_hpo_runner.py reads `trials`/
+#       `steps_per_trial` AND legacy `n_trials`/`hpo_timesteps`.
+#   [ ] GMGP1 BTC re-HPO (`gmgp1_btc_velotrade_rehpo_20260419`) completed.
+#   [ ] `python scripts/monitor_fleet.py` — gpuhub-1:0 + gpuhub-2:0 free.
+#   [x] Distributed HPO path wired S485 — `finrl_pro_ds.hpo.objective.make_objective`
+#       dispatches `environment.type: funding_arb` to funding-arb/DSAC factory
+#       at `finrl_pro_ds/hpo/funding_arb_objective.py`. No worker-CLI changes
+#       needed; agent_type=sac (auto-resolved from config.agents.sac) works.
 #
 # Launch (6 workers = 3 replicas × 2 GPUs, pattern matches dhpo_gmgp1_*.yaml):
 #   set -a; source .env; set +a

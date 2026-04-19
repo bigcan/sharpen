@@ -52,6 +52,20 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
         Optuna objective function: ``(optuna.Trial) -> float``
     """
 
+    # Dispatch: funding-arb uses a different env schema (`config.environment`,
+    # `FundingArbEnv`, DSAC CVaR axes) and doesn't fit the V7/cmgp1 objective
+    # below. Route to the dedicated factory so the distributed HPO stack works
+    # unchanged. Detection is env-type driven — same config key the runner uses.
+    _env_type = (
+        (base_config.get("environment") or {}).get("type")
+        or (base_config.get("env") or {}).get("type")
+    )
+    if _env_type == "funding_arb":
+        from finrl_pro_ds.hpo.funding_arb_objective import make_funding_arb_objective
+        return make_funding_arb_objective(
+            base_config, steps_per_trial, agent_type, device, trial_records,
+        )
+
     def objective(trial):
         _mean_train_reward = float('nan')
         trial_prefix = f"hpo/t{trial.number}"

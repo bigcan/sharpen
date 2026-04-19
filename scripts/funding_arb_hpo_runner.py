@@ -148,6 +148,11 @@ def _make_dsac_agent(env, config: dict, agent_params: dict, dsac_params: dict):
 
     Uses obs_mode="summary_stats" so the SummaryStatsEncoder handles
     the flat 1D observation vector directly (no multi-scale windowing).
+
+    Forwards `training.use_amp`, `training.amp_dtype`, `training.torch_compile`
+    so the config-declared optimization flags (OPT-09/10) actually reach the
+    agent. Before this fix the DSAC HPO path ran in eager-FP32 regardless of
+    config — which is the OPT regression wl7ir7ia exhibited (SPS=50).
     """
     import torch
     from finrl_pro_ds.agents.sac.dsac_agent import DistributionalSACAgent
@@ -155,6 +160,7 @@ def _make_dsac_agent(env, config: dict, agent_params: dict, dsac_params: dict):
     obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.shape[0]
     agents_cfg = config.get("agents", {}).get("sac", {})
+    training_cfg = config.get("training", {})
     network_arch = agents_cfg.get("network_arch", [256, 256])
     fusion_dim = network_arch[0] if network_arch else 256
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -184,6 +190,10 @@ def _make_dsac_agent(env, config: dict, agent_params: dict, dsac_params: dict):
         buffer_size=agent_params.get("buffer_size", 100_000),
         learning_starts=agent_params.get("learning_starts", 1000),
         update_interval=agents_cfg.get("update_interval", 4),
+        gradient_clip=agents_cfg.get("gradient_clip", 10.0),
+        use_amp=training_cfg.get("use_amp", False),
+        amp_dtype=training_cfg.get("amp_dtype", "float16"),
+        torch_compile=training_cfg.get("torch_compile", False),
         device=device,
     )
 
@@ -798,10 +808,21 @@ def main():
 
     config = load_config(args.config)
 
-    # Resolve HPO params: CLI > config > defaults
+    # Resolve HPO params: CLI > config(new v2 keys) > config(legacy keys) > defaults.
+    # Protocol v2 §4 stage 1 names the keys `trials` and `steps_per_trial` (which
+    # distributed_hpo_worker.py also reads). Older funding-arb configs used
+    # `n_trials` and `hpo_timesteps` — accept both so mixed configs keep working.
     hpo_cfg = config.get("hpo", {})
-    n_trials = args.n_trials or hpo_cfg.get("n_trials", 50)
-    hpo_timesteps = args.hpo_timesteps or hpo_cfg.get("hpo_timesteps", 500_000)
+    n_trials = (
+        args.n_trials
+        or hpo_cfg.get("trials")
+        or hpo_cfg.get("n_trials", 50)
+    )
+    hpo_timesteps = (
+        args.hpo_timesteps
+        or hpo_cfg.get("steps_per_trial")
+        or hpo_cfg.get("hpo_timesteps", 500_000)
+    )
 
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
