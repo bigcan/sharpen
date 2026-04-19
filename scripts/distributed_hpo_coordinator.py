@@ -338,10 +338,15 @@ def resolve_gpuhub_instances(
 
     Args:
         gpu_filter: Comma-separated GPU name filter (e.g. "RTX_4090").
-        safe_slots: Allow-list of "name:gpu_idx" strings (e.g. "gpuhub-1:0").
-            When provided, only slots in the list are returned. This is the
-            overlay's ``distributed_hpo.gpuhub.instances`` field — it lets
-            operators carve out specific GPUs that are running other work.
+        safe_slots: List of "name:gpu_idx" strings (e.g. "gpuhub-1:0"). When
+            provided, only listed slots are used; **duplicates spawn additional
+            replica workers on the same physical GPU** (e.g. listing
+            "gpuhub-1:0" three times → 3 workers with worker_ids
+            ``gpuhub-1-gpu0-r0/-r1/-r2`` sharing one GPU). Each replica gets
+            its own PID/log files so they don't collide. Useful for SAC HPO
+            where one worker only utilizes ~25% of the GPU (CPU-bound on
+            env.step) — co-locating 2-3 replicas typically gets 1.5-2.5×
+            aggregate throughput per GPU.
     """
     instances_file = PROJECT_ROOT / "instances.json"
     if not instances_file.exists():
@@ -350,13 +355,15 @@ def resolve_gpuhub_instances(
     with open(instances_file, encoding="utf-8") as f:
         registry = json.load(f)
 
-    safe_set: set[tuple[str, int]] | None = None
+    # Count requested replicas per slot. None means "default 1 per GPU"
+    # (legacy behavior when no overlay safe_slots passed).
+    slot_counts: dict[tuple[str, int], int] = {}
     if safe_slots:
-        safe_set = set()
         for slot in safe_slots:
             try:
                 name, idx = slot.rsplit(":", 1)
-                safe_set.add((name.strip(), int(idx)))
+                key = (name.strip(), int(idx))
+                slot_counts[key] = slot_counts.get(key, 0) + 1
             except (ValueError, AttributeError):
                 logger.warning("Skipping malformed safe-slot entry: %r", slot)
 
@@ -369,22 +376,29 @@ def resolve_gpuhub_instances(
             if not any(g in gpu for g in filters for gpu in gpus):
                 continue
 
-        # Create one worker entry per GPU in the instance
         for gpu_idx, gpu_name in enumerate(gpus):
-            if safe_set is not None and (name, gpu_idx) not in safe_set:
-                logger.info("Skipping %s:gpu%d (not in safe-slot list)", name, gpu_idx)
-                continue
-            workers.append({
-                "worker_id": f"{name}-gpu{gpu_idx}",
-                "platform": "gpuhub",
-                "instance_name": name,
-                "host": inst["host"],
-                "port": inst["port"],
-                "password": inst["password"],
-                "gpu_idx": gpu_idx,
-                "gpu_name": gpu_name,
-                "status": "running",  # GPUHub instances are always-on
-            })
+            if safe_slots:
+                replicas = slot_counts.get((name, gpu_idx), 0)
+                if replicas == 0:
+                    logger.info("Skipping %s:gpu%d (not in safe-slot list)", name, gpu_idx)
+                    continue
+            else:
+                replicas = 1  # legacy: one worker per GPU
+            for r in range(replicas):
+                wid_suffix = f"-r{r}" if replicas > 1 else ""
+                workers.append({
+                    "worker_id": f"{name}-gpu{gpu_idx}{wid_suffix}",
+                    "platform": "gpuhub",
+                    "instance_name": name,
+                    "host": inst["host"],
+                    "port": inst["port"],
+                    "password": inst["password"],
+                    "gpu_idx": gpu_idx,
+                    "gpu_name": gpu_name,
+                    "replica": r,
+                    "replicas_on_slot": replicas,
+                    "status": "running",  # GPUHub instances are always-on
+                })
 
     logger.info(
         "Resolved %d GPUHub worker slots (filter=%s, safe_slots=%s)",
