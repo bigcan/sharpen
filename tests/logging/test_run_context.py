@@ -168,7 +168,7 @@ def test_namespaced_log_passthrough_on_non_mapping(monkeypatch):
     sentinel = object()
     run_context.wandb.log(sentinel)  # not a dict
 
-    inner.assert_called_once_with(sentinel, step=None, commit=None, sync=None)
+    inner.assert_called_once_with(sentinel, step=None, commit=None)
 
 
 def test_namespaced_log_idempotent_on_prefixed_keys(monkeypatch):
