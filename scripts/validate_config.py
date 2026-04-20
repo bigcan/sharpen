@@ -264,6 +264,22 @@ def check_l1_multiseed(cfg: dict, r: ValidationResult) -> None:
         r.fail(f"gates.l1_seeds={seeds} — must be >=3 (Protocol v2 §4 stage 2)")
     if "l1_pf_cv_max" not in gates:
         r.warn("gates.l1_pf_cv_max not set — defaulting to 0.30")
+    # S488: prop-firm / live-capital workstreams must declare the ambiguous
+    # range pre-launch (Protocol v2 §4 stage 2, pre-committed escalation rule).
+    tags = cfg.get("wandb", {}).get("tags", []) or []
+    prop_firm = ("prop-firm" in tags) or ("FTMO" in tags) or ("velotrade" in tags)
+    if prop_firm and seeds >= 10:
+        amb = gates.get("l1_pf_cv_ambiguous")
+        if amb is None:
+            r.warn("prop-firm workstream with l1_seeds>=10 should declare "
+                   "gates.l1_pf_cv_ambiguous (default [0.22, 0.38]) for "
+                   "pre-committed escalation (Protocol v2 §4 stage 2)")
+        elif not (isinstance(amb, list) and len(amb) == 2 and amb[0] < amb[1]):
+            r.fail(f"gates.l1_pf_cv_ambiguous={amb} invalid — must be "
+                   "[low, high] with low<high")
+    if prop_firm and seeds < 10:
+        r.warn(f"prop-firm workstream with l1_seeds={seeds} — Protocol v2 §4 "
+               "stage 2 (S488) recommends N>=10 for CV-estimator reliability")
 
 
 def check_wf(cfg: dict, r: ValidationResult) -> None:

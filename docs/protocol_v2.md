@@ -163,10 +163,17 @@ All numeric gate thresholds live in `configs/<workstream>.gates.yaml` and are re
 - Gate: Optuna best trial PF ≥ `gates.hpo_pf_floor` (default 1.5)
 
 ### Stage 2 — l1-multiseed
-- N ≥ `gates.l1_seeds` (default 5)
+- N ≥ `gates.l1_seeds` (default 5; **prop-firm / live-capital workstreams must set N ≥ 10** — see S488 rationale below)
 - Each seed evaluated over `gates.eval_episodes` (default 10) — for stochastic policies (SAC), report **mean and std across episodes** per seed; deterministic eval (greedy action) is logged additionally for diagnostic purposes
 - Report **median** PF, Sharpe, MDD across seeds (not max)
 - Gate: median PF ≥ `gates.l1_pf_floor` (default 1.5), all seeds profitable, **CV (std/mean) of PF ≤ `gates.l1_pf_cv_max` (default 0.30)** — tightened from prior 0.5 because CV=0.5 admits PF=2.0 ± 1.0 which is operationally unstable
+
+- **Pre-committed escalation rule (mandatory for prop-firm / live-capital, N ≥ 10):**
+  - Declare `gates.l1_pf_cv_ambiguous: [low, high]` (default `[0.22, 0.38]`) in the workstream gate YAML **before launch**, not after seeing results
+  - If measured CV ∈ [low, high] the verdict is **AMBIGUOUS** — auto-extend with a second batch of seeds to reach N=20, then re-evaluate the gate. Point estimate outside this range → clear PASS/FAIL at N=10, stop
+  - Any seed with PF < 1.0 → immediate FAIL (short-circuit, no need to finish remaining seeds)
+  - Rationale: the CV estimator has 95% CI ≈ [0.15, 0.45] at N=10 (McKay/Vangel, assumed approximate normality of PF across seeds). With a gate at 0.30, a measured CV of 0.30 is consistent with true CV anywhere in that interval; N=20 tightens to [0.20, 0.40]. Without the escalation rule the Type I/II error rates of the CV gate are poorly controlled. Literature anchors: Henderson et al. 2018 (*Deep RL That Matters*); Agarwal et al. 2021 (*Statistical Precipice*) both recommend N ≥ 10 for variance-based claims
+  - Escalation batches use **different seeds** from the first batch (no overlap) so that CV estimate pools independent samples
 
 ### Stage 3 — walk-forward (+ fixed-lot stress sub-report)
 - K ≥ `gates.wf_windows` (default 4) rolling windows
