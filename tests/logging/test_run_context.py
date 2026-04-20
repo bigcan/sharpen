@@ -41,6 +41,51 @@ def test_standalone_mode_calls_wandb_init_with_name(monkeypatch):
     assert kwargs["name"] == "my-run"
     assert kwargs["tags"] == ["t1", "t2"]
     assert "resume" not in kwargs
+    # group/job_type omitted when not provided
+    assert "group" not in kwargs
+    assert "job_type" not in kwargs
+
+
+def test_standalone_mode_passes_group_and_job_type(monkeypatch):
+    """DHPO manual worker launch relies on group= + job_type=hpo_worker."""
+    init = mock.MagicMock()
+    monkeypatch.setattr(run_context.wandb, "init", init)
+
+    run_context.init_wandb(
+        _cfg(),
+        fallback_name="worker_3",
+        tags=["distributed_hpo"],
+        group="dhpo_study_X",
+        job_type="hpo_worker",
+    )
+
+    kwargs = init.call_args.kwargs
+    assert kwargs["group"] == "dhpo_study_X"
+    assert kwargs["job_type"] == "hpo_worker"
+    assert kwargs["name"] == "worker_3"
+
+
+def test_consolidated_mode_ignores_group_and_job_type(monkeypatch):
+    """Coordinator owns group/job_type on the parent run; children inherit."""
+    monkeypatch.setenv(run_context.ENV_RUN_ID, "abc")
+    monkeypatch.setenv(run_context.ENV_NAMESPACE, "worker_3")
+    init = mock.MagicMock()
+    monkeypatch.setattr(run_context.wandb, "init", init)
+    monkeypatch.setattr(run_context.wandb, "define_metric", mock.MagicMock())
+    monkeypatch.setattr(run_context.wandb, "log", mock.MagicMock())
+
+    run_context.init_wandb(
+        _cfg(),
+        fallback_name="ignored",
+        group="ignored_group",
+        job_type="ignored_type",
+    )
+
+    kwargs = init.call_args.kwargs
+    assert "group" not in kwargs
+    assert "job_type" not in kwargs
+    assert kwargs["id"] == "abc"
+    assert kwargs["resume"] == "allow"
 
 
 def test_consolidated_mode_resumes_parent_run(monkeypatch):
@@ -148,17 +193,31 @@ def test_namespaced_log_idempotent_on_prefixed_keys(monkeypatch):
     }
 
 
-def test_runid_without_namespace_warns_and_falls_back(monkeypatch, caplog):
-    monkeypatch.setenv(run_context.ENV_RUN_ID, "abc")
-    init = mock.MagicMock()
-    monkeypatch.setattr(run_context.wandb, "init", init)
+def test_runid_without_namespace_attaches_without_monkey_patch(monkeypatch):
+    """DHPO worker use case: attach to coordinator's run, no auto-prefix.
 
-    with caplog.at_level("WARNING"):
-        result = run_context.init_wandb(_cfg(), fallback_name="fb")
+    Caller is expected to call set_namespace() per trial/unit.
+    """
+    monkeypatch.setenv(run_context.ENV_RUN_ID, "abc123")
+    init = mock.MagicMock()
+    define = mock.MagicMock()
+    original_log = mock.MagicMock()
+    monkeypatch.setattr(run_context.wandb, "init", init)
+    monkeypatch.setattr(run_context.wandb, "define_metric", define)
+    monkeypatch.setattr(run_context.wandb, "log", original_log)
+
+    result = run_context.init_wandb(_cfg(), fallback_name="ignored")
 
     assert result is None
-    assert init.call_args.kwargs["name"] == "fb"
-    assert any("namespace" in rec.message.lower() for rec in caplog.records)
+    init.assert_called_once()
+    kwargs = init.call_args.kwargs
+    assert kwargs["id"] == "abc123"
+    assert kwargs["resume"] == "allow"
+    assert "name" not in kwargs
+    # No monkey-patch installed yet (no namespace given)
+    assert run_context.wandb.log is original_log
+    # No define_metric yet — called lazily by set_namespace when caller rotates.
+    define.assert_not_called()
 
 
 def test_is_consolidated_and_parent_run_id(monkeypatch):
@@ -202,6 +261,59 @@ def test_set_namespace_define_metric_idempotent(monkeypatch):
     run_context.set_namespace("win0")
 
     assert define.call_count == 2  # 2 metrics * 1 namespace, not 4
+
+
+def test_trial_namespaced_decorator(monkeypatch):
+    """Simulates an Optuna objective — decorator sets/clears per trial."""
+    monkeypatch.setattr(run_context.wandb, "define_metric", mock.MagicMock())
+
+    captured = []
+    monkeypatch.setattr(run_context.wandb, "log",
+                        lambda d, step=None, commit=None, sync=None: captured.append(d))
+
+    def raw_objective(trial):
+        # Emulate objective.py: mix of already-prefixed and raw keys.
+        trial_prefix = f"hpo/t{trial.number}"
+        run_context.wandb.log({f"{trial_prefix}/started": True})
+        run_context.wandb.log({"train/reward": 1.0, "train/step": 100})
+        return 42.0
+
+    class Trial:
+        def __init__(self, number):
+            self.number = number
+
+    wrapped = run_context.trial_namespaced(raw_objective)
+    assert wrapped(Trial(5)) == 42.0
+    assert wrapped(Trial(7)) == 42.0
+
+    # Trial 5 logs 2 events, then trial 7 logs 2 events.
+    assert captured[0] == {"hpo/t5/started": True, "hpo/t5/_step": 0}
+    assert captured[1] == {"hpo/t5/train/reward": 1.0,
+                           "hpo/t5/train/step": 100, "hpo/t5/_step": 1}
+    assert captured[2] == {"hpo/t7/started": True, "hpo/t7/_step": 0}
+    assert captured[3] == {"hpo/t7/train/reward": 1.0,
+                           "hpo/t7/train/step": 100, "hpo/t7/_step": 1}
+
+    # After both trials, namespace is cleared (next log passes through raw).
+    assert run_context._state["namespace"] is None
+
+
+def test_trial_namespaced_clears_on_exception(monkeypatch):
+    monkeypatch.setattr(run_context.wandb, "define_metric", mock.MagicMock())
+    monkeypatch.setattr(run_context.wandb, "log", mock.MagicMock())
+
+    def boom(trial):
+        raise RuntimeError("trial failed")
+
+    class Trial:
+        number = 3
+
+    wrapped = run_context.trial_namespaced(boom)
+    with pytest.raises(RuntimeError, match="trial failed"):
+        wrapped(Trial())
+
+    # finally cleared the namespace even though body raised.
+    assert run_context._state["namespace"] is None
 
 
 def test_clear_namespace_stops_prefixing(monkeypatch):

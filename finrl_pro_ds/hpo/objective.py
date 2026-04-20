@@ -17,6 +17,7 @@ import wandb
 
 from finrl_pro_ds.hpo.env_factory import create_vector_env
 from finrl_pro_ds.hpo.evaluate import evaluate_for_hpo
+from finrl_pro_ds.logging import trial_namespaced
 
 logger = logging.getLogger("FinRL.HPO")
 
@@ -478,4 +479,8 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
             if hasattr(torch, '_dynamo'):
                 torch._dynamo.reset()
 
-    return objective
+    # S488 round-2: each trial's wandb.log calls auto-prefix `hpo/t<N>/*`
+    # when the worker is attached to the coordinator's consolidated run.
+    # Standalone (legacy) mode: no active namespace => pass-through, keys
+    # already built with `trial_prefix` still work unchanged.
+    return trial_namespaced(objective)

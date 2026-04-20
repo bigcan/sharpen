@@ -48,6 +48,7 @@ import wandb  # noqa: E402
 
 from finrl_pro_ds.hpo.objective import make_objective  # noqa: E402
 from finrl_pro_ds.hpo.sampler import create_sampler  # noqa: E402
+from finrl_pro_ds.logging import init_wandb, is_consolidated  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -152,31 +153,39 @@ def run_worker(
     )
 
     # ------------------------------------------------------------------
-    # 4. Init WandB
+    # 4. Init WandB — attach-only if coordinator set FINRL_WANDB_RUN_ID
+    # (S488 round-2 consolidation); else standalone per-worker (legacy).
+    # Namespace is NOT set here; objective.py rotates it per-trial so
+    # each trial's logs land under `hpo/t<N>/*` on the parent run.
     # ------------------------------------------------------------------
-    wandb_config = config.get("wandb", {})
-    wandb.init(
-        entity=wandb_config.get("entity", "bigcan-chiwin-technology"),
-        project=wandb_config.get("project", "FinRL-Pro-DS"),
-        group=wandb_group,
-        job_type="hpo_worker",
-        name=f"worker_{worker_id}",
+    standalone_name = f"worker_{worker_id}"
+    init_wandb(
+        config,
+        fallback_name=standalone_name,
         tags=["distributed_hpo", study_name, f"worker_{worker_id}"],
-        config={
+        extra_config={
             "worker_id": worker_id,
             "study_name": study_name,
             "target_trials": target_trials,
             "steps_per_trial": steps_per_trial,
             "agent_type": agent_type,
             "device": device,
-            "experiment_config": config,
         },
+        # Standalone-mode legacy grouping — consolidated children inherit
+        # from the coordinator's parent run and ignore these kwargs.
+        group=wandb_group,
+        job_type="hpo_worker",
     )
-    logger.info(
-        "WandB initialized — group=%s, worker_%s",
-        wandb_group,
-        worker_id,
-    )
+    if is_consolidated():
+        logger.info(
+            "WandB attached to coordinator run (worker_%s). Trials will "
+            "namespace as hpo/t<N>/*.", worker_id,
+        )
+    else:
+        logger.info(
+            "WandB initialized standalone — group=%s, worker_%s",
+            wandb_group, worker_id,
+        )
 
     # ------------------------------------------------------------------
     # 5. Create objective function
