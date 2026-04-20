@@ -23,6 +23,7 @@ import wandb
 # Project imports
 sys.path.append(os.getcwd())
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
+from finrl_pro_ds.logging import init_wandb, is_consolidated
 from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
 from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
@@ -792,16 +793,17 @@ def main():
 
     logger.info(f"Pipeline Run: {run_name}")
 
-    # Initialize single WandB run for entire pipeline
-    wandb_config = base_config.get("wandb", {})
-    wandb.init(
-        project=wandb_config.get("project", "FinRL-Pro-DS"),
-        entity=wandb_config.get("entity", "bigcan-chiwin-technology"),
-        name=run_name,
-        tags=wandb_config.get("tags", []) + args.tags,
-        config=base_config,
-    )
-    logger.info(f"WandB Run: {wandb.run.url}")
+    # Initialize WandB: consolidated child (attaches to parent run via
+    # FINRL_WANDB_RUN_ID + FINRL_WANDB_NAMESPACE env vars) or standalone.
+    init_wandb(base_config, fallback_name=run_name, tags=list(args.tags))
+    if is_consolidated():
+        logger.info(
+            "WandB consolidated run: %s (namespace=%s)",
+            wandb.run.url if wandb.run else "?",
+            os.environ.get("FINRL_WANDB_NAMESPACE"),
+        )
+    else:
+        logger.info(f"WandB Run: {wandb.run.url}")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Device: {device}")

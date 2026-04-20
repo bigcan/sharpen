@@ -18,12 +18,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import wandb
 import yaml
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from finrl_pro_ds.data.splitter import RollingWindowSplitter
+from finrl_pro_ds.logging import clear_namespace, set_namespace
 
 logger = logging.getLogger("WalkForward")
 
@@ -177,6 +179,11 @@ def main():
     parser = argparse.ArgumentParser(description="Walk-Forward Evaluation")
     parser.add_argument("--config", required=True, help="Path to YAML config")
     parser.add_argument("--dry-run", action="store_true", help="Print folds without running")
+    parser.add_argument("--separate_runs", action="store_true",
+                        help="Legacy: skip consolidated WandB parent run. Folds "
+                             "log to whatever run run_training happens to create.")
+    parser.add_argument("--run_name_prefix", default="wf",
+                        help="WandB run name prefix (default: 'wf')")
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -208,11 +215,63 @@ def main():
         logger.error("No folds generated! Check date range and splitter config.")
         sys.exit(1)
 
+    # ------------------------------------------------------------------
+    # Consolidated WandB parent run — one run covers all folds (S488+).
+    # Each fold's internal wandb.log calls get prefixed win<i>/* via
+    # set_namespace. --separate_runs preserves legacy behavior.
+    # ------------------------------------------------------------------
+    parent_run = None
+    if not args.dry_run and not args.separate_runs:
+        wcfg = config.get("wandb", {}) or {}
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        parent_run = wandb.init(
+            project=wcfg.get("project", "FinRL-Pro-DS"),
+            entity=wcfg.get("entity", "bigcan-chiwin-technology"),
+            name=f"{args.run_name_prefix}_{timestamp}",
+            job_type="walk_forward",
+            tags=list(wcfg.get("tags", []) or []) + ["walk_forward", "consolidated"],
+            config={
+                "experiment": "walk_forward",
+                "n_folds": len(folds),
+                "config_path": str(args.config),
+                "splitter": splitter_cfg,
+            },
+        )
+        logger.info("Parent WandB run: %s", parent_run.url)
+
     # Run each fold
     results = []
     for i, (train_range, val_range, test_range) in enumerate(folds):
+        if parent_run is not None:
+            set_namespace(f"win{i}")
         fold_result = run_fold(i, train_range, val_range, test_range, config, dry_run=args.dry_run)
         results.append(fold_result)
+
+        # Final per-window summary dict logged directly from the driver.
+        if parent_run is not None:
+            summary = {
+                f"win{i}/summary/sharpe": fold_result.get("sharpe"),
+                f"win{i}/summary/max_drawdown": fold_result.get("max_drawdown"),
+                f"win{i}/summary/total_return_pct": fold_result.get("total_return_pct"),
+                f"win{i}/summary/status": fold_result.get("status"),
+            }
+            wandb.log({k: v for k, v in summary.items() if v is not None})
+
+    if parent_run is not None:
+        clear_namespace()
+        # Aggregate summary across all folds (WF-level header metrics).
+        sharpes = [r["sharpe"] for r in results if r.get("sharpe") is not None]
+        dds = [r["max_drawdown"] for r in results if r.get("max_drawdown") is not None]
+        if sharpes:
+            import numpy as _np
+            wandb.summary["wf/sharpe_mean"] = float(_np.mean(sharpes))
+            wandb.summary["wf/sharpe_std"] = float(_np.std(sharpes))
+        if dds:
+            import numpy as _np
+            wandb.summary["wf/max_drawdown_mean"] = float(_np.mean(dds))
+        wandb.summary["wf/n_folds"] = len(results)
+        wandb.summary["wf/n_completed"] = sum(1 for r in results if r.get("status") == "completed")
+        parent_run.finish()
 
     # Print summary
     print_summary(results)

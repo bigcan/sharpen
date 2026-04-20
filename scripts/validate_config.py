@@ -288,6 +288,30 @@ def check_wf(cfg: dict, r: ValidationResult) -> None:
         r.fail("gates.wf_windows < 4 (Protocol v2 §4 stage 3)")
 
 
+def check_wandb_consolidation(cfg: dict, stage: str, r: ValidationResult) -> None:
+    """S488+: multi-process stages must use WandB run consolidation.
+
+    One WandB run per experiment, not per seed/window. See
+    `memory/project_wandb_consolidation_plan.md`. Legacy `run_per_seed` /
+    `run_per_window` keys are rejected outright.
+    """
+    wcfg = cfg.get("wandb", {}) or {}
+    for legacy in ("run_per_seed", "run_per_window", "run_per_worker"):
+        if legacy in wcfg:
+            r.fail(
+                f"wandb.{legacy} is retired (S488 consolidation plan). "
+                f"Remove the key; launchers default to one parent run with "
+                f"seed/window/worker namespaces. Pass --separate_runs to the "
+                f"launcher if you genuinely need the legacy behavior."
+            )
+    if stage in ("l1-multiseed", "wf") and wcfg.get("consolidate") is False:
+        r.fail(
+            f"wandb.consolidate=false is not supported for stage '{stage}' "
+            f"(S488). Remove the key or set true; use launcher flag "
+            f"--separate_runs for one-off debugging."
+        )
+
+
 def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
     """Stage 5 live-config requirements (S468 + S470)."""
     risk = cfg.get("risk", {})
@@ -315,6 +339,7 @@ def validate(config_path: Path, stage: str) -> ValidationResult:
     check_no_hindsight_outside_hpo(cfg, stage, r)
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)
+    check_wandb_consolidation(cfg, stage, r)
 
     for check in STAGE_CHECKS[stage]:
         check(cfg, r)
