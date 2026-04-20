@@ -1,15 +1,17 @@
 #!/usr/bin/env python
-"""Queue GMGP1 XAUUSD + BTC + Funding-Arb DSAC re-HPOs after SG-1 completes.
+"""Queue SG-1 BTC + GMGP1 XAUUSD + BTC + Funding-Arb DSAC re-HPOs after SG-1 XAUUSD.
 
 Pipeline:
-    1. Poll SG-1 Optuna study until target_trials completed.
-    2. Refresh `agents.sac:` block of `configs/gmgp1_xauusd_ftmo_hpo.yaml` from
-       SG-1 best trial params (writes `.bak` copy of original).
-    3. Re-validate refreshed XAUUSD config (protocol v2).
-    4. Launch `distributed_hpo_coordinator.py` for XAUUSD; wait for exit.
-    5. Launch `distributed_hpo_coordinator.py` for BTC; wait for exit.
-    6. Launch `distributed_hpo_coordinator.py` for Funding-Arb DSAC re-HPO.
-       (S485: queued after wl7ir7ia killed — 199h/6 trials/BUG-01/monolithic.)
+    1.  Poll SG-1 XAUUSD Optuna study until target_trials completed.
+    1.5 Launch `distributed_hpo_coordinator.py` for SG-1 BTC Velotrade; wait.
+        (S486: queued here so SG-1 fleet is re-used before GMGP1 seed-refresh.)
+    2.  Refresh `agents.sac:` block of `configs/gmgp1_xauusd_ftmo_hpo.yaml` from
+        SG-1 XAUUSD best trial params (writes `.bak` copy of original).
+    3.  Re-validate refreshed XAUUSD config (protocol v2).
+    4.  Launch `distributed_hpo_coordinator.py` for GMGP1 XAUUSD; wait.
+    5.  Launch `distributed_hpo_coordinator.py` for GMGP1 BTC; wait.
+    6.  Launch `distributed_hpo_coordinator.py` for Funding-Arb DSAC re-HPO.
+        (S485: queued after wl7ir7ia killed — 199h/6 trials/BUG-01/monolithic.)
 
 Usage (all default launches on GPUHub with 6 workers):
     python scripts/queue_post_sg1_rehpo.py \\
@@ -17,9 +19,10 @@ Usage (all default launches on GPUHub with 6 workers):
         --db_url "$DISTRIBUTED_HPO_DB_URL"
 
 Skip flags for partial resumption:
-    --skip_wait          # SG-1 already done
+    --skip_wait          # SG-1 XAUUSD already done
+    --skip_sg1_btc       # skip SG-1 BTC Velotrade re-HPO (stage 1.5)
     --skip_refresh       # config already seed-refreshed
-    --skip_xauusd        # jump to BTC
+    --skip_xauusd        # jump to GMGP1 BTC
     --skip_btc           # skip GMGP1 BTC
     --skip_funding_arb   # skip funding-arb stage (default: disabled,
                          #   audit pre-req blocks auto-launch)
@@ -37,8 +40,12 @@ import subprocess
 import sys
 import time
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
+
+if TYPE_CHECKING:
+    import optuna
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
@@ -196,6 +203,8 @@ def main() -> int:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--sg1_study", default="sg1_xauusd_ftmo_rehpo_20260419")
     p.add_argument("--sg1_target_trials", type=int, default=50)
+    p.add_argument("--sg1_btc_study", default="sg1_btc_velotrade_rehpo_20260420")
+    p.add_argument("--sg1_btc_trials", type=int, default=50)
     p.add_argument("--xauusd_study", default="gmgp1_xauusd_ftmo_rehpo_20260419")
     p.add_argument("--xauusd_trials", type=int, default=30)
     p.add_argument("--btc_study", default="gmgp1_btc_velotrade_rehpo_20260419")
@@ -209,6 +218,7 @@ def main() -> int:
     p.add_argument("--db_url", default=os.environ.get("DISTRIBUTED_HPO_DB_URL"),
                    help="Optuna Postgres URL (defaults to $DISTRIBUTED_HPO_DB_URL)")
     p.add_argument("--skip_wait", action="store_true")
+    p.add_argument("--skip_sg1_btc", action="store_true")
     p.add_argument("--skip_refresh", action="store_true")
     p.add_argument("--skip_xauusd", action="store_true")
     p.add_argument("--skip_btc", action="store_true")
@@ -224,13 +234,15 @@ def main() -> int:
         logger.error("--db_url required (or set DISTRIBUTED_HPO_DB_URL)")
         return 2
 
+    sg1_btc_cfg = PROJECT_ROOT / "configs" / "sg1_btc_velotrade_hpo.yaml"
+    sg1_btc_dhpo = PROJECT_ROOT / "configs" / "dhpo_sg1_btc_velotrade.yaml"
     xauusd_cfg = PROJECT_ROOT / "configs" / "gmgp1_xauusd_ftmo_hpo.yaml"
     xauusd_dhpo = PROJECT_ROOT / "configs" / "dhpo_gmgp1_xauusd_ftmo.yaml"
     btc_cfg = PROJECT_ROOT / "configs" / "gmgp1_btc_velotrade_hpo.yaml"
     btc_dhpo = PROJECT_ROOT / "configs" / "dhpo_gmgp1_btc_velotrade.yaml"
     fa_cfg = PROJECT_ROOT / "configs" / "funding_arb_dsac_10assets_rehpo.yaml"
     fa_dhpo = PROJECT_ROOT / "configs" / "dhpo_funding_arb_dsac.yaml"
-    for f in (xauusd_cfg, xauusd_dhpo, btc_cfg, btc_dhpo, fa_cfg, fa_dhpo):
+    for f in (sg1_btc_cfg, sg1_btc_dhpo, xauusd_cfg, xauusd_dhpo, btc_cfg, btc_dhpo, fa_cfg, fa_dhpo):
         if not f.exists():
             logger.error("missing required config: %s", f)
             return 2
@@ -243,6 +255,19 @@ def main() -> int:
         )
     else:
         logger.info("skip_wait: assuming SG-1 already complete")
+
+    # Stage 1.5: SG-1 BTC Velotrade re-HPO (queued immediately after SG-1 XAUUSD).
+    # Runs before the GMGP1 seed-refresh so the SG-1 XAUUSD best-trial payload is
+    # untouched as donor for stage 2. Seeding cross-asset (XAUUSD→BTC) is NOT done
+    # here — SG-1 BTC has its own broad search per sg1_btc_velotrade_hpo.yaml.
+    if not args.skip_sg1_btc:
+        run_coordinator(
+            config=sg1_btc_cfg, dhpo_overlay=sg1_btc_dhpo,
+            study_name=args.sg1_btc_study, n_trials=args.sg1_btc_trials,
+            n_workers=args.n_workers, db_url=args.db_url, dry_run=args.dry_run,
+        )
+    else:
+        logger.info("skip_sg1_btc: skipping SG-1 BTC Velotrade coordinator")
 
     # Stage 2: seed-refresh XAUUSD
     if not args.skip_refresh:

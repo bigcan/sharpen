@@ -1,0 +1,63 @@
+# Distributed HPO overlay — SG-1 BTC Velotrade re-HPO (S486, queued after SG-1 XAUUSD)
+# Extends configs/distributed_hpo.yaml with workstream-specific data files.
+# Launch (auto via scripts/queue_post_sg1_rehpo.py stage 1.5, or manual):
+#   set -a; source .env; set +a
+#   python scripts/distributed_hpo_coordinator.py \
+#     --config configs/sg1_btc_velotrade_hpo.yaml \
+#     --platform gpuhub \
+#     --n_workers 6 --n_trials 50 \
+#     --db_url "$DISTRIBUTED_HPO_DB_URL" \
+#     --study_name sg1_btc_velotrade_rehpo_20260420 \
+#     --distributed_config configs/dhpo_sg1_btc_velotrade.yaml \
+#     --resume
+
+distributed_hpo:
+  platform: "gpuhub"
+  n_workers: 6
+  n_trials: 50
+
+  storage:
+    backend: "postgresql"
+    url: "${DISTRIBUTED_HPO_DB_URL}"
+    heartbeat_interval: 60
+    grace_period: 600
+    max_retry: 1
+
+  # 3 replicas per GPU — matches SG-1 XAUUSD overlay pattern (S481).
+  # Expected post-SG-1-XAUUSD completion: gpuhub-1:0, gpuhub-2:0 free.
+  gpuhub:
+    instances:
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-2:0"
+      - "gpuhub-2:0"
+      - "gpuhub-2:0"
+
+  worker:
+    target_trials: null
+    trial_timeout: 7200
+    graceful_shutdown_timeout: 60
+    pip_extras: ""
+
+  data:
+    upload_method: "sftp"
+    data_files:
+      - "btc_usdt_1min_bybit.parquet"
+      - "btc_usdt_1min_bybit.manifest.json"
+    cache_by_size: true
+
+  wandb:
+    entity: "bigcan-chiwin-technology"
+    project: "FinRL-Pro-DS"
+    group_prefix: "dhpo"
+    tags: ["distributed_hpo", "sg-1", "BTC", "velotrade", "re-hpo", "steady-state"]
+
+  fault_tolerance:
+    max_worker_retries: 2
+    worker_replace_on_death: false
+    monitor_poll_interval: 300
+
+  cost:
+    # max_total_spend omitted — GPUHub slots are prepaid; no $ cap needed
+    auto_teardown: false
