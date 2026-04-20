@@ -1111,11 +1111,15 @@ def main():
     wandb_entity = wcfg.get("entity", "bigcan-chiwin-technology")
     wandb_project = wcfg.get("project", "FinRL-Pro-DS")
     wandb_run_id = wandb.util.generate_id()
+    # Name format matches multiseed + WF: <prefix>_<YYYYMMDD_HHMMSS>.
+    # `group=study_name` is the cross-run semantic ID (stable across
+    # --resume); `name` is the per-invocation display label.
+    dhpo_timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     parent_run = wandb.init(
         id=wandb_run_id,
         entity=wandb_entity,
         project=wandb_project,
-        name=args.study_name,
+        name=f"{args.study_name}_{dhpo_timestamp}",
         group=wandb_group,
         job_type="dhpo_study",
         tags=list(wcfg.get("tags", []) or []) + ["dhpo", "consolidated"],
