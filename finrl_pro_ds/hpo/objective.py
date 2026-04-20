@@ -8,6 +8,7 @@ functionally identical to the inline objective previously defined inside
 import copy
 import gc
 import logging
+import os
 
 import numpy as np
 import optuna
@@ -343,15 +344,21 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                               config["env"].get("num_envs", 24)), 24)
             env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True)
 
+            # S487 race-fix: trial-unique run_name so co-located replicas
+            # don't clobber each other's checkpoints/sac_run/. Falls back to
+            # a local-only prefix when DHPO_WORKER_ID is unset (serial HPO).
+            _study_name = getattr(trial.study, "study_name", "hpo")
+            _worker_id = os.environ.get("DHPO_WORKER_ID", "local")
+            hpo_run_name = f"{_study_name}/worker_{_worker_id}/trial_{trial.number:04d}"
             if agent_type == "sac":
                 from finrl_pro_ds.training.sac_trainer import SACTrainer
-                trainer = SACTrainer(env, config, device=device, hpo_mode=True)
+                trainer = SACTrainer(env, config, device=device, hpo_mode=True, run_name=hpo_run_name)
             elif agent_type == "ppo":
                 from finrl_pro_ds.training.ppo_trainer import PPOTrainer
-                trainer = PPOTrainer(env, config, device=device, hpo_mode=True)
+                trainer = PPOTrainer(env, config, device=device, hpo_mode=True, run_name=hpo_run_name)
             else:
                 from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
-                trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
+                trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True, run_name=hpo_run_name)
 
             # V4.2: Evaluate on VALIDATION set (anti-overfitting)
             data_cfg = config.get("data", {})

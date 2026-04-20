@@ -26,8 +26,10 @@ from __future__ import annotations
 
 import argparse
 import copy
+import json
 import logging
 import os
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -106,6 +108,10 @@ def run_worker(
         agent_type: Agent type ("sac", "ppo", "iqn", "bdq").
     """
     global _shutdown
+
+    # S487 race-fix: advertise worker identity to the HPO objective so each
+    # trial writes to its own checkpoints/<study>/worker_<id>/trial_<N>/ dir.
+    os.environ["DHPO_WORKER_ID"] = worker_id
 
     # ------------------------------------------------------------------
     # 1. Load config
@@ -191,6 +197,53 @@ def run_worker(
     local_trials_completed = 0
     local_trials_started = 0
 
+    # S487 race-fix: after each committed trial, promote this worker's
+    # best-so-far checkpoint to checkpoints/<study>/best/ and delete the
+    # spent trial dir to keep disk bounded.
+    study_ckpt_root = Path("checkpoints") / study_name
+    worker_ckpt_root = study_ckpt_root / f"worker_{worker_id}"
+    best_ckpt_root = study_ckpt_root / "best"
+
+    def _promote_best_callback(study, frozen_trial):
+        if frozen_trial.state != TrialState.COMPLETE:
+            return
+        trial_dir = worker_ckpt_root / f"trial_{frozen_trial.number:04d}"
+        trial_final = trial_dir / "checkpoint_final.pth"
+        try:
+            # Compare against best-so-far across the whole study (distributed).
+            # If multiple workers' best land on the same trial number, each
+            # local copy is valid; last-write-wins is fine because weights are
+            # identical (same Optuna trial = same training run on one host).
+            try:
+                study_best = study.best_trial
+            except ValueError:
+                study_best = None
+
+            is_global_best = study_best is not None and study_best.number == frozen_trial.number
+            if is_global_best and trial_final.exists():
+                best_ckpt_root.mkdir(parents=True, exist_ok=True)
+                tmp_path = best_ckpt_root / "checkpoint_final.pth.new"
+                shutil.copy2(trial_final, tmp_path)
+                os.replace(tmp_path, best_ckpt_root / "checkpoint_final.pth")
+                manifest = {
+                    "study_name": study_name,
+                    "trial_number": frozen_trial.number,
+                    "value": frozen_trial.value,
+                    "params": frozen_trial.params,
+                    "promoted_by_worker": worker_id,
+                }
+                (best_ckpt_root / "manifest.json").write_text(json.dumps(manifest, indent=2))
+                logger.info(
+                    "Promoted trial %d (PF=%.4f) to %s",
+                    frozen_trial.number, frozen_trial.value or 0.0, best_ckpt_root,
+                )
+            # Clean up this trial's dir regardless (best was already copied)
+            if trial_dir.exists():
+                shutil.rmtree(trial_dir, ignore_errors=True)
+        except Exception as e:  # noqa: BLE001 — cleanup must never kill the run
+            logger.warning("promote-best callback failed for trial %d: %s",
+                           frozen_trial.number, e)
+
     while not _shutdown:
         # Check global progress
         completed_trials = len([
@@ -216,7 +269,12 @@ def run_worker(
         # Run exactly 1 trial, then re-check global progress
         local_trials_started += 1
         try:
-            study.optimize(objective, n_trials=1, gc_after_trial=True)
+            study.optimize(
+                objective,
+                n_trials=1,
+                gc_after_trial=True,
+                callbacks=[_promote_best_callback],
+            )
             local_trials_completed += 1
         except Exception as e:
             logger.error("Trial failed with exception: %s", e)
