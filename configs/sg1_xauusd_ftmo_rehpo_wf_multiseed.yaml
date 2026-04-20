@@ -1,0 +1,181 @@
+# SG-1 XAUUSD FTMO re-HPO — Stage 3 Walk-Forward, ENSEMBLE CONFIRMATION VARIANT
+#
+# Drafted 2026-04-21 (post-S488 ensemble sanity). Retrains top-3 seeds
+# (42, 789, 456) across all WF folds so `scripts/sg1_xauusd_ensemble_eval.py`
+# can evaluate `ens_agreement` (+ 3 solo baselines + 3 other rules) on held-out
+# fold test windows.
+#
+# Upstream:
+#   - Stage 2 L1 multiseed PASS @ N=10 (median PF 2.706, CV 7.73%)
+#   - In-sample ensemble eval on L1 test: `ens_agreement` PF 3.455 (+29% over
+#     best solo 2.680), tightest intraday DD 0.34% — see
+#     `project_sg1_xauusd_ensemble_s488.md`.
+#
+# Gate (pre-committed, lives in configs/sg1_xauusd_ensemble.gates.yaml):
+#   G1 Solo baseline  : >=2/3 seeds PF>=1.1 per fold in >=5/6 folds
+#   G2 No regression  : per-fold ens_PF >= 0.9 * best_solo_PF in >=5/6 folds
+#   G3 Uplift         : median ens_PF / median best_solo_PF >= 1.10
+#   G4 FTMO           : ensemble trajectory per-fold: dd buffers >=0.5pp + PASS
+#   G5 DD stability   : CV(ens_PF) across folds <= 0.35
+#   ALL PASS -> approve paper aggregation; ANY FAIL -> solo-best remains
+#
+# Launch (per seed; check `run_walk_forward.py` seed-aware run_name patch first):
+#   python scripts/run_walk_forward.py \
+#       --config configs/sg1_xauusd_ftmo_rehpo_wf_multiseed.yaml \
+#       --run_name_prefix sg1-xauusd-wf-ensemble-seed42 \
+#       --seed 42
+#   (repeat for 789, 456; gpuhub-2:gpu0 per S488 fleet rule)
+#
+# BLOCKER: Q1 2026 1-min XAU data build. `validate_config --stage wf` will
+# FAIL until `gc_2025_2026q1_lob1_1min_stitched.parquet` exists with <90d recency.
+# Same blocker as `project_sg1_xauusd_l1_multiseed_s488.md` and
+# `project_paper_checkpoints_q1_2026_blindspot.md`.
+
+data:
+  # Path to be updated to the 2025+Q1_2026 stitched file when build completes.
+  # Current (2025-only) file path left so validate_config can run schema-check;
+  # recency gate will still FAIL until Q1 2026 appended.
+  file_path: "data/cme/gc_2025_2026q1_lob1_1min_stitched.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  # 6-fold coverage (Aug 2025 through Mar 2026 test windows) once data lands:
+  #   fold 0: train Jan–Jun 2025  val Jul 2025  test Aug 2025
+  #   fold 1: train Feb–Jul 2025  val Aug 2025  test Sep 2025
+  #   fold 2: train Mar–Aug 2025  val Sep 2025  test Oct 2025
+  #   fold 3: train Apr–Sep 2025  val Oct 2025  test Nov 2025
+  #   fold 4: train May–Oct 2025  val Nov 2025  test Dec 2025
+  #   fold 5: train Jun–Nov 2025  val Dec 2025  test Jan–Mar 2026 (3 mo combined)
+  # Splitter with test_months=1 and step_months=1 yields 6 folds if end_date
+  # reaches 2026-03-31. For fold 5 we may need test_months=3 — decide at launch.
+  start_date: "2025-01-06"
+  end_date: "2026-03-31"
+
+splitter:
+  train_months: 6
+  val_months: 1
+  test_months: 1
+  step_months: 1
+  buffer_days: 0
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235                 # steady-state (S464)
+  deadband_threshold: 0.35            # trial 56 + ensemble agreement classifier basis
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.009270901804613313     # trial 56
+    dsr_scale: 1.0
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.03
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Trial 56 HPs — identical to L1 multiseed + Stage-3 WF base config
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000             # apples-to-apples with L1 + _wf.yaml
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+  # seed: set per-run via CLI (--seed N); plan sweeps top-3 [42, 789, 456]
+
+hpo:
+  enabled: false
+
+# Ensemble metadata — consumed by scripts/sg1_xauusd_ensemble_eval.py --wf_config
+ensemble:
+  seeds: [42, 789, 456]                # top-3 from L1 multiseed (S488)
+  # Checkpoint path pattern resolved after run_walk_forward.py seed-aware patch.
+  # Glob form (one of these matches each fold*seed combo):
+  checkpoint_pattern: "checkpoints/WF_seed{seed}_fold_{fold:02d}_*/checkpoint_final.pth"
+  # Aggregation rules evaluated per fold (subset of RULES in the eval script):
+  rules: ["solo_42", "solo_789", "solo_456",
+          "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
+  # Pointer to pre-committed gate YAML:
+  gates_file: "configs/sg1_xauusd_ensemble.gates.yaml"
+
+gates:                                # Protocol v2 §4 Stage 3 (training-level)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  wf_windows: 4                       # validator requires >=4; config emits 6
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                   # one parent run per seed; folds as win<i>/*
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "rehpo-trial56", "walk_forward", "wf-stage3", "ensemble",
+         "ensemble-confirm", "steady-state",
+         "upstream:sg1_xauusd_ftmo_rehpo_l1_multiseed"]

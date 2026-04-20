@@ -44,7 +44,8 @@ def load_config(path: str) -> dict:
 # Fold Runner
 # ---------------------------------------------------------------------------
 
-def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dry_run: bool = False):
+def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dry_run: bool = False,
+             seed: int | None = None):
     """
     Execute a single walk-forward fold:
       1. Train agent on train_range
@@ -91,9 +92,18 @@ def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dr
         fold_config["data"]["test_end_date"] = str(test_range[1])
 
         # Run training
-        run_name = f"WF_{fold_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Include seed when set so multiseed WF checkpoint dirs
+        # (checkpoints/<run_name>/checkpoint_final.pth) don't collide.
+        prefix = f"WF_seed{seed}" if seed is not None else "WF"
+        run_name = f"{prefix}_{fold_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         device = fold_config.get("agent", {}).get("device", "cuda")
-        checkpoint_path = run_training(fold_config, run_name, device)
+        # Agent type defaults to 'bdq' in run_training. For modern configs
+        # that key the agent under `agents.<type>`, pick that key so SAC /
+        # DSAC / PPO configs train the right model.
+        agent_type = (fold_config.get("agent_type")
+                      or next(iter(fold_config.get("agents", {}).keys()), "bdq"))
+        checkpoint_path = run_training(fold_config, run_name, device,
+                                       agent_type=agent_type)
 
         # ------------------------------------------------------------------
         # Phase 2: Backtest on test range
@@ -106,6 +116,7 @@ def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dr
                 start_date=str(test_range[0]),
                 end_date=str(test_range[1]),
                 prefix=f"wf_{fold_id}",
+                agent_type=agent_type,
             )
         else:
             logger.warning(f"  No checkpoint found for {fold_id}, skipping backtest")
@@ -184,12 +195,26 @@ def main():
                              "log to whatever run run_training happens to create.")
     parser.add_argument("--run_name_prefix", default="wf",
                         help="WandB run name prefix (default: 'wf')")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Global random seed (torch, numpy, random). Applied once at startup.")
     args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
     )
+
+    if args.seed is not None:
+        import random as _random
+
+        import numpy as _np
+        import torch as _torch
+        _torch.manual_seed(args.seed)
+        _np.random.seed(args.seed)
+        _random.seed(args.seed)
+        if _torch.cuda.is_available():
+            _torch.cuda.manual_seed_all(args.seed)
+        logger.info(f"Global seed set: {args.seed}")
 
     config = load_config(args.config)
 
@@ -241,10 +266,16 @@ def main():
 
     # Run each fold
     results = []
-    for i, (train_range, val_range, test_range) in enumerate(folds):
+    for i, fold in enumerate(folds):
+        # splitter.split() returns list[dict[str, TimeRange]]; unpack explicitly
+        # so we don't iterate dict keys.
+        train_range = fold["train"].to_tuple()
+        val_range = fold["val"].to_tuple()
+        test_range = fold["test"].to_tuple()
         if parent_run is not None:
             set_namespace(f"win{i}")
-        fold_result = run_fold(i, train_range, val_range, test_range, config, dry_run=args.dry_run)
+        fold_result = run_fold(i, train_range, val_range, test_range, config,
+                               dry_run=args.dry_run, seed=args.seed)
         results.append(fold_result)
 
         # Final per-window summary dict logged directly from the driver.
