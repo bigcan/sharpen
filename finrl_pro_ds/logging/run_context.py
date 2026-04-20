@@ -1,16 +1,27 @@
 """WandB run consolidation — shared-run-id + per-namespace metrics.
 
-When a launcher (multiseed, walk-forward, eventually DHPO coordinator) sets
-`FINRL_WANDB_RUN_ID` and `FINRL_WANDB_NAMESPACE` in a child process's env,
-that child attaches to the same WandB run via `resume="allow"` and all its
-`wandb.log(...)` calls get prefixed with `<namespace>/` transparently.
+When a launcher (multiseed, walk-forward, DHPO coordinator) sets
+`FINRL_WANDB_RUN_ID` in a child process's env, that child attaches to the
+same WandB run via `resume="allow"`. If `FINRL_WANDB_NAMESPACE` is also set,
+all `wandb.log(...)` calls get prefixed with `<namespace>/` transparently.
+When only `FINRL_WANDB_RUN_ID` is set (DHPO worker case), the child attaches
+without prefixing; the caller rotates namespaces per unit (e.g., per Optuna
+trial via `trial_namespaced`).
 
 Per-namespace `_step` via `wandb.define_metric` avoids step collisions between
 concurrent child processes logging to the same run.
 
 Standalone fallback: if the env vars are absent, `init_wandb` behaves like a
 plain `wandb.init` — no monkey-patching, no namespace — so scripts remain
-runnable outside the consolidated launcher.
+runnable outside the consolidated launcher. `group` / `job_type` pass through
+only in this mode (consolidated children inherit from the parent run).
+
+**Thread-safety caveat:** `_namespaced_log` reads/updates a module-global
+`_state` dict without a lock. The per-namespace counter increment is a
+read-modify-write. Safe today because every FinRL trainer logs from the
+main training-loop thread only (verified in S488 round-2 audit). If a
+future trainer calls `wandb.log` from background threads concurrently,
+add a `threading.Lock` around `_state` mutation.
 
 See `memory/project_wandb_consolidation_plan.md` (S488) for design rationale.
 """
@@ -116,11 +127,37 @@ def clear_namespace() -> None:
     _state["namespace"] = None
 
 
+def trial_namespaced(objective_fn):
+    """Decorator — wraps an Optuna objective in set_namespace/clear_namespace.
+
+    Each trial runs under its own `hpo/t<trial.number>/` namespace; all
+    `wandb.log` calls inside the objective (including trainer-internal
+    logs) get prefixed automatically. Keys already starting with
+    `hpo/t<N>/` pass through unchanged (idempotency rule in _namespaced_log).
+
+    Usage — in an HPO objective factory:
+
+        def make_objective(...):
+            def objective(trial):
+                ...
+            return trial_namespaced(objective)
+    """
+    def wrapper(trial):
+        set_namespace(f"hpo/t{trial.number}")
+        try:
+            return objective_fn(trial)
+        finally:
+            clear_namespace()
+    return wrapper
+
+
 def init_wandb(
     config: Mapping[str, Any],
     fallback_name: str,
     tags: list[str] | None = None,
     extra_config: Mapping[str, Any] | None = None,
+    group: str | None = None,
+    job_type: str | None = None,
 ) -> NamespacedRun | None:
     """Initialize WandB — consolidated-child or standalone depending on env.
 
@@ -128,24 +165,28 @@ def init_wandb(
     ----------
     config:
         Full YAML-loaded config dict. We read `config["wandb"]` for
-        `project`, `entity`, `tags`. Everything else is passed as run config.
+        `project`, `entity`, `tags`. Everything else is passed as run config
+        in standalone mode.
     fallback_name:
         Run name when this process is NOT a consolidated child. Ignored in
         consolidated mode (the parent owns the run's name).
     tags:
-        Extra tags appended to those in `config["wandb"]["tags"]`.
+        Extra tags appended to those in `config["wandb"]["tags"]` (standalone
+        mode only; consolidated children inherit tags from parent).
     extra_config:
         Extra key/values merged into WandB run config (standalone mode only).
+    group, job_type:
+        WandB group / job_type (standalone mode only). Consolidated children
+        inherit these from the parent run the coordinator created.
 
     Returns
     -------
-    NamespacedRun if consolidated child, else None. Either way, `wandb.run`
-    is set and `wandb.log(...)` works.
+    NamespacedRun if consolidated child *with* namespace, else None.
+    Either way, `wandb.run` is set after return and `wandb.log(...)` works.
     """
     wandb_cfg = (config.get("wandb") or {}) if isinstance(config, Mapping) else {}
     project = wandb_cfg.get("project", "FinRL-Pro-DS")
     entity = wandb_cfg.get("entity", "bigcan-chiwin-technology")
-    all_tags = list(wandb_cfg.get("tags", []) or []) + list(tags or [])
 
     run_id = parent_run_id()
     namespace = os.environ.get(ENV_NAMESPACE)
@@ -161,24 +202,40 @@ def init_wandb(
         set_namespace(namespace)
         return NamespacedRun(namespace=namespace)
 
-    if run_id and not namespace:
-        logger.warning(
-            "%s is set but %s is missing — falling back to standalone mode. "
-            "Child processes must set both to join a consolidated run.",
-            ENV_RUN_ID, ENV_NAMESPACE,
+    if run_id:
+        # Attach-only — caller rotates namespace per unit (e.g., DHPO trial).
+        logger.info(
+            "WandB attach-only — run_id=%s (namespace rotated per-unit via "
+            "set_namespace)", run_id,
         )
+        wandb.init(
+            id=run_id,
+            resume="allow",
+            project=project,
+            entity=entity,
+        )
+        return None
 
+    # Standalone mode — compute run.config and tags only here to keep the
+    # consolidated branches cheap.
+    all_tags = list(wandb_cfg.get("tags", []) or []) + list(tags or [])
     run_config: dict[str, Any] = dict(config) if isinstance(config, Mapping) else {}
     if extra_config:
         run_config.update(extra_config)
 
-    wandb.init(
-        project=project,
-        entity=entity,
-        name=fallback_name,
-        tags=all_tags,
-        config=run_config,
-    )
+    init_kwargs: dict[str, Any] = {
+        "project": project,
+        "entity": entity,
+        "name": fallback_name,
+        "tags": all_tags,
+        "config": run_config,
+    }
+    if group is not None:
+        init_kwargs["group"] = group
+    if job_type is not None:
+        init_kwargs["job_type"] = job_type
+
+    wandb.init(**init_kwargs)
     return None
 
 

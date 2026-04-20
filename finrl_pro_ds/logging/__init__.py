@@ -5,6 +5,7 @@ from finrl_pro_ds.logging.run_context import (
     is_consolidated,
     parent_run_id,
     set_namespace,
+    trial_namespaced,
 )
 
 __all__ = [
@@ -14,4 +15,5 @@ __all__ = [
     "is_consolidated",
     "parent_run_id",
     "set_namespace",
+    "trial_namespaced",
 ]

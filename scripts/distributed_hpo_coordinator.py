@@ -22,6 +22,7 @@ Usage:
 """
 
 import argparse
+import atexit
 import json
 import logging
 import os
@@ -35,6 +36,7 @@ import zipfile
 from datetime import datetime
 from pathlib import Path
 
+import wandb
 import yaml
 
 # ---------------------------------------------------------------------------
@@ -441,6 +443,7 @@ def deploy_to_worker(
     wandb_group: str,
     dist_config: dict,
     agent_type: str = "sac",
+    wandb_run_id: str | None = None,
 ) -> bool:
     """Deploy code and launch distributed_hpo_worker.py on a single worker.
     Returns True on success."""
@@ -547,6 +550,13 @@ def deploy_to_worker(
         ]
         if wandb_key:
             export_lines.append(f"export WANDB_API_KEY={shlex.quote(wandb_key)}")
+        if wandb_run_id:
+            # S488 round-2 consolidation: worker attaches to coordinator's
+            # parent run via init_wandb(). Namespace rotates per-trial inside
+            # the objective — we do NOT set FINRL_WANDB_NAMESPACE here.
+            export_lines.append(
+                f"export FINRL_WANDB_RUN_ID={shlex.quote(wandb_run_id)}"
+            )
 
         # `< /dev/null > log 2>&1 &` keeps the python child detached from the
         # SSH channel so bash exits cleanly. Even so, paramiko's stdout.read()
@@ -882,15 +892,21 @@ def run_monitor_loop(
                 return None
 
         # --- WandB health (optional) ---
+        # Under S488 consolidation the study has ONE parent run (workers attach
+        # via resume=allow); a `group=study_name` query therefore returns 1,
+        # which was previously misread as "1 worker alive". Query by tag to
+        # get the real count of worker attach-sessions. Best-effort.
         try:
-            import wandb
             api = wandb.Api()
             runs = api.runs(
                 f"{wandb_entity}/{wandb_project}",
-                filters={"group": study_name, "state": "running"},
+                filters={"tags": study_name, "state": "running"},
             )
             wandb_running = len(list(runs))
-            logger.info("WandB: %d runs active in group '%s'", wandb_running, study_name)
+            logger.info(
+                "WandB: %d run session(s) active tagged '%s' (1 = parent only)",
+                wandb_running, study_name,
+            )
         except Exception:
             pass  # WandB check is best-effort
 
@@ -1084,6 +1100,49 @@ def main():
     data_files = dist_config.get("data_files", [])
     launch_delay = dist_config.get("worker_launch_delay", 5)
 
+    # ------------------------------------------------------------------
+    # Parent WandB run (S488 round-2 consolidation)
+    # ------------------------------------------------------------------
+    # One run per study. Workers attach via FINRL_WANDB_RUN_ID +
+    # init_wandb() in attach-only mode; per-trial namespace is set inside
+    # the Optuna objective. Group is retained so historical `--group`
+    # filters keep working in the UI.
+    wcfg = base_config.get("wandb", {}) or {}
+    wandb_entity = wcfg.get("entity", "bigcan-chiwin-technology")
+    wandb_project = wcfg.get("project", "FinRL-Pro-DS")
+    wandb_run_id = wandb.util.generate_id()
+    parent_run = wandb.init(
+        id=wandb_run_id,
+        entity=wandb_entity,
+        project=wandb_project,
+        name=args.study_name,
+        group=wandb_group,
+        job_type="dhpo_study",
+        tags=list(wcfg.get("tags", []) or []) + ["dhpo", "consolidated"],
+        config={
+            "experiment": "dhpo",
+            "study_name": args.study_name,
+            "n_workers": len(running_workers),
+            "n_trials": args.n_trials,
+            "agent_type": agent_type,
+            "platform": args.platform,
+            "config_path": args.config,
+        },
+    )
+    logger.info("Parent WandB run: %s (id=%s)", parent_run.url, wandb_run_id)
+
+    # Crash-safety (F7 audit fix): if main() exits via KeyboardInterrupt or an
+    # unhandled exception before reaching the explicit wandb.finish() below,
+    # this atexit hook closes the run so WandB doesn't hold it in "running"
+    # until the stale-run GC kicks in. Idempotent with the explicit finish.
+    def _finish_parent_on_exit():
+        if wandb.run is not None:
+            try:
+                wandb.finish()
+            except Exception:
+                pass
+    atexit.register(_finish_parent_on_exit)
+
     for i, worker in enumerate(running_workers):
         success = deploy_to_worker(
             worker=worker,
@@ -1096,6 +1155,7 @@ def main():
             wandb_group=wandb_group,
             dist_config=dist_config,
             agent_type=agent_type,
+            wandb_run_id=wandb_run_id,
         )
         if success:
             dph = worker.get("dph", 0.0)
@@ -1117,6 +1177,13 @@ def main():
     if not deployed:
         logger.error("No workers deployed successfully. Aborting.")
         _cleanup_zip(zip_path)
+        # Close parent run cleanly so WandB doesn't leave a ghost "running" run
+        # (F4 audit fix). Tag exit_code=1 so the crashed-run view picks it up.
+        if wandb.run is not None:
+            try:
+                wandb.finish(exit_code=1)
+            except Exception as _e:  # pragma: no cover
+                logger.warning("wandb.finish(exit_code=1) raised: %s", _e)
         sys.exit(1)
 
     # =========================================================================
@@ -1207,6 +1274,15 @@ def main():
 
     # Cleanup local zip
     _cleanup_zip(zip_path)
+
+    # Finish parent WandB run (workers keep their own sessions open until
+    # they exit; they attach via resume="allow" so their logs continue to
+    # land on the same run even after coordinator finishes).
+    if wandb.run is not None:
+        try:
+            wandb.finish()
+        except Exception as _e:  # pragma: no cover — best-effort cleanup
+            logger.warning("wandb.finish() raised: %s", _e)
 
     logger.info("Coordinator finished.")
 

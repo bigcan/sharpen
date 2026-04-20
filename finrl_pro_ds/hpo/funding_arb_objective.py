@@ -25,6 +25,8 @@ import optuna
 import torch
 import wandb
 
+from finrl_pro_ds.logging import trial_namespaced
+
 logger = logging.getLogger("FinRL.HPO.FundingArb")
 
 # Module-level data cache — prepare_data makes a ccxt fetch that is slow and
@@ -327,4 +329,5 @@ def make_funding_arb_objective(
                         pass
             gc.collect()
 
-    return objective
+    # S488 round-2: trial_namespaced wraps per-trial namespace management.
+    return trial_namespaced(objective)
