@@ -370,11 +370,46 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
     return verdict
 
 
+def _require_gate(gates: dict, gate_name: str) -> dict:
+    """Strict access to a gate block. Raises with a clear message if missing.
+
+    Project rule (CLAUDE.md anti-patterns): never hardcode gate thresholds in code
+    or scripts. The gates YAML is the single source of truth — a missing block
+    is a configuration error, not a fall-back-to-default situation.
+    """
+    if gate_name not in gates:
+        raise ValueError(
+            f"Gate block '{gate_name}' missing from gates YAML. "
+            f"All gate thresholds must be defined in configs/<workstream>.gates.yaml. "
+            f"Refusing to fall back to a hardcoded default (CLAUDE.md anti-pattern)."
+        )
+    return gates[gate_name]
+
+
+def _require_field(gate_dict: dict, field: str, gate_name: str):
+    """Strict access to a numeric/typed field within a gate block."""
+    if field not in gate_dict:
+        raise ValueError(
+            f"Gate '{gate_name}' is missing required field '{field}'. "
+            f"Add it to configs/<workstream>.gates.yaml; do not rely on code defaults."
+        )
+    return gate_dict[field]
+
+
 def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[str],
                     gates_cfg: dict, seeds: List[int]) -> dict:
-    """Compute G1..G5 gate outcomes and aggregate verdict."""
+    """Compute G1..G5 gate outcomes and aggregate verdict.
+
+    All threshold values must be present in the gates YAML — missing values raise
+    rather than silently falling back to a hardcoded default (CLAUDE.md anti-pattern
+    "Never hardcode gate thresholds in code or scripts").
+    """
     gates = gates_cfg.get("gates", {})
-    agg_rule = gates_cfg.get("aggregation_rule", "ens_agreement")
+    if not gates:
+        raise ValueError("gates_cfg has no 'gates' block — cannot evaluate.")
+    if "aggregation_rule" not in gates_cfg:
+        raise ValueError("gates_cfg missing top-level 'aggregation_rule'.")
+    agg_rule = gates_cfg["aggregation_rule"]
     wf_folds_expected = gates_cfg.get("wf_folds", len(per_fold_metrics))
 
     completed = [fm for fm, s in zip(per_fold_metrics, fold_status) if s == "ok" and fm]
@@ -405,10 +440,10 @@ def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[s
         return fm.get(agg_rule, {}).get("pf_bar")
 
     # G1: solo baseline
-    g1 = gates.get("g1_solo_baseline", {})
-    pf_floor = g1.get("pf_floor", 1.1)
-    seeds_pass_min = g1.get("seeds_pass_min", 2)
-    g1_min_folds = g1.get("min_folds_pass", 5)
+    g1 = _require_gate(gates, "g1_solo_baseline")
+    pf_floor = _require_field(g1, "pf_floor", "g1_solo_baseline")
+    seeds_pass_min = _require_field(g1, "seeds_pass_min", "g1_solo_baseline")
+    g1_min_folds = _require_field(g1, "min_folds_pass", "g1_solo_baseline")
     g1_passing_folds = 0
     for fm in completed:
         passes = sum(1 for s in seeds
@@ -422,9 +457,9 @@ def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[s
     }
 
     # G2: no regression
-    g2 = gates.get("g2_no_regression", {})
-    ratio_min = g2.get("ens_ratio_min", 0.90)
-    g2_min_folds = g2.get("min_folds_pass", 5)
+    g2 = _require_gate(gates, "g2_no_regression")
+    ratio_min = _require_field(g2, "ens_ratio_min", "g2_no_regression")
+    g2_min_folds = _require_field(g2, "min_folds_pass", "g2_no_regression")
     g2_passing_folds = 0
     for fm in completed:
         bs, en = best_solo_pf(fm), ens_pf(fm)
@@ -439,8 +474,8 @@ def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[s
     }
 
     # G3: uplift
-    g3 = gates.get("g3_uplift", {})
-    uplift_min = g3.get("uplift_ratio_min", 1.10)
+    g3 = _require_gate(gates, "g3_uplift")
+    uplift_min = _require_field(g3, "uplift_ratio_min", "g3_uplift")
     med_ens = float(np.median([ens_pf(fm) for fm in completed if ens_pf(fm) is not None]))
     med_best = float(np.median([best_solo_pf(fm) for fm in completed if best_solo_pf(fm) is not None]))
     uplift = med_ens / med_best if med_best > 0 else 0.0
@@ -453,10 +488,10 @@ def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[s
     }
 
     # G4: FTMO compliance per fold
-    g4 = gates.get("g4_ftmo_compliance", {})
-    dd_buf_min = g4.get("daily_dd_buffer_pp_min", 0.5)
-    tr_buf_min = g4.get("trailing_dd_buffer_pp_min", 0.5)
-    g4_min_folds = g4.get("min_folds_pass", len(completed))
+    g4 = _require_gate(gates, "g4_ftmo_compliance")
+    dd_buf_min = _require_field(g4, "daily_dd_buffer_pp_min", "g4_ftmo_compliance")
+    tr_buf_min = _require_field(g4, "trailing_dd_buffer_pp_min", "g4_ftmo_compliance")
+    g4_min_folds = _require_field(g4, "min_folds_pass", "g4_ftmo_compliance")
     g4_passing_folds = 0
     for fm in completed:
         em = fm.get(agg_rule, {})
@@ -474,8 +509,8 @@ def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[s
     }
 
     # G5: DD stability (CV of ensemble PF across folds)
-    g5 = gates.get("g5_dd_stability", {})
-    cv_max = g5.get("cv_pf_max", 0.35)
+    g5 = _require_gate(gates, "g5_dd_stability")
+    cv_max = _require_field(g5, "cv_pf_max", "g5_dd_stability")
     ens_pfs = np.array([ens_pf(fm) for fm in completed if ens_pf(fm) is not None])
     if len(ens_pfs) >= 2 and ens_pfs.mean() > 0:
         cv = float(ens_pfs.std() / ens_pfs.mean())
