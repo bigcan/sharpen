@@ -72,16 +72,18 @@ class NamespacedRun:
         wandb.log(data, step=step, commit=commit)  # patched log handles prefix
 
 
-def _namespaced_log(data=None, step=None, commit=None, sync=None):
+def _namespaced_log(data=None, step=None, commit=None, **kwargs):
     """Patched `wandb.log` — prefixes keys with the active namespace.
 
     Reads `_state["namespace"]` on every call so WF-style in-process
-    rotation (via `set_namespace`) works without re-patching.
+    rotation (via `set_namespace`) works without re-patching. Forwards
+    unknown kwargs via **kwargs so wandb version drift (e.g. 0.26 dropped
+    `sync`) does not crash callers that never passed them.
     """
     assert _original_log is not None
     ns = _state["namespace"]
     if ns is None or not isinstance(data, Mapping):
-        return _original_log(data, step=step, commit=commit, sync=sync)
+        return _original_log(data, step=step, commit=commit, **kwargs)
 
     step_field = f"{ns}/{_STEP_KEY_SUFFIX}"
     ns_data: dict[str, Any] = {}
@@ -98,7 +100,7 @@ def _namespaced_log(data=None, step=None, commit=None, sync=None):
         ns_data[step_field] = counters.get(ns, 0)
     counters[ns] = max(counters.get(ns, 0), int(ns_data[step_field])) + 1
 
-    return _original_log(ns_data, step=None, commit=commit, sync=sync)
+    return _original_log(ns_data, step=None, commit=commit, **kwargs)
 
 
 def _ensure_patched() -> None:
