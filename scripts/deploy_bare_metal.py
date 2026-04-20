@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import shlex
 import sys
 import time
 import zipfile
@@ -9,6 +10,11 @@ from pathlib import Path
 
 import paramiko
 from dotenv import load_dotenv
+
+# Env vars auto-forwarded from deployer -> remote shell. Keep the allowlist
+# explicit — we never want to blindly echo local env onto a remote box.
+# FINRL_WANDB_* support the consolidated-run pattern (S488+).
+FORWARD_ENV_ALLOWLIST = ("FINRL_WANDB_RUN_ID", "FINRL_WANDB_NAMESPACE")
 
 # Load Environment Variables from Root
 load_dotenv()
@@ -287,6 +293,14 @@ def deploy(args):
     gpu_env = f"export CUDA_VISIBLE_DEVICES={args.gpu} &&" if args.gpu is not None else ""
 
     wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
+    # Auto-forward allowlisted env vars (see FORWARD_ENV_ALLOWLIST). The
+    # launcher sets these in its subprocess env; we echo them into the
+    # remote shell so `run_full_pipeline.py` can read them on gpuhub.
+    forwarded_exports = " ".join(
+        f"export {k}={shlex.quote(os.environ[k])} &&"
+        for k in FORWARD_ENV_ALLOWLIST
+        if os.environ.get(k)
+    )
     from datetime import datetime
     log_file = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
@@ -295,7 +309,7 @@ def deploy(args):
     hpo_storage_arg = f"--hpo_storage sqlite:///{remote_workspace}/{hpo_db}"
 
     # FIX: Remove () around ulimit so it applies to the current shell and subsequent nohup process
-    cmd = f"{export_path} && {gpu_env} {wandb_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
+    cmd = f"{export_path} && {gpu_env} {wandb_env} {forwarded_exports} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
 
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
