@@ -47,6 +47,17 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN", "300"))  # 5 min per container
 
+# Auto-restart on persistent running/unhealthy (S489 fix, issue #4).
+# After N consecutive unhealthy sweeps, `docker restart <name>` is issued.
+# Rate-limited to avoid loops when the container flaps.
+AUTO_RESTART_ENABLED = os.environ.get("AUTO_RESTART_UNHEALTHY", "true").lower() == "true"
+AUTO_RESTART_AFTER_N = int(os.environ.get("AUTO_RESTART_AFTER_N", "3"))
+AUTO_RESTART_MAX_PER_HOUR = int(os.environ.get("AUTO_RESTART_MAX_PER_HOUR", "3"))
+
+# Per-container state, keyed by container name.
+_unhealthy_streak: dict[str, int] = {}
+_auto_restart_history: dict[str, list[float]] = {}
+
 # Comma-separated container names to ignore (intentionally stopped / shelved workstreams).
 # Empty string means monitor everything (backward compatible).
 _IGNORE_CONTAINERS_RAW = os.environ.get("IGNORE_CONTAINERS", "")
@@ -335,6 +346,42 @@ def handle_container_event(event: dict) -> None:
 # Periodic sweep
 # ---------------------------------------------------------------------------
 
+def _should_auto_restart(container_name: str, streak: int, now: float | None = None) -> bool:
+    """Decide whether to auto-restart a persistently unhealthy container.
+
+    Returns True when the streak has reached the configured threshold AND
+    the container has not exceeded the per-hour restart cap.
+    """
+    if not AUTO_RESTART_ENABLED:
+        return False
+    if streak < AUTO_RESTART_AFTER_N:
+        return False
+    now = now if now is not None else time.time()
+    cutoff = now - 3600.0
+    history = [t for t in _auto_restart_history.get(container_name, []) if t >= cutoff]
+    _auto_restart_history[container_name] = history
+    return len(history) < AUTO_RESTART_MAX_PER_HOUR
+
+
+def _record_auto_restart(container_name: str, now: float | None = None) -> None:
+    """Append an auto-restart timestamp and prune entries older than 1h."""
+    now = now if now is not None else time.time()
+    cutoff = now - 3600.0
+    history = [t for t in _auto_restart_history.get(container_name, []) if t >= cutoff]
+    history.append(now)
+    _auto_restart_history[container_name] = history
+
+
+def _attempt_auto_restart(container, container_name: str) -> bool:
+    """Try `container.restart()`; return True on success, False otherwise."""
+    try:
+        container.restart()
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Auto-restart failed for {container_name}: {e}")
+        return False
+
+
 def sweep(client: docker.DockerClient) -> None:
     """Check all finrl.monitor containers. Catch issues missed by events."""
     containers = client.containers.list(
@@ -348,35 +395,60 @@ def sweep(client: docker.DockerClient) -> None:
 
     for container in containers:
         info = inspect_container(container)
+        name = info["name"]
 
-        if _is_ignored(info["name"]):
+        if _is_ignored(name):
             continue
 
-        status_str = f"{info['name']}: {info['status']} / {info['health']}"
+        status_str = f"{name}: {info['status']} / {info['health']}"
 
         if info["health"] == "unhealthy":
-            if info["name"].startswith(_TRADFI_CONTAINER_PREFIXES) and _tradfi_market_closed_utc():
+            if name.startswith(_TRADFI_CONTAINER_PREFIXES) and _tradfi_market_closed_utc():
+                # Suppressed: don't advance the streak during market close either.
+                _unhealthy_streak.pop(name, None)
                 logger.info(
                     f"Sweep UNHEALTHY suppressed (TradFi market closed): {status_str}"
                 )
                 continue
+
+            streak = _unhealthy_streak.get(name, 0) + 1
+            _unhealthy_streak[name] = streak
+
+            if _should_auto_restart(name, streak):
+                logger.warning(
+                    f"Auto-restart: {name} after {streak}x unhealthy "
+                    f"(threshold={AUTO_RESTART_AFTER_N})",
+                )
+                if _attempt_auto_restart(container, name):
+                    _record_auto_restart(name)
+                    _unhealthy_streak.pop(name, None)  # Give it a fresh window
+                    alert(
+                        name,
+                        f"<b>[AUTO-RESTART] {info['strategy']}</b>\n"
+                        f"Container: {name}\n"
+                        f"Reason: {streak}x consecutive unhealthy sweeps",
+                    )
+                    continue
+
             detail = get_health_detail(container)
             msg = (
                 f"<b>[SWEEP: UNHEALTHY] {info['strategy']}</b>\n"
-                f"Container: {info['name']}\n"
+                f"Container: {name}\n"
                 f"  {detail}"
             )
-            alert(info["name"], msg)
+            alert(name, msg)
             logger.warning(f"Sweep: {status_str}")
         elif not info["running"]:
+            _unhealthy_streak.pop(name, None)  # docker restart policy handles this
             msg = (
                 f"<b>[SWEEP: NOT RUNNING] {info['strategy']}</b>\n"
-                f"Container: {info['name']}\n"
+                f"Container: {name}\n"
                 f"Status: {info['status']}"
             )
-            alert(info["name"], msg)
+            alert(name, msg)
             logger.warning(f"Sweep: {status_str}")
         else:
+            _unhealthy_streak.pop(name, None)  # Back to healthy — reset streak
             logger.info(f"Sweep: {status_str}")
 
 
@@ -390,6 +462,13 @@ def main() -> None:
         f"Config: sweep={SWEEP_INTERVAL}s, wandb_check={WANDB_CHECK_INTERVAL}s, "
         f"telegram={'configured' if TELEGRAM_BOT_TOKEN else 'disabled'}",
     )
+    if AUTO_RESTART_ENABLED:
+        logger.info(
+            f"Auto-restart: enabled after {AUTO_RESTART_AFTER_N}x unhealthy sweeps "
+            f"(max {AUTO_RESTART_MAX_PER_HOUR}/hour per container)",
+        )
+    else:
+        logger.info("Auto-restart: disabled (AUTO_RESTART_UNHEALTHY=false)")
     if IGNORE_CONTAINERS:
         logger.info(f"Ignoring containers: {sorted(IGNORE_CONTAINERS)}")
     else:
