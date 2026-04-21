@@ -13,9 +13,22 @@
 # loss limit; max_daily_loss_pct=0.0 = disabled per prop_firm_wrapper.py:60,207).
 # 8% trailing matches live risk-manager buffer below Velotrade's 10% limit.
 #
-# Broad search (50 trials, no narrow_mode): T34 HPs were selected under frictionless
-# reward — topology is materially different at 5 bps, no reliable anchor. T34 values
-# kept as starting agents.sac defaults only (informative, not enqueued).
+# Broad search (50 trials, no narrow_mode): parameter topology at 5 bps has no reliable
+# anchor compatible with this config's preconditions. Seed-refresh from SG-1-BTC
+# (donor study `sg1_btc_velotrade_rehpo_20260420`, trial 44 PF=2.30 at 5 bps) was
+# evaluated and REJECTED S489-cont. — see decision_gmgp1_btc_no_seed_refresh.md.
+# Four donor/recipient mismatches (parallel XAUUSD pair has none of these):
+#   (a) Wrapper magnitudes differ: donor 10% trail / 5% penalty-start vs this 8% / 4%.
+#       Reward-landscape shape determines lr_alpha/initial_alpha/dsr_eta convergence;
+#       ±20% narrow band cannot recover the difference.
+#   (b) Venue: donor = Bybit (data/btc_usdt_1min_bybit.parquet), recipient = Bitfinex
+#       perp (data/bitfinex/btc_usdt_perp_2025_1min.parquet). Microstructure differs.
+#   (c) Train window: donor 2024-01 → 2025-06 (18mo), recipient 2025-01 → 2025-08 (8mo).
+#       Donor regime distribution includes 2024 mean-reversion that recipient never sees.
+#   (d) Observation space: donor signal-gated (composite, ~75% pass), recipient ungated.
+#       Action-saturation/entropy/α-tuning shaped by different bar distributions.
+# agents.sac values below are broad-search geometric midpoints (placeholders — overridden
+# by trial.suggest in HPO; only consulted if someone runs non-HPO training on this file).
 # augment_obs: false — live_obs_builder.py hard-codes private_dim=5.
 
 data:
@@ -77,23 +90,26 @@ network:
   fusion_dim: 256
   window_size: 30
 
-# Starting HPs — T34 best trial from prior biased HPO (run 8v4mueuf, PF=2.558 frictionless).
-# Informative only: narrow_mode: false means these are NOT enqueued as Trial 0. Reward
-# topology is different at 5 bps, so HPO searches the full parameter space.
+# Placeholder HPs — geometric midpoints of the broad search space defined in
+# finrl_pro_ds/hpo/objective.py:132-144. narrow_mode: false means these are NOT used
+# as priors by the HPO sampler (every dim resampled per trial). Prior T34 anchors were
+# stripped S489-cont. to avoid confusing this block with an enqueued seed (see header).
+# Non-HPO'd keys (batch_size, buffer_size, learning_starts, update_interval,
+# actor_update_freq, checkpoint_interval) are live — do not change without justification.
 agents:
   sac:
-    lr_actor: 0.00050182
-    lr_critic: 0.000027779
-    lr_alpha: 0.0000035704
-    gamma: 0.97127
-    tau: 0.0038951
+    lr_actor: 4.5e-5                    # geom-mid of [2e-6, 1e-3] log
+    lr_critic: 4.5e-5                   # geom-mid of [2e-6, 1e-3] log
+    lr_alpha: 4.5e-5                    # geom-mid of [2e-6, 1e-3] log
+    gamma: 0.975                        # arith-mid of [0.95, 0.999]
+    tau: 1.4e-4                         # geom-mid of [2e-6, 0.01] log
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.49701
+    initial_alpha: 0.158                # geom-mid of [0.05, 0.5] log
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 3.0198
+    gradient_clip: 3.16                 # geom-mid of [1.0, 10.0] log
     checkpoint_interval: 250000
 
 training:
