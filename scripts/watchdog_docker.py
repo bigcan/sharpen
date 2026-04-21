@@ -25,6 +25,8 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import docker
 import requests
@@ -95,14 +97,40 @@ _TRADFI_TAGS = {"Gold", "XAUUSD", "MGC", "GC", "cTrader", "IB", "COMEX", "FTMO",
 _TRADFI_CONTAINER_PREFIXES = ("gmgp1-gold", "gmgp1-xauusd", "gmgp2-xauusd", "sg1-gold")
 
 
+def _rollover_hours_utc(dt_utc: datetime, tz_name: str, local_break_hour: int) -> set[int]:
+    """UTC hours covered by a broker's daily rollover + 1-hour post-rollover lag.
+
+    `local_break_hour` is the hour-of-day (0-23) in the broker's server timezone
+    when the daily break begins. IC Markets (Athens) breaks at server 00:00;
+    CME Globex (Chicago) breaks at server 16:00. The returned set includes the
+    break hour itself plus the hour immediately after, to cover WandB stall
+    detection lag while the first post-break bar is still pending.
+    """
+    server_dt = dt_utc.astimezone(ZoneInfo(tz_name))
+    offset = server_dt.utcoffset()
+    # ZoneInfo always returns a non-None offset for aware datetimes.
+    assert offset is not None, f"ZoneInfo({tz_name}) returned None utcoffset"
+    offset_hours = int(offset.total_seconds()) // 3600
+    break_start = (local_break_hour - offset_hours) % 24
+    return {break_start, (break_start + 1) % 24}
+
+
 def _tradfi_market_closed_utc(now_utc: time.struct_time | None = None) -> bool:
     """Approximate market-closed predicate covering both cTrader XAUUSD and CME MGC.
 
-    Closed window (UTC):
-      - Fri 21:00  →  Sun 22:00
+    Closed windows (UTC):
+      - Weekend:          Fri 21:00  →  Sun 22:00
+      - Daily rollover:   Mon-Thu, union of IC Markets (Athens, break at
+                          server 00:00-01:00) and CME Globex (Chicago, break
+                          at server 16:00-17:00). Both schedules are computed
+                          per-tz to stay correct during the ~2-week windows
+                          each year when Europe and US DST offsets diverge.
+
     Covers XAUUSD (Fri ~21Z close / Sun 22Z reopen) and MGC/CME (Fri 22Z /
     Sun 23Z reopen — we suppress slightly ahead, reopening Mon stalls still
-    alert because bar_count resumes within STALL_MINUTES).
+    alert because bar_count resumes within STALL_MINUTES). Daily rollover
+    added S490 after false STALL alert for live_XAUUSD_ctrader at 22:06 UTC
+    during 21-22 UTC rollover gap.
     """
     t = now_utc or time.gmtime()
     wday = t.tm_wday  # Mon=0 .. Sun=6
@@ -113,6 +141,27 @@ def _tradfi_market_closed_utc(now_utc: time.struct_time | None = None) -> bool:
         return True
     if wday == 6 and hour < 22:  # Sunday before 22:00
         return True
+
+    # Daily rollover — Mon-Thu only (Fri rollover = start of weekend, already
+    # covered above). Union IC Markets (Athens) + CME Globex (Chicago) so
+    # MGC stays covered during DST transition weeks where Europe and US are
+    # temporarily offset by 1h relative to each other.
+    if wday in (0, 1, 2, 3):
+        if now_utc is not None:
+            dt_utc = datetime(
+                year=t.tm_year, month=t.tm_mon, day=t.tm_mday,
+                hour=t.tm_hour, minute=t.tm_min, second=t.tm_sec,
+                tzinfo=timezone.utc,
+            )
+        else:
+            dt_utc = datetime.now(timezone.utc)
+        rollover_hours = (
+            _rollover_hours_utc(dt_utc, "Europe/Athens", 0)
+            | _rollover_hours_utc(dt_utc, "America/Chicago", 16)
+        )
+        if hour in rollover_hours:
+            return True
+
     return False
 
 
