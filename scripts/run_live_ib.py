@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -237,7 +238,23 @@ def main():
         f"  Mode: {'PAPER' if config.get('exchange', {}).get('testnet', True) else 'LIVE'}\n"
         f"  Dry run: {config.get('dry_run', False)}",
     )
-    asyncio.run(main_async(config))
+    exit_code = 0
+    try:
+        asyncio.run(main_async(config))
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        exit_code = 130
+    except SystemExit as e:
+        exit_code = e.code if isinstance(e.code, int) else 1
+    except Exception:
+        logger.exception("Trading engine failed")
+        exit_code = 1
+    finally:
+        # Force PID 1 exit even if non-daemon threads or wandb-core
+        # subprocess is still alive. Docker restart: unless-stopped
+        # auto-recovers the strategy. Fixes S489 orphan-netns hang.
+        logger.info(f"run_live_ib exiting with code {exit_code}")
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

@@ -1949,11 +1949,29 @@ class LiveTradingEngine:
         )
 
         if self._wandb_run is not None:
-            try:
-                import wandb
-                wandb.finish()
-            except Exception:
-                pass
+            # Bounded wandb.finish() — unbounded hang here kept PID 1 alive
+            # for 2h+ in S489 (gmgp1-gold), defeating docker restart policy.
+            # Use a daemon thread (NOT asyncio.to_thread) so asyncio.run()
+            # cleanup doesn't join a stuck worker.
+            import threading as _threading
+            finish_exc: list[BaseException] = []
+
+            def _finish_worker() -> None:
+                try:
+                    import wandb
+                    wandb.finish()
+                except BaseException as e:  # noqa: BLE001
+                    finish_exc.append(e)
+
+            t = _threading.Thread(target=_finish_worker, daemon=True, name="wandb-finish")
+            t.start()
+            t.join(timeout=30.0)
+            if t.is_alive():
+                logger.warning(
+                    "wandb.finish() exceeded 30s timeout — proceeding with shutdown",
+                )
+            elif finish_exc:
+                logger.debug(f"wandb.finish failed: {finish_exc[0]}")
 
         try:
             await self.broker.close()
