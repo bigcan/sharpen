@@ -159,19 +159,34 @@ def validate_config(config_path: Path, stage: str = "hpo") -> None:
         raise RuntimeError(f"validate_config FAIL for {config_path.name}")
 
 
+def _to_remote_rel_posix(p: Path) -> str:
+    """Convert an absolute local config path to a POSIX path relative to
+    PROJECT_ROOT. The coordinator is invoked with cwd=PROJECT_ROOT, and the
+    remote worker CWDs to $REMOTE_WORKSPACE which mirrors PROJECT_ROOT's layout
+    after the deploy zip is extracted. Passing a POSIX relative string makes
+    both sides resolve the same file. (Windows-client fix — launching from
+    `C:\\...` previously shipped as-is to Linux workers → FileNotFoundError.)
+    """
+    try:
+        rel = p.resolve().relative_to(PROJECT_ROOT)
+    except ValueError:
+        return str(p)
+    return rel.as_posix()
+
+
 def run_coordinator(
     config: Path, dhpo_overlay: Path, study_name: str, n_trials: int,
     n_workers: int, db_url: str, dry_run: bool,
 ) -> None:
     cmd = [
         sys.executable, str(PROJECT_ROOT / "scripts" / "distributed_hpo_coordinator.py"),
-        "--config", str(config),
+        "--config", _to_remote_rel_posix(config),
         "--platform", "gpuhub",
         "--n_workers", str(n_workers),
         "--n_trials", str(n_trials),
         "--db_url", db_url,
         "--study_name", study_name,
-        "--distributed_config", str(dhpo_overlay),
+        "--distributed_config", _to_remote_rel_posix(dhpo_overlay),
         "--resume",
     ]
     logger.info("coordinator: %s",
