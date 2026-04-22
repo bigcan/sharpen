@@ -104,7 +104,7 @@ wandb:
 # --- Safety ---
 safety:
   require_explicit_mainnet: true
-  max_daily_loss_pct: 0.0            # No daily loss limit in 2-step
+  max_daily_loss_pct: 0.0            # 0 = disabled (Velotrade 2-step has no daily rule). Engine treats ≤0 as disabled (audit FIND-01, 2026-04-22).
   kill_file: "/tmp/finrl_live_sg1_btc_kill"
   emergency_flatten_on_error: true
 

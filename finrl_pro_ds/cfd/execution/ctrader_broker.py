@@ -22,9 +22,12 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import json
 import logging
 import os
+import tempfile
 import time
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -153,6 +156,19 @@ class CTraderBroker:
         self._access_token = os.environ.get("CTRADER_ACCESS_TOKEN", "")
         self._account_id = int(os.environ.get("CTRADER_ACCOUNT_ID", "0"))
         self._refresh_token = os.environ.get("CTRADER_REFRESH_TOKEN", "")
+
+        # FIND-03: token state file — in-memory token rotations are persisted
+        # here so a container restart picks up the latest refreshed tokens
+        # instead of falling back to the stale `.env` snapshot. State dir is
+        # a named Docker volume (`/app/state`), so the file survives restarts.
+        # File is chmod 0600 (secrets).
+        state_path_env = os.environ.get(
+            "CTRADER_TOKEN_STATE_FILE",
+            "/app/state/ctrader_tokens.json",
+        )
+        self._token_state_file = Path(state_path_env)
+        self._token_state_loaded = False
+        self._load_tokens_from_state_file()
 
         # Connection state
         self._client = None
@@ -608,11 +624,101 @@ class CTraderBroker:
                 self._access_token = token_data["accessToken"]
                 if "refreshToken" in token_data:
                     self._refresh_token = token_data["refreshToken"]
+                self._persist_tokens_to_state_file()
                 logger.info("Access token refreshed during reconnect")
             else:
                 logger.warning("Token refresh returned no accessToken: %s", token_data)
         except Exception as exc:
             logger.warning("Token refresh failed during reconnect: %s", exc)
+
+    # ------------------------------------------------------------------
+    # FIND-03: token state-file persistence across container restarts
+    # ------------------------------------------------------------------
+    def _load_tokens_from_state_file(self) -> None:
+        """Prefer tokens from state file over `.env` when both exist.
+
+        The S490 crash-storm root cause: `_token_refresh_loop` rotated tokens
+        in memory, but the `.env` file was never updated. Restart → stale env
+        tokens → CH_ACCESS_TOKEN_INVALID → refresh fails with ACCESS_DENIED.
+        Loading from a persistent state file closes that gap.
+        """
+        if self._token_state_loaded:
+            return
+        try:
+            if not self._token_state_file.exists():
+                return
+            data = json.loads(self._token_state_file.read_text(encoding="utf-8"))
+        except Exception as exc:
+            logger.warning(
+                "Token state file unreadable at %s (%s) — falling back to env.",
+                self._token_state_file, exc,
+            )
+            return
+
+        try:
+            account = int(data.get("account_id", 0) or 0)
+        except (TypeError, ValueError):
+            account = 0
+        if self._account_id and account and account != self._account_id:
+            logger.warning(
+                "Token state file account_id=%s does not match configured %s — "
+                "ignoring stale tokens.",
+                account, self._account_id,
+            )
+            return
+
+        access = data.get("access_token") or ""
+        refresh = data.get("refresh_token") or ""
+        if access:
+            self._access_token = access
+        if refresh:
+            self._refresh_token = refresh
+        self._token_state_loaded = True
+        logger.info(
+            "Loaded cTrader tokens from state file %s (rotated_at=%s)",
+            self._token_state_file, data.get("rotated_at", "unknown"),
+        )
+
+    def _persist_tokens_to_state_file(self) -> None:
+        """Atomically write the current tokens to the state file, chmod 0600.
+
+        Best-effort: a failed write logs but does not abort trading — the
+        rotated tokens still live in memory for the current session.
+        """
+        if not self._access_token:
+            return
+        path = self._token_state_file
+        payload = {
+            "access_token": self._access_token,
+            "refresh_token": self._refresh_token,
+            "account_id": self._account_id,
+            "client_id": self._client_id,
+            "rotated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            # Write to tmp in the same directory, then atomic rename.
+            fd, tmp = tempfile.mkstemp(
+                dir=str(path.parent), prefix=".ctrader_tokens.", suffix=".json.tmp",
+            )
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(payload, f)
+                os.chmod(tmp, 0o600)
+                os.replace(tmp, str(path))
+                tmp = None
+            finally:
+                if tmp is not None and os.path.exists(tmp):
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
+            logger.debug("Persisted cTrader tokens to %s", path)
+        except Exception as exc:
+            logger.warning(
+                "Failed to persist cTrader tokens to %s: %s (in-memory only).",
+                path, exc,
+            )
 
     async def _send_account_logout(self) -> None:
         """FIX CT-04: Send account logout so server releases the session.
@@ -1750,6 +1856,7 @@ class CTraderBroker:
                     self._access_token = token_data["accessToken"]
                     if "refreshToken" in token_data:
                         self._refresh_token = token_data["refreshToken"]
+                    self._persist_tokens_to_state_file()
                     logger.info("Access token refreshed successfully")
                 else:
                     logger.error(f"Token refresh failed: {token_data}")
@@ -1768,6 +1875,7 @@ class CTraderBroker:
                             self._access_token = token_data["accessToken"]
                             if "refreshToken" in token_data:
                                 self._refresh_token = token_data["refreshToken"]
+                            self._persist_tokens_to_state_file()
                             logger.info("Token refresh succeeded on retry")
                             break
                     else:
