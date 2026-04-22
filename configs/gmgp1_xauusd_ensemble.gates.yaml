@@ -1,0 +1,91 @@
+# GMGP1-XAUUSD ensemble confirmation gates — PRE-COMMITTED.
+#
+# Read by scripts/gmgp1_xauusd_ensemble_eval_oanda.py --wf_config.
+# Modeled on sg1_xauusd_ensemble.gates.yaml (S488); same five-gate structure.
+# This file is the ONLY source of truth for gate numbers (per project rule
+# "never hardcode gate thresholds in code or scripts").
+#
+# Decision rule: ALL five gates (G1..G5) must PASS -> approve ensemble for
+# GMGP1-XAUUSD paper-deploy aggregation. ANY fail -> ensemble rejected; solo
+# seed with highest WF-median PF remains the paper candidate.
+#
+# Pre-commit date: 2026-04-23 BEFORE WF launch. Do not edit after launch
+# without a decision memo explaining why.
+
+workstream: gmgp1_xauusd
+variant: ensemble_agreement_top3_oanda
+seeds: [42, 3141, 2025]                       # L1-OANDA top-3 (Path B)
+aggregation_rule: ens_agreement               # candidate rule under test
+
+# Fold count expected from the multiseed WF config.
+# 8 folds covering Aug 2025 -> Mar 2026 test windows (OANDA span Jan 2025 -> Apr 2026).
+wf_folds: 8
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+gates:
+  g1_solo_baseline:
+    description: >-
+      Existing WF Stage-3 gate applied per seed: at least 2/3 seeds must have
+      per-fold test PF >= pf_floor, in at least min_folds_pass of the total
+      folds. If solo seeds fail the base WF discipline, the ensemble is moot.
+    pf_floor: 1.1
+    seeds_pass_min: 2                         # >=2/3 seeds pass per fold
+    min_folds_pass: 7                         # in >=7/8 folds
+
+  g2_no_regression:
+    description: >-
+      Per fold, the ensemble must NOT materially regress vs the best solo on
+      that fold. Defined as ens_PF >= ens_ratio_min * best_solo_PF in at least
+      min_folds_pass folds.
+    ens_ratio_min: 0.90
+    min_folds_pass: 7                         # >=7/8 folds
+
+  g3_uplift:
+    description: >-
+      Across folds, the ensemble must earn its live-complexity overhead.
+      Defined as median(ens_PF) / median(best_solo_PF) >= uplift_ratio_min.
+      A lift below ~10% is not worth the additional live-engine branching
+      and aggregation latency (matches S493 Stage 2.5 PROMOTE threshold).
+    uplift_ratio_min: 1.10
+    metric: median                            # across-folds aggregation
+
+  g4_ftmo_compliance:
+    description: >-
+      Applied to the ENSEMBLE trajectory per fold (not the solo trajectories).
+      All three FTMO sub-gates must PASS in every fold (strict: 8/8).
+    daily_dd_buffer_pp_min: 0.5               # 4% cap - worst_intraday_dd%
+    trailing_dd_buffer_pp_min: 0.5            # 8% cap - trailing_mdd%
+    compliance_must_pass: true                # active_days/single_day_share
+    min_folds_pass: 8                         # all folds
+
+  g5_dd_stability:
+    description: >-
+      Guards against ensemble edge being a one-fold artifact. CV of ensemble
+      PF across folds must be at or below cv_max.
+    cv_pf_max: 0.35
+
+# ---------------------------------------------------------------------------
+# Decision matrix
+# ---------------------------------------------------------------------------
+
+decision:
+  all_pass_action: approve_ensemble_paper_deploy
+  any_fail_action: reject_ensemble_use_best_solo
+  solo_selection_metric: wf_median_pf
+  solo_tiebreaker: wf_mean_trailing_dd_buffer_pp
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+provenance:
+  drafted_on: '2026-04-23'
+  drafted_by_session: S493-cont
+  upstream_memory: project_ensemble_protocol_confirmation_test.md
+  plan_artifact: project_gmgp1_rehpo_queue_staged.md
+  l1_multiseed_result: "OANDA: median PF 2.127, CV 5.90%, worst MDD -0.76% (N=10). Top-3 by test PF: 42, 3141, 2025."
+  cme_vs_oanda_rerank: "CME top-3 = [789, 2025, 1024]; OANDA top-3 = [42, 3141, 2025]. Only 2025 overlapped — WF on OANDA-picked seeds per S470 sim-to-live audit."
+  in_sample_ensemble_result: "CME L1: ens_agreement PF 2.568 vs best solo 2.192 (+17.15% uplift); OANDA L1 confirmation pending in scripts/gmgp1_xauusd_ensemble_eval_oanda.py."

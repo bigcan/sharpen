@@ -1,0 +1,180 @@
+# GMGP1-XAUUSD FTMO re-HPO — Stage 3 Walk-Forward, ENSEMBLE CONFIRMATION VARIANT
+#
+# Path B (S493-cont 2026-04-23): WF on the OANDA L1 top-3 seeds [42, 3141, 2025]
+# (different from the CME L1 top-3 [789, 2025, 1024] — re-ranking confirmed
+# after moving from CME GC futures to OANDA spot XAUUSD per sim-to-live audit).
+#
+# Upstream:
+#   - Stage 2 L1-OANDA PASS (N=10, median PF 2.127, CV 5.90%, worst MDD -0.76%).
+#   - Stage 2.5 ensemble-confirm pending on L1 test window; this WF config is
+#     ready to launch the moment Stage 2.5 returns.
+#
+# Gate (pre-committed in configs/gmgp1_xauusd_ensemble.gates.yaml):
+#   G1 Solo baseline  : >=2/3 seeds PF>=1.1 per fold in >=7/8 folds
+#   G2 No regression  : per-fold ens_PF >= 0.9 * best_solo_PF in >=7/8 folds
+#   G3 Uplift         : median ens_PF / median best_solo_PF >= 1.10
+#   G4 FTMO           : ensemble trajectory per-fold: DD buffers >=0.5pp + PASS
+#   G5 DD stability   : CV(ens_PF) across folds <= 0.35
+#   ALL PASS -> approve paper ensemble; ANY FAIL -> solo-best (WF-median PF).
+#
+# Training: 3 seeds * 8 folds * 500K steps via scripts/run_walk_forward.py
+#   --config configs/gmgp1_xauusd_ftmo_rehpo_wf_multiseed_oanda.yaml --seed <N>
+#
+# Eval (no training; post-WF ensemble aggregation):
+#   python scripts/gmgp1_xauusd_ensemble_eval_oanda.py \
+#       --wf_config configs/gmgp1_xauusd_ftmo_rehpo_wf_multiseed_oanda.yaml \
+#       --gates_file configs/gmgp1_xauusd_ensemble.gates.yaml \
+#       --device cpu
+
+data:
+  file_path: data/oanda/xauusd_m1_m.parquet
+  ticker: XAUUSD
+  handler_type: multiscale
+  # 8-fold coverage (Aug 2025 -> Mar 2026 test windows):
+  #   fold 0: train Jan-Jun 2025  val Jul 2025  test Aug 2025
+  #   fold 1: train Feb-Jul 2025  val Aug 2025  test Sep 2025
+  #   fold 2: train Mar-Aug 2025  val Sep 2025  test Oct 2025
+  #   fold 3: train Apr-Sep 2025  val Oct 2025  test Nov 2025
+  #   fold 4: train May-Oct 2025  val Nov 2025  test Dec 2025
+  #   fold 5: train Jun-Nov 2025  val Dec 2025  test Jan 2026
+  #   fold 6: train Jul-Dec 2025  val Jan 2026  test Feb 2026
+  #   fold 7: train Aug 2025-Jan 2026  val Feb 2026  test Mar 2026
+  start_date: '2025-01-06'
+  end_date: '2026-04-15'
+
+splitter:
+  train_months: 6
+  val_months: 1
+  test_months: 1
+  step_months: 1
+  buffer_days: 0
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: cfd_gold
+
+env:
+  mdp_version: v7
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235                # steady-state (S464); IC Markets Raw ~2.35 bps/side
+  deadband_threshold: 0.35           # trial #10
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  gap_detection: true
+  gap_atr_mult: 3.0                  # OANDA 73h weekend gap detector required
+  reward:
+    mode: dsr
+    dsr_eta: 0.008072070485679669    # trial #10
+    dsr_scale: 1.0
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Trial #10 HPs (Optuna study gmgp1_xauusd_ftmo_rehpo_20260421) — identical to L1 base config
+    lr_actor: 0.00048211947849186834
+    lr_critic: 0.00023536913918894482
+    lr_alpha: 0.0000023011482963674244
+    gamma: 0.9734375919828845
+    tau: 0.0056901039341825865
+    initial_alpha: 0.4568170758305432
+    gradient_clip: 2.738336834748153
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000            # apples-to-apples with L1 + HPO
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: bfloat16
+  torch_compile: true
+  num_envs: 20
+  # seed: set per-run via CLI (--seed N); top-3 from L1-OANDA = [42, 3141, 2025]
+
+hpo:
+  enabled: false
+
+# Ensemble metadata — consumed by scripts/gmgp1_xauusd_ensemble_eval_oanda.py --wf_config
+ensemble:
+  seeds: [42, 3141, 2025]
+  # Checkpoint pattern — glob resolves one match per (seed, fold):
+  checkpoint_pattern: "checkpoints/WF_seed{seed}_fold_{fold:02d}_*/checkpoint_final.pth"
+  rules: [solo_42, solo_3141, solo_2025,
+          ens_mean, ens_median, ens_agreement, ens_pf_weighted]
+  # Test PFs from the L1-OANDA aggregate (weights for ens_pf_weighted).
+  seed_pfs:
+    42:   2.389
+    3141: 2.261
+    2025: 2.182
+  gates_file: configs/gmgp1_xauusd_ensemble.gates.yaml
+
+gates:                               # Protocol v2 Stage 3 (training-level)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10          # S493 Stage 2.5 PROMOTE threshold (pre-committed)
+  wf_windows: 4                      # validator requires >=4; splitter emits 8
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+wandb:
+  project: FinRL-Pro-DS
+  consolidate: true                  # one parent run per seed; folds as fold<i>/*
+  tags:
+    - gmgp1-xauusd
+    - Gold
+    - SAC
+    - 15min
+    - CFD
+    - FTMO
+    - ftmo-wrapped
+    - prop-firm
+    - propfirm
+    - rehpo-trial10
+    - walk_forward
+    - wf-stage3
+    - ensemble
+    - ensemble-confirm
+    - steady-state
+    - oanda-spot
+    - upstream:gmgp1_xauusd_ftmo_rehpo_20260421

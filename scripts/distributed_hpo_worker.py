@@ -254,24 +254,34 @@ def run_worker(
                            frozen_trial.number, e)
 
     while not _shutdown:
-        # Check global progress
+        # S493 fix (DHP-WORKER-OVERRUN): count COMPLETE + RUNNING + WAITING so N
+        # concurrent workers don't each pull a fresh trial after observing the
+        # same COMPLETE count — previously caused (n_workers - 1) overrun per
+        # campaign. FAIL stays un-counted so Optuna's RetryFailedTrialCallback
+        # can re-enqueue without the target shrinking.
+        in_flight_or_done = len([
+            t for t in study.trials
+            if t.state in (TrialState.COMPLETE, TrialState.RUNNING, TrialState.WAITING)
+        ])
         completed_trials = len([
             t for t in study.trials
             if t.state == TrialState.COMPLETE
         ])
-        if completed_trials >= target_trials:
+        if in_flight_or_done >= target_trials:
             logger.info(
-                "Global target reached: %d/%d completed trials. Stopping.",
-                completed_trials,
-                target_trials,
+                "Global target reached: %d in-flight-or-done / %d target "
+                "(completed: %d). Stopping.",
+                in_flight_or_done, target_trials, completed_trials,
             )
             break
 
         logger.info(
-            "Worker %s: starting trial (global progress: %d/%d completed, local: %d completed)",
+            "Worker %s: starting trial (global progress: %d/%d in-flight-or-done, "
+            "%d completed, local: %d completed)",
             worker_id,
-            completed_trials,
+            in_flight_or_done,
             target_trials,
+            completed_trials,
             local_trials_completed,
         )
 

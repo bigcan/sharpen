@@ -31,17 +31,19 @@ distributed_hpo:
     grace_period: 600
     max_retry: 1
 
-  # Safe slots layout — mirrors dhpo_sg1 (3 replicas/GPU; SAC HPO ~25% GPU util per worker;
-  # 3x co-location ≈ 75% util, ~2-2.5x aggregate throughput). Re-check monitor_fleet.py
-  # before launch in case fleet state shifted.
+  # Safe slots layout — S488 rule: HPO on gpuhub-1 only (gpu 0 + gpu 1);
+  # gpuhub-2 reserved for non-HPO (L1 multiseed, walk-forward). 3 replicas/GPU
+  # (SAC HPO ~25% GPU util per worker; 3x co-location ≈ 75% util,
+  # ~2-2.5x aggregate throughput). S489-cont. fix — previously listed
+  # gpuhub-2:0 which conflicts with SG-1 WF.
   gpuhub:
     instances:
       - "gpuhub-1:0"
       - "gpuhub-1:0"
       - "gpuhub-1:0"
-      - "gpuhub-2:0"
-      - "gpuhub-2:0"
-      - "gpuhub-2:0"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
 
   worker:
     target_trials: null
