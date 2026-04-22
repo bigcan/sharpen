@@ -292,6 +292,14 @@ services:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1-xauusd-l1-multiseed_20260408_163103:/app/checkpoints/gmgp1-xauusd-l1-multiseed_20260408_163103:ro
       - gmgp1-xauusd-logs:/app/logs
       - gmgp1-xauusd-state:/app/state
+    # S491: override crypto-strategy anchor default (1536M) — cTrader containers
+    # hit 5 OOMs in the 24h window ending 2026-04-22 (1.5G too tight for bootstrap
+    # + reconnect spikes). 3G gives headroom over the S488 gmgp1-gold 2G fix.
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: "2.0"
 
   sg1-xauusd:
     <<: *crypto-strategy
@@ -323,6 +331,14 @@ services:
       - ${CHECKPOINT_DIR}/WF_seed3141_fold_07_20260421_215709:/app/checkpoints/WF_seed3141_fold_07_20260421_215709:ro
       - sg1-xauusd-logs:/app/logs
       - sg1-xauusd-state:/app/state
+    # S491: override crypto-strategy anchor default (1536M) — same rationale as
+    # gmgp1-xauusd above; cTrader containers need 3G for bootstrap + reconnect
+    # headroom after S491 OOM cluster.
+    deploy:
+      resources:
+        limits:
+          memory: 3G
+          cpus: "2.0"
 
   # ============================================================
   #  Data Collectors (no trading, no checkpoints)
