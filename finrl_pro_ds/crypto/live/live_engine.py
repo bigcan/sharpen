@@ -89,6 +89,10 @@ class LiveTradingEngine:
         self._current_position = 0.0
         self._prev_close = 0.0
         self._portfolio_value = config.get("trading", {}).get("initial_balance", 10000.0)
+        # S490: preserve config-declared balance for the startup mismatch guard.
+        # _current_position is stored as a fraction with _portfolio_value in the
+        # denominator, so a silent broker-vs-config drift corrupts position tracking.
+        self._config_initial_balance = self._portfolio_value
         self._initial_portfolio_value = self._portfolio_value
         self._peak_portfolio_value = self._portfolio_value
         self._current_funding_rate = 0.0
@@ -310,6 +314,36 @@ class LiveTradingEngine:
         # broker._portfolio_value is set (otherwise get_single_position()
         # returns 0.0 because _contracts_to_position divides by zero PV).
         await self._update_portfolio_value()
+
+        # S490: balance-mismatch startup guard. The engine stores _current_position
+        # as lots*lot_size*price / _portfolio_value — a mid-session PV change
+        # silently invalidates cached positions and trips the reconciler. Refuse
+        # to start if broker equity has drifted from config.initial_balance beyond
+        # tolerance, forcing the operator to reconcile consciously (update config
+        # + restart, or opt out via safety.accept_balance_mismatch=true).
+        safety_cfg = self.config.get("safety", {})
+        mismatch_tolerance = safety_cfg.get("balance_mismatch_tolerance_pct", 0.10)
+        accept_mismatch = safety_cfg.get("accept_balance_mismatch", False)
+        config_ib = self._config_initial_balance
+        if config_ib > 0:
+            drift = abs(self._portfolio_value - config_ib) / config_ib
+            if drift > mismatch_tolerance:
+                msg = (
+                    f"BALANCE MISMATCH: broker equity ${self._portfolio_value:,.2f} "
+                    f"vs config.initial_balance ${config_ib:,.2f} "
+                    f"(drift {drift:.1%} > tolerance {mismatch_tolerance:.1%}). "
+                    f"Position tracking uses a PV-denominated fraction; starting "
+                    f"with a mismatch will corrupt reconciliation. Update "
+                    f"trading.initial_balance to match the broker and restart, or "
+                    f"set safety.accept_balance_mismatch=true to bypass."
+                )
+                if accept_mismatch:
+                    logger.warning(
+                        msg + " (BYPASSED via safety.accept_balance_mismatch=true)",
+                    )
+                else:
+                    logger.critical(msg)
+                    raise RuntimeError(msg)
 
         # FIX AUD-M01: Re-calibrate peak/initial from broker equity, not config.
         # Config initial_balance may differ from actual account balance,
