@@ -1,6 +1,10 @@
 # Live Trading Config — SG-1 XAUUSD SAC on Gold CFD via cTrader (FTMO)
-# 3-min bars, signal-gated, prop-firm trained (10% DD, 5% daily loss)
-# Checkpoint: PLACEHOLDER — update with L1 multi-seed best
+# 3-min bars, signal-gated, prop-firm trained (10% DD, 5% daily loss).
+# Deploys the top-3 WF multiseed ensemble (rule = ens_agreement) — approved for
+# paper-deploy by the Stage 2 verdict at
+# results/sg1_xauusd_ensemble_wf/verdict.json (2026-04-22): all 5 gates PASS,
+# median fold PF 2.058 (+20% over best solo), worst fold MDD -1.93% / daily
+# 0.84% (6.07pp / 3.16pp FTMO buffers), stress sidecar PF 1.921 (gate 1.5).
 #
 # Usage:
 #   python scripts/run_live_ctrader.py --config configs/live_sg1_xauusd_ctrader.yaml
@@ -9,6 +13,8 @@
 #
 # cTrader credentials via env vars:
 #   CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN, CTRADER_ACCOUNT_ID
+# (SG-1 uses its own IC Markets demo login — see docker/live/.env
+# SG1_XAUUSD_CTRADER_* block.)
 
 # --- cTrader Connection ---
 exchange:
@@ -26,25 +32,38 @@ contract:
   order_type: "MKT"                    # Market orders (CFD spreads tight enough)
   market_fallback_timeout: 10.0
 
-# --- Agent ---
+# --- Agent (ensemble = top-3 WF multiseed) ---
 agent:
-  # PLACEHOLDER — update with L1 multi-seed best checkpoint
-  checkpoint_path: "checkpoints/sg1_xauusd_ftmo_best/checkpoint_final.pth"
+  # Ensemble block overrides checkpoint_path. Leave the single-path key as a
+  # deliberate dead value; run_live_ctrader.py detects `ensemble` and skips it.
+  checkpoint_path: ""
   device: "cpu"
   torch_compile: false                 # Must be false for live inference
+  ensemble:
+    seeds: [42, 2025, 3141]
+    # Pattern tokens: {seed}, {fold:02d}. Resolved via glob at startup; exactly
+    # one match per (seed, fold) is required.
+    checkpoint_pattern: "checkpoints/WF_seed{seed}_fold_{fold:02d}_*/checkpoint_final.pth"
+    fold: 7                            # Fold 07 = trained through Feb 2026
+    aggregation_rule: "ens_agreement"  # approved by Stage 2 verdict
+    # deadband defaults to trading.deadband_threshold if omitted.
+    seed_pfs:                          # WF per-seed median fold PF (for pf_weighted)
+      42:   1.566
+      2025: 1.584
+      3141: 1.619
 
-# --- SAC Hyperparameters (PLACEHOLDER — update with HPO best trial) ---
+# --- SAC Hyperparameters (trial 56 HPs from sg1_xauusd_ftmo_rehpo_20260419) ---
 agents:
   sac:
-    lr_actor: 0.00022148365220787234
-    lr_critic: 0.00018486046430982398
-    lr_alpha: 0.000642523828301745
-    gamma: 0.9677944079144885
-    tau: 0.0020470394844356323
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
     batch_size: 512
     buffer_size: 100
-    initial_alpha: 0.1476793336332415
-    gradient_clip: 9.281178071284028
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
 
 # --- Network (must match training checkpoint exactly) ---
 network:
@@ -66,13 +85,13 @@ features:
   norm_span: 120
   bootstrap_bars: 30000               # 60-min scale needs ~7200 1-min bars. 30K is 2x safe.
 
-# --- Signal Gate (must match training — agent trained with composite gating) ---
+# --- Signal Gate (trial 56 calibration — must match training) ---
 signal_gate:
   enabled: true
   gate_mode: "composite"
-  atr_threshold: 0.3
-  parkinson_threshold: 0.02
-  volume_threshold: 0.5
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
   max_hold_bars: 20
   gate_always_on_first: true
 
@@ -85,8 +104,8 @@ bar_clock:
 # --- Trading ---
 trading:
   initial_balance: 100000.0            # FTMO $100K account
-  deadband_threshold: 0.25
-  taker_fee: 0.00035                   # 3.5bps effective CFD spread
+  deadband_threshold: 0.35             # trial 56 (must match ens_agreement threshold)
+  taker_fee: 0.000235                  # steady-state (S464)
   weekend_flatten:
     enabled: true
     minutes_before_close: 30           # Flatten 30 min before Friday close
@@ -105,8 +124,13 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
+  # Explicit run_id required — otherwise the engine's deterministic id builder
+  # `live-{asset}-{exchange}-{mode}` produces `live-xauusd-ctrader-paper`, which
+  # collides with gmgp1-xauusd and causes both strategies to attach to the same
+  # WandB run via `resume="allow"`.
+  run_id: "live-sg1-xauusd-ctrader-paper-20260422"
   tags: ["live", "sg-1", "XAUUSD", "Gold", "SAC", "3min", "cTrader", "paper",
-         "CFD", "FTMO", "signal-gated", "prop-firm"]
+         "CFD", "FTMO", "signal-gated", "prop-firm", "ensemble", "ens-agreement"]
 
 # --- Safety ---
 safety:

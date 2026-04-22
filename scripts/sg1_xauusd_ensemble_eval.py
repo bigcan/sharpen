@@ -54,7 +54,10 @@ SEED_CHECKPOINTS = {
     789: "checkpoints/sg1-xauusd-l1-multiseed-rehpo-batch2-seed789_20260420_171539/checkpoint_final.pth",
     456: "checkpoints/sg1-xauusd-l1-multiseed-rehpo-batch2-seed456_20260420_171539/checkpoint_final.pth",
 }
-# Reported test PFs from memory: project_sg1_xauusd_l1_multiseed_s488.md
+# Reported test PFs from memory: project_sg1_xauusd_l1_multiseed_s488.md.
+# Used ONLY by the module-level `_agg_pf_weighted` in single-window mode.
+# In WF mode we build a closure-based variant from `ensemble.seed_pfs` so the
+# per-seed weights track whichever L1 batch produced the checkpoints.
 SEED_PFS = {42: 2.940, 789: 2.841, 456: 2.812}
 
 
@@ -155,6 +158,22 @@ def _agg_pf_weighted(actions: Dict[int, np.ndarray], _db: float) -> np.ndarray:
     return (stacked * w[:, None]).sum(axis=0)
 
 
+def _make_pf_weighted(seed_pfs: Dict[int, float]) -> Callable:
+    """WF-mode factory: returns a pf-weighted aggregator using the supplied
+    per-seed PFs (typically from the upstream L1 seed_report), so weights match
+    the checkpoints being combined rather than the stale module-level defaults."""
+    def f(actions: Dict[int, np.ndarray], _db: float) -> np.ndarray:
+        pfs = {s: seed_pfs.get(s) for s in actions}
+        if any(v is None or v <= 0 for v in pfs.values()):
+            w = np.ones(len(actions), dtype=float)  # equal-weight fallback
+        else:
+            w = np.array([pfs[s] for s in actions], dtype=float)
+        w = w / w.sum()
+        stacked = np.stack([actions[s] for s in actions])
+        return (stacked * w[:, None]).sum(axis=0)
+    return f
+
+
 # --- run one rule -----------------------------------------------------------
 
 def run_rule(config: dict, agents: Dict[int, object], rule_name: str, rule_fn: Callable,
@@ -199,7 +218,7 @@ def run_rule(config: dict, agents: Dict[int, object], rule_name: str, rule_fn: C
         cur = getattr(base_env, "current_step", None)
         ts = base_ts[cur - 1] if (base_ts is not None and cur is not None and 0 <= cur - 1 < len(base_ts)) else None
 
-        rows.append({
+        row = {
             "step": step,
             "timestamp": ts,
             "portfolio_value": _s("portfolio_value", 100000.0),
@@ -212,10 +231,11 @@ def run_rule(config: dict, agents: Dict[int, object], rule_name: str, rule_fn: C
             "prop_firm_termination": info.get("prop_firm_termination"),
             "reward": float(reward),
             "action_agg": float(action[0]),
-            "action_42":  float(per_agent[42][0]),
-            "action_789": float(per_agent[789][0]),
-            "action_456": float(per_agent[456][0]),
-        })
+        }
+        # Per-seed action columns track whichever seeds are loaded (dynamic).
+        for s, act in per_agent.items():
+            row[f"action_{s}"] = float(act[0])
+        rows.append(row)
         if step % 5000 == 0:
             log.info(f"[{rule_name}] step={step} pv={rows[-1]['portfolio_value']:.2f}")
         step += 1
@@ -259,7 +279,8 @@ def _override_test_window(config: dict, test_start: str, test_end: str,
 
 def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
                     rules_subset: Optional[List[str]] = None,
-                    skip_missing_folds: bool = True) -> dict:
+                    skip_missing_folds: bool = True,
+                    output_dir: Optional[str] = None) -> dict:
     """Drive per-fold ensemble eval over a WF config.
 
     Pipeline per fold:
@@ -280,8 +301,23 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
     seeds: List[int] = list(ens.get("seeds", [42, 789, 456]))
     pattern: str = ens.get("checkpoint_pattern",
                            "checkpoints/WF_seed{seed}_fold_{fold:02d}_*/checkpoint_final.pth")
-    rule_names: List[str] = list(ens.get("rules",
-                                         [r[0] for r in RULES]))
+    # Build the effective rule table dynamically so solo_<seed> names track
+    # the seeds declared in the WF config. The module-level RULES constant is
+    # only used in single-window mode (`main`), which still pins the hard-coded
+    # seeds via SEED_CHECKPOINTS.
+    # `seed_pfs` weights pf-weighted aggregation against whichever upstream L1
+    # batch produced these checkpoints (falls back to equal-weight if absent).
+    seed_pfs = {int(k): float(v) for k, v in (ens.get("seed_pfs") or {}).items()}
+    effective_rules: List[tuple] = (
+        [(f"solo_{s}", _agg_solo(s)) for s in seeds]
+        + [
+            ("ens_mean",        _agg_mean),
+            ("ens_median",      _agg_median),
+            ("ens_agreement",   _agg_agreement),
+            ("ens_pf_weighted", _make_pf_weighted(seed_pfs)),
+        ]
+    )
+    rule_names: List[str] = list(ens.get("rules", [r[0] for r in effective_rules]))
     if rules_subset:
         rule_names = [r for r in rule_names if r in set(rules_subset)]
 
@@ -300,7 +336,7 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
     )
     log.info(f"Generated {len(folds)} WF folds")
 
-    root_out = Path("results/sg1_xauusd_ensemble_wf")
+    root_out = Path(output_dir) if output_dir else Path("results/sg1_xauusd_ensemble_wf")
     root_out.mkdir(parents=True, exist_ok=True)
 
     per_fold_metrics: List[Dict[str, dict]] = []   # [{rule: metrics}] per fold
@@ -329,10 +365,9 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
         agents = _load_agents_from_paths(fold_cfg, ckpt_paths, device)
 
         fold_metrics = {}
-        for rule_name, rule_factory in RULES:
+        for rule_name, rule_fn in effective_rules:
             if rule_name not in rule_names:
                 continue
-            rule_fn = rule_factory()
             df = run_rule(fold_cfg, agents, rule_name, rule_fn, device, fold_out)
             m = compute_gate_metrics(df, rule_name)
             m.update(ftmo_buffers(m))
@@ -553,10 +588,13 @@ def main():
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     ap.add_argument("--rules", nargs="*", default=None,
                     help="Subset of rule names to run (default: all)")
+    ap.add_argument("--output_dir", default=None,
+                    help="WF-mode output directory (default: results/sg1_xauusd_ensemble_wf)")
     args = ap.parse_args()
 
     if args.wf_config:
-        run_wf_ensemble(args.wf_config, args.gates_file, args.device, rules_subset=args.rules)
+        run_wf_ensemble(args.wf_config, args.gates_file, args.device,
+                        rules_subset=args.rules, output_dir=args.output_dir)
         return
 
     with open(args.config, encoding="utf-8") as f:

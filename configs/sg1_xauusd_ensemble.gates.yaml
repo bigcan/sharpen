@@ -14,12 +14,12 @@
 
 workstream: "sg1_xauusd"
 variant: "ensemble_agreement_top3"
-seeds: [42, 789, 456]                          # top-3 from L1 multiseed (S488)
+seeds: [42, 2025, 3141]                        # actual WF seeds (OANDA auto-chain)
 aggregation_rule: "ens_agreement"              # candidate rule under test
 
 # Fold count expected from the multiseed WF config.
-# 6 folds covering Aug 2025 → Mar 2026 test windows.
-wf_folds: 6
+# 8 folds covering Aug 2025 → Mar 2026 test windows (OANDA span Jan 2025→Apr 2026).
+wf_folds: 8
 
 # ---------------------------------------------------------------------------
 # Gates
@@ -33,7 +33,7 @@ gates:
       folds. If solo seeds fail the base WF discipline, the ensemble is moot.
     pf_floor: 1.1
     seeds_pass_min: 2                          # >=2/3 seeds pass per fold
-    min_folds_pass: 5                          # in >=5/6 folds
+    min_folds_pass: 7                          # in >=7/8 folds
 
   g2_no_regression:
     description: >-
@@ -41,7 +41,7 @@ gates:
       that fold. Defined as ens_PF >= ens_ratio_min * best_solo_PF in at least
       min_folds_pass folds.
     ens_ratio_min: 0.90
-    min_folds_pass: 5                          # >=5/6 folds
+    min_folds_pass: 7                          # >=7/8 folds
 
   g3_uplift:
     description: >-
@@ -55,11 +55,11 @@ gates:
   g4_ftmo_compliance:
     description: >-
       Applied to the ENSEMBLE trajectory per fold (not the solo trajectories).
-      All three FTMO sub-gates must PASS in every fold (strict: 6/6).
+      All three FTMO sub-gates must PASS in every fold (strict: 8/8).
     daily_dd_buffer_pp_min: 0.5                # 4% cap − worst_intraday_dd%
     trailing_dd_buffer_pp_min: 0.5             # 8% cap − trailing_mdd%
     compliance_must_pass: true                 # active_days/single_day_share
-    min_folds_pass: 6                          # all folds
+    min_folds_pass: 8                          # all folds
 
   g5_dd_stability:
     description: >-
@@ -84,8 +84,10 @@ decision:
 
 provenance:
   drafted_on: "2026-04-21"
+  reconciled_on: "2026-04-22"                  # S489 cont: seeds+folds matched to OANDA reality
   drafted_by_session: "post-S488"
   upstream_memory: "project_sg1_xauusd_ensemble_s488.md"
   plan_artifact: ".agent/memory/artifacts/plans/sg1_ensemble_wf_confirmation_plan.md"
-  l1_multiseed_result: "median PF 2.706, CV 7.73% (N=10)"
-  in_sample_ensemble_result: "ens_agreement PF 3.455 vs best solo 2.680 on L1 test"
+  l1_multiseed_result: "OANDA redo: median PF 1.367, CV 3.47% (N=10, top-3 by backtest_test/profit_factor: 2025, 3141, 42)"
+  wf_stage3_result: "3/3 seeds 8/8 folds PF>=1.1, median fold PFs 1.566/1.584/1.619, worst MDD -1.62%, inter-seed CV ~1.7%"
+  in_sample_ensemble_result: "ens_agreement PF 3.455 vs best solo 2.680 on L1 test (pre-OANDA-redo, kept as hypothesis anchor)"
