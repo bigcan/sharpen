@@ -103,7 +103,7 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 100000.0            # FTMO $100K account
+  initial_balance: 100000.0            # IC Markets demo (cTID <ACCT_8>) — reset to $100K via web UI 2026-04-22
   deadband_threshold: 0.35             # trial 56 (must match ens_agreement threshold)
   taker_fee: 0.000235                  # steady-state (S464)
   weekend_flatten:

@@ -79,7 +79,7 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 10000.0             # cTrader demo (reset 2026-04-13)
+  initial_balance: 100000.0            # cTrader demo (reset to $100K via web UI 2026-04-22)
   deadband_threshold: 0.25
   taker_fee: 0.00015                   # 1.5bps effective spread
   weekend_flatten:
