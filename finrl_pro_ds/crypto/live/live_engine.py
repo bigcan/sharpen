@@ -32,7 +32,7 @@ import os
 import signal
 import tempfile
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone  # noqa: F401 (date used in annotations)
 from pathlib import Path
 from typing import Optional
 
@@ -99,7 +99,7 @@ class LiveTradingEngine:
 
         # FIX AUD-H04: Track daily loss by UTC date, not bar count
         self._daily_start_value = self._portfolio_value
-        self._last_daily_reset_date: Optional[datetime] = None
+        self._last_daily_reset_date: Optional[date] = None
         self._max_daily_loss_pct = config.get("safety", {}).get("max_daily_loss_pct", 0.05)
 
         # FIX AUD-H07: Periodic funding rate fetch interval (bars between fetches)
@@ -274,6 +274,15 @@ class LiveTradingEngine:
                 # Windows doesn't support add_signal_handler
                 signal.signal(sig, lambda s, f: self._request_stop("signal"))
 
+        # Audit FIND-02 / S491: pre-broker halt gate. If a prior process
+        # persisted a halt (daily_loss / position_mismatch / balance_mismatch /
+        # risk_halt / intrabar_dd), sleep until halted_until BEFORE paying the
+        # cost of broker.connect() + bootstrap. Avoids death-looping broker
+        # auth on a stale token while we wait for UTC day rollover.
+        self._write_bootstrap_health("pre_broker_halt_gate")
+        if await self._check_persistent_halt():
+            return
+
         # Connect broker
         await self.broker.connect()
         logger.info(f"Broker connected: {self.broker.exchange_id} "
@@ -315,12 +324,13 @@ class LiveTradingEngine:
         # returns 0.0 because _contracts_to_position divides by zero PV).
         await self._update_portfolio_value()
 
-        # S490: balance-mismatch startup guard. The engine stores _current_position
-        # as lots*lot_size*price / _portfolio_value — a mid-session PV change
-        # silently invalidates cached positions and trips the reconciler. Refuse
-        # to start if broker equity has drifted from config.initial_balance beyond
-        # tolerance, forcing the operator to reconcile consciously (update config
-        # + restart, or opt out via safety.accept_balance_mismatch=true).
+        # S490 + FIND-02: balance-mismatch startup guard. The engine stores
+        # _current_position as lots*lot_size*price / _portfolio_value — a
+        # mid-session PV change silently invalidates cached positions and trips
+        # the reconciler. On detection, persist halt_state and exit cleanly so
+        # the pre-broker halt gate sleeps until UTC day rollover on next
+        # restart, instead of raising and death-looping under Docker
+        # restart-policy. Operator can opt out via safety.accept_balance_mismatch.
         safety_cfg = self.config.get("safety", {})
         mismatch_tolerance = safety_cfg.get("balance_mismatch_tolerance_pct", 0.10)
         accept_mismatch = safety_cfg.get("accept_balance_mismatch", False)
@@ -343,7 +353,21 @@ class LiveTradingEngine:
                     )
                 else:
                     logger.critical(msg)
-                    raise RuntimeError(msg)
+                    self._write_halt_state(
+                        reason="balance_mismatch",
+                        detail=(
+                            f"broker_equity={self._portfolio_value:.2f} "
+                            f"config_ib={config_ib:.2f} "
+                            f"drift={drift:.4f} "
+                            f"tolerance={mismatch_tolerance:.4f}"
+                        ),
+                        now_utc=datetime.now(timezone.utc),
+                    )
+                    self._request_stop("balance_mismatch")
+                    # Clean shutdown so broker TCP + loader close gracefully.
+                    # Pre-broker halt gate will fire on next restart.
+                    await self._shutdown()
+                    return
 
         # FIX AUD-M01: Re-calibrate peak/initial from broker equity, not config.
         # Config initial_balance may differ from actual account balance,
@@ -371,7 +395,12 @@ class LiveTradingEngine:
         # S427: gate on persistent halt state before entering main loop.
         # If a prior process tripped daily-loss / MAX_DD, stay halted
         # until halted_until so `restart: unless-stopped` can't revive us.
+        # Post-FIND-02 this is a defensive secondary check; the pre-broker
+        # halt gate catches virtually every case.
         if await self._check_persistent_halt():
+            # FIND-05: broker + loader are wired by now — close cleanly on
+            # mid-sleep SIGTERM so we don't leak a TCP connection.
+            await self._shutdown()
             return
 
         # Initialize WandB
@@ -1338,8 +1367,27 @@ class LiveTradingEngine:
         fast adverse moves, and that lag let XAUUSD run past FTMO's 10% DD
         line on 2026-04-13 (raw -11.74% final vs smoothed -9.37% at trip).
         Two-consecutive-bar requirement preserves single-spike robustness.
+
+        Audit FIND-01: ``max_daily_loss_pct <= 0`` disables the check. A
+        literal 0.0 used to trip ``raw_return < -0.0`` on any losing bar
+        (Velotrade 2-step configs tripped on the first red bar). Prop-firm
+        challenges without a daily-loss rule (Velotrade 2-step) can now set
+        this to 0.0 as an explicit "disabled" flag.
         """
         current_date = bar_time.date()
+
+        # FIND-01: non-positive limit disables the check. Still rotate the
+        # daily anchor so reporting remains correct across UTC day rollovers.
+        if self._max_daily_loss_pct <= 0:
+            if (
+                self._last_daily_reset_date is None
+                or current_date != self._last_daily_reset_date
+            ):
+                self._daily_start_value = self._portfolio_value
+                self._last_daily_reset_date = current_date
+                self._pv_buffer.clear()
+                self._consecutive_raw_breach_count = 0
+            return
 
         if self._last_daily_reset_date is None or current_date != self._last_daily_reset_date:
             self._daily_start_value = self._portfolio_value
