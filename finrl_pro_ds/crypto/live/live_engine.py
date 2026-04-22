@@ -1103,6 +1103,19 @@ class LiveTradingEngine:
                     f"exchange={exchange_pos:.4f}, divergence={pos_divergence:.4f} "
                     f"(>{self._reconciliation_halt_pct:.0%}). HALTING.",
                 )
+                # S491: persist halt so Docker restart enters safe sleep-to-midnight
+                # loop instead of thrashing through broker reconnect on every cycle
+                # (see project_xauusd_crash_storm_s491 — 4h gmgp1-xauusd outage).
+                self._write_halt_state(
+                    reason="position_mismatch",
+                    detail=(
+                        f"internal={self._current_position:.4f} "
+                        f"exchange={exchange_pos:.4f} "
+                        f"divergence={pos_divergence:.4f} "
+                        f"threshold={self._reconciliation_halt_pct:.4f}"
+                    ),
+                    now_utc=datetime.now(timezone.utc),
+                )
                 self._request_stop("position_mismatch")
             elif pos_divergence > self._reconciliation_warn_pct:
                 logger.warning(
