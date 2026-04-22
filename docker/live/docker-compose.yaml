@@ -293,6 +293,37 @@ services:
       - gmgp1-xauusd-logs:/app/logs
       - gmgp1-xauusd-state:/app/state
 
+  sg1-xauusd:
+    <<: *crypto-strategy
+    container_name: sg1-xauusd
+    profiles: [ctrader, all]
+    labels:
+      finrl.monitor: "true"
+      finrl.strategy: "sg1-xauusd"
+      finrl.broker: "ctrader"
+    environment:
+      <<: *common-env
+      BROKER_TYPE: ctrader
+      STRATEGY_NAME: sg1-xauusd
+      STRATEGY_RUNNER: scripts/run_live_ctrader.py
+      STRATEGY_CONFIG: /app/configs/live_sg1_xauusd_ctrader.yaml
+      METRICS_PORT: "9108"                       # next after 9107 (reserved block)
+      # SG-1 XAUUSD uses a separate IC Markets demo login — isolate creds so a
+      # rotation on one strategy doesn't clobber the other. Fallback to the
+      # shared CTRADER_* vars (GMGP1 pattern) if strategy-specific ones unset.
+      CTRADER_CLIENT_ID:     ${SG1_XAUUSD_CTRADER_CLIENT_ID:-${CTRADER_CLIENT_ID:-}}
+      CTRADER_CLIENT_SECRET: ${SG1_XAUUSD_CTRADER_CLIENT_SECRET:-${CTRADER_CLIENT_SECRET:-}}
+      CTRADER_ACCESS_TOKEN:  ${SG1_XAUUSD_CTRADER_ACCESS_TOKEN:-${CTRADER_ACCESS_TOKEN:-}}
+      CTRADER_ACCOUNT_ID:    ${SG1_XAUUSD_CTRADER_ACCOUNT_ID:-${CTRADER_ACCOUNT_ID:-}}
+    volumes:
+      # Mount all 8 fold checkpoint directories per seed so the ensemble glob in
+      # run_live_ctrader.py (fold:02d pattern) resolves inside the container.
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/WF_seed42_fold_07_20260421_220234:/app/checkpoints/WF_seed42_fold_07_20260421_220234:ro
+      - ${CHECKPOINT_DIR}/WF_seed2025_fold_07_20260421_214535:/app/checkpoints/WF_seed2025_fold_07_20260421_214535:ro
+      - ${CHECKPOINT_DIR}/WF_seed3141_fold_07_20260421_215709:/app/checkpoints/WF_seed3141_fold_07_20260421_215709:ro
+      - sg1-xauusd-logs:/app/logs
+      - sg1-xauusd-state:/app/state
+
   # ============================================================
   #  Data Collectors (no trading, no checkpoints)
   # ============================================================
@@ -417,6 +448,7 @@ volumes:
   funding-arb-logs:
   sync-1h-logs:
   gmgp1-xauusd-logs:
+  sg1-xauusd-logs:
   velotrade-btc-logs:
   gmgp1-gold-state:
   sg1-gold-state:
@@ -424,5 +456,6 @@ volumes:
   funding-arb-state:
   sync-1h-state:
   gmgp1-xauusd-state:
+  sg1-xauusd-state:
   velotrade-btc-state:
   hyperliquid-data:

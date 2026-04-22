@@ -1,33 +1,30 @@
-# SG-1 XAUUSD FTMO re-HPO — Stage 3 Walk-Forward, ENSEMBLE CONFIRMATION VARIANT
+# SG-1 XAUUSD ensemble WF — STRESS SIDECAR (diagnostic only, not a gate).
 #
-# Reconciled 2026-04-22 (S489 cont.) against OANDA-redo reality.
-# The actual WF runs (parents wnsbv3ec / fz0mfvn0 / 0890x0s9) used seeds
-# [42, 2025, 3141] chosen by the auto-chain poller from the L1 OANDA batch
-# (not the in-sample top-3 [42, 789, 456] that lived in this file originally).
-# The 24 fold checkpoints (3 seeds × 8 folds, 245.7 MB) already sit at
-#   checkpoints/WF_seed{42,2025,3141}_fold_{00..07}_*/checkpoint_final.pth
-# pulled via C:/tmp/pull_wf_checkpoints.py.
+# Built 2026-04-22 as the Stage 2c overlay on top of _wf_multiseed.yaml after
+# the primary eval PASSED all G1–G5 gates (verdict at
+#   results/sg1_xauusd_ensemble_wf/verdict.json, 2026-04-22 06:47Z).
 #
-# Upstream:
-#   - Stage 2 L1 multiseed OANDA PASS (N=10, median PF 1.367, CV 3.47%).
-#   - Stage 3 WF PASS for all three seeds: 8/8 folds per seed at PF>=1.1,
-#     median fold PFs 1.566 / 1.584 / 1.619, worst fold MDD -1.62%,
-#     inter-seed CV(median PF) ~1.7%.
+# Soft pass rule from the plan artifact:
+#   ens_agreement median fold PF >= 1.5 across 8 folds, FTMO-compliant in >=6/8.
+# Below 1.5 or <6/8 FTMO compliance -> flag a deploy-sizing discount in Stage 4.
 #
-# Gate (pre-committed, lives in configs/sg1_xauusd_ensemble.gates.yaml):
-#   G1 Solo baseline  : >=2/3 seeds PF>=1.1 per fold in >=7/8 folds
-#   G2 No regression  : per-fold ens_PF >= 0.9 * best_solo_PF in >=7/8 folds
-#   G3 Uplift         : median ens_PF / median best_solo_PF >= 1.10
-#   G4 FTMO           : ensemble trajectory per-fold: dd buffers >=0.5pp + PASS
-#   G5 DD stability   : CV(ens_PF) across folds <= 0.35
-#   ALL PASS -> approve paper aggregation; ANY FAIL -> solo-best remains
-#   (current solo-best fallback: seed 3141, median PF 1.619).
+# Overlays (plan §Stress sidecar):
+#   taker_fee    0.000235 x 1.2 -> 0.000282        (fee +20%)
+#   gap_atr_mult 3.0 x 1.5      -> 4.5             (gap detection +50%)
+#   slippage_base_bps           -> 0.45            (plan says "+50%"; primary WF
+#     leaves slippage at env default 0 -> naive +50% still vacuous. Using 0.3 bps
+#     as the typical gold-spot slippage floor — per continuous_swing_env.py line
+#     57 — and applying +50% gives 0.45. Judgement call, documented here.)
 #
-# Eval (no training; this config only drives splitter + ensemble block):
+# Eval:
 #   python scripts/sg1_xauusd_ensemble_eval.py \
-#       --wf_config configs/sg1_xauusd_ftmo_rehpo_wf_multiseed.yaml \
+#       --wf_config configs/sg1_xauusd_ftmo_rehpo_wf_multiseed_stress.yaml \
 #       --gates_file configs/sg1_xauusd_ensemble.gates.yaml \
+#       --rules ens_agreement solo_42 solo_2025 solo_3141 \
 #       --device cpu
+#   (Solos included so we can read the stressed solo vs stressed ensemble lift.
+#   Read per-fold metrics, not verdict.overall — G2 seeds_pass_min/min_folds_pass
+#   still evaluate but were calibrated for the non-stressed run.)
 
 data:
   # OANDA XAU_USD M1 mid — same file the WF runs were trained against, so the
@@ -75,7 +72,8 @@ env:
   initial_balance: 100000.0
   window_size: 30
   features_per_scale: 8
-  taker_fee: 0.000235                 # steady-state (S464)
+  taker_fee: 0.000282                 # STRESS: steady-state 0.000235 * 1.20
+  slippage_base_bps: 0.45             # STRESS: gold-spot floor 0.3 bps * 1.50
   deadband_threshold: 0.35            # trial 56 + ensemble agreement classifier basis
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
@@ -84,7 +82,7 @@ env:
   max_drawdown_pct: 0.10
   scales: [3, 15, 60]
   gap_detection: true
-  gap_atr_mult: 3.0
+  gap_atr_mult: 4.5                   # STRESS: 3.0 * 1.50 (tighter gap trigger)
   reward:
     mode: "dsr"
     dsr_eta: 0.009270901804613313     # trial 56
