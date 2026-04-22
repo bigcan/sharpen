@@ -37,11 +37,12 @@ Each stage launches as its own WandB run with naming `<workstream>-stage{N}-<pur
 | 0 | data-prep | Build cleaned parquet + manifest | minutes | `<dataset>.manifest.json` |
 | 1 | hpo | Hyperparameter search (Optuna) | hours–days | `best_hp.json` + `study.db` |
 | 2 | l1-multiseed | Validate best HPs across N≥3 seeds | hours | per-seed checkpoints + `seed_report.json` |
+| 2.5 | ensemble-confirm (prop-firm / live-capital; else advisory) | Verify multi-seed `ens_agreement` aggregation beats best-solo on L1 test window | minutes | `ensemble_report.json` (solo + 4 ensemble rules + uplift verdict) |
 | 3 | walk-forward (+ fixed-lot stress sub-report) | Temporal robustness across K windows; full-window fixed-lot replay attached as sub-artifact | hours | per-window checkpoints + `wf_report.json` (includes `stress` block) |
 | 4 | recent-oos (+ compliance filter sub-report) | OOS test on `today−60d → today−1d`; FTMO/Velotrade compliance filter applied to candidate set | minutes | `oos_report.json` (includes `compliance` block + final selection) |
 | 5 | paper-deploy | Live container on `finrl-desktop` | continuous | live engine emits its own runs |
 
-**Stage count:** 6 (stages 0–5). Fixed-lot stress and compliance filter are *replay/selection* operations on prior outputs, not new compute stages — kept as sub-reports inside stages 3 and 4 to reduce CLI/manifest plumbing without losing rigor.
+**Stage count:** 7 (stages 0, 1, 2, 2.5, 3, 4, 5). Stage 2.5 is eval-only (no training, no new WandB run by default — it writes a sub-artifact under the stage-2 parent). Fixed-lot stress and compliance filter are *replay/selection* operations on prior outputs, not new compute stages — kept as sub-reports inside stages 3 and 4 to reduce CLI/manifest plumbing without losing rigor.
 
 ---
 
@@ -175,6 +176,26 @@ All numeric gate thresholds live in `configs/<workstream>.gates.yaml` and are re
   - Rationale: the CV estimator has 95% CI ≈ [0.15, 0.45] at N=10 (McKay/Vangel, assumed approximate normality of PF across seeds). With a gate at 0.30, a measured CV of 0.30 is consistent with true CV anywhere in that interval; N=20 tightens to [0.20, 0.40]. Without the escalation rule the Type I/II error rates of the CV gate are poorly controlled. Literature anchors: Henderson et al. 2018 (*Deep RL That Matters*); Agarwal et al. 2021 (*Statistical Precipice*) both recommend N ≥ 10 for variance-based claims
   - Escalation batches use **different seeds** from the first batch (no overlap) so that CV estimate pools independent samples
 
+### Stage 2.5 — ensemble-confirm (mandatory for prop-firm / live-capital; advisory elsewhere)
+- **Inputs:** top-3 seeds by L1 test PF from stage 2 (`seed_report.json`), their checkpoints, and the L1 test window
+- **Method:** run `scripts/*_ensemble_eval.py` (reusing `sg1_xauusd_ensemble_eval.py` aggregation + backtest) on the L1 test window with `profit_target_pct` disabled and `episode_length=0` (full-window eval), reporting bar-level PF for:
+  - `solo_<seed>` for each of the top-3 seeds (baseline)
+  - `ens_mean` — np.mean of per-agent continuous actions
+  - `ens_median` — robust to a single outlier seed
+  - **`ens_agreement`** — deadband classification into {short, flat, long} + majority vote (≥2 of 3); size = mean of agreeing seeds; otherwise flat (the canonical rule)
+  - `ens_pf_weighted` — softmax-weighted by each seed's stage-2 test PF
+- **Gate:** `ens_agreement PF / best_solo_PF ≥ gates.ensemble_uplift_min` (default **1.10**)
+  - PASS → promote **`ens_agreement`** to the deploy aggregation rule; stage 3 WF runs all three seeds, and stage 5 live-config declares `agent.ensemble: {rule: ens_agreement, seeds: [...]}` (SG-1 XAUUSD precedent, S489)
+  - FAIL → stage 3/5 fall back to best-solo (advisory log only for non-prop-firm; hard fallback for prop-firm)
+  - AMBIGUOUS (uplift ∈ [1.05, 1.10)) → run once more on a second workstream (same asset class if possible) before codifying for that workstream; keep best-solo in the interim
+- **Checkpoint collision guard:** if multiple seeds share a checkpoint dir (e.g. concurrent deploys hit `deploy_bare_metal.py` timestamp-collision), substitute the next-best distinct seed. Ensemble eval **requires** per-seed distinct weight provenance; manifest must record checkpoint SHA256s
+- **Rationale — two independent data points:**
+  - SG-1 XAUUSD L1 OANDA (S490, N=1): `ens_agreement` median-fold PF 2.058 vs best-solo 1.715 → **+17.6% uplift**; stress sidecar PASS; paper-deployed `sg1-xauusd` on ens_agreement
+  - GMGP1 XAUUSD L1 (S493, N=2 confirmation): `ens_agreement` PF 2.568 vs best-solo 2.192 → **+17.15% uplift**; both workstreams converge on ~+17% lift at the same asset class, isolating the aggregation rule from venue/HPO noise
+  - Threshold ≥ 1.10 gives ~1.5× buffer over noise floor and matches SG-1's pre-committed rule in `configs/sg1_xauusd_ensemble.gates.yaml:g3_uplift`
+- **Cost:** ~5 min wall-time on CPU for a 2-month L1 test window (one forward pass per step × 7 rules)
+- **When not to run:** research-tier workstreams (e.g. CMGP1 crypto) may skip Stage 2.5 — ensemble remains a per-workstream option, not a protocol requirement. `validate_config.py --stage ensemble-confirm` only hard-fails on prop-firm / live-capital tags (`prop-firm`, `FTMO`, `Velotrade`)
+
 ### Stage 3 — walk-forward (+ fixed-lot stress sub-report)
 - K ≥ `gates.wf_windows` (default 4) rolling windows
 - Window split: `train: 12mo, val: 1mo, test: 1mo`, slide by 1mo (workstream may override under `wf.split` in gate config)
@@ -222,6 +243,12 @@ python scripts/run_full_pipeline.py --config configs/gmgp1_xauusd_ftmo_hpo.yaml 
 # Stage 2 — multiseed L1 (own WandB runs, fan out)
 python scripts/run_full_pipeline.py --config configs/gmgp1_xauusd_ftmo_hpo.yaml \
   --stage l1-multiseed --hp-run <stage1_run_id> --seeds 5
+
+# Stage 2.5 — ensemble confirmation (eval-only, ~5 min CPU)
+# Reuses the stage-2 parent run — does not spawn a new WandB run by default.
+python scripts/gmgp1_xauusd_ensemble_eval.py \
+  --config configs/gmgp1_xauusd_ftmo_rehpo_l1_multiseed.yaml
+# (Or the SG-1 equivalent: scripts/sg1_xauusd_ensemble_eval.py)
 
 # Stage 3 — walk-forward + fixed-lot stress (own WandB runs per window)
 python scripts/run_full_pipeline.py --config configs/gmgp1_xauusd_ftmo_hpo.yaml \
@@ -329,7 +356,7 @@ Quarterly review: every 90 days, all paper strategies re-run stage 4 (recent-OOS
 
 | Workstream | Current state | Migration action |
 |---|---|---|
-| GMGP1-XAUUSD | Already staged (HPO → L1 → paper). Static_peak fixed S468. | Add stage 3 fixed-lot sub-report and stage 4 (recent-OOS + compliance) before next paper-deploy. Refresh data to today−7d before re-HPO. |
+| GMGP1-XAUUSD | Already staged (HPO → L1 → paper). Static_peak fixed S468. **Stage 2.5 PASS S493** (ens_agreement +17.15% uplift, study `gmgp1_xauusd_ftmo_rehpo_20260421`). | Run stage 3 WF with top-3 seeds using `ens_agreement` aggregation, then stage 4 + compliance before paper swap. |
 | GMGP1-BTC | Same. Velotrade no daily cap. | Same; stage 4 compliance sub-report skipped (Velotrade has no daily-loss compliance). |
 | GMGP1-GC | Paper running on MGC. | Stage 4 quarterly review at 90-day mark. |
 | SG-1 XAUUSD | Constrained-RL Arm B running (`01imgvm7`). | Once ablation gate passes, re-HPO under v2 with stages 0–4. |

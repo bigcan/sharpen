@@ -8,7 +8,7 @@ Usage:
     python scripts/validate_config.py --config configs/<cfg>.yaml --stage <stage>
     python scripts/validate_config.py --config configs/<cfg>.yaml --stage hpo --strict
 
-Stages: data-prep, hpo, l1-multiseed, wf, oos, paper-deploy
+Stages: data-prep, hpo, l1-multiseed, ensemble-confirm, wf, oos, paper-deploy
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ import yaml
 logger = logging.getLogger("validate_config")
 
 PROTOCOL_DOC = "docs/protocol_v2.md"
-VALID_STAGES = ("data-prep", "hpo", "l1-multiseed", "wf", "oos", "paper-deploy")
+VALID_STAGES = ("data-prep", "hpo", "l1-multiseed", "ensemble-confirm", "wf", "oos", "paper-deploy")
 
 
 @dataclass
@@ -191,6 +191,7 @@ def check_data_manifest(cfg: dict, stage: str, r: ValidationResult) -> None:
         "data-prep": 7,
         "hpo": 180,
         "l1-multiseed": 180,
+        "ensemble-confirm": 180,  # reuses L1 test window — same recency bound
         "wf": 90,
         "oos": 1,
         "paper-deploy": 1,
@@ -282,6 +283,71 @@ def check_l1_multiseed(cfg: dict, r: ValidationResult) -> None:
                "stage 2 (S488) recommends N>=10 for CV-estimator reliability")
 
 
+def check_ensemble_confirm(cfg: dict, r: ValidationResult) -> None:
+    """Stage 2.5 gates (Protocol v2 §4, S493 codification).
+
+    Prop-firm / live-capital workstreams MUST pass Stage 2.5 before Stage 3.
+    Non-prop-firm workstreams may opt in via `wandb.tags` or gates block, but
+    the stage is advisory for them (warn, do not fail).
+    """
+    gates = cfg.get("gates", {}) or {}
+    ens = cfg.get("ensemble", {}) or {}
+    tags = cfg.get("wandb", {}).get("tags", []) or []
+    prop_firm = any(t in tags for t in ("prop-firm", "propfirm", "FTMO", "velotrade"))
+
+    # `ensemble:` block is required for Stage 2.5 configs — it names the top-3
+    # seeds + aggregation rule that the eval script will load.
+    if not ens:
+        msg = (
+            "ensemble block missing — Stage 2.5 requires `ensemble:` declaring "
+            "seeds (top-3 distinct checkpoints) + rule (default ens_agreement). "
+            "See configs/sg1_xauusd_ftmo_rehpo_wf_multiseed.yaml for schema."
+        )
+        r.fail(msg) if prop_firm else r.warn(msg)
+        return
+
+    seeds = ens.get("seeds")
+    if not isinstance(seeds, list) or len(seeds) != 3:
+        r.fail(
+            f"ensemble.seeds={seeds!r} — must be a list of exactly 3 seed ids "
+            "(top-3 from stage 2 by test PF)"
+        )
+    else:
+        r.ok(f"ensemble.seeds = {seeds}")
+
+    rule = ens.get("rule", "ens_agreement")
+    if rule != "ens_agreement":
+        r.warn(
+            f"ensemble.rule={rule!r} — canonical rule is 'ens_agreement' "
+            "(+17.6% SG-1, +17.15% GMGP1 uplift; see project_ensemble_protocol_"
+            "confirmation_test.md). Other rules allowed for A/B but should not "
+            "be promoted to deploy without independent uplift evidence."
+        )
+
+    # Gate: uplift floor must be declared per-workstream (no hardcoded default
+    # in code — CLAUDE.md anti-pattern rule).
+    if "ensemble_uplift_min" not in gates:
+        msg = (
+            "gates.ensemble_uplift_min not set — Stage 2.5 pre-committed "
+            "threshold. Protocol v2 default is 1.10; add to gates YAML."
+        )
+        r.fail(msg) if prop_firm else r.warn(msg)
+    else:
+        uplift_min = gates.get("ensemble_uplift_min")
+        try:
+            uplift_min = float(uplift_min)
+        except (TypeError, ValueError):
+            r.fail(f"gates.ensemble_uplift_min={uplift_min!r} is not numeric")
+            return
+        if uplift_min < 1.05:
+            r.warn(
+                f"gates.ensemble_uplift_min={uplift_min} < 1.05 — below the "
+                "AMBIGUOUS-band floor. Two-point evidence suggests ≥1.10 is "
+                "the load-bearing threshold."
+            )
+        r.ok(f"ensemble uplift gate = {uplift_min}×")
+
+
 def check_wf(cfg: dict, r: ValidationResult) -> None:
     gates = cfg.get("gates", {})
     if gates.get("wf_windows", 4) < 4:
@@ -325,6 +391,7 @@ STAGE_CHECKS = {
     "data-prep": [],
     "hpo": [check_hpo],
     "l1-multiseed": [check_l1_multiseed],
+    "ensemble-confirm": [check_ensemble_confirm],
     "wf": [check_wf],
     "oos": [],
     "paper-deploy": [check_paper_deploy],
