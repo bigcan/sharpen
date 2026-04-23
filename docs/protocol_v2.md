@@ -1,10 +1,11 @@
-# Training → Live Protocol v2.1
+# Training → Live Protocol v2.2
 
 > **Status:** Active. Standardizes the training-to-live workflow across all FinRL-Pro_DS workstreams (GMGP1, SG-1, CMGP1, AlphaSeek, Funding-Arb).
 > **Reference run:** GMGP1 staged approach. **Anti-pattern:** AlphaSeek `k28l6ef8` monolithic 5.7-day run.
-> **Owner:** R&D. **Last updated:** 2026-04-23 Session 495 (Stage 2.5 val-split amendment).
+> **Owner:** R&D. **Last updated:** 2026-04-23 Session 495-cont (RLOps drift + safe-mode amendment).
 >
 > **Version history:**
+> - **v2.2** (2026-04-23, S495-cont) — RLOps amendment from external expert review: §8 extended with live action-distribution drift (regime-conditioned KL / deadband-delta), §8.3 adds tiered WARN/CRIT safe-mode with graceful flatten (replaces prior "auto-halt" which was ambiguous and left open positions at risk), §2 manifest schema adds `eval_distribution` block required in stage-2 seed reports and stage-2.5 ensemble reports, §11 moves drift check from deferred to blocking for prop-firm / live-capital workstreams. See `decision_protocol_v22_rlops_drift_safemode.md`.
 > - **v2.1** (2026-04-23, S495) — Stage 2.5 ensemble rule selection moved from hardcoded `ens_agreement` (canonical per S493) to val-argmax-PF per-workstream selection. Motivated by GMGP1-BTC L1 falsification (S495 — ens_agreement was the *worst* ensemble on trending BTC, +4.10% vs ens_mean +8.13%). First customer: **GMGP1-BTC** (retro-applied). See `decision_ensemble_val_selection_s495.md`.
 > - **v2.0** (2026-04-18, S475) — initial post-audit revision: 6 core stages + Stage 2.5 ensemble-confirm (with hardcoded `ens_agreement` canonical rule per S493). Superseded the DRAFT.
 > - **v2-DRAFT** (2026-04-17, S474) — first codified protocol after AlphaSeek monolithic-HPO incident.
@@ -87,6 +88,18 @@ Every stage writes `<run_id>.manifest.json` to `results/<run_id>/`:
     "max_grad_norm": 4.2,
     "diverged": false
   },
+  "eval_distribution": {
+    "histogram_bins": [-1.0, -0.75, -0.5, -0.25, 0.0, 0.25, 0.5, 0.75, 1.0],
+    "counts": [212, 180, 310, 1420, 1510, 340, 205, 198],
+    "mean": 0.02, "std": 0.41, "entropy": 1.12,
+    "deadband_frac": 0.38, "saturation_frac": 0.04,
+    "by_vol_quartile": {
+      "q1": {"mean": 0.01, "std": 0.28, "deadband_frac": 0.52, "saturation_frac": 0.01},
+      "q2": {"mean": 0.02, "std": 0.37, "deadband_frac": 0.41, "saturation_frac": 0.03},
+      "q3": {"mean": 0.03, "std": 0.44, "deadband_frac": 0.32, "saturation_frac": 0.05},
+      "q4": {"mean": 0.02, "std": 0.52, "deadband_frac": 0.24, "saturation_frac": 0.08}
+    }
+  },
   "started_at": "2026-04-18T14:00:00Z",
   "ended_at": "2026-04-19T02:14:00Z",
   "status": "PASS",
@@ -101,6 +114,7 @@ Every stage writes `<run_id>.manifest.json` to `results/<run_id>/`:
 - `random_seeds` — every training stage. Eval reproducibility.
 - `outputs.replay_buffer` — stages 1, 2, 3 for off-policy algos (SAC, IQN). Required for `--resume` to work correctly; cold-buffer resume changes effective sample distribution.
 - `training_health` — every training stage. Used by stage gates (see §4 stage 1).
+- `eval_distribution` — **stage 2 per-seed** (required for prop-firm / live-capital; advisory elsewhere) and **stage 2.5 ensemble** (required when Stage 2.5 is mandatory). Consumed by §8.2 live-action-drift check; the bucketed `by_vol_quartile` form is the reference for regime-conditional baselining. Aggregated ensemble distribution must be logged under `ensemble_report.json → ensemble_eval_distribution` with an additional `composition_rule` field (the S495 chosen aggregation rule). For multi-dim action spaces (CryptoPerp, Funding-Arb), log per-asset marginal histograms under `by_asset.<asset_key>` instead of a scalar histogram.
 
 Status enum: `PASS`, `FAIL`, `WARN`, `RUNNING`. Downstream stages refuse to launch if upstream `status != "PASS"`.
 
@@ -173,6 +187,7 @@ All numeric gate thresholds live in `configs/<workstream>.gates.yaml` and are re
 - Each seed evaluated over `gates.eval_episodes` (default 10) — for stochastic policies (SAC), report **mean and std across episodes** per seed; deterministic eval (greedy action) is logged additionally for diagnostic purposes
 - Report **median** PF, Sharpe, MDD across seeds (not max)
 - Gate: median PF ≥ `gates.l1_pf_floor` (default 1.5), all seeds profitable, **CV (std/mean) of PF ≤ `gates.l1_pf_cv_max` (default 0.30)** — tightened from prior 0.5 because CV=0.5 admits PF=2.0 ± 1.0 which is operationally unstable
+- **`eval_distribution` per seed (v2.2 RLOps requirement)** — emitted into `seed_report.json` for every seed. Mandatory for prop-firm / live-capital; advisory otherwise. Bucketing by vol quartile uses the `regime_quartiles` from the data manifest (§3). This is the live-monitoring baseline referenced in §8.2; missing `eval_distribution` means §8.2 action-drift is log-only for that workstream.
 
 - **Pre-committed escalation rule (mandatory for prop-firm / live-capital, N ≥ 10):**
   - Declare `gates.l1_pf_cv_ambiguous: [low, high]` (default `[0.22, 0.38]`) in the workstream gate YAML **before launch**, not after seeing results
@@ -205,6 +220,7 @@ All numeric gate thresholds live in `configs/<workstream>.gates.yaml` and are re
 - **Retro-apply to BTC, leave paper-deployed XAUUSD alone:** Workstreams already paper-deployed on `ens_agreement` keep their S493 verdict (no container churn): SG-1 XAUUSD (paper live per S489), GMGP1 XAUUSD CME (Stage 3 WF already launched on `ens_agreement`). **First customer under S495 = GMGP1-BTC Velotrade L1** (retro-applied — val was never consulted in the S493 run, so running S495 val-selection now is a legitimate use of val, not post-hoc bias). Second customer = SG-1 BTC L1 (launched 2026-04-23 S494-cont, parent `ighx368o`).
 - **Cost:** ~8 min wall-time on CPU for 2mo val + 2mo test windows (7 rules on val + 4 rules on test). Previous single-window eval was ~5 min.
 - **When not to run:** research-tier workstreams (e.g. CMGP1 crypto) may skip Stage 2.5 — ensemble remains a per-workstream option, not a protocol requirement. `validate_config.py --stage ensemble-confirm` only hard-fails on prop-firm / live-capital tags (`prop-firm`, `FTMO`, `Velotrade`).
+- **`ensemble_eval_distribution` (v2.2 RLOps requirement)** — `ensemble_report.json` records the aggregated action distribution produced by `chosen_rule` on the **test window**, using the same schema as stage-2 `eval_distribution` plus a `composition_rule` field. This is what live monitoring compares against post-deploy; per-seed distributions are **not** valid baselines for an ensemble-deployed strategy because the aggregated distribution is a convex combination of per-seed distributions under the chosen rule. Missing this block means §8.2 drift check falls back to the best-solo seed's distribution with a warning flag recorded in the manifest.
 
 ### Stage 3 — walk-forward (+ fixed-lot stress sub-report)
 - K ≥ `gates.wf_windows` (default 4) rolling windows
@@ -325,21 +341,62 @@ Output: `data/parity/<training_source>_<live_source>.json`. Referenced by `valid
 
 ---
 
-## 8. Live-Feed Drift (post-deploy)
+## 8. Live-Feed + Live-Action Drift (post-deploy)
 
-Extension to `live_obs_builder.py`:
+Extension to `live_obs_builder.py`. Three independent drift signals (feature, joint-feature, action) feed a single tiered safe-mode state machine (§8.3). **Blocking for prop-firm / live-capital workstreams; advisory for research-tier.** Grace period: drift checks suppressed until `gates.drift.min_bars_before_check` (default 500) live bars have accumulated.
+
+### 8.1 Feature drift (environment / input side)
 
 **Per-feature drift** (catches obvious schema/scaling breaks):
-- First 1000 live bars compute z-score per feature against training-distribution mean/std (from `feature_distribution` in data manifest)
+- Rolling 1000 live bars compute z-score per feature against training-distribution mean/std (from `feature_distribution` in data manifest)
 - WARN if > 3 features drift > 3σ
-- CRIT (auto-halt) if > 3 features drift > 5σ
+- CRIT if > 3 features drift > 5σ
 
-**Joint drift** (catches correlated drift that per-feature misses):
+**Joint-feature drift** (catches correlated drift that per-feature misses):
 - Compute Mahalanobis distance of the rolling 1000-bar feature mean against the training-distribution multivariate mean (covariance from manifest top-K features)
 - WARN if Mahalanobis > `gates.drift_mahalanobis_warn` (default χ²(K, 0.99))
-- CRIT (auto-halt) if > `gates.drift_mahalanobis_crit` (default χ²(K, 0.999))
+- CRIT if > `gates.drift_mahalanobis_crit` (default χ²(K, 0.999))
 
-This catches silent feed schema changes, broker feed degradation, and training-to-live distribution shift before the strategy bleeds capital. Per-feature checks miss correlated drift (e.g., all volatility features shifting together within 3σ individually but jointly anomalous), which is the more dangerous failure mode.
+This catches silent feed schema changes, broker feed degradation, and training-to-live distribution shift. Per-feature checks miss correlated drift (all volatility features shifting together within 3σ individually but jointly anomalous).
+
+### 8.2 Action drift (policy / output side) — NEW in v2.2
+
+Feature drift is necessary but not sufficient. An RL agent can receive in-distribution observations yet respond to them in a way that has shifted — most commonly **collapse to a single safe action** (V7-style deadband-flat at >99% of bars). This is the dominant RL-specific failure mode and is invisible to §8.1.
+
+- **Baseline source:** `eval_distribution` from §2 — per-seed from `seed_report.json` (solo-deployed) or `ensemble_eval_distribution` from `ensemble_report.json` (ensemble-deployed, post-S495). Missing baseline → action drift runs in log-only mode, no WARN/CRIT.
+- **Regime conditioning:** the `by_vol_quartile` sub-distributions are the reference. Live rolling-window realized vol maps to a quartile using `data_manifest.regime_quartiles` cutpoints; the comparison uses the matching-quartile baseline, not a single global distribution. Required to avoid false positives on legitimate regime flips (trending vs choppy).
+- **Window:** rolling `gates.drift.window_bars` (default 1000) live actions.
+
+**Scalar action space (V7, `Box(-1,1,(1,))`):**
+- `deadband_frac_delta = |live_frac(|a|<0.25) − baseline_frac(|a|<0.25)|`
+- `saturation_frac_delta = |live_frac(|a|>0.95) − baseline_frac(|a|>0.95)|`
+- WARN if either delta > `gates.drift.deadband_frac_warn` / `gates.drift.saturation_frac_warn` (default 0.15)
+- CRIT if either delta > `gates.drift.deadband_frac_crit` / `gates.drift.saturation_frac_crit` (default 0.30)
+
+**Multi-dim action space (CryptoPerp, Funding-Arb, `Box(-1,1,(n_assets,))`):**
+- Per-asset marginal KL-divergence between live action histogram and baseline histogram (same bins as manifest)
+- `max_asset_kl = max_{asset} KL(live_asset || baseline_asset)`
+- WARN if `max_asset_kl > gates.drift.action_kl_warn` (default 0.5)
+- CRIT if `max_asset_kl > gates.drift.action_kl_crit` (default 1.0)
+- Joint (full-action-vector) KL is intractable at 10–20 dimensions and is not computed; the marginal-max is the informative view.
+
+**Cheap free signal (not a gate, log only):** workstreams with an oracle/signal gate (SG-1 `oracle_signal_gate`) emit live gate-firing rate alongside eval baseline rate. A delta > 0.3 against eval is a strong precursor even if §8.2 gates haven't fired.
+
+### 8.3 Tiered safe-mode — NEW in v2.2
+
+Replaces prior "auto-halt" language, which was ambiguous (halt ≠ flatten in trading) and left open positions at risk for the human-response window.
+
+| State | Trigger (any of) | Action |
+|---|---|---|
+| **WARN** | feature 3σ / Mahalanobis 99% / action-KL > `action_kl_warn` / deadband-delta > `deadband_frac_warn` / saturation-delta > `saturation_frac_warn` | Engine flag `no_new_entries: true` (existing positions held). Telegram WARN. Continue monitoring. |
+| **CRIT** | feature 5σ / Mahalanobis 99.9% / action-KL > `action_kl_crit` / deadband-delta > `deadband_frac_crit` / saturation-delta > `saturation_frac_crit` | Engine writes `kill_file` with body `{state: CRIT, cause, ts, signal_values}`. Existing FTMO-style force-close path (S422) flattens all open positions. Container exits non-zero. **Watchdog does NOT auto-restart.** Telegram CRIT. |
+| **REPEAT-CRIT LOCKOUT** | CRIT fires ≥ `gates.safe_mode.crit_repeat_count_before_lockout` (default 2) within `crit_repeat_window_hours` (default 24) | Watchdog refuses manual restart until `kill_file.override` written by human. Prevents restart thrash on genuine regime breaks. |
+
+**Implementation notes:**
+- Existing FTMO flatten code (S422, `PropFirmWrapperV7.force_close`) is reused — no new flatten primitive. The hook is: drift callback → `kill_file` writer → engine's existing kill-file observer → force-close → exit.
+- Watchdog reads `kill_file` metadata (timestamp + count within 24h) to implement lockout. Kill-file format extended with a JSON body (currently a bare sentinel file).
+- Stage 5 pre-flight (`validate_config.py`) rejects any live YAML missing `risk.flatten_on_kill_file: true` or `kill_file` path for prop-firm / live-capital configs.
+- Cross-reference from §9 retrain cadence: CRIT → halt-paper-for-retrain path always goes through this §8.3 flatten, never through "stop new entries only."
 
 ---
 
@@ -352,9 +409,11 @@ Automatic triggers (watchdog cron). Thresholds are per-workstream in `configs/<w
 | Live PF < `retrain.live_pf_ratio` × paper PF (default 0.8) for `retrain.live_pf_window_days` (default 5) consecutive trading days, AND ≥ `retrain.min_trades_window` (default 20) trades in window | Open re-HPO ticket |
 | `today − checkpoint.train_end > retrain.max_age_days` (default 90) | Open re-HPO ticket |
 | Stage 4 recent-OOS verdict = WATCH at next quarterly review | Open re-HPO ticket |
-| Stage 4 recent-OOS verdict = RETRAIN-required | Halt paper, mandatory re-HPO before redeploy |
+| Stage 4 recent-OOS verdict = RETRAIN-required | Halt paper via §8.3 CRIT path (graceful flatten, not halt-only), mandatory re-HPO before redeploy |
+| §8.1/8.2 CRIT drift alarm | §8.3 CRIT: flatten + kill_file + no auto-restart. Retrain ticket auto-opened. |
 
 The `min_trades_window` floor prevents low-frequency strategies (e.g., funding-arb at hourly cadence) from triggering on 5 trades.
+All "halt paper" actions route through §8.3 — no retrain trigger may bypass the flatten step when open positions exist.
 
 Quarterly review: every 90 days, all paper strategies re-run stage 4 (recent-OOS) with current data.
 
@@ -386,19 +445,23 @@ Default to v2 from inception. No fused-pipeline pattern allowed.
 
 These pieces are required for v2 to be operationally enforceable rather than aspirational:
 
-- `validate_config.py` implementation (encodes all stage 0/5 rules + manifest schema validation)
+- `validate_config.py` implementation (encodes all stage 0/5 rules + manifest schema validation, including v2.2 drift/safe_mode gate enforcement for prop-firm / live-capital tags)
 - `build_data_manifest.py` implementation (stage 0 producer)
-- Manifest JSON-schema file at `docs/schemas/manifest.schema.json` (schema enforcement for §2)
+- Manifest JSON-schema file at `docs/schemas/manifest.schema.json` (schema enforcement for §2, including `eval_distribution` block)
 - Per-workstream `gates.yaml` files (so §4 thresholds are config-driven, not hardcoded)
 - Stage refactor of `run_full_pipeline.py` (currently monolithic at line 745) — minimum viable: `--stage {hpo,l1-multiseed,wf,oos,all}` dispatch with manifest read/write
+- **(v2.2, blocking for prop-firm / live-capital only)** Live-feed + live-action drift in `live_obs_builder.py` (§8.1 + §8.2) wired to §8.3 tiered safe-mode
+- **(v2.2, blocking for prop-firm / live-capital only)** `eval_distribution` writer in `seed_report.json` (Stage 2) and `ensemble_report.json` (Stage 2.5); backfill for SG-1 XAUUSD + GMGP1 XAUUSD CME paper-deployed checkpoints
+- **(v2.2, blocking for prop-firm / live-capital only)** Kill-file JSON-body extension + watchdog repeat-CRIT lockout (`kill_file.override` handshake)
 
-### Deferred to v2.1 (nice-to-have)
+### Deferred to v2.3 (nice-to-have)
 
 - `source_parity.py` implementation
 - Fixed-lot stress as a callable sub-report (currently inline in stage 3 spec)
-- Live-feed drift z-score + Mahalanobis check in `live_obs_builder.py`
 - Watchdog cron for retrain triggers
 - Skill-chain auto-dispatch wiring (file-based hand-off works in the meantime)
+- Re-calibration of action-drift KL defaults (0.5 / 1.0) per asset class after 2–3 workstreams publish `eval_distribution` baselines
+- Conditional baselines extended beyond vol quartile (e.g. vol × spread, vol × session) — pending false-positive rate data from vol-only conditioning
 
 ---
 
