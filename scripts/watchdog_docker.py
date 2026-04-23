@@ -395,11 +395,52 @@ def handle_container_event(event: dict) -> None:
 # Periodic sweep
 # ---------------------------------------------------------------------------
 
+def _read_container_kill_file(container, path: str = "/tmp/finrl_live_kill") -> dict | None:
+    """Try to read the engine's kill_file from inside the container.
+
+    Uses `docker exec cat` so we don't need a shared volume. Returns the
+    parsed JSON payload, or None if the file is missing / unreadable / the
+    container is not running. Failures are non-fatal — callers fall back to
+    log grep or just proceed without lockout info.
+    """
+    try:
+        rc, output = container.exec_run(["cat", path])
+    except Exception as e:  # noqa: BLE001 — exec_run errors are varied
+        logger.debug(f"kill_file exec_run failed for {container.name}: {e}")
+        return None
+    if rc != 0 or not output:
+        return None
+    try:
+        raw = output.decode("utf-8", errors="replace").strip()
+    except Exception:  # noqa: BLE001
+        return None
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Legacy empty / non-JSON kill_file. Still signals halt, but has no
+        # drift_crit metadata — treat as generic kill_file.
+        return {"reason": "legacy"}
+
+
+def _has_drift_crit_kill_file(container) -> tuple[bool, dict | None]:
+    """Return (is_drift_crit, payload) for the container's kill_file."""
+    payload = _read_container_kill_file(container)
+    if payload is None:
+        return False, None
+    return payload.get("reason") == "drift_crit", payload
+
+
 def _should_auto_restart(container_name: str, streak: int, now: float | None = None) -> bool:
     """Decide whether to auto-restart a persistently unhealthy container.
 
     Returns True when the streak has reached the configured threshold AND
     the container has not exceeded the per-hour restart cap.
+
+    NOTE: drift-CRIT halts are checked by callers via `_has_drift_crit_kill_file`
+    before this function is consulted (Protocol v2.2 §8.3: watchdog does NOT
+    auto-restart on drift CRIT; manual human re-enable required).
     """
     if not AUTO_RESTART_ENABLED:
         return False
@@ -464,6 +505,30 @@ def sweep(client: docker.DockerClient) -> None:
             _unhealthy_streak[name] = streak
 
             if _should_auto_restart(name, streak):
+                # v2.2 §8.3: drift-CRIT halts are operator-only re-enable.
+                # Refuse auto-restart and surface the kill_file payload so
+                # humans can decide whether to clear kill_file + override.
+                is_crit, payload = _has_drift_crit_kill_file(container)
+                if is_crit:
+                    count = (payload or {}).get("count", 1)
+                    logger.critical(
+                        f"Auto-restart REFUSED for {name}: drift-CRIT "
+                        f"kill_file present (count={count})",
+                    )
+                    _unhealthy_streak.pop(name, None)  # break the streak loop
+                    alert(
+                        name,
+                        f"<b>[DRIFT-CRIT LOCKOUT] {info['strategy']}</b>\n"
+                        f"Container: {name}\n"
+                        f"Reason: drift CRIT kill_file "
+                        f"(count={count}, detail={(payload or {}).get('detail', '')})\n"
+                        f"Manual re-enable: clear kill_file"
+                        + (
+                            " AND kill_file.override" if count >= 2 else ""
+                        ),
+                    )
+                    continue
+
                 logger.warning(
                     f"Auto-restart: {name} after {streak}x unhealthy "
                     f"(threshold={AUTO_RESTART_AFTER_N})",

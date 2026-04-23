@@ -40,6 +40,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 
 from finrl_pro_ds.hpo.env_factory import make_env  # noqa: E402
 from finrl_pro_ds.data.splitter import RollingWindowSplitter  # noqa: E402
+from finrl_pro_ds.reporting import compute_eval_distribution  # noqa: E402
 from scripts.sg1_arm_gate_backtest import (  # noqa: E402
     _build_sac_agent,
     _prep_backtest_config,
@@ -370,6 +371,7 @@ def run_stage_2_5_val_selection(
              f"{data_cfg['test_start_date']} -> {data_cfg['test_end_date']}")
     test_rules = solo_rules + [(chosen_rule, chosen_fn)]
     test_metrics: Dict[str, dict] = {}
+    test_trajs: Dict[str, pd.DataFrame] = {}  # retained for v2.2 eval_distribution
     for rname, rfn in test_rules:
         df = run_rule(test_cfg, agents, rname, rfn, device, test_dir)
         m = compute_gate_metrics(df, rname)
@@ -378,6 +380,7 @@ def run_stage_2_5_val_selection(
             json.dumps(m, indent=2, default=str)
         )
         test_metrics[rname] = m
+        test_trajs[rname] = df
 
     # --- Phase 4: uplift gate ---
     solo_test_pfs = {s: test_metrics[f"solo_{s}"]["pf_bar"] for s in seed_pfs}
@@ -423,6 +426,47 @@ def run_stage_2_5_val_selection(
         "reason": reason,
     }
     (out_dir / "verdict.json").write_text(json.dumps(verdict, indent=2, default=str))
+
+    # --- v2.2 §2 eval_distribution artifacts (seed_report.json + ensemble_report.json) ---
+    # Per Protocol v2.2 §2: Stage 2 per-seed action distributions + Stage 2.5
+    # ensemble action distribution (with composition_rule). Consumed by §8.2
+    # live action-drift check as the regime-baseline. Regime bucketing
+    # (by_vol_quartile) is currently emitted as unavailable — populated once
+    # the data_manifest + bar-vol series wiring lands (T5 backfill ticket).
+    deadband_abs = float(config.get("env", {}).get("deadband_threshold", 0.25))
+    seed_report = {
+        "protocol": "v2.2_stage_2_seed_report",
+        "workstream": workstream_label,
+        "window": f"{data_cfg['test_start_date']} -> {data_cfg['test_end_date']}",
+        "seeds": sorted(seed_pfs),
+        "eval_distribution_by_seed": {
+            str(s): compute_eval_distribution(
+                test_trajs[f"solo_{s}"]["action_agg"].to_numpy(),
+                deadband=deadband_abs,
+            )
+            for s in seed_pfs
+        },
+    }
+    (out_dir / "seed_report.json").write_text(
+        json.dumps(seed_report, indent=2, default=str)
+    )
+    ensemble_report = {
+        "protocol": "v2.2_stage_2_5_ensemble_report",
+        "workstream": workstream_label,
+        "window": f"{data_cfg['test_start_date']} -> {data_cfg['test_end_date']}",
+        "chosen_rule": chosen_rule,
+        "decision": decision,
+        "uplift": uplift,
+        "ensemble_eval_distribution": compute_eval_distribution(
+            test_trajs[chosen_rule]["action_agg"].to_numpy(),
+            deadband=deadband_abs,
+            composition_rule=chosen_rule,
+        ),
+        "per_seed_eval_distribution": seed_report["eval_distribution_by_seed"],
+    }
+    (out_dir / "ensemble_report.json").write_text(
+        json.dumps(ensemble_report, indent=2, default=str)
+    )
 
     # Also write a flat summary CSV (val + test side-by-side) for quick audit.
     summary_rows = []
