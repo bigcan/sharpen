@@ -1,0 +1,206 @@
+# SG-1 BTC Velotrade re-HPO — Stage 3 Walk-Forward, ENSEMBLE CONFIRMATION VARIANT
+#
+# Drafted 2026-04-23 (S494 cont.) to refactor SG-1 BTC WF from the old
+# per-window single-seed layout (sg1_btc_velotrade_wf_w{1,2,3}.yaml) into the
+# splitter-driven multiseed pattern already used by SG-1 XAUUSD.
+#
+# Upstream:
+#   - Stage 1 re-HPO  : `sg1_btc_velotrade_rehpo_20260420` trial #44
+#                        (PF=2.3031 at 5 bps Bybit taker, WandB q9pq44ug)
+#   - Stage 2 L1     : `configs/sg1_btc_velotrade_l1_multiseed.yaml`
+#                        N=10 seeds [42,123,456,789,1024,1337,2025,3141,5150,9999]
+#                        NOT YET LAUNCHED — `ensemble.seeds` below is a
+#                        placeholder populated post-L1 by the reconcile step.
+#   - Stage 2.5      : ensemble-confirm gates pre-committed in
+#                        `configs/sg1_btc_velotrade_ensemble.gates.yaml`.
+#                        Protocol v2 §4 S493 mandates Stage 2.5 between L1
+#                        and WF for prop-firm workstreams.
+#
+# Splitter (8 folds, mirrors XAUUSD cadence):
+#   data.start_date 2025-01-06 → data.end_date 2026-04-06 (parquet max)
+#   train_months=6 val_months=1 test_months=1 step_months=1
+#     fold 0: train 2025-01-06–2025-07-06  val 2025-07–08  test 2025-08–09
+#     fold 1: train 2025-02-06–2025-08-06  val 2025-08–09  test 2025-09–10
+#     fold 2: train 2025-03-06–2025-09-06  val 2025-09–10  test 2025-10–11
+#     fold 3: train 2025-04-06–2025-10-06  val 2025-10–11  test 2025-11–12
+#     fold 4: train 2025-05-06–2025-11-06  val 2025-11–12  test 2025-12–01
+#     fold 5: train 2025-06-06–2025-12-06  val 2025-12–01  test 2026-01–02
+#     fold 6: train 2025-07-06–2026-01-06  val 2026-01–02  test 2026-02–03
+#     fold 7: train 2025-08-06–2026-02-06  val 2026-02–03  test 2026-03–04
+#
+# Gate (pre-committed, lives in configs/sg1_btc_velotrade_ensemble.gates.yaml):
+#   G1 Solo baseline  : >=2/3 seeds PF>=1.1 per fold in >= min_folds_pass folds
+#   G2 No regression  : per-fold ens_PF >= 0.9 * best_solo_PF in >= min_folds_pass
+#   G3 Uplift         : median ens_PF / median best_solo_PF >= 1.10
+#   G4 Velotrade      : ensemble trajectory per-fold: trailing DD buffer >=0.5pp
+#                        (Velotrade 2-Step: 10% trailing cap, no daily gate)
+#   G5 DD stability   : CV(ens_PF) across folds <= 0.35
+#   ALL PASS -> approve ensemble paper-deploy aggregation
+#   ANY FAIL -> solo-best remains (by wf_median_pf)
+#
+# NOTE on checkpoint collision with XAUUSD:
+#   run_walk_forward.py emits `checkpoints/WF_seed{seed}_fold_{fold:02d}_<ts>/`
+#   regardless of asset. XAUUSD WF checkpoints exist with 2026-04-21 timestamps;
+#   BTC WF will get later timestamps. The glob below resolves by {seed,fold}
+#   across ALL timestamps, so the eval script caller must ensure the BTC run
+#   is launched after XAU checkpoints are archived OR pass a pre-filtered
+#   directory prefix. A future cleanup pass can fold asset into the prefix.
+#
+# Eval (no training; this config only drives splitter + ensemble block):
+#   python scripts/sg1_xauusd_ensemble_eval.py \
+#       --wf_config configs/sg1_btc_velotrade_rehpo_wf_multiseed.yaml \
+#       --gates_file configs/sg1_btc_velotrade_ensemble.gates.yaml \
+#       --device cpu
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "multiscale"
+  # Splitter-driven windowing — `splitter:` below generates 8 folds inside
+  # the [start_date, end_date] envelope. Parquet spans 2024-01-01 to
+  # 2026-04-06; we start 2025-01-06 so fold 0 test begins Aug 2025 (mirrors
+  # SG-1 XAUUSD schedule) and fold 7 test ends 2026-04-06.
+  start_date: "2025-01-06"
+  end_date: "2026-04-06"
+
+splitter:
+  train_months: 6
+  val_months: 1
+  test_months: 1
+  step_months: 1
+  buffer_days: 0
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  # S479 BTC calibration (copied from L1 multiseed): ~75% composite pass rate
+  # on Bybit 3-min 2024-01-01 → 2025-06-30 train window (262K bars, vol>0).
+  atr_threshold: 0.15
+  parkinson_threshold: 0.0009
+  volume_threshold: 0.60
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005                   # steady-state 5 bps Bybit retail taker (S464)
+  deadband_threshold: 0.25            # trial #44
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 3000
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: false                # BTC 24/7 — no session gaps
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0008427308583293202    # trial #44
+    dsr_scale: 1.0
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10           # Velotrade 2-Step Step 1 target
+    max_trailing_drawdown_pct: 0.08   # buffered (Velotrade cap=10%, matches GMGP1-BTC)
+    max_daily_loss_pct: 0.0           # Velotrade 2-Step has no daily loss gate
+    eod_hour_utc: 0                   # crypto 24/7, UTC midnight roll
+    drawdown_penalty_start: 0.04      # buffered-vs-cap pattern (GMGP1-BTC S489)
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false                # private_dim=5 (live compat)
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs: sg1_btc_velotrade_rehpo_20260420 trial #44 (PF=2.3031, WandB q9pq44ug).
+# Full precision from results/hpo_archive/sg1_btc_velotrade_rehpo_20260420.csv.
+# Identical to L1 multiseed so Stage 3 WF is apples-to-apples with Stage 2.
+agents:
+  sac:
+    lr_actor: 0.00015739192475706186
+    lr_critic: 0.00007322355805160213
+    lr_alpha: 0.0000026314031405474944
+    gamma: 0.9593670398875173
+    tau: 0.0002134448307797731
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.4088157097959411
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.516294914428727
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000             # Protocol v2 Stage 3 budget (matches XAUUSD WF)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+  # seed: set per-run via CLI (--seed N); launcher sweeps the top-3 L1 seeds.
+
+hpo:
+  enabled: false
+
+# Ensemble metadata — consumed by scripts/sg1_xauusd_ensemble_eval.py (or a
+# BTC-ported variant) via --wf_config.
+ensemble:
+  # Top-3 seeds by backtest_test/profit_factor from L1 multiseed.
+  # POPULATED POST-L1 BY RECONCILE STEP. Stage 3 launcher must read the L1
+  # seed_report to pick the top-3 before invoking run_walk_forward.py.
+  seeds: []
+  rule: ens_agreement                  # S493 canonical rule (two-point evidence)
+  rules: ["solo_<s1>", "solo_<s2>", "solo_<s3>",
+          "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
+  # Checkpoint path pattern — glob resolves one match per (seed, fold).
+  # NOTE: XAUUSD WF produces the SAME prefix; see header "checkpoint collision"
+  # note. Launch BTC WF only after archiving / renaming XAU checkpoints, or
+  # fold asset into the `run_full_pipeline` checkpoint-dir template.
+  checkpoint_pattern: "checkpoints/WF_seed{seed}_fold_{fold:02d}_*/checkpoint_final.pth"
+  # Test PFs populated from L1 seed_report (weights for ens_pf_weighted).
+  seed_pfs: {}
+  # Pointer to pre-committed gate YAML:
+  gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
+
+gates:                                # Protocol v2 §4 Stage 3 (training-level)
+  # Upstream-stage gates retained so multi-stage validation walks this config
+  # without complaining about missing keys (mirrors XAUUSD WF multiseed).
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                        # S488: prop-firm requires N>=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]    # S488: pre-committed escalation range
+  ensemble_uplift_min: 1.10           # S493 Stage 2.5 PROMOTE threshold
+  # Stage 3 gates
+  wf_windows: 8                       # validator requires >=4; splitter emits 8
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                   # S488: one parent run per seed; folds as win<i>/*
+  tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade", "velotrade-wrapped",
+         "prop-firm", "propfirm", "walk_forward", "wf-stage3", "ensemble",
+         "ensemble-confirm", "rehpo-trial44", "steady-state", "bybit-perp",
+         "upstream:sg1_btc_velotrade_rehpo_20260420"]
