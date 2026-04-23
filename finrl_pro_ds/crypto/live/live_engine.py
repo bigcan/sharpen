@@ -39,7 +39,107 @@ from typing import Optional
 import numpy as np
 import torch
 
+from finrl_pro_ds.monitoring import (
+    ActionDriftTracker,
+    REASON_DRIFT_CRIT,
+    read_kill_file,
+    should_lockout,
+    write_kill_file,
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _init_drift_tracker(config: dict) -> Optional[ActionDriftTracker]:
+    """Build a Protocol v2.2 §8.2 ActionDriftTracker from engine config.
+
+    Returns None (tracker disabled) when:
+      * `drift.enabled` is false/missing, OR
+      * baseline_path is missing / unreadable / has no eval_distribution.
+    Baseline resolution:
+      * `ensemble_report.json` → reads `ensemble_eval_distribution`
+      * `seed_report.json` with `drift.baseline_seed` → reads
+         `eval_distribution_by_seed.<seed>`
+    The tracker itself is permissive: an unreadable baseline returns
+    status=LOG_ONLY, which lets live monitoring run in observability-only
+    mode until T5 backfill writes proper artifacts.
+    """
+    drift_cfg = config.get("drift") or {}
+    if not drift_cfg.get("enabled", False):
+        return None
+
+    baseline_path = drift_cfg.get("baseline_path")
+    baseline: Optional[dict] = None
+    if baseline_path:
+        try:
+            with open(baseline_path, encoding="utf-8") as f:
+                payload = json.load(f)
+            if "ensemble_eval_distribution" in payload:
+                baseline = payload["ensemble_eval_distribution"]
+            elif "eval_distribution_by_seed" in payload:
+                seed_key = str(drift_cfg.get("baseline_seed", ""))
+                by_seed = payload["eval_distribution_by_seed"]
+                if seed_key and seed_key in by_seed:
+                    baseline = by_seed[seed_key]
+                elif by_seed:
+                    # Fall back to the first seed with a stable sort so repeat
+                    # restarts pick the same baseline.
+                    first = sorted(by_seed.keys())[0]
+                    baseline = by_seed[first]
+                    logger.warning(
+                        f"drift.baseline_seed unset; using seed {first} from "
+                        f"{baseline_path}",
+                    )
+            elif "eval_distribution" in payload:
+                baseline = payload["eval_distribution"]
+            else:
+                logger.warning(
+                    f"drift baseline at {baseline_path} has no recognized "
+                    f"eval_distribution block — running in LOG_ONLY",
+                )
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(
+                f"drift baseline load failed ({e}) — running in LOG_ONLY",
+            )
+
+    safe_cfg = config.get("safe_mode") or {}
+    # Scalar V7 deadband matches the env's deadband_threshold so the live
+    # tracker and training baseline bucket the same way.
+    deadband_abs = float(config.get("trading", {}).get(
+        "deadband_threshold",
+        config.get("env", {}).get("deadband_threshold", 0.25),
+    ))
+    # Prefer drift.* keys (v2.2 spec); fall back to top-level `gates.drift.*`
+    # if callers pass them through that path.
+    gates_drift = (config.get("gates") or {}).get("drift") or {}
+    gates_safe = (config.get("gates") or {}).get("safe_mode") or {}
+
+    def _pick(key: str, default: float) -> float:
+        for src in (drift_cfg, safe_cfg, gates_drift, gates_safe):
+            if key in src:
+                return float(src[key])
+        return float(default)
+
+    cutpoints = drift_cfg.get("regime_cutpoints") or gates_drift.get("regime_cutpoints")
+    tracker = ActionDriftTracker(
+        baseline=baseline,
+        window_bars=int(_pick("window_bars", 1000)),
+        min_bars_before_check=int(_pick("min_bars_before_check", 500)),
+        deadband_warn=_pick("deadband_frac_warn", 0.15),
+        deadband_crit=_pick("deadband_frac_crit", 0.30),
+        saturation_warn=_pick("saturation_frac_warn", 0.15),
+        saturation_crit=_pick("saturation_frac_crit", 0.30),
+        action_kl_warn=_pick("action_kl_warn", 0.5),
+        action_kl_crit=_pick("action_kl_crit", 1.0),
+        deadband_abs=deadband_abs,
+        regime_cutpoints=cutpoints,
+        vol_estimator_bars=int(_pick("vol_estimator_bars", 20)),
+    )
+    logger.info(
+        f"ActionDriftTracker active: baseline={'YES' if baseline else 'LOG_ONLY'} "
+        f"window={tracker.window_bars} warmup={tracker.min_bars_before_check}",
+    )
+    return tracker
 
 
 class LiveTradingEngine:
@@ -111,6 +211,12 @@ class LiveTradingEngine:
         # Safety
         self._kill_file = Path(config.get("safety", {}).get(
             "kill_file", "/tmp/finrl_live_kill",
+        ))
+        # v2.2 §8.3 override path: operator file that lifts repeat-CRIT lockout.
+        # Distinct from the kill_file itself; operator must also clear the
+        # kill_file to re-enable the strategy after a lockout.
+        self._kill_file_override = Path(config.get("safety", {}).get(
+            "kill_file_override", f"{self._kill_file}.override",
         ))
         self._emergency_flatten_on_error = config.get("safety", {}).get(
             "emergency_flatten_on_error", True,
@@ -258,6 +364,15 @@ class LiveTradingEngine:
         self._warmup_bars = config.get("features", {}).get("warmup_bars", 0)
         self._warmup_bars_remaining = 0
 
+        # Protocol v2.2 §8.2 action-drift tracker. Engine-side concerns:
+        #   - observe(target_position, current_close) after agent.predict()
+        #   - WARN: disable new entries (handled in _apply_drift_status); holds stay
+        #   - CRIT: write kill_file (§8.3 T2) + FTMO force-close; watchdog lockout
+        # Safe defaults: disabled unless `drift.enabled: true` and baseline resolvable.
+        self._drift_tracker = _init_drift_tracker(config)
+        self._drift_warn_active = False
+        self._drift_last_status = None
+
     # -------------------------------------------------------------------
     # Main loop
     # -------------------------------------------------------------------
@@ -273,6 +388,14 @@ class LiveTradingEngine:
             except NotImplementedError:
                 # Windows doesn't support add_signal_handler
                 signal.signal(sig, lambda s, f: self._request_stop("signal"))
+
+        # v2.2 §8.3 startup gate: if a prior process wrote a kill_file (drift
+        # CRIT or operator halt), refuse to start until the operator clears
+        # it. Repeat-CRIT lockout requires `kill_file.override` alongside
+        # clearing the kill_file. Runs BEFORE broker.connect() so we don't
+        # burn a cTrader token re-auth while locked out.
+        if self._check_kill_file_startup_gate():
+            return
 
         # Audit FIND-02 / S491: pre-broker halt gate. If a prior process
         # persisted a halt (daily_loss / position_mismatch / balance_mismatch /
@@ -479,9 +602,19 @@ class LiveTradingEngine:
     async def _trading_step_inner(self, bar_time: datetime) -> None:
         """Inner trading step logic (wrapped by _trading_step for PV race guard)."""
         # --- Safety: kill file check ---
+        # v2.2 §8.3: if the file is a drift-CRIT JSON, log the reason/count so
+        # the watchdog stream tells humans what happened. Legacy empty file
+        # still stops the engine with reason="kill_file" (backward-compat).
         if self._kill_file.exists():
-            logger.warning(f"Kill file detected: {self._kill_file}")
-            self._request_stop("kill_file")
+            payload = read_kill_file(self._kill_file)
+            reason = (payload or {}).get("reason", "legacy")
+            detail = (payload or {}).get("detail", "")
+            count = (payload or {}).get("count", 1)
+            logger.warning(
+                f"Kill file detected: {self._kill_file} "
+                f"(reason={reason} count={count} detail={detail})",
+            )
+            self._request_stop(f"kill_file:{reason}")
             return
 
         # Session 426: once-per-day futures contract roll check.
@@ -600,6 +733,31 @@ class LiveTradingEngine:
 
         # --- 5. Agent inference ---
         target_position = self._predict(obs)
+
+        # --- 5a. Action-drift tracking (Protocol v2.2 §8.2) ---
+        # observe() records the *policy output* before any overlays / deadband
+        # / risk clipping, so the live distribution matches the stage-2/2.5
+        # eval baseline (which was also the raw policy output).
+        if self._drift_tracker is not None:
+            try:
+                report = self._drift_tracker.observe(
+                    target_position, bar_close=current_close,
+                )
+                self._apply_drift_status(report, bar_time)
+                # If CRIT forced a stop, the kill_file writer + flatten run
+                # via T2 wiring; bail out of this step without executing trades.
+                if self._should_stop:
+                    return
+                # WARN disables new entries — hold existing position.
+                if self._drift_warn_active and target_position != self._current_position:
+                    self._log_step(
+                        bar_time, self._current_position,
+                        traded=False, skip_reason="drift_warn_no_new_entries",
+                    )
+                    self._prev_close = current_close
+                    return
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"drift tracker error (non-fatal): {e}")
 
         # --- 5b. PRISM L2 regime overlay ---
         regime_info: dict = {}
@@ -1799,6 +1957,132 @@ class LiveTradingEngine:
             )
         except Exception as e:
             logger.warning(f"WandB init failed: {e}")
+
+    def _check_kill_file_startup_gate(self) -> bool:
+        """Return True if engine must refuse to start (kill_file present).
+
+        Lockout semantics per Protocol v2.2 §8.3 (see
+        `finrl_pro_ds.monitoring.kill_file.should_lockout`). We log the
+        reason and exit via `_request_stop` so the main loop falls through
+        without connecting to the broker.
+        """
+        payload = read_kill_file(self._kill_file)
+        if payload is None:
+            return False
+        locked, reason = should_lockout(payload, self._kill_file_override)
+        if not locked:
+            logger.info(
+                f"kill_file startup gate cleared: {reason}. Removing "
+                f"{self._kill_file} and {self._kill_file_override} before start.",
+            )
+            try:
+                self._kill_file.unlink(missing_ok=True)
+                self._kill_file_override.unlink(missing_ok=True)
+            except OSError as e:
+                logger.warning(f"kill_file clear failed ({e}) — refusing start")
+                self._request_stop(f"kill_file_clear_failed:{e}")
+                return True
+            return False
+        logger.critical(f"STARTUP REFUSED — {reason}")
+        self._request_stop(f"kill_file_lockout:{payload.get('reason')}")
+        return True
+
+    def _request_drift_crit(self, report, bar_time: datetime) -> None:
+        """Protocol v2.2 §8.3 CRIT path.
+
+        1. Write/increment drift_crit kill_file JSON (count enables repeat-CRIT
+           lockout on the next restart).
+        2. Schedule existing FTMO-style emergency flatten so open positions
+           aren't left at risk for the human-response window (the "halt
+           without flatten is the bleed window" failure mode). The flatten
+           is async-spawned because `_apply_drift_status` runs synchronously
+           inside the step loop; awaiting here would block the loop.
+        3. Request stop with reason=drift_crit → container exits non-zero →
+           watchdog / restart policy sees the kill_file on next boot.
+        """
+        try:
+            payload = write_kill_file(
+                self._kill_file,
+                reason=REASON_DRIFT_CRIT,
+                detail=report.reason,
+                extra={
+                    "bar_time": bar_time.isoformat() if bar_time else None,
+                    "kl": report.kl,
+                    "deadband_frac_delta": report.deadband_frac_delta,
+                    "saturation_frac_delta": report.saturation_frac_delta,
+                    "bucket": report.bucket,
+                    "n_bars": report.n_bars,
+                },
+            )
+            logger.critical(
+                f"[drift] CRIT → kill_file written "
+                f"(count={payload.get('count', 1)} at {self._kill_file})",
+            )
+        except OSError as e:
+            logger.critical(f"[drift] CRIT but kill_file write failed: {e}")
+
+        # Kick the flatten without awaiting (step loop is sync at this frame).
+        # asyncio.create_task runs after _apply_drift_status returns; the
+        # `_should_stop` flag set here prevents the step loop from issuing
+        # new orders in the interim.
+        try:
+            asyncio.create_task(self._emergency_flatten())
+        except RuntimeError:
+            logger.warning("[drift] CRIT flatten could not be scheduled — no loop")
+        self._request_stop("drift_crit")
+
+    def _apply_drift_status(self, report, bar_time: datetime) -> None:
+        """Dispatch a Protocol v2.2 §8.2 DriftReport into engine side-effects.
+
+        * WARN  → set self._drift_warn_active so the step loop blocks new entries
+                  (existing position stays). Rearmed downward on next OK.
+        * CRIT  → call self._request_drift_crit() which (T2) writes the kill_file
+                  JSON, triggers the existing FTMO flatten path, and exits the
+                  engine non-zero so the watchdog sees the CRIT signal.
+        All status transitions are logged at INFO+ and attached to WandB.
+        """
+        from finrl_pro_ds.monitoring import DriftStatus
+
+        status = report.status
+        prev = self._drift_last_status
+        self._drift_last_status = status
+
+        if self._wandb_run is not None:
+            try:
+                import wandb
+                wandb.log(
+                    {f"drift/{k}": v for k, v in report.to_dict().items()
+                     if v is not None and not isinstance(v, str)},
+                    commit=False,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        if status == DriftStatus.CRIT:
+            if prev != DriftStatus.CRIT:
+                logger.critical(
+                    f"[drift] CRIT at bar {self._total_bars}: {report.reason} "
+                    f"(bucket={report.bucket}, n={report.n_bars})",
+                )
+            # T2 handles kill_file + flatten. Stub hook until T2 lands:
+            if hasattr(self, "_request_drift_crit"):
+                self._request_drift_crit(report, bar_time)
+            else:
+                self._drift_warn_active = True  # conservative fallback
+        elif status == DriftStatus.WARN:
+            if not self._drift_warn_active or prev != DriftStatus.WARN:
+                logger.warning(
+                    f"[drift] WARN at bar {self._total_bars}: {report.reason} "
+                    f"(bucket={report.bucket}, n={report.n_bars})",
+                )
+            self._drift_warn_active = True
+        elif status == DriftStatus.OK:
+            if self._drift_warn_active:
+                logger.info(
+                    f"[drift] OK at bar {self._total_bars} — clearing WARN",
+                )
+            self._drift_warn_active = False
+        # WARMUP / LOG_ONLY: silent pass-through
 
     def _make_wandb_run_id(self) -> str:
         """Generate deterministic WandB run ID from strategy config.
