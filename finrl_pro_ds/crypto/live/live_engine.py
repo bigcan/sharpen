@@ -743,13 +743,16 @@ class LiveTradingEngine:
                 report = self._drift_tracker.observe(
                     target_position, bar_close=current_close,
                 )
-                self._apply_drift_status(report, bar_time)
-                # If CRIT forced a stop, the kill_file writer + flatten run
+                await self._apply_drift_status(report, bar_time)
+                # If CRIT forced a stop, the kill_file writer + flatten ran
                 # via T2 wiring; bail out of this step without executing trades.
                 if self._should_stop:
                     return
-                # WARN disables new entries — hold existing position.
-                if self._drift_warn_active and target_position != self._current_position:
+                # WARN: disable new entries / flips / size-ups, but ALLOW
+                # moves toward zero so the agent can still close exposure.
+                # The XAUUSD S491 crash storm post-mortem flagged the inverse
+                # failure mode ("halt while long = can't reduce risk").
+                if self._drift_warn_active and self._blocked_by_drift_warn(target_position):
                     self._log_step(
                         bar_time, self._current_position,
                         traded=False, skip_reason="drift_warn_no_new_entries",
@@ -1958,47 +1961,59 @@ class LiveTradingEngine:
         except Exception as e:
             logger.warning(f"WandB init failed: {e}")
 
+    def _blocked_by_drift_warn(self, target_position: float) -> bool:
+        """Return True if WARN state should block a pending position move.
+
+        WARN "disable new entries, hold existing" (v2.2 §8.3): permit any
+        trade that REDUCES exposure (moves |target| toward 0 without flipping
+        sign) and block everything else (new entries from flat, flips,
+        size-ups). A small tolerance absorbs SAC's stochastic float noise
+        so "same position" isn't spuriously classified as size-up.
+        """
+        cur = float(self._current_position)
+        tgt = float(target_position)
+        tol = 1e-4
+        # Flat → any non-flat target is a new entry: BLOCK.
+        if abs(cur) <= tol:
+            return abs(tgt) > tol
+        # Sign flip (long→short or short→long) is strictly a new entry on
+        # the opposite side after closing: BLOCK.
+        if (cur > 0 and tgt < -tol) or (cur < 0 and tgt > tol):
+            return True
+        # Same direction: ALLOW if |tgt| <= |cur| + tol (reduce or hold);
+        # BLOCK if |tgt| > |cur| + tol (size-up adds new exposure).
+        return abs(tgt) > abs(cur) + tol
+
     def _check_kill_file_startup_gate(self) -> bool:
         """Return True if engine must refuse to start (kill_file present).
 
         Lockout semantics per Protocol v2.2 §8.3 (see
         `finrl_pro_ds.monitoring.kill_file.should_lockout`). We log the
         reason and exit via `_request_stop` so the main loop falls through
-        without connecting to the broker.
+        without connecting to the broker. Any existing kill_file halts
+        startup — operator must manually delete kill_file to re-enable.
+        For repeat-CRIT branch (drift_crit, count ≥ 2 within 24h) the
+        operator must ALSO write `kill_file.override` before deleting
+        kill_file, per scoped-override semantic.
         """
         payload = read_kill_file(self._kill_file)
         if payload is None:
             return False
-        locked, reason = should_lockout(payload, self._kill_file_override)
-        if not locked:
-            logger.info(
-                f"kill_file startup gate cleared: {reason}. Removing "
-                f"{self._kill_file} and {self._kill_file_override} before start.",
-            )
-            try:
-                self._kill_file.unlink(missing_ok=True)
-                self._kill_file_override.unlink(missing_ok=True)
-            except OSError as e:
-                logger.warning(f"kill_file clear failed ({e}) — refusing start")
-                self._request_stop(f"kill_file_clear_failed:{e}")
-                return True
-            return False
+        _, reason = should_lockout(payload, self._kill_file_override)
         logger.critical(f"STARTUP REFUSED — {reason}")
         self._request_stop(f"kill_file_lockout:{payload.get('reason')}")
         return True
 
-    def _request_drift_crit(self, report, bar_time: datetime) -> None:
+    async def _request_drift_crit(self, report, bar_time: datetime) -> None:
         """Protocol v2.2 §8.3 CRIT path.
 
         1. Write/increment drift_crit kill_file JSON (count enables repeat-CRIT
            lockout on the next restart).
-        2. Schedule existing FTMO-style emergency flatten so open positions
-           aren't left at risk for the human-response window (the "halt
-           without flatten is the bleed window" failure mode). The flatten
-           is async-spawned because `_apply_drift_status` runs synchronously
-           inside the step loop; awaiting here would block the loop.
+        2. Await the existing FTMO-style emergency_flatten so open positions
+           are genuinely closed before stop is signaled (the "halt without
+           flatten is the bleed window" failure mode — S491 post-mortem).
         3. Request stop with reason=drift_crit → container exits non-zero →
-           watchdog / restart policy sees the kill_file on next boot.
+           watchdog refuses auto-restart while kill_file is present.
         """
         try:
             payload = write_kill_file(
@@ -2021,24 +2036,23 @@ class LiveTradingEngine:
         except OSError as e:
             logger.critical(f"[drift] CRIT but kill_file write failed: {e}")
 
-        # Kick the flatten without awaiting (step loop is sync at this frame).
-        # asyncio.create_task runs after _apply_drift_status returns; the
-        # `_should_stop` flag set here prevents the step loop from issuing
-        # new orders in the interim.
         try:
-            asyncio.create_task(self._emergency_flatten())
-        except RuntimeError:
-            logger.warning("[drift] CRIT flatten could not be scheduled — no loop")
+            await self._emergency_flatten()
+        except Exception as e:  # noqa: BLE001
+            logger.critical(
+                f"[drift] CRIT emergency_flatten raised ({e}) — "
+                f"position may still be open on exchange",
+            )
         self._request_stop("drift_crit")
 
-    def _apply_drift_status(self, report, bar_time: datetime) -> None:
+    async def _apply_drift_status(self, report, bar_time: datetime) -> None:
         """Dispatch a Protocol v2.2 §8.2 DriftReport into engine side-effects.
 
-        * WARN  → set self._drift_warn_active so the step loop blocks new entries
-                  (existing position stays). Rearmed downward on next OK.
-        * CRIT  → call self._request_drift_crit() which (T2) writes the kill_file
-                  JSON, triggers the existing FTMO flatten path, and exits the
-                  engine non-zero so the watchdog sees the CRIT signal.
+        * WARN  → set self._drift_warn_active so the step loop blocks new
+                  entries / flips / size-ups via `_blocked_by_drift_warn`.
+                  Rearmed downward on next OK.
+        * CRIT  → await self._request_drift_crit() which writes the kill_file
+                  JSON, flattens open positions, and requests stop.
         All status transitions are logged at INFO+ and attached to WandB.
         """
         from finrl_pro_ds.monitoring import DriftStatus
@@ -2064,11 +2078,7 @@ class LiveTradingEngine:
                     f"[drift] CRIT at bar {self._total_bars}: {report.reason} "
                     f"(bucket={report.bucket}, n={report.n_bars})",
                 )
-            # T2 handles kill_file + flatten. Stub hook until T2 lands:
-            if hasattr(self, "_request_drift_crit"):
-                self._request_drift_crit(report, bar_time)
-            else:
-                self._drift_warn_active = True  # conservative fallback
+            await self._request_drift_crit(report, bar_time)
         elif status == DriftStatus.WARN:
             if not self._drift_warn_active or prev != DriftStatus.WARN:
                 logger.warning(

@@ -112,24 +112,24 @@ def should_lockout(
     """Decide whether a startup/engine-restart should be refused.
 
     Lockout semantics (Protocol v2.2 §8.3):
-      * Any CRIT reason → refuse startup. Manual re-enable = delete kill_file.
-      * ≥ `count_threshold` CRITs in `window_hours` → refuse startup *even if*
-        operator is trying to re-enable. Require `kill_file.override` file to
-        lift. Prevents restart thrash on genuine regime breaks.
+      * Any kill_file present → refuse startup. Manual re-enable requires
+        deleting the kill_file (operator is acknowledging the halt).
+      * Repeat-CRIT (drift_crit reason, count ≥ threshold within window) →
+        refuse startup even after operator deletes the kill_file, UNTIL
+        `override_path` is ALSO written. The override is a narrow-purpose
+        human-approval signal scoped to repeat-CRIT; it does NOT lift a
+        single-CRIT or operator halt on its own (those just need the
+        kill_file cleared).
 
-    Returns `(locked, reason)`. An operator-issued (`REASON_OPERATOR`) or
-    legacy halt falls into the single-CRIT bucket — operator must clear the
-    file. A present `override_path` clears the repeat-CRIT branch but NOT
-    the general presence branch (i.e. override is a stronger re-enable, but
-    the kill_file itself still has to go).
+    Returns `(locked, reason)`.
     """
     reason = payload.get("reason", REASON_LEGACY)
     count = int(payload.get("count", 1))
     first_ts_raw = payload.get("first_ts")
 
-    if override_path is not None and override_path.exists():
-        return False, f"override file present ({override_path})"
+    override_present = override_path is not None and override_path.exists()
 
+    is_repeat_crit = False
     if reason == REASON_DRIFT_CRIT and count >= count_threshold:
         try:
             first_ts = datetime.fromisoformat(first_ts_raw) if first_ts_raw else None
@@ -141,16 +141,28 @@ def should_lockout(
                 first_ts = first_ts.replace(tzinfo=timezone.utc)
             window = now - first_ts
             if window <= timedelta(hours=window_hours):
-                return True, (
-                    f"REPEAT-CRIT LOCKOUT: drift_crit count={count} "
-                    f"within {window.total_seconds()/3600:.1f}h "
-                    f"(threshold {count_threshold} in {window_hours}h). "
-                    f"Clear {override_path} absent — engine refuses restart "
-                    f"until human override."
-                )
+                is_repeat_crit = True
+                if not override_present:
+                    return True, (
+                        f"REPEAT-CRIT LOCKOUT: drift_crit count={count} "
+                        f"within {window.total_seconds()/3600:.1f}h "
+                        f"(threshold {count_threshold} in {window_hours}h). "
+                        f"override {override_path} absent — engine refuses "
+                        f"restart until human override."
+                    )
 
-    # Any existing kill_file halts startup unless cleared. This mirrors
-    # legacy "file exists = stop" semantics.
+    # Single-CRIT / operator / legacy halt: kill_file presence alone locks
+    # out. Override does NOT substitute for clearing the kill_file here —
+    # that distinction is what preserves the "operator acknowledges halt"
+    # semantic. Only the repeat-CRIT branch above is allowed to be lifted
+    # by an override.
+    if is_repeat_crit and override_present:
+        # Repeat-CRIT window + operator has written override → still halt
+        # until kill_file itself is cleared, but with a clearer diagnostic.
+        return True, (
+            f"kill_file present (reason={reason}, count={count}); "
+            f"override seen — operator must also delete kill_file to restart"
+        )
     return True, f"kill_file present (reason={reason}, count={count})"
 
 

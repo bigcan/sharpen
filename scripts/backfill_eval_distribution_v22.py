@@ -23,6 +23,15 @@ Outputs written into <dir>:
     seed_report.json       v2.2 Stage 2 per-seed eval_distributions
     ensemble_report.json   v2.2 Stage 2.5 ensemble_eval_distribution +
                            per-seed block (same as seed_report)
+
+Reproduction from a fresh clone:
+    Trajectory parquets live under `results/` which is gitignored. Regenerate
+    them by running the upstream ensemble_eval first (requires committed
+    checkpoints + data):
+        python scripts/sg1_xauusd_ensemble_eval.py --config <cfg>
+    Then run this backfill. The output JSONs should be copied to
+    `baselines/<workstream>/` so they are committed + baked into the live
+    engine Docker image (`Dockerfile.live-engine` COPY baselines/).
 """
 
 from __future__ import annotations
@@ -35,6 +44,7 @@ import sys
 from pathlib import Path
 from typing import Optional
 
+import numpy as np
 import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -61,6 +71,27 @@ def _find_ensemble_trajectory(directory: Path, rule: str) -> Optional[Path]:
     return p if p.exists() else None
 
 
+def _rolling_realized_vol(pv: np.ndarray, window: int = 20) -> np.ndarray:
+    """Rolling realized vol proxy: std of log-return of portfolio_value.
+
+    Portfolio-value returns depend on the strategy's trades, so this is a
+    proxy — not the market-vol baseline we ultimately want. For the backfill
+    path it's the only vol signal available in the persisted trajectory.
+    Upstream (T3) should extend run_rule to capture bar `close` so market
+    vol can be computed directly; until then the buckets approximate.
+    """
+    pv = np.asarray(pv, dtype=np.float64)
+    if pv.size < 2:
+        return np.zeros(pv.size)
+    log_ret = np.zeros(pv.size)
+    np.log(pv[1:] / np.clip(pv[:-1], 1e-9, None), out=log_ret[1:])
+    vol = np.zeros(pv.size)
+    for i in range(pv.size):
+        lo = max(0, i - window + 1)
+        vol[i] = float(np.std(log_ret[lo:i + 1], ddof=0)) if i >= 1 else 0.0
+    return vol
+
+
 def backfill_directory(
     directory: Path,
     *,
@@ -80,13 +111,27 @@ def backfill_directory(
         )
     log.info(f"[{directory.name}] solo seeds found: {sorted(solos)}")
 
+    # Equal-weight quartile shares as regime_quartiles marker (the backfill
+    # can't know the training-time vol distribution, so it declares the 4
+    # quartiles exist so the helper computes per-sample cutpoints and the
+    # live tracker picks them up via baseline fallback).
+    equal_quartiles = {
+        "vol_q1": 0.25, "vol_q2": 0.25, "vol_q3": 0.25, "vol_q4": 0.25,
+    }
+
     seed_distributions: dict[str, dict] = {}
     for seed, traj_path in solos.items():
         df = pd.read_parquet(traj_path)
         if "action_agg" not in df.columns:
             raise KeyError(f"{traj_path} lacks action_agg column")
+        bar_vol = None
+        if "portfolio_value" in df.columns:
+            bar_vol = _rolling_realized_vol(df["portfolio_value"].to_numpy())
         seed_distributions[str(seed)] = compute_eval_distribution(
-            df["action_agg"].to_numpy(), deadband=deadband,
+            df["action_agg"].to_numpy(),
+            bar_vol=bar_vol,
+            regime_quartiles=equal_quartiles if bar_vol is not None else None,
+            deadband=deadband,
         )
     seed_report = {
         "protocol": "v2.2_stage_2_seed_report",
@@ -121,8 +166,13 @@ def backfill_directory(
         ens_df = pd.read_parquet(ens_path)
         if "action_agg" not in ens_df.columns:
             raise KeyError(f"{ens_path} lacks action_agg column")
+        bar_vol = None
+        if "portfolio_value" in ens_df.columns:
+            bar_vol = _rolling_realized_vol(ens_df["portfolio_value"].to_numpy())
         ensemble_report["ensemble_eval_distribution"] = compute_eval_distribution(
             ens_df["action_agg"].to_numpy(),
+            bar_vol=bar_vol,
+            regime_quartiles=equal_quartiles if bar_vol is not None else None,
             deadband=deadband,
             composition_rule=chosen_rule,
         )

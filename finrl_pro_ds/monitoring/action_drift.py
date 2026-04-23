@@ -133,6 +133,7 @@ class ActionDriftTracker:
         regime_cutpoints: Optional[Sequence[float]] = None,
         vol_estimator_bars: int = 20,
         hist_edges: Optional[Sequence[float]] = None,
+        asset_keys: Optional[Sequence[str]] = None,
     ):
         if window_bars < 50:
             raise ValueError("window_bars must be >= 50")
@@ -174,11 +175,37 @@ class ActionDriftTracker:
 
         # Regime cutpoints (3 floats → 4 quartiles). When None, regime
         # bucketing is disabled and comparison uses the top-level baseline.
+        # Prefer explicit cutpoints, then fall back to baseline-embedded
+        # cutpoints (EVAL-DIST-CUTPOINTS-01 fix).
+        if regime_cutpoints is None and baseline is not None:
+            baseline_cuts = baseline.get("regime_cutpoints")
+            if baseline_cuts is not None:
+                regime_cutpoints = baseline_cuts
         if regime_cutpoints is not None and len(regime_cutpoints) != 3:
             raise ValueError("regime_cutpoints must have length 3 (q25,q50,q75)")
         self.regime_cutpoints = (
             tuple(regime_cutpoints) if regime_cutpoints is not None else None
         )
+
+        # Expected per-asset ordering for multi-dim baselines. When provided
+        # and the baseline's by_asset keys are in a DIFFERENT order, raise on
+        # first observe() to catch silent mis-mapping of per-asset marginals.
+        self.expected_asset_keys: Optional[tuple[str, ...]] = (
+            tuple(asset_keys) if asset_keys is not None else None
+        )
+        if (
+            self.expected_asset_keys is not None
+            and baseline is not None
+            and isinstance(baseline.get("by_asset"), dict)
+        ):
+            baseline_keys = tuple(baseline["by_asset"].keys())
+            if baseline_keys != self.expected_asset_keys:
+                raise ValueError(
+                    f"baseline by_asset keys {baseline_keys} do not match "
+                    f"expected asset_keys {self.expected_asset_keys} — this "
+                    f"would silently mis-map per-asset marginals. Fix the "
+                    f"baseline ordering or the live config's asset_keys."
+                )
 
         self._regime_warning_logged = False
         if baseline is None:
@@ -378,10 +405,12 @@ class ActionDriftTracker:
             )
         max_kl = 0.0
         bins = list(self.hist_edges)
-        # Keys in by_asset are in insertion order; assume training ordered
-        # is the same as live action ordering. This is the same assumption
-        # the rest of the multi-asset pipeline makes (see CryptoPerpEnv).
-        for i, (asset_key, asset_baseline) in enumerate(by_asset.items()):
+        assert self._n_dim is not None, "observe() must set _n_dim before eval"
+        # Keys in by_asset are in insertion order; if expected_asset_keys was
+        # supplied, __init__ already validated that ordering matches. Without
+        # that check the live action vector could silently mis-map to the
+        # wrong asset's marginal.
+        for i, (_asset_key, asset_baseline) in enumerate(by_asset.items()):
             if i >= self._n_dim:
                 break
             asset_live = live[:, i]

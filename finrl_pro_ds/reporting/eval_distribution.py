@@ -81,8 +81,8 @@ def summarize_scalar_actions(
 def _bucket_indices(
     vol_series: np.ndarray,
     regime_quartiles: Optional[dict],
-) -> Optional[dict[str, np.ndarray]]:
-    """Map a per-bar vol series to q1..q4 bucket index arrays.
+) -> Optional[tuple[dict[str, np.ndarray], list[float]]]:
+    """Map a per-bar vol series to q1..q4 bucket index arrays + cutpoints.
 
     `regime_quartiles` holds per-quartile-share-of-bars from the data manifest
     (e.g. {"vol_q1": 0.27, ...}). The absolute cutpoints come from per-sample
@@ -90,6 +90,10 @@ def _bucket_indices(
     the manifest's key naming (vol_q1..vol_q4) only to validate that the four
     quartiles exist; the actual cutpoints are computed from `vol_series`
     because the manifest stores *shares*, not cutpoint values.
+
+    Returns `(masks, cutpoints)` where `cutpoints` is the [q25,q50,q75] list
+    used to classify bars. Live monitoring must consume these cutpoints to
+    bucket incoming bars consistently with the baseline.
     """
     if regime_quartiles is None:
         return None
@@ -102,12 +106,13 @@ def _bucket_indices(
         return None
     cuts = np.quantile(finite, [0.25, 0.5, 0.75])
     idx = np.digitize(v, cuts)  # 0..3 corresponding to q1..q4
-    return {
+    masks = {
         "q1": idx == 0,
         "q2": idx == 1,
         "q3": idx == 2,
         "q4": idx == 3,
     }
+    return masks, [float(c) for c in cuts]
 
 
 def compute_eval_distribution(
@@ -182,10 +187,11 @@ def compute_eval_distribution(
         )
         return block
 
-    masks = _bucket_indices(bar_vol_arr, regime_quartiles)
-    if masks is None:
+    bucket_result = _bucket_indices(bar_vol_arr, regime_quartiles)
+    if bucket_result is None:
         block["regime_bucketing"] = "unavailable: regime_quartiles missing/invalid"
         return block
+    masks, cutpoints = bucket_result
 
     by_vq: dict[str, dict] = {}
     for q_key in ("q1", "q2", "q3", "q4"):
@@ -208,4 +214,8 @@ def compute_eval_distribution(
                 "n": int(mask.sum()),
             }
     block["by_vol_quartile"] = by_vq
+    # v2.2 §8.2 EVAL-DIST-CUTPOINTS-01 fix: record the cutpoints used to
+    # classify bars into q1..q4. Live ActionDriftTracker reads these to
+    # bucket incoming bars consistently with the baseline.
+    block["regime_cutpoints"] = cutpoints
     return block

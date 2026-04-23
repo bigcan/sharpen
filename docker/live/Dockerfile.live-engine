@@ -65,6 +65,10 @@ RUN pip install /tmp/prism_sdk/ && rm -rf /tmp/prism_sdk/
 COPY finrl_pro_ds /app/finrl_pro_ds
 COPY scripts /app/scripts
 COPY configs /app/configs
+# v2.2 §8.2 live-monitoring baselines (seed_report.json + ensemble_report.json
+# per workstream). Baked at build time so the live engine can resolve
+# drift.baseline_path without a volume mount. See baselines/README.md.
+COPY baselines /app/baselines
 COPY pyproject.toml /app/
 
 RUN pip install -e ".[ctrader]"

@@ -431,20 +431,45 @@ def run_stage_2_5_val_selection(
     # Per Protocol v2.2 §2: Stage 2 per-seed action distributions + Stage 2.5
     # ensemble action distribution (with composition_rule). Consumed by §8.2
     # live action-drift check as the regime-baseline. Regime bucketing
-    # (by_vol_quartile) is currently emitted as unavailable — populated once
-    # the data_manifest + bar-vol series wiring lands (T5 backfill ticket).
+    # (by_vol_quartile + regime_cutpoints) is populated from a 20-bar rolling
+    # realized-vol proxy derived from portfolio_value log-returns — market-vol
+    # would be ideal but requires wiring close prices into the trajectory.
     deadband_abs = float(config.get("env", {}).get("deadband_threshold", 0.25))
+    equal_quartiles = {
+        "vol_q1": 0.25, "vol_q2": 0.25, "vol_q3": 0.25, "vol_q4": 0.25,
+    }
+
+    def _bar_vol(df_: pd.DataFrame) -> Optional[np.ndarray]:
+        if "portfolio_value" not in df_.columns:
+            return None
+        pv = df_["portfolio_value"].to_numpy(dtype=np.float64)
+        if pv.size < 2:
+            return None
+        log_ret = np.zeros(pv.size)
+        np.log(pv[1:] / np.clip(pv[:-1], 1e-9, None), out=log_ret[1:])
+        vol = np.zeros(pv.size)
+        for i in range(1, pv.size):
+            lo = max(0, i - 19)  # 20-bar window
+            vol[i] = float(np.std(log_ret[lo:i + 1], ddof=0))
+        return vol
+
+    def _dist(df_: pd.DataFrame, rule: Optional[str] = None) -> dict:
+        bv = _bar_vol(df_)
+        return compute_eval_distribution(
+            df_["action_agg"].to_numpy(),
+            bar_vol=bv,
+            regime_quartiles=equal_quartiles if bv is not None else None,
+            deadband=deadband_abs,
+            composition_rule=rule,
+        )
+
     seed_report = {
         "protocol": "v2.2_stage_2_seed_report",
         "workstream": workstream_label,
         "window": f"{data_cfg['test_start_date']} -> {data_cfg['test_end_date']}",
         "seeds": sorted(seed_pfs),
         "eval_distribution_by_seed": {
-            str(s): compute_eval_distribution(
-                test_trajs[f"solo_{s}"]["action_agg"].to_numpy(),
-                deadband=deadband_abs,
-            )
-            for s in seed_pfs
+            str(s): _dist(test_trajs[f"solo_{s}"]) for s in seed_pfs
         },
     }
     (out_dir / "seed_report.json").write_text(
@@ -457,11 +482,7 @@ def run_stage_2_5_val_selection(
         "chosen_rule": chosen_rule,
         "decision": decision,
         "uplift": uplift,
-        "ensemble_eval_distribution": compute_eval_distribution(
-            test_trajs[chosen_rule]["action_agg"].to_numpy(),
-            deadband=deadband_abs,
-            composition_rule=chosen_rule,
-        ),
+        "ensemble_eval_distribution": _dist(test_trajs[chosen_rule], rule=chosen_rule),
         "per_seed_eval_distribution": seed_report["eval_distribution_by_seed"],
     }
     (out_dir / "ensemble_report.json").write_text(
