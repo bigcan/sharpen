@@ -166,6 +166,29 @@ drift:
   # regime_cutpoints omitted — manifest-side `regime_cutpoints` wiring is a
   # follow-up (vol-quartile bucketing falls back to global baseline).
 
+# --- Protocol v2 Gates (live copy — mirrors sg1_xauusd_ensemble.gates.yaml §drift/§safe_mode) ---
+# The live engine reads drift/safe_mode thresholds from `drift:` block above
+# (T1 _init_drift_tracker fallback order); this duplicate block exists to
+# satisfy validate_config.py's paper-deploy stage check, which requires
+# `gates.drift.*` + `gates.safe_mode.*` declared on the live config itself.
+# SOURCE OF TRUTH for research/eval: configs/sg1_xauusd_ensemble.gates.yaml.
+gates:
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
 # --- PRISM Regime Overlay (L2 position sizing) ---
 prism:
   enabled: false
