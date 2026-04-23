@@ -1,0 +1,173 @@
+# GMGP1-BTC Velotrade re-HPO — Stage 3 Walk-Forward (SOLO SEED 456, interim)
+#
+# Pipeline state (2026-04-23):
+#   - Stage 1 HPO  : study `gmgp1_btc_velotrade_rehpo_20260421`, trial #48
+#                    PF=2.260 at 5 bps Bitfinex perp taker.
+#   - Stage 2 L1  : N=10 multiseed PASS (median PF 1.949, CV 0.089, worst MDD
+#                    -1.53%, 10/10 profitable). See
+#                    `results/gmgp1_btc_l1_rehpo_aggregate.json`.
+#                    Top-3 by test PF: [456, 1337, 123].
+#   - Stage 2.5   : S495 val-split rule selection picked `ens_mean` (val PF
+#                    2.048 > ens_agreement 1.989). Test uplift +8.13% lands in
+#                    AMBIGUOUS band [1.05, 1.10) — no ensemble PROMOTE.
+#                    Per `project_gmgp1_btc_stage_2_5_s495.md`: ship seed 456
+#                    solo to Stage 3 WF as interim; SG-1 BTC L1 (running on
+#                    gpuhub-2:0, parent ighx368o) is pre-committed second
+#                    customer. If SG-1 BTC also AMBIGUOUS -> re-evaluate
+#                    BTC-specific `ensemble_uplift_min: 1.05` and, if codified,
+#                    re-WF top-3 as ensemble path; otherwise seed 456 solo
+#                    graduates to Stage 4 recent-OOS.
+#
+# Why seed 456: ranked #1 in L1 seed_report (profit-target enabled, episode-
+# truncating early-term). PF 2.138, MDD -0.58%, 163 trades, run `p0yt8hew`.
+#
+# Window scheme (splitter-driven, 4 folds, step_months=2):
+#   data.start 2025-01-06 -> data.end 2026-03-06
+#   train_months=6 val_months=1 test_months=1
+#     fold 0: train 2025-01 -> 2025-07  val 2025-07->08  test 2025-08->09
+#     fold 1: train 2025-03 -> 2025-09  val 2025-09->10  test 2025-10->11
+#     fold 2: train 2025-05 -> 2025-11  val 2025-11->12  test 2025-12->2026-01
+#     fold 3: train 2025-07 -> 2026-01  val 2026-01->02  test 2026-02->03
+#   Fold 3 test covers 2026-Q1 (live-unseen during L1 which tested through
+#   2025-12-31). Matches 6-month train cadence of prior gmgp1_btc_wf_r{1..3}.
+#
+# Gate (Protocol v2 Stage 3):
+#   - wf_windows >= 4, wf_pf_floor >= 1.1 per-fold
+#   - velotrade_trailing_dd_buffer_pp >= 0.5pp (i.e. worst EOD trailing DD
+#     <= 8.5% against 10% Velotrade cap; 8% wrapper line + 0.5pp buffer)
+#   ALL PASS -> seed 456 checkpoint promoted to Stage 4 recent-OOS
+#   ANY FAIL -> back to Stage 2 (or HPO) per Protocol v2
+#
+# Launch:
+#   python scripts/validate_config.py --config configs/gmgp1_btc_velotrade_wf.yaml --stage wf
+#   python scripts/run_walk_forward.py --config configs/gmgp1_btc_velotrade_wf.yaml --seed 456
+#
+# Expected wallclock: ~4 folds * (~15 min train at num_envs=20 on 4090 + ~2 min
+# backtest) ≈ 1.2 h on a single 4090. Deploys to gpuhub-1:0 (free; SG-1 BTC L1
+# owns gpuhub-2:0).
+
+data:
+  # Extended 2025+Q1-2026 Bitfinex perp parquet (575K rows through 2026-04-12).
+  # Manifest generated 2026-04-23 (max_gap_bars=497 = ~8h Feb 2026 gap, clean OK).
+  # L1 multiseed trained on the 2025-only file; Stage 3 WF uses the extended
+  # file so fold 3 test can cover 2026-02 (first live-unseen OOS slice).
+  file_path: "data/bitfinex/btc_usdt_perp_2025_2026q1_1min.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  # Splitter-driven windowing; splitter: below emits 4 folds inside envelope.
+  start_date: "2025-01-06"
+  end_date: "2026-03-06"
+
+splitter:
+  train_months: 6
+  val_months: 1
+  test_months: 1
+  step_months: 2
+  buffer_days: 0
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005                   # steady-state 5 bps Bitfinex-perp (S464)
+  deadband_threshold: 0.15            # trial #48
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  gap_detection: true                 # match L1 multiseed config (S468/S478)
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0007696903903377959    # trial #48
+    dsr_scale: 1.0
+  prop_firm:
+    enabled: true
+    profit_target_pct: 0.10           # Velotrade 2-Step Step 1 target
+    max_trailing_drawdown_pct: 0.08   # buffered (Velotrade cap=10%)
+    max_daily_loss_pct: 0.0           # Velotrade 2-Step has no daily loss
+    eod_hour_utc: 0                   # crypto 24/7, UTC midnight roll
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false                # private_dim=5 (live compat)
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# Trial #48 HPs (Optuna study gmgp1_btc_velotrade_rehpo_20260421).
+# Identical to L1 multiseed so WF retrain is apples-to-apples with Stage 2.
+agents:
+  sac:
+    lr_actor: 0.0003295003003086035
+    lr_critic: 0.000017992633145705355
+    lr_alpha: 0.000007583094363970812
+    gamma: 0.9654375719893458
+    tau: 0.0000029525905252136697
+    initial_alpha: 0.4972364771289634
+    gradient_clip: 8.408201216723267
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000             # matches L1 Stage 2 budget
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+  # seed passed per-run via CLI --seed 456 (launcher override)
+
+hpo:
+  enabled: false
+
+gates:                                # Protocol v2 §4 Stage 3 (training-level)
+  # Upstream-stage gates retained so multi-stage validation walks this config
+  # without complaining about missing keys (matches sg1_btc WF multiseed).
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                        # S488: prop-firm requires N>=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]    # S488: pre-committed escalation range
+  ensemble_uplift_min: 1.10           # S493->S495 PROMOTE threshold
+  ensemble_ambiguous_min: 1.05        # S495: AMBIGUOUS floor
+  ensemble_rule_selection: val_argmax_pf   # S495: val-split rule pick
+  # Stage 3 gates
+  wf_windows: 4                       # validator requires >=4; splitter emits 4
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  # Stage 4 (recent-OOS) gate retained for downstream walk
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                   # S488: one parent run; folds as win<i>/*
+  tags: ["gmgp1-btc", "BTC", "SAC", "15min", "crypto", "velotrade",
+         "velotrade-wrapped", "prop-firm", "propfirm", "walk_forward",
+         "wf-stage3", "solo", "seed-456", "interim", "rehpo-trial48",
+         "steady-state", "bitfinex-perp",
+         "upstream:gmgp1_btc_velotrade_rehpo_20260421"]
