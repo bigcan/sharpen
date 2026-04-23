@@ -145,21 +145,27 @@ wandb:
 safety:
   require_explicit_mainnet: true
   max_daily_loss_pct: 0.04             # 4% daily loss (1% below FTMO 5% limit)
-  kill_file: "/tmp/finrl_live_sg1_xauusd_kill"
-  # v2.2 §8.3: override file that lifts repeat-CRIT lockout. Operator must
-  # ALSO delete `kill_file` to re-enable after the override.
-  kill_file_override: "/tmp/finrl_live_sg1_xauusd_kill.override"
+  # v2.2 §8.3: kill_file + override live under /app/state (volume-backed via
+  # sg1-xauusd-state in docker-compose.yaml) so repeat-CRIT lockout survives
+  # container restarts. /tmp inside the container is NOT a mount and would
+  # silently defeat the lockout after a docker-restart-policy bounce.
+  kill_file: "/app/state/finrl_live_sg1_xauusd_kill"
+  kill_file_override: "/app/state/finrl_live_sg1_xauusd_kill.override"
   flatten_on_kill_file: true           # graceful flatten on CRIT, not "halt"
   emergency_flatten_on_error: true
 
 # --- Protocol v2.2 §8.2 Live Action-Drift ---
-# Baseline backfilled from the deployed WF fold-07 ensemble trajectory (T5).
-# Without this block the tracker runs in LOG_ONLY; with it, WARN blocks new
-# entries and CRIT writes `kill_file` → emergency_flatten → non-zero exit →
-# watchdog refuses auto-restart (§8.3).
+# Baseline baked into the image from baselines/sg1_xauusd_fold_07/ via
+# Dockerfile.live-engine `COPY baselines/ /app/baselines/`. The source of
+# truth is the backfilled ensemble_report.json for the deployed WF fold-07
+# checkpoints; regenerate via scripts/backfill_eval_distribution_v22.py.
+# Without a resolvable baseline the tracker runs in LOG_ONLY; with it,
+# WARN blocks new entries / flips / size-ups (close-to-zero still allowed)
+# and CRIT writes kill_file → emergency_flatten → non-zero exit → watchdog
+# refuses auto-restart (§8.3).
 drift:
   enabled: true
-  baseline_path: "results/sg1_xauusd_ensemble_wf/fold_07/ensemble_report.json"
+  baseline_path: "/app/baselines/sg1_xauusd_fold_07/ensemble_report.json"
   window_bars: 1000
   min_bars_before_check: 500
   vol_estimator_bars: 20

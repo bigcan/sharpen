@@ -18,7 +18,7 @@ import json
 import logging
 import sys
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -339,14 +339,11 @@ def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
     if all(k in drift_gates for k in ("saturation_frac_warn", "saturation_frac_crit")):
         if drift_gates["saturation_frac_warn"] >= drift_gates["saturation_frac_crit"]:
             r.fail(
-                f"gates.drift.saturation_frac_warn must be < "
-                f"saturation_frac_crit"
+                "gates.drift.saturation_frac_warn must be < saturation_frac_crit"
             )
     if all(k in drift_gates for k in ("action_kl_warn", "action_kl_crit")):
         if drift_gates["action_kl_warn"] >= drift_gates["action_kl_crit"]:
-            r.fail(
-                f"gates.drift.action_kl_warn must be < action_kl_crit"
-            )
+            r.fail("gates.drift.action_kl_warn must be < action_kl_crit")
     wb = drift_gates.get("window_bars")
     mb = drift_gates.get("min_bars_before_check")
     if wb is not None and mb is not None and mb > wb:
