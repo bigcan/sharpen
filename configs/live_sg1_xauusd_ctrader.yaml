@@ -119,6 +119,15 @@ risk:
   max_position_pct: 1.0
   funding_rate_alert: 999.0
   min_margin_reserve_pct: 0.10
+  # S495 cont (2026-04-23): override default 4.0. CryptoRiskManager resets the
+  # turnover accumulator every 24 `check()` calls, not every 24 calendar hours
+  # (see crypto_risk_manager.py:267 "~1 day for 1H bars"). SG-1 on 3-min bars
+  # with signal-gate + ens_agreement trips check() ~9x/day → reset window spans
+  # ~2-3 calendar days. Cap tripped after 4 roundtrips (sum=3.79), blocking
+  # paper trading for the rest of the reset window. 10.0 gives ~3-5 roundtrips
+  # per reset window while still catching runaway loops. Structural fix
+  # (bar-interval-aware reset) queued.
+  daily_turnover_limit: 10.0
 
 # --- WandB Monitoring ---
 wandb:
@@ -137,7 +146,25 @@ safety:
   require_explicit_mainnet: true
   max_daily_loss_pct: 0.04             # 4% daily loss (1% below FTMO 5% limit)
   kill_file: "/tmp/finrl_live_sg1_xauusd_kill"
+  # v2.2 §8.3: override file that lifts repeat-CRIT lockout. Operator must
+  # ALSO delete `kill_file` to re-enable after the override.
+  kill_file_override: "/tmp/finrl_live_sg1_xauusd_kill.override"
+  flatten_on_kill_file: true           # graceful flatten on CRIT, not "halt"
   emergency_flatten_on_error: true
+
+# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# Baseline backfilled from the deployed WF fold-07 ensemble trajectory (T5).
+# Without this block the tracker runs in LOG_ONLY; with it, WARN blocks new
+# entries and CRIT writes `kill_file` → emergency_flatten → non-zero exit →
+# watchdog refuses auto-restart (§8.3).
+drift:
+  enabled: true
+  baseline_path: "results/sg1_xauusd_ensemble_wf/fold_07/ensemble_report.json"
+  window_bars: 1000
+  min_bars_before_check: 500
+  vol_estimator_bars: 20
+  # regime_cutpoints omitted — manifest-side `regime_cutpoints` wiring is a
+  # follow-up (vol-quartile bucketing falls back to global baseline).
 
 # --- PRISM Regime Overlay (L2 position sizing) ---
 prism:
