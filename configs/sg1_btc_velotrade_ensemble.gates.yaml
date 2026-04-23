@@ -1,0 +1,100 @@
+# SG-1 BTC Velotrade ensemble confirmation gates — PRE-COMMITTED.
+#
+# Modeled on sg1_xauusd_ensemble.gates.yaml (S488) and
+# gmgp1_xauusd_ensemble.gates.yaml (S493). Same five-gate structure; G4 is
+# re-cast from FTMO (4%/8% daily+trailing) to Velotrade (10% trailing, no
+# daily). This file is the ONLY source of truth for gate numbers (per
+# project rule "never hardcode gate thresholds in code or scripts").
+#
+# Decision rule: ALL five gates (G1..G5) must PASS -> approve ensemble for
+# SG-1 BTC Velotrade paper-deploy aggregation. ANY fail -> ensemble rejected;
+# solo seed with highest WF-median PF remains the paper candidate.
+#
+# Pre-commit date: 2026-04-23 S494 cont. Do not edit after first launch
+# without a decision memo explaining why.
+
+workstream: sg1_btc
+variant: ensemble_agreement_top3
+seeds: [null, null, null]                       # top-3 L1 seeds, populated post-L1 by reconcile step
+aggregation_rule: ens_agreement                  # canonical rule (S493 two-point evidence)
+
+# Fold count expected from the multiseed WF config.
+# Updated 2026-04-23 (S494 cont.) to match the new
+# `configs/sg1_btc_velotrade_rehpo_wf_multiseed.yaml` splitter output: 8 folds
+# (start 2025-01-06, end 2026-04-06, train=6/val=1/test=1/step=1). Old w1/w2/w3
+# single-seed WF configs are frozen as reference history; this file now tracks
+# the splitter-driven schedule that matches SG-1 XAUUSD Stage 3.
+wf_folds: 8                                      # splitter-driven (was 3 pre-refactor)
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+gates:
+  g1_solo_baseline:
+    description: >-
+      Existing WF Stage-3 gate applied per seed: at least 2/3 seeds must have
+      per-fold test PF >= pf_floor, in at least min_folds_pass of the total
+      folds. If solo seeds fail the base WF discipline, the ensemble is moot.
+    pf_floor: 1.1
+    seeds_pass_min: 2                            # >=2/3 seeds pass per fold
+    min_folds_pass: 7                            # >=7/8 folds (splitter-driven)
+
+  g2_no_regression:
+    description: >-
+      Per fold, the ensemble must NOT materially regress vs the best solo on
+      that fold. Defined as ens_PF >= ens_ratio_min * best_solo_PF in at least
+      min_folds_pass folds.
+    ens_ratio_min: 0.90
+    min_folds_pass: 7                            # >=7/8 folds
+
+  g3_uplift:
+    description: >-
+      Across folds, the ensemble must earn its live-complexity overhead.
+      Defined as median(ens_PF) / median(best_solo_PF) >= uplift_ratio_min.
+      A lift below ~10% is not worth the additional live-engine branching
+      and aggregation latency (matches S493 Stage 2.5 PROMOTE threshold).
+    uplift_ratio_min: 1.10
+    metric: median                               # across-folds aggregation
+
+  g4_velotrade_compliance:
+    description: >-
+      Applied to the ENSEMBLE trajectory per fold (not the solo trajectories).
+      Velotrade 2-Step Step 1: 10% profit target, 10% max trailing drawdown,
+      no daily loss gate. Engine runs with buffered trailing (8%) so gate
+      buffer is computed against the real Velotrade 10% cap.
+    trailing_dd_buffer_pp_min: 0.5               # 10% cap - worst_trailing_mdd%
+    daily_dd_buffer_pp_min: null                 # N/A: no daily loss gate in Velotrade 2-Step
+    compliance_must_pass: false                  # no active_days / single_day_share in Velotrade
+    min_folds_pass: 7                            # >=7/8 folds
+
+  g5_dd_stability:
+    description: >-
+      Guards against ensemble edge being a one-fold artifact. CV of ensemble
+      PF across folds must be at or below cv_max.
+      Statistical strength OK at N=8 folds (splitter-driven, S494 refactor).
+    cv_pf_max: 0.35
+
+# ---------------------------------------------------------------------------
+# Decision matrix
+# ---------------------------------------------------------------------------
+
+decision:
+  all_pass_action: approve_ensemble_paper_deploy
+  any_fail_action: reject_ensemble_use_best_solo
+  solo_selection_metric: wf_median_pf
+  solo_tiebreaker: wf_mean_trailing_dd_buffer_pp
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+provenance:
+  drafted_on: '2026-04-23'
+  drafted_by_session: S494-cont
+  upstream_memory: decision_ensemble_mandatory_stage_2_5.md
+  plan_artifact: project_gmgp1_rehpo_queue_staged.md
+  upstream_hpo: sg1_btc_velotrade_rehpo_20260420 (trial #44 PF 2.303, Bybit 5 bps taker)
+  l1_multiseed_status: not_yet_launched            # blocked on HP refresh from trial #44 + N=10 seed-sweep
+  wf_multiseed_status: config_built_2026_04_23     # configs/sg1_btc_velotrade_rehpo_wf_multiseed.yaml (8 folds); launch post-L1
+  two_point_anchor: "SG-1 XAUUSD +17.6% L1 uplift (S490), GMGP1 XAUUSD +17.15% L1 uplift (S493)"
