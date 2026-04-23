@@ -262,6 +262,190 @@ def ftmo_buffers(metrics: dict) -> dict:
     }
 
 
+# --- Stage 2.5 val-split rule selection (Protocol v2 amendment S495) --------
+#
+# Supersedes the S493 "hardcoded canonical = ens_agreement" rule. Motivation:
+# the BTC Stage 2.5 result (S495) showed that ens_agreement, while dominant on
+# XAUUSD (regime-flippy), is the *worst* ensemble on trending BTC (+4.10% vs
+# ens_mean's +8.13%). A hardcoded canonical rule embeds an asset-microstructure
+# bet; val-split selection lets each workstream pick the regime-appropriate
+# rule without leaking test-split information.
+#
+# Protocol:
+#   Phase 1 (val):  run all 4 ensemble rules + 3 solos on the L1 val window
+#                   (norm cutoff = train_end_date).
+#   Phase 2 (pick): argmax(val_PF) across the 4 ensemble rules → chosen_rule.
+#                   Test split is NOT consulted for rule selection.
+#   Phase 3 (test): run chosen_rule + 3 solos on the L1 test window
+#                   (norm cutoff = val_end_date).
+#   Phase 4 (gate): uplift = chosen_rule_test_PF / best_solo_test_PF
+#                   vs gates.ensemble_uplift_min / gates.ensemble_ambiguous_min.
+
+def run_stage_2_5_val_selection(
+    config: dict,
+    agents: Dict[int, object],
+    seed_pfs: Dict[int, float],
+    out_dir: Path,
+    device: str,
+    *,
+    buffer_fn: Callable[[dict], dict] = None,  # resolved to ftmo_buffers if None
+    workstream_label: str = "",
+    uplift_promote: Optional[float] = None,
+    uplift_ambiguous: Optional[float] = None,
+) -> dict:
+    """Stage 2.5 ensemble-confirm with val-split rule selection (S495).
+
+    Thresholds default to `config["gates"]["ensemble_uplift_min"]` and
+    `config["gates"]["ensemble_ambiguous_min"]` (required when not passed).
+    `buffer_fn` defaults to `ftmo_buffers`; pass a Velotrade / custom variant
+    for prop-firms with different DD caps.
+    """
+    if buffer_fn is None:
+        buffer_fn = ftmo_buffers
+
+    gates = config.get("gates", {})
+    if uplift_promote is None:
+        if "ensemble_uplift_min" not in gates:
+            raise ValueError(
+                "gates.ensemble_uplift_min missing — required by Protocol v2 Stage 2.5"
+            )
+        uplift_promote = float(gates["ensemble_uplift_min"])
+    if uplift_ambiguous is None:
+        # Default matches S493 ambiguous floor; configurable per workstream.
+        uplift_ambiguous = float(gates.get("ensemble_ambiguous_min", 1.05))
+
+    data_cfg = config.get("data", {})
+    for k in ("train_end_date", "val_start_date", "val_end_date",
+              "test_start_date", "test_end_date"):
+        if k not in data_cfg:
+            raise ValueError(f"data.{k} missing — required for val-split selection")
+
+    ensemble_rules: List[tuple] = [
+        ("ens_mean",        _agg_mean),
+        ("ens_median",      _agg_median),
+        ("ens_agreement",   _agg_agreement),
+        ("ens_pf_weighted", _make_pf_weighted(seed_pfs)),
+    ]
+    solo_rules: List[tuple] = [(f"solo_{s}", _agg_solo(s)) for s in seed_pfs]
+
+    # --- Phase 1: run everything on val ---
+    val_dir = out_dir / "val"
+    val_dir.mkdir(parents=True, exist_ok=True)
+    val_cfg = _override_test_window(
+        config,
+        test_start=data_cfg["val_start_date"],
+        test_end=data_cfg["val_end_date"],
+        norm_cutoff=data_cfg["train_end_date"],
+    )
+    log.info(f"[val-select] Phase 1: running {len(solo_rules + ensemble_rules)} rules "
+             f"on VAL {data_cfg['val_start_date']} -> {data_cfg['val_end_date']}")
+    val_metrics: Dict[str, dict] = {}
+    for rname, rfn in solo_rules + ensemble_rules:
+        df = run_rule(val_cfg, agents, rname, rfn, device, val_dir)
+        m = compute_gate_metrics(df, rname)
+        m.update(buffer_fn(m))
+        (val_dir / f"{rname}_metrics.json").write_text(
+            json.dumps(m, indent=2, default=str)
+        )
+        val_metrics[rname] = m
+
+    # --- Phase 2: pick winner (ensembles only; solos are uplift denominator) ---
+    ens_val_pfs = {r[0]: val_metrics[r[0]]["pf_bar"] for r in ensemble_rules}
+    chosen_rule = max(ens_val_pfs, key=lambda k: ens_val_pfs[k])
+    chosen_fn = dict(ensemble_rules)[chosen_rule]
+    log.info(f"[val-select] Phase 2: val PFs = {ens_val_pfs}")
+    log.info(f"[val-select] chosen_rule = {chosen_rule} "
+             f"(val PF {ens_val_pfs[chosen_rule]:.4f})")
+
+    # --- Phase 3: run chosen ensemble + solos on test ---
+    test_dir = out_dir / "test"
+    test_dir.mkdir(parents=True, exist_ok=True)
+    test_cfg = _override_test_window(
+        config,
+        test_start=data_cfg["test_start_date"],
+        test_end=data_cfg["test_end_date"],
+        norm_cutoff=data_cfg["val_end_date"],
+    )
+    log.info(f"[val-select] Phase 3: running chosen+solos on TEST "
+             f"{data_cfg['test_start_date']} -> {data_cfg['test_end_date']}")
+    test_rules = solo_rules + [(chosen_rule, chosen_fn)]
+    test_metrics: Dict[str, dict] = {}
+    for rname, rfn in test_rules:
+        df = run_rule(test_cfg, agents, rname, rfn, device, test_dir)
+        m = compute_gate_metrics(df, rname)
+        m.update(buffer_fn(m))
+        (test_dir / f"{rname}_metrics.json").write_text(
+            json.dumps(m, indent=2, default=str)
+        )
+        test_metrics[rname] = m
+
+    # --- Phase 4: uplift gate ---
+    solo_test_pfs = {s: test_metrics[f"solo_{s}"]["pf_bar"] for s in seed_pfs}
+    best_solo_seed = max(solo_test_pfs, key=lambda s: solo_test_pfs[s])
+    best_solo_test_pf = solo_test_pfs[best_solo_seed]
+    chosen_test_pf = test_metrics[chosen_rule]["pf_bar"]
+    uplift = (chosen_test_pf / best_solo_test_pf) if best_solo_test_pf > 0 else None
+
+    if uplift is None:
+        decision = "NO_DATA"
+        reason = "best_solo_test_pf was 0"
+    elif uplift >= uplift_promote:
+        decision = "PROMOTE_ENSEMBLE"
+        reason = (f"chosen rule {chosen_rule} test uplift {uplift:.4f}x "
+                  f">= {uplift_promote:.2f} PROMOTE threshold")
+    elif uplift >= uplift_ambiguous:
+        decision = "AMBIGUOUS_RERUN"
+        reason = (f"chosen rule {chosen_rule} test uplift {uplift:.4f}x in "
+                  f"[{uplift_ambiguous:.2f}, {uplift_promote:.2f}) ambiguous band")
+    else:
+        decision = "SOLO_BEST_FALLBACK"
+        reason = (f"chosen rule {chosen_rule} test uplift {uplift:.4f}x "
+                  f"< {uplift_ambiguous:.2f} ambiguous floor")
+
+    verdict = {
+        "workstream": workstream_label,
+        "protocol": "v2_stage_2_5_val_selection_s495",
+        "supersedes": "decision_ensemble_mandatory_stage_2_5 (S493)",
+        "val_window": f"{data_cfg['val_start_date']} -> {data_cfg['val_end_date']}",
+        "test_window": f"{data_cfg['test_start_date']} -> {data_cfg['test_end_date']}",
+        "seeds": sorted(seed_pfs),
+        "val_pf_by_rule": {r: val_metrics[r]["pf_bar"] for r in val_metrics},
+        "chosen_rule": chosen_rule,
+        "chosen_rule_val_pf": ens_val_pfs[chosen_rule],
+        "chosen_rule_test_pf": chosen_test_pf,
+        "test_solo_pfs": solo_test_pfs,
+        "best_solo_seed_on_test": best_solo_seed,
+        "best_solo_test_pf": best_solo_test_pf,
+        "uplift": uplift,
+        "uplift_promote_threshold": uplift_promote,
+        "uplift_ambiguous_threshold": uplift_ambiguous,
+        "decision": decision,
+        "reason": reason,
+    }
+    (out_dir / "verdict.json").write_text(json.dumps(verdict, indent=2, default=str))
+
+    # Also write a flat summary CSV (val + test side-by-side) for quick audit.
+    summary_rows = []
+    for rname in sorted(set(list(val_metrics) + list(test_metrics))):
+        v = val_metrics.get(rname, {})
+        t = test_metrics.get(rname, {})
+        summary_rows.append({
+            "rule": rname,
+            "val_pf": v.get("pf_bar"),
+            "val_return_pct": v.get("total_return_pct"),
+            "val_trail_dd_pct": v.get("trailing_max_drawdown_pct"),
+            "test_pf": t.get("pf_bar"),
+            "test_return_pct": t.get("total_return_pct"),
+            "test_trail_dd_pct": t.get("trailing_max_drawdown_pct"),
+            "test_trail_buf_pp": t.get("trailing_dd_buffer_pp"),
+            "test_ftmo_ok": t.get("ftmo_compliance_pass"),
+            "in_test_phase": (rname in test_metrics),
+        })
+    pd.DataFrame(summary_rows).to_csv(out_dir / "summary.csv", index=False)
+
+    return verdict
+
+
 # --- walk-forward orchestrator ----------------------------------------------
 
 def _override_test_window(config: dict, test_start: str, test_end: str,

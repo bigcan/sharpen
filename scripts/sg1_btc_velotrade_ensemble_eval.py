@@ -650,6 +650,71 @@ def run_single_window_ensemble(config_path: str, device: str, gates_path: Option
     return {"summary": summary, "verdict": verdict}
 
 
+# --- S495 Protocol v2 amendment: val-split rule selection -------------------
+# When the L1 config declares `gates.ensemble_rule_selection: val_argmax_pf`,
+# Stage 2.5 confirmation runs through the shared helper in
+# sg1_xauusd_ensemble_eval.py (see `decision_ensemble_val_selection_s495.md`).
+# The 5-gate G1..G5 framework stays on Stage 3 WF (run_wf_ensemble, unchanged).
+
+def run_single_window_val_selection(
+    config_path: str,
+    device: str,
+    output_dir: Optional[str] = None,
+    seeds_override: Optional[List[int]] = None,
+) -> dict:
+    """S495 Stage 2.5 val-selection path for SG-1 BTC Velotrade.
+
+    Resolves seeds + checkpoints + seed_pfs from the config's `ensemble:` block,
+    loads agents, then delegates to `sg1.run_stage_2_5_val_selection` with
+    `buffer_fn=velotrade_buffers`. The helper does phase1-val / phase2-pick /
+    phase3-test / phase4-uplift-gate and writes verdict.json + per-rule metrics
+    under `val/` and `test/` subdirs.
+    """
+    from scripts import sg1_xauusd_ensemble_eval as sg1  # local import: avoid cycles
+
+    with open(config_path, encoding="utf-8") as f:
+        config = yaml.safe_load(f)
+
+    ens = config.get("ensemble") or {}
+    seeds = [int(s) for s in (seeds_override or ens.get("seeds") or []) if s is not None]
+    if not seeds:
+        raise ValueError(
+            "No seeds resolved: populate `ensemble.seeds` in config (top-3 by "
+            "backtest_test/profit_factor after L1 reconcile) or pass --seeds_override."
+        )
+    pattern = ens.get("checkpoint_pattern") or ""
+    if not pattern:
+        raise ValueError("`ensemble.checkpoint_pattern` missing from config")
+    seed_pfs_raw = ens.get("seed_pfs") or {}
+    seed_pfs = {int(k): float(v) for k, v in seed_pfs_raw.items()}
+    if not seed_pfs or set(seed_pfs) != set(seeds):
+        raise ValueError(
+            "val-selection requires `ensemble.seed_pfs` with one entry per seed "
+            "(used to weight ens_pf_weighted; populated post-L1 by reconcile)"
+        )
+
+    ckpt_paths = {s: _resolve_single_checkpoint(pattern, s) for s in seeds}
+    workstream = config.get("workstream", "sg1_btc_velotrade")
+    out_dir = Path(output_dir) if output_dir else Path(f"results/{workstream}_ensemble")
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    agents = _load_agents_from_paths(config, ckpt_paths, device)
+
+    verdict = sg1.run_stage_2_5_val_selection(
+        config=config,
+        agents=agents,
+        seed_pfs=seed_pfs,
+        out_dir=out_dir,
+        device=device,
+        buffer_fn=velotrade_buffers,
+        workstream_label=workstream,
+    )
+
+    print(f"\n========== {workstream.upper()} ENSEMBLE-CONFIRM (Protocol v2 S495) ==========")
+    print(json.dumps(verdict, indent=2, default=str))
+    return verdict
+
+
 # --- main --------------------------------------------------------------------
 
 def main():
@@ -687,6 +752,21 @@ def main():
         run_wf_ensemble(args.wf_config, gates_path, args.device,
                         rules_subset=args.rules, output_dir=args.output_dir,
                         seeds_override=args.seeds_override)
+        return
+
+    # S495 amendment: if the L1 config declares val-argmax-PF rule selection,
+    # route Stage 2.5 through the shared helper instead of the legacy 5-gate
+    # single-window flow. WF mode (Stage 3) is unaffected.
+    with open(args.config, encoding="utf-8") as f:
+        _cfg_probe = yaml.safe_load(f)
+    _rule_sel = (_cfg_probe.get("gates") or {}).get("ensemble_rule_selection")
+    if _rule_sel == "val_argmax_pf":
+        run_single_window_val_selection(
+            config_path=args.config,
+            device=args.device,
+            output_dir=args.output_dir,
+            seeds_override=args.seeds_override,
+        )
         return
 
     run_single_window_ensemble(
