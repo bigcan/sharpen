@@ -93,6 +93,13 @@ risk:
   max_gross_exposure: 1.0            # 1:1 leverage (user policy)
   funding_rate_alert: 999.0
   min_margin_reserve_pct: 0.15
+  # S495-cont (2026-04-23) preemptive override (mirrors sg1-xauusd fix). See
+  # crypto_risk_manager.py:267 — accumulator resets every 24 `check()` calls,
+  # not 24 calendar hours. SG-1 3-min bars with signal_gate + deadband reduce
+  # check() to ~9/day → "daily" window spans ~2-3 calendar days. Default 4.0
+  # trips after 3-4 roundtrips. 10.0 gives ~3-5 roundtrips per reset window.
+  # Structural fix (bar-interval-aware reset) queued.
+  daily_turnover_limit: 10.0
 
 # --- WandB Monitoring ---
 wandb:
