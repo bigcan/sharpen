@@ -258,6 +258,103 @@ def check_hpo(cfg: dict, r: ValidationResult) -> None:
         )
 
 
+def _is_prop_firm(cfg: dict) -> bool:
+    """Workstream is paper-or-live-capital per Protocol v2.2 §8 scope rules.
+
+    Tag set mirrors the one declared in decision_protocol_v22_rlops_drift_safemode.md:
+    any of `prop-firm`, `FTMO`, `Velotrade` (case-insensitive match on
+    wandb.tags).
+    """
+    tags = [str(t).lower() for t in (cfg.get("wandb", {}).get("tags") or [])]
+    return any(t in tags for t in ("prop-firm", "propfirm", "ftmo", "velotrade"))
+
+
+# Protocol v2.2 §8.2 / §8.3 gate keys. Every one of these must be present in
+# a prop-firm / live-capital workstream's gate YAML — missing keys reject.
+# Advisory workstreams (research tier) are exempt (warn only).
+_V22_DRIFT_GATE_KEYS = (
+    "window_bars",
+    "min_bars_before_check",
+    "deadband_frac_warn",
+    "deadband_frac_crit",
+    "saturation_frac_warn",
+    "saturation_frac_crit",
+    "action_kl_warn",
+    "action_kl_crit",
+)
+_V22_SAFE_MODE_KEYS = (
+    "crit_triggers_flatten",
+    "crit_repeat_window_hours",
+    "crit_repeat_count_before_lockout",
+)
+
+
+def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
+    """Protocol v2.2 §8 / §8.3 drift + safe_mode gate-key presence.
+
+    Blocking for prop-firm / live-capital; advisory otherwise. Keys live
+    under the `gates:` block in the workstream YAML (co-located with the
+    other per-stage thresholds). The values themselves are project-wide
+    defaults and are not enforced here — only the presence of an explicit
+    declaration is, so that an operator intentionally declares their
+    thresholds rather than silently inheriting.
+
+    See `decision_protocol_v22_rlops_drift_safemode.md`.
+    """
+    prop_firm = _is_prop_firm(cfg)
+    gates = cfg.get("gates", {}) or {}
+    drift_gates = gates.get("drift") or {}
+    safe_gates = gates.get("safe_mode") or {}
+
+    missing_drift = [k for k in _V22_DRIFT_GATE_KEYS if k not in drift_gates]
+    missing_safe = [k for k in _V22_SAFE_MODE_KEYS if k not in safe_gates]
+
+    if missing_drift:
+        msg = (
+            f"gates.drift missing v2.2 key(s): {missing_drift} — "
+            f"§8.2 action-drift thresholds must be declared per workstream "
+            f"(see decision_protocol_v22_rlops_drift_safemode.md)"
+        )
+        r.fail(msg) if prop_firm else r.warn(msg)
+    else:
+        r.ok(f"gates.drift has all {len(_V22_DRIFT_GATE_KEYS)} v2.2 keys")
+
+    if missing_safe:
+        msg = (
+            f"gates.safe_mode missing v2.2 key(s): {missing_safe} — "
+            f"§8.3 tiered safe-mode must be explicitly declared"
+        )
+        r.fail(msg) if prop_firm else r.warn(msg)
+    else:
+        r.ok(f"gates.safe_mode has all {len(_V22_SAFE_MODE_KEYS)} v2.2 keys")
+
+    # Sanity on declared thresholds when present.
+    if all(k in drift_gates for k in ("deadband_frac_warn", "deadband_frac_crit")):
+        if drift_gates["deadband_frac_warn"] >= drift_gates["deadband_frac_crit"]:
+            r.fail(
+                f"gates.drift.deadband_frac_warn="
+                f"{drift_gates['deadband_frac_warn']} must be < "
+                f"deadband_frac_crit={drift_gates['deadband_frac_crit']}"
+            )
+    if all(k in drift_gates for k in ("saturation_frac_warn", "saturation_frac_crit")):
+        if drift_gates["saturation_frac_warn"] >= drift_gates["saturation_frac_crit"]:
+            r.fail(
+                f"gates.drift.saturation_frac_warn must be < "
+                f"saturation_frac_crit"
+            )
+    if all(k in drift_gates for k in ("action_kl_warn", "action_kl_crit")):
+        if drift_gates["action_kl_warn"] >= drift_gates["action_kl_crit"]:
+            r.fail(
+                f"gates.drift.action_kl_warn must be < action_kl_crit"
+            )
+    wb = drift_gates.get("window_bars")
+    mb = drift_gates.get("min_bars_before_check")
+    if wb is not None and mb is not None and mb > wb:
+        r.fail(
+            f"gates.drift.min_bars_before_check={mb} must be <= window_bars={wb}"
+        )
+
+
 def check_l1_multiseed(cfg: dict, r: ValidationResult) -> None:
     gates = cfg.get("gates", {})
     seeds = gates.get("l1_seeds", 5)
@@ -379,12 +476,56 @@ def check_wandb_consolidation(cfg: dict, stage: str, r: ValidationResult) -> Non
 
 
 def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
-    """Stage 5 live-config requirements (S468 + S470)."""
-    risk = cfg.get("risk", {})
+    """Stage 5 live-config requirements (S468 + S470 + v2.2 §8.3)."""
+    prop_firm = _is_prop_firm(cfg)
+    risk = cfg.get("risk", {}) or {}
+    safety = cfg.get("safety", {}) or {}
+    drift = cfg.get("drift", {}) or {}
+
     if not risk.get("static_peak"):
         r.fail("risk.static_peak must be true for paper-deploy (project_ftmo_risk_manager_fix.md)")
-    if not risk.get("kill_file"):
-        r.fail("risk.kill_file path required for paper-deploy")
+
+    # v2.2 §8.3: kill_file can live under risk.kill_file OR safety.kill_file
+    # (engine reads safety.kill_file; older configs have risk.kill_file — accept
+    # either but require at least one).
+    if not (risk.get("kill_file") or safety.get("kill_file")):
+        r.fail(
+            "kill_file path required for paper-deploy — declare either "
+            "`risk.kill_file` or `safety.kill_file` (engine reads the latter, "
+            "watchdog reads kill_file inside the container via exec_run)"
+        )
+
+    # v2.2 §8.3 flatten-on-kill-file: prop-firm / live-capital must confirm the
+    # CRIT path flattens rather than holding positions (S491 bleed-window case).
+    flatten_declared = risk.get("flatten_on_kill_file") or safety.get(
+        "flatten_on_kill_file",
+    )
+    if prop_firm and not flatten_declared:
+        r.fail(
+            "risk.flatten_on_kill_file (or safety.flatten_on_kill_file) must "
+            "be true for prop-firm/live-capital paper-deploy — §8.3 CRIT path "
+            "requires graceful flatten, not 'halt without close' (S491)"
+        )
+
+    # v2.2 §8.2 drift block: prop-firm must enable drift monitoring and point
+    # at a resolvable baseline artifact. Baseline existence isn't checked here
+    # (live config often runs on a different host); only declaration is.
+    if prop_firm:
+        if not drift.get("enabled"):
+            r.fail(
+                "drift.enabled must be true for prop-firm/live-capital "
+                "paper-deploy — §8.2 action-drift check is blocking"
+            )
+        if drift.get("enabled") and not drift.get("baseline_path"):
+            r.fail(
+                "drift.baseline_path missing — point at the seed_report.json "
+                "or ensemble_report.json emitted by Stage 2 / 2.5 writers. "
+                "LOG_ONLY fallback is intentional for T5 backfill only; "
+                "production deploys must resolve a baseline"
+            )
+
+    # Drift/safe_mode gate keys (see check_drift_safemode_gates) are part of
+    # the universal check path so they also apply here without repetition.
 
 
 STAGE_CHECKS = {
@@ -407,6 +548,7 @@ def validate(config_path: Path, stage: str) -> ValidationResult:
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)
     check_wandb_consolidation(cfg, stage, r)
+    check_drift_safemode_gates(cfg, r)
 
     for check in STAGE_CHECKS[stage]:
         check(cfg, r)

@@ -67,6 +67,27 @@ gates:
       PF across folds must be at or below cv_max.
     cv_pf_max: 0.35
 
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds (defaults
+  # from decision_protocol_v22_rlops_drift_safemode.md). Declared on the
+  # workstream gate YAML so validate_config.py can enforce presence.
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5                           # unused on V7 scalar, declared for schema
+    action_kl_crit: 1.0                           # unused on V7 scalar, declared for schema
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode.
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
 # ---------------------------------------------------------------------------
 # Decision matrix
 # ---------------------------------------------------------------------------
