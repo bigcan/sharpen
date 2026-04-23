@@ -1,8 +1,13 @@
-# Training → Live Protocol v2 (DRAFT)
+# Training → Live Protocol v2.1
 
-> **Status:** Draft for review. Standardizes the training-to-live workflow across all FinRL-Pro_DS workstreams (GMGP1, SG-1, CMGP1, AlphaSeek, Funding-Arb).
+> **Status:** Active. Standardizes the training-to-live workflow across all FinRL-Pro_DS workstreams (GMGP1, SG-1, CMGP1, AlphaSeek, Funding-Arb).
 > **Reference run:** GMGP1 staged approach. **Anti-pattern:** AlphaSeek `k28l6ef8` monolithic 5.7-day run.
-> **Owner:** R&D. **Last updated:** 2026-04-18 Session 475 (post-audit revision).
+> **Owner:** R&D. **Last updated:** 2026-04-23 Session 495 (Stage 2.5 val-split amendment).
+>
+> **Version history:**
+> - **v2.1** (2026-04-23, S495) — Stage 2.5 ensemble rule selection moved from hardcoded `ens_agreement` (canonical per S493) to val-argmax-PF per-workstream selection. Motivated by GMGP1-BTC L1 falsification (S495 — ens_agreement was the *worst* ensemble on trending BTC, +4.10% vs ens_mean +8.13%). First customer: **GMGP1-BTC** (retro-applied). See `decision_ensemble_val_selection_s495.md`.
+> - **v2.0** (2026-04-18, S475) — initial post-audit revision: 6 core stages + Stage 2.5 ensemble-confirm (with hardcoded `ens_agreement` canonical rule per S493). Superseded the DRAFT.
+> - **v2-DRAFT** (2026-04-17, S474) — first codified protocol after AlphaSeek monolithic-HPO incident.
 
 ---
 
@@ -177,24 +182,29 @@ All numeric gate thresholds live in `configs/<workstream>.gates.yaml` and are re
   - Escalation batches use **different seeds** from the first batch (no overlap) so that CV estimate pools independent samples
 
 ### Stage 2.5 — ensemble-confirm (mandatory for prop-firm / live-capital; advisory elsewhere)
-- **Inputs:** top-3 seeds by L1 test PF from stage 2 (`seed_report.json`), their checkpoints, and the L1 test window
-- **Method:** run `scripts/*_ensemble_eval.py` (reusing `sg1_xauusd_ensemble_eval.py` aggregation + backtest) on the L1 test window with `profit_target_pct` disabled and `episode_length=0` (full-window eval), reporting bar-level PF for:
-  - `solo_<seed>` for each of the top-3 seeds (baseline)
-  - `ens_mean` — np.mean of per-agent continuous actions
-  - `ens_median` — robust to a single outlier seed
-  - **`ens_agreement`** — deadband classification into {short, flat, long} + majority vote (≥2 of 3); size = mean of agreeing seeds; otherwise flat (the canonical rule)
-  - `ens_pf_weighted` — softmax-weighted by each seed's stage-2 test PF
-- **Gate:** `ens_agreement PF / best_solo_PF ≥ gates.ensemble_uplift_min` (default **1.10**)
-  - PASS → promote **`ens_agreement`** to the deploy aggregation rule; stage 3 WF runs all three seeds, and stage 5 live-config declares `agent.ensemble: {rule: ens_agreement, seeds: [...]}` (SG-1 XAUUSD precedent, S489)
-  - FAIL → stage 3/5 fall back to best-solo (advisory log only for non-prop-firm; hard fallback for prop-firm)
-  - AMBIGUOUS (uplift ∈ [1.05, 1.10)) → run once more on a second workstream (same asset class if possible) before codifying for that workstream; keep best-solo in the interim
-- **Checkpoint collision guard:** if multiple seeds share a checkpoint dir (e.g. concurrent deploys hit `deploy_bare_metal.py` timestamp-collision), substitute the next-best distinct seed. Ensemble eval **requires** per-seed distinct weight provenance; manifest must record checkpoint SHA256s
-- **Rationale — two independent data points:**
-  - SG-1 XAUUSD L1 OANDA (S490, N=1): `ens_agreement` median-fold PF 2.058 vs best-solo 1.715 → **+17.6% uplift**; stress sidecar PASS; paper-deployed `sg1-xauusd` on ens_agreement
-  - GMGP1 XAUUSD L1 (S493, N=2 confirmation): `ens_agreement` PF 2.568 vs best-solo 2.192 → **+17.15% uplift**; both workstreams converge on ~+17% lift at the same asset class, isolating the aggregation rule from venue/HPO noise
-  - Threshold ≥ 1.10 gives ~1.5× buffer over noise floor and matches SG-1's pre-committed rule in `configs/sg1_xauusd_ensemble.gates.yaml:g3_uplift`
-- **Cost:** ~5 min wall-time on CPU for a 2-month L1 test window (one forward pass per step × 7 rules)
-- **When not to run:** research-tier workstreams (e.g. CMGP1 crypto) may skip Stage 2.5 — ensemble remains a per-workstream option, not a protocol requirement. `validate_config.py --stage ensemble-confirm` only hard-fails on prop-firm / live-capital tags (`prop-firm`, `FTMO`, `Velotrade`)
+**Amended S495 — val-split rule selection supersedes S493 hardcoded canonical rule.** See `decision_ensemble_val_selection_s495.md`. Motivation: GMGP1-BTC L1 Stage 2.5 (S495) showed `ens_agreement` — the S493 canonical rule based on XAUUSD evidence — is the *worst* ensemble on trending BTC (+4.10% vs `ens_mean`'s +8.13%). A hardcoded canonical rule encodes an asset-microstructure bet; val-split selection lets each workstream discover the regime-appropriate rule without leaking test-split information.
+
+- **Inputs:** top-3 seeds by L1 test PF from stage 2 (`seed_report.json`), their checkpoints, L1 **val** window, and L1 **test** window. Both windows must be declared in the config's `data:` block (`val_start_date`, `val_end_date`, `test_start_date`, `test_end_date`).
+- **Method:** run `scripts/*_ensemble_eval.py` (all delegate to `sg1.run_stage_2_5_val_selection()`) with `profit_target_pct` disabled and `episode_length=0` (full-window eval):
+  - **Phase 1 — val bake-off:** run all 4 ensemble rules + 3 solos on the **val window** (norm cutoff = `train_end_date`). Reports bar-level PF for `ens_mean`, `ens_median`, `ens_agreement`, `ens_pf_weighted`, plus solos.
+  - **Phase 2 — rule selection:** `chosen_rule = argmax_{r ∈ ensembles}(val_PF[r])`. Test split is NOT consulted for this choice. Solo PFs on val are logged for audit but don't enter the selection.
+  - **Phase 3 — test eval:** run only `chosen_rule` + 3 solos on the **test window** (norm cutoff = `val_end_date`).
+  - **Phase 4 — uplift gate:** `uplift = chosen_rule_test_PF / best_solo_test_PF`
+- **Gate thresholds (from `gates:` block, no code defaults):**
+  - `gates.ensemble_uplift_min` (default **1.10**) → PROMOTE ensemble; stage 3 WF runs all three seeds with `chosen_rule` aggregation, stage 5 live-config declares `agent.ensemble: {rule: <chosen>, seeds: [...]}`
+  - `gates.ensemble_ambiguous_min` (default **1.05**) → AMBIGUOUS_RERUN; keep best-solo in the interim, confirm on a second workstream before codifying for that workstream
+  - `uplift < ambiguous_min` → SOLO_BEST_FALLBACK; stage 3/5 use best-solo seed (advisory log only for non-prop-firm; hard fallback for prop-firm)
+- **Selection rule `gates.ensemble_rule_selection: val_argmax_pf`** must be declared in the config. Other methods (`static:<rule>` for reproducing S493 behavior, `val_argmax_sharpe` etc.) may be added in future amendments.
+- **Checkpoint collision guard:** if multiple seeds share a checkpoint dir (e.g. concurrent deploys hit `deploy_bare_metal.py` timestamp-collision), substitute the next-best distinct seed. Ensemble eval **requires** per-seed distinct weight provenance; manifest must record checkpoint SHA256s.
+- **Empirical evidence for the amendment (S495, N=3 workstreams):**
+  - SG-1 XAUUSD L1 OANDA (S490): `ens_agreement` +17.6% — regime-flippy gold, agreement filter dominates
+  - GMGP1 XAUUSD L1 CME (S493): `ens_agreement` +17.15% — same asset class, same rule wins
+  - GMGP1 BTC Velotrade L1 (S495): `ens_agreement` +4.10% (below ambiguous floor); `ens_mean` +8.13% — trending BTC, noise-averaging beats consensus-filter. **This is the motivating case.**
+  - With val-split selection, BTC would have chosen `ens_mean` at the val stage (hypothesis; falsifiable on next re-run), avoiding the protocol-hardcoded wrong answer.
+- **Bias control:** val is already used twice (HP selection, seed selection). Rule selection adds a third, low-entropy use (log₂(4)=2 bits). Verdict artifact logs all 4 val PFs so audits can detect near-tie rule choices that may be overfit.
+- **Retro-apply to BTC, leave paper-deployed XAUUSD alone:** Workstreams already paper-deployed on `ens_agreement` keep their S493 verdict (no container churn): SG-1 XAUUSD (paper live per S489), GMGP1 XAUUSD CME (Stage 3 WF already launched on `ens_agreement`). **First customer under S495 = GMGP1-BTC Velotrade L1** (retro-applied — val was never consulted in the S493 run, so running S495 val-selection now is a legitimate use of val, not post-hoc bias). Second customer = SG-1 BTC L1 (launched 2026-04-23 S494-cont, parent `ighx368o`).
+- **Cost:** ~8 min wall-time on CPU for 2mo val + 2mo test windows (7 rules on val + 4 rules on test). Previous single-window eval was ~5 min.
+- **When not to run:** research-tier workstreams (e.g. CMGP1 crypto) may skip Stage 2.5 — ensemble remains a per-workstream option, not a protocol requirement. `validate_config.py --stage ensemble-confirm` only hard-fails on prop-firm / live-capital tags (`prop-firm`, `FTMO`, `Velotrade`).
 
 ### Stage 3 — walk-forward (+ fixed-lot stress sub-report)
 - K ≥ `gates.wf_windows` (default 4) rolling windows
