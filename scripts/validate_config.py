@@ -551,6 +551,98 @@ def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
     # Drift/safe_mode gate keys (see check_drift_safemode_gates) are part of
     # the universal check path so they also apply here without repetition.
 
+    # S495-cont prop-firm decoupling (rev 2): challenge block + static_peak
+    # consistency. Live deploys that were re-authored under the new schema
+    # must have both env.risk.static_peak and risk.static_peak aligned
+    # (train/live divergence was the S422 failure mode we're guarding).
+    check_challenge_block(cfg, r)
+    check_static_peak_consistency(cfg, r)
+
+
+def check_challenge_block(cfg: dict, r: ValidationResult) -> None:
+    """Validate the ``challenge:`` block when present (paper-deploy stage).
+
+    Only fires when the config actually declares a challenge block; a
+    legacy ``env.prop_firm:`` config hits check_legacy_prop_firm_block
+    which FAILs paper-deploy on its own, so this helper is additive.
+
+    Rules:
+    - ``challenge.phase`` must be one of {step1, step2, funded, custom}.
+    - ``challenge.advance_rule`` must be "manual_ack" (auto is rejected
+      for capital-at-risk per ADR-2).
+    - ``challenge.profit_target_pct`` must be a positive float, or null
+      for the funded phase, or >= 10.0 for backtest-style full-window
+      runs. funded MUST NOT set enabled=true with a finite target.
+    - ``n_confirm`` and ``smoothing_window`` must be positive integers
+      when present.
+    """
+    challenge = cfg.get("challenge")
+    if not isinstance(challenge, dict):
+        return
+    if not challenge.get("enabled", False):
+        # Disabled blocks exist on funded deploys — pass-through.
+        return
+
+    valid_phases = ("step1", "step2", "funded", "custom")
+    phase = challenge.get("phase")
+    if phase not in valid_phases:
+        r.fail(
+            f"challenge.phase must be one of {valid_phases}, got {phase!r} "
+            "(prop_firm_decoupling_architecture.md Interface 3)"
+        )
+
+    advance_rule = challenge.get("advance_rule", "manual_ack")
+    if advance_rule != "manual_ack":
+        r.fail(
+            f"challenge.advance_rule must be 'manual_ack' at paper-deploy, "
+            f"got {advance_rule!r}. 'auto' is rejected for capital-at-risk "
+            "per ADR-2 — operator must explicitly swap the overlay."
+        )
+
+    target = challenge.get("profit_target_pct")
+    if phase == "funded":
+        if target not in (None, float("inf")):
+            r.fail(
+                "challenge.phase=funded requires profit_target_pct=null "
+                "(or disable the challenge block entirely)"
+            )
+    else:
+        if target is None or (isinstance(target, (int, float)) and target <= 0):
+            r.fail(
+                f"challenge.profit_target_pct must be a positive float "
+                f"for phase={phase!r}, got {target!r}"
+            )
+
+    for key in ("n_confirm", "smoothing_window"):
+        if key in challenge:
+            val = challenge[key]
+            if not (isinstance(val, int) and val >= 1):
+                r.fail(
+                    f"challenge.{key} must be a positive integer, got {val!r}"
+                )
+
+
+def check_static_peak_consistency(cfg: dict, r: ValidationResult) -> None:
+    """``env.risk.static_peak`` must equal ``risk.static_peak`` at paper-deploy.
+
+    Train-time wrapper reads env.risk.static_peak; live-engine reads
+    risk.static_peak. A mismatch was the S422 class of bug (static train,
+    trailing live) — the train-time peak-accounting diverges from live,
+    so the policy can trip the live DD gate on a drawdown that its
+    trained-peak never saw. Keep them in sync. If only one is set,
+    accept — the sibling default is compatible — but flag if both are
+    set to different values.
+    """
+    env_risk = (cfg.get("env", {}) or {}).get("risk", {}) or {}
+    risk = cfg.get("risk", {}) or {}
+    env_val = env_risk.get("static_peak")
+    live_val = risk.get("static_peak")
+    if env_val is not None and live_val is not None and env_val != live_val:
+        r.fail(
+            f"env.risk.static_peak={env_val!r} != risk.static_peak={live_val!r}. "
+            "Train-time wrapper and live-engine must agree (project_ftmo_risk_manager_fix.md S422)."
+        )
+
 
 STAGE_CHECKS = {
     "data-prep": [],
