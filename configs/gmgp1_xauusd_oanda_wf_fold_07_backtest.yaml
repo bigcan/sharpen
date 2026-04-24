@@ -1,0 +1,93 @@
+# GMGP1-XAUUSD WF fold-07 retrain-gate backtest config (OANDA)
+# Referenced from configs/live_gmgp1_xauusd_ctrader.yaml `retrain_policy.backtest_config_ref`.
+# Used by scripts/check_retrain_triggers.py to re-evaluate the deployed
+# checkpoint on a rolling post-training OOS window.
+#
+# Checkpoint: WF_seed42_fold_07_20260424_061803 (Stage 2.5 SOLO_BEST, 2026-04-24)
+# Training split (per configs/gmgp1_xauusd_ftmo_rehpo_wf_multiseed_oanda.yaml
+# splitter 6/1/1 rolling, fold 7): train 2025-08-06 -> 2026-02-06, val 2026-02-06
+# -> 2026-03-06, test 2026-03-06 -> 2026-04-06. Retrain-gate test window starts
+# post-fold-7-test (2026-04-06) and extends to current OANDA parquet end.
+
+data:
+  file_path: "data/oanda/xauusd_m15_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  # Train/val split carried through for LEAK-1 EMA-Z reset boundaries only.
+  train_start_date: "2025-08-06"
+  train_end_date: "2026-02-06"
+  val_start_date: "2026-02-06"
+  val_end_date: "2026-03-06"
+  test_start_date: "2026-04-06"
+  test_end_date: "2026-04-15"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235                  # steady-state (S464); IC Markets Raw
+  deadband_threshold: 0.35             # trial #10 (matches training + live)
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: false
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  gap_detection: true                  # matches training + live
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.008072070485679669      # trial #10
+    dsr_scale: 1.0
+    hindsight_weight: 0.0              # BUG-03: never > 0 in backtest
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Trial #10 HPs (Optuna study gmgp1_xauusd_ftmo_rehpo_20260421)
+    lr_actor: 0.00048211947849186834
+    lr_critic: 0.00023536913918894482
+    lr_alpha: 0.0000023011482963674244
+    gamma: 0.9734375919828845
+    tau: 0.0056901039341825865
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.4568170758305432
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 2.738336834748153
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 0                   # backtest only
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: false                 # live parity
+  num_envs: 1
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-xauusd", "XAUUSD", "SAC", "15min", "CFD", "backtest",
+         "wf-stage3", "fold-07", "solo-seed-42", "oanda-xau-spot",
+         "retrain-gate", "steady-state"]
