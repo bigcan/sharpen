@@ -2,10 +2,22 @@
 # 3-min bars, signal-gated, prop-firm trained (10% EOD trailing DD)
 # Checkpoint: PLACEHOLDER — update with L1 multi-seed best
 #
-# Usage:
-#   python scripts/run_live_dxtrade.py --config configs/live_sg1_btc_dxtrade.yaml
-#   python scripts/run_live_dxtrade.py --config configs/live_sg1_btc_dxtrade.yaml --mainnet
-#   python scripts/run_live_dxtrade.py --config configs/live_sg1_btc_dxtrade.yaml --dry-run
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S495 Step 5, 2026-04-24).
+# This file is the BASE config. Phase-varying DD/target/gates live in
+# configs/deploy/velotrade/<phase>.yaml overlays (allowlist-enforced).
+#
+# Deploy invocations (resolved = this file + overlay):
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_dxtrade.py \
+#     --config configs/live_sg1_btc_dxtrade.yaml --overlay velotrade/step1
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_dxtrade.py \
+#     --config configs/live_sg1_btc_dxtrade.yaml --overlay velotrade/step2
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_dxtrade.py \
+#     --config configs/live_sg1_btc_dxtrade.yaml --overlay velotrade/funded
+#
+# After Step 5 migration this BASE file alone is NOT paper-deployable
+# (validator FAILs: `risk.static_peak` missing); pair with an overlay.
+# ---------------------------------------------------------------------------
 #
 # NOTE: DXtrade broker is currently a stub. Full API pending from Velotrade.
 # Paper testing uses Bybit data feed + log-only execution.
@@ -80,13 +92,12 @@ trading:
   deadband_threshold: 0.25
   taker_fee: 0.0005                  # 5bps crypto taker
 
-# --- Risk Management (with buffers below Velotrade limits) ---
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay owns: static_peak, eod_trailing_drawdown, eod_hour_utc,
+# flatten_on_kill_file. See configs/deploy/velotrade/{step1,step2,funded}.yaml.
 risk:
   enabled: true
   max_drawdown_pct: 0.08             # 8% trigger (2% buffer below 10% limit)
-  static_peak: true                  # Match training: DD from initial balance, never ratchets (S468)
-  eod_trailing_drawdown: true
-  eod_hour_utc: 0
   circuit_breaker_cooldown_bars: 0   # Stay flat once breached
   max_position_pct: 1.0
   max_net_short_exposure: -1.0

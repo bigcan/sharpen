@@ -1,0 +1,46 @@
+# Velotrade Step 1 overlay. Layer on top of a base training/live config.
+#
+# Applied by:
+#   python scripts/deploy_bare_metal.py --config <base> --overlay velotrade/step1
+#
+# Velotrade 2-step contract: +10% profit target (phase 1), 10% max EOD
+# *trailing* DD from equity high-water mark, no daily-loss rule, 00:00 UTC
+# rollover. Product is currently $5K-$200K per buy-in; max-buy-in policy
+# public but aggregate cap not yet confirmed in writing (see
+# reference_ftmo_velotrade_account_caps.md).
+#
+# DD handling: training-wrapper `env.risk.static_peak` stays `true` to
+# match the trained checkpoint contract (S422). The Velotrade-specific
+# trailing cap is enforced live-side via `risk.eod_trailing_drawdown`.
+# A future retrain with `static_peak: false` would close this sim-to-live
+# gap.
+#
+# See .agent/artifacts/prop_firm_decoupling_architecture.md Interface 4.
+
+env:
+  risk:
+    max_trailing_drawdown_pct: 0.08     # 2pp buffer vs Velotrade 10% cap
+    max_daily_loss_pct: 0.0             # Velotrade has no daily-loss rule
+    eod_hour_utc: 0                     # 00:00 UTC rollover
+    augment_obs: "off"                  # live-path compat
+    static_peak: true                   # match training (see header)
+
+challenge:
+  enabled: true
+  phase: step1
+  profit_target_pct: 0.10
+  next_phase: step2
+  advance_rule: manual_ack
+  n_confirm: 2
+  smoothing_window: 3
+
+risk:
+  static_peak: true                     # must match env.risk.static_peak
+  eod_trailing_drawdown: true           # Velotrade-specific live guard
+  eod_hour_utc: 0
+  flatten_on_kill_file: true            # v2.2 §8.3 CRIT graceful flatten
+
+gates:
+  velotrade_active_days_min: 4
+  velotrade_max_single_day_share: 0.5
+  velotrade_trailing_dd_buffer_pp: 0.5
