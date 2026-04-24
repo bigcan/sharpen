@@ -92,6 +92,17 @@ trading:
   deadband_threshold: 0.25
   taker_fee: 0.0005                  # 5bps crypto taker
 
+# --- Data source (validator Stage-0; ccxt live-fetch at runtime) ---
+data:
+  source: ccxt
+  data_exchange: binance             # Bybit data feed via Binance fallback (see header)
+  frequency: 3m
+  ticker: "BTC/USDT"
+
+# --- Hard Constraints (validator parity; mirrors trading.taker_fee) ---
+env:
+  taker_fee: 0.0005
+
 # --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
 # Overlay owns: static_peak, eod_trailing_drawdown, eod_hour_utc,
 # flatten_on_kill_file. See configs/deploy/velotrade/{step1,step2,funded}.yaml.
@@ -124,7 +135,40 @@ safety:
   require_explicit_mainnet: true
   max_daily_loss_pct: 0.0            # 0 = disabled (Velotrade 2-step has no daily rule). Engine treats ≤0 as disabled (audit FIND-01, 2026-04-22).
   kill_file: "/tmp/finrl_live_sg1_btc_kill"
+  flatten_on_kill_file: true         # v2.2 §8.3 CRIT graceful flatten
   emergency_flatten_on_error: true
+
+# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# PLACEHOLDER — baseline artifact does not exist until L1 multiseed
+# completes. Path reflects the expected post-L1 location; deploy will
+# error at startup with "baseline not found" until the report is baked
+# into the live-engine image. This is the correct safety posture for a
+# placeholder-checkpoint config.
+drift:
+  enabled: true
+  baseline_path: "/app/baselines/sg1_btc_l1/seed_report.json"
+  baseline_seed: "PLACEHOLDER"       # Update to winning seed post-L1
+  window_bars: 1000
+  min_bars_before_check: 500
+  vol_estimator_bars: 20
+
+# --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+gates:
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
 
 # --- PRISM Regime Overlay (optional) ---
 prism:
