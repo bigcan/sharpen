@@ -456,6 +456,72 @@ def run_solo_ab(
     return decision
 
 
+def _resolve_ensemble_checkpoints(checkpoint_dir: Path) -> dict[int, str]:
+    """Resolve ``{seed: checkpoint_path}`` from a verdict bundle reference.
+
+    Accepts either:
+    - a direct path to a ``verdict.json`` file (consumes its ``checkpoints`` map), or
+    - a directory containing ``verdict.json``, or
+    - a directory containing ``seed_<id>/checkpoint_final.pth`` subdirs.
+
+    Returns absolute POSIX-normalised paths so ``_load_agents_from_paths`` can
+    open them on any OS.
+    """
+    project_root = Path(__file__).resolve().parent.parent
+
+    def _normalise(p: str) -> str:
+        path = Path(p)
+        if not path.is_absolute():
+            path = project_root / path
+        return str(path)
+
+    verdict_path: Path | None = None
+    if checkpoint_dir.is_file() and checkpoint_dir.name == "verdict.json":
+        verdict_path = checkpoint_dir
+    elif checkpoint_dir.is_dir():
+        vp = checkpoint_dir / "verdict.json"
+        if vp.exists():
+            verdict_path = vp
+
+    if verdict_path is not None:
+        payload = json.loads(verdict_path.read_text(encoding="utf-8"))
+        raw = payload.get("checkpoints") or {}
+        if not raw:
+            raise KeyError(
+                f"{verdict_path} has no `checkpoints` mapping — cannot resolve seeds"
+            )
+        return {int(seed): _normalise(path) for seed, path in raw.items()}
+
+    if checkpoint_dir.is_dir():
+        out: dict[int, str] = {}
+        for sub in sorted(checkpoint_dir.glob("seed_*")):
+            if not sub.is_dir():
+                continue
+            try:
+                seed = int(sub.name.split("_", 1)[1])
+            except (IndexError, ValueError):
+                continue
+            ckpt = sub / "checkpoint_final.pth"
+            if not ckpt.exists():
+                raise FileNotFoundError(f"seed {seed}: missing {ckpt}")
+            out[seed] = _normalise(str(ckpt))
+        if out:
+            return out
+
+    raise FileNotFoundError(
+        f"could not resolve ensemble checkpoints from {checkpoint_dir!r}; "
+        "pass a verdict.json, a dir containing one, or a seed_<id>/ bundle"
+    )
+
+
+_ENSEMBLE_RULE_DISPATCH = {
+    "ens_mean": "_agg_mean",
+    "ens_median": "_agg_median",
+    "ens_agreement": "_agg_agreement",
+    "ens_pf_weighted": "_agg_pf_weighted",
+}
+
+
 def run_ensemble_ab(
     config_path: Path,
     checkpoint_dir: Path,
@@ -463,44 +529,62 @@ def run_ensemble_ab(
     out_dir: Path,
     *,
     device: str,
-    disable_profit_target_target_value: float = 10.0,
 ) -> dict[str, Any]:
-    """Run Q1 ensemble A/B via scripts/sg1_xauusd_ensemble_eval.
+    """Run Q1 ensemble A/B via scripts/sg1_xauusd_ensemble_eval.run_rule.
 
-    ``checkpoint_dir`` is expected to be a top-3-aggregation bundle directory
-    consumed by ``sg1_xauusd_ensemble_eval.run_rule``; ``ensemble_rule`` is
-    the S495 val-argmax aggregation name (``ens_mean``, ``ens_agreement``,
+    ``checkpoint_dir`` resolves to a ``{seed: checkpoint_path}`` map via
+    :func:`_resolve_ensemble_checkpoints`; ``ensemble_rule`` is the S495
+    val-argmax aggregation name (``ens_mean``, ``ens_agreement``,
     ``ens_pf_weighted``, or ``ens_median``).
+
+    Both arms share one agent pool — wrapper choice lives in the env, not
+    the policy — so we load once and reuse across A and B.
     """
     # Lazy import — ensemble eval pulls in WandB/plotting machinery.
-    from scripts.sg1_xauusd_ensemble_eval import run_rule
+    from scripts.sg1_xauusd_ensemble_eval import (  # noqa: E402
+        _agg_agreement,
+        _agg_mean,
+        _agg_median,
+        _agg_pf_weighted,
+        _load_agents_from_paths,
+        run_rule,
+    )
+
+    rule_fn_lookup = {
+        "ens_mean": _agg_mean,
+        "ens_median": _agg_median,
+        "ens_agreement": _agg_agreement,
+        "ens_pf_weighted": _agg_pf_weighted,
+    }
+    if ensemble_rule not in rule_fn_lookup:
+        raise ValueError(
+            f"ensemble_rule must be one of {sorted(rule_fn_lookup)}; got {ensemble_rule!r}"
+        )
+
+    seed_paths = _resolve_ensemble_checkpoints(checkpoint_dir)
+    log.info(
+        "A/B ensemble: resolved %d seeds (%s) from %s",
+        len(seed_paths), sorted(seed_paths), checkpoint_dir,
+    )
 
     tmp_dir = out_dir / "_tmp_configs"
+    cfg_a = _prep_arm_config(config_path, mutate_to_risk=False)
+    cfg_b = _prep_arm_config(config_path, mutate_to_risk=True)
+    _write_tmp_config(cfg_a, tmp_dir, "A_v7_ensemble")
+    _write_tmp_config(cfg_b, tmp_dir, "B_risk_ensemble")
 
-    cfg_a = _prep_arm_config(
-        config_path,
-        mutate_to_risk=False,
-        disable_profit_target_target_value=disable_profit_target_target_value,
-    )
-    cfg_a_path = _write_tmp_config(cfg_a, tmp_dir, "A_v7_ensemble")
+    agents = _load_agents_from_paths(cfg_a, seed_paths, device)
+    rule_fn = rule_fn_lookup[ensemble_rule]
 
-    cfg_b = _prep_arm_config(
-        config_path,
-        mutate_to_risk=True,
-        disable_profit_target_target_value=disable_profit_target_target_value,
-    )
-    cfg_b_path = _write_tmp_config(cfg_b, tmp_dir, "B_risk_ensemble")
-
+    a_out = out_dir / "A_v7_ensemble"
+    a_out.mkdir(parents=True, exist_ok=True)
     log.info("A/B ensemble: rule=%s — running Control (PropFirmWrapperV7)", ensemble_rule)
-    df_a = run_rule(
-        str(cfg_a_path), str(checkpoint_dir),
-        rule=ensemble_rule, label="A_v7_ensemble", device=device,
-    )
+    df_a = run_rule(cfg_a, agents, ensemble_rule, rule_fn, device, a_out)
+
+    b_out = out_dir / "B_risk_ensemble"
+    b_out.mkdir(parents=True, exist_ok=True)
     log.info("A/B ensemble: rule=%s — running Treatment (RiskShapingWrapper)", ensemble_rule)
-    df_b = run_rule(
-        str(cfg_b_path), str(checkpoint_dir),
-        rule=ensemble_rule, label="B_risk_ensemble", device=device,
-    )
+    df_b = run_rule(cfg_b, agents, ensemble_rule, rule_fn, device, b_out)
 
     df_a.to_parquet(out_dir / "A_trajectory.parquet")
     df_b.to_parquet(out_dir / "B_trajectory.parquet")
@@ -509,6 +593,7 @@ def run_ensemble_ab(
     decision = compute_ab_decision(df_a, df_b, initial_equity)
     decision["ensemble"] = {
         "checkpoint_dir": str(checkpoint_dir),
+        "seed_paths": seed_paths,
         "rule": ensemble_rule,
         "config": str(config_path),
         "initial_equity": initial_equity,
@@ -717,7 +802,6 @@ def main() -> int:
         decision = run_ensemble_ab(
             args.config, args.checkpoint, args.ensemble_rule, out_dir,
             device=args.device,
-            disable_profit_target_target_value=args.profit_target_disabled_value,
         )
     elif args.arm == "train_parity":
         decision = run_training_parity(
