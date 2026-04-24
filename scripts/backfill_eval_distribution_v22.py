@@ -49,7 +49,12 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from finrl_pro_ds.reporting import compute_eval_distribution  # noqa: E402
+from finrl_pro_ds.reporting import (  # noqa: E402
+    DEFAULT_PHASE_SPECS,
+    compute_challenge_target_hit_rates,
+    compute_eval_distribution,
+    parse_phase_spec_arg,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger("backfill-v22")
@@ -99,6 +104,7 @@ def backfill_directory(
     workstream: str,
     window: Optional[str],
     deadband: float,
+    phase_specs: Optional[list[dict]] = None,
 ) -> dict:
     """Write v2.2 eval_distribution artifacts into `directory`.
 
@@ -119,20 +125,34 @@ def backfill_directory(
         "vol_q1": 0.25, "vol_q2": 0.25, "vol_q3": 0.25, "vol_q4": 0.25,
     }
 
+    specs = phase_specs if phase_specs is not None else list(DEFAULT_PHASE_SPECS)
+
     seed_distributions: dict[str, dict] = {}
+    seed_hit_rates: dict[str, dict] = {}
     for seed, traj_path in solos.items():
         df = pd.read_parquet(traj_path)
         if "action_agg" not in df.columns:
             raise KeyError(f"{traj_path} lacks action_agg column")
         bar_vol = None
+        pv_arr = None
         if "portfolio_value" in df.columns:
-            bar_vol = _rolling_realized_vol(df["portfolio_value"].to_numpy())
+            pv_arr = df["portfolio_value"].to_numpy()
+            bar_vol = _rolling_realized_vol(pv_arr)
         seed_distributions[str(seed)] = compute_eval_distribution(
             df["action_agg"].to_numpy(),
             bar_vol=bar_vol,
             regime_quartiles=equal_quartiles if bar_vol is not None else None,
             deadband=deadband,
         )
+        if pv_arr is not None:
+            seed_hit_rates[str(seed)] = compute_challenge_target_hit_rates(
+                pv_arr, phase_specs=specs,
+            )
+        else:
+            log.warning(
+                f"[{traj_path.name}] no portfolio_value column — "
+                f"challenge_target_hit_rate omitted",
+            )
     seed_report = {
         "protocol": "v2.2_stage_2_seed_report",
         "source": "backfill_from_existing_trajectories",
@@ -140,6 +160,7 @@ def backfill_directory(
         "window": window,
         "seeds": sorted(int(s) for s in seed_distributions),
         "eval_distribution_by_seed": seed_distributions,
+        "challenge_target_hit_rate_by_seed": seed_hit_rates,
     }
     (directory / "seed_report.json").write_text(
         json.dumps(seed_report, indent=2, default=str),
@@ -154,21 +175,25 @@ def backfill_directory(
         "window": window,
         "chosen_rule": chosen_rule,
         "per_seed_eval_distribution": seed_distributions,
+        "challenge_target_hit_rate_by_seed": seed_hit_rates,
     }
     if ens_path is None:
         log.warning(
             f"[{directory.name}] no {chosen_rule}_trajectory.parquet — "
-            f"ensemble_eval_distribution omitted. Live drift baseline "
-            f"will fall back to per-seed mode."
+            f"ensemble_eval_distribution + ensemble_challenge_target_hit_rate "
+            f"omitted. Live drift baseline will fall back to per-seed mode."
         )
         ensemble_report["ensemble_eval_distribution"] = None
+        ensemble_report["ensemble_challenge_target_hit_rate"] = None
     else:
         ens_df = pd.read_parquet(ens_path)
         if "action_agg" not in ens_df.columns:
             raise KeyError(f"{ens_path} lacks action_agg column")
         bar_vol = None
+        ens_pv = None
         if "portfolio_value" in ens_df.columns:
-            bar_vol = _rolling_realized_vol(ens_df["portfolio_value"].to_numpy())
+            ens_pv = ens_df["portfolio_value"].to_numpy()
+            bar_vol = _rolling_realized_vol(ens_pv)
         ensemble_report["ensemble_eval_distribution"] = compute_eval_distribution(
             ens_df["action_agg"].to_numpy(),
             bar_vol=bar_vol,
@@ -176,6 +201,12 @@ def backfill_directory(
             deadband=deadband,
             composition_rule=chosen_rule,
         )
+        if ens_pv is not None:
+            ensemble_report["ensemble_challenge_target_hit_rate"] = (
+                compute_challenge_target_hit_rates(ens_pv, phase_specs=specs)
+            )
+        else:
+            ensemble_report["ensemble_challenge_target_hit_rate"] = None
         log.info(
             f"[{directory.name}] wrote ensemble_report.json (rule={chosen_rule}, "
             f"n={len(ens_df)})",
@@ -215,7 +246,15 @@ def main() -> int:
         help="scalar deadband threshold for deadband_frac computation "
              "(v2.2 §8.2 default: 0.25; match the env's deadband_threshold)",
     )
+    parser.add_argument(
+        "--phase-spec", default=None,
+        help="comma-separated 'label:target_pct[:window_bars[:stride_bars]]' phases "
+             "for challenge_target_hit_rate_per_window (default: step1:0.10,step2:0.05). "
+             "Set window_bars/stride_bars to subdivide a long L1 eval into multiple "
+             "non-overlapping windows for a more stable hit-rate estimate.",
+    )
     args = parser.parse_args()
+    phase_specs = parse_phase_spec_arg(args.phase_spec) if args.phase_spec else None
 
     summaries = []
     for d in args.dir:
@@ -229,6 +268,7 @@ def main() -> int:
                 workstream=args.workstream,
                 window=args.window,
                 deadband=args.deadband,
+                phase_specs=phase_specs,
             )
         )
 

@@ -582,6 +582,11 @@ def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
     # (train/live divergence was the S422 failure mode we're guarding).
     check_challenge_block(cfg, r)
     check_static_peak_consistency(cfg, r)
+    # Open Question #5 (resolved 2026-04-24): challenge_target_hit_rate field
+    # in the upstream L1/WF manifest. Best-effort — WARN only when the
+    # baseline file is locally readable, since live deploys often run on a
+    # different host and the file may not be present at validation time.
+    check_drift_baseline_manifest_schema(cfg, r)
 
 
 def check_challenge_block(cfg: dict, r: ValidationResult) -> None:
@@ -666,6 +671,74 @@ def check_static_peak_consistency(cfg: dict, r: ValidationResult) -> None:
         r.fail(
             f"env.risk.static_peak={env_val!r} != risk.static_peak={live_val!r}. "
             "Train-time wrapper and live-engine must agree (project_ftmo_risk_manager_fix.md S422)."
+        )
+
+
+def check_drift_baseline_manifest_schema(cfg: dict, r: ValidationResult) -> None:
+    """Best-effort check that the drift baseline manifest carries the v2.2
+    ``challenge_target_hit_rate`` block introduced by the S495 Open Question
+    #5 resolution (2026-04-24).
+
+    Only fires when:
+      - the workstream is prop-firm (so the field is meaningful)
+      - ``drift.enabled`` is true
+      - ``drift.baseline_path`` resolves to a readable JSON file (absolute
+        path or relative to repo root)
+
+    Otherwise silent — live deploys often run on a different host where the
+    baseline file is not present at validation time. Emits WARN (not FAIL)
+    so in-flight workstreams whose baselines pre-date the schema extension
+    can still be deployed; promote to FAIL once all migrations have
+    re-emitted their seed/ensemble reports.
+    """
+    if not _is_prop_firm(cfg):
+        return
+    drift = cfg.get("drift", {}) or {}
+    if not drift.get("enabled"):
+        return
+    baseline = drift.get("baseline_path")
+    if not baseline:
+        return  # check_paper_deploy already FAILs on missing baseline_path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    candidates = [Path(baseline)]
+    if not candidates[0].is_absolute():
+        candidates.append(repo_root / baseline)
+    # Live configs typically use the container path (`/app/baselines/...`); try
+    # stripping that prefix and resolving relative to repo root as a best effort.
+    if baseline.startswith("/app/"):
+        candidates.append(repo_root / baseline[len("/app/"):])
+    target = next((p for p in candidates if p.exists() and p.is_file()), None)
+    if target is None:
+        return  # remote-host or pre-deploy validation; silent
+
+    try:
+        manifest = json.loads(target.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return  # malformed file isn't this check's concern
+
+    protocol = str(manifest.get("protocol", ""))
+    is_seed_report = protocol.startswith("v2.2_stage_2_seed_report")
+    is_ensemble_report = protocol.startswith("v2.2_stage_2_5_ensemble_report")
+
+    if is_seed_report and "challenge_target_hit_rate_by_seed" not in manifest:
+        r.warn(
+            f"drift.baseline_path={baseline} is a seed_report but lacks "
+            "`challenge_target_hit_rate_by_seed` (S495 Open Question #5 "
+            "resolution 2026-04-24). Re-emit via "
+            "`scripts/backfill_eval_distribution_v22.py --phase-spec ...` "
+            "before relying on the val-selection tiebreaker."
+        )
+    elif is_ensemble_report and (
+        "challenge_target_hit_rate_by_seed" not in manifest
+        or "ensemble_challenge_target_hit_rate" not in manifest
+    ):
+        r.warn(
+            f"drift.baseline_path={baseline} is an ensemble_report but lacks "
+            "`challenge_target_hit_rate_by_seed` and/or "
+            "`ensemble_challenge_target_hit_rate` (S495 Open Question #5 "
+            "resolution 2026-04-24). Re-emit via "
+            "`scripts/backfill_eval_distribution_v22.py --phase-spec ...`."
         )
 
 

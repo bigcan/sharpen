@@ -1,4 +1,4 @@
-"""Tests for finrl_pro_ds.crypto.live.challenge_state_machine.
+"""Tests for finrl_pro_ds.live.challenge_state_machine.
 
 Covers:
 - Smoothed target hit triggers
@@ -22,7 +22,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from finrl_pro_ds.crypto.live.challenge_state_machine import (
+from finrl_pro_ds.live.challenge_state_machine import (
     REASON_PHASE_COMPLETE,
     ChallengePhase,
     ChallengeStateMachine,
