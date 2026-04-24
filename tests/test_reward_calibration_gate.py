@@ -50,24 +50,25 @@ GATE_WARN_BAND = 0.15   # 5-15%: log dsr_scale bump, fail CI
 
 
 def _mean_reward_over_episodes(
-    wrapper_cls,
-    wrapper_kwargs: dict,
+    wrapper_name: str,
+    config_path: Path,
     n_episodes: int,
     seed: int,
     checkpoint_path: Path,
 ) -> float:
     """Run ``n_episodes`` deterministic rollouts; return mean total reward.
 
-    Implementation left as a pytest helper stub — populated in Step 2 by the
-    A/B harness (scripts/prop_firm_ab_compare.py::_replay_for_calibration).
-    Until that script lands, this helper raises ``pytest.skip`` so the gate
-    stays wired into CI without blocking Step 1 landings.
+    Delegates to ``scripts.prop_firm_ab_compare._replay_for_calibration``.
     """
-    pytest.skip(
-        "Reward-calibration gate helper pending Step 2 wiring "
-        "(scripts/prop_firm_ab_compare.py::_replay_for_calibration). "
-        "Gate will activate once the first-customer checkpoint + A/B harness "
-        "are in place. Fixture stays in CI so Step 2 cannot skip the gate."
+    from scripts.prop_firm_ab_compare import _replay_for_calibration
+
+    return _replay_for_calibration(
+        wrapper_name,
+        checkpoint_path=checkpoint_path,
+        config_path=config_path,
+        n_episodes=n_episodes,
+        seed=seed,
+        device=os.environ.get("FINRL_REWARD_GATE_DEVICE", "cpu"),
     )
 
 
@@ -129,33 +130,37 @@ def test_classify_shift_boundary_warn_fail():
 def test_reward_calibration_gate(checkpoint_path: Path):
     """Gate: mean per-episode reward shift between wrappers must be < 5%.
 
-    Stub enforced: requires ≥200 episodes to keep shift variance bounded.
+    Requires ``FINRL_REWARD_GATE_CONFIG`` env var pointing at a training
+    config (``.yaml``). The helper derives both wrapper variants from that
+    one config — V7 path from ``env.prop_firm:``, RiskShaping path from
+    the auto-migrated ``env.risk:`` sibling. 200-episode minimum keeps
+    variance on the shift metric bounded below the 5% threshold.
     """
-    from finrl_pro_ds.envs.prop_firm_wrapper import PropFirmWrapperV7
-    from finrl_pro_ds.envs.risk_shaping_wrapper import RiskShapingWrapper
+    config_env = os.environ.get("FINRL_REWARD_GATE_CONFIG")
+    if not config_env:
+        pytest.skip(
+            "FINRL_REWARD_GATE_CONFIG not set — provide a training config "
+            "(e.g. configs/gmgp1_xauusd_ftmo_rehpo_l1_multiseed_oanda.yaml) "
+            "to exercise the end-to-end gate."
+        )
+    config_path = Path(config_env)
+    if not config_path.exists():
+        pytest.skip(f"Config not found: {config_path}")
 
     n_episodes = 200
     seed = 42
 
     mean_v7 = _mean_reward_over_episodes(
-        PropFirmWrapperV7,
-        dict(
-            profit_target_pct=0.10,
-            success_bonus=10.0,
-            augment_obs=False,
-            max_trailing_drawdown_pct=0.10,
-        ),
+        "v7",
+        config_path=config_path,
         n_episodes=n_episodes,
         seed=seed,
         checkpoint_path=checkpoint_path,
     )
 
     mean_rs = _mean_reward_over_episodes(
-        RiskShapingWrapper,
-        dict(
-            augment_obs="off",
-            max_trailing_drawdown_pct=0.10,
-        ),
+        "risk_shaping",
+        config_path=config_path,
         n_episodes=n_episodes,
         seed=seed,
         checkpoint_path=checkpoint_path,
