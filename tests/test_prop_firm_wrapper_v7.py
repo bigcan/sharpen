@@ -468,3 +468,42 @@ class TestStaticPeak:
         env.set_equity(95_000.0)
         _, _, terminated, _, info = wrapped.step(np.array([0.0]))
         assert terminated, "rolling peak must enforce 10% DD from ratcheted $110K"
+
+
+# ---------------------------------------------------------------------------
+# Deprecation warnings (rev-2 adapter)
+# ---------------------------------------------------------------------------
+
+class TestDeprecationWarnings:
+    """Ensure the rev-2 adapter surfaces the profit_progress deprecation."""
+
+    def test_profit_progress_access_warns(self):
+        env = MockDictEnv()
+        wrapped = PropFirmWrapperV7(env, augment_obs=False)
+        wrapped.reset()
+        _, _, _, _, info = wrapped.step(np.array([0.0]))
+
+        with pytest.warns(DeprecationWarning, match="profit_progress"):
+            _ = info["profit_progress"]
+
+    def test_profit_progress_get_warns(self):
+        env = MockDictEnv()
+        wrapped = PropFirmWrapperV7(env, augment_obs=False)
+        wrapped.reset()
+        _, _, _, _, info = wrapped.step(np.array([0.0]))
+
+        with pytest.warns(DeprecationWarning, match="profit_progress"):
+            _ = info.get("profit_progress")
+
+    def test_non_profit_progress_keys_do_not_warn(self):
+        env = MockDictEnv()
+        wrapped = PropFirmWrapperV7(env, augment_obs=False)
+        wrapped.reset()
+        _, _, _, _, info = wrapped.step(np.array([0.0]))
+
+        import warnings as _w
+        with _w.catch_warnings():
+            _w.simplefilter("error", DeprecationWarning)
+            _ = info["eod_drawdown"]
+            _ = info["cumulative_return"]
+            _ = info.get("portfolio_value")

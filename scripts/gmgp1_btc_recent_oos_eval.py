@@ -45,24 +45,18 @@ from scripts.sg1_arm_gate_backtest import (  # noqa: E402
 )
 from scripts import sg1_arm_gate_backtest as _sg1_arm  # noqa: E402
 from scripts import sg1_xauusd_ensemble_eval as _sg1_ens  # noqa: E402
+from functools import partial  # noqa: E402
+
+from finrl_pro_ds.config_utils import _prep_backtest_config as _shared_prep  # noqa: E402
 
 # --- profit-target override -------------------------------------------------
-# The shared `_prep_backtest_config` force-sets `profit_target_pct=10.0`
-# (1000% return) to suppress FTMO early-term — but a single aggressive 15-min
-# BTC run can compound past 10x inside the 96-day OOS window (observed: solo
-# 456 hit 1000% on day 54 of 96). Monkey-patch it locally to push the cap to
-# 100.0 (10000% return — functionally infinite) so backtests cover the full
-# window. DD-trailing early-term is preserved (it is part of the gate).
-_original_prep = _sg1_arm._prep_backtest_config
-
-
-def _prep_backtest_config_crypto(config, disable_profit_target: bool = True):
-    c = _original_prep(config, disable_profit_target=disable_profit_target)
-    if disable_profit_target:
-        c.setdefault("env", {}).setdefault("prop_firm", {})
-        c["env"]["prop_firm"]["profit_target_pct"] = 100.0
-    return c
-
+# Shared `_prep_backtest_config` defaults to `profit_target_pct=10.0` (1000%
+# return) which is plenty for XAU. But a single aggressive 15-min BTC run can
+# compound past 10x inside the 96-day OOS window (observed: solo 456 hit 1000%
+# on day 54 of 96). Use the crypto-safe `100.0` (10000% return — functionally
+# infinite) so backtests cover the full window. DD-trailing early-term is
+# preserved (it is part of the gate).
+_prep_backtest_config_crypto = partial(_shared_prep, profit_target_disabled_value=100.0)
 
 # Swap in the crypto-safe variant for BOTH modules (run_rule calls the local
 # name it imported at module load time).

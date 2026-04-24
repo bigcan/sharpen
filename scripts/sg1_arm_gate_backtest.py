@@ -14,7 +14,7 @@ Writes trajectory to results/gate_eval/<label>_trajectory.parquet for audit.
 No WandB dependency (pure local eval).
 """
 from __future__ import annotations
-import argparse, os, sys, copy, json, logging
+import argparse, os, sys, json, logging
 from pathlib import Path
 import numpy as np
 import pandas as pd
@@ -56,21 +56,10 @@ def _build_sac_agent(config, device):
     return agent
 
 
-def _prep_backtest_config(config, disable_profit_target: bool = True):
-    c = copy.deepcopy(config)
-    c.setdefault("env", {})
-    c["env"]["private_state_augment_prob"] = 0.0
-    c["env"].setdefault("reward", {})
-    c["env"]["reward"]["hindsight_weight"] = 0.0
-    c["env"]["episode_length"] = 0
-    c["env"]["random_start"] = False
-    if disable_profit_target:
-        # FTMO gate requires full-window evaluation. Profit-target early-term
-        # (S466 finding) truncates to ~3 sim-days, making active_days /
-        # intraday-daily-DD meaningless. Push target above plausible return.
-        c["env"].setdefault("prop_firm", {})
-        c["env"]["prop_firm"]["profit_target_pct"] = 10.0
-    return c
+# _prep_backtest_config consolidated to finrl_pro_ds.config_utils in S495-cont
+# (prop-firm decoupling rev 2). Re-exported here under the original name so
+# downstream scripts that import it from this module continue to work.
+from finrl_pro_ds.config_utils import _prep_backtest_config  # noqa: E402,F401
 
 
 def run_gate_backtest(config_path: str, checkpoint_path: str, label: str, device: str = "cuda"):

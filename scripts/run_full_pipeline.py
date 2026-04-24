@@ -43,14 +43,16 @@ def load_config(path):
         return yaml.safe_load(f)
 
 
+from finrl_pro_ds.config_utils import deep_merge as _deep_merge
+
+
 def merge_configs(base, overrides):
-    """Deep merge dictionaries."""
-    for k, v in overrides.items():
-        if isinstance(v, dict) and k in base and isinstance(base[k], dict):
-            merge_configs(base[k], v)
-        else:
-            base[k] = v
-    return base
+    """Deep merge dictionaries (legacy signature: mutates ``base`` in place).
+
+    Thin wrapper around ``finrl_pro_ds.config_utils.deep_merge``; retained for
+    backward compatibility with scripts that expect in-place mutation.
+    """
+    return _deep_merge(base, overrides, _mutate=True)
 
 
 # _parse_frequency_to_minutes moved to finrl_pro_ds.hpo.objective (imported above)

@@ -115,6 +115,33 @@ def check_no_fee_curriculum(cfg: dict, r: ValidationResult) -> None:
         )
 
 
+def check_legacy_prop_firm_block(cfg: dict, stage: str, r: ValidationResult) -> None:
+    """Flag configs still using the legacy ``env.prop_firm:`` block.
+
+    Post S495-cont the prop-firm decoupling split responsibilities:
+    - Training-side DD shaping lives under ``env.risk:`` +
+      :class:`finrl_pro_ds.envs.risk_shaping_wrapper.RiskShapingWrapper`.
+    - Live-side profit-target tracking lives under ``challenge:`` +
+      ``ChallengeStateMachine`` (live engine).
+
+    WARN at non-paper-deploy stages (adapter still honors the legacy block);
+    FAIL at ``paper-deploy`` so migrated deploys cannot ship without the new
+    schema. See ``.agent/artifacts/prop_firm_decoupling_architecture.md``.
+    """
+    env = cfg.get("env", {}) or {}
+    if "prop_firm" not in env:
+        return
+    msg = (
+        "env.prop_firm: is deprecated — migrate to env.risk: + top-level "
+        "challenge: block. The PropFirmWrapperV7 adapter is retired in Step 6. "
+        "(prop_firm_decoupling_architecture.md)"
+    )
+    if stage == "paper-deploy":
+        r.fail(msg)
+    else:
+        r.warn(msg)
+
+
 def check_no_hindsight_outside_hpo(cfg: dict, stage: str, r: ValidationResult) -> None:
     """BUG-03: hindsight_weight must be 0.0 outside HPO."""
     if stage == "hpo":
@@ -542,6 +569,7 @@ def validate(config_path: Path, stage: str) -> ValidationResult:
 
     check_no_fee_curriculum(cfg, r)
     check_no_hindsight_outside_hpo(cfg, stage, r)
+    check_legacy_prop_firm_block(cfg, stage, r)
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)
     check_wandb_consolidation(cfg, stage, r)

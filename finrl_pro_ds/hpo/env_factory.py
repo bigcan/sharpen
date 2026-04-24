@@ -138,9 +138,34 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
         if gate_cfg and gate_cfg.get("enabled", False):
             from finrl_pro_ds.envs.signal_gated_wrapper import SignalGatedWrapper
             env = SignalGatedWrapper(env, gate_config=gate_cfg)
-        # Prop firm wrapper (outermost — after signal gate)
+        # Risk shaping wrapper (outermost — after signal gate).
+        # Prefer new env.risk: block; fall back to legacy env.prop_firm: with
+        # DeprecationWarning. See .agent/artifacts/prop_firm_decoupling_architecture.md.
+        risk_cfg = env_config.get("risk", {})
         pf_cfg = env_config.get("prop_firm", {})
-        if pf_cfg.get("enabled", False):
+        if risk_cfg.get("enabled", False):
+            from finrl_pro_ds.envs.risk_shaping_wrapper import RiskShapingWrapper
+            env = RiskShapingWrapper(
+                env,
+                max_trailing_drawdown_pct=float(risk_cfg.get("max_trailing_drawdown_pct", 0.10)),
+                max_daily_loss_pct=float(risk_cfg.get("max_daily_loss_pct", 0.0)),
+                eod_hour_utc=int(risk_cfg.get("eod_hour_utc", 0)),
+                drawdown_penalty_start=float(risk_cfg.get("drawdown_penalty_start", 0.05)),
+                drawdown_penalty_scale=float(risk_cfg.get("drawdown_penalty_scale", 5.0)),
+                daily_loss_penalty_start=float(risk_cfg.get("daily_loss_penalty_start", 0.0)),
+                daily_loss_penalty_scale=float(risk_cfg.get("daily_loss_penalty_scale", 0.0)),
+                augment_obs=str(risk_cfg.get("augment_obs", "off")),
+                static_peak=bool(risk_cfg.get("static_peak", True)),
+            )
+        elif pf_cfg.get("enabled", False):
+            import warnings
+            warnings.warn(
+                "env.prop_firm: is deprecated — migrate to env.risk: + "
+                "top-level challenge: block. The PropFirmWrapperV7 adapter "
+                "will be removed after Step 6 of the prop-firm decoupling.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
             from finrl_pro_ds.envs.prop_firm_wrapper import PropFirmWrapperV7
             env = PropFirmWrapperV7(
                 env,

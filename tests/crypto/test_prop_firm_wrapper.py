@@ -15,7 +15,10 @@ from __future__ import annotations
 import gymnasium as gym
 import numpy as np
 
-from finrl_pro_ds.crypto.envs.prop_firm_wrapper import PropFirmWrapper
+# S495-cont: crypto-specific PropFirmWrapper retired in favour of the
+# unified PropFirmWrapperV7 adapter (which handles flat Box + Dict obs).
+# Tests preserved to guarantee flat-Box behaviour parity.
+from finrl_pro_ds.envs.prop_firm_wrapper import PropFirmWrapperV7 as PropFirmWrapper
 
 
 # ---------------------------------------------------------------------------
