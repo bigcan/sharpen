@@ -117,9 +117,13 @@ def main() -> None:
         device=args.device,
         buffer_fn=velotrade_buffers,
         workstream_label="gmgp1_btc_velotrade_rehpo_20260421_l1",
+        # v2.3: pass checkpoints so the swap bundle writes on PROMOTE.
+        # Bundle version starts at v1; Stage 2.5-R reruns bump to v2/v3/...
+        seed_checkpoints=SEED_CHECKPOINTS,
+        bundle_version="v1",
     )
 
-    print("\n========== GMGP1 BTC ENSEMBLE-CONFIRM (Protocol v2 S495) ==========")
+    print("\n========== GMGP1 BTC ENSEMBLE-CONFIRM (Protocol v2.3) ==========")
     print(json.dumps(verdict, indent=2, default=str))
 
 
