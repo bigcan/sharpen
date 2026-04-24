@@ -708,9 +708,11 @@ def run_single_window_val_selection(
         device=device,
         buffer_fn=velotrade_buffers,
         workstream_label=workstream,
+        seed_checkpoints=ckpt_paths,
+        bundle_version="v1",
     )
 
-    print(f"\n========== {workstream.upper()} ENSEMBLE-CONFIRM (Protocol v2 S495) ==========")
+    print(f"\n========== {workstream.upper()} ENSEMBLE-CONFIRM (Protocol v2.3) ==========")
     print(json.dumps(verdict, indent=2, default=str))
     return verdict
 

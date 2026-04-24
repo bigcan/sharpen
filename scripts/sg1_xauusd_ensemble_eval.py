@@ -23,14 +23,19 @@ checkpoints/sg1-xauusd-l1-multiseed-rehpo-batch2-seed{42,789,456}_20260420_17153
 """
 from __future__ import annotations
 import argparse
+import hashlib
 import os
 import sys
 import copy
 import glob
 import json
 import logging
+import shutil
+import tarfile
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 import torch
@@ -263,6 +268,486 @@ def ftmo_buffers(metrics: dict) -> dict:
     }
 
 
+# --- v2.3: bootstrap, action-correlation, diversity selector, swap bundle ---
+#
+# Protocol v2.3 amendment (decision_ensemble_bootstrap_diversity_s495.md):
+#   - Block-bootstrap on per-bar returns → P(ens_PF > solo_PF), P(ens_MDD < solo_MDD)
+#   - N×N action-correlation matrix on test-window solo trajectories
+#   - Diversity-aware top-K: PF − λ * max_corr_with_already_selected
+#   - Atomic swap bundle: K ckpts + per-seed normalizers + resolved config + manifest
+#
+# Designed to be ADDITIVE — Phase 4 still computes the legacy point-estimate
+# uplift; new bootstrap_verdict + diversity_audit blocks are written alongside.
+# Decision rule prefers bootstrap when gates are present in config; falls back
+# to legacy uplift otherwise (back-compat for pre-v2.3 configs).
+
+
+def _per_bar_returns(df: pd.DataFrame) -> np.ndarray:
+    """Per-bar simple returns from a trajectory's portfolio_value column."""
+    pv = df["portfolio_value"].to_numpy(dtype=np.float64)
+    if pv.size < 2:
+        return np.zeros(0, dtype=np.float64)
+    prev = np.clip(pv[:-1], 1e-12, None)
+    return (pv[1:] - pv[:-1]) / prev
+
+
+def _pf_from_returns(returns: np.ndarray) -> float:
+    """Bar-level PF on a returns vector (matches compute_gate_metrics convention)."""
+    if returns.size == 0:
+        return 0.0
+    wins = returns[returns > 0].sum()
+    losses = -returns[returns < 0].sum()
+    if losses < 1e-12:
+        return 10.0 if wins > 1e-12 else 0.0
+    return float(wins / losses)
+
+
+def _trailing_mdd_from_returns(returns: np.ndarray) -> float:
+    """Trailing peak-to-trough drawdown (negative fraction) from returns.
+
+    Reconstructs equity from returns assuming pv_0 = 1.0. Matches the bar-level
+    drawdown semantics used elsewhere; returned value is in [-1, 0]."""
+    if returns.size == 0:
+        return 0.0
+    pv = np.cumprod(1.0 + returns)
+    peak = np.maximum.accumulate(pv)
+    return float(np.min(pv / np.maximum(peak, 1e-12)) - 1.0)
+
+
+def _stationary_block_bootstrap_indices(
+    n: int, block_len_mean: float, rng: np.random.Generator
+) -> np.ndarray:
+    """Politis-Romano (1994) stationary block bootstrap index sequence.
+
+    Block lengths drawn from Geometric(1/block_len_mean); blocks wrap around the
+    end of the sample. Returns an int array of length n suitable for fancy
+    indexing into the original returns vector.
+    """
+    if n <= 0:
+        return np.zeros(0, dtype=np.int64)
+    if block_len_mean < 1.0:
+        block_len_mean = 1.0
+    p = 1.0 / block_len_mean
+    out = np.empty(n, dtype=np.int64)
+    i = 0
+    while i < n:
+        start = int(rng.integers(0, n))
+        # Geometric block length (>=1)
+        L = int(rng.geometric(p))
+        L = max(1, min(L, n - i))
+        out[i : i + L] = (start + np.arange(L)) % n
+        i += L
+    return out
+
+
+def block_bootstrap_pf_mdd(
+    ens_returns: np.ndarray,
+    solo_returns: np.ndarray,
+    *,
+    n_resamples: int = 10000,
+    block_len_mean: Optional[float] = None,
+    seed: int = 20260423,
+) -> dict:
+    """Paired stationary block bootstrap: P(ens_PF > solo_PF), P(ens_MDD better).
+
+    `ens_returns` and `solo_returns` MUST be bar-aligned (same length, same time
+    grid). Pairing is preserved by drawing one index sequence per resample and
+    applying it to both series — this controls for joint market shocks.
+
+    `block_len_mean` defaults to sqrt(n) capped at 0.1 * n (Politis-White
+    rule-of-thumb without the optimal-block fitting overhead). MDD comparison
+    treats less-negative as better (smaller magnitude drawdown wins).
+
+    Returns dict with empirical distributions and pair-wise win probabilities.
+    """
+    if ens_returns.shape != solo_returns.shape:
+        raise ValueError(
+            f"shape mismatch: ens {ens_returns.shape} vs solo {solo_returns.shape}"
+        )
+    n = ens_returns.size
+    if n < 30:
+        return {
+            "n_bars": int(n),
+            "n_resamples": 0,
+            "block_len_mean": None,
+            "p_pf_ens_better": None,
+            "p_mdd_ens_better": None,
+            "reason": "insufficient_bars",
+        }
+
+    if block_len_mean is None:
+        block_len_mean = float(min(np.sqrt(n), 0.10 * n))
+
+    rng = np.random.default_rng(seed)
+    pf_ens = np.empty(n_resamples, dtype=np.float64)
+    pf_solo = np.empty(n_resamples, dtype=np.float64)
+    mdd_ens = np.empty(n_resamples, dtype=np.float64)
+    mdd_solo = np.empty(n_resamples, dtype=np.float64)
+
+    for b in range(n_resamples):
+        idx = _stationary_block_bootstrap_indices(n, block_len_mean, rng)
+        e = ens_returns[idx]
+        s = solo_returns[idx]
+        pf_ens[b] = _pf_from_returns(e)
+        pf_solo[b] = _pf_from_returns(s)
+        mdd_ens[b] = _trailing_mdd_from_returns(e)
+        mdd_solo[b] = _trailing_mdd_from_returns(s)
+
+    # MDD: less negative = better → ens "wins" when mdd_ens > mdd_solo (closer to 0)
+    p_pf_better = float((pf_ens > pf_solo).mean())
+    p_mdd_better = float((mdd_ens > mdd_solo).mean())
+
+    return {
+        "n_bars": int(n),
+        "n_resamples": int(n_resamples),
+        "block_len_mean": float(block_len_mean),
+        "p_pf_ens_better": p_pf_better,
+        "p_mdd_ens_better": p_mdd_better,
+        "ens_pf_quantiles": {
+            "q05": float(np.quantile(pf_ens, 0.05)),
+            "q50": float(np.quantile(pf_ens, 0.50)),
+            "q95": float(np.quantile(pf_ens, 0.95)),
+        },
+        "solo_pf_quantiles": {
+            "q05": float(np.quantile(pf_solo, 0.05)),
+            "q50": float(np.quantile(pf_solo, 0.50)),
+            "q95": float(np.quantile(pf_solo, 0.95)),
+        },
+        "ens_mdd_quantiles": {
+            "q05": float(np.quantile(mdd_ens, 0.05)),
+            "q50": float(np.quantile(mdd_ens, 0.50)),
+            "q95": float(np.quantile(mdd_ens, 0.95)),
+        },
+        "solo_mdd_quantiles": {
+            "q05": float(np.quantile(mdd_solo, 0.05)),
+            "q50": float(np.quantile(mdd_solo, 0.50)),
+            "q95": float(np.quantile(mdd_solo, 0.95)),
+        },
+    }
+
+
+def _resolve_bootstrap_decision(
+    bs: dict, gates: dict, legacy_uplift: Optional[float]
+) -> Tuple[str, str]:
+    """Map bootstrap stats + legacy uplift onto v2.3 decision matrix.
+
+    Returns (decision, reason). Decision is one of PROMOTE, PROMOTE_DD_ONLY,
+    SOLO_BEST_FALLBACK, AMBIGUOUS_RERUN, NO_DATA. Falls back to legacy uplift
+    decision when bootstrap gates are absent (back-compat).
+    """
+    p_pf = bs.get("p_pf_ens_better")
+    p_mdd = bs.get("p_mdd_ens_better")
+    have_bs_gates = (
+        "ensemble_bootstrap_p_pf_promote" in gates
+        or "ensemble_bootstrap_p_mdd_promote" in gates
+    )
+
+    if not have_bs_gates:
+        # Pre-v2.3 config: defer to legacy point-estimate uplift; bootstrap is logged only.
+        return ("LEGACY_GATE_DEFER",
+                "no bootstrap gates in config — caller decides via legacy uplift")
+
+    if p_pf is None or p_mdd is None:
+        return ("NO_DATA",
+                f"bootstrap insufficient bars: {bs.get('reason', 'unknown')}")
+
+    p_pf_promote = float(gates.get("ensemble_bootstrap_p_pf_promote", 0.90))
+    p_mdd_promote = float(gates.get("ensemble_bootstrap_p_mdd_promote", 0.90))
+
+    pf_pass = p_pf >= p_pf_promote
+    mdd_pass = p_mdd >= p_mdd_promote
+
+    if pf_pass and mdd_pass:
+        return ("PROMOTE",
+                f"bootstrap P(PF)={p_pf:.3f}>={p_pf_promote:.2f} AND "
+                f"P(MDD)={p_mdd:.3f}>={p_mdd_promote:.2f}")
+    if (not pf_pass) and mdd_pass:
+        return ("PROMOTE_DD_ONLY",
+                f"bootstrap P(PF)={p_pf:.3f}<{p_pf_promote:.2f} but "
+                f"P(MDD)={p_mdd:.3f}>={p_mdd_promote:.2f} — DD-buffer-only promote")
+    return ("SOLO_BEST_FALLBACK",
+            f"bootstrap P(PF)={p_pf:.3f} P(MDD)={p_mdd:.3f} below promote "
+            f"thresholds [{p_pf_promote:.2f}, {p_mdd_promote:.2f}]")
+
+
+def compute_action_correlation_matrix(
+    trajectories: Dict[str, pd.DataFrame], seeds: Sequence[int]
+) -> Tuple[np.ndarray, List[int]]:
+    """N×N Pearson correlation on `action_<seed>` columns of solo trajectories.
+
+    `trajectories[f'solo_{s}']` must exist for each `s` in `seeds`. If a solo
+    trajectory's action_<s> column is absent, the diagonal entry is 1.0 and
+    off-diagonal entries with that seed are np.nan. Returns (matrix, seed_order).
+    """
+    seeds_sorted = sorted(int(s) for s in seeds)
+    n = len(seeds_sorted)
+    M = np.full((n, n), np.nan, dtype=np.float64)
+
+    actions: Dict[int, np.ndarray] = {}
+    for s in seeds_sorted:
+        key = f"solo_{s}"
+        if key not in trajectories:
+            continue
+        col = f"action_{s}"
+        df = trajectories[key]
+        if col not in df.columns:
+            # Fall back to action_agg, which for a solo trajectory == the seed's action
+            col = "action_agg"
+        if col not in df.columns:
+            continue
+        actions[s] = df[col].to_numpy(dtype=np.float64)
+
+    for i, si in enumerate(seeds_sorted):
+        for j, sj in enumerate(seeds_sorted):
+            if si not in actions or sj not in actions:
+                continue
+            a, b = actions[si], actions[sj]
+            n_pair = min(a.size, b.size)
+            if n_pair < 2:
+                continue
+            a, b = a[:n_pair], b[:n_pair]
+            sa, sb = float(a.std(ddof=0)), float(b.std(ddof=0))
+            if sa < 1e-12 or sb < 1e-12:
+                # Degenerate column (all flat) — set 1.0 on diagonal, nan off
+                M[i, j] = 1.0 if i == j else np.nan
+                continue
+            M[i, j] = float(np.corrcoef(a, b)[0, 1])
+    return M, seeds_sorted
+
+
+def select_diverse_top_k(
+    seed_pfs: Dict[int, float],
+    corr_matrix: np.ndarray,
+    seed_order: List[int],
+    *,
+    k: int = 3,
+    diversity_lambda: float = 1.0,
+) -> dict:
+    """Diversity-aware top-K seed selection.
+
+    Step 1: pick highest-PF seed.
+    Step 2: pick remaining (k-1) seeds that maximize PF − λ * max_corr_with_selected.
+
+    Returns dict with `selected_seeds`, `naive_top_k`, `selection_score_log`,
+    `differs_from_naive` flag, and the per-step audit trail.
+    """
+    seeds_avail = [int(s) for s in seed_pfs if int(s) in seed_order]
+    if not seeds_avail:
+        return {
+            "selected_seeds": [],
+            "naive_top_k": [],
+            "differs_from_naive": False,
+            "selection_score_log": [],
+            "reason": "no_seeds_in_corr_matrix",
+        }
+    if k <= 0:
+        return {
+            "selected_seeds": [],
+            "naive_top_k": [],
+            "differs_from_naive": False,
+            "selection_score_log": [],
+        }
+    k = min(k, len(seeds_avail))
+
+    naive_top_k = sorted(seeds_avail, key=lambda s: seed_pfs[int(s)], reverse=True)[:k]
+
+    seed_to_idx = {s: i for i, s in enumerate(seed_order)}
+    selected: List[int] = [naive_top_k[0]]
+    log_steps: List[dict] = [{
+        "step": 0,
+        "picked": int(naive_top_k[0]),
+        "rule": "highest_pf",
+        "pf": float(seed_pfs[int(naive_top_k[0])]),
+    }]
+
+    while len(selected) < k:
+        best_seed: Optional[int] = None
+        best_score = -np.inf
+        step_scores: Dict[int, dict] = {}
+        for c in seeds_avail:
+            if c in selected:
+                continue
+            ci = seed_to_idx[c]
+            corrs = []
+            for s in selected:
+                si = seed_to_idx[s]
+                v = corr_matrix[ci, si]
+                if not np.isnan(v):
+                    corrs.append(abs(v))
+            max_corr = max(corrs) if corrs else 0.0
+            pf = float(seed_pfs[int(c)])
+            score = pf - diversity_lambda * max_corr
+            step_scores[c] = {"pf": pf, "max_corr": float(max_corr), "score": float(score)}
+            if score > best_score:
+                best_score = score
+                best_seed = c
+        if best_seed is None:
+            break
+        selected.append(int(best_seed))
+        log_steps.append({
+            "step": len(selected) - 1,
+            "picked": int(best_seed),
+            "rule": "max(pf - lambda*max_corr)",
+            "lambda": float(diversity_lambda),
+            "candidates": step_scores,
+        })
+
+    differs = (sorted(selected) != sorted(naive_top_k))
+    return {
+        "selected_seeds": selected,
+        "naive_top_k": naive_top_k,
+        "differs_from_naive": bool(differs),
+        "diversity_lambda": float(diversity_lambda),
+        "selection_score_log": log_steps,
+    }
+
+
+# --- v2.3 atomic swap bundle ------------------------------------------------
+
+def _file_sha256(path: Path, chunk_size: int = 1 << 20) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(chunk_size)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _resolve_normalizer_path(ckpt_path: Path) -> Optional[Path]:
+    """Best-effort lookup for a per-seed normalizer state next to the checkpoint.
+
+    Looks for any of {ema_state.pkl, normalizer.pkl, obs_norm.pkl,
+    norm_state.pkl} in the checkpoint's directory. Returns None if none exist;
+    the bundle writer warns but does not fail (some workstreams keep
+    normalization stateless or baked into the checkpoint).
+    """
+    candidates = ["ema_state.pkl", "normalizer.pkl", "obs_norm.pkl", "norm_state.pkl"]
+    for name in candidates:
+        p = ckpt_path.parent / name
+        if p.exists():
+            return p
+    return None
+
+
+def write_ensemble_swap_bundle(
+    *,
+    bundle_path: Path,
+    workstream: str,
+    version: str,
+    chosen_rule: str,
+    selected_seeds: List[int],
+    seed_checkpoints: Dict[int, str],
+    config: dict,
+    diversity_audit: dict,
+    bootstrap_verdict: dict,
+    decision: str,
+    predecessor_version: Optional[str] = None,
+    trigger: Optional[str] = None,
+) -> dict:
+    """Pack a Protocol v2.3 atomic swap bundle (`ensemble_v{N}.tar.gz`).
+
+    Bundle layout (under tar root):
+      checkpoints/seed_<id>/checkpoint_final.pth  (one per selected seed)
+      normalizers/seed_<id>/<orig_name>           (if found alongside ckpt)
+      config.resolved.yaml
+      ensemble_manifest.json
+
+    Returns the manifest dict (also written into the bundle).
+    Bundle SHA256 written to <bundle_path>.sha256 alongside.
+    """
+    bundle_path = Path(bundle_path)
+    bundle_path.parent.mkdir(parents=True, exist_ok=True)
+
+    with tempfile.TemporaryDirectory() as td:
+        staging = Path(td)
+        ckpt_dir = staging / "checkpoints"
+        norm_dir = staging / "normalizers"
+        ckpt_dir.mkdir()
+        norm_dir.mkdir()
+
+        ckpt_sha: Dict[str, str] = {}
+        norm_sha: Dict[str, str] = {}
+        for s in selected_seeds:
+            src = Path(seed_checkpoints[int(s)])
+            if not src.exists():
+                raise FileNotFoundError(
+                    f"seed {s}: checkpoint missing at {src} — refuse to bundle"
+                )
+            seed_ckpt_dir = ckpt_dir / f"seed_{s}"
+            seed_ckpt_dir.mkdir()
+            dst = seed_ckpt_dir / "checkpoint_final.pth"
+            shutil.copy2(src, dst)
+            ckpt_sha[str(s)] = _file_sha256(dst)
+
+            norm_src = _resolve_normalizer_path(src)
+            if norm_src is not None:
+                seed_norm_dir = norm_dir / f"seed_{s}"
+                seed_norm_dir.mkdir()
+                norm_dst = seed_norm_dir / norm_src.name
+                shutil.copy2(norm_src, norm_dst)
+                norm_sha[str(s)] = _file_sha256(norm_dst)
+            else:
+                # Loud diagnostic — live engine MUST decide whether to refuse load
+                norm_sha[str(s)] = "MISSING"
+                log.warning(
+                    f"seed {s}: no normalizer found alongside {src.parent} — "
+                    f"bundle marks normalizer_sha256[{s}] = 'MISSING'. "
+                    f"Live engine should reject if EMA-Z is required."
+                )
+
+        config_path = staging / "config.resolved.yaml"
+        with open(config_path, "w", encoding="utf-8") as f:
+            yaml.safe_dump(config, f, sort_keys=False)
+        config_sha = _file_sha256(config_path)
+
+        manifest = {
+            "schema_version": "v2.3",
+            "protocol": "v2_stage_2_5_swap_bundle",
+            "workstream": workstream,
+            "version": version,
+            "predecessor_version": predecessor_version,
+            "trigger": trigger,
+            "chosen_rule": chosen_rule,
+            "seeds": [int(s) for s in selected_seeds],
+            "selected_via": (
+                "diversity_aware"
+                if diversity_audit.get("differs_from_naive")
+                or diversity_audit.get("selected_seeds")
+                else "unknown"
+            ),
+            "diversity_audit": diversity_audit,
+            "checkpoint_sha256": ckpt_sha,
+            "normalizer_sha256": norm_sha,
+            "config_sha256": config_sha,
+            "bootstrap_verdict": {
+                "decision": decision,
+                "p_pf_ens_better": bootstrap_verdict.get("p_pf_ens_better"),
+                "p_mdd_ens_better": bootstrap_verdict.get("p_mdd_ens_better"),
+                "n_resamples": bootstrap_verdict.get("n_resamples"),
+                "block_len_mean": bootstrap_verdict.get("block_len_mean"),
+            },
+            "produced_at": datetime.now(timezone.utc).isoformat(),
+        }
+        (staging / "ensemble_manifest.json").write_text(
+            json.dumps(manifest, indent=2, default=str)
+        )
+
+        with tarfile.open(bundle_path, "w:gz") as tar:
+            tar.add(staging, arcname=".")
+
+    bundle_sha = _file_sha256(bundle_path)
+    (bundle_path.with_suffix(bundle_path.suffix + ".sha256")).write_text(
+        f"{bundle_sha}  {bundle_path.name}\n"
+    )
+    log.info(
+        f"swap bundle written: {bundle_path} "
+        f"(sha256 {bundle_sha[:12]}…, {bundle_path.stat().st_size:,} B)"
+    )
+    return manifest
+
+
 # --- Stage 2.5 val-split rule selection (Protocol v2 amendment S495) --------
 #
 # Supersedes the S493 "hardcoded canonical = ens_agreement" rule. Motivation:
@@ -293,13 +778,33 @@ def run_stage_2_5_val_selection(
     workstream_label: str = "",
     uplift_promote: Optional[float] = None,
     uplift_ambiguous: Optional[float] = None,
+    seed_checkpoints: Optional[Dict[int, str]] = None,
+    bundle_version: str = "v1",
+    predecessor_version: Optional[str] = None,
+    trigger: Optional[str] = None,
 ) -> dict:
-    """Stage 2.5 ensemble-confirm with val-split rule selection (S495).
+    """Stage 2.5 ensemble-confirm with val-split rule selection (S495+v2.3).
 
     Thresholds default to `config["gates"]["ensemble_uplift_min"]` and
     `config["gates"]["ensemble_ambiguous_min"]` (required when not passed).
     `buffer_fn` defaults to `ftmo_buffers`; pass a Velotrade / custom variant
     for prop-firms with different DD caps.
+
+    v2.3 additions (additive — pre-v2.3 callers see no behavior change):
+      * Block-bootstrap on per-bar returns → P(ens_PF > solo_PF), P(ens_MDD < solo_MDD).
+        Active when `gates.ensemble_bootstrap_p_pf_promote` (or `_p_mdd_promote`)
+        is present in config; otherwise logged informationally and the legacy
+        point-estimate uplift gate decides.
+      * N×N action-correlation matrix on solo trajectories + diversity-aware
+        top-K audit (informational when only top-K seeds are loaded — the audit
+        flags whether reseating from a larger pool would change selection).
+      * Atomic swap bundle (`ensemble_v{bundle_version}.tar.gz`) written to
+        `out_dir` when decision ∈ {PROMOTE, PROMOTE_DD_ONLY} AND
+        `seed_checkpoints` is provided. Pre-v2.3 callers omitting
+        `seed_checkpoints` skip the bundle (no breakage).
+
+    Pass `predecessor_version` and `trigger` when running Stage 2.5-R after a
+    retrain so the new manifest records the audit chain.
     """
     if buffer_fn is None:
         buffer_fn = ftmo_buffers
@@ -382,7 +887,7 @@ def run_stage_2_5_val_selection(
         test_metrics[rname] = m
         test_trajs[rname] = df
 
-    # --- Phase 4: uplift gate ---
+    # --- Phase 4a: legacy point-estimate uplift gate (S495 baseline, kept for back-compat) ---
     solo_test_pfs = {s: test_metrics[f"solo_{s}"]["pf_bar"] for s in seed_pfs}
     best_solo_seed = max(solo_test_pfs, key=lambda s: solo_test_pfs[s])
     best_solo_test_pf = solo_test_pfs[best_solo_seed]
@@ -390,25 +895,91 @@ def run_stage_2_5_val_selection(
     uplift = (chosen_test_pf / best_solo_test_pf) if best_solo_test_pf > 0 else None
 
     if uplift is None:
-        decision = "NO_DATA"
-        reason = "best_solo_test_pf was 0"
+        legacy_decision = "NO_DATA"
+        legacy_reason = "best_solo_test_pf was 0"
     elif uplift >= uplift_promote:
-        decision = "PROMOTE_ENSEMBLE"
-        reason = (f"chosen rule {chosen_rule} test uplift {uplift:.4f}x "
-                  f">= {uplift_promote:.2f} PROMOTE threshold")
+        legacy_decision = "PROMOTE_ENSEMBLE"
+        legacy_reason = (f"chosen rule {chosen_rule} test uplift {uplift:.4f}x "
+                         f">= {uplift_promote:.2f} PROMOTE threshold")
     elif uplift >= uplift_ambiguous:
-        decision = "AMBIGUOUS_RERUN"
-        reason = (f"chosen rule {chosen_rule} test uplift {uplift:.4f}x in "
-                  f"[{uplift_ambiguous:.2f}, {uplift_promote:.2f}) ambiguous band")
+        legacy_decision = "AMBIGUOUS_RERUN"
+        legacy_reason = (f"chosen rule {chosen_rule} test uplift {uplift:.4f}x in "
+                        f"[{uplift_ambiguous:.2f}, {uplift_promote:.2f}) ambiguous band")
     else:
-        decision = "SOLO_BEST_FALLBACK"
-        reason = (f"chosen rule {chosen_rule} test uplift {uplift:.4f}x "
-                  f"< {uplift_ambiguous:.2f} ambiguous floor")
+        legacy_decision = "SOLO_BEST_FALLBACK"
+        legacy_reason = (f"chosen rule {chosen_rule} test uplift {uplift:.4f}x "
+                        f"< {uplift_ambiguous:.2f} ambiguous floor")
+
+    # --- Phase 4b: v2.3 block-bootstrap on per-bar returns ---
+    chosen_returns = _per_bar_returns(test_trajs[chosen_rule])
+    best_solo_returns = _per_bar_returns(test_trajs[f"solo_{best_solo_seed}"])
+    bs_n = int(gates.get("ensemble_bootstrap_resamples", 10000))
+    bs_block = gates.get("ensemble_bootstrap_block_len", None)
+    bs_block_f = float(bs_block) if bs_block is not None else None
+    log.info(f"[bootstrap] running stationary block bootstrap "
+             f"n_resamples={bs_n} block_len={bs_block_f or 'auto-sqrt(n)'} "
+             f"on n={chosen_returns.size} bars")
+    bootstrap_verdict = block_bootstrap_pf_mdd(
+        ens_returns=chosen_returns,
+        solo_returns=best_solo_returns,
+        n_resamples=bs_n,
+        block_len_mean=bs_block_f,
+    )
+    bs_decision, bs_reason = _resolve_bootstrap_decision(
+        bootstrap_verdict, gates, legacy_uplift=uplift
+    )
+    log.info(f"[bootstrap] P(PF ens better)={bootstrap_verdict.get('p_pf_ens_better')} "
+             f"P(MDD ens better)={bootstrap_verdict.get('p_mdd_ens_better')} "
+             f"→ {bs_decision}")
+
+    # --- Phase 4c: v2.3 diversity-aware audit (action correlation on solos) ---
+    corr_matrix, corr_seed_order = compute_action_correlation_matrix(
+        test_trajs, list(seed_pfs)
+    )
+    diversity_k = int(gates.get("ensemble_top_k", min(3, len(seed_pfs))))
+    diversity_lambda = float(gates.get("ensemble_diversity_lambda", 1.0))
+    diversity_audit = select_diverse_top_k(
+        seed_pfs={int(s): float(test_metrics[f"solo_{s}"]["pf_bar"]) for s in seed_pfs},
+        corr_matrix=corr_matrix,
+        seed_order=corr_seed_order,
+        k=diversity_k,
+        diversity_lambda=diversity_lambda,
+    )
+    diversity_audit["correlation_matrix"] = [
+        [None if np.isnan(v) else float(v) for v in row] for row in corr_matrix
+    ]
+    diversity_audit["correlation_seed_order"] = corr_seed_order
+    diversity_audit["pool_size"] = len(seed_pfs)
+    diversity_audit["k"] = diversity_k
+    diversity_audit["note_pool_too_small"] = (
+        len(seed_pfs) <= diversity_k
+        and "diversity-audit-only: pool size <= K, no reselection possible"
+        or None
+    )
+    if diversity_audit.get("differs_from_naive"):
+        log.warning(
+            f"[diversity] selection differs from naive top-{diversity_k}: "
+            f"naive={diversity_audit['naive_top_k']} "
+            f"diverse={diversity_audit['selected_seeds']}. "
+            f"Pool size={len(seed_pfs)}. If pool > K, consider promoting the "
+            f"diverse set in Stage 2.5-R."
+        )
+
+    # --- Phase 4d: combined decision (bootstrap-primary if gates present) ---
+    if bs_decision == "LEGACY_GATE_DEFER":
+        decision = legacy_decision
+        reason = f"[legacy uplift] {legacy_reason}"
+        decision_source = "legacy_uplift_v2.1"
+    else:
+        decision = bs_decision
+        reason = f"[bootstrap v2.3] {bs_reason}; legacy-uplift would say {legacy_decision} ({uplift})"
+        decision_source = "bootstrap_v2.3"
 
     verdict = {
         "workstream": workstream_label,
-        "protocol": "v2_stage_2_5_val_selection_s495",
-        "supersedes": "decision_ensemble_mandatory_stage_2_5 (S493)",
+        "protocol": "v2.3_stage_2_5_val_selection",
+        "supersedes": ["decision_ensemble_mandatory_stage_2_5 (S493)",
+                       "decision_ensemble_val_selection_s495"],
         "val_window": f"{data_cfg['val_start_date']} -> {data_cfg['val_end_date']}",
         "test_window": f"{data_cfg['test_start_date']} -> {data_cfg['test_end_date']}",
         "seeds": sorted(seed_pfs),
@@ -419,13 +990,56 @@ def run_stage_2_5_val_selection(
         "test_solo_pfs": solo_test_pfs,
         "best_solo_seed_on_test": best_solo_seed,
         "best_solo_test_pf": best_solo_test_pf,
+        # Legacy uplift kept as a sanity-check secondary
         "uplift": uplift,
         "uplift_promote_threshold": uplift_promote,
         "uplift_ambiguous_threshold": uplift_ambiguous,
+        "legacy_decision": legacy_decision,
+        # v2.3 primary verdict
+        "bootstrap_verdict": bootstrap_verdict,
+        "bootstrap_decision": bs_decision,
+        "bootstrap_reason": bs_reason,
+        "diversity_audit": diversity_audit,
+        # Combined decision
         "decision": decision,
+        "decision_source": decision_source,
         "reason": reason,
     }
     (out_dir / "verdict.json").write_text(json.dumps(verdict, indent=2, default=str))
+
+    # --- Phase 4e: v2.3 atomic swap bundle (only on PROMOTE / PROMOTE_DD_ONLY) ---
+    if seed_checkpoints is not None and decision in ("PROMOTE", "PROMOTE_DD_ONLY",
+                                                      "PROMOTE_ENSEMBLE"):
+        try:
+            bundle_path = out_dir / f"ensemble_{bundle_version}.tar.gz"
+            # Bundle only the seeds the ensemble actually uses (= seed_pfs.keys()
+            # in the current call pattern; diversity reselection from larger
+            # pools belongs to Stage 2.5-R callers that pass full N).
+            bundle_seeds = sorted(int(s) for s in seed_pfs)
+            write_ensemble_swap_bundle(
+                bundle_path=bundle_path,
+                workstream=workstream_label,
+                version=bundle_version,
+                chosen_rule=chosen_rule,
+                selected_seeds=bundle_seeds,
+                seed_checkpoints={int(s): seed_checkpoints[int(s)] for s in bundle_seeds},
+                config=config,
+                diversity_audit=diversity_audit,
+                bootstrap_verdict=bootstrap_verdict,
+                decision=decision,
+                predecessor_version=predecessor_version,
+                trigger=trigger,
+            )
+            verdict["swap_bundle_path"] = str(bundle_path)
+        except Exception as e:
+            log.error(f"swap bundle write failed: {e}")
+            verdict["swap_bundle_path"] = None
+            verdict["swap_bundle_error"] = str(e)
+            (out_dir / "verdict.json").write_text(json.dumps(verdict, indent=2, default=str))
+    elif seed_checkpoints is None and decision in ("PROMOTE", "PROMOTE_DD_ONLY",
+                                                    "PROMOTE_ENSEMBLE"):
+        log.info("decision=PROMOTE but seed_checkpoints not passed — "
+                 "skipping swap bundle (caller using pre-v2.3 invocation)")
 
     # --- v2.2 §2 eval_distribution artifacts (seed_report.json + ensemble_report.json) ---
     # Per Protocol v2.2 §2: Stage 2 per-seed action distributions + Stage 2.5
@@ -476,14 +1090,19 @@ def run_stage_2_5_val_selection(
         json.dumps(seed_report, indent=2, default=str)
     )
     ensemble_report = {
-        "protocol": "v2.2_stage_2_5_ensemble_report",
+        "protocol": "v2.3_stage_2_5_ensemble_report",
         "workstream": workstream_label,
         "window": f"{data_cfg['test_start_date']} -> {data_cfg['test_end_date']}",
         "chosen_rule": chosen_rule,
         "decision": decision,
+        "decision_source": decision_source,
         "uplift": uplift,
+        "legacy_decision": legacy_decision,
+        "bootstrap_verdict": bootstrap_verdict,
+        "diversity_audit": diversity_audit,
         "ensemble_eval_distribution": _dist(test_trajs[chosen_rule], rule=chosen_rule),
         "per_seed_eval_distribution": seed_report["eval_distribution_by_seed"],
+        "swap_bundle_path": verdict.get("swap_bundle_path"),
     }
     (out_dir / "ensemble_report.json").write_text(
         json.dumps(ensemble_report, indent=2, default=str)

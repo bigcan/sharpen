@@ -82,9 +82,11 @@ def main() -> None:
         device=args.device,
         buffer_fn=sg1.ftmo_buffers,
         workstream_label="gmgp1_xauusd_ftmo_rehpo_20260421_l1_oanda",
+        seed_checkpoints=SEED_CHECKPOINTS,
+        bundle_version="v1",
     )
 
-    print("\n========== GMGP1 OANDA ENSEMBLE-CONFIRM (Protocol v2 S495) ==========")
+    print("\n========== GMGP1 OANDA ENSEMBLE-CONFIRM (Protocol v2.3) ==========")
     print(json.dumps(verdict, indent=2, default=str))
 
 
