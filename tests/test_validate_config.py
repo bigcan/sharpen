@@ -11,6 +11,7 @@ sys.path.insert(0, str(ROOT))
 from scripts.validate_config import (  # noqa: E402
     ValidationResult,
     check_challenge_block,
+    check_drift_baseline_manifest_schema,
     check_legacy_prop_firm_block,
     check_static_peak_consistency,
 )
@@ -186,3 +187,117 @@ def test_static_peak_consistency_neither_set_is_silent():
     r = ValidationResult()
     check_static_peak_consistency({}, r)
     assert r.failures == []
+
+
+# ---------------------------------------------------------------------------
+# check_drift_baseline_manifest_schema (S495 Open Question #5)
+# ---------------------------------------------------------------------------
+
+import json
+
+import pytest
+
+
+def _prop_firm_cfg(baseline: str | None = None) -> dict:
+    cfg = {
+        "wandb": {"tags": ["prop-firm"]},
+        "env": {
+            "risk": {"enabled": True},
+        },
+        "challenge": {"enabled": True, "phase": "step1"},
+        "drift": {"enabled": True},
+    }
+    if baseline is not None:
+        cfg["drift"]["baseline_path"] = baseline
+    return cfg
+
+
+def test_baseline_manifest_check_skips_non_prop_firm():
+    r = ValidationResult()
+    cfg = {"env": {}, "drift": {"enabled": True, "baseline_path": "missing.json"}}
+    check_drift_baseline_manifest_schema(cfg, r)
+    assert r.failures == [] and r.warnings == []
+
+
+def test_baseline_manifest_check_skips_when_drift_disabled():
+    r = ValidationResult()
+    cfg = _prop_firm_cfg("missing.json")
+    cfg["drift"]["enabled"] = False
+    check_drift_baseline_manifest_schema(cfg, r)
+    assert r.warnings == []
+
+
+def test_baseline_manifest_check_silent_when_path_missing(tmp_path):
+    r = ValidationResult()
+    cfg = _prop_firm_cfg(str(tmp_path / "no_such_file.json"))
+    check_drift_baseline_manifest_schema(cfg, r)
+    assert r.warnings == []  # remote-host case
+
+
+def test_baseline_manifest_check_silent_for_seed_report_with_field(tmp_path):
+    p = tmp_path / "seed_report.json"
+    p.write_text(json.dumps({
+        "protocol": "v2.2_stage_2_seed_report",
+        "challenge_target_hit_rate_by_seed": {"42": {}},
+    }))
+    r = ValidationResult()
+    check_drift_baseline_manifest_schema(_prop_firm_cfg(str(p)), r)
+    assert r.warnings == []
+
+
+def test_baseline_manifest_check_warns_for_seed_report_missing_field(tmp_path):
+    p = tmp_path / "seed_report.json"
+    p.write_text(json.dumps({"protocol": "v2.2_stage_2_seed_report"}))
+    r = ValidationResult()
+    check_drift_baseline_manifest_schema(_prop_firm_cfg(str(p)), r)
+    assert any("challenge_target_hit_rate_by_seed" in w for w in r.warnings)
+
+
+def test_baseline_manifest_check_warns_for_ensemble_report_missing_either_field(tmp_path):
+    p = tmp_path / "ensemble_report.json"
+    p.write_text(json.dumps({
+        "protocol": "v2.2_stage_2_5_ensemble_report",
+        "challenge_target_hit_rate_by_seed": {"42": {}},
+        # ensemble_challenge_target_hit_rate intentionally missing
+    }))
+    r = ValidationResult()
+    check_drift_baseline_manifest_schema(_prop_firm_cfg(str(p)), r)
+    assert any("ensemble_challenge_target_hit_rate" in w for w in r.warnings)
+
+
+def test_baseline_manifest_check_silent_for_ensemble_with_both(tmp_path):
+    p = tmp_path / "ensemble_report.json"
+    p.write_text(json.dumps({
+        "protocol": "v2.2_stage_2_5_ensemble_report",
+        "challenge_target_hit_rate_by_seed": {"42": {}},
+        "ensemble_challenge_target_hit_rate": {"step1": {}},
+    }))
+    r = ValidationResult()
+    check_drift_baseline_manifest_schema(_prop_firm_cfg(str(p)), r)
+    assert r.warnings == []
+
+
+def test_baseline_manifest_check_silent_on_malformed_json(tmp_path):
+    p = tmp_path / "bad.json"
+    p.write_text("{not valid json")
+    r = ValidationResult()
+    check_drift_baseline_manifest_schema(_prop_firm_cfg(str(p)), r)
+    assert r.warnings == []  # malformed file isn't this check's concern
+
+
+def test_baseline_manifest_check_strips_app_prefix(monkeypatch, tmp_path):
+    """Live configs use container path /app/baselines/...; the check should
+    transparently resolve that against repo-root for best-effort host validation."""
+    fake_repo = tmp_path / "repo"
+    fake_baseline = fake_repo / "baselines/x/seed_report.json"
+    fake_baseline.parent.mkdir(parents=True)
+    fake_baseline.write_text(json.dumps({"protocol": "v2.2_stage_2_seed_report"}))
+    # Point the check's repo_root resolution at our fake tree by monkeypatching
+    # the module's __file__ via a wrapper.
+    import scripts.validate_config as vc
+    monkeypatch.setattr(vc, "__file__", str(fake_repo / "scripts" / "validate_config.py"))
+    r = ValidationResult()
+    check_drift_baseline_manifest_schema(
+        _prop_firm_cfg("/app/baselines/x/seed_report.json"), r,
+    )
+    assert any("challenge_target_hit_rate_by_seed" in w for w in r.warnings)

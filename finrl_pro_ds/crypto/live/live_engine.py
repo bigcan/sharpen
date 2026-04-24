@@ -46,7 +46,7 @@ from finrl_pro_ds.monitoring import (
     should_lockout,
     write_kill_file,
 )
-from finrl_pro_ds.crypto.live.challenge_state_machine import (
+from finrl_pro_ds.live.challenge_state_machine import (
     ChallengePhase,
     ChallengeStateMachine,
     REASON_PHASE_COMPLETE,
