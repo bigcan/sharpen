@@ -114,14 +114,18 @@ def deploy(args):
     print(f"Target instance: {inst['name']} ({host}:{port})"
           + (f" | GPUs: {inst['gpus']}" if inst['gpus'] else ""))
     # CANONICAL NAMING: {descriptive-id}_{YYYYMMDD}_{HHMMSS}
-    # Descriptive ID derived from config filename
-    from finrl_pro_ds.utils.naming import generate_run_name
-    full_run_name = generate_run_name(args.config)
-
-    # If user provided a custom name, add it as a tag instead
-    extra_tags = []
+    # Caller-provided --run_name wins (e.g. launch_l1_multiseed.py needs
+    # per-seed uniqueness to avoid concurrent processes clobbering
+    # checkpoints/<run_name>/ when they share a second-level timestamp).
+    # Fallback: derive from config filename.
+    from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
     if args.run_name:
-        extra_tags.append(args.run_name)
+        validate_run_name(args.run_name, raise_on_fail=True)
+        full_run_name = args.run_name
+    else:
+        full_run_name = generate_run_name(args.config)
+
+    extra_tags = []
 
     # Auto-inject platform + GPU model WandB tags
     extra_tags.append("gpuhub")
