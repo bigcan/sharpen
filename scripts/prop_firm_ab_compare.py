@@ -82,9 +82,9 @@ Q1_THRESHOLDS: dict[str, dict[str, float | str]] = {
         "description": "Mean |position| in [+10%, +inf) — treatment still trades post-target",
     },
     "trades_after_plus10pct": {
-        "rule": "at_most_k_times_median",  # B <= k * median_trades_per_window
-        "k": 3.0,
-        "description": "Trades post-target (B only) — operational risk guard",
+        "rule": "rate_ratio_ceiling",  # B_post_rate / A_pre_rate <= hi
+        "hi": 2.0,
+        "description": "Post-target trade rate — B must not trade >2x A's pre-termination rate (over-trading operational risk)",
     },
     "pf_full_window": {
         "rule": "at_least_ratio",  # B >= ratio * A
@@ -186,7 +186,7 @@ def _sharpe(returns: np.ndarray, annualization: float = np.sqrt(252)) -> float:
     return float(np.mean(returns) / std * annualization)
 
 
-def _trades_in_mask(df: pd.DataFrame, mask: np.ndarray) -> int:
+def _trades_in_mask(df: pd.DataFrame, mask: np.ndarray | None) -> int:
     """Count bars where a trade happened within the mask.
 
     ``traded`` is in the info dict emitted by live rollouts (1 on a traded
@@ -200,13 +200,19 @@ def _trades_in_mask(df: pd.DataFrame, mask: np.ndarray) -> int:
     return int(((traded > 0.5) & mask).sum())
 
 
-def _median_trades_per_window(df: pd.DataFrame, window_bars: int = 64) -> float:
-    """Approximate: median trade count per rolling window of ``window_bars``."""
-    if "traded" not in df.columns or len(df) < window_bars:
-        return 1.0
-    traded = df["traded"].fillna(0).to_numpy().astype(np.int64)
-    rolled = pd.Series(traded).rolling(window=window_bars, min_periods=1).sum().to_numpy()
-    return float(max(np.median(rolled), 1.0))
+def _trade_rate(df: pd.DataFrame, mask: np.ndarray | None = None) -> float:
+    """Return trades-per-bar for the subset of ``df`` selected by ``mask``."""
+    if "traded" not in df.columns or len(df) == 0:
+        return 0.0
+    if mask is None:
+        n_bars = len(df)
+        n_trades = int(df["traded"].fillna(0).astype(bool).sum())
+    else:
+        n_bars = int(mask.sum())
+        if n_bars == 0:
+            return 0.0
+        n_trades = int(((df["traded"].fillna(0) > 0.5) & mask).sum())
+    return n_trades / max(n_bars, 1)
 
 
 def _ab_metrics(df_a: pd.DataFrame, df_b: pd.DataFrame, initial_equity: float) -> dict[str, Any]:
@@ -229,7 +235,12 @@ def _ab_metrics(df_a: pd.DataFrame, df_b: pd.DataFrame, initial_equity: float) -
     mean_overall_b = float(pos_b.mean()) if len(pos_b) else 0.0
 
     trades_past_target_b = _trades_in_mask(df_b, above_b)
-    median_trades_b = _median_trades_per_window(df_b)
+    b_post_rate = _trade_rate(df_b, above_b)
+    # A's pre-termination trade rate is the natural reference: the control
+    # arm terminates at +10% so its entire trajectory is "pre-target". If
+    # the control somehow reached full-window (target never hit), use its
+    # full-window rate.
+    a_full_rate = _trade_rate(df_a)
 
     returns_a = np.diff(pv_a) / pv_a[:-1] if len(pv_a) > 1 else np.array([])
     returns_b = np.diff(pv_b) / pv_b[:-1] if len(pv_b) > 1 else np.array([])
@@ -254,8 +265,13 @@ def _ab_metrics(df_a: pd.DataFrame, df_b: pd.DataFrame, initial_equity: float) -
                                           "A_n": int(near_a.sum()), "B_n": int(near_b.sum())},
         "mean_abs_position_past_target": {"B_past": mean_above_b, "B_overall": mean_overall_b,
                                           "B_n_past": int(above_b.sum())},
-        "trades_after_plus10pct": {"B": trades_past_target_b,
-                                   "median_trades_per_window": median_trades_b},
+        "trades_after_plus10pct": {
+            "B_trades": trades_past_target_b,
+            "B_bars_past": int(above_b.sum()),
+            "B_post_rate": b_post_rate,
+            "A_pre_rate": a_full_rate,
+            "rate_ratio": (b_post_rate / a_full_rate) if a_full_rate > 0 else None,
+        },
         "pf_full_window": {"A": pf_a, "B": pf_b},
         "eod_drawdown_max": {"A": dd_max_a, "B": dd_max_b},
         "sharpe_full_window": {"A": sharpe_a, "B": sharpe_b},
@@ -300,11 +316,24 @@ def _gate_metric(name: str, m: dict[str, Any]) -> dict[str, Any]:
         return {"pass": bool(passed), "B_past": b_past, "B_overall": b_overall}
 
     if name == "trades_after_plus10pct":
-        b = m["B"]
-        med = m["median_trades_per_window"]
-        k = float(spec["k"])
-        passed = b <= k * med
-        return {"pass": bool(passed), "B_trades": b, "cap": k * med}
+        # Operational-risk guard: B must not trade more than hi x A's
+        # pre-termination rate past +10%. Under-trading is not an
+        # operational risk so we only gate on the ceiling. Inapplicable
+        # if B never crossed +10% or A had zero trade rate.
+        if m["B_bars_past"] == 0:
+            return {"pass": True, "note": "B never crossed +10%"}
+        if m["A_pre_rate"] <= 0 or m["rate_ratio"] is None:
+            return {"pass": True, "note": "A had zero trade rate; guard inapplicable"}
+        hi = float(spec["hi"])
+        r = float(m["rate_ratio"])
+        passed = r <= hi
+        return {
+            "pass": bool(passed),
+            "rate_ratio": r,
+            "ceiling": hi,
+            "B_post_rate": m["B_post_rate"],
+            "A_pre_rate": m["A_pre_rate"],
+        }
 
     if name == "pf_full_window":
         a, b = m["A"], m["B"]
@@ -359,18 +388,19 @@ def _prep_arm_config(
     config_path: Path,
     *,
     mutate_to_risk: bool,
-    disable_profit_target_target_value: float = 10.0,
 ) -> dict:
-    """Load a config from disk and prepare it for A/B backtesting."""
+    """Load ``config_path`` and (optionally) rewrite env.prop_firm → env.risk.
+
+    Does NOT apply ``_prep_backtest_config`` — that happens inside
+    ``run_gate_backtest`` with the appropriate ``disable_profit_target``
+    parameter propagated by the caller. Keeping the two-step separate
+    avoids the double-apply bug where the harness disabled the profit
+    target and then run_gate_backtest re-disabled it with the default.
+    """
     with config_path.open("r", encoding="utf-8") as f:
         cfg = yaml.safe_load(f)
     if mutate_to_risk:
         cfg = _to_env_risk_config(cfg)
-    cfg = _prep_backtest_config(
-        cfg,
-        disable_profit_target=not mutate_to_risk,
-        profit_target_disabled_value=disable_profit_target_target_value,
-    )
     return cfg
 
 
@@ -385,24 +415,30 @@ def run_solo_ab(
     """Run Q1 solo A/B. Returns the decision dict."""
     tmp_dir = out_dir / "_tmp_configs"
 
-    cfg_a = _prep_arm_config(
-        config_path,
-        mutate_to_risk=False,
-        disable_profit_target_target_value=disable_profit_target_target_value,
-    )
+    cfg_a = _prep_arm_config(config_path, mutate_to_risk=False)
     cfg_a_path = _write_tmp_config(cfg_a, tmp_dir, "A_v7")
 
-    cfg_b = _prep_arm_config(
-        config_path,
-        mutate_to_risk=True,
-        disable_profit_target_target_value=disable_profit_target_target_value,
-    )
+    cfg_b = _prep_arm_config(config_path, mutate_to_risk=True)
     cfg_b_path = _write_tmp_config(cfg_b, tmp_dir, "B_risk_shaping")
 
-    log.info("A/B solo: running Control (PropFirmWrapperV7)")
-    df_a = run_gate_backtest(str(cfg_a_path), str(checkpoint_path), label="A_v7", device=device)
-    log.info("A/B solo: running Treatment (RiskShapingWrapper)")
-    df_b = run_gate_backtest(str(cfg_b_path), str(checkpoint_path), label="B_risk", device=device)
+    # Control arm keeps profit_target_pct as-set in the config so the V7
+    # adapter can terminate at +10% equity — that termination is what the
+    # A/B is designed to measure (ADR-6). Treatment arm has no target
+    # concept; disable_profit_target=True is harmless (no prop_firm block
+    # to touch after env.risk: rewrite) and protects against any future
+    # dual-block configs.
+    log.info("A/B solo: running Control (PropFirmWrapperV7, target active)")
+    df_a = run_gate_backtest(
+        str(cfg_a_path), str(checkpoint_path),
+        label="A_v7", device=device,
+        disable_profit_target=False,
+    )
+    log.info("A/B solo: running Treatment (RiskShapingWrapper, no target)")
+    df_b = run_gate_backtest(
+        str(cfg_b_path), str(checkpoint_path),
+        label="B_risk", device=device,
+        disable_profit_target=True,
+    )
 
     # Persist trajectories under the arm's output dir
     df_a.to_parquet(out_dir / "A_trajectory.parquet")

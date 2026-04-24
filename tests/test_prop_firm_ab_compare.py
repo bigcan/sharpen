@@ -208,24 +208,73 @@ def test_past_target_band_empty_returns_pass_with_note():
     assert "note" in past
 
 
-def test_trades_after_target_operational_risk():
-    """B trades excessively past +10% → trades_after_plus10pct FAIL."""
+def test_trades_after_target_operational_risk_ratio_fail():
+    """B trades 10x faster past +10% than A did pre-term → FAIL via rate_ratio."""
     n = 500
     pv = np.linspace(100_000, 115_000, n)  # crosses +10% partway through
     position = np.full(n, 0.5)
-    # A: trades sparsely
+    # A: sparse trades (1 per 50 bars → rate 0.02/bar)
     traded_a = np.zeros(n, dtype=int)
     traded_a[::50] = 1
-    df_a = _make_trajectory(pv, position, traded_a)
-    # B: same trajectory but trades on EVERY bar past +10%
-    traded_b = traded_a.copy()
+    # A terminates at +10% — simulate by truncating to the first bar >= 110K
     ret = (pv - pv[0]) / pv[0]
+    first_target = int(np.argmax(ret >= 0.10))
+    df_a = _make_trajectory(pv[:first_target], position[:first_target], traded_a[:first_target])
+    # B: same sparse rate pre-target, blows up past target (trade every bar)
+    traded_b = traded_a.copy()
     traded_b[ret >= 0.10] = 1
     df_b = _make_trajectory(pv, position, traded_b)
 
     decision = compute_ab_decision(df_a, df_b, initial_equity=100_000.0)
     trades_gate = decision["gates"]["trades_after_plus10pct"]
     assert not trades_gate["pass"]
+    # Ratio should be ~1.0/0.02 = 50 × above the 2.0 ceiling
+    assert trades_gate["rate_ratio"] > 10
+
+
+def test_trades_after_target_rate_ratio_pass_when_consistent():
+    """B trades at same rate past +10% as A did pre-term → PASS."""
+    n = 500
+    pv = np.linspace(100_000, 115_000, n)
+    position = np.full(n, 0.5)
+    # Both arms trade every 3rd bar (rate ~0.33/bar)
+    traded = np.zeros(n, dtype=int)
+    traded[::3] = 1
+    ret = (pv - pv[0]) / pv[0]
+    first_target = int(np.argmax(ret >= 0.10))
+    df_a = _make_trajectory(pv[:first_target], position[:first_target], traded[:first_target])
+    df_b = _make_trajectory(pv, position, traded)
+
+    decision = compute_ab_decision(df_a, df_b, initial_equity=100_000.0)
+    trades_gate = decision["gates"]["trades_after_plus10pct"]
+    assert trades_gate["pass"]
+    # Ratio ~1.0
+    assert 0.7 <= trades_gate["rate_ratio"] <= 1.3
+
+
+def test_trades_after_target_undertrade_is_ok():
+    """B trades LESS than A post-target → PASS (under-trading is not a risk)."""
+    n = 500
+    pv = np.linspace(100_000, 115_000, n)
+    position = np.full(n, 0.5)
+    # A trades every 3rd bar (dense)
+    traded_a = np.zeros(n, dtype=int)
+    traded_a[::3] = 1
+    ret = (pv - pv[0]) / pv[0]
+    first_target = int(np.argmax(ret >= 0.10))
+    df_a = _make_trajectory(pv[:first_target], position[:first_target], traded_a[:first_target])
+    # B trades sparsely post-target (every 20th bar)
+    traded_b = traded_a.copy()
+    post = ret >= 0.10
+    traded_b[post] = 0
+    traded_b[post & (np.arange(n) % 20 == 0)] = 1
+    df_b = _make_trajectory(pv, position, traded_b)
+
+    decision = compute_ab_decision(df_a, df_b, initial_equity=100_000.0)
+    trades_gate = decision["gates"]["trades_after_plus10pct"]
+    assert trades_gate["pass"]
+    # Ratio should be well below 1.0 (under-trading)
+    assert trades_gate["rate_ratio"] < 1.0
 
 
 # ---------------------------------------------------------------------------

@@ -62,13 +62,28 @@ def _build_sac_agent(config, device):
 from finrl_pro_ds.config_utils import _prep_backtest_config  # noqa: E402,F401
 
 
-def run_gate_backtest(config_path: str, checkpoint_path: str, label: str, device: str = "cuda"):
+def run_gate_backtest(
+    config_path: str,
+    checkpoint_path: str,
+    label: str,
+    device: str = "cuda",
+    *,
+    disable_profit_target: bool = True,
+):
+    """Run a single-checkpoint gate backtest.
+
+    ``disable_profit_target`` — default True preserves the S466 FTMO gate
+    behaviour (full-window evaluation needs the profit-target early-term
+    disabled). The prop-firm A/B harness (ADR-6) sets this False for the
+    control arm so the V7 adapter can terminate at +10% equity, which is
+    exactly the behaviour the A/B is designed to measure.
+    """
     out_dir = Path("results/gate_eval")
     out_dir.mkdir(parents=True, exist_ok=True)
 
     with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
-    config = _prep_backtest_config(config)
+    config = _prep_backtest_config(config, disable_profit_target=disable_profit_target)
 
     data_cfg = config["data"]
     start, end = data_cfg["test_start_date"], data_cfg["test_end_date"]
