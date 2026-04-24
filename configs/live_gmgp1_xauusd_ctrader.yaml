@@ -1,6 +1,9 @@
 # Live Trading Config — GMGP1-XAUUSD SAC on Gold CFD via cTrader (IC Markets / FTMO)
-# Seed 123 checkpoint (test PF 2.31, Sharpe 3.82, MDD -1.30%)
-# HPs from T34 best trial (GMGP1-XAUUSD HPO, run 1fprvttn, PF=2.886)
+# Deploy: WF solo seed 42 fold-07 (test PF 2.260, Sharpe_d 4.43, MDD -0.39%, Win 57.8%)
+# HPs: trial #10 from gmgp1_xauusd_ftmo_rehpo_20260421 (OANDA path)
+# Stage 2.5 verdict (S495-cont 2026-04-24): SOLO_BEST — ens_mean val-picked but
+# G3 uplift FAIL (0.970 < 1.05 floor). Solo seed 42 graduates per val-argmax-PF rule.
+# See results/gmgp1_xauusd_oanda_wf_ensemble/fold_07/verdict.json.
 #
 # Usage:
 #   python scripts/run_live_ctrader.py --config configs/live_gmgp1_xauusd_ctrader.yaml
@@ -27,27 +30,27 @@ contract:
   order_type: "MKT"                    # Market orders (CFD spreads tight enough)
   market_fallback_timeout: 10.0        # Seconds before retry
 
-# --- Agent ---
+# --- Agent (solo seed 42, fold-07 of OANDA WF) ---
 agent:
-  checkpoint_path: "checkpoints/gmgp1-xauusd-l1-multiseed_20260408_163103/checkpoint_final.pth"
+  checkpoint_path: "checkpoints/WF_seed42_fold_07_20260424_061803/checkpoint_final.pth"
   device: "cpu"
   torch_compile: false                 # Must be false for live inference
 
-# --- SAC Hyperparameters (T34 best trial — must match training checkpoint) ---
+# --- SAC Hyperparameters (trial #10 HPs — must match training checkpoint) ---
 agents:
   sac:
-    lr_actor: 0.00034069
-    lr_critic: 0.000027372
-    lr_alpha: 0.0000020265
-    gamma: 0.99826
-    tau: 0.0019716
+    lr_actor: 0.00048211947849186834
+    lr_critic: 0.00023536913918894482
+    lr_alpha: 0.0000023011482963674244
+    gamma: 0.9734375919828845
+    tau: 0.0056901039341825865
     batch_size: 512
     buffer_size: 100
-    initial_alpha: 0.37652
+    initial_alpha: 0.4568170758305432
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 1.2302
+    gradient_clip: 2.738336834748153
 
 # --- Network (must match training checkpoint exactly) ---
 # GMGP1 uses full multi-scale TCN encoder (NOT summary_stats like GMGP2)
@@ -80,19 +83,31 @@ bar_clock:
 # --- Trading ---
 trading:
   initial_balance: 100000.0            # cTrader demo (reset to $100K via web UI 2026-04-22)
-  deadband_threshold: 0.25
-  taker_fee: 0.00015                   # 1.5bps effective spread
+  deadband_threshold: 0.35             # trial #10 — critical for drift tracker bucketing
+  taker_fee: 0.000235                  # steady-state (S464); IC Markets Raw ~2.35 bps/side
   weekend_flatten:
     enabled: true
     minutes_before_close: 30           # Flatten 30 min before Friday close
 
-# --- Hard Constraints (match training) ---
+# --- Data reference (validator Stage-0; not loaded at runtime — live fetches from cTrader) ---
+# Points at the OANDA parquet the WF checkpoint was trained on. m1 parquet has
+# manifest (m15 derives from m1). Retrain-gate reads backtest_config_ref
+# (configs/gmgp1_xauusd_oanda_wf_fold_07_backtest.yaml) which declares m15.
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+
+# --- Hard Constraints (match training + live-only safety rails) ---
 env:
-  stop_loss_bps: 125
-  max_holding_bars: 15
+  taker_fee: 0.000235                  # mirrors trading.taker_fee for validator parity
+  stop_loss_bps: 125                   # live-only guard (not in training env)
+  max_holding_bars: 15                 # live-only guard (not in training env)
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
   max_drawdown_pct: 0.10
+  gap_detection: true                  # S468 — match training env
+  gap_atr_mult: 3.0                    # OANDA 73h weekend gap detector
 
 # --- Risk Management (FTMO-safe limits) ---
 risk:
@@ -109,31 +124,67 @@ wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   tags: ["live", "paper", "gmgp1-xauusd", "cTrader", "XAUUSD", "Gold", "SAC", "15min",
-         "CFD", "FTMO", "multiscale-tcn", "hard-constraints", "seed-123", "reset-20260413"]
-  run_id: "live-xauusd-ctrader-paper-20260413"
+         "CFD", "FTMO", "oanda-spot", "wf-stage3", "solo-seed-42", "fold-07",
+         "rehpo-trial10", "steady-state", "v2-2-compliant"]
+  run_id: "live-gmgp1-xauusd-ctrader-paper-20260424"
 
 # --- Safety ---
 safety:
   require_explicit_mainnet: true       # Must pass --mainnet for live/challenge trading
   max_daily_loss_pct: 0.04             # 4% daily loss (1% below FTMO 5% limit)
-  kill_file: "/tmp/finrl_live_gmgp1_xauusd_kill"  # FIX CRIT-02: was shared with GMGP2
+  # v2.2 §8.3: kill_file + override under /app/state (volume-backed via
+  # gmgp1-xauusd-state) so repeat-CRIT lockout survives container restarts.
+  kill_file: "/app/state/finrl_live_gmgp1_xauusd_kill"
+  kill_file_override: "/app/state/finrl_live_gmgp1_xauusd_kill.override"
+  flatten_on_kill_file: true           # graceful flatten on CRIT (not "halt")
   emergency_flatten_on_error: true     # Flatten all positions on unrecoverable error
+
+# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# Stage 2.5 verdict = SOLO_BEST; baseline is seed 42's fold-07 eval_distribution
+# (not the ensemble rule). Tracker picks eval_distribution_by_seed["42"] via
+# baseline_seed. Baseline baked via Dockerfile.live-engine COPY baselines/.
+drift:
+  enabled: true
+  baseline_path: "/app/baselines/gmgp1_xauusd_oanda_wf_fold_07/seed_report.json"
+  baseline_seed: "42"
+  window_bars: 1000
+  min_bars_before_check: 500
+  vol_estimator_bars: 20
+
+# --- Protocol v2 Gates (validator requirement; mirrors §drift/§safe_mode) ---
+# SOURCE OF TRUTH for research: configs/gmgp1_xauusd_ensemble.gates.yaml.
+gates:
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
 
 # --- Retrain Policy (hybrid trigger + 12mo cap) ---
 # See scripts/check_retrain_triggers.py. Live DD checks delegated to live-monitor.
 retrain_policy:
   enabled: true
-  last_trained_date: "2026-04-08"        # gmgp1-xauusd-l1-multiseed_20260408_163103
+  last_trained_date: "2026-04-24"        # WF_seed42_fold_07_20260424_061803
   staleness_cap_days: 365
-  validation_pf_baseline: 2.31           # seed-123 Dec 2025 OOS PF
-  oos_pf_floor_ratio: 0.70               # floor: 1.62
+  validation_pf_baseline: 2.260          # seed 42 fold-7 test PF
+  oos_pf_floor_ratio: 0.70               # floor: 1.58
   dd_trigger_ratio: 0.50                 # 4% live DD trigger (vs 8% hard stop)
   gate_window_days: 90
   gate_lag_days: 1
   feature_drift_p_threshold: 0.01
   feature_drift_ks_stat_threshold: 0.20  # PRIMARY trigger: max CDF gap ≥ 0.20
-  backtest_config_ref: "configs/gmgp1_xauusd_l1_backtest_q1_2026.yaml"
-  data_file_path: "data/cme/gold_2025_2026q1_15min_stitched.parquet"
+  backtest_config_ref: "configs/gmgp1_xauusd_oanda_wf_fold_07_backtest.yaml"
+  data_file_path: "data/oanda/xauusd_m15_m.parquet"
 
 # --- PRISM Regime Overlay (L2 position sizing) ---
 prism:
