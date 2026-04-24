@@ -506,8 +506,33 @@ def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
     safety = cfg.get("safety", {}) or {}
     drift = cfg.get("drift", {}) or {}
 
-    if not risk.get("static_peak"):
-        r.fail("risk.static_peak must be true for paper-deploy (project_ftmo_risk_manager_fix.md)")
+    # Challenge-phase-aware static_peak requirement. Challenge / step programs
+    # use a static peak (DD from initial balance, non-trailing) — S422 fix.
+    # Funded accounts use a trailing peak. Default when no challenge block
+    # is declared: static (preserves legacy S422 guard).
+    challenge = cfg.get("challenge", {}) or {}
+    phase = challenge.get("phase")  # honored regardless of `enabled`
+    eod_trailing = bool(risk.get("eod_trailing_drawdown"))
+    if phase == "funded":
+        # FTMO funded: trailing peak baked into `risk.static_peak=false`.
+        # Velotrade funded: trailing enforced live-side via
+        # `risk.eod_trailing_drawdown=true` while `risk.static_peak=true`
+        # (training contract). Either pattern is acceptable as long as the
+        # trailing rule is declared.
+        if risk.get("static_peak") is True and not eod_trailing:
+            r.fail(
+                "risk.static_peak=true for funded-phase paper-deploy requires "
+                "risk.eod_trailing_drawdown=true (trailing-DD live-side guard). "
+                "FTMO-style: set risk.static_peak=false. "
+                "Velotrade-style: keep static_peak=true + eod_trailing_drawdown=true."
+            )
+    else:
+        if not risk.get("static_peak"):
+            r.fail(
+                "risk.static_peak must be true for paper-deploy "
+                "(project_ftmo_risk_manager_fix.md; funded phase is the only "
+                "exception and must declare challenge.phase='funded')"
+            )
 
     # v2.2 §8.3: kill_file can live under risk.kill_file OR safety.kill_file
     # (engine reads safety.kill_file; older configs have risk.kill_file — accept

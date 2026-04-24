@@ -1,0 +1,38 @@
+# FTMO Step 1 overlay. Layer on top of a base training/live config.
+#
+# Applied by:
+#   python scripts/deploy_bare_metal.py --config <base> --overlay ftmo/step1
+#
+# FTMO Step 1 contract: +10% profit target, 5% daily loss, 10% max loss,
+# no time limit (on current 2-step products, as of 2026-04). DD is a
+# static peak (max-loss from initial balance, non-trailing). 21:00 UTC
+# server rollover.
+#
+# See .agent/artifacts/prop_firm_decoupling_architecture.md Interface 4.
+
+env:
+  risk:
+    max_trailing_drawdown_pct: 0.08   # 2pp buffer vs FTMO 10% cap
+    max_daily_loss_pct: 0.04          # 1pp buffer vs FTMO 5% cap
+    eod_hour_utc: 21                  # FTMO server 21:00 UTC rollover
+    augment_obs: "off"                # live-path compat — no obs aug
+    static_peak: true                 # must match risk.static_peak
+
+challenge:
+  enabled: true
+  phase: step1
+  profit_target_pct: 0.10
+  next_phase: step2
+  advance_rule: manual_ack            # 'auto' rejected by validator
+  n_confirm: 2
+  smoothing_window: 3
+
+risk:
+  static_peak: true                   # must match env.risk.static_peak
+  flatten_on_kill_file: true          # v2.2 §8.3 CRIT graceful flatten
+
+gates:
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5

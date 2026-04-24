@@ -5,13 +5,27 @@
 # G3 uplift FAIL (0.970 < 1.05 floor). Solo seed 42 graduates per val-argmax-PF rule.
 # See results/gmgp1_xauusd_oanda_wf_ensemble/fold_07/verdict.json.
 #
-# Usage:
-#   python scripts/run_live_ctrader.py --config configs/live_gmgp1_xauusd_ctrader.yaml
-#   python scripts/run_live_ctrader.py --config configs/live_gmgp1_xauusd_ctrader.yaml --mainnet
-#   python scripts/run_live_ctrader.py --config configs/live_gmgp1_xauusd_ctrader.yaml --dry-run
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S495 Step 4, 2026-04-24).
+# This file is the BASE config: checkpoint + alpha contract + env dims +
+# data + drift baseline + container paths. Prop-firm phase and firm-
+# specific DD/target/gates live in configs/deploy/<firm>/<phase>.yaml
+# overlays (allowlist-enforced).
+#
+# Deploy invocations (resolved = this file + overlay):
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_ctrader.py \
+#     --config configs/live_gmgp1_xauusd_ctrader.yaml --overlay ftmo/step1
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_ctrader.py \
+#     --config configs/live_gmgp1_xauusd_ctrader.yaml --overlay ftmo/step2
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_ctrader.py \
+#     --config configs/live_gmgp1_xauusd_ctrader.yaml --overlay ftmo/funded
+#
+# After Step 4 migration this BASE file alone is NOT paper-deployable
+# (validator FAILs: `risk.static_peak` missing); pair with an overlay.
 #
 # cTrader credentials via env vars:
 #   CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN, CTRADER_ACCOUNT_ID
+# ---------------------------------------------------------------------------
 
 # --- cTrader Connection ---
 exchange:
@@ -109,11 +123,12 @@ env:
   gap_detection: true                  # S468 — match training env
   gap_atr_mult: 3.0                    # OANDA 73h weekend gap detector
 
-# --- Risk Management (FTMO-safe limits) ---
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay owns: static_peak (true for step1/step2, false for funded),
+# flatten_on_kill_file. See configs/deploy/ftmo/{step1,step2,funded}.yaml.
 risk:
   enabled: true
   max_drawdown_pct: 0.08               # 8% hard stop (2% below FTMO 10% limit)
-  static_peak: true                    # FTMO max-loss: DD from initial balance, never ratchets
   circuit_breaker_cooldown_bars: 12    # 3 hours at 15-min bars
   max_position_pct: 1.0                # Single asset = 100% allowed
   funding_rate_alert: 999.0            # Disabled (CFDs have no funding)

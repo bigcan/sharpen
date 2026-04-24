@@ -1,6 +1,9 @@
 # MCP config (contains API keys)
 .mcp.json
 
+# Resolved deploy configs (base + overlay merges, per-deploy artifacts)
+configs/deploy/_resolved/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

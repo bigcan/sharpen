@@ -3,10 +3,25 @@
 # HPs: T34 best from GMGP1-BTC HPO (run 8v4mueuf, PF=2.558)
 # Checkpoint: L1 seed-123 (run 1jazzser)
 #
-# Usage:
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S495 Step 5, 2026-04-24).
+# This file is the BASE config. Phase-varying DD/target/gates live in
+# configs/deploy/velotrade/<phase>.yaml overlays (allowlist-enforced).
+#
+# Deploy invocations (resolved = this file + overlay):
+#   python scripts/deploy_bare_metal.py --script scripts/run_live.py \
+#     --config configs/live_gmgp1_btc_bybit.yaml --overlay velotrade/step1
+#   python scripts/deploy_bare_metal.py --script scripts/run_live.py \
+#     --config configs/live_gmgp1_btc_bybit.yaml --overlay velotrade/step2
+#   python scripts/deploy_bare_metal.py --script scripts/run_live.py \
+#     --config configs/live_gmgp1_btc_bybit.yaml --overlay velotrade/funded
+#
+# After Step 5 migration this BASE file alone is NOT paper-deployable
+# (validator FAILs: `risk.static_peak` missing); pair with an overlay.
+# ---------------------------------------------------------------------------
+#
+# Usage (legacy direct-invoke, superseded by --overlay above):
 #   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml
-#   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml --mainnet
-#   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml --dry-run
 
 # --- Exchange ---
 exchange:
@@ -70,11 +85,12 @@ trading:
   deadband_threshold: 0.25         # Ignore position changes < 25%
   taker_fee: 0.00055               # Bybit futures taker fee
 
-# --- Risk Management (ENABLED for live) ---
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay owns: static_peak, eod_trailing_drawdown, eod_hour_utc,
+# flatten_on_kill_file. See configs/deploy/velotrade/{step1,step2,funded}.yaml.
 risk:
   enabled: true
   max_drawdown_pct: 0.08           # 8% hard stop (prop-firm safe, 2% buffer under 10% gate)
-  static_peak: true                # Prop-firm max-loss: DD from initial balance, never ratchets
   circuit_breaker_cooldown_bars: 12 # 3 hours at 15-min bars
   max_position_pct: 1.0            # Single asset = 100% allowed
   funding_rate_alert: 0.001        # Alert if |rate| > 0.1% per 8h

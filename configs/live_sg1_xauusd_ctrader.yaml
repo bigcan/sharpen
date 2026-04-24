@@ -6,15 +6,27 @@
 # median fold PF 2.058 (+20% over best solo), worst fold MDD -1.93% / daily
 # 0.84% (6.07pp / 3.16pp FTMO buffers), stress sidecar PF 1.921 (gate 1.5).
 #
-# Usage:
-#   python scripts/run_live_ctrader.py --config configs/live_sg1_xauusd_ctrader.yaml
-#   python scripts/run_live_ctrader.py --config configs/live_sg1_xauusd_ctrader.yaml --mainnet
-#   python scripts/run_live_ctrader.py --config configs/live_sg1_xauusd_ctrader.yaml --dry-run
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S495 Step 5, 2026-04-24).
+# This file is the BASE config. Phase-varying DD/target/gates live in
+# configs/deploy/ftmo/<phase>.yaml overlays (allowlist-enforced).
+#
+# Deploy invocations (resolved = this file + overlay):
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_ctrader.py \
+#     --config configs/live_sg1_xauusd_ctrader.yaml --overlay ftmo/step1
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_ctrader.py \
+#     --config configs/live_sg1_xauusd_ctrader.yaml --overlay ftmo/step2
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_ctrader.py \
+#     --config configs/live_sg1_xauusd_ctrader.yaml --overlay ftmo/funded
+#
+# After Step 5 migration this BASE file alone is NOT paper-deployable
+# (validator FAILs: `risk.static_peak` missing); pair with an overlay.
 #
 # cTrader credentials via env vars:
 #   CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN, CTRADER_ACCOUNT_ID
 # (SG-1 uses its own IC Markets demo login — see docker/live/.env
 # SG1_XAUUSD_CTRADER_* block.)
+# ---------------------------------------------------------------------------
 
 # --- cTrader Connection ---
 exchange:
@@ -110,11 +122,25 @@ trading:
     enabled: true
     minutes_before_close: 30           # Flatten 30 min before Friday close
 
-# --- Risk Management (FTMO-safe limits) ---
+# --- Data reference (validator Stage-0; not loaded at runtime — live fetches from cTrader) ---
+# Points at the OANDA parquet the WF ensemble checkpoints were trained on.
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+
+# --- Hard Constraints (validator parity; mirrors trading.taker_fee) ---
+env:
+  taker_fee: 0.000235
+  gap_detection: true                  # S468 — OANDA 73h weekend gap detector
+  gap_atr_mult: 3.0
+
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay owns: static_peak (true for step1/step2, false for funded),
+# flatten_on_kill_file. See configs/deploy/ftmo/{step1,step2,funded}.yaml.
 risk:
   enabled: true
   max_drawdown_pct: 0.08               # 8% hard stop (2% below FTMO 10% limit)
-  static_peak: true                    # FTMO max-loss: DD from initial balance, never ratchets (S468)
   circuit_breaker_cooldown_bars: 12
   max_position_pct: 1.0
   funding_rate_alert: 999.0

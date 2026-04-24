@@ -6,9 +6,11 @@ import shlex
 import sys
 import time
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import paramiko
+import yaml
 from dotenv import load_dotenv
 
 # Env vars auto-forwarded from deployer -> remote shell. Keep the allowlist
@@ -32,6 +34,71 @@ DEPLOY_EXCLUDES = [
 ROOT_DATA_EXCLUDE = ['data'] # Only exclude root data folder
 
 INSTANCES_FILE = PROJECT_ROOT / "instances.json"
+DEPLOY_OVERLAY_ROOT = PROJECT_ROOT / "configs" / "deploy"
+DEPLOY_ALLOWLIST_PATH = DEPLOY_OVERLAY_ROOT / "ALLOWLIST.yaml"
+
+
+def _load_overlay_allowlist(path: Path) -> set:
+    """Read configs/deploy/ALLOWLIST.yaml and return the allowed-path set."""
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Overlay allowlist missing at {path}. "
+            "See .agent/artifacts/prop_firm_decoupling_architecture.md ADR-5."
+        )
+    with path.open("r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    entries = raw.get("allow")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(
+            f"ALLOWLIST 'allow' must be a non-empty list (got {type(entries).__name__})"
+        )
+    return set(entries)
+
+
+def _resolve_with_overlays(base_path: Path, overlay_specs: list) -> Path:
+    """Deep-merge ``base`` + each overlay under ``configs/deploy/``.
+
+    Overlay spec format: ``"<firm>/<phase>"`` (no ``.yaml`` suffix; resolves
+    to ``configs/deploy/<spec>.yaml``). Later overlays win.
+
+    Raises ``ConfigMergeError`` if any overlay touches a disallowed key.
+    Writes the resolved config to ``configs/deploy/_resolved/`` so the
+    existing zip-builder picks it up unchanged. Returns the path of the
+    resolved config *relative to PROJECT_ROOT* (so the remote script sees
+    the same path after unzip).
+    """
+    from finrl_pro_ds.config_utils import ConfigMergeError, deep_merge
+
+    with base_path.open("r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+
+    allowlist = _load_overlay_allowlist(DEPLOY_ALLOWLIST_PATH)
+
+    for spec in overlay_specs:
+        overlay_path = DEPLOY_OVERLAY_ROOT / f"{spec}.yaml"
+        if not overlay_path.exists():
+            raise FileNotFoundError(
+                f"Overlay not found: {overlay_path} (spec={spec!r}). "
+                f"Expected layout: {DEPLOY_OVERLAY_ROOT}/<firm>/<phase>.yaml"
+            )
+        with overlay_path.open("r", encoding="utf-8") as f:
+            overlay_cfg = yaml.safe_load(f) or {}
+        try:
+            cfg = deep_merge(cfg, overlay_cfg, allowlist=allowlist)
+        except ConfigMergeError as exc:
+            raise ConfigMergeError(
+                f"Overlay {overlay_path.relative_to(PROJECT_ROOT)} rejected: {exc}"
+            ) from exc
+
+    resolved_dir = DEPLOY_OVERLAY_ROOT / "_resolved"
+    resolved_dir.mkdir(parents=True, exist_ok=True)
+    overlay_slug = "_".join(s.replace("/", "-") for s in overlay_specs)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    resolved_path = resolved_dir / f"{base_path.stem}__{overlay_slug}__{ts}.yaml"
+    with resolved_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+    return resolved_path.relative_to(PROJECT_ROOT)
+
 
 def get_env_var(key, default=None):
     val = os.getenv(key, default)
@@ -107,6 +174,25 @@ def create_filtered_zip(source_dir, output_filename):
     print(f"Package created. Size: {os.path.getsize(output_filename) / 1024 / 1024:.2f} MB")
 
 def deploy(args):
+    # Resolve overlays first so the effective config ships in the zip and
+    # the remote script sees the merged result. Violations of the overlay
+    # key-allowlist raise before any SSH / zip work happens.
+    if args.overlay:
+        base_path = Path(args.config)
+        if not base_path.is_absolute():
+            base_path = PROJECT_ROOT / base_path
+        if not base_path.exists():
+            print(f"ERROR: Base config not found: {base_path}")
+            sys.exit(2)
+        try:
+            resolved = _resolve_with_overlays(base_path, list(args.overlay))
+        except Exception as exc:
+            print(f"ERROR: Overlay resolution failed: {exc}")
+            sys.exit(2)
+        print(f"Overlays applied ({' -> '.join(['base', *args.overlay])}).")
+        print(f"Resolved config: {resolved}")
+        args.config = str(resolved).replace("\\", "/")
+
     inst = resolve_instance(args.instance)
     host = inst["host"]
     port = inst["port"]
@@ -305,7 +391,6 @@ def deploy(args):
         for k in FORWARD_ENV_ALLOWLIST
         if os.environ.get(k)
     )
-    from datetime import datetime
     log_file = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
     # Unique HPO DB to prevent locking collisions
@@ -375,7 +460,6 @@ def deploy(args):
 
             # Log to Registry (results/deploys.db)
             import sqlite3
-            from datetime import datetime
 
             db_path = os.path.join(PROJECT_ROOT, "results", "deploys.db")
             os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -463,6 +547,18 @@ if __name__ == "__main__":
     parser.add_argument("--instance", default=None, help="Named instance from instances.json (e.g. gpuhub-1, gpuhub-2). Default: uses 'default' key or .env")
     parser.add_argument("--gpu", default=None, help="CUDA_VISIBLE_DEVICES value (e.g. 0, 1, '0,1'). For multi-GPU instances.")
     parser.add_argument("--pip_extras", default=None, help="pip extras group to install (e.g. 'crypto' -> pip install -e .[crypto])")
+    parser.add_argument(
+        "--overlay",
+        action="append",
+        default=None,
+        metavar="<firm>/<phase>",
+        help=(
+            "Deploy overlay under configs/deploy/ (e.g. 'ftmo/step1'). "
+            "Repeatable — applied in order, deep-merged onto --config. "
+            "Overlay keys are validated against configs/deploy/ALLOWLIST.yaml "
+            "before merging; violations abort pre-SSH."
+        ),
+    )
     args = parser.parse_args()
 
     deploy(args)
