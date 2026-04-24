@@ -1,9 +1,9 @@
-"""Tests for the deploy-overlay + allowlist pipeline (Step 4).
+"""Tests for the deploy-overlay + allowlist pipeline (Steps 4 + 5).
 
 Covers:
 1. ALLOWLIST.yaml loads and is non-empty.
 2. FTMO step1/step2/funded overlays each pass the allowlist when merged
-   onto the GMGP1-XAUUSD live config.
+   onto the GMGP1-XAUUSD live config (Step 4 first customer).
 3. A synthetic overlay that touches training-only keys (env.reward.*,
    agents.*) is rejected *before* any merge happens.
 4. Merge order base -> step1 produces the expected scalar values
@@ -11,6 +11,10 @@ Covers:
 5. Funded overlay flips static_peak to false consistently in env.risk
    and risk, and sets challenge.phase='funded' with enabled=false
    (required for the validator's phase-aware static_peak rule).
+6. Step 5 rollout targets — SG-1-XAUUSD + GMGP1-BTC + SG-1-BTC base
+   configs — merge cleanly with their matching firm overlay (FTMO for
+   XAU, Velotrade for BTC) across all 3 phases. Guards against later
+   migrations accidentally touching training-only keys.
 """
 from __future__ import annotations
 
@@ -25,6 +29,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 BASE_CONFIG = PROJECT_ROOT / "configs" / "live_gmgp1_xauusd_ctrader.yaml"
 ALLOWLIST_PATH = PROJECT_ROOT / "configs" / "deploy" / "ALLOWLIST.yaml"
 OVERLAY_DIR = PROJECT_ROOT / "configs" / "deploy" / "ftmo"
+
+# Step 5 rollout customers: (base config filename, firm directory).
+MIGRATED_WORKSTREAMS = [
+    ("live_sg1_xauusd_ctrader.yaml", "ftmo"),
+    ("live_gmgp1_btc_bybit.yaml", "velotrade"),
+    ("live_sg1_btc_dxtrade.yaml", "velotrade"),
+]
 
 
 @pytest.fixture(scope="module")
@@ -122,3 +133,55 @@ def test_deep_merge_preserves_list_replace(
     overlay = {"wandb": {"tags": ["ftmo-step1"]}}
     merged = deep_merge(base_cfg, overlay, allowlist=allowlist)
     assert merged["wandb"]["tags"] == ["ftmo-step1"]
+
+
+# ---------------------------------------------------------------------------
+# Step 5 rollout — all migrated workstream base configs resolve cleanly
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("base_name,firm", MIGRATED_WORKSTREAMS)
+@pytest.mark.parametrize("phase", ["step1", "step2", "funded"])
+def test_rollout_base_plus_overlay_merges(
+    base_name: str, firm: str, phase: str, allowlist: set[str]
+) -> None:
+    """Each migrated base + its firm's phase overlay merges without raising
+    and produces the three live-only blocks the validator requires."""
+    base_path = PROJECT_ROOT / "configs" / base_name
+    overlay_path = PROJECT_ROOT / "configs" / "deploy" / firm / f"{phase}.yaml"
+    with base_path.open("r", encoding="utf-8") as f:
+        base = yaml.safe_load(f)
+    with overlay_path.open("r", encoding="utf-8") as f:
+        overlay = yaml.safe_load(f)
+    merged = deep_merge(base, overlay, allowlist=allowlist)
+    assert "challenge" in merged, f"{base_name}+{firm}/{phase}: challenge missing"
+    assert "env" in merged and "risk" in merged["env"], (
+        f"{base_name}+{firm}/{phase}: env.risk missing"
+    )
+    assert "risk" in merged, f"{base_name}+{firm}/{phase}: risk missing"
+    # Phase semantics preserved — funded disables the target, 2-step enables it.
+    if phase == "funded":
+        assert merged["challenge"]["enabled"] is False
+        assert merged["challenge"]["phase"] == "funded"
+    else:
+        assert merged["challenge"]["enabled"] is True
+        assert merged["challenge"]["phase"] == phase
+
+
+@pytest.mark.parametrize("base_name,firm", MIGRATED_WORKSTREAMS)
+def test_rollout_base_alone_has_no_overlay_owned_keys(
+    base_name: str, firm: str
+) -> None:
+    """Each migrated base config must delegate overlay-owned keys to the
+    overlay. If these leak into base, phase parity breaks (a step1 base
+    would silently act like step1 when a step2 overlay is requested)."""
+    del firm  # fixture param kept for parametrize symmetry
+    base_path = PROJECT_ROOT / "configs" / base_name
+    with base_path.open("r", encoding="utf-8") as f:
+        base = yaml.safe_load(f)
+    assert "challenge" not in base, f"{base_name}: challenge leaked into base"
+    assert "static_peak" not in (base.get("risk") or {}), (
+        f"{base_name}: risk.static_peak leaked into base"
+    )
+    assert "static_peak" not in ((base.get("env") or {}).get("risk") or {}), (
+        f"{base_name}: env.risk.static_peak leaked into base"
+    )
