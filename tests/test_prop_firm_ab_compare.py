@@ -400,3 +400,81 @@ def test_write_report_produces_files(tmp_path: Path):
     assert "Gate results" in body
     for name in Q1_THRESHOLDS:
         assert name in body
+
+
+# ---------------------------------------------------------------------------
+# S498 P4: cmd_template + pass-through args (regression guard)
+# ---------------------------------------------------------------------------
+
+def test_run_training_parity_drops_unsupported_flags(monkeypatch, tmp_path: Path):
+    """run_full_pipeline.py rejects --stage and --device. The legacy
+    cmd_template carried both. This test guards against re-adding them by
+    capturing the actual subprocess argv."""
+    from scripts import prop_firm_ab_compare as ab
+
+    # Minimal env.prop_firm: config so _prep_arm_config doesn't blow up
+    cfg = tmp_path / "min_train_cfg.yaml"
+    cfg.write_text(
+        "env:\n  prop_firm:\n    enabled: true\n    profit_target_pct: 0.10\n"
+        "    max_trailing_drawdown_pct: 0.10\n",
+        encoding="utf-8",
+    )
+
+    captured: list[list[str]] = []
+
+    class _FakeProc:
+        returncode = 0
+
+    def _fake_run(cmd, *_, **__):  # type: ignore[no-untyped-def]
+        captured.append(list(cmd))
+        return _FakeProc()
+
+    monkeypatch.setattr(ab.subprocess, "run", _fake_run)
+
+    out = ab.run_training_parity(cfg, tmp_path / "out", seed=7, steps=1234, device="cpu")
+
+    assert len(captured) == 2  # V7 + RS
+    for argv in captured:
+        joined = " ".join(argv)
+        assert "--stage" not in joined, f"--stage leaked back into cmd: {joined}"
+        assert "--device" not in joined, f"--device leaked back into cmd: {joined}"
+        assert "--steps" in argv
+        assert "--seed" in argv
+        assert "--config" in argv
+    assert "next_step" in out  # operator pointer kept
+
+
+def test_run_training_parity_forwards_extra_args(monkeypatch, tmp_path: Path):
+    """deploy_bare_metal forwards --tags / --run_name / --hpo_storage; the
+    harness must inject them verbatim into the subprocess argv."""
+    from scripts import prop_firm_ab_compare as ab
+
+    cfg = tmp_path / "min_train_cfg.yaml"
+    cfg.write_text(
+        "env:\n  prop_firm:\n    enabled: true\n    profit_target_pct: 0.10\n"
+        "    max_trailing_drawdown_pct: 0.10\n",
+        encoding="utf-8",
+    )
+
+    captured: list[list[str]] = []
+
+    class _FakeProc:
+        returncode = 0
+
+    monkeypatch.setattr(ab.subprocess, "run",
+                        lambda cmd, *_, **__: (captured.append(list(cmd)) or _FakeProc()))
+
+    extra = ["--tags", "q2", "ab", "--run_name", "ab-test", "--hpo_storage", "sqlite:///x.db"]
+    ab.run_training_parity(
+        cfg, tmp_path / "out",
+        seed=0, steps=100, device="cpu",
+        extra_run_full_pipeline_args=extra,
+    )
+
+    assert len(captured) == 2
+    for argv in captured:
+        # extras must appear before the final --config (which is appended last)
+        idx_config = argv.index("--config")
+        prefix = argv[:idx_config]
+        for token in extra:
+            assert token in prefix, f"{token!r} missing from forwarded argv: {prefix}"
