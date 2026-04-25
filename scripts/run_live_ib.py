@@ -161,6 +161,7 @@ def build_components(config: dict):
         static_peak=risk_cfg.get("static_peak", False),
         eod_trailing_drawdown=risk_cfg.get("eod_trailing_drawdown", False),
         eod_hour_utc=risk_cfg.get("eod_hour_utc", 0),
+        bar_interval_minutes=clock_cfg.get("base_interval_minutes", 15),
     ))
 
     # --- Data Loader ---
