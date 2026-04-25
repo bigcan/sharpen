@@ -293,6 +293,92 @@ def test_unknown_metric_raises():
 
 
 # ---------------------------------------------------------------------------
+# S497: window-aligned semantics for pf/sharpe/median_pos gates
+#
+# A's bar count is the alignment window. The "_full_window"-named gates
+# compare A vs B[:len(A)] (NOT full B) so a policy that hits target faster
+# than the harness assumed doesn't FAIL on apples-to-oranges comparisons.
+# ---------------------------------------------------------------------------
+
+def test_aligned_gates_pass_when_overlap_byte_identical():
+    """B is byte-identical to A in the overlap, then continues.
+
+    Mirrors the SG-1 XAUUSD finding (S497): wrappers produce the same
+    actions while A is alive, then B keeps trading after A terminates.
+    Aligned PF/Sharpe/median_pos gates must PASS regardless of B's
+    post-A trajectory shape.
+    """
+    df_a = _identical_trajectory(500)
+    # B = A's full trajectory, plus 2000 extra bars where things degrade.
+    extra_n = 2000
+    pv_a = df_a["portfolio_value"].to_numpy()
+    pv_extra = np.linspace(pv_a[-1], pv_a[-1] * 0.85, extra_n)  # 15% bleed
+    pv_b = np.concatenate([pv_a, pv_extra])
+    pos_b = np.concatenate([df_a["position"].to_numpy(), np.full(extra_n, 0.10)])
+    traded_b = np.concatenate([df_a["traded"].to_numpy(), np.zeros(extra_n, dtype=int)])
+    df_b = _make_trajectory(pv_b, pos_b, traded_b)
+
+    decision = compute_ab_decision(df_a, df_b, initial_equity=100_000.0)
+    pf = decision["metrics"]["pf_full_window"]
+    sh = decision["metrics"]["sharpe_full_window"]
+    mp = decision["metrics"]["median_abs_position_full"]
+
+    # Aligned A vs B[:len(A)] must be exactly equal.
+    assert pf["B"] == pytest.approx(pf["A"], rel=1e-12)
+    assert sh["B"] == pytest.approx(sh["A"], rel=1e-12)
+    assert mp["B"] == pytest.approx(mp["A"], rel=1e-12)
+
+    # B_full diverges from B (informational only — gate ignores it).
+    assert pf["B_full"] != pytest.approx(pf["A"], rel=0.01)
+    assert mp["B_full"] != pytest.approx(mp["A"], rel=0.01)
+
+    # n_aligned + n_b_full are reported.
+    assert pf["n_aligned"] == 500
+    assert pf["n_b_full"] == 2500
+
+    # All three aligned gates PASS.
+    assert decision["gates"]["pf_full_window"]["pass"]
+    assert decision["gates"]["sharpe_full_window"]["pass"]
+    assert decision["gates"]["median_abs_position_full"]["pass"]
+
+
+def test_aligned_pf_fails_when_overlap_diverges():
+    """If B diverges from A *within* the overlap, aligned gates still fire.
+
+    Catches the case where someone "fixes" alignment by accidentally
+    short-circuiting the comparison.
+    """
+    df_a = _identical_trajectory(500)
+    df_b = df_a.copy()
+    # B's first half is dramatically worse — aligned PF must drop.
+    pv_a = df_a["portfolio_value"].to_numpy()
+    pv_b = pv_a.copy()
+    pv_b[:250] = np.linspace(pv_a[0], pv_a[0] * 0.92, 250)  # 8% loss in first half
+    pv_b[250:] = np.linspace(pv_b[249], pv_b[249] * 1.10, 250)  # rebound
+    df_b["portfolio_value"] = pv_b
+    df_b["eod_drawdown"] = np.maximum.accumulate(np.maximum(0, 1 - pv_b / pv_b[0]))
+
+    decision = compute_ab_decision(df_a, df_b, initial_equity=100_000.0)
+    # Aligned PF must FAIL (B clearly worse than A in the overlap window).
+    assert not decision["gates"]["pf_full_window"]["pass"]
+
+
+def test_aligned_metrics_default_when_b_shorter_than_a():
+    """Edge case: B somehow has fewer bars than A (shouldn't normally happen
+    since B never terminates early, but the harness should be robust).
+    """
+    df_a = _identical_trajectory(500)
+    df_b = _identical_trajectory(300)  # B truncated
+    decision = compute_ab_decision(df_a, df_b, initial_equity=100_000.0)
+    pf = decision["metrics"]["pf_full_window"]
+    # n_aligned = len(A) = 500, but B only has 300 bars — iloc handles gracefully.
+    assert pf["n_aligned"] == 500
+    assert pf["n_b_full"] == 300
+    # Decision still produces a verdict (no crash).
+    assert decision["verdict"] in ("PASS", "AMBIGUOUS", "FAIL")
+
+
+# ---------------------------------------------------------------------------
 # Report writer
 # ---------------------------------------------------------------------------
 

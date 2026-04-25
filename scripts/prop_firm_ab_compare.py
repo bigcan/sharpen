@@ -69,7 +69,8 @@ Q1_THRESHOLDS: dict[str, dict[str, float | str]] = {
     "median_abs_position_full": {
         "rule": "within_pct",  # |B - A| / |A| <= tol
         "tol": 0.10,
-        "description": "Full-window median |position| — overall aggression preserved",
+        "description": "Median |position| over A's window vs B[:len(A)] — "
+                       "wrapper-equivalence check (window-aligned, S497 fix)",
     },
     "mean_abs_position_near_target": {
         "rule": "within_pct_or_above",  # B within tol of A, OR B > A
@@ -89,17 +90,22 @@ Q1_THRESHOLDS: dict[str, dict[str, float | str]] = {
     "pf_full_window": {
         "rule": "at_least_ratio",  # B >= ratio * A
         "ratio": 0.95,
-        "description": "Full-window PF — no degradation from target removal",
+        "description": "PF over A's window vs B[:len(A)] — wrapper-equivalence "
+                       "check (window-aligned, S497 fix). B_full kept as "
+                       "informational (full-window number).",
     },
     "eod_drawdown_max": {
         "rule": "at_most_plus_pp",  # B <= A + pp_budget
         "pp_budget": 0.005,  # 0.5pp
-        "description": "Max EOD drawdown — treatment does not blow the buffer",
+        "description": "Max EOD drawdown — treatment does not blow the buffer "
+                       "(intentionally full B, includes post-target window)",
     },
     "sharpe_full_window": {
         "rule": "at_least_ratio",
         "ratio": 0.90,
-        "description": "Full-window Sharpe — long-horizon quality preserved",
+        "description": "Sharpe over A's window vs B[:len(A)] — wrapper-equivalence "
+                       "check (window-aligned, S497 fix). B_full kept as "
+                       "informational (full-window number).",
     },
 }
 
@@ -216,17 +222,38 @@ def _trade_rate(df: pd.DataFrame, mask: np.ndarray | None = None) -> float:
 
 
 def _ab_metrics(df_a: pd.DataFrame, df_b: pd.DataFrame, initial_equity: float) -> dict[str, Any]:
-    """Compute the 7 Q1 comparison metrics (6 decision + 1 trades-guard)."""
+    """Compute the 7 Q1 comparison metrics (6 decision + 1 trades-guard).
+
+    S497 fix: pf/sharpe/median_abs_position gates are window-aligned —
+    they compare A vs ``B[:len(A)]``, not A vs full B. The control arm
+    terminates on profit target so its trajectory is the natural alignment
+    window. Comparing A vs full B was apples-to-oranges (A's cherry-picked
+    pre-termination PF vs B's diluted full-window PF) and produced false
+    FAILs on policies that hit target faster than the harness assumed.
+
+    The "past target" gates (mean_abs_position_past_target,
+    trades_after_plus10pct) keep using full B by design — they exist to
+    test post-target safety. eod_drawdown_max also keeps full B (it's a
+    max over the whole trajectory; if B blows the buffer outside A's
+    window, we still want to know).
+    """
     pv_a = df_a["portfolio_value"].to_numpy()
     pv_b = df_b["portfolio_value"].to_numpy()
     pos_a = df_a["position"].abs().to_numpy()
     pos_b = df_b["position"].abs().to_numpy()
 
+    n_a = len(df_a)
+    df_b_aligned = df_b.iloc[:n_a]
+    pv_b_aligned = df_b_aligned["portfolio_value"].to_numpy()
+    pos_b_aligned = df_b_aligned["position"].abs().to_numpy()
+
     _, near_a, above_a = _pct_bands(pv_a, initial_equity)
     _, near_b, above_b = _pct_bands(pv_b, initial_equity)
 
     median_abs_pos_a = float(np.median(pos_a)) if len(pos_a) else 0.0
-    median_abs_pos_b = float(np.median(pos_b)) if len(pos_b) else 0.0
+    # ALIGNED — first len(A) bars of B
+    median_abs_pos_b_aligned = float(np.median(pos_b_aligned)) if len(pos_b_aligned) else 0.0
+    median_abs_pos_b_full = float(np.median(pos_b)) if len(pos_b) else 0.0
 
     mean_near_a = float(pos_a[near_a].mean()) if near_a.any() else 0.0
     mean_near_b = float(pos_b[near_b].mean()) if near_b.any() else 0.0
@@ -243,24 +270,30 @@ def _ab_metrics(df_a: pd.DataFrame, df_b: pd.DataFrame, initial_equity: float) -
     a_full_rate = _trade_rate(df_a)
 
     returns_a = np.diff(pv_a) / pv_a[:-1] if len(pv_a) > 1 else np.array([])
-    returns_b = np.diff(pv_b) / pv_b[:-1] if len(pv_b) > 1 else np.array([])
+    returns_b_aligned = (
+        np.diff(pv_b_aligned) / pv_b_aligned[:-1] if len(pv_b_aligned) > 1 else np.array([])
+    )
+    returns_b_full = np.diff(pv_b) / pv_b[:-1] if len(pv_b) > 1 else np.array([])
 
-    wins_a = returns_a[returns_a > 0]
-    losses_a = returns_a[returns_a < 0]
-    pf_a = (float(wins_a.sum()) / float(abs(losses_a.sum())) if losses_a.size and losses_a.sum() != 0 else 0.0)
-
-    wins_b = returns_b[returns_b > 0]
-    losses_b = returns_b[returns_b < 0]
-    pf_b = (float(wins_b.sum()) / float(abs(losses_b.sum())) if losses_b.size and losses_b.sum() != 0 else 0.0)
+    pf_a = _profit_factor(returns_a)
+    pf_b_aligned = _profit_factor(returns_b_aligned)  # GATE source
+    pf_b_full = _profit_factor(returns_b_full)        # informational
 
     sharpe_a = _sharpe(returns_a)
-    sharpe_b = _sharpe(returns_b)
+    sharpe_b_aligned = _sharpe(returns_b_aligned)  # GATE source
+    sharpe_b_full = _sharpe(returns_b_full)        # informational
 
     dd_max_a = float(df_a.get("eod_drawdown", pd.Series(dtype=float)).max() or 0.0)
     dd_max_b = float(df_b.get("eod_drawdown", pd.Series(dtype=float)).max() or 0.0)
 
     return {
-        "median_abs_position_full": {"A": median_abs_pos_a, "B": median_abs_pos_b},
+        "median_abs_position_full": {
+            "A": median_abs_pos_a,
+            "B": median_abs_pos_b_aligned,
+            "B_full": median_abs_pos_b_full,
+            "n_aligned": int(n_a),
+            "n_b_full": int(len(pv_b)),
+        },
         "mean_abs_position_near_target": {"A": mean_near_a, "B": mean_near_b,
                                           "A_n": int(near_a.sum()), "B_n": int(near_b.sum())},
         "mean_abs_position_past_target": {"B_past": mean_above_b, "B_overall": mean_overall_b,
@@ -272,10 +305,32 @@ def _ab_metrics(df_a: pd.DataFrame, df_b: pd.DataFrame, initial_equity: float) -
             "A_pre_rate": a_full_rate,
             "rate_ratio": (b_post_rate / a_full_rate) if a_full_rate > 0 else None,
         },
-        "pf_full_window": {"A": pf_a, "B": pf_b},
+        "pf_full_window": {
+            "A": pf_a,
+            "B": pf_b_aligned,
+            "B_full": pf_b_full,
+            "n_aligned": int(n_a),
+            "n_b_full": int(len(pv_b)),
+        },
         "eod_drawdown_max": {"A": dd_max_a, "B": dd_max_b},
-        "sharpe_full_window": {"A": sharpe_a, "B": sharpe_b},
+        "sharpe_full_window": {
+            "A": sharpe_a,
+            "B": sharpe_b_aligned,
+            "B_full": sharpe_b_full,
+            "n_aligned": int(n_a),
+            "n_b_full": int(len(pv_b)),
+        },
     }
+
+
+def _profit_factor(returns: np.ndarray) -> float:
+    if returns.size == 0:
+        return 0.0
+    wins = returns[returns > 0]
+    losses = returns[returns < 0]
+    if losses.size == 0 or losses.sum() == 0:
+        return 0.0
+    return float(wins.sum()) / float(abs(losses.sum()))
 
 
 # ---------------------------------------------------------------------------
