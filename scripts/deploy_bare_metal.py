@@ -38,23 +38,6 @@ DEPLOY_OVERLAY_ROOT = PROJECT_ROOT / "configs" / "deploy"
 DEPLOY_ALLOWLIST_PATH = DEPLOY_OVERLAY_ROOT / "ALLOWLIST.yaml"
 
 
-def _load_overlay_allowlist(path: Path) -> set:
-    """Read configs/deploy/ALLOWLIST.yaml and return the allowed-path set."""
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Overlay allowlist missing at {path}. "
-            "See .agent/artifacts/prop_firm_decoupling_architecture.md ADR-5."
-        )
-    with path.open("r", encoding="utf-8") as f:
-        raw = yaml.safe_load(f) or {}
-    entries = raw.get("allow")
-    if not isinstance(entries, list) or not entries:
-        raise ValueError(
-            f"ALLOWLIST 'allow' must be a non-empty list (got {type(entries).__name__})"
-        )
-    return set(entries)
-
-
 def _resolve_with_overlays(base_path: Path, overlay_specs: list) -> Path:
     """Deep-merge ``base`` + each overlay under ``configs/deploy/``.
 
@@ -66,29 +49,22 @@ def _resolve_with_overlays(base_path: Path, overlay_specs: list) -> Path:
     existing zip-builder picks it up unchanged. Returns the path of the
     resolved config *relative to PROJECT_ROOT* (so the remote script sees
     the same path after unzip).
+
+    Merge semantics live in :func:`finrl_pro_ds.config_utils.apply_overlays`
+    so the live runners (run_live_ctrader / etc.) apply the same allowlist
+    enforcement at container boot.
     """
-    from finrl_pro_ds.config_utils import ConfigMergeError, deep_merge
+    from finrl_pro_ds.config_utils import apply_overlays
 
     with base_path.open("r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
+        base_cfg = yaml.safe_load(f) or {}
 
-    allowlist = _load_overlay_allowlist(DEPLOY_ALLOWLIST_PATH)
-
-    for spec in overlay_specs:
-        overlay_path = DEPLOY_OVERLAY_ROOT / f"{spec}.yaml"
-        if not overlay_path.exists():
-            raise FileNotFoundError(
-                f"Overlay not found: {overlay_path} (spec={spec!r}). "
-                f"Expected layout: {DEPLOY_OVERLAY_ROOT}/<firm>/<phase>.yaml"
-            )
-        with overlay_path.open("r", encoding="utf-8") as f:
-            overlay_cfg = yaml.safe_load(f) or {}
-        try:
-            cfg = deep_merge(cfg, overlay_cfg, allowlist=allowlist)
-        except ConfigMergeError as exc:
-            raise ConfigMergeError(
-                f"Overlay {overlay_path.relative_to(PROJECT_ROOT)} rejected: {exc}"
-            ) from exc
+    cfg = apply_overlays(
+        base_cfg,
+        overlay_specs,
+        overlay_root=DEPLOY_OVERLAY_ROOT,
+        allowlist_path=DEPLOY_ALLOWLIST_PATH,
+    )
 
     resolved_dir = DEPLOY_OVERLAY_ROOT / "_resolved"
     resolved_dir.mkdir(parents=True, exist_ok=True)

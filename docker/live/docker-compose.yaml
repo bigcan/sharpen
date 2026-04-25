@@ -283,6 +283,10 @@ services:
       STRATEGY_NAME: gmgp1-xauusd
       STRATEGY_RUNNER: scripts/run_live_ctrader.py
       STRATEGY_CONFIG: /app/configs/live_gmgp1_xauusd_ctrader.yaml
+      # S497: prop-firm decoupling Step 5. Base config strips phase-varying
+      # DD/target/gates; overlay supplies them. See docstring of
+      # configs/live_gmgp1_xauusd_ctrader.yaml.
+      STRATEGY_OVERLAY: ${GMGP1_XAUUSD_OVERLAY:-ftmo/step1}
       METRICS_PORT: "9106"
       CTRADER_CLIENT_ID: ${CTRADER_CLIENT_ID:-}
       CTRADER_CLIENT_SECRET: ${CTRADER_CLIENT_SECRET:-}
@@ -315,6 +319,10 @@ services:
       STRATEGY_NAME: sg1-xauusd
       STRATEGY_RUNNER: scripts/run_live_ctrader.py
       STRATEGY_CONFIG: /app/configs/live_sg1_xauusd_ctrader.yaml
+      # S497: prop-firm decoupling Step 5. Base config strips phase-varying
+      # DD/target/gates; overlay supplies them. See docstring of
+      # configs/live_sg1_xauusd_ctrader.yaml.
+      STRATEGY_OVERLAY: ${SG1_XAUUSD_OVERLAY:-ftmo/step1}
       METRICS_PORT: "9108"                       # next after 9107 (reserved block)
       # SG-1 XAUUSD uses a separate IC Markets demo login — isolate creds so a
       # rotation on one strategy doesn't clobber the other. Fallback to the
