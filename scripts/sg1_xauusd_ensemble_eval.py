@@ -913,6 +913,17 @@ def run_stage_2_5_val_selection(
     # --- Phase 4b: v2.3 block-bootstrap on per-bar returns ---
     chosen_returns = _per_bar_returns(test_trajs[chosen_rule])
     best_solo_returns = _per_bar_returns(test_trajs[f"solo_{best_solo_seed}"])
+    if chosen_returns.size != best_solo_returns.size:
+        n_common = min(chosen_returns.size, best_solo_returns.size)
+        log.warning(
+            f"[bootstrap] trajectory length mismatch: chosen={chosen_returns.size}, "
+            f"best_solo={best_solo_returns.size}; truncating both to min={n_common} "
+            f"(prop_firm wrapper terminates episode at profit_target hit; tail is "
+            f"post-termination of the shorter series, common-time prefix preserves "
+            f"paired bootstrap bar-alignment)"
+        )
+        chosen_returns = chosen_returns[:n_common]
+        best_solo_returns = best_solo_returns[:n_common]
     bs_n = int(gates.get("ensemble_bootstrap_resamples", 10000))
     bs_block = gates.get("ensemble_bootstrap_block_len", None)
     bs_block_f = float(bs_block) if bs_block is not None else None

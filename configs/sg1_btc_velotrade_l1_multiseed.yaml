@@ -138,15 +138,20 @@ gates:                                 # Protocol v2 Stage 2 (S488 escalation) +
   velotrade_trailing_dd_buffer_pp: 0.5
   oos_pf_floor: 1.1
 
-# Ensemble metadata — populated post-L1 by reconcile step; consumed by
-# scripts/sg1_xauusd_ensemble_eval.py (or future sg1_btc variant).
+# Ensemble metadata — populated post-L1 by reconcile step (S498 cont.,
+# 2026-04-25); top-3 by backtest_test/profit_factor across N=10 seeds (mean PF
+# 2.176, CV 5.7%). Test-PF ranking: 42=2.363, 2025=2.314, 9999=2.305 → top-3.
 ensemble:
-  seeds: []                            # top-3 by backtest_test/profit_factor after L1
-  rule: ens_agreement                  # S493 canonical rule (two-point evidence)
+  seeds: [42, 2025, 9999]              # top-3 by backtest_test/profit_factor
+  seed_pfs: {42: 2.363, 2025: 2.314, 9999: 2.305}  # drives ens_pf_weighted
+  rule: ens_agreement                  # S493 canonical rule (two-point evidence; superseded by val_argmax_pf below)
   rules: ["solo_<s1>", "solo_<s2>", "solo_<s3>",
           "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
   # Checkpoint path pattern — glob resolves one match per seed after L1 runs.
-  checkpoint_pattern: "checkpoints/sg1-btc-velotrade-l1-multiseed-seed{seed}_*/checkpoint_final.pth"
+  # Wildcard before `seed{seed}_` handles both the original `seed{N}_<ts>/` and
+  # the `rerun2-seed{N}_<ts>/` directory layouts (the L1 N=10 sweep ran in 4
+  # launch cycles to dodge the multiprocessing race; cohorts mixed prefixes).
+  checkpoint_pattern: "checkpoints/sg1-btc-velotrade-l1-multiseed*-seed{seed}_*/checkpoint_final.pth"
   # Pointer to pre-committed gate YAML (5-gate G1..G5):
   gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
 
