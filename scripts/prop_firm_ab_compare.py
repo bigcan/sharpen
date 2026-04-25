@@ -110,13 +110,26 @@ Q1_THRESHOLDS: dict[str, dict[str, float | str]] = {
 }
 
 # ---------------------------------------------------------------------------
-# Q2 (training parity) decision thresholds
+# Q2 (training parity) decision thresholds — Protocol revision S498
+#
+# S496 disambiguation (project_q2_train_parity_fail.md) found three of the
+# four original Q2 gates noise-bound at 100K SAC steps: V7-vs-V7-DET (same
+# wrapper, intra-arm) FAIL'd terminal_q (ratio 0.450), actor_loss (0.546),
+# and return_KL (35.052) while critic_loss stayed at 1.034. Critic loss is
+# the only metric that averaged consistently within band across V7-vs-V7,
+# V7-DET-vs-RS-DET, and V7-vs-RS comparisons (range 1.020-1.167).
+#
+# Verdict semantics (derived from S496 data):
+#   ratio in [0.95, 1.05]              → AMBIGUOUS  (within V7-vs-V7 noise
+#                                                    floor; can't distinguish
+#                                                    wrappers; escalate seeds)
+#   ratio in [0.80, 0.95) ∪ (1.05, 1.25] → PASS    (above noise, within band;
+#                                                    meaningful comparison)
+#   ratio outside [0.80, 1.25]         → FAIL      (clear divergence)
 # ---------------------------------------------------------------------------
 Q2_THRESHOLDS = {
-    "terminal_q_ratio_band": (0.90, 1.10),
     "critic_loss_ratio_band": (0.80, 1.25),
-    "actor_loss_ratio_band": (0.80, 1.25),
-    "return_kl_divergence_max": 0.05,
+    "critic_loss_ratio_ambiguous": (0.95, 1.05),
 }
 
 
@@ -716,12 +729,13 @@ def run_training_parity(
         "steps": steps,
         "seed": seed,
         "next_step": (
-            "Parse per-step WandB metrics (critic_loss, actor_loss, Q(s0,a)) "
-            "from both run logs and evaluate the 4 Q2 gates: terminal Q "
-            "ratio band [0.90, 1.10], critic/actor loss ratio bands "
-            "[0.80, 1.25], return-KL < 0.05. The parse step is best done "
-            "via the wandb CLI on the finished runs (entity "
-            "bigcan-chiwin-technology, project FinRL-Pro-DS)."
+            "Parse per-step WandB metric (critic_loss) from both run logs "
+            "and evaluate the S498-revised single Q2 gate: critic_loss "
+            "ratio in [0.80, 1.25] (PASS), inner [0.95, 1.05] = AMBIGUOUS "
+            "(escalate seeds), outside main band = FAIL. terminal_q / "
+            "actor_loss / return_kl gates dropped per S496 noise-floor "
+            "finding. Use scripts/q2_compute_gates.py for the parse + "
+            "verdict (entity bigcan-chiwin-technology, project FinRL-Pro-DS)."
         ),
     }
 
