@@ -676,15 +676,27 @@ def run_training_parity(
     seed: int = 0,
     steps: int = 100_000,
     device: str,
+    extra_run_full_pipeline_args: list[str] | None = None,
 ) -> dict[str, Any]:
     """Run Q2 training parity.
 
     Spawns two ``run_full_pipeline.py`` subprocesses (one per wrapper) with
-    matching seed + step budget, parses per-step metrics from the emitted
-    WandB summary JSON, and computes the 4 Q2 gates.
+    matching seed + step budget, captures their log paths so the caller
+    can hand them to ``scripts/q2_compute_gates.py`` for the S498-revised
+    single critic_loss gate.
 
-    Returns a decision dict. Gracefully falls back to a stub + operator-
-    instructions when run_full_pipeline is unavailable or in dry-run mode.
+    ``device`` is *not* forwarded to ``run_full_pipeline.py`` — that script
+    has no ``--device`` flag; the device choice lives in the YAML
+    (``agent.device``). The kwarg stays for back-compat (callers that pass
+    it from a CLI flag are silently honored at the harness level only).
+
+    ``extra_run_full_pipeline_args`` is appended verbatim — typically the
+    ``--tags``/``--run_name``/``--hpo_storage`` set forwarded by
+    ``deploy_bare_metal`` so the WandB runs show up under the expected
+    namespace and tag set.
+
+    Returns a decision dict; gracefully falls back to a stub + operator
+    instructions when ``run_full_pipeline`` is unavailable.
     """
     tmp_dir = out_dir / "_tmp_configs"
     project_root = Path(__file__).resolve().parent.parent
@@ -696,20 +708,24 @@ def run_training_parity(
     cfg_rs = _prep_arm_config(config_path, mutate_to_risk=True)
     cfg_rs_path = _write_tmp_config(cfg_rs, tmp_dir, "train_parity_RS")
 
-    cmd_template = [
+    # S498 P4: only the args run_full_pipeline.py actually accepts. The
+    # legacy template carried `--stage l1-multiseed` and `--device` which
+    # argparse rejects (run_full_pipeline has neither flag); both runs
+    # would have died at parse time before any training started. Stage is
+    # set via validate_config wiring at the YAML level; device comes from
+    # `agent.device`.
+    extra_args = list(extra_run_full_pipeline_args or [])
+    base_cmd = [
         sys.executable,
         str(project_root / "scripts" / "run_full_pipeline.py"),
-        "--stage", "l1-multiseed",
         "--steps", str(steps),
         "--seed", str(seed),
-        "--device", device,
-        "--config", "",  # filled in per run
+        *extra_args,
     ]
 
     runs: dict[str, dict[str, Any]] = {}
     for label, cfg_path in [("V7", cfg_v7_path), ("RS", cfg_rs_path)]:
-        cmd = cmd_template.copy()
-        cmd[-1] = str(cfg_path)
+        cmd = base_cmd + ["--config", str(cfg_path)]
         log.info("Q2 training-parity: launching %s run (%s)", label, " ".join(cmd))
         run_log = out_dir / f"train_parity_{label}.log"
         try:
@@ -729,13 +745,15 @@ def run_training_parity(
         "steps": steps,
         "seed": seed,
         "next_step": (
-            "Parse per-step WandB metric (critic_loss) from both run logs "
-            "and evaluate the S498-revised single Q2 gate: critic_loss "
-            "ratio in [0.80, 1.25] (PASS), inner [0.95, 1.05] = AMBIGUOUS "
-            "(escalate seeds), outside main band = FAIL. terminal_q / "
-            "actor_loss / return_kl gates dropped per S496 noise-floor "
-            "finding. Use scripts/q2_compute_gates.py for the parse + "
-            "verdict (entity bigcan-chiwin-technology, project FinRL-Pro-DS)."
+            "Parse the WandB run IDs from train_parity_{V7,RS}.log "
+            "(grep for 'View run at https://wandb.ai/.../runs/<id>') and "
+            "feed them to:\n"
+            "  python scripts/q2_compute_gates.py "
+            "--v7-run-id <V7_ID> --rs-run-id <RS_ID> --out-dir <out>\n"
+            "Verdict tiers (S498): ratio in [0.80, 1.25] outside [0.95, 1.05] "
+            "= PASS; inside [0.95, 1.05] = AMBIGUOUS (escalate seeds); "
+            "outside [0.80, 1.25] = FAIL. terminal_q / actor_loss / "
+            "return_kl dropped per S496 noise-floor finding."
         ),
     }
 
@@ -850,6 +868,18 @@ def main() -> int:
                     help="Step budget for train_parity arm")
     ap.add_argument("--device", default="cuda" if _torch_available() else "cpu")
     ap.add_argument("--out-root", default="results/ab_prop_firm_decoupling", type=Path)
+
+    # S498 P4: deploy_bare_metal pass-through. These flags don't change
+    # the harness's own behavior — they're forwarded verbatim to the
+    # train_parity subprocess so deploy_bare_metal can launch this script
+    # the same way it launches run_full_pipeline.py.
+    ap.add_argument("--tags", nargs="*", default=None,
+                    help="WandB tags forwarded to run_full_pipeline (train_parity arm only)")
+    ap.add_argument("--run_name", type=str, default=None,
+                    help="WandB run name forwarded to run_full_pipeline (train_parity arm only)")
+    ap.add_argument("--hpo_storage", type=str, default=None,
+                    help="Optuna storage URL forwarded to run_full_pipeline (train_parity arm only; no-op for solo/ensemble)")
+
     args = ap.parse_args()
 
     timestamp = dt.datetime.now(dt.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -873,9 +903,19 @@ def main() -> int:
             device=args.device,
         )
     elif args.arm == "train_parity":
+        # Build the pass-through arg list once; only forward the flags the
+        # operator actually set so run_full_pipeline keeps its own defaults.
+        extra: list[str] = []
+        if args.tags:
+            extra.extend(["--tags", *args.tags])
+        if args.run_name:
+            extra.extend(["--run_name", args.run_name])
+        if args.hpo_storage:
+            extra.extend(["--hpo_storage", args.hpo_storage])
         decision = run_training_parity(
             args.config, out_dir,
             seed=args.seed, steps=args.steps, device=args.device,
+            extra_run_full_pipeline_args=extra or None,
         )
     else:  # pragma: no cover
         raise AssertionError(f"unreachable arm: {args.arm}")
