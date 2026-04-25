@@ -172,6 +172,7 @@ def build_components(config: dict):
         funding_rate_alert=risk_cfg.get("funding_rate_alert", 999.0),
         min_margin_reserve_pct=risk_cfg.get("min_margin_reserve_pct", 0.15),
         static_peak=risk_cfg.get("static_peak", False),
+        bar_interval_minutes=clock_cfg.get("base_interval_minutes", 15),
     ))
 
     # --- Data Loader (Binance for OHLCV, DXtrade for execution) ---
