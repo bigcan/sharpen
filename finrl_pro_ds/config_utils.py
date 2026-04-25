@@ -12,7 +12,10 @@ ADR-5 (deep-merge + overlay key allowlist) and Step 1 dependency map.
 from __future__ import annotations
 
 import copy
+from pathlib import Path
 from typing import Iterable
+
+import yaml
 
 
 class ConfigMergeError(ValueError):
@@ -163,3 +166,93 @@ def _config_uses_prop_firm(config: dict) -> bool:
     """Return True if the config references the legacy env.prop_firm block."""
     pf = config.get("env", {}).get("prop_firm", None)
     return isinstance(pf, dict)
+
+
+# ---------------------------------------------------------------------------
+# Overlay application — shared by deploy_bare_metal (training/HPO zip path)
+# and the live runners (run_live_ctrader / future run_live_ib /
+# run_live_dxtrade / run_live.py). Both paths must use the same allowlist
+# semantics so a deploy that PASSes the validator on disk behaves the same
+# in a live container.
+# ---------------------------------------------------------------------------
+
+def load_overlay_allowlist(path: str | Path) -> set[str]:
+    """Read the overlay key allowlist YAML and return the set of entries.
+
+    Format: ``{allow: [path1, path2, ...]}``. See
+    ``configs/deploy/ALLOWLIST.yaml`` for the canonical file.
+    """
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(
+            f"Overlay allowlist missing at {p}. "
+            "See .agent/artifacts/prop_firm_decoupling_architecture.md ADR-5."
+        )
+    with p.open("r", encoding="utf-8") as f:
+        raw = yaml.safe_load(f) or {}
+    entries = raw.get("allow")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError(
+            f"ALLOWLIST 'allow' must be a non-empty list (got {type(entries).__name__})"
+        )
+    return set(entries)
+
+
+def apply_overlays(
+    base_config: dict,
+    overlay_specs: list[str],
+    *,
+    overlay_root: str | Path,
+    allowlist_path: str | Path,
+) -> dict:
+    """Deep-merge ``base_config`` with ``configs/deploy/<spec>.yaml`` overlays.
+
+    Overlay spec format: ``"<firm>/<phase>"`` (no ``.yaml`` suffix; resolves
+    to ``<overlay_root>/<spec>.yaml``). Later overlays win.
+
+    Returns a NEW merged dict; ``base_config`` is not mutated. Empty
+    ``overlay_specs`` returns a deep copy of ``base_config`` (no-op).
+
+    Raises ``FileNotFoundError`` if an overlay spec is missing.
+    Raises ``ConfigMergeError`` if any overlay touches a disallowed key
+    (per ADR-5 — the live and deploy paths must reject the same edits so a
+    config that PASSes validation can never silently change behavior).
+    """
+    if not overlay_specs:
+        return copy.deepcopy(base_config)
+
+    overlay_root_path = Path(overlay_root)
+    allowlist = load_overlay_allowlist(allowlist_path)
+    cfg = copy.deepcopy(base_config)
+
+    for spec in overlay_specs:
+        overlay_path = overlay_root_path / f"{spec}.yaml"
+        if not overlay_path.exists():
+            raise FileNotFoundError(
+                f"Overlay not found: {overlay_path} (spec={spec!r}). "
+                f"Expected layout: {overlay_root_path}/<firm>/<phase>.yaml"
+            )
+        with overlay_path.open("r", encoding="utf-8") as f:
+            overlay_cfg = yaml.safe_load(f) or {}
+        try:
+            cfg = deep_merge(cfg, overlay_cfg, allowlist=allowlist)
+        except ConfigMergeError as exc:
+            raise ConfigMergeError(
+                f"Overlay {overlay_path} rejected: {exc}"
+            ) from exc
+
+    return cfg
+
+
+def parse_overlay_env(env_value: str | None) -> list[str]:
+    """Parse a ``STRATEGY_OVERLAY`` env var value into an overlay-spec list.
+
+    Accepts comma- or whitespace-separated specs (e.g. ``"ftmo/step1"`` or
+    ``"ftmo/step1,wandb_dev_tag"``). Empty / unset returns ``[]``.
+    Whitespace around each spec is stripped; blank entries are dropped.
+    """
+    if not env_value:
+        return []
+    # Split on comma OR whitespace so both "a,b" and "a b" work.
+    raw = env_value.replace(",", " ").split()
+    return [s.strip() for s in raw if s.strip()]
