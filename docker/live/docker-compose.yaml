@@ -293,7 +293,11 @@ services:
       CTRADER_ACCESS_TOKEN: ${CTRADER_ACCESS_TOKEN:-}
       CTRADER_ACCOUNT_ID: ${CTRADER_ACCOUNT_ID:-}
     volumes:
-      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1-xauusd-l1-multiseed_20260408_163103:/app/checkpoints/gmgp1-xauusd-l1-multiseed_20260408_163103:ro
+      # Live config (commit d437437d) points at the OANDA WF fold-07 seed-42
+      # solo checkpoint trained 2026-04-24 06:18 UTC, not the older
+      # L1-multiseed paper checkpoint. The L1 mount was stale (image bake
+      # masked it until S497 force-recreate exposed the drift).
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/WF_seed42_fold_07_20260424_061803:/app/checkpoints/WF_seed42_fold_07_20260424_061803:ro
       - gmgp1-xauusd-logs:/app/logs
       - gmgp1-xauusd-state:/app/state
     # S491: override crypto-strategy anchor default (1536M) — cTrader containers
