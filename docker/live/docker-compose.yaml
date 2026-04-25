@@ -273,6 +273,37 @@ services:
       - velotrade-btc-logs:/app/logs
       - velotrade-btc-state:/app/state
 
+  # --- SG-1 BTC Binance Demo (paper validation) — S498-cont Step 5 migration.
+  # Seed 42 solo interim per Stage 2.5 AMBIGUOUS_RERUN verdict. Runs the
+  # Velotrade overlay against a Binance demo account so the challenge state
+  # machine + drift gates exercise the same code paths the eventual DXtrade
+  # deploy will hit. Switch STRATEGY_RUNNER → run_live_dxtrade.py + STRATEGY_CONFIG
+  # → live_sg1_btc_dxtrade.yaml + DXTRADE_* env block once the Velotrade DXtrade
+  # account is provisioned and Binance demo PnL has validated the strategy.
+  # Creds: SG1_BTC_BINANCE_DEMO_* in docker/live/.env (isolated from gmgp1-btc).
+  sg1-btc:
+    <<: *crypto-strategy
+    container_name: sg1-btc
+    profiles: [crypto, all]
+    labels:
+      finrl.monitor: "true"
+      finrl.strategy: "sg1-btc"
+      finrl.broker: "crypto"
+    environment:
+      <<: *common-env
+      BROKER_TYPE: crypto
+      STRATEGY_NAME: sg1-btc
+      STRATEGY_RUNNER: scripts/run_live.py
+      STRATEGY_CONFIG: /app/configs/live_sg1_btc_binance.yaml
+      STRATEGY_OVERLAY: ${SG1_BTC_OVERLAY:-velotrade/step1}
+      METRICS_PORT: "9109"
+      BINANCE_DEMO_API_KEY: ${SG1_BTC_BINANCE_DEMO_API_KEY:-}
+      BINANCE_DEMO_API_SECRET: ${SG1_BTC_BINANCE_DEMO_API_SECRET:-}
+    volumes:
+      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030:/app/checkpoints/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030:ro
+      - sg1-btc-logs:/app/logs
+      - sg1-btc-state:/app/state
+
   gmgp1-xauusd:
     <<: *crypto-strategy
     container_name: gmgp1-xauusd
@@ -482,6 +513,7 @@ volumes:
   gmgp1-xauusd-logs:
   sg1-xauusd-logs:
   velotrade-btc-logs:
+  sg1-btc-logs:
   gmgp1-gold-state:
   sg1-gold-state:
   gmgp1-btc-state:
@@ -490,4 +522,5 @@ volumes:
   gmgp1-xauusd-state:
   sg1-xauusd-state:
   velotrade-btc-state:
+  sg1-btc-state:
   hyperliquid-data:
