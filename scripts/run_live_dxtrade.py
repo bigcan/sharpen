@@ -296,7 +296,24 @@ def main():
         f"  Dry run: {config.get('dry_run', False)}"
     )
 
-    asyncio.run(main_async(config))
+    exit_code = 0
+    try:
+        asyncio.run(main_async(config))
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        exit_code = 130
+    except SystemExit as e:
+        exit_code = e.code if isinstance(e.code, int) else 1
+    except Exception:
+        logger.exception("Trading engine failed")
+        exit_code = 1
+    finally:
+        # Force PID 1 exit even if non-daemon threads (wandb-core subprocess,
+        # ccxt aiohttp pools) are still alive. Docker `restart: unless-stopped`
+        # auto-recovers the strategy. Mirrors the run_live_ib.py S489 fix;
+        # closes the orphan-netns generalization gap (S498).
+        logger.info(f"run_live_dxtrade exiting with code {exit_code}")
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":
