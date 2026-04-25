@@ -21,6 +21,7 @@ Requires env vars: CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET,
 from __future__ import annotations
 
 import asyncio
+import calendar
 import functools
 import json
 import logging
@@ -168,6 +169,21 @@ class CTraderBroker:
         )
         self._token_state_file = Path(state_path_env)
         self._token_state_loaded = False
+        # Epoch seconds of the most recent rotation we know about
+        # (loaded from state file or set on every successful refresh).
+        # 0.0 means unknown — proactive pre-connect refresh skips that case
+        # to avoid burning a refresh on every fresh-OAuth deploy.
+        self._token_acquired_at: float = 0.0
+        # Recovery threshold: if the cached access token is older than this
+        # at connect() time, refresh BEFORE Step 2 Account auth so the
+        # engine can recover after a >2h docker-restart-loop outage (S490).
+        # Default 3600s (1h) — well below the ~2h cTrader TTL.
+        try:
+            self._proactive_refresh_age_sec: float = float(
+                os.environ.get("CTRADER_PROACTIVE_REFRESH_AGE_SEC", "3600")
+            )
+        except ValueError:
+            self._proactive_refresh_age_sec = 3600.0
         self._load_tokens_from_state_file()
 
         # Connection state
@@ -215,6 +231,15 @@ class CTraderBroker:
             raise ValueError(
                 "Missing CTRADER_ACCOUNT_ID. Set the numeric trading account ID."
             )
+
+        # S490 follow-up #2: proactive pre-connect refresh.
+        # Cached access token may be stale after a >2h docker restart loop.
+        # If we know the rotation timestamp and it's older than the threshold,
+        # refresh BEFORE Step 2 Account auth so we don't waste a TCP+handshake
+        # round-trip just to fail with CH_ACCESS_TOKEN_INVALID. Failure here is
+        # non-fatal — fall through and let Account auth surface the visible
+        # error if the cached token is also dead.
+        await self._maybe_proactive_refresh()
 
         from ctrader_open_api import Client, EndPoints, Protobuf, TcpProtocol
         from ctrader_open_api.messages.OpenApiMessages_pb2 import (
@@ -631,6 +656,73 @@ class CTraderBroker:
         except Exception as exc:
             logger.warning("Token refresh failed during reconnect: %s", exc)
 
+    def _should_proactive_refresh(self) -> bool:
+        """Decide whether connect() should refresh the token before Step 2.
+
+        Returns True when:
+        - we have a refresh_token (no point trying without one), AND
+        - the cached access token's age is known (loaded from state file or
+          set by a prior in-process refresh), AND
+        - that age exceeds ``_proactive_refresh_age_sec``.
+
+        We deliberately skip cold starts (``_token_acquired_at == 0``) so a
+        fresh-OAuth deploy doesn't burn a refresh on the very first connect —
+        in that path the operator just minted the token and it's valid.
+        """
+        if not self._refresh_token:
+            return False
+        if self._token_acquired_at <= 0:
+            return False
+        age = time.time() - self._token_acquired_at
+        return age > self._proactive_refresh_age_sec
+
+    async def _maybe_proactive_refresh(self) -> None:
+        """Refresh the access token before connect() if it's likely expired.
+
+        Uses ``Auth.refreshToken`` (synchronous HTTP, no TCP session needed)
+        run in an executor so the event loop stays responsive. Failure is
+        logged and swallowed — connect() proceeds with whatever token is in
+        memory and Account auth surfaces the real error if both are dead.
+        """
+        if not self._should_proactive_refresh():
+            return
+
+        age = time.time() - self._token_acquired_at
+        logger.info(
+            "Proactive cTrader token refresh: age=%.0fs > threshold=%.0fs",
+            age, self._proactive_refresh_age_sec,
+        )
+        try:
+            from ctrader_open_api import Auth
+
+            loop = asyncio.get_running_loop()
+            token_data = await loop.run_in_executor(
+                None,
+                lambda: Auth.refreshToken(
+                    refreshToken=self._refresh_token,
+                    clientId=self._client_id,
+                    clientSecret=self._client_secret,
+                ),
+            )
+            if "accessToken" in token_data:
+                self._access_token = token_data["accessToken"]
+                if "refreshToken" in token_data:
+                    self._refresh_token = token_data["refreshToken"]
+                self._persist_tokens_to_state_file()
+                logger.info("Access token refreshed (proactive pre-connect)")
+            else:
+                logger.warning(
+                    "Proactive token refresh returned no accessToken: %s",
+                    token_data,
+                )
+        except Exception as exc:
+            logger.warning(
+                "Proactive token refresh failed (%s) — proceeding with "
+                "cached token; Account auth will surface the real error "
+                "if it's also dead.",
+                exc,
+            )
+
     # ------------------------------------------------------------------
     # FIND-03: token state-file persistence across container restarts
     # ------------------------------------------------------------------
@@ -673,10 +765,24 @@ class CTraderBroker:
             self._access_token = access
         if refresh:
             self._refresh_token = refresh
+        rotated_at_iso = data.get("rotated_at") or ""
+        if rotated_at_iso:
+            try:
+                # Stored as UTC ISO ("YYYY-MM-DDTHH:MM:SSZ") — parse without
+                # tz fallback so a rogue local-time entry is rejected loudly.
+                ts_struct = time.strptime(rotated_at_iso, "%Y-%m-%dT%H:%M:%SZ")
+                self._token_acquired_at = float(calendar.timegm(ts_struct))
+            except (ValueError, TypeError) as exc:
+                logger.warning(
+                    "Token state rotated_at unparseable (%s): %s — "
+                    "treating token age as unknown",
+                    rotated_at_iso, exc,
+                )
+                self._token_acquired_at = 0.0
         self._token_state_loaded = True
         logger.info(
             "Loaded cTrader tokens from state file %s (rotated_at=%s)",
-            self._token_state_file, data.get("rotated_at", "unknown"),
+            self._token_state_file, rotated_at_iso or "unknown",
         )
 
     def _persist_tokens_to_state_file(self) -> None:
@@ -688,12 +794,15 @@ class CTraderBroker:
         if not self._access_token:
             return
         path = self._token_state_file
+        rotated_epoch = time.time()
         payload = {
             "access_token": self._access_token,
             "refresh_token": self._refresh_token,
             "account_id": self._account_id,
             "client_id": self._client_id,
-            "rotated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            "rotated_at": time.strftime(
+                "%Y-%m-%dT%H:%M:%SZ", time.gmtime(rotated_epoch)
+            ),
         }
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -713,12 +822,17 @@ class CTraderBroker:
                         os.unlink(tmp)
                     except OSError:
                         pass
+            self._token_acquired_at = rotated_epoch
             logger.debug("Persisted cTrader tokens to %s", path)
         except Exception as exc:
             logger.warning(
                 "Failed to persist cTrader tokens to %s: %s (in-memory only).",
                 path, exc,
             )
+            # Even if disk write failed, the in-memory tokens were just
+            # rotated — track that age so a subsequent connect() within
+            # this process doesn't proactively re-refresh on a fresh token.
+            self._token_acquired_at = rotated_epoch
 
     async def _send_account_logout(self) -> None:
         """FIX CT-04: Send account logout so server releases the session.
