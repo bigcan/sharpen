@@ -192,6 +192,10 @@ services:
       STRATEGY_NAME: gmgp1-btc
       STRATEGY_RUNNER: scripts/run_live.py
       STRATEGY_CONFIG: /app/configs/live_gmgp1_btc_bybit.yaml
+      # S498: prop-firm decoupling Step 5. Base config strips phase-varying
+      # DD/target/gates; overlay supplies them. See docstring of
+      # configs/live_gmgp1_btc_bybit.yaml.
+      STRATEGY_OVERLAY: ${GMGP1_BTC_OVERLAY:-velotrade/step1}
       METRICS_PORT: "9103"
       BINANCE_DEMO_API_KEY: ${BINANCE_DEMO_API_KEY:-}
       BINANCE_DEMO_API_SECRET: ${BINANCE_DEMO_API_SECRET:-}
