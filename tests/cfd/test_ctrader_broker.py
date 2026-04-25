@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
+import time
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -285,3 +289,147 @@ def test_rebalance_result_creation():
         n_failed=0,
     )
     assert result.n_failed == 0
+
+
+# ---------------------------------------------------------------
+# S490 follow-up #2: proactive pre-connect token refresh
+# ---------------------------------------------------------------
+
+def _make_broker(tmp_path: Path, env_extra: dict | None = None) -> CTraderBroker:
+    env = {
+        "CTRADER_CLIENT_ID": "cid",
+        "CTRADER_CLIENT_SECRET": "csecret",
+        "CTRADER_ACCESS_TOKEN": "env_access",
+        "CTRADER_REFRESH_TOKEN": "env_refresh",
+        "CTRADER_ACCOUNT_ID": "12345",
+        "CTRADER_TOKEN_STATE_FILE": str(tmp_path / "ctrader_tokens.json"),
+    }
+    if env_extra:
+        env.update(env_extra)
+    with patch.dict(os.environ, env, clear=True):
+        return CTraderBroker(testnet=True)
+
+
+def test_should_proactive_refresh_no_refresh_token(tmp_path):
+    b = _make_broker(tmp_path, env_extra={"CTRADER_REFRESH_TOKEN": ""})
+    b._token_acquired_at = time.time() - 7200  # 2h old
+    assert b._should_proactive_refresh() is False
+
+
+def test_should_proactive_refresh_cold_start(tmp_path):
+    """No state file → _token_acquired_at == 0 → skip refresh."""
+    b = _make_broker(tmp_path)
+    assert b._token_acquired_at == 0.0
+    assert b._should_proactive_refresh() is False
+
+
+def test_should_proactive_refresh_fresh_token(tmp_path):
+    b = _make_broker(tmp_path)
+    b._token_acquired_at = time.time() - 60  # 1 min old
+    assert b._should_proactive_refresh() is False
+
+
+def test_should_proactive_refresh_stale_token(tmp_path):
+    b = _make_broker(tmp_path)
+    b._token_acquired_at = time.time() - 7200  # 2h old, threshold 1h
+    assert b._should_proactive_refresh() is True
+
+
+def test_proactive_refresh_threshold_env_override(tmp_path):
+    b = _make_broker(
+        tmp_path, env_extra={"CTRADER_PROACTIVE_REFRESH_AGE_SEC": "300"}
+    )
+    assert b._proactive_refresh_age_sec == 300.0
+    b._token_acquired_at = time.time() - 600  # 10 min old > 5 min threshold
+    assert b._should_proactive_refresh() is True
+
+
+def test_state_file_rotated_at_loaded_into_acquired_at(tmp_path):
+    state_file = tmp_path / "ctrader_tokens.json"
+    rotated_at = time.strftime(
+        "%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - 1800)
+    )
+    state_file.write_text(json.dumps({
+        "access_token": "state_access",
+        "refresh_token": "state_refresh",
+        "account_id": 12345,
+        "client_id": "cid",
+        "rotated_at": rotated_at,
+    }))
+    b = _make_broker(tmp_path)
+    assert b._access_token == "state_access"
+    assert b._refresh_token == "state_refresh"
+    # 1800s old → within ~5s of now-1800
+    assert abs((time.time() - b._token_acquired_at) - 1800) < 5
+
+
+def test_state_file_rotated_at_unparseable_treated_as_unknown(tmp_path):
+    state_file = tmp_path / "ctrader_tokens.json"
+    state_file.write_text(json.dumps({
+        "access_token": "state_access",
+        "refresh_token": "state_refresh",
+        "account_id": 12345,
+        "rotated_at": "not-a-timestamp",
+    }))
+    b = _make_broker(tmp_path)
+    assert b._access_token == "state_access"
+    assert b._token_acquired_at == 0.0
+    assert b._should_proactive_refresh() is False  # unknown age = skip
+
+
+def test_persist_tokens_updates_acquired_at(tmp_path):
+    b = _make_broker(tmp_path)
+    assert b._token_acquired_at == 0.0
+    before = time.time()
+    b._access_token = "new_access"
+    b._refresh_token = "new_refresh"
+    b._persist_tokens_to_state_file()
+    assert b._token_acquired_at >= before
+    # State file written
+    state = json.loads(b._token_state_file.read_text())
+    assert state["access_token"] == "new_access"
+
+
+def test_maybe_proactive_refresh_skips_when_fresh(tmp_path):
+    b = _make_broker(tmp_path)
+    b._token_acquired_at = time.time()  # just now
+    refresh_calls = []
+
+    def _fake_refresh(refreshToken, clientId, clientSecret):
+        refresh_calls.append(refreshToken)
+        return {"accessToken": "should_not_run"}
+
+    with patch("ctrader_open_api.Auth.refreshToken", side_effect=_fake_refresh):
+        asyncio.run(b._maybe_proactive_refresh())
+    assert refresh_calls == []
+    assert b._access_token == "env_access"  # unchanged
+
+
+def test_maybe_proactive_refresh_runs_when_stale(tmp_path):
+    b = _make_broker(tmp_path)
+    b._token_acquired_at = time.time() - 7200  # 2h old
+
+    def _fake_refresh(refreshToken, clientId, clientSecret):
+        assert refreshToken == "env_refresh"
+        return {"accessToken": "fresh_access", "refreshToken": "fresh_refresh"}
+
+    with patch("ctrader_open_api.Auth.refreshToken", side_effect=_fake_refresh):
+        asyncio.run(b._maybe_proactive_refresh())
+    assert b._access_token == "fresh_access"
+    assert b._refresh_token == "fresh_refresh"
+    # Persisted to state file
+    state = json.loads(b._token_state_file.read_text())
+    assert state["access_token"] == "fresh_access"
+
+
+def test_maybe_proactive_refresh_swallows_exceptions(tmp_path):
+    """Failure path: connect() must proceed even if refresh raises."""
+    b = _make_broker(tmp_path)
+    b._token_acquired_at = time.time() - 7200
+
+    def _fake_refresh(*args, **kwargs):
+        raise RuntimeError("ACCESS_DENIED")
+
+    with patch("ctrader_open_api.Auth.refreshToken", side_effect=_fake_refresh):
+        asyncio.run(b._maybe_proactive_refresh())  # must not raise
+    assert b._access_token == "env_access"  # cached token preserved
