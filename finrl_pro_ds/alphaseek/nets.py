@@ -1,11 +1,10 @@
 """Q-network architectures for AlphaSeek DQN ensemble.
 
-Copied from contest/reference/erl_net.py to avoid sys.path manipulation.
-These classes must remain identical to the contest code — trained checkpoints
-contain baked-in state_avg/state_std/value_avg/value_std parameters that
-depend on the exact network structure.
-
-DO NOT MODIFY these classes unless you retrain all agents from scratch.
+Originally copied from contest/reference/erl_net.py. v1/v2 checkpoints baked
+in state_avg/state_std/value_avg/value_std for a 10-dim state, so those nets
+were frozen. v3 (S500 ADR-008) trains from scratch on a 12-dim state, so
+structural edits here are now allowed — at the cost of ditching v1/v2
+checkpoints (already retired per S476).
 """
 
 import torch
