@@ -49,9 +49,15 @@ class BrokerProtocol(Protocol):
 
 
 class StateBuilderProtocol(Protocol):
-    """Minimal state builder interface."""
+    """Minimal state builder interface (v3: 12-dim state with execution dims)."""
 
-    def get_state(self, position: int, holding: int) -> torch.Tensor: ...
+    def get_state(
+        self,
+        position: int,
+        holding: int,
+        pending_limit_active: int = 0,
+        bars_since_last_trade: int = 0,
+    ) -> torch.Tensor: ...
 
     @property
     def is_ready(self) -> bool: ...

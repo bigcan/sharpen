@@ -34,20 +34,20 @@ class TestLOBTradeSimulatorBasic:
 
     def test_state_dim(self):
         sim = self._make_sim()
-        assert sim.state_dim == 10
+        assert sim.state_dim == 12  # v3: +pending_limit_active +bars_since_last_trade
         assert sim.action_dim == 3
 
     def test_reset_shape(self):
         sim = self._make_sim()
         state = sim.reset()
-        assert state.shape == (4, 10)  # (num_sims, state_dim)
+        assert state.shape == (4, 12)  # (num_sims, state_dim)
 
     def test_step_shape(self):
         sim = self._make_sim()
         sim.reset()
         action = th.ones((4, 1), dtype=th.long)  # all hold
         next_state, reward, done, info = sim.step(action)
-        assert next_state.shape == (4, 10)
+        assert next_state.shape == (4, 12)
         assert reward.shape == (4,)
         assert done.shape == (4,)
 
@@ -67,7 +67,7 @@ class TestLOBTradeSimulatorBasic:
 
         # After max_step, should be truncated (episode reset internally)
         # The state returned is from the new episode after reset
-        assert state.shape == (2, 10)
+        assert state.shape == (2, 12)
 
 
 @skip_no_data
