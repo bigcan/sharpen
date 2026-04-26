@@ -273,7 +273,7 @@ class TestAlphaSeekTrainer:
         trainer2.load_checkpoint(save_path)
 
         # Both agents should produce same Q-values
-        state = torch.randn(4, 10)
+        state = torch.randn(4, 12)  # v3 state_dim
         q1_orig = trainer.agent.act(state)
         q1_loaded = trainer2.agent.act(state)
         assert torch.allclose(q1_orig, q1_loaded, atol=1e-5)
