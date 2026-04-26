@@ -46,6 +46,11 @@ from finrl_pro_ds.monitoring import (
     should_lockout,
     write_kill_file,
 )
+from finrl_pro_ds.live.challenge_state_machine import (
+    ChallengePhase,
+    ChallengeStateMachine,
+    REASON_PHASE_COMPLETE,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -393,6 +398,48 @@ class LiveTradingEngine:
         self._drift_warn_active = False
         self._drift_last_status = None
 
+        # S495-cont prop-firm decoupling: challenge-phase state machine.
+        # Only instantiated when config.challenge.enabled=true (live deploy
+        # configs). Training / HPO / backtest configs have no challenge:
+        # block at all, so this stays None and the per-bar hook in
+        # _trading_step is a no-op.
+        self._challenge_state_machine: Optional[ChallengeStateMachine] = None
+        self._last_completed_phase_file = Path(config.get("safety", {}).get(
+            "last_completed_phase_file", "/app/state/last_completed_phase.txt",
+        ))
+        challenge_cfg = config.get("challenge", {}) or {}
+        if challenge_cfg.get("enabled", False):
+            target = challenge_cfg.get("profit_target_pct")
+            if target is None:
+                target = float("inf")
+            phase = ChallengePhase(
+                name=str(challenge_cfg.get("phase", "custom")),
+                profit_target_pct=float(target),
+                next_phase=challenge_cfg.get("next_phase"),
+                advance_rule=str(challenge_cfg.get("advance_rule", "manual_ack")),
+            )
+            self._challenge_state_machine = ChallengeStateMachine(
+                phase,
+                initial_portfolio_value=self._initial_portfolio_value,
+                strategy_name=self._strategy_name,
+                halt_state_writer=self._write_halt_state,
+                kill_file_writer=write_kill_file,
+                kill_file_path=self._kill_file,
+                last_completed_phase_path=self._last_completed_phase_file,
+                flatten_callback=self._emergency_flatten,
+                stop_callback=self._request_stop,
+                telemetry_gauge=self._metrics.update_generic
+                    if hasattr(self._metrics, "update_generic") else None,
+                n_confirm=int(challenge_cfg.get("n_confirm", 2)),
+                smoothing_window=int(challenge_cfg.get("smoothing_window", 3)),
+            )
+            logger.info(
+                f"Challenge state machine active: phase={phase.name}, "
+                f"target={phase.profit_target_pct}, next={phase.next_phase}, "
+                f"advance_rule={phase.advance_rule}, "
+                f"initial_pv={self._initial_portfolio_value:.2f}",
+            )
+
     # -------------------------------------------------------------------
     # Main loop
     # -------------------------------------------------------------------
@@ -415,6 +462,16 @@ class LiveTradingEngine:
         # clearing the kill_file. Runs BEFORE broker.connect() so we don't
         # burn a cTrader token re-auth while locked out.
         if self._check_kill_file_startup_gate():
+            return
+
+        # S495-cont prop-firm decoupling startup gate: if a prior process
+        # completed this phase (last_completed_phase.txt written by the
+        # ChallengeStateMachine), refuse to restart on the SAME phase
+        # config. ADR-2 operator-error guard: the operator must both clear
+        # the kill_file AND swap to the next-phase overlay. This gate
+        # catches the half-migration case where the kill_file was cleared
+        # but the config still points at the completed phase.
+        if self._check_challenge_phase_startup_gate():
             return
 
         # Audit FIND-02 / S491: pre-broker halt gate. If a prior process
@@ -667,6 +724,27 @@ class LiveTradingEngine:
         # Previously only ran at step 11 after trade execution, so holding bars
         # could breach the daily loss limit without detection.
         await self._check_daily_loss(bar_time)
+        if self._should_stop:
+            return
+
+        # S495-cont prop-firm decoupling: observe PV against challenge
+        # target, trigger phase_complete on a smoothed + N_CONFIRM-persisted
+        # breach. Placed here — between _check_daily_loss and the remaining
+        # per-bar logic — because:
+        #   - PV was just refreshed at start of _trading_step via
+        #     _update_portfolio_value (line ~626).
+        #   - If the daily-loss check already halted (should_stop=True),
+        #     we bail out above and skip the challenge check.
+        #   - The trigger's flatten + halt_state + kill_file writes are
+        #     idempotent with daily-loss's own halt write ordering, and
+        #     both use _write_halt_state so the same gate semantics apply.
+        if self._challenge_state_machine is not None:
+            status = self._challenge_state_machine.observe(
+                self._portfolio_value, now_utc=bar_time,
+            )
+            if status.phase_complete and status.trip_source != "already_complete":
+                await self._request_phase_complete(status, bar_time)
+                return
 
         # --- Weekend flatten (CFD only): close positions before Friday close ---
         if await self._check_weekend_flatten(bar_time):
@@ -1908,8 +1986,17 @@ class LiveTradingEngine:
         high for short) to estimate the maximum adverse excursion that
         occurred within the bar. If projected daily return would breach
         the limit, flatten and halt (persistently).
+
+        FIND-01 parity (S498-cont, 2026-04-26): ``max_daily_loss_pct <= 0``
+        disables the check, mirroring the closing-price daily-loss guard.
+        Without this, ``projected_return < -0.0`` trips on any tiny negative
+        excursion and persistently halts Velotrade-style deploys (no daily
+        rule) on the first bar that holds a position. SG-1-BTC paper deploy
+        2026-04-26 hit this on bar 1.
         """
         if not self._intrabar_dd_enabled:
+            return
+        if self._max_daily_loss_pct <= 0:
             return
         if abs(self._current_position) < 1e-9:
             return
@@ -2032,6 +2119,53 @@ class LiveTradingEngine:
         logger.critical(f"STARTUP REFUSED — {reason}")
         self._request_stop(f"kill_file_lockout:{payload.get('reason')}")
         return True
+
+    def _check_challenge_phase_startup_gate(self) -> bool:
+        """Return True if engine must refuse to start (wrong-phase config).
+
+        S495-cont (ADR-2 prop-firm decoupling). Reads
+        ``last_completed_phase.txt`` and refuses startup when:
+        - The file marks a phase equal to or ordered-after the
+          configured phase. Operator must swap to the next-phase overlay
+          (e.g. ``configs/deploy/ftmo/step2.yaml``) before restart.
+
+        No-op when no challenge state machine is active (training /
+        backtest configs have no ``challenge:`` block).
+        """
+        if self._challenge_state_machine is None:
+            return False
+        configured = self._challenge_state_machine.phase.name
+        ok, msg = ChallengeStateMachine.check_startup_phase_gate(
+            configured_phase=configured,
+            last_completed_phase_path=self._last_completed_phase_file,
+        )
+        if not ok:
+            logger.critical(f"STARTUP REFUSED — challenge phase gate: {msg}")
+            self._request_stop(f"challenge_phase_gate:{configured}")
+            return True
+        logger.info(f"Challenge phase startup gate: {msg}")
+        return False
+
+    async def _request_phase_complete(self, status, bar_time: datetime) -> None:
+        """S495-cont prop-firm decoupling phase_complete path.
+
+        Mirrors :meth:`_request_drift_crit` shape: writes persistent
+        markers, flattens, requests stop. Delegates the actual work to
+        the :class:`ChallengeStateMachine` which owns the idempotency
+        guard and atomic-write semantics.
+        """
+        if self._challenge_state_machine is None:
+            return
+        try:
+            await self._challenge_state_machine.trigger_phase_complete(
+                status.trip_source, now_utc=bar_time,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.critical(
+                f"[challenge] trigger_phase_complete raised ({e}) — "
+                f"halt_state + kill_file may be partial; operator must "
+                f"inspect {self._halt_state_file} and {self._kill_file}",
+            )
 
     async def _request_drift_crit(self, report, bar_time: datetime) -> None:
         """Protocol v2.2 §8.3 CRIT path.

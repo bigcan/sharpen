@@ -159,6 +159,11 @@ def build_components(config: dict):
     )
 
     # --- Risk Manager (with EOD trailing drawdown for prop firm) ---
+    # S498-cont 2026-04-26: added daily_turnover_limit + min_effective_bets
+    # passthrough to match parity test in tests/test_live_runners_force_exit.py.
+    # Without these, DXtrade swap-in for sg1-btc would regress on the same
+    # silent-clip bug that hit the crypto runner (sg1-btc -1.0 net short
+    # clipped to -0.5; gmgp1-btc 1.5x daily turnover cap hit ~10x/day).
     risk_cfg = config.get("risk", {})
     risk_manager = CryptoRiskManager(CryptoRiskConfig(
         enabled=risk_cfg.get("enabled", True),
@@ -169,9 +174,12 @@ def build_components(config: dict):
         max_position_pct=risk_cfg.get("max_position_pct", 1.0),
         max_net_short_exposure=risk_cfg.get("max_net_short_exposure", -1.0),
         max_gross_exposure=risk_cfg.get("max_gross_exposure", 6.0),
+        min_effective_bets=risk_cfg.get("min_effective_bets", 1.0),
+        daily_turnover_limit=risk_cfg.get("daily_turnover_limit", 4.0),
         funding_rate_alert=risk_cfg.get("funding_rate_alert", 999.0),
         min_margin_reserve_pct=risk_cfg.get("min_margin_reserve_pct", 0.15),
         static_peak=risk_cfg.get("static_peak", False),
+        bar_interval_minutes=clock_cfg.get("base_interval_minutes", 15),
     ))
 
     # --- Data Loader (Binance for OHLCV, DXtrade for execution) ---
@@ -235,6 +243,13 @@ def main():
         help="Path to live trading YAML config",
     )
     parser.add_argument(
+        "--overlay", action="append", default=None,
+        help="Deploy overlay under configs/deploy/ (e.g. 'velotrade/step1'). "
+             "Repeat for multiple; later wins. Same allowlist as "
+             "deploy_bare_metal --overlay. Falls back to STRATEGY_OVERLAY "
+             "env var if --overlay not given.",
+    )
+    parser.add_argument(
         "--mainnet", action="store_true",
         help="Use challenge account (Velotrade). Default: demo.",
     )
@@ -253,6 +268,26 @@ def main():
     with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    # Apply deploy overlays (Step 5 prop-firm decoupling). CLI flag wins
+    # over STRATEGY_OVERLAY env var so an interactive operator can override
+    # what the docker-compose bakes in.
+    from finrl_pro_ds.config_utils import apply_overlays, parse_overlay_env
+    overlay_specs = args.overlay or parse_overlay_env(os.environ.get("STRATEGY_OVERLAY"))
+    if overlay_specs:
+        project_root = Path(__file__).resolve().parents[1]
+        overlay_root = project_root / "configs" / "deploy"
+        allowlist_path = overlay_root / "ALLOWLIST.yaml"
+        config = apply_overlays(
+            config,
+            overlay_specs,
+            overlay_root=overlay_root,
+            allowlist_path=allowlist_path,
+        )
+        logger.info(
+            "Applied %d deploy overlay(s): %s",
+            len(overlay_specs), ", ".join(overlay_specs),
+        )
+
     # Validate and patch
     config = validate_config(config, args)
 
@@ -261,13 +296,31 @@ def main():
     logger.info(
         f"Starting DXtrade live trading engine\n"
         f"  Config: {config_path}\n"
+        f"  Overlays: {overlay_specs or 'none'}\n"
         f"  Asset: {asset}\n"
         f"  Mode: {mode} (Velotrade)\n"
         f"  Leverage: {config.get('exchange', {}).get('leverage', 6)}x\n"
         f"  Dry run: {config.get('dry_run', False)}"
     )
 
-    asyncio.run(main_async(config))
+    exit_code = 0
+    try:
+        asyncio.run(main_async(config))
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        exit_code = 130
+    except SystemExit as e:
+        exit_code = e.code if isinstance(e.code, int) else 1
+    except Exception:
+        logger.exception("Trading engine failed")
+        exit_code = 1
+    finally:
+        # Force PID 1 exit even if non-daemon threads (wandb-core subprocess,
+        # ccxt aiohttp pools) are still alive. Docker `restart: unless-stopped`
+        # auto-recovers the strategy. Mirrors the run_live_ib.py S489 fix;
+        # closes the orphan-netns generalization gap (S498).
+        logger.info(f"run_live_dxtrade exiting with code {exit_code}")
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

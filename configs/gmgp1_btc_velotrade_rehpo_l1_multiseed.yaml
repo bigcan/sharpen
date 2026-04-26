@@ -115,6 +115,14 @@ gates:                               # Protocol v2 Stage 2 (S488 escalation)
   velotrade_trailing_dd_buffer_pp: 0.5
   oos_pf_floor: 1.1
 
+ensemble:
+  # Protocol v2.3 Stage 2.5: gates_file overlay. The Stage 2.5 helper
+  # (run_stage_2_5_val_selection) merges this file's `gates:` block over the
+  # `gates:` block above so v2.3 bootstrap thresholds (P(PF)/P(MDD) >= 0.90)
+  # become effective. Without this overlay the verdict deferred to legacy
+  # uplift (S498-cont GMGP1-BTC AMBIGUOUS_RERUN despite bootstrap evidence).
+  gates_file: "configs/gmgp1_btc_velotrade_ensemble.gates.yaml"
+
 wandb:
   project: FinRL-Pro-DS
   tags:

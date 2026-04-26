@@ -282,6 +282,49 @@ def ftmo_buffers(metrics: dict) -> dict:
 # to legacy uplift otherwise (back-compat for pre-v2.3 configs).
 
 
+def _load_gates_with_overlay(config: dict) -> dict:
+    """Resolve effective gates dict for Stage 2.5 by merging standalone overlay.
+
+    L1 multiseed configs historically held only the v2.1 legacy uplift keys
+    (`ensemble_uplift_min`, `ensemble_ambiguous_min`). The v2.3 bootstrap and
+    diversity thresholds live in standalone `<workstream>_ensemble.gates.yaml`
+    files referenced by `ensemble.gates_file` for WF (Stage 3) consumption.
+    Without this overlay, `run_stage_2_5_val_selection` saw only the legacy
+    keys → bootstrap stats computed but verdict deferred to legacy uplift
+    (S498-cont SG-1-BTC AMBIGUOUS_RERUN despite P(PF) = 1.0).
+
+    Merge rule: standalone `gates:` block wins on key overlap (top-level only;
+    nested g1..g5 sub-dicts are not deep-merged because they are scoped to WF
+    Stage 3 and are not consulted by Stage 2.5 — dragging them along is benign).
+    Resolves `gates_file` relative to repo root (cwd) when not absolute.
+    """
+    gates = dict(config.get("gates") or {})
+    gates_file = (config.get("ensemble") or {}).get("gates_file")
+    if not gates_file:
+        return gates
+    gates_path = Path(gates_file)
+    if not gates_path.is_absolute():
+        gates_path = Path.cwd() / gates_path
+    if not gates_path.exists():
+        log.warning(
+            f"[gates-overlay] ensemble.gates_file={gates_file!r} not found "
+            f"(resolved {gates_path}); falling back to L1 config gates only"
+        )
+        return gates
+    with open(gates_path, encoding="utf-8") as f:
+        standalone = yaml.safe_load(f) or {}
+    standalone_gates = standalone.get("gates") or {}
+    if not standalone_gates:
+        return gates
+    overlap = sorted(set(gates) & set(standalone_gates))
+    gates.update(standalone_gates)
+    log.info(
+        f"[gates-overlay] merged {len(standalone_gates)} keys from "
+        f"{gates_path.name} (overlap={overlap or 'none'}; standalone wins)"
+    )
+    return gates
+
+
 def _per_bar_returns(df: pd.DataFrame) -> np.ndarray:
     """Per-bar simple returns from a trajectory's portfolio_value column."""
     pv = df["portfolio_value"].to_numpy(dtype=np.float64)
@@ -809,7 +852,7 @@ def run_stage_2_5_val_selection(
     if buffer_fn is None:
         buffer_fn = ftmo_buffers
 
-    gates = config.get("gates", {})
+    gates = _load_gates_with_overlay(config)
     if uplift_promote is None:
         if "ensemble_uplift_min" not in gates:
             raise ValueError(
@@ -913,6 +956,17 @@ def run_stage_2_5_val_selection(
     # --- Phase 4b: v2.3 block-bootstrap on per-bar returns ---
     chosen_returns = _per_bar_returns(test_trajs[chosen_rule])
     best_solo_returns = _per_bar_returns(test_trajs[f"solo_{best_solo_seed}"])
+    if chosen_returns.size != best_solo_returns.size:
+        n_common = min(chosen_returns.size, best_solo_returns.size)
+        log.warning(
+            f"[bootstrap] trajectory length mismatch: chosen={chosen_returns.size}, "
+            f"best_solo={best_solo_returns.size}; truncating both to min={n_common} "
+            f"(prop_firm wrapper terminates episode at profit_target hit; tail is "
+            f"post-termination of the shorter series, common-time prefix preserves "
+            f"paired bootstrap bar-alignment)"
+        )
+        chosen_returns = chosen_returns[:n_common]
+        best_solo_returns = best_solo_returns[:n_common]
     bs_n = int(gates.get("ensemble_bootstrap_resamples", 10000))
     bs_block = gates.get("ensemble_bootstrap_block_len", None)
     bs_block_f = float(bs_block) if bs_block is not None else None

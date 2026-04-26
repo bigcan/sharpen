@@ -1,9 +1,24 @@
 # Live Trading Config — SG1 SAC on Gold Futures via Interactive Brokers
 #
 # Usage:
-#   python scripts/run_live_ib.py --config configs/live_sg1_gc_ib.yaml
-#   python scripts/run_live_ib.py --config configs/live_sg1_gc_ib.yaml --mainnet
-#   python scripts/run_live_ib.py --config configs/live_sg1_gc_ib.yaml --dry-run
+#   python scripts/run_live_ib.py --config configs/live_sg1_gc_ib.yaml --overlay ftmo/step1
+#   python scripts/run_live_ib.py --config configs/live_sg1_gc_ib.yaml --overlay ftmo/step1 --mainnet
+#   python scripts/run_live_ib.py --config configs/live_sg1_gc_ib.yaml --overlay ftmo/step1 --dry-run
+#
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S499c Tier-9 Step-5 base-config migration).
+# This file is the BASE config: checkpoint + alpha contract + env dims +
+# data + container paths. Prop-firm phase and firm-specific DD/target/gates
+# live in configs/deploy/<firm>/<phase>.yaml overlays (allowlist-enforced).
+#
+# Deploy invocations (resolved = this file + overlay):
+#   python scripts/run_live_ib.py --config configs/live_sg1_gc_ib.yaml --overlay ftmo/step1
+#   python scripts/run_live_ib.py --config configs/live_sg1_gc_ib.yaml --overlay ftmo/step2
+#   python scripts/run_live_ib.py --config configs/live_sg1_gc_ib.yaml --overlay ftmo/funded
+#
+# After this migration the BASE file alone is NOT paper-deployable
+# (validator FAILs: `risk.static_peak` missing); pair with an overlay.
+# ---------------------------------------------------------------------------
 
 # --- IB Connection ---
 exchange:
@@ -93,11 +108,12 @@ trading:
     enabled: true
     minutes_before_close: 30           # Flatten 30 min before Friday close
 
-# --- Risk Management ---
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay owns: static_peak (true for step1/step2, false for funded),
+# flatten_on_kill_file. See configs/deploy/ftmo/{step1,step2,funded}.yaml.
 risk:
   enabled: true
   max_drawdown_pct: 0.10
-  static_peak: true                    # Match training: DD from initial balance, never ratchets (S468)
   circuit_breaker_cooldown_bars: 12
   max_position_pct: 1.0
   funding_rate_alert: 999.0

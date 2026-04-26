@@ -1,10 +1,12 @@
-# Training → Live Protocol v2.3
+# Training → Live Protocol v2.4
 
 > **Status:** Active. Standardizes the training-to-live workflow across all FinRL-Pro_DS workstreams (GMGP1, SG-1, CMGP1, AlphaSeek, Funding-Arb).
 > **Reference run:** GMGP1 staged approach. **Anti-pattern:** AlphaSeek `k28l6ef8` monolithic 5.7-day run.
-> **Owner:** R&D. **Last updated:** 2026-04-23 Session 495-cont (ensemble bootstrap-gate + diversity selector + Stage 2.5-R amendment).
+> **Owner:** R&D. **Last updated:** 2026-04-24 Session 495-cont (prop-firm challenge decoupling — wrapper/state-machine split + deploy-overlay schema).
 >
 > **Version history:**
+> - **v2.4** (2026-04-24, S495-cont) — Prop-firm challenge decoupling shipped. Schema change: training configs use `env.risk:` (phase-invariant DD + daily-loss shaping — no `profit_target_pct`, no `success_bonus`, no terminate-on-profit); deploy-stage configs use `configs/deploy/<firm>/<phase>.yaml` overlays layered onto the base training YAML via `deep_merge(allowlist=)` in `finrl_pro_ds/config_utils.py`; `challenge:` block gates `ChallengeStateMachine` (live only, `challenge.enabled=true`). Training matrix collapses from **N strategies × M firms × 3 phases** to **N checkpoints + 3M overlays**. Legacy `env.prop_firm:` deprecated (validator WARN elsewhere, FAIL at paper-deploy). See `decision_prop_firm_decoupling_s495.md` + `.agent/artifacts/prop_firm_decoupling_architecture.md` (rev 2 LIVE). Four new validator checks: `check_legacy_prop_firm_block`, `check_challenge_block`, `check_static_peak_consistency`, `check_overlay_allowlist`. `REASON_PHASE_COMPLETE` kill-file reason distinct from `REASON_DRIFT_CRIT` (preserves §8.3 repeat-CRIT lockout math). First customer: GMGP1-XAUUSD FTMO seed 42, solo A/B PASS 7/7 gates on Q1 2026 OANDA OOS.
+>   - **2026-04-24 amendment (Open Questions Q1–Q5 resolved):** Q1 ensemble-checkpoint timing → val-argmax-PF from WF-OANDA (S495 rule). Q2 adapter deprecation → gate-on-migration-completion (calendar-agnostic). Q3 The5ers/HyroTrader/FundingPips overlays → defer until those workstreams activate. Q4 `ChallengeStateMachine` re-homed `finrl_pro_ds/crypto/live/` → `finrl_pro_ds/live/` (asset-agnostic). Q5 manifest extension shipped: `challenge_target_hit_rate_per_window` per seed (in `seed_report.json` and `ensemble_report.json`) + `ensemble_challenge_target_hit_rate` for the chosen rule (in `ensemble_report.json`), at both L1 and WF stages. New `finrl_pro_ds/reporting/challenge_target.py`; backfill via `scripts/backfill_eval_distribution_v22.py --phase-spec ...`; new validator `check_drift_baseline_manifest_schema` (best-effort WARN at paper-deploy).
 > - **v2.3** (2026-04-23, S495-cont) — Ensemble methodology amendment from external expert review (see `decision_ensemble_bootstrap_diversity_s495.md`). Five changes: (a) §4 Stage 2.5 uplift gate replaced with **block-bootstrap on per-bar PnL** — `P(ens_PF > solo_PF) > 0.90` AND `P(ens_MDD < solo_MDD) > 0.90`. Point-estimate `ensemble_uplift_min` retained as a sanity-check secondary, not the primary decision rule. (b) §4 top-3 seed selection extended from "median test PF" to **diversity-aware**: top-1 by PF, then #2/#3 maximize `PF − λ·max_action_corr` against already-selected. Reduces same-local-minimum collapse. (c) New §4.5 **Stage 2.5-R (ensemble re-eval after retrain)** with explicit triggers (HP change, scheduled cadence, live PF degradation, **agreement-decay** capital-starvation, action KL drift, cost drift) and a 6-step protocol. (d) §8 adds **agreement-decay live monitor** for ensemble-deployed strategies (`ens_agreement` flat-rate vs baseline) — silent capital-starvation failure mode. (e) §5 / new §11.x specify the **atomic ensemble swap artifact** (`ensemble_v{N}.tar.gz`): 3 ckpts + per-seed normalizer states + resolved config + chosen rule + SHA256 manifest, container reads/swaps all-or-nothing.
 > - **v2.2** (2026-04-23, S495-cont) — RLOps amendment from external expert review: §8 extended with live action-distribution drift (regime-conditioned KL / deadband-delta), §8.3 adds tiered WARN/CRIT safe-mode with graceful flatten (replaces prior "auto-halt" which was ambiguous and left open positions at risk), §2 manifest schema adds `eval_distribution` block required in stage-2 seed reports and stage-2.5 ensemble reports, §11 moves drift check from deferred to blocking for prop-firm / live-capital workstreams. See `decision_protocol_v22_rlops_drift_safemode.md`.
 > - **v2.1** (2026-04-23, S495) — Stage 2.5 ensemble rule selection moved from hardcoded `ens_agreement` (canonical per S493) to val-argmax-PF per-workstream selection. Motivated by GMGP1-BTC L1 falsification (S495 — ens_agreement was the *worst* ensemble on trending BTC, +4.10% vs ens_mean +8.13%). First customer: **GMGP1-BTC** (retro-applied). See `decision_ensemble_val_selection_s495.md`.
@@ -48,7 +50,7 @@ Each stage launches as its own WandB run with naming `<workstream>-stage{N}-<pur
 | 2.5-R | ensemble re-eval after retrain (any workstream that previously ran Stage 2.5) | Re-pick top-3 + re-run bootstrap gate on freshly trained seeds; produce next-gen swap bundle | minutes (after L1 retrain) | new `ensemble_report.json` + `ensemble_v{N+1}.tar.gz` |
 | 3 | walk-forward (+ fixed-lot stress sub-report) | Temporal robustness across K windows; full-window fixed-lot replay attached as sub-artifact | hours | per-window checkpoints + `wf_report.json` (includes `stress` block) |
 | 4 | recent-oos (+ compliance filter sub-report) | OOS test on `today−60d → today−1d`; FTMO/Velotrade compliance filter applied to candidate set | minutes | `oos_report.json` (includes `compliance` block + final selection) |
-| 5 | paper-deploy | Live container on `finrl-desktop` (reads `ensemble_v{N}.tar.gz` if ensemble was promoted) | continuous | live engine emits its own runs |
+| 5 | paper-deploy | Live container on `finrl-desktop` (reads `ensemble_v{N}.tar.gz` if ensemble was promoted; prop-firm / live-capital applies `configs/deploy/<firm>/<phase>.yaml` overlay per v2.4) | continuous | live engine emits its own runs |
 
 **Stage count:** 8 (stages 0, 1, 2, 2.5, 2.5-R, 3, 4, 5). Stages 2.5 and 2.5-R are eval-only (no training, no new WandB run by default — they write sub-artifacts under the stage-2 / stage-2-R parent). 2.5-R is *not* a fresh run-from-zero re-derivation; it's the re-evaluation that follows any L1 retrain whose downstream is a live-deployed ensemble. Fixed-lot stress and compliance filter are *replay/selection* operations on prior outputs, not new compute stages — kept as sub-reports inside stages 3 and 4 to reduce CLI/manifest plumbing without losing rigor.
 
@@ -101,6 +103,10 @@ Every stage writes `<run_id>.manifest.json` to `results/<run_id>/`:
       "q3": {"mean": 0.03, "std": 0.44, "deadband_frac": 0.32, "saturation_frac": 0.05},
       "q4": {"mean": 0.02, "std": 0.52, "deadband_frac": 0.24, "saturation_frac": 0.08}
     }
+  },
+  "challenge_target_hit_rate_per_window": {
+    "step1": {"target_pct": 0.10, "window_bars": null, "n_windows": 1, "n_hits": 1, "hit_rate": 1.0, "bars_to_target_median": 1245.0, "max_cum_return": 0.124},
+    "step2": {"target_pct": 0.05, "window_bars": null, "n_windows": 1, "n_hits": 1, "hit_rate": 1.0, "bars_to_target_median": 412.0, "max_cum_return": 0.124}
   },
   "started_at": "2026-04-18T14:00:00Z",
   "ended_at": "2026-04-19T02:14:00Z",
@@ -190,6 +196,7 @@ All numeric gate thresholds live in `configs/<workstream>.gates.yaml` and are re
 - Report **median** PF, Sharpe, MDD across seeds (not max)
 - Gate: median PF ≥ `gates.l1_pf_floor` (default 1.5), all seeds profitable, **CV (std/mean) of PF ≤ `gates.l1_pf_cv_max` (default 0.30)** — tightened from prior 0.5 because CV=0.5 admits PF=2.0 ± 1.0 which is operationally unstable
 - **`eval_distribution` per seed (v2.2 RLOps requirement)** — emitted into `seed_report.json` for every seed. Mandatory for prop-firm / live-capital; advisory otherwise. Bucketing by vol quartile uses the `regime_quartiles` from the data manifest (§3). This is the live-monitoring baseline referenced in §8.2; missing `eval_distribution` means §8.2 action-drift is log-only for that workstream.
+- **`challenge_target_hit_rate_per_window` per seed (v2.4 prop-firm amendment, S495 Open Question #5 resolution 2026-04-24)** — emitted into both `seed_report.json` (key `challenge_target_hit_rate_by_seed`) and at WF stage. Computed by `finrl_pro_ds/reporting/challenge_target.py` from the per-bar `portfolio_value` series. Default phase specs: step1 (target=0.10) + step2 (target=0.05); funded skipped (target=∞). Used as the S495 val-selection tiebreaker when ensemble-rule PFs are within Δ < 0.1%, and as a deploy-readiness signal (workstreams with `hit_rate < 0.5` on step1 should not paper-deploy). Mandatory for prop-firm / live-capital; advisory otherwise.
 
 - **Pre-committed escalation rule (mandatory for prop-firm / live-capital, N ≥ 10):**
   - Declare `gates.l1_pf_cv_ambiguous: [low, high]` (default `[0.22, 0.38]`) in the workstream gate YAML **before launch**, not after seeing results
@@ -277,6 +284,9 @@ On PROMOTE, `run_stage_2_5_val_selection()` writes `results/<run_id>/ensemble_v{
 #### `ensemble_eval_distribution` (v2.2 carry-over)
 `ensemble_report.json` records the aggregated action distribution produced by `chosen_rule` on the **test window**, using the same schema as stage-2 `eval_distribution` plus a `composition_rule` field. This is what live monitoring compares against post-deploy; per-seed distributions are **not** valid baselines for an ensemble-deployed strategy because the aggregated distribution is a convex combination of per-seed distributions under the chosen rule.
 
+#### `ensemble_challenge_target_hit_rate` (v2.4 prop-firm amendment)
+`ensemble_report.json` also records per-phase `challenge_target_hit_rate_per_window` for the chosen ensemble rule's aggregated PV trajectory, plus the per-seed block (`challenge_target_hit_rate_by_seed`) carried over from stage 2. The ensemble-level hit rate is the operationally meaningful number when the strategy is ensemble-deployed; per-seed hit rates inform tiebreaking when val-rule PFs are nearly identical. Backfill for paper-deployed checkpoints whose reports predate this amendment via `scripts/backfill_eval_distribution_v22.py --phase-spec ...`.
+
 #### Operational notes
 - **Checkpoint collision guard:** if multiple seeds share a checkpoint dir (e.g. concurrent deploys hit `deploy_bare_metal.py` timestamp-collision), substitute the next-best distinct seed. Ensemble eval **requires** per-seed distinct weight provenance; manifest records checkpoint SHA256s.
 - **Bias control:** val is now used three times (HP selection, seed selection, rule selection). Diversity-aware Phase 0 adds *no* val use (correlation is computed on test trajectories — bias-budget consumed in Phase 4 bootstrap). Verdict logs all 4 val PFs so audits can detect near-tie rule choices that may be overfit.
@@ -350,9 +360,10 @@ On PROMOTE, `run_stage_2_5_val_selection()` writes `results/<run_id>/ensemble_v{
   - Gate: ≥ 1 candidate passes filter
 
 ### Stage 5 — paper-deploy
-- Pre-flight: `validate_config.py` re-run on live YAML
+- Pre-flight: `validate_config.py` re-run on live YAML (checks include v2.4 `check_legacy_prop_firm_block` / `check_challenge_block` / `check_static_peak_consistency` / `check_overlay_allowlist` for prop-firm / live-capital tags)
 - `monitor_fleet.py` exits non-zero on resource contention
 - Live config has `risk.static_peak: true`, `kill_file` path set, `taker_fee` matches training manifest, `gap_detection: true` if data manifest required it
+- **Prop-firm / live-capital (v2.4):** deploy YAML = base training config + `configs/deploy/<firm>/<phase>.yaml` overlay layered via `finrl_pro_ds/config_utils.deep_merge(allowlist=...)`. Base must use `env.risk:` (not deprecated `env.prop_firm:`). Overlay supplies the `challenge:` block (`challenge.enabled=true`, `challenge.phase ∈ {step1, step2, funded, custom}`, `challenge.advance_rule: "manual_ack"`). `challenge.advance_rule: "auto"` FAILs validator. Overlay keys restricted by `configs/deploy/ALLOWLIST.yaml` — touching `env.reward.*` or any HPO-sensitive key FAILs before merge.
 - Container starts via `./scripts/manage_strategies.sh up <target>`
 
 ---
@@ -561,8 +572,10 @@ These pieces are required for v2 to be operationally enforceable rather than asp
 - **(v2.3, blocking for prop-firm / live-capital only)** Block-bootstrap + diversity-aware top-K extension to `scripts/sg1_xauusd_ensemble_eval.py` (writes `ensemble_report.json → bootstrap_verdict` and `diversity_audit`). First customer = SG-1 BTC L1 currently in flight (parent `ighx368o`).
 - **(v2.3, blocking for prop-firm / live-capital only)** Atomic ensemble swap bundle (`ensemble_v{N}.tar.gz` writer in `run_stage_2_5_val_selection`; live-engine bundle reader with SHA256 validation + drain-and-cutover swap protocol; `kill_file.swap_approved` handshake).
 - **(v2.3, blocking for any ensemble-deployed prop-firm strategy)** Live agreement-decay tracker in `live_obs_builder.py` / `live_action_drift.py` (§8.2 extension); fires WARN/CRIT and §4.5 Stage 2.5-R trigger #4.
+- **(v2.4, SHIPPED S495-cont, blocking for prop-firm / live-capital only)** `RiskShapingWrapper` (training) + `ChallengeStateMachine` (live) split replacing `PropFirmWrapperV7`. `finrl_pro_ds/config_utils.py` with `deep_merge(allowlist=)` + `_prep_backtest_config`. Deploy-overlay family `configs/deploy/{ftmo,velotrade}/{step1,step2,funded}.yaml` + `configs/deploy/ALLOWLIST.yaml`. Four new `validate_config.py` checks: `check_legacy_prop_firm_block` (WARN / paper-deploy FAIL), `check_challenge_block`, `check_static_peak_consistency` (S422 train/live divergence guard), `check_overlay_allowlist`. `REASON_PHASE_COMPLETE` kill-file reason distinct from `REASON_DRIFT_CRIT`. `scripts/prop_firm_ab_compare.py` (solo / ensemble / train_parity arms, 7 Q1 metrics) for first-customer A/B. See `decision_prop_firm_decoupling_s495.md`.
+- **(v2.4, REMAINING, blocking for prop-firm / live-capital only)** Per-workstream Step-5 rollout (SG-1-XAUUSD FTMO, GMGP1-BTC Velotrade, SG-1-BTC Velotrade, GMGP1-MGC, SG-1-EURUSD — each = rename `env.prop_firm:`→`env.risk:`, drop `success_bonus`/`profit_target_pct`, attach overlay, 48h paper smoke). Ensemble A/B (A2/B2) for GMGP1-XAUUSD FTMO gated on WF-OANDA completion. Step 6 retirement of `PropFirmWrapperV7` adapter gated on ≥30 live-trading days clean across all migrated workstreams.
 
-### Deferred to v2.4 (nice-to-have)
+### Deferred to v2.5 (nice-to-have)
 
 - `source_parity.py` implementation
 - Fixed-lot stress as a callable sub-report (currently inline in stage 3 spec)

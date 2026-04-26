@@ -1,0 +1,41 @@
+# Overlay key-allowlist — source of truth for firm/phase deploy overlays.
+#
+# Loaded by scripts/deploy_bare_metal.py (enforced pre-merge via
+# finrl_pro_ds.config_utils.deep_merge(..., allowlist=...)) and by
+# scripts/validate_config.py::check_overlay_allowlist.
+#
+# Rationale: base training config carries the trained policy contract
+# (env.reward.*, agents.*, network.*, features.*, data.*, agent.*). Any
+# overlay that mutates those keys would invalidate the checkpoint. This
+# list restricts overlays to strictly live-side and firm/phase concerns.
+#
+# See .agent/artifacts/prop_firm_decoupling_architecture.md ADR-5.
+#
+# Entry syntax:
+#   "foo.bar"      — exact leaf path match
+#   "foo.bar.*"    — any leaf under foo.bar
+#   "foo.bar_*"    — any leaf whose segment begins with "bar_" under foo.
+#
+# To add a new firm: add `gates.<firm>_*` below and mirror in the
+# deploy overlay README.
+allow:
+  # Train-side DD shaping (RiskShapingWrapper inputs).
+  - env.risk.*
+
+  # Live-only phase state machine (ChallengeStateMachine inputs).
+  - challenge.*
+
+  # Live engine risk manager block.
+  - risk.*
+
+  # Per-firm compliance gates.
+  - gates.ftmo_*
+  - gates.velotrade_*
+  - gates.the5ers_*
+  - gates.hyrotrader_*
+  - gates.fundingpips_*
+
+  # Per-deploy labeling. `wandb.run_id` is intentionally NOT allowlisted —
+  # it's derived by deploy_bare_metal.py from --run_name + timestamp.
+  - wandb.tags
+  - wandb.name
