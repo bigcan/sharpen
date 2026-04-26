@@ -93,6 +93,14 @@ safety:
   max_daily_loss_pct: 0.05          # 5% daily loss → hard stop
   kill_file: "/tmp/finrl_live_kill" # Touch this file to stop trading
   emergency_flatten_on_error: true  # Flatten all on unrecoverable error
+  # E1 Step 0b: live-replay fixture capture for the signed-lots refactor.
+  # Captures raw CCXT fetch_positions + fetch_balance JSONL for the next
+  # capture_max_bars trading steps, then auto-closes. Default-off elsewhere;
+  # enabled here for the 2026-04-27 00:00 UTC un-halt redeploy. Disable
+  # (set false or remove) once the Tier-3 fixture is collected.
+  capture_ccxt_raw_responses: true
+  capture_max_bars: 96              # 96 × 15-min = 24h
+  capture_dir: "/app/state"
 
 # --- Retrain Policy (hybrid trigger + 12mo cap) ---
 # Used by scripts/check_retrain_triggers.py — runs rolling OOS backtest, checks
