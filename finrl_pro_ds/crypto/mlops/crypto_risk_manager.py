@@ -36,6 +36,13 @@ class CryptoRiskConfig:
     # Turnover
     daily_turnover_limit: float = 1.50    # 150% per day
     daily_cost_budget_bps: float = 20.0
+    # Bar interval drives the reset window for daily_turnover. Reset fires every
+    # `round(24*60 / bar_interval_minutes)` bars: 60→24 (1H), 15→96, 3→480.
+    # Default 60 preserves the historical 24-bar behavior for callers that don't set it.
+    # Why: pre-S498, reset was hardcoded at 24 bars across all intervals; on sub-hour
+    # bars with signal-gate the "daily" window stretched to multiple calendar days
+    # (S495-cont sg1-xauusd incident).
+    bar_interval_minutes: int = 60
 
     # Crypto events
     flash_crash_threshold: float = 0.15   # 15% drop in 1h
@@ -90,6 +97,10 @@ class CryptoRiskManager:
         self.config = config or CryptoRiskConfig()
         self.state = RiskState()
         self._last_accumulated_delta: float = 0.0
+        # Reset window for daily_turnover_accumulated, scaled by bar_interval_minutes.
+        # 60→24 (1H, legacy), 15→96, 3→480. Floor at 1 bar to avoid div-by-zero on misconfig.
+        bar_min = max(1, int(self.config.bar_interval_minutes))
+        self._reset_bars: int = max(1, round(24 * 60 / bar_min))
 
     @property
     def enabled(self) -> bool:
@@ -264,12 +275,13 @@ class CryptoRiskManager:
                             modified *= min(overall_scale, 1.0)
 
         # --- Check 4: Daily turnover limit ---
-        # Note: "daily" = 24 consecutive bars (~1 day for 1H bars).
-        # Does not align with UTC midnight; acceptable for risk budgeting.
+        # "daily" = self._reset_bars consecutive bars, scaled by bar_interval_minutes
+        # (1H→24, 15min→96, 3min→480). Does not align with UTC midnight; acceptable
+        # for risk budgeting. Pre-S498 this was hardcoded at 24 bars across all intervals.
         delta = np.abs(modified - positions).sum()
 
-        # M13 fix: Reset BEFORE incrementing to get exactly 24 bars per cycle
-        if self.state.bars_since_day_start >= 24:
+        # M13 fix: Reset BEFORE incrementing to get exactly _reset_bars per cycle
+        if self.state.bars_since_day_start >= self._reset_bars:
             self.state.daily_turnover_accumulated = 0.0
             self.state.daily_cost_accumulated = 0.0
             self.state.bars_since_day_start = 0

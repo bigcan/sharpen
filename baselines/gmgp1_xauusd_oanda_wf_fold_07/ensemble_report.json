@@ -462,6 +462,86 @@
       ]
     }
   },
+  "challenge_target_hit_rate_by_seed": {
+    "2025": {
+      "step1": {
+        "target_pct": 0.1,
+        "window_bars": null,
+        "n_windows": 1,
+        "n_hits": 1,
+        "hit_rate": 1.0,
+        "bars_to_target_per_window": [
+          372
+        ],
+        "bars_to_target_median": 372.0,
+        "max_cum_return": 0.6131476627903196
+      },
+      "step2": {
+        "target_pct": 0.05,
+        "window_bars": null,
+        "n_windows": 1,
+        "n_hits": 1,
+        "hit_rate": 1.0,
+        "bars_to_target_per_window": [
+          169
+        ],
+        "bars_to_target_median": 169.0,
+        "max_cum_return": 0.6131476627903196
+      }
+    },
+    "3141": {
+      "step1": {
+        "target_pct": 0.1,
+        "window_bars": null,
+        "n_windows": 1,
+        "n_hits": 1,
+        "hit_rate": 1.0,
+        "bars_to_target_per_window": [
+          397
+        ],
+        "bars_to_target_median": 397.0,
+        "max_cum_return": 0.4739736412027778
+      },
+      "step2": {
+        "target_pct": 0.05,
+        "window_bars": null,
+        "n_windows": 1,
+        "n_hits": 1,
+        "hit_rate": 1.0,
+        "bars_to_target_per_window": [
+          188
+        ],
+        "bars_to_target_median": 188.0,
+        "max_cum_return": 0.4739736412027778
+      }
+    },
+    "42": {
+      "step1": {
+        "target_pct": 0.1,
+        "window_bars": null,
+        "n_windows": 1,
+        "n_hits": 1,
+        "hit_rate": 1.0,
+        "bars_to_target_per_window": [
+          382
+        ],
+        "bars_to_target_median": 382.0,
+        "max_cum_return": 0.7455310846873493
+      },
+      "step2": {
+        "target_pct": 0.05,
+        "window_bars": null,
+        "n_windows": 1,
+        "n_hits": 1,
+        "hit_rate": 1.0,
+        "bars_to_target_per_window": [
+          190
+        ],
+        "bars_to_target_median": 190.0,
+        "max_cum_return": 0.7455310846873493
+      }
+    }
+  },
   "ensemble_eval_distribution": {
     "histogram_bins": [
       -1.0,
@@ -614,5 +694,31 @@
       0.0008314470922047056,
       0.0012143859288494701
     ]
+  },
+  "ensemble_challenge_target_hit_rate": {
+    "step1": {
+      "target_pct": 0.1,
+      "window_bars": null,
+      "n_windows": 1,
+      "n_hits": 1,
+      "hit_rate": 1.0,
+      "bars_to_target_per_window": [
+        377
+      ],
+      "bars_to_target_median": 377.0,
+      "max_cum_return": 0.6130768261532785
+    },
+    "step2": {
+      "target_pct": 0.05,
+      "window_bars": null,
+      "n_windows": 1,
+      "n_hits": 1,
+      "hit_rate": 1.0,
+      "bars_to_target_per_window": [
+        179
+      ],
+      "bars_to_target_median": 179.0,
+      "max_cum_return": 0.6130768261532785
+    }
   }
 }

@@ -115,6 +115,33 @@ def check_no_fee_curriculum(cfg: dict, r: ValidationResult) -> None:
         )
 
 
+def check_legacy_prop_firm_block(cfg: dict, stage: str, r: ValidationResult) -> None:
+    """Flag configs still using the legacy ``env.prop_firm:`` block.
+
+    Post S495-cont the prop-firm decoupling split responsibilities:
+    - Training-side DD shaping lives under ``env.risk:`` +
+      :class:`finrl_pro_ds.envs.risk_shaping_wrapper.RiskShapingWrapper`.
+    - Live-side profit-target tracking lives under ``challenge:`` +
+      ``ChallengeStateMachine`` (live engine).
+
+    WARN at non-paper-deploy stages (adapter still honors the legacy block);
+    FAIL at ``paper-deploy`` so migrated deploys cannot ship without the new
+    schema. See ``.agent/artifacts/prop_firm_decoupling_architecture.md``.
+    """
+    env = cfg.get("env", {}) or {}
+    if "prop_firm" not in env:
+        return
+    msg = (
+        "env.prop_firm: is deprecated — migrate to env.risk: + top-level "
+        "challenge: block. The PropFirmWrapperV7 adapter is retired in Step 6. "
+        "(prop_firm_decoupling_architecture.md)"
+    )
+    if stage == "paper-deploy":
+        r.fail(msg)
+    else:
+        r.warn(msg)
+
+
 def check_no_hindsight_outside_hpo(cfg: dict, stage: str, r: ValidationResult) -> None:
     """BUG-03: hindsight_weight must be 0.0 outside HPO."""
     if stage == "hpo":
@@ -479,8 +506,33 @@ def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
     safety = cfg.get("safety", {}) or {}
     drift = cfg.get("drift", {}) or {}
 
-    if not risk.get("static_peak"):
-        r.fail("risk.static_peak must be true for paper-deploy (project_ftmo_risk_manager_fix.md)")
+    # Challenge-phase-aware static_peak requirement. Challenge / step programs
+    # use a static peak (DD from initial balance, non-trailing) — S422 fix.
+    # Funded accounts use a trailing peak. Default when no challenge block
+    # is declared: static (preserves legacy S422 guard).
+    challenge = cfg.get("challenge", {}) or {}
+    phase = challenge.get("phase")  # honored regardless of `enabled`
+    eod_trailing = bool(risk.get("eod_trailing_drawdown"))
+    if phase == "funded":
+        # FTMO funded: trailing peak baked into `risk.static_peak=false`.
+        # Velotrade funded: trailing enforced live-side via
+        # `risk.eod_trailing_drawdown=true` while `risk.static_peak=true`
+        # (training contract). Either pattern is acceptable as long as the
+        # trailing rule is declared.
+        if risk.get("static_peak") is True and not eod_trailing:
+            r.fail(
+                "risk.static_peak=true for funded-phase paper-deploy requires "
+                "risk.eod_trailing_drawdown=true (trailing-DD live-side guard). "
+                "FTMO-style: set risk.static_peak=false. "
+                "Velotrade-style: keep static_peak=true + eod_trailing_drawdown=true."
+            )
+    else:
+        if not risk.get("static_peak"):
+            r.fail(
+                "risk.static_peak must be true for paper-deploy "
+                "(project_ftmo_risk_manager_fix.md; funded phase is the only "
+                "exception and must declare challenge.phase='funded')"
+            )
 
     # v2.2 §8.3: kill_file can live under risk.kill_file OR safety.kill_file
     # (engine reads safety.kill_file; older configs have risk.kill_file — accept
@@ -524,6 +576,171 @@ def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
     # Drift/safe_mode gate keys (see check_drift_safemode_gates) are part of
     # the universal check path so they also apply here without repetition.
 
+    # S495-cont prop-firm decoupling (rev 2): challenge block + static_peak
+    # consistency. Live deploys that were re-authored under the new schema
+    # must have both env.risk.static_peak and risk.static_peak aligned
+    # (train/live divergence was the S422 failure mode we're guarding).
+    check_challenge_block(cfg, r)
+    check_static_peak_consistency(cfg, r)
+    # Open Question #5 (resolved 2026-04-24): challenge_target_hit_rate field
+    # in the upstream L1/WF manifest. Best-effort — WARN only when the
+    # baseline file is locally readable, since live deploys often run on a
+    # different host and the file may not be present at validation time.
+    check_drift_baseline_manifest_schema(cfg, r)
+
+
+def check_challenge_block(cfg: dict, r: ValidationResult) -> None:
+    """Validate the ``challenge:`` block when present (paper-deploy stage).
+
+    Only fires when the config actually declares a challenge block; a
+    legacy ``env.prop_firm:`` config hits check_legacy_prop_firm_block
+    which FAILs paper-deploy on its own, so this helper is additive.
+
+    Rules:
+    - ``challenge.phase`` must be one of {step1, step2, funded, custom}.
+    - ``challenge.advance_rule`` must be "manual_ack" (auto is rejected
+      for capital-at-risk per ADR-2).
+    - ``challenge.profit_target_pct`` must be a positive float, or null
+      for the funded phase, or >= 10.0 for backtest-style full-window
+      runs. funded MUST NOT set enabled=true with a finite target.
+    - ``n_confirm`` and ``smoothing_window`` must be positive integers
+      when present.
+    """
+    challenge = cfg.get("challenge")
+    if not isinstance(challenge, dict):
+        return
+    if not challenge.get("enabled", False):
+        # Disabled blocks exist on funded deploys — pass-through.
+        return
+
+    valid_phases = ("step1", "step2", "funded", "custom")
+    phase = challenge.get("phase")
+    if phase not in valid_phases:
+        r.fail(
+            f"challenge.phase must be one of {valid_phases}, got {phase!r} "
+            "(prop_firm_decoupling_architecture.md Interface 3)"
+        )
+
+    advance_rule = challenge.get("advance_rule", "manual_ack")
+    if advance_rule != "manual_ack":
+        r.fail(
+            f"challenge.advance_rule must be 'manual_ack' at paper-deploy, "
+            f"got {advance_rule!r}. 'auto' is rejected for capital-at-risk "
+            "per ADR-2 — operator must explicitly swap the overlay."
+        )
+
+    target = challenge.get("profit_target_pct")
+    if phase == "funded":
+        if target not in (None, float("inf")):
+            r.fail(
+                "challenge.phase=funded requires profit_target_pct=null "
+                "(or disable the challenge block entirely)"
+            )
+    else:
+        if target is None or (isinstance(target, (int, float)) and target <= 0):
+            r.fail(
+                f"challenge.profit_target_pct must be a positive float "
+                f"for phase={phase!r}, got {target!r}"
+            )
+
+    for key in ("n_confirm", "smoothing_window"):
+        if key in challenge:
+            val = challenge[key]
+            if not (isinstance(val, int) and val >= 1):
+                r.fail(
+                    f"challenge.{key} must be a positive integer, got {val!r}"
+                )
+
+
+def check_static_peak_consistency(cfg: dict, r: ValidationResult) -> None:
+    """``env.risk.static_peak`` must equal ``risk.static_peak`` at paper-deploy.
+
+    Train-time wrapper reads env.risk.static_peak; live-engine reads
+    risk.static_peak. A mismatch was the S422 class of bug (static train,
+    trailing live) — the train-time peak-accounting diverges from live,
+    so the policy can trip the live DD gate on a drawdown that its
+    trained-peak never saw. Keep them in sync. If only one is set,
+    accept — the sibling default is compatible — but flag if both are
+    set to different values.
+    """
+    env_risk = (cfg.get("env", {}) or {}).get("risk", {}) or {}
+    risk = cfg.get("risk", {}) or {}
+    env_val = env_risk.get("static_peak")
+    live_val = risk.get("static_peak")
+    if env_val is not None and live_val is not None and env_val != live_val:
+        r.fail(
+            f"env.risk.static_peak={env_val!r} != risk.static_peak={live_val!r}. "
+            "Train-time wrapper and live-engine must agree (project_ftmo_risk_manager_fix.md S422)."
+        )
+
+
+def check_drift_baseline_manifest_schema(cfg: dict, r: ValidationResult) -> None:
+    """Best-effort check that the drift baseline manifest carries the v2.2
+    ``challenge_target_hit_rate`` block introduced by the S495 Open Question
+    #5 resolution (2026-04-24).
+
+    Only fires when:
+      - the workstream is prop-firm (so the field is meaningful)
+      - ``drift.enabled`` is true
+      - ``drift.baseline_path`` resolves to a readable JSON file (absolute
+        path or relative to repo root)
+
+    Otherwise silent — live deploys often run on a different host where the
+    baseline file is not present at validation time. Emits WARN (not FAIL)
+    so in-flight workstreams whose baselines pre-date the schema extension
+    can still be deployed; promote to FAIL once all migrations have
+    re-emitted their seed/ensemble reports.
+    """
+    if not _is_prop_firm(cfg):
+        return
+    drift = cfg.get("drift", {}) or {}
+    if not drift.get("enabled"):
+        return
+    baseline = drift.get("baseline_path")
+    if not baseline:
+        return  # check_paper_deploy already FAILs on missing baseline_path
+
+    repo_root = Path(__file__).resolve().parent.parent
+    candidates = [Path(baseline)]
+    if not candidates[0].is_absolute():
+        candidates.append(repo_root / baseline)
+    # Live configs typically use the container path (`/app/baselines/...`); try
+    # stripping that prefix and resolving relative to repo root as a best effort.
+    if baseline.startswith("/app/"):
+        candidates.append(repo_root / baseline[len("/app/"):])
+    target = next((p for p in candidates if p.exists() and p.is_file()), None)
+    if target is None:
+        return  # remote-host or pre-deploy validation; silent
+
+    try:
+        manifest = json.loads(target.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return  # malformed file isn't this check's concern
+
+    protocol = str(manifest.get("protocol", ""))
+    is_seed_report = protocol.startswith("v2.2_stage_2_seed_report")
+    is_ensemble_report = protocol.startswith("v2.2_stage_2_5_ensemble_report")
+
+    if is_seed_report and "challenge_target_hit_rate_by_seed" not in manifest:
+        r.warn(
+            f"drift.baseline_path={baseline} is a seed_report but lacks "
+            "`challenge_target_hit_rate_by_seed` (S495 Open Question #5 "
+            "resolution 2026-04-24). Re-emit via "
+            "`scripts/backfill_eval_distribution_v22.py --phase-spec ...` "
+            "before relying on the val-selection tiebreaker."
+        )
+    elif is_ensemble_report and (
+        "challenge_target_hit_rate_by_seed" not in manifest
+        or "ensemble_challenge_target_hit_rate" not in manifest
+    ):
+        r.warn(
+            f"drift.baseline_path={baseline} is an ensemble_report but lacks "
+            "`challenge_target_hit_rate_by_seed` and/or "
+            "`ensemble_challenge_target_hit_rate` (S495 Open Question #5 "
+            "resolution 2026-04-24). Re-emit via "
+            "`scripts/backfill_eval_distribution_v22.py --phase-spec ...`."
+        )
+
 
 STAGE_CHECKS = {
     "data-prep": [],
@@ -542,6 +759,7 @@ def validate(config_path: Path, stage: str) -> ValidationResult:
 
     check_no_fee_curriculum(cfg, r)
     check_no_hindsight_outside_hpo(cfg, stage, r)
+    check_legacy_prop_firm_block(cfg, stage, r)
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)
     check_wandb_consolidation(cfg, stage, r)

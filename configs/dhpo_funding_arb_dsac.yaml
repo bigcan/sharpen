@@ -14,16 +14,16 @@
 #       at `finrl_pro_ds/hpo/funding_arb_objective.py`. No worker-CLI changes
 #       needed; agent_type=sac (auto-resolved from config.agents.sac) works.
 #
-# Launch (6 workers = 3 replicas × 2 GPUs, pattern matches dhpo_gmgp1_*.yaml):
+# Launch (6 workers = 3 replicas × 2 GPUs, S488 rule = HPO on gpuhub-1 only):
 #   set -a; source .env; set +a
 #   python scripts/distributed_hpo_coordinator.py \
 #     --config configs/funding_arb_dsac_10assets_rehpo.yaml \
 #     --platform gpuhub \
 #     --n_workers 6 --n_trials 50 \
 #     --db_url "$DISTRIBUTED_HPO_DB_URL" \
-#     --study_name funding_arb_dsac_rehpo_20260419 \
-#     --distributed_config configs/dhpo_funding_arb_dsac.yaml \
-#     --resume
+#     --study_name funding_arb_dsac_rehpo_20260426 \
+#     --distributed_config configs/dhpo_funding_arb_dsac.yaml
+#   (omit --resume for a fresh study; verified S499c: no funding_arb study in DB)
 
 distributed_hpo:
   platform: "gpuhub"
@@ -38,13 +38,18 @@ distributed_hpo:
     max_retry: 1
 
   gpuhub:
+    # S488 rule: HPO on gpuhub-1 only (gpu 0 + gpu 1); gpuhub-2 reserved for
+    # non-HPO (L1 multiseed, walk-forward). 3 replicas/GPU = 6 workers total —
+    # matches dhpo_gmgp1_xauusd_ftmo.yaml + dhpo_gmgp1_btc_velotrade.yaml.
+    # Fresh layout (S499c) — original draft used gpuhub-2:0 which conflicts
+    # with the pinned S488 rule.
     instances:
       - "gpuhub-1:0"
       - "gpuhub-1:0"
       - "gpuhub-1:0"
-      - "gpuhub-2:0"
-      - "gpuhub-2:0"
-      - "gpuhub-2:0"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
 
   worker:
     target_trials: null

@@ -161,6 +161,7 @@ def build_components(config: dict):
         static_peak=risk_cfg.get("static_peak", False),
         eod_trailing_drawdown=risk_cfg.get("eod_trailing_drawdown", False),
         eod_hour_utc=risk_cfg.get("eod_hour_utc", 0),
+        bar_interval_minutes=clock_cfg.get("base_interval_minutes", 15),
     ))
 
     # --- Data Loader ---
@@ -214,6 +215,13 @@ def main():
         description="Launch Gold futures paper/live trading via IB",
     )
     parser.add_argument("--config", required=True, help="Path to live trading YAML config")
+    parser.add_argument(
+        "--overlay", action="append", default=None,
+        help="Deploy overlay under configs/deploy/ (e.g. 'ftmo/step1'). "
+             "Repeat for multiple; later wins. Same allowlist as "
+             "deploy_bare_metal --overlay. Falls back to STRATEGY_OVERLAY "
+             "env var if --overlay not given.",
+    )
     parser.add_argument("--mainnet", action="store_true", help="Use live trading (real money). Default: paper.")
     parser.add_argument("--dry-run", action="store_true", help="Log actions without executing orders.")
     args = parser.parse_args()
@@ -227,6 +235,26 @@ def main():
     with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    # Apply deploy overlays (Step 5 prop-firm decoupling). CLI flag wins
+    # over STRATEGY_OVERLAY env var so an interactive operator can override
+    # what the docker-compose bakes in.
+    from finrl_pro_ds.config_utils import apply_overlays, parse_overlay_env
+    overlay_specs = args.overlay or parse_overlay_env(os.environ.get("STRATEGY_OVERLAY"))
+    if overlay_specs:
+        project_root = Path(__file__).resolve().parents[1]
+        overlay_root = project_root / "configs" / "deploy"
+        allowlist_path = overlay_root / "ALLOWLIST.yaml"
+        config = apply_overlays(
+            config,
+            overlay_specs,
+            overlay_root=overlay_root,
+            allowlist_path=allowlist_path,
+        )
+        logger.info(
+            "Applied %d deploy overlay(s): %s",
+            len(overlay_specs), ", ".join(overlay_specs),
+        )
+
     # Validate and patch
     config = validate_config(config, args)
 
@@ -234,6 +262,7 @@ def main():
     logger.info(
         f"Starting IB Gold futures trading engine\n"
         f"  Config: {config_path}\n"
+        f"  Overlays: {overlay_specs or 'none'}\n"
         f"  Contract: {config.get('contract', {}).get('symbol', 'MGC')}\n"
         f"  Mode: {'PAPER' if config.get('exchange', {}).get('testnet', True) else 'LIVE'}\n"
         f"  Dry run: {config.get('dry_run', False)}",

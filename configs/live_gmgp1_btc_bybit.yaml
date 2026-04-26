@@ -3,10 +3,25 @@
 # HPs: T34 best from GMGP1-BTC HPO (run 8v4mueuf, PF=2.558)
 # Checkpoint: L1 seed-123 (run 1jazzser)
 #
-# Usage:
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S495 Step 5, 2026-04-24).
+# This file is the BASE config. Phase-varying DD/target/gates live in
+# configs/deploy/velotrade/<phase>.yaml overlays (allowlist-enforced).
+#
+# Deploy invocations (resolved = this file + overlay):
+#   python scripts/deploy_bare_metal.py --script scripts/run_live.py \
+#     --config configs/live_gmgp1_btc_bybit.yaml --overlay velotrade/step1
+#   python scripts/deploy_bare_metal.py --script scripts/run_live.py \
+#     --config configs/live_gmgp1_btc_bybit.yaml --overlay velotrade/step2
+#   python scripts/deploy_bare_metal.py --script scripts/run_live.py \
+#     --config configs/live_gmgp1_btc_bybit.yaml --overlay velotrade/funded
+#
+# After Step 5 migration this BASE file alone is NOT paper-deployable
+# (validator FAILs: `risk.static_peak` missing); pair with an overlay.
+# ---------------------------------------------------------------------------
+#
+# Usage (legacy direct-invoke, superseded by --overlay above):
 #   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml
-#   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml --mainnet
-#   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml --dry-run
 
 # --- Exchange ---
 exchange:
@@ -70,11 +85,23 @@ trading:
   deadband_threshold: 0.25         # Ignore position changes < 25%
   taker_fee: 0.00055               # Bybit futures taker fee
 
-# --- Risk Management (ENABLED for live) ---
+# --- Data source (validator Stage-0; ccxt live-fetch at runtime) ---
+data:
+  source: ccxt                     # Skip manifest gating — live fetch
+  data_exchange: binance           # demo-fapi.binance.com for OHLCV
+  frequency: 15m
+  ticker: "BTC/USDT"
+
+# --- Hard Constraints (validator parity; mirrors trading.taker_fee) ---
+env:
+  taker_fee: 0.00055
+
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay owns: static_peak, eod_trailing_drawdown, eod_hour_utc,
+# flatten_on_kill_file. See configs/deploy/velotrade/{step1,step2,funded}.yaml.
 risk:
   enabled: true
   max_drawdown_pct: 0.08           # 8% hard stop (prop-firm safe, 2% buffer under 10% gate)
-  static_peak: true                # Prop-firm max-loss: DD from initial balance, never ratchets
   circuit_breaker_cooldown_bars: 12 # 3 hours at 15-min bars
   max_position_pct: 1.0            # Single asset = 100% allowed
   funding_rate_alert: 0.001        # Alert if |rate| > 0.1% per 8h
@@ -92,6 +119,7 @@ safety:
   require_explicit_mainnet: true    # Must pass --mainnet for live
   max_daily_loss_pct: 0.05          # 5% daily loss → hard stop
   kill_file: "/tmp/finrl_live_kill" # Touch this file to stop trading
+  flatten_on_kill_file: true        # v2.2 §8.3 CRIT graceful flatten
   emergency_flatten_on_error: true  # Flatten all on unrecoverable error
   # E1 Step 0b: live-replay fixture capture for the signed-lots refactor.
   # Captures raw CCXT fetch_positions + fetch_balance JSONL for the next
@@ -101,6 +129,38 @@ safety:
   capture_ccxt_raw_responses: true
   capture_max_bars: 96              # 96 × 15-min = 24h
   capture_dir: "/app/state"
+
+# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# Baseline = Stage 2.5 ensemble-confirm backfill. Live checkpoint is L1
+# multiseed seed-123 (gmgp1-btc-l1-multiseed_20260407_070227); Stage 2.5
+# seed_report.json contains eval distributions for seeds 123, 456, 1337.
+# Regenerate via scripts/backfill_eval_distribution_v22.py if checkpoint
+# changes.
+drift:
+  enabled: true
+  baseline_path: "/app/baselines/gmgp1_btc_stage_2_5/seed_report.json"
+  baseline_seed: "123"
+  window_bars: 1000
+  min_bars_before_check: 500
+  vol_estimator_bars: 20
+
+# --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+gates:
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
 
 # --- Retrain Policy (hybrid trigger + 12mo cap) ---
 # Used by scripts/check_retrain_triggers.py — runs rolling OOS backtest, checks

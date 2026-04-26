@@ -1,0 +1,34 @@
+# FTMO Funded overlay. Profit target disabled; DD rules relaxed to trailing.
+#
+# Applied by:
+#   python scripts/deploy_bare_metal.py --config <base> --overlay ftmo/funded
+#
+# FTMO Funded contract: no profit target, 5% daily loss, 10% max loss
+# (trailing from high-water mark). 21:00 UTC rollover unchanged.
+#
+# Note: static_peak flips to false because the funded-account DD rule
+# is trailing, not static. The paired env.risk.static_peak / risk.static_peak
+# toggle is validator-enforced via check_static_peak_consistency (S422).
+
+env:
+  risk:
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    augment_obs: "off"
+    static_peak: false                # funded = trailing peak
+
+challenge:
+  enabled: false                      # no profit target in funded
+  phase: funded                       # required even when disabled — validator
+                                      # reads phase to waive static_peak=true rule
+
+risk:
+  static_peak: false                  # must match env.risk.static_peak
+  flatten_on_kill_file: true
+
+gates:
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
