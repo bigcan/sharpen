@@ -159,6 +159,11 @@ def build_components(config: dict):
     )
 
     # --- Risk Manager (with EOD trailing drawdown for prop firm) ---
+    # S498-cont 2026-04-26: added daily_turnover_limit + min_effective_bets
+    # passthrough to match parity test in tests/test_live_runners_force_exit.py.
+    # Without these, DXtrade swap-in for sg1-btc would regress on the same
+    # silent-clip bug that hit the crypto runner (sg1-btc -1.0 net short
+    # clipped to -0.5; gmgp1-btc 1.5x daily turnover cap hit ~10x/day).
     risk_cfg = config.get("risk", {})
     risk_manager = CryptoRiskManager(CryptoRiskConfig(
         enabled=risk_cfg.get("enabled", True),
@@ -169,6 +174,8 @@ def build_components(config: dict):
         max_position_pct=risk_cfg.get("max_position_pct", 1.0),
         max_net_short_exposure=risk_cfg.get("max_net_short_exposure", -1.0),
         max_gross_exposure=risk_cfg.get("max_gross_exposure", 6.0),
+        min_effective_bets=risk_cfg.get("min_effective_bets", 1.0),
+        daily_turnover_limit=risk_cfg.get("daily_turnover_limit", 4.0),
         funding_rate_alert=risk_cfg.get("funding_rate_alert", 999.0),
         min_margin_reserve_pct=risk_cfg.get("min_margin_reserve_pct", 0.15),
         static_peak=risk_cfg.get("static_peak", False),
