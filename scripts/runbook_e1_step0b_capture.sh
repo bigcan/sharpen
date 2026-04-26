@@ -56,12 +56,16 @@ phase_preflight() {
     # 2. PR commits on origin/April2026
     git -C "$REPO_ROOT" fetch origin April2026 --quiet 2>/dev/null || \
         yellow "  [warn] git fetch failed (offline?) — skipping PR-merge check"
-    if git -C "$REPO_ROOT" log origin/April2026 --oneline 2>/dev/null | grep -q "$EXPECTED_COMMIT_PREFIX"; then
+    # Use git log -50 + grep without -q: bounded output ensures grep finishes
+    # reading stdin (no SIGPIPE that would break the pipeline under pipefail).
+    local log_out
+    log_out=$(git -C "$REPO_ROOT" log origin/April2026 --oneline -50 2>/dev/null || echo "")
+    if echo "$log_out" | grep "$EXPECTED_COMMIT_PREFIX" >/dev/null 2>&1; then
         green "  [ok] commit $EXPECTED_COMMIT_PREFIX on origin/April2026"
     else
         fail "commit $EXPECTED_COMMIT_PREFIX NOT on origin/April2026 — PR #5 not merged yet"
     fi
-    if git -C "$REPO_ROOT" log origin/April2026 --oneline 2>/dev/null | grep -q "$EXPECTED_CONFIG_COMMIT"; then
+    if echo "$log_out" | grep "$EXPECTED_CONFIG_COMMIT" >/dev/null 2>&1; then
         green "  [ok] commit $EXPECTED_CONFIG_COMMIT on origin/April2026"
     else
         fail "commit $EXPECTED_CONFIG_COMMIT NOT on origin/April2026 — config flip not merged"
@@ -129,7 +133,7 @@ phase_verify() {
         while [ "$(date +%s)" -lt $end ]; do
             if docker --context "$DOCKER_CTX" exec "$c" sh -c \
                 'ls /app/state/ccxt_capture_*.jsonl 2>/dev/null | head -1' 2>/dev/null \
-                | grep -q ccxt_capture; then
+                | grep ccxt_capture >/dev/null 2>&1; then
                 found=1
                 break
             fi
