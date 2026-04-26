@@ -63,3 +63,70 @@ def test_runner_has_force_exit_in_finally(runner_path: Path):
         f"reactor blocks the natural exit. See "
         f"`project_ibgateway_restart_orphan_netns.md`."
     )
+
+
+# ---------------------------------------------------------------------------
+# Risk-config pass-through parity (S498-cont 2026-04-26)
+#
+# Background: run_live.py used to drop max_net_short_exposure /
+# max_gross_exposure / daily_turnover_limit / min_effective_bets when
+# constructing CryptoRiskConfig, falling back to dataclass defaults
+# regardless of YAML. This silently clipped sg1-btc's intended -1.0 net
+# short to -0.5 and gmgp1-btc to a 1.5x daily turnover cap that the
+# strategy hit ~10x/day. The cTrader/IB/DXtrade runners already passed
+# these keys; only the crypto runner was inconsistent.
+#
+# This test asserts the union of risk keys is uniformly passed across all
+# 4 runners. New live-impacting risk keys (added to CryptoRiskConfig) must
+# be wired into every runner OR explicitly opted out below.
+# ---------------------------------------------------------------------------
+
+REQUIRED_RISK_KEYS = {
+    "enabled",
+    "max_drawdown_pct",
+    "max_position_pct",
+    "max_net_short_exposure",
+    "min_effective_bets",
+    "daily_turnover_limit",
+    "static_peak",
+    "eod_trailing_drawdown",
+    "eod_hour_utc",
+    "bar_interval_minutes",
+}
+
+
+def _crypto_risk_config_kwargs(tree: ast.AST) -> set[str] | None:
+    """Return the set of keyword argument names passed to the first
+    CryptoRiskConfig(...) call in `tree`, or None if no such call exists."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        name = None
+        if isinstance(func, ast.Name):
+            name = func.id
+        elif isinstance(func, ast.Attribute):
+            name = func.attr
+        if name == "CryptoRiskConfig":
+            return {kw.arg for kw in node.keywords if kw.arg is not None}
+    return None
+
+
+@pytest.mark.parametrize("runner_path", RUNNERS, ids=lambda p: p.name)
+def test_runner_risk_config_passthrough(runner_path: Path):
+    src = runner_path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    kwargs = _crypto_risk_config_kwargs(tree)
+    assert kwargs is not None, (
+        f"{runner_path.name}: no CryptoRiskConfig(...) construction found. "
+        f"All live runners must build their risk manager from a CryptoRiskConfig "
+        f"sourced from the YAML risk: block."
+    )
+    missing = REQUIRED_RISK_KEYS - kwargs
+    assert not missing, (
+        f"{runner_path.name}: missing pass-through for risk keys {sorted(missing)}. "
+        f"Add `<key>=risk_cfg.get('<key>', <default>)` to the CryptoRiskConfig(...) "
+        f"call. Without it, YAML overrides are silently ignored — see "
+        f"`project_runner_risk_config_passthrough.md` for the sg1-btc / gmgp1-btc "
+        f"incident on 2026-04-26."
+    )

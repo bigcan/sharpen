@@ -137,12 +137,25 @@ def build_components(config: dict):
     )
 
     # --- Risk Manager ---
+    # Pass-through parity with run_live_ctrader.py / run_live_ib.py /
+    # run_live_dxtrade.py (S498-cont 2026-04-26): the crypto runner used to
+    # silently drop max_net_short_exposure / max_gross_exposure /
+    # daily_turnover_limit / min_effective_bets, falling back to dataclass
+    # defaults (-0.50 / 1.0 / 1.50 / 4.0) regardless of YAML overrides. That
+    # clipped sg1-btc's intended -1.0 net short to -0.5 and gmgp1-btc to a
+    # 1.5x turnover cap that the strategy hit ~10×/day. Single-asset crypto
+    # strategies use min_effective_bets=1.0 to silence noise CONCENTRATION
+    # violations (ENB=1.0 by definition for one asset).
     risk_cfg = config.get("risk", {})
     risk_manager = CryptoRiskManager(CryptoRiskConfig(
         enabled=risk_cfg.get("enabled", True),
         max_drawdown_pct=risk_cfg.get("max_drawdown_pct", 0.10),
         circuit_breaker_cooldown_bars=risk_cfg.get("circuit_breaker_cooldown_bars", 12),
         max_position_pct=risk_cfg.get("max_position_pct", 1.0),
+        max_net_short_exposure=risk_cfg.get("max_net_short_exposure", -1.0),
+        max_gross_exposure=risk_cfg.get("max_gross_exposure", 1.0),
+        min_effective_bets=risk_cfg.get("min_effective_bets", 1.0),
+        daily_turnover_limit=risk_cfg.get("daily_turnover_limit", 4.0),
         funding_rate_alert=risk_cfg.get("funding_rate_alert", 0.001),
         min_margin_reserve_pct=risk_cfg.get("min_margin_reserve_pct", 0.10),
         static_peak=risk_cfg.get("static_peak", False),
