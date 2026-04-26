@@ -248,6 +248,26 @@ class LiveTradingEngine:
             "position_file", "/tmp/finrl_last_position.json",
         ))
 
+        # Step 0b (E1 architect pass): live-replay fixture capture. When
+        # `capture_ccxt_raw_responses` is true, the engine opens a JSONL writer
+        # at startup and registers a capture callback on the broker; raw
+        # CCXT fetch_positions / fetch_balance responses are appended for the
+        # next `capture_max_bars` trading steps, then capture closes itself.
+        # Default false; deploy with true after the 2026-04-27 00:00 UTC un-halt
+        # to collect the Tier-3 live-replay fixture for the E1 refactor.
+        self._capture_enabled = bool(config.get("safety", {}).get(
+            "capture_ccxt_raw_responses", False,
+        ))
+        self._capture_max_bars = int(config.get("safety", {}).get(
+            "capture_max_bars", 96,
+        ))
+        self._capture_dir = Path(config.get("safety", {}).get(
+            "capture_dir", "/app/state",
+        ))
+        self._capture_writer = None
+        self._capture_path: Optional[Path] = None
+        self._capture_bars_remaining = 0
+
         # Persistent risk-halt state (S427 revive-after-halt fix).
         # When daily-loss / MAX_DD trips, we write halted_until so that
         # docker `restart: unless-stopped` can't revive a halted engine
@@ -551,6 +571,10 @@ class LiveTradingEngine:
         # during the up-to-15-min wait.
         self._write_bootstrap_health("waiting_for_first_bar")
 
+        # Step 0b: open capture writer + register broker callback if enabled.
+        if self._capture_enabled:
+            self._open_capture_writer()
+
         # Wire heartbeat callback on CMEBarClock so health file stays fresh
         # during market-closed sleeps (prevents false UNHEALTHY alerts).
         if hasattr(self.bar_clock, "_heartbeat_callback"):
@@ -598,6 +622,11 @@ class LiveTradingEngine:
             await self._trading_step_inner(bar_time)
         finally:
             self._trading_step_active = False
+            # Step 0b: bound capture window by bar count.
+            if self._capture_writer is not None and self._capture_bars_remaining > 0:
+                self._capture_bars_remaining -= 1
+                if self._capture_bars_remaining == 0:
+                    self._close_capture_writer(reason="max_bars_reached")
 
     async def _trading_step_inner(self, bar_time: datetime) -> None:
         """Inner trading step logic (wrapped by _trading_step for PV race guard)."""
@@ -2291,6 +2320,76 @@ class LiveTradingEngine:
             logger.debug(f"Health status write failed: {e}")
 
     # -------------------------------------------------------------------
+    # Step 0b: live-replay fixture capture (E1 architect pass)
+    # -------------------------------------------------------------------
+    def _open_capture_writer(self) -> None:
+        """Open a JSONL capture file and register the broker callback.
+
+        Any failure here is logged and disables capture; trading is unaffected.
+        """
+        try:
+            self._capture_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            self._capture_path = self._capture_dir / (
+                f"ccxt_capture_{self._strategy_name}_{ts}.jsonl"
+            )
+            self._capture_writer = self._capture_path.open("a", buffering=1, encoding="utf-8")
+            self._capture_bars_remaining = self._capture_max_bars
+            if hasattr(self.broker, "set_capture_callback"):
+                self.broker.set_capture_callback(self._capture_emit)
+                logger.info(
+                    f"CCXT capture mode ENABLED: path={self._capture_path} "
+                    f"max_bars={self._capture_max_bars}",
+                )
+            else:
+                logger.warning(
+                    "capture_ccxt_raw_responses=true but broker has no "
+                    "set_capture_callback(); capture will be no-op.",
+                )
+                self._close_capture_writer(reason="broker_unsupported")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Capture writer open failed (non-fatal): {e}")
+            self._capture_writer = None
+
+    def _capture_emit(self, event_name: str, raw_response) -> None:
+        """Broker callback: append one JSONL record per fetch.
+
+        Errors are swallowed: capture must never disrupt trading.
+        """
+        if self._capture_writer is None:
+            return
+        try:
+            record = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "bar": self._total_bars,
+                "event": event_name,
+                "strategy": self._strategy_name,
+                "raw": raw_response,
+                "engine_position": self._current_position,
+                "engine_pv": self._portfolio_value,
+            }
+            self._capture_writer.write(json.dumps(record, default=str) + "\n")
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Capture write failed (non-fatal): {e}")
+
+    def _close_capture_writer(self, reason: str) -> None:
+        """Close the capture writer and unregister the broker callback."""
+        if self._capture_writer is not None:
+            try:
+                self._capture_writer.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"Capture writer close raised (non-fatal): {e}")
+            self._capture_writer = None
+        if hasattr(self.broker, "set_capture_callback"):
+            try:
+                self.broker.set_capture_callback(None)
+            except Exception:  # noqa: BLE001
+                pass
+        logger.info(
+            f"CCXT capture mode CLOSED: reason={reason} path={self._capture_path}",
+        )
+
+    # -------------------------------------------------------------------
     # Shutdown
     # -------------------------------------------------------------------
     async def _shutdown(self) -> None:
@@ -2336,6 +2435,10 @@ class LiveTradingEngine:
             f"  Final PV: ${self._portfolio_value:,.2f}\n"
             f"  Position: {self._current_position:.4f}",
         )
+
+        # Step 0b: ensure capture writer is flushed and closed on shutdown.
+        if self._capture_writer is not None:
+            self._close_capture_writer(reason="shutdown")
 
         if self._wandb_run is not None:
             # Bounded wandb.finish() — unbounded hang here kept PID 1 alive
