@@ -1957,8 +1957,17 @@ class LiveTradingEngine:
         high for short) to estimate the maximum adverse excursion that
         occurred within the bar. If projected daily return would breach
         the limit, flatten and halt (persistently).
+
+        FIND-01 parity (S498-cont, 2026-04-26): ``max_daily_loss_pct <= 0``
+        disables the check, mirroring the closing-price daily-loss guard.
+        Without this, ``projected_return < -0.0`` trips on any tiny negative
+        excursion and persistently halts Velotrade-style deploys (no daily
+        rule) on the first bar that holds a position. SG-1-BTC paper deploy
+        2026-04-26 hit this on bar 1.
         """
         if not self._intrabar_dd_enabled:
+            return
+        if self._max_daily_loss_pct <= 0:
             return
         if abs(self._current_position) < 1e-9:
             return

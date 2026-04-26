@@ -224,3 +224,84 @@ def test_write_halt_state_balance_mismatch_contract(tmp_path: Path):
     assert data["reason"] == "balance_mismatch"
     assert data["halted_until"].startswith("2026-04-23T00:00:00")
     assert "drift=0.7000" in data["detail"]
+
+
+# ---------------------------------------------------------------------------
+# FIND-01 parity (S498-cont): intrabar_dd projection honors limit <= 0
+# ---------------------------------------------------------------------------
+
+def _make_intrabar_engine(limit: float):
+    """Engine stub for _check_intrabar_dd. Carries a tiny stub obs_builder
+    that returns adverse OHLC the projection would otherwise trip on."""
+    eng = object.__new__(LiveTradingEngine)
+    eng._intrabar_dd_enabled = True
+    eng._max_daily_loss_pct = limit
+    eng._current_position = -0.27  # short, like sg1-btc bar 1
+    eng._portfolio_value = 4_999.26
+    eng._daily_start_value = 4_999.26
+    eng._trip_fired = False
+    eng._halt_detail = None
+
+    class _StubObs:
+        def get_current_hl(self):
+            return 77502.30, 77502.30  # high == low — bar that yields ~0 adverse
+        def get_current_close(self):
+            return 77502.30
+    eng.obs_builder = _StubObs()
+
+    async def _fake_flatten():
+        eng._trip_fired = True
+    def _fake_write_halt_state(reason, detail, now_utc):
+        eng._halt_detail = (reason, detail)
+    def _fake_request_stop(reason):
+        pass
+    eng._emergency_flatten = _fake_flatten
+    eng._write_halt_state = _fake_write_halt_state
+    eng._request_stop = _fake_request_stop
+    return eng
+
+
+def test_intrabar_dd_disabled_at_zero():
+    """FIND-01 parity: max_daily_loss_pct=0 must disable intrabar projection.
+
+    Regression: SG-1-BTC paper deploy 2026-04-26 halted on bar 1 because
+    `projected_return < -0.0` evaluates True for any tiny negative value.
+    """
+    async def run():
+        eng = _make_intrabar_engine(limit=0.0)
+        t = datetime(2026, 4, 26, 0, 6, tzinfo=timezone.utc)
+        await eng._check_intrabar_dd(t)
+        assert eng._trip_fired is False
+        assert eng._halt_detail is None
+    asyncio.run(run())
+
+
+def test_intrabar_dd_disabled_negative():
+    """Negative limit (config typo) must also disable, mirroring closing check."""
+    async def run():
+        eng = _make_intrabar_engine(limit=-0.05)
+        t = datetime(2026, 4, 26, 0, 6, tzinfo=timezone.utc)
+        await eng._check_intrabar_dd(t)
+        assert eng._trip_fired is False
+    asyncio.run(run())
+
+
+def test_intrabar_dd_still_trips_when_enabled():
+    """Sanity: real adverse excursion still trips when limit is positive."""
+    async def run():
+        eng = _make_intrabar_engine(limit=0.05)
+        # Force an adverse short by widening high vs close so projection
+        # crosses the 5% daily-loss limit. Short pos -1.0 of pv against a
+        # 6% adverse high → projected_return ≈ -6% < -5%.
+        eng._current_position = -1.0
+        class _BadObs:
+            def get_current_hl(self):
+                return 82152.4, 77502.30  # high 6% above close
+            def get_current_close(self):
+                return 77502.30
+        eng.obs_builder = _BadObs()
+        t = datetime(2026, 4, 26, 0, 6, tzinfo=timezone.utc)
+        await eng._check_intrabar_dd(t)
+        assert eng._trip_fired is True
+        assert eng._halt_detail[0] == "intrabar_dd_projection"
+    asyncio.run(run())
