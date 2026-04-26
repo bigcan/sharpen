@@ -136,6 +136,12 @@ services:
       STRATEGY_NAME: gmgp1-gold
       STRATEGY_RUNNER: scripts/run_live_ib.py
       STRATEGY_CONFIG: /app/configs/live_gmgp1_gc_ib.yaml
+      # S499c Tier-9 Step-5 decoupling: base config (live_gmgp1_gc_ib.yaml) is
+      # NOT paper-deployable alone (validator FAILs: risk.static_peak missing);
+      # overlay supplies static_peak/flatten_on_kill_file/challenge/gates. See
+      # configs/deploy/ftmo/{step1,step2,funded}.yaml. Override via env var
+      # GMGP1_GOLD_OVERLAY (e.g. ftmo/step2, ftmo/funded).
+      STRATEGY_OVERLAY: ${GMGP1_GOLD_OVERLAY:-ftmo/step1}
       METRICS_PORT: "9101"
       MAX_STALE_SECONDS: "4500"  # 75min: covers 60-min CME maintenance + 15-min bar
     volumes:
@@ -167,6 +173,12 @@ services:
       STRATEGY_NAME: sg1-gold
       STRATEGY_RUNNER: scripts/run_live_ib.py
       STRATEGY_CONFIG: /app/configs/live_sg1_gc_ib.yaml
+      # S499c Tier-9 Step-5 decoupling: base config (live_sg1_gc_ib.yaml) is
+      # NOT paper-deployable alone (validator FAILs: risk.static_peak missing);
+      # overlay supplies static_peak/flatten_on_kill_file/challenge/gates. See
+      # configs/deploy/ftmo/{step1,step2,funded}.yaml. Override via env var
+      # SG1_GOLD_OVERLAY (e.g. ftmo/step2, ftmo/funded).
+      STRATEGY_OVERLAY: ${SG1_GOLD_OVERLAY:-ftmo/step1}
       METRICS_PORT: "9102"
       MAX_STALE_SECONDS: "4500"  # 75min: covers 60-min CME maintenance + 3-min bar
     volumes:
