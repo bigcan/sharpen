@@ -225,7 +225,7 @@ def main() -> int:
     p.add_argument("--btc_study", default="gmgp1_btc_velotrade_rehpo_20260419")
     p.add_argument("--btc_trials", type=int, default=50)
     p.add_argument("--funding_arb_study",
-                   default="funding_arb_dsac_rehpo_20260419")
+                   default="funding_arb_dsac_rehpo_20260426")
     p.add_argument("--funding_arb_trials", type=int, default=50)
     p.add_argument("--n_workers", type=int, default=6)
     p.add_argument("--poll_interval", type=int, default=600,
