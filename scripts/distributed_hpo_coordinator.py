@@ -741,8 +741,13 @@ def extract_and_route_best_params(study, agent_type: str = "sac") -> dict:
         agent_params = {
             "lr_actor", "lr_critic", "lr_alpha", "tau", "initial_alpha",
             "gamma", "gradient_clip", "batch_size",
+            "learning_rate", "buffer_size",
+            "cvar_alpha", "n_quantiles", "kappa",
         }
-        env_params = {"deadband_threshold", "stop_loss_bps", "max_holding_bars"}
+        env_params = {
+            "deadband_threshold", "stop_loss_bps", "max_holding_bars",
+            "reward_scaling", "lambda_delta",
+        }
     elif agent_type == "ppo":
         reward_params = set()
         agent_params = {
