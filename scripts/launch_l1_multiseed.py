@@ -61,6 +61,11 @@ def parse_slots(slots_arg: str | None, fallback_instance: str | None,
     Each slot is a (instance_name, cuda_visible_devices) pair. The instance
     name must resolve via `instances.json` (deploy_bare_metal handles that);
     the gpu string is forwarded verbatim as CUDA_VISIBLE_DEVICES.
+
+    Duplicate (host, gpu) tuples are allowed and create N concurrent replicas
+    sharing one GPU's VRAM — same semantics as `--instance X --gpu Y --concurrent N`
+    but extensible across multiple GPUs in one invocation. The caller is
+    responsible for verifying VRAM headroom before running >1 replica per GPU.
     """
     if slots_arg:
         slots: list[tuple[str, str]] = []
@@ -77,10 +82,6 @@ def parse_slots(slots_arg: str | None, fallback_instance: str | None,
             slots.append((host, gpu))
         if not slots:
             raise ValueError("--slots parsed to empty list")
-        # Reject duplicate slots — two seeds on the same GPU would share VRAM.
-        if len(set(slots)) != len(slots):
-            dupes = [s for s in slots if slots.count(s) > 1]
-            raise ValueError(f"duplicate slots in --slots: {dupes}")
         return slots
     if fallback_instance is None:
         raise ValueError("must pass --slots or --instance")
@@ -89,7 +90,8 @@ def parse_slots(slots_arg: str | None, fallback_instance: str | None,
 
 def run_seed(config: Path, slot_pool: "queue.Queue[tuple[str, str]]",
              seed: int, run_name: str, no_collect: bool,
-             shared_run_id: str | None) -> tuple[int, int, float, str, str]:
+             shared_run_id: str | None,
+             script: str | None = None) -> tuple[int, int, float, str, str]:
     """Spawn deploy_bare_metal for one seed and block until completion.
 
     Pulls a (instance, gpu) slot from `slot_pool` for the duration of the run
@@ -115,6 +117,8 @@ def run_seed(config: Path, slot_pool: "queue.Queue[tuple[str, str]]",
             "--run_name", run_name,
             "--extra_args", f"--seed {seed}",
         ]
+        if script:
+            cmd.extend(["--script", script])
         if not no_collect:
             cmd.append("--collect")
 
@@ -171,6 +175,11 @@ def main() -> int:
     p.add_argument("--separate_runs", action="store_true",
                    help="Legacy: create one WandB run per seed. Default is "
                         "ONE consolidated parent run with seed<N>/* namespaces.")
+    p.add_argument("--script", default=None,
+                   help="Override the runner script (default: deploy_bare_metal "
+                        "uses scripts/run_full_pipeline.py). Used for non-V7 "
+                        "envs that need a workstream-specific runner — e.g. "
+                        "scripts/funding_arb_dsac_train_seed.py for funding-arb.")
     p.add_argument("--dry_run", action="store_true")
     args = p.parse_args()
 
@@ -278,7 +287,7 @@ def main() -> int:
             run_name = f"{args.run_name_prefix}-seed{s}_{timestamp}"
             futs[ex.submit(
                 run_seed, args.config, slot_pool, s,
-                run_name, args.no_collect, shared_run_id,
+                run_name, args.no_collect, shared_run_id, args.script,
             )] = s
         for fut in concurrent.futures.as_completed(futs):
             results.append(fut.result())
