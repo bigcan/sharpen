@@ -56,11 +56,12 @@ logging.basicConfig(
 )
 log = logging.getLogger("vol-target")
 
-# 3-min XAUUSD CFD bars per year. 252 trading days × ~16 active hours ×
-# (60/3) bars/hour ≈ 80,640. Used for vol annualization. Approximate —
-# session calendar has gaps (weekends, holidays); the deannualization is
-# only used to derive a per-bar target from a user-friendly annual %.
-BARS_PER_YEAR_3MIN_XAU = 252 * 16 * (60 // 3)
+# 3-min XAUUSD CFD bars per year. XAU CFD trades 23h/day Mon-Fri (closed
+# Friday 22:00 UTC → Sunday 22:00 UTC) → ~23 active hours × ~252 trading
+# days × (60/3) bars/hour = 115,920 bars/year.
+# (B7 audit-fix 2026-04-27: previous 80,640 used 16 hr/day for an equity-
+# style session, biased per-bar vol target ~20% high.)
+BARS_PER_YEAR_3MIN_XAU = 252 * 23 * (60 // 3)  # = 115,920
 
 
 def per_bar_realized_vol(returns: np.ndarray) -> float:
@@ -263,6 +264,14 @@ def main():
         "--baseline_only", action="store_true",
         help="Skip vol-targeted variants (sanity check on baseline ensemble)",
     )
+    parser.add_argument(
+        "--constant_lev_arms", type=float, nargs="*",
+        default=[3.0],
+        help="B2 control: extra arms at fixed max_leverage with NO scaling. "
+             "Decomposes 'vol-targeting wins' into 'leverage cap raised' vs "
+             "'vol-aware sizing'. Default [3.0] matches scale_max so vol-target "
+             "treatments share the same cap. Pass empty list to disable.",
+    )
     args = parser.parse_args()
 
     out_dir = Path(args.out_dir)
@@ -288,6 +297,22 @@ def main():
     summary.append({"variant": "baseline", "vol_target": None, **m})
 
     if not args.baseline_only:
+        # B2 control: constant-leverage arms with NO vol scaling. Isolates
+        # "raised leverage cap" effect from "vol-aware sizing" — without these
+        # the vol-target arms confound the two (they all run at scale_max env
+        # cap while baseline runs at 1.0).
+        for lev in args.constant_lev_arms:
+            tag = f"constant_lev_{lev:g}x"
+            log.info("=" * 70)
+            log.info(f"CONTROL {tag}: max_leverage={lev}, scaler=1.0 fixed (no vol-scaling)")
+            _, m = run_variant(
+                config, agents, target_annual_vol=None,
+                vol_window=args.vol_window, scale_min=1.0, scale_max=1.0,
+                env_max_leverage=float(lev),
+                device=args.device, out_dir=out_dir, tag=tag,
+            )
+            summary.append({"variant": tag, "vol_target": None, **m})
+
         for vt in args.vol_targets:
             tag = f"vol_target_{int(vt * 100):02d}pct"
             log.info("=" * 70)

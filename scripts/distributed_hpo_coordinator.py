@@ -1050,6 +1050,12 @@ def main():
                 "dsr_eta": be_r.get("dsr_eta", 0.001),
                 "gradient_clip": bs.get("gradient_clip", 1.0),
             }
+            # B3 fix: anchor max_leverage=1.0 in trial 0 when the search
+            # space declares it, so we have a within-study control point.
+            # Without this, Optuna freely samples max_leverage even for the
+            # baseline anchor (observed: trial 0 drew 0.77 in first launch).
+            if "max_leverage" in (base_config.get("hpo", {}).get("search_space", {}) or {}):
+                baseline["max_leverage"] = 1.0
 
     if baseline and existing == 0:
         study.enqueue_trial(baseline)
