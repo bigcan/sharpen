@@ -1016,6 +1016,17 @@ class LiveTradingEngine:
             self.risk_manager.rollback_last_turnover()
             # FIX AUD-L05: Update prev_close even on execution error
             self._prev_close = current_close
+
+            # FIX S502: Ambiguous-execution outcome — order may have filled at
+            # the exchange while the engine assumes failure. Force an immediate
+            # broker reconcile so the agent doesn't act on stale internal state
+            # on the next bar. Without this, periodic reconcile (every
+            # _reconcile_interval bars) may not detect the divergence until the
+            # position has drifted past the halt threshold (S502 gmgp1-btc
+            # 08:45 incident: -1007 timeout at 08:00 → opposite-sign divergence
+            # 1.24 by 08:45 reconcile).
+            await self._force_reconcile_if_ambiguous(str(e), bar_time)
+
             if (
                 self._emergency_flatten_on_error
                 and self._consecutive_execution_errors >= self._execution_error_threshold
@@ -1351,6 +1362,51 @@ class LiveTradingEngine:
             logger.warning(
                 "CT-05: Could not check for orphaned positions: %s", e
             )
+
+    # S502: ccxt error patterns where the order may have filled despite
+    # raising. These require an immediate broker reconcile to resync the
+    # internal position cache before the agent acts on stale state.
+    _AMBIGUOUS_EXECUTION_MARKERS = (
+        "-1007",                      # binance: timeout, send status unknown
+        "send status unknown",
+        "execution status unknown",
+    )
+
+    @classmethod
+    def _is_ambiguous_execution_error(cls, err_str: str) -> bool:
+        """Return True if the ccxt error string indicates an ambiguous fill."""
+        err_lower = err_str.lower()
+        return any(m in err_lower for m in cls._AMBIGUOUS_EXECUTION_MARKERS)
+
+    async def _force_reconcile_if_ambiguous(
+        self, err_str: str, bar_time: datetime,
+    ) -> bool:
+        """Trigger immediate ``_reconcile_all`` if the error is ambiguous.
+
+        Returns True if reconcile was attempted (regardless of outcome).
+        Caller is the order-execution exception handler in
+        ``_trading_step_inner``; reconcile must not propagate exceptions.
+        """
+        if not self._is_ambiguous_execution_error(err_str):
+            return False
+        logger.warning(
+            "Ambiguous execution outcome detected — forcing immediate "
+            "broker reconcile (order may have filled despite error).",
+        )
+        # Reset reconcile gate so this call is not skipped by the interval
+        # check. ``_reconcile_all`` itself updates ``_last_reconcile_bar`` to
+        # ``_total_bars`` once it begins work.
+        self._last_reconcile_bar = (
+            self._total_bars - self._reconcile_interval
+        )
+        try:
+            await self._reconcile_all(bar_time)
+        except Exception as rec_err:
+            logger.error(
+                f"Forced reconcile after ambiguous execution failed: "
+                f"{rec_err} — next bar will retry via interval gate.",
+            )
+        return True
 
     async def _reconcile_all(self, bar_time: datetime) -> None:
         """XVal Layer 1: Periodic broker position + PV cross-validation.
