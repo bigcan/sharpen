@@ -118,6 +118,11 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             "dsr_eta": be_r["dsr_eta"],
             "gradient_clip": bs["gradient_clip"],
         }
+        # B3 fix: anchor max_leverage=1.0 in trial 0 when the search space
+        # declares it. Without this, Optuna samples max_leverage even for
+        # baseline anchor → no within-study leverage=1 control point.
+        if "max_leverage" in (base_config.get("hpo", {}).get("search_space", {}) or {}):
+            baseline_params["max_leverage"] = 1.0
         study.enqueue_trial(baseline_params)
         logger.info(f"Enqueued baseline trial with config HPs: {baseline_params}")
 

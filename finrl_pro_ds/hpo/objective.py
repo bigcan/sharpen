@@ -432,16 +432,28 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
             if hasattr(trainer, 'episode_rewards') and len(trainer.episode_rewards) > 0:
                 _mean_train_reward = float(np.mean(trainer.episode_rewards))
 
-            # V4.2: Multi-seed eval for robust PF measurement (3 seeds, median)
+            # V4.2: Multi-seed eval for robust PF measurement (3 seeds, median).
+            # B6 fix: also track per-seed eval completion fraction so post-hoc
+            # leverage analysis can detect DD-termination selection bias
+            # (high-L runs hit DD ~L^2 faster → smaller eval sample → biased PF).
             pf_values = []
             tc_values = []
+            completion_pcts = []
+            terminated_early_count = 0
             for eval_seed in [42, 123, 7]:
                 eval_env.reset(seed=eval_seed)
-                pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=50000, bar_minutes=hpo_bar_minutes)
+                pf, tc, diag = evaluate_for_hpo(
+                    eval_env, trainer.agent,
+                    max_steps=50000, bar_minutes=hpo_bar_minutes,
+                    return_diag=True,
+                )
                 pf_values.append(pf)
                 tc_values.append(tc)
+                completion_pcts.append(diag.get("_debug/eval_completion_pct", 1.0))
+                terminated_early_count += int(diag.get("_debug/eval_terminated_early", 0))
             profit_factor = float(np.median(pf_values))
             trade_count = int(np.median(tc_values))
+            mean_completion_pct = float(np.mean(completion_pcts))
 
             # Activity constraint — kill lazy holding agents
             min_trades = 30
@@ -456,12 +468,20 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
             wandb.log({
                 f"{trial_prefix}/profit_factor": profit_factor,
                 f"{trial_prefix}/trade_count": trade_count,
+                f"{trial_prefix}/eval_mean_completion_pct": mean_completion_pct,
+                f"{trial_prefix}/eval_seeds_terminated_early": terminated_early_count,
                 f"{trial_prefix}/completed": True,
             })
-            logger.info("Trial %d: PF=%.4f, Trades=%d", trial.number, profit_factor, trade_count)
+            logger.info(
+                "Trial %d: PF=%.4f, Trades=%d, EvalCompletion=%.1f%% (early=%d/3)",
+                trial.number, profit_factor, trade_count,
+                mean_completion_pct * 100.0, terminated_early_count,
+            )
 
             trial_records.append({"trial": trial.number, "mean_reward": _mean_train_reward,
                                   "val_pf": profit_factor, "trade_count": trade_count,
+                                  "eval_completion_pct": mean_completion_pct,
+                                  "eval_seeds_terminated_early": terminated_early_count,
                                   "status": "completed", "hps": dict(trial.params)})
             return profit_factor
 
