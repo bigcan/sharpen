@@ -18,7 +18,9 @@ from __future__ import annotations
 import copy
 import gc
 import logging
+import os
 import threading
+from pathlib import Path
 
 import numpy as np
 import optuna
@@ -261,6 +263,27 @@ def make_funding_arb_objective(
                 model = _make_sb3_agent("sac", vec_env, sac_cfg)
                 model.learn(total_timesteps=steps_per_trial)
                 vec_env.close()
+
+            # S487 promote-best fix: write trial checkpoint at the path the
+            # distributed HPO worker's promote callback expects. SACTrainer
+            # auto-writes this for V7/cmgp1; funding-arb bypasses the trainer
+            # so we mirror it manually here. Without this the best HPO trial's
+            # weights are silently lost — only HPs survive in Optuna.
+            _study_name = getattr(trial.study, "study_name", "hpo")
+            _worker_id = os.environ.get("DHPO_WORKER_ID", "local")
+            _ckpt_dir = (
+                Path("checkpoints") / _study_name
+                / f"worker_{_worker_id}" / f"trial_{trial.number:04d}"
+            )
+            try:
+                _ckpt_dir.mkdir(parents=True, exist_ok=True)
+                _ckpt_path = _ckpt_dir / "checkpoint_final.pth"
+                model.save(str(_ckpt_path))
+                logger.info("Trial %d: saved checkpoint to %s",
+                            trial.number, _ckpt_path)
+            except Exception as save_err:
+                logger.warning("Trial %d: checkpoint save failed (non-fatal): %s",
+                               trial.number, save_err)
 
             # Evaluate on val — protocol v2 stage 1 gate.
             val_env = create_env(val_arrays, cfg_for_env)

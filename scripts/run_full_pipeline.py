@@ -143,10 +143,13 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     # V4.2: Explicit routing for ALL HPO params to prevent silent mis-routing.
     if agent_type == "sac":
         reward_params = {"dsr_eta", "reward_mode"}
-        agent_params = {"lr_actor", "lr_critic", "lr_alpha", "tau", "initial_alpha", "gamma", "gradient_clip", "batch_size"}
+        agent_params = {"lr_actor", "lr_critic", "lr_alpha", "tau", "initial_alpha", "gamma", "gradient_clip", "batch_size",
+                        "learning_rate", "buffer_size",
+                        "cvar_alpha", "n_quantiles", "kappa"}
         # deadband + v6 hard constraints + v9 MM params route to env, not agent
         env_params = {"deadband_threshold", "stop_loss_bps", "max_holding_bars",
-                      "base_spread_bps", "max_skew_bps"}
+                      "base_spread_bps", "max_skew_bps",
+                      "reward_scaling", "lambda_delta"}
     elif agent_type == "ppo":
         # V4.2: PPO locks reward params — only optimizer HPs are tunable
         reward_params = set()
