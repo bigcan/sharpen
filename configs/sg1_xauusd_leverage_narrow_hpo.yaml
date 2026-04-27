@@ -1,0 +1,183 @@
+# SG-1 XAUUSD — Leverage research Phase 1a (narrow re-HPO + leverage axis)
+#
+# Tests whether adding `max_leverage` as a tunable knob produces materially
+# better PF than the implicit-1x baseline (SG-1 XAUUSD S488 ensemble:
+# PF 3.455, intraday DD 0.34%, top-3 seeds [42, 789, 456]).
+#
+# narrow_mode: ±20% around trial 56 winning HPs (study sg1_xauusd_ftmo_rehpo_20260419);
+# the only WIDE axis is hpo.search_space.max_leverage [0.5, 3.0] log-uniform —
+# the dimension under test.
+#
+# Plan: ~/.claude/plans/plan-a-new-research-lexical-sunrise.md
+# Baseline (S488): configs/sg1_xauusd_ftmo_rehpo_l1_multiseed.yaml
+# Phase 1a budget: ~12 trials × 500K steps ≈ 2-4 GPU-d (distributed possible).
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-06-30"
+  val_start_date: "2025-07-01"
+  val_end_date: "2025-08-31"
+  test_start_date: "2025-09-01"
+  test_end_date: "2025-10-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235
+  deadband_threshold: 0.35              # trial 56 winner — narrow_mode keeps fixed (categorical)
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5             # safety constraint — leverage scales action, ATR cap stays absolute
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.009270901804613313       # trial 56
+    dsr_scale: 1.0
+  # Migrated from deprecated env.prop_firm to env.risk (S495 decoupling).
+  risk:
+    enabled: true
+    static_peak: true
+    max_trailing_drawdown_pct: 0.08     # buffered from FTMO 10% hard rail
+    max_daily_loss_pct: 0.04            # buffered from FTMO 5% hard rail
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.03
+    drawdown_penalty_scale: 5.0
+    daily_loss_penalty_start: 0.0
+    daily_loss_penalty_scale: 0.0
+    augment_obs: "off"
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Trial 56 winners (Optuna study sg1_xauusd_ftmo_rehpo_20260419) — narrow_mode
+    # samples ±20% around these.
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000               # apples-to-apples vs S488 retrain (yaiuwlcy)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  objective: "profit_factor"
+  trials: 12                            # narrow re-HPO + 1 new axis (plan §Phase 1a)
+  steps_per_trial: 500000
+  narrow_mode: true                     # ±20% on lr_actor/critic/alpha, tau, gamma, initial_alpha, dsr_eta, gradient_clip
+  enqueue_baseline: true                # trial 0 = baseline anchor (max_leverage=1.0 effectively)
+  search_space:
+    # The axis under test — wider range than the narrow-mode HPs because it's
+    # the new dimension we're characterizing.
+    max_leverage:
+      low: 0.5
+      high: 3.0
+      log: true
+
+gates:
+  # Stage 1 training-health hard-fails (matches SG-1 baseline + alphaseek_v3 pattern)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 8           # 12 trials × 67% completion floor
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+
+  # L1 multi-seed (downstream Phase 2)
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+
+  # Stage 2.5 ensemble (downstream)
+  ensemble_uplift_min: 1.10
+  ensemble_ambiguous_min: 1.05
+  ensemble_rule_selection: val_argmax_pf
+
+  # Walk-forward + recent-OOS (downstream)
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  oos_pf_floor: 1.1
+
+  # FTMO compliance (downstream — DD buffer is the kill criterion for this experiment)
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+
+  # LEVERAGE RESEARCH GATES — pre-committed per plan
+  # Hard floor: any trial with PF below baseline*(1+uplift) is uninteresting;
+  # any trial that breaches DD buffer is rejected even if PF rises.
+  leverage_baseline_pf: 3.455           # SG-1 XAUUSD S488 ensemble PF (val window)
+  leverage_pf_uplift_min: 1.15          # +15% over baseline (plan PRIMARY gate)
+  leverage_dd_buffer_floor_pp: 0.5      # match FTMO daily DD buffer floor
+
+  # Protocol v2.2 §8.2 / §8.3 declarations (advisory at HPO; load-bearing at paper-deploy)
+  drift:
+    window_bars: 1800
+    min_bars_before_check: 600
+    deadband_frac_warn: 0.85
+    deadband_frac_crit: 0.95
+    saturation_frac_warn: 0.20
+    saturation_frac_crit: 0.40
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  consolidate: true                     # S488 one-run-per-experiment
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "leverage-research", "phase-1a", "narrow-rehpo", "steady-state",
+         "upstream:sg1_xauusd_ftmo_rehpo_20260419"]
