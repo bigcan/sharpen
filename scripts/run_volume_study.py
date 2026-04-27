@@ -21,9 +21,14 @@ Usage:
     # Smoke test (1 seed at 500K on gpuhub-2:0)
     python scripts/run_volume_study.py --smoke --instance gpuhub-2 --gpu 0
 
-    # Full 25-run sweep (sequential over 5 budgets)
+    # Full 25-run sweep, single-instance (sequential over 5 budgets)
     python scripts/run_volume_study.py --full --instance gpuhub-2 --gpu 0 \
         --concurrent 2
+
+    # Full 25-run sweep, cross-GPU fan-out (3 slots, budgets sequential,
+    # seeds within each budget distributed across slots)
+    python scripts/run_volume_study.py --full \
+        --slots gpuhub-1:0,gpuhub-1:1,gpuhub-2:0
 
     # Dry run: prints commands + writes derived configs but does not launch
     python scripts/run_volume_study.py --full --dry_run
@@ -105,9 +110,14 @@ def validate(cfg_path: Path) -> bool:
 
 
 def launch_budget(cfg_path: Path, label: str, seeds: list[int],
-                  instance: str, gpu: str, concurrent: int,
+                  instance: str | None, gpu: str | None, concurrent: int,
+                  slots: str | None,
                   timestamp: str, dry_run: bool) -> tuple[int, float]:
     """Invoke launch_l1_multiseed.py for one budget. Blocks until all seeds done.
+
+    When `slots` is set (cross-GPU mode), it's forwarded to the launcher and
+    the launcher distributes seeds across slots; `instance/gpu/concurrent`
+    are ignored. Otherwise the launcher uses the single-slot fallback.
 
     Note: the launcher itself appends `_<timestamp>` to the prefix and `-seed{N}`
     to per-seed names. The validate_run_name regex
@@ -126,17 +136,23 @@ def launch_budget(cfg_path: Path, label: str, seeds: list[int],
     cmd = [
         sys.executable, str(LAUNCHER),
         "--config", cfg_rel,
-        "--instance", instance,
-        "--gpu", gpu,
         "--seeds", seeds_csv,
-        "--concurrent", str(concurrent),
         "--run_name_prefix", prefix,
     ]
+    if slots:
+        cmd.extend(["--slots", slots])
+        target_str = f"slots={slots}"
+    else:
+        cmd.extend([
+            "--instance", instance or "gpuhub-2",
+            "--gpu", gpu or "0",
+            "--concurrent", str(concurrent),
+        ])
+        target_str = f"{instance} (gpu={gpu}, concurrent={concurrent})"
     if dry_run:
         cmd.append("--dry_run")
 
-    log.info("launching budget=%s seeds=%s concurrent=%d -> %s",
-             label, seeds_csv, concurrent, instance)
+    log.info("launching budget=%s seeds=%s -> %s", label, seeds_csv, target_str)
     log.info("  cmd: %s", " ".join(cmd))
     start = time.time()
     proc = subprocess.run(cmd, cwd=PROJECT_ROOT)
@@ -157,10 +173,19 @@ def main() -> int:
     mode.add_argument("--full", action="store_true",
                       help="Full 25-run sweep (5 budgets x 5 seeds)")
     p.add_argument("--instance", default="gpuhub-2",
-                   help="Target instance (default: gpuhub-2 — idle per S499c memory)")
-    p.add_argument("--gpu", default="0", help="CUDA_VISIBLE_DEVICES (default 0)")
+                   help="Single-slot fallback target instance (default: gpuhub-2). "
+                        "Ignored if --slots is set.")
+    p.add_argument("--gpu", default="0",
+                   help="Single-slot CUDA_VISIBLE_DEVICES (default 0). "
+                        "Ignored if --slots is set.")
     p.add_argument("--concurrent", type=int, default=2,
-                   help="Within-budget seed concurrency (default 2 — VRAM-bound)")
+                   help="Single-slot within-budget seed concurrency (default 2 — "
+                        "VRAM-bound). Ignored if --slots is set.")
+    p.add_argument("--slots", default=None,
+                   help="Cross-GPU slot pool: comma-separated host:gpu pairs "
+                        "(e.g. 'gpuhub-1:0,gpuhub-1:1,gpuhub-2:0'). When set, "
+                        "each budget fans seeds out across these slots; "
+                        "concurrency = len(slots). Budgets remain sequential.")
     p.add_argument("--budgets", type=str, default=None,
                    help="Comma-separated subset of budgets (e.g., '500000,1000000'). "
                         "Default: read from gates file.")
@@ -204,8 +229,11 @@ def main() -> int:
     log.info("  budgets:     %s", budgets)
     log.info("  seeds:       %s", seeds)
     log.info("  total runs:  %d", len(budgets) * len(seeds))
-    log.info("  instance:    %s (gpu=%s, concurrent=%d)",
-             args.instance, args.gpu, args.concurrent)
+    if args.slots:
+        log.info("  slots:       %s (cross-GPU)", args.slots)
+    else:
+        log.info("  instance:    %s (gpu=%s, concurrent=%d)",
+                 args.instance, args.gpu, args.concurrent)
     log.info("  results dir: %s", results_dir.relative_to(PROJECT_ROOT))
     log.info("  dry_run:     %s", args.dry_run)
     log.info("=" * 70)
@@ -218,6 +246,7 @@ def main() -> int:
         "instance": args.instance,
         "gpu": args.gpu,
         "concurrent": args.concurrent,
+        "slots": args.slots,
         "budgets": budgets,
         "seeds": seeds,
         "dry_run": args.dry_run,
@@ -242,6 +271,7 @@ def main() -> int:
         rc, elapsed = launch_budget(
             cfg_path, label, seeds,
             args.instance, args.gpu, args.concurrent,
+            args.slots,
             timestamp, args.dry_run,
         )
         manifest["runs"].append({

@@ -509,6 +509,13 @@ def deploy(args):
             print("\n\nCollection cancelled. Run continues on remote.")
             print("  Use 'python scripts/collect_run.py --run_id <ID>' manually later.")
 
+    # Signal deploy failure so callers (launch_l1_multiseed, run_volume_study)
+    # don't silently see exit 0 when run.pid was empty. Without this, --collect
+    # falls through to a no-op and the launcher counts the seed as OK.
+    if not (pid and pid.isdigit()):
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--script", default="scripts/run_full_pipeline.py", help="Script to run (default: scripts/run_full_pipeline.py)")

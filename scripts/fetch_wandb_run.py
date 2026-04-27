@@ -1,11 +1,22 @@
 import argparse
 import json
 import os
+import sys
 
 import paramiko
 from dotenv import load_dotenv
 
 import wandb
+
+# Force UTF-8 on Windows consoles (cp950/cp1252) so the ✅/⚠️ status prints
+# below don't crash with UnicodeEncodeError when invoked directly. No-op on
+# Linux/macOS or when stdout has already been reconfigured by a parent script.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 load_dotenv()
 

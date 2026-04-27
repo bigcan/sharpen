@@ -33,6 +33,7 @@ import argparse
 import concurrent.futures
 import logging
 import os
+import queue
 import subprocess
 import sys
 import time
@@ -53,47 +54,92 @@ logging.basicConfig(
 logger = logging.getLogger("l1_multiseed")
 
 
-def run_seed(config: Path, instance: str, gpu: str, seed: int,
-             run_name: str, no_collect: bool,
-             shared_run_id: str | None) -> tuple[int, int, float]:
+def parse_slots(slots_arg: str | None, fallback_instance: str | None,
+                fallback_gpu: str | None) -> list[tuple[str, str]]:
+    """Parse --slots CSV `host:gpu,host:gpu,...` or fall back to a 1-slot list.
+
+    Each slot is a (instance_name, cuda_visible_devices) pair. The instance
+    name must resolve via `instances.json` (deploy_bare_metal handles that);
+    the gpu string is forwarded verbatim as CUDA_VISIBLE_DEVICES.
+    """
+    if slots_arg:
+        slots: list[tuple[str, str]] = []
+        for token in slots_arg.split(","):
+            token = token.strip()
+            if not token:
+                continue
+            if ":" not in token:
+                raise ValueError(f"slot {token!r} missing ':' (expected host:gpu)")
+            host, gpu = token.split(":", 1)
+            host, gpu = host.strip(), gpu.strip()
+            if not host or not gpu:
+                raise ValueError(f"slot {token!r} has empty host or gpu")
+            slots.append((host, gpu))
+        if not slots:
+            raise ValueError("--slots parsed to empty list")
+        # Reject duplicate slots — two seeds on the same GPU would share VRAM.
+        if len(set(slots)) != len(slots):
+            dupes = [s for s in slots if slots.count(s) > 1]
+            raise ValueError(f"duplicate slots in --slots: {dupes}")
+        return slots
+    if fallback_instance is None:
+        raise ValueError("must pass --slots or --instance")
+    return [(fallback_instance, fallback_gpu or "0")]
+
+
+def run_seed(config: Path, slot_pool: "queue.Queue[tuple[str, str]]",
+             seed: int, run_name: str, no_collect: bool,
+             shared_run_id: str | None) -> tuple[int, int, float, str, str]:
     """Spawn deploy_bare_metal for one seed and block until completion.
+
+    Pulls a (instance, gpu) slot from `slot_pool` for the duration of the run
+    and returns it on exit (success OR failure) so the next queued seed can
+    pick it up. The pool is the synchronization primitive — its size caps
+    concurrency, replacing the prior `max_workers` knob.
 
     If `shared_run_id` is given, child inherits FINRL_WANDB_RUN_ID +
     FINRL_WANDB_NAMESPACE=seed<N> so it attaches to the parent WandB run.
 
-    Returns (seed, exit_code, elapsed_seconds).
+    Returns (seed, exit_code, elapsed_seconds, instance, gpu).
     """
-    start = time.time()
-    # Force POSIX path separators — deploy_bare_metal passes --config through
-    # to a remote Linux shell where backslashes are escape chars.
-    cmd = [
-        sys.executable, str(DEPLOY_SCRIPT),
-        "--config", config.as_posix(),
-        "--instance", instance,
-        "--gpu", gpu,
-        "--run_name", run_name,
-        "--extra_args", f"--seed {seed}",
-    ]
-    if not no_collect:
-        cmd.append("--collect")
+    instance, gpu = slot_pool.get()
+    try:
+        start = time.time()
+        # Force POSIX path separators — deploy_bare_metal passes --config through
+        # to a remote Linux shell where backslashes are escape chars.
+        cmd = [
+            sys.executable, str(DEPLOY_SCRIPT),
+            "--config", config.as_posix(),
+            "--instance", instance,
+            "--gpu", gpu,
+            "--run_name", run_name,
+            "--extra_args", f"--seed {seed}",
+        ]
+        if not no_collect:
+            cmd.append("--collect")
 
-    child_env = os.environ.copy()
-    if shared_run_id:
-        child_env["FINRL_WANDB_RUN_ID"] = shared_run_id
-        child_env["FINRL_WANDB_NAMESPACE"] = f"seed{seed}"
+        child_env = os.environ.copy()
+        if shared_run_id:
+            child_env["FINRL_WANDB_RUN_ID"] = shared_run_id
+            child_env["FINRL_WANDB_NAMESPACE"] = f"seed{seed}"
 
-    logger.info("seed %d: launching -> %s%s", seed, run_name,
-                " [consolidated]" if shared_run_id else "")
-    proc = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True,
-                          env=child_env)
-    elapsed = time.time() - start
-    if proc.returncode != 0:
-        logger.error("seed %d FAILED (exit=%d, %.1fs)", seed, proc.returncode, elapsed)
-        logger.error("  stdout tail: %s", proc.stdout[-500:])
-        logger.error("  stderr tail: %s", proc.stderr[-500:])
-    else:
-        logger.info("seed %d OK (%.1fs)", seed, elapsed)
-    return seed, proc.returncode, elapsed
+        logger.info("seed %d: launching on %s:%s -> %s%s",
+                    seed, instance, gpu, run_name,
+                    " [consolidated]" if shared_run_id else "")
+        proc = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True,
+                              env=child_env)
+        elapsed = time.time() - start
+        if proc.returncode != 0:
+            logger.error("seed %d FAILED on %s:%s (exit=%d, %.1fs)",
+                         seed, instance, gpu, proc.returncode, elapsed)
+            logger.error("  stdout tail: %s", proc.stdout[-500:])
+            logger.error("  stderr tail: %s", proc.stderr[-500:])
+        else:
+            logger.info("seed %d OK on %s:%s (%.1fs)",
+                        seed, instance, gpu, elapsed)
+        return seed, proc.returncode, elapsed, instance, gpu
+    finally:
+        slot_pool.put((instance, gpu))
 
 
 def main() -> int:
@@ -101,14 +147,22 @@ def main() -> int:
                                 formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--config", required=True, type=Path,
                    help="Multiseed YAML config (per Protocol v2 Stage 2)")
-    p.add_argument("--instance", required=True,
-                   help="Target instance in instances.json (e.g. gpuhub-2)")
-    p.add_argument("--gpu", default="0",
-                   help="CUDA_VISIBLE_DEVICES value (default 0)")
+    p.add_argument("--instance", default=None,
+                   help="Single-slot fallback. Target instance in "
+                        "instances.json (e.g. gpuhub-2). Ignored if --slots set.")
+    p.add_argument("--gpu", default=None,
+                   help="CUDA_VISIBLE_DEVICES for single-slot fallback (default 0). "
+                        "Ignored if --slots set.")
+    p.add_argument("--slots", default=None,
+                   help="Cross-GPU slot pool: comma-separated host:gpu pairs "
+                        "(e.g. 'gpuhub-1:0,gpuhub-1:1,gpuhub-2:0'). When set, "
+                        "seeds fan out across slots; --instance/--gpu/--concurrent "
+                        "are ignored. Concurrency = len(slots).")
     p.add_argument("--seeds", required=True,
                    help="Comma-separated seed list (e.g. 42,123,456)")
     p.add_argument("--concurrent", type=int, default=3,
-                   help="Max concurrent runs on target instance (default 3)")
+                   help="Single-slot mode only: max concurrent runs on the one "
+                        "instance (default 3). Ignored when --slots set.")
     p.add_argument("--run_name_prefix", required=True,
                    help="WandB run name prefix; per-seed suffix added")
     p.add_argument("--no_collect", action="store_true",
@@ -127,6 +181,12 @@ def main() -> int:
         logger.error("deploy script not found: %s", DEPLOY_SCRIPT)
         return 2
 
+    try:
+        slots = parse_slots(args.slots, args.instance, args.gpu)
+    except ValueError as e:
+        logger.error("slot config error: %s", e)
+        return 2
+
     seeds = [int(s) for s in args.seeds.split(",") if s.strip()]
     if len(seeds) < 1:
         logger.error("no seeds parsed from %r", args.seeds)
@@ -135,13 +195,34 @@ def main() -> int:
         logger.error("duplicate seeds in %r", seeds)
         return 2
 
+    # Concurrency = len(slots) when --slots is set; otherwise honor --concurrent
+    # against the single fallback slot. We allow more workers than slots only
+    # in the single-slot case (multiple seeds time-sharing one GPU's VRAM).
+    if args.slots:
+        # Slots already enforce uniqueness; pool size = len(slots).
+        slot_pool: queue.Queue[tuple[str, str]] = queue.Queue()
+        for slot in slots:
+            slot_pool.put(slot)
+        concurrency = len(slots)
+    else:
+        # Single-slot: replicate the slot N=concurrent times so up to N seeds
+        # can share that one GPU (legacy behavior).
+        concurrency = max(1, int(args.concurrent))
+        slot_pool = queue.Queue()
+        for _ in range(concurrency):
+            slot_pool.put(slots[0])
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     logger.info("=" * 70)
     logger.info("L1 Multiseed Launcher")
     logger.info("  config:      %s", args.config.name)
-    logger.info("  instance:    %s (gpu=%s)", args.instance, args.gpu)
+    if args.slots:
+        logger.info("  slots (%d):  %s", len(slots),
+                    ",".join(f"{i}:{g}" for i, g in slots))
+    else:
+        logger.info("  instance:    %s (gpu=%s)", slots[0][0], slots[0][1])
+        logger.info("  concurrent:  %d", concurrency)
     logger.info("  seeds (%d):  %s", len(seeds), seeds)
-    logger.info("  concurrent:  %d", args.concurrent)
     logger.info("  prefix:      %s", args.run_name_prefix)
     logger.info("  collect:     %s", not args.no_collect)
     logger.info("=" * 70)
@@ -177,9 +258,8 @@ def main() -> int:
                 "experiment": "l1_multiseed",
                 "seeds": seeds,
                 "n_seeds": len(seeds),
-                "instance": args.instance,
-                "gpu": args.gpu,
-                "concurrent": args.concurrent,
+                "slots": [f"{i}:{g}" for i, g in slots],
+                "concurrency": concurrency,
                 "config_path": str(args.config),
                 "launcher_timestamp": timestamp,
             },
@@ -191,19 +271,19 @@ def main() -> int:
             wandb.define_metric(f"seed{s}/*", step_metric=f"seed{s}/_step")
             wandb.define_metric(f"seed{s}/_step", hidden=True)
 
-    results: list[tuple[int, int, float]] = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=args.concurrent) as ex:
+    results: list[tuple[int, int, float, str, str]] = []
+    with concurrent.futures.ThreadPoolExecutor(max_workers=concurrency) as ex:
         futs = {}
         for s in seeds:
             run_name = f"{args.run_name_prefix}-seed{s}_{timestamp}"
             futs[ex.submit(
-                run_seed, args.config, args.instance, args.gpu, s,
+                run_seed, args.config, slot_pool, s,
                 run_name, args.no_collect, shared_run_id,
             )] = s
         for fut in concurrent.futures.as_completed(futs):
             results.append(fut.result())
 
-    fails = [(s, code) for s, code, _ in results if code != 0]
+    fails = [(s, code) for s, code, _, _, _ in results if code != 0]
     ok = len(results) - len(fails)
     logger.info("=" * 70)
     logger.info("Summary: %d/%d OK, %d FAIL", ok, len(results), len(fails))
