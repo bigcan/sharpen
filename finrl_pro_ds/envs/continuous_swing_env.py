@@ -61,6 +61,11 @@ class ContinuousSwingEnv(gym.Env):
         self.atr_cap_percentile = float(config.get("atr_cap_percentile", 90))
         self.atr_cap_max_position = float(config.get("atr_cap_max_position", 0.5))
 
+        # Leverage cap (default 1.0 = current behavior). Scales action to
+        # target_position ∈ [-max_leverage, +max_leverage]. ATR cap remains
+        # absolute (acts as hard safety in high-vol regimes regardless of leverage).
+        self.max_leverage = float(config.get("max_leverage", 1.0))
+
         # Gap detection: zero out returns exceeding 3x ATR/price (session gaps, rolls)
         # Default off — enable for futures with trading halts (Gold, ES).
         self.gap_detection = bool(config.get("gap_detection", False))
@@ -237,7 +242,7 @@ class ContinuousSwingEnv(gym.Env):
 
     def step(self, action):
         raw_action = float(action[0]) if hasattr(action, '__len__') else float(action)
-        target_position = np.clip(raw_action, -1.0, 1.0)
+        target_position = np.clip(raw_action, -1.0, 1.0) * self.max_leverage
 
         self.current_step += 1
 
@@ -294,7 +299,9 @@ class ContinuousSwingEnv(gym.Env):
 
             if delta != 0.0:
                 self.current_position += delta
-                self.current_position = np.clip(self.current_position, -1.0, 1.0)
+                self.current_position = np.clip(
+                    self.current_position, -self.max_leverage, self.max_leverage,
+                )
                 traded = True
                 self.trade_count += 1
 

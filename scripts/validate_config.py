@@ -115,6 +115,47 @@ def check_no_fee_curriculum(cfg: dict, r: ValidationResult) -> None:
         )
 
 
+def check_max_leverage_bounds(cfg: dict, r: ValidationResult) -> None:
+    """env.max_leverage must be in [0.5, 5.0] when present.
+
+    Default 1.0 (current behavior) is only used when the key is absent — once
+    declared, values outside the safe band are rejected. Lower bound rules
+    out accidental zero/negative; upper bound caps the search at 5x notional
+    (broker maxes go higher but we don't want HPO exploring ruin-zone leverage
+    without an explicit waiver). See plan-a-new-research-lexical-sunrise.md.
+    """
+    env = cfg.get("env", {}) or {}
+    if "max_leverage" in env:
+        val = env["max_leverage"]
+        try:
+            lev = float(val)
+        except (TypeError, ValueError):
+            r.fail(f"env.max_leverage={val!r} is not numeric")
+        else:
+            if not (0.5 <= lev <= 5.0):
+                r.fail(
+                    f"env.max_leverage={lev} out of bounds [0.5, 5.0]. "
+                    "Edit the value or open a waiver in the plan file."
+                )
+            else:
+                r.ok(f"env.max_leverage = {lev}x")
+
+    # If HPO will sample leverage, the search-space bounds must also fit.
+    ss = (cfg.get("hpo", {}) or {}).get("search_space", {}) or {}
+    lev_ss = ss.get("max_leverage")
+    if isinstance(lev_ss, dict):
+        lo = lev_ss.get("low")
+        hi = lev_ss.get("high")
+        if lo is not None and hi is not None:
+            if not (0.5 <= float(lo) and float(hi) <= 5.0 and float(lo) < float(hi)):
+                r.fail(
+                    f"hpo.search_space.max_leverage=[{lo}, {hi}] must lie "
+                    f"within [0.5, 5.0] with low<high"
+                )
+            else:
+                r.ok(f"max_leverage HPO range [{lo}, {hi}]")
+
+
 def check_legacy_prop_firm_block(cfg: dict, stage: str, r: ValidationResult) -> None:
     """Flag configs still using the legacy ``env.prop_firm:`` block.
 
@@ -759,6 +800,7 @@ def validate(config_path: Path, stage: str) -> ValidationResult:
 
     check_no_fee_curriculum(cfg, r)
     check_no_hindsight_outside_hpo(cfg, stage, r)
+    check_max_leverage_bounds(cfg, r)
     check_legacy_prop_firm_block(cfg, stage, r)
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)

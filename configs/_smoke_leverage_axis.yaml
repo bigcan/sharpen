@@ -1,0 +1,117 @@
+# SMOKE TEST — leverage research infrastructure (Phase 0)
+# Purpose: exercise the new env.max_leverage HPO axis end-to-end with
+# minimum compute (1 trial × 1000 steps). Not a real HPO run.
+#
+# Plan: ~\.claude\plans\plan-a-new-research-lexical-sunrise.md
+# Touches: finrl_pro_ds/hpo/objective.py + finrl_pro_ds/envs/continuous_swing_env.py
+# Validator: scripts/validate_config.py:check_max_leverage_bounds
+#
+# Data: reuses CME GC stitched parquet (no new data work for smoke).
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-06-30"
+  val_start_date: "2025-07-01"
+  val_end_date: "2025-08-31"
+  test_start_date: "2025-09-01"
+  test_end_date: "2025-10-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    static_peak: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.03
+    drawdown_penalty_scale: 5.0
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 64
+    buffer_size: 10000
+    initial_alpha: 0.2
+    learning_starts: 100
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 5000
+
+training:
+  total_timesteps: 1000
+  log_interval: 100
+  use_amp: false
+  torch_compile: false
+  num_envs: 4
+
+hpo:
+  enabled: true
+  objective: "profit_factor"
+  trials: 1
+  steps_per_trial: 1000
+  search_space:
+    # The axis under test — new this PR.
+    max_leverage:
+      low: 0.5
+      high: 3.0
+      log: true
+
+gates:
+  hpo_pf_floor: 0.0   # smoke — accept any PF
+  hpo_min_trials_completed: 1
+  entropy_floor: 0.0
+  q_div_max: 1e9
+  action_sat_max: 1.0
+  l1_seeds: 3
+  l1_pf_cv_max: 1.0
+  l1_pf_floor: 0.0
+  wf_windows: 4
+  wf_pf_floor: 0.0
+  oos_pf_floor: 0.0
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["smoke", "leverage-research", "phase-0"]
+  mode: "disabled"  # smoke — no telemetry pollution
