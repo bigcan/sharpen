@@ -1,0 +1,197 @@
+# Funding-Arb DSAC — L1 Multi-Seed Stability (Protocol v2 Stage 2)
+#
+# HP PROVENANCE:
+#   Re-HPO study `funding_arb_dsac_rehpo_20260426` (S499c, 2026-04-26 → 04-27)
+#   best trial #37, PF=4.1040 / 50 trials / 0 fail. Parent WandB `tbdorry7`.
+#   Source recovery: results/best_params_funding_arb_dsac_rehpo_20260426.yaml
+#   (written 2026-04-27 post-routing-fix; coordinator's auto-write step crashed
+#   on the missing DSAC routing rule, fixed in scripts/distributed_hpo_coordinator.py
+#   and scripts/run_full_pipeline.py same session).
+#
+# Data + windows: identical to upstream HPO config `funding_arb_dsac_10assets_rehpo.yaml`
+# so trial #37 HPs are evaluated on the same splits they optimized over.
+#
+# Seed plan (N=10): [42, 123, 456, 789, 1024, 1337, 2025, 3141, 5150, 9999].
+# This matches the prop-firm convention even though funding-arb is not currently
+# tagged prop-firm — the goal of L1 multiseed is the same (rule out lucky-seed
+# illusion). Ambiguous escalation: CV(PF) in [0.22, 0.38] → auto-extend to N=20.
+#
+# STAGE 2.5 (ensemble-confirm) hook (Protocol v2 §4 S493 + S495 val-selection):
+#   After L1 completes, top-3 seeds (S495 diversity-aware: top-1 by PF, then
+#   top-2/3 maximize PF − λ·max_action_corr) feed the ensemble eval. Aggregation
+#   rule chosen by val-argmax-PF (S495 rule, not hardcoded ens_agreement).
+#   Gate numbers are pre-committed in configs/funding_arb_dsac_ensemble.gates.yaml
+#   (TBD; copy from sg1_btc_velotrade_ensemble.gates.yaml as starting point).
+
+strategy:
+  id: "funding-arb-dsac10-l1-multiseed"
+  name: "funding_arb_dsac_l1_multiseed"
+  version: "1.0.0"
+
+universe:
+  assets: ["ARB", "UNI", "LINK", "OP", "LTC", "FIL", "DOGE", "BTC", "ETH", "BNB"]
+  quote: "USDT"
+  data_exchange: "binance"
+  n_assets: 10
+
+data:
+  source: "ccxt"
+  market_type: "futures"
+  frequency: "1h"
+  start_date: "2022-01-01"
+  end_date: null
+  cache_dir: "./data/crypto_cache"
+
+features:
+  tech_dim: 15
+  norm_window: 720
+  zscore_window: 720
+  correlation_window: 168
+
+environment:
+  type: "funding_arb"
+  initial_capital: 100000
+  # --- Cost model (2-leg: spot + perp) — identical to upstream HPO ---
+  spot_taker_fee_pct: 0.0001     # 1 bp Binance spot
+  perp_taker_fee_pct: 0.0005     # 5 bp Binance futures
+  perp_margin_rate: 0.05
+  slippage_base_bps: 2.0
+  slippage_impact_bps: 10.0
+  spot_borrow_rate_hourly: 8.33e-6
+  max_gross_exposure: 0.80
+  action_repeat: 8
+  lambda_basis: 0.0
+  lambda_turnover: 0.1
+  reward_clip_range: [-5.0, 5.0]
+  circuit_breaker_threshold: 0.05
+  # --- HPO'd env params (trial #37 overrides) ---
+  deadband_threshold: 0.03637936421661308   # was 0.01 in HPO base
+  lambda_delta: 277.8807028536518            # was 100.0 in HPO base
+  reward_scaling: 6319.481516268883          # was 10000.0 in HPO base
+
+agents:
+  primary: "sac"
+  total_timesteps: 2000000
+  n_envs: 24
+  sac:
+    distributional: true
+    quantile_embed_dim: 64
+    network_arch: [256, 256]
+    update_interval: 4
+    gradient_clip: 10.0
+    # --- HPO'd agent params (trial #37) ---
+    learning_rate: 4.9458931797650316e-05    # was 3.0e-4 in HPO base
+    buffer_size: 53958                        # was 500000 in HPO base
+    batch_size: 128                           # was 512 in HPO base
+    gamma: 0.9984567844511835                 # was 0.99 in HPO base
+    tau: 0.002154794469471597                 # was 0.005 in HPO base
+    n_quantiles: 16                           # was 32 in HPO base
+    cvar_alpha: 0.14113246565717544           # was 0.25 in HPO base
+    kappa: 0.9401645709624002                 # was 1.0 in HPO base
+
+training:
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+
+hpo:
+  enabled: false
+
+walk_forward:
+  train_bars: 8760
+  val_bars: 720
+  test_bars: 1440
+  step_bars: 720
+  embargo_bars: 0
+
+# Protocol v2 §4 (S488 + v2.2 + v2.3 amendments).
+gates:
+  # --- Stage 1 inheritance (from HPO upstream — already met) ---
+  hpo_pf_floor: 1.1
+  hpo_min_trials_completed: 30
+  entropy_floor: -3.0
+  q_div_max: 10.0
+  action_sat_max: 95.0
+  # --- Stage 2 (L1 multiseed) ---
+  l1_seeds: 10                              # S488 convention; auto-extend on ambiguous CV
+  l1_pf_floor: 1.5                          # raised vs HPO's 1.1: trial #37 PF=4.10 leaves
+                                            # ample headroom; tight gate filters one-off seeds.
+  l1_pf_cv_max: 0.30
+  l1_pf_cv_ambiguous: [0.22, 0.38]          # S488 pre-committed escalation range
+  # --- Stage 2.5 (ensemble) ---
+  ensemble_uplift_min: 1.10                 # S493→S495 PROMOTE threshold (point-estimate)
+  ensemble_ambiguous_min: 1.05              # S495 AMBIGUOUS floor
+  ensemble_rule_selection: val_argmax_pf    # S495: pick aggregation rule on val split
+  ensemble_bootstrap_p_pf_min: 0.90         # v2.3: P(ens_PF > solo_PF) bootstrap floor
+  ensemble_bootstrap_p_mdd_min: 0.90        # v2.3: P(ens_MDD < solo_MDD) bootstrap floor
+  # --- Stage 3 (walk-forward) ---
+  wf_windows: 7
+  wf_pf_floor: 1.0
+  wf_profitable_windows_min: 5              # S405/S408 regime-robust floor
+  stress_dd_buffer_pp: 2.0                  # 5% breaker → must clear 2pp buffer
+  stress_leverage_max: 1.0                  # delta-hedge breakdown indicator
+  # --- Stage 4 (recent-OOS) ---
+  recent_oos_days: 60
+  oos_pf_floor: 1.1
+  oos_hold_ratio: 0.8
+  oos_watch_ratio: 0.6
+  # --- v2.2 RLOps drift + safe-mode (deferred from HPO stage; bake here) ---
+  drift:
+    min_bars_before_check: 500
+    window_bars: 1000
+    drift_mahalanobis_warn_p: 0.99          # χ²(K, 0.99)
+    drift_mahalanobis_crit_p: 0.999         # χ²(K, 0.999)
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    agreement_flat_delta_warn: 0.20         # v2.3 ensemble agreement-decay
+    agreement_flat_delta_crit: 0.40
+    agreement_flat_window_bars: 2000
+  safe_mode:
+    crit_triggers_flatten: true             # v2.2 §8.3: CRIT writes kill_file → force-close
+    crit_repeat_count_before_lockout: 2
+    crit_repeat_window_hours: 24
+  # --- Retrain cadence (Protocol v2 §9) ---
+  retrain:
+    live_pf_ratio: 0.8
+    live_pf_window_days: 10
+    min_trades_window: 20
+    max_age_days: 120
+    action_kl_warn_window_bars: 5000
+    cost_drift_ratio: 1.20
+    cost_drift_window_trades: 100
+    agreement_decay_delta: 0.20
+    agreement_decay_window_bars: 2000
+
+# Ensemble metadata — populated post-L1 by Stage 2.5 reconcile step (S495).
+# Leave seeds + rule UNSET until L1 completes; Stage 2.5 fills these from
+# val-split argmax across the rule menu listed below.
+ensemble:
+  seeds: []                                 # filled post-L1 (top-3 diversity-aware)
+  seed_pfs: {}                              # filled post-L1
+  rule: null                                # filled post-Stage-2.5 (val_argmax_pf)
+  rules: ["solo_<s1>", "solo_<s2>", "solo_<s3>",
+          "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
+  checkpoint_pattern: "checkpoints/funding-arb-dsac10-l1-multiseed-seed{seed}_*/checkpoint_final.pth"
+  gates_file: "configs/funding_arb_dsac_ensemble.gates.yaml"  # TBD pre-Stage-2.5
+
+upstream:
+  # Manifest contract: this run's manifest references the HPO study + best trial.
+  # validate_config (--stage l1_multiseed) checks upstream.status == PASS before
+  # accepting this config.
+  hpo_study: "funding_arb_dsac_rehpo_20260426"
+  hpo_best_trial: 37
+  hpo_best_pf: 4.1040
+  hpo_wandb_parent: "tbdorry7"
+  hpo_results_yaml: "results/best_params_funding_arb_dsac_rehpo_20260426.yaml"
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: null
+  consolidate: true                          # S488: one parent run, seeds as seed<N>/*
+  tags: ["funding-arb", "dsac", "cvar", "l1", "multiseed",
+         "10-assets", "regime-robust", "steady-state",
+         "upstream:funding_arb_dsac_rehpo_20260426"]
