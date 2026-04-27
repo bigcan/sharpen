@@ -155,6 +155,21 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                 config["env"]["reward"] = {}
             config["env"]["reward"]["dsr_eta"] = dsr_eta
 
+            # Leverage research axis (plan-a-new-research-lexical-sunrise.md).
+            # Sampled only when hpo.search_space.max_leverage is declared so
+            # legacy configs are unaffected. Bounds are validated upstream by
+            # scripts/validate_config.py:check_max_leverage_bounds [0.5, 5.0].
+            ss = base_config.get("hpo", {}).get("search_space", {})
+            lev_ss = ss.get("max_leverage")
+            if isinstance(lev_ss, dict):
+                lev_lo = float(lev_ss.get("low", 0.5))
+                lev_hi = float(lev_ss.get("high", 3.0))
+                lev_log = bool(lev_ss.get("log", True))
+                max_leverage = trial.suggest_float(
+                    "max_leverage", lev_lo, lev_hi, log=lev_log,
+                )
+                config["env"]["max_leverage"] = max_leverage
+
             # Config-driven batch_size HPO (CMGP1+)
             ss = base_config.get("hpo", {}).get("search_space", {})
             bs_ss = ss.get("batch_size", {})
@@ -205,6 +220,8 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                 hpo_log[f"{trial_prefix}/max_holding_bars"] = config["env"]["max_holding_bars"]
             if ss.get("batch_size") and "batch_size" in config.get("agents", {}).get("sac", {}):
                 hpo_log[f"{trial_prefix}/batch_size"] = config["agents"]["sac"]["batch_size"]
+            if ss.get("max_leverage") and "max_leverage" in config.get("env", {}):
+                hpo_log[f"{trial_prefix}/max_leverage"] = config["env"]["max_leverage"]
             if config.get("env", {}).get("mdp_version") == "v8":
                 hpo_log[f"{trial_prefix}/reward_mode"] = config["env"]["reward"]["mode"]
             if config.get("env", {}).get("mdp_version") == "v9":
