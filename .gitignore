@@ -142,6 +142,9 @@ alphaseek_train/
 # Research papers & large data snapshots (don't bloat git history)
 *.pdf
 *.jsonl
+# Exception: live-replay capture fixtures (E1 Tier-3 regression input).
+# Small (<1MB), versioned, scrubbed of secrets at pull time.
+!tests/fixtures/live_replay/*.jsonl
 
 # Contest data snapshots
 contest/*/data/
