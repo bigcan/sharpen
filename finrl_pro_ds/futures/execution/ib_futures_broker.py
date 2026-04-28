@@ -249,6 +249,16 @@ class IBFuturesBroker:
         target_contracts = self._position_to_contracts(target_position, portfolio_value, price)
         current_contracts = self._position_contracts
 
+        # FIX S503: log the conversion arithmetic so the 2× drift signature
+        # leaves a forensic trace on every order — see what target_position
+        # rounds to under what (price, PV, multiplier).
+        logger.info(
+            f"[ORDER-DIAG] target_frac={target_position:.4f} current_frac={current_position:.4f} "
+            f"PV={portfolio_value:.2f} price={price:.2f} mult={self._contract_manager.multiplier} "
+            f"→ target_contracts={target_contracts} current_contracts={current_contracts} "
+            f"delta={target_contracts - current_contracts}"
+        )
+
         delta = target_contracts - current_contracts
         if delta == 0:
             return OrderResult(
@@ -279,9 +289,33 @@ class IBFuturesBroker:
             # In the limit-to-market fallback path, actual fill can differ from target.
             actual_filled = int(result.filled_quantity)
             if side == "BUY":
-                self._position_contracts = current_contracts + actual_filled
+                expected_contracts = current_contracts + actual_filled
             else:
-                self._position_contracts = current_contracts - actual_filled
+                expected_contracts = current_contracts - actual_filled
+            self._position_contracts = expected_contracts
+
+            # FIX S503: post-fill consistency check. Re-read what IB says we
+            # actually hold and compare to (cached + filled). If they differ,
+            # something doubled or dropped a contract — log loudly so the next
+            # bar's reconcile knows what to do (and we get one fixture).
+            try:
+                live_positions = self._ib.positions()
+                live_n = 0
+                for pos in live_positions:
+                    if (getattr(self._contract_manager.ib_contract, "conId", 0)
+                            and pos.contract.conId
+                                == self._contract_manager.ib_contract.conId):
+                        live_n = int(pos.position)
+                        break
+                if live_n != expected_contracts:
+                    logger.error(
+                        f"[FILL-DIAG] Post-fill mismatch: cached+filled={expected_contracts} "
+                        f"vs ib.positions()={live_n} (side={side} qty={quantity} "
+                        f"actual_filled={actual_filled} prev={current_contracts}). "
+                        f"This is the S503 2× drift signature."
+                    )
+            except Exception as e:
+                logger.warning(f"[FILL-DIAG] Post-fill verify failed: {e}")
 
         return result
 
@@ -289,16 +323,54 @@ class IBFuturesBroker:
         """Get current position as a fraction of portfolio value.
 
         Queries IB for actual position and converts to [-1, 1] fraction.
+
+        FIX S503 (gmgp1-gold 2× drift, diagnostic-first):
+        - Match strictly on conId (the unique IB contract identifier) when it
+          is set. Previously the OR-match (conId OR localSymbol) could pick a
+          stale/wrong contract if conId was 0 at qualification race or if a
+          deferred-month contract shared the localSymbol prefix.
+        - Log every Position object IB returns + the match decision so the
+          next mismatch leaves a forensic trace.
         """
         positions = self._ib.positions()
         contract = self._contract_manager.ib_contract
+        target_conid = getattr(contract, "conId", 0)
+        target_localsym = getattr(contract, "localSymbol", "")
 
-        n_contracts = 0
+        matches: list[tuple[int, str, int]] = []
         for pos in positions:
-            if (pos.contract.conId == contract.conId
-                    or pos.contract.localSymbol == contract.localSymbol):
-                n_contracts = int(pos.position)
-                break
+            pc = pos.contract
+            # Prefer conId-strict match; fall back to localSymbol when our
+            # qualified contract has no conId (qualification race on cold start).
+            if target_conid:
+                if pc.conId == target_conid:
+                    matches.append((pc.conId, pc.localSymbol, int(pos.position)))
+            elif target_localsym and pc.localSymbol == target_localsym:
+                matches.append((pc.conId, pc.localSymbol, int(pos.position)))
+
+        if len(positions) > 1 or len(matches) > 1:
+            logger.warning(
+                f"[POS-DIAG] ib.positions() returned {len(positions)} entries; "
+                f"target conId={target_conid} localSymbol={target_localsym!r}; "
+                f"all=[{', '.join(f'(conId={p.contract.conId},sym={p.contract.localSymbol!r},pos={p.position})' for p in positions)}]; "
+                f"matched={matches}"
+            )
+
+        if len(matches) == 0:
+            n_contracts = 0
+        elif len(matches) == 1:
+            n_contracts = matches[0][2]
+        else:
+            # Multiple matches against a single conId is unexpected — IB should
+            # net per (account, conId). Take the largest |qty| as the truth and
+            # log loudly. Engine reconcile (15% threshold) will catch anything
+            # genuinely divergent on the next bar.
+            chosen = max(matches, key=lambda m: abs(m[2]))
+            n_contracts = chosen[2]
+            logger.error(
+                f"[POS-DIAG] Multiple matches for same target — picked {chosen} "
+                f"from {matches}. Investigate ib_insync state."
+            )
 
         self._position_contracts = n_contracts
 
@@ -320,6 +392,12 @@ class IBFuturesBroker:
 
         price = await self._get_mid_price()
         fraction = self._contracts_to_position(n_contracts, self._portfolio_value, price)
+        # FIX S503: per-call diagnostic so the next mismatch leaves a
+        # forensic trace. Cheap (one log line per get_single_position).
+        logger.info(
+            f"[POS-DIAG] n_contracts={n_contracts} mult={self._contract_manager.multiplier} "
+            f"price={price:.2f} PV={self._portfolio_value:.2f} → fraction={fraction:.4f}"
+        )
         return fraction
 
     async def get_account_info(self) -> dict:
