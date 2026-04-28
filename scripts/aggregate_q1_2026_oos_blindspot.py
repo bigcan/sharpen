@@ -77,12 +77,11 @@ STRATEGIES = {
         "max_dd_breach_pct": 8.0,
         "ckpt": "WF_seed{42,2025,3141}_fold_07_20260421_*/checkpoint_final.pth",
         "uses_pipeline": False,
-        # WF fold-7 strict-OOS test PF for ens_agreement rule
-        # (results/gmgp1_xauusd_oanda_wf_ensemble/fold_07/verdict.json -> test_ensemble_pfs.ens_agreement)
-        # Note: this verdict is for gmgp1_xauusd_oanda fold_07; sg1_xauusd_oanda fold_07 likely has its
-        # own verdict — but the ensemble fold-7 numbers from S490 are the closest stable reference we
-        # have without re-running fold-7 strict-OOS for sg1.
-        "baseline_pf": 2.227,
+        # SG-1 XAUUSD's OWN fold-7 ens_agreement strict-OOS test PF
+        # (results/sg1_xauusd_ensemble_wf/fold_07/ens_agreement_metrics.json -> pf_bar = 1.955).
+        # n_bars=1522 (~25 active days, fold-7 strict 1-month test window).
+        # FIXED 2026-04-29: previously used 2.227 from GMGP1's fold-7 verdict (wrong strategy).
+        "baseline_pf": 1.955,
         "in_sample_overlap_warn": "fold-7 train ended 2026-02-06 -> Jan-1 to Feb-6 is in-sample",
     },
 }
@@ -339,9 +338,13 @@ def main() -> int:
             f"{m.get('test_trade_count', '—')} | "
             f"{notes} |"
         )
-    summary_path = RESULTS_DIR / "summary.md"
-    summary_path.write_text("\n".join(md), encoding="utf-8")
-    print(f"\nSummary -> {summary_path.relative_to(PROJECT_ROOT)}")
+    # Auto-generated summary at table_summary.md; the hand-curated narrative
+    # (with method, per-strategy interpretation, decision implications) lives
+    # at summary.md and is never overwritten here.
+    auto_path = RESULTS_DIR / "table_summary.md"
+    auto_path.write_text("\n".join(md), encoding="utf-8")
+    print(f"\nAuto-table -> {auto_path.relative_to(PROJECT_ROOT)}")
+    print(f"(Narrative report at {(RESULTS_DIR / 'summary.md').relative_to(PROJECT_ROOT)} preserved.)")
     return 0
 
 
