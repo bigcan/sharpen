@@ -69,16 +69,15 @@ env:
     mode: "dsr"
     dsr_eta: 0.001                    # HPO will sweep
     dsr_scale: 1.0
-  prop_firm:
+  risk:
     enabled: true
-    profit_target_pct: 0.10           # Velotrade 2-Step Step 1 target
     max_trailing_drawdown_pct: 0.08   # buffered (Velotrade=10%)
     max_daily_loss_pct: 0.0           # disabled: Velotrade 2-Step has no daily loss
     eod_hour_utc: 0                   # crypto 24/7 — roll at UTC midnight
     drawdown_penalty_start: 0.04      # quadratic at half the trailing line
     drawdown_penalty_scale: 5.0
-    success_bonus: 10.0
-    augment_obs: false                # keep private_dim=5 (live_obs_builder compat)
+    augment_obs: "off"                # keep private_dim=5 (live_obs_builder compat)
+    static_peak: true
 
 network:
   scale_encoder:

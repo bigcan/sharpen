@@ -74,16 +74,15 @@ env:
     mode: dsr
     dsr_eta: 0.008072070485679669    # trial #10
     dsr_scale: 1.0
-  prop_firm:
+  risk:
     enabled: true
-    profit_target_pct: 0.10
     max_trailing_drawdown_pct: 0.08
     max_daily_loss_pct: 0.04
     eod_hour_utc: 21
     drawdown_penalty_start: 0.04
     drawdown_penalty_scale: 5.0
-    success_bonus: 10.0
-    augment_obs: false
+    augment_obs: "off"
+    static_peak: true
 
 network:
   scale_encoder:

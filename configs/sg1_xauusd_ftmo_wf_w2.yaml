@@ -53,16 +53,15 @@ env:
     - {step: 0, taker_fee: 0.0}
     - {step: 300000, taker_fee: 0.0, ramp_to: 0.00035, ramp_end_step: 900000}
     - {step: 900000, taker_fee: 0.00035}
-  prop_firm:
+  risk:
     enabled: true
-    profit_target_pct: 0.10
     max_trailing_drawdown_pct: 0.10
     max_daily_loss_pct: 0.05
     eod_hour_utc: 21
     drawdown_penalty_start: 0.05
     drawdown_penalty_scale: 5.0
-    success_bonus: 10.0
-    augment_obs: false
+    augment_obs: "off"
+    static_peak: true
 
 network:
   scale_encoder:

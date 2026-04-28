@@ -1,4 +1,11 @@
 # GMGP1-XAUUSD WF fold-07 prop-firm-decoupling A/B config (OANDA)
+# INTENTIONAL: legacy V7 control arm — DO NOT MIGRATE to env.risk:.
+# This file MUST keep env.prop_firm: so arm A exercises PropFirmWrapperV7;
+# arm B is mutated in-memory to env.risk: by _to_env_risk_config in
+# scripts/prop_firm_ab_compare.py. Validator WARN on env.prop_firm is
+# expected; future FAIL-escalation must skip this file via comment-marker
+# or path-exclude.
+#
 # Purpose: Q1 ensemble A/B (scripts/prop_firm_ab_compare.py --arm ensemble)
 # on the WF fold-07 deploy candidate ensemble [42, 3141, 2025] against the
 # same OOS window the Stage 2.5 verdict consumed.
@@ -7,9 +14,7 @@
 #   - test_start/test_end pinned to the verdict's fold-7 test window
 #     (2026-03-06 -> 2026-04-06) so A- and B-arm inference matches the
 #     ensemble_report already on disk.
-#   - Adds env.prop_firm: block (trial-10 FTMO rails); arm A exercises the
-#     legacy PropFirmWrapperV7 via env.prop_firm:, arm B is mutated in-memory
-#     to env.risk: by _to_env_risk_config.
+#   - Adds env.prop_firm: block (trial-10 FTMO rails) — see header.
 #   - random_start: false (deterministic backtest for A/B parity).
 
 data:
