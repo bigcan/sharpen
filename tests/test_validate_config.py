@@ -29,28 +29,29 @@ def test_no_prop_firm_block_is_silent():
     assert r.failures == []
 
 
-def test_prop_firm_block_warns_at_hpo():
+def test_prop_firm_block_fails_at_hpo():
+    """S504: training stages now FAIL (escalated from WARN)."""
     r = ValidationResult()
     cfg = {"env": {"prop_firm": {"enabled": True, "profit_target_pct": 0.10}}}
     check_legacy_prop_firm_block(cfg, "hpo", r)
-    assert any("env.prop_firm" in w for w in r.warnings)
-    assert r.failures == []
+    assert r.warnings == []
+    assert any("env.prop_firm" in f for f in r.failures)
 
 
-def test_prop_firm_block_warns_at_l1_multiseed():
+def test_prop_firm_block_fails_at_l1_multiseed():
     r = ValidationResult()
     cfg = {"env": {"prop_firm": {"enabled": True}}}
     check_legacy_prop_firm_block(cfg, "l1-multiseed", r)
-    assert r.warnings
-    assert r.failures == []
+    assert r.warnings == []
+    assert r.failures
 
 
-def test_prop_firm_block_warns_at_wf():
+def test_prop_firm_block_fails_at_wf():
     r = ValidationResult()
     cfg = {"env": {"prop_firm": {"enabled": True}}}
     check_legacy_prop_firm_block(cfg, "wf", r)
-    assert r.warnings
-    assert r.failures == []
+    assert r.warnings == []
+    assert r.failures
 
 
 def test_prop_firm_block_fails_at_paper_deploy():
@@ -63,7 +64,7 @@ def test_prop_firm_block_fails_at_paper_deploy():
 
 
 def test_migration_message_is_actionable():
-    """Warning/failure message should name the new keys."""
+    """Failure message should name the new keys."""
     r = ValidationResult()
     check_legacy_prop_firm_block(
         {"env": {"prop_firm": {}}}, "paper-deploy", r
@@ -71,6 +72,36 @@ def test_migration_message_is_actionable():
     msg = r.failures[0] if r.failures else ""
     assert "env.risk" in msg
     assert "challenge" in msg
+
+
+def test_prop_firm_block_with_intentional_marker_is_silent(tmp_path):
+    """S504: the 3 A/B-control configs carry a DO-NOT-MIGRATE marker that
+    suppresses the FAIL — the validator must honor it on all stages."""
+    cfg_path = tmp_path / "intentional_legacy.yaml"
+    cfg_path.write_text(
+        "# INTENTIONAL: legacy V7 control arm — DO NOT MIGRATE to env.risk:.\n"
+        "env:\n  prop_firm:\n    enabled: true\n",
+        encoding="utf-8",
+    )
+    cfg = {"env": {"prop_firm": {"enabled": True}}}
+    for stage in ("hpo", "l1-multiseed", "wf", "paper-deploy"):
+        r = ValidationResult()
+        check_legacy_prop_firm_block(cfg, stage, r, config_path=cfg_path)
+        assert r.warnings == [], f"unexpected WARN at stage={stage}: {r.warnings}"
+        assert r.failures == [], f"unexpected FAIL at stage={stage}: {r.failures}"
+
+
+def test_prop_firm_block_without_marker_still_fails_with_path(tmp_path):
+    """A config_path is provided but the file lacks the marker — must still FAIL."""
+    cfg_path = tmp_path / "unmigrated.yaml"
+    cfg_path.write_text(
+        "env:\n  prop_firm:\n    enabled: true\n", encoding="utf-8"
+    )
+    r = ValidationResult()
+    check_legacy_prop_firm_block(
+        {"env": {"prop_firm": {"enabled": True}}}, "hpo", r, config_path=cfg_path
+    )
+    assert any("env.prop_firm" in f for f in r.failures)
 
 
 # ---------------------------------------------------------------------------

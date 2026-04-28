@@ -156,8 +156,34 @@ def check_max_leverage_bounds(cfg: dict, r: ValidationResult) -> None:
                 r.ok(f"max_leverage HPO range [{lo}, {hi}]")
 
 
-def check_legacy_prop_firm_block(cfg: dict, stage: str, r: ValidationResult) -> None:
-    """Flag configs still using the legacy ``env.prop_firm:`` block.
+_PROP_FIRM_INTENTIONAL_MARKER = "DO NOT MIGRATE to env.risk:"
+
+
+def _config_has_intentional_legacy_marker(config_path: Path | None) -> bool:
+    """Return True if the source YAML contains the intentional-legacy marker.
+
+    Three configs keep ``env.prop_firm:`` by design (V7 vs RS A/B controls
+    for the Q2 critic-loss parity gate and the GMGP1 OANDA fold-07 ensemble
+    A/B). They carry an ``# INTENTIONAL: ... DO NOT MIGRATE to env.risk:``
+    header comment so the validator can recognize and skip them. See
+    ``project_prop_firm_config_migration_todo.md``.
+    """
+    if config_path is None or not config_path.exists():
+        return False
+    try:
+        text = config_path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    return _PROP_FIRM_INTENTIONAL_MARKER in text
+
+
+def check_legacy_prop_firm_block(
+    cfg: dict,
+    stage: str,
+    r: ValidationResult,
+    config_path: Path | None = None,
+) -> None:
+    """FAIL configs still using the legacy ``env.prop_firm:`` block.
 
     Post S495-cont the prop-firm decoupling split responsibilities:
     - Training-side DD shaping lives under ``env.risk:`` +
@@ -165,22 +191,27 @@ def check_legacy_prop_firm_block(cfg: dict, stage: str, r: ValidationResult) -> 
     - Live-side profit-target tracking lives under ``challenge:`` +
       ``ChallengeStateMachine`` (live engine).
 
-    WARN at non-paper-deploy stages (adapter still honors the legacy block);
-    FAIL at ``paper-deploy`` so migrated deploys cannot ship without the new
-    schema. See ``.agent/artifacts/prop_firm_decoupling_architecture.md``.
+    Escalated S504 from WARN→FAIL at all stages now that the config-tree
+    migration is done (33/36 configs migrated; 3 intentional A/B controls
+    retained with the ``DO NOT MIGRATE to env.risk:`` marker comment).
+    Configs carrying that marker are skipped silently. Configs without the
+    marker FAIL at every stage. See
+    ``.agent/artifacts/prop_firm_decoupling_architecture.md``.
     """
     env = cfg.get("env", {}) or {}
     if "prop_firm" not in env:
         return
+    if _config_has_intentional_legacy_marker(config_path):
+        r.ok("env.prop_firm: present — intentional-legacy marker honored")
+        return
     msg = (
-        "env.prop_firm: is deprecated — migrate to env.risk: + top-level "
+        "env.prop_firm: is removed — migrate to env.risk: + top-level "
         "challenge: block. The PropFirmWrapperV7 adapter is retired in Step 6. "
+        "Intentional A/B controls must include "
+        f"'# INTENTIONAL: ... {_PROP_FIRM_INTENTIONAL_MARKER}' header. "
         "(prop_firm_decoupling_architecture.md)"
     )
-    if stage == "paper-deploy":
-        r.fail(msg)
-    else:
-        r.warn(msg)
+    r.fail(msg)
 
 
 def check_no_hindsight_outside_hpo(cfg: dict, stage: str, r: ValidationResult) -> None:
@@ -801,7 +832,7 @@ def validate(config_path: Path, stage: str) -> ValidationResult:
     check_no_fee_curriculum(cfg, r)
     check_no_hindsight_outside_hpo(cfg, stage, r)
     check_max_leverage_bounds(cfg, r)
-    check_legacy_prop_firm_block(cfg, stage, r)
+    check_legacy_prop_firm_block(cfg, stage, r, config_path=config_path)
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)
     check_wandb_consolidation(cfg, stage, r)

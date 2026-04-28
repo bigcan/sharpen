@@ -1,11 +1,16 @@
 # Q2 training-parity arm A — PropFirmWrapperV7 (control)
+# INTENTIONAL: legacy V7 control arm — DO NOT MIGRATE to env.risk:.
+# This file MUST keep env.prop_firm: to test PropFirmWrapperV7 against
+# RiskShapingWrapper (S496 wrappers proven equivalent). Validator WARN
+# on env.prop_firm is expected; future FAIL-escalation must skip this
+# file via comment-marker or path-exclude. Pair: configs/q2_train_parity_sg1_xauusd_rs.yaml.
+#
 # Source: configs/sg1_xauusd_ftmo_rehpo_l1_multiseed.yaml (trial 56 HPs)
 #
 # Q2 setup (ADR-6, prop-firm decoupling architecture):
 #   - Same SG-1-XAUUSD trial-56 HPs, seed 0, 100K steps
 #   - profit_target_pct = 10.0 (effectively disabled — no early termination)
 #   - HPO disabled (single seed parity smoke)
-#   - Pair: configs/q2_train_parity_sg1_xauusd_rs.yaml (env.risk: variant)
 #
 # Decision per ADR-6 Q2 thresholds:
 #   - terminal Q(s0,a0) ratio band [0.90, 1.10]
