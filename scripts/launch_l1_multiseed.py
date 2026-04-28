@@ -36,6 +36,7 @@ import os
 import queue
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -45,6 +46,29 @@ import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DEPLOY_SCRIPT = PROJECT_ROOT / "scripts" / "deploy_bare_metal.py"
+
+# Per-instance setup-phase stagger. deploy_bare_metal's setup (unzip + pip
+# uninstall/install on the shared remote workspace) is not concurrent-safe
+# when multiple deploys hit the same host — overlapping unzips and pip
+# install/uninstall cycles can corrupt module files. Serialize the start of
+# each deploy on a given instance so its setup window is exclusive; once
+# python is launched, training runs concurrent on the GPU pool.
+DEPLOY_SETUP_GAP_S = 300.0
+_INSTANCE_NEXT_DEPLOY_TIME: dict[str, float] = {}
+_INSTANCE_LOCK = threading.Lock()
+
+
+def _reserve_instance_setup_slot(instance: str,
+                                 gap_s: float = DEPLOY_SETUP_GAP_S) -> float:
+    """Reserve the next exclusive setup window on `instance`. Returns the
+    seconds the caller should sleep before starting its deploy_bare_metal
+    subprocess."""
+    with _INSTANCE_LOCK:
+        now = time.time()
+        next_t = _INSTANCE_NEXT_DEPLOY_TIME.get(instance, now)
+        my_start = max(now, next_t)
+        _INSTANCE_NEXT_DEPLOY_TIME[instance] = my_start + gap_s
+        return my_start - now
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,6 +130,11 @@ def run_seed(config: Path, slot_pool: "queue.Queue[tuple[str, str]]",
     """
     instance, gpu = slot_pool.get()
     try:
+        wait_s = _reserve_instance_setup_slot(instance)
+        if wait_s > 0:
+            logger.info("seed %d: waiting %.0fs for %s setup-slot (concurrent-deploy stagger)",
+                        seed, wait_s, instance)
+            time.sleep(wait_s)
         start = time.time()
         # Force POSIX path separators — deploy_bare_metal passes --config through
         # to a remote Linux shell where backslashes are escape chars.
@@ -116,11 +145,25 @@ def run_seed(config: Path, slot_pool: "queue.Queue[tuple[str, str]]",
             "--gpu", gpu,
             "--run_name", run_name,
             "--extra_args", f"--seed {seed}",
+            # `pkill -f run_full_pipeline.py` in deploy_bare_metal kills peer
+            # seeds when several deploys land on the same instance — fatal
+            # under 3-per-GPU multiplexing. Each deploy already isolates via
+            # unique zip name + unique hpo.db path, so the kill phase is
+            # unnecessary. Always skip it from the launcher.
+            "--no_kill",
         ]
         if script:
             cmd.extend(["--script", script])
-        if not no_collect:
-            cmd.append("--collect")
+        # NEVER pass --collect from the launcher.
+        # Even in separate_runs mode, deploy_bare_metal --collect's
+        # poll_run_until_complete + collect_run pipeline empirically hangs
+        # for tens of minutes after wandb state transitions (cause unknown,
+        # likely some combination of paramiko/wandb-API blocking I/O). For
+        # multi-seed runs that means the launcher sits idle for 30+ min
+        # after training is done. The dispatcher (run_volume_study.py)
+        # polls wandb directly to know when a budget has finished and
+        # then proceeds. Use scripts/collect_run.py post-hoc if checkpoints
+        # are needed.
 
         child_env = os.environ.copy()
         if shared_run_id:

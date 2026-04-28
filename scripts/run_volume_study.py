@@ -138,6 +138,15 @@ def launch_budget(cfg_path: Path, label: str, seeds: list[int],
         "--config", cfg_rel,
         "--seeds", seeds_csv,
         "--run_name_prefix", prefix,
+        # Use separate WandB runs per seed (one parent-run per seed) instead of
+        # consolidated parent. The consolidated mode has a multi-writer summary
+        # race where each python's wandb session, on finish(), flushes its
+        # local summary cache (which contains stale reads of OTHER seeds'
+        # values) and stomps the run-wide summary. Separate runs eliminate
+        # the race entirely — each seed run has a single writer. Bonus:
+        # `--collect` polling now works (each subprocess polls its own run
+        # id, which transitions cleanly without the parent-writer deadlock).
+        "--separate_runs",
     ]
     if slots:
         cmd.extend(["--slots", slots])
@@ -264,7 +273,48 @@ def main() -> int:
             log.error("aborting: validator rejected %s", cfg_path.name)
             return 3
 
-    # Phase 2: dispatch budgets sequentially (launcher manages seed concurrency).
+    # Phase 2: dispatch budgets sequentially.
+    # The launcher fires off all 5 deploys with --no_collect and returns within
+    # ~25 min (5 × stagger). Training itself runs for hours afterwards. To
+    # know when a budget is actually done — so we don't pile concurrent
+    # budgets onto gpuhub-1 — we poll wandb directly for that budget's runs.
+    import wandb as _wandb
+    api = _wandb.Api(timeout=60)
+    project = base_cfg.get("wandb", {}).get("project", "FinRL-Pro-DS")
+    entity = base_cfg.get("wandb", {}).get("entity", "bigcan-chiwin-technology")
+
+    def wait_runs_finished(label_: str, expected_n: int,
+                           poll_every_s: int = 120, max_wait_h: float = 30.0) -> int:
+        """Block until `expected_n` runs tagged for this budget are all in a
+        terminal state. Returns count of seeds that reached `finished`."""
+        deadline = time.time() + max_wait_h * 3600
+        last_log_state = None
+        while time.time() < deadline:
+            runs = list(api.runs(f"{entity}/{project}", filters={
+                "$and": [
+                    {"tags": {"$in": ["volume-study"]}},
+                    {"tags": {"$in": [f"budget-{label_}"]}},
+                    {"tags": {"$in": [f"study-id-{timestamp}"]}},
+                ],
+            }))
+            states = [r.state for r in runs]
+            counts = {s: states.count(s) for s in set(states)}
+            terminal = sum(1 for s in states if s in ("finished", "crashed", "failed"))
+            cur_state = (len(runs), terminal, tuple(sorted(counts.items())))
+            if cur_state != last_log_state:
+                log.info("waiting on budget=%s: runs=%d  terminal=%d/%d  by_state=%s",
+                         label_, len(runs), terminal, expected_n, counts)
+                last_log_state = cur_state
+            if len(runs) >= expected_n and terminal >= expected_n:
+                ok = states.count("finished")
+                log.info("budget=%s wandb-side complete: %d/%d finished, others: %s",
+                         label_, ok, expected_n,
+                         {k: v for k, v in counts.items() if k != "finished"})
+                return ok
+            time.sleep(poll_every_s)
+        log.error("wandb wait timed out after %.1fh on budget=%s", max_wait_h, label_)
+        return -1
+
     for steps in budgets:
         label = _budget_label(steps)
         cfg_path = derived_paths[steps]
@@ -274,6 +324,13 @@ def main() -> int:
             args.slots,
             timestamp, args.dry_run,
         )
+
+        # Wait for the actual training+backtest to finish before next budget.
+        # The launcher only spawns deploys; runs continue on remote afterwards.
+        finished_ok = -2  # not waited
+        if rc == 0 and not args.dry_run:
+            finished_ok = wait_runs_finished(label, expected_n=len(seeds))
+
         manifest["runs"].append({
             "budget": steps,
             "label": label,
@@ -281,14 +338,20 @@ def main() -> int:
             "config": str(cfg_path.relative_to(PROJECT_ROOT)),
             "exit_code": rc,
             "elapsed_s": round(elapsed, 1),
+            "wandb_finished_ok": finished_ok,
         })
-        # Persist manifest progressively in case of mid-run failure.
         with (results_dir / "manifest.json").open("w", encoding="utf-8") as f:
             json.dump(manifest, f, indent=2)
 
         if rc != 0:
-            log.error("aborting subsequent budgets: budget=%s failed", label)
+            log.error("aborting subsequent budgets: budget=%s launcher exit=%d", label, rc)
             return 1
+        if finished_ok < 0:
+            log.error("aborting subsequent budgets: budget=%s wandb wait failed (%d)", label, finished_ok)
+            return 1
+        if finished_ok < len(seeds):
+            log.warning("budget=%s: only %d/%d seeds finished cleanly; continuing",
+                        label, finished_ok, len(seeds))
 
     fails = [r for r in manifest["runs"] if r["exit_code"] != 0]
     log.info("=" * 70)
