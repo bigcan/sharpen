@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -35,13 +36,18 @@ import yaml
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 GATES_FILE = PROJECT_ROOT / "configs" / "gmgp1_volume_study.gates.yaml"
 
-# Per CLAUDE.md backtest metric keys.
+# Backtest metric keys actually emitted by the V7 SAC pipeline. CLAUDE.md
+# documents the legacy capitalized names (Profit_Factor_Daily etc), but
+# `run_full_pipeline.py` writes lowercase under `seed{N}/backtest_{val,test}/`.
+# Verified empirically against the volume study smoke run (`ou69yn1r`).
+# `sharpe_daily` is preferred over `sharpe` — the raw value is minute-level
+# and inflated by autocorrelation; the daily resample is the trustworthy view.
 SUMMARY_KEYS = (
-    "Profit_Factor_Daily",
-    "Sharpe_Ratio",
-    "Sortino_Ratio",
-    "Max_Drawdown",
-    "Total_Return",
+    "profit_factor",
+    "sharpe_daily",
+    "sortino",
+    "max_drawdown",
+    "total_return",
 )
 
 logging.basicConfig(
@@ -85,12 +91,11 @@ def fetch_runs_for_budget(api, project: str, entity: str, label: str,
     return list(api.runs(f"{entity}/{project}", filters=filters))
 
 
-def extract_seed_summaries(run, seeds: list[int]) -> dict[int, dict]:
-    """Pull per-seed summary metrics out of a consolidated parent run.
+_SEED_FROM_NAME_RE = re.compile(r"-seed(\d+)_")
 
-    Consolidated namespace pattern: seed<N>/<metric>. Falls back to flat
-    summary keys (single-seed legacy) if the namespaced keys aren't present.
-    """
+
+def _extract_from_one_run_consolidated(run, seeds: list[int]) -> dict[int, dict]:
+    """Consolidated parent run: per-seed namespaced keys (seed<N>/...)."""
     out: dict[int, dict] = {}
     summary = dict(run.summary_metrics)
     for s in seeds:
@@ -107,7 +112,6 @@ def extract_seed_summaries(run, seeds: list[int]) -> dict[int, dict]:
                 any_found = True
             else:
                 row[key] = None
-        # val/test split markers if logged separately
         for split in ("val", "test"):
             for key in SUMMARY_KEYS:
                 ns_key = f"{ns}backtest_{split}/{key}"
@@ -116,6 +120,60 @@ def extract_seed_summaries(run, seeds: list[int]) -> dict[int, dict]:
                     any_found = True
         if any_found:
             out[s] = row
+    return out
+
+
+def _extract_from_one_run_separate(run, seed: int) -> dict | None:
+    """One seed run from --separate_runs mode: flat keys, no namespace."""
+    summary = dict(run.summary_metrics)
+    row = {"seed": seed, "run_id": run.id, "run_name": run.name}
+    any_found = False
+    for split in ("val", "test"):
+        for key in SUMMARY_KEYS:
+            flat_key = f"backtest_{split}/{key}"
+            if flat_key in summary:
+                row[f"{split}_{key}"] = summary[flat_key]
+                any_found = True
+    return row if any_found else None
+
+
+def extract_seed_summaries(runs, seeds: list[int]) -> dict[int, dict]:
+    """Pull per-seed summary metrics from EITHER:
+      * one consolidated parent run (seed<N>/<metric> namespacing), OR
+      * many separate-runs (one wandb run per seed, flat keys).
+
+    Detected by run name pattern: `-seed<N>_` in the name → separate_runs entry.
+    Backwards-compatible with single-run callers (older code paths pass `run`,
+    not a list).
+    """
+    if not isinstance(runs, list):
+        runs = [runs]
+    if not runs:
+        return {}
+
+    # Classify each run by name pattern.
+    separate_runs: dict[int, object] = {}
+    consolidated_runs: list = []
+    for r in runs:
+        m = _SEED_FROM_NAME_RE.search(r.name)
+        if m and int(m.group(1)) in seeds:
+            separate_runs[int(m.group(1))] = r
+        else:
+            consolidated_runs.append(r)
+
+    out: dict[int, dict] = {}
+    # Separate-runs mode: one run per seed, flat keys
+    for seed, run in separate_runs.items():
+        row = _extract_from_one_run_separate(run, seed)
+        if row is not None:
+            out[seed] = row
+    # Consolidated mode: namespace-extract from any non-seed-named run
+    # (typically only one such run per budget — the parent).
+    for run in consolidated_runs:
+        merged = _extract_from_one_run_consolidated(run, seeds)
+        for s, row in merged.items():
+            # Don't overwrite separate-runs results (those are higher-fidelity)
+            out.setdefault(s, row)
     return out
 
 
@@ -275,15 +333,15 @@ def write_report(out_dir: Path, manifest: dict, gates: dict,
               f"concurrent={manifest['concurrent']})\n")
 
     md.append("## Per-seed summary\n")
-    md.append("| Budget | Seed | Test PF | Test Sharpe | Test MDD | Val PF |")
+    md.append("| Budget | Seed | Test PF | Test Sharpe (daily) | Test MDD | Val PF |")
     md.append("|---|---|---|---|---|---|")
     for r in sorted(per_seed, key=lambda x: (x["budget"], x["seed"])):
         md.append(f"| {r['budget']:>7} | {r['seed']} | "
-                  f"{r.get('test_Profit_Factor_Daily','—'):.3f} | "
-                  f"{r.get('test_Sharpe_Ratio','—')} | "
-                  f"{r.get('test_Max_Drawdown','—')} | "
-                  f"{r.get('val_Profit_Factor_Daily','—')} |"
-                  if isinstance(r.get('test_Profit_Factor_Daily'), (int, float))
+                  f"{r.get('test_profit_factor','—'):.3f} | "
+                  f"{r.get('test_sharpe_daily','—')} | "
+                  f"{r.get('test_max_drawdown','—')} | "
+                  f"{r.get('val_profit_factor','—')} |"
+                  if isinstance(r.get('test_profit_factor'), (int, float))
                   else f"| {r['budget']:>7} | {r['seed']} | n/a | n/a | n/a | n/a |")
 
     md.append("\n## Hypothesis verdicts\n")
@@ -361,24 +419,29 @@ def main() -> int:
             log.warning("budget=%s: no WandB runs found", label)
             continue
 
-        run = runs[0]
-        log.info("budget=%s: parent run %s (%s)", label, run.name, run.id)
-        seed_rows = extract_seed_summaries(run, seeds)
+        log.info("budget=%s: %d run(s) found", label, len(runs))
+        for r in runs:
+            log.info("  - %s (%s)", r.name, r.id)
+        seed_rows = extract_seed_summaries(runs, seeds)
 
         for s, row in seed_rows.items():
             row["budget"] = budget
             row["budget_label"] = label
             per_seed_rows.append(row)
-            if row.get("test_Profit_Factor_Daily") is not None:
+            if row.get("test_profit_factor") is not None:
                 per_budget_test_pf.setdefault(budget, []).append(
-                    row["test_Profit_Factor_Daily"])
-            if row.get("val_Profit_Factor_Daily") is not None:
+                    row["test_profit_factor"])
+            if row.get("val_profit_factor") is not None:
                 per_budget_val_pf.setdefault(budget, []).append(
-                    row["val_Profit_Factor_Daily"])
+                    row["val_profit_factor"])
 
         # Buffer saturation only meaningful at the highest budget(s).
+        # Use the first available run for history scan; in separate_runs mode
+        # we'd want per-seed scans but the anomaly detector currently expects
+        # consolidated namespacing — skip cleanly if no consolidated run found.
         if budget >= 2_000_000:
-            buf_flags = detect_buffer_saturation(run, seeds, gates)
+            consolidated = next((r for r in runs if not _SEED_FROM_NAME_RE.search(r.name)), None)
+            buf_flags = detect_buffer_saturation(consolidated, seeds, gates) if consolidated else []
             for f in buf_flags:
                 anomalies.append(
                     f"buffer_saturation: budget={label} seed={f['seed']} "
