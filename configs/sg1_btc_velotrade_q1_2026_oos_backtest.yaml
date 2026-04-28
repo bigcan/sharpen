@@ -1,0 +1,106 @@
+# SG-1 BTC Velotrade Q1 2026 OOS Backtest — regime drift quantification
+# Checkpoint: sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030 (live sg1-btc paper)
+# Base: configs/sg1_btc_velotrade_l1_multiseed.yaml (env params copied verbatim)
+# Data: Bybit BTCUSDT 1m parquet covers 2024-01-01 → 2026-04-06.
+# Test window: 2026-01-01 → 2026-04-12 (data physically caps at 04-06 — engine
+# will terminate on data exhaustion; ~13 weeks effective).
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "multiscale"
+  # LEAK-1 split markers carried through for EMA-Z reset boundaries.
+  train_start_date: "2024-01-01"
+  train_end_date: "2025-06-30"
+  val_start_date: "2025-07-01"
+  val_end_date: "2025-09-30"
+  test_start_date: "2026-01-01"
+  test_end_date: "2026-04-12"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.15
+  parkinson_threshold: 0.0009
+  volume_threshold: 0.60
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 3000
+  random_start: false
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: false
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0008427308583293202
+    dsr_scale: 1.0
+    hindsight_weight: 0.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.10
+    max_daily_loss_pct: 0.0
+    eod_hour_utc: 0
+    drawdown_penalty_start: 0.05
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.00015739192475706186
+    lr_critic: 0.00007322355805160213
+    lr_alpha: 0.0000026314031405474944
+    gamma: 0.9593670398875173
+    tau: 0.0002134448307797731
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.4088157097959411
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.516294914428727
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 0
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: false
+  num_envs: 1
+
+hpo:
+  enabled: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade",
+         "backtest", "q1-2026-oos", "regime-drift", "l1-seed42",
+         "bybit-perp", "steady-state-fee"]
