@@ -1,0 +1,119 @@
+# AlphaSeek v3 — Stage 2 L1 multiseed config (S500 M5).
+#
+# Reads upstream HPO manifest (best-trial HPs) and trains N=10 independent
+# seeds on the same train/val/test split. Reports inter-seed PF CV; if CV
+# falls in [0.22, 0.38] (S488 ambiguous band) auto-extends to N=20.
+#
+# Validator: scripts/validate_config.py --config <this> --stage l1-multiseed
+#   PRE-STAGE-0 NOTE: data manifest required first.
+#
+# Promoted artifact: top-3 seed checkpoints by val PF → Stage 2.5.
+
+strategy:
+  id: "alphaseek-v3"
+  name: "AlphaSeek v3 — L1 multiseed (N=10)"
+  version: "3.0.0-l1"
+
+# Upstream chain — populated by launcher with the actual run_id of the
+# winning HPO trial. Off-policy resume not used (DQN, not SAC) so no
+# replay-buffer dependency.
+upstream:
+  stage: "hpo"
+  run_id: null                                 # filled by `--upstream-run`
+  best_trial_metric: "profit_factor"
+
+data:
+  source: "parquet"
+  file_path: "data/lob_parquet/btcusdt_lob_1s.parquet"
+
+env:
+  simulator: "lob"
+  num_sims: 4096
+  num_sims_eval: 64
+  num_ignore_step: 60
+  max_position: 1
+  step_gap: 2                                  # overridden by upstream HPO
+  slippage: 7.0e-7
+  seq_len: 3600
+  stop_loss_thresh: 1.0e-3
+
+  # M1-M2 LOCKED params (carried from HPO; values pinned here for clarity)
+  taker_fee: 5.0e-4
+  maker_fee: 2.0e-4
+  per_trade_penalty_bps: 0.5
+  holding_bonus: 1.0e-7
+  maker_bias: true
+  fill_alpha_ofi: 2.0
+  fill_beta_spread: 1.0
+  fill_gamma_age: -0.05
+  limit_max_age: 60
+  max_idle_bars: 1800
+
+features:
+  norm_span: 120
+  momentum_window: 5
+  vol_window: 30
+
+agent:
+  net_dims: [256, 256]
+  gamma: 0.995
+  explore_rate: 0.02
+  state_value_tau: 0.01
+  soft_update_tau: 5.0e-4
+  learning_rate: 1.0e-4
+  batch_size: 1024
+  repeat_times: 2
+  reward_scale: 4096
+  clip_grad_norm: 3.0
+
+ensemble:
+  agent_classes: ["D3QN", "DoubleDQN", "TwinD3QN"]
+  voting: "q_average"
+
+throughput_gate:
+  enabled: true
+  n_warmup_steps: 20000
+  max_fills_per_episode: 150
+  min_fills_per_episode: 10
+
+l1_multiseed:
+  enabled: true
+  seeds: [42, 123, 456, 789, 2025, 3141, 7777, 9999, 12345, 31337]
+  steps_per_seed: 320000                       # full training budget per seed
+  parallel_seeds: 4                            # 4 concurrent on a 4090
+  auto_extend_to_n_20:
+    enabled: true                              # S488 escalation rule
+    extra_seeds: [54321, 65432, 76543, 87654, 98765,
+                  101010, 202020, 303030, 404040, 505050]
+  promote_top_k: 3                             # top-3 by val PF → Stage 2.5
+
+# ---------------------------------------------------------------------------
+# Gates (Stage 2 subset)
+# ---------------------------------------------------------------------------
+gates:
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_cv_ambiguous: [0.22, 0.38]             # S488 pre-committed escalation
+  l1_pf_floor: 1.0                             # per-seed median PF >= 1.0
+
+  # v2.2 declarations (advisory at L1)
+  drift:
+    window_bars: 1800
+    min_bars_before_check: 600
+    deadband_frac_warn: 0.85
+    deadband_frac_crit: 0.95
+    saturation_frac_warn: 0.20
+    saturation_frac_crit: 0.40
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  enabled: true
+  entity: "bigcan-chiwin-technology"
+  project: "FinRL-Pro-DS"
+  tags: ["alphaseek-v3", "l1-multiseed", "lob-scalping"]
+  consolidate: true                            # S488 one-run-per-experiment
