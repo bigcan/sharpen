@@ -12,10 +12,33 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import Optional
 
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+
+def _coerce_bar_time_to_utc_datetime(bar_time) -> Optional[datetime]:
+    """Normalize a ``bar_time`` kwarg to a tz-aware UTC ``datetime``.
+
+    Accepts:
+      - ``None`` → returns ``None`` (caller dispatches to legacy fallback).
+      - ``int``/``float`` → treated as epoch seconds (UTC).
+      - ``datetime`` (tz-aware) → converted to UTC.
+      - ``datetime`` (tz-naive) → defensively interpreted as UTC, not local.
+
+    Why a helper: the EOD trailing-DD path and the daily-turnover reset path
+    both need identical bar_time handling; inlining it twice invites drift.
+    """
+    if bar_time is None:
+        return None
+    if isinstance(bar_time, (int, float)):
+        return datetime.fromtimestamp(float(bar_time), tz=timezone.utc)
+    if bar_time.tzinfo is None:
+        return bar_time.replace(tzinfo=timezone.utc)
+    return bar_time.astimezone(timezone.utc)
 
 
 @dataclass
@@ -84,6 +107,9 @@ class RiskState:
     # FIX RSK-01: Declare field properly — was dynamically added via setattr,
     # which breaks frozen dataclasses and confuses static analysis.
     last_day_close_value: float = 0.0
+    # S506 Option B: UTC date "YYYYMMDD" of the last daily-turnover reset.
+    # Empty string before the first reset; aligns with last_eod_date semantics.
+    last_turnover_reset_date: str = ""
 
 
 class CryptoRiskManager:
@@ -166,13 +192,8 @@ class CryptoRiskManager:
         elif self.config.eod_trailing_drawdown:
             # Prop firm EOD mode: peak only updates at end-of-day boundary.
             # Requires bar_time kwarg or falls back to tick-by-tick.
-            from datetime import datetime, timezone
-            bar_time = kwargs.get("bar_time")
-            if bar_time is not None:
-                if isinstance(bar_time, (int, float)):
-                    dt = datetime.fromtimestamp(bar_time, tz=timezone.utc)
-                else:
-                    dt = bar_time
+            dt = _coerce_bar_time_to_utc_datetime(kwargs.get("bar_time"))
+            if dt is not None:
                 today = dt.strftime("%Y%m%d")
                 if today != self.state.last_eod_date:
                     # FIX CRM-01: Day boundary — update EOD peak using the
@@ -275,17 +296,33 @@ class CryptoRiskManager:
                             modified *= min(overall_scale, 1.0)
 
         # --- Check 4: Daily turnover limit ---
-        # "daily" = self._reset_bars consecutive bars, scaled by bar_interval_minutes
-        # (1H→24, 15min→96, 3min→480). Does not align with UTC midnight; acceptable
-        # for risk budgeting. Pre-S498 this was hardcoded at 24 bars across all intervals.
+        # S506 Option B: UTC-midnight-anchored reset when ``bar_time`` is
+        # supplied (matches eod_trailing_drawdown semantics and is robust to
+        # signal_gate / funding_rate_gate / deadband upstream-gating that
+        # otherwise stretches a call-count window across multiple calendar
+        # days — the S495-cont sg1-xauusd / S506 gmgp1-btc reproducers).
+        # Falls back to the S498 Option A bar-interval-aware call-count
+        # reset when no ``bar_time`` is supplied (e.g., unit tests, future
+        # research harnesses) — preserves backwards-compat bit-for-bit.
         delta = np.abs(modified - positions).sum()
 
-        # M13 fix: Reset BEFORE incrementing to get exactly _reset_bars per cycle
-        if self.state.bars_since_day_start >= self._reset_bars:
-            self.state.daily_turnover_accumulated = 0.0
-            self.state.daily_cost_accumulated = 0.0
-            self.state.bars_since_day_start = 0
-        self.state.bars_since_day_start += 1
+        bar_dt = _coerce_bar_time_to_utc_datetime(kwargs.get("bar_time"))
+        if bar_dt is not None:
+            today = bar_dt.strftime("%Y%m%d")
+            if today != self.state.last_turnover_reset_date:
+                self.state.daily_turnover_accumulated = 0.0
+                self.state.daily_cost_accumulated = 0.0
+                # bars_since_day_start retained as legacy diagnostic only
+                self.state.bars_since_day_start = 0
+                self.state.last_turnover_reset_date = today
+            self.state.bars_since_day_start += 1
+        else:
+            # M13 fix: Reset BEFORE incrementing to get exactly _reset_bars per cycle
+            if self.state.bars_since_day_start >= self._reset_bars:
+                self.state.daily_turnover_accumulated = 0.0
+                self.state.daily_cost_accumulated = 0.0
+                self.state.bars_since_day_start = 0
+            self.state.bars_since_day_start += 1
 
         pre_delta_accumulated = self.state.daily_turnover_accumulated
 
