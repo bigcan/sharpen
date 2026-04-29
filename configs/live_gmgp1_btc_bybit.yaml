@@ -106,6 +106,7 @@ risk:
   max_position_pct: 1.0            # Single asset = 100% allowed
   funding_rate_alert: 0.001        # Alert if |rate| > 0.1% per 8h
   min_margin_reserve_pct: 0.10     # Keep 10% margin reserve
+  daily_turnover_limit: 10.0       # S495 hotfix: CryptoRiskManager resets every 24 check() calls, not 24h; default 4.0 chokes 15-min sub-32%-decision-rate strategies. See project_live_turnover_cap_calibration_s495.md.
 
 # --- WandB Monitoring ---
 wandb:
