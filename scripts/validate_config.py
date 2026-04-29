@@ -814,6 +814,31 @@ def check_drift_baseline_manifest_schema(cfg: dict, r: ValidationResult) -> None
         )
 
 
+def check_turnover_limit_explicit(cfg: dict, r: ValidationResult) -> None:
+    """S506 Option B: structural fix uses UTC-midnight-anchored turnover reset.
+
+    The S495-cont hotfix (`risk.daily_turnover_limit: 10.0`) was added to
+    several live configs to mask the call-count-based reset stretching
+    "daily" across 2-3 calendar days under signal_gate / deadband gating.
+    With Option B in place, the override is no longer needed and is likely
+    vestigial. WARN (not FAIL) so operators with genuinely high-turnover
+    strategies can still cap explicitly. See
+    `.agent/artifacts/turnover_cap_structural_fix_spec.md` §5 Stage 3 for
+    the documented removal order.
+    """
+    risk = cfg.get("risk", {}) or {}
+    if "daily_turnover_limit" not in risk:
+        return  # using runner default 4.0 — fine
+    val = risk["daily_turnover_limit"]
+    if val == 10.0:
+        r.warn(
+            f"risk.daily_turnover_limit={val} matches the S495-cont hotfix "
+            "value. Verify whether this override is still needed after the "
+            "S506 structural UTC-midnight reset "
+            "(.agent/artifacts/turnover_cap_structural_fix_spec.md)."
+        )
+
+
 STAGE_CHECKS = {
     "data-prep": [],
     "hpo": [check_hpo],
@@ -821,7 +846,7 @@ STAGE_CHECKS = {
     "ensemble-confirm": [check_ensemble_confirm],
     "wf": [check_wf],
     "oos": [],
-    "paper-deploy": [check_paper_deploy],
+    "paper-deploy": [check_paper_deploy, check_turnover_limit_explicit],
 }
 
 

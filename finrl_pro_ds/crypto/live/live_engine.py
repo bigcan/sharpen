@@ -896,6 +896,9 @@ class LiveTradingEngine:
             margin_balance=self._portfolio_value * 0.95,  # Conservative estimate
             positions=np.array([self._current_position]),
             funding_rates=np.array([self._current_funding_rate]),
+            # S506 Option B: enables UTC-midnight-anchored daily-turnover reset.
+            # bar_time is in scope from _trading_step_inner signature.
+            bar_time=bar_time,
         )
         target_position = float(checked_action[0])
 
