@@ -1338,10 +1338,18 @@ class CTraderBroker:
             available = total_equity - used_margin
             self._portfolio_value = total_equity
 
+            # S510 forensics: expose components so the engine sanity guard can
+            # log a breakdown when a phantom equity is rejected. Disambiguates
+            # protobuf mis-pairing (balance spike) from stale-mid_price orphan
+            # PnL (unrealized_pnl spike).
             return {
                 "total_equity": total_equity,
                 "available_balance": available,
                 "used_margin": used_margin,
+                "balance": balance,
+                "unrealized_pnl": unrealized_pnl,
+                "n_positions": n_positions,
+                "mid_price": current_price,
             }
 
         except Exception as e:
@@ -1350,6 +1358,10 @@ class CTraderBroker:
                 "total_equity": self._portfolio_value,
                 "available_balance": self._portfolio_value,
                 "used_margin": 0.0,
+                "balance": 0.0,
+                "unrealized_pnl": 0.0,
+                "n_positions": 0,
+                "mid_price": self._mid_price,
             }
 
     @_with_reconnect

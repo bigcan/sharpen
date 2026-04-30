@@ -1512,11 +1512,22 @@ class LiveTradingEngine:
             if equity > 0:
                 ref = max(self._portfolio_value, self._config_initial_balance)
                 if ref > 0 and equity > 1.5 * ref:
+                    # cTrader exposes balance/unrealized_pnl/n_positions/
+                    # mid_price; other brokers default to None and the log
+                    # collapses to "n/a". Splits a balance spike (protobuf
+                    # mis-pairing) from a unrealized_pnl spike (stale mid +
+                    # broker-side orphan position).
+                    bal = info.get("balance")
+                    upnl = info.get("unrealized_pnl")
+                    n_pos = info.get("n_positions")
+                    mid = info.get("mid_price")
                     logger.warning(
                         f"S510: discarding suspicious broker equity "
                         f"${equity:,.2f} (>1.5× ref ${ref:,.2f}); "
                         f"keeping PV=${self._portfolio_value:,.2f} and "
-                        f"peak=${self._peak_portfolio_value:,.2f}",
+                        f"peak=${self._peak_portfolio_value:,.2f}; "
+                        f"breakdown: balance={bal}, unrealized_pnl={upnl}, "
+                        f"n_positions={n_pos}, mid_price={mid}",
                     )
                     return
                 self._portfolio_value = equity
