@@ -473,15 +473,24 @@ def main() -> int:
 
     log.info("verdict: %s", json.dumps(
         {k: v.get("verdict") for k, v in verdict["hypotheses"].items()}))
-    log.info("report:  %s", report_path.relative_to(PROJECT_ROOT))
-    log.info("verdict json: %s", (out_dir / "verdict.json").relative_to(PROJECT_ROOT))
+
+    def _rel(p: Path) -> str:
+        # Py 3.13 strict relative_to; resolve both sides first to handle
+        # mixed relative/absolute Path objects from out_dir / write_report.
+        try:
+            return str(Path(p).resolve().relative_to(PROJECT_ROOT.resolve()))
+        except ValueError:
+            return str(p)
+
+    log.info("report:  %s", _rel(report_path))
+    log.info("verdict json: %s", _rel(out_dir / "verdict.json"))
 
     if args.write_randd:
         randd = PROJECT_ROOT / "randd_log.md"
         with randd.open("a", encoding="utf-8") as f:
             f.write("\n\n---\n\n")
             f.write(report_path.read_text(encoding="utf-8"))
-        log.info("appended report to %s", randd.relative_to(PROJECT_ROOT))
+        log.info("appended report to %s", _rel(randd))
 
     return 0
 
