@@ -79,23 +79,41 @@ def auto_discover_manifest() -> Path | None:
     return None
 
 
-def poll_wandb_5m(api, entity: str, project: str, study_id: str) -> tuple[int, int, dict]:
+# Inline poll script — fresh subprocess per call avoids the long-lived
+# `wandb.Api()` hang that bit S508/S509 watchers (api.runs() silently freezes
+# after hours of reuse, suspected graphql/HTTP pool exhaustion). Mirrors the
+# pattern in run_data_window_study.py and C:/tmp/poll_wandb_budget.py.
+_POLL_PY = (
+    "import json, sys, wandb\n"
+    "api = wandb.Api(timeout=30)\n"
+    "entity, project, sid = sys.argv[1:4]\n"
+    "runs = list(api.runs(f'{entity}/{project}', filters={'$and': [\n"
+    "    {'tags': {'$in': ['volume-study']}},\n"
+    "    {'tags': {'$in': ['budget-5m']}},\n"
+    "    {'tags': {'$in': [f'study-id-{sid}']}},\n"
+    "]}))\n"
+    "states = [r.state for r in runs]\n"
+    "counts = {s: states.count(s) for s in set(states)}\n"
+    "terminal = sum(1 for s in states if s in ('finished','crashed','failed'))\n"
+    "print(json.dumps({'n': len(runs), 'terminal': terminal, 'counts': counts}))\n"
+)
+
+
+def poll_wandb_5m(entity: str, project: str, study_id: str) -> tuple[int, int, dict]:
     """Returns (n_runs_total, n_terminal, state_counts) for the 5M cell.
 
-    Terminal = states {'finished', 'crashed', 'failed'}. Wandb API uses tag
-    array filters identical to the dispatcher's wait_runs_finished.
+    Terminal = states {'finished', 'crashed', 'failed'}. Spawns a fresh
+    subprocess per call to dodge the long-lived wandb.Api() hang.
     """
-    runs = list(api.runs(f"{entity}/{project}", filters={
-        "$and": [
-            {"tags": {"$in": ["volume-study"]}},
-            {"tags": {"$in": ["budget-5m"]}},
-            {"tags": {"$in": [f"study-id-{study_id}"]}},
-        ],
-    }))
-    states = [r.state for r in runs]
-    counts = {s: states.count(s) for s in set(states)}
-    terminal = sum(1 for s in states if s in ("finished", "crashed", "failed"))
-    return len(runs), terminal, counts
+    proc = subprocess.run(
+        [sys.executable, "-c", _POLL_PY, entity, project, study_id],
+        capture_output=True, text=True, timeout=180,
+    )
+    if proc.returncode != 0 or not proc.stdout.strip():
+        raise RuntimeError(
+            f"poll subprocess rc={proc.returncode} stderr={proc.stderr[-300:]!r}")
+    data = json.loads(proc.stdout.strip().splitlines()[-1])
+    return data["n"], data["terminal"], data["counts"]
 
 
 def run_analyzer(manifest_path: Path) -> int:
@@ -199,15 +217,17 @@ def main() -> int:
     logging.info("  watcher log:     %s", log_path)
     logging.info("=" * 70)
 
-    import wandb
-    api = wandb.Api(timeout=60)
-
     deadline = time.time() + args.max_wait_h * 3600
     last_state = None
     while time.time() < deadline:
         try:
             n_runs, terminal, counts = poll_wandb_5m(
-                api, args.entity, args.project, study_id)
+                args.entity, args.project, study_id)
+        except subprocess.TimeoutExpired:
+            logging.warning("poll subprocess hit 180s timeout — retrying in %ds",
+                            args.poll_interval_s)
+            time.sleep(args.poll_interval_s)
+            continue
         except Exception as e:
             logging.warning("WandB poll raised %s — retrying in %ds", e, args.poll_interval_s)
             time.sleep(args.poll_interval_s)
