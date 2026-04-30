@@ -53,12 +53,10 @@ scrape_configs:
         labels:
           strategy: "sg1-xauusd"
           broker: "ctrader"
-      # S498-cont: SG-1 BTC Velotrade Step 5 (DXtrade, seed 42 solo interim).
-      # Active scrape gated on DXtrade creds being populated in docker/live/.env.
       - targets: ["sg1-btc:9109"]
         labels:
           strategy: "sg1-btc"
-          broker: "dxtrade"
+          broker: "binance"
 
   # INACTIVE: PRISM API — PRISM falsified (Session 345)
   # - job_name: "prism"

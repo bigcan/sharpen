@@ -1496,11 +1496,29 @@ class LiveTradingEngine:
         FIX LIVE-03: Track consecutive zero-equity readings. If the broker
         returns 0 repeatedly, it's a real problem (not a glitch). Log critical
         after 3 consecutive zeros so it doesn't go unnoticed.
+
+        S510: sanity guard against transient broker readings that have been
+        observed to come back at ~2× the real equity (cTrader IC Markets demo
+        — symptom: peak ratchets to a value never seen in any logged bar, then
+        every subsequent bar reports a phantom 50% drawdown). Reject readings
+        >1.5× the larger of current PV and config initial_balance — bar-to-bar
+        equity moves on prop-firm paper accounts are bounded by leverage ×
+        intra-bar volatility and never come close to 50%. A real deposit is
+        an operator event that warrants a config bump, not a silent ratchet.
         """
         try:
             info = await self.broker.get_account_info()
             equity = info.get("total_equity", 0)
             if equity > 0:
+                ref = max(self._portfolio_value, self._config_initial_balance)
+                if ref > 0 and equity > 1.5 * ref:
+                    logger.warning(
+                        f"S510: discarding suspicious broker equity "
+                        f"${equity:,.2f} (>1.5× ref ${ref:,.2f}); "
+                        f"keeping PV=${self._portfolio_value:,.2f} and "
+                        f"peak=${self._peak_portfolio_value:,.2f}",
+                    )
+                    return
                 self._portfolio_value = equity
                 self._peak_portfolio_value = max(self._peak_portfolio_value, equity)
                 self._consecutive_zero_equity = 0
