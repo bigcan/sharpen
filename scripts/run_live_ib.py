@@ -82,7 +82,7 @@ def build_components(config: dict):
     """Instantiate all live trading components for IB Gold futures."""
     from finrl_pro_ds.agents.sac.sac_agent import SACAgent
     from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
-    from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder
+    from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder, resolve_norm_warmup_path
     from finrl_pro_ds.crypto.mlops.crypto_risk_manager import (
         CryptoRiskConfig,
         CryptoRiskManager,
@@ -126,6 +126,7 @@ def build_components(config: dict):
 
     # --- Observation Builder (reused from crypto, asset-agnostic) ---
     feat_cfg = config.get("features", {})
+    norm_warmup_path = resolve_norm_warmup_path(config)
     obs_builder = LiveObsBuilder(
         scales=feat_cfg.get("scales", [15, 60, 240]),
         window_size=feat_cfg.get("window_size", 30),
@@ -134,6 +135,7 @@ def build_components(config: dict):
         bootstrap_bars=feat_cfg.get("bootstrap_bars", 30_000),
         obs_mode=feat_cfg.get("obs_mode", "window"),
         summary_feature_indices=feat_cfg.get("summary_feature_indices"),
+        norm_warmup_path=norm_warmup_path,
     )
 
     # --- Bar Clock (CME-aware) ---
