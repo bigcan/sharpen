@@ -314,10 +314,27 @@ def main() -> int:
     # Phase 2: dispatch cells sequentially. Volume Study precedent: poll wandb
     # for terminal state before advancing — avoids stacking concurrent cells
     # onto the same GPU once deploy_bare_metal returns from setup phase.
-    import wandb as _wandb
-    api = _wandb.Api(timeout=60)
+    # Each poll runs in a fresh subprocess to dodge the long-lived api.runs()
+    # hang that bit S508/S509 (volume study, watcher). See randd_log S509.
     project = base_cfg.get("wandb", {}).get("project", "FinRL-Pro-DS")
     entity = base_cfg.get("wandb", {}).get("entity", "bigcan-chiwin-technology")
+
+    _POLL_PY = (
+        "import json, sys, wandb\n"
+        "api = wandb.Api(timeout=30)\n"
+        "entity, project, win, bud, sid = sys.argv[1:6]\n"
+        "runs = list(api.runs(f'{entity}/{project}', filters={'$and': [\n"
+        "    {'tags': {'$in': ['data-window-study']}},\n"
+        "    {'tags': {'$in': [f'window-{win}']}},\n"
+        "    {'tags': {'$in': [f'budget-{bud}']}},\n"
+        "    {'tags': {'$in': [f'study-id-{sid}']}},\n"
+        "]}))\n"
+        "states = [r.state for r in runs]\n"
+        "counts = {s: states.count(s) for s in set(states)}\n"
+        "terminal = sum(1 for s in states if s in ('finished','crashed','failed'))\n"
+        "print(json.dumps({'n': len(runs), 'terminal': terminal,\n"
+        "                  'counts': counts, 'finished': states.count('finished')}))\n"
+    )
 
     def wait_runs_finished(window_slug_: str, budget_label_: str,
                            expected_n: int,
@@ -328,30 +345,45 @@ def main() -> int:
 
         Per artifact compute estimate: 2M-step run ~25 min, 500K-step run
         ~6 min. 8h ceiling = 16-20x slack on the worst cell.
+
+        Fresh subprocess per poll — `wandb.Api()` reuse hangs after hours.
         """
         deadline = time.time() + max_wait_h * 3600
         last_log_state = None
         while time.time() < deadline:
-            runs = list(api.runs(f"{entity}/{project}", filters={
-                "$and": [
-                    {"tags": {"$in": ["data-window-study"]}},
-                    {"tags": {"$in": [f"window-{window_slug_}"]}},
-                    {"tags": {"$in": [f"budget-{budget_label_}"]}},
-                    {"tags": {"$in": [f"study-id-{timestamp}"]}},
-                ],
-            }))
-            states = [r.state for r in runs]
-            counts = {s: states.count(s) for s in set(states)}
-            terminal = sum(1 for s in states if s in ("finished", "crashed", "failed"))
-            cur_state = (len(runs), terminal, tuple(sorted(counts.items())))
+            try:
+                proc = subprocess.run(
+                    [sys.executable, "-c", _POLL_PY,
+                     entity, project, window_slug_, budget_label_, timestamp],
+                    capture_output=True, text=True, timeout=180,
+                )
+                if proc.returncode != 0 or not proc.stdout.strip():
+                    log.warning("poll subprocess failed (rc=%d): %s",
+                                proc.returncode, proc.stderr[-500:])
+                    time.sleep(poll_every_s)
+                    continue
+                data = json.loads(proc.stdout.strip().splitlines()[-1])
+            except subprocess.TimeoutExpired:
+                log.warning("poll subprocess hit 180s timeout — retrying")
+                time.sleep(poll_every_s)
+                continue
+            except Exception as e:
+                log.warning("poll subprocess raised %s — retrying", e)
+                time.sleep(poll_every_s)
+                continue
+
+            n_runs = data["n"]
+            terminal = data["terminal"]
+            counts = data["counts"]
+            cur_state = (n_runs, terminal, tuple(sorted(counts.items())))
             if cur_state != last_log_state:
                 log.info("waiting on cell window=%s budget=%s: "
                          "runs=%d terminal=%d/%d by_state=%s",
-                         window_slug_, budget_label_, len(runs),
+                         window_slug_, budget_label_, n_runs,
                          terminal, expected_n, counts)
                 last_log_state = cur_state
-            if len(runs) >= expected_n and terminal >= expected_n:
-                ok = states.count("finished")
+            if n_runs >= expected_n and terminal >= expected_n:
+                ok = data["finished"]
                 log.info("cell window=%s budget=%s wandb-side complete: "
                          "%d/%d finished, others: %s",
                          window_slug_, budget_label_, ok, expected_n,
