@@ -146,6 +146,33 @@ gates:                                # Protocol v2 §4 — per-workstream numer
   # Recent-OOS stage
   oos_pf_floor: 1.1
 
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds. Validator
+  # (scripts/validate_config.py:check_drift_safemode_gates) enforces presence
+  # of all 8 keys for prop-firm/live-capital workstreams; this config is
+  # tagged 'velotrade'+'propfirm' so the gate is BLOCKING. Values mirror
+  # configs/gmgp1_btc_velotrade_ensemble.gates.yaml (the canonical companion
+  # for this workstream — same window_bars/deadband/saturation/KL thresholds).
+  # Declaration here is required even at HPO stage because the validator runs
+  # check_drift_safemode_gates unconditionally (validate_config.py:864).
+  drift:
+    window_bars: 400                  # ~4 days continuous at 15-min cadence
+    min_bars_before_check: 200        # half-window grace before drift check trusted
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5               # unused on V7 scalar; declared for schema parity
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten via
+  # kill_file (S491 bleed-window lesson), not "halt while holding".
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
 wandb:
   project: "FinRL-Pro-DS"
   tags: ["gmgp1-btc", "BTC", "SAC", "15min", "crypto", "velotrade",
