@@ -1,0 +1,238 @@
+# GMGP1 Training-Data-Window Study (Axis A) — pre-registered hypothesis gates.
+#
+# Read by scripts/analyze_data_window_study.py. Single source of truth for
+# decision rules (project rule: never hardcode gate thresholds in code).
+#
+# Pre-committed BEFORE any run is launched. Do not edit after the first run
+# completes without a decision memo explaining why.
+#
+# Twin to configs/gmgp1_volume_study.gates.yaml. Same statistical protocol;
+# the IV switches from `total_timesteps` to `train_start_date`. G6 is
+# new — tests whether longer history rescues 2M-step overfitting that the
+# Volume Study found at 10mo train.
+
+workstream: "gmgp1_data_window_study"
+test_bed: "gmgp1_sac_btc_15min"
+asset: "BTC"
+exchange: "bybit"
+data_file: "data/btc_usdt_1min_bybit.parquet"
+
+# Axis A sweep — train_start_date variants, train_end_date pinned.
+windows:
+  A_short:
+    train_start_date: "2025-04-06"
+    train_window_months: 6
+  A_base:
+    train_start_date: "2025-01-06"
+    train_window_months: 10
+    note: "matches Volume Study baseline"
+  A_medium:
+    train_start_date: "2024-07-01"
+    train_window_months: 16
+  A_long:
+    train_start_date: "2024-01-01"
+    train_window_months: 22
+
+# Two-budget design — Volume Study early result shows budget axis already
+# saturates past 500K on 10mo train; testing both 500K and 2M at every
+# train_window measures the optimum-budget shift (and rescue, see G6).
+step_budgets: [500000, 2000000]
+seeds: [123, 456, 789, 1024, 2026]
+n_seeds: 5
+n_runs: 40                            # 4 windows x 2 budgets x 5 seeds
+
+# Confound declarations — copied here so the analysis script can sanity-check
+# that all 40 runs share the same controlled variables.
+fixed_hp_source: "configs/gmgp1_volume_study.yaml (v5 HPO 6xluh826 T29)"
+fee_model: "steady_state_5bps_from_step_0"
+data_window:
+  train_end:   "2025-10-31"           # pinned across all variants
+  val:         "2025-11-01 to 2025-11-30"
+  test:        "2025-12-01 to 2025-12-31"
+buffer_size: 500000                   # constant across windows; multiplicity is the IV
+
+# ---------------------------------------------------------------------------
+# Hypotheses & decision rules
+# ---------------------------------------------------------------------------
+
+hypotheses:
+  g1_monotonic_direction:
+    description: >-
+      OOS test PF varies monotonically with `train_window_months` at FIXED
+      budget. Sign UNKNOWN a priori — replay-buffer multiplicity argument
+      [L9] predicts +sign (more data -> less overfitting); regime-decay
+      argument predicts -sign (older data is wrong regime). Run the test
+      independently for each budget level so we don't average across
+      potentially opposite trends.
+    statistic: "kendall_tau"
+    metric: "median_test_pf_per_window"
+    per_budget: true                  # evaluate G1 once per [500K, 2M]
+    tau_min: 0.40                     # |tau| >= 0.40
+    p_max: 0.10
+    decision: "PASS|FAIL|AMBIGUOUS"
+
+  g2_variance_stability:
+    description: >-
+      Per-seed CV(test PF) at A_long is no worse than at A_short. If longer
+      history simply trades multiplicity for sample diversity, variance
+      should not blow up. Variance growth is a flag for buffer-dilution
+      instability (each variant covers fewer regime exposures per seed).
+    statistic: "cv_pf_compare"
+    rule: "cv_pf_at_A_long <= cv_pf_at_A_short"
+    per_budget: true
+
+  g3_regime_decay_flag:
+    description: >-
+      If test PF at A_long drops more than 10% (relative) below A_base at
+      the same budget, regime-decay is dominant — older 2024 BTC data
+      poisons the buffer rather than enriches it. Mirrors the
+      Funding-Arb S508 failure mode for Question A.
+    statistic: "relative_drop"
+    metric: "median_test_pf"
+    rule: "(median(A_long) - median(A_base)) / median(A_base) >= -0.10"
+    triggered_when_violated: true
+    per_budget: true
+
+  g4_significance:
+    description: >-
+      Mann-Whitney U two-sided test on the seed-level test-PF distributions
+      between A_base and A_long, evaluated per budget. Loose alpha (0.10)
+      matches Protocol v2 Stage-2 ambiguity-band convention at small N.
+    statistic: "mann_whitney_u"
+    alternative: "two_sided"
+    p_max: 0.10
+    pair: ["A_base", "A_long"]
+    per_budget: true
+
+  g5_sim_to_live_indirect:
+    description: >-
+      Train->val->test PF degradation ratio (val/test) is a proxy for
+      OOS leakage. If A_long ratio > A_base ratio at fixed budget, longer
+      history is OVER-fitting more, not less — flag despite a possible
+      G1 PASS, since the headline test PF gain may be regime-dependent.
+    metric: "median_val_pf / median_test_pf"
+    rule: "ratio_at_A_long <= ratio_at_A_base"
+    per_budget: true
+
+  g6_overfitting_rescue:
+    description: >-
+      NEW with the 2-budget design. Volume Study showed that on the 10mo
+      train (A_base), test PF DEGRADES from 500K (2.024) to 2M (1.965) —
+      the multiplicity-overfit cliff. Does longer history rescue it? At
+      A_long, is test PF at 2M >= test PF at 500K? If YES, the buffer-
+      multiplicity mechanism is real and exploitable. If NO, overfitting
+      is intrinsic to fixed budget regardless of data size and a bigger
+      structural intervention is needed (e.g., recency-weighted replay,
+      RSNorm, regularization).
+    statistic: "median_pf_compare"
+    rule: "median(test_pf at A_long, 2M) >= median(test_pf at A_long, 500K)"
+    decisive_for: "STRONG GO upgrade"
+
+# ---------------------------------------------------------------------------
+# Significance gate (any pairwise "improvement" claim must pass)
+# ---------------------------------------------------------------------------
+
+significance:
+  test: "mann_whitney_u"
+  alternative: "two_sided"
+  p_max: 0.10
+  rationale: "loose alpha matches Protocol v2 Stage-2 ambiguity-band convention at small N"
+
+# ---------------------------------------------------------------------------
+# Anomaly flags (exclude from G1-G6 stats but report)
+# ---------------------------------------------------------------------------
+
+anomalies:
+  buffer_saturation:
+    description: >-
+      buffer_size=500000 is unchanged across windows. At 6mo train (~17K
+      bars) per-bar multiplicity is ~114x at 2M; at 22mo train (~63K bars)
+      multiplicity drops to ~31x. The IV. Only flag if a seed's
+      critic_loss diverges >10x its 500K-step baseline at the same window.
+    critic_loss_blowup_ratio: 10.0
+    blowup_check_step: 500000
+
+  entropy_collapse:
+    description: "Protocol v2 health gate. Auto-flag any seed whose entropy crashes."
+    entropy_floor: -10.0
+
+  fee_tier_confound:
+    description: >-
+      Bybit may have changed VIP-tier structure between 2024 and 2025; if
+      effective taker tier shifted >0.5bp during the longer-history train
+      windows, document as a potential cause of any A_long advantage. See
+      Risks 1-2 in the research artifact.
+    status: "RESOLVED — no material shift on standard tier 0"
+    resolved_on: "2026-04-29"
+    resolution: >-
+      Web-research check (S508-cont): Bybit's three 2024-2025 fee revisions
+      (2024-08-15, 2025-01-13, 2025-07-xx) all targeted Pro/VIP tiers; the
+      Standard / Tier 0 (retail, non-VIP) USDT perpetual taker fee held
+      steady at 0.055% (5.5bp) throughout the entire 2024-01 -> 2025-10 span
+      covered by the four train_start_date variants. Therefore no
+      window-differential fee confound. Note: project simulation uses
+      5.0bp (0.0005), 0.5bp tighter than the actual Bybit Standard tier
+      5.5bp — a LEVEL shift held fixed across all 40 runs, not a
+      window-dependent confound, so it does not bias the Axis A IV.
+    sources:
+      - "https://announcements.bybit.com/article/updates-on-trading-fee-structure-new-pro-6-level-and-reduced-taker-fees-blt3feaedeb0f604f56/"
+      - "https://announcements.bybit.com/en/article/notice-fee-adjustments-to-enhance-liquidity-and-trading-opportunities-bltdf4747c1884c03f2/"
+      - "https://www.bybit.com/en/help-center/article/Trading-Fee-Structure"
+    manual: false
+
+# ---------------------------------------------------------------------------
+# Decision tree (artifact §"Decision tree on completion (per-budget arm)")
+# ---------------------------------------------------------------------------
+
+decision_tree:
+  STRONG_GO:
+    when: "G6 PASS (longer history rescues 2M overfitting)"
+    action: >-
+      Vindicates buffer-multiplicity mechanism; expands the productive
+      budget range. Re-train GMGP1 paper checkpoint on best
+      [train_window x budget] cell. Re-run Volume Study at A_long to
+      find new optimum. Queue same study for SG-1 + GMGP1-XAUUSD.
+
+  GO:
+    when: "G1 PASS + G2 PASS + G3 NOT triggered (at either budget)"
+    action: >-
+      Re-train GMGP1 paper checkpoint on best [train_window x budget]
+      cell; queue same study for SG-1.
+
+  PARTIAL_GO:
+    when: "G1 PASS at one budget, FAIL at the other"
+    action: >-
+      Optimal budget shifts with train-window size. Pick the cell with
+      best PF + lowest CV; document the optimum-shift finding. Do NOT
+      generalize to other workstreams without re-testing at their HPs.
+
+  DEFER:
+    when: "G1 PASS but G3 triggered, OR G2 FAIL (variance grows)"
+    action: >-
+      Regime-decay or buffer-dilution mechanism dominates breadth gain.
+      Open Architect ticket for recency-weighted FlatReplayBuffer or
+      DEER-style env-discrepancy replay before re-litigating Axis A.
+
+  NO_GO:
+    when: "G1 FAIL at both budgets (no monotone trend)"
+    action: >-
+      Confirms [L1] Fig 2(d) population-level null in our setting.
+      Document and close axis. Implies overfitting is data-independent;
+      bigger intervention needed (RSNorm, regularization, synthetic
+      augmentation [L4]/[L5]).
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+
+outputs:
+  report_markdown: "randd_log.md"     # appended via /sync
+  wandb_report_title: "GMGP1 Data-Window Study Axis A (S508-cont)"
+  decision_memo_if_strong_go: ".agent/memory/decision_train_window_axis_a.md"
+  pf_surface_artifact: ".agent/artifacts/data_window_study_pf_surface.md"
+
+provenance:
+  drafted_on: "2026-04-29"
+  research_artifact: ".agent/artifacts/training_data_scaling_research.md"
+  upstream_hp_run: "6xluh826"
+  twin_study: "configs/gmgp1_volume_study.gates.yaml"
