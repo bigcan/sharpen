@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from finrl_pro_ds.monitoring.kill_file import (
+    REASON_AGREEMENT_DECAY_CRIT,
     REASON_DRIFT_CRIT,
     REASON_LEGACY,
     REASON_OPERATOR,
@@ -185,6 +186,31 @@ def test_old_crit_past_window_not_repeat():
     locked, reason = should_lockout(payload, None)
     assert locked is True
     assert "REPEAT-CRIT" not in reason
+
+
+# ---------- agreement_decay_crit (v2.3) participates in repeat-CRIT lockout ---
+
+
+def test_repeat_agreement_decay_crit_locks_out_without_override(tmp_path: Path):
+    """v2.3: agreement_decay_crit triggers same repeat-CRIT semantics as drift_crit."""
+    kf = tmp_path / "kf"
+    ov = tmp_path / "kf.override"
+    write_kill_file(kf, reason=REASON_AGREEMENT_DECAY_CRIT, detail="1st")
+    write_kill_file(kf, reason=REASON_AGREEMENT_DECAY_CRIT, detail="2nd")
+    payload = read_kill_file(kf)
+    locked, reason = should_lockout(payload, ov)
+    assert locked is True
+    assert "REPEAT-CRIT LOCKOUT" in reason
+    assert REASON_AGREEMENT_DECAY_CRIT in reason
+
+
+def test_single_agreement_decay_crit_locks_out(tmp_path: Path):
+    kf = tmp_path / "kf"
+    write_kill_file(kf, reason=REASON_AGREEMENT_DECAY_CRIT, detail="silent death")
+    payload = read_kill_file(kf)
+    locked, reason = should_lockout(payload, None)
+    assert locked is True
+    assert REASON_AGREEMENT_DECAY_CRIT in reason
 
 
 # ---------- clear_kill_file --------------------------------------------------

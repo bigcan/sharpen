@@ -14,6 +14,7 @@ from scripts.validate_config import (  # noqa: E402
     check_drift_baseline_manifest_schema,
     check_legacy_prop_firm_block,
     check_static_peak_consistency,
+    check_v23_agreement_decay_gates,
 )
 
 
@@ -332,3 +333,109 @@ def test_baseline_manifest_check_strips_app_prefix(monkeypatch, tmp_path):
         _prop_firm_cfg("/app/baselines/x/seed_report.json"), r,
     )
     assert any("challenge_target_hit_rate_by_seed" in w for w in r.warnings)
+
+
+# ---------------------------------------------------------------------------
+# check_v23_agreement_decay_gates  (v2.3 §8.2-extension)
+# ---------------------------------------------------------------------------
+
+
+_FULL_AGREEMENT_GATES = {
+    "agreement_flat_delta_warn": 0.20,
+    "agreement_flat_delta_crit": 0.40,
+    "agreement_flat_window_bars": 2000,
+}
+
+
+def _ensemble_cfg(rule: str, *, prop_firm: bool = True, gates: dict | None = None) -> dict:
+    tags = ["live"]
+    if prop_firm:
+        tags.append("FTMO")
+    return {
+        "wandb": {"tags": tags},
+        "agent": {"ensemble": {"bundle_path": "x.tar.gz", "aggregation_rule": rule}},
+        "gates": {"drift": dict(gates or {})},
+    }
+
+
+def test_agreement_decay_skipped_for_non_prop_firm():
+    r = ValidationResult()
+    check_v23_agreement_decay_gates(
+        _ensemble_cfg("ens_agreement", prop_firm=False), r,
+    )
+    assert r.failures == []
+    assert r.passed == []
+
+
+def test_agreement_decay_skipped_for_non_consensus_rule():
+    r = ValidationResult()
+    check_v23_agreement_decay_gates(
+        _ensemble_cfg("ens_mean", prop_firm=True), r,
+    )
+    assert r.failures == []
+    assert r.passed == []
+
+
+def test_agreement_decay_fails_when_keys_missing_for_consensus_rule():
+    r = ValidationResult()
+    check_v23_agreement_decay_gates(
+        _ensemble_cfg("ens_agreement", prop_firm=True), r,
+    )
+    assert any("agreement_flat" in f for f in r.failures)
+    assert any("ens_agreement" in f for f in r.failures)
+
+
+def test_agreement_decay_fails_when_partial_keys_present():
+    r = ValidationResult()
+    check_v23_agreement_decay_gates(
+        _ensemble_cfg(
+            "ens_majority", prop_firm=True,
+            gates={"agreement_flat_delta_warn": 0.20},
+        ),
+        r,
+    )
+    assert any("agreement_flat_delta_crit" in f for f in r.failures)
+
+
+def test_agreement_decay_passes_with_all_keys():
+    r = ValidationResult()
+    check_v23_agreement_decay_gates(
+        _ensemble_cfg("ens_agreement", prop_firm=True, gates=_FULL_AGREEMENT_GATES),
+        r,
+    )
+    assert r.failures == []
+    assert any("agreement-decay keys" in p for p in r.passed)
+
+
+def test_agreement_decay_warn_ge_crit_rejected():
+    r = ValidationResult()
+    check_v23_agreement_decay_gates(
+        _ensemble_cfg(
+            "ens_agreement", prop_firm=True,
+            gates={
+                "agreement_flat_delta_warn": 0.50,
+                "agreement_flat_delta_crit": 0.30,
+                "agreement_flat_window_bars": 2000,
+            },
+        ),
+        r,
+    )
+    assert any("warn < crit" in f for f in r.failures)
+
+
+def test_agreement_decay_window_too_small_rejected():
+    r = ValidationResult()
+    check_v23_agreement_decay_gates(
+        _ensemble_cfg(
+            "ens_agreement", prop_firm=True,
+            gates={
+                "agreement_flat_delta_warn": 0.20,
+                "agreement_flat_delta_crit": 0.40,
+                "agreement_flat_window_bars": 50,
+            },
+        ),
+        r,
+    )
+    assert any("too small" in f for f in r.failures)
+
+

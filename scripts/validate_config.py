@@ -711,6 +711,10 @@ def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
     # different host and the file may not be present at validation time.
     check_drift_baseline_manifest_schema(cfg, r)
 
+    # v2.3 (S514) §8.2-extension blocker for ensemble-deployed prop-firm
+    # strategies that use a consensus aggregation rule.
+    check_v23_agreement_decay_gates(cfg, r)
+
 
 def check_challenge_block(cfg: dict, r: ValidationResult) -> None:
     """Validate the ``challenge:`` block when present (paper-deploy stage).
@@ -940,6 +944,81 @@ def check_report_schema(cfg: dict, r: ValidationResult) -> None:
             )
     if checked:
         r.ok(f"manifest schema OK on {checked} report(s)")
+
+
+_V23_AGREEMENT_DECAY_KEYS = (
+    "agreement_flat_delta_warn",
+    "agreement_flat_delta_crit",
+    "agreement_flat_window_bars",
+)
+_CONSENSUS_RULES = ("ens_agreement", "ens_majority")
+
+
+def _resolve_ensemble_rule(cfg: dict) -> str | None:
+    """Return the live aggregation rule, preferring config override over bundle.
+
+    The live config may either pin ``agent.ensemble.aggregation_rule`` (the
+    canonical case) or rely on the bundle's manifest ``chosen_rule``. We
+    can't unpack the bundle here — paper-deploy validation often runs
+    without the bundle file being locally present — so we only inspect
+    the config-side declaration. Returns None when no rule can be inferred.
+    """
+    ens = (cfg.get("agent", {}) or {}).get("ensemble") or {}
+    rule = ens.get("aggregation_rule") or ens.get("rule")
+    if isinstance(rule, str) and rule:
+        return rule
+    return None
+
+
+def check_v23_agreement_decay_gates(cfg: dict, r: ValidationResult) -> None:
+    """v2.3 §8.2-extension agreement-decay gate-key presence.
+
+    Mandatory when:
+      * workstream is prop-firm / live-capital, AND
+      * live agent uses a consensus aggregation rule (``ens_agreement`` /
+        ``ens_majority``).
+    The agreement-decay tracker is the silent-death detector for these
+    rules (see Protocol v2 §4.5 trigger #4); shipping without the
+    threshold declarations means a misconfigured live deploy could go
+    undetected for thousands of bars.
+    """
+    if not _is_prop_firm(cfg):
+        return
+    rule = _resolve_ensemble_rule(cfg)
+    if rule not in _CONSENSUS_RULES:
+        return  # non-consensus rule → tracker is no-op; gates are advisory
+
+    gates = cfg.get("gates", {}) or {}
+    drift_gates = gates.get("drift") or {}
+
+    missing = [k for k in _V23_AGREEMENT_DECAY_KEYS if k not in drift_gates]
+    if missing:
+        r.fail(
+            f"gates.drift missing v2.3 agreement-decay key(s): {missing} — "
+            f"required for ensemble rule {rule!r} (Protocol v2 §8.2 ext / "
+            f"§4.5 Stage 2.5-R trigger #4). Defaults: warn=0.20, crit=0.40, "
+            f"window_bars=2000."
+        )
+        return
+    r.ok(
+        f"gates.drift has all {len(_V23_AGREEMENT_DECAY_KEYS)} v2.3 "
+        f"agreement-decay keys (rule={rule})"
+    )
+
+    # Sanity on declared thresholds.
+    warn = drift_gates["agreement_flat_delta_warn"]
+    crit = drift_gates["agreement_flat_delta_crit"]
+    if not (0 < float(warn) < float(crit) < 1.0):
+        r.fail(
+            f"gates.drift.agreement_flat_delta_warn={warn} / _crit={crit}: "
+            f"must satisfy 0 < warn < crit < 1.0"
+        )
+    window = drift_gates["agreement_flat_window_bars"]
+    if int(window) < 100:
+        r.fail(
+            f"gates.drift.agreement_flat_window_bars={window} too small — "
+            f"minimum 100 (default 2000); short windows generate false CRITs"
+        )
 
 
 STAGE_CHECKS = {
