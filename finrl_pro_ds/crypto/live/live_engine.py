@@ -41,6 +41,9 @@ import torch
 
 from finrl_pro_ds.monitoring import (
     ActionDriftTracker,
+    AgreementDecayTracker,
+    CONSENSUS_RULES,
+    REASON_AGREEMENT_DECAY_CRIT,
     REASON_DRIFT_CRIT,
     read_kill_file,
     should_lockout,
@@ -143,6 +146,89 @@ def _init_drift_tracker(config: dict) -> Optional[ActionDriftTracker]:
     logger.info(
         f"ActionDriftTracker active: baseline={'YES' if baseline else 'LOG_ONLY'} "
         f"window={tracker.window_bars} warmup={tracker.min_bars_before_check}",
+    )
+    return tracker
+
+
+def _init_agreement_decay_tracker(
+    config: dict,
+    agent,
+) -> Optional[AgreementDecayTracker]:
+    """Build a Protocol v2.3 §8.2-extension AgreementDecayTracker.
+
+    Returns None (tracker disabled) when:
+      * the live agent isn't a consensus-rule ensemble (`ens_agreement` /
+        `ens_majority`), OR
+      * `drift.enabled` is false (we piggy-back on the same enable flag —
+        gating the silent-death detector while running drift in LOG_ONLY
+        is incoherent), OR
+      * the baseline file is missing / has no `ensemble_eval_distribution`.
+
+    Baseline is the post-aggregation `deadband_frac` from
+    `ensemble_report.json → ensemble_eval_distribution`. The same
+    `drift.baseline_path` that feeds ActionDriftTracker is reused so the
+    operator declares ONE artifact path.
+    """
+    rule = getattr(agent, "aggregation_rule", None)
+    if rule not in CONSENSUS_RULES:
+        return None
+
+    drift_cfg = config.get("drift") or {}
+    if not drift_cfg.get("enabled", False):
+        return None
+
+    baseline_flat: Optional[float] = None
+    baseline_path = drift_cfg.get("baseline_path")
+    if baseline_path:
+        try:
+            with open(baseline_path, encoding="utf-8") as f:
+                payload = json.load(f)
+            ens = payload.get("ensemble_eval_distribution")
+            if isinstance(ens, dict) and "deadband_frac" in ens:
+                baseline_flat = float(ens["deadband_frac"])
+            else:
+                logger.warning(
+                    f"agreement-decay baseline at {baseline_path} has no "
+                    f"ensemble_eval_distribution.deadband_frac — running in "
+                    f"LOG_ONLY",
+                )
+        except (OSError, json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.warning(
+                f"agreement-decay baseline load failed ({e}) — running in "
+                f"LOG_ONLY",
+            )
+
+    gates_drift = (config.get("gates") or {}).get("drift") or {}
+
+    def _pick(key: str, default: float) -> float:
+        for src in (drift_cfg, gates_drift):
+            if key in src:
+                return float(src[key])
+        return float(default)
+
+    deadband = float(
+        getattr(agent, "deadband", None)
+        or config.get("trading", {}).get("deadband_threshold")
+        or config.get("env", {}).get("deadband_threshold", 0.25),
+    )
+
+    window_bars = int(_pick("agreement_flat_window_bars", 2000))
+    tracker = AgreementDecayTracker(
+        baseline_flat_frac=baseline_flat,
+        rule=rule,
+        deadband=deadband,
+        window_bars=window_bars,
+        min_bars_before_check=int(
+            _pick("agreement_flat_min_bars_before_check", window_bars // 2),
+        ),
+        warn_delta=_pick("agreement_flat_delta_warn", 0.20),
+        crit_delta=_pick("agreement_flat_delta_crit", 0.40),
+    )
+    logger.info(
+        f"AgreementDecayTracker active: rule={rule} "
+        f"baseline={'YES' if baseline_flat is not None else 'LOG_ONLY'} "
+        f"window={tracker.window_bars} warmup={tracker.min_bars_before_check} "
+        f"warn={tracker.warn_delta} crit={tracker.crit_delta}",
     )
     return tracker
 
@@ -397,6 +483,20 @@ class LiveTradingEngine:
         self._drift_tracker = _init_drift_tracker(config)
         self._drift_warn_active = False
         self._drift_last_status = None
+
+        # Protocol v2.3 §8.2-extension agreement-decay tracker. Active only
+        # for ensemble agents whose aggregation_rule is consensus-based
+        # (`ens_agreement` / `ens_majority`). Silent-death detector: when
+        # seeds diverge under regime shift the consensus filter stays flat
+        # → no losses (PF gates don't fire) → capital utilization → 0.
+        # Same WARN-blocks-new-entries / CRIT-flatten plumbing as drift,
+        # but kill_file reason is `agreement_decay_crit` so retrospective
+        # analysis (§4.5 Stage 2.5-R trigger #4) can attribute correctly.
+        self._agreement_decay_tracker = _init_agreement_decay_tracker(
+            config, agent,
+        )
+        self._agreement_decay_warn_active = False
+        self._agreement_decay_last_status = None
 
         # S495-cont prop-firm decoupling: challenge-phase state machine.
         # Only instantiated when config.challenge.enabled=true (live deploy
@@ -868,6 +968,32 @@ class LiveTradingEngine:
                     return
             except Exception as e:  # noqa: BLE001
                 logger.warning(f"drift tracker error (non-fatal): {e}")
+
+        # --- 5a-bis. Agreement-decay tracking (Protocol v2.3 §8.2 ext) ---
+        # Same observe-then-dispatch pattern as the action-drift block above;
+        # the WARN gate reuses _blocked_by_drift_warn (no-new-entries) since
+        # the failure mode is identical from the engine's POV.
+        if self._agreement_decay_tracker is not None:
+            try:
+                ad_report = self._agreement_decay_tracker.observe(
+                    target_position,
+                )
+                await self._apply_agreement_decay_status(ad_report, bar_time)
+                if self._should_stop:
+                    return
+                if (
+                    self._agreement_decay_warn_active
+                    and self._blocked_by_drift_warn(target_position)
+                ):
+                    self._log_step(
+                        bar_time, self._current_position,
+                        traded=False,
+                        skip_reason="agreement_decay_warn_no_new_entries",
+                    )
+                    self._prev_close = current_close
+                    return
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"agreement-decay tracker error (non-fatal): {e}")
 
         # --- 5b. PRISM L2 regime overlay ---
         regime_info: dict = {}
@@ -2344,6 +2470,100 @@ class LiveTradingEngine:
                 )
             self._drift_warn_active = False
         # WARMUP / LOG_ONLY: silent pass-through
+
+    async def _request_agreement_decay_crit(
+        self, report, bar_time: datetime,
+    ) -> None:
+        """Protocol v2.3 §8.2-ext CRIT path (parallel to _request_drift_crit).
+
+        Distinct kill_file reason (`agreement_decay_crit`) so retrospective
+        analysis can attribute the §4.5 Stage 2.5-R retrain trigger #4
+        correctly. Same flatten + stop semantics — silent capital
+        starvation is just as harmful as a true distribution drift.
+        """
+        try:
+            payload = write_kill_file(
+                self._kill_file,
+                reason=REASON_AGREEMENT_DECAY_CRIT,
+                detail=report.reason,
+                extra={
+                    "bar_time": bar_time.isoformat() if bar_time else None,
+                    "rule": report.rule,
+                    "flat_bar_frac_live": report.flat_bar_frac_live,
+                    "flat_bar_frac_baseline": report.flat_bar_frac_baseline,
+                    "flat_bar_frac_delta": report.flat_bar_frac_delta,
+                    "n_bars": report.n_bars,
+                    "trigger": "agreement_decay",  # §4.5 Stage 2.5-R trigger #4
+                },
+            )
+            logger.critical(
+                f"[agreement-decay] CRIT → kill_file written "
+                f"(count={payload.get('count', 1)} at {self._kill_file})",
+            )
+        except OSError as e:
+            logger.critical(
+                f"[agreement-decay] CRIT but kill_file write failed: {e}",
+            )
+
+        try:
+            await self._emergency_flatten()
+        except Exception as e:  # noqa: BLE001
+            logger.critical(
+                f"[agreement-decay] CRIT emergency_flatten raised ({e}) — "
+                f"position may still be open on exchange",
+            )
+        self._request_stop("agreement_decay_crit")
+
+    async def _apply_agreement_decay_status(
+        self, report, bar_time: datetime,
+    ) -> None:
+        """Dispatch a Protocol v2.3 §8.2-ext AgreementDecayReport.
+
+        Mirrors :meth:`_apply_drift_status`: WARN flips
+        ``_agreement_decay_warn_active`` (engine then refuses new entries
+        / flips / size-ups via ``_blocked_by_drift_warn`` — the no-new-
+        entries semantics are identical), CRIT routes through
+        :meth:`_request_agreement_decay_crit`. WARMUP / LOG_ONLY pass
+        through silently except for WandB telemetry.
+        """
+        from finrl_pro_ds.monitoring import AgreementDecayStatus
+
+        status = report.status
+        prev = self._agreement_decay_last_status
+        self._agreement_decay_last_status = status
+
+        if self._wandb_run is not None:
+            try:
+                import wandb
+                wandb.log(
+                    {f"agreement_decay/{k}": v for k, v in report.to_dict().items()
+                     if v is not None and not isinstance(v, str)},
+                    commit=False,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        if status == AgreementDecayStatus.CRIT:
+            if prev != AgreementDecayStatus.CRIT:
+                logger.critical(
+                    f"[agreement-decay] CRIT at bar {self._total_bars}: "
+                    f"{report.reason} (rule={report.rule}, n={report.n_bars})",
+                )
+            await self._request_agreement_decay_crit(report, bar_time)
+        elif status == AgreementDecayStatus.WARN:
+            if not self._agreement_decay_warn_active or prev != AgreementDecayStatus.WARN:
+                logger.warning(
+                    f"[agreement-decay] WARN at bar {self._total_bars}: "
+                    f"{report.reason} (rule={report.rule}, n={report.n_bars})",
+                )
+            self._agreement_decay_warn_active = True
+        elif status == AgreementDecayStatus.OK:
+            if self._agreement_decay_warn_active:
+                logger.info(
+                    f"[agreement-decay] OK at bar {self._total_bars} — clearing WARN",
+                )
+            self._agreement_decay_warn_active = False
+        # WARMUP / LOG_ONLY: silent pass-through (telemetry only)
 
     def _make_wandb_run_id(self) -> str:
         """Generate deterministic WandB run ID from strategy config.

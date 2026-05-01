@@ -25,6 +25,7 @@ logger = logging.getLogger(__name__)
 
 # Well-known reasons — string-typed for forward compat.
 REASON_DRIFT_CRIT = "drift_crit"
+REASON_AGREEMENT_DECAY_CRIT = "agreement_decay_crit"
 REASON_OPERATOR = "operator"
 REASON_LEGACY = "legacy"
 
@@ -130,7 +131,7 @@ def should_lockout(
     override_present = override_path is not None and override_path.exists()
 
     is_repeat_crit = False
-    if reason == REASON_DRIFT_CRIT and count >= count_threshold:
+    if reason in (REASON_DRIFT_CRIT, REASON_AGREEMENT_DECAY_CRIT) and count >= count_threshold:
         try:
             first_ts = datetime.fromisoformat(first_ts_raw) if first_ts_raw else None
         except ValueError:
@@ -144,7 +145,7 @@ def should_lockout(
                 is_repeat_crit = True
                 if not override_present:
                     return True, (
-                        f"REPEAT-CRIT LOCKOUT: drift_crit count={count} "
+                        f"REPEAT-CRIT LOCKOUT: {reason} count={count} "
                         f"within {window.total_seconds()/3600:.1f}h "
                         f"(threshold {count_threshold} in {window_hours}h). "
                         f"override {override_path} absent — engine refuses "
