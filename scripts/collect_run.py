@@ -21,6 +21,15 @@ from datetime import datetime
 
 import wandb
 
+# Force UTF-8 on Windows consoles (cp950/cp1252) so emoji prints in
+# fetch_wandb_run.py don't crash with UnicodeEncodeError. No-op on Linux/macOS.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        try:
+            _stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 # Add project root to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 

@@ -17,6 +17,7 @@ import asyncio
 import logging
 import time
 from datetime import datetime, timedelta, timezone
+from typing import Callable, Optional
 from zoneinfo import ZoneInfo
 
 from finrl_pro_ds.crypto.live.bar_clock import (
@@ -44,7 +45,10 @@ def _get_schedule_hours(dt_utc: datetime) -> tuple[int, int, int, int]:
     Sundays or closing 1 hour late on Fridays.
     """
     server_dt = dt_utc.astimezone(_SERVER_TZ)
-    offset_hours = int(server_dt.utcoffset().total_seconds()) // 3600
+    offset = server_dt.utcoffset()
+    # ZoneInfo always returns a non-None offset for aware datetimes.
+    assert offset is not None
+    offset_hours = int(offset.total_seconds()) // 3600
     # Server midnight (00:00) in UTC
     break_start = (24 - offset_hours) % 24  # 22 winter, 21 summer
     break_end = (break_start + 1) % 24      # 23 winter, 22 summer
@@ -69,11 +73,17 @@ class CFDBarClock:
             # bar_time is guaranteed to be during XAUUSD trading hours
     """
 
+    # Max seconds between health heartbeats during market-closed sleeps.
+    # Mirrors CMEBarClock — keeps /tmp/health_status.json fresh so Docker
+    # HEALTHCHECK stays green through daily rollover + weekend gates.
+    _HEARTBEAT_INTERVAL = 120
+
     def __init__(
         self,
         bar_interval_minutes: int = 15,
         execution_delay_seconds: float = 5.0,
         max_late_seconds: float = 30.0,
+        heartbeat_callback: Optional[Callable[[str], None]] = None,
     ):
         self._inner = BarClock(
             bar_interval_minutes=bar_interval_minutes,
@@ -81,6 +91,8 @@ class CFDBarClock:
             max_late_seconds=max_late_seconds,
         )
         self._skipped_bars = 0
+        # Engine wires this post-construction via `hasattr` check in live_engine.py.
+        self._heartbeat_callback = heartbeat_callback
 
     @property
     def interval(self) -> int:
@@ -131,12 +143,24 @@ class CFDBarClock:
                         f"{next_open.strftime('%Y-%m-%d %H:%M')} UTC"
                     )
 
-                # Sleep until market opens, plus a small buffer
-                # Record clocks for jump detection around long market-closed sleeps
+                # Sleep until market opens, plus a small buffer.
+                # Record clocks for jump detection around long market-closed sleeps.
+                # Sleep in chunks so the heartbeat callback can refresh the
+                # Docker health file (prevents UNHEALTHY + auto-restart during
+                # daily rollover / weekend gates).
                 actual_sleep = max(sleep_secs + 2.0, 0)
                 mono_before = time.monotonic()
                 wall_before = time.time()
-                await asyncio.sleep(actual_sleep)
+                remaining = actual_sleep
+                while remaining > 0:
+                    chunk = min(remaining, self._HEARTBEAT_INTERVAL)
+                    await asyncio.sleep(chunk)
+                    remaining -= chunk
+                    if self._heartbeat_callback is not None:
+                        try:
+                            self._heartbeat_callback("market_closed")
+                        except Exception:
+                            pass  # Non-critical — never block trading loop
                 self._check_gate_clock_jump(wall_before, mono_before)
                 continue
 

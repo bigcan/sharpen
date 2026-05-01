@@ -8,6 +8,7 @@ functionally identical to the inline objective previously defined inside
 import copy
 import gc
 import logging
+import os
 
 import numpy as np
 import optuna
@@ -16,6 +17,7 @@ import wandb
 
 from finrl_pro_ds.hpo.env_factory import create_vector_env
 from finrl_pro_ds.hpo.evaluate import evaluate_for_hpo
+from finrl_pro_ds.logging import trial_namespaced
 
 logger = logging.getLogger("FinRL.HPO")
 
@@ -51,6 +53,20 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
     Returns:
         Optuna objective function: ``(optuna.Trial) -> float``
     """
+
+    # Dispatch: funding-arb uses a different env schema (`config.environment`,
+    # `FundingArbEnv`, DSAC CVaR axes) and doesn't fit the V7/cmgp1 objective
+    # below. Route to the dedicated factory so the distributed HPO stack works
+    # unchanged. Detection is env-type driven — same config key the runner uses.
+    _env_type = (
+        (base_config.get("environment") or {}).get("type")
+        or (base_config.get("env") or {}).get("type")
+    )
+    if _env_type == "funding_arb":
+        from finrl_pro_ds.hpo.funding_arb_objective import make_funding_arb_objective
+        return make_funding_arb_objective(
+            base_config, steps_per_trial, agent_type, device, trial_records,
+        )
 
     def objective(trial):
         _mean_train_reward = float('nan')
@@ -108,7 +124,11 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                 gradient_clip = trial.suggest_float("gradient_clip", bs["gradient_clip"] * (1 - nf), bs["gradient_clip"] * (1 + nf), log=True)
             else:
                 ss = base_config.get("hpo", {}).get("search_space", {})
-                _ss_f = lambda name, lo, hi, **kw: trial.suggest_float(name, ss.get(name, {}).get("low", lo), ss.get(name, {}).get("high", hi), **kw)
+
+                def _ss_f(name, lo, hi, **kw):
+                    bounds = ss.get(name, {})
+                    return trial.suggest_float(name, bounds.get("low", lo), bounds.get("high", hi), **kw)
+
                 lr_actor = _ss_f("lr_actor", 2e-6, 1e-3, log=True)
                 lr_critic = _ss_f("lr_critic", 2e-6, 1e-3, log=True)
                 lr_alpha = _ss_f("lr_alpha", 2e-6, 1e-3, log=True)
@@ -134,6 +154,21 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
             if "reward" not in config.get("env", {}):
                 config["env"]["reward"] = {}
             config["env"]["reward"]["dsr_eta"] = dsr_eta
+
+            # Leverage research axis (plan-a-new-research-lexical-sunrise.md).
+            # Sampled only when hpo.search_space.max_leverage is declared so
+            # legacy configs are unaffected. Bounds are validated upstream by
+            # scripts/validate_config.py:check_max_leverage_bounds [0.5, 5.0].
+            ss = base_config.get("hpo", {}).get("search_space", {})
+            lev_ss = ss.get("max_leverage")
+            if isinstance(lev_ss, dict):
+                lev_lo = float(lev_ss.get("low", 0.5))
+                lev_hi = float(lev_ss.get("high", 3.0))
+                lev_log = bool(lev_ss.get("log", True))
+                max_leverage = trial.suggest_float(
+                    "max_leverage", lev_lo, lev_hi, log=lev_log,
+                )
+                config["env"]["max_leverage"] = max_leverage
 
             # Config-driven batch_size HPO (CMGP1+)
             ss = base_config.get("hpo", {}).get("search_space", {})
@@ -185,6 +220,8 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                 hpo_log[f"{trial_prefix}/max_holding_bars"] = config["env"]["max_holding_bars"]
             if ss.get("batch_size") and "batch_size" in config.get("agents", {}).get("sac", {}):
                 hpo_log[f"{trial_prefix}/batch_size"] = config["agents"]["sac"]["batch_size"]
+            if ss.get("max_leverage") and "max_leverage" in config.get("env", {}):
+                hpo_log[f"{trial_prefix}/max_leverage"] = config["env"]["max_leverage"]
             if config.get("env", {}).get("mdp_version") == "v8":
                 hpo_log[f"{trial_prefix}/reward_mode"] = config["env"]["reward"]["mode"]
             if config.get("env", {}).get("mdp_version") == "v9":
@@ -325,15 +362,21 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
                               config["env"].get("num_envs", 24)), 24)
             env = create_vector_env(config, num_envs=hpo_num_envs, gym_shm=False, use_sync=True)
 
+            # S487 race-fix: trial-unique run_name so co-located replicas
+            # don't clobber each other's checkpoints/sac_run/. Falls back to
+            # a local-only prefix when DHPO_WORKER_ID is unset (serial HPO).
+            _study_name = getattr(trial.study, "study_name", "hpo")
+            _worker_id = os.environ.get("DHPO_WORKER_ID", "local")
+            hpo_run_name = f"{_study_name}/worker_{_worker_id}/trial_{trial.number:04d}"
             if agent_type == "sac":
                 from finrl_pro_ds.training.sac_trainer import SACTrainer
-                trainer = SACTrainer(env, config, device=device, hpo_mode=True)
+                trainer = SACTrainer(env, config, device=device, hpo_mode=True, run_name=hpo_run_name)
             elif agent_type == "ppo":
                 from finrl_pro_ds.training.ppo_trainer import PPOTrainer
-                trainer = PPOTrainer(env, config, device=device, hpo_mode=True)
+                trainer = PPOTrainer(env, config, device=device, hpo_mode=True, run_name=hpo_run_name)
             else:
                 from finrl_pro_ds.training.deepscalper_trainer import DeepScalperTrainer
-                trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True)
+                trainer = DeepScalperTrainer(env, config, device=device, hpo_mode=True, run_name=hpo_run_name)
 
             # V4.2: Evaluate on VALIDATION set (anti-overfitting)
             data_cfg = config.get("data", {})
@@ -389,16 +432,28 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
             if hasattr(trainer, 'episode_rewards') and len(trainer.episode_rewards) > 0:
                 _mean_train_reward = float(np.mean(trainer.episode_rewards))
 
-            # V4.2: Multi-seed eval for robust PF measurement (3 seeds, median)
+            # V4.2: Multi-seed eval for robust PF measurement (3 seeds, median).
+            # B6 fix: also track per-seed eval completion fraction so post-hoc
+            # leverage analysis can detect DD-termination selection bias
+            # (high-L runs hit DD ~L^2 faster → smaller eval sample → biased PF).
             pf_values = []
             tc_values = []
+            completion_pcts = []
+            terminated_early_count = 0
             for eval_seed in [42, 123, 7]:
                 eval_env.reset(seed=eval_seed)
-                pf, tc = evaluate_for_hpo(eval_env, trainer.agent, max_steps=50000, bar_minutes=hpo_bar_minutes)
+                pf, tc, diag = evaluate_for_hpo(
+                    eval_env, trainer.agent,
+                    max_steps=50000, bar_minutes=hpo_bar_minutes,
+                    return_diag=True,
+                )
                 pf_values.append(pf)
                 tc_values.append(tc)
+                completion_pcts.append(diag.get("_debug/eval_completion_pct", 1.0))
+                terminated_early_count += int(diag.get("_debug/eval_terminated_early", 0))
             profit_factor = float(np.median(pf_values))
             trade_count = int(np.median(tc_values))
+            mean_completion_pct = float(np.mean(completion_pcts))
 
             # Activity constraint — kill lazy holding agents
             min_trades = 30
@@ -413,12 +468,20 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
             wandb.log({
                 f"{trial_prefix}/profit_factor": profit_factor,
                 f"{trial_prefix}/trade_count": trade_count,
+                f"{trial_prefix}/eval_mean_completion_pct": mean_completion_pct,
+                f"{trial_prefix}/eval_seeds_terminated_early": terminated_early_count,
                 f"{trial_prefix}/completed": True,
             })
-            logger.info("Trial %d: PF=%.4f, Trades=%d", trial.number, profit_factor, trade_count)
+            logger.info(
+                "Trial %d: PF=%.4f, Trades=%d, EvalCompletion=%.1f%% (early=%d/3)",
+                trial.number, profit_factor, trade_count,
+                mean_completion_pct * 100.0, terminated_early_count,
+            )
 
             trial_records.append({"trial": trial.number, "mean_reward": _mean_train_reward,
                                   "val_pf": profit_factor, "trade_count": trade_count,
+                                  "eval_completion_pct": mean_completion_pct,
+                                  "eval_seeds_terminated_early": terminated_early_count,
                                   "status": "completed", "hps": dict(trial.params)})
             return profit_factor
 
@@ -453,4 +516,8 @@ def make_objective(base_config, steps_per_trial, agent_type, device, trial_recor
             if hasattr(torch, '_dynamo'):
                 torch._dynamo.reset()
 
-    return objective
+    # S488 round-2: each trial's wandb.log calls auto-prefix `hpo/t<N>/*`
+    # when the worker is attached to the coordinator's consolidated run.
+    # Standalone (legacy) mode: no active namespace => pass-through, keys
+    # already built with `trial_prefix` still work unchanged.
+    return trial_namespaced(objective)

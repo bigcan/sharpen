@@ -1,0 +1,122 @@
+# SG-1 XAUUSD Ensemble Q1 2026 OOS Backtest — regime drift quantification
+# Deployed live in sg1-xauusd container (3-way ensemble, rule=ens_agreement).
+# Cloned env params from configs/sg1_xauusd_ftmo_rehpo_wf_oanda.yaml (training cfg).
+#
+# Checkpoints (3-way WF fold-07 ensemble, mounted 2026-04-21):
+#   - WF_seed42_fold_07_20260421_220234/checkpoint_final.pth
+#   - WF_seed2025_fold_07_20260421_214535/checkpoint_final.pth
+#   - WF_seed3141_fold_07_20260421_215709/checkpoint_final.pth
+#
+# Note: fold-7 train ended ~2026-02-06 for these seeds (per SG-1 WF splitter
+# 6/1/1 over 2025-01-06 → 2026-04-15). Jan-1 → Feb-6 is in-sample for each
+# seed individually but the ensemble aggregation is what's actually deployed.
+#
+# Eval: scripts/sg1_xauusd_ensemble_eval.py --config <this> (single-window mode)
+
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-08-06"
+  train_end_date: "2026-02-06"
+  val_start_date: "2026-02-06"
+  val_end_date: "2026-03-06"
+  test_start_date: "2026-01-01"
+  test_end_date: "2026-04-12"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235
+  deadband_threshold: 0.35
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: false
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.009270901804613313
+    dsr_scale: 1.0
+    hindsight_weight: 0.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.03
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 0
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: false
+  num_envs: 1
+
+hpo:
+  enabled: false
+
+ensemble:
+  seeds: [42, 2025, 3141]
+  rule: ens_agreement                  # S489 deployed rule
+  rules: ["solo_42", "solo_2025", "solo_3141",
+          "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
+  seed_pfs: {42: 1.0, 2025: 1.0, 3141: 1.0}  # placeholder; ens_pf_weighted uses these
+  checkpoint_pattern: "checkpoints/WF_seed{seed}_fold_07_20260421_*/checkpoint_final.pth"
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "ensemble", "wf-stage3", "fold-07", "oanda-spot",
+         "q1-2026-oos", "regime-drift"]

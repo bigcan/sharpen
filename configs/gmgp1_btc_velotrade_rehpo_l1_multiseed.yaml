@@ -1,0 +1,141 @@
+# GMGP1-BTC Velotrade re-HPO — Stage 2 L1 multiseed (S489 cont)
+#
+# Path A (in-sample / Bitfinex): same data source as the HPO study. No Path B
+# equivalent for BTC — XAUUSD Path B existed because CME GC proxy differs from
+# the OANDA spot deploy target; BTC's live target (Bybit/Binance) is already
+# consistent with Bitfinex-perp microstructure for re-ranking purposes.
+# If sim-to-live gap shows up at paper, revisit as Path B on Bybit data.
+#
+# Gate (Protocol v2 Stage 2, S488 escalation rule):
+#   - median test PF >= 1.2, all seeds profitable, CV(PF) outside [0.22, 0.38]
+#   - CV inside [0.22, 0.38] = AMBIGUOUS -> auto-extend to N=20
+
+data:
+  file_path: data/bitfinex/btc_usdt_perp_2025_1min.parquet
+  ticker: BTC
+  handler_type: multiscale
+  train_start_date: '2025-01-06'
+  train_end_date: '2025-08-31'
+  val_start_date: '2025-09-01'
+  val_end_date: '2025-10-31'
+  test_start_date: '2025-11-01'
+  test_end_date: '2025-12-31'
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: crypto
+
+env:
+  mdp_version: v7
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005                  # steady-state 5 bps Bybit retail taker
+  deadband_threshold: 0.15           # trial #48
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  gap_detection: true                # keep consistent with HPO stage
+  gap_atr_mult: 3.0
+  reward:
+    mode: dsr
+    dsr_eta: 0.0007696903903377959   # trial #48
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08  # buffered (Velotrade=10%)
+    max_daily_loss_pct: 0.0          # disabled (Velotrade 2-Step no daily loss)
+    eod_hour_utc: 0                  # crypto 24/7, UTC midnight roll
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"               # private_dim=5 (live compat)
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Trial #48 HPs (Optuna study gmgp1_btc_velotrade_rehpo_20260421)
+    lr_actor: 0.0003295003003086035
+    lr_critic: 0.000017992633145705355
+    lr_alpha: 0.000007583094363970812
+    gamma: 0.9654375719893458
+    tau: 0.0000029525905252136697
+    initial_alpha: 0.4972364771289634
+    gradient_clip: 8.408201216723267
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000            # Protocol v2 Stage 2 budget
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: bfloat16
+  torch_compile: true
+  num_envs: 20
+  # seed: set per-run via CLI (--seed N); launcher sweeps
+  # [42, 123, 456, 789, 1024, 1337, 2025, 3141, 5150, 9999]
+
+hpo:
+  enabled: false
+
+gates:                               # Protocol v2 Stage 2 (S488 escalation)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                       # S488: prop-firm workstreams require N>=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]   # S488: pre-committed escalation range
+  ensemble_uplift_min: 1.10          # S493→S495 Stage 2.5 PROMOTE threshold (pre-committed)
+  ensemble_ambiguous_min: 1.05       # S495 AMBIGUOUS floor; below this = SOLO_BEST_FALLBACK
+  ensemble_rule_selection: val_argmax_pf  # S495: pick aggregation rule on val split (was: implicit canonical=ens_agreement)
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+ensemble:
+  # Protocol v2.3 Stage 2.5: gates_file overlay. The Stage 2.5 helper
+  # (run_stage_2_5_val_selection) merges this file's `gates:` block over the
+  # `gates:` block above so v2.3 bootstrap thresholds (P(PF)/P(MDD) >= 0.90)
+  # become effective. Without this overlay the verdict deferred to legacy
+  # uplift (S498-cont GMGP1-BTC AMBIGUOUS_RERUN despite bootstrap evidence).
+  gates_file: "configs/gmgp1_btc_velotrade_ensemble.gates.yaml"
+
+wandb:
+  project: FinRL-Pro-DS
+  tags:
+    - gmgp1-btc
+    - BTC
+    - SAC
+    - 15min
+    - crypto
+    - velotrade
+    - velotrade-wrapped
+    - prop-firm
+    - propfirm
+    - rehpo-trial48
+    - l1-multiseed
+    - steady-state
+    - bitfinex-perp
+    - upstream:gmgp1_btc_velotrade_rehpo_20260421

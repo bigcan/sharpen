@@ -1,0 +1,135 @@
+# GMGP1 Training-Data-Window Study (Axis A) — base config.
+#
+# Research question: at FIXED budget, does a longer `train_start_date` move
+# OOS test PF? Twin to the Volume Study (which sweeps budget at fixed train
+# window). Together the two studies populate a 2D `train_window x budget` PF
+# surface (artifact: .agent/artifacts/training_data_scaling_research.md,
+# §"Theoretical Analysis" — replay-buffer sample-multiplicity prediction).
+#
+# Volume Study early result (4/5 budget arms 2026-04-29): monotone PF
+# *degradation* 500K=2.024 -> 3M=1.790 on 10mo train. Vindicates the
+# multiplicity-driven overfitting mechanism. Axis A asks whether longer
+# train history rescues the overfitting (G6 gate).
+#
+# Sweep design: 4 train-window variants x 2 budgets x 5 seeds = 40 runs.
+#   Variants                 train_start_date   bars (15-min)
+#     A_short  ( ~6 mo)       2025-04-06        ~17K
+#     A_base   (~10 mo)       2025-01-06        ~28K (matches Volume Study)
+#     A_medium (~16 mo)       2024-07-01        ~46K
+#     A_long   (~22 mo)       2024-01-01        ~63K
+#   Budgets:  500_000, 2_000_000
+#   Seeds:    [123, 456, 789, 1024, 2026]   (same as Volume Study)
+#
+# Test bed: GMGP1 SAC BTC 15-min on Bybit. Local parquet covers
+# 2024-01-01 -> 2026-04-06 (manifest dated 2026-04-19, clean).
+# Gold CME is 2025-only and cannot host this experiment without 2024
+# stitching (see artifact §"Codebase Alignment").
+#
+# HPs frozen: v5 HPO `6xluh826` T29 (same as Volume Study). Preserves
+# orthogonality with the budget axis — same agent, swap data.
+#
+# CONFOUND CONTROL:
+#  - Steady-state 5bps Bybit taker fee from step 0 (S464 mandate;
+#    decision_steady_state_fees_pattern.md). NO `fee_schedule:` block
+#    (banned by validate_config.check_no_fee_curriculum).
+#  - Test/val window pinned (2025-11/2025-12) so all 40 runs evaluate on
+#    the same OOS regime. Train_start_date is the ONLY data-axis IV.
+#  - 2024 Bybit BTC fee-tier confound: pre-launch check listed in artifact
+#    §"Mandatory fee-tier confound check" (Risks 1-2).
+#
+# This file is the BASE; scripts/run_data_window_study.py generates 8
+# derived variants (one per [train_start_date, total_timesteps] pair) at
+# launch time and forwards each to scripts/launch_l1_multiseed.py.
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"     # OVERRIDDEN per-window by run_data_window_study.py
+  train_end_date: "2025-10-31"
+  val_start_date: "2025-11-01"
+  val_end_date: "2025-11-30"
+  test_start_date: "2025-12-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005                  # steady-state 5bps Bybit taker from step 0
+  deadband_threshold: 0.35           # v5 6xluh826 T29 (same as Volume Study)
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30             # research-tier; mirrors Volume Study (NOT prop-firm 10%)
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.003159755401614352    # v5 6xluh826 T29
+    dsr_scale: 1.0
+  # NO fee_schedule — banned by validate_config.check_no_fee_curriculum.
+  # NO gap_detection — BTC trades 24/7, no overnight/weekend gaps.
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# v5 HPO `6xluh826` T29 — identical to Volume Study agents.sac block.
+agents:
+  sac:
+    lr_actor: 0.0005462612695421805
+    lr_critic: 0.000866154995794675
+    lr_alpha: 0.0009625164717779418
+    gamma: 0.9535315530021778
+    tau: 0.00212659146992685
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.15930606967484204
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000            # OVERRIDDEN per-budget by run_data_window_study.py
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false                     # HPs locked from 6xluh826 T29
+
+# Validator-required gates (Protocol v2 §4 stage 2 + universal).
+# G1-G6 hypothesis gates are in configs/gmgp1_data_window_study.gates.yaml,
+# read by scripts/analyze_data_window_study.py post-run.
+gates:
+  l1_seeds: 5
+  l1_pf_floor: 1.0                   # research-tier floor; promote-to-paper out of scope
+  l1_pf_cv_max: 0.30
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags:
+    - "gmgp1-v5"
+    - "data-window-study"
+    - "axis-a"
+    - "ablation"
+    - "steady-state-fees"
+    - "research"

@@ -13,9 +13,22 @@
 # loss limit; max_daily_loss_pct=0.0 = disabled per prop_firm_wrapper.py:60,207).
 # 8% trailing matches live risk-manager buffer below Velotrade's 10% limit.
 #
-# Broad search (50 trials, no narrow_mode): T34 HPs were selected under frictionless
-# reward — topology is materially different at 5 bps, no reliable anchor. T34 values
-# kept as starting agents.sac defaults only (informative, not enqueued).
+# Broad search (50 trials, no narrow_mode): parameter topology at 5 bps has no reliable
+# anchor compatible with this config's preconditions. Seed-refresh from SG-1-BTC
+# (donor study `sg1_btc_velotrade_rehpo_20260420`, trial 44 PF=2.30 at 5 bps) was
+# evaluated and REJECTED S489-cont. — see decision_gmgp1_btc_no_seed_refresh.md.
+# Four donor/recipient mismatches (parallel XAUUSD pair has none of these):
+#   (a) Wrapper magnitudes differ: donor 10% trail / 5% penalty-start vs this 8% / 4%.
+#       Reward-landscape shape determines lr_alpha/initial_alpha/dsr_eta convergence;
+#       ±20% narrow band cannot recover the difference.
+#   (b) Venue: donor = Bybit (data/btc_usdt_1min_bybit.parquet), recipient = Bitfinex
+#       perp (data/bitfinex/btc_usdt_perp_2025_1min.parquet). Microstructure differs.
+#   (c) Train window: donor 2024-01 → 2025-06 (18mo), recipient 2025-01 → 2025-08 (8mo).
+#       Donor regime distribution includes 2024 mean-reversion that recipient never sees.
+#   (d) Observation space: donor signal-gated (composite, ~75% pass), recipient ungated.
+#       Action-saturation/entropy/α-tuning shaped by different bar distributions.
+# agents.sac values below are broad-search geometric midpoints (placeholders — overridden
+# by trial.suggest in HPO; only consulted if someone runs non-HPO training on this file).
 # augment_obs: false — live_obs_builder.py hard-codes private_dim=5.
 
 data:
@@ -50,20 +63,21 @@ env:
   random_start: true
   max_drawdown_pct: 0.10              # second-line safety — wrapper is primary
   scales: [15, 60, 240]
+  gap_detection: true                 # S468/S478 Stage 0: data-artifact robustness
+  gap_atr_mult: 3.0                   # zero returns exceeding 3× ATR (non-tradeable)
   reward:
     mode: "dsr"
     dsr_eta: 0.001                    # HPO will sweep
     dsr_scale: 1.0
-  prop_firm:
+  risk:
     enabled: true
-    profit_target_pct: 0.10           # Velotrade 2-Step Step 1 target
     max_trailing_drawdown_pct: 0.08   # buffered (Velotrade=10%)
     max_daily_loss_pct: 0.0           # disabled: Velotrade 2-Step has no daily loss
     eod_hour_utc: 0                   # crypto 24/7 — roll at UTC midnight
     drawdown_penalty_start: 0.04      # quadratic at half the trailing line
     drawdown_penalty_scale: 5.0
-    success_bonus: 10.0
-    augment_obs: false                # keep private_dim=5 (live_obs_builder compat)
+    augment_obs: "off"                # keep private_dim=5 (live_obs_builder compat)
+    static_peak: true
 
 network:
   scale_encoder:
@@ -75,23 +89,26 @@ network:
   fusion_dim: 256
   window_size: 30
 
-# Starting HPs — T34 best trial from prior biased HPO (run 8v4mueuf, PF=2.558 frictionless).
-# Informative only: narrow_mode: false means these are NOT enqueued as Trial 0. Reward
-# topology is different at 5 bps, so HPO searches the full parameter space.
+# Placeholder HPs — geometric midpoints of the broad search space defined in
+# finrl_pro_ds/hpo/objective.py:132-144. narrow_mode: false means these are NOT used
+# as priors by the HPO sampler (every dim resampled per trial). Prior T34 anchors were
+# stripped S489-cont. to avoid confusing this block with an enqueued seed (see header).
+# Non-HPO'd keys (batch_size, buffer_size, learning_starts, update_interval,
+# actor_update_freq, checkpoint_interval) are live — do not change without justification.
 agents:
   sac:
-    lr_actor: 0.00050182
-    lr_critic: 0.000027779
-    lr_alpha: 0.0000035704
-    gamma: 0.97127
-    tau: 0.0038951
+    lr_actor: 4.5e-5                    # geom-mid of [2e-6, 1e-3] log
+    lr_critic: 4.5e-5                   # geom-mid of [2e-6, 1e-3] log
+    lr_alpha: 4.5e-5                    # geom-mid of [2e-6, 1e-3] log
+    gamma: 0.975                        # arith-mid of [0.95, 0.999]
+    tau: 1.4e-4                         # geom-mid of [2e-6, 0.01] log
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.49701
+    initial_alpha: 0.158                # geom-mid of [0.05, 0.5] log
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 3.0198
+    gradient_clip: 3.16                 # geom-mid of [1.0, 10.0] log
     checkpoint_interval: 250000
 
 training:
@@ -104,10 +121,57 @@ training:
 
 hpo:
   enabled: true
-  n_trials: 50                        # broad: 10 random + 40 TPE (per objective.py)
+  objective: "profit_factor"          # BUG-01 / Protocol v2 §4 stage 1
+  trials: 50                          # broad: 10 random + 40 TPE (Protocol v2 naming, was n_trials)
   steps_per_trial: 500000
   narrow_mode: false                  # full parameter space — T34 anchor invalid at 5 bps
   enqueue_baseline: false
+
+gates:                                # Protocol v2 §4 — per-workstream numeric gates
+  # HPO stage
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30        # broad search — more trials before promotion
+  entropy_floor: 0.01                 # training-health hard fails
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  # L1 multi-seed stage
+  l1_seeds: 3                         # Protocol v2 minimum
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.5
+  # Walk-forward stage
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  # Velotrade 2-Step compliance (no daily-loss rail; trailing DD only)
+  velotrade_trailing_dd_buffer_pp: 0.5  # breach if EOD trailing DD > (8% wrapper + 0.5pp) = 8.5%
+  # Recent-OOS stage
+  oos_pf_floor: 1.1
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds. Validator
+  # (scripts/validate_config.py:check_drift_safemode_gates) enforces presence
+  # of all 8 keys for prop-firm/live-capital workstreams; this config is
+  # tagged 'velotrade'+'propfirm' so the gate is BLOCKING. Values mirror
+  # configs/gmgp1_btc_velotrade_ensemble.gates.yaml (the canonical companion
+  # for this workstream — same window_bars/deadband/saturation/KL thresholds).
+  # Declaration here is required even at HPO stage because the validator runs
+  # check_drift_safemode_gates unconditionally (validate_config.py:864).
+  drift:
+    window_bars: 400                  # ~4 days continuous at 15-min cadence
+    min_bars_before_check: 200        # half-window grace before drift check trusted
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5               # unused on V7 scalar; declared for schema parity
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten via
+  # kill_file (S491 bleed-window lesson), not "halt while holding".
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
 
 wandb:
   project: "FinRL-Pro-DS"

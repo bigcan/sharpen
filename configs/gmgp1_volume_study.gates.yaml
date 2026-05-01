@@ -1,0 +1,102 @@
+# GMGP1 Training-Volume Study — pre-registered hypothesis gates.
+#
+# Read by scripts/analyze_volume_study.py. Single source of truth for
+# decision rules (project rule: never hardcode gate thresholds in code).
+#
+# Pre-committed BEFORE any run is launched. Do not edit after the first run
+# completes without a decision memo explaining why.
+
+workstream: "gmgp1_volume_study"
+test_bed: "gmgp1_sac_gc_15min"
+asset: "GC"
+
+step_budgets: [500000, 1000000, 2000000, 3000000, 5000000]
+seeds: [123, 456, 789, 1024, 2026]
+n_seeds: 5
+n_runs: 25
+
+# Confound declarations — copied here so the analysis script can sanity-check
+# that all 25 runs share the same controlled variables.
+fixed_hp_source: "configs/gmgp1_l1_multiseed.yaml (v5 HPO 6xluh826 T29)"
+fee_model: "steady_state_2bps_from_step_0"
+data_window:
+  train: "2025-01-06 to 2025-10-31"
+  val: "2025-11-01 to 2025-11-30"
+  test: "2025-12-01 to 2025-12-31"
+
+# ---------------------------------------------------------------------------
+# Hypotheses & decision rules
+# ---------------------------------------------------------------------------
+
+hypotheses:
+  h1_monotonic_improvement:
+    description: >-
+      OOS test PF improves monotonically with total_timesteps across the
+      5-budget sweep. Implies training-volume is a free improvement lever.
+    statistic: "kendall_tau"
+    metric: "median_test_pf_per_budget"
+    tau_min: 0.6
+    p_max: 0.10
+    decision: "PASS|FAIL|AMBIGUOUS"
+
+  h2_variance_tightens:
+    description: >-
+      Per-seed CV(PF) at the largest budget is no worse than at the smallest.
+      Tests whether more training reduces seed-stochasticity.
+    statistic: "cv_pf_compare"
+    rule: "cv_pf_at_5M <= cv_pf_at_500K"
+
+  h3_overfitting_onset:
+    description: >-
+      Val/test PF gap widens past some budget — overfitting indicator. Gap
+      defined as (median_val_pf - median_test_pf) per budget. Threshold:
+      gap at 5M exceeds 1.5 * gap at 500K.
+    statistic: "val_test_gap_ratio"
+    ratio_threshold: 1.5
+
+  h4_diminishing_returns:
+    description: >-
+      Marginal gain shrinks past 2M steps. If true, recommend trimming the
+      project's canonical 3M L1 retrain to ~2M.
+    rule: "median(test_pf at 5M) - median(test_pf at 3M) < median(test_pf at 2M) - median(test_pf at 1M)"
+
+# ---------------------------------------------------------------------------
+# Significance gate (any pairwise "improvement" claim must pass)
+# ---------------------------------------------------------------------------
+
+significance:
+  test: "mann_whitney_u"
+  alternative: "two_sided"
+  p_max: 0.10
+  rationale: "loose alpha matches Protocol v2 Stage-2 ambiguity-band convention at small N"
+
+# ---------------------------------------------------------------------------
+# Anomaly flags (exclude from H1-H4 stats but report)
+# ---------------------------------------------------------------------------
+
+anomalies:
+  buffer_saturation:
+    description: >-
+      buffer_size=500000 is unchanged across all budgets. At 5M steps the
+      replay buffer turns over ~10x. If a seed's critic_loss diverges >10x
+      its 500K-step baseline, flag as buffer-confounded.
+    critic_loss_blowup_ratio: 10.0
+    blowup_check_step: 500000
+
+  entropy_collapse:
+    description: "Protocol v2 health gate. Auto-flag any seed whose entropy crashes."
+    entropy_floor: -10.0
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+
+outputs:
+  report_markdown: "randd_log.md"            # appended via /sync
+  wandb_report_title: "GMGP1 Volume Study (S500-cont)"
+  decision_memo_if_h1_pass: ".agent/memory/decision_l1_step_budget.md"
+
+provenance:
+  drafted_on: "2026-04-26"
+  plan_file: "~/.claude/plans/new-research-idea-to-piped-starlight.md"
+  upstream_hp_run: "6xluh826"

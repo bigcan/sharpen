@@ -1,0 +1,345 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://chiwin-tech/finrl-pro-ds/manifest.schema.json",
+  "title": "Protocol v2 Stage-2 / Stage-2.5 manifest",
+  "description": "Validates seed_report.json (Stage 2) and ensemble_report.json (Stage 2.5) emitted by the L1 multiseed and ensemble-confirm pipelines. Three protocol versions coexist on disk; selection is keyed on the top-level `protocol` field. See docs/protocol_v2.md §2 + §4.",
+
+  "oneOf": [
+    { "$ref": "#/$defs/seed_report_v2_2" },
+    { "$ref": "#/$defs/ensemble_report_v2_2" },
+    { "$ref": "#/$defs/ensemble_report_v2_3" },
+    { "$ref": "#/$defs/seed_registry_legacy_v1" }
+  ],
+
+  "$defs": {
+    "eval_distribution_block": {
+      "type": "object",
+      "description": "Per-seed or per-ensemble action-distribution summary. Live-monitoring baseline for v2.2 §8.2 drift checks.",
+      "required": [
+        "histogram_bins",
+        "counts",
+        "mean",
+        "std",
+        "entropy",
+        "deadband_frac",
+        "saturation_frac",
+        "n",
+        "by_vol_quartile"
+      ],
+      "properties": {
+        "histogram_bins": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 2
+        },
+        "counts": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "minItems": 1
+        },
+        "mean": { "type": "number" },
+        "std": { "type": "number", "minimum": 0 },
+        "entropy": { "type": "number", "minimum": 0 },
+        "deadband_frac": { "type": "number", "minimum": 0, "maximum": 1 },
+        "saturation_frac": { "type": "number", "minimum": 0, "maximum": 1 },
+        "n": { "type": "integer", "minimum": 0 },
+        "by_vol_quartile": {
+          "type": "object",
+          "required": ["q1", "q2", "q3", "q4"],
+          "properties": {
+            "q1": { "$ref": "#/$defs/eval_distribution_quartile" },
+            "q2": { "$ref": "#/$defs/eval_distribution_quartile" },
+            "q3": { "$ref": "#/$defs/eval_distribution_quartile" },
+            "q4": { "$ref": "#/$defs/eval_distribution_quartile" }
+          }
+        },
+        "regime_cutpoints": {
+          "type": "array",
+          "items": { "type": "number" },
+          "minItems": 3,
+          "maxItems": 3,
+          "description": "Vol-quartile cutpoints (q25, q50, q75) used to bucket by_vol_quartile."
+        },
+        "composition_rule": {
+          "type": "string",
+          "enum": ["ens_mean", "ens_median", "ens_agreement", "ens_majority", "ens_pf_weighted"],
+          "description": "Present on ensemble_eval_distribution only; identifies which aggregation rule produced this distribution."
+        }
+      }
+    },
+
+    "eval_distribution_quartile": {
+      "type": "object",
+      "description": "Vol-bucket sub-distribution. Same shape as the parent except no nested by_vol_quartile.",
+      "required": ["histogram_bins", "counts", "mean", "std", "n"],
+      "properties": {
+        "histogram_bins": { "type": "array", "items": { "type": "number" } },
+        "counts": { "type": "array", "items": { "type": "integer", "minimum": 0 } },
+        "mean": { "type": "number" },
+        "std": { "type": "number", "minimum": 0 },
+        "entropy": { "type": "number", "minimum": 0 },
+        "deadband_frac": { "type": "number", "minimum": 0, "maximum": 1 },
+        "saturation_frac": { "type": "number", "minimum": 0, "maximum": 1 },
+        "n": { "type": "integer", "minimum": 0 }
+      }
+    },
+
+    "seed_keyed_eval_map": {
+      "type": "object",
+      "description": "Keyed by seed-id (stringified integer). At least one entry required.",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[0-9]+$": { "$ref": "#/$defs/eval_distribution_block" }
+      },
+      "additionalProperties": false
+    },
+
+    "challenge_target_per_phase": {
+      "type": "object",
+      "description": "Hit-rate stats of the per-phase profit target across windows of the eval period. v2.4 prop-firm amendment (S495 OQ#5). Each phase entry carries the full hit-rate breakdown: target_pct, n_windows, n_hits, hit_rate, plus bars-to-target distribution.",
+      "minProperties": 1,
+      "patternProperties": {
+        "^(step1|step2|funded)$": { "$ref": "#/$defs/challenge_target_phase_stats" }
+      },
+      "additionalProperties": false
+    },
+
+    "challenge_target_phase_stats": {
+      "type": "object",
+      "required": ["target_pct", "n_windows", "n_hits", "hit_rate"],
+      "properties": {
+        "target_pct": { "type": "number" },
+        "window_bars": { "type": ["integer", "null"] },
+        "n_windows": { "type": "integer", "minimum": 0 },
+        "n_hits": { "type": "integer", "minimum": 0 },
+        "hit_rate": { "type": "number", "minimum": 0, "maximum": 1 },
+        "bars_to_target_per_window": {
+          "type": "array",
+          "items": { "type": ["integer", "null"] }
+        },
+        "bars_to_target_median": { "type": ["number", "null"] },
+        "max_cum_return": { "type": ["number", "null"] }
+      }
+    },
+
+    "seed_keyed_challenge_target_map": {
+      "type": "object",
+      "minProperties": 1,
+      "patternProperties": {
+        "^[0-9]+$": { "$ref": "#/$defs/challenge_target_per_phase" }
+      },
+      "additionalProperties": false
+    },
+
+    "bootstrap_verdict": {
+      "type": "object",
+      "description": "v2.3 §4 Phase 4 — block-bootstrap on per-bar PnL.",
+      "required": [
+        "n_bars",
+        "n_resamples",
+        "block_len_mean",
+        "p_pf_ens_better",
+        "p_mdd_ens_better",
+        "ens_pf_quantiles",
+        "solo_pf_quantiles",
+        "ens_mdd_quantiles",
+        "solo_mdd_quantiles"
+      ],
+      "properties": {
+        "n_bars": { "type": "integer", "minimum": 1 },
+        "n_resamples": { "type": "integer", "minimum": 100 },
+        "block_len_mean": { "type": "number", "exclusiveMinimum": 0 },
+        "p_pf_ens_better": { "type": "number", "minimum": 0, "maximum": 1 },
+        "p_mdd_ens_better": { "type": "number", "minimum": 0, "maximum": 1 },
+        "ens_pf_quantiles": { "$ref": "#/$defs/quantile_triple" },
+        "solo_pf_quantiles": { "$ref": "#/$defs/quantile_triple" },
+        "ens_mdd_quantiles": { "$ref": "#/$defs/quantile_triple" },
+        "solo_mdd_quantiles": { "$ref": "#/$defs/quantile_triple" }
+      }
+    },
+
+    "quantile_triple": {
+      "type": "object",
+      "required": ["q05", "q50", "q95"],
+      "properties": {
+        "q05": { "type": "number" },
+        "q50": { "type": "number" },
+        "q95": { "type": "number" }
+      }
+    },
+
+    "diversity_audit": {
+      "type": "object",
+      "description": "v2.3 §4 Phase 0 — diversity-aware top-K selection record.",
+      "required": [
+        "selected_seeds",
+        "naive_top_k",
+        "differs_from_naive",
+        "diversity_lambda",
+        "selection_score_log",
+        "correlation_matrix",
+        "correlation_seed_order",
+        "pool_size",
+        "k"
+      ],
+      "properties": {
+        "selected_seeds": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 1
+        },
+        "naive_top_k": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 1
+        },
+        "differs_from_naive": { "type": "boolean" },
+        "diversity_lambda": { "type": "number", "minimum": 0 },
+        "selection_score_log": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "correlation_matrix": {
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": { "type": "number", "minimum": -1, "maximum": 1 }
+          }
+        },
+        "correlation_seed_order": {
+          "type": "array",
+          "items": { "type": "integer" }
+        },
+        "pool_size": { "type": "integer", "minimum": 1 },
+        "k": { "type": "integer", "minimum": 1 },
+        "note_pool_too_small": { "type": "string" }
+      }
+    },
+
+    "seed_report_v2_2": {
+      "type": "object",
+      "description": "Stage 2 (L1 multiseed) per-seed report. v2.2 introduced eval_distribution_by_seed; v2.4 added challenge_target_hit_rate_by_seed.",
+      "required": [
+        "protocol",
+        "workstream",
+        "window",
+        "seeds",
+        "eval_distribution_by_seed"
+      ],
+      "properties": {
+        "protocol": { "const": "v2.2_stage_2_seed_report" },
+        "source": { "type": "string" },
+        "workstream": { "type": "string", "minLength": 1 },
+        "window": { "type": "string", "minLength": 1 },
+        "seeds": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 1
+        },
+        "eval_distribution_by_seed": { "$ref": "#/$defs/seed_keyed_eval_map" },
+        "challenge_target_hit_rate_by_seed": { "$ref": "#/$defs/seed_keyed_challenge_target_map" }
+      },
+      "additionalProperties": true
+    },
+
+    "ensemble_report_v2_2": {
+      "type": "object",
+      "description": "Stage 2.5 ensemble-confirm report — v2.2 (point-estimate uplift gate, hardcoded ens_agreement rule, no bootstrap).",
+      "required": [
+        "protocol",
+        "workstream",
+        "window",
+        "chosen_rule",
+        "per_seed_eval_distribution",
+        "ensemble_eval_distribution"
+      ],
+      "properties": {
+        "protocol": { "const": "v2.2_stage_2_5_ensemble_report" },
+        "source": { "type": "string" },
+        "workstream": { "type": "string", "minLength": 1 },
+        "window": { "type": "string", "minLength": 1 },
+        "chosen_rule": {
+          "type": "string",
+          "enum": ["ens_mean", "ens_median", "ens_agreement", "ens_majority", "ens_pf_weighted"]
+        },
+        "per_seed_eval_distribution": { "$ref": "#/$defs/seed_keyed_eval_map" },
+        "challenge_target_hit_rate_by_seed": { "$ref": "#/$defs/seed_keyed_challenge_target_map" },
+        "ensemble_eval_distribution": { "$ref": "#/$defs/eval_distribution_block" },
+        "ensemble_challenge_target_hit_rate": { "$ref": "#/$defs/challenge_target_per_phase" }
+      },
+      "additionalProperties": true
+    },
+
+    "seed_registry_legacy_v1": {
+      "type": "object",
+      "description": "Pre-v2.2 L1 multiseed seed registry: top-level object keyed by seed-id (stringified integer), each entry carrying per-seed run metadata (wandb_run_id, val/test metrics). Carries no `protocol` field. Tolerated for backward compatibility with un-migrated legacy reports.",
+      "minProperties": 1,
+      "not": { "required": ["protocol"] },
+      "patternProperties": {
+        "^[0-9]+$": {
+          "type": "object",
+          "required": ["seed"],
+          "properties": {
+            "seed": { "type": "integer" },
+            "wandb_run_id": { "type": "string" },
+            "wandb_run_name": { "type": "string" },
+            "wandb_url": { "type": "string" },
+            "state": { "type": "string" },
+            "batch": { "type": ["integer", "string", "null"] }
+          },
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "ensemble_report_v2_3": {
+      "type": "object",
+      "description": "Stage 2.5 ensemble-confirm report — v2.3 (block-bootstrap gate + diversity-aware top-K + atomic-swap bundle path).",
+      "required": [
+        "protocol",
+        "workstream",
+        "window",
+        "chosen_rule",
+        "decision",
+        "bootstrap_verdict",
+        "diversity_audit",
+        "ensemble_eval_distribution",
+        "per_seed_eval_distribution"
+      ],
+      "properties": {
+        "protocol": { "const": "v2.3_stage_2_5_ensemble_report" },
+        "workstream": { "type": "string", "minLength": 1 },
+        "window": { "type": "string", "minLength": 1 },
+        "chosen_rule": {
+          "type": "string",
+          "enum": ["ens_mean", "ens_median", "ens_agreement", "ens_majority", "ens_pf_weighted"]
+        },
+        "decision": {
+          "type": "string",
+          "enum": [
+            "PROMOTE",
+            "PROMOTE_DD_ONLY",
+            "AMBIGUOUS_RERUN",
+            "REJECT_USE_SOLO"
+          ]
+        },
+        "decision_source": {
+          "type": "string",
+          "enum": ["bootstrap_v2.3", "legacy_uplift_v2.1"]
+        },
+        "uplift": { "type": "number" },
+        "legacy_decision": { "type": "string" },
+        "bootstrap_verdict": { "$ref": "#/$defs/bootstrap_verdict" },
+        "diversity_audit": { "$ref": "#/$defs/diversity_audit" },
+        "ensemble_eval_distribution": { "$ref": "#/$defs/eval_distribution_block" },
+        "per_seed_eval_distribution": { "$ref": "#/$defs/seed_keyed_eval_map" },
+        "swap_bundle_path": {
+          "type": ["string", "null"],
+          "description": "Path to ensemble_v{N}.tar.gz atomic-swap artifact. Null until the bundle writer fires on PROMOTE."
+        }
+      },
+      "additionalProperties": true
+    }
+  }
+}

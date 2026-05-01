@@ -25,6 +25,8 @@ import json
 import logging
 import os
 import time
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 import docker
 import requests
@@ -46,6 +48,17 @@ XVAL_PROMETHEUS_URL = os.environ.get("XVAL_PROMETHEUS_URL", "http://prometheus:9
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 ALERT_COOLDOWN = int(os.environ.get("ALERT_COOLDOWN", "300"))  # 5 min per container
+
+# Auto-restart on persistent running/unhealthy (S489 fix, issue #4).
+# After N consecutive unhealthy sweeps, `docker restart <name>` is issued.
+# Rate-limited to avoid loops when the container flaps.
+AUTO_RESTART_ENABLED = os.environ.get("AUTO_RESTART_UNHEALTHY", "true").lower() == "true"
+AUTO_RESTART_AFTER_N = int(os.environ.get("AUTO_RESTART_AFTER_N", "3"))
+AUTO_RESTART_MAX_PER_HOUR = int(os.environ.get("AUTO_RESTART_MAX_PER_HOUR", "3"))
+
+# Per-container state, keyed by container name.
+_unhealthy_streak: dict[str, int] = {}
+_auto_restart_history: dict[str, list[float]] = {}
 
 # Comma-separated container names to ignore (intentionally stopped / shelved workstreams).
 # Empty string means monitor everything (backward compatible).
@@ -84,14 +97,40 @@ _TRADFI_TAGS = {"Gold", "XAUUSD", "MGC", "GC", "cTrader", "IB", "COMEX", "FTMO",
 _TRADFI_CONTAINER_PREFIXES = ("gmgp1-gold", "gmgp1-xauusd", "gmgp2-xauusd", "sg1-gold")
 
 
+def _rollover_hours_utc(dt_utc: datetime, tz_name: str, local_break_hour: int) -> set[int]:
+    """UTC hours covered by a broker's daily rollover + 1-hour post-rollover lag.
+
+    `local_break_hour` is the hour-of-day (0-23) in the broker's server timezone
+    when the daily break begins. IC Markets (Athens) breaks at server 00:00;
+    CME Globex (Chicago) breaks at server 16:00. The returned set includes the
+    break hour itself plus the hour immediately after, to cover WandB stall
+    detection lag while the first post-break bar is still pending.
+    """
+    server_dt = dt_utc.astimezone(ZoneInfo(tz_name))
+    offset = server_dt.utcoffset()
+    # ZoneInfo always returns a non-None offset for aware datetimes.
+    assert offset is not None, f"ZoneInfo({tz_name}) returned None utcoffset"
+    offset_hours = int(offset.total_seconds()) // 3600
+    break_start = (local_break_hour - offset_hours) % 24
+    return {break_start, (break_start + 1) % 24}
+
+
 def _tradfi_market_closed_utc(now_utc: time.struct_time | None = None) -> bool:
     """Approximate market-closed predicate covering both cTrader XAUUSD and CME MGC.
 
-    Closed window (UTC):
-      - Fri 21:00  →  Sun 22:00
+    Closed windows (UTC):
+      - Weekend:          Fri 21:00  →  Sun 22:00
+      - Daily rollover:   Mon-Thu, union of IC Markets (Athens, break at
+                          server 00:00-01:00) and CME Globex (Chicago, break
+                          at server 16:00-17:00). Both schedules are computed
+                          per-tz to stay correct during the ~2-week windows
+                          each year when Europe and US DST offsets diverge.
+
     Covers XAUUSD (Fri ~21Z close / Sun 22Z reopen) and MGC/CME (Fri 22Z /
     Sun 23Z reopen — we suppress slightly ahead, reopening Mon stalls still
-    alert because bar_count resumes within STALL_MINUTES).
+    alert because bar_count resumes within STALL_MINUTES). Daily rollover
+    added S490 after false STALL alert for live_XAUUSD_ctrader at 22:06 UTC
+    during 21-22 UTC rollover gap.
     """
     t = now_utc or time.gmtime()
     wday = t.tm_wday  # Mon=0 .. Sun=6
@@ -102,6 +141,27 @@ def _tradfi_market_closed_utc(now_utc: time.struct_time | None = None) -> bool:
         return True
     if wday == 6 and hour < 22:  # Sunday before 22:00
         return True
+
+    # Daily rollover — Mon-Thu only (Fri rollover = start of weekend, already
+    # covered above). Union IC Markets (Athens) + CME Globex (Chicago) so
+    # MGC stays covered during DST transition weeks where Europe and US are
+    # temporarily offset by 1h relative to each other.
+    if wday in (0, 1, 2, 3):
+        if now_utc is not None:
+            dt_utc = datetime(
+                year=t.tm_year, month=t.tm_mon, day=t.tm_mday,
+                hour=t.tm_hour, minute=t.tm_min, second=t.tm_sec,
+                tzinfo=timezone.utc,
+            )
+        else:
+            dt_utc = datetime.now(timezone.utc)
+        rollover_hours = (
+            _rollover_hours_utc(dt_utc, "Europe/Athens", 0)
+            | _rollover_hours_utc(dt_utc, "America/Chicago", 16)
+        )
+        if hour in rollover_hours:
+            return True
+
     return False
 
 
@@ -335,6 +395,83 @@ def handle_container_event(event: dict) -> None:
 # Periodic sweep
 # ---------------------------------------------------------------------------
 
+def _read_container_kill_file(container, path: str = "/tmp/finrl_live_kill") -> dict | None:
+    """Try to read the engine's kill_file from inside the container.
+
+    Uses `docker exec cat` so we don't need a shared volume. Returns the
+    parsed JSON payload, or None if the file is missing / unreadable / the
+    container is not running. Failures are non-fatal — callers fall back to
+    log grep or just proceed without lockout info.
+    """
+    try:
+        rc, output = container.exec_run(["cat", path])
+    except Exception as e:  # noqa: BLE001 — exec_run errors are varied
+        logger.debug(f"kill_file exec_run failed for {container.name}: {e}")
+        return None
+    if rc != 0 or not output:
+        return None
+    try:
+        raw = output.decode("utf-8", errors="replace").strip()
+    except Exception:  # noqa: BLE001
+        return None
+    if not raw:
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        # Legacy empty / non-JSON kill_file. Still signals halt, but has no
+        # drift_crit metadata — treat as generic kill_file.
+        return {"reason": "legacy"}
+
+
+def _has_drift_crit_kill_file(container) -> tuple[bool, dict | None]:
+    """Return (is_drift_crit, payload) for the container's kill_file."""
+    payload = _read_container_kill_file(container)
+    if payload is None:
+        return False, None
+    return payload.get("reason") == "drift_crit", payload
+
+
+def _should_auto_restart(container_name: str, streak: int, now: float | None = None) -> bool:
+    """Decide whether to auto-restart a persistently unhealthy container.
+
+    Returns True when the streak has reached the configured threshold AND
+    the container has not exceeded the per-hour restart cap.
+
+    NOTE: drift-CRIT halts are checked by callers via `_has_drift_crit_kill_file`
+    before this function is consulted (Protocol v2.2 §8.3: watchdog does NOT
+    auto-restart on drift CRIT; manual human re-enable required).
+    """
+    if not AUTO_RESTART_ENABLED:
+        return False
+    if streak < AUTO_RESTART_AFTER_N:
+        return False
+    now = now if now is not None else time.time()
+    cutoff = now - 3600.0
+    history = [t for t in _auto_restart_history.get(container_name, []) if t >= cutoff]
+    _auto_restart_history[container_name] = history
+    return len(history) < AUTO_RESTART_MAX_PER_HOUR
+
+
+def _record_auto_restart(container_name: str, now: float | None = None) -> None:
+    """Append an auto-restart timestamp and prune entries older than 1h."""
+    now = now if now is not None else time.time()
+    cutoff = now - 3600.0
+    history = [t for t in _auto_restart_history.get(container_name, []) if t >= cutoff]
+    history.append(now)
+    _auto_restart_history[container_name] = history
+
+
+def _attempt_auto_restart(container, container_name: str) -> bool:
+    """Try `container.restart()`; return True on success, False otherwise."""
+    try:
+        container.restart()
+        return True
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Auto-restart failed for {container_name}: {e}")
+        return False
+
+
 def sweep(client: docker.DockerClient) -> None:
     """Check all finrl.monitor containers. Catch issues missed by events."""
     containers = client.containers.list(
@@ -348,35 +485,84 @@ def sweep(client: docker.DockerClient) -> None:
 
     for container in containers:
         info = inspect_container(container)
+        name = info["name"]
 
-        if _is_ignored(info["name"]):
+        if _is_ignored(name):
             continue
 
-        status_str = f"{info['name']}: {info['status']} / {info['health']}"
+        status_str = f"{name}: {info['status']} / {info['health']}"
 
         if info["health"] == "unhealthy":
-            if info["name"].startswith(_TRADFI_CONTAINER_PREFIXES) and _tradfi_market_closed_utc():
+            if name.startswith(_TRADFI_CONTAINER_PREFIXES) and _tradfi_market_closed_utc():
+                # Suppressed: don't advance the streak during market close either.
+                _unhealthy_streak.pop(name, None)
                 logger.info(
                     f"Sweep UNHEALTHY suppressed (TradFi market closed): {status_str}"
                 )
                 continue
+
+            streak = _unhealthy_streak.get(name, 0) + 1
+            _unhealthy_streak[name] = streak
+
+            if _should_auto_restart(name, streak):
+                # v2.2 §8.3: drift-CRIT halts are operator-only re-enable.
+                # Refuse auto-restart and surface the kill_file payload so
+                # humans can decide whether to clear kill_file + override.
+                is_crit, payload = _has_drift_crit_kill_file(container)
+                if is_crit:
+                    count = (payload or {}).get("count", 1)
+                    logger.critical(
+                        f"Auto-restart REFUSED for {name}: drift-CRIT "
+                        f"kill_file present (count={count})",
+                    )
+                    _unhealthy_streak.pop(name, None)  # break the streak loop
+                    alert(
+                        name,
+                        f"<b>[DRIFT-CRIT LOCKOUT] {info['strategy']}</b>\n"
+                        f"Container: {name}\n"
+                        f"Reason: drift CRIT kill_file "
+                        f"(count={count}, detail={(payload or {}).get('detail', '')})\n"
+                        f"Manual re-enable: clear kill_file"
+                        + (
+                            " AND kill_file.override" if count >= 2 else ""
+                        ),
+                    )
+                    continue
+
+                logger.warning(
+                    f"Auto-restart: {name} after {streak}x unhealthy "
+                    f"(threshold={AUTO_RESTART_AFTER_N})",
+                )
+                if _attempt_auto_restart(container, name):
+                    _record_auto_restart(name)
+                    _unhealthy_streak.pop(name, None)  # Give it a fresh window
+                    alert(
+                        name,
+                        f"<b>[AUTO-RESTART] {info['strategy']}</b>\n"
+                        f"Container: {name}\n"
+                        f"Reason: {streak}x consecutive unhealthy sweeps",
+                    )
+                    continue
+
             detail = get_health_detail(container)
             msg = (
                 f"<b>[SWEEP: UNHEALTHY] {info['strategy']}</b>\n"
-                f"Container: {info['name']}\n"
+                f"Container: {name}\n"
                 f"  {detail}"
             )
-            alert(info["name"], msg)
+            alert(name, msg)
             logger.warning(f"Sweep: {status_str}")
         elif not info["running"]:
+            _unhealthy_streak.pop(name, None)  # docker restart policy handles this
             msg = (
                 f"<b>[SWEEP: NOT RUNNING] {info['strategy']}</b>\n"
-                f"Container: {info['name']}\n"
+                f"Container: {name}\n"
                 f"Status: {info['status']}"
             )
-            alert(info["name"], msg)
+            alert(name, msg)
             logger.warning(f"Sweep: {status_str}")
         else:
+            _unhealthy_streak.pop(name, None)  # Back to healthy — reset streak
             logger.info(f"Sweep: {status_str}")
 
 
@@ -390,6 +576,13 @@ def main() -> None:
         f"Config: sweep={SWEEP_INTERVAL}s, wandb_check={WANDB_CHECK_INTERVAL}s, "
         f"telegram={'configured' if TELEGRAM_BOT_TOKEN else 'disabled'}",
     )
+    if AUTO_RESTART_ENABLED:
+        logger.info(
+            f"Auto-restart: enabled after {AUTO_RESTART_AFTER_N}x unhealthy sweeps "
+            f"(max {AUTO_RESTART_MAX_PER_HOUR}/hour per container)",
+        )
+    else:
+        logger.info("Auto-restart: disabled (AUTO_RESTART_UNHEALTHY=false)")
     if IGNORE_CONTAINERS:
         logger.info(f"Ignoring containers: {sorted(IGNORE_CONTAINERS)}")
     else:

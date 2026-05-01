@@ -1,0 +1,176 @@
+# GMGP1 BTC Velotrade ensemble confirmation gates — PRE-COMMITTED.
+#
+# Modeled on sg1_btc_velotrade_ensemble.gates.yaml (S494 cont.) and
+# gmgp1_xauusd_ensemble.gates.yaml (S493). Same five-gate structure;
+# Velotrade buffers (10% trailing, no daily). This file is the ONLY source of
+# truth for gate numbers (per project rule "never hardcode gate thresholds in
+# code or scripts").
+#
+# Decision rule: ALL five gates (G1..G5) must PASS -> approve ensemble for
+# GMGP1 BTC Velotrade paper-deploy aggregation. ANY fail -> ensemble rejected;
+# solo seed with highest WF-median PF remains the paper candidate.
+#
+# Pre-commit date: 2026-04-26 S498-cont (Stage 2.5 v2.3 bootstrap-gates fix).
+# Do not edit after first launch without a decision memo explaining why.
+
+workstream: gmgp1_btc
+variant: ensemble_top3
+seeds: [null, null, null]                       # top-3 L1 seeds, populated post-L1 by reconcile step
+aggregation_rule: ens_mean                       # val-argmax-PF chose ens_mean for GMGP1-BTC (S495 retro)
+
+# Fold count expected from the multiseed WF config. GMGP1 BTC Velotrade uses
+# the 4-fold splitter (configs/gmgp1_btc_velotrade_wf.yaml); revisit if WF
+# refactors to a longer schedule.
+wf_folds: 4
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+gates:
+  g1_solo_baseline:
+    description: >-
+      Existing WF Stage-3 gate applied per seed: at least 2/3 seeds must have
+      per-fold test PF >= pf_floor, in at least min_folds_pass of the total
+      folds. If solo seeds fail the base WF discipline, the ensemble is moot.
+    pf_floor: 1.1
+    seeds_pass_min: 2                            # >=2/3 seeds pass per fold
+    min_folds_pass: 3                            # >=3/4 folds (splitter-driven)
+
+  g2_no_regression:
+    description: >-
+      Per fold, the ensemble must NOT materially regress vs the best solo on
+      that fold. Defined as ens_PF >= ens_ratio_min * best_solo_PF in at least
+      min_folds_pass folds.
+    ens_ratio_min: 0.90
+    min_folds_pass: 3                            # >=3/4 folds
+
+  g3_uplift:
+    description: >-
+      Across folds, the ensemble must earn its live-complexity overhead.
+      Defined as median(ens_PF) / median(best_solo_PF) >= uplift_ratio_min.
+      A lift below ~10% is not worth the additional live-engine branching
+      and aggregation latency (matches S493 Stage 2.5 PROMOTE threshold).
+      v2.3 NOTE: this is the WF-stage point-estimate gate (across folds).
+      Stage 2.5 (single L1 window) uses block-bootstrap when the
+      ensemble_bootstrap_* keys below are loaded via gates_file overlay
+      (S498-cont structural fix to run_stage_2_5_val_selection).
+    uplift_ratio_min: 1.10
+    metric: median                               # across-folds aggregation
+
+  # Protocol v2.3 Stage 2.5 (single L1 val/test window) ensemble gates.
+  # Mirrors sg1_btc_velotrade_ensemble.gates.yaml for cross-workstream
+  # parity. Cast for Velotrade Step 1 (10% trailing cap, no daily-loss gate)
+  # so PROMOTE_DD_ONLY here means "trailing-DD tightens enough to widen the
+  # 10% buffer", not the FTMO daily/trailing pair.
+  ensemble_bootstrap_p_pf_promote: 0.90        # P(ens_PF > solo_PF) >= 0.90 for PROMOTE
+  ensemble_bootstrap_p_mdd_promote: 0.90       # P(ens_MDD better) >= 0.90 for full PROMOTE
+                                                #   (PF-fail + MDD-pass → PROMOTE_DD_ONLY,
+                                                #    relevant for Velotrade trailing-DD buffer)
+  ensemble_bootstrap_resamples: 10000           # B in stationary block bootstrap
+  ensemble_bootstrap_block_len: null            # null → auto = sqrt(n_bars), capped at 0.1*n
+  ensemble_uplift_min: 1.10                     # legacy point-estimate; sanity-check secondary
+                                                #   (still required by v2 helper signature)
+  ensemble_ambiguous_min: 1.05                  # legacy ambiguous floor (logged only when
+                                                #   bootstrap gates above are present)
+
+  # v2.3 diversity-aware top-K selection (Phase 0). Pearson |action correlation|
+  # used as redundancy proxy. Pool-size > K is a precondition for the selector
+  # to materially differ from naive top-K-by-PF; with pool == K it's audit-only.
+  ensemble_top_k: 3
+  ensemble_diversity_lambda: 1.0                # score = PF − λ * max_corr_with_already_selected
+
+  g4_velotrade_compliance:
+    description: >-
+      Applied to the ENSEMBLE trajectory per fold (not the solo trajectories).
+      Velotrade 2-Step Step 1: 10% profit target, 10% max trailing drawdown,
+      no daily loss gate. Engine runs with buffered trailing (8%) so gate
+      buffer is computed against the real Velotrade 10% cap.
+    trailing_dd_buffer_pp_min: 0.5               # 10% cap - worst_trailing_mdd%
+    daily_dd_buffer_pp_min: null                 # N/A: no daily loss gate in Velotrade 2-Step
+    compliance_must_pass: false                  # no active_days / single_day_share in Velotrade
+    min_folds_pass: 3                            # >=3/4 folds
+
+  g5_dd_stability:
+    description: >-
+      Guards against ensemble edge being a one-fold artifact. CV of ensemble
+      PF across folds must be at or below cv_max.
+    cv_pf_max: 0.35
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds. Defaults
+  # mirror sg1_btc_velotrade_ensemble.gates.yaml for cross-workstream parity.
+  # GMGP1 BTC Velotrade runs 24/7 15-min bars: window_bars=400 ≈ 4 days
+  # continuous (vs ~3.5 days at 5-min). Deadband/saturation deltas tuned for
+  # V7 scalar action.
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5                         # unused on V7 scalar, declared for schema
+    action_kl_crit: 1.0                         # unused on V7 scalar, declared for schema
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten (S491
+  # bleed-window lesson), not "halt while holding".
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers. Each is a separate
+  # auto-fire condition; any one trips a Stage 2.5-R rerun (re-pick top-K +
+  # re-bootstrap + new ensemble_v{N+1}.tar.gz bundle). Bar-windows scale to
+  # GMGP1 BTC 15-min cadence (24/7): 600 bars ≈ 6 days continuous, 1500 bars
+  # ≈ 16 days. Live-PF window is in trading days for parity with the prop-
+  # firm Velotrade rulebook; for 24/7 BTC the live monitor must convert to
+  # calendar days at evaluation time.
+  retrain:
+    ensemble_recheck_days: 90                   # quarterly cadence
+    live_pf_ratio: 0.8                          # live PF < 0.8 * paper PF
+    live_pf_window_days: 5                      # for 5 consecutive trading days
+    min_trades_window: 20                       # AND >=20 trades in window
+    # Agreement-decay (silent capital starvation, ens_agreement only)
+    agreement_decay_delta: 0.20                 # live flat-rate drift > +0.20 vs baseline
+    agreement_decay_window_bars: 600            # sustained for 600 bars (~6 days at 15-min)
+    # Action KL drift (sustained WARN before CRIT)
+    action_kl_warn_window_bars: 1500
+    # Cost drift
+    cost_drift_ratio: 1.20                      # realized cost > 1.20x backtest assumption
+    cost_drift_window_trades: 100               # over rolling 100 trades
+
+  # Protocol v2.3 §8.2 agreement-decay live monitor (ensemble-deployed only).
+  # No-op for ens_mean / ens_median / ens_pf_weighted (only consensus rules
+  # have the silent-flat failure mode). Tracker compares live flat_bar_frac
+  # against ensemble_eval_distribution.deadband_frac from ensemble_report.json.
+  drift_agreement:
+    enabled_for_rules: ["ens_agreement", "ens_majority"]
+    flat_delta_warn: 0.20                       # |live_flat - baseline_flat| > 0.20 → WARN
+    flat_delta_crit: 0.40                       # > 0.40 → CRIT (routes through §8.3 flatten)
+    window_bars: 600
+
+# ---------------------------------------------------------------------------
+# Decision matrix
+# ---------------------------------------------------------------------------
+
+decision:
+  all_pass_action: approve_ensemble_paper_deploy
+  any_fail_action: reject_ensemble_use_best_solo
+  solo_selection_metric: wf_median_pf
+  solo_tiebreaker: wf_mean_trailing_dd_buffer_pp
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+provenance:
+  drafted_on: '2026-04-26'
+  drafted_by_session: S498-cont
+  upstream_memory: project_stage_2_5_bootstrap_gates_not_loaded.md
+  modeled_on: configs/sg1_btc_velotrade_ensemble.gates.yaml
+  upstream_hpo: gmgp1_btc_velotrade_rehpo_20260421 (trial #48 PF 2.59, Bybit 5 bps taker)
+  l1_multiseed_status: completed_2026_04_23
+  s495_first_customer: true

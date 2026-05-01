@@ -43,12 +43,16 @@ async def snapshot():
 
     result = {{"account": {{}}, "positions": [], "orders": [], "fills": []}}
 
-    # Account summary
+    # Account summary. IB returns segment-broken-out variants for futures
+    # accounts (e.g. "AvailableFunds-C" for commodity, "AvailableFunds-S" for
+    # securities). Compare the base tag (pre-"-") so those variants pass the
+    # filter and land in `result["account"]` under their full segment-tagged key.
+    _ALLOWED_BASE = {{"NetLiquidation", "TotalCashValue", "UnrealizedPnL",
+                     "RealizedPnL", "AvailableFunds", "BuyingPower",
+                     "GrossPositionValue", "MaintMarginReq", "InitMarginReq"}}
     summary = await ib.accountSummaryAsync()
     for s in summary:
-        if s.tag in ("NetLiquidation", "TotalCashValue", "UnrealizedPnL",
-                      "RealizedPnL", "AvailableFunds", "BuyingPower",
-                      "GrossPositionValue", "MaintMarginReq", "InitMarginReq"):
+        if s.tag.split("-", 1)[0] in _ALLOWED_BASE:
             result["account"][s.tag] = s.value
 
     # Positions + portfolio

@@ -1,0 +1,97 @@
+# AlphaSeek v3 — Stage 4 recent-OOS config (S500 M5).
+#
+# Eval-only on the most recent 60 days of the LOB parquet. Catches recent
+# regime drift between WF training (older window) and live deploy (today).
+# PF >= 1.0 required; median fill_count <= 100/episode (tighter than Stage
+# 1 throughput cap of 150 — recent regime should not require more activity).
+#
+# Validator: scripts/validate_config.py --config <this> --stage oos
+#   STAGE 4 RECENCY GATE: data manifest `last_ts` must be < 1 day old.
+#   Run scripts/build_data_manifest.py + LOB collector refresh first.
+
+strategy:
+  id: "alphaseek-v3"
+  name: "AlphaSeek v3 — recent OOS (today−60d)"
+  version: "3.0.0-oos"
+
+upstream:
+  stage: "wf"
+  run_id: null                                 # filled by `--upstream-run`
+
+data:
+  source: "parquet"
+  file_path: "data/lob_parquet/btcusdt_lob_1s.parquet"
+
+# OOS window: today − 60d → today − 1d. The launcher slices the parquet to
+# this range at load time; `start_date`/`end_date` are advisory.
+oos_window:
+  end_offset_days: 1                           # exclude today (incomplete bar)
+  span_days: 60
+
+env:
+  simulator: "lob"
+  num_sims: 64                                 # eval-only
+  num_ignore_step: 60
+  max_position: 1
+  step_gap: 2                                  # carried from upstream
+  slippage: 7.0e-7
+  seq_len: 3600
+  stop_loss_thresh: 1.0e-3
+
+  # M1-M2 LOCKED params
+  taker_fee: 5.0e-4
+  maker_fee: 2.0e-4
+  per_trade_penalty_bps: 0.5
+  holding_bonus: 1.0e-7
+  maker_bias: true
+  fill_alpha_ofi: 2.0
+  fill_beta_spread: 1.0
+  fill_gamma_age: -0.05
+  limit_max_age: 60
+  max_idle_bars: 1800
+
+features:
+  norm_span: 120
+  momentum_window: 5
+  vol_window: 30
+
+ensemble:
+  seeds: [42, 2025, 3141]                      # carried from Stage 2.5/3
+  rule: "ens_agreement"                        # carried from Stage 2.5 winner
+  agent_classes: ["D3QN", "DoubleDQN", "TwinD3QN"]
+  voting: "q_average"
+
+# ---------------------------------------------------------------------------
+# Gates (Stage 4)
+# ---------------------------------------------------------------------------
+gates:
+  oos_pf_floor: 1.0
+  oos_max_fills_per_episode: 100               # tighter than Stage 1 (150)
+  oos_min_episodes: 30                         # statistical floor
+
+  # Compliance sub-report (FTMO/Velotrade challenge readiness — passive,
+  # informational only at this stage; promoted to blocking at Stage 5).
+  oos_daily_dd_buffer_pp_min: 0.5
+  oos_trailing_dd_buffer_pp_min: 0.5
+
+  # v2.2 declarations
+  drift:
+    window_bars: 1800
+    min_bars_before_check: 600
+    deadband_frac_warn: 0.85
+    deadband_frac_crit: 0.95
+    saturation_frac_warn: 0.20
+    saturation_frac_crit: 0.40
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  enabled: true
+  entity: "bigcan-chiwin-technology"
+  project: "FinRL-Pro-DS"
+  tags: ["alphaseek-v3", "recent-oos", "lob-scalping"]
+  consolidate: true

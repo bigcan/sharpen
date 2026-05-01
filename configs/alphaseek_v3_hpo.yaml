@@ -1,0 +1,180 @@
+# AlphaSeek v3 — Stage 1 HPO config (S500 M5).
+#
+# Frame: fee-internalized LOB scalping. M0-M4 simulator + executor +
+# state_dim=12 + throughput gate are upstream of this config (committed in
+# bf0146f6). M6 will replace the monolithic alphaseek_hpo_runner.py with a
+# protocol-v2-conformant launcher; this YAML is the first config it consumes.
+#
+# Validator: scripts/validate_config.py --config configs/alphaseek_v3_hpo.yaml --stage hpo
+#   PRE-STAGE-0 NOTE: data manifest does not yet exist; validator will FAIL
+#   on `data manifest not found alongside btcusdt_lob_1s.parquet`. Build via
+#   the Stage 0 manifest builder before launching.
+#
+# Reward / fees / fill-model params (LOCKED during HPO per BUG-01 + ADR-002).
+# Stage 0.5 shadow-fit will overwrite fill_alpha/beta/gamma before Stage 1
+# launches; the literature defaults below are placeholders only.
+
+strategy:
+  id: "alphaseek-v3"
+  name: "AlphaSeek v3 — fee-internalized LOB scalping (HPO)"
+  version: "3.0.0-hpo"
+
+data:
+  source: "parquet"
+  file_path: "data/lob_parquet/btcusdt_lob_1s.parquet"
+
+env:
+  simulator: "lob"
+  num_sims: 4096
+  num_sims_hpo: 512                            # VRAM budget per trial
+  num_sims_eval: 64
+  num_ignore_step: 60
+  max_position: 1
+  step_gap: 2                                  # HPO axis (categorical [1,2,4,8,16])
+  slippage: 7.0e-7
+  seq_len: 3600
+  stop_loss_thresh: 1.0e-3
+
+  # ----- M1 fees + reward shaping (LOCKED in HPO) -----
+  taker_fee: 5.0e-4                            # Binance perp canonical
+  maker_fee: 2.0e-4
+  per_trade_penalty_bps: 0.5                   # subtractive per-fill drag
+  holding_bonus: 1.0e-7                        # carry incentive
+
+  # ----- M2 maker-bias execution (LOCKED in HPO) -----
+  maker_bias: true                             # post-only with parametric fill
+  fill_alpha_ofi: 2.0                          # P(fill) = sigmoid(α·OFI + β·sp_inv + γ·age)
+  fill_beta_spread: 1.0
+  fill_gamma_age: -0.05
+  limit_max_age: 60                            # cancel-aged-out at 60 bars
+  max_idle_bars: 1800                          # = max_holding default at step_gap=2
+
+features:
+  norm_span: 120
+  momentum_window: 5
+  vol_window: 30
+
+agent:
+  # Per-agent HPO is per-class; these are seed defaults the trial builder
+  # may override for D3QN / DoubleDQN / TwinD3QN independently.
+  net_dims: [256, 256]                         # multiples of 8 (Tensor Core)
+  gamma: 0.995
+  explore_rate: 0.02
+  state_value_tau: 0.01
+  soft_update_tau: 5.0e-4
+  learning_rate: 1.0e-4
+  batch_size: 1024
+  repeat_times: 2
+  reward_scale: 4096
+  clip_grad_norm: 3.0
+
+ensemble:
+  agent_classes: ["D3QN", "DoubleDQN", "TwinD3QN"]
+  voting: "q_average"
+
+throughput_gate:
+  enabled: true
+  n_warmup_steps: 20000
+  max_fills_per_episode: 150
+  min_fills_per_episode: 10
+
+hpo:
+  enabled: true
+  objective: "profit_factor"                   # FIX BUG-01 (v2 had total_return)
+  trials: 50
+  steps_per_trial: 160000
+
+  # BUG-01 lock: these reward / fill-model params are NOT searched during HPO
+  # (would let the agent game the cost model). Stage 0.5 calibration writes
+  # fill_alpha/beta/gamma; everything below is a contract not an axis.
+  locked_params:
+    - taker_fee
+    - maker_fee
+    - per_trade_penalty_bps
+    - holding_bonus
+    - fill_alpha_ofi
+    - fill_beta_spread
+    - fill_gamma_age
+    - limit_max_age
+
+  search_space:
+    step_gap:
+      type: "categorical"
+      choices: [1, 2, 4, 8, 16]
+    learning_rate:
+      type: "loguniform"
+      low: 1.0e-5
+      high: 1.0e-3
+    batch_size:
+      type: "categorical"
+      choices: [512, 1024, 2048]
+    gamma:
+      type: "uniform"
+      low: 0.99
+      high: 0.999
+    explore_rate:
+      type: "uniform"
+      low: 0.005
+      high: 0.05
+    soft_update_tau:
+      type: "loguniform"
+      low: 1.0e-4
+      high: 5.0e-3
+    repeat_times:
+      type: "categorical"
+      choices: [1, 2, 4]
+    reward_scale:
+      type: "categorical"
+      choices: [1024, 2048, 4096, 8192]
+
+walk_forward:
+  # Stage 1 HPO uses a single train/val split; full WF lives in M9 config.
+  train_segments: 8
+  val_segments: 1
+  test_segments: 1
+  slide_by: 1
+
+# ---------------------------------------------------------------------------
+# Gates (subset for stage 1; canonical source of truth in
+# configs/alphaseek_v3.gates.yaml)
+# ---------------------------------------------------------------------------
+gates:
+  # Stage 1 training-health hard-fails
+  entropy_floor: 0.05
+  q_div_max: 1.0e6
+  action_sat_max: 0.30
+
+  # Throughput gate (mirrored from canonical for runner convenience)
+  throughput_max_fills_per_episode: 150
+  throughput_min_fills_per_episode: 10
+  throughput_n_warmup_steps: 20000
+
+  # Protocol v2.2 §8.2 / §8.3 declarations (advisory at HPO; load-bearing
+  # at paper-deploy). Values from alphaseek_v3.gates.yaml.
+  drift:
+    window_bars: 1800
+    min_bars_before_check: 600
+    deadband_frac_warn: 0.85
+    deadband_frac_crit: 0.95
+    saturation_frac_warn: 0.20
+    saturation_frac_crit: 0.40
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  enabled: true
+  entity: "bigcan-chiwin-technology"
+  project: "FinRL-Pro-DS"
+  tags: ["alphaseek-v3", "hpo", "lob-scalping"]
+  # NOT prop-firm tagged at Stage 1; promoted to ["prop-firm", "FTMO"] only
+  # in the Stage 5 paper-deploy config (M11) after Stage 4 PASS.
+  consolidate: true                            # S488 one-run-per-experiment
+
+deployment:
+  training_target: "gpuhub"
+  collector_target: "vps"
+  docker_image: "alphaseek_v3:latest"

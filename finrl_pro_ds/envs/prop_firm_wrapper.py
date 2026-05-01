@@ -1,82 +1,88 @@
-"""Prop Firm Challenge Wrapper — V7-Compatible (Dict + Flat Obs).
+"""Prop Firm Challenge Wrapper — V7 (Deprecated Adapter).
 
-Gymnasium wrapper that imposes prop firm evaluation constraints on any
-base environment.  Supports both flat ``Box`` observations (crypto envs)
-and ``Dict`` observations (ContinuousSwingEnv V7 multi-scale).
+Retained for backward-compat. Subclasses :class:`RiskShapingWrapper` and
+re-adds the profit-target termination + success_bonus behaviour that the
+parent deliberately omits.
 
-Adds:
-- EOD trailing drawdown (floor updates at session close, not tick-by-tick)
-- Daily loss limit (terminate if daily loss exceeds threshold)
-- Profit target (early termination on success)
-- Reward shaping: soft penalty for approaching drawdown limits
-- Observation augmentation: 3 extra dims for constraint awareness
+The decoupling (see ``.agent/artifacts/prop_firm_decoupling_architecture.md``)
+moves profit-target handling into ``ChallengeStateMachine`` on the live path.
+New configs should use ``env.risk:`` + the parent wrapper directly.
+``scripts/validate_config.py`` warns on ``env.prop_firm:`` at any stage and
+rejects it at stage ``paper-deploy``.
 
-Compatible with any base env that:
-1. Returns ``portfolio_value`` in its ``info`` dict.
-2. Has a ``timestamps`` array (int64 epoch-seconds or datetime64).
-3. Has a ``step_idx`` attribute.
-4. Uses either a flat ``Box`` or a ``Dict`` observation space.
+``info["profit_progress"]`` is emitted here (not by the parent) with a
+``DeprecationWarning`` on first access. Removed in Step 6 once all
+workstreams migrate.
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any
+import warnings
+from typing import Any, Literal
 
 import gymnasium as gym
 import numpy as np
 
+from finrl_pro_ds.envs.risk_shaping_wrapper import (
+    RiskShapingWrapper,
+    _epoch_to_utc_date,
+    _ts_to_epoch,
+)
+
 logger = logging.getLogger(__name__)
 
 
-def _epoch_to_utc_date(epoch_s: int) -> int:
-    """Return an integer YYYYMMDD from epoch seconds (UTC)."""
-    dt = datetime.fromtimestamp(int(epoch_s), tz=timezone.utc)
-    return dt.year * 10000 + dt.month * 100 + dt.day
+_PROFIT_PROGRESS_DEPRECATION = (
+    "info['profit_progress'] is deprecated — it is emitted only by the "
+    "PropFirmWrapperV7 adapter for backward compat and will be removed "
+    "when the adapter retires. Migrate to env.risk: + ChallengeStateMachine."
+)
 
 
-def _ts_to_epoch(ts_val: Any) -> int:
-    """Convert a timestamp value (int64 epoch or datetime64) to epoch seconds."""
-    if isinstance(ts_val, (np.datetime64,)):
-        return int(ts_val.astype("datetime64[s]").astype("int64"))
-    return int(ts_val)
+class _DeprecatedProfitProgressDict(dict):
+    """Dict that emits a DeprecationWarning on 'profit_progress' access.
+
+    Behaves identically to a regular dict for every other key. Used by
+    :class:`PropFirmWrapperV7` to surface its continued emission of the
+    legacy key without forcing every downstream log-parser to change
+    immediately.
+    """
+
+    __slots__ = ()
+
+    def __getitem__(self, key):
+        if key == "profit_progress":
+            warnings.warn(
+                _PROFIT_PROGRESS_DEPRECATION,
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return super().__getitem__(key)
+
+    def get(self, key, default=None):
+        if key == "profit_progress":
+            warnings.warn(
+                _PROFIT_PROGRESS_DEPRECATION,
+                DeprecationWarning,
+                stacklevel=2,
+            )
+        return super().get(key, default)
 
 
-class PropFirmWrapperV7(gym.Wrapper):
-    """Gymnasium wrapper imposing prop firm challenge constraints.
+class PropFirmWrapperV7(RiskShapingWrapper):
+    """Deprecated adapter — adds profit-target termination + success_bonus.
 
-    Supports both flat Box and Dict observation spaces.
+    All parent (:class:`RiskShapingWrapper`) behaviour is preserved. The
+    only additions are:
 
-    Parameters
-    ----------
-    env : gym.Env
-        Base environment (ContinuousSwingEnv V7, CryptoPerpEnv, etc.).
-    profit_target_pct : float
-        Cumulative return target to pass the challenge (e.g. 0.10 = 10%).
-    max_trailing_drawdown_pct : float
-        Maximum EOD trailing drawdown before termination (e.g. 0.10 = 10%).
-    max_daily_loss_pct : float
-        Maximum single-day loss before termination (0.0 = disabled).
-    eod_hour_utc : int
-        UTC hour that defines end-of-day for drawdown floor updates.
-    drawdown_penalty_start : float
-        Drawdown fraction at which reward penalty begins.
-    drawdown_penalty_scale : float
-        Multiplier for the quadratic drawdown penalty.
-    daily_loss_penalty_start : float
-        Daily-loss fraction at which reward penalty begins (0.0 disables).
-    daily_loss_penalty_scale : float
-        Multiplier for the quadratic daily-loss penalty (0.0 disables).
-    success_bonus : float
-        One-time reward bonus when profit target is reached.
-    augment_obs : bool
-        If True, append 3 constraint-awareness dims to observation.
-    static_peak : bool
-        If True (default), peak equity locks at ``initial_capital`` for the
-        whole episode — matching FTMO Phase 1 Challenge's static Maximum Loss
-        rule (10% floor measured from starting balance forever). If False,
-        peak ratchets up at each EOD boundary (funded-account trailing style).
+    - Early termination when cumulative return >= ``profit_target_pct``.
+    - One-shot ``success_bonus`` reward on that termination.
+    - ``info["profit_progress"]``, ``info["challenge_passed"]`` keys.
+    - Legacy ``augment_obs: bool`` API (``True`` → 3 dims = parent's 2 dims
+      + ``profit_progress``; ``False`` → no augmentation).
+
+    New code should use :class:`RiskShapingWrapper` + ``ChallengeStateMachine``.
     """
 
     def __init__(
@@ -95,30 +101,34 @@ class PropFirmWrapperV7(gym.Wrapper):
         augment_obs: bool = True,
         static_peak: bool = True,
     ) -> None:
-        super().__init__(env)
+        # V7 uses a legacy 3-dim augmentation (dd_remaining, daily_remaining,
+        # profit_progress). The parent only knows "off" or "2d", so we keep
+        # augmentation off at the parent level and handle all 3 dims here.
+        self._v7_augment = bool(augment_obs)
+        super().__init__(
+            env,
+            max_trailing_drawdown_pct=max_trailing_drawdown_pct,
+            max_daily_loss_pct=max_daily_loss_pct,
+            eod_hour_utc=eod_hour_utc,
+            drawdown_penalty_start=drawdown_penalty_start,
+            drawdown_penalty_scale=drawdown_penalty_scale,
+            daily_loss_penalty_start=daily_loss_penalty_start,
+            daily_loss_penalty_scale=daily_loss_penalty_scale,
+            augment_obs="off",
+            static_peak=static_peak,
+        )
 
         self.profit_target_pct = float(profit_target_pct)
-        self.max_trailing_dd_pct = float(max_trailing_drawdown_pct)
-        self.max_daily_loss_pct = float(max_daily_loss_pct)
-        self.eod_hour_utc = int(eod_hour_utc)
-        self.dd_penalty_start = float(drawdown_penalty_start)
-        self.dd_penalty_scale = float(drawdown_penalty_scale)
-        self.daily_loss_penalty_start = float(daily_loss_penalty_start)
-        self.daily_loss_penalty_scale = float(daily_loss_penalty_scale)
         self.success_bonus = float(success_bonus)
+        # Keep the old public attribute name for tests that read it directly
         self.augment_obs = augment_obs
-        self.static_peak = bool(static_peak)
 
-        # Detect obs type and extend space if augmenting
-        self._dict_obs = isinstance(env.observation_space, gym.spaces.Dict)
-
-        if self.augment_obs:
+        if self._v7_augment:
             if self._dict_obs:
-                # Extend the 'private' sub-space by 3 dims
                 assert isinstance(env.observation_space, gym.spaces.Dict)
                 spaces = dict(env.observation_space.spaces)
                 private_space = spaces["private"]
-                assert private_space.shape is not None, "private space must have shape"
+                assert private_space.shape is not None
                 old_dim = private_space.shape[0]
                 spaces["private"] = gym.spaces.Box(
                     low=-np.inf, high=np.inf,
@@ -126,7 +136,6 @@ class PropFirmWrapperV7(gym.Wrapper):
                 )
                 self.observation_space = gym.spaces.Dict(spaces)
             else:
-                # Flat Box obs — extend by 3
                 base_shape = env.observation_space.shape
                 assert base_shape is not None and len(base_shape) == 1, (
                     "PropFirmWrapperV7 requires flat Box or Dict obs"
@@ -137,189 +146,55 @@ class PropFirmWrapperV7(gym.Wrapper):
                     shape=(new_dim,), dtype=np.float32,
                 )
 
-        # State (reset in reset())
-        self._initial_capital: float = 0.0
-        self._peak_eod_equity: float = 0.0
-        self._last_eod_date: int = 0  # YYYYMMDD
-        self._daily_start_equity: float = 0.0
-        self._daily_date: int = 0  # YYYYMMDD
-        self._current_equity: float = 0.0
-
-    def _get_timestamp_epoch(self) -> int | None:
-        """Extract current bar's epoch seconds from the base env."""
-        timestamps = getattr(self.env, "timestamps", None)
-        step_idx = getattr(self.env, "step_idx", None)
-        if timestamps is not None and step_idx is not None and step_idx > 0:
-            if step_idx <= len(timestamps):
-                return _ts_to_epoch(timestamps[step_idx - 1])
-        return None
+    # ------------------------------------------------------------------
+    # step / reset — add profit-target termination + V7-shaped info dict
+    # ------------------------------------------------------------------
 
     def reset(self, **kwargs):
-        obs, info = self.env.reset(**kwargs)
-
-        # Initialize from base env
-        self._initial_capital = float(
-            info.get("portfolio_value", getattr(self.env, "initial_capital", 100_000.0))
-        )
-        self._peak_eod_equity = self._initial_capital
-        self._current_equity = self._initial_capital
-        self._daily_start_equity = self._initial_capital
-
-        # Initialize date tracking from first timestamp
-        ts_epoch = self._get_timestamp_epoch()
-        if ts_epoch is not None:
-            date_int = _epoch_to_utc_date(ts_epoch)
-            self._last_eod_date = date_int
-            self._daily_date = date_int
-        else:
-            self._last_eod_date = 0
-            self._daily_date = 0
-
-        if self.augment_obs:
-            obs = self._augment(obs)
-
+        obs, info = super().reset(**kwargs)
+        if self._v7_augment:
+            obs = self._augment_v7(obs)
         return obs, info
 
     def step(self, action):
-        obs, reward, terminated, truncated, info = self.env.step(action)
+        obs, reward, terminated, truncated, info = super().step(action)
 
-        # If base env already terminated, pass through
-        if terminated:
-            if self.augment_obs:
-                obs = self._augment(obs)
-            return obs, reward, terminated, truncated, info
-
-        # --- Extract equity ---
-        self._current_equity = float(info.get("portfolio_value", self._current_equity))
-
-        # --- Timestamp tracking ---
-        current_date = 0
-        ts_epoch = self._get_timestamp_epoch()
-        if ts_epoch is not None:
-            current_date = _epoch_to_utc_date(ts_epoch)
-
-        # --- EOD trailing drawdown ---
-        # FTMO Phase 1 Challenge rule: Maximum Loss is measured from initial
-        # balance (static floor at initial_capital × (1 - max_trailing_dd_pct)).
-        # When static_peak=True, peak stays locked at initial_capital forever.
-        # When False (funded-account style), peak ratchets up at EOD boundaries.
-        if not self.static_peak:
-            if current_date != self._last_eod_date and self._last_eod_date > 0:
-                # Day boundary crossed: update peak from PREVIOUS day's closing equity
-                self._peak_eod_equity = max(self._peak_eod_equity, self._current_equity)
-                self._last_eod_date = current_date
-
-        eod_drawdown = 0.0
-        if self._peak_eod_equity > 0:
-            eod_drawdown = 1.0 - self._current_equity / self._peak_eod_equity
-
-        if eod_drawdown > self.max_trailing_dd_pct:
-            terminated = True
-            info["prop_firm_termination"] = "eod_trailing_drawdown"
-            info["eod_drawdown"] = eod_drawdown
-            logger.info(
-                f"PropFirm: EOD trailing drawdown {eod_drawdown:.4f} > "
-                f"{self.max_trailing_dd_pct:.4f} — challenge FAILED"
-            )
-
-        # --- Daily loss limit ---
-        if self.max_daily_loss_pct > 0 and not terminated:
-            if current_date != self._daily_date and self._daily_date > 0:
-                # New day: reset daily tracking
-                self._daily_start_equity = self._current_equity
-                self._daily_date = current_date
-
-            daily_loss = 0.0
-            if self._daily_start_equity > 0:
-                daily_loss = 1.0 - self._current_equity / self._daily_start_equity
-
-            if daily_loss > self.max_daily_loss_pct:
+        # Parent already handled DD + daily-loss termination. Only add
+        # profit-target termination if the parent did not terminate.
+        if not terminated:
+            cumulative_return = info.get("cumulative_return", 0.0)
+            if cumulative_return >= self.profit_target_pct:
                 terminated = True
-                info["prop_firm_termination"] = "daily_loss_limit"
-                info["daily_loss"] = daily_loss
+                reward += self.success_bonus
+                info["prop_firm_termination"] = "profit_target_reached"
+                info["challenge_passed"] = True
                 logger.info(
-                    f"PropFirm: Daily loss {daily_loss:.4f} > "
-                    f"{self.max_daily_loss_pct:.4f} — challenge FAILED"
+                    f"PropFirm: Profit target reached! Return {cumulative_return:.4f} >= "
+                    f"{self.profit_target_pct:.4f} — challenge PASSED"
                 )
 
-        # --- Profit target ---
-        cumulative_return = (self._current_equity - self._initial_capital) / self._initial_capital
-        if cumulative_return >= self.profit_target_pct and not terminated:
-            terminated = True
-            reward += self.success_bonus
-            info["prop_firm_termination"] = "profit_target_reached"
-            info["challenge_passed"] = True
-            info["cumulative_return"] = cumulative_return
-            logger.info(
-                f"PropFirm: Profit target reached! Return {cumulative_return:.4f} >= "
-                f"{self.profit_target_pct:.4f} — challenge PASSED"
-            )
-
-        # --- Reward shaping: drawdown proximity penalty ---
-        if not terminated and self.dd_penalty_scale > 0 and eod_drawdown > self.dd_penalty_start:
-            dd_frac = (eod_drawdown - self.dd_penalty_start) / (
-                self.max_trailing_dd_pct - self.dd_penalty_start + 1e-10
-            )
-            penalty = -self.dd_penalty_scale * dd_frac * dd_frac
-            reward += penalty
-
-        # --- Reward shaping: daily-loss proximity penalty (S469 ablation) ---
-        # Bounded quadratic, symmetric with the total-DD penalty above.
-        # Scale default 0.0 = disabled for backward compatibility.
-        if (not terminated and self.daily_loss_penalty_scale > 0
-                and self.max_daily_loss_pct > 0 and self._daily_start_equity > 0):
-            daily_loss_frac = 1.0 - self._current_equity / self._daily_start_equity
-            if daily_loss_frac > self.daily_loss_penalty_start:
-                dl_frac = (daily_loss_frac - self.daily_loss_penalty_start) / (
-                    self.max_daily_loss_pct - self.daily_loss_penalty_start + 1e-10
-                )
-                reward += -self.daily_loss_penalty_scale * dl_frac * dl_frac
-
-        # --- Prop firm info ---
-        info["eod_drawdown"] = eod_drawdown
-        info["eod_peak_equity"] = self._peak_eod_equity
-        info["cumulative_return"] = cumulative_return
-        info["profit_progress"] = (
+        # V7-only info keys. Wrap dict so profit_progress access emits
+        # DeprecationWarning.
+        cumulative_return = info.get("cumulative_return", 0.0)
+        profit_progress = (
             min(1.0, cumulative_return / self.profit_target_pct)
             if self.profit_target_pct > 0 else 0.0
         )
-        info["drawdown_budget_remaining"] = max(0.0, self.max_trailing_dd_pct - eod_drawdown)
+        info["profit_progress"] = profit_progress
+        info = _DeprecatedProfitProgressDict(info)
 
-        if self.augment_obs:
-            obs = self._augment(obs)
+        if self._v7_augment:
+            obs = self._augment_v7(obs)
 
         return obs, reward, terminated, truncated, info
 
-    def _compute_extra(self) -> np.ndarray:
-        """Compute the 3 prop-firm constraint dims.
+    # ------------------------------------------------------------------
+    # V7 3-dim augmentation (parent's 2 dims + profit_progress)
+    # ------------------------------------------------------------------
 
-        Returns
-        -------
-        np.ndarray of shape (3,):
-            [0] drawdown_remaining_frac: (max_dd - current_dd) / max_dd  in [0, 1]
-            [1] daily_loss_remaining_frac: (max_daily - current_daily) / max_daily  in [0, 1]
-            [2] profit_progress_frac: cumulative_return / profit_target  in [0, 1]
-        """
-        # Drawdown remaining
-        eod_dd = (
-            1.0 - self._current_equity / self._peak_eod_equity
-            if self._peak_eod_equity > 0 else 0.0
-        )
-        dd_remaining = (
-            max(0.0, (self.max_trailing_dd_pct - eod_dd) / self.max_trailing_dd_pct)
-            if self.max_trailing_dd_pct > 0 else 1.0
-        )
-
-        # Daily loss remaining
-        if self.max_daily_loss_pct > 0 and self._daily_start_equity > 0:
-            daily_loss = 1.0 - self._current_equity / self._daily_start_equity
-            daily_remaining = max(
-                0.0, (self.max_daily_loss_pct - daily_loss) / self.max_daily_loss_pct
-            )
-        else:
-            daily_remaining = 1.0
-
-        # Profit progress
+    def _compute_extra_v7(self) -> np.ndarray:
+        """3-dim constraint vector: [dd_remaining, daily_remaining, profit_progress]."""
+        parent_extra = self._compute_extra()  # (2,) [dd_remaining, daily_remaining]
         cum_ret = (
             (self._current_equity - self._initial_capital) / self._initial_capital
             if self._initial_capital > 0 else 0.0
@@ -328,18 +203,12 @@ class PropFirmWrapperV7(gym.Wrapper):
             float(np.clip(cum_ret / self.profit_target_pct, 0.0, 1.0))
             if self.profit_target_pct > 0 else 0.0
         )
+        return np.concatenate([parent_extra, np.array([profit_progress], dtype=np.float32)])
 
-        return np.array([dd_remaining, daily_remaining, profit_progress], dtype=np.float32)
-
-    def _augment(self, obs: dict | np.ndarray) -> dict | np.ndarray:
-        """Append 3 prop-firm constraint dims to the observation."""
-        extra = self._compute_extra()
-
+    def _augment_v7(self, obs: dict | np.ndarray) -> dict | np.ndarray:
+        extra = self._compute_extra_v7()
         if self._dict_obs:
-            # Dict obs: extend 'private' key
-            obs = dict(obs)  # shallow copy
+            obs = dict(obs)
             obs["private"] = np.concatenate([obs["private"], extra])
             return obs
-        else:
-            # Flat obs
-            return np.concatenate([obs, extra])
+        return np.concatenate([obs, extra])

@@ -1,6 +1,9 @@
 # MCP config (contains API keys)
 .mcp.json
 
+# Resolved deploy configs (base + overlay merges, per-deploy artifacts)
+configs/deploy/_resolved/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -106,6 +109,10 @@ deepscalper_tuned.yaml
 trading_state.json
 recent_runs.json
 deploy_package.zip
+deploy_package_*.zip
+deploy_dhpo_*.zip
+configs/_volume_study_runtime/
+env.txt
 *.db
 
 # Docker artifacts
@@ -139,6 +146,9 @@ alphaseek_train/
 # Research papers & large data snapshots (don't bloat git history)
 *.pdf
 *.jsonl
+# Exception: live-replay capture fixtures (E1 Tier-3 regression input).
+# Small (<1MB), versioned, scrubbed of secrets at pull time.
+!tests/fixtures/live_replay/*.jsonl
 
 # Contest data snapshots
 contest/*/data/

@@ -120,7 +120,10 @@ class CMEBarClock:
                     chunk = min(remaining, self._HEARTBEAT_INTERVAL)
                     await asyncio.sleep(chunk)
                     remaining -= chunk
-                    if remaining > 0 and self._heartbeat_callback is not None:
+                    # S490 F4: fire callback after EVERY chunk including the
+                    # final one, so the health file stays fresh across the
+                    # market-closed → market-open transition.
+                    if self._heartbeat_callback is not None:
                         try:
                             self._heartbeat_callback("market_closed")
                         except Exception:

@@ -18,12 +18,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+import wandb
 import yaml
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from finrl_pro_ds.data.splitter import RollingWindowSplitter
+from finrl_pro_ds.logging import clear_namespace, set_namespace
 
 logger = logging.getLogger("WalkForward")
 
@@ -42,7 +44,8 @@ def load_config(path: str) -> dict:
 # Fold Runner
 # ---------------------------------------------------------------------------
 
-def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dry_run: bool = False):
+def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dry_run: bool = False,
+             seed: int | None = None):
     """
     Execute a single walk-forward fold:
       1. Train agent on train_range
@@ -89,9 +92,18 @@ def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dr
         fold_config["data"]["test_end_date"] = str(test_range[1])
 
         # Run training
-        run_name = f"WF_{fold_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        # Include seed when set so multiseed WF checkpoint dirs
+        # (checkpoints/<run_name>/checkpoint_final.pth) don't collide.
+        prefix = f"WF_seed{seed}" if seed is not None else "WF"
+        run_name = f"{prefix}_{fold_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         device = fold_config.get("agent", {}).get("device", "cuda")
-        checkpoint_path = run_training(fold_config, run_name, device)
+        # Agent type defaults to 'bdq' in run_training. For modern configs
+        # that key the agent under `agents.<type>`, pick that key so SAC /
+        # DSAC / PPO configs train the right model.
+        agent_type = (fold_config.get("agent_type")
+                      or next(iter(fold_config.get("agents", {}).keys()), "bdq"))
+        checkpoint_path = run_training(fold_config, run_name, device,
+                                       agent_type=agent_type)
 
         # ------------------------------------------------------------------
         # Phase 2: Backtest on test range
@@ -104,6 +116,7 @@ def run_fold(fold_idx: int, train_range, val_range, test_range, config: dict, dr
                 start_date=str(test_range[0]),
                 end_date=str(test_range[1]),
                 prefix=f"wf_{fold_id}",
+                agent_type=agent_type,
             )
         else:
             logger.warning(f"  No checkpoint found for {fold_id}, skipping backtest")
@@ -177,12 +190,31 @@ def main():
     parser = argparse.ArgumentParser(description="Walk-Forward Evaluation")
     parser.add_argument("--config", required=True, help="Path to YAML config")
     parser.add_argument("--dry-run", action="store_true", help="Print folds without running")
+    parser.add_argument("--separate_runs", action="store_true",
+                        help="Legacy: skip consolidated WandB parent run. Folds "
+                             "log to whatever run run_training happens to create.")
+    parser.add_argument("--run_name_prefix", default="wf",
+                        help="WandB run name prefix (default: 'wf')")
+    parser.add_argument("--seed", type=int, default=None,
+                        help="Global random seed (torch, numpy, random). Applied once at startup.")
     args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
     )
+
+    if args.seed is not None:
+        import random as _random
+
+        import numpy as _np
+        import torch as _torch
+        _torch.manual_seed(args.seed)
+        _np.random.seed(args.seed)
+        _random.seed(args.seed)
+        if _torch.cuda.is_available():
+            _torch.cuda.manual_seed_all(args.seed)
+        logger.info(f"Global seed set: {args.seed}")
 
     config = load_config(args.config)
 
@@ -208,11 +240,69 @@ def main():
         logger.error("No folds generated! Check date range and splitter config.")
         sys.exit(1)
 
+    # ------------------------------------------------------------------
+    # Consolidated WandB parent run — one run covers all folds (S488+).
+    # Each fold's internal wandb.log calls get prefixed win<i>/* via
+    # set_namespace. --separate_runs preserves legacy behavior.
+    # ------------------------------------------------------------------
+    parent_run = None
+    if not args.dry_run and not args.separate_runs:
+        wcfg = config.get("wandb", {}) or {}
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        parent_run = wandb.init(
+            project=wcfg.get("project", "FinRL-Pro-DS"),
+            entity=wcfg.get("entity", "bigcan-chiwin-technology"),
+            name=f"{args.run_name_prefix}_{timestamp}",
+            job_type="walk_forward",
+            tags=list(wcfg.get("tags", []) or []) + ["walk_forward", "consolidated"],
+            config={
+                "experiment": "walk_forward",
+                "n_folds": len(folds),
+                "config_path": str(args.config),
+                "splitter": splitter_cfg,
+            },
+        )
+        logger.info("Parent WandB run: %s", parent_run.url)
+
     # Run each fold
     results = []
-    for i, (train_range, val_range, test_range) in enumerate(folds):
-        fold_result = run_fold(i, train_range, val_range, test_range, config, dry_run=args.dry_run)
+    for i, fold in enumerate(folds):
+        # splitter.split() returns list[dict[str, TimeRange]]; unpack explicitly
+        # so we don't iterate dict keys.
+        train_range = fold["train"].to_tuple()
+        val_range = fold["val"].to_tuple()
+        test_range = fold["test"].to_tuple()
+        if parent_run is not None:
+            set_namespace(f"win{i}")
+        fold_result = run_fold(i, train_range, val_range, test_range, config,
+                               dry_run=args.dry_run, seed=args.seed)
         results.append(fold_result)
+
+        # Final per-window summary dict logged directly from the driver.
+        if parent_run is not None:
+            summary = {
+                f"win{i}/summary/sharpe": fold_result.get("sharpe"),
+                f"win{i}/summary/max_drawdown": fold_result.get("max_drawdown"),
+                f"win{i}/summary/total_return_pct": fold_result.get("total_return_pct"),
+                f"win{i}/summary/status": fold_result.get("status"),
+            }
+            wandb.log({k: v for k, v in summary.items() if v is not None})
+
+    if parent_run is not None:
+        clear_namespace()
+        # Aggregate summary across all folds (WF-level header metrics).
+        sharpes = [r["sharpe"] for r in results if r.get("sharpe") is not None]
+        dds = [r["max_drawdown"] for r in results if r.get("max_drawdown") is not None]
+        if sharpes:
+            import numpy as _np
+            wandb.summary["wf/sharpe_mean"] = float(_np.mean(sharpes))
+            wandb.summary["wf/sharpe_std"] = float(_np.std(sharpes))
+        if dds:
+            import numpy as _np
+            wandb.summary["wf/max_drawdown_mean"] = float(_np.mean(dds))
+        wandb.summary["wf/n_folds"] = len(results)
+        wandb.summary["wf/n_completed"] = sum(1 for r in results if r.get("status") == "completed")
+        parent_run.finish()
 
     # Print summary
     print_summary(results)

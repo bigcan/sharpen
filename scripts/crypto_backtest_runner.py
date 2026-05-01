@@ -38,7 +38,7 @@ from finrl_pro_ds.crypto.data.crypto_loader import (  # noqa: E402
     fetch_crypto_data,
 )
 from finrl_pro_ds.crypto.envs.crypto_perp_env import CryptoPerpEnv  # noqa: E402
-from finrl_pro_ds.crypto.envs.prop_firm_wrapper import PropFirmWrapper  # noqa: E402
+from finrl_pro_ds.envs.prop_firm_wrapper import PropFirmWrapperV7 as PropFirmWrapper  # noqa: E402
 from finrl_pro_ds.crypto.execution.arbitrator import SoftmaxArbitrator  # noqa: E402
 from finrl_pro_ds.crypto.features.crypto_features import (  # noqa: E402
     compute_crypto_features,

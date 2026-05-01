@@ -1,0 +1,68 @@
+# Distributed HPO overlay — SG-1-XAUUSD leverage research Phase 1a
+#
+# Single GPU (gpuhub-1 occupied by funding-arb DSAC `tbdorry7`). 3 co-located
+# replicas on gpuhub-2:0 — proven safe pattern (sg1_xauusd_ftmo_rehpo_20260419,
+# 3 replicas per 4090, ~75% util / ~2-2.5x aggregate throughput).
+#
+# 12 trials / 3 workers = 4 trials per worker × ~2hr/trial ≈ 8hr wall clock
+# (vs ~2-4 GPU-days for serial HPO). S487 race-fix in place — checkpoints
+# isolated per worker via run_name = {study}/worker_{ID}/trial_{N}.
+#
+# Launch:
+#   set -a; source .env; set +a
+#   python scripts/distributed_hpo_coordinator.py \
+#     --config configs/sg1_xauusd_leverage_narrow_hpo.yaml \
+#     --platform gpuhub \
+#     --n_workers 3 --n_trials 12 \
+#     --db_url "$DISTRIBUTED_HPO_DB_URL" \
+#     --study_name sg1_xauusd_leverage_narrow_hpo_20260427 \
+#     --distributed_config configs/dhpo_sg1_xauusd_leverage.yaml
+
+distributed_hpo:
+  platform: "gpuhub"
+  n_workers: 3
+  n_trials: 12
+
+  storage:
+    backend: "postgresql"
+    url: "${DISTRIBUTED_HPO_DB_URL}"
+    heartbeat_interval: 60
+    grace_period: 600
+    max_retry: 1
+
+  # Single-GPU fleet — gpuhub-1 occupied (funding-arb DSAC `tbdorry7`),
+  # gpuhub-2:0 idle (verified via monitor_fleet 2026-04-27 13:06 UTC).
+  # 3 co-located replicas — proven from sg1_xauusd_ftmo_rehpo_20260419.
+  gpuhub:
+    instances:
+      - "gpuhub-2:0"
+      - "gpuhub-2:0"
+      - "gpuhub-2:0"
+
+  worker:
+    target_trials: null
+    trial_timeout: 7200          # 2hr/trial — narrow re-HPO converges fast
+    graceful_shutdown_timeout: 60
+    pip_extras: ""
+
+  data:
+    upload_method: "sftp"
+    data_files:
+      - "cme/gc_2025_lob1_1min_stitched.parquet"
+      - "cme/gc_2025_lob1_1min_stitched.manifest.json"
+    cache_by_size: true
+
+  wandb:
+    entity: "bigcan-chiwin-technology"
+    project: "FinRL-Pro-DS"
+    group_prefix: "dhpo"
+    tags: ["distributed_hpo", "sg-1", "XAUUSD", "FTMO", "leverage-research",
+           "phase-1a", "narrow-rehpo", "steady-state"]
+
+  fault_tolerance:
+    max_worker_retries: 2
+    worker_replace_on_death: false
+    monitor_poll_interval: 300
+
+  cost:
+    auto_teardown: false

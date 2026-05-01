@@ -2,13 +2,21 @@
 import argparse
 import json
 import os
+import shlex
 import sys
 import time
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 import paramiko
+import yaml
 from dotenv import load_dotenv
+
+# Env vars auto-forwarded from deployer -> remote shell. Keep the allowlist
+# explicit — we never want to blindly echo local env onto a remote box.
+# FINRL_WANDB_* support the consolidated-run pattern (S488+).
+FORWARD_ENV_ALLOWLIST = ("FINRL_WANDB_RUN_ID", "FINRL_WANDB_NAMESPACE")
 
 # Load Environment Variables from Root
 load_dotenv()
@@ -26,6 +34,47 @@ DEPLOY_EXCLUDES = [
 ROOT_DATA_EXCLUDE = ['data'] # Only exclude root data folder
 
 INSTANCES_FILE = PROJECT_ROOT / "instances.json"
+DEPLOY_OVERLAY_ROOT = PROJECT_ROOT / "configs" / "deploy"
+DEPLOY_ALLOWLIST_PATH = DEPLOY_OVERLAY_ROOT / "ALLOWLIST.yaml"
+
+
+def _resolve_with_overlays(base_path: Path, overlay_specs: list) -> Path:
+    """Deep-merge ``base`` + each overlay under ``configs/deploy/``.
+
+    Overlay spec format: ``"<firm>/<phase>"`` (no ``.yaml`` suffix; resolves
+    to ``configs/deploy/<spec>.yaml``). Later overlays win.
+
+    Raises ``ConfigMergeError`` if any overlay touches a disallowed key.
+    Writes the resolved config to ``configs/deploy/_resolved/`` so the
+    existing zip-builder picks it up unchanged. Returns the path of the
+    resolved config *relative to PROJECT_ROOT* (so the remote script sees
+    the same path after unzip).
+
+    Merge semantics live in :func:`finrl_pro_ds.config_utils.apply_overlays`
+    so the live runners (run_live_ctrader / etc.) apply the same allowlist
+    enforcement at container boot.
+    """
+    from finrl_pro_ds.config_utils import apply_overlays
+
+    with base_path.open("r", encoding="utf-8") as f:
+        base_cfg = yaml.safe_load(f) or {}
+
+    cfg = apply_overlays(
+        base_cfg,
+        overlay_specs,
+        overlay_root=DEPLOY_OVERLAY_ROOT,
+        allowlist_path=DEPLOY_ALLOWLIST_PATH,
+    )
+
+    resolved_dir = DEPLOY_OVERLAY_ROOT / "_resolved"
+    resolved_dir.mkdir(parents=True, exist_ok=True)
+    overlay_slug = "_".join(s.replace("/", "-") for s in overlay_specs)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    resolved_path = resolved_dir / f"{base_path.stem}__{overlay_slug}__{ts}.yaml"
+    with resolved_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+    return resolved_path.relative_to(PROJECT_ROOT)
+
 
 def get_env_var(key, default=None):
     val = os.getenv(key, default)
@@ -101,6 +150,25 @@ def create_filtered_zip(source_dir, output_filename):
     print(f"Package created. Size: {os.path.getsize(output_filename) / 1024 / 1024:.2f} MB")
 
 def deploy(args):
+    # Resolve overlays first so the effective config ships in the zip and
+    # the remote script sees the merged result. Violations of the overlay
+    # key-allowlist raise before any SSH / zip work happens.
+    if args.overlay:
+        base_path = Path(args.config)
+        if not base_path.is_absolute():
+            base_path = PROJECT_ROOT / base_path
+        if not base_path.exists():
+            print(f"ERROR: Base config not found: {base_path}")
+            sys.exit(2)
+        try:
+            resolved = _resolve_with_overlays(base_path, list(args.overlay))
+        except Exception as exc:
+            print(f"ERROR: Overlay resolution failed: {exc}")
+            sys.exit(2)
+        print(f"Overlays applied ({' -> '.join(['base', *args.overlay])}).")
+        print(f"Resolved config: {resolved}")
+        args.config = str(resolved).replace("\\", "/")
+
     inst = resolve_instance(args.instance)
     host = inst["host"]
     port = inst["port"]
@@ -108,14 +176,18 @@ def deploy(args):
     print(f"Target instance: {inst['name']} ({host}:{port})"
           + (f" | GPUs: {inst['gpus']}" if inst['gpus'] else ""))
     # CANONICAL NAMING: {descriptive-id}_{YYYYMMDD}_{HHMMSS}
-    # Descriptive ID derived from config filename
-    from finrl_pro_ds.utils.naming import generate_run_name
-    full_run_name = generate_run_name(args.config)
-
-    # If user provided a custom name, add it as a tag instead
-    extra_tags = []
+    # Caller-provided --run_name wins (e.g. launch_l1_multiseed.py needs
+    # per-seed uniqueness to avoid concurrent processes clobbering
+    # checkpoints/<run_name>/ when they share a second-level timestamp).
+    # Fallback: derive from config filename.
+    from finrl_pro_ds.utils.naming import generate_run_name, validate_run_name
     if args.run_name:
-        extra_tags.append(args.run_name)
+        validate_run_name(args.run_name, raise_on_fail=True)
+        full_run_name = args.run_name
+    else:
+        full_run_name = generate_run_name(args.config)
+
+    extra_tags = []
 
     # Auto-inject platform + GPU model WandB tags
     extra_tags.append("gpuhub")
@@ -148,9 +220,12 @@ def deploy(args):
     stdin_mk, stdout_mk, stderr_mk = ssh.exec_command(f"mkdir -p {remote_workspace}")
     stdout_mk.channel.recv_exit_status()  # Wait for mkdir to complete
 
-    print("Cleaning remote workspace of old zips...")
-    stdin_rm, stdout_rm, stderr_rm = ssh.exec_command(f"rm -rf {remote_workspace}/*.zip")
-    stdout_rm.channel.recv_exit_status()  # Wait for rm to complete before uploading
+    # Concurrent-safe: only remove our OWN zip slot (in case of stale retry).
+    # Wiping `*.zip` is unsafe when multiple deploys race on the same instance
+    # (3-per-GPU multiplexing) — each deploy would delete peer zips mid-flight.
+    print(f"Removing stale {zip_name} if present...")
+    stdin_rm, stdout_rm, stderr_rm = ssh.exec_command(f"rm -f {remote_workspace}/{zip_name}")
+    stdout_rm.channel.recv_exit_status()
 
     if args.upload_data:
         # Use absolute paths for robust deployment
@@ -287,7 +362,14 @@ def deploy(args):
     gpu_env = f"export CUDA_VISIBLE_DEVICES={args.gpu} &&" if args.gpu is not None else ""
 
     wandb_env = f"export WANDB_API_KEY={wandb_key} &&" if wandb_key else ""
-    from datetime import datetime
+    # Auto-forward allowlisted env vars (see FORWARD_ENV_ALLOWLIST). The
+    # launcher sets these in its subprocess env; we echo them into the
+    # remote shell so `run_full_pipeline.py` can read them on gpuhub.
+    forwarded_exports = " ".join(
+        f"export {k}={shlex.quote(os.environ[k])} &&"
+        for k in FORWARD_ENV_ALLOWLIST
+        if os.environ.get(k)
+    )
     log_file = f"run_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
 
     # Unique HPO DB to prevent locking collisions
@@ -295,22 +377,45 @@ def deploy(args):
     hpo_storage_arg = f"--hpo_storage sqlite:///{remote_workspace}/{hpo_db}"
 
     # FIX: Remove () around ulimit so it applies to the current shell and subsequent nohup process
-    cmd = f"{export_path} && {gpu_env} {wandb_env} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
+    cmd = f"{export_path} && {gpu_env} {wandb_env} {forwarded_exports} ulimit -n 65535 || true && nohup python -u {script_path} --config {config_path} {run_name_arg} {hpo_storage_arg} {all_extra_args} > {log_file} 2>&1 & echo $! > run.pid"
 
     exec_cmd = f"cd {remote_workspace} && {cmd}"
     stdin, stdout, stderr = ssh.exec_command(exec_cmd)
 
-    # Check if launched
-    time.sleep(15)
-    stdin, stdout, stderr = ssh.exec_command(f"cat {remote_workspace}/run.pid")
-    pid = stdout.read().decode().strip()
+    # Probe for run.pid with backoff (the `& echo $! > run.pid` race is flaky:
+    # bash sometimes hasn't reached the echo by the 15s mark, leaving run.pid
+    # missing while python is happily training in the background). On failure
+    # we fall back to pgrep on the script name — orphaning the seed silently
+    # is far worse than a slow probe.
+    script_basename = os.path.basename(script_path)
+    pid = ""
+    for _attempt in range(20):           # 20 * 1.5s = 30s
+        time.sleep(1.5)
+        _, out, _ = ssh.exec_command(f"cat {remote_workspace}/run.pid 2>/dev/null")
+        candidate = out.read().decode().strip()
+        if candidate and candidate.isdigit():
+            pid = candidate
+            break
+    if not pid:
+        # Fallback: locate the python process by its unique --config path.
+        # Matching on config_path (not just script name) avoids picking up
+        # sibling deploys on the same instance that share the script.
+        _, out, _ = ssh.exec_command(
+            f"pgrep -f 'python -u .*{script_basename}.*{config_path}' | head -1"
+        )
+        candidate = out.read().decode().strip()
+        if candidate and candidate.isdigit():
+            pid = candidate
+            # Persist for downstream consumers (and to short-circuit re-runs).
+            ssh.exec_command(f"echo {pid} > {remote_workspace}/run.pid")
+            print(f"NOTE: run.pid was missing; recovered PID via pgrep: {pid}")
 
     if pid and pid.isdigit():
         print(f"SUCCESS: Deployed successfully. PID: {pid}")
         print(f"Logs: {remote_workspace}/{log_file}")
         print(f"WandB Run: {full_run_name if full_run_name else '(auto-generated by script)'}")
     else:
-        print("FAILURE: PID not found. Check remote logs.")
+        print("FAILURE: PID not found and pgrep fallback empty. Check remote logs.")
         stdin, stdout, stderr = ssh.exec_command(f"cat {remote_workspace}/{log_file}")
         print(stdout.read().decode("utf-8", errors="replace").encode("ascii", errors="replace").decode("ascii"))
 
@@ -357,7 +462,6 @@ def deploy(args):
 
             # Log to Registry (results/deploys.db)
             import sqlite3
-            from datetime import datetime
 
             db_path = os.path.join(PROJECT_ROOT, "results", "deploys.db")
             os.makedirs(os.path.dirname(db_path), exist_ok=True)
@@ -431,6 +535,13 @@ def deploy(args):
             print("\n\nCollection cancelled. Run continues on remote.")
             print("  Use 'python scripts/collect_run.py --run_id <ID>' manually later.")
 
+    # Signal deploy failure so callers (launch_l1_multiseed, run_volume_study)
+    # don't silently see exit 0 when run.pid was empty. Without this, --collect
+    # falls through to a no-op and the launcher counts the seed as OK.
+    if not (pid and pid.isdigit()):
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--script", default="scripts/run_full_pipeline.py", help="Script to run (default: scripts/run_full_pipeline.py)")
@@ -445,6 +556,18 @@ if __name__ == "__main__":
     parser.add_argument("--instance", default=None, help="Named instance from instances.json (e.g. gpuhub-1, gpuhub-2). Default: uses 'default' key or .env")
     parser.add_argument("--gpu", default=None, help="CUDA_VISIBLE_DEVICES value (e.g. 0, 1, '0,1'). For multi-GPU instances.")
     parser.add_argument("--pip_extras", default=None, help="pip extras group to install (e.g. 'crypto' -> pip install -e .[crypto])")
+    parser.add_argument(
+        "--overlay",
+        action="append",
+        default=None,
+        metavar="<firm>/<phase>",
+        help=(
+            "Deploy overlay under configs/deploy/ (e.g. 'ftmo/step1'). "
+            "Repeatable — applied in order, deep-merged onto --config. "
+            "Overlay keys are validated against configs/deploy/ALLOWLIST.yaml "
+            "before merging; violations abort pre-SSH."
+        ),
+    )
     args = parser.parse_args()
 
     deploy(args)

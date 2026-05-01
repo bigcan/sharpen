@@ -65,16 +65,15 @@ environment:
   random_start_pct: 0.1
 
   # --- Prop firm wrapper ---
-  prop_firm:
+  risk:
     enabled: true
-    profit_target_pct: 0.10          # 10% profit target (step 1)
     max_trailing_drawdown_pct: 0.10  # 10% EOD trailing DD
     max_daily_loss_pct: 0.0          # No daily loss limit in 2-step
     eod_hour_utc: 0
     drawdown_penalty_start: 0.05     # Start penalty at 5% DD
     drawdown_penalty_scale: 5.0
-    success_bonus: 10.0
-    augment_obs: true
+    augment_obs: "2d"                # legacy True → 2-dim augment (3-dim legacy unsupported per ADR-1)
+    static_peak: true
 
 network:
   scale_encoder:

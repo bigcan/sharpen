@@ -30,6 +30,30 @@ from finrl_pro_ds.futures.execution.contract_manager import FuturesContractManag
 logger = logging.getLogger(__name__)
 
 
+# IB error codes that indicate an explicit broker rejection of an order
+# (margin failure, no security definition, cancelled by broker, etc.).
+# These must surface as exceptions so the engine's consecutive_errors
+# counter increments instead of silently swallowing the failure
+# (S488 gmgp1-gold 77× Error 201 storm with health_status stuck green).
+IB_ORDER_REJECTION_CODES = frozenset({200, 201, 202, 203, 204})
+
+# HMDS / historical-data codes are transient (farm flicker). Logged for
+# visibility but not raised — _get_mid_price has its own retry + fallback.
+IB_HMDS_CODES = frozenset({321, 322})
+
+
+class IBOrderRejected(RuntimeError):
+    """Raised when IB emits an order-rejection errorEvent (200-204)."""
+
+    def __init__(self, order_id: int, error_code: int, error_string: str):
+        self.order_id = order_id
+        self.error_code = error_code
+        self.error_string = error_string
+        super().__init__(
+            f"IB Error {error_code} on order {order_id}: {error_string}"
+        )
+
+
 class IBFuturesBroker:
     """IB futures broker for Gold (GC/MGC) paper and live trading.
 
@@ -90,6 +114,12 @@ class IBFuturesBroker:
         # so we must maintain our own price cache.
         self._cached_market_price: float = 0.0
 
+        # Pending IB order rejections captured via errorEvent, keyed by
+        # reqId (== orderId for order errors). Drained by _place_order
+        # after _wait_for_fill so we can raise and let the engine count
+        # the failure.
+        self._ib_order_rejections: dict[int, tuple[int, str]] = {}
+
     async def connect(self) -> None:
         """Connect to IB Gateway/TWS. No-op if already connected.
 
@@ -104,6 +134,10 @@ class IBFuturesBroker:
             if self._ib is not None:
                 try:
                     self._ib.updatePortfolioEvent -= self._on_portfolio_update
+                except Exception:
+                    pass
+                try:
+                    self._ib.errorEvent -= self._on_ib_error
                 except Exception:
                     pass
                 try:
@@ -133,6 +167,13 @@ class IBFuturesBroker:
         # zero-position items, so we listen and cache ourselves).
         self._ib.updatePortfolioEvent += self._on_portfolio_update
 
+        # Surface IB order rejections (Error 200-204) as exceptions in
+        # _place_order. Without this, place_order silently returned
+        # status="failed" and the engine never counted the event toward
+        # consecutive_errors (S488 gmgp1-gold MGCM6 Error 201 storm).
+        self._ib_order_rejections.clear()
+        self._ib.errorEvent += self._on_ib_error
+
         logger.info(
             f"IBFuturesBroker ready: {self._contract_manager.contract.local_symbol} "
             f"({'PAPER' if self.testnet else 'LIVE'})"
@@ -141,9 +182,13 @@ class IBFuturesBroker:
     async def close(self) -> None:
         """Disconnect from IB."""
         if self._ib:
-            # FIX IB-07: Unsubscribe event handler to prevent leak
+            # FIX IB-07: Unsubscribe event handlers to prevent leak
             try:
                 self._ib.updatePortfolioEvent -= self._on_portfolio_update
+            except Exception:
+                pass
+            try:
+                self._ib.errorEvent -= self._on_ib_error
             except Exception:
                 pass
             if self._ib.isConnected():
@@ -204,6 +249,16 @@ class IBFuturesBroker:
         target_contracts = self._position_to_contracts(target_position, portfolio_value, price)
         current_contracts = self._position_contracts
 
+        # FIX S503: log the conversion arithmetic so the 2× drift signature
+        # leaves a forensic trace on every order — see what target_position
+        # rounds to under what (price, PV, multiplier).
+        logger.info(
+            f"[ORDER-DIAG] target_frac={target_position:.4f} current_frac={current_position:.4f} "
+            f"PV={portfolio_value:.2f} price={price:.2f} mult={self._contract_manager.multiplier} "
+            f"→ target_contracts={target_contracts} current_contracts={current_contracts} "
+            f"delta={target_contracts - current_contracts}"
+        )
+
         delta = target_contracts - current_contracts
         if delta == 0:
             return OrderResult(
@@ -234,9 +289,33 @@ class IBFuturesBroker:
             # In the limit-to-market fallback path, actual fill can differ from target.
             actual_filled = int(result.filled_quantity)
             if side == "BUY":
-                self._position_contracts = current_contracts + actual_filled
+                expected_contracts = current_contracts + actual_filled
             else:
-                self._position_contracts = current_contracts - actual_filled
+                expected_contracts = current_contracts - actual_filled
+            self._position_contracts = expected_contracts
+
+            # FIX S503: post-fill consistency check. Re-read what IB says we
+            # actually hold and compare to (cached + filled). If they differ,
+            # something doubled or dropped a contract — log loudly so the next
+            # bar's reconcile knows what to do (and we get one fixture).
+            try:
+                live_positions = self._ib.positions()
+                live_n = 0
+                for pos in live_positions:
+                    if (getattr(self._contract_manager.ib_contract, "conId", 0)
+                            and pos.contract.conId
+                                == self._contract_manager.ib_contract.conId):
+                        live_n = int(pos.position)
+                        break
+                if live_n != expected_contracts:
+                    logger.error(
+                        f"[FILL-DIAG] Post-fill mismatch: cached+filled={expected_contracts} "
+                        f"vs ib.positions()={live_n} (side={side} qty={quantity} "
+                        f"actual_filled={actual_filled} prev={current_contracts}). "
+                        f"This is the S503 2× drift signature."
+                    )
+            except Exception as e:
+                logger.warning(f"[FILL-DIAG] Post-fill verify failed: {e}")
 
         return result
 
@@ -244,16 +323,54 @@ class IBFuturesBroker:
         """Get current position as a fraction of portfolio value.
 
         Queries IB for actual position and converts to [-1, 1] fraction.
+
+        FIX S503 (gmgp1-gold 2× drift, diagnostic-first):
+        - Match strictly on conId (the unique IB contract identifier) when it
+          is set. Previously the OR-match (conId OR localSymbol) could pick a
+          stale/wrong contract if conId was 0 at qualification race or if a
+          deferred-month contract shared the localSymbol prefix.
+        - Log every Position object IB returns + the match decision so the
+          next mismatch leaves a forensic trace.
         """
         positions = self._ib.positions()
         contract = self._contract_manager.ib_contract
+        target_conid = getattr(contract, "conId", 0)
+        target_localsym = getattr(contract, "localSymbol", "")
 
-        n_contracts = 0
+        matches: list[tuple[int, str, int]] = []
         for pos in positions:
-            if (pos.contract.conId == contract.conId
-                    or pos.contract.localSymbol == contract.localSymbol):
-                n_contracts = int(pos.position)
-                break
+            pc = pos.contract
+            # Prefer conId-strict match; fall back to localSymbol when our
+            # qualified contract has no conId (qualification race on cold start).
+            if target_conid:
+                if pc.conId == target_conid:
+                    matches.append((pc.conId, pc.localSymbol, int(pos.position)))
+            elif target_localsym and pc.localSymbol == target_localsym:
+                matches.append((pc.conId, pc.localSymbol, int(pos.position)))
+
+        if len(positions) > 1 or len(matches) > 1:
+            logger.warning(
+                f"[POS-DIAG] ib.positions() returned {len(positions)} entries; "
+                f"target conId={target_conid} localSymbol={target_localsym!r}; "
+                f"all=[{', '.join(f'(conId={p.contract.conId},sym={p.contract.localSymbol!r},pos={p.position})' for p in positions)}]; "
+                f"matched={matches}"
+            )
+
+        if len(matches) == 0:
+            n_contracts = 0
+        elif len(matches) == 1:
+            n_contracts = matches[0][2]
+        else:
+            # Multiple matches against a single conId is unexpected — IB should
+            # net per (account, conId). Take the largest |qty| as the truth and
+            # log loudly. Engine reconcile (15% threshold) will catch anything
+            # genuinely divergent on the next bar.
+            chosen = max(matches, key=lambda m: abs(m[2]))
+            n_contracts = chosen[2]
+            logger.error(
+                f"[POS-DIAG] Multiple matches for same target — picked {chosen} "
+                f"from {matches}. Investigate ib_insync state."
+            )
 
         self._position_contracts = n_contracts
 
@@ -275,6 +392,12 @@ class IBFuturesBroker:
 
         price = await self._get_mid_price()
         fraction = self._contracts_to_position(n_contracts, self._portfolio_value, price)
+        # FIX S503: per-call diagnostic so the next mismatch leaves a
+        # forensic trace. Cheap (one log line per get_single_position).
+        logger.info(
+            f"[POS-DIAG] n_contracts={n_contracts} mult={self._contract_manager.multiplier} "
+            f"price={price:.2f} PV={self._portfolio_value:.2f} → fraction={fraction:.4f}"
+        )
         return fraction
 
     async def get_account_info(self) -> dict:
@@ -371,18 +494,27 @@ class IBFuturesBroker:
                 if mid is not None and not np.isnan(mid) and mid > 0:
                     self._ib.cancelMktData(contract)
                     self._ib.reqMarketDataType(1)
+                    # Zero-position HMDS fallback: seed cache so flat-position
+                    # HMDS outages can recover via _get_portfolio_market_price.
+                    self._cached_market_price = float(mid)
                     return mid
 
                 last = ticker.last
                 if last is not None and not np.isnan(last) and last > 0:
                     self._ib.cancelMktData(contract)
                     self._ib.reqMarketDataType(1)
+                    # Zero-position HMDS fallback: seed cache so flat-position
+                    # HMDS outages can recover via _get_portfolio_market_price.
+                    self._cached_market_price = float(last)
                     return last
 
                 close = ticker.close
                 if close is not None and not np.isnan(close) and close > 0:
                     self._ib.cancelMktData(contract)
                     self._ib.reqMarketDataType(1)
+                    # Zero-position HMDS fallback: seed cache so flat-position
+                    # HMDS outages can recover via _get_portfolio_market_price.
+                    self._cached_market_price = float(close)
                     return close
 
             self._ib.cancelMktData(contract)
@@ -396,13 +528,21 @@ class IBFuturesBroker:
         self._ib.reqMarketDataType(1)
 
         # Fallback 1: portfolio market price (populated by updatePortfolio
-        # events — requires an open position)
+        # events when a position is open, or seeded by a prior successful
+        # snapshot for the zero-position HMDS fallback path)
         portfolio_price = self._get_portfolio_market_price()
         if portfolio_price > 0:
-            logger.warning(
-                f"reqMktData snapshot failed — using portfolio price: "
-                f"{portfolio_price:.2f}"
-            )
+            if self._position_contracts == 0:
+                logger.warning(
+                    f"reqMktData snapshot failed (flat position) — using "
+                    f"snapshot-seeded cached price: {portfolio_price:.2f} "
+                    f"[zero-position HMDS fallback]"
+                )
+            else:
+                logger.warning(
+                    f"reqMktData snapshot failed — using portfolio price: "
+                    f"{portfolio_price:.2f}"
+                )
             return portfolio_price
 
         # Fallback 2: historical last tick (bypasses snapshot bug; uses
@@ -458,6 +598,24 @@ class IBFuturesBroker:
         """Return cached market price from updatePortfolio events."""
         return self._cached_market_price
 
+    def _on_ib_error(self, reqId, errorCode, errorString, contract=None) -> None:
+        """Capture IB errorEvents so order rejections surface to the engine.
+
+        ib_insync errorEvent signature: (reqId, errorCode, errorString, contract).
+        For order-related errors, reqId == orderId. Non-order events (e.g.
+        farm-connection broken) use reqId=-1 and are just logged.
+        """
+        if errorCode in IB_ORDER_REJECTION_CODES:
+            logger.error(
+                f"IB order rejection: code={errorCode} reqId={reqId} msg={errorString}"
+            )
+            if reqId is not None and reqId >= 0:
+                self._ib_order_rejections[int(reqId)] = (int(errorCode), str(errorString))
+        elif errorCode in IB_HMDS_CODES:
+            logger.warning(
+                f"IB HMDS error: code={errorCode} reqId={reqId} msg={errorString}"
+            )
+
     async def _place_order(
         self,
         side: str,
@@ -502,6 +660,12 @@ class IBFuturesBroker:
 
         # Wait for fill with timeout
         filled = await self._wait_for_fill(trade, timeout=self._market_fallback_timeout)
+
+        # Surface IB rejections (Error 200-204) as exceptions so the engine
+        # counts them toward consecutive_execution_errors instead of
+        # silently falling through to the limit-to-market fallback (which
+        # would just re-reject for margin reasons).
+        self._raise_if_rejected(trade, filled)
         # FIX IB-04: Track partial fills across limit-to-market fallback
         limit_filled = 0
         market_filled = 0
@@ -529,6 +693,7 @@ class IBFuturesBroker:
                 market_order = MarketOrder(side, remaining)
                 trade = self._ib.placeOrder(contract, market_order)
                 filled = await self._wait_for_fill(trade, timeout=30.0)
+                self._raise_if_rejected(trade, filled)
                 if filled:
                     market_filled = int(trade.orderStatus.filled)
                     market_avg_price = trade.orderStatus.avgFillPrice
@@ -579,6 +744,31 @@ class IBFuturesBroker:
             await asyncio.sleep(interval)
             elapsed += interval
         return False
+
+    def _raise_if_rejected(self, trade, filled: bool) -> None:
+        """Raise IBOrderRejected if an errorEvent (200-204) hit this order.
+
+        Drains the rejection from the pending dict so a subsequent order
+        does not see a stale entry. Only raises when the order did not
+        fill — a rare race where the fill and error both arrive is not
+        worth aborting on.
+        """
+        order = getattr(trade, "order", None)
+        order_id = getattr(order, "orderId", None) if order is not None else None
+        if order_id is None:
+            return
+        rejection = self._ib_order_rejections.pop(int(order_id), None)
+        if rejection is None:
+            return
+        code, msg = rejection
+        if filled:
+            # Order filled despite an errorEvent (e.g. a benign warning
+            # that happens to share the 200-204 range). Log and move on.
+            logger.warning(
+                f"IB errorEvent {code} on order {order_id} but fill succeeded: {msg}"
+            )
+            return
+        raise IBOrderRejected(int(order_id), code, msg)
 
     async def _flatten_for_roll(self) -> None:
         """Flatten position before contract roll."""

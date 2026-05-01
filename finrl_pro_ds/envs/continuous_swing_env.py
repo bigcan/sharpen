@@ -61,6 +61,11 @@ class ContinuousSwingEnv(gym.Env):
         self.atr_cap_percentile = float(config.get("atr_cap_percentile", 90))
         self.atr_cap_max_position = float(config.get("atr_cap_max_position", 0.5))
 
+        # Leverage cap (default 1.0 = current behavior). Scales action to
+        # target_position ∈ [-max_leverage, +max_leverage]. ATR cap remains
+        # absolute (acts as hard safety in high-vol regimes regardless of leverage).
+        self.max_leverage = float(config.get("max_leverage", 1.0))
+
         # Gap detection: zero out returns exceeding 3x ATR/price (session gaps, rolls)
         # Default off — enable for futures with trading halts (Gold, ES).
         self.gap_detection = bool(config.get("gap_detection", False))
@@ -237,7 +242,7 @@ class ContinuousSwingEnv(gym.Env):
 
     def step(self, action):
         raw_action = float(action[0]) if hasattr(action, '__len__') else float(action)
-        target_position = np.clip(raw_action, -1.0, 1.0)
+        target_position = np.clip(raw_action, -1.0, 1.0) * self.max_leverage
 
         self.current_step += 1
 
@@ -273,7 +278,14 @@ class ContinuousSwingEnv(gym.Env):
         delta = target_position - self.current_position
         traded = False
 
-        if abs(delta) < self.deadband_threshold:
+        # B5 fix: scale deadband by max_leverage so trade frequency is invariant
+        # to the leverage knob. Without this, deadband=0.25 in scaled-position
+        # space means the agent crosses it 1/L as often (high-L → more trades →
+        # superlinear fee drag → PF artifact unrelated to alpha).
+        # ATR cap stays absolute (it's a safety constraint, not a knob).
+        effective_deadband = self.deadband_threshold * self.max_leverage
+
+        if abs(delta) < effective_deadband:
             delta = 0.0
         else:
             # ATR cap: reduce max position in high-vol regimes
@@ -289,12 +301,14 @@ class ContinuousSwingEnv(gym.Env):
                         self.atr_cap_max_position,
                     )
                     delta = target_position - self.current_position
-                    if abs(delta) < self.deadband_threshold:
+                    if abs(delta) < effective_deadband:
                         delta = 0.0
 
             if delta != 0.0:
                 self.current_position += delta
-                self.current_position = np.clip(self.current_position, -1.0, 1.0)
+                self.current_position = np.clip(
+                    self.current_position, -self.max_leverage, self.max_leverage,
+                )
                 traded = True
                 self.trade_count += 1
 
@@ -408,15 +422,23 @@ class ContinuousSwingEnv(gym.Env):
 
         [current_position, unrealized_pnl_norm, time_sin, time_cos, atr_ratio]
         """
-        # 1. Current position [-1, 1]
-        pos = self.current_position
+        # 1. Current position normalized to [-1, 1] regardless of max_leverage.
+        # B1 fix: at max_leverage>1, raw position can range to ±max_leverage.
+        # Reporting raw values causes train/eval distribution shift across
+        # different leverages and breaks cross-L policy comparison. Divide by
+        # max_leverage so the agent sees position-as-fraction-of-cap, the same
+        # contract regardless of leverage knob.
+        _lev = max(self.max_leverage, 1e-9)
+        pos = self.current_position / _lev
 
         # 2. Unrealized PnL normalized — not applicable for continuous
-        # (position changes continuously, use recent return as proxy)
+        # (position changes continuously, use recent return as proxy).
+        # Same B1 normalization: scale by 1/max_leverage so the proxy is
+        # invariant to the leverage knob.
         pnl_proxy = 0.0
         if self.prev_close > 0 and self.current_close > 0:
             ret_bps = (self.current_close - self.prev_close) / self.prev_close * 10000.0
-            pnl_proxy = float(np.clip(self.current_position * ret_bps / 100.0, -1.0, 1.0))
+            pnl_proxy = float(np.clip((self.current_position / _lev) * ret_bps / 100.0, -1.0, 1.0))
 
         # 3-4. Time encoding (cached — only recompute when pointer advances)
         if self._current_obs and hasattr(self, 'handler') and self.handler:

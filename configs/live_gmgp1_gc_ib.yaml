@@ -1,9 +1,24 @@
 # Live Trading Config — GMGP1-v5 SAC on Gold Futures via Interactive Brokers
 #
 # Usage:
-#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml
-#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml --mainnet
-#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml --dry-run
+#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml --overlay ftmo/step1
+#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml --overlay ftmo/step1 --mainnet
+#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml --overlay ftmo/step1 --dry-run
+#
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S499c Tier-9 Step-5 base-config migration).
+# This file is the BASE config: checkpoint + alpha contract + env dims +
+# data + container paths. Prop-firm phase and firm-specific DD/target/gates
+# live in configs/deploy/<firm>/<phase>.yaml overlays (allowlist-enforced).
+#
+# Deploy invocations (resolved = this file + overlay):
+#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml --overlay ftmo/step1
+#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml --overlay ftmo/step2
+#   python scripts/run_live_ib.py --config configs/live_gmgp1_gc_ib.yaml --overlay ftmo/funded
+#
+# After this migration the BASE file alone is NOT paper-deployable
+# (validator FAILs: `risk.static_peak` missing); pair with an overlay.
+# ---------------------------------------------------------------------------
 
 # --- IB Connection ---
 exchange:
@@ -84,11 +99,12 @@ trading:
     enabled: true
     minutes_before_close: 30           # Flatten 30 min before Friday close
 
-# --- Risk Management ---
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay owns: static_peak (true for step1/step2, false for funded),
+# flatten_on_kill_file. See configs/deploy/ftmo/{step1,step2,funded}.yaml.
 risk:
   enabled: true
   max_drawdown_pct: 0.08               # 8% hard stop (2% below FTMO 10% limit)
-  static_peak: true                    # FTMO max-loss: DD from initial balance, never ratchets
   circuit_breaker_cooldown_bars: 12    # 3 hours at 15-min bars
   max_position_pct: 1.0                # Single asset = 100% allowed
   max_net_short_exposure: -1.0         # Single asset — allow full short

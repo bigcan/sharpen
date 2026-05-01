@@ -1,0 +1,139 @@
+# AlphaSeek v3 — canonical gates source of truth (S500 M5).
+#
+# Per CLAUDE.md anti-pattern rule "never hardcode gate thresholds in code or
+# scripts": this file is the ONE place numeric gates live. Stage configs
+# inline the subset their validator + launcher needs; ensemble eval scripts
+# read this file directly via `--gates_file`.
+#
+# Pattern follows configs/sg1_xauusd_ensemble.gates.yaml (S488).
+#
+# Workstream is a research-stage redesign of retired AlphaSeek v2 — not yet
+# prop-firm tagged. Tag transitions to ["prop-firm", "FTMO" or "velotrade"]
+# only after Stage 4 PASS (M10) and only inside the paper-deploy config.
+
+workstream: "alphaseek_v3"
+variant: "fee_internalized_lob_scalping"
+seeds: []                                      # populated post-L1 (top-3 by val PF)
+aggregation_rule: "ens_agreement"              # candidate; final rule selected at
+                                                # Stage 2.5 via val-argmax-PF (S495)
+
+# Fold count for WF (M9).
+wf_folds: 4
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+gates:
+
+  # ----- Stage 1 HPO training-health -----
+  entropy_floor: 0.05                          # SAC fallback path; DQN ignores
+  q_div_max: 1.0e6                             # Q value divergence guard
+  action_sat_max: 0.30                         # discrete agent so soft cap
+
+  # ----- Stage 2 L1 multiseed (S488 N=10 + auto-extend) -----
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_cv_ambiguous: [0.22, 0.38]             # auto-extend to N=20 if CV in range
+  l1_pf_floor: 1.0                             # per-seed median PF >= 1.0
+
+  # ----- Stage 2.5 ensemble (Protocol v2.3 + S495 val-selection) -----
+  # Stage 2.5 uses block-bootstrap on per-bar returns to compute paired
+  # P(ens > solo) on PF + MDD. Pre-committed at M5 per
+  # project_stage_2_5_bootstrap_gates_not_loaded.md.
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_mdd_promote: 0.90
+  ensemble_bootstrap_resamples: 10000
+  ensemble_bootstrap_block_len: null            # null → auto = sqrt(n_bars)
+  ensemble_uplift_min: 1.10                     # legacy point-estimate; secondary
+  ensemble_ambiguous_min: 1.05
+  ensemble_top_k: 3
+  ensemble_diversity_lambda: 1.0                # PF − λ * max_corr_with_already_selected
+
+  # ----- Stage 3 WF -----
+  wf_windows: 4
+  wf_pf_floor: 1.0                             # per-window median PF
+  wf_seeds_pass_min: 2                         # >=2/3 seeds pass per window
+
+  # ----- Stage 4 recent-OOS -----
+  oos_pf_floor: 1.0
+  oos_max_fills_per_episode: 100               # tighter than Stage 1 cap (150)
+
+  # ----- Stage 5 paper-deploy (M11; populated when Stage 4 promotes) -----
+  # Sim-vs-live shadow gate: 24h sim-vs-live fill-rate within ±20%, PnL
+  # within 1σ of L1 distribution.
+  shadow_fill_rate_tolerance: 0.20
+  shadow_pnl_sigma_max: 1.0
+
+  # ----- Throughput gate (M4 — also enforced inside HPO via callback) -----
+  throughput_max_fills_per_episode: 150
+  throughput_min_fills_per_episode: 10
+  throughput_n_warmup_steps: 20000
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds. AlphaSeek
+  # v3 uses discrete {-1,0,+1} Q-value action; deadband_frac maps to "argmax
+  # 0 fraction", saturation_frac to "argmax ±1 fraction". Conservative
+  # defaults pre-Stage-4; revisit when live shadow data lands.
+  drift:
+    window_bars: 1800                          # ~30 min at step_gap=1 (1s LOB)
+    min_bars_before_check: 600                 # cold-start suppression
+    deadband_frac_warn: 0.85                   # discrete: hold (action=0) bias
+    deadband_frac_crit: 0.95
+    saturation_frac_warn: 0.20                 # ±1 saturation
+    saturation_frac_crit: 0.40
+    action_kl_warn: 0.5                        # Q-distribution KL vs baseline
+    action_kl_crit: 1.0
+    regime_conditioning: false                 # crypto perp; no session split
+    vol_estimator_bars: 60
+
+  # Protocol v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten (S491
+  # bleed-window lesson); not applicable until Stage 5, but declared for
+  # schema completeness.
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers (post-deploy).
+  retrain:
+    ensemble_recheck_days: 90                  # quarterly cadence
+    live_pf_ratio: 0.8                         # live PF < 0.8 * paper PF
+    live_pf_window_days: 5
+    min_trades_window: 50                      # higher than SG-1 (HFT)
+    agreement_decay_delta: 0.20
+    agreement_decay_window_bars: 5000
+    action_kl_warn_window_bars: 5000
+    cost_drift_ratio: 1.20
+    cost_drift_window_trades: 200
+
+  # Protocol v2.3 §8.2 agreement-decay live monitor (consensus rules only).
+  drift_agreement:
+    enabled_for_rules: ["ens_agreement", "ens_majority"]
+    flat_delta_warn: 0.20
+    flat_delta_crit: 0.40
+    window_bars: 5000
+
+# ---------------------------------------------------------------------------
+# Decision matrix
+# ---------------------------------------------------------------------------
+
+decision:
+  all_pass_action: "approve_ensemble_paper_deploy"
+  any_fail_action: "reject_ensemble_use_best_solo"
+  solo_selection_metric: "wf_median_pf"
+  solo_tiebreaker: "wf_mean_trailing_dd_buffer_pp"
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+provenance:
+  drafted_on: "2026-04-26"
+  drafted_by_session: "S500-cont (M5)"
+  upstream_memory: "project_alphaseek_v3_plan_handoff.md"
+  plan_artifact: "~/.claude/plans/use-architect-skill-to-compressed-moore.md"
+  m0_kb_review: "decision_alphaseek_v3_kb_review.md"
+  notes: >-
+    M0–M4 shipped on bf0146f6 (feature/alphaseek-v3-m0-m4). Seeds list +
+    ensemble.aggregation_rule are populated by L1 multiseed completion (M7)
+    and Stage 2.5 val-argmax-PF (M8) respectively.

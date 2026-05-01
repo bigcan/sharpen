@@ -1,14 +1,32 @@
 # Live Trading Config — SG-1 XAUUSD SAC on Gold CFD via cTrader (FTMO)
-# 3-min bars, signal-gated, prop-firm trained (10% DD, 5% daily loss)
-# Checkpoint: PLACEHOLDER — update with L1 multi-seed best
+# 3-min bars, signal-gated, prop-firm trained (10% DD, 5% daily loss).
+# Deploys the top-3 WF multiseed ensemble (rule = ens_agreement) — approved for
+# paper-deploy by the Stage 2 verdict at
+# results/sg1_xauusd_ensemble_wf/verdict.json (2026-04-22): all 5 gates PASS,
+# median fold PF 2.058 (+20% over best solo), worst fold MDD -1.93% / daily
+# 0.84% (6.07pp / 3.16pp FTMO buffers), stress sidecar PF 1.921 (gate 1.5).
 #
-# Usage:
-#   python scripts/run_live_ctrader.py --config configs/live_sg1_xauusd_ctrader.yaml
-#   python scripts/run_live_ctrader.py --config configs/live_sg1_xauusd_ctrader.yaml --mainnet
-#   python scripts/run_live_ctrader.py --config configs/live_sg1_xauusd_ctrader.yaml --dry-run
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S495 Step 5, 2026-04-24).
+# This file is the BASE config. Phase-varying DD/target/gates live in
+# configs/deploy/ftmo/<phase>.yaml overlays (allowlist-enforced).
+#
+# Deploy invocations (resolved = this file + overlay):
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_ctrader.py \
+#     --config configs/live_sg1_xauusd_ctrader.yaml --overlay ftmo/step1
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_ctrader.py \
+#     --config configs/live_sg1_xauusd_ctrader.yaml --overlay ftmo/step2
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_ctrader.py \
+#     --config configs/live_sg1_xauusd_ctrader.yaml --overlay ftmo/funded
+#
+# After Step 5 migration this BASE file alone is NOT paper-deployable
+# (validator FAILs: `risk.static_peak` missing); pair with an overlay.
 #
 # cTrader credentials via env vars:
 #   CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN, CTRADER_ACCOUNT_ID
+# (SG-1 uses its own IC Markets demo login — see docker/live/.env
+# SG1_XAUUSD_CTRADER_* block.)
+# ---------------------------------------------------------------------------
 
 # --- cTrader Connection ---
 exchange:
@@ -26,25 +44,38 @@ contract:
   order_type: "MKT"                    # Market orders (CFD spreads tight enough)
   market_fallback_timeout: 10.0
 
-# --- Agent ---
+# --- Agent (ensemble = top-3 WF multiseed) ---
 agent:
-  # PLACEHOLDER — update with L1 multi-seed best checkpoint
-  checkpoint_path: "checkpoints/sg1_xauusd_ftmo_best/checkpoint_final.pth"
+  # Ensemble block overrides checkpoint_path. Leave the single-path key as a
+  # deliberate dead value; run_live_ctrader.py detects `ensemble` and skips it.
+  checkpoint_path: ""
   device: "cpu"
   torch_compile: false                 # Must be false for live inference
+  ensemble:
+    seeds: [42, 2025, 3141]
+    # Pattern tokens: {seed}, {fold:02d}. Resolved via glob at startup; exactly
+    # one match per (seed, fold) is required.
+    checkpoint_pattern: "checkpoints/WF_seed{seed}_fold_{fold:02d}_*/checkpoint_final.pth"
+    fold: 7                            # Fold 07 = trained through Feb 2026
+    aggregation_rule: "ens_agreement"  # approved by Stage 2 verdict
+    # deadband defaults to trading.deadband_threshold if omitted.
+    seed_pfs:                          # WF per-seed median fold PF (for pf_weighted)
+      42:   1.566
+      2025: 1.584
+      3141: 1.619
 
-# --- SAC Hyperparameters (PLACEHOLDER — update with HPO best trial) ---
+# --- SAC Hyperparameters (trial 56 HPs from sg1_xauusd_ftmo_rehpo_20260419) ---
 agents:
   sac:
-    lr_actor: 0.00022148365220787234
-    lr_critic: 0.00018486046430982398
-    lr_alpha: 0.000642523828301745
-    gamma: 0.9677944079144885
-    tau: 0.0020470394844356323
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
     batch_size: 512
     buffer_size: 100
-    initial_alpha: 0.1476793336332415
-    gradient_clip: 9.281178071284028
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
 
 # --- Network (must match training checkpoint exactly) ---
 network:
@@ -66,13 +97,13 @@ features:
   norm_span: 120
   bootstrap_bars: 30000               # 60-min scale needs ~7200 1-min bars. 30K is 2x safe.
 
-# --- Signal Gate (must match training — agent trained with composite gating) ---
+# --- Signal Gate (trial 56 calibration — must match training) ---
 signal_gate:
   enabled: true
   gate_mode: "composite"
-  atr_threshold: 0.3
-  parkinson_threshold: 0.02
-  volume_threshold: 0.5
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
   max_hold_bars: 20
   gate_always_on_first: true
 
@@ -84,36 +115,111 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 100000.0            # FTMO $100K account
-  deadband_threshold: 0.25
-  taker_fee: 0.00035                   # 3.5bps effective CFD spread
+  initial_balance: 100000.0            # IC Markets demo (cTID <ACCT_8>) — reset to $100K via web UI 2026-04-22
+  deadband_threshold: 0.35             # trial 56 (must match ens_agreement threshold)
+  taker_fee: 0.000235                  # steady-state (S464)
   weekend_flatten:
     enabled: true
     minutes_before_close: 30           # Flatten 30 min before Friday close
 
-# --- Risk Management (FTMO-safe limits) ---
+# --- Data reference (validator Stage-0; not loaded at runtime — live fetches from cTrader) ---
+# Points at the OANDA parquet the WF ensemble checkpoints were trained on.
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+
+# --- Hard Constraints (validator parity; mirrors trading.taker_fee) ---
+env:
+  taker_fee: 0.000235
+  gap_detection: true                  # S468 — OANDA 73h weekend gap detector
+  gap_atr_mult: 3.0
+
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay owns: static_peak (true for step1/step2, false for funded),
+# flatten_on_kill_file. See configs/deploy/ftmo/{step1,step2,funded}.yaml.
 risk:
   enabled: true
   max_drawdown_pct: 0.08               # 8% hard stop (2% below FTMO 10% limit)
-  static_peak: true                    # FTMO max-loss: DD from initial balance, never ratchets (S468)
   circuit_breaker_cooldown_bars: 12
   max_position_pct: 1.0
   funding_rate_alert: 999.0
   min_margin_reserve_pct: 0.10
+  # S495 cont (2026-04-23): override default 4.0. CryptoRiskManager resets the
+  # turnover accumulator every 24 `check()` calls, not every 24 calendar hours
+  # (see crypto_risk_manager.py:267 "~1 day for 1H bars"). SG-1 on 3-min bars
+  # with signal-gate + ens_agreement trips check() ~9x/day → reset window spans
+  # ~2-3 calendar days. Cap tripped after 4 roundtrips (sum=3.79), blocking
+  # paper trading for the rest of the reset window. 10.0 gives ~3-5 roundtrips
+  # per reset window while still catching runaway loops. Structural fix
+  # (bar-interval-aware reset) queued.
+  daily_turnover_limit: 10.0
 
 # --- WandB Monitoring ---
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
+  # Explicit run_id required — otherwise the engine's deterministic id builder
+  # `live-{asset}-{exchange}-{mode}` produces `live-xauusd-ctrader-paper`, which
+  # collides with gmgp1-xauusd and causes both strategies to attach to the same
+  # WandB run via `resume="allow"`.
+  run_id: "live-sg1-xauusd-ctrader-paper-20260422"
   tags: ["live", "sg-1", "XAUUSD", "Gold", "SAC", "3min", "cTrader", "paper",
-         "CFD", "FTMO", "signal-gated", "prop-firm"]
+         "CFD", "FTMO", "signal-gated", "prop-firm", "ensemble", "ens-agreement"]
 
 # --- Safety ---
 safety:
   require_explicit_mainnet: true
   max_daily_loss_pct: 0.04             # 4% daily loss (1% below FTMO 5% limit)
-  kill_file: "/tmp/finrl_live_sg1_xauusd_kill"
+  # v2.2 §8.3: kill_file + override live under /app/state (volume-backed via
+  # sg1-xauusd-state in docker-compose.yaml) so repeat-CRIT lockout survives
+  # container restarts. /tmp inside the container is NOT a mount and would
+  # silently defeat the lockout after a docker-restart-policy bounce.
+  kill_file: "/app/state/finrl_live_sg1_xauusd_kill"
+  kill_file_override: "/app/state/finrl_live_sg1_xauusd_kill.override"
+  flatten_on_kill_file: true           # graceful flatten on CRIT, not "halt"
   emergency_flatten_on_error: true
+
+# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# Baseline baked into the image from baselines/sg1_xauusd_fold_07/ via
+# Dockerfile.live-engine `COPY baselines/ /app/baselines/`. The source of
+# truth is the backfilled ensemble_report.json for the deployed WF fold-07
+# checkpoints; regenerate via scripts/backfill_eval_distribution_v22.py.
+# Without a resolvable baseline the tracker runs in LOG_ONLY; with it,
+# WARN blocks new entries / flips / size-ups (close-to-zero still allowed)
+# and CRIT writes kill_file → emergency_flatten → non-zero exit → watchdog
+# refuses auto-restart (§8.3).
+drift:
+  enabled: true
+  baseline_path: "/app/baselines/sg1_xauusd_fold_07/ensemble_report.json"
+  window_bars: 1000
+  min_bars_before_check: 500
+  vol_estimator_bars: 20
+  # regime_cutpoints omitted — manifest-side `regime_cutpoints` wiring is a
+  # follow-up (vol-quartile bucketing falls back to global baseline).
+
+# --- Protocol v2 Gates (live copy — mirrors sg1_xauusd_ensemble.gates.yaml §drift/§safe_mode) ---
+# The live engine reads drift/safe_mode thresholds from `drift:` block above
+# (T1 _init_drift_tracker fallback order); this duplicate block exists to
+# satisfy validate_config.py's paper-deploy stage check, which requires
+# `gates.drift.*` + `gates.safe_mode.*` declared on the live config itself.
+# SOURCE OF TRUTH for research/eval: configs/sg1_xauusd_ensemble.gates.yaml.
+gates:
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
 
 # --- PRISM Regime Overlay (L2 position sizing) ---
 prism:

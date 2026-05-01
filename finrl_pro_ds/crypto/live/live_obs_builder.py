@@ -26,6 +26,7 @@ import pandas as pd
 from finrl_pro_ds.data.multiscale_handler import (
     _compute_scale_features,
     _resample_ohlcv,
+    compute_features_with_warmup,
 )
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,54 @@ logger = logging.getLogger(__name__)
 # Maximum 1-min bars to retain in the rolling buffer.
 # ~30 days of 1-min data. Prevents unbounded memory growth.
 _MAX_BUFFER_BARS = 50_000
+
+
+def resolve_norm_warmup_path(config: dict) -> Optional[str]:
+    """Resolve per-fold norm warmup buffer path (S509 train-serve skew fix).
+
+    Two strategies can share a checkpoint directory while having different
+    feature scales (e.g. sg1-xauusd `[3,15,60]` vs gmgp1-xauusd `[15,60,240]`
+    both pointing at `WF_seed42_fold_07_*/`), so the buffer file is named
+    after the scales it was extracted for. Resolver looks up the
+    config-specific name first, then falls back to the legacy unsuffixed name.
+
+    Resolution order, where ``ckpt_dir`` ranges over (1) explicit, (2) ensemble
+    `_resolved_paths`, (3) solo `agent.checkpoint_path`:
+        a. `features.norm_warmup_path` (explicit override)
+        b. ``ckpt_dir/norm_warmup_<scales-dash-joined>.pkl``
+        c. ``ckpt_dir/norm_warmup.pkl`` (legacy unsuffixed)
+        z. None → caller's LiveObsBuilder falls back to legacy rolling EMA-Z
+
+    Returns the resolved path string, or None (with logger.warning).
+    """
+    from pathlib import Path
+    feat_cfg = config.get("features", {})
+    explicit = feat_cfg.get("norm_warmup_path")
+    if explicit:
+        return explicit
+    scales = feat_cfg.get("scales") or []
+    suffixed_name = f"norm_warmup_{'-'.join(str(s) for s in scales)}.pkl" if scales else None
+    candidates_per_dir = [n for n in [suffixed_name, "norm_warmup.pkl"] if n]
+
+    agent_cfg = config.get("agent", {}) or {}
+    ensemble_cfg = agent_cfg.get("ensemble") or {}
+    ckpt_dirs: list[Path] = []
+    for ckpt_path in (ensemble_cfg.get("_resolved_paths") or {}).values():
+        ckpt_dirs.append(Path(ckpt_path).parent)
+    solo_ckpt = agent_cfg.get("checkpoint_path")
+    if solo_ckpt:
+        ckpt_dirs.append(Path(solo_ckpt).parent)
+    for ckpt_dir in ckpt_dirs:
+        for name in candidates_per_dir:
+            candidate = ckpt_dir / name
+            if candidate.exists():
+                return str(candidate)
+    logger.warning(
+        f"S509: no norm warmup buffer found alongside checkpoint(s) "
+        f"(searched {candidates_per_dir} in {len(ckpt_dirs)} dir(s)); "
+        f"LiveObsBuilder will use legacy rolling EMA-Z (train-serve skew possible).",
+    )
+    return None
 
 
 class LiveObsBuilder:
@@ -59,6 +108,7 @@ class LiveObsBuilder:
         drift_window: int = 100,
         obs_mode: str = "window",
         summary_feature_indices: Optional[list[int]] = None,
+        norm_warmup_path: Optional[str] = None,
     ):
         """
         Args:
@@ -82,6 +132,14 @@ class LiveObsBuilder:
         self.bootstrap_bars = bootstrap_bars
         self.obs_mode = obs_mode
         self.summary_feature_indices = summary_feature_indices or [0, 1, 2, 6, 7]
+
+        # S509 fix: per-scale pre-cutoff warmup buffer that reproduces training's
+        # freeze-and-restart EMA-Z behavior. Without this, live's rolling EMA
+        # tracks recent regime → train-serve skew → silent capital starvation
+        # (sg1-xauusd 2026-04-30 drift_crit was the witness incident).
+        self._norm_warmup: dict[int, pd.DataFrame] = {}
+        if norm_warmup_path:
+            self._load_norm_warmup(norm_warmup_path)
 
         # Rolling 1-min OHLCV buffer (DataFrame)
         self._buffer_1min: Optional[pd.DataFrame] = None
@@ -218,7 +276,15 @@ class LiveObsBuilder:
         if 'timestamp' not in df.columns and df.index.name == 'timestamp':
             df = df.reset_index()
 
-        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        # S509: force tz-naive UTC to match the warmup buffer's stripping (see
+        # extract_norm_warmup_buffer.py). Brokers that return ISO8601 with `Z`
+        # or `+00:00` would otherwise produce a tz-aware Series; concatenating
+        # that with the tz-naive warmup buffer in compute_features_with_warmup
+        # raises TypeError on modern pandas.
+        ts = pd.to_datetime(df['timestamp'], utc=True)
+        if ts.dt.tz is not None:
+            ts = ts.dt.tz_convert(None)
+        df['timestamp'] = ts
         for col in ['open', 'high', 'low', 'close', 'volume']:
             if col not in df.columns:
                 raise ValueError(f"Missing required column: {col}")
@@ -263,15 +329,63 @@ class LiveObsBuilder:
                     f"(need {needed}, {quality:.0%} converged)",
                 )
 
+    def _load_norm_warmup(self, path: str) -> None:
+        """Load per-scale pre-cutoff warmup buffer (S509 train-serve skew fix).
+
+        Schema (written by scripts/extract_norm_warmup_buffer.py):
+            {"schema_version": "v1", "scales": [...], "n_warmup": 200,
+             "norm_span": 120, "fold": int, "seed": int,
+             "train_end_date": str, "buffers": {scale: pd.DataFrame}}
+        """
+        import pickle
+        from pathlib import Path
+        p = Path(path)
+        if not p.exists():
+            raise FileNotFoundError(f"norm warmup buffer not found: {p}")
+        with open(p, "rb") as f:
+            payload = pickle.load(f)
+        if payload.get("schema_version") != "v1":
+            raise ValueError(f"unsupported norm_warmup schema: {payload.get('schema_version')}")
+        if int(payload.get("norm_span", 0)) != int(self.norm_span):
+            raise ValueError(
+                f"norm_span mismatch: warmup={payload.get('norm_span')} live={self.norm_span}"
+            )
+        for scale in self.scales:
+            if scale not in payload["buffers"]:
+                raise ValueError(
+                    f"warmup buffer missing scale={scale}min "
+                    f"(have {sorted(payload['buffers'].keys())})"
+                )
+            self._norm_warmup[scale] = payload["buffers"][scale].reset_index(drop=True)
+        logger.info(
+            f"S509: loaded norm warmup buffer fold={payload.get('fold')} "
+            f"train_end={payload.get('train_end_date')} "
+            f"scales={sorted(self._norm_warmup.keys())}",
+        )
+
     def _recompute_all_scales(self) -> None:
-        """Resample and compute features for every scale."""
+        """Resample and compute features for every scale.
+
+        S509: when a per-scale warmup buffer is loaded, features are computed
+        via `compute_features_with_warmup` to reproduce training's freeze-and-
+        restart EMA-Z. Falls back to rolling-EMA-Z (legacy/buggy) otherwise.
+        """
         for scale in self.scales:
             resampled = _resample_ohlcv(self._buffer_1min, scale)
-            # No norm_cutoff in live mode (LEAK-1 N/A — no splits in live)
-            features = _compute_scale_features(
-                resampled, norm_cutoff_idx=None, span=self.norm_span,
-                n_features=self.n_features,
-            )
+            warmup = self._norm_warmup.get(scale)
+            if warmup is not None and len(warmup) > 0:
+                features = compute_features_with_warmup(
+                    warmup, resampled, span=self.norm_span,
+                    n_features=self.n_features,
+                )
+            else:
+                # No warmup → legacy rolling EMA-Z (LEAK-1 N/A path; left as
+                # fallback for tests / strategies that have not yet shipped a
+                # warmup buffer alongside their checkpoint).
+                features = _compute_scale_features(
+                    resampled, norm_cutoff_idx=None, span=self.norm_span,
+                    n_features=self.n_features,
+                )
             self._scale_dfs[scale] = resampled
             self._scale_features[scale] = features
             self._scale_last_bar_count[scale] = len(resampled)
@@ -389,7 +503,13 @@ class LiveObsBuilder:
         if len(new_df) == 0:
             return
 
-        new_df['timestamp'] = pd.to_datetime(new_df['timestamp'])
+        # S509: same tz-stripping as _init_from_dataframe — guarantees the
+        # rolling buffer stays tz-naive so the warmup-buffer concat in
+        # compute_features_with_warmup never hits the tz-aware/naive collision.
+        ts = pd.to_datetime(new_df['timestamp'], utc=True)
+        if ts.dt.tz is not None:
+            ts = ts.dt.tz_convert(None)
+        new_df['timestamp'] = ts
 
         # Append to buffer
         self._buffer_1min = pd.concat(

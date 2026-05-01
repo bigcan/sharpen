@@ -1,0 +1,169 @@
+# SG-1 XAUUSD ensemble confirmation gates — PRE-COMMITTED.
+#
+# Read by scripts/sg1_xauusd_ensemble_eval.py --wf_config.
+# See .agent/memory/artifacts/plans/sg1_ensemble_wf_confirmation_plan.md for
+# the full plan; this file is the ONLY source of truth for gate numbers
+# (per project rule "never hardcode gate thresholds in code or scripts").
+#
+# Decision rule: ALL five gates (G1..G5) must PASS → approve ensemble for
+# SG-1 XAUUSD paper-deploy aggregation. ANY fail → ensemble rejected; solo
+# seed with highest WF-median PF remains the paper candidate.
+#
+# Committed 2026-04-21 BEFORE any WF ensemble run is launched. Do not edit
+# after first launch without a decision memo explaining why.
+
+workstream: "sg1_xauusd"
+variant: "ensemble_agreement_top3"
+seeds: [42, 2025, 3141]                        # actual WF seeds (OANDA auto-chain)
+aggregation_rule: "ens_agreement"              # candidate rule under test
+
+# Fold count expected from the multiseed WF config.
+# 8 folds covering Aug 2025 → Mar 2026 test windows (OANDA span Jan 2025→Apr 2026).
+wf_folds: 8
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+gates:
+  g1_solo_baseline:
+    description: >-
+      Existing WF Stage-3 gate applied per seed: at least 2/3 seeds must have
+      per-fold test PF >= pf_floor, in at least min_folds_pass of the total
+      folds. If solo seeds fail the base WF discipline, the ensemble is moot.
+    pf_floor: 1.1
+    seeds_pass_min: 2                          # >=2/3 seeds pass per fold
+    min_folds_pass: 7                          # in >=7/8 folds
+
+  g2_no_regression:
+    description: >-
+      Per fold, the ensemble must NOT materially regress vs the best solo on
+      that fold. Defined as ens_PF >= ens_ratio_min * best_solo_PF in at least
+      min_folds_pass folds.
+    ens_ratio_min: 0.90
+    min_folds_pass: 7                          # >=7/8 folds
+
+  g3_uplift:
+    description: >-
+      Across folds, the ensemble must earn its live-complexity overhead.
+      Defined as median(ens_PF) / median(best_solo_PF) >= uplift_ratio_min.
+      A lift below ~10% is not worth the additional live-engine branching
+      and aggregation latency.
+      v2.3 NOTE: this is the WF-stage point-estimate gate (across folds).
+      Stage 2.5 (single L1 window) now uses block-bootstrap; see ensemble_*
+      block below.
+    uplift_ratio_min: 1.10
+    metric: "median"                           # across-folds aggregation
+
+  # Protocol v2.3 Stage 2.5 (single L1 val/test window) ensemble gates.
+  # Replaces the legacy point-estimate ensemble_uplift_min for prop-firm /
+  # live-capital workstreams. Block-bootstrap on per-bar returns gives a
+  # paired probability that ensemble beats best-solo on PF and MDD.
+  ensemble_bootstrap_p_pf_promote: 0.90        # P(ens_PF > solo_PF) >= 0.90 for PROMOTE
+  ensemble_bootstrap_p_mdd_promote: 0.90       # P(ens_MDD better) >= 0.90 for full PROMOTE
+                                                #   (PF-fail + MDD-pass → PROMOTE_DD_ONLY,
+                                                #    relevant when DD tightening is the
+                                                #    primary win for prop-firm DD-buffer)
+  ensemble_bootstrap_resamples: 10000           # B in stationary block bootstrap
+  ensemble_bootstrap_block_len: null            # null → auto = sqrt(n_bars), capped at 0.1*n
+  ensemble_uplift_min: 1.10                     # legacy point-estimate; sanity-check secondary
+                                                #   (still required by v2 helper signature)
+  ensemble_ambiguous_min: 1.05                  # legacy ambiguous floor (logged only when
+                                                #   bootstrap gates above are present)
+
+  # v2.3 diversity-aware top-K selection (Phase 0). Pearson |action correlation|
+  # used as redundancy proxy. Pool-size > K is a precondition for the selector
+  # to materially differ from naive top-K-by-PF; with pool == K it's audit-only.
+  ensemble_top_k: 3
+  ensemble_diversity_lambda: 1.0                # score = PF − λ * max_corr_with_already_selected
+
+  g4_ftmo_compliance:
+    description: >-
+      Applied to the ENSEMBLE trajectory per fold (not the solo trajectories).
+      All three FTMO sub-gates must PASS in every fold (strict: 8/8).
+    daily_dd_buffer_pp_min: 0.5                # 4% cap − worst_intraday_dd%
+    trailing_dd_buffer_pp_min: 0.5             # 8% cap − trailing_mdd%
+    compliance_must_pass: true                 # active_days/single_day_share
+    min_folds_pass: 8                          # all folds
+
+  g5_dd_stability:
+    description: >-
+      Guards against ensemble edge being a one-fold artifact. CV of ensemble
+      PF across folds must be at or below cv_max.
+    cv_pf_max: 0.35
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds. Defaults from
+  # decision_protocol_v22_rlops_drift_safemode.md. `window_bars` at 1000 gives
+  # ~2 trading sessions of 3-min SG-1 bars; `min_bars_before_check` at 500
+  # suppresses cold-start variance. Deadband/saturation deltas tuned for V7
+  # scalar action space (|a|<0.25 deadband, |a|>0.95 saturation).
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5                           # unused on V7 scalar, declared for schema
+    action_kl_crit: 1.0                           # unused on V7 scalar, declared for schema
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten (S491
+  # bleed-window lesson), not "halt while holding".
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers. Each is a separate
+  # auto-fire condition; any one trips a Stage 2.5-R rerun (re-pick top-K +
+  # re-bootstrap + new ensemble_v{N+1}.tar.gz bundle).
+  retrain:
+    ensemble_recheck_days: 90                  # quarterly cadence
+    live_pf_ratio: 0.8                         # live PF < 0.8 * paper PF
+    live_pf_window_days: 5                     # for 5 consecutive trading days
+    min_trades_window: 20                      # AND >=20 trades in window
+    # Agreement-decay (silent capital starvation, ens_agreement only)
+    agreement_decay_delta: 0.20                # live flat-rate drift > +0.20 vs baseline
+    agreement_decay_window_bars: 2000          # sustained for 2000 bars (~ days at 3-min)
+    # Action KL drift (sustained WARN before CRIT)
+    action_kl_warn_window_bars: 5000
+    # Cost drift
+    cost_drift_ratio: 1.20                     # realized cost > 1.20x backtest assumption
+    cost_drift_window_trades: 100              # over rolling 100 trades
+
+  # Protocol v2.3 §8.2 agreement-decay live monitor (ensemble-deployed only).
+  # No-op for ens_mean / ens_median / ens_pf_weighted (only consensus rules
+  # have the silent-flat failure mode). Tracker compares live flat_bar_frac
+  # against ensemble_eval_distribution.deadband_frac from ensemble_report.json.
+  drift_agreement:
+    enabled_for_rules: ["ens_agreement", "ens_majority"]
+    flat_delta_warn: 0.20                      # |live_flat - baseline_flat| > 0.20 → WARN
+    flat_delta_crit: 0.40                      # > 0.40 → CRIT (routes through §8.3 flatten)
+    window_bars: 2000
+
+# ---------------------------------------------------------------------------
+# Decision matrix
+# ---------------------------------------------------------------------------
+
+decision:
+  all_pass_action: "approve_ensemble_paper_deploy"
+  any_fail_action: "reject_ensemble_use_best_solo"
+  # Tie-breakers inside the "best solo" fallback:
+  solo_selection_metric: "wf_median_pf"
+  solo_tiebreaker: "wf_mean_trailing_dd_buffer_pp"
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+provenance:
+  drafted_on: "2026-04-21"
+  reconciled_on: "2026-04-22"                  # S489 cont: seeds+folds matched to OANDA reality
+  drafted_by_session: "post-S488"
+  upstream_memory: "project_sg1_xauusd_ensemble_s488.md"
+  plan_artifact: ".agent/memory/artifacts/plans/sg1_ensemble_wf_confirmation_plan.md"
+  l1_multiseed_result: "OANDA redo: median PF 1.367, CV 3.47% (N=10, top-3 by backtest_test/profit_factor: 2025, 3141, 42)"
+  wf_stage3_result: "3/3 seeds 8/8 folds PF>=1.1, median fold PFs 1.566/1.584/1.619, worst MDD -1.62%, inter-seed CV ~1.7%"
+  in_sample_ensemble_result: "ens_agreement PF 3.455 vs best solo 2.680 on L1 test (pre-OANDA-redo, kept as hypothesis anchor)"
