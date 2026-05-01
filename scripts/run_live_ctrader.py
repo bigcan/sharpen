@@ -171,9 +171,52 @@ def build_components(config: dict):
         # SACAgents from the bundle's checkpoints. EnsembleAgent constructor
         # is shared with the legacy path below.
         from finrl_pro_ds.agents.sac.ensemble_agent import EnsembleAgent
-        from finrl_pro_ds.live import extract_and_verify_bundle, BundleIntegrityError
+        from finrl_pro_ds.live import (
+            BundleIntegrityError,
+            check_swap_approved,
+            extract_and_verify_bundle,
+            record_successful_load,
+        )
 
         bundle_path = ensemble_cfg["bundle_path"]
+
+        # v2.3 §4.5 step 6 swap-approval handshake. Prop-firm strategies
+        # require an explicit operator sentinel before loading a bundle
+        # that differs from the one this engine last loaded. Same-bundle
+        # restarts (config + sha256 unchanged) bypass the handshake.
+        # Runs BEFORE extract_and_verify_bundle so we don't pay the
+        # extraction cost on a swap the operator hasn't approved yet.
+        safety_cfg = config.get("safety", {}) or {}
+        kill_file = safety_cfg.get("kill_file") or (config.get("risk", {}) or {}).get("kill_file")
+        if kill_file:
+            tags = [str(t).lower() for t in (config.get("wandb", {}).get("tags") or [])]
+            is_prop_firm = any(
+                t in tags for t in ("prop-firm", "propfirm", "ftmo", "velotrade")
+            )
+            last_bundle_state = safety_cfg.get(
+                "last_bundle_file",
+                f"{kill_file}.last_bundle",
+            )
+            swap_approved = safety_cfg.get(
+                "swap_approved_file",
+                f"{kill_file}.swap_approved",
+            )
+            handshake = check_swap_approved(
+                bundle_path,
+                last_bundle_state_path=last_bundle_state,
+                swap_approved_path=swap_approved,
+                is_prop_firm=is_prop_firm,
+            )
+            if not handshake.approved:
+                logger.error(
+                    f"v2.3 swap-approval handshake REJECTED: {handshake.reason}",
+                )
+                sys.exit(1)
+            logger.info(
+                f"v2.3 swap-approval handshake: {handshake.reason} "
+                f"(is_swap={handshake.is_swap})",
+            )
+
         try:
             bundle = extract_and_verify_bundle(
                 bundle_path,
@@ -182,6 +225,22 @@ def build_components(config: dict):
         except BundleIntegrityError as exc:
             logger.error(f"v2.3 bundle integrity failure: {exc}")
             raise
+
+        # Record the successful load AFTER bundle SHA256 has been verified
+        # so a corrupted bundle that fails extraction doesn't poison the
+        # state file. The engine's broker connect / risk init can still
+        # fail downstream; that's acceptable — the next restart will see
+        # the same bundle as already-loaded and skip the handshake.
+        if kill_file:
+            try:
+                record_successful_load(
+                    bundle_path, last_bundle_state_path=last_bundle_state,
+                )
+            except OSError as state_err:
+                logger.warning(
+                    f"could not record bundle load state ({state_err}) — "
+                    f"next restart may re-prompt handshake",
+                )
         seeds = list(bundle.seeds)
         loaded_agents = []
         for s in seeds:

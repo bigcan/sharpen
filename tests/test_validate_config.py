@@ -15,6 +15,7 @@ from scripts.validate_config import (  # noqa: E402
     check_legacy_prop_firm_block,
     check_static_peak_consistency,
     check_v23_agreement_decay_gates,
+    check_v23_swap_handshake,
 )
 
 
@@ -439,3 +440,72 @@ def test_agreement_decay_window_too_small_rejected():
     assert any("too small" in f for f in r.failures)
 
 
+# ---------------------------------------------------------------------------
+# check_v23_swap_handshake (v2.3 §4.5 step 6)
+# ---------------------------------------------------------------------------
+
+
+def test_swap_handshake_skipped_for_non_prop_firm():
+    cfg = {
+        "wandb": {"tags": ["live"]},
+        "agent": {"ensemble": {"bundle_path": "x.tar.gz"}},
+        "safety": {"kill_file": "/app/state/kf"},
+    }
+    r = ValidationResult()
+    check_v23_swap_handshake(cfg, r)
+    assert r.passed == []
+    assert r.warnings == []
+    assert r.failures == []
+
+
+def test_swap_handshake_skipped_when_no_bundle():
+    cfg = {
+        "wandb": {"tags": ["FTMO"]},
+        "agent": {"ensemble": {"seeds": [42, 1]}},  # legacy retro-apply path
+        "safety": {"kill_file": "/app/state/kf"},
+    }
+    r = ValidationResult()
+    check_v23_swap_handshake(cfg, r)
+    assert r.passed == []
+    assert r.failures == []
+
+
+def test_swap_handshake_skipped_when_no_kill_file():
+    # Already FAILed by check_paper_deploy upstream — bail silently to
+    # avoid duplicate noise.
+    cfg = {
+        "wandb": {"tags": ["FTMO"]},
+        "agent": {"ensemble": {"bundle_path": "x.tar.gz"}},
+        "safety": {},
+    }
+    r = ValidationResult()
+    check_v23_swap_handshake(cfg, r)
+    assert r.failures == []
+
+
+def test_swap_handshake_warns_without_explicit_state_file():
+    cfg = {
+        "wandb": {"tags": ["FTMO"]},
+        "agent": {"ensemble": {"bundle_path": "x.tar.gz"}},
+        "safety": {"kill_file": "/app/state/kf"},
+    }
+    r = ValidationResult()
+    check_v23_swap_handshake(cfg, r)
+    assert any("last_bundle_file not declared" in w for w in r.warnings)
+
+
+def test_swap_handshake_passes_with_explicit_state_file():
+    cfg = {
+        "wandb": {"tags": ["Velotrade"]},
+        "agent": {"ensemble": {"bundle_path": "x.tar.gz"}},
+        "safety": {
+            "kill_file": "/app/state/kf",
+            "last_bundle_file": "/app/state/last_bundle.json",
+            "swap_approved_file": "/app/state/kf.swap_approved",
+        },
+    }
+    r = ValidationResult()
+    check_v23_swap_handshake(cfg, r)
+    assert r.failures == []
+    assert any("last_bundle.json" in p for p in r.passed)
+    assert any("swap_approved" in p for p in r.passed)

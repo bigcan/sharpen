@@ -711,8 +711,9 @@ def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
     # different host and the file may not be present at validation time.
     check_drift_baseline_manifest_schema(cfg, r)
 
-    # v2.3 (S514) §8.2-extension blocker for ensemble-deployed prop-firm
-    # strategies that use a consensus aggregation rule.
+    # v2.3 (S514) §4.5 step 6 + §8.2-extension blockers for ensemble-deployed
+    # prop-firm strategies.
+    check_v23_swap_handshake(cfg, r)
     check_v23_agreement_decay_gates(cfg, r)
 
 
@@ -968,6 +969,50 @@ def _resolve_ensemble_rule(cfg: dict) -> str | None:
     if isinstance(rule, str) and rule:
         return rule
     return None
+
+
+def check_v23_swap_handshake(cfg: dict, r: ValidationResult) -> None:
+    """v2.3 §4.5 step 6 swap-approval handshake declaration.
+
+    Prop-firm / live-capital paper-deploys that load an ensemble bundle
+    must declare a kill_file path (already enforced upstream by
+    check_paper_deploy) AND should declare an explicit
+    ``safety.last_bundle_file`` so the handshake state survives container
+    restarts on a non-default mount. The handshake itself is enforced at
+    runtime by ``finrl_pro_ds.live.swap_handshake.check_swap_approved``;
+    this validator only catches the declaration mistake.
+    """
+    if not _is_prop_firm(cfg):
+        return
+    ens = (cfg.get("agent", {}) or {}).get("ensemble") or {}
+    if not ens.get("bundle_path"):
+        return  # legacy retro-apply path or solo deploy — handshake N/A
+
+    safety = cfg.get("safety", {}) or {}
+    risk = cfg.get("risk", {}) or {}
+    kill_file = safety.get("kill_file") or risk.get("kill_file")
+    if not kill_file:
+        # Already FAILed by check_paper_deploy; skip to avoid duplicate noise.
+        return
+
+    # last_bundle_file is OPTIONAL — defaults to <kill_file>.last_bundle in
+    # the runner. WARN if it isn't explicit, because the operator should
+    # confirm the state file lives on a persistent mount (kill_file is
+    # already required to be on /app/state per paper-deploy precedent).
+    last_bundle = safety.get("last_bundle_file")
+    if not last_bundle:
+        r.warn(
+            "safety.last_bundle_file not declared — v2.3 swap handshake "
+            f"will default to {kill_file}.last_bundle. Verify the path "
+            f"is on a persistent mount (otherwise every container restart "
+            f"is treated as a new bundle and triggers the handshake)."
+        )
+    else:
+        r.ok(f"v2.3 swap handshake state file: {last_bundle}")
+
+    swap_approved = safety.get("swap_approved_file")
+    if swap_approved:
+        r.ok(f"v2.3 swap handshake sentinel path: {swap_approved}")
 
 
 def check_v23_agreement_decay_gates(cfg: dict, r: ValidationResult) -> None:
