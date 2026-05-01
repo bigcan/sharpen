@@ -29,6 +29,8 @@ logger = logging.getLogger("validate_config")
 PROTOCOL_DOC = "docs/protocol_v2.md"
 VALID_STAGES = ("data-prep", "hpo", "l1-multiseed", "ensemble-confirm", "wf", "oos", "paper-deploy")
 
+MANIFEST_SCHEMA_PATH = Path(__file__).resolve().parent.parent / "docs" / "schemas" / "manifest.schema.json"
+
 
 @dataclass
 class ValidationResult:
@@ -65,6 +67,52 @@ def load_data_manifest(data_path: Path) -> dict[str, Any] | None:
     if not manifest_path.exists():
         return None
     return json.loads(manifest_path.read_text(encoding="utf-8"))
+
+
+_MANIFEST_SCHEMA_CACHE: dict[str, Any] | None = None
+
+
+def _load_manifest_schema() -> dict[str, Any] | None:
+    """Load and cache the Stage 2 / 2.5 report JSON schema (Protocol v2 §2)."""
+    global _MANIFEST_SCHEMA_CACHE
+    if _MANIFEST_SCHEMA_CACHE is not None:
+        return _MANIFEST_SCHEMA_CACHE
+    if not MANIFEST_SCHEMA_PATH.exists():
+        return None
+    _MANIFEST_SCHEMA_CACHE = json.loads(MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8"))
+    return _MANIFEST_SCHEMA_CACHE
+
+
+def _candidate_report_paths(cfg: dict) -> list[Path]:
+    """Surface the report files this config points at, if any.
+
+    Live configs reference seed/ensemble reports via:
+      - drift.baseline_path     (Stage 2.5 ensemble baseline for §8.2 drift)
+      - agent.ensemble.bundle_path  (v2.3 atomic-swap bundle; report sits beside it)
+    Adjacent seed_report.json + ensemble_report.json are checked when present.
+    """
+    paths: list[Path] = []
+    drift = cfg.get("drift", {}) or {}
+    bp = drift.get("baseline_path")
+    if isinstance(bp, str) and bp:
+        paths.append(Path(bp))
+    agent = cfg.get("agent", {}) or {}
+    ensemble = agent.get("ensemble", {}) or {}
+    bundle = ensemble.get("bundle_path")
+    if isinstance(bundle, str) and bundle:
+        bundle_p = Path(bundle)
+        for sibling in ("ensemble_report.json", "seed_report.json"):
+            paths.append(bundle_p.parent / sibling)
+    # de-dupe while preserving order
+    seen: set[str] = set()
+    out: list[Path] = []
+    for p in paths:
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
 
 
 # ---------- universal checks (every stage) ----------
@@ -645,8 +693,11 @@ def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
                 "production deploys must resolve a baseline"
             )
 
-    # Drift/safe_mode gate keys (see check_drift_safemode_gates) are part of
-    # the universal check path so they also apply here without repetition.
+    # Drift/safe_mode gate keys (see check_drift_safemode_gates) are wired
+    # into STAGE_CHECKS for ensemble-confirm + paper-deploy only, matching
+    # the v2.2 §8 spec ("post-deploy only"). Training stages (hpo / l1 /
+    # wf / oos) intentionally do not enforce them — the threshold matrix
+    # comes from the overlay *.gates.yaml at ensemble-confirm time.
 
     # S495-cont prop-firm decoupling (rev 2): challenge block + static_peak
     # consistency. Live deploys that were re-authored under the new schema
@@ -839,14 +890,75 @@ def check_turnover_limit_explicit(cfg: dict, r: ValidationResult) -> None:
         )
 
 
+def check_report_schema(cfg: dict, r: ValidationResult) -> None:
+    """Protocol v2 §2 manifest schema enforcement on Stage 2 / 2.5 reports.
+
+    Looks up reports referenced by the config (drift.baseline_path,
+    agent.ensemble.bundle_path) and validates each against
+    `docs/schemas/manifest.schema.json`. Missing files are skipped silently
+    (they get caught by other checks); schema mismatches WARN so backfill
+    workflows aren't blocked. Schema is loaded lazily; missing schema file
+    or jsonschema package is reported as a single WARN.
+
+    Wired into ensemble-confirm + paper-deploy. Training stages
+    (hpo / l1 / wf / oos) don't reference reports yet.
+    """
+    schema = _load_manifest_schema()
+    if schema is None:
+        r.warn(
+            f"manifest schema not found at {MANIFEST_SCHEMA_PATH.relative_to(Path.cwd()) if MANIFEST_SCHEMA_PATH.is_relative_to(Path.cwd()) else MANIFEST_SCHEMA_PATH} "
+            "— skipping report-schema validation"
+        )
+        return
+    try:
+        import jsonschema  # type: ignore[import-not-found]
+    except ImportError:
+        r.warn("jsonschema not installed — skipping report-schema validation (install with `pip install -e .[dev]`)")
+        return
+
+    paths = _candidate_report_paths(cfg)
+    if not paths:
+        return  # no reports to check is fine; other checks cover required-vs-optional
+
+    checked = 0
+    for p in paths:
+        if not p.exists():
+            continue
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            r.warn(f"report not parseable as JSON: {p} ({exc})")
+            continue
+        try:
+            jsonschema.validate(data, schema)
+            checked += 1
+        except jsonschema.ValidationError as exc:
+            path_repr = "/".join(str(x) for x in exc.absolute_path) or "<root>"
+            r.warn(
+                f"report {p} fails manifest schema at {path_repr}: "
+                f"{exc.message[:200]}"
+            )
+    if checked:
+        r.ok(f"manifest schema OK on {checked} report(s)")
+
+
 STAGE_CHECKS = {
     "data-prep": [],
     "hpo": [check_hpo],
     "l1-multiseed": [check_l1_multiseed],
-    "ensemble-confirm": [check_ensemble_confirm],
+    "ensemble-confirm": [
+        check_ensemble_confirm,
+        check_drift_safemode_gates,
+        check_report_schema,
+    ],
     "wf": [check_wf],
     "oos": [],
-    "paper-deploy": [check_paper_deploy, check_turnover_limit_explicit],
+    "paper-deploy": [
+        check_paper_deploy,
+        check_turnover_limit_explicit,
+        check_drift_safemode_gates,
+        check_report_schema,
+    ],
 }
 
 
@@ -861,7 +973,6 @@ def validate(config_path: Path, stage: str) -> ValidationResult:
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)
     check_wandb_consolidation(cfg, stage, r)
-    check_drift_safemode_gates(cfg, r)
 
     for check in STAGE_CHECKS[stage]:
         check(cfg, r)
@@ -869,10 +980,42 @@ def validate(config_path: Path, stage: str) -> ValidationResult:
     return r
 
 
+def validate_report(report_path: Path) -> ValidationResult:
+    """Validate a single Stage 2 / 2.5 report against the manifest schema."""
+    r = ValidationResult()
+    schema = _load_manifest_schema()
+    if schema is None:
+        r.fail(f"manifest schema not found at {MANIFEST_SCHEMA_PATH}")
+        return r
+    try:
+        import jsonschema  # type: ignore[import-not-found]
+    except ImportError:
+        r.fail("jsonschema not installed (`pip install -e .[dev]`)")
+        return r
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        r.fail(f"report unreadable: {exc}")
+        return r
+    try:
+        jsonschema.validate(data, schema)
+        protocol = data.get("protocol", "<legacy>")
+        r.ok(f"report valid against manifest schema (protocol={protocol})")
+    except jsonschema.ValidationError as exc:
+        path_repr = "/".join(str(x) for x in exc.absolute_path) or "<root>"
+        r.fail(f"schema mismatch at {path_repr}: {exc.message[:300]}")
+    return r
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("--stage", required=True, choices=VALID_STAGES)
+    parser.add_argument("--config", type=Path,
+                        help="YAML config to validate against a stage")
+    parser.add_argument("--stage", choices=VALID_STAGES,
+                        help="Pipeline stage; required with --config")
+    parser.add_argument("--report", type=Path,
+                        help="Validate a Stage 2 / 2.5 JSON report against manifest schema "
+                             "(seed_report.json or ensemble_report.json)")
     parser.add_argument(
         "--strict", action="store_true",
         help="Treat warnings as failures (CI mode)",
@@ -880,6 +1023,26 @@ def main() -> int:
     args = parser.parse_args()
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
+
+    if args.report is not None:
+        if not args.report.exists():
+            logger.error("report not found: %s", args.report)
+            return 2
+        result = validate_report(args.report)
+        for msg in result.passed:
+            logger.info("  PASS  %s", msg)
+        for msg in result.warnings:
+            logger.warning("  WARN  %s", msg)
+        for msg in result.failures:
+            logger.error("  FAIL  %s", msg)
+        status = result.status
+        if args.strict and status == "WARN":
+            status = "FAIL"
+        logger.info("\nstatus=%s  report=%s", status, args.report.name)
+        return 1 if status == "FAIL" else 0
+
+    if args.config is None or args.stage is None:
+        parser.error("--config and --stage are required (or use --report)")
 
     if not args.config.exists():
         logger.error("config not found: %s", args.config)
