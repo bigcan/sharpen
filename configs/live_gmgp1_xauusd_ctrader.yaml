@@ -131,6 +131,7 @@ risk:
   max_drawdown_pct: 0.08               # 8% hard stop (2% below FTMO 10% limit)
   circuit_breaker_cooldown_bars: 12    # 3 hours at 15-min bars
   max_position_pct: 1.0                # Single asset = 100% allowed
+  daily_turnover_limit: 10.0           # S506 hotfix: 4.0 default fires under gated check() counting (S495-cont). Remove once Option B (UTC-midnight reset) lands.
   funding_rate_alert: 999.0            # Disabled (CFDs have no funding)
   min_margin_reserve_pct: 0.10         # 10% margin reserve
 
