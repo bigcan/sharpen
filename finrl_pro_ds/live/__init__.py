@@ -12,6 +12,11 @@ from finrl_pro_ds.live.challenge_state_machine import (
     ChallengeStateMachine,
     ChallengeStatus,
 )
+from finrl_pro_ds.live.ensemble_bundle import (
+    BundleContents,
+    BundleIntegrityError,
+    extract_and_verify_bundle,
+)
 
 __all__ = [
     "PHASE_ORDER",
@@ -19,4 +24,7 @@ __all__ = [
     "ChallengePhase",
     "ChallengeStateMachine",
     "ChallengeStatus",
+    "BundleContents",
+    "BundleIntegrityError",
+    "extract_and_verify_bundle",
 ]
