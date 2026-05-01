@@ -1,0 +1,132 @@
+# AlphaSeek v3 — Stage 2.5 ensemble selection config (S500 M5).
+#
+# Per Protocol v2.1 + S495: aggregation rule is picked at runtime by
+# val-argmax-PF (was hardcoded ens_agreement before S495). The
+# `ensemble.rule` field below is the candidate rule for validator
+# completeness; the eval script overrides it via val-set selection.
+#
+# Block-bootstrap on per-bar returns gives paired P(ens > solo) on PF + MDD.
+# Pre-committed bootstrap thresholds inline (NOT just in the standalone
+# gates yaml) per project_stage_2_5_bootstrap_gates_not_loaded.md fix.
+#
+# Validator: scripts/validate_config.py --config <this> --stage ensemble-confirm
+#   PRE-STAGE-0 NOTE: data manifest required first.
+
+strategy:
+  id: "alphaseek-v3"
+  name: "AlphaSeek v3 — Stage 2.5 ensemble"
+  version: "3.0.0-stage25"
+
+upstream:
+  stage: "l1-multiseed"
+  run_id: null                                 # filled by `--upstream-run`
+  promote_top_k: 3
+
+data:
+  source: "parquet"
+  file_path: "data/lob_parquet/btcusdt_lob_1s.parquet"
+
+env:
+  simulator: "lob"
+  num_sims: 64                                 # eval-only sim count
+  num_ignore_step: 60
+  max_position: 1
+  step_gap: 2
+  slippage: 7.0e-7
+  seq_len: 3600
+  stop_loss_thresh: 1.0e-3
+
+  # M1-M2 LOCKED params (carried from HPO/L1)
+  taker_fee: 5.0e-4
+  maker_fee: 2.0e-4
+  per_trade_penalty_bps: 0.5
+  holding_bonus: 1.0e-7
+  maker_bias: true
+  fill_alpha_ofi: 2.0
+  fill_beta_spread: 1.0
+  fill_gamma_age: -0.05
+  limit_max_age: 60
+  max_idle_bars: 1800
+
+features:
+  norm_span: 120
+  momentum_window: 5
+  vol_window: 30
+
+# ---------------------------------------------------------------------------
+# Ensemble (validator requires exactly 3 seeds + a rule)
+# ---------------------------------------------------------------------------
+ensemble:
+  # Placeholder seeds — replaced by `--upstream-run` resolution to top-3 by
+  # val PF from the L1 manifest. Validator only checks list length == 3.
+  seeds: [42, 2025, 3141]
+  rule: "ens_agreement"                        # candidate; runtime selects via
+                                                # val-argmax-PF over
+                                                # {ens_mean, ens_median,
+                                                # ens_pf_weighted, ens_agreement}
+  # S495 val-selection rule selection
+  val_selection:
+    enabled: true                              # picks rule from val PF
+    candidates: ["ens_mean", "ens_median", "ens_pf_weighted", "ens_agreement"]
+    metric: "profit_factor"
+
+  # Per-rule diversity selector (Phase 0 — audit-only when pool == K).
+  diversity_selector:
+    enabled: false
+    correlation_metric: "pearson_action"
+    lambda: 1.0
+
+# ---------------------------------------------------------------------------
+# Block-bootstrap on per-bar returns (Protocol v2.3, S498 fix)
+# ---------------------------------------------------------------------------
+bootstrap:
+  enabled: true
+  resamples: 10000
+  block_len: null                              # null → auto = sqrt(n_bars)
+  paired: true                                 # ens vs best-solo on same bars
+  metrics: ["profit_factor", "max_drawdown"]
+
+# ---------------------------------------------------------------------------
+# Gates (Stage 2.5 — bootstrap-aware)
+# ---------------------------------------------------------------------------
+gates:
+  # Pre-committed bootstrap thresholds (S498 inline-not-just-gates-yaml fix)
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_mdd_promote: 0.90
+  ensemble_bootstrap_resamples: 10000
+  ensemble_bootstrap_block_len: null
+
+  # Legacy point-estimate (still required by v2 helper signature)
+  ensemble_uplift_min: 1.10
+  ensemble_ambiguous_min: 1.05
+
+  # Top-K + diversity
+  ensemble_top_k: 3
+  ensemble_diversity_lambda: 1.0
+
+  # v2.2 declarations
+  drift:
+    window_bars: 1800
+    min_bars_before_check: 600
+    deadband_frac_warn: 0.85
+    deadband_frac_crit: 0.95
+    saturation_frac_warn: 0.20
+    saturation_frac_crit: 0.40
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+# Path to the canonical gates YAML — read by ensemble_eval scripts that
+# resolve thresholds outside the validator path.
+ensemble_eval:
+  gates_file: "configs/alphaseek_v3.gates.yaml"
+
+wandb:
+  enabled: true
+  entity: "bigcan-chiwin-technology"
+  project: "FinRL-Pro-DS"
+  tags: ["alphaseek-v3", "stage-2-5", "ensemble", "lob-scalping"]
+  consolidate: true

@@ -1,18 +1,37 @@
-# SG-1 BTC Velotrade — L1 Multi-Seed Stability
-# Window W2 (median WF): Train Apr-Sep 2024, Val Oct-Nov 2024, Test Dec 2024 - Jan 2025
-# Run with --seed 123 and --seed 456.
-# Gate: PF CV < 30%, Sharpe CV < 30% across seeds.
+# SG-1 BTC Velotrade — L1 Multi-Seed Stability (Protocol v2 Stage 2)
+#
+# Data windows: matched to HPO source `sg1_btc_velotrade_hpo.yaml` so trial #44
+# HPs are evaluated on the same splits they were optimized against.
+#   train 2024-01-01 -> 2025-06-30, val 2025-07-01 -> 2025-09-30,
+#   test  2025-10-01 -> 2025-12-31.
+# Seed plan (N=10, S488 prop-firm rule): [42, 123, 456, 789, 1024, 1337, 2025, 3141, 5150, 9999].
+# Ambiguous escalation: CV in [0.22, 0.38] -> auto-extend to N=20.
+#
+# HP PROVENANCE (refreshed 2026-04-23 S494-cont):
+#   Re-HPO study `sg1_btc_velotrade_rehpo_20260420` best trial #44,
+#   PF=2.3031 at 5 bps Bybit taker, WandB `q9pq44ug`. Superseded legacy HPO
+#   `38hpavja` trial #38 (PF 2.133). Source CSV:
+#     results/hpo_archive/sg1_btc_velotrade_rehpo_20260420.csv (line 46)
+#   Report:
+#     results/reports/sg1_btc_velotrade_rehpo_20260420.md
+#
+# STAGE 2.5 (ensemble-confirm) hook:
+#   After L1 completes, top-3 seeds by backtest_test/profit_factor feed
+#   scripts/sg1_xauusd_ensemble_eval.py (or a BTC-ported variant). Gate numbers
+#   are pre-committed in configs/sg1_btc_velotrade_ensemble.gates.yaml.
+#   Protocol v2 §4 S493 mandates Stage 2.5 between L1 and WF for prop-firm.
 
 data:
   file_path: "data/btc_usdt_1min_bybit.parquet"
   ticker: "BTCUSDT"
   handler_type: "multiscale"
-  train_start_date: "2024-04-01"
-  train_end_date: "2024-09-30"
-  val_start_date: "2024-10-01"
-  val_end_date: "2024-11-30"
-  test_start_date: "2024-12-01"
-  test_end_date: "2025-01-31"
+  # Mirror sg1_btc_velotrade_hpo.yaml (trial #44 was trained on these splits).
+  train_start_date: "2024-01-01"
+  train_end_date: "2025-06-30"
+  val_start_date: "2025-07-01"
+  val_end_date: "2025-09-30"
+  test_start_date: "2025-10-01"
+  test_end_date: "2025-12-31"
 
 features:
   scales: [3, 15, 60]
@@ -23,9 +42,12 @@ features:
 signal_gate:
   enabled: true
   gate_mode: "composite"
-  atr_threshold: 0.5
-  parkinson_threshold: 0.03
-  volume_threshold: 0.5
+  # S479 calibration on BTC Bybit 3-min 2024-01-01 -> 2025-06-30 train window
+  # (262K bars, vol>0). ~75% composite pass rate target. Old placeholder values
+  # (0.5/0.03/0.5) never triggered — BTC parkinson dist is ~10x smaller than XAU.
+  atr_threshold: 0.15
+  parkinson_threshold: 0.0009
+  volume_threshold: 0.60
   max_hold_bars: 20
   gate_always_on_first: true
   normalize_accumulated_reward: true
@@ -35,8 +57,8 @@ env:
   initial_balance: 100000.0
   window_size: 30
   features_per_scale: 8
-  taker_fee: 0.0
-  deadband_threshold: 0.35
+  taker_fee: 0.0005                     # steady-state 5 bps Bybit retail taker (S464)
+  deadband_threshold: 0.25              # trial #44
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
   episode_length: 3000
@@ -46,22 +68,17 @@ env:
   gap_detection: false
   reward:
     mode: "dsr"
-    dsr_eta: 0.00444
+    dsr_eta: 0.0008427308583293202       # trial #44
     dsr_scale: 1.0
-  fee_schedule:
-    - {step: 0, taker_fee: 0.0}
-    - {step: 300000, taker_fee: 0.0, ramp_to: 0.0005, ramp_end_step: 900000}
-    - {step: 900000, taker_fee: 0.0005}
-  prop_firm:
+  risk:
     enabled: true
-    profit_target_pct: 0.10
     max_trailing_drawdown_pct: 0.10
     max_daily_loss_pct: 0.0
     eod_hour_utc: 0
     drawdown_penalty_start: 0.05
     drawdown_penalty_scale: 5.0
-    success_bonus: 10.0
-    augment_obs: false
+    augment_obs: "off"
+    static_peak: true
 
 network:
   scale_encoder:
@@ -73,21 +90,22 @@ network:
   fusion_dim: 256
   window_size: 30
 
-# HPs: HPO 38hpavja trial #38 (PF=2.133, Test PF=2.16, MDD -0.53%)
+# HPs: sg1_btc_velotrade_rehpo_20260420 trial #44 (PF=2.3031, WandB q9pq44ug).
+# Full precision from results/hpo_archive/sg1_btc_velotrade_rehpo_20260420.csv.
 agents:
   sac:
-    lr_actor: 1.44e-4
-    lr_critic: 1.95e-4
-    lr_alpha: 2.56e-6
-    gamma: 0.9555
-    tau: 2.01e-3
+    lr_actor: 0.00015739192475706186
+    lr_critic: 0.00007322355805160213
+    lr_alpha: 0.0000026314031405474944
+    gamma: 0.9593670398875173
+    tau: 0.0002134448307797731
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.473
+    initial_alpha: 0.4088157097959411
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 1.49
+    gradient_clip: 1.516294914428727
     checkpoint_interval: 250000
 
 training:
@@ -101,6 +119,44 @@ training:
 hpo:
   enabled: false
 
+gates:                                 # Protocol v2 Stage 2 (S488 escalation) + Stage 2.5 (S493)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                         # S488: prop-firm workstreams require N>=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]     # S488: pre-committed escalation range
+  ensemble_uplift_min: 1.10            # S493→S495 Stage 2.5 PROMOTE threshold (pre-committed)
+  ensemble_ambiguous_min: 1.05         # S495 AMBIGUOUS floor; below this = SOLO_BEST_FALLBACK
+  ensemble_rule_selection: val_argmax_pf  # S495: pick aggregation rule on val split (was: implicit canonical=ens_agreement)
+  wf_windows: 3                        # existing w1/w2/w3 (validator min is 4 — multiseed-WF refactor TBD)
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+# Ensemble metadata — populated post-L1 by reconcile step (S498 cont.,
+# 2026-04-25); top-3 by backtest_test/profit_factor across N=10 seeds (mean PF
+# 2.176, CV 5.7%). Test-PF ranking: 42=2.363, 2025=2.314, 9999=2.305 → top-3.
+ensemble:
+  seeds: [42, 2025, 9999]              # top-3 by backtest_test/profit_factor
+  seed_pfs: {42: 2.363, 2025: 2.314, 9999: 2.305}  # drives ens_pf_weighted
+  rule: ens_agreement                  # S493 canonical rule (two-point evidence; superseded by val_argmax_pf below)
+  rules: ["solo_<s1>", "solo_<s2>", "solo_<s3>",
+          "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
+  # Checkpoint path pattern — glob resolves one match per seed after L1 runs.
+  # Wildcard before `seed{seed}_` handles both the original `seed{N}_<ts>/` and
+  # the `rerun2-seed{N}_<ts>/` directory layouts (the L1 N=10 sweep ran in 4
+  # launch cycles to dodge the multiprocessing race; cohorts mixed prefixes).
+  checkpoint_pattern: "checkpoints/sg1-btc-velotrade-l1-multiseed*-seed{seed}_*/checkpoint_final.pth"
+  # Pointer to pre-committed gate YAML (5-gate G1..G5):
+  gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
+
 wandb:
   project: "FinRL-Pro-DS"
-  tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade", "prop-firm", "multiseed", "l1"]
+  consolidate: true                    # S488: one parent run, seeds as seed<N>/*
+  tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade", "velotrade-wrapped",
+         "prop-firm", "propfirm", "multiseed", "l1", "steady-state", "bybit-perp",
+         "rehpo-trial44", "upstream:sg1_btc_velotrade_rehpo_20260420"]

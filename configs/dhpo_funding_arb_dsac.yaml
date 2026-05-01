@@ -1,0 +1,85 @@
+# Distributed HPO overlay — Funding-Arb DSAC 10-assets re-HPO (S485)
+# Extends configs/distributed_hpo.yaml with funding-arb data files.
+# Queued to launch after GMGP1 BTC re-HPO (see scripts/queue_post_sg1_rehpo.py stage 5).
+#
+# PREREQUISITES BEFORE LAUNCH (status 2026-04-19):
+#   [x] Full audit pass on configs/funding_arb_dsac_10assets_rehpo.yaml
+#       (validator 2-leg fix + gates populated + OPT-09/10 plumb-through).
+#   [x] Runner migration: funding_arb_hpo_runner.py reads `trials`/
+#       `steps_per_trial` AND legacy `n_trials`/`hpo_timesteps`.
+#   [ ] GMGP1 BTC re-HPO (`gmgp1_btc_velotrade_rehpo_20260419`) completed.
+#   [ ] `python scripts/monitor_fleet.py` — gpuhub-1:0 + gpuhub-2:0 free.
+#   [x] Distributed HPO path wired S485 — `finrl_pro_ds.hpo.objective.make_objective`
+#       dispatches `environment.type: funding_arb` to funding-arb/DSAC factory
+#       at `finrl_pro_ds/hpo/funding_arb_objective.py`. No worker-CLI changes
+#       needed; agent_type=sac (auto-resolved from config.agents.sac) works.
+#
+# Launch (6 workers = 3 replicas × 2 GPUs, S488 rule = HPO on gpuhub-1 only):
+#   set -a; source .env; set +a
+#   python scripts/distributed_hpo_coordinator.py \
+#     --config configs/funding_arb_dsac_10assets_rehpo.yaml \
+#     --platform gpuhub \
+#     --n_workers 6 --n_trials 50 \
+#     --db_url "$DISTRIBUTED_HPO_DB_URL" \
+#     --study_name funding_arb_dsac_rehpo_20260426 \
+#     --distributed_config configs/dhpo_funding_arb_dsac.yaml
+#   (omit --resume for a fresh study; verified S499c: no funding_arb study in DB)
+
+distributed_hpo:
+  platform: "gpuhub"
+  n_workers: 6
+  n_trials: 50
+
+  storage:
+    backend: "postgresql"
+    url: "${DISTRIBUTED_HPO_DB_URL}"
+    heartbeat_interval: 60
+    grace_period: 600
+    max_retry: 1
+
+  gpuhub:
+    # S488 rule: HPO on gpuhub-1 only (gpu 0 + gpu 1); gpuhub-2 reserved for
+    # non-HPO (L1 multiseed, walk-forward). 3 replicas/GPU = 6 workers total —
+    # matches dhpo_gmgp1_xauusd_ftmo.yaml + dhpo_gmgp1_btc_velotrade.yaml.
+    # Fresh layout (S499c) — original draft used gpuhub-2:0 which conflicts
+    # with the pinned S488 rule.
+    instances:
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
+
+  worker:
+    target_trials: null
+    trial_timeout: 7200
+    graceful_shutdown_timeout: 60
+    pip_extras: ""
+
+  data:
+    upload_method: "sftp"
+    # Funding-arb pulls data via ccxt at runtime (cache_dir in main config).
+    # No parquet files to ship — leave list empty; coordinator will skip data upload.
+    data_files: []
+    cache_by_size: false
+
+  wandb:
+    entity: "bigcan-chiwin-technology"
+    project: "FinRL-Pro-DS"
+    group_prefix: "dhpo"
+    tags: ["distributed_hpo", "funding-arb", "dsac", "cvar",
+           "10-assets", "re-hpo", "regime-robust"]
+
+  fault_tolerance:
+    max_worker_retries: 2
+    worker_replace_on_death: false
+    monitor_poll_interval: 300
+
+  cost:
+    auto_teardown: false
+
+# Expected wall-clock (per optimization audit, TBD):
+#   50 trials × 500K steps = 25M steps / aggregate SPS TBD after audit
+#   Target aggregate ≥ 600 SPS (6-worker 4090 fleet) → ~11-12h wall-clock
+#   vs wl7ir7ia projected ~60+ days on single worker.

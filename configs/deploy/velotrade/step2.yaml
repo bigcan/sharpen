@@ -1,0 +1,35 @@
+# Velotrade Step 2 overlay. Identical to step1 except the profit target.
+#
+# Applied by:
+#   python scripts/deploy_bare_metal.py --config <base> --overlay velotrade/step2
+#
+# Velotrade Step 2: +5% profit target, 10% max EOD trailing DD, 00:00 UTC
+# rollover. Same DD handling as step1 (training contract preserved).
+
+env:
+  risk:
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.0
+    eod_hour_utc: 0
+    augment_obs: "off"
+    static_peak: true
+
+challenge:
+  enabled: true
+  phase: step2
+  profit_target_pct: 0.05
+  next_phase: funded
+  advance_rule: manual_ack
+  n_confirm: 2
+  smoothing_window: 3
+
+risk:
+  static_peak: true
+  eod_trailing_drawdown: true
+  eod_hour_utc: 0
+  flatten_on_kill_file: true
+
+gates:
+  velotrade_active_days_min: 4
+  velotrade_max_single_day_share: 0.5
+  velotrade_trailing_dd_buffer_pp: 0.5

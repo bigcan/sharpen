@@ -67,6 +67,46 @@ def _resample_ohlcv(df_1min: pd.DataFrame, scale_minutes: int) -> pd.DataFrame:
     return resampled.reset_index()
 
 
+def compute_features_with_warmup(
+    warmup_df: pd.DataFrame,
+    live_df: pd.DataFrame,
+    span: int = 120,
+    n_features: int = 8,
+) -> np.ndarray:
+    """Compute features for `live_df` using `warmup_df` as the EMA-Z warmup buffer.
+
+    Reproduces the training-time post-cutoff path bit-for-bit:
+    concatenate `[warmup_df + live_df]`, run `_compute_scale_features` with
+    `norm_cutoff_idx=len(warmup_df)`, then strip the warmup-bar features.
+
+    Live deploy uses this so its EMA-Z state matches the freeze-and-restart
+    state the agent was trained against (LEAK-1 invariant applied to deploy).
+
+    Args:
+        warmup_df: Pre-cutoff OHLCV bars (training data ending at train_end_date).
+                   Typically `WARMUP_BUFFER=200` rows per scale.
+        live_df:   Live/eval bars to compute features for.
+        span:      EMA span (must match training).
+        n_features: Output feature count (TC-aligned 8).
+
+    Returns:
+        ndarray of shape `(len(live_df), n_features)` — features for `live_df`
+        only. Warmup-bar features are computed and discarded.
+    """
+    if warmup_df is None or len(warmup_df) == 0:
+        return _compute_scale_features(live_df, norm_cutoff_idx=None,
+                                        span=span, n_features=n_features)
+    n_warmup = len(warmup_df)
+    combined = pd.concat(
+        [warmup_df[['timestamp', 'open', 'high', 'low', 'close', 'volume']],
+         live_df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]],
+        ignore_index=True,
+    )
+    full = _compute_scale_features(combined, norm_cutoff_idx=n_warmup,
+                                    span=span, n_features=n_features)
+    return full[n_warmup:]
+
+
 def _compute_scale_features(df: pd.DataFrame, norm_cutoff_idx: Optional[int] = None, span: int = 120, n_features: int = 8) -> np.ndarray:
     """Compute features for a single timescale DataFrame.
 

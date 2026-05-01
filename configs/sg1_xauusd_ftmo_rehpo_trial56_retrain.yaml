@@ -1,0 +1,129 @@
+# SG-1 XAUUSD FTMO re-HPO — trial 56 retrain (S487)
+# Best trial from study `sg1_xauusd_ftmo_rehpo_20260419` (PF=2.8533) was lost
+# when 3 co-located replicas on gpuhub-1 raced for checkpoints/sac_run/.
+# This config reproduces trial 56 as a single-seed training run so we have a
+# usable checkpoint for the next L1 multiseed stage.
+#
+# Trial 56 provenance (from Postgres + r1 worker log):
+#   value = 2.8533191011206833
+#   produced_by = worker_gpuhub-1-gpu0-r1 (vn67pwtl) at 2026-04-20 08:22:29 UTC
+#
+# Protocol v2: stage = retrain (one-off), upstream = sg1_xauusd_ftmo_rehpo_20260419
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-06-30"
+  val_start_date: "2025-07-01"
+  val_end_date: "2025-08-31"
+  test_start_date: "2025-09-01"
+  test_end_date: "2025-10-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235
+  deadband_threshold: 0.35              # trial 56
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.009270901804613313       # trial 56
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.03
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Trial 56 hyperparameters (from Optuna Postgres study)
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
+    # Fixed (non-searched)
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000               # match HPO budget so result is comparable
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+  seed: 42                              # deterministic retrain
+
+hpo:
+  enabled: false                        # single-seed retrain, not a sweep
+
+gates:                                  # Protocol v2 §4 (inherited from sg1_xauusd_ftmo_hpo.yaml)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 3
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "rehpo-trial56", "retrain", "steady-state", "upstream:sg1_xauusd_ftmo_rehpo_20260419"]

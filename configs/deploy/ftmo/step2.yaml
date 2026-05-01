@@ -1,0 +1,34 @@
+# FTMO Step 2 overlay. Identical to step1 except the profit target.
+#
+# Applied by:
+#   python scripts/deploy_bare_metal.py --config <base> --overlay ftmo/step2
+#
+# FTMO Step 2 contract: +5% profit target, 5% daily loss, 10% max loss.
+# DD rules and server rollover match step1.
+
+env:
+  risk:
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    augment_obs: "off"
+    static_peak: true
+
+challenge:
+  enabled: true
+  phase: step2
+  profit_target_pct: 0.05
+  next_phase: funded
+  advance_rule: manual_ack
+  n_confirm: 2
+  smoothing_window: 3
+
+risk:
+  static_peak: true
+  flatten_on_kill_file: true
+
+gates:
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5

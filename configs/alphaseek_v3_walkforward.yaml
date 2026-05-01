@@ -1,0 +1,137 @@
+# AlphaSeek v3 — Stage 3 walk-forward config (S500 M5).
+#
+# K=4 windows; each window trains on its own train/val and tests on the
+# held-out test segment. Per-window median PF >= 1.0; fixed-lot stress
+# sub-report. Uses the top-3 seeds + aggregation rule promoted from Stage
+# 2.5.
+#
+# Validator: scripts/validate_config.py --config <this> --stage wf
+#   PRE-STAGE-0 NOTE: data manifest required first.
+
+strategy:
+  id: "alphaseek-v3"
+  name: "AlphaSeek v3 — walk-forward (K=4)"
+  version: "3.0.0-wf"
+
+upstream:
+  stage: "ensemble-confirm"
+  run_id: null                                 # filled by `--upstream-run`
+
+data:
+  source: "parquet"
+  file_path: "data/lob_parquet/btcusdt_lob_1s.parquet"
+
+env:
+  simulator: "lob"
+  num_sims: 4096
+  num_sims_eval: 64
+  num_ignore_step: 60
+  max_position: 1
+  step_gap: 2                                  # carried from upstream
+  slippage: 7.0e-7
+  seq_len: 3600
+  stop_loss_thresh: 1.0e-3
+
+  # M1-M2 LOCKED params
+  taker_fee: 5.0e-4
+  maker_fee: 2.0e-4
+  per_trade_penalty_bps: 0.5
+  holding_bonus: 1.0e-7
+  maker_bias: true
+  fill_alpha_ofi: 2.0
+  fill_beta_spread: 1.0
+  fill_gamma_age: -0.05
+  limit_max_age: 60
+  max_idle_bars: 1800
+
+features:
+  norm_span: 120
+  momentum_window: 5
+  vol_window: 30
+
+agent:
+  net_dims: [256, 256]
+  gamma: 0.995
+  explore_rate: 0.02
+  state_value_tau: 0.01
+  soft_update_tau: 5.0e-4
+  learning_rate: 1.0e-4
+  batch_size: 1024
+  repeat_times: 2
+  reward_scale: 4096
+  clip_grad_norm: 3.0
+
+ensemble:
+  seeds: [42, 2025, 3141]                      # top-3 from Stage 2.5 promotion
+  rule: "ens_agreement"                        # carried from Stage 2.5 winner
+  agent_classes: ["D3QN", "DoubleDQN", "TwinD3QN"]
+  voting: "q_average"
+
+throughput_gate:
+  enabled: true
+  n_warmup_steps: 20000
+  max_fills_per_episode: 150
+  min_fills_per_episode: 10
+
+# ---------------------------------------------------------------------------
+# Walk-forward windows (K=4 per Stage 3 protocol)
+# ---------------------------------------------------------------------------
+walk_forward:
+  windows: 4
+  train_bars: null                             # auto: floor(parquet_bars * 0.6) / K
+  val_bars: null                               # auto: floor(parquet_bars * 0.1) / K
+  test_bars: null                              # auto: floor(parquet_bars * 0.15) / K
+  step_bars: null                              # auto: aligns windows non-overlap
+  embargo_bars: 600                            # ~10 min at 1s LOB
+  min_windows: 4
+
+# Stress sub-report (fixed-lot variant — counters position-sizing leverage
+# masking PF). Runs after the main WF eval, uses the same trajectories,
+# emits a side-by-side comparison.
+stress:
+  enabled: true
+  variants:
+    - name: "fixed_lot"
+      description: "max_position fixed at 1 contract regardless of equity"
+      max_position_override: 1
+    - name: "double_fee"
+      description: "2× canonical fees (taker 10bps, maker 4bps) — robustness check"
+      taker_fee_override: 1.0e-3
+      maker_fee_override: 4.0e-4
+
+# ---------------------------------------------------------------------------
+# Gates (Stage 3)
+# ---------------------------------------------------------------------------
+gates:
+  wf_windows: 4
+  wf_pf_floor: 1.0                             # per-window median PF
+  wf_seeds_pass_min: 2                         # >=2/3 seeds pass per window
+  wf_min_windows_pass: 4                       # all 4 windows must pass
+
+  # CV stability across windows
+  wf_pf_cv_max: 0.40                           # looser than L1 (regime drift)
+
+  # Stress sub-report — fixed_lot must not regress more than 30% vs main
+  stress_fixed_lot_pf_ratio_min: 0.70
+
+  # v2.2 declarations
+  drift:
+    window_bars: 1800
+    min_bars_before_check: 600
+    deadband_frac_warn: 0.85
+    deadband_frac_crit: 0.95
+    saturation_frac_warn: 0.20
+    saturation_frac_crit: 0.40
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  enabled: true
+  entity: "bigcan-chiwin-technology"
+  project: "FinRL-Pro-DS"
+  tags: ["alphaseek-v3", "walk-forward", "lob-scalping"]
+  consolidate: true

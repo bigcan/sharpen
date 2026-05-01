@@ -163,3 +163,117 @@ def test_initial_bars_processed():
 def test_initial_skipped_bars():
     clock = CFDBarClock()
     assert clock.skipped_bars == 0
+
+
+# ---------------------------------------------------------------
+# Heartbeat callback (S490) — mirror CMEBarClock so cTrader XAUUSD
+# stays Docker-healthy through daily rollover + weekend gates.
+# ---------------------------------------------------------------
+
+def test_heartbeat_callback_default_none():
+    """Default construction leaves the callback slot empty."""
+    clock = CFDBarClock()
+    assert clock._heartbeat_callback is None
+
+
+def test_heartbeat_callback_assignable():
+    """Engine wires the callback post-construction via hasattr check."""
+    clock = CFDBarClock()
+    calls = []
+    clock._heartbeat_callback = lambda phase: calls.append(phase)
+    clock._heartbeat_callback("market_closed")
+    assert calls == ["market_closed"]
+
+
+def test_heartbeat_interval_constant():
+    """Heartbeat cadence matches CMEBarClock (120s)."""
+    assert CFDBarClock._HEARTBEAT_INTERVAL == 120
+
+
+def test_heartbeat_fires_during_market_closed_sleep(monkeypatch):
+    """S490 F3: chunked sleep fires heartbeat once per chunk (incl. final).
+
+    Regression guard: before S490 the CFDBarClock slept in a single
+    `await asyncio.sleep()`, so the health file staled during the 21-22 UTC
+    daily rollover and Docker marked the container UNHEALTHY → watchdog
+    auto-restart. After S490 F4, callback fires after every chunk so the
+    file stays fresh across the market-closed → market-open transition.
+    """
+    import asyncio
+
+    clock = CFDBarClock()
+    calls = []
+    clock._heartbeat_callback = lambda phase: calls.append(phase)
+
+    # Flip market from closed → open so wait_for_next_bar exits the sleep
+    # branch and delegates to the inner clock after one pass.
+    state = {"calls": 0}
+
+    def mock_is_open(_dt):
+        state["calls"] += 1
+        return state["calls"] > 1  # first call = closed, rest = open
+
+    clock.is_market_open = mock_is_open
+
+    # Return a 500s sleep window regardless of real wall clock.
+    clock.next_market_open = lambda now: now + timedelta(seconds=500)
+
+    # Stub inner BarClock so it returns a bar_time immediately (no real sleep).
+    bar_time = utc(2026, 4, 22, 10, 0)
+
+    async def fake_inner_wait():
+        return bar_time
+
+    clock._inner.wait_for_next_bar = fake_inner_wait
+
+    # Patch asyncio.sleep in the cfd_bar_clock module to a no-op coroutine
+    # so the chunked loop completes instantly.
+    import finrl_pro_ds.cfd.live.cfd_bar_clock as mod
+
+    async def fake_sleep(_secs):
+        pass
+
+    monkeypatch.setattr(mod.asyncio, "sleep", fake_sleep)
+
+    async def run():
+        return await clock.wait_for_next_bar()
+
+    result = asyncio.run(run())
+    assert result == bar_time
+
+    # sleep_secs = 500, actual_sleep = 502. Chunks: 120,120,120,120,22 → 5.
+    # F4 guarantees the callback fires once per chunk, including the final.
+    assert len(calls) == 5, f"expected 5 heartbeat calls, got {len(calls)}"
+    assert all(phase == "market_closed" for phase in calls)
+
+
+def test_heartbeat_silent_when_callback_not_wired(monkeypatch):
+    """When _heartbeat_callback is None, chunked sleep must not crash."""
+    import asyncio
+
+    clock = CFDBarClock()
+    assert clock._heartbeat_callback is None
+
+    state = {"calls": 0}
+    clock.is_market_open = lambda _dt: (state.__setitem__("calls", state["calls"] + 1) or state["calls"] > 1)
+    clock.next_market_open = lambda now: now + timedelta(seconds=500)
+
+    bar_time = utc(2026, 4, 22, 10, 0)
+
+    async def fake_inner_wait():
+        return bar_time
+
+    clock._inner.wait_for_next_bar = fake_inner_wait
+
+    import finrl_pro_ds.cfd.live.cfd_bar_clock as mod
+
+    async def fake_sleep(_secs):
+        pass
+
+    monkeypatch.setattr(mod.asyncio, "sleep", fake_sleep)
+
+    async def run():
+        return await clock.wait_for_next_bar()
+
+    # Should complete without raising even though callback is None.
+    assert asyncio.run(run()) == bar_time

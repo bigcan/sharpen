@@ -49,6 +49,14 @@ scrape_configs:
       #   labels:
       #     strategy: "velotrade-btc"
       #     broker: "dxtrade"
+      - targets: ["sg1-xauusd:9108"]
+        labels:
+          strategy: "sg1-xauusd"
+          broker: "ctrader"
+      - targets: ["sg1-btc:9109"]
+        labels:
+          strategy: "sg1-btc"
+          broker: "binance"
 
   # INACTIVE: PRISM API — PRISM falsified (Session 345)
   # - job_name: "prism"

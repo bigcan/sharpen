@@ -2,3 +2,15 @@
 # Workaround for Docker Desktop Windows bind mount issues.
 FROM prom/prometheus:latest
 COPY prometheus/prometheus.yml /etc/prometheus/prometheus.yml
+
+# S510: enable admin API so we can delete stale series surgically. The port
+# is only exposed on the internal `finrl-net` Docker network, never published
+# to the host, so this is safe.
+CMD [ \
+    "--config.file=/etc/prometheus/prometheus.yml", \
+    "--storage.tsdb.path=/prometheus", \
+    "--web.console.libraries=/usr/share/prometheus/console_libraries", \
+    "--web.console.templates=/usr/share/prometheus/consoles", \
+    "--web.enable-lifecycle", \
+    "--web.enable-admin-api" \
+]

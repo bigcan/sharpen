@@ -11,11 +11,17 @@ import wandb
 logger = logging.getLogger("FinRL.HPO")
 
 
-def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
-    """Evaluate agent for HPO — returns (profit_factor, trade_count).
+def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1, return_diag=False):
+    """Evaluate agent for HPO — returns (profit_factor, trade_count) or
+    (profit_factor, trade_count, diag_dict) when ``return_diag=True``.
 
     V4.2: Changed from raw Sharpe to profit_factor to prevent specification gaming.
     Also tracks trade_count for the activity constraint (min 100 trades).
+
+    B6 (2026-04-27): ``return_diag`` adds an optional 3rd return slot with the
+    same fields logged to WandB (eval_steps, completion_pct, terminated_early,
+    eval_returns_std, …) so multi-seed callers can aggregate per-seed without
+    re-parsing WandB.
 
     IMPORTANT: This function handles both single envs and VectorEnvs.
     VectorEnv returns info as a dict of arrays, or for newer Gymnasium versions,
@@ -268,8 +274,17 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
         action_labels = {0: "taker_buy", 1: "hold", 2: "taker_sell"}
     else:
         action_labels = {0: "taker_buy", 1: "maker_buy", 2: "hold", 3: "cancel", 4: "maker_sell", 5: "taker_sell"}
+    # B6 fix: surface truncation/early-termination so post-hoc analysis can
+    # detect leverage-axis selection bias (high-L runs hit DD termination
+    # ~L^2 faster → smaller eval sample → noisier PF estimator → favors
+    # lucky high-L runs).
+    completion_pct = float(step / max_steps) if max_steps > 0 else 0.0
+    terminated_early = 1 if step < max_steps else 0
     diag = {
         "_debug/eval_steps": step,
+        "_debug/eval_steps_max": max_steps,
+        "_debug/eval_completion_pct": completion_pct,
+        "_debug/eval_terminated_early": terminated_early,
         "_debug/eval_returns_len": len(returns),
         "_debug/eval_returns_std": float(np.std(returns)) if len(returns) > 0 else 0.0,
         "_debug/eval_returns_mean": float(np.mean(returns)) if len(returns) > 0 else 0.0,
@@ -311,6 +326,8 @@ def evaluate_for_hpo(env, agent, max_steps=5000, bar_minutes=1):
     if hasattr(agent, '_hidden_state'):
         agent._hidden_state = _saved_hidden
 
+    if return_diag:
+        return profit_factor, trade_count, dict(diag)
     return profit_factor, trade_count
 
 

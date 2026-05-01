@@ -21,6 +21,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -81,7 +82,7 @@ def build_components(config: dict):
     """Instantiate all live trading components for IB Gold futures."""
     from finrl_pro_ds.agents.sac.sac_agent import SACAgent
     from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
-    from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder
+    from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder, resolve_norm_warmup_path
     from finrl_pro_ds.crypto.mlops.crypto_risk_manager import (
         CryptoRiskConfig,
         CryptoRiskManager,
@@ -125,6 +126,7 @@ def build_components(config: dict):
 
     # --- Observation Builder (reused from crypto, asset-agnostic) ---
     feat_cfg = config.get("features", {})
+    norm_warmup_path = resolve_norm_warmup_path(config)
     obs_builder = LiveObsBuilder(
         scales=feat_cfg.get("scales", [15, 60, 240]),
         window_size=feat_cfg.get("window_size", 30),
@@ -133,6 +135,7 @@ def build_components(config: dict):
         bootstrap_bars=feat_cfg.get("bootstrap_bars", 30_000),
         obs_mode=feat_cfg.get("obs_mode", "window"),
         summary_feature_indices=feat_cfg.get("summary_feature_indices"),
+        norm_warmup_path=norm_warmup_path,
     )
 
     # --- Bar Clock (CME-aware) ---
@@ -160,6 +163,7 @@ def build_components(config: dict):
         static_peak=risk_cfg.get("static_peak", False),
         eod_trailing_drawdown=risk_cfg.get("eod_trailing_drawdown", False),
         eod_hour_utc=risk_cfg.get("eod_hour_utc", 0),
+        bar_interval_minutes=clock_cfg.get("base_interval_minutes", 15),
     ))
 
     # --- Data Loader ---
@@ -213,6 +217,13 @@ def main():
         description="Launch Gold futures paper/live trading via IB",
     )
     parser.add_argument("--config", required=True, help="Path to live trading YAML config")
+    parser.add_argument(
+        "--overlay", action="append", default=None,
+        help="Deploy overlay under configs/deploy/ (e.g. 'ftmo/step1'). "
+             "Repeat for multiple; later wins. Same allowlist as "
+             "deploy_bare_metal --overlay. Falls back to STRATEGY_OVERLAY "
+             "env var if --overlay not given.",
+    )
     parser.add_argument("--mainnet", action="store_true", help="Use live trading (real money). Default: paper.")
     parser.add_argument("--dry-run", action="store_true", help="Log actions without executing orders.")
     args = parser.parse_args()
@@ -226,6 +237,26 @@ def main():
     with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    # Apply deploy overlays (Step 5 prop-firm decoupling). CLI flag wins
+    # over STRATEGY_OVERLAY env var so an interactive operator can override
+    # what the docker-compose bakes in.
+    from finrl_pro_ds.config_utils import apply_overlays, parse_overlay_env
+    overlay_specs = args.overlay or parse_overlay_env(os.environ.get("STRATEGY_OVERLAY"))
+    if overlay_specs:
+        project_root = Path(__file__).resolve().parents[1]
+        overlay_root = project_root / "configs" / "deploy"
+        allowlist_path = overlay_root / "ALLOWLIST.yaml"
+        config = apply_overlays(
+            config,
+            overlay_specs,
+            overlay_root=overlay_root,
+            allowlist_path=allowlist_path,
+        )
+        logger.info(
+            "Applied %d deploy overlay(s): %s",
+            len(overlay_specs), ", ".join(overlay_specs),
+        )
+
     # Validate and patch
     config = validate_config(config, args)
 
@@ -233,11 +264,28 @@ def main():
     logger.info(
         f"Starting IB Gold futures trading engine\n"
         f"  Config: {config_path}\n"
+        f"  Overlays: {overlay_specs or 'none'}\n"
         f"  Contract: {config.get('contract', {}).get('symbol', 'MGC')}\n"
         f"  Mode: {'PAPER' if config.get('exchange', {}).get('testnet', True) else 'LIVE'}\n"
         f"  Dry run: {config.get('dry_run', False)}",
     )
-    asyncio.run(main_async(config))
+    exit_code = 0
+    try:
+        asyncio.run(main_async(config))
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        exit_code = 130
+    except SystemExit as e:
+        exit_code = e.code if isinstance(e.code, int) else 1
+    except Exception:
+        logger.exception("Trading engine failed")
+        exit_code = 1
+    finally:
+        # Force PID 1 exit even if non-daemon threads or wandb-core
+        # subprocess is still alive. Docker restart: unless-stopped
+        # auto-recovers the strategy. Fixes S489 orphan-netns hang.
+        logger.info(f"run_live_ib exiting with code {exit_code}")
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

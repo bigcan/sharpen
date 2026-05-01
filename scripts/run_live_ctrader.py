@@ -53,11 +53,40 @@ def validate_config(config: dict, args) -> dict:
     """Validate and patch config with CLI overrides."""
 
     # --- Checkpoint existence ---
-    checkpoint_path = config.get("agent", {}).get("checkpoint_path", "")
-    if not Path(checkpoint_path).exists():
-        logger.error(f"Checkpoint not found: {checkpoint_path}")
-        logger.info("Set agent.checkpoint_path in the config to your L1 checkpoint.")
-        sys.exit(1)
+    # Two modes: solo (agent.checkpoint_path) or ensemble (agent.ensemble.{seeds,
+    # checkpoint_pattern, aggregation_rule}). Ensemble mode resolves one path per
+    # seed via a glob matching the same pattern tokens used by
+    # scripts/sg1_xauusd_ensemble_eval.py — {seed} and {fold:02d}.
+    agent_cfg = config.get("agent", {})
+    ensemble_cfg = agent_cfg.get("ensemble")
+    if ensemble_cfg:
+        import glob
+        seeds = list(ensemble_cfg.get("seeds", []))
+        pattern = ensemble_cfg.get("checkpoint_pattern", "")
+        if not seeds or not pattern:
+            logger.error("agent.ensemble requires both 'seeds' and 'checkpoint_pattern'")
+            sys.exit(1)
+        resolved: dict = {}
+        for s in seeds:
+            # Let the caller choose which fold to load via a fixed 'fold' key
+            # (defaults to 7 = fold_07, the most-recent training window).
+            fold = int(ensemble_cfg.get("fold", 7))
+            glob_s = pattern.format(seed=s, fold=fold)
+            matches = sorted(glob.glob(glob_s))
+            if not matches:
+                logger.error(f"No checkpoint matches for seed {s} at {glob_s}")
+                sys.exit(1)
+            if len(matches) > 1:
+                logger.warning(f"Seed {s} has {len(matches)} matches; picking last: {matches[-1]}")
+            resolved[s] = matches[-1]
+        ensemble_cfg["_resolved_paths"] = resolved
+        logger.info(f"Ensemble checkpoints resolved: {resolved}")
+    else:
+        checkpoint_path = agent_cfg.get("checkpoint_path", "")
+        if not Path(checkpoint_path).exists():
+            logger.error(f"Checkpoint not found: {checkpoint_path}")
+            logger.info("Set agent.checkpoint_path (solo) or agent.ensemble (multi-seed).")
+            sys.exit(1)
 
     # --- cTrader credentials ---
     missing = [v for v in _REQUIRED_ENV_VARS if not os.environ.get(v)]
@@ -108,26 +137,57 @@ def build_components(config: dict):
     from finrl_pro_ds.cfd.execution.ctrader_broker import CTraderBroker
     from finrl_pro_ds.cfd.live.cfd_bar_clock import CFDBarClock
     from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
-    from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder
+    from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder, resolve_norm_warmup_path
     from finrl_pro_ds.crypto.mlops.crypto_risk_manager import (
         CryptoRiskConfig,
         CryptoRiskManager,
     )
 
-    # --- Agent ---
+    # --- Agent (solo or ensemble) ---
     agent_cfg = config.get("agent", {})
     network_cfg = config.get("network", {})
     sac_cfg = config.get("agents", {}).get("sac", {})
+    device = agent_cfg.get("device", "cpu")
+    sac_kwargs = {k: v for k, v in sac_cfg.items() if k not in ("checkpoint_path",)}
 
-    agent = SACAgent(
-        network_config=network_cfg,
-        device=agent_cfg.get("device", "cpu"),
-        torch_compile=False,
-        **{k: v for k, v in sac_cfg.items() if k not in ("checkpoint_path",)},
-    )
-    agent.load(agent_cfg["checkpoint_path"])
-    agent.actor.eval()
-    logger.info(f"Agent loaded from {agent_cfg['checkpoint_path']}")
+    ensemble_cfg = agent_cfg.get("ensemble")
+    if ensemble_cfg:
+        from finrl_pro_ds.agents.sac.ensemble_agent import EnsembleAgent
+        resolved = ensemble_cfg["_resolved_paths"]  # populated in validate_config
+        seeds = list(ensemble_cfg.get("seeds", []))
+        # Ensemble agents share `sac_kwargs` (config.agents.sac). This assumes all
+        # ensemble seeds were trained with the same HPs, which is true for the
+        # current SG-1 XAUUSD ensemble (top-3 seeds all ran trial-56 params). A
+        # mixed-HP ensemble would need per-seed kwargs keyed by seed id.
+        loaded_agents = []
+        for s in seeds:
+            a = SACAgent(
+                network_config=network_cfg, device=device, torch_compile=False,
+                **sac_kwargs,
+            )
+            a.load(resolved[s])
+            a.actor.eval()
+            loaded_agents.append(a)
+        agent = EnsembleAgent(
+            agents=loaded_agents,
+            seeds=seeds,
+            aggregation_rule=ensemble_cfg.get("aggregation_rule", "ens_agreement"),
+            deadband=float(ensemble_cfg.get("deadband",
+                config.get("trading", {}).get("deadband_threshold", 0.25))),
+            seed_pfs={int(k): float(v) for k, v in (ensemble_cfg.get("seed_pfs") or {}).items()},
+        )
+        logger.info(
+            f"EnsembleAgent loaded: {len(seeds)} seeds={seeds} "
+            f"rule={ensemble_cfg.get('aggregation_rule', 'ens_agreement')} "
+            f"deadband={agent.deadband}",
+        )
+    else:
+        agent = SACAgent(
+            network_config=network_cfg, device=device, torch_compile=False, **sac_kwargs,
+        )
+        agent.load(agent_cfg["checkpoint_path"])
+        agent.actor.eval()
+        logger.info(f"Agent loaded from {agent_cfg['checkpoint_path']}")
 
     # --- Broker ---
     ex_cfg = config.get("exchange", {})
@@ -148,6 +208,10 @@ def build_components(config: dict):
 
     # --- Observation Builder (reused from crypto, asset-agnostic) ---
     feat_cfg = config.get("features", {})
+    # S509: per-scale norm warmup buffer reproduces training freeze-and-restart
+    # EMA-Z (vs live's legacy rolling EMA-Z). Resolved either explicitly via
+    # `features.norm_warmup_path` or relative to the first ensemble checkpoint.
+    norm_warmup_path = resolve_norm_warmup_path(config)
     obs_builder = LiveObsBuilder(
         scales=feat_cfg.get("scales", [15, 60, 240]),
         window_size=feat_cfg.get("window_size", 30),
@@ -156,6 +220,7 @@ def build_components(config: dict):
         bootstrap_bars=feat_cfg.get("bootstrap_bars", 30_000),
         obs_mode=feat_cfg.get("obs_mode", "window"),
         summary_feature_indices=feat_cfg.get("summary_feature_indices"),
+        norm_warmup_path=norm_warmup_path,
     )
 
     # --- Bar Clock (CFD 24h market) ---
@@ -181,6 +246,7 @@ def build_components(config: dict):
         static_peak=risk_cfg.get("static_peak", False),
         eod_trailing_drawdown=risk_cfg.get("eod_trailing_drawdown", False),
         eod_hour_utc=risk_cfg.get("eod_hour_utc", 0),
+        bar_interval_minutes=clock_cfg.get("base_interval_minutes", 15),
     ))
 
     # --- Data Loader ---
@@ -274,6 +340,13 @@ def main():
         help="Path to live trading YAML config",
     )
     parser.add_argument(
+        "--overlay", action="append", default=None,
+        help="Deploy overlay under configs/deploy/ (e.g. 'ftmo/step1'). "
+             "Repeat for multiple; later wins. Same allowlist as "
+             "deploy_bare_metal --overlay. Falls back to STRATEGY_OVERLAY "
+             "env var if --overlay not given.",
+    )
+    parser.add_argument(
         "--mainnet", action="store_true",
         help="Use live trading (FTMO challenge). Default: paper (IC Markets demo).",
     )
@@ -292,6 +365,26 @@ def main():
     with open(config_path, encoding="utf-8") as f:
         config = yaml.safe_load(f)
 
+    # Apply deploy overlays (Step 5 prop-firm decoupling). CLI flag wins
+    # over STRATEGY_OVERLAY env var so an interactive operator can override
+    # what the docker-compose bakes in.
+    from finrl_pro_ds.config_utils import apply_overlays, parse_overlay_env
+    overlay_specs = args.overlay or parse_overlay_env(os.environ.get("STRATEGY_OVERLAY"))
+    if overlay_specs:
+        project_root = Path(__file__).resolve().parents[1]
+        overlay_root = project_root / "configs" / "deploy"
+        allowlist_path = overlay_root / "ALLOWLIST.yaml"
+        config = apply_overlays(
+            config,
+            overlay_specs,
+            overlay_root=overlay_root,
+            allowlist_path=allowlist_path,
+        )
+        logger.info(
+            "Applied %d deploy overlay(s): %s",
+            len(overlay_specs), ", ".join(overlay_specs),
+        )
+
     # Validate and patch
     config = validate_config(config, args)
 
@@ -300,6 +393,7 @@ def main():
     logger.info(
         f"Starting cTrader Gold CFD trading engine\n"
         f"  Config: {config_path}\n"
+        f"  Overlays: {overlay_specs or 'none'}\n"
         f"  Symbol: {contract}\n"
         f"  Mode: {mode}\n"
         f"  Dry run: {config.get('dry_run', False)}"
@@ -320,7 +414,25 @@ def main():
     )
     reactor_thread.start()
 
-    asyncio.run(main_async(config))
+    exit_code = 0
+    try:
+        asyncio.run(main_async(config))
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user")
+        exit_code = 130
+    except SystemExit as e:
+        exit_code = e.code if isinstance(e.code, int) else 1
+    except Exception:
+        logger.exception("Trading engine failed")
+        exit_code = 1
+    finally:
+        # Force PID 1 exit even if non-daemon threads (twisted reactor,
+        # wandb-core subprocess, ccxt aiohttp pools) are still alive.
+        # Docker `restart: unless-stopped` auto-recovers the strategy.
+        # Mirrors the run_live_ib.py S489 fix; closes the orphan-netns
+        # generalization gap (S498).
+        logger.info(f"run_live_ctrader exiting with code {exit_code}")
+        os._exit(exit_code)
 
 
 if __name__ == "__main__":

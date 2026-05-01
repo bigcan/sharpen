@@ -1,0 +1,170 @@
+# Funding-Arb DSAC re-HPO (S485 2026-04-19; audit-cleared 2026-04-19)
+# Replacement for `funding_arb_dsac_10assets_hpo.yaml` (WandB wl7ir7ia — killed
+# S485 after 199h / 6 trials / SPS=50 / BUG-01 violation / monolithic pipeline).
+#
+# Queued to launch after GMGP1 BTC re-HPO completes (see
+# `scripts/queue_post_sg1_rehpo.py` stage 5, gated by `--enable_funding_arb`).
+#
+# Audit pass (2026-04-19):
+#   [x] BUG-01 fix: `hpo.objective: profit_factor`
+#   [x] Protocol v2 HPO keys: `hpo.trials` + `hpo.steps_per_trial` (runner
+#       accepts legacy `n_trials`/`hpo_timesteps` for back-compat).
+#   [x] `validate_config.py --stage hpo` extended to accept 2-leg cost model
+#       (spot + perp) and ccxt-at-runtime data; this config now PASSes.
+#   [x] `gates:` populated with protocol-v2-aligned values (18 keys covering
+#       stages 1-4 + retrain cadence). Units corrected from original draft
+#       (entropy signed, q_div / action_sat in project-standard scale).
+#   [x] OPT-09/10 plumb-through: `_make_dsac_agent` in
+#       `scripts/funding_arb_hpo_runner.py` now forwards
+#       `training.{use_amp, amp_dtype, torch_compile}` — previous path ran
+#       eager-FP32 regardless of config, which is the SPS=50 root cause.
+#
+# Distributed HPO path wired S485 (option A — `make_objective` dispatch):
+#   - `finrl_pro_ds/hpo/objective.py` routes `environment.type: funding_arb`
+#     to `finrl_pro_ds/hpo/funding_arb_objective.py`.
+#   - Distributed stack (coordinator → worker → make_objective) now runs
+#     funding-arb DSAC unmodified. `--agent_type sac` (default) is correct;
+#     `distributional: true` below drives DSAC behavior inside the objective.
+#   - `hpo.hpo_window_index` (default 0) selects which walk-forward window
+#     the HPO stage optimizes over. Stage 3 walk-forward handles rollover.
+#
+# OPT-04/08 follow-ups (not blockers; OPT-09/10 alone should 3-5× SPS vs
+# wl7ir7ia's 50):
+#   - DSAC HPO path still uses a single env (ignores `agents.n_envs: 24`).
+#     VecEnv'ing the DSAC path needs `store_transition` to accept batched
+#     dict obs — separate refactor.
+#   - No CPU/GPU pipeline overlap in `_train_dsac_agent` (OPT-08 unwired).
+
+strategy:
+  id: "funding-arb-v3-dsac10-rehpo"
+  name: "funding_arb_v3_dsac_10assets_rehpo"
+  version: "3.1.0"
+
+universe:
+  # Top-10 by mean |funding rate| (2022-01 -> 2026-03):
+  assets: ["ARB", "UNI", "LINK", "OP", "LTC", "FIL", "DOGE", "BTC", "ETH", "BNB"]
+  quote: "USDT"
+  data_exchange: "binance"
+  n_assets: 10
+
+data:
+  source: "ccxt"
+  market_type: "futures"
+  frequency: "1h"
+  start_date: "2022-01-01"
+  end_date: null
+  cache_dir: "./data/crypto_cache"
+
+features:
+  tech_dim: 15
+  norm_window: 720
+  zscore_window: 720
+  correlation_window: 168
+
+environment:
+  type: "funding_arb"
+  initial_capital: 100000
+  # --- Cost model (2-leg: spot + perp) ---
+  spot_taker_fee_pct: 0.0001     # 1 bp Binance spot
+  perp_taker_fee_pct: 0.0005     # 5 bp Binance futures
+  perp_margin_rate: 0.05
+  slippage_base_bps: 2.0
+  slippage_impact_bps: 10.0
+  spot_borrow_rate_hourly: 8.33e-6
+  max_gross_exposure: 0.80
+  deadband_threshold: 0.01
+  action_repeat: 8
+  lambda_basis: 0.0
+  lambda_delta: 100.0
+  lambda_turnover: 0.1
+  reward_scaling: 10000.0
+  reward_clip_range: [-5.0, 5.0]
+  circuit_breaker_threshold: 0.05
+
+agents:
+  primary: "sac"
+  total_timesteps: 2000000
+  n_envs: 24
+  sac:
+    distributional: true
+    n_quantiles: 32
+    cvar_alpha: 0.25
+    quantile_embed_dim: 64
+    kappa: 1.0
+    learning_rate: 3.0e-4
+    buffer_size: 500000
+    batch_size: 512
+    tau: 0.005
+    gamma: 0.99
+    network_arch: [256, 256]
+    update_interval: 4
+    gradient_clip: 10.0
+
+training:
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+
+hpo:
+  enabled: true
+  # BUG-01 FIX: profit_factor, not total_return (wl7ir7ia violation).
+  objective: "profit_factor"
+  # Protocol v2 §4 key names (funding_arb_hpo_runner.py accepts both the new
+  # names below and the legacy `n_trials`/`hpo_timesteps` for back-compat.
+  # distributed_hpo_worker.py only reads `steps_per_trial`.)
+  trials: 50
+  steps_per_trial: 500000
+
+walk_forward:
+  train_bars: 8760
+  val_bars: 720
+  test_bars: 1440
+  step_bars: 720
+  embargo_bars: 0
+
+gates:                              # Protocol v2 §4 — audit-cleared S485 (2026-04-19)
+  # --- Stage 1 (HPO) ---
+  hpo_pf_floor: 1.1                 # delta-neutral: lower than GMGP1's 1.5. CVaR
+                                    # targets the tail, not peak PF.
+  hpo_min_trials_completed: 30      # 60% of 50-trial budget to establish signal.
+  # Training-health hard-fails (protocol v2 §4 stage 1 defaults):
+  entropy_floor: -3.0               # SAC actor entropy (log-prob); collapse below
+                                    # this = policy saturated. Negative = correct sign.
+  q_div_max: 10.0                   # Q-target max|div| ratio across update cycle.
+  action_sat_max: 95.0              # % of steps with |action|≥0.99 (percent units).
+  # --- Stage 2 (L1 multiseed) ---
+  l1_seeds: 5
+  l1_pf_floor: 1.1                  # delta-neutral: match hpo_pf_floor.
+  l1_pf_cv_max: 0.30                # CV(PF) across seeds. Funding-arb is regime-
+                                    # heterogeneous; looser CV is tempting but
+                                    # 0.30 is the project standard.
+  # --- Stage 3 (walk-forward) ---
+  wf_windows: 7                     # per walk_forward.train/val/test schedule.
+  wf_pf_floor: 1.0                  # per-window break-even.
+  wf_profitable_windows_min: 5      # 5/7 profitable — regime-robust gate from
+                                    # S405/S408 (mean-SAC hit 2-3/7 OOS only).
+  # Stress sub-report (no FTMO rails, but DD/leverage still watched):
+  stress_dd_buffer_pp: 2.0          # worst intraday DD must clear 2pp buffer
+                                    # below circuit_breaker_threshold (5% → 3%).
+  stress_leverage_max: 1.0          # max_gross_exposure caps at 0.80; leverage
+                                    # spikes above 1.0× = delta-hedge breakdown.
+  # --- Stage 4 (recent-OOS) ---
+  recent_oos_days: 60
+  oos_pf_floor: 1.1
+  oos_hold_ratio: 0.8               # OOS PF ≥ 0.8 × WF median → HOLD.
+  oos_watch_ratio: 0.6               # OOS PF ≥ 0.6 × WF median → WATCH.
+  # Compliance sub-report: skip — crypto perps, no FTMO/Velotrade cap.
+  # --- Retrain cadence (protocol v2 §9) ---
+  retrain:
+    live_pf_ratio: 0.8
+    live_pf_window_days: 10         # hourly strategy + ~24 trades/day — 10-day
+                                    # window accumulates ~200+ trades for stat sig.
+    min_trades_window: 20           # protocol-level floor for low-freq strategies.
+    max_age_days: 120               # funding regimes decay slowly; 120d cadence
+                                    # balances refit cost vs distribution drift.
+
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: null
+  tags: ["funding-arb", "dsac", "cvar", "hpo", "10-assets",
+         "regime-robust", "re-hpo", "s485-queued"]

@@ -25,6 +25,11 @@ import logging
 import sys
 import time
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger("setup_distributed_hpo_db")
 
 
@@ -38,15 +43,21 @@ def test_connectivity(db_url: str) -> bool:
         import sqlalchemy
     except ImportError:
         logger.error(
-            "sqlalchemy is not installed. Install with: pip install sqlalchemy psycopg2-binary"
+            "sqlalchemy is not installed. Install the project's [distributed] "
+            "extra: pip install -e .[distributed]  (ships psycopg[binary] v3 "
+            "for the postgresql+psycopg:// URL scheme)."
         )
         return False
 
     logger.info("Testing PostgreSQL connectivity...")
     logger.info("URL (masked): %s", _mask_url(db_url))
 
+    # connect_timeout is a libpq kwarg — only forward it for PostgreSQL URLs.
+    connect_args: dict = {}
+    if db_url.startswith(("postgresql://", "postgresql+psycopg://", "postgresql+psycopg2://")):
+        connect_args["connect_timeout"] = 10
     try:
-        engine = sqlalchemy.create_engine(db_url, connect_args={"connect_timeout": 10})
+        engine = sqlalchemy.create_engine(db_url, connect_args=connect_args)
         t0 = time.monotonic()
         with engine.connect() as conn:
             result = conn.execute(sqlalchemy.text("SELECT 1"))
@@ -299,13 +310,6 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
 
     # --- Instructions mode ---
     if args.instructions:

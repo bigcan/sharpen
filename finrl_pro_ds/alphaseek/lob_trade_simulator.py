@@ -27,6 +27,7 @@ import pandas as pd
 import torch as th
 
 from .feature_engine import AlphaSeekFeatureEngine
+from .maker_bias_executor import MakerBiasExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,20 @@ class LOBTradeSimulator:
         device: th.device = th.device("cpu"),
         gpu_id: int = -1,
         segment_filter: list[int] | None = None,
+        # v3 fee-internalized scalping (S500 ADR-002 — steady-state fees, no curriculum)
+        taker_fee: float = 0.0,
+        maker_fee: float = 0.0,
+        maker_bias: bool = False,
+        per_trade_penalty_bps: float = 0.0,
+        holding_bonus: float = 0.0,
+        # v3 maker-bias execution (S500 ADR-003); MakerBiasExecutor calibration.
+        # Defaults from decision_alphaseek_v3_kb_review.md; HPO locks these.
+        fill_alpha_ofi: float = 2.0,
+        fill_beta_spread: float = 1.0,
+        fill_gamma_age: float = -0.05,
+        limit_max_age: int = 60,
+        max_idle_bars: int | None = None,
+        seed: int | None = None,
     ):
         self.device = th.device(f"cuda:{gpu_id}") if gpu_id >= 0 else device
         self.num_sims = num_sims
@@ -66,6 +81,13 @@ class LOBTradeSimulator:
         self.seq_len = seq_len
         self.stop_loss_thresh = stop_loss_thresh
         self.sim_ids = th.arange(self.num_sims, device=self.device)
+        # v3 fee + penalty config; defaults zero so legacy configs preserve v1/v2 reward
+        # semantics. M5 yaml configs set 5e-4 / 2e-4 / 0.5 / 1e-7 per plan.
+        self.taker_fee = float(taker_fee)
+        self.maker_fee = float(maker_fee)
+        self.maker_bias = bool(maker_bias)
+        self.per_trade_penalty_bps = float(per_trade_penalty_bps)
+        self.holding_bonus = float(holding_bonus)
 
         # --- Load LOB data and compute features ---
         logger.info(f"Loading LOB parquet: {lob_parquet_path}")
@@ -115,9 +137,14 @@ class LOBTradeSimulator:
             f"Valid starts: {self._valid_start_mask.sum():,}",
         )
 
-        # Environment info (matches contest TradeSimulator)
+        # Environment info (matches contest TradeSimulator). v3 extends state
+        # 10 → 12 dims: appends `pending_limit_active` + `bars_since_last_trade
+        # / max_idle_bars` (S500 M3). Normaliser defaults to `max_holding`.
+        self.max_idle_bars = (
+            int(max_idle_bars) if max_idle_bars is not None else int(self.max_holding)
+        )
         self.env_name = "LOBTradeSimulator-v0"
-        self.state_dim = 8 + 2  # features + (position, holding)
+        self.state_dim = 8 + 4  # features + (position, holding, pending, idle)
         self.action_dim = 3  # short, nothing, long
         self.if_discrete = True
         self.max_step = (self.seq_len - num_ignore_step) // step_gap
@@ -134,6 +161,38 @@ class LOBTradeSimulator:
         self.cash = th.zeros((num_sims,), dtype=th.float32, device=self.device)
         self.asset = th.zeros((num_sims,), dtype=th.float32, device=self.device)
         self.best_price = th.zeros((num_sims,), dtype=th.float32, device=self.device)
+
+        # v3 throughput-gate counter (M4 Optuna pruning reads this)
+        self.fill_counter = th.zeros((num_sims,), dtype=th.long, device=self.device)
+        # Cumulative fee paid per sim (telemetry / fee-to-gross ratio gate)
+        self.fee_cost_cum = th.zeros((num_sims,), dtype=th.float32, device=self.device)
+        # M3: bars since last filled trade (resets on fill; feeds dim 11 of state).
+        self.bars_since_last_trade = th.zeros(
+            (num_sims,), dtype=th.long, device=self.device,
+        )
+
+        # v3 maker-bias executor — always constructed, only consulted when
+        # ``maker_bias=True`` so unit tests can poke its state regardless.
+        self.maker_executor = MakerBiasExecutor(
+            num_sims=num_sims,
+            device=self.device,
+            fill_alpha_ofi=fill_alpha_ofi,
+            fill_beta_spread=fill_beta_spread,
+            fill_gamma_age=fill_gamma_age,
+            limit_max_age=limit_max_age,
+            seed=seed,
+        )
+
+    def set_fees(self, taker_fee: float, maker_fee: float | None = None) -> None:
+        """Runtime fee-update hook.
+
+        Mirrors `ContinuousSwingEnv.set_fees` (envs/continuous_swing_env.py:176)
+        so live overlays / future-curriculum experiments share the same surface.
+        Pass ``maker_fee=None`` to leave the maker-side rate unchanged.
+        """
+        self.taker_fee = float(taker_fee)
+        if maker_fee is not None:
+            self.maker_fee = float(maker_fee)
 
     def _compute_valid_starts(self) -> np.ndarray:
         """Compute boolean mask of valid episode start indices.
@@ -193,6 +252,14 @@ class LOBTradeSimulator:
         self.position = th.zeros((num_sims,), dtype=th.long, device=device)
         self.best_price = th.zeros((num_sims,), dtype=th.float32, device=self.device)
 
+        # v3 telemetry reset (throughput gate + fee-to-gross diagnostics)
+        self.fill_counter = th.zeros((num_sims,), dtype=th.long, device=device)
+        self.fee_cost_cum = th.zeros((num_sims,), dtype=th.float32, device=device)
+        self.bars_since_last_trade = th.zeros(
+            (num_sims,), dtype=th.long, device=device,
+        )
+        self.maker_executor.reset()
+
         step_is = self.step_is + self.step_i
         state = self.get_state(step_is)
         return state
@@ -205,16 +272,28 @@ class LOBTradeSimulator:
         action_int = action - 1  # map (0,1,2) → (-1,0,+1)
         del action
 
+        # BUG-04 snapshot: agent intent before any forced-close masking. Held
+        # for telemetry / future regularizers; reward formula uses executed
+        # action_int because PnL is realized on what filled, not on intent.
+        direction_for_reward = action_int.clone()
+
         old_cash = self.cash
         old_asset = self.asset
         old_position = self.position
 
         mid_price = self.price_ary[step_is, 2]
 
+        # Track which sims had this bar's exit forced (taker fee + skip
+        # per-trade penalty when M5 config wires post-action attribution).
+        forced_close_mask = th.zeros(
+            (self.num_sims,), dtype=th.bool, device=self.device,
+        )
+
         # Truncation: force close at episode end
         truncated = self.step_i >= (self.max_step * self.step_gap)
         if truncated:
             action_int = -old_position
+            forced_close_mask = old_position.ne(0)
         else:
             new_position = (old_position + action_int).clip(
                 -self.max_position, self.max_position,
@@ -228,9 +307,10 @@ class LOBTradeSimulator:
 
         # Max holding enforcement
         self.holding = self.holding + 1
-        mask_max_holding = self.holding.gt(self.max_holding)
+        mask_max_holding = self.holding.gt(self.max_holding) & old_position.ne(0)
         if mask_max_holding.sum() > 0:
             action_int[mask_max_holding] = -old_position[mask_max_holding]
+            forced_close_mask = forced_close_mask | mask_max_holding
         self.holding[old_position == 0] = 0
 
         # Stop-loss
@@ -259,6 +339,30 @@ class LOBTradeSimulator:
         sl_mask = th.logical_or(sl_mask1, sl_mask2)
         if sl_mask.sum() > 0:
             action_int[sl_mask] = -old_position[sl_mask]
+            forced_close_mask = forced_close_mask | sl_mask
+
+        # ---- M2: maker-bias execution override. -----------------------------
+        # When ``maker_bias=True``, non-forced sims surrender their action to
+        # the executor (post-only at BBO; same-bar Bernoulli fill model).
+        # Forced sims keep the taker exit (executor short-circuits to taker on
+        # ``forced_close_mask=True`` so the result is identical to taker mode
+        # for those sims).
+        if self.maker_bias:
+            ofi_signed = self.factor_ary[step_is, 3]  # OFI feature dim
+            bbo_bid = self.price_ary[step_is, 0]
+            bbo_ask = self.price_ary[step_is, 1]
+            action_int, filled_mask, used_taker_mask = self.maker_executor.step(
+                action_int=action_int,
+                forced_close_mask=forced_close_mask,
+                ofi_signed=ofi_signed,
+                bbo_bid=bbo_bid,
+                bbo_ask=bbo_ask,
+                mid_price=mid_price,
+                old_position=old_position,
+            )
+        else:
+            filled_mask = action_int.ne(0)
+            used_taker_mask = filled_mask  # taker-only model
 
         # Execute
         new_position = old_position + action_int
@@ -274,7 +378,36 @@ class LOBTradeSimulator:
         )
         new_asset = new_cash + new_position * mid_price
 
-        reward = new_asset - old_asset
+        # ---- v3 reward: gross PnL minus exchange fees, per-trade penalty,
+        #      plus position-holding bonus. Taker fills (forced exits or
+        #      taker-only mode) pay ``taker_fee``; maker fills pay
+        #      ``maker_fee``. Sims that didn't fill pay nothing.
+        gross_pnl = new_asset - old_asset
+        notional = action_int.abs().float() * mid_price
+        effective_fee = th.where(
+            used_taker_mask,
+            th.full_like(notional, self.taker_fee),
+            th.full_like(notional, self.maker_fee),
+        )
+        fee_cost = notional * effective_fee * filled_mask.float()
+        trade_penalty = (
+            filled_mask.float() * notional * (self.per_trade_penalty_bps / 1e4)
+        )
+        # Holding bonus rewards staying in (old) position; flat sims get nothing.
+        hold_bonus = (
+            old_position.ne(0).float() * self.holding_bonus * mid_price
+        )
+        reward = gross_pnl - fee_cost - trade_penalty + hold_bonus
+
+        # Telemetry: per-sim fill counter (M4 throughput gate) + cumulative fee.
+        self.fill_counter = self.fill_counter + filled_mask.long()
+        self.fee_cost_cum = self.fee_cost_cum + fee_cost
+        # M3: idle-bars counter resets on fill, increments otherwise.
+        self.bars_since_last_trade = th.where(
+            filled_mask,
+            th.zeros_like(self.bars_since_last_trade),
+            self.bars_since_last_trade + 1,
+        )
 
         self.cash = new_cash
         self.asset = new_asset
@@ -282,7 +415,15 @@ class LOBTradeSimulator:
         self.action_int = action_int
 
         state = self.get_state(step_is)
-        info_dict = {}
+        info_dict = {
+            "filled_mask": filled_mask,
+            "forced_close_mask": forced_close_mask,
+            "used_taker_mask": used_taker_mask,
+            "fee_cost": fee_cost,
+            "fill_count": self.fill_counter.clone(),
+            "fee_cost_cum": self.fee_cost_cum.clone(),
+            "direction_for_reward": direction_for_reward,
+        }
         if truncated:
             terminal = th.ones_like(self.position, dtype=th.bool)
             state = self.reset()
@@ -299,11 +440,17 @@ class LOBTradeSimulator:
 
     def get_state(self, step_is):
         factor_ary = self.factor_ary[step_is, :]
+        pending_active = self.maker_executor.pending_dir.ne(0).float()
+        idle_norm = (
+            self.bars_since_last_trade.float() / max(1, self.max_idle_bars)
+        ).clamp(max=1.0)
         return th.concat(
             (
                 (self.position.float() / self.max_position)[:, None],
                 (self.holding.float() / self.max_holding)[:, None],
                 factor_ary,
+                pending_active[:, None],
+                idle_norm[:, None],
             ),
             dim=1,
         )

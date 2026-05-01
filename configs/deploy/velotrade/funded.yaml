@@ -1,0 +1,33 @@
+# Velotrade Funded overlay. Profit target disabled; DD rules unchanged.
+#
+# Applied by:
+#   python scripts/deploy_bare_metal.py --config <base> --overlay velotrade/funded
+#
+# Velotrade Funded: no profit target. Trailing DD + 00:00 UTC rollover
+# inherited from the 2-step pair. Unlike FTMO funded (which flips to a
+# trailing peak), the training contract and live engine already use
+# trailing-cap semantics, so no static_peak flip is needed.
+
+env:
+  risk:
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.0
+    eod_hour_utc: 0
+    augment_obs: "off"
+    static_peak: true                   # unchanged from 2-step
+
+challenge:
+  enabled: false                        # no profit target in funded
+  phase: funded                         # required even when disabled — validator
+                                        # reads phase to waive static_peak=true rule
+
+risk:
+  static_peak: true                     # unchanged from 2-step
+  eod_trailing_drawdown: true
+  eod_hour_utc: 0
+  flatten_on_kill_file: true
+
+gates:
+  velotrade_active_days_min: 4
+  velotrade_max_single_day_share: 0.5
+  velotrade_trailing_dd_buffer_pp: 0.5

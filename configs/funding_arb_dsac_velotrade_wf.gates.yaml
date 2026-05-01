@@ -1,0 +1,126 @@
+# Funding-Arb DSAC × Velotrade Stage 3 (Walk-Forward) gates — PRE-COMMITTED.
+#
+# Modeled on `sg1_btc_velotrade_ensemble.gates.yaml` (S494) but stripped of
+# the ensemble-only blocks (Stage 2.5 verdict for funding-arb was solo_1337
+# with no uplift — see project_funding_arb_dsac_stage_2_5_s503.md). The
+# stress sub-report is repurposed from a single-leverage gate to a leverage
+# grid because funding-arb is delta-neutral and total-return is bounded by
+# `funding_rate × gross_notional` — the operational sizing question is
+# "what leverage stays within Velotrade's 10% trailing DD cap?", not
+# "does the policy survive scaled actions" (it does by construction).
+#
+# Decision rule (Stage 3): G1..G3 must PASS to advance to Stage 4 recent-OOS.
+# Leverage-grid sub-report is informational (reported in wf_report.json) but
+# the operational leverage selection is gated post-Stage 4.
+#
+# Pre-commit date: 2026-04-28 S503-cont. Do not edit after first launch.
+
+workstream: funding_arb_dsac
+variant: solo
+seed: 1337                                       # Stage 2.5 winner (S503)
+hpo_provenance:
+  study: funding_arb_dsac_rehpo_20260426
+  best_trial: 37
+  best_pf: 4.1040
+  results_yaml: results/best_params_funding_arb_dsac_rehpo_20260426.yaml
+
+wf_folds: 8                                      # K=8 windows from window_schedule
+# Spread across the 23-window schedule (every 3rd, stride=3) so test splits
+# cover Apr-2024 → Mar-2026 instead of clustering in one 8-month band.
+# Auto-computed from window_indices below; window_index_range kept for the
+# launcher's sanity-check.
+window_indices: [0, 3, 6, 9, 12, 15, 18, 21]
+window_index_range: [0, 21]                      # inclusive (max(window_indices))
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+gates:
+  g1_per_window_profitability:
+    description: >-
+      Each WF window's TEST split must show positive net return (funding −
+      fees − slippage). Funding-arb is structurally delta-neutral so basis
+      PnL ≈ 0; net = funding − costs. Negative net return on any window
+      means the policy lost the funding edge in that regime.
+    min_test_return_pct: 0.0
+    folds_pass_min: 8                            # ALL 8 must be positive (strict)
+
+  g2_pf_floor:
+    description: >-
+      Per-window funding/cost ratio (PF-proxy) must stay above the S405
+      operational floor. Median across folds must comfortably exceed the
+      floor too (sanity).
+    pf_floor_per_window: 1.5                     # S405 GATE
+    pf_floor_median: 2.0
+    folds_pass_min: 7                            # >=7/8 windows above 1.5
+
+  g3_max_drawdown:
+    description: >-
+      Per-window worst max-drawdown (at TRAINING leverage = max_gross_exposure
+      0.80) must stay well below Velotrade's 10% cap. This is the "policy is
+      safe at training scale" gate. Leverage-grid stress (below) handles
+      the operational sizing question.
+    mdd_max_per_window_pct: 5.0                  # half of 10% cap, conservative
+    folds_pass_min: 8                            # ALL 8 windows
+
+  g4_pf_xcheck:
+    description: >-
+      PF-XCHECK invariant — per-window PF computed via mid_price AND close
+      must agree within 30%. Funding-arb is delta-neutral so price-source
+      sensitivity should be tiny; >30% divergence means a data/marking bug.
+      For funding-arb specifically, "mid" and "close" both come from the
+      perp leg; this gate confirms the reported PF is reproducible.
+    max_divergence_pct: 30.0
+    folds_pass_min: 8
+
+  # ---------------------------------------------------------------------
+  # Leverage-grid stress sub-report (Stage 3 sub-artifact, NOT a hard gate
+  # at this stage — informational. The selected leverage is used by Stage 5
+  # paper-deploy as the operational sizing.)
+  # ---------------------------------------------------------------------
+  stress_leverage_grid:
+    description: >-
+      Replay each WF test window with the trained policy at multiple gross
+      leverage settings. For each leverage L ∈ leverage_factors, multiply
+      the agent's action by L (clip to [-1, 1]) AND raise env max_gross_exposure
+      to L so the env's normalize-to-cap doesn't undo the scaling. Compute
+      worst trailing-DD across all 8 windows for each L. Operational leverage
+      = max L such that worst_window_trailing_dd_pct + buffer_pp ≤ velotrade_cap.
+    leverage_factors: [1.0, 2.0, 3.0, 5.0, 7.5, 10.0]
+    # Override at smoke-test time via --leverage_factors flag if needed.
+    velotrade_cap_pct: 10.0                      # Velotrade Step 1 trailing DD
+    velotrade_buffer_pp: 0.5                     # operational margin
+    # The grid is reported per-window AND aggregated. Both views matter
+    # because a single bad-window outlier can kill a leverage that looks
+    # safe on median.
+    aggregations: [worst_window, median_window, p95_window]
+
+# ---------------------------------------------------------------------------
+# Decision matrix (Stage 3)
+# ---------------------------------------------------------------------------
+
+decision:
+  all_pass_action: advance_to_stage_4_recent_oos
+  any_fail_action: halt_workstream_pending_diagnosis
+  notes: >-
+    G1+G2+G3+G4 are the WF protocol gates. Leverage-grid stress is
+    informational at this stage — operational leverage selection happens
+    at Stage 5 paper-deploy after Stage 4 confirms recent-regime fitness.
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+provenance:
+  drafted_on: '2026-04-28'
+  drafted_by_session: S503-cont
+  upstream_l1_run: pj0teg7a
+  upstream_l1_config: configs/funding_arb_dsac_l1_multiseed.yaml
+  upstream_stage_2_5_verdict: solo_1337 (no ensemble uplift, S493 gate not met)
+  upstream_memory:
+    - project_funding_arb_dsac_l1_init_sensitivity.md
+    - project_funding_arb_dsac_stage_2_5_s503.md
+    - decision_l1_multiseed_n_seeds_s488.md
+  prop_firm: velotrade
+  prop_firm_phase: step1

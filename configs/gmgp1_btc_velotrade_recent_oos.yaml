@@ -1,0 +1,121 @@
+# GMGP1-BTC Velotrade — Stage 4 Recent-OOS (solo seed 456, fold 3 checkpoint)
+#
+# Stage 4 per Protocol v2: unseen-window backtest against the Stage 3 WF
+# graduation checkpoint. Window chosen to maximise post-training unseen time
+# while staying inside the extended parquet (through 2026-04-12).
+#
+# Upstream:
+#   - Stage 3 WF: configs/gmgp1_btc_velotrade_wf.yaml (seed 456, 4 folds PASS).
+#     fold 3 train 2025-07-06 -> 2026-01-06, val 2026-01-06 -> 2026-02-06,
+#     test 2026-02-06 -> 2026-03-06.
+#   - Graduation checkpoint:
+#     checkpoints/WF_seed456_fold_03_20260423_212007/checkpoint_final.pth
+#
+# Window:
+#   test 2026-01-06 -> 2026-04-12 (~96 days). Includes fold 3's val window
+#   (norm cutoff = 2026-01-06 so EMA-Z statistics are frozen at end-of-training;
+#   val window from the WF fold is re-evaluated here as part of recent-OOS).
+#
+# Gate (Protocol v2 Stage 4):
+#   - oos_pf_floor >= 1.10 (per _wf.yaml line 164)
+#   - velotrade_trailing_dd_buffer_pp >= 0.5pp
+#   - sanity: trade_count >= 200 over ~96-day window
+#
+# Run:
+#   python scripts/gmgp1_btc_recent_oos_eval.py \
+#     --config configs/gmgp1_btc_velotrade_recent_oos.yaml \
+#     --checkpoint checkpoints/WF_seed456_fold_03_20260423_212007/checkpoint_final.pth \
+#     --device cpu
+
+data:
+  file_path: "data/bitfinex/btc_usdt_perp_2025_2026q1_1min.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  # Single-window eval — test_start/end consumed directly by run_rule().
+  # val_end_date is used as norm_cutoff by the eval script.
+  train_start_date: "2025-07-06"
+  train_end_date: "2026-01-06"
+  val_start_date: "2026-01-06"
+  val_end_date: "2026-01-06"            # norm cutoff = end of fold-3 training
+  test_start_date: "2026-01-06"
+  test_end_date: "2026-04-12"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005                   # steady-state 5 bps Bitfinex perp
+  deadband_threshold: 0.15            # trial #48
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 0                   # full-window (_prep_backtest_config also sets this)
+  random_start: false
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0007696903903377959
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.0
+    eod_hour_utc: 0
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.0003295003003086035
+    lr_critic: 0.000017992633145705355
+    lr_alpha: 0.000007583094363970812
+    gamma: 0.9654375719893458
+    tau: 0.0000029525905252136697
+    initial_alpha: 0.4972364771289634
+    gradient_clip: 8.408201216723267
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 0                  # inference-only
+  num_envs: 1
+
+hpo:
+  enabled: false
+
+gates:
+  oos_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_min_trade_count: 200
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-btc", "BTC", "SAC", "15min", "crypto", "velotrade",
+         "velotrade-wrapped", "prop-firm", "recent_oos", "stage4",
+         "solo", "seed-456", "fold-3-ckpt", "bitfinex-perp",
+         "steady-state", "upstream:gmgp1_btc_velotrade_wf"]

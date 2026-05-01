@@ -1,7 +1,9 @@
 import argparse
 import json
 import os
+import re
 import sqlite3
+import statistics as _st
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -97,6 +99,77 @@ def _overfitting_diagnosis(val_s, test_s, dev_str):
         return "❌ Both Negative", "Strategy failed on both val and test."
 
 
+_WF_FOLD_RE = re.compile(r"^win(\d+)/wf_fold_(\d{2})/profit_factor$")
+
+
+def _wf_folds(summary):
+    """Extract per-fold metrics from a WF-consolidated run.
+
+    Returns a list of fold dicts sorted by (window, fold), or [] if not WF.
+    """
+    hits = []
+    for k in summary:
+        m = _WF_FOLD_RE.match(k)
+        if m:
+            hits.append((int(m.group(1)), int(m.group(2))))
+    if not hits:
+        return []
+    folds = []
+    for win_i, fold_i in sorted(hits):
+        fp = f"win{win_i}/wf_fold_{fold_i:02d}"
+        tp = f"win{win_i}/train"
+        folds.append({
+            "win": win_i,
+            "fold": fold_i,
+            "pf": summary.get(f"{fp}/profit_factor"),
+            "dd": summary.get(f"{fp}/max_drawdown"),
+            "ret": summary.get(f"{fp}/total_return"),
+            "sharpe_d": summary.get(f"{fp}/sharpe_daily"),
+            "sortino": summary.get(f"{fp}/sortino"),
+            "trades": summary.get(f"{fp}/trade_count"),
+            "win_rate": summary.get(f"{fp}/win_rate"),
+            "stability": summary.get(f"{fp}/stability"),
+            "exposure": summary.get(f"{fp}/market_exposure"),
+            "sps": summary.get(f"{tp}/sps"),
+            "steps": summary.get(f"{tp}/total_steps"),
+            "agent_type": summary.get(f"{tp}/agent_type"),
+            "taker_fee": summary.get(f"{tp}/taker_fee"),
+            "checkpoint": summary.get(f"{tp}/checkpoint"),
+        })
+    return folds
+
+
+def _wf_aggregate(folds):
+    pfs = [f["pf"] for f in folds if isinstance(f["pf"], (int, float))]
+    dds = [f["dd"] for f in folds if isinstance(f["dd"], (int, float))]
+    rets = [f["ret"] for f in folds if isinstance(f["ret"], (int, float))]
+    shs = [f["sharpe_d"] for f in folds if isinstance(f["sharpe_d"], (int, float))]
+    trades = [f["trades"] for f in folds if isinstance(f["trades"], (int, float))]
+
+    def cv(xs):
+        if len(xs) < 2:
+            return None
+        m = _st.mean(xs)
+        if m == 0:
+            return None
+        return _st.stdev(xs) / abs(m)
+
+    return {
+        "n_folds": len(folds),
+        "n_profitable": sum(1 for p in pfs if p > 1.0),
+        "n_pf_ge_11": sum(1 for p in pfs if p >= 1.1),
+        "median_pf": _st.median(pfs) if pfs else None,
+        "min_pf": min(pfs) if pfs else None,
+        "max_pf": max(pfs) if pfs else None,
+        "cv_pf": cv(pfs),
+        "mean_return": _st.mean(rets) if rets else None,
+        "total_return": sum(rets) if rets else None,
+        "worst_dd": min(dds) if dds else None,
+        "median_sharpe_d": _st.median(shs) if shs else None,
+        "total_trades": sum(trades) if trades else None,
+    }
+
+
 def _status_icon(status):
     if status == "finished":
         return "✅ Finished"
@@ -143,6 +216,162 @@ def _get_comparison_runs(current_run_id, n=5):
 
 
 # ---------------------------------------------------------------------------
+# Walk-Forward Generator (WandB consolidation format, S488+)
+# ---------------------------------------------------------------------------
+
+def _generate_wf_report(run_id, output_path, data, config, tags, name, status,
+                        classification, folds):
+    """Render a fold-aware report for WF-consolidated runs."""
+    agg = _wf_aggregate(folds)
+    agent_type = (folds[0].get("agent_type") or "unknown").upper()
+    steps_per_fold = folds[0].get("steps") or 0
+    total_steps = sum((f.get("steps") or 0) for f in folds)
+    taker_fee = folds[0].get("taker_fee")
+    taker_fee_str = f"{taker_fee*10000:.2f}" if isinstance(taker_fee, (int, float)) else "N/A"
+
+    tags_str = ", ".join(f"`{t}`" for t in tags) if tags else "None"
+
+    # Gate verdict — SG-1 XAUUSD ensemble plan style, reused as a generic WF heuristic.
+    g1_pass = (agg["n_pf_ge_11"] or 0) >= max(1, int(0.83 * (agg["n_folds"] or 1)))  # ≥83% folds PF≥1.1
+    g_profit = agg["n_profitable"] == agg["n_folds"]
+    ftmo_ok = isinstance(agg["worst_dd"], (int, float)) and agg["worst_dd"] > -0.05
+    cv_ok = isinstance(agg["cv_pf"], (int, float)) and agg["cv_pf"] <= 0.35
+
+    # Per-fold table
+    fold_rows = []
+    for f in folds:
+        pf = f"{f['pf']:.3f}" if isinstance(f["pf"], (int, float)) else "N/A"
+        dd = f"{f['dd']*100:+.2f}%" if isinstance(f["dd"], (int, float)) else "N/A"
+        ret = f"{f['ret']*100:+.2f}%" if isinstance(f["ret"], (int, float)) else "N/A"
+        sh = f"{f['sharpe_d']:.2f}" if isinstance(f["sharpe_d"], (int, float)) else "N/A"
+        trd = int(f["trades"]) if isinstance(f["trades"], (int, float)) else "N/A"
+        wr = f"{f['win_rate']:.1f}%" if isinstance(f["win_rate"], (int, float)) else "N/A"
+        fold_rows.append(f"| {f['fold']} | {pf} | {dd} | {ret} | {sh} | {trd} | {wr} |")
+    fold_table = "\n".join(fold_rows)
+
+    # Aggregate formatters
+    def _fmt_pct(x):
+        return f"{x*100:+.2f}%" if isinstance(x, (int, float)) else "N/A"
+    def _fmt_num(x, n=3):
+        return f"{x:.{n}f}" if isinstance(x, (int, float)) else "N/A"
+    def _fmt_cv(x):
+        return f"{x*100:.2f}%" if isinstance(x, (int, float)) else "N/A"
+
+    data_cfg = config.get("data", {}) or {}
+    ticker = data_cfg.get("ticker", "N/A")
+    wf_cfg = config.get("walk_forward", {}) or config.get("wf", {}) or {}
+    train_window = wf_cfg.get("train_window", data_cfg.get("train_window", "N/A"))
+    val_window = wf_cfg.get("val_window", data_cfg.get("val_window", "N/A"))
+    test_window = wf_cfg.get("test_window", data_cfg.get("test_window", "N/A"))
+
+    report = f"""# DeepScalper Walk-Forward Report: {name}
+
+**Run ID:** `{run_id}`
+**Name:** {name}
+**Date:** {data.get("created_at", "N/A")}
+**Status:** {_status_icon(status)}
+**Classification:** {classification} (WF, {agg['n_folds']} folds)
+**WandB URL:** [Link]({data.get("url", "#")})
+**Tags:** {tags_str}
+
+---
+
+## 1. Executive Summary
+
+*   **Agent:** {agent_type}
+*   **Outcome:** {_status_icon(status)}
+*   **WF Folds:** {agg['n_folds']} completed, {agg['n_profitable']} profitable, {agg['n_pf_ge_11']} at PF≥1.1
+*   **Median PF:** {_fmt_num(agg['median_pf'])}  (min {_fmt_num(agg['min_pf'])} / max {_fmt_num(agg['max_pf'])})
+*   **Worst Fold MaxDD:** {_fmt_pct(agg['worst_dd'])}
+*   **Median Daily Sharpe:** {_fmt_num(agg['median_sharpe_d'], n=2)}
+
+---
+
+## 2. Walk-Forward Fold Results
+
+| Fold | PF | MaxDD | Return | Sharpe_d | Trades | WinRate |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+{fold_table}
+
+### 2a. Aggregate Statistics
+
+| Metric | Value |
+| :--- | :--- |
+| **Folds Completed** | {agg['n_folds']} |
+| **Folds Profitable (PF>1.0)** | {agg['n_profitable']} / {agg['n_folds']} |
+| **Folds PF ≥ 1.1** | {agg['n_pf_ge_11']} / {agg['n_folds']} |
+| **Median Fold PF** | {_fmt_num(agg['median_pf'])} |
+| **Min / Max Fold PF** | {_fmt_num(agg['min_pf'])} / {_fmt_num(agg['max_pf'])} |
+| **CV(PF) across folds** | {_fmt_cv(agg['cv_pf'])} |
+| **Mean Fold Return** | {_fmt_pct(agg['mean_return'])} |
+| **Sum Fold Returns** | {_fmt_pct(agg['total_return'])} |
+| **Worst Fold MaxDD** | {_fmt_pct(agg['worst_dd'])} |
+| **Median Fold Daily Sharpe** | {_fmt_num(agg['median_sharpe_d'], n=2)} |
+| **Total Trades** | {int(agg['total_trades']) if isinstance(agg['total_trades'], (int, float)) else 'N/A'} |
+
+---
+
+## 3. Operational Telemetry (Training)
+
+| Metric | Value |
+| :--- | :--- |
+| **Agent** | {agent_type} |
+| **Steps / Fold** | {steps_per_fold:,} |
+| **Total Steps (all folds)** | {total_steps:,} |
+| **Mean SPS** | {_fmt_num(_st.mean([f['sps'] for f in folds if isinstance(f['sps'], (int, float))]) if any(isinstance(f['sps'], (int, float)) for f in folds) else None, n=1)} |
+| **Taker Fee** | {taker_fee_str} bps |
+
+---
+
+## 4. Configuration Highlights
+
+*   **Agent:** {agent_type}
+*   **Data:** {ticker}
+*   **WF Windows:** train={train_window}, val={val_window}, test={test_window}
+*   **Fold Count:** {agg['n_folds']}
+
+---
+
+## 5. Gate Assessment
+
+| Gate | Threshold | Result | Verdict |
+| :--- | :--- | :--- | :--- |
+| **All Folds Profitable** | PF>1.0 for all | {agg['n_profitable']}/{agg['n_folds']} | {'✅' if g_profit else '❌'} |
+| **Coverage PF≥1.1** | ≥83% of folds | {agg['n_pf_ge_11']}/{agg['n_folds']} | {'✅' if g1_pass else '❌'} |
+| **FTMO Daily DD** | worst fold > -5% | {_fmt_pct(agg['worst_dd'])} | {'✅' if ftmo_ok else '❌'} |
+| **CV(PF)** | ≤ 35% | {_fmt_cv(agg['cv_pf'])} | {'✅' if cv_ok else '❌'} |
+
+---
+
+## 6. Automated Decision
+"""
+    passes = sum([g_profit, g1_pass, ftmo_ok, cv_ok])
+    if passes == 4:
+        report += "\n✅ **WF PASS**: All generic gates clear. Proceed to ensemble eval / stress sidecar.\n"
+    elif passes >= 2:
+        report += f"\n⚠️ **PARTIAL**: {passes}/4 gates passed. Investigate failing gates before promotion.\n"
+    else:
+        report += f"\n❌ **WF FAIL**: {passes}/4 gates passed. Do not promote.\n"
+
+    # Optional: comparison runs section (reuse existing helper)
+    comp_rows = _get_comparison_runs(run_id, n=5)
+    if comp_rows:
+        report += "\n---\n\n## 7. Comparison to Previous Runs\n\n"
+        report += "| Run | Date | Status |\n| :--- | :--- | :--- |\n"
+        for row in comp_rows:
+            rid, _, rdate, rstatus = row[0], row[1], row[2], row[3]
+            short_date = str(rdate)[:10] if rdate else "N/A"
+            report += f"| `{rid}` | {short_date} | {rstatus} |\n"
+
+    report += "\n---\n\n*Report auto-generated by `generate_report.py` (WF mode) — enrich with behavioral diagnosis and recommendations as needed.*\n"
+
+    os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
+    with open(output_path, 'w', encoding='utf-8') as f:
+        f.write(report)
+    print(f"Report generated: {output_path}")
+
+
+# ---------------------------------------------------------------------------
 # Main Generator
 # ---------------------------------------------------------------------------
 
@@ -164,6 +393,25 @@ def generate_report(run_id, output_path):
 
     # ── 2. Classify ───────────────────────────────────────────────────────
     classification = _classify_run(tags, config)
+
+    # ── 2a. WF short-circuit ──────────────────────────────────────────────
+    # WF-consolidated runs (S488+) nest metrics under win<i>/wf_fold_<NN>/*,
+    # so the standard backtest_val/backtest_test keys don't exist. Render a
+    # fold-aware report instead and return early.
+    folds = _wf_folds(summary)
+    if folds:
+        _generate_wf_report(
+            run_id=run_id,
+            output_path=output_path,
+            data=data,
+            config=config,
+            tags=tags,
+            name=name,
+            status=status,
+            classification=classification,
+            folds=folds,
+        )
+        return
 
     # ── 3. Extract Metrics ────────────────────────────────────────────────
     # Financial — Validation
@@ -214,7 +462,15 @@ def generate_report(run_id, output_path):
 
     # Config
     num_envs       = config.get("env", {}).get("num_envs", "N/A")
-    total_timesteps = config.get("training", {}).get("total_timesteps", "N/A")
+    total_timesteps = (
+        config.get("training", {}).get("total_timesteps")
+        or config.get("agents", {}).get("total_timesteps")
+        or 0
+    )
+    try:
+        total_timesteps = int(total_timesteps)
+    except (TypeError, ValueError):
+        total_timesteps = 0
     maker_fee      = config.get("env", {}).get("maker_fee_bps", config.get("env", {}).get("maker_fee", "N/A"))
     taker_fee      = config.get("env", {}).get("taker_fee_bps", config.get("env", {}).get("taker_fee", "N/A"))
 

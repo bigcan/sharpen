@@ -32,14 +32,119 @@ import os
 import signal
 import tempfile
 import time
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone  # noqa: F401 (date used in annotations)
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
 import torch
 
+from finrl_pro_ds.monitoring import (
+    ActionDriftTracker,
+    REASON_DRIFT_CRIT,
+    read_kill_file,
+    should_lockout,
+    write_kill_file,
+)
+from finrl_pro_ds.live.challenge_state_machine import (
+    ChallengePhase,
+    ChallengeStateMachine,
+    REASON_PHASE_COMPLETE,
+)
+
 logger = logging.getLogger(__name__)
+
+
+def _init_drift_tracker(config: dict) -> Optional[ActionDriftTracker]:
+    """Build a Protocol v2.2 §8.2 ActionDriftTracker from engine config.
+
+    Returns None (tracker disabled) when:
+      * `drift.enabled` is false/missing, OR
+      * baseline_path is missing / unreadable / has no eval_distribution.
+    Baseline resolution:
+      * `ensemble_report.json` → reads `ensemble_eval_distribution`
+      * `seed_report.json` with `drift.baseline_seed` → reads
+         `eval_distribution_by_seed.<seed>`
+    The tracker itself is permissive: an unreadable baseline returns
+    status=LOG_ONLY, which lets live monitoring run in observability-only
+    mode until T5 backfill writes proper artifacts.
+    """
+    drift_cfg = config.get("drift") or {}
+    if not drift_cfg.get("enabled", False):
+        return None
+
+    baseline_path = drift_cfg.get("baseline_path")
+    baseline: Optional[dict] = None
+    if baseline_path:
+        try:
+            with open(baseline_path, encoding="utf-8") as f:
+                payload = json.load(f)
+            if "ensemble_eval_distribution" in payload:
+                baseline = payload["ensemble_eval_distribution"]
+            elif "eval_distribution_by_seed" in payload:
+                seed_key = str(drift_cfg.get("baseline_seed", ""))
+                by_seed = payload["eval_distribution_by_seed"]
+                if seed_key and seed_key in by_seed:
+                    baseline = by_seed[seed_key]
+                elif by_seed:
+                    # Fall back to the first seed with a stable sort so repeat
+                    # restarts pick the same baseline.
+                    first = sorted(by_seed.keys())[0]
+                    baseline = by_seed[first]
+                    logger.warning(
+                        f"drift.baseline_seed unset; using seed {first} from "
+                        f"{baseline_path}",
+                    )
+            elif "eval_distribution" in payload:
+                baseline = payload["eval_distribution"]
+            else:
+                logger.warning(
+                    f"drift baseline at {baseline_path} has no recognized "
+                    f"eval_distribution block — running in LOG_ONLY",
+                )
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(
+                f"drift baseline load failed ({e}) — running in LOG_ONLY",
+            )
+
+    safe_cfg = config.get("safe_mode") or {}
+    # Scalar V7 deadband matches the env's deadband_threshold so the live
+    # tracker and training baseline bucket the same way.
+    deadband_abs = float(config.get("trading", {}).get(
+        "deadband_threshold",
+        config.get("env", {}).get("deadband_threshold", 0.25),
+    ))
+    # Prefer drift.* keys (v2.2 spec); fall back to top-level `gates.drift.*`
+    # if callers pass them through that path.
+    gates_drift = (config.get("gates") or {}).get("drift") or {}
+    gates_safe = (config.get("gates") or {}).get("safe_mode") or {}
+
+    def _pick(key: str, default: float) -> float:
+        for src in (drift_cfg, safe_cfg, gates_drift, gates_safe):
+            if key in src:
+                return float(src[key])
+        return float(default)
+
+    cutpoints = drift_cfg.get("regime_cutpoints") or gates_drift.get("regime_cutpoints")
+    tracker = ActionDriftTracker(
+        baseline=baseline,
+        window_bars=int(_pick("window_bars", 1000)),
+        min_bars_before_check=int(_pick("min_bars_before_check", 500)),
+        deadband_warn=_pick("deadband_frac_warn", 0.15),
+        deadband_crit=_pick("deadband_frac_crit", 0.30),
+        saturation_warn=_pick("saturation_frac_warn", 0.15),
+        saturation_crit=_pick("saturation_frac_crit", 0.30),
+        action_kl_warn=_pick("action_kl_warn", 0.5),
+        action_kl_crit=_pick("action_kl_crit", 1.0),
+        deadband_abs=deadband_abs,
+        regime_cutpoints=cutpoints,
+        vol_estimator_bars=int(_pick("vol_estimator_bars", 20)),
+    )
+    logger.info(
+        f"ActionDriftTracker active: baseline={'YES' if baseline else 'LOG_ONLY'} "
+        f"window={tracker.window_bars} warmup={tracker.min_bars_before_check}",
+    )
+    return tracker
 
 
 class LiveTradingEngine:
@@ -89,13 +194,17 @@ class LiveTradingEngine:
         self._current_position = 0.0
         self._prev_close = 0.0
         self._portfolio_value = config.get("trading", {}).get("initial_balance", 10000.0)
+        # S490: preserve config-declared balance for the startup mismatch guard.
+        # _current_position is stored as a fraction with _portfolio_value in the
+        # denominator, so a silent broker-vs-config drift corrupts position tracking.
+        self._config_initial_balance = self._portfolio_value
         self._initial_portfolio_value = self._portfolio_value
         self._peak_portfolio_value = self._portfolio_value
         self._current_funding_rate = 0.0
 
         # FIX AUD-H04: Track daily loss by UTC date, not bar count
         self._daily_start_value = self._portfolio_value
-        self._last_daily_reset_date: Optional[datetime] = None
+        self._last_daily_reset_date: Optional[date] = None
         self._max_daily_loss_pct = config.get("safety", {}).get("max_daily_loss_pct", 0.05)
 
         # FIX AUD-H07: Periodic funding rate fetch interval (bars between fetches)
@@ -107,6 +216,12 @@ class LiveTradingEngine:
         # Safety
         self._kill_file = Path(config.get("safety", {}).get(
             "kill_file", "/tmp/finrl_live_kill",
+        ))
+        # v2.2 §8.3 override path: operator file that lifts repeat-CRIT lockout.
+        # Distinct from the kill_file itself; operator must also clear the
+        # kill_file to re-enable the strategy after a lockout.
+        self._kill_file_override = Path(config.get("safety", {}).get(
+            "kill_file_override", f"{self._kill_file}.override",
         ))
         self._emergency_flatten_on_error = config.get("safety", {}).get(
             "emergency_flatten_on_error", True,
@@ -137,6 +252,26 @@ class LiveTradingEngine:
         self._position_file = Path(config.get("safety", {}).get(
             "position_file", "/tmp/finrl_last_position.json",
         ))
+
+        # Step 0b (E1 architect pass): live-replay fixture capture. When
+        # `capture_ccxt_raw_responses` is true, the engine opens a JSONL writer
+        # at startup and registers a capture callback on the broker; raw
+        # CCXT fetch_positions / fetch_balance responses are appended for the
+        # next `capture_max_bars` trading steps, then capture closes itself.
+        # Default false; deploy with true after the 2026-04-27 00:00 UTC un-halt
+        # to collect the Tier-3 live-replay fixture for the E1 refactor.
+        self._capture_enabled = bool(config.get("safety", {}).get(
+            "capture_ccxt_raw_responses", False,
+        ))
+        self._capture_max_bars = int(config.get("safety", {}).get(
+            "capture_max_bars", 96,
+        ))
+        self._capture_dir = Path(config.get("safety", {}).get(
+            "capture_dir", "/app/state",
+        ))
+        self._capture_writer = None
+        self._capture_path: Optional[Path] = None
+        self._capture_bars_remaining = 0
 
         # Persistent risk-halt state (S427 revive-after-halt fix).
         # When daily-loss / MAX_DD trips, we write halted_until so that
@@ -254,6 +389,57 @@ class LiveTradingEngine:
         self._warmup_bars = config.get("features", {}).get("warmup_bars", 0)
         self._warmup_bars_remaining = 0
 
+        # Protocol v2.2 §8.2 action-drift tracker. Engine-side concerns:
+        #   - observe(target_position, current_close) after agent.predict()
+        #   - WARN: disable new entries (handled in _apply_drift_status); holds stay
+        #   - CRIT: write kill_file (§8.3 T2) + FTMO force-close; watchdog lockout
+        # Safe defaults: disabled unless `drift.enabled: true` and baseline resolvable.
+        self._drift_tracker = _init_drift_tracker(config)
+        self._drift_warn_active = False
+        self._drift_last_status = None
+
+        # S495-cont prop-firm decoupling: challenge-phase state machine.
+        # Only instantiated when config.challenge.enabled=true (live deploy
+        # configs). Training / HPO / backtest configs have no challenge:
+        # block at all, so this stays None and the per-bar hook in
+        # _trading_step is a no-op.
+        self._challenge_state_machine: Optional[ChallengeStateMachine] = None
+        self._last_completed_phase_file = Path(config.get("safety", {}).get(
+            "last_completed_phase_file", "/app/state/last_completed_phase.txt",
+        ))
+        challenge_cfg = config.get("challenge", {}) or {}
+        if challenge_cfg.get("enabled", False):
+            target = challenge_cfg.get("profit_target_pct")
+            if target is None:
+                target = float("inf")
+            phase = ChallengePhase(
+                name=str(challenge_cfg.get("phase", "custom")),
+                profit_target_pct=float(target),
+                next_phase=challenge_cfg.get("next_phase"),
+                advance_rule=str(challenge_cfg.get("advance_rule", "manual_ack")),
+            )
+            self._challenge_state_machine = ChallengeStateMachine(
+                phase,
+                initial_portfolio_value=self._initial_portfolio_value,
+                strategy_name=self._strategy_name,
+                halt_state_writer=self._write_halt_state,
+                kill_file_writer=write_kill_file,
+                kill_file_path=self._kill_file,
+                last_completed_phase_path=self._last_completed_phase_file,
+                flatten_callback=self._emergency_flatten,
+                stop_callback=self._request_stop,
+                telemetry_gauge=self._metrics.update_generic
+                    if hasattr(self._metrics, "update_generic") else None,
+                n_confirm=int(challenge_cfg.get("n_confirm", 2)),
+                smoothing_window=int(challenge_cfg.get("smoothing_window", 3)),
+            )
+            logger.info(
+                f"Challenge state machine active: phase={phase.name}, "
+                f"target={phase.profit_target_pct}, next={phase.next_phase}, "
+                f"advance_rule={phase.advance_rule}, "
+                f"initial_pv={self._initial_portfolio_value:.2f}",
+            )
+
     # -------------------------------------------------------------------
     # Main loop
     # -------------------------------------------------------------------
@@ -269,6 +455,33 @@ class LiveTradingEngine:
             except NotImplementedError:
                 # Windows doesn't support add_signal_handler
                 signal.signal(sig, lambda s, f: self._request_stop("signal"))
+
+        # v2.2 §8.3 startup gate: if a prior process wrote a kill_file (drift
+        # CRIT or operator halt), refuse to start until the operator clears
+        # it. Repeat-CRIT lockout requires `kill_file.override` alongside
+        # clearing the kill_file. Runs BEFORE broker.connect() so we don't
+        # burn a cTrader token re-auth while locked out.
+        if self._check_kill_file_startup_gate():
+            return
+
+        # S495-cont prop-firm decoupling startup gate: if a prior process
+        # completed this phase (last_completed_phase.txt written by the
+        # ChallengeStateMachine), refuse to restart on the SAME phase
+        # config. ADR-2 operator-error guard: the operator must both clear
+        # the kill_file AND swap to the next-phase overlay. This gate
+        # catches the half-migration case where the kill_file was cleared
+        # but the config still points at the completed phase.
+        if self._check_challenge_phase_startup_gate():
+            return
+
+        # Audit FIND-02 / S491: pre-broker halt gate. If a prior process
+        # persisted a halt (daily_loss / position_mismatch / balance_mismatch /
+        # risk_halt / intrabar_dd), sleep until halted_until BEFORE paying the
+        # cost of broker.connect() + bootstrap. Avoids death-looping broker
+        # auth on a stale token while we wait for UTC day rollover.
+        self._write_bootstrap_health("pre_broker_halt_gate")
+        if await self._check_persistent_halt():
+            return
 
         # Connect broker
         await self.broker.connect()
@@ -311,6 +524,51 @@ class LiveTradingEngine:
         # returns 0.0 because _contracts_to_position divides by zero PV).
         await self._update_portfolio_value()
 
+        # S490 + FIND-02: balance-mismatch startup guard. The engine stores
+        # _current_position as lots*lot_size*price / _portfolio_value — a
+        # mid-session PV change silently invalidates cached positions and trips
+        # the reconciler. On detection, persist halt_state and exit cleanly so
+        # the pre-broker halt gate sleeps until UTC day rollover on next
+        # restart, instead of raising and death-looping under Docker
+        # restart-policy. Operator can opt out via safety.accept_balance_mismatch.
+        safety_cfg = self.config.get("safety", {})
+        mismatch_tolerance = safety_cfg.get("balance_mismatch_tolerance_pct", 0.10)
+        accept_mismatch = safety_cfg.get("accept_balance_mismatch", False)
+        config_ib = self._config_initial_balance
+        if config_ib > 0:
+            drift = abs(self._portfolio_value - config_ib) / config_ib
+            if drift > mismatch_tolerance:
+                msg = (
+                    f"BALANCE MISMATCH: broker equity ${self._portfolio_value:,.2f} "
+                    f"vs config.initial_balance ${config_ib:,.2f} "
+                    f"(drift {drift:.1%} > tolerance {mismatch_tolerance:.1%}). "
+                    f"Position tracking uses a PV-denominated fraction; starting "
+                    f"with a mismatch will corrupt reconciliation. Update "
+                    f"trading.initial_balance to match the broker and restart, or "
+                    f"set safety.accept_balance_mismatch=true to bypass."
+                )
+                if accept_mismatch:
+                    logger.warning(
+                        msg + " (BYPASSED via safety.accept_balance_mismatch=true)",
+                    )
+                else:
+                    logger.critical(msg)
+                    self._write_halt_state(
+                        reason="balance_mismatch",
+                        detail=(
+                            f"broker_equity={self._portfolio_value:.2f} "
+                            f"config_ib={config_ib:.2f} "
+                            f"drift={drift:.4f} "
+                            f"tolerance={mismatch_tolerance:.4f}"
+                        ),
+                        now_utc=datetime.now(timezone.utc),
+                    )
+                    self._request_stop("balance_mismatch")
+                    # Clean shutdown so broker TCP + loader close gracefully.
+                    # Pre-broker halt gate will fire on next restart.
+                    await self._shutdown()
+                    return
+
         # FIX AUD-M01: Re-calibrate peak/initial from broker equity, not config.
         # Config initial_balance may differ from actual account balance,
         # causing false drawdown triggers on startup.
@@ -337,7 +595,12 @@ class LiveTradingEngine:
         # S427: gate on persistent halt state before entering main loop.
         # If a prior process tripped daily-loss / MAX_DD, stay halted
         # until halted_until so `restart: unless-stopped` can't revive us.
+        # Post-FIND-02 this is a defensive secondary check; the pre-broker
+        # halt gate catches virtually every case.
         if await self._check_persistent_halt():
+            # FIND-05: broker + loader are wired by now — close cleanly on
+            # mid-sleep SIGTERM so we don't leak a TCP connection.
+            await self._shutdown()
             return
 
         # Initialize WandB
@@ -364,6 +627,10 @@ class LiveTradingEngine:
         # for first bar. Keeps health file fresh so Docker doesn't kill us
         # during the up-to-15-min wait.
         self._write_bootstrap_health("waiting_for_first_bar")
+
+        # Step 0b: open capture writer + register broker callback if enabled.
+        if self._capture_enabled:
+            self._open_capture_writer()
 
         # Wire heartbeat callback on CMEBarClock so health file stays fresh
         # during market-closed sleeps (prevents false UNHEALTHY alerts).
@@ -412,13 +679,28 @@ class LiveTradingEngine:
             await self._trading_step_inner(bar_time)
         finally:
             self._trading_step_active = False
+            # Step 0b: bound capture window by bar count.
+            if self._capture_writer is not None and self._capture_bars_remaining > 0:
+                self._capture_bars_remaining -= 1
+                if self._capture_bars_remaining == 0:
+                    self._close_capture_writer(reason="max_bars_reached")
 
     async def _trading_step_inner(self, bar_time: datetime) -> None:
         """Inner trading step logic (wrapped by _trading_step for PV race guard)."""
         # --- Safety: kill file check ---
+        # v2.2 §8.3: if the file is a drift-CRIT JSON, log the reason/count so
+        # the watchdog stream tells humans what happened. Legacy empty file
+        # still stops the engine with reason="kill_file" (backward-compat).
         if self._kill_file.exists():
-            logger.warning(f"Kill file detected: {self._kill_file}")
-            self._request_stop("kill_file")
+            payload = read_kill_file(self._kill_file)
+            reason = (payload or {}).get("reason", "legacy")
+            detail = (payload or {}).get("detail", "")
+            count = (payload or {}).get("count", 1)
+            logger.warning(
+                f"Kill file detected: {self._kill_file} "
+                f"(reason={reason} count={count} detail={detail})",
+            )
+            self._request_stop(f"kill_file:{reason}")
             return
 
         # Session 426: once-per-day futures contract roll check.
@@ -442,6 +724,27 @@ class LiveTradingEngine:
         # Previously only ran at step 11 after trade execution, so holding bars
         # could breach the daily loss limit without detection.
         await self._check_daily_loss(bar_time)
+        if self._should_stop:
+            return
+
+        # S495-cont prop-firm decoupling: observe PV against challenge
+        # target, trigger phase_complete on a smoothed + N_CONFIRM-persisted
+        # breach. Placed here — between _check_daily_loss and the remaining
+        # per-bar logic — because:
+        #   - PV was just refreshed at start of _trading_step via
+        #     _update_portfolio_value (line ~626).
+        #   - If the daily-loss check already halted (should_stop=True),
+        #     we bail out above and skip the challenge check.
+        #   - The trigger's flatten + halt_state + kill_file writes are
+        #     idempotent with daily-loss's own halt write ordering, and
+        #     both use _write_halt_state so the same gate semantics apply.
+        if self._challenge_state_machine is not None:
+            status = self._challenge_state_machine.observe(
+                self._portfolio_value, now_utc=bar_time,
+            )
+            if status.phase_complete and status.trip_source != "already_complete":
+                await self._request_phase_complete(status, bar_time)
+                return
 
         # --- Weekend flatten (CFD only): close positions before Friday close ---
         if await self._check_weekend_flatten(bar_time):
@@ -538,6 +841,34 @@ class LiveTradingEngine:
         # --- 5. Agent inference ---
         target_position = self._predict(obs)
 
+        # --- 5a. Action-drift tracking (Protocol v2.2 §8.2) ---
+        # observe() records the *policy output* before any overlays / deadband
+        # / risk clipping, so the live distribution matches the stage-2/2.5
+        # eval baseline (which was also the raw policy output).
+        if self._drift_tracker is not None:
+            try:
+                report = self._drift_tracker.observe(
+                    target_position, bar_close=current_close,
+                )
+                await self._apply_drift_status(report, bar_time)
+                # If CRIT forced a stop, the kill_file writer + flatten ran
+                # via T2 wiring; bail out of this step without executing trades.
+                if self._should_stop:
+                    return
+                # WARN: disable new entries / flips / size-ups, but ALLOW
+                # moves toward zero so the agent can still close exposure.
+                # The XAUUSD S491 crash storm post-mortem flagged the inverse
+                # failure mode ("halt while long = can't reduce risk").
+                if self._drift_warn_active and self._blocked_by_drift_warn(target_position):
+                    self._log_step(
+                        bar_time, self._current_position,
+                        traded=False, skip_reason="drift_warn_no_new_entries",
+                    )
+                    self._prev_close = current_close
+                    return
+            except Exception as e:  # noqa: BLE001
+                logger.warning(f"drift tracker error (non-fatal): {e}")
+
         # --- 5b. PRISM L2 regime overlay ---
         regime_info: dict = {}
         if self._prism_overlay is not None:
@@ -565,6 +896,9 @@ class LiveTradingEngine:
             margin_balance=self._portfolio_value * 0.95,  # Conservative estimate
             positions=np.array([self._current_position]),
             funding_rates=np.array([self._current_funding_rate]),
+            # S506 Option B: enables UTC-midnight-anchored daily-turnover reset.
+            # bar_time is in scope from _trading_step_inner signature.
+            bar_time=bar_time,
         )
         target_position = float(checked_action[0])
 
@@ -685,6 +1019,17 @@ class LiveTradingEngine:
             self.risk_manager.rollback_last_turnover()
             # FIX AUD-L05: Update prev_close even on execution error
             self._prev_close = current_close
+
+            # FIX S502: Ambiguous-execution outcome — order may have filled at
+            # the exchange while the engine assumes failure. Force an immediate
+            # broker reconcile so the agent doesn't act on stale internal state
+            # on the next bar. Without this, periodic reconcile (every
+            # _reconcile_interval bars) may not detect the divergence until the
+            # position has drifted past the halt threshold (S502 gmgp1-btc
+            # 08:45 incident: -1007 timeout at 08:00 → opposite-sign divergence
+            # 1.24 by 08:45 reconcile).
+            await self._force_reconcile_if_ambiguous(str(e), bar_time)
+
             if (
                 self._emergency_flatten_on_error
                 and self._consecutive_execution_errors >= self._execution_error_threshold
@@ -1021,6 +1366,51 @@ class LiveTradingEngine:
                 "CT-05: Could not check for orphaned positions: %s", e
             )
 
+    # S502: ccxt error patterns where the order may have filled despite
+    # raising. These require an immediate broker reconcile to resync the
+    # internal position cache before the agent acts on stale state.
+    _AMBIGUOUS_EXECUTION_MARKERS = (
+        "-1007",                      # binance: timeout, send status unknown
+        "send status unknown",
+        "execution status unknown",
+    )
+
+    @classmethod
+    def _is_ambiguous_execution_error(cls, err_str: str) -> bool:
+        """Return True if the ccxt error string indicates an ambiguous fill."""
+        err_lower = err_str.lower()
+        return any(m in err_lower for m in cls._AMBIGUOUS_EXECUTION_MARKERS)
+
+    async def _force_reconcile_if_ambiguous(
+        self, err_str: str, bar_time: datetime,
+    ) -> bool:
+        """Trigger immediate ``_reconcile_all`` if the error is ambiguous.
+
+        Returns True if reconcile was attempted (regardless of outcome).
+        Caller is the order-execution exception handler in
+        ``_trading_step_inner``; reconcile must not propagate exceptions.
+        """
+        if not self._is_ambiguous_execution_error(err_str):
+            return False
+        logger.warning(
+            "Ambiguous execution outcome detected — forcing immediate "
+            "broker reconcile (order may have filled despite error).",
+        )
+        # Reset reconcile gate so this call is not skipped by the interval
+        # check. ``_reconcile_all`` itself updates ``_last_reconcile_bar`` to
+        # ``_total_bars`` once it begins work.
+        self._last_reconcile_bar = (
+            self._total_bars - self._reconcile_interval
+        )
+        try:
+            await self._reconcile_all(bar_time)
+        except Exception as rec_err:
+            logger.error(
+                f"Forced reconcile after ambiguous execution failed: "
+                f"{rec_err} — next bar will retry via interval gate.",
+            )
+        return True
+
     async def _reconcile_all(self, bar_time: datetime) -> None:
         """XVal Layer 1: Periodic broker position + PV cross-validation.
 
@@ -1069,6 +1459,19 @@ class LiveTradingEngine:
                     f"exchange={exchange_pos:.4f}, divergence={pos_divergence:.4f} "
                     f"(>{self._reconciliation_halt_pct:.0%}). HALTING.",
                 )
+                # S491: persist halt so Docker restart enters safe sleep-to-midnight
+                # loop instead of thrashing through broker reconnect on every cycle
+                # (see project_xauusd_crash_storm_s491 — 4h gmgp1-xauusd outage).
+                self._write_halt_state(
+                    reason="position_mismatch",
+                    detail=(
+                        f"internal={self._current_position:.4f} "
+                        f"exchange={exchange_pos:.4f} "
+                        f"divergence={pos_divergence:.4f} "
+                        f"threshold={self._reconciliation_halt_pct:.4f}"
+                    ),
+                    now_utc=datetime.now(timezone.utc),
+                )
                 self._request_stop("position_mismatch")
             elif pos_divergence > self._reconciliation_warn_pct:
                 logger.warning(
@@ -1093,11 +1496,40 @@ class LiveTradingEngine:
         FIX LIVE-03: Track consecutive zero-equity readings. If the broker
         returns 0 repeatedly, it's a real problem (not a glitch). Log critical
         after 3 consecutive zeros so it doesn't go unnoticed.
+
+        S510: sanity guard against transient broker readings that have been
+        observed to come back at ~2× the real equity (cTrader IC Markets demo
+        — symptom: peak ratchets to a value never seen in any logged bar, then
+        every subsequent bar reports a phantom 50% drawdown). Reject readings
+        >1.5× the larger of current PV and config initial_balance — bar-to-bar
+        equity moves on prop-firm paper accounts are bounded by leverage ×
+        intra-bar volatility and never come close to 50%. A real deposit is
+        an operator event that warrants a config bump, not a silent ratchet.
         """
         try:
             info = await self.broker.get_account_info()
             equity = info.get("total_equity", 0)
             if equity > 0:
+                ref = max(self._portfolio_value, self._config_initial_balance)
+                if ref > 0 and equity > 1.5 * ref:
+                    # cTrader exposes balance/unrealized_pnl/n_positions/
+                    # mid_price; other brokers default to None and the log
+                    # collapses to "n/a". Splits a balance spike (protobuf
+                    # mis-pairing) from a unrealized_pnl spike (stale mid +
+                    # broker-side orphan position).
+                    bal = info.get("balance")
+                    upnl = info.get("unrealized_pnl")
+                    n_pos = info.get("n_positions")
+                    mid = info.get("mid_price")
+                    logger.warning(
+                        f"S510: discarding suspicious broker equity "
+                        f"${equity:,.2f} (>1.5× ref ${ref:,.2f}); "
+                        f"keeping PV=${self._portfolio_value:,.2f} and "
+                        f"peak=${self._peak_portfolio_value:,.2f}; "
+                        f"breakdown: balance={bal}, unrealized_pnl={upnl}, "
+                        f"n_positions={n_pos}, mid_price={mid}",
+                    )
+                    return
                 self._portfolio_value = equity
                 self._peak_portfolio_value = max(self._peak_portfolio_value, equity)
                 self._consecutive_zero_equity = 0
@@ -1291,8 +1723,27 @@ class LiveTradingEngine:
         fast adverse moves, and that lag let XAUUSD run past FTMO's 10% DD
         line on 2026-04-13 (raw -11.74% final vs smoothed -9.37% at trip).
         Two-consecutive-bar requirement preserves single-spike robustness.
+
+        Audit FIND-01: ``max_daily_loss_pct <= 0`` disables the check. A
+        literal 0.0 used to trip ``raw_return < -0.0`` on any losing bar
+        (Velotrade 2-step configs tripped on the first red bar). Prop-firm
+        challenges without a daily-loss rule (Velotrade 2-step) can now set
+        this to 0.0 as an explicit "disabled" flag.
         """
         current_date = bar_time.date()
+
+        # FIND-01: non-positive limit disables the check. Still rotate the
+        # daily anchor so reporting remains correct across UTC day rollovers.
+        if self._max_daily_loss_pct <= 0:
+            if (
+                self._last_daily_reset_date is None
+                or current_date != self._last_daily_reset_date
+            ):
+                self._daily_start_value = self._portfolio_value
+                self._last_daily_reset_date = current_date
+                self._pv_buffer.clear()
+                self._consecutive_raw_breach_count = 0
+            return
 
         if self._last_daily_reset_date is None or current_date != self._last_daily_reset_date:
             self._daily_start_value = self._portfolio_value
@@ -1623,8 +2074,17 @@ class LiveTradingEngine:
         high for short) to estimate the maximum adverse excursion that
         occurred within the bar. If projected daily return would breach
         the limit, flatten and halt (persistently).
+
+        FIND-01 parity (S498-cont, 2026-04-26): ``max_daily_loss_pct <= 0``
+        disables the check, mirroring the closing-price daily-loss guard.
+        Without this, ``projected_return < -0.0`` trips on any tiny negative
+        excursion and persistently halts Velotrade-style deploys (no daily
+        rule) on the first bar that holds a position. SG-1-BTC paper deploy
+        2026-04-26 hit this on bar 1.
         """
         if not self._intrabar_dd_enabled:
+            return
+        if self._max_daily_loss_pct <= 0:
             return
         if abs(self._current_position) < 1e-9:
             return
@@ -1704,6 +2164,186 @@ class LiveTradingEngine:
             )
         except Exception as e:
             logger.warning(f"WandB init failed: {e}")
+
+    def _blocked_by_drift_warn(self, target_position: float) -> bool:
+        """Return True if WARN state should block a pending position move.
+
+        WARN "disable new entries, hold existing" (v2.2 §8.3): permit any
+        trade that REDUCES exposure (moves |target| toward 0 without flipping
+        sign) and block everything else (new entries from flat, flips,
+        size-ups). A small tolerance absorbs SAC's stochastic float noise
+        so "same position" isn't spuriously classified as size-up.
+        """
+        cur = float(self._current_position)
+        tgt = float(target_position)
+        tol = 1e-4
+        # Flat → any non-flat target is a new entry: BLOCK.
+        if abs(cur) <= tol:
+            return abs(tgt) > tol
+        # Sign flip (long→short or short→long) is strictly a new entry on
+        # the opposite side after closing: BLOCK.
+        if (cur > 0 and tgt < -tol) or (cur < 0 and tgt > tol):
+            return True
+        # Same direction: ALLOW if |tgt| <= |cur| + tol (reduce or hold);
+        # BLOCK if |tgt| > |cur| + tol (size-up adds new exposure).
+        return abs(tgt) > abs(cur) + tol
+
+    def _check_kill_file_startup_gate(self) -> bool:
+        """Return True if engine must refuse to start (kill_file present).
+
+        Lockout semantics per Protocol v2.2 §8.3 (see
+        `finrl_pro_ds.monitoring.kill_file.should_lockout`). We log the
+        reason and exit via `_request_stop` so the main loop falls through
+        without connecting to the broker. Any existing kill_file halts
+        startup — operator must manually delete kill_file to re-enable.
+        For repeat-CRIT branch (drift_crit, count ≥ 2 within 24h) the
+        operator must ALSO write `kill_file.override` before deleting
+        kill_file, per scoped-override semantic.
+        """
+        payload = read_kill_file(self._kill_file)
+        if payload is None:
+            return False
+        _, reason = should_lockout(payload, self._kill_file_override)
+        logger.critical(f"STARTUP REFUSED — {reason}")
+        self._request_stop(f"kill_file_lockout:{payload.get('reason')}")
+        return True
+
+    def _check_challenge_phase_startup_gate(self) -> bool:
+        """Return True if engine must refuse to start (wrong-phase config).
+
+        S495-cont (ADR-2 prop-firm decoupling). Reads
+        ``last_completed_phase.txt`` and refuses startup when:
+        - The file marks a phase equal to or ordered-after the
+          configured phase. Operator must swap to the next-phase overlay
+          (e.g. ``configs/deploy/ftmo/step2.yaml``) before restart.
+
+        No-op when no challenge state machine is active (training /
+        backtest configs have no ``challenge:`` block).
+        """
+        if self._challenge_state_machine is None:
+            return False
+        configured = self._challenge_state_machine.phase.name
+        ok, msg = ChallengeStateMachine.check_startup_phase_gate(
+            configured_phase=configured,
+            last_completed_phase_path=self._last_completed_phase_file,
+        )
+        if not ok:
+            logger.critical(f"STARTUP REFUSED — challenge phase gate: {msg}")
+            self._request_stop(f"challenge_phase_gate:{configured}")
+            return True
+        logger.info(f"Challenge phase startup gate: {msg}")
+        return False
+
+    async def _request_phase_complete(self, status, bar_time: datetime) -> None:
+        """S495-cont prop-firm decoupling phase_complete path.
+
+        Mirrors :meth:`_request_drift_crit` shape: writes persistent
+        markers, flattens, requests stop. Delegates the actual work to
+        the :class:`ChallengeStateMachine` which owns the idempotency
+        guard and atomic-write semantics.
+        """
+        if self._challenge_state_machine is None:
+            return
+        try:
+            await self._challenge_state_machine.trigger_phase_complete(
+                status.trip_source, now_utc=bar_time,
+            )
+        except Exception as e:  # noqa: BLE001
+            logger.critical(
+                f"[challenge] trigger_phase_complete raised ({e}) — "
+                f"halt_state + kill_file may be partial; operator must "
+                f"inspect {self._halt_state_file} and {self._kill_file}",
+            )
+
+    async def _request_drift_crit(self, report, bar_time: datetime) -> None:
+        """Protocol v2.2 §8.3 CRIT path.
+
+        1. Write/increment drift_crit kill_file JSON (count enables repeat-CRIT
+           lockout on the next restart).
+        2. Await the existing FTMO-style emergency_flatten so open positions
+           are genuinely closed before stop is signaled (the "halt without
+           flatten is the bleed window" failure mode — S491 post-mortem).
+        3. Request stop with reason=drift_crit → container exits non-zero →
+           watchdog refuses auto-restart while kill_file is present.
+        """
+        try:
+            payload = write_kill_file(
+                self._kill_file,
+                reason=REASON_DRIFT_CRIT,
+                detail=report.reason,
+                extra={
+                    "bar_time": bar_time.isoformat() if bar_time else None,
+                    "kl": report.kl,
+                    "deadband_frac_delta": report.deadband_frac_delta,
+                    "saturation_frac_delta": report.saturation_frac_delta,
+                    "bucket": report.bucket,
+                    "n_bars": report.n_bars,
+                },
+            )
+            logger.critical(
+                f"[drift] CRIT → kill_file written "
+                f"(count={payload.get('count', 1)} at {self._kill_file})",
+            )
+        except OSError as e:
+            logger.critical(f"[drift] CRIT but kill_file write failed: {e}")
+
+        try:
+            await self._emergency_flatten()
+        except Exception as e:  # noqa: BLE001
+            logger.critical(
+                f"[drift] CRIT emergency_flatten raised ({e}) — "
+                f"position may still be open on exchange",
+            )
+        self._request_stop("drift_crit")
+
+    async def _apply_drift_status(self, report, bar_time: datetime) -> None:
+        """Dispatch a Protocol v2.2 §8.2 DriftReport into engine side-effects.
+
+        * WARN  → set self._drift_warn_active so the step loop blocks new
+                  entries / flips / size-ups via `_blocked_by_drift_warn`.
+                  Rearmed downward on next OK.
+        * CRIT  → await self._request_drift_crit() which writes the kill_file
+                  JSON, flattens open positions, and requests stop.
+        All status transitions are logged at INFO+ and attached to WandB.
+        """
+        from finrl_pro_ds.monitoring import DriftStatus
+
+        status = report.status
+        prev = self._drift_last_status
+        self._drift_last_status = status
+
+        if self._wandb_run is not None:
+            try:
+                import wandb
+                wandb.log(
+                    {f"drift/{k}": v for k, v in report.to_dict().items()
+                     if v is not None and not isinstance(v, str)},
+                    commit=False,
+                )
+            except Exception:  # noqa: BLE001
+                pass
+
+        if status == DriftStatus.CRIT:
+            if prev != DriftStatus.CRIT:
+                logger.critical(
+                    f"[drift] CRIT at bar {self._total_bars}: {report.reason} "
+                    f"(bucket={report.bucket}, n={report.n_bars})",
+                )
+            await self._request_drift_crit(report, bar_time)
+        elif status == DriftStatus.WARN:
+            if not self._drift_warn_active or prev != DriftStatus.WARN:
+                logger.warning(
+                    f"[drift] WARN at bar {self._total_bars}: {report.reason} "
+                    f"(bucket={report.bucket}, n={report.n_bars})",
+                )
+            self._drift_warn_active = True
+        elif status == DriftStatus.OK:
+            if self._drift_warn_active:
+                logger.info(
+                    f"[drift] OK at bar {self._total_bars} — clearing WARN",
+                )
+            self._drift_warn_active = False
+        # WARMUP / LOG_ONLY: silent pass-through
 
     def _make_wandb_run_id(self) -> str:
         """Generate deterministic WandB run ID from strategy config.
@@ -1902,6 +2542,76 @@ class LiveTradingEngine:
             logger.debug(f"Health status write failed: {e}")
 
     # -------------------------------------------------------------------
+    # Step 0b: live-replay fixture capture (E1 architect pass)
+    # -------------------------------------------------------------------
+    def _open_capture_writer(self) -> None:
+        """Open a JSONL capture file and register the broker callback.
+
+        Any failure here is logged and disables capture; trading is unaffected.
+        """
+        try:
+            self._capture_dir.mkdir(parents=True, exist_ok=True)
+            ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            self._capture_path = self._capture_dir / (
+                f"ccxt_capture_{self._strategy_name}_{ts}.jsonl"
+            )
+            self._capture_writer = self._capture_path.open("a", buffering=1, encoding="utf-8")
+            self._capture_bars_remaining = self._capture_max_bars
+            if hasattr(self.broker, "set_capture_callback"):
+                self.broker.set_capture_callback(self._capture_emit)
+                logger.info(
+                    f"CCXT capture mode ENABLED: path={self._capture_path} "
+                    f"max_bars={self._capture_max_bars}",
+                )
+            else:
+                logger.warning(
+                    "capture_ccxt_raw_responses=true but broker has no "
+                    "set_capture_callback(); capture will be no-op.",
+                )
+                self._close_capture_writer(reason="broker_unsupported")
+        except Exception as e:  # noqa: BLE001
+            logger.warning(f"Capture writer open failed (non-fatal): {e}")
+            self._capture_writer = None
+
+    def _capture_emit(self, event_name: str, raw_response) -> None:
+        """Broker callback: append one JSONL record per fetch.
+
+        Errors are swallowed: capture must never disrupt trading.
+        """
+        if self._capture_writer is None:
+            return
+        try:
+            record = {
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "bar": self._total_bars,
+                "event": event_name,
+                "strategy": self._strategy_name,
+                "raw": raw_response,
+                "engine_position": self._current_position,
+                "engine_pv": self._portfolio_value,
+            }
+            self._capture_writer.write(json.dumps(record, default=str) + "\n")
+        except Exception as e:  # noqa: BLE001
+            logger.debug(f"Capture write failed (non-fatal): {e}")
+
+    def _close_capture_writer(self, reason: str) -> None:
+        """Close the capture writer and unregister the broker callback."""
+        if self._capture_writer is not None:
+            try:
+                self._capture_writer.close()
+            except Exception as e:  # noqa: BLE001
+                logger.debug(f"Capture writer close raised (non-fatal): {e}")
+            self._capture_writer = None
+        if hasattr(self.broker, "set_capture_callback"):
+            try:
+                self.broker.set_capture_callback(None)
+            except Exception:  # noqa: BLE001
+                pass
+        logger.info(
+            f"CCXT capture mode CLOSED: reason={reason} path={self._capture_path}",
+        )
+
+    # -------------------------------------------------------------------
     # Shutdown
     # -------------------------------------------------------------------
     async def _shutdown(self) -> None:
@@ -1948,12 +2658,34 @@ class LiveTradingEngine:
             f"  Position: {self._current_position:.4f}",
         )
 
+        # Step 0b: ensure capture writer is flushed and closed on shutdown.
+        if self._capture_writer is not None:
+            self._close_capture_writer(reason="shutdown")
+
         if self._wandb_run is not None:
-            try:
-                import wandb
-                wandb.finish()
-            except Exception:
-                pass
+            # Bounded wandb.finish() — unbounded hang here kept PID 1 alive
+            # for 2h+ in S489 (gmgp1-gold), defeating docker restart policy.
+            # Use a daemon thread (NOT asyncio.to_thread) so asyncio.run()
+            # cleanup doesn't join a stuck worker.
+            import threading as _threading
+            finish_exc: list[BaseException] = []
+
+            def _finish_worker() -> None:
+                try:
+                    import wandb
+                    wandb.finish()
+                except BaseException as e:  # noqa: BLE001
+                    finish_exc.append(e)
+
+            t = _threading.Thread(target=_finish_worker, daemon=True, name="wandb-finish")
+            t.start()
+            t.join(timeout=30.0)
+            if t.is_alive():
+                logger.warning(
+                    "wandb.finish() exceeded 30s timeout — proceeding with shutdown",
+                )
+            elif finish_exc:
+                logger.debug(f"wandb.finish failed: {finish_exc[0]}")
 
         try:
             await self.broker.close()

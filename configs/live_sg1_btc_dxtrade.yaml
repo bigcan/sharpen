@@ -2,10 +2,22 @@
 # 3-min bars, signal-gated, prop-firm trained (10% EOD trailing DD)
 # Checkpoint: PLACEHOLDER — update with L1 multi-seed best
 #
-# Usage:
-#   python scripts/run_live_dxtrade.py --config configs/live_sg1_btc_dxtrade.yaml
-#   python scripts/run_live_dxtrade.py --config configs/live_sg1_btc_dxtrade.yaml --mainnet
-#   python scripts/run_live_dxtrade.py --config configs/live_sg1_btc_dxtrade.yaml --dry-run
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S495 Step 5, 2026-04-24).
+# This file is the BASE config. Phase-varying DD/target/gates live in
+# configs/deploy/velotrade/<phase>.yaml overlays (allowlist-enforced).
+#
+# Deploy invocations (resolved = this file + overlay):
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_dxtrade.py \
+#     --config configs/live_sg1_btc_dxtrade.yaml --overlay velotrade/step1
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_dxtrade.py \
+#     --config configs/live_sg1_btc_dxtrade.yaml --overlay velotrade/step2
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_dxtrade.py \
+#     --config configs/live_sg1_btc_dxtrade.yaml --overlay velotrade/funded
+#
+# After Step 5 migration this BASE file alone is NOT paper-deployable
+# (validator FAILs: `risk.static_peak` missing); pair with an overlay.
+# ---------------------------------------------------------------------------
 #
 # NOTE: DXtrade broker is currently a stub. Full API pending from Velotrade.
 # Paper testing uses Bybit data feed + log-only execution.
@@ -20,9 +32,15 @@ exchange:
   data_exchange: "binance"           # OHLCV data from Binance (DXtrade = execution only)
 
 # --- Agent ---
+# Seed 42 solo interim per Stage 2.5 AMBIGUOUS_RERUN verdict (S498-cont,
+# 2026-04-25): chosen rule ens_pf_weighted test uplift 1.059x in [1.05, 1.10)
+# ambiguous band → fall back to best-test-PF solo (seed 42, test PF 2.308,
+# val PF 2.155, MDD -0.42%). Mirrors GMGP1-BTC seed 456 interim path.
+# Verdict at results/sg1_btc_velotrade_ensemble/verdict.json.
+# Ensemble path deferred: would need run_live_dxtrade.py port of the
+# EnsembleAgent wiring that exists in run_live_ctrader.py (S489).
 agent:
-  # PLACEHOLDER — update with L1 multi-seed best checkpoint
-  checkpoint_path: "checkpoints/sg1_btc_velotrade_best/checkpoint_final.pth"
+  checkpoint_path: "checkpoints/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030/checkpoint_final.pth"
   device: "cpu"
   torch_compile: false
 
@@ -59,14 +77,18 @@ features:
   bootstrap_bars: 30000
 
 # --- Signal Gate (must match training) ---
+# Thresholds from configs/sg1_btc_velotrade_l1_multiseed.yaml (S479 BTC Bybit
+# 3-min calibration; ~75% composite pass rate). Old placeholders (0.5/0.03/0.5)
+# never triggered because BTC parkinson dist is ~10× smaller than XAU.
 signal_gate:
   enabled: true
   gate_mode: "composite"
-  atr_threshold: 0.5
-  parkinson_threshold: 0.03
-  volume_threshold: 0.5
+  atr_threshold: 0.15
+  parkinson_threshold: 0.0009
+  volume_threshold: 0.60
   max_hold_bars: 20
   gate_always_on_first: true
+  normalize_accumulated_reward: true
 
 # --- Bar Clock (3-min bars for SG-1, 24/7 market) ---
 bar_clock:
@@ -80,19 +102,36 @@ trading:
   deadband_threshold: 0.25
   taker_fee: 0.0005                  # 5bps crypto taker
 
-# --- Risk Management (with buffers below Velotrade limits) ---
+# --- Data source (validator Stage-0; ccxt live-fetch at runtime) ---
+data:
+  source: ccxt
+  data_exchange: binance             # Bybit data feed via Binance fallback (see header)
+  frequency: 3m
+  ticker: "BTC/USDT"
+
+# --- Hard Constraints (validator parity; mirrors trading.taker_fee) ---
+env:
+  taker_fee: 0.0005
+
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay owns: static_peak, eod_trailing_drawdown, eod_hour_utc,
+# flatten_on_kill_file. See configs/deploy/velotrade/{step1,step2,funded}.yaml.
 risk:
   enabled: true
   max_drawdown_pct: 0.08             # 8% trigger (2% buffer below 10% limit)
-  static_peak: true                  # Match training: DD from initial balance, never ratchets (S468)
-  eod_trailing_drawdown: true
-  eod_hour_utc: 0
   circuit_breaker_cooldown_bars: 0   # Stay flat once breached
   max_position_pct: 1.0
   max_net_short_exposure: -1.0
   max_gross_exposure: 1.0            # 1:1 leverage (user policy)
   funding_rate_alert: 999.0
   min_margin_reserve_pct: 0.15
+  # S495-cont (2026-04-23) preemptive override (mirrors sg1-xauusd fix). See
+  # crypto_risk_manager.py:267 — accumulator resets every 24 `check()` calls,
+  # not 24 calendar hours. SG-1 3-min bars with signal_gate + deadband reduce
+  # check() to ~9/day → "daily" window spans ~2-3 calendar days. Default 4.0
+  # trips after 3-4 roundtrips. 10.0 gives ~3-5 roundtrips per reset window.
+  # Structural fix (bar-interval-aware reset) queued.
+  daily_turnover_limit: 10.0
 
 # --- WandB Monitoring ---
 wandb:
@@ -104,9 +143,42 @@ wandb:
 # --- Safety ---
 safety:
   require_explicit_mainnet: true
-  max_daily_loss_pct: 0.0            # No daily loss limit in 2-step
+  max_daily_loss_pct: 0.0            # 0 = disabled (Velotrade 2-step has no daily rule). Engine treats ≤0 as disabled (audit FIND-01, 2026-04-22).
   kill_file: "/tmp/finrl_live_sg1_btc_kill"
+  flatten_on_kill_file: true         # v2.2 §8.3 CRIT graceful flatten
   emergency_flatten_on_error: true
+
+# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# PLACEHOLDER — baseline artifact does not exist until L1 multiseed
+# completes. Path reflects the expected post-L1 location; deploy will
+# error at startup with "baseline not found" until the report is baked
+# into the live-engine image. This is the correct safety posture for a
+# placeholder-checkpoint config.
+drift:
+  enabled: true
+  baseline_path: "/app/baselines/sg1_btc_l1/seed_report.json"
+  baseline_seed: "PLACEHOLDER"       # Update to winning seed post-L1
+  window_bars: 1000
+  min_bars_before_check: 500
+  vol_estimator_bars: 20
+
+# --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+gates:
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
 
 # --- PRISM Regime Overlay (optional) ---
 prism:

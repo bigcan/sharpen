@@ -1,0 +1,139 @@
+# Q2 training-parity arm A — PropFirmWrapperV7 (control)
+# INTENTIONAL: legacy V7 control arm — DO NOT MIGRATE to env.risk:.
+# This file MUST keep env.prop_firm: to test PropFirmWrapperV7 against
+# RiskShapingWrapper (S496 wrappers proven equivalent). Validator WARN
+# on env.prop_firm is expected; future FAIL-escalation must skip this
+# file via comment-marker or path-exclude. Pair: configs/q2_train_parity_sg1_xauusd_rs.yaml.
+#
+# Source: configs/sg1_xauusd_ftmo_rehpo_l1_multiseed.yaml (trial 56 HPs)
+#
+# Q2 setup (ADR-6, prop-firm decoupling architecture):
+#   - Same SG-1-XAUUSD trial-56 HPs, seed 0, 100K steps
+#   - profit_target_pct = 10.0 (effectively disabled — no early termination)
+#   - HPO disabled (single seed parity smoke)
+#
+# Decision per ADR-6 Q2 thresholds:
+#   - terminal Q(s0,a0) ratio band [0.90, 1.10]
+#   - critic loss ratio band [0.80, 1.25]
+#   - actor loss ratio band [0.80, 1.25]
+#   - return-KL < 0.05
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-06-30"
+  val_start_date: "2025-07-01"
+  val_end_date: "2025-08-31"
+  test_start_date: "2025-09-01"
+  test_end_date: "2025-10-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235
+  deadband_threshold: 0.35
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.009270901804613313
+    dsr_scale: 1.0
+  prop_firm:
+    enabled: true
+    profit_target_pct: 10.0           # Q2: disable target (1000% never hit) for stable parity
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.03
+    drawdown_penalty_scale: 5.0
+    success_bonus: 10.0
+    augment_obs: false
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 100000             # Q2: 100K parity smoke (overridable via --steps)
+  log_interval: 500                   # denser logging for KL/Q comparison
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+gates:
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10
+  ensemble_ambiguous_min: 1.05
+  ensemble_rule_selection: val_argmax_pf
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "Q2", "train-parity",
+         "arm:V7", "prop_firm_decoupling", "100k-smoke"]

@@ -26,7 +26,10 @@ from __future__ import annotations
 
 import argparse
 import copy
+import json
 import logging
+import os
+import shutil
 import signal
 import sys
 from pathlib import Path
@@ -45,6 +48,7 @@ import wandb  # noqa: E402
 
 from finrl_pro_ds.hpo.objective import make_objective  # noqa: E402
 from finrl_pro_ds.hpo.sampler import create_sampler  # noqa: E402
+from finrl_pro_ds.logging import init_wandb, is_consolidated  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Logging
@@ -63,14 +67,19 @@ _shutdown = False
 
 
 def _sigterm_handler(signum, frame):
-    """Handle SIGTERM: let the current trial finish, then exit."""
+    """Handle SIGTERM/SIGINT: set shutdown flag; loop checks it after each trial.
+
+    Note: study.optimize(n_trials=1) is blocking — a long-running trial will run
+    to completion before the shutdown flag is observed. Send SIGKILL (kill -9)
+    to force-stop a stuck worker; the trial will be marked stale by Optuna's
+    heartbeat (grace_period=600s) and retried by another worker.
+    """
     global _shutdown
-    logger.info("SIGTERM received — will exit after current trial completes.")
+    logger.info("Signal %d received — will exit after current trial completes.", signum)
     _shutdown = True
 
 
 signal.signal(signal.SIGTERM, _sigterm_handler)
-# Also handle SIGINT (Ctrl-C) for interactive debugging
 signal.signal(signal.SIGINT, _sigterm_handler)
 
 
@@ -81,7 +90,7 @@ def run_worker(
     config_path: str,
     db_url: str,
     study_name: str,
-    worker_id: int,
+    worker_id: str,
     target_trials: int,
     wandb_group: str,
     device: str = "cuda",
@@ -93,13 +102,17 @@ def run_worker(
         config_path: Path to experiment YAML config.
         db_url: PostgreSQL connection string for Optuna RDBStorage.
         study_name: Name of the Optuna study (must already exist).
-        worker_id: Unique integer ID for this worker.
+        worker_id: Unique worker ID string (e.g. "vastai-12345" or "gpuhub-1-gpu0").
         target_trials: Global target — stop when study has this many completed trials.
         wandb_group: WandB group name for grouping distributed workers.
         device: PyTorch device string ("cuda" or "cpu").
         agent_type: Agent type ("sac", "ppo", "iqn", "bdq").
     """
     global _shutdown
+
+    # S487 race-fix: advertise worker identity to the HPO objective so each
+    # trial writes to its own checkpoints/<study>/worker_<id>/trial_<N>/ dir.
+    os.environ["DHPO_WORKER_ID"] = worker_id
 
     # ------------------------------------------------------------------
     # 1. Load config
@@ -140,31 +153,39 @@ def run_worker(
     )
 
     # ------------------------------------------------------------------
-    # 4. Init WandB
+    # 4. Init WandB — attach-only if coordinator set FINRL_WANDB_RUN_ID
+    # (S488 round-2 consolidation); else standalone per-worker (legacy).
+    # Namespace is NOT set here; objective.py rotates it per-trial so
+    # each trial's logs land under `hpo/t<N>/*` on the parent run.
     # ------------------------------------------------------------------
-    wandb_config = config.get("wandb", {})
-    wandb.init(
-        entity=wandb_config.get("entity", "bigcan-chiwin-technology"),
-        project=wandb_config.get("project", "FinRL-Pro-DS"),
-        group=wandb_group,
-        job_type="hpo_worker",
-        name=f"worker_{worker_id}",
+    standalone_name = f"worker_{worker_id}"
+    init_wandb(
+        config,
+        fallback_name=standalone_name,
         tags=["distributed_hpo", study_name, f"worker_{worker_id}"],
-        config={
+        extra_config={
             "worker_id": worker_id,
             "study_name": study_name,
             "target_trials": target_trials,
             "steps_per_trial": steps_per_trial,
             "agent_type": agent_type,
             "device": device,
-            "experiment_config": config,
         },
+        # Standalone-mode legacy grouping — consolidated children inherit
+        # from the coordinator's parent run and ignore these kwargs.
+        group=wandb_group,
+        job_type="hpo_worker",
     )
-    logger.info(
-        "WandB initialized — group=%s, worker_%d",
-        wandb_group,
-        worker_id,
-    )
+    if is_consolidated():
+        logger.info(
+            "WandB attached to coordinator run (worker_%s). Trials will "
+            "namespace as hpo/t<N>/*.", worker_id,
+        )
+    else:
+        logger.info(
+            "WandB initialized standalone — group=%s, worker_%s",
+            wandb_group, worker_id,
+        )
 
     # ------------------------------------------------------------------
     # 5. Create objective function
@@ -185,32 +206,94 @@ def run_worker(
     local_trials_completed = 0
     local_trials_started = 0
 
+    # S487 race-fix: after each committed trial, promote this worker's
+    # best-so-far checkpoint to checkpoints/<study>/best/ and delete the
+    # spent trial dir to keep disk bounded.
+    study_ckpt_root = Path("checkpoints") / study_name
+    worker_ckpt_root = study_ckpt_root / f"worker_{worker_id}"
+    best_ckpt_root = study_ckpt_root / "best"
+
+    def _promote_best_callback(study, frozen_trial):
+        if frozen_trial.state != TrialState.COMPLETE:
+            return
+        trial_dir = worker_ckpt_root / f"trial_{frozen_trial.number:04d}"
+        trial_final = trial_dir / "checkpoint_final.pth"
+        try:
+            # Compare against best-so-far across the whole study (distributed).
+            # If multiple workers' best land on the same trial number, each
+            # local copy is valid; last-write-wins is fine because weights are
+            # identical (same Optuna trial = same training run on one host).
+            try:
+                study_best = study.best_trial
+            except ValueError:
+                study_best = None
+
+            is_global_best = study_best is not None and study_best.number == frozen_trial.number
+            if is_global_best and trial_final.exists():
+                best_ckpt_root.mkdir(parents=True, exist_ok=True)
+                tmp_path = best_ckpt_root / "checkpoint_final.pth.new"
+                shutil.copy2(trial_final, tmp_path)
+                os.replace(tmp_path, best_ckpt_root / "checkpoint_final.pth")
+                manifest = {
+                    "study_name": study_name,
+                    "trial_number": frozen_trial.number,
+                    "value": frozen_trial.value,
+                    "params": frozen_trial.params,
+                    "promoted_by_worker": worker_id,
+                }
+                (best_ckpt_root / "manifest.json").write_text(json.dumps(manifest, indent=2))
+                logger.info(
+                    "Promoted trial %d (PF=%.4f) to %s",
+                    frozen_trial.number, frozen_trial.value or 0.0, best_ckpt_root,
+                )
+            # Clean up this trial's dir regardless (best was already copied)
+            if trial_dir.exists():
+                shutil.rmtree(trial_dir, ignore_errors=True)
+        except Exception as e:  # noqa: BLE001 — cleanup must never kill the run
+            logger.warning("promote-best callback failed for trial %d: %s",
+                           frozen_trial.number, e)
+
     while not _shutdown:
-        # Check global progress
+        # S493 fix (DHP-WORKER-OVERRUN): count COMPLETE + RUNNING + WAITING so N
+        # concurrent workers don't each pull a fresh trial after observing the
+        # same COMPLETE count — previously caused (n_workers - 1) overrun per
+        # campaign. FAIL stays un-counted so Optuna's RetryFailedTrialCallback
+        # can re-enqueue without the target shrinking.
+        in_flight_or_done = len([
+            t for t in study.trials
+            if t.state in (TrialState.COMPLETE, TrialState.RUNNING, TrialState.WAITING)
+        ])
         completed_trials = len([
             t for t in study.trials
             if t.state == TrialState.COMPLETE
         ])
-        if completed_trials >= target_trials:
+        if in_flight_or_done >= target_trials:
             logger.info(
-                "Global target reached: %d/%d completed trials. Stopping.",
-                completed_trials,
-                target_trials,
+                "Global target reached: %d in-flight-or-done / %d target "
+                "(completed: %d). Stopping.",
+                in_flight_or_done, target_trials, completed_trials,
             )
             break
 
         logger.info(
-            "Worker %d: starting trial (global progress: %d/%d completed, local: %d completed)",
+            "Worker %s: starting trial (global progress: %d/%d in-flight-or-done, "
+            "%d completed, local: %d completed)",
             worker_id,
-            completed_trials,
+            in_flight_or_done,
             target_trials,
+            completed_trials,
             local_trials_completed,
         )
 
         # Run exactly 1 trial, then re-check global progress
         local_trials_started += 1
         try:
-            study.optimize(objective, n_trials=1, gc_after_trial=True)
+            study.optimize(
+                objective,
+                n_trials=1,
+                gc_after_trial=True,
+                callbacks=[_promote_best_callback],
+            )
             local_trials_completed += 1
         except Exception as e:
             logger.error("Trial failed with exception: %s", e)
@@ -232,7 +315,7 @@ def run_worker(
     except ValueError:
         logger.warning("No completed trials in study — cannot determine best trial.")
 
-    summary = {
+    summary: dict = {
         "worker_id": worker_id,
         "local_trials_started": local_trials_started,
         "local_trials_completed": local_trials_completed,
@@ -246,7 +329,7 @@ def run_worker(
         summary["best_trial_params"] = best_trial.params
 
     wandb.log({"worker_summary": summary})
-    logger.info("Worker %d finished — %d local trials, %d global completed",
+    logger.info("Worker %s finished — %d local trials, %d global completed",
                 worker_id, local_trials_completed, completed_trials)
     if best_trial is not None:
         logger.info("Study best: trial %d, PF=%.4f, params=%s",
@@ -260,7 +343,7 @@ def run_worker(
         )})
 
     wandb.finish()
-    logger.info("Worker %d — WandB run finished. Exiting.", worker_id)
+    logger.info("Worker %s — WandB run finished. Exiting.", worker_id)
 
 
 # ---------------------------------------------------------------------------
@@ -280,8 +363,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--db_url",
         type=str,
-        required=True,
-        help="PostgreSQL connection string (e.g. postgresql+psycopg://user:pass@host/optuna).",
+        required=False,
+        default=None,
+        help=(
+            "PostgreSQL connection string. If omitted, reads DISTRIBUTED_HPO_DB_URL "
+            "from env. Prefer the env path on shared hosts — secrets in argv are "
+            "readable to any user via `ps -ef`."
+        ),
     )
     parser.add_argument(
         "--study_name",
@@ -291,9 +379,9 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--worker_id",
-        type=int,
+        type=str,
         required=True,
-        help="Unique integer ID for this worker.",
+        help="Unique worker ID string (e.g. vastai-12345, gpuhub-1-gpu0).",
     )
     parser.add_argument(
         "--target_trials",
@@ -325,9 +413,17 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+    db_url = args.db_url or os.environ.get("DISTRIBUTED_HPO_DB_URL")
+    if not db_url:
+        print(
+            "error: --db_url not provided and DISTRIBUTED_HPO_DB_URL env var "
+            "not set. The coordinator should set it via the launch script.",
+            file=sys.stderr,
+        )
+        sys.exit(2)
     run_worker(
         config_path=args.config,
-        db_url=args.db_url,
+        db_url=db_url,
         study_name=args.study_name,
         worker_id=args.worker_id,
         target_trials=args.target_trials,

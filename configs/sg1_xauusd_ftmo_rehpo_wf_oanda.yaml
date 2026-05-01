@@ -1,0 +1,151 @@
+# SG-1 XAUUSD FTMO re-HPO — Stage 3 Walk-Forward (S488 Path A — OANDA redo)
+#
+# Upstream: Stage 2 L1 multiseed OANDA redo (N=10, config
+#   configs/sg1_xauusd_ftmo_rehpo_l1_multiseed_oanda.yaml). Top-3 seeds are
+#   picked at runtime by scripts/auto_queue_wf_after_l1.py from the 10-seed
+#   batch (1+2) on WandB backtest_test/profit_factor.
+#
+# Data: OANDA XAU_USD M1 mid (spot, matches cTrader paper-deploy).
+#   data/oanda/xauusd_m1_m.parquet — 453,743 bars, 2025-01-01 → 2026-04-15.
+#
+# Splitter: train=6mo / val=1mo / test=1mo / step=1mo over 2025-01-06 →
+# 2026-04-15 yields ~9 folds (test months Aug 2025 → Apr 2026). Gates require
+# wf_windows>=4.
+#
+# Gate (Protocol v2 §4 Stage 3, pre-committed S488):
+#   - gates.wf_pf_floor per window (per-seed)
+#   - aggregate ftmo_trailing_dd_buffer_pp >= 0.5
+#   - >=2/3 seeds must pass gate (1/3 = survivor bias -> re-HPO, NOT paper)
+#   - Stress sidecar (fee+20%, slip+50%, gap+50%) diagnostic, not a hard gate
+#
+# Launch (auto-chained by scripts/auto_queue_wf_after_l1.py after batch-2
+# completes, IF L1 gate passes):
+#   python scripts/run_walk_forward.py \
+#       --config configs/sg1_xauusd_ftmo_rehpo_wf_oanda.yaml \
+#       --run_name_prefix sg1-xauusd-wf-rehpo-oanda-seed42 \
+#       --seed 42
+#   (repeated for top-3 seeds on gpuhub-2:gpu0, non-HPO rule)
+
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  # Splitter-driven rolling window over the full OANDA span.
+  start_date: "2025-01-06"
+  end_date: "2026-04-15"
+
+splitter:
+  train_months: 6
+  val_months: 1
+  test_months: 1
+  step_months: 1
+  buffer_days: 0
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235               # steady-state (S464)
+  deadband_threshold: 0.35          # trial 56
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0                 # OANDA 73h weekend gap
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.009270901804613313   # trial 56
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.03
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Trial 56 HPs (Optuna study sg1_xauusd_ftmo_rehpo_20260419, best PF 2.85 on GC)
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000           # apples-to-apples with L1 budget
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+gates:                              # Protocol v2 §4 Stage 3
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  wf_windows: 4                     # validator requires >=4
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                 # S488: one parent run per seed, folds as win<i>/*
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "rehpo-trial56", "walk_forward", "wf-stage3", "steady-state",
+         "oanda-spot", "auto-chain",
+         "upstream:sg1_xauusd_ftmo_rehpo_l1_multiseed_oanda"]

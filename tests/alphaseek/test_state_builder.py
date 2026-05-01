@@ -30,7 +30,7 @@ class TestStateBuilderProtocol:
         for _ in range(15):
             builder.ingest_snapshot(_make_snapshot())
         state = builder.get_state(position=0, holding=0)
-        assert state.shape == (1, 10)
+        assert state.shape == (1, 12)  # v3: +pending_active +bars_since_last_trade
         assert state.dtype == torch.float32
 
     def test_get_state_device_cpu(self):
@@ -102,7 +102,7 @@ class TestStateBuilderPreWarmup:
         engine = AlphaSeekFeatureEngine(norm_span=10)
         builder = AlphaSeekStateBuilder(engine, device="cpu")
         state = builder.get_state(position=0, holding=0)
-        assert state.shape == (1, 10)
+        assert state.shape == (1, 12)  # v3
         assert torch.all(state == 0.0)
 
 

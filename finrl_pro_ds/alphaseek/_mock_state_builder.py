@@ -1,8 +1,9 @@
 """Mock state builder for dry-run testing.
 
-Generates random but plausible state vectors matching the AlphaSeek
-10-dim contract: 8 LSTM predictions + position_norm + holding_norm.
-Simulates a slowly drifting BTC price for mid_price and spread.
+Generates random but plausible 12-dim state vectors matching the AlphaSeek
+v3 contract: position_norm, holding_norm, 8 LOB features, pending_limit_active,
+bars_since_last_trade_norm. Simulates a slowly drifting BTC price for
+mid_price and spread.
 """
 
 import numpy as np
@@ -20,8 +21,14 @@ class MockStateBuilder:
         self._tick = 0
         self._ready = True
 
-    def get_state(self, position: int, holding: int) -> torch.Tensor:
-        """Generate a mock 10-dim state vector."""
+    def get_state(
+        self,
+        position: int,
+        holding: int,
+        pending_limit_active: int = 0,
+        bars_since_last_trade: int = 0,
+    ) -> torch.Tensor:
+        """Generate a mock 12-dim state vector."""
         self._tick += 1
 
         # Simulate random LSTM predictions (8 dims, small values near 0)
@@ -30,10 +37,13 @@ class MockStateBuilder:
         # Position and holding normalization (matching TradeSimulator)
         position_norm = float(position) / 1.0  # max_position = 1
         holding_norm = float(holding) / 1800.0  # max_holding = 1800
+        pending_norm = 1.0 if pending_limit_active else 0.0
+        idle_norm = min(1.0, float(bars_since_last_trade) / 1800.0)
 
         state = np.concatenate([
             [position_norm, holding_norm],
             lstm_preds,
+            [pending_norm, idle_norm],
         ])
 
         # Simulate price drift

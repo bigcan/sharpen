@@ -23,6 +23,7 @@ import wandb
 # Project imports
 sys.path.append(os.getcwd())
 from finrl_pro_ds.agents.deepscalper.bdq_agent import DeepScalperBDQ
+from finrl_pro_ds.logging import init_wandb, is_consolidated
 from finrl_pro_ds.agents.ppo_scalper.ppo_agent import PPOAgent
 from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
 from finrl_pro_ds.data.parquet_handler import ParquetDataHandler
@@ -42,14 +43,16 @@ def load_config(path):
         return yaml.safe_load(f)
 
 
+from finrl_pro_ds.config_utils import deep_merge as _deep_merge
+
+
 def merge_configs(base, overrides):
-    """Deep merge dictionaries."""
-    for k, v in overrides.items():
-        if isinstance(v, dict) and k in base and isinstance(base[k], dict):
-            merge_configs(base[k], v)
-        else:
-            base[k] = v
-    return base
+    """Deep merge dictionaries (legacy signature: mutates ``base`` in place).
+
+    Thin wrapper around ``finrl_pro_ds.config_utils.deep_merge``; retained for
+    backward compatibility with scripts that expect in-place mutation.
+    """
+    return _deep_merge(base, overrides, _mutate=True)
 
 
 # _parse_frequency_to_minutes moved to finrl_pro_ds.hpo.objective (imported above)
@@ -115,6 +118,11 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
             "dsr_eta": be_r["dsr_eta"],
             "gradient_clip": bs["gradient_clip"],
         }
+        # B3 fix: anchor max_leverage=1.0 in trial 0 when the search space
+        # declares it. Without this, Optuna samples max_leverage even for
+        # baseline anchor → no within-study leverage=1 control point.
+        if "max_leverage" in (base_config.get("hpo", {}).get("search_space", {}) or {}):
+            baseline_params["max_leverage"] = 1.0
         study.enqueue_trial(baseline_params)
         logger.info(f"Enqueued baseline trial with config HPs: {baseline_params}")
 
@@ -135,10 +143,13 @@ def run_hpo(base_config, n_trials, steps_per_trial, device, agent_type="bdq"):
     # V4.2: Explicit routing for ALL HPO params to prevent silent mis-routing.
     if agent_type == "sac":
         reward_params = {"dsr_eta", "reward_mode"}
-        agent_params = {"lr_actor", "lr_critic", "lr_alpha", "tau", "initial_alpha", "gamma", "gradient_clip", "batch_size"}
+        agent_params = {"lr_actor", "lr_critic", "lr_alpha", "tau", "initial_alpha", "gamma", "gradient_clip", "batch_size",
+                        "learning_rate", "buffer_size",
+                        "cvar_alpha", "n_quantiles", "kappa"}
         # deadband + v6 hard constraints + v9 MM params route to env, not agent
         env_params = {"deadband_threshold", "stop_loss_bps", "max_holding_bars",
-                      "base_spread_bps", "max_skew_bps"}
+                      "base_spread_bps", "max_skew_bps",
+                      "reward_scaling", "lambda_delta"}
     elif agent_type == "ppo":
         # V4.2: PPO locks reward params — only optimizer HPs are tunable
         reward_params = set()
@@ -792,16 +803,17 @@ def main():
 
     logger.info(f"Pipeline Run: {run_name}")
 
-    # Initialize single WandB run for entire pipeline
-    wandb_config = base_config.get("wandb", {})
-    wandb.init(
-        project=wandb_config.get("project", "FinRL-Pro-DS"),
-        entity=wandb_config.get("entity", "bigcan-chiwin-technology"),
-        name=run_name,
-        tags=wandb_config.get("tags", []) + args.tags,
-        config=base_config,
-    )
-    logger.info(f"WandB Run: {wandb.run.url}")
+    # Initialize WandB: consolidated child (attaches to parent run via
+    # FINRL_WANDB_RUN_ID + FINRL_WANDB_NAMESPACE env vars) or standalone.
+    init_wandb(base_config, fallback_name=run_name, tags=list(args.tags))
+    if is_consolidated():
+        logger.info(
+            "WandB consolidated run: %s (namespace=%s)",
+            wandb.run.url if wandb.run else "?",
+            os.environ.get("FINRL_WANDB_NAMESPACE"),
+        )
+    else:
+        logger.info(f"WandB Run: {wandb.run.url}")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Device: {device}")

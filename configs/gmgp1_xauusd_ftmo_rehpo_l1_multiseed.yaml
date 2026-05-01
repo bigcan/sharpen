@@ -1,0 +1,147 @@
+# GMGP1-XAUUSD FTMO re-HPO — Stage 2 L1 multiseed (trial #10 anchor)
+#
+# Upstream: Optuna study `gmgp1_xauusd_ftmo_rehpo_20260421` (narrow stage, 30 trials)
+#   Best trial #10 — PF 2.6210 (promoted_by_worker gpuhub-1-gpu1-r1, 2026-04-22 03:24 UTC)
+#   Params cf. results/best_params_gmgp1_xauusd_ftmo_rehpo_20260421.yaml
+#
+# Protocol v2 §4 Stage 2 (S488): prop-firm workstreams require N>=10 seeds with
+# pre-committed escalation range `l1_pf_cv_ambiguous: [0.22, 0.38]`.
+#   - PASS  gate: median test PF >= 1.2, all seeds profitable, CV(PF) outside [0.22, 0.38]
+#   - AMBIG gate: CV inside [0.22, 0.38] -> auto-extend to N=20
+#
+# Data choice: SAME as HPO (`data/cme/gc_2025_lob1_1min_stitched.parquet`) for
+# apples-to-apples HP-stability evidence. An OANDA-spot redo (per sim-to-live
+# gap audit S470, mirroring SG-1's `..._l1_multiseed_oanda.yaml` path) is the
+# planned follow-up once this L1 passes.
+
+data:
+  file_path: data/cme/gc_2025_lob1_1min_stitched.parquet
+  ticker: XAUUSD
+  handler_type: multiscale
+  train_start_date: '2025-01-06'
+  train_end_date: '2025-08-31'
+  val_start_date: '2025-09-01'
+  val_end_date: '2025-10-31'
+  test_start_date: '2025-11-01'
+  test_end_date: '2025-12-31'
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: cfd_gold
+
+env:
+  mdp_version: v7
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235                # steady-state (S464); IC Markets Raw ~2.35 bps/side
+  deadband_threshold: 0.35           # trial #10
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  gap_detection: true
+  gap_atr_mult: 3.0                  # XAUUSD weekend gap detector (prelaunch checklist)
+  reward:
+    mode: dsr
+    dsr_eta: 0.008072070485679669    # trial #10
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"               # keep private_dim=5 (live compat)
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Trial #10 HPs (Optuna study gmgp1_xauusd_ftmo_rehpo_20260421)
+    lr_actor: 0.00048211947849186834
+    lr_critic: 0.00023536913918894482
+    lr_alpha: 0.0000023011482963674244
+    gamma: 0.9734375919828845
+    tau: 0.0056901039341825865
+    initial_alpha: 0.4568170758305432
+    gradient_clip: 2.738336834748153
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000            # match HPO budget (apples-to-apples)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: bfloat16
+  torch_compile: true
+  num_envs: 20
+  # seed: set per-run via CLI (--seed N); launcher sweeps
+  # [42, 123, 456, 789, 1024, 1337, 2025, 3141, 5150, 9999]
+
+hpo:
+  enabled: false
+
+gates:                               # Protocol v2 §4 Stage 2 (S488 escalation)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                       # S488: prop-firm workstreams require N>=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]   # S488: pre-committed escalation range
+  ensemble_uplift_min: 1.10          # S493→S495 Stage 2.5 PROMOTE threshold (pre-committed)
+  ensemble_ambiguous_min: 1.05       # S495 AMBIGUOUS floor; below this = SOLO_BEST_FALLBACK
+  ensemble_rule_selection: val_argmax_pf  # S495: pick aggregation rule on val split (was: implicit canonical=ens_agreement)
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+# Stage 2.5 ensemble-confirm block (S493): top-3 distinct-checkpoint seeds from
+# L1 by test PF. Used by scripts/gmgp1_xauusd_ensemble_eval.py + validator.
+# Batch-4 seeds 123/1337/3141 share a checkpoint dir (deploy_bare_metal race),
+# so the third slot substitutes the next-best distinct seed 1024.
+ensemble:
+  rule: ens_agreement
+  seeds: [789, 2025, 1024]
+
+wandb:
+  project: FinRL-Pro-DS
+  tags:
+    - gmgp1-xauusd
+    - Gold
+    - SAC
+    - 15min
+    - CFD
+    - FTMO
+    - ftmo-wrapped
+    - prop-firm
+    - propfirm
+    - rehpo-trial10
+    - l1-multiseed
+    - steady-state
+    - upstream:gmgp1_xauusd_ftmo_rehpo_20260421

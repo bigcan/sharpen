@@ -137,6 +137,28 @@ class ExchangePerpBroker:
         self.reconciliation_interval = reconciliation_interval
         self._exchange = None
         self._traded_assets: set[str] = set()
+        # Step 0b (E1 refactor): capture callback for live-replay fixture
+        # collection. None = disabled. Set via set_capture_callback().
+        self._capture_callback = None
+
+    def set_capture_callback(self, callback) -> None:
+        """Register a callback invoked after every raw CCXT fetch_positions /
+        fetch_balance call (capture mode for live-replay fixture collection).
+
+        Signature: ``callback(event_name: str, raw_response) -> None``.
+        Set to ``None`` to disable. Errors raised by the callback are
+        swallowed so capture failures cannot disrupt trading.
+        """
+        self._capture_callback = callback
+
+    def _emit_capture(self, event_name: str, raw_response) -> None:
+        """Internal: invoke the capture callback if set (errors swallowed)."""
+        if self._capture_callback is None:
+            return
+        try:
+            self._capture_callback(event_name, raw_response)
+        except Exception as e:  # noqa: BLE001 — capture must never disrupt trading
+            logger.debug(f"Capture callback raised (non-fatal): {e}")
 
     def _ensure_connected(self) -> None:
         """Raise RuntimeError if exchange is not connected (replaces assert)."""
@@ -527,9 +549,11 @@ class ExchangePerpBroker:
 
         try:
             exchange_positions = await self._exchange.fetch_positions()
+            self._emit_capture("fetch_positions", exchange_positions)
 
             # Get account balance for weight calculation
             balance = await self._exchange.fetch_balance()
+            self._emit_capture("fetch_balance", balance)
             total_equity = float(balance.get("total", {}).get("USDT", 0))
 
             if total_equity < 1.0:
@@ -570,6 +594,7 @@ class ExchangePerpBroker:
         self._ensure_connected()
 
         balance = await self._exchange.fetch_balance()
+        self._emit_capture("fetch_balance", balance)
 
         return {
             "total_equity": float(balance.get("total", {}).get("USDT", 0)),
