@@ -57,6 +57,7 @@ dev = [
     "black>=23.12",
     "mypy>=1.7",
     "lancedb>=0.29.0",
+    "jsonschema>=4.0",
 ]
 
 [project.urls]
