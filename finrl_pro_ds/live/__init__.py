@@ -17,6 +17,11 @@ from finrl_pro_ds.live.ensemble_bundle import (
     BundleIntegrityError,
     extract_and_verify_bundle,
 )
+from finrl_pro_ds.live.swap_handshake import (
+    SwapHandshakeResult,
+    check_swap_approved,
+    record_successful_load,
+)
 
 __all__ = [
     "PHASE_ORDER",
@@ -27,4 +32,7 @@ __all__ = [
     "BundleContents",
     "BundleIntegrityError",
     "extract_and_verify_bundle",
+    "SwapHandshakeResult",
+    "check_swap_approved",
+    "record_successful_load",
 ]
