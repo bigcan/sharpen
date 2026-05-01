@@ -1,0 +1,7 @@
+# Force LF line endings on shell scripts that are exec'd inside Linux containers.
+# Without this, a Windows checkout (core.autocrlf=true) corrupts the shebang and
+# every subsequent line — `env: 'bash\r': No such file or directory` on boot.
+# Bit us once on 2026-05-01 (image f54a1081f432, entrypoint.sh + healthcheck.sh).
+docker/live/*.sh text eol=lf
+scripts/*.sh text eol=lf
+*.sh text eol=lf
