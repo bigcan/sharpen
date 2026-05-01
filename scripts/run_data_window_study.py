@@ -339,12 +339,14 @@ def main() -> int:
     def wait_runs_finished(window_slug_: str, budget_label_: str,
                            expected_n: int,
                            poll_every_s: int = 120,
-                           max_wait_h: float = 8.0) -> int:
+                           max_wait_h: float = 14.0) -> int:
         """Block until `expected_n` runs tagged for this cell are all in a
         terminal state. Returns count of seeds that reached `finished`.
 
-        Per artifact compute estimate: 2M-step run ~25 min, 500K-step run
-        ~6 min. 8h ceiling = 16-20x slack on the worst cell.
+        Empirical (S509 INV1): 2M-step cell on gpuhub-1:0 concurrent=5 took
+        ~9-10h wall (5 seeds at ~225 SPS sharing one GPU); 500K-step cell
+        ~25 min. 14h ceiling = ~1.4x slack on the worst cell. The earlier
+        8h default tripped the timeout on base_2m at 94% complete.
 
         Fresh subprocess per poll — `wandb.Api()` reuse hangs after hours.
         """
