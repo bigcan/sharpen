@@ -1,0 +1,91 @@
+data:
+  file_path: data/btc_usdt_1min_bybit.parquet
+  ticker: BTC
+  handler_type: multiscale
+  train_start_date: '2024-01-01'
+  train_end_date: '2025-10-31'
+  val_start_date: '2025-11-01'
+  val_end_date: '2025-11-30'
+  test_start_date: '2025-12-01'
+  test_end_date: '2025-12-31'
+features:
+  scales:
+  - 15
+  - 60
+  - 240
+  window_size: 30
+  features_per_scale: 8
+  asset_class: crypto
+env:
+  mdp_version: v7
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005
+  deadband_threshold: 0.35
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.3
+  scales:
+  - 15
+  - 60
+  - 240
+  reward:
+    mode: dsr
+    dsr_eta: 0.003159755401614352
+    dsr_scale: 1.0
+network:
+  scale_encoder:
+    input_size: 8
+    channels:
+    - 32
+    - 64
+    - 64
+    - 64
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+agents:
+  sac:
+    lr_actor: 0.0005462612695421805
+    lr_critic: 0.000866154995794675
+    lr_alpha: 0.0009625164717779418
+    gamma: 0.9535315530021778
+    tau: 0.00212659146992685
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.15930606967484204
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+training:
+  total_timesteps: 2000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: bfloat16
+  torch_compile: true
+  num_envs: 20
+hpo:
+  enabled: false
+gates:
+  l1_seeds: 5
+  l1_pf_floor: 1.0
+  l1_pf_cv_max: 0.3
+wandb:
+  project: FinRL-Pro-DS
+  tags:
+  - gmgp1-v5
+  - data-window-study
+  - axis-a
+  - ablation
+  - steady-state-fees
+  - research
+  - window-long
+  - budget-2m
+  - study-id-20260430_193907
