@@ -53,18 +53,33 @@ def validate_config(config: dict, args) -> dict:
     """Validate and patch config with CLI overrides."""
 
     # --- Checkpoint existence ---
-    # Two modes: solo (agent.checkpoint_path) or ensemble (agent.ensemble.{seeds,
-    # checkpoint_pattern, aggregation_rule}). Ensemble mode resolves one path per
-    # seed via a glob matching the same pattern tokens used by
-    # scripts/sg1_xauusd_ensemble_eval.py — {seed} and {fold:02d}.
+    # Three modes:
+    #   - solo (agent.checkpoint_path)
+    #   - v2.3 atomic-swap bundle (agent.ensemble.bundle_path → ensemble_v{N}.tar.gz)
+    #   - legacy ensemble (agent.ensemble.{seeds, checkpoint_pattern, aggregation_rule})
+    # The legacy form remains supported for v2.1/v2.2 retro-apply paper deploys per
+    # docs/protocol_v2.md §4. New L1-retrain promotions MUST emit a bundle.
     agent_cfg = config.get("agent", {})
     ensemble_cfg = agent_cfg.get("ensemble")
-    if ensemble_cfg:
+    if ensemble_cfg and ensemble_cfg.get("bundle_path"):
+        # v2.3 path: defer extraction + SHA256 verification to build_components,
+        # so failures abort the runner with the live engine's logging context
+        # rather than during config validation. Just check the bundle file
+        # exists at this stage.
+        bundle_path = Path(ensemble_cfg["bundle_path"])
+        if not bundle_path.exists():
+            logger.error(f"v2.3 swap bundle not found: {bundle_path}")
+            sys.exit(1)
+        logger.info(f"v2.3 swap bundle declared: {bundle_path}")
+    elif ensemble_cfg:
         import glob
         seeds = list(ensemble_cfg.get("seeds", []))
         pattern = ensemble_cfg.get("checkpoint_pattern", "")
         if not seeds or not pattern:
-            logger.error("agent.ensemble requires both 'seeds' and 'checkpoint_pattern'")
+            logger.error(
+                "agent.ensemble requires either 'bundle_path' (v2.3) or "
+                "'seeds' + 'checkpoint_pattern' (legacy retro-apply)"
+            )
             sys.exit(1)
         resolved: dict = {}
         for s in seeds:
@@ -80,7 +95,7 @@ def validate_config(config: dict, args) -> dict:
                 logger.warning(f"Seed {s} has {len(matches)} matches; picking last: {matches[-1]}")
             resolved[s] = matches[-1]
         ensemble_cfg["_resolved_paths"] = resolved
-        logger.info(f"Ensemble checkpoints resolved: {resolved}")
+        logger.info(f"Legacy ensemble checkpoints resolved: {resolved}")
     else:
         checkpoint_path = agent_cfg.get("checkpoint_path", "")
         if not Path(checkpoint_path).exists():
@@ -151,7 +166,55 @@ def build_components(config: dict):
     sac_kwargs = {k: v for k, v in sac_cfg.items() if k not in ("checkpoint_path",)}
 
     ensemble_cfg = agent_cfg.get("ensemble")
-    if ensemble_cfg:
+    if ensemble_cfg and ensemble_cfg.get("bundle_path"):
+        # v2.3 atomic-swap bundle path: extract + SHA256-verify, then load N
+        # SACAgents from the bundle's checkpoints. EnsembleAgent constructor
+        # is shared with the legacy path below.
+        from finrl_pro_ds.agents.sac.ensemble_agent import EnsembleAgent
+        from finrl_pro_ds.live import extract_and_verify_bundle, BundleIntegrityError
+
+        bundle_path = ensemble_cfg["bundle_path"]
+        try:
+            bundle = extract_and_verify_bundle(
+                bundle_path,
+                require_normalizers=ensemble_cfg.get("require_normalizers", True),
+            )
+        except BundleIntegrityError as exc:
+            logger.error(f"v2.3 bundle integrity failure: {exc}")
+            raise
+        seeds = list(bundle.seeds)
+        loaded_agents = []
+        for s in seeds:
+            a = SACAgent(
+                network_config=network_cfg, device=device, torch_compile=False,
+                **sac_kwargs,
+            )
+            a.load(str(bundle.checkpoint_paths[s]))
+            a.actor.eval()
+            loaded_agents.append(a)
+        # Manifest-declared seed_pfs win over any caller override; live config
+        # may still pin an aggregation_rule override (e.g. swap to ens_mean
+        # without rebuilding the bundle), but the canonical rule is in the
+        # manifest and we log if the caller diverges.
+        rule = ensemble_cfg.get("aggregation_rule") or bundle.chosen_rule
+        if rule != bundle.chosen_rule:
+            logger.warning(
+                f"aggregation_rule override: config={rule!r} differs from "
+                f"manifest.chosen_rule={bundle.chosen_rule!r}"
+            )
+        deadband = float(ensemble_cfg.get("deadband", bundle.deadband))
+        agent = EnsembleAgent(
+            agents=loaded_agents,
+            seeds=seeds,
+            aggregation_rule=rule,
+            deadband=deadband,
+            seed_pfs=bundle.seed_pfs,
+        )
+        logger.info(
+            f"EnsembleAgent loaded from v2.3 bundle: ws={bundle.workstream} "
+            f"v={bundle.version} seeds={seeds} rule={rule} deadband={deadband}",
+        )
+    elif ensemble_cfg:
         from finrl_pro_ds.agents.sac.ensemble_agent import EnsembleAgent
         resolved = ensemble_cfg["_resolved_paths"]  # populated in validate_config
         seeds = list(ensemble_cfg.get("seeds", []))
