@@ -174,14 +174,14 @@ docker/live/
 Tier 1: .agent/memory/core.md   -- Project status (~100 lines, deterministic boot context)
 Tier 2: randd_log.md             -- R&D write buffer (~20 entries, auto-rotated at 150 KB)
         randd_archive/YYYY-MM.md -- Monthly archives (cold backup, grep-searchable)
-Cloud:  agent-memory MCP         -- LanceDB on GCS, search index over ALL R&D entries
+Search: agent-memory MCP         -- self-hosted LanceDB on finrl-desktop (Docker), embeddings via Ollama nomic-embed-text (768-dim, cosine)
 ```
 
 **Boot:** `core.md` loaded via system prompt hook. `memory_search` for semantic retrieval -> grep `randd_log.md` for recent exact matches -> grep `randd_archive/` as fallback.
 **Commit:** Append `randd_log.md` -> `memory_store` new entry to LanceDB -> auto-rotate if >150 KB -> update `core.md` -> git commit.
 **Auto-rotate:** `python scripts/rotate_randd_log.py --keep-months 1 --max-entries 20` (triggered during `/sync` when >150 KB). `--max-entries` acts as both cap and floor at month boundaries.
-**Bulk re-index:** `python scripts/bulk_index_memory.py --force` after archive rotation or to rebuild the search index.
-**Cloud:** Requires `GOOGLE_SERVICE_ACCOUNT` env var in `.mcp.json` pointing to `~/.openclaw/gcs-service-account.json`. Flat files remain authoritative -- LanceDB is a search acceleration layer.
+**Bulk re-index:** `scripts/bulk_index_memory.py` is GCS+Gemini-only and unused after S517; needs porting to the local Ollama+LanceDB stack before its next use. New rows are added per-call via `memory_store` from Claude Code; no scheduled re-index path runs today.
+**MCP transport:** `.mcp.json` invokes `docker --context finrl-desktop exec -i agent-memory node /app/src/index.js` over Tailscale. Rollback to GCS+Gemini lives at `.mcp.json.gcs-rollback` until the ~2026-06-01 decommission (routine `agent-memory-decommission-runbook-2026-06-01`). Container source is out-of-repo at `~\mcp-servers\agent-memory\`; image build context is desktop-side, see `docker/live/Dockerfile.agent-memory`. Migration record: `randd_log.md` Session 517.
 
 ## Docker Monitoring Architecture (full)
 
