@@ -99,7 +99,7 @@ hypotheses:
       between A_base and A_long, evaluated per budget. Loose alpha (0.10)
       matches Protocol v2 Stage-2 ambiguity-band convention at small N.
     statistic: "mann_whitney_u"
-    alternative: "two_sided"
+    alternative: "two-sided"
     p_max: 0.10
     pair: ["A_base", "A_long"]
     per_budget: true
@@ -134,7 +134,7 @@ hypotheses:
 
 significance:
   test: "mann_whitney_u"
-  alternative: "two_sided"
+  alternative: "two-sided"
   p_max: 0.10
   rationale: "loose alpha matches Protocol v2 Stage-2 ambiguity-band convention at small N"
 

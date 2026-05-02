@@ -589,9 +589,10 @@ def main() -> int:
         window_slug = run_meta["window_slug"]
         budget = run_meta["budget"]
         budget_label = run_meta["budget_label"]
+        cell_study_id = run_meta.get("study_id", manifest["timestamp"])
         runs = fetch_runs_for_cell(api, args.project, args.entity,
                                    window_slug, budget_label,
-                                   study_id=manifest["timestamp"])
+                                   study_id=cell_study_id)
         if not runs:
             log.warning("cell window=%s budget=%s: no WandB runs found",
                         window, budget_label)
