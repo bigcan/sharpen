@@ -193,22 +193,20 @@ Replay: reproduce <fingerprint_id>
 
 This project operates a dual-tier agent memory system and integrates external MCP servers for maximal agent autonomy and observability:
 
-1. **Local Vector Knowledge Base (`agent-memory` MCP)**: 
-   - **Purpose**: Semantic search over project history (`randd_log.md` and `core.md`). Fast retrieval of exact experiment parameters and architectural pivots (e.g. "Why did Phase J fail?").
-   - **Tools**: `search_memory`, `index_randd_log`, `index_document`, `index_status`, `clear_index`.
-   - **Protocol**: Always invoke `search_memory` first when exploring past experiments or diagnosing unknown bugs. Ensure you trigger an index refresh (`/sync` macro or `index_randd_log`) after modifying the R&D log.
-2. **Cloud Memory (`memory` MCP)**: 
-   - **Purpose**: Cross-project user preferences and global rules.
-   - **Tools**: `memory_store`, `memory_search`, `memory_forget`.
-3. **AI Debugger (`notebooklm` MCP)**:
+1. **Long-term Memory (`agent-memory` MCP)**:
+   - **Purpose**: Semantic search + persistent storage for project history, decisions, and user preferences (cross-session, cross-project). Backs both per-session recall and the `/sync` write path.
+   - **Backend**: Self-hosted LanceDB + Ollama `nomic-embed-text` in Docker on `finrl-desktop` (Tailscale <TAILSCALE_HOST>). Migrated S517 (2026-05-02) off GCS+Gemini.
+   - **Tools**: `memory_search`, `memory_store`, `memory_count`, `memory_stats`, `memory_list`, `memory_update`, `memory_forget`.
+   - **Protocol**: Invoke `memory_search` first when exploring past experiments or diagnosing unknown bugs. Call `memory_store` on significant results, decisions, or infra changes. New memories are embedded-and-inserted per-call; no separate index step is needed.
+2. **AI Debugger (`notebooklm` MCP)**:
    - **Purpose**: Deep context synthesis, long-term pattern recognition, and trend analysis.
    - **Protocol**: Utilize NotebookLM when facing novel, complex error loops or needing to synthesize broad context across vast documents/logs.
-4. **Mission Control (`notion` MCP)**:
+3. **Mission Control (`notion` MCP)**:
    - **Purpose**: Remote dashboarding, real-time command-and-control (steering), and persistent state management.
    - **Protocol**: Use Notion for high-level experiment tracking, milestone sign-offs, and 'Level 5' autonomous system observability.
 
 - **Core Protocol**: Log key decisions via the native memory skill; read `.agent/memory/core.md` at session start via `/memory-boot`.
-- **Proactive Cloud Saves**: After any significant experiment result, architecture decision, or infrastructure change, proactively call `memory_store`.
+- **Proactive Saves**: After any significant experiment result, architecture decision, or infrastructure change, proactively call `memory_store`.
 - **Proactive Tooling**: Maximize agent autonomy by proactively invoking specific MCP tools and native workflow skills (`math`, `monitor`, `audit`, etc.) when planning, executing, or debugging. Do not wait for explicit user prompts if a specific tool logically executes a task or resolves an uncertainty.
 
 ## When In Doubt
