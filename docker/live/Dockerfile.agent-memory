@@ -1,0 +1,29 @@
+# agent-memory MCP server — local LanceDB + Ollama embeddings
+#
+# Build:
+#   docker build -t finrl-agent-memory:2.0.0 \
+#     -f docker/live/Dockerfile.agent-memory <agent-memory-source-dir>
+#
+# Container CMD is `sleep infinity` — the actual MCP server is spawned per
+# Claude session via `docker exec -i agent-memory node /app/src/index.js`.
+# This avoids the container restart loop that would happen if the stdio
+# server exited when stdin closes between sessions.
+
+FROM node:20-slim
+
+ENV NODE_ENV=production \
+    TZ=UTC
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+COPY src ./src
+COPY scripts ./scripts
+
+RUN mkdir -p /data/lancedb && chown -R node:node /data/lancedb /app
+
+USER node
+
+CMD ["sleep", "infinity"]

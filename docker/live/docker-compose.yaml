@@ -508,6 +508,60 @@ services:
     networks: [finrl-net]
     restart: unless-stopped
 
+  # ---------------------------------------------------------------------------
+  # Long-term memory: Ollama (embeddings) + agent-memory (MCP server, LanceDB)
+  # Replaces the previous GCS-backed Gemini setup. See plan
+  # google-cloud-is-too-splendid-patterson.md for migration details.
+  # Image finrl-agent-memory:2.0.0 must be built on the desktop after rsync of
+  # the mcp-servers/agent-memory/ source tree (no in-repo build context).
+  # ---------------------------------------------------------------------------
+  ollama-embed:
+    image: ollama/ollama:latest
+    container_name: ollama-embed
+    profiles: [memory, all]
+    environment:
+      OLLAMA_KEEP_ALIVE: "24h"
+      OLLAMA_NUM_PARALLEL: "4"
+    volumes:
+      - ollama-models:/root/.ollama
+    networks: [finrl-net]
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
+    healthcheck:
+      test: ["CMD-SHELL", "ollama list >/dev/null 2>&1 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 60s
+
+  agent-memory:
+    image: finrl-agent-memory:2.0.0
+    container_name: agent-memory
+    profiles: [memory, all]
+    stdin_open: true
+    tty: false
+    environment:
+      LANCEDB_URI: /data/lancedb/v1
+      OLLAMA_URL: http://ollama-embed:11434
+      EMBED_MODEL: nomic-embed-text
+      MCP_SOURCE: agent-memory
+      OPENCLAW_DEVICE: finrl-desktop
+    volumes:
+      - agent-memory-data:/data/lancedb
+    networks: [finrl-net]
+    depends_on:
+      ollama-embed:
+        condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
 networks:
   finrl-net:
     driver: bridge
@@ -536,3 +590,5 @@ volumes:
   sg1-xauusd-state:
   velotrade-btc-state:
   hyperliquid-data:
+  agent-memory-data:
+  ollama-models:
