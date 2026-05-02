@@ -82,7 +82,8 @@ def fetch_runs_for_cell(api, project: str, entity: str,
             {"tags": {"$in": [f"study-id-{study_id}"]}},
         ]
     }
-    return list(api.runs(f"{entity}/{project}", filters=filters))
+    return [r for r in api.runs(f"{entity}/{project}", filters=filters)
+            if r.state == "finished"]
 
 
 _SEED_FROM_NAME_RE = re.compile(r"-seed(\d+)_")
