@@ -1095,6 +1095,62 @@ def run_stage_2_5_val_selection(
         log.info("decision=PROMOTE but seed_checkpoints not passed — "
                  "skipping swap bundle (caller using pre-v2.3 invocation)")
 
+    # --- Phase 4f: v2.4.1 §11 replay-buffer purge (minimal, fleet-wide) ---
+    # Free disk by unlinking non-selected seeds' replay.pkl files. ABSENT is
+    # the common case today: most workstreams launch with --no_collect (per
+    # `launch_l1_multiseed.py` comment) so replay.pkl lives on remote GPUHub
+    # and isn't visible here. Purge becomes load-bearing once any workstream
+    # starts collecting replay buffers locally for resume/off-policy continuation.
+    purge_report = {
+        "protocol": "v2.4.1_stage_2_5_replay_purge",
+        "decision": decision,
+        "selected_seeds": [],
+        "non_selected_seeds": [],
+        "per_seed": {},
+    }
+    if seed_checkpoints is None:
+        purge_report["status"] = "SKIPPED_NO_CHECKPOINTS"
+    elif decision in ("AMBIGUOUS_RERUN", "NO_DATA", "LEGACY_GATE_DEFER"):
+        purge_report["status"] = "SKIPPED_AMBIGUOUS"
+        purge_report["selected_seeds"] = sorted(int(s) for s in seed_pfs)
+    else:
+        if decision == "SOLO_BEST_FALLBACK":
+            kept = {int(best_solo_seed)}
+        else:  # PROMOTE / PROMOTE_DD_ONLY / PROMOTE_ENSEMBLE
+            kept = {int(s) for s in seed_pfs}
+        non_selected = sorted(int(s) for s in seed_pfs if int(s) not in kept)
+        purge_report["selected_seeds"] = sorted(kept)
+        purge_report["non_selected_seeds"] = non_selected
+        for seed in non_selected:
+            ckpt_path = Path(seed_checkpoints[int(seed)])
+            replay_path = ckpt_path.parent / "replay.pkl"
+            entry = {"replay_pkl": str(replay_path)}
+            if replay_path.exists():
+                try:
+                    h = hashlib.sha256()
+                    with replay_path.open("rb") as f:
+                        for chunk in iter(lambda: f.read(1 << 20), b""):
+                            h.update(chunk)
+                    entry["sha256"] = h.hexdigest()
+                    entry["size_bytes"] = replay_path.stat().st_size
+                    replay_path.unlink()
+                    entry["status"] = "UNLINKED"
+                    log.info(f"[purge] seed {seed}: unlinked replay.pkl "
+                             f"({entry['size_bytes']} bytes, sha256={entry['sha256'][:12]}...)")
+                except Exception as e:
+                    entry["status"] = "FAILED"
+                    entry["error"] = str(e)
+                    log.warning(f"[purge] seed {seed}: unlink failed: {e}")
+            else:
+                entry["status"] = "ABSENT"
+                log.info(f"[purge] seed {seed}: replay.pkl absent at {replay_path} "
+                         f"(typical when --no_collect used; lives on remote GPUHub)")
+            purge_report["per_seed"][str(seed)] = entry
+        purge_report["status"] = "OK"
+    (out_dir / "purge_report.json").write_text(
+        json.dumps(purge_report, indent=2, default=str)
+    )
+
     # --- v2.2 §2 eval_distribution artifacts (seed_report.json + ensemble_report.json) ---
     # Per Protocol v2.2 §2: Stage 2 per-seed action distributions + Stage 2.5
     # ensemble action distribution (with composition_rule). Consumed by §8.2
