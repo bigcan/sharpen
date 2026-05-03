@@ -1,0 +1,139 @@
+# GMGP1-BTC Velotrade Stage 2.5-R config — A_long × 2M.
+#
+# Provenance:
+#   - Created 2026-05-03 (Session 522).
+#   - Stage 2.5-R for the 5 A_long×2M checkpoints from data-window study
+#     unified_20260502 (run IDs ba0zxoot, drwd4fuk, m4bjcriq, ro7ptpll, hgxtabl5).
+#   - Triggered by: L1 retrain (new train window 2024-01-01, new total_timesteps
+#     2M, vs prior Velotrade re-HPO 2026-04-23 trial-#48 at 500K). Per Protocol
+#     v2.3 §4.5: any HP / data / env / feature change → mandatory Stage 2.5-R.
+#   - Decision basis: `decision_volume_axis_v2_2m_ceiling.md` (S522)
+#     ("HALT axis at 2M, ship A_long × 2M as paper checkpoint").
+#
+# IMPORTANT — sim-to-live caveat (do NOT silently inherit):
+#   The 5 checkpoints were trained on Bybit BTC perp data (only BTC source with
+#   22mo of bars, required for A_long). The gmgp1-btc paper container deploys
+#   on Binance demo. This is a Bybit→Binance cross-venue gap, separately tracked
+#   under `project_sim_to_live_gap_audit_s470.md`. Stage 2.5-R verdict here
+#   establishes Bybit-OOS rule selection; live performance on Binance carries
+#   the existing cross-venue uncertainty regardless of which checkpoint wins.
+#   Bitfinex (the prior eval venue) does NOT have 2024 history; eval there is
+#   not an option without abandoning A_long.
+#
+# Inheritance:
+#   - data / env / agents / network / features → from `gmgp1_data_window_study.yaml`
+#     (matches what the 5 checkpoints actually saw during training)
+#   - gates + ensemble.gates_file overlay → from `gmgp1_btc_velotrade_rehpo_l1_multiseed.yaml`
+#     (v2.3 bootstrap thresholds + Velotrade DD buffers + S499 gate-loading fix)
+
+# ---------- DATA (from data-window study, A_long pinned) ----------
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  train_start_date: "2024-01-01"        # A_long
+  train_end_date:   "2025-10-31"
+  val_start_date:   "2025-11-01"
+  val_end_date:     "2025-11-30"
+  test_start_date:  "2025-12-01"
+  test_end_date:    "2025-12-31"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+# ---------- ENV (matches data-window training) ----------
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005                     # steady-state 5bps Bybit taker from step 0
+  deadband_threshold: 0.35              # v5 6xluh826 T29
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30                # research-tier (NOT prop-firm 10%) — matches train
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.003159755401614352       # v5 6xluh826 T29
+    dsr_scale: 1.0
+
+# ---------- NETWORK (matches data-window training) ----------
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# ---------- AGENTS (v5 HPO 6xluh826 T29 — frozen) ----------
+agents:
+  sac:
+    lr_actor: 0.0005462612695421805
+    lr_critic: 0.000866154995794675
+    lr_alpha: 0.0009625164717779418
+    gamma: 0.9535315530021778
+    tau: 0.00212659146992685
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.15930606967484204
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+# ---------- TRAINING (informational — Stage 2.5 doesn't train) ----------
+training:
+  total_timesteps: 2000000              # the cell that produced the 5 checkpoints
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+# ---------- GATES (v2.3 ensemble + Velotrade — from velotrade_rehpo) ----------
+gates:
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 5                           # the data-window cell ran 5 seeds (not 10)
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10             # legacy point-estimate (S495 baseline)
+  ensemble_ambiguous_min: 1.05
+  ensemble_rule_selection: val_argmax_pf
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+ensemble:
+  # v2.3 Stage 2.5 overlay — merges the bootstrap thresholds (P_PF/P_MDD ≥ 0.90)
+  # over the gates above. Without this overlay the verdict defers to legacy
+  # uplift only (per `project_stage_2_5_bootstrap_gates_not_loaded.md` S499).
+  gates_file: "configs/gmgp1_btc_velotrade_ensemble.gates.yaml"
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags:
+    - "gmgp1-btc"
+    - "BTC"
+    - "stage-2-5-r"
+    - "along-2m"
+    - "v2-3-bootstrap"
+    - "velotrade"

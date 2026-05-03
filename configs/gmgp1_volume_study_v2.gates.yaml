@@ -1,0 +1,226 @@
+# GMGP1 Volume Study v2 — pre-registered hypothesis gates.
+#
+# Read by scripts/analyze_volume_study_v2.py (or hand-merged into the
+# existing data-window analyzer with --gates-override). Single source of
+# truth for v2 decision rules (project rule: never hardcode gate
+# thresholds in code).
+#
+# PRE-COMMITTED 2026-05-02 (Session 522), BEFORE any v2 run is launched.
+# Do not edit after the first run completes without a decision memo.
+#
+# CONTEXT — why v2 exists:
+#   - Volume Study v1 (configs/gmgp1_volume_study.gates.yaml) ran on
+#     GMGP1 *Gold* 15-min at A_base train window (10mo, 2025-01-06 to
+#     2025-10-31). Found H1 FAIL: PF *degrades* monotonically from 500K
+#     (2.001) -> 5M (1.855); diminishing-returns rule said cap budget at
+#     500K-1M.
+#   - Data-Window Study (Axis A) at A_long (22mo, 2024-01-01 onward)
+#     subsequently revealed (S521 STRONG_GO + G6 PASS) that the v1
+#     "500K is optimum" verdict was conditional on the 10mo train. At
+#     A_long the test PF actually *climbs* from 500K (2.426) -> 2M
+#     (2.442) and the gate suite passes cleanly.
+#   - Conjectured mechanism: replay-buffer multiplicity. With 22mo of
+#     bars (~63K) at buffer_size=500000, the per-bar replay multiplicity
+#     at 2M steps is ~32x (vs ~114x at 6mo). Lower multiplicity
+#     postpones the overfitting cliff. Question: does the curve keep
+#     climbing past 2M, or does it plateau / invert at some new ceiling?
+#
+# v2 ASKS: at FIXED A_long train window (22mo), what is the productive
+#          budget ceiling? Sweep total_timesteps in {2M, 4M, 8M} and
+#          test for monotone improvement, variance behavior, the new
+#          overfitting cliff (if any), and diminishing returns.
+#
+# Reuses 5 A_long×2M seeds from data-window study unified_20260502
+# (run_ids: ba0zxoot/drwd4fuk/m4bjcriq/ro7ptpll/hgxtabl5; same HPs,
+# same fee model, same eval window). Only 4M and 8M cells are new.
+
+workstream: "gmgp1_volume_study_v2"
+test_bed: "gmgp1_sac_btc_15min"
+asset: "BTC"
+exchange: "bybit"
+data_file: "data/btc_usdt_1min_bybit.parquet"
+
+# Single train-window — A_long, the data-window study's best cell.
+train_window:
+  name: "A_long"
+  train_start_date: "2024-01-01"
+  train_end_date: "2025-10-31"
+  train_window_months: 22
+  bars_15min: 63000               # approximate; 22mo * 30d * 24h * 4
+  rationale: "data-window study STRONG_GO winner cell (S521 unified_20260502)"
+
+# Three-budget design — extends the data-window study's 2M frontier.
+step_budgets: [2000000, 4000000, 8000000]
+seeds: [123, 456, 789, 1024, 2026]
+n_seeds: 5
+n_runs_new: 10                    # 5 seeds * {4M, 8M}; 2M reused from data-window
+n_runs_total: 15                  # for analysis after merging the 2M reuse cell
+
+# Confound declarations — copied here so the analysis script can
+# sanity-check that all 15 runs share the same controlled variables.
+fixed_hp_source: "configs/gmgp1_data_window_study.yaml (v5 HPO 6xluh826 T29)"
+fee_model: "steady_state_5bps_from_step_0"
+data_window_split:
+  train: "2024-01-01 to 2025-10-31"
+  val:   "2025-11-01 to 2025-11-30"
+  test:  "2025-12-01 to 2025-12-31"
+buffer_size: 500000               # constant across budgets — multiplicity is the IV
+batch_size: 512                   # constant
+lr_actor: 0.0005462612695421805   # frozen from 6xluh826 T29
+update_interval: 4                # constant
+checkpoint_interval: 250000       # for intermediate eval points within each budget
+
+# Reuse provenance for the 2M cell — analyzer pulls these directly from WandB
+# rather than re-launching, to save 5 seeds * ~9h = 45 GPU-hours.
+reuse_2m_cell:
+  source_study: "data_window_study_unified_20260502"
+  source_window: "A_long"
+  source_budget: 2000000
+  wandb_tags_required:
+    - "data-window-study"
+    - "window-long"
+    - "budget-2m"
+  expected_run_ids:
+    - "ba0zxoot"  # seed 123
+    - "drwd4fuk"  # seed 456
+    - "m4bjcriq"  # seed 789
+    - "ro7ptpll"  # seed 1024
+    - "hgxtabl5"  # seed 2026
+
+# ---------------------------------------------------------------------------
+# Hypotheses & decision rules
+# ---------------------------------------------------------------------------
+
+hypotheses:
+  h1_monotonic_improvement:
+    description: >-
+      OOS test PF improves monotonically with total_timesteps across the
+      3-budget sweep at A_long (22mo train). PASS implies the buffer-
+      multiplicity rescue mechanism extends beyond 2M; FAIL or
+      AMBIGUOUS locates the new overfitting cliff between 2M and 8M.
+    statistic: "kendall_tau"
+    metric: "median_test_pf_per_budget"
+    tau_min: 0.6
+    p_max: 0.10
+    decision: "PASS|FAIL|AMBIGUOUS"
+
+  h2_variance_tightens:
+    description: >-
+      Per-seed CV(test PF) at the largest budget (8M) is no worse than
+      at the smallest (2M). v1 saw CV tighten 4.18%->2.87% on Gold
+      A_base; data-window saw CV tighten 4.0%->2.2% at 2M. Continued
+      tightening at 4M+8M would corroborate the rescue mechanism;
+      blow-up flags buffer-dilution instability at extreme multiplicity.
+    statistic: "cv_pf_compare"
+    rule: "cv_pf_at_8M <= cv_pf_at_2M"
+
+  h3_overfitting_onset:
+    description: >-
+      Val/test PF gap widens past some budget — overfitting indicator.
+      Gap defined as (median_val_pf - median_test_pf) per budget.
+      Threshold: gap at 8M exceeds 1.5x gap at 2M -> overfitting cliff
+      reached. Mirrors v1 H3 rule (which OK'd at ratio 1.41 < 1.5 even
+      under H1 FAIL on Gold).
+    statistic: "val_test_gap_ratio"
+    ratio_threshold: 1.5
+
+  h4_diminishing_returns:
+    description: >-
+      Marginal gain shrinks past 4M steps. If true, recommend retraining
+      the GMGP1 paper checkpoint at 4M (vs 8M). Required for cost
+      justification: 8M is 4x the GPU spend of 2M.
+    rule: "median(test_pf at 8M) - median(test_pf at 4M) < median(test_pf at 4M) - median(test_pf at 2M)"
+    decision: "STILL_GROWING|DIMINISHING|INVERTED"
+
+  h5_paper_uplift:
+    description: >-
+      Best-budget median test PF exceeds the data-window study's
+      A_long×2M median (2.442) by at least 5% relative. PASS triggers
+      the paper-checkpoint retrain at the new optimum cell. FAIL means
+      the 2M reused cell is good enough; ship it without re-spending.
+    rule: "max(median(test_pf at b) for b in {2M, 4M, 8M}) >= 2.442 * 1.05"
+    decision: "RETRAIN_AT_NEW_OPTIMUM|SHIP_2M"
+
+# ---------------------------------------------------------------------------
+# Significance gate (any pairwise "improvement" claim must pass)
+# ---------------------------------------------------------------------------
+
+significance:
+  test: "mann_whitney_u"
+  alternative: "two-sided"
+  p_max: 0.10
+  rationale: "loose alpha matches Protocol v2 Stage-2 ambiguity-band convention at small N"
+
+# ---------------------------------------------------------------------------
+# Anomaly flags (exclude from H1-H5 stats but report)
+# ---------------------------------------------------------------------------
+
+anomalies:
+  buffer_saturation:
+    description: >-
+      buffer_size=500000 is unchanged across all 3 budgets. At 8M steps
+      the replay buffer turns over ~16x. If a seed's critic_loss
+      diverges >10x its 2M-step baseline at the same step, flag as
+      buffer-confounded (mirrors v1 anomaly).
+    critic_loss_blowup_ratio: 10.0
+    blowup_check_step: 2000000
+
+  entropy_collapse:
+    description: "Protocol v2 health gate. Auto-flag any seed whose entropy crashes."
+    entropy_floor: -10.0
+
+# ---------------------------------------------------------------------------
+# Decision tree
+# ---------------------------------------------------------------------------
+
+decision_tree:
+  STRONG_GO_BIGGER:
+    when: "H1 PASS + H2 PASS + H4 STILL_GROWING + H5 RETRAIN_AT_NEW_OPTIMUM"
+    action: >-
+      Open a third volume-axis sweep at A_long * {8M, 16M, 32M} to find
+      the absolute ceiling. Retrain GMGP1 paper checkpoint at the new
+      best cell. Queue same study for SG-1-XAUUSD + GMGP1-XAUUSD.
+
+  GO_RETRAIN:
+    when: "H1 PASS or AMBIGUOUS + H4 DIMINISHING + H5 RETRAIN_AT_NEW_OPTIMUM"
+    action: >-
+      Retrain GMGP1 paper checkpoint at the highest-PF cell. Do NOT
+      extend the budget axis — diminishing returns confirmed. Queue
+      same study for SG-1-XAUUSD + GMGP1-XAUUSD.
+
+  SHIP_2M:
+    when: "H5 SHIP_2M (no >=5% uplift over reused 2M cell)"
+    action: >-
+      Retrain GMGP1 paper checkpoint at A_long * 2M (already-validated
+      cell, lowest-cost option). Document budget ceiling at 2M for
+      A_long; do not extend axis.
+
+  CLIFF:
+    when: "H1 FAIL or H4 INVERTED or H3 ratio > 1.5"
+    action: >-
+      Overfitting cliff reached between 2M and 8M. Locate via
+      intermediate budgets if needed. Retrain at the cell BEFORE the
+      cliff. Open Architect ticket if cliff < 4M (suggests the
+      multiplicity-mechanism is much more fragile at A_long than the
+      data-window study suggested).
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+
+outputs:
+  report_markdown: "results/volume_study_v2_<timestamp>/report.md"
+  verdict_json: "results/volume_study_v2_<timestamp>/verdict.json"
+  per_seed_json: "results/volume_study_v2_<timestamp>/per_seed.json"
+  pf_curve_json: "results/volume_study_v2_<timestamp>/pf_curve.json"
+  randd_log_append: "randd_log.md"
+  decision_memo_if_strong_go: ".agent/memory/decision_volume_axis_v2.md"
+
+provenance:
+  drafted_on: "2026-05-02"
+  research_artifact: ".agent/artifacts/training_data_scaling_research.md"
+  upstream_hp_run: "6xluh826"            # v5 HPO T29
+  upstream_data_window_study: "results/data_window_study_unified_20260502/"
+  twin_studies:
+    - "configs/gmgp1_volume_study.gates.yaml"        # v1 (Gold A_base)
+    - "configs/gmgp1_data_window_study.gates.yaml"   # Axis A (BTC, both budgets)

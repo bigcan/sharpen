@@ -1,30 +1,48 @@
 #!/usr/bin/env python3
-"""GMGP1-BTC Velotrade L1 ensemble-confirm (Stage 2.5, Path A, Protocol v2 S495).
+"""GMGP1-BTC Velotrade L1 ensemble-confirm (Stage 2.5-R, Protocol v2.3 + v2.4.1).
 
 BTC variant of the val-split ensemble-confirm eval. Delegates to
 `sg1.run_stage_2_5_val_selection()` — this file supplies the BTC-specific
 seed/checkpoint map, seed PFs, buffer function (Velotrade, no daily-loss gate),
-and output dir. Protocol logic (val-argmax-pf rule selection + test-window
-uplift gate) lives in the shared helper.
+and output dir. Protocol logic (val-argmax-pf rule selection + v2.3 bootstrap
+gate + v2.4.1 §11 replay-buffer purge) lives in the shared helper.
 
-Protocol (per S495 `decision_ensemble_val_selection_s495.md`, supersedes S493):
-  Phase 1: run all 4 ensemble rules + 3 solos on L1 **val** window
+Protocol (per `decision_protocol_v2_mandatory.md` + Protocol v2.3):
+  Phase 1: run all 4 ensemble rules + N solos on L1 **val** window
   Phase 2: argmax(val_PF) across ensembles → chosen_rule (no test peek)
-  Phase 3: run chosen_rule + 3 solos on L1 **test** window
-  Phase 4: uplift = chosen_rule_test_PF / best_solo_test_PF
-           >= gates.ensemble_uplift_min (1.10) → PROMOTE
-           >= gates.ensemble_ambiguous_min (1.05) → AMBIGUOUS_RERUN
-           else → SOLO_BEST_FALLBACK
+  Phase 3: run chosen_rule + N solos on L1 **test** window
+  Phase 4a: legacy uplift gate (back-compat, sanity check)
+  Phase 4b: stationary block bootstrap on per-bar returns →
+            P(PF_ens > PF_best_solo), P(MDD_ens better than MDD_best_solo)
+  Phase 4d: PROMOTE iff P_PF ≥ 0.90 AND P_MDD ≥ 0.90;
+            PROMOTE_DD_ONLY iff only MDD passes;
+            else SOLO_BEST_FALLBACK
+  Phase 4f: v2.4.1 §11 replay-buffer purge for non-selected seeds (graceful
+            no-op when --no_collect was used and replay.pkl lives on remote)
 
-Top-3 seeds from `results/gmgp1_btc_l1_rehpo_aggregate.json`
-(2026-04-23 S494-cont, trial-#48 HPs, N=10 Path A Bitfinex):
-  seed 456  PF=2.13823  (solo-recovery checkpoint at ..._102150/ — the
-                         _080059/ dir is a 0-byte stub from the init crash)
-  seed 1337 PF=2.08359
-  seed 123  PF=2.02130
+Active seed set — Stage 2.5-R for A_long × 2M (S522, 2026-05-03):
+  Triggered by L1 retrain at A_long × 2M (data-window study STRONG_GO winner;
+  see `decision_volume_axis_v2_2m_ceiling.md`). Test PFs from data-window
+  study `unified_20260502/per_seed.json`.
 
-Velotrade 2-Step gate (from `gmgp1_btc_velotrade_rehpo_l1_multiseed.yaml`):
-  max_trailing_drawdown_pct: 0.08, max_daily_loss_pct: 0.0 (disabled).
+  seed   run_id     test_PF   val_PF
+  ----   --------   -------   ------
+  123    ba0zxoot   2.4422    2.3035
+  456    drwd4fuk   2.4225    2.3328
+  789    m4bjcriq   2.4695    2.3722
+  1024   ro7ptpll   2.3670    2.3334
+  2026   hgxtabl5   2.5084    2.3800
+
+Cross-venue caveat:
+  The 5 checkpoints were trained on Bybit BTC (only source with 22mo of bars).
+  Live container deploys on Binance demo. This is a known sim-to-live gap
+  (`project_sim_to_live_gap_audit_s470.md`); Stage 2.5-R verdict establishes
+  Bybit-OOS rule selection only. Bitfinex (prior eval venue) lacks 2024 bars;
+  re-evaling there would force budget back to A_base and defeat the data-window
+  study finding.
+
+Velotrade 2-Step gate (Velotrade buffer fn, daily-loss disabled):
+  max_trailing_drawdown_pct: 0.08, max_daily_loss_pct: 0.0.
 """
 from __future__ import annotations
 import argparse
@@ -51,14 +69,22 @@ log = logging.getLogger("gmgp1-btc-ensemble-eval")
 
 
 SEED_CHECKPOINTS: Dict[int, str] = {
-    456:  "checkpoints/gmgp1-btc-velotrade-l1-rehpo-seed456_20260423_102150/checkpoint_final.pth",
-    1337: "checkpoints/gmgp1-btc-velotrade-l1-rehpo-seed1337_20260423_080059/checkpoint_final.pth",
-    123:  "checkpoints/gmgp1-btc-velotrade-l1-rehpo-seed123_20260423_080059/checkpoint_final.pth",
+    123:  "checkpoints/gmgp1-dwin-long-2m-seed123_20260502_063041/checkpoint_final.pth",
+    456:  "checkpoints/gmgp1-dwin-long-2m-seed456_20260502_063041/checkpoint_final.pth",
+    789:  "checkpoints/gmgp1-dwin-long-2m-seed789_20260502_065129/checkpoint_final.pth",
+    1024: "checkpoints/gmgp1-dwin-long-2m-seed1024_20260502_070147/checkpoint_final.pth",
+    2026: "checkpoints/gmgp1-dwin-long-2m-seed2026_20260502_071220/checkpoint_final.pth",
 }
 SEED_PFS: Dict[int, float] = {
-    456:  2.13823,
-    1337: 2.08359,
-    123:  2.02130,
+    # L1 test PF from data-window study unified_20260502/per_seed.json.
+    # Used by `_make_pf_weighted` in the ensemble; ens_mean / ens_median /
+    # ens_agreement are unaffected. The val-argmax-pf rule selector uses
+    # val PFs computed live in Phase 1, not these.
+    123:  2.4422,
+    456:  2.4225,
+    789:  2.4695,
+    1024: 2.3670,
+    2026: 2.5084,
 }
 
 
@@ -94,9 +120,11 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument(
         "--config",
-        default="configs/gmgp1_btc_velotrade_rehpo_l1_multiseed.yaml",
-        help="L1 multiseed config (must contain data.train_end_date, "
-             "val_start/end_date, test_start/end_date, gates.ensemble_uplift_min)",
+        default="configs/gmgp1_btc_along_2m_ensemble.yaml",
+        help="Stage 2.5-R config (must contain data.train_end_date, "
+             "val_start/end_date, test_start/end_date, gates.ensemble_uplift_min, "
+             "and ensemble.gates_file overlay for v2.3 bootstrap thresholds). "
+             "Default targets A_long × 2M Bybit-trained checkpoints (S522).",
     )
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     args = ap.parse_args()
@@ -120,10 +148,12 @@ def main() -> None:
         # v2.3: pass checkpoints so the swap bundle writes on PROMOTE.
         # Bundle version starts at v1; Stage 2.5-R reruns bump to v2/v3/...
         seed_checkpoints=SEED_CHECKPOINTS,
-        bundle_version="v1",
+        bundle_version="v2",                           # v1 was 2026-04-23 velotrade re-HPO
+        predecessor_version="v1",
+        trigger="L1_retrain_along_2m_S522",
     )
 
-    print("\n========== GMGP1 BTC ENSEMBLE-CONFIRM (Protocol v2.3) ==========")
+    print("\n========== GMGP1 BTC ENSEMBLE-CONFIRM (Protocol v2.3 + v2.4.1) ==========")
     print(json.dumps(verdict, indent=2, default=str))
 
 

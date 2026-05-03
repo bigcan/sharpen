@@ -1,0 +1,183 @@
+# GMGP1-BTC Velotrade Stage 3 Walk-Forward — A_long × 2M (multiseed N=5).
+#
+# Provenance:
+#   - Created 2026-05-03 (Session 522).
+#   - Stage 3 WF re-confirmation triggered by Stage 2.5-R PROMOTE
+#     (`results/gmgp1_btc_ensemble/verdict.json` — ens_pf_weighted PROMOTE,
+#     bootstrap P(PF)=0.9996, P(MDD)=0.9578).
+#   - Per Protocol v2.3 §4.5: WF re-confirmation MANDATORY after Stage 2.5-R,
+#     "temporal robustness on new data is not transitive."
+#
+# Inheritance:
+#   - data / env / agents / network / features → from `gmgp1_data_window_study.yaml`
+#     (matches the L1 training that produced ensemble_v2.tar.gz)
+#   - splitter scheme → 22mo train + 1mo val + 1mo test, 1mo rolling step,
+#     yielding exactly 4 folds within the Bybit envelope
+#   - gates → mirror `gmgp1_btc_velotrade_rehpo_l1_multiseed.yaml`, with
+#     `l1_seeds: 5` (matches the data-window seed set, not 10)
+#   - ensemble.gates_file overlay → existing
+#     `configs/gmgp1_btc_velotrade_ensemble.gates.yaml` (Velotrade buffers +
+#     v2.3 bootstrap thresholds)
+#
+# Sim-to-live caveat (carried from Stage 2.5-R config):
+#   WF training + eval are on Bybit. Live container runs on Binance demo.
+#   Cross-venue gap survives this stage; tracked under
+#   `project_sim_to_live_gap_audit_s470.md`. WF PASS validates Bybit-OOS
+#   robustness only.
+
+# ---------- DATA (Bybit, full envelope) ----------
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  # Splitter envelope; per-fold windows materialized by dispatcher.
+  start_date: "2024-01-01"
+  end_date:   "2026-04-06"
+
+splitter:
+  train_months: 22                      # A_long
+  val_months:   1
+  test_months:  1
+  step_months:  1                       # 1mo rolling → 4 folds in 27mo envelope
+  buffer_days:  0
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+# ---------- ENV (matches L1 training — research-tier max_dd, no risk wrapper) ----------
+# NOTE: Velotrade prop-firm DD measurement happens at EVAL via velotrade_buffers
+# in scripts/gmgp1_btc_ensemble_eval.py. Training stays in research-tier mode
+# to match the L1 ensemble that just got Stage 2.5-R PROMOTE. Adding env.risk
+# at training time would diverge from the validated training distribution.
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005                     # steady-state 5bps Bybit taker from step 0
+  deadband_threshold: 0.35              # v5 6xluh826 T29
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30                # research-tier (matches L1 train)
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.003159755401614352       # v5 6xluh826 T29
+    dsr_scale: 1.0
+  # NO fee_schedule, NO gap_detection (BTC perp 24/7), NO env.risk
+
+# ---------- NETWORK (matches L1) ----------
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# ---------- AGENTS (v5 HPO 6xluh826 T29 — frozen) ----------
+agents:
+  sac:
+    lr_actor: 0.0005462612695421805
+    lr_critic: 0.000866154995794675
+    lr_alpha: 0.0009625164717779418
+    gamma: 0.9535315530021778
+    tau: 0.00212659146992685
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.15930606967484204
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+# ---------- TRAINING ----------
+training:
+  total_timesteps: 2000000              # A_long × 2M (the L1 cell)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+# ---------- GATES (Stage 3 WF + upstream-stage retention) ----------
+gates:
+  # Upstream stages (retained for validate_config walk through pipeline)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 5                           # data-window cell ran 5 seeds (not 10)
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10             # legacy point-estimate (back-compat)
+  ensemble_ambiguous_min: 1.05
+  ensemble_rule_selection: val_argmax_pf
+  # Stage 3 (this config's primary gates)
+  wf_windows: 4                         # validator hard-fails if <4
+  wf_pf_floor: 1.1                      # per-fold ensemble PF floor
+  velotrade_trailing_dd_buffer_pp: 0.5  # worst EOD trail-DD must be ≤8.5% (Velotrade cap=10%)
+  # Stage 4 (downstream — recent-OOS)
+  oos_pf_floor: 1.1
+
+ensemble:
+  # v2.3 Stage 2.5 overlay — Velotrade buffer fn + bootstrap thresholds
+  # (P_PF/P_MDD ≥ 0.90). Required by `run_wf_ensemble()` for per-fold verdicts.
+  gates_file: "configs/gmgp1_btc_velotrade_ensemble.gates.yaml"
+
+  # `run_wf_ensemble()` (scripts/sg1_xauusd_ensemble_eval.py:1280) discovers
+  # per-(fold, seed) checkpoints via this glob pattern. The umbrella default
+  # (`WF_seed{seed}_fold_{fold:02d}_*`) was for the monolithic run_walk_forward
+  # path; we use the cell-launched path so the run-name prefix matches the
+  # launch_btc_along_wf_multiseed dispatcher's `gmgp1-btc-along-wf-fold{N}`
+  # prefix + launch_l1_multiseed's per-seed suffix.
+  checkpoint_pattern: "checkpoints/gmgp1-btc-along-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth"
+
+  # Seeds the umbrella expects (default is [42, 789, 456] — wrong for this run).
+  seeds: [123, 456, 789, 1024, 2026]
+
+  # Prior weights for `_make_pf_weighted` (ens_pf_weighted aggregation rule).
+  # Source: L1 test PFs from data-window study unified_20260502
+  # (results/data_window_study_unified_20260502/per_seed.json, A_long×2M cell).
+  # These are constant across folds — the rule weights actions by these priors
+  # at every step. The new WF training will produce different per-fold PFs but
+  # the umbrella uses ONE seed_pfs dict for all folds (by design, treats it as
+  # a typical-quality prior, not a per-fold ranking).
+  seed_pfs:
+    123:  2.4422
+    456:  2.4225
+    789:  2.4695
+    1024: 2.3670
+    2026: 2.5084
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                     # S488: one parent run, fold<i>/seed<j>/* namespaces
+  tags:
+    - "gmgp1-btc"
+    - "BTC"
+    - "SAC"
+    - "15min"
+    - "crypto"
+    - "velotrade"
+    - "prop-firm"
+    - "walk_forward"
+    - "wf-stage3"
+    - "along-2m"
+    - "v2-3-bootstrap"
+    - "bybit-perp"
+    - "upstream:gmgp1_data_window_study_unified_20260502"
+    - "upstream-stage25:results/gmgp1_btc_ensemble/ensemble_v2.tar.gz"
