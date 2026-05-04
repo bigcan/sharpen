@@ -29,7 +29,7 @@ scrape_configs:
       - targets: ["gmgp1-btc:9103"]
         labels:
           strategy: "gmgp1-btc"
-          broker: "crypto"
+          broker: "bybit"
       # INACTIVE: funding-arb — shelved
       # - targets: ["funding-arb:9104"]
       #   labels:
@@ -56,7 +56,7 @@ scrape_configs:
       - targets: ["sg1-btc:9109"]
         labels:
           strategy: "sg1-btc"
-          broker: "binance"
+          broker: "bybit"
 
   # INACTIVE: PRISM API — PRISM falsified (Session 345)
   # - job_name: "prism"

@@ -32,9 +32,9 @@
 # 2026-05-02: Migrated Binance demo → Bybit testnet (replacing, not parallel).
 # Soak clock for S495 Step 6 RESETS at this cutover.
 exchange:
-  name: "bybit"                        # Bybit testnet (paper trading via sandbox URLs)
-  testnet: true                        # ccxt set_sandbox_mode(True) → api-testnet.bybit.com
-  demo: false                          # demo flag is for production-URL demo accounts (different path)
+  name: "bybit"                        # Bybit MAINNET DEMO TRADING (S527-cont; testnet abandoned — broken indexPrice + thin book)
+  testnet: false                       # was true (S526 testnet) → false (S527-cont mainnet-demo cutover)
+  demo: true                           # ccxt enable_demo_trading(True) → api-demo.bybit.com (real orderbook + simulated fills)
   asset: "BTC"
   leverage: 1                          # 1:1 (user policy — Velotrade 6x is cap not floor)
   order_type: "limit"                  # Mirror gmgp1-btc — limit orders + market fallback
@@ -109,7 +109,7 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 50000.0           # Bybit testnet USDT-only (venue cutover 2026-05-02; testnet default funding)
+  initial_balance: 50000.0           # Bybit MAINNET DEMO USDT (S527-cont; auto-funded 50k coin USDT equity, totalWalletBalance ~100k; testnet path abandoned — broken indexPrice + thin book)
   deadband_threshold: 0.25
   taker_fee: 0.0005                  # 5bps crypto taker
 
