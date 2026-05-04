@@ -1102,9 +1102,15 @@ class LiveTradingEngine:
                 self._current_position = exchange_pos
                 self._total_trades += 1
                 self._total_fees += order.fee
+                # S527-cont: Bybit demo can return None for filled/avg/fee
+                # via ccxt; format with `or 0` so logging never crashes the
+                # success path (which would mask the fill as an exec error).
+                _fq = order.filled_quantity if order.filled_quantity is not None else 0.0
+                _avg = order.avg_fill_price if order.avg_fill_price is not None else 0.0
+                _fee = order.fee if order.fee is not None else 0.0
                 logger.info(
-                    f"Trade executed: {order.side} {order.filled_quantity:.6f} "
-                    f"@ {order.avg_fill_price:.2f}, fee={order.fee:.4f} USDT",
+                    f"Trade executed: {order.side} {_fq:.6f} "
+                    f"@ {_avg:.2f}, fee={_fee:.4f} USDT",
                 )
             elif order.status == "partial":
                 # FIX AUD-H06 + LIVE-01: Don't assume target on partial fill.
@@ -1118,9 +1124,11 @@ class LiveTradingEngine:
                     self._current_position = exchange_pos
                 except Exception as e:
                     logger.warning(f"Post-partial-fill position query failed: {e}")
+                _fq = order.filled_quantity if order.filled_quantity is not None else 0.0
+                _qty = order.quantity if order.quantity is not None else 0.0
                 logger.warning(
-                    f"Partial fill: {order.filled_quantity:.6f} of "
-                    f"{order.quantity:.6f} — synced position to {self._current_position:.4f}",
+                    f"Partial fill: {_fq:.6f} of "
+                    f"{_qty:.6f} — synced position to {self._current_position:.4f}",
                 )
             else:
                 logger.warning(f"Trade failed: {order.status} — {order.error}")
@@ -1495,10 +1503,18 @@ class LiveTradingEngine:
     # S502: ccxt error patterns where the order may have filled despite
     # raising. These require an immediate broker reconcile to resync the
     # internal position cache before the agent acts on stale state.
+    # S527-cont: Bybit demo `fetch_order` can return Python `None` instead
+    # of raising; the broker swallows this, fires a Market fallback that
+    # double-fills, and the engine surfaces the fault as a downstream
+    # format-string crash with no recognizable broker error string. Treat
+    # those crashes as ambiguous so reconcile fires within 1 bar.
     _AMBIGUOUS_EXECUTION_MARKERS = (
         "-1007",                      # binance: timeout, send status unknown
         "send status unknown",
         "execution status unknown",
+        "unsupported format string",  # bybit demo: NoneType.__format__ crash
+        "could not fetch order status",  # bybit demo: silent None from fetch_order
+        "nonetype",                   # bybit demo: 'NoneType' attr/subscript errors
     )
 
     @classmethod

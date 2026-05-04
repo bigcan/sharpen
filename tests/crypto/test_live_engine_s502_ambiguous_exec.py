@@ -96,6 +96,39 @@ def test_substring_overlap_is_acceptable():
     ) is True
 
 
+# S527-cont: Bybit demo's ``fetch_order`` can return Python ``None`` instead
+# of raising. The broker swallows it, fires a Market fallback that double-
+# fills, and the engine surfaces the fault as a downstream format-string
+# crash with no recognizable broker error string. The classifier must also
+# treat those crashes as ambiguous so reconcile fires within 1 bar.
+
+def test_detect_unsupported_format_string():
+    """``f"{None:.6f}"`` raises this when ``OrderResult.filled_quantity`` is None."""
+    assert LiveTradingEngine._is_ambiguous_execution_error(
+        "unsupported format string passed to NoneType.__format__",
+    ) is True
+
+
+def test_detect_could_not_fetch_order_status():
+    """Bybit demo: ``_execute_order`` cancel-path warns this when fetch_order
+    returns None — propagated up as the exception message in some paths."""
+    assert LiveTradingEngine._is_ambiguous_execution_error(
+        "Could not fetch order status for abc-123, assuming unfilled",
+    ) is True
+
+
+def test_detect_nonetype_attribute_error():
+    """``order["status"]`` on None raises ``TypeError: 'NoneType' object is
+    not subscriptable``; an attribute access raises a similar ``NoneType``
+    AttributeError. Both must classify as ambiguous."""
+    assert LiveTradingEngine._is_ambiguous_execution_error(
+        "AttributeError: 'NoneType' object has no attribute 'status'",
+    ) is True
+    assert LiveTradingEngine._is_ambiguous_execution_error(
+        "TypeError: 'NoneType' object is not subscriptable",
+    ) is True
+
+
 # ---------------------------------------------------------------------------
 # Trigger — async helper
 # ---------------------------------------------------------------------------
