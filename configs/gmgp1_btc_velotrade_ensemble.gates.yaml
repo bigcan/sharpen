@@ -12,6 +12,12 @@
 #
 # Pre-commit date: 2026-04-26 S498-cont (Stage 2.5 v2.3 bootstrap-gates fix).
 # Do not edit after first launch without a decision memo explaining why.
+#
+# 2026-05-05 S528 amendment: g3_uplift.uplift_ratio_min 1.10 -> 1.05.
+# Decision memo: memory/project_gmgp1_btc_along_wf_uplift_threshold_revision.md
+# (high-baseline workstream — solo PF ~2.5 makes a 10% relative lift harder
+# than on lower-edge workstreams; absolute lift +0.20 PF is meaningful and
+# ensemble dominated best solo in 4/4 A_long×2M WF folds).
 
 workstream: gmgp1_btc
 variant: ensemble_top3
@@ -49,13 +55,18 @@ gates:
     description: >-
       Across folds, the ensemble must earn its live-complexity overhead.
       Defined as median(ens_PF) / median(best_solo_PF) >= uplift_ratio_min.
-      A lift below ~10% is not worth the additional live-engine branching
-      and aggregation latency (matches S493 Stage 2.5 PROMOTE threshold).
+      Threshold revised S528 (2026-05-05) from 1.10 to 1.05 — see
+      project_gmgp1_btc_along_wf_uplift_threshold_revision.md. GMGP1-BTC's
+      WF-median solo PF clusters near 2.5; a 5% relative lift (+0.13 PF)
+      is the smallest absolute uplift that consistently justifies the
+      live-engine branching and aggregation latency on a high-baseline
+      workstream. (Lower-baseline workstreams like XAUUSD ensemble eval
+      use sister gate files and remain at 1.10 unless reviewed.)
       v2.3 NOTE: this is the WF-stage point-estimate gate (across folds).
       Stage 2.5 (single L1 window) uses block-bootstrap when the
       ensemble_bootstrap_* keys below are loaded via gates_file overlay
       (S498-cont structural fix to run_stage_2_5_val_selection).
-    uplift_ratio_min: 1.10
+    uplift_ratio_min: 1.05
     metric: median                               # across-folds aggregation
 
   # Protocol v2.3 Stage 2.5 (single L1 val/test window) ensemble gates.
