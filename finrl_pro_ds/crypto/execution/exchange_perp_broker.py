@@ -446,11 +446,16 @@ class ExchangePerpBroker:
                 if fee_cost <= 0:
                     fee_cost = self._estimate_fee(notional, is_maker=False)
 
+                # S527-cont: Bybit demo can populate "filled"/"average" with
+                # JSON null → dict.get returns None (the default arg only
+                # applies when the key is absent). Use explicit None check.
+                _filled = filled_order.get("filled")
+                _avg = filled_order.get("average")
                 return OrderResult(
                     asset=asset, symbol=symbol, side=side,
                     order_type="limit", quantity=quantity, price=price,
-                    filled_quantity=filled_order.get("filled", quantity),
-                    avg_fill_price=filled_order.get("average", price),
+                    filled_quantity=_filled if _filled is not None else quantity,
+                    avg_fill_price=_avg if _avg is not None else price,
                     fee=fee_cost,
                     status="filled", order_id=order["id"],
                 )
@@ -498,11 +503,14 @@ class ExchangePerpBroker:
         if fee_cost <= 0:
             fee_cost = self._estimate_fee(remaining_qty * mid_price, is_maker=False)
 
+        # S527-cont: see note above re Bybit demo None values.
+        _filled = order.get("filled")
+        _avg = order.get("average")
         return OrderResult(
             asset=asset, symbol=symbol, side=side,
             order_type="market", quantity=remaining_qty, price=mid_price,
-            filled_quantity=order.get("filled", remaining_qty),
-            avg_fill_price=order.get("average", mid_price),
+            filled_quantity=_filled if _filled is not None else remaining_qty,
+            avg_fill_price=_avg if _avg is not None else mid_price,
             fee=fee_cost,
             status="filled" if order.get("status") == "closed" else "partial",
             order_id=order.get("id", ""),
