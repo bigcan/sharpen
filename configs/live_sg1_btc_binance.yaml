@@ -1,13 +1,18 @@
-# Live Trading Config — SG-1 BTC SAC via Binance Demo (paper validation phase)
+# Live Trading Config — SG-1 BTC SAC via Bybit Testnet (paper validation phase)
 # 3-min bars, signal-gated, prop-firm trained (10% EOD trailing DD).
 #
+# NOTE: Filename retains "_binance" for backward compatibility with
+# docker-compose.yaml STRATEGY_CONFIG ref + tests/check_retrain_triggers/runbook
+# scripts. Contents are now Bybit testnet — see exchange block below.
+# Venue cutover: 2026-05-02 (Binance demo → Bybit testnet, replacing).
+#
 # Sister config: configs/live_sg1_btc_dxtrade.yaml (Velotrade DXtrade execution,
-# activated once Binance demo paper validates this strategy/checkpoint pair).
+# activated once Bybit testnet paper validates this strategy/checkpoint pair).
 #
 # ---------------------------------------------------------------------------
 # PROP-FIRM DECOUPLING (S498-cont Step 5, 2026-04-25).
 # Phase-varying DD/target/gates live in configs/deploy/velotrade/<phase>.yaml
-# overlays. Even on paper Binance demo we use the Velotrade overlay so the
+# overlays. Even on paper Bybit testnet we use the Velotrade overlay so the
 # challenge state machine + drift gates exercise the same code paths the live
 # DXtrade deploy will hit.
 #
@@ -19,20 +24,23 @@
 # (validator FAILs: `risk.static_peak` missing); pair with an overlay.
 # ---------------------------------------------------------------------------
 #
-# Auth: BINANCE_DEMO_API_KEY/SECRET env vars (compose maps SG1_BTC_BINANCE_DEMO_*
-# to the runner-expected names so SG-1 + GMGP1 demo accounts stay isolated).
+# Auth: BYBIT_TESTNET_API_KEY/SECRET env vars (compose maps
+# SG1_BTC_BYBIT_TESTNET_* to the runner-expected names so SG-1 + GMGP1 testnet
+# accounts stay isolated). Read by ExchangePerpBroker testnet branch.
 
 # --- Exchange ---
+# 2026-05-02: Migrated Binance demo → Bybit testnet (replacing, not parallel).
+# Soak clock for S495 Step 6 RESETS at this cutover.
 exchange:
-  name: "binance"                      # Binance demo trading (testnet deprecated for futures)
-  testnet: false                       # Testnet deprecated — use demo instead
-  demo: true                           # Uses demo-fapi.binance.com (paper trading)
+  name: "bybit"                        # Bybit testnet (paper trading via sandbox URLs)
+  testnet: true                        # ccxt set_sandbox_mode(True) → api-testnet.bybit.com
+  demo: false                          # demo flag is for production-URL demo accounts (different path)
   asset: "BTC"
   leverage: 1                          # 1:1 (user policy — Velotrade 6x is cap not floor)
   order_type: "limit"                  # Mirror gmgp1-btc — limit orders + market fallback
   limit_offset_pct: 0.0005             # Cross spread for immediate fill
   market_fallback_timeout: 60.0
-  data_exchange: "binance"             # OHLCV data also from Binance demo
+  data_exchange: "bybit"               # OHLCV from Bybit testnet (matches exec venue)
 
 # --- Agent ---
 # Seed 42 solo interim per Stage 2.5 AMBIGUOUS_RERUN verdict (S498-cont,
@@ -101,14 +109,14 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 5000.0            # Binance demo USDT-only (matches gmgp1-btc paper account)
+  initial_balance: 50000.0           # Bybit testnet USDT-only (venue cutover 2026-05-02; testnet default funding)
   deadband_threshold: 0.25
   taker_fee: 0.0005                  # 5bps crypto taker
 
 # --- Data source (validator Stage-0; ccxt live-fetch at runtime) ---
 data:
   source: ccxt
-  data_exchange: binance             # Bybit data feed via Binance fallback (see header)
+  data_exchange: bybit               # api-testnet.bybit.com (matches exec venue)
   frequency: 3m
   ticker: "BTC/USDT"
 
@@ -140,9 +148,10 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "sg-1", "BTC", "SAC", "3min", "binance-demo", "paper",
-         "velotrade-overlay", "signal-gated", "prop-firm", "seed42-solo"]
-  run_id: "live-sg1-btc-binance-paper-20260425"
+  tags: ["live", "sg-1", "BTC", "SAC", "3min", "bybit-testnet", "paper",
+         "velotrade-overlay", "signal-gated", "prop-firm", "seed42-solo",
+         "venue-cutover-20260502"]
+  run_id: "live-sg1-btc-bybit-testnet-paper-20260502"
 
 # --- Safety ---
 safety:
