@@ -1,0 +1,179 @@
+# SG-1 BTC Velotrade — L1 Multi-Seed Stability on EXTENDED data window (Protocol v2 Stage 2)
+#
+# S524 post-WF queue Tier A1: retrain on extended data window so the live paper
+# checkpoint (currently seed-42 SOLO_BEST_FALLBACK trained through 2025-06-30,
+# leaving ~10mo OOS) sees fresher regime data and gets a Stage 2.5 ensemble bake.
+#
+# Diff vs the original sg1_btc_velotrade_l1_multiseed.yaml (HPs are unchanged —
+# trial #44 was robust at 18mo and bar density already saturates the buffer at
+# this resolution, so we hold HPs and only shift the window):
+#   train 2024-01-01 -> 2026-01-31   (was 2024-01-01 -> 2025-06-30) — +19mo, 24mo total
+#   val   2026-02-01 -> 2026-02-28   (was 2025-07-01 -> 2025-09-30)
+#   test  2026-03-01 -> 2026-04-06   (was 2025-10-01 -> 2025-12-31; bound by parquet last_ts)
+#
+# Why HOLD the HPs (no re-HPO):
+#   * trial #44 was tuned at 5bps Bybit on 18mo BTC 3-min — same fee model, same asset,
+#     same handler, same bar density distribution; the regime extension does NOT change
+#     reward-landscape topology meaningfully.
+#   * At 3-min cadence the 24mo train window is ~350K bars; replay multiplicity at
+#     500K-step budget is ~1.4× per-bar — far below the ~32× rescue ceiling identified in
+#     decision_volume_axis_v2_2m_ceiling.md (S521/S522). The buffer-multiplicity
+#     overfit-cliff that drove GMGP1-BTC's data-window study at 15-min does not bind here.
+#
+# WHY EXTENDED (vs running the full data-window study sweep):
+#   * SG-1-BTC L1 already had N=10 seeds at 18mo — the marginal value of adding shorter
+#     windows is small; the marginal value of adding fresher data through 2026-04-06 is
+#     large (covers Q1 2026 entirely OOS-unseen by current paper checkpoint).
+#   * GPU economics: extended-window L1 = 1× cost, full sweep = 8× cost.
+#
+# DATA PROVENANCE: data/btc_usdt_1min_bybit.parquet manifest verified (S524):
+#   row_count 1189457, first_ts 2024-01-01T00:00 UTC, last_ts 2026-04-06T00:16 UTC,
+#   max_gap_bars 0, clean_ohlcv_passed true.
+#
+# UPSTREAM HP PROVENANCE (unchanged from rehpo trial #44):
+#   Re-HPO study `sg1_btc_velotrade_rehpo_20260420` best trial #44, PF=2.3031 at 5 bps
+#   Bybit taker, WandB `q9pq44ug`. CSV results/hpo_archive/sg1_btc_velotrade_rehpo_20260420.csv
+#
+# STAGE 2.5 (ensemble-confirm) hook unchanged — feeds same scripts/sg1_xauusd_ensemble_eval.py
+# pattern; gates pre-committed at configs/sg1_btc_velotrade_ensemble.gates.yaml.
+# Stage 2.5-R MANDATORY before any Stage 3 WF + paper swap (Protocol v2 §4.5).
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "multiscale"
+  train_start_date: "2024-01-01"
+  train_end_date: "2026-01-31"
+  val_start_date: "2026-02-01"
+  val_end_date: "2026-02-28"
+  test_start_date: "2026-03-01"
+  test_end_date: "2026-04-06"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  # S479 calibration values held — 24mo extension uses same vol distribution.
+  # Re-calibrate ONLY if Stage 2.5-R fails the pass-rate sanity (target ~75%).
+  atr_threshold: 0.15
+  parkinson_threshold: 0.0009
+  volume_threshold: 0.60
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005                     # steady-state 5 bps Bybit retail taker (S464)
+  deadband_threshold: 0.25              # trial #44
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 3000
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: false
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0008427308583293202       # trial #44
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.10
+    max_daily_loss_pct: 0.0
+    eod_hour_utc: 0
+    drawdown_penalty_start: 0.05
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs frozen from sg1_btc_velotrade_rehpo_20260420 trial #44 (PF=2.3031, WandB q9pq44ug).
+agents:
+  sac:
+    lr_actor: 0.00015739192475706186
+    lr_critic: 0.00007322355805160213
+    lr_alpha: 0.0000026314031405474944
+    gamma: 0.9593670398875173
+    tau: 0.0002134448307797731
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.4088157097959411
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.516294914428727
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+gates:                                 # Protocol v2 Stage 2 (S488 escalation) + Stage 2.5 (S493)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                         # S488: prop-firm workstreams require N>=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]     # S488: pre-committed escalation range
+  ensemble_uplift_min: 1.10            # S493/S495 Stage 2.5 PROMOTE threshold
+  ensemble_ambiguous_min: 1.05         # S495 AMBIGUOUS floor; below this = SOLO_BEST_FALLBACK
+  ensemble_rule_selection: val_argmax_pf  # S495
+  wf_windows: 3
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+# `ensemble:` block intentionally omitted — populated post-L1 by Stage 2.5-R reconcile
+# step (top-3 by backtest_test/profit_factor across N=10 extended-window seeds), mirroring
+# the parent sg1_btc_velotrade_l1_multiseed.yaml workflow.
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                    # S488: one parent run, seeds as seed<N>/*
+  tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade", "velotrade-wrapped",
+         "prop-firm", "propfirm", "multiseed", "l1", "steady-state", "bybit-perp",
+         "rehpo-trial44", "extended-window", "s524",
+         "upstream:sg1_btc_velotrade_rehpo_20260420"]
