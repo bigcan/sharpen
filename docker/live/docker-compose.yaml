@@ -209,8 +209,13 @@ services:
       # configs/live_gmgp1_btc_bybit.yaml.
       STRATEGY_OVERLAY: ${GMGP1_BTC_OVERLAY:-velotrade/step1}
       METRICS_PORT: "9103"
-      BINANCE_DEMO_API_KEY: ${BINANCE_DEMO_API_KEY:-}
-      BINANCE_DEMO_API_SECRET: ${BINANCE_DEMO_API_SECRET:-}
+      # 2026-05-02 venue cutover: Binance demo → Bybit testnet (replacing).
+      # Broker reads BYBIT_TESTNET_* in testnet mode (exchange_perp_broker.py:114-122).
+      # Old BINANCE_DEMO_* kept commented for rollback (see docker/live/.env).
+      BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
+      BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
+      # BINANCE_DEMO_API_KEY: ${BINANCE_DEMO_API_KEY:-}
+      # BINANCE_DEMO_API_SECRET: ${BINANCE_DEMO_API_SECRET:-}
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/gmgp1-btc-l1-multiseed_20260407_070227:/app/checkpoints/gmgp1-btc-l1-multiseed_20260407_070227:ro
       - gmgp1-btc-logs:/app/logs
@@ -285,14 +290,15 @@ services:
       - velotrade-btc-logs:/app/logs
       - velotrade-btc-state:/app/state
 
-  # --- SG-1 BTC Binance Demo (paper validation) — S498-cont Step 5 migration.
+  # --- SG-1 BTC Bybit Testnet (paper validation) — S498-cont Step 5 migration.
   # Seed 42 solo interim per Stage 2.5 AMBIGUOUS_RERUN verdict. Runs the
-  # Velotrade overlay against a Binance demo account so the challenge state
+  # Velotrade overlay against a Bybit testnet account so the challenge state
   # machine + drift gates exercise the same code paths the eventual DXtrade
   # deploy will hit. Switch STRATEGY_RUNNER → run_live_dxtrade.py + STRATEGY_CONFIG
   # → live_sg1_btc_dxtrade.yaml + DXTRADE_* env block once the Velotrade DXtrade
-  # account is provisioned and Binance demo PnL has validated the strategy.
-  # Creds: SG1_BTC_BINANCE_DEMO_* in docker/live/.env (isolated from gmgp1-btc).
+  # account is provisioned and Bybit testnet PnL has validated the strategy.
+  # Venue cutover 2026-05-02: was Binance demo, now Bybit testnet (replacing).
+  # Creds: SG1_BTC_BYBIT_TESTNET_* in docker/live/.env (isolated from gmgp1-btc).
   sg1-btc:
     <<: *crypto-strategy
     container_name: sg1-btc
@@ -309,8 +315,14 @@ services:
       STRATEGY_CONFIG: /app/configs/live_sg1_btc_binance.yaml
       STRATEGY_OVERLAY: ${SG1_BTC_OVERLAY:-velotrade/step1}
       METRICS_PORT: "9109"
-      BINANCE_DEMO_API_KEY: ${SG1_BTC_BINANCE_DEMO_API_KEY:-}
-      BINANCE_DEMO_API_SECRET: ${SG1_BTC_BINANCE_DEMO_API_SECRET:-}
+      # 2026-05-02 venue cutover: Binance demo → Bybit testnet (replacing).
+      # Per-strategy SG1_BTC_BYBIT_TESTNET_* in .env mapped to broker-expected
+      # BYBIT_TESTNET_* inside the container, keeping SG-1 + GMGP1 testnet
+      # accounts isolated. Old SG1_BTC_BINANCE_DEMO_* kept commented for rollback.
+      BYBIT_TESTNET_API_KEY: ${SG1_BTC_BYBIT_TESTNET_API_KEY:-}
+      BYBIT_TESTNET_API_SECRET: ${SG1_BTC_BYBIT_TESTNET_API_SECRET:-}
+      # BINANCE_DEMO_API_KEY: ${SG1_BTC_BINANCE_DEMO_API_KEY:-}
+      # BINANCE_DEMO_API_SECRET: ${SG1_BTC_BINANCE_DEMO_API_SECRET:-}
     volumes:
       - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030:/app/checkpoints/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030:ro
       - sg1-btc-logs:/app/logs

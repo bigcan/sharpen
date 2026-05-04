@@ -24,16 +24,21 @@
 #   python scripts/run_live.py --config configs/live_gmgp1_btc_bybit.yaml
 
 # --- Exchange ---
+# 2026-05-02: Migrated Binance demo → Bybit testnet (replacing, not parallel).
+# Soak clock for S495 Step 6 (≥30-live-day calendar gate before V7 deletion)
+# RESETS at this cutover. Bybit testnet uses ccxt set_sandbox_mode(True) →
+# api-testnet.bybit.com. Auth via BYBIT_TESTNET_API_KEY/SECRET env vars (see
+# ExchangePerpBroker resolution at finrl_pro_ds/crypto/execution/exchange_perp_broker.py:114-122).
 exchange:
-  name: "binance"                   # Binance demo trading (testnet deprecated for futures)
-  testnet: false                    # Testnet deprecated — use demo instead
-  demo: true                       # Uses demo-fapi.binance.com (paper trading)
+  name: "bybit"                     # Bybit testnet (paper trading via sandbox URLs)
+  testnet: true                     # ccxt set_sandbox_mode(True) → api-testnet.bybit.com
+  demo: false                       # demo flag is for production-URL demo accounts (different path)
   asset: "BTC"
   leverage: 1
   order_type: "limit"
   limit_offset_pct: 0.0005         # Cross spread for immediate fill
   market_fallback_timeout: 60.0     # Seconds before limit → market fallback
-  data_exchange: "binance"          # Exchange for data fetching (higher limits)
+  data_exchange: "bybit"            # OHLCV from Bybit testnet (matches execution venue)
 
 # --- Agent ---
 agent:
@@ -81,14 +86,14 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 5000.0          # Binance demo USDT-only (reset 2026-04-13)
+  initial_balance: 50000.0         # Bybit testnet USDT-only (venue cutover 2026-05-02; testnet default funding)
   deadband_threshold: 0.25         # Ignore position changes < 25%
   taker_fee: 0.00055               # Bybit futures taker fee
 
 # --- Data source (validator Stage-0; ccxt live-fetch at runtime) ---
 data:
   source: ccxt                     # Skip manifest gating — live fetch
-  data_exchange: binance           # demo-fapi.binance.com for OHLCV
+  data_exchange: bybit             # api-testnet.bybit.com for OHLCV (matches exec venue)
   frequency: 15m
   ticker: "BTC/USDT"
 
@@ -112,8 +117,8 @@ risk:
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "paper", "gmgp1-btc", "BTC", "SAC", "15min", "bybit", "velotrade", "l1-seed123", "reset-20260413"]
-  run_id: "live-btc-binance-paper-20260413"
+  tags: ["live", "paper", "gmgp1-btc", "BTC", "SAC", "15min", "bybit", "bybit-testnet", "velotrade", "l1-seed123", "venue-cutover-20260502"]
+  run_id: "live-btc-bybit-testnet-paper-20260502"
 
 # --- Safety ---
 safety:
