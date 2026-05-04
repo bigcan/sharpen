@@ -209,11 +209,17 @@ services:
       # configs/live_gmgp1_btc_bybit.yaml.
       STRATEGY_OVERLAY: ${GMGP1_BTC_OVERLAY:-velotrade/step1}
       METRICS_PORT: "9103"
-      # 2026-05-02 venue cutover: Binance demo → Bybit testnet (replacing).
-      # Broker reads BYBIT_TESTNET_* in testnet mode (exchange_perp_broker.py:114-122).
-      # Old BINANCE_DEMO_* kept commented for rollback (see docker/live/.env).
-      BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
-      BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
+      # 2026-05-04 (S527-cont) venue re-cutover: Bybit testnet → Bybit mainnet demo.
+      # Testnet abandoned — broken indexPrice (~½ of last) + 1.21% spread + thin
+      # ask-side book caused 30208 price-band rejections on every realistic buy
+      # limit + EC_NoImmediateQtyToFill on reduce-only flatten orders. See S527.
+      # Broker reads BYBIT_DEMO_* in demo mode (exchange_perp_broker.py:200-204
+      # → enable_demo_trading(True) → api-demo.bybit.com, real orderbook + sim fills).
+      # Old BYBIT_TESTNET_* + BINANCE_DEMO_* kept commented for rollback (.env).
+      BYBIT_DEMO_API_KEY: ${BYBIT_DEMO_API_KEY:-}
+      BYBIT_DEMO_API_SECRET: ${BYBIT_DEMO_API_SECRET:-}
+      # BYBIT_TESTNET_API_KEY: ${BYBIT_TESTNET_API_KEY:-}
+      # BYBIT_TESTNET_API_SECRET: ${BYBIT_TESTNET_API_SECRET:-}
       # BINANCE_DEMO_API_KEY: ${BINANCE_DEMO_API_KEY:-}
       # BINANCE_DEMO_API_SECRET: ${BINANCE_DEMO_API_SECRET:-}
     volumes:
@@ -315,12 +321,17 @@ services:
       STRATEGY_CONFIG: /app/configs/live_sg1_btc_binance.yaml
       STRATEGY_OVERLAY: ${SG1_BTC_OVERLAY:-velotrade/step1}
       METRICS_PORT: "9109"
-      # 2026-05-02 venue cutover: Binance demo → Bybit testnet (replacing).
-      # Per-strategy SG1_BTC_BYBIT_TESTNET_* in .env mapped to broker-expected
-      # BYBIT_TESTNET_* inside the container, keeping SG-1 + GMGP1 testnet
-      # accounts isolated. Old SG1_BTC_BINANCE_DEMO_* kept commented for rollback.
-      BYBIT_TESTNET_API_KEY: ${SG1_BTC_BYBIT_TESTNET_API_KEY:-}
-      BYBIT_TESTNET_API_SECRET: ${SG1_BTC_BYBIT_TESTNET_API_SECRET:-}
+      # 2026-05-04 (S527-cont) venue re-cutover: Bybit testnet → Bybit mainnet demo.
+      # See gmgp1-btc service block above for full rationale (testnet broken
+      # indexPrice + thin book → unrecoverable on the testnet venue).
+      # Per-strategy SG1_BTC_BYBIT_DEMO_* in .env mapped to broker-expected
+      # BYBIT_DEMO_* inside the container, keeping SG-1 + GMGP1 demo UIDs
+      # isolated (sg1-btc userID <ACCT_11>, gmgp1-btc userID <ACCT_10>).
+      # Old SG1_BTC_BYBIT_TESTNET_* + SG1_BTC_BINANCE_DEMO_* kept commented for rollback.
+      BYBIT_DEMO_API_KEY: ${SG1_BTC_BYBIT_DEMO_API_KEY:-}
+      BYBIT_DEMO_API_SECRET: ${SG1_BTC_BYBIT_DEMO_API_SECRET:-}
+      # BYBIT_TESTNET_API_KEY: ${SG1_BTC_BYBIT_TESTNET_API_KEY:-}
+      # BYBIT_TESTNET_API_SECRET: ${SG1_BTC_BYBIT_TESTNET_API_SECRET:-}
       # BINANCE_DEMO_API_KEY: ${SG1_BTC_BINANCE_DEMO_API_KEY:-}
       # BINANCE_DEMO_API_SECRET: ${SG1_BTC_BINANCE_DEMO_API_SECRET:-}
     volumes:
