@@ -1,0 +1,154 @@
+# GMGP1-Gold (15-min) — STEADY-STATE FEE re-HPO config (S524 post-WF queue Tier A2)
+#
+# Audit lineage: project_gmgp1_gc_steady_state_fee_audit.md (S519). The current paper
+# container (gmgp1-gold, IB MGC) runs live at taker_fee 0.000068 (~6.8bps) per
+# configs/live_gmgp1_gc_ib.yaml:97 — but the deployed v5 seed-456 checkpoint was
+# trained under the legacy 0->2bps fee curriculum from configs/gmgp1_sac_gc_15min.yaml.
+# Same disease that compressed SG-1-XAUUSD pre-S461-463; gold was on the un-audited list.
+#
+# Diff vs configs/gmgp1_sac_gc_15min.yaml:
+#   * env.taker_fee: 0.0 -> 0.000068                      (live MGC fee from step 0)
+#   * env.fee_schedule block REMOVED                       (banned by validate_config
+#                                                           check_no_fee_curriculum;
+#                                                           per decision_steady_state_fees_pattern)
+#   * hpo block: schema bumped to Protocol v2 (`enabled`, `objective`, `trials`)
+#   * gates block ADDED                                    (HPO + L1 + WF + drift/safe_mode)
+#   * wandb tags refreshed                                 (steady-state, re-hpo, s524)
+#
+# DATA SCOPE NOTE: data/cme/gc_2025_lob1_1min_stitched.parquet is 2025-only.
+# Train window left at 2025-01-06 -> 2025-08-31 (matches deployed v5 baseline). If a
+# 2026-Q1 GC extract becomes available, bump train_end_date and re-run; the fee fix
+# is the load-bearing change here and is independent of the data refresh.
+#
+# UPSTREAM: this is the pre-req for project_gmgp1_mgc_retrain_queued_s477.md (Tier 9).
+# DO NOT DELETE the original gmgp1_sac_gc_15min.yaml — it is the v5-paper baseline.
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "GC"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [15, 60, 240]          # 15-min decision, 1h trend, 4h regime
+  window_size: 30
+  features_per_scale: 8           # TC-OPT: 8 aligns Conv1d input for Tensor Cores
+  asset_class: "cme_futures"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8           # TC-OPT: must match features.features_per_scale
+  # S464 steady-state: live MGC IB fee from step 0 (configs/live_gmgp1_gc_ib.yaml:97).
+  # NO fee_schedule block — banned by validate_config.check_no_fee_curriculum.
+  taker_fee: 0.000068
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500            # 500 x 15min = 125 hours ~ 5 days
+  random_start: true
+  max_drawdown_pct: 0.30
+  scales: [15, 60, 240]
+  gap_detection: true             # CME GC closes overnight + weekends; data manifest
+  gap_atr_mult: 3.0               # max_gap_bars ~3600 (60h weekend). Zero returns >3xATR.
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+
+network:
+  scale_encoder:
+    input_size: 8                  # TC-OPT: 8 aligns Conv1d for Tensor Cores
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# Placeholder HPs — overridden by trial.suggest in HPO. Re-HPO is broad (no
+# narrow_mode) because the v5 anchor was tuned at 0bps and is not a defensible
+# prior at 6.8bps (parallel reasoning to gmgp1_btc_velotrade_hpo.yaml comment).
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000       # downstream L1 budget; HPO uses steps_per_trial below
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  objective: "profit_factor"      # BUG-01 / Protocol v2 §4 stage 1
+  trials: 50                      # broad: 10 random + 40 TPE (Protocol v2 naming)
+  steps_per_trial: 500000         # SAC needs long exploration past deadband + learning_starts
+  narrow_mode: false              # full parameter space — v5 anchor invalid at 6.8bps
+  enqueue_baseline: false
+
+gates:                            # Protocol v2 §4 — per-workstream numeric gates
+  # HPO stage
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  # L1 multi-seed stage
+  l1_seeds: 3                     # research-tier; bump to 10 if paper-promoting to prop firm
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  # Walk-forward stage
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  # Recent-OOS stage
+  oos_pf_floor: 1.1
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds. Validator
+  # (scripts/validate_config.py:check_drift_safemode_gates) runs unconditionally;
+  # declaring the full block here is required even though gmgp1-gold is currently
+  # internal-validation only (not yet a prop-firm container). Future MGC retrain
+  # ticket (S477) will inherit these.
+  drift:
+    window_bars: 400              # ~4 days continuous at 15-min cadence
+    min_bars_before_check: 200    # half-window grace before drift check trusted
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode (S491 bleed-window lesson).
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-v5", "Gold", "SAC", "15min", "MultiScale", "OHLCV", "DSR",
+         "swing", "gmgp1", "4090", "opt-10", "steady-state", "re-hpo", "s524",
+         "fee-audit"]
