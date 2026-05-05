@@ -137,12 +137,15 @@ def recompute(
         )
 
     legacy_uplift = prior.get("uplift")
-    bs_decision, bs_reason = _resolve_bootstrap_decision(
-        bootstrap_verdict, gates, legacy_uplift=legacy_uplift
-    )
+    bs_resolved = _resolve_bootstrap_decision(bootstrap_verdict, gates)
+    bs_decision = bs_resolved["decision"]
+    bs_reason = bs_resolved["reason"]
+    bs_primary_basis = bs_resolved["primary_basis"]
+    bs_thresholds = bs_resolved["thresholds_used"]
     log.info(
         f"[bootstrap] P(PF)={bootstrap_verdict.get('p_pf_ens_better')} "
-        f"P(MDD)={bootstrap_verdict.get('p_mdd_ens_better')} → {bs_decision}"
+        f"P(MDD)={bootstrap_verdict.get('p_mdd_ens_better')} → {bs_decision} "
+        f"(primary_basis={bs_primary_basis})"
     )
 
     # --- diversity audit (only if all 3 solo trajectories present) ---
@@ -175,17 +178,28 @@ def recompute(
             else None
         )
 
-    # --- compose verdict (matches v2.3 schema; legacy keys preserved) ---
-    if bs_decision == "LEGACY_GATE_DEFER":
+    # --- compose verdict (Protocol v2.5 schema; legacy keys preserved) ---
+    if bs_primary_basis == "legacy_uplift":
         decision = prior.get("legacy_decision") or prior.get("decision")
         decision_source = "legacy_uplift_v2.1"
     else:
         decision = bs_decision
-        decision_source = "bootstrap_v2.3_recomputed"
+        decision_source = "bootstrap_v2.5_recomputed"
+
+    legacy_uplift_block = {
+        "uplift_ratio": legacy_uplift,
+        "promote_threshold": float(gates["ensemble_uplift_min"]),
+        "ambiguous_band": [
+            float(gates["ensemble_ambiguous_min"]),
+            float(gates["ensemble_uplift_min"]),
+        ],
+        "would_have_decided": prior.get("legacy_decision") or prior.get("decision"),
+    }
 
     verdict = {
+        "schema_version": "2.5",
         "workstream": prior.get("workstream", workstream),
-        "protocol": "v2.3_stage_2_5_val_selection_recomputed_s498cont",
+        "protocol": "v2.5_stage_2_5_bootstrap_primary_recomputed_s526",
         "supersedes": [
             prior.get("protocol", "<unknown>"),
             "verdict.json (kept as audit trail)",
@@ -207,24 +221,36 @@ def recompute(
         "test_solo_pfs": prior.get("test_solo_pfs"),
         "best_solo_seed_on_test": best_solo_seed,
         "best_solo_test_pf": prior.get("best_solo_test_pf"),
+        # v2.5 PRIMARY: bootstrap block.
+        "bootstrap": {
+            "p_pf_ens_better": bootstrap_verdict.get("p_pf_ens_better"),
+            "p_mdd_ens_better": bootstrap_verdict.get("p_mdd_ens_better"),
+            "block_len_used": bootstrap_verdict.get("block_len_mean"),
+            "resamples": bootstrap_verdict.get("n_resamples"),
+            "thresholds_used": bs_thresholds,
+            "reason": bs_reason,
+        },
+        "bootstrap_verdict": bootstrap_verdict,
+        "bootstrap_decision": bs_decision,
+        "bootstrap_reason": bs_reason,
+        # v2.5 SECONDARY: legacy uplift demoted to audit metadata.
+        "legacy_uplift": legacy_uplift_block,
         "uplift": legacy_uplift,
         "uplift_promote_threshold": float(gates["ensemble_uplift_min"]),
         "uplift_ambiguous_threshold": float(gates["ensemble_ambiguous_min"]),
         "legacy_decision": prior.get("legacy_decision") or prior.get("decision"),
-        "bootstrap_verdict": bootstrap_verdict,
-        "bootstrap_decision": bs_decision,
-        "bootstrap_reason": bs_reason,
         "diversity_audit": diversity_audit,
         "decision": decision,
+        "primary_basis": bs_primary_basis,
         "decision_source": decision_source,
         "reason": (
-            f"[bootstrap v2.3] {bs_reason}"
-            if decision_source == "bootstrap_v2.3_recomputed"
+            f"[bootstrap v2.5] {bs_reason}"
+            if decision_source == "bootstrap_v2.5_recomputed"
             else f"[legacy uplift] {prior.get('reason', 'unknown')}"
         ),
     }
 
-    out_path = out_dir / "verdict_v2_3.json"
+    out_path = out_dir / "verdict_v2_5.json"
     out_path.write_text(json.dumps(verdict, indent=2, default=str))
     log.info(f"wrote {out_path}")
     return verdict
