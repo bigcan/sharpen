@@ -1,6 +1,9 @@
 # MCP config (contains API keys)
 .mcp.json
 
+# Local-pulled backups (Phase-2 off-host copy of agent-memory LanceDB tarballs)
+.backups/
+
 # Resolved deploy configs (base + overlay merges, per-deploy artifacts)
 configs/deploy/_resolved/
 
