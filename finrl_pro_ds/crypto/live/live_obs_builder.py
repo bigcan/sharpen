@@ -42,14 +42,12 @@ def resolve_norm_warmup_path(config: dict) -> Optional[str]:
     Two strategies can share a checkpoint directory while having different
     feature scales (e.g. sg1-xauusd `[3,15,60]` vs gmgp1-xauusd `[15,60,240]`
     both pointing at `WF_seed42_fold_07_*/`), so the buffer file is named
-    after the scales it was extracted for. Resolver looks up the
-    config-specific name first, then falls back to the legacy unsuffixed name.
+    after the scales it was extracted for.
 
     Resolution order, where ``ckpt_dir`` ranges over (1) explicit, (2) ensemble
     `_resolved_paths`, (3) solo `agent.checkpoint_path`:
         a. `features.norm_warmup_path` (explicit override)
         b. ``ckpt_dir/norm_warmup_<scales-dash-joined>.pkl``
-        c. ``ckpt_dir/norm_warmup.pkl`` (legacy unsuffixed)
         z. None → caller's LiveObsBuilder falls back to legacy rolling EMA-Z
 
     Returns the resolved path string, or None (with logger.warning).
@@ -61,7 +59,7 @@ def resolve_norm_warmup_path(config: dict) -> Optional[str]:
         return explicit
     scales = feat_cfg.get("scales") or []
     suffixed_name = f"norm_warmup_{'-'.join(str(s) for s in scales)}.pkl" if scales else None
-    candidates_per_dir = [n for n in [suffixed_name, "norm_warmup.pkl"] if n]
+    candidates_per_dir = [n for n in [suffixed_name] if n]
 
     agent_cfg = config.get("agent", {}) or {}
     ensemble_cfg = agent_cfg.get("ensemble") or {}
