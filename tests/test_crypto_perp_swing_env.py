@@ -1,7 +1,9 @@
 """Tests for CryptoPerpSwingEnv (Sync-2H)."""
 import numpy as np
+import pandas as pd
 import pytest
 
+from finrl_pro_ds.crypto.data.multiscale_crypto_handler import MultiScaleCryptoHandler
 from finrl_pro_ds.crypto.envs.crypto_perp_swing_env import CryptoPerpSwingEnv
 
 
@@ -436,3 +438,195 @@ class TestEvalFees:
         action = np.array([0.5, 0.0, 0.0], dtype=np.float32)
         env.step(action)
         assert env.cumulative_fees > 0.0, "Non-zero fees should produce costs on trade"
+
+
+# ---------------------------------------------------------------------------
+# FIND-CMGP1-03: Handler timestamp alignment under per-asset gaps.
+# ---------------------------------------------------------------------------
+
+def _build_ohlcv(asset_to_timestamps: dict[str, list[pd.Timestamp]],
+                 close_offset: dict[str, float] | None = None) -> pd.DataFrame:
+    """Build a merged OHLCV DataFrame from per-asset timestamp lists.
+
+    Each row's `close` encodes (asset_offset + hour_index) so we can verify
+    "row at canonical slot t came from asset's bar at canonical timestamp t."
+    """
+    close_offset = close_offset or {}
+    rows = []
+    for asset, ts_list in asset_to_timestamps.items():
+        offset = close_offset.get(asset, 0.0)
+        for ts in ts_list:
+            hour_id = (ts - pd.Timestamp("2025-01-01")).total_seconds() / 3600.0
+            close = offset + 100.0 + hour_id
+            rows.append({
+                "timestamp": ts,
+                "ticker": asset,
+                "open": close - 0.1,
+                "high": close + 0.5,
+                "low": close - 0.5,
+                "close": close,
+                "volume": 1000.0 + hour_id,
+            })
+    return pd.DataFrame(rows)
+
+
+def _full_grid(n_hours: int, start: str = "2025-01-01") -> list[pd.Timestamp]:
+    return list(pd.date_range(start, periods=n_hours, freq="1h"))
+
+
+def _feature_cfg(window_size: int = 10) -> dict:
+    return {
+        "scales": [1, 4, 24],
+        "window_size": window_size,
+        "obs_mode": "summary_stats",
+        "summary_feature_indices": [0, 1, 2, 6, 7],
+        "norm_span": 120,
+        "feature_set_version": "v1",
+    }
+
+
+class TestHandlerTimestampAlignment:
+    """FIND-CMGP1-03: timestamp-based alignment must survive head/middle/tail gaps."""
+
+    def test_no_gap_full_universe(self):
+        """All assets share full grid → reindex is no-op, all slots active."""
+        n_hours = 300
+        full = _full_grid(n_hours)
+        ohlcv = _build_ohlcv(
+            {"BTC": full, "ETH": full, "SOL": full},
+            close_offset={"BTC": 0.0, "ETH": 1000.0, "SOL": 2000.0},
+        )
+        handler = MultiScaleCryptoHandler(
+            ohlcv_df=ohlcv,
+            funding_df=None,
+            assets=["BTC", "ETH", "SOL"],
+            feature_config=_feature_cfg(),
+        )
+        # Canonical = full grid; every slot active for every asset.
+        assert handler._len == n_hours
+        assert handler._base_active.all()
+        assert (handler._base_close > 0).all()
+        # Per-asset close at slot t encodes (offset + 100 + t).
+        for ai, offset in enumerate([0.0, 1000.0, 2000.0]):
+            np.testing.assert_allclose(
+                handler._base_close[:, ai],
+                offset + 100.0 + np.arange(n_hours, dtype=np.float64),
+            )
+
+    def test_head_gap_does_not_corrupt_alignment(self):
+        """Asset listed late → head slots inactive, remaining slots aligned."""
+        full = _full_grid(300)
+        late_start = full[100:]  # ETH starts at hour 100
+        ohlcv = _build_ohlcv(
+            {"BTC": full, "ETH": late_start, "SOL": full},
+            close_offset={"BTC": 0.0, "ETH": 1000.0, "SOL": 2000.0},
+        )
+        handler = MultiScaleCryptoHandler(
+            ohlcv_df=ohlcv,
+            funding_df=None,
+            assets=["BTC", "ETH", "SOL"],
+            feature_config=_feature_cfg(),
+        )
+        assert handler._len == 300
+        # ETH inactive in slots 0..99, active 100..299.
+        assert not handler._base_active[:100, 1].any()
+        assert handler._base_active[100:, 1].all()
+        # ETH close at slot t (t >= 100) must be 1000+100+t (its own grid hour).
+        np.testing.assert_allclose(
+            handler._base_close[100:, 1],
+            1000.0 + 100.0 + np.arange(100, 300, dtype=np.float64),
+        )
+        # Inactive slots zero-filled → C2 mask in env will gate correctly.
+        np.testing.assert_array_equal(handler._base_close[:100, 1], 0.0)
+
+    def test_middle_gap_preserves_per_asset_alignment(self):
+        """Asset missing a middle bar → that slot inactive, no shift on later slots.
+
+        This is the bug FIND-CMGP1-03 describes: pre-fix code length-padded the
+        front, so a middle-gap asset's later bars were shifted up by one slot
+        relative to the canonical grid, silently mismatching prices and features
+        cross-section.
+        """
+        full = _full_grid(300)
+        # ETH is missing the bar at hour 150 (one middle gap).
+        eth_grid = full[:150] + full[151:]
+        ohlcv = _build_ohlcv(
+            {"BTC": full, "ETH": eth_grid, "SOL": full},
+            close_offset={"BTC": 0.0, "ETH": 1000.0, "SOL": 2000.0},
+        )
+        handler = MultiScaleCryptoHandler(
+            ohlcv_df=ohlcv,
+            funding_df=None,
+            assets=["BTC", "ETH", "SOL"],
+            feature_config=_feature_cfg(),
+        )
+        # Canonical grid is union(full, eth_grid) = full → length 300.
+        assert handler._len == 300
+        # ETH active everywhere except slot 150.
+        eth_active = handler._base_active[:, 1]
+        assert eth_active[150] == False  # noqa: E712 — explicit boolean check
+        assert eth_active[:150].all()
+        assert eth_active[151:].all()
+        # ETH close at slot 149 must be 1000+100+149 (NOT 1000+100+148, the
+        # bug-shift case). At slot 151 must be 1000+100+151.
+        assert handler._base_close[149, 1] == pytest.approx(1000.0 + 100.0 + 149.0)
+        assert handler._base_close[150, 1] == 0.0  # gap → zero-filled
+        assert handler._base_close[151, 1] == pytest.approx(1000.0 + 100.0 + 151.0)
+        # BTC and SOL unaffected.
+        np.testing.assert_allclose(
+            handler._base_close[:, 0],
+            100.0 + np.arange(300, dtype=np.float64),
+        )
+        np.testing.assert_allclose(
+            handler._base_close[:, 2],
+            2000.0 + 100.0 + np.arange(300, dtype=np.float64),
+        )
+
+    def test_tail_gap_preserves_alignment(self):
+        """Asset delisted/halted before window end → tail slots inactive."""
+        full = _full_grid(300)
+        eth_grid = full[:250]  # ETH ends at hour 249
+        ohlcv = _build_ohlcv(
+            {"BTC": full, "ETH": eth_grid, "SOL": full},
+            close_offset={"BTC": 0.0, "ETH": 1000.0, "SOL": 2000.0},
+        )
+        handler = MultiScaleCryptoHandler(
+            ohlcv_df=ohlcv,
+            funding_df=None,
+            assets=["BTC", "ETH", "SOL"],
+            feature_config=_feature_cfg(),
+        )
+        assert handler._len == 300
+        eth_active = handler._base_active[:, 1]
+        assert eth_active[:250].all()
+        assert not eth_active[250:].any()
+        # Active slots use ETH's own grid hour (1000+100+t).
+        np.testing.assert_allclose(
+            handler._base_close[:250, 1],
+            1000.0 + 100.0 + np.arange(250, dtype=np.float64),
+        )
+        np.testing.assert_array_equal(handler._base_close[250:, 1], 0.0)
+
+    def test_step_emits_active_mask(self):
+        """step() exposes per-bar active mask so consumers can verify alignment."""
+        full = _full_grid(300)
+        eth_grid = full[:150] + full[151:]
+        ohlcv = _build_ohlcv(
+            {"BTC": full, "ETH": eth_grid, "SOL": full},
+            close_offset={"BTC": 0.0, "ETH": 1000.0, "SOL": 2000.0},
+        )
+        handler = MultiScaleCryptoHandler(
+            ohlcv_df=ohlcv,
+            funding_df=None,
+            assets=["BTC", "ETH", "SOL"],
+            feature_config=_feature_cfg(),
+        )
+        handler._ptr = 150  # advance straight to the gap slot
+        out = handler.step()
+        assert out is not None
+        assert "active" in out
+        assert out["active"][0] == True   # BTC active  # noqa: E712
+        assert out["active"][1] == False  # ETH gap    # noqa: E712
+        assert out["active"][2] == True   # SOL active # noqa: E712
+        # Close zero-fill must propagate to env C2 mask.
+        assert out["close"][1] == 0.0

@@ -95,7 +95,17 @@ class MultiScaleCryptoHandler:
         self._load_data(ohlcv_df, funding_df)
 
     def _load_data(self, ohlcv_df: pd.DataFrame, funding_df: Optional[pd.DataFrame]):
-        """Split by asset, resample to scales, compute features."""
+        """Split by asset, resample to scales, compute features, align by timestamp.
+
+        FIND-CMGP1-03 fix: per-asset features and OHLCV are reindexed onto a canonical
+        timestamp grid (sorted union of all assets' resampled timestamps) per scale.
+        Slots where an asset has no bar are zero-filled and flagged inactive in
+        ``_base_active``. CryptoPerpSwingEnv's C2 mask gates positions on
+        ``close > 1e-10``, so zero-fill OHLCV propagates "no data" without further
+        wiring. For top-N universes with continuous bars, the union equals each
+        asset's grid, so reindex is a no-op and outputs are bit-identical to the
+        pre-fix path.
+        """
         # Ensure timestamp is datetime, tz-naive
         ohlcv = ohlcv_df.copy()
         ts = pd.to_datetime(ohlcv["timestamp"], utc=True)
@@ -106,145 +116,135 @@ class MultiScaleCryptoHandler:
         if self.end_date is not None:
             ohlcv = ohlcv[ohlcv["timestamp"] <= self.end_date]
 
-        # Base scale = smallest in scales list (should be 1 for 1H data)
         base_scale = min(self.scales)
         self._base_scale = base_scale
 
-        # Build canonical timestamp index from base scale
-        # Use the first asset that has data to establish the time grid
-        sample_asset = None
+        # Pre-resample each asset for each scale, store frames keyed by timestamp.
+        # asset_resampled[scale][asset] = DataFrame indexed by timestamp.
+        asset_resampled: dict[int, dict[str, pd.DataFrame]] = {s: {} for s in self.scales}
+        any_data = False
         for asset in self.assets:
             asset_df = ohlcv[ohlcv["ticker"] == asset].sort_values("timestamp")
             if len(asset_df) > 0:
-                sample_asset = asset
-                break
-        if sample_asset is None:
+                any_data = True
+            elif self.norm_cutoff_date is not None or self.start_date is not None:
+                logger.warning(f"Asset {asset} has no OHLCV data in window")
+            for scale in self.scales:
+                if scale > 1:
+                    rs = _resample_ohlcv(asset_df, scale * 60)
+                else:
+                    rs = asset_df[["timestamp", "open", "high", "low", "close", "volume"]].copy()
+                    rs = rs.reset_index(drop=True)
+                if len(rs) > 0 and len(rs) < 10:
+                    logger.warning(
+                        f"Asset {asset} has insufficient {scale}h data ({len(rs)} bars)",
+                    )
+                asset_resampled[scale][asset] = rs.set_index("timestamp").sort_index()
+        if not any_data:
             raise ValueError("No OHLCV data found for any asset")
 
-        # Get base-scale timestamps from first available asset
-        base_ohlcv = ohlcv[ohlcv["ticker"] == sample_asset].sort_values("timestamp")
-        if base_scale > 1:
-            base_resampled = _resample_ohlcv(base_ohlcv, base_scale * 60)
-        else:
-            base_resampled = base_ohlcv.copy()
-        base_timestamps = base_resampled["timestamp"].values
-
-        # Per-asset per-scale features: _scale_features[scale] = (T_scale, n_assets, 8)
-        self._scale_features: dict[int, np.ndarray] = {}
+        # Canonical timestamp grid per scale = sorted union over assets.
         self._scale_timestamps: dict[int, np.ndarray] = {}
-
         for scale in self.scales:
-            scale_minutes = scale * 60  # Convert hours to minutes for resampler
-
-            # Compute features for each asset at this scale
-            per_asset_features = []
-            scale_ts = None
-
+            union = pd.DatetimeIndex([])
             for asset in self.assets:
-                asset_ohlcv = ohlcv[ohlcv["ticker"] == asset].sort_values("timestamp")
+                union = union.union(asset_resampled[scale][asset].index)
+            self._scale_timestamps[scale] = union.values
 
-                if len(asset_ohlcv) < 10:
-                    logger.warning(f"Asset {asset} has insufficient data ({len(asset_ohlcv)} bars)")
-
-                # Resample to target scale
-                if scale > 1:
-                    resampled = _resample_ohlcv(asset_ohlcv, scale_minutes)
-                else:
-                    resampled = asset_ohlcv[["timestamp", "open", "high", "low", "close", "volume"]].copy()
-                    resampled = resampled.reset_index(drop=True)
-
-                # Compute norm cutoff index for this scale
+        # Compute features per asset on its NATIVE grid (so log_return/EMA are
+        # correct), then reindex onto the canonical grid with zero-fill for
+        # missing rows.
+        self._scale_features: dict[int, np.ndarray] = {}
+        for scale in self.scales:
+            canonical = pd.DatetimeIndex(self._scale_timestamps[scale])
+            T = len(canonical)
+            feats = np.zeros((T, self.n_assets, 8), dtype=np.float32)
+            for ai, asset in enumerate(self.assets):
+                rs_idx = asset_resampled[scale][asset]
+                if len(rs_idx) == 0:
+                    continue
+                rs = rs_idx.reset_index()
+                # Norm cutoff on the asset's native grid (LEAK-1).
                 norm_cutoff_idx = None
                 if self.norm_cutoff_date is not None:
-                    cutoff_mask = resampled["timestamp"] >= self.norm_cutoff_date
+                    cutoff_mask = rs["timestamp"] >= self.norm_cutoff_date
                     if cutoff_mask.any():
-                        norm_cutoff_idx = cutoff_mask.idxmax()
+                        norm_cutoff_idx = int(cutoff_mask.idxmax())
+                asset_features = _compute_scale_features(rs, norm_cutoff_idx, self.norm_span)
+                # Map asset native timestamps to canonical-grid positions.
+                asset_ts = pd.DatetimeIndex(rs["timestamp"].values)
+                indexer = canonical.get_indexer(asset_ts)
+                valid = indexer >= 0
+                feats[indexer[valid], ai, :] = asset_features[valid]
+            self._scale_features[scale] = feats
 
-                # Compute 8 features using shared function from multiscale_handler
-                features = _compute_scale_features(resampled, norm_cutoff_idx, self.norm_span)
-
-                # Align to common timestamp grid via reindex
-                if scale_ts is None:
-                    scale_ts = resampled["timestamp"].values
-
-                per_asset_features.append(features)
-
-            # Stack: (T_scale, n_assets, 8)
-            # Pad shorter assets to max length
-            max_len = max(f.shape[0] for f in per_asset_features)
-            aligned = []
-            for f in per_asset_features:
-                if f.shape[0] < max_len:
-                    pad = np.zeros((max_len - f.shape[0], f.shape[1]), dtype=np.float32)
-                    f = np.concatenate([pad, f], axis=0)
-                aligned.append(f)
-
-            self._scale_features[scale] = np.stack(aligned, axis=1)  # (T, N, 8)
-            self._scale_timestamps[scale] = scale_ts[:max_len] if scale_ts is not None else np.array([])
-
-        # Apply start_date trimming AFTER feature computation (EMA warmup)
-        base_features = self._scale_features[base_scale]
+        # Apply start_date trim with window_size warmup buffer on base scale.
         trim_idx = 0
-        if self.start_date is not None and len(self._scale_timestamps[base_scale]) > 0:
-            start_mask = self._scale_timestamps[base_scale] >= np.datetime64(self.start_date)
+        base_canonical_full = pd.DatetimeIndex(self._scale_timestamps[base_scale])
+        if self.start_date is not None and len(base_canonical_full) > 0:
+            start_mask = base_canonical_full >= self.start_date
             if start_mask.any():
-                trim_idx = np.argmax(start_mask)
-                trim_idx = max(0, trim_idx - self.window_size)
+                first_idx = int(np.argmax(start_mask.values))
+                trim_idx = max(0, first_idx - self.window_size)
 
-        # Trim all scales and rebuild index maps
-        for scale in self.scales:
-            if scale == base_scale:
-                self._scale_features[scale] = self._scale_features[scale][trim_idx:]
-                self._scale_timestamps[scale] = self._scale_timestamps[scale][trim_idx:]
+        if trim_idx > 0:
+            self._scale_features[base_scale] = self._scale_features[base_scale][trim_idx:]
+            self._scale_timestamps[base_scale] = self._scale_timestamps[base_scale][trim_idx:]
 
-        # Base scale data for stepping
-        base_df_full = self._scale_features[base_scale]  # (T, N, 8)
-        self._len = base_df_full.shape[0]
+        base_features = self._scale_features[base_scale]  # (T, N, 8)
+        self._len = base_features.shape[0]
+        self._base_timestamps = self._scale_timestamps[base_scale]
 
-        # Extract close prices per asset from OHLCV (base scale)
+        # Reindex per-asset OHLCV and ATR onto base canonical grid (zero-fill).
+        # Inactive slots: close=high=low=volume=0 → CryptoPerpSwingEnv C2 mask
+        # (close > 1e-10) gates positions and PnL on those slots.
+        base_canonical = pd.DatetimeIndex(self._base_timestamps)
         self._base_close = np.zeros((self._len, self.n_assets), dtype=np.float64)
         self._base_high = np.zeros((self._len, self.n_assets), dtype=np.float64)
         self._base_low = np.zeros((self._len, self.n_assets), dtype=np.float64)
         self._base_volume = np.zeros((self._len, self.n_assets), dtype=np.float64)
+        self._base_active = np.zeros((self._len, self.n_assets), dtype=bool)
+        self._base_atr = np.zeros((self._len, self.n_assets), dtype=np.float64)
+
+        # Stash native base-scale frames for sigboost (returns must be computed
+        # on the native grid to avoid spurious ±100% spikes at gap boundaries).
+        self._asset_native_base: dict[str, pd.DataFrame] = asset_resampled[base_scale]
 
         for ai, asset in enumerate(self.assets):
-            asset_ohlcv = ohlcv[ohlcv["ticker"] == asset].sort_values("timestamp")
-            if base_scale > 1:
-                asset_resampled = _resample_ohlcv(asset_ohlcv, base_scale * 60)
-            else:
-                asset_resampled = asset_ohlcv.copy().reset_index(drop=True)
+            rs_idx = asset_resampled[base_scale][asset]
+            if len(rs_idx) == 0:
+                continue
+            asset_ts = pd.DatetimeIndex(rs_idx.index)
+            indexer = base_canonical.get_indexer(asset_ts)
+            valid = indexer >= 0
+            slot = indexer[valid]
 
-            # Trim to match
-            if self.start_date is not None:
-                start_mask = asset_resampled["timestamp"] >= self.start_date
-                if start_mask.any():
-                    t_idx = max(0, start_mask.idxmax() - self.window_size)
-                    asset_resampled = asset_resampled.iloc[t_idx:].reset_index(drop=True)
+            close_vals = rs_idx["close"].values
+            high_vals = rs_idx["high"].values
+            low_vals = rs_idx["low"].values
+            volume_vals = rs_idx["volume"].values
 
-            n = min(len(asset_resampled), self._len)
-            offset = self._len - n  # Right-align if shorter
-            self._base_close[offset:, ai] = asset_resampled["close"].values[:n].astype(np.float64)
-            self._base_high[offset:, ai] = asset_resampled["high"].values[:n].astype(np.float64)
-            self._base_low[offset:, ai] = asset_resampled["low"].values[:n].astype(np.float64)
-            self._base_volume[offset:, ai] = asset_resampled["volume"].values[:n].astype(np.float64)
+            self._base_close[slot, ai] = close_vals[valid].astype(np.float64)
+            self._base_high[slot, ai] = high_vals[valid].astype(np.float64)
+            self._base_low[slot, ai] = low_vals[valid].astype(np.float64)
+            self._base_volume[slot, ai] = volume_vals[valid].astype(np.float64)
+            self._base_active[slot, ai] = True
 
-        self._base_timestamps = self._scale_timestamps[base_scale]
-
-        # Pre-compute ATR per asset on base scale for vol-regime scaling
-        self._base_atr = np.zeros((self._len, self.n_assets), dtype=np.float64)
-        for ai in range(self.n_assets):
-            close = self._base_close[:, ai]
-            high = self._base_high[:, ai]
-            low = self._base_low[:, ai]
-            prev_close = np.roll(close, 1)
-            prev_close[0] = close[0]
-            tr = np.maximum(
-                high - low,
-                np.maximum(np.abs(high - prev_close), np.abs(low - prev_close)),
+            # ATR on the asset's native grid, then reindex onto canonical.
+            close_native = close_vals.astype(np.float64)
+            high_native = high_vals.astype(np.float64)
+            low_native = low_vals.astype(np.float64)
+            prev_close = np.roll(close_native, 1)
+            if len(prev_close) > 0:
+                prev_close[0] = close_native[0]
+            tr_native = np.maximum(
+                high_native - low_native,
+                np.maximum(np.abs(high_native - prev_close), np.abs(low_native - prev_close)),
             )
-            self._base_atr[:, ai] = pd.Series(tr).rolling(14, min_periods=1).mean().values
+            atr_native = pd.Series(tr_native).rolling(14, min_periods=1).mean().values
+            self._base_atr[slot, ai] = atr_native[valid]
 
-        # Build scale index map (base -> coarser scale indices)
+        # Build scale index map (base canonical -> coarser scale canonical).
         self._scale_index_map: dict[int, np.ndarray] = {}
         for scale in self.scales:
             if scale == base_scale:
@@ -256,23 +256,27 @@ class MultiScaleCryptoHandler:
                 indices = np.clip(indices, 0, len(coarse_ts) - 1)
                 self._scale_index_map[scale] = indices
 
-        # Load funding rates
+        # Funding rates (already timestamp-aligned via reindex+ffill).
         self._base_funding = np.zeros((self._len, self.n_assets), dtype=np.float64)
         if funding_df is not None and not funding_df.empty:
             self._load_funding(funding_df)
 
-        # SigBoost V1.1: compute crypto-specific features (gated by config)
+        # SigBoost V1.1
         self._compute_sigboost_features()
 
         self._ptr = self.window_size
 
-        sigboost_str = f", sigboost={self._sigboost_features.shape}" if self._sigboost_features is not None else ""
+        sigboost_str = (
+            f", sigboost={self._sigboost_features.shape}"
+            if self._sigboost_features is not None else ""
+        )
+        active_pct = float(self._base_active.mean()) * 100.0 if self._len > 0 else 0.0
         logger.info(
             f"MultiScaleCryptoHandler loaded: {self._len} base bars ({base_scale}h), "
-            f"{self.n_assets} assets, scales={self.scales}, window={self.window_size}{sigboost_str}",
+            f"{self.n_assets} assets, scales={self.scales}, window={self.window_size}, "
+            f"active={active_pct:.1f}%{sigboost_str}",
         )
 
-        # Verify sufficient data
         if self._len < self.window_size + 10:
             raise ValueError(
                 f"Insufficient data after filtering: {self._len} bars "
@@ -325,14 +329,28 @@ class MultiScaleCryptoHandler:
                 btc_idx = i
                 break
 
-        # Pre-compute BTC returns for momentum spread
-        if btc_idx is not None:
-            btc_close = pd.Series(self._base_close[:, btc_idx], dtype=np.float64)
-            btc_ret_24 = btc_close.pct_change(24).fillna(0.0)
-            btc_ret_168 = btc_close.pct_change(168).fillna(0.0)
+        # Returns computed on each asset's NATIVE grid then reindexed onto base
+        # canonical (FIND-CMGP1-03): pct_change on the zero-filled canonical
+        # close array would produce ±100% spikes at gap boundaries.
+        base_canonical = pd.DatetimeIndex(self._base_timestamps)
+        per_asset_ret_24: list[Optional[np.ndarray]] = [None] * N
+        per_asset_ret_168: list[Optional[np.ndarray]] = [None] * N
+        for ai, asset in enumerate(self.assets):
+            rs = self._asset_native_base.get(asset)
+            if rs is None or len(rs) == 0:
+                continue
+            close_native = rs["close"].astype(np.float64)
+            r24 = close_native.pct_change(24).fillna(0.0)
+            r168 = close_native.pct_change(168).fillna(0.0)
+            per_asset_ret_24[ai] = r24.reindex(base_canonical, fill_value=0.0).values
+            per_asset_ret_168[ai] = r168.reindex(base_canonical, fill_value=0.0).values
+
+        if btc_idx is not None and per_asset_ret_24[btc_idx] is not None:
+            btc_ret_24_arr = per_asset_ret_24[btc_idx]
+            btc_ret_168_arr = per_asset_ret_168[btc_idx]
         else:
-            btc_ret_24 = pd.Series(0.0, index=range(T))
-            btc_ret_168 = pd.Series(0.0, index=range(T))
+            btc_ret_24_arr = np.zeros(T, dtype=np.float64)
+            btc_ret_168_arr = np.zeros(T, dtype=np.float64)
 
         for ai in range(N):
             funding = pd.Series(self._base_funding[:, ai], dtype=np.float64)
@@ -352,15 +370,15 @@ class MultiScaleCryptoHandler:
 
             # 3-4: momentum spread vs BTC
             if ai == btc_idx:
-                # BTC vs itself = 0
                 feats[:, ai, 3] = 0.0
                 feats[:, ai, 4] = 0.0
-            else:
-                asset_close = pd.Series(self._base_close[:, ai], dtype=np.float64)
-                asset_ret_24 = asset_close.pct_change(24).fillna(0.0)
-                asset_ret_168 = asset_close.pct_change(168).fillna(0.0)
-                feats[:, ai, 3] = (asset_ret_24 - btc_ret_24).clip(-1.0, 1.0).fillna(0.0).values
-                feats[:, ai, 4] = (asset_ret_168 - btc_ret_168).clip(-1.0, 1.0).fillna(0.0).values
+            elif per_asset_ret_24[ai] is not None:
+                feats[:, ai, 3] = np.clip(
+                    per_asset_ret_24[ai] - btc_ret_24_arr, -1.0, 1.0,
+                ).astype(np.float32)
+                feats[:, ai, 4] = np.clip(
+                    per_asset_ret_168[ai] - btc_ret_168_arr, -1.0, 1.0,
+                ).astype(np.float32)
 
         self._sigboost_features = feats
         logger.info(
@@ -380,10 +398,11 @@ class MultiScaleCryptoHandler:
                 scale_0: (n_assets, window_size, 8) or (n_assets * n_summary,)
                 scale_1: same shape
                 scale_2: same shape
-                close: (n_assets,) float64
+                close: (n_assets,) float64 — 0.0 where asset has no bar at this slot
                 atr: (n_assets,) float64
                 funding_rate: (n_assets,) float64
                 volume: (n_assets,) float64
+                active: (n_assets,) bool — True iff asset had a real bar at this slot
                 timestamp: numpy datetime64
             or None if data exhausted
         """
@@ -423,6 +442,7 @@ class MultiScaleCryptoHandler:
         result["atr"] = self._base_atr[self._ptr].copy()
         result["funding_rate"] = self._base_funding[self._ptr].copy()
         result["volume"] = self._base_volume[self._ptr].copy()
+        result["active"] = self._base_active[self._ptr].copy()
         result["timestamp"] = self._base_timestamps[self._ptr]
 
         if self._sigboost_features is not None:
