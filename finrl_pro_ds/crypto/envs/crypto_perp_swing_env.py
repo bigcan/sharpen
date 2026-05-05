@@ -166,6 +166,8 @@ class CryptoPerpSwingEnv(gym.Env):
         self._current_funding = np.zeros(self.n_assets, dtype=np.float64)
         self._current_volume = np.zeros(self.n_assets, dtype=np.float64)
         self._prev_close = np.zeros(self.n_assets, dtype=np.float64)
+        # Per-asset active mask (S531 F1: carry positions through asset halts).
+        self._current_active = np.ones(self.n_assets, dtype=bool)
 
         # SigBoost V1.1: per-asset crypto features
         self._current_sigboost: np.ndarray | None = (
@@ -220,6 +222,7 @@ class CryptoPerpSwingEnv(gym.Env):
         self._current_close[:] = 0.0
         self._current_atr[:] = 0.0
         self._prev_close[:] = 0.0
+        self._current_active[:] = True
         if self._current_sigboost is not None:
             self._current_sigboost[:] = 0.0
 
@@ -256,6 +259,10 @@ class CryptoPerpSwingEnv(gym.Env):
                 self._current_obs = self._extract_obs(first)
                 if self._current_sigboost is not None and "sigboost_features" in first:
                     self._current_sigboost = first["sigboost_features"].astype(np.float32)
+                if "active" in first:
+                    self._current_active = first["active"].astype(bool)
+                else:
+                    self._current_active = self._current_close > 1e-10
             else:
                 self._current_obs = self._empty_obs()
         else:
@@ -279,8 +286,10 @@ class CryptoPerpSwingEnv(gym.Env):
             truncated = True
             return self._get_observation(), 0.0, terminated, truncated, self._make_info(0.0)
 
-        # Save previous close
+        # Save previous close + previous active mask (S531 F1: needed to hold
+        # eff_prev stable across consecutive halt bars).
         self._prev_close = self._current_close.copy()
+        prev_active = self._current_active.copy()
 
         # 2. Update market state
         if step_data is not None:
@@ -291,6 +300,12 @@ class CryptoPerpSwingEnv(gym.Env):
             self._current_obs = self._extract_obs(step_data)
             if self._current_sigboost is not None and "sigboost_features" in step_data:
                 self._current_sigboost = step_data["sigboost_features"].astype(np.float32)
+            # Per-asset active mask (back-compat: derive from close if handler
+            # doesn't emit one — pre-S531 handlers and MockHandler).
+            if "active" in step_data:
+                self._current_active = step_data["active"].astype(bool)
+            else:
+                self._current_active = self._current_close > 1e-10
 
             # Update portfolio ATR for vol-regime scaling
             portfolio_atr = float(np.mean(self._current_atr))
@@ -299,21 +314,37 @@ class CryptoPerpSwingEnv(gym.Env):
                 self._atr_buffer = self._atr_buffer[-200:]
             self._portfolio_atr_mean = float(np.mean(self._atr_buffer))
 
-        # 3. Asset availability mask (C2)
-        asset_available = self._current_close > 1e-10
-        target_weights[~asset_available] = 0.0
+        # 3. Asset availability mask (C2) — split halt by holding state.
+        # Halted+flat: target forced to 0 (no new entry into halt).
+        # Halted+holding: target forced to current position (delta=0, carry through).
+        holding = np.abs(self.positions) > 1e-8
+        halted = ~self._current_active
+        halted_flat = halted & ~holding
+        halted_holding = halted & holding
+        target_weights[halted_flat] = 0.0
 
         # 4. Enforce gross exposure with vol-regime scaling
         effective_gross = self._get_effective_gross_exposure()
         target_weights = self._enforce_gross_exposure(target_weights, effective_gross)
+
+        # Carry halted holdings AFTER gross-enforcement so delta=0 even if the
+        # gross-cap pass would otherwise have shrunk the carried weight.
+        if halted_holding.any():
+            target_weights[halted_holding] = self.positions[halted_holding]
 
         # 5. Per-asset deadband
         delta = target_weights - self.positions
         deadband_mask = np.abs(delta) < self.deadband_threshold
         target_weights[deadband_mask] = self.positions[deadband_mask]
 
+        # Effective price for PnL: real close where active, entry_price where halted.
+        # Yields zero PnL change across halts (price_ratio = entry/entry - 1 = 0)
+        # and zero funding (funding rate is also zero-filled on inactive slots).
+        eff_close = np.where(self._current_active, self._current_close, self.entry_prices)
+        eff_prev = np.where(prev_active, self._prev_close, self.entry_prices)
+
         # 6. Calculate portfolio value BEFORE price move
-        unrealized_before = self._calc_unrealized_pnl(self._prev_close)
+        unrealized_before = self._calc_unrealized_pnl(eff_prev)
         portfolio_value_before = max(
             self.margin_balance + float(unrealized_before.sum()),
             self.initial_balance * 0.001,
@@ -325,7 +356,7 @@ class CryptoPerpSwingEnv(gym.Env):
         if (self._funding_mask is not None
                 and 0 <= ptr < len(self._funding_mask)
                 and self._funding_mask[ptr]):
-            funding_cost = self._apply_funding(self._current_close)
+            funding_cost = self._apply_funding(eff_close)
             self.cumulative_funding += funding_cost
             self.margin_balance -= funding_cost
 
@@ -336,12 +367,12 @@ class CryptoPerpSwingEnv(gym.Env):
 
         # 9. Transaction costs
         total_fees, total_slippage = self._calc_transaction_costs(
-            abs_delta, self._current_close, portfolio_value_before,
+            abs_delta, eff_close, portfolio_value_before,
         )
 
         # 10. Realize PnL on closed/reduced positions
         realized_this_step = self._realize_pnl(
-            old_positions, delta_weights, self._current_close,
+            old_positions, delta_weights, eff_close,
         )
 
         # 11. Update positions
@@ -351,7 +382,7 @@ class CryptoPerpSwingEnv(gym.Env):
 
         # 12. Update entry prices/notionals for new/increased positions
         self._update_entry_prices(
-            old_positions, delta_weights, self._current_close, portfolio_value_before,
+            old_positions, delta_weights, eff_close, portfolio_value_before,
         )
 
         # 13. Deduct costs, credit realized PnL
@@ -361,7 +392,7 @@ class CryptoPerpSwingEnv(gym.Env):
 
         # 14. Liquidation check
         if self.margin_balance < 0:
-            forced_pnl = float(self._calc_unrealized_pnl(self._current_close).sum())
+            forced_pnl = float(self._calc_unrealized_pnl(eff_close).sum())
             self.margin_balance += forced_pnl
             self.margin_balance = max(self.margin_balance, 0.0)
             self.positions[:] = 0.0
@@ -369,11 +400,14 @@ class CryptoPerpSwingEnv(gym.Env):
             self.entry_notionals[:] = 0.0
             self._bars_in_position[:] = 0
 
-        # 15. Hard risk constraints (per-asset)
-        self._apply_hard_constraints(self._current_close, portfolio_value_before)
+        # 15. Hard risk constraints (per-asset; halted assets skipped to keep
+        # bars_in_position counter and stop-loss off the stale halt price).
+        self._apply_hard_constraints(
+            eff_close, portfolio_value_before, self._current_active,
+        )
 
         # 16. Compute portfolio value
-        new_unrealized = self._calc_unrealized_pnl(self._current_close)
+        new_unrealized = self._calc_unrealized_pnl(eff_close)
         self.equity = self.margin_balance + float(new_unrealized.sum())
         self.peak_equity = max(self.peak_equity, self.equity)
 
@@ -458,10 +492,19 @@ class CryptoPerpSwingEnv(gym.Env):
         return result
 
     def _apply_hard_constraints(
-        self, current_price: np.ndarray, portfolio_value: float,
+        self,
+        current_price: np.ndarray,
+        portfolio_value: float,
+        active_mask: np.ndarray | None = None,
     ):
-        """Per-asset stop-loss and max holding timer (from GMGP2)."""
+        """Per-asset stop-loss and max holding timer (from GMGP2).
+
+        active_mask (S531 F1): when provided, halted assets are skipped — neither
+        bars_in_position nor stop-loss/max-holding fire on the stale halt price.
+        """
         for i in range(self.n_assets):
+            if active_mask is not None and not active_mask[i]:
+                continue
             if np.abs(self.positions[i]) < 1e-8:
                 self._bars_in_position[i] = 0
                 continue

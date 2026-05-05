@@ -630,3 +630,184 @@ class TestHandlerTimestampAlignment:
         assert out["active"][2] == True   # SOL active # noqa: E712
         # Close zero-fill must propagate to env C2 mask.
         assert out["close"][1] == 0.0
+
+
+# ---------------------------------------------------------------------------
+# S531 F1: env-side carry-through across halt bars.
+# Gates CMGP1 universe expansion to assets with halt history.
+# ---------------------------------------------------------------------------
+
+
+def _real_handler_env(
+    eth_grid: list[pd.Timestamp],
+    full: list[pd.Timestamp],
+    *,
+    episode_length: int = 200,
+    stop_loss_bps: float = 0.0,
+    max_holding_bars: int = 0,
+    deadband_threshold: float = 0.03,
+) -> CryptoPerpSwingEnv:
+    """Build env wired to the real MultiScaleCryptoHandler with a 3-asset gap pattern."""
+    ohlcv = _build_ohlcv(
+        {"BTC": full, "ETH": eth_grid, "SOL": full},
+        close_offset={"BTC": 0.0, "ETH": 1000.0, "SOL": 2000.0},
+    )
+    handler = MultiScaleCryptoHandler(
+        ohlcv_df=ohlcv,
+        funding_df=None,
+        assets=["BTC", "ETH", "SOL"],
+        feature_config=_feature_cfg(),
+    )
+    config = {
+        "n_assets": 3,
+        "initial_balance": 100000.0,
+        "window_size": 10,
+        "features_per_scale": 8,
+        "taker_fee": 0.0,
+        "deadband_threshold": deadband_threshold,
+        "slippage_base_bps": 0.0,
+        "slippage_impact_bps": 0.0,
+        "max_gross_exposure": 1.0,
+        "max_net_short_exposure": -0.50,
+        "episode_length": episode_length,
+        "random_start": False,
+        "max_drawdown_pct": 0.30,
+        "circuit_breaker_threshold": 0.1,
+        "stop_loss_bps": stop_loss_bps,
+        "max_holding_bars": max_holding_bars,
+        "scales": [1, 4, 24],
+        "obs_mode": "summary_stats",
+        "summary_feature_indices": [0, 1, 2, 6, 7],
+        "reward": {"mode": "dsr", "dsr_eta": 0.001, "dsr_scale": 1.0},
+        "vol_scaling": {"enabled": False},
+    }
+    return CryptoPerpSwingEnv(config=config, data_handler=handler)
+
+
+class TestHaltWhileHolding:
+    """S531 F1: env must carry positions through halt bars without realizing -100% PnL.
+
+    Pre-fix `_realize_pnl` saw close=0 on inactive bars and computed
+    price_change = 0/entry - 1 = -1, blasting -entry_notional through equity.
+    Patch consumes handler.active to freeze halted holdings: target=position
+    (delta=0), eff_close = entry_price (zero PnL across halt), bars_in_position
+    counter paused, hard constraints skipped.
+    """
+
+    def _advance_to_slot(self, env: CryptoPerpSwingEnv, target_slot: int):
+        """Step zero-action until the NEXT env.step() will land on target_slot."""
+        # After env.reset(): handler._ptr = window_size + 1 = 11 (handler.step
+        # consumed slot 10). env.step iteration k processes slot 11+k. So to
+        # land on target_slot, do `target_slot - 11` zero-action steps first.
+        n_warmup = target_slot - 11
+        assert n_warmup >= 0, f"target_slot {target_slot} < 11"
+        for _ in range(n_warmup):
+            env.step(np.zeros(3, dtype=np.float32))
+
+    def test_position_frozen_across_halt_bars(self):
+        """Open ETH at slot 160 (active), 5 halt bars 161-165, reactivate at 166.
+
+        Position, entry_price, entry_notional, bars_in_position all unchanged
+        across the halt; equity stable; PnL resumes correctly on reactivation.
+        """
+        full = _full_grid(300)
+        # ETH halts hours 161..165 (5 bars).
+        eth_grid = full[:161] + full[166:]
+        env = _real_handler_env(eth_grid, full, episode_length=300)
+        env.reset()
+
+        # Land at slot 160 (ETH active, last bar before halt).
+        self._advance_to_slot(env, 160)
+        assert env._current_active[1], "ETH should be active at slot 160"
+
+        # Open ETH long position.
+        env.step(np.array([0.0, 0.5, 0.0], dtype=np.float32))
+        assert env._current_active[1], "ETH still active just after open"
+        assert env.positions[1] > 0.4, "ETH position opened"
+
+        eth_pos_at_open = float(env.positions[1])
+        eth_entry_at_open = float(env.entry_prices[1])
+        eth_notional_at_open = float(env.entry_notionals[1])
+        eth_bars_at_open = int(env._bars_in_position[1])
+        margin_at_open = float(env.margin_balance)
+        equity_at_open = float(env.equity)
+
+        # Entry price should be ETH's slot-160 close = 1000+100+160 = 1260.
+        assert eth_entry_at_open == pytest.approx(1260.0, rel=1e-9)
+        assert eth_notional_at_open == pytest.approx(0.5 * 100000.0, rel=1e-6)
+
+        # Step through 5 halt bars (slots 161..165).
+        for halt_step in range(5):
+            env.step(np.array([0.0, 0.5, 0.0], dtype=np.float32))
+            assert not env._current_active[1], (
+                f"ETH should be halted at halt_step {halt_step}"
+            )
+            # Position carry-through invariants:
+            assert env.positions[1] == pytest.approx(eth_pos_at_open, rel=1e-12), (
+                f"halt_step {halt_step}: position changed"
+            )
+            assert env.entry_prices[1] == pytest.approx(eth_entry_at_open, rel=1e-12)
+            assert env.entry_notionals[1] == pytest.approx(eth_notional_at_open, rel=1e-12)
+            assert env._bars_in_position[1] == eth_bars_at_open, (
+                f"halt_step {halt_step}: bars_in_position incremented during halt"
+            )
+            # Margin unchanged: BTC/SOL flat → no funding/fees from them either.
+            assert env.margin_balance == pytest.approx(margin_at_open, rel=1e-9)
+            # Equity unchanged: PnL contribution from ETH = 0 (eff_close=entry_price).
+            assert env.equity == pytest.approx(equity_at_open, rel=1e-9)
+
+        # Reactivation at slot 166: ETH close = 1000+100+166 = 1266.
+        env.step(np.array([0.0, 0.5, 0.0], dtype=np.float32))
+        assert env._current_active[1], "ETH should be active again at slot 166"
+
+        # Position still unchanged (delta=0 because target=carried position via deadband).
+        assert env.positions[1] == pytest.approx(eth_pos_at_open, rel=1e-12)
+        assert env.entry_prices[1] == pytest.approx(eth_entry_at_open, rel=1e-12)
+        assert env.entry_notionals[1] == pytest.approx(eth_notional_at_open, rel=1e-12)
+
+        # PnL resumes: unrealized = +1 * notional * (1266/1260 - 1).
+        expected_pnl = eth_notional_at_open * (1266.0 / 1260.0 - 1.0)
+        actual_unrealized = env._calc_unrealized_pnl(env._current_close)[1]
+        assert actual_unrealized == pytest.approx(expected_pnl, rel=1e-9)
+
+        # bars_in_position now increments on the active bar.
+        assert env._bars_in_position[1] == eth_bars_at_open + 1
+
+    def test_no_open_during_halt(self):
+        """Agent cannot open a position into a halted asset (halted_flat → target=0)."""
+        full = _full_grid(300)
+        eth_grid = full[:161] + full[166:]
+        env = _real_handler_env(eth_grid, full, episode_length=300)
+        env.reset()
+
+        # Land at slot 161 (first ETH halt bar; ETH is flat).
+        self._advance_to_slot(env, 161)
+        # Try to open ETH long at the halt bar.
+        env.step(np.array([0.0, 0.5, 0.0], dtype=np.float32))
+        assert not env._current_active[1], "ETH halted at slot 161"
+        assert env.positions[1] == 0.0, "Open into halted asset must be rejected"
+        assert env.entry_prices[1] == 0.0
+        assert env.entry_notionals[1] == 0.0
+
+    def test_halted_holding_skips_stop_loss_on_zero_price(self):
+        """With stop_loss_bps active, a held position must not be force-flatted by
+        the halt's zero-fill close (would otherwise trip a 100% loss stop).
+        """
+        full = _full_grid(300)
+        eth_grid = full[:161] + full[166:]
+        # 50bps stop-loss — would fire instantly if hard_constraints saw close=0.
+        env = _real_handler_env(eth_grid, full, episode_length=300, stop_loss_bps=50.0)
+        env.reset()
+
+        # Open at slot 160.
+        self._advance_to_slot(env, 160)
+        env.step(np.array([0.0, 0.5, 0.0], dtype=np.float32))
+        eth_pos_at_open = float(env.positions[1])
+        assert eth_pos_at_open > 0.4
+
+        # First halt bar (slot 161): position must survive.
+        env.step(np.array([0.0, 0.5, 0.0], dtype=np.float32))
+        assert not env._current_active[1]
+        assert env.positions[1] == pytest.approx(eth_pos_at_open, rel=1e-12), (
+            "Stop-loss falsely triggered by halt zero-fill close"
+        )
