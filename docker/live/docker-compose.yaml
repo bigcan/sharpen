@@ -585,6 +585,37 @@ services:
           memory: 512M
           cpus: "0.5"
 
+  # ---------------------------------------------------------------------------
+  # Nightly LanceDB backup sidecar for agent-memory.
+  # busybox crond runs 0 3 * * * UTC -> tar gz of /data/lancedb/v1 into
+  # the agent-memory-backups named volume, retaining 30 days.
+  # See docker/live/agent-memory-backup/{Dockerfile,backup.sh,crontab}.
+  # ---------------------------------------------------------------------------
+  agent-memory-backup:
+    build:
+      context: ./agent-memory-backup
+      dockerfile: Dockerfile
+    image: finrl-agent-memory-backup:1.0.0
+    container_name: agent-memory-backup
+    profiles: [memory, all]
+    environment:
+      TZ: UTC
+      BACKUP_RETENTION_DAYS: "30"
+      BACKUP_DIR: /backups
+      SOURCE_DIR: /data/lancedb
+    volumes:
+      - agent-memory-data:/data/lancedb:ro
+      - agent-memory-backups:/backups
+    networks: [finrl-net]
+    depends_on:
+      - agent-memory
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+          cpus: "0.25"
+
 networks:
   finrl-net:
     driver: bridge
@@ -614,4 +645,5 @@ volumes:
   velotrade-btc-state:
   hyperliquid-data:
   agent-memory-data:
+  agent-memory-backups:
   ollama-models:
