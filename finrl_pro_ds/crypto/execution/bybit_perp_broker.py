@@ -340,6 +340,13 @@ class BybitPerpBroker:
 
             price = float(self._exchange.price_to_precision(symbol, price))
 
+            # S527-cont Phase 2: see ExchangePerpBroker._detect_fill_after_cancel.
+            pos_before_weight: float | None = None
+            try:
+                pos_before_weight = await self.get_single_position(asset)
+            except Exception as e:
+                logger.warning(f"Phase 2 pre-order pos snapshot failed: {e}")
+
             order = await self._exchange.create_order(
                 symbol=symbol,
                 type="limit",
@@ -381,12 +388,10 @@ class BybitPerpBroker:
                 await self._exchange.cancel_order(order["id"], symbol)
             except Exception:
                 pass
-            # Fetch actual fill status after cancel to avoid double-execution
-            try:
-                final_order = await self._exchange.fetch_order(order["id"], symbol)
-                already_filled = float(final_order.get("filled", 0) if final_order else 0)
-            except Exception:
-                logger.warning(f"Could not fetch order status for {order['id']}, assuming unfilled")
+            already_filled = await self._detect_fill_after_cancel(
+                order_id=order["id"], symbol=symbol, asset=asset, side=side,
+                mid_price=mid_price, pos_before_weight=pos_before_weight,
+            )
 
             # Subtract partial fill from remaining quantity to avoid double-sizing
             remaining_qty = max(quantity - already_filled, 0.0)
@@ -450,6 +455,61 @@ class BybitPerpBroker:
             elapsed += poll_interval
 
         return None  # Timeout
+
+    async def _detect_fill_after_cancel(
+        self,
+        order_id: str,
+        symbol: str,
+        asset: str,
+        side: str,
+        mid_price: float,
+        pos_before_weight: float | None,
+    ) -> float:
+        """Determine how much of a cancelled limit actually filled.
+
+        S527-cont Phase 2: prefer signed position-delta detection over
+        ``fetch_order``. Bybit demo's ``fetch_order`` can return Python
+        ``None`` after a cancel even when the limit fully filled at the
+        exchange. Trusting the position delta closes the bug class.
+        Falls back to ``fetch_order`` when the snapshot path is unusable.
+        Returns the fill quantity in contracts (always >= 0).
+        """
+        if pos_before_weight is not None:
+            try:
+                pos_after_weight = await self.get_single_position(asset)
+                balance = await self._exchange.fetch_balance()
+                total_equity = float(balance.get("total", {}).get("USDT", 0))
+                if total_equity > 0 and mid_price > 0:
+                    delta_weight = pos_after_weight - pos_before_weight
+                    expected_sign = 1.0 if side == "buy" else -1.0
+                    if delta_weight * expected_sign < 0:
+                        logger.warning(
+                            f"Phase 2 fill detection: pos delta {delta_weight:+.4f} "
+                            f"opposite of {side} direction; treating as zero fill",
+                        )
+                        return 0.0
+                    delta_contracts = abs(delta_weight) * total_equity / mid_price
+                    logger.info(
+                        f"Phase 2 fill detection ({order_id}): pos "
+                        f"{pos_before_weight:+.4f} → {pos_after_weight:+.4f} "
+                        f"delta_contracts={delta_contracts:.6f}",
+                    )
+                    return float(delta_contracts)
+                logger.warning(
+                    "Phase 2 fill detection unavailable (zero equity or price); "
+                    "falling back to fetch_order",
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Phase 2 post-cancel snapshot failed: {e}; falling back to fetch_order",
+                )
+
+        try:
+            final_order = await self._exchange.fetch_order(order_id, symbol)
+            return float(final_order.get("filled", 0) if final_order else 0)
+        except Exception:
+            logger.warning(f"Could not fetch order status for {order_id}, assuming unfilled")
+            return 0.0
 
     def _estimate_fee(self, notional: float, is_maker: bool) -> float:
         """Estimate fee for a trade."""
