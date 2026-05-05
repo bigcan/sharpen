@@ -524,14 +524,48 @@ def check_l1_multiseed(cfg: dict, r: ValidationResult) -> None:
                "stage 2 (S488) recommends N>=10 for CV-estimator reliability")
 
 
+def _load_ensemble_gates_overlay(cfg: dict) -> dict:
+    """Mirror `sg1_xauusd_ensemble_eval._load_gates_with_overlay` for validation.
+
+    The Stage 2.5 helper merges `ensemble.gates_file` over the inline `gates:`
+    block at runtime (S498-cont fix, commit `b007fb2d`). This validator must
+    see the same effective gates so prop-firm configs that delegate bootstrap
+    thresholds to a standalone yaml file don't FAIL validation while passing
+    at runtime. Returns a NEW dict; caller's cfg is not mutated.
+    """
+    gates = dict((cfg.get("gates") or {}))
+    gates_file = (cfg.get("ensemble") or {}).get("gates_file")
+    if not gates_file:
+        return gates
+    gates_path = Path(gates_file)
+    if not gates_path.is_absolute():
+        gates_path = Path.cwd() / gates_path
+    if not gates_path.exists():
+        return gates
+    try:
+        with open(gates_path, encoding="utf-8") as f:
+            standalone = yaml.safe_load(f) or {}
+    except Exception:
+        return gates
+    standalone_gates = (standalone.get("gates") or {})
+    if standalone_gates:
+        gates.update(standalone_gates)
+    return gates
+
+
 def check_ensemble_confirm(cfg: dict, r: ValidationResult) -> None:
-    """Stage 2.5 gates (Protocol v2 §4, S493 codification).
+    """Stage 2.5 gates (Protocol v2.5 §4, S526 bootstrap-primary refinement).
 
     Prop-firm / live-capital workstreams MUST pass Stage 2.5 before Stage 3.
     Non-prop-firm workstreams may opt in via `wandb.tags` or gates block, but
     the stage is advisory for them (warn, do not fail).
+
+    Protocol v2.5 (S526): block-bootstrap thresholds are PRIMARY for prop-firm
+    workstreams. The legacy `ensemble_uplift_min` point gate is demoted to an
+    audit-only metric (still encouraged for diff against historical decisions
+    but no longer fails validation when missing).
     """
-    gates = cfg.get("gates", {}) or {}
+    gates = _load_ensemble_gates_overlay(cfg)
     ens = cfg.get("ensemble", {}) or {}
     tags = cfg.get("wandb", {}).get("tags", []) or []
     prop_firm = any(t in tags for t in ("prop-firm", "propfirm", "FTMO", "velotrade"))
@@ -565,14 +599,77 @@ def check_ensemble_confirm(cfg: dict, r: ValidationResult) -> None:
             "be promoted to deploy without independent uplift evidence."
         )
 
-    # Gate: uplift floor must be declared per-workstream (no hardcoded default
-    # in code — CLAUDE.md anti-pattern rule).
-    if "ensemble_uplift_min" not in gates:
+    # --- Rules 1-2 (v2.5): bootstrap PROMOTE thresholds REQUIRED for prop-firm.
+    bootstrap_keys_hint = (
+        "Copy the four `ensemble_bootstrap_p_pf_promote` / "
+        "`ensemble_bootstrap_p_mdd_promote` / `ensemble_bootstrap_p_pf_ambiguous` / "
+        "`ensemble_bootstrap_resamples` keys from a sister "
+        "<workstream>_ensemble.gates.yaml (e.g. configs/sg1_xauusd_ensemble.gates.yaml). "
+        "Defaults: 0.90 / 0.90 / 0.75 / 10000."
+    )
+    p_pf_promote = gates.get("ensemble_bootstrap_p_pf_promote")
+    if p_pf_promote is None:
         msg = (
-            "gates.ensemble_uplift_min not set — Stage 2.5 pre-committed "
-            "threshold. Protocol v2 default is 1.10; add to gates YAML."
+            "gates.ensemble_bootstrap_p_pf_promote not set — Protocol v2.5 "
+            "Stage 2.5 PRIMARY gate. " + bootstrap_keys_hint
         )
         r.fail(msg) if prop_firm else r.warn(msg)
+
+    p_mdd_promote = gates.get("ensemble_bootstrap_p_mdd_promote")
+    if p_mdd_promote is None:
+        msg = (
+            "gates.ensemble_bootstrap_p_mdd_promote not set — Protocol v2.5 "
+            "Stage 2.5 PRIMARY gate. " + bootstrap_keys_hint
+        )
+        r.fail(msg) if prop_firm else r.warn(msg)
+
+    # --- Rule 3 (v2.5): resamples is recommended; warn (not fail) when missing.
+    if "ensemble_bootstrap_resamples" not in gates:
+        r.warn(
+            "gates.ensemble_bootstrap_resamples not set — defaulting to 10000. "
+            "Add explicitly to lock the bootstrap budget."
+        )
+
+    # --- Rule 6 (v2.5): sanity-bound check on p_pf_promote.
+    if p_pf_promote is not None:
+        try:
+            p_pf_promote_f = float(p_pf_promote)
+            if not (0.80 <= p_pf_promote_f <= 0.99):
+                r.warn(
+                    f"gates.ensemble_bootstrap_p_pf_promote={p_pf_promote_f} "
+                    "outside sanity bound [0.80, 0.99]. Lower values weaken the "
+                    "noise-aware promote criterion; higher values rarely fire. "
+                    "Per-asset-class overrides below 0.80 require a decision memo."
+                )
+        except (TypeError, ValueError):
+            r.fail(
+                f"gates.ensemble_bootstrap_p_pf_promote={p_pf_promote!r} is not numeric"
+            )
+
+    # --- Rule 7 (v2.5): ordering invariant ambiguous < promote.
+    p_pf_ambiguous = gates.get("ensemble_bootstrap_p_pf_ambiguous")
+    if p_pf_ambiguous is not None and p_pf_promote is not None:
+        try:
+            if float(p_pf_ambiguous) >= float(p_pf_promote):
+                r.fail(
+                    f"gates.ensemble_bootstrap_p_pf_ambiguous={p_pf_ambiguous} "
+                    f">= ensemble_bootstrap_p_pf_promote={p_pf_promote} — ambiguous "
+                    "floor must be strictly below promote threshold (otherwise the "
+                    "AMBIGUOUS_BOOT band is empty)."
+                )
+        except (TypeError, ValueError):
+            r.fail(
+                f"gates.ensemble_bootstrap_p_pf_ambiguous={p_pf_ambiguous!r} is not numeric"
+            )
+
+    # --- Rule 4-5 (v2.5): legacy uplift demoted to audit-only — WARN-not-FAIL.
+    if "ensemble_uplift_min" not in gates:
+        if prop_firm:
+            r.warn(
+                "gates.ensemble_uplift_min not set — demoted to audit/sanity "
+                "in Protocol v2.5 (bootstrap is primary), but recommended for "
+                "diff against historical v2.1/v2.3 decisions. Default 1.10."
+            )
     else:
         uplift_min = gates.get("ensemble_uplift_min")
         try:
@@ -586,7 +683,13 @@ def check_ensemble_confirm(cfg: dict, r: ValidationResult) -> None:
                 "AMBIGUOUS-band floor. Two-point evidence suggests ≥1.10 is "
                 "the load-bearing threshold."
             )
-        r.ok(f"ensemble uplift gate = {uplift_min}×")
+        r.ok(f"ensemble uplift gate (audit-only) = {uplift_min}×")
+
+    if p_pf_promote is not None and p_mdd_promote is not None:
+        r.ok(
+            f"ensemble bootstrap gates = P(PF)≥{p_pf_promote}, "
+            f"P(MDD)≥{p_mdd_promote}"
+        )
 
 
 def check_wf(cfg: dict, r: ValidationResult) -> None:
