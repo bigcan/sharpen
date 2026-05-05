@@ -37,16 +37,19 @@ gates:
   l1_pf_cv_ambiguous: [0.22, 0.38]             # auto-extend to N=20 if CV in range
   l1_pf_floor: 1.0                             # per-seed median PF >= 1.0
 
-  # ----- Stage 2.5 ensemble (Protocol v2.3 + S495 val-selection) -----
-  # Stage 2.5 uses block-bootstrap on per-bar returns to compute paired
-  # P(ens > solo) on PF + MDD. Pre-committed at M5 per
-  # project_stage_2_5_bootstrap_gates_not_loaded.md.
-  ensemble_bootstrap_p_pf_promote: 0.90
-  ensemble_bootstrap_p_mdd_promote: 0.90
+  # ----- Stage 2.5 ensemble (Protocol v2.5 + S495 val-selection) -----
+  # Block-bootstrap on per-bar returns is the PRIMARY gate (S526). Legacy
+  # uplift demoted to audit-only. See
+  # decision_protocol_v25_bootstrap_primary.md.
+  # === Protocol v2.5 PRIMARY ===
+  ensemble_bootstrap_p_pf_promote: 0.90         # P(ens_PF > solo_PF) >= 0.90 for PROMOTE
+  ensemble_bootstrap_p_mdd_promote: 0.90        # P(ens_MDD better) >= 0.90 for PROMOTE on DD channel
+  ensemble_bootstrap_p_pf_ambiguous: 0.75       # v2.5 ambiguous floor on P(PF)
   ensemble_bootstrap_resamples: 10000
   ensemble_bootstrap_block_len: null            # null → auto = sqrt(n_bars)
-  ensemble_uplift_min: 1.10                     # legacy point-estimate; secondary
-  ensemble_ambiguous_min: 1.05
+  # === Protocol v2.5 SECONDARY (audit-only) ===
+  ensemble_uplift_min: 1.10                     # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05                  # legacy ambiguous floor (audit-only in v2.5)
   ensemble_top_k: 3
   ensemble_diversity_lambda: 1.0                # PF − λ * max_corr_with_already_selected
 

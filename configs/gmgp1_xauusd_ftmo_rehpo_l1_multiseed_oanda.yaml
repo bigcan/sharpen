@@ -117,8 +117,10 @@ gates:                               # Protocol v2 Stage 2 (S488 escalation)
   l1_pf_cv_max: 0.30
   l1_pf_floor: 1.2
   l1_pf_cv_ambiguous: [0.22, 0.38]   # S488: pre-committed escalation range
-  ensemble_uplift_min: 1.10          # S493→S495 Stage 2.5 PROMOTE threshold (pre-committed)
-  ensemble_ambiguous_min: 1.05       # S495 AMBIGUOUS floor; below this = SOLO_BEST_FALLBACK
+  # Protocol v2.5: bootstrap is PRIMARY (S526); legacy uplift below = audit-only.
+  ensemble_uplift_min: 1.10          # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05       # legacy ambiguous floor (audit-only in v2.5)
+  ensemble_bootstrap_p_pf_ambiguous: 0.75  # v2.5 PRIMARY: AMBIGUOUS_BOOT band floor on P(PF)
   ensemble_rule_selection: val_argmax_pf  # S495: pick aggregation rule on val split (was: implicit canonical=ens_agreement)
   wf_windows: 4
   wf_pf_floor: 1.1
