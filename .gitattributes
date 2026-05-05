@@ -5,3 +5,9 @@
 docker/live/*.sh text eol=lf
 scripts/*.sh text eol=lf
 *.sh text eol=lf
+
+# Files copied verbatim into Linux containers (Dockerfile COPY, busybox crond)
+# must stay LF — busybox crond chokes on CRLF in /etc/crontabs/root and
+# `docker build` will silently bake CRLF shebangs into intermediate images.
+docker/live/**/Dockerfile text eol=lf
+docker/live/**/crontab text eol=lf
