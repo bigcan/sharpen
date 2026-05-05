@@ -68,8 +68,13 @@ def recompute(
     gates_file: Path,
     legacy_promote: float,
     legacy_ambiguous: float,
+    out_dir_override: Path | None = None,
 ) -> dict:
-    out_dir = Path(f"results/{workstream}_ensemble")
+    out_dir = (
+        Path(out_dir_override)
+        if out_dir_override is not None
+        else Path(f"results/{workstream}_ensemble")
+    )
     if not out_dir.exists():
         raise FileNotFoundError(f"results dir missing: {out_dir}")
 
@@ -101,30 +106,33 @@ def recompute(
         f"legacy_promote={gates['ensemble_uplift_min']}"
     )
 
-    # --- load trajectories (test split only — that's where the verdict bites) ---
+    # --- bootstrap: prefer cached if present, else recompute from trajectories ---
     test_dir = out_dir / "test"
-    chosen_traj = _load_trajectory(test_dir / f"{chosen_rule}_trajectory.parquet")
-    solo_traj = _load_trajectory(test_dir / f"solo_{best_solo_seed}_trajectory.parquet")
-
-    chosen_returns = _per_bar_returns(chosen_traj)
-    solo_returns = _per_bar_returns(solo_traj)
-    if chosen_returns.size != solo_returns.size:
-        n_common = min(chosen_returns.size, solo_returns.size)
-        log.warning(
-            f"trajectory length mismatch: chosen={chosen_returns.size} "
-            f"solo={solo_returns.size}; truncating to {n_common}"
-        )
-        chosen_returns = chosen_returns[:n_common]
-        solo_returns = solo_returns[:n_common]
-
     bs_n = int(gates.get("ensemble_bootstrap_resamples", 10000))
     bs_block = gates.get("ensemble_bootstrap_block_len", None)
     bs_block_f = float(bs_block) if bs_block is not None else None
 
-    if "bootstrap_verdict" in prior and prior["bootstrap_verdict"].get("p_pf_ens_better") is not None:
+    has_cached_bootstrap = (
+        "bootstrap_verdict" in prior
+        and prior["bootstrap_verdict"].get("p_pf_ens_better") is not None
+    )
+    if has_cached_bootstrap:
         log.info("[bootstrap] reusing cached bootstrap_verdict from prior verdict.json")
         bootstrap_verdict = prior["bootstrap_verdict"]
     else:
+        # No cache → must recompute from cached test/ trajectories.
+        chosen_traj = _load_trajectory(test_dir / f"{chosen_rule}_trajectory.parquet")
+        solo_traj = _load_trajectory(test_dir / f"solo_{best_solo_seed}_trajectory.parquet")
+        chosen_returns = _per_bar_returns(chosen_traj)
+        solo_returns = _per_bar_returns(solo_traj)
+        if chosen_returns.size != solo_returns.size:
+            n_common = min(chosen_returns.size, solo_returns.size)
+            log.warning(
+                f"trajectory length mismatch: chosen={chosen_returns.size} "
+                f"solo={solo_returns.size}; truncating to {n_common}"
+            )
+            chosen_returns = chosen_returns[:n_common]
+            solo_returns = solo_returns[:n_common]
         log.info(
             f"[bootstrap] running stationary block bootstrap n_resamples={bs_n} "
             f"block_len={bs_block_f or 'auto-sqrt(n)'} on n={chosen_returns.size} bars"
@@ -271,6 +279,12 @@ def main() -> None:
     )
     ap.add_argument("--legacy-uplift-promote", type=float, default=1.10)
     ap.add_argument("--legacy-uplift-ambiguous", type=float, default=1.05)
+    ap.add_argument(
+        "--out-dir",
+        default=None,
+        help="Override results/<workstream>_ensemble path (for non-standard suffixes "
+        "like results/gmgp1_xauusd_ensemble_oanda).",
+    )
     args = ap.parse_args()
 
     verdict = recompute(
@@ -278,6 +292,7 @@ def main() -> None:
         gates_file=Path(args.gates_file),
         legacy_promote=args.legacy_uplift_promote,
         legacy_ambiguous=args.legacy_uplift_ambiguous,
+        out_dir_override=Path(args.out_dir) if args.out_dir else None,
     )
     print("\n========== RECOMPUTED VERDICT ==========")
     print(
