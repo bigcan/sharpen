@@ -470,13 +470,38 @@ def block_bootstrap_pf_mdd(
 
 
 def _resolve_bootstrap_decision(
-    bs: dict, gates: dict, legacy_uplift: Optional[float]
-) -> Tuple[str, str]:
-    """Map bootstrap stats + legacy uplift onto v2.3 decision matrix.
+    bs: dict, gates: dict, legacy_uplift: Optional[float] = None
+) -> dict:
+    """Map bootstrap stats onto the Protocol v2.5 decision matrix.
 
-    Returns (decision, reason). Decision is one of PROMOTE, PROMOTE_DD_ONLY,
-    SOLO_BEST_FALLBACK, AMBIGUOUS_RERUN, NO_DATA. Falls back to legacy uplift
-    decision when bootstrap gates are absent (back-compat).
+    Protocol v2.5 (S526) bumps bootstrap to PRIMARY for prop-firm workstreams
+    and demotes the legacy point-estimate uplift to audit-only. The decision
+    space:
+
+        decision         | preconditions
+        -----------------|---------------------------------------------------
+        PROMOTE          | P(PF) >= p_pf_promote
+                         |   (PF dominance ⇒ promote regardless of MDD)
+        PROMOTE_DD_ONLY  | P(PF) in [p_pf_ambiguous, p_pf_promote)
+                         |   AND P(MDD) >= p_mdd_promote
+        AMBIGUOUS_BOOT   | P(PF) in [p_pf_ambiguous, p_pf_promote)
+                         |   AND P(MDD) <  p_mdd_promote
+        SOLO_BEST_FALLBACK | P(PF) <  p_pf_ambiguous (any MDD)
+
+        LEGACY_GATE_DEFER | no bootstrap gates in config (back-compat path)
+        NO_DATA           | bootstrap insufficient bars (n < 30 etc.)
+
+    The legacy `legacy_uplift` parameter is kept for back-compat with the v2.3
+    signature; v2.5 callers ignore it and consult the returned dict's
+    `primary_basis` field.
+
+    Returns a dict with keys:
+        decision         (str)
+        primary_basis    "bootstrap" | "legacy_uplift"
+        p_pf_ens_better  (float | None)
+        p_mdd_ens_better (float | None)
+        thresholds_used  ({p_pf_promote, p_mdd_promote, p_pf_ambiguous})
+        reason           (str — human-readable verdict explanation)
     """
     p_pf = bs.get("p_pf_ens_better")
     p_mdd = bs.get("p_mdd_ens_better")
@@ -485,32 +510,71 @@ def _resolve_bootstrap_decision(
         or "ensemble_bootstrap_p_mdd_promote" in gates
     )
 
-    if not have_bs_gates:
-        # Pre-v2.3 config: defer to legacy point-estimate uplift; bootstrap is logged only.
-        return ("LEGACY_GATE_DEFER",
-                "no bootstrap gates in config — caller decides via legacy uplift")
-
-    if p_pf is None or p_mdd is None:
-        return ("NO_DATA",
-                f"bootstrap insufficient bars: {bs.get('reason', 'unknown')}")
-
     p_pf_promote = float(gates.get("ensemble_bootstrap_p_pf_promote", 0.90))
     p_mdd_promote = float(gates.get("ensemble_bootstrap_p_mdd_promote", 0.90))
+    p_pf_ambiguous = float(gates.get("ensemble_bootstrap_p_pf_ambiguous", 0.75))
+    thresholds_used = {
+        "p_pf_promote": p_pf_promote,
+        "p_mdd_promote": p_mdd_promote,
+        "p_pf_ambiguous": p_pf_ambiguous,
+    }
+
+    if not have_bs_gates:
+        return {
+            "decision": "LEGACY_GATE_DEFER",
+            "primary_basis": "legacy_uplift",
+            "p_pf_ens_better": p_pf,
+            "p_mdd_ens_better": p_mdd,
+            "thresholds_used": thresholds_used,
+            "reason": "no bootstrap gates in config — caller decides via legacy uplift",
+        }
+
+    if p_pf is None or p_mdd is None:
+        return {
+            "decision": "NO_DATA",
+            "primary_basis": "bootstrap",
+            "p_pf_ens_better": p_pf,
+            "p_mdd_ens_better": p_mdd,
+            "thresholds_used": thresholds_used,
+            "reason": f"bootstrap insufficient bars: {bs.get('reason', 'unknown')}",
+        }
 
     pf_pass = p_pf >= p_pf_promote
     mdd_pass = p_mdd >= p_mdd_promote
+    pf_ambiguous = p_pf >= p_pf_ambiguous
 
-    if pf_pass and mdd_pass:
-        return ("PROMOTE",
-                f"bootstrap P(PF)={p_pf:.3f}>={p_pf_promote:.2f} AND "
-                f"P(MDD)={p_mdd:.3f}>={p_mdd_promote:.2f}")
-    if (not pf_pass) and mdd_pass:
-        return ("PROMOTE_DD_ONLY",
-                f"bootstrap P(PF)={p_pf:.3f}<{p_pf_promote:.2f} but "
-                f"P(MDD)={p_mdd:.3f}>={p_mdd_promote:.2f} — DD-buffer-only promote")
-    return ("SOLO_BEST_FALLBACK",
-            f"bootstrap P(PF)={p_pf:.3f} P(MDD)={p_mdd:.3f} below promote "
-            f"thresholds [{p_pf_promote:.2f}, {p_mdd_promote:.2f}]")
+    if pf_pass:
+        # v2.5 matrix row: PF dominance promotes regardless of MDD outcome.
+        if mdd_pass:
+            reason = (f"P(PF)={p_pf:.3f}>={p_pf_promote:.2f} AND "
+                      f"P(MDD)={p_mdd:.3f}>={p_mdd_promote:.2f}")
+        else:
+            reason = (f"P(PF)={p_pf:.3f}>={p_pf_promote:.2f} (PF dominance); "
+                      f"P(MDD)={p_mdd:.3f}<{p_mdd_promote:.2f} is a wash — promote")
+        decision = "PROMOTE"
+    elif pf_ambiguous and mdd_pass:
+        decision = "PROMOTE_DD_ONLY"
+        reason = (f"P(PF)={p_pf:.3f} in "
+                  f"[{p_pf_ambiguous:.2f}, {p_pf_promote:.2f}) ambiguous band, "
+                  f"P(MDD)={p_mdd:.3f}>={p_mdd_promote:.2f} — DD-buffer-only promote")
+    elif pf_ambiguous and not mdd_pass:
+        decision = "AMBIGUOUS_BOOT"
+        reason = (f"P(PF)={p_pf:.3f} in "
+                  f"[{p_pf_ambiguous:.2f}, {p_pf_promote:.2f}) ambiguous band, "
+                  f"P(MDD)={p_mdd:.3f}<{p_mdd_promote:.2f} — second data point required")
+    else:
+        decision = "SOLO_BEST_FALLBACK"
+        reason = (f"P(PF)={p_pf:.3f}<{p_pf_ambiguous:.2f} ambiguous floor "
+                  f"(P(MDD)={p_mdd:.3f}); statistically indistinguishable on PF")
+
+    return {
+        "decision": decision,
+        "primary_basis": "bootstrap",
+        "p_pf_ens_better": p_pf,
+        "p_mdd_ens_better": p_mdd,
+        "thresholds_used": thresholds_used,
+        "reason": reason,
+    }
 
 
 def compute_action_correlation_matrix(
@@ -979,12 +1043,14 @@ def run_stage_2_5_val_selection(
         n_resamples=bs_n,
         block_len_mean=bs_block_f,
     )
-    bs_decision, bs_reason = _resolve_bootstrap_decision(
-        bootstrap_verdict, gates, legacy_uplift=uplift
-    )
+    bs_resolved = _resolve_bootstrap_decision(bootstrap_verdict, gates)
+    bs_decision = bs_resolved["decision"]
+    bs_reason = bs_resolved["reason"]
+    bs_primary_basis = bs_resolved["primary_basis"]
+    bs_thresholds = bs_resolved["thresholds_used"]
     log.info(f"[bootstrap] P(PF ens better)={bootstrap_verdict.get('p_pf_ens_better')} "
              f"P(MDD ens better)={bootstrap_verdict.get('p_mdd_ens_better')} "
-             f"→ {bs_decision}")
+             f"→ {bs_decision} (primary_basis={bs_primary_basis})")
 
     # --- Phase 4c: v2.3 diversity-aware audit (action correlation on solos) ---
     corr_matrix, corr_seed_order = compute_action_correlation_matrix(
@@ -1019,21 +1085,25 @@ def run_stage_2_5_val_selection(
             f"diverse set in Stage 2.5-R."
         )
 
-    # --- Phase 4d: combined decision (bootstrap-primary if gates present) ---
-    if bs_decision == "LEGACY_GATE_DEFER":
+    # --- Phase 4d: combined decision (Protocol v2.5 — bootstrap is PRIMARY) ---
+    if bs_primary_basis == "legacy_uplift":
+        # Pre-v2.3 config (no bootstrap gates) — fall through to point-uplift.
         decision = legacy_decision
         reason = f"[legacy uplift] {legacy_reason}"
         decision_source = "legacy_uplift_v2.1"
     else:
         decision = bs_decision
-        reason = f"[bootstrap v2.3] {bs_reason}; legacy-uplift would say {legacy_decision} ({uplift})"
-        decision_source = "bootstrap_v2.3"
+        reason = (f"[bootstrap v2.5] {bs_reason}; "
+                  f"legacy-uplift would say {legacy_decision} ({uplift}, audit-only)")
+        decision_source = "bootstrap_v2.5"
 
     verdict = {
+        "schema_version": "2.5",
         "workstream": workstream_label,
-        "protocol": "v2.3_stage_2_5_val_selection",
+        "protocol": "v2.5_stage_2_5_bootstrap_primary",
         "supersedes": ["decision_ensemble_mandatory_stage_2_5 (S493)",
-                       "decision_ensemble_val_selection_s495"],
+                       "decision_ensemble_val_selection_s495",
+                       "v2.3_stage_2_5_val_selection (gate-ordering flip S526)"],
         "val_window": f"{data_cfg['val_start_date']} -> {data_cfg['val_end_date']}",
         "test_window": f"{data_cfg['test_start_date']} -> {data_cfg['test_end_date']}",
         "seeds": sorted(seed_pfs),
@@ -1044,18 +1114,33 @@ def run_stage_2_5_val_selection(
         "test_solo_pfs": solo_test_pfs,
         "best_solo_seed_on_test": best_solo_seed,
         "best_solo_test_pf": best_solo_test_pf,
-        # Legacy uplift kept as a sanity-check secondary
-        "uplift": uplift,
+        # v2.5 PRIMARY: bootstrap verdict + resolved decision.
+        "bootstrap": {
+            "p_pf_ens_better": bootstrap_verdict.get("p_pf_ens_better"),
+            "p_mdd_ens_better": bootstrap_verdict.get("p_mdd_ens_better"),
+            "block_len_used": bootstrap_verdict.get("block_len_mean"),
+            "resamples": bootstrap_verdict.get("n_resamples"),
+            "thresholds_used": bs_thresholds,
+            "reason": bs_reason,
+        },
+        "bootstrap_verdict": bootstrap_verdict,   # full quantile detail (back-compat)
+        "bootstrap_decision": bs_decision,
+        "bootstrap_reason": bs_reason,
+        # v2.5 SECONDARY: legacy uplift kept as audit/sanity metadata.
+        "legacy_uplift": {
+            "uplift_ratio": uplift,
+            "promote_threshold": uplift_promote,
+            "ambiguous_band": [uplift_ambiguous, uplift_promote],
+            "would_have_decided": legacy_decision,
+        },
+        "uplift": uplift,                          # back-compat top-level alias
         "uplift_promote_threshold": uplift_promote,
         "uplift_ambiguous_threshold": uplift_ambiguous,
         "legacy_decision": legacy_decision,
-        # v2.3 primary verdict
-        "bootstrap_verdict": bootstrap_verdict,
-        "bootstrap_decision": bs_decision,
-        "bootstrap_reason": bs_reason,
         "diversity_audit": diversity_audit,
-        # Combined decision
+        # Combined decision (top-level for back-compat with v2.3 readers).
         "decision": decision,
+        "primary_basis": bs_primary_basis,
         "decision_source": decision_source,
         "reason": reason,
     }
@@ -1110,7 +1195,8 @@ def run_stage_2_5_val_selection(
     }
     if seed_checkpoints is None:
         purge_report["status"] = "SKIPPED_NO_CHECKPOINTS"
-    elif decision in ("AMBIGUOUS_RERUN", "NO_DATA", "LEGACY_GATE_DEFER"):
+    elif decision in ("AMBIGUOUS_RERUN", "AMBIGUOUS_BOOT",
+                       "NO_DATA", "LEGACY_GATE_DEFER"):
         purge_report["status"] = "SKIPPED_AMBIGUOUS"
         purge_report["selected_seeds"] = sorted(int(s) for s in seed_pfs)
     else:
