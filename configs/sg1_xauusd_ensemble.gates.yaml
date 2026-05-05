@@ -55,21 +55,32 @@ gates:
     uplift_ratio_min: 1.10
     metric: "median"                           # across-folds aggregation
 
-  # Protocol v2.3 Stage 2.5 (single L1 val/test window) ensemble gates.
-  # Replaces the legacy point-estimate ensemble_uplift_min for prop-firm /
-  # live-capital workstreams. Block-bootstrap on per-bar returns gives a
-  # paired probability that ensemble beats best-solo on PF and MDD.
+  # === Protocol v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
+  # See decision_protocol_v25_bootstrap_primary.md for the gate-ordering flip
+  # and the architecture artifact at
+  # .agent/artifacts/stage_2_5_bootstrap_primary_architecture.md.
+  # Replaces the legacy point-estimate uplift for prop-firm / live-capital
+  # workstreams. Block-bootstrap on per-bar returns gives a paired probability
+  # that ensemble beats best-solo on PF and MDD; the resolver treats this as
+  # the sole arbiter when both keys are present (ADR-1).
   ensemble_bootstrap_p_pf_promote: 0.90        # P(ens_PF > solo_PF) >= 0.90 for PROMOTE
-  ensemble_bootstrap_p_mdd_promote: 0.90       # P(ens_MDD better) >= 0.90 for full PROMOTE
-                                                #   (PF-fail + MDD-pass → PROMOTE_DD_ONLY,
-                                                #    relevant when DD tightening is the
-                                                #    primary win for prop-firm DD-buffer)
+  ensemble_bootstrap_p_mdd_promote: 0.90       # P(ens_MDD better) >= 0.90 for PROMOTE on DD channel
+                                                #   (PF-pass + MDD-fail → PROMOTE on PF dominance;
+                                                #    PF-fail + MDD-pass → PROMOTE_DD_ONLY, relevant
+                                                #    when DD tightening is the primary win.)
+  ensemble_bootstrap_p_pf_ambiguous: 0.75      # v2.5 ambiguous floor on P(PF). P(PF) below this →
+                                                #   SOLO regardless of MDD; in [p_pf_ambiguous,
+                                                #   p_pf_promote) AND MDD-fail → AMBIGUOUS_BOOT
+                                                #   (second data point required).
   ensemble_bootstrap_resamples: 10000           # B in stationary block bootstrap
   ensemble_bootstrap_block_len: null            # null → auto = sqrt(n_bars), capped at 0.1*n
-  ensemble_uplift_min: 1.10                     # legacy point-estimate; sanity-check secondary
-                                                #   (still required by v2 helper signature)
-  ensemble_ambiguous_min: 1.05                  # legacy ambiguous floor (logged only when
-                                                #   bootstrap gates above are present)
+
+  # === Protocol v2.5 SECONDARY (audit/sanity only). ===
+  # Demoted from gate-bearing in v2.5: the resolver no longer consults these
+  # when the bootstrap keys above are present. Logged in the verdict's
+  # `legacy_uplift` block so audit tooling can diff against historical decisions.
+  ensemble_uplift_min: 1.10                     # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05                  # legacy ambiguous floor (audit-only in v2.5)
 
   # v2.3 diversity-aware top-K selection (Phase 0). Pearson |action correlation|
   # used as redundancy proxy. Pool-size > K is a precondition for the selector
