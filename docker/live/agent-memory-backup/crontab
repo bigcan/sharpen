@@ -1,0 +1,6 @@
+# Agent-memory LanceDB nightly backup
+# Schedule: 03:00 UTC daily. Avoids the 00:00 UTC turnover-cap reset window.
+SHELL=/bin/sh
+PATH=/usr/local/bin:/usr/bin:/bin:/sbin
+
+0 3 * * * /usr/local/bin/backup.sh > /proc/1/fd/1 2>&1
