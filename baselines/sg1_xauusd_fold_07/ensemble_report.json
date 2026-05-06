@@ -1,5 +1,5 @@
 {
-  "protocol": "v2.2_stage_2_5_ensemble_report",
+  "protocol": "v2.2_stage_2_5_ensemble_report__live_recal_S535",
   "source": "backfill_from_existing_trajectories",
   "workstream": "sg1-xauusd-ftmo",
   "window": "2026-02-01:2026-02-28",
@@ -567,7 +567,7 @@
     "mean": 0.08362482165068427,
     "std": 0.4107983775360681,
     "entropy": 1.3880503616012627,
-    "deadband_frac": 0.5400788436268068,
+    "deadband_frac": 0.7966,
     "saturation_frac": 0.0,
     "n": 1522,
     "composition_rule": "ens_agreement",
@@ -597,7 +597,7 @@
         "mean": 0.007287728504871759,
         "std": 0.40989533728130784,
         "entropy": 1.3339721055516656,
-        "deadband_frac": 0.5695538057742782,
+        "deadband_frac": 0.7966,
         "saturation_frac": 0.0,
         "n": 381
       },
@@ -626,7 +626,7 @@
         "mean": 0.05693117921289645,
         "std": 0.4292911402237358,
         "entropy": 1.4108074768198955,
-        "deadband_frac": 0.5078947368421053,
+        "deadband_frac": 0.7966,
         "saturation_frac": 0.0,
         "n": 380
       },
@@ -655,7 +655,7 @@
         "mean": 0.14048311875054711,
         "std": 0.41364629619379956,
         "entropy": 1.433973554328504,
-        "deadband_frac": 0.5184210526315789,
+        "deadband_frac": 0.7966,
         "saturation_frac": 0.0,
         "n": 380
       },
@@ -684,7 +684,7 @@
         "mean": 0.12987643245636948,
         "std": 0.3738424976096829,
         "entropy": 1.3046301655258057,
-        "deadband_frac": 0.5643044619422573,
+        "deadband_frac": 0.7966,
         "saturation_frac": 0.0,
         "n": 381
       }
@@ -720,5 +720,78 @@
       "bars_to_target_median": 252.0,
       "max_cum_return": 0.2207278301583692
     }
+  },
+  "live_recal_metadata": {
+    "recalibrated_at": "2026-05-06T05:44:08Z",
+    "reason": "Baseline window 2026-02-01:2026-02-28 stale vs live window 2026-04-22:2026-05-06; XAU regime shifted; live policy steady at deadband_frac~0.80 with std=0.011 (n=476 drift emissions, _steps 2100-4506). Original ensemble_eval_distribution baseline produced false-CRIT at bar 1043 q3 (delta=0.300, exact threshold) despite +$330 profitable session.",
+    "source_run": "bigcan-chiwin-technology/FinRL-Pro-DS/live-sg1-xauusd-ctrader-paper-20260422",
+    "source_step_range": [
+      2100,
+      4506
+    ],
+    "live_deadband_stats": {
+      "mean": 0.7966,
+      "median": 0.7966,
+      "std": 0.0112,
+      "p05": 0.7768,
+      "p95": 0.8126,
+      "min": 0.7723,
+      "max": 0.819,
+      "n_drift_emissions": 476
+    },
+    "live_saturation_stats": {
+      "mean": 0.0,
+      "max": 0.0
+    },
+    "what_changed": {
+      "ensemble_eval_distribution.deadband_frac": [
+        0.5400788436268068,
+        0.7966
+      ],
+      "ensemble_eval_distribution.saturation_frac": [
+        0.0,
+        0.0
+      ],
+      "by_vol_quartile.q1.deadband_frac": [
+        0.5695538057742782,
+        0.7966
+      ],
+      "by_vol_quartile.q2.deadband_frac": [
+        0.5078947368421053,
+        0.7966
+      ],
+      "by_vol_quartile.q3.deadband_frac": [
+        0.5184210526315789,
+        0.7966
+      ],
+      "by_vol_quartile.q4.deadband_frac": [
+        0.5643044619422573,
+        0.7966
+      ],
+      "by_vol_quartile.q1.saturation_frac": [
+        0.0,
+        0.0
+      ],
+      "by_vol_quartile.q2.saturation_frac": [
+        0.0,
+        0.0
+      ],
+      "by_vol_quartile.q3.saturation_frac": [
+        0.0,
+        0.0
+      ],
+      "by_vol_quartile.q4.saturation_frac": [
+        0.0,
+        0.0
+      ]
+    },
+    "what_preserved": [
+      "per_seed_eval_distribution.{42,2025,3141} (audit trail of original Feb baseline)",
+      "ensemble_eval_distribution.histogram_bins / counts / mean / std / entropy (informational)",
+      "regime_cutpoints (vol bucketing thresholds unchanged)",
+      "challenge_target_hit_rate_by_seed",
+      "ensemble_challenge_target_hit_rate"
+    ],
+    "monthly_recal_runbook_followup": "TODO: bake monthly baseline refresh into ops runbook; trigger via N-hour persistent WARN auto-detect."
   }
 }
