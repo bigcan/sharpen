@@ -1,0 +1,162 @@
+workstream: sg1_btc_velotrade_extended
+data:
+  file_path: data/btc_usdt_1min_bybit.parquet
+  ticker: BTCUSDT
+  handler_type: multiscale
+  train_start_date: '2024-04-01'
+  train_end_date: '2025-10-01'
+  val_start_date: '2025-10-01'
+  val_end_date: '2025-11-01'
+  test_start_date: '2025-11-01'
+  test_end_date: '2025-12-01'
+features:
+  scales:
+  - 3
+  - 15
+  - 60
+  window_size: 30
+  features_per_scale: 8
+  asset_class: crypto
+signal_gate:
+  enabled: true
+  gate_mode: composite
+  atr_threshold: 0.15
+  parkinson_threshold: 0.0009
+  volume_threshold: 0.6
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+env:
+  mdp_version: v7
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 3000
+  random_start: true
+  max_drawdown_pct: 0.1
+  scales:
+  - 3
+  - 15
+  - 60
+  gap_detection: false
+  reward:
+    mode: dsr
+    dsr_eta: 0.0008427308583293202
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.0
+    eod_hour_utc: 0
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    augment_obs: 'off'
+    static_peak: true
+network:
+  scale_encoder:
+    input_size: 8
+    channels:
+    - 32
+    - 64
+    - 64
+    - 64
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+agents:
+  sac:
+    lr_actor: 0.00015739192475706186
+    lr_critic: 7.322355805160213e-05
+    lr_alpha: 2.6314031405474944e-06
+    gamma: 0.9593670398875173
+    tau: 0.0002134448307797731
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.4088157097959411
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.516294914428727
+    checkpoint_interval: 250000
+training:
+  total_timesteps: 500000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: bfloat16
+  torch_compile: true
+  num_envs: 20
+hpo:
+  enabled: false
+ensemble:
+  seeds:
+  - 456
+  - 3141
+  - 123
+  rule: ens_mean
+  rules:
+  - solo_456
+  - solo_3141
+  - solo_123
+  - ens_mean
+  - ens_median
+  - ens_agreement
+  - ens_pf_weighted
+  checkpoint_pattern: checkpoints/sg1-btc-extended-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth
+  seed_pfs:
+    456: 2.831187549972178
+    3141: 2.788342505569011
+    123: 2.7167399984602385
+  gates_file: configs/sg1_btc_velotrade_ensemble.gates.yaml
+gates:
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10
+  l1_pf_cv_max: 0.3
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous:
+  - 0.22
+  - 0.38
+  ensemble_uplift_min: 1.1
+  ensemble_ambiguous_min: 1.05
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_rule_selection: val_argmax_pf
+  wf_windows: 8
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+wandb:
+  project: FinRL-Pro-DS
+  consolidate: true
+  tags:
+  - sg-1
+  - BTC
+  - SAC
+  - 3min
+  - signal-gated
+  - velotrade
+  - velotrade-wrapped
+  - prop-firm
+  - propfirm
+  - walk_forward
+  - wf-stage3
+  - ensemble
+  - ensemble-confirm
+  - rehpo-trial44
+  - steady-state
+  - bybit-perp
+  - extended-window
+  - s535-cont-2
+  - fu-3
+  - upstream:sg1_btc_velotrade_l1_multiseed_extended
+  - upstream-stage25:sg1_btc_extended_v1
+  - fold-3
+  - study-id-20260506_171250
