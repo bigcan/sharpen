@@ -178,6 +178,7 @@ def build_components(config: dict):
         max_gross_exposure=risk_cfg.get("max_gross_exposure", 6.0),
         min_effective_bets=risk_cfg.get("min_effective_bets", 1.0),
         daily_turnover_limit=risk_cfg.get("daily_turnover_limit", 4.0),
+        soft_throttle_start=risk_cfg.get("soft_throttle_start", 1.0),
         funding_rate_alert=risk_cfg.get("funding_rate_alert", 999.0),
         min_margin_reserve_pct=risk_cfg.get("min_margin_reserve_pct", 0.15),
         static_peak=risk_cfg.get("static_peak", False),

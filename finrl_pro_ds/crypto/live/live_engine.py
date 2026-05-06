@@ -940,6 +940,10 @@ class LiveTradingEngine:
 
         # --- 5. Agent inference ---
         target_position = self._predict(obs)
+        # S535 ADR-4: snapshot the raw policy intent before any overlay (PRISM)
+        # or risk-manager rewrite. Threaded into _log_step calls so the gap
+        # between policy intent and executed action is observable in WandB.
+        policy_target_position = float(target_position)
 
         # --- 5a. Action-drift tracking (Protocol v2.2 §8.2) ---
         # observe() records the *policy output* before any overlays / deadband
@@ -963,6 +967,7 @@ class LiveTradingEngine:
                     self._log_step(
                         bar_time, self._current_position,
                         traded=False, skip_reason="drift_warn_no_new_entries",
+                        policy_target_position=policy_target_position,
                     )
                     self._prev_close = current_close
                     return
@@ -989,6 +994,7 @@ class LiveTradingEngine:
                         bar_time, self._current_position,
                         traded=False,
                         skip_reason="agreement_decay_warn_no_new_entries",
+                        policy_target_position=policy_target_position,
                     )
                     self._prev_close = current_close
                     return
@@ -1011,7 +1017,11 @@ class LiveTradingEngine:
         delta = target_position - self._current_position
         if abs(delta) < self._deadband_threshold:
             self._prev_close = current_close
-            self._log_step(bar_time, target_position, traded=False, skip_reason="deadband", regime_info=regime_info)
+            self._log_step(
+                bar_time, target_position, traded=False, skip_reason="deadband",
+                regime_info=regime_info,
+                policy_target_position=policy_target_position,
+            )
             return
 
         # --- 7. Risk manager check ---
@@ -1060,7 +1070,11 @@ class LiveTradingEngine:
             # Trade won't execute — rollback turnover budget consumed by check()
             self.risk_manager.rollback_last_turnover()
             self._prev_close = current_close
-            self._log_step(bar_time, target_position, traded=False, skip_reason="risk_deadband", regime_info=regime_info)
+            self._log_step(
+                bar_time, target_position, traded=False, skip_reason="risk_deadband",
+                regime_info=regime_info,
+                policy_target_position=policy_target_position,
+            )
             return
 
         # --- 8. Execute trade ---
@@ -1071,7 +1085,10 @@ class LiveTradingEngine:
             )
             self._current_position = target_position
             self._prev_close = current_close
-            self._log_step(bar_time, target_position, traded=True, regime_info=regime_info)
+            self._log_step(
+                bar_time, target_position, traded=True, regime_info=regime_info,
+                policy_target_position=policy_target_position,
+            )
             return
 
         order = None
@@ -1140,7 +1157,11 @@ class LiveTradingEngine:
                 # F-03: broker returned without raising — reset execution-error
                 # counter so a prior transient HMDS error doesn't persist.
                 self._consecutive_execution_errors = 0
-                self._log_step(bar_time, target_position, traded=False, skip_reason="broker_skipped", regime_info=regime_info)
+                self._log_step(
+                    bar_time, target_position, traded=False, skip_reason="broker_skipped",
+                    regime_info=regime_info,
+                    policy_target_position=policy_target_position,
+                )
                 return
 
         except Exception as e:
@@ -1190,7 +1211,11 @@ class LiveTradingEngine:
         # (Daily loss check moved to start of _trading_step — runs on ALL bars)
 
         # --- 11. Log ---
-        self._log_step(bar_time, target_position, traded=True, order=order, regime_info=regime_info)
+        self._log_step(
+            bar_time, target_position, traded=True, order=order,
+            regime_info=regime_info,
+            policy_target_position=policy_target_position,
+        )
 
     # -------------------------------------------------------------------
     # Agent inference
@@ -2600,8 +2625,19 @@ class LiveTradingEngine:
         skip_reason: str = "",
         order=None,
         regime_info: dict | None = None,
+        policy_target_position: float | None = None,
     ) -> None:
-        """Log step metrics to WandB and logger."""
+        """Log step metrics to WandB and logger.
+
+        S535 ADR-4 (observability): when ``policy_target_position`` is supplied
+        (set right after ``self._predict(obs)`` and threaded through the
+        pipeline), emit it alongside the existing ``target_position`` so the
+        gap between policy intent and executed action is visible in WandB.
+        The risk manager's soft-throttle / hard-cap can silently rewrite the
+        action — this metric makes that override observable for the drift
+        detector and downstream review (currently they only see the post-clip
+        ``target_position``).
+        """
         drawdown = 0.0
         if self._peak_portfolio_value > 0:
             drawdown = 1.0 - self._portfolio_value / self._peak_portfolio_value
@@ -2617,6 +2653,17 @@ class LiveTradingEngine:
             "traded": int(traded),
             "funding_rate": self._current_funding_rate,
         }
+
+        # S535 ADR-4: policy-intent observability. Emitted only when supplied
+        # by the caller (post-predict paths); pre-predict skip paths (signal
+        # gate, funding-rate gate, obs sanity) leave this None.
+        if policy_target_position is not None:
+            metrics["policy_target_position"] = policy_target_position
+            risk_clip_delta = policy_target_position - target_position
+            metrics["risk_clip_delta"] = risk_clip_delta
+            denom = max(abs(policy_target_position), 0.01)
+            metrics["risk_clip_fraction"] = risk_clip_delta / denom
+            metrics["risk_clip_active"] = int(abs(risk_clip_delta) > 0.01)
 
         if order is not None:
             metrics["order_fee"] = order.fee
