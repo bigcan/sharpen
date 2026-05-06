@@ -59,6 +59,13 @@ class CryptoRiskConfig:
     # Turnover
     daily_turnover_limit: float = 1.50    # 150% per day
     daily_cost_budget_bps: float = 20.0
+    # S535 ADR-1: soft-throttle entry point as a fraction of `daily_turnover_limit`.
+    # When `pre_accumulated / limit >= soft_throttle_start`, the action delta is
+    # tapered linearly from full pass-through (at soft_throttle_start) to zero
+    # (at exhaustion). Default 1.0 = legacy hard-wall behavior (no taper, all
+    # existing tests bit-identical). Opt-in per config: e.g. set 0.8 in
+    # `risk.soft_throttle_start` to brake from 80% budget instead of cliff-edging.
+    soft_throttle_start: float = 1.0
     # Bar interval drives the reset window for daily_turnover. Reset fires every
     # `round(24*60 / bar_interval_minutes)` bars: 60→24 (1H), 15→96, 3→480.
     # Default 60 preserves the historical 24-bar behavior for callers that don't set it.
@@ -325,17 +332,42 @@ class CryptoRiskManager:
             self.state.bars_since_day_start += 1
 
         pre_delta_accumulated = self.state.daily_turnover_accumulated
+        limit = self.config.daily_turnover_limit
 
-        if pre_delta_accumulated + delta > self.config.daily_turnover_limit:
+        # S535 ADR-1: soft-throttle taper + hard 100%-cap clamp.
+        # Two-stage clipping replaces the legacy single-stage hard wall:
+        #   (A) Soft throttle — when `pre_accumulated / limit` is in
+        #       [soft_throttle_start, 1.0), scale delta linearly from
+        #       1.0 (at soft_throttle_start) to 0.0 (at exhaustion). Default
+        #       soft_throttle_start = 1.0 disables the taper, preserving the
+        #       legacy hard-wall behavior bit-identically.
+        #   (B) Hard cap — even outside the throttle band, clamp the final
+        #       delta so accumulated never exceeds `limit`. Guards against a
+        #       single large delta near the band entrance overshooting.
+        # The DAILY_TURNOVER violation message is emitted whenever any clipping
+        # occurs (either soft taper or hard cap).
+        soft_start = self.config.soft_throttle_start
+        budget_pre = pre_delta_accumulated / limit if limit > 0 else 0.0
+
+        if budget_pre >= 1.0:
+            soft_scale = 0.0
+        elif budget_pre <= soft_start:
+            soft_scale = 1.0
+        else:
+            denom = max(1e-9, 1.0 - soft_start)
+            soft_scale = max(0.0, (1.0 - budget_pre) / denom)
+
+        delta_post_throttle = delta * soft_scale if soft_scale < 1.0 else delta
+        remaining_to_hard_cap = max(0.0, limit - pre_delta_accumulated)
+        final_delta = min(delta_post_throttle, remaining_to_hard_cap)
+
+        if delta > 1e-8 and final_delta < delta - 1e-9:
+            scale = final_delta / delta
             violations.append(
                 f"DAILY_TURNOVER: {pre_delta_accumulated + delta:.2f} > "
-                f"{self.config.daily_turnover_limit:.2f}",
+                f"{limit:.2f} (scale={scale:.3f})",
             )
-            # Scale action to use exactly the remaining turnover budget
-            remaining = max(0, self.config.daily_turnover_limit - pre_delta_accumulated)
-            if delta > 1e-8:
-                scale = min(remaining / delta, 1.0)
-                modified = positions + (modified - positions) * scale
+            modified = positions + (modified - positions) * scale
 
         # Turnover accumulation deferred to after all checks (R6 fix below).
 

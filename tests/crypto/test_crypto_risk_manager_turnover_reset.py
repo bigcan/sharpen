@@ -38,7 +38,10 @@ from finrl_pro_ds.crypto.mlops.crypto_risk_manager import (
 )
 
 
-def _make_rm(bar_interval_minutes: int | None = None) -> CryptoRiskManager:
+def _make_rm(
+    bar_interval_minutes: int | None = None,
+    soft_throttle_start: float | None = None,
+) -> CryptoRiskManager:
     kwargs = dict(
         enabled=True,
         max_drawdown_pct=0.99,
@@ -52,6 +55,8 @@ def _make_rm(bar_interval_minutes: int | None = None) -> CryptoRiskManager:
     )
     if bar_interval_minutes is not None:
         kwargs["bar_interval_minutes"] = bar_interval_minutes
+    if soft_throttle_start is not None:
+        kwargs["soft_throttle_start"] = soft_throttle_start
     rm = CryptoRiskManager(CryptoRiskConfig(**kwargs))
     rm.reset(initial_capital=100_000.0)
     return rm
@@ -391,3 +396,96 @@ def test_bar_time_as_naive_datetime_treated_as_utc():
     naive = datetime(2026, 4, 29, 12, 0)  # no tzinfo
     _step_at(rm, 0.5, naive)
     assert rm.state.last_turnover_reset_date == "20260429"
+
+
+# -----------------------------------------------------------------------------
+# Soft-throttle (S535 ADR-1) — piecewise-linear taper before hard 100% cap.
+#
+# The legacy hard wall (soft_throttle_start=1.0) is the dataclass default and
+# is exercised by every test above; these tests cover the opt-in path where
+# the throttle band is enabled.
+# -----------------------------------------------------------------------------
+
+
+def _step_with_pos(
+    rm: CryptoRiskManager, action: float, current_pos: float = 0.0,
+) -> tuple[np.ndarray, list[str]]:
+    """Single-asset step with explicit current position (no bar_time)."""
+    a = np.array([action], dtype=np.float64)
+    pos = np.array([current_pos], dtype=np.float64)
+    fund = np.array([0.0], dtype=np.float64)
+    return rm.check(a, 100_000.0, 100_000.0, pos, fund)
+
+
+def test_soft_throttle_below_band_no_clip():
+    """Below `soft_throttle_start`: action passes through unchanged."""
+    rm = _make_rm(soft_throttle_start=0.8)  # limit=4.0 → band entry at 3.2
+    # Pre-load accumulator to 2.0 (50% budget — well below 80% band).
+    rm.state.daily_turnover_accumulated = 2.0
+    out, viol = _step_with_pos(rm, 0.5)
+    assert out[0] == pytest.approx(0.5)  # full pass-through
+    assert all("DAILY_TURNOVER" not in v for v in viol)
+    assert rm.state.daily_turnover_accumulated == pytest.approx(2.5)
+
+
+def test_soft_throttle_midband_half_scale():
+    """At midpoint of [0.8, 1.0] band (budget=0.9): scale ≈ 0.5."""
+    rm = _make_rm(soft_throttle_start=0.8)  # limit=4.0
+    # Pre-load accumulator to 3.6 (90% budget — midway through the band).
+    # Linear taper: scale = (1.0 - 0.9) / (1.0 - 0.8) = 0.5.
+    rm.state.daily_turnover_accumulated = 3.6
+    out, viol = _step_with_pos(rm, 0.5)
+    # Output should be midway between current pos (0.0) and target (0.5).
+    assert out[0] == pytest.approx(0.25)
+    assert any("DAILY_TURNOVER" in v for v in viol)
+    # Accumulator advanced by the *post-throttle* delta = 0.25.
+    assert rm.state.daily_turnover_accumulated == pytest.approx(3.85)
+
+
+def test_soft_throttle_full_block_at_exhaustion():
+    """At 100% budget (or beyond): scale = 0, output = current position."""
+    rm = _make_rm(soft_throttle_start=0.8)  # limit=4.0
+    rm.state.daily_turnover_accumulated = 4.0  # exactly exhausted
+    out, viol = _step_with_pos(rm, 0.5, current_pos=0.1)
+    assert out[0] == pytest.approx(0.1)  # held at current pos
+    assert any("DAILY_TURNOVER" in v for v in viol)
+    assert rm.state.daily_turnover_accumulated == pytest.approx(4.0)
+
+
+def test_soft_throttle_disabled_with_start_at_one_preserves_legacy():
+    """`soft_throttle_start=1.0` (default) bit-identical to legacy hard wall:
+    full pass-through for any pre-budget < 100%, then sharp clip when
+    pre+delta crosses 100% (clipped to remaining budget).
+    """
+    rm = _make_rm(soft_throttle_start=1.0)  # explicit default
+    rm.state.daily_turnover_accumulated = 3.7  # 92.5% — would be in throttle band if start=0.8
+    out, viol = _step_with_pos(rm, 0.5)
+    # Legacy: full pass-through because budget_pre < 1.0 and pre+delta=4.2 > 4.0
+    # → hard cap clamps delta from 0.5 → 0.3 (remaining = 0.3).
+    assert out[0] == pytest.approx(0.3)
+    assert any("DAILY_TURNOVER" in v for v in viol)
+    assert rm.state.daily_turnover_accumulated == pytest.approx(4.0)
+
+
+def test_soft_throttle_below_band_but_overshoot_clamped_by_hard_cap():
+    """Operator-amendment clamp (S535): a single large delta that originates
+    well below `soft_throttle_start` but would push post-budget over 100%
+    must be clipped by the hard cap to land at exactly 100%, not allowed to
+    overshoot just because soft_scale=1.0.
+
+    Realistic scenario: SAC flips from full short (-1.0) to full long (+1.0)
+    in a single bar — delta=2.0. With pre_accumulated=3.0 of a 4.0 budget,
+    budget_pre=0.75 is below the band entry 0.8, so the soft taper does not
+    fire. Without the operator clamp the post-budget would land at 5.0
+    (overshoot by 25%). The hard cap clamps final delta to remaining=1.0, so
+    the executed flip is half the policy intent (final position = 0.0) and
+    the accumulator pins at exactly the limit.
+    """
+    rm = _make_rm(soft_throttle_start=0.8)  # band: 3.2..4.0
+    rm.state.daily_turnover_accumulated = 3.0  # 75% — below band entry 0.8 (3.2)
+    out, viol = _step_with_pos(rm, action=1.0, current_pos=-1.0)  # delta=2.0
+    # soft_scale=1.0 (pre 75% < 80%); post would be 5.0; hard cap clamps to 1.0.
+    # scale = 1.0/2.0 = 0.5; modified = -1 + (1 - (-1)) * 0.5 = 0.0.
+    assert out[0] == pytest.approx(0.0)
+    assert any("DAILY_TURNOVER" in v for v in viol)
+    assert rm.state.daily_turnover_accumulated == pytest.approx(4.0)

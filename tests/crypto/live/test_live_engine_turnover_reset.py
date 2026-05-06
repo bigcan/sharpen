@@ -186,3 +186,42 @@ def test_engine_full_loop_resets_at_utc_midnight(monkeypatch):
     asyncio.run(engine._trading_step_inner(post_midnight))
     assert risk_manager.state.last_turnover_reset_date == "20260430"
     assert risk_manager.state.daily_turnover_accumulated == pytest.approx(0.5)
+
+
+def test_engine_emits_policy_target_position_to_log_step(monkeypatch):
+    """S535 ADR-4: ``_log_step`` must receive ``policy_target_position`` as a
+    kwarg from every post-predict call site. This is the wiring contract
+    that lets WandB / drift detector see the gap between the agent's raw
+    intent and the post-risk executed action.
+
+    Pre-fix: the drift detector and WandB only saw ``target_position``,
+    which was overwritten by the risk manager's clip; soft-throttle / hard-cap
+    rewrites were invisible. Adding this kwarg makes the intent visible.
+    """
+    config = _build_minimal_config()
+    risk_manager = MagicMock()
+    risk_manager.check = MagicMock(return_value=(np.array([0.5]), []))
+    risk_manager.rollback_last_turnover = MagicMock()
+
+    engine = _build_engine(config, risk_manager, monkeypatch)
+
+    log_calls: list = []
+    monkeypatch.setattr(
+        engine, "_log_step",
+        lambda *a, **k: log_calls.append({"args": a, "kwargs": k}),
+    )
+
+    bar_time = datetime(2026, 4, 29, 12, 30, tzinfo=timezone.utc)
+    asyncio.run(engine._trading_step_inner(bar_time))
+
+    assert len(log_calls) == 1, f"expected one _log_step call, got {len(log_calls)}"
+    kwargs = log_calls[0]["kwargs"]
+    assert "policy_target_position" in kwargs, (
+        f"_log_step called without policy_target_position kwarg "
+        f"(observability regression); kwargs={list(kwargs)}"
+    )
+    # Engine's _predict was monkeypatched to return 0.5 in _build_engine.
+    assert kwargs["policy_target_position"] == pytest.approx(0.5), (
+        f"policy_target_position mismatch: expected 0.5, "
+        f"got {kwargs['policy_target_position']}"
+    )
