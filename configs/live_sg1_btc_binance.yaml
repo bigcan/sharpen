@@ -143,6 +143,12 @@ risk:
   # trips after 3-4 roundtrips. 10.0 gives ~3-5 roundtrips per reset window.
   # Structural fix (bar-interval-aware reset) queued.
   daily_turnover_limit: 10.0
+  # S535 canary (2026-05-06). Piecewise-linear taper across [0.8, 1.0] of the
+  # daily turnover budget — replaces hard-wall scaling that produced the
+  # 13h flat-line at the cap on 2026-05-05. Default 1.0 disables taper
+  # (legacy preserved bit-identically). 0.8 = brake from 80% budget instead
+  # of cliff-edging to 100%. See crypto_risk_manager.py:334-370 + commit 3b7d49b1.
+  soft_throttle_start: 0.8
 
 # --- WandB Monitoring ---
 wandb:
