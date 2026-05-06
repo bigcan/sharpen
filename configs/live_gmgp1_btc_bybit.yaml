@@ -112,6 +112,12 @@ risk:
   funding_rate_alert: 0.001        # Alert if |rate| > 0.1% per 8h
   min_margin_reserve_pct: 0.10     # Keep 10% margin reserve
   daily_turnover_limit: 10.0       # S495 hotfix: CryptoRiskManager resets every 24 check() calls, not 24h; default 4.0 chokes 15-min sub-32%-decision-rate strategies. See project_live_turnover_cap_calibration_s495.md.
+  # S535 canary Tier-1 (2026-05-06). Piecewise-linear taper across [0.8, 1.0]
+  # of the daily turnover budget. Replaces hard-wall scaling that produced
+  # gmgp1-btc's 10.91x cap-pinning (S519) and sg1-btc's 13h flat-line on
+  # 2026-05-05. Default 1.0 disables taper (legacy preserved bit-identically).
+  # See crypto_risk_manager.py:334-370 + commit 3b7d49b1.
+  soft_throttle_start: 0.8
 
 # --- WandB Monitoring ---
 wandb:
