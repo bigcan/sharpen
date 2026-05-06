@@ -168,9 +168,25 @@ gates:                                 # Protocol v2 Stage 2 (S488 escalation) +
     crit_repeat_window_hours: 24
     crit_repeat_count_before_lockout: 2
 
-# `ensemble:` block intentionally omitted — populated post-L1 by Stage 2.5-R reconcile
-# step (top-3 by backtest_test/profit_factor across N=10 extended-window seeds), mirroring
-# the parent sg1_btc_velotrade_l1_multiseed.yaml workflow.
+# `ensemble:` block populated 2026-05-06 by FU-2 Stage 2.5-R reconcile (S535-cont).
+# Top-3 selected by val_argmax_pf rule (S495) over N=10 extended-window L1 seeds:
+#   seed 456 :  val PF 2.9832 / test PF 2.8312
+#   seed 3141:  val PF 2.9161 / test PF 2.7883
+#   seed 123 :  val PF 2.9042 / test PF 2.7167
+# L1 verdict: PASS (test PF CV 2.12% << 22% ambiguous floor; 0/10 below pf_floor 1.2).
+# Full per-seed report: results/sg1_btc_extended_seed_report.json
+#
+# Workstream label `sg1_btc_velotrade_extended` keeps results dir disjoint from the
+# legacy 18mo `sg1_btc_velotrade` ensemble bake (live paper deploy audit trail).
+workstream: sg1_btc_velotrade_extended
+ensemble:
+  seeds: [456, 3141, 123]
+  seed_pfs:
+    456: 2.831187549972178
+    3141: 2.788342505569011
+    123: 2.7167399984602385
+  checkpoint_pattern: "checkpoints/sg1-btc-velotrade-l1-multiseed-extended-seed{seed}_*/checkpoint_final.pth"
+  gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
 
 wandb:
   project: "FinRL-Pro-DS"
