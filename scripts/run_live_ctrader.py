@@ -52,56 +52,9 @@ _REQUIRED_ENV_VARS = [
 def validate_config(config: dict, args) -> dict:
     """Validate and patch config with CLI overrides."""
 
-    # --- Checkpoint existence ---
-    # Three modes:
-    #   - solo (agent.checkpoint_path)
-    #   - v2.3 atomic-swap bundle (agent.ensemble.bundle_path → ensemble_v{N}.tar.gz)
-    #   - legacy ensemble (agent.ensemble.{seeds, checkpoint_pattern, aggregation_rule})
-    # The legacy form remains supported for v2.1/v2.2 retro-apply paper deploys per
-    # docs/protocol_v2.md §4. New L1-retrain promotions MUST emit a bundle.
-    agent_cfg = config.get("agent", {})
-    ensemble_cfg = agent_cfg.get("ensemble")
-    if ensemble_cfg and ensemble_cfg.get("bundle_path"):
-        # v2.3 path: defer extraction + SHA256 verification to build_components,
-        # so failures abort the runner with the live engine's logging context
-        # rather than during config validation. Just check the bundle file
-        # exists at this stage.
-        bundle_path = Path(ensemble_cfg["bundle_path"])
-        if not bundle_path.exists():
-            logger.error(f"v2.3 swap bundle not found: {bundle_path}")
-            sys.exit(1)
-        logger.info(f"v2.3 swap bundle declared: {bundle_path}")
-    elif ensemble_cfg:
-        import glob
-        seeds = list(ensemble_cfg.get("seeds", []))
-        pattern = ensemble_cfg.get("checkpoint_pattern", "")
-        if not seeds or not pattern:
-            logger.error(
-                "agent.ensemble requires either 'bundle_path' (v2.3) or "
-                "'seeds' + 'checkpoint_pattern' (legacy retro-apply)"
-            )
-            sys.exit(1)
-        resolved: dict = {}
-        for s in seeds:
-            # Let the caller choose which fold to load via a fixed 'fold' key
-            # (defaults to 7 = fold_07, the most-recent training window).
-            fold = int(ensemble_cfg.get("fold", 7))
-            glob_s = pattern.format(seed=s, fold=fold)
-            matches = sorted(glob.glob(glob_s))
-            if not matches:
-                logger.error(f"No checkpoint matches for seed {s} at {glob_s}")
-                sys.exit(1)
-            if len(matches) > 1:
-                logger.warning(f"Seed {s} has {len(matches)} matches; picking last: {matches[-1]}")
-            resolved[s] = matches[-1]
-        ensemble_cfg["_resolved_paths"] = resolved
-        logger.info(f"Legacy ensemble checkpoints resolved: {resolved}")
-    else:
-        checkpoint_path = agent_cfg.get("checkpoint_path", "")
-        if not Path(checkpoint_path).exists():
-            logger.error(f"Checkpoint not found: {checkpoint_path}")
-            logger.info("Set agent.checkpoint_path (solo) or agent.ensemble (multi-seed).")
-            sys.exit(1)
+    # --- Checkpoint existence (solo / v2.3 bundle / legacy ensemble) ---
+    from finrl_pro_ds.live import resolve_agent_paths
+    resolve_agent_paths(config, logger=logger)
 
     # --- cTrader credentials ---
     missing = [v for v in _REQUIRED_ENV_VARS if not os.environ.get(v)]
@@ -148,7 +101,6 @@ def validate_config(config: dict, args) -> dict:
 
 def build_components(config: dict):
     """Instantiate all live trading components for cTrader XAUUSD CFD."""
-    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
     from finrl_pro_ds.cfd.execution.ctrader_broker import CTraderBroker
     from finrl_pro_ds.cfd.live.cfd_bar_clock import CFDBarClock
     from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
@@ -157,159 +109,10 @@ def build_components(config: dict):
         CryptoRiskConfig,
         CryptoRiskManager,
     )
+    from finrl_pro_ds.live import build_agent
 
-    # --- Agent (solo or ensemble) ---
-    agent_cfg = config.get("agent", {})
-    network_cfg = config.get("network", {})
-    sac_cfg = config.get("agents", {}).get("sac", {})
-    device = agent_cfg.get("device", "cpu")
-    sac_kwargs = {k: v for k, v in sac_cfg.items() if k not in ("checkpoint_path",)}
-
-    ensemble_cfg = agent_cfg.get("ensemble")
-    if ensemble_cfg and ensemble_cfg.get("bundle_path"):
-        # v2.3 atomic-swap bundle path: extract + SHA256-verify, then load N
-        # SACAgents from the bundle's checkpoints. EnsembleAgent constructor
-        # is shared with the legacy path below.
-        from finrl_pro_ds.agents.sac.ensemble_agent import EnsembleAgent
-        from finrl_pro_ds.live import (
-            BundleIntegrityError,
-            check_swap_approved,
-            extract_and_verify_bundle,
-            record_successful_load,
-        )
-
-        bundle_path = ensemble_cfg["bundle_path"]
-
-        # v2.3 §4.5 step 6 swap-approval handshake. Prop-firm strategies
-        # require an explicit operator sentinel before loading a bundle
-        # that differs from the one this engine last loaded. Same-bundle
-        # restarts (config + sha256 unchanged) bypass the handshake.
-        # Runs BEFORE extract_and_verify_bundle so we don't pay the
-        # extraction cost on a swap the operator hasn't approved yet.
-        safety_cfg = config.get("safety", {}) or {}
-        kill_file = safety_cfg.get("kill_file") or (config.get("risk", {}) or {}).get("kill_file")
-        if kill_file:
-            tags = [str(t).lower() for t in (config.get("wandb", {}).get("tags") or [])]
-            is_prop_firm = any(
-                t in tags for t in ("prop-firm", "propfirm", "ftmo", "velotrade")
-            )
-            last_bundle_state = safety_cfg.get(
-                "last_bundle_file",
-                f"{kill_file}.last_bundle",
-            )
-            swap_approved = safety_cfg.get(
-                "swap_approved_file",
-                f"{kill_file}.swap_approved",
-            )
-            handshake = check_swap_approved(
-                bundle_path,
-                last_bundle_state_path=last_bundle_state,
-                swap_approved_path=swap_approved,
-                is_prop_firm=is_prop_firm,
-            )
-            if not handshake.approved:
-                logger.error(
-                    f"v2.3 swap-approval handshake REJECTED: {handshake.reason}",
-                )
-                sys.exit(1)
-            logger.info(
-                f"v2.3 swap-approval handshake: {handshake.reason} "
-                f"(is_swap={handshake.is_swap})",
-            )
-
-        try:
-            bundle = extract_and_verify_bundle(
-                bundle_path,
-                require_normalizers=ensemble_cfg.get("require_normalizers", True),
-            )
-        except BundleIntegrityError as exc:
-            logger.error(f"v2.3 bundle integrity failure: {exc}")
-            raise
-
-        # Record the successful load AFTER bundle SHA256 has been verified
-        # so a corrupted bundle that fails extraction doesn't poison the
-        # state file. The engine's broker connect / risk init can still
-        # fail downstream; that's acceptable — the next restart will see
-        # the same bundle as already-loaded and skip the handshake.
-        if kill_file:
-            try:
-                record_successful_load(
-                    bundle_path, last_bundle_state_path=last_bundle_state,
-                )
-            except OSError as state_err:
-                logger.warning(
-                    f"could not record bundle load state ({state_err}) — "
-                    f"next restart may re-prompt handshake",
-                )
-        seeds = list(bundle.seeds)
-        loaded_agents = []
-        for s in seeds:
-            a = SACAgent(
-                network_config=network_cfg, device=device, torch_compile=False,
-                **sac_kwargs,
-            )
-            a.load(str(bundle.checkpoint_paths[s]))
-            a.actor.eval()
-            loaded_agents.append(a)
-        # Manifest-declared seed_pfs win over any caller override; live config
-        # may still pin an aggregation_rule override (e.g. swap to ens_mean
-        # without rebuilding the bundle), but the canonical rule is in the
-        # manifest and we log if the caller diverges.
-        rule = ensemble_cfg.get("aggregation_rule") or bundle.chosen_rule
-        if rule != bundle.chosen_rule:
-            logger.warning(
-                f"aggregation_rule override: config={rule!r} differs from "
-                f"manifest.chosen_rule={bundle.chosen_rule!r}"
-            )
-        deadband = float(ensemble_cfg.get("deadband", bundle.deadband))
-        agent = EnsembleAgent(
-            agents=loaded_agents,
-            seeds=seeds,
-            aggregation_rule=rule,
-            deadband=deadband,
-            seed_pfs=bundle.seed_pfs,
-        )
-        logger.info(
-            f"EnsembleAgent loaded from v2.3 bundle: ws={bundle.workstream} "
-            f"v={bundle.version} seeds={seeds} rule={rule} deadband={deadband}",
-        )
-    elif ensemble_cfg:
-        from finrl_pro_ds.agents.sac.ensemble_agent import EnsembleAgent
-        resolved = ensemble_cfg["_resolved_paths"]  # populated in validate_config
-        seeds = list(ensemble_cfg.get("seeds", []))
-        # Ensemble agents share `sac_kwargs` (config.agents.sac). This assumes all
-        # ensemble seeds were trained with the same HPs, which is true for the
-        # current SG-1 XAUUSD ensemble (top-3 seeds all ran trial-56 params). A
-        # mixed-HP ensemble would need per-seed kwargs keyed by seed id.
-        loaded_agents = []
-        for s in seeds:
-            a = SACAgent(
-                network_config=network_cfg, device=device, torch_compile=False,
-                **sac_kwargs,
-            )
-            a.load(resolved[s])
-            a.actor.eval()
-            loaded_agents.append(a)
-        agent = EnsembleAgent(
-            agents=loaded_agents,
-            seeds=seeds,
-            aggregation_rule=ensemble_cfg.get("aggregation_rule", "ens_agreement"),
-            deadband=float(ensemble_cfg.get("deadband",
-                config.get("trading", {}).get("deadband_threshold", 0.25))),
-            seed_pfs={int(k): float(v) for k, v in (ensemble_cfg.get("seed_pfs") or {}).items()},
-        )
-        logger.info(
-            f"EnsembleAgent loaded: {len(seeds)} seeds={seeds} "
-            f"rule={ensemble_cfg.get('aggregation_rule', 'ens_agreement')} "
-            f"deadband={agent.deadband}",
-        )
-    else:
-        agent = SACAgent(
-            network_config=network_cfg, device=device, torch_compile=False, **sac_kwargs,
-        )
-        agent.load(agent_cfg["checkpoint_path"])
-        agent.actor.eval()
-        logger.info(f"Agent loaded from {agent_cfg['checkpoint_path']}")
+    # --- Agent (solo / v2.3 bundle / legacy ensemble) ---
+    agent = build_agent(config, logger=logger)
 
     # --- Broker ---
     ex_cfg = config.get("exchange", {})

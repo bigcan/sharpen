@@ -22,6 +22,10 @@ from finrl_pro_ds.live.swap_handshake import (
     check_swap_approved,
     record_successful_load,
 )
+from finrl_pro_ds.live.agent_loader import (
+    build_agent,
+    resolve_agent_paths,
+)
 
 __all__ = [
     "PHASE_ORDER",
@@ -35,4 +39,6 @@ __all__ = [
     "SwapHandshakeResult",
     "check_swap_approved",
     "record_successful_load",
+    "build_agent",
+    "resolve_agent_paths",
 ]

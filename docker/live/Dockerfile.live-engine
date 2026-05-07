@@ -69,6 +69,11 @@ COPY configs /app/configs
 # per workstream). Baked at build time so the live engine can resolve
 # drift.baseline_path without a volume mount. See baselines/README.md.
 COPY baselines /app/baselines
+# v2.3 atomic-swap bundles (ensemble_v{N}.tar.gz + .sha256 per workstream).
+# Baked so a strategy swap = one image rebuild + container bounce; the
+# swap-approval handshake (finrl_pro_ds.live.swap_handshake) gates the load
+# against the operator's last-bundle sentinel.
+COPY bundles /app/bundles
 COPY pyproject.toml /app/
 
 RUN pip install -e ".[ctrader]"
