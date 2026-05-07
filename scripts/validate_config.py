@@ -1189,8 +1189,16 @@ STAGE_CHECKS = {
 }
 
 
-def validate(config_path: Path, stage: str) -> ValidationResult:
+def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -> ValidationResult:
     cfg = load_yaml(config_path)
+    if overlays:
+        from finrl_pro_ds.config_utils import apply_overlays
+        project_root = Path(__file__).resolve().parent.parent
+        cfg = apply_overlays(
+            cfg, overlays,
+            overlay_root=project_root / "configs" / "deploy",
+            allowlist_path=project_root / "configs" / "deploy" / "ALLOWLIST.yaml",
+        )
     r = ValidationResult()
 
     check_no_fee_curriculum(cfg, r)
@@ -1244,6 +1252,14 @@ def main() -> int:
                         help="Validate a Stage 2 / 2.5 JSON report against manifest schema "
                              "(seed_report.json or ensemble_report.json)")
     parser.add_argument(
+        "--overlay", action="append", default=None,
+        help="Deploy overlay under configs/deploy/ (e.g. 'velotrade/step1'). "
+             "Repeat for multiple; later wins. Mirrors run_live --overlay so "
+             "the validator can check the EFFECTIVE deployed config, not "
+             "just the base (prop-firm overlays own static_peak per "
+             "decision_prop_firm_decoupling_s495).",
+    )
+    parser.add_argument(
         "--strict", action="store_true",
         help="Treat warnings as failures (CI mode)",
     )
@@ -1275,7 +1291,7 @@ def main() -> int:
         logger.error("config not found: %s", args.config)
         return 2
 
-    result = validate(args.config, args.stage)
+    result = validate(args.config, args.stage, overlays=args.overlay)
 
     for msg in result.passed:
         logger.info("  PASS  %s", msg)
@@ -1288,7 +1304,8 @@ def main() -> int:
     if args.strict and status == "WARN":
         status = "FAIL"
 
-    logger.info("\nstatus=%s  config=%s  stage=%s", status, args.config.name, args.stage)
+    overlay_tag = f"  overlays={','.join(args.overlay)}" if args.overlay else ""
+    logger.info("\nstatus=%s  config=%s  stage=%s%s", status, args.config.name, args.stage, overlay_tag)
     if status == "FAIL":
         logger.error("Protocol v2 violations. See %s.", PROTOCOL_DOC)
         return 1
