@@ -42,18 +42,39 @@ exchange:
   market_fallback_timeout: 60.0
   data_exchange: "bybit"               # OHLCV from Bybit testnet (matches exec venue)
 
-# --- Agent ---
-# Seed 42 solo interim per Stage 2.5 AMBIGUOUS_RERUN verdict (S498-cont,
-# 2026-04-25): chosen rule ens_pf_weighted test uplift 1.059x in [1.05, 1.10)
-# ambiguous band → fall back to best-test-PF solo (seed 42, test PF 2.308,
-# val PF 2.155, MDD -0.42%). Mirrors GMGP1-BTC seed 456 interim path.
-# Verdict at results/sg1_btc_velotrade_ensemble/verdict.json.
-# Ensemble path deferred: would need run_live_dxtrade.py port of the
-# EnsembleAgent wiring that exists in run_live_ctrader.py (S489).
+# --- Agent (v2.3 atomic-swap bundle: ens_agreement, FU-3 PROMOTE) ---
+# Loaded from bundle baked into image at /app/bundles/sg1_btc_velotrade_extended/.
+# - L1 N=10: test PF median 2.75, CV 2.12% (S535-cont FU-1 reconcile)
+# - Stage 2.5-R bootstrap PRIMARY: P(ens > solo) = 0.983 → PROMOTE (FU-2)
+# - Stage 3 WF 8-fold: bootstrap P(PF) = 1.0000 (n=57k), legacy G3 1.018
+#   below 1.10 but PF dominance promotes → PROMOTE (FU-3)
+# - Bundle SHA256: 0c50fe6267f5ca2cf889d8073549c16c11e9cd358d18b2a03135e43a4528981b
+# - Manifest chosen_rule: ens_agreement (changed from FU-2 v1 ens_mean —
+#   operator awareness required; drift_agreement baseline at
+#   baselines/sg1_btc_extended_fold_07/ensemble_report.json was recal'd in
+#   commit 24b67ec2 ahead of this swap).
+# Predecessor: seed 42 solo (S498-cont AMBIGUOUS_RERUN fallback) — paper
+# soak from 2026-04-25 to swap-date. Now 8th-best test PF in N=10 cohort.
+# `checkpoint_path` retained as dead value; build_agent() detects
+# `agent.ensemble.bundle_path` and skips the solo path.
 agent:
-  checkpoint_path: "checkpoints/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030/checkpoint_final.pth"
+  checkpoint_path: ""
   device: "cpu"
   torch_compile: false
+  ensemble:
+    bundle_path: "/app/bundles/sg1_btc_velotrade_extended/ensemble_v2.tar.gz"
+    # aggregation_rule declared explicitly so validate_config can fire its
+    # v2.3 agreement-decay key check (it can't open the tarball at validate
+    # time). Mismatch with bundle.chosen_rule logs a WARN at runtime.
+    aggregation_rule: "ens_agreement"
+    # FU-3 bake produced normalizer_sha256: MISSING for all 3 seeds (same as
+    # FU-2 v1) — live engine supplies its own `norm_warmup` pkl per
+    # project_live_obs_normalization_mismatch_s509. Without this override
+    # extract_and_verify_bundle's default require_normalizers=True raises
+    # BundleIntegrityError on first boot.
+    require_normalizers: false
+    # deadband, seeds, seed_pfs come from the bundle's manifest. Override
+    # deadband / aggregation_rule here only to demote without rebuilding.
 
 # --- SAC Hyperparameters (PLACEHOLDER — update with HPO best trial) ---
 agents:
@@ -151,19 +172,26 @@ risk:
   soft_throttle_start: 0.8
 
 # --- WandB Monitoring ---
+# Distinct run_id from seed42-solo predecessor so swap is auditable in WandB.
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "sg-1", "BTC", "SAC", "3min", "bybit-testnet", "paper",
-         "velotrade-overlay", "signal-gated", "prop-firm", "seed42-solo",
-         "venue-cutover-20260502"]
-  run_id: "live-sg1-btc-bybit-testnet-paper-20260502"
+  tags: ["live", "sg-1", "BTC", "SAC", "3min", "bybit-demo", "paper",
+         "velotrade-overlay", "signal-gated", "prop-firm", "ensemble",
+         "ens-agreement", "v2-swap"]
+  run_id: "live-sg1-btc-bybit-demo-paper-ensemble-v2"
 
 # --- Safety ---
 safety:
   require_explicit_mainnet: true
   max_daily_loss_pct: 0.0            # 0 = disabled (Velotrade 2-step has no daily rule). Engine treats ≤0 as disabled (audit FIND-01, 2026-04-22).
   kill_file: "/tmp/finrl_live_sg1_btc_kill"
+  # v2.3 swap-handshake state files on the persistent state volume (/app/state
+  # is mounted via sg1-btc-state in docker-compose). Default `${kill_file}.*`
+  # would land on /tmp which is wiped per container — every restart would be
+  # treated as a fresh bundle and re-trigger the operator approval handshake.
+  last_bundle_file: "/app/state/finrl_live_sg1_btc_last_bundle"
+  swap_approved_file: "/app/state/finrl_live_sg1_btc_swap_approved"
   flatten_on_kill_file: true         # v2.2 §8.3 CRIT graceful flatten
   emergency_flatten_on_error: true
   # E1 Step 0b: live-replay fixture capture for the signed-lots refactor.
@@ -201,6 +229,9 @@ gates:
     saturation_frac_crit: 0.30
     action_kl_warn: 0.5
     action_kl_crit: 1.0
+    agreement_flat_delta_warn: 0.20         # v2.3 ensemble agreement-decay
+    agreement_flat_delta_crit: 0.40
+    agreement_flat_window_bars: 2000
     regime_conditioning: true
     vol_estimator_bars: 20
   safe_mode:

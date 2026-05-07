@@ -214,6 +214,9 @@ gates:
     saturation_frac_crit: 0.30
     action_kl_warn: 0.5
     action_kl_crit: 1.0
+    agreement_flat_delta_warn: 0.20         # v2.3 ensemble agreement-decay
+    agreement_flat_delta_crit: 0.40
+    agreement_flat_window_bars: 2000
     regime_conditioning: true
     vol_estimator_bars: 20
   safe_mode:
