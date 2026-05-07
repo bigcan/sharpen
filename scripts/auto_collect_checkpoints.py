@@ -14,6 +14,17 @@ Usage:
     python scripts/auto_collect_checkpoints.py --run_id abc123    # Specific run
     python scripts/auto_collect_checkpoints.py --dry_run          # Preview only
     python scripts/auto_collect_checkpoints.py --all_instances    # Scan all (no WandB)
+
+Eval/WF artifact preservation
+-----------------------------
+The collector defaults to pulling **only** model checkpoints (.pth/.zip), but
+eval-stage and walk-forward outputs (trajectory parquets, verdict.json,
+ensemble bundles) live under remote `results/<workstream>/...` and were not
+mirrored historically. Loss of those artifacts when gpuhub-1 was released
+post-FU-3 (2026-05-07) forced a single-fold drift-baseline fallback. Use
+`--results <relpath>` to mirror the results tree for a finished WF/ensemble
+run before its host is recycled. Whitelisted suffixes only: .parquet, .json,
+.csv, .tar.gz; files larger than --max-size-mb (default 500 MB) are skipped.
 """
 
 import argparse
@@ -30,10 +41,17 @@ import wandb
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 INSTANCES_FILE = PROJECT_ROOT / "instances.json"
 CHECKPOINTS_DIR = PROJECT_ROOT / "checkpoints"
+RESULTS_DIR = PROJECT_ROOT / "results"
 COLLECTION_LOG = PROJECT_ROOT / "results" / "collection_log.json"
 REMOTE_WORKSPACE = "/workspace/DeepScalper"
 WANDB_ENTITY = "bigcan-chiwin-technology"
 WANDB_PROJECT = "FinRL-Pro-DS"
+
+# Whitelisted file suffixes for --results pulls. Trajectory parquets,
+# verdicts/manifests, summary CSVs, and bundled ensembles are tiny enough
+# to mirror; large opaques (replay buffers, raw datasets) stay remote.
+RESULTS_WHITELIST_SUFFIXES = (".parquet", ".json", ".csv", ".tar.gz")
+RESULTS_DEFAULT_MAX_MB = 500
 
 # Named run prefixes — only these are worth auto-collecting.
 # Timestamp-only dirs (e.g., 20260315_073204) are HPO trial intermediates.
@@ -262,6 +280,137 @@ def find_and_download_checkpoint(run_name, instances, dry_run=False):
     return None, None, 0
 
 
+def _has_whitelisted_suffix(name: str) -> bool:
+    return any(name.endswith(s) for s in RESULTS_WHITELIST_SUFFIXES)
+
+
+def _walk_remote(sftp, remote_dir):
+    """Yield (remote_path, attr) for every file under remote_dir (recursive).
+
+    paramiko's SFTPClient lacks os.walk; we DIY via listdir_attr + stat-mode.
+    """
+    import stat as _stat
+    pending = [remote_dir]
+    while pending:
+        cur = pending.pop()
+        try:
+            entries = sftp.listdir_attr(cur)
+        except FileNotFoundError:
+            continue
+        except Exception as exc:
+            log.debug(f"  walk skip {cur}: {exc}")
+            continue
+        for entry in entries:
+            full = f"{cur}/{entry.filename}"
+            if _stat.S_ISDIR(entry.st_mode):
+                pending.append(full)
+            else:
+                yield full, entry
+
+
+def collect_results_dir(
+    relpath: str,
+    instances: dict,
+    *,
+    dry_run: bool = False,
+    max_mb: int = RESULTS_DEFAULT_MAX_MB,
+):
+    """Mirror /workspace/DeepScalper/results/<relpath>/ from the first
+    instance that has it. Whitelisted suffixes only; files >max_mb skipped.
+
+    Returns (instance_name, files_downloaded, total_mb).
+    """
+    rel = relpath.strip("/").rstrip("/")
+    if not rel:
+        log.error("--results requires a non-empty path under results/")
+        return None, 0, 0.0
+
+    remote_root = f"{REMOTE_WORKSPACE}/results/{rel}"
+    local_root = RESULTS_DIR / rel
+
+    for inst_name, inst in instances.items():
+        try:
+            ssh, sftp = sftp_connect(inst)
+        except Exception as e:
+            log.debug(f"  {inst_name}: connection failed ({e})")
+            continue
+
+        try:
+            try:
+                sftp.stat(remote_root)
+            except FileNotFoundError:
+                log.debug(f"  {inst_name}: no {remote_root}")
+                continue
+
+            log.info(f"  {inst_name}: walking {remote_root}")
+            files = []
+            for full, attr in _walk_remote(sftp, remote_root):
+                fname = full.rsplit("/", 1)[-1]
+                if not _has_whitelisted_suffix(fname):
+                    continue
+                size_mb = attr.st_size / 1024 / 1024
+                if size_mb > max_mb:
+                    log.warning(
+                        f"  {inst_name}: skip {full} ({size_mb:.1f} MB > "
+                        f"--max-size-mb={max_mb})"
+                    )
+                    continue
+                files.append((full, attr, size_mb))
+
+            if not files:
+                log.warning(
+                    f"  {inst_name}: {remote_root} exists but no whitelisted "
+                    f"files ({RESULTS_WHITELIST_SUFFIXES})"
+                )
+                return None, 0, 0.0
+
+            total_mb = sum(s for _, _, s in files)
+            if dry_run:
+                log.info(
+                    f"  {inst_name}: WOULD download {len(files)} file(s) "
+                    f"({total_mb:.1f} MB) -> {local_root}"
+                )
+                for full, _, sm in files[:10]:
+                    log.info(f"    {full.replace(remote_root + '/', '')} "
+                             f"({sm:.2f} MB)")
+                if len(files) > 10:
+                    log.info(f"    ... +{len(files) - 10} more")
+                return inst_name, len(files), total_mb
+
+            downloaded = 0
+            skipped = 0
+            for full, attr, size_mb in files:
+                rel_path = full[len(remote_root) + 1:]
+                local_path = local_root / rel_path
+                if (local_path.exists()
+                        and local_path.stat().st_size == attr.st_size):
+                    skipped += 1
+                    continue
+                local_path.parent.mkdir(parents=True, exist_ok=True)
+                log.info(f"  {inst_name}: download {rel_path} ({size_mb:.2f} MB)")
+                sftp.get(full, str(local_path))
+                downloaded += 1
+
+            log.info(
+                f"  {inst_name}: results pull complete "
+                f"({downloaded} new, {skipped} already-local, "
+                f"{total_mb:.1f} MB total) -> {local_root}"
+            )
+            return inst_name, downloaded, total_mb
+
+        except Exception as e:
+            log.warning(f"  {inst_name}: results scan error ({e})")
+        finally:
+            try:
+                sftp.close()
+                ssh.close()
+            except Exception:
+                pass
+
+    log.warning(f"results/{rel} not found on any instance")
+    return None, 0, 0.0
+
+
 def is_named_run(dirname):
     """Check if a checkpoint dir is a named run (vs a timestamp-only HPO trial)."""
     return dirname.startswith(NAMED_RUN_PREFIXES)
@@ -339,10 +488,39 @@ def main():
     parser.add_argument("--dry_run", action="store_true", help="Preview only, don't download")
     parser.add_argument("--all_instances", action="store_true", help="Scan all instances for uncollected checkpoints (no WandB needed)")
     parser.add_argument("--include_all", action="store_true", help="With --all_instances: include timestamp-only HPO trial dirs too")
+    parser.add_argument(
+        "--results", action="append", default=None,
+        help="Mirror /workspace/DeepScalper/results/<relpath>/ from the first "
+             "instance that has it (whitelist: .parquet/.json/.csv/.tar.gz). "
+             "Repeat for multiple. Use to preserve WF trajectory parquets + "
+             "verdicts before the host instance is recycled. Example: "
+             "'--results sg1_btc_velotrade_extended_ensemble'.",
+    )
+    parser.add_argument(
+        "--max-size-mb", type=int, default=RESULTS_DEFAULT_MAX_MB,
+        help=f"Per-file size cap for --results pulls (default: {RESULTS_DEFAULT_MAX_MB} MB)",
+    )
     args = parser.parse_args()
 
     instances = load_instances()
     log.info(f"Loaded {len(instances)} instance(s): {', '.join(instances.keys())}")
+
+    if args.results:
+        log.info(f"Collecting results subdir(s): {args.results}")
+        any_found = False
+        for rel in args.results:
+            inst, n, mb = collect_results_dir(
+                rel, instances,
+                dry_run=args.dry_run, max_mb=args.max_size_mb,
+            )
+            if inst:
+                any_found = True
+        if not any_found:
+            log.warning("No results subdir was found on any instance.")
+        # Results pulls are a standalone mode — checkpoint flow only runs
+        # if the operator also passes --hours/--run_id/--all_instances.
+        if not (args.run_id or args.all_instances or args.hours != 24):
+            return
 
     if args.all_instances:
         log.info(f"Scanning all instances for uncollected checkpoints...")
