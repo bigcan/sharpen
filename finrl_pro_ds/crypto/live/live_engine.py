@@ -2907,30 +2907,44 @@ class LiveTradingEngine:
         """
         flatten_on_stop = self.config.get("safety", {}).get("flatten_on_stop", True)
 
-        # Final position reconciliation — flatten if configured
-        try:
-            exchange_pos = await self.broker.get_single_position(self._asset)
-            if abs(exchange_pos) > 0.01:
-                if flatten_on_stop:
-                    logger.warning(
-                        f"SHUTDOWN: Flattening open position {exchange_pos:.4f} "
-                        f"(safety.flatten_on_stop=true)",
-                    )
-                    await self._emergency_flatten()
+        # Final position reconciliation — flatten if configured.
+        # S535-cont-2: skip when broker is known-disconnected. ib_futures_broker.get_single_position
+        # falls back to clipped raw-contract count when _portfolio_value <= 0 (BUG-15 fallback at
+        # ib_futures_broker.py:381-386); during a dead IB connection ib.positions() returns []
+        # so n_contracts=0 → exchange_pos=0.0, producing a misleading "Position discrepancy:
+        # internal=0.47 exchange=0.00" log every time the engine self-stops on
+        # 5-consecutive-reconnect-failures (gmgp1-gold daily IB outage 23:30-00:45 UTC).
+        # The cached _current_position is correct; the broker query is unreliable.
+        if not self._check_broker_alive():
+            logger.warning(
+                f"SHUTDOWN: broker disconnected — skipping final position verify; "
+                f"last known internal position fraction={self._current_position:.4f} "
+                f"(use broker UI / next-restart sync for ground truth).",
+            )
+        else:
+            try:
+                exchange_pos = await self.broker.get_single_position(self._asset)
+                if abs(exchange_pos) > 0.01:
+                    if flatten_on_stop:
+                        logger.warning(
+                            f"SHUTDOWN: Flattening open position {exchange_pos:.4f} "
+                            f"(safety.flatten_on_stop=true)",
+                        )
+                        await self._emergency_flatten()
+                    else:
+                        logger.warning(
+                            f"SHUTDOWN: POSITION STILL OPEN on exchange: {exchange_pos:.4f}. "
+                            f"Position will be ORPHANED. Flatten manually or restart.",
+                        )
                 else:
+                    logger.info(f"Shutdown: exchange position is flat ({exchange_pos:.4f})")
+                if abs(exchange_pos - self._current_position) > 0.01:
                     logger.warning(
-                        f"SHUTDOWN: POSITION STILL OPEN on exchange: {exchange_pos:.4f}. "
-                        f"Position will be ORPHANED. Flatten manually or restart.",
+                        f"SHUTDOWN: Position discrepancy: internal={self._current_position:.4f}, "
+                        f"exchange={exchange_pos:.4f}",
                     )
-            else:
-                logger.info(f"Shutdown: exchange position is flat ({exchange_pos:.4f})")
-            if abs(exchange_pos - self._current_position) > 0.01:
-                logger.warning(
-                    f"SHUTDOWN: Position discrepancy: internal={self._current_position:.4f}, "
-                    f"exchange={exchange_pos:.4f}",
-                )
-        except Exception as e:
-            logger.warning(f"Shutdown position check failed: {e}")
+            except Exception as e:
+                logger.warning(f"Shutdown position check failed: {e}")
 
         logger.info(
             f"=== TRADING STOPPED ===\n"
