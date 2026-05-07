@@ -107,6 +107,15 @@ features:
   asset_class: "crypto"
   norm_span: 120
   bootstrap_bars: 30000
+  # S509 train-serve EMA-Z parity (S535-cont-5 swap audit follow-up AUD-7).
+  # v2 bundle has normalizer_sha256: MISSING per FU-3 bake; without an
+  # explicit override the resolver searches alongside the extracted seed
+  # checkpoints (which lack the pkl) then falls back to legacy rolling
+  # EMA-Z. The L1 solo seed-42 dir is bind-mounted here for backward-compat
+  # and its pkl is parity-correct for the v2 ensemble: norm_warmup is a
+  # deterministic function of (training data, scales, norm_span) — all 4
+  # L1 seeds [42, 456, 3141, 123] share these, only SAC RNG differs.
+  norm_warmup_path: "/app/checkpoints/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030/norm_warmup_3-15-60.pkl"
 
 # --- Signal Gate (must match training) ---
 # Thresholds from configs/sg1_btc_velotrade_l1_multiseed.yaml (S479 BTC Bybit
@@ -185,7 +194,13 @@ wandb:
 safety:
   require_explicit_mainnet: true
   max_daily_loss_pct: 0.0            # 0 = disabled (Velotrade 2-step has no daily rule). Engine treats ≤0 as disabled (audit FIND-01, 2026-04-22).
-  kill_file: "/tmp/finrl_live_sg1_btc_kill"
+  # S535-cont-6 (AUD-3 fix): moved from /tmp to persistent volume so v2.2 §8.3
+  # repeat-CRIT lockout survives container restart. /tmp inside container fs is
+  # tmpfs-equivalent and wiped per restart — kill_file there auto-cleared on
+  # bounce, defeating the lockout. Mirrors sister sg1_xauusd_ctrader.yaml.
+  # `kill_file_override` defaults to `${kill_file}.override` per
+  # live_engine.py:309 so it inherits /app/state too — no separate line needed.
+  kill_file: "/app/state/finrl_live_sg1_btc_kill"
   # v2.3 swap-handshake state files on the persistent state volume (/app/state
   # is mounted via sg1-btc-state in docker-compose). Default `${kill_file}.*`
   # would land on /tmp which is wiped per container — every restart would be

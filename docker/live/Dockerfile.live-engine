@@ -79,9 +79,15 @@ COPY pyproject.toml /app/
 RUN pip install -e ".[ctrader]"
 
 # ---- Runtime setup ----
+# NOTE: COPY from Windows host strips the user-write bit on nested dirs
+# (top-level /app/<dir> is 755 but subdirs land 555). The engine extracts
+# atomic-swap bundles into /app/bundles/<ws>/_extracted_<stem>/ at boot
+# (ensemble_bundle.extract_and_verify_bundle), so /app/bundles MUST be
+# writable by finrl. Restore the user-write bit there explicitly.
 RUN groupadd -r finrl && useradd -r -g finrl -d /app finrl \
     && mkdir -p /app/logs /app/state /tmp \
-    && chown -R finrl:finrl /app /tmp
+    && chown -R finrl:finrl /app /tmp \
+    && chmod -R u+w /app/bundles
 
 COPY docker/live/entrypoint.sh /app/entrypoint.sh
 COPY docker/live/healthcheck.sh /app/healthcheck.sh
