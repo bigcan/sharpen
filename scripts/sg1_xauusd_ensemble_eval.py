@@ -1586,25 +1586,42 @@ def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[s
         "uplift_min": uplift_min,
     }
 
-    # G4: FTMO compliance per fold
-    g4 = _require_gate(gates, "g4_ftmo_compliance")
-    dd_buf_min = _require_field(g4, "daily_dd_buffer_pp_min", "g4_ftmo_compliance")
-    tr_buf_min = _require_field(g4, "trailing_dd_buffer_pp_min", "g4_ftmo_compliance")
-    g4_min_folds = _require_field(g4, "min_folds_pass", "g4_ftmo_compliance")
+    # G4: prop-firm compliance per fold (FTMO or Velotrade variant).
+    # Velotrade has no daily-loss gate (`daily_dd_buffer_pp_min: null`) and waives
+    # active_days/single_day_share (`compliance_must_pass: false`). Auto-detect by
+    # gate-name presence; only one variant should appear in any given gates yaml.
+    if "g4_velotrade_compliance" in gates and "g4_ftmo_compliance" in gates:
+        raise ValueError(
+            "Gates YAML defines BOTH g4_ftmo_compliance and g4_velotrade_compliance. "
+            "Only one prop-firm G4 variant may be active per workstream."
+        )
+    g4_key = "g4_velotrade_compliance" if "g4_velotrade_compliance" in gates else "g4_ftmo_compliance"
+    g4 = _require_gate(gates, g4_key)
+    dd_buf_min = g4.get("daily_dd_buffer_pp_min", None)  # None ⇒ no daily-loss gate
+    tr_buf_min = _require_field(g4, "trailing_dd_buffer_pp_min", g4_key)
+    g4_min_folds = _require_field(g4, "min_folds_pass", g4_key)
+    compliance_must_pass = bool(g4.get("compliance_must_pass", True))
     g4_passing_folds = 0
     for fm in completed:
         em = fm.get(agg_rule, {})
-        dd_buf = em.get("daily_dd_buffer_pp")
         tr_buf = em.get("trailing_dd_buffer_pp")
-        comp = em.get("ftmo_compliance_pass")
-        if dd_buf is None or tr_buf is None:
+        if tr_buf is None or tr_buf < tr_buf_min:
             continue
-        if dd_buf >= dd_buf_min and tr_buf >= tr_buf_min and comp:
-            g4_passing_folds += 1
-    out["gates"]["G4_ftmo_compliance"] = {
+        if dd_buf_min is not None:
+            dd_buf = em.get("daily_dd_buffer_pp")
+            if dd_buf is None or dd_buf < dd_buf_min:
+                continue
+        if compliance_must_pass and not em.get("ftmo_compliance_pass"):
+            continue
+        g4_passing_folds += 1
+    out["gates"]["G4_compliance"] = {
         "pass": g4_passing_folds >= g4_min_folds,
+        "variant": g4_key,
         "folds_meeting": g4_passing_folds,
         "min_required": g4_min_folds,
+        "trailing_dd_buffer_pp_min": tr_buf_min,
+        "daily_dd_buffer_pp_min": dd_buf_min,
+        "compliance_must_pass": compliance_must_pass,
     }
 
     # G5: DD stability (CV of ensemble PF across folds)
