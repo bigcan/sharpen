@@ -26,6 +26,7 @@ import logging
 import os
 import time
 from datetime import datetime, timezone
+from threading import Timer
 from zoneinfo import ZoneInfo
 
 import docker
@@ -59,6 +60,23 @@ AUTO_RESTART_MAX_PER_HOUR = int(os.environ.get("AUTO_RESTART_MAX_PER_HOUR", "3")
 # Per-container state, keyed by container name.
 _unhealthy_streak: dict[str, int] = {}
 _auto_restart_history: dict[str, list[float]] = {}
+
+# S535-cont-2 Fix D: ibgateway restart auto-rebind for orphaned netns.
+# When the ibgateway container restarts (TWS nightly auto-logoff at 23:40 UTC,
+# manual bounce, OOM, etc.), strategies using `network_mode: container:ibgateway`
+# retain a stale kernel netns reference — `localhost:4002` from inside the
+# strategy container routes into dead space until the strategy itself restarts.
+# This hook detects ibgateway start events and `docker restart`s dependents
+# after a short grace period (let IBC complete login first).
+# See project_gmgp1_gold_daily_ib_outage_s535.md and
+# project_ibgateway_restart_orphan_netns.md (S489).
+IBGATEWAY_REBIND_ENABLED = os.environ.get("IBGATEWAY_REBIND_ENABLED", "true").lower() == "true"
+IBGATEWAY_REBIND_GRACE_S = int(os.environ.get("IBGATEWAY_REBIND_GRACE_S", "20"))
+IBGATEWAY_CONTAINER_NAME = os.environ.get("IBGATEWAY_CONTAINER_NAME", "ibgateway")
+# Dedupe: Docker can emit multiple "start" events per restart cycle (containerd,
+# health-check, etc.). Suppress all but the first within this window.
+_last_ibgateway_rebind_fired: float = 0.0
+IBGATEWAY_REBIND_DEDUPE_WINDOW_S = 60.0
 
 # Comma-separated container names to ignore (intentionally stopped / shelved workstreams).
 # Empty string means monitor everything (backward compatible).
@@ -345,12 +363,113 @@ def _detect_stop_reason(container_name: str, exit_code) -> str:
     return logs[idx + len(marker):].splitlines()[0].strip()[:64]
 
 
+def _find_ibgateway_dependents(client: docker.DockerClient) -> list:
+    """Return running containers using ``network_mode: container:<ibgateway>``.
+
+    These containers' kernel netns reference becomes stale on every ibgateway
+    container restart. They need a ``docker restart`` to rebind to the new
+    ibgateway PID's network namespace. See
+    project_ibgateway_restart_orphan_netns.md (S489) and
+    project_gmgp1_gold_daily_ib_outage_s535.md (Fix D, this session).
+    """
+    try:
+        ibg = client.containers.get(IBGATEWAY_CONTAINER_NAME)
+    except Exception as e:  # noqa: BLE001 — docker SDK raises NotFound / APIError / etc.
+        # All lookup failures are equivalent here: no ibgateway → no dependents to rebind.
+        logger.debug(
+            f"_find_ibgateway_dependents: get('{IBGATEWAY_CONTAINER_NAME}') failed: {e}",
+        )
+        return []
+
+    expected_modes = (f"container:{ibg.id}", f"container:{IBGATEWAY_CONTAINER_NAME}")
+    deps = []
+    for c in client.containers.list():
+        try:
+            mode = c.attrs.get("HostConfig", {}).get("NetworkMode", "")
+        except Exception:  # noqa: BLE001
+            continue
+        if mode in expected_modes:
+            deps.append(c)
+    return deps
+
+
+def _ibgateway_rebind_dependents() -> None:
+    """Restart all containers using ``network_mode: container:ibgateway``.
+
+    Fires from a background Timer thread so it doesn't block the event loop.
+    Spawns its own docker client so it doesn't race with the main loop's.
+    """
+    try:
+        client = docker.from_env()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"_ibgateway_rebind_dependents: docker.from_env() failed: {e}")
+        return
+
+    deps = _find_ibgateway_dependents(client)
+    if not deps:
+        logger.info("ibgateway rebind: no dependents found — nothing to restart")
+        return
+
+    names = [c.name for c in deps]
+    logger.info(f"ibgateway rebind: restarting dependents to rebind netns: {names}")
+
+    ok, failed = [], []
+    for c in deps:
+        try:
+            c.restart(timeout=10)
+            logger.info(f"  ✓ {c.name} restart issued")
+            ok.append(c.name)
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"  ✗ {c.name} restart failed: {e}")
+            failed.append((c.name, str(e)))
+
+    msg = (
+        f"<b>[IB-NETNS-REBIND] ibgateway restart auto-recovery</b>\n"
+        f"Restarted dependents to rebind orphaned kernel netns:\n"
+        f"  ✓ {len(ok)}/{len(deps)} OK"
+    )
+    if ok:
+        msg += "\n  Restarted: " + ", ".join(html.escape(n) for n in ok)
+    if failed:
+        msg += "\n  Failed: " + ", ".join(
+            f"{html.escape(n)} ({html.escape(str(e)[:80])})" for n, e in failed
+        )
+    msg += "\n<i>(Fix D — project_gmgp1_gold_daily_ib_outage_s535.md)</i>"
+    alert("ibgateway-rebind", msg)
+
+
 def handle_container_event(event: dict) -> None:
     """Handle container lifecycle events (die, start, restart)."""
     action = event.get("Action", "")
     actor = event.get("Actor", {})
     attrs = actor.get("Attributes", {})
     container_name = attrs.get("name", "unknown")
+
+    # S535-cont-2 Fix D: ibgateway restart triggers a delayed dependent-rebind.
+    # ibgateway has no `finrl.monitor` label, so it would otherwise early-return
+    # below. Special-case here. Skip if disabled via env.
+    if (
+        IBGATEWAY_REBIND_ENABLED
+        and container_name == IBGATEWAY_CONTAINER_NAME
+        and action == "start"
+    ):
+        global _last_ibgateway_rebind_fired
+        now_t = time.time()
+        if now_t - _last_ibgateway_rebind_fired < IBGATEWAY_REBIND_DEDUPE_WINDOW_S:
+            logger.debug(
+                f"ibgateway start event suppressed "
+                f"(rebind already fired {now_t - _last_ibgateway_rebind_fired:.0f}s ago)",
+            )
+            return
+        _last_ibgateway_rebind_fired = now_t
+        logger.info(
+            f"ibgateway start detected — scheduling dependent rebind in "
+            f"{IBGATEWAY_REBIND_GRACE_S}s (let IBC complete login first)",
+        )
+        t = Timer(IBGATEWAY_REBIND_GRACE_S, _ibgateway_rebind_dependents)
+        t.daemon = True
+        t.start()
+        return  # ibgateway has no finrl.monitor label
 
     if "finrl.monitor" not in attrs:
         return
@@ -583,6 +702,13 @@ def main() -> None:
         )
     else:
         logger.info("Auto-restart: disabled (AUTO_RESTART_UNHEALTHY=false)")
+    if IBGATEWAY_REBIND_ENABLED:
+        logger.info(
+            f"ibgateway rebind hook: enabled (target='{IBGATEWAY_CONTAINER_NAME}', "
+            f"grace={IBGATEWAY_REBIND_GRACE_S}s, dedupe={IBGATEWAY_REBIND_DEDUPE_WINDOW_S:.0f}s)",
+        )
+    else:
+        logger.info("ibgateway rebind hook: disabled (IBGATEWAY_REBIND_ENABLED=false)")
     if IGNORE_CONTAINERS:
         logger.info(f"Ignoring containers: {sorted(IGNORE_CONTAINERS)}")
     else:
