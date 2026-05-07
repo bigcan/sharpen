@@ -1,0 +1,185 @@
+{
+  "protocol": "v2.2_stage_2_5_ensemble_report__fu3_wf_baseline",
+  "workstream": "sg1_btc_velotrade_extended",
+  "source": "fu3_wf_fold_07_ens_agreement",
+  "window": "fu3_wf_fold_07_oos_2026-03-01 -> 2026-04-01",
+  "chosen_rule": "ens_agreement",
+  "decision": "PROMOTE",
+  "decision_source": "v2.5_bootstrap",
+  "ensemble_eval_distribution": {
+    "histogram_bins": [
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "counts": [
+      1262,
+      1348,
+      686,
+      0,
+      1406,
+      731,
+      1552,
+      1446
+    ],
+    "mean": 0.03541486144999057,
+    "std": 0.6305809385405378,
+    "entropy": 1.906180804248968,
+    "deadband_frac": 0.1667655082433875,
+    "saturation_frac": 0.007591033092159886,
+    "n": 8431,
+    "composition_rule": "ens_agreement",
+    "by_vol_quartile": {
+      "q1": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          211,
+          364,
+          193,
+          0,
+          492,
+          231,
+          388,
+          229
+        ],
+        "mean": 0.02024677120134998,
+        "std": 0.566117887513559,
+        "entropy": 1.8871060526051013,
+        "deadband_frac": 0.2333965844402277,
+        "saturation_frac": 0.0014231499051233396,
+        "n": 2108
+      },
+      "q2": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          321,
+          368,
+          196,
+          0,
+          361,
+          168,
+          388,
+          305
+        ],
+        "mean": -0.004612011172842742,
+        "std": 0.624509519208556,
+        "entropy": 1.9076033990357548,
+        "deadband_frac": 0.17133364973896537,
+        "saturation_frac": 0.006169909824394874,
+        "n": 2107
+      },
+      "q3": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          366,
+          336,
+          155,
+          0,
+          324,
+          177,
+          396,
+          354
+        ],
+        "mean": 0.01451287301260787,
+        "std": 0.64165740406526,
+        "entropy": 1.898203363369302,
+        "deadband_frac": 0.15370018975332067,
+        "saturation_frac": 0.008538899430740038,
+        "n": 2108
+      },
+      "q4": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          364,
+          280,
+          142,
+          0,
+          229,
+          155,
+          380,
+          558
+        ],
+        "mean": 0.11149282467885534,
+        "std": 0.6784125794158165,
+        "entropy": 1.8468805131406258,
+        "deadband_frac": 0.10863377609108159,
+        "saturation_frac": 0.014231499051233396,
+        "n": 2108
+      }
+    },
+    "regime_cutpoints": [
+      0.00063467979008054,
+      0.0008391205046983324,
+      0.0010831783173884573
+    ]
+  },
+  "fu3_verdict": null,
+  "bundle_metadata": {
+    "path": "results\\sg1_btc_velotrade_extended_ensemble\\ensemble_v2.tar.gz",
+    "sha256": "0c50fe6267f5ca2cf889d8073549c16c11e9cd358d18b2a03135e43a4528981b",
+    "size_bytes": 28674380
+  },
+  "bake_metadata": {
+    "baked_at_utc": "2026-05-07T07:54:10Z",
+    "baked_by": "scripts/bake_sg1_btc_v2_drift_baseline.py",
+    "input_paths": [
+      "results\\sg1_btc_extended_fold7_replay\\fold_07\\ens_agreement_trajectory.parquet"
+    ],
+    "fold_bars": [
+      8431
+    ],
+    "concat_n_bars": 8431,
+    "deadband_abs": 0.25,
+    "vol_estimator_bars": 20,
+    "rule": "ens_agreement",
+    "predecessor_baseline": "baselines/sg1_btc_l1/seed_report.json",
+    "predecessor_protocol": "v2.2_stage_2_seed_report (per-seed; seed 42 fallback)",
+    "rationale": "Pre-swap recal for ensemble_v2 (ens_agreement). Live engine v1 ran ens_mean against seed-42 fallback baseline; v2 ens_agreement needs ensemble_eval_distribution block (live_engine.py:85-86, :186-188). Baseline aggregated across all 8 FU-3 WF OOS test windows for breadth (matches WF bootstrap n=57028) rather than a single fold to be robust against single-window regime quirks."
+  }
+}

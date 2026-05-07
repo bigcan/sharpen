@@ -176,15 +176,16 @@ safety:
   capture_dir: "/app/state"
 
 # --- Protocol v2.2 §8.2 Live Action-Drift ---
-# Baseline = Stage 2.5 ensemble-confirm seed_report.json (S498-cont 2026-04-25)
-# at baselines/sg1_btc_l1/seed_report.json. Live checkpoint is L1 seed 42
-# (interim solo per Stage 2.5 AMBIGUOUS verdict). Baked into live-engine image
-# via Dockerfile.live-engine `COPY baselines /app/baselines`. Regenerate via
-# scripts/sg1_btc_velotrade_ensemble_eval.py if checkpoint changes.
+# Baseline = FU-3 ensemble_report.json (ens_agreement, fold_07 OOS 2026-03-01..04-01)
+# at baselines/sg1_btc_extended_fold_07/ensemble_report.json. Pre-swap recal
+# 2026-05-07 ahead of v1 (ens_mean) -> v2 (ens_agreement) ensemble swap; see
+# project_sg1_btc_fu3_wf_promote. Baked into live-engine image via
+# Dockerfile.live-engine `COPY baselines /app/baselines`. Regenerate via
+# scripts/sg1_xauusd_ensemble_eval.py --wf_config <ext_wf> --rules ens_agreement
+# then scripts/bake_sg1_btc_v2_drift_baseline.py if checkpoint/rule changes.
 drift:
   enabled: true
-  baseline_path: "/app/baselines/sg1_btc_l1/seed_report.json"
-  baseline_seed: "42"
+  baseline_path: "/app/baselines/sg1_btc_extended_fold_07/ensemble_report.json"
   window_bars: 1000
   min_bars_before_check: 500
   vol_estimator_bars: 20
