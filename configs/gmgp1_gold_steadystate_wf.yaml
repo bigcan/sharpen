@@ -1,0 +1,199 @@
+# GMGP1-Gold steady-state Stage 3 Walk-Forward — multiseed N=3 on top-3 seeds.
+#
+# Provenance:
+#   - Created S538 (2026-05-08) post Stage 2.5-R PROMOTE.
+#   - Stage 2.5-R PROMOTE: ens_pf_weighted on [456, 1024, 2025], bootstrap_v2.5
+#     P(PF)=1.000, test PF 3.05 (+20.4% uplift). See
+#     `results/gmgp1_gold_ensemble/ensemble_report.json` and
+#     `project_gmgp1_gold_steadystate_a2_results.md`.
+#   - Per Protocol v2.3 §4.5: WF re-confirmation MANDATORY after Stage 2.5-R,
+#     "temporal robustness on new data is not transitive."
+#
+# Inheritance:
+#   - data / env / agents / network / features → mirror
+#     `gmgp1_sac_gc_15min_steadystate_l1_multiseed.yaml` (the cell that produced
+#     the N=10 ckpts whose top-3 PROMOTE'd). Best HPs frozen from `tfbaitfp`.
+#   - splitter scheme → 6mo train + 1mo val + 1mo test, 1mo step → exactly 4
+#     folds within the 12mo gold envelope (2025-01-01 → 2025-12-31). Smallest
+#     train window that still clears `gates.wf_windows: 4`. Training is bar-loop
+#     wraparound, so 500K steps is independent of dataset length.
+#   - gates → mirror L1 multiseed gates with `l1_seeds: 3` (top-3 only at WF
+#     stage), `wf_windows: 4`, `wf_pf_floor: 1.1`.
+#   - ensemble.gates_file overlay → existing
+#     `configs/gmgp1_gold_steadystate_ensemble.gates.yaml` (research-tier
+#     buffers + v2.5 bootstrap thresholds; same overlay used in Stage 2.5-R).
+#
+# Sim-to-live note (carried from Stage 2.5-R config):
+#   gmgp1-gold paper container is internal-validation IB MGC, not on FTMO/
+#   Velotrade. Research-tier `max_drawdown_pct: 0.30` and no `risk:` block.
+#   `g4_research_dd_compliance` gate is a structural sanity check, not a
+#   prop-firm cap. Velotrade-style buffers stay null.
+
+# ---------- DATA (CME GC, full envelope) ----------
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "GC"
+  handler_type: "multiscale"
+  # Splitter envelope; per-fold windows materialized by dispatcher.
+  start_date: "2025-01-01"
+  end_date:   "2025-12-31"
+
+splitter:
+  train_months: 6                       # smallest window that yields 4 folds in 12mo
+  val_months:   1
+  test_months:  1
+  step_months:  1                       # 1mo rolling → 4 folds in 12mo envelope
+  buffer_days:  0
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cme_futures"
+
+# ---------- ENV (matches L1 multiseed — research-tier max_dd, no risk wrapper) ----------
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000068                   # live MGC IB fee, steady-state from step 0
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30                # research-tier (matches L1 train)
+  scales: [15, 60, 240]
+  gap_detection: true                   # CME GC overnight + weekend gaps
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+
+# ---------- NETWORK (matches L1) ----------
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# ---------- AGENTS (HPO `tfbaitfp` — frozen, transcribed from wandb config) ----------
+agents:
+  sac:
+    lr_actor: 0.00038328488757883856
+    lr_critic: 0.00008103804982530071
+    lr_alpha: 0.000006228366311019425
+    gamma: 0.9929746422964338
+    tau: 0.00011195773489610946
+    initial_alpha: 0.215815935674158
+    gradient_clip: 2.0838716586365407
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+# ---------- TRAINING ----------
+training:
+  total_timesteps: 500000               # matches L1 cell + S509 GC OOS-optimum
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+# ---------- GATES (Stage 3 WF + upstream-stage retention for validator) ----------
+gates:
+  # Upstream stages (retained for validate_config walk through pipeline)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 3                           # WF cell uses top-3 seeds (not 10)
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10             # legacy point-estimate (audit-only)
+  ensemble_ambiguous_min: 1.05
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_rule_selection: val_argmax_pf
+  # Stage 3 (this config's primary gates)
+  wf_windows: 4                         # validator hard-fails if <4
+  wf_pf_floor: 1.1                      # per-fold ensemble PF floor
+  # Stage 4 (downstream — recent-OOS, retained for validator continuity)
+  oos_pf_floor: 1.1
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds (validator runs unconditionally).
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode (S491 lesson).
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+ensemble:
+  # v2.5 Stage 2.5 overlay — research-tier buffers + bootstrap thresholds
+  # (P_PF/P_MDD ≥ 0.90). Required by `run_wf_ensemble()` for per-fold verdicts.
+  gates_file: "configs/gmgp1_gold_steadystate_ensemble.gates.yaml"
+
+  # `run_wf_ensemble()` discovers per-(fold, seed) checkpoints via this glob
+  # pattern. The dispatcher uses run-name prefix `gmgp1-gold-steadystate-wf-fold{N}`
+  # + launch_l1_multiseed's per-seed suffix; SFTP-pulled ckpts land under
+  # `checkpoints/<run_name>/checkpoint_final.pth`.
+  checkpoint_pattern: "checkpoints/gmgp1-gold-steadystate-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth"
+
+  # Seeds the umbrella expects. Top-3 from Stage 2 N=10 (val_argmax_pf rule).
+  seeds: [456, 1024, 2025]
+
+  # Prior weights for `_make_pf_weighted` (ens_pf_weighted aggregation rule —
+  # the rule that PROMOTE'd at Stage 2.5-R per ensemble_report.json).
+  # Source: Stage 2 N=10 test PFs from
+  # results/gmgp1_gold_steadystate_l1_multiseed/seed_report.json. These are
+  # constant across folds — the rule weights actions by these priors at every
+  # step. The new WF training will produce different per-fold PFs but the
+  # umbrella uses ONE seed_pfs dict for all folds (by design, treats it as a
+  # typical-quality prior, not a per-fold ranking).
+  seed_pfs:
+    456:  2.4871
+    1024: 2.4470
+    2025: 2.5801
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                     # S488: one parent run, fold<i>/seed<j>/* namespaces
+  tags:
+    - "gmgp1-v5"
+    - "Gold"
+    - "SAC"
+    - "15min"
+    - "cme-futures"
+    - "internal-validation"
+    - "walk_forward"
+    - "wf-stage3"
+    - "steady-state"
+    - "v2-5-bootstrap"
+    - "upstream:tfbaitfp"
+    - "upstream-stage25:results/gmgp1_gold_ensemble/ensemble_v1.tar.gz"
+    - "s538"
