@@ -1,0 +1,145 @@
+# GMGP1-Gold steady-state ensemble confirmation gates — PRE-COMMITTED.
+#
+# Stage 2.5-R for GMGP1-Gold internal-validation track (NOT prop-firm).
+# Modeled on configs/gmgp1_btc_velotrade_ensemble.gates.yaml (S498-cont) with
+# velotrade-specific gates relaxed to research-tier (gmgp1-gold paper container
+# runs IB MGC for sim-to-live validation, no prop-firm DD constraints yet).
+#
+# Lineage:
+#   - Stage 2 N=10 PASS S536-cont (val PF mean 2.746 CV 2.98%, test 2.563 CV 3.22%)
+#   - Top-3 by val_argmax_pf: [456, 1024, 2025]
+#   - project_gmgp1_gold_steadystate_a2_results.md
+#   - decision_protocol_v25_bootstrap_primary.md
+#
+# Decision rule: ALL five gates (G1..G5) must PASS -> approve ensemble for
+# gmgp1-gold paper-deploy aggregation. ANY fail -> ensemble rejected; solo seed
+# with highest WF-median PF remains the paper candidate (currently v5 seed-456).
+#
+# Pre-commit: 2026-05-08 S536-cont. Do not edit after first launch without a
+# decision memo explaining why.
+
+workstream: gmgp1_gold
+variant: ensemble_top3
+seeds: [456, 1024, 2025]                         # top-3 by val_argmax_pf from Stage 2 N=10
+aggregation_rule: val_argmax_pf                   # decided live in Phase 1
+
+# Gold Stage 3 will use the same 4-fold splitter as BTC Velotrade for parity.
+wf_folds: 4
+
+gates:
+  g1_solo_baseline:
+    description: >-
+      Per-seed WF Stage-3 baseline: at least 2/3 seeds must have per-fold test
+      PF >= pf_floor in at least min_folds_pass folds. If solo seeds fail base
+      WF discipline, the ensemble is moot.
+    pf_floor: 1.1
+    seeds_pass_min: 2
+    min_folds_pass: 3                             # >=3/4 folds
+
+  g2_no_regression:
+    description: >-
+      Per fold, ensemble must NOT regress vs best solo: ens_PF >= ens_ratio_min
+      * best_solo_PF in min_folds_pass folds.
+    ens_ratio_min: 0.90
+    min_folds_pass: 3                             # >=3/4 folds
+
+  g3_uplift:
+    description: >-
+      Across folds, ensemble must justify aggregation overhead: median(ens_PF) /
+      median(best_solo_PF) >= uplift_ratio_min. Threshold 1.05 mirrors GMGP1-BTC
+      A_long×2M revision (S528) — high-baseline workstreams (solo PF ~2.5+)
+      need lower relative threshold; absolute uplift +0.13 PF on 2.5 baseline
+      is meaningful. v2.5 NOTE: this is the WF-stage point-estimate gate;
+      Stage 2.5 single-window verdict uses block-bootstrap below.
+    uplift_ratio_min: 1.05
+    metric: median
+
+  # === Protocol v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
+  ensemble_bootstrap_p_pf_promote: 0.90           # P(ens_PF > solo_best_PF) >= 0.90 for PROMOTE
+  ensemble_bootstrap_p_mdd_promote: 0.90           # P(ens_MDD better) >= 0.90 for PROMOTE on DD channel
+  ensemble_bootstrap_p_pf_ambiguous: 0.75          # v2.5 ambiguous floor on P(PF)
+  ensemble_bootstrap_resamples: 10000              # B in stationary block bootstrap
+  ensemble_bootstrap_block_len: null               # auto = sqrt(n_bars), capped at 0.1*n
+
+  # === Protocol v2.5 SECONDARY (audit/sanity only). ===
+  ensemble_uplift_min: 1.10                        # legacy point-estimate
+  ensemble_ambiguous_min: 1.05                     # legacy ambiguous floor
+
+  # v2.3 diversity-aware top-K selection (Phase 0).
+  ensemble_top_k: 3
+  ensemble_diversity_lambda: 1.0
+
+  g4_research_dd_compliance:
+    description: >-
+      gmgp1-gold runs research-tier (max_drawdown_pct: 0.30 in env). Ensemble
+      trajectory must keep meaningful buffer vs the 30% cap. Gate is loose
+      because Stage 2 test DDs were uniformly < -1.5%; if this trips, something
+      is structurally wrong with the ensemble aggregation. NO daily_loss gate
+      (gold has no prop-firm cap yet).
+    trailing_dd_buffer_pp_min: 5.0                 # 30% cap - worst_trailing_mdd% must leave >=5pp
+    daily_dd_buffer_pp_min: null                   # N/A
+    compliance_must_pass: false
+    min_folds_pass: 3                              # >=3/4 folds
+
+  g5_dd_stability:
+    description: >-
+      Guards against ensemble edge being a one-fold artifact. CV of ensemble PF
+      across folds must be at or below cv_max. Same threshold as BTC.
+    cv_pf_max: 0.35
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds — mirrors
+  # gmgp1-gold L1 gates. Window 400 bars at 15-min ≈ 4 days continuous (CME
+  # closes overnight + weekends so calendar-time conversion needed at live
+  # check; tracker uses bar count not wall time).
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers — calendar-day windows
+  # (CME GC trades ~6.5h/day so per-day bar count differs from BTC).
+  retrain:
+    ensemble_recheck_days: 90                      # quarterly cadence
+    live_pf_ratio: 0.8                             # live PF < 0.8 * paper PF
+    live_pf_window_days: 5
+    min_trades_window: 20
+    agreement_decay_delta: 0.20
+    agreement_decay_window_bars: 600               # ~3-4 trading days for GC
+    action_kl_warn_window_bars: 1500
+    cost_drift_ratio: 1.20
+    cost_drift_window_trades: 100
+
+  # Protocol v2.3 §8.2 agreement-decay live monitor.
+  drift_agreement:
+    enabled_for_rules: ["ens_agreement", "ens_majority"]
+    flat_delta_warn: 0.20
+    flat_delta_crit: 0.40
+    window_bars: 600
+
+decision:
+  all_pass_action: approve_ensemble_paper_deploy
+  any_fail_action: reject_ensemble_use_best_solo
+  solo_selection_metric: wf_median_pf
+  solo_tiebreaker: wf_mean_trailing_dd_buffer_pp
+
+provenance:
+  drafted_on: '2026-05-08'
+  drafted_by_session: S536-cont
+  upstream_memory: project_gmgp1_gold_steadystate_a2_results.md
+  modeled_on: configs/gmgp1_btc_velotrade_ensemble.gates.yaml
+  upstream_hpo: tfbaitfp (HPO 20×500K + 3M retrain @ taker_fee 0.000068)
+  l1_multiseed_status: completed_2026_05_08_N10_PASS
+  l1_test_pf_mean: 2.563
+  l1_test_pf_cv: 0.0322
