@@ -1,0 +1,148 @@
+# GMGP1-Gold (15-min) — STEADY-STATE Stage 2 L1 multiseed (S524 Tier A2 → Stage 2)
+#
+# Upstream: HPO+retrain run `tfbaitfp` (gmgp1-sac-gc-15min-steadystate_20260505_074755)
+#   - Stage 1: HPO 20 trials × 500K (in-memory Optuna) → retrain 3M
+#   - Backtest: val PF 2.19 / DD -1.03%, test PF 2.26 / DD -1.23% (taker_fee 0.000068)
+#   - Best HPs from `tfbaitfp` config.agents.sac transcribed below — in-memory study
+#     was not persisted, so HPs are baked here as the canonical Stage 2 anchor.
+#
+# Lineage:
+#   - project_post_wf_training_queue_s524.md (Tier A2 fired S529, results S535-cont-3+1)
+#   - project_gmgp1_gc_steady_state_fee_audit.md (closes Step 1 — fee plumbing live-matched)
+#   - decision_l1_multiseed_n_seeds_s488.md (N=10, ambiguous CV [0.22,0.38] → auto-extend N=20)
+#
+# NOTE: GMGP1-Gold (IB MGC) is currently internal-validation only, NOT a prop-firm
+# container. No ensemble overlay or prop-firm risk wrapper here. If MGC retrain
+# (project_gmgp1_mgc_retrain_queued_s477.md) graduates to FTMO/Phidias, fork this
+# config and layer in `risk:` + `ensemble.gates_file` per the GMGP1-BTC template.
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "GC"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-08-31"
+  val_start_date: "2025-09-01"
+  val_end_date: "2025-10-31"
+  test_start_date: "2025-11-01"
+  test_end_date: "2025-12-31"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cme_futures"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000068                # live MGC IB fee (live_gmgp1_gc_ib.yaml:97); steady-state from step 0
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30
+  scales: [15, 60, 240]
+  gap_detection: true                # CME GC overnight + weekend gaps
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Best HPs from tfbaitfp HPO (20 trials, profit_factor objective, in-memory study).
+    # Transcribed from wandb run config.agents.sac — single source of truth.
+    lr_actor: 0.00038328488757883856
+    lr_critic: 0.00008103804982530071
+    lr_alpha: 0.000006228366311019425
+    gamma: 0.9929746422964338
+    tau: 0.00011195773489610946
+    initial_alpha: 0.215815935674158
+    gradient_clip: 2.0838716586365407
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000            # Protocol v2 Stage 2 budget (matches GMGP1-BTC L1)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+  # seed: per-run via CLI (--seed N); launcher sweeps
+  # [42, 123, 456, 789, 1024, 1337, 2025, 3141, 5150, 9999]
+
+hpo:
+  enabled: false                     # Stage 2 has no HPO
+
+gates:                               # Protocol v2 Stage 2 (S488 escalation, S526 v2.5 bootstrap-primary)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                       # S488: prop-firm-grade N=10 (also adopted for internal validation)
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]   # S488 escalation band → auto-extend to N=20 if hit
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  oos_pf_floor: 1.1
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds (validator runs unconditionally).
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode (S491 lesson).
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags:
+    - gmgp1-v5
+    - Gold
+    - SAC
+    - "15min"
+    - MultiScale
+    - OHLCV
+    - DSR
+    - swing
+    - gmgp1
+    - "4090"
+    - opt-10
+    - steady-state
+    - l1-multiseed
+    - s524
+    - fee-audit
+    - upstream:tfbaitfp

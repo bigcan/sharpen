@@ -1,0 +1,125 @@
+# GMGP1-Gold steady-state Stage 2.5-R config — top-3 [456, 1024, 2025].
+#
+# Provenance:
+#   - Stage 2 N=10 PASS S536-cont (val PF mean 2.746 CV 2.98%, test 2.563 CV 3.22%)
+#   - Top-3 by val_argmax_pf rule: [456, 1024, 2025] (val PFs 2.858 / 2.832 / 2.824)
+#   - Upstream HPO: tfbaitfp (20 trials × 500K + 3M retrain at live-matched 6.8e-05 fee)
+#   - project_gmgp1_gold_steadystate_a2_results.md
+#
+# Inheritance:
+#   - data/env/agents/network/features → mirror gmgp1_sac_gc_15min_steadystate_l1_multiseed.yaml
+#     (the cell that produced the 10 ckpts)
+#   - gates + ensemble.gates_file overlay → gmgp1_gold_steadystate_ensemble.gates.yaml
+#     (v2.5 bootstrap thresholds + research-tier DD compliance, NOT prop-firm)
+
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "GC"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date:   "2025-08-31"
+  val_start_date:   "2025-09-01"
+  val_end_date:     "2025-10-31"
+  test_start_date:  "2025-11-01"
+  test_end_date:    "2025-12-31"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cme_futures"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000068                    # live MGC IB fee (live_gmgp1_gc_ib.yaml:97)
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30                 # research-tier (NOT prop-firm)
+  scales: [15, 60, 240]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Best HPs from tfbaitfp HPO (in-memory study, transcribed). Single source
+    # of truth for what the 10 ckpts were trained with.
+    lr_actor: 0.00038328488757883856
+    lr_critic: 0.00008103804982530071
+    lr_alpha: 0.000006228366311019425
+    gamma: 0.9929746422964338
+    tau: 0.00011195773489610946
+    initial_alpha: 0.215815935674158
+    gradient_clip: 2.0838716586365407
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000                # the cell that produced the 10 ckpts
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+gates:
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  # v2.5 bootstrap PRIMARY (loaded by ensemble.gates_file overlay below).
+  ensemble_uplift_min: 1.10               # legacy point-estimate (audit-only)
+  ensemble_ambiguous_min: 1.05            # legacy ambiguous floor (audit-only)
+  ensemble_bootstrap_p_pf_ambiguous: 0.75 # PRIMARY ambiguous floor on P(PF)
+  ensemble_rule_selection: val_argmax_pf
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  oos_pf_floor: 1.1
+
+ensemble:
+  # v2.3 Stage 2.5 overlay — merges bootstrap thresholds (P_PF/P_MDD ≥ 0.90)
+  # over the gates above. Without this overlay the verdict defers to legacy
+  # uplift only (per `project_stage_2_5_bootstrap_gates_not_loaded.md` S499).
+  gates_file: "configs/gmgp1_gold_steadystate_ensemble.gates.yaml"
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags:
+    - "gmgp1-v5"
+    - "Gold"
+    - "stage-2-5-r"
+    - "steady-state"
+    - "v2-5-bootstrap"
+    - "internal-validation"
+    - "s536"
