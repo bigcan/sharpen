@@ -268,6 +268,44 @@ def ftmo_buffers(metrics: dict) -> dict:
     }
 
 
+def research_buffers(metrics: dict) -> dict:
+    """Research-tier buffers for internal-validation workstreams (e.g. gmgp1-gold).
+    No prop-firm cap; gates against env's research-tier `max_drawdown_pct: 0.30`
+    (30%). No daily-loss gate. Mirrors `gmgp1_gold_ensemble_eval.py:research_buffers`.
+    """
+    trail = metrics.get("trailing_max_drawdown_pct")
+    return {
+        "trailing_dd_buffer_pp": (30.0 + trail) if trail is not None else None,
+        "daily_dd_buffer_pp": None,
+    }
+
+
+def _select_buffer_fn(gates_cfg: dict):
+    """Pick the buffer fn matching the workstream's G4 variant declared in gates.
+
+    Triple auto-detect mirrors `_evaluate_gates`: research-tier (gmgp1-gold) /
+    FTMO / Velotrade. Exactly one variant must be present in the gates dict.
+    """
+    gates = gates_cfg.get("gates", {}) if isinstance(gates_cfg, dict) else {}
+    variants = {
+        "g4_research_dd_compliance": research_buffers,
+        "g4_velotrade_compliance":   velotrade_buffers if "velotrade_buffers" in globals() else ftmo_buffers,
+        "g4_ftmo_compliance":        ftmo_buffers,
+    }
+    present = [k for k in variants if k in gates]
+    if len(present) > 1:
+        raise ValueError(
+            f"Gates YAML defines multiple G4 variants {present}. "
+            "Exactly one of g4_research_dd_compliance / g4_ftmo_compliance / "
+            "g4_velotrade_compliance must be active per workstream."
+        )
+    if not present:
+        # Back-compat: pre-v2.3 gates yamls without an explicit G4 block default
+        # to FTMO buffers (same fallback behavior as before this patch).
+        return ftmo_buffers
+    return variants[present[0]]
+
+
 # --- v2.3: bootstrap, action-correlation, diversity selector, swap bundle ---
 #
 # Protocol v2.3 amendment (decision_ensemble_bootstrap_diversity_s495.md):
@@ -1403,6 +1441,11 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
     root_out = Path(output_dir) if output_dir else Path("results/sg1_xauusd_ensemble_wf")
     root_out.mkdir(parents=True, exist_ok=True)
 
+    # Pick buffer fn matching the workstream's G4 variant in gates yaml.
+    # Research-tier (gmgp1-gold) → research_buffers; FTMO/Velotrade → respective.
+    buffer_fn = _select_buffer_fn(gates_cfg)
+    log.info(f"buffer_fn = {buffer_fn.__name__}")
+
     per_fold_metrics: List[Dict[str, dict]] = []   # [{rule: metrics}] per fold
     fold_status: List[str] = []                     # 'ok' | 'skipped:reason'
 
@@ -1434,7 +1477,7 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
                 continue
             df = run_rule(fold_cfg, agents, rule_name, rule_fn, device, fold_out)
             m = compute_gate_metrics(df, rule_name)
-            m.update(ftmo_buffers(m))
+            m.update(buffer_fn(m))
             (fold_out / f"{rule_name}_metrics.json").write_text(json.dumps(m, indent=2, default=str))
             fold_metrics[rule_name] = m
 
@@ -1586,16 +1629,24 @@ def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[s
         "uplift_min": uplift_min,
     }
 
-    # G4: prop-firm compliance per fold (FTMO or Velotrade variant).
-    # Velotrade has no daily-loss gate (`daily_dd_buffer_pp_min: null`) and waives
-    # active_days/single_day_share (`compliance_must_pass: false`). Auto-detect by
-    # gate-name presence; only one variant should appear in any given gates yaml.
-    if "g4_velotrade_compliance" in gates and "g4_ftmo_compliance" in gates:
+    # G4: per-fold DD compliance. Three variants (auto-detect by gate-name presence;
+    # exactly one must appear): research-tier (gmgp1-gold internal-validation, no
+    # daily-loss gate, 30% trailing cap), FTMO (8% trailing + 4% daily), Velotrade
+    # (10% trailing, no daily, compliance_must_pass: false).
+    g4_variants = ("g4_research_dd_compliance", "g4_velotrade_compliance", "g4_ftmo_compliance")
+    present = [k for k in g4_variants if k in gates]
+    if len(present) > 1:
         raise ValueError(
-            "Gates YAML defines BOTH g4_ftmo_compliance and g4_velotrade_compliance. "
-            "Only one prop-firm G4 variant may be active per workstream."
+            f"Gates YAML defines multiple G4 variants {present}. "
+            "Only one of g4_research_dd_compliance / g4_ftmo_compliance / "
+            "g4_velotrade_compliance may be active per workstream."
         )
-    g4_key = "g4_velotrade_compliance" if "g4_velotrade_compliance" in gates else "g4_ftmo_compliance"
+    if not present:
+        raise ValueError(
+            "Gates YAML missing G4 block. One of g4_research_dd_compliance, "
+            "g4_ftmo_compliance, or g4_velotrade_compliance is required."
+        )
+    g4_key = present[0]
     g4 = _require_gate(gates, g4_key)
     dd_buf_min = g4.get("daily_dd_buffer_pp_min", None)  # None ⇒ no daily-loss gate
     tr_buf_min = _require_field(g4, "trailing_dd_buffer_pp_min", g4_key)
