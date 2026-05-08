@@ -42,19 +42,27 @@ exchange:
   market_fallback_timeout: 60.0
   data_exchange: "bybit"               # OHLCV from Bybit testnet (matches exec venue)
 
-# --- Agent (v2.3 atomic-swap bundle: ens_agreement, FU-3 PROMOTE) ---
+# --- Agent (v2.3 atomic-swap bundle: FU-3 PROMOTE checkpoints, ens_mean override) ---
 # Loaded from bundle baked into image at /app/bundles/sg1_btc_velotrade_extended/.
 # - L1 N=10: test PF median 2.75, CV 2.12% (S535-cont FU-1 reconcile)
 # - Stage 2.5-R bootstrap PRIMARY: P(ens > solo) = 0.983 → PROMOTE (FU-2)
 # - Stage 3 WF 8-fold: bootstrap P(PF) = 1.0000 (n=57k), legacy G3 1.018
 #   below 1.10 but PF dominance promotes → PROMOTE (FU-3)
 # - Bundle SHA256: 0c50fe6267f5ca2cf889d8073549c16c11e9cd358d18b2a03135e43a4528981b
-# - Manifest chosen_rule: ens_agreement (changed from FU-2 v1 ens_mean —
-#   operator awareness required; drift_agreement baseline at
-#   baselines/sg1_btc_extended_fold_07/ensemble_report.json was recal'd in
-#   commit 24b67ec2 ahead of this swap).
-# Predecessor: seed 42 solo (S498-cont AMBIGUOUS_RERUN fallback) — paper
-# soak from 2026-04-25 to swap-date. Now 8th-best test PF in N=10 cohort.
+# - Manifest chosen_rule: ens_agreement (FU-3 WF selection on fold_07).
+# - LIVE OVERRIDE: aggregation_rule=ens_mean. agent_loader.py:245 honors the
+#   config override over bundle.chosen_rule (logs WARN). Reverted from v2's
+#   ens_agreement after 2026-05-08 13:00 UTC drift_crit at warmup boundary
+#   (524 bars, dispersion-collapse: live deadband_frac=0.456 vs baseline 0.167).
+#   Root cause: ens_agreement returns target=0 on seed disagreement → engine
+#   treats target=0 as "liquidate" rather than "hold". ens_mean averages
+#   instead, naturally landing in deadband on disagreement → no spurious
+#   liquidations. FU-2 PROMOTE was on ens_mean with the same 3 seeds, so
+#   this is a known-validated configuration. Bundle SHA unchanged → no
+#   swap-handshake sentinel needed.
+# Predecessor: seed 42 solo (S498-cont AMBIGUOUS_RERUN fallback) → v2
+# ens_agreement (2026-05-07 - 2026-05-08, halted on drift_crit) → v2.1
+# ens_mean override (this).
 # `checkpoint_path` retained as dead value; build_agent() detects
 # `agent.ensemble.bundle_path` and skips the solo path.
 agent:
@@ -66,7 +74,9 @@ agent:
     # aggregation_rule declared explicitly so validate_config can fire its
     # v2.3 agreement-decay key check (it can't open the tarball at validate
     # time). Mismatch with bundle.chosen_rule logs a WARN at runtime.
-    aggregation_rule: "ens_agreement"
+    # 2026-05-08: overridden to ens_mean; bundle manifest still says
+    # ens_agreement (no rebake). See comment block above for rationale.
+    aggregation_rule: "ens_mean"
     # FU-3 bake produced normalizer_sha256: MISSING for all 3 seeds (same as
     # FU-2 v1) — live engine supplies its own `norm_warmup` pkl per
     # project_live_obs_normalization_mismatch_s509. Without this override
@@ -187,8 +197,8 @@ wandb:
   entity: "bigcan-chiwin-technology"
   tags: ["live", "sg-1", "BTC", "SAC", "3min", "bybit-demo", "paper",
          "velotrade-overlay", "signal-gated", "prop-firm", "ensemble",
-         "ens-agreement", "v2-swap"]
-  run_id: "live-sg1-btc-bybit-demo-paper-ensemble-v2"
+         "ens-mean", "v2p1-rule-revert"]
+  run_id: "live-sg1-btc-bybit-demo-paper-ensemble-v2p1-ens-mean"
 
 # --- Safety ---
 safety:
@@ -219,16 +229,18 @@ safety:
   capture_dir: "/app/state"
 
 # --- Protocol v2.2 §8.2 Live Action-Drift ---
-# Baseline = FU-3 ensemble_report.json (ens_agreement, fold_07 OOS 2026-03-01..04-01)
-# at baselines/sg1_btc_extended_fold_07/ensemble_report.json. Pre-swap recal
-# 2026-05-07 ahead of v1 (ens_mean) -> v2 (ens_agreement) ensemble swap; see
-# project_sg1_btc_fu3_wf_promote. Baked into live-engine image via
-# Dockerfile.live-engine `COPY baselines /app/baselines`. Regenerate via
-# scripts/sg1_xauusd_ensemble_eval.py --wf_config <ext_wf> --rules ens_agreement
-# then scripts/bake_sg1_btc_v2_drift_baseline.py if checkpoint/rule changes.
+# Baseline = FU-2 ens_mean reference distribution (single-window L1 PROMOTE,
+# 2026-03-01 -> 2026-04-06) copied to baselines/sg1_btc_extended_fold_07_ens_mean/
+# 2026-05-08 to support ens_mean live override (see Agent section). Same 3
+# seeds [456, 3141, 123] as FU-3 fold_07 checkpoints; FU-2 was trained
+# through 2026-01-31 vs FU-3 fold_07 through 2026-02-28 (~1mo earlier). On
+# the same 2026-03-01..04-06 region the rule-driven distribution should
+# dominate the small training-window delta. Predecessor (ens_agreement)
+# baseline kept at baselines/sg1_btc_extended_fold_07/ensemble_report.json
+# for audit. Baked into live-engine image via `COPY baselines /app/baselines`.
 drift:
   enabled: true
-  baseline_path: "/app/baselines/sg1_btc_extended_fold_07/ensemble_report.json"
+  baseline_path: "/app/baselines/sg1_btc_extended_fold_07_ens_mean/ensemble_report.json"
   window_bars: 1000
   min_bars_before_check: 500
   vol_estimator_bars: 20
