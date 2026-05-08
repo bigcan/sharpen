@@ -180,3 +180,42 @@ def test_default_constants_match_v22_spec():
     assert DEFAULT_HIST_EDGES[0] == -1.0
     assert DEFAULT_HIST_EDGES[-1] == 1.0
     assert len(DEFAULT_HIST_EDGES) == 9  # 8 bins
+
+
+# ---------- Fix 2 (S538-cont) NaN sentinel filtering -----------------------
+
+
+def test_summarize_scalar_filters_nan_from_deadband():
+    # 100 actions: 30 NaN (no consensus), 50 in deadband, 20 directional.
+    # deadband_frac is over consensus bars only: 50/70.
+    # no_consensus_frac is over all bars: 30/100 = 0.30.
+    a = np.concatenate([
+        np.full(30, np.nan),
+        np.full(50, 0.05),
+        np.full(20, 0.5),
+    ])
+    out = summarize_scalar_actions(a)
+    assert out["no_consensus_frac"] == pytest.approx(0.30)
+    assert out["deadband_frac"] == pytest.approx(50 / 70)
+    assert out["n"] == 70  # consensus-bar count
+    assert out["n_total_bars"] == 100
+
+
+def test_summarize_scalar_all_nan_returns_zero_metrics():
+    # All-NaN input → no consensus bars; metrics are zero, no_consensus=1.0.
+    a = np.full(50, np.nan)
+    out = summarize_scalar_actions(a)
+    assert out["no_consensus_frac"] == pytest.approx(1.0)
+    assert out["n"] == 0
+    assert out["n_total_bars"] == 50
+    assert out["deadband_frac"] == 0.0
+
+
+def test_summarize_scalar_no_nan_consensus_frac_zero():
+    # Existing baselines (pre-Fix-2) had no NaN at all. Verify the new
+    # field defaults sanely: no_consensus_frac == 0.0.
+    a = np.array([-0.5, 0.0, 0.5])
+    out = summarize_scalar_actions(a)
+    assert out["no_consensus_frac"] == 0.0
+    assert out["n"] == 3
+    assert out["n_total_bars"] == 3

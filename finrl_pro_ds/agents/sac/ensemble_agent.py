@@ -37,6 +37,14 @@ def _agreement(actions: np.ndarray, deadband: float) -> np.ndarray:
     from `actions[:, 0]`; for a multi-asset ensemble the vote would need to
     be computed per action dimension. Current live customer (SG-1 XAUUSD) has
     action_dim=1, so this is safe.
+
+    No-consensus sentinel (Fix 2, 2026-05-08): when neither direction has a
+    >=2 majority, return an array of NaN. Consumers (live engine, drift
+    trackers, offline-eval) interpret NaN as "no actionable signal — hold
+    prior position, exclude bar from distribution metrics." The previous
+    implementation returned ``np.zeros_like(actions[0])`` which conflated
+    "no consensus" with "deliberate flat = liquidate" and triggered the
+    sg1-btc S538-cont dispersion-collapse incident.
     """
     labels = np.zeros(actions.shape[0], dtype=int)
     first_dim = actions[:, 0]
@@ -48,7 +56,7 @@ def _agreement(actions: np.ndarray, deadband: float) -> np.ndarray:
         return actions[labels == 1].mean(axis=0)
     if n_short >= 2:
         return actions[labels == -1].mean(axis=0)
-    return np.zeros_like(actions[0])
+    return np.full_like(actions[0], np.nan, dtype=np.float64)
 
 
 def _make_pf_weighted(seed_pfs: Dict[int, float]):

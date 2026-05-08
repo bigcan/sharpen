@@ -54,6 +54,10 @@ class DriftReport:
     saturation_frac_baseline: Optional[float]
     saturation_frac_delta: Optional[float]
     kl: Optional[float]
+    # Fix 2 (S538-cont, 2026-05-08): fraction of bars where the aggregator
+    # emitted NaN (no consensus). NaN bars are excluded from the deadband /
+    # saturation denominator since they are "unobserved" rather than "flat".
+    no_consensus_frac: Optional[float] = None
 
     def to_dict(self) -> dict:
         return {
@@ -66,6 +70,7 @@ class DriftReport:
             "saturation_frac_baseline": self.saturation_frac_baseline,
             "saturation_frac_delta": self.saturation_frac_delta,
             "kl": self.kl,
+            "no_consensus_frac": self.no_consensus_frac,
         }
 
 
@@ -274,6 +279,7 @@ class ActionDriftTracker:
                 deadband_frac_delta=None,
                 saturation_frac_live=None, saturation_frac_baseline=None,
                 saturation_frac_delta=None, kl=None,
+                no_consensus_frac=None,
             )
 
         if self.baseline is None:
@@ -317,10 +323,19 @@ class ActionDriftTracker:
 
     def _log_only_report(self, n: int) -> DriftReport:
         live_actions = np.asarray(self._actions, dtype=np.float64)
+        no_consensus_frac: Optional[float] = None
         if self._is_scalar:
             live = live_actions[:, 0]
-            live_dead = float((np.abs(live) < self.deadband_abs).mean())
-            live_sat = float((np.abs(live) > self.saturation_abs).mean())
+            # Fix 2: filter NaN from deadband/saturation; report NaN share separately.
+            nan_mask = np.isnan(live)
+            no_consensus_frac = float(nan_mask.mean()) if n else 0.0
+            live_clean = live[~nan_mask]
+            if live_clean.size:
+                live_dead = float((np.abs(live_clean) < self.deadband_abs).mean())
+                live_sat = float((np.abs(live_clean) > self.saturation_abs).mean())
+            else:
+                live_dead = None
+                live_sat = None
         else:
             live_dead = None
             live_sat = None
@@ -332,6 +347,7 @@ class ActionDriftTracker:
             deadband_frac_delta=None,
             saturation_frac_live=live_sat, saturation_frac_baseline=None,
             saturation_frac_delta=None, kl=None,
+            no_consensus_frac=no_consensus_frac,
         )
 
     def _evaluate_scalar(
@@ -341,8 +357,20 @@ class ActionDriftTracker:
         baseline_block: Optional[dict],
     ) -> DriftReport:
         live = np.asarray(self._actions, dtype=np.float64)[:, 0]
-        live_dead = float((np.abs(live) < self.deadband_abs).mean())
-        live_sat = float((np.abs(live) > self.saturation_abs).mean())
+        # Fix 2 (S538-cont): NaN sentinel = "no consensus, no actionable
+        # signal". Excluded from deadband/saturation denominators; reported
+        # separately as no_consensus_frac. The pre-Fix-2 zeros_like behavior
+        # silently inflated deadband_frac and masked the dispersion-collapse
+        # mechanism that drove the sg1-btc 6.62% DD incident.
+        nan_mask = np.isnan(live)
+        no_consensus_frac = float(nan_mask.mean()) if n else 0.0
+        live_clean = live[~nan_mask]
+        if live_clean.size:
+            live_dead = float((np.abs(live_clean) < self.deadband_abs).mean())
+            live_sat = float((np.abs(live_clean) > self.saturation_abs).mean())
+        else:
+            live_dead = None
+            live_sat = None
 
         if baseline_block is None:
             return DriftReport(
@@ -353,6 +381,21 @@ class ActionDriftTracker:
                 deadband_frac_delta=None,
                 saturation_frac_live=live_sat, saturation_frac_baseline=None,
                 saturation_frac_delta=None, kl=None,
+                no_consensus_frac=no_consensus_frac,
+            )
+
+        # All bars are no-consensus → cannot compare distributions
+        # meaningfully; emit a degenerate report instead of NaN-vs-baseline.
+        if live_dead is None:
+            return DriftReport(
+                status=DriftStatus.LOG_ONLY,
+                reason="all bars in window were no-consensus (NaN)",
+                n_bars=n, bucket=bucket_key,
+                deadband_frac_live=None, deadband_frac_baseline=None,
+                deadband_frac_delta=None,
+                saturation_frac_live=None, saturation_frac_baseline=None,
+                saturation_frac_delta=None, kl=None,
+                no_consensus_frac=no_consensus_frac,
             )
 
         base_dead = float(baseline_block.get("deadband_frac", 0.0))
@@ -383,6 +426,7 @@ class ActionDriftTracker:
             deadband_frac_delta=dead_delta,
             saturation_frac_live=live_sat, saturation_frac_baseline=base_sat,
             saturation_frac_delta=sat_delta, kl=None,
+            no_consensus_frac=no_consensus_frac,
         )
 
     def _evaluate_multidim(
@@ -402,6 +446,7 @@ class ActionDriftTracker:
                 deadband_frac_delta=None,
                 saturation_frac_live=None, saturation_frac_baseline=None,
                 saturation_frac_delta=None, kl=None,
+                no_consensus_frac=None,
             )
         max_kl = 0.0
         bins = list(self.hist_edges)
@@ -414,6 +459,11 @@ class ActionDriftTracker:
             if i >= self._n_dim:
                 break
             asset_live = live[:, i]
+            # Fix 2: filter NaN before histogram so multi-dim ensembles
+            # (none today, defensive) get apples-to-apples KL.
+            asset_live = asset_live[~np.isnan(asset_live)]
+            if asset_live.size == 0:
+                continue
             live_counts, _ = np.histogram(asset_live, bins=bins)
             base_counts = np.asarray(asset_baseline.get("counts", []), dtype=np.float64)
             if base_counts.size != live_counts.size:
@@ -431,12 +481,15 @@ class ActionDriftTracker:
             status = DriftStatus.WARN
             reason = f"WARN: max KL {max_kl:.4f} > warn {self.action_kl_warn}"
 
+        # Multi-dim per-asset NaN frac (informational only — gating uses KL).
+        nan_per_asset = float(np.isnan(live).any(axis=1).mean()) if live.size else 0.0
         return DriftReport(
             status=status, reason=reason, n_bars=n, bucket=bucket_key,
             deadband_frac_live=None, deadband_frac_baseline=None,
             deadband_frac_delta=None,
             saturation_frac_live=None, saturation_frac_baseline=None,
             saturation_frac_delta=None, kl=max_kl,
+            no_consensus_frac=nan_per_asset,
         )
 
 

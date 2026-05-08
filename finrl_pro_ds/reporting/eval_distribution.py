@@ -49,9 +49,26 @@ def summarize_scalar_actions(
     """Summarize a 1-D action array into the v2.2 eval_distribution sub-block.
 
     Keys: histogram_bins, counts, mean, std, entropy, deadband_frac,
-    saturation_frac. `n` is the sample count for downstream consumers.
+    saturation_frac, no_consensus_frac, n. ``n`` is the count of bars with
+    *non-NaN* actions (i.e., consensus bars), so downstream comparison
+    across baselines and live windows is on apples-to-apples consensus
+    populations.
+
+    Fix 2 (S538-cont, 2026-05-08): the ensemble aggregator emits NaN on
+    no >=2 directional consensus. NaN bars are excluded from
+    deadband_frac / saturation_frac numerators *and* denominators, and
+    the share is reported separately as ``no_consensus_frac``. Pre-Fix-2
+    NaN was impossible (aggregator returned 0); now it must be filtered
+    so the baseline written here matches the live tracker's NaN-aware
+    measurement.
     """
-    a = np.asarray(actions, dtype=np.float64).ravel()
+    a_all = np.asarray(actions, dtype=np.float64).ravel()
+    n_all = int(a_all.size)
+    nan_mask = np.isnan(a_all)
+    n_no_consensus = int(nan_mask.sum())
+    a = a_all[~nan_mask]
+    no_consensus_frac = float(n_no_consensus / n_all) if n_all else 0.0
+
     if a.size == 0:
         return {
             "histogram_bins": list(hist_edges),
@@ -61,7 +78,9 @@ def summarize_scalar_actions(
             "entropy": 0.0,
             "deadband_frac": 0.0,
             "saturation_frac": 0.0,
+            "no_consensus_frac": no_consensus_frac,
             "n": 0,
+            "n_total_bars": n_all,
         }
 
     counts, _ = np.histogram(a, bins=list(hist_edges))
@@ -74,7 +93,9 @@ def summarize_scalar_actions(
         "entropy": _shannon_entropy(counts.astype(np.float64)),
         "deadband_frac": float((abs_a < deadband).mean()),
         "saturation_frac": float((abs_a > saturation).mean()),
+        "no_consensus_frac": no_consensus_frac,
         "n": int(a.size),
+        "n_total_bars": n_all,
     }
 
 

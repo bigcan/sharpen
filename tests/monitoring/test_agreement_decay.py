@@ -171,18 +171,24 @@ def test_window_eviction_drops_old_bars():
     assert report["flat_bar_frac_live"] == pytest.approx(0.0)
 
 
-def test_consensus_failure_action_classified_as_flat():
-    # ens_agreement returns exactly 0 on consensus failure; verify that
-    # any deadband > 0 catches it.
+def test_consensus_failure_emits_nan_not_flat():
+    # Fix 2 (S538-cont): the aggregator now emits NaN on consensus failure
+    # (was 0 pre-Fix-2). The tracker counts NaN as no-consensus, NOT as flat.
+    # This is the test that pins the corrected contract — its predecessor
+    # (test_consensus_failure_action_classified_as_flat) pinned the BUG.
     t = AgreementDecayTracker(
         baseline_flat_frac=0.10, rule="ens_agreement",
         window_bars=200, min_bars_before_check=100,
         warn_delta=0.20, crit_delta=0.40, deadband=0.001,
     )
+    nan = float("nan")
     for _ in range(150):
-        t.observe(0.0)  # consensus failure
+        t.observe(nan)  # consensus failure (post-Fix-2)
     report = t.snapshot()
-    assert report["flat_bar_frac_live"] == pytest.approx(1.0)
+    assert report["no_consensus_frac"] == pytest.approx(1.0)
+    # All bars no-consensus → no consensus bars to compute flat-frac on
+    assert report["flat_bar_frac_live"] is None
+    assert report["status"] == AgreementDecayStatus.LOG_ONLY
 
 
 def test_deadband_boundary_excludes_equal():
@@ -208,7 +214,53 @@ def test_to_dict_round_trip():
     expected_keys = {
         "status", "reason", "n_bars",
         "flat_bar_frac_live", "flat_bar_frac_baseline", "flat_bar_frac_delta",
-        "rule",
+        "rule", "no_consensus_frac",
     }
     assert set(d.keys()) == expected_keys
     assert d["rule"] == "ens_majority"
+
+
+# ---------- Fix 2 (S538-cont) NaN sentinel semantics ------------------------
+
+
+def test_observe_nan_recorded_as_no_consensus():
+    # Mixed window: 200 bars with 50% NaN, 25% flat-with-consensus, 25%
+    # directional-with-consensus. Expect:
+    #   no_consensus_frac = 100/200 = 0.50
+    #   flat_bar_frac_live = 50/100 = 0.50 (within consensus bars only)
+    t = AgreementDecayTracker(
+        baseline_flat_frac=0.50, rule="ens_agreement",
+        window_bars=200, min_bars_before_check=100,
+        warn_delta=0.20, crit_delta=0.40, deadband=0.25,
+    )
+    nan = float("nan")
+    for _ in range(100):
+        t.observe(nan)
+    for _ in range(50):
+        t.observe(0.0)  # flat with consensus
+    for _ in range(50):
+        t.observe(0.5)  # directional with consensus
+    report = t.snapshot()
+    assert report["no_consensus_frac"] == pytest.approx(0.50)
+    assert report["flat_bar_frac_live"] == pytest.approx(0.50)
+    # delta = |0.50 - 0.50| = 0 → OK
+    assert report["status"] == AgreementDecayStatus.OK
+
+
+def test_nan_window_does_not_inflate_flat_frac():
+    # Pre-Fix-2 mental model: a 0-on-disagreement bar would be counted as
+    # flat → inflates flat_bar_frac_live. Post-Fix-2: NaN bars do NOT
+    # count as flat. Verify directly: 100% NaN should not trip CRIT despite
+    # baseline_flat_frac being far away.
+    t = AgreementDecayTracker(
+        baseline_flat_frac=0.10, rule="ens_agreement",
+        window_bars=200, min_bars_before_check=100,
+        warn_delta=0.20, crit_delta=0.40, deadband=0.25,
+    )
+    nan = float("nan")
+    for _ in range(150):
+        t.observe(nan)
+    report = t.snapshot()
+    # All bars NaN → no flat-frac measurement, status LOG_ONLY (not CRIT)
+    assert report["status"] == AgreementDecayStatus.LOG_ONLY
+    assert report["no_consensus_frac"] == pytest.approx(1.0)

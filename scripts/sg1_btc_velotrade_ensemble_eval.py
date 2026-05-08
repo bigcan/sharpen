@@ -134,7 +134,11 @@ def _agg_median(actions: Dict[int, np.ndarray], _db: float) -> np.ndarray:
 
 def _agg_agreement(actions: Dict[int, np.ndarray], deadband: float) -> np.ndarray:
     """Classify each agent's raw action by deadband into {short, flat, long}.
-    Trade only if >=2 agree on a directional label. Size = mean of agreeing."""
+    Trade only if >=2 agree on a directional label. Size = mean of agreeing.
+
+    No-consensus sentinel (Fix 2, 2026-05-08): NaN array on no >=2 majority.
+    ``run_rule`` substitutes NaN with current_position so env.step holds the
+    prior position. Old ``np.zeros_like`` was the sg1-btc S538-cont bug."""
     stacked = np.stack(list(actions.values()))  # (N, 1)
     labels = np.zeros(stacked.shape[0], dtype=int)
     labels[stacked[:, 0] >  deadband] =  1
@@ -145,7 +149,7 @@ def _agg_agreement(actions: Dict[int, np.ndarray], deadband: float) -> np.ndarra
         return stacked[labels ==  1].mean(axis=0)
     if n_short >= 2:
         return stacked[labels == -1].mean(axis=0)
-    return np.zeros_like(stacked[0])
+    return np.full_like(stacked[0], np.nan, dtype=np.float64)
 
 
 def _make_pf_weighted(seed_pfs: Dict[int, float]) -> Callable:
@@ -209,6 +213,13 @@ def run_rule(config: dict, agents: Dict[int, object], rule_name: str, rule_fn: C
 
         per_agent = _infer_actions(agents, scale_stack, priv, device)
         action = rule_fn(per_agent, deadband)
+        # Fix 2 (2026-05-08): NaN sentinel = "no consensus, hold prior".
+        # See sg1_xauusd_ensemble_eval.py.run_rule for the rationale.
+        no_consensus = bool(np.isnan(action).any())
+        if no_consensus:
+            cur_pos = float(getattr(base_env, "current_position", 0.0))
+            max_lev = float(getattr(base_env, "max_leverage", 1.0)) or 1.0
+            action = np.array([cur_pos / max_lev], dtype=action.dtype)
         obs, reward, terminated, truncated, info = env.step(action)
         done = terminated or truncated
 
@@ -234,6 +245,7 @@ def run_rule(config: dict, agents: Dict[int, object], rule_name: str, rule_fn: C
             "prop_firm_termination": info.get("prop_firm_termination"),
             "reward": float(reward),
             "action_agg": float(action[0]),
+            "no_consensus": int(no_consensus),
         }
         for s, act in per_agent.items():
             row[f"action_{s}"] = float(act[0])
