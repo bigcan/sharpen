@@ -21,7 +21,7 @@
 workstream: gmgp1_gold
 variant: ensemble_top3
 seeds: [456, 1024, 2025]                         # top-3 by val_argmax_pf from Stage 2 N=10
-aggregation_rule: val_argmax_pf                   # decided live in Phase 1
+aggregation_rule: ens_pf_weighted                 # PROMOTE'd at Stage 2.5-R (val_argmax_pf selector landed on ens_pf_weighted; see results/gmgp1_gold_ensemble/ensemble_report.json)
 
 # Gold Stage 3 will use the same 4-fold splitter as BTC Velotrade for parity.
 wf_folds: 4
