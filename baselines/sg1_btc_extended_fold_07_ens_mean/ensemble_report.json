@@ -1,0 +1,177 @@
+{
+  "protocol": "v2.2_stage_2_5_ensemble_report__fu3_fold07_ens_mean_override",
+  "workstream": "sg1_btc_velotrade_extended",
+  "source": "fu2_ens_mean_baseline_used_for_fu3_fold07_checkpoints",
+  "window": "fu2_l1_oos_2026-03-01 -> 2026-04-06 (FU-2 ens_mean reference window)",
+  "chosen_rule": "ens_mean",
+  "decision": "PROMOTE",
+  "decision_source": "v2.5_bootstrap (FU-2 single-window L1 PROMOTE)",
+  "ensemble_eval_distribution": {
+    "histogram_bins": [
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "counts": [
+      1808,
+      1204,
+      785,
+      705,
+      691,
+      794,
+      1430,
+      2062
+    ],
+    "mean": 0.03812087972030714,
+    "std": 0.6635420275637731,
+    "entropy": 1.993468411015581,
+    "deadband_frac": 0.1472729190842916,
+    "saturation_frac": 0.010760628758307838,
+    "n": 9479,
+    "composition_rule": "ens_mean",
+    "by_vol_quartile": {
+      "q1": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          331,
+          316,
+          257,
+          243,
+          207,
+          251,
+          360,
+          405
+        ],
+        "mean": 0.0334120893873564,
+        "std": 0.6126420480396493,
+        "entropy": 2.056900340575881,
+        "deadband_frac": 0.189873417721519,
+        "saturation_frac": 0.007172995780590718,
+        "n": 2370
+      },
+      "q2": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          464,
+          336,
+          210,
+          205,
+          193,
+          191,
+          317,
+          453
+        ],
+        "mean": -0.011215965453641808,
+        "std": 0.6504880035737731,
+        "entropy": 2.0156770515487716,
+        "deadband_frac": 0.16800337695230055,
+        "saturation_frac": 0.009708737864077669,
+        "n": 2369
+      },
+      "q3": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          514,
+          253,
+          177,
+          114,
+          154,
+          180,
+          388,
+          590
+        ],
+        "mean": 0.06564405765070065,
+        "std": 0.6900258344417061,
+        "entropy": 1.9258685559219253,
+        "deadband_frac": 0.11308016877637131,
+        "saturation_frac": 0.009704641350210971,
+        "n": 2370
+      },
+      "q4": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          499,
+          299,
+          141,
+          143,
+          137,
+          172,
+          365,
+          614
+        ],
+        "mean": 0.0646225200625627,
+        "std": 0.6947151541737281,
+        "entropy": 1.919703945654648,
+        "deadband_frac": 0.11814345991561181,
+        "saturation_frac": 0.016455696202531647,
+        "n": 2370
+      }
+    },
+    "regime_cutpoints": [
+      0.000645085735968121,
+      0.0008300725339650516,
+      0.0010826330794863482
+    ]
+  },
+  "live_recal_metadata": {
+    "recalibrated_at": "2026-05-08T14:47:59Z",
+    "recalibrated_by": "manual_baseline_copy_for_rule_revert_to_ens_mean",
+    "reason": "sg1-btc v2 ens_agreement live deploy 2026-05-07 hit drift_crit at warmup boundary (524 bars) due to dispersion-collapse: live deadband_frac=0.456 vs baseline 0.167. Root cause: ens_agreement rule returns target=0 on seed disagreement, which engine treats as 'liquidate' rather than 'hold'. Switching live aggregation_rule to ens_mean (FU-2 PROMOTE rule) avoids the silent-flat collapse without requiring bundle rebuild \u2014 agent_loader.py:245 honors config override over bundle.chosen_rule. Same 3 seeds [456, 3141, 123]; FU-2 baseline is a slightly earlier training window (through 2026-01-31 vs FU-3 through 2026-02-28) but the eval window (2026-03-01 -> 2026-04-06) overlaps fold_07 OOS region.",
+    "predecessor_baseline": "baselines/sg1_btc_extended_fold_07/ensemble_report.json (ens_agreement)",
+    "predecessor_baseline_deadband_frac": 0.16677,
+    "predecessor_baseline_saturation_frac": 0.00759,
+    "this_baseline_deadband_frac": 0.1472729190842916,
+    "this_baseline_saturation_frac": 0.010760628758307838,
+    "what_preserved": [
+      "FU-2 single-window ensemble_eval_distribution (rule=ens_mean) including by_vol_quartile",
+      "regime_cutpoints from FU-2 (vol bucketing thresholds unchanged)"
+    ],
+    "monthly_recal_runbook_followup": "After ~1500 OK drift emissions on the new ens_mean live run, run scripts/recal_drift_baseline.py against the live wandb run to refit baseline to live regime. Watch for any drift CRIT during first 1000 bars; if it fires, investigate before recal."
+  }
+}
