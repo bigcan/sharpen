@@ -209,3 +209,45 @@ def test_dim_change_mid_stream_raises():
     t.observe(0.1, bar_close=None)
     with pytest.raises(ValueError, match="action dim changed"):
         t.observe(np.array([0.1, 0.2]), bar_close=None)
+
+
+# ---------- Fix 2 (S538-cont) NaN sentinel semantics ------------------------
+
+
+def test_observe_nan_excluded_from_deadband_frac():
+    # Mixed window of NaN and consensus bars. NaN should not contribute to
+    # deadband_frac numerator OR denominator; should be reported via the
+    # new no_consensus_frac field.
+    base = _mk_baseline_scalar(seed=42)
+    t = ActionDriftTracker(
+        base, window_bars=600, min_bars_before_check=300,
+        deadband_warn=0.15, deadband_crit=0.30,
+    )
+    rng = np.random.default_rng(42)
+    # 200 NaN bars (no-consensus), 400 consensus bars.
+    # All consensus bars within deadband → deadband_frac_live should be 1.0
+    # over the consensus subset, NOT 400/600.
+    for _ in range(200):
+        t.observe(float("nan"), bar_close=None)
+    for _ in range(400):
+        t.observe(0.05, bar_close=None)  # always inside deadband
+    report = t.snapshot()
+    assert report["no_consensus_frac"] == pytest.approx(200 / 600)
+    assert report["deadband_frac_live"] == pytest.approx(1.0)
+    # baseline ≈ 0.4-0.6 deadband on N(0, 0.4); 1.0 - baseline > 0.30 → CRIT
+    assert report["status"] == DriftStatus.CRIT
+
+
+def test_observe_all_nan_emits_log_only_not_crit():
+    # If every bar in the window is NaN, the tracker has no consensus bars
+    # to compare against the baseline. Must NOT trip CRIT — emit LOG_ONLY.
+    base = _mk_baseline_scalar(seed=7)
+    t = ActionDriftTracker(
+        base, window_bars=400, min_bars_before_check=200,
+    )
+    for _ in range(300):
+        t.observe(float("nan"), bar_close=None)
+    report = t.snapshot()
+    assert report["status"] == DriftStatus.LOG_ONLY
+    assert report["no_consensus_frac"] == pytest.approx(1.0)
+    assert report["deadband_frac_live"] is None

@@ -1,10 +1,23 @@
 # Live Trading Config — SG-1 XAUUSD SAC on Gold CFD via cTrader (FTMO)
 # 3-min bars, signal-gated, prop-firm trained (10% DD, 5% daily loss).
-# Deploys the top-3 WF multiseed ensemble (rule = ens_agreement) — approved for
-# paper-deploy by the Stage 2 verdict at
-# results/sg1_xauusd_ensemble_wf/verdict.json (2026-04-22): all 5 gates PASS,
-# median fold PF 2.058 (+20% over best solo), worst fold MDD -1.93% / daily
-# 0.84% (6.07pp / 3.16pp FTMO buffers), stress sidecar PF 1.921 (gate 1.5).
+# Originally deployed top-3 WF multiseed ensemble (rule = ens_agreement) approved
+# for paper-deploy by Stage 2 verdict at results/sg1_xauusd_ensemble_wf/verdict.json
+# (2026-04-22): all 5 gates PASS, median fold PF 2.058 (+20% over best solo).
+#
+# ---------------------------------------------------------------------------
+# RULE REVERT 2026-05-09 (S538-cont-4) — aggregation_rule: ens_agreement → ens_mean
+# Reason: Fix 2 NaN-sentinel Stage 5.5 fold_07 re-eval (sg1-btc) showed
+# ens_agreement under correct semantics drops -18.80% PF (gate FAIL); cross-
+# strategy on gmgp1-gold val confirms -18.71%. sg1-xauusd's bug-induced
+# ens_agreement PF (1.95 on fold_07) > ens_mean PF (1.62 same fold), so
+# migration LOSES ~17% PF on this fold — but the bug is masked, not absent
+# (R1 recal 2026-05-06 baked deadband_frac=0.7966 into the new baseline).
+# Migrating to ens_mean recovers REAL alpha without the live-trip mechanism
+# that hit sg1-btc 2026-05-08 13:00 UTC. Same Fix 1 pattern as sg1-btc
+# (project_sg1_btc_drift_crit_rule_revert_s538). Live config override is
+# honored by agent_loader.py:245 — no bundle rebuild needed; checkpoints
+# and seeds are unchanged.
+# ---------------------------------------------------------------------------
 #
 # ---------------------------------------------------------------------------
 # PROP-FIRM DECOUPLING (S495 Step 5, 2026-04-24).
@@ -57,7 +70,10 @@ agent:
     # one match per (seed, fold) is required.
     checkpoint_pattern: "checkpoints/WF_seed{seed}_fold_{fold:02d}_*/checkpoint_final.pth"
     fold: 7                            # Fold 07 = trained through Feb 2026
-    aggregation_rule: "ens_agreement"  # approved by Stage 2 verdict
+    aggregation_rule: "ens_mean"       # 2026-05-09 rule revert (Fix 1 pattern)
+                                       # — was "ens_agreement" pre-Fix-2; see
+                                       # header rule-revert block + memo
+                                       # project_fix2_stage_5_5_fold07_gate_fail_s538.md
     # deadband defaults to trading.deadband_threshold if omitted.
     seed_pfs:                          # WF per-seed median fold PF (for pf_weighted)
       42:   1.566
@@ -191,7 +207,14 @@ safety:
 # refuses auto-restart (§8.3).
 drift:
   enabled: true
-  baseline_path: "/app/baselines/sg1_xauusd_fold_07/ensemble_report.json"
+  baseline_path: "/app/baselines/sg1_xauusd_wf_fold_07_ens_mean/ensemble_report.json"
+                                       # 2026-05-09 swapped from ens_agreement
+                                       # baseline (sg1_xauusd_fold_07/) to
+                                       # ens_mean baseline derived from
+                                       # results/sg1_xauusd_ensemble_wf/fold_07/ens_mean_trajectory.parquet
+                                       # via C:/tmp/derive_xauusd_ens_mean_baseline.py.
+                                       # Predecessor preserved at
+                                       # baselines/sg1_xauusd_fold_07/ for audit.
   window_bars: 1000
   min_bars_before_check: 500
   vol_estimator_bars: 20

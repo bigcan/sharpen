@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import collections
 import logging
+import math
 from dataclasses import dataclass
 from typing import Optional
 
@@ -54,6 +55,11 @@ class AgreementDecayReport:
     flat_bar_frac_baseline: Optional[float]
     flat_bar_frac_delta: Optional[float]
     rule: str
+    # Fix 2 (S538-cont, 2026-05-08): fraction of bars where the aggregator
+    # emitted NaN (no >=2 directional consensus). Replaces the old conflation
+    # of "flat" with "no consensus". flat_bar_frac_live now measures
+    # naturally-flat bars only (within consensus bars).
+    no_consensus_frac: Optional[float] = None
 
     def to_dict(self) -> dict:
         return {
@@ -64,6 +70,7 @@ class AgreementDecayReport:
             "flat_bar_frac_baseline": self.flat_bar_frac_baseline,
             "flat_bar_frac_delta": self.flat_bar_frac_delta,
             "rule": self.rule,
+            "no_consensus_frac": self.no_consensus_frac,
         }
 
 
@@ -130,6 +137,11 @@ class AgreementDecayTracker:
         self._flat_flags: collections.deque[bool] = collections.deque(
             maxlen=self.window_bars,
         )
+        # Fix 2: a parallel deque tracking NaN sentinels (no consensus) so
+        # the live flat_bar_frac measurement is on consensus bars only.
+        self._no_consensus_flags: collections.deque[bool] = collections.deque(
+            maxlen=self.window_bars,
+        )
 
         if not self._is_consensus:
             logger.warning(
@@ -152,12 +164,23 @@ class AgreementDecayTracker:
 
         Pass the **post-aggregation** scalar action (the EnsembleAgent's
         output before the engine-side deadband / risk-manager clipping).
-        For `ens_agreement` the aggregator returns 0 on consensus failure,
-        so |action| < deadband captures both naturally-flat and
-        consensus-failed bars consistently with the eval baseline.
+
+        Fix 2 (S538-cont, 2026-05-08): the aggregator now emits NaN on
+        no >=2 directional consensus. NaN bars are recorded in
+        ``_no_consensus_flags`` and excluded from ``flat_bar_frac_live``
+        (which measures naturally-flat bars within consensus bars only).
+        Pre-Fix-2 the aggregator returned 0 on consensus failure and the
+        live flat fraction conflated "consensus said hold" with "consensus
+        failed silently" — the sg1-btc dispersion-collapse bug.
         """
-        is_flat = abs(float(aggregated_action)) < self.deadband
+        try:
+            agg = float(aggregated_action)
+        except (TypeError, ValueError):
+            agg = float("nan")
+        is_no_consensus = math.isnan(agg)
+        is_flat = (not is_no_consensus) and abs(agg) < self.deadband
         self._flat_flags.append(is_flat)
+        self._no_consensus_flags.append(is_no_consensus)
         return self._evaluate()
 
     def snapshot(self) -> dict:
@@ -178,6 +201,7 @@ class AgreementDecayTracker:
                 flat_bar_frac_baseline=self.baseline_flat_frac,
                 flat_bar_frac_delta=None,
                 rule=self.rule,
+                no_consensus_frac=None,
             )
 
         if n < self.min_bars_before_check:
@@ -192,9 +216,31 @@ class AgreementDecayTracker:
                 flat_bar_frac_baseline=self.baseline_flat_frac,
                 flat_bar_frac_delta=None,
                 rule=self.rule,
+                no_consensus_frac=None,
             )
 
-        live = sum(self._flat_flags) / n
+        # Fix 2: live flat-bar fraction excludes no-consensus bars, since
+        # those are now "unobserved" rather than "flat". no_consensus_frac
+        # is reported separately (and AgreementDecayTracker fires CRIT on
+        # sustained no-consensus regimes via its own thresholds — TODO 5.5).
+        n_no_consensus = sum(self._no_consensus_flags)
+        n_consensus = n - n_no_consensus
+        no_consensus_frac = n_no_consensus / n if n else 0.0
+        if n_consensus == 0:
+            return AgreementDecayReport(
+                status=AgreementDecayStatus.LOG_ONLY,
+                reason=(
+                    f"all {n} bars in window were no-consensus (NaN); "
+                    f"no flat-fraction signal computable"
+                ),
+                n_bars=n,
+                flat_bar_frac_live=None,
+                flat_bar_frac_baseline=self.baseline_flat_frac,
+                flat_bar_frac_delta=None,
+                rule=self.rule,
+                no_consensus_frac=no_consensus_frac,
+            )
+        live = sum(self._flat_flags) / n_consensus
 
         if self.baseline_flat_frac is None:
             return AgreementDecayReport(
@@ -205,6 +251,7 @@ class AgreementDecayTracker:
                 flat_bar_frac_baseline=None,
                 flat_bar_frac_delta=None,
                 rule=self.rule,
+                no_consensus_frac=no_consensus_frac,
             )
 
         delta = abs(live - self.baseline_flat_frac)
@@ -222,6 +269,7 @@ class AgreementDecayTracker:
                 flat_bar_frac_baseline=self.baseline_flat_frac,
                 flat_bar_frac_delta=delta,
                 rule=self.rule,
+                no_consensus_frac=no_consensus_frac,
             )
         if delta > self.warn_delta:
             return AgreementDecayReport(
@@ -235,6 +283,7 @@ class AgreementDecayTracker:
                 flat_bar_frac_baseline=self.baseline_flat_frac,
                 flat_bar_frac_delta=delta,
                 rule=self.rule,
+                no_consensus_frac=no_consensus_frac,
             )
         return AgreementDecayReport(
             status=AgreementDecayStatus.OK,
@@ -244,4 +293,5 @@ class AgreementDecayTracker:
             flat_bar_frac_baseline=self.baseline_flat_frac,
             flat_bar_frac_delta=delta,
             rule=self.rule,
+            no_consensus_frac=no_consensus_frac,
         )

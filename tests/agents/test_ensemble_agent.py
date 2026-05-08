@@ -63,17 +63,34 @@ def test_agreement_two_short():
     assert out == pytest.approx(np.array([-0.5]))
 
 
-def test_agreement_split_stays_flat():
-    # 1 long, 1 short, 1 flat -> no majority -> flat
+def test_agreement_no_majority_emits_nan():
+    # Fix 2 (S538-cont): 1 long, 1 short, 1 flat -> no majority -> NaN sentinel
+    # (was np.zeros_like pre-Fix-2; that conflated "no consensus" with
+    # "deliberate flat = liquidate" — sg1-btc dispersion-collapse incident).
     acts = np.array([[0.5], [-0.4], [0.0]])
     out = _agreement(acts, 0.25)
-    assert out == pytest.approx(np.array([0.0]))
+    assert np.isnan(out).all()
+    assert out.shape == (1,)
 
 
-def test_agreement_all_flat():
-    acts = np.array([[0.1], [0.0], [-0.1]])  # all within deadband 0.25
+def test_agreement_all_flat_emits_nan():
+    # All within deadband -> 0 longs, 0 shorts -> no >=2 majority -> NaN
+    acts = np.array([[0.1], [0.0], [-0.1]])
     out = _agreement(acts, 0.25)
-    assert out == pytest.approx(np.array([0.0]))
+    assert np.isnan(out).all()
+
+
+def test_ensemble_agent_predict_no_consensus_emits_nan():
+    # Inject 1 long, 1 short, 1 flat across 3 seeds -> aggregator emits NaN
+    # which should propagate through EnsembleAgent.predict as a NaN tensor.
+    agents = [_StubAgent(0.5), _StubAgent(-0.4), _StubAgent(0.0)]
+    ens = EnsembleAgent(
+        agents=agents, seeds=[42, 2025, 3141],
+        aggregation_rule="ens_agreement", deadband=0.25,
+    )
+    out = ens.predict(None, None)
+    assert out.shape == (1, 1)
+    assert torch.isnan(out).all()
 
 
 def test_pf_weighted_equal_weights_fallback():

@@ -945,6 +945,37 @@ class LiveTradingEngine:
         # between policy intent and executed action is observable in WandB.
         policy_target_position = float(target_position)
 
+        # --- 5z. No-consensus NaN sentinel (Fix 2, S538-cont, 2026-05-08) ---
+        # EnsembleAgent._agreement returns NaN when no >=2 directional
+        # majority. Pre-Fix-2 it returned 0.0 which engine-side conflated
+        # with "deliberate flat = liquidate" (sg1-btc dispersion-collapse
+        # incident, drift_crit at warmup +6.62% DD). Treat NaN as "hold
+        # prior position" — feed NaN to the trackers (they classify it as
+        # no-consensus, NOT deadband) but skip every downstream trade-side
+        # path so current_position is preserved.
+        if np.isnan(policy_target_position):
+            if self._drift_tracker is not None:
+                try:
+                    self._drift_tracker.observe(
+                        target_position, bar_close=current_close,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"drift tracker error on NaN bar (non-fatal): {e}")
+            if self._agreement_decay_tracker is not None:
+                try:
+                    self._agreement_decay_tracker.observe(target_position)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        f"agreement-decay tracker error on NaN bar (non-fatal): {e}",
+                    )
+            self._prev_close = current_close
+            self._log_step(
+                bar_time, self._current_position, traded=False,
+                skip_reason="no_consensus",
+                policy_target_position=policy_target_position,
+            )
+            return
+
         # --- 5a. Action-drift tracking (Protocol v2.2 §8.2) ---
         # observe() records the *policy output* before any overlays / deadband
         # / risk clipping, so the live distribution matches the stage-2/2.5
