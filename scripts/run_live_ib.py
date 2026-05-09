@@ -38,12 +38,9 @@ logger = logging.getLogger("run_live_ib")
 def validate_config(config: dict, args) -> dict:
     """Validate and patch config with CLI overrides."""
 
-    # --- Checkpoint existence ---
-    checkpoint_path = config.get("agent", {}).get("checkpoint_path", "")
-    if not Path(checkpoint_path).exists():
-        logger.error(f"Checkpoint not found: {checkpoint_path}")
-        logger.info("Set agent.checkpoint_path in the config to your L1 checkpoint.")
-        sys.exit(1)
+    # --- Checkpoint existence (solo / v2.3 bundle / legacy ensemble) ---
+    from finrl_pro_ds.live import resolve_agent_paths
+    resolve_agent_paths(config, logger=logger)
 
     # --- Mainnet safety ---
     exchange_cfg = config.setdefault("exchange", {})
@@ -80,7 +77,6 @@ def validate_config(config: dict, args) -> dict:
 
 def build_components(config: dict):
     """Instantiate all live trading components for IB Gold futures."""
-    from finrl_pro_ds.agents.sac.sac_agent import SACAgent
     from finrl_pro_ds.crypto.live.live_engine import LiveTradingEngine
     from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder, resolve_norm_warmup_path
     from finrl_pro_ds.crypto.mlops.crypto_risk_manager import (
@@ -90,21 +86,10 @@ def build_components(config: dict):
     from finrl_pro_ds.futures.execution.ib_futures_broker import IBFuturesBroker
     from finrl_pro_ds.futures.live.cme_bar_clock import CMEBarClock
     from finrl_pro_ds.futures.live.cme_calendar import CMEGlobexCalendar
+    from finrl_pro_ds.live import build_agent
 
-    # --- Agent ---
-    agent_cfg = config.get("agent", {})
-    network_cfg = config.get("network", {})
-    sac_cfg = config.get("agents", {}).get("sac", {})
-
-    agent = SACAgent(
-        network_config=network_cfg,
-        device=agent_cfg.get("device", "cpu"),
-        torch_compile=False,
-        **{k: v for k, v in sac_cfg.items() if k not in ("checkpoint_path",)},
-    )
-    agent.load(agent_cfg["checkpoint_path"])
-    agent.actor.eval()
-    logger.info(f"Agent loaded from {agent_cfg['checkpoint_path']}")
+    # --- Agent (solo / v2.3 bundle / legacy ensemble) ---
+    agent = build_agent(config, logger=logger)
 
     # --- Broker ---
     ex_cfg = config.get("exchange", {})

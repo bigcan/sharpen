@@ -43,12 +43,43 @@ contract:
   limit_offset_ticks: 2                # Cross 2 ticks ($0.20) into book for limit fills
   market_fallback_timeout: 30.0        # Seconds before limit -> market fallback
 
-# --- Agent ---
+# --- Agent (v2.3 atomic-swap bundle: A2 PROMOTE checkpoints, ens_pf_weighted) ---
+# Loaded from bundle baked into image at /app/bundles/gmgp1_gold/.
+# - L1 N=10 PASS (S536-cont): val PF mean 2.746 CV 2.98%, test mean 2.563 CV 3.22%
+# - Stage 2.5-R bootstrap PRIMARY: P(ens_PF > solo_best_PF) = 1.000 → PROMOTE
+# - Bundle SHA256: 7e46cb5cc96965568975670bc82575d06ed2db1295eeeab17bd0600f3c655b75
+# - Manifest chosen_rule: ens_pf_weighted (val-argmax 3.4641 over ens_mean 3.4532).
+# - val-argmax stability under Fix 2 NaN-sentinel verified S538-cont-4
+#   (project_fix2_gold_val_argmax_pass_s538): ens_pf_weighted val PF stays #1
+#   (3.4641 → 3.4731), bundle re-bake NOT required.
+# - ens_pf_weighted aggregator is bug-free (no zero-on-disagreement branch);
+#   AgreementDecayTracker auto-disabled at boot (rule not in CONSENSUS_RULES).
+# - seed_pfs supplied here (manifest lacks them; bake pipeline gap, see
+#   agent_loader._build_v23_bundle_agent merge logic). Source: verdict.json
+#   test_solo_pfs (window 2025-11-01..2025-12-31).
+# Predecessor: gmgp1_v5_l1_seed456 solo (best PF 1.974, deployed 2026-04-17).
 agent:
-  # Point to L1 multi-seed checkpoint (seed 456 = best PF 1.974)
-  checkpoint_path: "checkpoints/gmgp1_v5_l1_seed456/checkpoint_final.pth"
-  device: "cpu"                        # CPU for inference (no CUDA needed)
-  torch_compile: false                 # Must be false for live inference
+  # checkpoint_path retained as dead value; build_agent() detects
+  # `agent.ensemble.bundle_path` and skips the solo path.
+  checkpoint_path: ""
+  device: "cpu"
+  torch_compile: false
+  ensemble:
+    bundle_path: "/app/bundles/gmgp1_gold/ensemble_v1.tar.gz"
+    aggregation_rule: "ens_pf_weighted"
+    # A2 bake produced normalizer_sha256: MISSING for all 3 seeds (FU-2/FU-3
+    # parity). Live engine supplies its own norm_warmup pkl via
+    # `features.norm_warmup_path` below. Without this override
+    # extract_and_verify_bundle's default require_normalizers=True raises
+    # BundleIntegrityError on first boot.
+    require_normalizers: false
+    # Manifest doesn't carry seed_pfs (bake pipeline gap). For ens_pf_weighted
+    # they are required; without them the aggregator silently falls back to
+    # equal weights (= ens_mean equivalent). Source: verdict.json test_solo_pfs.
+    seed_pfs:
+      456:  2.4780818313001243
+      1024: 2.4138230415414177
+      2025: 2.5273953978575285
 
 # --- SAC Hyperparameters (must match training checkpoint, T29 HPs) ---
 agents:
@@ -83,6 +114,14 @@ features:
                                        # 240-min scale needs 360+ bars (3x EMA span=120)
                                        # 100K / 240 = 417 bars → fully converged
                                        # IB fetch: ~73 requests @ 11s pacing = ~13 min bootstrap
+  # S509 train-serve EMA-Z parity (parity for v2.3 ensemble bundle whose
+  # normalizer_sha256 is MISSING per A2 bake). The L1 solo seed-456 dir is
+  # bind-mounted at /app/checkpoints/gmgp1_v5_l1_seed456 (see docker-compose)
+  # and its norm_warmup_15-60-240.pkl is parity-correct for the v1 ensemble:
+  # norm_warmup is a deterministic function of (training data, scales,
+  # norm_span) — all 3 A2 seeds [456, 1024, 2025] share these, only SAC RNG
+  # differs. Mirrors sg1-btc's same workaround.
+  norm_warmup_path: "/app/checkpoints/gmgp1_v5_l1_seed456/norm_warmup_15-60-240.pkl"
 
 # --- Bar Clock (CME-aware) ---
 bar_clock:
@@ -99,6 +138,20 @@ trading:
     enabled: true
     minutes_before_close: 30           # Flatten 30 min before Friday close
 
+# --- Data reference (validator Stage-0; not loaded at runtime — IB live-fetches from CME) ---
+# Points at the training-data parquet for the v1 ensemble checkpoints.
+# Source: configs/gmgp1_gold_steadystate_ensemble.yaml (A2 ensemble training).
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "MGC"
+  handler_type: "multiscale"
+
+# --- Hard Constraints (validator parity; mirrors trading.taker_fee) ---
+env:
+  taker_fee: 0.000068                  # ~6.8bps for MGC ($0.88 / ~$13K half-notional) — S471 switch
+  gap_detection: true                  # CME has nightly + weekend gaps (data manifest max_gap_bars > 1d)
+  gap_atr_mult: 3.0
+
 # --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
 # Overlay owns: static_peak (true for step1/step2, false for funded),
 # flatten_on_kill_file. See configs/deploy/ftmo/{step1,step2,funded}.yaml.
@@ -114,18 +167,82 @@ risk:
   min_margin_reserve_pct: 0.20         # Keep 20% margin reserve (futures need more)
 
 # --- WandB Monitoring ---
+# 2026-05-09 (S538-cont-4): distinct run_id for solo→ensemble swap so audit trail
+# in WandB is clean. Predecessor ran as `live-gold-ib-paper-20260417-mgc` (solo
+# seed 456, 2026-04-17 .. 2026-05-09).
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
-  tags: ["live", "gmgp1-v5", "Gold", "SAC", "15min", "IB", "paper", "MGC", "COMEX", "reset-20260417"]
-  run_id: "live-gold-ib-paper-20260417-mgc"
+  tags: ["live", "gmgp1-v5", "Gold", "SAC", "15min", "IB", "paper", "MGC",
+         "COMEX", "ensemble", "ens-pf-weighted", "ensemble-v1-deploy-20260509",
+         "prop-firm", "FTMO"]
+  run_id: "live-gold-ib-paper-ensemble-v1-20260509"
 
 # --- Safety ---
+# kill_file moved from /tmp to /app/state (mounted via gmgp1-gold-state in
+# docker-compose) so v2.2 §8.3 repeat-CRIT lockout + v2.3 swap-handshake state
+# survive container restart. /tmp inside container fs is wiped per restart —
+# any kill_file there auto-clears on bounce, defeating both mechanisms. Mirrors
+# sister sg1-btc and sg1-xauusd configs.
+# `kill_file_override` defaults to `${kill_file}.override` per
+# live_engine.py:309 so it inherits /app/state too — no separate line needed.
 safety:
   require_explicit_mainnet: true       # Must pass --mainnet for live trading
   max_daily_loss_pct: 0.05             # 5% daily loss, hard stop
-  kill_file: "/tmp/finrl_live_gc_kill" # Touch this file to stop trading gracefully
+  kill_file: "/app/state/finrl_live_gc_kill"
+  # v2.3 swap-handshake state files on the persistent state volume. Default
+  # `${kill_file}.*` would land on the same path, but pinning explicitly here
+  # so an audit reader can see them. First deploy of ensemble_v1 — operator
+  # pre-touches /app/state/finrl_live_gc_kill.swap_approved before the build
+  # to authorize the solo→ensemble swap (handshake consumes the sentinel).
+  last_bundle_file: "/app/state/finrl_live_gc_kill.last_bundle"
+  swap_approved_file: "/app/state/finrl_live_gc_kill.swap_approved"
+  flatten_on_kill_file: true           # v2.2 §8.3 CRIT graceful flatten
   emergency_flatten_on_error: true     # Flatten all positions on unrecoverable error
+
+# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# Baseline = A2 ensemble reference distribution (single-window L1 PROMOTE,
+# 2025-11-01..2025-12-31), copied to baselines/gmgp1_gold_ensemble/ from
+# results/gmgp1_gold_ensemble/ensemble_report.json. Same 3 seeds [456, 1024,
+# 2025] as the bundle. Baked into live-engine image via
+# `COPY baselines /app/baselines`. Without a resolvable baseline the tracker
+# runs in LOG_ONLY; with it, WARN blocks new entries / flips / size-ups (close
+# to zero still allowed) and CRIT writes kill_file → emergency_flatten →
+# non-zero exit → watchdog refuses auto-restart (§8.3).
+# window_bars=400 is the gates-config value — gold trades ~26 bars per CME
+# session (15-min bars × 6.5h) so 400 ≈ 15 sessions ≈ 3 weeks of activity.
+drift:
+  enabled: true
+  baseline_path: "/app/baselines/gmgp1_gold_ensemble/ensemble_report.json"
+  window_bars: 400
+  min_bars_before_check: 200
+  vol_estimator_bars: 20
+
+# --- Protocol v2 Gates (live copy — mirrors gmgp1_gold_steadystate_ensemble.gates.yaml §drift/§safe_mode) ---
+# The live engine reads drift/safe_mode thresholds from `drift:` block above
+# (T1 _init_drift_tracker fallback order); this duplicate block exists to
+# satisfy validate_config.py's paper-deploy stage check, which requires
+# `gates.drift.*` + `gates.safe_mode.*` declared on the live config itself.
+# SOURCE OF TRUTH for research/eval: configs/gmgp1_gold_steadystate_ensemble.gates.yaml.
+gates:
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    agreement_flat_delta_warn: 0.20         # v2.3 ensemble agreement-decay
+    agreement_flat_delta_crit: 0.40
+    agreement_flat_window_bars: 600
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
 
 # --- Retrain Policy (hybrid trigger + 12mo cap) ---
 # See scripts/check_retrain_triggers.py. Live DD checks delegated to live-monitor.
