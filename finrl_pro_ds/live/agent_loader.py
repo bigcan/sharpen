@@ -249,12 +249,19 @@ def _build_v23_bundle_agent(
             f"manifest.chosen_rule={bundle.chosen_rule!r}"
         )
     deadband = float(ensemble_cfg.get("deadband", bundle.deadband))
+    # seed_pfs precedence: config-supplied wins over manifest. Required when
+    # rule=ens_pf_weighted but the bundle manifest lacks seed_pfs (the FU-2/FU-3
+    # bake pipelines did not populate it; without an override the aggregator
+    # silently falls back to equal weights = ens_mean equivalent).
+    seed_pfs_from_cfg = {
+        int(k): float(v) for k, v in (ensemble_cfg.get("seed_pfs") or {}).items()
+    }
     agent = EnsembleAgent(
         agents=loaded_agents,
         seeds=seeds,
         aggregation_rule=rule,
         deadband=deadband,
-        seed_pfs=bundle.seed_pfs,
+        seed_pfs=seed_pfs_from_cfg or bundle.seed_pfs,
     )
     logger.info(
         f"EnsembleAgent loaded from v2.3 bundle: ws={bundle.workstream} "

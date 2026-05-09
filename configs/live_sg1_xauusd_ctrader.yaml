@@ -179,9 +179,13 @@ wandb:
   # `live-{asset}-{exchange}-{mode}` produces `live-xauusd-ctrader-paper`, which
   # collides with gmgp1-xauusd and causes both strategies to attach to the same
   # WandB run via `resume="allow"`.
-  run_id: "live-sg1-xauusd-ctrader-paper-20260422"
+  # 2026-05-09 (S538-cont-4): distinct run_id post rule revert so ens_agreement
+  # → ens_mean swap is auditable in WandB. Predecessor ran as
+  # `live-sg1-xauusd-ctrader-paper-20260422` (ens_agreement, 2026-04-22 .. 05-09).
+  run_id: "live-sg1-xauusd-ctrader-paper-ens-mean-20260509"
   tags: ["live", "sg-1", "XAUUSD", "Gold", "SAC", "3min", "cTrader", "paper",
-         "CFD", "FTMO", "signal-gated", "prop-firm", "ensemble", "ens-agreement"]
+         "CFD", "FTMO", "signal-gated", "prop-firm", "ensemble", "ens-mean",
+         "rule-revert"]
 
 # --- Safety ---
 safety:
