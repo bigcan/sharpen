@@ -88,9 +88,11 @@ class AgreementDecayTracker:
             than firing a false CRIT.
         deadband: |action| < deadband counts as flat. Should match the
             EnsembleAgent.deadband used at inference (which itself comes
-            from the resolved bundle config). For `ens_agreement`, when
-            consensus fails the aggregator returns exactly 0, so any
-            sensible deadband (>0) classifies the bar as flat.
+            from the resolved bundle config). Post-Fix-2 the
+            `ens_agreement` aggregator returns NaN when consensus fails
+            (no-consensus bars are excluded from numerator and denominator
+            of the flat-bar fraction); see `update()` for the NaN-skip
+            contract.
         window_bars: rolling window size (default 2000 per spec).
         min_bars_before_check: warmup floor; gating is suppressed below
             this count (default = window_bars / 2).

@@ -52,7 +52,6 @@ from finrl_pro_ds.monitoring import (
 from finrl_pro_ds.live.challenge_state_machine import (
     ChallengePhase,
     ChallengeStateMachine,
-    REASON_PHASE_COMPLETE,
 )
 
 logger = logging.getLogger(__name__)

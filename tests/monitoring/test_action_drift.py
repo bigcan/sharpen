@@ -223,7 +223,6 @@ def test_observe_nan_excluded_from_deadband_frac():
         base, window_bars=600, min_bars_before_check=300,
         deadband_warn=0.15, deadband_crit=0.30,
     )
-    rng = np.random.default_rng(42)
     # 200 NaN bars (no-consensus), 400 consensus bars.
     # All consensus bars within deadband → deadband_frac_live should be 1.0
     # over the consensus subset, NOT 400/600.

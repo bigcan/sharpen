@@ -306,7 +306,7 @@ def _select_buffer_fn(gates_cfg: dict):
     gates = gates_cfg.get("gates", {}) if isinstance(gates_cfg, dict) else {}
     variants = {
         "g4_research_dd_compliance": research_buffers,
-        "g4_velotrade_compliance":   velotrade_buffers if "velotrade_buffers" in globals() else ftmo_buffers,
+        "g4_velotrade_compliance":   globals().get("velotrade_buffers", ftmo_buffers),
         "g4_ftmo_compliance":        ftmo_buffers,
     }
     present = [k for k in variants if k in gates]
