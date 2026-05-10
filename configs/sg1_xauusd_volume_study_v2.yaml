@@ -1,0 +1,182 @@
+# SG-1 XAUUSD Volume Study v2 — Phase 1 budget sweep base config (S537, 2026-05-07).
+#
+# CONTEXT
+#   Tier B1 of the post-WF training queue (see project_post_wf_training_queue_s524.md).
+#   Goal: locate the productive training-budget ceiling for SG-1-XAUUSD on the
+#   extended 24mo OANDA window. This is the cross-asset/cross-resolution
+#   transfer test of the buffer-multiplicity rescue mechanism identified in
+#   GMGP1-BTC v2 (decision_volume_axis_v2_2m_ceiling.md).
+#
+# WHY 3M IS NOT THE ANCHOR
+#   The original SG-1 family (S344) inherited 3M total_timesteps without a
+#   volume-study evidence base. Volume Study v1 (Gold 15-min A_base, ~21K bars)
+#   FAILED H1 — PF degrades 500K→5M (multiplicities 24×→240×, both past cliff).
+#   Volume Study v2 (BTC 15-min A_long, ~63K bars) found peak at 2M (32×) with
+#   4M statistically indistinguishable. SG-1-XAUUSD on extended OANDA (24mo,
+#   ~233K 3-min bars) sits at:
+#       500K → 2.1×       (likely under-trained)
+#       2M   → 8.6×       (anchor; predicted productive zone)
+#       4M   → 17×        (between productive and ceiling)
+#       8M   → 34×        (just past the v2-found ceiling — cliff probe)
+#   Phase 1 sweeps {2M, 4M, 8M} matching v2 cells. Phase 2 fires N=10 at the
+#   winning cell selected by the gate decision tree in
+#   configs/sg1_xauusd_volume_study_v2.gates.yaml.
+#
+# DATA
+#   data/oanda/xauusd_m1_m.parquet — 816,688 rows, 2024-01-01 → 2026-04-23,
+#   max_gap_bars=4384 (expected weekend gaps), clean_ohlcv_passed=true,
+#   manifest sha256 verified. Live-deploy-aligned: matches the data source the
+#   live sg1-xauusd ensemble was baked from (S488 OANDA redo).
+#
+# HPs FROZEN
+#   Trial 56 from study sg1_xauusd_ftmo_rehpo_20260419 (best PF=2.85 HPO,
+#   yaiuwlcy retrain). Same HPs as the live-deploy ensemble baseline. v2's
+#   methodology held HPs constant across budget cells — multiplicity is the
+#   independent variable.
+#
+# FEE MODEL
+#   Steady-state 2.35bps OANDA-aligned (S464 audit; live-deploy uses 2.35bps).
+#   No fee curriculum — Protocol v2.4.1 §8 default.
+#
+# DISPATCHER
+#   scripts/run_volume_study.py extended in S537 with --base_config and
+#   --gates_file flags. Each Phase 1 cell uses --separate_runs (one parent
+#   WandB run per seed); 5 seeds * 3 budgets = 15 runs total.
+#
+#   python scripts/run_volume_study.py \
+#       --full \
+#       --base_config configs/sg1_xauusd_volume_study_v2.yaml \
+#       --gates_file  configs/sg1_xauusd_volume_study_v2.gates.yaml \
+#       --slots gpuhub-1:0,gpuhub-1:0,gpuhub-1:1,gpuhub-1:1
+#
+# PHASE 2 (post-Phase-1 verdict)
+#   Phase 2 will be a SEPARATE config
+#   `configs/sg1_xauusd_volume_study_v2_phase2_l1_multiseed.yaml`
+#   that pins total_timesteps to the winning cell and runs the standard L1
+#   seed pool [42,123,456,789,1024,1337,2025,3141,5150,9999]. Decision rule:
+#   gates yaml decision_tree → STRONG_GO_BIGGER / GO_RETRAIN / SHIP_2M / CLIFF.
+
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  # Extended A_long window — mirrors A1 sg1-btc-extended structure.
+  # Bound by parquet last_ts (2026-04-23); leaving 1wk safety margin on test.
+  train_start_date: "2024-01-01"
+  train_end_date:   "2026-01-31"
+  val_start_date:   "2026-02-01"
+  val_end_date:     "2026-02-28"
+  test_start_date:  "2026-03-01"
+  test_end_date:    "2026-04-15"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235                # steady-state OANDA-aligned (S464)
+  deadband_threshold: 0.35           # trial 56
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0                  # OANDA 73h weekend gap, detector required
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.009270901804613313    # trial 56
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.03
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# Trial 56 HPs (Optuna study sg1_xauusd_ftmo_rehpo_20260419, best PF 2.85 HPO).
+# Frozen across all Phase 1 cells — multiplicity is the independent variable.
+agents:
+  sac:
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 2000000           # default cell; dispatcher overrides per budget
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+# Protocol v2 §4 Stage 2 gates — mirror the rehpo-l1-multiseed-oanda config.
+# Volume study analysis uses configs/sg1_xauusd_volume_study_v2.gates.yaml
+# (separate file with H1-H5 + decision_tree).
+gates:
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 5                        # Phase 1 sweep uses N=5; Phase 2 lifts to N=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "volume-study", "volume-study-v2", "extended-window", "oanda-spot",
+         "rehpo-trial56", "steady-state",
+         "upstream:sg1_xauusd_ftmo_rehpo_20260419"]

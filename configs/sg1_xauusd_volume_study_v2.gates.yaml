@@ -1,0 +1,247 @@
+# SG-1 XAUUSD Volume Study v2 — pre-registered hypothesis gates (S537, 2026-05-07).
+#
+# Read by scripts/analyze_volume_study.py (extended in S537 to accept --gates_file).
+# Single source of truth for v2/SG-1-XAUUSD decision rules — never hardcode in
+# code or scripts (project rule).
+#
+# PRE-COMMITTED 2026-05-07, BEFORE any Phase-1 run is launched. Do not edit
+# after the first run completes without a decision memo.
+#
+# CONTEXT — why this v2 transfer exists:
+#   - GMGP1 Volume Study v1 (Gold 15-min A_base, 10mo, ~21K bars): H1 FAIL.
+#     PF degrades 500K (2.001) → 5M (1.855). Cap at 500K-1M (multiplicities
+#     past cliff: 24× → 240×).
+#   - GMGP1 Volume Study v2 (BTC 15-min A_long, 22mo, ~63K bars): peak at 2M
+#     (PF 2.442, multiplicity 32×); 4M -1.4% median, p=0.84 vs 2M, CV widens.
+#     Mechanism: replay-buffer multiplicity rescue saturates ~32×.
+#   - SG-1-XAUUSD on extended OANDA window (24mo, ~233K 3-min bars) sits at
+#     much LOWER multiplicity per fixed-budget cell (more bars). The mechanism
+#     should still apply but the productive cell shifts UP the budget axis.
+#   - This study tests whether the multiplicity-mechanism transfers across
+#     asset class (BTC → XAU), exchange (Bybit perp → OANDA spot), and
+#     resolution (15-min → 3-min).
+#
+# Multiplicity at A_long (~233K 3-min bars):
+#   500K → 2.1× (under-trained, far below productive zone)
+#   2M   → 8.6× (within productive zone)
+#   4M   → 17×  (between productive and ceiling)
+#   8M   → 34×  (just past v2-found ceiling — cliff probe)
+#
+# v2 ASKS: at FIXED A_long (24mo) train window, what is the productive budget
+#          ceiling for SG-1-XAUUSD on OANDA spot? Sweep total_timesteps in
+#          {2M, 4M, 8M} and test for monotone improvement, variance behavior,
+#          overfitting onset, diminishing returns, and paper uplift over the
+#          live-deployed 500K baseline.
+#
+# NO REUSE CELL: unlike GMGP1 v2 (which reused 5 A_long×2M seeds from the
+# data-window study), SG-1-XAUUSD has no prior 24mo×2M run. All 15 cells are
+# new training runs.
+
+workstream: "sg1_xauusd_volume_study_v2"
+test_bed: "sg1_sac_xauusd_3min"
+asset: "XAUUSD"
+exchange: "oanda"
+data_file: "data/oanda/xauusd_m1_m.parquet"
+
+# Single train-window — A_long extended, mirrors A1 sg1-btc-extended.
+train_window:
+  name: "A_long"
+  train_start_date: "2024-01-01"
+  train_end_date: "2026-01-31"
+  train_window_months: 24
+  bars_3min: 233000               # approximate; 24mo OANDA × ~5 trading days/wk × 24h × 20bars/h
+  rationale: "extended window; mirrors A1 sg1-btc-extended (S524) and is the live-deploy retrain target"
+
+# Three-budget design — multiplicity-adjusted from v2 BTC's {2M, 4M, 8M}.
+# Same absolute budgets, different multiplicity coverage due to bar density:
+#   GMGP1 BTC 15min @ 63K bars: 2M=32×  4M=64×    8M=128×    (peaked at 32×)
+#   SG-1 XAU  3min  @ 233K bars: 2M=8.6× 4M=17×    8M=34×    (cliff probe at 34×)
+step_budgets: [2000000, 4000000, 8000000]
+seeds: [123, 456, 789, 1024, 2026]
+n_seeds: 5
+n_runs_new: 15                    # all new (no reuse cell)
+n_runs_total: 15
+
+# Confound declarations — copied here so the analysis script can sanity-check
+# that all 15 runs share the same controlled variables.
+fixed_hp_source: "configs/sg1_xauusd_volume_study_v2.yaml (trial 56 from sg1_xauusd_ftmo_rehpo_20260419)"
+fee_model: "steady_state_2.35bps_oanda_from_step_0"
+data_window_split:
+  train: "2024-01-01 to 2026-01-31"
+  val:   "2026-02-01 to 2026-02-28"
+  test:  "2026-03-01 to 2026-04-15"
+buffer_size: 500000               # constant across budgets — multiplicity is the IV
+batch_size: 512                   # constant
+lr_actor: 0.0004328235879674501   # frozen from trial 56
+lr_critic: 0.000255518632525778
+update_interval: 4                # constant
+checkpoint_interval: 250000       # for intermediate eval points within each budget
+
+# ---------------------------------------------------------------------------
+# Hypotheses & decision rules
+# ---------------------------------------------------------------------------
+
+hypotheses:
+  h1_monotonic_improvement:
+    description: >-
+      OOS test PF improves monotonically with total_timesteps across the
+      3-budget sweep at A_long (24mo train). PASS implies the buffer-
+      multiplicity rescue mechanism extends past the v2 BTC ceiling on this
+      lower-multiplicity test bed; FAIL or AMBIGUOUS locates the cliff
+      between 2M and 8M.
+    statistic: "kendall_tau"
+    metric: "median_test_pf_per_budget"
+    tau_min: 0.6
+    p_max: 0.10
+    decision: "PASS|FAIL|AMBIGUOUS"
+
+  h2_variance_tightens:
+    description: >-
+      Per-seed CV(test PF) at the largest budget (8M) is no worse than at
+      the smallest (2M). v1 saw CV tighten 4.18%→2.87% on Gold A_base; v2
+      saw CV tighten 4.0%→2.2% at 2M. Continued tightening at 8M would
+      corroborate the rescue mechanism; blow-up flags buffer-dilution
+      instability at extreme multiplicity (34× is just past v2's ceiling).
+    statistic: "cv_pf_compare"
+    rule: "cv_pf_at_8M <= cv_pf_at_2M"
+
+  h3_overfitting_onset:
+    description: >-
+      Val/test PF gap widens past some budget — overfitting indicator.
+      Gap defined as (median_val_pf - median_test_pf) per budget. Threshold:
+      gap at 8M exceeds 1.5× gap at 2M → overfitting cliff reached.
+      Mirrors v1/v2 H3 rule.
+    statistic: "val_test_gap_ratio"
+    ratio_threshold: 1.5
+
+  h4_diminishing_returns:
+    description: >-
+      Marginal gain shrinks past 4M steps. If true, recommend retraining
+      the SG-1-XAUUSD paper checkpoint at 4M (vs 8M). Required for cost
+      justification: 8M is 4× the GPU spend of 2M.
+    rule: "median(test_pf at 8M) - median(test_pf at 4M) < median(test_pf at 4M) - median(test_pf at 2M)"
+    decision: "STILL_GROWING|DIMINISHING|INVERTED"
+
+  h5_paper_uplift:
+    description: >-
+      Best-budget median test PF must exceed the LIVE-DEPLOYED baseline
+      (500K @ 6mo train) median by at least 5% relative. Live baseline:
+      median test PF 1.367 from sg1_xauusd_oanda_l1_multiseed (S488 N=10).
+      PASS triggers Phase 2 N=10 retrain at the new optimum cell. FAIL
+      means extended window alone (with current 500K budget) carries the
+      uplift — collapses to a budget-neutral A_long L1 retrain.
+      NOTE: "5% over 500K@6mo" is a low bar because the test windows
+      differ; in practice the regime/data-coverage uplift will dominate
+      the budget signal. Use H5 as a sanity floor, not the primary
+      decision lever — H1/H4 carry that.
+    rule: "max(median(test_pf at b) for b in {2M, 4M, 8M}) >= 1.367 * 1.05"
+    decision: "RETRAIN_AT_NEW_OPTIMUM|SHIP_BASELINE_WINDOW"
+
+# ---------------------------------------------------------------------------
+# Significance gate (any pairwise "improvement" claim must pass)
+# ---------------------------------------------------------------------------
+
+significance:
+  test: "mann_whitney_u"
+  alternative: "two-sided"
+  p_max: 0.10
+  rationale: "loose alpha matches Protocol v2 Stage-2 ambiguity-band convention at small N"
+
+# ---------------------------------------------------------------------------
+# Anomaly flags (exclude from H1-H5 stats but report)
+# ---------------------------------------------------------------------------
+
+anomalies:
+  buffer_saturation:
+    description: >-
+      buffer_size=500000 is unchanged across all 3 budgets. At 8M steps the
+      replay buffer turns over ~16×. If a seed's critic_loss diverges >10×
+      its 2M-step baseline at the same step, flag as buffer-confounded
+      (mirrors v1/v2 anomaly).
+    critic_loss_blowup_ratio: 10.0
+    blowup_check_step: 2000000
+
+  entropy_collapse:
+    description: "Protocol v2 health gate. Auto-flag any seed whose entropy crashes."
+    entropy_floor: -10.0
+
+  gap_aware_loss_skew:
+    description: >-
+      OANDA 73h weekend gaps inject discontinuities the multiscale handler
+      smooths but the action-policy may overfit to. Flag seeds where >5% of
+      training transitions cross a gap_atr_mult boundary — symptom of
+      gap-conditioned reward leakage.
+    gap_transition_frac_max: 0.05
+
+# ---------------------------------------------------------------------------
+# Decision tree → Phase 2 N=10 cell selection
+# ---------------------------------------------------------------------------
+
+decision_tree:
+  STRONG_GO_BIGGER:
+    when: "H1 PASS + H2 PASS + H4 STILL_GROWING + H5 RETRAIN_AT_NEW_OPTIMUM"
+    action: >-
+      Open a third-axis sweep at A_long × {16M, 32M} to find the absolute
+      ceiling for SG-1-XAUUSD. Phase 2 N=10 fires at 8M as interim deploy
+      while the third-axis runs.
+
+  GO_RETRAIN_8M:
+    when: "H1 PASS + H4 STILL_GROWING + H5 RETRAIN_AT_NEW_OPTIMUM"
+    action: >-
+      Phase 2 N=10 at A_long × 8M. Highest productive cell within the swept
+      range. Document the multiplicity-mechanism transfer outcome for
+      future XAUUSD/MGC retrains.
+
+  GO_RETRAIN_4M:
+    when: "H1 PASS or AMBIGUOUS + H4 DIMINISHING + H5 RETRAIN_AT_NEW_OPTIMUM"
+    action: >-
+      Phase 2 N=10 at A_long × 4M. Diminishing returns confirmed past 4M;
+      8M not worth the GPU spend.
+
+  GO_RETRAIN_2M:
+    when: "H1 FAIL with peak at 2M + (H3 PASS OR H4 INVERTED) + H5 RETRAIN_AT_NEW_OPTIMUM"
+    action: >-
+      Phase 2 N=10 at A_long × 2M. SG-1-XAUUSD's multiplicity ceiling is
+      LOWER than expected (peak at 8.6× rather than 17-34×). Document the
+      asymmetry vs GMGP1 v2 finding.
+
+  SHIP_BASELINE_WINDOW:
+    when: "H5 SHIP_BASELINE_WINDOW (no ≥5% uplift over the live 500K baseline)"
+    action: >-
+      Skip Phase 2 budget retrain. Run an A_long-only L1 multiseed at the
+      legacy 500K budget (apples-to-apples with live deploy) — the
+      regime/data-coverage uplift was insufficient to justify a budget
+      change. Open audit ticket: why does extended window not carry uplift
+      on SG-1-XAUUSD when it does on SG-1-BTC?
+
+  CLIFF:
+    when: "H1 FAIL or H4 INVERTED or H3 ratio > 1.5 (with peak NOT at 2M)"
+    action: >-
+      Overfitting cliff reached between 2M and 8M. Locate via intermediate
+      budgets (e.g. 5M, 6M) if needed. Phase 2 N=10 at the cell BEFORE the
+      cliff. Open Architect ticket if cliff < 4M (suggests the
+      multiplicity-mechanism is much more fragile on 3-min XAU than the
+      v2 BTC study suggested).
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+
+outputs:
+  report_markdown: "results/sg1_xauusd_volume_study_v2_<timestamp>/report.md"
+  verdict_json: "results/sg1_xauusd_volume_study_v2_<timestamp>/verdict.json"
+  per_seed_json: "results/sg1_xauusd_volume_study_v2_<timestamp>/per_seed.json"
+  pf_curve_json: "results/sg1_xauusd_volume_study_v2_<timestamp>/pf_curve.json"
+  randd_log_append: "randd_log.md"
+  decision_memo_if_strong_go: ".agent/memory/decision_volume_axis_v2_sg1_xauusd.md"
+
+provenance:
+  drafted_on: "2026-05-07"
+  drafted_by_session: "S537"
+  upstream_decision: "decision_volume_axis_v2_2m_ceiling.md (open follow-up: SG-1-XAUUSD transfer)"
+  upstream_l1_baseline: "results/sg1_xauusd_oanda_l1_multiseed/manifest.json (N=10 @ 500K, median PF 1.367)"
+  upstream_hp_source: "results/hpo_archive/sg1_xauusd_rehpo_20260419.db trial 56"
+  twin_studies:
+    - "configs/gmgp1_volume_study.gates.yaml"        # v1 (Gold A_base)
+    - "configs/gmgp1_volume_study_v2.gates.yaml"     # v2 (BTC A_long) — direct ancestor
+    - "configs/gmgp1_data_window_study.gates.yaml"   # Axis A (BTC, both budgets)
