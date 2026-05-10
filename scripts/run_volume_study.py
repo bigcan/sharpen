@@ -51,9 +51,14 @@ from pathlib import Path
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-BASE_CONFIG = PROJECT_ROOT / "configs" / "gmgp1_volume_study.yaml"
-GATES_FILE = PROJECT_ROOT / "configs" / "gmgp1_volume_study.gates.yaml"
-RUNTIME_DIR = PROJECT_ROOT / "configs" / "_volume_study_runtime"
+# Defaults preserve historical GMGP1 v1 dispatcher behavior. S537 generalized
+# the dispatcher to drive arbitrary volume studies via --base_config /
+# --gates_file / --prefix CLI flags (e.g. SG-1-XAUUSD volume_study_v2).
+DEFAULT_BASE_CONFIG = PROJECT_ROOT / "configs" / "gmgp1_volume_study.yaml"
+DEFAULT_GATES_FILE = PROJECT_ROOT / "configs" / "gmgp1_volume_study.gates.yaml"
+DEFAULT_PREFIX = "gmgp1-volume"
+DEFAULT_RUNTIME_DIR = PROJECT_ROOT / "configs" / "_volume_study_runtime"
+DEFAULT_RESULTS_SUBDIR = "volume_study"
 LAUNCHER = PROJECT_ROOT / "scripts" / "launch_l1_multiseed.py"
 VALIDATOR = PROJECT_ROOT / "scripts" / "validate_config.py"
 
@@ -78,7 +83,8 @@ def load_gates() -> dict:
 
 
 def write_derived_config(base: dict, total_timesteps: int, label: str,
-                         study_id: str) -> Path:
+                         study_id: str, runtime_dir: Path,
+                         filename_stem: str) -> Path:
     """Materialize a derived config with overridden total_timesteps."""
     cfg = copy.deepcopy(base)
     cfg.setdefault("training", {})["total_timesteps"] = total_timesteps
@@ -89,8 +95,8 @@ def write_derived_config(base: dict, total_timesteps: int, label: str,
             tags.append(t)
     cfg["wandb"]["tags"] = tags
 
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    out = RUNTIME_DIR / f"gmgp1_volume_study_{label}.yaml"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    out = runtime_dir / f"{filename_stem}_{label}.yaml"
     with out.open("w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
     return out
@@ -112,7 +118,8 @@ def validate(cfg_path: Path) -> bool:
 def launch_budget(cfg_path: Path, label: str, seeds: list[int],
                   instance: str | None, gpu: str | None, concurrent: int,
                   slots: str | None,
-                  timestamp: str, dry_run: bool) -> tuple[int, float]:
+                  timestamp: str, dry_run: bool,
+                  prefix_base: str = DEFAULT_PREFIX) -> tuple[int, float]:
     """Invoke launch_l1_multiseed.py for one budget. Blocks until all seeds done.
 
     When `slots` is set (cross-GPU mode), it's forwarded to the launcher and
@@ -127,7 +134,7 @@ def launch_budget(cfg_path: Path, label: str, seeds: list[int],
     `study-id-<ts>` wandb tag instead.
     """
     seeds_csv = ",".join(str(s) for s in seeds)
-    prefix = f"gmgp1-volume-{label}"
+    prefix = f"{prefix_base}-{label}"
     # Pass the config path RELATIVE to PROJECT_ROOT. deploy_bare_metal forwards
     # it verbatim to the remote run_full_pipeline.py, where the workspace
     # unpacks under `/workspace/DeepScalper/`. Absolute Windows paths
@@ -198,21 +205,64 @@ def main() -> int:
     p.add_argument("--budgets", type=str, default=None,
                    help="Comma-separated subset of budgets (e.g., '500000,1000000'). "
                         "Default: read from gates file.")
+    p.add_argument("--base_config", type=Path, default=DEFAULT_BASE_CONFIG,
+                   help="Base config to derive per-budget cells from. "
+                        "Default: configs/gmgp1_volume_study.yaml")
+    p.add_argument("--gates_file", type=Path, default=DEFAULT_GATES_FILE,
+                   help="Pre-registered hypothesis gates yaml (drives step_budgets, seeds). "
+                        "Default: configs/gmgp1_volume_study.gates.yaml")
+    p.add_argument("--prefix", type=str, default=None,
+                   help="Run-name prefix used for derived configs + WandB run names. "
+                        "If unset, derived from --base_config stem (lowercase, "
+                        "underscores → hyphens). GMGP1 v1 uses 'gmgp1-volume'.")
+    p.add_argument("--results_subdir", type=str, default=DEFAULT_RESULTS_SUBDIR,
+                   help="Sub-directory under results/ for the manifest. "
+                        "Default: 'volume_study' → results/volume_study_<ts>/")
+    p.add_argument("--study_id", type=str, default=None,
+                   help="Override the study_id used in the WandB 'study-id-<ID>' "
+                        "tag. Default: auto-generated timestamp. Use this to "
+                        "RESUME a study where some cells already finished — pass "
+                        "the original study_id so 4M/8M cells share the tag with "
+                        "the existing 2M cell for clean analysis-time merging.")
     p.add_argument("--dry_run", action="store_true",
                    help="Generate + validate configs, print launch commands, do not spawn")
     args = p.parse_args()
 
-    if not BASE_CONFIG.exists():
-        log.error("base config not found: %s", BASE_CONFIG)
+    base_config: Path = args.base_config
+    gates_file: Path = args.gates_file
+    if not base_config.exists():
+        log.error("base config not found: %s", base_config)
         return 2
-    if not GATES_FILE.exists():
-        log.error("gates file not found: %s", GATES_FILE)
+    if not gates_file.exists():
+        log.error("gates file not found: %s", gates_file)
         return 2
     if not LAUNCHER.exists():
         log.error("launcher not found: %s", LAUNCHER)
         return 2
 
-    gates = load_gates()
+    # Derive prefix + filename stem from base_config if not supplied. Backward
+    # compat: when both base_config and gates_file are the GMGP1 v1 defaults
+    # AND --prefix was not passed, restore the historical 'gmgp1-volume' prefix
+    # so existing WandB run-name patterns / randd_log greps keep matching.
+    base_stem = base_config.stem  # e.g. 'sg1_xauusd_volume_study_v2'
+    if args.prefix is not None:
+        prefix_base = args.prefix
+    elif base_config == DEFAULT_BASE_CONFIG:
+        prefix_base = DEFAULT_PREFIX  # 'gmgp1-volume' (back-compat)
+    else:
+        prefix_base = base_stem.replace("_", "-")
+    # Back-compat: GMGP1 v1 historical runtime dir was '_volume_study_runtime'
+    # (no workstream prefix). Preserve to keep existing on-disk artifacts.
+    if base_config == DEFAULT_BASE_CONFIG:
+        runtime_dir = DEFAULT_RUNTIME_DIR
+    else:
+        runtime_dir = PROJECT_ROOT / "configs" / f"_{base_stem}_runtime"
+
+    def _load_gates() -> dict:
+        with gates_file.open("r", encoding="utf-8") as f:
+            return yaml.safe_load(f)
+
+    gates = _load_gates()
     all_budgets: list[int] = list(gates["step_budgets"])
     all_seeds: list[int] = list(gates["seeds"])
 
@@ -229,12 +279,22 @@ def main() -> int:
         seeds = all_seeds
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    results_dir = PROJECT_ROOT / "results" / f"volume_study_{timestamp}"
+    # study_id is the WandB-side study tag (study-id-<ID>); defaults to the
+    # current timestamp but can be overridden to resume an interrupted study
+    # so newly-launched cells share the tag with already-finished cells.
+    study_id = args.study_id or timestamp
+    results_dir = PROJECT_ROOT / "results" / f"{args.results_subdir}_{timestamp}"
     results_dir.mkdir(parents=True, exist_ok=True)
 
     log.info("=" * 70)
-    log.info("GMGP1 Volume Study Dispatcher")
-    log.info("  base config: %s", BASE_CONFIG.name)
+    log.info("Volume Study Dispatcher (workstream=%s)",
+             gates.get("workstream", "<unset>"))
+    log.info("  base config: %s", base_config.name)
+    log.info("  gates file:  %s", gates_file.name)
+    log.info("  prefix:      %s", prefix_base)
+    log.info("  runtime dir: %s", runtime_dir.relative_to(PROJECT_ROOT))
+    log.info("  study_id:    %s%s", study_id,
+             " (override)" if args.study_id else " (auto)")
     log.info("  budgets:     %s", budgets)
     log.info("  seeds:       %s", seeds)
     log.info("  total runs:  %d", len(budgets) * len(seeds))
@@ -247,7 +307,7 @@ def main() -> int:
     log.info("  dry_run:     %s", args.dry_run)
     log.info("=" * 70)
 
-    with BASE_CONFIG.open("r", encoding="utf-8") as f:
+    with base_config.open("r", encoding="utf-8") as f:
         base_cfg = yaml.safe_load(f)
 
     manifest = {
@@ -267,7 +327,9 @@ def main() -> int:
     derived_paths: dict[int, Path] = {}
     for steps in budgets:
         label = _budget_label(steps)
-        cfg_path = write_derived_config(base_cfg, steps, label, timestamp)
+        cfg_path = write_derived_config(base_cfg, steps, label, study_id,
+                                        runtime_dir=runtime_dir,
+                                        filename_stem=base_stem)
         derived_paths[steps] = cfg_path
         if not validate(cfg_path):
             log.error("aborting: validator rejected %s", cfg_path.name)
@@ -279,24 +341,45 @@ def main() -> int:
     # know when a budget is actually done — so we don't pile concurrent
     # budgets onto gpuhub-1 — we poll wandb directly for that budget's runs.
     import wandb as _wandb
-    api = _wandb.Api(timeout=60)
     project = base_cfg.get("wandb", {}).get("project", "FinRL-Pro-DS")
     entity = base_cfg.get("wandb", {}).get("entity", "bigcan-chiwin-technology")
 
     def wait_runs_finished(label_: str, expected_n: int,
                            poll_every_s: int = 120, max_wait_h: float = 30.0) -> int:
         """Block until `expected_n` runs tagged for this budget are all in a
-        terminal state. Returns count of seeds that reached `finished`."""
+        terminal state. Returns count of seeds that reached `finished`.
+
+        S537-cont fix: instantiate a FRESH wandb.Api per poll iteration. The
+        prior implementation created a single Api outside the loop and got
+        stuck in May 2026 returning stale 'all running' state for hours after
+        runs had actually finished server-side. The Api.runs() public collection
+        caches GraphQL pages on the underlying client; recreating the Api each
+        poll forces a clean session and avoids the cache.
+        """
         deadline = time.time() + max_wait_h * 3600
         last_log_state = None
+        consecutive_errors = 0
         while time.time() < deadline:
-            runs = list(api.runs(f"{entity}/{project}", filters={
-                "$and": [
-                    {"tags": {"$in": ["volume-study"]}},
-                    {"tags": {"$in": [f"budget-{label_}"]}},
-                    {"tags": {"$in": [f"study-id-{timestamp}"]}},
-                ],
-            }))
+            try:
+                api = _wandb.Api(timeout=60)
+                runs = list(api.runs(f"{entity}/{project}", filters={
+                    "$and": [
+                        {"tags": {"$in": ["volume-study"]}},
+                        {"tags": {"$in": [f"budget-{label_}"]}},
+                        {"tags": {"$in": [f"study-id-{study_id}"]}},
+                    ],
+                }))
+                consecutive_errors = 0
+            except Exception as exc:  # transient network / 5xx / auth
+                consecutive_errors += 1
+                log.warning("wandb poll error #%d on budget=%s: %s",
+                            consecutive_errors, label_, exc)
+                if consecutive_errors >= 10:
+                    log.error("aborting wait: %d consecutive wandb api errors on budget=%s",
+                              consecutive_errors, label_)
+                    return -1
+                time.sleep(poll_every_s)
+                continue
             states = [r.state for r in runs]
             counts = {s: states.count(s) for s in set(states)}
             terminal = sum(1 for s in states if s in ("finished", "crashed", "failed"))
@@ -323,6 +406,7 @@ def main() -> int:
             args.instance, args.gpu, args.concurrent,
             args.slots,
             timestamp, args.dry_run,
+            prefix_base=prefix_base,
         )
 
         # Wait for the actual training+backtest to finish before next budget.

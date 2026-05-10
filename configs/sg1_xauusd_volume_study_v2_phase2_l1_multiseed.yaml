@@ -1,0 +1,192 @@
+# SG-1 XAUUSD Volume Study v2 — Phase 2 L1 multiseed at WINNER cell A_long × 4M (S537-cont, 2026-05-10).
+#
+# CONTEXT
+#   Phase 1 verdict: CLIFF triple-confirmed (H1 FAIL + H4 INVERTED + H3 ratio 1.715),
+#   cliff edge between 4M and 8M, cell BEFORE cliff = 4M. Phase 1 N=5 yielded
+#   4M test PF median 1.9067 (peak), mean 1.9772, CV 5.14%; 8M collapsed across
+#   all 5 seeds (median 1.7890, mean 1.7602, val-test gap 0.1573 vs 4M's 0.0976).
+#   Per gates yaml decision tree → GO_RETRAIN_4M_VIA_CLIFF.
+#
+#   Full verdict: results/sg1_xauusd_volume_study_v2_20260510/verdict.json
+#
+# WHY THIS CONFIG IS A NEAR-CLONE OF PHASE 1 BASE
+#   Phase 2's purpose is to lift cell N from 5 → 10 at the winning cell so we
+#   get a CV estimate reliable enough to anchor the live deploy decision.
+#   Diff vs configs/sg1_xauusd_volume_study_v2.yaml:
+#     - total_timesteps: 2_000_000 -> 4_000_000  (winner cell)
+#     - l1_seeds gate: 5 -> 10                    (full L1 pool)
+#     - wandb tags: 'volume-study-v2' kept; 'phase2' + 'budget-4m-promote' added
+#     - workstream: sg1_xauusd_volume_study_v2_phase2 (results dir disjoint)
+#   Everything else (data window, HPs, fee model, signal_gate, env, network) is
+#   IDENTICAL to Phase 1 base — apples-to-apples merge with the 5 Phase 1 4M
+#   seeds at analysis time (10 net-new seeds: full pool minus the 5 already in).
+#   Net new seeds: [42, 1337, 2025, 3141, 5150, 9999]. Re-running [123, 456,
+#   789, 1024, 2026] would be duplicative — they're already in WandB.
+#
+#   N=10 effective via union of:
+#     Phase 1 4M cell: [123, 456, 789, 1024, 2026] (already done)
+#     Phase 2 (this run): [42, 1337, 2025, 3141, 5150, 9999] (new) + repeat
+#       any Phase 1 seed for replication audit if desired
+#
+#   For simplicity + CV stability, this config sweeps the FULL pool [42, 123,
+#   456, 789, 1024, 1337, 2025, 3141, 5150, 9999]. The 5 repeats cost ~30 GPU
+#   hours but eliminate the "cross-cohort drift" risk if the gpuhub-1 image
+#   has changed since Phase 1 launch (2026-05-08) — a fresh apples-to-apples
+#   re-run on the same 5 seeds gives a sanity check.
+#
+# DOWNSTREAM CHAIN (operator-driven post-Phase-2)
+#   1. Phase 2 N=10 results → seed_report.json
+#   2. Stage 2.5-R val_argmax_pf top-3 selection + bootstrap PRIMARY (Protocol v2.5)
+#   3. Stage 3 WF (8 folds × top-3 seeds) on extended-window data
+#   4. Bake ensemble bundle (sg1_xauusd_volume_study_v2_phase2/ensemble_v1.tar.gz)
+#   5. Live container swap (sg1-xauusd) — drift baseline recal first per S535 lesson
+#
+# DATA, HPs, FEE MODEL: unchanged from Phase 1 base
+#   - data/oanda/xauusd_m1_m.parquet (live-deploy-aligned)
+#   - trial 56 from sg1_xauusd_ftmo_rehpo_20260419
+#   - taker_fee 0.000235 from step 0 (steady-state, S464)
+
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2024-01-01"
+  train_end_date:   "2026-01-31"
+  val_start_date:   "2026-02-01"
+  val_end_date:     "2026-02-28"
+  test_start_date:  "2026-03-01"
+  test_end_date:    "2026-04-15"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235
+  deadband_threshold: 0.35
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.009270901804613313
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.03
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 4000000           # WINNER cell from Phase 1 (CLIFF branch)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+workstream: sg1_xauusd_volume_study_v2_phase2
+
+gates:                               # Protocol v2 §4 Stage 2 (S488 N=10 + bootstrap)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                       # Phase 2: full L1 pool
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  # Protocol v2.5: bootstrap PRIMARY for live-capital workstreams.
+  ensemble_uplift_min: 1.10          # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05       # legacy ambiguous floor (audit-only)
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_rule_selection: val_argmax_pf
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                   # Protocol v2 §4 default; launcher --separate_runs overrides at runtime
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "volume-study", "volume-study-v2", "phase2", "budget-4m-promote",
+         "extended-window", "oanda-spot", "rehpo-trial56", "steady-state",
+         "l1-multiseed",
+         "upstream:sg1_xauusd_volume_study_v2_phase1",
+         "upstream:sg1_xauusd_ftmo_rehpo_20260419",
+         "study-id-volume-study-v2-phase2-20260510"]
