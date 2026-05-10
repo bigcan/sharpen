@@ -77,6 +77,31 @@ def _budget_label(steps: int) -> str:
     return f"{steps // 1000}k"
 
 
+def _compute_max_wait_h(total_timesteps: int,
+                        sps: float = 62.0,
+                        safety_factor: float = 1.3,
+                        floor_h: float = 30.0) -> float:
+    """Per-cell wandb-wait deadline scaled to budget.
+
+    S539 lesson: hardcoded `max_wait_h=30.0` was too short for the 8M cell
+    (~36h/seed at 62 SPS) and the dispatcher timed out before training finished.
+    Default model: SAC v7+DSR+4090 = ~62 SPS regardless of GPU multiplexing
+    (per `decision_volume_axis_v2_2m_ceiling.md` and S529/S539 empirical wall).
+    Add a 30% safety factor for tail seeds + checkpoint+backtest overhead.
+    Floor at 30h so small cells (500K, 1M) still get a generous deadline if
+    an SFTP-deploy stragges.
+
+    Examples (with sps=62, safety=1.3, floor=30):
+        500K  -> floor 30h  (raw 2.9h)
+        2M    -> floor 30h  (raw 11.6h)
+        4M    -> floor 30h  (raw 23.3h)
+        8M    -> 46.6h
+        16M   -> 93.2h
+    """
+    raw_h = total_timesteps / sps * safety_factor / 3600.0
+    return max(floor_h, raw_h)
+
+
 def load_gates() -> dict:
     with GATES_FILE.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f)
@@ -413,7 +438,11 @@ def main() -> int:
         # The launcher only spawns deploys; runs continue on remote afterwards.
         finished_ok = -2  # not waited
         if rc == 0 and not args.dry_run:
-            finished_ok = wait_runs_finished(label, expected_n=len(seeds))
+            cell_max_wait_h = _compute_max_wait_h(steps)
+            log.info("budget=%s wait deadline: %.1fh (steps=%d @ ~62 SPS × 1.3 safety, floor 30h)",
+                     label, cell_max_wait_h, steps)
+            finished_ok = wait_runs_finished(label, expected_n=len(seeds),
+                                             max_wait_h=cell_max_wait_h)
 
         manifest["runs"].append({
             "budget": steps,
