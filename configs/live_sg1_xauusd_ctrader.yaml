@@ -5,6 +5,20 @@
 # (2026-04-22): all 5 gates PASS, median fold PF 2.058 (+20% over best solo).
 #
 # ---------------------------------------------------------------------------
+# VS V2 PHASE 2 SWAP 2026-05-20 (S542-cont) — top-3 swap: [42,2025,3141] → [2025,42,9999]
+# Source: results/sg1_xauusd_vs_v2_phase2_wf_ensemble/verdict.json
+#   G1-G5 ALL PASS — uplift 1.105× (ens_mean 2.005 vs best solo 1.814),
+#   G4 FTMO compliance 8/8 folds, CV PF 0.173 (< 0.35 max), 24/24 ckpts local.
+# Per-seed WF median PF (pf_bar): 2025=1.7687, 42=1.7137, 9999=1.7532.
+# Rule retained as ens_mean (Phase 2 Stage 2.5-R selector landed there); the
+# 2026-05-09 NaN-sentinel rationale below still applies — the swap is a top-3
+# refresh trained on the corrected v2 phase-2 buffer-multiplicity envelope.
+# Baseline regenerated from WF fold-07 ens_mean trajectory (deadband_frac=0.5434,
+# down from live 0.7966 post-S535-R1). Bundle SHA recorded; predecessor v2
+# ens_mean baseline preserved at baselines/sg1_xauusd_wf_fold_07_ens_mean/.
+# ---------------------------------------------------------------------------
+#
+# ---------------------------------------------------------------------------
 # RULE REVERT 2026-05-09 (S538-cont-4) — aggregation_rule: ens_agreement → ens_mean
 # Reason: Fix 2 NaN-sentinel Stage 5.5 fold_07 re-eval (sg1-btc) showed
 # ens_agreement under correct semantics drops -18.80% PF (gate FAIL); cross-
@@ -65,20 +79,22 @@ agent:
   device: "cpu"
   torch_compile: false                 # Must be false for live inference
   ensemble:
-    seeds: [42, 2025, 3141]
-    # Pattern tokens: {seed}, {fold:02d}. Resolved via glob at startup; exactly
-    # one match per (seed, fold) is required.
-    checkpoint_pattern: "checkpoints/WF_seed{seed}_fold_{fold:02d}_*/checkpoint_final.pth"
+    seeds: [2025, 42, 9999]            # 2026-05-20 (S543): VS v2 Phase 2 top-3 swap
+                                       # (predecessor [42,2025,3141] = 2026-04-22 OANDA WF)
+    # Pattern tokens: {seed}, {fold}. Resolved via glob at startup; exactly
+    # one match per (seed, fold) is required. Phase 2 ckpts use single-digit
+    # fold naming (fold0..fold7), no leading zero.
+    checkpoint_pattern: "checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth"
     fold: 7                            # Fold 07 = trained through Feb 2026
     aggregation_rule: "ens_mean"       # 2026-05-09 rule revert (Fix 1 pattern)
                                        # — was "ens_agreement" pre-Fix-2; see
                                        # header rule-revert block + memo
                                        # project_fix2_stage_5_5_fold07_gate_fail_s538.md
     # deadband defaults to trading.deadband_threshold if omitted.
-    seed_pfs:                          # WF per-seed median fold PF (for pf_weighted)
-      42:   1.566
-      2025: 1.584
-      3141: 1.619
+    seed_pfs:                          # WF per-seed median pf_bar across 8 folds
+      2025: 1.7687                     # Source: results/sg1_xauusd_vs_v2_phase2_wf_ensemble/
+      42:   1.7137                     # solo_{seed}_metrics.json (S543 post-WF eval)
+      9999: 1.7532
 
 # --- SAC Hyperparameters (trial 56 HPs from sg1_xauusd_ftmo_rehpo_20260419) ---
 agents:
@@ -179,13 +195,14 @@ wandb:
   # `live-{asset}-{exchange}-{mode}` produces `live-xauusd-ctrader-paper`, which
   # collides with gmgp1-xauusd and causes both strategies to attach to the same
   # WandB run via `resume="allow"`.
-  # 2026-05-09 (S538-cont-4): distinct run_id post rule revert so ens_agreement
-  # → ens_mean swap is auditable in WandB. Predecessor ran as
+  # 2026-05-20 (S543): distinct run_id for VS v2 Phase 2 swap audit.
+  # Predecessor: `live-sg1-xauusd-ctrader-paper-ens-mean-20260509` (ens_mean,
+  # 2026-05-09 .. 2026-05-20). Pre-predecessor:
   # `live-sg1-xauusd-ctrader-paper-20260422` (ens_agreement, 2026-04-22 .. 05-09).
-  run_id: "live-sg1-xauusd-ctrader-paper-ens-mean-20260509"
+  run_id: "live-sg1-xauusd-ctrader-paper-vs-v2-phase2-20260520"
   tags: ["live", "sg-1", "XAUUSD", "Gold", "SAC", "3min", "cTrader", "paper",
          "CFD", "FTMO", "signal-gated", "prop-firm", "ensemble", "ens-mean",
-         "rule-revert"]
+         "vs-v2-phase2", "ensemble-v2"]
 
 # --- Safety ---
 safety:
@@ -211,14 +228,16 @@ safety:
 # refuses auto-restart (§8.3).
 drift:
   enabled: true
-  baseline_path: "/app/baselines/sg1_xauusd_wf_fold_07_ens_mean/ensemble_report.json"
-                                       # 2026-05-09 swapped from ens_agreement
-                                       # baseline (sg1_xauusd_fold_07/) to
-                                       # ens_mean baseline derived from
-                                       # results/sg1_xauusd_ensemble_wf/fold_07/ens_mean_trajectory.parquet
-                                       # via C:/tmp/derive_xauusd_ens_mean_baseline.py.
+  baseline_path: "/app/baselines/sg1_xauusd_vs_v2_phase2_fold_07/ensemble_report.json"
+                                       # 2026-05-20 (S543): VS v2 Phase 2 baseline
+                                       # baked from all 8 WF fold ens_mean
+                                       # trajectories (n=12945 bars) via
+                                       # scripts/bake_sg1_xauusd_vs_v2_phase2_drift_baseline.py.
+                                       # deadband_frac=0.5434 (was 0.7966 post-S535-R1).
                                        # Predecessor preserved at
-                                       # baselines/sg1_xauusd_fold_07/ for audit.
+                                       # baselines/sg1_xauusd_wf_fold_07_ens_mean/.
+                                       # Pre-predecessor (ens_agreement) at
+                                       # baselines/sg1_xauusd_fold_07/.
   window_bars: 1000
   min_bars_before_check: 500
   vol_estimator_bars: 20

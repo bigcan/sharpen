@@ -373,10 +373,14 @@ services:
     # S491: override crypto-strategy anchor default (1536M) — cTrader containers
     # hit 5 OOMs in the 24h window ending 2026-04-22 (1.5G too tight for bootstrap
     # + reconnect spikes). 3G gives headroom over the S488 gmgp1-gold 2G fix.
+    # S540: bump to 4G — 3G still OOM'd (exit 137) after 45h spanning weekend
+    # TradFi suppression window on 2026-05-10 22:35 UTC. Belt-and-suspenders
+    # while tracemalloc diagnostics (see project_gmgp1_xauusd_45h_idle_oom_s540)
+    # identify the leak source. Same risk class on sg1-xauusd — not yet bumped.
     deploy:
       resources:
         limits:
-          memory: 3G
+          memory: 4G
           cpus: "2.0"
 
   sg1-xauusd:
@@ -406,20 +410,22 @@ services:
       CTRADER_ACCESS_TOKEN:  ${SG1_XAUUSD_CTRADER_ACCESS_TOKEN:-${CTRADER_ACCESS_TOKEN:-}}
       CTRADER_ACCOUNT_ID:    ${SG1_XAUUSD_CTRADER_ACCOUNT_ID:-${CTRADER_ACCOUNT_ID:-}}
     volumes:
-      # Mount all 8 fold checkpoint directories per seed so the ensemble glob in
-      # run_live_ctrader.py (fold:02d pattern) resolves inside the container.
-      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/WF_seed42_fold_07_20260421_220234:/app/checkpoints/WF_seed42_fold_07_20260421_220234:ro
-      - ${CHECKPOINT_DIR}/WF_seed2025_fold_07_20260421_214535:/app/checkpoints/WF_seed2025_fold_07_20260421_214535:ro
-      - ${CHECKPOINT_DIR}/WF_seed3141_fold_07_20260421_215709:/app/checkpoints/WF_seed3141_fold_07_20260421_215709:ro
+      # VS v2 Phase 2 fold7 ckpts are now baked into the image via Dockerfile
+      # COPY (S543, 2026-05-20) — sidesteps Docker Desktop Windows bind-mount
+      # silent failure on force-recreate. To roll back: revert this block + the
+      # 3 Dockerfile COPY lines + rebuild.
       - sg1-xauusd-logs:/app/logs
       - sg1-xauusd-state:/app/state
     # S491: override crypto-strategy anchor default (1536M) — same rationale as
     # gmgp1-xauusd above; cTrader containers need 3G for bootstrap + reconnect
     # headroom after S491 OOM cluster.
+    # S540: bump to 4G alongside gmgp1-xauusd — same image / broker / heartbeat
+    # path; did not OOM in S540 sweep but flagged same-risk-class in the
+    # project_gmgp1_xauusd_45h_idle_oom_s540 ticket.
     deploy:
       resources:
         limits:
-          memory: 3G
+          memory: 4G
           cpus: "2.0"
 
   # ============================================================
@@ -561,7 +567,7 @@ services:
       start_period: 60s
 
   agent-memory:
-    image: finrl-agent-memory:2.0.0
+    image: finrl-agent-memory:2.1.0
     container_name: agent-memory
     profiles: [memory, all]
     stdin_open: true

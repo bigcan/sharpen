@@ -20,3 +20,13 @@ docker/live/.env
 *.pth
 randd_log.md
 randd_archive
+
+# sg1-xauusd VS v2 Phase 2 fold7 ckpts: allowlisted to override the
+# `checkpoints` + `*.pth` ignores above so Dockerfile.live-engine can
+# COPY them into the image (S543, 2026-05-20).
+!checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed42_20260520_181055
+!checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed42_20260520_181055/**
+!checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed2025_20260520_181055
+!checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed2025_20260520_181055/**
+!checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed9999_20260520_181055
+!checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed9999_20260520_181055/**
