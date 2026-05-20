@@ -74,6 +74,13 @@ COPY baselines /app/baselines
 # swap-approval handshake (finrl_pro_ds.live.swap_handshake) gates the load
 # against the operator's last-bundle sentinel.
 COPY bundles /app/bundles
+# sg1-xauusd VS v2 Phase 2 fold7 ensemble ckpts (S543, 2026-05-20). Baked
+# rather than bind-mounted because Docker Desktop on Windows silently fails
+# to expose bind-mount contents on force-recreate (CLAUDE.md gotcha). Only
+# fold 7 is required at runtime (live config agent.ensemble.fold: 7).
+COPY checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed2025_20260520_181055 /app/checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed2025_20260520_181055
+COPY checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed42_20260520_181055 /app/checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed42_20260520_181055
+COPY checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed9999_20260520_181055 /app/checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed9999_20260520_181055
 COPY pyproject.toml /app/
 
 RUN pip install -e ".[ctrader]"

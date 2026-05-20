@@ -1,0 +1,219 @@
+{
+  "protocol": "v2.2_stage_2_5_ensemble_report__sg1_xauusd_vs_v2_phase2_wf_baseline",
+  "workstream": "sg1_xauusd_volume_study_v2_phase2",
+  "source": "sg1_xauusd_vs_v2_phase2_wf_fold_07_ens_mean",
+  "window": "vs_v2_phase2_wf_fold_07_oos_2026-03-01 -> 2026-04-01",
+  "chosen_rule": "ens_mean",
+  "decision": "PROMOTE",
+  "decision_source": "v2.5_bootstrap__stage_2_5_r",
+  "ensemble_eval_distribution": {
+    "histogram_bins": [
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "counts": [
+      458,
+      1256,
+      1639,
+      2673,
+      2821,
+      1899,
+      1771,
+      428
+    ],
+    "mean": 0.031795950439015175,
+    "std": 0.42649381430295563,
+    "entropy": 1.9304239443460334,
+    "deadband_frac": 0.5433758207802241,
+    "saturation_frac": 0.0,
+    "no_consensus_frac": 0.0,
+    "n": 12945,
+    "n_total_bars": 12945,
+    "composition_rule": "ens_mean",
+    "by_vol_quartile": {
+      "q1": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          105,
+          272,
+          419,
+          647,
+          693,
+          487,
+          502,
+          111
+        ],
+        "mean": 0.05609829810070828,
+        "std": 0.42736957608834536,
+        "entropy": 1.9257170431353507,
+        "deadband_frac": 0.5330655129789864,
+        "saturation_frac": 0.0,
+        "no_consensus_frac": 0.0,
+        "n": 3236,
+        "n_total_bars": 3236
+      },
+      "q2": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          109,
+          346,
+          425,
+          636,
+          716,
+          469,
+          427,
+          108
+        ],
+        "mean": 0.022445472508477476,
+        "std": 0.4280752065840339,
+        "entropy": 1.9340173935883607,
+        "deadband_frac": 0.5435723114956736,
+        "saturation_frac": 0.0,
+        "no_consensus_frac": 0.0,
+        "n": 3236,
+        "n_total_bars": 3236
+      },
+      "q3": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          136,
+          325,
+          395,
+          708,
+          669,
+          467,
+          439,
+          97
+        ],
+        "mean": 0.019143130955423273,
+        "std": 0.4297555905933505,
+        "entropy": 1.9346019150756777,
+        "deadband_frac": 0.5370828182941904,
+        "saturation_frac": 0.0,
+        "no_consensus_frac": 0.0,
+        "n": 3236,
+        "n_total_bars": 3236
+      },
+      "q4": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          108,
+          313,
+          400,
+          682,
+          743,
+          476,
+          403,
+          112
+        ],
+        "mean": 0.029497610432492005,
+        "std": 0.419718058137768,
+        "entropy": 1.9213218756284587,
+        "deadband_frac": 0.5597775718257646,
+        "saturation_frac": 0.0,
+        "no_consensus_frac": 0.0,
+        "n": 3237,
+        "n_total_bars": 3237
+      }
+    },
+    "regime_cutpoints": [
+      0.00024547339914807154,
+      0.0003900088883526801,
+      0.0005901526914753927
+    ]
+  },
+  "wf_verdict": {
+    "overall": "PASS",
+    "decision": "approve_ensemble_paper_deploy",
+    "gates_pass": {
+      "G1_solo_baseline": null,
+      "G2_no_regression": null,
+      "G3_uplift": null,
+      "G4_compliance": null,
+      "G5_dd_stability": null
+    }
+  },
+  "bundle_metadata": {
+    "path": "results\\sg1_xauusd_volume_study_v2_phase2_stage25r\\ensemble_v2.tar.gz",
+    "sha256": "b467d242d4419076d02655ba96306a28aa60a02f8298b291b890b4906e01552a",
+    "size_bytes": 28752730
+  },
+  "bake_metadata": {
+    "baked_at_utc": "2026-05-20T14:04:41Z",
+    "baked_by": "scripts/bake_sg1_xauusd_vs_v2_phase2_drift_baseline.py",
+    "input_paths": [
+      "results\\sg1_xauusd_vs_v2_phase2_wf_ensemble\\fold_00\\ens_mean_trajectory.parquet",
+      "results\\sg1_xauusd_vs_v2_phase2_wf_ensemble\\fold_01\\ens_mean_trajectory.parquet",
+      "results\\sg1_xauusd_vs_v2_phase2_wf_ensemble\\fold_02\\ens_mean_trajectory.parquet",
+      "results\\sg1_xauusd_vs_v2_phase2_wf_ensemble\\fold_03\\ens_mean_trajectory.parquet",
+      "results\\sg1_xauusd_vs_v2_phase2_wf_ensemble\\fold_04\\ens_mean_trajectory.parquet",
+      "results\\sg1_xauusd_vs_v2_phase2_wf_ensemble\\fold_05\\ens_mean_trajectory.parquet",
+      "results\\sg1_xauusd_vs_v2_phase2_wf_ensemble\\fold_06\\ens_mean_trajectory.parquet",
+      "results\\sg1_xauusd_vs_v2_phase2_wf_ensemble\\fold_07\\ens_mean_trajectory.parquet"
+    ],
+    "fold_bars": [
+      1477,
+      1717,
+      1726,
+      1374,
+      1759,
+      1713,
+      1492,
+      1687
+    ],
+    "concat_n_bars": 12945,
+    "deadband_abs": 0.35,
+    "vol_estimator_bars": 20,
+    "rule": "ens_mean",
+    "predecessor_baseline": "baselines/sg1_xauusd_wf_fold_07_ens_mean/ensemble_report.json",
+    "predecessor_protocol": "v2.2_stage_2_5_ensemble_report__sg1xauusd_fold07_ens_mean_override (S488 OANDA WF)",
+    "rationale": "Pre-swap recal for ensemble_v2 (Phase 2 Volume Study v2 retrain). Live engine v1 ran ens_mean against the S488 OANDA WF fold-07 baseline (seeds [42, 2025, 3141]); v2 ens_mean uses Phase 2 retrain checkpoints (seeds [2025, 42, 9999]) at 4M steps. Baseline aggregated across all 8 Phase 2 WF OOS test windows for breadth (matches WF bootstrap denominator) rather than a single fold to be robust against single-window regime quirks."
+  }
+}
