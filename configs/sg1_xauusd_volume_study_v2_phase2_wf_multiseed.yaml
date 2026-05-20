@@ -1,0 +1,220 @@
+# SG-1 XAUUSD Volume Study v2 Phase 2 — Stage 3 Walk-Forward, top-3 ensemble.
+#
+# Drafted 2026-05-19 (S540-cont) to confirm Phase 2 Stage 2.5-R verdict on
+# temporal robustness across folds, per Protocol v2.5 §4.5 ("WF re-confirmation
+# MANDATORY after Stage 2.5-R PROMOTE").
+#
+# Upstream:
+#   - Phase 2 N=10 L1 multiseed PASS (median test PF 1.954, CV 6.55%, 10/10 ≥
+#     PF floor 1.435). See project_sg1_xauusd_volume_study_v2_phase2_n10_verdict.
+#   - Stage 2.5-R verdict: `results/sg1_xauusd_volume_study_v2_phase2_stage25r/
+#     verdict.json` (pending operator review; this WF config goes live only on
+#     PROMOTE / PROMOTE_DD_ONLY).
+#
+# Top-3 by val_argmax_pf = [2025, 42, 9999] (CORRECTED S540-cont; S540 inline
+# aggregator scrambled batch 1 dict keys — see
+# feedback_seed_report_key_scramble_s540.md). seed_pfs sourced from val column
+# of seed_report.json (post-fix).
+#
+# Splitter (8 folds, train_months=18, val_months=1, test_months=1, step_months=1)
+#   on envelope 2024-01-01 → 2026-04-15 (parquet max 2026-04-23):
+#     fold 0: train 2024-01-01 → 2025-07-01  val 2025-07 → 08  test 2025-08 → 09
+#     fold 1: train 2024-02-01 → 2025-08-01  val 2025-08 → 09  test 2025-09 → 10
+#     fold 2: train 2024-03-01 → 2025-09-01  val 2025-09 → 10  test 2025-10 → 11
+#     fold 3: train 2024-04-01 → 2025-10-01  val 2025-10 → 11  test 2025-11 → 12
+#     fold 4: train 2024-05-01 → 2025-11-01  val 2025-11 → 12  test 2025-12 → 01
+#     fold 5: train 2024-06-01 → 2025-12-01  val 2025-12 → 01  test 2026-01 → 02
+#     fold 6: train 2024-07-01 → 2026-01-01  val 2026-01 → 02  test 2026-02 → 03
+#     fold 7: train 2024-08-01 → 2026-02-01  val 2026-02 → 03  test 2026-03 → 04
+#
+# NOTE on train window: Phase 2 L1 used 24mo train (2024-01-01 → 2026-01-31)
+# but the OANDA parquet only spans 27mo total, which cannot accommodate 24mo
+# train × 8 folds × 1mo step. Mirroring the SG-1-BTC FU-3 extended WF pattern
+# (18mo train) fits exactly. This shortens per-fold train context by 6mo vs
+# the L1 cell but preserves the 8-fold granularity that drives G1-G5 gate
+# discipline. Operator may opt 4-fold × 24mo train if granularity is the lower
+# priority — see launcher --folds for subset runs.
+#
+# Gate (pre-committed at configs/sg1_xauusd_volume_study_v2_phase2_ensemble.gates.yaml):
+#   G1 Solo baseline  : >=2/3 seeds PF>=1.1 per fold in >=7/8 folds
+#   G2 No regression  : per-fold ens_PF >= 0.9 * best_solo_PF in >=7/8 folds
+#   G3 Uplift         : median ens_PF / median best_solo_PF >= 1.10
+#   G4 FTMO compliance: ensemble per-fold dd buffers >=0.5pp + PASS
+#   G5 DD stability   : CV(ens_PF) across folds <= 0.35
+#   ALL PASS  -> approve ensemble paper-deploy (replaces ens v1 [42,2025,3141])
+#   ANY FAIL  -> solo-best fallback (by wf_median_pf)
+#
+# Eval (no training; consumed by sg1_xauusd_ensemble_eval.py via --wf_config):
+#   python scripts/sg1_xauusd_ensemble_eval.py \
+#       --wf_config configs/sg1_xauusd_volume_study_v2_phase2_wf_multiseed.yaml \
+#       --gates_file configs/sg1_xauusd_volume_study_v2_phase2_ensemble.gates.yaml \
+#       --device cpu
+
+workstream: sg1_xauusd_volume_study_v2_phase2_wf
+
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  # Splitter envelope; per-fold windows materialized by dispatcher.
+  start_date: "2024-01-01"
+  end_date: "2026-04-15"
+
+splitter:
+  train_months: 18
+  val_months: 1
+  test_months: 1
+  step_months: 1
+  buffer_days: 0
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235
+  deadband_threshold: 0.35
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.009270901804613313
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.03
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs frozen from Phase 2 L1 (trial 56 from sg1_xauusd_ftmo_rehpo_20260419) —
+# identical to L1 so Stage 3 is apples-to-apples with Stage 2.5-R.
+agents:
+  sac:
+    lr_actor: 0.0004328235879674501
+    lr_critic: 0.000255518632525778
+    lr_alpha: 0.0000027165537430202373
+    gamma: 0.9887304528260698
+    tau: 0.00586388344589006
+    initial_alpha: 0.4297169729200557
+    gradient_clip: 3.0464559724708105
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000              # Protocol v2 Stage 3 budget (matches SG-1-BTC FU-3)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+ensemble:
+  # Top-3 by val_argmax_pf rule over N=10 Phase 2 L1 seeds.
+  # Source: results/sg1_xauusd_volume_study_v2_phase2/seed_report.json (post key-scramble fix).
+  #   seed 2025: val PF 2.1731 / test PF 2.0348
+  #   seed   42: val PF 2.1323 / test PF 1.7947  ← largest val-test gap, val-overfit watch
+  #   seed 9999: val PF 2.0858 / test PF 2.0167
+  seeds: [2025, 42, 9999]
+  rule: ens_mean                       # Provisional; Stage 2.5-R verdict overrides.
+  rules: ["solo_2025", "solo_42", "solo_9999",
+          "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
+  # Checkpoint path pattern — matches launcher's --run_name_prefix.
+  checkpoint_pattern: "checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth"
+  # val PFs (S495 selection metric) — weights for ens_pf_weighted aggregation.
+  seed_pfs:
+    2025: 2.1731
+    42:   2.1323
+    9999: 2.0858
+  gates_file: "configs/sg1_xauusd_volume_study_v2_phase2_ensemble.gates.yaml"
+
+gates:                                 # Protocol v2 §4 Stage 3 (training-level)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10             # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_rule_selection: val_argmax_pf
+  # Stage 3 gates
+  wf_windows: 8
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                    # one parent run per seed; folds as win<i>/*
+  tags: ["sg-1", "XAUUSD", "SAC", "3min", "signal-gated", "FTMO", "prop-firm",
+         "walk_forward", "wf-stage3", "ensemble", "ensemble-confirm",
+         "rehpo-trial56", "steady-state", "oanda-spot",
+         "volume-study-v2", "phase2", "vs-v2-phase2-wf",
+         "upstream:sg1_xauusd_volume_study_v2_phase2_l1_multiseed",
+         "upstream-stage25:sg1_xauusd_volume_study_v2_phase2_v2"]

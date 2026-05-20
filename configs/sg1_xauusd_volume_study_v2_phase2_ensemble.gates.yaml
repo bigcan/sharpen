@@ -1,0 +1,133 @@
+# SG-1 XAUUSD Volume Study v2 Phase 2 ensemble-confirm gates (Stage 3 WF + 2.5-R).
+#
+# Read by scripts/sg1_xauusd_ensemble_eval.py via --gates_file in WF mode and
+# auto-overlaid in Stage 2.5 single-window mode (gates: block only — top-level
+# fields are descriptive).
+#
+# Derived from configs/sg1_xauusd_ensemble.gates.yaml (S488 baseline) with
+# Phase 2 top-3 seeds + Protocol v2.5 bootstrap PRIMARY thresholds.
+#
+# Decision rule: ALL five gates (G1..G5) must PASS → approve Phase 2 ensemble
+# for SG-1-XAUUSD paper-deploy aggregation (replaces ens v1 [42, 2025, 3141]
+# baked 2026-04-22). ANY fail → solo seed with highest WF-median PF remains
+# the paper candidate.
+
+workstream: "sg1_xauusd_volume_study_v2_phase2"
+variant: "ensemble_top3_phase2"
+seeds: [2025, 42, 9999]                        # Phase 2 top-3 by val_argmax_pf
+aggregation_rule: "ens_mean"                   # Provisional; Stage 2.5-R verdict overrides
+
+# 8 folds covering Aug 2025 → Mar 2026 test windows (parquet 2024-01-01 → 2026-04-23).
+wf_folds: 8
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+gates:
+  g1_solo_baseline:
+    description: >-
+      Per fold, at least 2/3 seeds must have test PF >= pf_floor, in at least
+      min_folds_pass of the total folds.
+    pf_floor: 1.1
+    seeds_pass_min: 2
+    min_folds_pass: 7                          # >=7/8 folds
+
+  g2_no_regression:
+    description: >-
+      Per fold, ens_PF >= ens_ratio_min * best_solo_PF in >=min_folds_pass folds.
+    ens_ratio_min: 0.90
+    min_folds_pass: 7
+
+  g3_uplift:
+    description: >-
+      Across-folds: median(ens_PF) / median(best_solo_PF) >= uplift_ratio_min.
+      v2.5 NOTE: this is the WF-stage point-estimate gate. Stage 2.5 (single
+      L1 window) uses block-bootstrap; see ensemble_* keys below.
+    uplift_ratio_min: 1.10
+    metric: "median"
+
+  # === Protocol v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_mdd_promote: 0.90
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_bootstrap_resamples: 10000
+  ensemble_bootstrap_block_len: null            # null → auto = sqrt(n_bars)
+
+  # === Protocol v2.5 SECONDARY (audit/sanity only). ===
+  ensemble_uplift_min: 1.10                     # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05
+
+  # v2.3 diversity-aware top-K selection.
+  ensemble_top_k: 3
+  ensemble_diversity_lambda: 1.0
+
+  g4_ftmo_compliance:
+    description: >-
+      Applied to ENSEMBLE trajectory per fold. All three FTMO sub-gates must
+      PASS in every fold (strict: 8/8).
+    daily_dd_buffer_pp_min: 0.5                # 4% cap − worst_intraday_dd%
+    trailing_dd_buffer_pp_min: 0.5             # 8% cap − trailing_mdd%
+    compliance_must_pass: true
+    min_folds_pass: 8
+
+  g5_dd_stability:
+    description: >-
+      Guards against single-fold artifact. CV of ensemble PF across folds <= cv_max.
+    cv_pf_max: 0.35
+
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers (inherited from S488 baseline).
+  retrain:
+    ensemble_recheck_days: 90
+    live_pf_ratio: 0.8
+    live_pf_window_days: 5
+    min_trades_window: 20
+    agreement_decay_delta: 0.20
+    agreement_decay_window_bars: 2000
+    action_kl_warn_window_bars: 5000
+    cost_drift_ratio: 1.20
+    cost_drift_window_trades: 100
+
+  drift_agreement:
+    enabled_for_rules: ["ens_agreement", "ens_majority"]
+    flat_delta_warn: 0.20
+    flat_delta_crit: 0.40
+    window_bars: 2000
+
+# ---------------------------------------------------------------------------
+# Decision matrix
+# ---------------------------------------------------------------------------
+
+decision:
+  all_pass_action: "approve_ensemble_paper_deploy"
+  any_fail_action: "reject_ensemble_use_best_solo"
+  solo_selection_metric: "wf_median_pf"
+  solo_tiebreaker: "wf_mean_trailing_dd_buffer_pp"
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+provenance:
+  drafted_on: "2026-05-19"
+  drafted_by_session: "S540-cont"
+  upstream_memory: "project_sg1_xauusd_volume_study_v2_phase2_n10_verdict.md"
+  l1_multiseed_result: "Phase 2 N=10: median test PF 1.9537, CV 6.55%; top-3 [2025, 42, 9999]"
+  predecessor_gates: "configs/sg1_xauusd_ensemble.gates.yaml (S488 baseline, seeds [42, 2025, 3141])"
