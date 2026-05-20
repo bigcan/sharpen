@@ -1,0 +1,192 @@
+# SG-1 BTC Velotrade — L1 Multi-Seed (SG1BTC-DECAY-01) on FRESH data window
+#
+# S541 retrain triggered by n=88 alpha-decay re-audit (2026-05-11):
+# `project_sg1_btc_n50_audit_20260511.md`. Live v2.1 ens_mean bundle (training
+# cutoff 2026-02-28) shows perfect-fill steady-state PnL −$11.25/trade with
+# 50% directional WR — both gate conditions in
+# `decision_sg1_btc_skip_first_3_trades_s538.md` met → retrain on extended data.
+#
+# Diff vs sg1_btc_velotrade_l1_multiseed_extended.yaml (S524 staging baseline):
+#   train 2024-01-01 -> 2026-03-31   (was -> 2026-01-31; +2mo, 27mo total)
+#   val   2026-04-01 -> 2026-04-15   (was 2026-02-01 -> 2026-02-28)
+#   test  2026-04-16 -> 2026-04-30   (was 2026-03-01 -> 2026-04-06)
+#   workstream: sg1_btc_velotrade_decay01  (was sg1_btc_velotrade_extended)
+#   ensemble: block cleared (will be reconciled post-L1 by Stage 2.5-R)
+#   wandb.tags: added decay01, s541, sg1btc-decay-01; removed extended-window/s524
+#
+# HOLD: HPs frozen from rehpo trial #44 (PF=2.3031 at 5bps), per the same rationale
+# as S524 — at 3-min cadence 27mo train = ~394K bars, replay multiplicity at 3M
+# steps still ~7.6× per-bar (below ~32× rescue ceiling from
+# decision_volume_axis_v2_2m_ceiling.md). HP topology unchanged by 2mo window
+# extension; reward landscape determined by fee + asset, both unchanged.
+#
+# DATA PROVENANCE: data/btc_usdt_1min_bybit.parquet manifest verified (S541):
+#   row_count 1225440, first_ts 2024-01-01T00:00 UTC, last_ts 2026-04-30T23:59 UTC,
+#   max_gap_bars 0, clean_ohlcv_passed true. Extended from 2026-04-06 via Bybit
+#   mainnet linear ccxt fetch on 2026-05-11.
+#
+# UPSTREAM HP PROVENANCE (unchanged from rehpo trial #44):
+#   Re-HPO study `sg1_btc_velotrade_rehpo_20260420` best trial #44, PF=2.3031
+#   at 5 bps Bybit taker, WandB `q9pq44ug`. CSV at
+#   results/hpo_archive/sg1_btc_velotrade_rehpo_20260420.csv
+#
+# STAGE 2.5 MANDATORY before any Stage 3 WF + paper swap (Protocol v2 §4.5,
+# v2.5 §3 bootstrap PRIMARY).
+#
+# LIVE-DEPLOY NOTE: the new bundle's live config MUST ship the post-restart
+# cooldown gate per decision_sg1_btc_skip_first_3_trades_s538.md
+# (risk.post_restart_cooldown_bars: 3). The cooldown is a LIVE-engine knob, not
+# a training-side feature, so it does not appear in this training config.
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "multiscale"
+  train_start_date: "2024-01-01"
+  train_end_date: "2026-03-31"
+  val_start_date: "2026-04-01"
+  val_end_date: "2026-04-15"
+  test_start_date: "2026-04-16"
+  test_end_date: "2026-04-30"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  # S479 calibration values held — 27mo extension uses same vol distribution.
+  # Re-calibrate ONLY if Stage 2.5-R fails the pass-rate sanity (target ~75%).
+  atr_threshold: 0.15
+  parkinson_threshold: 0.0009
+  volume_threshold: 0.60
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005                     # steady-state 5 bps Bybit retail taker (S464)
+  deadband_threshold: 0.25              # trial #44
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 3000
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: false
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0008427308583293202       # trial #44
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.10
+    max_daily_loss_pct: 0.0
+    eod_hour_utc: 0
+    drawdown_penalty_start: 0.05
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs frozen from sg1_btc_velotrade_rehpo_20260420 trial #44 (PF=2.3031, WandB q9pq44ug).
+agents:
+  sac:
+    lr_actor: 0.00015739192475706186
+    lr_critic: 0.00007322355805160213
+    lr_alpha: 0.0000026314031405474944
+    gamma: 0.9593670398875173
+    tau: 0.0002134448307797731
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.4088157097959411
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.516294914428727
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+gates:                                 # Protocol v2 Stage 2 (S488 escalation) + Stage 2.5 (S493/S526)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                         # S488: prop-firm workstreams require N>=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]     # S488: pre-committed escalation range
+  # Protocol v2.5: bootstrap is PRIMARY (S526); legacy uplift below = audit-only.
+  ensemble_uplift_min: 1.10            # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05         # legacy ambiguous floor (audit-only in v2.5)
+  ensemble_bootstrap_p_pf_ambiguous: 0.75  # v2.5 PRIMARY: AMBIGUOUS_BOOT band floor on P(PF)
+  ensemble_rule_selection: val_argmax_pf  # S495
+  wf_windows: 3
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+# `ensemble:` block populated by S542 Stage 2.5-R reconcile post-N=10 lockup.
+# Top-3 picked by val_argmax_pf rule (S495); seed_pfs are the L1 test PFs
+# (verified against WandB summaries 2026-05-20 — id↔seed↔ckpt all match per
+# feedback_seed_report_key_scramble_s540.md).
+ensemble:
+  seeds: [456, 42, 2025]              # top-3 by val_argmax_pf (S541 LOCKED)
+  seed_pfs:                           # L1 test PF (backtest_test/profit_factor)
+    456:  3.1718                      # WandB 46dlr8l6, val 2.5346
+    42:   3.0989                      # WandB r30s0di0, val 2.5053
+    2025: 3.1430                      # WandB fsupynfb, val 2.4847
+  checkpoint_pattern: "checkpoints/sg1-btc-velotrade-decay01-seed{seed}_*/checkpoint_final.pth"
+  gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
+
+workstream: sg1_btc_velotrade_decay01
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                    # S488: one parent run, seeds as seed<N>/*
+  tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade", "velotrade-wrapped",
+         "prop-firm", "propfirm", "multiseed", "l1", "steady-state", "bybit-perp",
+         "rehpo-trial44", "decay01", "s541", "sg1btc-decay-01",
+         "upstream:sg1_btc_velotrade_rehpo_20260420"]

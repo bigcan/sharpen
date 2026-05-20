@@ -474,6 +474,25 @@ class LiveTradingEngine:
         self._warmup_bars = config.get("features", {}).get("warmup_bars", 0)
         self._warmup_bars_remaining = 0
 
+        # S542 / decision_sg1_btc_skip_first_3_trades_s538: post-restart cooldown.
+        # Skip the first N would-be trades after a fresh container start to avoid
+        # the OOD execution skew seen on sg1-btc's first-3 live trades (perfect-fill
+        # +$12 vs live -$45). Counter resets on each engine __init__ (i.e., every
+        # restart) and decrements ONLY when an actual trade would otherwise fire
+        # (passed deadband + risk-manager re-deadband). signal_gate / funding_gate /
+        # warmup / deadband skips do NOT decrement — the cooldown counts trades,
+        # not bars. Default 0 = disabled (every strategy except sg1-btc).
+        self._post_restart_cooldown_initial = int(
+            (config.get("risk") or {}).get("post_restart_cooldown_bars", 0),
+        )
+        self._post_restart_cooldown_remaining = self._post_restart_cooldown_initial
+        if self._post_restart_cooldown_remaining > 0:
+            logger.info(
+                f"[Post-restart cooldown] Armed: will skip first "
+                f"{self._post_restart_cooldown_remaining} would-be trades after this "
+                f"restart (count resets on every container start).",
+            )
+
         # Protocol v2.2 §8.2 action-drift tracker. Engine-side concerns:
         #   - observe(target_position, current_close) after agent.predict()
         #   - WARN: disable new entries (handled in _apply_drift_status); holds stay
@@ -1102,6 +1121,34 @@ class LiveTradingEngine:
             self._prev_close = current_close
             self._log_step(
                 bar_time, target_position, traded=False, skip_reason="risk_deadband",
+                regime_info=regime_info,
+                policy_target_position=policy_target_position,
+            )
+            return
+
+        # --- 7b. Post-restart cooldown (S542) -------------------------------
+        # By here a real trade is about to fire: passed signal/funding gates,
+        # passed both deadband checks, risk manager cleared. Decrement the
+        # counter and hold the current position. This implements the
+        # `risk.post_restart_cooldown_bars` knob from
+        # decision_sg1_btc_skip_first_3_trades_s538.md — count *would-be
+        # trades*, not bars, so signal_gate / deadband / funding_gate skips
+        # do not consume the cooldown.
+        if self._post_restart_cooldown_remaining > 0:
+            self._post_restart_cooldown_remaining -= 1
+            # Rollback turnover budget consumed by risk_manager.check above so
+            # the skipped trade doesn't burn the daily quota.
+            self.risk_manager.rollback_last_turnover()
+            self._prev_close = current_close
+            logger.info(
+                f"[Post-restart cooldown] Bar {self._total_bars}: holding "
+                f"position {self._current_position:.4f}, "
+                f"{self._post_restart_cooldown_remaining} cooldown trades "
+                f"remaining.",
+            )
+            self._log_step(
+                bar_time, self._current_position,
+                traded=False, skip_reason="post_restart_cooldown",
                 regime_info=regime_info,
                 policy_target_position=policy_target_position,
             )
