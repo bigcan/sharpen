@@ -2,6 +2,25 @@
 # Production budget: 50 HPO trials, 8 HP dimensions, 3M full training
 # OPT-10: update_interval NOT scaled by num_envs (SPS ~80 vs ~8)
 # GPU: RTX 4090 (48GB) — BF16, batch 512, buffer 500K, num_envs 20
+#
+# ---------------------------------------------------------------------------
+# LEGACY — v5 PAPER BASELINE ONLY. DO NOT USE FOR NEW HPO / RETRAIN.
+# ---------------------------------------------------------------------------
+# This config preserves the original 0 -> 2bp fee curriculum that produced the
+# gmgp1-v5 seed-456 paper checkpoint shipped to gmgp1-gold IB. It is retained
+# unmodified so that historical results remain reproducible.
+#
+# For any new GC/MGC HPO, L1 multiseed, walk-forward, or retrain work, use the
+# steady-state sibling:
+#   configs/gmgp1_sac_gc_15min_steadystate.yaml   (taker_fee: 0.000068 from step 0,
+#                                                  matches live IB MGC fee at
+#                                                  configs/live_gmgp1_gc_ib.yaml:136)
+#
+# Audit history: S519 ticket -> S536 HPO PASS (wandb tfbaitfp) -> S538-cont-2
+# Stage 3 WF closed -> 2026-05-09 ensemble v1 LIVE.
+# Refs: docs/protocol_v2.md S3.5.4, decision_steady_state_fees_pattern.md,
+#       project_gmgp1_gc_steady_state_fee_audit.md.
+# ---------------------------------------------------------------------------
 
 data:
   file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"

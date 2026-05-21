@@ -95,6 +95,22 @@ class LiveObsBuilder:
     EMA warmup requires bootstrap_bars of history on startup.
     """
 
+    # S546 GAP-B fix: weekend/session-closed asset classes lose ~30% of
+    # calendar minutes to halts (Gold CFDs close Fri 22:00 UTC → Sun 22:00
+    # UTC).  A naïve `start = end - timedelta(minutes=bootstrap_bars)`
+    # under-fetches active bars, producing a 95% warmup gate fail on the
+    # coarsest scale and a 10-bar engine lockout.  Expand the calendar
+    # window by the listed factor per asset class.  Tuned so that the
+    # 60-min scale's 360-bar EMA-convergence target lands cleanly with a
+    # small safety margin.  See
+    # docs/research/sg1_xauusd_sim_to_live_gap_audit.md §3 + §4.2.
+    _CALENDAR_EXPANSION_FACTOR: dict[str, float] = {
+        "crypto": 1.0,
+        "cfd_gold": 1.45,
+        "cfd_forex": 1.45,
+        "cme_futures": 1.45,
+    }
+
     def __init__(
         self,
         scales: list[int],
@@ -107,6 +123,7 @@ class LiveObsBuilder:
         obs_mode: str = "window",
         summary_feature_indices: Optional[list[int]] = None,
         norm_warmup_path: Optional[str] = None,
+        asset_class: str = "crypto",
     ):
         """
         Args:
@@ -122,6 +139,10 @@ class LiveObsBuilder:
             obs_mode: "window" (raw windows) or "summary_stats" (flat summary).
             summary_feature_indices: Feature column indices for summary stats
                 (default [0,1,2,6,7] = log_return, atr_norm, parkinson, close_z, volume_z).
+            asset_class: Drives bootstrap calendar-window expansion for assets
+                with closed sessions ("cfd_gold", "cfd_forex", "cme_futures";
+                see ``_CALENDAR_EXPANSION_FACTOR``).  Default "crypto" → 1.0×
+                (no expansion).
         """
         self.scales = sorted(scales)
         self.window_size = window_size
@@ -130,6 +151,14 @@ class LiveObsBuilder:
         self.bootstrap_bars = bootstrap_bars
         self.obs_mode = obs_mode
         self.summary_feature_indices = summary_feature_indices or [0, 1, 2, 6, 7]
+        self.asset_class = asset_class
+        if asset_class not in self._CALENDAR_EXPANSION_FACTOR:
+            logger.warning(
+                f"LiveObsBuilder: unknown asset_class={asset_class!r}; "
+                "defaulting bootstrap calendar-expansion factor to 1.0 "
+                "(may under-fetch on weekend-closed markets — declare the "
+                "asset_class explicitly in features.asset_class).",
+            )
 
         # S509 fix: per-scale pre-cutoff warmup buffer that reproduces training's
         # freeze-and-restart EMA-Z behavior. Without this, live's rolling EMA
@@ -200,6 +229,26 @@ class LiveObsBuilder:
     # -------------------------------------------------------------------
     # Bootstrap
     # -------------------------------------------------------------------
+    def calendar_expansion_factor(self) -> float:
+        """Calendar-window expansion factor for the configured asset class.
+
+        Crypto-style 24/7 assets return 1.0.  Weekend-closed assets
+        (cfd_gold, cfd_forex, cme_futures) return 1.45 so that
+        ``bootstrap_bars`` of *active* 1-min data lands inside the fetched
+        calendar window.  Unknown asset classes fall back to 1.0 (already
+        warned at construction time).
+        """
+        return self._CALENDAR_EXPANSION_FACTOR.get(self.asset_class, 1.0)
+
+    def compute_bootstrap_calendar_minutes(self) -> int:
+        """Calendar-minute window for the bootstrap fetch.
+
+        ``bootstrap_bars + 60`` minutes of *active* data on a 24/7 market;
+        scaled by ``calendar_expansion_factor()`` for weekend-closed asset
+        classes (S546 GAP-B).
+        """
+        return int((self.bootstrap_bars + 60) * self.calendar_expansion_factor())
+
     async def bootstrap(
         self,
         loader,
@@ -213,15 +262,19 @@ class LiveObsBuilder:
         """
         from datetime import datetime, timezone
 
+        calendar_minutes = self.compute_bootstrap_calendar_minutes()
+        factor = self.calendar_expansion_factor()
         logger.info(
-            f"LiveObsBuilder bootstrapping: fetching {self.bootstrap_bars} "
-            f"1-min bars for {asset}...",
+            f"LiveObsBuilder bootstrapping: requesting {calendar_minutes} "
+            f"calendar minutes for {self.bootstrap_bars} active 1-min bars on "
+            f"{asset} (asset_class={self.asset_class}, expansion={factor:.2f}x).",
         )
 
         # FIX AUD-C01: Use correct CryptoLoader.fetch_ohlcv() signature.
         # Compute start/end from bootstrap_bars instead of passing limit.
+        # S546: window is calendar-minute-expanded for weekend-closed assets.
         end = datetime.now(timezone.utc)
-        start = end - timedelta(minutes=self.bootstrap_bars + 60)  # Small buffer
+        start = end - timedelta(minutes=calendar_minutes)
 
         for attempt in range(3):
             try:

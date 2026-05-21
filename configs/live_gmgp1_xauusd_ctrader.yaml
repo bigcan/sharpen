@@ -216,3 +216,27 @@ prism:
     LOW_VOL: 1.3
     NORMAL_VOL: 1.0
     HIGH_VOL: 0.3
+
+# ---------------------------------------------------------------------------
+# Provenance (S546, 2026-05-21) — S470 item 7
+# ---------------------------------------------------------------------------
+provenance:
+  schema_version: 1
+  block_added: "2026-05-21 (S546)"
+  strategy: gmgp1-xauusd
+  agent_type: solo                       # Stage 2.5 verdict SOLO_BEST (S495-cont)
+  upstream_hpo_run: gmgp1_xauusd_ftmo_rehpo_20260421  # trial #10
+  upstream_wf_run: gmgp1_xauusd_oanda_wf_ensemble
+  wf_solo_seed: 42
+  wf_fold: 7
+  wf_metrics: "test PF 2.260, Sharpe_d 4.43, MDD -0.39%, Win 57.8%"
+  stage_2_5_verdict: SOLO_BEST            # G3 uplift FAIL (0.970 < 1.05 floor)
+  stage_2_5_verdict_path: "results/gmgp1_xauusd_oanda_wf_ensemble/fold_07/verdict.json"
+  checkpoint_path: "checkpoints/WF_seed42_fold_07_20260424_061803/checkpoint_final.pth"
+  live_run_id: "live-gmgp1-xauusd-ctrader-paper-20260424"
+  paper_deploy_since: "2026-04-24"
+  audit_history:
+    - "2026-04-24: Stage 2.5 SOLO_BEST verdict, paper deploy on IC Markets demo"
+    - "2026-04-24 (S495-cont): prop-firm decoupling Step 4 (base config + FTMO overlays)"
+    - "2026-04-30 (S490): CFDBarClock false-STALL during XAU rollover; heartbeat fix shipped"
+    - "2026-05-10 (S540): 45h-idle OOM exit 137; force-recreate shipped; tracemalloc queued"

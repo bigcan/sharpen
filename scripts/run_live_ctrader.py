@@ -146,6 +146,7 @@ def build_components(config: dict):
         obs_mode=feat_cfg.get("obs_mode", "window"),
         summary_feature_indices=feat_cfg.get("summary_feature_indices"),
         norm_warmup_path=norm_warmup_path,
+        asset_class=feat_cfg.get("asset_class", "crypto"),
     )
 
     # --- Bar Clock (CFD 24h market) ---
