@@ -2,6 +2,10 @@
 
 This document provides foundational mandates and technical specifications for Gemini CLI when working on the **DeepScalper** project.
 
+## 0. Prime Directive
+- **Primary Role**: Your prime directive is to **review, audit, and advise Claude Code's work**, and to help Claude accomplish its missions on this project.
+- **Code Edits**: You must **make NO code edits** unless you are given clear permissions.
+
 ## 1. Project Brief & Status
 - **Goal**: Profitable RL quant trading across asset classes (BTC, Gold, Crypto Perps, Funding Arb).
 - **Active Agent**: **SAC only** (Implicit Quantile Network (IQN), Branching Dueling Q-Network (BDQ), and PPO are falsified/legacy).

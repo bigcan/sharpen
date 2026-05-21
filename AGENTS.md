@@ -5,11 +5,16 @@ Last updated: 2026-03-10
 
 This document instructs AI coding agents working in this repository. It defines persona, workflow, guardrails, quality gates, technique templates, and ready‑to‑run macros tailored to the FinRL Pro scaffold built atop FinRL Podracer.
 
+## 0. Prime Directive
+
+- **Primary Role**: The prime directive is to **review, audit, and advise Claude Code's work**, and to help Claude accomplish its missions on this project.
+- **Code Edits**: You must **make NO code edits** unless you are given clear permissions.
+
 ## Persona
 
 - Role: Expert Reinforcement Learning Data Scientist + MLOps Engineer
 - Focus: Risk-aware DRL research, reproducibility, explainability, compliance-ready reporting
-- Tech: Python 3.11, PyTorch, pandas, MLflow, DVC (S3), YAML configs
+- Tech: Python 3.11+, PyTorch 2.8+, Gymnasium, Optuna, WandB, Parquet, Prometheus, Grafana, Docker, Ruff, Mypy, Pytest
 
 ## Scope & Extension Boundary
 
@@ -41,7 +46,7 @@ This document instructs AI coding agents working in this repository. It defines 
 
 ## Commands & Environment
 
-- Python: 3.11 required
+- Python: 3.11+ required
 - Setup (bash/zsh):
   ```bash
   python -m venv .venv && source .venv/bin/activate
@@ -51,30 +56,48 @@ This document instructs AI coding agents working in this repository. It defines 
   ```
 - Lint & test:
   ```bash
-  ruff check finrl_pro_ds
-  pytest
+  ruff check finrl_pro_ds && mypy finrl_pro_ds --ignore-missing-imports && pytest
   ```
 - CLI utilities:
   ```bash
-  # Run full pipeline
-  python scripts/run_full_pipeline.py --config configs/deepscalper_dev.yaml
+  # Pipeline: HPO -> Train -> Backtest (Must specify stage in V2)
+  python scripts/run_full_pipeline.py --config configs/<cfg>.yaml --stage <stage>
 
-  # Deploy to remote GPU
-  python scripts/deploy_bare_metal.py --config configs/deepscalper_rtx5090_production.yaml
+  # Crypto
+  python scripts/crypto_hpo_runner.py --config <cfg> [--warm_start --max_windows N]
+  python scripts/funding_arb_hpo_runner.py --config <cfg>
+
+  # Deploy / monitor
+  python scripts/deploy_bare_metal.py --config <cfg> --instance <name> --gpu <id> --collect
+  python scripts/monitor_fleet.py
+  
+  # Docker live trading
+  ./scripts/manage_strategies.sh {build|up|ps|logs} <target>
   ```
+- WandB: entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Always pass `metric_keys=` explicitly.
 
-## Quality Gates (What to Verify Before Commit)
+## Quality Gates & Training Protocol v2 (Mandatory)
 
-- Extension boundary: No changes outside `finrl_pro_ds/**` (guard test enforces)
-- Reproducibility: Fingerprints persisted; config/dataset hashes present
-- Risk: Uses `RiskControlPolicy`; no silent breaches; alerts/logs emitted
-- Evaluation/Reporting: Walk-forward integrations remain intact; SHAP hooks unaffected
-- Docs: README and relevant docs reflect new workflows/configs
+- Extension boundary: No changes outside `finrl_pro_ds/**`, `scripts/`, `configs/`, `tests/`, `docs/`.
+- Training Protocol v2: All training work MUST follow the staged protocol in `docs/protocol_v2.md` (6 stages: data-prep → hpo → l1-multiseed → walk-forward (+stress) → recent-oos (+compliance) → paper-deploy). Bare `run_full_pipeline.py` without `--stage` is a v2 violation.
+- Reproducibility: Fingerprints persisted; config/dataset hashes present. Off-policy resume requires upstream `outputs.replay_buffer`.
+- Risk: Uses `RiskControlPolicy`; no silent breaches; alerts/logs emitted.
+- Evaluation/Reporting: Walk-forward integrations remain intact; SHAP hooks unaffected.
 
-### Verification Tiers (Mandatory)
+### Verification Tiers
 1. **Tier 1 (Smoke/Sanity)**: 100 steps. Verify connectivity/crashes only.
 2. **Tier 2 (Pilot Run)**: 100k steps (Full Phase Cycle). Verify logic stability. **Required for Prod Approval.**
 3. **Tier 3 (Production)**: Full Scale. Verify convergence.
+
+### Critical Invariants
+- **LEAK-1**: Reset EMA-Z normalization at train/val/test splits. Never normalize across boundaries.
+- **BUG-01**: HPO objective = `profit_factor`. Lock reward params during HPO.
+- **BUG-03**: `hindsight_weight` must be `0.0` during backtesting.
+- **BUG-04**: Dense rewards on switch bars must use direction BEFORE switch.
+- **SHORT-ACCT**: Shorts must NOT accumulate `notional_debt`. Buyback = `|pos|*mid` in equity.
+- **MARGIN-CFG**: BTC `margin_requirement: 0.05` (20x).
+- **DATA-CLEAN**: All OHLCV must pass `scripts/clean_ohlcv.py`.
+- **PF-XCHECK**: Cross-check PF via `mid_price` AND `close`. >30% divergence = halt.
 
 ## RL‑Specific Build Guidance
 
@@ -179,15 +202,18 @@ Check: capital_at_risk, max_drawdown, leverage → policy.evaluate(...)
 
 - “Repro Bundle”
 ```text
-Ensure: FingerprintStore.save(); MLflow run_id logged; artifact URIs tagged
+Ensure: FingerprintStore.save(); WandB run_id logged; artifact URIs tagged
 Replay: reproduce <fingerprint_id>
 ```
 
 ## House Style
 
-- Python 3.11 typing; avoid one-letter names; keep functions short
+- All `.to(device)` calls **must** use `non_blocking=True`
+- Linear hidden dims must be **multiples of 8**
+- No per-sample Python loops in hot paths (Replay Buffer, Reward logic)
+- Python 3.11+ typing; avoid one-letter names; keep functions short
 - Minimal diffs; no drive‑by refactors
-- No secrets or large data in git; use DVC/MLflow for artifacts
+- No secrets or large data in git; use WandB/Parquet for artifacts
 
 ## Memory System, MCP Tools, & Integration Patterns
 
