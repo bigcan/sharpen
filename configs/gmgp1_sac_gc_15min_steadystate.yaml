@@ -2,7 +2,7 @@
 #
 # Audit lineage: project_gmgp1_gc_steady_state_fee_audit.md (S519). The current paper
 # container (gmgp1-gold, IB MGC) runs live at taker_fee 0.000068 (~6.8bps) per
-# configs/live_gmgp1_gc_ib.yaml:97 — but the deployed v5 seed-456 checkpoint was
+# configs/live_gmgp1_gc_ib.yaml:136 — but the deployed v5 seed-456 checkpoint was
 # trained under the legacy 0->2bps fee curriculum from configs/gmgp1_sac_gc_15min.yaml.
 # Same disease that compressed SG-1-XAUUSD pre-S461-463; gold was on the un-audited list.
 #

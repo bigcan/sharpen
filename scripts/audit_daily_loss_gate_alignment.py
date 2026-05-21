@@ -66,6 +66,9 @@ DEFAULT_PROJECT = "FinRL-Pro-DS"
 # Every-bar keys (must all be populated on every `_log_step` call so that
 # scan_history's row filter does not drop non-traded bars).  See
 # `_log_step` in `finrl_pro_ds/crypto/live/live_engine.py` for the schema.
+# `_timestamp` is WandB's synthetic per-row epoch; included so that
+# `_reconstruct_daily_loss` can anchor UTC days directly when present,
+# rather than falling back to the configurable bar-interval estimate.
 HISTORY_KEYS = [
     "bar",
     "position",
@@ -73,6 +76,7 @@ HISTORY_KEYS = [
     "drawdown_pct",
     "total_trades",
     "traded",
+    "_timestamp",
 ]
 
 
@@ -131,20 +135,29 @@ def _pull_history(run_path: str) -> pd.DataFrame:
 
 
 def _reconstruct_daily_loss(
-    df: pd.DataFrame, max_daily_loss_pct: float,
-) -> pd.DataFrame:
+    df: pd.DataFrame,
+    max_daily_loss_pct: float,
+    bar_interval_min: int,
+) -> tuple[pd.DataFrame, str]:
     """Reconstruct UTC-anchored daily_loss_pct from raw portfolio_value.
 
     Mirrors `_check_daily_loss` in
     `finrl_pro_ds/crypto/live/live_engine.py:1976-2008`: anchor on the first
     PV reading of each UTC day and recompute the raw return per bar.
 
-    WandB doesn't ship the `bar_time` directly to this script — we derive
-    `created_at` from the `_step` ordering plus an assumed bar interval.  In
-    practice the live engine logs PV with monotonic bars, so per-day grouping
-    via the run's wall-clock timestamps is robust.  When `_runtime` is
-    available on the row, we use it directly; otherwise fall back to bar
-    index ranges that approximate UTC days.
+    Timestamp resolution preference:
+      1. WandB's per-row `_timestamp` (unix-epoch float) when it is present
+         and at least partially populated — this gives true wall-clock UTC
+         days regardless of strategy cadence.
+      2. Otherwise a synthetic monotonic series at `bar_interval_min`-minute
+         spacing.  This is configurable so the caller can match the strategy
+         cadence (e.g. 15 for gmgp1-gold, 3 for sg1-xauusd) and avoid the
+         legacy hard-coded 3-min assumption that compressed UTC-day
+         boundaries on slower-cadence runs.
+
+    Returns a `(DataFrame, ts_source)` tuple where `ts_source` is one of
+    `"wandb_timestamp"` / `"synthetic_<N>min"` for transparency in the
+    report.
 
     Returns a DataFrame with added columns:
       - utc_day            : pandas Timestamp (day-only, UTC) per bar
@@ -154,21 +167,16 @@ def _reconstruct_daily_loss(
     """
     out = df.copy()
 
-    # Best-effort timestamp inference.  WandB returns `_timestamp` on each row
-    # as a unix-epoch float when the run logs it; otherwise we reconstruct from
-    # ordering.  Live engine doesn't add `_timestamp` to its metrics dict, so
-    # we approximate UTC days by treating consecutive bars as 3-minute intervals
-    # (the finest live cadence; both 15-min and 3-min runs land within the
-    # right UTC day under this assumption for the persistence-window question).
     if "_timestamp" in out.columns and out["_timestamp"].notna().any():
         ts = pd.to_datetime(out["_timestamp"], unit="s", utc=True)
+        ts_source = "wandb_timestamp"
     else:
-        # Fall back: estimate 3-min spacing from first-bar assumption.  This is
-        # rough but sufficient — we only need it for daily-anchor grouping.
         synthetic_ts = pd.date_range(
-            start="1970-01-01", periods=len(out), freq="3min", tz="UTC",
+            start="1970-01-01", periods=len(out),
+            freq=f"{bar_interval_min}min", tz="UTC",
         )
         ts = pd.Series(synthetic_ts)
+        ts_source = f"synthetic_{bar_interval_min}min"
 
     out["bar_time_utc"] = ts.values
     out["utc_day"] = pd.to_datetime(out["bar_time_utc"]).dt.floor("D")
@@ -191,7 +199,7 @@ def _reconstruct_daily_loss(
         out["daily_loss_pct_sim"].notna()
         & (out["daily_loss_pct_sim"] < -max_daily_loss_pct)
     )
-    return out
+    return out, ts_source
 
 
 def _classify_divergences(
@@ -223,9 +231,13 @@ def _classify_divergences(
     }
 
 
-def _audit_run(spec: RunSpec, persistence_window: int) -> dict:
+def _audit_run(
+    spec: RunSpec, persistence_window: int, bar_interval_min: int,
+) -> dict:
     raw = _pull_history(spec.run_path)
-    enriched = _reconstruct_daily_loss(raw, spec.max_daily_loss_pct)
+    enriched, ts_source = _reconstruct_daily_loss(
+        raw, spec.max_daily_loss_pct, bar_interval_min,
+    )
     n_bars = int(len(enriched))
     n_trades = int(enriched["traded"].fillna(0).astype(float).sum())
     classification = _classify_divergences(enriched, persistence_window)
@@ -242,6 +254,7 @@ def _audit_run(spec: RunSpec, persistence_window: int) -> dict:
         "max_daily_loss_pct": spec.max_daily_loss_pct,
         "n_bars": n_bars,
         "n_trades": n_trades,
+        "ts_source": ts_source,
         "min_daily_loss_pct_sim": (
             float(enriched["daily_loss_pct_sim"].min())
             if enriched["daily_loss_pct_sim"].notna().any() else math.nan
@@ -251,18 +264,20 @@ def _audit_run(spec: RunSpec, persistence_window: int) -> dict:
     }
 
 
-def _render_markdown(per_run: list[dict], persistence_window: int) -> str:
+def _render_markdown(
+    per_run: list[dict], persistence_window: int, bar_interval_min: int,
+) -> str:
     lines = []
     lines.append("# Daily-Loss Gate Alignment Audit Report\n")
     lines.append(f"> **Generated:** {dt.datetime.now(dt.timezone.utc).isoformat()}")
     lines.append(
         "> **Source:** `scripts/audit_daily_loss_gate_alignment.py` "
-        f"(persistence_window = {persistence_window} bars)\n",
+        f"(persistence_window = {persistence_window} bars, "
+        f"synthetic_ts_fallback = {bar_interval_min}min)\n",
     )
 
     total_trips = sum(r["n_sim_trips"] for r in per_run)
     total_absorbed = sum(r["n_live_absorbed"] for r in per_run)
-    total_halted = sum(r["n_live_halted"] for r in per_run)
     n_runs = len(per_run)
 
     verdict = (
@@ -296,14 +311,15 @@ def _render_markdown(per_run: list[dict], persistence_window: int) -> str:
     lines.append("## Verdict\n")
     lines.append(f"**{verdict}** — {verdict_text}\n")
     lines.append("## Fleet Summary\n")
-    lines.append("| Run | max_daily | n_bars | n_trades | min_daily_loss% | sim_trips | absorbed | halt-boundary |")
-    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|")
+    lines.append("| Run | max_daily | ts_source | n_bars | n_trades | min_daily_loss% | sim_trips | absorbed | halt-boundary |")
+    lines.append("|---|---:|---|---:|---:|---:|---:|---:|---:|")
     for r in per_run:
         min_dl = r["min_daily_loss_pct_sim"]
         min_dl_str = f"{min_dl * 100:.3f}" if not math.isnan(min_dl) else "n/a"
         lines.append(
             f"| `{r['run_path'].split('/')[-1]}` | "
             f"{r['max_daily_loss_pct'] * 100:.2f}% | "
+            f"{r.get('ts_source', 'n/a')} | "
             f"{r['n_bars']} | {r['n_trades']} | {min_dl_str} | "
             f"{r['n_sim_trips']} | {r['n_live_absorbed']} | {r['n_live_halted']} |",
         )
@@ -353,6 +369,14 @@ def main() -> int:
              "propagation through wandb.",
     )
     ap.add_argument(
+        "--bar-interval-min", type=int, default=3,
+        help="Synthetic-timestamp fallback spacing in minutes, used only when "
+             "WandB does not expose `_timestamp` on the run's rows.  Set this "
+             "to match the strategy cadence (e.g. 15 for gmgp1-gold, 3 for "
+             "sg1-xauusd) so UTC-day boundaries are not compressed.  Ignored "
+             "when `_timestamp` is present (preferred path).",
+    )
+    ap.add_argument(
         "--out", type=Path, default=None,
         help="Markdown report path.",
     )
@@ -366,7 +390,9 @@ def main() -> int:
     for spec in args.runs:
         print(f"Pulling WandB history: {spec.run_path}", file=sys.stderr)
         try:
-            result = _audit_run(spec, args.persistence_window)
+            result = _audit_run(
+                spec, args.persistence_window, args.bar_interval_min,
+            )
         except Exception as e:
             print(f"  ERROR: {e}", file=sys.stderr)
             result = {
@@ -374,19 +400,23 @@ def main() -> int:
                 "max_daily_loss_pct": spec.max_daily_loss_pct,
                 "error": str(e),
                 "n_bars": 0, "n_trades": 0,
+                "ts_source": "error",
                 "min_daily_loss_pct_sim": math.nan,
                 "n_sim_trips": 0, "n_live_absorbed": 0, "n_live_halted": 0,
                 "sample_trips": [],
             }
         print(
             f"  {spec.short_name}: bars={result.get('n_bars', 0)}, "
+            f"ts_source={result.get('ts_source', 'n/a')}, "
             f"sim_trips={result.get('n_sim_trips', 0)}, "
             f"absorbed={result.get('n_live_absorbed', 0)}",
             file=sys.stderr,
         )
         per_run.append(result)
 
-    report = _render_markdown(per_run, args.persistence_window)
+    report = _render_markdown(
+        per_run, args.persistence_window, args.bar_interval_min,
+    )
     print(report)
 
     if args.out:
