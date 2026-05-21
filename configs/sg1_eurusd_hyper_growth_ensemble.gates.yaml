@@ -1,0 +1,151 @@
+# SG-1 EURUSD The5ers Hyper Growth — ensemble confirmation gates (PRE-COMMITTED)
+#
+# S544-cont-5 (2026-05-21): scaffolded from `sg1_xauusd_ensemble.gates.yaml`.
+# Only diff is `g4_hyper_growth_compliance` (replacing FTMO-specific numbers)
+# and workstream/variant labels. Protocol v2.5 bootstrap-primary gates unchanged.
+#
+# Read by Stage 2.5 ensemble evaluator (TBD: clone of `sg1_xauusd_ensemble_eval.py`).
+# Single source of truth for gate numbers — never hardcode in code/scripts.
+#
+# Decision rule: ALL five gates (G1..G5) must PASS → approve ensemble for
+# SG-1 EURUSD Hyper Growth paper-deploy aggregation. ANY fail → ensemble
+# rejected; solo seed with highest WF-median PF remains the paper candidate.
+#
+# Committed BEFORE any WF ensemble run is launched. Do not edit after first
+# launch without a decision memo explaining why.
+
+workstream: "sg1_eurusd_hyper_growth"
+variant: "ensemble_agreement_top3"
+seeds: [42, 2025, 3141]                        # placeholder; populate from L1 actuals
+aggregation_rule: "ens_agreement"              # candidate rule under test
+
+# Fold count expected from the multiseed WF config.
+# Tentative 8 folds (matches XAUUSD OANDA cadence on ~24mo span); revisit after
+# WF scaffold lands.
+wf_folds: 8
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+gates:
+  g1_solo_baseline:
+    description: >-
+      Existing WF Stage-3 gate applied per seed: at least 2/3 seeds must have
+      per-fold test PF >= pf_floor, in at least min_folds_pass of the total
+      folds. If solo seeds fail the base WF discipline, the ensemble is moot.
+    pf_floor: 1.1
+    seeds_pass_min: 2
+    min_folds_pass: 7
+
+  g2_no_regression:
+    description: >-
+      Per fold, the ensemble must NOT materially regress vs the best solo on
+      that fold. Defined as ens_PF >= ens_ratio_min * best_solo_PF in at least
+      min_folds_pass folds.
+    ens_ratio_min: 0.90
+    min_folds_pass: 7
+
+  g3_uplift:
+    description: >-
+      Across folds, the ensemble must earn its live-complexity overhead.
+      Defined as median(ens_PF) / median(best_solo_PF) >= uplift_ratio_min.
+      A lift below ~10% is not worth additional live-engine branching and
+      aggregation latency.
+      v2.5 NOTE: WF-stage point-estimate gate. Stage 2.5 (single L1 window)
+      uses block-bootstrap; see ensemble_* block below.
+    uplift_ratio_min: 1.10
+    metric: "median"
+
+  # === Protocol v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
+  # See decision_protocol_v25_bootstrap_primary.md.
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_mdd_promote: 0.90
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_bootstrap_resamples: 10000
+  ensemble_bootstrap_block_len: null
+
+  # === Protocol v2.5 SECONDARY (audit/sanity only). ===
+  ensemble_uplift_min: 1.10
+  ensemble_ambiguous_min: 1.05
+
+  # v2.3 diversity-aware top-K selection (Phase 0).
+  ensemble_top_k: 3
+  ensemble_diversity_lambda: 1.0
+
+  g4_hyper_growth_compliance:
+    description: >-
+      Applied to the ENSEMBLE trajectory per fold (not solo trajectories).
+      All three Hyper Growth sub-gates must PASS in every fold (strict: 8/8).
+      Numbers: hard caps 3% daily / 6% trailing (vs FTMO 5% / 10%).
+    daily_dd_buffer_pp_min: 0.5                # 3% cap − worst_intraday_dd%
+    trailing_dd_buffer_pp_min: 0.5             # 6% cap − trailing_mdd%
+    compliance_must_pass: true                 # active_days/single_day_share (active_days_min=0 for HG)
+    min_folds_pass: 8
+
+  g5_dd_stability:
+    description: >-
+      Guards against ensemble edge being a one-fold artifact. CV of ensemble
+      PF across folds must be at or below cv_max.
+    cv_pf_max: 0.35
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds.
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten.
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers.
+  retrain:
+    ensemble_recheck_days: 90
+    live_pf_ratio: 0.8
+    live_pf_window_days: 5
+    min_trades_window: 20
+    agreement_decay_delta: 0.20
+    agreement_decay_window_bars: 2000
+    action_kl_warn_window_bars: 5000
+    cost_drift_ratio: 1.20
+    cost_drift_window_trades: 100
+
+  # Protocol v2.3 §8.2 agreement-decay live monitor (ensemble-deployed only).
+  drift_agreement:
+    enabled_for_rules: ["ens_agreement", "ens_majority"]
+    flat_delta_warn: 0.20
+    flat_delta_crit: 0.40
+    window_bars: 2000
+
+# ---------------------------------------------------------------------------
+# Decision matrix
+# ---------------------------------------------------------------------------
+
+decision:
+  all_pass_action: "approve_ensemble_paper_deploy"
+  any_fail_action: "reject_ensemble_use_best_solo"
+  solo_selection_metric: "wf_median_pf"
+  solo_tiebreaker: "wf_mean_trailing_dd_buffer_pp"
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+provenance:
+  drafted_on: "2026-05-21"
+  drafted_by_session: "S544-cont-5"
+  upstream_memory: "project_sg1_eurusd_retrain_queued_s477.md"
+  upstream_template: "configs/sg1_xauusd_ensemble.gates.yaml"
+  hpo_config: "configs/sg1_eurusd_hyper_growth_hpo.yaml"
+  redirect_origin: "AlphaSeek v3 KILLED 2026-05-21 (S544-cont-5); see project_alphaseek_v3_plan_handoff.md"
+  pre_deploy_blocker: "Hyper Growth EA/bot rule NOT on website; verify T&C + email before paper"
