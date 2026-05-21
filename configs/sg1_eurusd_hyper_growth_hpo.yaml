@@ -1,0 +1,162 @@
+# SG-1 EURUSD The5ers Hyper Growth — Stage 1 HPO
+#
+# S544-cont-5 (2026-05-21): created after AlphaSeek v3 KILL freed gpuhub-1
+# capacity. Path (b) under `project_sg1_eurusd_retrain_queued_s477.md` was
+# elected (override of S520 calendar deferral). New EURUSD-direct HPO gate
+# is decoupled from the dead Arm B gate (S479 FAIL by 0.01pp).
+#
+# Architecture: clone of `sg1_xauusd_ftmo_hpo.yaml`. Diffs from XAUUSD:
+#   - Data: OANDA M1 EUR_USD (cleanly liquid 23h/day, no commodity-segment gaps)
+#   - Fees: IC Markets Raw EUR/USD: $3/lot/side comm + ~0.05 pip spread/side
+#     ≈ 0.4 bps per side; using 0.00005 (5e-5) per side conservatively.
+#   - Risk caps: The5ers Hyper Growth (6% max DD / 3% daily loss),
+#     vs FTMO (10% / 5%). Buffers preserved at 1pp from hard cap.
+#   - signal_gate thresholds inherited from XAUUSD calibration (S479);
+#     these are TO_CALIBRATE against EURUSD vol regime before promotion
+#     to L1 multiseed. Acceptable for HPO discovery pass.
+#
+# Hyper Growth rules (parsed S544-cont-5 from the5ers.com/hyper-growth/):
+#   - Account sizes $5K/$10K/$20K, $40K aggregate cap per trader
+#   - Profit target 10% (eval phase)
+#   - Daily loss limit 3%
+#   - Max drawdown 6% (peak-to-trough, type per T&C unclear)
+#   - No min trading days; unlimited time; 30-day inactivity expires
+#   - Weekend holding ALLOWED (vs FTMO forbidden)
+#   - Profit split up to 100%
+#
+# PRE-DEPLOY BLOCKER (do not paper-deploy without resolving):
+#   - The5ers Hyper Growth page does NOT explicitly state EA/bot policy.
+#     Verify via T&C + email confirmation BEFORE paper. Reference cautionary
+#     tale: GMGP1-MGC retargeted S537 after MFFU+Phidias both falsified on
+#     bot policy (see `project_gmgp1_mgc_retrain_queued_s477.md`).
+
+data:
+  file_path: "data/oanda/eurusd_m1_m.parquet"
+  ticker: "EURUSD"
+  handler_type: "multiscale"
+  # Splits assume fetch covers 2024-06-01 → 2026-05-21 (~24 months).
+  # 16mo train / 3mo val / 3mo test = same shape as XAUUSD OANDA splits.
+  # Adjust if fetch returns shorter range.
+  train_start_date: "2024-06-01"
+  train_end_date: "2025-09-30"
+  val_start_date: "2025-10-01"
+  val_end_date: "2025-12-31"
+  test_start_date: "2026-01-01"
+  test_end_date: "2026-03-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_forex"             # FX-major (not "cfd_gold"); verify finrl_pro_ds.data.feature_engineering supports
+
+signal_gate:
+  # XAUUSD S479-calibrated thresholds inherited as placeholders. Re-calibrate
+  # on EURUSD M3 vol distribution BEFORE Stage 2 L1 multiseed promotion.
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00005                   # per-side; IC Markets Raw EUR/USD ~0.4 bps/side, conservative ceiling
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.06               # Hyper Growth hard cap (6%)
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0                    # OANDA has weekend gap (Fri 21:00 → Sun 21:00 UTC), detector required
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.05    # 1pp buffer from Hyper Growth 6% hard rail
+    max_daily_loss_pct: 0.02           # 1pp buffer from Hyper Growth 3% hard rail
+    eod_hour_utc: 21                   # FX day rolls 21:00 UTC (= NY 17:00 / 16:00 DST)
+    drawdown_penalty_start: 0.015      # shaping triggers 0.5pp before 2% daily cap
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # HPO axes will overwrite per-trial; values below are reasonable priors.
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  objective: "profit_factor"           # BUG-01 lock: never optimize total_return
+  trials: 50
+  steps_per_trial: 500000
+
+gates:                                 # Protocol v2 §4 — per-workstream numeric gates
+  # HPO stage
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01                  # training-health hard fails
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  # L1 multi-seed stage (S488 escalation rule)
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  # Walk-forward stage
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  # The5ers Hyper Growth compliance (analogue of FTMO gates, different numbers)
+  hyper_growth_active_days_min: 0      # no min trading days requirement (vs FTMO 4)
+  hyper_growth_max_single_day_share: 0.5
+  hyper_growth_daily_dd_buffer_pp: 0.5 # breach if intraday DD > (2.0% + 0.5pp) = 2.5%
+  hyper_growth_trailing_dd_buffer_pp: 0.5  # breach if trailing > (5.0% + 0.5pp) = 5.5%
+  # Recent-OOS stage
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "EURUSD", "SAC", "3min", "signal-gated", "the5ers",
+         "hyper-growth", "prop-firm", "hpo", "steady-state", "oanda-spot",
+         "post-alphaseek-kill"]
