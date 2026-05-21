@@ -284,3 +284,31 @@ prism:
 # --- Monitoring ---
 monitoring:
   metrics_port: 9109                   # Aligned with docker-compose sg1-btc service
+
+# ---------------------------------------------------------------------------
+# Provenance (S546, 2026-05-21) — S470 item 7
+# ---------------------------------------------------------------------------
+provenance:
+  schema_version: 1
+  block_added: "2026-05-21 (S546)"
+  strategy: sg1-btc
+  agent_type: ensemble
+  training_config: "configs/sg1_btc_velotrade_l1_multiseed_extended.yaml"
+  bundle_path: "/app/bundles/sg1_btc_velotrade_extended/"  # baked into image
+  bundle_sha256: "0c50fe6267f5ca2cf889d8073549c16c11e9cd358d18b2a03135e43a4528981b"
+  ensemble:
+    aggregation_rule: "ens_mean"           # LIVE OVERRIDE — bundle.chosen_rule=ens_agreement (FU-3 WF). Reverted to ens_mean 2026-05-08 after drift_crit at warmup boundary
+    bundle_chosen_rule: "ens_agreement"    # FU-3 WF selection on fold_07
+    l1_metrics: "test PF median 2.75, CV 2.12% (N=10, S535-cont FU-1)"
+    stage_2_5_bootstrap: "P(ens > solo) = 0.983 (FU-2 PROMOTE)"
+    stage_3_wf_bootstrap: "P(PF) = 1.0000 (n=57k, 8-fold, FU-3 PROMOTE)"
+  live_run_id: "live-sg1-btc-bybit-demo-paper-ensemble-v2p1-ens-mean"
+  paper_deploy_since: "2026-05-08"         # v2.3 swap (was ens_agreement v2.1 pre-revert)
+  audit_history:
+    - "2026-04-25 (S498-cont): initial paper deploy on Binance demo"
+    - "2026-05-02: venue cutover Binance demo → Bybit testnet"
+    - "2026-05-04 (S527-cont): testnet → Bybit mainnet demo"
+    - "2026-05-08 (S538-cont-4): aggregation_rule ens_agreement → ens_mean (Fix 1 pattern) after drift_crit at warmup boundary"
+    - "2026-05-09: cohort A soak T+0 reset clean ($50,000.76)"
+    - "2026-05-11: n=88 re-audit FIRED SG1BTC-DECAY-01 retrain trigger (alpha decay accelerating)"
+    - "2026-05-12 (S542): SG-1-BTC DECAY-01 Stage 2.5-R verdict = SOLO_BEST_FALLBACK on seed 456 (ens_mean won val 2.572 but only 1.006× test uplift; bootstrap P(PF)=0.650<0.75 floor)"

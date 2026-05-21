@@ -206,3 +206,26 @@ prism:
     LOW_VOL: 1.3
     NORMAL_VOL: 1.0
     HIGH_VOL: 0.3
+
+# ---------------------------------------------------------------------------
+# Provenance (S546, 2026-05-21) — S470 item 7
+# ---------------------------------------------------------------------------
+provenance:
+  schema_version: 1
+  block_added: "2026-05-21 (S546)"
+  strategy: gmgp1-btc
+  agent_type: solo
+  upstream_hpo_run: 8v4mueuf            # GMGP1-BTC HPO trial #34, PF 2.558
+  upstream_l1_run: 1jazzser             # L1 multiseed seed-123 retrain
+  checkpoint_path: "checkpoints/gmgp1-btc-l1-multiseed_20260407_070227/checkpoint_final.pth"
+  l1_seed: 123
+  l1_metrics: "PF=2.19, Sharpe=3.97, DD=-1.88%, CV=1%"
+  live_run_id: "live-btc-bybit-testnet-paper-20260502"
+  paper_deploy_since: "2026-05-02"       # Bybit cutover from Binance demo
+  audit_history:
+    - "2026-04-07: L1 multiseed PASS, seed-123 graduated"
+    - "2026-04-22: paper deploy on Binance demo"
+    - "2026-05-02: venue cutover Binance demo → Bybit testnet"
+    - "2026-05-04 (S527-cont): testnet → Bybit mainnet demo (broken indexPrice + thin book)"
+    - "2026-05-05 (S527-cont): Phase 1+2 demo-fetchOrder double-trade fix shipped"
+    - "2026-05-09 (S538-cont-7): cohort A soak T+0 reset clean ($49,982.14)"

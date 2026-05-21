@@ -274,3 +274,30 @@ prism:
     LOW_VOL: 1.3
     NORMAL_VOL: 1.0
     HIGH_VOL: 0.3
+
+# ---------------------------------------------------------------------------
+# Provenance (S546, 2026-05-21) — S470 item 7
+# ---------------------------------------------------------------------------
+provenance:
+  schema_version: 1
+  block_added: "2026-05-21 (S546)"
+  strategy: gmgp1-gold
+  agent_type: ensemble
+  training_config: "configs/gmgp1_sac_gc_15min_steadystate.yaml"  # S536 steady-state sibling (6.8 bps from step 0)
+  upstream_hpo_run: tfbaitfp              # S536 steady-state HPO PASS, val PF 2.19, test PF 2.26
+  upstream_l1_run: r0nqxemc               # S536 L1 N=10: val PF mean 2.746 CV 2.98%, test mean 2.563 CV 3.22%
+  bundle_path: "/app/bundles/gmgp1_gold/"  # baked into image
+  bundle_sha256: "7e46cb5cc96965568975670bc82575d06ed2db1295eeeab17bd0600f3c655b75"
+  ensemble:
+    seeds: [456, 1024, 2025]              # A2 PROMOTE checkpoints
+    aggregation_rule: "ens_pf_weighted"
+    stage_2_5_verdict: PROMOTE             # bootstrap P(ens_PF > solo_best_PF) = 1.000
+    fold: null                            # Stage 3 WF ensemble (8-fold)
+  live_run_id: "live-gold-ib-paper-ensemble-v1-20260509"
+  paper_deploy_since: "2026-05-09"
+  audit_history:
+    - "2026-05-07 (S536): steady-state HPO + L1 multiseed fired"
+    - "2026-05-08 (S538-cont-2): Stage 3 WF closed (8-fold ensemble PROMOTE)"
+    - "2026-05-09 (S538-cont-4): A2 ensemble v1 LIVE — required run_live_ib.py refactor (agent_loader) + seed_pfs config-merge"
+    - "2026-05-09 03:28 UTC (S538-cont-7): Cohort A soak T+0 reset clean ($100,048.48)"
+    - "2026-05-21 (S546): legacy gmgp1_sac_gc_15min.yaml flagged with deprecation banner; protocol §3.5.4 bumped from TBD to steady_state_6.8bps_ib_mgc_from_step_0"

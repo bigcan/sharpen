@@ -215,7 +215,7 @@ Locks in the empirical findings from six volume/budget studies (S500–S543; see
 |---|---|---|
 | Bybit BTC perp | `steady_state_5bps_from_step_0` | Bybit taker tier-0 |
 | OANDA XAU spot | `steady_state_2.35bps_oanda_from_step_0` | OANDA retail XAU bid-ask mid |
-| IB Gold (GC/MGC) | TBD — steady-state audit ticketed | `project_gmgp1_gc_steady_state_fee_audit.md` |
+| IB Gold (GC/MGC) | `steady_state_6.8bps_ib_mgc_from_step_0` | S536/S538-cont-2 — see `configs/gmgp1_sac_gc_15min_steadystate.yaml` + `project_gmgp1_gc_steady_state_fee_audit.md`. Legacy `configs/gmgp1_sac_gc_15min.yaml` is the v5 paper baseline only (curriculum 0→2bp preserved); do NOT use for new HPO. |
 
 Curriculum fee schedules (0 → 2bp → 5bp ramp) are forbidden outside HPO sensitivity-analysis runs (BUG-01 lock-down; `decision_steady_state_fees_pattern.md`).
 
