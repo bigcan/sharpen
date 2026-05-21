@@ -321,7 +321,7 @@ def _render_markdown(
     lines.append(f"> **Generated:** {dt.datetime.now(dt.timezone.utc).isoformat()}")
     lines.append(f"> **WandB run:** `{run_path}`")
     lines.append(
-        f"> **Audit reference:** "
+        "> **Audit reference:** "
         "docs/research/sg1_xauusd_sim_to_live_gap_audit.md §4.1\n",
     )
     lines.append("## Verdict\n")
