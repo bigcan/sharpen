@@ -43,9 +43,9 @@ env:
 
   # ----- M2 maker-bias execution (LOCKED in HPO) -----
   maker_bias: true                             # post-only with parametric fill
-  fill_alpha_ofi: 2.0                          # P(fill) = sigmoid(α·OFI + β·sp_inv + γ·age)
-  fill_beta_spread: 1.0
-  fill_gamma_age: -0.05
+  fill_alpha_ofi: -0.0183                          # P(fill) = sigmoid(α·OFI + β·sp_inv + γ·age)
+  fill_beta_spread: -1.3494
+  fill_gamma_age: -0.0479
   limit_max_age: 60                            # cancel-aged-out at 60 bars
   max_idle_bars: 1800                          # = max_holding default at step_gap=2
 
