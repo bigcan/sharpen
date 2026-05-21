@@ -1,10 +1,11 @@
-# Training → Live Protocol v2.5
+# Training → Live Protocol v2.5.1
 
 > **Status:** Active. Standardizes the training-to-live workflow across all FinRL-Pro_DS workstreams (GMGP1, SG-1, CMGP1, AlphaSeek, Funding-Arb).
 > **Reference run:** GMGP1 staged approach. **Anti-pattern:** AlphaSeek `k28l6ef8` monolithic 5.7-day run.
-> **Owner:** R&D. **Last updated:** 2026-05-05 Session 526 (Stage 2.5 bootstrap-primary gate-ordering flip).
+> **Owner:** R&D. **Last updated:** 2026-05-21 Session 545 (Training-budget & data-window rule lock-in from volume/budget study consolidation).
 >
 > **Version history:**
+> - **v2.5.1** (2026-05-21, S545) — Training-budget & data-window rule (new §3.5) locking in findings from six studies: GMGP1 Volume Study v1 (Gold), Data-Window Study (BTC Axis A), Volume Study v2 (BTC, 2M ceiling), Gold Steady-State, SG-1-XAUUSD Volume Study v2 Phase 1 + Phase 2, SG-1-BTC A1 extended audit. Empirically-derived **multiplicity rule** (`total_timesteps / bars_in_train_window ∈ [15, 40]`) and **calendar-anchored data window** (NOT bar-anchored — preserves regime coverage across timeframes) replace per-asset budget guessing. Validated cells for GMGP1-BTC (22mo × 2M, 32×) and SG-1-XAUUSD (24mo × 4M, 17×) become protocol defaults. §9 retrain cadence extended with **timeframe-dependent intervals** (sub-5m: 14–28d; 5–15m: 30–45d; ≥15m: 60–90d) to handle microstructure decay without shrinking the training window. Non-breaking: existing configs with valid multiplicity remain compliant; `validate_config.py` adds a multiplicity preflight (WARN below 10×, REJECT above 50× — requires fresh study). See `decision_training_budget_multiplicity_rule.md` and `decision_calendar_anchored_training_window.md`.
 > - **v2.5** (2026-05-05, S526) — Stage 2.5 ensemble-confirm gate refinement: block-bootstrap probability (`P(ens_PF > solo_PF)`, `P(ens_MDD better)`) is now the PRIMARY decision criterion for prop-firm / live-capital workstreams; the legacy point-estimate `ensemble_uplift_min` is demoted to audit-only metadata. New `gates.ensemble_bootstrap_p_pf_ambiguous` (default **0.75**) introduces an `AMBIGUOUS_BOOT` band (mirrors S495 `AMBIGUOUS_RERUN` for the noise-aware criterion). v2.5 matrix promotes on PF dominance (`P_PF ≥ promote`) regardless of `P_MDD`, fixing a v2.3 misclassification (Funding-Arb DSAC `P_PF=1.0, P_MDD=0.36` was previously SOLO_BEST_FALLBACK; v2.5 makes it PROMOTE). Validator promoted: bootstrap keys are FAIL-on-missing for prop-firm; uplift demoted to WARN-on-missing. Verdict JSON bumped to `schema_version: "2.5"` with new `bootstrap` / `legacy_uplift` blocks (additive — v2.1/v2.3 readers parse cleanly). See `decision_protocol_v25_bootstrap_primary.md` and the architecture artifact `.agent/artifacts/stage_2_5_bootstrap_primary_architecture.md`.
 > - **v2.4.1** (2026-05-01, S512) — Operational-hygiene patch from external simplification review (`.agent/artifacts/protocol_v2_simplification.md`). Two non-breaking refinements adopted; three rejected. **Adopted:** (a) §2 + §4 Stage 2.5 specify **post-PROMOTE replay-buffer purge** for non-top-K seeds (purged seeds retain SHA256 in manifest for audit); collapses Stage-2 buffer retention from `N=10` to `K=3` for typical prop-firm runs (~70% disk reduction without affecting Stage-3 warm-resume). (b) §8.1 joint-feature drift Mahalanobis pinned to **Ledoit-Wolf shrinkage covariance** (`sklearn.covariance.LedoitWolf`) before any `live_obs_builder.py` implementation lands; eliminates the ill-conditioned-Σ false-positive risk on collinear LOB/MA features without changing χ² thresholds or replacing Mahalanobis with autoencoder/PCA alternatives. New gate key `gates.drift.mahalanobis_top_k` (default **8**). **Rejected (with rationale):** MedianPruner on Q-divergence/TD-error (contradicts BUG-01 + NopPruner gotcha — RL learning curves are non-monotonic, kills late-bloomers); CRIT-flatten replacement with TWAP/limit-chase (inverts cost asymmetry for FTMO/Velotrade — DD-breach termination dwarfs slippage); CSCV/Deflated-Sharpe replacing block bootstrap in Stage 2.5 (answers a different statistical question — single-strategy overfitting vs paired ensemble-vs-solo dominance — and the v2.3 bootstrap costs ~30s, not "massive"). See `decision_protocol_v241_simplification_review.md` for full review and counter-evidence.
 > - **v2.4** (2026-04-24, S495-cont) — Prop-firm challenge decoupling shipped. Schema change: training configs use `env.risk:` (phase-invariant DD + daily-loss shaping — no `profit_target_pct`, no `success_bonus`, no terminate-on-profit); deploy-stage configs use `configs/deploy/<firm>/<phase>.yaml` overlays layered onto the base training YAML via `deep_merge(allowlist=)` in `finrl_pro_ds/config_utils.py`; `challenge:` block gates `ChallengeStateMachine` (live only, `challenge.enabled=true`). Training matrix collapses from **N strategies × M firms × 3 phases** to **N checkpoints + 3M overlays**. Legacy `env.prop_firm:` deprecated (validator WARN elsewhere, FAIL at paper-deploy). See `decision_prop_firm_decoupling_s495.md` + `.agent/artifacts/prop_firm_decoupling_architecture.md` (rev 2 LIVE). Four new validator checks: `check_legacy_prop_firm_block`, `check_challenge_block`, `check_static_peak_consistency`, `check_overlay_allowlist`. `REASON_PHASE_COMPLETE` kill-file reason distinct from `REASON_DRIFT_CRIT` (preserves §8.3 repeat-CRIT lockout math). First customer: GMGP1-XAUUSD FTMO seed 42, solo A/B PASS 7/7 gates on Q1 2026 OANDA OOS.
@@ -170,6 +171,94 @@ Written by `scripts/build_data_manifest.py`. Co-located with the parquet file as
 
 ---
 
+## 3.5 Training Budget & Data Window Rule (v2.5.1 NEW)
+
+Locks in the empirical findings from six volume/budget studies (S500–S543; see study memories listed at end of section). Replaces per-asset budget guessing — future asset workstreams pick `total_timesteps` and `train_window` by applying the rules below, not by running fresh studies.
+
+### 3.5.1 The Multiplicity Rule (primary)
+
+**Definition.** Replay-buffer multiplicity = `total_timesteps / bars_in_train_window`. Empirically governs the overfitting/generalization trade-off across all studied asset classes and timeframes.
+
+**Productive zone:** multiplicity ∈ **[15, 40]**. Pick `total_timesteps` so the ratio lands here. Buffer size stays at 500K (held constant across all studies); only `total_timesteps` varies.
+
+| Zone | Multiplicity | Behavior | Action |
+|------|--------------|----------|--------|
+| Under-trained | < 10× | Policy hasn't learned robust features | `validate_config.py` WARN; OK for smoke runs |
+| Borderline | 10–15× | Marginal; works on some assets (XAU 2M @ 24mo = 8.6×) | Allowed; flag for N=10 validation |
+| **Productive** | **15–40×** | Buffer revisits rescue overfitting; CV tightens; val-test gap < 1.5× | **TARGET** |
+| Cliff | > 50× | All seeds collapse; CV widens; val-test gap ≥ 1.5× | `validate_config.py` REJECT — requires fresh study |
+
+**Why this works:** Longer history → lower multiplicity for the same budget → the buffer-revisiting effect that exploits regime variety, before noise/overfitting dominates. Mechanism transferred cleanly across **BTC@15m (Bybit)** and **XAU@3m (OANDA)** — portable.
+
+### 3.5.2 Calendar-Anchored Data Window (NOT bar-anchored)
+
+**Rule:** `train_window` is set in **calendar months**, NOT in bars. Minimum **22 months**, preferred **24 months**, regardless of timeframe.
+
+**Why calendar, not bars:** Macro regime cycles (bull/chop/bear), Fed cycles, halvings, ETF flows, seasonality — all calendar-anchored phenomena. A bar-anchored window (e.g., "always 60K bars") on a 3m strategy gives only ~4 calendar months, missing regime variety the agent must generalize to. The multiplicity rule absorbs the bar-density difference between timeframes via `total_timesteps`, not via window length.
+
+**Empirical anchor:** SG-1-XAUUSD (3m, 24mo, ~233K bars, 4M steps, 17× mult) passed Phase 2 N=10 with PF 1.95, CV 6.55%. GMGP1-BTC (15m, 22mo, ~63K bars, 2M steps, 32× mult) peaked at PF 2.44, CV 2.17%. Both calendar-equivalent; both in productive zone via their own bar-density-appropriate budgets.
+
+### 3.5.3 Validated Cells (protocol defaults)
+
+| Workstream | Timeframe | Train window | Bars (approx) | `total_timesteps` | Mult | Test PF | Study |
+|---|---|---|---|---|---|---|---|
+| GMGP1-Gold | 15m | 10mo | ~21K | 500K–1M | 24–48× | 2.00 (cliff above 1M) | Volume Study v1 (s500) |
+| **GMGP1-BTC** | **15m** | **22mo** | **~63K** | **2M** | **32×** | **2.44** | Data-Window + Volume v2 (s522) |
+| **SG-1-XAUUSD** | **3m** | **24mo** | **~233K** | **4M** | **17×** | **1.95 (N=10)** | VS-v2 Phase 1 + Phase 2 (s540) |
+| SG-1-BTC | 3m | 22–24mo | ~330K | 2M + decay | ~6× (extended) | 2.76 (regime-fragile) | A1 extended + DECAY-01 (s533, s542) |
+
+**Bold rows are the canonical protocol defaults** for prop-firm new-asset launches in the same class. Gold cell at 10mo is intentionally short-window per the steady-state-fee study; treat as IB-specific exception.
+
+### 3.5.4 Asset-Class Fee Models (workstream-locked)
+
+| Asset class | Fee model | Source |
+|---|---|---|
+| Bybit BTC perp | `steady_state_5bps_from_step_0` | Bybit taker tier-0 |
+| OANDA XAU spot | `steady_state_2.35bps_oanda_from_step_0` | OANDA retail XAU bid-ask mid |
+| IB Gold (GC/MGC) | TBD — steady-state audit ticketed | `project_gmgp1_gc_steady_state_fee_audit.md` |
+
+Curriculum fee schedules (0 → 2bp → 5bp ramp) are forbidden outside HPO sensitivity-analysis runs (BUG-01 lock-down; `decision_steady_state_fees_pattern.md`).
+
+### 3.5.5 New-Asset Launch Preflight (enforced by `validate_config.py --stage l1-multiseed`)
+
+```
+□ bars_in_train_window computed and printed at preflight
+□ multiplicity = total_timesteps / bars_in_train_window ∈ [15, 40]   → WARN below 10, REJECT above 50
+□ train_window ≥ 22 calendar months                                   → REJECT if shorter (no exceptions outside GMGP1-Gold IB legacy)
+□ l1_seeds = 10 (prop-firm / live-capital) or 5 (exploratory)         → see §4 Stage 2
+□ l1_pf_cv_ambiguous = [0.22, 0.38] pre-committed                     → see §4 Stage 2
+□ fee_model matches venue from §3.5.4                                 → REJECT on curriculum schedule (BUG-01)
+□ ensemble_uplift_min matches baseline tier (1.10 low, 1.05 high)     → see §4 Stage 2.5
+□ retrain cadence configured per §9 timeframe tier
+```
+
+**Axes NOT studied (do not lock in via this protocol):** `batch_size` (512 fixed by HPO inheritance), `update_interval` (4 fixed; 1:4 env:policy ratio standard SAC), `num_envs` (20 fixed; cheap 3-cell sweep `{5, 20, 50}` queued but not run), `buffer_size` (500K — DO NOT CHANGE; multiplicity is computed against this constant). Entropy α / actor LR / critic LR / grad clip remain HPO-tuned per asset.
+
+### 3.5.6 When to run a fresh study (the protocol does NOT cover this)
+
+Required if any of the following:
+- Timeframe outside the studied set (e.g., sub-1m LOB, 1H+ swing). Mechanism is expected to transfer but multiplicity productive-zone bounds are not yet validated outside 3m–15m.
+- New asset class with materially different bar-density profile (e.g., illiquid CFD with frequent gaps, or futures roll bars). Multiplicity formula assumes contiguous bars.
+- Multiplicity outside [15, 40] is *operationally desired* (e.g., wall-clock constraint forces under-trained run). Requires explicit OVERRIDE block in gate YAML + study justification.
+- `buffer_size ≠ 500K`. Multiplicity rule is defined against 500K; changing this invalidates the productive-zone bounds.
+
+### 3.5.7 Study Memory References
+
+| Slug | Topic |
+|---|---|
+| `decision_training_budget_multiplicity_rule.md` | The 15–40× rule + this section |
+| `decision_calendar_anchored_training_window.md` | Calendar-vs-bar anchoring rationale |
+| `decision_volume_axis_v2_2m_ceiling.md` | GMGP1-BTC 2M ceiling at A_long |
+| `decision_volume_axis_v2_sg1_xauusd.md` | SG-1-XAUUSD 4M productive zone |
+| `project_volume_study_5budget_verdict_s509.md` | GMGP1-Gold v1 (5-budget verdict) |
+| `project_sg1_xauusd_volume_study_v2_phase1_verdict.md` | XAU Phase 1 CLIFF triple-confirm |
+| `project_sg1_xauusd_volume_study_v2_phase2_n10_verdict.md` | XAU Phase 2 N=10 PASS |
+| `project_a1_extended_audit_findings_s533.md` | SG-1-BTC extended-window regime audit |
+| `decision_l1_multiseed_n_seeds_s488.md` | N=10 + ambiguous-band rule |
+| `project_gmgp1_btc_along_wf_uplift_threshold_revision.md` | Tier-dependent ensemble uplift threshold |
+
+---
+
 ## 4. Per-Stage Gates
 
 All numeric gate thresholds live in `configs/<workstream>.gates.yaml` and are referenced by name below. Defaults shown in parentheses are the project-wide fallback when a workstream omits the key.
@@ -184,7 +273,7 @@ All numeric gate thresholds live in `configs/<workstream>.gates.yaml` and are re
 - `hindsight_weight = 0.0` outside HPO (BUG-03)
 - `study.db` retained for downstream analysis
 - **Per-trial seeding:** trials run with **single seed** by default (noise-fit risk acknowledged; L1 multiseed in stage 2 is the validation filter). Workstreams may override `hpo.seeds_per_trial: ≥2` in gate config to average across seeds at the cost of longer HPO. This is an explicit trade-off, not an oversight.
-- **HPO budget** declared per workstream in gate config: `hpo.trials`, `hpo.steps_per_trial`, `hpo.wall_clock_hours_estimate`. `validate_config.py` rejects unbounded HPO.
+- **HPO budget** declared per workstream in gate config: `hpo.trials`, `hpo.steps_per_trial`, `hpo.wall_clock_hours_estimate`. `validate_config.py` rejects unbounded HPO. Pick `hpo.steps_per_trial` per §3.5.1 multiplicity rule (target 15–40×); 500K is the project-wide default for HPO trials and yields ~24× on a 21K-bar window, ~8× on a 63K-bar window (the latter under-trained for L1 but acceptable for HPO since L1 multiseed is the real validation filter).
 - **Training-health hard-fail** (any trial that hits these is auto-pruned and excluded from best-trial selection):
   - actor entropy collapses (final entropy < `gates.entropy_floor`, default `-3.0` for SAC)
   - Q-target divergence (`q_target_max_div_ratio > gates.q_div_max`, default `10.0`)
@@ -193,6 +282,7 @@ All numeric gate thresholds live in `configs/<workstream>.gates.yaml` and are re
 - Gate: Optuna best trial PF ≥ `gates.hpo_pf_floor` (default 1.5)
 
 ### Stage 2 — l1-multiseed
+- **`total_timesteps` and `train_window` must satisfy §3.5 multiplicity rule** (15–40× target; REJECT above 50×, WARN below 10×). For prop-firm / live-capital workstreams without a dedicated budget study, use the validated cells in §3.5.3 directly.
 - N ≥ `gates.l1_seeds` (default 5; **prop-firm / live-capital workstreams must set N ≥ 10** — see S488 rationale below)
 - Each seed evaluated over `gates.eval_episodes` (default 10) — for stochastic policies (SAC), report **mean and std across episodes** per seed; deterministic eval (greedy action) is logged additionally for diagnostic purposes
 - Report **median** PF, Sharpe, MDD across seeds (not max)
@@ -523,12 +613,20 @@ Replaces prior "auto-halt" language, which was ambiguous (halt ≠ flatten in tr
 
 ## 9. Retrain Cadence
 
-Automatic triggers (watchdog cron). Thresholds are per-workstream in `configs/<workstream>.gates.yaml` under `retrain.*`:
+Automatic triggers (watchdog cron). Thresholds are per-workstream in `configs/<workstream>.gates.yaml` under `retrain.*`.
+
+**Timeframe-dependent `retrain.max_age_days` default (v2.5.1):** Microstructure decays faster than price-action regimes, so faster-timeframe strategies require shorter scheduled retrain intervals — but the *training window* stays calendar-anchored at 22–24mo regardless (§3.5.2). The fix for microstructure decay is cadence, not window shrinking.
+
+| Timeframe tier | `retrain.max_age_days` default | Rationale |
+|---|---|---|
+| ≥ 15m | **90** | Price-action regimes are stable over months; project-wide default |
+| 5m–15m | **45** | Mixed dependence; halve the cadence |
+| < 5m | **28** | Microstructure regimes (spread/depth/MM rotation) shift week-to-week; SG-1-BTC alpha-decay 2026-05-09 is the cautionary anchor (`project_sg1_btc_alpha_decay_audit_20260509.md`) |
 
 | Trigger | Action |
 |---|---|
 | Live PF < `retrain.live_pf_ratio` × paper PF (default 0.8) for `retrain.live_pf_window_days` (default 5) consecutive trading days, AND ≥ `retrain.min_trades_window` (default 20) trades in window | Open re-HPO ticket |
-| `today − checkpoint.train_end > retrain.max_age_days` (default 90) | Open re-HPO ticket |
+| `today − checkpoint.train_end > retrain.max_age_days` (default per timeframe tier above) | Open re-HPO ticket |
 | Stage 4 recent-OOS verdict = WATCH at next quarterly review | Open re-HPO ticket |
 | Stage 4 recent-OOS verdict = RETRAIN-required | Halt paper via §8.3 CRIT path (graceful flatten, not halt-only), mandatory re-HPO before redeploy |
 | §8.1/8.2 CRIT drift alarm | §8.3 CRIT: flatten + kill_file + no auto-restart. Retrain ticket auto-opened. |
