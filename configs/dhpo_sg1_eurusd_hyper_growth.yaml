@@ -1,0 +1,67 @@
+# Distributed HPO overlay — SG-1 EURUSD The5ers Hyper Growth (S544-cont-5)
+#
+# Post-AlphaSeek-v3-KILL redirect (2026-05-21). Single-instance variant of
+# the XAUUSD dhpo pattern (`dhpo_sg1_xauusd_ftmo.yaml`): 3 workers across
+# the 2 RTX 4090 GPUs on gpuhub-1 only. gpuhub-2 is FULL with sg1-btc
+# DECAY-01 WF (5 active 3MIN runs) and unavailable for this study.
+#
+# Launch:
+#   set -a; source .env; set +a
+#   python scripts/distributed_hpo_coordinator.py \
+#     --config configs/sg1_eurusd_hyper_growth_hpo.yaml \
+#     --platform gpuhub \
+#     --n_workers 3 --n_trials 50 \
+#     --db_url "$DISTRIBUTED_HPO_DB_URL" \
+#     --study_name sg1_eurusd_hyper_growth_20260521 \
+#     --distributed_config configs/dhpo_sg1_eurusd_hyper_growth.yaml \
+#     --resume
+
+distributed_hpo:
+  platform: "gpuhub"
+  n_workers: 3
+  n_trials: 50
+
+  storage:
+    backend: "postgresql"
+    url: "${DISTRIBUTED_HPO_DB_URL}"
+    heartbeat_interval: 60
+    grace_period: 600
+    max_retry: 1
+
+  # 2 workers on GPU 0 (3 replicas would saturate but VRAM headroom matters
+  # for SAC with num_envs=20); 1 worker on GPU 1 for isolation of the longest
+  # trial. ~75% aggregate GPU util target per XAUUSD overlay's tuning notes.
+  gpuhub:
+    instances:
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-1:1"
+
+  worker:
+    target_trials: null
+    trial_timeout: 7200
+    graceful_shutdown_timeout: 60
+    pip_extras: ""
+
+  data:
+    upload_method: "sftp"
+    data_files:
+      - "oanda/eurusd_m1_m.parquet"
+      - "oanda/eurusd_m1_m.manifest.json"
+    cache_by_size: true
+
+  wandb:
+    entity: "bigcan-chiwin-technology"
+    project: "FinRL-Pro-DS"
+    group_prefix: "dhpo"
+    tags: ["distributed_hpo", "sg-1", "EURUSD", "the5ers", "hyper-growth",
+           "prop-firm", "hpo", "steady-state", "oanda-spot",
+           "post-alphaseek-kill"]
+
+  fault_tolerance:
+    max_worker_retries: 2
+    worker_replace_on_death: false   # single-instance — manual replace if a worker dies
+    monitor_poll_interval: 300
+
+  cost:
+    auto_teardown: false             # never auto-destroy GPUHub instances
