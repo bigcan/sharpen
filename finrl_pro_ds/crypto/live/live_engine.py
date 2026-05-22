@@ -222,12 +222,16 @@ def _init_agreement_decay_tracker(
         ),
         warn_delta=_pick("agreement_flat_delta_warn", 0.20),
         crit_delta=_pick("agreement_flat_delta_crit", 0.40),
+        no_consensus_warn=_pick("agreement_no_consensus_warn", 0.30),
+        no_consensus_crit=_pick("agreement_no_consensus_crit", 0.60),
     )
     logger.info(
         f"AgreementDecayTracker active: rule={rule} "
         f"baseline={'YES' if baseline_flat is not None else 'LOG_ONLY'} "
         f"window={tracker.window_bars} warmup={tracker.min_bars_before_check} "
-        f"warn={tracker.warn_delta} crit={tracker.crit_delta}",
+        f"flat_warn={tracker.warn_delta} flat_crit={tracker.crit_delta} "
+        f"no_consensus_warn={tracker.no_consensus_warn} "
+        f"no_consensus_crit={tracker.no_consensus_crit}",
     )
     return tracker
 
@@ -2614,6 +2618,10 @@ class LiveTradingEngine:
                     "flat_bar_frac_live": report.flat_bar_frac_live,
                     "flat_bar_frac_baseline": report.flat_bar_frac_baseline,
                     "flat_bar_frac_delta": report.flat_bar_frac_delta,
+                    # F2-AUD-01 closure (S548-cont): surface no_consensus_frac
+                    # so retrospective analysis can disambiguate the two
+                    # CRIT signals (flat-drift vs no-consensus rate).
+                    "no_consensus_frac": report.no_consensus_frac,
                     "n_bars": report.n_bars,
                     "trigger": "agreement_decay",  # §4.5 Stage 2.5-R trigger #4
                 },
