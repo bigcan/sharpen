@@ -10,12 +10,19 @@ so this tracker watches the post-aggregation flat-bar fraction directly.
 
 Baseline = `ensemble_eval_distribution.deadband_frac` from
 `ensemble_report.json` (the post-aggregation flat-bar fraction on the
-test window for the chosen rule). The tracker fires:
+test window for the chosen rule). The tracker fires on two independent
+signals (max severity wins):
 
-  * WARN when |live − baseline| > `agreement_flat_delta_warn` sustained
-    for `window_bars`
-  * CRIT when |live − baseline| > `agreement_flat_delta_crit` sustained
-    for `window_bars`
+  * **Flat-bar drift** — |live − baseline| > `agreement_flat_delta_*`
+    sustained for `window_bars`. Catches dispersion-collapse where
+    seeds disagree more in regime and the consensus aggregator
+    inflates the flat-bar fraction. (Pre-Fix-2 contract; the only
+    signal that existed before S538-cont.)
+  * **No-consensus rate** — fraction of bars where the aggregator
+    emitted NaN > `no_consensus_*`. Catches the F2-AUD-01 silent-death
+    case where 100% of bars hit no-consensus — the strategy stops
+    trading but the flat-bar fraction is undefined (no consensus bars
+    to compute on), so the flat-delta signal stays LOG_ONLY.
 
 CRIT routes through §8.3 flatten + kill_file + watchdog lockout (engine
 side) and also fires the §4.5 Stage 2.5-R retrain trigger #4. No-op for
@@ -96,7 +103,14 @@ class AgreementDecayTracker:
         window_bars: rolling window size (default 2000 per spec).
         min_bars_before_check: warmup floor; gating is suppressed below
             this count (default = window_bars / 2).
-        warn_delta / crit_delta: |live − baseline| thresholds.
+        warn_delta / crit_delta: |live − baseline| thresholds for the
+            flat-bar drift signal.
+        no_consensus_warn / no_consensus_crit: fraction-of-window-bars
+            thresholds for the no-consensus rate signal (Fix 2
+            S538-cont + F2-AUD-01 closure S548-cont). Defaults 0.30 /
+            0.60: sg1-btc fold_07 baseline saw ~14% no-consensus rate;
+            sg1-xauusd ~36%; 60% means majority of bars have no
+            directional consensus → strategy is effectively idle.
     """
 
     def __init__(
@@ -109,6 +123,8 @@ class AgreementDecayTracker:
         min_bars_before_check: Optional[int] = None,
         warn_delta: float = 0.20,
         crit_delta: float = 0.40,
+        no_consensus_warn: float = 0.30,
+        no_consensus_crit: float = 0.60,
     ):
         if window_bars < 100:
             raise ValueError("window_bars must be >= 100")
@@ -118,6 +134,12 @@ class AgreementDecayTracker:
             raise ValueError("warn_delta must be < crit_delta")
         if deadband <= 0:
             raise ValueError("deadband must be > 0")
+        if not 0.0 < no_consensus_warn < 1.0:
+            raise ValueError("no_consensus_warn must be in (0, 1)")
+        if not 0.0 < no_consensus_crit <= 1.0:
+            raise ValueError("no_consensus_crit must be in (0, 1]")
+        if no_consensus_warn >= no_consensus_crit:
+            raise ValueError("no_consensus_warn must be < no_consensus_crit")
 
         self.baseline_flat_frac = (
             float(baseline_flat_frac) if baseline_flat_frac is not None else None
@@ -134,6 +156,8 @@ class AgreementDecayTracker:
             raise ValueError("min_bars_before_check must be <= window_bars")
         self.warn_delta = float(warn_delta)
         self.crit_delta = float(crit_delta)
+        self.no_consensus_warn = float(no_consensus_warn)
+        self.no_consensus_crit = float(no_consensus_crit)
 
         self._is_consensus = self.rule in CONSENSUS_RULES
         self._flat_flags: collections.deque[bool] = collections.deque(
@@ -191,6 +215,20 @@ class AgreementDecayTracker:
 
     # --- internals ------------------------------------------------------
 
+    # Severity ordering used by the dual-signal evaluator. LOG_ONLY is the
+    # weakest "we computed something but cannot gate on it" state, so
+    # anything from WARN upward overrides it.
+    _SEVERITY_ORDER: tuple[str, ...] = (
+        AgreementDecayStatus.OK,
+        AgreementDecayStatus.LOG_ONLY,
+        AgreementDecayStatus.WARN,
+        AgreementDecayStatus.CRIT,
+    )
+
+    @classmethod
+    def _max_severity(cls, a: str, b: str) -> str:
+        return a if cls._SEVERITY_ORDER.index(a) >= cls._SEVERITY_ORDER.index(b) else b
+
     def _evaluate(self) -> AgreementDecayReport:
         n = len(self._flat_flags)
 
@@ -223,73 +261,91 @@ class AgreementDecayTracker:
 
         # Fix 2: live flat-bar fraction excludes no-consensus bars, since
         # those are now "unobserved" rather than "flat". no_consensus_frac
-        # is reported separately (and AgreementDecayTracker fires CRIT on
-        # sustained no-consensus regimes via its own thresholds — TODO 5.5).
+        # is reported separately AND gated on its own thresholds —
+        # F2-AUD-01 closure (S548-cont) replaces the old "all-NaN → silent
+        # LOG_ONLY" behavior with explicit WARN/CRIT firing.
         n_no_consensus = sum(self._no_consensus_flags)
         n_consensus = n - n_no_consensus
         no_consensus_frac = n_no_consensus / n if n else 0.0
+
+        # ---------- Signal 1: no-consensus rate ----------
+        # Pure rate threshold — no baseline needed. Fires regardless of
+        # whether the flat-fraction signal is computable.
+        if no_consensus_frac > self.no_consensus_crit:
+            nc_status = AgreementDecayStatus.CRIT
+            nc_reason = (
+                f"CRIT: no_consensus_frac={no_consensus_frac:.3f} "
+                f"(crit={self.no_consensus_crit}) — consensus failed on "
+                f"majority of window; strategy is effectively idle"
+            )
+        elif no_consensus_frac > self.no_consensus_warn:
+            nc_status = AgreementDecayStatus.WARN
+            nc_reason = (
+                f"WARN: no_consensus_frac={no_consensus_frac:.3f} "
+                f"(warn={self.no_consensus_warn})"
+            )
+        else:
+            nc_status = AgreementDecayStatus.OK
+            nc_reason = ""
+
+        # ---------- Signal 2: flat-bar drift vs baseline ----------
         if n_consensus == 0:
-            return AgreementDecayReport(
-                status=AgreementDecayStatus.LOG_ONLY,
-                reason=(
-                    f"all {n} bars in window were no-consensus (NaN); "
-                    f"no flat-fraction signal computable"
-                ),
-                n_bars=n,
-                flat_bar_frac_live=None,
-                flat_bar_frac_baseline=self.baseline_flat_frac,
-                flat_bar_frac_delta=None,
-                rule=self.rule,
-                no_consensus_frac=no_consensus_frac,
+            # No consensus bars → flat-frac signal undefined. Defer to
+            # the no-consensus rate signal alone (which is guaranteed
+            # CRIT here since no_consensus_frac == 1.0 > no_consensus_crit
+            # for any sane threshold).
+            fd_status = AgreementDecayStatus.LOG_ONLY
+            fd_reason = (
+                f"all {n} bars in window were no-consensus (NaN); "
+                f"flat-fraction signal not computable"
             )
-        live = sum(self._flat_flags) / n_consensus
+            live = None
+            delta = None
+        else:
+            live = sum(self._flat_flags) / n_consensus
+            if self.baseline_flat_frac is None:
+                fd_status = AgreementDecayStatus.LOG_ONLY
+                fd_reason = "no baseline flat_bar_frac available"
+                delta = None
+            else:
+                delta = abs(live - self.baseline_flat_frac)
+                if delta > self.crit_delta:
+                    fd_status = AgreementDecayStatus.CRIT
+                    fd_reason = (
+                        f"CRIT: flat_frac_delta={delta:.3f} "
+                        f"(crit={self.crit_delta}) — consensus has decayed; "
+                        f"capital utilization at risk"
+                    )
+                elif delta > self.warn_delta:
+                    fd_status = AgreementDecayStatus.WARN
+                    fd_reason = (
+                        f"WARN: flat_frac_delta={delta:.3f} "
+                        f"(warn={self.warn_delta})"
+                    )
+                else:
+                    fd_status = AgreementDecayStatus.OK
+                    fd_reason = f"within thresholds (delta={delta:.3f})"
 
-        if self.baseline_flat_frac is None:
-            return AgreementDecayReport(
-                status=AgreementDecayStatus.LOG_ONLY,
-                reason="no baseline flat_bar_frac available",
-                n_bars=n,
-                flat_bar_frac_live=live,
-                flat_bar_frac_baseline=None,
-                flat_bar_frac_delta=None,
-                rule=self.rule,
-                no_consensus_frac=no_consensus_frac,
-            )
+        # ---------- Resolve max severity + reason ----------
+        final = self._max_severity(fd_status, nc_status)
+        if final == fd_status == nc_status:
+            reason = fd_reason if fd_reason else nc_reason
+        elif final == fd_status:
+            reason = fd_reason
+        else:
+            reason = nc_reason
+        # If both signals are non-OK at the same severity, surface both.
+        if (
+            fd_status != AgreementDecayStatus.OK
+            and nc_status != AgreementDecayStatus.OK
+            and fd_status == nc_status
+            and fd_reason and nc_reason
+        ):
+            reason = f"{fd_reason} | {nc_reason}"
 
-        delta = abs(live - self.baseline_flat_frac)
-
-        if delta > self.crit_delta:
-            return AgreementDecayReport(
-                status=AgreementDecayStatus.CRIT,
-                reason=(
-                    f"CRIT: flat_frac_delta={delta:.3f} "
-                    f"(crit={self.crit_delta}) — consensus has decayed; "
-                    f"capital utilization at risk"
-                ),
-                n_bars=n,
-                flat_bar_frac_live=live,
-                flat_bar_frac_baseline=self.baseline_flat_frac,
-                flat_bar_frac_delta=delta,
-                rule=self.rule,
-                no_consensus_frac=no_consensus_frac,
-            )
-        if delta > self.warn_delta:
-            return AgreementDecayReport(
-                status=AgreementDecayStatus.WARN,
-                reason=(
-                    f"WARN: flat_frac_delta={delta:.3f} "
-                    f"(warn={self.warn_delta})"
-                ),
-                n_bars=n,
-                flat_bar_frac_live=live,
-                flat_bar_frac_baseline=self.baseline_flat_frac,
-                flat_bar_frac_delta=delta,
-                rule=self.rule,
-                no_consensus_frac=no_consensus_frac,
-            )
         return AgreementDecayReport(
-            status=AgreementDecayStatus.OK,
-            reason=f"within thresholds (delta={delta:.3f})",
+            status=final,
+            reason=reason,
             n_bars=n,
             flat_bar_frac_live=live,
             flat_bar_frac_baseline=self.baseline_flat_frac,
