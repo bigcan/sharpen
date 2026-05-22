@@ -81,6 +81,13 @@ COPY bundles /app/bundles
 COPY checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed2025_20260520_181055 /app/checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed2025_20260520_181055
 COPY checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed42_20260520_181055 /app/checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed42_20260520_181055
 COPY checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed9999_20260520_181055 /app/checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed9999_20260520_181055
+# sg1-btc DECAY-01 fold_07 seed-456 ckpt + norm_warmup_3-15-60.pkl (S548,
+# 2026-05-22). Baked rather than bind-mounted for the Windows force-recreate
+# safety reason above. live_sg1_btc_binance.yaml features.norm_warmup_path
+# reads the pkl; the .pth itself is unused at runtime (the bundle's seed_456
+# checkpoint owns the agent weights), but copying the whole dir keeps the pkl
+# co-located with its source ckpt for audit.
+COPY checkpoints/sg1-btc-decay01-wf-fold7-seed456_20260521_230637 /app/checkpoints/sg1-btc-decay01-wf-fold7-seed456_20260521_230637
 COPY pyproject.toml /app/
 
 RUN pip install -e ".[ctrader]"

@@ -243,6 +243,19 @@ def _build_v23_bundle_agent(
         loaded_agents.append(a)
 
     rule = ensemble_cfg.get("aggregation_rule") or bundle.chosen_rule
+
+    # Solo bundle (N=1): EnsembleAgent's >=2 guard would reject this and
+    # aggregation is mathematically a no-op (every rule collapses to the
+    # single agent's action). Return the SACAgent directly so the runner
+    # sees the same shape as a classic `agent.checkpoint_path` deploy.
+    if len(seeds) == 1:
+        logger.info(
+            f"SACAgent loaded from v2.3 solo bundle: ws={bundle.workstream} "
+            f"v={bundle.version} seed={seeds[0]} "
+            f"(manifest rule={bundle.chosen_rule!r} is degenerate for N=1)"
+        )
+        return loaded_agents[0]
+
     if rule != bundle.chosen_rule:
         logger.warning(
             f"aggregation_rule override: config={rule!r} differs from "

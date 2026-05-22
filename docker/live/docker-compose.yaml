@@ -335,7 +335,13 @@ services:
       # BINANCE_DEMO_API_KEY: ${SG1_BTC_BINANCE_DEMO_API_KEY:-}
       # BINANCE_DEMO_API_SECRET: ${SG1_BTC_BINANCE_DEMO_API_SECRET:-}
     volumes:
-      - ${CHECKPOINT_DIR:?Set CHECKPOINT_DIR}/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030:/app/checkpoints/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030:ro
+      # S548: DECAY-01 fold_07 seed-456 ckpt + norm_warmup pkl are now baked
+      # into the image via Dockerfile COPY (mirrors sg1-xauusd VS-v2 pattern) —
+      # sidesteps Docker Desktop Windows bind-mount silent failure on
+      # force-recreate. Previous bind:
+      # `${CHECKPOINT_DIR}/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030`
+      # (FU-2 L1 seed42 norm_warmup, training cutoff 2026-01-31). Rollback:
+      # restore the FU-2 bind + revert the Dockerfile COPY line + rebuild.
       - sg1-btc-logs:/app/logs
       - sg1-btc-state:/app/state
 

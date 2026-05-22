@@ -1,0 +1,216 @@
+{
+  "protocol": "v2.2_stage_2_5_ensemble_report__decay01_wf_solo_456_baseline",
+  "workstream": "sg1_btc_velotrade_decay01",
+  "source": "decay01_wf_8fold_solo_456",
+  "window": "decay01_wf_8fold_oos_2025-09-01 -> 2026-04-01 (per-fold 1mo test windows)",
+  "chosen_rule": "solo_456",
+  "decision": "SOLO_BEST",
+  "decision_source": "stage_3_wf_5_gate (reject_ensemble_use_best_solo)",
+  "ensemble_eval_distribution": {
+    "histogram_bins": [
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "counts": [
+      11876,
+      11521,
+      6985,
+      4939,
+      4381,
+      4564,
+      6091,
+      6679
+    ],
+    "mean": -0.15536296828819227,
+    "std": 0.608457727033261,
+    "entropy": 2.00809468533474,
+    "deadband_frac": 0.1634055684129322,
+    "saturation_frac": 0.007977417771232204,
+    "no_consensus_frac": 0.0,
+    "n": 57036,
+    "n_total_bars": 57036,
+    "composition_rule": "solo_456",
+    "by_vol_quartile": {
+      "q1": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          2528,
+          3223,
+          2057,
+          1427,
+          1247,
+          1164,
+          1392,
+          1221
+        ],
+        "mean": -0.1856458129157686,
+        "std": 0.5667024441380526,
+        "entropy": 2.0077150533549593,
+        "deadband_frac": 0.1875306823760432,
+        "saturation_frac": 0.004768917876428922,
+        "no_consensus_frac": 0.0,
+        "n": 14259,
+        "n_total_bars": 14259
+      },
+      "q2": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          2667,
+          2955,
+          1979,
+          1340,
+          1233,
+          1167,
+          1474,
+          1444
+        ],
+        "mean": -0.16111673155489395,
+        "std": 0.5865136705172334,
+        "entropy": 2.0190629164030094,
+        "deadband_frac": 0.18044743670664143,
+        "saturation_frac": 0.006171540781260958,
+        "no_consensus_frac": 0.0,
+        "n": 14259,
+        "n_total_bars": 14259
+      },
+      "q3": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          3236,
+          2756,
+          1570,
+          1187,
+          1025,
+          1143,
+          1579,
+          1763
+        ],
+        "mean": -0.15283544403030874,
+        "std": 0.6211595473834762,
+        "entropy": 1.9978177955366339,
+        "deadband_frac": 0.15513009327442318,
+        "saturation_frac": 0.00820534399326741,
+        "no_consensus_frac": 0.0,
+        "n": 14259,
+        "n_total_bars": 14259
+      },
+      "q4": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          3445,
+          2587,
+          1379,
+          985,
+          876,
+          1090,
+          1646,
+          2251
+        ],
+        "mean": -0.12185388465179775,
+        "std": 0.6540754464197167,
+        "entropy": 1.971992679078669,
+        "deadband_frac": 0.13051406129462095,
+        "saturation_frac": 0.012763868433971527,
+        "no_consensus_frac": 0.0,
+        "n": 14259,
+        "n_total_bars": 14259
+      }
+    },
+    "regime_cutpoints": [
+      0.0005193007242216613,
+      0.0007320937786495648,
+      0.0009859573938064427
+    ]
+  },
+  "wf_verdict": {
+    "decision": "reject_ensemble_use_best_solo",
+    "overall": "FAIL",
+    "folds_completed": 8,
+    "G2_no_regression_folds_meeting": 1,
+    "G3_uplift_ratio": 0.8656201254620538,
+    "G5_cv_pf": 0.05318506119176812
+  },
+  "bundle_metadata": {
+    "path": "bundles\\sg1_btc_velotrade_decay01\\solo_v1.tar.gz",
+    "sha256": "7e8bdda31e536da1167e164bf9fbb8a864863e84df1f97be467ab817fa202a48",
+    "size_bytes": 9560452
+  },
+  "bake_metadata": {
+    "baked_at_utc": "2026-05-22T04:06:03Z",
+    "baked_by": "scripts/bake_sg1_btc_decay01_drift_baseline.py",
+    "input_paths": [
+      "results\\sg1_btc_ensemble_wf\\fold_00\\solo_456_trajectory.parquet",
+      "results\\sg1_btc_ensemble_wf\\fold_01\\solo_456_trajectory.parquet",
+      "results\\sg1_btc_ensemble_wf\\fold_02\\solo_456_trajectory.parquet",
+      "results\\sg1_btc_ensemble_wf\\fold_03\\solo_456_trajectory.parquet",
+      "results\\sg1_btc_ensemble_wf\\fold_04\\solo_456_trajectory.parquet",
+      "results\\sg1_btc_ensemble_wf\\fold_05\\solo_456_trajectory.parquet",
+      "results\\sg1_btc_ensemble_wf\\fold_06\\solo_456_trajectory.parquet",
+      "results\\sg1_btc_ensemble_wf\\fold_07\\solo_456_trajectory.parquet"
+    ],
+    "fold_bars": [
+      5759,
+      5402,
+      6969,
+      8212,
+      7006,
+      6391,
+      8866,
+      8431
+    ],
+    "concat_n_bars": 57036,
+    "deadband_abs": 0.25,
+    "vol_estimator_bars": 20,
+    "rule": "solo_456",
+    "predecessor_baseline": "baselines/sg1_btc_extended_fold_07_ens_mean/ensemble_report.json",
+    "predecessor_protocol": "v2.2_stage_2_5_ensemble_report__fu3_fold07_ens_mean_override (FU-2 ens_mean reference window)",
+    "rationale": "Stage 3 WF rejected ensemble (G2 1/8, G3 uplift 0.866x); solo_v1.tar.gz anchors seed 456 fold_07 checkpoint. New baseline captures seed 456 action distribution across all 8 DECAY-01 WF OOS test windows (2025-09-01 -> 2026-04-01) for regime breadth, matching the WF gate's per-fold coverage."
+  }
+}

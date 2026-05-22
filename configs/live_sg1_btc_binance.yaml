@@ -1,24 +1,31 @@
-# Live Trading Config — SG-1 BTC SAC via Bybit Testnet (paper validation phase)
+# Live Trading Config — SG-1 BTC SAC via Bybit Mainnet Demo (DECAY-01 solo cutover)
 # 3-min bars, signal-gated, prop-firm trained (10% EOD trailing DD).
+#
+# Successor to configs/live_sg1_btc_binance.yaml (ensemble_v2 / ens_mean).
+# Triggered by SG1BTC-DECAY-01 retrain (n=88 perfect-fill re-audit fired the
+# decay gate, project_sg1_btc_n50_audit_20260511); Stage 3 WF 8-fold ensemble
+# eval verdict = `reject_ensemble_use_best_solo` (G1/G4/G5 PASS, G2 1/8 FAIL,
+# G3 uplift 0.866x < 1.10). Solo bundle on seed 456 fold_07 checkpoint owns
+# the freshest training cutoff (2026-02-01) and tops fold_07 pf_bar (2.524
+# vs solo_42 2.484 / solo_2025 2.363, plus all 4 ensemble rules).
 #
 # NOTE: Filename retains "_binance" for backward compatibility with
 # docker-compose.yaml STRATEGY_CONFIG ref + tests/check_retrain_triggers/runbook
-# scripts. Contents are now Bybit testnet — see exchange block below.
-# Venue cutover: 2026-05-02 (Binance demo → Bybit testnet, replacing).
+# scripts. Contents are Bybit mainnet demo — see exchange block.
 #
 # Sister config: configs/live_sg1_btc_dxtrade.yaml (Velotrade DXtrade execution,
-# activated once Bybit testnet paper validates this strategy/checkpoint pair).
+# activated once Bybit mainnet-demo soak validates this strategy/checkpoint pair).
 #
 # ---------------------------------------------------------------------------
 # PROP-FIRM DECOUPLING (S498-cont Step 5, 2026-04-25).
 # Phase-varying DD/target/gates live in configs/deploy/velotrade/<phase>.yaml
-# overlays. Even on paper Bybit testnet we use the Velotrade overlay so the
-# challenge state machine + drift gates exercise the same code paths the live
-# DXtrade deploy will hit.
+# overlays. Even on paper Bybit mainnet-demo we use the Velotrade overlay so
+# the challenge state machine + drift gates exercise the same code paths the
+# live DXtrade deploy will hit.
 #
 # Deploy invocations (resolved = this file + overlay):
 #   python scripts/deploy_bare_metal.py --script scripts/run_live.py \
-#     --config configs/live_sg1_btc_binance.yaml --overlay velotrade/step1
+#     --config configs/live_sg1_btc_binance_decay01.yaml --overlay velotrade/step1
 #
 # After Step 5 migration this BASE file alone is NOT paper-deployable
 # (validator FAILs: `risk.static_peak` missing); pair with an overlay.
@@ -29,64 +36,41 @@
 # accounts stay isolated). Read by ExchangePerpBroker testnet branch.
 
 # --- Exchange ---
-# 2026-05-02: Migrated Binance demo → Bybit testnet (replacing, not parallel).
-# Soak clock for S495 Step 6 RESETS at this cutover.
 exchange:
-  name: "bybit"                        # Bybit MAINNET DEMO TRADING (S527-cont; testnet abandoned — broken indexPrice + thin book)
-  testnet: false                       # was true (S526 testnet) → false (S527-cont mainnet-demo cutover)
-  demo: true                           # ccxt enable_demo_trading(True) → api-demo.bybit.com (real orderbook + simulated fills)
+  name: "bybit"
+  testnet: false
+  demo: true                           # ccxt enable_demo_trading(True) -> api-demo.bybit.com
   asset: "BTC"
   leverage: 1                          # 1:1 (user policy — Velotrade 6x is cap not floor)
-  order_type: "limit"                  # Mirror gmgp1-btc — limit orders + market fallback
-  limit_offset_pct: 0.0005             # Cross spread for immediate fill
+  order_type: "limit"
+  limit_offset_pct: 0.0005
   market_fallback_timeout: 60.0
-  data_exchange: "bybit"               # OHLCV from Bybit testnet (matches exec venue)
+  data_exchange: "bybit"
 
-# --- Agent (v2.3 atomic-swap bundle: FU-3 PROMOTE checkpoints, ens_mean override) ---
-# Loaded from bundle baked into image at /app/bundles/sg1_btc_velotrade_extended/.
-# - L1 N=10: test PF median 2.75, CV 2.12% (S535-cont FU-1 reconcile)
-# - Stage 2.5-R bootstrap PRIMARY: P(ens > solo) = 0.983 → PROMOTE (FU-2)
-# - Stage 3 WF 8-fold: bootstrap P(PF) = 1.0000 (n=57k), legacy G3 1.018
-#   below 1.10 but PF dominance promotes → PROMOTE (FU-3)
-# - Bundle SHA256: 0c50fe6267f5ca2cf889d8073549c16c11e9cd358d18b2a03135e43a4528981b
-# - Manifest chosen_rule: ens_agreement (FU-3 WF selection on fold_07).
-# - LIVE OVERRIDE: aggregation_rule=ens_mean. agent_loader.py:245 honors the
-#   config override over bundle.chosen_rule (logs WARN). Reverted from v2's
-#   ens_agreement after 2026-05-08 13:00 UTC drift_crit at warmup boundary
-#   (524 bars, dispersion-collapse: live deadband_frac=0.456 vs baseline 0.167).
-#   Root cause: ens_agreement returns target=0 on seed disagreement → engine
-#   treats target=0 as "liquidate" rather than "hold". ens_mean averages
-#   instead, naturally landing in deadband on disagreement → no spurious
-#   liquidations. FU-2 PROMOTE was on ens_mean with the same 3 seeds, so
-#   this is a known-validated configuration. Bundle SHA unchanged → no
-#   swap-handshake sentinel needed.
-# Predecessor: seed 42 solo (S498-cont AMBIGUOUS_RERUN fallback) → v2
-# ens_agreement (2026-05-07 - 2026-05-08, halted on drift_crit) → v2.1
-# ens_mean override (this).
-# `checkpoint_path` retained as dead value; build_agent() detects
-# `agent.ensemble.bundle_path` and skips the solo path.
+# --- Agent (v2.3 atomic-swap bundle: SG1BTC-DECAY-01 SOLO seed 456) ---
+# Loaded from bundle baked into image at /app/bundles/sg1_btc_velotrade_decay01/.
+# - DECAY-01 L1 N=10 (S541): test-PF CV 0.82% (10x tighter than S535 extended).
+# - Stage 2.5-R bootstrap PRIMARY (S542): P(ens > solo) = 0.650 < 0.75 floor
+#   -> SOLO_BEST_FALLBACK on seed 456 (val_argmax_pf 2.529, test PF 2.456).
+# - Stage 3 WF 8-fold (S548): G1/G4/G5 PASS; G2 1/8 FAIL; G3 uplift 0.866x
+#   (median ens_pf 2.040 vs median best-solo PF 2.357); G5 cv_pf 0.053.
+#   Decision: reject_ensemble_use_best_solo.
+# - Bundle SHA256: 7e8bdda31e536da1167e164bf9fbb8a864863e84df1f97be467ab817fa202a48
+# - Manifest chosen_rule: ens_mean (degenerate for N=1; aggregator returns the
+#   single seed's action unchanged).
+# Predecessor: bundles/sg1_btc_velotrade_extended/ensemble_v2.tar.gz
+#   (ensemble_v2 / ens_mean override; LIVE since 2026-05-08, halted on
+#   2026-05-11 n=88 re-audit firing SG1BTC-DECAY-01 retrain trigger).
 agent:
   checkpoint_path: ""
   device: "cpu"
   torch_compile: false
   ensemble:
-    bundle_path: "/app/bundles/sg1_btc_velotrade_extended/ensemble_v2.tar.gz"
-    # aggregation_rule declared explicitly so validate_config can fire its
-    # v2.3 agreement-decay key check (it can't open the tarball at validate
-    # time). Mismatch with bundle.chosen_rule logs a WARN at runtime.
-    # 2026-05-08: overridden to ens_mean; bundle manifest still says
-    # ens_agreement (no rebake). See comment block above for rationale.
-    aggregation_rule: "ens_mean"
-    # FU-3 bake produced normalizer_sha256: MISSING for all 3 seeds (same as
-    # FU-2 v1) — live engine supplies its own `norm_warmup` pkl per
-    # project_live_obs_normalization_mismatch_s509. Without this override
-    # extract_and_verify_bundle's default require_normalizers=True raises
-    # BundleIntegrityError on first boot.
-    require_normalizers: false
-    # deadband, seeds, seed_pfs come from the bundle's manifest. Override
-    # deadband / aggregation_rule here only to demote without rebuilding.
+    bundle_path: "/app/bundles/sg1_btc_velotrade_decay01/solo_v1.tar.gz"
+    aggregation_rule: "ens_mean"       # degenerate for N=1; matches manifest.chosen_rule
+    require_normalizers: false         # bundle has normalizer_sha256: MISSING; norm_warmup pkl supplied below
 
-# --- SAC Hyperparameters (PLACEHOLDER — update with HPO best trial) ---
+# --- SAC Hyperparameters (live-engine ctor stubs; runtime weights come from bundle) ---
 agents:
   sac:
     lr_actor: 0.0003
@@ -117,20 +101,18 @@ features:
   asset_class: "crypto"
   norm_span: 120
   bootstrap_bars: 30000
-  # S509 train-serve EMA-Z parity (S535-cont-5 swap audit follow-up AUD-7).
-  # v2 bundle has normalizer_sha256: MISSING per FU-3 bake; without an
-  # explicit override the resolver searches alongside the extracted seed
-  # checkpoints (which lack the pkl) then falls back to legacy rolling
-  # EMA-Z. The L1 solo seed-42 dir is bind-mounted here for backward-compat
-  # and its pkl is parity-correct for the v2 ensemble: norm_warmup is a
-  # deterministic function of (training data, scales, norm_span) — all 4
-  # L1 seeds [42, 456, 3141, 123] share these, only SAC RNG differs.
-  norm_warmup_path: "/app/checkpoints/sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030/norm_warmup_3-15-60.pkl"
+  # S509 train-serve EMA-Z parity. DECAY-01 fold_07 training data ends
+  # 2026-02-01, 1mo later than the L1 seed42 pkl previously bind-mounted
+  # here. Regenerated via:
+  #   python scripts/extract_norm_warmup_buffer.py \
+  #     --config configs/sg1_btc_velotrade_decay01_wf_multiseed.yaml \
+  #     --seeds 456 --train_end_date 2026-02-01 \
+  #     --ckpt_path_glob "checkpoints/sg1-btc-decay01-wf-fold7-seed{seed}_*/checkpoint_final.pth"
+  # Image build must COPY this checkpoint dir into /app/checkpoints/ so the
+  # pkl is reachable at the path below.
+  norm_warmup_path: "/app/checkpoints/sg1-btc-decay01-wf-fold7-seed456_20260521_230637/norm_warmup_3-15-60.pkl"
 
 # --- Signal Gate (must match training) ---
-# Thresholds from configs/sg1_btc_velotrade_l1_multiseed.yaml (S479 BTC Bybit
-# 3-min calibration; ~75% composite pass rate). Old placeholders (0.5/0.03/0.5)
-# never triggered because BTC parkinson dist is ~10× smaller than XAU.
 signal_gate:
   enabled: true
   gate_mode: "composite"
@@ -149,14 +131,14 @@ bar_clock:
 
 # --- Trading ---
 trading:
-  initial_balance: 50000.0           # Bybit MAINNET DEMO USDT (S527-cont; auto-funded 50k coin USDT equity, totalWalletBalance ~100k; testnet path abandoned — broken indexPrice + thin book)
+  initial_balance: 50000.0
   deadband_threshold: 0.25
-  taker_fee: 0.0005                  # 5bps crypto taker
+  taker_fee: 0.0005
 
 # --- Data source (validator Stage-0; ccxt live-fetch at runtime) ---
 data:
   source: ccxt
-  data_exchange: bybit               # api-testnet.bybit.com (matches exec venue)
+  data_exchange: bybit
   frequency: 3m
   ticker: "BTC/USDT"
 
@@ -165,82 +147,63 @@ env:
   taker_fee: 0.0005
 
 # --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
-# Overlay owns: static_peak, eod_trailing_drawdown, eod_hour_utc,
-# flatten_on_kill_file. See configs/deploy/velotrade/{step1,step2,funded}.yaml.
 risk:
   enabled: true
-  max_drawdown_pct: 0.08             # 8% trigger (2% buffer below 10% limit)
-  circuit_breaker_cooldown_bars: 0   # Stay flat once breached
+  max_drawdown_pct: 0.08
+  circuit_breaker_cooldown_bars: 0
   max_position_pct: 1.0
   max_net_short_exposure: -1.0
-  max_gross_exposure: 1.0            # 1:1 leverage (user policy)
+  max_gross_exposure: 1.0
   funding_rate_alert: 999.0
   min_margin_reserve_pct: 0.15
-  # S495-cont (2026-04-23) preemptive override (mirrors sg1-xauusd fix). See
-  # crypto_risk_manager.py:267 — accumulator resets every 24 `check()` calls,
-  # not 24 calendar hours. SG-1 3-min bars with signal_gate + deadband reduce
-  # check() to ~9/day → "daily" window spans ~2-3 calendar days. Default 4.0
-  # trips after 3-4 roundtrips. 10.0 gives ~3-5 roundtrips per reset window.
-  # Structural fix (bar-interval-aware reset) queued.
   daily_turnover_limit: 10.0
-  # S535 canary (2026-05-06). Piecewise-linear taper across [0.8, 1.0] of the
-  # daily turnover budget — replaces hard-wall scaling that produced the
-  # 13h flat-line at the cap on 2026-05-05. Default 1.0 disables taper
-  # (legacy preserved bit-identically). 0.8 = brake from 80% budget instead
-  # of cliff-edging to 100%. See crypto_risk_manager.py:334-370 + commit 3b7d49b1.
   soft_throttle_start: 0.8
+  # SG1BTC-DECAY-01 cooldown (decision_sg1_btc_skip_first_3_trades_s538).
+  # Skip the first 3 trades after each container restart — first-3-trade
+  # live PnL is -$45 vs perfect-fill +$12 over 5 legs (4x execution skew
+  # on weakly-conviction signals where alpha < 5bp limit-cross). Count-based,
+  # no-look-ahead band-aid. Counter resets on fresh container start.
+  # Implementation: live_engine.py:474-491 + skip block at post-deadband/post-risk
+  # junction (shipped S542). Counter decrements only on would-be TRADES.
+  post_restart_cooldown_bars: 3
 
 # --- WandB Monitoring ---
-# Distinct run_id from seed42-solo predecessor so swap is auditable in WandB.
 wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   tags: ["live", "sg-1", "BTC", "SAC", "3min", "bybit-demo", "paper",
-         "velotrade-overlay", "signal-gated", "prop-firm", "ensemble",
-         "ens-mean", "v2p1-rule-revert"]
-  run_id: "live-sg1-btc-bybit-demo-paper-ensemble-v2p1-ens-mean"
+         "velotrade-overlay", "signal-gated", "prop-firm", "solo",
+         "decay01", "seed-456"]
+  run_id: "live-sg1-btc-bybit-demo-paper-solo-decay01-seed456"
 
 # --- Safety ---
 safety:
   require_explicit_mainnet: true
-  max_daily_loss_pct: 0.0            # 0 = disabled (Velotrade 2-step has no daily rule). Engine treats ≤0 as disabled (audit FIND-01, 2026-04-22).
-  # S535-cont-6 (AUD-3 fix): moved from /tmp to persistent volume so v2.2 §8.3
-  # repeat-CRIT lockout survives container restart. /tmp inside container fs is
-  # tmpfs-equivalent and wiped per restart — kill_file there auto-cleared on
-  # bounce, defeating the lockout. Mirrors sister sg1_xauusd_ctrader.yaml.
-  # `kill_file_override` defaults to `${kill_file}.override` per
-  # live_engine.py:309 so it inherits /app/state too — no separate line needed.
+  max_daily_loss_pct: 0.0
+  # S535-cont-6 (AUD-3): persistent /app/state volume so v2.2 §8.3 lockout
+  # survives restart. kill_file_override defaults to ${kill_file}.override
+  # so it inherits /app/state too — no separate line needed.
   kill_file: "/app/state/finrl_live_sg1_btc_kill"
-  # v2.3 swap-handshake state files on the persistent state volume (/app/state
-  # is mounted via sg1-btc-state in docker-compose). Default `${kill_file}.*`
-  # would land on /tmp which is wiped per container — every restart would be
-  # treated as a fresh bundle and re-trigger the operator approval handshake.
+  # v2.3 swap-handshake state on persistent state volume.
   last_bundle_file: "/app/state/finrl_live_sg1_btc_last_bundle"
   swap_approved_file: "/app/state/finrl_live_sg1_btc_swap_approved"
-  flatten_on_kill_file: true         # v2.2 §8.3 CRIT graceful flatten
+  flatten_on_kill_file: true
   emergency_flatten_on_error: true
-  # E1 Step 0b: live-replay fixture capture for the signed-lots refactor.
-  # Captures raw CCXT fetch_positions + fetch_balance JSONL for the next
-  # capture_max_bars trading steps, then auto-closes. Default-off elsewhere;
-  # enabled here for the 2026-04-27 00:00 UTC un-halt redeploy. Disable
-  # (set false or remove) once the Tier-3 fixture is collected.
+  # E1 Step 0b live-replay fixture capture (signed-lots refactor support).
+  # 480 bars * 3min = 24h; auto-closes. Remove after Tier-3 fixture collected.
   capture_ccxt_raw_responses: true
-  capture_max_bars: 480              # 480 × 3-min = 24h
+  capture_max_bars: 480
   capture_dir: "/app/state"
 
 # --- Protocol v2.2 §8.2 Live Action-Drift ---
-# Baseline = FU-2 ens_mean reference distribution (single-window L1 PROMOTE,
-# 2026-03-01 -> 2026-04-06) copied to baselines/sg1_btc_extended_fold_07_ens_mean/
-# 2026-05-08 to support ens_mean live override (see Agent section). Same 3
-# seeds [456, 3141, 123] as FU-3 fold_07 checkpoints; FU-2 was trained
-# through 2026-01-31 vs FU-3 fold_07 through 2026-02-28 (~1mo earlier). On
-# the same 2026-03-01..04-06 region the rule-driven distribution should
-# dominate the small training-window delta. Predecessor (ens_agreement)
-# baseline kept at baselines/sg1_btc_extended_fold_07/ensemble_report.json
-# for audit. Baked into live-engine image via `COPY baselines /app/baselines`.
+# Baseline = DECAY-01 solo_456 distribution aggregated across all 8 WF OOS
+# test windows (57036 bars, 2025-09-01 -> 2026-04-01) for regime breadth.
+# Mean shift from +0.04 (FU-2 ens_mean) -> -0.16 (DECAY-01 solo_456) reflects
+# seed 456's fresher-data short bias; deadband_frac 0.1634, sat 0.0080.
+# Baked into live-engine image via `COPY baselines /app/baselines`.
 drift:
   enabled: true
-  baseline_path: "/app/baselines/sg1_btc_extended_fold_07_ens_mean/ensemble_report.json"
+  baseline_path: "/app/baselines/sg1_btc_decay01_fold_07_solo_456/ensemble_report.json"
   window_bars: 1000
   min_bars_before_check: 500
   vol_estimator_bars: 20
@@ -256,7 +219,7 @@ gates:
     saturation_frac_crit: 0.30
     action_kl_warn: 0.5
     action_kl_crit: 1.0
-    agreement_flat_delta_warn: 0.20         # v2.3 ensemble agreement-decay
+    agreement_flat_delta_warn: 0.20         # inert for solo (no agreement signal)
     agreement_flat_delta_crit: 0.40
     agreement_flat_window_bars: 2000
     regime_conditioning: true
@@ -266,7 +229,7 @@ gates:
     crit_repeat_window_hours: 24
     crit_repeat_count_before_lockout: 2
 
-# --- PRISM Regime Overlay (optional) ---
+# --- PRISM Regime Overlay (optional, falsified S413+) ---
 prism:
   enabled: false
   base_url: "http://prism-api:8001"
@@ -286,29 +249,35 @@ monitoring:
   metrics_port: 9109                   # Aligned with docker-compose sg1-btc service
 
 # ---------------------------------------------------------------------------
-# Provenance (S546, 2026-05-21) — S470 item 7
+# Provenance (S548) — SG1BTC-DECAY-01 solo cutover
 # ---------------------------------------------------------------------------
 provenance:
   schema_version: 1
-  block_added: "2026-05-21 (S546)"
+  block_added: "2026-05-22 (S548)"
   strategy: sg1-btc
-  agent_type: ensemble
-  training_config: "configs/sg1_btc_velotrade_l1_multiseed_extended.yaml"
-  bundle_path: "/app/bundles/sg1_btc_velotrade_extended/"  # baked into image
-  bundle_sha256: "0c50fe6267f5ca2cf889d8073549c16c11e9cd358d18b2a03135e43a4528981b"
-  ensemble:
-    aggregation_rule: "ens_mean"           # LIVE OVERRIDE — bundle.chosen_rule=ens_agreement (FU-3 WF). Reverted to ens_mean 2026-05-08 after drift_crit at warmup boundary
-    bundle_chosen_rule: "ens_agreement"    # FU-3 WF selection on fold_07
-    l1_metrics: "test PF median 2.75, CV 2.12% (N=10, S535-cont FU-1)"
-    stage_2_5_bootstrap: "P(ens > solo) = 0.983 (FU-2 PROMOTE)"
-    stage_3_wf_bootstrap: "P(PF) = 1.0000 (n=57k, 8-fold, FU-3 PROMOTE)"
-  live_run_id: "live-sg1-btc-bybit-demo-paper-ensemble-v2p1-ens-mean"
-  paper_deploy_since: "2026-05-08"         # v2.3 swap (was ens_agreement v2.1 pre-revert)
+  agent_type: solo                       # was: ensemble (ensemble_v2 ens_mean override)
+  training_config: "configs/sg1_btc_velotrade_decay01_wf_multiseed.yaml"
+  bundle_path: "/app/bundles/sg1_btc_velotrade_decay01/"
+  bundle_sha256: "7e8bdda31e536da1167e164bf9fbb8a864863e84df1f97be467ab817fa202a48"
+  solo:
+    seed: 456
+    fold: 7
+    aggregation_rule: "ens_mean"           # degenerate for N=1
+    bundle_chosen_rule: "ens_mean"
+    seed_pf_fold_07: 2.5237
+    l1_decay01_metrics: "test PF CV 0.82% (N=10, S541 — 10x tighter than S535 extended)"
+    stage_2_5_r_bootstrap: "P(ens > solo) = 0.650 < 0.75 floor (S542 — SOLO_BEST_FALLBACK on seed 456)"
+    stage_3_wf_gates: "G1 8/8 PASS, G2 1/8 FAIL, G3 0.866x FAIL, G4 8/8 PASS, G5 cv_pf 0.053 PASS"
+    stage_3_wf_decision: "reject_ensemble_use_best_solo (S548)"
+  live_run_id: "live-sg1-btc-bybit-demo-paper-solo-decay01-seed456"
+  paper_deploy_since: null               # set on first paper bar
   audit_history:
-    - "2026-04-25 (S498-cont): initial paper deploy on Binance demo"
-    - "2026-05-02: venue cutover Binance demo → Bybit testnet"
-    - "2026-05-04 (S527-cont): testnet → Bybit mainnet demo"
-    - "2026-05-08 (S538-cont-4): aggregation_rule ens_agreement → ens_mean (Fix 1 pattern) after drift_crit at warmup boundary"
+    - "2026-04-25 (S498-cont): initial paper deploy on Binance demo (seed 42 solo)"
+    - "2026-05-02: venue cutover Binance demo -> Bybit testnet"
+    - "2026-05-04 (S527-cont): testnet -> Bybit mainnet demo"
+    - "2026-05-07 (FU-3): swap to ensemble_v2 ens_agreement (drift_crit at warmup)"
+    - "2026-05-08 (S538-cont-4): aggregation_rule ens_agreement -> ens_mean override"
     - "2026-05-09: cohort A soak T+0 reset clean ($50,000.76)"
-    - "2026-05-11: n=88 re-audit FIRED SG1BTC-DECAY-01 retrain trigger (alpha decay accelerating)"
-    - "2026-05-12 (S542): SG-1-BTC DECAY-01 Stage 2.5-R verdict = SOLO_BEST_FALLBACK on seed 456 (ens_mean won val 2.572 but only 1.006× test uplift; bootstrap P(PF)=0.650<0.75 floor)"
+    - "2026-05-11: n=88 re-audit FIRED SG1BTC-DECAY-01 retrain trigger (alpha decay)"
+    - "2026-05-12 (S542): Stage 2.5-R verdict = SOLO_BEST_FALLBACK on seed 456"
+    - "2026-05-22 (S548): Stage 3 WF reject_ensemble_use_best_solo; solo_v1 cutover"
