@@ -2353,8 +2353,12 @@ class LiveTradingEngine:
         projected_return = (worst_pv - self._daily_start_value) / self._daily_start_value
 
         if projected_return < -self._max_daily_loss_pct:
+            # Snapshot pos BEFORE _emergency_flatten() zeros it — otherwise
+            # the persisted halt detail reports pos=0 and post-mortem reads
+            # like a flat-position false positive (S501).
+            pos_at_trip = self._current_position
             logger.critical(
-                f"INTRA-BAR DD PROJECTION: pos={self._current_position:+.4f} "
+                f"INTRA-BAR DD PROJECTION: pos={pos_at_trip:+.4f} "
                 f"close={close:.4f} adverse={adverse_price:.4f} "
                 f"worst_pv={worst_pv:.2f} daily_start={self._daily_start_value:.2f} "
                 f"projected_return={projected_return:.2%} < -{self._max_daily_loss_pct:.0%}. "
@@ -2367,7 +2371,7 @@ class LiveTradingEngine:
                     reason="intrabar_dd_projection",
                     detail=(
                         f"projected_return={projected_return:.4f} "
-                        f"pos={self._current_position:.4f} "
+                        f"pos_at_trip={pos_at_trip:.4f} "
                         f"adverse={adverse_price:.4f} close={close:.4f}"
                     ),
                     now_utc=datetime.now(timezone.utc),
