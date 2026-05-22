@@ -11,6 +11,7 @@ from finrl_pro_ds.monitoring.agreement_decay import (
     AgreementDecayTracker,
 )
 from finrl_pro_ds.monitoring.kill_file import (
+    CRIT_REASONS,
     REASON_AGREEMENT_DECAY_CRIT,
     REASON_DRIFT_CRIT,
     REASON_OPERATOR,
@@ -25,6 +26,7 @@ __all__ = [
     "AgreementDecayStatus",
     "AgreementDecayTracker",
     "CONSENSUS_RULES",
+    "CRIT_REASONS",
     "DriftStatus",
     "REASON_AGREEMENT_DECAY_CRIT",
     "REASON_DRIFT_CRIT",
