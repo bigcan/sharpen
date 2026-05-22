@@ -184,7 +184,28 @@ def _init_agreement_decay_tracker(
                 payload = json.load(f)
             ens = payload.get("ensemble_eval_distribution")
             if isinstance(ens, dict) and "deadband_frac" in ens:
-                baseline_flat = float(ens["deadband_frac"])
+                # F2-AUD-02 guard (S548-cont): pre-Fix-2 baselines folded
+                # no-consensus zeros into deadband_frac (aggregator returned
+                # 0 on consensus failure); post-Fix-2 baselines exclude NaN
+                # bars from numerator+denominator. Pairing an old baseline
+                # with a consensus-rule live deploy would compute a biased
+                # `flat_frac_delta`. Detect via the `no_consensus_frac` field
+                # — its presence is the implicit Fix-2 marker. Degrade to
+                # LOG_ONLY (preserves WandB telemetry; suppresses false
+                # WARN/CRIT) and require operator re-bake under Fix 2.
+                if "no_consensus_frac" not in ens:
+                    logger.warning(
+                        f"agreement-decay baseline at {baseline_path} "
+                        f"lacks `no_consensus_frac` — pre-Fix-2 schema. "
+                        f"Pairing with rule={rule!r} would compute biased "
+                        f"flat_frac_delta (baseline includes consensus-failure "
+                        f"bars in deadband_frac denominator; live tracker "
+                        f"excludes NaN). Running in LOG_ONLY — re-bake "
+                        f"baseline under Fix 2 to re-enable WARN/CRIT "
+                        f"(F2-AUD-02 closure, S548-cont).",
+                    )
+                else:
+                    baseline_flat = float(ens["deadband_frac"])
             else:
                 logger.warning(
                     f"agreement-decay baseline at {baseline_path} has no "
