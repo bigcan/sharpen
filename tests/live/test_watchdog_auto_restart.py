@@ -179,3 +179,117 @@ def test_restart_failure_does_not_record_success(wd):
     assert c.restart.call_count == 1
     # Failed restart not recorded — rate limit not consumed
     assert wd._auto_restart_history.get("gmgp1-gold", []) == []
+
+
+# ---------- F2-A-01 closure (S548-cont): CRIT-lockout filter ----------------
+#
+# Pre-S548-cont the watchdog refused auto-restart only when the kill_file
+# `reason == "drift_crit"`. An `agreement_decay_crit` kill_file would
+# fall through and the watchdog would bounce the container, defeating
+# Protocol v2.2 §8.3 operator-only re-enable semantics. Fix: use the
+# canonical `CRIT_REASONS` tuple from `finrl_pro_ds.monitoring.kill_file`
+# (currently `{drift_crit, agreement_decay_crit}`) so adding a new
+# write_kill_file reason there auto-widens this guard.
+
+
+import json  # noqa: E402 — kept local to F2-A-01 test block
+
+
+def _stub_kill_file_payload(container: MagicMock, reason: str | None, count: int = 1) -> None:
+    """Stub `docker exec cat <kill_file>` to return a JSON payload (or empty).
+
+    None reason = no kill_file present (exec returns rc != 0).
+    """
+    if reason is None:
+        container.exec_run.return_value = (1, b"")
+        return
+    payload = {
+        "reason": reason,
+        "count": count,
+        "detail": f"test {reason}",
+        "first_ts": "2026-05-22T00:00:00+00:00",
+        "last_ts": "2026-05-22T00:00:00+00:00",
+    }
+    container.exec_run.return_value = (0, json.dumps(payload).encode("utf-8"))
+
+
+def test_drift_crit_kill_file_refuses_auto_restart(wd):
+    """Regression: drift_crit kill_file still blocks auto-restart (was the
+    pre-S548-cont single-reason behavior)."""
+    c = _make_container("sg1-xauusd", health="unhealthy")
+    _stub_kill_file_payload(c, reason="drift_crit", count=1)
+    _run_sweeps(wd, [c], n=3)
+    assert c.restart.call_count == 0, "drift_crit must block auto-restart"
+    assert "sg1-xauusd" not in wd._unhealthy_streak, (
+        "streak should be cleared after CRIT refusal"
+    )
+
+
+def test_agreement_decay_crit_kill_file_refuses_auto_restart(wd):
+    """F2-A-01 closure: agreement_decay_crit kill_file blocks auto-restart
+    (pre-S548-cont this leaked through and the watchdog would bounce the
+    container, defeating §8.3 lockout)."""
+    c = _make_container("sg1-xauusd", health="unhealthy")
+    _stub_kill_file_payload(c, reason="agreement_decay_crit", count=1)
+    _run_sweeps(wd, [c], n=3)
+    assert c.restart.call_count == 0, "agreement_decay_crit must block auto-restart"
+    assert "sg1-xauusd" not in wd._unhealthy_streak
+
+
+def test_agreement_decay_crit_repeat_lockout_message(wd, monkeypatch):
+    """Repeat-CRIT (count >= 2) alert should mention BOTH kill_file and
+    override clear semantics. (The CRIT LOCKOUT alert is one of several
+    emitted during a sweep cycle — pre-threshold UNHEALTHY alerts also
+    fire — so filter to the lockout message specifically.)"""
+    captured: list[tuple[str, str]] = []
+    monkeypatch.setattr(wd, "alert", lambda name, msg: captured.append((name, msg)))
+
+    c = _make_container("sg1-xauusd", health="unhealthy")
+    _stub_kill_file_payload(c, reason="agreement_decay_crit", count=3)
+    _run_sweeps(wd, [c], n=3)
+
+    assert c.restart.call_count == 0
+    lockout_alerts = [(n, m) for n, m in captured if "CRIT LOCKOUT" in m]
+    assert len(lockout_alerts) == 1, (
+        f"expected exactly 1 CRIT LOCKOUT alert; got {len(lockout_alerts)} "
+        f"(all captured: {[m[:60] for _, m in captured]})"
+    )
+    name, msg = lockout_alerts[0]
+    assert name == "sg1-xauusd"
+    assert "agreement_decay_crit" in msg
+    assert "kill_file.override" in msg, (
+        "count>=2 should advise clearing both kill_file AND override"
+    )
+
+
+def test_operator_reason_does_not_block_auto_restart(wd):
+    """A non-CRIT kill_file reason (e.g., operator manual stop) should NOT
+    trigger the §8.3 lockout branch — watchdog still attempts auto-restart.
+    (The engine's own startup gate handles the actual halt; this just
+    preserves the current contract for non-CRIT kill_files.)"""
+    c = _make_container("sg1-xauusd", health="unhealthy")
+    _stub_kill_file_payload(c, reason="operator", count=1)
+    _run_sweeps(wd, [c], n=3)
+    assert c.restart.call_count == 1, (
+        "non-CRIT kill_file reasons should fall through to auto-restart"
+    )
+
+
+def test_no_kill_file_does_not_block_auto_restart(wd):
+    """Sanity: missing kill_file is the normal post-unhealthy state."""
+    c = _make_container("sg1-xauusd", health="unhealthy")
+    _stub_kill_file_payload(c, reason=None)
+    _run_sweeps(wd, [c], n=3)
+    assert c.restart.call_count == 1
+
+
+def test_crit_reasons_constant_matches_kill_file_canonical():
+    """Watchdog imports the canonical CRIT_REASONS from kill_file.py; if
+    a new reason is added there, this assertion catches the drift."""
+    from finrl_pro_ds.monitoring.kill_file import CRIT_REASONS as canonical
+    sys.modules.pop("watchdog_docker", None)
+    mod = importlib.import_module("watchdog_docker")
+    assert mod.CRIT_REASONS == canonical, (
+        f"watchdog CRIT_REASONS {mod.CRIT_REASONS} drifted from canonical "
+        f"{canonical} — F2-A-01 single-source-of-truth contract violated"
+    )

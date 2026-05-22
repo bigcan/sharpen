@@ -29,6 +29,12 @@ REASON_AGREEMENT_DECAY_CRIT = "agreement_decay_crit"
 REASON_OPERATOR = "operator"
 REASON_LEGACY = "legacy"
 
+# CRIT-class reasons that trigger §8.3 "operator-only re-enable" semantics
+# (repeat-CRIT lockout in `should_lockout` + watchdog auto-restart refusal in
+# `scripts/watchdog_docker.py`). Single source of truth — adding a new
+# write_kill_file reason here automatically widens both downstream guards.
+CRIT_REASONS: tuple[str, ...] = (REASON_DRIFT_CRIT, REASON_AGREEMENT_DECAY_CRIT)
+
 CRIT_LOCKOUT_WINDOW_HOURS = 24
 CRIT_LOCKOUT_COUNT = 2
 
@@ -131,7 +137,7 @@ def should_lockout(
     override_present = override_path is not None and override_path.exists()
 
     is_repeat_crit = False
-    if reason in (REASON_DRIFT_CRIT, REASON_AGREEMENT_DECAY_CRIT) and count >= count_threshold:
+    if reason in CRIT_REASONS and count >= count_threshold:
         try:
             first_ts = datetime.fromisoformat(first_ts_raw) if first_ts_raw else None
         except ValueError:

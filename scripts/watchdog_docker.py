@@ -32,6 +32,17 @@ from zoneinfo import ZoneInfo
 import docker
 import requests
 
+# Import the canonical CRIT-reasons set from the kill_file module so the
+# watchdog's lockout filter automatically widens when new write_kill_file
+# reasons are added (F2-A-01 closure S548-cont: previously hardcoded to
+# `drift_crit` only, missed `agreement_decay_crit`).
+# scripts/ is not a package — fall back to a local set if running outside
+# the install path (e.g., ad-hoc invocations in dev sandboxes).
+try:
+    from finrl_pro_ds.monitoring.kill_file import CRIT_REASONS
+except ImportError:
+    CRIT_REASONS = ("drift_crit", "agreement_decay_crit")
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -543,12 +554,24 @@ def _read_container_kill_file(container, path: str = "/tmp/finrl_live_kill") -> 
         return {"reason": "legacy"}
 
 
-def _has_drift_crit_kill_file(container) -> tuple[bool, dict | None]:
-    """Return (is_drift_crit, payload) for the container's kill_file."""
+def _has_crit_kill_file(container) -> tuple[bool, dict | None]:
+    """Return (is_crit, payload) for the container's kill_file.
+
+    `is_crit` is True iff the kill_file payload's `reason` is in
+    `CRIT_REASONS` (operator-only re-enable per Protocol v2.2 §8.3).
+    Currently `drift_crit` + `agreement_decay_crit`; the source of truth
+    is `finrl_pro_ds.monitoring.kill_file.CRIT_REASONS` so adding a new
+    reason there widens this guard automatically.
+
+    F2-A-01 closure (S548-cont, 2026-05-22): previously `is_drift_crit`
+    matched only `reason == "drift_crit"`. An `agreement_decay_crit`
+    kill_file would fall through and the watchdog would attempt auto-
+    restart, defeating the §8.3 operator-only re-enable intent.
+    """
     payload = _read_container_kill_file(container)
     if payload is None:
         return False, None
-    return payload.get("reason") == "drift_crit", payload
+    return payload.get("reason") in CRIT_REASONS, payload
 
 
 def _should_auto_restart(container_name: str, streak: int, now: float | None = None) -> bool:
@@ -557,9 +580,10 @@ def _should_auto_restart(container_name: str, streak: int, now: float | None = N
     Returns True when the streak has reached the configured threshold AND
     the container has not exceeded the per-hour restart cap.
 
-    NOTE: drift-CRIT halts are checked by callers via `_has_drift_crit_kill_file`
-    before this function is consulted (Protocol v2.2 §8.3: watchdog does NOT
-    auto-restart on drift CRIT; manual human re-enable required).
+    NOTE: CRIT halts (drift_crit / agreement_decay_crit / any future
+    `CRIT_REASONS`) are checked by callers via `_has_crit_kill_file`
+    before this function is consulted (Protocol v2.2 §8.3: watchdog does
+    NOT auto-restart on these; manual human re-enable required).
     """
     if not AUTO_RESTART_ENABLED:
         return False
@@ -624,22 +648,23 @@ def sweep(client: docker.DockerClient) -> None:
             _unhealthy_streak[name] = streak
 
             if _should_auto_restart(name, streak):
-                # v2.2 §8.3: drift-CRIT halts are operator-only re-enable.
+                # v2.2 §8.3: CRIT halts are operator-only re-enable.
                 # Refuse auto-restart and surface the kill_file payload so
                 # humans can decide whether to clear kill_file + override.
-                is_crit, payload = _has_drift_crit_kill_file(container)
+                is_crit, payload = _has_crit_kill_file(container)
                 if is_crit:
+                    reason = (payload or {}).get("reason", "unknown_crit")
                     count = (payload or {}).get("count", 1)
                     logger.critical(
-                        f"Auto-restart REFUSED for {name}: drift-CRIT "
-                        f"kill_file present (count={count})",
+                        f"Auto-restart REFUSED for {name}: CRIT "
+                        f"kill_file present (reason={reason}, count={count})",
                     )
                     _unhealthy_streak.pop(name, None)  # break the streak loop
                     alert(
                         name,
-                        f"<b>[DRIFT-CRIT LOCKOUT] {info['strategy']}</b>\n"
+                        f"<b>[CRIT LOCKOUT — {reason}] {info['strategy']}</b>\n"
                         f"Container: {name}\n"
-                        f"Reason: drift CRIT kill_file "
+                        f"Reason: {reason} kill_file "
                         f"(count={count}, detail={(payload or {}).get('detail', '')})\n"
                         f"Manual re-enable: clear kill_file"
                         + (
