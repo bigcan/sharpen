@@ -16,8 +16,8 @@
 
 workstream: "sg1_eurusd_hyper_growth"
 variant: "ensemble_agreement_top3"
-seeds: [42, 2025, 3141]                        # placeholder; populate from L1 actuals
-aggregation_rule: "ens_agreement"              # candidate rule under test
+seeds: [2025, 3141, 9999]                      # SG-1 EURUSD HG L1 top-3 (S549-cont)
+aggregation_rule: "ens_pf_weighted"            # Stage 2.5-R PROMOTE (S549-cont, bundle ensemble_v1)
 
 # Fold count expected from the multiseed WF config.
 # Tentative 8 folds (matches XAUUSD OANDA cadence on ~24mo span); revisit after
