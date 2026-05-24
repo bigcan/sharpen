@@ -36,3 +36,11 @@ randd_archive
 # co-location) + norm_warmup_3-15-60.pkl (read at runtime by features layer).
 !checkpoints/sg1-btc-decay01-wf-fold7-seed456_20260521_230637
 !checkpoints/sg1-btc-decay01-wf-fold7-seed456_20260521_230637/**
+
+# sg1-eurusd HG L1 trial-18 seed-2025: allowlist for the ensemble_v1
+# paper-deploy bake (S550-cont-2, 2026-05-24). Dockerfile.live-engine
+# COPYs the whole dir so norm_warmup_3-15-60.pkl is reachable at the path
+# in live_sg1_eurusd_bybit.yaml features.norm_warmup_path. Per-seed pkls
+# are byte-identical (same L1 train_end_date 2025-09-30) so one seed dir suffices.
+!checkpoints/sg1-eurusd-hg-l1-trial18-seed2025_20260523_120312
+!checkpoints/sg1-eurusd-hg-l1-trial18-seed2025_20260523_120312/**
