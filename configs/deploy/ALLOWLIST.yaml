@@ -32,6 +32,7 @@ allow:
   - gates.ftmo_*
   - gates.velotrade_*
   - gates.the5ers_*
+  - gates.hyper_growth_*       # The5ers Hyper Growth product (S550: sg1-eurusd HG soak)
   - gates.hyrotrader_*
   - gates.fundingpips_*
 

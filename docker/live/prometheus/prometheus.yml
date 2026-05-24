@@ -57,6 +57,10 @@ scrape_configs:
         labels:
           strategy: "sg1-btc"
           broker: "bybit"
+      - targets: ["sg1-eurusd:9110"]
+        labels:
+          strategy: "sg1-eurusd"
+          broker: "bybit"
 
   # INACTIVE: PRISM API — PRISM falsified (Session 345)
   # - job_name: "prism"

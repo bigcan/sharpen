@@ -1,0 +1,46 @@
+# The5ers Hyper Growth Step 1 overlay. Layer on top of a base training/live config.
+#
+# Applied by:
+#   python scripts/deploy_bare_metal.py --config <base> --overlay hyper_growth/step1
+#
+# Hyper Growth contract: 1-step "Hyper" evaluation, 3% max daily DD, 6% max
+# trailing DD from equity high-water mark, weekend holds allowed, personal
+# EAs allowed. Profit target varies by program tier; for our soak path on
+# Bybit demo the target is operator-driven (manual_ack advance) so the
+# challenge state machine still exercises the same code path as the live
+# The5ers deploy will.
+#
+# DD handling: training-wrapper `env.risk.static_peak` stays `true` to match
+# trained checkpoint contract (S422). HG-specific trailing cap is enforced
+# live-side via `risk.eod_trailing_drawdown`. Day rolls 21:00 UTC (FX session).
+#
+# See decision_prop_firm_decoupling_s495 and project_sg1_eurusd_retrain_queued_s477.
+
+env:
+  risk:
+    max_trailing_drawdown_pct: 0.05     # 1pp buffer vs HG 6% cap (matches L1 training cfg)
+    max_daily_loss_pct: 0.02            # 1pp buffer vs HG 3% cap (matches L1 training cfg)
+    eod_hour_utc: 21                    # FX session rolls 21:00 UTC
+    augment_obs: "off"                  # live-path compat
+    static_peak: true                   # match training (see header)
+
+challenge:
+  enabled: true
+  phase: step1
+  profit_target_pct: 0.08               # The5ers Hyper Growth ~8% target (operator-confirm at funded promotion)
+  next_phase: funded                    # HG is 1-step; promotion goes straight to funded
+  advance_rule: manual_ack
+  n_confirm: 2
+  smoothing_window: 3
+
+risk:
+  static_peak: true                     # must match env.risk.static_peak
+  eod_trailing_drawdown: true           # HG-specific live guard
+  eod_hour_utc: 21
+  flatten_on_kill_file: true            # v2.2 §8.3 CRIT graceful flatten
+
+gates:
+  hyper_growth_active_days_min: 0       # HG has no min trading days (vs FTMO 4)
+  hyper_growth_max_single_day_share: 0.5
+  hyper_growth_daily_dd_buffer_pp: 0.5  # breach if intraday DD > (2.0% + 0.5pp) = 2.5%
+  hyper_growth_trailing_dd_buffer_pp: 0.5  # breach if trailing > (5.0% + 0.5pp) = 5.5%

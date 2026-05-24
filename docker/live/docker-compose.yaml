@@ -345,6 +345,45 @@ services:
       - sg1-btc-logs:/app/logs
       - sg1-btc-state:/app/state
 
+  # SG-1 EURUSD Bybit mainnet demo (Hyper Growth soak) — S550 first deploy.
+  # Bundle: ensemble_v1 (seeds [2025, 3141, 9999], ens_pf_weighted) per
+  # Protocol v2.5 bootstrap PROMOTE (P(PF)=1.0000 / vs_best_solo=0.9994).
+  # Venue: Bybit EUR/USDT perp; SOAK-only — PnL does NOT extrapolate to
+  # The5ers Hyper Growth (CFD forex). Graduation venue is cTrader/MT5.
+  # Creds: SG1_EURUSD_BYBIT_DEMO_* in docker/live/.env (isolated subaccount
+  # from sg1-btc / gmgp1-btc — verify subaccount userID is distinct in
+  # Bybit Demo UI per feedback_bybit_demo_key_creation_ui_safety).
+  sg1-eurusd:
+    <<: *crypto-strategy
+    container_name: sg1-eurusd
+    profiles: [crypto, all]
+    labels:
+      finrl.monitor: "true"
+      finrl.strategy: "sg1-eurusd"
+      finrl.broker: "crypto"
+    environment:
+      <<: *common-env
+      BROKER_TYPE: crypto
+      STRATEGY_NAME: sg1-eurusd
+      STRATEGY_RUNNER: scripts/run_live.py
+      STRATEGY_CONFIG: /app/configs/live_sg1_eurusd_bybit.yaml
+      STRATEGY_OVERLAY: ${SG1_EURUSD_OVERLAY:-hyper_growth/step1}
+      METRICS_PORT: "9110"
+      # Per-strategy SG1_EURUSD_BYBIT_DEMO_* in .env mapped to broker-expected
+      # BYBIT_DEMO_* inside the container, keeping SG-1 EURUSD demo subaccount
+      # isolated from sg1-btc / gmgp1-btc.
+      BYBIT_DEMO_API_KEY: ${SG1_EURUSD_BYBIT_DEMO_API_KEY:-}
+      BYBIT_DEMO_API_SECRET: ${SG1_EURUSD_BYBIT_DEMO_API_SECRET:-}
+    volumes:
+      # S550: L1 trial-18 seed-2025 ckpt dir baked into image via Dockerfile
+      # COPY (mirrors sg1-btc DECAY-01 pattern). The .pth itself is unused at
+      # runtime (the bundle's per-seed checkpoints own the agent weights), but
+      # copying the whole dir keeps the norm_warmup_3-15-60.pkl co-located
+      # with its source ckpt for audit. live_sg1_eurusd_bybit.yaml
+      # features.norm_warmup_path reads the pkl from this dir.
+      - sg1-eurusd-logs:/app/logs
+      - sg1-eurusd-state:/app/state
+
   gmgp1-xauusd:
     <<: *crypto-strategy
     container_name: gmgp1-xauusd
@@ -643,6 +682,7 @@ volumes:
   sg1-gold-logs:
   gmgp1-btc-logs:
   sg1-btc-logs:
+  sg1-eurusd-logs:
   funding-arb-logs:
   sync-1h-logs:
   gmgp1-xauusd-logs:
@@ -652,6 +692,7 @@ volumes:
   sg1-gold-state:
   gmgp1-btc-state:
   sg1-btc-state:
+  sg1-eurusd-state:
   funding-arb-state:
   sync-1h-state:
   gmgp1-xauusd-state:
