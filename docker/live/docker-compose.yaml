@@ -345,44 +345,58 @@ services:
       - sg1-btc-logs:/app/logs
       - sg1-btc-state:/app/state
 
-  # SG-1 EURUSD Bybit mainnet demo (Hyper Growth soak) — S550 first deploy.
+  # SG-1 EURUSD cTrader IC Markets demo (Hyper Growth soak) — S550-cont-3.
+  # Pivoted from Bybit demo (S550-cont-2) after pre-flight discovered Bybit
+  # has no EUR/USDT pair on spot/swap/future. cTrader IC Markets has EURUSD
+  # as a core CFD pair AND it's the same instrument the graduation venue
+  # (The5ers HG + FTMO MT5 EURUSD CFD) uses — so paper PnL extrapolates.
   # Bundle: ensemble_v1 (seeds [2025, 3141, 9999], ens_pf_weighted) per
   # Protocol v2.5 bootstrap PROMOTE (P(PF)=1.0000 / vs_best_solo=0.9994).
-  # Venue: Bybit EUR/USDT perp; SOAK-only — PnL does NOT extrapolate to
-  # The5ers Hyper Growth (CFD forex). Graduation venue is cTrader/MT5.
-  # Creds: SG1_EURUSD_BYBIT_DEMO_* in docker/live/.env (isolated subaccount
-  # from sg1-btc / gmgp1-btc — verify subaccount userID is distinct in
-  # Bybit Demo UI per feedback_bybit_demo_key_creation_ui_safety).
+  # Creds: SG1_EURUSD_CTRADER_* in docker/live/.env (cTID <ACCT_1> distinct
+  # from gmgp1-xauusd <ACCT_7> + sg1-xauusd <ACCT_8>). OAuth tokens shared
+  # across all three (single cTrader user grant covers all accounts);
+  # CTRADER_ACCOUNT_ID is the per-account routing key.
   sg1-eurusd:
     <<: *crypto-strategy
     container_name: sg1-eurusd
-    profiles: [crypto, all]
+    profiles: [ctrader, all]
     labels:
       finrl.monitor: "true"
       finrl.strategy: "sg1-eurusd"
-      finrl.broker: "crypto"
+      finrl.broker: "ctrader"
     environment:
       <<: *common-env
-      BROKER_TYPE: crypto
+      BROKER_TYPE: ctrader
       STRATEGY_NAME: sg1-eurusd
-      STRATEGY_RUNNER: scripts/run_live.py
-      STRATEGY_CONFIG: /app/configs/live_sg1_eurusd_bybit.yaml
+      STRATEGY_RUNNER: scripts/run_live_ctrader.py
+      STRATEGY_CONFIG: /app/configs/live_sg1_eurusd_ctrader.yaml
       STRATEGY_OVERLAY: ${SG1_EURUSD_OVERLAY:-hyper_growth/step1}
       METRICS_PORT: "9110"
-      # Per-strategy SG1_EURUSD_BYBIT_DEMO_* in .env mapped to broker-expected
-      # BYBIT_DEMO_* inside the container, keeping SG-1 EURUSD demo subaccount
-      # isolated from sg1-btc / gmgp1-btc.
-      BYBIT_DEMO_API_KEY: ${SG1_EURUSD_BYBIT_DEMO_API_KEY:-}
-      BYBIT_DEMO_API_SECRET: ${SG1_EURUSD_BYBIT_DEMO_API_SECRET:-}
+      # Per-strategy SG1_EURUSD_CTRADER_* in .env override shared CTRADER_*
+      # defaults (gmgp1-xauusd pattern). OAuth tokens identical to sg1-xauusd
+      # (single cTrader user grant); only ACCOUNT_ID (cTID <ACCT_1>) routes
+      # orders to the SG-1 EURUSD demo account.
+      CTRADER_CLIENT_ID:     ${SG1_EURUSD_CTRADER_CLIENT_ID:-${CTRADER_CLIENT_ID:-}}
+      CTRADER_CLIENT_SECRET: ${SG1_EURUSD_CTRADER_CLIENT_SECRET:-${CTRADER_CLIENT_SECRET:-}}
+      CTRADER_ACCESS_TOKEN:  ${SG1_EURUSD_CTRADER_ACCESS_TOKEN:-${CTRADER_ACCESS_TOKEN:-}}
+      CTRADER_REFRESH_TOKEN: ${SG1_EURUSD_CTRADER_REFRESH_TOKEN:-${CTRADER_REFRESH_TOKEN:-}}
+      CTRADER_ACCOUNT_ID:    ${SG1_EURUSD_CTRADER_ACCOUNT_ID:-${CTRADER_ACCOUNT_ID:-}}
     volumes:
-      # S550: L1 trial-18 seed-2025 ckpt dir baked into image via Dockerfile
-      # COPY (mirrors sg1-btc DECAY-01 pattern). The .pth itself is unused at
+      # L1 trial-18 seed-2025 ckpt dir baked into image via Dockerfile COPY
+      # (mirrors sg1-btc DECAY-01 pattern). The .pth itself is unused at
       # runtime (the bundle's per-seed checkpoints own the agent weights), but
       # copying the whole dir keeps the norm_warmup_3-15-60.pkl co-located
-      # with its source ckpt for audit. live_sg1_eurusd_bybit.yaml
+      # with its source ckpt for audit. live_sg1_eurusd_ctrader.yaml
       # features.norm_warmup_path reads the pkl from this dir.
       - sg1-eurusd-logs:/app/logs
       - sg1-eurusd-state:/app/state
+    # cTrader containers need 4G for bootstrap + reconnect headroom (S491 OOM
+    # cluster; S540 bump to 4G fleet-wide on cTrader profile).
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+          cpus: "2.0"
 
   gmgp1-xauusd:
     <<: *crypto-strategy

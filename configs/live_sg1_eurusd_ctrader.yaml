@@ -1,0 +1,296 @@
+# Live Trading Config — SG-1 EURUSD SAC on EUR/USD CFD via cTrader (Hyper Growth)
+# 3-min bars, signal-gated, prop-firm trained (6% trailing / 3% daily DD).
+#
+# S550-cont-3 (2026-05-24): cTrader IC Markets demo pivot from Bybit demo
+# (cTID <ACCT_1>, Currency USD). Bybit attempt failed pre-flight assumption —
+# Bybit has no EUR/USDT pair on spot/swap/future. cTrader IC Markets has
+# EURUSD as a core CFD pair AND it's the same instrument the graduation venue
+# (The5ers Hyper Growth + FTMO EURUSD CFD) uses — so paper PnL extrapolates
+# cleanly, unlike the Bybit USDT-perp plan.
+#
+# Bundle / baseline / norm_warmup / overlay all carried over unchanged from
+# the prior Bybit attempt (S550-cont-2). Only broker layer + symbol mapping
+# differs. Predecessor (deprecated): configs/live_sg1_eurusd_bybit.yaml.
+#
+# Stage 3 WF ensemble v1 (Protocol v2.5 bootstrap PROMOTE, S550):
+#   bundle SHA efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf
+#   seeds [2025, 3141, 9999] rule ens_pf_weighted
+#   L1 N=10: median test PF 1.5985, CV 0.0479
+#   Stage 2.5-R bootstrap: P(PF)=0.9991, P(MDD)=0.9713 -> PROMOTE
+#   Stage 3 WF 8-fold: G1/G2/G4/G5 PASS; G3 1.081 < 1.10 legacy FAIL
+#     -> Protocol v2.5 manual block-bootstrap on stitched 13,452 OOS bars:
+#        P(ens > solo_2025) = 1.0000, P(ens > best_solo) = 0.9994 -> PROMOTE
+#
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S498-cont Step 5 pattern; HG variant).
+# Phase-varying DD/target/gates live in configs/deploy/hyper_growth/<phase>.yaml
+# overlays. Even on the cTrader IC Markets demo we use the HG overlay so the
+# challenge state machine + drift gates exercise the same code paths the live
+# Hyper Growth deploy will hit (when wired against MyForexFunds / The5ers MT5).
+#
+# Deploy invocation (resolved = this file + overlay):
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_ctrader.py \
+#     --config configs/live_sg1_eurusd_ctrader.yaml --overlay hyper_growth/step1
+#
+# After overlay, validator requires the overlay's `risk.static_peak` etc.;
+# this BASE file alone is NOT paper-deployable.
+# ---------------------------------------------------------------------------
+#
+# cTrader credentials via env vars:
+#   CTRADER_CLIENT_ID, CTRADER_CLIENT_SECRET, CTRADER_ACCESS_TOKEN, CTRADER_ACCOUNT_ID
+# Per-strategy keys (SG1_EURUSD_CTRADER_*) override the shared CTRADER_* defaults
+# in docker/live/.env — same pattern as sg1-xauusd (cTID <ACCT_8> isolation).
+# OAuth tokens are shared with gmgp1-xauusd / sg1-xauusd (one cTrader user
+# grant covers all their accounts); only CTRADER_ACCOUNT_ID differs.
+
+# --- cTrader Connection ---
+exchange:
+  name: "ctrader"
+  testnet: true                        # true=IC Markets demo, false=Hyper Growth live (MT5)
+  asset: "EURUSD"
+
+# --- Contract Specification ---
+contract:
+  symbol: "EURUSD"
+  lot_size: 100000                     # 1 standard FX lot = 100,000 units of base currency
+  min_lot: 0.01                        # 0.01 lots = 1,000 units (micro-lot)
+  tick_size: 0.00001                   # IC Markets EURUSD = 5-digit pricing (0.00001)
+  leverage: 1                          # 1:1 (user policy — HG 1:30 is cap not floor)
+  order_type: "MKT"
+  market_fallback_timeout: 10.0
+
+# --- Agent (v2.3 atomic-swap bundle: SG-1 EURUSD HG ensemble_v1, ens_pf_weighted) ---
+# Loaded from bundle baked into image at /app/bundles/sg1_eurusd_hg_ensemble_v1/.
+# - L1 N=10 PASS: median test PF 1.5985, CV 0.0479 (S550 verdict).
+# - Stage 2.5-R PROMOTE on ens_pf_weighted: bundle SHA
+#   efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf
+#   bootstrap P(PF)=0.9991, P(MDD)=0.9713.
+# - Stage 3 WF 8-fold ens_pf_weighted: G1/G2/G4/G5 PASS, G3 1.081 FAIL by
+#   legacy point-estimate (uplift_ratio_min 1.10). Protocol v2.5 manual
+#   block-bootstrap on stitched 13,452 OOS bars: P(ens > solo_2025) = 1.0000,
+#   P(ens > best_solo) = 0.9994 -> PROMOTE.
+# - Manifest chosen_rule: ens_pf_weighted; seed_pfs weights from L1 test PFs.
+agent:
+  checkpoint_path: ""
+  device: "cpu"
+  torch_compile: false
+  ensemble:
+    bundle_path: "/app/bundles/sg1_eurusd_hg_ensemble_v1/ensemble_v1.tar.gz"
+    aggregation_rule: "ens_pf_weighted"  # matches manifest.chosen_rule + gates yaml
+    require_normalizers: false           # bundle ships empty normalizers/; norm_warmup pkl supplied below
+
+# --- SAC Hyperparameters (HPO trial #18 from sg1_eurusd_hyper_growth_20260521) ---
+agents:
+  sac:
+    lr_actor: 0.00037752851184085103
+    lr_critic: 0.00044684267408421323
+    lr_alpha: 0.0001059694907530247
+    tau: 0.0027196274363356005
+    gamma: 0.9654402434898545
+    initial_alpha: 0.11970026598125914
+    gradient_clip: 8.803451835153641
+    batch_size: 512
+    buffer_size: 100
+
+# --- Network (must match training checkpoint exactly) ---
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# --- Features (SG-1 3-min multi-scale — must match training) ---
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_forex"
+  norm_span: 120
+  bootstrap_bars: 30000               # 60-min scale needs ~7200 1-min bars. 30K is 2x safe.
+  # S509 train-serve EMA-Z parity. Seeds in the ensemble bundle share the same
+  # L1 train_end_date (2025-09-30), so the per-seed pkls are byte-identical and
+  # any one pkl is sufficient for the live warmup buffer. Pkl generated via:
+  #   python scripts/extract_norm_warmup_buffer.py \
+  #     --config configs/sg1_eurusd_hyper_growth_l1_multiseed.yaml \
+  #     --seeds 2025 3141 9999 --train_end_date 2025-09-30 \
+  #     --ckpt_path_glob "checkpoints/sg1-eurusd-hg-l1-trial18-seed{seed}_*/checkpoint_final.pth"
+  # Image build COPYs this checkpoint dir into /app/checkpoints/ so the pkl is
+  # reachable at the path below.
+  norm_warmup_path: "/app/checkpoints/sg1-eurusd-hg-l1-trial18-seed2025_20260523_120312/norm_warmup_3-15-60.pkl"
+
+# --- Signal Gate (trial #18 calibration — must match training) ---
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+# --- Bar Clock (3-min bars for SG-1) ---
+bar_clock:
+  base_interval_minutes: 3
+  execution_delay_seconds: 10.0
+  max_late_seconds: 60.0
+
+# --- Trading ---
+# IC Markets EURUSD Raw demo: ~0.4 bps/side taker (matches HPO trial #18
+# env.taker_fee 0.00005). Demo balance starts at the IC Markets default; reset
+# via web UI to $100K to match training initial_balance if drift suspected.
+trading:
+  initial_balance: 100000.0
+  deadband_threshold: 0.35             # trial #18 (must match ens_pf_weighted threshold)
+  taker_fee: 0.00005                   # IC Markets Raw EUR/USD ~0.4 bps/side; matches HPO
+  weekend_flatten:
+    enabled: true
+    minutes_before_close: 30           # Flatten 30 min before Friday close
+
+# --- Data reference (validator Stage-0; not loaded at runtime — live fetches from cTrader) ---
+# Points at the OANDA parquet the L1 ensemble checkpoints were trained on.
+data:
+  file_path: "data/oanda/eurusd_m1_m.parquet"
+  ticker: "EURUSD"
+  handler_type: "multiscale"
+
+# --- Hard Constraints (validator parity; mirrors trading.taker_fee) ---
+env:
+  taker_fee: 0.00005
+  gap_detection: true                  # OANDA weekend gap detector (mirrors training)
+  gap_atr_mult: 3.0
+
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay (hyper_growth/step1) owns: static_peak (true), max_trailing_drawdown_pct,
+# max_daily_loss_pct, eod_hour_utc, flatten_on_kill_file.
+# max_drawdown_pct: 0.06 = HG hard 6% rail; trailing/daily buffers in overlay.
+risk:
+  enabled: true
+  max_drawdown_pct: 0.06               # 6% hard stop (HG hard rail)
+  circuit_breaker_cooldown_bars: 12
+  max_position_pct: 1.0
+  funding_rate_alert: 999.0
+  min_margin_reserve_pct: 0.10
+  # S495-cont fleet-wide hotfix (override default 4.0). Cleanup deferred to
+  # S506 Option B Phase 4 (operator-driven across 7 configs).
+  daily_turnover_limit: 10.0
+  soft_throttle_start: 0.8
+
+# --- WandB Monitoring ---
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  # Explicit run_id required — otherwise the engine's deterministic id builder
+  # `live-{asset}-{exchange}-{mode}` produces `live-eurusd-ctrader-paper`, which
+  # could collide with a future EURUSD strategy.
+  run_id: "live-sg1-eurusd-ctrader-paper-ensemble-v1"
+  tags: ["live", "sg-1", "EURUSD", "SAC", "3min", "cTrader", "paper",
+         "CFD", "the5ers", "hyper-growth-overlay", "signal-gated", "prop-firm",
+         "ensemble", "ens-pf-weighted", "seeds-2025-3141-9999", "hg-soak"]
+
+# --- Safety ---
+safety:
+  require_explicit_mainnet: true
+  max_daily_loss_pct: 0.0
+  # Persistent /app/state volume so v2.2 §8.3 lockout survives restart.
+  kill_file: "/app/state/finrl_live_sg1_eurusd_kill"
+  kill_file_override: "/app/state/finrl_live_sg1_eurusd_kill.override"
+  # v2.3 swap-handshake state on persistent state volume.
+  last_bundle_file: "/app/state/finrl_live_sg1_eurusd_last_bundle"
+  swap_approved_file: "/app/state/finrl_live_sg1_eurusd_swap_approved"
+  flatten_on_kill_file: true
+  emergency_flatten_on_error: true
+
+# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# Baseline = ens_pf_weighted distribution aggregated across all 8 HG WF OOS
+# test windows (13,460 bars, ~2025-09-01 -> 2026-04-01) for regime breadth.
+# deadband_frac 0.1857, sat 0.0958, mean -0.0383, std 0.6621.
+# Baked into live-engine image via `COPY baselines /app/baselines`.
+drift:
+  enabled: true
+  baseline_path: "/app/baselines/sg1_eurusd_hg_ensemble_v1/ensemble_report.json"
+  window_bars: 1000
+  min_bars_before_check: 500
+  vol_estimator_bars: 20
+
+# --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+gates:
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    agreement_flat_delta_warn: 0.20
+    agreement_flat_delta_crit: 0.40
+    agreement_flat_window_bars: 2000
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+# --- PRISM Regime Overlay (optional, falsified S413+) ---
+prism:
+  enabled: false
+  base_url: "http://prism-api:8001"
+  api_key: ""
+  ticker: "EUR-USD"
+  timeframe: "daily"
+  timeout: 5
+  cache_ttl: 60
+  crisis_flatten: true
+  multipliers:
+    LOW_VOL: 1.3
+    NORMAL_VOL: 1.0
+    HIGH_VOL: 0.3
+
+# --- Monitoring ---
+monitoring:
+  metrics_port: 9110                   # Aligned with docker-compose sg1-eurusd service (carried over from Bybit attempt)
+
+# ---------------------------------------------------------------------------
+# Provenance (S550-cont-3) — SG-1 EURUSD HG ensemble_v1 cTrader IC Markets deploy
+# ---------------------------------------------------------------------------
+provenance:
+  schema_version: 1
+  block_added: "2026-05-24 (S550-cont-3)"
+  strategy: sg1-eurusd
+  agent_type: ensemble
+  training_config: "configs/sg1_eurusd_hyper_growth_l1_multiseed.yaml"
+  bundle_path: "/app/bundles/sg1_eurusd_hg_ensemble_v1/"
+  bundle_sha256: "efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf"
+  ensemble:
+    seeds: [2025, 3141, 9999]
+    aggregation_rule: "ens_pf_weighted"
+    bundle_chosen_rule: "ens_pf_weighted"
+    seed_pfs:                                # L1 test PFs (weights for ens_pf_weighted)
+      9999: 1.7248
+      2025: 1.6927
+      3141: 1.6466
+    hpo_trial: 18
+    hpo_study: "sg1_eurusd_hyper_growth_20260521"
+    hpo_parent_wandb: "6rjp4ugt"
+    l1_metrics: "median test PF 1.5985, CV 0.0479 (N=10, S550)"
+    stage_2_5_r_bootstrap: "P(PF)=0.9991, P(MDD)=0.9713 -> PROMOTE (S550)"
+    stage_3_wf_gates: "G1/G2/G4/G5 PASS; G3 1.081 < 1.10 legacy FAIL"
+    stage_3_wf_bootstrap_override: "P(ens > solo_2025) = 1.0000, P(ens > best_solo) = 0.9994 (Protocol v2.5 primary; legacy demoted to audit-only S526)"
+    stage_3_wf_decision: "PROMOTE (S550)"
+  drift_baseline_path: "/app/baselines/sg1_eurusd_hg_ensemble_v1/ensemble_report.json"
+  live_run_id: "live-sg1-eurusd-ctrader-paper-ensemble-v1"
+  paper_deploy_since: null               # set on first paper bar
+  audit_history:
+    - "2026-05-24 (S550-cont-2): Bybit demo attempt SHIPPED but failed pre-flight — Bybit has no EUR/USDT pair (audit miss); container torn down same session."
+    - "2026-05-24 (S550-cont-3): cTrader IC Markets demo pivot (cTID <ACCT_1>); broker layer + symbol mapping new, all training artifacts (bundle/baseline/norm_warmup/overlay) carried over unchanged."
+  notes:
+    - "Soak-gate override (B4): sg1-btc 30-day soak target ~2026-06-21; deploying 27 days early. Rationale: cTrader IC Markets demo matches graduation-venue instrument (CFD EURUSD), so soak now has dual purpose (mechanics + early PnL signal)."
+    - "T&C blocker (A3): pre_deploy_blocker in gates yaml L151 (Hyper Growth EA/bot rule verification) DOES NOT bind cTrader IC Markets demo — only HG live graduation venue (MT5 / MyForexFunds)."
+    - "Bybit demo predecessor: configs/live_sg1_eurusd_bybit.yaml (deprecated S550-cont-3; kept for git history; do NOT deploy)."
