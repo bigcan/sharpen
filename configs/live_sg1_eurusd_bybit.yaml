@@ -1,0 +1,264 @@
+# Live Trading Config — SG-1 EURUSD SAC via Bybit Mainnet Demo (Hyper Growth soak)
+# 3-min bars, signal-gated, prop-firm trained (6% trailing / 3% daily DD).
+#
+# S550 (2026-05-24): full-stack PROMOTE via Protocol v2.5 bootstrap on
+# `ens_pf_weighted` (P(PF)=1.0000 / vs_best_solo=0.9994; legacy G3 1.081
+# point-estimate FAIL overridden). Bundle = ensemble_v1.tar.gz seeds
+# [2025, 3141, 9999]. Graduation venue = The5ers Hyper Growth + FTMO
+# (cTrader/MT5); Bybit demo is SOAK-only — PnL does NOT extrapolate.
+# See project_sg1_eurusd_bybit_demo_credentials + project_sg1_eurusd_retrain_queued_s477.
+#
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S498-cont Step 5 pattern; HG variant).
+# Phase-varying DD/target/gates live in configs/deploy/hyper_growth/<phase>.yaml
+# overlays. Even on paper Bybit demo we use the HG overlay so the challenge
+# state machine + drift gates exercise the same code paths the live HG deploy
+# will hit (when wired against cTrader/MT5).
+#
+# Deploy invocation (resolved = this file + overlay):
+#   python scripts/deploy_bare_metal.py --script scripts/run_live.py \
+#     --config configs/live_sg1_eurusd_bybit.yaml --overlay hyper_growth/step1
+#
+# After overlay, validator requires the overlay's `risk.static_peak` etc.;
+# this BASE file alone is NOT paper-deployable.
+# ---------------------------------------------------------------------------
+#
+# Auth: SG1_EURUSD_BYBIT_DEMO_API_KEY/SECRET env vars (compose maps them to
+# broker-expected BYBIT_DEMO_* inside the container, isolated from sg1-btc /
+# gmgp1-btc demo subaccounts). Read by ExchangePerpBroker demo branch.
+
+# --- Exchange ---
+exchange:
+  name: "bybit"
+  testnet: false
+  demo: true                           # ccxt enable_demo_trading(True) -> api-demo.bybit.com
+  asset: "EUR"
+  leverage: 1                          # 1:1 (user policy — HG 1:30 is cap not floor)
+  order_type: "limit"
+  limit_offset_pct: 0.0005
+  market_fallback_timeout: 60.0
+  data_exchange: "bybit"
+
+# --- Agent (v2.3 atomic-swap bundle: SG-1 EURUSD HG ensemble_v1, ens_pf_weighted) ---
+# Loaded from bundle baked into image at /app/bundles/sg1_eurusd_hg_ensemble_v1/.
+# - L1 N=10 PASS: median test PF 1.5985, CV 0.0479 (S550 verdict).
+# - Stage 2.5-R PROMOTE on ens_pf_weighted: bundle SHA
+#   efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf
+#   bootstrap P(PF)=0.9991, P(MDD)=0.9713.
+# - Stage 3 WF 8-fold ens_pf_weighted: G1/G2/G4/G5 PASS, G3 1.081 FAIL by
+#   legacy point-estimate (uplift_ratio_min 1.10). Protocol v2.5 manual
+#   block-bootstrap on stitched 13,452 OOS bars: P(ens > solo_2025) = 1.0000,
+#   P(ens > best_solo) = 0.9994 -> PROMOTE.
+# - Manifest chosen_rule: ens_pf_weighted; seed_pfs weights from L1 test PFs.
+agent:
+  checkpoint_path: ""
+  device: "cpu"
+  torch_compile: false
+  ensemble:
+    bundle_path: "/app/bundles/sg1_eurusd_hg_ensemble_v1/ensemble_v1.tar.gz"
+    aggregation_rule: "ens_pf_weighted"  # matches manifest.chosen_rule + gates yaml
+    require_normalizers: false           # bundle ships empty normalizers/; norm_warmup pkl supplied below
+
+# --- SAC Hyperparameters (live-engine ctor stubs; runtime weights come from bundle) ---
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 100
+    initial_alpha: 0.2
+
+# --- Network (must match training checkpoint exactly) ---
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# --- Features (SG-1 3-min multi-scale — must match training) ---
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_forex"
+  norm_span: 120
+  bootstrap_bars: 30000
+  # S509 train-serve EMA-Z parity. Seeds in the ensemble bundle share the same
+  # L1 train_end_date (2025-09-30), so the per-seed pkls are byte-identical and
+  # any one pkl is sufficient for the live warmup buffer. Pkl generated via:
+  #   python scripts/extract_norm_warmup_buffer.py \
+  #     --config configs/sg1_eurusd_hyper_growth_l1_multiseed.yaml \
+  #     --seeds 2025 3141 9999 --train_end_date 2025-09-30 \
+  #     --ckpt_path_glob "checkpoints/sg1-eurusd-hg-l1-trial18-seed{seed}_*/checkpoint_final.pth"
+  # Image build COPYs this checkpoint dir into /app/checkpoints/ so the pkl is
+  # reachable at the path below.
+  norm_warmup_path: "/app/checkpoints/sg1-eurusd-hg-l1-trial18-seed2025_20260523_120312/norm_warmup_3-15-60.pkl"
+
+# --- Signal Gate (must match training) ---
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+# --- Bar Clock (3-min bars for SG-1, 24/7 crypto market) ---
+bar_clock:
+  base_interval_minutes: 3
+  execution_delay_seconds: 5.0
+  max_late_seconds: 30.0
+
+# --- Trading ---
+# initial_balance matches L1 training (100K); deadband matches trial #18.
+# taker_fee = 0.0006 reflects Bybit Class A taker (~0.055%) with margin
+# vs training's IC Markets ~0.005% — conservative for SOAK PV accounting.
+# Note: PnL on Bybit demo does NOT extrapolate to The5ers HG (CFD forex)
+# per project_sg1_eurusd_bybit_demo_credentials.
+trading:
+  initial_balance: 100000.0
+  deadband_threshold: 0.35
+  taker_fee: 0.0006
+
+# --- Data source (validator Stage-0; ccxt live-fetch at runtime) ---
+data:
+  source: ccxt
+  data_exchange: bybit
+  frequency: 3m
+  ticker: "EUR/USDT"
+
+# --- Hard Constraints (validator parity; mirrors trading.taker_fee) ---
+env:
+  taker_fee: 0.0006
+
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# max_drawdown_pct: 0.06 = HG hard 6% rail; trailing/daily buffers in overlay.
+risk:
+  enabled: true
+  max_drawdown_pct: 0.06
+  circuit_breaker_cooldown_bars: 0
+  max_position_pct: 1.0
+  max_net_short_exposure: -1.0
+  max_gross_exposure: 1.0
+  funding_rate_alert: 999.0
+  min_margin_reserve_pct: 0.15
+  daily_turnover_limit: 10.0
+  soft_throttle_start: 0.8
+
+# --- WandB Monitoring ---
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  tags: ["live", "sg-1", "EURUSD", "SAC", "3min", "bybit-demo", "paper",
+         "hyper-growth-overlay", "signal-gated", "prop-firm", "ensemble",
+         "ens-pf-weighted", "seeds-2025-3141-9999", "hg-soak"]
+  run_id: "live-sg1-eurusd-bybit-demo-paper-ensemble-v1"
+
+# --- Safety ---
+safety:
+  require_explicit_mainnet: true
+  max_daily_loss_pct: 0.0
+  # Persistent /app/state volume so v2.2 §8.3 lockout survives restart.
+  kill_file: "/app/state/finrl_live_sg1_eurusd_kill"
+  # v2.3 swap-handshake state on persistent state volume.
+  last_bundle_file: "/app/state/finrl_live_sg1_eurusd_last_bundle"
+  swap_approved_file: "/app/state/finrl_live_sg1_eurusd_swap_approved"
+  flatten_on_kill_file: true
+  emergency_flatten_on_error: true
+
+# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# Baseline = ens_pf_weighted distribution aggregated across all 8 HG WF OOS
+# test windows (13,460 bars, ~2025-09-01 -> 2026-04-01) for regime breadth.
+# deadband_frac 0.1857, sat 0.0958, mean -0.0383, std 0.6621.
+# Baked into live-engine image via `COPY baselines /app/baselines`.
+drift:
+  enabled: true
+  baseline_path: "/app/baselines/sg1_eurusd_hg_ensemble_v1/ensemble_report.json"
+  window_bars: 1000
+  min_bars_before_check: 500
+  vol_estimator_bars: 20
+
+# --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+gates:
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    agreement_flat_delta_warn: 0.20
+    agreement_flat_delta_crit: 0.40
+    agreement_flat_window_bars: 2000
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+# --- PRISM Regime Overlay (optional, falsified S413+) ---
+prism:
+  enabled: false
+  base_url: "http://prism-api:8001"
+  api_key: ""
+  ticker: "EUR-USD"
+  timeframe: "daily"
+  timeout: 5
+  cache_ttl: 60
+  crisis_flatten: true
+  multipliers:
+    LOW_VOL: 1.3
+    NORMAL_VOL: 1.0
+    HIGH_VOL: 0.3
+
+# --- Monitoring ---
+monitoring:
+  metrics_port: 9110                   # Aligned with docker-compose sg1-eurusd service (next free after sg1-btc:9109)
+
+# ---------------------------------------------------------------------------
+# Provenance (S550) — SG-1 EURUSD HG ensemble_v1 first paper deploy
+# ---------------------------------------------------------------------------
+provenance:
+  schema_version: 1
+  block_added: "2026-05-24 (S550)"
+  strategy: sg1-eurusd
+  agent_type: ensemble
+  training_config: "configs/sg1_eurusd_hyper_growth_l1_multiseed.yaml"
+  bundle_path: "/app/bundles/sg1_eurusd_hg_ensemble_v1/"
+  bundle_sha256: "efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf"
+  ensemble:
+    seeds: [2025, 3141, 9999]
+    aggregation_rule: "ens_pf_weighted"
+    bundle_chosen_rule: "ens_pf_weighted"
+    seed_pfs:                                # L1 test PFs (weights for ens_pf_weighted)
+      9999: 1.7248
+      2025: 1.6927
+      3141: 1.6466
+    hpo_trial: 18
+    hpo_study: "sg1_eurusd_hyper_growth_20260521"
+    hpo_parent_wandb: "6rjp4ugt"
+    l1_metrics: "median test PF 1.5985, CV 0.0479 (N=10, S550)"
+    stage_2_5_r_bootstrap: "P(PF)=0.9991, P(MDD)=0.9713 -> PROMOTE (S550)"
+    stage_3_wf_gates: "G1/G2/G4/G5 PASS; G3 1.081 < 1.10 legacy FAIL"
+    stage_3_wf_bootstrap_override: "P(ens > solo_2025) = 1.0000, P(ens > best_solo) = 0.9994 (Protocol v2.5 primary; legacy demoted to audit-only S526)"
+    stage_3_wf_decision: "PROMOTE (S550)"
+  live_run_id: "live-sg1-eurusd-bybit-demo-paper-ensemble-v1"
+  paper_deploy_since: null               # set on first paper bar
+  audit_history:
+    - "2026-05-24 (S550): initial paper deploy on Bybit mainnet demo (ensemble_v1, seeds [2025, 3141, 9999], ens_pf_weighted)"
+  notes:
+    - "Bybit EUR/USDT perp != The5ers HG EURUSD CFD; venue diverges in fee/spread/funding. SOAK validates mechanics only."
+    - "Soak-gate override (B4): sg1-btc 30-day soak target ~2026-06-21; deploying 27 days early. Rationale: Bybit demo is mechanics-only, no PnL extrapolation; gate was for PnL-stability of preceding strategy."
+    - "T&C blocker (A3): pre_deploy_blocker in gates yaml L151 (Hyper Growth EA/bot rule verification) DOES NOT bind Bybit demo — only HG graduation venue."

@@ -88,6 +88,13 @@ COPY checkpoints/sg1-xauusd-vs-v2-phase2-wf-fold7-seed9999_20260520_181055 /app/
 # checkpoint owns the agent weights), but copying the whole dir keeps the pkl
 # co-located with its source ckpt for audit.
 COPY checkpoints/sg1-btc-decay01-wf-fold7-seed456_20260521_230637 /app/checkpoints/sg1-btc-decay01-wf-fold7-seed456_20260521_230637
+# sg1-eurusd HG L1 trial-18 seed-2025 ckpt + norm_warmup_3-15-60.pkl (S550,
+# 2026-05-24). Bundle ensemble_v1 (seeds [2025, 3141, 9999], ens_pf_weighted)
+# owns the agent weights at runtime; this dir is COPYed so the per-seed
+# norm_warmup pkl is reachable at live_sg1_eurusd_bybit.yaml
+# features.norm_warmup_path. The seeds' train_end_date is identical
+# (2025-09-30), so any one seed's pkl serves the whole ensemble.
+COPY checkpoints/sg1-eurusd-hg-l1-trial18-seed2025_20260523_120312 /app/checkpoints/sg1-eurusd-hg-l1-trial18-seed2025_20260523_120312
 COPY pyproject.toml /app/
 
 RUN pip install -e ".[ctrader]"

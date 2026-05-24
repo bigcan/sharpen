@@ -1,0 +1,292 @@
+{
+  "protocol": "v2.2_stage_2_5_ensemble_report__sg1_eurusd_hg_wf_baseline",
+  "workstream": "sg1_eurusd_hyper_growth",
+  "source": "sg1_eurusd_hg_wf_8fold_ens_pf_weighted",
+  "window": "hg_wf_8fold_oos (per-fold ~3wk test windows, ~13.5K bars total)",
+  "chosen_rule": "ens_pf_weighted",
+  "decision": "PROMOTE",
+  "decision_source": "v2.5_bootstrap__manual (P(PF)=1.0000, P(vs_best_solo)=0.9994; legacy G3 1.081 override)",
+  "ensemble_eval_distribution": {
+    "histogram_bins": [
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "counts": [
+      2809,
+      1633,
+      1443,
+      1276,
+      1223,
+      1189,
+      1303,
+      2584
+    ],
+    "mean": -0.03826902196313582,
+    "std": 0.6621194690832976,
+    "entropy": 2.0208043185462525,
+    "deadband_frac": 0.18566121842496286,
+    "saturation_frac": 0.09583952451708767,
+    "no_consensus_frac": 0.0,
+    "n": 13460,
+    "n_total_bars": 13460,
+    "composition_rule": "ens_pf_weighted",
+    "by_vol_quartile": {
+      "q1": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          711,
+          421,
+          364,
+          325,
+          314,
+          271,
+          295,
+          664
+        ],
+        "mean": -0.047561788509978296,
+        "std": 0.6710922939240948,
+        "entropy": 2.012666039091157,
+        "deadband_frac": 0.18989598811292718,
+        "saturation_frac": 0.1188707280832095,
+        "no_consensus_frac": 0.0,
+        "n": 3365,
+        "n_total_bars": 3365
+      },
+      "q2": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          749,
+          392,
+          383,
+          305,
+          323,
+          309,
+          282,
+          622
+        ],
+        "mean": -0.06207874278663602,
+        "std": 0.6620544611073007,
+        "entropy": 2.0138865647461843,
+        "deadband_frac": 0.18662704309063893,
+        "saturation_frac": 0.10728083209509658,
+        "no_consensus_frac": 0.0,
+        "n": 3365,
+        "n_total_bars": 3365
+      },
+      "q3": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          657,
+          370,
+          372,
+          327,
+          306,
+          312,
+          345,
+          676
+        ],
+        "mean": -0.007829299435029092,
+        "std": 0.6579589173063026,
+        "entropy": 2.026159949068899,
+        "deadband_frac": 0.18811292719167905,
+        "saturation_frac": 0.09153046062407132,
+        "no_consensus_frac": 0.0,
+        "n": 3365,
+        "n_total_bars": 3365
+      },
+      "q4": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          692,
+          450,
+          324,
+          319,
+          280,
+          297,
+          381,
+          622
+        ],
+        "mean": -0.03560625712089984,
+        "std": 0.6560723486913218,
+        "entropy": 2.0228514179613524,
+        "deadband_frac": 0.17800891530460625,
+        "saturation_frac": 0.06567607726597326,
+        "no_consensus_frac": 0.0,
+        "n": 3365,
+        "n_total_bars": 3365
+      }
+    },
+    "regime_cutpoints": [
+      0.00010463869231995379,
+      0.0001492621010888776,
+      0.00021740236174250726
+    ]
+  },
+  "ensemble_challenge_target_hit_rate": {
+    "step1": {
+      "target_pct": 0.08,
+      "window_bars": "per_fold",
+      "n_windows": 8,
+      "n_hits": 1,
+      "hit_rate": 0.125,
+      "max_cum_return_per_fold": [
+        0.06221097736058453,
+        0.051407414844688464,
+        0.05341340825553112,
+        0.046981677983572626,
+        0.05205569501890435,
+        0.06059464772921556,
+        0.09598629879210915,
+        0.05864332296905454
+      ]
+    }
+  },
+  "challenge_target_hit_rate_by_seed": {
+    "2025": {
+      "step1": {
+        "target_pct": 0.08,
+        "window_bars": "per_fold",
+        "n_windows": 8,
+        "n_hits": 0,
+        "hit_rate": 0.0,
+        "max_cum_return_per_fold": [
+          0.0458312467184968,
+          0.05778518083516915,
+          0.05331758898234079,
+          0.040450007042637084,
+          0.06556504720219784,
+          0.05768334978171277,
+          0.07874964149721804,
+          0.05558215953295929
+        ]
+      }
+    },
+    "3141": {
+      "step1": {
+        "target_pct": 0.08,
+        "window_bars": "per_fold",
+        "n_windows": 8,
+        "n_hits": 1,
+        "hit_rate": 0.125,
+        "max_cum_return_per_fold": [
+          0.059554428756932884,
+          0.04066340974337803,
+          0.05316729247579501,
+          0.03430092827971063,
+          0.04469444739100829,
+          0.0536753842338502,
+          0.10053994669912354,
+          0.05899465589216218
+        ]
+      }
+    },
+    "9999": {
+      "step1": {
+        "target_pct": 0.08,
+        "window_bars": "per_fold",
+        "n_windows": 8,
+        "n_hits": 1,
+        "hit_rate": 0.125,
+        "max_cum_return_per_fold": [
+          0.05010114866350338,
+          0.039549398761906863,
+          0.037330955522808434,
+          0.04490293412363852,
+          0.042271483743653214,
+          0.060197073086191225,
+          0.09428409473816035,
+          0.054078288510984424
+        ]
+      }
+    }
+  },
+  "wf_verdict": {
+    "decision": "reject_ensemble_use_best_solo",
+    "overall": "FAIL",
+    "folds_completed": 8,
+    "G2_no_regression_folds_meeting": 8,
+    "G3_uplift_ratio": 1.081075511927026,
+    "G5_cv_pf": 0.07348058142746929
+  },
+  "bundle_metadata": {
+    "path": "bundles\\sg1_eurusd_hg_ensemble_v1\\ensemble_v1.tar.gz",
+    "sha256": "efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf",
+    "size_bytes": 28800370
+  },
+  "bake_metadata": {
+    "baked_at_utc": "2026-05-24T10:56:53Z",
+    "baked_by": "scripts/bake_sg1_eurusd_hg_ensemble_drift_baseline.py",
+    "input_paths": [
+      "results\\sg1_eurusd_hg_ensemble_wf\\fold_00\\ens_pf_weighted_trajectory.parquet",
+      "results\\sg1_eurusd_hg_ensemble_wf\\fold_01\\ens_pf_weighted_trajectory.parquet",
+      "results\\sg1_eurusd_hg_ensemble_wf\\fold_02\\ens_pf_weighted_trajectory.parquet",
+      "results\\sg1_eurusd_hg_ensemble_wf\\fold_03\\ens_pf_weighted_trajectory.parquet",
+      "results\\sg1_eurusd_hg_ensemble_wf\\fold_04\\ens_pf_weighted_trajectory.parquet",
+      "results\\sg1_eurusd_hg_ensemble_wf\\fold_05\\ens_pf_weighted_trajectory.parquet",
+      "results\\sg1_eurusd_hg_ensemble_wf\\fold_06\\ens_pf_weighted_trajectory.parquet",
+      "results\\sg1_eurusd_hg_ensemble_wf\\fold_07\\ens_pf_weighted_trajectory.parquet"
+    ],
+    "fold_bars": [
+      1858,
+      1798,
+      1537,
+      1605,
+      1677,
+      1484,
+      1736,
+      1765
+    ],
+    "concat_n_bars": 13460,
+    "deadband_abs": 0.25,
+    "vol_estimator_bars": 20,
+    "rule": "ens_pf_weighted",
+    "rationale": "Ensemble v1 (seeds [2025, 3141, 9999], aggregation ens_pf_weighted) baseline captures the ensemble's action distribution across all 8 Hyper Growth WF OOS test windows for regime breadth. Stage 3 WF G3 point-estimate FAILed (1.081 < 1.10) but Protocol v2.5 block-bootstrap PROMOTEd. Live drift monitor compares Bybit demo trading-time action histogram against this baseline."
+  }
+}
