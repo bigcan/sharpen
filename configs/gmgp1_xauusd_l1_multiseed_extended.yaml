@@ -1,0 +1,212 @@
+# GMGP1-XAUUSD Extended-Window L1 Multiseed Retrain (Tier B2 of post-WF queue).
+# Protocol-anchored cell: A_long × 1.5M (S550-cont-6, 2026-05-25).
+#
+# CELL SELECTION RATIONALE — no per-strategy volume sweep needed
+#   Protocol v2.5.1 multiplicity rule (decision_training_budget_multiplicity_rule.md)
+#   locked the band [15x, 40x] with HARD-REJECT >50x. GMGP1-XAUUSD at 24mo ×
+#   15-min has ~49K training bars (736,933 m1 / 15). The 1.5M cell yields
+#   30.5x multiplicity, anchored by two converging validators:
+#
+#   PRIMARY (same asset class + same timeframe):
+#     - GMGP1-Gold v1 — 15-min CFD gold, 10mo × 500K-1M @ ~21K bars → 24-48x
+#       band. Scaled to 49K bars, the in-band cell sits at ~1.2-2.4M. 1.5M is
+#       centered in this range and matches the productive-zone evidence on the
+#       SAME asset class + same timeframe substrate that B2 targets.
+#     - GMGP1-Gold steady-state ensemble v1 LIVE 2026-05-09 (S538-cont-2)
+#       additionally validates that the protocol works for 15-min CFD gold
+#       under steady-state fees in production.
+#
+#   SECONDARY (cross-asset, same timeframe — gentle-cliff confirmation):
+#     - GMGP1-BTC v2 — 15-min crypto, 22mo × 2M @ ~63K bars → 32x PEAK
+#       (test PF 2.44, +21% over 1M cell). 4M @ 64x = -1.4%, p=0.84 vs peak,
+#       confirming the cliff is gentle on 15-min substrates. Density nearly
+#       matches B2 (49K vs 63K = 78%).
+#     - SG-1-XAUUSD VS-v2 (S539) confirmed the buffer-multiplicity rescue
+#       mechanism transfers to XAU asset class (+39.5% test PF uplift at the
+#       peak cell).
+#
+#   This config therefore skips the Phase 1 volume sweep that B1 ran (15 runs,
+#   ~3 days) — the protocol IS the evidence base, distilled. See
+#   feedback_anchor_cells_via_protocol_v25_multiplicity.md for the rule.
+#
+# CONTEXT
+#   Replaces the live gmgp1-xauusd checkpoint (solo WF_seed42_fold_07 from
+#   2026-04-24, test PF 2.260 on Feb-Apr 2025 OOS) with an ensemble built on
+#   24mo extended-window training. Live container target: gmgp1-xauusd
+#   cTrader IC Markets demo, live since 2026-04-24, FTMO graduation candidate.
+#
+# DIFF vs configs/gmgp1_xauusd_ftmo_rehpo_l1_multiseed_oanda.yaml (predecessor pattern)
+#   - train_window: 8mo (2025-01 -> 2025-08) -> 24mo (2024-01 -> 2026-01)
+#   - val/test:     2025-09 / 2025-11 -> 2026-02-28 / 2026-04-15
+#   - total_timesteps: 500K -> 1.5M (protocol-anchored)
+#   - workstream: gmgp1_xauusd_extended (results dir disjoint)
+#   - bootstrap PRIMARY gates added (Protocol v2.5)
+#   - drift + safe_mode blocks added (live-capital prereq)
+#   Everything else (HPs, fee model, env, network) IDENTICAL — Trial 10
+#   matches live deploy.
+#
+# LAUNCH PATTERN (per feedback_multiseed_batches_of_5_not_10_at_once.md)
+#   Fire TWO SEQUENTIAL launches of 5 each — never 10-in-one-launch.
+#   --concurrent 5 × num_envs >= 20 triggers multiprocessing race (S536).
+#
+#   Batch 1 (5 seeds):
+#     python scripts/launch_l1_multiseed.py \
+#       --config configs/gmgp1_xauusd_l1_multiseed_extended.yaml \
+#       --seeds 42,123,456,789,1024 \
+#       --run_name_prefix gmgp1-xauusd-extended \
+#       --separate_runs --concurrent 2 \
+#       --slots gpuhub-1:0,gpuhub-1:0,gpuhub-1:1,gpuhub-1:1
+#
+#   Batch 2 (5 seeds, fire after Batch 1 lands):
+#     python scripts/launch_l1_multiseed.py \
+#       --config configs/gmgp1_xauusd_l1_multiseed_extended.yaml \
+#       --seeds 1337,2025,3141,5150,9999 \
+#       --run_name_prefix gmgp1-xauusd-extended \
+#       --separate_runs --concurrent 2 \
+#       --slots gpuhub-1:0,gpuhub-1:0,gpuhub-1:1,gpuhub-1:1
+#
+# DOWNSTREAM CHAIN (operator-driven)
+#   1. L1 N=10 results -> seed_report.json
+#   2. Stage 2.5-R val_argmax_pf top-3 selection + bootstrap PRIMARY (Protocol v2.5)
+#   3. Stage 3 WF (4-8 folds x top-3 seeds) on extended-window data
+#   4. Bake ensemble bundle (gmgp1_xauusd_extended/ensemble_v1.tar.gz)
+#   5. Live container swap (gmgp1-xauusd) — drift baseline recal first per S535 lesson
+#
+# WALL-TIME (revised vs original Phase-1+Phase-2 plan)
+#   Original: 15 runs (Phase 1 sweep) + 10 runs (Phase 2) ~= 3-4 days
+#   Revised:  10 runs (this config, 2 batches of 5) ~= 22h on 4-slot pool
+
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  train_start_date: "2024-01-01"
+  train_end_date:   "2026-01-31"
+  val_start_date:   "2026-02-01"
+  val_end_date:     "2026-02-28"
+  test_start_date:  "2026-03-01"
+  test_end_date:    "2026-04-15"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235                # steady-state OANDA-aligned (S464)
+  deadband_threshold: 0.35           # trial 10
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.008072070485679669    # trial 10
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# Trial 10 HPs (gmgp1_xauusd_ftmo_rehpo_20260421) — IDENTICAL to Phase 1 base.
+# Frozen across all cells — multiplicity is the independent variable.
+agents:
+  sac:
+    lr_actor: 0.00048211947849186834
+    lr_critic: 0.00023536913918894482
+    lr_alpha: 0.0000023011482963674244
+    gamma: 0.9734375919828845
+    tau: 0.0056901039341825865
+    initial_alpha: 0.4568170758305432
+    gradient_clip: 2.738336834748153
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 1500000           # Protocol v2.5.1 multiplicity-anchored (30x @ ~49K bars)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+workstream: gmgp1_xauusd_extended
+
+gates:                               # Protocol v2 §4 Stage 2 (S488 N=10 + bootstrap)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                       # Phase 2: full L1 pool
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  # Protocol v2.5: bootstrap PRIMARY for live-capital workstreams.
+  ensemble_uplift_min: 1.10          # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05       # legacy ambiguous floor (audit-only)
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_rule_selection: val_argmax_pf  # S495: pick aggregation rule on val split
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                   # Protocol v2 §4 default; launcher --separate_runs overrides at runtime
+  tags: ["gmgp1-xauusd", "Gold", "SAC", "15min", "CFD", "FTMO", "prop-firm",
+         "extended-window", "oanda-spot", "rehpo-trial10", "steady-state",
+         "l1-multiseed", "protocol-anchored-cell",
+         "upstream:gmgp1_xauusd_ftmo_rehpo_20260421",
+         "study-id-gmgp1-xauusd-extended-20260525"]
