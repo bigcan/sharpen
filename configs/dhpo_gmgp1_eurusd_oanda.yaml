@@ -1,0 +1,74 @@
+# Distributed HPO overlay — GMGP1-EURUSD-OANDA (S551-cont-2 2026-05-26)
+#
+# Mirror of `dhpo_sg1_eurusd_hyper_growth.yaml` (SG-1 sibling) but on the
+# 15-min GMGP1 timeframe. 4 workers across both RTX 4090 GPUs on gpuhub-1.
+# Fire-gate: Tier B2 GMGP1-XAUUSD extended Stage 3 WF must clear the 4-slot
+# pool first (currently in flight as of 2026-05-26 21:52 UTC, ETA ~3h50m on
+# active fold). Re-check fleet via `python scripts/monitor_fleet.py` before
+# launch.
+#
+# Launch (when fleet free):
+#   set -a; source .env; set +a
+#   python scripts/distributed_hpo_coordinator.py \
+#     --config configs/gmgp1_eurusd_oanda_hpo.yaml \
+#     --platform gpuhub \
+#     --n_workers 4 --n_trials 50 \
+#     --db_url "$DISTRIBUTED_HPO_DB_URL" \
+#     --study_name gmgp1_eurusd_oanda_20260526 \
+#     --distributed_config configs/dhpo_gmgp1_eurusd_oanda.yaml \
+#     --resume
+#
+# Wall estimate: ~24-39h on 4-worker pool (SG-1-EURUSD precedent was 39h27m
+# on 3-worker pool with 3-min env; GMGP1 15-min is structurally faster per
+# step but trials run 500K each).
+
+distributed_hpo:
+  platform: "gpuhub"
+  n_workers: 4
+  n_trials: 50
+
+  storage:
+    backend: "postgresql"
+    url: "${DISTRIBUTED_HPO_DB_URL}"
+    heartbeat_interval: 60
+    grace_period: 600
+    max_retry: 1
+
+  # 2 workers per GPU. GMGP1 15-min SAC at num_envs=20 uses ~3.3GB VRAM/proc
+  # (S529 measurement) — well under 4090's 48GB ceiling. Tier B2 (4 active
+  # XAUUSD WF procs) is the precedent for 4-slot 4090 pool capacity.
+  gpuhub:
+    instances:
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
+
+  worker:
+    target_trials: null
+    trial_timeout: 7200
+    graceful_shutdown_timeout: 60
+    pip_extras: ""
+
+  data:
+    upload_method: "sftp"
+    data_files:
+      - "oanda/eurusd_m1_m.parquet"
+      - "oanda/eurusd_m1_m.manifest.json"
+    cache_by_size: true
+
+  wandb:
+    entity: "bigcan-chiwin-technology"
+    project: "FinRL-Pro-DS"
+    group_prefix: "dhpo"
+    tags: ["distributed_hpo", "gmgp1-eurusd", "EURUSD", "FTMO",
+           "prop-firm", "hpo", "broad-search", "steady-state", "oanda-spot",
+           "15min", "protocol-anchored-cell", "post-sg1-eurusd-oanda"]
+
+  fault_tolerance:
+    max_worker_retries: 2
+    worker_replace_on_death: false   # single-instance — manual replace if a worker dies
+    monitor_poll_interval: 300
+
+  cost:
+    auto_teardown: false             # never auto-destroy GPUHub instances

@@ -1,0 +1,173 @@
+# GMGP1-EURUSD-OANDA — Stage 1 HPO (broad-search, first-time on EURUSD).
+#
+# Queued S551-cont-2 2026-05-26 per `project_gmgp1_eurusd_oanda_queued.md`.
+# Fresh workstream — no upstream baseline; broad-search HPO (narrow_mode off).
+# Cell pre-committed per [[feedback-anchor-cells-via-protocol-v25-multiplicity]]:
+#   - 22mo calendar window (2024-06-02 -> 2026-03-31, satisfies 22mo min)
+#   - 500K steps per HPO trial; best-trial retrain to 1.5M (32x mult @ ~46K bars)
+#   - Buffer 500K (DO NOT change)
+#
+# Target firm: FTMO (anchor; matches GMGP1-XAUUSD precedent; per-strategy
+# decoupling overlay at configs/deploy/ftmo/step1.yaml). Switch to The5ers HG
+# at L1 stage only if FTMO PF ceiling proves too tight in HPO discovery.
+#
+# Broker target: OANDA practice (api-fxpractice.oanda.com). Live deploy goes
+# through `finrl_pro_ds.cfd.execution.oanda_broker.OandaBroker` shipped S551
+# (commit 17b76290). Symbol map at broker boundary: EURUSD <-> EUR_USD.
+#
+# Architecture template: clone of `gmgp1_xauusd_ftmo_hpo.yaml` (15-min V7
+# ContinuousSwing, multiscale features). Diffs from XAUUSD:
+#   - Data:  OANDA M1 EUR_USD (24h/5d FX, weekend Fri 21:00 -> Sun 21:00 UTC)
+#   - Fees:  5e-5 per side (~5bps; OANDA EUR/USD practice — see Q2 audit note)
+#   - Asset class: cfd_forex
+#   - Window: 22mo (vs XAUUSD 8mo) — calendar-anchored per protocol v2.5.1
+#   - DD caps: FTMO standard (10% max / 5% daily; buffers 0.5pp)
+#   - Risk eod_hour_utc: 21 (FX day rolls 21:00 UTC = NY 17:00 / 16:00 DST)
+#
+# Q2 fee-audit (NOT YET DONE — flagged in queue memo): 5bps is conservative
+# ceiling derived from SG-1-EURUSD HG HPO (IC Markets Raw). OANDA practice
+# spread MAY be tighter than IC Markets Raw — if empirical p50 spread on the
+# sg1-eurusd-oanda pricing stream comes in materially under 0.3bps, tighten
+# taker_fee BEFORE L1 multiseed promotion to avoid overconservative training.
+#
+# Q3 sub-account (OPERATOR ACTION): create a fresh $100K USD NETTING practice
+# sub-account under the existing OANDA personal token; capture account ID into
+# `docker/live/.env` as `GMGP1_EURUSD_OANDA_ACCOUNT_ID`. Not used at HPO time,
+# only at Stage 5 paper deploy.
+
+data:
+  file_path: data/oanda/eurusd_m1_m.parquet
+  ticker: EURUSD
+  handler_type: multiscale
+  # 22-month train window per calendar-anchored rule (audit fix: original
+  # 2024-06-02 -> 2026-03-31 was 21mo+29d = 21.95mo, just under policy).
+  # Parquet manifest: first_ts 2024-06-02T21:04 UTC, last_ts 2026-05-26T07:05 UTC.
+  train_start_date: '2024-06-02'
+  train_end_date:   '2026-04-02'   # 22.0 months exact
+  val_start_date:   '2026-04-03'
+  val_end_date:     '2026-05-03'   # 1 month
+  test_start_date:  '2026-05-04'
+  test_end_date:    '2026-05-25'   # ~3 weeks; ends 1d before parquet boundary (07:05 UTC partial-day on 05-26)
+
+features:
+  scales: [15, 60, 240]            # 15min/1h/4h multiscale (V7 GMGP1 standard)
+  window_size: 30
+  features_per_scale: 8
+  asset_class: cfd_forex           # FX-major (validated key per live_obs_builder.py:110)
+
+env:
+  mdp_version: v7
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00005               # ~5bps per side; Q2 audit pending (see header)
+  deadband_threshold: 0.35         # XAUUSD-inherited prior; HPO sweeps this axis
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10           # FTMO 10% hard cap (matches XAUUSD)
+  scales: [15, 60, 240]
+  gap_detection: true
+  gap_atr_mult: 3.0                # FX weekend 48-50h gap detector (OANDA Fri 21Z -> Sun 21Z)
+  reward:
+    mode: dsr
+    dsr_eta: 0.005                 # prior; HPO sweeps
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08  # 2pp buffer vs FTMO 10% cap
+    max_daily_loss_pct: 0.04         # 1pp buffer vs FTMO 5% cap
+    eod_hour_utc: 21                 # FX day rolls 21:00 UTC
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"               # live-path compat
+    static_peak: true                # FTMO static-peak DD (non-trailing)
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Priors only — HPO sweeps the standard 9 axes (lr_actor/critic/alpha,
+    # gamma, tau, initial_alpha, deadband_threshold, dsr_eta, gradient_clip).
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000            # multiplicity rule anchored against this constant
+    initial_alpha: 0.2
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+training:
+  # HPO trial size (~45K bars in 22mo cell -> 11.0x multiplicity, just above
+  # validator's 10x WARN floor and below productive 15-40 band). HPO discovery
+  # at low multiplicity is project-precedented (SG-1-EURUSD HG HPO best trial
+  # #18 found at 2.1x). Best-trial retrains at 1.5M -> 33.0x = productive band.
+  total_timesteps: 500000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: bfloat16
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: true
+  objective: profit_factor         # BUG-01 lock
+  trials: 50                       # match SG-1-EURUSD HG precedent
+  steps_per_trial: 500000
+  # narrow_mode: false (default) — first-time on EURUSD, no prior to narrow around
+
+gates:                             # Protocol v2 §4 numeric gates
+  # Stage 1 HPO
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  # Stage 2 L1 multiseed (S488 escalation)
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  # Stage 3 WF
+  wf_windows: 8
+  wf_pf_floor: 1.1
+  # FTMO compliance (sub-gates applied to ensemble trajectory in Stage 3)
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  # Stage 4 recent-OOS
+  oos_pf_floor: 1.1
+
+wandb:
+  project: FinRL-Pro-DS
+  tags:
+    - gmgp1-eurusd
+    - EURUSD
+    - SAC
+    - 15min
+    - CFD
+    - FTMO
+    - prop-firm
+    - propfirm
+    - hpo
+    - broad-search
+    - oanda-spot
+    - steady-state
+    - protocol-anchored-cell
+    - post-sg1-eurusd-oanda
