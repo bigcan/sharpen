@@ -1533,12 +1533,15 @@ class LiveTradingEngine:
                     self.loader._contract_manager = self.broker._contract_manager
                 return True
 
-            # --- cTrader broker check ---
+            # --- _connected-attribute broker check (cTrader, OANDA) ---
             ct_connected = getattr(self.broker, "_connected", None)
             if ct_connected is not None:
                 if ct_connected:
                     return True
-                logger.warning("cTrader connection lost — attempting reconnect")
+                logger.warning(
+                    "%s connection lost — attempting reconnect",
+                    type(self.broker).__name__,
+                )
                 reconnect_fn = getattr(self.broker, "_reconnect", None)
                 if reconnect_fn is not None:
                     success = await reconnect_fn()

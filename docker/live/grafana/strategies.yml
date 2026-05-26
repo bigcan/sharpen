@@ -18,6 +18,8 @@ strategies:
     uid: finrl-sg1-xauusd
   - name: sg1-btc
     uid: finrl-sg1-btc
+  - name: sg1-eurusd-oanda
+    uid: finrl-sg1-eurusd-oanda
   # INACTIVE -- uncomment when the corresponding prometheus target is active.
   # - name: sg1-gold
   #   uid: finrl-sg1-gold

@@ -57,10 +57,11 @@ scrape_configs:
         labels:
           strategy: "sg1-btc"
           broker: "bybit"
-      - targets: ["sg1-eurusd:9110"]
-        labels:
-          strategy: "sg1-eurusd"
-          broker: "bybit"
+      # INACTIVE: sg1-eurusd (Bybit) — pivoted to OANDA in S551 (cTrader app KYC delay)
+      # - targets: ["sg1-eurusd:9110"]
+      #   labels:
+      #     strategy: "sg1-eurusd"
+      #     broker: "bybit"
       - targets: ["sg1-eurusd-oanda:9112"]
         labels:
           strategy: "sg1-eurusd-oanda"
