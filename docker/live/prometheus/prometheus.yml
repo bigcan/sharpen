@@ -61,6 +61,10 @@ scrape_configs:
         labels:
           strategy: "sg1-eurusd"
           broker: "bybit"
+      - targets: ["sg1-eurusd-oanda:9112"]
+        labels:
+          strategy: "sg1-eurusd-oanda"
+          broker: "oanda"
 
   # INACTIVE: PRISM API — PRISM falsified (Session 345)
   # - job_name: "prism"
