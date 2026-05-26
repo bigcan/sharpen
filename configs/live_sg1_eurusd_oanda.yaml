@@ -1,0 +1,300 @@
+# Live Trading Config — SG-1 EURUSD SAC on EUR/USD CFD via OANDA v20 (Hyper Growth)
+# 3-min bars, signal-gated, prop-firm trained (6% trailing / 3% daily DD).
+#
+# S551 (2026-05-26): OANDA practice pivot from cTrader IC Markets.
+# Driver: cTrader app-delete fragility (CH_CLIENT_AUTH_FAILURE on
+# sg1-eurusd 2026-05-26 ~03:30 UTC; per-strategy app isolation requires
+# multi-day KYC re-onboarding). OANDA's per-account isolation via
+# OANDA_ACCOUNT_ID with one shared personal token eliminates this
+# fragility class — sub-accounts spin up in seconds via Hub UI.
+#
+# Bonus: SG-1 EURUSD ensemble v1 was trained on OANDA historical data
+# (data/oanda/eurusd_m1_m.parquet), so OANDA practice is actually a
+# better sim-to-paper feature-parity match than the IC Markets pivot
+# this replaces.
+#
+# Stage 3 WF ensemble v1 (Protocol v2.5 bootstrap PROMOTE, S550):
+#   bundle SHA efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf
+#   seeds [2025, 3141, 9999] rule ens_pf_weighted
+#   L1 N=10: median test PF 1.5985, CV 0.0479
+#   Stage 2.5-R bootstrap: P(PF)=0.9991, P(MDD)=0.9713 -> PROMOTE
+#   Stage 3 WF 8-fold: G1/G2/G4/G5 PASS; G3 1.081 < 1.10 legacy FAIL
+#     -> Protocol v2.5 manual block-bootstrap on stitched 13,452 OOS bars:
+#        P(ens > solo_2025) = 1.0000, P(ens > best_solo) = 0.9994 -> PROMOTE
+#
+# ---------------------------------------------------------------------------
+# PROP-FIRM DECOUPLING (S498-cont Step 5 pattern; HG variant).
+# Same hyper_growth/step1 overlay used on the cTrader sibling — overlay is
+# broker-agnostic, so the challenge state machine + drift gates exercise
+# identical code paths regardless of underlying broker.
+#
+# Deploy invocation (resolved = this file + overlay):
+#   python scripts/deploy_bare_metal.py --script scripts/run_live_oanda.py \
+#     --config configs/live_sg1_eurusd_oanda.yaml --overlay hyper_growth/step1
+#
+# After overlay, validator requires the overlay's `risk.static_peak` etc.;
+# this BASE file alone is NOT paper-deployable.
+# ---------------------------------------------------------------------------
+#
+# OANDA credentials via env vars:
+#   OANDA_API_TOKEN, OANDA_ACCOUNT_ID, OANDA_ENV
+# Per-strategy keys (SG1_EURUSD_OANDA_ACCOUNT_ID) override the shared
+# OANDA_ACCOUNT_ID default in docker/live/.env — one OANDA personal token
+# covers all sub-accounts under the same user identity; sub-account
+# isolation is via OANDA_ACCOUNT_ID, not separate tokens.
+
+# --- OANDA Connection ---
+exchange:
+  name: "oanda"
+  env: "practice"                      # "practice"=paper, "live"=Hyper Growth live (post-MT5 graduation)
+  testnet: true                        # legacy field; mirrors env=="practice" for engine compat
+  asset: "EURUSD"
+
+# --- Contract Specification ---
+contract:
+  symbol: "EURUSD"                     # OANDA: EUR_USD (broker maps internally)
+  lot_size: 100000                     # 1 standard FX lot = 100,000 base-currency units
+  min_lot: 0.01                        # 0.01 lots = 1,000 units (micro-lot)
+  tick_size: 0.00001                   # OANDA EUR/USD = 5-digit pricing (pipLocation -4)
+  leverage: 1                          # 1:1 (user policy — HG 1:30 / OANDA 50:1 are caps)
+  order_type: "MKT"                    # MARKET orders with FOK timeInForce
+  market_fallback_timeout: 10.0
+
+# --- Agent (v2.3 atomic-swap bundle: SG-1 EURUSD HG ensemble_v1, ens_pf_weighted) ---
+# Loaded from bundle baked into image at /app/bundles/sg1_eurusd_hg_ensemble_v1/.
+# - L1 N=10 PASS: median test PF 1.5985, CV 0.0479 (S550 verdict).
+# - Stage 2.5-R PROMOTE on ens_pf_weighted: bundle SHA
+#   efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf
+#   bootstrap P(PF)=0.9991, P(MDD)=0.9713.
+# - Stage 3 WF 8-fold ens_pf_weighted: G1/G2/G4/G5 PASS, G3 1.081 FAIL by
+#   legacy point-estimate (uplift_ratio_min 1.10). Protocol v2.5 manual
+#   block-bootstrap on stitched 13,452 OOS bars: P(ens > solo_2025) = 1.0000,
+#   P(ens > best_solo) = 0.9994 -> PROMOTE.
+# - Manifest chosen_rule: ens_pf_weighted; seed_pfs weights from L1 test PFs.
+agent:
+  checkpoint_path: ""
+  device: "cpu"
+  torch_compile: false
+  ensemble:
+    bundle_path: "/app/bundles/sg1_eurusd_hg_ensemble_v1/ensemble_v1.tar.gz"
+    aggregation_rule: "ens_pf_weighted"  # matches manifest.chosen_rule + gates yaml
+    require_normalizers: false           # bundle ships empty normalizers/; norm_warmup pkl supplied below
+
+# --- SAC Hyperparameters (HPO trial #18 from sg1_eurusd_hyper_growth_20260521) ---
+agents:
+  sac:
+    lr_actor: 0.00037752851184085103
+    lr_critic: 0.00044684267408421323
+    lr_alpha: 0.0001059694907530247
+    tau: 0.0027196274363356005
+    gamma: 0.9654402434898545
+    initial_alpha: 0.11970026598125914
+    gradient_clip: 8.803451835153641
+    batch_size: 512
+    buffer_size: 100
+
+# --- Network (must match training checkpoint exactly) ---
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# --- Features (SG-1 3-min multi-scale — must match training) ---
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_forex"
+  norm_span: 120
+  bootstrap_bars: 30000               # 60-min scale needs ~7200 1-min bars. 30K is 2x safe.
+  # S509 train-serve EMA-Z parity. Seeds in the ensemble bundle share the same
+  # L1 train_end_date (2025-09-30); per-seed pkls are byte-identical so any
+  # one pkl is sufficient for the live warmup buffer. Same pkl as cTrader
+  # sibling — broker-agnostic.
+  norm_warmup_path: "/app/checkpoints/sg1-eurusd-hg-l1-trial18-seed2025_20260523_120312/norm_warmup_3-15-60.pkl"
+
+# --- Signal Gate (trial #18 calibration — must match training) ---
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+# --- Bar Clock (3-min bars for SG-1; OandaDataLoader synthesizes M3 from M1 per ADR-3) ---
+bar_clock:
+  base_interval_minutes: 3
+  execution_delay_seconds: 10.0
+  max_late_seconds: 60.0
+
+# --- Trading ---
+# OANDA EUR/USD practice: commission $0, cost is in the spread (~1.7 pips
+# observed live; encode as fractional spread-cost matching HPO trial #18
+# env.taker_fee 0.00005 = 0.5 bps round-trip = ~0.4 pip total). Demo NAV
+# starts at $100K (user-reset); E1 guard tolerance 10% bounds drift.
+trading:
+  initial_balance: 100000.0
+  deadband_threshold: 0.35             # trial #18 (must match ens_pf_weighted threshold)
+  taker_fee: 0.00005                   # OANDA EUR/USD effective spread; matches HPO
+  weekend_flatten:
+    enabled: true
+    minutes_before_close: 30           # Flatten 30 min before Friday close
+
+# --- Data reference (validator Stage-0; not loaded at runtime — live fetches from OANDA) ---
+# Same OANDA parquet the L1 ensemble checkpoints were trained on. Symbol
+# convention here is the config-side EURUSD; broker maps to EUR_USD for
+# the API.
+data:
+  file_path: "data/oanda/eurusd_m1_m.parquet"
+  ticker: "EURUSD"
+  handler_type: "multiscale"
+
+# --- Hard Constraints (validator parity; mirrors trading.taker_fee) ---
+env:
+  taker_fee: 0.00005
+  gap_detection: true                  # OANDA weekend gap detector (mirrors training)
+  gap_atr_mult: 3.0
+
+# --- Risk Management (universal live safety; phase-varying keys come from overlay) ---
+# Overlay (hyper_growth/step1) owns: static_peak (true), max_trailing_drawdown_pct,
+# max_daily_loss_pct, eod_hour_utc, flatten_on_kill_file.
+risk:
+  enabled: true
+  max_drawdown_pct: 0.06               # 6% hard stop (HG hard rail)
+  circuit_breaker_cooldown_bars: 12
+  max_position_pct: 1.0
+  funding_rate_alert: 999.0
+  min_margin_reserve_pct: 0.10
+  # S495-cont fleet-wide hotfix (override default 4.0). Cleanup deferred to
+  # S506 Option B Phase 4 (operator-driven across configs).
+  daily_turnover_limit: 10.0
+  soft_throttle_start: 0.8
+
+# --- WandB Monitoring ---
+wandb:
+  project: "FinRL-Pro-DS"
+  entity: "bigcan-chiwin-technology"
+  # Distinct run_id from the cTrader sibling so the two never collide
+  # in WandB if both are ever running simultaneously.
+  run_id: "live-sg1-eurusd-oanda-paper-ensemble-v1"
+  tags: ["live", "sg-1", "EURUSD", "SAC", "3min", "OANDA", "paper",
+         "CFD", "the5ers", "hyper-growth-overlay", "signal-gated", "prop-firm",
+         "ensemble", "ens-pf-weighted", "seeds-2025-3141-9999", "hg-soak",
+         "broker-pivot-s551"]
+
+# --- Safety ---
+safety:
+  require_explicit_mainnet: true
+  max_daily_loss_pct: 0.0
+  # Distinct kill_file paths from the cTrader sibling so both can coexist
+  # on the same /app/state volume during the soak window without
+  # interference. (Container-private state volume in compose anyway, but
+  # belt-and-braces.)
+  kill_file: "/app/state/finrl_live_sg1_eurusd_oanda_kill"
+  kill_file_override: "/app/state/finrl_live_sg1_eurusd_oanda_kill.override"
+  # v2.3 swap-handshake state on persistent state volume.
+  last_bundle_file: "/app/state/finrl_live_sg1_eurusd_oanda_last_bundle"
+  swap_approved_file: "/app/state/finrl_live_sg1_eurusd_oanda_swap_approved"
+  flatten_on_kill_file: true
+  emergency_flatten_on_error: true
+
+# --- Protocol v2.2 §8.2 Live Action-Drift ---
+# Baseline = ens_pf_weighted distribution aggregated across all 8 HG WF OOS
+# test windows (13,460 bars, ~2025-09-01 -> 2026-04-01) for regime breadth.
+# deadband_frac 0.1857, sat 0.0958, mean -0.0383, std 0.6621.
+# Same baseline as the cTrader sibling — broker-independent.
+drift:
+  enabled: true
+  baseline_path: "/app/baselines/sg1_eurusd_hg_ensemble_v1/ensemble_report.json"
+  window_bars: 1000
+  min_bars_before_check: 500
+  vol_estimator_bars: 20
+
+# --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+gates:
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    agreement_flat_delta_warn: 0.20
+    agreement_flat_delta_crit: 0.40
+    agreement_flat_window_bars: 2000
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+# --- PRISM Regime Overlay (optional, falsified S413+) ---
+prism:
+  enabled: false
+  base_url: "http://prism-api:8001"
+  api_key: ""
+  ticker: "EUR-USD"
+  timeframe: "daily"
+  timeout: 5
+  cache_ttl: 60
+  crisis_flatten: true
+  multipliers:
+    LOW_VOL: 1.3
+    NORMAL_VOL: 1.0
+    HIGH_VOL: 0.3
+
+# --- Monitoring ---
+monitoring:
+  metrics_port: 9112                   # Distinct from sg1-eurusd cTrader (9110)
+
+# ---------------------------------------------------------------------------
+# Provenance (S551) — SG-1 EURUSD HG ensemble_v1 OANDA practice deploy
+# ---------------------------------------------------------------------------
+provenance:
+  schema_version: 1
+  block_added: "2026-05-26 (S551)"
+  strategy: sg1-eurusd
+  agent_type: ensemble
+  training_config: "configs/sg1_eurusd_hyper_growth_l1_multiseed.yaml"
+  bundle_path: "/app/bundles/sg1_eurusd_hg_ensemble_v1/"
+  bundle_sha256: "efd4853d1deb4d2018b62820aac686b78056bf3327684f32df5a75b1a51001cf"
+  ensemble:
+    seeds: [2025, 3141, 9999]
+    aggregation_rule: "ens_pf_weighted"
+    bundle_chosen_rule: "ens_pf_weighted"
+    seed_pfs:                                # L1 test PFs (weights for ens_pf_weighted)
+      9999: 1.7248
+      2025: 1.6927
+      3141: 1.6466
+    hpo_trial: 18
+    hpo_study: "sg1_eurusd_hyper_growth_20260521"
+    hpo_parent_wandb: "6rjp4ugt"
+    l1_metrics: "median test PF 1.5985, CV 0.0479 (N=10, S550)"
+    stage_2_5_r_bootstrap: "P(PF)=0.9991, P(MDD)=0.9713 -> PROMOTE (S550)"
+    stage_3_wf_gates: "G1/G2/G4/G5 PASS; G3 1.081 < 1.10 legacy FAIL"
+    stage_3_wf_bootstrap_override: "P(ens > solo_2025) = 1.0000, P(ens > best_solo) = 0.9994 (Protocol v2.5 primary; legacy demoted to audit-only S526)"
+    stage_3_wf_decision: "PROMOTE (S550)"
+  drift_baseline_path: "/app/baselines/sg1_eurusd_hg_ensemble_v1/ensemble_report.json"
+  live_run_id: "live-sg1-eurusd-oanda-paper-ensemble-v1"
+  paper_deploy_since: null               # set on first paper bar
+  audit_history:
+    - "2026-05-24 (S550-cont-2): Bybit demo attempt SHIPPED but failed pre-flight — Bybit has no EUR/USDT pair (audit miss); container torn down same session."
+    - "2026-05-24 (S550-cont-3): cTrader IC Markets demo pivot (cTID <ACCT_1>); paper-deployed S550-cont-4 to S550-cont-5."
+    - "2026-05-26 (S551): cTrader CH_CLIENT_AUTH_FAILURE restart loop; sg1-eurusd cTrader container halted (operator). Pivot to OANDA practice account 101-011-<ACCT_9>-001 (S551). Broker layer (OandaBroker, OandaDataLoader, run_live_oanda) new; all training artifacts (bundle/baseline/norm_warmup/overlay) carried over byte-identical. Bonus: OANDA practice has better sim-to-paper feature parity than IC Markets — bundle was trained on OANDA historical data (data/oanda/eurusd_m1_m.parquet)."
+  notes:
+    - "Architect artifact: .agent/artifacts/oanda_broker_architecture.md"
+    - "Soak-gate override (B4): inherited from S550-cont-3 cTrader pivot; sg1-btc 30-day soak target ~2026-06-21 unchanged."
+    - "T&C blocker (A3): pre_deploy_blocker in gates yaml L151 (Hyper Growth EA/bot rule verification) DOES NOT bind OANDA practice — only HG live graduation venue."
+    - "cTrader predecessor: configs/live_sg1_eurusd_ctrader.yaml (paused S551; retained for fallback)."
+    - "Bybit demo predecessor: configs/live_sg1_eurusd_bybit.yaml (deprecated S550-cont-3; kept for git history; do NOT deploy)."
