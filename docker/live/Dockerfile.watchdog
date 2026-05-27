@@ -11,6 +11,7 @@ ENV PYTHONUNBUFFERED=1 \
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tzdata \
+    cron \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -19,12 +20,24 @@ RUN pip install --upgrade pip && \
     pip install \
     "docker>=7.0" \
     "requests>=2.31" \
-    "wandb>=0.16.0"
+    "wandb>=0.16.0" \
+    "pandas>=2.0"
 
 # Copy watchdog scripts + existing watchdog.py for WandB checks
 COPY scripts/watchdog_docker.py /app/scripts/watchdog_docker.py
 COPY scripts/watchdog.py /app/scripts/watchdog.py
+# drift_watch.py runs on a 15-min cron — see watchdog_crontab below.
+COPY scripts/drift_watch.py /app/scripts/drift_watch.py
+
+# Cron wiring: */15min drift-baseline staleness check, alerts via Telegram when
+# any live run hits a WARN streak >= 4h. Captures both Mode A (baseline staleness)
+# and Mode B (regime-feature mismatch). See project_drift_watch_not_wired_to_cron_s551_cont_3.
+COPY docker/live/run_drift_watch.sh /usr/local/bin/run_drift_watch.sh
+COPY docker/live/watchdog_crontab /etc/cron.d/drift_watch
+COPY docker/live/watchdog_entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/run_drift_watch.sh /usr/local/bin/entrypoint.sh && \
+    chmod 0644 /etc/cron.d/drift_watch
 
 ENV PYTHONPATH=/app
 
-CMD ["python", "scripts/watchdog_docker.py"]
+CMD ["/usr/local/bin/entrypoint.sh"]
