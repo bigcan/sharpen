@@ -50,10 +50,10 @@ DEPLOY_SCRIPT = PROJECT_ROOT / "scripts" / "deploy_bare_metal.py"
 # Per-instance setup-phase stagger. deploy_bare_metal's setup (unzip + pip
 # uninstall/install on the shared remote workspace) is not concurrent-safe
 # when multiple deploys hit the same host — overlapping unzips and pip
-# install/uninstall cycles can corrupt module files. Serialize the start of
-# each deploy on a given instance so its setup window is exclusive; once
-# python is launched, training runs concurrent on the GPU pool.
-DEPLOY_SETUP_GAP_S = 300.0
+# install/uninstall cycles can corrupt module files (S551-cont-3: 5-min
+# default lost wandb proto race on fold-5 seed 2025). Default 300s; override
+# via DEPLOY_SETUP_GAP_S env var when a fold needs a wider window.
+DEPLOY_SETUP_GAP_S = float(os.environ.get("DEPLOY_SETUP_GAP_S", "300.0"))
 _INSTANCE_NEXT_DEPLOY_TIME: dict[str, float] = {}
 _INSTANCE_LOCK = threading.Lock()
 
