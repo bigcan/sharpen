@@ -39,6 +39,11 @@ class DriftStatus:
     LOG_ONLY = "LOG_ONLY"   # no baseline → record but don't fire
     WARN = "WARN"
     CRIT = "CRIT"
+    # v2.6 (S551-cont-4): bar excluded from drift accumulation because the
+    # observation features were flat (LiveObsBuilder.feature_variance_status()
+    # returned "FLAT"). Engine continues normal trading — VETOED is NOT a halt
+    # signal — it only protects the histogram from degenerate inputs.
+    VETOED = "VETOED"
 
 
 @dataclass
@@ -58,6 +63,10 @@ class DriftReport:
     # emitted NaN (no consensus). NaN bars are excluded from the deadband /
     # saturation denominator since they are "unobserved" rather than "flat".
     no_consensus_frac: Optional[float] = None
+    # v2.6 (S551-cont-4): rolling fraction of FLAT-feature bars in the window
+    # and the snapshot of feature_state passed to observe() for this bar.
+    flat_veto_frac: Optional[float] = None
+    feature_state: Optional[str] = None
 
     def to_dict(self) -> dict:
         return {
@@ -71,6 +80,8 @@ class DriftReport:
             "saturation_frac_delta": self.saturation_frac_delta,
             "kl": self.kl,
             "no_consensus_frac": self.no_consensus_frac,
+            "flat_veto_frac": self.flat_veto_frac,
+            "feature_state": self.feature_state,
         }
 
 
@@ -139,6 +150,7 @@ class ActionDriftTracker:
         vol_estimator_bars: int = 20,
         hist_edges: Optional[Sequence[float]] = None,
         asset_keys: Optional[Sequence[str]] = None,
+        max_veto_frac: float = 0.50,
     ):
         if window_bars < 50:
             raise ValueError("window_bars must be >= 50")
@@ -156,6 +168,11 @@ class ActionDriftTracker:
         self.deadband_abs = float(deadband_abs)
         self.saturation_abs = float(saturation_abs)
         self.vol_estimator_bars = int(vol_estimator_bars)
+        if not 0.0 < float(max_veto_frac) < 1.0:
+            raise ValueError(
+                f"max_veto_frac must be in (0, 1); got {max_veto_frac!r}"
+            )
+        self.max_veto_frac = float(max_veto_frac)
 
         # Multi-dim detection
         self._is_scalar: Optional[bool] = None
@@ -169,6 +186,16 @@ class ActionDriftTracker:
             maxlen=self.window_bars,
         )
         self._prev_close: Optional[float] = None
+
+        # v2.6 (S551-cont-4): rolling per-bar feature_state for the
+        # max_veto_frac ADR-5 escalation. Tracks ALL bars (including FLAT
+        # vetoes that are excluded from _actions), so the ratio reflects the
+        # share of the last `window_bars` bars that were vetoed.
+        self._recent_feature_states: collections.deque[str] = collections.deque(
+            maxlen=self.window_bars,
+        )
+        # Monotonic counter — diagnostic only (lifetime veto count).
+        self._flat_veto_count: int = 0
 
         # Histogram bin config — prefer baseline's bins so live/baseline align
         if hist_edges is not None:
@@ -230,13 +257,34 @@ class ActionDriftTracker:
         self,
         action: float | Sequence[float] | np.ndarray,
         bar_close: Optional[float],
+        *,
+        feature_state: Optional[str] = None,
     ) -> DriftReport:
         """Append one bar. Returns the post-append drift status.
 
-        `bar_close` is the market close price for the current bar — used to
-        estimate realized vol for regime bucketing. If `None`, bucketing
-        falls back to global baseline for this call.
+        Args:
+            action: scalar or K-vector matching the dim seen on first call.
+            bar_close: current bar's close — used for realized-vol bucketing.
+                `None` falls back to the global baseline for this call.
+            feature_state: v2.6 — one of {"OK","FLAT","EXPLODE"} or ``None``
+                (≡ "OK"). When ``"FLAT"``, the bar is excluded from the action
+                histogram (Mode B mitigation: flat features ≠ informative
+                policy output). `bar_close` IS still appended to the vol
+                buffer because flat features do not imply flat prices. The
+                returned report has ``status=VETOED``.
+
+        Invariants:
+            * The dim-change guard fires on every call, including VETOED bars.
+            * Every call advances ``_recent_feature_states`` so the rolling
+              ``flat_veto_frac`` reflects the last ``window_bars`` calls.
         """
+        fs = "OK" if feature_state is None else feature_state
+        if fs not in ("OK", "FLAT", "EXPLODE"):
+            raise ValueError(
+                f"feature_state must be None, 'OK', 'FLAT', or 'EXPLODE'; "
+                f"got {feature_state!r}"
+            )
+
         a = np.atleast_1d(np.asarray(action, dtype=np.float64)).ravel()
         if self._n_dim is None:
             self._n_dim = int(a.size)
@@ -246,8 +294,9 @@ class ActionDriftTracker:
                 f"action dim changed: first={self._n_dim} now={a.size}",
             )
 
-        self._actions.append(a)
-
+        # Vol bucketing advances on every observation — flat features can
+        # coincide with very active prices (a tight-range chop is flat in
+        # engineered features but the close still moves).
         if bar_close is not None:
             if self._prev_close is not None and self._prev_close > 0 and bar_close > 0:
                 try:
@@ -257,18 +306,56 @@ class ActionDriftTracker:
                     pass
             self._prev_close = float(bar_close)
 
-        return self._evaluate()
+        self._recent_feature_states.append(fs)
+
+        if fs == "FLAT":
+            self._flat_veto_count += 1
+            return self._veto_report()
+
+        self._actions.append(a)
+        return self._evaluate(feature_state=fs)
 
     def snapshot(self) -> dict:
         """Current window stats without mutating state. For WandB logging."""
         return self._evaluate().to_dict()
 
+    def _flat_veto_frac(self) -> float:
+        """Rolling fraction of ``_recent_feature_states`` equal to ``"FLAT"``.
+
+        Denominator is ``len(self._recent_feature_states)`` (capped at
+        ``window_bars``), NOT ``len(_actions) + _flat_veto_count`` — using the
+        deque keeps the ratio honest as old vetoes roll off, which is the only
+        interpretation that makes ADR-5's "if 80% of bars in a window are
+        vetoed" semantics work for a rolling-window tracker.
+        """
+        if not self._recent_feature_states:
+            return 0.0
+        states = list(self._recent_feature_states)
+        return sum(1 for s in states if s == "FLAT") / len(states)
+
+    def _veto_report(self) -> DriftReport:
+        """DriftReport returned for FLAT bars. Engine treats VETOED as a silent
+        pass-through (see `LiveTradingEngine._apply_drift_status`)."""
+        return DriftReport(
+            status=DriftStatus.VETOED,
+            reason="feature_variance_flat: bar skipped from drift accumulation",
+            n_bars=len(self._actions),
+            bucket=None,
+            deadband_frac_live=None, deadband_frac_baseline=None,
+            deadband_frac_delta=None,
+            saturation_frac_live=None, saturation_frac_baseline=None,
+            saturation_frac_delta=None,
+            kl=None, no_consensus_frac=None,
+            flat_veto_frac=self._flat_veto_frac(),
+            feature_state="FLAT",
+        )
+
     # --- internals ------------------------------------------------------
 
-    def _evaluate(self) -> DriftReport:
+    def _evaluate(self, *, feature_state: Optional[str] = None) -> DriftReport:
         n = len(self._actions)
         if n < self.min_bars_before_check:
-            return DriftReport(
+            report = DriftReport(
                 status=DriftStatus.WARMUP,
                 reason=(
                     f"warmup: {n}/{self.min_bars_before_check} bars "
@@ -281,16 +368,41 @@ class ActionDriftTracker:
                 saturation_frac_delta=None, kl=None,
                 no_consensus_frac=None,
             )
+        elif self.baseline is None:
+            report = self._log_only_report(n)
+        else:
+            bucket_key = self._current_bucket()
+            baseline_block = self._resolve_baseline_block(bucket_key)
+            if self._is_scalar:
+                report = self._evaluate_scalar(n, bucket_key, baseline_block)
+            else:
+                report = self._evaluate_multidim(n, bucket_key, baseline_block)
 
-        if self.baseline is None:
-            return self._log_only_report(n)
+        # v2.6 (S551-cont-4): stamp feature_state + flat_veto_frac on every
+        # report so WandB sees the veto cadence regardless of branch.
+        report.feature_state = feature_state
+        report.flat_veto_frac = self._flat_veto_frac()
 
-        bucket_key = self._current_bucket()
-        baseline_block = self._resolve_baseline_block(bucket_key)
-
-        if self._is_scalar:
-            return self._evaluate_scalar(n, bucket_key, baseline_block)
-        return self._evaluate_multidim(n, bucket_key, baseline_block)
+        # ADR-5 escalation: too much veto saturation is itself a signal that
+        # the bundle is stuck in degenerate regime — escalate OK → WARN so the
+        # engine's existing drift_warn_no_new_entries hold-gate fires. Only
+        # escalates OK; existing WARN/CRIT/LOG_ONLY/WARMUP/VETOED are left
+        # alone so we never SOFTEN a stronger signal.
+        if (
+            report.status == DriftStatus.OK
+            and report.flat_veto_frac is not None
+            and report.flat_veto_frac > self.max_veto_frac
+        ):
+            report.status = DriftStatus.WARN
+            report.reason = (
+                f"feature_variance_veto_exceeded: "
+                f"flat_veto_frac={report.flat_veto_frac:.3f} > "
+                f"max={self.max_veto_frac:.3f}. "
+                f"Recommend operator run scripts/recal_drift_baseline.py "
+                f"(Mode A baseline staleness possible). See "
+                f"decision_drift_two_failure_modes_s551_cont_3."
+            )
+        return report
 
     def _current_bucket(self) -> Optional[str]:
         if self.regime_cutpoints is None:

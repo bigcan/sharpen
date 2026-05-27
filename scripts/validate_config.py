@@ -434,6 +434,11 @@ _V22_SAFE_MODE_KEYS = (
     "crit_repeat_window_hours",
     "crit_repeat_count_before_lockout",
 )
+# v2.6 (S551-cont-4): feature_variance_veto sub-block. WARN-only for one
+# release cycle; once all 5 active live configs declare it, promote to
+# fail-loud for prop-firm tier.
+_V26_DRIFT_OPTIONAL_KEYS = ("feature_variance_veto",)
+_V26_VETO_REQUIRED_SUBKEYS = ("enabled", "scale", "max_veto_frac")
 
 
 def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
@@ -497,6 +502,54 @@ def check_drift_safemode_gates(cfg: dict, r: ValidationResult) -> None:
         r.fail(
             f"gates.drift.min_bars_before_check={mb} must be <= window_bars={wb}"
         )
+
+    # v2.6 (S551-cont-4): feature_variance_veto block — WARN-only for one
+    # release cycle, fail-loud after rollout to all 5 live configs.
+    veto = drift_gates.get("feature_variance_veto")
+    if veto is None:
+        msg = (
+            "gates.drift.feature_variance_veto missing — v2.6 ActionDriftTracker "
+            "amendment recommends declaring {enabled, scale, max_veto_frac} "
+            "(see decision_drift_two_failure_modes_s551_cont_3). Defaults "
+            "(enabled=true, scale='base', max_veto_frac=0.50) apply when absent."
+        )
+        r.warn(msg)
+    else:
+        if not isinstance(veto, dict):
+            r.fail(
+                f"gates.drift.feature_variance_veto must be a mapping; "
+                f"got {type(veto).__name__}"
+            )
+        else:
+            missing_subkeys = [k for k in _V26_VETO_REQUIRED_SUBKEYS if k not in veto]
+            if missing_subkeys:
+                r.warn(
+                    f"gates.drift.feature_variance_veto missing v2.6 sub-key(s): "
+                    f"{missing_subkeys} — defaults will apply"
+                )
+            mvf = veto.get("max_veto_frac")
+            if mvf is not None:
+                try:
+                    mvf_f = float(mvf)
+                except (TypeError, ValueError):
+                    r.fail(
+                        f"gates.drift.feature_variance_veto.max_veto_frac must be "
+                        f"a float; got {mvf!r}"
+                    )
+                else:
+                    if not 0.0 < mvf_f < 1.0:
+                        r.fail(
+                            f"gates.drift.feature_variance_veto.max_veto_frac="
+                            f"{mvf_f} must be in (0, 1)"
+                        )
+            scale = veto.get("scale")
+            if scale is not None and not (
+                scale in ("base", "all") or isinstance(scale, int)
+            ):
+                r.fail(
+                    f"gates.drift.feature_variance_veto.scale must be 'base', "
+                    f"'all', or an int (minutes); got {scale!r}"
+                )
 
 
 def check_l1_multiseed(cfg: dict, r: ValidationResult) -> None:

@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import logging
 from collections import deque
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Optional
+from typing import Optional, Union
 
 import numpy as np
 import pandas as pd
@@ -80,6 +81,24 @@ def resolve_norm_warmup_path(config: dict) -> Optional[str]:
         f"LiveObsBuilder will use legacy rolling EMA-Z (train-serve skew possible).",
     )
     return None
+
+
+@dataclass(frozen=True)
+class FeatureVarianceStatus:
+    """Read-only snapshot returned by :meth:`LiveObsBuilder.feature_variance_status`.
+
+    Consumed by :class:`LiveTradingEngine` to pass ``feature_state`` into
+    :meth:`ActionDriftTracker.observe` (S551-cont-4 v2.6 amendment). ``OK`` is
+    the conservative default: insufficient samples or disabled drift detection
+    return ``state="OK"`` so the tracker never vetoes on missing data.
+    """
+
+    state: str                                       # "OK" | "FLAT" | "EXPLODE"
+    base_scale: int
+    base_scale_ratio: Optional[float]
+    per_scale_ratio: dict[int, Optional[float]] = field(default_factory=dict)
+    flat_threshold: float = 0.01
+    explode_threshold: float = 100.0
 
 
 class LiveObsBuilder:
@@ -467,6 +486,98 @@ class LiveObsBuilder:
         """True if any scale has anomalous feature variance (flat or exploding)."""
         return self._drift_detected
 
+    def _compute_variance_ratio(self, scale: int) -> Optional[float]:
+        """Read-only variance ratio for ``scale`` against its rolling median.
+
+        Does NOT mutate ``self._variance_history`` — callers that want to advance
+        the rolling buffer (e.g. :meth:`_check_drift`) must append separately.
+
+        Returns:
+            ``current_var / rolling_median``, or ``None`` when:
+              - drift detection is disabled
+              - the scale has no features yet
+              - the rolling history is too short (<10 samples)
+              - the rolling median is degenerate (<1e-15)
+        """
+        if not self._drift_detection_enabled:
+            return None
+        features = self._scale_features.get(scale)
+        if features is None or len(features) == 0:
+            return None
+        history = self._variance_history.get(scale)
+        if history is None or len(history) < 10:
+            return None
+        rolling_median = float(np.median(list(history)))
+        if rolling_median < 1e-15:
+            return None
+        current_var = float(np.var(features[-1]))
+        return current_var / rolling_median
+
+    def _ratio_to_state(self, ratio: Optional[float]) -> str:
+        """Classify a variance ratio. ``None`` → ``"OK"`` (conservative — don't veto on missing data)."""
+        if ratio is None:
+            return "OK"
+        if ratio < self._drift_flat_threshold:
+            return "FLAT"
+        if ratio > self._drift_explode_threshold:
+            return "EXPLODE"
+        return "OK"
+
+    def feature_variance_status(
+        self,
+        *,
+        scale: Union[str, int] = "base",
+    ) -> FeatureVarianceStatus:
+        """Read-only snapshot of feature-variance health.
+
+        Args:
+            scale:
+                ``"base"`` (default) — state of the finest scale, the only scale
+                that updates every bar.
+                ``"all"`` — ``"FLAT"`` if any scale is FLAT, else ``"EXPLODE"``
+                if any scale exploded, else ``"OK"``.
+                ``int`` — state of that specific scale (must be in ``self.scales``).
+
+        Returns:
+            :class:`FeatureVarianceStatus` with the selected state plus per-scale
+            ratios for downstream telemetry. Insufficient samples are reported as
+            ``"OK"`` (never veto on missing data — operator should rely on the
+            existing 10-sample minimum in :meth:`_check_drift`).
+        """
+        per_scale: dict[int, Optional[float]] = {
+            s: self._compute_variance_ratio(s) for s in self.scales
+        }
+        if scale == "base":
+            target_state = self._ratio_to_state(per_scale.get(self._base_scale))
+        elif scale == "all":
+            states = [self._ratio_to_state(r) for r in per_scale.values()]
+            if "FLAT" in states:
+                target_state = "FLAT"
+            elif "EXPLODE" in states:
+                target_state = "EXPLODE"
+            else:
+                target_state = "OK"
+        elif isinstance(scale, int):
+            if scale not in self.scales:
+                raise ValueError(
+                    f"feature_variance_status: scale {scale} not in configured "
+                    f"scales {self.scales}"
+                )
+            target_state = self._ratio_to_state(per_scale.get(scale))
+        else:
+            raise ValueError(
+                f"feature_variance_status: scale must be 'base', 'all', or int "
+                f"in self.scales; got {scale!r}"
+            )
+        return FeatureVarianceStatus(
+            state=target_state,
+            base_scale=self._base_scale,
+            base_scale_ratio=per_scale.get(self._base_scale),
+            per_scale_ratio=per_scale,
+            flat_threshold=self._drift_flat_threshold,
+            explode_threshold=self._drift_explode_threshold,
+        )
+
     def _check_drift(self) -> bool:
         """Check per-scale feature variance against rolling median.
 
@@ -512,8 +623,9 @@ class LiveObsBuilder:
                 continue
 
             variance_ratio = current_var / rolling_median
+            state = self._ratio_to_state(variance_ratio)
 
-            if variance_ratio < self._drift_flat_threshold:
+            if state == "FLAT":
                 logger.warning(
                     "EMA drift detected — scale %dmin: feature variance FLAT "
                     "(ratio=%.4f, current=%.2e, median=%.2e). "
@@ -521,7 +633,7 @@ class LiveObsBuilder:
                     scale, variance_ratio, current_var, rolling_median,
                 )
                 any_drift = True
-            elif variance_ratio > self._drift_explode_threshold:
+            elif state == "EXPLODE":
                 logger.warning(
                     "EMA drift detected — scale %dmin: feature variance EXPLOSION "
                     "(ratio=%.1f, current=%.2e, median=%.2e). "
