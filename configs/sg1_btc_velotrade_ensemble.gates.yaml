@@ -105,22 +105,42 @@ gates:
       Statistical strength OK at N=8 folds (splitter-driven, S494 refactor).
     cv_pf_max: 0.35
 
-  # Protocol v2.2 §8.2 live action-distribution drift thresholds. Defaults
-  # mirror sg1_xauusd_ensemble.gates.yaml for cross-workstream parity. BTC
-  # runs 24/7 5-min bars: window_bars=1000 ≈ 3.5 days continuous (vs ~2
-  # XAUUSD trading sessions); revisit if the SG-1 BTC live monitor proves
-  # too jittery. Deadband/saturation deltas tuned for V7 scalar action.
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds.
+  # v2.6 (S551-cont-4): asymmetric blast-radius — deadband-wider,
+  # saturation-tighter. Deadband drift up = policy went quiet (safe failure,
+  # capital preserved); saturation drift up = policy went max-out (dangerous,
+  # slippage + DD limits at risk). 5pp headroom over the 2026-05-26 historic
+  # event signature (dead_delta=0.305) plus the feature_variance_veto
+  # backstop. SCOPED TO sg1-btc until per-workstream audit (Step 4-FOLLOWUP)
+  # calibrates the other 4 prop-firm gate YAMLs against their own baselines.
+  # See decision_drift_two_failure_modes_s551_cont_3.
+  #
+  # BTC runs 24/7 3-min bars: window_bars=1000 ≈ 2.1 days continuous; revisit
+  # if the SG-1 BTC live monitor proves too jittery.
   drift:
     window_bars: 1000
     min_bars_before_check: 500
     deadband_frac_warn: 0.15
-    deadband_frac_crit: 0.30
-    saturation_frac_warn: 0.15
-    saturation_frac_crit: 0.30
+    deadband_frac_crit: 0.35                    # v2.6 (was 0.30) — ADR-3 deadband headroom
+    saturation_frac_warn: 0.10                  # v2.6 (was 0.15) — ADR-3 earlier saturation WARN
+    saturation_frac_crit: 0.25                  # v2.6 (was 0.30) — ADR-3 tighter saturation CRIT
     action_kl_warn: 0.5                         # unused on V7 scalar, declared for schema
     action_kl_crit: 1.0                         # unused on V7 scalar, declared for schema
     regime_conditioning: true
     vol_estimator_bars: 20
+
+    # v2.6 (S551-cont-4): feature-variance veto. ADR-1 (Mode B mitigation):
+    # bars where engineered features are pathologically flat are excluded
+    # from the deadband histogram. ADR-4: 'base' = finest scale (3min for
+    # SG-1 BTC) which updates every bar — coarser scales' flatness is too
+    # easily triggered by downsampling cadence. ADR-5: if rolling
+    # flat_veto_frac > 0.50, escalate to WARN with operator hand-off to
+    # scripts/recal_drift_baseline.py (Mode A possibility — needs a fresh
+    # baseline rather than Mode B veto).
+    feature_variance_veto:
+      enabled: true
+      scale: base
+      max_veto_frac: 0.50
 
   # Protocol v2.2 §8.3 tiered safe-mode. CRIT must graceful-flatten (S491
   # bleed-window lesson), not "halt while holding".
