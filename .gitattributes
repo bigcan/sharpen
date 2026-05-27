@@ -10,4 +10,6 @@ scripts/*.sh text eol=lf
 # must stay LF — busybox crond chokes on CRLF in /etc/crontabs/root and
 # `docker build` will silently bake CRLF shebangs into intermediate images.
 docker/live/**/Dockerfile text eol=lf
+docker/live/**/Dockerfile.* text eol=lf
 docker/live/**/crontab text eol=lf
+docker/live/**/*_crontab text eol=lf

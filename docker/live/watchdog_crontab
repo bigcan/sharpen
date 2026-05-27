@@ -1,0 +1,7 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Drift baseline staleness watcher — runs every 15 min, alerts on WARN streak >= 4h.
+# Covers BOTH Mode A (baseline staleness) and Mode B (regime-feature mismatch)
+# for the live fleet. See project_drift_watch_not_wired_to_cron_s551_cont_3.
+*/15 * * * * root /usr/local/bin/run_drift_watch.sh
