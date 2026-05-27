@@ -128,6 +128,13 @@ def _init_drift_tracker(config: dict) -> Optional[ActionDriftTracker]:
         return float(default)
 
     cutpoints = drift_cfg.get("regime_cutpoints") or gates_drift.get("regime_cutpoints")
+    # v2.6 (S551-cont-4): feature_variance_veto.max_veto_frac flows to the
+    # tracker so it can run the ADR-5 escalation. The veto's enabled/scale
+    # toggles live on the engine (read separately) — the tracker doesn't need
+    # to know whether the engine WILL pass feature_state; an unused max_veto_frac
+    # just sits idle (default 0.50, ratio stays at 0 when no FLAT bars seen).
+    veto_block = (gates_drift.get("feature_variance_veto") or {})
+    max_veto_frac = float(veto_block.get("max_veto_frac", 0.50))
     tracker = ActionDriftTracker(
         baseline=baseline,
         window_bars=int(_pick("window_bars", 1000)),
@@ -141,6 +148,7 @@ def _init_drift_tracker(config: dict) -> Optional[ActionDriftTracker]:
         deadband_abs=deadband_abs,
         regime_cutpoints=cutpoints,
         vol_estimator_bars=int(_pick("vol_estimator_bars", 20)),
+        max_veto_frac=max_veto_frac,
     )
     logger.info(
         f"ActionDriftTracker active: baseline={'YES' if baseline else 'LOG_ONLY'} "
@@ -526,6 +534,23 @@ class LiveTradingEngine:
         self._drift_tracker = _init_drift_tracker(config)
         self._drift_warn_active = False
         self._drift_last_status = None
+
+        # v2.6 (S551-cont-4): feature-variance veto config — flows from
+        # gates.drift.feature_variance_veto.{enabled,scale}. Engine-side
+        # because we read `LiveObsBuilder.feature_variance_status()` per bar.
+        # Defaults: enabled=True (every prop-firm workstream gets it once they
+        # bump max_veto_frac into their gates.yaml), scale="base" (ADR-4).
+        _veto_cfg = (
+            (config.get("gates") or {}).get("drift", {}).get("feature_variance_veto", {})
+        ) or {}
+        self._feature_variance_veto_enabled = bool(_veto_cfg.get("enabled", True))
+        _scale = _veto_cfg.get("scale", "base")
+        if isinstance(_scale, str) and _scale not in ("base", "all"):
+            raise ValueError(
+                f"gates.drift.feature_variance_veto.scale must be 'base', 'all', "
+                f"or an int in features.scales; got {_scale!r}"
+            )
+        self._feature_variance_veto_scale = _scale
 
         # Protocol v2.3 §8.2-extension agreement-decay tracker. Active only
         # for ensemble agents whose aggregation_rule is consensus-based
@@ -1019,14 +1044,29 @@ class LiveTradingEngine:
             )
             return
 
-        # --- 5a. Action-drift tracking (Protocol v2.2 §8.2) ---
+        # --- 5a. Action-drift tracking (Protocol v2.2 §8.2 + v2.6 ADR-1) ---
         # observe() records the *policy output* before any overlays / deadband
         # / risk clipping, so the live distribution matches the stage-2/2.5
         # eval baseline (which was also the raw policy output).
+        #
+        # v2.6 (S551-cont-4): feature_state lets the tracker exclude bars where
+        # the engineered features were pathologically flat — the policy COULD
+        # not have responded, so counting that bar as "policy went deadband"
+        # is a false positive (Mode B in
+        # decision_drift_two_failure_modes_s551_cont_3). Status returned is
+        # VETOED for those bars — silent pass-through in _apply_drift_status.
         if self._drift_tracker is not None:
             try:
+                feature_state: Optional[str] = None
+                if self._feature_variance_veto_enabled and hasattr(
+                    self.obs_builder, "feature_variance_status"
+                ):
+                    feature_state = self.obs_builder.feature_variance_status(
+                        scale=self._feature_variance_veto_scale,
+                    ).state
                 report = self._drift_tracker.observe(
                     target_position, bar_close=current_close,
+                    feature_state=feature_state,
                 )
                 await self._apply_drift_status(report, bar_time)
                 # If CRIT forced a stop, the kill_file writer + flatten ran
@@ -2619,6 +2659,13 @@ class LiveTradingEngine:
                     f"[drift] OK at bar {self._total_bars} — clearing WARN",
                 )
             self._drift_warn_active = False
+        elif status == DriftStatus.VETOED:
+            # v2.6 (S551-cont-4): bar excluded from drift accumulation because
+            # the observation features were flat. NOT a halt signal — engine
+            # continues normal trading. _drift_warn_active is NOT toggled
+            # (WARN-clear semantics preserved). WandB already saw the veto
+            # via the to_dict() log above (drift/flat_veto_frac, drift/feature_state).
+            pass
         # WARMUP / LOG_ONLY: silent pass-through
 
     async def _request_agreement_decay_crit(
