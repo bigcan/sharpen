@@ -18,8 +18,8 @@
 # the WF config's `ensemble.seeds`, NOT from this file's `seeds:` row, so the
 # placeholder here is documentation-only until Stage 2.5-R bake.
 
-workstream: gmgp1_eurusd
-variant: ensemble_top3_oanda_ftmo
+workstream: gmgp1_eurusd_hyper_growth
+variant: ensemble_top3_oanda_hyper_growth
 seeds: [0, 0, 0]                                 # PLACEHOLDER — overwrite from L1 val_argmax_pf top-3 before Stage 2.5-R bake
 aggregation_rule: ens_pf_weighted                # candidate rule (final pick at Stage 2.5-R eval)
 
@@ -79,13 +79,14 @@ gates:
   ensemble_diversity_lambda: 1.0               # score = PF − λ * max_corr_with_already_selected
   ensemble_rule_selection: val_argmax_pf       # S495: pick aggregation rule on val split
 
-  g4_ftmo_compliance:
+  g4_hyper_growth_compliance:
     description: >-
       Applied to the ENSEMBLE trajectory per fold (not the solo trajectories).
-      All three FTMO sub-gates must PASS in every fold (strict: 8/8).
-    daily_dd_buffer_pp_min: 0.5               # 4% sim cap - worst_intraday_dd%
-    trailing_dd_buffer_pp_min: 0.5            # 8% sim cap - trailing_mdd%
-    compliance_must_pass: true                # active_days/single_day_share
+      All three Hyper Growth sub-gates must PASS in every fold (strict: 8/8).
+      Numbers: HG hard caps 3% daily / 6% trailing (vs FTMO 5% / 10%).
+    daily_dd_buffer_pp_min: 0.5               # 2% sim cap - worst_intraday_dd%
+    trailing_dd_buffer_pp_min: 0.5            # 5% sim cap - trailing_mdd%
+    compliance_must_pass: true                # active_days/single_day_share (active_days_min=0 for HG)
     min_folds_pass: 8                         # all folds
 
   g5_dd_stability:
@@ -156,9 +157,15 @@ decision:
 provenance:
   drafted_on: '2026-05-26'
   drafted_by_session: S551-cont-2
+  firm_pivot:
+    on: '2026-05-28'
+    session: S551-cont-9
+    from: FTMO
+    to: The5ers Hyper Growth
+    rationale: Sibling SG-1-EURUSD-OANDA already paper LIVE on HG (S551); weekend-hold ALLOWED on HG simplifies FX ops vs FTMO Fri-flatten requirement; matches `configs/deploy/hyper_growth/step1.yaml` overlay
   upstream_memory: project_gmgp1_eurusd_oanda_queued.md
-  template_source: configs/gmgp1_xauusd_ensemble.gates.yaml
-  target_firm: FTMO
+  template_source: configs/sg1_eurusd_hyper_growth_ensemble.gates.yaml
+  target_firm: The5ers Hyper Growth
   broker: OANDA practice (api-fxpractice.oanda.com)
-  fee_assumption: 5e-5 per side (Q2 empirical audit pending)
-  cell: 22mo calendar window x 1.5M total_timesteps (32x multiplicity)
+  fee_assumption: 5e-5 per side (sibling Bar 1 validated 2026-05-26, 0.8 pip slippage on 1.16368 fill)
+  cell: 22mo calendar window x 1.5M total_timesteps (~34x multiplicity)
