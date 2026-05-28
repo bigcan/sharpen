@@ -1,0 +1,212 @@
+# GMGP1-XAUUSD Extended-Window — Stage 3 Walk-Forward, top-3 ensemble.
+#
+# Drafted S550-cont-8 2026-05-26 after L1 N=10 CLEAN PASS
+# (results/gmgp1_xauusd_extended_l1_*, median test PF 2.6601, CV 5.38%).
+# Per Protocol v2.5 §4.5: WF re-confirmation MANDATORY after Stage 2 PASS
+# before paper-deploy aggregation.
+#
+# Upstream:
+#   - Stage 1 HPO: trial #10, study gmgp1_xauusd_ftmo_rehpo_20260421 (inherited
+#     from predecessor; HPs FROZEN — only the training cell changed for B2).
+#   - Stage 2 L1 N=10: CLEAN PASS median test PF 2.6601, CV 5.38%,
+#     val-test gap -0.014, 10/10 above live baseline 2.260, median uplift +17.7%.
+#
+# Top-3 by L1-extended val-argmax-PF (S495 rule; pool=N=10 -> K=3, no diversity
+# reseat needed since pool > K but val-pf ranking is the canonical selector):
+#   - seed  789: val PF 2.8447 / test PF 2.5354 (wandb 4b04cwv1)
+#   - seed 2025: val PF 2.7778 / test PF 2.6491 (wandb rsg3u962)
+#   - seed 1024: val PF 2.7557 / test PF 2.8181 (wandb z0tfmpp0)
+#
+# Splitter (8 folds, train_months=18, val/test/step = 1mo)
+#   on envelope 2024-01-01 -> 2026-04-15:
+#     fold 0: train 2024-01 -> 2025-07  val 2025-07 -> 08  test 2025-08 -> 09
+#     fold 1: train 2024-02 -> 2025-08  val 2025-08 -> 09  test 2025-09 -> 10
+#     fold 2: train 2024-03 -> 2025-09  val 2025-09 -> 10  test 2025-10 -> 11
+#     fold 3: train 2024-04 -> 2025-10  val 2025-10 -> 11  test 2025-11 -> 12
+#     fold 4: train 2024-05 -> 2025-11  val 2025-11 -> 12  test 2025-12 -> 01
+#     fold 5: train 2024-06 -> 2025-12  val 2025-12 -> 01  test 2026-01 -> 02
+#     fold 6: train 2024-07 -> 2026-01  val 2026-01 -> 02  test 2026-02 -> 03
+#     fold 7: train 2024-08 -> 2026-02  val 2026-02 -> 03  test 2026-03 -> 04
+#
+# NOTE on train window: L1-extended used 24mo train (2024-01 -> 2026-01-31);
+# WF shortens to 18mo to fit 8-fold cadence in 27.5mo envelope. Mirrors
+# SG-1-XAUUSD VS-v2 Phase 2 precedent (L1 24mo -> WF 18mo for 8-fold
+# granularity).
+#
+# NOTE on training budget: total_timesteps = 1.1M per fold preserves the L1
+# extended cell's 30.5x multiplicity (1.5M / ~49K bars). 18mo @ 15-min OANDA
+# yields ~36K bars; 1.1M / 36K = 30.5x. Holds Protocol v2.5.1 multiplicity
+# steady from L1 to WF. (NOT the predecessor's 500K — that would underfit
+# the larger asset class at 13.9x, below the 15x floor.)
+#
+# Gate (pre-committed at configs/gmgp1_xauusd_extended_ensemble.gates.yaml):
+#   G1 Solo baseline   : >=2/3 seeds PF>=1.1 per fold in >=7/8 folds
+#   G2 No regression   : per-fold ens_PF >= 0.9 * best_solo_PF in >=7/8 folds
+#   G3 Uplift (legacy) : median ens_PF / median best_solo_PF >= 1.10 (audit-only in v2.5)
+#   G4 FTMO            : ensemble trajectory per-fold: DD buffers >=0.5pp + PASS, 8/8 folds
+#   G5 DD stability    : CV(ens_PF) across folds <= 0.35
+#   v2.5 PRIMARY (bootstrap): P(PF) >= 0.90 PROMOTE / 0.75 ambiguous floor
+#   ALL PASS  -> approve ensemble paper-deploy
+#   ANY FAIL  -> solo-best fallback (wf_median_pf)
+#
+# Eval (no training; post-WF ensemble aggregation):
+#   python scripts/gmgp1_xauusd_ensemble_eval_oanda.py \
+#       --wf_config configs/gmgp1_xauusd_wf_extended.yaml \
+#       --gates_file configs/gmgp1_xauusd_extended_ensemble.gates.yaml \
+#       --device cpu
+
+workstream: gmgp1_xauusd_extended_wf
+
+data:
+  file_path: "data/oanda/xauusd_m1_m.parquet"
+  ticker: "XAUUSD"
+  handler_type: "multiscale"
+  # Splitter envelope; per-fold windows materialized by dispatcher.
+  start_date: "2024-01-01"
+  end_date:   "2026-04-15"
+
+splitter:
+  train_months: 18
+  val_months: 1
+  test_months: 1
+  step_months: 1
+  buffer_days: 0
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_gold"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000235                # steady-state OANDA-aligned (S464); IC Markets Raw ~2.35 bps/side
+  deadband_threshold: 0.35           # trial 10
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  gap_detection: true
+  gap_atr_mult: 3.0                  # OANDA 73h weekend gap detector
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.008072070485679669    # trial 10
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08
+    max_daily_loss_pct: 0.04
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# Trial 10 HPs — IDENTICAL to L1-extended (and predecessor). Frozen so Stage 3
+# is apples-to-apples with Stage 2.
+agents:
+  sac:
+    lr_actor: 0.00048211947849186834
+    lr_critic: 0.00023536913918894482
+    lr_alpha: 0.0000023011482963674244
+    gamma: 0.9734375919828845
+    tau: 0.0056901039341825865
+    initial_alpha: 0.4568170758305432
+    gradient_clip: 2.738336834748153
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 1100000           # Protocol v2.5.1 multiplicity-anchored (30.5x @ ~36K bars/fold)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+ensemble:
+  # Top-3 by L1-extended val-argmax-PF (S495 rule).
+  # Source: L1-extended N=10 results (this session, S550-cont-8).
+  seeds: [789, 2025, 1024]
+  rule: ens_pf_weighted              # Stage 2.5-R candidate (final pick at eval time)
+  rules: ["solo_789", "solo_2025", "solo_1024",
+          "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
+  # Checkpoint path pattern — matches launcher's --run_name_prefix.
+  checkpoint_pattern: "checkpoints/gmgp1-xauusd-ext-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth"
+  # L1-extended test PFs — weights for ens_pf_weighted aggregation.
+  seed_pfs:
+    789:  2.5354
+    2025: 2.6491
+    1024: 2.8181
+  gates_file: "configs/gmgp1_xauusd_extended_ensemble.gates.yaml"
+
+gates:                               # Protocol v2 §4 Stage 3 (training-level)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10          # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_rule_selection: val_argmax_pf
+  # Stage 3 gates
+  wf_windows: 8
+  wf_pf_floor: 1.1
+  ftmo_active_days_min: 4
+  ftmo_max_single_day_share: 0.5
+  ftmo_daily_dd_buffer_pp: 0.5
+  ftmo_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                  # Protocol v2 §4 default; launcher --separate_runs overrides at runtime
+  tags: ["gmgp1-xauusd", "Gold", "SAC", "15min", "CFD", "FTMO", "prop-firm",
+         "extended-window", "oanda-spot", "rehpo-trial10", "steady-state",
+         "walk_forward", "wf-stage3", "ensemble", "ensemble-confirm",
+         "protocol-anchored-cell",
+         "upstream:gmgp1_xauusd_ftmo_rehpo_20260421",
+         "upstream:gmgp1_xauusd_l1_multiseed_extended"]
