@@ -44,3 +44,11 @@ randd_archive
 # are byte-identical (same L1 train_end_date 2025-09-30) so one seed dir suffices.
 !checkpoints/sg1-eurusd-hg-l1-trial18-seed2025_20260523_120312
 !checkpoints/sg1-eurusd-hg-l1-trial18-seed2025_20260523_120312/**
+
+# gmgp1-xauusd extended WF fold_07 seed-789: allowlist for the ensemble_v1
+# paper-deploy bake (S551-cont-7, 2026-05-28). Dockerfile.live-engine COPYs
+# the whole dir so norm_warmup_15-60-240.pkl is reachable at the path in
+# live_gmgp1_xauusd_ctrader.yaml features.norm_warmup_path. The 3 ensemble
+# seeds share train_end_date (2026-02-01) so any one seed dir suffices.
+!checkpoints/gmgp1-xauusd-ext-wf-fold7-seed789_20260527_224418
+!checkpoints/gmgp1-xauusd-ext-wf-fold7-seed789_20260527_224418/**

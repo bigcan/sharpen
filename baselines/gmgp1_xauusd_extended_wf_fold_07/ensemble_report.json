@@ -1,0 +1,231 @@
+{
+  "protocol": "v2.2_stage_2_5_ensemble_report__gmgp1_xauusd_extended_wf_baseline",
+  "workstream": "gmgp1_xauusd_extended",
+  "source": "gmgp1_xauusd_extended_wf_fold_07_ens_pf_weighted",
+  "window": "extended_wf_fold_07_oos_2026-03-01 -> 2026-04-01",
+  "chosen_rule": "ens_pf_weighted",
+  "decision": "PROMOTE",
+  "decision_source": "v2.5_bootstrap__wf_aggregated",
+  "ensemble_eval_distribution": {
+    "histogram_bins": [
+      -1.0,
+      -0.75,
+      -0.5,
+      -0.25,
+      0.0,
+      0.25,
+      0.5,
+      0.75,
+      1.0
+    ],
+    "counts": [
+      411,
+      2448,
+      2102,
+      1950,
+      2145,
+      2626,
+      3503,
+      498
+    ],
+    "mean": 0.06192259615145158,
+    "std": 0.4822761260649102,
+    "entropy": 1.9296172481595444,
+    "deadband_frac": 0.37358923675317224,
+    "saturation_frac": 0.0,
+    "no_consensus_frac": 0.0,
+    "n": 15683,
+    "n_total_bars": 15683,
+    "composition_rule": "ens_pf_weighted",
+    "by_vol_quartile": {
+      "q1": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          33,
+          516,
+          495,
+          559,
+          606,
+          776,
+          862,
+          74
+        ],
+        "mean": 0.09246107555804489,
+        "std": 0.4455354332495876,
+        "entropy": 1.8632068286347248,
+        "deadband_frac": 0.4172404998724815,
+        "saturation_frac": 0.0,
+        "no_consensus_frac": 0.0,
+        "n": 3921,
+        "n_total_bars": 3921
+      },
+      "q2": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          88,
+          608,
+          553,
+          510,
+          516,
+          625,
+          914,
+          106
+        ],
+        "mean": 0.060518712908643364,
+        "std": 0.48014928007838226,
+        "entropy": 1.912688266655314,
+        "deadband_frac": 0.373469387755102,
+        "saturation_frac": 0.0,
+        "no_consensus_frac": 0.0,
+        "n": 3920,
+        "n_total_bars": 3920
+      },
+      "q3": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          125,
+          613,
+          525,
+          441,
+          527,
+          652,
+          878,
+          160
+        ],
+        "mean": 0.06688673794704555,
+        "std": 0.49240836422865214,
+        "entropy": 1.9486352683135337,
+        "deadband_frac": 0.36062229023208364,
+        "saturation_frac": 0.0,
+        "no_consensus_frac": 0.0,
+        "n": 3921,
+        "n_total_bars": 3921
+      },
+      "q4": {
+        "histogram_bins": [
+          -1.0,
+          -0.75,
+          -0.5,
+          -0.25,
+          0.0,
+          0.25,
+          0.5,
+          0.75,
+          1.0
+        ],
+        "counts": [
+          165,
+          711,
+          529,
+          440,
+          496,
+          573,
+          849,
+          158
+        ],
+        "mean": 0.02782350014992947,
+        "std": 0.5066827550655518,
+        "entropy": 1.9619279903545963,
+        "deadband_frac": 0.34302473858709515,
+        "saturation_frac": 0.0,
+        "no_consensus_frac": 0.0,
+        "n": 3921,
+        "n_total_bars": 3921
+      }
+    },
+    "regime_cutpoints": [
+      0.0003454987866490216,
+      0.0005149738417939691,
+      0.0007583059363437722
+    ]
+  },
+  "wf_verdict": {
+    "overall": "FAIL",
+    "decision": "reject_ensemble_use_best_solo",
+    "gates_pass": {
+      "G1_solo_baseline": true,
+      "G2_no_regression": true,
+      "G3_uplift": false,
+      "G4_compliance": true,
+      "G5_dd_stability": true
+    },
+    "wf_bootstrap_decision": {
+      "decision": "PROMOTE",
+      "primary_basis": "bootstrap",
+      "p_pf_ens_better": 1.0,
+      "p_mdd_ens_better": 0.9863,
+      "thresholds_used": {
+        "p_pf_promote": 0.9,
+        "p_mdd_promote": 0.9,
+        "p_pf_ambiguous": 0.75
+      },
+      "reason": "P(PF)=1.000>=0.90 AND P(MDD)=0.986>=0.90"
+    }
+  },
+  "bundle_metadata": {
+    "path": "results\\gmgp1_xauusd_extended_wf_ensemble\\ensemble_v1.tar.gz",
+    "sha256": "eb8800ec4acdfbce02a4992419e50fc9e204b57bed1d7d8568380472d5f7d868",
+    "size_bytes": 28565490
+  },
+  "bake_metadata": {
+    "baked_at_utc": "2026-05-28T00:29:16Z",
+    "baked_by": "scripts/bake_gmgp1_xauusd_ext_drift_baseline.py",
+    "input_paths": [
+      "results\\gmgp1_xauusd_extended_wf_ensemble\\fold_00\\ens_pf_weighted_trajectory.parquet",
+      "results\\gmgp1_xauusd_extended_wf_ensemble\\fold_01\\ens_pf_weighted_trajectory.parquet",
+      "results\\gmgp1_xauusd_extended_wf_ensemble\\fold_02\\ens_pf_weighted_trajectory.parquet",
+      "results\\gmgp1_xauusd_extended_wf_ensemble\\fold_03\\ens_pf_weighted_trajectory.parquet",
+      "results\\gmgp1_xauusd_extended_wf_ensemble\\fold_04\\ens_pf_weighted_trajectory.parquet",
+      "results\\gmgp1_xauusd_extended_wf_ensemble\\fold_05\\ens_pf_weighted_trajectory.parquet",
+      "results\\gmgp1_xauusd_extended_wf_ensemble\\fold_06\\ens_pf_weighted_trajectory.parquet",
+      "results\\gmgp1_xauusd_extended_wf_ensemble\\fold_07\\ens_pf_weighted_trajectory.parquet"
+    ],
+    "fold_bars": [
+      1933,
+      2015,
+      2108,
+      1836,
+      2006,
+      1922,
+      1830,
+      2033
+    ],
+    "concat_n_bars": 15683,
+    "deadband_abs": 0.35,
+    "vol_estimator_bars": 20,
+    "rule": "ens_pf_weighted",
+    "predecessor_baseline": "baselines/gmgp1_xauusd_oanda_wf_fold_07/seed_report.json",
+    "predecessor_protocol": "v2.2_solo_seed_42_fold_07 (S495 OANDA WF)",
+    "rationale": "Pre-swap recal for ensemble_v1 (Tier B2 extended-window retrain). Live engine ran solo seed-42 against the S495 OANDA WF fold-07 seed_report.json baseline; v1 ens_pf_weighted uses extended retrain checkpoints (seeds [789, 2025, 1024]) at 1.1M steps per fold. Baseline aggregated across all 8 extended WF OOS test windows for breadth (matches WF bootstrap denominator) rather than a single fold."
+  }
+}

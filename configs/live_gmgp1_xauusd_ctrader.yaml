@@ -1,9 +1,12 @@
 # Live Trading Config — GMGP1-XAUUSD SAC on Gold CFD via cTrader (IC Markets / FTMO)
-# Deploy: WF solo seed 42 fold-07 (test PF 2.260, Sharpe_d 4.43, MDD -0.39%, Win 57.8%)
-# HPs: trial #10 from gmgp1_xauusd_ftmo_rehpo_20260421 (OANDA path)
-# Stage 2.5 verdict (S495-cont 2026-04-24): SOLO_BEST — ens_mean val-picked but
-# G3 uplift FAIL (0.970 < 1.05 floor). Solo seed 42 graduates per val-argmax-PF rule.
-# See results/gmgp1_xauusd_oanda_wf_ensemble/fold_07/verdict.json.
+# Deploy: extended-window ENSEMBLE v1 (seeds [789, 2025, 1024], ens_pf_weighted)
+# Provenance: Tier B2 extended-window L1 N=10 → Stage 3 WF 8-fold (S550-cont-6 → S551-cont-6).
+# WF Stage 3 verdict (S551-cont-7, 2026-05-28): bootstrap PRIMARY PROMOTE
+#   (P(PF)=1.000, P(MDD)=0.986); legacy G3 uplift FAIL by 0.0015 (1.0985 < 1.10)
+#   audit-only per Protocol v2.5. G1/G2/G4/G5 PASS (8/8 folds clean).
+#   Median ens_PF 2.722 vs solo seed-2025 median 2.402; ensemble dominates 8/8 folds.
+#   See results/gmgp1_xauusd_extended_wf_ensemble/verdict.json.
+# Predecessor: solo seed-42 fold-07 OANDA L1 (LIVE 2026-04-24 → 2026-05-28).
 #
 # ---------------------------------------------------------------------------
 # PROP-FIRM DECOUPLING (S495 Step 4, 2026-04-24).
@@ -44,11 +47,25 @@ contract:
   order_type: "MKT"                    # Market orders (CFD spreads tight enough)
   market_fallback_timeout: 10.0        # Seconds before retry
 
-# --- Agent (solo seed 42, fold-07 of OANDA WF) ---
+# --- Agent (v2.3 ensemble bundle — seeds [789, 2025, 1024], ens_pf_weighted) ---
+# First ensemble graduation for gmgp1-xauusd. Requires `swap_approved` sentinel
+# pre-touch before first deploy (S538-cont-4 lesson — first deploy looks like a
+# swap since prev_path=None, FTMO tag triggers prop-firm handshake).
 agent:
-  checkpoint_path: "checkpoints/WF_seed42_fold_07_20260424_061803/checkpoint_final.pth"
+  checkpoint_path: ""
   device: "cpu"
   torch_compile: false                 # Must be false for live inference
+  ensemble:
+    bundle_path: "/app/bundles/gmgp1_xauusd_extended/ensemble_v1.tar.gz"
+    aggregation_rule: "ens_pf_weighted"
+    require_normalizers: false         # bundle has normalizer_sha256: MISSING; norm_warmup pkl supplied below
+    # Per-seed test PFs from L1-extended N=10 (S550-cont-6 source). Required
+    # explicitly because ens_pf_weighted falls back to equal weights without
+    # this config block (feedback_bundle_seed_pfs_missing_for_ens_pf_weighted).
+    seed_pfs:
+      789:  2.5354
+      2025: 2.6491
+      1024: 2.8181
 
 # --- SAC Hyperparameters (trial #10 HPs — must match training checkpoint) ---
 agents:
@@ -86,6 +103,11 @@ features:
   asset_class: "cfd_gold"
   norm_span: 120
   bootstrap_bars: 100000
+  # S509 train-serve EMA-Z parity. Extended WF fold_07 training ends 2026-02-01.
+  # All 3 ensemble seeds share the same warmup (identical train_end_date), so
+  # any one seed's pkl serves the whole ensemble. Image build must COPY this
+  # checkpoint dir into /app/checkpoints/ so the pkl is reachable here.
+  norm_warmup_path: "/app/checkpoints/gmgp1-xauusd-ext-wf-fold7-seed789_20260527_224418/norm_warmup_15-60-240.pkl"
 
 # --- Bar Clock (CFD 24h market) ---
 bar_clock:
@@ -140,9 +162,10 @@ wandb:
   project: "FinRL-Pro-DS"
   entity: "bigcan-chiwin-technology"
   tags: ["live", "paper", "gmgp1-xauusd", "cTrader", "XAUUSD", "Gold", "SAC", "15min",
-         "CFD", "FTMO", "oanda-spot", "wf-stage3", "solo-seed-42", "fold-07",
-         "rehpo-trial10", "steady-state", "v2-2-compliant"]
-  run_id: "live-gmgp1-xauusd-ctrader-paper-20260424"
+         "CFD", "FTMO", "prop-firm", "oanda-spot", "wf-stage3", "ensemble",
+         "ens_pf_weighted", "extended-window", "rehpo-trial10", "steady-state",
+         "v2-3-compliant", "v2-5-bootstrap-promote"]
+  run_id: "live-gmgp1-xauusd-ctrader-ensemble-v1-20260528"
 
 # --- Safety ---
 safety:
@@ -156,13 +179,12 @@ safety:
   emergency_flatten_on_error: true     # Flatten all positions on unrecoverable error
 
 # --- Protocol v2.2 §8.2 Live Action-Drift ---
-# Stage 2.5 verdict = SOLO_BEST; baseline is seed 42's fold-07 eval_distribution
-# (not the ensemble rule). Tracker picks eval_distribution_by_seed["42"] via
-# baseline_seed. Baseline baked via Dockerfile.live-engine COPY baselines/.
+# Ensemble baseline (ens_pf_weighted, 8-fold concatenated WF OOS = 15,683 bars).
+# Baked by scripts/bake_gmgp1_xauusd_ext_drift_baseline.py.
+# No baseline_seed (ensemble rule, not a per-seed baseline).
 drift:
   enabled: true
-  baseline_path: "/app/baselines/gmgp1_xauusd_oanda_wf_fold_07/seed_report.json"
-  baseline_seed: "42"
+  baseline_path: "/app/baselines/gmgp1_xauusd_extended_wf_fold_07/ensemble_report.json"
   window_bars: 1000
   min_bars_before_check: 500
   vol_estimator_bars: 20
@@ -190,16 +212,16 @@ gates:
 # See scripts/check_retrain_triggers.py. Live DD checks delegated to live-monitor.
 retrain_policy:
   enabled: true
-  last_trained_date: "2026-04-24"        # WF_seed42_fold_07_20260424_061803
+  last_trained_date: "2026-02-01"        # extended WF fold_07 train_end
   staleness_cap_days: 365
-  validation_pf_baseline: 2.260          # seed 42 fold-7 test PF
-  oos_pf_floor_ratio: 0.70               # floor: 1.58
+  validation_pf_baseline: 2.722          # WF median ens_pf_weighted (8 folds)
+  oos_pf_floor_ratio: 0.70               # floor: 1.91
   dd_trigger_ratio: 0.50                 # 4% live DD trigger (vs 8% hard stop)
   gate_window_days: 90
   gate_lag_days: 1
   feature_drift_p_threshold: 0.01
   feature_drift_ks_stat_threshold: 0.20  # PRIMARY trigger: max CDF gap ≥ 0.20
-  backtest_config_ref: "configs/gmgp1_xauusd_oanda_wf_fold_07_backtest.yaml"
+  backtest_config_ref: "configs/gmgp1_xauusd_wf_extended.yaml"
   data_file_path: "data/oanda/xauusd_m15_m.parquet"
 
 # --- PRISM Regime Overlay (L2 position sizing) ---
@@ -223,20 +245,30 @@ prism:
 provenance:
   schema_version: 1
   block_added: "2026-05-21 (S546)"
+  block_updated: "2026-05-28 (S551-cont-7) — solo → v2.3 ensemble swap"
   strategy: gmgp1-xauusd
-  agent_type: solo                       # Stage 2.5 verdict SOLO_BEST (S495-cont)
-  upstream_hpo_run: gmgp1_xauusd_ftmo_rehpo_20260421  # trial #10
-  upstream_wf_run: gmgp1_xauusd_oanda_wf_ensemble
-  wf_solo_seed: 42
-  wf_fold: 7
-  wf_metrics: "test PF 2.260, Sharpe_d 4.43, MDD -0.39%, Win 57.8%"
-  stage_2_5_verdict: SOLO_BEST            # G3 uplift FAIL (0.970 < 1.05 floor)
-  stage_2_5_verdict_path: "results/gmgp1_xauusd_oanda_wf_ensemble/fold_07/verdict.json"
-  checkpoint_path: "checkpoints/WF_seed42_fold_07_20260424_061803/checkpoint_final.pth"
-  live_run_id: "live-gmgp1-xauusd-ctrader-paper-20260424"
-  paper_deploy_since: "2026-04-24"
+  agent_type: ensemble                   # v2.3 bundle, ens_pf_weighted
+  upstream_hpo_run: gmgp1_xauusd_ftmo_rehpo_20260421  # trial #10 (HPs inherited)
+  upstream_l1_run: gmgp1_xauusd_l1_multiseed_extended  # N=10, S550-cont-6
+  upstream_wf_run: gmgp1_xauusd_wf_extended            # 8-fold, S551-cont-6
+  ensemble_seeds: [789, 2025, 1024]
+  ensemble_rule: ens_pf_weighted
+  wf_metrics: "median ens_PF 2.722, CV 0.130, ens dominates 8/8 folds vs best solo 2.402"
+  stage_3_verdict: PROMOTE                                            # bootstrap PRIMARY
+  stage_3_verdict_source: v2_5_bootstrap                              # P(PF)=1.000, P(MDD)=0.986
+  stage_3_verdict_path: "results/gmgp1_xauusd_extended_wf_ensemble/verdict.json"
+  bundle_path: "bundles/gmgp1_xauusd_extended/ensemble_v1.tar.gz"
+  bundle_sha256: "13881339e0ae"          # truncated; full in .sha256 sidecar
+  drift_baseline_path: "baselines/gmgp1_xauusd_extended_wf_fold_07/ensemble_report.json"
+  norm_warmup_path: "checkpoints/gmgp1-xauusd-ext-wf-fold7-seed789_20260527_224418/norm_warmup_15-60-240.pkl"
+  predecessor_checkpoint: "checkpoints/WF_seed42_fold_07_20260424_061803/checkpoint_final.pth"
+  predecessor_live_since: "2026-04-24"
+  predecessor_retired: "2026-05-28"
+  live_run_id: "live-gmgp1-xauusd-ctrader-ensemble-v1-20260528"
+  paper_deploy_since: "2026-05-28"
   audit_history:
-    - "2026-04-24: Stage 2.5 SOLO_BEST verdict, paper deploy on IC Markets demo"
+    - "2026-04-24: Stage 2.5 SOLO_BEST verdict, paper deploy on IC Markets demo (solo seed 42)"
     - "2026-04-24 (S495-cont): prop-firm decoupling Step 4 (base config + FTMO overlays)"
     - "2026-04-30 (S490): CFDBarClock false-STALL during XAU rollover; heartbeat fix shipped"
     - "2026-05-10 (S540): 45h-idle OOM exit 137; force-recreate shipped; tracemalloc queued"
+    - "2026-05-28 (S551-cont-7): solo → v2.3 ensemble v1 swap; WF bootstrap PRIMARY PROMOTE"

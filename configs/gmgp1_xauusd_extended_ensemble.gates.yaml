@@ -1,0 +1,171 @@
+# GMGP1-XAUUSD Extended-Window ensemble confirmation gates — PRE-COMMITTED.
+#
+# Stage 3 WF for the Tier B2 protocol-anchored retrain (1.5M / 30.5x on 24mo
+# OANDA spot). Mirrors the GMGP1-XAUUSD predecessor gates file
+# (configs/gmgp1_xauusd_ensemble.gates.yaml, S493 OANDA L1 Path B); the only
+# differences are `seeds:` (now [789, 2025, 1024] from L1-extended val-argmax)
+# and `provenance:`. Gate thresholds are identical — same workstream + same
+# asset class + same Protocol v2.5 policy.
+#
+# Read by scripts/gmgp1_xauusd_ensemble_eval_oanda.py --wf_config.
+# Decision rule: ALL five gates (G1..G5) must PASS -> approve ensemble for
+# GMGP1-XAUUSD paper-deploy aggregation. ANY fail -> solo fallback (highest
+# WF-median PF).
+#
+# Pre-commit date: 2026-05-26 BEFORE WF launch. Do not edit after launch
+# without a decision memo explaining why.
+
+workstream: gmgp1_xauusd_extended
+variant: ensemble_top3_val_argmax_extended
+seeds: [789, 2025, 1024]                      # L1-extended top-3 (val-argmax-PF, S495)
+aggregation_rule: ens_pf_weighted             # candidate rule under test (Stage 2.5-R chosen at eval)
+
+# Fold count expected from the multiseed WF config.
+# 8 folds covering Aug 2025 -> Apr 2026 test windows
+# (envelope: 2024-01-01 -> 2026-04-15, train_months=18, val/test/step = 1mo).
+wf_folds: 8
+
+# ---------------------------------------------------------------------------
+# Gates
+# ---------------------------------------------------------------------------
+
+gates:
+  g1_solo_baseline:
+    description: >-
+      Existing WF Stage-3 gate applied per seed: at least 2/3 seeds must have
+      per-fold test PF >= pf_floor, in at least min_folds_pass of the total
+      folds. If solo seeds fail the base WF discipline, the ensemble is moot.
+    pf_floor: 1.1
+    seeds_pass_min: 2                         # >=2/3 seeds pass per fold
+    min_folds_pass: 7                         # in >=7/8 folds
+
+  g2_no_regression:
+    description: >-
+      Per fold, the ensemble must NOT materially regress vs the best solo on
+      that fold. Defined as ens_PF >= ens_ratio_min * best_solo_PF in at least
+      min_folds_pass folds.
+    ens_ratio_min: 0.90
+    min_folds_pass: 7                         # >=7/8 folds
+
+  g3_uplift:
+    description: >-
+      Across folds, the ensemble must earn its live-complexity overhead.
+      Defined as median(ens_PF) / median(best_solo_PF) >= uplift_ratio_min.
+      v2.5 NOTE: this is the legacy point-estimate gate (audit-only). The
+      bootstrap PRIMARY block below carries the live-capital decision.
+    uplift_ratio_min: 1.10
+    metric: median                            # across-folds aggregation
+
+  # === Protocol v2.5 PRIMARY (S526): block-bootstrap probability gate. ===
+  # Mirrors the GMGP1-XAUUSD predecessor gates file so Stage 2.5-R callers,
+  # live-engine drift_agreement monitors, and run_stage_2_5_val_selection see
+  # identical thresholds across all GMGP1-XAUUSD variants (extended +
+  # predecessor). See decision_protocol_v25_bootstrap_primary.md.
+  ensemble_bootstrap_p_pf_promote: 0.90       # P(ens_PF > solo_PF) >= 0.90 for PROMOTE
+  ensemble_bootstrap_p_mdd_promote: 0.90      # P(ens_MDD better) >= 0.90 for PROMOTE on DD channel
+  ensemble_bootstrap_p_pf_ambiguous: 0.75     # v2.5 ambiguous floor on P(PF)
+  ensemble_bootstrap_resamples: 10000          # B in stationary block bootstrap
+  ensemble_bootstrap_block_len: null           # null -> auto = sqrt(n_bars), capped at 0.1*n
+
+  # === Protocol v2.5 SECONDARY (audit/sanity only). ===
+  ensemble_uplift_min: 1.10                    # legacy point-estimate (audit-only)
+  ensemble_ambiguous_min: 1.05                 # legacy ambiguous floor (audit-only)
+
+  # v2.3 diversity-aware top-K selection (Phase 0). Pool == K here so it's
+  # audit-only (selector cannot materially differ from naive top-K-by-PF).
+  ensemble_top_k: 3
+  ensemble_diversity_lambda: 1.0               # score = PF − λ * max_corr_with_already_selected
+
+  g4_ftmo_compliance:
+    description: >-
+      Applied to the ENSEMBLE trajectory per fold (not the solo trajectories).
+      All three FTMO sub-gates must PASS in every fold (strict: 8/8).
+    daily_dd_buffer_pp_min: 0.5               # 4% cap - worst_intraday_dd%
+    trailing_dd_buffer_pp_min: 0.5            # 8% cap - trailing_mdd%
+    compliance_must_pass: true                # active_days/single_day_share
+    min_folds_pass: 8                         # all folds
+
+  g5_dd_stability:
+    description: >-
+      Guards against ensemble edge being a one-fold artifact. CV of ensemble
+      PF across folds must be at or below cv_max.
+    cv_pf_max: 0.35
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds.
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5                           # unused on V7 scalar, declared for schema
+    action_kl_crit: 1.0                           # unused on V7 scalar, declared for schema
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode.
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+  # Protocol v2.3 §4.5 Stage 2.5-R retrain triggers.
+  retrain:
+    ensemble_recheck_days: 90
+    live_pf_ratio: 0.8
+    live_pf_window_days: 5
+    min_trades_window: 20
+    agreement_decay_delta: 0.20
+    agreement_decay_window_bars: 2000
+    action_kl_warn_window_bars: 5000
+    cost_drift_ratio: 1.20
+    cost_drift_window_trades: 100
+    # Protocol v2.5.1 timeframe-tier max_age_days: 15-min -> 90d.
+    max_age_days: 90
+
+  # Protocol v2.3 §8.2 agreement-decay live monitor (no-op for ens_pf_weighted).
+  drift_agreement:
+    enabled_for_rules: ["ens_agreement", "ens_majority"]
+    flat_delta_warn: 0.20
+    flat_delta_crit: 0.40
+    window_bars: 2000
+
+# ---------------------------------------------------------------------------
+# Decision matrix
+# ---------------------------------------------------------------------------
+
+decision:
+  all_pass_action: approve_ensemble_paper_deploy
+  any_fail_action: reject_ensemble_use_best_solo
+  solo_selection_metric: wf_median_pf
+  solo_tiebreaker: wf_mean_trailing_dd_buffer_pp
+
+# ---------------------------------------------------------------------------
+# Provenance
+# ---------------------------------------------------------------------------
+
+provenance:
+  drafted_on: '2026-05-26'
+  drafted_by_session: S550-cont-8
+  upstream_memory: feedback_anchor_cells_via_protocol_v25_multiplicity.md
+  l1_extended_result: >-
+    L1 N=10 CLEAN PASS: median test PF 2.6601, mean 2.6697, CV 5.38%,
+    val PF median 2.6461 (val-test gap -0.014), Sharpe_d median 4.67
+    [4.44, 5.08], MaxDD median -1.99% [-2.92%, -1.17%], 10/10 above live
+    baseline 2.260 (median uplift +17.7%).
+    Top-3 by val-argmax-PF (S495): seed 789 (val 2.8447 / test 2.5354),
+    seed 2025 (val 2.7778 / test 2.6491), seed 1024 (val 2.7557 / test 2.8181).
+  wf_train_window_rationale: >-
+    L1 extended used 24mo train (2024-01 -> 2026-01-31). WF shortens to 18mo
+    to fit 8-fold cadence in the 27.5mo envelope (2024-01-01 -> 2026-04-15).
+    Mirrors SG-1-XAUUSD VS-v2 Phase 2 precedent (L1 24mo -> WF 18mo).
+  wf_budget_rationale: >-
+    total_timesteps = 1.1M per fold. Anchored to L1 cell's 30.5x multiplicity
+    (1.5M / ~49K bars). 18mo WF folds yield ~36K bars; 1.1M / 36K = 30.5x,
+    holds multiplicity steady from L1 to WF per Protocol v2.5.1.
+  upstream_l1_config: configs/gmgp1_xauusd_l1_multiseed_extended.yaml
+  upstream_wandb_runs:
+    seed_789:  4b04cwv1
+    seed_2025: rsg3u962
+    seed_1024: z0tfmpp0
