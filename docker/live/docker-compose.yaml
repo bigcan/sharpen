@@ -318,7 +318,7 @@ services:
       BROKER_TYPE: crypto
       STRATEGY_NAME: sg1-btc
       STRATEGY_RUNNER: scripts/run_live.py
-      STRATEGY_CONFIG: /app/configs/live_sg1_btc_binance.yaml
+      STRATEGY_CONFIG: /app/configs/live_sg1_btc_bybit.yaml
       STRATEGY_OVERLAY: ${SG1_BTC_OVERLAY:-velotrade/step1}
       METRICS_PORT: "9109"
       # 2026-05-04 (S527-cont) venue re-cutover: Bybit testnet → Bybit mainnet demo.

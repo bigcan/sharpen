@@ -1,17 +1,20 @@
 # Live Trading Config — SG-1 BTC SAC via Bybit Mainnet Demo (DECAY-01 solo cutover)
 # 3-min bars, signal-gated, prop-firm trained (10% EOD trailing DD).
 #
-# Successor to configs/live_sg1_btc_binance.yaml (ensemble_v2 / ens_mean).
+# Filename: renamed S551-cont-9 (2026-05-28) from `live_sg1_btc_binance.yaml` to
+# match the actual venue. Historical lineage: Binance demo (S498) → Bybit testnet
+# (2026-05-02) → Bybit mainnet demo (2026-05-04, S527-cont). The
+# `live_sg1_btc_binance.yaml` name persisted as a stub on the working tree to
+# avoid disrupting `docker-compose.yaml` STRATEGY_CONFIG + runbook scripts. Now
+# updated atomically with the rename. Legacy filename pointer in memory at
+# reference_live_config_filename_legacy_s551.md.
+#
 # Triggered by SG1BTC-DECAY-01 retrain (n=88 perfect-fill re-audit fired the
 # decay gate, project_sg1_btc_n50_audit_20260511); Stage 3 WF 8-fold ensemble
 # eval verdict = `reject_ensemble_use_best_solo` (G1/G4/G5 PASS, G2 1/8 FAIL,
 # G3 uplift 0.866x < 1.10). Solo bundle on seed 456 fold_07 checkpoint owns
 # the freshest training cutoff (2026-02-01) and tops fold_07 pf_bar (2.524
 # vs solo_42 2.484 / solo_2025 2.363, plus all 4 ensemble rules).
-#
-# NOTE: Filename retains "_binance" for backward compatibility with
-# docker-compose.yaml STRATEGY_CONFIG ref + tests/check_retrain_triggers/runbook
-# scripts. Contents are Bybit mainnet demo — see exchange block.
 #
 # Sister config: configs/live_sg1_btc_dxtrade.yaml (Velotrade DXtrade execution,
 # activated once Bybit mainnet-demo soak validates this strategy/checkpoint pair).
@@ -25,7 +28,7 @@
 #
 # Deploy invocations (resolved = this file + overlay):
 #   python scripts/deploy_bare_metal.py --script scripts/run_live.py \
-#     --config configs/live_sg1_btc_binance_decay01.yaml --overlay velotrade/step1
+#     --config configs/live_sg1_btc_bybit.yaml --overlay velotrade/step1
 #
 # After Step 5 migration this BASE file alone is NOT paper-deployable
 # (validator FAILs: `risk.static_peak` missing); pair with an overlay.
@@ -209,14 +212,21 @@ drift:
   vol_estimator_bars: 20
 
 # --- Protocol v2 Gates (paper-deploy requirement; mirrors §drift/§safe_mode) ---
+# v2.6 (S551-cont-9, 2026-05-28): asymmetric thresholds + feature_variance_veto
+# applied here too. S551-cont-4 updated the canonical
+# `configs/sg1_btc_velotrade_ensemble.gates.yaml` but the live engine reads
+# config["gates"]["drift"] from THIS file at runtime — the canonical gates
+# yaml is for Stage-3 WF verdict gating, not live engine init. Missing the
+# parity update here caused the 2026-05-28 05:27 UTC drift_crit (dead_delta
+# 0.343 > 0.30; would have been within 0.35 v2.6 ceiling).
 gates:
   drift:
     window_bars: 1000
     min_bars_before_check: 500
     deadband_frac_warn: 0.15
-    deadband_frac_crit: 0.30
-    saturation_frac_warn: 0.15
-    saturation_frac_crit: 0.30
+    deadband_frac_crit: 0.35                # v2.6 (was 0.30) — ADR-3 deadband headroom
+    saturation_frac_warn: 0.10              # v2.6 (was 0.15) — ADR-3 earlier saturation WARN
+    saturation_frac_crit: 0.25              # v2.6 (was 0.30) — ADR-3 tighter saturation CRIT
     action_kl_warn: 0.5
     action_kl_crit: 1.0
     agreement_flat_delta_warn: 0.20         # inert for solo (no agreement signal)
@@ -224,6 +234,15 @@ gates:
     agreement_flat_window_bars: 2000
     regime_conditioning: true
     vol_estimator_bars: 20
+    # v2.6 feature-variance veto. ADR-1 Mode B mitigation: bars where the
+    # finest engineered feature scale (3-min for SG-1 BTC) is pathologically
+    # flat are excluded from the drift histogram. ADR-5 escalation: if
+    # rolling flat_veto_frac > 0.50, OK → WARN with operator hand-off to
+    # scripts/recal_drift_baseline.py.
+    feature_variance_veto:
+      enabled: true
+      scale: base
+      max_veto_frac: 0.50
   safe_mode:
     crit_triggers_flatten: true
     crit_repeat_window_hours: 24
