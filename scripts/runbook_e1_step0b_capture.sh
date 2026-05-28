@@ -72,7 +72,7 @@ phase_preflight() {
     fi
 
     # 3. YAMLs have the capture flag
-    for f in configs/live_gmgp1_btc_bybit.yaml configs/live_sg1_btc_binance.yaml; do
+    for f in configs/live_gmgp1_btc_bybit.yaml configs/live_sg1_btc_bybit.yaml; do
         if grep -q "capture_ccxt_raw_responses: true" "$REPO_ROOT/$f"; then
             green "  [ok] $f has capture flag"
         else
