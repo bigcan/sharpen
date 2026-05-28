@@ -36,13 +36,13 @@ distributed_hpo:
     docker_image: "pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime"
 
   # --- GPUHub Worker Mapping ---
-  # Verified safe slots (S480 monitor_fleet snapshot 2026-04-19):
-  #   - gpuhub-1:0 idle, gpuhub-2:0 idle
+  # Verified safe slots (S551-cont-9 monitor_fleet snapshot 2026-05-28):
+  #   - gpuhub-1:0 idle (formerly running gmgp1-eurusd HPO single-worker, killed S551-cont-9)
+  #   - gpuhub-1:1 idle
+  #   - gpuhub-2:0 idle
   # Excluded:
-  #   - gpuhub-1:1 was running active DSAC HPO; do not trash
-  #   - gpuhub-2:1 does not exist (gpuhub-2 has 1 GPU)
-  #   - gpuhub-3:0 not reachable in current fleet
-  # Re-run `python scripts/monitor_fleet.py` and update before any launch.
+  #   - gpuhub-2:1 does not exist (gpuhub-2 has 1 GPU per feedback_gpuhub2_has_one_gpu_not_two)
+  # Re-run `python scripts/monitor_fleet.py --hw-only` and update before any launch.
   #
   # Replica syntax: list a slot N times to spawn N workers on that GPU
   # (CPU-bound SAC HPO uses ~25% GPU per worker; 3x co-location ≈ 75% util,
@@ -55,6 +55,9 @@ distributed_hpo:
       - "gpuhub-1:0"
       - "gpuhub-1:0"
       - "gpuhub-1:0"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
       - "gpuhub-2:0"
       - "gpuhub-2:0"
       - "gpuhub-2:0"
