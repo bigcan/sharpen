@@ -198,10 +198,14 @@ wandb:
     - upstream:gmgp1_eurusd_hyper_growth_20260528
     - upstream:brpnppzw
 
-# Stage 2.5-R ensemble block (populated post-L1 by results/gmgp1_eurusd_l1_verdict.json).
-# Top-3 by L1 val_argmax_pf; ens_pf_weighted aggregator weights from seed_pfs.
+# Stage 2.5-R ensemble block — populated S551-cont-9 2026-05-29 from
+# results/gmgp1_eurusd_l1_seed_report.json (10/10 seeds CLEAN PASS: val PF
+# mean 2.6747 CV 0.030, test PF mean 2.6841 CV 0.055, 0/10 below floor).
+# Top-3 by val_argmax_pf rule (S495); ens_pf_weighted weights from L1 test PFs.
 ensemble:
-  seeds: [0, 0, 0]                   # PLACEHOLDER — populated by Stage 2.5-R val-argmax top-3
-  seed_pfs:                          # PLACEHOLDER — populated from L1 test PFs
-    0: 0.0
+  seeds: [1024, 456, 5150]           # top-3 by L1 val PF (2.7641 / 2.7542 / 2.7396)
+  seed_pfs:                          # L1 test PFs (weights for ens_pf_weighted)
+    1024: 2.5535
+    456:  2.6775
+    5150: 2.4965
   gates_file: "configs/gmgp1_eurusd_oanda_ensemble.gates.yaml"
