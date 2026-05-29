@@ -1,0 +1,207 @@
+# GMGP1-EURUSD-OANDA — Stage 2 L1 multiseed (N=10) on best HPO Trial #1.
+#
+# Upstream: Stage 1 HPO study `gmgp1_eurusd_hyper_growth_20260528` (parent
+# WandB brpnppzw) completed 2026-05-29 06:18 UTC on Neon Postgres distributed
+# coordinator with 8 effective workers. 50/50 trials, top-10 mean PF 3.1127,
+# best Trial #1 PF 3.2654. Distribution healthy (47/50 above 1.5, 28/50 above
+# 2.5) — best params not a single-trial fluke. Stage 1 gate PASS.
+#
+# Architecture: clone of `gmgp1_eurusd_oanda_hpo.yaml` with HPs frozen to
+# Trial #1 from `results/best_params_gmgp1_eurusd_hyper_growth_20260528.yaml`.
+# Diffs vs HPO config:
+#   - hpo.enabled: false (no more sweeping)
+#   - training.total_timesteps: 500K -> 1.5M (Protocol v2.5.1 multiplicity
+#     anchor: ~46K bars × ~34x = 1.5M, matches GMGP1-XAUUSD extended cell)
+#   - agents.sac.{lr_actor,lr_critic,lr_alpha,gamma,tau,initial_alpha,
+#     gradient_clip} frozen from Trial #1
+#   - env.reward.dsr_eta + env.deadband_threshold frozen from Trial #1
+#   - ensemble block (placeholder seeds — populated post-L1 by val_argmax_pf
+#     top-3 selection in Stage 2.5-R bake)
+#   - workstream: gmgp1_eurusd_hyper_growth
+#
+# Stage 2 gate (Protocol v2 §4 + S488 escalation):
+#   - median test PF >= 1.2, all seeds profitable
+#   - CV(PF) in [0.22, 0.38] = AMBIGUOUS -> auto-extend to N=20
+#
+# Launch pattern (per feedback_multiseed_batches_of_5_not_10_at_once +
+# feedback_l1_multiseed_launcher_pitfalls):
+#   - 2 sequential batches of 5 seeds each (N=10 total)
+#   - `--concurrent 2 --separate_runs` per batch (avoids num_envs=20 race)
+#   - Target: gpuhub-1 (4-slot pool) — non-HPO per
+#     feedback_hpo_gpuhub1_nonhpo_gpuhub2, but reversed this cycle because
+#     gpuhub-1 is free post-HPO and gpuhub-2 is single-GPU
+#
+#   Batch 1:
+#     python scripts/launch_l1_multiseed.py \
+#       --config configs/gmgp1_eurusd_oanda_l1_multiseed.yaml \
+#       --seeds 42,123,456,789,1024 \
+#       --run_name_prefix gmgp1-eurusd-l1 \
+#       --separate_runs --concurrent 2 \
+#       --slots gpuhub-1:0,gpuhub-1:0,gpuhub-1:1,gpuhub-1:1
+#
+#   Batch 2 (fire after Batch 1 lands):
+#     python scripts/launch_l1_multiseed.py \
+#       --config configs/gmgp1_eurusd_oanda_l1_multiseed.yaml \
+#       --seeds 1337,2025,3141,5150,9999 \
+#       --run_name_prefix gmgp1-eurusd-l1 \
+#       --separate_runs --concurrent 2 \
+#       --slots gpuhub-1:0,gpuhub-1:0,gpuhub-1:1,gpuhub-1:1
+
+data:
+  file_path: data/oanda/eurusd_m1_m.parquet
+  ticker: EURUSD
+  handler_type: multiscale
+  train_start_date: '2024-06-02'
+  train_end_date:   '2026-04-02'   # 22.0 months (same as HPO)
+  val_start_date:   '2026-04-03'
+  val_end_date:     '2026-05-03'   # 1 month
+  test_start_date:  '2026-05-04'
+  test_end_date:    '2026-05-25'   # ~3 weeks
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: cfd_forex
+
+env:
+  mdp_version: v7
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00005               # OANDA practice ~5bps/side (sibling Bar 1 validated)
+  deadband_threshold: 0.25         # Trial #1 frozen (HPO picked 0.25 over 0.35 prior)
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.06           # Hyper Growth 6% hard cap
+  scales: [15, 60, 240]
+  gap_detection: true
+  gap_atr_mult: 3.0                # OANDA weekend gap detector
+  reward:
+    mode: dsr
+    dsr_eta: 0.004019602773440119  # Trial #1 frozen
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.05  # 1pp buffer vs HG 6% rail
+    max_daily_loss_pct: 0.02         # 1pp buffer vs HG 3% rail
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.015
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Trial #1 HPs frozen (Optuna study gmgp1_eurusd_hyper_growth_20260528,
+    # parent WandB brpnppzw, source results/best_params_gmgp1_eurusd_hyper_growth_20260528.yaml)
+    lr_actor: 9.342955206312993e-06
+    lr_critic: 0.0009971476346129868
+    lr_alpha: 1.6584383225513344e-05
+    tau: 9.31089526353895e-06
+    gamma: 0.9865116014092484
+    initial_alpha: 0.28060953240606235
+    gradient_clip: 4.489373157203433
+    batch_size: 512
+    buffer_size: 500000              # multiplicity anchor (DO NOT change)
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 1500000           # Protocol v2.5.1 multiplicity-anchored (~34x @ ~46K bars)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: bfloat16
+  torch_compile: true
+  num_envs: 20
+  # seed: set per-run via CLI (--seed N); launcher sweeps
+  # batch 1: [42, 123, 456, 789, 1024]
+  # batch 2: [1337, 2025, 3141, 5150, 9999]
+
+hpo:
+  enabled: false
+
+gates:                               # Protocol v2 §4 Stage 2 (S488 N=10 + bootstrap)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                       # S488: prop-firm requires N>=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]   # S488 escalation range
+  # Protocol v2.5: bootstrap PRIMARY for live-capital workstreams
+  ensemble_uplift_min: 1.10          # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05       # legacy ambiguous floor (audit-only)
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_rule_selection: val_argmax_pf  # S495: pick aggregation rule on val
+  wf_windows: 8
+  wf_pf_floor: 1.1
+  # The5ers Hyper Growth compliance (sub-gates applied to ensemble trajectory)
+  hyper_growth_active_days_min: 0    # no min trading days (vs FTMO 4)
+  hyper_growth_max_single_day_share: 0.5
+  hyper_growth_daily_dd_buffer_pp: 0.5
+  hyper_growth_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+workstream: gmgp1_eurusd_hyper_growth
+
+wandb:
+  project: FinRL-Pro-DS
+  consolidate: true                  # Protocol v2 §4 default; launcher --separate_runs overrides
+  tags:
+    - gmgp1-eurusd
+    - EURUSD
+    - SAC
+    - 15min
+    - CFD
+    - FX
+    - the5ers
+    - hyper-growth
+    - prop-firm
+    - l1-multiseed
+    - oanda-spot
+    - steady-state
+    - trial1
+    - protocol-anchored-cell
+    - upstream:gmgp1_eurusd_hyper_growth_20260528
+    - upstream:brpnppzw
+
+# Stage 2.5-R ensemble block (populated post-L1 by results/gmgp1_eurusd_l1_verdict.json).
+# Top-3 by L1 val_argmax_pf; ens_pf_weighted aggregator weights from seed_pfs.
+ensemble:
+  seeds: [0, 0, 0]                   # PLACEHOLDER — populated by Stage 2.5-R val-argmax top-3
+  seed_pfs:                          # PLACEHOLDER — populated from L1 test PFs
+    0: 0.0
+  gates_file: "configs/gmgp1_eurusd_oanda_ensemble.gates.yaml"
