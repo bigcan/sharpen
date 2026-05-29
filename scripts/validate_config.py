@@ -745,6 +745,164 @@ def check_ensemble_confirm(cfg: dict, r: ValidationResult) -> None:
         )
 
 
+def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
+    """Protocol v2.6 Stage 2.5-R Sensitivity Audit gate validation (S553).
+
+    Validates that the L1 multiseed config declares the gate keys required for
+    the post-PROMOTE sensitivity audit (`scripts/stage_2_5_r_sensitivity_audit.py`,
+    landing in v2.7-A C4). The audit runs a 3×3 (deadband_threshold ×
+    max_leverage) sweep on the PROMOTE'd ensemble/solo and flags edge-fragile
+    policies via the ratio gate `pf_inner_min / pf_center >= floor`.
+
+    Phase α (S553+): legacy configs (no `protocol_version` or `<= "2.5"`) are
+    exempt — this check is a no-op. Configs that opt in via `protocol_version:
+    "2.6"` get full enforcement.
+
+    Phase β (post-backfill): operator bumps the 5 active live workstreams to
+    `protocol_version: "2.6"` AND `sensitivity_audit_required: true` after
+    threshold calibration. Validator FAILs prop-firm configs missing the keys
+    at that point.
+
+    See `.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md`
+    (ADR-3, ADR-5) and `mc_robustness_methods_research.md` (Method #5).
+    """
+    # Phase α back-compat: only enforce on explicit v2.6 opt-in.
+    protocol_version = str(cfg.get("protocol_version", "2.5"))
+    if protocol_version not in ("2.6",):
+        return
+
+    gates = _load_ensemble_gates_overlay(cfg)
+    prop_firm = _is_prop_firm(cfg)
+
+    sensitivity_hint = (
+        "Copy from a sister <workstream>_ensemble.gates.yaml or use Phase α "
+        "defaults: edge_stability_pf_ratio_floor: 0.70, "
+        "sensitivity_deadband_grid: [0.20, 0.25, 0.30], "
+        "sensitivity_max_leverage_mults: [0.5, 1.0, 1.5], "
+        "sensitivity_deployable_max_leverage_cap: <deployed env.max_leverage>, "
+        "sensitivity_audit_required_min_deployable_neighbors: 4, "
+        "sensitivity_audit_required: false (Phase α) → true (Phase β)."
+    )
+
+    floor = gates.get("edge_stability_pf_ratio_floor")
+    if floor is None:
+        msg = f"gates.edge_stability_pf_ratio_floor not set — v2.6 PRIMARY gate. {sensitivity_hint}"
+        r.fail(msg) if prop_firm else r.warn(msg)
+    else:
+        try:
+            floor_f = float(floor)
+            if not (0.50 <= floor_f <= 0.95):
+                r.warn(
+                    f"gates.edge_stability_pf_ratio_floor={floor_f} outside sanity "
+                    "bound [0.50, 0.95]. Below 0.50 weakens the audit; above 0.95 "
+                    "rarely fires."
+                )
+        except (TypeError, ValueError):
+            r.fail(
+                f"gates.edge_stability_pf_ratio_floor={floor!r} is not numeric"
+            )
+
+    grid_db = gates.get("sensitivity_deadband_grid")
+    if not isinstance(grid_db, list) or len(grid_db) != 3:
+        msg = (
+            "gates.sensitivity_deadband_grid must be a 3-element list "
+            f"(e.g. [0.20, 0.25, 0.30]); got {grid_db!r}"
+        )
+        r.fail(msg) if prop_firm else r.warn(msg)
+
+    grid_ml = gates.get("sensitivity_max_leverage_mults")
+    if not isinstance(grid_ml, list) or len(grid_ml) != 3:
+        msg = (
+            "gates.sensitivity_max_leverage_mults must be a 3-element list "
+            f"(e.g. [0.5, 1.0, 1.5]); got {grid_ml!r}"
+        )
+        r.fail(msg) if prop_firm else r.warn(msg)
+
+    # SENS-1 invariant: center cell must match deployed config — non-centered
+    # grids invalidate the edge-stability semantics.
+    deployed_deadband = (cfg.get("env") or {}).get("deadband_threshold", 0.25)
+    if isinstance(grid_db, list) and len(grid_db) == 3:
+        try:
+            if abs(float(grid_db[1]) - float(deployed_deadband)) > 1e-9:
+                r.fail(
+                    f"sensitivity_deadband_grid center [{grid_db[1]}] must equal "
+                    f"deployed env.deadband_threshold ({deployed_deadband}); "
+                    "non-centered grids invalidate the edge-stability semantics "
+                    "(SENS-1 invariant)."
+                )
+        except (TypeError, ValueError):
+            r.fail(
+                f"sensitivity_deadband_grid contains non-numeric values: {grid_db!r}"
+            )
+
+    if isinstance(grid_ml, list) and len(grid_ml) == 3:
+        try:
+            if abs(float(grid_ml[1]) - 1.0) > 1e-9:
+                r.fail(
+                    f"sensitivity_max_leverage_mults center [{grid_ml[1]}] must "
+                    "equal 1.0 (center = deployed max_leverage; mults are relative)."
+                )
+        except (TypeError, ValueError):
+            r.fail(
+                f"sensitivity_max_leverage_mults contains non-numeric values: {grid_ml!r}"
+            )
+
+    cap = gates.get("sensitivity_deployable_max_leverage_cap")
+    if cap is not None:
+        try:
+            cap_f = float(cap)
+            if cap_f <= 0:
+                r.fail(
+                    f"sensitivity_deployable_max_leverage_cap={cap_f} must be positive"
+                )
+        except (TypeError, ValueError):
+            r.fail(
+                f"sensitivity_deployable_max_leverage_cap={cap!r} is not numeric"
+            )
+
+    min_neighbors = gates.get(
+        "sensitivity_audit_required_min_deployable_neighbors", 4,
+    )
+    try:
+        min_neighbors_i = int(min_neighbors)
+        if not (1 <= min_neighbors_i <= 8):
+            r.warn(
+                f"sensitivity_audit_required_min_deployable_neighbors="
+                f"{min_neighbors_i} outside [1, 8]. Below 1 is meaningless; "
+                "above 8 is impossible in a 3×3 grid (8 neighbors)."
+            )
+    except (TypeError, ValueError):
+        r.fail(
+            f"sensitivity_audit_required_min_deployable_neighbors="
+            f"{min_neighbors!r} is not integer"
+        )
+
+    required = gates.get("sensitivity_audit_required")
+    if required is None:
+        msg = (
+            "gates.sensitivity_audit_required not set — v2.6 explicit "
+            "declaration required. Set false during Phase α calibration; "
+            "flip to true once threshold is locked in Phase β."
+        )
+        r.fail(msg) if prop_firm else r.warn(msg)
+    elif not isinstance(required, bool):
+        r.fail(
+            f"gates.sensitivity_audit_required={required!r} must be boolean "
+            "(true/false)"
+        )
+
+    if (
+        isinstance(required, bool)
+        and required
+        and prop_firm
+        and not r.failures
+    ):
+        r.ok(
+            f"sensitivity audit enforcement active "
+            f"(floor={floor}, grid={grid_db}×{grid_ml})"
+        )
+
+
 def check_wf(cfg: dict, r: ValidationResult) -> None:
     gates = cfg.get("gates", {})
     if gates.get("wf_windows", 4) < 4:
@@ -1228,6 +1386,7 @@ STAGE_CHECKS = {
     "l1-multiseed": [check_l1_multiseed],
     "ensemble-confirm": [
         check_ensemble_confirm,
+        check_sensitivity_audit,
         check_drift_safemode_gates,
         check_report_schema,
     ],
