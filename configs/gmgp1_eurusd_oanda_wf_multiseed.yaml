@@ -1,0 +1,216 @@
+# GMGP1-EURUSD The5ers Hyper Growth — Stage 3 Walk-Forward, top-3 ensemble.
+#
+# Drafted S551-cont-9 2026-05-29 after Stage 2.5-R PROMOTE
+# (results/gmgp1_eurusd_hg_ensemble/ensemble_v1.tar.gz, chosen_rule=ens_pf_weighted,
+# P(PF)=0.914 / P(MDD)=0.945, sha256 TBD). Per Protocol v2.5 §4.5: WF
+# re-confirmation MANDATORY after Stage 2.5-R PROMOTE.
+#
+# Upstream:
+#   - Stage 1 HPO: Trial #1, study gmgp1_eurusd_hyper_growth_20260528, parent
+#     WandB brpnppzw (50/50 trials, best PF 3.2654, top-10 mean 3.11).
+#   - Stage 2 L1 N=10: CLEAN PASS median test PF 2.6669, CV 0.055
+#     (results/gmgp1_eurusd_l1_seed_report.json).
+#   - Stage 2.5-R: PROMOTE on ens_pf_weighted (bundle ensemble_v1.tar.gz,
+#     P(PF)=0.914, P(MDD)=0.945; legacy uplift 1.049 = SOLO_BEST_FALLBACK
+#     audit-only per Protocol v2.5).
+#
+# Top-3 by L1 val_argmax_pf (S495), CONFIRMED by Stage 2.5-R diversity-audit
+# (pool=K=3 so naive top-K is the only choice — no reseat needed):
+#   - seed 1024: L1 val PF 2.7641 / test PF 2.5535
+#   - seed 456:  L1 val PF 2.7542 / test PF 2.6775
+#   - seed 5150: L1 val PF 2.7396 / test PF 2.4965
+#
+# Splitter (8 folds, train_months=14, val_months=1, test_months=1, step_months=1)
+#   on envelope 2024-06-02 → 2026-05-25 (parquet last_ts 2026-05-26T07:05Z):
+#     fold 0: train 2024-06 → 2025-08  val 2025-08 → 09  test 2025-09 → 10
+#     fold 1: train 2024-07 → 2025-09  val 2025-09 → 10  test 2025-10 → 11
+#     fold 2: train 2024-08 → 2025-10  val 2025-10 → 11  test 2025-11 → 12
+#     fold 3: train 2024-09 → 2025-11  val 2025-11 → 12  test 2025-12 → 01
+#     fold 4: train 2024-10 → 2025-12  val 2025-12 → 01  test 2026-01 → 02
+#     fold 5: train 2024-11 → 2026-01  val 2026-01 → 02  test 2026-02 → 03
+#     fold 6: train 2024-12 → 2026-02  val 2026-02 → 03  test 2026-03 → 04
+#     fold 7: train 2025-01 → 2026-03  val 2026-03 → 04  test 2026-04 → 05
+#
+# NOTE on train window: L1 used 22mo train; WF shortens to 14mo to fit 8-fold
+# cadence in ~24mo envelope. Mirrors SG-1-EURUSD-HG WF + GMGP1-XAUUSD-extended WF
+# precedents.
+#
+# NOTE on budget: total_timesteps = 1.0M per fold. Anchored to L1 cell's ~33x
+# multiplicity (1.5M / ~46K bars). 14mo WF folds yield ~30K bars; 1.0M / 30K =
+# ~33x, holds multiplicity steady from L1 to WF per Protocol v2.5.1. Matches
+# GMGP1-XAUUSD-extended WF anchoring (1.1M @ 36K bars = 30.5x).
+#
+# Gate (pre-committed at configs/gmgp1_eurusd_oanda_ensemble.gates.yaml):
+#   G1 Solo baseline        : >=2/3 seeds PF>=1.1 per fold in >=7/8 folds
+#   G2 No regression        : per-fold ens_PF >= 0.9 * best_solo_PF in >=7/8 folds
+#   G3 Uplift               : median ens_PF / median best_solo_PF >= 1.10 (audit-only v2.5)
+#   G4 Hyper Growth compliance: per-fold dd buffers >=0.5pp + PASS, 8/8 folds
+#   G5 DD stability         : CV(ens_PF) across folds <= 0.35
+#   PRIMARY v2.5 bootstrap  : P(ens_PF > best_solo) >= 0.90 + P(MDD better) >= 0.90
+#   ALL PASS -> approve ensemble paper-deploy
+#   ANY FAIL -> solo-best fallback (by wf_median_pf)
+
+workstream: gmgp1_eurusd_hyper_growth_wf
+
+data:
+  file_path: "data/oanda/eurusd_m1_m.parquet"
+  ticker: "EURUSD"
+  handler_type: "multiscale"
+  start_date: "2024-06-02"
+  end_date:   "2026-05-25"
+
+splitter:
+  train_months: 14
+  val_months: 1
+  test_months: 1
+  step_months: 1
+  buffer_days: 0
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_forex"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00005                   # OANDA practice ~5bps/side
+  deadband_threshold: 0.25             # Trial #1 frozen
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.06               # HG 6% hard cap
+  scales: [15, 60, 240]
+  gap_detection: true
+  gap_atr_mult: 3.0                    # OANDA weekend gap detector
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.004019602773440119      # Trial #1 frozen
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.05    # 1pp buffer from HG 6%
+    max_daily_loss_pct: 0.02           # 1pp buffer from HG 3%
+    eod_hour_utc: 21
+    drawdown_penalty_start: 0.015
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs frozen from Trial #1 (gmgp1_eurusd_hyper_growth_20260528) —
+# identical to L1 so Stage 3 is apples-to-apples with Stage 2.5-R.
+agents:
+  sac:
+    lr_actor: 9.342955206312993e-06
+    lr_critic: 0.0009971476346129868
+    lr_alpha: 1.6584383225513344e-05
+    tau: 9.31089526353895e-06
+    gamma: 0.9865116014092484
+    initial_alpha: 0.28060953240606235
+    gradient_clip: 4.489373157203433
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 1000000             # Protocol v2.5.1 multiplicity hold (33x @ ~30K bars)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+ensemble:
+  # Top-3 by L1 val_argmax_pf; Stage 2.5-R chose ens_pf_weighted as winner.
+  # Source: results/gmgp1_eurusd_l1_seed_report.json + results/gmgp1_eurusd_hg_ensemble/
+  seeds: [1024, 456, 5150]
+  rule: ens_pf_weighted                # Stage 2.5-R PROMOTE rule
+  rules: ["solo_1024", "solo_456", "solo_5150",
+          "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
+  # Checkpoint path pattern — matches launcher's --run_name_prefix.
+  checkpoint_pattern: "checkpoints/gmgp1-eurusd-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth"
+  # L1 test PFs — weights for ens_pf_weighted aggregation in WF folds.
+  seed_pfs:
+    1024: 2.5535
+    456:  2.6775
+    5150: 2.4965
+  gates_file: "configs/gmgp1_eurusd_oanda_ensemble.gates.yaml"
+
+gates:                                 # Protocol v2 §4 Stage 3 (training-level)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10            # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_rule_selection: val_argmax_pf
+  # Stage 3 gates
+  wf_windows: 8
+  wf_pf_floor: 1.1
+  hyper_growth_active_days_min: 0
+  hyper_growth_max_single_day_share: 0.5
+  hyper_growth_daily_dd_buffer_pp: 0.5
+  hyper_growth_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+  drift:
+    window_bars: 1000
+    min_bars_before_check: 500
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags:
+    - gmgp1-eurusd
+    - EURUSD
+    - SAC
+    - 15min
+    - CFD
+    - FX
+    - the5ers
+    - hyper-growth
+    - prop-firm
+    - wf-multiseed
+    - oanda-spot
+    - steady-state
+    - trial1
+    - protocol-anchored-cell
+    - upstream:gmgp1_eurusd_hyper_growth_20260528
+    - upstream:brpnppzw
