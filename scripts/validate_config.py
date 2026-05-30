@@ -404,6 +404,9 @@ def check_hpo(cfg: dict, r: ValidationResult) -> None:
             "stage 1 will fall back to project defaults"
         )
 
+    # Training-budget multiplicity (Protocol v2.5.1 §3.5) on the per-trial budget.
+    _check_multiplicity(cfg, hpo.get("steps_per_trial"), "HPO per-trial", r)
+
 
 def _is_prop_firm(cfg: dict) -> bool:
     """Workstream is paper-or-live-capital per Protocol v2.2 §8 scope rules.
@@ -414,6 +417,111 @@ def _is_prop_firm(cfg: dict) -> bool:
     """
     tags = [str(t).lower() for t in (cfg.get("wandb", {}).get("tags") or [])]
     return any(t in tags for t in ("prop-firm", "propfirm", "ftmo", "velotrade"))
+
+
+def _base_scale_minutes(cfg: dict) -> int | None:
+    """Finest OHLCV scale in minutes — one env step is one base bar."""
+    feats = cfg.get("features", {}) or {}
+    scales = feats.get("scales") or (cfg.get("env", {}) or {}).get("scales")
+    if not scales:
+        return None
+    try:
+        base = min(int(s) for s in scales)
+    except (TypeError, ValueError):
+        return None
+    return base if base > 0 else None
+
+
+def _train_window_days(cfg: dict) -> float | None:
+    """Calendar length of the train window, from explicit dates or splitter months."""
+    data = cfg.get("data", {}) or {}
+    ts, te = data.get("train_start_date"), data.get("train_end_date")
+    if ts and te:
+        try:
+            return float((datetime.fromisoformat(str(te)) - datetime.fromisoformat(str(ts))).days)
+        except ValueError:
+            pass
+    months = (cfg.get("splitter", {}) or {}).get("train_months")
+    if months:
+        try:
+            return float(months) * 30.44
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _training_budget_multiplicity(cfg: dict, total_steps) -> tuple[float, float, str] | None:
+    """``steps / bars_in_train_window`` for 24/7 crypto (Protocol v2.5.1 §3.5,
+    decision_training_budget_multiplicity_rule). Returns ``(mult, bars, basis)``
+    or ``None`` when the trading calendar can't be inferred reliably (session-bound
+    FX/futures) — we skip rather than emit a wrong multiplicity."""
+    try:
+        steps = float(total_steps)
+    except (TypeError, ValueError):
+        return None
+    if steps <= 0:
+        return None
+    # 24/7 calendar is only certain for crypto; session-bound assets need a
+    # calendar we don't model here, so skip rather than guess.
+    feats = cfg.get("features", {}) or {}
+    asset_class = str(
+        feats.get("asset_class") or (cfg.get("data", {}) or {}).get("asset_class") or ""
+    ).lower()
+    if asset_class != "crypto":
+        return None
+    base_min = _base_scale_minutes(cfg)
+    days = _train_window_days(cfg)
+    if not base_min or not days or days <= 0:
+        return None
+    bars = days * (1440.0 / base_min)
+    if bars <= 0:
+        return None
+    return steps / bars, bars, f"{days:.0f}d x {1440.0 / base_min:.0f} bars/day @ {base_min}m"
+
+
+def _check_multiplicity(cfg: dict, total_steps, label: str, r: ValidationResult) -> None:
+    """Training-budget multiplicity gate. >50x = REJECT overfit cliff; <15x =
+    under-trained WARN (acceptable only when L1 N>=10 is the real filter)."""
+    m = _training_budget_multiplicity(cfg, total_steps)
+    if m is None:
+        return
+    mult, bars, basis = m
+    msg = f"{label} budget multiplicity {mult:.1f}x ({basis}, {bars:.0f} train bars)"
+    if mult > 50.0:
+        r.fail(f"{msg} — exceeds 50x REJECT cliff (decision_training_budget_multiplicity_rule §3.5)")
+    elif mult > 40.0:
+        r.warn(f"{msg} — above [15,40] productive band, approaching 50x reject cliff")
+    elif mult >= 15.0:
+        r.ok(f"{msg} — within [15,40] productive band")
+    else:
+        r.warn(
+            f"{msg} — below [15,40] band (under-trained); acceptable per §3.5 only when "
+            "the L1 N>=10 multiseed is the real validation filter"
+        )
+
+
+def check_execution_cost_realism(cfg: dict, stage: str, r: ValidationResult) -> None:
+    """Prop-firm configs that bear execution must model slippage. Selecting,
+    grading, or deploying a policy under slippage=0 understates live cost and is
+    the documented sg1-btc sim->live gap (sg1_btc_sim_live_gap.md; audit P3/P4/P10).
+    WARN (not FAIL) so historical configs still validate, but the gap is surfaced."""
+    if stage not in ("l1-multiseed", "wf", "oos", "paper-deploy"):
+        return
+    if not _is_prop_firm(cfg):
+        return
+    env = cfg.get("env", {}) or {}
+    try:
+        slip = float(env.get("slippage_base_bps", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        slip = 0.0
+    if slip > 0:
+        r.ok(f"execution cost: env.slippage_base_bps={slip} modeled (stage={stage})")
+    else:
+        r.warn(
+            f"execution cost: env.slippage_base_bps unset/0 on a prop-firm {stage} config "
+            "— policy trained/selected/graded net of fee only, understating live cost "
+            "(sg1_btc_sim_live_gap.md). Set to the venue marketable-limit cross."
+        )
 
 
 # Protocol v2.2 §8.2 / §8.3 gate keys. Every one of these must be present in
@@ -575,6 +683,10 @@ def check_l1_multiseed(cfg: dict, r: ValidationResult) -> None:
     if prop_firm and seeds < 10:
         r.warn(f"prop-firm workstream with l1_seeds={seeds} — Protocol v2 §4 "
                "stage 2 (S488) recommends N>=10 for CV-estimator reliability")
+
+    # Training-budget multiplicity (Protocol v2.5.1 §3.5) on the per-seed budget.
+    _check_multiplicity(cfg, (cfg.get("training", {}) or {}).get("total_timesteps"),
+                        "L1 per-seed", r)
 
 
 def _load_ensemble_gates_overlay(cfg: dict) -> dict:
@@ -1419,6 +1531,7 @@ def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -
     check_legacy_prop_firm_block(cfg, stage, r, config_path=config_path)
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)
+    check_execution_cost_realism(cfg, stage, r)
     check_wandb_consolidation(cfg, stage, r)
 
     for check in STAGE_CHECKS[stage]:
