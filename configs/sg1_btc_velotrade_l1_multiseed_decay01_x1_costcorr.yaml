@@ -1,0 +1,190 @@
+# SG-1 BTC Velotrade — L1 Multi-Seed (SG1BTC-DECAY-01) — X1 COST-CORRECTED RE-SELECT
+#
+# === X1: cost-corrected, post-X2-causal seed re-selection (S553-cont-8) ===
+# WHY: the DECAY-01 L1 cohort (configs/sg1_btc_velotrade_l1_multiseed_decay01.yaml)
+# was trained/selected COST-FREE-relative (taker 5.0 bps, slippage UNSET=0) and on
+# the PRE-X2 leaky multiscale pipeline (each base bar saw the fully-completed coarse
+# bar — forward look-ahead). The cost-corrected Stage-3 WF then INHERITED that
+# cost-free top-3 [456,42,2025] verbatim (audit finding P7-01,
+# docs/research/sg1_btc_strategy_audit_2026-05-29.md). X1 re-runs the FULL N=10
+# cohort under the honest, de-leaked pipeline so seed selection itself is
+# cost-corrected and causal:
+#   1. taker_fee:         0.0005 -> 0.00055  (real Bybit retail taker 5.5 bps)
+#   2. slippage_base_bps: unset  -> 5.0      (one-way marketable-limit cross ~4.58 bps)
+#      Both consumed by continuous_swing_env.py:58 (slip) + :364-366,:387 (tc_bps AND
+#      equity delta). SAME cost model as the cost-corrected WF
+#      (sg1_btc_velotrade_decay01_wf_multiseed.yaml:118-119).
+#   3. post-X2 causal coarse-bar alignment is CODE-LEVEL (multiscale_handler.py,
+#      committed 6c027e19 / S553-cont-7) — applies automatically, no config flag.
+# Per Protocol v2 §4.5 this is the cost-drift (#6) + env-change (#1) trigger that
+# mandates a full L1 re-derive before reading any downstream WF. Expect LOWER PFs
+# than the cost-free / pre-X2 cohort (best-solo was 2.53 cost-free / 1.69
+# cost-corrected-but-leaky pre-X2; the de-leaked numbers will be lower again).
+#
+# EVERYTHING ELSE IS BYTE-IDENTICAL to the cost-free L1 decay01 config (same data
+# window, HPs trial #44, network, signal_gate, budget 3M, risk params, N=10 seeds,
+# gates) so the re-selection is apples-to-apples — ONLY the cost model changes.
+# workstream/result dir/checkpoint prefix renamed to keep X1 artifacts disjoint
+# from the cost-free decay01 L1 dirs.
+#
+# Seeds (N=10, same as decay01 L1 for a clean re-derive; source
+# results/sg1_btc_velotrade_decay01/seed_report.json):
+#   42,123,456,789,1024,1337,2025,3141,5150,9999
+#
+# Post-train: re-reconcile top-3 via val_argmax_pf (S495), then Stage 2.5-R
+# bootstrap (PRIMARY), then Stage 3 WF re-run on the new seeds. The current
+# ensemble: block below is the STALE cost-free selection — it MUST be re-derived
+# from this run's seed_report before any WF/deploy read.
+#
+# DATA PROVENANCE: data/btc_usdt_1min_bybit.parquet manifest verified (S541):
+#   row_count 1225440, first_ts 2024-01-01T00:00 UTC, last_ts 2026-04-30T23:59 UTC,
+#   max_gap_bars 0, clean_ohlcv_passed true.
+#
+# UPSTREAM HP PROVENANCE (unchanged from rehpo trial #44):
+#   Re-HPO study `sg1_btc_velotrade_rehpo_20260420` best trial #44, PF=2.3031
+#   at 5 bps Bybit taker, WandB `q9pq44ug`.
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "multiscale"
+  train_start_date: "2024-01-01"
+  train_end_date: "2026-03-31"
+  val_start_date: "2026-04-01"
+  val_end_date: "2026-04-15"
+  test_start_date: "2026-04-16"
+  test_end_date: "2026-04-30"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.15
+  parkinson_threshold: 0.0009
+  volume_threshold: 0.60
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00055                    # X1 cost-correction: real Bybit retail taker 5.5 bps (was 0.0005)
+  slippage_base_bps: 5.0               # X1 cost-correction: one-way limit-cross ~4.58 bps (was unset=0)
+  deadband_threshold: 0.25              # trial #44
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 3000
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: false
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0008427308583293202       # trial #44
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.10
+    max_daily_loss_pct: 0.0
+    eod_hour_utc: 0
+    drawdown_penalty_start: 0.05
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# HPs frozen from sg1_btc_velotrade_rehpo_20260420 trial #44 (PF=2.3031, WandB q9pq44ug).
+agents:
+  sac:
+    lr_actor: 0.00015739192475706186
+    lr_critic: 0.00007322355805160213
+    lr_alpha: 0.0000026314031405474944
+    gamma: 0.9593670398875173
+    tau: 0.0002134448307797731
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.4088157097959411
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.516294914428727
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 3000000
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+gates:                                 # Protocol v2 Stage 2 (S488 escalation) + Stage 2.5 (S493/S526)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                         # S488: prop-firm workstreams require N>=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]     # S488: pre-committed escalation range
+  ensemble_uplift_min: 1.10            # legacy point-estimate (audit-only in v2.5)
+  ensemble_ambiguous_min: 1.05         # legacy ambiguous floor (audit-only in v2.5)
+  ensemble_bootstrap_p_pf_ambiguous: 0.75  # v2.5 PRIMARY: AMBIGUOUS_BOOT band floor on P(PF)
+  ensemble_rule_selection: val_argmax_pf  # S495
+  wf_windows: 3
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+# STALE cost-free selection (pre-X1). DO NOT read for WF/deploy — re-derive top-3
+# from THIS run's results/sg1_btc_velotrade_decay01_x1/seed_report.json after L1.
+ensemble:
+  seeds: [456, 42, 2025]              # STALE: cost-free/pre-X2 top-3 (S541) — pending X1 re-select
+  checkpoint_pattern: "checkpoints/sg1-btc-x1-costcorr-seed{seed}_*/checkpoint_final.pth"
+  gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
+
+workstream: sg1_btc_velotrade_decay01_x1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                    # S488: one parent run, seeds as seed<N>/*
+  tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade", "velotrade-wrapped",
+         "prop-firm", "propfirm", "multiseed", "l1", "steady-state", "bybit-perp",
+         "rehpo-trial44", "decay01", "x1", "costcorr", "x2-causal", "s553",
+         "upstream:sg1_btc_velotrade_rehpo_20260420"]
