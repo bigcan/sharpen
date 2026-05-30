@@ -35,6 +35,7 @@ import logging
 import os
 import sys
 import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -153,18 +154,70 @@ def _dry_run_cell(spec: CellSpec, deployed_config: Dict[str, float]) -> CellResu
     )
 
 
+def _resolve_rule_fn(rule_name: str, seed_pfs_typed: Dict[int, float]):
+    """Rebuild the ensemble aggregation function from its name.
+
+    The aggregation functions exposed by ``sg1_xauusd_ensemble_eval`` are
+    closures (``_make_pf_weighted`` / ``_agg_solo``), which are NOT picklable
+    and so cannot cross a ProcessPool boundary. Resolving by name inside each
+    worker keeps the closure process-local. Raises ``ValueError`` on an
+    unsupported rule.
+    """
+    from scripts.sg1_xauusd_ensemble_eval import (  # noqa: E402  — lazy import
+        _agg_agreement,
+        _agg_mean,
+        _agg_median,
+        _agg_solo,
+        _make_pf_weighted,
+    )
+    rule_lookup = {
+        "ens_mean": _agg_mean,
+        "ens_median": _agg_median,
+        "ens_agreement": _agg_agreement,
+    }
+    if rule_name == "ens_pf_weighted":
+        return _make_pf_weighted(dict(seed_pfs_typed))
+    if rule_name in rule_lookup:
+        return rule_lookup[rule_name]
+    if rule_name.startswith("solo_"):
+        return _agg_solo(int(rule_name.split("_")[1]))
+    raise ValueError(f"unsupported rule {rule_name!r}")
+
+
+def _cell_worker(payload: Dict[str, Any]) -> CellResult:
+    """Run a single cell. Module-level + picklable so it can be the ProcessPool
+    target; the (non-picklable) aggregation closure is rebuilt here from
+    ``rule_name`` rather than shipped across the process boundary.
+
+    Shared by the sequential and parallel runners so the two cannot diverge.
+    ``payload["dry_run"]`` routes to the synthetic cell.
+    """
+    spec: CellSpec = payload["spec"]
+    if payload["dry_run"]:
+        return _dry_run_cell(spec, payload["deployed_config"])
+    rule_fn = _resolve_rule_fn(payload["rule_name"], payload["seed_pfs_typed"])
+    return run_cell(
+        config=payload["config"],
+        spec=spec,
+        seeds=payload["seeds"],
+        rule_name=payload["rule_name"],
+        rule_fn=rule_fn,
+        checkpoint_paths=payload["checkpoint_paths"],
+        out_dir=Path(payload["out_dir"]),
+        device=payload["device"],
+    )
+
+
 def _run_cells_sequential(
     cells_spec: List[CellSpec],
     *,
-    config: Dict[str, Any],
-    seeds: List[int],
-    rule_name: str,
-    rule_fn,
-    checkpoint_paths: Dict[int, str],
-    out_dir: Path,
-    device: str,
+    payload_base: Dict[str, Any],
 ) -> List[CellResult]:
-    """Run cells one-at-a-time. Used as fallback and for the smoke-test path."""
+    """Run cells one-at-a-time, in-process (fallback + smoke-test path).
+
+    Delegates each cell to :func:`_cell_worker`, sharing the exact rollout logic
+    with :func:`_run_cells_parallel`.
+    """
     results: List[CellResult] = []
     for i, spec in enumerate(cells_spec):
         t0 = time.time()
@@ -172,17 +225,10 @@ def _run_cells_sequential(
             f"[cell {i+1}/{len(cells_spec)}] {spec.label()} "
             f"(deadband={spec.deadband_threshold}, max_leverage={spec.max_leverage})"
         )
+        payload = dict(payload_base)
+        payload["spec"] = spec
         try:
-            result = run_cell(
-                config=config,
-                spec=spec,
-                seeds=seeds,
-                rule_name=rule_name,
-                rule_fn=rule_fn,
-                checkpoint_paths=checkpoint_paths,
-                out_dir=out_dir,
-                device=device,
-            )
+            result = _cell_worker(payload)
         except InvariantViolation as e:
             log.error(f"[cell {spec.label()}] invariant violation: {e}")
             raise
@@ -196,6 +242,50 @@ def _run_cells_sequential(
         )
         results.append(result)
     return results
+
+
+def _run_cells_parallel(
+    cells_spec: List[CellSpec],
+    *,
+    payload_base: Dict[str, Any],
+    max_workers: int,
+) -> List[CellResult]:
+    """Run cells across a process pool, order-preserving.
+
+    Each worker rebuilds the aggregation closure from ``rule_name`` in its own
+    process (see :func:`_resolve_rule_fn`), so nothing unpicklable crosses the
+    boundary. Failure semantics match the sequential path: an
+    :class:`InvariantViolation` propagates verbatim (pre-flight); any other
+    error is wrapped as a rollout failure.
+    """
+    results: List[Optional[CellResult]] = [None] * len(cells_spec)
+    payloads: List[Dict[str, Any]] = []
+    for spec in cells_spec:
+        payload = dict(payload_base)
+        payload["spec"] = spec
+        payloads.append(payload)
+    with ProcessPoolExecutor(max_workers=max_workers) as ex:
+        futures = {
+            ex.submit(_cell_worker, payloads[i]): i
+            for i in range(len(cells_spec))
+        }
+        for fut in as_completed(futures):
+            i = futures[fut]
+            spec = cells_spec[i]
+            try:
+                result = fut.result()
+            except InvariantViolation as e:
+                log.error(f"[cell {spec.label()}] invariant violation: {e}")
+                raise
+            except Exception as e:  # noqa: BLE001
+                log.error(f"[cell {spec.label()}] rollout failure: {e}")
+                raise RuntimeError(f"cell rollout failed: {spec.label()}") from e
+            results[i] = result
+            log.info(
+                f"[cell {spec.label()}] done — "
+                f"PF={result.pf_test:.3f} MDD={result.mdd_test:.4f} halt={result.halt}"
+            )
+    return [r for r in results if r is not None]
 
 
 # ---------------------------------------------------------------------------
@@ -298,13 +388,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Root of configs/ directory (default: configs)")
     args = parser.parse_args(argv)
 
-    if args.parallel and int(args.parallel) > 1:
-        log.warning(
-            f"--parallel {args.parallel} requested, but 9-cell parallel rollout "
-            "is not yet implemented (Q1 follow-up); running cells SEQUENTIALLY. "
-            "Wall time ~15-50 min/workstream rather than ~3-10 min."
-        )
-
     # --- 1. Locate verdict ---
     verdict_path = _locate_verdict(args.workstream, args.results_root)
     if not verdict_path.exists():
@@ -396,30 +479,22 @@ def main(argv: Optional[List[str]] = None) -> int:
             log.error("verdict.seeds missing — cannot resolve checkpoints")
             return EXIT_PREFLIGHT
 
-    # --- 7. Run cells ---
+    # --- 7. Run cells (sequential or parallel; shared _cell_worker) ---
     out_dir = args.results_root / f"{args.workstream}_ensemble"
+    n_par = max(1, min(int(args.parallel), len(cells_spec)))
     t_start = time.time()
     try:
         if args.dry_run:
             log.info("dry-run mode: emitting synthetic cell results")
-            cell_results = [_dry_run_cell(s, deployed_config) for s in cells_spec]
-        else:
-            # Resolve aggregation function + checkpoint paths from verdict + config.
-            # For v2.6 C4 we delegate to sg1_xauusd_ensemble_eval helpers via
-            # run_cell's lazy imports. The operator passes --config to surface
-            # the L1 multiseed config that already declares the agent paths.
-            from scripts.sg1_xauusd_ensemble_eval import (  # noqa: E402  — lazy import
-                _agg_agreement,
-                _agg_mean,
-                _agg_median,
-                _agg_solo,
-                _make_pf_weighted,
-            )
-            rule_lookup = {
-                "ens_mean": _agg_mean,
-                "ens_median": _agg_median,
-                "ens_agreement": _agg_agreement,
+            payload_base: Dict[str, Any] = {
+                "dry_run": True,
+                "deployed_config": deployed_config,
             }
+        else:
+            # Resolve aggregation rule + checkpoint paths from verdict + config.
+            # The aggregation fn is rebuilt per-worker from rule_name (closures
+            # are not picklable); validate it once here before dispatch.
+            seed_pfs_typed: Dict[int, float] = {}
             if rule_name == "ens_pf_weighted":
                 seed_pfs = (
                     verdict.get("test_solo_pfs")
@@ -427,18 +502,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                     or {}
                 )
                 seed_pfs_typed = {int(k): float(v) for k, v in seed_pfs.items()}
-                rule_fn = _make_pf_weighted(seed_pfs_typed)
-            elif rule_name in rule_lookup:
-                rule_fn = rule_lookup[rule_name]
-            elif rule_name.startswith("solo_"):
-                rule_fn = _agg_solo(int(rule_name.split("_")[1]))
-            else:
-                log.error(f"unsupported rule {rule_name!r}")
+            try:
+                _resolve_rule_fn(rule_name, seed_pfs_typed)
+            except ValueError as e:
+                log.error(str(e))
                 return EXIT_PREFLIGHT
 
             # Checkpoint paths: operator-specified via L1 config under
-            # agents.<seed>.ckpt; for v2.6 C4 we accept either dict-shape or
-            # legacy SEED_CHECKPOINTS module-level constants.
+            # agents.<seed>.ckpt; v2.6 requires per-seed checkpoint paths.
             agents_section = (cli_config or {}).get("agents") or {}
             checkpoint_paths: Dict[int, str] = {}
             for s in seeds:
@@ -453,16 +524,29 @@ def main(argv: Optional[List[str]] = None) -> int:
                     return EXIT_PREFLIGHT
                 checkpoint_paths[int(s)] = ckpt
 
-            device = "cpu"  # SAC inference is small; CPU is the safe default
+            payload_base = {
+                "dry_run": False,
+                "deployed_config": deployed_config,
+                "config": cli_config or {},
+                "seeds": [int(s) for s in seeds],
+                "rule_name": rule_name,
+                "seed_pfs_typed": seed_pfs_typed,
+                "checkpoint_paths": checkpoint_paths,
+                "out_dir": str(out_dir),
+                "device": "cpu",  # SAC inference is small; CPU is the safe default
+            }
+
+        if n_par > 1:
+            log.info(
+                f"running {len(cells_spec)} cells across {n_par} worker "
+                "process(es) (--parallel)"
+            )
+            cell_results = _run_cells_parallel(
+                cells_spec, payload_base=payload_base, max_workers=n_par,
+            )
+        else:
             cell_results = _run_cells_sequential(
-                cells_spec,
-                config=cli_config or {},
-                seeds=[int(s) for s in seeds],
-                rule_name=rule_name,
-                rule_fn=rule_fn,
-                checkpoint_paths=checkpoint_paths,
-                out_dir=out_dir,
-                device=device,
+                cells_spec, payload_base=payload_base,
             )
     except InvariantViolation as e:
         log.error(f"invariant violation during rollout: {e}")
