@@ -1,9 +1,18 @@
-# SG-1 BTC Velotrade Q1 2026 OOS Backtest — regime drift quantification
-# Checkpoint: sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030 (live sg1-btc paper)
-# Base: configs/sg1_btc_velotrade_l1_multiseed.yaml (env params copied verbatim)
-# Data: Bybit BTCUSDT 1m parquet covers 2024-01-01 → 2026-04-06.
-# Test window: 2026-01-01 → 2026-04-12 (data physically caps at 04-06 — engine
-# will terminate on data exhaustion; ~13 weeks effective).
+# SG-1 BTC Velotrade recent-OOS Backtest — DEPLOYED policy, cost-corrected (S553-cont audit P8)
+# Checkpoint: sg1-btc-decay01-wf-fold7-seed456_20260521_230637 (the DEPLOYED
+#   DECAY-01 SOLO seed-456, train cutoff 2026-02-01 — bundle solo_v1.tar.gz in
+#   configs/live_sg1_btc_bybit.yaml). REPLACES the retired seed-42 l1-multiseed
+#   checkpoint: the deployed live policy had never passed a Stage-4 recent-OOS
+#   gate (audit P8-01).
+# Base HPs: trial #44 (sg1_btc_velotrade_rehpo_20260420), identical to the
+#   DECAY-01 L1/WF stack — env params below match the deployed config.
+# Data: Bybit BTCUSDT 1m parquet covers 2024-01-01 → 2026-04-30.
+# Test window: 2026-02-03 → 2026-04-30 (STRICTLY after the seed-456 train cutoff
+#   2026-02-01 so the window is genuinely out-of-sample for the deployed ckpt;
+#   the old 2026-01-01 start overlapped seed-456 training — audit P8-01).
+# Cost: taker_fee 0.00055 (5.5 bps Bybit retail) + slippage_base_bps 5.0 (live
+#   marketable-limit cross) per the S552 sim->live gap RCA — the old config ran
+#   the falsified cheap model (5.0 bps fee, 0 slippage; audit P8-02).
 
 data:
   file_path: "data/btc_usdt_1min_bybit.parquet"
@@ -14,8 +23,8 @@ data:
   train_end_date: "2025-06-30"
   val_start_date: "2025-07-01"
   val_end_date: "2025-09-30"
-  test_start_date: "2026-01-01"
-  test_end_date: "2026-04-12"
+  test_start_date: "2026-02-03"   # strictly after seed-456 train cutoff 2026-02-01 (audit P8-01)
+  test_end_date: "2026-04-30"
 
 features:
   scales: [3, 15, 60]
@@ -38,7 +47,8 @@ env:
   initial_balance: 100000.0
   window_size: 30
   features_per_scale: 8
-  taker_fee: 0.0005
+  taker_fee: 0.00055               # S552 cost-correction: Bybit retail taker 5.5 bps (was 0.0005)
+  slippage_base_bps: 5.0           # S552 cost-correction: live marketable-limit cross (was unset=0)
   deadband_threshold: 0.25
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
@@ -102,5 +112,5 @@ hpo:
 wandb:
   project: "FinRL-Pro-DS"
   tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade",
-         "backtest", "q1-2026-oos", "regime-drift", "l1-seed42",
-         "bybit-perp", "steady-state-fee"]
+         "backtest", "recent-oos", "regime-drift", "decay01-seed456-deployed",
+         "bybit-perp", "steady-state-fee", "cost-corrected"]

@@ -64,11 +64,20 @@ STRATEGIES = {
     },
     "sg1-btc-deployed": {
         "log": "sg1_btc_deployed.log",
-        "label": "SG-1-BTC (deployed l1-multiseed seed-42 SOLO_BEST_FALLBACK)",
+        "label": "SG-1-BTC (deployed DECAY-01 WF fold-7 seed-456 SOLO, cost-corrected)",
         "asset_class": "crypto",
-        "max_dd_breach_pct": 8.0,
-        "ckpt": "sg1-btc-velotrade-l1-multiseed-seed42_20260423_234030/checkpoint_final.pth",
+        "max_dd_breach_pct": 8.0,  # Velotrade trailing
+        # Re-pointed S553-cont (audit P8-01): was the RETIRED seed-42 l1-multiseed
+        # ckpt; the live policy is the DECAY-01 SOLO seed-456 (bundle solo_v1.tar.gz,
+        # live_sg1_btc_bybit.yaml). Re-run configs/sg1_btc_velotrade_q1_2026_oos_backtest.yaml
+        # (cost-corrected, window 2026-02-03 -> 2026-04-30) against this ckpt to
+        # refresh sg1_btc_deployed.log before aggregating.
+        "ckpt": "sg1-btc-decay01-wf-fold7-seed456_20260521_230637/checkpoint_final.pth",
         "uses_pipeline": True,
+        "in_sample_overlap_warn": (
+            "deployed seed-456 train cutoff 2026-02-01 — OOS window must start "
+            "AFTER it (config set to 2026-02-03)"
+        ),
     },
     "sg1-xauusd-deployed": {
         "log": "sg1_xauusd_deployed.log",
@@ -128,6 +137,41 @@ def bucket(test_pf: float, val_pf: float, max_dd_pct: float, breach_pct: float) 
     if degradation >= 0.20:
         return "WATCH", {**info, "reason": f"degradation {degradation*100:.1f}% in [20,40)"}
     return "HOLD", {**info, "reason": f"degradation {degradation*100:.1f}% < 20%"}
+
+
+# Recent-OOS returns above this (over a ~2-3 month window) are not realizable net
+# of cost — they signal a frictionless/compounding artifact, not real edge.
+IMPLAUSIBLE_RETURN_PCT = 1000.0
+
+
+def _apply_return_sanity(v: dict) -> None:
+    """Guard against frictionless/compounding artifacts (audit P8-07).
+
+    The retired seed-42 verdict bucketed a +1,351,291% total return as HOLD purely
+    on PF degradation, because ``bucket()`` never inspects total return. A recent-OOS
+    backtest whose return is physically implausible cannot be trusted: WARN and force
+    RETRAIN so the gate never silently green-lights an artifact. The usual cause is a
+    missing cost model (slippage=0) and/or uncapped equity compounding.
+    """
+    ret = v.get("metrics", {}).get("test_total_return_pct")
+    try:
+        ret = float(ret)
+    except (TypeError, ValueError):
+        return
+    if abs(ret) <= IMPLAUSIBLE_RETURN_PCT:
+        return
+    v.setdefault("warnings", []).append(
+        f"implausible test_total_return={ret:,.0f}% (> {IMPLAUSIBLE_RETURN_PCT:.0f}%) — "
+        "frictionless/compounding artifact; verify cost model (slippage>0) and equity "
+        "compounding before trusting this verdict (audit P8-07)"
+    )
+    if v.get("bucket") in ("HOLD", "WATCH", "PASS-on-file"):
+        v["bucket_info"] = {
+            **v.get("bucket_info", {}),
+            "overridden_from": v.get("bucket"),
+            "reason": "implausible return — gate cannot trust a frictionless artifact",
+        }
+        v["bucket"] = "RETRAIN"
 
 
 def _parse_test_metrics_from_log(log_path: Path) -> dict:
@@ -312,6 +356,7 @@ def main() -> int:
         if v is None:
             print(f"[skip] {sid}: results not ready")
             continue
+        _apply_return_sanity(v)
         out_path = RESULTS_DIR / sid / "verdict.json"
         out_path.parent.mkdir(parents=True, exist_ok=True)
         out_path.write_text(json.dumps(v, indent=2))

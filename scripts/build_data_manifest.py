@@ -24,6 +24,9 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from clean_ohlcv import detect_outliers  # noqa: E402  (sibling script in scripts/)
+
 
 def build_manifest(parquet_path: Path) -> dict:
     df = pd.read_parquet(parquet_path)
@@ -52,24 +55,47 @@ def build_manifest(parquet_path: Path) -> dict:
     ohlcv_cols = [c for c in ("open", "high", "low", "close", "volume") if c in df.columns]
     nan_count = int(df[ohlcv_cols].isna().sum().sum()) if ohlcv_cols else 0
 
+    # Regime coverage. NOTE: binning rolling-vol against the data's OWN quartiles
+    # is degenerate — each bucket is ~0.25 by construction, so it can NEVER trip
+    # the validate_config `regime_quartile < 0.10` coverage gate (audit finding
+    # P1-03, sg1_btc_strategy_audit_2026-05-29.md). We instead bin against FIXED
+    # multiples of the dataset median vol, which makes the four fractions
+    # genuinely informative: a regime-poor (all-calm or all-stress) dataset now
+    # surfaces a bucket well below 0.10. `counts.get(k, 0.0)` keeps all four keys
+    # so an EMPTY bucket reports 0.0 (and trips the gate) instead of vanishing.
+    # (Per-train-window coverage vs global edges remains a validate_config
+    # follow-up; see the audit roadmap.)
     regime_quartiles: dict[str, float] = {}
     if "close" in df.columns and len(df) > 100:
         returns = df["close"].astype(float).pct_change().dropna()
         rolling_vol = returns.abs().rolling(30, min_periods=10).mean().dropna()
-        if len(rolling_vol) > 4:
-            q = rolling_vol.quantile([0.25, 0.5, 0.75]).values
-            bins = [-np.inf, q[0], q[1], q[2], np.inf]
+        med = float(rolling_vol.median())
+        if len(rolling_vol) > 4 and med > 0:
+            bins = [-np.inf, 0.5 * med, med, 2.0 * med, np.inf]
             labels = pd.cut(rolling_vol, bins=bins, labels=["q1_low", "q2", "q3", "q4_high"])
             counts = labels.value_counts(normalize=True)
-            regime_quartiles = {str(k): float(v) for k, v in counts.items()}
+            regime_quartiles = {k: float(counts.get(k, 0.0)) for k in ("q1_low", "q2", "q3", "q4_high")}
 
-    clean_ohlcv_passed = True
-    if "high" in df.columns and "low" in df.columns:
-        if (df["high"] < df["low"]).any():
-            clean_ohlcv_passed = False
-    if "close" in df.columns:
-        if (df["close"].astype(float) <= 0).any():
-            clean_ohlcv_passed = False
+    # DATA-CLEAN invariant: run the REAL outlier detector (scripts/clean_ohlcv.py)
+    # rather than the prior weak high<low / close<=0 self-check (audit finding
+    # P1-02), and record provenance so the manifest is an auditable cleaning
+    # contract rather than a self-certified flag.
+    clean_threshold = 0.05
+    n_bad_high = n_bad_low = n_invariant = 0
+    have_ohlc = all(c in df.columns for c in ("open", "high", "low", "close"))
+    if have_ohlc:
+        det = detect_outliers(df, threshold=clean_threshold)
+        n_bad_high = int(np.asarray(det["bad_high"]).sum())
+        n_bad_low = int(np.asarray(det["bad_low"]).sum())
+        n_invariant = int(
+            np.asarray(det["inv_high_open"]).sum()
+            + np.asarray(det["inv_high_close"]).sum()
+            + np.asarray(det["inv_low_open"]).sum()
+            + np.asarray(det["inv_low_close"]).sum()
+        )
+    clean_ohlcv_passed = have_ohlc and (n_bad_high + n_bad_low + n_invariant) == 0
+    if "close" in df.columns and (df["close"].astype(float) <= 0).any():
+        clean_ohlcv_passed = False
 
     return {
         "parquet_file": parquet_path.name,
@@ -80,6 +106,12 @@ def build_manifest(parquet_path: Path) -> dict:
         "max_gap_bars": max_gap_bars,
         "nan_count": nan_count,
         "clean_ohlcv_passed": clean_ohlcv_passed,
+        "clean_threshold": clean_threshold,
+        "clean_outliers": {
+            "bad_high": n_bad_high,
+            "bad_low": n_bad_low,
+            "invariant_violations": n_invariant,
+        },
         "regime_quartiles": regime_quartiles,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
