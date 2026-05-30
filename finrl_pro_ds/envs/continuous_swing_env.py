@@ -71,6 +71,14 @@ class ContinuousSwingEnv(gym.Env):
         self.gap_detection = bool(config.get("gap_detection", False))
         self._gap_atr_mult = float(config.get("gap_atr_mult", 3.0))
 
+        # N2 (PF-XCHECK dual-equity): when set, mark a SECOND equity curve at the
+        # bar (H+L)/2 midpoint, in lockstep with the close-marked equity, for the
+        # Stage 2.5-R sensitivity audit's mid-vs-close PF cross-check. SHADOW-ONLY
+        # (SENS-4): equity_mid never feeds reward / termination / ATR / obs, so the
+        # close-marked trajectory is byte-identical with the flag on or off (SENS-5).
+        # Default OFF → zero behavior change for training / live / existing backtests.
+        self.record_dual_equity = bool(config.get("record_dual_equity", False))
+
         # Reward config
         reward_cfg = config.get("reward", {})
         self.reward_mode = reward_cfg.get("mode", "dsr")
@@ -143,6 +151,11 @@ class ContinuousSwingEnv(gym.Env):
         self.current_atr = 0.0
         self.equity = self.initial_balance
         self.peak_equity = self.initial_balance
+        # N2 dual-equity shadow state (only advanced when record_dual_equity).
+        self.prev_mid = 0.0
+        self.current_mid = 0.0
+        self.equity_mid = self.initial_balance
+        self.peak_equity_mid = self.initial_balance
         self.cumulative_fees = 0.0
         self.trade_count = 0
         self.current_step = 0
@@ -195,6 +208,12 @@ class ContinuousSwingEnv(gym.Env):
         self.current_close = 0.0
         self.current_atr = 0.0
 
+        # N2 dual-equity shadow reset
+        self.prev_mid = 0.0
+        self.current_mid = 0.0
+        self.equity_mid = self.initial_balance
+        self.peak_equity_mid = self.initial_balance
+
         # v6: Position tracking reset
         self._entry_equity = self.initial_balance
         self._position_direction = 0
@@ -232,6 +251,9 @@ class ContinuousSwingEnv(gym.Env):
                 self.current_close = first["close"]
                 self.prev_close = self.current_close
                 self.current_atr = first["atr"]
+                if self.record_dual_equity and "high" in first and "low" in first:
+                    self.current_mid = 0.5 * (first["high"] + first["low"])
+                    self.prev_mid = self.current_mid
                 self._current_obs = self._extract_obs(first)
             else:
                 self._current_obs = self._empty_obs()
@@ -258,10 +280,14 @@ class ContinuousSwingEnv(gym.Env):
 
         # Save previous close
         self.prev_close = self.current_close
+        if self.record_dual_equity:
+            self.prev_mid = self.current_mid
 
         # 2. Update market state
         if step_data is not None:
             self.current_close = step_data["close"]
+            if self.record_dual_equity and "high" in step_data and "low" in step_data:
+                self.current_mid = 0.5 * (step_data["high"] + step_data["low"])
             self.current_atr = step_data["atr"]
             self._current_obs = self._extract_obs(step_data)
             # RCRP + Path 2: Track current regime code from handler
@@ -347,6 +373,7 @@ class ContinuousSwingEnv(gym.Env):
         # FIX R5-AUD-01: Compute price_return once, reuse for both reward and equity update
         pnl_bps = 0.0
         price_return = 0.0
+        gap_fired = False  # N2: shared gap mask, applied to BOTH close and mid returns
         if self.prev_close > 0:
             price_return = (self.current_close - self.prev_close) / self.prev_close
             # Gap detection: zero out returns from session gaps / contract rolls
@@ -354,6 +381,7 @@ class ContinuousSwingEnv(gym.Env):
             if (self.gap_detection and self._atr_rolling_mean > 1e-12
                     and abs(price_return) > self._gap_atr_mult * self._atr_rolling_mean / self.prev_close):
                 price_return = 0.0
+                gap_fired = True
             pnl_bps = self.current_position * price_return * 10000.0
 
         # Transaction cost (fee + slippage)
@@ -382,12 +410,30 @@ class ContinuousSwingEnv(gym.Env):
         # 6. Update equity
         # FIX R2-AUD-05: Use current equity (not initial_balance) so PnL compounds correctly.
         # Without this, drawdown recovery is inflated and long backtests diverge from reality.
+        # N2: fee_frac hoisted out of the `if` (same value, used by both equity curves);
+        # the not-traded close result is unchanged because the subtraction stays guarded.
+        fee_frac = self.taker_fee + self.slippage_base_bps / 10000.0
         equity_delta = self.current_position * price_return * self.equity
         if traded and total_delta > 1e-9:
-            fee_frac = self.taker_fee + self.slippage_base_bps / 10000.0
             equity_delta -= fee_frac * total_delta * self.equity
         self.equity += equity_delta
         self.peak_equity = max(self.peak_equity, self.equity)
+
+        # 6b. N2 PF-XCHECK shadow: mark a second equity curve at the bar (H+L)/2
+        # midpoint, in lockstep with the close-marked curve. Reuses current_position,
+        # total_delta, fee_frac, and the gap mask BY REFERENCE (MATH-N2-a) so fees are
+        # common-mode and the ONLY difference vs the close curve is the marking price.
+        # SHADOW-ONLY (SENS-4): never read by reward / termination / ATR / obs, so the
+        # close-marked trajectory is byte-identical with the flag on or off (SENS-5).
+        if self.record_dual_equity:
+            mid_return = 0.0
+            if self.prev_mid > 0 and not gap_fired:
+                mid_return = (self.current_mid - self.prev_mid) / self.prev_mid
+            equity_mid_delta = self.current_position * mid_return * self.equity_mid
+            if traded and total_delta > 1e-9:
+                equity_mid_delta -= fee_frac * total_delta * self.equity_mid
+            self.equity_mid += equity_mid_delta
+            self.peak_equity_mid = max(self.peak_equity_mid, self.equity_mid)
 
         # 7. Termination — peak-based drawdown stop
         # FIX R4-AUD-07: Compare against peak_equity (not initial_balance) so a 30%
@@ -513,6 +559,8 @@ class ContinuousSwingEnv(gym.Env):
         drawdown_pct = 1.0 - (self.equity / self.peak_equity) if self.peak_equity > 0 else 0.0
         return {
             "portfolio_value": self.equity,
+            # N2 PF-XCHECK: (H+L)/2-marked shadow equity; None when not recording.
+            "portfolio_value_mid": self.equity_mid if self.record_dual_equity else None,
             "position": self.current_position,
             "traded": traded,
             "trade_count": self.trade_count,

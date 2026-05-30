@@ -390,6 +390,8 @@ class MultiScaleOHLCVHandler:
                 scale_1: (window_size, 7) float32
                 scale_2: (window_size, 7) float32  (coarsest scale)
                 close: float
+                high: float    (N2 PF-XCHECK: base-scale bar high)
+                low: float     (N2 PF-XCHECK: base-scale bar low)
                 atr: float
                 timestamp: numpy datetime64
             or None if data exhausted
@@ -429,6 +431,11 @@ class MultiScaleOHLCVHandler:
                 result[key] = window.copy()
 
         result["close"] = float(self._base_close[self._ptr])
+        # N2 (PF-XCHECK dual-equity): expose base-scale bar high/low so the env
+        # can mark a second (H+L)/2 equity curve. Additive; existing consumers
+        # read keys by name and ignore these.
+        result["high"] = float(self._base_high[self._ptr])
+        result["low"] = float(self._base_low[self._ptr])
         result["atr"] = float(self._base_atr[self._ptr])
         result["timestamp"] = self._base_timestamps[self._ptr]
 

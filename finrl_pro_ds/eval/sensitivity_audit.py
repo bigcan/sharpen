@@ -55,6 +55,11 @@ PF_CAP = 10.0
 PF_XCHECK_DIVERGENCE_HALT = 0.30
 """PF-XCHECK invariant per CLAUDE.md: >30% divergence halts the cell."""
 
+PF_XCHECK_REPORT_ONLY = True
+"""ADR-N5 (Protocol v2.7-A N2): Phase-α calibration — compute and surface the
+mid-vs-close PF divergence but never HALT. Flip to False (N2-enforce) only after
+the report-only distribution across known-good policies locks the threshold."""
+
 DEFAULT_MIN_DEPLOYABLE_NEIGHBORS = 4
 DEFAULT_PF_RATIO_FLOOR = 0.70
 DEFAULT_DEADBAND_GRID: Tuple[float, float, float] = (0.20, 0.25, 0.30)
@@ -177,30 +182,42 @@ def mdd_from_pv(pv: np.ndarray) -> float:
 
 
 def compute_pf_xcheck(
-    pv_mid: np.ndarray,
-    pv_close: Optional[np.ndarray] = None,
+    pv_close: np.ndarray,
+    pv_mid: Optional[np.ndarray] = None,
     halt_threshold: float = PF_XCHECK_DIVERGENCE_HALT,
+    report_only: bool = False,
 ) -> PfXCheckResult:
-    """PF-XCHECK invariant per-cell check.
+    """PF-XCHECK invariant per-cell check: close-marked vs (H+L)/2-marked PF.
 
-    When ``pv_close`` is None (current v2.6 state — env-side dual-equity
-    recording deferred), returns SKIPPED status: divergence=0, pass=true.
+    ``pv_close`` (the close-marked equity curve) is the reference and is always
+    present. ``pv_mid`` (the independent (H+L)/2-marked equity curve, N2) is
+    optional; when None — flag off / no dual-equity recorded — returns SKIPPED
+    status (divergence=0, pass=true).
+
     When both arrays are provided, computes the relative divergence
-    ``|pf_mid - pf_close| / max(pf_mid, eps)`` and HALTs if it exceeds the
-    threshold (30% per CLAUDE.md PF-XCHECK).
+    ``|pf_close - pf_mid| / max(|pf_close|, eps)`` (denominator = close, the
+    trusted/deployed marking — ADR-N4, Math-verified S553-cont-9) and HALTs if it
+    exceeds the threshold (30% per CLAUDE.md PF-XCHECK). The gate is two-sided:
+    a >30% disagreement in EITHER direction means the PF is marking-sensitive.
+
+    When ``report_only`` is set (ADR-N5 Phase-α calibration), the divergence is
+    still computed and surfaced but the status is clamped to PASS (never HALT).
     """
-    pf_m = pf_from_pv(pv_mid)
-    if pv_close is None:
+    pf_c = pf_from_pv(pv_close)
+    if pv_mid is None:
         return PfXCheckResult(
             status="SKIPPED",
             divergence=0.0,
-            pf_mid=pf_m,
-            pf_close=pf_m,
+            pf_mid=pf_c,
+            pf_close=pf_c,
         )
-    pf_c = pf_from_pv(pv_close)
-    denom = max(abs(pf_m), 1e-9)
-    divergence = abs(pf_m - pf_c) / denom
-    status = "PASS" if divergence <= halt_threshold else "HALT"
+    pf_m = pf_from_pv(pv_mid)
+    denom = max(abs(pf_c), 1e-9)
+    divergence = abs(pf_c - pf_m) / denom
+    if report_only:
+        status = "PASS"
+    else:
+        status = "PASS" if divergence <= halt_threshold else "HALT"
     return PfXCheckResult(
         status=status,
         divergence=float(divergence),
@@ -469,6 +486,8 @@ def run_cell(
     env_cfg = cell_cfg.setdefault("env", {})
     env_cfg["deadband_threshold"] = spec.deadband_threshold
     env_cfg["max_leverage"] = spec.max_leverage
+    # N2: record the (H+L)/2-marked shadow equity so PF-XCHECK has a real pv_mid.
+    env_cfg["record_dual_equity"] = True
 
     cell_dir = Path(out_dir) / "sensitivity_audit" / spec.label()
     cell_dir.mkdir(parents=True, exist_ok=True)
@@ -476,12 +495,27 @@ def run_cell(
     agents = _load_agents_from_paths(cell_cfg, checkpoint_paths, device)
     df = run_rule(cell_cfg, agents, rule_name, rule_fn, device, cell_dir)
 
-    pv_mid = df["portfolio_value"].to_numpy(dtype=np.float64)
-    # PF-XCHECK: dual-equity-curve recording is a future env extension.
-    # Until it lands, pf_close is None → SKIPPED status (no halt).
-    pf_xcheck = compute_pf_xcheck(pv_mid, pv_close=None)
-    pf_test = pf_from_pv(pv_mid)
-    mdd_test = mdd_from_pv(pv_mid)
+    pv_close = df["portfolio_value"].to_numpy(dtype=np.float64)
+    # N2 PF-XCHECK: the (H+L)/2-marked shadow equity recorded by the env when
+    # record_dual_equity is set (enabled above). Absent column / all-NaN (flag
+    # off in some upstream path) → pv_mid=None → SKIPPED.
+    pv_mid: Optional[np.ndarray] = None
+    if "portfolio_value_mid" in df.columns:
+        _mid = df["portfolio_value_mid"].to_numpy(dtype=np.float64)
+        if not np.isnan(_mid).all():
+            pv_mid = _mid
+    pf_xcheck = compute_pf_xcheck(
+        pv_close, pv_mid=pv_mid, report_only=PF_XCHECK_REPORT_ONLY,
+    )
+    if pv_mid is not None and pf_xcheck.divergence > PF_XCHECK_DIVERGENCE_HALT:
+        log.warning(
+            "[%s] PF-XCHECK divergence %.3f > %.2f (report_only=%s): close-marked "
+            "vs (H+L)/2-marked PF disagree (pf_close=%.3f pf_mid=%.3f).",
+            spec.label(), pf_xcheck.divergence, PF_XCHECK_DIVERGENCE_HALT,
+            PF_XCHECK_REPORT_ONLY, pf_xcheck.pf_close, pf_xcheck.pf_mid,
+        )
+    pf_test = pf_from_pv(pv_close)
+    mdd_test = mdd_from_pv(pv_close)
     halt = pf_xcheck.status == "HALT"
     halt_reason = (
         f"PF-XCHECK divergence {pf_xcheck.divergence:.3f} > "
