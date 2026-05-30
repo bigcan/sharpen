@@ -37,12 +37,11 @@ from __future__ import annotations
 import copy
 import json
 import logging
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
-import pandas as pd
 
 log = logging.getLogger("sensitivity-audit")
 
@@ -137,6 +136,12 @@ class EdgeStabilityVerdict:
     n_deployable_neighbors: int
     n_halted_cells: int
     decision: str  # "PASS" | "FAIL" | "UNKNOWN_INSUFFICIENT_NEIGHBORS"
+    # N2 (S553 audit): count of cells whose PF-XCHECK was SKIPPED (no close-marked
+    # equity curve available). For the current OHLCV/forex feeds the env marks
+    # equity at close and mid_price == close, so the mid-vs-close cross-check has
+    # no independent second series until env-side dual-marking lands. Surfaced so
+    # SKIPPED is never silently read as a validated cross-check.
+    n_pf_xcheck_skipped: int = 0
 
 
 # ---------------------------------------------------------------------------
@@ -309,9 +314,11 @@ def resolve_edge_stability(
       * The center cell halted (PF-XCHECK divergence > 30%).
       * Fewer than ``min_deployable_neighbors`` deployable+non-halted
         neighbors remain after filtering.
-      * pf_center < 1e-9 (defensive — Stage 2.5 PROMOTE should preclude
-        this, but a sensitivity cell with a different deadband CAN drive
-        center pf to zero if the policy's edge is entirely deadband-bound).
+      * pf_center < 1.0 (per ADR-5 — a center re-roll below breakeven means
+        the deployed config is no longer profitable on the test split, so a
+        PASS/FAIL ratio would be misleading. Stage 2.5 PROMOTE should
+        preclude this, but a sensitivity re-roll CAN drive center pf below
+        1.0 if the policy's edge is deadband-bound; flag the anomaly).
 
     Otherwise: ``PASS`` if ratio >= floor, else ``FAIL``.
     """
@@ -329,6 +336,10 @@ def resolve_edge_stability(
     center_idx = center_index(specs, deployed_config)
     pf_center = float(cells[center_idx].pf_test)
     n_halted = sum(1 for c in cells if c.halt)
+    # N2: surface PF-XCHECK SKIPPED cells so they are never silently trusted.
+    n_pf_xcheck_skipped = sum(
+        1 for c in cells if c.pf_xcheck.status == "SKIPPED"
+    )
 
     if cells[center_idx].halt:
         return EdgeStabilityVerdict(
@@ -341,6 +352,7 @@ def resolve_edge_stability(
             n_deployable_neighbors=0,
             n_halted_cells=n_halted,
             decision="UNKNOWN_INSUFFICIENT_NEIGHBORS",
+            n_pf_xcheck_skipped=n_pf_xcheck_skipped,
         )
 
     neighbors = [c for i, c in enumerate(cells) if i != center_idx]
@@ -357,12 +369,16 @@ def resolve_edge_stability(
             n_deployable_neighbors=len(eligible),
             n_halted_cells=n_halted,
             decision="UNKNOWN_INSUFFICIENT_NEIGHBORS",
+            n_pf_xcheck_skipped=n_pf_xcheck_skipped,
         )
 
     worst = min(eligible, key=lambda c: c.pf_test)
     worst_pair = (worst.spec.deadband_threshold, worst.spec.max_leverage)
 
-    if pf_center < 1e-9:
+    # ADR-5: a center re-roll below breakeven (PF < 1.0) is an anomaly, not a
+    # ratio to grade. Stage 2.5 PROMOTE guarantees pf_center healthy at the
+    # deployed config, but the audit re-rolls and CAN dip below 1.0.
+    if pf_center < 1.0:
         return EdgeStabilityVerdict(
             pf_center=pf_center,
             pf_inner_min=float(worst.pf_test),
@@ -373,6 +389,7 @@ def resolve_edge_stability(
             n_deployable_neighbors=len(eligible),
             n_halted_cells=n_halted,
             decision="UNKNOWN_INSUFFICIENT_NEIGHBORS",
+            n_pf_xcheck_skipped=n_pf_xcheck_skipped,
         )
 
     ratio = float(worst.pf_test) / pf_center
@@ -387,6 +404,7 @@ def resolve_edge_stability(
         n_deployable_neighbors=len(eligible),
         n_halted_cells=n_halted,
         decision="PASS" if passed else "FAIL",
+        n_pf_xcheck_skipped=n_pf_xcheck_skipped,
     )
 
 
@@ -442,7 +460,7 @@ def run_cell(
     _assert_invariants(config)
 
     # Lazy import to keep the test module importable without torch/env deps.
-    from scripts.sg1_xauusd_ensemble_eval import (  # noqa: WPS433 — lazy on purpose
+    from scripts.sg1_xauusd_ensemble_eval import (  # lazy on purpose: keep module torch-free
         _load_agents_from_paths,
         run_rule,
     )
@@ -551,6 +569,7 @@ def build_sensitivity_audit_block(
             "pass": edge_stability.pass_,
             "n_deployable_neighbors": edge_stability.n_deployable_neighbors,
             "n_halted_cells": edge_stability.n_halted_cells,
+            "n_pf_xcheck_skipped": edge_stability.n_pf_xcheck_skipped,
             "decision": edge_stability.decision,
         },
         "thresholds_used": {

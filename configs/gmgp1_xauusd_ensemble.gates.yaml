@@ -83,7 +83,9 @@ gates:
   edge_stability_pf_ratio_floor: 0.70             # PRIMARY: pf_inner_min / pf_center >= floor
   sensitivity_deadband_grid: [0.20, 0.25, 0.30]   # 3-cell; center must match env.deadband_threshold
   sensitivity_max_leverage_mults: [0.5, 1.0, 1.5] # 3-cell; center = 1.0 (= deployed max_leverage)
-  sensitivity_deployable_max_leverage_cap: 1.0    # cells with max_leverage > cap → non-deployable
+  # sensitivity_deployable_max_leverage_cap: omitted → code defaults to deployed
+  #   env.max_leverage (ADR-8), so the 1.5× cell is correctly non-deployable for
+  #   workstreams deployed below 1.0. Set explicitly ONLY to widen coverage (e.g. IB GC/MGC).
   sensitivity_audit_required_min_deployable_neighbors: 4
   sensitivity_audit_required: false               # Phase α; flip true in Phase β after threshold locked
 

@@ -43,6 +43,7 @@ def _write_workstream_fixture(
     chosen_rule: str = "ens_pf_weighted",
     gates_overrides: dict = None,
     include_deployed_config: bool = True,
+    decision: str = "PROMOTE",
 ):
     """Construct a minimal but realistic workstream fixture.
 
@@ -57,7 +58,7 @@ def _write_workstream_fixture(
     verdict = {
         "schema_version": "2.5",
         "chosen_rule": chosen_rule,
-        "decision": "PROMOTE",
+        "decision": decision,
         "seeds": [456, 1024, 2025],
         "test_solo_pfs": {"456": 2.55, "1024": 2.47, "2025": 2.50},
     }
@@ -152,6 +153,54 @@ def test_dry_run_with_strict_floor_produces_fail_exit(tmp_path, monkeypatch):
     out_path = results_root / "test_ws_ensemble" / "verdict_v2_6.json"
     new_verdict = json.loads(out_path.read_text(encoding="utf-8"))
     assert new_verdict["sensitivity_audit"]["edge_stability"]["decision"] == "FAIL"
+
+
+# ---------------------------------------------------------------------------
+# SENS-2: run-after-PROMOTE only
+# ---------------------------------------------------------------------------
+
+
+def test_solo_best_fallback_is_informational_exit_pass(tmp_path, monkeypatch):
+    """SENS-2: SOLO_BEST_FALLBACK runs informational-only — even a FAIL ratio
+    exits EXIT_PASS (non-blocking) but records the true decision in the block."""
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+    results_root, configs_root, _, gates_path = _write_workstream_fixture(
+        tmp_path,
+        decision="SOLO_BEST_FALLBACK",
+        gates_overrides={"edge_stability_pf_ratio_floor": 0.95},  # would FAIL
+    )
+    code = audit_cli.main([
+        "--workstream", "test_ws",
+        "--gates-file", str(gates_path),
+        "--results-root", str(results_root),
+        "--configs-root", str(configs_root),
+        "--dry-run",
+    ])
+    assert code == audit_cli.EXIT_PASS  # informational → never blocks
+
+    out_path = results_root / "test_ws_ensemble" / "verdict_v2_6.json"
+    sa = json.loads(out_path.read_text(encoding="utf-8"))["sensitivity_audit"]
+    assert sa["informational_only"] is True
+    assert sa["stage_2_5_decision"] == "SOLO_BEST_FALLBACK"
+    assert sa["edge_stability"]["decision"] == "FAIL"  # true decision preserved
+
+
+def test_non_promote_decision_refused_preflight(tmp_path, monkeypatch):
+    """SENS-2: auditing a non-PROMOTE'd (e.g. REJECT) verdict is a category
+    error → EXIT_PREFLIGHT, no verdict written."""
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+    results_root, configs_root, _, gates_path = _write_workstream_fixture(
+        tmp_path, decision="REJECT",
+    )
+    code = audit_cli.main([
+        "--workstream", "test_ws",
+        "--gates-file", str(gates_path),
+        "--results-root", str(results_root),
+        "--configs-root", str(configs_root),
+        "--dry-run",
+    ])
+    assert code == audit_cli.EXIT_PREFLIGHT
+    assert not (results_root / "test_ws_ensemble" / "verdict_v2_6.json").exists()
 
 
 # ---------------------------------------------------------------------------
