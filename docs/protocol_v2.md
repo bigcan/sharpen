@@ -1,10 +1,11 @@
-# Training → Live Protocol v2.5.1
+# Training → Live Protocol v2.6
 
 > **Status:** Active. Standardizes the training-to-live workflow across all FinRL-Pro_DS workstreams (GMGP1, SG-1, CMGP1, AlphaSeek, Funding-Arb).
 > **Reference run:** GMGP1 staged approach. **Anti-pattern:** AlphaSeek `k28l6ef8` monolithic 5.7-day run.
-> **Owner:** R&D. **Last updated:** 2026-05-21 Session 545 (Training-budget & data-window rule lock-in from volume/budget study consolidation).
+> **Owner:** R&D. **Last updated:** 2026-05-30 Session 553 (Stage 2.5-R Sensitivity Audit — Protocol v2.7-A C1-C5 shipped).
 >
 > **Version history:**
+> - **v2.6** (2026-05-30, S553) — Protocol v2.7-A Stage 2.5-R **Sensitivity Audit** sub-step added (new §4.5.1). 3×3 (`deadband_threshold` × `max_leverage`) eval-time config-sensitivity sweep on PROMOTE candidates; edge-stability gate `pf_inner_min / pf_center ≥ floor` (default **0.70**) across 8 deployable, non-halted NEIGHBOR cells. Verdict `schema_version` bumped to `"2.6"` with additive `sensitivity_audit` block + new top-level `deployed_config` field. Phase α (S553+) — keys present in all 9 ensemble gates yamls, `sensitivity_audit_required: false`, validator dormant for legacy `protocol_version != "2.6"` configs. Phase β (post-backfill calibration) — operator bumps 5 active live workstreams to `protocol_version: "2.6"` + `sensitivity_audit_required: true`. New validator rule `check_sensitivity_audit` enforces SENS-1 (grid center matches deployed config). Standalone CLI `scripts/stage_2_5_r_sensitivity_audit.py` is the canonical entrypoint (mirrors `recompute_stage_2_5_verdicts.py` precedent — `run_full_pipeline.py --stage sensitivity-audit` not added; monolithic launcher does not support `--stage` dispatch). Backfill sidecar `scripts/backfill_deployed_config_field.py` populates the new field on legacy v2.5 verdicts. **Researcher artifact** `.agent/artifacts/mc_robustness_methods_research.md` ranked Method #5 CONDITIONAL-GO. **Architecture artifact** `.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md` (8 ADRs, 3 SENS-* invariants, 5-commit breakdown). **Forward-declared:** v2.7-B (Stage 3.5 obs-noise robustness, Method #4 GO) and v2.7-C (Stage 3 exec-failure stress sub-block, Method #3 CG re-framed) are deferred follow-ups — slots reserved in §4. **NO live-strategy impact during Phase α** — gates schema is additive, validator is dormant. See `decision_protocol_v25_bootstrap_primary.md` for the v2.5 bootstrap precedent that v2.6 extends.
 > - **v2.5.1** (2026-05-21, S545) — Training-budget & data-window rule (new §3.5) locking in findings from six studies: GMGP1 Volume Study v1 (Gold), Data-Window Study (BTC Axis A), Volume Study v2 (BTC, 2M ceiling), Gold Steady-State, SG-1-XAUUSD Volume Study v2 Phase 1 + Phase 2, SG-1-BTC A1 extended audit. Empirically-derived **multiplicity rule** (`total_timesteps / bars_in_train_window ∈ [15, 40]`) and **calendar-anchored data window** (NOT bar-anchored — preserves regime coverage across timeframes) replace per-asset budget guessing. Validated cells for GMGP1-BTC (22mo × 2M, 32×) and SG-1-XAUUSD (24mo × 4M, 17×) become protocol defaults. §9 retrain cadence extended with **timeframe-dependent intervals** (sub-5m: 14–28d; 5–15m: 30–45d; ≥15m: 60–90d) to handle microstructure decay without shrinking the training window. Non-breaking: existing configs with valid multiplicity remain compliant; `validate_config.py` adds a multiplicity preflight (WARN below 10×, REJECT above 50× — requires fresh study). See `decision_training_budget_multiplicity_rule.md` and `decision_calendar_anchored_training_window.md`.
 > - **v2.5** (2026-05-05, S526) — Stage 2.5 ensemble-confirm gate refinement: block-bootstrap probability (`P(ens_PF > solo_PF)`, `P(ens_MDD better)`) is now the PRIMARY decision criterion for prop-firm / live-capital workstreams; the legacy point-estimate `ensemble_uplift_min` is demoted to audit-only metadata. New `gates.ensemble_bootstrap_p_pf_ambiguous` (default **0.75**) introduces an `AMBIGUOUS_BOOT` band (mirrors S495 `AMBIGUOUS_RERUN` for the noise-aware criterion). v2.5 matrix promotes on PF dominance (`P_PF ≥ promote`) regardless of `P_MDD`, fixing a v2.3 misclassification (Funding-Arb DSAC `P_PF=1.0, P_MDD=0.36` was previously SOLO_BEST_FALLBACK; v2.5 makes it PROMOTE). Validator promoted: bootstrap keys are FAIL-on-missing for prop-firm; uplift demoted to WARN-on-missing. Verdict JSON bumped to `schema_version: "2.5"` with new `bootstrap` / `legacy_uplift` blocks (additive — v2.1/v2.3 readers parse cleanly). See `decision_protocol_v25_bootstrap_primary.md` and the architecture artifact `.agent/artifacts/stage_2_5_bootstrap_primary_architecture.md`.
 > - **v2.4.1** (2026-05-01, S512) — Operational-hygiene patch from external simplification review (`.agent/artifacts/protocol_v2_simplification.md`). Two non-breaking refinements adopted; three rejected. **Adopted:** (a) §2 + §4 Stage 2.5 specify **post-PROMOTE replay-buffer purge** for non-top-K seeds (purged seeds retain SHA256 in manifest for audit); collapses Stage-2 buffer retention from `N=10` to `K=3` for typical prop-firm runs (~70% disk reduction without affecting Stage-3 warm-resume). (b) §8.1 joint-feature drift Mahalanobis pinned to **Ledoit-Wolf shrinkage covariance** (`sklearn.covariance.LedoitWolf`) before any `live_obs_builder.py` implementation lands; eliminates the ill-conditioned-Σ false-positive risk on collinear LOB/MA features without changing χ² thresholds or replacing Mahalanobis with autoencoder/PCA alternatives. New gate key `gates.drift.mahalanobis_top_k` (default **8**). **Rejected (with rationale):** MedianPruner on Q-divergence/TD-error (contradicts BUG-01 + NopPruner gotcha — RL learning curves are non-monotonic, kills late-bloomers); CRIT-flatten replacement with TWAP/limit-chase (inverts cost asymmetry for FTMO/Velotrade — DD-breach termination dwarfs slippage); CSCV/Deflated-Sharpe replacing block bootstrap in Stage 2.5 (answers a different statistical question — single-strategy overfitting vs paired ensemble-vs-solo dominance — and the v2.3 bootstrap costs ~30s, not "massive"). See `decision_protocol_v241_simplification_review.md` for full review and counter-evidence.
@@ -429,6 +430,61 @@ On PROMOTE, `run_stage_2_5_val_selection()` writes `results/<run_id>/ensemble_v{
 - A live container restart (no model change) does NOT fire 2.5-R. Same bundle reloaded.
 - A solo-deployed strategy (Stage 2.5 verdict was SOLO_BEST_FALLBACK or never ran ensemble) does NOT fire 2.5-R on retrain — it fires regular Stage 2.5 if the workstream is prop-firm tagged. The "-R" suffix specifically denotes a re-eval of an existing ensemble's continued validity.
 
+### Stage 2.5-R Sensitivity Audit (v2.6 NEW)
+
+**Mandatory for any prop-firm / live-capital workstream at `protocol_version: "2.6"` with `gates.sensitivity_audit_required: true`.** Eval-time 3×3 config-perturbation sweep on the PROMOTE'd ensemble/solo. Gates Stage 3 paper-deploy candidacy on edge-stability of the trained policy in nearby YAML space.
+
+Upstream research: `.agent/artifacts/mc_robustness_methods_research.md` (Method #5 CONDITIONAL-GO, S553).
+Architecture: `.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md` (8 ADRs).
+Canonical entrypoint: `scripts/stage_2_5_r_sensitivity_audit.py`.
+
+#### Grid
+- 3×3 over `(deadband_threshold, max_leverage)` YAML knobs (the two config knobs that change the env's action-processing layer at [`continuous_swing_env.py:245,286,298-303`](../finrl_pro_ds/envs/continuous_swing_env.py#L243-L313) without retraining).
+- Center cell = deployed config (SENS-1 invariant; validator FAIL on mismatch). Defaults: deadband `[0.20, 0.25, 0.30]`, max_leverage mults `[0.5, 1.0, 1.5]` (mults relative to deployed `env.max_leverage`).
+- **Axes are NOT orthogonal in env effect** (B5 fix: `effective_deadband = deadband × max_leverage`). The 3×3 characterizes config sensitivity *as deployed*, not in orthogonal-axis space. Documented per ADR-6.
+- Cells with `max_leverage > gates.sensitivity_deployable_max_leverage_cap` flagged `deployable: false`; reported but excluded from the edge-stability gate.
+
+#### Per-cell rollout
+- Each cell re-runs the trained policy through the test split with cell-specific env knobs. Frozen policy weights (no retraining). Test split = same window as Stage 2.5 chose.
+- Aggregation rule = the PROMOTE'd rule from verdict.json (`ens_pf_weighted` / `ens_agreement` / `ens_mean` / `ens_median` / `solo_<seed>`).
+- Per-cell trajectory parquet at `results/<ws>_ensemble/sensitivity_audit/<cell_label>/<rule>_trajectory.parquet`.
+- **PF-XCHECK per-cell** (CLAUDE.md invariant): mid_price vs close-marked PF; >30% divergence flags `halt: true`. Note: env-side dual-equity-curve recording is deferred — until that lands, PF-XCHECK status is `SKIPPED` (divergence=0, pass=true) and the halt path is exercised only by synthetic test fixtures.
+
+#### Gate (ADR-4 + ADR-5)
+- **Eligibility filter:** `deployable == true AND halt == false` (across the 8 NON-CENTER neighbors).
+- **Minimum:** `n_deployable_neighbors ≥ gates.sensitivity_audit_required_min_deployable_neighbors` (default **4**); fewer → `UNKNOWN_INSUFFICIENT_NEIGHBORS`.
+- **Center halt** → `UNKNOWN_INSUFFICIENT_NEIGHBORS`.
+- **Metric:** `pf_ratio = pf_inner_min / pf_center` where `pf_inner_min = min(PF over eligible neighbors)`.
+- **Decision:** `pf_ratio ≥ gates.edge_stability_pf_ratio_floor` (default **0.70**) → `PASS`; else `FAIL`.
+
+#### Phase α / Phase β rollout (S553 operator decision)
+| Phase | Configs | Validator behavior | When to advance |
+|---|---|---|---|
+| **α — calibration** | `protocol_version` defaults to `"2.5"`; gates yamls declare keys with `sensitivity_audit_required: false`. | Dormant (back-compat exempt). | After all 5 deployed strategies are backfilled and the operator reviews empirical `pf_ratio` distribution to calibrate `edge_stability_pf_ratio_floor`. |
+| **β — enforcement** | Operator bumps L1 multiseed `protocol_version: "2.6"` AND flips `gates.sensitivity_audit_required: true`. | Validator FAILs prop-firm configs missing the gates keys; Stage 3 launcher refuses without `sensitivity_audit` block in upstream manifest. | Permanent. |
+
+#### Operator backfill flow (Phase α calibration)
+```
+for ws in gmgp1-gold gmgp1-btc gmgp1-xauusd sg1-btc sg1-xauusd; do
+  python scripts/backfill_deployed_config_field.py \
+      --workstream $ws --config configs/<ws>_l1_multiseed.yaml
+  python scripts/stage_2_5_r_sensitivity_audit.py \
+      --workstream $ws --config configs/<ws>_l1_multiseed.yaml
+done
+```
+Backfill FAIL policy (operator decision Q3): **flag-and-document only**. Live container keeps running; randd_log entry + memory FLAG; optionally queue retrain with sensitivity-aware HPO. NO auto-unship.
+
+#### Verdict schema 2.6
+Additive `sensitivity_audit` block alongside the v2.5 `bootstrap` / `legacy_uplift` blocks; new top-level `deployed_config` field (REQUIRED for v2.6). v2.5 readers parse v2.6 verdicts. v2.6 reader accepts `schema_version ∈ {"2.1", "2.3", "2.5", "2.6"}`.
+
+#### When NOT to fire
+- Workstreams with `protocol_version: "2.5"` (or unset) are exempt — back-compat preserved.
+- Non-prop-firm workstreams: advisory only (validator WARN-on-missing instead of FAIL).
+- SOLO_BEST_FALLBACK verdicts: sensitivity audit runs informational-only against the solo policy; gate not blocking.
+
+### Stage 3.5 — observation-noise robustness (v2.7-B forward-declared)
+**Reserved slot.** Researcher Method #4 GO: OHLC multiplicative log-noise → re-run policy → distribution of PF/MDD across noise seeds × WF windows. Direct prop-firm tail-DD signal; structural answer to the sim-to-live class of incidents ([project_sim_to_live_gap_audit_s470], [project_live_obs_normalization_mismatch_s509]). Engineering: ~250 LOC core + new env wrapper. Not yet shipped — pending operator approval after v2.7-A backfill calibration completes. See `.agent/artifacts/mc_robustness_methods_research.md` §Method #4.
+
 
 - K ≥ `gates.wf_windows` (default 4) rolling windows
 - Window split: `train: 12mo, val: 1mo, test: 1mo`, slide by 1mo (workstream may override under `wf.split` in gate config)
@@ -439,6 +495,7 @@ On PROMOTE, `run_stage_2_5_val_selection()` writes `results/<run_id>/ensemble_v{
   - Replay full WF window with **fixed lot size** (no PropFirm early-term truncation)
   - Required after S466 SG-1 XAUUSD incident (apparent 1.09% DD was 3-sim-day artifact; fixed-lot revealed 4.59%)
   - Stress gate: worst intraday DD ≥ `gates.stress_dd_buffer_pp` (default 0.5pp) from FTMO/Velotrade cap, peak leverage ≤ `gates.stress_leverage_max` (default 1.0×)
+- **Execution-failure stress sub-block** (v2.7-C forward-declared, NOT YET SHIPPED): Bernoulli(p) miss-fill DR sweep `p ∈ {0.05, 0.10, 0.20}` × N_seeds=5 per WF window. Researcher Method #3 (re-framed) CONDITIONAL-GO. Slot reserved as `wf_report.json → stress.exec_failure`; gate `gates.stress_exec_failure_pf_floor` (default **0.85**). Pending operator approval after v2.7-A backfill calibration. See `.agent/artifacts/mc_robustness_methods_research.md` §Method #3.
 
 ### Stage 4 — recent-oos (+ compliance filter sub-report)
 - Test window: `today − gates.recent_oos_days` (default 60) `→ today − 1d`
@@ -483,6 +540,15 @@ python scripts/run_full_pipeline.py --config configs/gmgp1_xauusd_ftmo_hpo.yaml 
 python scripts/gmgp1_xauusd_ensemble_eval.py \
   --config configs/gmgp1_xauusd_ftmo_rehpo_l1_multiseed.yaml
 # (Or the SG-1 equivalent: scripts/sg1_xauusd_ensemble_eval.py)
+
+# Stage 2.5-R Sensitivity Audit (v2.6 NEW; mandatory under Phase β protocol_version: "2.6")
+# Standalone CLI mirrors recompute_stage_2_5_verdicts.py precedent — run_full_pipeline.py
+# does NOT support --stage sensitivity-audit (monolithic launcher; v2.7-A scope deviation).
+python scripts/stage_2_5_r_sensitivity_audit.py \
+  --workstream <ws> --config configs/<ws>_l1_multiseed.yaml
+# Backfill sidecar (one-shot per workstream, populates v2.6 deployed_config field):
+python scripts/backfill_deployed_config_field.py \
+  --workstream <ws> --config configs/<ws>_l1_multiseed.yaml
 
 # Stage 3 — walk-forward + fixed-lot stress (own WandB runs per window)
 python scripts/run_full_pipeline.py --config configs/gmgp1_xauusd_ftmo_hpo.yaml \
