@@ -188,6 +188,12 @@ ensemble:
   #   seed 42  : val PF 2.5053 / test PF 3.0989 (WandB r30s0di0)
   #   seed 2025: val PF 2.4847 / test PF 3.1430 (WandB fsupynfb)
   seeds: [456, 42, 2025]
+  # Audit N3: grade the rule Stage-2.5 val_argmax_pf actually promoted, NOT the
+  # static gates.aggregation_rule (ens_agreement). The DECAY-01 Stage-2.5 verdict
+  # (results/sg1_btc_velotrade_decay01_ensemble/verdict.json) chose ens_mean;
+  # the bootstrap decision was SOLO_BEST_FALLBACK, so this only affects which
+  # ensemble candidate the WF G2/G3/G4/G5 gates grade.
+  chosen_rule: ens_mean
   rules: ["solo_456", "solo_42", "solo_2025",
           "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
   # Checkpoint path pattern — new prefix matches

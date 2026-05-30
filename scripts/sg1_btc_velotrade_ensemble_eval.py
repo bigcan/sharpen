@@ -298,7 +298,8 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
                     rules_subset: Optional[List[str]] = None,
                     skip_missing_folds: bool = True,
                     output_dir: Optional[str] = None,
-                    seeds_override: Optional[List[int]] = None) -> dict:
+                    seeds_override: Optional[List[int]] = None,
+                    chosen_rule: Optional[str] = None) -> dict:
     """Drive per-fold ensemble eval over a WF config (Velotrade-cast gates)."""
     with open(wf_config_path, encoding="utf-8") as f:
         wf_cfg = yaml.safe_load(f)
@@ -322,6 +323,22 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
     rule_names: List[str] = list(ens.get("rules") or [r[0] for r in effective_rules])
     if rules_subset:
         rule_names = [r for r in rule_names if r in set(rules_subset)]
+
+    # Audit N3: grade the rule Stage-2.5 actually promoted (val_argmax_pf), not
+    # the static gates.aggregation_rule. Priority: param/CLI > WF config
+    # ensemble.chosen_rule > None (then _evaluate_gates falls back to the gates
+    # value). Ensure the graded rule is actually evaluated each fold.
+    chosen_rule = chosen_rule or (ens.get("chosen_rule") or None)
+    if chosen_rule:
+        available = {r[0] for r in effective_rules}
+        if chosen_rule not in available:
+            raise ValueError(
+                f"ensemble.chosen_rule={chosen_rule!r} is not an available rule "
+                f"{sorted(available)} — fix the WF config / Stage-2.5 verdict.")
+        if chosen_rule not in rule_names:
+            rule_names.append(chosen_rule)
+        log.info(f"WF will GRADE Stage-2.5 chosen_rule '{chosen_rule}' "
+                 f"(overrides gates.aggregation_rule)")
 
     split_cfg = wf_cfg.get("splitter", {})
     data_cfg = wf_cfg.get("data", {})
@@ -383,7 +400,8 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
         fold_status.append("ok")
         del agents
 
-    verdict = _evaluate_gates(per_fold_metrics, fold_status, gates_cfg, seeds)
+    verdict = _evaluate_gates(per_fold_metrics, fold_status, gates_cfg, seeds,
+                              chosen_rule=chosen_rule)
     (root_out / "verdict.json").write_text(json.dumps(verdict, indent=2, default=str))
 
     rows = []
@@ -437,16 +455,26 @@ def _pick_compliance_gate(gates: dict) -> tuple:
 
 
 def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[str],
-                    gates_cfg: dict, seeds: List[int]) -> dict:
+                    gates_cfg: dict, seeds: List[int],
+                    chosen_rule: Optional[str] = None) -> dict:
     """Compute G1..G5 gate outcomes. Velotrade cast: G4 uses trailing buffer
     only; daily_dd_buffer_pp_min==null and compliance_must_pass==false skip
-    those sub-checks."""
+    those sub-checks.
+
+    `chosen_rule`, when given, is the aggregation rule the Stage-2.5
+    val-selection actually promoted (verdict.json `chosen_rule`). It OVERRIDES
+    the static `gates_cfg['aggregation_rule']` so the WF grades the rule that
+    will be deployed, not a pinned one — audit N3: the gates YAML hardcoded
+    `ens_agreement` while Stage 2.5 chose `ens_mean`. Falls back to the gates
+    value when None (behaviour unchanged for callers that don't pass it).
+    """
     gates = gates_cfg.get("gates", {})
     if not gates:
         raise ValueError("gates_cfg has no 'gates' block")
     if "aggregation_rule" not in gates_cfg:
         raise ValueError("gates_cfg missing top-level 'aggregation_rule'")
-    agg_rule = gates_cfg["aggregation_rule"]
+    gates_agg_rule = gates_cfg["aggregation_rule"]
+    agg_rule = chosen_rule or gates_agg_rule
     wf_folds_expected = gates_cfg.get("wf_folds", len(per_fold_metrics))
 
     completed = [fm for fm, s in zip(per_fold_metrics, fold_status) if s == "ok" and fm]
@@ -455,11 +483,18 @@ def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[s
 
     out = {
         "overall": "PENDING",
+        "graded_rule": agg_rule,
+        "gates_aggregation_rule": gates_agg_rule,
         "folds_completed": n_ok,
         "folds_total": n_total,
         "folds_expected": wf_folds_expected,
         "gates": {},
     }
+    if chosen_rule and chosen_rule != gates_agg_rule:
+        msg = (f"WF graded rule '{chosen_rule}' (Stage-2.5 chosen_rule) overrides "
+               f"gates.aggregation_rule '{gates_agg_rule}' (audit N3)")
+        out["warnings"] = [msg]
+        log.warning(msg)
     if n_ok == 0:
         out["overall"] = "NO_DATA"
         return out
@@ -746,6 +781,10 @@ def main():
                     help="Explicit seed list; overrides ensemble.seeds in config")
     ap.add_argument("--output_dir", default=None,
                     help="Output directory (defaults: results/<workstream>_ensemble[_wf])")
+    ap.add_argument("--chosen_rule", default=None,
+                    help="WF mode: aggregation rule to grade (the Stage-2.5 verdict "
+                         "chosen_rule). Overrides gates.aggregation_rule and "
+                         "ensemble.chosen_rule in the WF config (audit N3).")
     args = ap.parse_args()
 
     # Resolve gates_file: CLI > ensemble.gates_file in config
@@ -765,7 +804,8 @@ def main():
                              "`ensemble.gates_file` in the WF config)")
         run_wf_ensemble(args.wf_config, gates_path, args.device,
                         rules_subset=args.rules, output_dir=args.output_dir,
-                        seeds_override=args.seeds_override)
+                        seeds_override=args.seeds_override,
+                        chosen_rule=args.chosen_rule)
         return
 
     # S495 amendment: if the L1 config declares val-argmax-PF rule selection,
