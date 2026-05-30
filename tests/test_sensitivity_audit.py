@@ -434,6 +434,37 @@ def test_resolve_edge_stability_unknown_when_pf_center_zero():
     assert verdict.decision == "UNKNOWN_INSUFFICIENT_NEIGHBORS"
 
 
+def test_resolve_edge_stability_unknown_when_pf_center_below_one():
+    """ADR-5 (N2 audit fix): a center re-roll below breakeven (0 < pf_center < 1.0)
+    is an anomaly → UNKNOWN, NOT a misleading PASS from a ratio of two losers."""
+    specs = build_grid(_baseline_deployed(), _baseline_gates())
+    # ratio = 0.55 / 0.60 = 0.917 would be a PASS under the old < 1e-9 guard.
+    cells = _make_homogeneous_cells(specs, center_pf=0.60, neighbor_pf=0.55)
+    verdict = resolve_edge_stability(cells, _baseline_deployed(), _baseline_gates())
+    assert verdict.decision == "UNKNOWN_INSUFFICIENT_NEIGHBORS"
+    assert not verdict.pass_
+
+
+def test_resolve_edge_stability_pf_center_one_is_graded_not_unknown():
+    """Boundary: pf_center == 1.0 (breakeven) is graded normally (ADR-5 is strict <)."""
+    specs = build_grid(_baseline_deployed(), _baseline_gates())
+    cells = _make_homogeneous_cells(specs, center_pf=1.0, neighbor_pf=0.9)
+    verdict = resolve_edge_stability(cells, _baseline_deployed(), _baseline_gates())
+    assert verdict.decision in ("PASS", "FAIL")  # ratio 0.9 ≥ 0.70 → PASS
+    assert verdict.pf_ratio == pytest.approx(0.9, abs=1e-9)
+
+
+def test_resolve_edge_stability_counts_pf_xcheck_skipped():
+    """N2 audit fix: SKIPPED PF-XCHECK cells are counted and surfaced so a
+    close-marked single-curve PF is never silently read as cross-checked."""
+    specs = build_grid(_baseline_deployed(), _baseline_gates())
+    cells = _make_homogeneous_cells(specs, center_pf=2.0, neighbor_pf=1.5)
+    verdict = resolve_edge_stability(cells, _baseline_deployed(), _baseline_gates())
+    # _make_cell_result builds every cell with PfXCheckResult(status="SKIPPED").
+    assert verdict.n_pf_xcheck_skipped == 9
+    assert verdict.decision == "PASS"  # SKIPPED is surfaced, not blocking
+
+
 def test_resolve_edge_stability_respects_floor_override():
     """Stricter floor 0.85 → ratio 0.75 from previous baseline now FAILs."""
     specs = build_grid(_baseline_deployed(), _baseline_gates())

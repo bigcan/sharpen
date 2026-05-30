@@ -35,9 +35,8 @@ import logging
 import os
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 import yaml
 
@@ -52,9 +51,6 @@ from finrl_pro_ds.eval.sensitivity_audit import (  # noqa: E402
     PfXCheckResult,
     build_grid,
     build_sensitivity_audit_block,
-    center_index,
-    mdd_from_pv,
-    pf_from_pv,
     resolve_edge_stability,
     run_cell,
     write_verdict_v26,
@@ -133,7 +129,6 @@ def _dry_run_cell(spec: CellSpec, deployed_config: Dict[str, float]) -> CellResu
     running env rollouts. PF is a deterministic function of distance from
     center so the resolver can exercise PASS / FAIL paths predictably."""
     deployed_db = float(deployed_config["deadband_threshold"])
-    deployed_ml = float(deployed_config["max_leverage"])
     # Distance from center in normalized units (each axis step ~0.05 / 0.5×)
     d_db = abs(spec.deadband_threshold - deployed_db) / max(0.05, 1e-9)
     d_ml = abs(spec.max_leverage_mult - 1.0) / 0.5
@@ -303,6 +298,13 @@ def main(argv: Optional[List[str]] = None) -> int:
                         help="Root of configs/ directory (default: configs)")
     args = parser.parse_args(argv)
 
+    if args.parallel and int(args.parallel) > 1:
+        log.warning(
+            f"--parallel {args.parallel} requested, but 9-cell parallel rollout "
+            "is not yet implemented (Q1 follow-up); running cells SEQUENTIALLY. "
+            "Wall time ~15-50 min/workstream rather than ~3-10 min."
+        )
+
     # --- 1. Locate verdict ---
     verdict_path = _locate_verdict(args.workstream, args.results_root)
     if not verdict_path.exists():
@@ -310,6 +312,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         return EXIT_PREFLIGHT
     verdict = json.loads(verdict_path.read_text(encoding="utf-8"))
     log.info(f"verdict loaded: {verdict_path} (schema {verdict.get('schema_version', '?')})")
+
+    # --- 1b. SENS-2: run-after-PROMOTE only ---
+    # The sensitivity audit gates Stage 3 candidacy on a PROMOTE'd policy. A
+    # SOLO_BEST_FALLBACK verdict MAY run the audit on the solo policy, but the
+    # gate is INFORMATIONAL-ONLY (non-blocking) for it. Any other decision
+    # (REJECT / no-go / missing) is refused — auditing a non-promoted policy is
+    # a category error.
+    stage25_decision = str(verdict.get("decision", "")).upper()
+    promote_decisions = {"PROMOTE", "PROMOTE_DD_ONLY"}
+    informational_decisions = {"SOLO_BEST_FALLBACK"}
+    informational_only = stage25_decision in informational_decisions
+    if stage25_decision not in promote_decisions and not informational_only:
+        log.error(
+            f"SENS-2: sensitivity audit runs only on PROMOTE'd verdicts; "
+            f"verdict.decision={stage25_decision!r} not in "
+            f"{sorted(promote_decisions | informational_decisions)}. Refusing."
+        )
+        return EXIT_PREFLIGHT
+    if informational_only:
+        log.warning(
+            f"SENS-2: verdict.decision={stage25_decision!r} — running sensitivity "
+            "audit INFORMATIONAL-ONLY on the solo policy; the edge-stability gate "
+            "is NOT blocking and the exit code will be EXIT_PASS regardless."
+        )
 
     # --- 2. Locate + load gates yaml ---
     gates_path = args.gates_file or _locate_gates_file(args.workstream, args.configs_root)
@@ -382,7 +408,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             # For v2.6 C4 we delegate to sg1_xauusd_ensemble_eval helpers via
             # run_cell's lazy imports. The operator passes --config to surface
             # the L1 multiseed config that already declares the agent paths.
-            from scripts.sg1_xauusd_ensemble_eval import (  # noqa: E402, WPS433
+            from scripts.sg1_xauusd_ensemble_eval import (  # noqa: E402  — lazy import
                 _agg_agreement,
                 _agg_mean,
                 _agg_median,
@@ -453,6 +479,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         f"(pf_center={verdict_es.pf_center:.3f}, pf_inner_min={verdict_es.pf_inner_min:.3f}, "
         f"ratio={verdict_es.pf_ratio:.3f}, floor={verdict_es.pf_ratio_floor})"
     )
+    # N2: PF-XCHECK is SKIPPED until env-side dual-equity (mid vs close) recording
+    # lands. For OHLCV/forex feeds mid_price == close, so there is no independent
+    # second curve to cross-check. Surface loudly so the calibration pf_ratio is
+    # never mistaken for a PF-XCHECK-validated number.
+    if verdict_es.n_pf_xcheck_skipped and not args.dry_run:
+        log.warning(
+            f"PF-XCHECK SKIPPED on {verdict_es.n_pf_xcheck_skipped}/{len(cell_results)} "
+            "cells (no close-marked equity curve). Calibration PF is close-marked "
+            "single-curve; mid-vs-close cross-check pends env dual-marking."
+        )
 
     # --- 9. Build v2.6 block + write verdict ---
     block = build_sensitivity_audit_block(
@@ -475,6 +511,11 @@ def main(argv: Optional[List[str]] = None) -> int:
         wandb_run_id=args.wandb_run_id or verdict.get("wandb_run_id"),
         git_sha=_git_sha(),
     )
+    # SENS-2 provenance: record the upstream Stage 2.5 decision and whether the
+    # gate was treated as informational-only (SOLO_BEST_FALLBACK).
+    block["stage_2_5_decision"] = stage25_decision
+    block["informational_only"] = informational_only
+
     out_path = out_dir / f"verdict_{args.out_suffix}.json"
     write_verdict_v26(verdict_path, block, deployed_config, out_path)
 
@@ -484,6 +525,16 @@ def main(argv: Optional[List[str]] = None) -> int:
         _log_to_wandb(parent_run_id, block, args.workstream)
 
     # --- 11. Exit per decision ---
+    # SENS-2: informational-only runs (SOLO_BEST_FALLBACK) never block — the
+    # verdict block still records the true edge_stability.decision for the
+    # operator, but the process exits EXIT_PASS so it cannot gate Stage 3.
+    if informational_only:
+        log.info(
+            f"verdict written: {out_path} "
+            f"(informational-only; edge_stability.decision={verdict_es.decision}, "
+            f"exit={EXIT_PASS})"
+        )
+        return EXIT_PASS
     code = {
         "PASS": EXIT_PASS,
         "FAIL": EXIT_FAIL,
