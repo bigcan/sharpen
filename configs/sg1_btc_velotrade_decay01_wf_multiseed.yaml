@@ -1,5 +1,22 @@
 # SG-1 BTC Velotrade — Stage 3 Walk-Forward, DECAY-01 VARIANT (S542)
 #
+# === COST-CORRECTION RE-RUN (S552, 2026-05-29) ===
+# Per the sim->live gap RCA (docs/research/sg1_btc_sim_live_gap.md), the
+# original DECAY-01 stack was trained/selected under an unrealistically cheap
+# cost model: taker_fee 5.0 bps (real Bybit retail = 5.5 bps) AND
+# slippage_base_bps UNSET (=0) despite the live engine crossing 5 bps on a
+# marketable limit (bybit_perp_broker.py:337-339). Gap A (execution+fee cost)
+# was reconciled to the penny on the live decay01 segment; this re-run reveals
+# the HONEST net-of-cost expectation. Two env params changed below:
+#   taker_fee:          0.0005 -> 0.00055   (5.0 -> 5.5 bps, Bybit retail taker)
+#   slippage_base_bps:  unset  -> 5.0       (one-way limit-cross, ~4.58 bps measured)
+# Both consumed natively by continuous_swing_env.py:58 (slippage), :364-366 +
+# :387 (applied to tc_bps AND equity delta). Expect sim PF 2.53 / +26.98%/14d
+# to drop materially. NOTE: changing the cost model is a Protocol v2 §4.5
+# Stage 2.5-R trigger (#1 env-change / #6 cost-drift) — the cost-free top-3
+# seed selection [456,42,2025] is inherited here; a full cost-corrected
+# re-selection requires re-training the L1 N=10 cohort under these same params.
+#
 # Drafted 2026-05-20 (S542) to confirm DECAY-01 Stage 2.5-R verdict
 # (`results/sg1_btc_velotrade_decay01_ensemble/verdict.json` — top-3 [456, 42,
 # 2025] LOCKED by val_argmax_pf over the N=10 cohort; chosen aggregation rule
@@ -98,7 +115,8 @@ env:
   initial_balance: 100000.0
   window_size: 30
   features_per_scale: 8
-  taker_fee: 0.0005                   # steady-state 5 bps Bybit retail taker (S464)
+  taker_fee: 0.00055                  # S552 cost-correction: real Bybit retail taker 5.5 bps (was 0.0005; RCA Gap A)
+  slippage_base_bps: 5.0              # S552 cost-correction: live 5bps marketable limit-cross (was unset=0; continuous_swing_env.py:58)
   deadband_threshold: 0.25            # trial #44
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
