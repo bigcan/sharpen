@@ -15,15 +15,15 @@ from live (which only ever sees the partial in-progress bar).
 Causal invariant under test: the coarse bar assigned to a base bar at time ``t``
 must have already CLOSED at or before ``t`` — i.e. ``coarse_start + scale <= t``.
 
-Marked ``xfail(strict=True)`` because the current code leaks; this flips to a
-passing assertion once the causal-alignment fix (X2 roadmap item) maps each base
-bar to the most recent COMPLETED coarse bar. When that lands, remove the marker.
+The X2 causal-alignment fix (``multiscale_handler._scale_index_map`` searchsorts on
+``base_ts - scale_ns``) maps each base bar to the most recent COMPLETED coarse bar,
+so this now asserts that no forward look-ahead remains. Previously
+``xfail(strict=True)``; the marker was removed when X2 landed.
 """
 from __future__ import annotations
 
 import numpy as np
 import pandas as pd
-import pytest
 
 from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
 
@@ -45,11 +45,6 @@ def _write_synth_parquet(path) -> None:
     ).to_parquet(path)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="S1 coarse-bar forward look-ahead leak (audit P2-P4-01); "
-    "fix = causal coarse alignment (X2 roadmap). Remove marker when fixed.",
-)
 def test_coarse_scale_alignment_is_causal(tmp_path):
     parquet = tmp_path / "synth_1min.parquet"
     _write_synth_parquet(parquet)
