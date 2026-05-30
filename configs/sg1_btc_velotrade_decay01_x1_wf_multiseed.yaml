@@ -1,0 +1,180 @@
+# SG-1 BTC Velotrade — Stage-3 Walk-Forward on X1 DE-LEAKED top-3 (S553-cont-10 chain)
+#
+# === DE-LEAKED WF — downstream of X1 (the replacement for results/sg1_btc_ensemble_wf/) ===
+# The committed cost-corrected WF (configs/sg1_btc_velotrade_decay01_wf_multiseed.yaml,
+# results/sg1_btc_ensemble_wf/) INHERITED the cost-free / pre-X2-leaked top-3
+# [456,42,2025] verbatim (audit P7-01). X1
+# (configs/sg1_btc_velotrade_l1_multiseed_decay01_x1_costcorr.yaml, workstream
+# sg1_btc_velotrade_decay01_x1) re-derives the L1 top-3 on the HONEST pipeline:
+#   - cost-corrected (taker 0.00055 + slippage_base_bps 5.0)
+#   - post-X2 CAUSAL coarse-bar alignment (multiscale_handler.py, code-level, 6c027e19)
+# This WF then re-runs Stage-3 on X1's NEW top-3 so the fold trajectories
+# (fold_XX/solo_SEED_trajectory.parquet) — which the vol-target re-validation and
+# the final seed pick read — are themselves de-leaked. Expect LOWER PFs than the
+# leaked ~1.69 best-solo.
+#
+# DIFF vs configs/sg1_btc_velotrade_decay01_wf_multiseed.yaml (the leaked WF):
+#   - ensemble.seeds: [] PLACEHOLDER — FILL from X1's
+#     results/sg1_btc_velotrade_decay01_x1/seed_report.json top3_by_val_argmax_pf
+#     AFTER X1 completes + reconcile. Left EMPTY on purpose: the eval/launcher
+#     raise "No seeds resolved" rather than silently running the wrong (leaked) seeds.
+#   - ensemble.seed_pfs: FILL from the same seed_report (val_argmax test PFs).
+#   - workstream / checkpoint prefix / result dir: *_x1 to stay disjoint from the
+#     leaked WF artifacts.
+#   - cost model, splitter, HPs, data window, gates: IDENTICAL to the leaked WF
+#     (cost params were already corrected there; X2 is code-level) so the only
+#     change vs the leaked WF is WHICH seeds + de-leaked code path.
+#
+# Splitter (8 folds, train_months=18, val_months=1, test_months=1, step_months=1):
+#   data.start_date 2024-01-01 -> data.end_date 2026-04-30 (28mo envelope) — same as leaked WF.
+#
+# Launch (24 fresh SAC training runs; fan across free GPUs like X1):
+#   python scripts/launch_sg1_btc_decay01_wf_multiseed.py \
+#       --config configs/sg1_btc_velotrade_decay01_x1_wf_multiseed.yaml \
+#       --run_name_prefix sg1-btc-x1-wf  ... (instance/slots per fleet)
+# Post-train eval (no GPU):
+#   python scripts/sg1_btc_velotrade_ensemble_eval.py \
+#       --wf_config configs/sg1_btc_velotrade_decay01_x1_wf_multiseed.yaml \
+#       --gates_file configs/sg1_btc_velotrade_ensemble.gates.yaml --device cpu
+# Then vol-target re-validation:
+#   python scripts/sg1_btc_vol_target_eval.py \
+#       --results_dir results/sg1_btc_velotrade_decay01_x1_ensemble_wf \
+#       --wf_config configs/sg1_btc_velotrade_decay01_x1_wf_multiseed.yaml \
+#       --seeds <X1 top3>
+
+workstream: sg1_btc_velotrade_decay01_x1
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTCUSDT"
+  handler_type: "multiscale"
+  start_date: "2024-01-01"
+  end_date: "2026-04-30"
+
+splitter:
+  train_months: 18
+  val_months: 1
+  test_months: 1
+  step_months: 1
+  buffer_days: 0
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.15
+  parkinson_threshold: 0.0009
+  volume_threshold: 0.60
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00055                  # cost-corrected (same as leaked WF + X1)
+  slippage_base_bps: 5.0              # cost-corrected (same as leaked WF + X1)
+  deadband_threshold: 0.25            # trial #44
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 3000
+  random_start: true
+  max_drawdown_pct: 0.10
+  scales: [3, 15, 60]
+  gap_detection: false
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0008427308583293202    # trial #44
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.08   # buffered (Velotrade cap=10%)
+    max_daily_loss_pct: 0.0
+    eod_hour_utc: 0
+    drawdown_penalty_start: 0.04
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.00015739192475706186
+    lr_critic: 0.00007322355805160213
+    lr_alpha: 0.0000026314031405474944
+    gamma: 0.9593670398875173
+    tau: 0.0002134448307797731
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.4088157097959411
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 1.516294914428727
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000             # Protocol v2 Stage 3 budget (matches leaked WF)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+ensemble:
+  # ⚠️ PLACEHOLDER — FILL from X1 results/sg1_btc_velotrade_decay01_x1/seed_report.json
+  # (top3_by_val_argmax_pf) AFTER X1 completes + reconcile. EMPTY on purpose so a
+  # premature launch fails loudly instead of running the leaked seeds.
+  seeds: []
+  # chosen_rule: <fill from X1 Stage-2.5-R verdict>  (likely solo / ens_mean)
+  rules: ["ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
+  checkpoint_pattern: "checkpoints/sg1-btc-x1-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth"
+  seed_pfs: {}                         # FILL from X1 seed_report val_argmax test PFs
+  gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
+
+gates:
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10
+  ensemble_ambiguous_min: 1.05
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_rule_selection: val_argmax_pf
+  wf_windows: 8
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["sg-1", "BTC", "SAC", "3min", "signal-gated", "velotrade", "velotrade-wrapped",
+         "prop-firm", "propfirm", "walk_forward", "wf-stage3", "ensemble",
+         "ensemble-confirm", "rehpo-trial44", "steady-state", "bybit-perp",
+         "decay01", "x1", "costcorr", "x2-causal", "s553",
+         "upstream:sg1_btc_velotrade_decay01_x1"]
