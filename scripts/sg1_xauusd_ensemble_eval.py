@@ -244,6 +244,9 @@ def run_rule(config: dict, agents: Dict[int, object], rule_name: str, rule_fn: C
             "step": step,
             "timestamp": ts,
             "portfolio_value": _s("portfolio_value", 100000.0),
+            # N2 PF-XCHECK: (H+L)/2-marked shadow equity; NaN when the env is not
+            # recording dual equity (record_dual_equity off).
+            "portfolio_value_mid": _s("portfolio_value_mid", float("nan")),
             "position": _s("position"),
             "traded": _s("traded"),
             "trade_count": _s("trade_count"),

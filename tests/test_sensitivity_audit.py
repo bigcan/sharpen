@@ -21,15 +21,12 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from finrl_pro_ds.eval.sensitivity_audit import (  # noqa: E402
-    DEFAULT_DEADBAND_GRID,
-    DEFAULT_MAX_LEVERAGE_MULTS,
-    DEFAULT_PF_RATIO_FLOOR,
     PF_CAP,
     PF_XCHECK_DIVERGENCE_HALT,
+    PF_XCHECK_REPORT_ONLY,
     SCHEMA_VERSION,
     CellResult,
     CellSpec,
-    EdgeStabilityVerdict,
     InvariantViolation,
     PfXCheckResult,
     _assert_invariants,
@@ -106,9 +103,10 @@ def test_mdd_from_pv_peak_then_recover_records_trough():
 # ---------------------------------------------------------------------------
 
 
-def test_pf_xcheck_skipped_when_close_absent():
+def test_pf_xcheck_skipped_when_mid_absent():
+    """N2 rename: pv_mid (the optional independent mark) None → SKIPPED."""
     pv = np.linspace(100.0, 105.0, 20)
-    result = compute_pf_xcheck(pv, pv_close=None)
+    result = compute_pf_xcheck(pv, pv_mid=None)
     assert result.status == "SKIPPED"
     assert result.pass_
     assert result.divergence == 0.0
@@ -116,27 +114,63 @@ def test_pf_xcheck_skipped_when_close_absent():
 
 def test_pf_xcheck_pass_when_curves_match():
     pv = np.linspace(100.0, 105.0, 20)
-    result = compute_pf_xcheck(pv, pv_close=pv.copy())
+    result = compute_pf_xcheck(pv, pv_mid=pv.copy())
     assert result.status == "PASS"
     assert result.pass_
 
 
 def test_pf_xcheck_halt_when_divergence_exceeds_threshold():
-    """Mid PF = high, close PF = 0 → divergence = 100% → HALT."""
-    pv_mid = np.linspace(100.0, 200.0, 50)  # PF_CAP
-    pv_close = np.linspace(100.0, 50.0, 50)  # PF=0
-    result = compute_pf_xcheck(pv_mid, pv_close=pv_close)
+    """Close PF = high (reference), mid PF = 0 → divergence = 100% → HALT."""
+    pv_close = np.linspace(100.0, 200.0, 50)  # PF_CAP
+    pv_mid = np.linspace(100.0, 50.0, 50)  # PF=0
+    result = compute_pf_xcheck(pv_close, pv_mid=pv_mid)
     assert result.status == "HALT"
     assert not result.pass_
     assert result.divergence > PF_XCHECK_DIVERGENCE_HALT
 
 
 def test_pf_xcheck_pass_when_divergence_below_threshold():
-    """Modest 10% divergence → PASS."""
-    pv_mid = np.array([100.0, 101.0, 100.5, 102.0, 101.5])
-    pv_close = pv_mid * 1.001  # tiny perturbation
-    result = compute_pf_xcheck(pv_mid, pv_close=pv_close)
+    """Modest sub-threshold divergence → PASS."""
+    pv_close = np.array([100.0, 101.0, 100.5, 102.0, 101.5])
+    pv_mid = pv_close * 1.001  # tiny perturbation
+    result = compute_pf_xcheck(pv_close, pv_mid=pv_mid)
     assert result.status == "PASS"
+
+
+def test_pf_xcheck_report_only_suppresses_halt():
+    """ADR-N5: report_only surfaces the divergence but never HALTs."""
+    pv_close = np.linspace(100.0, 200.0, 50)  # PF_CAP
+    pv_mid = np.linspace(100.0, 50.0, 50)  # PF=0 → would HALT
+    result = compute_pf_xcheck(pv_close, pv_mid=pv_mid, report_only=True)
+    assert result.status == "PASS"
+    assert result.pass_
+    # Divergence is still computed and surfaced for calibration.
+    assert result.divergence > PF_XCHECK_DIVERGENCE_HALT
+    # The shipped default is Phase-α report-only.
+    assert PF_XCHECK_REPORT_ONLY is True
+
+
+def test_pf_xcheck_denominator_is_close_marked():
+    """ADR-N4: divergence normalizes by the CLOSE-marked PF, not mid."""
+    pv_close = np.array([100.0, 103.0, 101.0, 104.0, 102.0])
+    pv_mid = np.array([100.0, 101.0, 100.5, 102.0, 101.0])
+    pf_c = pf_from_pv(pv_close)
+    pf_m = pf_from_pv(pv_mid)
+    result = compute_pf_xcheck(pv_close, pv_mid=pv_mid)
+    assert result.pf_close == pytest.approx(pf_c, abs=1e-12)
+    assert result.pf_mid == pytest.approx(pf_m, abs=1e-12)
+    expected = abs(pf_c - pf_m) / max(abs(pf_c), 1e-9)
+    assert result.divergence == pytest.approx(expected, abs=1e-12)
+
+
+def test_pf_xcheck_halts_two_sided_when_mid_rosier():
+    """Two-sided gate: a much HIGHER mid PF also HALTs (marking-sensitive edge)."""
+    pv_close = np.array([100.0, 101.0, 100.0, 101.0, 100.0, 101.0])  # choppy, PF≈1
+    pv_mid = np.linspace(100.0, 130.0, 6)  # monotonic up → PF_CAP
+    result = compute_pf_xcheck(pv_close, pv_mid=pv_mid)
+    assert result.pf_mid > result.pf_close
+    assert result.status == "HALT"
+    assert result.divergence > PF_XCHECK_DIVERGENCE_HALT
 
 
 # ---------------------------------------------------------------------------
