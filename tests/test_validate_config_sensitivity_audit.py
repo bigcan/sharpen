@@ -33,6 +33,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.validate_config import (  # noqa: E402
     ValidationResult,
+    _protocol_at_least,
     check_sensitivity_audit,
 )
 
@@ -319,3 +320,61 @@ def test_min_neighbors_non_integer_fails():
     )
     check_sensitivity_audit(cfg, r)
     assert any("is not integer" in f for f in r.failures)
+
+
+# ---------------------------------------------------------------------------
+# N4: version-tuple compare — v2.7+ configs must keep enforcing the v2.6 audit.
+# The pre-N4 exact-match (`protocol_version in ("2.6",)`) silently self-disabled
+# the whole check once a config bumped to "2.7", so a fragile policy could ship.
+# ---------------------------------------------------------------------------
+
+def test_protocol_at_least_ordering():
+    """Dotted-int ordering with zero-padding and graceful garbage handling."""
+    assert _protocol_at_least("2.6", "2.6") is True
+    assert _protocol_at_least("2.7", "2.6") is True
+    assert _protocol_at_least("2.10", "2.6") is True   # numeric, not lexical
+    assert _protocol_at_least("3.0", "2.6") is True
+    assert _protocol_at_least("2.6.0", "2.6") is True  # zero-pad equality
+    assert _protocol_at_least("2.6", "2.6.0") is True
+    assert _protocol_at_least("2.5", "2.6") is False
+    assert _protocol_at_least("2.5.9", "2.6") is False
+    # Unparseable declared versions are treated as pre-target (exempt), never crash.
+    assert _protocol_at_least("latest", "2.6") is False
+    assert _protocol_at_least("", "2.6") is False
+
+
+def test_phase_beta_v27_propfirm_still_enforces():
+    """N4 regression: a v2.7 prop-firm config missing the PRIMARY floor must FAIL.
+
+    Pre-N4 this returned early (exact-match on "2.6") and the fragile policy
+    sailed through. With version-tuple compare it stays enforced at every
+    version >= 2.6.
+    """
+    r = ValidationResult()
+    cfg = _baseline_cfg(protocol_version="2.7", edge_stability_pf_ratio_floor=None)
+    check_sensitivity_audit(cfg, r)
+    assert any(
+        "edge_stability_pf_ratio_floor" in f for f in r.failures
+    ), f"v2.7 must still enforce the v2.6 audit; got {r.failures}"
+
+
+def test_phase_beta_v27_baseline_passes_and_emits_ok():
+    """A fully-populated v2.7 prop-firm config passes and emits the OK marker."""
+    r = ValidationResult()
+    check_sensitivity_audit(_baseline_cfg(protocol_version="2.7"), r)
+    assert r.failures == [], f"unexpected failures: {r.failures}"
+    assert any("enforcement active" in p for p in r.passed)
+
+
+def test_phase_alpha_v25_dotted_variant_exempt():
+    """A "2.5.1"-style pre-2.6 version is still exempt (no-op), not enforced."""
+    r = ValidationResult()
+    cfg = _baseline_cfg(
+        protocol_version="2.5.1",
+        edge_stability_pf_ratio_floor=None,
+        sensitivity_deadband_grid=None,
+        sensitivity_max_leverage_mults=None,
+        sensitivity_audit_required=None,
+    )
+    check_sensitivity_audit(cfg, r)
+    assert r.failures == [] and r.warnings == [], (r.failures, r.warnings)

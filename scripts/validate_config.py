@@ -857,6 +857,40 @@ def check_ensemble_confirm(cfg: dict, r: ValidationResult) -> None:
         )
 
 
+def _parse_protocol_version(version: str) -> tuple[int, ...] | None:
+    """Parse a dotted protocol-version string into an int tuple for ordering.
+
+    Returns ``None`` when the string isn't a clean dotted-int version (e.g. a
+    git sha or ``"latest"``) so callers can treat an unparseable version as
+    "not satisfying" rather than crashing.
+    """
+    parts = str(version).strip().split(".")
+    try:
+        return tuple(int(p) for p in parts)
+    except (TypeError, ValueError):
+        return None
+
+
+def _protocol_at_least(declared: str, target: str) -> bool:
+    """True when ``declared`` >= ``target`` by dotted-int version ordering.
+
+    Zero-pads to equal length so ``"2.6" == "2.6.0"``. An unparseable
+    ``declared`` returns False (treated as pre-target / exempt), preserving the
+    pre-N4 behavior where only recognized versions opted into enforcement.
+
+    N4: replaces the exact-match ``protocol_version in ("2.6",)`` gate, which
+    silently self-disabled the sensitivity audit once configs bumped to "2.7"+.
+    """
+    d = _parse_protocol_version(declared)
+    t = _parse_protocol_version(target)
+    if d is None or t is None:
+        return False
+    n = max(len(d), len(t))
+    d += (0,) * (n - len(d))
+    t += (0,) * (n - len(t))
+    return d >= t
+
+
 def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
     """Protocol v2.6 Stage 2.5-R Sensitivity Audit gate validation (S553).
 
@@ -868,7 +902,7 @@ def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
 
     Phase α (S553+): legacy configs (no `protocol_version` or `<= "2.5"`) are
     exempt — this check is a no-op. Configs that opt in via `protocol_version:
-    "2.6"` get full enforcement.
+    "2.6"` (or any higher version) get full enforcement.
 
     Phase β (post-backfill): operator bumps the 5 active live workstreams to
     `protocol_version: "2.6"` AND `sensitivity_audit_required: true` after
@@ -878,9 +912,10 @@ def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
     See `.agent/artifacts/protocol_v27_a_sensitivity_audit_architecture.md`
     (ADR-3, ADR-5) and `mc_robustness_methods_research.md` (Method #5).
     """
-    # Phase α back-compat: only enforce on explicit v2.6 opt-in.
+    # Phase α back-compat: enforce on v2.6 opt-in and every later protocol
+    # version (N4: version-tuple compare, not exact-match — see _protocol_at_least).
     protocol_version = str(cfg.get("protocol_version", "2.5"))
-    if protocol_version not in ("2.6",):
+    if not _protocol_at_least(protocol_version, "2.6"):
         return
 
     gates = _load_ensemble_gates_overlay(cfg)
