@@ -194,6 +194,10 @@ class LiveObsBuilder:
         self._scale_features: dict[int, np.ndarray] = {}
         self._scale_dfs: dict[int, pd.DataFrame] = {}
         self._scale_last_bar_count: dict[int, int] = {}
+        # X2 / audit P2-01: index of the last CAUSAL (completed) bar per scale,
+        # used to terminate each observation window. Mirrors
+        # MultiScaleOHLCVHandler._scale_index_map evaluated at the latest base bar.
+        self._scale_end_idx: dict[int, int] = {}
 
         # Base scale = finest (smallest)
         self._base_scale = self.scales[0]
@@ -459,6 +463,43 @@ class LiveObsBuilder:
             self._scale_dfs[scale] = resampled
             self._scale_features[scale] = features
             self._scale_last_bar_count[scale] = len(resampled)
+
+        # X2: refresh the causal window end-index once all scale dfs exist.
+        self._recompute_scale_end_indices()
+
+    def _recompute_scale_end_indices(self) -> None:
+        """Index of the last CAUSAL bar to terminate each scale's obs window.
+
+        X2 / audit P2-01: mirrors ``MultiScaleOHLCVHandler._scale_index_map``
+        evaluated at the latest base bar. The base (finest) scale terminates at
+        its last bar; each coarser scale terminates at the most recent bar that
+        has already CLOSED at or before the latest base bar's START timestamp —
+        never the in-progress bar. A coarse bar stamped ``t`` (label='left')
+        closes at ``t + scale`` minutes, so it is only causal for a base bar at
+        time ``b`` when ``t + scale <= b``; searching on ``base_ts - scale_ns``
+        selects that last-closed bar. Without this the window would end on the
+        partial in-progress coarse bar, leaking up to ``scale - base_scale``
+        minutes of the base bar's own future (train<->live divergence).
+        """
+        self._scale_end_idx = {}
+        base_df = self._scale_dfs.get(self._base_scale)
+        if base_df is None or len(base_df) == 0:
+            return
+        # Same int64-ns conversion path as the training handler so the
+        # searchsorted is bit-identical.
+        base_ts_last = base_df["timestamp"].values.astype("int64")[-1]
+        for scale in self.scales:
+            n = len(self._scale_features.get(scale, []))
+            if n == 0:
+                continue
+            if scale == self._base_scale:
+                # 1:1 mapping — the current base bar itself is the decision bar.
+                self._scale_end_idx[scale] = n - 1
+                continue
+            coarse_ts = self._scale_dfs[scale]["timestamp"].values.astype("int64")
+            scale_ns = scale * 60 * 1_000_000_000
+            idx = int(np.searchsorted(coarse_ts, base_ts_last - scale_ns, side="right") - 1)
+            self._scale_end_idx[scale] = int(np.clip(idx, 0, n - 1))
 
     def _recompute_base_atr(self) -> None:
         """Compute ATR(14) on the base scale for position capping."""
@@ -735,18 +776,25 @@ class LiveObsBuilder:
 
         obs = {}
 
-        # Scale features — last window_size rows from each scale
+        # Scale features — causal window terminating at the last COMPLETED bar.
+        # X2 / audit P2-01: coarser scales must NOT include the in-progress bar
+        # (whose [t, t+scale) interval has not closed at the latest base bar);
+        # the base scale terminates at its last bar. Window construction is
+        # identical to MultiScaleOHLCVHandler.step() (incl. front-padding with
+        # the window's first row) so train<->live observations stay bit-equal.
         for i, scale in enumerate(self.scales):
             features = self._scale_features[scale]
             n = len(features)
+            idx = self._scale_end_idx.get(scale, n - 1)
 
-            if n >= self.window_size:
-                window = features[n - self.window_size: n]
-            else:
-                # Pad with first row
-                pad_len = self.window_size - n
-                pad = np.tile(features[0:1], (pad_len, 1))
-                window = np.concatenate([pad, features], axis=0)
+            # Window: [idx - window_size + 1, idx + 1)
+            start = max(0, idx - self.window_size + 1)
+            end = idx + 1
+            window = features[start:end]
+            if len(window) < self.window_size:
+                pad_len = self.window_size - len(window)
+                pad = np.tile(window[0:1], (pad_len, 1))
+                window = np.concatenate([pad, window], axis=0)
 
             if self.obs_mode == "summary_stats":
                 obs[f"scale_{i}"] = self._compute_summary_stats(window)
