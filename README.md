@@ -157,7 +157,7 @@ randd_log.md             # Append-only R&D write buffer (rotates at 150 KB)
 randd_archive/YYYY-MM.md # Rotated archives
 ```
 
-Cloud tier: agent-memory MCP (LanceDB on GCS) as a search index; flat files remain authoritative. End-of-session `/sync` writes to memory → optional Randy gateway → `Skill-Evolve` staleness check → git commit.
+Cloud tier: agent-memory MCP (LanceDB on GCS) as a search index; flat files remain authoritative. End-of-session `/sync` writes to memory → `Skill-Evolve` staleness check → git commit.
 
 ---
 
