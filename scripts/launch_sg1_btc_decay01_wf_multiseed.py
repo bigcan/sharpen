@@ -42,6 +42,7 @@ import argparse
 import copy
 import json
 import logging
+import re
 import subprocess
 import sys
 import time
@@ -51,7 +52,6 @@ from pathlib import Path
 import yaml
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-RUNTIME_DIR = PROJECT_ROOT / "configs" / "_sg1_btc_decay01_wf_runtime"
 LAUNCHER = PROJECT_ROOT / "scripts" / "launch_l1_multiseed.py"
 VALIDATOR = PROJECT_ROOT / "scripts" / "validate_config.py"
 
@@ -65,15 +65,30 @@ logging.basicConfig(
 )
 log = logging.getLogger("sg1_btc_decay01_wf")
 
-SEEDS = [456, 42, 2025]
-
 
 def _date_only(ts: str) -> str:
     """Trim 'YYYY-MM-DD HH:MM:SS' → 'YYYY-MM-DD' for config dates."""
     return ts[:10]
 
 
-def write_fold_config(base: dict, fold_idx: int, fold: dict, study_id: str) -> Path:
+def parse_base_prefix(checkpoint_pattern: str) -> str:
+    """Derive the run-name prefix from ensemble.checkpoint_pattern.
+
+    'checkpoints/sg1-btc-x1-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth'
+        -> 'sg1-btc-x1-wf'  (the text between 'checkpoints/' and '-fold{')
+    Config-driven so decay01 and x1 (and future workstreams) share one launcher
+    instead of hardcoding seeds/prefix. Returns the prefix or raises ValueError.
+    """
+    m = re.search(r"checkpoints/(.+?)-fold\{fold", checkpoint_pattern)
+    if not m:
+        raise ValueError(
+            f"cannot parse run-name prefix from checkpoint_pattern={checkpoint_pattern!r}; "
+            "expected 'checkpoints/<prefix>-fold{fold}-seed{seed}_*/...'")
+    return m.group(1)
+
+
+def write_fold_config(base: dict, fold_idx: int, fold: dict, study_id: str,
+                      runtime_dir: Path, fold_basename: str) -> Path:
     """Materialize a single-fold L1-style config with explicit windows."""
     cfg = copy.deepcopy(base)
     cfg.pop("splitter", None)
@@ -92,8 +107,8 @@ def write_fold_config(base: dict, fold_idx: int, fold: dict, study_id: str) -> P
             tags.append(t)
     cfg["wandb"]["tags"] = tags
 
-    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    out = RUNTIME_DIR / f"sg1_btc_decay01_wf_fold_{fold_idx}.yaml"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    out = runtime_dir / f"{fold_basename}_fold_{fold_idx}.yaml"
     with out.open("w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
     return out
@@ -113,10 +128,10 @@ def validate(cfg_path: Path) -> bool:
 
 def launch_cell(cfg_path: Path, fold_idx: int, slots: str | None,
                 instance: str | None, gpu: str | None, concurrent: int,
-                dry_run: bool) -> tuple[int, float]:
-    """Invoke launch_l1_multiseed.py for one fold's 3-seed cell."""
-    seeds_csv = ",".join(str(s) for s in SEEDS)
-    prefix = f"sg1-btc-decay01-wf-fold{fold_idx}"
+                dry_run: bool, seeds: list[int], base_prefix: str) -> tuple[int, float]:
+    """Invoke launch_l1_multiseed.py for one fold's N-seed cell."""
+    seeds_csv = ",".join(str(s) for s in seeds)
+    prefix = f"{base_prefix}-fold{fold_idx}"
     cfg_rel = cfg_path.relative_to(PROJECT_ROOT).as_posix()
     cmd = [
         sys.executable, str(LAUNCHER),
@@ -178,6 +193,23 @@ def main() -> int:
     with args.config.open("r", encoding="utf-8") as f:
         base_cfg = yaml.safe_load(f)
 
+    # Config-driven seeds + run-name prefix + runtime/results paths (no hardcoding).
+    # Empty ensemble.seeds => fail loud (placeholder guard) rather than run leaked seeds.
+    ens = base_cfg.get("ensemble", {})
+    seeds = list(ens.get("seeds") or [])
+    if not seeds:
+        log.error("ensemble.seeds is empty in %s — fill from the upstream L1 "
+                  "seed_report.json (top3_by_val_argmax_pf) before launching; "
+                  "refusing to run placeholder/leaked seeds", args.config.name)
+        return 2
+    try:
+        base_prefix = parse_base_prefix(ens.get("checkpoint_pattern", ""))
+    except ValueError as e:
+        log.error("%s", e)
+        return 2
+    pfx_us = base_prefix.replace("-", "_")
+    runtime_dir = PROJECT_ROOT / "configs" / f"_{pfx_us}_runtime"
+
     data = base_cfg.get("data", {})
     spl = base_cfg.get("splitter", {})
     if not spl or "start_date" not in data or "end_date" not in data:
@@ -210,15 +242,15 @@ def main() -> int:
         folds_subset = list(enumerate(folds))
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    results_dir = PROJECT_ROOT / "results" / f"sg1_btc_decay01_wf_{timestamp}"
+    results_dir = PROJECT_ROOT / "results" / f"{pfx_us}_{timestamp}"
     results_dir.mkdir(parents=True, exist_ok=True)
 
     log.info("=" * 70)
-    log.info("SG-1-BTC Stage 3 WF Dispatcher — DECAY-01 (S542, top-3 N=3)")
+    log.info("SG-1-BTC Stage 3 WF Dispatcher — config-driven (prefix=%s)", base_prefix)
     log.info("  config:      %s", args.config.name)
     log.info("  folds:       %s of %d total", [i for i, _ in folds_subset], len(folds))
-    log.info("  seeds:       %s", SEEDS)
-    log.info("  total runs:  %d", len(folds_subset) * len(SEEDS))
+    log.info("  seeds:       %s", seeds)
+    log.info("  total runs:  %d", len(folds_subset) * len(seeds))
     if args.slots:
         log.info("  slots:       %s (cross-GPU)", args.slots)
     else:
@@ -235,7 +267,8 @@ def main() -> int:
         "gpu": args.gpu,
         "concurrent": args.concurrent,
         "slots": args.slots,
-        "seeds": SEEDS,
+        "seeds": seeds,
+        "base_prefix": base_prefix,
         "n_folds": len(folds_subset),
         "dry_run": args.dry_run,
         "folds": [],
@@ -244,7 +277,8 @@ def main() -> int:
     # Phase 1: materialize + validate all derived configs upfront
     derived: dict[int, Path] = {}
     for fold_idx, fold in folds_subset:
-        cfg_path = write_fold_config(base_cfg, fold_idx, fold, timestamp)
+        cfg_path = write_fold_config(base_cfg, fold_idx, fold, timestamp,
+                                     runtime_dir, pfx_us)
         derived[fold_idx] = cfg_path
         if not validate(cfg_path):
             log.error("aborting: validator rejected %s", cfg_path.name); return 3
@@ -262,7 +296,6 @@ def main() -> int:
         "entity, project, fid, sid = sys.argv[1:5]\n"
         "runs = list(api.runs(f'{entity}/{project}', filters={'$and': [\n"
         "    {'tags': {'$in': ['wf-stage3']}},\n"
-        "    {'tags': {'$in': ['decay01']}},\n"
         "    {'tags': {'$in': [f'fold-{fid}']}},\n"
         "    {'tags': {'$in': [f'study-id-{sid}']}},\n"
         "]}))\n"
@@ -317,11 +350,12 @@ def main() -> int:
         rc, elapsed = launch_cell(
             cfg_path, fold_idx, args.slots,
             args.instance, args.gpu, args.concurrent, args.dry_run,
+            seeds, base_prefix,
         )
 
         finished_ok = -2
         if rc == 0 and not args.dry_run:
-            finished_ok = wait_runs_finished(fold_idx, expected_n=len(SEEDS))
+            finished_ok = wait_runs_finished(fold_idx, expected_n=len(seeds))
 
         manifest["folds"].append({
             "fold_idx": fold_idx,
@@ -343,9 +377,9 @@ def main() -> int:
             log.error("aborting: fold %d launcher exit=%d", fold_idx, rc); return 1
         if finished_ok == -1:
             log.error("aborting: fold %d wandb wait timed out", fold_idx); return 1
-        if finished_ok != -2 and finished_ok < len(SEEDS):
+        if finished_ok != -2 and finished_ok < len(seeds):
             log.warning("fold %d: only %d/%d seeds finished cleanly; continuing",
-                        fold_idx, finished_ok, len(SEEDS))
+                        fold_idx, finished_ok, len(seeds))
 
     log.info("=" * 70)
     log.info("Dispatcher complete: %d/%d folds OK", len(folds_subset), len(folds_subset))
