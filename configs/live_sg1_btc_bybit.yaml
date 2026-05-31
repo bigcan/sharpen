@@ -170,6 +170,35 @@ risk:
   # junction (shipped S542). Counter decrements only on would-be TRADES.
   post_restart_cooldown_bars: 3
 
+# --- Protocol v2 §4.5 offline retrain gate (scripts/check_retrain_triggers.py) ---
+# Complements the LIVE cost-drift trigger (gates.retrain.cost_drift_* above):
+# this block drives the monthly/cron OOS-PF + staleness + live-DD + feature-
+# drift-KS gate. The two schemas are intentionally distinct — offline rolling
+# backtest vs live execution signal — NOT duplicative (docs/protocol_v2.md §4.5).
+# `checkpoint_path` is read in preference to agent.checkpoint_path so a
+# bundle-deployed strategy (agent.checkpoint_path: "") still has a raw
+# checkpoint for the rolling OOS backtest.
+#
+# Values stamp the CURRENTLY DEPLOYED policy (DECAY-01 solo seed-456, train
+# cutoff 2026-02-01). RE-STAMP last_trained_date + validation_pf_baseline +
+# checkpoint_path + the backtest_config_ref test window at the de-leaked X1
+# redeploy (Lane A). validation_pf_baseline below is the pre-cost-correction
+# recorded test PF; refresh from the cost-corrected OOS backtest at re-stamp.
+retrain_policy:
+  enabled: true
+  last_trained_date: "2026-02-01"        # seed-456 fold_07 train cutoff (provenance)
+  staleness_cap_days: 180                # hard cap; soft quarterly cadence = gates.retrain.ensemble_recheck_days (90)
+  validation_pf_baseline: 2.46           # deployed seed-456 recorded recent-OOS test PF (provenance: 2.456)
+  oos_pf_floor_ratio: 0.70               # OOS_FAIL if rolling-OOS PF < 0.70 × baseline (= 1.72)
+  dd_trigger_ratio: 0.50                 # DD_BREACH if live DD > 0.50 × risk.max_drawdown_pct (= 0.04)
+  gate_window_days: 90                   # rolling OOS window length
+  gate_lag_days: 1                       # end window at today − lag (avoid partial-day data)
+  feature_drift_p_threshold: 0.01        # KS-test p-value floor (reported, secondary)
+  feature_drift_ks_stat_threshold: 0.20  # PRIMARY: max CDF gap ≥ 0.20 = practical regime shift
+  backtest_config_ref: "configs/sg1_btc_velotrade_q1_2026_oos_backtest.yaml"
+  data_file_path: "data/btc_usdt_1min_bybit.parquet"
+  checkpoint_path: "checkpoints/sg1-btc-decay01-wf-fold7-seed456_20260521_230637/checkpoint_final.pth"
+
 # --- WandB Monitoring ---
 wandb:
   project: "FinRL-Pro-DS"
@@ -247,6 +276,20 @@ gates:
     crit_triggers_flatten: true
     crit_repeat_window_hours: 24
     crit_repeat_count_before_lockout: 2
+  # Protocol v2 §4.5 Stage 2.5-R retrain triggers. Mirrors the canonical
+  # configs/sg1_btc_velotrade_ensemble.gates.yaml `gates.retrain` block —
+  # the live engine reads thresholds from THIS file at runtime (S551-cont-9
+  # both-files lesson; the canonical gates yaml gates Stage-3 WF verdicts).
+  # The live engine consumes ONLY the cost-drift keys today (trigger #6 →
+  # CostDriftTracker → WandB drift/cost_*); the cadence/PF keys are carried
+  # for canonical parity + the offline live-monitor (triggers #2/#3).
+  retrain:
+    ensemble_recheck_days: 90                   # quarterly cadence (#2)
+    live_pf_ratio: 0.8                          # live PF < 0.8 × paper PF (#3)
+    live_pf_window_days: 5                      # over 5 consecutive trading days
+    action_kl_warn_window_bars: 5000
+    cost_drift_ratio: 1.20                      # realized cost > 1.20× config assumption (#6)
+    cost_drift_window_trades: 100               # over rolling 100 fills
 
 # --- PRISM Regime Overlay (optional, falsified S413+) ---
 prism:

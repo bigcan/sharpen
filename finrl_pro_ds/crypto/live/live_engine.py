@@ -43,6 +43,8 @@ from finrl_pro_ds.monitoring import (
     ActionDriftTracker,
     AgreementDecayTracker,
     CONSENSUS_RULES,
+    CostDriftStatus,
+    CostDriftTracker,
     REASON_AGREEMENT_DECAY_CRIT,
     REASON_DRIFT_CRIT,
     read_kill_file,
@@ -261,6 +263,51 @@ def _init_agreement_decay_tracker(
         f"flat_warn={tracker.warn_delta} flat_crit={tracker.crit_delta} "
         f"no_consensus_warn={tracker.no_consensus_warn} "
         f"no_consensus_crit={tracker.no_consensus_crit}",
+    )
+    return tracker
+
+
+def _init_cost_drift_tracker(config: dict) -> Optional[CostDriftTracker]:
+    """Build a Protocol v2 §4.5 trigger #6 CostDriftTracker from engine config.
+
+    Returns None when no `gates.retrain` block is declared (no cost-drift
+    thresholds to gate on). Thresholds come from `gates.retrain`:
+    `cost_drift_ratio` (default 1.20) and `cost_drift_window_trades`
+    (default 100) — read from the LIVE config's inline gates block, since
+    the engine reads `config["gates"]` at runtime (S551-cont-9 lesson; the
+    canonical `<ws>_ensemble.gates.yaml` drives Stage-3 WF gating only).
+
+    The denominator is the one-way per-trade cost the policy was *configured*
+    under: `trading.taker_fee` (+ `trading.slippage_base_bps`/1e4 if present),
+    falling back to the `env.*` mirror. A missing / non-positive assumption
+    leaves the tracker in LOG_ONLY (realized cost still recorded; never FIRED).
+    Cost drift is a retrain trigger, NOT a §8.3 halt — see CostDriftTracker.
+    """
+    retrain_cfg = (config.get("gates") or {}).get("retrain") or {}
+    if not retrain_cfg:
+        return None
+
+    trading = config.get("trading") or {}
+    env = config.get("env") or {}
+    taker = trading.get("taker_fee", env.get("taker_fee"))
+    slip_bps = trading.get("slippage_base_bps", env.get("slippage_base_bps", 0.0))
+    config_cost_frac: Optional[float] = None
+    if taker is not None:
+        try:
+            config_cost_frac = float(taker) + float(slip_bps or 0.0) / 1e4
+        except (TypeError, ValueError):
+            config_cost_frac = None
+
+    tracker = CostDriftTracker(
+        config_cost_frac,
+        cost_drift_ratio=float(retrain_cfg.get("cost_drift_ratio", 1.20)),
+        window_trades=int(retrain_cfg.get("cost_drift_window_trades", 100)),
+    )
+    logger.info(
+        "CostDriftTracker active: config_cost_frac=%s ratio=%s window=%s",
+        f"{tracker.config_cost_frac:.6f}" if tracker.config_cost_frac else "LOG_ONLY",
+        tracker.cost_drift_ratio,
+        tracker.window_trades,
     )
     return tracker
 
@@ -565,6 +612,17 @@ class LiveTradingEngine:
         )
         self._agreement_decay_warn_active = False
         self._agreement_decay_last_status = None
+
+        # Protocol v2 §4.5 trigger #6 cost-drift tracker. Rolling realized
+        # one-way cost (fee + slippage vs the decision-bar close) measured
+        # against the configured cost assumption. A FIRED status is a
+        # Stage 2.5-R retrain signal — logged once per transition + surfaced
+        # to WandB (drift/cost_*) — NOT a §8.3 halt: it never flattens or
+        # writes the kill_file (execution being dearer than assumed is a
+        # model-staleness signal, not an unsafe-to-trade one).
+        self._cost_drift_tracker = _init_cost_drift_tracker(config)
+        self._cost_drift_fired = False
+        self._cost_drift_last_report = None
 
         # S495-cont prop-firm decoupling: challenge-phase state machine.
         # Only instantiated when config.challenge.enabled=true (live deploy
@@ -1261,6 +1319,7 @@ class LiveTradingEngine:
                 self._current_position = exchange_pos
                 self._total_trades += 1
                 self._total_fees += order.fee
+                self._observe_cost_drift(order, current_close)
                 # S527-cont: Bybit demo can return None for filled/avg/fee
                 # via ccxt; format with `or 0` so logging never crashes the
                 # success path (which would mask the fill as an exec error).
@@ -1278,6 +1337,7 @@ class LiveTradingEngine:
                 # bar computes delta from stale position → double execution.
                 self._total_trades += 1
                 self._total_fees += order.fee
+                self._observe_cost_drift(order, current_close)
                 try:
                     exchange_pos = await self.broker.get_single_position(self._asset)
                     self._current_position = exchange_pos
@@ -2612,6 +2672,37 @@ class LiveTradingEngine:
             )
         self._request_stop("drift_crit")
 
+    def _observe_cost_drift(self, order, decision_price: float) -> None:
+        """Feed one filled/partial trade to the §4.5 #6 cost-drift tracker.
+
+        Cost drift is a RETRAIN trigger, not a §8.3 halt: a FIRED status is
+        logged once per OK→FIRED transition (and surfaced to WandB via
+        ``_log_step``), but never flattens positions or writes the kill_file.
+        A clear (FIRED→OK) is logged at INFO. No-op when the tracker is
+        disabled (no ``gates.retrain`` block). Robust to the Bybit-demo
+        ``None`` fee/fill/qty case — the tracker skips such fills.
+        """
+        if self._cost_drift_tracker is None or order is None:
+            return
+        report = self._cost_drift_tracker.observe(
+            fee=getattr(order, "fee", None),
+            avg_fill_price=getattr(order, "avg_fill_price", None),
+            decision_price=decision_price,
+            filled_quantity=getattr(order, "filled_quantity", None),
+        )
+        self._cost_drift_last_report = report
+        if report.status == CostDriftStatus.FIRED:
+            if not self._cost_drift_fired:
+                logger.warning(f"[cost_drift] {report.reason}")
+                self._cost_drift_fired = True
+        elif report.status == CostDriftStatus.OK and self._cost_drift_fired:
+            logger.info(
+                f"[cost_drift] cleared at bar {self._total_bars} — "
+                f"cost_ratio={report.cost_ratio:.3f} back within "
+                f"{report.cost_drift_ratio}",
+            )
+            self._cost_drift_fired = False
+
     async def _apply_drift_status(self, report, bar_time: datetime) -> None:
         """Dispatch a Protocol v2.2 §8.2 DriftReport into engine side-effects.
 
@@ -2828,6 +2919,20 @@ class LiveTradingEngine:
         if order is not None:
             metrics["order_fee"] = order.fee
             metrics["order_fill_price"] = order.avg_fill_price
+
+        # Protocol v2 §4.5 #6 cost-drift telemetry (rolling realized vs config
+        # cost). Emitted every bar so the ratio trend is visible even between
+        # fills; None-valued stats (warmup / log-only) are filtered like the
+        # §8.2 drift report. `drift/cost_fired` is the retrain-trigger flag —
+        # informational only (no halt; see _observe_cost_drift).
+        if self._cost_drift_tracker is not None:
+            _cd = self._cost_drift_tracker.snapshot()
+            metrics["drift/cost_fired"] = int(_cd["status"] == CostDriftStatus.FIRED)
+            metrics["drift/cost_n_trades"] = _cd["n_trades"]
+            if _cd["cost_ratio"] is not None:
+                metrics["drift/cost_ratio"] = _cd["cost_ratio"]
+            if _cd["realized_cost_frac_mean"] is not None:
+                metrics["drift/cost_realized_frac_mean"] = _cd["realized_cost_frac_mean"]
 
         # PRISM regime info (if available)
         if regime_info and not regime_info.get("fallback", False):

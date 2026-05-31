@@ -10,6 +10,11 @@ from finrl_pro_ds.monitoring.agreement_decay import (
     AgreementDecayStatus,
     AgreementDecayTracker,
 )
+from finrl_pro_ds.monitoring.cost_drift import (
+    CostDriftReport,
+    CostDriftStatus,
+    CostDriftTracker,
+)
 from finrl_pro_ds.monitoring.kill_file import (
     CRIT_REASONS,
     REASON_AGREEMENT_DECAY_CRIT,
@@ -27,6 +32,9 @@ __all__ = [
     "AgreementDecayTracker",
     "CONSENSUS_RULES",
     "CRIT_REASONS",
+    "CostDriftReport",
+    "CostDriftStatus",
+    "CostDriftTracker",
     "DriftStatus",
     "REASON_AGREEMENT_DECAY_CRIT",
     "REASON_DRIFT_CRIT",
