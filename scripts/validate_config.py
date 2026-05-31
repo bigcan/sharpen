@@ -1246,6 +1246,8 @@ def check_paper_deploy(cfg: dict, r: ValidationResult) -> None:
     # prop-firm strategies.
     check_v23_swap_handshake(cfg, r)
     check_v23_agreement_decay_gates(cfg, r)
+    # X6 (§4.5): offline retrain_policy gate + live gates.retrain cost-drift.
+    check_retrain_gate(cfg, r)
 
 
 def check_challenge_block(cfg: dict, r: ValidationResult) -> None:
@@ -1595,6 +1597,142 @@ def check_v23_agreement_decay_gates(cfg: dict, r: ValidationResult) -> None:
             f"gates.drift.agreement_flat_window_bars={window} too small — "
             f"minimum 100 (default 2000); short windows generate false CRITs"
         )
+
+
+# retrain_policy keys required for the offline gate (check_retrain_triggers.py)
+# to run once `enabled: true` (each is dereferenced unconditionally there).
+_RETRAIN_POLICY_REQUIRED_KEYS = (
+    "last_trained_date",
+    "staleness_cap_days",
+    "validation_pf_baseline",
+    "oos_pf_floor_ratio",
+    "gate_window_days",
+    "backtest_config_ref",
+    "data_file_path",
+)
+
+
+def _num(d: dict, key: str):
+    """Return d[key] if it is a real (non-bool) number, else None."""
+    v = d.get(key)
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def check_retrain_gate(cfg: dict, r: ValidationResult) -> None:
+    """Protocol v2 §4.5 retrain-trigger schema (paper-deploy stage, X6).
+
+    Two complementary, intentionally-distinct blocks (NOT duplicative — see
+    docs/protocol_v2.md §4.5):
+      * ``retrain_policy:`` drives the offline cron OOS-PF / staleness /
+        live-DD / feature-drift-KS gate (scripts/check_retrain_triggers.py).
+      * ``gates.retrain.cost_drift_*`` drives the LIVE CostDriftTracker
+        (§4.5 trigger #6 → WandB ``drift/cost_ratio``).
+
+    Missing blocks are WARN for prop-firm (one-release-cycle grace, mirroring
+    the v2.6 feature_variance_veto rollout) so live configs that predate X6
+    keep validating; a declared-but-malformed value is always a FAIL (it would
+    crash CostDriftTracker / check_retrain_triggers at runtime).
+    """
+    prop_firm = _is_prop_firm(cfg)
+
+    # --- gates.retrain.cost_drift_* (consumed by the live CostDriftTracker) ---
+    retrain_gates = (cfg.get("gates", {}) or {}).get("retrain") or {}
+    if not retrain_gates:
+        if prop_firm:
+            r.warn(
+                "gates.retrain absent — Protocol v2 §4.5 cost-drift trigger #6 "
+                "(CostDriftTracker) is DISABLED for this live config. Declare "
+                "gates.retrain.cost_drift_ratio (>1.0) + cost_drift_window_trades "
+                "(int>=1), mirroring the canonical <ws>_ensemble.gates.yaml "
+                "(S551-cont-9 both-files rule). WARN this cycle; blocking after "
+                "rollout to all live configs."
+            )
+    else:
+        ratio = retrain_gates.get("cost_drift_ratio")
+        if ratio is not None and not (
+            isinstance(ratio, (int, float)) and not isinstance(ratio, bool)
+            and float(ratio) > 1.0
+        ):
+            r.fail(
+                f"gates.retrain.cost_drift_ratio must be a number > 1.0 "
+                f"(CostDriftTracker rejects <=1.0); got {ratio!r}"
+            )
+        window = retrain_gates.get("cost_drift_window_trades")
+        if window is not None and not (
+            isinstance(window, int) and not isinstance(window, bool) and window >= 1
+        ):
+            r.fail(
+                f"gates.retrain.cost_drift_window_trades must be an int >= 1; "
+                f"got {window!r}"
+            )
+        if ratio is not None and window is not None:
+            r.ok("gates.retrain cost-drift keys present and well-formed (§4.5 #6)")
+
+    # --- retrain_policy (offline gate) ---
+    policy = cfg.get("retrain_policy")
+    if not policy:
+        if prop_firm:
+            r.warn(
+                "retrain_policy absent — the offline retrain gate "
+                "(check_retrain_triggers.py) returns CONFIG_MISSING for this "
+                "strategy (no automated OOS/staleness/drift degradation "
+                "detector). Add the block (audit P10-03). WARN this cycle; "
+                "blocking after rollout to all live configs."
+            )
+        return
+    if not policy.get("enabled", False):
+        r.warn("retrain_policy.enabled is false — offline retrain gate disabled")
+        return
+
+    missing = [k for k in _RETRAIN_POLICY_REQUIRED_KEYS if k not in policy]
+    if missing:
+        r.fail(
+            f"retrain_policy enabled but missing required key(s): {missing} — "
+            f"check_retrain_triggers.py dereferences each unconditionally"
+        )
+
+    # Checkpoint resolvability (P10-03 reconcile): bundle deploys leave
+    # agent.checkpoint_path empty, so the OOS backtest needs an explicit
+    # retrain_policy.checkpoint_path; solo deploys may use agent.checkpoint_path.
+    ckpt = policy.get("checkpoint_path") or (cfg.get("agent", {}) or {}).get(
+        "checkpoint_path",
+    )
+    if not ckpt:
+        r.fail(
+            "retrain_policy enabled but no checkpoint to backtest — set "
+            "retrain_policy.checkpoint_path (bundle deploys leave "
+            "agent.checkpoint_path empty)"
+        )
+
+    floor = _num(policy, "oos_pf_floor_ratio")
+    if floor is not None and not (0.0 < floor <= 1.0):
+        r.fail(f"retrain_policy.oos_pf_floor_ratio must be in (0, 1]; got {floor}")
+    dd = _num(policy, "dd_trigger_ratio")
+    if dd is not None and not (0.0 < dd <= 1.0):
+        r.fail(f"retrain_policy.dd_trigger_ratio must be in (0, 1]; got {dd}")
+    ks = _num(policy, "feature_drift_ks_stat_threshold")
+    if ks is not None and not (0.0 < ks <= 1.0):
+        r.fail(
+            f"retrain_policy.feature_drift_ks_stat_threshold must be in (0, 1]; "
+            f"got {ks}"
+        )
+    baseline = _num(policy, "validation_pf_baseline")
+    if baseline is not None and baseline <= 0.0:
+        r.fail(f"retrain_policy.validation_pf_baseline must be > 0; got {baseline}")
+    for key in ("staleness_cap_days", "gate_window_days"):
+        v = _num(policy, key)
+        if v is not None and v <= 0:
+            r.fail(f"retrain_policy.{key} must be > 0; got {v}")
+    ltd = policy.get("last_trained_date")
+    if ltd is not None:
+        try:
+            datetime.fromisoformat(str(ltd))
+        except ValueError:
+            r.fail(
+                f"retrain_policy.last_trained_date not ISO-parseable: {ltd!r}"
+            )
+    if not missing and ckpt:
+        r.ok("retrain_policy block present and well-formed (offline §4.5 gate)")
 
 
 STAGE_CHECKS = {

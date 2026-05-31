@@ -1,6 +1,7 @@
 """Tests for scripts/validate_config.py (subset covering rev-2 additions)."""
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from scripts.validate_config import (  # noqa: E402
     check_challenge_block,
     check_drift_baseline_manifest_schema,
     check_legacy_prop_firm_block,
+    check_retrain_gate,
     check_static_peak_consistency,
     check_v23_agreement_decay_gates,
     check_v23_swap_handshake,
@@ -225,10 +227,6 @@ def test_static_peak_consistency_neither_set_is_silent():
 # ---------------------------------------------------------------------------
 # check_drift_baseline_manifest_schema (S495 Open Question #5)
 # ---------------------------------------------------------------------------
-
-import json
-
-import pytest
 
 
 def _prop_firm_cfg(baseline: str | None = None) -> dict:
@@ -509,3 +507,131 @@ def test_swap_handshake_passes_with_explicit_state_file():
     assert r.failures == []
     assert any("last_bundle.json" in p for p in r.passed)
     assert any("swap_approved" in p for p in r.passed)
+
+
+# ---------------------------------------------------------------------------
+# check_retrain_gate (X6 — Protocol v2 §4.5 retrain automation)
+# ---------------------------------------------------------------------------
+
+def _retrain_cfg(*, prop_firm=True, with_policy=True, with_gates=True, **policy_over):
+    """Build a minimal live config for check_retrain_gate."""
+    cfg: dict = {
+        "wandb": {"tags": ["prop-firm"] if prop_firm else ["research"]},
+        "agent": {"checkpoint_path": ""},  # bundle deploy: empty agent ckpt
+    }
+    if with_gates:
+        cfg["gates"] = {"retrain": {"cost_drift_ratio": 1.20,
+                                    "cost_drift_window_trades": 100}}
+    if with_policy:
+        policy = {
+            "enabled": True,
+            "last_trained_date": "2026-02-01",
+            "staleness_cap_days": 180,
+            "validation_pf_baseline": 2.46,
+            "oos_pf_floor_ratio": 0.70,
+            "dd_trigger_ratio": 0.50,
+            "gate_window_days": 90,
+            "feature_drift_ks_stat_threshold": 0.20,
+            "backtest_config_ref": "configs/x.yaml",
+            "data_file_path": "data/x.parquet",
+            "checkpoint_path": "checkpoints/x/checkpoint_final.pth",
+        }
+        policy.update(policy_over)
+        cfg["retrain_policy"] = policy
+    return cfg
+
+
+def test_retrain_gate_wellformed_passes():
+    r = ValidationResult()
+    check_retrain_gate(_retrain_cfg(), r)
+    assert r.failures == []
+    assert any("cost-drift keys present" in p for p in r.passed)
+    assert any("retrain_policy block present" in p for p in r.passed)
+
+
+def test_retrain_gate_cost_ratio_le_one_fails():
+    r = ValidationResult()
+    cfg = _retrain_cfg()
+    cfg["gates"]["retrain"]["cost_drift_ratio"] = 1.0
+    check_retrain_gate(cfg, r)
+    assert any("cost_drift_ratio must be a number > 1.0" in f for f in r.failures)
+
+
+def test_retrain_gate_window_must_be_int_ge_one():
+    r = ValidationResult()
+    cfg = _retrain_cfg()
+    cfg["gates"]["retrain"]["cost_drift_window_trades"] = 0
+    check_retrain_gate(cfg, r)
+    assert any("cost_drift_window_trades must be an int >= 1" in f for f in r.failures)
+
+
+def test_retrain_gate_missing_gates_retrain_warns_propfirm():
+    r = ValidationResult()
+    check_retrain_gate(_retrain_cfg(with_gates=False), r)
+    assert r.failures == []  # WARN, not FAIL
+    assert any("gates.retrain absent" in w for w in r.warnings)
+
+
+def test_retrain_gate_missing_policy_warns_propfirm():
+    r = ValidationResult()
+    check_retrain_gate(_retrain_cfg(with_policy=False), r)
+    assert r.failures == []
+    assert any("retrain_policy absent" in w for w in r.warnings)
+
+
+def test_retrain_gate_non_propfirm_missing_is_silent():
+    r = ValidationResult()
+    check_retrain_gate(_retrain_cfg(prop_firm=False, with_policy=False,
+                                    with_gates=False), r)
+    assert r.failures == []
+    assert r.warnings == []
+
+
+def test_retrain_gate_enabled_missing_required_key_fails():
+    r = ValidationResult()
+    cfg = _retrain_cfg()
+    del cfg["retrain_policy"]["validation_pf_baseline"]
+    check_retrain_gate(cfg, r)
+    assert any("missing required key" in f for f in r.failures)
+
+
+def test_retrain_gate_bundle_deploy_no_checkpoint_fails():
+    # Bundle deploy: agent.checkpoint_path empty AND no retrain_policy.checkpoint_path.
+    r = ValidationResult()
+    cfg = _retrain_cfg()
+    del cfg["retrain_policy"]["checkpoint_path"]
+    check_retrain_gate(cfg, r)
+    assert any("no checkpoint to backtest" in f for f in r.failures)
+
+
+def test_retrain_gate_agent_checkpoint_fallback_ok():
+    # Solo deploy: no retrain_policy.checkpoint_path but agent.checkpoint_path set.
+    r = ValidationResult()
+    cfg = _retrain_cfg()
+    del cfg["retrain_policy"]["checkpoint_path"]
+    cfg["agent"]["checkpoint_path"] = "checkpoints/solo/checkpoint_final.pth"
+    check_retrain_gate(cfg, r)
+    assert not any("no checkpoint to backtest" in f for f in r.failures)
+
+
+def test_retrain_gate_oos_floor_out_of_range_fails():
+    r = ValidationResult()
+    cfg = _retrain_cfg(oos_pf_floor_ratio=1.5)
+    check_retrain_gate(cfg, r)
+    assert any("oos_pf_floor_ratio must be in (0, 1]" in f for f in r.failures)
+
+
+def test_retrain_gate_disabled_policy_warns_no_keychecks():
+    r = ValidationResult()
+    cfg = _retrain_cfg(enabled=False)
+    del cfg["retrain_policy"]["validation_pf_baseline"]  # would FAIL if validated
+    check_retrain_gate(cfg, r)
+    assert r.failures == []
+    assert any("retrain_policy.enabled is false" in w for w in r.warnings)
+
+
+def test_retrain_gate_bad_last_trained_date_fails():
+    r = ValidationResult()
+    cfg = _retrain_cfg(last_trained_date="not-a-date")
+    check_retrain_gate(cfg, r)
+    assert any("last_trained_date not ISO-parseable" in f for f in r.failures)

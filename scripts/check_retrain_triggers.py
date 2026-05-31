@@ -306,7 +306,17 @@ def evaluate(live_cfg_path: Path, live_dd_pct: float | None, report_dir: Path) -
             window_end = data_max
             window_start = window_end - timedelta(days=window_days)
 
-        checkpoint_path = live_cfg["agent"]["checkpoint_path"]
+        # Prefer an explicit retrain_policy.checkpoint_path (bundle-deployed
+        # strategies leave agent.checkpoint_path empty — the policy lives in
+        # the bundle — so the offline OOS backtest needs the raw checkpoint
+        # named here). Fall back to agent.checkpoint_path for solo-checkpoint
+        # deploys (e.g. gmgp1-btc) that don't set it. P10-03 schema reconcile.
+        checkpoint_path = policy.get("checkpoint_path") or live_cfg.get("agent", {}).get("checkpoint_path")
+        if not checkpoint_path:
+            return {
+                "decision": "CONFIG_MISSING",
+                "reason": "no checkpoint_path in retrain_policy or agent block",
+            }
         metrics = _run_oos_backtest(backtest_cfg, checkpoint_path, window_start, window_end)
         oos_pf = float(metrics.get("backtest/profit_factor", 0.0))
         baseline = float(policy["validation_pf_baseline"])
