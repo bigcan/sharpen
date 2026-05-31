@@ -463,6 +463,8 @@ def run_cell(
     checkpoint_paths: Dict[int, str],
     out_dir: Path,
     device: str = "cpu",
+    pf_xcheck_report_only: bool = PF_XCHECK_REPORT_ONLY,
+    pf_xcheck_divergence_halt: float = PF_XCHECK_DIVERGENCE_HALT,
 ) -> CellResult:
     """Run one grid cell: override env knobs, load agents, roll test split.
 
@@ -473,6 +475,14 @@ def run_cell(
 
     ``rule_fn`` must conform to the ``run_rule`` signature: callable
     ``(per_seed_actions: Dict[int, np.ndarray], deadband: float) -> np.ndarray``.
+
+    N2 (Protocol v2.7-A, gates-driven): ``pf_xcheck_report_only`` and
+    ``pf_xcheck_divergence_halt`` are resolved by the orchestrator from
+    ``gates.pf_xcheck_report_only`` / ``gates.pf_xcheck_divergence_halt`` (ADR-N5).
+    They default to the module constants so direct callers and unit tests keep
+    the shipped Phase-α behavior (report-only, 0.30). Promoting them out of code
+    constants makes the report-only -> enforce flip a per-workstream config
+    operation, honoring the CLAUDE.md "no hardcoded gate thresholds" invariant.
     """
     _assert_invariants(config)
 
@@ -505,21 +515,23 @@ def run_cell(
         if not np.isnan(_mid).all():
             pv_mid = _mid
     pf_xcheck = compute_pf_xcheck(
-        pv_close, pv_mid=pv_mid, report_only=PF_XCHECK_REPORT_ONLY,
+        pv_close, pv_mid=pv_mid,
+        halt_threshold=pf_xcheck_divergence_halt,
+        report_only=pf_xcheck_report_only,
     )
-    if pv_mid is not None and pf_xcheck.divergence > PF_XCHECK_DIVERGENCE_HALT:
+    if pv_mid is not None and pf_xcheck.divergence > pf_xcheck_divergence_halt:
         log.warning(
             "[%s] PF-XCHECK divergence %.3f > %.2f (report_only=%s): close-marked "
             "vs (H+L)/2-marked PF disagree (pf_close=%.3f pf_mid=%.3f).",
-            spec.label(), pf_xcheck.divergence, PF_XCHECK_DIVERGENCE_HALT,
-            PF_XCHECK_REPORT_ONLY, pf_xcheck.pf_close, pf_xcheck.pf_mid,
+            spec.label(), pf_xcheck.divergence, pf_xcheck_divergence_halt,
+            pf_xcheck_report_only, pf_xcheck.pf_close, pf_xcheck.pf_mid,
         )
     pf_test = pf_from_pv(pv_close)
     mdd_test = mdd_from_pv(pv_close)
     halt = pf_xcheck.status == "HALT"
     halt_reason = (
         f"PF-XCHECK divergence {pf_xcheck.divergence:.3f} > "
-        f"{PF_XCHECK_DIVERGENCE_HALT}"
+        f"{pf_xcheck_divergence_halt}"
         if halt
         else None
     )

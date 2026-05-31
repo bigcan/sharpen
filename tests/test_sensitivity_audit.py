@@ -146,8 +146,25 @@ def test_pf_xcheck_report_only_suppresses_halt():
     assert result.pass_
     # Divergence is still computed and surfaced for calibration.
     assert result.divergence > PF_XCHECK_DIVERGENCE_HALT
-    # The shipped default is Phase-α report-only.
+    # The shipped default is Phase-α report-only; gates can override per
+    # workstream once the threshold is locked (N2/ADR-N5).
     assert PF_XCHECK_REPORT_ONLY is True
+
+
+def test_run_cell_pf_xcheck_params_default_to_module_constants():
+    """N2 (ADR-N5): run_cell exposes gates-driven PF-XCHECK params that default
+    to the module constants, so direct callers/tests keep the shipped Phase-α
+    behavior while the orchestrator overrides them from the gates overlay."""
+    import inspect
+
+    from finrl_pro_ds.eval.sensitivity_audit import run_cell
+
+    sig = inspect.signature(run_cell)
+    assert sig.parameters["pf_xcheck_report_only"].default is PF_XCHECK_REPORT_ONLY
+    assert (
+        sig.parameters["pf_xcheck_divergence_halt"].default
+        == PF_XCHECK_DIVERGENCE_HALT
+    )
 
 
 def test_pf_xcheck_denominator_is_close_marked():

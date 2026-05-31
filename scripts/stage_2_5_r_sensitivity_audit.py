@@ -46,6 +46,8 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from finrl_pro_ds.eval.sensitivity_audit import (  # noqa: E402
+    PF_XCHECK_DIVERGENCE_HALT,
+    PF_XCHECK_REPORT_ONLY,
     CellResult,
     CellSpec,
     InvariantViolation,
@@ -90,6 +92,23 @@ def _load_gates(gates_path: Path) -> Dict[str, Any]:
     with gates_path.open(encoding="utf-8") as f:
         data = yaml.safe_load(f) or {}
     return dict(data.get("gates") or {})
+
+
+def _resolve_pf_xcheck_gates(gates: Dict[str, Any]) -> tuple[bool, float]:
+    """Resolve the N2 PF-XCHECK controls from the gates overlay (ADR-N5).
+
+    ``gates.pf_xcheck_report_only`` (default ``True``) and
+    ``gates.pf_xcheck_divergence_halt`` (default ``0.30``) promote the
+    report-only -> enforce flip and the divergence threshold out of code
+    constants into per-workstream config — the CLAUDE.md "no hardcoded gate
+    thresholds" invariant. Falls back to the module constants when a key is
+    absent, so Phase-α gates yamls behave identically to the shipped code.
+    """
+    report_only = bool(gates.get("pf_xcheck_report_only", PF_XCHECK_REPORT_ONLY))
+    divergence_halt = float(
+        gates.get("pf_xcheck_divergence_halt", PF_XCHECK_DIVERGENCE_HALT),
+    )
+    return report_only, divergence_halt
 
 
 def _resolve_deployed_config(
@@ -205,6 +224,12 @@ def _cell_worker(payload: Dict[str, Any]) -> CellResult:
         checkpoint_paths=payload["checkpoint_paths"],
         out_dir=Path(payload["out_dir"]),
         device=payload["device"],
+        pf_xcheck_report_only=payload.get(
+            "pf_xcheck_report_only", PF_XCHECK_REPORT_ONLY,
+        ),
+        pf_xcheck_divergence_halt=payload.get(
+            "pf_xcheck_divergence_halt", PF_XCHECK_DIVERGENCE_HALT,
+        ),
     )
 
 
@@ -427,6 +452,12 @@ def main(argv: Optional[List[str]] = None) -> int:
         return EXIT_PREFLIGHT
     gates = _load_gates(gates_path)
     log.info(f"gates loaded: {gates_path} ({len(gates)} keys)")
+    pf_xcheck_report_only, pf_xcheck_divergence_halt = _resolve_pf_xcheck_gates(gates)
+    log.info(
+        f"PF-XCHECK (N2): report_only={pf_xcheck_report_only} "
+        f"divergence_halt={pf_xcheck_divergence_halt} "
+        f"({'calibration — surfaced, never halts' if pf_xcheck_report_only else 'ENFORCE — diverging cells HALT'})"
+    )
 
     # --- 3. Load L1 config (optional in dry-run; required otherwise) ---
     cli_config: Optional[Dict[str, Any]] = None
@@ -536,6 +567,12 @@ def main(argv: Optional[List[str]] = None) -> int:
                 "device": "cpu",  # SAC inference is small; CPU is the safe default
             }
 
+        # N2 (ADR-N5): PF-XCHECK report-only mode + divergence threshold are
+        # gates-driven (resolved above); thread them to every cell via the
+        # shared payload. dry-run cells ignore them (SKIPPED status).
+        payload_base["pf_xcheck_report_only"] = pf_xcheck_report_only
+        payload_base["pf_xcheck_divergence_halt"] = pf_xcheck_divergence_halt
+
         if n_par > 1:
             log.info(
                 f"running {len(cells_spec)} cells across {n_par} worker "
@@ -599,6 +636,12 @@ def main(argv: Optional[List[str]] = None) -> int:
     # gate was treated as informational-only (SOLO_BEST_FALLBACK).
     block["stage_2_5_decision"] = stage25_decision
     block["informational_only"] = informational_only
+    # N2 (ADR-N5): record the PF-XCHECK controls this run used so the
+    # post-retrain "lock the threshold" review can read the calibration basis.
+    block["pf_xcheck_config"] = {
+        "report_only": pf_xcheck_report_only,
+        "divergence_halt": pf_xcheck_divergence_halt,
+    }
 
     out_path = out_dir / f"verdict_{args.out_suffix}.json"
     write_verdict_v26(verdict_path, block, deployed_config, out_path)
