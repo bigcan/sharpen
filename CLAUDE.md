@@ -125,13 +125,13 @@ Skill chain extension: code change to training pipeline → **validate_config** 
 ## Skills (auto-dispatch)
 
 Project skills at `.claude/skills/` (Deploy, Monitor, Dashboard, Docker, Live-Trading, Live-Monitor, Collect-Run).
-User skills at `~/.claude/skills/` (Audit, Memory, Optimization, Math, WandB, Researcher, Architect, Skill-Evolve, Randy).
+User skills at `~/.claude/skills/` (Audit, Memory, Optimization, Math, WandB, Researcher, Architect, Skill-Evolve).
 Both `SKILL.md` and (if present) `FINRL.md` must be read when triggered.
 
 **Core chains:**
 - Code change → **Audit** (mandatory). + **Math** if formulas. + **Optimization** if perf.
 - Deploy → Monitor → Optimization → Deploy → Monitor → Dashboard
-- Session start → Memory boot. `/sync` → Memory → Randy (if gateway) → Skill-Evolve (staleness) → git commit
+- Session start → Memory boot. `/sync` → Memory → Skill-Evolve (staleness) → git commit
 - HPO complete → WandB → Memory → Dashboard → git commit
 - Run finished → **Collect-Run** (fetch metrics + checkpoint + report) → Dashboard → (Audit if reward/formula changed)
 - Research question → Researcher (query NotebookLM KB `4aef5475-7fec-4d1f-96a7-efb3cafbb371` before web search — see `reference_notebooklm_knowledge_base` memory) → (GO) → Architect → implement → Audit
