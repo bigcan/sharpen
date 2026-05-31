@@ -405,6 +405,62 @@ def run_wf_ensemble(wf_config_path: str, gates_path: str, device: str,
 
     verdict = _evaluate_gates(per_fold_metrics, fold_status, gates_cfg, seeds,
                               chosen_rule=chosen_rule)
+
+    # --- X3: fixed-lot stress sub-report (no early-term truncation) ----------
+    # Protocol v2 Stage 3 + audit P7-03/P7-07: the engine's buffered 8% early-term
+    # can truncate the recorded trailing DD, making the Velotrade G4 buffer
+    # near-non-binding. Reconstruct the honest fixed-lot worst DD + peak leverage
+    # from the GRADED rule's per-fold trajectories and gate it (stress_dd_buffer_pp /
+    # stress_leverage_max). A real breach flips OVERALL; an early-terminated fold
+    # flags INCOMPLETE_NEEDS_REROLLOUT (never silently passed).
+    from finrl_pro_ds.eval.fixed_lot_stress import compute_stress_subreport  # lazy
+    gates_block = gates_cfg.get("gates", {}) or {}
+    # Grade the SAME rule _evaluate_gates graded (single source of truth:
+    # verdict["graded_rule"] = chosen_rule or top-level gates_cfg["aggregation_rule"]),
+    # so the stress block can never diverge from the verdict's gate rule.
+    graded_rule = verdict.get("graded_rule")
+    init_bal = float((wf_cfg.get("env", {}) or {}).get("initial_balance", 100000.0))
+    stress_parquets = []
+    if graded_rule:
+        for i, st in enumerate(fold_status):
+            if not str(st).startswith("ok"):
+                continue
+            p = root_out / f"fold_{i:02d}" / f"{graded_rule}_trajectory.parquet"
+            if p.exists():
+                stress_parquets.append((f"fold_{i:02d}", p))
+    if graded_rule and stress_parquets:
+        stress = compute_stress_subreport(
+            stress_parquets, gates=gates_block, initial_balance=init_bal,
+            trailing_cap_pct=VELOTRADE_TRAILING_CAP_PCT, graded_rule=graded_rule,
+        )
+    else:
+        stress = {
+            "status": "SKIPPED", "stress_pass": False,
+            "note": (f"no graded-rule trajectories found "
+                     f"(graded_rule={graded_rule!r}, n={len(stress_parquets)})"),
+        }
+    verdict["stress"] = stress
+    verdict.setdefault("gates", {})["G_STRESS"] = {
+        "pass": stress.get("stress_pass", False),
+        "status": stress.get("status"),
+        "worst_fixed_trailing_mdd_pct": stress.get("worst_fixed_trailing_mdd_pct"),
+        "stress_dd_buffer_pp": stress.get("stress_dd_buffer_pp"),
+        "peak_leverage": stress.get("peak_leverage"),
+    }
+    if stress.get("status") == "FAIL":
+        verdict["overall"] = "FAIL"
+        verdict["stress_override"] = "overall set FAIL by X3 fixed-lot stress gate"
+        log.warning("X3 stress gate FAIL -> overall=FAIL (worst fixed DD %s%%, "
+                    "buffer %spp < %spp min, peak lev %s)",
+                    stress.get("worst_fixed_trailing_mdd_pct"),
+                    stress.get("stress_dd_buffer_pp"),
+                    stress.get("stress_dd_buffer_pp_min"),
+                    stress.get("peak_leverage"))
+    elif stress.get("status") == "INCOMPLETE_NEEDS_REROLLOUT":
+        log.warning("X3 stress INCOMPLETE: %d fold(s) early-terminated -> re-rollout "
+                    "with termination disabled needed for honest DD. NOT a pass.",
+                    len(stress.get("early_terminated_folds", [])))
+
     (root_out / "verdict.json").write_text(json.dumps(verdict, indent=2, default=str))
 
     rows = []
