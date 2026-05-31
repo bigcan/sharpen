@@ -32,15 +32,19 @@
 #   python scripts/launch_sg1_btc_decay01_wf_multiseed.py \
 #       --config configs/sg1_btc_velotrade_decay01_x1_wf_multiseed.yaml \
 #       --run_name_prefix sg1-btc-x1-wf  ... (instance/slots per fleet)
-# Post-train eval (no GPU):
+# Post-train eval (no GPU). --output_dir is MANDATORY: the shared gates file's
+# `workstream: sg1_btc` makes run_wf_ensemble default to results/sg1_btc_ensemble_wf/
+# (the LEAKED decay01 dir) — passing the *_x1 dir keeps artifacts disjoint AND is
+# where the vol-target step below reads from.
 #   python scripts/sg1_btc_velotrade_ensemble_eval.py \
 #       --wf_config configs/sg1_btc_velotrade_decay01_x1_wf_multiseed.yaml \
-#       --gates_file configs/sg1_btc_velotrade_ensemble.gates.yaml --device cpu
-# Then vol-target re-validation:
+#       --gates_file configs/sg1_btc_velotrade_ensemble.gates.yaml \
+#       --output_dir results/sg1_btc_velotrade_decay01_x1_ensemble_wf --device cpu
+# Then vol-target re-validation (--results_dir MUST match the eval --output_dir):
 #   python scripts/sg1_btc_vol_target_eval.py \
 #       --results_dir results/sg1_btc_velotrade_decay01_x1_ensemble_wf \
 #       --wf_config configs/sg1_btc_velotrade_decay01_x1_wf_multiseed.yaml \
-#       --seeds <X1 top3>
+#       --seeds 123 2025 42
 
 workstream: sg1_btc_velotrade_decay01_x1
 
@@ -141,14 +145,22 @@ hpo:
   enabled: false
 
 ensemble:
-  # ⚠️ PLACEHOLDER — FILL from X1 results/sg1_btc_velotrade_decay01_x1/seed_report.json
-  # (top3_by_val_argmax_pf) AFTER X1 completes + reconcile. EMPTY on purpose so a
-  # premature launch fails loudly instead of running the leaked seeds.
-  seeds: []
-  # chosen_rule: <fill from X1 Stage-2.5-R verdict>  (likely solo / ens_mean)
-  rules: ["ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
+  # X1 de-leaked top-3 by val_argmax_pf (S553-cont-13 collect+reconcile, healthy seeds only).
+  # Source: results/sg1_btc_velotrade_decay01_x1/seed_report.json top3_by_val_argmax_pf.
+  #   seed 123 : val PF 1.0010 / test PF 1.2185 (WandB wxo59x3j)
+  #   seed 2025: val PF 0.9982 / test PF 1.2504 (WandB yk2ii09w)
+  #   seed 42  : val PF 0.9854 / test PF 1.2081 (WandB ly0hz3sr)
+  # Degenerate (non-trading, <100 test trades) seeds 789/1024/3141 EXCLUDED. val window
+  # is ~16 trades (near-noise) so this is a CANDIDATE set; wf_median_pf is the real
+  # arbiter and the final deploy pick is SOLO (cost-corrected WF rejected the ensemble).
+  seeds: [123, 2025, 42]
+  # MUST include the per-seed solo_<seed> rules (mirrors the leaked-WF config):
+  # run_wf_ensemble only evaluates rules present here, and G1/G2/G3 + the
+  # best-solo seed-pick + vol_target_eval all read fold_XX/solo_<seed>_trajectory.parquet.
+  # Omitting solos => degenerate verdict (best_solo=None) + empty vol_target. (S553-cont-17 de-risk)
+  rules: ["solo_123", "solo_2025", "solo_42", "ens_mean", "ens_median", "ens_agreement", "ens_pf_weighted"]
   checkpoint_pattern: "checkpoints/sg1-btc-x1-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth"
-  seed_pfs: {}                         # FILL from X1 seed_report val_argmax test PFs
+  seed_pfs: {123: 1.2185, 2025: 1.2504, 42: 1.2081}   # X1 L1 test PFs (val_argmax top-3)
   gates_file: "configs/sg1_btc_velotrade_ensemble.gates.yaml"
 
 gates:
