@@ -928,7 +928,9 @@ def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
         "sensitivity_max_leverage_mults: [0.5, 1.0, 1.5], "
         "sensitivity_deployable_max_leverage_cap: <deployed env.max_leverage>, "
         "sensitivity_audit_required_min_deployable_neighbors: 4, "
-        "sensitivity_audit_required: false (Phase α) → true (Phase β)."
+        "sensitivity_audit_required: false (Phase α) → true (Phase β), "
+        "pf_xcheck_report_only: true (Phase α) → false (enforce, post-calibration), "
+        "pf_xcheck_divergence_halt: 0.30."
     )
 
     floor = gates.get("edge_stability_pf_ratio_floor")
@@ -1037,6 +1039,46 @@ def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
             f"gates.sensitivity_audit_required={required!r} must be boolean "
             "(true/false)"
         )
+
+    # N2 (ADR-N5, Protocol v2.7-A): PF-XCHECK report-only mode + divergence
+    # threshold are gates-driven. report_only=true surfaces the (H+L)/2-vs-close
+    # PF divergence without halting (Phase-α calibration); flip false to enforce
+    # only after locking the threshold on the retrained policy's observed
+    # divergence. Promoted out of code constants per "no hardcoded gate
+    # thresholds" (CLAUDE.md).
+    report_only = gates.get("pf_xcheck_report_only")
+    if report_only is None:
+        # Optional under Phase α (code default = report-only). Once the audit is
+        # required (Phase β), the report-only -> enforce decision must be a
+        # deliberate, recorded config value rather than a silent code default.
+        if isinstance(required, bool) and required:
+            msg = (
+                "gates.pf_xcheck_report_only not set while "
+                "sensitivity_audit_required=true — the report-only -> enforce "
+                "decision must be explicit in Phase β. Set false only after "
+                "locking pf_xcheck_divergence_halt against observed divergence."
+            )
+            r.fail(msg) if prop_firm else r.warn(msg)
+    elif not isinstance(report_only, bool):
+        r.fail(
+            f"gates.pf_xcheck_report_only={report_only!r} must be boolean "
+            "(true/false)"
+        )
+
+    halt_div = gates.get("pf_xcheck_divergence_halt")
+    if halt_div is not None:
+        try:
+            halt_div_f = float(halt_div)
+            if not (0.0 < halt_div_f <= 1.0):
+                r.warn(
+                    f"gates.pf_xcheck_divergence_halt={halt_div_f} outside sane "
+                    "bound (0, 1]. The CLAUDE.md PF-XCHECK invariant is 0.30; "
+                    "deviate only with a logged calibration rationale."
+                )
+        except (TypeError, ValueError):
+            r.fail(
+                f"gates.pf_xcheck_divergence_halt={halt_div!r} is not numeric"
+            )
 
     if (
         isinstance(required, bool)

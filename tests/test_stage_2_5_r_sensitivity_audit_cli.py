@@ -15,7 +15,6 @@ We do NOT exercise the real rollout path here. C4 ships the CLI; C5 docs
 from __future__ import annotations
 
 import json
-import os
 import sys
 from pathlib import Path
 
@@ -316,3 +315,62 @@ def test_out_suffix_override_writes_named_file(tmp_path, monkeypatch):
     ])
     expected = results_root / "test_ws_ensemble" / "verdict_audit_backfill_20260530.json"
     assert expected.exists()
+
+
+# ---------------------------------------------------------------------------
+# N2 (ADR-N5): gates-driven PF-XCHECK report-only mode + divergence threshold
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_pf_xcheck_gates_defaults_when_absent():
+    """Empty gates → fall back to the module constants (Phase-α behavior)."""
+    report_only, divergence_halt = audit_cli._resolve_pf_xcheck_gates({})
+    assert report_only is audit_cli.PF_XCHECK_REPORT_ONLY
+    assert divergence_halt == audit_cli.PF_XCHECK_DIVERGENCE_HALT
+
+
+def test_resolve_pf_xcheck_gates_reads_overrides():
+    """Enforce flip + custom threshold come from the gates overlay."""
+    report_only, divergence_halt = audit_cli._resolve_pf_xcheck_gates(
+        {"pf_xcheck_report_only": False, "pf_xcheck_divergence_halt": 0.25},
+    )
+    assert report_only is False
+    assert divergence_halt == 0.25
+
+
+def test_resolve_pf_xcheck_gates_coerces_numeric_string():
+    """A YAML-stringified threshold is coerced to float (robust to quoting)."""
+    _, divergence_halt = audit_cli._resolve_pf_xcheck_gates(
+        {"pf_xcheck_divergence_halt": "0.2"},
+    )
+    assert isinstance(divergence_halt, float)
+    assert divergence_halt == pytest.approx(0.2)
+
+
+def test_pf_xcheck_config_recorded_in_verdict_block(tmp_path, monkeypatch):
+    """End-to-end (dry-run): the resolved PF-XCHECK controls are stamped into
+    the verdict's sensitivity_audit block as calibration provenance."""
+    monkeypatch.setenv("WANDB_MODE", "disabled")
+    results_root, configs_root, _, gates_path = _write_workstream_fixture(
+        tmp_path,
+        gates_overrides={
+            "pf_xcheck_report_only": False,
+            "pf_xcheck_divergence_halt": 0.2,
+        },
+    )
+    audit_cli.main([
+        "--workstream", "test_ws",
+        "--gates-file", str(gates_path),
+        "--results-root", str(results_root),
+        "--configs-root", str(configs_root),
+        "--dry-run",
+    ])
+    block = json.loads(
+        (results_root / "test_ws_ensemble" / "verdict_v2_6.json").read_text(
+            encoding="utf-8",
+        )
+    )["sensitivity_audit"]
+    assert block["pf_xcheck_config"] == {
+        "report_only": False,
+        "divergence_halt": 0.2,
+    }

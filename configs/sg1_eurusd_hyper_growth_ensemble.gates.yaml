@@ -81,6 +81,8 @@ gates:
   #   workstreams deployed below 1.0. Set explicitly ONLY to widen coverage (e.g. IB GC/MGC).
   sensitivity_audit_required_min_deployable_neighbors: 4
   sensitivity_audit_required: false               # Phase α; flip true in Phase β after threshold locked
+  pf_xcheck_report_only: true                    # N2/ADR-N5 Phase α: surface (H+L)/2-vs-close PF divergence, never HALT
+  pf_xcheck_divergence_halt: 0.30                # lock per-workstream vs observed divergence, then flip report_only false (enforce)
 
   # v2.3 diversity-aware top-K selection (Phase 0).
   ensemble_top_k: 3

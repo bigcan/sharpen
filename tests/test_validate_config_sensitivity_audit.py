@@ -59,6 +59,10 @@ def _baseline_cfg(
         "sensitivity_deployable_max_leverage_cap": 1.0,
         "sensitivity_audit_required_min_deployable_neighbors": 4,
         "sensitivity_audit_required": True,
+        # N2 (ADR-N5): gates-driven PF-XCHECK controls. A real Phase-β gates
+        # file declares the report-only/enforce mode explicitly.
+        "pf_xcheck_report_only": True,
+        "pf_xcheck_divergence_halt": 0.30,
     }
     for k, v in gates_overrides.items():
         if v is None:
@@ -378,3 +382,60 @@ def test_phase_alpha_v25_dotted_variant_exempt():
     )
     check_sensitivity_audit(cfg, r)
     assert r.failures == [] and r.warnings == [], (r.failures, r.warnings)
+
+
+# ---------------------------------------------------------------------------
+# N2 (ADR-N5): gates-driven PF-XCHECK report-only mode + divergence threshold
+# ---------------------------------------------------------------------------
+
+
+def test_pf_xcheck_report_only_absent_phase_beta_propfirm_fails():
+    """Phase β (audit_required=true) prop-firm config must declare the
+    report-only/enforce mode explicitly — mirrors sensitivity_audit_required."""
+    r = ValidationResult()
+    check_sensitivity_audit(_baseline_cfg(pf_xcheck_report_only=None), r)
+    assert any(
+        "pf_xcheck_report_only not set" in f for f in r.failures
+    ), f"missing explicit PF-XCHECK mode must FAIL at Phase β; got {r.failures}"
+
+
+def test_pf_xcheck_report_only_absent_research_only_warns():
+    """Non-prop-firm: the missing explicit mode is advisory (WARN), not FAIL."""
+    r = ValidationResult()
+    check_sensitivity_audit(
+        _baseline_cfg(prop_firm=False, pf_xcheck_report_only=None), r,
+    )
+    assert r.failures == [], f"research config must not FAIL; got {r.failures}"
+    assert any("pf_xcheck_report_only not set" in w for w in r.warnings)
+
+
+def test_pf_xcheck_enforce_mode_with_valid_threshold_passes():
+    """report_only=false (enforce) + an explicit in-range threshold is the
+    legitimate post-calibration Phase-β shape and must pass cleanly."""
+    r = ValidationResult()
+    check_sensitivity_audit(
+        _baseline_cfg(pf_xcheck_report_only=False, pf_xcheck_divergence_halt=0.25),
+        r,
+    )
+    assert r.failures == [], f"enforce mode must pass; got {r.failures}"
+
+
+def test_pf_xcheck_report_only_non_boolean_fails():
+    r = ValidationResult()
+    check_sensitivity_audit(_baseline_cfg(pf_xcheck_report_only="yes"), r)
+    assert any("pf_xcheck_report_only" in f and "boolean" in f for f in r.failures)
+
+
+def test_pf_xcheck_divergence_halt_out_of_range_warns():
+    r = ValidationResult()
+    check_sensitivity_audit(_baseline_cfg(pf_xcheck_divergence_halt=1.5), r)
+    assert any("pf_xcheck_divergence_halt" in w for w in r.warnings)
+    assert r.failures == [], f"out-of-range halt is WARN, not FAIL; got {r.failures}"
+
+
+def test_pf_xcheck_divergence_halt_non_numeric_fails():
+    r = ValidationResult()
+    check_sensitivity_audit(_baseline_cfg(pf_xcheck_divergence_halt="wide"), r)
+    assert any(
+        "pf_xcheck_divergence_halt" in f and "not numeric" in f for f in r.failures
+    )
