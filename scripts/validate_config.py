@@ -1092,10 +1092,38 @@ def check_sensitivity_audit(cfg: dict, r: ValidationResult) -> None:
         )
 
 
+def _check_stress_gate_keys(gates: dict, r: ValidationResult) -> None:
+    """Validate the X3 fixed-lot stress gate keys when present (Protocol v2 Stage 3;
+    audit P7-03/P7-07). Safe code defaults exist (0.5pp / 1.0x) so absence is not an
+    error — this only sanity-checks declared values."""
+    ddb = gates.get("stress_dd_buffer_pp")
+    if ddb is not None:
+        try:
+            v = float(ddb)
+            if not (0.0 <= v <= 10.0):
+                r.warn(
+                    f"gates.stress_dd_buffer_pp={v} outside sane bound [0, 10] pp "
+                    "(headroom of worst fixed-lot DD from the trailing cap)"
+                )
+        except (TypeError, ValueError):
+            r.fail(f"gates.stress_dd_buffer_pp={ddb!r} is not numeric")
+    lev = gates.get("stress_leverage_max")
+    if lev is not None:
+        try:
+            if float(lev) <= 0:
+                r.fail(f"gates.stress_leverage_max={lev} must be positive")
+        except (TypeError, ValueError):
+            r.fail(f"gates.stress_leverage_max={lev!r} is not numeric")
+
+
 def check_wf(cfg: dict, r: ValidationResult) -> None:
     gates = cfg.get("gates", {})
     if gates.get("wf_windows", 4) < 4:
         r.fail("gates.wf_windows < 4 (Protocol v2 §4 stage 3)")
+    # X3 stress gate keys live in the standalone <ws>_ensemble.gates.yaml overlay
+    # (same source the WF eval reads), with inline gates taking precedence.
+    overlay = _load_ensemble_gates_overlay(cfg) or {}
+    _check_stress_gate_keys({**overlay, **(gates or {})}, r)
 
 
 def check_wandb_consolidation(cfg: dict, stage: str, r: ValidationResult) -> None:

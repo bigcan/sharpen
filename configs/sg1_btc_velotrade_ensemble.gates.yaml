@@ -102,6 +102,13 @@ gates:
   ensemble_top_k: 3
   ensemble_diversity_lambda: 1.0                # score = PF − λ * max_corr_with_already_selected
 
+  # === X3 fixed-lot stress sub-report (Protocol v2 Stage 3; audit P7-03/P7-07) ===
+  # The WF eval reconstructs the honest no-early-term fixed-lot equity from the graded
+  # rule's per-fold trajectories and gates the worst DD + peak leverage. A real breach
+  # flips OVERALL=FAIL. Required after the S466 SG-1-XAUUSD truncated-DD incident.
+  stress_dd_buffer_pp: 0.5                       # 10% Velotrade cap - worst fixed-lot trailing DD% >= this
+  stress_leverage_max: 1.0                       # peak |position| (max_leverage units) must be <= this
+
   g4_velotrade_compliance:
     description: >-
       Applied to the ENSEMBLE trajectory per fold (not the solo trajectories).
