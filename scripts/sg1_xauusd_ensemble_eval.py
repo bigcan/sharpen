@@ -300,24 +300,43 @@ def research_buffers(metrics: dict) -> dict:
     }
 
 
+def hyper_growth_buffers(metrics: dict) -> dict:
+    """The5ers Hyper Growth buffers — measured vs the firm HARD caps
+    (6% trailing / 3% daily). These match `env.max_drawdown_pct: 0.06` and the
+    `g4_hyper_growth_compliance` block ("6% cap"/"3% cap") in
+    `configs/sg1_eurusd_hyper_growth_ensemble.gates.yaml`, against which the
+    gate's `*_buffer_pp_min` is calibrated. Do NOT swap these for the
+    `env.risk.max_{trailing_drawdown,daily_loss}_pct` shaping caps (5%/2%),
+    which sit 1pp tighter — that would overstate the margin and mis-align the
+    G4 gate. (Cf. `ftmo_buffers`, which by contrast references the 8%/4% env
+    caps, not FTMO's 10%/5% firm rails — reference frame is per-workstream.)"""
+    trail = metrics.get("trailing_max_drawdown_pct")
+    intraday = metrics.get("worst_intraday_daily_dd_pct")
+    return {
+        "trailing_dd_buffer_pp": (6.0 + trail) if trail is not None else None,
+        "daily_dd_buffer_pp":    (3.0 - intraday) if intraday is not None else None,
+    }
+
+
 def _select_buffer_fn(gates_cfg: dict):
     """Pick the buffer fn matching the workstream's G4 variant declared in gates.
 
-    Triple auto-detect mirrors `_evaluate_gates`: research-tier (gmgp1-gold) /
-    FTMO / Velotrade. Exactly one variant must be present in the gates dict.
+    Quad auto-detect mirrors `_evaluate_gates`: research-tier (gmgp1-gold) /
+    FTMO / Velotrade / Hyper Growth. Exactly one variant must be present.
     """
     gates = gates_cfg.get("gates", {}) if isinstance(gates_cfg, dict) else {}
     variants = {
-        "g4_research_dd_compliance": research_buffers,
-        "g4_velotrade_compliance":   globals().get("velotrade_buffers", ftmo_buffers),
-        "g4_ftmo_compliance":        ftmo_buffers,
+        "g4_research_dd_compliance":     research_buffers,
+        "g4_velotrade_compliance":       globals().get("velotrade_buffers", ftmo_buffers),
+        "g4_ftmo_compliance":            ftmo_buffers,
+        "g4_hyper_growth_compliance":    hyper_growth_buffers,
     }
     present = [k for k in variants if k in gates]
     if len(present) > 1:
         raise ValueError(
             f"Gates YAML defines multiple G4 variants {present}. "
             "Exactly one of g4_research_dd_compliance / g4_ftmo_compliance / "
-            "g4_velotrade_compliance must be active per workstream."
+            "g4_velotrade_compliance / g4_hyper_growth_compliance must be active."
         )
     if not present:
         # Back-compat: pre-v2.3 gates yamls without an explicit G4 block default
@@ -1653,18 +1672,20 @@ def _evaluate_gates(per_fold_metrics: List[Dict[str, dict]], fold_status: List[s
     # exactly one must appear): research-tier (gmgp1-gold internal-validation, no
     # daily-loss gate, 30% trailing cap), FTMO (8% trailing + 4% daily), Velotrade
     # (10% trailing, no daily, compliance_must_pass: false).
-    g4_variants = ("g4_research_dd_compliance", "g4_velotrade_compliance", "g4_ftmo_compliance")
+    g4_variants = ("g4_research_dd_compliance", "g4_velotrade_compliance",
+                   "g4_ftmo_compliance", "g4_hyper_growth_compliance")
     present = [k for k in g4_variants if k in gates]
     if len(present) > 1:
         raise ValueError(
             f"Gates YAML defines multiple G4 variants {present}. "
             "Only one of g4_research_dd_compliance / g4_ftmo_compliance / "
-            "g4_velotrade_compliance may be active per workstream."
+            "g4_velotrade_compliance / g4_hyper_growth_compliance may be active."
         )
     if not present:
         raise ValueError(
             "Gates YAML missing G4 block. One of g4_research_dd_compliance, "
-            "g4_ftmo_compliance, or g4_velotrade_compliance is required."
+            "g4_ftmo_compliance, g4_velotrade_compliance, or g4_hyper_growth_compliance "
+            "is required."
         )
     g4_key = present[0]
     g4 = _require_gate(gates, g4_key)
