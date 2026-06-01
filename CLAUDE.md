@@ -79,6 +79,7 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 | ID | Rule |
 |----|------|
 | LEAK-1 | Reset EMA-Z normalization at train/val/test split boundaries. Never normalize across splits. |
+| LEAK-2 | **Temporal causality.** No observation/feature at bar `t` may incorporate data stamped `> t`. Covers: multi-scale coarse-bar maps (map to the last **CLOSED** coarse bar, never the in-progress one — the X2/sg1-btc leak), resample `label`/`closed` conventions, `searchsorted`/index alignment, rolling/`shift`/`roll` windows, ATR/feature warmup carry, and sim↔live parity (live only ever sees the partial in-progress bar). Each guarded by a **negative** test that fails if look-ahead is reintroduced. |
 | BUG-01 | HPO objective = `profit_factor`. Lock reward params during HPO. |
 | BUG-03 | `hindsight_weight` must be `0.0` during backtesting (uses future prices). |
 | BUG-04 | Dense reward on switch bars must use direction BEFORE switch. Save `direction_for_reward` before action processing. |
@@ -108,6 +109,8 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 - Never claim a file/function/class/config key/CLI flag exists without verifying via Grep/Glob/Read
 - **Never launch a fused HPO+train+eval pipeline.** All training work follows `docs/protocol_v2.md` (6 stages, manifest contract). AlphaSeek `k28l6ef8` is the cautionary tale.
 - **Never hardcode gate thresholds in code or scripts.** All numeric gates (PF floors, DD buffers, retrain triggers) live in `configs/<workstream>.gates.yaml`.
+- **Never trust a diff-scoped `/audit` to cover latent bugs in unchanged code.** Routine Audit reads the diff; a bug introduced once and never re-touched is invisible to it forever (the sg1-btc X2 coarse-bar leak lived in `multiscale_handler.py` from Session 121 → S553 across hundreds of green audits). Correctness-critical modules need whole-module re-review when touched, executing **tripwire tests**, and a **Tier-2 deep lifecycle audit** at stakes gates.
+- **Never promote a strategy to capital (live/paper) — or read a deploy-gating WF/OOS verdict — without a Tier-2 deep lifecycle audit** (`.claude/workflows/deep_strategy_audit.js`, finder+skeptic per pillar). Stakes, not a diff, trigger it. The leak that erased the sg1-btc edge was found only by such an audit (`docs/research/sg1_btc_strategy_audit_2026-05-29.md`), never by routine `/audit`.
 
 ## Training Protocol v2 (mandatory)
 
