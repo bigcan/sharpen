@@ -48,7 +48,6 @@ import yaml
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from finrl_pro_ds.config_utils import _prep_backtest_config, deep_merge  # noqa: E402
 from scripts.sg1_arm_gate_backtest import (  # noqa: E402
     compute_gate_metrics,
     run_gate_backtest,

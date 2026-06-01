@@ -33,8 +33,6 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from finrl_pro_ds.crypto.eval.statistics import (  # noqa: E402
     bootstrap_sharpe_ci,
     probabilistic_sharpe_ratio,
-    sharpe_ratio,
-    sortino_ratio,
 )
 
 logging.basicConfig(
@@ -396,7 +394,7 @@ def print_report(
     print(f"  PSR:            {stats['psr']:.4f}")
     print(f"  Sharpe 95% CI:  [{stats['sharpe_ci_95']['lower']:.2f}, {stats['sharpe_ci_95']['upper']:.2f}]")
 
-    print(f"\n--- Per-Window Decomposition ---")
+    print("\n--- Per-Window Decomposition ---")
     print(f"  {'Win':>3} | {'Return':>8} | {'Funding':>10} | {'Costs':>10} | {'Basis PnL':>10} | {'F/C':>5} | {'Trades':>6}")
     print(f"  {'---':>3}-+-{'--------':>8}-+-{'----------':>10}-+-{'----------':>10}-+-{'----------':>10}-+-{'-----':>5}-+-{'------':>6}")
     for d in sorted(decompositions, key=lambda x: x.window):
@@ -405,24 +403,24 @@ def print_report(
             f"{d.transaction_costs:10.2f} | {d.basis_pnl:10.2f} | {d.funding_vs_costs:5.2f} | {d.n_trades:6d}"
         )
 
-    print(f"\n--- Alpha Decay Analysis ---")
+    print("\n--- Alpha Decay Analysis ---")
     print(f"  Return slope:     {decay['return_slope_per_window']:.6f} per window")
     print(f"  Sharpe slope:     {decay['sharpe_slope_per_window']:.4f} per window")
     print(f"  Last-{decay['last_n_windows']} monotonic: {decay['last_n_monotonic_ratio']:.1%}")
     print(f"  Decay detected:   {'YES' if decay['decay_detected'] else 'NO'}")
 
-    print(f"\n--- Fee/Slippage Sensitivity ---")
+    print("\n--- Fee/Slippage Sensitivity ---")
     print(f"  Base F/C median:  {fee_sensitivity['base_funding_vs_costs_median']:.2f}x")
     print(f"  At 1.5x fees:     {fee_sensitivity['at_1_5x_fees']['win_rate']:.1%} profitable")
     print(f"  At 2.0x fees:     {fee_sensitivity['at_2x_fees']['win_rate']:.1%} profitable")
 
     if seed_robustness:
-        print(f"\n--- Seed Robustness ---")
+        print("\n--- Seed Robustness ---")
         agg_cv = seed_robustness.get("aggregate_sharpe_cv")
         print(f"  Aggregate Sharpe CV: {agg_cv:.2%}" if agg_cv else "  No multi-seed data")
         print(f"  Robust (CV < 30%):   {'YES' if seed_robustness.get('robust') else 'NO'}")
 
-    print(f"\n--- Phase 1 Gate Evaluation ---")
+    print("\n--- Phase 1 Gate Evaluation ---")
     for name, g in gates.items():
         if name == "overall":
             continue

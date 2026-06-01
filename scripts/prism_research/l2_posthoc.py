@@ -66,7 +66,7 @@ def load_regime_multipliers(
 
     prism["multiplier"] = prism.apply(get_multiplier, axis=1)
 
-    logger.info(f"Regime multiplier distribution:")
+    logger.info("Regime multiplier distribution:")
     for mult_val in sorted(prism["multiplier"].unique()):
         count = (prism["multiplier"] == mult_val).sum()
         logger.info(f"  mult={mult_val:.1f}: {count} days")

@@ -251,7 +251,7 @@ def discriminative_power_check(df: pd.DataFrame) -> bool:
             has_high_vol_test = (test_data["vol_regime"] == 2).any()
             if not has_high_vol_test:
                 issues.append("No HIGH_VOL days in test period (Nov-Dec 2025) — L2 may be no-op")
-                logger.info(f"  [WARN] No HIGH_VOL in test period — L2 overlay will have limited effect")
+                logger.info("  [WARN] No HIGH_VOL in test period — L2 overlay will have limited effect")
             else:
                 n_high = (test_data["vol_regime"] == 2).sum()
                 logger.info(f"  [PASS] {n_high} HIGH_VOL days in test period")

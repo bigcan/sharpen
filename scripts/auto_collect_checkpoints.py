@@ -30,7 +30,6 @@ run before its host is recycled. Whitelisted suffixes only: .parquet, .json,
 import argparse
 import json
 import logging
-import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -523,7 +522,7 @@ def main():
             return
 
     if args.all_instances:
-        log.info(f"Scanning all instances for uncollected checkpoints...")
+        log.info("Scanning all instances for uncollected checkpoints...")
         found = scan_all_instances(instances, dry_run=args.dry_run, include_all=args.include_all)
         if found:
             log.info(f"\n{'DRY RUN: ' if args.dry_run else ''}Found {len(found)} uncollected checkpoint(s):")

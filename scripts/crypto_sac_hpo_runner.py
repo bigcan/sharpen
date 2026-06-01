@@ -65,7 +65,6 @@ def prepare_data(config: dict) -> dict:
 
     Returns dict with keys: ohlcv, funding, walk_forward_windows
     """
-    from finrl_pro_ds.crypto.data.crypto_loader import CryptoLoader, CryptoDataPipeline
 
     data_cfg = config["data"]
     universe_cfg = config["universe"]

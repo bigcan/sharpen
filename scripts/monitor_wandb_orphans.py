@@ -7,9 +7,7 @@ Designed to be called repeatedly (e.g. via /loop).
 """
 import sys
 import io
-import os
 import json
-import time
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -248,7 +246,7 @@ def main():
                 if ok:
                     state["synced"][wid] = now.isoformat()
                 line = f"  {wid}  {name:<28} {'SYNCED' if status.get('synced') else 'DONE'}  {status['progress']}"
-                print(f"    Last log lines:")
+                print("    Last log lines:")
                 for l in status["log_tail"].split("\n")[-3:]:
                     print(f"      {l}")
 
@@ -258,7 +256,7 @@ def main():
 
     # Summary table
     print(f"\n{'─'*72}")
-    print(f"  SUMMARY")
+    print("  SUMMARY")
     print(f"{'─'*72}")
     for line in summary:
         print(line)

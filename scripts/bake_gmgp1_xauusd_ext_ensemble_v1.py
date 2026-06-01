@@ -15,7 +15,6 @@ Output: results/gmgp1_xauusd_extended_wf_ensemble/ensemble_v1.tar.gz
 from __future__ import annotations
 
 import json
-import os
 import sys
 from copy import deepcopy
 from pathlib import Path
