@@ -114,7 +114,7 @@ recent_runs.json
 deploy_package.zip
 deploy_package_*.zip
 deploy_dhpo_*.zip
-configs/_volume_study_runtime/
+configs/_*_runtime/
 env.txt
 *.db
 
