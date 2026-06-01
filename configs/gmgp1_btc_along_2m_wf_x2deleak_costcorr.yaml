@@ -1,0 +1,198 @@
+# GMGP1-BTC Velotrade Stage-3 WF — X2 DE-LEAK + COST-CORRECTED (the real deploy gate).
+#
+# === PURPOSE: the actual Velotrade GO/NO-GO gate for gmgp1-btc ===
+# The de-leak probe (configs/gmgp1_btc_along_2m_wf_x2deleak.yaml) deliberately
+# HELD taker_fee at 0.0005 and left slippage UNSET (=0) so the ONLY moving part
+# was the X2 causal coarse-bar fix — that run is a FRICTIONLESS UPPER BOUND, not a
+# deploy verdict (deep-audit finding P3-02, S553-cont-23). This config adds the
+# real cost layer on top of the same de-leaked code so the verdict reflects what
+# the strategy will actually pay live on Bybit.
+#
+# DELTA vs gmgp1_btc_along_2m_wf_x2deleak.yaml — COST LAYER ONLY (X2 fix is
+# already code-level on June2026 @ 6c027e19; no config key encodes it):
+#   1. env.taker_fee:         0.0005 -> 0.00055  (real Bybit futures taker 5.5 bps;
+#                                                  matches live_gmgp1_btc_bybit.yaml:91)
+#   2. env.slippage_base_bps: unset(=0) -> 5.0   (one-way marketable-limit cross
+#                                                  ~4.58 bps; SAME cost model as the
+#                                                  sg1-btc X1 cost-corrected run,
+#                                                  sg1_btc_velotrade_l1_multiseed_decay01_x1_costcorr.yaml:79-80)
+#      Both consumed by continuous_swing_env.py:58 (slip) + :392-394 (tc_bps) +
+#      :415-418 (equity fee_frac). Total one-way cost = 5.5 + 5.0 = 10.5 bps/unit,
+#      applied in BOTH training (launch) AND eval (the env is rebuilt from this
+#      config), so it is an honest apples-to-apples gate.
+#   3. ensemble.checkpoint_pattern: gmgp1-btc-x2deleak-* -> gmgp1-btc-x2deleak-costcorr-*
+#      (DISJOINT from the in-flight frictionless de-leak run so run_wf_ensemble
+#      cannot mix the two cohorts).
+#   4. wandb.tags: + "costcorr" (KEEP "along-2m" — the dispatcher's WandB
+#      completion-poller hard-filters on that tag; KEEP "x2-deleak"/"s553").
+#   EVERYTHING else byte-identical: data, splitter, features, HPs, network, seeds,
+#   gates. (seed_pfs are inherited placeholders — see the ensemble: block; they
+#   MUST be re-derived from THIS run's seed_report before any deploy read.)
+#
+# LAUNCH (disjoint prefix REQUIRED — checkpoints must not collide with either the
+# leaky run OR the frictionless de-leak run):
+#   python scripts/launch_btc_along_wf_multiseed.py \
+#       --config configs/gmgp1_btc_along_2m_wf_x2deleak_costcorr.yaml \
+#       --run_name_prefix gmgp1-btc-x2deleak-costcorr \
+#       --slots <5-tenant x 3 GPU pool>            # 20 runs (4 folds x 5 seeds), ~5-7h
+#
+# POST-TRAIN EVAL (no GPU) — --output_dir MANDATORY (gates workstream:gmgp1_btc
+# otherwise defaults to the LEAKY results/gmgp1_btc_ensemble_wf/):
+#   python scripts/sg1_xauusd_ensemble_eval.py \
+#       --wf_config configs/gmgp1_btc_along_2m_wf_x2deleak_costcorr.yaml \
+#       --gates_file configs/gmgp1_btc_velotrade_ensemble.gates.yaml \
+#       --output_dir results/gmgp1_btc_ensemble_wf_x2deleak_costcorr --device cpu
+#
+# VERDICT LADDER (read in this order):
+#   leaky frictionless ens 2.81 / best-solo 2.61   (configs/gmgp1_btc_along_2m_wf.yaml)
+#     -> de-leaked frictionless verdict             (configs/..._x2deleak.yaml; upper bound)
+#       -> de-leaked + COST-CORRECTED verdict       (THIS config; the deploy gate)
+#   THIS run survives the Velotrade gates -> gmgp1-btc edge is real net of fees,
+#                                            promote to Tier-2 deep audit -> paper.
+#   THIS run collapses                    -> edge does not clear real Bybit costs;
+#                                            shelve like sg1-btc (de-leaked best-solo
+#                                            ~1.0). Do NOT deploy on the frictionless
+#                                            de-leak verdict alone.
+#
+# !! Per CLAUDE.md, reading THIS deploy-gating WF verdict REQUIRES a Tier-2 deep
+#    lifecycle audit (.claude/workflows/deep_strategy_audit.js) BEFORE any
+#    promotion to capital — stakes, not a diff, trigger it. !!
+
+# ---------- DATA (Bybit, full envelope) — identical to leaky/de-leak WF ----------
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  start_date: "2024-01-01"
+  end_date:   "2026-04-06"
+
+splitter:
+  train_months: 22                      # A_long
+  val_months:   1
+  test_months:  1
+  step_months:  1                       # 1mo rolling -> 4 folds in 27mo envelope
+  buffer_days:  0
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+# ---------- ENV (matches L1 training — research-tier max_dd, no risk wrapper) ----------
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00055                    # COST-CORRECTED: real Bybit futures taker 5.5 bps (was 0.0005)
+  slippage_base_bps: 5.0                # COST-CORRECTED: one-way limit-cross ~4.58 bps (was unset=0)
+  deadband_threshold: 0.35              # v5 6xluh826 T29
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30                # research-tier (matches L1 train)
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.003159755401614352       # v5 6xluh826 T29
+    dsr_scale: 1.0
+
+# ---------- NETWORK (matches L1) ----------
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# ---------- AGENTS (v5 HPO 6xluh826 T29 — frozen) ----------
+agents:
+  sac:
+    lr_actor: 0.0005462612695421805
+    lr_critic: 0.000866154995794675
+    lr_alpha: 0.0009625164717779418
+    gamma: 0.9535315530021778
+    tau: 0.00212659146992685
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.15930606967484204
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 10.0
+    checkpoint_interval: 250000
+
+# ---------- TRAINING ----------
+training:
+  total_timesteps: 2000000              # A_long × 2M (the L1 cell)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+# ---------- GATES (Stage 3 WF + upstream-stage retention) — identical to leaky WF ----------
+gates:
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 5                           # data-window cell ran 5 seeds (not 10)
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10
+  ensemble_ambiguous_min: 1.05
+  ensemble_rule_selection: val_argmax_pf
+  wf_windows: 4                         # validator hard-fails if <4
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+ensemble:
+  gates_file: "configs/gmgp1_btc_velotrade_ensemble.gates.yaml"
+  # DISJOINT prefix so the eval glob matches ONLY de-leaked + cost-corrected checkpoints.
+  checkpoint_pattern: "checkpoints/gmgp1-btc-x2deleak-costcorr-fold{fold}-seed{seed}_*/checkpoint_final.pth"
+  seeds: [123, 456, 789, 1024, 2026]
+  # STALE PLACEHOLDERS — these are the LEAKY-cohort per-seed PFs inherited from
+  # gmgp1_btc_along_2m_wf_x2deleak.yaml. They only matter if val_argmax_pf selects
+  # the pf_weighted rule. RE-DERIVE from results/gmgp1_btc_ensemble_wf_x2deleak_costcorr/
+  # seed_report.json (test_solo_pfs) before any deploy read — under real costs the
+  # PFs WILL be lower (cf. bundle-bake seed_pfs gotcha, S538-cont-4).
+  seed_pfs:
+    123:  2.4422
+    456:  2.4225
+    789:  2.4695
+    1024: 2.3670
+    2026: 2.5084
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                     # S488: one parent run, fold<i>/seed<j>/* namespaces
+  tags:
+    - "gmgp1-btc"
+    - "BTC"
+    - "SAC"
+    - "15min"
+    - "crypto"
+    - "velotrade"
+    - "prop-firm"
+    - "walk_forward"
+    - "wf-stage3"
+    - "along-2m"                        # REQUIRED: dispatcher poller hard-filters on this tag
+    - "v2-3-bootstrap"
+    - "bybit-perp"
+    - "x2-deleak"
+    - "costcorr"
+    - "s553"
+    - "upstream:gmgp1_data_window_study_unified_20260502"
+    - "upstream-stage25:results/gmgp1_btc_ensemble/ensemble_v2.tar.gz"
