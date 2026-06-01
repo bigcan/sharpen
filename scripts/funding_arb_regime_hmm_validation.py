@@ -13,7 +13,6 @@ Tests:
 from __future__ import annotations
 
 import logging
-from datetime import timezone
 
 import numpy as np
 import pandas as pd
@@ -301,7 +300,7 @@ def main():
         print(f"    Transition lead time: {(w17_start - last_high).total_seconds() / 3600:.0f}h "
               f"before W17 test starts")
     else:
-        print(f"\n  No clear HIGH→LOW transition found around W16→W17 boundary")
+        print("\n  No clear HIGH→LOW transition found around W16→W17 boundary")
 
     # --- Verdict ---
     print(f"\n{'='*80}")

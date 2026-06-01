@@ -358,7 +358,7 @@ def write_report(out_dir: Path, manifest: dict, gates: dict,
         for a in verdict["anomalies"]:
             md.append(f"- `{a}`")
 
-    md.append(f"\n## Provenance\n")
+    md.append("\n## Provenance\n")
     md.append(f"- Plan: `{gates['provenance']['plan_file']}`")
     md.append(f"- Upstream HP run: `{gates['provenance']['upstream_hp_run']}`")
     md.append(f"- Manifest: `results/volume_study_{manifest['timestamp']}/manifest.json`")

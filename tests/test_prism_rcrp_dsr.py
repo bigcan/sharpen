@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from finrl_pro_ds.agents.common.flat_replay_buffer import FlatReplayBuffer
 from finrl_pro_ds.envs.dsr import DSRCalculator

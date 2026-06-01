@@ -9,7 +9,6 @@ Stage A.1 of the 2026-04-18 AlphaSeek replan.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -167,7 +166,7 @@ def main() -> int:
         print("=== SUMMARY ===")
         print(f"files OK:   {ckpt_total_ok}")
         print(f"files FAIL: {ckpt_total_fail}")
-        print(f"target:     12 dirs × 6 files = 72 files (pths). additional .jsons may exist.")
+        print("target:     12 dirs × 6 files = 72 files (pths). additional .jsons may exist.")
         print()
         print("Verifying local checkpoints (best + final)...")
         n_complete = 0

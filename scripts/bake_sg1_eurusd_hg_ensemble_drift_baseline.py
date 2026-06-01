@@ -33,7 +33,6 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT))
 
 from finrl_pro_ds.reporting import (  # noqa: E402
-    compute_challenge_target_hit_rates,
     compute_eval_distribution,
 )
 

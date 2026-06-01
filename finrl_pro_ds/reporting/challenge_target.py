@@ -17,7 +17,7 @@ more stable hit-rate estimate.
 from __future__ import annotations
 
 import math
-from typing import Iterable, Optional, Sequence
+from typing import Optional, Sequence
 
 import numpy as np
 

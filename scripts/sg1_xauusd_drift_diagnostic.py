@@ -27,10 +27,9 @@ from __future__ import annotations
 import copy
 import json
 import logging
-import os
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, Tuple
 
 import numpy as np
 import pandas as pd
@@ -43,7 +42,6 @@ sys.path.insert(0, str(ROOT))
 from finrl_pro_ds.hpo.env_factory import make_env  # noqa: E402
 from scripts.sg1_xauusd_ensemble_eval import (  # noqa: E402
     _agg_agreement,
-    _agg_mean,
     _infer_actions,
     _resolve_fold_checkpoints,
 )

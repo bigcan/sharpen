@@ -25,7 +25,6 @@ sys.path.insert(0, str(ROOT))
 
 from scripts.prop_firm_ab_compare import (  # noqa: E402
     Q1_THRESHOLDS,
-    _ab_metrics,
     _gate_metric,
     _to_env_risk_config,
     compute_ab_decision,

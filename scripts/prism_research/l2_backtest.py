@@ -30,7 +30,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from finrl_pro_ds.agents.sac.sac_agent import SACAgent
-from finrl_pro_ds.analytics.pyfolio_analyzer import PyfolioAnalyzer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -242,7 +241,7 @@ def run_ab_comparison(
         logger.info(f"\n--- Seed {seed} ---")
 
         # Baseline (no L2)
-        logger.info(f"  Running baseline...")
+        logger.info("  Running baseline...")
         bm = run_single_backtest(config, checkpoint_path, device, seed,
                                  regime_lookup=None, label="baseline")
         results.append(bm)

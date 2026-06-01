@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
-import sys
 import time
 from pathlib import Path
 
@@ -46,7 +45,7 @@ def main() -> int:
     t0 = time.time()
     print(f"[load] reading {args.symbol} snapshots from {args.db}")
     conn = sqlite3.connect(str(args.db))
-    q = f"""
+    q = """
         SELECT timestamp_ms, datetime, best_bid_price, best_bid_qty,
                best_ask_price, best_ask_qty
         FROM lob_snapshots

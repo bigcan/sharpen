@@ -145,7 +145,6 @@ class PositionCleaner:
 
     async def close_position(self, position_id: int, volume: int) -> bool:
         """Close a single position by ID. Returns True on success."""
-        from ctrader_open_api import Protobuf
         from ctrader_open_api.messages.OpenApiMessages_pb2 import (
             ProtoOAClosePositionReq,
         )
@@ -348,7 +347,7 @@ async def main_async(dry_run: bool = False) -> int:
         remaining = await cleaner.list_positions()
 
         print(f"\n{'='*80}")
-        print(f"  RESULTS")
+        print("  RESULTS")
         print(f"{'='*80}")
         print(f"  Closed:    {closed}")
         print(f"  Failed:    {failed}")

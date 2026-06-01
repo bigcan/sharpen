@@ -22,12 +22,10 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 import time
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
 
 # Add project root and PRISM SDK to path

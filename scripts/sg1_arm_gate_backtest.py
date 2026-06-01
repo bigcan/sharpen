@@ -14,7 +14,11 @@ Writes trajectory to results/gate_eval/<label>_trajectory.parquet for audit.
 No WandB dependency (pure local eval).
 """
 from __future__ import annotations
-import argparse, os, sys, json, logging
+import argparse
+import os
+import sys
+import json
+import logging
 from pathlib import Path
 import numpy as np
 import pandas as pd

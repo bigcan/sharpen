@@ -358,7 +358,7 @@ def render_report(results: list[dict], out_path: Path) -> None:
     lines.append("")
     lines.append(f"**Generated:** {time.strftime('%Y-%m-%d %H:%M:%S UTC', time.gmtime())}")
     lines.append("**Stage:** A.2 (per 2026-04-18 replan plan)")
-    lines.append(f"**Checkpoints:** 12 × full/best (3 agents × 4 WF windows)")
+    lines.append("**Checkpoints:** 12 × full/best (3 agents × 4 WF windows)")
     lines.append(f"**Fee configs:** {len(FEE_CONFIGS)} (contest + 6 realistic)")
     lines.append("")
     lines.append("## Fee sweep summary (median across 12 checkpoints)")

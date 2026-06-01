@@ -24,8 +24,7 @@ sys.path.insert(0, str(ROOT))
 
 from finrl_pro_ds.crypto.live.live_obs_builder import LiveObsBuilder  # noqa: E402
 from finrl_pro_ds.data.multiscale_handler import (  # noqa: E402
-    MultiScaleOHLCVHandler, _compute_scale_features, _resample_ohlcv,
-    compute_features_with_warmup,
+    _compute_scale_features, _resample_ohlcv,
 )
 
 logging.basicConfig(level=logging.INFO,

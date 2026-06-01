@@ -120,7 +120,7 @@ def main() -> None:
             return
 
         if not running and not (len(completed) + len(failed)):
-            _emit(f"[heartbeat] no running/completed trials yet — workers warming up")
+            _emit("[heartbeat] no running/completed trials yet — workers warming up")
         elif not running:
             _emit(
                 f"[heartbeat] no RUNNING trials but {len(completed)}/{args.target_trials} "
