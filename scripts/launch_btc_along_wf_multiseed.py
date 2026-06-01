@@ -116,10 +116,10 @@ def validate(cfg_path: Path) -> bool:
 
 def launch_cell(cfg_path: Path, fold_idx: int, slots: str | None,
                 instance: str | None, gpu: str | None, concurrent: int,
-                dry_run: bool) -> tuple[int, float]:
+                dry_run: bool, run_name_prefix: str = "gmgp1-btc-along-wf") -> tuple[int, float]:
     """Invoke launch_l1_multiseed.py for one fold's 5-seed cell."""
     seeds_csv = ",".join(str(s) for s in SEEDS)
-    prefix = f"gmgp1-btc-along-wf-fold{fold_idx}"
+    prefix = f"{run_name_prefix}-fold{fold_idx}"
     cfg_rel = cfg_path.relative_to(PROJECT_ROOT).as_posix()
     cmd = [
         sys.executable, str(LAUNCHER),
@@ -169,6 +169,11 @@ def main() -> int:
                         "Recommended for 4-fold WF: 5-tenant per GPU × 3 GPUs = 15 slots.")
     p.add_argument("--folds", type=str, default=None,
                    help="Comma-separated fold subset (e.g., '0' for smoke, '0,1' for two)")
+    p.add_argument("--run_name_prefix", default="gmgp1-btc-along-wf",
+                   help="Checkpoint/run-name prefix; per-fold becomes <prefix>-fold<i>. "
+                        "Override for disjoint re-runs (e.g. X2 de-leak: gmgp1-btc-x2deleak) "
+                        "so the eval glob does not mix checkpoint cohorts. Must match the "
+                        "config's ensemble.checkpoint_pattern.")
     p.add_argument("--dry_run", action="store_true",
                    help="Materialize + validate configs + print launch cmds; do not spawn")
     args = p.parse_args()
@@ -235,6 +240,7 @@ def main() -> int:
     manifest = {
         "timestamp": timestamp,
         "config": str(args.config.relative_to(PROJECT_ROOT)),
+        "run_name_prefix": args.run_name_prefix,
         "instance": args.instance,
         "gpu": args.gpu,
         "concurrent": args.concurrent,
@@ -322,6 +328,7 @@ def main() -> int:
         rc, elapsed = launch_cell(
             cfg_path, fold_idx, args.slots,
             args.instance, args.gpu, args.concurrent, args.dry_run,
+            args.run_name_prefix,
         )
 
         finished_ok = -2                            # not waited (dry-run path)
