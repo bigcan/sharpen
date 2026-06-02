@@ -684,7 +684,10 @@ def run_obs_noise_stage(
     torch-backed ``scripts.sg1_xauusd_ensemble_eval`` functions, lazy-imported);
     tests pass deterministic fakes to exercise the wiring without torch.
     """
+    import time as _time
+
     _assert_obs_noise_invariants(config)
+    _t0 = _time.time()
 
     if _load_agents is None or _run_rule is None:
         from scripts.sg1_xauusd_ensemble_eval import (  # lazy: keep module torch-free
@@ -773,6 +776,8 @@ def run_obs_noise_stage(
             )
 
     verdict = resolve_obs_noise_gate(results, gates)
+    if wall_time_seconds is None:
+        wall_time_seconds = _time.time() - _t0
     report = build_obs_noise_report(
         config, results, verdict, specs, fold_shas, folds, rule_name, gates,
         workstream=workstream, ensemble_seeds=ensemble_seeds, device=device,
