@@ -1735,6 +1735,100 @@ def check_retrain_gate(cfg: dict, r: ValidationResult) -> None:
         r.ok("retrain_policy block present and well-formed (offline §4.5 gate)")
 
 
+def check_obs_noise_gate(cfg: dict, r: ValidationResult) -> None:
+    """Protocol v2.7-B Stage 3.5 observation-noise gate validation (S553-cont-25).
+
+    Validates that the config (via its ensemble gates overlay) declares the keys
+    required for Stage 3.5 price-path randomization
+    (``scripts/stage_3_5_obs_noise.py``). Stage 3.5 re-rolls the PROMOTE policy
+    through multiplicative log-noise on the raw OHLC and gates on edge survival
+    (median PF ratio floor + q95(|MDD|) degradation buffer, per σ-level).
+
+    Phase α (S553+): legacy configs (``protocol_version`` unset or ``< "2.7"``)
+    are exempt — this check is a no-op. Mirrors ``check_sensitivity_audit``'s
+    Phase α/β rollout (ADR-9), using the N4 version-tuple compare so the gate
+    self-enables at 2.7 and every later version.
+
+    Phase β: operator bumps ``protocol_version`` to ``"2.7"`` AND flips
+    ``obs_noise_required: true`` after locking ``obs_noise_pf_floor_*`` /
+    ``obs_noise_mdd_buffer_pp_*`` against the de-leaked candidates' empirical
+    spread. Validator then FAILs prop-firm configs missing the keys.
+
+    See ``.agent/artifacts/protocol_v27_b_obs_noise_stage_3_5_architecture.md``
+    (IC-3/IC-4).
+    """
+    protocol_version = str(cfg.get("protocol_version", "2.6"))
+    if not _protocol_at_least(protocol_version, "2.7"):
+        return
+
+    gates = _load_ensemble_gates_overlay(cfg)
+    prop_firm = _is_prop_firm(cfg)
+    fail_or_warn = r.fail if prop_firm else r.warn
+
+    obs_hint = (
+        "Copy the v2.7 Stage 3.5 block from a sister <workstream>_ensemble.gates.yaml "
+        "or use Phase α defaults: obs_noise_sigma_levels: {\"10bps\": 0.001, "
+        "\"50bps\": 0.005}, obs_noise_n_seeds: 10, obs_noise_pf_floor_10bps: 0.85, "
+        "obs_noise_pf_floor_50bps: 0.70, obs_noise_mdd_buffer_pp_10bps: 0.3, "
+        "obs_noise_mdd_buffer_pp_50bps: 0.7, obs_noise_required_min_folds: <wf_folds>, "
+        "obs_noise_required: false (Phase α) -> true (Phase β)."
+    )
+
+    levels = gates.get("obs_noise_sigma_levels")
+    if not isinstance(levels, dict) or not levels:
+        fail_or_warn(
+            "gates.obs_noise_sigma_levels missing or empty — v2.7 Stage 3.5 "
+            "requires a {label -> log-sigma} map. " + obs_hint
+        )
+        return
+
+    # Each σ-level needs a non-negative σ plus both a PF floor and an MDD buffer.
+    for label in levels:
+        sigma = levels[label]
+        try:
+            if float(sigma) < 0.0:
+                r.fail(f"gates.obs_noise_sigma_levels[{label!r}]={sigma} must be >= 0")
+        except (TypeError, ValueError):
+            r.fail(f"gates.obs_noise_sigma_levels[{label!r}]={sigma!r} is not numeric")
+        for key, lo, hi in ((f"obs_noise_pf_floor_{label}", 0.50, 0.99),
+                            (f"obs_noise_mdd_buffer_pp_{label}", 0.0, 5.0)):
+            v = gates.get(key)
+            if v is None:
+                fail_or_warn(
+                    f"gates.{key} not set (v2.7 Stage 3.5 σ-level {label!r}). " + obs_hint
+                )
+                continue
+            try:
+                vf = float(v)
+                if not (lo <= vf <= hi):
+                    r.warn(f"gates.{key}={vf} outside sanity bound [{lo}, {hi}].")
+            except (TypeError, ValueError):
+                r.fail(f"gates.{key}={v!r} is not numeric")
+
+    n_seeds = gates.get("obs_noise_n_seeds")
+    if n_seeds is None:
+        fail_or_warn("gates.obs_noise_n_seeds not set (v2.7 Stage 3.5). " + obs_hint)
+    else:
+        try:
+            if int(n_seeds) < 5:
+                r.warn(
+                    f"gates.obs_noise_n_seeds={n_seeds} < 5 — noise q05/q95 quantile "
+                    "estimates will be unstable; 10 recommended."
+                )
+        except (TypeError, ValueError):
+            r.fail(f"gates.obs_noise_n_seeds={n_seeds!r} is not integer")
+
+    required = gates.get("obs_noise_required")
+    if required is None:
+        fail_or_warn(
+            "gates.obs_noise_required not set — v2.7 explicit declaration required. "
+            "Set false during Phase α calibration; flip true in Phase β once the "
+            "thresholds are locked."
+        )
+    elif not isinstance(required, bool):
+        r.fail(f"gates.obs_noise_required={required!r} must be boolean (true/false)")
+
+
 STAGE_CHECKS = {
     "data-prep": [],
     "hpo": [check_hpo],
@@ -1745,7 +1839,7 @@ STAGE_CHECKS = {
         check_drift_safemode_gates,
         check_report_schema,
     ],
-    "wf": [check_wf],
+    "wf": [check_wf, check_obs_noise_gate],
     "oos": [],
     "paper-deploy": [
         check_paper_deploy,
