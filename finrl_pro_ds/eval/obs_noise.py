@@ -59,9 +59,9 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 import numpy as np
 import pandas as pd
 
-# Single source of the PF clip convention (torch-free import; sensitivity_audit
-# lazy-imports run_rule so this does NOT pull torch/env into the pure core).
-from finrl_pro_ds.eval.sensitivity_audit import PF_CAP
+# Single source of the PF clip + metric conventions (torch-free import;
+# sensitivity_audit lazy-imports run_rule so this does NOT pull torch/env in).
+from finrl_pro_ds.eval.sensitivity_audit import PF_CAP, mdd_from_pv, pf_from_pv
 
 log = logging.getLogger("obs-noise")
 
@@ -478,3 +478,317 @@ def resolve_obs_noise_gate(
         n_folds=n_folds,
         n_folds_graded=n_folds_graded,
     )
+
+
+# ---------------------------------------------------------------------------
+# obs_noise_report.json (IC-2) — pure dict builder + atomic writer
+# ---------------------------------------------------------------------------
+
+
+def build_obs_noise_report(
+    config: Dict[str, Any],
+    results: Sequence[FoldNoiseResult],
+    verdict: ObsNoiseVerdict,
+    specs: Sequence[NoiseSpec],
+    fold_shas: Dict[Tuple[int, str], List[str]],
+    folds: Sequence[Dict[str, Any]],
+    rule_name: str,
+    gates: Dict[str, Any],
+    *,
+    workstream: str = "",
+    ensemble_seeds: Optional[Sequence[int]] = None,
+    device: str = "cpu",
+    parallel: int = 1,
+    wall_time_seconds: Optional[float] = None,
+    wandb_run_id: Optional[str] = None,
+    git_sha: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Compose the ``obs_noise_report.json`` manifest (IC-2).
+
+    ``fold_shas`` maps ``(fold_idx, sigma_label) -> [sha256 per noise seed]``.
+    ``folds`` is the splitter output (``{"test": TimeRange, "val": TimeRange}``)
+    used to record per-fold test ranges + val_end. ``results`` is the flat
+    per-(fold, sigma) list from :func:`run_obs_noise_stage`.
+    """
+    by_fold: Dict[int, Dict[str, FoldNoiseResult]] = defaultdict(dict)
+    for r in results:
+        by_fold[r.fold_idx][r.sigma_label] = r
+
+    folds_block: List[dict] = []
+    for fold_idx in sorted(by_fold):
+        fold = folds[fold_idx] if fold_idx < len(folds) else {}
+        test = fold.get("test") if isinstance(fold, dict) else None
+        val = fold.get("val") if isinstance(fold, dict) else None
+        per_sigma: Dict[str, dict] = {}
+        for label, r in sorted(by_fold[fold_idx].items()):
+            per_sigma[label] = {
+                "pf_nominal": r.pf_nominal,
+                "mdd_nominal": r.mdd_nominal,
+                "pf_seeds": list(r.pf_seeds),
+                "mdd_seeds": list(r.mdd_seeds),
+                "pf_q05": r.pf_q05, "pf_q50": r.pf_q50, "pf_q95": r.pf_q95,
+                "mdd_q05": r.mdd_q05, "mdd_q50": r.mdd_q50, "mdd_q95": r.mdd_q95,
+                "absmdd_q95": r.absmdd_q95,
+                "pf_ratio": r.pf_ratio,
+                "mdd_degradation_pp": r.mdd_degradation_pp,
+                "anomaly": r.anomaly,
+                "noised_parquet_sha": fold_shas.get((fold_idx, label), []),
+            }
+        folds_block.append({
+            "fold_idx": fold_idx,
+            "test_range": [test.start[:10], test.end[:10]] if test is not None else None,
+            "val_end": (val.end[:10] if val is not None else None),
+            "per_sigma": per_sigma,
+        })
+
+    thresholds_used: Dict[str, Any] = {}
+    for spec in specs:
+        thresholds_used[f"obs_noise_pf_floor_{spec.label}"] = gates.get(
+            f"obs_noise_pf_floor_{spec.label}")
+        thresholds_used[f"obs_noise_mdd_buffer_pp_{spec.label}"] = gates.get(
+            f"obs_noise_mdd_buffer_pp_{spec.label}")
+    thresholds_used["obs_noise_n_seeds"] = (specs[0].n_seeds if specs else None)
+    thresholds_used["obs_noise_required_min_folds"] = gates.get(
+        "obs_noise_required_min_folds", verdict.n_folds)
+    thresholds_used["obs_noise_base_seed"] = gates.get(
+        "obs_noise_base_seed", DEFAULT_NOISE_BASE_SEED)
+
+    return {
+        "schema": SCHEMA_VERSION,
+        "stage": "3.5",
+        "protocol_version": str(config.get("protocol_version", "2.7")),
+        "workstream": workstream,
+        "rule": rule_name,
+        "ensemble_seeds": list(ensemble_seeds) if ensemble_seeds is not None else None,
+        "n_noise_seeds": (specs[0].n_seeds if specs else None),
+        "sigma_levels": [{"label": s.label, "sigma": s.sigma} for s in specs],
+        "noise_model": {
+            "kind": "multiplicative_lognormal_ohlc",
+            "repair": "minmax",
+            "volume_noised": False,
+            "noise_start_rule": "test_start",
+        },
+        "folds": folds_block,
+        "edge_robustness": {
+            "decision": verdict.decision,
+            "per_sigma": verdict.per_sigma,
+            "n_folds": verdict.n_folds,
+            "n_folds_graded": verdict.n_folds_graded,
+        },
+        "thresholds_used": thresholds_used,
+        "device": device,
+        "parallel": int(parallel),
+        "wall_time_seconds": wall_time_seconds,
+        "wandb_run_id": wandb_run_id,
+        "git_sha": git_sha,
+    }
+
+
+def write_obs_noise_report(out_path: Any, report: Dict[str, Any]) -> Path:
+    """Write ``report`` to ``out_path`` atomically (tempfile + rename)."""
+    import json
+
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+    tmp.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    tmp.replace(out_path)
+    log.info("obs_noise_report written: %s", out_path)
+    return out_path
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator (impure — reuses run_rule + _load_agents_from_paths)
+# ---------------------------------------------------------------------------
+
+
+def _assert_obs_noise_invariants(config: Dict[str, Any]) -> None:
+    """BUG-03 preflight before any rollout (mirror sensitivity_audit)."""
+    hindsight = (config.get("env", {}) or {}).get("hindsight_weight", 0.0)
+    if float(hindsight) != 0.0:
+        raise InvariantViolation(
+            f"BUG-03: env.hindsight_weight must be 0.0 in obs-noise backtest; "
+            f"got {hindsight}"
+        )
+
+
+def _fold_cell_config(
+    config: Dict[str, Any], test_start: str, test_end: str, val_end: str,
+) -> Dict[str, Any]:
+    """Config copy with the fold's test window + val_end (norm cutoff) set.
+
+    Mirrors ``scripts.sg1_xauusd_ensemble_eval._override_test_window`` but inline
+    so this module stays torch-free (the real run_rule is lazy-imported only when
+    no injection hook is supplied).
+    """
+    import copy
+
+    c = copy.deepcopy(config)
+    c.setdefault("data", {})
+    c["data"]["test_start_date"] = test_start[:10]
+    c["data"]["test_end_date"] = test_end[:10]
+    c["data"]["val_end_date"] = val_end[:10]  # norm cutoff frozen at end of val
+    return c
+
+
+def _pv(df: "pd.DataFrame") -> np.ndarray:
+    return df["portfolio_value"].to_numpy(dtype=np.float64)
+
+
+def run_obs_noise_stage(
+    config: Dict[str, Any],
+    folds: Sequence[Dict[str, Any]],
+    fold_checkpoints: Dict[int, Dict[int, str]],
+    rule_name: str,
+    rule_fn: Any,
+    specs: Sequence[NoiseSpec],
+    gates: Dict[str, Any],
+    out_dir: Any,
+    scratch_dir: Any,
+    device: str = "cpu",
+    parallel: int = 1,
+    keep_noised: bool = False,
+    *,
+    workstream: str = "",
+    ensemble_seeds: Optional[Sequence[int]] = None,
+    wandb_run_id: Optional[str] = None,
+    git_sha: Optional[str] = None,
+    wall_time_seconds: Optional[float] = None,
+    _load_agents: Optional[Any] = None,
+    _run_rule: Optional[Any] = None,
+) -> Tuple[List[FoldNoiseResult], ObsNoiseVerdict]:
+    """Stage 3.5 obs-noise orchestrator.
+
+    For each fold: a ``sigma=0`` nominal rollout (in-band reference, ADR-3) plus,
+    per sigma-level, ``n_seeds`` noisy rollouts. Each rollout materializes a
+    noised 1-min parquet (``apply_ohlc_noise`` -> ``write_noised_parquet``), points
+    a deep-copied config's ``data.file_path`` at it, and rolls the **unmodified**
+    ``run_rule`` so the real handler recomputes every feature / the X2 causal map
+    / EMA-Z / ATR from the noised bars (single source of truth; ADR-1/2). PF/MDD
+    are read off ``portfolio_value`` via the shared ``pf_from_pv`` / ``mdd_from_pv``.
+
+    Scratch is bounded: each cell's parquet is generated -> rolled -> deleted
+    (unless ``keep_noised``). Agents are loaded ONCE per fold (policy weights are
+    independent of the noised data) and reused across sigma x seed.
+
+    Preconditions: ``config.env.hindsight_weight == 0.0`` (BUG-03);
+    ``noise_start (=test_start) >= val_end`` per fold (LEAK-1 / OBSNOISE-2).
+
+    Parallelism: ``parallel`` is recorded in the report but rollouts run serially
+    in this first cut — the per-seed rollout closures (``_make_pf_weighted``) are
+    not ProcessPool-picklable and CUDA-in-subprocess sharing risks the documented
+    multiprocessing race. The CPU-bound noise generation can be parallelized in a
+    later optimization without changing the verdict.
+
+    ``_load_agents`` / ``_run_rule`` are injection hooks (default: the real
+    torch-backed ``scripts.sg1_xauusd_ensemble_eval`` functions, lazy-imported);
+    tests pass deterministic fakes to exercise the wiring without torch.
+    """
+    _assert_obs_noise_invariants(config)
+
+    if _load_agents is None or _run_rule is None:
+        from scripts.sg1_xauusd_ensemble_eval import (  # lazy: keep module torch-free
+            _load_agents_from_paths as _real_load_agents,
+            run_rule as _real_run_rule,
+        )
+        _load_agents = _load_agents or _real_load_agents
+        _run_rule = _run_rule or _real_run_rule
+
+    data_cfg = config.get("data", {}) or {}
+    source_path = data_cfg.get("file_path")
+    if not source_path:
+        raise ValueError("config.data.file_path missing — obs-noise needs the source 1-min parquet")
+    base_seed = int(gates.get("obs_noise_base_seed", DEFAULT_NOISE_BASE_SEED))
+
+    out_dir = Path(out_dir)
+    scratch_dir = Path(scratch_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+
+    results: List[FoldNoiseResult] = []
+    fold_shas: Dict[Tuple[int, str], List[str]] = {}
+
+    for fold_idx, fold in enumerate(folds):
+        test = fold["test"]
+        val = fold["val"]
+        test_start, test_end, val_end = test.start, test.end, val.end
+        noise_start = test_start  # ADR-5
+
+        if pd.Timestamp(noise_start) < pd.Timestamp(val_end):
+            raise InvariantViolation(
+                f"LEAK-1/OBSNOISE-2: fold {fold_idx} noise_start ({noise_start}) "
+                f"< val_end ({val_end}); noise would touch the normalization warmup."
+            )
+        if fold_idx not in fold_checkpoints:
+            raise FileNotFoundError(
+                f"fold {fold_idx}: no checkpoints in fold_checkpoints map"
+            )
+        ckpts = fold_checkpoints[fold_idx]
+        fold_base_cfg = _fold_cell_config(config, test_start, test_end, val_end)
+        fold_scratch = scratch_dir / f"fold_{fold_idx:02d}"
+
+        # --- sigma=0 nominal (ADR-3): identical code path, byte-identity parquet ---
+        nom_parquet, _ = write_noised_parquet(
+            source_path, 0.0, 0, noise_start, fold_scratch / "nominal.parquet",
+        )
+        nom_cfg = _fold_cell_config(config, test_start, test_end, val_end)
+        nom_cfg["data"]["file_path"] = str(nom_parquet)
+        agents = _load_agents(nom_cfg, ckpts, device)
+        nom_out = out_dir / f"fold_{fold_idx:02d}" / "nominal"
+        nom_out.mkdir(parents=True, exist_ok=True)
+        nom_df = _run_rule(nom_cfg, agents, rule_name, rule_fn, device, nom_out)
+        pf_nom = pf_from_pv(_pv(nom_df))
+        mdd_nom = mdd_from_pv(_pv(nom_df))
+        if not keep_noised and nom_parquet.exists():
+            nom_parquet.unlink()
+        log.info(
+            "[fold %d] nominal sigma=0: pf=%.4f mdd=%.4f", fold_idx, pf_nom, mdd_nom,
+        )
+
+        for level_idx, spec in enumerate(specs):
+            pf_seeds: List[float] = []
+            mdd_seeds: List[float] = []
+            shas: List[str] = []
+            for k in range(spec.n_seeds):
+                seed = derive_noise_seed(fold_idx, level_idx, k, base_seed)
+                cell_parquet, sha = write_noised_parquet(
+                    source_path, spec.sigma, seed, noise_start,
+                    fold_scratch / spec.label / f"seed_{k}.parquet",
+                )
+                cell_cfg = copy_with_file_path(fold_base_cfg, str(cell_parquet))
+                cell_out = out_dir / f"fold_{fold_idx:02d}" / spec.label / f"seed_{k}"
+                cell_out.mkdir(parents=True, exist_ok=True)
+                df = _run_rule(cell_cfg, agents, rule_name, rule_fn, device, cell_out)
+                pf_seeds.append(pf_from_pv(_pv(df)))
+                mdd_seeds.append(mdd_from_pv(_pv(df)))
+                shas.append(sha)
+                if not keep_noised and cell_parquet.exists():
+                    cell_parquet.unlink()
+            r = aggregate_fold(fold_idx, spec, pf_nom, mdd_nom, pf_seeds, mdd_seeds)
+            results.append(r)
+            fold_shas[(fold_idx, spec.label)] = shas
+            log.info(
+                "[fold %d] %s: pf_ratio=%.4f mdd_degr_pp=%.3f anomaly=%s",
+                fold_idx, spec.label, r.pf_ratio, r.mdd_degradation_pp, r.anomaly,
+            )
+
+    verdict = resolve_obs_noise_gate(results, gates)
+    report = build_obs_noise_report(
+        config, results, verdict, specs, fold_shas, folds, rule_name, gates,
+        workstream=workstream, ensemble_seeds=ensemble_seeds, device=device,
+        parallel=parallel, wall_time_seconds=wall_time_seconds,
+        wandb_run_id=wandb_run_id, git_sha=git_sha,
+    )
+    write_obs_noise_report(out_dir / "obs_noise_report.json", report)
+    log.info("Stage 3.5 obs-noise verdict: %s", verdict.decision)
+    return results, verdict
+
+
+def copy_with_file_path(config: Dict[str, Any], file_path: str) -> Dict[str, Any]:
+    """Deep-copy ``config`` and point ``data.file_path`` at ``file_path`` (ADR-2)."""
+    import copy
+
+    c = copy.deepcopy(config)
+    c.setdefault("data", {})
+    c["data"]["file_path"] = file_path
+    return c
