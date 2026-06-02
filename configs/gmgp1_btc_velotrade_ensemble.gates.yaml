@@ -103,6 +103,27 @@ gates:
   pf_xcheck_report_only: true                    # N2/ADR-N5 Phase α: surface (H+L)/2-vs-close PF divergence, never HALT
   pf_xcheck_divergence_halt: 0.30                # lock per-workstream vs observed divergence, then flip report_only false (enforce)
 
+  # === Protocol v2.7-B Stage 3.5 obs-noise robustness (S553-cont-25, Phase α) ===
+  # Design: .agent/artifacts/protocol_v27_b_obs_noise_stage_3_5_architecture.md
+  # Math gate: same doc "§ Math Audit Verdict" (PASS WITH NOTES). Price-path
+  # randomization re-rolls the PROMOTE policy through multiplicative log-noise on
+  # the raw 1-min OHLC (σ is log-space; bps = σ·1e4, MATH-OBS-2), recomputes every
+  # feature via the REAL handler, and gates on edge survival under perturbation.
+  # Phase α (S553+): keys present, obs_noise_required=false → report-only
+  # calibration. Phase β: operator locks the floors/buffers against the de-leaked
+  # candidates' empirical spread, then bumps protocol_version to '2.7' AND flips
+  # obs_noise_required=true. Stage 3.5 runs AFTER Stage 3 WF, gates Stage 4 OOS.
+  obs_noise_sigma_levels:                   # label → log-space σ (explicit unit; no magic)
+    "10bps": 0.001
+    "50bps": 0.005
+  obs_noise_n_seeds: 10                      # noise seeds per (fold, σ)
+  obs_noise_pf_floor_10bps: 0.85            # PRIMARY: median PF ratio floor @ σ=10bps
+  obs_noise_pf_floor_50bps: 0.70
+  obs_noise_mdd_buffer_pp_10bps: 0.3        # max q95(|MDD|) degradation (pp) @ σ=10bps (MATH-OBS-4)
+  obs_noise_mdd_buffer_pp_50bps: 0.7
+  obs_noise_required_min_folds: 4           # = wf_folds; graded folds below → UNKNOWN_INSUFFICIENT_FOLDS
+  obs_noise_required: false                  # Phase α dormant; flip true in Phase β (post-calibration)
+
   # v2.3 diversity-aware top-K selection (Phase 0). Pearson |action correlation|
   # used as redundancy proxy. Pool-size > K is a precondition for the selector
   # to materially differ from naive top-K-by-PF; with pool == K it's audit-only.
