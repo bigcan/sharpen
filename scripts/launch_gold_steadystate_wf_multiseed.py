@@ -119,10 +119,11 @@ def validate(cfg_path: Path) -> bool:
 
 def launch_cell(cfg_path: Path, fold_idx: int, slots: str | None,
                 instance: str | None, gpu: str | None, concurrent: int,
-                dry_run: bool) -> tuple[int, float]:
+                dry_run: bool,
+                run_name_prefix: str = "gmgp1-gold-steadystate-wf") -> tuple[int, float]:
     """Invoke launch_l1_multiseed.py for one fold's 3-seed cell."""
     seeds_csv = ",".join(str(s) for s in SEEDS)
-    prefix = f"gmgp1-gold-steadystate-wf-fold{fold_idx}"
+    prefix = f"{run_name_prefix}-fold{fold_idx}"
     cfg_rel = cfg_path.relative_to(PROJECT_ROOT).as_posix()
     cmd = [
         sys.executable, str(LAUNCHER),
@@ -173,6 +174,10 @@ def main() -> int:
                    help="Cross-GPU slot pool: comma-separated host:gpu pairs.")
     p.add_argument("--folds", type=str, default=None,
                    help="Comma-separated fold subset (e.g., '0' for smoke, '0,1' for two)")
+    p.add_argument("--run_name_prefix", default="gmgp1-gold-steadystate-wf",
+                   help="Run-name / checkpoint prefix. Override for disjoint cohorts "
+                        "(e.g. gmgp1-gold-x2deleak-wf for an X2 de-leak re-run). MUST "
+                        "match the WF config's ensemble.checkpoint_pattern prefix.")
     p.add_argument("--dry_run", action="store_true",
                    help="Materialize + validate configs + print launch cmds; do not spawn")
     args = p.parse_args()
@@ -226,6 +231,7 @@ def main() -> int:
     log.info("  config:      %s", args.config.name)
     log.info("  folds:       %s of %d total", [i for i, _ in folds_subset], len(folds))
     log.info("  seeds:       %s", SEEDS)
+    log.info("  prefix:      %s", args.run_name_prefix)
     log.info("  total runs:  %d", len(folds_subset) * len(SEEDS))
     if args.slots:
         log.info("  slots:       %s (cross-GPU)", args.slots)
@@ -326,6 +332,7 @@ def main() -> int:
         rc, elapsed = launch_cell(
             cfg_path, fold_idx, args.slots,
             args.instance, args.gpu, args.concurrent, args.dry_run,
+            args.run_name_prefix,
         )
 
         finished_ok = -2                            # not waited (dry-run path)
