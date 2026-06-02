@@ -1,0 +1,213 @@
+# GMGP1-Gold steady-state Stage-3 WF — X2 DE-LEAK re-run of the deployed N=3 ensemble.
+#
+# === PURPOSE: blast-radius probe #2 (S553-cont-26 follow-up) ===
+# sg1-btc [3,15,60] AND gmgp1-btc [15,60,240] both proved leak-borne once the X2
+# coarse-bar look-ahead was made causal (sg1-btc best-solo WF PF 1.69 -> 1.02
+# breakeven; gmgp1-btc fold-0 ens 2.75 -> 0.80, net LOSING). gmgp1-gold is the
+# highest-stakes remaining multiscale strategy: it is LIVE paper (IB MGC), it is
+# the FTMO/Velotrade-designated GMGP1 leg, it shares the leaky multiscale_handler.py,
+# it uses the IDENTICAL [15,60,240] octave as the worst BTC collapse, and its HPs
+# (tfbaitfp) were selected on leaky validation. This WF answers the gating
+# question: is the gmgp1-gold policy alpha real, or leak-borne like both BTC twins?
+#
+# This config is a DISJOINT clone of configs/gmgp1_gold_steadystate_wf.yaml — the
+# config that produced the LEAKY deployed ensemble v1 (Stage 2.5-R PROMOTE
+# ens_pf_weighted [456,1024,2025], bootstrap P(PF)=1.000, test PF 3.05; live since
+# 2026-05-09, S538-cont-4).
+#
+# DELTA vs gmgp1_gold_steadystate_wf.yaml — APPLES-TO-APPLES, only X2 changes:
+#   - ensemble.checkpoint_pattern: gmgp1-gold-x2deleak-wf-* (disjoint from the
+#     leaky gmgp1-gold-steadystate-wf-* checkpoints — 12 dirs from 2026-05-08 still
+#     on disk — so run_wf_ensemble's glob cannot mix cohorts).
+#   - wandb.tags: + "x2-deleak" / "s553" (KEEP "Gold" + "wf-stage3" — the dispatcher's
+#     WandB completion-poller hard-filters on those two tags + fold-<i> + study-id-<ts>).
+#   - EVERYTHING else byte-identical: data, splitter, env (incl. taker_fee 0.000068
+#     held constant to isolate X2 — already live-matched MGC, NOT re-cost-correcting),
+#     HPs (tfbaitfp), network, seeds, seed_pfs, gates. The X2 causal fix (6c027e19)
+#     applies at CODE level on the June2026 branch; no config key encodes it.
+#
+# LAUNCH (disjoint prefix REQUIRED so checkpoints don't collide with the leaky run;
+# fold-0 preview first per the gmgp1-btc precedent — fold-0 was decisive there):
+#   DEPLOY_SETUP_GAP_S=900 python scripts/launch_gold_steadystate_wf_multiseed.py \
+#       --config configs/gmgp1_gold_steadystate_wf_x2deleak.yaml \
+#       --run_name_prefix gmgp1-gold-x2deleak-wf \
+#       --instance gpuhub-2 --gpu 0 --concurrent 3 --folds 0
+#
+# POST-TRAIN EVAL (no GPU) — --output_dir MANDATORY (otherwise defaults to the
+# LEAKY results/gmgp1_gold_ensemble_wf/):
+#   python scripts/sg1_xauusd_ensemble_eval.py \
+#       --wf_config configs/gmgp1_gold_steadystate_wf_x2deleak.yaml \
+#       --gates_file configs/gmgp1_gold_steadystate_ensemble.gates.yaml \
+#       --output_dir results/gmgp1_gold_ensemble_wf_x2deleak --device cpu
+#
+# COMPARE: leaky Stage 2.5-R test PF 3.05 / WF ens (per ensemble_report.json)
+#   survives gates -> gmgp1-gold edge is REAL; multiscale CAN work on the right
+#                     asset; drawing-board reset is BTC-specific, not architecture-wide.
+#   collapses      -> 3rd strike, same [15,60,240] octave; multiscale-coarse-bar
+#                     swing has no causal edge; full state-representation redesign +
+#                     pull gmgp1-gold from the FTMO/Velotrade path.
+
+# ---------- DATA (CME GC, full envelope) — identical to leaky WF ----------
+data:
+  file_path: "data/cme/gc_2025_lob1_1min_stitched.parquet"
+  ticker: "GC"
+  handler_type: "multiscale"
+  start_date: "2025-01-01"
+  end_date:   "2025-12-31"
+
+splitter:
+  train_months: 6                       # smallest window that yields 4 folds in 12mo
+  val_months:   1
+  test_months:  1
+  step_months:  1                       # 1mo rolling → 4 folds in 12mo envelope
+  buffer_days:  0
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cme_futures"
+
+# ---------- ENV (matches L1 multiseed — research-tier max_dd, no risk wrapper) ----------
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.000068                   # live MGC IB fee, held identical to leaky WF (isolate X2)
+  deadband_threshold: 0.25
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30                # research-tier (matches L1 train)
+  scales: [15, 60, 240]
+  gap_detection: true                   # CME GC overnight + weekend gaps
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+
+# ---------- NETWORK (matches L1) ----------
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# ---------- AGENTS (HPO `tfbaitfp` — frozen, transcribed from wandb config) ----------
+agents:
+  sac:
+    lr_actor: 0.00038328488757883856
+    lr_critic: 0.00008103804982530071
+    lr_alpha: 0.000006228366311019425
+    gamma: 0.9929746422964338
+    tau: 0.00011195773489610946
+    initial_alpha: 0.215815935674158
+    gradient_clip: 2.0838716586365407
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+# ---------- TRAINING ----------
+training:
+  total_timesteps: 500000               # matches L1 cell + S509 GC OOS-optimum
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+# ---------- GATES (Stage 3 WF + upstream-stage retention for validator) ----------
+gates:
+  # Upstream stages (retained for validate_config walk through pipeline)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 3                           # WF cell uses top-3 seeds (not 10)
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10             # legacy point-estimate (audit-only)
+  ensemble_ambiguous_min: 1.05
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_rule_selection: val_argmax_pf
+  # Stage 3 (this config's primary gates)
+  wf_windows: 4                         # validator hard-fails if <4
+  wf_pf_floor: 1.1                      # per-fold ensemble PF floor
+  # Stage 4 (downstream — recent-OOS, retained for validator continuity)
+  oos_pf_floor: 1.1
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds (validator runs unconditionally).
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode (S491 lesson).
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+ensemble:
+  # v2.5 Stage 2.5 overlay — research-tier buffers + bootstrap thresholds
+  # (P_PF/P_MDD ≥ 0.90). Required by `run_wf_ensemble()` for per-fold verdicts.
+  gates_file: "configs/gmgp1_gold_steadystate_ensemble.gates.yaml"
+
+  # DISJOINT prefix so the eval glob matches ONLY de-leaked checkpoints.
+  checkpoint_pattern: "checkpoints/gmgp1-gold-x2deleak-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth"
+
+  # Seeds the umbrella expects. Top-3 from Stage 2 N=10 (val_argmax_pf rule).
+  seeds: [456, 1024, 2025]
+
+  # Prior weights for `_make_pf_weighted` (ens_pf_weighted aggregation rule —
+  # the rule that PROMOTE'd at Stage 2.5-R per ensemble_report.json).
+  # Held identical to the leaky WF (apples-to-apples): the rule weights actions by
+  # these priors at every step; the de-leak WF produces different per-fold PFs but
+  # the umbrella uses ONE seed_pfs dict for all folds (by design, a typical-quality
+  # prior, not a per-fold ranking).
+  seed_pfs:
+    456:  2.4871
+    1024: 2.4470
+    2025: 2.5801
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true                     # S488: one parent run, fold<i>/seed<j>/* namespaces
+  tags:
+    - "gmgp1-v5"
+    - "Gold"                            # REQUIRED: dispatcher poller hard-filters on this tag
+    - "SAC"
+    - "15min"
+    - "cme-futures"
+    - "internal-validation"
+    - "walk_forward"
+    - "wf-stage3"                       # REQUIRED: dispatcher poller hard-filters on this tag
+    - "steady-state"
+    - "v2-5-bootstrap"
+    - "x2-deleak"
+    - "s553"
+    - "upstream:tfbaitfp"
+    - "upstream-stage25:results/gmgp1_gold_ensemble/ensemble_v1.tar.gz"
+    - "s538"
