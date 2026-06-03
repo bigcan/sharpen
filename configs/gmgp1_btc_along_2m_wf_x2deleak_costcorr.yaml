@@ -38,10 +38,25 @@
 #
 # POST-TRAIN EVAL (no GPU) — --output_dir MANDATORY (gates workstream:gmgp1_btc
 # otherwise defaults to the LEAKY results/gmgp1_btc_ensemble_wf/):
-#   python scripts/sg1_xauusd_ensemble_eval.py \
+#   python scripts/sg1_btc_velotrade_ensemble_eval.py \
 #       --wf_config configs/gmgp1_btc_along_2m_wf_x2deleak_costcorr.yaml \
 #       --gates_file configs/gmgp1_btc_velotrade_ensemble.gates.yaml \
 #       --output_dir results/gmgp1_btc_ensemble_wf_x2deleak_costcorr --device cpu
+#
+# !! ENGINE CORRECTION (deep lifecycle audit 2026-06-03, findings P7-01/P7-02) !!
+#   The eval engine was changed from scripts/sg1_xauusd_ensemble_eval.py
+#   (the "shared" engine) to scripts/sg1_btc_velotrade_ensemble_eval.py. The
+#   shared engine has NO fixed-lot stress sub-report (P7-01, S1) and grades the
+#   STATIC gates.aggregation_rule instead of the deployed/chosen rule (P7-02, S1)
+#   -> its WF verdict reads trailing DD off the lenient bare-env 30% surface with
+#   no fixed-lot cross-check, making the "DD within Velotrade 10% cap" gate
+#   non-binding. The velotrade engine is a config-driven port that (a) runs the
+#   X3 fixed-lot stress pass (finrl_pro_ds/eval/fixed_lot_stress.py, audit-verified
+#   P7-10) gating the HONEST worst fixed-lot trailing DD vs the 10% cap, and
+#   (b) grades the chosen rule via --chosen_rule. Same CLI args; zero code change.
+#   REQUIRES stress_dd_buffer_pp + stress_leverage_max in the gates file (else
+#   stress_leverage_max defaults to 1.0 and spuriously FAILs a leverage>1 policy)
+#   -> the clean-canary gates file (authored in Phase B-1) sets both.
 #
 # VERDICT LADDER (read in this order):
 #   leaky frictionless ens 2.81 / best-solo 2.61   (configs/gmgp1_btc_along_2m_wf.yaml)
