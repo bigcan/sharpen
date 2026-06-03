@@ -1,0 +1,75 @@
+# Distributed HPO overlay — GMGP1-BTC X2-DE-LEAK CLEAN CANARY (S553-cont-31).
+# Pairs with configs/gmgp1_btc_x2deleak_canary_hpo.yaml (the experiment config).
+# Mirrors configs/dhpo_gmgp1_btc_velotrade.yaml but: Bybit data (de-leak envelope),
+# 24 trials, x2-deleak/canary tags.
+#
+# PREREQUISITES BEFORE LAUNCH:
+#   1. python scripts/monitor_fleet.py  -> gpuhub-1:0 + gpuhub-1:1 FREE (gpuhub-2 reserved for the WF stage).
+#   2. python scripts/validate_config.py --config configs/gmgp1_btc_x2deleak_canary_hpo.yaml --stage hpo  -> PASS.
+#   3. set -a; source .env; set +a   (exports DISTRIBUTED_HPO_DB_URL — Neon PostgreSQL).
+#
+# Launch (6 workers = 3 replicas x 2 GPUs on gpuhub-1):
+#   python scripts/distributed_hpo_coordinator.py \
+#     --config configs/gmgp1_btc_x2deleak_canary_hpo.yaml \
+#     --platform gpuhub \
+#     --n_workers 6 --n_trials 24 \
+#     --db_url "$DISTRIBUTED_HPO_DB_URL" \
+#     --study_name gmgp1_btc_x2deleak_canary_hpo_20260603 \
+#     --distributed_config configs/dhpo_gmgp1_btc_x2deleak_canary.yaml \
+#     --resume
+#   # NOTE: NO --gpu_filter for gpuhub (Vast.ai-only; 'RTX_4090' underscore vs the
+#   # registry's 'RTX 4090' space culls all slots -> "No running instances").
+
+distributed_hpo:
+  platform: "gpuhub"
+  n_workers: 6
+  n_trials: 24                          # 10 random + 14 TPE
+
+  storage:
+    backend: "postgresql"
+    url: "${DISTRIBUTED_HPO_DB_URL}"
+    heartbeat_interval: 60
+    grace_period: 600
+    max_retry: 1
+
+  # S488 rule: HPO on gpuhub-1 ONLY (gpu 0 + gpu 1); gpuhub-2 reserved for the
+  # non-HPO WF stage. 3 replicas/GPU (SAC HPO ~25% util per worker -> ~75% util).
+  gpuhub:
+    instances:
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-1:0"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
+      - "gpuhub-1:1"
+
+  worker:
+    target_trials: null
+    trial_timeout: 14400                 # 4h/trial ceiling (1M steps co-located ~2.5-3h; headroom)
+    graceful_shutdown_timeout: 60
+    pip_extras: ""
+
+  data:
+    upload_method: "sftp"
+    data_files:
+      - "btc_usdt_1min_bybit.parquet"
+      - "btc_usdt_1min_bybit.manifest.json"
+    cache_by_size: true
+
+  wandb:
+    entity: "bigcan-chiwin-technology"
+    project: "FinRL-Pro-DS"
+    group_prefix: "dhpo"
+    tags: ["distributed_hpo", "gmgp1-btc", "BTC", "velotrade", "15min",
+           "x2-deleak", "clean-canary", "cost-corrected", "leverage-axis", "s553"]
+
+  fault_tolerance:
+    max_worker_retries: 2
+    worker_replace_on_death: false       # GPUHub fixed fleet — manual replace if a worker dies
+    monitor_poll_interval: 300
+
+  cost:
+    auto_teardown: false                 # never auto-destroy GPUHub instances
+
+# Expected wall-clock: 24 trials x 1.0M steps = 24M steps / ~600 SPS aggregate
+#   (6-worker 4090 fleet, 3/GPU co-location) ~= 11-13h (vs ~50h serial on one 4090).

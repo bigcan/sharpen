@@ -1,0 +1,165 @@
+# GMGP1-BTC X2-DE-LEAK CLEAN CANARY — ensemble/WF gates (PRE-COMMITTED).
+#
+# Dedicated gates file for the strictly-clean falsification canary
+# (configs/gmgp1_btc_x2deleak_canary_hpo.yaml -> cost-corrected 4-fold WF).
+# Clone of configs/gmgp1_btc_velotrade_ensemble.gates.yaml with TWO deltas:
+#
+#   1. + X3 FIXED-LOT STRESS BLOCK (stress_dd_buffer_pp / stress_leverage_max) —
+#      the canary-trust fix from the 2026-06-03 deep lifecycle audit (P7-01/P7-03).
+#      The velotrade eval engine (scripts/sg1_btc_velotrade_ensemble_eval.py) reads
+#      these in run_wf_ensemble -> fixed_lot_stress.compute_stress_subreport, gating
+#      the HONEST worst fixed-lot trailing DD (no early-term truncation) vs the 10%
+#      Velotrade cap. Without these keys the module DEFAULTS stress_leverage_max=1.0,
+#      which would spuriously FAIL a leverage>1 canary.
+#
+#   2. stress_leverage_max = 2.0 = the canary HPO leverage axis cap [0.5, 2.0].
+#      Kept SEPARATE from the live gmgp1_btc gates (which imply 1.0) so the canary's
+#      higher leverage ceiling does not loosen the deployed-workstream gate.
+#
+# Everything else byte-identical to the velotrade gates (G1..G5, bootstrap, drift,
+# safe_mode, retrain, sensitivity, obs_noise). Floors are already de-leak-appropriate
+# (pf_floor 1.1 = the kill-criterion FALSIFY boundary; trailing_dd_buffer_pp_min 0.5
+# = worst DD <= 9.5% under the 10% cap). The deploy DECISION is the pre-registered
+# kill criterion (net WF PF >= 1.2 + stress DD < 10%), NOT a single gate here.
+#
+# Pre-commit: 2026-06-03 S553-cont-31 (clean-canary falsification test).
+
+workstream: gmgp1_btc
+variant: ensemble_top3_canary
+seeds: [null, null, null]                       # top seeds populated post-L1 by reconcile step
+aggregation_rule: ens_mean                       # placeholder; --chosen_rule / best-solo read at WF eval
+
+wf_folds: 4
+
+gates:
+  g1_solo_baseline:
+    description: >-
+      WF Stage-3 gate per seed: >=seeds_pass_min seeds with per-fold test PF >=
+      pf_floor in >=min_folds_pass folds. pf_floor 1.1 = kill-criterion FALSIFY line.
+    pf_floor: 1.1
+    seeds_pass_min: 2
+    min_folds_pass: 3
+
+  g2_no_regression:
+    description: >-
+      Per fold, ensemble must not materially regress vs best solo:
+      ens_PF >= ens_ratio_min * best_solo_PF in >=min_folds_pass folds.
+    ens_ratio_min: 0.90
+    min_folds_pass: 3
+
+  g3_uplift:
+    description: >-
+      Across folds, median(ens_PF) / median(best_solo_PF) >= uplift_ratio_min.
+      (Canary typically reads best-solo per the prior de-leak pattern; this gates
+      the ensemble-overhead justification when an ensemble rule is graded.)
+    uplift_ratio_min: 1.05
+    metric: median
+
+  # === Protocol v2.5 PRIMARY: block-bootstrap probability gate ===
+  ensemble_bootstrap_p_pf_promote: 0.90
+  ensemble_bootstrap_p_mdd_promote: 0.90
+  ensemble_bootstrap_p_pf_ambiguous: 0.75
+  ensemble_bootstrap_resamples: 10000
+  ensemble_bootstrap_block_len: null
+
+  # === Protocol v2.5 SECONDARY (audit/sanity only) ===
+  ensemble_uplift_min: 1.10
+  ensemble_ambiguous_min: 1.05
+
+  # === Protocol v2.6 Stage 2.5-R Sensitivity Audit (Phase α — dormant) ===
+  edge_stability_pf_ratio_floor: 0.70
+  sensitivity_deadband_grid: [0.20, 0.25, 0.30]
+  sensitivity_max_leverage_mults: [0.5, 1.0, 1.5]
+  sensitivity_audit_required_min_deployable_neighbors: 4
+  sensitivity_audit_required: false
+  pf_xcheck_report_only: true
+  pf_xcheck_divergence_halt: 0.30
+
+  # === Protocol v2.7-B Stage 3.5 obs-noise robustness (Phase α — dormant) ===
+  obs_noise_sigma_levels:
+    "10bps": 0.001
+    "50bps": 0.005
+  obs_noise_n_seeds: 10
+  obs_noise_pf_floor_10bps: 0.85
+  obs_noise_pf_floor_50bps: 0.70
+  obs_noise_mdd_buffer_pp_10bps: 0.3
+  obs_noise_mdd_buffer_pp_50bps: 0.7
+  obs_noise_required_min_folds: 4
+  obs_noise_required: false
+
+  # v2.3 diversity-aware top-K selection
+  ensemble_top_k: 3
+  ensemble_diversity_lambda: 1.0
+
+  g4_velotrade_compliance:
+    description: >-
+      Ensemble trajectory per fold. Velotrade Step 1: 10% trailing DD cap, no
+      daily-loss gate. Engine buffered trailing (8%); gate buffer vs the 10% cap.
+    trailing_dd_buffer_pp_min: 0.5
+    daily_dd_buffer_pp_min: null
+    compliance_must_pass: false
+    min_folds_pass: 3
+
+  g5_dd_stability:
+    description: CV of ensemble PF across folds must be <= cv_pf_max.
+    cv_pf_max: 0.35
+
+  # === X3 FIXED-LOT STRESS SUB-REPORT (canary-trust fix, audit P7-01/P7-03/P7-10) ===
+  # Read by sg1_btc_velotrade_ensemble_eval.run_wf_ensemble ->
+  # finrl_pro_ds/eval/fixed_lot_stress.compute_stress_subreport. Replays the graded
+  # rule's full per-fold path at FIXED lot with NO prop-firm early-term truncation,
+  # then gates the honest worst trailing DD + peak leverage. A real breach flips
+  # OVERALL=FAIL; an early-terminated fold -> INCOMPLETE_NEEDS_REROLLOUT (never a pass).
+  stress_dd_buffer_pp: 0.5         # 10% Velotrade cap - worst fixed-lot trailing DD% >= this (=> worst DD <= 9.5%)
+  stress_leverage_max: 2.0         # peak |position| (max_leverage units) <= this; = canary HPO leverage axis cap
+
+  # Protocol v2.2 §8.2 live action-distribution drift thresholds (schema parity)
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode (schema parity)
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+  # Protocol v2.3 §4.5 retrain triggers (schema parity)
+  retrain:
+    ensemble_recheck_days: 90
+    live_pf_ratio: 0.8
+    live_pf_window_days: 5
+    min_trades_window: 20
+    agreement_decay_delta: 0.20
+    agreement_decay_window_bars: 600
+    action_kl_warn_window_bars: 1500
+    cost_drift_ratio: 1.20
+    cost_drift_window_trades: 100
+
+  drift_agreement:
+    enabled_for_rules: ["ens_agreement", "ens_majority"]
+    flat_delta_warn: 0.20
+    flat_delta_crit: 0.40
+    window_bars: 600
+
+decision:
+  all_pass_action: approve_ensemble_paper_deploy
+  any_fail_action: reject_ensemble_use_best_solo
+  solo_selection_metric: wf_median_pf
+  solo_tiebreaker: wf_mean_trailing_dd_buffer_pp
+
+provenance:
+  drafted_on: '2026-06-03'
+  drafted_by_session: S553-cont-31
+  modeled_on: configs/gmgp1_btc_velotrade_ensemble.gates.yaml
+  purpose: clean-canary X2-de-leak falsification (fresh HPO + leverage axis + cost-corrected WF)
+  upstream_hpo: gmgp1_btc_x2deleak_canary_hpo_20260603
+  delta_vs_model: "+stress_dd_buffer_pp/+stress_leverage_max (P7-01/P7-03); stress_leverage_max=2.0=axis cap"

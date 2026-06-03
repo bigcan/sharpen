@@ -1,0 +1,228 @@
+# ============================================================================
+# GMGP1-BTC X2-DE-LEAK CLEAN CANARY — FRESH HPO (Stage 1, Protocol v2)
+# ============================================================================
+# PURPOSE (operator falsification test, S553-cont-31): the strictly-clean test
+# that has NEVER been run. Every prior de-leak WF (configs/*_x2deleak*.yaml)
+# reused HPs FROZEN from the leaky study 6xluh826 (hpo.enabled:false), which
+# (a) optimized validation PF on the X2-LEAKY handler and (b) had NO leverage/
+# risk search axis at all (see project_hpo_leak_contaminated_at_selection_s553).
+# This config runs a FRESH HPO on the DE-LEAKED env (X2 fix 6c027e19 is code-
+# level on June2026) WITH a leverage/risk axis, under HONEST cost. Its winning
+# HPs feed a 4-fold COST-CORRECTED WF whose net PF + fixed-lot-stress DD decide
+# the pre-registered kill criterion (PF>=1.2 + DD<10% CONFIRM / <1.1 FALSIFY).
+#
+# WHY THIS IS A GENUINE OPEN TEST (not a foregone conclusion): the frictionless
+# fold-0 "collapse" (ens 0.80) used the LEAKY HPs. De-leaking removed INFORMATION
+# from the obs, so a fresh HPO is a falsification step, not expected-recovery —
+# but it is the only clean (de-leaked env + de-leaked HPO) run ever executed.
+#
+# === KEY DESIGN DECISIONS (all deliberate; flagged for operator review) ======
+#  1. DE-LEAKED ENV: automatic — env_factory.py:124-136 instantiates the causal
+#     MultiScaleOHLCVHandler (post-6c027e19). No config key encodes it; the
+#     gpuhub workers run the zip-of-local-tree at June2026 HEAD (de-leaked).
+#  2. COST-CORRECTED HPO: taker_fee 0.00055 + slippage_base_bps 5.0 (= the WF's
+#     cost layer). HPs are thus selected on the REAL cost topology the WF tests
+#     (S464 steady-state standard), not a frictionless upper bound.
+#  3. LEVERAGE/RISK AXIS (the axis 6xluh826 NEVER searched):
+#       - max_leverage      [0.5, 2.0] log   <- THE headline missing axis (sizing/risk).
+#                                               2.0 cap is Velotrade-prudent (10% DD cap);
+#                                               validator bound is [0.5, 5.0].
+#       - deadband_threshold[0.15,0.40] float<- trade-frequency / conviction (was a
+#                                               fixed categorical in 6xluh826).
+#     HELD FIXED (documented): atr_cap_max_position 0.5 + atr_cap_percentile 90
+#       — searching atr_cap needs an objective.py extension (no search-space hook
+#       exists); deferred to keep the canary code-change-free. stop_loss_bps /
+#       max_holding_bars left OFF (0) to avoid forcing hard constraints that would
+#       confound the "does the SIGNAL have alpha" question. dsr_eta is searched as
+#       a reward-SHAPING HP (objective stays PF -> BUG-01 compliant, audit P5-10).
+#  4. BARE ENV (no RiskShapingWrapper): this is a PURE-SIGNAL falsification test.
+#     The honest DD-vs-10%-cap read comes from the WF's fixed-lot stress sub-report
+#     (audit P7-10), NOT a training-time risk wrapper. If the pure signal clears
+#     the gate, a deploy-realistic risk-wrapper arm is a follow-up; if it does not,
+#     a risk wrapper cannot manufacture alpha.
+#  5. SELECTION-LEAKAGE GUARD (audit P5-06): HPO train/val/test windows all end
+#     BEFORE 2025-12-01 — the earliest WF test window. HPO never selects on data
+#     the WF then tests. (WF test windows: 2025-12 / 2026-01 / 2026-02 / 2026-03.)
+#
+# LAUNCH (distributed, gpuhub-1 only — gpuhub-2 reserved for the WF stage):
+#   set -a; source .env; set +a
+#   python scripts/distributed_hpo_coordinator.py \
+#     --config configs/gmgp1_btc_x2deleak_canary_hpo.yaml \
+#     --platform gpuhub \
+#     --n_workers 6 --n_trials 24 \
+#     --db_url "$DISTRIBUTED_HPO_DB_URL" \
+#     --study_name gmgp1_btc_x2deleak_canary_hpo_20260603 \
+#     --distributed_config configs/dhpo_gmgp1_btc_x2deleak_canary.yaml \
+#     --resume
+#   # NOTE: do NOT pass --gpu_filter for gpuhub — that is a Vast.ai-only concept;
+#   # the gpuhub registry (instances.json) stores 'RTX 4090' (space) so an
+#   # 'RTX_4090' (underscore) filter culls every safe-slot to zero ("No running
+#   # instances available"). gpuhub slots come from the overlay gpuhub.instances list.
+#
+# PRE-FLIGHT:
+#   python scripts/validate_config.py --config configs/gmgp1_btc_x2deleak_canary_hpo.yaml --stage hpo  -> PASS
+# ============================================================================
+
+# ---------- DATA (Bybit, matches the WF envelope; gap-free per P1-07) --------
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  # HPO selection windows — all strictly BEFORE the WF test windows (2025-12+)
+  # so HP selection cannot leak into the WF verdict (audit P5-06).
+  train_start_date: "2024-06-01"        # 15mo train -> 1.0M steps = 22.8x mult (in [15,40])
+  train_end_date:   "2025-09-01"
+  val_start_date:   "2025-09-01"        # HPO objective = median val PF (3 seeds)
+  val_end_date:     "2025-10-01"
+  test_start_date:  "2025-10-01"        # HPO held-out sanity
+  test_end_date:    "2025-11-01"
+
+features:
+  scales: [15, 60, 240]                 # 15-min decision, 1h trend, 4h regime
+  window_size: 30
+  features_per_scale: 8                  # TC-OPT: Conv1d Tensor Core alignment
+  asset_class: "crypto"
+
+# ---------- ENV (bare, de-leaked, COST-CORRECTED) ----------------------------
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00055                     # COST-CORRECTED: real Bybit futures taker 5.5 bps
+  slippage_base_bps: 5.0                 # COST-CORRECTED: one-way limit-cross ~4.58 bps
+  deadband_threshold: 0.25               # placeholder — OVERRIDDEN per-trial (search_space)
+  atr_cap_percentile: 90                 # HELD FIXED (not searched — see header note 3)
+  atr_cap_max_position: 0.5              # HELD FIXED
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30                 # research-tier (matches WF L1 train; honest DD at WF stage)
+  scales: [15, 60, 240]
+  gap_detection: true                    # S468/S478: data-artifact robustness
+  gap_atr_mult: 3.0
+  # max_leverage intentionally UNSET here -> driven entirely by search_space per trial.
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001                       # placeholder — HPO sweeps (reward-shaping; objective stays PF)
+    dsr_scale: 1.0
+
+# ---------- NETWORK (matches L1 / WF) ----------------------------------------
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5                         # augment_obs off — live_obs_builder compat
+  fusion_dim: 256
+  window_size: 30
+
+# ---------- AGENTS (placeholders — overridden by trial.suggest in HPO) --------
+# Geometric/arith midpoints of the broad search space (objective.py:132-144).
+# narrow_mode:false -> every dim resampled per trial; these are only consulted
+# if someone runs non-HPO training on this file.
+agents:
+  sac:
+    lr_actor: 4.5e-5
+    lr_critic: 4.5e-5
+    lr_alpha: 4.5e-5
+    gamma: 0.975
+    tau: 1.4e-4
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.158
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 3.16
+    checkpoint_interval: 250000
+
+# ---------- TRAINING (per-trial budget; multiplicity 22.8x on 15mo) ----------
+training:
+  total_timesteps: 1000000               # overridden to steps_per_trial during HPO
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+# ---------- HPO (Stage 1) ----------------------------------------------------
+hpo:
+  enabled: true
+  objective: "profit_factor"             # BUG-01 / Protocol v2 §4 stage 1
+  trials: 24                             # 10 random + 14 TPE (operator range 20-30)
+  steps_per_trial: 1000000               # 22.8x multiplicity on the 15mo window (in [15,40])
+  narrow_mode: false                     # full space — no valid leaky anchor on de-leaked env
+  enqueue_baseline: false
+  # The leverage/risk axis the contaminated 6xluh826 NEVER searched.
+  search_space:
+    max_leverage:
+      low: 0.5
+      high: 2.0
+      log: true
+    deadband_threshold:
+      type: "float"
+      low: 0.15
+      high: 0.40
+
+# ---------- GATES (Protocol v2 — RECALIBRATED for de-leaked numbers) ----------
+# NOTE: the leaky hpo_pf_floor:1.2 / l1_pf_floor:1.5 were calibrated on
+# X2-leak-INFLATED PFs (project_hpo_leak_contaminated_at_selection_s553). On the
+# de-leaked + cost-corrected env these are meaningless. Floors below are SANITY
+# floors (did HPO find anything tradeable) — the deploy decision is the WF kill
+# criterion (net PF>=1.2 + stress DD<10%), NOT these HPO/L1 floors.
+gates:
+  # HPO stage
+  hpo_pf_floor: 1.05                     # de-leaked sanity floor (beat breakeven+cost), NOT a deploy gate
+  hpo_min_trials_completed: 20           # of 24
+  entropy_floor: 0.01                    # training-health hard fails (audit P5-01: declared; mitigated by post-hoc inspection)
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  # L1 multi-seed stage
+  l1_seeds: 5                            # >3 (audit P5-13 prefers 10 for prop-firm; 5 balances canary cost)
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.1                       # de-leaked (was leaky 1.5)
+  # Walk-forward stage (the kill-criterion floor: <1.1 = FALSIFIED)
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  # Recent-OOS stage (not run in this canary; declared for schema parity)
+  oos_pf_floor: 1.1
+
+  # Protocol v2.2 §8.2 drift thresholds — declared for schema parity (validator
+  # runs check_drift_safemode_gates unconditionally; this config is prop-firm-tagged).
+  drift:
+    window_bars: 400
+    min_bars_before_check: 200
+    deadband_frac_warn: 0.15
+    deadband_frac_crit: 0.30
+    saturation_frac_warn: 0.15
+    saturation_frac_crit: 0.30
+    action_kl_warn: 0.5
+    action_kl_crit: 1.0
+    regime_conditioning: true
+    vol_estimator_bars: 20
+
+  # Protocol v2.2 §8.3 tiered safe-mode.
+  safe_mode:
+    crit_triggers_flatten: true
+    crit_repeat_window_hours: 24
+    crit_repeat_count_before_lockout: 2
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags:
+    - "gmgp1-btc"
+    - "BTC"
+    - "SAC"
+    - "15min"
+    - "crypto"
+    - "velotrade"
+    - "prop-firm"
+    - "hpo"
+    - "distributed_hpo"
+    - "x2-deleak"
+    - "clean-canary"
+    - "cost-corrected"
+    - "leverage-axis"
+    - "s553"

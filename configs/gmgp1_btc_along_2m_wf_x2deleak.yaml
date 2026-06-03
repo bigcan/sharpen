@@ -30,10 +30,15 @@
 #
 # POST-TRAIN EVAL (no GPU) — --output_dir MANDATORY (gates workstream:gmgp1_btc
 # otherwise defaults to the LEAKY results/gmgp1_btc_ensemble_wf/):
-#   python scripts/sg1_xauusd_ensemble_eval.py \
+#   python scripts/sg1_btc_velotrade_ensemble_eval.py \
 #       --wf_config configs/gmgp1_btc_along_2m_wf_x2deleak.yaml \
 #       --gates_file configs/gmgp1_btc_velotrade_ensemble.gates.yaml \
 #       --output_dir results/gmgp1_btc_ensemble_wf_x2deleak --device cpu
+#   # ENGINE CORRECTION (deep audit 2026-06-03, P7-01/P7-02): use the velotrade
+#   # engine (has X3 fixed-lot stress + chosen_rule grading), NOT the shared
+#   # sg1_xauusd engine (no stress, grades static rule). See the costcorr config
+#   # header for the full rationale. This frictionless run is an UPPER BOUND, not
+#   # a deploy gate, so stress matters less here — but keep the engine consistent.
 #
 # COMPARE: leaky ens 2.81 / best-solo 2.61  vs  de-leaked verdict.
 #   survives gates -> gmgp1-btc edge is real; leak not fatal at 15m -> reassuring
