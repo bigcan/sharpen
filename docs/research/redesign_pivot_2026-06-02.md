@@ -119,3 +119,22 @@ Maps to the goal — **robust** (causal + cost-realistic + obs-noise + OOS, gate
 **Prism regime-gate verdict: do NOT lift GAHMM.** Prism = GAHMM (backward-looking, daily, never accuracy-validated) + Chronos-2 (causal forecaster). The exact proposed use (regime-gate gold = PRISM L2) already failed 9/9 monotonically (Sharpe −0.78..−5.02); L1 PF 1.77 vs 2.08. But the falsification ran on retired GMGP2-XAUUSD / leaky pre-X2 env / leak-inflated baseline, and the decision record's own escape clause (forward-looking regime model / new asset) is now satisfied — so the regime-gating *concept* is alive; the *tool* isn't. Prior art: RCRP regime-balanced replay + regime-adaptive DSR (commit `6eed962c`, `tests/test_prism_rcrp_dsr.py`).
 
 **R0 sharpened to R0-regime (next session, operator-deferred).** R0-regime = head-to-head: does Prism GAHMM vs Chronos spread vs simple causal vol/trend/session separate gold's winning folds (0-1) from breakeven folds (2-3)? CPU-only; reuse `results/prism_research/prism_features_gc_2025.parquet` + de-leaked gold trajectories. Winner earns the gate; then A/B the gate on the de-leaked policy.
+
+---
+
+## Update (S553-cont-30, 2026-06-02) — R0-regime EXECUTED → **NO-GO** (regime-gating lever falsified for gold)
+
+Spec + run: `docs/research/r0_regime_spec_2026-06-02.md`; artifacts `results/r0_regime/`; script `scripts/research/r0_regime_separation.py`.
+
+**Result: no causal, leading regime variable gates the de-leaked gold signal.** Robust across all 3 policy rules (ens_pf_weighted/solo_456/ens_mean). Decisive evidence:
+- **No within-period good/bad-day separation** for ANY candidate — Prism GAHMM price/vol regime, causal daily price features (mom/dist/vol/vol-pct), intraday session/vol — every Mann–Whitney p ≥ 0.61 inside both periods.
+- The single pooled "hit" (`vol_20`, p=0.031) is a **calendar confound** (vol and policy-PnL both drift with fold: corr +0.23 / −0.43; fails Bonferroni; null within each period). It separates the two *periods* (p=3.6e-5) but only because Oct–Nov was higher-vol — a hindsight property of *which month*, not a leading edge detector.
+- **No OOS-calibrated gate is deployable** (bar-level PF, calibrated on folds 0-1, scored on held-out 2-3 where ungated = 1.007): best `prism_vol_calm` = 1.107 (sits out 76%), best intraday `session_NY` = 1.186 — both below the 1.20 bar; all others ≈ ungated.
+- **Look-ahead doesn't rescue it** (the strongest statement): best *leaky/contemporaneous* Prism gate bar-PF 1.51 ≈ best *causal* gate 1.51 ≈ ungated 1.32. There is *nothing to detect* at the daily-regime granularity even with hindsight.
+- **Chronos = untestable** (dead data in the parquet: `chronos_spread` all-zero, `confidence` const 0.7). Causality tripwire passed.
+
+**Consequence.** The locked lever — **#2 regime-gated price signal** — is FALSIFIED for gold across every *price-only* regime axis available (Prism GAHMM + causal price vol/trend/MA + intraday session/vol). Gating the fixed de-leaked policy does NOT recover a deployable edge; the Aug→Oct decay is the directional signal decaying, not a gateable regime the policy sits inside.
+
+**Scope boundary (NOT falsified):** (a) **non-price / macro** regime axes — DXY, real yields, VIX/MOVE, COT, cross-asset lead-lag (not in dataset; natural next probe, = redesign family #4); (b) **regime-conditioned RL** (retrain with a regime obs feature) vs gating a frozen policy; (c) Chronos (no data). These are distinct levers, not rescues of this one.
+
+**Next = a lever CHOICE, not more tuning** (operator decision): (i) pivot the regime axis to a non-price/macro signal (family #4), or (ii) accept the broader pivot conclusion that single-instrument price-derived timing has no robust edge and move to cross-sectional / relative-value (family #1). R0-regime did its job — killed the cheapest lever cheaply, pre-GPU.
