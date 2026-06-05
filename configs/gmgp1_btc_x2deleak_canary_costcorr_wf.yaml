@@ -1,0 +1,164 @@
+# GMGP1-BTC CLEAN CANARY — cost-corrected 4-fold WF on the FRESH de-leaked HPs.
+#
+# The definitive falsification test (Phase B-2 step 3). Trains the FRESH HPs from
+# the clean-canary HPO (study gmgp1_btc_x2deleak_canary_hpo_20260603, BEST trial #5
+# val PF 1.1312) on the DE-LEAKED + COST-CORRECTED env across 4 walk-forward folds,
+# then the velotrade eval engine + fixed-lot stress sub-report grade the pre-
+# registered kill criterion (net WF PF >=1.2 + stress DD <10% CONFIRM / <1.1 FALSIFY
+# / [1.1,1.2) AMBIGUOUS).
+#
+# DELTA vs configs/gmgp1_btc_along_2m_wf_x2deleak_costcorr.yaml — FRESH HPs only:
+#   - agents.sac.* + env.deadband_threshold + env.reward.dsr_eta + env.max_leverage
+#     from canary HPO trial #5 (REPLACES the frozen leaky 6xluh826 T29 HPs).
+#   - NEW env.max_leverage: 1.7710 (the leverage axis 6xluh826 never searched).
+#   - ensemble.gates_file -> the dedicated stress-keyed canary gates.
+#   - ensemble.checkpoint_pattern -> gmgp1-btc-canary-costcorr-* (disjoint).
+#   Cost layer identical (taker 0.00055 + slippage 5.0 bps). X2 de-leak is code-level.
+#
+# LAUNCH (WF/multiseed on gpuhub-2 [+gpuhub-1 now free post-HPO]):
+#   python scripts/launch_btc_along_wf_multiseed.py \
+#       --config configs/gmgp1_btc_x2deleak_canary_costcorr_wf.yaml \
+#       --run_name_prefix gmgp1-btc-canary-costcorr
+#
+# EVAL (no GPU) — velotrade engine (has X3 stress + chosen_rule); --output_dir MANDATORY:
+#   python scripts/sg1_btc_velotrade_ensemble_eval.py \
+#       --wf_config configs/gmgp1_btc_x2deleak_canary_costcorr_wf.yaml \
+#       --gates_file configs/gmgp1_btc_x2deleak_canary_ensemble.gates.yaml \
+#       --output_dir results/gmgp1_btc_canary_costcorr_wf --device cpu
+#
+# !! Read this deploy-gating verdict ONLY behind a Tier-2 deep audit (CLAUDE.md). !!
+
+# ---------- DATA (Bybit, full envelope) — identical to the de-leak WF ----------
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  start_date: "2024-01-01"
+  end_date:   "2026-04-06"
+
+splitter:
+  train_months: 22
+  val_months:   1
+  test_months:  1
+  step_months:  1                       # 1mo rolling -> 4 folds
+  buffer_days:  0
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+# ---------- ENV (bare, de-leaked, COST-CORRECTED) — FRESH HPs from canary HPO ----------
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00055                     # COST-CORRECTED (real Bybit taker 5.5 bps)
+  slippage_base_bps: 5.0                 # COST-CORRECTED (one-way limit-cross ~4.58 bps)
+  deadband_threshold: 0.33987435271118105   # canary HPO trial #5
+  atr_cap_percentile: 90                 # held fixed (not searched)
+  atr_cap_max_position: 0.5              # held fixed
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30                 # research-tier (matches L1 train; honest DD at WF stage via stress)
+  scales: [15, 60, 240]
+  max_leverage: 1.770966122615107        # canary HPO trial #5 (the axis 6xluh826 NEVER searched)
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.006529766361344645        # canary HPO trial #5
+    dsr_scale: 1.0
+
+# ---------- NETWORK ----------
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# ---------- AGENTS (FRESH — canary HPO trial #5, REPLACES leaky 6xluh826 T29) ----------
+agents:
+  sac:
+    lr_actor: 7.795675728752896e-05
+    lr_critic: 4.59909621898876e-05
+    lr_alpha: 6.436967260355394e-06
+    gamma: 0.9537310183287655
+    tau: 0.0037445232945475075
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.4457952174148438
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 5.7228465480432185
+    checkpoint_interval: 250000
+
+# ---------- TRAINING ----------
+training:
+  total_timesteps: 2000000              # A_long x 2M (32x mult — the validated L1 cell)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false
+
+# ---------- GATES (retention floors; deploy decision = kill criterion on the verdict) ----------
+gates:
+  hpo_pf_floor: 1.05                     # de-leaked (was leaky 1.2)
+  hpo_min_trials_completed: 20
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 5
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.1                       # de-leaked (was leaky 1.5)
+  l1_pf_cv_ambiguous: [0.22, 0.38]
+  ensemble_uplift_min: 1.10
+  ensemble_ambiguous_min: 1.05
+  ensemble_rule_selection: val_argmax_pf
+  wf_windows: 4
+  wf_pf_floor: 1.1                       # = kill-criterion FALSIFY boundary
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_pf_floor: 1.1
+
+ensemble:
+  gates_file: "configs/gmgp1_btc_x2deleak_canary_ensemble.gates.yaml"   # stress-keyed canary gates
+  checkpoint_pattern: "checkpoints/gmgp1-btc-canary-costcorr-fold{fold}-seed{seed}_*/checkpoint_final.pth"
+  seeds: [123, 456, 789, 1024, 2026]
+  # Placeholders — re-derived from this run's seed_report (test_solo_pfs) before any deploy read.
+  seed_pfs:
+    123:  1.10
+    456:  1.10
+    789:  1.10
+    1024: 1.10
+    2026: 1.10
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags:
+    - "gmgp1-btc"
+    - "BTC"
+    - "SAC"
+    - "15min"
+    - "crypto"
+    - "velotrade"
+    - "prop-firm"
+    - "walk_forward"
+    - "wf-stage3"
+    - "along-2m"                        # REQUIRED: dispatcher poller hard-filters on this tag
+    - "v2-3-bootstrap"
+    - "bybit-perp"
+    - "x2-deleak"
+    - "clean-canary"
+    - "cost-corrected"
+    - "leverage-axis"
+    - "s553"
