@@ -20,7 +20,7 @@ Design principles (the redesign discipline that earned this pivot):
     realized vol, XS rank, and the baseline weight; the env owns vol-targeting/sizing.
 
 Output is a tidy long DataFrame: one row per (date, ticker), columns
-``[sig_tsmom_<L>..., vol, xs_rank, carry, baseline_weight]``.
+``[sig_tsmom_<L>..., trend_conviction, vol, xs_rank, carry, baseline_weight]``.
 """
 from __future__ import annotations
 
@@ -128,9 +128,11 @@ def compute(
 
     Returns:
         Tidy long DataFrame, one row per (date, ticker), columns:
-        ``date, ticker, sig_tsmom_<L> (one per lookback), vol, xs_rank, carry,
-        baseline_weight``. Warmup rows (insufficient history) carry NaN signals and
-        ``baseline_weight = 0.0`` (no position taken until signals exist).
+        ``date, ticker, sig_tsmom_<L> (one per lookback), trend_conviction, vol,
+        xs_rank, carry, baseline_weight``. ``trend_conviction`` is the per-asset
+        conviction in [-1, 1] (mean of the per-lookback signs) the env vol-scales
+        into ``baseline_weight``. Warmup rows (insufficient history) carry NaN
+        signals and ``baseline_weight = 0.0`` (no position taken until signals exist).
 
     Causality (LEAK-2): every value at date ``t`` is a pure function of data at
     ``<= t - skip`` (signals) or ``<= t - 1`` (vol). Guarded by :func:`assert_causal`.
@@ -151,6 +153,10 @@ def compute(
         L: _tsmom_sign(close, L, skip) for L in lookbacks
     }
     # Combined trend = mean of per-lookback signs (the validated TSMOM signal).
+    # This is the per-asset CONVICTION in [-1, 1]: it is exactly the action that,
+    # once vol-scaled and leverage-capped by the env (ADR-2), reproduces
+    # ``baseline_weight``. Carried out as ``trend_conviction`` so the env's
+    # action->weight unit test can assert that identity without re-deriving it.
     combined_sign = sum(sig_by_L.values()) / float(len(lookbacks))
 
     # Baseline weight = linear core: mean-sign × causal vol-scale, leverage-capped.
@@ -167,6 +173,7 @@ def compute(
 
     # Assemble tidy long frame.
     frames = {f"sig_tsmom_{L}": sig_by_L[L] for L in lookbacks}
+    frames["trend_conviction"] = combined_sign
     frames["vol"] = vol
     frames["xs_rank"] = xs_rank
     frames["carry"] = carry_df
