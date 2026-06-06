@@ -87,26 +87,27 @@ env:
   random_start: false
 
 # ---------- AGENTS (SAC; RL is a thin overlay on the linear core) ------------
+# AGENT = SB3 SAC (MlpPolicy). The allocator env returns a FLAT Box obs, exactly
+# like its sibling CryptoPerpEnv (which also uses SB3 via crypto_hpo_runner — the
+# runner this pipeline adapts). The custom finrl_pro_ds SACAgent/SACTrainer are
+# V7-multiscale-DICT-obs only (they read obs["scale_*"]+obs["private"]) and are NOT
+# compatible here. HPO (cross_asset_pipeline._sac_search_space) searches
+# learning_rate/buffer_size/batch_size/gamma/tau/learning_starts; the values below
+# are full-train defaults / fallbacks. SB3 auto-tunes entropy (ent_coef="auto").
 agents:
   sac:
-    lr_actor: 0.0003
-    lr_critic: 0.0003
-    lr_alpha: 0.0003
+    learning_rate: 0.0003
     gamma: 0.99
     tau: 0.005
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.2
     learning_starts: 5000
-    update_interval: 8                   # tau auto-scales (project standard)
-    checkpoint_interval: 100000
+    ent_coef: "auto"
+    network_arch: [256, 256]             # MlpPolicy hidden dims (Tensor-Core ×8)
 
 training:
   total_timesteps: 1000000
-  num_envs: 8
-  use_amp: true
-  amp_dtype: "bfloat16"
-  torch_compile: true
+  num_envs: 8                            # SB3 DummyVecEnv copies (sample diversity)
 
 # ---------- HPO (Stage 1; ADR-4 objective = Sharpe) --------------------------
 hpo:

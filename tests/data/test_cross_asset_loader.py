@@ -1,0 +1,210 @@
+"""Tests for the cross-asset OHLCV loader → env-array builder (Phase 4, S553-cont-34).
+
+Two layers:
+  - **Synthetic, no network**: array contracts + the two correctness-critical
+    normalization invariants (``vol_ary`` is the RAW vol-scaling denominator, never
+    z-scored; the obs ``baseline_weight`` column is passthrough, never z-scored —
+    z-scoring it would break ADR-3) + an array-level look-ahead tripwire (LEAK-2).
+  - **Real data (cache/network gated)**: the loader's ``baseline_weight`` reproduces
+    the validated linear-core net Sharpe ~0.60 (analytic monthly backtest) — proves
+    the loader builds the SAME book the falsification validated.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import pytest
+
+from finrl_pro_ds.data import cross_asset_loader as loader
+from finrl_pro_ds.features import cross_asset_signals as cas
+
+ROOT = Path(__file__).resolve().parents[2]
+ANN = 252
+
+
+# --------------------------------------------------------------------------- #
+# Synthetic fixture (deterministic; long enough to clear the 252+skip+vol warmup)
+# --------------------------------------------------------------------------- #
+def _synthetic():
+    rng = np.random.default_rng(7)
+    T = 700
+    idx = pd.bdate_range("2017-01-02", periods=T)
+    tickers = ["A", "B", "C", "D", "E", "F"]
+    drift = np.array([0.0005, 0.0002, 0.0, -0.0001, 0.0004, 0.0001])
+    steps = 1.0 + drift + rng.normal(0, 0.011, (T, len(tickers)))
+    close = pd.DataFrame(100.0 * np.cumprod(steps, axis=0), index=idx, columns=tickers)
+    volume = pd.DataFrame(rng.uniform(1e6, 5e6, (T, len(tickers))), index=idx, columns=tickers)
+    asset_class = {"A": "eq", "B": "eq", "C": "eq", "D": "fx", "E": "fx", "F": "fx"}
+    signals = cas.compute(close, asset_class=asset_class)
+    return close, volume, tickers, asset_class, signals
+
+
+def _arrays(norm_window=252):
+    close, volume, tickers, _, signals = _synthetic()
+    return loader.build_allocator_arrays(
+        signals, close, volume, tickers, close.index[0], close.index[-1],
+        norm_window=norm_window,
+    ), close, volume, tickers, signals
+
+
+# --------------------------------------------------------------------------- #
+# Array contracts
+# --------------------------------------------------------------------------- #
+def test_array_shapes_and_tech_cols():
+    arrays, close, _, tickers, _ = _arrays()
+    T, N = len(close), len(tickers)
+    assert arrays["price_ary"].shape == (T, N)
+    assert arrays["vol_ary"].shape == (T, N)
+    assert arrays["carry_ary"].shape == (T, N)
+    assert arrays["volume_ary"].shape == (T, N)
+    assert arrays["conviction_ary"].shape == (T, N)
+    assert arrays["timestamps"].shape == (T,)
+    expected = ["sig_tsmom_63", "sig_tsmom_126", "sig_tsmom_252",
+                "trend_conviction", "vol", "xs_rank", "baseline_weight"]
+    assert arrays["tech_cols"] == expected
+    assert arrays["tech_ary"].shape == (T, N * len(expected))
+
+
+def test_carry_is_zero_v1():
+    arrays, *_ = _arrays()
+    assert np.all(arrays["carry_ary"] == 0.0), "v1 is TSMOM-only (ADR-6): carry must be 0"
+
+
+def test_all_arrays_finite():
+    arrays, *_ = _arrays()
+    for k in ("price_ary", "tech_ary", "vol_ary", "carry_ary", "volume_ary", "conviction_ary"):
+        assert np.isfinite(arrays[k]).all(), f"{k} has non-finite entries"
+
+
+def test_timestamps_are_epoch_seconds_ascending():
+    arrays, close, *_ = _arrays()
+    ts = arrays["timestamps"]
+    assert (np.diff(ts) > 0).all(), "timestamps must be strictly ascending"
+    assert pd.to_datetime(ts[0], unit="s").date() == close.index[0].date()
+
+
+# --------------------------------------------------------------------------- #
+# Normalization invariants (the correctness-critical part)
+# --------------------------------------------------------------------------- #
+def test_vol_ary_is_raw_not_zscored():
+    """vol_ary is the vol-scaling denominator — must be RAW realized vol, never
+    z-scored (z-scores would be ~[-5,5]; raw annualized vol is positive ~[0,2])."""
+    arrays, close, _, tickers, signals = _arrays()
+    raw_vol = (signals.pivot(index="date", columns="ticker", values="vol")
+               .reindex(index=close.index, columns=tickers).to_numpy(np.float64))
+    raw_vol = np.nan_to_num(raw_vol, nan=0.0, posinf=0.0, neginf=0.0)
+    np.testing.assert_allclose(arrays["vol_ary"], raw_vol, atol=1e-12)
+    # Sanity: post-warmup vols are positive and NOT clipped to a z-score range.
+    post = arrays["vol_ary"][400:]
+    assert (post > 0).any() and post.max() < 5.0 and post.min() >= 0.0
+
+
+def test_baseline_weight_in_tech_is_passthrough():
+    """The obs baseline_weight column must equal the RAW linear-core weight (ADR-3:
+    the RL must be able to copy it to match the core) — NOT a z-score of it."""
+    arrays, close, _, tickers, signals = _arrays()
+    tcols = arrays["tech_cols"]
+    bw_local = tcols.index("baseline_weight")
+    n_tech = len(tcols)
+    raw_bw = (signals.pivot(index="date", columns="ticker", values="baseline_weight")
+              .reindex(index=close.index, columns=tickers).ffill().fillna(0.0))
+    for j, tk in enumerate(tickers):
+        col = arrays["tech_ary"][:, j * n_tech + bw_local]
+        np.testing.assert_allclose(col, raw_bw[tk].to_numpy(np.float32), atol=1e-5,
+                                   err_msg=f"baseline_weight for {tk} was normalized")
+
+
+def test_vol_column_in_tech_is_normalized():
+    """The unbounded `vol` obs column SHOULD be window-local z-scored (≠ raw vol,
+    clipped to ±5)."""
+    arrays, close, _, tickers, signals = _arrays()
+    tcols = arrays["tech_cols"]
+    vol_local = tcols.index("vol")
+    n_tech = len(tcols)
+    raw_vol = (signals.pivot(index="date", columns="ticker", values="vol")
+               .reindex(index=close.index, columns=tickers).ffill().fillna(0.0))
+    tech_vol = arrays["tech_ary"][:, 0 * n_tech + vol_local]
+    assert not np.allclose(tech_vol, raw_vol[tickers[0]].to_numpy(np.float32)), \
+        "vol obs column should be z-scored, not raw"
+    assert tech_vol.max() <= 5.0 + 1e-4 and tech_vol.min() >= -5.0 - 1e-4
+
+
+def test_sign_and_conviction_columns_are_passthrough():
+    """Bounded signal columns (signs ∈ {-1,0,1}, conviction/rank ∈ [-1,1]) pass
+    through unnormalized."""
+    arrays, close, _, tickers, signals = _arrays()
+    tcols = arrays["tech_cols"]
+    n_tech = len(tcols)
+    for name in ("sig_tsmom_63", "trend_conviction", "xs_rank"):
+        local = tcols.index(name)
+        raw = (signals.pivot(index="date", columns="ticker", values=name)
+               .reindex(index=close.index, columns=tickers).ffill().fillna(0.0))
+        col = arrays["tech_ary"][:, 0 * n_tech + local]
+        np.testing.assert_allclose(col, raw[tickers[0]].to_numpy(np.float32), atol=1e-5,
+                                   err_msg=f"{name} should be passthrough")
+
+
+# --------------------------------------------------------------------------- #
+# Look-ahead tripwire (LEAK-2) at the array-builder level
+# --------------------------------------------------------------------------- #
+def test_array_builder_is_causal():
+    """Perturbing FUTURE bars must not change any array row at <= t (price excepted,
+    since price IS the perturbed series at future rows)."""
+    close, volume, tickers, asset_class, signals = _synthetic()
+    base = loader.build_allocator_arrays(
+        signals, close, volume, tickers, close.index[0], close.index[-1], norm_window=252)
+
+    tp = int(len(close) * 0.6)
+    close2 = close.copy()
+    close2.iloc[tp + 1:] = close2.iloc[tp + 1:] * 1.3
+    signals2 = cas.compute(close2, asset_class=asset_class)
+    after = loader.build_allocator_arrays(
+        signals2, close2, volume, tickers, close2.index[0], close2.index[-1], norm_window=252)
+
+    for key in ("tech_ary", "vol_ary", "conviction_ary"):
+        np.testing.assert_allclose(
+            base[key][:tp + 1], after[key][:tp + 1], atol=1e-9,
+            err_msg=f"LEAK-2: future perturbation changed {key} at rows <= {tp}")
+
+
+# --------------------------------------------------------------------------- #
+# Real-data parity (cache/network gated): loader signals reproduce the ~0.60 core
+# --------------------------------------------------------------------------- #
+def _analytic_monthly_net_sharpe(close: pd.DataFrame, baseline_weight: pd.DataFrame,
+                                 cost: float = 0.0002) -> float:
+    """Falsification-style monthly TSMOM net Sharpe from the loader's baseline_weight
+    (w_eff = monthly weight shift(1); cost on rebalance turnover). Mirrors the
+    keystone reference, sourced from the loader."""
+    rets = close.pct_change()
+    key = close.index.to_period("M")
+    last = pd.DatetimeIndex(pd.Series(close.index, index=close.index).groupby(key).max().values)
+    warmup = max(cas.DEFAULT_LOOKBACKS) + cas.DEFAULT_SKIP + cas.DEFAULT_VOL_WINDOW
+    rebal = last[last >= close.index[warmup]]
+    w_rebal = baseline_weight.loc[rebal].fillna(0.0)
+    w_daily = w_rebal.reindex(close.index).ffill().fillna(0.0)
+    gross = (w_daily.shift(1).fillna(0.0) * rets).sum(axis=1)
+    dw = w_rebal.diff().abs().sum(axis=1)
+    dw.iloc[0] = w_rebal.iloc[0].abs().sum()
+    cost_daily = dw.reindex(close.index).fillna(0.0) * cost
+    net = (gross - cost_daily).dropna().to_numpy()
+    return float(net.mean() / net.std() * np.sqrt(ANN)) if net.std() > 0 else 0.0
+
+
+_CACHE = loader.DEFAULT_CACHE_DIR / "ohlcv_daily.parquet"
+
+
+@pytest.mark.skipif(not _CACHE.exists(),
+                    reason="real OHLCV cache absent (run cross_asset_pipeline / loader once)")
+def test_loader_baseline_reproduces_linear_core():
+    import yaml
+    cfg = yaml.safe_load((ROOT / "configs" / "cross_asset_momentum.yaml").read_text(encoding="utf-8"))
+    data = loader.load_cross_asset_data(cfg)
+    close = data["close"]
+    bw = data["signals"].pivot(index="date", columns="ticker", values="baseline_weight") \
+        .reindex(columns=close.columns)
+    sharpe = _analytic_monthly_net_sharpe(close, bw)
+    # Validated core ~0.60 (falsification 0.601, keystone 0.615). Band absorbs
+    # yfinance auto-adjust vintage drift; a leak would inflate >>1, a broken signal ~0.
+    assert 0.45 <= sharpe <= 0.85, f"loader baseline net Sharpe {sharpe:.3f} off the ~0.60 core"
