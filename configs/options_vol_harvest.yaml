@@ -1,0 +1,142 @@
+# ============================================================================
+# OPTIONS-VOL HARVEST — crypto-options variance-risk-premium harvester (vrp-harvest-v1)
+# ============================================================================
+# Phase 3 of the market-making redesign (S553-cont-36). FREE-DATA scope: BTC-only,
+# a single constant-maturity ATM straddle repriced from Deribit's DVOL index — the
+# only honest daily substrate the free Deribit API affords (no per-option chain =>
+# no skew/strangle leg; that is a drop-in K=2 extension once paid Tardis chain data
+# is bought). The env's structural core is the validated Phase-1 linear short-vol
+# book (results/options_vrp/verdict.json: BTC straddle net Sharpe 1.10, PF 1.19,
+# DD 5.4% on free DVOL data). The RL must BEAT that frozen core OOS by the
+# gates.rl_beats_linear uplift, or we ship the linear rule (RL = thin overlay).
+#
+# Design: .agent/artifacts/options_vol_harvest_architecture.md
+#   - env.type: options_vol_harvest -> OptionsVolHarvestEnv (generalizes the
+#     allocator/CryptoPerp accounting to options MTM; baseline-parity test proves it
+#     reproduces the linear core bit-for-bit under the neutral action).
+#   - action = [vol_conviction, hedge_residual]; structural rolling short-straddle +
+#     structural delta-hedge live in the env; RL modulates size (per roll) + hedge
+#     fraction (every bar — the deep-hedging value-add). ADR-3.
+#   - hpo.objective: sharpe (ADR-5 — risk-adjusted, not BUG-01 PF; PF is secondary).
+#   - tail safety = HARD caps (max_gross_premium_frac, max_net_vega_pct; clipped in
+#     env) + a CVaR downside reward term (ADR-6). Short vol = short gamma = crash-
+#     exposed: a Tier-2 deep_strategy_audit precedes any capital.
+#
+# PRE-FLIGHT:
+#   python scripts/validate_config.py --config configs/options_vol_harvest.yaml --stage hpo -> PASS
+#   python scripts/validate_config.py --config configs/options_vol_harvest.yaml --stage wf  -> PASS
+# NOTE: the Protocol-v2 pipeline (options_vol_pipeline.py) and any GPU training are a
+# SEPARATE, operator-gated step — this config makes the env loadable + validatable.
+# ============================================================================
+
+strategy:
+  id: "vrp-harvest-v1"
+  name: "options_vol_harvest"
+  version: "0.1.0"
+  instrument: "options_vol_harvest"
+
+# ---------- UNIVERSE (BTC-only; ETH dropped — real-chain NO-GO, S553-cont-36) -
+universe:
+  assets: ["BTC"]
+  asset_class:
+    BTC: crypto
+  n_assets: 1
+
+# ---------- DATA (free Deribit public API; runtime fetch + clean) ------------
+data:
+  source: "deribit_public_api"           # DVOL + perp + funding (deribit_options_loader)
+  frequency: "1d"
+  resolution: "1D"                       # loader resolution arg
+  start_date: "2021-04-01"               # DVOL inception
+  end_date: null                         # rolling to latest
+  fields: ["open", "high", "low", "close", "volume"]
+
+# ---------- FEATURES (causal vol signals; options_vol_features.compute) -------
+features:
+  rv_windows: [10, 30, 90]               # trailing realized-vol windows
+  iv_rv_ref_window: 30                   # IV - RV_30 = the VRP signal
+  skip_bars: 1                           # lag signal cols 1 bar (microstructure)
+  include_baseline_book: true            # ADR-4 (RL learns a residual over the core)
+
+# ---------- ENV (OptionsVolHarvestEnv) ---------------------------------------
+env:
+  type: "options_vol_harvest"
+  initial_capital: 100000.0
+  # structural book (matches Phase-1 SimConfig; neutral action reproduces these)
+  base_premium_frac: 0.05                # linear-core gross premium sold per roll
+  max_premium_frac: 0.10                 # |target premium frac| at |conviction|=1
+  roll_days: 21                          # hold each straddle 21d then roll (turnover-gated GO)
+  entry_tenor_days: 30                   # constant-maturity target
+  # costs (Deribit schedule; VERIFY current schedule before any capital — ADR-7)
+  option_fee_pct_underlying: 0.0003      # 0.03% of underlying per option leg
+  option_fee_cap_pct_premium: 0.125      # capped at 12.5% of premium
+  perp_taker_fee: 0.0005
+  option_spread_vol_pts: 1.0             # modelled bid/ask (real measured ~0.6 BTC — conservative)
+  # RL controls
+  allow_long_vol: true                   # short-vol biased but may go long-vol in a regime
+  hedge_residual_gain: 1.0               # hedge_frac = clip(1 + gain*residual, 0, hedge_frac_max)
+  hedge_frac_max: 2.0
+  # HARD risk caps (ADR-6) — clipped in env; tail gates live in the .gates.yaml
+  max_gross_premium_frac: 0.30           # |gross premium|/equity ceiling
+  max_net_vega_pct: 0.50                 # |m*vega|/equity ceiling
+  # reward (Math-verified DSR + Rockafellar-Uryasev CVaR surrogate)
+  reward_type: "dsr_cvar"
+  dsr_eta: 0.01
+  cvar_alpha: 0.05
+  cvar_penalty: 0.5
+  cvar_window: 63
+  turnover_penalty: 0.001
+  random_start: false
+
+# ---------- AGENTS (SB3 SAC; FLAT Box obs like the allocator/CryptoPerp) ------
+agents:
+  sac:
+    learning_rate: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    ent_coef: "auto"
+    network_arch: [256, 256]             # MlpPolicy hidden dims (Tensor-Core x8)
+
+training:
+  total_timesteps: 1000000
+  num_envs: 8
+
+# ---------- HPO (Stage 1; ADR-5 objective = Sharpe) --------------------------
+hpo:
+  enabled: true
+  agents: ["sac"]
+  objective: "sharpe"                    # ADR-5 (risk-adjusted, not BUG-01 PF)
+  trials: 40
+  steps_per_trial: 500000
+
+# ---------- WALK-FORWARD (Stage 3; daily bars; ~1850 bars total) -------------
+walk_forward:
+  train_bars: 730                        # ~2 years
+  val_bars: 180                          # ~6 months
+  test_bars: 180
+  step_bars: 180
+  embargo_bars: 14                       # ~2 weeks
+  min_windows: 4                         # ~1892 daily bars fit 5 @ this sizing (Protocol v2 >=4)
+
+# ---------- GATES (stage schema; decision gates in the overlay) --------------
+# PF floors are SECONDARY here — the primary metric is net Sharpe + rl_beats_linear
+# (configs/options_vol_harvest.gates.yaml).
+gates:
+  hpo_pf_floor: 1.05                     # secondary sanity only (Sharpe is primary)
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 5
+  l1_pf_cv_max: 0.30
+  wf_windows: 4
+
+ensemble:
+  gates_file: configs/options_vol_harvest.gates.yaml
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["vrp-harvest", "options", "SAC", "deribit", "dsr-cvar", "s553"]

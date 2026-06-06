@@ -38,6 +38,12 @@ import numpy as np
 
 from finrl_pro_ds.crypto.data import deribit_options_loader as dol
 from finrl_pro_ds.crypto.data import options_array_builder as oab
+from finrl_pro_ds.crypto.options_pricing import (
+    bs_self_test as _bs_selftest,
+    straddle_delta,
+    straddle_price,
+    straddle_vega,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -53,49 +59,6 @@ GATES = {
     "min_recent_oos_sharpe": 0.0,         # recent 12m must not be losing (regime-decay guard)
     "cost_gap_caution": 0.15,             # reported caution only
 }
-
-
-# ---------------------------------------------------------------------------
-# Black-Scholes (scalar; r=0 crypto; vol in fraction, tau in years)
-# ---------------------------------------------------------------------------
-def _ncdf(x: float) -> float:
-    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
-
-
-def _npdf(x: float) -> float:
-    return math.exp(-0.5 * x * x) / math.sqrt(2.0 * math.pi)
-
-
-def _d1(S, K, sigma, tau):
-    return (math.log(S / K) + 0.5 * sigma * sigma * tau) / (sigma * math.sqrt(tau))
-
-
-def straddle_price(S, K, sigma, tau) -> float:
-    d1 = _d1(S, K, sigma, tau)
-    d2 = d1 - sigma * math.sqrt(tau)
-    call = S * _ncdf(d1) - K * _ncdf(d2)
-    put = K * _ncdf(-d2) - S * _ncdf(-d1)
-    return call + put
-
-
-def straddle_delta(S, K, sigma, tau) -> float:
-    """Delta of a LONG straddle = 2N(d1) - 1."""
-    return 2.0 * _ncdf(_d1(S, K, sigma, tau)) - 1.0
-
-
-def straddle_vega(S, K, sigma, tau) -> float:
-    """Vega per 1.00 (=100%) change in vol of a long straddle = 2 * S * n(d1) * sqrt(tau)."""
-    return 2.0 * S * _npdf(_d1(S, K, sigma, tau)) * math.sqrt(tau)
-
-
-def _bs_selftest():
-    """Put-call parity / ATM magnitude sanity (fails loud if BS is wrong)."""
-    S, sigma, tau = 100.0, 0.6, 30 / 365
-    atm = straddle_price(S, S, sigma, tau)
-    approx = 0.7979 * S * sigma * math.sqrt(tau)  # ATM straddle ~ 0.8 S sigma sqrt(tau)
-    assert abs(atm - approx) / approx < 0.02, (atm, approx)
-    # ATM straddle delta = 2N(0.5*sigma*sqrt(tau)) - 1 -> small but nonzero (vol drift in d1)
-    assert abs(straddle_delta(S, S, sigma, tau)) < 0.10  # ~delta-neutral at inception
 
 
 # ---------------------------------------------------------------------------
