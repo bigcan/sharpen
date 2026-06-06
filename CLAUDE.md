@@ -147,7 +147,7 @@ Full tables + every chaining rule: `docs/claude_md_reference.md`.
 ## Memory Protocol
 
 Tier 1: `.agent/memory/core.md` (boot context). Tier 2: `randd_log.md` at project root (R&D write buffer, auto-rotated at 150 KB into `randd_archive/YYYY-MM.md`).
-Search index: agent-memory MCP — self-hosted LanceDB + Ollama `nomic-embed-text` in Docker on `finrl-desktop` (S517, 2026-05-02; migrated off GCS+Gemini). Flat files remain authoritative.
+Search index: agent-memory MCP — self-hosted LanceDB + native Ollama `nomic-embed-text` running **native-local on this workstation** (no Docker; decoupled from the offline `finrl-desktop` remote 2026-06-06 — prior docker-exec config at `.mcp.json.remote-docker-bak`). Local index seeded 2026-06-06 by cloning the remote LanceDB volume (1574 rows via `docker cp`); no flat-file reindex tool exists, so re-clone from remote if rebuilding. Flat files remain authoritative.
 Full detail (commit flow, rotation, re-index, container setup): `docs/claude_md_reference.md`.
 
 ## Live Trading / Docker / PRISM
