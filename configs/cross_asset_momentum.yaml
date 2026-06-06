@@ -1,0 +1,146 @@
+# ============================================================================
+# CROSS-ASSET MOMENTUM ALLOCATOR — xsec-mom-v1 (Protocol v2)
+# ============================================================================
+# Phase 3 of the cross-sectional pivot (S553-cont-33). Config for the RL allocator
+# built on the validated linear TSMOM core (net Sharpe ~0.60 @2bps, 4/4 classes;
+# results/xsec_momentum/). The RL must BEAT the frozen linear core OOS by the
+# gates.rl_beats_linear uplift, or we ship the linear rule (RL = thin overlay).
+#
+# Design: .agent/artifacts/multi_asset_allocator_architecture.md
+#   - env.type: multi_asset_allocator -> MultiAssetAllocatorEnv (generalizes
+#     CryptoPerpEnv). Action = signed conviction; the env vol-targets (ADR-2).
+#   - hpo.objective: sharpe (ADR-4 — portfolio risk-adjusted, not BUG-01 PF).
+#   - data: yfinance daily proxies for dev (ADR-5); curated futures for deploy.
+#     The cross_asset_loader fetches + clean_ohlcv at runtime (no shipped parquet).
+#
+# PRE-FLIGHT:
+#   python scripts/validate_config.py --config configs/cross_asset_momentum.yaml --stage hpo  -> PASS
+#   python scripts/validate_config.py --config configs/cross_asset_momentum.yaml --stage wf   -> PASS
+# ============================================================================
+
+strategy:
+  id: "xsec-mom-v1"
+  name: "cross_asset_momentum"
+  version: "0.1.0"
+  instrument: "multi_asset_allocator"
+
+# ---------- UNIVERSE (18 liquid ETF proxies × 4 classes; validated set) -------
+universe:
+  assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",      # equity
+           "TLT", "IEF", "LQD",                     # rates
+           "GLD", "SLV", "DBC", "USO", "DBA",       # commodity
+           "UUP", "FXE", "FXY", "FXB", "FXA"]       # fx
+  asset_class:                                       # ticker -> class (XS-rank grouping)
+    SPY: equity
+    QQQ: equity
+    IWM: equity
+    EFA: equity
+    EEM: equity
+    TLT: rates
+    IEF: rates
+    LQD: rates
+    GLD: commodity
+    SLV: commodity
+    DBC: commodity
+    USO: commodity
+    DBA: commodity
+    UUP: fx
+    FXE: fx
+    FXY: fx
+    FXB: fx
+    FXA: fx
+  n_assets: 18
+
+# ---------- DATA (yfinance daily; runtime fetch + clean via cross_asset_loader)
+data:
+  source: "yfinance_etf"                 # dev proxies (ADR-5); curated futures for deploy
+  frequency: "1d"
+  start_date: "2006-01-01"
+  end_date: null                         # rolling to latest
+  fields: ["open", "high", "low", "close", "volume"]
+
+# ---------- FEATURES (causal signals; cross_asset_signals.compute) ------------
+features:
+  lookbacks: [63, 126, 252]              # 3 / 6 / 12-month trend (validated)
+  skip: 5                                # skip last week (microstructure)
+  vol_window: 63                         # ~3-month realized-vol window
+  include_baseline_weight: true          # ADR-3 (RL learns a residual over the core)
+  carry:
+    enabled: false                       # v1 TSMOM-only (ADR-6); carry data is v1.1
+
+# ---------- ENV (MultiAssetAllocatorEnv) -------------------------------------
+env:
+  type: "multi_asset_allocator"
+  initial_capital: 100000.0
+  taker_fee: 0.0002                      # 2 bps (liquid futures/ETF); validator 1-leg cost
+  slippage_base_bps: 1.0
+  slippage_impact_bps: 5.0
+  target_vol_asset: 0.10                 # per-asset annualized vol target
+  lev_cap: 2.0                           # per-asset leverage cap after vol-scaling
+  max_gross_exposure: 3.0                # vol-targeted book may lever > 1 (ADR-2; bounded [1,6])
+  allow_short: true                      # long/short across all classes
+  reward_type: "dsr"                     # Differential Sharpe Ratio (Moody-Saffell)
+  dsr_eta: 0.01                          # DSR EMA adaptation rate
+  turnover_penalty: 0.001                # daily cadence => lower than crypto hourly
+  min_trade_pct: 0.005
+  circuit_breaker_threshold: 0.1
+  random_start: false
+
+# ---------- AGENTS (SAC; RL is a thin overlay on the linear core) ------------
+agents:
+  sac:
+    lr_actor: 0.0003
+    lr_critic: 0.0003
+    lr_alpha: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.2
+    learning_starts: 5000
+    update_interval: 8                   # tau auto-scales (project standard)
+    checkpoint_interval: 100000
+
+training:
+  total_timesteps: 1000000
+  num_envs: 8
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+
+# ---------- HPO (Stage 1; ADR-4 objective = Sharpe) --------------------------
+hpo:
+  enabled: true
+  agents: ["sac"]
+  objective: "sharpe"                    # ADR-4 (portfolio risk-adjusted, not BUG-01 PF)
+  trials: 40
+  steps_per_trial: 500000
+
+# ---------- WALK-FORWARD (Stage 3; daily bars) -------------------------------
+walk_forward:
+  train_bars: 1260                       # ~5 years
+  val_bars: 252                          # ~1 year
+  test_bars: 252
+  step_bars: 252
+  embargo_bars: 21                       # ~1 month
+  min_windows: 3
+
+# ---------- GATES (stage schema; allocator decision gates in the overlay) -----
+# PF floors are SECONDARY sanity here — the allocator's primary metric is net
+# portfolio Sharpe + the rl_beats_linear gate (configs/cross_asset_momentum.gates.yaml).
+gates:
+  hpo_pf_floor: 1.05                     # secondary sanity only (Sharpe is primary)
+  entropy_floor: 0.01                    # training-health hard fails
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 5
+  l1_pf_cv_max: 0.30
+  wf_windows: 4
+
+ensemble:
+  gates_file: configs/cross_asset_momentum.gates.yaml
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["xsec-momentum", "allocator", "SAC", "TSMOM", "daily", "s553"]
