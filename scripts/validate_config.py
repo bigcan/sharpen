@@ -122,9 +122,11 @@ def check_no_fee_curriculum(cfg: dict, r: ValidationResult) -> None:
 
     See decision_steady_state_fees_pattern.md (S464).
 
-    Accepts two cost-model schemas:
+    Accepts three cost-model schemas:
       - Single-leg (GMGP1, SG-1, CMGP1):   env.taker_fee
       - Two-leg spot+perp (Funding-Arb):   environment.{spot,perp}_taker_fee_pct
+      - Options-vol harvest (vrp-harvest):  env.{option_fee_pct_underlying,
+        perp_taker_fee} — option fee schedule + perp delta-hedge taker fee.
 
     Both blocks are checked for the banned `fee_schedule:` curriculum key.
     """
@@ -145,21 +147,28 @@ def check_no_fee_curriculum(cfg: dict, r: ValidationResult) -> None:
         "spot_taker_fee_pct" in environment
         and "perp_taker_fee_pct" in environment
     )
+    # Options-vol harvest: a delta-hedged short-vol book pays an option fee per leg
+    # (option_fee_pct_underlying, capped at option_fee_cap_pct_premium) PLUS a perp
+    # taker fee on the delta hedge. Env-type-gated so other workstreams are unaffected.
+    options_legs = (
+        env.get("type") == "options_vol_harvest"
+        and "option_fee_pct_underlying" in env
+        and "perp_taker_fee" in env
+    )
 
-    if one_leg and two_leg:
-        r.fail(
-            "Both env.taker_fee (1-leg) and environment.{spot,perp}_taker_fee_pct "
-            "(2-leg) declared. Pick one cost model."
-        )
+    if sum([one_leg, two_leg, options_legs]) > 1:
+        r.fail("Multiple cost models declared. Pick one.")
     elif one_leg:
         r.ok("steady-state fees (1-leg env.taker_fee)")
     elif two_leg:
         r.ok("steady-state fees (2-leg environment.{spot,perp}_taker_fee_pct)")
+    elif options_legs:
+        r.ok("steady-state fees (options: env.option_fee_pct_underlying + perp_taker_fee)")
     else:
         r.fail(
-            "No cost model declared. Expected env.taker_fee (1-leg) or "
-            "environment.{spot_taker_fee_pct, perp_taker_fee_pct} (2-leg, "
-            "funding-arb)."
+            "No cost model declared. Expected env.taker_fee (1-leg), "
+            "environment.{spot_taker_fee_pct, perp_taker_fee_pct} (2-leg, funding-arb), "
+            "or env.{option_fee_pct_underlying, perp_taker_fee} (options-vol harvest)."
         )
 
 
@@ -339,6 +348,19 @@ def check_data_manifest(cfg: dict, stage: str, r: ValidationResult) -> None:
             )
         return
 
+    # Deribit public API (options-vol harvest): DVOL + perp + funding fetched and
+    # cached at runtime via deribit_options_loader (DATA-CLEAN + manifest.json on the
+    # price legs at fetch time). Like ccxt/yfinance, no pre-built parquet ships.
+    if source.startswith("deribit"):
+        if not data.get("frequency"):
+            r.fail("data.source=deribit* but data.frequency missing")
+        else:
+            r.ok(
+                f"data source={source} (runtime fetch via deribit_options_loader, "
+                f"skip manifest; stage={stage})"
+            )
+        return
+
     file_path = data.get("file_path")
     if not file_path:
         r.fail("data.file_path missing")
@@ -416,23 +438,27 @@ def check_hpo(cfg: dict, r: ValidationResult) -> None:
         r.fail("hpo block missing")
         return
 
-    # ADR-4 (cross-asset allocator): the multi-asset allocator optimizes a
-    # PORTFOLIO risk-adjusted return (Sharpe/Sortino), not single-instrument
-    # profit_factor. BUG-01 is a scalping-era rule — a daily diversified book has
-    # PF ~1.1 (no discriminating power); crypto already uses objective: sortino.
-    # The allocator allow-list is env-type-gated so single-instrument workstreams
-    # remain strictly bound to profit_factor.
+    # ADR-4 (cross-asset allocator) / ADR-5 (options-vol harvester): a hedged,
+    # multi-leg or portfolio book optimizes a PORTFOLIO risk-adjusted return
+    # (Sharpe/Sortino), not single-instrument profit_factor. BUG-01 is a
+    # scalping-era rule — a daily diversified / delta-hedged-vol book has PF ~1.1
+    # (no discriminating power); crypto already uses objective: sortino. The
+    # allow-list is env-type-gated so single-instrument workstreams remain strictly
+    # bound to profit_factor.
     env_type = (cfg.get("env", {}) or {}).get("type")
     objective = hpo.get("objective")
-    allocator_objectives = ("sharpe", "sortino")
-    if env_type == "multi_asset_allocator":
-        if objective not in allocator_objectives:
+    risk_adjusted_objectives = ("sharpe", "sortino")
+    # ADR-5: options_vol_harvest is a delta-hedged short-vol book — risk-adjusted
+    # return is the right objective (PF is a secondary gate), same as the allocator.
+    risk_adjusted_env_types = ("multi_asset_allocator", "options_vol_harvest")
+    if env_type in risk_adjusted_env_types:
+        if objective not in risk_adjusted_objectives:
             r.fail(
-                f"hpo.objective={objective!r} — multi_asset_allocator must use one of "
-                f"{allocator_objectives} (ADR-4; portfolio Sharpe/Sortino, not BUG-01 PF)"
+                f"hpo.objective={objective!r} — {env_type} must use one of "
+                f"{risk_adjusted_objectives} (ADR-4/ADR-5; portfolio Sharpe/Sortino, not BUG-01 PF)"
             )
         else:
-            r.ok(f"HPO objective = {objective} (allocator; BUG-01 extended per ADR-4)")
+            r.ok(f"HPO objective = {objective} ({env_type}; BUG-01 extended per ADR-4/ADR-5)")
     elif objective != "profit_factor":
         r.fail(f"hpo.objective={objective!r} — must be 'profit_factor' (BUG-01)")
     else:
