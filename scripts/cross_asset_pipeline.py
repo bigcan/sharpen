@@ -34,7 +34,9 @@ import argparse
 import gc
 import json
 import logging
+import os
 import sys
+import time
 from pathlib import Path
 
 import numpy as np
@@ -152,6 +154,42 @@ def _evaluate_model(model, arrays: dict, config: dict, overrides: dict | None = 
     return factory._metrics(step_returns, turnovers, pvs)
 
 
+# --------------------------------------------------------------------------- #
+# WandB (optional; liveness for monitor_fleet — avoids the false-CRIT stall)
+# --------------------------------------------------------------------------- #
+def _wandb_log(metrics: dict) -> None:
+    """Best-effort WandB log (no-op if wandb absent / not initialized)."""
+    try:
+        import wandb
+        if wandb.run is not None:
+            wandb.log(metrics)
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _heartbeat_callback(label: str, log_every: int = 10_000):
+    """SB3 callback that WandB-logs step/SPS periodically so monitor_fleet sees
+    the run is alive (the project's documented false-CRIT silent-stall guard)."""
+    from stable_baselines3.common.callbacks import BaseCallback
+
+    class _HB(BaseCallback):
+        def __init__(self):
+            super().__init__(verbose=0)
+            self._t0 = time.time()
+            self._last = 0
+
+        def _on_step(self) -> bool:
+            s = self.num_timesteps
+            if s - self._last >= log_every:
+                self._last = s
+                el = time.time() - self._t0
+                _wandb_log({f"train/{label}/step": s,
+                            f"train/{label}/sps": s / el if el > 0 else 0.0})
+            return True
+
+    return _HB()
+
+
 def _sac_search_space(trial) -> dict:
     return {
         "agent_params": {
@@ -168,8 +206,12 @@ def _sac_search_space(trial) -> dict:
     }
 
 
-def _run_hpo(train_arrays, val_arrays, config, n_trials, steps, net_arch) -> dict:
-    """Optuna SAC HPO; objective = val net Sharpe (ADR-4). Returns best params."""
+def _run_hpo(train_arrays, val_arrays, config, n_trials, steps, net_arch,
+             *, storage: str | None = None, study_name: str = "xsec_hpo") -> dict:
+    """Optuna SAC HPO; objective = val net Sharpe (ADR-4). Returns best params.
+
+    ``storage`` (deploy-injected sqlite URL) makes the study resumable — already
+    completed trials are skipped on restart."""
     import optuna
 
     n_envs = config.get("training", {}).get("num_envs", 8)
@@ -179,13 +221,16 @@ def _run_hpo(train_arrays, val_arrays, config, n_trials, steps, net_arch) -> dic
         try:
             vec_env = _make_vec_env(train_arrays, config, n_envs, search["env_overrides"])
             model = _make_sac(vec_env, search["agent_params"], net_arch)
-            model.learn(total_timesteps=steps)
+            model.learn(total_timesteps=steps,
+                        callback=_heartbeat_callback(f"hpo_t{trial.number}"))
             m = _evaluate_model(model, val_arrays, config, search["env_overrides"])
             vec_env.close()
             del model, vec_env
             gc.collect()
             if m["n_steps"] < 50:
                 return -999.0
+            _wandb_log({f"hpo/{study_name}/trial": trial.number,
+                        f"hpo/{study_name}/val_net_sharpe": m["net_sharpe"]})
             return m["net_sharpe"]
         except Exception as e:  # noqa: BLE001
             logger.error("HPO trial %d failed: %s", trial.number, e)
@@ -193,11 +238,17 @@ def _run_hpo(train_arrays, val_arrays, config, n_trials, steps, net_arch) -> dic
             return -999.0
 
     study = optuna.create_study(
+        study_name=study_name,
         direction="maximize",
         sampler=optuna.samplers.TPESampler(seed=42, multivariate=True),
         pruner=optuna.pruners.NopPruner(),
+        storage=storage,
+        load_if_exists=bool(storage),
     )
-    study.optimize(objective, n_trials=n_trials, gc_after_trial=True)
+    remaining = max(n_trials - len([t for t in study.trials if t.state.is_finished()]), 0) \
+        if storage else n_trials
+    if remaining > 0:
+        study.optimize(objective, n_trials=remaining, gc_after_trial=True)
     best = study.best_trial
     env_keys = {"turnover_penalty"}
     return {
@@ -212,7 +263,7 @@ def _run_hpo(train_arrays, val_arrays, config, n_trials, steps, net_arch) -> dic
 # Per-window: HPO → train → RL eval → linear-core eval → gate
 # --------------------------------------------------------------------------- #
 def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
-               out_dir: Path, gate: dict) -> dict:
+               out_dir: Path, gate: dict, *, hpo_storage: str | None = None) -> dict:
     lookbacks = data["lookbacks"]
     norm_window = int(config.get("features", {}).get("norm_window", 252))
     net_arch = config.get("agents", {}).get("sac", {}).get("network_arch", [256, 256])
@@ -227,7 +278,8 @@ def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
     test_arrays = arrays_for(window["test_start"], window["test_end"])
 
     logger.info("=== Window %d: HPO (%d trials × %d steps) ===", w_idx, n_trials, hpo_steps)
-    hpo = _run_hpo(train_arrays, val_arrays, config, n_trials, hpo_steps, net_arch)
+    hpo = _run_hpo(train_arrays, val_arrays, config, n_trials, hpo_steps, net_arch,
+                   storage=hpo_storage, study_name=f"xsec_w{w_idx}")
     logger.info("  best val net Sharpe=%.3f trial=%d params=%s",
                 hpo["best_value"], hpo["best_trial"], hpo["agent_params"])
 
@@ -235,7 +287,8 @@ def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
     n_envs = config.get("training", {}).get("num_envs", 8)
     vec_env = _make_vec_env(train_arrays, config, n_envs, hpo["env_overrides"])
     model = _make_sac(vec_env, hpo["agent_params"], net_arch)
-    model.learn(total_timesteps=train_steps)
+    model.learn(total_timesteps=train_steps,
+                callback=_heartbeat_callback(f"w{w_idx}_train"))
     model_path = out_dir / f"w{w_idx}_sac"
     model.save(str(model_path))
     vec_env.close()
@@ -277,6 +330,13 @@ def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
         "model_path": str(model_path),
     }
     (out_dir / f"w{w_idx}_result.json").write_text(json.dumps(result, indent=2))
+    _wandb_log({
+        f"window/{w_idx}/rl_net_sharpe": rl_test["net_sharpe"],
+        f"window/{w_idx}/linear_core_net_sharpe": core_test["net_sharpe"],
+        f"window/{w_idx}/uplift_net_sharpe": uplift,
+        f"window/{w_idx}/cost_gap": cost_gap,
+        f"window/{w_idx}/gate_pass": int(window_pass),
+    })
     logger.info("  Window %d: RL=%.3f  core=%.3f  uplift=%.3f  cost_gap=%.3f  gate=%s",
                 w_idx, rl_test["net_sharpe"], core_test["net_sharpe"], uplift, cost_gap,
                 "PASS" if window_pass else "fail")
@@ -288,7 +348,7 @@ def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
 # --------------------------------------------------------------------------- #
 def run_pipeline(config: dict, *, stage: str, out_dir: Path, max_windows: int | None,
                  n_trials: int, hpo_steps: int, train_steps: int,
-                 force_refetch: bool = False) -> dict:
+                 force_refetch: bool = False, hpo_storage: str | None = None) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     gate = load_gate_thresholds(config)
     logger.info("Gate thresholds: %s", gate)
@@ -309,7 +369,7 @@ def run_pipeline(config: dict, *, stage: str, out_dir: Path, max_windows: int | 
         try:
             results.append(run_window(
                 window["window"], window, data, config, n_trials, hpo_steps,
-                train_steps, out_dir, gate))
+                train_steps, out_dir, gate, hpo_storage=hpo_storage))
         except Exception as e:  # noqa: BLE001
             logger.exception("Window %d FAILED", window["window"])
             results.append({"window": window["window"], "status": "FAILED", "error": str(e)})
@@ -376,6 +436,11 @@ def main():
     ap.add_argument("--force_refetch", action="store_true")
     ap.add_argument("--smoke", action="store_true",
                     help="tiny end-to-end wiring check (1 window, 2 trials, 1k steps)")
+    # Deploy compatibility (deploy_bare_metal.py injects these into the launch cmd)
+    ap.add_argument("--run_name", default=None, help="WandB run name (deploy-injected)")
+    ap.add_argument("--hpo_storage", default=None,
+                    help="Optuna sqlite storage URL (deploy-injected; makes HPO resumable)")
+    ap.add_argument("--tags", nargs="*", default=None, help="extra WandB tags (deploy-injected)")
     args = ap.parse_args()
 
     logging.basicConfig(level=logging.INFO,
@@ -397,10 +462,40 @@ def main():
     logger.info("Pipeline: stage=%s trials=%d hpo_steps=%d train_steps=%d out=%s",
                 args.stage, n_trials, hpo_steps, train_steps, out_dir)
 
-    manifest = run_pipeline(
-        config, stage=args.stage, out_dir=out_dir, max_windows=max_windows,
-        n_trials=n_trials, hpo_steps=hpo_steps, train_steps=train_steps,
-        force_refetch=args.force_refetch)
+    # WandB (optional) — liveness for monitor_fleet; never let it block the run.
+    wb_cfg = config.get("wandb", {})
+    base_tags = list(wb_cfg.get("tags", [])) + list(args.tags or []) + [f"stage-{args.stage}"]
+    # 64-char tag guard (pydantic-validated; an over-limit tag silently crashes
+    # wandb.init before the run row exists — see feedback_wandb_tag_64_char_limit).
+    tags = [t for t in base_tags if len(str(t)) <= 64]
+    try:
+        import wandb
+        if not os.environ.get("WANDB_DISABLED"):
+            wandb.init(
+                project=wb_cfg.get("project", "FinRL-Pro-DS"),
+                entity=wb_cfg.get("entity"),
+                name=args.run_name or f"xsec-allocator-{args.stage}",
+                tags=tags,
+                config={"stage": args.stage, "strategy": config.get("strategy", {}),
+                        "n_trials": n_trials, "hpo_steps": hpo_steps,
+                        "train_steps": train_steps},
+                reinit=True,
+            )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("WandB init skipped (%s) — proceeding without run tracking", e)
+
+    try:
+        manifest = run_pipeline(
+            config, stage=args.stage, out_dir=out_dir, max_windows=max_windows,
+            n_trials=n_trials, hpo_steps=hpo_steps, train_steps=train_steps,
+            force_refetch=args.force_refetch, hpo_storage=args.hpo_storage)
+    finally:
+        try:
+            import wandb
+            if wandb.run is not None:
+                wandb.finish()
+        except Exception:  # noqa: BLE001
+            pass
 
     if manifest["status"] != "PASS":
         logger.error("Pipeline stage did not complete: %s", manifest.get("reason"))
