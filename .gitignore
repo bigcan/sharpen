@@ -1,5 +1,5 @@
-# MCP config (contains API keys)
-.mcp.json
+# MCP config (contains API keys) + local rollback/backup variants
+.mcp.json*
 
 # Local-pulled backups (Phase-2 off-host copy of agent-memory LanceDB tarballs)
 .backups/

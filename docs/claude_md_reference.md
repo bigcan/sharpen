@@ -171,14 +171,14 @@ docker/live/
 Tier 1: .agent/memory/core.md   -- Project status (~100 lines, deterministic boot context)
 Tier 2: randd_log.md             -- R&D write buffer (~20 entries, auto-rotated at 150 KB)
         randd_archive/YYYY-MM.md -- Monthly archives (cold backup, grep-searchable)
-Search: agent-memory MCP         -- self-hosted LanceDB on finrl-desktop (Docker), embeddings via Ollama nomic-embed-text (768-dim, cosine)
+Search: agent-memory MCP         -- self-hosted LanceDB native-local on this workstation, embeddings via native Ollama nomic-embed-text (768-dim, cosine)
 ```
 
 **Boot:** `core.md` loaded via system prompt hook. `memory_search` for semantic retrieval -> grep `randd_log.md` for recent exact matches -> grep `randd_archive/` as fallback.
 **Commit:** Append `randd_log.md` -> `memory_store` new entry to LanceDB -> auto-rotate if >150 KB -> update `core.md` -> git commit.
 **Auto-rotate:** `python scripts/rotate_randd_log.py --keep-months 1 --max-entries 20` (triggered during `/sync` when >150 KB). `--max-entries` acts as both cap and floor at month boundaries.
 **Bulk re-index:** `scripts/bulk_index_memory.py` is GCS+Gemini-only and unused after S517; needs porting to the local Ollama+LanceDB stack before its next use. New rows are added per-call via `memory_store` from Claude Code; no scheduled re-index path runs today.
-**MCP transport:** `.mcp.json` invokes `docker --context finrl-desktop exec -i agent-memory node /app/src/index.js` over Tailscale. Rollback to GCS+Gemini lives at `.mcp.json.gcs-rollback` until the ~2026-06-01 decommission (routine `agent-memory-decommission-runbook-2026-06-01`). Container source is out-of-repo at `~\mcp-servers\agent-memory\`; image build context is desktop-side, see `docker/live/Dockerfile.agent-memory`. Migration record: `randd_log.md` Session 517.
+**MCP transport:** `.mcp.json` invokes the server natively: `C:/nvm4w/nodejs/node.exe ~/mcp-servers/agent-memory/src/index.js` with env `OLLAMA_URL=http://localhost:11434`, `EMBED_MODEL=nomic-embed-text`, `LANCEDB_URI=~/.openclaw/lancedb/v1`. **No Docker** (decoupled from the offline `finrl-desktop` remote on 2026-06-06; prior `docker --context finrl-desktop exec` config saved at `.mcp.json.remote-docker-bak`). Requires native Ollama (winget `Ollama.Ollama`, auto-starts via `Ollama.lnk` in the user Startup folder, serves `:11434`) + the `nomic-embed-text` model. Server source out-of-repo at `~\mcp-servers\agent-memory\`. The local LanceDB index was **seeded 2026-06-06 by cloning the remote `agent-memory` volume** (`docker --context finrl-desktop cp agent-memory:/data/lancedb/v1` → `~/.openclaw/lancedb/v1`, 1574 rows). There is no flat-file reindex tool (`bulk_index_memory.py` is GCS+Gemini-only and unported), so re-clone from the remote volume to rebuild; flat files (`core.md`, `randd_log.md`) remain authoritative. Older GCS+Gemini rollback: `.mcp.json.gcs-rollback`. Migration record: `randd_log.md` Session 517.
 
 ## Docker Monitoring Architecture (full)
 
