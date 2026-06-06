@@ -1,0 +1,33 @@
+# ============================================================================
+# CROSS-ASSET MOMENTUM ALLOCATOR — decision gates overlay (xsec-mom-v1)
+# ============================================================================
+# Merged over the inline `gates:` of configs/cross_asset_momentum.yaml at
+# validation/eval time (validate_config._load_ensemble_gates_overlay). These are
+# the allocator's DECISION gates — the RL-beats-linear-core test and the
+# diversification/cost-gap acceptance criteria from the architecture
+# (.agent/artifacts/multi_asset_allocator_architecture.md). All thresholds live
+# here (never hardcoded in code/scripts).
+gates:
+  # The decisive gate: the RL allocator must beat the FROZEN linear core OOS by
+  # >= min_uplift on the same WF windows, else we ship the linear rule.
+  rl_beats_linear:
+    metric: "oos_net_sharpe"
+    min_uplift_vs_baseline: 0.10         # RL net Sharpe must exceed linear core by >= 0.10
+    else: "ship_linear_core"
+
+  # The sleeve must stay uncorrelated to the existing live book (the north-star).
+  g_diversification:
+    max_corr_to_existing_sleeves: 0.30
+
+  # Guard against a frictionless artifact: net Sharpe must not collapse vs costless.
+  g_cost_gap:
+    max_frictionless_minus_net_sharpe: 0.15
+
+  # Allocator primary WF metric is net portfolio Sharpe (NOT single-instrument PF;
+  # the linear core is ~0.60, so a floor of 0.40 is a survival sanity, not the
+  # deploy bar — the deploy decision is rl_beats_linear above).
+  wf_net_sharpe_floor: 0.40
+
+  # Fixed-lot stress sub-report (X3; Protocol v2 Stage 3) sanity bounds.
+  stress_dd_buffer_pp: 1.0               # headroom of worst fixed-lot DD from the cap (pp)
+  stress_leverage_max: 6.0              # matches env.max_gross_exposure ceiling

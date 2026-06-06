@@ -188,6 +188,25 @@ def check_max_leverage_bounds(cfg: dict, r: ValidationResult) -> None:
             else:
                 r.ok(f"env.max_leverage = {lev}x")
 
+    # Allocator leverage IS gross exposure (a vol-targeted book legitimately levers
+    # low-vol sleeves > 1x); bound env.max_gross_exposure like max_leverage so a
+    # config can't declare ruinous gross (MARGIN-CFG). env-type-gated so existing
+    # single-instrument configs (which use max_leverage) are unaffected.
+    if env.get("type") == "multi_asset_allocator" and "max_gross_exposure" in env:
+        gval = env["max_gross_exposure"]
+        try:
+            gross = float(gval)
+        except (TypeError, ValueError):
+            r.fail(f"env.max_gross_exposure={gval!r} is not numeric")
+        else:
+            if not (1.0 <= gross <= 6.0):
+                r.fail(
+                    f"env.max_gross_exposure={gross} out of bounds [1.0, 6.0] "
+                    "(MARGIN-CFG safety bound for the allocator)"
+                )
+            else:
+                r.ok(f"env.max_gross_exposure = {gross}x (allocator)")
+
     # If HPO will sample leverage, the search-space bounds must also fit.
     ss = (cfg.get("hpo", {}) or {}).get("search_space", {}) or {}
     lev_ss = ss.get("max_leverage")
@@ -306,6 +325,20 @@ def check_data_manifest(cfg: dict, stage: str, r: ValidationResult) -> None:
         # ccxt pipelines manage gaps internally; don't require env.gap_detection.
         return
 
+    # yfinance daily proxies (cross-asset allocator dev) + curated-futures both
+    # fetch + clean (clean_ohlcv) at runtime via cross_asset_loader (ADR-5); like
+    # ccxt, no pre-built parquet ships. Skip file/manifest gating, require frequency.
+    source = str(data.get("source") or "")
+    if source.startswith("yfinance"):
+        if not data.get("frequency"):
+            r.fail("data.source=yfinance* but data.frequency missing")
+        else:
+            r.ok(
+                f"data source={source} (runtime fetch via cross_asset_loader, "
+                f"skip manifest; stage={stage})"
+            )
+        return
+
     file_path = data.get("file_path")
     if not file_path:
         r.fail("data.file_path missing")
@@ -383,8 +416,24 @@ def check_hpo(cfg: dict, r: ValidationResult) -> None:
         r.fail("hpo block missing")
         return
 
+    # ADR-4 (cross-asset allocator): the multi-asset allocator optimizes a
+    # PORTFOLIO risk-adjusted return (Sharpe/Sortino), not single-instrument
+    # profit_factor. BUG-01 is a scalping-era rule — a daily diversified book has
+    # PF ~1.1 (no discriminating power); crypto already uses objective: sortino.
+    # The allocator allow-list is env-type-gated so single-instrument workstreams
+    # remain strictly bound to profit_factor.
+    env_type = (cfg.get("env", {}) or {}).get("type")
     objective = hpo.get("objective")
-    if objective != "profit_factor":
+    allocator_objectives = ("sharpe", "sortino")
+    if env_type == "multi_asset_allocator":
+        if objective not in allocator_objectives:
+            r.fail(
+                f"hpo.objective={objective!r} — multi_asset_allocator must use one of "
+                f"{allocator_objectives} (ADR-4; portfolio Sharpe/Sortino, not BUG-01 PF)"
+            )
+        else:
+            r.ok(f"HPO objective = {objective} (allocator; BUG-01 extended per ADR-4)")
+    elif objective != "profit_factor":
         r.fail(f"hpo.objective={objective!r} — must be 'profit_factor' (BUG-01)")
     else:
         r.ok("HPO objective = profit_factor")
