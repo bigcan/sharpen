@@ -190,18 +190,25 @@ def _heartbeat_callback(label: str, log_every: int = 10_000):
     return _HB()
 
 
-def _sac_search_space(trial) -> dict:
+def _sac_search_space(trial, config: dict | None = None) -> dict:
+    """SAC search space. Bounds for turnover_penalty / learning_starts / buffer_size
+    are overridable via ``config.hpo.search`` so an anti-overfit retry can widen the
+    turnover-penalty range and shrink learning_starts/buffer without a code edit."""
+    s = ((config or {}).get("hpo", {}) or {}).get("search", {}) or {}
+    tp_lo, tp_hi = s.get("turnover_penalty", [0.0005, 0.01])
+    ls_lo, ls_hi = s.get("learning_starts", [1000, 10000])
+    bf_lo, bf_hi = s.get("buffer_size", [100_000, 1_000_000])
     return {
         "agent_params": {
             "learning_rate": trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True),
-            "buffer_size": trial.suggest_int("buffer_size", 100_000, 1_000_000, log=True),
+            "buffer_size": trial.suggest_int("buffer_size", int(bf_lo), int(bf_hi), log=True),
             "batch_size": trial.suggest_categorical("batch_size", [256, 512, 1024]),
             "gamma": trial.suggest_float("gamma", 0.95, 0.999),
             "tau": trial.suggest_float("tau", 0.001, 0.02, log=True),
-            "learning_starts": trial.suggest_int("learning_starts", 1000, 10000, log=True),
+            "learning_starts": trial.suggest_int("learning_starts", int(ls_lo), int(ls_hi), log=True),
         },
         "env_overrides": {
-            "turnover_penalty": trial.suggest_float("turnover_penalty", 0.0005, 0.01, log=True),
+            "turnover_penalty": trial.suggest_float("turnover_penalty", float(tp_lo), float(tp_hi), log=True),
         },
     }
 
@@ -217,7 +224,7 @@ def _run_hpo(train_arrays, val_arrays, config, n_trials, steps, net_arch,
     n_envs = config.get("training", {}).get("num_envs", 8)
 
     def objective(trial):
-        search = _sac_search_space(trial)
+        search = _sac_search_space(trial, config)
         try:
             vec_env = _make_vec_env(train_arrays, config, n_envs, search["env_overrides"])
             model = _make_sac(vec_env, search["agent_params"], net_arch)

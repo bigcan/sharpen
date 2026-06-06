@@ -1,0 +1,143 @@
+# ============================================================================
+# CROSS-ASSET MOMENTUM ALLOCATOR — xsec-mom-v1 RETRY (anti-overfit, S553-cont-34)
+# ============================================================================
+# Tuned re-run after the Stage-1 (window-0) verdict: the RL OVERFIT (val 1.51 ->
+# test -2.99) and OVER-TRADED (turnover 280/yr vs the linear core's 26; cost_gap
+# 1.23) -> gate ship_linear_core. Root causes & fixes:
+#   1. OVERFIT from over-training: 500k steps / 1260 train_bars = 397x multiplicity,
+#      ~8x past the project's 50x REJECT cliff ([15-40] productive band, Protocol
+#      v2.5.1 §3.5 — the gate is skipped for non-crypto, so window-0 was the proof).
+#      -> steps_per_trial + total_timesteps = 50000 (~40x, top of the band).
+#   2. OVER-TRADING: turnover_penalty range [0.0005,0.01] let the policy churn.
+#      -> hpo.search.turnover_penalty = [0.02, 0.2] (much stronger churn cost) AND
+#         env.min_trade_pct 0.005 -> 0.02 (skip <2% dust rebalances).
+#   3. CAPACITY: net_arch [256,256] -> [128,128] (less room to memorize a window).
+# Everything else is byte-identical to configs/cross_asset_momentum.yaml.
+#
+# PRE-FLIGHT:
+#   python scripts/validate_config.py --config configs/cross_asset_momentum_retry.yaml --stage hpo -> PASS
+# ============================================================================
+
+strategy:
+  id: "xsec-mom-v1"
+  name: "cross_asset_momentum"
+  version: "0.2.0-retry-overfitguard"
+  instrument: "multi_asset_allocator"
+
+# ---------- UNIVERSE (18 liquid ETF proxies × 4 classes; validated set) -------
+universe:
+  assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",      # equity
+           "TLT", "IEF", "LQD",                     # rates
+           "GLD", "SLV", "DBC", "USO", "DBA",       # commodity
+           "UUP", "FXE", "FXY", "FXB", "FXA"]       # fx
+  asset_class:                                       # ticker -> class (XS-rank grouping)
+    SPY: equity
+    QQQ: equity
+    IWM: equity
+    EFA: equity
+    EEM: equity
+    TLT: rates
+    IEF: rates
+    LQD: rates
+    GLD: commodity
+    SLV: commodity
+    DBC: commodity
+    USO: commodity
+    DBA: commodity
+    UUP: fx
+    FXE: fx
+    FXY: fx
+    FXB: fx
+    FXA: fx
+  n_assets: 18
+
+# ---------- DATA (yfinance daily; runtime fetch + clean via cross_asset_loader)
+data:
+  source: "yfinance_etf"
+  frequency: "1d"
+  start_date: "2006-01-01"
+  end_date: null
+  fields: ["open", "high", "low", "close", "volume"]
+
+# ---------- FEATURES (causal signals; cross_asset_signals.compute) ------------
+features:
+  lookbacks: [63, 126, 252]
+  skip: 5
+  vol_window: 63
+  include_baseline_weight: true
+  carry:
+    enabled: false
+
+# ---------- ENV (MultiAssetAllocatorEnv) -------------------------------------
+env:
+  type: "multi_asset_allocator"
+  initial_capital: 100000.0
+  taker_fee: 0.0002
+  slippage_base_bps: 1.0
+  slippage_impact_bps: 5.0
+  target_vol_asset: 0.10
+  lev_cap: 2.0
+  max_gross_exposure: 3.0
+  allow_short: true
+  reward_type: "dsr"
+  dsr_eta: 0.01
+  turnover_penalty: 0.02                  # RETRY: 0.001 -> 0.02 (curb 280-turnover churn)
+  min_trade_pct: 0.02                     # RETRY: 0.005 -> 0.02 (skip dust rebalances)
+  circuit_breaker_threshold: 0.1
+  random_start: false
+
+# ---------- AGENTS (SB3 SAC; smaller net = less overfit capacity) ------------
+agents:
+  sac:
+    learning_rate: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 100000                   # RETRY: 500k -> 100k (50k-step budget)
+    learning_starts: 2000                 # RETRY: 5000 -> 2000 (50k-step budget)
+    ent_coef: "auto"
+    network_arch: [128, 128]              # RETRY: [256,256] -> [128,128] (regularize)
+
+training:
+  total_timesteps: 50000                  # RETRY: 1M -> 50k (~40x mult; was 793x = overfit)
+  num_envs: 8
+
+# ---------- HPO (Stage 1; ADR-4 objective = Sharpe) --------------------------
+hpo:
+  enabled: true
+  agents: ["sac"]
+  objective: "sharpe"
+  trials: 40
+  steps_per_trial: 50000                  # RETRY: 500k -> 50k (~40x mult, in [15-40] band)
+  # Anti-overtrade/overfit search bounds (read by _sac_search_space).
+  search:
+    turnover_penalty: [0.02, 0.2]         # RETRY: was [0.0005, 0.01] — much stronger churn cost
+    learning_starts: [500, 4000]          # shrunk for the 50k-step budget
+    buffer_size: [50000, 200000]          # shrunk for the 50k-step budget
+
+# ---------- WALK-FORWARD (Stage 3; daily bars) -------------------------------
+walk_forward:
+  train_bars: 1260
+  val_bars: 252
+  test_bars: 252
+  step_bars: 252
+  embargo_bars: 21
+  min_windows: 3
+
+# ---------- GATES (stage schema; allocator decision gates in the overlay) -----
+gates:
+  hpo_pf_floor: 1.05
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 5
+  l1_pf_cv_max: 0.30
+  wf_windows: 4
+
+ensemble:
+  gates_file: configs/cross_asset_momentum.gates.yaml
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["xsec-momentum", "allocator", "SAC", "TSMOM", "daily", "s553", "retry", "overfit-guard"]
