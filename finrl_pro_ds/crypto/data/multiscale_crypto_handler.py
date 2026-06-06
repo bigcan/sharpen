@@ -250,9 +250,20 @@ class MultiScaleCryptoHandler:
             if scale == base_scale:
                 self._scale_index_map[scale] = np.arange(self._len)
             else:
+                # X2 / audit P2-01: map each base bar to the last COMPLETED coarse
+                # bar (no forward look-ahead). _resample_ohlcv stamps coarse bars at
+                # interval START (label='left'), so a coarse bar stamped t closes at
+                # t + scale HOURS; it is causal for a base bar at time b only when
+                # t + scale <= b. Searching on (base_ts - scale_ns) selects that
+                # last-closed bar. Crypto scales are HOURS (not minutes like the V7
+                # MultiScaleOHLCVHandler), so scale_ns = scale * 3600 * 1e9. The prior
+                # code searched base_ts directly and returned the still-in-progress
+                # coarse bar, leaking up to (scale - base_scale) hours of the base
+                # bar's own future into obs (window mean/std AND the `last` value).
                 coarse_ts = self._scale_timestamps[scale].astype("int64")
                 base_ts = self._base_timestamps.astype("int64")
-                indices = np.searchsorted(coarse_ts, base_ts, side="right") - 1
+                scale_ns = scale * 3600 * 1_000_000_000
+                indices = np.searchsorted(coarse_ts, base_ts - scale_ns, side="right") - 1
                 indices = np.clip(indices, 0, len(coarse_ts) - 1)
                 self._scale_index_map[scale] = indices
 
