@@ -34,6 +34,7 @@ import argparse
 import gc
 import json
 import logging
+import multiprocessing as mp
 import os
 import sys
 import time
@@ -270,7 +271,7 @@ def _run_hpo(train_arrays, val_arrays, config, n_trials, steps, net_arch,
 # Per-window: HPO → train → RL eval → linear-core eval → gate
 # --------------------------------------------------------------------------- #
 def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
-               out_dir: Path, gate: dict, *, hpo_storage: str | None = None) -> dict:
+               out_dir: Path, gate: dict) -> dict:
     lookbacks = data["lookbacks"]
     norm_window = int(config.get("features", {}).get("norm_window", 252))
     net_arch = config.get("agents", {}).get("sac", {}).get("network_arch", [256, 256])
@@ -284,9 +285,12 @@ def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
     val_arrays = arrays_for(window["val_start"], window["val_end"])
     test_arrays = arrays_for(window["test_start"], window["test_end"])
 
+    # Per-window Optuna storage: resumable AND contention-free when windows run
+    # concurrently across GPUs (a single shared sqlite would lock under parallel writes).
+    storage = f"sqlite:///{(out_dir / f'hpo_w{w_idx}.db').resolve().as_posix()}"
     logger.info("=== Window %d: HPO (%d trials × %d steps) ===", w_idx, n_trials, hpo_steps)
     hpo = _run_hpo(train_arrays, val_arrays, config, n_trials, hpo_steps, net_arch,
-                   storage=hpo_storage, study_name=f"xsec_w{w_idx}")
+                   storage=storage, study_name=f"xsec_w{w_idx}")
     logger.info("  best val net Sharpe=%.3f trial=%d params=%s",
                 hpo["best_value"], hpo["best_trial"], hpo["agent_params"])
 
@@ -353,13 +357,44 @@ def run_window(w_idx, window, data, config, n_trials, hpo_steps, train_steps,
 # --------------------------------------------------------------------------- #
 # Orchestrator + manifest
 # --------------------------------------------------------------------------- #
+def _assign_windows_to_gpus(schedule: list, gpus: list[int]) -> dict[int, list]:
+    """Round-robin WF windows across GPUs (balanced ±1). Pure + testable."""
+    buckets: dict[int, list] = {g: [] for g in gpus}
+    for i, w in enumerate(schedule):
+        buckets[gpus[i % len(gpus)]].append(w)
+    return buckets
+
+
+def _window_worker(gpu_id, window_dicts, config, out_dir_str, gate,
+                   n_trials, hpo_steps, train_steps):
+    """Spawn-subprocess entry: pin to ONE GPU, reload data from the (parent-warmed)
+    cache, run the assigned windows. Each window writes its own w{idx}_result.json,
+    aggregated by the parent. Module-level so it is picklable for the spawn context.
+    Sets CUDA_VISIBLE_DEVICES before any torch/SB3 import (those are lazy in this
+    module), so each worker sees exactly its GPU."""
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
+    logging.basicConfig(
+        level=logging.INFO,
+        format=f"%(asctime)s [gpu{gpu_id}] [%(levelname)s] %(name)s: %(message)s")
+    out_dir = Path(out_dir_str)
+    data = loader.load_cross_asset_data(config)        # cache hit (parent fetched first)
+    for w in window_dicts:
+        try:
+            run_window(w["window"], w, data, config, n_trials, hpo_steps,
+                       train_steps, out_dir, gate)
+        except Exception:  # noqa: BLE001
+            logger.exception("[gpu%s] window %d FAILED", gpu_id, w["window"])
+
+
 def run_pipeline(config: dict, *, stage: str, out_dir: Path, max_windows: int | None,
                  n_trials: int, hpo_steps: int, train_steps: int,
-                 force_refetch: bool = False, hpo_storage: str | None = None) -> dict:
+                 force_refetch: bool = False, gpus: list[int] | None = None,
+                 windows: list[int] | None = None, aggregate_only: bool = False) -> dict:
     out_dir.mkdir(parents=True, exist_ok=True)
     gate = load_gate_thresholds(config)
     logger.info("Gate thresholds: %s", gate)
 
+    # Parent loads ONCE (fetch+clean+cache+signals) so concurrent workers hit the cache.
     data = loader.load_cross_asset_data(config, force_refetch=force_refetch)
     schedule = build_wf_schedule(data["close"].index, config["walk_forward"])
     if not schedule:
@@ -371,17 +406,60 @@ def run_pipeline(config: dict, *, stage: str, out_dir: Path, max_windows: int | 
     elif max_windows is not None:
         schedule = schedule[:max_windows]
 
-    results = []
-    for window in schedule:
-        try:
-            results.append(run_window(
-                window["window"], window, data, config, n_trials, hpo_steps,
-                train_steps, out_dir, gate, hpo_storage=hpo_storage))
-        except Exception as e:  # noqa: BLE001
-            logger.exception("Window %d FAILED", window["window"])
-            results.append({"window": window["window"], "status": "FAILED", "error": str(e)})
+    # --windows restricts which windows THIS process runs (cross-instance split);
+    # --aggregate_only skips running and builds the WF verdict from collected JSONs.
+    run_set = [w for w in schedule if windows is None or w["window"] in windows]
 
-    return _write_manifest(out_dir, stage, config, gate, results, status="PASS")
+    gpus = gpus or []
+    if aggregate_only:
+        logger.info("aggregate-only: building WF verdict from %d windows in %s",
+                    len(schedule), out_dir)
+    elif len(gpus) > 1 and len(run_set) > 1:
+        # Window-level parallelism: round-robin windows to one spawn-worker per GPU.
+        # Windows are fully independent (own per-window study/model/arrays), so this
+        # is embarrassingly parallel — no shared Optuna RDB, no cross-window state.
+        buckets = _assign_windows_to_gpus(run_set, gpus)
+        logger.info("Parallel WF: %d windows across GPUs %s -> %s", len(run_set), gpus,
+                    {g: [w["window"] for w in ws] for g, ws in buckets.items()})
+        ctx = mp.get_context("spawn")
+        procs = []
+        for g, ws in buckets.items():
+            if not ws:
+                continue
+            p = ctx.Process(target=_window_worker,
+                            args=(g, ws, config, str(out_dir), gate,
+                                  n_trials, hpo_steps, train_steps))
+            p.start()
+            procs.append(p)
+        for p in procs:
+            p.join()
+    else:
+        for window in run_set:
+            try:
+                run_window(window["window"], window, data, config, n_trials,
+                           hpo_steps, train_steps, out_dir, gate)
+            except Exception:  # noqa: BLE001
+                logger.exception("Window %d FAILED", window["window"])
+
+    # Aggregate from per-window result JSONs (uniform path for serial + parallel).
+    # aggregate-only builds the FULL-schedule verdict (cross-instance collect); a
+    # subset run reports only the windows it ran.
+    agg_set = schedule if aggregate_only else run_set
+    results = []
+    for w in agg_set:
+        p = out_dir / f"w{w['window']}_result.json"
+        if p.exists():
+            results.append(json.loads(p.read_text()))
+        else:
+            results.append({"window": w["window"], "status": "FAILED",
+                            "error": "no result json (window crashed)"})
+    manifest = _write_manifest(out_dir, stage, config, gate, results, status="PASS")
+    _wandb_log({
+        "wf/median_uplift_net_sharpe": manifest.get("median_uplift_net_sharpe") or 0.0,
+        "wf/median_rl_net_sharpe": manifest.get("median_rl_net_sharpe") or 0.0,
+        "wf/n_windows_gate_pass": manifest.get("n_windows_gate_pass") or 0,
+    })
+    return manifest
 
 
 def _write_manifest(out_dir: Path, stage: str, config: dict, gate: dict,
@@ -443,12 +521,21 @@ def main():
     ap.add_argument("--force_refetch", action="store_true")
     ap.add_argument("--smoke", action="store_true",
                     help="tiny end-to-end wiring check (1 window, 2 trials, 1k steps)")
+    ap.add_argument("--gpus", default=None,
+                    help="comma GPU ids for parallel WF window-dispatch, e.g. '0,1'. "
+                         "Deploy WITHOUT --gpu so all are visible; each window-worker pins one.")
+    ap.add_argument("--windows", default=None,
+                    help="comma window indices to run THIS process (cross-instance split), e.g. '0,1,2'")
+    ap.add_argument("--aggregate_only", action="store_true",
+                    help="skip running; build the WF manifest from collected w*_result.json in --out_dir")
     # Deploy compatibility (deploy_bare_metal.py injects these into the launch cmd)
     ap.add_argument("--run_name", default=None, help="WandB run name (deploy-injected)")
     ap.add_argument("--hpo_storage", default=None,
-                    help="Optuna sqlite storage URL (deploy-injected; makes HPO resumable)")
+                    help="(accepted for deploy compat; ignored — WF uses per-window sqlite)")
     ap.add_argument("--tags", nargs="*", default=None, help="extra WandB tags (deploy-injected)")
     args = ap.parse_args()
+    gpus = [int(x) for x in args.gpus.split(",") if x.strip() != ""] if args.gpus else None
+    windows = [int(x) for x in args.windows.split(",") if x.strip() != ""] if args.windows else None
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
@@ -495,7 +582,8 @@ def main():
         manifest = run_pipeline(
             config, stage=args.stage, out_dir=out_dir, max_windows=max_windows,
             n_trials=n_trials, hpo_steps=hpo_steps, train_steps=train_steps,
-            force_refetch=args.force_refetch, hpo_storage=args.hpo_storage)
+            force_refetch=args.force_refetch, gpus=gpus, windows=windows,
+            aggregate_only=args.aggregate_only)
     finally:
         try:
             import wandb

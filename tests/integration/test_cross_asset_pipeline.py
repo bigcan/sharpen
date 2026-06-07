@@ -136,3 +136,33 @@ def test_manifest_median_cost_gap_none_without_field(tmp_path):
     results = [_result(0.20, 0.55, 0.35, True)]
     m = pipe._write_manifest(tmp_path, "wf", {}, _GATE, results, status="PASS")
     assert m["median_cost_gap"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Parallel window→GPU assignment (the WF parallelism dispatch)
+# --------------------------------------------------------------------------- #
+def _sched(n):
+    return [{"window": i} for i in range(n)]
+
+
+def test_assign_windows_round_robin_balanced():
+    buckets = pipe._assign_windows_to_gpus(_sched(14), [0, 1])
+    got0 = [w["window"] for w in buckets[0]]
+    got1 = [w["window"] for w in buckets[1]]
+    assert got0 == [0, 2, 4, 6, 8, 10, 12]
+    assert got1 == [1, 3, 5, 7, 9, 11, 13]
+    # every window assigned exactly once, balanced ±1
+    assert sorted(got0 + got1) == list(range(14))
+    assert abs(len(got0) - len(got1)) <= 1
+
+
+def test_assign_windows_three_gpus():
+    buckets = pipe._assign_windows_to_gpus(_sched(14), [0, 1, 2])
+    allw = sorted(w["window"] for ws in buckets.values() for w in ws)
+    assert allw == list(range(14))
+    assert max(len(ws) for ws in buckets.values()) - min(len(ws) for ws in buckets.values()) <= 1
+
+
+def test_assign_windows_single_gpu_gets_all():
+    buckets = pipe._assign_windows_to_gpus(_sched(5), [0])
+    assert [w["window"] for w in buckets[0]] == [0, 1, 2, 3, 4]
