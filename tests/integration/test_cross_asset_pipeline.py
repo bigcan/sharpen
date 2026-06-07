@@ -132,6 +132,23 @@ def test_manifest_surfaces_cost_gap_and_deferred_diversification(tmp_path):
     assert "DEFERRED" in m["diversification_gate"]
 
 
+def test_manifest_ship_linear_when_cost_fragile(tmp_path):
+    """Beats core on uplift + Sharpe, but median cost_gap > max_cost_gap (cost-fragile,
+    the AlphaSeek failure mode) -> must NOT crown rl_beats_linear."""
+    r0 = {**_result(0.20, 0.55, 0.35, False), "cost_gap": 0.50}
+    r1 = {**_result(0.30, 0.60, 0.30, False), "cost_gap": 0.40}
+    m = pipe._write_manifest(tmp_path, "wf", {}, _GATE, [r0, r1], status="PASS")
+    assert m["gate_decision"] == "ship_linear_core"
+    assert m["median_cost_gap"] == 0.45
+
+
+def test_manifest_rl_beats_linear_with_costgap_in_band(tmp_path):
+    r0 = {**_result(0.20, 0.55, 0.35, True), "cost_gap": 0.05}
+    r1 = {**_result(0.30, 0.60, 0.30, True), "cost_gap": 0.10}
+    m = pipe._write_manifest(tmp_path, "wf", {}, _GATE, [r0, r1], status="PASS")
+    assert m["gate_decision"] == "rl_beats_linear"
+
+
 def test_manifest_median_cost_gap_none_without_field(tmp_path):
     results = [_result(0.20, 0.55, 0.35, True)]
     m = pipe._write_manifest(tmp_path, "wf", {}, _GATE, results, status="PASS")

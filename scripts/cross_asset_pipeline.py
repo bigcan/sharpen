@@ -472,10 +472,15 @@ def _write_manifest(out_dir: Path, stage: str, config: dict, gate: dict,
     n_pass = sum(1 for r in ok if r["gate_pass"])
 
     decision = "ship_linear_core"
+    median_cost_gap = float(np.median(cost_gaps)) if cost_gaps else None
     if ok:
         median_uplift = float(np.median(uplifts))
         median_rl = float(np.median(rl_sharpes))
-        if median_uplift >= gate["min_uplift"] and median_rl >= gate["wf_net_sharpe_floor"]:
+        # Decision must mirror the per-window gate: beat the core on uplift AND clear
+        # the survival floor AND not be cost-fragile (median cost_gap in-band). Omitting
+        # cost_gap would crown a frictionless-only book — the AlphaSeek failure mode.
+        cost_ok = median_cost_gap is None or median_cost_gap <= gate["max_cost_gap"]
+        if median_uplift >= gate["min_uplift"] and median_rl >= gate["wf_net_sharpe_floor"] and cost_ok:
             decision = "rl_beats_linear"
     else:
         median_uplift = median_rl = None
@@ -492,7 +497,7 @@ def _write_manifest(out_dir: Path, stage: str, config: dict, gate: dict,
         "median_uplift_net_sharpe": median_uplift,
         "median_rl_net_sharpe": median_rl,
         "median_linear_core_net_sharpe": float(np.median(core_sharpes)) if core_sharpes else None,
-        "median_cost_gap": float(np.median(cost_gaps)) if cost_gaps else None,
+        "median_cost_gap": median_cost_gap,
         # g_diversification (corr to existing live sleeves) needs GMGP1/SG-1 live
         # return series — a Stage-3/deploy-gate integration, not wired in this
         # sim-only pipeline. Surfaced (not silently dropped) so the deploy gate
