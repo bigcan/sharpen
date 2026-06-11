@@ -14,8 +14,11 @@
 #     The cross_asset_loader fetches + clean_ohlcv at runtime (no shipped parquet).
 #
 # PRE-FLIGHT:
-#   python scripts/validate_config.py --config configs/cross_asset_momentum.yaml --stage hpo  -> PASS
-#   python scripts/validate_config.py --config configs/cross_asset_momentum.yaml --stage wf   -> PASS
+#   --stage hpo -> FAILS multiplicity since the S553-cont-34 gate fix (500k steps /
+#   1260 train_bars = 397x >> 50x REJECT cliff — this config IS the overfit that
+#   slipped when the gate skipped non-crypto). Historical artifact; use
+#   cross_asset_momentum_retry.yaml (50k, ~40x) or the v1.1 config for new runs.
+#   --stage wf  -> PASS (wf does not re-check the per-trial HPO budget)
 # ============================================================================
 
 strategy:

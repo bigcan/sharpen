@@ -87,6 +87,9 @@ class MultiAssetAllocatorEnv(gym.Env):
         turnover_penalty: float = 0.001,
         reward_clip_range: tuple = (-5.0, 5.0),
         min_trade_pct: float = 0.005,            # skip dust trades < 0.5% weight
+        no_trade_band: float = 0.0,              # v1.1: trade only to the band edge
+        rebalance_interval: int = 1,             # v1.1: decision cadence in bars (1 = every bar)
+        cost_penalty_scale: float = 0.0,         # v1.1: realized (fee+slip)/PV reward penalty
         circuit_breaker_threshold: float = 0.1,
         random_start: bool = False,
         random_start_pct: float = 0.1,
@@ -135,6 +138,12 @@ class MultiAssetAllocatorEnv(gym.Env):
         self.turnover_penalty = float(turnover_penalty)
         self.reward_clip_range = reward_clip_range
         self.min_trade_pct = float(min_trade_pct)
+        # --- v1.1 cost levers (S553-cont-34: gross alpha real, net killed by
+        # turnover cost — median cost_gap 0.41 vs the 0.15 gate). Defaults keep
+        # v1 behavior byte-identical (keystone baseline-parity unaffected).
+        self.no_trade_band = float(no_trade_band)
+        self.rebalance_interval = max(int(rebalance_interval), 1)
+        self.cost_penalty_scale = float(cost_penalty_scale)
         self.circuit_breaker_threshold = float(circuit_breaker_threshold)
         self.random_start = bool(random_start)
         self.random_start_pct = float(random_start_pct)
@@ -222,7 +231,12 @@ class MultiAssetAllocatorEnv(gym.Env):
         # --- Conviction -> target weights (vol-scaling + leverage caps) ---
         # Uses vol at the CURRENT (decision) bar, which is causal (<= t-1), BEFORE
         # advancing the clock — mirrors how obs is built from tech_ary[step_idx].
-        target_weights = self._action_to_weights(action)
+        # v1.1 rebalance cadence: off-cadence bars HOLD current weights (the action
+        # is a no-op); only every `rebalance_interval`-th decision bar may trade.
+        if self.rebalance_interval > 1 and (self.step_idx % self.rebalance_interval) != 0:
+            target_weights = self.positions.copy()
+        else:
+            target_weights = self._action_to_weights(action)
 
         # --- Advance to next bar ---
         self.step_idx += 1
@@ -247,6 +261,22 @@ class MultiAssetAllocatorEnv(gym.Env):
         # --- Execute rebalance: compute deltas and apply costs ---
         old_positions = self.positions.copy()
         delta_weights = target_weights - old_positions
+
+        # v1.1 no-trade band: deltas inside the band are held; larger deltas trade
+        # only to the nearest band EDGE (target -/+ band), the classic partial-
+        # rebalance turnover saver — each trade is `band` smaller than full-to-target.
+        # Availability-forced closes (invalid-price asset, target zeroed above) BYPASS
+        # the band: shrinking them would strand a band-sized residual in a dead asset
+        # forever (every later delta sits "inside band" while the price stays invalid).
+        if self.no_trade_band > 0.0:
+            inside = np.abs(delta_weights) <= self.no_trade_band
+            banded = np.where(
+                inside, 0.0,
+                delta_weights - np.sign(delta_weights) * self.no_trade_band,
+            )
+            delta_weights = np.where(
+                self._asset_available[self.step_idx], banded, delta_weights,
+            )
         abs_delta = np.abs(delta_weights)
 
         # Filter dust trades
@@ -294,7 +324,10 @@ class MultiAssetAllocatorEnv(gym.Env):
         if len(self.returns_history) > self.sortino_window * 2:
             self.returns_history = self.returns_history[-self.sortino_window:]
 
-        reward = self._calc_reward(step_return, abs_delta, portfolio_value_before)
+        reward = self._calc_reward(
+            step_return, abs_delta, portfolio_value_before,
+            realized_cost=total_fees + total_slippage,
+        )
 
         if self.enable_trade_log and self.trade_log is not None:
             abs_old = np.abs(old_positions).sum()
@@ -499,11 +532,17 @@ class MultiAssetAllocatorEnv(gym.Env):
     # -----------------------------------------------------------------------
     def _calc_reward(
         self, step_return: float, abs_delta: np.ndarray, portfolio_value: float,
+        realized_cost: float = 0.0,
     ) -> float:
-        """``reward = base_signal(step_return) - turnover_penalty * sum|Δw|``.
+        """``reward = base_signal(step_return) - turnover_penalty * sum|Δw|
+        - cost_penalty_scale * realized_cost / portfolio_value``.
 
         ``dsr``: Moody-Saffell Differential Sharpe Ratio (shared ``DSRCalculator``).
         ``sortino``: return / trailing downside deviation. ``simple``: scaled return.
+
+        The v1.1 cost term re-charges the bar's ACTUAL fee+slippage (already inside
+        ``step_return``) as a dense penalty, so the cost signal scales with the real
+        fee structure rather than raw turnover (which is fee-blind).
         """
         if self.reward_type == "dsr":
             reward = self._dsr.compute(step_return)
@@ -514,6 +553,8 @@ class MultiAssetAllocatorEnv(gym.Env):
 
         if portfolio_value > 1e-6:
             reward -= float(abs_delta.sum()) * self.turnover_penalty
+            if self.cost_penalty_scale > 0.0:
+                reward -= self.cost_penalty_scale * realized_cost / portfolio_value
 
         clip_lo, clip_hi = self.reward_clip_range
         return max(clip_lo, min(clip_hi, reward))

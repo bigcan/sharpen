@@ -183,3 +183,46 @@ def test_assign_windows_three_gpus():
 def test_assign_windows_single_gpu_gets_all():
     buckets = pipe._assign_windows_to_gpus(_sched(5), [0])
     assert [w["window"] for w in buckets[0]] == [0, 1, 2, 3, 4]
+
+
+# --------------------------------------------------------------------------- #
+# v1.1 cost-lever HPO search space (config-gated)
+# --------------------------------------------------------------------------- #
+class _StubTrial:
+    """Records suggest_* calls; returns lo / first choice deterministically."""
+
+    def __init__(self):
+        self.params = {}
+
+    def suggest_float(self, name, lo, hi, log=False):
+        self.params[name] = float(lo)
+        return float(lo)
+
+    def suggest_int(self, name, lo, hi, log=False):
+        self.params[name] = int(lo)
+        return int(lo)
+
+    def suggest_categorical(self, name, choices):
+        self.params[name] = choices[0]
+        return choices[0]
+
+
+def test_search_space_without_lever_bounds_is_unchanged():
+    t = _StubTrial()
+    out = pipe._sac_search_space(t, {"hpo": {"search": {}}})
+    assert set(out["env_overrides"]) == {"turnover_penalty"}
+
+
+def test_search_space_with_lever_bounds_suggests_them():
+    cfg = {"hpo": {"search": {
+        "no_trade_band": [0.01, 0.10],
+        "rebalance_interval": [1, 5, 21],
+        "cost_penalty_scale": [0.5, 5.0],
+    }}}
+    t = _StubTrial()
+    out = pipe._sac_search_space(t, cfg)
+    ov = out["env_overrides"]
+    assert ov["no_trade_band"] == 0.01
+    assert ov["rebalance_interval"] == 1
+    assert ov["cost_penalty_scale"] == 0.5
+    assert "turnover_penalty" in ov

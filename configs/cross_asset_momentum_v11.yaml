@@ -1,0 +1,153 @@
+# ============================================================================
+# CROSS-ASSET MOMENTUM ALLOCATOR — xsec-mom-v1.1 COST LEVERS (S553-cont-41)
+# ============================================================================
+# The v1 Stage-3 WF (results/cross_asset_allocator/wf/manifest_wf.json) proved
+# the RL has REAL gross alpha — frictionless net Sharpe 0.80 BEATS the linear
+# core 0.34 across all 14 windows — but loses ALL of it to transaction cost
+# (median net 0.135, cost_gap 0.41 vs the 0.15 gate) => ship_linear_core.
+# v1.1 = the cost round: convert gross to net via three execution/reward levers,
+# all HPO-searched (env.* values below are fallbacks; hpo.search owns the range):
+#   1. no_trade_band      — hold |Δw| inside the band; trade only to the band EDGE
+#   2. rebalance_interval — decision cadence in bars (off-cadence bars hold)
+#   3. cost_penalty_scale — re-charge realized fee+slippage in reward (fee-aware,
+#                           unlike the fee-blind turnover_penalty)
+# The linear-core gate baseline is IMMUNE to these levers by construction
+# (allocator_factory.evaluate_linear_core forces them off).
+# Inherits every anti-overfit retry lesson (50k steps ~ 40x multiplicity in the
+# [15,40] band — now ENFORCED by validate_config; [128,128] net; strong
+# turnover-penalty range).
+#
+# PRE-FLIGHT:
+#   python scripts/validate_config.py --config configs/cross_asset_momentum_v11.yaml --stage hpo -> PASS
+#   python scripts/validate_config.py --config configs/cross_asset_momentum_v11.yaml --stage wf  -> PASS
+# ============================================================================
+
+strategy:
+  id: "xsec-mom-v1"
+  name: "cross_asset_momentum"
+  version: "0.3.0-v11-costlevers"
+  instrument: "multi_asset_allocator"
+
+# ---------- UNIVERSE (18 liquid ETF proxies × 4 classes; validated set) -------
+universe:
+  assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",      # equity
+           "TLT", "IEF", "LQD",                     # rates
+           "GLD", "SLV", "DBC", "USO", "DBA",       # commodity
+           "UUP", "FXE", "FXY", "FXB", "FXA"]       # fx
+  asset_class:                                       # ticker -> class (XS-rank grouping)
+    SPY: equity
+    QQQ: equity
+    IWM: equity
+    EFA: equity
+    EEM: equity
+    TLT: rates
+    IEF: rates
+    LQD: rates
+    GLD: commodity
+    SLV: commodity
+    DBC: commodity
+    USO: commodity
+    DBA: commodity
+    UUP: fx
+    FXE: fx
+    FXY: fx
+    FXB: fx
+    FXA: fx
+  n_assets: 18
+
+# ---------- DATA (yfinance daily; runtime fetch + clean via cross_asset_loader)
+data:
+  source: "yfinance_etf"
+  frequency: "1d"
+  start_date: "2006-01-01"
+  end_date: null
+  fields: ["open", "high", "low", "close", "volume"]
+
+# ---------- FEATURES (causal signals; cross_asset_signals.compute) ------------
+features:
+  lookbacks: [63, 126, 252]
+  skip: 5
+  vol_window: 63
+  include_baseline_weight: true
+  carry:
+    enabled: false                         # carry factor is a separate v1.1+ falsification
+
+# ---------- ENV (MultiAssetAllocatorEnv + v1.1 cost levers) -------------------
+env:
+  type: "multi_asset_allocator"
+  initial_capital: 100000.0
+  taker_fee: 0.0002
+  slippage_base_bps: 1.0
+  slippage_impact_bps: 5.0
+  target_vol_asset: 0.10
+  lev_cap: 2.0
+  max_gross_exposure: 3.0
+  allow_short: true
+  reward_type: "dsr"
+  dsr_eta: 0.01
+  turnover_penalty: 0.02                  # retry lesson (was 0.001 in v1)
+  min_trade_pct: 0.02                     # retry lesson (skip <2% dust)
+  no_trade_band: 0.05                     # v1.1 fallback; HPO searches [0.01, 0.15]
+  rebalance_interval: 5                   # v1.1 fallback (weekly); HPO searches [1,5,21]
+  cost_penalty_scale: 1.0                 # v1.1 fallback; HPO searches [0.5, 10]
+  circuit_breaker_threshold: 0.1
+  random_start: false
+
+# ---------- AGENTS (SB3 SAC; retry-regularized capacity) ----------------------
+agents:
+  sac:
+    learning_rate: 0.0003
+    gamma: 0.99
+    tau: 0.005
+    batch_size: 512
+    buffer_size: 100000
+    learning_starts: 2000
+    ent_coef: "auto"
+    network_arch: [128, 128]
+
+training:
+  total_timesteps: 50000                  # ~40x multiplicity (validator-enforced band)
+  num_envs: 8
+
+# ---------- HPO (Stage 1; ADR-4 objective = Sharpe) --------------------------
+hpo:
+  enabled: true
+  agents: ["sac"]
+  objective: "sharpe"
+  trials: 40
+  steps_per_trial: 50000                  # ~40x mult, top of the [15,40] band
+  # Cost-lever + anti-overfit search bounds (read by _sac_search_space).
+  search:
+    turnover_penalty: [0.02, 0.2]
+    learning_starts: [500, 4000]
+    buffer_size: [50000, 200000]
+    no_trade_band: [0.01, 0.15]           # v1.1 lever 1 (uniform)
+    rebalance_interval: [1, 5, 21]        # v1.1 lever 2 (categorical: daily/weekly/monthly)
+    cost_penalty_scale: [0.5, 10.0]       # v1.1 lever 3 (log-uniform)
+
+# ---------- WALK-FORWARD (Stage 3; daily bars) -------------------------------
+walk_forward:
+  train_bars: 1260
+  val_bars: 252
+  test_bars: 252
+  step_bars: 252
+  embargo_bars: 21
+  min_windows: 3
+
+# ---------- GATES (stage schema; allocator decision gates in the overlay) -----
+gates:
+  hpo_pf_floor: 1.05
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 5
+  l1_pf_cv_max: 0.30
+  wf_windows: 4
+
+ensemble:
+  gates_file: configs/cross_asset_momentum.gates.yaml
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["xsec-momentum", "allocator", "SAC", "TSMOM", "daily", "s553", "v1.1", "cost-levers"]
