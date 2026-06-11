@@ -21,8 +21,9 @@ env:
   initial_balance: 100000.0
   window_size: 30
   features_per_scale: 8
-  taker_fee: 0.0005
-  deadband_threshold: 0.35
+  taker_fee: 0.00055
+  slippage_base_bps: 5.0
+  deadband_threshold: 0.33987435271118105
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5
   episode_length: 500
@@ -32,9 +33,10 @@ env:
   - 15
   - 60
   - 240
+  max_leverage: 1.770966122615107
   reward:
     mode: dsr
-    dsr_eta: 0.003159755401614352
+    dsr_eta: 0.006529766361344645
     dsr_scale: 1.0
 network:
   scale_encoder:
@@ -51,18 +53,18 @@ network:
   window_size: 30
 agents:
   sac:
-    lr_actor: 0.0005462612695421805
-    lr_critic: 0.000866154995794675
-    lr_alpha: 0.0009625164717779418
-    gamma: 0.9535315530021778
-    tau: 0.00212659146992685
+    lr_actor: 7.795675728752896e-05
+    lr_critic: 4.59909621898876e-05
+    lr_alpha: 6.436967260355394e-06
+    gamma: 0.9537310183287655
+    tau: 0.0037445232945475075
     batch_size: 512
     buffer_size: 500000
-    initial_alpha: 0.15930606967484204
+    initial_alpha: 0.4457952174148438
     learning_starts: 5000
     update_interval: 4
     actor_update_freq: 2
-    gradient_clip: 10.0
+    gradient_clip: 5.7228465480432185
     checkpoint_interval: 250000
 training:
   total_timesteps: 2000000
@@ -74,14 +76,14 @@ training:
 hpo:
   enabled: false
 gates:
-  hpo_pf_floor: 1.2
-  hpo_min_trials_completed: 30
+  hpo_pf_floor: 1.05
+  hpo_min_trials_completed: 20
   entropy_floor: 0.01
   q_div_max: 100.0
   action_sat_max: 0.9
   l1_seeds: 5
   l1_pf_cv_max: 0.3
-  l1_pf_floor: 1.2
+  l1_pf_floor: 1.1
   l1_pf_cv_ambiguous:
   - 0.22
   - 0.38
@@ -93,8 +95,8 @@ gates:
   velotrade_trailing_dd_buffer_pp: 0.5
   oos_pf_floor: 1.1
 ensemble:
-  gates_file: configs/gmgp1_btc_velotrade_ensemble.gates.yaml
-  checkpoint_pattern: checkpoints/gmgp1-btc-along-wf-fold{fold}-seed{seed}_*/checkpoint_final.pth
+  gates_file: configs/gmgp1_btc_x2deleak_canary_ensemble.gates.yaml
+  checkpoint_pattern: checkpoints/gmgp1-btc-canary-costcorr-fold{fold}-seed{seed}_*/checkpoint_final.pth
   seeds:
   - 123
   - 456
@@ -102,11 +104,11 @@ ensemble:
   - 1024
   - 2026
   seed_pfs:
-    123: 2.4422
-    456: 2.4225
-    789: 2.4695
-    1024: 2.367
-    2026: 2.5084
+    123: 1.1
+    456: 1.1
+    789: 1.1
+    1024: 1.1
+    2026: 1.1
 wandb:
   project: FinRL-Pro-DS
   consolidate: true
@@ -123,7 +125,10 @@ wandb:
   - along-2m
   - v2-3-bootstrap
   - bybit-perp
-  - upstream:gmgp1_data_window_study_unified_20260502
-  - upstream-stage25:results/gmgp1_btc_ensemble/ensemble_v2.tar.gz
+  - x2-deleak
+  - clean-canary
+  - cost-corrected
+  - leverage-axis
+  - s553
   - fold-1
-  - study-id-20260503_161154
+  - study-id-20260604_083612

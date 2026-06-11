@@ -1,6 +1,10 @@
 ---
 name: wandb-finrl
 description: "Project-specific WandB addendum for FinRL-Pro-DS. Extends user-scope wandb skill with project entity, metric keys, and helper paths."
+effort: high
+model: opus
+version: 1
+quality: 11/12
 ---
 
 # WandB Addendum — FinRL-Pro-DS
