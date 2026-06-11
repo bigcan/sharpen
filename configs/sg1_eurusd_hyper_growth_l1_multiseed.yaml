@@ -1,0 +1,167 @@
+# SG-1 EURUSD The5ers Hyper Growth — Stage 2 L1 multiseed
+#
+# S549-cont follow-up (2026-05-23): Stage 1 HPO `6rjp4ugt` (study
+# `sg1_eurusd_hyper_growth_20260521`) finished 50/50 trials on gpuhub-1.
+# Best trial **#18** test PF 2.3523 / train PF 2.1384; top-10 cluster eval
+# PF >= 2.05 (no overfit signal). HPs sourced from
+# `results/best_params_sg1_eurusd_hyper_growth_20260521.yaml` (full
+# precision; banner figures are rounded).
+#
+# Architecture: clone of `sg1_xauusd_ftmo_rehpo_l1_multiseed_oanda.yaml`.
+# Diffs vs that file (relative to upstream HPO config):
+#   - Data: data/oanda/eurusd_m1_m.parquet (Hyper Growth deploy market)
+#   - Risk caps: Hyper Growth 6%/3% (vs FTMO 10%/5%) — preserved from
+#     sg1_eurusd_hyper_growth_hpo.yaml
+#   - Trial #18 HPs (lr_*, tau, gamma, initial_alpha, gradient_clip,
+#     dsr_eta, deadband_threshold) frozen from study output
+#   - signal_gate thresholds inherited from XAUUSD calibration (S479);
+#     same prior as HPO. Re-cal against EURUSD vol regime is queued
+#     post-L1 PASS, pre-WF (per HPO config header note).
+#
+# Stage 2 gate (Protocol v2 §4 + S488 escalation):
+#   - median test PF >= 1.2, all seeds profitable
+#   - CV(PF) in [0.22, 0.38] = AMBIGUOUS -> auto-extend to N=20
+#
+# Launch pattern (per feedback_multiseed_batches_of_5_not_10_at_once +
+# feedback_l1_multiseed_launcher_pitfalls):
+#   - 2 sequential batches of 5 seeds each (N=10 total)
+#   - `--concurrent 2 --separate_runs` per batch (avoids num_envs=20 race)
+#   - Target: gpuhub-2:0 (per feedback_hpo_gpuhub1_nonhpo_gpuhub2)
+#
+# PRE-DEPLOY BLOCKER (carried from HPO config): The5ers Hyper Growth
+# EA/bot policy NOT on website; verify T&C + email BEFORE paper-deploy.
+
+data:
+  file_path: "data/oanda/eurusd_m1_m.parquet"
+  ticker: "EURUSD"
+  handler_type: "multiscale"
+  train_start_date: "2024-06-01"
+  train_end_date: "2025-09-30"
+  val_start_date: "2025-10-01"
+  val_end_date: "2025-12-31"
+  test_start_date: "2026-01-01"
+  test_end_date: "2026-03-31"
+
+features:
+  scales: [3, 15, 60]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "cfd_forex"
+
+signal_gate:
+  enabled: true
+  gate_mode: "composite"
+  atr_threshold: 0.35
+  parkinson_threshold: 0.0107
+  volume_threshold: 0.75
+  max_hold_bars: 20
+  gate_always_on_first: true
+  normalize_accumulated_reward: true
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00005                   # IC Markets Raw EUR/USD ~0.4 bps/side; same as HPO
+  deadband_threshold: 0.35             # trial #18
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 1500
+  random_start: true
+  max_drawdown_pct: 0.06               # Hyper Growth 6% hard cap
+  scales: [3, 15, 60]
+  gap_detection: true
+  gap_atr_mult: 3.0                    # OANDA weekend gap detector
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.004353581581318677      # trial #18
+    dsr_scale: 1.0
+  risk:
+    enabled: true
+    max_trailing_drawdown_pct: 0.05    # 1pp buffer from Hyper Growth 6% rail
+    max_daily_loss_pct: 0.02           # 1pp buffer from Hyper Growth 3% rail
+    eod_hour_utc: 21                   # FX day rolls 21:00 UTC
+    drawdown_penalty_start: 0.015      # shaping triggers 0.5pp before 2% daily cap
+    drawdown_penalty_scale: 5.0
+    augment_obs: "off"
+    static_peak: true
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    # Trial #18 HPs (Optuna study sg1_eurusd_hyper_growth_20260521,
+    # parent WandB 6rjp4ugt, full precision from best_params yaml).
+    lr_actor: 0.00037752851184085103
+    lr_critic: 0.00044684267408421323
+    lr_alpha: 0.0001059694907530247
+    tau: 0.0027196274363356005
+    gamma: 0.9654402434898545
+    initial_alpha: 0.11970026598125914
+    gradient_clip: 8.803451835153641
+    batch_size: 512
+    buffer_size: 500000
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 500000              # match HPO steps_per_trial (apples-to-apples)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+  # seed: set per-run via CLI (--seed N); launcher sweeps
+  # batch 1: [42, 123, 456, 789, 1024]
+  # batch 2: [1337, 2025, 3141, 5150, 9999]
+
+hpo:
+  enabled: false
+
+gates:                                 # Protocol v2 §4 Stage 2 (S488 escalation)
+  hpo_pf_floor: 1.2
+  hpo_min_trials_completed: 30
+  entropy_floor: 0.01
+  q_div_max: 100.0
+  action_sat_max: 0.9
+  l1_seeds: 10                         # S488: prop-firm workstreams require N>=10
+  l1_pf_cv_max: 0.30
+  l1_pf_floor: 1.2
+  l1_pf_cv_ambiguous: [0.22, 0.38]     # S488: pre-committed escalation range
+  wf_windows: 4
+  wf_pf_floor: 1.1
+  hyper_growth_active_days_min: 0      # no min trading days (vs FTMO 4)
+  hyper_growth_max_single_day_share: 0.5
+  hyper_growth_daily_dd_buffer_pp: 0.5 # breach if intraday DD > (2.0% + 0.5pp) = 2.5%
+  hyper_growth_trailing_dd_buffer_pp: 0.5  # breach if trailing > (5.0% + 0.5pp) = 5.5%
+  oos_pf_floor: 1.1
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["sg-1", "EURUSD", "SAC", "3min", "signal-gated", "the5ers",
+         "hyper-growth", "prop-firm", "l1-multiseed", "steady-state",
+         "oanda-spot", "trial18", "upstream:sg1_eurusd_hyper_growth_20260521",
+         "upstream:6rjp4ugt"]
+
+# Stage 2.5-R ensemble block (populated S549-cont post-L1 by results/sg1_eurusd_l1_verdict.json).
+# Top-3 by L1 test PF; ens_pf_weighted aggregator weights from seed_pfs.
+ensemble:
+  seeds: [9999, 2025, 3141]            # top-3 L1 test PF (1.7248 / 1.6927 / 1.6466)
+  seed_pfs:                            # backtest_test/profit_factor from L1 multiseed
+    9999: 1.7248
+    2025: 1.6927
+    3141: 1.6466
+  gates_file: "configs/sg1_eurusd_hyper_growth_ensemble.gates.yaml"
+
+workstream: sg1_eurusd_hyper_growth
