@@ -199,6 +199,23 @@ def _sac_search_space(trial, config: dict | None = None) -> dict:
     tp_lo, tp_hi = s.get("turnover_penalty", [0.0005, 0.01])
     ls_lo, ls_hi = s.get("learning_starts", [1000, 10000])
     bf_lo, bf_hi = s.get("buffer_size", [100_000, 1_000_000])
+    env_overrides = {
+        "turnover_penalty": trial.suggest_float("turnover_penalty", float(tp_lo), float(tp_hi), log=True),
+    }
+    # v1.1 cost levers — searched ONLY when bounds appear in hpo.search (configs
+    # without them are untouched). rebalance_interval is a categorical bar-cadence
+    # list (e.g. [1, 5, 21]); the other two are [lo, hi] floats.
+    if "no_trade_band" in s:
+        ntb_lo, ntb_hi = s["no_trade_band"]
+        env_overrides["no_trade_band"] = trial.suggest_float(
+            "no_trade_band", float(ntb_lo), float(ntb_hi))
+    if "rebalance_interval" in s:
+        env_overrides["rebalance_interval"] = trial.suggest_categorical(
+            "rebalance_interval", [int(c) for c in s["rebalance_interval"]])
+    if "cost_penalty_scale" in s:
+        cps_lo, cps_hi = s["cost_penalty_scale"]
+        env_overrides["cost_penalty_scale"] = trial.suggest_float(
+            "cost_penalty_scale", float(cps_lo), float(cps_hi), log=True)
     return {
         "agent_params": {
             "learning_rate": trial.suggest_float("learning_rate", 1e-5, 1e-3, log=True),
@@ -208,9 +225,7 @@ def _sac_search_space(trial, config: dict | None = None) -> dict:
             "tau": trial.suggest_float("tau", 0.001, 0.02, log=True),
             "learning_starts": trial.suggest_int("learning_starts", int(ls_lo), int(ls_hi), log=True),
         },
-        "env_overrides": {
-            "turnover_penalty": trial.suggest_float("turnover_penalty", float(tp_lo), float(tp_hi), log=True),
-        },
+        "env_overrides": env_overrides,
     }
 
 
@@ -258,7 +273,8 @@ def _run_hpo(train_arrays, val_arrays, config, n_trials, steps, net_arch,
     if remaining > 0:
         study.optimize(objective, n_trials=remaining, gc_after_trial=True)
     best = study.best_trial
-    env_keys = {"turnover_penalty"}
+    env_keys = {"turnover_penalty", "no_trade_band", "rebalance_interval",
+                "cost_penalty_scale"}
     return {
         "best_value": float(best.value),
         "agent_params": {k: v for k, v in best.params.items() if k not in env_keys},

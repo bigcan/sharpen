@@ -54,6 +54,9 @@ _ENV_KEY_MAP = {
     "turnover_penalty": "turnover_penalty",
     "reward_clip_range": "reward_clip_range",
     "min_trade_pct": "min_trade_pct",
+    "no_trade_band": "no_trade_band",
+    "rebalance_interval": "rebalance_interval",
+    "cost_penalty_scale": "cost_penalty_scale",
     "circuit_breaker_threshold": "circuit_breaker_threshold",
     "random_start": "random_start",
     "random_start_pct": "random_start_pct",
@@ -62,6 +65,13 @@ _ENV_KEY_MAP = {
 
 _BOOL_KW = {"allow_short", "random_start", "enable_trade_log"}
 _TUPLE_KW = {"reward_clip_range"}
+
+# v1.1 execution levers are RL trading discipline, NOT market conditions. The
+# RL-beats-linear gate baseline must stay the VALIDATED linear core (monthly
+# cadence, full-to-target trades) — these are forced off in evaluate_linear_core.
+EXECUTION_LEVERS = {"no_trade_band", "rebalance_interval", "cost_penalty_scale"}
+_EXECUTION_LEVERS_OFF = {"no_trade_band": 0.0, "rebalance_interval": 1,
+                         "cost_penalty_scale": 0.0}
 
 
 def make_allocator_env(
@@ -199,5 +209,10 @@ def evaluate_linear_core(
         raise KeyError("evaluate_linear_core needs arrays['conviction_ary'] "
                        "(build_allocator_arrays output)")
     conv_monthly = monthly_rebal_conviction(arrays["timestamps"], arrays["conviction_ary"])
-    env = make_allocator_env(arrays, config, overrides=overrides, eval_mode=True)
+    # Force the v1.1 execution levers OFF regardless of config/overrides: the
+    # baseline is the validated monthly linear core, not "linear core through the
+    # RL's trading discipline" (a 5-bar rebalance_interval would even block the
+    # monthly cadence whenever month-end falls off-cadence).
+    core_overrides = {**(overrides or {}), **_EXECUTION_LEVERS_OFF}
+    env = make_allocator_env(arrays, config, overrides=core_overrides, eval_mode=True)
     return _drive(env, lambda k, obs: conv_monthly[k])

@@ -536,6 +536,20 @@ def _training_budget_multiplicity(cfg: dict, total_steps) -> tuple[float, float,
         return None
     if steps <= 0:
         return None
+    # Bar-stepped envs with an explicit walk_forward bar split declare the train
+    # window directly — no calendar inference needed. Without this branch the
+    # allocator's 500k/1260-bar = 397x Stage-1 overfit slipped validation
+    # entirely (S553-cont-34; the WF was the proof).
+    env_type = str((cfg.get("env", {}) or {}).get("type") or "").lower()
+    if env_type == "multi_asset_allocator":
+        try:
+            bars = float((cfg.get("walk_forward", {}) or {}).get("train_bars"))
+        except (TypeError, ValueError):
+            return None
+        if bars <= 0:
+            return None
+        freq = str((cfg.get("data", {}) or {}).get("frequency") or "bars")
+        return steps / bars, bars, f"walk_forward.train_bars @ {freq}"
     # 24/7 calendar is only certain for crypto; session-bound assets need a
     # calendar we don't model here, so skip rather than guess.
     feats = cfg.get("features", {}) or {}

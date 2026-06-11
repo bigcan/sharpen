@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.validate_config import (  # noqa: E402
     ValidationResult,
+    _training_budget_multiplicity,
     check_data_manifest,
     check_hpo,
     check_max_leverage_bounds,
@@ -23,6 +24,7 @@ from scripts.validate_config import (  # noqa: E402
 )
 
 ALLOCATOR_CFG = ROOT / "configs" / "cross_asset_momentum.yaml"
+ALLOCATOR_RETRY_CFG = ROOT / "configs" / "cross_asset_momentum_retry.yaml"
 
 
 def _hpo_cfg(env_type, objective):
@@ -111,14 +113,64 @@ def test_yfinance_source_requires_frequency():
 
 
 # --------------------------------------------------------------------------- #
-# End-to-end: the shipped config validates at both gated stages
+# Training-budget multiplicity (Protocol v2.5.1 §3.5) — allocator branch.
+# The gate used to return None for non-crypto, so the 500k/1260-bar = 397x
+# Stage-1 overfit slipped validation (S553-cont-34). These are the regression
+# tests that keep that hole closed.
 # --------------------------------------------------------------------------- #
 
-def test_shipped_allocator_config_passes_hpo():
+def _alloc_mult_cfg(train_bars=1260):
+    return {
+        "env": {"type": "multi_asset_allocator"},
+        "walk_forward": {"train_bars": train_bars},
+        "data": {"frequency": "1d"},
+    }
+
+
+def test_allocator_multiplicity_uses_walk_forward_train_bars():
+    m = _training_budget_multiplicity(_alloc_mult_cfg(), 500000)
+    assert m is not None
+    mult, bars, _basis = m
+    assert bars == 1260
+    assert abs(mult - 500000 / 1260) < 1e-9
+
+
+def test_allocator_multiplicity_missing_train_bars_skips():
+    cfg = {"env": {"type": "multi_asset_allocator"}, "walk_forward": {}}
+    assert _training_budget_multiplicity(cfg, 500000) is None
+
+
+def test_non_crypto_non_allocator_still_skips():
+    """Session-bound assets without a modeled calendar stay skipped (no false mult)."""
+    cfg = {"env": {"type": "v7"}, "features": {"asset_class": "gold"}}
+    assert _training_budget_multiplicity(cfg, 500000) is None
+
+
+def test_original_allocator_config_fails_hpo_multiplicity():
+    """The exact config that slipped (500k steps / 1260 bars = 397x) must now
+    FAIL the 50x REJECT cliff at --stage hpo."""
     r = validate(ALLOCATOR_CFG, "hpo")
+    assert any("REJECT cliff" in f for f in r.failures), r.failures
+
+
+def test_retry_allocator_config_passes_hpo_in_band():
+    """The anti-overfit retry (50k steps = ~39.7x) sits inside [15,40] and passes."""
+    r = validate(ALLOCATOR_RETRY_CFG, "hpo")
+    assert not r.failures, r.failures
+    assert any("budget multiplicity" in p and "productive band" in p for p in r.passed), r.passed
+
+
+# --------------------------------------------------------------------------- #
+# End-to-end: the active (retry) config validates at both gated stages
+# --------------------------------------------------------------------------- #
+
+def test_retry_allocator_config_passes_wf():
+    r = validate(ALLOCATOR_RETRY_CFG, "wf")
     assert not r.failures, r.failures
 
 
 def test_shipped_allocator_config_passes_wf():
+    """wf stage does not re-check the per-trial HPO budget; the original config
+    remains valid for WF-stage replay."""
     r = validate(ALLOCATOR_CFG, "wf")
     assert not r.failures, r.failures
