@@ -179,3 +179,40 @@ paradigm would be churn, not rigor.
 `fable_data_audit_etf.py` / `fable_data_audit_btc.py` →
 `fable_tsmom_repro.py` → `fable_canary_reprice.py` →
 `fable_untouched_universe.py` → JSON/CSV in `results/fable_verdict/`.
+
+---
+
+## Addendum (same day) — full strategy coverage map
+
+Asked: "have you reviewed all the strategies?" Answer: every strategy is now
+either independently re-derived, voided by a verified contamination chain, or
+explicitly classified as not re-derived (with why that does not move the
+verdict). Breadth pass: `fable_reverify_all.py` (+ data-trust addendum).
+
+| Strategy / claim | Project's verdict | Fable treatment | Outcome |
+|---|---|---|---|
+| gmgp1-btc clean canary | FAIL (the V7 kill) | full clean-room re-pricing, 20 seed-folds | **KILL CONFIRMED** (median PF 0.904; frictionless ≤1.07) |
+| sg1-btc de-leaked X1 WF | FAIL (shelved) | full clean-room re-pricing, 8 folds × 3 seeds, 100% machine-exact fit | **KILL CONFIRMED** (median 0.982; 0/24 at deploy bar) |
+| gmgp1-gold de-leaked WF | FAIL, "real-but-decaying" | re-priced on its true dataset + bar-level data forensics | accounting honest, **dataset corrupt** (stale +5% prints inside the best fold, ~21% of its P&L) → "real edge" claim VOID; retirement stands |
+| gmgp1-xauusd | live-paper halted; R0 NO-GO | not re-derived | moot: promotion was pre-de-leak (contaminated chain); fleet halted; do not redeploy without a de-leaked re-test |
+| sg1-eurusd | Stage-3 PROMOTE (pre-de-leak), awaiting soak | not re-derived | **PROMOTE VOID by contamination** (leaky shared handler, never re-tested) — explicitly must NOT deploy on the existing verdict |
+| TSMOM linear core | GO (the pivot) | full clean-room re-derivation + pre-registered untouched-universe test | **CONFIRMED**, honest band net Sharpe 0.4–0.6 |
+| Options-VRP short-straddle | cleared-for-paper (conditional) | recompute scripts re-ran clean; NOT clean-roomed | MEDIUM trust; Fable re-pricing is a queued pre-capital gate |
+| Funding-Arb | regime-fragile, MED tier, dead | history review only | stays dead; nothing here feeds the GO path |
+| Sync-1H crypto | pilot failure, closed | history review only | stays dead |
+| Market-Making LOB | retired S442 (venue-structural) | history review only | stays retired |
+| AlphaSeek HFT/v3 | frictionless artifact (PF 0.07–0.27 real) | history review only | stays dead |
+| CMGP1 / crypto multiscale | X2 fix NOT applied to `MultiScaleCryptoHandler` (P2-01) | noted | blocker stands: no CMGP1 verdict until fixed |
+
+Three doctrine updates from the breadth pass:
+
+1. **The +31-bar trajectory stamp shift** is universal across eval exports
+   (3-min and 15-min alike). Anyone re-pricing trajectories must use the
+   documented convention (`fable_reverify_all.py::discover`).
+2. **Gold work is data-blocked, not model-blocked.** Before ANY gold revival:
+   re-collect from a verifiable source, add an inter-bar continuity / stale-print
+   detector to DATA-CLEAN (flat-OHLC bars currently pass), and external-cross-check
+   extreme days. The corrupted file also voids the "directional RL almost worked
+   on gold" narrative — do not let it justify revival spend.
+3. **No strategy promoted on pre-de-leak verdicts may deploy** (sg1-eurusd is
+   the live instance of this rule: 8/8 green folds, all on the leaky handler).

@@ -127,3 +127,61 @@ not corrupted data and not a broken eval. Both the project's lead positive claim
 and its lead negative claim survive independent re-derivation — which means
 conclusions drawn from here can be trusted *if and only if* they go through the
 same clean-room discipline.
+
+---
+
+## Addendum (same day) — breadth pass over the remaining strategy verdicts
+
+`fable_reverify_all.py` extended the re-pricing to the two remaining decisive
+walk-forward verdicts with artifacts on disk.
+
+### sg1-btc de-leaked cost-corrected X1 WF — **KILL REPRODUCES**
+
+Certified at `wallclock +31 bars` (93 min at 3-min bars), **100.0% of 3,068
+single-bar no-trade rows machine-exact** (median residual 5e-17). All 8 folds ×
+3 seeds re-priced: recorded median solo PF 0.9792 vs mine 0.9817; frictionless
+0.9923; **0/24 reach the 1.1 deploy bar in either accounting**. Second
+directional kill independently confirmed. (The +31-bar stamp shift recurs in
+every dataset — it is a trajectory-writer offset in *bars*, not a timezone;
+the canary's "UTC+8" reading was the 15-min special case of the same shift.)
+
+### gmgp1-gold de-leaked X2 WF — accounting HONEST, **dataset CORRUPT**
+
+Three findings, in order of discovery:
+
+1. **Config↔data provenance gap.** The WF config names
+   `data/cme/gc_2025_lob1_1min_stitched.parquet`, but no alignment against that
+   file (or any 1-min sibling) explains the trajectories — it is missing ~22-35%
+   of trading minutes *including event minutes* (e.g. 13:30 UTC data releases).
+   The env's actual mark-to-market series is
+   `data/cme/gold_2025_2026q1_15min_stitched.parquet`, certified at `seq +31`
+   with **99.7% machine-exact rows** (p95 residual 1.3e-16).
+2. **The recorded numbers are honest — in fact conservative — on that dataset.**
+   My reconstruction (fee-only) gives slightly *higher* PFs than recorded
+   (recorded net includes spread/slippage I don't model). The
+   "real-but-decaying" shape replicates: folds 0-1 profitable, folds 2-3
+   breakeven, in both accountings.
+3. **But the dataset itself contains confirmed corrupt segments.** Friday
+   2025-08-15 21:00 prints a flat-OHLC bar at **3521.4 (+5.0% in one bar)**
+   followed by a weekend and reversion to ~3360 — Yahoo GC=F shows no such move
+   (3336 that day); a second flat-OHLC stale print sits Sunday 12:00. The
+   recorded P&L of the BEST fold accrues **$5,053 of its $24,062 (~21%) across
+   exactly that window**. A second suspect: stitched +4.4% on 2025-09-30 vs
+   Yahoo +0.5%. October's violent moves DO verify externally (real). →
+   **Gold's "real edge in favorable regimes" claim is void pending clean data**;
+   the decay-to-breakeven conclusion and the non-deployment verdict stand.
+4. **Cleaner blind spot (root cause).** `clean_ohlcv` validates *intra-bar*
+   consistency only; a flat-OHLC stale print (O=H=L=C) passes all its checks,
+   and there is no inter-bar continuity check to catch a +5% jump that exactly
+   reverts. Any future data prep needs a jump-and-revert / stale-quote detector
+   and an external cross-source check on extreme days.
+
+### Trust-map updates
+
+| Asset | Trust | Change |
+|---|---|---|
+| sg1-btc de-leak FAIL verdict | **HIGH** | re-priced, kill confirmed |
+| `gold_2025_2026q1_15min_stitched.parquet` | **VOID for eval** | confirmed stale-print corruption inside profitable windows |
+| gmgp1-gold "real-but-decaying" | **UNVERIFIED / likely inflated** | profits partly ride corrupt bars; do not cite as "directional RL almost works" |
+| gmgp1-gold eval accounting | HIGH | recorded ≤ independent reconstruction (conservative) |
+| sg1-eurusd Stage-3 PROMOTE | **VOID by contamination** | obtained on the leaky shared handler, never re-tested de-leaked — must not deploy |
