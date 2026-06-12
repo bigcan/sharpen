@@ -106,6 +106,38 @@ Scripts: `scripts/research/r1_illiquidity_fetch.py`, `scripts/research/r1_illiqu
 
 ---
 
-## 11. VERDICT
+## 11. VERDICT (run 2026-06-12, same session as pre-registration) — **WEAK-GO: structure without capture**
 
-*(to be appended after the run — gates above are frozen as of pre-registration commit)*
+Computed programmatically from the frozen gates: `results/r1_illiquidity/verdict.json`. 23/23 assets fetched, 23/23 QC-CLEAN (no gold-style stale-print corruption anywhere; zero UNTESTABLE). 92 primary cells (23 assets × 2 scales × 2 models). Tripwires: TW-1 leak-shift IC = **1.00** (detector saturates on planted look-ahead), TW-2 shuffled nulls ≤ |0.007|, TW-3 BTC control IC +0.007 ≤ +0.01 (consistent with canary IC < 0), TW-4 causality asserts passed on every gather.
+
+**Gate A (structure exists): PASS — 20/92 cells, and the composition is the operator's theory in miniature.**
+Every single Gate-A passer is an exotic-FX or T2/T3 mid/small-cap crypto cell; zero passers among the T0 controls (BTC, ETH) or any major-FX/CFD control:
+
+| Asset | Cells passing | Best OOS IC (q_FDR) | Best gross PF |
+|---|---|---|---|
+| USD_TRY | 4/4 | 0.073 (4e-12) | **1.86** (3m gbm) |
+| USD_ZAR | 4/4 | 0.029 (9e-6) | 1.11 |
+| NEARUSDT (T2) | 3/4 | 0.028 (~0) | 1.06 |
+| FILUSDT (T2) | 3/4 | 0.023 (6e-4) | 1.04 |
+| GALAUSDT (T3) | 2/4 | 0.070 (~0) | 1.24 |
+| ALGOUSDT (T3) | 2/4 | 0.040 (~0) | 1.09 |
+| SANDUSDT (T3), SOLUSDT (T1) | 1/4 each | 0.018 / 0.016 | 1.03 / 1.06 |
+
+**Gate C (survives costs): FAIL — 0/92 cells. Not marginal: catastrophic.** Best net PF anywhere in the table = 0.826; best among Gate-A passers = 0.587; **zero net-positive folds out of 552 fold-results**, including at the half-cost sensitivity (best net_half = 0.77). USD_TRY — the largest gross edge found (PF 1.66–1.86 frictionless) — nets **0.007–0.021** at its 30 bp one-way cost. The same illiquidity that creates the signal prices its capture away for a taker.
+
+**Gate B (formal dose-response): FAIL** — best crypto-venue Spearman(log liquidity, IC) = −0.32 (15m gbm), permutation p = 0.12 (n = 16, underpowered; the empirical relationship is threshold-like — controls dead, tail alive — rather than monotone). The qualitative tiering above is strong, but the pre-registered monotone test did not clear.
+
+**Verdict rule applied (locked §9): A ≠ ∅ ∧ C = ∅ → WEAK-GO (structure without capture).** The inefficiency mechanism the operator hypothesized is REAL and concentrated exactly where the theory says — but it cannot rescue SG-1/GMGP1: intraday taker-style capture fails at every point on a ~880× liquidity spectrum, at both timeframes, in all 92 cells. No new intraday RL workstream is justified.
+
+**Exploratory (cannot flip verdict, informs routing):** the strongest signals are *slow* — USD_TRY H=4 IC (0.114 at 15m base = 1-hour horizon) exceeds its H=1 IC; ZAR likewise. Edge-per-trade at the strongest cell is still ~10× below its spread at intraday holding. The horizon at which these assets' edge clears cost is multi-day — i.e., the cross-sectional/TSMOM low-turnover regime, not SG/GMGP's.
+
+**Actionable routing (consistent with the locked WEAK-GO definition):**
+1. Extend the Phase-1 linear TSMOM/carry core universe with less-efficient sleeves — EM-FX (TRY/ZAR/MXN forwards or CFDs incl. carry) and mid-cap crypto momentum (NEAR/FIL/GALA/ALGO tier) — capturing the same premium at weekly+ turnover where 10–30 bp amortizes.
+2. The only intraday route to this structure is maker-side (it is, mechanically, the liquidity premium) — that is the retired MM/LOB workstream class, would require LOB data for these venues, and is NOT reopened by this result.
+3. SG-1 / GMGP1 remain shelved; asset choice is now eliminated as the rescue variable (this probe), alongside code quality (canary) and regime gating (R0).
+
+**Caveats / errata:**
+- GBM feature view implemented as 54 unique dims; spec §5's "69" double-counted the 15 selected last-features (same information content). Recorded here per pre-registration discipline.
+- For OANDA assets, `harsh` ≡ `double` cost by construction (2× one-way).
+- USD_TRY/ZAR gross edges may be partially indicative-quote artifacts (OANDA mid on sparse ticks; stale-quote unwind is itself predictable). Unverifiable without tick/spread data; immaterial to the verdict (net-dead either way) — but do NOT cite "TRY gross PF 1.86" as harvestable.
+- Cost assumptions for T2/T3 (12.5/20 bp slippage) and exotics are estimates; the 0/92 result is robust to halving them (still 0 passers).
