@@ -29,7 +29,6 @@ momentum backtest). A same-day-execution variant is the leak tripwire.
 """
 from __future__ import annotations
 
-import io
 import json
 import sys
 import urllib.request
@@ -63,57 +62,60 @@ CARRY_TICKERS = sorted(set(list(FX_ETF) + list(RATES_ETF) + EQUITY_ETF))
 
 # US Treasury curve via Yahoo (reachable where FRED is blocked)
 US_CURVE_YH = {"3m": "^IRX", "5y": "^FVX", "10y": "^TNX", "30y": "^TYX"}
-# FX foreign 3M short-rate candidates (FRED OECD interbank) — used only if FRED reachable
-FRED_FX = {
-    "EUR": ["IR3TIB01EZM156N", "ECBDFR"], "JPY": ["IR3TIB01JPM156N", "IRSTCI01JPM156N"],
-    "GBP": ["IR3TIB01GBM156N", "IUDSOIA"], "AUD": ["IR3TIB01AUM156N", "IRSTCB01AUM156N"],
-    "CHF": ["IR3TIB01CHM156N", "IRSTCI01CHM156N"], "CAD": ["IR3TIB01CAM156N", "IRSTCB01CAM156N"],
-}
-_fred_resolved: dict[str, str] = {}
+# FX foreign 3-month interbank short rates via DBnomics OECD MEI (FRED is blocked from
+# this workstation; DBnomics host IS reachable). Path OECD/MEI/{LOC}.IR3TIB01.ST.M
+# (monthly; OECD MEI is ARCHIVED so it ends ~2024-01 -> FX carry runs 2006->2024 and
+# fades out post-2024 by the spec's no-stale-fill rule).
+OECD_LOC = {"EUR": "EA19", "JPY": "JPN", "GBP": "GBR",
+            "AUD": "AUS", "CHF": "CHE", "CAD": "CAN"}
+FX_CACHE = OUT / "fx_rates.parquet"
+_fred_resolved: dict[str, str] = {}   # ccy -> resolved DBnomics series id + window (logged)
 
 
 # ============================ data fetch ============================
-def fred_reachable() -> bool:
-    try:
-        req = urllib.request.Request(
-            "https://fred.stlouisfed.org/graph/fredgraph.csv?id=DGS10",
-            headers={"User-Agent": "Mozilla/5.0"})
-        urllib.request.urlopen(req, timeout=8).read()
-        return True
-    except Exception:
-        return False
-
-
-def _fred_one(series: str) -> pd.Series | None:
-    url = f"https://fred.stlouisfed.org/graph/fredgraph.csv?id={series}"
+def _dbnomics_obs(sid: str) -> pd.Series | None:
+    url = f"https://api.db.nomics.world/v22/series?series_ids={sid}&observations=1"
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-        raw = urllib.request.urlopen(req, timeout=12).read().decode()
-        df = pd.read_csv(io.StringIO(raw))
-        dc, vc = df.columns[0], df.columns[1]
-        df[dc] = pd.to_datetime(df[dc], errors="coerce")
-        df[vc] = pd.to_numeric(df[vc], errors="coerce")
-        df = df.dropna()
-        if len(df) < 24:
-            return None
-        s = df.set_index(dc)[vc].sort_index()
-        med = pd.Series(s.index).diff().dt.days.median()
-        if med and med > 20:               # monthly -> 1-month publication lag (causal)
-            s = s.shift(1)
-        didx = pd.date_range(s.index.min(), pd.Timestamp(END), freq="D")
-        return s.reindex(didx).ffill()
+        j = json.loads(urllib.request.urlopen(req, timeout=45).read())
     except Exception:
         return None
+    docs = j.get("series", {}).get("docs", [])
+    if not docs:
+        return None
+    d = docs[0]
+    per, val = d.get("period", []), d.get("value", [])
+    if not per:
+        return None
+    s = pd.to_numeric(pd.Series(val, index=pd.to_datetime(per)),
+                      errors="coerce").dropna().sort_index()
+    return s if len(s) >= 24 else None
 
 
-def get_fx_rate(ccy: str) -> pd.Series | None:
-    for sid in FRED_FX[ccy]:
-        s = _fred_one(sid)
+def get_fx_rates_dbnomics() -> dict[str, pd.Series]:
+    """G10 3-month interbank rates from DBnomics OECD MEI, daily-ffilled within their
+    own range (no extension past last obs), 1-month publication lag (causal)."""
+    if FX_CACHE.exists():
+        df = pd.read_parquet(FX_CACHE)
+        for ccy, loc in OECD_LOC.items():
+            c = df[ccy].dropna() if ccy in df.columns else None
+            _fred_resolved[ccy] = (f"OECD/MEI/{loc}.IR3TIB01.ST.M (cached)"
+                                   if c is not None and len(c) else "NONE")
+        return {c: df[c].dropna() for c in df.columns}
+    out = {}
+    for ccy, loc in OECD_LOC.items():
+        s = _dbnomics_obs(f"OECD/MEI/{loc}.IR3TIB01.ST.M")
         if s is not None:
-            _fred_resolved[ccy] = sid
-            return s
-    _fred_resolved[ccy] = "NONE"
-    return None
+            s = s.shift(1).dropna()                    # 1-month publication lag (causal)
+            didx = pd.date_range(s.index.min(), s.index.max(), freq="D")
+            out[ccy] = s.reindex(didx).ffill()
+            _fred_resolved[ccy] = (f"OECD/MEI/{loc}.IR3TIB01.ST.M "
+                                   f"[{s.index.min().date()}->{s.index.max().date()}]")
+        else:
+            _fred_resolved[ccy] = "NONE"
+    if out:
+        pd.DataFrame(out).to_parquet(FX_CACHE)
+    return out
 
 
 def get_yahoo_curve() -> dict[str, pd.Series]:
@@ -180,6 +182,17 @@ def _asof(s, dt):
     return float(sub.iloc[-1]) if len(sub) else np.nan
 
 
+def _asof_fresh(s, dt, max_stale=75):
+    """as-of value only if the latest obs is within max_stale days of dt (else NaN).
+    Prevents stale-rate fill past the archived FX data end (spec: no stale fill)."""
+    if s is None:
+        return np.nan
+    sub = s.loc[:dt]
+    if len(sub) == 0 or (dt - sub.index[-1]).days > max_stale:
+        return np.nan
+    return float(sub.iloc[-1])
+
+
 def _xs(row):
     r = row.dropna()
     if len(r) < 2 or r.std() == 0:
@@ -192,7 +205,7 @@ def fx_carry_signal(rebal, fx_rates, us3m):
     sig = _sig(rebal, list(FX_ETF))
     for dt in rebal:
         usd = _asof(us3m, dt)
-        diffs = {etf: (_asof(fx_rates.get(ccy), dt) - usd) for etf, ccy in FX_ETF.items()}
+        diffs = {etf: (_asof_fresh(fx_rates.get(ccy), dt) - usd) for etf, ccy in FX_ETF.items()}
         sig.loc[dt] = _xs(pd.Series(diffs))
     return sig.fillna(0.0)
 
@@ -276,10 +289,10 @@ def main():
     dy = get_div_yields(close)
     us3m = curve.get("3m")
 
-    fred_ok = fred_reachable()
-    print(f"FRED reachable: {fred_ok}")
-    fx_rates = {ccy: get_fx_rate(ccy) for ccy in set(FX_ETF.values())} if fred_ok else {}
-    fx_available = fred_ok and any(v is not None for v in fx_rates.values())
+    fx_rates = get_fx_rates_dbnomics()
+    n_fx = sum(1 for v in fx_rates.values() if v is not None and len(v))
+    fx_available = n_fx >= 4
+    print(f"FX rates resolved: {n_fx}/6 currencies (DBnomics OECD MEI)")
 
     rebal = mom.last_trading_of_period(close.index, "monthly")
     rebal = rebal[rebal >= close.index[max(mom.LOOKBACKS) + mom.SKIP + VOL_WIN]]
@@ -292,10 +305,15 @@ def main():
     classes["equity"] = mom.vol_scaled_weights(
         equity_carry_signal(rebal, dy, us3m), rets[EQUITY_ETF], rebal
     ).reindex(columns=close.columns).fillna(0.0)
-    if fx_available:
+    fx_present = [t for t in FX_ETF if t in close.columns]
+    if fx_available and len(fx_present) >= 4:
+        fxsig = fx_carry_signal(rebal, fx_rates, us3m)[fx_present]
         classes["fx"] = mom.vol_scaled_weights(
-            fx_carry_signal(rebal, fx_rates, us3m), rets[list(FX_ETF)], rebal
+            fxsig, rets[fx_present], rebal
         ).reindex(columns=close.columns).fillna(0.0)
+        fx_available = True
+    else:
+        fx_available = False
     unavailable = [] if fx_available else ["fx"]
 
     per_class = {c: mom.run_book(f"carry_{c}", w, rets, bench) for c, w in classes.items()}
@@ -322,11 +340,35 @@ def main():
     sh_carry, sh_mom = mom.sharpe(cn), mom.sharpe(mn)
     sh_comb, dd_comb, dd_mom = mom.sharpe(combined), mom.max_dd(combined), mom.max_dd(mom_only)
 
+    # clean 3-class read over the FX-live window (OECD MEI archived ~2024 -> FX fades after)
+    fx_end = max((s.index.max() for s in fx_rates.values() if s is not None and len(s)),
+                 default=None)
+    add_fxwin = None
+    if fx_available and fx_end is not None:
+        fxw = common[common <= fx_end]
+        if len(fxw) > 250:
+            cnw, mnw = carry_net.reindex(fxw), mom_net.reindex(fxw)
+            combw = 0.5 * scale10(cnw) + 0.5 * scale10(mnw)
+            add_fxwin = {"window": [str(fxw.min().date()), str(fxw.max().date())],
+                         "corr_carry_momentum": round(float(cnw.corr(mnw)), 3),
+                         "pooled_carry_sharpe": round(mom.sharpe(cnw), 3),
+                         "sharpe_combined": round(mom.sharpe(combw), 3),
+                         "maxdd_combined": round(mom.max_dd(combw), 4),
+                         "maxdd_momentum_only": round(mom.max_dd(scale10(mnw)), 4)}
+
     # ---- Gate 1 ----
     net_sh = pooled["by_cost"]["standard_2bps"]["sharpe"]
     fric_sh = pooled["by_cost"]["frictionless"]["sharpe"]
     gap = round(fric_sh - net_sh, 3)
-    cls_sh = {c: per_class[c]["by_cost"]["standard_2bps"]["sharpe"] for c in classes}
+    # per-class net Sharpe over each class's VALID window (FX = its active window pre-2024,
+    # since post-2024 zero-weight days dilute the full-series Sharpe) — spec: score per
+    # class over its valid-data window.
+    cls_sh = {}
+    for c in classes:
+        if c == "fx" and fx_end is not None:
+            cls_sh[c] = round(mom.sharpe(per_class[c]["_net_standard"].loc[:fx_end]), 3)
+        else:
+            cls_sh[c] = per_class[c]["by_cost"]["standard_2bps"]["sharpe"]
     classes_pos = sum(1 for s in cls_sh.values() if s > 0)
     g1 = (net_sh >= 0.40) and (classes_pos >= 3) and (gap <= 0.15)
 
@@ -361,7 +403,10 @@ def main():
         "decision": decision,
         "data_note": ("FRED unreachable from this workstation -> FX carry NOT run; "
                       "rates+equity scored via Yahoo curve+dividends. FX is the gating follow-up."
-                      if unavailable else "all 3 classes scored"),
+                      if unavailable else
+                      "3 classes scored; FX via DBnomics OECD MEI (archived ~2024-01, fades out "
+                      "post-2024 by no-stale-fill rule) -> see gate2.over_fx_window for the clean "
+                      "2006-2024 3-class read; rates+equity run to 2026."),
         "classes_scored": list(classes), "classes_unavailable": unavailable,
         "leak_tripwire_ok": leak_ok,
         "gate1_standalone": {
@@ -373,14 +418,16 @@ def main():
             "sharpe_carry": round(sh_carry, 3), "sharpe_momentum": round(sh_mom, 3),
             "sharpe_combined_riskparity": round(sh_comb, 3),
             "maxdd_combined": round(dd_comb, 4), "maxdd_momentum_only": round(dd_mom, 4),
-            "rule": "corr<0.30 AND combined SR>=0.65 AND combined DD<=momentum-alone DD"},
+            "rule": "corr<0.30 AND combined SR>=0.65 AND combined DD<=momentum-alone DD",
+            "over_fx_window": add_fxwin},
         "gate3_tail_persistence": {
             "carry_skew": round(sk, 3), "carry_cvar95_pct": cv,
             "skew_flag_short_vol": bool(skew_flag), "subperiod_sharpes": subp,
             "subperiods_positive": subp_pos},
         "leak": {"causal_sharpe": round(causal, 3), "lookahead_sharpe": round(look, 3),
                  "gap": leak_gap},
-        "fred_reachable": fred_ok, "fred_resolved": _fred_resolved,
+        "fx_source": "DBnomics OECD MEI IR3TIB01 (FRED blocked from workstation)",
+        "fx_currencies_resolved": n_fx, "fx_rate_series": _fred_resolved,
         "carry_window": [str(carry_net.index.min().date()), str(carry_net.index.max().date())],
         "per_class_turnover": {c: per_class[c]["turnover_ann"] for c in classes},
     }
