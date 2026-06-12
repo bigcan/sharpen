@@ -28,6 +28,7 @@ Run:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import math
@@ -35,11 +36,13 @@ from dataclasses import dataclass, asdict
 from pathlib import Path
 
 import numpy as np
+import yaml
 
 from finrl_pro_ds.crypto.data import deribit_options_loader as dol
 from finrl_pro_ds.crypto.data import options_array_builder as oab
 from finrl_pro_ds.crypto.options_pricing import (
     bs_self_test as _bs_selftest,
+    ncdf,
     straddle_delta,
     straddle_price,
     straddle_vega,
@@ -50,15 +53,37 @@ logger = logging.getLogger(__name__)
 RESULTS_DIR = Path("results/options_vrp")
 ANN = 365.0  # crypto 24/7
 
-# Pre-registered gate thresholds (mirror options_vol_harvest.gates.yaml: phase1_linear)
-GATES = {
-    "min_net_sharpe": 0.50,
-    "min_net_pf": 1.10,
-    "require_multi_subperiod": True,      # not all edge from one calendar year
-    "max_recent_oos_drawdown": 0.40,      # hard tail kill
-    "min_recent_oos_sharpe": 0.0,         # recent 12m must not be losing (regime-decay guard)
-    "cost_gap_caution": 0.15,             # reported caution only
-}
+# Gate thresholds live in configs/options_vol_harvest.gates.yaml — NEVER hardcoded
+# here (CLAUDE.md invariant). The prior module-level dict *mirrored* but did not
+# *read* the yaml, so a yaml edit silently never reached the gate (V1-11/V5-03).
+# Resolved relative to this script so the working directory does not matter.
+GATES_FILE = Path(__file__).resolve().parents[2] / "configs" / "options_vol_harvest.gates.yaml"
+
+
+def load_gates(gates_file: Path | str = GATES_FILE) -> dict:
+    """Read the pre-registered kill thresholds from the gates overlay: the
+    ``phase1_linear`` criteria + the short-vol ``tail`` kill-switches (the latter
+    were declared-but-not-wired before this — V5-03). The ``.get`` defaults are a
+    last-resort for a key missing from the yaml, NOT an alternate source of truth."""
+    g = yaml.safe_load(Path(gates_file).read_text(encoding="utf-8")).get("gates", {})
+    p1 = g.get("phase1_linear", {})
+    tail = g.get("tail", {})
+    return {
+        "min_net_sharpe": float(p1.get("min_net_sharpe", 0.50)),
+        "min_net_pf": float(p1.get("min_net_pf", 1.10)),
+        "require_multi_subperiod": bool(p1.get("require_multi_subperiod", True)),
+        "max_recent_oos_drawdown": float(p1.get("max_recent_oos_drawdown", 0.40)),
+        "min_recent_oos_sharpe": float(p1.get("min_recent_oos_sharpe", 0.0)),
+        # short-vol tail kill-switches — now WIRED against the linear core (V5-03)
+        "max_worst_window_dd_pct": float(tail.get("max_worst_window_dd_pct", 25.0)),
+        "max_net_vega_per_100k": float(tail.get("max_net_vega_per_100k", 50000.0)),
+        "cvar95_floor_pct": float(tail.get("cvar95_floor_pct", -8.0)),
+        # reported caution only (not a pre-registered kill) — falsification-local
+        "cost_gap_caution": 0.15,
+    }
+
+
+GATES = load_gates()
 
 
 # ---------------------------------------------------------------------------
@@ -118,6 +143,7 @@ def simulate_asset(spot, iv, funding, cfg: SimConfig):
     days_held = 0
     tau_step = 1.0 / ANN
     gross_premium_history = []
+    vega_pct_history = []   # |net vega| / equity per held bar (short-vol tail metric)
 
     def open_straddle(t):
         nonlocal n, K, tau, equity, q_prev
@@ -131,17 +157,29 @@ def simulate_asset(spot, iv, funding, cfg: SimConfig):
         gross_premium_history.append(prem_total)
         # opening costs (we RECEIVE premium; pay fee + half-spread)
         cost = _option_fees(n, S, prem_total, cfg) + _spread_cost(n, S, sigma, tau, cfg)
+        # perp-hedge establishment / roll-jump taker fee: trade the hedge from its
+        # prior level (q_prev — leftover hedge from the just-closed straddle, or 0 at
+        # the initial open) to the new straddle's delta hedge. The in-loop rehedge fee
+        # only covers intra-hold delta moves, so without this the establishment leg of
+        # every roll was free (the omitted ~$1.1k/5.2y fee; V2-05/V4-01).
+        q_new = n * straddle_delta(S, K, sigma, tau)
+        if not cfg.frictionless:
+            cost += cfg.perp_taker_fee * abs(q_new - q_prev) * S
         equity -= cost
         daily_pnl[t] -= cost
         # set initial hedge (long perp = +straddle_delta to neutralise short straddle)
-        q_prev = n * straddle_delta(S, K, sigma, tau)
+        q_prev = q_new
 
     def close_straddle(t):
         nonlocal n, equity
         if n <= 0:
             return
         S, sigma = spot[t], iv[t]
-        V = straddle_price(S, K, max(tau, tau_step), sigma if False else sigma)
+        # FIX (V3-03): args were transposed — straddle_price(S, K, max(tau, tau_step),
+        # sigma) passed tau into the sigma slot and sigma into the tau slot (plus a dead
+        # `sigma if False else sigma` ternary). Inert at 21d (this V only feeds the
+        # close-fee premium cap, which never binds), but a latent unit landmine.
+        V = straddle_price(S, K, sigma, max(tau, tau_step))
         cost = _option_fees(n, S, n * V, cfg) + _spread_cost(n, S, sigma, max(tau, tau_step), cfg)
         equity -= cost
         daily_pnl[t] -= cost
@@ -153,7 +191,8 @@ def simulate_asset(spot, iv, funding, cfg: SimConfig):
         t0 += 1
     if t0 >= T - 2:
         return {"daily_pnl": daily_pnl, "eq_curve": eq_curve, "t0": t0,
-                "gross_premium": np.array(gross_premium_history)}
+                "gross_premium": np.array(gross_premium_history),
+                "vega_pct": np.array(vega_pct_history)}
 
     open_straddle(t0)
     days_held = 0
@@ -168,6 +207,9 @@ def simulate_asset(spot, iv, funding, cfg: SimConfig):
         q_t = n * straddle_delta(S_t, K, sig_t, max(tau, tau_step))
         # rehedge cost on the change in perp position
         rehedge_cost = 0.0 if cfg.frictionless else cfg.perp_taker_fee * abs(q_t - q_prev) * S_t
+        # net-vega / equity at this bar (short-vol tail exposure; V5-03 gate metric)
+        vega_pct_history.append(
+            abs(n * straddle_vega(S_t, K, sig_t, max(tau, tau_step))) / max(equity, 1e-6))
 
         # 2) advance one day: option MTM (short => gain when value falls), hedge PnL, funding
         V_t = straddle_price(S_t, K, sig_t, max(tau, tau_step))
@@ -194,7 +236,8 @@ def simulate_asset(spot, iv, funding, cfg: SimConfig):
             eq_curve[t + 1] = equity
 
     return {"daily_pnl": daily_pnl, "eq_curve": eq_curve, "t0": t0,
-            "gross_premium": np.array(gross_premium_history)}
+            "gross_premium": np.array(gross_premium_history),
+            "vega_pct": np.array(vega_pct_history)}
 
 
 # ---------------------------------------------------------------------------
@@ -226,6 +269,101 @@ def _returns_from_pnl(daily_pnl, eq_curve):
     return daily_pnl / prev
 
 
+# ---------------------------------------------------------------------------
+# Risk / tail / multiplicity stats (V6 — short-vol left tail; the honest-band caveat).
+# A short-vol book has negative skew, so Sharpe overstates it — report Sortino, CVaR,
+# the block-bootstrap CI and the multiplicity-deflated Sharpe alongside the headline.
+# ---------------------------------------------------------------------------
+def _block_bootstrap_sharpe_ci(daily_ret, block=21, n_boot=10_000, seed=7):
+    """Circular block-bootstrap CI95 of the annualized Sharpe (block preserves the
+    short-vol autocorrelation/clustering a naive iid bootstrap would destroy)."""
+    d = daily_ret[np.isfinite(daily_ret)]
+    if len(d) < block + 2:
+        return None
+    rng = np.random.default_rng(seed)
+    Tn = len(d)
+    sh = np.empty(n_boot)
+    base = np.arange(block)
+    for b in range(n_boot):
+        idx = []
+        while len(idx) < Tn:
+            s0 = int(rng.integers(0, Tn))
+            idx.extend(((s0 + base) % Tn).tolist())
+        x = d[np.array(idx[:Tn])]
+        sd = x.std(ddof=1)
+        sh[b] = x.mean() / sd * math.sqrt(ANN) if sd > 0 else 0.0
+    return {"ci95_low": float(np.quantile(sh, 0.025)),
+            "ci95_high": float(np.quantile(sh, 0.975)),
+            "p_sharpe_lt_0_5": float((sh < 0.5).mean()),
+            "p_sharpe_lt_0": float((sh < 0).mean())}
+
+
+def _risk_block(daily_ret, vega_pct=None, *, bootstrap=False):
+    """Distribution / tail stats for a daily-return series (+ optional vega exposure)."""
+    d = daily_ret[np.isfinite(daily_ret)]
+    out = {"n_obs": int(len(d))}
+    if len(d) >= 3:
+        mu, sd = float(d.mean()), float(d.std(ddof=1))
+        out["mean_daily"] = mu
+        out["std_daily"] = sd
+        out["skew"] = float(((d - mu) ** 3).mean() / sd ** 3) if sd > 0 else 0.0
+        out["kurtosis"] = float(((d - mu) ** 4).mean() / sd ** 4) if sd > 0 else 0.0
+        downside = d[d < 0]
+        out["sortino"] = (float(mu / downside.std(ddof=1) * math.sqrt(ANN))
+                          if len(downside) > 2 and downside.std(ddof=1) > 0 else float("nan"))
+        v95 = float(np.quantile(d, 0.05))
+        out["cvar95_pct_daily"] = float(d[d <= v95].mean()) * 100.0
+        v99 = float(np.quantile(d, 0.01))
+        out["cvar99_pct_daily"] = float(d[d <= v99].mean()) * 100.0
+        out["worst_day_pct"] = float(d.min()) * 100.0
+    if vega_pct is not None and len(vega_pct):
+        out["max_net_vega_per_100k"] = float(np.nanmax(vega_pct) * 1e5)
+        out["median_net_vega_per_100k"] = float(np.nanmedian(vega_pct) * 1e5)
+    if bootstrap:
+        out["bootstrap_sharpe"] = _block_bootstrap_sharpe_ci(daily_ret)
+    return out
+
+
+def _deflated_sharpe(observed_sr_daily, trial_sharpes_daily, n_obs, skew, kurt, n_trials):
+    """Bailey & López de Prado deflated Sharpe: the probability the *true* SR>0 after
+    correcting the observed daily SR for the ``n_trials`` configs graded (multiplicity)
+    and the non-normal (skew/kurt) return shape. ``trial_sharpes_daily`` supplies the
+    across-config SR variance (the deflation benchmark SR*)."""
+    ts = np.asarray(trial_sharpes_daily, float)
+    v_sr = float(np.var(ts, ddof=1)) if len(ts) > 1 else 0.0
+    if v_sr <= 0 or n_obs < 3 or n_trials < 2:
+        return None
+    gamma = 0.5772156649015329  # Euler-Mascheroni
+
+    def _qnorm(p):  # inverse standard-normal CDF via bisection on ncdf (no scipy dep)
+        lo, hi = -10.0, 10.0
+        for _ in range(80):
+            mid = 0.5 * (lo + hi)
+            if ncdf(mid) < p:
+                lo = mid
+            else:
+                hi = mid
+        return 0.5 * (lo + hi)
+
+    sr_star = math.sqrt(v_sr) * ((1 - gamma) * _qnorm(1 - 1.0 / n_trials)
+                                 + gamma * _qnorm(1 - 1.0 / (n_trials * math.e)))
+    denom = math.sqrt(max(1 - skew * observed_sr_daily
+                          + (kurt - 1) / 4.0 * observed_sr_daily ** 2, 1e-12))
+    dsr = ncdf((observed_sr_daily - sr_star) * math.sqrt(n_obs - 1) / denom)
+    return {"sr_star_ann": float(sr_star * math.sqrt(ANN)), "dsr": float(dsr)}
+
+
+def _data_fingerprint(cache_dir="data/processed/deribit") -> dict:
+    """SHA256 (16-hex prefix) of each cached Deribit parquet — the data fingerprint a
+    refresh would change (V1-07: results/ + data/ are gitignored, no DVC)."""
+    out = {}
+    p = Path(cache_dir)
+    if p.exists():
+        for f in sorted(p.glob("*.parquet")):
+            out[f.name] = hashlib.sha256(f.read_bytes()).hexdigest()[:16]
+    return out
+
+
 def variance_spread_xcheck(spot, iv, window=30):
     """Model B: rolling non-overlapping 30d variance spread (IV^2 - RV^2), frictionless."""
     logret = np.diff(np.log(spot))
@@ -244,7 +382,7 @@ def variance_spread_xcheck(spot, iv, window=30):
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
-def run(cfg: SimConfig | None = None) -> dict:
+def run(cfg: SimConfig | None = None, *, bootstrap_stats: bool = True) -> dict:
     cfg = cfg or SimConfig()
     _bs_selftest()
     raw = dol.load({"universe": {"assets": ["BTC", "ETH"]}})
@@ -276,6 +414,8 @@ def run(cfg: SimConfig | None = None) -> dict:
             "net_max_dd": _max_drawdown(net["eq_curve"]),
             "frictionless_sharpe": _sharpe(fri_ret),
             "var_spread_xcheck": xchk,
+            "risk_stats": _risk_block(net_ret, net["vega_pct"],
+                                      bootstrap=(a == "BTC" and bootstrap_stats)),
             "by_year": {},
         }
         for y in sorted(set(years.tolist())):
@@ -325,6 +465,13 @@ def run(cfg: SimConfig | None = None) -> dict:
     fri_sharpe = _sharpe(fri_port_ret)
     cost_gap = fri_sharpe - port_sharpe
 
+    # short-vol tail stats + the kill-switch metrics (V5-03/V6) against the linear core
+    port_risk = _risk_block(port_ret, bootstrap=bootstrap_stats)
+    worst_asset_dd_pct = max(d["net_max_dd"] for d in per_asset.values()) * 100.0
+    worst_vega_100k = max(d["risk_stats"].get("max_net_vega_per_100k", 0.0)
+                          for d in per_asset.values())
+    port_cvar95 = port_risk.get("cvar95_pct_daily", 0.0)
+
     portfolio = {
         "net_sharpe": port_sharpe,
         "net_pf": port_pf,
@@ -339,6 +486,12 @@ def run(cfg: SimConfig | None = None) -> dict:
         "pos_years": pos_years,
         "n_years": len(yr_returns),
         "top_year_share_of_gains": float(top_year_share),
+        "risk_stats": port_risk,
+        "tail_metrics": {
+            "worst_per_asset_dd_pct": worst_asset_dd_pct,
+            "worst_per_asset_net_vega_per_100k": worst_vega_100k,
+            "portfolio_cvar95_pct_daily": port_cvar95,
+        },
     }
 
     # ---- verdict (pre-registered) ----
@@ -353,6 +506,15 @@ def run(cfg: SimConfig | None = None) -> dict:
         kills.append(f"recent-12m Sharpe {recent_sharpe:.2f} <= {GATES['min_recent_oos_sharpe']}")
     if port_dd > GATES["max_recent_oos_drawdown"]:
         kills.append(f"worst DD {port_dd:.2%} > {GATES['max_recent_oos_drawdown']:.0%}")
+    # short-vol tail kill-switches — declared in gates.yaml `tail:` but, until now,
+    # never evaluated against the linear core (V5-03). Wired fail-loud; all pass on
+    # today's clean data, but a refresh that pushed any past the floor now NO-GOs.
+    if port_cvar95 < GATES["cvar95_floor_pct"]:
+        kills.append(f"daily CVaR95 {port_cvar95:.2f}% < floor {GATES['cvar95_floor_pct']}%")
+    if worst_vega_100k > GATES["max_net_vega_per_100k"]:
+        kills.append(f"net vega/100k {worst_vega_100k:,.0f} > cap {GATES['max_net_vega_per_100k']:,.0f}")
+    if worst_asset_dd_pct > GATES["max_worst_window_dd_pct"]:
+        kills.append(f"worst per-asset DD {worst_asset_dd_pct:.1f}% > {GATES['max_worst_window_dd_pct']}%")
 
     cautions = []
     if cost_gap > GATES["cost_gap_caution"]:
@@ -404,6 +566,28 @@ def _fmt(result: dict) -> str:
                      f"ret {d['net_total_return']:.1%}, DD {d['net_max_dd']:.1%}, "
                      f"frictionless Sharpe {d['frictionless_sharpe']:.2f}; "
                      f"Model-B var-spread mean {x['mean_var_spread']:.3f} ({x['pct_positive']:.0f}% +, n={x['n_windows']})")
+    hb = result.get("honest_band")
+    if hb:
+        btc_rs = result["per_asset"]["BTC"].get("risk_stats", {})
+        dsr16 = (btc_rs.get("deflated_sharpe", {}) or {}).get("16") or {}
+        boot = btc_rs.get("bootstrap_sharpe") or {}
+        port_rs = result["portfolio"].get("risk_stats", {})
+        lo, hi = hb["honest_expectation_band"]
+        lines += [
+            "",
+            "## Honest band & tail caveats (the deploy-sizing anchor, NOT the headline)",
+            f"- **SIZE to the {lo:.1f}-{hi:.1f} honest band**, not the {hb['headline_best_case_btc_net_sharpe']:.2f} "
+            f"best-of-2-asset headline (real-chain monthly anchor {hb['real_chain_anchor_net_sharpe']:.2f}; "
+            f"best-case ceiling {hb['best_case_ceiling']:.2f}; portfolio pre-reg {hb['portfolio_pre_registered_net_sharpe']:.2f})",
+            f"- BTC Sortino {btc_rs.get('sortino', float('nan')):.2f} < Sharpe {result['per_asset']['BTC']['net_sharpe']:.2f} "
+            f"(short-vol left tail), skew {btc_rs.get('skew', float('nan')):.2f}, "
+            f"CVaR95 {btc_rs.get('cvar95_pct_daily', float('nan')):.2f}%/day, CVaR99 {btc_rs.get('cvar99_pct_daily', float('nan')):.2f}%/day",
+            f"- deflated Sharpe (N=16) {dsr16.get('dsr', float('nan')):.2f} | "
+            f"bootstrap Sharpe CI95 [{boot.get('ci95_low', float('nan')):.2f}, {boot.get('ci95_high', float('nan')):.2f}], "
+            f"P(SR<0.5)={boot.get('p_sharpe_lt_0_5', float('nan')):.2f}",
+            f"- intraday-trough DD ~{hb['intraday_trough_dd_pct_btc']:.1f}% vs close-basis {hb['close_basis_dd_pct_btc']:.1f}% (BTC); "
+            f"portfolio Sortino {port_rs.get('sortino', float('nan')):.2f}",
+        ]
     if result["kills"]:
         lines += ["", "## KILL triggers", *[f"- {k}" for k in result["kills"]]]
     if result["cautions"]:
@@ -424,7 +608,7 @@ def main():
     grid = []
     for pf_frac in (0.05, 0.10):
         for roll in (7, 14, 21, 30):
-            r = run(SimConfig(premium_frac=pf_frac, roll_days=roll))
+            r = run(SimConfig(premium_frac=pf_frac, roll_days=roll), bootstrap_stats=False)
             grid.append({"premium_frac": pf_frac, "roll_days": roll,
                          "net_sharpe": r["portfolio"]["net_sharpe"],
                          "net_pf": r["portfolio"]["net_pf"],
@@ -434,14 +618,59 @@ def main():
                          "verdict": r["verdict"]})
     base["robustness_grid"] = grid
 
-    (RESULTS_DIR / "verdict.json").write_text(json.dumps(base, indent=2, default=str))
+    # ---- multiplicity-deflated Sharpe (V6-03/V7-02) ----
+    # The headline is the best of >=16 graded configs (8-cell turnover×sizing grid × 2
+    # assets) + ~12 spread-grid cells. The across-config SR variance comes from the grid;
+    # N escalates to fold in the asset + spread-grid multiplicity. The 1.06 barely clears
+    # its own multiplicity-corrected hurdle — log DSR so paper out-perf != confirmation.
+    grid_sharpes_daily = [g["net_sharpe"] / math.sqrt(ANN) for g in grid]
+    for scope, blk, sr in (("BTC", base["per_asset"]["BTC"]["risk_stats"],
+                            base["per_asset"]["BTC"]["net_sharpe"]),
+                           ("portfolio", base["portfolio"]["risk_stats"],
+                            base["portfolio"]["net_sharpe"])):
+        blk["deflated_sharpe"] = {
+            str(N): _deflated_sharpe(sr / math.sqrt(ANN), grid_sharpes_daily,
+                                     blk.get("n_obs", 0), blk.get("skew", 0.0),
+                                     blk.get("kurtosis", 3.0), N)
+            for N in (8, 16, 28)}
+
+    # ---- honest band (V1-03/V1-09/V6) — the deploy-sizing anchor ----
+    btc = base["per_asset"]["BTC"]
+    base["honest_band"] = {
+        "headline_best_case_btc_net_sharpe": btc["net_sharpe"],
+        "portfolio_pre_registered_net_sharpe": base["portfolio"]["net_sharpe"],
+        "real_chain_anchor_net_sharpe": 0.61,        # Tardis monthly real-chain (skew_verdict.json)
+        "honest_expectation_band": [0.6, 0.9],
+        "best_case_ceiling": 1.10,
+        "close_basis_dd_pct_btc": btc["net_max_dd"] * 100.0,
+        "intraday_trough_dd_pct_btc": 8.42,          # reconstructed high/low (tail recompute; ~1.6x close)
+        "note": ("SIZE/DEPLOY to the 0.6-0.9 honest band, NOT the 1.06 best-of-2-asset "
+                 "headline. Synthetic DVOL straddle (real-chain monthly anchor 0.61); "
+                 "multiplicity-deflated Sharpe ~0.5-0.65 (risk_stats.deflated_sharpe); "
+                 "left tail real (skew<0, Sortino<Sharpe, bootstrap CI95 spans <0.5); "
+                 "intraday-trough DD ~8.4% vs close-basis. Paper out-performance is NOT "
+                 "confirmation."),
+        "_provenance": "docs/research/options_vrp_linear_core_deep_lifecycle_audit_2026-06-11.md",
+    }
+
+    # ---- provenance (V1-07): the data fingerprint a --refresh would change ----
+    base["provenance"] = {
+        "data_sha256": _data_fingerprint(),
+        "gates_file": "configs/options_vol_harvest.gates.yaml",
+        "gates_source": "yaml-loaded (not hardcoded)",
+        "note": ("Commit verdict.json + this fingerprint together; the loader writes a "
+                 ".bak before any --refresh overwrites the graded parquets."),
+    }
+
+    (RESULTS_DIR / "verdict.json").write_text(
+        json.dumps(base, indent=2, default=str), encoding="utf-8")
     summary = _fmt(base)
     grid_md = "\n".join(
         f"- premium_frac={g['premium_frac']}, roll={g['roll_days']}d: "
         f"Sharpe {g['net_sharpe']:.2f}, PF {g['net_pf']:.2f}, DD {g['net_max_dd']:.1%}, "
         f"recent {g['recent_12m_sharpe']:.2f} -> {g['verdict']}" for g in grid)
     summary += "\n\n## Robustness grid\n" + grid_md
-    (RESULTS_DIR / "summary.md").write_text(summary)
+    (RESULTS_DIR / "summary.md").write_text(summary, encoding="utf-8")
 
     logger.info("\n%s", summary)
     logger.info("Wrote %s and %s", RESULTS_DIR / "verdict.json", RESULTS_DIR / "summary.md")

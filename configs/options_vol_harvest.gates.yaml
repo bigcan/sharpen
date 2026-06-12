@@ -9,8 +9,11 @@
 gates:
   # The decisive gate: the RL must beat the FROZEN linear short-vol core OOS by
   # >= min_uplift on the same WF windows, else we ship the linear rule. The free
-  # DVOL-synthetic BTC straddle core is net Sharpe ~1.10 (results/options_vrp/
-  # verdict.json, per_asset BTC); the RL has to clear that, OOS, by the uplift.
+  # DVOL-synthetic BTC straddle core is fully-costed net Sharpe ~1.06 (results/
+  # options_vrp/verdict.json, per_asset BTC, after the Tier-2-audit perp-hedge fee
+  # correction); the HONEST deploy-sizing band is ~0.6-0.9 (real-chain monthly
+  # anchor 0.61; multiplicity-deflated ~0.5-0.65 — see verdict.json honest_band).
+  # The RL has to clear the core, OOS, by the uplift.
   rl_beats_linear:
     metric: "oos_net_sharpe"
     min_uplift_vs_baseline: 0.10
@@ -23,21 +26,24 @@ gates:
 
   # Frictionless-artifact guard (the AlphaSeek lesson). Option fees are STRUCTURALLY
   # large relative to premium, so the absolute Sharpe gap is inherently wide
-  # (frictionless 1.86 vs net 1.10 => 0.76 for BTC) and is a CAUTION, not a kill —
-  # the real guard is that NET Sharpe clears wf_net_sharpe_floor with REAL fees. The
-  # bound here catches a pathological frictionless-only result (net collapsing far
-  # below the validated 1.10), NOT the structurally-large fee gap.
+  # (frictionless 1.86 vs fully-costed net 1.06 => ~0.80 for BTC) and is a CAUTION,
+  # not a kill — the real guard is that NET Sharpe clears wf_net_sharpe_floor with
+  # REAL fees. The bound here catches a pathological frictionless-only result (net
+  # collapsing far below the validated band), NOT the structurally-large fee gap.
   g_cost_gap:
     max_frictionless_minus_net_sharpe: 0.90
 
   # Primary WF survival sanity (NOT the deploy bar — rl_beats_linear is). Linear
-  # core ~1.10; a floor of 0.50 is a survival check.
+  # core fully-costed ~1.06 (honest band 0.6-0.9); a floor of 0.50 is a survival check.
   wf_net_sharpe_floor: 0.50
 
   # Short-vol tail gates (ADR-6) — the kill-switches a vol seller must pre-register.
   # max_net_vega_per_100k mirrors the env's max_net_vega_pct hard cap (0.50 of equity
   # => $50k vega notional / $100k); the env clips to it physically, this is the
-  # report-time assertion.
+  # report-time assertion. WIRED 2026-06-11 (V5-03): the Phase-1 falsification now
+  # reads this block via load_gates() and evaluates cvar95_floor_pct, this vega cap,
+  # and max_worst_window_dd_pct against the linear core as fail-loud kills (were
+  # previously declared here but had no Python consumer).
   tail:
     max_worst_window_dd_pct: 25.0
     max_net_vega_per_100k: 50000.0
