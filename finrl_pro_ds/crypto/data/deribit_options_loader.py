@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import time
 import urllib.error
 import urllib.parse
@@ -44,6 +45,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 logger = logging.getLogger(__name__)
@@ -191,8 +193,17 @@ def fetch_funding(currency: str, start: str | int | datetime, end: str | int | d
 # ---------------------------------------------------------------------------
 # Validation (DATA-CLEAN)
 # ---------------------------------------------------------------------------
-def _validate(df: pd.DataFrame, name: str, price_cols: tuple[str, ...]) -> list[str]:
-    """Return a list of validation issues (empty == clean). Never raises."""
+def _validate(df: pd.DataFrame, name: str, price_cols: tuple[str, ...] = ("close",),
+              *, require_positive: bool = True, ohlc: bool = False,
+              check_gaps: bool = False, max_gap_days: float = 4.0,
+              stale_max: int = 15) -> list[str]:
+    """Return a list of DATA-CLEAN validation issues (empty == clean). Never raises.
+
+    Covers (CLAUDE.md DATA-CLEAN): monotonic/duplicate index, NaN + (optional)
+    non-positivity, OHLC invariants (``high >= max(O,C)``, ``low <= min(O,C)``,
+    ``high >= low``), daily gap/continuity, and a stale-feed run check. ``load`` then
+    raises in strict mode — the prior loader merely *warned* and the issues never
+    gated, so a corrupt ``--refresh`` would have graded silently (V1-06)."""
     issues: list[str] = []
     if df.empty:
         issues.append(f"{name}: EMPTY")
@@ -208,8 +219,40 @@ def _validate(df: pd.DataFrame, name: str, price_cols: tuple[str, ...]) -> list[
         col = df[c]
         if col.isna().any():
             issues.append(f"{name}: {int(col.isna().sum())} NaNs in {c}")
-        if (col <= 0).any():
+        if require_positive and (col.dropna() <= 0).any():
             issues.append(f"{name}: non-positive values in {c}")
+    # OHLC invariants — a decimal-shift / aggregation artifact violates these
+    if ohlc and {"open", "high", "low", "close"}.issubset(df.columns):
+        o_a = df["open"].to_numpy(dtype=float)
+        h_a = df["high"].to_numpy(dtype=float)
+        l_a = df["low"].to_numpy(dtype=float)
+        c_a = df["close"].to_numpy(dtype=float)
+        max_oc = np.maximum(o_a, c_a)
+        min_oc = np.minimum(o_a, c_a)
+        n_h = int((h_a < max_oc - 1e-9).sum())
+        n_l = int((l_a > min_oc + 1e-9).sum())
+        n_hl = int((h_a < l_a - 1e-9).sum())
+        if n_h:
+            issues.append(f"{name}: {n_h} bars with high < max(open,close)")
+        if n_l:
+            issues.append(f"{name}: {n_l} bars with low > min(open,close)")
+        if n_hl:
+            issues.append(f"{name}: {n_hl} bars with high < low")
+    # Gap / continuity (daily cadence): flag any calendar gap exceeding max_gap_days
+    if check_gaps and len(df) > 1:
+        gap_days = np.diff(df.index.asi8) / (MS_PER_DAY * 1_000_000)  # ns -> days
+        big = int((gap_days > max_gap_days).sum())
+        if big:
+            issues.append(f"{name}: {big} gap(s) > {max_gap_days:g}d (max {gap_days.max():.1f}d)")
+    # Stale feed: a long run of identical closes => a frozen series, not real ticks
+    if "close" in df.columns and len(df) > stale_max:
+        close_a = df["close"].to_numpy(dtype=float)
+        longest = run = 1
+        for k in range(1, len(close_a)):
+            run = run + 1 if close_a[k] == close_a[k - 1] else 1
+            longest = max(longest, run)
+        if longest > stale_max:
+            issues.append(f"{name}: stale close run of {longest} (> {stale_max})")
     return issues
 
 
@@ -226,7 +269,8 @@ class RawOptionsData:
 
 
 def load(config: dict, *, cache_dir: Path | str = DEFAULT_CACHE_DIR,
-         use_cache: bool = True, refresh: bool = False) -> RawOptionsData:
+         use_cache: bool = True, refresh: bool = False,
+         strict: bool = True) -> RawOptionsData:
     """Fetch (or load cached) DVOL + perp + funding for the configured universe.
 
     ``config`` keys used (with sensible defaults):
@@ -234,6 +278,11 @@ def load(config: dict, *, cache_dir: Path | str = DEFAULT_CACHE_DIR,
         data.start_date   : str        (default DVOL inception 2021-04-01)
         data.end_date     : str|None   (default = now)
         data.resolution   : str        (default "1D")
+
+    ``strict`` (default True): DATA-CLEAN gate — raise ``RuntimeError`` if any frame
+    fails ``_validate`` (OHLC invariants, gaps, stale runs, NaN/non-positive). The
+    issues are always recorded in the manifest first; ``strict=False`` downgrades to
+    a warning for exploratory fetches.
     """
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -258,6 +307,11 @@ def load(config: dict, *, cache_dir: Path | str = DEFAULT_CACHE_DIR,
             fund_df = pd.read_parquet(fund_p)
         else:
             logger.info("Fetching Deribit data for %s (%s -> %s, res=%s)", ccy, start, end, resolution)
+            # Back up the existing graded parquets before a refresh overwrites them, so a
+            # bad fetch never silently destroys the data that produced the verdict (V1-07).
+            for p in (dvol_p, perp_p, fund_p):
+                if p.exists():
+                    shutil.copy2(p, p.with_suffix(p.suffix + ".bak"))
             dvol_df = fetch_dvol(ccy, start, end, resolution)
             perp_df = fetch_perp_chart(ccy, start, end, resolution)
             fund_df = fetch_funding(ccy, start, end)
@@ -266,8 +320,12 @@ def load(config: dict, *, cache_dir: Path | str = DEFAULT_CACHE_DIR,
             fund_df.to_parquet(fund_p)
 
         issues[ccy] = (
-            _validate(dvol_df, f"dvol_{ccy}", ("close",))
-            + _validate(perp_df, f"perp_{ccy}", ("close",))
+            _validate(dvol_df, f"dvol_{ccy}", ("open", "high", "low", "close"),
+                      ohlc=True, check_gaps=True)
+            + _validate(perp_df, f"perp_{ccy}", ("open", "high", "low", "close"),
+                        ohlc=True, check_gaps=True)
+            # funding can legitimately be negative (perp carry) — no positivity check
+            + _validate(fund_df, f"funding_{ccy}", ("interest_8h",), require_positive=False)
         )
         out.dvol[ccy] = dvol_df
         out.perp[ccy] = perp_df
@@ -291,6 +349,10 @@ def load(config: dict, *, cache_dir: Path | str = DEFAULT_CACHE_DIR,
     n_issues = sum(len(v) for v in issues.values())
     if n_issues:
         logger.warning("Deribit load completed with %d validation issue(s): %s", n_issues, issues)
+        if strict:
+            raise RuntimeError(
+                f"Deribit DATA-CLEAN failed with {n_issues} issue(s) (see manifest "
+                f"{manifest_path}): {issues}")
     else:
         logger.info("Deribit load clean for assets %s", assets)
     return out
@@ -307,13 +369,15 @@ def _cli() -> None:
     ap.add_argument("--resolution", default="1D")
     ap.add_argument("--cache_dir", default=str(DEFAULT_CACHE_DIR))
     ap.add_argument("--refresh", action="store_true")
+    ap.add_argument("--no-strict", dest="no_strict", action="store_true",
+                    help="downgrade DATA-CLEAN failures from raise to warn (exploratory)")
     args = ap.parse_args()
 
     cfg = {
         "universe": {"assets": args.assets.split(",")},
         "data": {"start_date": args.start, "end_date": args.end, "resolution": args.resolution},
     }
-    data = load(cfg, cache_dir=args.cache_dir, refresh=args.refresh)
+    data = load(cfg, cache_dir=args.cache_dir, refresh=args.refresh, strict=not args.no_strict)
     logger.info("Manifest: %s", json.dumps(data.manifest["rows"], indent=2))
 
 

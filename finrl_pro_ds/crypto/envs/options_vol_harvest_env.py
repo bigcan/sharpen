@@ -237,10 +237,18 @@ class OptionsVolHarvestEnv(gym.Env):
         prem_total_abs = abs(self.m) * straddle_price(S, S, sigma, self.entry_tau)
         cost = self._option_fees(abs(self.m), S, prem_total_abs) + \
             self._spread_cost(abs(self.m), S, sigma, self.entry_tau)
+        # Perp-hedge establishment / roll-jump taker fee (V2-05): the hedge is traded
+        # from its prior level (``q_prev`` — the leftover hedge from the just-closed
+        # straddle, or 0 at the reset open) to the new straddle's delta hedge. The
+        # in-step rehedge fee only covers intra-hold delta adjustments, so without
+        # this the establishment leg of every roll was free. Mirrors
+        # ``options_vrp_falsification.open_straddle`` so baseline parity still holds.
+        q_new = self.m * straddle_delta(S, self.K, sigma, self.entry_tau)
+        cost += self.perp_taker_fee * abs(q_new - self.q_prev) * S
         self.equity -= cost
         self.cumulative_fees += cost
         # initial hedge so that q_t == q_prev on the next bar (zero rehedge at open)
-        self.q_prev = self.m * straddle_delta(S, self.K, sigma, self.entry_tau)
+        self.q_prev = q_new
         self.days_held = 0
         return cost
 

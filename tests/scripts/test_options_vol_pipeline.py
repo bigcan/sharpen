@@ -159,3 +159,67 @@ def test_frictionless_overrides_zero_all_costs():
         done = term or trunc
     # zero option fee + zero spread + zero perp taker ⇒ no fees ever booked
     assert env.cumulative_fees == 0.0
+
+
+# ---------------------------------------------------------------------------
+# V3-03 regression: the close-fee straddle_price(S, K, sigma, tau) arg order. A swap
+# is INERT at the shipped 21d config (the premium cap never binds) but corrupts the
+# fee the instant the cap binds — the latent unit landmine. These lock the fix and
+# document why hundreds of green runs never surfaced it.
+# ---------------------------------------------------------------------------
+def test_straddle_price_arg_order_is_load_bearing():
+    """sigma and tau are NOT interchangeable; the swapped call is a different price."""
+    S, sigma, tau = 30_000.0, 0.60, 9.0 / op.ANN
+    correct = op.straddle_price(S, S, sigma, tau)
+    swapped = op.straddle_price(S, S, tau, sigma)   # the old falsification.py:144 order
+    assert abs(correct - swapped) / correct > 0.5   # materially different
+
+
+def test_close_fee_cap_binding_uses_bs_correct_value():
+    """When the 12.5%-of-premium cap binds, the close fee must use the BS-correct
+    straddle premium (sigma, tau). With the swapped args the 'premium' is a different
+    number, so the booked cap would be wrong — the V3-03 landmine."""
+    cfg = fals.SimConfig()
+    # very short tenor + low vol => tiny straddle value => the 12.5%-of-premium cap
+    # falls below the 0.06%-of-notional underlying fee => the cap is the binding branch.
+    S, sigma, tau = 30_000.0, 0.08, 1.0 / op.ANN
+    n = 5.0
+    V_correct = op.straddle_price(S, S, sigma, max(tau, 1.0 / op.ANN))
+    fee = fals._option_fees(n, S, n * V_correct, cfg)
+    fee_underlying = 2.0 * n * cfg.option_fee_pct_underlying * S
+    fee_cap = cfg.option_fee_cap_pct_premium * n * V_correct
+    assert fee_cap < fee_underlying                 # the cap is the binding branch
+    assert abs(fee - fee_cap) < 1e-9                # fee uses the BS-correct premium
+    # the swapped-arg premium would book a different cap => the bug is real once it binds
+    V_swapped = op.straddle_price(S, S, max(tau, 1.0 / op.ANN), sigma)
+    assert abs(cfg.option_fee_cap_pct_premium * n * V_swapped - fee_cap) > 1e-6
+
+
+def test_close_fee_cap_does_not_bind_at_shipped_aged_straddle():
+    """Why the swap was inert in the shipped verdict: at a 21d roll the closed straddle
+    still has ~9-30d left, so the underlying fee is well below the premium cap — the cap
+    never binds, so the V that only feeds it is dead. Reproduces 'cap binds 0/90'."""
+    cfg = fals.SimConfig()
+    S, sigma, tau = 30_000.0, 0.60, 9.0 / op.ANN     # an aged straddle at a 21d roll
+    n = 5.0
+    V = op.straddle_price(S, S, sigma, tau)
+    fee_underlying = 2.0 * n * cfg.option_fee_pct_underlying * S
+    fee_cap = cfg.option_fee_cap_pct_premium * n * V
+    assert fee_underlying < fee_cap                  # underlying branch wins => swap inert
+
+
+def test_establishment_hedge_fee_booked_at_open():
+    """V2-05: the first open books option fee + half-spread + the perp-hedge
+    establishment taker fee (q_prev 0 -> initial delta hedge) — previously omitted."""
+    spot, iv, funding = synthetic_series(T=120, seed=7)
+    cfg = fals.SimConfig()
+    res = fals.simulate_asset(spot, iv, funding, cfg)
+    t0 = res["t0"]
+    S, sigma, tau = spot[t0], iv[t0], cfg.entry_tenor_days / op.ANN
+    unit = op.straddle_price(S, S, sigma, tau)
+    n = cfg.premium_frac * cfg.initial_capital / unit
+    opt_fee = fals._option_fees(n, S, n * unit, cfg)
+    spread = fals._spread_cost(n, S, sigma, tau, cfg)
+    est_fee = cfg.perp_taker_fee * abs(n * op.straddle_delta(S, S, sigma, tau)) * S
+    assert est_fee > 0.0
+    assert abs(res["daily_pnl"][t0] - (-(opt_fee + spread + est_fee))) < 1e-6

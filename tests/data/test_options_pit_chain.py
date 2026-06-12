@@ -37,6 +37,29 @@ def test_validate_clean_series_has_no_issues():
     assert dol._validate(good, "x", ("close",)) == []
 
 
+def test_validate_flags_ohlc_gap_and_stale():
+    """DATA-CLEAN tripwire (S553-cont-41): the wired OHLC-invariant, gap and stale-feed
+    checks must actually fire — a safeguard that never flags corruption is the bug."""
+    idx = pd.date_range("2022-01-01", periods=20, freq="D", tz="UTC")
+    # OHLC invariant violation: high below max(open, close)
+    bad_ohlc = pd.DataFrame({"open": 50.0, "high": 49.0, "low": 48.0, "close": 50.5}, index=idx)
+    assert any("high < max" in i for i in
+               dol._validate(bad_ohlc, "x", ("open", "high", "low", "close"), ohlc=True))
+    # calendar gap > max_gap_days (a 31-day jump after 10 daily bars)
+    gap_idx = pd.DatetimeIndex(list(pd.date_range("2022-01-01", periods=10, freq="D", tz="UTC"))
+                               + [pd.Timestamp("2022-02-01", tz="UTC")])
+    gapped = pd.DataFrame({"close": np.arange(11, dtype=float) + 50.0}, index=gap_idx)
+    assert any("gap" in i for i in dol._validate(gapped, "g", ("close",), check_gaps=True))
+    # stale feed: a frozen close run beyond stale_max
+    stale = pd.DataFrame({"close": np.full(20, 50.0)}, index=idx)
+    assert any("stale" in i for i in dol._validate(stale, "s", ("close",)))
+    # and the clean control raises nothing OHLC/gap/stale
+    clean = pd.DataFrame({"open": np.arange(20) + 50.0, "high": np.arange(20) + 50.6,
+                          "low": np.arange(20) + 49.4, "close": np.arange(20) + 50.0}, index=idx)
+    assert dol._validate(clean, "c", ("open", "high", "low", "close"),
+                         ohlc=True, check_gaps=True) == []
+
+
 def test_daily_funding_is_causal_8h_times_three():
     """Daily funding = mean(interest_8h) * 3 over the day; a future hour cannot
     alter a past day's aggregate."""
@@ -54,9 +77,13 @@ def test_manifest_declares_pit_provenance(monkeypatch, tmp_path):
     (provenance guard against silently swapping in a non-PIT reconstruction)."""
     dates = pd.date_range("2022-01-01", periods=40, freq="D", tz="UTC")
     close = 50_000 * np.exp(np.cumsum(np.full(40, 0.001)))
-    perp = pd.DataFrame({"open": close, "high": close, "low": close,
+    perp = pd.DataFrame({"open": close, "high": close * 1.01, "low": close * 0.99,
                          "close": close, "volume": 1.0}, index=dates)
-    dvol = pd.DataFrame({"open": 50.0, "high": 50.0, "low": 50.0, "close": 50.0}, index=dates)
+    # DVOL gently varies (a flat constant would trip the strict stale-feed check, and
+    # a real published vol index never sits at exactly one value for 40 days).
+    dvol_c = 50.0 + np.cumsum(np.full(40, 0.05))
+    dvol = pd.DataFrame({"open": dvol_c, "high": dvol_c + 0.5, "low": dvol_c - 0.5,
+                         "close": dvol_c}, index=dates)
     fund = pd.DataFrame({"interest_8h": 0.0}, index=dates)
 
     monkeypatch.setattr(dol, "fetch_dvol", lambda *a, **k: dvol)
