@@ -69,7 +69,7 @@ class MultiAssetAllocatorEnv(gym.Env):
         tech_ary: np.ndarray,            # (T, N * tech_dim) — per-asset causal signals
         vol_ary: np.ndarray,             # (T, N) — CAUSAL realized vol (annualized, <= t-1)
         carry_ary: np.ndarray,           # (T, N) — per-bar carry return to a long unit
-        volume_ary: np.ndarray,          # (T, N) — per-bar volume (for slippage)
+        volume_ary: np.ndarray,          # (T, N) — per-bar DOLLAR volume (shares×price); slippage participation denominator (F1)
         timestamps: np.ndarray,          # (T,) — UTC epoch seconds (int64)
         initial_capital: float = 100_000.0,
         taker_fee_pct: float = 0.0002,           # 2 bps (liquid futures/ETF)
@@ -497,9 +497,10 @@ class MultiAssetAllocatorEnv(gym.Env):
         notionals = abs_delta[active] * portfolio_value
         total_fees = float(np.sum(notionals) * self.taker_fee_pct)
 
-        # Previous bar's volume (current-bar volume is unknowable at execution).
-        # Missing/zero volume (halt, holiday, data gap) ⇒ assume MAX impact (ratio 1.0),
-        # the conservative CryptoPerpEnv default — never silently free.
+        # Previous bar's DOLLAR volume (current-bar volume is unknowable at execution).
+        # volume_ary is shares×price (F1), so notionals / bar_vols is a dimensionless
+        # participation fraction. Missing/zero volume (halt, holiday, data gap) ⇒ assume
+        # MAX impact (ratio 1.0), the conservative CryptoPerpEnv default — never silently free.
         vol_idx = max(self.step_idx - 1, 0)
         bar_vols = self.volume_ary[vol_idx, active]
         volume_ratios = np.where(bar_vols > 1e-6, notionals / bar_vols, 1.0)
@@ -624,7 +625,7 @@ class MultiAssetAllocatorEnv(gym.Env):
             pv_for_cost = max(portfolio_value, self.initial_capital * 0.01)
             obs_vol_idx = max(self.step_idx - 1, 0)
             notionals = abs_pos[active_pos] * pv_for_cost
-            bar_vols = self.volume_ary[obs_vol_idx, active_pos]
+            bar_vols = self.volume_ary[obs_vol_idx, active_pos]  # DOLLAR volume (F1)
             vol_ratios = np.where(bar_vols > 1e-6, notionals / bar_vols, 1.0)
             slip_bps = self.slippage_base_bps + self.slippage_impact_bps * vol_ratios
             costs = notionals * (self.taker_fee_pct + slip_bps * 1e-4)
