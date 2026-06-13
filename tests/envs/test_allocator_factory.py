@@ -115,3 +115,72 @@ def test_evaluate_linear_core_requires_conviction_ary():
     del arrays["conviction_ary"]
     with pytest.raises(KeyError):
         factory.evaluate_linear_core(arrays, CFG)
+
+
+# --------------------------------------------------------------------------- #
+# linear_core_weights — the paper executor's frozen-core weight source (ADR-7)
+# --------------------------------------------------------------------------- #
+def test_linear_core_weights_shape_and_finite():
+    arrays = _arrays(T=400, N=3)
+    w = factory.linear_core_weights(arrays, CFG)
+    assert w.shape == (arrays["price_ary"].shape[0] - 1, 3)
+    assert np.isfinite(w).all()
+    cap = CFG["env"]["max_gross_exposure"]
+    assert np.all(np.abs(w).sum(axis=1) <= cap + 1e-9), "gross exposure exceeds cap"
+
+
+def test_linear_core_weights_requires_conviction_ary():
+    arrays = _arrays()
+    del arrays["conviction_ary"]
+    with pytest.raises(KeyError):
+        factory.linear_core_weights(arrays, CFG)
+
+
+def test_linear_core_weights_match_independent_redrive():
+    """Locks ADR-7 parity-by-construction: the weight trajectory equals an independent
+    monthly-conviction drive of the same env (execution levers off), so the paper
+    executor's targets are byte-identical to the evaluate_linear_core gate baseline."""
+    arrays = _arrays(T=400, N=3)
+    w = factory.linear_core_weights(arrays, CFG)
+    conv_monthly = factory.monthly_rebal_conviction(arrays["timestamps"], arrays["conviction_ary"])
+    env = factory.make_allocator_env(
+        arrays, CFG,
+        overrides={"no_trade_band": 0.0, "rebalance_interval": 1, "cost_penalty_scale": 0.0},
+        eval_mode=True,
+    )
+    env.reset()
+    manual = []
+    done = False
+    while not done:
+        k = env.step_idx
+        _, _, term, trunc, info = env.step(conv_monthly[k])
+        manual.append(info["position"])
+        done = term or trunc
+    np.testing.assert_array_equal(w, np.asarray(manual, dtype=np.float64))
+
+
+def test_linear_core_weights_rescale_daily_with_vol():
+    """Chosen design (Option-2, daily vol-rescale): between month-ends the held
+    conviction is RE-VOL-SCALED every bar, so the weight tracks target_vol/vol — it is
+    NOT held constant (the monthly-hold alternative). Also pins the exact transform
+    w[j] = clip(conv·clip(target_vol/vol[j], <=lev_cap), -lev_cap, lev_cap)."""
+    import pandas as pd
+    T = 70
+    ts = (pd.bdate_range("2020-01-01", periods=T).asi8 // 10**9).astype(np.int64)
+    vol = (0.10 * (1.0 + 0.3 * (np.arange(T) % 2))).reshape(T, 1)   # alternates 0.10 / 0.13
+    arrays = {
+        "price_ary": np.full((T, 1), 100.0),
+        "tech_ary": np.zeros((T, 7), dtype=np.float32),
+        "vol_ary": vol,
+        "carry_ary": np.zeros((T, 1)),
+        "volume_ary": np.full((T, 1), 1e12),
+        "timestamps": ts,
+        "conviction_ary": np.ones((T, 1)),                          # constant long conviction
+    }
+    cfg = {"env": {"target_vol_asset": 0.10, "lev_cap": 2.0, "max_gross_exposure": 1e9,
+                   "taker_fee": 0.0002, "allow_short": True}}
+    w = factory.linear_core_weights(arrays, cfg)                    # (T-1, 1)
+    j = 45                                                          # well past the first month-end
+    assert w[j, 0] != w[j + 1, 0], "weight held constant between bars — daily vol-rescale missing"
+    expected = min(0.10 / vol[j, 0], 2.0)                           # conviction = +1, gross non-binding
+    np.testing.assert_allclose(w[j, 0], expected, rtol=1e-12)
