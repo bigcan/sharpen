@@ -146,17 +146,20 @@ def monthly_rebal_conviction(timestamps: np.ndarray, conviction_ary: np.ndarray)
     return out
 
 
-def _drive(env: MultiAssetAllocatorEnv, action_at_step) -> tuple[dict, np.ndarray]:
+def _drive(env: MultiAssetAllocatorEnv, action_at_step) -> tuple[dict, np.ndarray, dict]:
     """Run ``env`` to termination, action chosen by ``action_at_step(step_idx, obs)``
     (env-native convention: action at step k governs the k→k+1 move). Returns
-    ``(metrics, weights)``: ``metrics`` from the env's own step returns / turnover,
-    and ``weights[k]`` the signed target weight held during the k→k+1 move
+    ``(metrics, weights, trajectory)``: ``metrics`` from the env's own step returns /
+    turnover; ``weights[k]`` the signed target weight held during the k→k+1 move
     (``info['position']`` after the step — post vol-scaling, availability-zeroing,
-    and gross cap)."""
+    and gross cap); ``trajectory`` the per-step series (equity curve, step returns,
+    turnover, running fees) the paper executor's parity harness consumes as the sim
+    oracle (ADR-7)."""
     obs, _ = env.reset()
     step_returns: list[float] = []
     turnovers: list[float] = []
     pvs: list[float] = [env.initial_capital]
+    fees: list[float] = []
     weights: list[np.ndarray] = []
     done = False
     while not done:
@@ -166,9 +169,17 @@ def _drive(env: MultiAssetAllocatorEnv, action_at_step) -> tuple[dict, np.ndarra
         step_returns.append(info["step_return"])
         turnovers.append(info["turnover"])
         pvs.append(info["portfolio_value"])
+        fees.append(info["cumulative_fees"])
         weights.append(info["position"])
         done = terminated or truncated
-    return _metrics(step_returns, turnovers, pvs), np.asarray(weights, dtype=np.float64)
+    trajectory = {
+        # equity_curve[0] == initial_capital; equity_curve[k+1] is PV after step k.
+        "equity_curve": np.asarray(pvs, dtype=np.float64),            # (n_steps + 1,)
+        "step_returns": np.asarray(step_returns, dtype=np.float64),   # (n_steps,)
+        "turnovers": np.asarray(turnovers, dtype=np.float64),         # (n_steps,) sum|Δw| per step
+        "cumulative_fees": np.asarray(fees, dtype=np.float64),        # (n_steps,) running fee+slippage
+    }
+    return _metrics(step_returns, turnovers, pvs), np.asarray(weights, dtype=np.float64), trajectory
 
 
 def _metrics(step_returns: list[float], turnovers: list[float], pvs: list[float]) -> dict:
@@ -201,7 +212,7 @@ def _linear_core_drive(
     arrays: Mapping,
     config: Mapping,
     overrides: Mapping | None,
-) -> tuple[dict, np.ndarray]:
+) -> tuple[dict, np.ndarray, dict]:
     """Shared frozen-linear-core env drive behind :func:`evaluate_linear_core` (the
     gate metrics) and :func:`linear_core_weights` (the executor's weight trajectory).
     Keeping ONE drive path guarantees the executor's target weights are byte-identical
@@ -237,7 +248,7 @@ def evaluate_linear_core(
     RL eval, so the RL−baseline uplift is well-posed. Requires
     ``arrays['conviction_ary']`` (from ``build_allocator_arrays``).
     """
-    metrics, _ = _linear_core_drive(arrays, config, overrides)
+    metrics, _, _ = _linear_core_drive(arrays, config, overrides)
     return metrics
 
 
@@ -257,5 +268,30 @@ def linear_core_weights(
     and rung-1 paper-sim parity is ≈0 by construction. ``w[-1]`` is the weight to hold
     going forward from the most recent bar (the live order-generation target).
     """
-    _, weights = _linear_core_drive(arrays, config, overrides)
+    _, weights, _ = _linear_core_drive(arrays, config, overrides)
     return weights
+
+
+def linear_core_trajectory(
+    arrays: Mapping,
+    config: Mapping,
+    *,
+    overrides: Mapping | None = None,
+) -> dict:
+    """Full per-step trajectory of the frozen linear core — the paper executor's
+    parity SIM ORACLE (ADR-7).
+
+    Shares :func:`_linear_core_drive` with :func:`evaluate_linear_core` and
+    :func:`linear_core_weights`, so the ``weights`` and ``equity_curve`` returned here
+    are byte-identical to the RL-beats-linear gate baseline. The paper executor's
+    forward (SimFillEngine + paper_state) path is compared against this trajectory, so
+    rung-1 paper-sim parity is ≈0 by construction — any non-zero ``weight_l1_drift`` or
+    ``daily_return_te_bps`` is a real forward-path bug, not an accounting artifact.
+
+    Returns dict with keys: ``weights (n_steps, N)``, ``equity_curve (n_steps + 1,)``
+    (``equity_curve[0] == initial_capital``), ``step_returns (n_steps,)``,
+    ``turnovers (n_steps,)``, ``cumulative_fees (n_steps,)``, ``metrics`` (the same dict
+    :func:`evaluate_linear_core` returns). Requires ``arrays['conviction_ary']``.
+    """
+    metrics, weights, traj = _linear_core_drive(arrays, config, overrides)
+    return {"weights": weights, "metrics": metrics, **traj}
