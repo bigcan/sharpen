@@ -85,6 +85,20 @@ def test_timestamps_are_epoch_seconds_ascending():
     assert pd.to_datetime(ts[0], unit="s").date() == close.index[0].date()
 
 
+def test_volume_ary_is_dollar_volume():
+    """F1 (Fable 2026-06-11): ``volume_ary`` must be DOLLAR volume (shares × close),
+    NOT raw share count — the env divides order notional by it to get a dimensionless
+    participation ratio, so raw share volume overstated slippage impact by ~price."""
+    arrays, close, volume, tickers, _ = _arrays()
+    price = arrays["price_ary"]
+    share_vol = (volume[tickers].reindex(close.index)
+                 .ffill().fillna(0.0).to_numpy(np.float64))
+    np.testing.assert_allclose(arrays["volume_ary"], share_vol * price, rtol=1e-12, atol=1e-6)
+    # And it must NOT be the raw share volume (the F1 bug); dollar volume is ~price× larger.
+    assert not np.allclose(arrays["volume_ary"], share_vol), \
+        "volume_ary is raw share volume (F1 regressed) — must be shares × price"
+
+
 # --------------------------------------------------------------------------- #
 # Normalization invariants (the correctness-critical part)
 # --------------------------------------------------------------------------- #

@@ -222,3 +222,57 @@ def test_linear_core_immune_to_execution_levers():
         arrays, lever_cfg,
         overrides={"no_trade_band": 0.2, "rebalance_interval": 21})
     assert m_base == m_lever
+
+
+# --------------------------------------------------------------------------- #
+# 5. F1 — dollar-volume slippage participation (Fable 2026-06-11)
+# --------------------------------------------------------------------------- #
+
+def _cost_env(dollar_volume: float, T=60, n=1, **kw) -> MultiAssetAllocatorEnv:
+    """Single-asset env with a CONSTANT dollar-volume array and unit vol-scaling
+    (weight == action). Slippage left ON; fee OFF so cumulative_fees == slippage.
+    ``volume_ary`` here is dollar volume (shares × price) per the F1 contract."""
+    price = synthetic_prices(T=T, n=n, seed=5)
+    arrays = build_arrays(price, vol=np.full((T, n), 0.10), volume=dollar_volume)
+    params = dict(
+        target_vol_asset=0.10, lev_cap=2.0, max_gross_exposure=1e9,
+        min_trade_pct=0.0, taker_fee_pct=0.0, turnover_penalty=0.0,
+        reward_type="simple",
+    )
+    params.update(kw)
+    return MultiAssetAllocatorEnv(**arrays, **params)
+
+
+def test_slippage_participation_uses_dollar_volume():
+    """Realized slippage == notional·(base + impact·notional/dollar_vol)·1e-4, i.e.
+    participation = order_notional / DOLLAR volume. taker_fee=0 ⇒ cumulative_fees is
+    slippage only; info['turnover'] gives the exact applied weight-delta (robust to
+    the action→weight transform)."""
+    V, base, impact = 1_000_000.0, 1.0, 10.0
+    env = _cost_env(V, slippage_base_bps=base, slippage_impact_bps=impact)
+    env.reset()
+    _, _, _, _, info = env.step(np.array([0.5]))
+    notional = info["turnover"] * env.initial_capital   # from flat: pv_before == initial_capital
+    participation = notional / V
+    expected = notional * (base + impact * participation) * 1e-4
+    assert notional > 0 and participation > 1e-6, "impact term must actually be exercised"
+    assert abs(env.cumulative_fees - expected) < 1e-9
+
+
+def test_slippage_decreases_with_dollar_volume():
+    """Impact is participation-based: deeper (larger dollar-volume) markets cost less,
+    and a near-infinite-depth market charges base slippage only."""
+    def slip(V):
+        env = _cost_env(V, slippage_base_bps=1.0, slippage_impact_bps=50.0)
+        env.reset()
+        env.step(np.array([0.5]))
+        return env.cumulative_fees
+
+    s_thin, s_mid, s_deep = slip(1e5), slip(1e7), slip(1e12)
+    assert s_thin > s_mid > s_deep, "slippage must fall as dollar volume rises"
+    # Deep-market slippage → base only (impact participation → 0).
+    env = _cost_env(1e12, slippage_base_bps=1.0, slippage_impact_bps=50.0)
+    env.reset()
+    _, _, _, _, info = env.step(np.array([0.5]))
+    base_only = info["turnover"] * env.initial_capital * 1.0 * 1e-4
+    assert abs(s_deep - base_only) / base_only < 1e-3

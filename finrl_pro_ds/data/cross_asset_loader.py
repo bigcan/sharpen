@@ -292,7 +292,14 @@ def build_allocator_arrays(
         raise ValueError(f"empty window {start_ts}..{end_ts}")
 
     price_ary = close_wide.loc[wdates, assets].ffill().fillna(0.0).to_numpy(np.float64)
-    volume_ary = volume_wide.loc[wdates, assets].ffill().fillna(0.0).to_numpy(np.float64)
+    # F1 (Fable 2026-06-11): the env charges slippage participation =
+    # order_notional / volume_ary, so volume_ary MUST be DOLLAR volume (shares ×
+    # price), not raw share count. Raw share volume made participation
+    # dollars-per-share — overstating impact by ~price (≈90× for a $90 ETF) and
+    # mis-ranking per-asset cost. dollar_volume[t,i] = share_volume[t,i] × close[t,i]
+    # (close is the price basis used throughout this module; same wdates slice).
+    share_volume = volume_wide.loc[wdates, assets].ffill().fillna(0.0).to_numpy(np.float64)
+    volume_ary = share_volume * price_ary
 
     # Raw causal realized vol — the vol-scaling denominator. NEVER normalized.
     # Warmup NaN → 0; the env treats vol <= vol_floor as flat (weight 0), exactly
