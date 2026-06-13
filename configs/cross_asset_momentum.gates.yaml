@@ -1,9 +1,9 @@
 # ============================================================================
-# CROSS-ASSET MOMENTUM ALLOCATOR — decision gates overlay (xsec-mom-v1)
+# CROSS-ASSET MOMENTUM ALLOCATOR - decision gates overlay (xsec-mom-v1)
 # ============================================================================
 # Merged over the inline `gates:` of configs/cross_asset_momentum.yaml at
 # validation/eval time (validate_config._load_ensemble_gates_overlay). These are
-# the allocator's DECISION gates — the RL-beats-linear-core test and the
+# the allocator's DECISION gates - the RL-beats-linear-core test and the
 # diversification/cost-gap acceptance criteria from the architecture
 # (.agent/artifacts/multi_asset_allocator_architecture.md). All thresholds live
 # here (never hardcoded in code/scripts).
@@ -25,9 +25,82 @@ gates:
 
   # Allocator primary WF metric is net portfolio Sharpe (NOT single-instrument PF;
   # the linear core is ~0.60, so a floor of 0.40 is a survival sanity, not the
-  # deploy bar — the deploy decision is rl_beats_linear above).
+  # deploy bar - the deploy decision is rl_beats_linear above).
   wf_net_sharpe_floor: 0.40
 
   # Fixed-lot stress sub-report (X3; Protocol v2 Stage 3) sanity bounds.
   stress_dd_buffer_pp: 1.0               # headroom of worst fixed-lot DD from the cap (pp)
   stress_leverage_max: 6.0              # matches env.max_gross_exposure ceiling
+
+# ============================================================================
+# PAPER-SOAK GATES - PRE-REGISTERED 2026-06-12, BEFORE THE FIRST PAPER BAR.
+# ============================================================================
+# Separate from the `gates:` overlay above (those are validate_config/eval-time
+# DECISION gates). These gate the live-paper -> capital promotion and are
+# consumed by the paper executor + live-monitor (item 4 build), NOT by
+# validate_config. Declared now as a COMMITMENT DEVICE: the leak-era lesson is
+# that verdicts read post-hoc get rationalized, so the criteria are frozen while
+# the outcome is unknown. Do not loosen after the soak starts without a dated
+# decision memo (mirrors the gmgp1_xauusd "do not edit after launch" rule).
+#
+# CRITICAL CALIBRATION - the frozen linear core rebalances MONTHLY
+# (results/xsec_momentum baseline; net SR ~0.60 in-sample, honest band 0.4-0.6
+# per Fable verdict 2026-06-11). A live Sharpe estimate over a short soak is
+# statistically meaningless (resolving SR to +/-0.2 needs ~5 yr of monthly
+# returns). THEREFORE the PRIMARY soak gate is sim<->live EXECUTION PARITY (does
+# the executor reproduce the frozen core's positions/returns) - measurable in a
+# short soak - and the rolling-Sharpe floor is a LONG-HORIZON backstop, never
+# the promotion trigger.
+paper_soak:
+  status: pre_registered                 # wired into executor/monitor at item 4 (do not treat as live yet)
+  consumed_by: [paper_executor, live_monitor]   # NOT validate_config
+  baseline_ref: results/xsec_momentum/summary.md   # the frozen linear core this soak shadows
+
+  # --- promotion horizon ---
+  min_soak_calendar_days: 90             # >= 1 quarter (matches quarterly retrain cadence)
+  min_rebalances_observed: 3             # >= 3 clean monthly rebalance cycles executed
+  rebalance_cadence: monthly             # MUST match the frozen core; weekly/daily = a DIFFERENT strategy
+
+  # --- PRIMARY gate: sim<->live execution parity (the real soak test) ---
+  parity:
+    max_daily_return_te_bps: 15          # |live - sim| daily portfolio-return tracking error
+    max_weight_l1_drift: 0.05            # sum|w_live - w_sim| across assets at each rebalance
+    max_missed_rebalances: 0             # every scheduled monthly rebalance must execute
+    max_cost_drift_ratio: 1.50           # realized one-way cost <= 1.5x the 2bps+slippage model
+
+  # --- ALWAYS-ON risk kill-switches (broken-executor / regime-break, not normal variance) ---
+  risk:
+    max_drawdown_kill_pct: 20.0          # halt+flatten if live equity DD from peak >= 20%
+                                         #   (a ~10%-vol 0.5-SR book draws 12-18% in bad runs;
+                                         #    20% = "edge gone or executor broken", not variance)
+    max_gross_exposure: 6.0              # matches env.max_gross_exposure / stress ceiling
+    daily_loss_halt_pct: 4.0             # single-day equity loss (~6 sigma on a 10%-vol book) -> halt for review
+
+  # --- diversification / regime drift (the north-star: an UNCORRELATED sleeve) ---
+  drift:
+    max_corr_to_spy: 0.40                # 60d rolling daily-return corr to SPY (core was 0.08) -> trip review
+    corr_window_days: 60
+    max_single_class_pnl_share: 0.60     # no asset class supplies > 60% of cumulative P&L
+    sleeve_attribution_required: true    # per-class (equity/rates/commodity/fx) P&L logged each rebalance
+
+  # --- BACKSTOP: long-horizon performance floor (NOT a short-soak trigger) ---
+  # Calibrated to the HONEST band (net SR 0.4-0.6), NOT the in-sample 0.60
+  # headline (curation flattered it ~0.2). The floor sits BELOW the band's lower
+  # edge so it fires only on genuine edge loss, not normal live underperformance.
+  performance:
+    rolling_sharpe_floor: 0.30           # trailing live net SR below this -> review (not auto-kill)
+    rolling_sharpe_window_months: 12     # trailing window for the SR estimate
+    min_months_for_sharpe: 12            # gate = UNKNOWN_INSUFFICIENT_DATA until this many monthly returns
+    honest_band: [0.40, 0.60]            # reference expectation (net SR, ~10% vol) - NOT a gate value
+
+paper_soak_provenance:
+  drafted_on: '2026-06-12'
+  drafted_by_session: S553-cont-44
+  rationale: >-
+    Item 2 of the pre-paper TSMOM hardening list. Primary gate is execution
+    parity because the monthly core makes short-soak Sharpe unmeasurable;
+    Sharpe floor calibrated to the Fable honest band (0.4-0.6), not in-sample.
+  wiring_pending: >-
+    paper executor + live-monitor (item 4). Until wired, this block is a frozen
+    pre-registration, not an enforced gate. A validate_config presence-check may
+    be added when the allocator live config is built.
