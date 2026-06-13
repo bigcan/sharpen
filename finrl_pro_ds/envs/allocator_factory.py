@@ -146,14 +146,18 @@ def monthly_rebal_conviction(timestamps: np.ndarray, conviction_ary: np.ndarray)
     return out
 
 
-def _drive(env: MultiAssetAllocatorEnv, action_at_step) -> dict:
+def _drive(env: MultiAssetAllocatorEnv, action_at_step) -> tuple[dict, np.ndarray]:
     """Run ``env`` to termination, action chosen by ``action_at_step(step_idx, obs)``
     (env-native convention: action at step k governs the k→k+1 move). Returns
-    metrics computed from the env's own step returns / turnover."""
+    ``(metrics, weights)``: ``metrics`` from the env's own step returns / turnover,
+    and ``weights[k]`` the signed target weight held during the k→k+1 move
+    (``info['position']`` after the step — post vol-scaling, availability-zeroing,
+    and gross cap)."""
     obs, _ = env.reset()
     step_returns: list[float] = []
     turnovers: list[float] = []
     pvs: list[float] = [env.initial_capital]
+    weights: list[np.ndarray] = []
     done = False
     while not done:
         k = env.step_idx
@@ -162,8 +166,9 @@ def _drive(env: MultiAssetAllocatorEnv, action_at_step) -> dict:
         step_returns.append(info["step_return"])
         turnovers.append(info["turnover"])
         pvs.append(info["portfolio_value"])
+        weights.append(info["position"])
         done = terminated or truncated
-    return _metrics(step_returns, turnovers, pvs)
+    return _metrics(step_returns, turnovers, pvs), np.asarray(weights, dtype=np.float64)
 
 
 def _metrics(step_returns: list[float], turnovers: list[float], pvs: list[float]) -> dict:
@@ -192,6 +197,33 @@ def _metrics(step_returns: list[float], turnovers: list[float], pvs: list[float]
     }
 
 
+def _linear_core_drive(
+    arrays: Mapping,
+    config: Mapping,
+    overrides: Mapping | None,
+) -> tuple[dict, np.ndarray]:
+    """Shared frozen-linear-core env drive behind :func:`evaluate_linear_core` (the
+    gate metrics) and :func:`linear_core_weights` (the executor's weight trajectory).
+    Keeping ONE drive path guarantees the executor's target weights are byte-identical
+    to the gate baseline (ADR-7) — rung-1 paper-sim parity is ≈0 by construction.
+
+    Drives the env (real config costs, ``eval_mode``) with the monthly-rebalanced
+    ``conviction_ary`` under the env-native convention. Forces the v1.1 execution
+    levers OFF regardless of config/overrides: the baseline is the validated monthly
+    linear core, not "linear core through the RL's trading discipline" (a 5-bar
+    ``rebalance_interval`` would even block the monthly cadence whenever month-end
+    falls off-cadence). Requires ``arrays['conviction_ary']`` (from
+    ``build_allocator_arrays``).
+    """
+    if "conviction_ary" not in arrays:
+        raise KeyError("the linear-core drive needs arrays['conviction_ary'] "
+                       "(build_allocator_arrays output)")
+    conv_monthly = monthly_rebal_conviction(arrays["timestamps"], arrays["conviction_ary"])
+    core_overrides = {**(overrides or {}), **_EXECUTION_LEVERS_OFF}
+    env = make_allocator_env(arrays, config, overrides=core_overrides, eval_mode=True)
+    return _drive(env, lambda k, obs: conv_monthly[k])
+
+
 def evaluate_linear_core(
     arrays: Mapping,
     config: Mapping,
@@ -205,14 +237,25 @@ def evaluate_linear_core(
     RL eval, so the RL−baseline uplift is well-posed. Requires
     ``arrays['conviction_ary']`` (from ``build_allocator_arrays``).
     """
-    if "conviction_ary" not in arrays:
-        raise KeyError("evaluate_linear_core needs arrays['conviction_ary'] "
-                       "(build_allocator_arrays output)")
-    conv_monthly = monthly_rebal_conviction(arrays["timestamps"], arrays["conviction_ary"])
-    # Force the v1.1 execution levers OFF regardless of config/overrides: the
-    # baseline is the validated monthly linear core, not "linear core through the
-    # RL's trading discipline" (a 5-bar rebalance_interval would even block the
-    # monthly cadence whenever month-end falls off-cadence).
-    core_overrides = {**(overrides or {}), **_EXECUTION_LEVERS_OFF}
-    env = make_allocator_env(arrays, config, overrides=core_overrides, eval_mode=True)
-    return _drive(env, lambda k, obs: conv_monthly[k])
+    metrics, _ = _linear_core_drive(arrays, config, overrides)
+    return metrics
+
+
+def linear_core_weights(
+    arrays: Mapping,
+    config: Mapping,
+    *,
+    overrides: Mapping | None = None,
+) -> np.ndarray:
+    """Per-step target-weight trajectory of the frozen linear core — the paper
+    executor's weight source (ADR-7; resolves spec Open-Item-1 toward the env path).
+
+    Returns ``w`` of shape ``(n_steps, N)`` where ``w[k]`` is the signed weight the
+    core holds during the k→k+1 move (vol-scaled monthly conviction, capped). Because
+    it shares :func:`_linear_core_drive` with :func:`evaluate_linear_core`, the
+    executor's target weights are byte-identical to the RL-beats-linear gate baseline
+    and rung-1 paper-sim parity is ≈0 by construction. ``w[-1]`` is the weight to hold
+    going forward from the most recent bar (the live order-generation target).
+    """
+    _, weights = _linear_core_drive(arrays, config, overrides)
+    return weights
