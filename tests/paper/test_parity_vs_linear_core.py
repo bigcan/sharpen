@@ -49,8 +49,10 @@ def test_parity_synthetic_18_asset(cfg, gates_cfg, arrays_18):
     # synthetic random-sign conviction are data-dependent and not the point here.
     verdict = evaluate_paper_soak_gates(live, rep, gates_cfg)
     assert verdict["groups"]["parity"]["status"] == "PASS"
-    assert verdict["overall_status"] in {"PASS", "FAIL", "REVIEW"}
+    assert verdict["overall_status"] in {"PASS", "FAIL", "REVIEW", "UNKNOWN_INSUFFICIENT_DATA"}
     assert verdict["rebalance_cadence"] == "monthly"
+    # the full-span month-end calendar is genuinely satisfied in a full replay ⇒ 0 missed.
+    assert rep.missed_rebalances == 0
 
 
 def test_parity_verdict_serializes(tmp_path, cfg, gates_cfg, arrays_18):
@@ -63,7 +65,7 @@ def test_parity_verdict_serializes(tmp_path, cfg, gates_cfg, arrays_18):
     out = serialize_verdict(verdict, tmp_path / "paper_soak_verdict.json")
     assert out.exists()
     loaded = json.loads(out.read_text(encoding="utf-8"))
-    assert loaded["overall_status"] in {"PASS", "FAIL", "REVIEW"}
+    assert loaded["overall_status"] in {"PASS", "FAIL", "REVIEW", "UNKNOWN_INSUFFICIENT_DATA"}
     assert loaded["groups"]["parity"]["checks"]["weight_l1_drift"]["status"] == "PASS"
     assert loaded["groups"]["parity"]["checks"]["daily_return_te_bps"]["status"] == "PASS"
 
@@ -81,6 +83,22 @@ def test_forward_prefix_consistency(cfg, arrays_18):
         assert W_trunc.shape == (m, arrays_18["price_ary"].shape[1])
         np.testing.assert_array_equal(W_trunc, W_full[:m])
     del T
+
+
+def test_missed_rebalances_detects_a_dropped_month_end():
+    """With the full-span month-end calendar (not the self-derived subset), dropping a true
+    month-end from the processed set is now DETECTABLE — the HARD gate can actually fail
+    (P3-02/P8-02/P10-04; previously it was structurally pinned at 0)."""
+    import pandas as pd
+
+    ts = (pd.bdate_range("2020-01-01", periods=170).asi8 // 10**9).astype("int64")  # ~8 months
+    expected = ParityHarness._true_month_end_ts(ts)
+    assert len(expected) >= 6
+    # processed every bar (incl. every true month-end) ⇒ 0 missed.
+    assert ParityHarness._missed_rebalances(ts, expected_ts=expected) == 0
+    # drop one true month-end from the processed set ⇒ exactly 1 missed (the gate CAN fail).
+    dropped = ts[ts != expected[3]]
+    assert ParityHarness._missed_rebalances(dropped, expected_ts=expected) == 1
 
 
 @pytest.mark.skipif(not OHLCV_CACHE.exists(),

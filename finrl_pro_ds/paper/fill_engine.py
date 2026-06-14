@@ -10,8 +10,10 @@ rebalance's signed weight deltas into realized fills + costs.
     ``slippage = Σ|order_notional|·(base_bps + impact_bps·participation)·1e-4`` with
     **F1-correct** ``participation = |order_notional| / dollar_volume`` (ADR-6; the
     ``volume_ary`` carried by ``build_allocator_arrays`` is shares×price). This mirrors
-    ``MultiAssetAllocatorEnv._calc_transaction_costs_fast`` line-for-line so the
-    rung-1 paper-sim parity vs ``evaluate_linear_core`` is ≈0 by construction.
+    ``MultiAssetAllocatorEnv._calc_transaction_costs_fast`` line-for-line, so the rung-1
+    ``cost_drift_ratio`` is 1.0 by construction — an ACCOUNTING-fidelity check, NOT a
+    forward-cost validation. Real fill-price deviation vs this modeled cost is measured
+    only at rung-2 with live IB fills (where ``cost_drift_ratio`` becomes informative).
   - **IBFillEngine (rung 2):** real Interactive Brokers paper fills/commissions —
     operator-gated (ADR-5); not built in this step (the ABC marks the seam).
 

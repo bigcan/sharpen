@@ -167,3 +167,61 @@ def test_fresh_book_defaults():
     assert book.peak_equity == 250_000.0
     assert book.positions.shape == (5,) and not book.positions.any()
     assert len(book.assets) == 5
+
+
+def test_load_preserves_liquidated_book(tmp_path):
+    """A liquidated/flattened book persists margin_balance == 0.0; load() must NOT
+    resurrect it to initial_capital via the __post_init__ unset-heuristic (P10-02)."""
+    book = PaperState(n_assets=3, initial_capital=100_000.0, assets=["SPY", "TLT", "GLD"])
+    book.margin_balance = 0.0                 # liquidation guard floored it to exactly 0.0
+    book.peak_equity = 137_000.0              # the real historical peak (DD is measured from here)
+    book.positions = np.zeros(3)
+    book.realized_pnl = -100_000.0
+    book.save(tmp_path)
+
+    b2 = PaperState.load(tmp_path)
+    assert b2.margin_balance == 0.0           # NOT resurrected to 100_000
+    assert b2.peak_equity == 137_000.0        # preserved, not reset to initial
+    assert not b2.positions.any()
+
+
+def test_resume_continuity(tmp_path, cfg):
+    """run → save → load → continue must equal an uninterrupted run (the justification for a
+    separate forward book). A to_frame/load regression that round-trips fields but corrupts
+    continuation would pass test_persistence_round_trip yet silently break a resumed soak."""
+    arrays = allocator_arrays(T=120, n=4, seed=13, volume=1e7)
+    W = linear_core_weights(arrays, cfg)
+    price, volume, carry = arrays["price_ary"], arrays["volume_ary"], arrays["carry_ary"]
+    eng = SimFillEngine(taker_fee_pct=cfg["env"]["taker_fee"],
+                        slippage_base_bps=cfg["env"]["slippage_base_bps"],
+                        slippage_impact_bps=cfg["env"]["slippage_impact_bps"])
+    cap = float(cfg["env"]["initial_capital"])
+
+    def step(book, k):
+        pv_before = book.pv_before(price[k])
+        delta = generate_orders(W[k], book.positions, min_trade_pct=0.0)
+        fill = eng.fill(delta_weights=delta, ref_prices=price[k + 1], pv_before=pv_before,
+                        dollar_volume=volume[k])
+        return book.step_bar(delta_weights=delta, fill=fill, prev_price=price[k],
+                             price_now=price[k + 1], carry_rates=carry[k + 1], pv_before=pv_before)
+
+    cont = PaperState(n_assets=4, initial_capital=cap)
+    info_c = None
+    for k in range(len(price) - 1):
+        info_c = step(cont, k)
+
+    mid = (len(price) - 1) // 2
+    book = PaperState(n_assets=4, initial_capital=cap)
+    for k in range(mid):
+        step(book, k)
+    book.save(tmp_path)                       # interrupt: persist + reload mid-soak
+    book = PaperState.load(tmp_path)
+    info_r = None
+    for k in range(mid, len(price) - 1):
+        info_r = step(book, k)
+
+    np.testing.assert_allclose(book.positions, cont.positions, atol=1e-9)
+    np.testing.assert_allclose(book.entry_notionals, cont.entry_notionals, atol=1e-6)
+    assert abs(book.margin_balance - cont.margin_balance) < 1e-6
+    assert abs(book.cumulative_fees - cont.cumulative_fees) < 1e-6
+    assert abs(info_r["portfolio_value"] - info_c["portfolio_value"]) < 1e-6

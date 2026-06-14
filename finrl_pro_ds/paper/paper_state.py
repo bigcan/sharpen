@@ -73,7 +73,10 @@ class PaperState:
     n_assets: int
     initial_capital: float
     assets: list[str] = field(default_factory=list)
-    margin_balance: float = 0.0
+    # NaN sentinel (not 0.0) distinguishes "unset → default to initial_capital" from a
+    # genuinely-persisted 0.0 — a liquidated book floors margin to EXACTLY 0.0, and the old
+    # `== 0.0` heuristic resurrected it to full capital on reload (P10-02).
+    margin_balance: float = float("nan")
     # Default to empty arrays (sized to n_assets in __post_init__); keeps the dataclass
     # field types clean (ndarray, not Optional) while still allowing a bare
     # PaperState(n_assets=N, initial_capital=C) construction.
@@ -83,7 +86,7 @@ class PaperState:
     realized_pnl: float = 0.0
     cumulative_fees: float = 0.0
     cumulative_carry: float = 0.0
-    peak_equity: float = 0.0
+    peak_equity: float = float("nan")    # NaN sentinel (see margin_balance) — preserve a persisted peak
     as_of_ts: int = 0
 
     def __post_init__(self) -> None:
@@ -95,9 +98,11 @@ class PaperState:
             self.entry_notionals = np.zeros(self.n_assets, dtype=np.float64)
         if not self.assets:
             self.assets = [f"asset_{i}" for i in range(self.n_assets)]
-        if self.margin_balance == 0.0:
+        # NaN sentinel ⇒ unset ⇒ default to initial_capital; a persisted 0.0 (liquidated
+        # book) is preserved (P10-02). load() passes the real persisted values.
+        if np.isnan(self.margin_balance):
             self.margin_balance = float(self.initial_capital)
-        if self.peak_equity == 0.0:
+        if np.isnan(self.peak_equity):
             self.peak_equity = float(self.initial_capital)
 
     # ------------------------------------------------------------------ #
