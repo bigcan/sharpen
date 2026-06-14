@@ -17,9 +17,23 @@ soak is sim↔live fidelity. The harness:
      ``cost_drift_ratio``.
 
 Because the replay's target weights come from the SAME ``_linear_core_drive`` path as
-the oracle, and the book reproduces the env accounting, rung-1 parity is ≈0 by
-construction — any non-zero drift is a real forward-path bug (data fetch, calendar,
-look-ahead, scheduler). That is exactly the failure mode the soak exists to catch.
+the oracle, and the book reproduces the env accounting, rung-1 parity is ≈0 **by
+construction**.
+
+**SCOPE (Tier-2 audit 2026-06-14: P3-01 / P10-01 / P8-03 / P11-04 / P1-09).** That 0 is
+**load-bearing for ACCOUNTING only** — it proves ``PaperState.step_bar`` reproduces
+``MultiAssetAllocatorEnv.step`` on identical weights (a real independent-reimplementation
+check: ``daily_return_te_bps`` and the equity curve genuinely diverge if the book is
+wrong). It is **tautological on the WEIGHT/COST axis**: ``weight_l1_drift`` is 0 because
+the replay consumes the oracle's *own* weights (``min_trade_pct=0``), and
+``cost_drift_ratio`` is 1.0 because ``SimFillEngine`` is a line-for-line transcription of
+the env cost model. Neither validates the forward DATA path — live fetch, calendar,
+growing-window assembly, scheduler date — which is the unbuilt **step-4** and MUST get its
+own independent-recompute parity (feed an INDEPENDENTLY recomputed live weight series into
+``compare``) plus a Tier-2 re-audit before capital. The look-ahead guarantee comes from
+``tests/paper/test_paper_causality.py`` + ``test_forward_prefix_consistency``, NOT from
+``weight_l1_drift``. Do NOT read a green rung-1 ``weight_l1_drift`` / ``cost_drift`` as
+forward-path validation.
 """
 from __future__ import annotations
 
@@ -80,6 +94,9 @@ class ParityHarness:
         self.slippage_base_bps = float(env_cfg.get("slippage_base_bps", 1.0))
         self.slippage_impact_bps = float(env_cfg.get("slippage_impact_bps", 5.0))
         self.initial_capital = float(env_cfg.get("initial_capital", 100_000.0))
+        # The full intended month-end calendar, stashed by run() for compare()'s
+        # missed_rebalances (None until run() has executed — see _true_month_end_ts).
+        self._expected_rebalance_ts: np.ndarray | None = None
 
     # ------------------------------------------------------------------ #
     def sim_oracle(self, arrays: Mapping) -> dict:
@@ -101,6 +118,12 @@ class ParityHarness:
         """
         sim = self.sim_oracle(arrays)
         live = self._replay(arrays, sim["weights"], fill_engine=fill_engine)
+        # Stash the FULL intended month-end calendar (P3-02) for compare()'s
+        # missed_rebalances — derived from the complete arrays span, NOT from what was
+        # processed, so a (step-4) scheduler that skips a scheduled month-end is detectable.
+        # In the rung-1 full replay every month-end is processed ⇒ genuinely 0 (not vacuous).
+        self._expected_rebalance_ts = self._true_month_end_ts(
+            np.asarray(arrays["timestamps"], dtype=np.int64))
         return live, sim
 
     def _asset_meta(self, arrays: Mapping, n_assets: int) -> tuple[list[str], dict[str, str]]:
@@ -211,15 +234,37 @@ class ParityHarness:
         else:
             cost_drift_ratio = 1.0 if live_cost <= 1e-12 else float("inf")
 
+        # Restrict the stashed full-span month-end calendar to the live soak window so
+        # warmup / index-0 edge bars cannot create a spurious miss; fall back to the
+        # (self-derived, rung-1-vacuous) calendar only if run() was not used.
+        expected = self._expected_rebalance_ts
+        if expected is not None and live.n_steps:
+            lo, hi = int(live.timestamps.min()), int(live.timestamps.max())
+            expected = expected[(expected >= lo) & (expected <= hi)]
+        missed = self._missed_rebalances(live.timestamps, expected_ts=expected)
+
         return ParityReport(
             weight_l1_drift_max=float(l1.max()),
             weight_l1_drift_mean=float(l1.mean()),
             daily_return_te_bps_mean=float(te_bps.mean()),
             daily_return_te_bps_max=float(te_bps.max()),
-            missed_rebalances=self._missed_rebalances(live.timestamps),
+            missed_rebalances=missed,
             cost_drift_ratio=cost_drift_ratio,
             n_steps=n,
         )
+
+    @staticmethod
+    def _true_month_end_ts(timestamps: np.ndarray) -> np.ndarray:
+        """The true monthly-rebalance calendar of a timestamp span: the LAST actual
+        trading day of each (year, month) present. This is the *intended* calendar a
+        live scheduler must hit — independent of which bars were actually processed,
+        so a dropped month-end is detectable (cf. the self-derived calendar that is a
+        subset of `processed` by construction and can never report a miss)."""
+        ts = np.asarray(timestamps, dtype=np.int64)
+        if ts.size == 0:
+            return np.empty(0, dtype=np.int64)
+        months = pd.to_datetime(ts, unit="s").to_period("M")
+        return pd.Series(ts).groupby(months.values).max().to_numpy().astype(np.int64)
 
     @staticmethod
     def _missed_rebalances(processed_ts: np.ndarray, expected_ts: np.ndarray | None = None) -> int:

@@ -69,12 +69,18 @@ paper_soak:
     max_cost_drift_ratio: 1.50           # realized one-way cost <= 1.5x the 2bps+slippage model
 
   # --- ALWAYS-ON risk kill-switches (broken-executor / regime-break, not normal variance) ---
+  # RECALIBRATED 2026-06-14 to the env-path (daily-vol-rescale) empirical risk — see
+  # paper_soak_provenance.recalibration_2026_06_14 + Tier-2 audit
+  # (docs/research/cross_asset_momentum_paper_rung1_deep_lifecycle_audit_2026-06-14.md, P11-02/P8-04).
+  # The shadowed daily-rescale render runs at ~19.6% vol with a 42.8% historical max DD /
+  # -9.77% worst day — NOT the ~10%-vol/22%-DD book the original 20%/4% kills assumed. Kills
+  # now sit ABOVE every historical extreme so they signal "edge gone or executor broken", not
+  # a normal drawdown (which would auto-flatten + raise a false "broken" alarm). Operator chose
+  # Option A (recalibrate + keep daily-rescale); Option B (portfolio-vol overlay → ~22% DD) declined.
   risk:
-    max_drawdown_kill_pct: 20.0          # halt+flatten if live equity DD from peak >= 20%
-                                         #   (a ~10%-vol 0.5-SR book draws 12-18% in bad runs;
-                                         #    20% = "edge gone or executor broken", not variance)
-    max_gross_exposure: 6.0              # matches env.max_gross_exposure / stress ceiling
-    daily_loss_halt_pct: 4.0             # single-day equity loss (~6 sigma on a 10%-vol book) -> halt for review
+    max_drawdown_kill_pct: 50.0          # > env-path historical max DD 42.8% (+~17% headroom)
+    max_gross_exposure: 3.3              # env caps gross at 3.0 (env.max_gross_exposure) + ~10% margin; realized 3.04
+    daily_loss_halt_pct: 12.0            # > env-path worst single day -9.77% (+~23% headroom)
 
   # --- diversification / regime drift (the north-star: an UNCORRELATED sleeve) ---
   drift:
@@ -104,3 +110,25 @@ paper_soak_provenance:
     paper executor + live-monitor (item 4). Until wired, this block is a frozen
     pre-registration, not an enforced gate. A validate_config presence-check may
     be added when the allocator live config is built.
+  recalibration_2026_06_14:
+    session: S553-cont-47
+    audit_ref: docs/research/cross_asset_momentum_paper_rung1_deep_lifecycle_audit_2026-06-14.md
+    decision: >-
+      Operator Option A (recalibrate the risk kills to the env-path daily-rescale render;
+      keep the 2026-06-13 daily-vol-rescale decision; Option B portfolio-vol overlay
+      declined). The strategy the executor actually shadows is the daily-rescale render of
+      the frozen core: net SR ~0.441 (inside the Fable honest band [0.40,0.60]), ~19.6% vol,
+      42.8% historical max DD, -9.77% worst day - NOT the monthly-frozen GO headline (SR
+      0.601). The pre-registered 20% DD / 4% daily-loss kills were calibrated to a
+      ~10%-vol/22%-DD book, so the strategy FAILed its own risk gates on its own history.
+    changes:
+      max_drawdown_kill_pct: {from: 20.0, to: 50.0}
+      daily_loss_halt_pct: {from: 4.0, to: 12.0}
+      max_gross_exposure: {from: 6.0, to: 3.3}
+    note: >-
+      This is a LOOSENING under the "do not loosen without a dated memo" rule: the kills are
+      raised above the historical extremes so they fire only on a genuine break, the
+      documented consequence of accepting the high-DD daily-rescale sleeve (Option A). Two
+      related calibration items are TRACKED for a follow-up, NOT changed here: the drift
+      corr-to-SPY gate (60d rolling vs the 0.08 full-sample reference, P11-03) and wiring the
+      existing PSR/MinTRL control into the performance backstop (P11-05).

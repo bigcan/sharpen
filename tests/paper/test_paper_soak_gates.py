@@ -46,7 +46,7 @@ def make_live(
         cumulative_fees=np.zeros(n),
         gross_exposure=np.full(n, gross),
         net_exposure=np.zeros(n),
-        timestamps=np.arange(n, dtype=np.int64),
+        timestamps=np.arange(n, dtype=np.int64) * 86400,   # day-spaced (horizon gate reads the calendar span)
         class_pnl=class_pnl or {"equity": 1.0, "rates": 1.0, "commodity": 1.0, "fx": 1.0},
         assets=_ASSETS,
         asset_class=_CLASSES,
@@ -112,10 +112,10 @@ def test_cost_drift_and_missed_rebalances_trip(gates_cfg):
 # risk (HARD)
 # --------------------------------------------------------------------------- #
 def test_drawdown_kill_trips(gates_cfg):
-    # +1% ten times then -3% ten times ⇒ ~26% peak-to-trough > 20% kill.
-    r = np.concatenate([np.full(10, 0.01), np.full(10, -0.03)])
+    # +1% five times then -5% fifteen times ⇒ ~54% peak-to-trough > 50% recalibrated kill.
+    r = np.concatenate([np.full(5, 0.01), np.full(15, -0.05)])
     live = make_live(r)
-    assert live.max_drawdown_pct() > 20.0
+    assert live.max_drawdown_pct() > 50.0
     v = evaluate_paper_soak_gates(live, clean_parity(n_steps=len(r)), gates_cfg)
     assert v["groups"]["risk"]["checks"]["max_drawdown_pct"]["status"] == FAIL
     assert v["overall_status"] == FAIL
@@ -123,7 +123,7 @@ def test_drawdown_kill_trips(gates_cfg):
 
 def test_daily_loss_halt_trips(gates_cfg):
     r = _benign_returns().copy()
-    r[150] = -0.05                                   # a single -5% day > 4% halt
+    r[150] = -0.15                                   # a single -15% day > 12% recalibrated halt
     live = make_live(r)
     v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
     assert v["groups"]["risk"]["checks"]["daily_loss_pct"]["status"] == FAIL
@@ -131,7 +131,7 @@ def test_daily_loss_halt_trips(gates_cfg):
 
 
 def test_gross_exposure_trips(gates_cfg):
-    live = make_live(_benign_returns(), gross=7.0)    # > 6.0 ceiling
+    live = make_live(_benign_returns(), gross=4.0)    # > 3.3 recalibrated ceiling (env cap 3.0)
     v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
     assert v["groups"]["risk"]["checks"]["max_gross_exposure"]["status"] == FAIL
     assert v["overall_status"] == FAIL
@@ -162,6 +162,29 @@ def test_single_class_pnl_share_trips_review(gates_cfg):
     v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
     assert v["groups"]["drift"]["checks"]["max_single_class_pnl_share"]["status"] == FAIL
     assert v["overall_status"] == "REVIEW"
+
+
+# --------------------------------------------------------------------------- #
+# horizon / sufficiency (capital promotion cannot precede the declared soak length)
+# --------------------------------------------------------------------------- #
+def test_horizon_blocks_premature_pass(gates_cfg):
+    """A sub-horizon trajectory (< min_soak_calendar_days / < min_rebalances_observed)
+    can NEVER return the promotable PASS — it blocks as UNKNOWN_INSUFFICIENT_DATA (P8-01),
+    even though parity/risk are clean."""
+    live = make_live(_benign_returns(n=30))            # ~29 days, 1 month < 90d / 3 rebalances
+    v = evaluate_paper_soak_gates(live, clean_parity(n_steps=30), gates_cfg)
+    assert v["groups"]["horizon"]["status"] == UNKNOWN
+    assert v["groups"]["parity"]["status"] == PASS and v["groups"]["risk"]["status"] == PASS
+    assert v["overall_status"] == UNKNOWN              # fail-closed: not PASS despite clean hard gates
+
+
+def test_horizon_met_allows_pass(gates_cfg):
+    """Once the calendar span and rebalance count clear the horizon, a clean trajectory
+    promotes to PASS (the gate is a floor, not a permanent block)."""
+    live = make_live(_benign_returns(n=300))           # ~299 days, ~10 months
+    v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
+    assert v["groups"]["horizon"]["status"] == PASS
+    assert v["overall_status"] == PASS
 
 
 # --------------------------------------------------------------------------- #

@@ -128,7 +128,17 @@ def monthly_rebal_conviction(timestamps: np.ndarray, conviction_ary: np.ndarray)
     """Step-function conviction that changes only on the last trading day of each
     month (the validated linear-core cadence). ``conviction_ary`` is the raw daily
     ``trend_conviction``; between rebalances the most recent month-end conviction is
-    held. Causal: each month-end conviction is itself a causal signal."""
+    held. Causal: each month-end conviction is itself a causal signal.
+
+    **Truncation caveat (Tier-2 audit 2026-06-14, P2-01).** ``last_of_month`` is the max
+    index *within the given window*, so on a window truncated mid-month the in-progress
+    FINAL bar is flagged as a month-end and ``out[-1]`` is the partial-month raw daily
+    conviction. The batch drive is UNAFFECTED — its last decision is at index ``T-2``, which
+    reads only confirmed interior month-ends; the final-bar flag is never consumed. But a
+    forward / incremental reader MUST NOT take ``monthly_rebal_conviction(window)[-1]`` as the
+    live target: use :func:`linear_core_weights` ``w[-1]`` (which lags to the last CONFIRMED
+    month-end) or an independent true-month-end calendar. Reading the in-progress tail is an
+    ADR-2 "daily is a different strategy" / X2-class look-ahead trap."""
     ts = np.asarray(timestamps, dtype=np.int64)
     dates = pd.to_datetime(ts, unit="s")
     months = dates.to_period("M")
@@ -265,8 +275,13 @@ def linear_core_weights(
     core holds during the k→k+1 move (vol-scaled monthly conviction, capped). Because
     it shares :func:`_linear_core_drive` with :func:`evaluate_linear_core`, the
     executor's target weights are byte-identical to the RL-beats-linear gate baseline
-    and rung-1 paper-sim parity is ≈0 by construction. ``w[-1]`` is the weight to hold
-    going forward from the most recent bar (the live order-generation target).
+    and rung-1 paper-sim parity is ≈0 by construction (on the accounting axis — see
+    :func:`linear_core_trajectory`). ``w[-1]`` is the weight to hold going forward from the
+    most recent bar (the live order-generation target) — and it is the SAFE forward target:
+    the env drive's last decision (index ``T-2``) reads ``conv_monthly[T-2]``, the last
+    CONFIRMED interior month-end, NOT the in-progress final bar (cf. the
+    :func:`monthly_rebal_conviction` truncation caveat, P2-01). Step-4 MUST source the live
+    target from here, never from ``monthly_rebal_conviction(window)[-1]``.
     """
     _, weights, _ = _linear_core_drive(arrays, config, overrides)
     return weights
@@ -283,10 +298,13 @@ def linear_core_trajectory(
 
     Shares :func:`_linear_core_drive` with :func:`evaluate_linear_core` and
     :func:`linear_core_weights`, so the ``weights`` and ``equity_curve`` returned here
-    are byte-identical to the RL-beats-linear gate baseline. The paper executor's
-    forward (SimFillEngine + paper_state) path is compared against this trajectory, so
-    rung-1 paper-sim parity is ≈0 by construction — any non-zero ``weight_l1_drift`` or
-    ``daily_return_te_bps`` is a real forward-path bug, not an accounting artifact.
+    are byte-identical to the RL-beats-linear gate baseline. The paper executor's forward
+    (SimFillEngine + paper_state) path is compared against this trajectory; rung-1 parity
+    is ≈0 by construction. NOTE (Tier-2 audit 2026-06-14): that 0 is load-bearing for
+    ACCOUNTING (``daily_return_te_bps`` / equity diverge if the book is wrong) but
+    TAUTOLOGICAL on the weight axis (the replay consumes these very ``weights``); the
+    forward-DATA path (live fetch / calendar / scheduler) is validated at step-4, not here.
+    See :class:`~finrl_pro_ds.paper.parity_harness.ParityHarness` for the full scope.
 
     Returns dict with keys: ``weights (n_steps, N)``, ``equity_curve (n_steps + 1,)``
     (``equity_curve[0] == initial_capital``), ``step_returns (n_steps,)``,

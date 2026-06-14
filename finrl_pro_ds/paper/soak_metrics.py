@@ -155,16 +155,51 @@ def evaluate_paper_soak_gates(
         chk["months_observed"] = round(months_observed, 2)
         perf_checks = {"rolling_sharpe": chk}
 
+    # --- HORIZON / sufficiency (the soak must run long enough to mean anything) ---
+    # min_soak_calendar_days / min_rebalances_observed gate capital PROMOTION: the verdict
+    # can never be a promotable PASS until the soak has spanned the declared horizon AND
+    # executed enough monthly rebalance cycles (P8-01 — these keys previously had no consumer,
+    # so a 10-trading-day / 0-rebalance trajectory returned PASS).
+    ts = np.asarray(live.timestamps, dtype=np.int64)
+    if ts.size >= 2:
+        calendar_days = float((ts[-1] - ts[0]) / 86400.0)
+        rebalances_observed = int(np.unique(ts.astype("datetime64[s]").astype("datetime64[M]")).size)
+    else:
+        calendar_days, rebalances_observed = 0.0, 0
+    min_days = float(soak.get("min_soak_calendar_days", 0))
+    min_rebal = float(soak.get("min_rebalances_observed", 0))
+    horizon_ok = calendar_days >= min_days and rebalances_observed >= min_rebal
+    horizon_checks = {
+        "soak_calendar_days": {"value": round(calendar_days, 1), "threshold": min_days, "op": ">=",
+                               "status": PASS if calendar_days >= min_days else UNKNOWN},
+        "rebalances_observed": {"value": rebalances_observed, "threshold": min_rebal, "op": ">=",
+                                "status": PASS if rebalances_observed >= min_rebal else UNKNOWN},
+    }
+
     groups = {
         "parity": {"severity": "hard", "status": _group_status(parity_checks), "checks": parity_checks},
         "risk": {"severity": "hard", "status": _group_status(risk_checks), "checks": risk_checks},
         "drift": {"severity": "review", "status": _group_status(drift_checks), "checks": drift_checks},
         "performance": {"severity": "review", "status": _group_status(perf_checks), "checks": perf_checks},
+        "horizon": {"severity": "sufficiency", "status": PASS if horizon_ok else UNKNOWN,
+                    "checks": horizon_checks},
     }
 
-    hard_fail = any(g["status"] == FAIL for k, g in groups.items() if k in _HARD_GROUPS)
-    soft_fail = any(g["status"] == FAIL for k, g in groups.items() if k not in _HARD_GROUPS)
-    overall = FAIL if hard_fail else ("REVIEW" if soft_fail else PASS)
+    # Fail-CLOSED routing (P8-07): a HARD group that is FAIL → FAIL; a HARD group that is
+    # UNKNOWN, or an unmet soak horizon, can NEVER be a promotable PASS (→ UNKNOWN, blocking);
+    # a soft (drift/performance) FAIL → REVIEW. UNKNOWN in a HARD group used to pass through.
+    _SOFT_GROUPS = {"drift", "performance"}
+    hard_fail = any(groups[k]["status"] == FAIL for k in _HARD_GROUPS)
+    hard_unknown = any(groups[k]["status"] == UNKNOWN for k in _HARD_GROUPS)
+    soft_fail = any(groups[k]["status"] == FAIL for k in _SOFT_GROUPS)
+    if hard_fail:
+        overall = FAIL
+    elif hard_unknown or not horizon_ok:
+        overall = UNKNOWN
+    elif soft_fail:
+        overall = "REVIEW"
+    else:
+        overall = PASS
 
     return {
         "overall_status": overall,
