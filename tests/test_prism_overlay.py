@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
 from unittest.mock import MagicMock, patch
 
 import pytest
+
+
+def _call(overlay):
+    """Drive the async ``get_position_multiplier`` to completion.
+
+    The overlay method is ``async`` (FIX PRS-01 runs the blocking PRISM client
+    call in a thread executor). These tests are synchronous, so each call runs in
+    a fresh event loop; the overlay's cache/backoff state lives on the instance
+    and persists across loops, so that behaviour is preserved.
+    """
+    return asyncio.run(overlay.get_position_multiplier())
 
 
 @pytest.fixture
@@ -55,7 +67,7 @@ class TestPRISMOverlay:
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        multiplier, info = overlay.get_position_multiplier()
+        multiplier, info = _call(overlay)
 
         assert multiplier == 1.0
         assert info["vol_regime"] == "NORMAL_VOL"
@@ -70,7 +82,7 @@ class TestPRISMOverlay:
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        multiplier, info = overlay.get_position_multiplier()
+        multiplier, info = _call(overlay)
 
         assert multiplier == 1.3
         assert info["vol_regime"] == "LOW_VOL"
@@ -84,7 +96,7 @@ class TestPRISMOverlay:
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        multiplier, info = overlay.get_position_multiplier()
+        multiplier, info = _call(overlay)
 
         assert multiplier == 0.3
         assert info["vol_regime"] == "HIGH_VOL"
@@ -103,7 +115,7 @@ class TestPRISMOverlay:
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        multiplier, info = overlay.get_position_multiplier()
+        multiplier, info = _call(overlay)
 
         assert multiplier == 0.0
         assert info["composite_code"] == 2
@@ -122,7 +134,7 @@ class TestPRISMOverlay:
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        multiplier, info = overlay.get_position_multiplier()
+        multiplier, info = _call(overlay)
 
         # Without crisis flatten, HIGH_VOL multiplier applies
         assert multiplier == 0.3
@@ -136,7 +148,7 @@ class TestPRISMOverlay:
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        multiplier, info = overlay.get_position_multiplier()
+        multiplier, info = _call(overlay)
 
         assert multiplier == 1.0
         assert info["fallback"] is True
@@ -152,7 +164,7 @@ class TestPRISMOverlay:
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        multiplier, info = overlay.get_position_multiplier()
+        multiplier, info = _call(overlay)
 
         assert multiplier == 1.0
         assert info["fallback"] is True
@@ -168,9 +180,9 @@ class TestPRISMOverlay:
         overlay = PRISMOverlay(base_config)
 
         # First call hits API
-        m1, _ = overlay.get_position_multiplier()
+        m1, _ = _call(overlay)
         # Second call should use cache
-        m2, _ = overlay.get_position_multiplier()
+        m2, _ = _call(overlay)
 
         assert m1 == m2 == 1.3
         assert mock_client.get_regime.call_count == 1  # Only 1 API call
@@ -186,8 +198,8 @@ class TestPRISMOverlay:
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        overlay.get_position_multiplier()
-        overlay.get_position_multiplier()
+        _call(overlay)
+        _call(overlay)
 
         assert mock_client.get_regime.call_count == 2
 
@@ -202,7 +214,7 @@ class TestPRISMOverlay:
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        multiplier, _ = overlay.get_position_multiplier()
+        multiplier, _ = _call(overlay)
 
         assert multiplier == 0.5
 
@@ -210,25 +222,29 @@ class TestPRISMOverlay:
     def test_stats_tracking(self, mock_client_cls, base_config):
         from finrl_pro_ds.crypto.live.prism_overlay import PRISMOverlay
 
+        # cache_ttl=0 so a *successful* result is never reused, but an error
+        # opens a 5-minute fallback backoff during which the cached fallback is
+        # served WITHOUT a new API call (FIX PRS-03 + PRISM-01). So the 3rd call
+        # below does not reach the client.
         base_config["cache_ttl"] = 0
 
         mock_client = MagicMock()
         mock_client.get_regime.side_effect = [
             _make_regime(),
             ConnectionError("fail"),
-            _make_regime(),
         ]
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        overlay.get_position_multiplier()  # success
-        overlay.get_position_multiplier()  # error
-        overlay.get_position_multiplier()  # success
+        _call(overlay)  # success         -> API call 1
+        _call(overlay)  # error           -> API call 2, opens 5-min backoff
+        _call(overlay)  # within backoff  -> cached fallback, no API call
 
         stats = overlay.get_stats()
-        assert stats["total_calls"] == 3
+        assert stats["total_calls"] == 2
         assert stats["total_errors"] == 1
         assert stats["total_fallbacks"] == 1
+        assert mock_client.get_regime.call_count == 2
 
     @patch("prism_client.PRISMClient")
     def test_regime_info_fields(self, mock_client_cls, base_config):
@@ -245,7 +261,7 @@ class TestPRISMOverlay:
         mock_client_cls.return_value = mock_client
 
         overlay = PRISMOverlay(base_config)
-        _, info = overlay.get_position_multiplier()
+        _, info = _call(overlay)
 
         assert info["price_regime"] == "BULLISH"
         assert info["vol_regime"] == "LOW_VOL"

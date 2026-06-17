@@ -39,6 +39,7 @@ class PRISMOverlay:
     def __init__(self, config: dict[str, Any]):
         from prism_client import PRISMClient
 
+        self._enabled = bool(config.get("enabled", False))
         self._base_url = config.get("base_url", "http://prism-api:8001")
         self._ticker = config["ticker"]
         self._timeframe = config.get("timeframe", "daily")
@@ -75,7 +76,14 @@ class PRISMOverlay:
 
     @property
     def enabled(self) -> bool:
-        return True
+        """Reflects the ``prism.enabled`` config flag (default False).
+
+        The live runner already gates construction on this flag, so any
+        constructed overlay is normally enabled; the property exists so that
+        callers reading it get the truthful config value rather than a hardcoded
+        constant.
+        """
+        return self._enabled
 
     async def get_position_multiplier(self) -> tuple[float, dict[str, Any]]:
         """Get vol-regime position multiplier.

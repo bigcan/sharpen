@@ -33,7 +33,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "docker" / "live" / "prism_sdk"))
 
-from prism_client import PRISMClient
+from prism_client import PRISMClient  # noqa: E402  (import follows sys.path injection)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -317,12 +317,21 @@ def merge_and_save(
         if col in all_dates.columns:
             all_dates[col] = all_dates[col].fillna(0.0)
 
-    # Forward-fill regime labels (regime persists until next prediction)
+    # Forward-fill regime labels (a regime persists until the next prediction).
+    # Do NOT back-fill: bfill would seed leading dates with a FUTURE regime
+    # (look-ahead, LEAK-2), and in the degenerate single-prediction fallback it
+    # would smear the latest regime across the entire history. Leading dates with
+    # no prior prediction get a NEUTRAL prior instead.
+    _NEUTRAL_LABEL_DEFAULTS = {
+        "price_regime": 1,    # NEUTRAL
+        "vol_regime": 1,      # NORMAL_VOL
+        "composite_code": 4,  # NEUTRAL price + NORMAL vol
+        "confidence": 0.0,
+    }
     for col in ["price_regime", "vol_regime", "composite_code", "confidence"]:
         if col in all_dates.columns:
             all_dates[col] = all_dates[col].ffill()
-            # Back-fill any remaining NaN at the start
-            all_dates[col] = all_dates[col].bfill()
+            all_dates[col] = all_dates[col].fillna(_NEUTRAL_LABEL_DEFAULTS[col])
 
     # Add close price for reference
     all_dates["close"] = daily["close"]
