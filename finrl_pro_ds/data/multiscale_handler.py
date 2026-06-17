@@ -231,6 +231,7 @@ class MultiScaleOHLCVHandler:
         self._prism_lookup: dict | None = None
         self._prism_raw_codes: dict = {}  # date → raw composite code (0-8)
         self._prism_default = np.zeros(13, dtype=np.float32)
+        self._prism_dates: np.ndarray | None = None  # sorted day index (causal lookup)
 
         self.start_date = pd.to_datetime(start_date) if start_date else None
         self.end_date = pd.to_datetime(end_date) if end_date else None
@@ -439,13 +440,24 @@ class MultiScaleOHLCVHandler:
         result["atr"] = float(self._base_atr[self._ptr])
         result["timestamp"] = self._base_timestamps[self._ptr]
 
-        # PRISM L1: Lookup daily regime features for current bar
+        # PRISM L1: serve the LAST CLOSED daily regime bar (LEAK-2 / CAUS-01).
+        # The precompute stamps day t's row with features derived from day t's
+        # close (the Chronos window includes close[t]; the GAHMM regime is fit on
+        # day-t data), so an intraday bar on day t may only read the most recent
+        # PRIOR trading day's row. Keying by the bar's own day leaked up to a full
+        # day of its own future — the X2 coarse-bar leak class. searchsorted with
+        # side='left' minus 1 yields the last prism date strictly before today.
         if self._prism_lookup is not None:
             bar_day = np.datetime64(self._base_timestamps[self._ptr], "D")
-            result["prism"] = self._prism_lookup.get(bar_day, self._prism_default)
-            # RCRP + Path 2: Raw composite code (0-8) for replay balancing / DSR shaping
-            raw_code = self._prism_raw_codes.get(bar_day, -1)
-            result["regime_code"] = int(raw_code)
+            j = int(np.searchsorted(self._prism_dates, bar_day, side="left")) - 1
+            if j >= 0:
+                prev_day = self._prism_dates[j]
+                result["prism"] = self._prism_lookup[prev_day]
+                # RCRP + Path 2: raw composite code (0-8) for replay / DSR shaping
+                result["regime_code"] = int(self._prism_raw_codes.get(prev_day, -1))
+            else:
+                result["prism"] = self._prism_default
+                result["regime_code"] = -1
 
         self._ptr += 1
         return result
@@ -517,6 +529,11 @@ class MultiScaleOHLCVHandler:
             self._prism_lookup[day] = features
             # RCRP: Store raw composite code (0-8) for replay balancing / DSR shaping
             self._prism_raw_codes[day] = int(row.get("composite_code", -1))
+
+        # Sorted day index for the causal (last-CLOSED-bar) lookup in step().
+        self._prism_dates = np.array(
+            sorted(self._prism_lookup.keys()), dtype="datetime64[D]",
+        )
 
         logger.info(
             f"PRISM L1 features loaded: {len(self._prism_lookup)} dates "

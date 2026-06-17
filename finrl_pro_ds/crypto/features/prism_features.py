@@ -1,7 +1,7 @@
 """PRISM feature integration for FinRL crypto strategies.
 
-Imports PRISMFeatureProvider from the SAFFS project via sys.path injection.
-Set PRISM_ROOT env var to point to the SAFFS project root (default: C:\\FinRL\\SAFFS).
+Imports PRISMFeatureProvider from the PRISM project via sys.path injection.
+Set PRISM_ROOT env var to point to the PRISM project root (default: C:\\FinRL\\PRISM).
 
 Produces 13 features per asset per timestep:
     chronos_p10/p30/p50/p70/p90, chronos_spread,

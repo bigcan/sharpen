@@ -79,3 +79,77 @@ def test_coarse_scale_alignment_is_causal(tmp_path):
             f"are mapped to a coarse bar that has not yet closed (forward look-ahead of up to "
             f"{scale - base_scale}m)"
         )
+
+
+def _write_synth_prism_parquet(path) -> None:
+    """One daily PRISM row per synth day, each with a DISTINCT composite code.
+
+    The code carries the row's own date so the test can detect *which* day's
+    regime the handler served.
+    """
+    pd.DataFrame(
+        {
+            "date": pd.to_datetime(["2024-01-01", "2024-01-02", "2024-01-03"]),
+            "composite_code": [1, 4, 7],  # distinct; index-6 obs = code/8 != default
+        }
+    ).to_parquet(path)
+
+
+def test_prism_l1_daily_lookup_is_causal(tmp_path):
+    """PRISM L1 must serve the LAST CLOSED daily regime bar — never the bar's own day.
+
+    The precompute stamps day t's regime/forecast with features derived from data
+    through day t's close, so an intraday bar on day t may only read the most
+    recent PRIOR trading day's row. Reverting ``multiscale_handler.step()`` to the
+    bar's own-day lookup (``_prism_lookup.get(bar_day)``) re-introduces up to a
+    full day of look-ahead — the X2 coarse-bar leak class — and MUST fail here.
+    """
+    parquet = tmp_path / "synth_1min.parquet"
+    _write_synth_parquet(parquet)
+    prism_parquet = tmp_path / "synth_prism.parquet"
+    _write_synth_prism_parquet(prism_parquet)
+
+    handler = MultiScaleOHLCVHandler(
+        file_path=str(parquet),
+        ticker="SYNTH",
+        feature_config={
+            "scales": [3, 15, 60],
+            "window_size": 30,
+            "prism_features_path": str(prism_parquet),
+        },
+    )
+
+    code_by_day = {
+        np.datetime64("2024-01-01", "D"): 1,
+        np.datetime64("2024-01-02", "D"): 4,
+        np.datetime64("2024-01-03", "D"): 7,
+    }
+    prism_days = sorted(code_by_day)
+
+    def expected_causal_code(bar_day):
+        prior = [d for d in prism_days if d < bar_day]
+        return code_by_day[prior[-1]] if prior else -1
+
+    n_checked = 0
+    leak_would_differ = 0
+    handler.reset()
+    step = handler.step()
+    while step is not None:
+        bar_day = np.datetime64(step["timestamp"], "D")
+        served = step["regime_code"]
+        exp = expected_causal_code(bar_day)
+        assert served == exp, (
+            f"bar {step['timestamp']} (day {bar_day}) served regime_code={served}, "
+            f"expected last-CLOSED-day code={exp} -- PRISM L1 look-ahead leak"
+        )
+        # obs vector index 6 == composite_code / 8.0 (GAHMM passthrough); -1 -> default zeros
+        assert float(step["prism"][6]) == (served / 8.0 if served >= 0 else 0.0)
+        # Record that a same-day (leaky) lookup would have served a DIFFERENT code,
+        # so a regression genuinely trips this test rather than passing vacuously.
+        if bar_day in code_by_day and code_by_day[bar_day] != exp:
+            leak_would_differ += 1
+        n_checked += 1
+        step = handler.step()
+
+    assert n_checked > 0
+    assert leak_would_differ > 0, "test never exercised a bar where the leak would differ"
