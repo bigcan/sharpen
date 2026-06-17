@@ -103,19 +103,41 @@ def _chronos_live(df: pd.DataFrame) -> bool:
     return bool(cols) and bool(np.any(np.abs(df[cols].to_numpy()) > 1e-9))
 
 
-def eval_asset(label: str, df: pd.DataFrame, cost_bps: float, deadband: float) -> dict:
+def eval_asset(label: str, df: pd.DataFrame, cost_bps: float, deadband: float,
+               oos_start: str | None = None, oos_end: str | None = None,
+               arm: str | None = None) -> dict:
     df = df.sort_index().copy()
     close = df["close"].astype(float)
+    # fwd_ret is computed on the FULL series FIRST, so the last in-window bar keeps its
+    # realized t->t+1 return; THEN we restrict to the OOS window. The window only drops
+    # rows — it never shifts the t->t+1 alignment, so no look-ahead is introduced.
     fwd_ret = np.log(close.shift(-1) / close).to_numpy()  # realized t -> t+1, aligned at t
+    if oos_start is not None or oos_end is not None:
+        idx = df.index
+        mask = np.ones(len(df), dtype=bool)
+        if oos_start is not None:
+            mask &= np.asarray(idx >= pd.Timestamp(oos_start))
+        if oos_end is not None:
+            mask &= np.asarray(idx <= pd.Timestamp(oos_end))
+        df = df.loc[mask]
+        fwd_ret = fwd_ret[mask]
     cost = cost_bps / 1e4
     n = len(df)
     chronos_live = _chronos_live(df)
+    window = ("full" if (oos_start is None and oos_end is None)
+              else f"{oos_start or 'start'}..{oos_end or 'end'}")
 
-    logger.info("\n%s  [%d daily bars %s -> %s]  chronos_live=%s",
-                label.upper(), n, df.index[0].date(), df.index[-1].date(), chronos_live)
+    if n == 0:
+        logger.warning("%s: 0 bars in window %s — skipping.", label.upper(), window)
+        return {"asset": label, "arm": arm, "window": window, "n_bars": 0,
+                "chronos_live": chronos_live, "cost_bps": cost_bps}
 
-    row: dict = {"asset": label, "n_bars": n, "chronos_live": chronos_live,
-                 "cost_bps": cost_bps}
+    logger.info("\n%s  [arm=%s window=%s %d daily bars %s -> %s]  chronos_live=%s",
+                label.upper(), arm, window, n, df.index[0].date(), df.index[-1].date(),
+                chronos_live)
+
+    row: dict = {"asset": label, "arm": arm, "window": window, "n_bars": n,
+                 "chronos_live": chronos_live, "cost_bps": cost_bps}
 
     # --- 1. Chronos directional forecast ---
     if chronos_live:
@@ -192,9 +214,18 @@ def main() -> None:
                         help="One-way cost in bps for the trade sims (default 5)")
     parser.add_argument("--deadband", type=float, default=0.25,
                         help="Chronos signal deadband in units of forecast std")
+    parser.add_argument("--oos-start", default=None,
+                        help="Restrict the readout to bars >= this date (YYYY-MM-DD). "
+                             "fwd_ret is computed on the full series first, so the last "
+                             "in-window bar keeps its forward return. Default: full history.")
+    parser.add_argument("--oos-end", default=None,
+                        help="Restrict the readout to bars <= this date (YYYY-MM-DD).")
+    parser.add_argument("--arm-label", default=None,
+                        help="Arm tag stamped into each summary row (e.g. base/v2/ft3).")
     args = parser.parse_args()
 
     results_dir = Path(args.results_dir)
+    windowed = args.oos_start is not None or args.oos_end is not None
     rows = []
     for label in args.assets:
         path = results_dir / f"prism_features_{label}_daily.parquet"
@@ -205,14 +236,17 @@ def main() -> None:
         if not isinstance(df.index, pd.DatetimeIndex):
             if "date" in df.columns:
                 df = df.set_index(pd.DatetimeIndex(pd.to_datetime(df["date"])))
-        rows.append(eval_asset(label, df, args.cost_bps, args.deadband))
+        rows.append(eval_asset(label, df, args.cost_bps, args.deadband,
+                               oos_start=args.oos_start, oos_end=args.oos_end,
+                               arm=args.arm_label))
 
     if not rows:
         logger.error("No assets evaluated.")
         sys.exit(1)
 
     summary = pd.DataFrame(rows)
-    out_path = results_dir / "prism_predictive_eval_summary.csv"
+    suffix = "_oos" if windowed else ""
+    out_path = results_dir / f"prism_predictive_eval_summary{suffix}.csv"
     summary.to_csv(out_path, index=False)
     logger.info("\nSaved summary -> %s", out_path)
 
