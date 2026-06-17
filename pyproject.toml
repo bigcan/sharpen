@@ -79,3 +79,6 @@ testpaths = [
 pythonpath = [
     ".",
 ]
+markers = [
+    "slow: marks tests that load heavy models / external providers (deselect with '-m \"not slow\"')",
+]
