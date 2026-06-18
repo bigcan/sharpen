@@ -1,0 +1,78 @@
+{
+  "checks": {
+    "A_rates_leak": {
+      "causal_sharpe": 0.467,
+      "sameday_sharpe": 0.43,
+      "gap": -0.037,
+      "pass": true,
+      "note": "same-day should NOT be much better than causal (a leak inflates same-day)"
+    },
+    "B_rates_subperiods": {
+      "by_period": {
+        "2006-09": 0.349,
+        "2010-15": 0.963,
+        "2016-20": 0.629,
+        "2021-26": -0.374
+      },
+      "positive_periods": 3,
+      "full": 0.467,
+      "pass": true,
+      "note": "+0.467 must NOT come from one regime; >=3/4 subperiods positive"
+    },
+    "C_corr_stability": {
+      "full": 0.014,
+      "by_period": {
+        "2006-09": 0.189,
+        "2010-15": 0.048,
+        "2016-20": 0.032,
+        "2021-26": -0.193
+      },
+      "worst": 0.189,
+      "pass": true,
+      "note": "corr must stay low in every regime; a spike >0.5 in a crisis = diversification fails when needed"
+    },
+    "D_combined_robust": {
+      "full": 0.75,
+      "by_period": {
+        "2006-09": 0.598,
+        "2010-15": 1.197,
+        "2016-20": 0.547,
+        "2021-26": 0.447
+      },
+      "oos_2018": 0.386,
+      "pass": true,
+      "note": "combined must be positive OOS and in >=3/4 subperiods"
+    },
+    "E_cost_harsh": {
+      "combined_sharpe_2bps": 0.75,
+      "combined_sharpe_10bps": 0.688,
+      "pass": true,
+      "note": "combined must survive harsh 10bps (pessimistic for liquid ETFs)"
+    },
+    "F_rates_drop_one": {
+      "full": 0.467,
+      "drop_one": {
+        "drop_SHY": 0.464,
+        "drop_IEF": 0.463,
+        "drop_TLT": 0.469,
+        "drop_LQD": 0.428
+      },
+      "min": 0.428,
+      "pass": true,
+      "note": "no single bond ETF should carry the entire rates-carry edge"
+    },
+    "G_meta_layer_cost": {
+      "note": "risk-parity meta-layer is a static 50/50 (equal-vol) split rebalanced monthly; meta-turnover ~ the change in each sleeve's vol-scalar, small. Each sleeve's INTERNAL cost is already charged (2bps). Residual meta-cost is a 2nd-order optimism, est <2bps/yr on the combined book.",
+      "severity": "S3",
+      "material": false
+    }
+  },
+  "verdict": {
+    "decision": "PROCEED_no_S1",
+    "all_checks_pass": true,
+    "S1": [],
+    "S2": [],
+    "S3": [],
+    "summary": "0 S1, 0 S2, 0 S3"
+  }
+}
