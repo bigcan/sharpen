@@ -26,10 +26,12 @@ Prices: reuse `results/xsec_momentum/prices_daily.parquet` (yfinance daily adjus
 For each asset i at rebalance date t (using only data ≤ t):
 
 ```
-value_raw(i, t) = log P_i(t − L_skip)  −  log P_i(t − L_long)
+value_raw(i, t) = log P_i(t − L_long)  −  log P_i(t − L_skip)
                = − [ cumulative log-return over the window (t−L_long , t−L_skip) ]
 ```
 with **`L_long = 1260` trading days (~5y)** and **`L_skip = 252` trading days (~1y)**.
+
+> **Erratum (same-commit, pre-data):** the first formula line originally read `log P(t−L_skip) − log P(t−L_long)`, which has a sign error (it equals **+**cumulative-return, the opposite of reversal). The unambiguous economic INTENT — stated in the prose immediately below and in the second formula line — is **value = −cumulative-return** (long the asset that FELL = cheap). Corrected to `log P(t−L_long) − log P(t−L_skip)` to match intent. No gate or economic content changed; only the transcription of the algebra.
 - **Positive value_raw ⇒ the asset FELL over the 5y→1y window ⇒ "cheap" ⇒ candidate LONG.** Negative ⇒ rose ⇒ "expensive" ⇒ candidate SHORT (mean-reversion).
 - The **1-year skip is load-bearing**: the momentum signal uses `[t−252, t−5]` (3/6/12m sign-ensemble), so `L_skip = 252` makes the value window **non-overlapping with the entire momentum window** ⇒ value and momentum are orthogonal by construction (the AMP −0.5 correlation is structural, not mechanical overlap).
 
