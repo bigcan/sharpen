@@ -1,7 +1,7 @@
 # Tier-2 Deep Lifecycle Audit — momentum + rates-carry 2-sleeve book
 
 > **Session:** 553-cont-53 | **Date:** 2026-06-18 | **Gate:** pre-paper-capital stakes gate (CLAUDE.md mandatory)
-> **Verdict:** **PROCEED-WITH-CAVEATS to PAPER — 0 S1, 2 S2, 4 S3.** Capital (paper) is **not blocked on correctness**; the book is leak-free, causal, cost-honest, and the diversification is real. But forward expectations must be set at **honest net Sharpe ~0.4–0.5**, NOT the curated 0.60–0.75 — rates-carry's standalone edge is ZIRP-era-inflated and its forward value is mostly *decorrelation*, not return.
+> **Verdict:** **PROCEED-WITH-CAVEATS to PAPER — 0 S1 on the linear-book path, 4 S2, 4 S3.** Capital (paper) is **not blocked on correctness**; the book is leak-free, causal, cost-honest, and the diversification is real. Forward expectations must be set at **honest net Sharpe ~0.4–0.5**, NOT the curated 0.60–0.75. **All 3 S1s found by the full workflow audit live in the V7/SAC RL eval+selection+live pipeline — the path this recommendation explicitly does NOT ship** (see §3.5). Two production-path S2s (data-clean wiring, DSR/PBO) gate REAL capital, not the paper soak.
 
 ---
 
@@ -41,6 +41,20 @@ The headline combined Sharpe 0.75 is **curated** (18-ETF momentum). Honest-hairc
 - **S3-3 prop-firm DD mismatch:** at a deployable 2× (20 % vol) the honest maxDD is ~−26 %, far beyond an FTMO ~10 % limit. This book is the **north-star uncorrelated sleeve**, NOT the prop-firm product; for a prop-firm sleeve it must be sized to ~8 % vol (~5 %/yr, ~−14 % DD).
 - **S3-4 meta-layer cost** uncharged (immaterial, <2 bps/yr).
 
+## 3.5 Reconciliation with the full deep_strategy_audit workflow (resumed run)
+
+The mis-scoped workflow ultimately completed (`docs/research/UNSPECIFIED_deep_lifecycle_audit_2026-06-18.md`, 99 confirmed findings: 3 S1 / 28 S2 / 34 S3 / 34 S4) and — despite the `UNSPECIFIED` workstream — **did** cover the cross-asset surface alongside the legacy V7 engine. Reconciling it against my focused audit:
+
+**It CONFIRMS the linear book has no S1 of its own:**
+- **P1-05 / P1-06 (POSITIVE, S4):** an independent finder verified the signal stack is **causal-by-construction** — `.shift(skip)/.shift(skip+L)` momentum, `.shift(1)` vol, and an `assert_causal` tripwire that perturbs all future bars and asserts byte-identical signals at ≤t (11/11 pass). This independently corroborates my leak attack (A).
+- **All 3 S1s are in the V7/SAC RL pipeline, NOT the linear path:** the eval engine producing a **+5,437 % "PASS" on a FALSIFIED strategy** (taker-fee-only + uncapped compounding + no return-sanity bound, P8-01/02); **OOS-test leaking into seed selection** in the L1→WF auto-chain (P6-01); cost-regime dishonesty in the V7 chain. My book uses none of this machinery (it computes net daily returns directly, vol-normalized, Sharpe-based — no RL eval engine, no seed selection). **The S1s are affirmative reasons NOT to ship the RL allocator** — which this campaign already recommends against (the audit separately flags the RL allocator as unseeded / no-Stage-4-OOS / no-DSR-PBO, P5-04/P8-06/P11-01). The audit reinforces "ship linear, not RL" from an independent angle.
+
+**Two production-path refinements I now fold in (gate REAL capital, not the paper soak):**
+- **S2-3 — DATA-CLEAN safeguard declared-but-not-wired (P1-01/02/03, "Now"):** the stale-print detector (`detect_stale_runs`, the gold flat-OHLC class, built S553-cont-46) and a cache-freshness check are **NOT called** by `cross_asset_loader._clean_wide` / `fetch_and_clean` (manifest hardcodes `status:'PASS'`; cache can run 13-day-stale on the deploy path); `validate_config` skips §3 rules for `source=yfinance*`. This is the **exact X2-leak pattern** (a green wrapper around an unenforced gate) and it **supersedes/elevates my S3-2** (which only flagged the Yahoo curve) to S2 across the whole data layer. *Actual data risk to a liquid-ETF book is low* (P1-06: 0 interior gaps, late tickers masked), but the safeguard must be wired before real capital. The research numbers themselves are unaffected (the falsification scripts read raw cached parquet; P1-05/06 confirm causality).
+- **S2-4 — no multiple-testing / survivorship correction (P11-01, P1-08):** the combined Sharpe carries no formal DSR/PBO deflation, and the 18-ETF universe is hardcoded full-sample-hindsight (survivorship). The Fable 0.60→0.39 haircut + pre-registration partially cover this, and my **OOS-2018 split (0.386 curated) directly addresses the "no Stage-4 OOS" gap that the RL allocator lacked (P8-06)** — but a formal DSR/PBO on the number gating capital is owed and would shave the honest estimate modestly.
+
+**Net effect on the verdict:** unchanged direction (PROCEED to paper, 0 S1 on the linear path), with two production-wiring S2s added to the REAL-capital gate. The workflow's heavy V7/RL findings are out-of-scope for what this campaign ships.
+
 ## 4. Verdict & deploy guidance
 
 **PROCEED-WITH-CAVEATS to PAPER (0 S1).** The momentum + rates-carry book is correctness-sound for a **paper soak**; no leak, no cost artifact, real diversification. Promotion to **real capital** remains gated on the paper soak + the S2/S3 items being reflected in sizing and monitoring.
@@ -48,10 +62,17 @@ The headline combined Sharpe 0.75 is **curated** (18-ETF momentum). Honest-hairc
 **Deploy expectation (honest):** net Sharpe **~0.4–0.5**; at 10 % vol ≈ **5–6 %/yr at ~−14 % DD**; rates-carry contributes **primarily decorrelation**, expect ~0 standalone return from it in the current rate regime. Monitor the rates-carry sleeve's live contribution separately — if the curve re-steepens, its standalone return should recover; if not, the book is ~momentum-alone + a variance reducer.
 
 ## 5. Concrete next steps
+**Paper soak (not blocked):**
 1. Wire rates-carry into the rung-1 paper executor as the documented `carry_ary` additive sleeve (`finrl_pro_ds/envs/multi_asset_allocator_env.py:511`); re-run the rung-1 **forward-path** audit on the 2-sleeve executor (the cont-47 step-4 capital-gate items still apply).
-2. Add a stale-print/continuity wrap on the Yahoo curve loader before any real-capital step (S3-2).
-3. Set monitoring to the honest ~0.4–0.5 Sharpe expectation and attribute per-sleeve P&L (watch rates-carry's regime contribution).
-4. Keep building uncorrelated sleeves — the only honest lever toward higher portfolio Sharpe.
+2. Set monitoring to the honest ~0.4–0.5 Sharpe expectation and attribute per-sleeve P&L (watch rates-carry's regime contribution — it should be ~0 standalone in the current rate regime).
+
+**REAL-capital gate (S2 — must clear before live $):**
+3. **Wire the DATA-CLEAN safeguard (P1-02/03, "Now"):** call `validate_ohlcv`/`detect_stale_runs` per ticker in `cross_asset_loader._clean_wide`; derive `clean_ohlcv_passed`+`stale_flagged` into the manifest (stop hardcoding `status:'PASS'`); add a max-cache-age refetch in `fetch_and_clean`; enforce `last_ts` recency by stage in `validate_config.check_data_manifest` for `yfinance*`. Extend the same to the Yahoo curve loader.
+4. **Add a DSR/PBO multiple-testing haircut (P11-01)** on the combined Sharpe gating capital; document universe-selection provenance / point-in-time membership (P1-08).
+5. Add the manifest sha256/gap_count provenance fields (P1-07).
+
+**Strategic:**
+6. Keep building uncorrelated sleeves — the only honest lever toward higher portfolio Sharpe.
 
 ## 6. Artifacts
 - Focused audit: `scripts/research/audit_two_sleeve_book.py` → `results/portfolio_frontier/audit_2sleeve.json`
