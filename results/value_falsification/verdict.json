@@ -1,0 +1,84 @@
+{
+  "test": "cross-asset VALUE falsification (linear, pre-RL)",
+  "decision": "NO_GO_value_weak",
+  "common_window": [
+    "2011-04-29",
+    "2026-05-29"
+  ],
+  "standalone": {
+    "xsvalue_pooled_net_sharpe": -0.364,
+    "xsvalue_pooled_frictionless_sharpe": -0.292,
+    "frictionless_minus_net_gap": 0.072,
+    "per_class_net_sharpe": {
+      "equity": -0.582,
+      "rates": -0.199,
+      "commodity": -0.091,
+      "fx": -0.01
+    },
+    "tsvalue_pooled_net_sharpe": -0.267
+  },
+  "additivity": {
+    "corr_value_momentum": 0.039,
+    "momentum_alone_sharpe_samewindow": 0.545,
+    "value_alone_sharpe_samewindow": -0.364,
+    "combined_riskparity_sharpe": 0.126,
+    "uplift_vs_momentum": -0.419,
+    "momentum_maxdd_pct@10vol": -22.54,
+    "combined_maxdd_pct@10vol": -38.11
+  },
+  "persistence_subperiods": {
+    "2011-13": {
+      "combined_sharpe": 0.32,
+      "momentum_sharpe": 0.236,
+      "n_days": 673
+    },
+    "2014-16": {
+      "combined_sharpe": 0.323,
+      "momentum_sharpe": 0.673,
+      "n_days": 756
+    },
+    "2017-20": {
+      "combined_sharpe": -0.392,
+      "momentum_sharpe": 0.293,
+      "n_days": 1007
+    },
+    "2021-26": {
+      "combined_sharpe": 0.332,
+      "momentum_sharpe": 0.824,
+      "n_days": 1357
+    }
+  },
+  "leak": {
+    "causal_sharpe": -0.364,
+    "sameday_sharpe": -0.313,
+    "gap": 0.0,
+    "ok": true
+  },
+  "ic": {
+    "value_rank_ic": -0.0589,
+    "shuffle_null_95": 0.0338,
+    "ic_escapes_null": true,
+    "n": 3207
+  },
+  "gates": {
+    "G1_standalone": {
+      "pass": false,
+      "1a_sharpe>=0.20": false,
+      "1b_>=2_classes_pos": false,
+      "1c_cost_gap<=0.10": true
+    },
+    "G2_additivity": {
+      "pass": false,
+      "2a_corr<0.10": true,
+      "2b_combined>=mom+0.05": false,
+      "2c_dd<=mom": true
+    },
+    "G3_persistence": {
+      "pass": false,
+      "3a_>=3of4_and_post2017_adds": false,
+      "subperiods_positive": 3
+    },
+    "leak_tripwire": true
+  },
+  "interpretation": "Value earns a sleeve slot only if it is non-positively correlated to momentum AND lifts the combined book. Standalone strength is secondary (value's job is diversification via the AMP -0.5 correlation)."
+}
