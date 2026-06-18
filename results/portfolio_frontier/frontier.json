@@ -1,0 +1,310 @@
+{
+  "title": "Multi-sleeve portfolio frontier (honest survivors)",
+  "common_window": [
+    "2006-01-03",
+    "2026-05-29"
+  ],
+  "sleeves_empirical": [
+    "momentum (TSMOM 18-ETF)",
+    "rates-carry (Treasury curve)"
+  ],
+  "standalone_sharpe": {
+    "momentum_curated": 0.601,
+    "momentum_fable_honest": 0.389,
+    "rates_carry": 0.467
+  },
+  "combine_2sleeve": {
+    "corr_momentum_rates": 0.014,
+    "combined_sharpe_curated": 0.75,
+    "combined_sharpe_fable_honest": 0.601,
+    "uplift_vs_momentum_curated": 0.149,
+    "uplift_vs_momentum_honest": 0.212
+  },
+  "analytical_sharpe_extensions": {
+    "mom+rates (rp, curated)": 0.75,
+    "mom+rates (rp, Fable-honest mom=0.389)": 0.601,
+    "mom+rates+VRP@0.8 (rp, honest)": 0.956,
+    "mom+rates+VRP@0.8 (rp, curated)": 1.078,
+    "_note": "VRP is a separate BTC-options substrate (cont-39/41), corr~0, not in the empirical ETF combine; included analytically as a 3rd uncorrelated sleeve."
+  },
+  "frontier_combined_curated": {
+    "label": "momentum+rates-carry (curated, risk-parity)",
+    "native_ann_vol_pct": 7.1,
+    "grid": [
+      {
+        "vol_target": 0.075,
+        "leverage_x_vs_10pct": 0.75,
+        "ann_ret_pct": 5.6,
+        "ann_vol_pct": 7.5,
+        "sharpe": 0.75,
+        "max_dd_pct": -10.0,
+        "calmar": 0.56
+      },
+      {
+        "vol_target": 0.1,
+        "leverage_x_vs_10pct": 1.0,
+        "ann_ret_pct": 7.5,
+        "ann_vol_pct": 10.0,
+        "sharpe": 0.75,
+        "max_dd_pct": -13.2,
+        "calmar": 0.57
+      },
+      {
+        "vol_target": 0.15,
+        "leverage_x_vs_10pct": 1.5,
+        "ann_ret_pct": 11.3,
+        "ann_vol_pct": 15.0,
+        "sharpe": 0.75,
+        "max_dd_pct": -19.3,
+        "calmar": 0.58
+      },
+      {
+        "vol_target": 0.2,
+        "leverage_x_vs_10pct": 2.0,
+        "ann_ret_pct": 15.0,
+        "ann_vol_pct": 20.0,
+        "sharpe": 0.75,
+        "max_dd_pct": -25.0,
+        "calmar": 0.6
+      },
+      {
+        "vol_target": 0.3,
+        "leverage_x_vs_10pct": 3.0,
+        "ann_ret_pct": 22.5,
+        "ann_vol_pct": 30.0,
+        "sharpe": 0.75,
+        "max_dd_pct": -35.6,
+        "calmar": 0.63
+      },
+      {
+        "vol_target": 0.4,
+        "leverage_x_vs_10pct": 4.0,
+        "ann_ret_pct": 30.0,
+        "ann_vol_pct": 40.0,
+        "sharpe": 0.75,
+        "max_dd_pct": -45.2,
+        "calmar": 0.66
+      },
+      {
+        "vol_target": 0.5,
+        "leverage_x_vs_10pct": 5.0,
+        "ann_ret_pct": 37.5,
+        "ann_vol_pct": 50.0,
+        "sharpe": 0.75,
+        "max_dd_pct": -53.7,
+        "calmar": 0.7
+      },
+      {
+        "vol_target": 0.75,
+        "leverage_x_vs_10pct": 7.5,
+        "ann_ret_pct": 56.3,
+        "ann_vol_pct": 75.0,
+        "sharpe": 0.75,
+        "max_dd_pct": -71.9,
+        "calmar": 0.78
+      },
+      {
+        "vol_target": 1.0,
+        "leverage_x_vs_10pct": 10.0,
+        "ann_ret_pct": 75.0,
+        "ann_vol_pct": 100.0,
+        "sharpe": 0.75,
+        "max_dd_pct": -88.9,
+        "calmar": 0.84
+      }
+    ]
+  },
+  "frontier_combined_honest": {
+    "label": "momentum+rates-carry (Fable-honest mom=0.389)",
+    "native_ann_vol_pct": 7.1,
+    "grid": [
+      {
+        "vol_target": 0.075,
+        "leverage_x_vs_10pct": 0.75,
+        "ann_ret_pct": 4.5,
+        "ann_vol_pct": 7.5,
+        "sharpe": 0.601,
+        "max_dd_pct": -10.6,
+        "calmar": 0.43
+      },
+      {
+        "vol_target": 0.1,
+        "leverage_x_vs_10pct": 1.0,
+        "ann_ret_pct": 6.0,
+        "ann_vol_pct": 10.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -13.9,
+        "calmar": 0.43
+      },
+      {
+        "vol_target": 0.15,
+        "leverage_x_vs_10pct": 1.5,
+        "ann_ret_pct": 9.0,
+        "ann_vol_pct": 15.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -20.3,
+        "calmar": 0.44
+      },
+      {
+        "vol_target": 0.2,
+        "leverage_x_vs_10pct": 2.0,
+        "ann_ret_pct": 12.0,
+        "ann_vol_pct": 20.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -26.4,
+        "calmar": 0.46
+      },
+      {
+        "vol_target": 0.3,
+        "leverage_x_vs_10pct": 3.0,
+        "ann_ret_pct": 18.0,
+        "ann_vol_pct": 30.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -38.1,
+        "calmar": 0.47
+      },
+      {
+        "vol_target": 0.4,
+        "leverage_x_vs_10pct": 4.0,
+        "ann_ret_pct": 24.1,
+        "ann_vol_pct": 40.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -49.1,
+        "calmar": 0.49
+      },
+      {
+        "vol_target": 0.5,
+        "leverage_x_vs_10pct": 5.0,
+        "ann_ret_pct": 30.1,
+        "ann_vol_pct": 50.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -61.1,
+        "calmar": 0.49
+      },
+      {
+        "vol_target": 0.75,
+        "leverage_x_vs_10pct": 7.5,
+        "ann_ret_pct": 45.1,
+        "ann_vol_pct": 75.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -86.0,
+        "calmar": 0.52
+      },
+      {
+        "vol_target": 1.0,
+        "leverage_x_vs_10pct": 10.0,
+        "ann_ret_pct": 60.1,
+        "ann_vol_pct": 100.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -97.3,
+        "calmar": 0.62
+      }
+    ]
+  },
+  "frontier_momentum_alone": {
+    "label": "momentum-alone (curated)",
+    "native_ann_vol_pct": 74.6,
+    "grid": [
+      {
+        "vol_target": 0.075,
+        "leverage_x_vs_10pct": 0.75,
+        "ann_ret_pct": 4.5,
+        "ann_vol_pct": 7.5,
+        "sharpe": 0.601,
+        "max_dd_pct": -17.2,
+        "calmar": 0.26
+      },
+      {
+        "vol_target": 0.1,
+        "leverage_x_vs_10pct": 1.0,
+        "ann_ret_pct": 6.0,
+        "ann_vol_pct": 10.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -22.5,
+        "calmar": 0.27
+      },
+      {
+        "vol_target": 0.15,
+        "leverage_x_vs_10pct": 1.5,
+        "ann_ret_pct": 9.0,
+        "ann_vol_pct": 15.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -32.7,
+        "calmar": 0.28
+      },
+      {
+        "vol_target": 0.2,
+        "leverage_x_vs_10pct": 2.0,
+        "ann_ret_pct": 12.0,
+        "ann_vol_pct": 20.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -42.0,
+        "calmar": 0.29
+      },
+      {
+        "vol_target": 0.3,
+        "leverage_x_vs_10pct": 3.0,
+        "ann_ret_pct": 18.0,
+        "ann_vol_pct": 30.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -58.1,
+        "calmar": 0.31
+      },
+      {
+        "vol_target": 0.4,
+        "leverage_x_vs_10pct": 4.0,
+        "ann_ret_pct": 24.0,
+        "ann_vol_pct": 40.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -70.8,
+        "calmar": 0.34
+      },
+      {
+        "vol_target": 0.5,
+        "leverage_x_vs_10pct": 5.0,
+        "ann_ret_pct": 30.1,
+        "ann_vol_pct": 50.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -80.4,
+        "calmar": 0.37
+      },
+      {
+        "vol_target": 0.75,
+        "leverage_x_vs_10pct": 7.5,
+        "ann_ret_pct": 45.1,
+        "ann_vol_pct": 75.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -94.0,
+        "calmar": 0.48
+      },
+      {
+        "vol_target": 1.0,
+        "leverage_x_vs_10pct": 10.0,
+        "ann_ret_pct": 60.1,
+        "ann_vol_pct": 100.0,
+        "sharpe": 0.601,
+        "max_dd_pct": -98.6,
+        "calmar": 0.61
+      }
+    ]
+  },
+  "toward_100pct": {
+    "combined_curated": {
+      "vol_target_for_100pct": 133.0,
+      "implied_max_dd_pct": -99.2,
+      "leverage_x_vs_10pct": 13.3
+    },
+    "combined_honest": {
+      "vol_target_for_100pct": 166.0,
+      "implied_max_dd_pct": -100.0,
+      "leverage_x_vs_10pct": 16.6
+    }
+  },
+  "honest_ceiling": {
+    "combined_maxdd_at_10pct_vol": -13.9,
+    "vol_target_for_minus25pct_dd": 18.8,
+    "ann_ret_at_minus25pct_dd_pct": 11.3,
+    "sharpe_needed_for_100pct_at_minus25dd": 5.32,
+    "implied_uncorrelated_sleeves_needed_for_100pct_at_minus25dd": 113.1
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "test": "sleeve-timing falsification (linear proxy, pre-RL gate)",
+  "sleeves": [
+    "momentum",
+    "rates_carry"
+  ],
+  "oos_split": "2018-01-01",
+  "meta_layer": "FRICTIONLESS (generous to dynamic challengers)",
+  "by_strategy": {
+    "static_rp": {
+      "full": 0.751,
+      "in_sample": 0.879,
+      "oos": 0.517,
+      "oos_maxdd_pct": -15.1
+    },
+    "sleeve_momentum": {
+      "full": 0.434,
+      "in_sample": 0.511,
+      "oos": 0.345,
+      "oos_maxdd_pct": -20.3
+    },
+    "drawdown_control": {
+      "full": 0.753,
+      "in_sample": 0.953,
+      "oos": 0.351,
+      "oos_maxdd_pct": -18.3
+    }
+  },
+  "baseline_static_rp_oos_sharpe": 0.517,
+  "best_challenger": "drawdown_control",
+  "best_challenger_oos_sharpe": 0.351,
+  "oos_uplift_vs_static": -0.166,
+  "beat_gate": "+0.05 OOS Sharpe (same gate RL would face)",
+  "rl_sleeve_allocator_justified": false,
+  "decision": "RL_NOT_JUSTIFIED_ship_static",
+  "interpretation": "Even with a frictionless meta-layer and canonical timing signals, dynamic sleeve-timing must beat static risk-parity OOS to justify an RL allocator. RL adds turnover cost, so a frictionless linear timing failure is decisive."
+}
