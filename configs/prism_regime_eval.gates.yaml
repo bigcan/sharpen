@@ -1,0 +1,61 @@
+# ============================================================================
+# PRISM REGIME-DETECTOR EVAL — decision gates (regime-eval-v1)
+# ============================================================================
+# Pre-registered 2026-06-18 (S553-cont-52), BEFORE the first metric was computed.
+# Consumed by scripts/prism_research/prism_regime_eval.py. ALL numeric thresholds
+# live here (CLAUDE.md invariant: never hardcode gate thresholds in code/scripts).
+# Spec + rationale: docs/research/prism_regime_eval_spec_2026-06-18.md
+#
+# Commitment device (leak-era lesson): verdicts read post-hoc get rationalized,
+# so these are frozen while the outcome is unknown. Do not loosen after the run
+# without a dated decision memo.
+
+# --- shared run parameters ---
+run:
+  assets: [btc, gold, eurusd]
+  horizons_days: [1, 5]          # forward realized-vol horizons (k)
+  cost_bps_oneway: 5.0           # one-way trade cost for risk-scaling sims
+  trail_vol_window: 25           # rolling-RV baseline window (matches GAHMM vol input)
+  train_end: '2021-11-30'        # OOS split: train <= this date, test after
+  # Pre-registered regime -> position-size map (monotone de-risk in high vol).
+  # Keys are the hard vol_regime labels (0=low, 1=normal, 2=high).
+  vol_size_map: {low: 1.5, normal: 1.0, high: 0.5}
+  primary_horizon: 1             # horizon used for the headline vol verdict
+
+# --- VOL-REGIME usefulness gate (the primary question) ---
+# Evaluated on the OOS-test window. USEFUL iff >= min_assets_pass assets clear
+# ALL of: IC beats its own shuffle-null, IC beats the rolling-RV baseline, the
+# risk-scaler improves risk-adjusted return, AND the scaler beats the rolling-RV
+# scaler (the "does the ML add anything over a rolling std" term).
+vol_regime_useful:
+  ic_must_exceed_null95: true
+  min_delta_ic_vs_baseline: 0.0        # IC_gahmm - IC_baseline must be > 0
+  min_sharpe_uplift_vs_unscaled: 0.10  # Sharpe(gahmm) - Sharpe(unscaled)
+  min_dd_reduction_frac: 0.15          # alt path: (|dd_unscaled|-|dd_gahmm|)/|dd_unscaled|
+  min_marginal_sharpe_vs_baseline: 0.0 # Sharpe(gahmm) - Sharpe(rolling-RV scaler)
+  min_assets_pass: 2                   # of 3
+
+# --- PRICE-REGIME usefulness gate (secondary; cont-49 + R0 lean dead) ---
+price_regime_useful:
+  ic_must_exceed_null95: true
+  min_gated_net_pf: 1.1
+  must_beat_mom20_baseline: true
+  min_assets_pass: 2                   # of 3
+
+# --- label-degeneracy guard (a near-constant label has meaningless IC) ---
+sanity:
+  min_state_frac: 0.05                 # each of the 3 hard states must hold >= 5% of bars
+  min_mean_dwell_bars: 2.0             # mean run-length; < 2 == noise flipping
+
+provenance:
+  drafted_on: '2026-06-18'
+  drafted_by_session: S553-cont-52
+  rationale: >-
+    Turns the PRISM falsification lens from the Chronos forecast head
+    (cont-49/50/51, all no-edge) onto the GAHMM regime detectors. cont-49 already
+    showed regime DIRECTION is inside the shuffle-null and R0-regime killed gold
+    directional GATING; the untested gap is vol_regime as a volatility forecaster
+    for RISK-SCALING, and whether either detector beats a cheap baseline built
+    from its own inputs. Sharpe is the primary risk-scaling metric because it is
+    scale-free (a de-levering scaler flatters DD). The delta-vs-baseline terms are
+    the decisive "does the ML add anything" tests.
