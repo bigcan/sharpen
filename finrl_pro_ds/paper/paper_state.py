@@ -346,6 +346,11 @@ class LiveTrajectory:
     asset_class: dict[str, str]
     initial_capital: float
     spy_returns: np.ndarray | None = None   # (n_steps,) SPY daily returns (drift gate), or None
+    # Per-SLEEVE cumulative gross-return attribution (two-sleeve book only; None for the
+    # single-sleeve path). Distinct from class_pnl (per asset class): a sleeve may span
+    # several classes and two sleeves may overlap on a bond ETF, so this is attributed by
+    # sleeve via the risk-parity-weighted sleeve weights (TwoSleeveExecutor).
+    sleeve_pnl: dict[str, float] | None = None
 
     @property
     def n_steps(self) -> int:

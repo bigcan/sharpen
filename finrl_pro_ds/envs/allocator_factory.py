@@ -222,6 +222,8 @@ def _linear_core_drive(
     arrays: Mapping,
     config: Mapping,
     overrides: Mapping | None,
+    *,
+    conv_monthly: np.ndarray | None = None,
 ) -> tuple[dict, np.ndarray, dict]:
     """Shared frozen-linear-core env drive behind :func:`evaluate_linear_core` (the
     gate metrics) and :func:`linear_core_weights` (the executor's weight trajectory).
@@ -235,11 +237,20 @@ def _linear_core_drive(
     ``rebalance_interval`` would even block the monthly cadence whenever month-end
     falls off-cadence). Requires ``arrays['conviction_ary']`` (from
     ``build_allocator_arrays``).
+
+    ``conv_monthly`` override (step-4 independent live-recompute parity, P3-01/P10-01):
+    when supplied, the env is driven with this PRE-ASSEMBLED held-conviction series
+    instead of the batch ``monthly_rebal_conviction(...)``. The parity harness uses it
+    to feed an *independently* growing-window-recomputed conviction through the SAME env
+    so ``weight_l1_drift`` becomes load-bearing. It must be shape ``(T, N)`` (indexed at
+    each step ``k`` like the batch path). The default ``None`` preserves the exact gate
+    baseline behaviour.
     """
-    if "conviction_ary" not in arrays:
-        raise KeyError("the linear-core drive needs arrays['conviction_ary'] "
-                       "(build_allocator_arrays output)")
-    conv_monthly = monthly_rebal_conviction(arrays["timestamps"], arrays["conviction_ary"])
+    if conv_monthly is None:
+        if "conviction_ary" not in arrays:
+            raise KeyError("the linear-core drive needs arrays['conviction_ary'] "
+                           "(build_allocator_arrays output)")
+        conv_monthly = monthly_rebal_conviction(arrays["timestamps"], arrays["conviction_ary"])
     core_overrides = {**(overrides or {}), **_EXECUTION_LEVERS_OFF}
     env = make_allocator_env(arrays, config, overrides=core_overrides, eval_mode=True)
     return _drive(env, lambda k, obs: conv_monthly[k])
@@ -313,3 +324,179 @@ def linear_core_trajectory(
     """
     metrics, weights, traj = _linear_core_drive(arrays, config, overrides)
     return {"weights": weights, "metrics": metrics, **traj}
+
+
+def drive_with_conviction(
+    arrays: Mapping,
+    config: Mapping,
+    conv_monthly: np.ndarray,
+    *,
+    overrides: Mapping | None = None,
+) -> dict:
+    """Drive the frozen-core env with an EXTERNALLY-assembled held-conviction series.
+
+    The step-4 independent live-recompute parity variant (Tier-2 audit 2026-06-14,
+    P3-01 / P10-01 / P8-03 / P10-08). :func:`linear_core_trajectory` (the sim oracle)
+    builds its conviction in ONE batch ``monthly_rebal_conviction`` call, and the rung-1
+    replay then consumes the oracle's own weights — so ``weight_l1_drift`` is 0 *by
+    construction* (tautological on the weight axis). To make that drift load-bearing, the
+    parity harness reconstructs the held-conviction series INDEPENDENTLY on a growing
+    live-fetched window (the live scheduler's view) and drives the SAME env with it here;
+    a calendar / truncation / look-ahead bug in that forward assembly then moves the
+    weights and is caught by ``weight_l1_drift``.
+
+    Shares :func:`_linear_core_drive` (identical env, costs, execution-levers-OFF,
+    env-native convention) with the oracle, so a CORRECT forward assembly reproduces the
+    oracle weights exactly (drift ≈ 0). ``conv_monthly`` is the already-held
+    (step-function) conviction of shape ``(T, N)`` — NOT raw daily conviction; the env
+    re-applies only the daily vol-scale, never a second monthly-rebalance.
+
+    Returns the same dict shape as :func:`linear_core_trajectory`.
+    """
+    metrics, weights, traj = _linear_core_drive(
+        arrays, config, overrides, conv_monthly=np.asarray(conv_monthly, dtype=np.float64))
+    return {"weights": weights, "metrics": metrics, **traj}
+
+
+# --------------------------------------------------------------------------- #
+# Two-sleeve risk-parity combine (momentum + rates-carry fund-of-funds)
+# --------------------------------------------------------------------------- #
+# The paper executor shadows a FUND-OF-FUNDS, not a single env drive: the validated
+# momentum sleeve and the validated rates-carry sleeve are each driven through the env
+# independently (each gets the env's per-asset vol-targeting + gross cap on its OWN
+# universe), and their post-scale weight trajectories are combined by trailing-causal
+# inverse-vol RISK PARITY (S553-cont-53; research `portfolio_frontier.py` risk_parity).
+#
+# Why a portfolio-level combine (not a single combined-conviction drive): the research
+# combine scales EACH sleeve's return to a common risk THEN sums — two independent
+# vol-scalings, which a single env drive (one vol-scale on a merged conviction) cannot
+# reproduce. So the combine is post-scale weight math; the env accounting is then applied
+# to the combined weights via PaperState (the pinned env transcription). See
+# `finrl_pro_ds/paper/two_sleeve.py`.
+#
+# Causality (LEAK-2): the risk-parity scalar at decision bar k uses ONLY each sleeve's
+# realized step returns with index < k (returns[j] is the realized j->j+1 move, known at
+# bar j+1 <= k), recomputed at month-ends and HELD between (the monthly meta-cadence the
+# research used; meta-turnover ~0). Full-sample sleeve vol is NEVER used (that would be
+# look-ahead) — so the combined oracle is a forward-safe book, not the ex-post research
+# number, preserving the executor's parity-by-construction model.
+
+
+def _monthly_held(values: np.ndarray, timestamps: np.ndarray) -> np.ndarray:
+    """Forward-fill ``values`` (shape ``(K, ...)``) from the LAST decision bar of each
+    (year, month) — the monthly meta-rebalance hold. ``timestamps`` is the per-row decision
+    stamp (epoch s). Rows before the first month-end keep their own value (warmup)."""
+    ts = np.asarray(timestamps, dtype=np.int64)
+    out = np.array(values, dtype=np.float64, copy=True)
+    if len(ts) == 0:
+        return out
+    months = pd.to_datetime(ts, unit="s").to_period("M")
+    last_of_month = pd.Series(np.arange(len(ts))).groupby(months.values).max().to_numpy()
+    is_me = np.zeros(len(ts), dtype=bool)
+    is_me[last_of_month] = True
+    held = out[0].copy() if out.ndim > 1 else out[0]
+    for k in range(len(ts)):
+        if is_me[k]:
+            held = out[k].copy() if out.ndim > 1 else out[k]
+        out[k] = held
+    return out
+
+
+def _trailing_ann_vol(returns: np.ndarray, *, window: int, min_periods: int, ann: int = ANN) -> np.ndarray:
+    """Causal trailing annualized vol of ``returns`` (1-D, indexed by decision bar k):
+    row ``k`` = std of returns ``[k-window, k-1]`` (EXCLUDES the not-yet-realized k->k+1
+    move) × √ann. NaN until ``min_periods`` realized returns exist (warmup)."""
+    r = pd.Series(np.asarray(returns, dtype=np.float64))
+    # .shift(1): row k uses returns strictly < k (returns[k] is the k->k+1 move, unknown
+    # at decision bar k). ddof=1 (Bessel), matching _metrics / the env's Sortino.
+    vol = r.rolling(window, min_periods=min_periods).std(ddof=1).shift(1)
+    return (vol * np.sqrt(ann)).to_numpy(np.float64)
+
+
+def risk_parity_alphas(
+    sleeve_returns: Mapping[str, np.ndarray],
+    timestamps: np.ndarray,
+    *,
+    window: int = 252,
+    min_periods: int = 63,
+    monthly_meta: bool = True,
+    target_portfolio_vol: float | None = None,
+    vol_floor: float = 1e-4,
+) -> dict[str, np.ndarray]:
+    """Per-sleeve daily capital-allocation scalars ``α_s(k)`` (the risk-parity meta-layer).
+
+    Two modes, identical RATIO ``α_mom:α_rat = (1/σ_mom):(1/σ_rat)``:
+      - ``target_portfolio_vol is None`` (default, NO portfolio-vol overlay — consistent
+        with the executor's declined-overlay decision 2026-06-14): CONVEX inverse-vol,
+        ``α_s = (1/σ_s) / Σ_s'(1/σ_s')`` so ``Σ_s α_s = 1``.
+      - ``target_portfolio_vol = v``: research style (``portfolio_frontier.risk_parity``),
+        scale each sleeve to ``v`` then equal-weight: ``α_s = (1/N)·(v/σ_s)``.
+
+    ``σ_s(k)`` is the trailing-``window`` causal annualized vol of sleeve ``s``'s env-render
+    step returns (:func:`_trailing_ann_vol`), recomputed at month-ends and held between
+    when ``monthly_meta`` (the research meta-cadence). During warmup (any sleeve σ still
+    NaN, or all ≤ ``vol_floor``) the step falls back to EQUAL weights (``1/N``), so no
+    look-ahead and no div-by-zero. ``timestamps`` is the per-step DECISION stamp
+    (``union_timestamps[:-1]``), one per of the ``T-1`` steps.
+
+    Returns ``{sleeve: (K,) α array}`` where ``K = len(timestamps)``.
+    """
+    names = list(sleeve_returns)
+    K = len(np.asarray(timestamps))
+    N = len(names)
+    sig = {s: _trailing_ann_vol(sleeve_returns[s], window=window, min_periods=min_periods)
+           for s in names}
+    if monthly_meta:
+        sig = {s: _monthly_held(sig[s], timestamps) for s in names}
+
+    alphas = {s: np.full(K, 1.0 / N, dtype=np.float64) for s in names}
+    for k in range(K):
+        sk = np.array([sig[s][k] for s in names], dtype=np.float64)
+        usable = np.isfinite(sk) & (sk > vol_floor)
+        if not usable.all():
+            continue  # warmup / degenerate → equal weights (already set)
+        inv = 1.0 / sk
+        if target_portfolio_vol is None:
+            a = inv / inv.sum()                       # convex, Σα = 1
+        else:
+            a = (1.0 / N) * float(target_portfolio_vol) * inv  # scale-each-to-target, eq-wt
+        for j, s in enumerate(names):
+            alphas[s][k] = a[j]
+    return alphas
+
+
+def combine_sleeve_weights(
+    sleeve_weights: Mapping[str, np.ndarray],
+    sleeve_assets: Mapping[str, list[str]],
+    sleeve_alphas: Mapping[str, np.ndarray],
+    union_assets: list[str],
+    *,
+    max_gross_exposure: float | None = None,
+) -> np.ndarray:
+    """Map each sleeve's ``(K, n_s)`` post-vol-scale weights into the ``(K, U)`` union
+    universe (by asset name), scale by its ``α_s(k)``, and sum:
+    ``w_comb[k, a] = Σ_s α_s(k) · w_s[k, a]``.
+
+    ``max_gross_exposure`` (optional): proportional gross cap on the COMBINED book (the
+    env's ``_enforce_gross_exposure`` invariant, MARGIN-CFG). A no-op for the convex
+    inverse-vol combine (combined gross ≤ max sleeve gross ≤ cap by the triangle
+    inequality); load-bearing only if a ``target_portfolio_vol`` overlay levers the book up.
+    """
+    union_assets = list(union_assets)
+    idx = {a: i for i, a in enumerate(union_assets)}
+    K = len(next(iter(sleeve_alphas.values())))
+    U = len(union_assets)
+    out = np.zeros((K, U), dtype=np.float64)
+    for s, w in sleeve_weights.items():
+        w = np.asarray(w, dtype=np.float64)
+        cols = [idx[a] for a in sleeve_assets[s]]
+        a_s = np.asarray(sleeve_alphas[s], dtype=np.float64)[:, None]
+        out[:, cols] += a_s * w
+    if max_gross_exposure is not None:
+        gross = np.abs(out).sum(axis=1)
+        over = gross > float(max_gross_exposure)
+        if over.any():
+            scale = np.ones(K, dtype=np.float64)
+            scale[over] = float(max_gross_exposure) / gross[over]
+            out *= scale[:, None]
+    return out

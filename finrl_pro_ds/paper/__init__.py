@@ -24,6 +24,7 @@ from finrl_pro_ds.paper.soak_metrics import (
     evaluate_paper_soak_gates,
     serialize_verdict,
 )
+from finrl_pro_ds.paper.two_sleeve import TwoSleeveExecutor
 
 __all__ = [
     "FillEngine",
@@ -37,4 +38,5 @@ __all__ = [
     "evaluate_paper_soak_gates",
     "serialize_verdict",
     "PaperMetrics",
+    "TwoSleeveExecutor",
 ]
