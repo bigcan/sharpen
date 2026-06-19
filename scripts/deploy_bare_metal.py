@@ -30,6 +30,13 @@ DEPLOY_EXCLUDES = [
     'mlruns', 'logs', 'wandb', 'results', 'checkpoints', '.git', '.venv', 'venv', '__pycache__',
     'market_data.parquet', 'btc_lob_jan2023.parquet', 'finrl_pro_ds.egg-info', # Exclude massive data & stale metadata
     'hpo.db', 'hpo.db-journal', # Exclude local HPO state to prevent overwriting remote clean start
+    # Training deploys never read these — they bloated the package to ~201MB and
+    # were timing out the SFTP upload (EOFError) to the gpuhub link. bundles/ =
+    # baked ensemble tarballs (eval/live-only, written by bake_*.py), .backups/ =
+    # local agent-memory snapshots, .mypy_cache/.pytest_cache/.ruff_cache = local
+    # tool caches (.mypy_cache alone was ~608MB uncompressed). Excluding all of
+    # these: ~201MB -> ~15MB package (fast, reliable upload).
+    'bundles', '.backups', '.mypy_cache', '.pytest_cache', '.ruff_cache',
 ]
 ROOT_DATA_EXCLUDE = ['data'] # Only exclude root data folder
 
@@ -140,8 +147,8 @@ def create_filtered_zip(source_dir, output_filename):
                 dirs.remove('data')
 
             for file in files:
-                if file.endswith((".pyc", ".pyo", ".zip", ".ds_store")):
-                    continue
+                if file.endswith((".pyc", ".pyo", ".zip", ".ds_store", ".pdf")):
+                    continue  # .pdf: docs/textbooks are never a training input
                 if file in DEPLOY_EXCLUDES or file.startswith("hpo.db"):
                     continue  # Exclude specific files like hpo.db*
                 file_path = os.path.join(root, file)
