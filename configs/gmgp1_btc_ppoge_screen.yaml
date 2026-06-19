@@ -1,0 +1,115 @@
+# ============================================================================
+# GMGP1-BTC PPO-GAE (continuous PPO) SCREEN — vs SAC clean-canary (S553-cont-54)
+# ============================================================================
+# Mirrors configs/gmgp1_btc_x2deleak_canary_hpo.yaml (the clean, de-leaked,
+# cost-corrected SAC canary) EXACTLY for data / features / env / network, and
+# swaps the agent to continuous PPO. Goal: isolate the RL algorithm as the only
+# changed variable in a PPO-vs-SAC comparison on gmgp1-btc.
+#
+# SAC clean-canary baseline (4-fold WF, results/gmgp1_btc_canary_costcorr_wf):
+#   best-solo median PF 0.9774 | ensemble 0.8935 | worst fixed-lot DD -33.1% | FAIL
+#
+# This is a SCREEN: fixed PPO HPs (no HPO), single train on the canary train
+# split, backtest on the 4 WF OOS windows + val/test. Run via
+# scripts/research/ppo_ge_gmgp1_btc_screen.py.  Escalate to full HPO+WF only if
+# WF median PF >= 1.10 AND test PF >= 1.0 (pre-registered).
+# ============================================================================
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  train_start_date: "2024-06-01"
+  train_end_date:   "2025-09-01"
+  val_start_date:   "2025-09-01"
+  val_end_date:     "2025-10-01"
+  test_start_date:  "2025-10-01"
+  test_end_date:    "2025-11-01"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+# ENV — identical to the clean canary (de-leaked handler is code-level, cost-corrected)
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.00055                # COST-CORRECTED: real Bybit futures taker 5.5 bps
+  slippage_base_bps: 5.0            # COST-CORRECTED: one-way limit-cross ~4.58 bps
+  deadband_threshold: 0.25          # screen default (overridable via --deadband)
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30
+  max_leverage: 2.0                 # SAC canary cap (overridable via --max_leverage)
+  scales: [15, 60, 240]
+  gap_detection: true
+  gap_atr_mult: 3.0
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.001
+    dsr_scale: 1.0
+
+# NETWORK — identical encoder to SAC canary EXCEPT dropout=0 (PPO needs
+# deterministic forward so collection/update log-probs are consistent; SAC's
+# dropout is an off-policy regularizer that would bias the PPO importance ratio).
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+    dropout: 0.0
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+# AGENT — continuous PPO (PPO-GAE). Literature-standard MuJoCo-style defaults
+# adapted to the V7 contract. ent_coef=0 by default to avoid the AP-4
+# entropy-dominance failure mode that killed the legacy Discrete PPO.
+agents:
+  ppoc:
+    learning_rate: 0.0003
+    gamma: 0.99
+    gae_lambda: 0.95
+    clip_eps: 0.2
+    vf_coef: 0.5
+    ent_coef: 0.0
+    max_grad_norm: 0.5
+    n_epochs: 10
+    rollout_steps: 2048
+    batch_size: 256
+    lr_schedule: "linear"
+    clip_value_loss: true
+    target_kl: 0.03
+    checkpoint_interval: 500000
+
+training:
+  total_timesteps: 1000000          # overridable via --total_timesteps
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: false              # PPO graph differs per-rollout; keep eager for stability
+  num_envs: 20
+  use_sync: false
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags:
+    - "gmgp1-btc"
+    - "BTC"
+    - "PPO"
+    - "ppo-gae"
+    - "ppo-continuous"
+    - "15min"
+    - "crypto"
+    - "x2-deleak"
+    - "clean-canary"
+    - "cost-corrected"
+    - "ppo-vs-sac"
+    - "s553"
