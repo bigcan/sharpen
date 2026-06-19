@@ -41,7 +41,9 @@ from typing import Mapping, Sequence
 import numpy as np
 import pandas as pd
 
+from finrl_pro_ds.data import treasury_curve_loader as tcl
 from finrl_pro_ds.features import cross_asset_signals as cas
+from finrl_pro_ds.features import rates_carry as rc
 
 log = logging.getLogger("cross_asset_loader")
 
@@ -391,3 +393,229 @@ def load_cross_asset_data(config: Mapping, *, force_refetch: bool = False) -> di
         "lookbacks": lookbacks,
         "manifest": manifest,
     }
+
+
+# --------------------------------------------------------------------------- #
+# Two-sleeve (momentum + rates-carry) loader / array builders
+# --------------------------------------------------------------------------- #
+# The paper executor shadows a FUND-OF-FUNDS: the validated momentum sleeve
+# (cross_asset_signals TSMOM over the 18 ETFs) and the validated rates-carry sleeve
+# (Treasury-curve carry+roll over {SHY,IEF,TLT,LQD}, net SR 0.467, corr-to-mom 0.014),
+# each driven through the env independently and risk-parity-combined (allocator_factory).
+# These builders fetch the UNION universe ONCE (so all three array sets share one
+# calendar) and expose per-sleeve env arrays + a union price/volume set for the combined
+# PaperState replay. The momentum sleeve arrays are byte-identical to the single-sleeve
+# path (signals computed on the 18-asset subset only → XS-rank-within-class unchanged; SHY
+# never enters momentum).
+
+
+def _window_mask(dates: pd.DatetimeIndex, start_ts, end_ts) -> pd.DatetimeIndex:
+    mask = (dates >= start_ts) & (dates <= end_ts)
+    wdates = dates[mask]
+    if len(wdates) == 0:
+        raise ValueError(f"empty window {start_ts}..{end_ts}")
+    return wdates
+
+
+def _dollar_volume_and_price(
+    close_wide: pd.DataFrame, volume_wide: pd.DataFrame,
+    assets: Sequence[str], wdates: pd.DatetimeIndex,
+) -> tuple[np.ndarray, np.ndarray]:
+    """``(volume_ary, price_ary)`` over ``assets`` on ``wdates``. ``volume_ary`` is DOLLAR
+    volume (shares×price, F1) — the env/SimFillEngine slippage-participation denominator."""
+    assets = list(assets)
+    price_ary = close_wide.loc[wdates, assets].ffill().fillna(0.0).to_numpy(np.float64)
+    share_volume = volume_wide.loc[wdates, assets].ffill().fillna(0.0).to_numpy(np.float64)
+    return share_volume * price_ary, price_ary
+
+
+def _causal_vol_ary(
+    close_wide: pd.DataFrame, assets: Sequence[str], wdates: pd.DatetimeIndex,
+    *, vol_window: int,
+) -> np.ndarray:
+    """Causal annualized realized vol over ``assets`` on ``wdates`` — the env's
+    vol-scaling denominator. Uses the SAME formula as the momentum ``vol_ary``
+    (``cross_asset_signals._realized_vol``: rolling std then ``.shift(1)``, so row ``t``
+    uses returns ``<= t-1``) so the two sleeves vol-scale identically. Warmup NaN → 0
+    (env treats vol ≤ vol_floor as flat)."""
+    rets = close_wide[list(assets)].pct_change()
+    vol = cas._realized_vol(rets, vol_window, cas.ANN)
+    arr = vol.reindex(wdates)[list(assets)].to_numpy(np.float64)
+    np.nan_to_num(arr, copy=False, nan=0.0, posinf=0.0, neginf=0.0)
+    return arr
+
+
+def build_rates_carry_arrays(
+    close_wide: pd.DataFrame,
+    volume_wide: pd.DataFrame,
+    curve: Mapping[str, "pd.Series"],
+    rates_assets: Sequence[str],
+    start_ts: pd.Timestamp,
+    end_ts: pd.Timestamp,
+    *,
+    tenor_map: Mapping[str, str] = rc.DEFAULT_RATES_TENOR,
+    financing_tenor: str = rc.DEFAULT_FINANCING_TENOR,
+    tanh_scale: float = rc.DEFAULT_TANH_SCALE,
+    vol_window: int = cas.DEFAULT_VOL_WINDOW,
+) -> dict:
+    """Env arrays for the RATES-CARRY sleeve drive (``linear_core_trajectory`` over the
+    rates universe). ``conviction_ary`` is the causal daily carry+roll conviction
+    (:func:`rates_carry.rates_carry_conviction`), NOT trend momentum; everything else
+    mirrors :func:`build_allocator_arrays` (dollar volume F1, causal vol, carry_ary=0).
+
+    ``tech_ary`` is a minimal placeholder (the conviction itself, ``tech_dim=1``): the
+    frozen-linear-core drive ignores the observation (``action_at_step`` reads the
+    conviction directly), so only its SHAPE must be valid for the env constructor.
+    """
+    rates_assets = list(rates_assets)
+    n = len(rates_assets)
+    wdates = _window_mask(close_wide.index, start_ts, end_ts)
+
+    volume_ary, _price = _dollar_volume_and_price(close_wide, volume_wide, rates_assets, wdates)
+    vol_ary = _causal_vol_ary(close_wide, rates_assets, wdates, vol_window=vol_window)
+    conviction_ary = rc.daily_conviction_array(
+        curve, wdates, rates_assets, tenor_map=tenor_map,
+        financing_tenor=financing_tenor, tanh_scale=tanh_scale)
+    carry_ary = np.zeros((len(wdates), n), dtype=np.float64)  # position-carry accrual = 0 (ADR-6)
+    timestamps = (wdates.asi8 // 10**9).astype(np.int64)
+
+    return {
+        "price_ary": _price,
+        "tech_ary": conviction_ary.astype(np.float32),   # placeholder (tech_dim=1); drive ignores obs
+        "vol_ary": vol_ary,
+        "carry_ary": carry_ary,
+        "volume_ary": volume_ary,
+        "timestamps": timestamps,
+        "conviction_ary": conviction_ary,
+        "tech_cols": ["rates_carry_conviction"],
+        "assets": rates_assets,
+    }
+
+
+def build_union_arrays(
+    close_wide: pd.DataFrame,
+    volume_wide: pd.DataFrame,
+    union_assets: Sequence[str],
+    start_ts: pd.Timestamp,
+    end_ts: pd.Timestamp,
+) -> dict:
+    """Price / dollar-volume / carry / timestamps over the UNION universe (momentum 18 +
+    SHY → 19) for the combined PaperState replay (the risk-parity-combined target weights
+    are booked here). No signals — accounting only; the combined weights come from the two
+    sleeve drives + the risk-parity combine (allocator_factory)."""
+    union_assets = list(union_assets)
+    wdates = _window_mask(close_wide.index, start_ts, end_ts)
+    volume_ary, price_ary = _dollar_volume_and_price(close_wide, volume_wide, union_assets, wdates)
+    return {
+        "price_ary": price_ary,
+        "volume_ary": volume_ary,
+        "carry_ary": np.zeros((len(wdates), len(union_assets)), dtype=np.float64),
+        "timestamps": (wdates.asi8 // 10**9).astype(np.int64),
+        "assets": union_assets,
+    }
+
+
+def _sleeve_cfg(config: Mapping) -> tuple[dict, dict]:
+    sleeves = dict(config.get("sleeves", {}))
+    if "momentum" not in sleeves or "rates_carry" not in sleeves:
+        raise KeyError("two-sleeve config needs sleeves.{momentum,rates_carry}")
+    return dict(sleeves["momentum"]), dict(sleeves["rates_carry"])
+
+
+def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False) -> dict:
+    """Fetch+clean the UNION OHLCV once and prepare BOTH sleeves' inputs.
+
+    Returns dict: ``close (wide), volume (wide), mom_signals (long), mom_assets,
+    rates_assets, union_assets, asset_class, curve, lookbacks, sleeve cfgs, manifest``.
+    Per-window env arrays are built lazily via :func:`build_two_sleeve_arrays`.
+
+    Momentum signals are computed on the 18-asset SUBSET (so XS-rank-within-class and the
+    validated baseline are byte-identical to the single-sleeve path; SHY never enters the
+    momentum cross-section). The rates curve is loaded once and a LEAK-2 causality tripwire
+    is asserted on it at load (mirrors ``cas.assert_causal``).
+    """
+    mom_cfg, rc_cfg = _sleeve_cfg(config)
+    uni = config["universe"]
+    data_cfg = config.get("data", {})
+    feat_cfg = config.get("features", {})
+
+    union_assets = list(uni["assets"])
+    asset_class = dict(uni.get("asset_class", {a: "all" for a in union_assets}))
+    mom_assets = list(mom_cfg["assets"])
+    rates_assets = list(rc_cfg.get("assets", rc.rates_universe()))
+    tenor_map = dict(rc_cfg.get("tenor_map", rc.DEFAULT_RATES_TENOR))
+    financing_tenor = str(rc_cfg.get("financing_tenor", rc.DEFAULT_FINANCING_TENOR))
+    tanh_scale = float(rc_cfg.get("tanh_scale", rc.DEFAULT_TANH_SCALE))
+
+    lookbacks = list(feat_cfg.get("lookbacks", cas.DEFAULT_LOOKBACKS))
+    skip = int(feat_cfg.get("skip", cas.DEFAULT_SKIP))
+    vol_window = int(feat_cfg.get("vol_window", cas.DEFAULT_VOL_WINDOW))
+    target_vol = float(config.get("env", {}).get("target_vol_asset", cas.DEFAULT_TARGET_VOL_ASSET))
+    lev_cap = float(config.get("env", {}).get("lev_cap", cas.DEFAULT_LEV_CAP))
+
+    missing = [a for a in mom_assets + rates_assets if a not in union_assets]
+    if missing:
+        raise ValueError(f"sleeve assets {missing} not in universe.assets (union must cover both sleeves)")
+
+    wide, manifest = fetch_and_clean(
+        union_assets,
+        start=data_cfg.get("start_date", "2006-01-01"),
+        end=data_cfg.get("end_date"),
+        cache_dir=Path(data_cfg.get("cache_dir", DEFAULT_CACHE_DIR)),
+        force_refetch=force_refetch,
+    )
+    close = wide["close"]
+
+    mom_close = close[mom_assets]
+    mom_asset_class = {a: asset_class.get(a, "all") for a in mom_assets}
+    cas.assert_causal(
+        mom_close, lookbacks=lookbacks, skip=skip, vol_window=vol_window,
+        target_vol_asset=target_vol, lev_cap=lev_cap, asset_class=mom_asset_class,
+    )
+    mom_signals = cas.compute(
+        mom_close, lookbacks=lookbacks, skip=skip, vol_window=vol_window,
+        target_vol_asset=target_vol, lev_cap=lev_cap, asset_class=mom_asset_class,
+    )
+
+    curve = tcl.load_treasury_curve(cache_dir=data_cfg.get("cache_dir"))
+    rc.assert_causal(curve, close.index, tenor_map=tenor_map,
+                     financing_tenor=financing_tenor, tanh_scale=tanh_scale)
+
+    return {
+        "close": close,
+        "volume": wide["volume"],
+        "mom_signals": mom_signals,
+        "mom_assets": mom_assets,
+        "rates_assets": rates_assets,
+        "union_assets": union_assets,
+        "asset_class": asset_class,
+        "curve": curve,
+        "lookbacks": lookbacks,
+        "vol_window": vol_window,
+        "tenor_map": tenor_map,
+        "financing_tenor": financing_tenor,
+        "tanh_scale": tanh_scale,
+        "manifest": manifest,
+    }
+
+
+def build_two_sleeve_arrays(data: Mapping, start_ts, end_ts) -> dict:
+    """Build the per-sleeve env arrays + the union accounting arrays for ``[start_ts,
+    end_ts]`` from a :func:`load_two_sleeve_data` payload. All three share one calendar
+    (single union fetch), so step index ``k`` aligns across sleeves and the union book.
+
+    Returns ``{"momentum": mom_arrays, "rates_carry": rates_arrays, "union": union_arrays}``.
+    """
+    mom_arrays = build_allocator_arrays(
+        data["mom_signals"], data["close"], data["volume"], data["mom_assets"],
+        start_ts, end_ts, lookbacks=data["lookbacks"],
+    )
+    rates_arrays = build_rates_carry_arrays(
+        data["close"], data["volume"], data["curve"], data["rates_assets"],
+        start_ts, end_ts, tenor_map=data["tenor_map"],
+        financing_tenor=data["financing_tenor"], tanh_scale=data["tanh_scale"],
+        vol_window=data["vol_window"],
+    )
+    union_arrays = build_union_arrays(
+        data["close"], data["volume"], data["union_assets"], start_ts, end_ts)
+    return {"momentum": mom_arrays, "rates_carry": rates_arrays, "union": union_arrays}

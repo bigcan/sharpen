@@ -27,24 +27,32 @@ check: ``daily_return_te_bps`` and the equity curve genuinely diverge if the boo
 wrong). It is **tautological on the WEIGHT/COST axis**: ``weight_l1_drift`` is 0 because
 the replay consumes the oracle's *own* weights (``min_trade_pct=0``), and
 ``cost_drift_ratio`` is 1.0 because ``SimFillEngine`` is a line-for-line transcription of
-the env cost model. Neither validates the forward DATA path — live fetch, calendar,
-growing-window assembly, scheduler date — which is the unbuilt **step-4** and MUST get its
-own independent-recompute parity (feed an INDEPENDENTLY recomputed live weight series into
-``compare``) plus a Tier-2 re-audit before capital. The look-ahead guarantee comes from
-``tests/paper/test_paper_causality.py`` + ``test_forward_prefix_consistency``, NOT from
-``weight_l1_drift``. Do NOT read a green rung-1 ``weight_l1_drift`` / ``cost_drift`` as
-forward-path validation.
+the env cost model.
+
+**:meth:`ParityHarness.run_independent_recompute` (step-4) makes ``weight_l1_drift``
+load-bearing on the WEIGHT axis** — it does NOT consume the oracle's weights; instead it
+reconstructs the held-conviction series INDEPENDENTLY on a growing live-fetched window (the
+live scheduler's view) and drives the same env with it. A correct forward assembly
+reproduces the oracle (drift ≈ 0); a calendar / truncation / look-ahead bug (e.g. the
+P2-01 in-progress-tail trap) diverges and is caught. The COST axis (``cost_drift_ratio``)
+stays sim-tautological at 1.0 until rung-2's real IB fills. Promote to capital only after
+running this variant under a Tier-2 re-audit (NEXT roadmap #2).
+
+The default :meth:`run` path validates ACCOUNTING only; its look-ahead guarantee comes from
+``tests/paper/test_paper_causality.py`` + ``test_forward_prefix_consistency``, NOT from a
+green ``run``-path ``weight_l1_drift``. Do NOT read a green rung-1 ``run`` ``weight_l1_drift``
+/ ``cost_drift`` as forward-path validation.
 """
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Mapping
+from typing import Callable, Mapping
 
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.envs.allocator_factory import linear_core_trajectory
+from finrl_pro_ds.envs.allocator_factory import drive_with_conviction, linear_core_trajectory
 from finrl_pro_ds.paper.fill_engine import FillEngine, SimFillEngine
 from finrl_pro_ds.paper.paper_state import LiveTrajectory, PaperState, generate_orders
 
@@ -125,6 +133,87 @@ class ParityHarness:
         self._expected_rebalance_ts = self._true_month_end_ts(
             np.asarray(arrays["timestamps"], dtype=np.int64))
         return live, sim
+
+    # ------------------------------------------------------------------ #
+    def run_independent_recompute(
+        self,
+        arrays: Mapping,
+        *,
+        fill_engine: FillEngine | None = None,
+        conviction_fn: Callable[[Mapping, int], np.ndarray] | None = None,
+    ) -> tuple[LiveTrajectory, dict]:
+        """Step-4 forward-path parity variant — makes ``weight_l1_drift`` LOAD-BEARING.
+
+        Unlike :meth:`run` (which feeds the replay the oracle's OWN weights, so
+        ``weight_l1_drift`` is 0 by construction — accounting-only; Tier-2 audit
+        P3-01/P10-01/P8-03/P11-04), this re-derives the live weight series
+        **independently**: it walks the harness's own true-month-end calendar
+        (:meth:`_true_month_end_ts`) and at each rebalance recomputes the held
+        conviction on the GROWING window ``arrays[:t+1]`` (the live scheduler's view),
+        assembles the daily held-conviction series, and drives the SAME env once with it
+        via :func:`~finrl_pro_ds.envs.allocator_factory.drive_with_conviction`. The env
+        re-applies only the deterministic daily vol-scale (already validated), so the only
+        independently-reconstructed part is the monthly conviction — exactly where the
+        forward calendar/truncation risk lives.
+
+        A CORRECT forward assembly reproduces the oracle weights (``weight_l1_drift`` ≈ 0,
+        legitimately); a calendar / truncation / look-ahead bug in the growing-window
+        assembly (e.g. the P2-01 in-progress-tail trap, or peeking a future bar) moves the
+        weights and ``weight_l1_drift`` > 0 CATCHES it. This is the config the Tier-2
+        re-audit (NEXT roadmap #2) requires before rung-2 capital; the rung-1 ``run`` path
+        validates ACCOUNTING only.
+
+        ``conviction_fn(arrays, t) -> (N,)`` is the per-rebalance recompute (default
+        :meth:`_safe_monthend_conviction`, the SAFE confirmed-month-end reader). Tests
+        inject a deliberately-broken reader to prove the escape (drift > 0) exists.
+
+        Returns ``(live_trajectory, sim_oracle_dict)`` ready for :meth:`compare` — where
+        ``compare`` now measures the genuine live-vs-oracle weight divergence.
+        """
+        sim = self.sim_oracle(arrays)
+        conv_live = self._assemble_forward_conviction(arrays, conviction_fn=conviction_fn)
+        drive = drive_with_conviction(arrays, self.config, conv_live)
+        live = self._replay(arrays, drive["weights"], fill_engine=fill_engine)
+        self._expected_rebalance_ts = self._true_month_end_ts(
+            np.asarray(arrays["timestamps"], dtype=np.int64))
+        return live, sim
+
+    def _assemble_forward_conviction(
+        self, arrays: Mapping, *,
+        conviction_fn: Callable[[Mapping, int], np.ndarray] | None = None,
+    ) -> np.ndarray:
+        """Reconstruct the daily held-conviction series a LIVE scheduler would carry, by
+        recomputing on a GROWING window at each true month-end — INDEPENDENT of the
+        oracle's batch ``monthly_rebal_conviction``. Returns ``(T, N)`` to feed
+        :func:`drive_with_conviction`.
+
+        Between rebalances the most recent month-end conviction is held (the env then
+        vol-scales it daily). When ``conviction_fn`` is the default SAFE reader this
+        reproduces the batch ``monthly_rebal_conviction`` exactly; a broken reader (or a
+        wrong calendar) diverges and is caught downstream by ``weight_l1_drift``.
+        """
+        ts = np.asarray(arrays["timestamps"], dtype=np.int64)
+        conv_raw = np.asarray(arrays["conviction_ary"], dtype=np.float64)
+        T, N = conv_raw.shape
+        rebal_ts = {int(t) for t in self._true_month_end_ts(ts)}
+        fn = conviction_fn or self._safe_monthend_conviction
+        out = np.zeros((T, N), dtype=np.float64)
+        held = np.zeros(N, dtype=np.float64)
+        for t in range(T):
+            if int(ts[t]) in rebal_ts:
+                held = np.asarray(fn(arrays, t), dtype=np.float64).ravel()
+            out[t] = held
+        return out
+
+    @staticmethod
+    def _safe_monthend_conviction(arrays: Mapping, t: int) -> np.ndarray:
+        """The conviction a live scheduler decides at true month-end bar ``t`` from the
+        GROWING window ``[0..t]`` only — SAFE: the recompute runs on the truncated slice
+        and takes the value at the CONFIRMED month-end bar ``t``, never an in-progress
+        tail (cf. the :func:`monthly_rebal_conviction` P2-01 caveat). Reproduces the batch
+        ``conv_monthly`` exactly when the forward assembly is correct."""
+        conv_window = np.asarray(arrays["conviction_ary"], dtype=np.float64)[:t + 1]
+        return conv_window[-1]
 
     def _asset_meta(self, arrays: Mapping, n_assets: int) -> tuple[list[str], dict[str, str]]:
         assets = list(arrays.get("assets") or self.config.get("universe", {}).get("assets")

@@ -1,0 +1,135 @@
+# ============================================================================
+# CROSS-ASSET 2-SLEEVE PAPER EXECUTOR — momentum + rates-carry (rung-1 paper-sim)
+# ============================================================================
+# The forward/paper config for the LINEAR multi-sleeve book the new-strategy campaign
+# recommended (S553-cont-53, docs/research/multi_sleeve_strategy_report_2026-06-18.md):
+#   sleeve 1 = momentum (validated TSMOM, 18 ETFs, 4 classes; cross_asset_momentum.yaml)
+#   sleeve 2 = rates-carry (Treasury-curve carry+roll over {SHY,IEF,TLT,LQD}; the carry
+#              falsification's lone additive SURVIVOR — net SR 0.467, corr-to-mom 0.014)
+# Combined as a FUND-OF-FUNDS (operator decision 2026-06-18): each sleeve driven through
+# the env independently, then risk-parity-combined (trailing-causal inverse-vol, monthly
+# meta-cadence, LEAK-2 safe). The executor shadows the COMBINED env-render book.
+#
+# NOT a training config (no HPO/RL — the campaign verdict was "ship linear, RL NOT
+# justified"). Consumed by finrl_pro_ds.paper.TwoSleeveExecutor + the paper_soak gates.
+#
+# CAPITAL GATE (do not skip): an actual paper-capital soak still requires the report's
+# step-1 Tier-2 deep-lifecycle audit (deep_strategy_audit / audit_two_sleeve_book.py) +
+# operator go-ahead. This config WIRES the book; it does not promote it.
+# ============================================================================
+
+strategy:
+  id: "xsec-2sleeve-paper"
+  name: "cross_asset_momentum_rates_carry"
+  version: "0.1.0"
+  instrument: "multi_asset_allocator"
+
+# ---------- UNIVERSE (union = 18 momentum ETFs + SHY → 19; SHY is rates-carry-only) ----
+# SHY (2y) is NOT in the validated momentum cross-section — it enters ONLY via the
+# rates-carry sleeve. The union is the asset axis the combined book is booked on.
+universe:
+  assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",       # equity
+           "TLT", "IEF", "LQD",                      # rates (momentum + rates-carry)
+           "GLD", "SLV", "DBC", "USO", "DBA",        # commodity
+           "UUP", "FXE", "FXY", "FXB", "FXA",        # fx
+           "SHY"]                                     # rates (rates-carry ONLY)
+  asset_class:
+    SPY: equity
+    QQQ: equity
+    IWM: equity
+    EFA: equity
+    EEM: equity
+    TLT: rates
+    IEF: rates
+    LQD: rates
+    GLD: commodity
+    SLV: commodity
+    DBC: commodity
+    USO: commodity
+    DBA: commodity
+    UUP: fx
+    FXE: fx
+    FXY: fx
+    FXB: fx
+    FXA: fx
+    SHY: rates
+  n_assets: 19
+
+# ---------- SLEEVES (the fund-of-funds definition) ---------------------------
+sleeves:
+  momentum:                                          # validated TSMOM core (18 ETFs)
+    assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",
+             "TLT", "IEF", "LQD",
+             "GLD", "SLV", "DBC", "USO", "DBA",
+             "UUP", "FXE", "FXY", "FXB", "FXA"]
+    signal: tsmom
+  rates_carry:                                       # Treasury-curve carry+roll survivor
+    assets: ["SHY", "IEF", "TLT", "LQD"]
+    tenor_map: {SHY: y2, IEF: "10y", TLT: "30y", LQD: "10y"}   # ETF -> curve tenor (LOCKED)
+    financing_tenor: "3m"
+    tanh_scale: 1.5                                  # carry conviction = tanh(carry / 1.5) (LOCKED)
+
+# ---------- RISK-PARITY META-LAYER (how the two sleeves are combined) ---------
+# Trailing-causal inverse-vol (convex Σα=1; NO portfolio-vol overlay — consistent with
+# the executor's declined-overlay decision 2026-06-14). The scalar uses ONLY each sleeve's
+# realized returns < the decision bar, recomputed monthly and held (meta-turnover ~0).
+risk_parity:
+  trailing_window: 252                               # ~1y trailing sleeve-vol window
+  min_periods: 63                                    # warmup before inverse-vol (else equal-weight)
+  monthly_meta: true                                 # recompute α at month-ends, hold between
+  target_portfolio_vol: null                         # null = convex inverse-vol (no overlay)
+
+# ---------- DATA (yfinance daily; SEPARATE cache so the 19-asset union fetch does NOT
+# clobber the 18-asset momentum cache used by the single-sleeve path) -----------
+data:
+  source: "yfinance_etf"
+  frequency: "1d"
+  start_date: "2006-01-01"
+  end_date: null
+  fields: ["open", "high", "low", "close", "volume"]
+  cache_dir: "results/cross_asset_paper"
+
+# ---------- FEATURES (momentum sleeve causal signals; LOCKED to the validated core) ----
+features:
+  lookbacks: [63, 126, 252]
+  skip: 5
+  vol_window: 63
+  include_baseline_weight: true
+
+# ---------- ENV (MultiAssetAllocatorEnv — both sleeve drives + the union replay) -------
+# The frozen-linear-core drive forces the v1.1 execution levers OFF (allocator_factory),
+# so the env block here is the validated v1 core (NOT the v1.1 cost-lever RL env).
+env:
+  type: "multi_asset_allocator"
+  initial_capital: 100000.0
+  taker_fee: 0.0002                      # 2 bps
+  slippage_base_bps: 1.0
+  slippage_impact_bps: 5.0
+  target_vol_asset: 0.10                 # per-asset annualized vol target (per sleeve)
+  lev_cap: 2.0
+  max_gross_exposure: 3.0                # per-sleeve gross cap AND combined-book cap
+  allow_short: true
+  reward_type: "dsr"
+  dsr_eta: 0.01
+  turnover_penalty: 0.001
+  min_trade_pct: 0.005
+  circuit_breaker_threshold: 0.1
+  random_start: false
+
+# ---------- EXECUTION (rung-1 paper-sim; ADR-3) ------------------------------
+execution:
+  shadow: linear_core_two_sleeve         # momentum + rates-carry fund-of-funds (NOT rl)
+  rung: paper_sim                        # {paper_sim, paper_ib}
+  venue: none                            # rung-1; "ib" for rung-2 (ADR-5)
+  rebalance_cadence: monthly             # MUST match gates.paper_soak.rebalance_cadence
+  fill_reference: close
+
+# ---------- GATES (pre-registered paper_soak; reused — the union replay computes per-class
+# attribution incl. SHY→rates, so the drift gate works unchanged) --------------
+ensemble:
+  gates_file: configs/cross_asset_momentum.gates.yaml
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["xsec-momentum", "rates-carry", "two-sleeve", "allocator", "TSMOM", "paper", "s553"]
