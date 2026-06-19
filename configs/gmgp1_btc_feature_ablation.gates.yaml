@@ -1,0 +1,158 @@
+# GMGP1-BTC Feature-Engineering Ablation — pre-registered rung table + gates.
+#
+# Research question: how much of GMGP1's multi-scale OHLCV feature engineering
+# actually earns its keep? Rung-0 = the single cheapest signal (15-min
+# log_return); each rung adds ONE feature (or, at the top, the coarse scales).
+# Marginal contribution of feature/scale k = median(PF_rung_k) - median(PF_rung_{k-1}).
+#
+# Read by scripts/run_feature_ablation.py (rung table -> derived configs) and
+# scripts/analyze_feature_ablation.py (hypotheses, post-run). Single source of
+# truth for decision rules (project rule: never hardcode gate thresholds).
+#
+# Pre-committed BEFORE any run launches. Do not edit after the first rung
+# completes without a decision memo explaining why.
+
+workstream: "gmgp1_btc_feature_ablation"
+test_bed: "gmgp1_btc_sac_15min_clean"
+asset: "BTC"
+
+seeds: [123, 456, 789, 1024, 2026]
+n_seeds: 5
+n_rungs: 6
+n_runs: 30
+
+# ---------------------------------------------------------------------------
+# Confound declarations — copied here so the analysis script can sanity-check
+# that all 30 runs share the controlled variables. The feature axis is the
+# ONLY intended independent variable.
+# ---------------------------------------------------------------------------
+fixed_hp_source: "canary HPO trial #5 (gmgp1_btc_x2deleak_canary_hpo) — same HPs as configs/gmgp1_btc_x2deleak_canary_costcorr_wf.yaml"
+fee_model: "steady_state: taker 0.00055 (5.5bps Bybit) + slippage_base_bps 5.0 — NO fee curriculum"
+data_source: "data/btc_usdt_1min_bybit.parquet (clean; canary substrate)"
+data_window:
+  train: "2024-01-06 to 2026-01-31"
+  val:   "2026-02-01 to 2026-02-28"
+  test:  "2026-03-01 to 2026-04-06"
+training_budget_steps: 2000000
+eval_protocol: "l1-multiseed (single split, 5 seeds)"
+
+# ---------------------------------------------------------------------------
+# Rung table — the dispatcher overrides features.feature_indices / scales /
+# features_per_scale + env.* + network.scale_encoder.input_size per rung.
+# Feature index legend (multiscale_handler.py _compute_scale_features):
+#   0 log_return | 1 atr_norm | 2 parkinson_vol | 3 open_z | 4 high_z |
+#   5 low_z | 6 close_z | 7 volume_z
+# ---------------------------------------------------------------------------
+rungs:
+  - id: r0
+    label: logret
+    feature_indices: [0]
+    scales: [15]
+    desc: "single 15m log_return — BASELINE FLOOR (the reference number)"
+  - id: r1
+    label: logret-atr
+    feature_indices: [0, 1]
+    scales: [15]
+    desc: "+atr_norm (normalized volatility)"
+  - id: r2
+    label: logret-atr-park
+    feature_indices: [0, 1, 2]
+    scales: [15]
+    desc: "+parkinson_vol (intrabar range)"
+  - id: r3
+    label: plus-ohlcz
+    feature_indices: [0, 1, 2, 3, 4, 5, 6]
+    scales: [15]
+    desc: "+open/high/low/close z-scores (SymLog->EMA-Z->tanh)"
+  - id: r4
+    label: full8-single
+    feature_indices: [0, 1, 2, 3, 4, 5, 6, 7]
+    scales: [15]
+    desc: "+volume_z = full 8-feature single-scale"
+  - id: r5
+    label: full8-multiscale
+    feature_indices: [0, 1, 2, 3, 4, 5, 6, 7]
+    scales: [15, 60, 240]
+    desc: "full 8-feature x 3 scales = CANARY feature set (multiscale value test + anchor)"
+
+# ---------------------------------------------------------------------------
+# Hypotheses & decision rules
+# ---------------------------------------------------------------------------
+hypotheses:
+  h1_feature_monotonic:
+    description: >-
+      OOS test PF is non-decreasing as single-scale features are added
+      (r0 -> r4). If true, the per-feature engineering carries real signal.
+    statistic: "kendall_tau"
+    metric: "median_test_pf_per_rung"
+    rungs: [r0, r1, r2, r3, r4]
+    tau_min: 0.6
+    p_max: 0.10
+    decision: "PASS|FAIL|AMBIGUOUS"
+
+  h2_multiscale_value:
+    description: >-
+      The coarse scales earn their keep: median(PF r5) > median(PF r4),
+      MWU two-sided p < 0.10. This is the question that motivated the study
+      ("does multi-scale add value over a single 15m scale?").
+    statistic: "mann_whitney_u"
+    compare: ["r5", "r4"]
+    p_max: 0.10
+    decision: "PASS|FAIL|AMBIGUOUS"
+
+  h3_per_feature_significance:
+    description: >-
+      Each single feature addition is individually justified: rung_k vs
+      rung_{k-1} MWU two-sided p < 0.10 to CLAIM "feature k adds value".
+      Otherwise the feature is decorative (drop from the production set).
+    statistic: "mann_whitney_u"
+    p_max: 0.10
+
+  baseline_reference:
+    description: >-
+      r0 median test PF IS the feature-engineering baseline number. Expected
+      near-breakeven on clean BTC (canary falsified BTC directional edge) —
+      a flat baseline is the CORRECT reference, not a failure. The science is
+      in the deltas, not r0's absolute level.
+    metric: "median_test_pf_r0"
+
+# ---------------------------------------------------------------------------
+# Significance gate (any pairwise "improvement" claim must pass)
+# ---------------------------------------------------------------------------
+significance:
+  test: "mann_whitney_u"
+  alternative: "two_sided"
+  p_max: 0.10
+  rationale: "loose alpha matches Protocol v2 Stage-2 ambiguity-band convention at small N (5 seeds)"
+
+# ---------------------------------------------------------------------------
+# Per-rung stability + health gates (validator-required + research-tier)
+# ---------------------------------------------------------------------------
+gates:
+  l1_seeds: 5
+  l1_pf_floor: 1.0            # research-tier sanity floor; NOT a promote-to-paper gate
+  l1_pf_cv_max: 0.30          # cross-seed CV(PF) per rung
+  entropy_floor: -10.0        # Protocol v2 health flag
+
+# ---------------------------------------------------------------------------
+# Sanity anchor
+# ---------------------------------------------------------------------------
+anchors:
+  r5_vs_canary:
+    description: >-
+      r5 uses the EXACT canary feature set (8 feat x [15,60,240]) on the same
+      data/costs/HPs/budget. r5's median PF must land in the same neighborhood
+      as the canary's L1 numbers (~0.95-1.05 best-solo). A large divergence
+      flags a pipeline regression in this study, not a feature effect.
+
+# ---------------------------------------------------------------------------
+# Outputs
+# ---------------------------------------------------------------------------
+outputs:
+  report_markdown: "randd_log.md"
+  decision_memo: ".agent/memory/decision_feature_engineering_value.md"
+
+provenance:
+  drafted_on: "2026-06-16"
+  upstream_hp_run: "gmgp1_btc_x2deleak_canary_hpo trial #5"
+  base_config: "configs/gmgp1_btc_feature_ablation_base.yaml"

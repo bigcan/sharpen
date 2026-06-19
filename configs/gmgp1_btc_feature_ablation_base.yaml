@@ -1,0 +1,103 @@
+# GMGP1-BTC Feature-Engineering Ablation — BASE config (controlled variables).
+#
+# scripts/run_feature_ablation.py overrides the per-rung FEATURE AXIS only:
+#   features.feature_indices / features.scales / features.features_per_scale
+#   env.scales / env.features_per_scale
+#   network.scale_encoder.input_size   (= len(feature_indices))
+# from the rung table in configs/gmgp1_btc_feature_ablation.gates.yaml.
+#
+# Everything below is FROZEN across all 6 rungs (the confound controls):
+#   data  = clean Bybit BTC (canary substrate)
+#   costs = 5.5 bps taker + 5.0 bps slippage (steady-state, NO curriculum)
+#   HPs   = canary HPO trial #5 (same set as the de-leaked cost-corrected WF)
+#   budget= 2M steps · eval = l1-multiseed single split · seeds [123,456,789,1024,2026]
+#
+# The default axis below = R5 (canary feature set: 8 features x [15,60,240]) so
+# the base validates standalone and reproduces the canary at the top rung. The
+# dispatcher rewrites it DOWN for r0..r4.
+
+data:
+  file_path: "data/btc_usdt_1min_bybit.parquet"   # clean; has manifest
+  ticker: "BTC"
+  handler_type: "multiscale"
+  train_start_date: "2024-01-06"
+  train_end_date:   "2026-01-31"
+  val_start_date:   "2026-02-01"
+  val_end_date:     "2026-02-28"
+  test_start_date:  "2026-03-01"
+  test_end_date:    "2026-04-06"
+
+features:
+  scales: [15, 60, 240]                  # OVERRIDDEN per rung
+  feature_indices: [0, 1, 2, 3, 4, 5, 6, 7]   # OVERRIDDEN per rung
+  features_per_scale: 8                  # OVERRIDDEN per rung (= len(feature_indices))
+  window_size: 30
+  asset_class: "crypto"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8                  # OVERRIDDEN per rung
+  scales: [15, 60, 240]                  # OVERRIDDEN per rung
+  taker_fee: 0.00055                     # COST-CORRECTED (real Bybit taker 5.5 bps)
+  slippage_base_bps: 5.0                 # COST-CORRECTED (one-way limit-cross ~4.58 bps)
+  deadband_threshold: 0.33987435271118105   # FROZEN: canary HPO trial #5
+  atr_cap_percentile: 90                 # FROZEN
+  atr_cap_max_position: 0.5              # FROZEN
+  max_leverage: 1.770966122615107        # FROZEN: canary HPO trial #5
+  episode_length: 500
+  random_start: true
+  max_drawdown_pct: 0.30                 # research-tier (matches canary L1; honest DD belongs at WF)
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.006529766361344645        # FROZEN: canary HPO trial #5
+    dsr_scale: 1.0
+
+network:
+  scale_encoder:
+    input_size: 8                        # OVERRIDDEN per rung (= len(feature_indices))
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+  # n_scales auto-derived = len(features.scales) in sac_trainer.py:58
+
+agents:
+  sac:                                   # FROZEN — canary HPO trial #5, identical every rung
+    lr_actor: 7.795675728752896e-05
+    lr_critic: 4.59909621898876e-05
+    lr_alpha: 6.436967260355394e-06
+    gamma: 0.9537310183287655
+    tau: 0.0037445232945475075
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.4457952174148438
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 5.7228465480432185
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 2000000               # FROZEN budget (LOCK across all rungs)
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: true
+  num_envs: 20
+
+hpo:
+  enabled: false                         # fixed HPs (operator decision — confound control)
+
+gates:                                   # research-tier — sanity/stability only, NOT promotion
+  l1_seeds: 5
+  l1_pf_floor: 1.0
+  l1_pf_cv_max: 0.30
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-btc", "BTC", "SAC", "15min", "feature-ablation",
+         "fixed-hp", "clean-bybit", "research"]
