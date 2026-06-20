@@ -14,6 +14,14 @@ rebalance's signed weight deltas into realized fills + costs.
     ``cost_drift_ratio`` is 1.0 by construction — an ACCOUNTING-fidelity check, NOT a
     forward-cost validation. Real fill-price deviation vs this modeled cost is measured
     only at rung-2 with live IB fills (where ``cost_drift_ratio`` becomes informative).
+  - **ReactiveSimFillEngine (execution overlay):** ``SimFillEngine`` + a *reactive*
+    mean-reverting temporary impact (execution_overlay_architecture.md ADR-6). The
+    linear participation cost stays the PERMANENT-impact floor (byte-identical to
+    ``SimFillEngine`` when ``reactive_impact_bps == 0``); a per-asset pressure state
+    accumulates same-bar √-law impact and decays each bar, so *fast* execution pays a
+    concave, transient penalty that *slow* execution avoids. This cross-bar coupling is
+    what makes the optimal schedule state-dependent (something the RL overlay can beat
+    static TWAP on); a non-reactive replay would inflate the bps (arXiv 2603.29086).
   - **IBFillEngine (rung 2):** real Interactive Brokers paper fills/commissions —
     operator-gated (ADR-5); not built in this step (the ABC marks the seam).
 
@@ -147,4 +155,113 @@ class SimFillEngine(FillEngine):
             fees=total_fees,
             slippage=total_slippage,
             traded_notional=float(np.sum(notionals)),
+        )
+
+
+class ReactiveSimFillEngine(SimFillEngine):
+    """Rung-1 sim fills + a reactive mean-reverting temporary impact (execution overlay).
+
+    Extends :class:`SimFillEngine` (execution_overlay_architecture.md ADR-6). The parent's
+    linear participation slippage ``base_bps + impact_bps·participation`` is the
+    **permanent-impact floor** — kept byte-for-byte (computed via ``super().fill``), so
+    ``reactive_impact_bps == 0`` reproduces ``SimFillEngine`` EXACTLY (the rung-1
+    parity-floor guarantee). On top, a per-asset **pressure** state ``D`` (bps) models
+    transient liquidity demand:
+
+      participation_i = |order_notional_i| / dollar_volume_i           (F1, env convention)
+      add_i           = reactive_impact_bps · sqrt(participation_i)     (√-law, AC temporary impact)
+      temp_bps_i      = D_i (residual from prior bars) + add_i          (you cross your own new impact)
+      reactive_slip   = Σ_i |order_notional_i| · temp_bps_i · 1e-4      (charged on traded notional)
+      D_i             ← decay · (D_i + add_i)                           (mean-reversion into next bar)
+
+    The slippage stays a **cost debit** (the fill price is unchanged at the reference —
+    the env convention; ``fill_prices == ref_prices``), never a future-price peek
+    (LEAK-2). Pressure decays even on no-trade bars (``add_i = 0`` ⇒ ``D ← decay·D``), so
+    transient impact reverts while the agent waits. The √-law (the
+    ``I(Q)=Y·σ·√(Q/V)`` form the research cites) makes the temporary cost non-vanishing
+    at the low participations a daily ETF book trades at, and the cross-bar ``D`` coupling
+    is what gives the schedule a state-dependent optimum (vs the parent's per-bar-
+    independent cost, whose optimum is static TWAP by convexity).
+
+    **Stateful:** holds ``self._pressure`` of shape ``(n_assets,)`` across ``fill`` calls.
+    Each env instance MUST own its own engine and call :meth:`reset` at episode start
+    (the :class:`ExecutionSchedulerEnv` does this in ``reset``). Sign-agnostic: within a
+    single parent-order horizon the per-asset order sign is fixed, so unsigned pressure
+    (always an extra cost) is exact-within-horizon and conservative across direction
+    flips. New cost formula ⇒ Math + Audit chain (ADR-6).
+    """
+
+    def __init__(
+        self,
+        *,
+        taker_fee_pct: float,
+        slippage_base_bps: float,
+        slippage_impact_bps: float,
+        n_assets: int,
+        reactive_impact_bps: float = 0.0,
+        decay: float = 0.5,
+    ) -> None:
+        super().__init__(
+            taker_fee_pct=taker_fee_pct,
+            slippage_base_bps=slippage_base_bps,
+            slippage_impact_bps=slippage_impact_bps,
+        )
+        self.n_assets = int(n_assets)
+        self.reactive_impact_bps = float(reactive_impact_bps)
+        if self.reactive_impact_bps < 0.0:
+            raise ValueError(f"reactive_impact_bps must be >= 0 (got {reactive_impact_bps})")
+        # decay in [0, 1): 0 ⇒ no cross-bar carry (pure same-bar concave impact);
+        # ->1 ⇒ near-permanent (impact barely reverts). 1.0 would never revert (rejected).
+        self.decay = float(decay)
+        if not (0.0 <= self.decay < 1.0):
+            raise ValueError(f"decay must be in [0, 1) (got {decay})")
+        self._pressure = np.zeros(self.n_assets, dtype=np.float64)
+
+    def reset(self) -> None:
+        """Zero the temporary-impact pressure (call at the start of each execution episode)."""
+        self._pressure[:] = 0.0
+
+    def fill(
+        self,
+        *,
+        delta_weights: np.ndarray,
+        ref_prices: np.ndarray,
+        pv_before: float,
+        dollar_volume: np.ndarray,
+    ) -> FillResult:
+        base = super().fill(
+            delta_weights=delta_weights, ref_prices=ref_prices,
+            pv_before=pv_before, dollar_volume=dollar_volume,
+        )
+        # reactive_impact_bps == 0 ⇒ add ≡ 0 and pressure stays 0 forever ⇒ exactly the
+        # parent. Short-circuit so the parity-floor guarantee is provably byte-identical.
+        if self.reactive_impact_bps == 0.0:
+            return base
+
+        delta = np.asarray(delta_weights, dtype=np.float64).ravel()
+        vol = np.asarray(dollar_volume, dtype=np.float64).ravel()
+        abs_delta = np.abs(delta)
+        active = abs_delta >= _TRADE_EPS
+        notionals = abs_delta * float(pv_before)                       # (N,), 0 where inactive
+
+        # participation = notional / DOLLAR volume (F1). Active trades into zero/halted
+        # volume ⇒ MAX participation 1.0 (the env's conservative default); inactive ⇒ 0.
+        participation = np.zeros(self.n_assets, dtype=np.float64)
+        has_vol = vol > _VOL_EPS
+        np.divide(notionals, vol, out=participation, where=has_vol)
+        participation[active & ~has_vol] = 1.0
+        participation[~active] = 0.0
+
+        add = self.reactive_impact_bps * np.sqrt(participation)         # (N,) bps, 0 where inactive
+        temp_bps = self._pressure + add                                # residual + own new impact
+        reactive_slip = float(np.sum(notionals * temp_bps * 1e-4))     # charged on traded notional
+        # D ← decay·(D + add), in place (no per-bar realloc; preserves _pressure dtype/shape).
+        self._pressure += add
+        self._pressure *= self.decay                                   # decay residual into next bar
+
+        return FillResult(
+            fill_prices=base.fill_prices,
+            fees=base.fees,
+            slippage=base.slippage + reactive_slip,
+            traded_notional=base.traded_notional,
         )
