@@ -16,7 +16,12 @@ Spec: ``.agent/artifacts/paper_executor_spec.md``. Gates:
 """
 from __future__ import annotations
 
-from finrl_pro_ds.paper.fill_engine import FillEngine, FillResult, SimFillEngine
+from finrl_pro_ds.paper.fill_engine import (
+    FillEngine,
+    FillResult,
+    ReactiveSimFillEngine,
+    SimFillEngine,
+)
 from finrl_pro_ds.paper.paper_state import LiveTrajectory, PaperState, generate_orders
 from finrl_pro_ds.paper.parity_harness import ParityHarness, ParityReport
 from finrl_pro_ds.paper.soak_metrics import (
@@ -30,6 +35,7 @@ __all__ = [
     "FillEngine",
     "FillResult",
     "SimFillEngine",
+    "ReactiveSimFillEngine",
     "PaperState",
     "LiveTrajectory",
     "generate_orders",
