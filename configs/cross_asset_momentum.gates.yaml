@@ -84,8 +84,14 @@ paper_soak:
 
   # --- diversification / regime drift (the north-star: an UNCORRELATED sleeve) ---
   drift:
-    max_corr_to_spy: 0.40                # 60d rolling daily-return corr to SPY (core was 0.08) -> trip review
-    corr_window_days: 60
+    # RECALIBRATED 2026-06-21 (P11-03): window 60d -> 252d. A trailing-60d corr fired on
+    # 51% of the strategy's own clean 2006-2026 history (pure short-window noise, p95|corr|=0.80);
+    # it cannot distinguish regime DRIFT from coincidence. 252d is stable (rolling p50~0.00) yet
+    # responsive to a multi-year regime shift, which is what this monitor is for. The 0.08 in the
+    # old comment was the monthly-frozen core; the daily-rescale render the executor actually
+    # shadows is -0.19 full-sample. See paper_soak_provenance.recalibration_2026_06_21.
+    max_corr_to_spy: 0.40                # 252d trailing daily-return corr to SPY -> trip REVIEW (severity=review)
+    corr_window_days: 252
     max_single_class_pnl_share: 0.60     # no asset class supplies > 60% of cumulative P&L
     sleeve_attribution_required: true    # per-class (equity/rates/commodity/fx) P&L logged each rebalance
 
@@ -130,5 +136,34 @@ paper_soak_provenance:
       raised above the historical extremes so they fire only on a genuine break, the
       documented consequence of accepting the high-DD daily-rescale sleeve (Option A). Two
       related calibration items are TRACKED for a follow-up, NOT changed here: the drift
-      corr-to-SPY gate (60d rolling vs the 0.08 full-sample reference, P11-03) and wiring the
-      existing PSR/MinTRL control into the performance backstop (P11-05).
+      corr-to-SPY gate (60d rolling vs the 0.08 full-sample reference, P11-03 - RESOLVED
+      2026-06-21, see recalibration_2026_06_21) and wiring the existing PSR/MinTRL control
+      into the performance backstop (P11-05).
+  recalibration_2026_06_21:
+    session: S553-cont-57
+    resolves: P11-03 (deferred by recalibration_2026_06_14)
+    runner: scripts/run_cross_asset_paper_validation.py
+    evidence: C:/tmp/corr_spy_calibration_probe.py (full forward-path render, 5146 daily steps)
+    decision: >-
+      Operator-approved metric fix (NOT a loosening): switch the drift corr-to-SPY window from
+      60d to 252d; threshold unchanged at 0.40. The 60d single-window metric was mis-specified -
+      it fired on 51% of the strategy's own clean 2006-2026 history (rolling-60d p50=0.11,
+      p90=0.63, p95=0.71, max=0.94), so it measured short-window noise, not regime drift. A
+      252d trailing window is well-behaved (rolling p50~0.00, p90=0.51) and still responsive to
+      a multi-year regime shift, which is this monitor's stated purpose.
+    changes:
+      corr_window_days: {from: 60, to: 252}
+      max_corr_to_spy: {from: 0.40, to: 0.40}   # threshold UNCHANGED - this is a metric fix
+    measured:
+      full_sample_corr: -0.19          # structural / life-of-strategy (the real "uncorrelated" basis)
+      trailing_252d_corr: 0.53         # current value under the new metric -> REVIEW
+      trailing_504d_corr: 0.59
+    note: >-
+      NOT a loosening: the threshold is unchanged and the new metric STILL trips (252d=0.53 >
+      0.40 -> REVIEW). This is deliberate and correct. The sleeve is structurally uncorrelated
+      over its life (-0.19) but has genuinely drifted to ~0.5 SPY-correlation over the last ~2
+      years (equity-momentum + rates legs both risk-on). That is a REAL finding, not noise;
+      severity=review surfaces it as a documented known-issue to watch into paper WITHOUT
+      blocking. Per the "do not tune away a real signal" intent of the dated-memo rule, the
+      verdict is left at REVIEW rather than recalibrated to PASS. Capital promotion remains
+      BLOCKED pending the rung-1 step-4 Tier-2 gate regardless.

@@ -260,11 +260,13 @@ class PaperMetrics:
     """Thread-safe Prometheus gauges for the paper soak. No-op if ``prometheus_client``
     is missing or ``port == 0`` (the soak is never affected by monitoring)."""
 
-    def __init__(self, port: int = 0, strategy_name: str = "xsec-mom-linear-paper") -> None:
+    def __init__(self, port: int = 0, strategy_name: str = "xsec-mom-linear-paper",
+                 corr_window: int = 252) -> None:
         self._enabled = port > 0 and _HAS_PROMETHEUS
         self._port = port
         self._started = False
         self._strategy = strategy_name
+        self._corr_window = corr_window   # MUST match drift.corr_window_days (gates yaml)
         if not self._enabled:
             return
         self._g = {
@@ -278,7 +280,7 @@ class PaperMetrics:
                 "daily_return_te_bps": "Parity: |live-sim| daily return TE (bps, max)",
                 "cost_drift_ratio": "Parity: realized/modeled one-way cost",
                 "missed_rebalances": "Parity: scheduled month-end rebalances missed",
-                "corr_to_spy": "Drift: 60d corr of returns to SPY",
+                "corr_to_spy": "Drift: trailing corr of returns to SPY (corr_window_days)",
                 "max_class_pnl_share": "Drift: largest single asset-class P&L share",
                 "soak_status": "paper_soak overall (1=PASS, 0=FAIL, 0.5=REVIEW)",
             }.items()
@@ -299,7 +301,7 @@ class PaperMetrics:
         """Push the latest soak state to Prometheus. Thread-safe; no-op if disabled."""
         if not self._enabled:
             return
-        corr = live.corr_to_spy(window=60)
+        corr = live.corr_to_spy(window=self._corr_window)
         status_map = {PASS: 1.0, "REVIEW": 0.5, FAIL: 0.0}
         vals = {
             "equity": float(live.equity_curve[-1]) if len(live.equity_curve) else 0.0,
