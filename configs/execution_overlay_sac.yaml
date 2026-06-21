@@ -1,0 +1,116 @@
+# ============================================================================
+# EXECUTION OVERLAY (RL) — SAC training config (exec-overlay-2sleeve)
+# ============================================================================
+# Step 5 of the execution-overlay build (.agent/artifacts/execution_overlay_architecture.md).
+# Trains the RL execution scheduler (ExecutionSchedulerEnv, step 2) that shapes the TRADE PATH
+# of the FIXED linear 2-sleeve target (momentum + rates-carry) emitted by
+# TwoSleeveExecutor.sim_oracle — WITHOUT changing the target weights. RL points at EXECUTION
+# only (institutional_rl_live_trading_research.md pattern A): it minimizes net-of-impact
+# implementation shortfall vs a tuned TWAP baseline; it can NEVER manufacture a directional edge.
+#
+# Consumed by scripts/execution_overlay_runner.py:  load → sim_oracle target → build env →
+# SACTrainer.train → evaluate_execution_overlay → execution_beats_baseline gate. NOT a fused
+# pipeline (protocol_v2 staging): training and the deploy-gate eval are separate artifacts.
+#
+# CAPITAL GATE: this config TRAINS + GRADES the overlay. Promoting it to paper-CAPITAL (or
+# reading the runner verdict as a deploy decision) still requires a Tier-2 deep-lifecycle audit
+# (deep_strategy_audit) + operator go-ahead — stakes, not a diff, trigger it.
+# ============================================================================
+
+strategy:
+  id: "exec-overlay-2sleeve"
+  name: "execution_overlay_rl"
+  version: "0.1.0"
+  instrument: "execution_scheduler"
+
+# ---------- BASE BOOK (inheritance) ------------------------------------------
+# The FIXED target + the universe/sleeves/risk_parity/env/data/features come from the linear
+# 2-sleeve paper book. validate_config + the runner deep-merge this UNDER the blocks below
+# (these win), so the overlay config stays DRY: combined_w = TwoSleeveExecutor.sim_oracle target.
+base_book: configs/live_cross_asset_paper.yaml
+
+# ---------- EXECUTION OVERLAY (ExecutionSchedulerEnv params; ADR-3/4/6/7) -----
+# Each monthly conviction shift is the parent order worked over `horizon_bars`; the daily
+# vol-rescale drift is executed deterministically at baseline (the core's risk control, not an
+# execution choice). a=0 → m=1 → exact closed-loop TWAP slice; H=1 → byte-equivalent to the snap.
+execution_overlay:
+  horizon_bars: 5                 # H — bars to work each monthly parent order
+  baseline_schedule: twap         # v1 = closed-loop TWAP (AC is an accepted-but-ignored v2 schedule)
+  urgency_min: 0.0                # action=-1 → pause; action=0 → 1.0 (baseline); action=+1 → urgency_max
+  urgency_max: 2.0
+  is_reward_scale: 1.0e4          # IS struck in bps (×1e4) for reward conditioning
+  impact_penalty: 1.0             # alpha on modeled impact cost
+  risk_penalty: 0.0               # lambda (0 ⇒ risk via V7 wrapper + CVaR, not the reward)
+  unexecuted_penalty: 50.0        # beta terminal completion guard (forced phi=1 makes residual ~0)
+  asymmetric_dampen: 0.0          # eta Spooner dampener (raise > 0 if trend-following leaks in)
+  reactive_impact_bps: 8.0        # ReactiveSimFillEngine temporary-impact coefficient (step 1)
+  reactive_decay: 0.5             # mean-reversion of the temporary impact per bar
+  vol_window: 20                  # trailing window for realized_short_vol (market obs)
+  mom_window: 5                   # short-horizon window for signed_basket_momentum (market obs)
+  relative_equity: true           # info["portfolio_value"] = execution tracking-error equity (ADR-5)
+
+# ---------- PROP FIRM (PropFirmWrapperV7; ADR-5) -----------------------------
+# Constrains EXECUTION-INDUCED tracking-error drawdown (relative_equity above) and augments
+# `private` with 3 risk-budget dims (+3 → the runner sizes the net accordingly).
+prop_firm:
+  max_trailing_drawdown_pct: 0.05 # cap on execution-induced tracking-error DD
+  drawdown_penalty_start: 0.02
+  drawdown_penalty_scale: 5.0
+  augment_obs: true               # inject [dd_remaining, daily_remaining, profit_progress] into private
+  static_peak: true
+
+# ---------- NETWORK (dict-obs summary_stats; ADR-9) --------------------------
+# summary_input_dim / private_dim / action_dim are set AT RUNTIME from the (V7-augmented)
+# env.observation_space (M=scale_0 width, P=private width) so they can never drift from the env.
+network:
+  obs_mode: summary_stats
+  n_scales: 1
+  fusion_dim: 256                 # multiple of 8 (Tensor Core alignment)
+  window_size: 1
+
+# scales=[1] forces SACTrainer to derive n_scales=1 (the env emits scale_0 only); merges over
+# the base-book momentum feature block (lookbacks/skip/vol_window preserved).
+features:
+  scales: [1]
+
+# ---------- AGENT (DistributionalSAC, CVaR on tail-IS; action_dim=1) ---------
+agents:
+  sac:
+    distributional: true
+    cvar_alpha: 0.25
+    n_quantiles: 32
+    update_interval: 8            # tau auto-scales
+    batch_size: 512
+    learning_starts: 10000
+    buffer_size: 1000000
+
+training:
+  total_timesteps: 2000000
+  torch_compile: true
+  use_amp: true
+  num_envs: 8
+
+# ---------- GATES (decision gates; ADR-8) ------------------------------------
+# Inline block satisfies validate_config.check_gates_block + check_execution_overlay_gates;
+# the standalone overlay below is the canonical source the runner reads (two-files rule,
+# S551-cont-9). Keep the two in sync — the standalone may override (later wins).
+gates:
+  execution_beats_baseline:
+    metric: "net_is_uplift_bps"
+    min_uplift_bps: 2.0
+    cost_stress_factor: 1.5
+    cost_stress_min_uplift_bps: 0.5
+    wf_folds: 4
+    robust_folds_required: 3
+    else: "ship_snap_executor"
+  overlay_parity:
+    max_completion_l1_drift: 0.01
+    max_intra_horizon_drift: 1.0
+
+ensemble:
+  gates_file: configs/execution_overlay.gates.yaml
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["exec-overlay", "execution", "two-sleeve", "sac", "rl-execution", "s553"]
