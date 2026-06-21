@@ -15,12 +15,22 @@ import json
 import sys
 from pathlib import Path
 
+import yaml as _yaml
+
 ROOT = Path(__file__).resolve().parents[2]
 OUT = ROOT / "results" / "portfolio_frontier"
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(ROOT))                              # finrl_pro_ds (bare-script run)
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # sibling research modules
 import xsec_momentum_falsification as mom   # noqa: E402
 import carry_falsification as carry          # noqa: E402
 import portfolio_frontier as pf              # noqa: E402
+
+from finrl_pro_ds.crypto.eval.statistics import (  # noqa: E402
+    block_bootstrap_sharpe_ci,
+    deflated_sharpe_ratio,
+    excess_kurtosis,
+    skewness,
+)
 
 ANN = mom.ANN
 SUBPERIODS = {"2006-09": ("2006-01-01", "2009-12-31"), "2010-15": ("2010-01-01", "2015-12-31"),
@@ -137,6 +147,67 @@ def main():
                 "is a 2nd-order optimism, est <2bps/yr on the combined book.",
         "severity": "S3", "material": False}
 
+    # ---- ATTACK 8: multiplicity-deflated Sharpe + block-bootstrap CI (N1; P11-01/02/09) ----
+    # The deployable book's honest 0.601 is the BEST of a multi-config search; PSR@0 does
+    # NOT control for that. Deflate the observed Sharpe for the n_trials graded (Bailey &
+    # Lopez de Prado 2014): a best-of-N winner must clear the EXPECTED-MAX-of-N bar. All
+    # thresholds + the pre-registered honest n_trials come from the gates yaml.
+    of = _yaml.safe_load(
+        (ROOT / "configs" / "cross_asset_momentum.gates.yaml").read_text(encoding="utf-8")
+    )["overfitting"]
+    n_trials_pre = int(of["dsr_n_trials"])
+    min_dsr = float(of["min_dsr"])
+    bracket_N = [int(n) for n in of.get("dsr_n_trials_bracket", [n_trials_pre])]
+    block_days = int(of.get("block_bootstrap_block_days", 21))
+
+    # The honest (Fable-haircut) combine — the 0.601 book the GO rests on. Mirror
+    # portfolio_frontier: cut momentum's drift so its Sharpe -> 0.389, recombine with rates.
+    m_sh = mom.sharpe(m_al)
+    mu = float(m_al.mean())
+    mu_t = mu * (0.389 / m_sh) if m_sh > 0 else mu
+    m_hair = m_al - (mu - mu_t)
+    comb_hair, _, _ = pf.risk_parity([m_hair, r_al])
+    cd = comb_hair.dropna().to_numpy()
+    obs_sr_daily = float(mom.sharpe(comb_hair) / (ANN ** 0.5))   # per-period (matches trials)
+
+    grid_ann = mom.graded_book_sharpes()                        # 18 graded momentum books
+    trial_sharpes_daily = [s / (ANN ** 0.5) for s in grid_ann.values()]
+    g1, g2 = skewness(cd.tolist()), excess_kurtosis(cd.tolist())
+
+    def _dsr(N):
+        return deflated_sharpe_ratio(
+            obs_sr_daily, trial_sharpes_daily, n_obs=len(cd),
+            skew=g1, excess_kurt=g2, n_trials=N, periods_per_year=ANN)
+
+    dsr_pre = _dsr(n_trials_pre) or {}
+    dsr_val = dsr_pre.get("dsr")
+    boot = block_bootstrap_sharpe_ci(cd, block=block_days, periods_per_year=ANN)
+    dsr_pass = dsr_val is not None and dsr_val >= min_dsr
+    out["checks"]["H_deflated_sharpe"] = {
+        "honest_combined_sharpe_ann": sh(comb_hair),
+        "curated_combined_sharpe_ann": sh(combined),
+        "observed_sr_daily": round(obs_sr_daily, 5),
+        "n_momentum_books_graded": len(trial_sharpes_daily),
+        "n_trials_pre_registered": n_trials_pre,
+        "dsr_at_pre_registered_N": (None if dsr_val is None else round(dsr_val, 4)),
+        "sr_star_ann_at_pre_registered_N": (round(dsr_pre["sr_star_ann"], 3) if dsr_pre else None),
+        "dsr_bracket": {str(N): (None if (d := _dsr(N)) is None else round(d["dsr"], 4))
+                        for N in bracket_N},
+        "block_bootstrap_sharpe_ci95": (None if boot is None else
+                                        {k: (round(v, 4) if isinstance(v, float) else v)
+                                         for k, v in boot.items()}),
+        "min_dsr": min_dsr,
+        "pass": dsr_pass,
+        "note": "DSR = P(true SR>0) after deflating for the momentum-grid x carry-selection "
+                "search; gates paper-capital (PSR@0 is NOT a multiplicity control). N "
+                "brackets the un-enumerated search depth (18 momentum-only .. 28 conservative).",
+    }
+    if not dsr_pass:
+        sev = "S1" if (dsr_val is not None and dsr_val < 0.50) else "S2"
+        findings.append((sev, "deflated-Sharpe below floor",
+                         f"DSR(N={n_trials_pre})={dsr_val} < {min_dsr}; the honest 0.601 may be "
+                         f"a multiple-comparison artifact"))
+
     # ---- verdict ----
     s1 = [f for f in findings if f[0] == "S1"]
     s2 = [f for f in findings if f[0] == "S2"]
@@ -145,6 +216,8 @@ def main():
     verdict = "PROCEED_no_S1" if not s1 else "BLOCK_S1"
     out["verdict"] = {
         "decision": verdict, "all_checks_pass": all_pass,
+        "deflated_sharpe_gate": {"dsr": dsr_val, "min_dsr": min_dsr,
+                                 "n_trials": n_trials_pre, "pass": dsr_pass},
         "S1": s1, "S2": s2, "S3": s3,
         "summary": f"{len(s1)} S1, {len(s2)} S2, {len(s3)} S3"}
     (OUT / "audit_2sleeve.json").write_text(json.dumps(out, indent=2, default=str))

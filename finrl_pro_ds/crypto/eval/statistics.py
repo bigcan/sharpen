@@ -1,6 +1,12 @@
-"""Statistical utilities: Sharpe, Sortino, PSR, and CI for returns.
+"""Statistical utilities: Sharpe, Sortino, PSR, Deflated-Sharpe, and CI for returns.
 
 All functions assume input returns are 1-D sequences of float daily returns.
+
+The multiple-testing controls (:func:`deflated_sharpe_ratio`,
+:func:`block_bootstrap_sharpe_ci`) were promoted here from the options-VRP
+falsification sleeve (``scripts/research/options_vrp_falsification.py``) so the
+cross-asset momentum pre-capital audit can haircut its best-of-N headline; see the
+cross_asset_momentum Tier-2 audit N1 (P11-01/P11-02/P11-09).
 """
 
 from __future__ import annotations
@@ -220,3 +226,122 @@ def bootstrap_sharpe_ci(
     lo_idx = max(0, min(lo_idx, len(stats) - 1))
     hi_idx = max(0, min(hi_idx, len(stats) - 1))
     return SharpeCI(lower=stats[lo_idx], upper=stats[hi_idx])
+
+
+def deflated_sharpe_ratio(
+    observed_sr: float,
+    trial_sharpes: Sequence[float],
+    *,
+    n_obs: int,
+    skew: float,
+    excess_kurt: float,
+    n_trials: int,
+    periods_per_year: int = 252,
+) -> dict | None:
+    """Deflated Sharpe Ratio (Bailey & López de Prado, 2014).
+
+    The probability that the *true* Sharpe is > 0 after correcting the observed Sharpe
+    for (a) the ``n_trials`` configurations searched — selection bias / multiplicity —
+    and (b) the non-normal (skew / fat-tailed) return shape. This is the multiple-testing
+    control that PSR@benchmark=0 is NOT: :func:`probabilistic_sharpe_ratio` tests one
+    track against a FIXED benchmark and never sees ``n_trials``; DSR deflates the
+    benchmark to the *expected maximum* Sharpe of ``n_trials`` draws, so a best-of-N
+    winner must clear a higher bar.
+
+    ALL Sharpe inputs are PER-PERIOD (e.g. daily) and non-annualized: ``observed_sr`` and
+    every element of ``trial_sharpes`` must be ``annualized_SR / sqrt(periods_per_year)``.
+    ``skew`` / ``excess_kurt`` are the g1 / g2 (EXCESS kurtosis, normal → 0) of the
+    strategy's per-period returns — exactly :func:`skewness` / :func:`excess_kurtosis`.
+
+    Formula (Φ = standard-normal CDF, Φ⁻¹ its inverse, γ_E = Euler-Mascheroni)::
+
+        SR* = sqrt(Var(trial_sharpes)) ·
+              [ (1−γ_E)·Φ⁻¹(1 − 1/N) + γ_E·Φ⁻¹(1 − 1/(N·e)) ]
+        DSR = Φ[ (observed_sr − SR*) · sqrt(n_obs − 1)
+                 / sqrt(1 − g1·observed_sr + (g2+2)/4 · observed_sr²) ]
+
+    The variance bracket ``1 − g1·SR + (g2+2)/4·SR²`` is the skew/kurtosis-adjusted
+    SR-estimator variance (Mertens) — identical to the PSR bracket here, and equal to the
+    BLdP non-excess ``(γ4−1)/4`` form since g2 = γ4 − 3. Returns ``None`` when the
+    deflation is undefined: fewer than 2 trials, non-positive across-trial SR variance, or
+    fewer than 3 observations.
+
+    Returns ``{"dsr", "sr_star", "sr_star_ann", "n_trials"}`` where ``sr_star`` is the
+    per-period deflation benchmark and ``sr_star_ann`` is its annualized view.
+    """
+    from math import e, erf, sqrt
+    from statistics import NormalDist
+
+    if n_trials < 2 or n_obs < 3:
+        return None
+    v_sr = std(trial_sharpes, ddof=1) ** 2          # across-trial SR variance (the search)
+    if v_sr <= 0.0:
+        return None
+    nd = NormalDist()
+    gamma_e = 0.5772156649015329                    # Euler-Mascheroni constant
+    # SR* — expected max Sharpe of N independent trials (BLdP order-statistic approx).
+    sr_star = sqrt(v_sr) * (
+        (1.0 - gamma_e) * nd.inv_cdf(1.0 - 1.0 / n_trials)
+        + gamma_e * nd.inv_cdf(1.0 - 1.0 / (n_trials * e))
+    )
+    bracket = 1.0 - skew * observed_sr + ((excess_kurt + 2.0) / 4.0) * observed_sr ** 2
+    denom = sqrt(max(bracket, 1e-12))               # PSR-style variance bracket, clamped >0
+    z = (observed_sr - sr_star) * sqrt(n_obs - 1) / denom
+    dsr = 0.5 * (1.0 + erf(z / sqrt(2.0)))          # Φ(z)
+    return {
+        "dsr": max(0.0, min(1.0, dsr)),
+        "sr_star": float(sr_star),
+        "sr_star_ann": float(sr_star * (periods_per_year ** 0.5)),
+        "n_trials": int(n_trials),
+    }
+
+
+def block_bootstrap_sharpe_ci(
+    returns: Iterable[float],
+    *,
+    block: int = 21,
+    n_boot: int = 10_000,
+    alpha: float = 0.05,
+    seed: int = 7,
+    periods_per_year: int = 252,
+) -> dict | None:
+    """Circular block-bootstrap CI for the annualized Sharpe.
+
+    Unlike :func:`bootstrap_sharpe_ci` (i.i.d. resampling, which destroys the
+    autocorrelation / vol-clustering of trend & carry returns and reads too tight), this
+    resamples contiguous ``block``-length runs (≈ 1 trading month at 21) so the serial
+    dependence is preserved — the appropriate default for a Sharpe CI on autocorrelated
+    daily strategy returns (cross_asset_momentum Tier-2 audit P11-05). Deterministic given
+    ``seed``. Returns ``None`` with fewer than ``block + 2`` finite observations.
+
+    Returns ``{"ci_low", "ci_high", "p_sharpe_lt_0", "p_sharpe_lt_0_5", "block",
+    "n_boot"}`` — the (alpha/2, 1−alpha/2) Sharpe quantiles plus the bootstrap mass below
+    0 and below 0.5.
+    """
+    import numpy as np
+
+    d = np.asarray(_to_list(returns), dtype=np.float64)
+    d = d[np.isfinite(d)]
+    if len(d) < block + 2:
+        return None
+    rng = np.random.default_rng(seed)
+    t_n = len(d)
+    base = np.arange(block)
+    boots = max(1, n_boot)
+    sh = np.empty(boots)
+    for b in range(boots):
+        idx: list[int] = []
+        while len(idx) < t_n:
+            s0 = int(rng.integers(0, t_n))
+            idx.extend(((s0 + base) % t_n).tolist())   # circular block (wraps at the tail)
+        x = d[np.array(idx[:t_n])]
+        sd = x.std(ddof=1)
+        sh[b] = x.mean() / sd * (periods_per_year ** 0.5) if sd > 0 else 0.0
+    return {
+        "ci_low": float(np.quantile(sh, alpha / 2.0)),
+        "ci_high": float(np.quantile(sh, 1.0 - alpha / 2.0)),
+        "p_sharpe_lt_0": float((sh < 0.0).mean()),
+        "p_sharpe_lt_0_5": float((sh < 0.5).mean()),
+        "block": int(block),
+        "n_boot": int(boots),
+    }
