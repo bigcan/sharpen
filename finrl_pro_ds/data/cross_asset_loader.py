@@ -116,32 +116,48 @@ def fetch_ohlcv_wide(
 def _clean_wide(
     wide: dict[str, pd.DataFrame], threshold: float = 0.05,
 ) -> tuple[dict[str, pd.DataFrame], dict]:
-    """Run the canonical OHLCV outlier detect/repair per ticker (DATA-CLEAN).
+    """Run the canonical OHLCV outlier detect/repair AND the stale-print scan per ticker.
 
     Lazy-imports ``scripts.clean_ohlcv`` (single source of truth — no duplicated
     detection logic that could silently drift from the project cleaner) so this
     library module imports cleanly without ``scripts/`` on the path.
+
+    Beyond outlier detect/repair, each (post-repair) ticker is scanned with
+    ``detect_stale_runs`` — the exact flat-close / flat-OHLC detector for the
+    gmgp1-gold stale-print class that voided "directional RL almost worked on gold"
+    (DATA-CLEAN, P1-03). Per-ticker ``stale_*`` metrics + a ``stale_flagged`` flag are
+    recorded so the manifest ``status`` can be EARNED from the scan rather than asserted
+    (P1-05). On daily ETF bars the run threshold auto-scales (needs ~30 consecutive
+    identical closes) so normal data is not false-flagged.
     """
     import sys
 
     if str(ROOT) not in sys.path:
         sys.path.insert(0, str(ROOT))
-    from scripts.clean_ohlcv import detect_outliers, repair_outliers
+    from scripts.clean_ohlcv import detect_outliers, detect_stale_runs, repair_outliers
 
     tickers = list(wide["close"].columns)
     report: dict[str, dict] = {}
     for tk in tickers:
         df = pd.DataFrame({c: wide[c][tk] for c in _OHLCV}).dropna(how="all")
         if df.empty or df[["open", "high", "low", "close"]].dropna(how="all").empty:
-            report[tk] = {"rows": 0, "outliers_repaired": 0}
+            report[tk] = {"rows": 0, "outliers_repaired": 0, "stale_suspect_frac": 0.0,
+                          "stale_pnl_share": 0.0, "flat_ohlc_spikes": 0, "stale_flagged": False}
             continue
         det = detect_outliers(df, threshold=threshold)
         n_bad = int((det["bad_high"] | det["bad_low"]).sum())
         if n_bad:
-            fixed = repair_outliers(df, det, threshold=threshold)
+            df = repair_outliers(df, det, threshold=threshold)
             for c in ("open", "high", "low", "close"):
-                wide[c].loc[fixed.index, tk] = fixed[c].to_numpy()
-        report[tk] = {"rows": int(len(df)), "outliers_repaired": n_bad}
+                wide[c].loc[df.index, tk] = df[c].to_numpy()
+        stale = detect_stale_runs(df)     # scan the POST-repair series (DatetimeIndex)
+        report[tk] = {
+            "rows": int(len(df)), "outliers_repaired": n_bad,
+            "stale_suspect_frac": stale["stale_suspect_frac"],
+            "stale_pnl_share": stale["stale_pnl_share"],
+            "flat_ohlc_spikes": stale["flat_ohlc_spikes"],
+            "stale_flagged": bool(stale["flagged"]),
+        }
     return wide, report
 
 
@@ -153,6 +169,31 @@ def _wide_to_long(wide: dict[str, pd.DataFrame]) -> pd.DataFrame:
     return long.sort_values(["date", "ticker"]).reset_index(drop=True)
 
 
+def _cache_covers_end(manifest: Mapping, end: str | None, *,
+                      require_fresh: bool, tol_days: int) -> bool:
+    """Does the cached manifest's ``date_max`` reach the requested window end (P1-02)?
+
+    The old cache-hit branch keyed ONLY on the asset superset and ignored ``date_max``, so a
+    scheduled live run silently reused a frozen cache and never advanced. Now:
+      - a finite ``end`` is covered iff ``date_max >= end - tol_days`` (always enforced — a
+        request for data beyond the cache must refetch; safe for backtests whose cache covers
+        their end);
+      - ``end is None`` (rolling-to-latest) is trusted by default, but when ``require_fresh``
+        (the live scheduler) it is covered only if ``date_max`` is within ``tol_days`` of today.
+    """
+    dm = manifest.get("date_max")
+    if not dm:
+        return False
+    date_max = pd.Timestamp(dm)
+    if end is None:
+        if not require_fresh:
+            return True
+        target = pd.Timestamp.utcnow().tz_localize(None).normalize()
+    else:
+        target = pd.Timestamp(end)
+    return date_max >= (target - pd.Timedelta(days=int(tol_days)))
+
+
 def fetch_and_clean(
     assets: Sequence[str],
     start: str,
@@ -161,12 +202,22 @@ def fetch_and_clean(
     cache_dir: Path = DEFAULT_CACHE_DIR,
     threshold: float = 0.05,
     force_refetch: bool = False,
+    require_fresh: bool = False,
+    freshness_tol_days: int = 5,
+    stale_pnl_fail_threshold: float = 0.02,
 ) -> tuple[dict[str, pd.DataFrame], dict]:
     """Fetch full OHLCV, DATA-CLEAN it, cache raw + cleaned + manifest.
 
     Returns ``(wide, manifest)`` where ``wide`` is the cleaned dict of wide frames.
     Caches: ``ohlcv_daily_raw.parquet`` (the ``.bak``), ``ohlcv_daily.parquet``
     (cleaned), ``ohlcv_daily.manifest.json``.
+
+    The cache is reused only when it covers BOTH the requested asset superset AND the
+    requested window ``end`` (:func:`_cache_covers_end`, P1-02) — a scheduled run that asks
+    for fresher data than the cache holds refetches instead of silently freezing. The
+    manifest ``status`` is EARNED from the stale-print scan (P1-05): ``FAIL`` if any ticker's
+    stale-print P&L share crosses ``stale_pnl_fail_threshold`` (the gmgp1-gold class),
+    ``WARN`` if any ticker is flagged below that, else ``PASS``.
     """
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -176,13 +227,20 @@ def fetch_and_clean(
 
     if clean_path.exists() and manifest_path.exists() and not force_refetch:
         manifest = json.loads(manifest_path.read_text())
-        if set(manifest.get("assets", [])) >= set(assets):
-            log.info("cross_asset_loader: using cached clean OHLCV (%s)", clean_path)
+        assets_ok = set(manifest.get("assets", [])) >= set(assets)
+        fresh_ok = _cache_covers_end(manifest, end, require_fresh=require_fresh,
+                                     tol_days=freshness_tol_days)
+        if assets_ok and fresh_ok:
+            log.info("cross_asset_loader: using cached clean OHLCV (%s, date_max=%s)",
+                     clean_path, manifest.get("date_max"))
             long = pd.read_parquet(clean_path)
             long["date"] = pd.to_datetime(long["date"])
             wide = {c: long.pivot(index="date", columns="ticker", values=c)
                     .reindex(columns=list(assets)).sort_index() for c in _OHLCV}
             return wide, manifest
+        log.info("cross_asset_loader: cache stale (assets_ok=%s fresh_ok=%s, date_max=%s, "
+                 "requested_end=%s) → refetching", assets_ok, fresh_ok,
+                 manifest.get("date_max"), end)
 
     log.info("cross_asset_loader: fetching %d tickers %s..%s", len(assets), start, end)
     wide = fetch_ohlcv_wide(assets, start, end)
@@ -194,12 +252,22 @@ def fetch_and_clean(
 
     idx = wide["close"].index
     total_outliers = int(sum(r["outliers_repaired"] for r in clean_report.values()))
+    # EARN the manifest status from the stale-print scan (P1-05) — never a hardcoded literal.
+    flagged_tickers = sorted(tk for tk, r in clean_report.items() if r.get("stale_flagged"))
+    max_stale_pnl_share = max((r.get("stale_pnl_share", 0.0) for r in clean_report.values()),
+                              default=0.0)
+    if max_stale_pnl_share >= stale_pnl_fail_threshold:
+        status = "FAIL"
+    elif flagged_tickers:
+        status = "WARN"
+    else:
+        status = "PASS"
     payload_hash = hashlib.sha256(
         pd.util.hash_pandas_object(long, index=True).values.tobytes(),
     ).hexdigest()[:16]
     manifest = {
         "stage": "data-prep",
-        "status": "PASS",
+        "status": status,
         "source": "yfinance_etf",
         "auto_adjust": True,
         "frequency": "1d",
@@ -212,15 +280,23 @@ def fetch_and_clean(
         "date_max": str(idx.max().date()) if len(idx) else None,
         "clean_threshold": threshold,
         "total_outliers_repaired": total_outliers,
+        "stale_scan": {
+            "flagged_tickers": flagged_tickers,
+            "max_stale_pnl_share": round(float(max_stale_pnl_share), 5),
+            "stale_pnl_fail_threshold": stale_pnl_fail_threshold,
+        },
         "per_ticker": clean_report,
         "raw_cache": str(raw_path),
         "clean_cache": str(clean_path),
         "content_sha256_16": payload_hash,
     }
     manifest_path.write_text(json.dumps(manifest, indent=2))
+    if status != "PASS":
+        log.warning("cross_asset_loader: manifest status=%s (stale-flagged: %s, "
+                    "max_stale_pnl_share=%.4f)", status, flagged_tickers, max_stale_pnl_share)
     log.info(
-        "cross_asset_loader: cleaned %d tickers × %d rows (%d outliers repaired) → %s",
-        len(assets), len(idx), total_outliers, clean_path,
+        "cross_asset_loader: cleaned %d tickers × %d rows (%d outliers repaired) → %s [%s]",
+        len(assets), len(idx), total_outliers, clean_path, status,
     )
     return wide, manifest
 
@@ -346,7 +422,8 @@ def build_allocator_arrays(
 # --------------------------------------------------------------------------- #
 # Top-level loader (mirrors crypto_backtest_runner.prepare_data contract)
 # --------------------------------------------------------------------------- #
-def load_cross_asset_data(config: Mapping, *, force_refetch: bool = False) -> dict:
+def load_cross_asset_data(config: Mapping, *, force_refetch: bool = False,
+                          require_fresh: bool = False) -> dict:
     """Fetch+clean OHLCV and compute causal signals for the whole series.
 
     Returns dict: ``signals (long DF), close (wide), volume (wide), assets,
@@ -371,6 +448,7 @@ def load_cross_asset_data(config: Mapping, *, force_refetch: bool = False) -> di
         end=data_cfg.get("end_date"),
         cache_dir=Path(data_cfg.get("cache_dir", DEFAULT_CACHE_DIR)),
         force_refetch=force_refetch,
+        require_fresh=require_fresh,
     )
 
     close = wide["close"]
@@ -522,7 +600,8 @@ def _sleeve_cfg(config: Mapping) -> tuple[dict, dict]:
     return dict(sleeves["momentum"]), dict(sleeves["rates_carry"])
 
 
-def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False) -> dict:
+def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
+                         require_fresh: bool = False) -> dict:
     """Fetch+clean the UNION OHLCV once and prepare BOTH sleeves' inputs.
 
     Returns dict: ``close (wide), volume (wide), mom_signals (long), mom_assets,
@@ -563,6 +642,7 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False) -> dic
         end=data_cfg.get("end_date"),
         cache_dir=Path(data_cfg.get("cache_dir", DEFAULT_CACHE_DIR)),
         force_refetch=force_refetch,
+        require_fresh=require_fresh,
     )
     close = wide["close"]
 

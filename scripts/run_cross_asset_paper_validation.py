@@ -68,6 +68,9 @@ def main() -> int:
         "--out", default="results/cross_asset_paper/paper_validation_verdict.json"
     )
     ap.add_argument("--force_refetch", action="store_true")
+    ap.add_argument("--require_fresh", action="store_true",
+                    help="freshness-gate the loader cache: refetch if it doesn't reach today "
+                         "(P1-02; the scheduled live mode — a backtest run leaves this off)")
     args = ap.parse_args()
 
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
@@ -76,7 +79,8 @@ def main() -> int:
 
     n_union = config["universe"]["n_assets"]
     log.info("loading two-sleeve data (union=%d assets)...", n_union)
-    data = load_two_sleeve_data(config, force_refetch=args.force_refetch)
+    data = load_two_sleeve_data(config, force_refetch=args.force_refetch,
+                                require_fresh=args.require_fresh)
     start_ts = data["close"].index[0]
     end_ts = data["close"].index[-1]
     log.info(

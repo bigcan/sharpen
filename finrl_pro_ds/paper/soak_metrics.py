@@ -25,11 +25,16 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 from pathlib import Path
 from typing import Mapping
 
 import numpy as np
 
+from finrl_pro_ds.crypto.eval.statistics import (
+    min_track_record_length,
+    probabilistic_sharpe_ratio,
+)
 from finrl_pro_ds.paper.paper_state import LiveTrajectory
 from finrl_pro_ds.paper.parity_harness import ParityReport
 
@@ -102,12 +107,24 @@ def evaluate_paper_soak_gates(
     perf = dict(soak.get("performance", {}))
 
     # --- PARITY (primary, hard) ---
+    # cost_drift_ratio is TWO-SIDED (P8-06): the upper bound catches over-execution
+    # (fees > model), the lower bound catches a non-/under-trading forward path (real IB
+    # rejects/partials at rung-2 leave realized cost ~0 while weights stay in tolerance —
+    # "the executor isn't trading the book"). min defaults to 0.0 (one-sided) unless the
+    # yaml sets min_cost_drift_ratio.
+    cdr = float(parity.cost_drift_ratio)
+    cdr_max = float(p["max_cost_drift_ratio"])
+    cdr_min = float(p.get("min_cost_drift_ratio", 0.0))
+    cost_drift_check = {
+        "value": cdr, "threshold": cdr_max, "min_threshold": cdr_min, "op": "in[min,max]",
+        "status": PASS if (cdr_min <= cdr <= cdr_max) else FAIL,
+    }
     parity_checks = {
         "daily_return_te_bps": _check(parity.daily_return_te_bps_max,
                                       p["max_daily_return_te_bps"], "<=", unit="bps"),
         "weight_l1_drift": _check(parity.weight_l1_drift_max, p["max_weight_l1_drift"], "<="),
         "missed_rebalances": _check(parity.missed_rebalances, p["max_missed_rebalances"], "<="),
-        "cost_drift_ratio": _check(parity.cost_drift_ratio, p["max_cost_drift_ratio"], "<="),
+        "cost_drift_ratio": cost_drift_check,
     }
 
     # --- RISK (always-on kill switches, hard) ---
@@ -141,19 +158,50 @@ def evaluate_paper_soak_gates(
     }
 
     # --- PERFORMANCE (long-horizon backstop, review; UNKNOWN until enough data) ---
+    # A raw rolling-Sharpe floor PLUS a skew/kurtosis-adjusted PSR / MinTRL confidence
+    # control (Bailey & Lopez de Prado 2012; P11-05). The monthly core makes a short-soak
+    # point Sharpe statistically meaningless, so the principled promotion signal is
+    # PSR(SR > benchmark) — the probability the edge is real — not a bare floor; MinTRL
+    # reports how long a track is needed to confirm it. Both stay REVIEW (never auto-kill).
+    #
+    # CRITICAL (MATH-S08): PSR/MinTRL take the PER-PERIOD (non-annualized) Sharpe in their
+    # standard error — ``periods_per_year=1``. Feeding an ANNUALIZED SR (×sqrt(252)) inflates
+    # the z-stat by ~16× and SATURATES the CDF (PSR→1.0, MinTRL→a few days), making the gate
+    # meaningless. ``psr_benchmark`` is therefore a per-period bound (0.0 = "edge is positive").
     months_observed = live.n_steps / _TRADING_DAYS_PER_MONTH
     min_months = float(perf.get("min_months_for_sharpe", 12))
+    psr_benchmark = float(perf.get("psr_benchmark", 0.0))
+    min_psr = float(perf.get("min_psr", 0.0))
+    mintrl_conf = float(perf.get("mintrl_confidence", 0.95))
     if months_observed < min_months:
-        perf_checks = {"rolling_sharpe": {
-            "value": None, "threshold": float(perf["rolling_sharpe_floor"]), "op": ">=",
-            "status": UNKNOWN, "months_observed": round(months_observed, 2),
-            "min_months": min_months}}
+        perf_checks = {
+            "rolling_sharpe": {
+                "value": None, "threshold": float(perf["rolling_sharpe_floor"]), "op": ">=",
+                "status": UNKNOWN, "months_observed": round(months_observed, 2),
+                "min_months": min_months},
+            "psr": {
+                "value": None, "threshold": min_psr, "op": ">=", "status": UNKNOWN,
+                "benchmark_sr": psr_benchmark, "months_observed": round(months_observed, 2)},
+        }
     else:
         window_days = int(perf.get("rolling_sharpe_window_months", 12) * _TRADING_DAYS_PER_MONTH)
+        r_window = np.asarray(live.step_returns, dtype=np.float64)
+        if window_days < len(r_window):
+            r_window = r_window[-window_days:]
         sharpe = _rolling_sharpe(live.step_returns, window_days)
         chk = _check(sharpe, perf["rolling_sharpe_floor"], ">=")
         chk["months_observed"] = round(months_observed, 2)
-        perf_checks = {"rolling_sharpe": chk}
+        # periods_per_year=1 ⇒ per-period Sharpe in the SE (MATH-S08); MinTRL is then in
+        # OBSERVATIONS (daily bars) → /_TRADING_DAYS_PER_MONTH for the reported months.
+        psr = probabilistic_sharpe_ratio(r_window, sr_benchmark=psr_benchmark, periods_per_year=1)
+        mintrl_obs = min_track_record_length(
+            r_window, sr_benchmark=psr_benchmark, prob=mintrl_conf, periods_per_year=1)
+        psr_chk = _check(psr, min_psr, ">=")
+        psr_chk["benchmark_sr"] = psr_benchmark
+        psr_chk["mintrl_months"] = (round(mintrl_obs / _TRADING_DAYS_PER_MONTH, 1)
+                                    if math.isfinite(mintrl_obs) else None)
+        psr_chk["mintrl_confidence"] = mintrl_conf
+        perf_checks = {"rolling_sharpe": chk, "psr": psr_chk}
 
     # --- HORIZON / sufficiency (the soak must run long enough to mean anything) ---
     # min_soak_calendar_days / min_rebalances_observed gate capital PROMOTION: the verdict
@@ -189,10 +237,22 @@ def evaluate_paper_soak_gates(
     # UNKNOWN, or an unmet soak horizon, can NEVER be a promotable PASS (→ UNKNOWN, blocking);
     # a soft (drift/performance) FAIL → REVIEW. UNKNOWN in a HARD group used to pass through.
     _SOFT_GROUPS = {"drift", "performance"}
+    # A non-finite HARD metric (NaN/Inf parity or risk value) means the forward-path
+    # computation broke — never promotable. Force FAIL (P8-08). Today usually already FAIL
+    # via _check (``nan <= t`` is False ⇒ FAIL), but this guards future non-_check HARD
+    # entries and the serializer's strict-JSON path below.
+    def _has_nonfinite(checks: Mapping[str, dict]) -> bool:
+        for c in checks.values():
+            v = c.get("value")
+            if isinstance(v, (int, float)) and not math.isfinite(float(v)):
+                return True
+        return False
+
+    hard_nonfinite = _has_nonfinite(parity_checks) or _has_nonfinite(risk_checks)
     hard_fail = any(groups[k]["status"] == FAIL for k in _HARD_GROUPS)
     hard_unknown = any(groups[k]["status"] == UNKNOWN for k in _HARD_GROUPS)
     soft_fail = any(groups[k]["status"] == FAIL for k in _SOFT_GROUPS)
-    if hard_fail:
+    if hard_fail or hard_nonfinite:
         overall = FAIL
     elif hard_unknown or not horizon_ok:
         overall = UNKNOWN
@@ -217,25 +277,52 @@ def evaluate_paper_soak_gates(
             "daily_return_te_bps_max": parity.daily_return_te_bps_max,
             "cost_drift_ratio": parity.cost_drift_ratio,
             "class_pnl": {k: float(v) for k, v in live.class_pnl.items()},
+            # True when the oracle/replay terminated early (env circuit-break); parity is
+            # then valid only over the covered prefix (P10-03) — surfaced, not silently dropped.
+            "coverage_incomplete": bool(getattr(live, "coverage_incomplete", False)),
         },
     }
 
 
 def serialize_verdict(verdict: Mapping, path: str | Path) -> Path:
     """Write the gate verdict to JSON (atomic via tmp). The "evaluate AND serialize"
-    half of the step-3 gate — the decision artifact the soak/audit consumes."""
+    half of the step-3 gate — the decision artifact the soak/audit consumes.
+
+    STRICT JSON (P8-08): non-finite floats (NaN/Inf — e.g. a NaN step-return propagating
+    into ``total_return_pct``) are mapped to ``null`` BEFORE dumping, and ``allow_nan=False``
+    makes any survivor raise loudly rather than emit bare ``NaN``/``Infinity`` tokens that
+    strict consumers (live_monitor, dashboards, jq) reject. ``evaluate_paper_soak_gates``
+    additionally forces the verdict to FAIL if a HARD metric is non-finite, so a corrupted
+    decision artifact can never read as a promotable PASS."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(verdict, indent=2, default=_json_default), encoding="utf-8")
+    tmp.write_text(
+        json.dumps(_sanitize_json(verdict), indent=2, default=_json_default, allow_nan=False),
+        encoding="utf-8",
+    )
     tmp.replace(path)
     logger.info("paper_soak: verdict %s → %s", verdict.get("overall_status"), path)
     return path
 
 
+def _sanitize_json(o):
+    """Recursively map non-finite floats (NaN/Inf, numpy or builtin) → None so the verdict
+    is strict-JSON-encodable; everything else passes through to ``_json_default``."""
+    if isinstance(o, (float, np.floating)):
+        f = float(o)
+        return f if math.isfinite(f) else None
+    if isinstance(o, dict):
+        return {k: _sanitize_json(v) for k, v in o.items()}
+    if isinstance(o, (list, tuple)):
+        return [_sanitize_json(v) for v in o]
+    return o
+
+
 def _json_default(o):
     if isinstance(o, (np.floating,)):
-        return float(o)
+        f = float(o)
+        return f if math.isfinite(f) else None
     if isinstance(o, (np.integer,)):
         return int(o)
     if isinstance(o, np.ndarray):

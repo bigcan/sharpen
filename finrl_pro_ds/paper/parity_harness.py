@@ -232,7 +232,19 @@ class ParityHarness:
         ts = np.asarray(arrays["timestamps"], dtype=np.int64)
         T, N = price.shape
         W = np.asarray(target_weights, dtype=np.float64)
-        assert W.shape == (T - 1, N), f"target_weights {W.shape} != {(T - 1, N)}"
+        # The asset axis MUST match (a real shape bug); the TIME axis may be SHORT when the
+        # oracle terminated early on the env circuit-break (PV < 0.1×capital) — replay the
+        # covered prefix and flag coverage_incomplete instead of crashing (P10-03; the old
+        # hard `assert W.shape == (T-1, N)` raised an unhandled AssertionError on a DD-flatten).
+        if W.ndim != 2 or W.shape[1] != N:
+            raise ValueError(f"target_weights {W.shape} incompatible with {N} assets")
+        n_replay = min(T - 1, W.shape[0])
+        coverage_incomplete = W.shape[0] < (T - 1)
+        if coverage_incomplete:
+            logger.warning(
+                "parity replay: target_weights has %d rows < %d bars (early-terminated / "
+                "circuit-broken oracle) — replaying the covered %d-step prefix; parity is "
+                "valid only over it (coverage_incomplete)", W.shape[0], T - 1, n_replay)
 
         engine = fill_engine or self.default_fill_engine()
         assets, asset_class = self._asset_meta(arrays, N)
@@ -240,7 +252,7 @@ class ParityHarness:
 
         weights, equity = [], [self.initial_capital]
         rets, turns, cumfees, gross, net, stamps = [], [], [], [], [], []
-        for k in range(T - 1):
+        for k in range(n_replay):
             prev_price, price_now = price[k], price[k + 1]
             pv_before = book.pv_before(prev_price)
             # W[k] is already the env's post-dust, post-cap realized position, so book
@@ -263,7 +275,10 @@ class ParityHarness:
             net.append(info["net_exposure"])
             stamps.append(int(ts[k + 1]))
 
-        class_pnl, spy_returns = self._attribution(W, price, assets, asset_class)
+        # Attribute over the COVERED prefix only (W[:n_replay] / price[:n_replay+1]) so a
+        # circuit-broken short replay keeps class_pnl / spy_returns aligned to step_returns.
+        class_pnl, spy_returns = self._attribution(
+            W[:n_replay], price[:n_replay + 1], assets, asset_class)
         return LiveTrajectory(
             weights=np.asarray(weights, dtype=np.float64),
             equity_curve=np.asarray(equity, dtype=np.float64),
@@ -278,6 +293,7 @@ class ParityHarness:
             asset_class=asset_class,
             initial_capital=self.initial_capital,
             spy_returns=spy_returns,
+            coverage_incomplete=coverage_incomplete,
         )
 
     @staticmethod

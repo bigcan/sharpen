@@ -206,6 +206,103 @@ def _analytic_monthly_net_sharpe(close: pd.DataFrame, baseline_weight: pd.DataFr
     return float(net.mean() / net.std() * np.sqrt(ANN)) if net.std() > 0 else 0.0
 
 
+# --------------------------------------------------------------------------- #
+# Step-4 forward-path hardening: stale-scan + earned manifest status (P1-03/P1-05)
+# and the loader freshness-gate (P1-02). No network — synthetic wides / monkeypatch.
+# --------------------------------------------------------------------------- #
+def _wide_frames(close: pd.DataFrame) -> dict:
+    """Build {open,high,low,close,volume} wide frames from a close frame (OHLC == close,
+    positive volume) — the shape ``_clean_wide`` / ``fetch_ohlcv_wide`` produce."""
+    vol = pd.DataFrame(1e6, index=close.index, columns=close.columns)
+    return {"open": close.copy(), "high": close.copy(), "low": close.copy(),
+            "close": close.copy(), "volume": vol}
+
+
+def _clean_close(T=200, seed=4) -> pd.DataFrame:
+    idx = pd.bdate_range("2018-01-02", periods=T)
+    rng = np.random.default_rng(seed)
+    px = 100.0 * np.cumprod(1.0 + rng.normal(0.0003, 0.011, (T, 2)), axis=0)
+    return pd.DataFrame(px, index=idx, columns=["AAA", "BBB"])
+
+
+def test_clean_wide_clean_data_not_flagged():
+    """A normal random-walk ETF is NOT stale-flagged (no false positives at daily scale)."""
+    wide = _wide_frames(_clean_close())
+    _, report = loader._clean_wide(wide)
+    assert all(not r["stale_flagged"] for r in report.values())
+    assert all(r["stale_suspect_frac"] == 0.0 for r in report.values())
+
+
+def test_clean_wide_flags_stale_run():
+    """A >= min_run_bars flat-close run (the gmgp1-gold stale-print class) is flagged and
+    its stale-print metrics recorded — the scan the manifest status is earned from."""
+    close = _clean_close()
+    close.iloc[100:114, close.columns.get_loc("AAA")] = float(close.iloc[100]["AAA"])  # 14 flat bars
+    wide = _wide_frames(close)
+    _, report = loader._clean_wide(wide)
+    assert report["AAA"]["stale_flagged"] is True
+    assert report["AAA"]["stale_suspect_frac"] > 0.0
+    assert report["BBB"]["stale_flagged"] is False
+
+
+def test_cache_covers_end_freshness_matrix():
+    """_cache_covers_end: a finite end beyond date_max refetches; within tol reuses; an
+    end=None cache is trusted by default but freshness-gated under require_fresh."""
+    man = {"date_max": "2026-06-05"}
+    # finite end within / beyond the cache
+    assert loader._cache_covers_end(man, "2026-06-05", require_fresh=False, tol_days=5)
+    assert loader._cache_covers_end(man, "2026-06-08", require_fresh=False, tol_days=5)   # within tol
+    assert not loader._cache_covers_end(man, "2026-07-01", require_fresh=False, tol_days=5)
+    # end=None: trusted unless require_fresh, then must be near today (2026-06-05 is far past)
+    assert loader._cache_covers_end(man, None, require_fresh=False, tol_days=5)
+    assert not loader._cache_covers_end(man, None, require_fresh=True, tol_days=5)
+
+
+def test_fetch_and_clean_refetches_when_cache_too_old(tmp_path, monkeypatch):
+    """A scheduled run asking for data beyond the cache's date_max must REFETCH, not freeze
+    on the stale cache (P1-02). Counts the (monkeypatched) network fetch."""
+    calls = {"n": 0}
+
+    def fake_fetch(assets, start, end, *, auto_adjust=True):
+        calls["n"] += 1
+        return _wide_frames(_clean_close())               # index ends 2018 — deliberately old
+
+    monkeypatch.setattr(loader, "fetch_ohlcv_wide", fake_fetch)
+    # 1st call seeds the cache (date_max ~2018-10).
+    loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 1
+    # 2nd call (end=None, rolling-to-latest, not require_fresh) reuses the cache (no refetch)...
+    loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 1
+    # ...but asking for a finite end far beyond the cache's date_max forces a refetch
+    # (the silent-freeze the audit named, P1-02).
+    loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", "2026-06-30", cache_dir=tmp_path)
+    assert calls["n"] == 2
+
+
+def test_manifest_status_earned_from_stale_scan(tmp_path, monkeypatch):
+    """The manifest status is DERIVED from the stale scan (P1-05), not a hardcoded 'PASS':
+    clean data → PASS; a flat-print ticker → not PASS, with the flagged ticker recorded."""
+    def clean_fetch(assets, start, end, *, auto_adjust=True):
+        return _wide_frames(_clean_close())
+
+    monkeypatch.setattr(loader, "fetch_ohlcv_wide", clean_fetch)
+    _, man = loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", "2018-10-31",
+                                    cache_dir=tmp_path, force_refetch=True)
+    assert man["status"] == "PASS" and man["stale_scan"]["flagged_tickers"] == []
+
+    def stale_fetch(assets, start, end, *, auto_adjust=True):
+        close = _clean_close()
+        close.iloc[100:114, close.columns.get_loc("AAA")] = float(close.iloc[100]["AAA"])
+        return _wide_frames(close)
+
+    monkeypatch.setattr(loader, "fetch_ohlcv_wide", stale_fetch)
+    _, man2 = loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", "2018-10-31",
+                                     cache_dir=tmp_path, force_refetch=True)
+    assert man2["status"] in {"WARN", "FAIL"}
+    assert "AAA" in man2["stale_scan"]["flagged_tickers"]
+
+
 _CACHE = loader.DEFAULT_CACHE_DIR / "ohlcv_daily.parquet"
 
 
