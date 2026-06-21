@@ -195,6 +195,55 @@ def run_book(name: str, weights_rebal: pd.DataFrame, rets: pd.DataFrame,
             "_net_standard": (gross - cost_daily["standard_2bps"])}
 
 
+def build_books(close: pd.DataFrame, rets: pd.DataFrame, bench: pd.Series) -> dict:
+    """Construct EVERY momentum book the falsification grades — the full candidate grid
+    whose best cell became the deployed momentum sleeve. Single source of truth reused by
+    :func:`main` (the GO/NO-GO verdict) and :func:`graded_book_sharpes` (the multiplicity
+    count fed to the deflated-Sharpe haircut, audit_two_sleeve_book / Tier-2 N1). The grid
+    is 18 books: {TSMOM_pooled, 4x TSMOM_class, 3x XSMOM_class (N>=5), XSMOM_pooled}
+    x {monthly, weekly}."""
+    books: dict = {}
+    for freq in ["monthly", "weekly"]:
+        rebal = last_trading_of_period(close.index, freq)
+        rebal = rebal[rebal >= close.index[max(LOOKBACKS) + SKIP + VOL_WIN]]
+        sig = tsmom_signal(close, rebal)
+        # ---- TSMOM pooled (all assets) ----
+        w_all = vol_scaled_weights(sig, rets, rebal)
+        books[f"TSMOM_pooled_{freq}"] = run_book(f"TSMOM_pooled_{freq}", w_all, rets, bench)
+        # ---- TSMOM per asset class ----
+        for cls, tickers in UNIVERSE.items():
+            tk = [t for t in tickers if t in close.columns]
+            w_cls = vol_scaled_weights(sig[tk], rets[tk], rebal).reindex(
+                columns=close.columns).fillna(0.0)
+            books[f"TSMOM_{cls}_{freq}"] = run_book(f"TSMOM_{cls}_{freq}", w_cls, rets, bench)
+        # ---- XSMOM per class (N>=5) then pooled ----
+        xs_books = []
+        for cls, tickers in UNIVERSE.items():
+            tk = [t for t in tickers if t in close.columns]
+            if len(tk) < 5:
+                continue
+            w_xs = xsmom_weights(close, rets, rebal, tk).reindex(
+                columns=close.columns).fillna(0.0)
+            books[f"XSMOM_{cls}_{freq}"] = run_book(f"XSMOM_{cls}_{freq}", w_xs, rets, bench)
+            xs_books.append(w_xs.reindex(columns=close.columns).fillna(0.0))
+        if xs_books:
+            w_xs_pool = sum(xs_books)
+            books[f"XSMOM_pooled_{freq}"] = run_book(f"XSMOM_pooled_{freq}", w_xs_pool, rets, bench)
+    return books
+
+
+def graded_book_sharpes(cost: str = "standard_2bps") -> dict:
+    """Net Sharpe of every graded momentum book (the candidate pool that produced the
+    deployed momentum sleeve). Honest multiplicity for the deflated-Sharpe haircut: the
+    headline is the BEST of these, so it must clear the expected-max-of-N bar (Tier-2 N1,
+    P11-01). Recomputed in-process from the cached prices — no gitignored-artifact dep."""
+    close = get_prices()
+    close = close[[t for t in ALL_TICKERS if t in close.columns]]
+    rets = close.pct_change()
+    bench = close["SPY"].pct_change()
+    return {b: bk["by_cost"][cost]["sharpe"] for b, bk in build_books(close, rets, bench).items()}
+
+
 def main():
     close = get_prices()
     close = close[[t for t in ALL_TICKERS if t in close.columns]]
@@ -209,36 +258,7 @@ def main():
         "lev_cap": LEV_CAP, "cost_models": COST_MODELS,
         "carry": "DEFERRED (needs yield/term-structure data)"}, "books": {}}
 
-    for freq in ["monthly", "weekly"]:
-        rebal = last_trading_of_period(close.index, freq)
-        rebal = rebal[rebal >= close.index[max(LOOKBACKS) + SKIP + VOL_WIN]]
-        sig = tsmom_signal(close, rebal)
-        # ---- TSMOM pooled (all assets) ----
-        w_all = vol_scaled_weights(sig, rets, rebal)
-        results["books"][f"TSMOM_pooled_{freq}"] = run_book(
-            f"TSMOM_pooled_{freq}", w_all, rets, bench)
-        # ---- TSMOM per asset class ----
-        for cls, tickers in UNIVERSE.items():
-            tk = [t for t in tickers if t in close.columns]
-            w_cls = vol_scaled_weights(sig[tk], rets[tk], rebal).reindex(
-                columns=close.columns).fillna(0.0)
-            results["books"][f"TSMOM_{cls}_{freq}"] = run_book(
-                f"TSMOM_{cls}_{freq}", w_cls, rets, bench)
-        # ---- XSMOM per class (N>=5) then pooled ----
-        xs_books = []
-        for cls, tickers in UNIVERSE.items():
-            tk = [t for t in tickers if t in close.columns]
-            if len(tk) < 5:
-                continue
-            w_xs = xsmom_weights(close, rets, rebal, tk).reindex(
-                columns=close.columns).fillna(0.0)
-            results["books"][f"XSMOM_{cls}_{freq}"] = run_book(
-                f"XSMOM_{cls}_{freq}", w_xs, rets, bench)
-            xs_books.append(w_xs.reindex(columns=close.columns).fillna(0.0))
-        if xs_books:
-            w_xs_pool = sum(xs_books)
-            results["books"][f"XSMOM_pooled_{freq}"] = run_book(
-                f"XSMOM_pooled_{freq}", w_xs_pool, rets, bench)
+    results["books"] = build_books(close, rets, bench)
 
     # ---- GO/NO-GO gate (monthly, standard cost) ----
     pooled = results["books"]["TSMOM_pooled_monthly"]["by_cost"]["standard_2bps"]

@@ -33,6 +33,29 @@ gates:
   stress_leverage_max: 6.0              # matches env.max_gross_exposure ceiling
 
 # ============================================================================
+# MULTIPLICITY / DEFLATED-SHARPE - pre-capital overfitting haircut (N1; P11-01/02/09)
+# ============================================================================
+# Consumed by scripts/research/audit_two_sleeve_book.py (the pre-capital Tier-2
+# adversarial audit), NOT validate_config or the paper soak. The deployable
+# momentum+rates-carry book's honest 0.601 is the BEST of a multi-config search, and
+# PSR@benchmark=0 is not a multiplicity control (it tests one track vs a fixed bound,
+# never seeing n_trials). The Deflated-Sharpe (Bailey & Lopez de Prado 2014) deflates
+# the benchmark to the EXPECTED MAX Sharpe of n_trials draws, so a best-of-N winner must
+# clear a higher bar. Pre-registered here as a COMMITMENT DEVICE (frozen n_trials count)
+# so the haircut can't be softened after the number is known. All thresholds live here.
+overfitting:
+  # Honest pre-registered trial count. 18 momentum books were graded
+  # (3-lookback TSMOM score x {pooled, 4 per-class, 3 XSMOM-class, XSMOM-pooled}
+  # x {monthly, weekly} = 18; results/xsec_momentum/results.json) and the rates sleeve is
+  # the LONE survivor of a 3-class carry selection (rates/equity-div/FX) whose pooled
+  # verdict was NO_GO. Honest N = 18 + 3 = 21. The bracket reports DSR sensitivity to
+  # un-enumerated search depth (18 = momentum-only, 28 = conservative incl. the combine).
+  dsr_n_trials: 21
+  dsr_n_trials_bracket: [18, 21, 28]
+  min_dsr: 0.95                          # P(true SR>0 | multiplicity, skew, kurt) must clear 95%
+  block_bootstrap_block_days: 21         # ~1-month blocks preserve momentum/carry autocorrelation
+
+# ============================================================================
 # PAPER-SOAK GATES - PRE-REGISTERED 2026-06-12, BEFORE THE FIRST PAPER BAR.
 # ============================================================================
 # Separate from the `gates:` overlay above (those are validate_config/eval-time

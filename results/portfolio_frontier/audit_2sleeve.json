@@ -65,14 +65,51 @@
       "note": "risk-parity meta-layer is a static 50/50 (equal-vol) split rebalanced monthly; meta-turnover ~ the change in each sleeve's vol-scalar, small. Each sleeve's INTERNAL cost is already charged (2bps). Residual meta-cost is a 2nd-order optimism, est <2bps/yr on the combined book.",
       "severity": "S3",
       "material": false
+    },
+    "H_deflated_sharpe": {
+      "honest_combined_sharpe_ann": 0.601,
+      "curated_combined_sharpe_ann": 0.75,
+      "observed_sr_daily": 0.03789,
+      "n_momentum_books_graded": 18,
+      "n_trials_pre_registered": 21,
+      "dsr_at_pre_registered_N": 0.9176,
+      "sr_star_ann_at_pre_registered_N": 0.292,
+      "dsr_bracket": {
+        "18": 0.9245,
+        "21": 0.9176,
+        "28": 0.9042
+      },
+      "block_bootstrap_sharpe_ci95": {
+        "ci_low": 0.208,
+        "ci_high": 0.9994,
+        "p_sharpe_lt_0": 0.0014,
+        "p_sharpe_lt_0_5": 0.3156,
+        "block": 21,
+        "n_boot": 10000
+      },
+      "min_dsr": 0.95,
+      "pass": false,
+      "note": "DSR = P(true SR>0) after deflating for the momentum-grid x carry-selection search; gates paper-capital (PSR@0 is NOT a multiplicity control). N brackets the un-enumerated search depth (18 momentum-only .. 28 conservative)."
     }
   },
   "verdict": {
     "decision": "PROCEED_no_S1",
-    "all_checks_pass": true,
+    "all_checks_pass": false,
+    "deflated_sharpe_gate": {
+      "dsr": 0.9176393086345799,
+      "min_dsr": 0.95,
+      "n_trials": 21,
+      "pass": false
+    },
     "S1": [],
-    "S2": [],
+    "S2": [
+      [
+        "S2",
+        "deflated-Sharpe below floor",
+        "DSR(N=21)=0.9176393086345799 < 0.95; the honest 0.601 may be a multiple-comparison artifact"
+      ]
+    ],
     "S3": [],
-    "summary": "0 S1, 0 S2, 0 S3"
+    "summary": "0 S1, 1 S2, 0 S3"
   }
 }
