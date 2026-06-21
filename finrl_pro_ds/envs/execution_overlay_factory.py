@@ -226,12 +226,15 @@ def neutral_baseline_action(step_idx: int, obs: Mapping) -> np.ndarray:  # noqa:
     return np.zeros(1, dtype=np.float32)
 
 
-def _sac_action_source(agent, n_scales: int) -> Callable[[int, Mapping], np.ndarray]:
+def _sac_action_source(
+    agent, n_scales: int, *, deterministic: bool = True,
+) -> Callable[[int, Mapping], np.ndarray]:
     """Wrap a trained dict-obs SAC agent as an ``action_at_step``.
 
     Replicates ``SACTrainer``'s summary_stats convention EXACTLY (``sac_trainer.py``):
     concatenate ``[scale_0, …, scale_{n-1}, private]`` into a flat ``(1, D)`` tensor,
-    pass it as ``scale_input`` with ``private=None``, and predict deterministically.
+    pass it as ``scale_input`` with ``private=None``, and predict (``deterministic`` ⇒ the
+    mean action for the deploy/forward replay; the gate eval uses the default ``True``).
     Torch is imported lazily so the factory (and its unit tests) stay torch-free unless a
     real agent is actually driven.
     """
@@ -244,22 +247,27 @@ def _sac_action_source(agent, n_scales: int) -> Callable[[int, Mapping], np.ndar
         parts.append(np.asarray(obs["private"], dtype=np.float32))
         flat = np.concatenate(parts).reshape(1, -1)
         scale_stack = torch.as_tensor(flat, dtype=torch.float32).to(device, non_blocking=True)
-        out = agent.predict(scale_stack, None, deterministic=True)
+        out = agent.predict(scale_stack, None, deterministic=deterministic)
         return np.asarray(out.detach().cpu().numpy(), dtype=np.float32).reshape(-1)
 
     return action
 
 
-def _resolve_action_source(agent, n_scales: int) -> Callable[[int, Mapping], np.ndarray]:
+def resolve_action_source(
+    agent, n_scales: int, *, deterministic: bool = True,
+) -> Callable[[int, Mapping], np.ndarray]:
     """Resolve ``agent`` to an ``action_at_step(step_idx, obs)`` callable.
 
+    The canonical action-convention resolver shared by the gate eval
+    (:func:`evaluate_execution_overlay`) and the executor's forward replay
+    (``TwoSleeveExecutor.run_with_overlay``) so both drive a SAC policy identically.
     Accepts: ``None`` (the neutral TWAP baseline), a SAC-like agent (has ``.predict``), or
     a plain ``callable(obs) -> action`` (test stubs / fixed-urgency policies).
     """
     if agent is None:
         return neutral_baseline_action
     if hasattr(agent, "predict"):
-        return _sac_action_source(agent, n_scales)
+        return _sac_action_source(agent, n_scales, deterministic=deterministic)
     if callable(agent):
         return lambda step_idx, obs: np.asarray(agent(obs), dtype=np.float32).reshape(-1)
     raise TypeError(
@@ -383,7 +391,7 @@ def evaluate_execution_overlay(
             eval_mode=True, apply_prop_firm=apply_prop_firm, cost_stress=cost_stress)
 
     baseline = drive_execution_episodes(_build(), neutral_baseline_action)
-    overlay = drive_execution_episodes(_build(), _resolve_action_source(agent, n_scales))
+    overlay = drive_execution_episodes(_build(), resolve_action_source(agent, n_scales))
 
     uplift = baseline["net_is_bps"] - overlay["net_is_bps"]
     logger.info(
