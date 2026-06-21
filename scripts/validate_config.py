@@ -61,6 +61,30 @@ def load_yaml(path: Path) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def _resolve_base_book(cfg: dict[str, Any], config_path: Path) -> dict[str, Any]:
+    """Deep-merge a ``base_book:`` parent config UNDER ``cfg`` (cfg wins).
+
+    The execution-overlay training config (and any future inheritance-based config) carries a
+    ``base_book:`` pointer instead of duplicating the base book's universe/sleeves/env/data/
+    features blocks. The runner does the same merge so both see one effective config. Resolved
+    relative to CWD (repo root) first, then the config's own directory. A missing/unreadable
+    base_book is left to the downstream checks (e.g. missing env/data) rather than crashing here.
+    """
+    base_ref = cfg.get("base_book")
+    if not isinstance(base_ref, str) or not base_ref:
+        return cfg
+    candidates = [Path(base_ref)]
+    if not candidates[0].is_absolute():
+        candidates.append(config_path.parent / base_ref)
+    base_path = next((p for p in candidates if p.exists() and p.is_file()), None)
+    if base_path is None:
+        return cfg
+    from finrl_pro_ds.config_utils import deep_merge
+
+    base_cfg = load_yaml(base_path)
+    return deep_merge(base_cfg, cfg)
+
+
 def load_data_manifest(data_path: Path) -> dict[str, Any] | None:
     """Manifest co-located with parquet as <stem>.manifest.json."""
     manifest_path = data_path.with_suffix(".manifest.json")
@@ -610,6 +634,113 @@ def check_execution_cost_realism(cfg: dict, stage: str, r: ValidationResult) -> 
             f"execution cost: env.slippage_base_bps unset/0 on a prop-firm {stage} config "
             "— policy trained/selected/graded net of fee only, understating live cost "
             "(sg1_btc_sim_live_gap.md). Set to the venue marketable-limit cross."
+        )
+
+
+def check_execution_overlay_gates(cfg: dict, r: ValidationResult) -> None:
+    """RL execution-overlay deploy-gate presence + sanity (ADR-8, exec-overlay step 5).
+
+    Fires ONLY when the config declares an ``execution_overlay`` block (the overlay training
+    config; a no-op for every other workstream — env-type-gated like
+    :func:`check_max_leverage_bounds`). The overlay shapes only the *trade path* of the FIXED
+    linear target and can never manufacture a directional edge, so its single deploy gate is
+    the ``beat-linear`` discipline: net-of-impact implementation-shortfall uplift vs a tuned
+    TWAP baseline, robust across folds + a cost-stress variant (else ``ship_snap_executor``).
+
+    Validates the effective gates (inline ``gates:`` merged with the standalone
+    ``ensemble.gates_file`` overlay, via :func:`_load_ensemble_gates_overlay`) — both the
+    ``execution_beats_baseline`` decision gate and the redefined ``overlay_parity`` gate
+    (completion is hard; intra-horizon lag is sanity). Thresholds live in the gates file
+    (CLAUDE invariant); this checks they are present and well-formed so the runner can never
+    read a malformed or absent gate. See ``.agent/artifacts/execution_overlay_architecture.md``.
+    """
+    if "execution_overlay" not in cfg:
+        return  # not an execution-overlay config — no-op
+
+    gates = _load_ensemble_gates_overlay(cfg)
+    ebb = gates.get("execution_beats_baseline")
+    if not isinstance(ebb, dict):
+        r.fail(
+            "execution_overlay config missing gates.execution_beats_baseline — the deploy "
+            "gate (net-IS uplift vs tuned TWAP). Copy from configs/execution_overlay.gates.yaml "
+            "(min_uplift_bps / cost_stress_factor / cost_stress_min_uplift_bps / wf_folds / "
+            "robust_folds_required / else)."
+        )
+        return
+
+    def _pos_num(block: dict, key: str, *, strict_pos: bool = False) -> float | None:
+        v = block.get(key)
+        if v is None:
+            r.fail(f"gates.execution_beats_baseline.{key} not set (exec-overlay deploy gate)")
+            return None
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            r.fail(f"gates.execution_beats_baseline.{key}={v!r} is not numeric")
+            return None
+        if strict_pos and f <= 0.0:
+            r.fail(f"gates.execution_beats_baseline.{key}={f} must be > 0")
+            return None
+        return f
+
+    min_uplift = _pos_num(ebb, "min_uplift_bps")
+    stress_uplift = _pos_num(ebb, "cost_stress_min_uplift_bps")
+    factor = _pos_num(ebb, "cost_stress_factor")
+    if factor is not None and factor <= 1.0:
+        r.fail(
+            f"gates.execution_beats_baseline.cost_stress_factor={factor} must be > 1.0 "
+            "(a stress variant scales impact coefficients UP; <=1.0 is not a stress)"
+        )
+    # Stress floor should sit at or below the primary floor (a harder bar at stress is
+    # incoherent — the stressed uplift can only be <= the primary).
+    if min_uplift is not None and stress_uplift is not None and stress_uplift > min_uplift:
+        r.fail(
+            f"gates.execution_beats_baseline.cost_stress_min_uplift_bps={stress_uplift} must be "
+            f"<= min_uplift_bps={min_uplift} (the stressed uplift cannot exceed the primary)"
+        )
+
+    wf_folds = ebb.get("wf_folds")
+    robust = ebb.get("robust_folds_required")
+    folds_ok = True
+    for key, val in (("wf_folds", wf_folds), ("robust_folds_required", robust)):
+        if not (isinstance(val, int) and not isinstance(val, bool) and val >= 1):
+            r.fail(f"gates.execution_beats_baseline.{key}={val!r} must be an int >= 1")
+            folds_ok = False
+    if folds_ok and robust > wf_folds:
+        r.fail(
+            f"gates.execution_beats_baseline.robust_folds_required={robust} must be "
+            f"<= wf_folds={wf_folds} (cannot require more positive folds than exist)"
+        )
+
+    else_action = ebb.get("else")
+    if else_action != "ship_snap_executor":
+        r.fail(
+            f"gates.execution_beats_baseline.else={else_action!r} must be 'ship_snap_executor' "
+            "— the safe fail-open default (the snap _replay owns rung-1 parity-0)"
+        )
+
+    parity = gates.get("overlay_parity")
+    if not isinstance(parity, dict):
+        r.fail(
+            "execution_overlay config missing gates.overlay_parity (ADR-8 redefined parity: "
+            "max_completion_l1_drift hard + max_intra_horizon_drift sanity)"
+        )
+    else:
+        for key in ("max_completion_l1_drift", "max_intra_horizon_drift"):
+            v = parity.get(key)
+            if v is None:
+                r.fail(f"gates.overlay_parity.{key} not set (exec-overlay parity gate)")
+            else:
+                try:
+                    if float(v) <= 0.0:
+                        r.fail(f"gates.overlay_parity.{key}={v} must be > 0")
+                except (TypeError, ValueError):
+                    r.fail(f"gates.overlay_parity.{key}={v!r} is not numeric")
+
+    if not r.failures:
+        r.ok(
+            f"execution-overlay gates OK (min_uplift={min_uplift}bps, "
+            f"stress x{factor} >= {stress_uplift}bps, {robust}/{wf_folds} folds)"
         )
 
 
@@ -1941,6 +2072,9 @@ STAGE_CHECKS = {
 
 def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -> ValidationResult:
     cfg = load_yaml(config_path)
+    # Resolve a `base_book:` parent (inheritance) BEFORE the deploy overlays so the universal
+    # checks see the effective env/data/gates (exec-overlay config inherits the 2-sleeve book).
+    cfg = _resolve_base_book(cfg, config_path)
     if overlays:
         from finrl_pro_ds.config_utils import apply_overlays
         project_root = Path(__file__).resolve().parent.parent
@@ -1958,6 +2092,7 @@ def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)
     check_execution_cost_realism(cfg, stage, r)
+    check_execution_overlay_gates(cfg, r)
     check_wandb_consolidation(cfg, stage, r)
 
     for check in STAGE_CHECKS[stage]:

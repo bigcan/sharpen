@@ -1,0 +1,58 @@
+# ============================================================================
+# EXECUTION OVERLAY (RL) — decision gates overlay (exec-overlay-2sleeve)
+# ============================================================================
+# Step 5 of the execution-overlay build (.agent/artifacts/execution_overlay_architecture.md,
+# ADR-8). Merged over the inline `gates:` of configs/execution_overlay_sac.yaml at
+# validate/eval time (validate_config._load_ensemble_gates_overlay) and read by
+# scripts/execution_overlay_runner.py to render the deploy verdict. ALL thresholds live
+# here (CLAUDE invariant — never hardcoded in code/scripts).
+#
+# The overlay shapes only the *trade path* of the FIXED linear 2-sleeve target; it can NEVER
+# manufacture a directional edge (the failure mode that burned ~500 sessions). So the gate is
+# the same `beat-linear` discipline as rl_beats_linear: the trained overlay's net-of-impact
+# implementation shortfall must beat a tuned TWAP/AC baseline OOS, robustly across folds and
+# under a cost-stress variant — else we keep snapping (ship_snap_executor).
+#
+# Sign convention (gate-critical): implementation shortfall is a COST (bps of parent notional,
+# positive = bad). The overlay should make execution CHEAPER, so the gate reads an
+# uplift = SAVING:  is_uplift_bps = net_is_bps_baseline − net_is_bps_overlay  (positive ⇒ the
+# overlay beat TWAP by that many bps). This is evaluate_execution_overlay["is_uplift_bps"].
+gates:
+  # The decisive gate: net-IS uplift vs the tuned neutral-urgency TWAP baseline. The overlay
+  # is only worth shipping on a robust positive margin (research: single-digit bps, grows with
+  # horizon). Fails open to the snap executor — the safe default that owns rung-1 parity-0.
+  execution_beats_baseline:
+    metric: "net_is_uplift_bps"          # overlay net-IS − tuned TWAP/AC net-IS (the saving)
+    min_uplift_bps: 2.0                   # primary (cost_stress=1.0) uplift must clear this
+    cost_stress_factor: 1.5               # impact-coefficient multiplier for the robustness variant
+    cost_stress_min_uplift_bps: 0.5       # uplift must STAY positive (>= this) at stressed impact
+    wf_folds: 4                           # chronological folds the rebalance events split into
+    robust_folds_required: 3              # >= this many folds must show a positive uplift
+    else: "ship_snap_executor"            # FAIL action: keep today's _replay snap path
+
+  # Overlay parity REDEFINED (ADR-8): the overlay DELIBERATELY makes weight_l1_drift > 0 WITHIN
+  # a horizon, so the snap path's paper_soak.parity gate does NOT apply here. Instead:
+  #   completion — the target IS reached at each horizon end (execution-only; forced phi=1 at
+  #     h=H-1 makes the residual structurally ~0). A hard gate: a non-completing overlay is broken.
+  #   intra_horizon — bounded within-horizon lag vs the snap target. SANITY, not a kill (severity
+  #     warn): the overlay is meant to lag the target mid-horizon — that is the whole point.
+  overlay_parity:
+    max_completion_l1_drift: 0.01         # ‖W_held − W_target‖₁ at each horizon end (hard)
+    max_intra_horizon_drift: 1.0          # worst within-horizon lag (sanity warn, not a kill)
+
+provenance:
+  drafted_on: '2026-06-21'
+  drafted_by_session: S553-cont-57
+  architecture_ref: .agent/artifacts/execution_overlay_architecture.md
+  consumed_by: [validate_config, execution_overlay_runner]
+  rationale: >-
+    Step 5 of the RL execution-overlay build. Pre-registered BEFORE the first trained-overlay
+    eval as a commitment device (the leak-era lesson: verdicts read post-hoc get rationalized).
+    The overlay points RL at execution — the one production-proven, sample-rich, direction-free
+    use (institutional_rl_live_trading_research.md pattern A, CONDITIONAL GO) — so the gate is a
+    net-of-impact saving vs a tuned baseline, never a directional-PF claim. Do not loosen after
+    the first eval without a dated decision memo.
+  capital_gate: >-
+    A PASS here authorizes nothing on its own. Promoting the overlay to paper-CAPITAL (or reading
+    this verdict as a deploy decision) still requires a Tier-2 deep-lifecycle audit
+    (deep_strategy_audit) + operator go-ahead — stakes, not a diff, trigger it.
