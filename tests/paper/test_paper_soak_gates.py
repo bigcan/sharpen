@@ -6,6 +6,8 @@ pre-registered ``paper_soak`` bound and asserts the right gate flips, with the r
 """
 from __future__ import annotations
 
+import json
+
 import numpy as np
 
 from finrl_pro_ds.paper.parity_harness import ParityReport
@@ -16,6 +18,7 @@ from finrl_pro_ds.paper.soak_metrics import (
     UNKNOWN,
     PaperMetrics,
     evaluate_paper_soak_gates,
+    serialize_verdict,
 )
 
 _CLASSES = {"SPY": "equity", "TLT": "rates", "GLD": "commodity", "UUP": "fx"}
@@ -220,3 +223,119 @@ def test_performance_floor_trips_review_when_enough_data(gates_cfg):
     assert chk["status"] == FAIL and chk["value"] < 0.30
     assert v["groups"]["risk"]["status"] == PASS
     assert v["overall_status"] == "REVIEW"
+
+
+# --------------------------------------------------------------------------- #
+# PSR / MinTRL backstop (P11-05 — review; UNKNOWN until enough months)
+# --------------------------------------------------------------------------- #
+def test_psr_unknown_below_min_months(gates_cfg):
+    """The PSR check is wired and reports UNKNOWN below min_months_for_sharpe (it can no
+    more PASS than the rolling Sharpe before the soak is long enough)."""
+    live = make_live(_benign_returns(n=100))           # ~4.8 months < 12
+    v = evaluate_paper_soak_gates(live, clean_parity(n_steps=100), gates_cfg)
+    psr = v["groups"]["performance"]["checks"]["psr"]
+    assert psr["status"] == UNKNOWN and psr["value"] is None
+
+
+def test_psr_passes_on_strong_positive_edge(gates_cfg):
+    """A clean low-vol positive book clears min_psr (high confidence SR>0) and reports a
+    finite MinTRL — the principled go-live confidence statement."""
+    live = make_live(_benign_returns(n=300))
+    v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
+    psr = v["groups"]["performance"]["checks"]["psr"]
+    assert psr["status"] == PASS and psr["value"] >= 0.95
+    assert psr["mintrl_months"] is not None and psr["mintrl_months"] > 0
+
+
+def test_psr_trips_review_on_low_confidence_edge(gates_cfg):
+    """A negative-drift book gives PSR(SR>0) far below 0.95 ⇒ psr FAILs (REVIEW, never a
+    hard kill) and MinTRL is unreachable (None)."""
+    r = -0.0003 + np.random.default_rng(7).normal(0.0, 0.0015, 273)
+    live = make_live(r)
+    v = evaluate_paper_soak_gates(live, clean_parity(n_steps=len(r)), gates_cfg)
+    psr = v["groups"]["performance"]["checks"]["psr"]
+    assert psr["status"] == FAIL and psr["value"] < 0.95
+    assert psr["mintrl_months"] is None                # SR<=0 ⇒ MinTRL = inf ⇒ reported None
+    assert v["groups"]["risk"]["status"] == PASS and v["overall_status"] == "REVIEW"
+
+
+def test_psr_uses_per_period_sharpe_not_annualized(gates_cfg):
+    """CALIBRATION TRIPWIRE (MATH-S08): PSR must take the PER-PERIOD Sharpe
+    (periods_per_year=1). This weak-but-genuinely-POSITIVE book (per-period SR ~0.04)
+    yields PSR≈0.65 ⇒ correctly FAILs the 0.95 floor. If the wiring regresses to the
+    ANNUALIZED SR (periods_per_year=252) the CDF SATURATES to ~1.0 and the gate wrongly
+    PASSes — both asserts below break, catching the mis-calibration."""
+    r = 0.0007 + np.random.default_rng(0).normal(0.0, 0.012, 300)   # weak +SR, low DD
+    live = make_live(r)
+    v = evaluate_paper_soak_gates(live, clean_parity(n_steps=len(r)), gates_cfg)
+    psr = v["groups"]["performance"]["checks"]["psr"]
+    assert psr["status"] == FAIL                         # below the 0.95 floor (honest)
+    assert 0.50 < psr["value"] < 0.95                    # positive but un-saturated (≠ ~1.0 at p=252)
+    assert v["groups"]["risk"]["status"] == PASS         # DD/daily-loss inside the kills
+
+
+# --------------------------------------------------------------------------- #
+# two-sided cost_drift band (P8-06 — HARD)
+# --------------------------------------------------------------------------- #
+def test_cost_drift_lower_bound_trips(gates_cfg):
+    """An UNDER-/non-trading forward path (realized cost ~0 ⇒ cost_drift well below the
+    model) must FAIL the parity gate, not pass trivially — the rung-2 'executor isn't
+    trading the book' failure mode."""
+    live = make_live(_benign_returns())
+    bad = evaluate_paper_soak_gates(live, clean_parity(cost_drift_ratio=0.30), gates_cfg)
+    ok = evaluate_paper_soak_gates(live, clean_parity(cost_drift_ratio=0.60), gates_cfg)
+    assert bad["groups"]["parity"]["checks"]["cost_drift_ratio"]["status"] == FAIL
+    assert bad["overall_status"] == FAIL
+    assert ok["groups"]["parity"]["checks"]["cost_drift_ratio"]["status"] == PASS
+
+
+# --------------------------------------------------------------------------- #
+# strict-JSON verdict (P8-08)
+# --------------------------------------------------------------------------- #
+def test_nonfinite_hard_metric_forces_fail(gates_cfg):
+    """A non-finite HARD parity metric (a broken forward-path computation) can NEVER be a
+    promotable PASS — it forces overall FAIL."""
+    live = make_live(_benign_returns())
+    v = evaluate_paper_soak_gates(live, clean_parity(daily_return_te_bps_max=float("inf")),
+                                  gates_cfg)
+    assert v["groups"]["parity"]["checks"]["daily_return_te_bps"]["status"] == FAIL
+    assert v["overall_status"] == FAIL
+
+
+def test_serialize_verdict_is_strict_json(tmp_path, gates_cfg):
+    """serialize_verdict maps non-finite floats → null and writes strict JSON (no bare
+    NaN/Infinity tokens) so live_monitor / jq / dashboards can parse it (P8-08)."""
+    live = make_live(_benign_returns())
+    verdict = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
+    verdict["summary"]["total_return_pct"] = float("nan")   # inject a stray NaN
+    verdict["summary"]["weird_inf"] = float("inf")
+    out = serialize_verdict(verdict, tmp_path / "verdict.json")
+    text = out.read_text(encoding="utf-8")
+    assert "NaN" not in text and "Infinity" not in text
+    parsed = json.loads(text)                                # strict json.loads (rejects NaN)
+    assert parsed["summary"]["total_return_pct"] is None
+    assert parsed["summary"]["weird_inf"] is None
+
+
+# --------------------------------------------------------------------------- #
+# pre-registration pin (P8-05 — the commitment device has teeth)
+# --------------------------------------------------------------------------- #
+def test_pre_registered_gate_constants_frozen(gates_cfg):
+    """Pin the frozen ``paper_soak`` constants so a silent loosening (e.g. te 15→150)
+    fails CI rather than leaving every threshold-sourced test green. Changing any value
+    here is the deliberate act the dated-memo rule governs (update both together)."""
+    s = gates_cfg["paper_soak"]
+    assert s["min_soak_calendar_days"] == 90 and s["min_rebalances_observed"] == 3
+    assert s["rebalance_cadence"] == "monthly"
+    assert s["parity"] == {
+        "max_daily_return_te_bps": 15, "max_weight_l1_drift": 0.05,
+        "max_missed_rebalances": 0, "max_cost_drift_ratio": 1.50, "min_cost_drift_ratio": 0.50,
+    }
+    assert s["risk"] == {
+        "max_drawdown_kill_pct": 50.0, "max_gross_exposure": 3.3, "daily_loss_halt_pct": 12.0,
+    }
+    assert s["drift"]["max_corr_to_spy"] == 0.40 and s["drift"]["corr_window_days"] == 252
+    assert s["drift"]["max_single_class_pnl_share"] == 0.60
+    assert s["performance"]["rolling_sharpe_floor"] == 0.30
+    assert s["performance"]["min_psr"] == 0.95 and s["performance"]["psr_benchmark"] == 0.0
+    assert s["performance"]["mintrl_confidence"] == 0.95

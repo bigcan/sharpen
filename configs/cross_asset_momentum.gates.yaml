@@ -67,6 +67,11 @@ paper_soak:
     max_weight_l1_drift: 0.05            # sum|w_live - w_sim| across assets at each rebalance
     max_missed_rebalances: 0             # every scheduled monthly rebalance must execute
     max_cost_drift_ratio: 1.50           # realized one-way cost <= 1.5x the 2bps+slippage model
+    # Two-sided cost band (P8-06): the lower bound catches an UNDER-/non-trading forward path
+    # (rung-2 broker rejects/partials leave realized cost ~0 while weights stay in tolerance —
+    # "the executor isn't trading the book"). 0 in rung-1 sim (cost_drift==1.0 by construction);
+    # binds once real IB fills arrive at rung-2. Wired step-4 (S553-cont-57); see provenance.
+    min_cost_drift_ratio: 0.50           # realized one-way cost >= 0.5x the model
 
   # --- ALWAYS-ON risk kill-switches (broken-executor / regime-break, not normal variance) ---
   # RECALIBRATED 2026-06-14 to the env-path (daily-vol-rescale) empirical risk — see
@@ -104,6 +109,16 @@ paper_soak:
     rolling_sharpe_window_months: 12     # trailing window for the SR estimate
     min_months_for_sharpe: 12            # gate = UNKNOWN_INSUFFICIENT_DATA until this many monthly returns
     honest_band: [0.40, 0.60]            # reference expectation (net SR, ~10% vol) - NOT a gate value
+    # PSR / MinTRL confidence control (Bailey & Lopez de Prado 2012; P11-05, wired step-4
+    # S553-cont-57). A monthly core makes a short-soak POINT Sharpe meaningless, so the
+    # principled backstop is PSR(SR>benchmark) = the probability the edge is real, with MinTRL
+    # = the track length needed to confirm it. The code uses the PER-PERIOD Sharpe in the SE
+    # (periods_per_year=1, MATH-S08 — annualizing saturates the CDF); psr_benchmark is a
+    # per-period bound. REVIEW severity (never auto-kill); a below-floor PSR surfaces a
+    # low-confidence edge.
+    psr_benchmark: 0.0                   # PSR tests per-period SR > 0 (the edge is positive)
+    min_psr: 0.95                        # < 95% confidence SR>0 over the trailing window -> review
+    mintrl_confidence: 0.95              # MinTRL reports months-to-confirm at this confidence
 
 paper_soak_provenance:
   drafted_on: '2026-06-12'
@@ -167,3 +182,27 @@ paper_soak_provenance:
       blocking. Per the "do not tune away a real signal" intent of the dated-memo rule, the
       verdict is left at REVIEW rather than recalibrated to PASS. Capital promotion remains
       BLOCKED pending the rung-1 step-4 Tier-2 gate regardless.
+  step4_hardening_2026_06_21:
+    session: S553-cont-57
+    resolves: P8-06 (two-sided cost band) + P11-05 (PSR/MinTRL backstop)
+    audit_ref: docs/research/cross_asset_momentum_paper_rung1_deep_lifecycle_audit_2026-06-14.md
+    decision: >-
+      Step-4 forward-path hardening (the rung-1 Tier-2 gate items that block paper-CAPITAL).
+      ADDITIONS / TIGHTENINGS only — NOT a loosening, but logged under the dated-memo rule:
+      (1) parity.min_cost_drift_ratio=0.50 closes the one-sided cost gate (P8-06): a rung-2
+      under-/non-trading book (realized cost ~0, weights in tolerance) now FAILs parity instead
+      of passing trivially; inert in rung-1 sim where cost_drift==1.0 by construction.
+      (2) performance.{psr_benchmark,min_psr,mintrl_confidence} wire the in-repo
+      crypto/eval/statistics.probabilistic_sharpe_ratio + the new min_track_record_length into
+      the performance backstop (P11-05) at periods_per_year=252 — a skew/kurtosis-adjusted
+      confidence statement replacing the bare rolling-Sharpe floor. REVIEW severity (never
+      auto-kills); the rolling_sharpe_floor is retained alongside.
+    changes:
+      min_cost_drift_ratio: {from: null, to: 0.50}
+      psr_benchmark: {from: null, to: 0.0}
+      min_psr: {from: null, to: 0.95}
+      mintrl_confidence: {from: null, to: 0.95}
+    note: >-
+      Math-gated (PSR + MinTRL formulas) and Audit-gated on commit. Capital promotion remains
+      BLOCKED pending the operator-triggered Tier-2 deep-lifecycle re-audit at the stakes gate;
+      this memo records the gate-definition change, not a promotion.

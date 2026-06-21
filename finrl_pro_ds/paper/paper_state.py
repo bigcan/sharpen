@@ -351,6 +351,10 @@ class LiveTrajectory:
     # several classes and two sleeves may overlap on a bond ETF, so this is attributed by
     # sleeve via the risk-parity-weighted sleeve weights (TwoSleeveExecutor).
     sleeve_pnl: dict[str, float] | None = None
+    # True when the replay covered FEWER bars than the full window — the oracle/replay
+    # terminated early on an env circuit-break (PV < 0.1×capital). Parity is then valid only
+    # over the covered prefix, never silently treated as a full-coverage soak (P10-03).
+    coverage_incomplete: bool = False
 
     @property
     def n_steps(self) -> int:

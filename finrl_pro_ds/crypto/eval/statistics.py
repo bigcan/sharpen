@@ -148,6 +148,43 @@ def probabilistic_sharpe_ratio(
     return max(0.0, min(1.0, prob))
 
 
+def min_track_record_length(
+    returns: Iterable[float],
+    *,
+    sr_benchmark: float = 0.0,
+    prob: float = 0.95,
+    periods_per_year: int = 8760,
+) -> float:
+    """Minimum Track Record Length (Bailey & Lopez de Prado, 2012).
+
+    The number of OBSERVATIONS at which :func:`probabilistic_sharpe_ratio` would first
+    reach ``prob`` confidence that ``SR > sr_benchmark`` — i.e. the analytic inverse of
+    that function, using the SAME skew/kurtosis-adjusted standard error, so by
+    construction ``PSR(track of length MinTRL) == prob``.
+
+    Inverting ``PSR = Phi( (SR - SR*) * sqrt(T-1) / sqrt(B) ) = prob`` (with
+    ``B = 1 - g1*SR + (g2+2)/4 * SR**2`` the same bracket PSR uses) gives
+    ``MinTRL = 1 + B * (Z_prob / (SR - SR*))**2``. Returns ``inf`` when ``SR <=
+    sr_benchmark`` (the benchmark is unreachable at any sample size). Result is in the
+    SAME frequency as ``returns`` (divide by ``periods_per_year`` for years)."""
+    from statistics import NormalDist
+
+    r = _to_list(returns)
+    n = len(r)
+    if n < 3:
+        return float("inf")
+    sr = sharpe_ratio(r, periods_per_year=periods_per_year)
+    sr_b = float(sr_benchmark)
+    if sr <= sr_b:
+        return float("inf")
+    g1 = skewness(r)
+    g2 = excess_kurtosis(r)
+    bracket = 1.0 - g1 * sr + ((g2 + 2.0) / 4.0) * (sr ** 2)
+    bracket = max(bracket, 1e-12)                       # PSR variance is non-negative
+    z = NormalDist().inv_cdf(min(max(prob, 1e-6), 1.0 - 1e-6))
+    return 1.0 + bracket * (z / (sr - sr_b)) ** 2
+
+
 @dataclass(slots=True)
 class SharpeCI:
     lower: float

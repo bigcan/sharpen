@@ -55,6 +55,27 @@ def test_parity_synthetic_18_asset(cfg, gates_cfg, arrays_18):
     assert rep.missed_rebalances == 0
 
 
+def test_replay_handles_short_weights_gracefully(cfg, gates_cfg, arrays_18):
+    """A circuit-broken / early-terminated oracle yields FEWER weight rows than bars; the
+    replay must degrade (cover the prefix + flag coverage_incomplete), NOT crash on the old
+    hard ``assert W.shape == (T-1, N)`` (P10-03). compare()/gates stay well-defined."""
+    h = ParityHarness(cfg)
+    sim = h.sim_oracle(arrays_18)
+    full = np.asarray(sim["weights"], dtype=np.float64)
+    short = full[: len(full) // 2]                       # simulate an early circuit-break
+    live = h._replay(arrays_18, short, fill_engine=None)
+    assert live.coverage_incomplete is True
+    assert live.n_steps == len(short)
+    # compare() takes the min length — no crash, parity still computable over the prefix.
+    rep = h.compare(live, {**sim, "weights": full})
+    assert rep.n_steps == len(short)
+    v = evaluate_paper_soak_gates(live, rep, gates_cfg)
+    assert v["summary"]["coverage_incomplete"] is True
+    # A full-length replay is (still) full coverage.
+    live_full = h._replay(arrays_18, full, fill_engine=None)
+    assert live_full.coverage_incomplete is False
+
+
 def test_parity_verdict_serializes(tmp_path, cfg, gates_cfg, arrays_18):
     """The step-3 gate is 'evaluate AND serialize' — the verdict must round-trip JSON."""
     h = ParityHarness(cfg)
