@@ -197,6 +197,14 @@ class ExecutionSchedulerEnv(gym.Env):
         self._rel_peak = self.initial_capital
         self.book: PaperState | None = None
 
+    @property
+    def W_held(self) -> np.ndarray:
+        """The realized held weight vector after the latest :meth:`step` — the lagged path
+        the overlay actually books (``W_held = (1−φ)·W_held + φ·W_target[k]`` per bar).
+        ``TwoSleeveExecutor.run_with_overlay`` reads this each step to stitch the realized
+        trajectory; a live view of the episode's running inventory (caller copies on use)."""
+        return self._W_held
+
     # ------------------------------------------------------------------ #
     def reset(self, seed: Optional[int] = None, options: Optional[dict] = None):
         super().reset(seed=seed)

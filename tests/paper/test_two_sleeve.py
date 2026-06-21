@@ -202,6 +202,57 @@ def test_rates_sleeve_lookahead_also_caught(paper2_cfg, bundle):
 
 
 # --------------------------------------------------------------------------- #
+# Step-4 RL-execution overlay: run_with_overlay (target invariant + path shaping)
+# --------------------------------------------------------------------------- #
+def test_run_with_overlay_agent_none_falls_back_to_run(paper2_cfg, bundle):
+    """``agent=None`` ⇒ no overlay ⇒ byte-identical to the snap ``run()`` (weights, equity,
+    fees) — the opt-in escape hatch leaves the validated rung-1 path untouched."""
+    exe = TwoSleeveExecutor(paper2_cfg)
+    live_ov, sim_ov = exe.run_with_overlay(bundle, agent=None)
+    live_run, sim_run = exe.run(bundle)
+    np.testing.assert_array_equal(live_ov.weights, live_run.weights)
+    np.testing.assert_array_equal(live_ov.equity_curve, live_run.equity_curve)
+    np.testing.assert_array_equal(live_ov.cumulative_fees, live_run.cumulative_fees)
+    np.testing.assert_array_equal(sim_ov["weights"], sim_run["weights"])
+
+
+def test_run_with_overlay_target_invariant_and_compatible(paper2_cfg, bundle):
+    """The FIXED target (the returned ``oracle``) is byte-identical to ``run()`` whatever the
+    overlay does — only the realized PATH may differ; and ``live`` is a valid, finite,
+    ``compare()``-compatible :class:`LiveTrajectory` (same shape as the snap path)."""
+    exe = TwoSleeveExecutor(paper2_cfg)
+    _, sim_run = exe.run(bundle)
+    live, sim_ov = exe.run_with_overlay(
+        bundle, agent=lambda obs: np.array([0.5], dtype=np.float32))
+    # target unchanged (combined_w → oracle weights) — the overlay never moves the target.
+    np.testing.assert_array_equal(sim_ov["weights"], sim_run["weights"])
+    # compare-compatible, finite, same length as the snap oracle.
+    rep = exe.compare(live, sim_ov)
+    assert rep.n_steps == len(sim_run["weights"])
+    assert np.isfinite(live.equity_curve).all()
+    assert live.sleeve_pnl is not None and set(live.sleeve_pnl) == {"momentum", "rates_carry"}
+
+
+def test_run_with_overlay_shapes_path_but_completes(paper2_cfg, bundle):
+    """A PAUSE agent (a=-1 ⇒ m=0 ⇒ defer the whole conviction shift to the forced last
+    horizon bar) genuinely LAGS the snap target within each horizon ⇒ non-zero weight drift
+    (the overlay shapes the path, ADR-8) — yet completion is structural: the path re-anchors
+    to the target by each horizon end, so the final bar matches the snap and gross is never
+    over-levered beyond the target (MARGIN-CFG, convex-combo cap)."""
+    exe = TwoSleeveExecutor(paper2_cfg)
+    live, sim = exe.run_with_overlay(
+        bundle, agent=lambda obs: np.array([-1.0], dtype=np.float32))
+    rep = exe.compare(live, sim)
+    sim_w = np.asarray(sim["weights"], dtype=np.float64)
+    # overlay lags the snap inside horizons → real within-horizon drift.
+    assert rep.weight_l1_drift_max > 1e-6, rep.weight_l1_drift_max
+    # …but re-anchors: the final (post-horizon) bar equals the snap target.
+    np.testing.assert_allclose(live.weights[-1], sim_w[-1], atol=1e-9)
+    # gross never exceeds the target's gross (convex combination of ≤-cap vectors).
+    assert np.abs(live.weights).sum(axis=1).max() <= np.abs(sim_w).sum(axis=1).max() + 1e-9
+
+
+# --------------------------------------------------------------------------- #
 # Attribution + soak gates
 # --------------------------------------------------------------------------- #
 def test_sleeve_attribution_present_and_finite(paper2_cfg, bundle):

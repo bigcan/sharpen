@@ -34,7 +34,7 @@ SHY→rates out of the box); per-SLEEVE attribution is attached separately.
 from __future__ import annotations
 
 import logging
-from typing import Callable, Mapping
+from typing import Callable, Mapping, cast
 
 import numpy as np
 
@@ -165,6 +165,79 @@ class TwoSleeveExecutor:
         live = self.harness._replay(bundle["union"], combined_w, fill_engine=fill_engine)
         self.harness._expected_rebalance_ts = self.harness._true_month_end_ts(
             np.asarray(bundle["union"]["timestamps"], dtype=np.int64))
+        return live, oracle
+
+    def run_with_overlay(
+        self,
+        bundle: Mapping,
+        *,
+        agent,
+        deterministic: bool = True,
+        fill_engine: FillEngine | None = None,
+    ) -> tuple[LiveTrajectory, dict]:
+        """Step-4 RL-execution-overlay book: replay the FIXED 2-sleeve target along the
+        overlay's *realized* (lagged) path instead of snapping the full gap each bar.
+
+        Computes the immutable target (:meth:`sim_oracle` → ``combined_w``, byte-identical
+        to :meth:`run`), drives an ``ExecutionSchedulerEnv`` with ``agent`` over each
+        monthly parent order — capturing the realized ``W_held`` within every worked
+        horizon — and books that realized path through the SAME validated union replay
+        (:meth:`ParityHarness._replay`). The returned ``(live, oracle)`` is therefore
+        :meth:`compare`-compatible exactly like :meth:`run`; only the realized PATH differs,
+        the target ``oracle`` is identical.
+
+        ``agent`` is a trained execution-overlay policy (``.predict``), a
+        ``callable(obs)->action``, or ``None`` ⇒ no overlay ⇒ delegates to :meth:`run`
+        (the snap path). The overlay DELIBERATELY makes ``weight_l1_drift > 0`` *within* a
+        horizon (ADR-8) — the snap parity gates do NOT apply to this path; the overlay's
+        deploy gate is the net-IS uplift (``evaluate_execution_overlay``). ``deterministic``
+        selects the mean action for a SAC policy (the deploy/forward-replay default).
+        """
+        if agent is None:
+            return self.run(bundle, fill_engine=fill_engine)
+
+        # Lazy import: only env→paper imports are allowed at module scope, so the env-side
+        # factory is imported here (not at top level) to avoid an env↔paper cycle (the
+        # factory itself lazy-imports this module). resolve_action_source is the canonical
+        # SAC-action convention shared with the gate eval — reused so the realized path
+        # matches what evaluate_execution_overlay scored.
+        from finrl_pro_ds.envs.execution_overlay_factory import (
+            make_execution_env,
+            resolve_action_source,
+        )
+        from finrl_pro_ds.envs.execution_scheduler_env import ExecutionSchedulerEnv
+
+        oracle, detail = self.sim_oracle(bundle)
+        combined_w = detail["combined_w"]                       # FIXED target (never mutated)
+
+        apply_prop_firm = bool(self.config.get("prop_firm", {}).get("augment_obs", False))
+        n_scales = int(self.config.get("network", {}).get("n_scales", 1))
+        env = make_execution_env(
+            bundle, self.config, target_weights=combined_w,
+            eval_mode=True, apply_prop_firm=apply_prop_firm)
+        base = cast(ExecutionSchedulerEnv, env.unwrapped)       # scheduler even when V7-wrapped
+        action_at_step = resolve_action_source(agent, n_scales, deterministic=deterministic)
+
+        # Realized path = the snap target everywhere, OVERWRITTEN within each worked horizon
+        # (decision bars k = r .. r+H-1) by the agent's lagged fills. Horizons never overlap
+        # (month-ends ≫ H), and each forced φ=1 at h=H-1 re-anchors W_held → W_target — so the
+        # stitched path is continuous (realized[r-1] == target[r-1] == the episode warm-start)
+        # and the conviction transition is the only thing whose path the overlay shaped.
+        realized_w = np.array(combined_w, dtype=np.float64, copy=True)
+        for r in (int(x) for x in base.rebalance_steps):
+            obs, _ = env.reset(options={"rebalance_step": r})
+            done = False
+            while not done:
+                k = base.step_idx                              # decision bar (action governs k→k+1)
+                a = np.asarray(action_at_step(k, obs), dtype=np.float32).reshape(-1)[:1]
+                obs, _reward, _terminated, _truncated, _info = env.step(a)
+                realized_w[k] = base.W_held                    # realized weight held over k→k+1
+                done = _terminated or _truncated
+
+        live = self.harness._replay(bundle["union"], realized_w, fill_engine=fill_engine)
+        self.harness._expected_rebalance_ts = self.harness._true_month_end_ts(
+            np.asarray(bundle["union"]["timestamps"], dtype=np.int64))
+        live.sleeve_pnl = detail["sleeve_pnl"]                  # per-sleeve attribution for the digest
         return live, oracle
 
     def compare(self, live: LiveTrajectory, sim: Mapping):
