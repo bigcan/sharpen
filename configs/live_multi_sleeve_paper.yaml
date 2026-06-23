@@ -10,9 +10,10 @@
 # trailing-causal inverse-vol risk-parity (MS-ADR-1).
 #
 # SEQUENCING (MS-ADR-6): sleeves.vrp.enabled is FALSE — with VRP off this book is
-# byte-identical to the 2-sleeve TwoSleeveExecutor. Flip it on ONLY after the in-flight
-# 2-sleeve rung-1 soak passes its >= 3-month gate, then re-run the Tier-2 deep-lifecycle
-# audit on the COMBINED book before any paper-capital (CLAUDE.md mandatory).
+# byte-identical to the 2-sleeve TwoSleeveExecutor. Enable it ONLY via a Tier-2 deep-lifecycle
+# audit on the COMBINED book + operator go-ahead before any paper-capital (CLAUDE.md mandatory).
+# NOTE: no live paper soak is running (fleet halted 2026-06-01); the >= 3-month (90-day)
+# paper_soak span is a gate THRESHOLD that applies if/when a live soak is run, not an in-flight process.
 #
 # CAPITAL GATE (do not skip): paper-capital still requires the combined-book Tier-2 audit
 # + operator go-ahead. This config WIRES the book; it does not promote it.
@@ -70,7 +71,7 @@ sleeves:
     tanh_scale: 1.5
   vrp:                                               # BTC options variance-risk-premium — Deribit account
     type: return_stream                              # combined at the RETURN level (MS-ADR-1), not a union allocator
-    enabled: false                                   # MS-ADR-6 — flip on ONLY after the 2-sleeve soak clears >= 3 months
+    enabled: false                                   # MS-ADR-6 — enable ONLY via combined-book Tier-2 audit + operator go-ahead (no live soak running)
     asset: BTC                                        # ETH dropped (negative every holdout cadence) — MS-ADR-2
     max_weight: 0.35                                  # cap α_vrp: trailing vol understates the short-vol TAIL, so naive
                                                       # inverse-vol over-allocates (would be ~0.68 / 67% of P&L). Operator
