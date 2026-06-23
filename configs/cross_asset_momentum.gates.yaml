@@ -97,18 +97,22 @@ paper_soak:
     min_cost_drift_ratio: 0.50           # realized one-way cost >= 0.5x the model
 
   # --- ALWAYS-ON risk kill-switches (broken-executor / regime-break, not normal variance) ---
-  # RECALIBRATED 2026-06-14 to the env-path (daily-vol-rescale) empirical risk — see
-  # paper_soak_provenance.recalibration_2026_06_14 + Tier-2 audit
-  # (docs/research/cross_asset_momentum_paper_rung1_deep_lifecycle_audit_2026-06-14.md, P11-02/P8-04).
-  # The shadowed daily-rescale render runs at ~19.6% vol with a 42.8% historical max DD /
-  # -9.77% worst day — NOT the ~10%-vol/22%-DD book the original 20%/4% kills assumed. Kills
-  # now sit ABOVE every historical extreme so they signal "edge gone or executor broken", not
-  # a normal drawdown (which would auto-flatten + raise a false "broken" alarm). Operator chose
-  # Option A (recalibrate + keep daily-rescale); Option B (portfolio-vol overlay → ~22% DD) declined.
+  # RECALIBRATED 2026-06-23 (P8-07) to the TWO-SLEEVE fund-of-funds render the executor now
+  # produces — see paper_soak_provenance.recalibration_2026_06_23 + the cont-58 Tier-2 audit
+  # (docs/research/cross_asset_momentum_deep_lifecycle_audit_2026-06-21.md, P8-07). The prior
+  # 50/12 kills were calibrated (2026-06-14) to the RETIRED single-sleeve daily-rescale render
+  # (42.8% DD / -9.77% day); the executor now runs the momentum + rates-carry fund-of-funds at
+  # ~20.28% historical max DD / -5.14% worst day, so 50/12 sat at ~2.5x the real tail and a
+  # 30-40% break (a genuine "edge gone / executor broken") passed silently. Kills now sit just
+  # ABOVE the 2-sleeve render's extremes: a normal worst-case does not trip, a genuine break does.
+  # `calibrated_for_sleeves` pins the composition these were derived against — the soak gate
+  # FAILs if the executor runs a DIFFERENT sleeve set (e.g. the +VRP combined PortfolioExecutor
+  # book, which needs its own calibration), so a mis-scoped kill cannot be silently trusted.
   risk:
-    max_drawdown_kill_pct: 50.0          # > env-path historical max DD 42.8% (+~17% headroom)
-    max_gross_exposure: 3.3              # env caps gross at 3.0 (env.max_gross_exposure) + ~10% margin; realized 3.04
-    daily_loss_halt_pct: 12.0            # > env-path worst single day -9.77% (+~23% headroom)
+    max_drawdown_kill_pct: 25.0          # > 2-sleeve render max DD 20.28% (+~23% headroom); trips a 30%+ break
+    max_gross_exposure: 3.3              # env caps gross at 3.0 (env.max_gross_exposure) + ~10% margin; realized ~3.00
+    daily_loss_halt_pct: 7.0             # > 2-sleeve render worst day -5.14% (+~36% headroom); trips an 8%+ day
+    calibrated_for_sleeves: [momentum, rates_carry]   # composition the kills were derived against (P8-07 cross-check)
 
   # --- diversification / regime drift (the north-star: an UNCORRELATED sleeve) ---
   drift:
@@ -244,3 +248,35 @@ paper_soak_provenance:
       Math-gated (PSR + MinTRL formulas) and Audit-gated on commit. Capital promotion remains
       BLOCKED pending the operator-triggered Tier-2 deep-lifecycle re-audit at the stakes gate;
       this memo records the gate-definition change, not a promotion.
+  recalibration_2026_06_23:
+    session: S553-cont-58
+    resolves: P8-07 (stale risk kills calibrated to the retired single-sleeve render)
+    audit_ref: docs/research/cross_asset_momentum_deep_lifecycle_audit_2026-06-21.md
+    decision: >-
+      Re-derive the always-on DD / daily-loss kills against the TWO-SLEEVE fund-of-funds render
+      the executor now produces (momentum + rates-carry, the path live_cross_asset_paper.yaml
+      drives), NOT the retired single-sleeve daily-rescale render the 2026-06-14 memo assumed.
+      The render evolved (single-sleeve daily-rescale -> 2-sleeve FoF) but the kills did not, so
+      50/12 sat at ~2.5x the actual 2-sleeve tail and a 30-40% DD (a genuine break for THIS book)
+      passed silently. This is a TIGHTENING (not a loosening): the kills move DOWN toward the
+      real tail. Numbers from the forward-path render (run_cross_asset_paper_validation,
+      5148 daily steps): max DD 20.28%, worst day -5.14%, realized gross ~3.00.
+    changes:
+      max_drawdown_kill_pct: {from: 50.0, to: 25.0}    # > render 20.28% + ~23% headroom
+      daily_loss_halt_pct: {from: 12.0, to: 7.0}       # > render 5.14% + ~36% headroom
+      calibrated_for_sleeves: {from: null, to: [momentum, rates_carry]}
+    measured:
+      two_sleeve_render_max_dd_pct: 20.28
+      two_sleeve_render_worst_day_pct: -5.14
+      two_sleeve_render_max_gross: 3.00
+    cross_check: >-
+      `risk.calibrated_for_sleeves` is now enforced by soak_metrics.evaluate_paper_soak_gates:
+      the risk group FAILs if the executor's actual sleeve composition differs from the one the
+      kills were derived against. The +VRP combined PortfolioExecutor book
+      (live_multi_sleeve_paper.yaml, which also reads this gates file) therefore trips the
+      cross-check until it gets its OWN risk calibration — TRACKED (cont-68+), out of this
+      memo's 2-sleeve scope, NOT silently trusted.
+    note: >-
+      Audit-gated on commit. Kills sit ABOVE every historical extreme of the 2-sleeve render so
+      they signal "edge gone or executor broken", not a normal drawdown. Capital promotion
+      remains BLOCKED pending the operator Tier-2 stakes gate; this records the gate change.
