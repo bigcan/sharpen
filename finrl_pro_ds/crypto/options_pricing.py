@@ -39,6 +39,8 @@ __all__ = [
     "bs_put",
     "leg_price",
     "leg_delta",
+    "leg_vega",
+    "leg_gamma",
     "bs_self_test",
 ]
 
@@ -129,6 +131,31 @@ def leg_delta(opt_type: str, S: float, K: float, sig: float, tau: float) -> floa
     return ncdf(_d1) if opt_type == "call" else ncdf(_d1) - 1.0
 
 
+def leg_vega(opt_type: str, S: float, K: float, sig: float, tau: float) -> float:
+    """Per-leg vega: price change per 1.00 (=100%) change in vol = ``S n(d1) sqrt(tau)``.
+
+    Call and put vega are IDENTICAL at r=0 (``opt_type`` is accepted only for
+    signature symmetry with ``leg_price``/``leg_delta``), so a strike's two legs sum
+    to that strike's straddle vega: ``leg_vega(call)+leg_vega(put) == straddle_vega``.
+    Returns ``0.0`` for an expired/degenerate leg (``tau<=0 or sig<=0``) — no vol
+    sensitivity once intrinsic. This is the per-leg primitive the signed multi-leg
+    net-vega tail gate sums over (long wings carry +vega, shrinking |net short vega|).
+    """
+    if tau <= 0 or sig <= 0:
+        return 0.0
+    return S * npdf(d1(S, K, sig, tau)) * math.sqrt(tau)
+
+
+def leg_gamma(opt_type: str, S: float, K: float, sig: float, tau: float) -> float:
+    """Per-leg gamma = ``n(d1) / (S sig sqrt(tau))`` (call==put at r=0). Obs-only.
+
+    Sums to the strike's straddle gamma: ``leg_gamma(call)+leg_gamma(put) ==
+    straddle_gamma``. ``0.0`` when expired/degenerate (``tau<=0 or sig<=0``)."""
+    if tau <= 0 or sig <= 0:
+        return 0.0
+    return npdf(d1(S, K, sig, tau)) / (S * sig * math.sqrt(tau))
+
+
 # ---------------------------------------------------------------------------
 # Self-test (put-call parity / ATM magnitude sanity; fails loud if BS is wrong)
 # ---------------------------------------------------------------------------
@@ -141,3 +168,12 @@ def bs_self_test() -> None:
     assert abs(straddle_delta(S, S, sigma, tau)) < 0.10  # ~delta-neutral at inception
     # Put-call parity at r=0: C - P = S - K  =>  ATM (K=S) call == put.
     assert abs(bs_call(S, S, sigma, tau) - bs_put(S, S, sigma, tau)) < 1e-9
+    # Per-leg vega/gamma sum to the straddle's (the multi-leg net-vega gate relies on
+    # this additivity); call==put at r=0; both zero once expired.
+    K = 1.1 * S  # off-ATM so call!=put intrinsic, but vega/gamma still call==put
+    assert abs(leg_vega("call", S, K, sigma, tau) - leg_vega("put", S, K, sigma, tau)) < 1e-9
+    assert abs(leg_vega("call", S, S, sigma, tau) + leg_vega("put", S, S, sigma, tau)
+               - straddle_vega(S, S, sigma, tau)) < 1e-9
+    assert abs(leg_gamma("call", S, S, sigma, tau) + leg_gamma("put", S, S, sigma, tau)
+               - straddle_gamma(S, S, sigma, tau)) < 1e-9
+    assert leg_vega("call", S, S, sigma, 0.0) == 0.0 and leg_gamma("put", S, S, sigma, 0.0) == 0.0

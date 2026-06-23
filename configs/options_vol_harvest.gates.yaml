@@ -60,3 +60,18 @@ gates:
     require_multi_subperiod: true
     max_recent_oos_drawdown: 0.40
     min_recent_oos_sharpe: 0.0
+
+  # Instrument A/B bake-off (.agent/artifacts/options_vrp_instrument_ab_spec.md). The
+  # real-chain skew falsification runs each signed-leg structure through phase1_linear
+  # + tail independently (no inheritance from the straddle), then picks the survivor by
+  # a TAIL-ADJUSTED metric (Sortino, with the tail CVaR95 guard) — NOT raw Sharpe — so a
+  # capped-tail iron fly with a lower Sharpe can legitimately win (it's the one you can
+  # safely lever). Pre-registered here so the metric/threshold can't be chosen post-hoc.
+  instrument_ab:
+    instruments: [straddle, strangle, iron_fly, iron_condor]
+    wing_delta: 0.10              # long-wing target |delta| for iron_fly / iron_condor (< 0.25 short delta)
+    require_pass_phase1: true     # each instrument must independently clear phase1_linear + tail
+    select_by: sortino            # rank PASSERS by Sortino (downside-adjusted), NOT raw Sharpe (ADR-4)
+    min_sortino: 0.50             # a winner must also clear this Sortino floor
+    # cvar95 guard reuses gates.tail.cvar95_floor_pct (-8.0); worst-window DD reuses tail.max_worst_window_dd_pct
+    sample_basis: tardis_first_of_month   # free monthly snapshots; paid daily-chain re-run = deploy-grade (ADR-5)

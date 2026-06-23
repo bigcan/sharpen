@@ -345,3 +345,78 @@ def block_bootstrap_sharpe_ci(
         "block": int(block),
         "n_boot": int(boots),
     }
+
+
+def block_bootstrap_sortino_ci(
+    returns: Iterable[float],
+    *,
+    target: float = 0.0,
+    block: int = 21,
+    n_boot: int = 10_000,
+    alpha: float = 0.05,
+    seed: int = 7,
+    periods_per_year: int = 252,
+) -> dict | None:
+    """Circular block-bootstrap CI for the annualized SORTINO ratio.
+
+    The Sortino analogue of :func:`block_bootstrap_sharpe_ci` — the right CI for the
+    pre-registered tail-adjusted selection metric of the options-VRP instrument A/B
+    (``.agent/artifacts/options_vrp_instrument_ab_spec.md`` ADR-4), where a short-vol
+    book is judged on DOWNSIDE deviation, not symmetric vol. Resamples contiguous
+    ``block``-length runs so vol-clustering is preserved; annualized Sortino per draw is
+    ``mean / downside_std * sqrt(periods_per_year)`` with ``downside_std`` the true
+    downside deviation about ``target`` (uses ALL obs; positive ones contribute zero) —
+    identical convention to :func:`sortino_ratio`. A bootstrap draw with zero downside
+    deviation (no return below target) yields ``+inf`` Sortino and is recorded as such;
+    the quantiles stay finite as long as fewer than ``alpha/2`` of draws are degenerate.
+    Deterministic given ``seed``. ``None`` with fewer than ``block + 2`` finite obs.
+
+    Returns ``{"ci_low", "ci_high", "p_sortino_lt_0", "p_sortino_lt_0_5", "block",
+    "n_boot"}``.
+    """
+    import numpy as np
+
+    d = np.asarray(_to_list(returns), dtype=np.float64)
+    d = d[np.isfinite(d)]
+    if len(d) < block + 2:
+        return None
+    rng = np.random.default_rng(seed)
+    t_n = len(d)
+    base = np.arange(block)
+    boots = max(1, n_boot)
+    so = np.empty(boots)
+    for b in range(boots):
+        idx: list[int] = []
+        while len(idx) < t_n:
+            s0 = int(rng.integers(0, t_n))
+            idx.extend(((s0 + base) % t_n).tolist())   # circular block (wraps at the tail)
+        x = d[np.array(idx[:t_n])]
+        downside = np.minimum(x - target, 0.0)
+        # downside deviation about target, ddof=1 to match downside_std / sortino_ratio
+        # (the point estimator) and block_bootstrap_sharpe_ci's std(ddof=1).
+        dd = np.sqrt(float(downside @ downside) / (t_n - 1))
+        mu = x.mean() - target
+        if dd > 0:
+            so[b] = mu / dd * (periods_per_year ** 0.5)
+        else:                                           # no downside in this draw
+            so[b] = np.inf if mu > 0 else 0.0
+    # Quantiles: linear interpolation when finite (consistent with the Sharpe CI), but a
+    # no-downside draw yields +inf, and np.quantile would interpolate inf-inf -> NaN. So
+    # when any draw is +inf, fall back to a nearest-rank quantile (returns an actual draw,
+    # so a +inf high CI propagates HONESTLY — a large share of resamples had zero loss).
+    if np.isfinite(so).all():
+        ci_low = float(np.quantile(so, alpha / 2.0))
+        ci_high = float(np.quantile(so, 1.0 - alpha / 2.0))
+    else:
+        ss = np.sort(so)               # +inf sorts to the tail
+        t = len(ss)
+        ci_low = float(ss[min(int(alpha / 2.0 * t), t - 1)])
+        ci_high = float(ss[min(int((1.0 - alpha / 2.0) * t), t - 1)])
+    return {
+        "ci_low": ci_low,
+        "ci_high": ci_high,
+        "p_sortino_lt_0": float((so < 0.0).mean()),
+        "p_sortino_lt_0_5": float((so < 0.5).mean()),
+        "block": int(block),
+        "n_boot": int(boots),
+    }
