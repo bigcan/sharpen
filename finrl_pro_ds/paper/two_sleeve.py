@@ -53,6 +53,23 @@ logger = logging.getLogger(__name__)
 _SLEEVES = ("momentum", "rates_carry")
 
 
+def _allocator_sleeve_names(config: Mapping) -> tuple[str, ...]:
+    """Allocator-family sleeve names (weights over the ETF union), in config order.
+
+    Reads the config ``sleeves`` block, EXCLUDING any sleeve whose ``type`` is
+    ``return_stream`` — those are not driven through the allocator env (no
+    weights-over-union representation); they are combined at the portfolio level by
+    :class:`~finrl_pro_ds.paper.portfolio_executor.PortfolioExecutor`. Defaults to the
+    validated momentum+rates pair when no ``sleeves`` block is present, so the existing
+    2-sleeve config/behavior is byte-identical (back-compat, MS-ADR-6)."""
+    sleeves = dict(config.get("sleeves", {}))
+    if not sleeves:
+        return _SLEEVES
+    names = tuple(s for s, spec in sleeves.items()
+                  if str((spec or {}).get("type", "allocator")) != "return_stream")
+    return names or _SLEEVES
+
+
 class TwoSleeveExecutor:
     """Drives the momentum + rates-carry fund-of-funds and produces the combined rung-1
     sim oracle + forward replay. Composes a :class:`ParityHarness` for the (reused)
@@ -70,6 +87,9 @@ class TwoSleeveExecutor:
         tv = rp.get("target_portfolio_vol", None)
         self.rp_target_vol = float(tv) if tv is not None else None
         self.max_gross = float(dict(config.get("env", {})).get("max_gross_exposure", 3.0))
+        # Allocator-family sleeves driven through the env (config-driven; default
+        # (momentum, rates_carry) — back-compat). return_stream sleeves (VRP) are excluded.
+        self.sleeve_names = _allocator_sleeve_names(config)
 
     # ------------------------------------------------------------------ #
     def _alphas(self, sleeve_returns: Mapping[str, np.ndarray], ts_decision: np.ndarray) -> dict:
@@ -85,9 +105,8 @@ class TwoSleeveExecutor:
             max_gross_exposure=self.max_gross)
         return combined, alphas
 
-    @staticmethod
-    def _sleeve_assets(bundle: Mapping) -> dict[str, list[str]]:
-        return {s: list(bundle[s]["assets"]) for s in _SLEEVES}
+    def _sleeve_assets(self, bundle: Mapping) -> dict[str, list[str]]:
+        return {s: list(bundle[s]["assets"]) for s in self.sleeve_names}
 
     @staticmethod
     def _decision_ts(bundle: Mapping) -> np.ndarray:
@@ -101,9 +120,9 @@ class TwoSleeveExecutor:
         union. Returns ``(oracle_dict, detail)`` where ``oracle_dict`` is compare-ready
         (``weights/step_returns/equity_curve/cumulative_fees/turnovers``) and ``detail``
         carries the per-sleeve trajectories, the α paths, and the combined weights."""
-        traj = {s: linear_core_trajectory(bundle[s], self.config) for s in _SLEEVES}
-        sleeve_w = {s: traj[s]["weights"] for s in _SLEEVES}
-        sleeve_r = {s: traj[s]["step_returns"] for s in _SLEEVES}
+        traj = {s: linear_core_trajectory(bundle[s], self.config) for s in self.sleeve_names}
+        sleeve_w = {s: traj[s]["weights"] for s in self.sleeve_names}
+        sleeve_r = {s: traj[s]["step_returns"] for s in self.sleeve_names}
         sleeve_assets = self._sleeve_assets(bundle)
         union_assets = list(bundle["union"]["assets"])
         ts_dec = self._decision_ts(bundle)
@@ -154,7 +173,7 @@ class TwoSleeveExecutor:
         ts_dec = self._decision_ts(bundle)
 
         sleeve_w_fwd, sleeve_r_fwd = {}, {}
-        for s in _SLEEVES:
+        for s in self.sleeve_names:
             conv_live = self.harness._assemble_forward_conviction(
                 bundle[s], conviction_fn=fns.get(s))
             fwd = drive_with_conviction(bundle[s], self.config, conv_live)

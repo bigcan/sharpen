@@ -85,6 +85,21 @@ def _rolling_sharpe(step_returns: np.ndarray, window_days: int) -> float:
     return float(r.mean() / sd * np.sqrt(ANN)) if sd > 1e-12 else 0.0
 
 
+def _safe_corr(a: np.ndarray, b: np.ndarray, window: int) -> float | None:
+    """Trailing-``window`` correlation of two aligned return series; None if too short or
+    degenerate (a flat series). Used by the realized-returns diversification gate."""
+    a = np.asarray(a, dtype=np.float64)
+    b = np.asarray(b, dtype=np.float64)
+    n = min(len(a), len(b))
+    if n < 3:
+        return None
+    w = min(window, n)
+    a, b = a[-w:], b[-w:]
+    if a.std() < 1e-12 or b.std() < 1e-12:
+        return None
+    return float(np.corrcoef(a, b)[0, 1])
+
+
 def evaluate_paper_soak_gates(
     live: LiveTrajectory,
     parity: ParityReport,
@@ -157,6 +172,37 @@ def evaluate_paper_soak_gates(
         },
     }
 
+    # diversification (MS-ADR-7): each return-stream sleeve (e.g. VRP) must stay
+    # uncorrelated to the allocator book AND to SPY on REALIZED returns — the live closure
+    # of the WF manifest's DEFERRED g_diversification. Present only for a multi-sleeve
+    # combined book (PortfolioExecutor attaches sleeve_returns / allocator_sleeve); the
+    # single-sleeve / 2-sleeve allocator path skips it (no extra sleeve to correlate).
+    sleeve_returns = getattr(live, "sleeve_returns", None)
+    alloc_name = getattr(live, "allocator_sleeve", None)
+    if sleeve_returns and alloc_name and len(sleeve_returns) >= 2:
+        max_corr_sl = float(drift.get("max_corr_between_sleeves", 0.30))
+        win = int(drift.get("corr_window_days", 252))
+        base = sleeve_returns.get(alloc_name)
+        worst, per = 0.0, {}
+        for name, rr in sleeve_returns.items():
+            if name == alloc_name:
+                continue
+            c_alloc = _safe_corr(rr, base, win) if base is not None else None
+            c_spy = _safe_corr(rr, live.spy_returns, win) if live.spy_returns is not None else None
+            per[name] = {"corr_to_allocator": c_alloc, "corr_to_spy": c_spy}
+            # Gate the INTER-SLEEVE correlation only (the north-star / g_diversification
+            # closure: "uncorrelated to the EXISTING book"). corr_to_spy is a DIAGNOSTIC
+            # surfaced per-sleeve — the combined book's equity beta is gated separately by
+            # drift.corr_to_spy, so we don't conflate "is it diversifying vs our sleeves"
+            # with "does it carry equity beta" (a recent BTC↔equity regime can push the
+            # latter up while the former stays clean).
+            if c_alloc is not None:
+                worst = max(worst, abs(c_alloc))
+        drift_checks["diversification"] = {
+            "value": worst, "threshold": max_corr_sl, "op": "abs<=", "per_sleeve": per,
+            "status": PASS if worst <= max_corr_sl else FAIL,
+        }
+
     # --- PERFORMANCE (long-horizon backstop, review; UNKNOWN until enough data) ---
     # A raw rolling-Sharpe floor PLUS a skew/kurtosis-adjusted PSR / MinTRL confidence
     # control (Bailey & Lopez de Prado 2012; P11-05). The monthly core makes a short-soak
@@ -224,6 +270,25 @@ def evaluate_paper_soak_gates(
                                 "status": PASS if rebalances_observed >= min_rebal else UNKNOWN},
     }
 
+    # --- SLEEVE TAIL (return-stream short-vol tail monitor, review) ---
+    # Surfaces + checks each return-stream sleeve's tail (from live.sleeve_risk) against the
+    # pre-registered short-vol kills (mirrors options_vol_harvest `tail`). Present only for a
+    # multi-sleeve book with a return-stream sleeve; thresholds from paper_soak.sleeve_tail.
+    sleeve_risk = getattr(live, "sleeve_risk", None)
+    tail_cfg = dict(soak.get("sleeve_tail", {}))
+    sleeve_tail_checks: dict[str, dict] = {}
+    if sleeve_risk and tail_cfg:
+        for name, rx in sleeve_risk.items():
+            if "cvar95_pct_daily" in rx and "cvar95_floor_pct" in tail_cfg:
+                sleeve_tail_checks[f"{name}:cvar95"] = _check(
+                    rx["cvar95_pct_daily"], tail_cfg["cvar95_floor_pct"], ">=", unit="%")
+            if "max_net_vega_per_100k" in rx and "max_net_vega_per_100k" in tail_cfg:
+                sleeve_tail_checks[f"{name}:net_vega"] = _check(
+                    rx["max_net_vega_per_100k"], tail_cfg["max_net_vega_per_100k"], "<=")
+            if "max_dd_pct" in rx and "max_worst_window_dd_pct" in tail_cfg:
+                sleeve_tail_checks[f"{name}:worst_dd"] = _check(
+                    rx["max_dd_pct"], tail_cfg["max_worst_window_dd_pct"], "<=", unit="%")
+
     groups = {
         "parity": {"severity": "hard", "status": _group_status(parity_checks), "checks": parity_checks},
         "risk": {"severity": "hard", "status": _group_status(risk_checks), "checks": risk_checks},
@@ -232,11 +297,14 @@ def evaluate_paper_soak_gates(
         "horizon": {"severity": "sufficiency", "status": PASS if horizon_ok else UNKNOWN,
                     "checks": horizon_checks},
     }
+    if sleeve_tail_checks:
+        groups["sleeve_tail"] = {"severity": "review", "status": _group_status(sleeve_tail_checks),
+                                 "checks": sleeve_tail_checks}
 
     # Fail-CLOSED routing (P8-07): a HARD group that is FAIL → FAIL; a HARD group that is
     # UNKNOWN, or an unmet soak horizon, can NEVER be a promotable PASS (→ UNKNOWN, blocking);
     # a soft (drift/performance) FAIL → REVIEW. UNKNOWN in a HARD group used to pass through.
-    _SOFT_GROUPS = {"drift", "performance"}
+    _SOFT_GROUPS = {"drift", "performance", "sleeve_tail"}
     # A non-finite HARD metric (NaN/Inf parity or risk value) means the forward-path
     # computation broke — never promotable. Force FAIL (P8-08). Today usually already FAIL
     # via _check (``nan <= t`` is False ⇒ FAIL), but this guards future non-_check HARD
@@ -251,7 +319,9 @@ def evaluate_paper_soak_gates(
     hard_nonfinite = _has_nonfinite(parity_checks) or _has_nonfinite(risk_checks)
     hard_fail = any(groups[k]["status"] == FAIL for k in _HARD_GROUPS)
     hard_unknown = any(groups[k]["status"] == UNKNOWN for k in _HARD_GROUPS)
-    soft_fail = any(groups[k]["status"] == FAIL for k in _SOFT_GROUPS)
+    # sleeve_tail is OPTIONAL (only present for a multi-sleeve book with a return-stream
+    # sleeve) — use .get so the 2-sleeve / single-sleeve path doesn't KeyError.
+    soft_fail = any(groups.get(k, {}).get("status") == FAIL for k in _SOFT_GROUPS)
     if hard_fail or hard_nonfinite:
         overall = FAIL
     elif hard_unknown or not horizon_ok:
@@ -277,6 +347,13 @@ def evaluate_paper_soak_gates(
             "daily_return_te_bps_max": parity.daily_return_te_bps_max,
             "cost_drift_ratio": parity.cost_drift_ratio,
             "class_pnl": {k: float(v) for k, v in live.class_pnl.items()},
+            # Multi-sleeve combined book only (None for the single/2-sleeve allocator path):
+            # per-sleeve P&L attribution, the return-stream tail surface, and the realized
+            # diversification check — the closure of the DEFERRED g_diversification.
+            "sleeve_pnl": ({k: float(v) for k, v in live.sleeve_pnl.items()}
+                           if live.sleeve_pnl else None),
+            "sleeve_risk": sleeve_risk,
+            "diversification": drift_checks.get("diversification"),
             # True when the oracle/replay terminated early (env circuit-break); parity is
             # then valid only over the covered prefix (P10-03) — surfaced, not silently dropped.
             "coverage_incomplete": bool(getattr(live, "coverage_incomplete", False)),

@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 
 from finrl_pro_ds.crypto import options_pricing as op
+from finrl_pro_ds.crypto import options_vrp_sim as ovs  # sim core promoted from the script (MS-ADR-9)
 
 _ROOT = Path(__file__).resolve().parents[2]
 
@@ -185,7 +186,7 @@ def test_close_fee_cap_binding_uses_bs_correct_value():
     S, sigma, tau = 30_000.0, 0.08, 1.0 / op.ANN
     n = 5.0
     V_correct = op.straddle_price(S, S, sigma, max(tau, 1.0 / op.ANN))
-    fee = fals._option_fees(n, S, n * V_correct, cfg)
+    fee = ovs._option_fees(n, S, n * V_correct, cfg)
     fee_underlying = 2.0 * n * cfg.option_fee_pct_underlying * S
     fee_cap = cfg.option_fee_cap_pct_premium * n * V_correct
     assert fee_cap < fee_underlying                 # the cap is the binding branch
@@ -218,8 +219,8 @@ def test_establishment_hedge_fee_booked_at_open():
     S, sigma, tau = spot[t0], iv[t0], cfg.entry_tenor_days / op.ANN
     unit = op.straddle_price(S, S, sigma, tau)
     n = cfg.premium_frac * cfg.initial_capital / unit
-    opt_fee = fals._option_fees(n, S, n * unit, cfg)
-    spread = fals._spread_cost(n, S, sigma, tau, cfg)
+    opt_fee = ovs._option_fees(n, S, n * unit, cfg)
+    spread = ovs._spread_cost(n, S, sigma, tau, cfg)
     est_fee = cfg.perp_taker_fee * abs(n * op.straddle_delta(S, S, sigma, tau)) * S
     assert est_fee > 0.0
     assert abs(res["daily_pnl"][t0] - (-(opt_fee + spread + est_fee))) < 1e-6
