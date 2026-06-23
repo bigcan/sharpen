@@ -6,6 +6,15 @@
 # results/xsec_momentum/). The RL must BEAT the frozen linear core OOS by the
 # gates.rl_beats_linear uplift, or we ship the linear rule (RL = thin overlay).
 #
+# >> RESEARCH-TIER (cont-58 P6-04): strategy.tier=research / deploy_gating=false. The cont-53
+#    campaign verdict was SHIP-LINEAR ("RL NOT justified"): the RL allocator did NOT clear the
+#    rl_beats_linear gate, so the capital-bound strategy is the FROZEN LINEAR core
+#    (configs/live_cross_asset_paper.yaml + the paper executor + the paper_soak gates), which
+#    runs no SAC. This pipeline runs SINGLE-SEED HPO/train per window (no l1-multiseed, no
+#    seed=), so its WF manifest is RESEARCH evidence, NOT a Protocol-v2 deploy gate — Principle-6
+#    (multiseed median) does not bind it. The seeded multiseed is the X1 alternative NOT taken.
+#    This resolves the cont-58 S1 (P6-04): no capital decision rests on a single-run RL verdict.
+#
 # Design: .agent/artifacts/multi_asset_allocator_architecture.md
 #   - env.type: multi_asset_allocator -> MultiAssetAllocatorEnv (generalizes
 #     CryptoPerpEnv). Action = signed conviction; the env vol-targets (ADR-2).
@@ -26,6 +35,13 @@ strategy:
   name: "cross_asset_momentum"
   version: "0.1.0"
   instrument: "multi_asset_allocator"
+  # P6-04 (cont-58): RESEARCH-TIER, NOT capital-bound. Per the cont-53 ship-linear verdict the
+  # capital path is the FROZEN LINEAR core (configs/live_cross_asset_paper.yaml + paper executor
+  # + paper_soak gates), which runs no SAC. This RL allocator's single-seed WF answers the
+  # rl_beats_linear RESEARCH question only; it does NOT gate capital, so Protocol-v2 Principle-6
+  # (multiseed median) does not bind it (the seeded multiseed = the un-taken X1 alternative).
+  tier: research
+  deploy_gating: false
 
 # ---------- UNIVERSE (18 liquid ETF proxies × 4 classes; validated set) -------
 universe:
@@ -132,13 +148,19 @@ walk_forward:
 # ---------- GATES (stage schema; allocator decision gates in the overlay) -----
 # PF floors are SECONDARY sanity here — the allocator's primary metric is net
 # portfolio Sharpe + the rl_beats_linear gate (configs/cross_asset_momentum.gates.yaml).
+# RESEARCH-TIER (P6-04): the l1-multiseed / training-health keys below (l1_seeds, l1_pf_cv_max,
+# entropy_floor, q_div_max, action_sat_max) are the parameters of the un-taken X1 multiseed
+# build — they are DECLARED here but NOT wired as a deploy gate (the pipeline runs single-seed,
+# single-run WF; strategy.tier=research). They are retained to document the X1 alternative, not
+# to claim a Principle-6-compliant deploy verdict. Wiring them (X1/X6) is gated on a future
+# decision to take the RL allocator to capital — which the cont-53 ship-linear verdict did NOT.
 gates:
   hpo_pf_floor: 1.05                     # secondary sanity only (Sharpe is primary)
-  entropy_floor: 0.01                    # training-health hard fails
-  q_div_max: 100.0
-  action_sat_max: 0.9
-  l1_seeds: 5
-  l1_pf_cv_max: 0.30
+  entropy_floor: 0.01                    # X1 training-health param (declared; not a wired gate)
+  q_div_max: 100.0                       # X1 training-health param (declared; not a wired gate)
+  action_sat_max: 0.9                    # X1 training-health param (declared; not a wired gate)
+  l1_seeds: 5                            # X1 multiseed count (declared; l1-multiseed stage NOT run)
+  l1_pf_cv_max: 0.30                     # X1 cross-seed CV gate (declared; NOT wired — research-tier)
   wf_windows: 4
 
 ensemble:
