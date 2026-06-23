@@ -1,0 +1,53 @@
+# ============================================================================
+# VWAP / ANCHORED-VWAP falsification - decision gates overlay (vwap-v1)
+# ============================================================================
+# Pre-registered 2026-06-22 (S553-cont-66) BEFORE the probe was run, as a
+# COMMITMENT DEVICE (the leak-era lesson: verdicts read post-hoc get
+# rationalized). All thresholds live here, never hardcoded in the probe
+# (CLAUDE.md invariant). Read by scripts/research/vwap_avwap_falsification.py.
+#
+# Research basis: 4/4 independent research agents (.agent/artifacts/
+# vwap_avwap_research.md) converged that the DECISIVE test of whether VWAP is a
+# distinct alpha source - rather than a cosmetic re-skin of a moving average the
+# TSMOM book already owns - is a matched-lookback VWAP-arm vs time-weighted
+# control-arm comparison, net of cost. Peer-reviewed prior (Heston-Korajczyk-
+# Sadka JF2010; Della Corte-Kosowski; Brock 1992; Han-Zhou-Zhu JFE2016;
+# Berkowitz-Logue-Noser JF1988) is that VWAP is an EXECUTION benchmark and the
+# alpha, where any exists, is time-weighted trend - so volume-weighting should
+# add ~nothing. This file pre-registers the bar it must clear to refute that.
+gates:
+  # ---- ABSOLUTE deploy gate (same bar as every other sleeve falsification) ----
+  phase1_linear:
+    min_net_sharpe: 0.50                 # best VWAP book net Sharpe (standard 2bps)
+    min_net_pf: 1.10                     # best VWAP book net profit factor
+    require_multi_subperiod: true        # >= 2 of 3 subperiods net-positive
+    min_subperiods_positive: 2
+    n_subperiods: 3
+    min_recent_oos_sharpe: 0.0           # trailing-3y net Sharpe must be > 0
+    max_worst_subperiod_dd_pct: 40.0     # worst subperiod max drawdown < 40%
+
+  # ---- DECISIVE incremental gate: does volume-weighting ADD edge? ----
+  # The VWAP book must beat its OWN matched-lookback time-weighted control
+  # (rolling-VWAP vs SMA of typical price; VWAP-bands vs Bollinger) by this
+  # margin, net of cost, else it is redundant with a moving average - NOT a new
+  # uncorrelated sleeve. Mirrors the allocator's rl_beats_linear philosophy.
+  vwap_adds_edge:
+    metric: "net_sharpe"
+    min_uplift_vs_matched_control: 0.10
+    else: "redundant_with_time_weighted_MA"
+
+  # ---- north-star: a NEW sleeve must be uncorrelated to the live book ----
+  g_diversification:
+    max_corr_to_spy: 0.40                # |corr| of net daily returns to SPY
+    max_corr_to_tsmom: 0.50              # |corr| to the deployed momentum sleeve
+
+  # Frictionless-artifact guard: net Sharpe must not collapse vs costless.
+  g_cost_gap:
+    max_frictionless_minus_net_sharpe: 0.20   # reported caution, not a hard kill
+
+# Cost models (one-way, applied to turnover). 2bps = standard liquid-ETF
+# round-trip ~ the momentum book's calibration; 10bps = harsh stress.
+cost_models:
+  frictionless: 0.0
+  standard_2bps: 0.0002
+  harsh_10bps: 0.0010
