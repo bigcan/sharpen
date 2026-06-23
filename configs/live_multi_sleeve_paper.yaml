@@ -71,11 +71,17 @@ sleeves:
     tanh_scale: 1.5
   vrp:                                               # BTC options variance-risk-premium — Deribit account
     type: return_stream                              # combined at the RETURN level (MS-ADR-1), not a union allocator
-    enabled: false                                   # MS-ADR-6 — enable ONLY via combined-book Tier-2 audit + operator go-ahead (no live soak running)
-    asset: BTC                                        # ETH dropped (negative every holdout cadence) — MS-ADR-2
-    max_weight: 0.35                                  # cap α_vrp: trailing vol understates the short-vol TAIL, so naive
+    enabled: false                                   # [!] KEEP FALSE -- paper-gate clearance RESCINDED 2026-06-23
+                                                      # (de-contamination re-audit: the 0.61 real-chain anchor was USDC-linear
+                                                      # contamination; clean real-chain NO-GO; docs/research/
+                                                      # options_vrp_decontamination_reaudit_2026-06-23.md). Enable ONLY after a
+                                                      # PAID daily-chain 21d-roll real-chain RE-VALIDATION (net Sharpe >=~0.5 AND
+                                                      # >0 OOS) + combined-book Tier-2 audit + operator go-ahead, else RETIRE.
+    asset: BTC                                        # ETH dropped (negative every holdout cadence) -- MS-ADR-2
+    max_weight: 0.35                                  # cap a_vrp: trailing vol understates the short-vol TAIL, so naive
                                                       # inverse-vol over-allocates (would be ~0.68 / 67% of P&L). Operator
-                                                      # decision 2026-06-22; honors the 0.6-0.9 honest-band sizing.
+                                                      # decision 2026-06-22. NOTE: the "0.6-0.9 honest band" this cap honored
+                                                      # is VOID post de-contamination (no real-execution-validated band).
     sim:                                              # = falsification SimConfig (LOCKED for naked_straddle)
       instrument: naked_straddle                      # MS-ADR-10 knob: naked_straddle (gate-cleared) | iron_fly | strangle
       premium_frac: 0.05                              #   (each non-default variant must clear its OWN phase1 gate)

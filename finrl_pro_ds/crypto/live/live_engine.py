@@ -3221,7 +3221,10 @@ class LiveTradingEngine:
         )
 
         # Step 0b: ensure capture writer is flushed and closed on shutdown.
-        if self._capture_writer is not None:
+        # Guard with getattr: shutdown must complete even on a partially
+        # constructed engine (e.g. __init__ failed before line 437 set the
+        # attribute), so PID 1 always exits and docker's restart policy fires.
+        if getattr(self, "_capture_writer", None) is not None:
             self._close_capture_writer(reason="shutdown")
 
         if self._wandb_run is not None:

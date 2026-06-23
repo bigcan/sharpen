@@ -411,13 +411,20 @@ def _fmt(result: dict) -> str:
         dsr16 = (btc_rs.get("deflated_sharpe", {}) or {}).get("16") or {}
         boot = btc_rs.get("bootstrap_sharpe") or {}
         port_rs = result["portfolio"].get("risk_stats", {})
-        lo, hi = hb["honest_expectation_band"]
+        band = hb.get("honest_expectation_band")
+        if band:  # legacy deploy band (pre-2026-06-23)
+            lo, hi = band
+            head = (f"- **SIZE to the {lo:.1f}-{hi:.1f} honest band**, not the "
+                    f"{hb['headline_best_case_btc_net_sharpe']:.2f} best-of-2-asset headline")
+        else:  # de-contaminated: NO real-execution-validated band; sleeve BLOCKED
+            head = (f"- **DO NOT DEPLOY — sleeve BLOCKED, clearance RESCINDED.** {hb.get('deploy_status', '')}. "
+                    f"The 0.61 real-chain anchor was USDC-linear contamination; de-contaminated real-chain "
+                    f"{hb.get('real_chain_status', 'NO-GO')}. Honest read: {hb.get('deflated_sharpe_read', '')}. "
+                    f"DVOL-synthetic headline {hb['headline_best_case_btc_net_sharpe']:.2f} is UNCONFIRMED by real execution")
         lines += [
             "",
-            "## Honest band & tail caveats (the deploy-sizing anchor, NOT the headline)",
-            f"- **SIZE to the {lo:.1f}-{hi:.1f} honest band**, not the {hb['headline_best_case_btc_net_sharpe']:.2f} "
-            f"best-of-2-asset headline (real-chain monthly anchor {hb['real_chain_anchor_net_sharpe']:.2f}; "
-            f"best-case ceiling {hb['best_case_ceiling']:.2f}; portfolio pre-reg {hb['portfolio_pre_registered_net_sharpe']:.2f})",
+            "## Honest band & tail caveats (RE-DERIVED post de-contamination 2026-06-23)",
+            head,
             f"- BTC Sortino {btc_rs.get('sortino', float('nan')):.2f} < Sharpe {result['per_asset']['BTC']['net_sharpe']:.2f} "
             f"(short-vol left tail), skew {btc_rs.get('skew', float('nan')):.2f}, "
             f"CVaR95 {btc_rs.get('cvar95_pct_daily', float('nan')):.2f}%/day, CVaR99 {btc_rs.get('cvar99_pct_daily', float('nan')):.2f}%/day",
@@ -473,23 +480,34 @@ def main():
                                      blk.get("kurtosis", 3.0), N)
             for N in (8, 16, 28)}
 
-    # ---- honest band (V1-03/V1-09/V6) — the deploy-sizing anchor ----
+    # ---- honest band (V1-03/V1-09/V6) — RE-DERIVED after the 2026-06-23 de-contamination ----
+    # The prior 0.61 "real-chain anchor" was USDC-linear data contamination (the free Tardis
+    # chain mixed USD-priced BTC_USDC rows into the coin-priced ATM argmin in 5/63 months, all
+    # recent). De-contaminated (inverse-only), the real-chain is NO-GO: straddle -0.25, strangle
+    # +0.05, instrument A/B 0/8 (results/options_vrp/skew_verdict.json + instrument_ab_verdict.json).
+    # PATH A (this DVOL-synthetic core) is a SEPARATE, un-contaminated data path and still
+    # reproduces ~1.06/0.77, but it has LOST its only real-price corroboration, so the honest read
+    # is the multiplicity-deflated DSR, NOT a 0.6-0.9 deploy band. Sleeve BLOCKED, clearance RESCINDED.
     btc = base["per_asset"]["BTC"]
     base["honest_band"] = {
         "headline_best_case_btc_net_sharpe": btc["net_sharpe"],
         "portfolio_pre_registered_net_sharpe": base["portfolio"]["net_sharpe"],
-        "real_chain_anchor_net_sharpe": 0.61,        # Tardis monthly real-chain (skew_verdict.json)
-        "honest_expectation_band": [0.6, 0.9],
+        "real_chain_anchor_net_sharpe": None,             # VOID: was 0.61 = USDC-linear contamination
+        "real_chain_clean_straddle_net_sharpe": -0.25,    # de-contaminated, NO-GO (skew_verdict.json)
+        "real_chain_status": "NO-GO (de-contaminated 2026-06-23; inverse-only; straddle -0.25 / strangle +0.05 / A-B 0-8)",
+        "honest_expectation_band": None,                  # no real-execution-validated band
+        "deflated_sharpe_read": "DSR ~0.27-0.37 portfolio / ~0.51-0.61 BTC (N=16-28); bootstrap P(SR<0.5)=0.29",
+        "deploy_status": "BLOCKED flag-off; revival needs PAID daily-chain 21d-roll real-chain re-validation (net Sharpe >=~0.5 AND >0 OOS), else retire",
         "best_case_ceiling": 1.10,
         "close_basis_dd_pct_btc": btc["net_max_dd"] * 100.0,
-        "intraday_trough_dd_pct_btc": 8.42,          # reconstructed high/low (tail recompute; ~1.6x close)
-        "note": ("SIZE/DEPLOY to the 0.6-0.9 honest band, NOT the 1.06 best-of-2-asset "
-                 "headline. Synthetic DVOL straddle (real-chain monthly anchor 0.61); "
-                 "multiplicity-deflated Sharpe ~0.5-0.65 (risk_stats.deflated_sharpe); "
-                 "left tail real (skew<0, Sortino<Sharpe, bootstrap CI95 spans <0.5); "
-                 "intraday-trough DD ~8.4% vs close-basis. Paper out-performance is NOT "
-                 "confirmation."),
-        "_provenance": "docs/research/options_vrp_linear_core_deep_lifecycle_audit_2026-06-11.md",
+        "intraday_trough_dd_pct_btc": 8.42,               # reconstructed high/low (tail recompute; ~1.6x close)
+        "note": ("DO NOT DEPLOY. The 0.61 real-chain anchor was USDC-linear contamination "
+                 "(5/63 months, all recent); de-contaminated real-chain short-vol is NO-GO on "
+                 "BTC+ETH across straddle/strangle/iron_fly/iron_condor. This DVOL-synthetic "
+                 "1.06/0.77 is UNCONFIRMED by real execution and multiplicity-deflated to DSR "
+                 "~0.3-0.5; left tail real (skew<0, Sortino<Sharpe, bootstrap CI95 spans <0.5); "
+                 "intraday-trough DD ~8.4% vs close-basis. Paper out-performance is NOT confirmation."),
+        "_provenance": "docs/research/options_vrp_decontamination_reaudit_2026-06-23.md",
     }
 
     # ---- provenance (V1-07): the data fingerprint a --refresh would change ----

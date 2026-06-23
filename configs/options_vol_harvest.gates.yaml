@@ -11,9 +11,19 @@ gates:
   # >= min_uplift on the same WF windows, else we ship the linear rule. The free
   # DVOL-synthetic BTC straddle core is fully-costed net Sharpe ~1.06 (results/
   # options_vrp/verdict.json, per_asset BTC, after the Tier-2-audit perp-hedge fee
-  # correction); the HONEST deploy-sizing band is ~0.6-0.9 (real-chain monthly
-  # anchor 0.61; multiplicity-deflated ~0.5-0.65 — see verdict.json honest_band).
-  # The RL has to clear the core, OOS, by the uplift.
+  # correction).
+  # [!] DE-CONTAMINATION RE-AUDIT 2026-06-23 (docs/research/
+  # options_vrp_decontamination_reaudit_2026-06-23.md): the prior "HONEST deploy band
+  # ~0.6-0.9 / real-chain monthly anchor 0.61" is VOID. The 0.61 was USDC-linear data
+  # contamination -- the free Tardis chain mixed USD-priced BTC_USDC rows into the
+  # coin-priced ATM argmin in 5/63 months (all recent: 2025-12..2026-06). De-contaminated
+  # (inverse-only) the real-chain is NO-GO (straddle -0.25, strangle +0.05; instrument
+  # A/B 0/8). PATH A (DVOL-synthetic, SEPARATE data path) is UNAFFECTED and still
+  # reproduces 1.06/0.77, BUT has lost its only real-price corroboration; the honest read
+  # is now the multiplicity-deflated DSR ~0.3-0.5 (N=16-28, P(SR<0.5)=0.29), UNCONFIRMED
+  # by real execution. Sleeve BLOCKED / paper-gate clearance RESCINDED -- stays flag-off;
+  # revival needs a PAID daily-chain 21d-roll real-chain re-validation (net Sharpe >=~0.5
+  # AND >0 OOS), else retire. The RL gate itself is unchanged (clear the core, OOS, by uplift).
   rl_beats_linear:
     metric: "oos_net_sharpe"
     min_uplift_vs_baseline: 0.10
