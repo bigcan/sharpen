@@ -150,8 +150,13 @@ def main() -> int:
         parity_fwd.missed_rebalances, parity_fwd.cost_drift_ratio,
     )
 
-    # 3) Pre-registered paper_soak verdict on the forward-path render.
-    verdict = evaluate_paper_soak_gates(live_fwd, parity_fwd, gates_cfg)
+    # 3) Pre-registered paper_soak verdict on the forward-path render. Pass the actual sleeve
+    #    composition so the risk-kill calibration cross-check (P8-07) can verify the always-on
+    #    kills were derived against the SAME book this executor runs.
+    verdict = evaluate_paper_soak_gates(
+        live_fwd, parity_fwd, gates_cfg,
+        executor_sleeves=sorted(config.get("sleeves", {}).keys()),
+    )
     # Full-sample (life-of-strategy) corr-to-SPY for context: the drift gate trips on the
     # trailing corr_window_days window (regime-drift monitor), but a reviewer should also see
     # the structural number — they diverge when the sleeve drifts within a recent regime.

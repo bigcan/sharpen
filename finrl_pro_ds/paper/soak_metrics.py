@@ -27,7 +27,7 @@ import json
 import logging
 import math
 from pathlib import Path
-from typing import Mapping
+from typing import Mapping, Sequence
 
 import numpy as np
 
@@ -104,6 +104,8 @@ def evaluate_paper_soak_gates(
     live: LiveTrajectory,
     parity: ParityReport,
     gates_cfg: Mapping,
+    *,
+    executor_sleeves: Sequence[str] | None = None,
 ) -> dict:
     """Score the rung-1 trajectory against the pre-registered ``paper_soak`` gates.
 
@@ -112,6 +114,11 @@ def evaluate_paper_soak_gates(
     per-group breakdown and an ``overall_status`` (``FAIL`` if any HARD group fails;
     ``REVIEW`` if only a soft group fails; else ``PASS``). Thresholds are never
     hardcoded — every bound comes from the yaml.
+
+    ``executor_sleeves`` (optional) is the actual sleeve composition the executor ran. When
+    given AND ``risk.calibrated_for_sleeves`` is set, the (hard) risk group FAILs if they
+    differ (P8-07): the always-on kills are calibrated to a SPECIFIC render's tail, so a
+    different composition (e.g. the +VRP combined book) must not silently trust 2-sleeve kills.
     """
     soak = dict(gates_cfg.get("paper_soak", {}))
     if not soak:
@@ -151,6 +158,16 @@ def evaluate_paper_soak_gates(
         "daily_loss_pct": _check(abs(min(live.min_daily_return_pct(), 0.0)),
                                  risk["daily_loss_halt_pct"], "<=", unit="%"),
     }
+    # Sleeve-composition cross-check (P8-07): the kills are calibrated to a SPECIFIC render's
+    # tail. If the executor ran a DIFFERENT sleeve set, they are mis-scoped and must not be
+    # trusted → FAIL the (hard) risk group. Skipped when either side is absent (back-compat).
+    calib = risk.get("calibrated_for_sleeves")
+    if calib is not None and executor_sleeves is not None:
+        got, want = sorted(executor_sleeves), sorted(calib)
+        risk_checks["calibration_for_sleeves"] = {
+            "value": got, "threshold": want, "op": "==",
+            "status": PASS if got == want else FAIL,
+        }
 
     # --- DRIFT (uncorrelated-sleeve / regime monitors, review) ---
     corr = live.corr_to_spy(window=int(drift.get("corr_window_days", 60)))

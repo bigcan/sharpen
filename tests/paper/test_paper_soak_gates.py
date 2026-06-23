@@ -115,10 +115,24 @@ def test_cost_drift_and_missed_rebalances_trip(gates_cfg):
 # risk (HARD)
 # --------------------------------------------------------------------------- #
 def test_drawdown_kill_trips(gates_cfg):
-    # +1% five times then -5% fifteen times ⇒ ~54% peak-to-trough > 50% recalibrated kill.
+    # +1% five times then -5% fifteen times ⇒ ~54% peak-to-trough, well over the 25% kill.
     r = np.concatenate([np.full(5, 0.01), np.full(15, -0.05)])
     live = make_live(r)
-    assert live.max_drawdown_pct() > 50.0
+    assert live.max_drawdown_pct() > 25.0
+    v = evaluate_paper_soak_gates(live, clean_parity(n_steps=len(r)), gates_cfg)
+    assert v["groups"]["risk"]["checks"]["max_drawdown_pct"]["status"] == FAIL
+    assert v["overall_status"] == FAIL
+
+
+def test_drawdown_30pct_break_now_trips_recalibrated_kill(gates_cfg):
+    """N5/P8-07 regression: a ~30% DD — a genuine break for the 2-sleeve book (render worst
+    ~20%) — now FAILs the recalibrated 25% kill where it PASSED silently under the retired 50%
+    kill (which was calibrated to the single-sleeve daily-rescale render). The exact silent-pass
+    the recalibration closes: the DD sits BETWEEN the new (25) and old (50) kill."""
+    r = np.concatenate([np.full(5, 0.01), np.full(12, -0.03)])     # ~30.6% peak-to-trough
+    live = make_live(r)
+    dd = live.max_drawdown_pct()
+    assert 25.0 < dd < 50.0, f"need a DD between the new (25) and retired (50) kill, got {dd:.1f}"
     v = evaluate_paper_soak_gates(live, clean_parity(n_steps=len(r)), gates_cfg)
     assert v["groups"]["risk"]["checks"]["max_drawdown_pct"]["status"] == FAIL
     assert v["overall_status"] == FAIL
@@ -126,7 +140,7 @@ def test_drawdown_kill_trips(gates_cfg):
 
 def test_daily_loss_halt_trips(gates_cfg):
     r = _benign_returns().copy()
-    r[150] = -0.15                                   # a single -15% day > 12% recalibrated halt
+    r[150] = -0.15                                   # a single -15% day > 7% recalibrated halt
     live = make_live(r)
     v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
     assert v["groups"]["risk"]["checks"]["daily_loss_pct"]["status"] == FAIL
@@ -138,6 +152,35 @@ def test_gross_exposure_trips(gates_cfg):
     v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
     assert v["groups"]["risk"]["checks"]["max_gross_exposure"]["status"] == FAIL
     assert v["overall_status"] == FAIL
+
+
+def test_calibration_for_sleeves_match_passes(gates_cfg):
+    """The risk-kill calibration cross-check PASSES when the executor's sleeves == the
+    composition the kills were derived against (order-insensitive) (P8-07)."""
+    live = make_live(_benign_returns())
+    v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg,
+                                  executor_sleeves=["rates_carry", "momentum"])
+    assert v["groups"]["risk"]["checks"]["calibration_for_sleeves"]["status"] == PASS
+    assert v["groups"]["risk"]["status"] == PASS
+
+
+def test_calibration_for_sleeves_mismatch_fails(gates_cfg):
+    """A DIFFERENT sleeve set (e.g. the +VRP combined PortfolioExecutor book) FAILs the hard
+    risk group: the 2-sleeve-calibrated kills must NOT be silently trusted for a different
+    render (P8-07). Benign returns ⇒ only the calibration check fails."""
+    live = make_live(_benign_returns())
+    v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg,
+                                  executor_sleeves=["momentum", "rates_carry", "options_vrp"])
+    assert v["groups"]["risk"]["checks"]["calibration_for_sleeves"]["status"] == FAIL
+    assert v["groups"]["risk"]["status"] == FAIL and v["overall_status"] == FAIL
+
+
+def test_calibration_check_skipped_without_executor_sleeves(gates_cfg):
+    """Back-compat: with no executor_sleeves passed, the cross-check is OMITTED — existing
+    callers (and the rung-1 runner before this wiring) are unaffected."""
+    live = make_live(_benign_returns())
+    v = evaluate_paper_soak_gates(live, clean_parity(), gates_cfg)
+    assert "calibration_for_sleeves" not in v["groups"]["risk"]["checks"]
 
 
 # --------------------------------------------------------------------------- #
@@ -332,7 +375,8 @@ def test_pre_registered_gate_constants_frozen(gates_cfg):
         "max_missed_rebalances": 0, "max_cost_drift_ratio": 1.50, "min_cost_drift_ratio": 0.50,
     }
     assert s["risk"] == {
-        "max_drawdown_kill_pct": 50.0, "max_gross_exposure": 3.3, "daily_loss_halt_pct": 12.0,
+        "max_drawdown_kill_pct": 25.0, "max_gross_exposure": 3.3, "daily_loss_halt_pct": 7.0,
+        "calibrated_for_sleeves": ["momentum", "rates_carry"],
     }
     assert s["drift"]["max_corr_to_spy"] == 0.40 and s["drift"]["corr_window_days"] == 252
     assert s["drift"]["max_single_class_pnl_share"] == 0.60
