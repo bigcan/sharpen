@@ -14,7 +14,17 @@ net Sharpe, evaluated through the SAME env/convention/costs (see
 
 Stages (Protocol v2):
     --stage hpo   window 0 only: HPO + train + eval + gate (Stage-1 decision artifact)
-    --stage wf    all walk-forward windows (Stage-3 deploy-gating verdict)
+    --stage wf    all walk-forward windows (Stage-3 RESEARCH-tier verdict, NOT a deploy gate)
+
+TIER (cont-58 P6-04): this RL allocator is RESEARCH-TIER. Per the cont-53 ship-linear verdict
+("ship the linear momentum+rates-carry core, RL NOT justified") the capital-bound strategy is
+the FROZEN LINEAR core (``configs/live_cross_asset_paper.yaml`` + the paper executor + the
+``paper_soak`` gates), which runs no SAC. This pipeline runs SINGLE-SEED HPO/train per window
+(no ``seed=``, no l1-multiseed), so its WF manifest answers the rl_beats_linear *research*
+question only — it does NOT gate capital, so Protocol-v2 Principle-6 (multiseed median) does not
+bind it. Building the seeded multiseed (the X1 alternative) is the path NOT taken under
+ship-linear. The manifest is stamped ``tier: research`` / ``deploy_gating: false`` to make this
+unmistakable to any downstream reader.
 
 CPU-testable pieces (no GPU/SB3 import at module load): the WF scheduler, the gate
 logic, the manifest writer, and the config→env mapping (via allocator_factory).
@@ -501,9 +511,28 @@ def _write_manifest(out_dir: Path, stage: str, config: dict, gate: dict,
     else:
         median_uplift = median_rl = None
 
+    # P6-04 (cont-58): the RL allocator is RESEARCH-TIER, not capital-bound. Per the cont-53
+    # ship-linear verdict the capital path is the FROZEN LINEAR core (live_cross_asset_paper.yaml
+    # + the paper executor + paper_soak gates), which uses no SAC. Stamp the tier onto the verdict
+    # so a reader can never mistake this single-seed WF for a Protocol-v2 deploy gate. Default
+    # research/non-gating is the SAFE default (a research verdict cannot promote capital).
+    strat = config.get("strategy", {})
+    tier = str(strat.get("tier", "research"))
+    deploy_gating = bool(strat.get("deploy_gating", False))
+    tier_note = (
+        "RESEARCH-TIER (cont-58 P6-04): this single-seed WF answers the rl_beats_linear "
+        "RESEARCH question; it is NOT a capital deploy gate. The capital-bound strategy is the "
+        "FROZEN LINEAR core (live_cross_asset_paper.yaml), which runs no SAC/multiseed. "
+        "Protocol-v2 Principle-6 (multiseed median) is the un-taken X1 alternative, so a single "
+        "non-deterministic run per window is acceptable research evidence and gates nothing."
+        if tier == "research" else None
+    )
     manifest = {
         "stage": stage,
-        "strategy": config.get("strategy", {}),
+        "strategy": strat,
+        "tier": tier,
+        "deploy_gating": deploy_gating,
+        "tier_note": tier_note,
         "status": status,
         "reason": reason,
         "gate_thresholds": gate,

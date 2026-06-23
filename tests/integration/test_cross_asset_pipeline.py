@@ -156,6 +156,36 @@ def test_manifest_median_cost_gap_none_without_field(tmp_path):
 
 
 # --------------------------------------------------------------------------- #
+# P6-04: research-tier reclassification (the single-run RL WF is NOT a deploy gate)
+# --------------------------------------------------------------------------- #
+def test_manifest_stamps_research_tier_by_default(tmp_path):
+    """With no explicit tier the WF manifest is stamped RESEARCH-tier / non-deploy-gating (the
+    SAFE default — a single-seed RL verdict must never read as a capital deploy gate, P6-04)."""
+    m = pipe._write_manifest(tmp_path, "wf", {}, _GATE, [_result(0.20, 0.55, 0.35, True)],
+                             status="PASS")
+    assert m["tier"] == "research" and m["deploy_gating"] is False
+    assert m["tier_note"] and "NOT a capital deploy gate" in m["tier_note"]
+
+
+def test_manifest_tier_is_config_driven(tmp_path):
+    """The tier is read from strategy.* (not hardcoded): an explicit deploy-tier config flips
+    the stamp and drops the research note."""
+    cfg = {"strategy": {"tier": "deploy", "deploy_gating": True}}
+    m = pipe._write_manifest(tmp_path, "wf", cfg, _GATE, [_result(0.20, 0.55, 0.35, True)],
+                             status="PASS")
+    assert m["tier"] == "deploy" and m["deploy_gating"] is True and m["tier_note"] is None
+
+
+def test_shipped_config_declares_research_tier():
+    """The shipped cross_asset_momentum.yaml classifies the allocator research-tier (P6-04),
+    so its single-run WF cannot be mistaken for the capital deploy gate (= the linear core)."""
+    import yaml
+    cfg = yaml.safe_load((ROOT / "configs" / "cross_asset_momentum.yaml").read_text(encoding="utf-8"))
+    assert cfg["strategy"]["tier"] == "research"
+    assert cfg["strategy"]["deploy_gating"] is False
+
+
+# --------------------------------------------------------------------------- #
 # Parallel window→GPU assignment (the WF parallelism dispatch)
 # --------------------------------------------------------------------------- #
 def _sched(n):
