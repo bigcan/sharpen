@@ -11,6 +11,7 @@ Two layers:
 """
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import numpy as np
@@ -278,6 +279,34 @@ def test_fetch_and_clean_refetches_when_cache_too_old(tmp_path, monkeypatch):
     # (the silent-freeze the audit named, P1-02).
     loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", "2026-06-30", cache_dir=tmp_path)
     assert calls["n"] == 2
+
+
+def test_refetch_when_manifest_predates_stale_scan(tmp_path, monkeypatch):
+    """A cached manifest WITHOUT a `stale_scan` block (or below the loader schema version)
+    predates the scan code — it must be REFUSED on cache-hit so the scan is re-earned on
+    active data (P1-03; the committed run silently reused a pre-stale-scan cache)."""
+    calls = {"n": 0}
+
+    def fake_fetch(assets, start, end, *, auto_adjust=True):
+        calls["n"] += 1
+        return _wide_frames(_clean_close())
+
+    monkeypatch.setattr(loader, "fetch_ohlcv_wide", fake_fetch)
+    # 1st call seeds the cache + a current-schema manifest (has stale_scan + version).
+    _, man = loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 1
+    assert "stale_scan" in man and man["loader_manifest_version"] >= loader.LOADER_MANIFEST_VERSION
+    # Re-call reuses the current-schema cache — no refetch.
+    loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 1
+    # DOWNGRADE the on-disk manifest to a pre-stale-scan vintage → next call must refetch.
+    man_path = tmp_path / "ohlcv_daily.manifest.json"
+    legacy = json.loads(man_path.read_text())
+    legacy.pop("stale_scan", None)
+    legacy.pop("loader_manifest_version", None)
+    man_path.write_text(json.dumps(legacy))
+    loader.fetch_and_clean(["AAA", "BBB"], "2018-01-01", None, cache_dir=tmp_path)
+    assert calls["n"] == 2, "a manifest lacking stale_scan must force a refetch (P1-03)"
 
 
 def test_manifest_status_earned_from_stale_scan(tmp_path, monkeypatch):

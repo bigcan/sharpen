@@ -50,6 +50,15 @@ log = logging.getLogger("cross_asset_loader")
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CACHE_DIR = ROOT / "results" / "xsec_momentum"
 
+# Bump when the manifest schema changes in a way a downstream gate depends on. v2 = the
+# stale-print scan era: a cached manifest WITHOUT a `stale_scan` block (or below this version)
+# predates the scan and is REFUSED on cache-hit so the scan is re-earned on active data
+# (P1-03 — the committed run reused a pre-stale-scan cache).
+LOADER_MANIFEST_VERSION = 2
+# The rates curve must reach (within this tolerance) the ETF data's date_max, else the live
+# book serves stale curve weights past the curve's end (P1-05; the audit saw a 6-day desync).
+_CURVE_ETF_DESYNC_TOL_DAYS = 5
+
 # yfinance field (level-0 column) -> our lowercase OHLCV name.
 _YF_FIELDS = {"Open": "open", "High": "high", "Low": "low",
               "Close": "close", "Volume": "volume"}
@@ -230,7 +239,12 @@ def fetch_and_clean(
         assets_ok = set(manifest.get("assets", [])) >= set(assets)
         fresh_ok = _cache_covers_end(manifest, end, require_fresh=require_fresh,
                                      tol_days=freshness_tol_days)
-        if assets_ok and fresh_ok:
+        # Refuse a cache that predates the stale-print scan (P1-03): no `stale_scan` block, or
+        # an older manifest schema, means the scan never ran on this data — refetch so the
+        # status is EARNED on active data instead of silently reusing un-scanned parquet.
+        scan_ok = ("stale_scan" in manifest
+                   and manifest.get("loader_manifest_version", 1) >= LOADER_MANIFEST_VERSION)
+        if assets_ok and fresh_ok and scan_ok:
             log.info("cross_asset_loader: using cached clean OHLCV (%s, date_max=%s)",
                      clean_path, manifest.get("date_max"))
             long = pd.read_parquet(clean_path)
@@ -238,8 +252,8 @@ def fetch_and_clean(
             wide = {c: long.pivot(index="date", columns="ticker", values=c)
                     .reindex(columns=list(assets)).sort_index() for c in _OHLCV}
             return wide, manifest
-        log.info("cross_asset_loader: cache stale (assets_ok=%s fresh_ok=%s, date_max=%s, "
-                 "requested_end=%s) → refetching", assets_ok, fresh_ok,
+        log.info("cross_asset_loader: cache stale (assets_ok=%s fresh_ok=%s scan_ok=%s, "
+                 "date_max=%s, requested_end=%s) → refetching", assets_ok, fresh_ok, scan_ok,
                  manifest.get("date_max"), end)
 
     log.info("cross_asset_loader: fetching %d tickers %s..%s", len(assets), start, end)
@@ -268,6 +282,7 @@ def fetch_and_clean(
     manifest = {
         "stage": "data-prep",
         "status": status,
+        "loader_manifest_version": LOADER_MANIFEST_VERSION,
         "source": "yfinance_etf",
         "auto_adjust": True,
         "frequency": "1d",
@@ -657,9 +672,32 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
         target_vol_asset=target_vol, lev_cap=lev_cap, asset_class=mom_asset_class,
     )
 
-    curve = tcl.load_treasury_curve(cache_dir=data_cfg.get("cache_dir"))
+    curve, curve_manifest = tcl.load_treasury_curve_with_manifest(
+        cache_dir=data_cfg.get("cache_dir"),
+        force_refetch=force_refetch, require_fresh=require_fresh)
     rc.assert_causal(curve, close.index, tenor_map=tenor_map,
                      financing_tenor=financing_tenor, tanh_scale=tanh_scale)
+
+    # P1-05: the curve must reach (within tol) the ETF data's date_max, else the live book
+    # serves stale curve weights past the curve's end. Surface as a WARN on the curve manifest.
+    etf_date_max = close.index.max()
+    curve_dm = pd.Timestamp(curve_manifest["date_max"]) if curve_manifest.get("date_max") else None
+    if curve_dm is not None:
+        desync_days = int((etf_date_max - curve_dm).days)
+        if desync_days > _CURVE_ETF_DESYNC_TOL_DAYS:
+            curve_manifest["calendar_desync_days"] = desync_days
+            curve_manifest["etf_date_max"] = str(etf_date_max.date())
+            if curve_manifest["status"] == "PASS":
+                curve_manifest["status"] = "WARN"
+            log.warning("cross_asset_loader: curve date_max %s is %d days behind ETF date_max "
+                        "%s (stale curve weights past the curve end)",
+                        curve_manifest.get("date_max"), desync_days, etf_date_max.date())
+            # The desync is cross-dataset (only known here), so the curve loader's sidecar was
+            # written without it — keep it consistent so a sidecar reader can't see a stale PASS.
+            cdir = data_cfg.get("cache_dir")
+            if cdir:
+                (Path(cdir) / "treasury_curve.manifest.json").write_text(
+                    json.dumps(curve_manifest, indent=2))
 
     return {
         "close": close,
@@ -676,6 +714,7 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
         "financing_tenor": financing_tenor,
         "tanh_scale": tanh_scale,
         "manifest": manifest,
+        "curve_manifest": curve_manifest,
     }
 
 

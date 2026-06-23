@@ -18,8 +18,13 @@ Flow:
 NOT a capital promotion: it computes + serializes the verdict only. Thresholds come
 entirely from ``configs/cross_asset_momentum.gates.yaml`` (paper_soak block).
 
+A FAIL on either the OHLCV or the curve data manifest ABORTS before any verdict is computed
+(fail-closed, P1-01/P10-03); WARN is surfaced into ``validation_meta``. The freshness gate is
+ON by default (live mode); pass ``--backtest`` for a reproducible historical window.
+
 Usage:
-  python scripts/run_cross_asset_paper_validation.py
+  python scripts/run_cross_asset_paper_validation.py                      # live: freshness-gated
+  python scripts/run_cross_asset_paper_validation.py --backtest           # reproducible window
   python scripts/run_cross_asset_paper_validation.py --config configs/live_cross_asset_paper.yaml --force_refetch
 """
 from __future__ import annotations
@@ -28,6 +33,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
+from typing import Mapping
 
 import yaml
 
@@ -45,6 +51,24 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
 )
 log = logging.getLogger("paper_validation")
+
+
+def evaluate_data_integrity(manifest: Mapping, curve_manifest: Mapping | None) -> dict:
+    """Fail-CLOSED data gate (P1-01/P10-03): the EARNED manifest status(es) decide whether the
+    paper verdict may even be computed. A FAIL dataset — a stale-print P&L share over the
+    gmgp1-gold threshold, or a grossly-corrupt curve leg — ABORTS the run; WARN is surfaced
+    into the verdict, never silenced. Returns ``{ok, fails, warnings, statuses}``."""
+    statuses = {"ohlcv": manifest.get("status"),
+                "curve": (curve_manifest or {}).get("status")}
+    fails = [f"{name} manifest status=FAIL" for name, st in statuses.items() if st == "FAIL"]
+    warnings = [f"{name} manifest status=WARN" for name, st in statuses.items() if st == "WARN"]
+    ss = manifest.get("stale_scan") or {}
+    if ss.get("flagged_tickers"):
+        warnings.append(f"ohlcv stale-flagged tickers: {ss['flagged_tickers']}")
+    if curve_manifest and curve_manifest.get("calendar_desync_days"):
+        warnings.append(f"curve date_max {curve_manifest.get('date_max')} is "
+                        f"{curve_manifest['calendar_desync_days']}d behind ETF date_max")
+    return {"ok": not fails, "fails": fails, "warnings": warnings, "statuses": statuses}
 
 
 def _parity_dict(p) -> dict:
@@ -68,25 +92,41 @@ def main() -> int:
         "--out", default="results/cross_asset_paper/paper_validation_verdict.json"
     )
     ap.add_argument("--force_refetch", action="store_true")
-    ap.add_argument("--require_fresh", action="store_true",
-                    help="freshness-gate the loader cache: refetch if it doesn't reach today "
-                         "(P1-02; the scheduled live mode — a backtest run leaves this off)")
+    ap.add_argument("--backtest", action="store_true",
+                    help="reproducible historical window: DISABLE the freshness gate. Default "
+                         "is live/non-backtest mode, which freshness-gates the loader + curve "
+                         "caches so they refetch when they don't reach today (P10-04).")
     args = ap.parse_args()
+
+    # require_fresh defaults TRUE (live/scheduled mode): a bare run freshness-gates the cache.
+    # An explicit --backtest opts into the reproducible historical window (no refetch).
+    require_fresh = not args.backtest
 
     config = yaml.safe_load(Path(args.config).read_text(encoding="utf-8"))
     gates_path = args.gates or config["ensemble"]["gates_file"]
     gates_cfg = yaml.safe_load(Path(gates_path).read_text(encoding="utf-8"))
 
     n_union = config["universe"]["n_assets"]
-    log.info("loading two-sleeve data (union=%d assets)...", n_union)
+    log.info("loading two-sleeve data (union=%d assets, require_fresh=%s)...",
+             n_union, require_fresh)
     data = load_two_sleeve_data(config, force_refetch=args.force_refetch,
-                                require_fresh=args.require_fresh)
+                                require_fresh=require_fresh)
     start_ts = data["close"].index[0]
     end_ts = data["close"].index[-1]
     log.info(
         "data range %s -> %s (%d bars, %d union assets)",
         start_ts.date(), end_ts.date(), len(data["close"]), len(data["union_assets"]),
     )
+
+    # Fail-CLOSED data gate BEFORE any verdict is computed (P1-01/P10-03): a FAIL manifest
+    # (the gmgp1-gold stale-print class, or a corrupt curve leg) must abort, not drive a verdict.
+    integrity = evaluate_data_integrity(data["manifest"], data.get("curve_manifest"))
+    for w in integrity["warnings"]:
+        log.warning("data-integrity WARN: %s", w)
+    if not integrity["ok"]:
+        log.error("ABORT — fail-closed data gate: %s", "; ".join(integrity["fails"]))
+        return 2
+
     bundle = build_two_sleeve_arrays(data, start_ts, end_ts)
 
     ex = TwoSleeveExecutor(config)
@@ -117,6 +157,7 @@ def main() -> int:
     # the structural number — they diverge when the sleeve drifts within a recent regime.
     corr_full = live_fwd.corr_to_spy(window=None)
     corr_window = int(gates_cfg["paper_soak"]["drift"].get("corr_window_days", 252))
+    curve_manifest = data.get("curve_manifest") or {}
     verdict["validation_meta"] = {
         "config": str(args.config),
         "gates": str(gates_path),
@@ -128,6 +169,15 @@ def main() -> int:
         "corr_to_spy_gate_window_days": corr_window,
         "batch_parity_baseline": _parity_dict(parity_batch),
         "forward_parity": _parity_dict(parity_fwd),
+        # Data-integrity provenance (P1-01/P1-03/P10-04): the EARNED statuses + freshness mode
+        # this verdict ran under, so a reader can see whether the gate even had teeth.
+        "require_fresh": require_fresh,
+        "data_manifest_status": data["manifest"].get("status"),
+        "curve_manifest_status": curve_manifest.get("status"),
+        "cache_date_max": data["manifest"].get("date_max"),
+        "curve_date_max": curve_manifest.get("date_max"),
+        "stale_scan": data["manifest"].get("stale_scan"),
+        "data_warnings": integrity["warnings"],
         "note": "HISTORICAL forward-path validation, NOT a live soak. Capital promotion "
                 "still requires a Tier-2 deep-lifecycle audit + operator go-ahead.",
     }
