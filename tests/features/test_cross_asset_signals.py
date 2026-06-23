@@ -97,6 +97,20 @@ def test_known_leak_is_caught():
         cas.compute = orig  # type: ignore[assignment]
 
 
+def test_current_bar_read_is_caught():
+    """A skip=0 signal reads the CURRENT bar (in live, the bar still forming at decision time)
+    — a look-ahead the future-only sweep is STRUCTURALLY BLIND to (P2-01, the X2 failure mode:
+    the old tripwire perturbed only bars > t and passed skip=0 with zero error). The new
+    current-bar perturbation must trip it, while the production skip>=1 still passes."""
+    close = _synthetic_prices()
+    ac = {c: "all" for c in close.columns}
+    kw = dict(asset_class=ac, vol_window=20, lookbacks=(20, 40, 60))
+    cas.assert_causal(close, skip=1, **kw)                 # skip>=1: row t ⊥ close[t] → passes
+    cas.assert_causal(close, skip=5, **kw)                 # production skip: passes
+    with pytest.raises(AssertionError, match="current-bar"):
+        cas.assert_causal(close, skip=0, **kw)             # reads close[t] → trips
+
+
 # --------------------------------------------------------------------------- #
 # 2. Baseline-parity keystone
 # --------------------------------------------------------------------------- #
