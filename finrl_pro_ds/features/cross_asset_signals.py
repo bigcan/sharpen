@@ -41,6 +41,10 @@ DEFAULT_VOL_WINDOW: int = 63                           # ~3-month realized-vol w
 DEFAULT_TARGET_VOL_ASSET: float = 0.10                 # 10% annualized per-asset target
 DEFAULT_LEV_CAP: float = 2.0                           # per-asset leverage cap after vol-scaling
 ANN: int = 252                                         # annualization factor (daily)
+# Current-bar tripwire perturbation (P2-01): a 99% crash at bar t. With skip>=1 the signal
+# row at t reads close[<= t-skip], so it is invariant to this; a skip=0 (current-bar) read
+# pushes every trailing return below its anchor -> sign flips to -1 -> the guard trips.
+_CURRENT_BAR_CRASH: float = 0.01
 
 
 def _tsmom_sign(close: pd.DataFrame, lookback: int, skip: int) -> pd.DataFrame:
@@ -202,32 +206,50 @@ def assert_causal(
     atol: float = 1e-9,
     **compute_kwargs,
 ) -> None:
-    """Look-ahead TRIPWIRE (LEAK-2). Perturb a FUTURE bar, recompute, and assert every
-    signal at dates ``<= perturb_date`` is byte-identical. If any value at ``<= t``
-    moves when a bar at ``> t`` changes, a forward leak has been reintroduced.
+    """Look-ahead TRIPWIRE (LEAK-2). Two perturbations, each asserting every signal at dates
+    ``<= perturb_date`` is byte-identical:
 
-    Raises ``AssertionError`` on leak; returns ``None`` on pass. Cheap enough to run
-    in CI and at signal-creation time (the redesign mandate).
+      1. **future-bar sweep** — bump ALL bars strictly after ``t``: catches a look-back that
+         reaches into the future.
+      2. **current-bar** (P2-01) — crash bar ``t`` ITSELF: catches a signal that reads its own
+         (current) bar. The future-only sweep is structurally BLIND to this (it never perturbs
+         bar ``t``), the exact X2 failure mode — a green tripwire that never touches the line
+         where the bug lives. With ``skip >= 1`` the row at ``t`` reads ``close[<= t-skip]`` and
+         vol reads ``close[<= t-1]``, so it is invariant; a ``skip = 0`` read (the live
+         look-ahead: at decision-time ``t`` the bar is still forming) trips it.
+
+    Raises ``AssertionError`` on leak; returns ``None`` on pass. Cheap enough to run in CI and
+    at signal-creation time (the redesign mandate).
     """
     base = compute(close, **compute_kwargs)
     t_idx = int(len(close) * perturb_frac)
     perturb_date = close.index[t_idx]
-
-    perturbed = close.copy()
-    perturbed.iloc[t_idx + 1:] = perturbed.iloc[t_idx + 1:] * bump  # bump ALL future bars
-    after = compute(perturbed, **compute_kwargs)
-
     sig_cols = [c for c in base.columns if c not in ("date", "ticker")]
     b = base[base["date"] <= perturb_date].set_index(["date", "ticker"])[sig_cols]
-    a = after[after["date"] <= perturb_date].set_index(["date", "ticker"])[sig_cols]
-    diff = (b.fillna(-999.0) - a.fillna(-999.0)).abs()
-    max_diff = float(diff.to_numpy().max()) if len(diff) else 0.0
-    if max_diff > atol:
-        worst = diff.stack().idxmax()
-        raise AssertionError(
-            f"LEAK-2 VIOLATION: perturbing bars after {perturb_date.date()} changed a "
-            f"signal at <= {perturb_date.date()} by {max_diff:.3e} (worst: {worst}). "
-            f"A look-back signal is seeing future data — fix the shift before any build."
-        )
-    log.info("assert_causal PASS: 0 leak across %d past rows (perturb @ %s)",
-             len(b), perturb_date.date())
+
+    def _assert_past_unchanged(perturbed: pd.DataFrame, label: str) -> None:
+        after = compute(perturbed, **compute_kwargs)
+        a = after[after["date"] <= perturb_date].set_index(["date", "ticker"])[sig_cols]
+        diff = (b.fillna(-999.0) - a.fillna(-999.0)).abs()
+        max_diff = float(diff.to_numpy().max()) if len(diff) else 0.0
+        if max_diff > atol:
+            worst = diff.stack().idxmax()
+            raise AssertionError(
+                f"LEAK-2 VIOLATION ({label}): perturbing the {label} around "
+                f"{perturb_date.date()} changed a signal at <= {perturb_date.date()} by "
+                f"{max_diff:.3e} (worst: {worst}). A signal is reading {label} data — fix the "
+                f"shift before any build."
+            )
+
+    # (1) FUTURE-BAR sweep — bump every bar strictly after t.
+    fut = close.copy()
+    fut.iloc[t_idx + 1:] = fut.iloc[t_idx + 1:] * bump
+    _assert_past_unchanged(fut, "future-bar")
+
+    # (2) CURRENT-BAR — crash bar t itself (skip>=1 ⇒ row t is invariant; skip=0 trips).
+    cur = close.copy()
+    cur.iloc[t_idx] = cur.iloc[t_idx] * _CURRENT_BAR_CRASH
+    _assert_past_unchanged(cur, "current-bar")
+
+    log.info("assert_causal PASS: 0 leak (future-bar + current-bar) across %d past rows "
+             "(perturb @ %s)", len(b), perturb_date.date())

@@ -74,6 +74,31 @@ def test_single_future_bar_perturbation_is_causal(cfg, arrays_18):
     np.testing.assert_array_equal(live_base.step_returns[:m], live_pert.step_returns[:m])
 
 
+def test_current_bar_perturbation_is_causal(cfg, arrays_18):
+    """Current-bar (P2-01): perturb the SIGNAL inputs (conviction, vol) at index m ITSELF —
+    not m+1 — and assert steps [0, m) are byte-unchanged. The future sweep starts at m+1, so a
+    decision at m-1 that peeked ONE bar ahead (read index m) is INVISIBLE to it; this closes
+    that boundary blind spot (the X2 failure mode on the forward path). Each weights[k<m] is
+    decided from conviction/vol at its own bar (< m), so flipping index m must not move it."""
+    base = arrays_18
+    live_base, _ = ParityHarness(cfg).run(base)
+    me = pd.Series(np.arange(len(base["timestamps"]))).groupby(
+        pd.to_datetime(base["timestamps"], unit="s").to_period("M").values).max().to_numpy()
+    ms = [int(me[len(me) // 3] + 7), int(me[2 * len(me) // 3] + 7)]
+    tested = 0
+    for m in ms:
+        if not (50 < m < len(base["timestamps"]) - 2):
+            continue
+        pert = {k: (v.copy() if isinstance(v, np.ndarray) else v) for k, v in base.items()}
+        pert["conviction_ary"][m] = -base["conviction_ary"][m]      # flip the signal AT m
+        pert["vol_ary"][m] = base["vol_ary"][m] * 3.0               # shock vol AT m
+        live_pert, _ = ParityHarness(cfg).run(pert)
+        np.testing.assert_array_equal(live_base.weights[:m], live_pert.weights[:m])
+        np.testing.assert_array_equal(live_base.step_returns[:m], live_pert.step_returns[:m])
+        tested += 1
+    assert tested, "no in-range mid-month index derived"
+
+
 def test_weights_are_price_independent(cfg):
     """The frozen-core weight VALUES are vol-scaled conviction — a pure price shock
     (signal/vol untouched) must leave every weight identical (only returns/equity move)."""
