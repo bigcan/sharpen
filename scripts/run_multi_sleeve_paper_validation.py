@@ -9,8 +9,8 @@ combine the ETF/IB account (momentum+rates, weight-combined, UNCHANGED) with the
 VRP account (a return stream) at the capital-allocation level (MS-ADR-1).
 
 With ``sleeves.vrp.enabled: false`` (the default) this reproduces the 2-sleeve verdict
-byte-for-byte (MS-ADR-6); flip it on only after the 2-sleeve soak clears its >=3-month
-gate (+ a combined-book Tier-2 audit before any capital).
+byte-for-byte (MS-ADR-6); enable it only via a combined-book Tier-2 audit + operator
+go-ahead before any capital (no live paper soak is running — fleet halted 2026-06-01).
 
 Flow:
   load_two_sleeve_data → build_two_sleeve_arrays                 # ETF account bundle
