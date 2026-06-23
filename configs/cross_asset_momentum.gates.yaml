@@ -122,6 +122,11 @@ paper_soak:
     corr_window_days: 252
     max_single_class_pnl_share: 0.60     # no asset class supplies > 60% of cumulative P&L
     sleeve_attribution_required: true    # per-class (equity/rates/commodity/fx) P&L logged each rebalance
+    # MS-ADR-7 (S553-cont-68): realized-returns closure of the WF manifest's DEFERRED
+    # g_diversification. |corr(return-stream sleeve, allocator book)| AND |corr(sleeve, SPY)|
+    # over corr_window_days must stay under this. Inert for the 2-sleeve allocator path (no
+    # return-stream sleeve); binds for the combined VRP book (PortfolioExecutor). REVIEW.
+    max_corr_between_sleeves: 0.30
 
   # --- BACKSTOP: long-horizon performance floor (NOT a short-soak trigger) ---
   # Calibrated to the HONEST band (net SR 0.4-0.6), NOT the in-sample 0.60
@@ -142,6 +147,16 @@ paper_soak:
     psr_benchmark: 0.0                   # PSR tests per-period SR > 0 (the edge is positive)
     min_psr: 0.95                        # < 95% confidence SR>0 over the trailing window -> review
     mintrl_confidence: 0.95              # MinTRL reports months-to-confirm at this confidence
+
+  # --- RETURN-STREAM SLEEVE TAIL (VRP short-vol monitor; MS-ADR-7, S553-cont-68) ---
+  # Surfaced + checked for each return-stream sleeve in the COMBINED multi-sleeve book
+  # (review severity). Mirrors configs/options_vol_harvest.gates.yaml `tail` so the soak
+  # re-checks the short-vol kills on realized combined returns. Inert for the 2-sleeve
+  # allocator path (no return-stream sleeve).
+  sleeve_tail:
+    cvar95_floor_pct: -8.0               # daily CVaR95 must stay >= this (short-vol left tail)
+    max_net_vega_per_100k: 50000         # net vega per $100k cap
+    max_worst_window_dd_pct: 25.0        # worst per-sleeve drawdown cap
 
 paper_soak_provenance:
   drafted_on: '2026-06-12'

@@ -14,16 +14,26 @@ paper-integration decision. Reuses the validated falsification engine verbatim.
 Run:  PYTHONPATH=. python scripts/research/options_vrp_diversification_gate.py
 """
 from __future__ import annotations
-import json, logging
-from pathlib import Path
-import numpy as np, pandas as pd, yfinance as yf
 
-from scripts.research.options_vrp_falsification import simulate_asset, SimConfig, _returns_from_pnl
+import json
+import logging
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+import yfinance as yf
+
+from finrl_pro_ds.crypto.options_vrp_sim import (
+    SimConfig,
+    returns_from_pnl as _returns_from_pnl,
+    simulate_asset,
+)
 from finrl_pro_ds.crypto.data import deribit_options_loader as dol
 from finrl_pro_ds.crypto.data import options_array_builder as oab
 
 logging.basicConfig(level=logging.WARNING)
-OUT = Path("results/options_vrp"); OUT.mkdir(parents=True, exist_ok=True)
+OUT = Path("results/options_vrp")
+OUT.mkdir(parents=True, exist_ok=True)
 GATE = 0.30
 
 
@@ -51,7 +61,8 @@ def vrp_btc_returns(cfg: SimConfig) -> pd.Series:
 
 
 def tsmom_proxy() -> pd.Series:
-    px = pd.read_parquet("results/xsec_momentum/prices_daily.parquet"); px.index = _naive(px.index)
+    px = pd.read_parquet("results/xsec_momentum/prices_daily.parquet")
+    px.index = _naive(px.index)
     ret = px.pct_change()
     sig = np.sign(px.shift(21) / px.shift(252) - 1.0)            # 12-1 momentum, known at t
     w = sig * (1.0 / ret.rolling(63).std())
@@ -71,7 +82,9 @@ def main() -> dict:
 
     book = {}
     for nm, s in [("spy_equity_beta", spy), ("tsmom_momentum_proxy", tsmom)]:
-        cd, nd = _corr(vrp, s); cw, _ = _corr(vrp, s, "W"); cm, _ = _corr(vrp, s, "ME")
+        cd, nd = _corr(vrp, s)
+        cw, _ = _corr(vrp, s, "W")
+        cm, _ = _corr(vrp, s, "ME")
         book[nm] = {"daily": round(cd, 4), "weekly": round(cw, 4), "monthly": round(cm, 4), "n_daily": nd}
 
     jw = pd.concat([((1 + vrp).resample("W").prod() - 1).rename("vrp"),

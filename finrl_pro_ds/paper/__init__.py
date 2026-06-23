@@ -29,6 +29,16 @@ from finrl_pro_ds.paper.soak_metrics import (
     evaluate_paper_soak_gates,
     serialize_verdict,
 )
+from finrl_pro_ds.paper.sleeves import (
+    AllocatorBookSleeve,
+    ReturnStreamSleeve,
+    Sleeve,
+    SleeveContext,
+    SleeveStream,
+    VRPSleeve,
+    resample_returns_to_calendar,
+)
+from finrl_pro_ds.paper.portfolio_executor import PortfolioExecutor
 from finrl_pro_ds.paper.two_sleeve import TwoSleeveExecutor
 
 __all__ = [
@@ -45,4 +55,12 @@ __all__ = [
     "serialize_verdict",
     "PaperMetrics",
     "TwoSleeveExecutor",
+    "Sleeve",
+    "SleeveStream",
+    "SleeveContext",
+    "ReturnStreamSleeve",
+    "AllocatorBookSleeve",
+    "VRPSleeve",
+    "resample_returns_to_calendar",
+    "PortfolioExecutor",
 ]

@@ -1,0 +1,149 @@
+# ============================================================================
+# MULTI-SLEEVE PAPER EXECUTOR — momentum + rates-carry (ETF/IB account) + VRP
+# (BTC options short-vol, Deribit account). N-sleeve fund-of-funds, rung-1 paper-sim.
+# ============================================================================
+# Generalizes live_cross_asset_paper.yaml (the 2-sleeve ETF book, UNCHANGED) by adding
+# the gate-cleared options-VRP sleeve as a RETURN-STREAM sleeve (S553-cont-68; spec
+# .agent/artifacts/multi_sleeve_paper_executor_architecture.md). Combined by
+# finrl_pro_ds.paper.PortfolioExecutor: weight-combine WITHIN the ETF/IB account
+# (momentum ⊕ rates, unchanged) + return-combine ACROSS accounts (ETF vs Deribit) via
+# trailing-causal inverse-vol risk-parity (MS-ADR-1).
+#
+# SEQUENCING (MS-ADR-6): sleeves.vrp.enabled is FALSE — with VRP off this book is
+# byte-identical to the 2-sleeve TwoSleeveExecutor. Flip it on ONLY after the in-flight
+# 2-sleeve rung-1 soak passes its >= 3-month gate, then re-run the Tier-2 deep-lifecycle
+# audit on the COMBINED book before any paper-capital (CLAUDE.md mandatory).
+#
+# CAPITAL GATE (do not skip): paper-capital still requires the combined-book Tier-2 audit
+# + operator go-ahead. This config WIRES the book; it does not promote it.
+# ============================================================================
+
+strategy:
+  id: "xsec-multisleeve-paper"
+  name: "cross_asset_momentum_rates_carry_vrp"
+  version: "0.1.0"
+  instrument: "multi_sleeve_portfolio"
+
+# ---------- UNIVERSE (ETF account union = 18 momentum ETFs + SHY → 19) -------
+# Unchanged from live_cross_asset_paper.yaml. The VRP sleeve trades BTC options on a
+# SEPARATE account (Deribit) and is NOT part of this ETF asset axis.
+universe:
+  assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",       # equity
+           "TLT", "IEF", "LQD",                      # rates (momentum + rates-carry)
+           "GLD", "SLV", "DBC", "USO", "DBA",        # commodity
+           "UUP", "FXE", "FXY", "FXB", "FXA",        # fx
+           "SHY"]                                     # rates (rates-carry ONLY)
+  asset_class:
+    SPY: equity
+    QQQ: equity
+    IWM: equity
+    EFA: equity
+    EEM: equity
+    TLT: rates
+    IEF: rates
+    LQD: rates
+    GLD: commodity
+    SLV: commodity
+    DBC: commodity
+    USO: commodity
+    DBA: commodity
+    UUP: fx
+    FXE: fx
+    FXY: fx
+    FXB: fx
+    FXA: fx
+    SHY: rates
+  n_assets: 19
+
+# ---------- SLEEVES (the fund-of-funds definition) ---------------------------
+sleeves:
+  momentum:                                          # validated TSMOM core (18 ETFs) — ETF account
+    assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",
+             "TLT", "IEF", "LQD",
+             "GLD", "SLV", "DBC", "USO", "DBA",
+             "UUP", "FXE", "FXY", "FXB", "FXA"]
+    signal: tsmom
+  rates_carry:                                       # Treasury-curve carry+roll survivor — ETF account
+    assets: ["SHY", "IEF", "TLT", "LQD"]
+    tenor_map: {SHY: y2, IEF: "10y", TLT: "30y", LQD: "10y"}
+    financing_tenor: "3m"
+    tanh_scale: 1.5
+  vrp:                                               # BTC options variance-risk-premium — Deribit account
+    type: return_stream                              # combined at the RETURN level (MS-ADR-1), not a union allocator
+    enabled: false                                   # MS-ADR-6 — flip on ONLY after the 2-sleeve soak clears >= 3 months
+    asset: BTC                                        # ETH dropped (negative every holdout cadence) — MS-ADR-2
+    max_weight: 0.35                                  # cap α_vrp: trailing vol understates the short-vol TAIL, so naive
+                                                      # inverse-vol over-allocates (would be ~0.68 / 67% of P&L). Operator
+                                                      # decision 2026-06-22; honors the 0.6-0.9 honest-band sizing.
+    sim:                                              # = falsification SimConfig (LOCKED for naked_straddle)
+      instrument: naked_straddle                      # MS-ADR-10 knob: naked_straddle (gate-cleared) | iron_fly | strangle
+      premium_frac: 0.05                              #   (each non-default variant must clear its OWN phase1 gate)
+      roll_days: 21
+      entry_tenor_days: 30
+      perp_taker_fee: 0.0005
+      option_spread_vol_pts: 1.0
+    # PROVENANCE pointer to the canonical VRP tail kills. NOT read directly by the executor:
+    # the combined soak re-checks the tail via paper_soak.sleeve_tail (mirrored there so the
+    # gate stays self-contained / gates-not-hardcoded). Keep the two in sync if either moves.
+    gates_file: configs/options_vol_harvest.gates.yaml
+
+# ---------- RISK-PARITY META-LAYER (cross-account combine) -------------------
+# Trailing-causal inverse-vol (convex Σα=1; NO portfolio-vol overlay). Uses ONLY each
+# sleeve's realized returns < the decision bar, recomputed monthly and held. The VRP
+# max_weight cap is applied after this (Σα preserved).
+risk_parity:
+  trailing_window: 252
+  min_periods: 63
+  monthly_meta: true
+  target_portfolio_vol: null
+
+# ---------- DATA (ETF account: yfinance daily; SEPARATE cache) ---------------
+data:
+  source: "yfinance_etf"
+  frequency: "1d"
+  start_date: "2006-01-01"
+  end_date: null
+  fields: ["open", "high", "low", "close", "volume"]
+  cache_dir: "results/cross_asset_paper"
+
+# ---------- FEATURES (momentum sleeve causal signals; LOCKED) ----------------
+features:
+  lookbacks: [63, 126, 252]
+  skip: 5
+  vol_window: 63
+  include_baseline_weight: true
+
+# ---------- ENV (MultiAssetAllocatorEnv — ETF account sleeve drives) ---------
+env:
+  type: "multi_asset_allocator"
+  initial_capital: 100000.0
+  taker_fee: 0.0002
+  slippage_base_bps: 1.0
+  slippage_impact_bps: 5.0
+  target_vol_asset: 0.10
+  lev_cap: 2.0
+  max_gross_exposure: 3.0
+  allow_short: true
+  reward_type: "dsr"
+  dsr_eta: 0.01
+  turnover_penalty: 0.001
+  min_trade_pct: 0.005
+  circuit_breaker_threshold: 0.1
+  random_start: false
+
+# ---------- EXECUTION (rung-1 paper-sim; ADR-3) -----------------------------
+execution:
+  shadow: linear_core_multi_sleeve       # momentum + rates-carry + VRP fund-of-funds (NOT rl)
+  rung: paper_sim
+  venue: none                            # ETF account → "ib" at rung-2; VRP → "deribit" (separate)
+  rebalance_cadence: monthly             # ETF account cadence == gates.paper_soak.rebalance_cadence
+  fill_reference: close
+
+# ---------- GATES (pre-registered paper_soak; diversification + sleeve_tail wired) ----
+ensemble:
+  gates_file: configs/cross_asset_momentum.gates.yaml
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["xsec-momentum", "rates-carry", "vrp", "multi-sleeve", "allocator", "paper", "s553"]
