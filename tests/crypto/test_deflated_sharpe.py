@@ -18,10 +18,12 @@ import numpy as np
 
 from finrl_pro_ds.crypto.eval.statistics import (
     block_bootstrap_sharpe_ci,
+    block_bootstrap_sortino_ci,
     deflated_sharpe_ratio,
     excess_kurtosis,
     probabilistic_sharpe_ratio,
     skewness,
+    sortino_ratio,
     std,
 )
 
@@ -107,3 +109,31 @@ def test_block_bootstrap_is_deterministic_and_ordered():
 
 def test_block_bootstrap_none_on_short_series():
     assert block_bootstrap_sharpe_ci([0.01] * 10, block=21, periods_per_year=ANN) is None
+
+
+# --- block_bootstrap_sortino_ci (the tail-adjusted A/B selection CI) ----------
+def test_block_bootstrap_sortino_deterministic_and_ordered():
+    r = np.random.default_rng(11).normal(0.0006, 0.011, 800)
+    a = block_bootstrap_sortino_ci(r, block=21, n_boot=500, seed=7, periods_per_year=ANN)
+    b = block_bootstrap_sortino_ci(r, block=21, n_boot=500, seed=7, periods_per_year=ANN)
+    assert a == b                                    # deterministic given seed
+    assert a["ci_low"] <= a["ci_high"]
+    assert 0.0 <= a["p_sortino_lt_0"] <= 1.0
+    assert a["p_sortino_lt_0"] < 0.5                 # positive-drift ⇒ rarely Sortino<0
+    # the point Sortino sits inside the bootstrap CI
+    point = sortino_ratio(r.tolist(), periods_per_year=ANN)
+    assert a["ci_low"] <= point <= a["ci_high"]
+
+
+def test_block_bootstrap_sortino_uses_downside_only():
+    """A series with NO returns below target has zero downside deviation ⇒ every draw is
+    +inf Sortino ⇒ p_sortino_lt_0 == 0 (proves it keys off DOWNSIDE, not symmetric vol)."""
+    r = [0.0, 0.01, 0.02, 0.0, 0.015] * 20           # all >= target 0.0
+    out = block_bootstrap_sortino_ci(r, block=21, n_boot=200, seed=7, periods_per_year=ANN)
+    assert out is not None
+    assert out["p_sortino_lt_0"] == 0.0
+    assert out["ci_high"] == float("inf")            # honest: no-downside draws → +inf
+
+
+def test_block_bootstrap_sortino_none_on_short_series():
+    assert block_bootstrap_sortino_ci([0.01] * 10, block=21, periods_per_year=ANN) is None
