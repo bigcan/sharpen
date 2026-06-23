@@ -1,7 +1,9 @@
 # Options-VRP sleeve — paper-promotion determination (2026-06-22)
 
+> ⚠ **VOID 2026-06-23 — clearance RESCINDED. See `options_vrp_decontamination_reaudit_2026-06-23.md`.** This determination's "real-chain monthly anchor 0.61" / "deploy-size to net Sharpe 0.6–0.9" was USDC-linear data contamination; de-contaminated the real-chain is NO-GO. The sleeve stays flag-OFF; revival requires a paid daily-chain real-chain re-validation, else retire.
+
 **Workstream:** `options_vol_harvest` (crypto variance-risk-premium short-vol, BTC-only) ·
-**Author:** Claude (S553-cont-63+) · **Status:** PAPER GATE CLEARED; real-capital still gated
+**Author:** Claude (S553-cont-63+) · **Status:** ⚠ PAPER GATE CLEARED → **RESCINDED 2026-06-23** (de-contamination re-audit)
 
 ## Verdict
 

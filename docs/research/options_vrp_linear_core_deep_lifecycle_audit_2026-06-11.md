@@ -1,5 +1,7 @@
 # Options-VRP Linear Short-Straddle Core — Deep Lifecycle Audit (Tier-2)
 
+> ⚠ **PARTIALLY SUPERSEDED 2026-06-23 — see `options_vrp_decontamination_reaudit_2026-06-23.md`.** This audit's real-chain claims are VOID: the "only real-price anchor = **0.61**" (V1-03/V2-09) and "real-chain strangle **0.92** > straddle 0.61, the skew leg adds edge and truncates the tail" (V8 / External-Benchmark) were **USDC-linear data contamination** in the free Tardis chain. De-contaminated, the real-chain is **NO-GO** (straddle −0.25, strangle +0.05, instrument A/B 0/8), so the "trade the strangle" tail-control recommendation is **struck** and the honest band's 0.6 floor is removed. The PATH-A (DVOL-synthetic) reproduction, BS/accounting checks, margin probe, and DSR work below remain valid — PATH A was never contaminated — but its deploy justification (real-chain corroboration) is gone, and the sleeve's paper-gate clearance is **RESCINDED**.
+
 **Date:** 2026-06-11 · **Session:** S553-cont-41
 **Audit object:** the STATIC LINEAR rolling delta-hedged short ATM straddle on BTC, built on FREE Deribit data (DVOL as IV proxy, perp chart, funding) — the `ship_linear_core` artifact from S553-cont-39. **NOT** the RL overlay (already falsified: 1/5 WF windows).
 **Headline claim under audit:** `results/options_vrp/verdict.json` — net Sharpe **1.10** / PF **1.19** / max DD **5.38%** / total return **30.5%** on BTC, net of Deribit fees + funding + modelled spread; turnover-gated (14–30d roll GO, 7d NO-GO).
