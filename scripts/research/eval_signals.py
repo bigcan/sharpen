@@ -20,10 +20,17 @@ import importlib
 import sys
 from pathlib import Path
 
-from finrl_pro_ds.signals import Gates, evaluate_batch, make_synthetic_panel, to_markdown, write_scorecard
-from finrl_pro_ds.signals.features import Panel
-
 ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(ROOT))  # runnable uninstalled, from any CWD
+
+from finrl_pro_ds.signals import (  # noqa: E402  (after sys.path bootstrap)
+    Gates,
+    evaluate_batch,
+    make_synthetic_panel,
+    to_markdown,
+    write_scorecard,
+)
+from finrl_pro_ds.signals.features import Panel  # noqa: E402
 DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 
 
@@ -36,9 +43,17 @@ def build_panel(spec: str) -> Panel:
             ts, ns = spec.split(":", 1)[1].split(",")
             t, n = int(ts), int(ns)
         return make_synthetic_panel(T=t, N=n, seed=0)
+    if spec.startswith("sp500"):
+        # sp500 | sp500:2015-01-01 | sp500:2015-01-01:2026-06-01 | sp500:2015-01-01::120
+        from finrl_pro_ds.data.equity_panel_loader import load_sp500_panel
+        parts = spec.split(":")[1:]
+        start = parts[0] if len(parts) > 0 and parts[0] else "2010-01-01"
+        end = parts[1] if len(parts) > 1 and parts[1] else None
+        max_names = int(parts[2]) if len(parts) > 2 and parts[2] else None
+        return load_sp500_panel(start=start, end=end, max_names=max_names)
     if spec == "sharadar":
-        raise SystemExit("--panel sharadar needs the Sharadar PanelLoader (P8) and "
-                         "NASDAQ_DATA_LINK_API_KEY in .env — not yet wired.")
+        raise SystemExit("--panel sharadar needs the Sharadar PanelLoader and "
+                         "NASDAQ_DATA_LINK_API_KEY in .env — not yet wired (use --panel sp500).")
     if spec.startswith("parquet:"):
         raise SystemExit("--panel parquet:<path> needs the PanelLoader parquet path (P8).")
     raise SystemExit(f"unknown --panel spec: {spec!r}")
