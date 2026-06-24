@@ -1,0 +1,30 @@
+# Pre-registered gates for the signal-eval harness (docs/research/signal_eval_system_design.md).
+# NEVER hardcode these in code or scripts — the harness reads them via Gates.from_yaml().
+universe:
+  id: sp500_pit
+  min_names_per_day: 50          # days with fewer active names are excluded from IC
+  min_adv_usd: 5.0e6             # liquidity floor per name-day
+coverage:
+  min_days: 1260                 # ~5y of daily bars required
+  max_nan_frac: 0.40
+  max_ohlc_violations: 0         # DATA-CLEAN: any OHLC violation halts (PF-XCHECK)
+gross_power:
+  horizons: [1, 5, 10, 21, 63]   # forward trading-day horizons evaluated
+  primary_horizon: 5             # rank key uses 5d IC by default
+  promising_ic_ir: 0.05          # per-period IC-IR floor for PROMISING
+  promising_ic_tstat: 3.0
+deflation:
+  promising_dsr: 0.90            # P(true IC-IR>0 after deflation) floor (n_trials=batch size)
+  fdr_q_max: 0.10                # Benjamini-Hochberg q ceiling across the batch
+robustness:                      # Tier 3 (P5) — reported, refines verdict
+  min_subperiod_ic_ir: 0.0       # no negative subperiod
+  recent_oos_years: 2
+capturability:                   # Tier 2 (P5) — SECONDARY (rank key = gross power)
+  cost_models: {frictionless: 0.0, standard: 0.0010, harsh: 0.0025}  # one-way equity fraction
+  cost_wall_caution: 0.30        # frictionless−net sharpe gap flag
+neutralization:
+  winsor_pct: [0.01, 0.99]
+  controls: [sector, size]       # size = log-ADV proxy in v1
+promotion:
+  survivorship_free_required: true   # LEAK-EQ-1 GO-gate (yfinance/biased = UPPER BOUND)
+  tier2_audit_required: true         # CLAUDE.md: no capital without a Tier-2 deep audit
