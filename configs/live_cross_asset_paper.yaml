@@ -79,6 +79,20 @@ risk_parity:
   monthly_meta: true                                 # recompute α at month-ends, hold between
   target_portfolio_vol: null                         # null = convex inverse-vol (no overlay)
 
+# ---------- SLEEVE COMBINER (C1.1/C1.2 — OPTIONAL; absent ⇒ inverse_vol = the risk_parity
+# block above, back-compat). mode:dynamic tilts the convex inverse-vol prior toward sleeves
+# with stronger recent risk-adj performance (AlphaForge). Default ships STATIC; the dynamic
+# rule must beat static OOS (gates.combiner_beats_static) before it is deployed. REQUIRES
+# risk_parity.target_portfolio_vol: null (convex-only, M-1). -----------
+sleeve_combiner:
+  mode: inverse_vol        # {inverse_vol (default), dynamic}
+  # --- consumed only when mode: dynamic; swept on OOS paths only (C1.4) ---
+  tilt_strength: 0.0       # λ ∈ [0,5] (M-3); 0.0 ⇒ exact inverse-vol
+  perf_window: 126         # causal trailing window (bars) for recent sleeve Sharpe
+  perf_min_periods: 63     # warmup before the tilt applies (prior-only / tilt=1 before)
+  perf_metric: sharpe      # {sharpe, sortino}
+  tilt_clip: 1.5           # clip recent Sharpe into [-c,c] before exp (anti-runaway)
+
 # ---------- DATA (yfinance daily; SEPARATE cache so the 19-asset union fetch does NOT
 # clobber the 18-asset momentum cache used by the single-sleeve path) -----------
 data:

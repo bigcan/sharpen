@@ -43,7 +43,7 @@ from typing import Mapping
 
 import numpy as np
 
-from finrl_pro_ds.envs.allocator_factory import risk_parity_alphas
+from finrl_pro_ds.envs.allocator_factory import combiner_alphas
 from finrl_pro_ds.paper.paper_state import LiveTrajectory
 from finrl_pro_ds.paper.sleeves import (
     AllocatorBookSleeve,
@@ -83,6 +83,8 @@ class PortfolioExecutor:
         self.rp_monthly_meta = bool(rp.get("monthly_meta", True))
         tv = rp.get("target_portfolio_vol", None)
         self.rp_target_vol = float(tv) if tv is not None else None
+        # C1.2: optional dynamic-combiner block. Absent ⇒ inverse-vol (back-compat, MS-ADR-6).
+        self.sleeve_combiner = dict(config.get("sleeve_combiner", {}))
         self.initial_capital = float(dict(config.get("env", {})).get("initial_capital", 100_000.0))
         uni = dict(config.get("universe", {}))
         self.union_assets = list(uni.get("assets", []))
@@ -148,9 +150,10 @@ class PortfolioExecutor:
 
     # ------------------------------------------------------------------ #
     def _alphas(self, returns: Mapping[str, np.ndarray], ts: np.ndarray) -> dict:
-        return risk_parity_alphas(
+        return combiner_alphas(
             returns, ts, window=self.rp_window, min_periods=self.rp_min_periods,
-            monthly_meta=self.rp_monthly_meta, target_portfolio_vol=self.rp_target_vol)
+            monthly_meta=self.rp_monthly_meta, target_portfolio_vol=self.rp_target_vol,
+            sleeve_combiner=self.sleeve_combiner)
 
     @staticmethod
     def _weight_caps(config: Mapping) -> dict[str, float]:

@@ -104,6 +104,19 @@ risk_parity:
   monthly_meta: true
   target_portfolio_vol: null
 
+# ---------- SLEEVE COMBINER (C1.1/C1.2 — OPTIONAL; absent ⇒ inverse_vol, back-compat).
+# mode:dynamic tilts the convex inverse-vol prior toward recently-stronger sleeves
+# (AlphaForge); must beat static OOS (gates.combiner_beats_static) before deploy. REQUIRES
+# target_portfolio_vol: null (convex-only, M-1). The dynamic combiner's value GROWS with
+# sleeve count, so it is most useful here (N-sleeve FoF incl. VRP) once Component 3 adds sleeves.
+sleeve_combiner:
+  mode: inverse_vol        # {inverse_vol (default), dynamic}
+  tilt_strength: 0.0       # λ ∈ [0,5] (M-3); 0.0 ⇒ exact inverse-vol
+  perf_window: 126         # causal trailing window (bars) for recent sleeve Sharpe
+  perf_min_periods: 63     # warmup before the tilt applies
+  perf_metric: sharpe      # {sharpe, sortino}
+  tilt_clip: 1.5           # clip recent Sharpe into [-c,c] before exp (anti-runaway)
+
 # ---------- DATA (ETF account: yfinance daily; SEPARATE cache) ---------------
 data:
   source: "yfinance_etf"

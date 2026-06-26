@@ -256,6 +256,76 @@ def check_max_leverage_bounds(cfg: dict, r: ValidationResult) -> None:
                 r.ok(f"max_leverage HPO range [{lo}, {hi}]")
 
 
+_SLEEVE_COMBINER_MODES = ("inverse_vol", "dynamic")
+_PERF_METRICS = ("sharpe", "sortino")
+
+
+def check_sleeve_combiner(cfg: dict, r: ValidationResult) -> None:
+    """Validate the optional ``sleeve_combiner:`` block (C1.3 — the dynamic sleeve combiner).
+
+    Absent ⇒ no-op (inverse-vol back-compat). When present, enforce the C1.1 contract bounds
+    so a config can't reach ``dynamic_sleeve_alphas`` with an out-of-band knob:
+      - ``mode ∈ {inverse_vol, dynamic}``;
+      - dynamic only: ``tilt_strength ∈ [0,5]`` (M-3 anti EXP-OVERFLOW),
+        ``tilt_clip > 0``, ``perf_window ≥ perf_min_periods``, ``perf_metric ∈ {sharpe,sortino}``;
+      - **M-1:** ``mode: dynamic`` REQUIRES ``risk_parity.target_portfolio_vol`` unset/null —
+        the convex-only contract has no clean tilt for the leverage-bearing scale-to-target prior.
+    """
+    if "sleeve_combiner" not in cfg:
+        return
+    sc = cfg.get("sleeve_combiner") or {}
+    if not isinstance(sc, dict):
+        r.fail(f"sleeve_combiner must be a mapping, got {type(sc).__name__}")
+        return
+    mode = str(sc.get("mode", "inverse_vol"))
+    if mode not in _SLEEVE_COMBINER_MODES:
+        r.fail(f"sleeve_combiner.mode={mode!r} invalid — must be one of {_SLEEVE_COMBINER_MODES}")
+        return
+    if mode == "inverse_vol":
+        r.ok("sleeve_combiner.mode=inverse_vol (static, back-compat)")
+        return
+
+    # --- mode: dynamic ---
+    ok = True
+    try:
+        lam = float(sc.get("tilt_strength", 0.0))
+    except (TypeError, ValueError):
+        r.fail(f"sleeve_combiner.tilt_strength={sc.get('tilt_strength')!r} is not numeric")
+        ok = False
+    else:
+        if not (0.0 <= lam <= 5.0):
+            r.fail(f"sleeve_combiner.tilt_strength={lam} out of bounds [0, 5] (M-3 anti-overflow)")
+            ok = False
+    try:
+        clip = float(sc.get("tilt_clip", 1.5))
+    except (TypeError, ValueError):
+        r.fail(f"sleeve_combiner.tilt_clip={sc.get('tilt_clip')!r} is not numeric")
+        ok = False
+    else:
+        if clip <= 0:
+            r.fail(f"sleeve_combiner.tilt_clip={clip} must be > 0")
+            ok = False
+    pw = int(sc.get("perf_window", 126))
+    pmp = int(sc.get("perf_min_periods", 63))
+    if pw < pmp:
+        r.fail(f"sleeve_combiner.perf_window={pw} must be >= perf_min_periods={pmp}")
+        ok = False
+    pm = str(sc.get("perf_metric", "sharpe"))
+    if pm not in _PERF_METRICS:
+        r.fail(f"sleeve_combiner.perf_metric={pm!r} invalid — must be one of {_PERF_METRICS}")
+        ok = False
+    # M-1: convex-only — reject a target_portfolio_vol overlay under dynamic mode.
+    tpv = (cfg.get("risk_parity", {}) or {}).get("target_portfolio_vol", None)
+    if tpv is not None:
+        r.fail(
+            f"sleeve_combiner.mode=dynamic requires risk_parity.target_portfolio_vol=null "
+            f"(got {tpv}) — the dynamic combiner is convex-only (M-1)."
+        )
+        ok = False
+    if ok:
+        r.ok(f"sleeve_combiner.mode=dynamic (λ={lam}, perf_window={pw}, metric={pm})")
+
+
 _PROP_FIRM_INTENTIONAL_MARKER = "DO NOT MIGRATE to env.risk:"
 
 
@@ -2088,6 +2158,7 @@ def validate(config_path: Path, stage: str, overlays: list[str] | None = None) -
     check_no_fee_curriculum(cfg, r)
     check_no_hindsight_outside_hpo(cfg, stage, r)
     check_max_leverage_bounds(cfg, r)
+    check_sleeve_combiner(cfg, r)
     check_legacy_prop_firm_block(cfg, stage, r, config_path=config_path)
     check_gates_block(cfg, r)
     check_data_manifest(cfg, stage, r)

@@ -620,6 +620,46 @@ def dynamic_sleeve_alphas(
     return alphas
 
 
+def combiner_alphas(
+    sleeve_returns: Mapping[str, np.ndarray],
+    timestamps: np.ndarray,
+    *,
+    window: int = 252,
+    min_periods: int = 63,
+    monthly_meta: bool = True,
+    target_portfolio_vol: float | None = None,
+    sleeve_combiner: Mapping | None = None,
+) -> dict[str, np.ndarray]:
+    """Single dispatch seam between the static and dynamic sleeve combiners (C1.2). Both
+    :class:`TwoSleeveExecutor` and :class:`PortfolioExecutor` call THIS (not the rules
+    directly), so the two executors cannot drift on the mode-selection logic.
+
+    Selects on the optional ``sleeve_combiner`` config block:
+      - absent / ``mode='inverse_vol'`` (default) ⇒ :func:`risk_parity_alphas` BYTE-IDENTICAL
+        to today (MS-ADR-6 back-compat — the live paper book is unchanged when no block);
+      - ``mode='dynamic'`` ⇒ :func:`dynamic_sleeve_alphas` (the AlphaForge perf-tilt), reading
+        ``tilt_strength``/``perf_window``/``perf_min_periods``/``perf_metric``/``tilt_clip``.
+
+    The σ-prior params (``window``/``min_periods``/``monthly_meta``/``target_portfolio_vol``)
+    come from the executor's ``risk_parity:`` block and are passed identically to both rules,
+    so the dynamic rule's λ=0 path reproduces the static book exactly. Unknown modes fall
+    through to inverse-vol here; ``validate_config`` (C1.3) is the loud enum guard."""
+    sc = dict(sleeve_combiner or {})
+    if str(sc.get("mode", "inverse_vol")) == "dynamic":
+        return dynamic_sleeve_alphas(
+            sleeve_returns, timestamps,
+            window=window, min_periods=min_periods, monthly_meta=monthly_meta,
+            target_portfolio_vol=target_portfolio_vol,
+            tilt_strength=float(sc.get("tilt_strength", 0.0)),
+            perf_window=int(sc.get("perf_window", 126)),
+            perf_min_periods=int(sc.get("perf_min_periods", 63)),
+            perf_metric=str(sc.get("perf_metric", "sharpe")),
+            tilt_clip=float(sc.get("tilt_clip", 1.5)))
+    return risk_parity_alphas(
+        sleeve_returns, timestamps, window=window, min_periods=min_periods,
+        monthly_meta=monthly_meta, target_portfolio_vol=target_portfolio_vol)
+
+
 def combine_sleeve_weights(
     sleeve_weights: Mapping[str, np.ndarray],
     sleeve_assets: Mapping[str, list[str]],

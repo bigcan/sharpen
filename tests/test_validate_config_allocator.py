@@ -20,6 +20,7 @@ from scripts.validate_config import (  # noqa: E402
     check_data_manifest,
     check_hpo,
     check_max_leverage_bounds,
+    check_sleeve_combiner,
     validate,
 )
 
@@ -174,3 +175,73 @@ def test_shipped_allocator_config_passes_wf():
     remains valid for WF-stage replay."""
     r = validate(ALLOCATOR_CFG, "wf")
     assert not r.failures, r.failures
+
+
+# --------------------------------------------------------------------------- #
+# C1.3: sleeve_combiner validation (dynamic combiner config guard)
+# --------------------------------------------------------------------------- #
+LIVE_PAPER_CFG = ROOT / "configs" / "live_cross_asset_paper.yaml"
+LIVE_MULTI_SLEEVE_CFG = ROOT / "configs" / "live_multi_sleeve_paper.yaml"
+
+
+def test_sleeve_combiner_absent_is_noop():
+    r = ValidationResult()
+    check_sleeve_combiner({"env": {}}, r)
+    assert not r.failures and not r.passed       # absent ⇒ no-op
+
+
+def test_sleeve_combiner_inverse_vol_ok():
+    r = ValidationResult()
+    check_sleeve_combiner({"sleeve_combiner": {"mode": "inverse_vol"}}, r)
+    assert not r.failures, r.failures
+
+
+def test_sleeve_combiner_unknown_mode_fails():
+    r = ValidationResult()
+    check_sleeve_combiner({"sleeve_combiner": {"mode": "bandit"}}, r)
+    assert any("mode=" in f and "invalid" in f for f in r.failures), r.failures
+
+
+def test_sleeve_combiner_dynamic_valid_ok():
+    r = ValidationResult()
+    check_sleeve_combiner(
+        {"sleeve_combiner": {"mode": "dynamic", "tilt_strength": 2.0, "perf_window": 126,
+                             "perf_min_periods": 63, "perf_metric": "sharpe", "tilt_clip": 1.5},
+         "risk_parity": {"target_portfolio_vol": None}}, r)
+    assert not r.failures, r.failures
+
+
+def test_sleeve_combiner_lambda_out_of_band_fails():
+    r = ValidationResult()
+    check_sleeve_combiner({"sleeve_combiner": {"mode": "dynamic", "tilt_strength": 7.0}}, r)
+    assert any("tilt_strength" in f and "out of bounds" in f for f in r.failures), r.failures
+
+
+def test_sleeve_combiner_perf_window_lt_min_periods_fails():
+    r = ValidationResult()
+    check_sleeve_combiner(
+        {"sleeve_combiner": {"mode": "dynamic", "perf_window": 40, "perf_min_periods": 63}}, r)
+    assert any("perf_window" in f for f in r.failures), r.failures
+
+
+def test_sleeve_combiner_bad_metric_fails():
+    r = ValidationResult()
+    check_sleeve_combiner({"sleeve_combiner": {"mode": "dynamic", "perf_metric": "omega"}}, r)
+    assert any("perf_metric" in f for f in r.failures), r.failures
+
+
+def test_sleeve_combiner_dynamic_rejects_target_vol_overlay():
+    """M-1: dynamic + a target_portfolio_vol overlay is the convex-only violation."""
+    r = ValidationResult()
+    check_sleeve_combiner(
+        {"sleeve_combiner": {"mode": "dynamic", "tilt_strength": 1.0},
+         "risk_parity": {"target_portfolio_vol": 0.10}}, r)
+    assert any("target_portfolio_vol" in f and "convex-only" in f for f in r.failures), r.failures
+
+
+def test_live_paper_configs_with_combiner_block_validate():
+    """The shipped live paper configs (now carrying an inverse_vol sleeve_combiner block)
+    still validate clean at paper-deploy."""
+    for cfg_path in (LIVE_PAPER_CFG, LIVE_MULTI_SLEEVE_CFG):
+        r = validate(cfg_path, "paper-deploy")
+        assert not any("sleeve_combiner" in f for f in r.failures), (cfg_path.name, r.failures)

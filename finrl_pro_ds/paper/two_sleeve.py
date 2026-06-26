@@ -40,9 +40,9 @@ import numpy as np
 
 from finrl_pro_ds.envs.allocator_factory import (
     combine_sleeve_weights,
+    combiner_alphas,
     drive_with_conviction,
     linear_core_trajectory,
-    risk_parity_alphas,
 )
 from finrl_pro_ds.paper.fill_engine import FillEngine
 from finrl_pro_ds.paper.paper_state import LiveTrajectory
@@ -86,6 +86,8 @@ class TwoSleeveExecutor:
         # overlay default). A float levers the combined book toward that annualized vol.
         tv = rp.get("target_portfolio_vol", None)
         self.rp_target_vol = float(tv) if tv is not None else None
+        # C1.2: optional dynamic-combiner block. Absent ⇒ inverse-vol (back-compat, MS-ADR-6).
+        self.sleeve_combiner = dict(config.get("sleeve_combiner", {}))
         self.max_gross = float(dict(config.get("env", {})).get("max_gross_exposure", 3.0))
         # Allocator-family sleeves driven through the env (config-driven; default
         # (momentum, rates_carry) — back-compat). return_stream sleeves (VRP) are excluded.
@@ -93,10 +95,10 @@ class TwoSleeveExecutor:
 
     # ------------------------------------------------------------------ #
     def _alphas(self, sleeve_returns: Mapping[str, np.ndarray], ts_decision: np.ndarray) -> dict:
-        return risk_parity_alphas(
+        return combiner_alphas(
             sleeve_returns, ts_decision, window=self.rp_window,
             min_periods=self.rp_min_periods, monthly_meta=self.rp_monthly_meta,
-            target_portfolio_vol=self.rp_target_vol)
+            target_portfolio_vol=self.rp_target_vol, sleeve_combiner=self.sleeve_combiner)
 
     def _combine(self, sleeve_weights, sleeve_assets, sleeve_returns, union_assets, ts_decision):
         alphas = self._alphas(sleeve_returns, ts_decision)

@@ -15,6 +15,17 @@ gates:
     min_uplift_vs_baseline: 0.10         # RL net Sharpe must exceed linear core by >= 0.10
     else: "ship_linear_core"
 
+  # The Component-1 deploy decision (ADR-C1-4): the DYNAMIC sleeve combiner must beat the
+  # FROZEN static inverse-vol combiner OOS (same WF/CPCV paths) by >= min_uplift net Sharpe,
+  # else ship the static inverse-vol book. λ/perf_window are selected ONLY on these OOS paths
+  # (C1.4). At N=2 sleeves this gate is EXPECTED to often say ship_static_rp (the cross-
+  # sectional tilt is near-degenerate) — that is the honest, correct outcome, not a failure.
+  combiner_beats_static:
+    metric: "oos_net_sharpe"
+    baseline: "static_inverse_vol"       # frozen inverse-vol combiner on the same OOS paths
+    min_uplift_vs_baseline: 0.10         # dynamic must exceed static by >= 0.10 net Sharpe OOS
+    else: "ship_static_rp"
+
   # The sleeve must stay uncorrelated to the existing live book (the north-star).
   g_diversification:
     max_corr_to_existing_sleeves: 0.30
