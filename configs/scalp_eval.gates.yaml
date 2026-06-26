@@ -1,0 +1,77 @@
+# ============================================================================
+# SMB VWAP-scalp + MACD-scalp falsification - decision gates overlay (scalp-v1)
+# ============================================================================
+# Pre-registered 2026-06-25 (S553-cont-82) BEFORE the probe was run, as a
+# COMMITMENT DEVICE (the leak-era lesson: post-hoc verdicts get rationalized).
+# All thresholds live here, never hardcoded in the probe (CLAUDE.md invariant).
+# Read by scripts/research/smb_macd_scalp_eval.py.
+#
+# Strategies under test (two YouTube videos, both SMB-Capital scalping content):
+#   V1 (pImpnT4Bqj0 "You will never look at scalping the same way again"):
+#       SMB top scalp setups -- VWAP Flip (market entry on decisive close across
+#       session VWAP, stop at recent swing, FIXED 1R TP) + Offsides Reversal
+#       (volume-divergence trend-exhaustion, stop-limit reversal entry, stop at
+#       swing midpoint, FIXED 2R TP). Source: authentic SMB "Offsides Scalping"
+#       cheat sheet (FX Replay). 5m, YM/ES (equity-index future), 5am-12pm NY.
+#   V2 (t7XAyKAUvFA "Very High Win-Rate MACD Scalping Strategy"):
+#       MACD line/signal crossover scalp (+ trend/zero-line filter), exit on
+#       opposite cross or fixed R bracket. 5m.
+#
+# Both are marketed on WIN RATE. The decisive question is whether high win rate
+# survives as positive net EXPECTANCY after realistic intraday cost, and whether
+# it beats simply holding the index intraday (cont-66 ORB standard: "0% of
+# configs beat intraday B&H"). Prior internal falsifications this corroborates:
+#   - cont-67 intraday session-VWAP NO-GO (gold M15 best-case: +1.48 GROSS Sharpe
+#     -> -2.91 NET at 4367 turns/yr; cost-killed; VWAP ~= SMA control).
+#   - cont-66 opening-range-breakout NO-GO (0% beat intraday B&H; tight intraday
+#     stops guarantee paying spread+slippage on the predominantly-false breaks).
+#   - cont-78 momentum arbitraged-to-cost in liquid markets (MACD = smoothed
+#     momentum oscillator; no incremental edge expected intraday).
+gates:
+  # ---- ABSOLUTE deploy gate ----
+  phase1_linear:
+    min_net_expectancy_bps: 0.0          # net per-trade expectancy (bps of notional) must be > 0
+    min_net_sharpe: 0.50                 # best strategy/variant net Sharpe (annualized by trade freq)
+    min_net_pf: 1.10                     # best strategy/variant net profit factor
+    require_multi_subperiod: true        # >= 2 of 3 calendar subperiods net-positive
+    min_subperiods_positive: 2
+    n_subperiods: 3
+    max_worst_subperiod_dd_pct: 40.0
+
+  # ---- DECISIVE incremental gate: does active scalping beat passive holding? ----
+  # cont-66 standard. The strategy must out-earn intraday buy-and-hold (long
+  # open->close over the same trading window) on a risk-adjusted basis, else the
+  # turnover/cost/effort buys nothing.
+  beats_buy_and_hold:
+    metric: "net_sharpe"
+    min_active_ir: 0.0                    # active (strat - intraday B&H) info ratio > 0
+    else: "dominated_by_holding_the_index"
+
+  # ---- win-rate trap guard ----
+  # Both videos sell a high WIN RATE. A high win rate with <=0 expectancy is the
+  # classic small-win/large-loss negative-skew trap. The verdict must report
+  # expectancy, NOT win rate, as the deploy criterion.
+  win_rate_is_not_edge:
+    require_positive_expectancy_not_winrate: true
+
+  # ---- cost-fragility guard (scalping is the most cost-hostile category) ----
+  g_cost_gap:
+    max_frictionless_minus_net_sharpe: 0.30   # large gap => cost-fragile (reported caution)
+    flag_if_gross_positive_net_negative: true # the cont-67 signature
+
+  # ---- multiplicity deflation ----
+  # Many variants are tried (3 MACD param sets x exits, VWAP-flip body-thresholds,
+  # 3 assets). The best must survive deflation for the number of configs searched.
+  g_deflation:
+    apply_deflated_sharpe_across_variants: true
+    min_deflated_prob_best_gt_0: 0.95
+
+# Cost models (ROUND-TRIP, bps of notional, charged per discrete trade). ES is a
+# very cheap instrument: 1 tick (0.25pt) ~ 0.4bps. Realistic retail round-trip =
+# spread cross + stop slippage + commission. frictionless isolates the cost-kill;
+# es_realistic is the honest case; harsh stresses fast-market stop slippage.
+cost_models:
+  frictionless: 0.0
+  es_cheap_1bp: 0.0001
+  es_realistic_2p5bp: 0.00025
+  harsh_5bp: 0.0005
