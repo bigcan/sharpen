@@ -413,6 +413,48 @@ def _trailing_ann_vol(returns: np.ndarray, *, window: int, min_periods: int, ann
     return (vol * np.sqrt(ann)).to_numpy(np.float64)
 
 
+def _trailing_ann_perf(
+    returns: np.ndarray,
+    *,
+    window: int,
+    min_periods: int,
+    metric: str = "sharpe",
+    ann: int = ANN,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Causal trailing annualized risk-adjusted performance of ``returns`` (1-D, indexed by
+    decision bar k): row ``k`` uses returns ``[k-window, k-1]`` (``.shift(1)`` on BOTH the
+    rolling mean and the rolling denominator — EXCLUDES the not-yet-realized k->k+1 move).
+
+    Returns ``(perf, ann_denom)``: ``perf`` is the annualized Sharpe (``mean/std·√ann``,
+    ``ddof=1``, MATH-S03) or Sortino (``mean/downside_dev·√ann``, MATH-S04 — downside
+    deviation is ``sqrt(Σ min(r,0)²/(n-1))``, identical to :func:`_metrics`), and
+    ``ann_denom`` the annualized denominator (vol for Sharpe, downside-dev for Sortino) the
+    caller uses to mask degenerate rows (M-2). Both are NaN until ``min_periods`` realized
+    returns exist (warmup). ``Sharpe = ann_ret/ann_denom`` with ``ann_ret = mean·ann``,
+    ``ann_denom = denom·√ann`` (so ``ann_ret/ann_denom = mean/denom·√ann``)."""
+    r = pd.Series(np.asarray(returns, dtype=np.float64))
+    roll = r.rolling(window, min_periods=min_periods)
+    mean = roll.mean().shift(1)
+    if metric == "sharpe":
+        denom = roll.std(ddof=1).shift(1)
+    elif metric == "sortino":
+        # downside deviation over the window: sqrt(Σ min(r,0)²/(n-1)), matching _metrics /
+        # the env's Sortino (RMS of min(r,0) over n-1, NOT std of only the negatives).
+        def _downside_dev(x: np.ndarray) -> float:
+            n = len(x)
+            return float(np.sqrt(np.sum(np.minimum(x, 0.0) ** 2) / (n - 1))) if n > 1 else np.nan
+        denom = roll.apply(_downside_dev, raw=True).shift(1)
+    else:
+        raise ValueError(f"perf_metric must be 'sharpe' or 'sortino', got {metric!r}")
+    ann_denom = denom * np.sqrt(ann)
+    ann_ret = mean * ann
+    # ann_ret/ann_denom = (mean·ann)/(denom·√ann) = mean/denom·√ann. Where ann_denom==0 this
+    # yields inf/nan; the caller neutralizes those rows (ŝ:=0 ⇒ tilt=1) via the M-2 guard.
+    with np.errstate(divide="ignore", invalid="ignore"):
+        perf = ann_ret / ann_denom
+    return perf.to_numpy(np.float64), ann_denom.to_numpy(np.float64)
+
+
 def risk_parity_alphas(
     sleeve_returns: Mapping[str, np.ndarray],
     timestamps: np.ndarray,
@@ -460,6 +502,119 @@ def risk_parity_alphas(
             a = inv / inv.sum()                       # convex, Σα = 1
         else:
             a = (1.0 / N) * float(target_portfolio_vol) * inv  # scale-each-to-target, eq-wt
+        for j, s in enumerate(names):
+            alphas[s][k] = a[j]
+    return alphas
+
+
+def dynamic_sleeve_alphas(
+    sleeve_returns: Mapping[str, np.ndarray],
+    timestamps: np.ndarray,
+    *,
+    # --- inverse-vol prior params (identical semantics to risk_parity_alphas) ---
+    window: int = 252,
+    min_periods: int = 63,
+    monthly_meta: bool = True,
+    target_portfolio_vol: float | None = None,
+    vol_floor: float = 1e-4,
+    # --- NEW: rolling-performance tilt (AlphaForge mechanism) ---
+    tilt_strength: float = 0.0,
+    perf_window: int = 126,
+    perf_min_periods: int = 63,
+    perf_metric: str = "sharpe",
+    tilt_clip: float = 1.5,
+) -> dict[str, np.ndarray]:
+    """Per-sleeve daily capital-allocation scalars ``α_s(k)`` = the convex inverse-vol prior
+    **tilted** toward sleeves with stronger recent risk-adjusted performance (the AlphaForge
+    rolling-performance mechanism). Component 1 of the alpha-mining loop
+    (``.agent/artifacts/dynamic_sleeve_combiner_architecture.md``, C1.1).
+
+    ``α_s(k) = (p_s·tilt_s) / Σ_s'(p_s'·tilt_s')`` with ``tilt_s = exp(λ·clip(ŝ_s, −c, +c))``:
+
+    - ``p_s(k)`` — the CONVEX inverse-vol prior ``(1/σ_s)/Σ(1/σ_s')``, computed by the SAME
+      code path as :func:`risk_parity_alphas` (``_trailing_ann_vol`` + the usable-mask
+      equal-weight warmup fallback). σ uses ``window``/``min_periods``.
+    - ``ŝ_s(k)`` — causal trailing-``perf_window`` annualized Sharpe (or Sortino if
+      ``perf_metric='sortino'``) of sleeve ``s``'s realized step returns, ``.shift(1)`` on
+      BOTH the rolling mean and the rolling denominator (LEAK-2: row ``k`` uses returns
+      strictly ``< k``). ``λ = tilt_strength``, ``c = tilt_clip``.
+    - **Monthly-meta (M-4):** when ``monthly_meta`` both σ AND ŝ are held to the last decision
+      bar of each month (``_monthly_held``), so α rotates only at month-ends (meta-turnover
+      ~0 — the cost property both executors rely on).
+
+    **Convex-only / back-compat (M-1, ADR-C1-3):** ``λ = tilt_strength = 0`` ⇒ ``tilt_s ≡ 1``
+    ⇒ ``α == p`` reproduces :func:`risk_parity_alphas` (convex branch) **bit-for-bit**
+    (regression test C1-T1). The leverage-bearing scale-to-target prior has no clean tilt, so
+    ``target_portfolio_vol is not None`` raises :class:`NotImplementedError` (prod uses
+    ``target_portfolio_vol: null``).
+
+    **Math-audit guards (Math report 2026-06-26, folded into the contract):**
+      - **M-2 (DIV-ZERO):** when a sleeve's recent denominator ``≤ vol_floor`` (annualized) or
+        it is still in perf-warmup (``< perf_min_periods`` realized returns), ``ŝ_s := 0`` ⇒
+        ``tilt_s = 1`` (neutral). The prior's own σ-warmup→equal-weight fallback is reused
+        unchanged (when ANY sleeve σ is unusable the step is equal-weight, ``α == p``).
+      - **M-3 (EXP-OVERFLOW):** ``clip(ŝ, ±c)`` bounds the exponent; with ``validate_config``
+        bounding ``tilt_strength ∈ [0, 5]`` (and ``c`` the default 1.5) ``λ·c ≤ 7.5`` (safe fp64).
+
+    Preconditions: ``sleeve_returns[s]`` shape ``(K,)`` realized step returns (the ``j→j+1``
+    return known at bar ``j+1``); ``timestamps`` shape ``(K,)`` per-step DECISION stamps
+    (``union_timestamps[:-1]``, epoch s). ``0 ≤ tilt_strength``, ``tilt_clip > 0``,
+    ``perf_window ≥ perf_min_periods``, ``target_portfolio_vol is None``.
+    Postconditions: ``{s: (K,) α}`` with ``Σ_s α_s(k) = 1`` and ``α_s(k) > 0`` ∀s,k; during σ
+    warmup (prior → equal-weight) or perf-warmup/degenerate-denom (``tilt=1``) ``α == p`` (no
+    look-ahead, no div-by-zero). Returns ``{sleeve: (K,) α array}``, ``K = len(timestamps)``.
+    """
+    # M-1: convex-only. The scale-to-target prior is leverage-bearing and has no clean tilt.
+    if target_portfolio_vol is not None:
+        raise NotImplementedError(
+            "dynamic_sleeve_alphas supports only the convex branch (target_portfolio_vol=None); "
+            "the leverage-bearing scale-to-target prior has no clean perf-tilt (M-1). "
+            "Production configs use target_portfolio_vol: null.")
+    if not 0.0 <= tilt_strength <= 5.0:
+        # M-3: λ·c ≤ 7.5 keeps exp() in safe fp64 range. validate_config (C1.3) also enforces
+        # this, but bound it here too so the function cannot silently emit exp(inf)→NaN α
+        # before that wiring exists.
+        raise ValueError(f"tilt_strength (λ) must be in [0, 5], got {tilt_strength}")
+    if tilt_clip <= 0:
+        raise ValueError(f"tilt_clip (c) must be > 0, got {tilt_clip}")
+    if perf_window < perf_min_periods:
+        raise ValueError(
+            f"perf_window ({perf_window}) must be >= perf_min_periods ({perf_min_periods})")
+
+    names = list(sleeve_returns)
+    K = len(np.asarray(timestamps))
+    N = len(names)
+
+    # σ_s: inverse-vol prior — SAME path as risk_parity_alphas (guarantees the λ=0 identity).
+    sigma = {s: _trailing_ann_vol(sleeve_returns[s], window=window, min_periods=min_periods)
+             for s in names}
+    # ŝ_s: recent perf, neutralized to 0 during warmup / degenerate denom ⇒ tilt=1 (M-2).
+    shat = {}
+    for s in names:
+        perf, denom = _trailing_ann_perf(
+            sleeve_returns[s], window=perf_window, min_periods=perf_min_periods,
+            metric=perf_metric)
+        v = perf.copy()
+        neutral = ~np.isfinite(v) | ~np.isfinite(denom) | (denom <= vol_floor)
+        v[neutral] = 0.0
+        shat[s] = v
+    if monthly_meta:  # M-4: hold BOTH σ and ŝ at month-ends (rotate only at month-ends).
+        sigma = {s: _monthly_held(sigma[s], timestamps) for s in names}
+        shat = {s: _monthly_held(shat[s], timestamps) for s in names}
+
+    alphas = {s: np.full(K, 1.0 / N, dtype=np.float64) for s in names}
+    lam = float(tilt_strength)
+    c = float(tilt_clip)
+    for k in range(K):
+        sk = np.array([sigma[s][k] for s in names], dtype=np.float64)
+        usable = np.isfinite(sk) & (sk > vol_floor)
+        if not usable.all():
+            continue  # σ warmup / degenerate → equal weights (== prior p), no tilt
+        inv = 1.0 / sk                                  # convex inverse-vol prior (unnormalized)
+        shk = np.array([shat[s][k] for s in names], dtype=np.float64)
+        tilt = np.exp(lam * np.clip(shk, -c, c))        # =1 where ŝ=0 (warmup/degenerate/λ=0)
+        wk = inv * tilt
+        a = wk / wk.sum()                               # convex, Σα = 1
         for j, s in enumerate(names):
             alphas[s][k] = a[j]
     return alphas
