@@ -255,21 +255,28 @@ def main() -> int:
     out_dir = (ROOT / args.out) if not Path(args.out).is_absolute() else Path(args.out)
 
     frames: list[pd.DataFrame] = []
+    failed_days: list[str] = []
     days = _trading_days(args.start, end)
     log.info("Fetching %s %s over %d trading days (%s..%s)", dataset, args.id, len(days),
              args.start, end)
     for i, day in enumerate(days):
         try:
             raw = _finmind_day(dataset, args.id, day, args.token)
-        except PermissionError as e:
+            if not raw.empty:
+                frames.append(norm(raw))
+        except PermissionError as e:  # tier/paywall is fatal — no point continuing
             log.error("%s", e)
             return 3
-        if not raw.empty:
-            frames.append(norm(raw))
+        except Exception as e:  # noqa: BLE001 — one bad day must not kill a multi-hour run
+            log.warning("  skipping %s: %r", day, e)
+            failed_days.append(day)
         if i % 50 == 0 and i:
-            log.info("  ...%d/%d days, %d bars so far", i, len(days),
-                     sum(len(f) for f in frames))
+            log.info("  ...%d/%d days, %d bars, %d skipped", i, len(days),
+                     sum(len(f) for f in frames), len(failed_days))
         time.sleep(args.sleep)
+    if failed_days:
+        log.warning("%d/%d days skipped (errors): %s%s", len(failed_days), len(days),
+                    failed_days[:10], " ..." if len(failed_days) > 10 else "")
 
     frames = [f for f in frames if f is not None and not f.empty]
     if not frames:
