@@ -1,0 +1,55 @@
+# Pre-registered gates for the Taiwan cross-sectional signal-eval PoC (S553-cont).
+# Tests the "less-liquid market = more extractable alpha" thesis on TWSE large-caps.
+# Overrides only the keys that differ from configs/signal_eval.gates.yaml; the harness
+# deep-merges the rest from Gates._DEFAULTS. NEVER hardcode these in code/scripts.
+#
+# Scope caveats baked into these numbers (read before trusting any verdict):
+#   - Universe is a CURRENT 0050-style large-cap list → SURVIVORSHIP-BIASED. Results are
+#     UPPER BOUNDS (the harness flags this via panel.meta.survivorship_free=False).
+#   - min_names_per_day is relaxed to 25 (the PoC universe is ~45 names, not the S&P 500),
+#     so the cross-section is thinner than the US harness assumes — IC dispersion is wider.
+universe:
+  id: twse_largecap_current        # NOT point-in-time — survivorship-biased (upper bound)
+  min_names_per_day: 25            # ~45-name PoC universe; days below this are excluded from IC
+  min_adv_usd: 0.0                 # ADV floor disabled for the PoC (TWD volume, not USD)
+coverage:
+  min_days: 1000                   # ~4y of daily bars (FinMind free from 2017 gives ~9y)
+  max_nan_frac: 0.40
+  max_ohlc_violations: 0           # DATA-CLEAN: any OHLC violation halts (PF-XCHECK)
+gross_power:
+  horizons: [1, 5, 10, 21, 63]
+  primary_horizon: 21             # 21d hold = LOW TURNOVER (monthly rebalance); the thesis test
+  promising_ic_ir: 0.05
+  promising_ic_tstat: 3.0
+deflation:
+  promising_dsr: 0.90
+  fdr_q_max: 0.10
+  use_effective_n: false
+  hlz_t_min: 3.0
+  require_hlz: false
+cpcv:
+  enabled: true
+  n_groups: 6
+  k_test: 2
+  embargo_days: 5
+robustness:
+  min_subperiod_ic_ir: 0.0
+  recent_oos_years: 2
+capturability:
+  # One-way fraction-of-notional cost applied to per-rebalance turnover (|Δw|). Taiwan's
+  # 0.3% securities-transaction TAX is SELL-SIDE ONLY; converted to the harness's symmetric
+  # one-way model: each rebalance is ~half buys / half sells, so effective one-way ≈
+  # 0.5·(buy comm ~0.06%) + 0.5·(sell comm ~0.06% + 0.30% tax) ≈ 0.0021. The tax roughly
+  # DOUBLES friction vs US equity (0.0010). us_equiv_ref is the US bar, shown for contrast.
+  cost_models:
+    frictionless: 0.0
+    us_equiv_ref: 0.0010           # US equity standard — contrast only, NOT the Taiwan reality
+    standard: 0.0021               # Taiwan e-broker discounted commission + 0.30% sell tax
+    harsh: 0.0029                  # Taiwan full 0.1425% commission (undiscounted) + sell tax
+  cost_wall_caution: 0.30
+neutralization:
+  winsor_pct: [0.01, 0.99]
+  controls: [sector, size]         # size = log trailing TWD ADV; sector = coarse 7-bucket map
+promotion:
+  survivorship_free_required: true   # PIT 0050 constituents required before any GO
+  tier2_audit_required: true
