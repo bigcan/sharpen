@@ -1,0 +1,39 @@
+# Pre-registered gates for the DELTA-HEDGED Taiwan TXO VRP scout.
+# The un-hedged monthly short straddle was NO-GO (net Sharpe -0.54, frictionless -0.53) — killed
+# by the crash tail, NOT by cost. BUT the variance premium is genuinely positive (IV>RV 75%).
+# A delta-hedged short straddle neutralizes the directional/crash exposure and isolates the
+# IV-RV premium itself — the proper test of whether that +0.017 is harvestable alpha.
+#
+# Strategy: short the front-monthly ATM straddle at entry (actual premium), then DAILY delta-hedge
+# with the index (model BS delta at the constant entry IV, r=q=0) to expiry; option leg cash-settles
+# to the official final settlement. Per-cycle PnL = (premium - intrinsic) + hedge_pnl - costs.
+# NET subtracts option entry cost (as in the un-hedged scout) AND the daily hedge-rebalance cost on
+# the underlying — the NEW load-bearing assumption (daily hedging churns the index position).
+# NEVER hardcode these thresholds in code/scripts.
+scout:
+  rv_window_trading_days: 252
+  oos_split_frac: 0.5
+costs:
+  # option entry (same as the un-hedged scout — no exit spread, cash settlement)
+  half_spread_pts_per_leg: 1.0
+  fee_pts_per_leg: 0.4
+  tax_rate_on_premium: 0.001
+  # NEW: daily delta-hedge cost on the index (TX future), bps of notional traded per rebalance.
+  # This is the load-bearing assumption for the hedged variant — swept in the report.
+  hedge_cost_bps: 2.0          # conservative round-trip-ish per-rebalance cost on TX futures
+  vol_floor: 0.0014            # min calendar-day tau (~0.5/365) to keep near-expiry BS gamma sane
+gate:
+  net_sharpe_floor: 0.5        # annualized NET Sharpe of the hedged premium
+  oos_net_sharpe_min: 0.0      # AND > 0 out-of-sample (second half)
+  bootstrap_p_max: 0.05        # AND IID bootstrap p(mean net cycle return <= 0) < 0.05
+  max_equity_beta_abs: 0.15    # TIGHTER than un-hedged (0.30): the hedge must actually neutralize
+                               # direction — residual equity beta means a broken hedge, not alpha
+  vrp_positive_frac_min: 0.50  # AND IV>RV in >=50% of cycles
+null_model:
+  n_boot: 10000
+verdict:
+  # GO  -> the delta-hedged TXO VRP is harvestable net of hedge cost; proceed to fuller validation
+  #        (tick-level hedge cost, weeklies) + Tier-2 tail audit before any capital.
+  # NO-GO -> the positive VRP is crash compensation, not alpha (hedge cost or residual tail eats it).
+  require_all: [net_sharpe_above_floor, oos_net_sharpe_positive, beats_bootstrap_null,
+                equity_beta_below_ceiling, vrp_premium_exists]

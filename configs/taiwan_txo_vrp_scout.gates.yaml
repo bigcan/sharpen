@@ -1,0 +1,39 @@
+# Pre-registered gates for the Taiwan TXO (台指選擇權) variance-risk-premium (VRP) signal scout.
+# Cheap CPU "is there a cost-survivable short-vol premium BEFORE any deeper validation" gate.
+# Mirrors the TX intraday canary doctrine: a pre-registered, falsifiable bar that the strategy
+# must clear NET of a CONSERVATIVE transaction-cost model. The standing project VRP verdict is
+# NO-GO on cost realism (USDC-contamination on Deribit, clean BTC straddle -0.25); this scout is
+# the Taiwan-market re-test. NEVER hardcode these thresholds in code/scripts.
+#
+# Strategy under test: short the front-MONTHLY ATM straddle at ~30 DTE, hold to cash settlement
+# (final settlement price). Un-hedged (the classic raw-VRP test). Return basis = net PnL / spot
+# (return on underlying notional), annualized by ~12 monthly cycles/yr.
+scout:
+  contract: monthly            # front-monthly TXO (cleanest/most liquid; weeklies = refinement)
+  entry_dte_target: 30         # enter on the first trading day after the prior monthly expiry
+  rv_window_trading_days: 252  # annualization base for realized vol
+  oos_split_frac: 0.5          # first 50% of cycles (by date) = IS, last 50% = OOS
+costs:
+  # The LOAD-BEARING assumption — TXO has no quoted bid/ask in FinMind, so the spread is MODELED.
+  # Held-to-cash-settlement means NO exit spread (settled at the official final settlement price),
+  # so cost is dominated by the ENTRY half-spread on the two short legs. Values are conservative
+  # for liquid ATM monthly TXO (TAIFEX). All in INDEX POINTS unless noted.
+  half_spread_pts_per_leg: 1.0 # conservative ATM monthly half-spread (entry only; 2 legs sold)
+  fee_pts_per_leg: 0.4         # brokerage+clearing per leg in index pts (NT$ fee / 50 pt-value)
+  tax_rate_on_premium: 0.001   # 期交稅 0.1% of premium (entry) + 0.1% of settled intrinsic
+gate:
+  net_sharpe_floor: 0.5        # annualized NET Sharpe must clear the project VRP re-validation bar
+  oos_net_sharpe_min: 0.0      # AND NET Sharpe must stay > 0 in the out-of-sample second half
+  bootstrap_p_max: 0.05        # AND IID bootstrap p(mean net cycle return <= 0) < 0.05
+  max_equity_beta_abs: 0.30    # AND |beta of straddle return to TAIEX return| below ceiling
+                               # (so the premium is NOT just disguised equity beta — the prior
+                               #  wheel/0DTE NO-GOs were all capped equity beta)
+  vrp_positive_frac_min: 0.50  # AND IV>RV in >=50% of cycles (the premium must actually exist)
+null_model:
+  n_boot: 10000                # IID bootstrap of net cycle returns for the Sharpe/mean p-value
+verdict:
+  # GO  -> the Taiwan VRP premium survives a conservative cost model; proceed to a fuller
+  #        validation (weeklies, delta-hedged variant, Tier-2 tail audit before any capital).
+  # NO-GO -> cost-killed or disguised equity beta (the standing VRP class); do not proceed.
+  require_all: [net_sharpe_above_floor, oos_net_sharpe_positive, beats_bootstrap_null,
+                equity_beta_below_ceiling, vrp_premium_exists]
