@@ -1,0 +1,24 @@
+# Pre-registered gates for the Taiwan TX (TAIEX futures) gmgp1/sg-1 falsification canary.
+# Cheap "is there a frictionless directional edge BEFORE GPU" gate (S553-cont-85): a LINEAR
+# core on the env's own multiscale features must beat a block-shuffle null on OOS IC AND
+# frictionless directional PF. If linear finds nothing, RL is unjustified (the gmgp1-btc /
+# gold verdict). NEVER hardcode these in code/scripts.
+canary:
+  base_scale_min: 15            # gmgp1 decision scale (sg-1 would re-run at 3)
+  scales: [15, 60, 240]         # 15-min decision, 1h trend, 4h regime (gmgp1 config)
+  window_size: 30
+  wf_folds: 6                   # rolling walk-forward; Ridge re-fit per fold (OOS only)
+  ridge_alpha: 10.0             # regularization for the linear core
+  embargo_bars: 50              # purge between train/test to kill boundary leakage
+gate:
+  ic_null_p_max: 0.05           # OOS rank-IC must exceed the block-shuffle null at p < 0.05
+  pf_null_p_max: 0.05           # frictionless directional PF must exceed null at p < 0.05
+  pf_floor: 1.05                # AND absolute frictionless PF floor (structure-present bar)
+  ic_floor: 0.02                # AND absolute OOS rank-IC floor
+null_model:
+  n_boot: 5000                  # circular block-bootstrap permutations of the realized return
+  block_bars: 64                # preserves intraday return autocorrelation under the null
+verdict:
+  # GO  -> proceed to the RL canary (minimal SAC WF), THEN HPO if the canary survives.
+  # NO-GO (FALSIFIED) -> TX has no frictionless directional edge; do not spend GPU (BTC/gold class).
+  require_all: [ic_beats_null, pf_beats_null, pf_above_floor, ic_above_floor]
