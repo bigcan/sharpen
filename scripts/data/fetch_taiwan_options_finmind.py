@@ -88,18 +88,27 @@ def _finmind(dataset: str, *, data_id: str | None, start: str, end: str, token: 
 # --------------------------------------------------------------------------- #
 # Cycle assembly
 # --------------------------------------------------------------------------- #
-def monthly_settlements(token: str, start: str, end: str) -> pd.DataFrame:
-    """TXO MONTHLY expiries only (contract_month == 'YYYYMM', i.e. no 'W' weekly suffix) →
-    columns [contract_month, settle_date, settle_price], sorted by settle_date."""
+_CADENCE_RE = {
+    # MONTHLY: pure 'YYYYMM' only — rejects weeklies AND the 'F' series TAIFEX added mid-2025.
+    "monthly": r"\d{6}",
+    # WEEKLY: every WEDNESDAY expiry = monthly 3rd-Wed ('YYYYMM') + the 'W' weeklies ('YYYYMMW1'..).
+    # EXCLUDES the 'F' (Friday) series (only exists mid-2025+); mixing Wed+Fri expiries would create
+    # irregular 2-3 day cycles and corrupt the consistent ~7-day weekly cadence across 2019-2025.
+    "weekly": r"\d{6}(W\d)?",
+}
+
+
+def monthly_settlements(token: str, start: str, end: str, cadence: str = "monthly") -> pd.DataFrame:
+    """TXO expiries for the chosen cadence → [contract_month, settle_date, settle_price], sorted.
+    'monthly' = pure 'YYYYMM' (3rd-Wed). 'weekly' = all Wednesday expiries (monthly + 'W' weeklies,
+    'F' Friday series excluded). Any non-cadence settlement corrupts the entry rule (entry = first
+    day after the prior expiry in this calendar) by compressing the gap, so the filter is strict."""
     raw = _finmind("TaiwanOptionFinalSettlementPrice", data_id="TXO", start=start, end=end,
                    token=token)
     if raw.empty:
         return raw
-    # Keep ONLY pure-monthly codes 'YYYYMM' (6 digits). This rejects weeklies ('...W1') AND the
-    # 'F' series TAIFEX introduced mid-2025 ('202507F3', ...). Any non-monthly settlement in this
-    # list corrupts the entry rule (entry = first day after prior MONTHLY expiry) — a weekly/F
-    # expiry between two monthlies compresses the gap to ~1 DTE. Robust against future suffixes.
-    raw = raw[raw["contract_month"].astype(str).str.fullmatch(r"\d{6}")].copy()
+    pat = _CADENCE_RE[cadence]
+    raw = raw[raw["contract_month"].astype(str).str.fullmatch(pat)].copy()
     raw["settle_date"] = pd.to_datetime(raw["date"], errors="coerce")
     raw["settle_price"] = pd.to_numeric(raw["settlement_price"], errors="coerce")
     out = (raw[["contract_month", "settle_date", "settle_price"]]
@@ -138,11 +147,12 @@ def _next_trading_day(after: pd.Timestamp, spot_dates: pd.DatetimeIndex) -> pd.T
     return later[0] if len(later) else None
 
 
-def build_cycles(token: str, start: str, end: str, sleep: float) -> tuple[pd.DataFrame, pd.DataFrame,
-                                                                          pd.DataFrame, list[str]]:
-    """Assemble (entry_chains, settlements, spot, failed). Entry of monthly M = first trading day
-    strictly after the settlement of monthly M-1 (so DTE ~ one expiry cycle, ~30 calendar days)."""
-    settle = monthly_settlements(token, start, end)
+def build_cycles(token: str, start: str, end: str, sleep: float, cadence: str = "monthly"
+                 ) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, list[str]]:
+    """Assemble (entry_chains, settlements, spot, failed). Entry of contract E_i = first trading day
+    strictly after the settlement of the prior expiry E_{i-1} in this cadence's calendar (monthly
+    ~30 cal-day cycles; weekly ~7 cal-day cycles)."""
+    settle = monthly_settlements(token, start, end, cadence)
     spot = taiex_spot(token, start, end)
     if settle.empty or spot.empty:
         return pd.DataFrame(), settle, spot, []
@@ -174,7 +184,7 @@ def build_cycles(token: str, start: str, end: str, sleep: float) -> tuple[pd.Dat
             rows.append(chain)
         time.sleep(sleep)
         if i % 12 == 0:
-            log.info("  ...%d/%d monthly cycles, %d chain rows", i, len(settle) - 1,
+            log.info("  ...%d/%d cycles, %d chain rows", i, len(settle) - 1,
                      sum(len(r) for r in rows))
     chains = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame()
     return chains, settle, spot, failed
@@ -184,7 +194,7 @@ def build_cycles(token: str, start: str, end: str, sleep: float) -> tuple[pd.Dat
 # Write + manifest
 # --------------------------------------------------------------------------- #
 def _write(chains: pd.DataFrame, settle: pd.DataFrame, spot: pd.DataFrame, out_dir: Path,
-           source: str, failed: list[str]) -> str:
+           source: str, failed: list[str], cadence: str = "monthly") -> str:
     out_dir.mkdir(parents=True, exist_ok=True)
     n_cycles = int(chains["contract_month"].nunique()) if not chains.empty else 0
     status = "PASS" if (n_cycles >= 12 and not chains.empty and not settle.empty
@@ -192,15 +202,16 @@ def _write(chains: pd.DataFrame, settle: pd.DataFrame, spot: pd.DataFrame, out_d
     chains.to_parquet(out_dir / "TXO_vrp_entry_chains.parquet", index=False)
     settle.to_parquet(out_dir / "TXO_vrp_settlement.parquet", index=False)
     spot.to_parquet(out_dir / "TAIEX_spot.parquet", index=False)
+    dte_note = "~30 DTE" if cadence == "monthly" else "~7 DTE (all Wednesday expiries)"
     manifest = {
         "stage": "data-prep", "status": status,
         "loader_manifest_version": LOADER_MANIFEST_VERSION, "source": source,
-        "instrument": "TXO (monthly) + TAIEX spot", "adjusted": False,
-        "timezone": "Asia/Taipei (GMT+8), tz-naive local", "frequency": "monthly cycles",
-        "n_monthly_cycles": n_cycles, "n_chain_rows": int(len(chains)),
+        "instrument": f"TXO ({cadence}) + TAIEX spot", "cadence": cadence, "adjusted": False,
+        "timezone": "Asia/Taipei (GMT+8), tz-naive local", "frequency": f"{cadence} cycles",
+        "n_cycles": n_cycles, "n_chain_rows": int(len(chains)),
         "n_settlements": int(len(settle)), "n_spot_days": int(len(spot)),
         "session": "position (regular) only; after_market excluded",
-        "entry_rule": "first trading day after prior monthly settlement (~30 DTE)",
+        "entry_rule": f"first trading day after prior {cadence} settlement ({dte_note})",
         "atm_band_pts": ATM_BAND_PTS,
         "date_min": str(spot["date"].min()) if not spot.empty else None,
         "date_max": str(spot["date"].max()) if not spot.empty else None,
@@ -249,6 +260,8 @@ def main() -> int:
     ap.add_argument("--start", default="2018-01-01")
     ap.add_argument("--end", default=None)
     ap.add_argument("--out", default="data/taiwan_options")
+    ap.add_argument("--cadence", choices=["monthly", "weekly"], default="monthly",
+                    help="monthly (3rd-Wed) or weekly (all Wednesday expiries, F-series excluded)")
     ap.add_argument("--token", default=os.environ.get("FINMIND_TOKEN", ""))
     ap.add_argument("--sleep", type=float, default=0.3)
     ap.add_argument("--selftest", action="store_true", help="validate assembly on synthetic, no token")
@@ -263,9 +276,10 @@ def main() -> int:
 
     end = args.end or pd.Timestamp.today().strftime("%Y-%m-%d")
     out_dir = (ROOT / args.out) if not Path(args.out).is_absolute() else Path(args.out)
-    log.info("Assembling TXO monthly VRP cycles %s..%s", args.start, end)
+    log.info("Assembling TXO %s VRP cycles %s..%s", args.cadence, args.start, end)
     try:
-        chains, settle, spot, failed = build_cycles(args.token, args.start, end, args.sleep)
+        chains, settle, spot, failed = build_cycles(args.token, args.start, end, args.sleep,
+                                                     args.cadence)
     except PermissionError as e:
         log.error("%s", e)
         return 3
@@ -275,7 +289,7 @@ def main() -> int:
         return 2
     if failed:
         log.warning("%d cycles skipped: %s", len(failed), failed[:10])
-    _write(chains, settle, spot, out_dir, "finmind_sponsor_TaiwanOptionDaily", failed)
+    _write(chains, settle, spot, out_dir, "finmind_sponsor_TaiwanOptionDaily", failed, args.cadence)
     return 0
 
 

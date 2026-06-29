@@ -1,0 +1,44 @@
+# Pre-registered gates for the WEEKLY TXO VRP delta-hedge validation (cont-88 weeklies extension).
+#
+# Same strategy/method as the monthly validation (configs/taiwan_txo_vrp_validation.gates.yaml) —
+# short the front ATM straddle, DAILY delta-hedge on the REAL TX FUTURE (13:30 cash-close aligned),
+# cash-settle to the official final settlement — but on the WEEKLY (every-Wednesday) expiry
+# calendar (~52 cycles/yr, ~4x the monthly count). The monthly run was a BORDERLINE NO-GO whose
+# binding failure was DSR POWER (n=83 too short + left-skew). Weeklies ~4x the sample to test
+# whether the per-cycle edge, if real, clears the deflated 0.95 bar. NEVER hardcode in code.
+scout:
+  rv_window_trading_days: 252
+  oos_split_frac: 0.5
+  cycles_per_year: 52          # WEEKLY annualization (monthly = 12); validated vs median DTE at runtime
+
+costs:
+  half_spread_pts_per_leg: 1.0
+  fee_pts_per_leg: 0.4
+  tax_rate_on_premium: 0.001
+  hedge_half_spread_pts: 1.0   # TX future, tick-floored (see monthly yaml rationale)
+  vol_floor: 0.0014
+  min_path_points: 3           # weekly cycles are ~5 trading days; need >=3 daily marks to hedge
+
+hedge:
+  session_start: "08:45"
+  session_end: "13:30"         # contemporaneous with TAIEX cash close (TWSE 13:30), NOT 13:45
+
+gate:
+  net_sharpe_floor: 0.5
+  oos_net_sharpe_min: 0.0
+  bootstrap_p_max: 0.05
+  max_equity_beta_abs: 0.15
+  vrp_positive_frac_min: 0.50
+  delta_robust_min_sharpe: 0.5
+  dsr_min: 0.95                # the project capital bar; the monthly run's binding failure
+
+deflation:
+  n_trials_gate: 50
+  n_trials_report: [10, 20, 50, 100]
+
+null_model:
+  n_boot: 10000
+
+verdict:
+  require_all: [net_sharpe_above_floor, oos_net_sharpe_positive, beats_bootstrap_null,
+                equity_beta_below_ceiling, vrp_premium_exists, delta_models_robust, dsr_above_floor]

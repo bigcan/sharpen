@@ -1,0 +1,63 @@
+# Pre-registered gates for the FULLER TXO VRP delta-hedge VALIDATION (cont-87 NEXT plan).
+#
+# The scout (taiwan_txo_vrp_deltahedge.py) returned a research-tier GO (net Sharpe +0.89) but
+# leaned on three modeled assumptions flagged as scout-tier caveats:
+#   (1) hedge delta = MODEL BS delta at the constant entry IV (not real daily option deltas);
+#   (2) hedge instrument = TAIEX SPOT (untradeable) with a modeled 2bps cost (no real bid/ask);
+#   (4) no DSR / multiplicity deflation on n=83.
+# This validation strengthens (1) via a delta-MODEL robustness sweep, replaces (2) with the real
+# TX-FUTURE close path (tradeable, basis-bearing, converges to settlement) priced at the empirical
+# tick-level spread, and adds (4) the Deflated Sharpe Ratio at the project's 0.95 capital bar.
+# The true gold-standard for (1) (mark the option leg to its real daily price) still needs the
+# full daily chain (token-gated) — this is the runnable-now strengthening, NOT the final word.
+# NEVER hardcode these thresholds in code/scripts.
+scout:
+  rv_window_trading_days: 252
+  oos_split_frac: 0.5
+
+costs:
+  # option entry (unchanged — no exit spread, TXO cash-settles to the official final settlement)
+  half_spread_pts_per_leg: 1.0
+  fee_pts_per_leg: 0.4
+  tax_rate_on_premium: 0.001
+  # REAL TX-future hedge cost, in absolute INDEX POINTS per rebalance trade (not bps): the TX
+  # min tick is 1 index pt, so the effective half-spread is tick-floored. Corwin-Schultz on the
+  # cont-86 TX 1-min daily high-low came back below estimator resolution (negative median) =>
+  # sub-tick true spread; we use a CONSERVATIVE 1.0-pt half-spread (~0.55 bps), still ~3x cheaper
+  # than the scout's 2bps. Swept in the report.
+  hedge_half_spread_pts: 1.0
+  vol_floor: 0.0014          # min calendar-day tau to keep near-expiry BS gamma sane
+
+hedge:
+  # TX-future session close used as the daily hedge mark. MUST be contemporaneous with the TAIEX
+  # cash close (TWSE 09:00-13:30) — the option's realized variance is measured on the 13:30 spot,
+  # so the hedge return must be the 13:30 future return. The future trades on to 13:45; marking at
+  # 13:45 adds 15 min of extra variance NOT in the option's settlement window => fake basis noise
+  # that wrongly deflates the hedge Sharpe (0.63 -> 0.54 measured). Use 13:30.
+  session_start: "08:45"
+  session_end: "13:30"
+
+gate:
+  net_sharpe_floor: 0.5        # annualized NET Sharpe, PRIMARY variant (TX-fut, entry-IV delta, tick cost)
+  oos_net_sharpe_min: 0.0      # AND > 0 out-of-sample (second half)
+  bootstrap_p_max: 0.05        # AND IID bootstrap p(mean net cycle return <= 0) < 0.05
+  max_equity_beta_abs: 0.15    # hedge must neutralize direction
+  vrp_positive_frac_min: 0.50  # AND IV>RV in >=50% of cycles
+  delta_robust_min_sharpe: 0.5 # AND every CAUSAL delta-model variant stays >= this (caveat-1 robustness)
+  dsr_min: 0.95                # AND Deflated Sharpe Ratio >= 0.95 at the gated trial count (caveat-4)
+
+deflation:
+  # Deflated Sharpe Ratio (Bailey & Lopez de Prado 2014) multiplicity.
+  n_trials_gate: 50            # conservative # of independent strategy configs in the VRP search
+  n_trials_report: [10, 20, 50, 100]   # DSR reported across this grid for transparency
+
+null_model:
+  n_boot: 10000
+
+verdict:
+  # GO    -> the delta-hedged TXO VRP survives a real tradeable hedge, real tick-level cost,
+  #          delta-model perturbation, AND DSR deflation -> proceed to the token-gated final
+  #          validation (full daily chain real-delta mark-to-market + weeklies) then Tier-2 audit.
+  # NO-GO -> the edge was an artifact of the spot/2bps/constant-IV-delta modeling, or fails DSR.
+  require_all: [net_sharpe_above_floor, oos_net_sharpe_positive, beats_bootstrap_null,
+                equity_beta_below_ceiling, vrp_premium_exists, delta_models_robust, dsr_above_floor]
