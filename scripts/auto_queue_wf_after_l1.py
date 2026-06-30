@@ -33,6 +33,7 @@ import sys
 import time
 from pathlib import Path
 
+import yaml
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -56,12 +57,43 @@ WF_CONFIG = "configs/sg1_xauusd_ftmo_rehpo_wf_oanda.yaml"
 WF_NAME_PREFIX = "sg1-xauusd-wf-rehpo-oanda"
 WF_LOG_PREFIX = "run_wf_oanda_seed"
 
-# L1 gate (mirror of configs/sg1_xauusd_ftmo_rehpo_l1_multiseed_oanda.yaml
-# gates block — duplicated here so gate-eval is self-contained).
-L1_PF_FLOOR = 1.2
-L1_PF_CV_MAX = 0.30
-L1_PF_CV_AMBIG_LO = 0.22
-L1_PF_CV_AMBIG_HI = 0.38
+# L1 gate — loaded from the L1 multiseed config's `gates:` block. Per project
+# invariant, numeric gates are NEVER hardcoded; they live in the workstream
+# config / `<workstream>.gates.yaml` and are read at load time.
+L1_GATES_CONFIG = "configs/sg1_xauusd_ftmo_rehpo_l1_multiseed_oanda.yaml"
+
+
+def _load_l1_gates(config_path: str) -> dict:
+    """Load the `gates:` block from the L1 multiseed config.
+
+    Required keys (no silent defaults): `l1_pf_floor`, `l1_pf_cv_max`,
+    `l1_pf_cv_ambiguous` ([lo, hi]). Raises if any are absent.
+    """
+    path = Path(config_path)
+    if not path.is_absolute():
+        path = Path(__file__).resolve().parent.parent / path
+    with path.open(encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh) or {}
+    gates = cfg.get("gates") or {}
+    for key in ("l1_pf_floor", "l1_pf_cv_max", "l1_pf_cv_ambiguous"):
+        if key not in gates:
+            raise KeyError(
+                f"required gate '{key}' missing from gates block of {config_path}"
+            )
+    ambig = gates["l1_pf_cv_ambiguous"]
+    if not (isinstance(ambig, (list, tuple)) and len(ambig) == 2):
+        raise ValueError(
+            f"gate 'l1_pf_cv_ambiguous' in {config_path} must be [lo, hi], "
+            f"got {ambig!r}"
+        )
+    return gates
+
+
+_L1_GATES = _load_l1_gates(L1_GATES_CONFIG)
+L1_PF_FLOOR = float(_L1_GATES["l1_pf_floor"])
+L1_PF_CV_MAX = float(_L1_GATES["l1_pf_cv_max"])
+L1_PF_CV_AMBIG_LO = float(_L1_GATES["l1_pf_cv_ambiguous"][0])
+L1_PF_CV_AMBIG_HI = float(_L1_GATES["l1_pf_cv_ambiguous"][1])
 
 # Polling.
 POLL_INTERVAL = 300       # 5 min

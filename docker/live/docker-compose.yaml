@@ -227,10 +227,12 @@ services:
       - gmgp1-btc-logs:/app/logs
       - gmgp1-btc-state:/app/state
 
+  # SHELVED (re-run only if funding >8%/yr — see project memory). Guarded behind the
+  # `retired` profile so no routine `--profile crypto|all up` can deploy it against live creds.
   funding-arb:
     <<: *crypto-strategy
     container_name: funding-arb
-    profiles: [crypto, all]
+    profiles: [retired]
     labels:
       finrl.monitor: "true"
       finrl.strategy: "funding-arb"
@@ -249,10 +251,12 @@ services:
       - funding-arb-logs:/app/logs
       - funding-arb-state:/app/state
 
+  # RETIRED (Sync-1H pilot failure). Guarded behind the `retired` profile so no routine
+  # `--profile crypto|all up` can deploy it against live creds.
   sync-1h:
     <<: *crypto-strategy
     container_name: sync-1h
-    profiles: [crypto, all]
+    profiles: [retired]
     labels:
       finrl.monitor: "true"
       finrl.strategy: "sync-1h"
