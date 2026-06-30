@@ -17,7 +17,10 @@ _DEFAULTS: dict = {
         "promising_ic_ir": 0.05,
         "promising_ic_tstat": 3.0,
     },
-    "deflation": {"promising_dsr": 0.90, "fdr_q_max": 0.10},
+    "deflation": {"promising_dsr": 0.90, "fdr_q_max": 0.10,
+                  "use_effective_n": False, "effective_n_min_overlap": 23,
+                  "hlz_t_min": 3.0, "require_hlz": False},
+    "cpcv": {"enabled": True, "n_groups": 6, "k_test": 2, "embargo_days": 5},
     "robustness": {"min_subperiod_ic_ir": 0.0, "recent_oos_years": 2},
     "capturability": {
         "cost_models": {"frictionless": 0.0, "standard": 0.0010, "harsh": 0.0025},
@@ -48,6 +51,14 @@ class Gates:
     promising_ic_tstat: float
     promising_dsr: float
     fdr_q_max: float
+    use_effective_n: bool          # C2.1 — deflate DSR against effective (clustered) N
+    effective_n_min_overlap: int   # C2.1 — min common IC-days to correlate a trial pair
+    hlz_t_min: float               # C2.3 — Harvey-Liu-Zhu t-stat hurdle
+    require_hlz: bool              # C2.3 — fold hlz_pass into PROMISING (default off)
+    cpcv_enabled: bool             # C2.2 — run combinatorial purged CV
+    cpcv_n_groups: int
+    cpcv_k_test: int
+    cpcv_embargo_days: int
     neutralization: tuple[str, ...]
     winsor_pct: tuple[float, float]
     cost_models: dict
@@ -59,7 +70,18 @@ class Gates:
     @classmethod
     def from_dict(cls, d: dict | None = None) -> "Gates":
         m = _merge(_DEFAULTS, d)
-        gp, defl, neu = m["gross_power"], m["deflation"], m["neutralization"]
+        gp, defl, neu, cpcv = m["gross_power"], m["deflation"], m["neutralization"], m["cpcv"]
+        n_groups, k_test = int(cpcv["n_groups"]), int(cpcv["k_test"])
+        if n_groups < 2:
+            raise ValueError(f"cpcv.n_groups must be >= 2, got {n_groups}")
+        if not (1 <= k_test < n_groups):
+            raise ValueError(f"cpcv.k_test must satisfy 1 <= k_test < n_groups, got {k_test}")
+        if int(cpcv["embargo_days"]) < 0:
+            raise ValueError("cpcv.embargo_days must be >= 0")
+        if float(defl["hlz_t_min"]) < 0:
+            raise ValueError("deflation.hlz_t_min must be >= 0")
+        if int(defl["effective_n_min_overlap"]) < 2:
+            raise ValueError("deflation.effective_n_min_overlap must be >= 2")
         return cls(
             horizons=tuple(int(h) for h in gp["horizons"]),
             primary_horizon=int(gp["primary_horizon"]),
@@ -70,6 +92,14 @@ class Gates:
             promising_ic_tstat=float(gp["promising_ic_tstat"]),
             promising_dsr=float(defl["promising_dsr"]),
             fdr_q_max=float(defl["fdr_q_max"]),
+            use_effective_n=bool(defl["use_effective_n"]),
+            effective_n_min_overlap=int(defl["effective_n_min_overlap"]),
+            hlz_t_min=float(defl["hlz_t_min"]),
+            require_hlz=bool(defl["require_hlz"]),
+            cpcv_enabled=bool(cpcv["enabled"]),
+            cpcv_n_groups=n_groups,
+            cpcv_k_test=k_test,
+            cpcv_embargo_days=int(cpcv["embargo_days"]),
             neutralization=tuple(["winsor", "zscore", *neu["controls"]]),
             winsor_pct=(float(neu["winsor_pct"][0]), float(neu["winsor_pct"][1])),
             cost_models=dict(m["capturability"]["cost_models"]),

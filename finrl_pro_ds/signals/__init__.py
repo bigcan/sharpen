@@ -15,8 +15,10 @@ from __future__ import annotations
 from ._ic import (
     CrossSectionalIC,
     bh_fdr,
+    bhy_fdr,
     block_bootstrap_mean,
     cross_sectional_ic,
+    effective_n_trials,
     one_sided_p,
     spearman_ic,
 )
@@ -51,6 +53,8 @@ __all__ = [
     "spearman_ic",
     "one_sided_p",
     "bh_fdr",
+    "bhy_fdr",
+    "effective_n_trials",
     "block_bootstrap_mean",
     "COST_MODELS",
     "max_drawdown",

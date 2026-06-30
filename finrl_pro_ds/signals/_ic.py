@@ -23,7 +23,7 @@ perturbing their committed verdict JSONs; re-pointing is a deferred cleanup.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 import pandas as pd
@@ -37,7 +37,10 @@ class CrossSectionalIC:
     ``ic_series`` is the per-day Spearman IC (only valid days retained). ``ic_ir`` is the
     per-period information ratio ``ic_mean / ic_std`` (Grinold); ``ic_tstat`` is its
     significance ``ic_ir * sqrt(n_days)`` (== the quantity ``_xs_ic`` returned as its
-    "ic_ir"). All are NaN when fewer than 2 valid days exist.
+    "ic_ir"). All are NaN when fewer than 2 valid days exist. ``kept_days`` are the integer
+    row indices into the original ``(T, N)`` panel that survived the ``min_names``/finite
+    gate and produced ``ic_series`` (1:1, same length) — used by ``effective_n_trials`` to
+    date-align the IC series of different signals onto a common grid (C2.1).
     """
 
     ic_series: np.ndarray
@@ -47,6 +50,7 @@ class CrossSectionalIC:
     ic_tstat: float
     n_days: int
     n_obs_total: int
+    kept_days: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
 
 
 def spearman_ic(
@@ -122,17 +126,18 @@ def cross_sectional_ic(
         ic_row = np.where(denom > 0, cov / denom, np.nan)   # (T,) per-day Spearman
 
     keep = (n >= min_names) & np.isfinite(ic_row)
+    kept_idx = np.flatnonzero(keep).astype(np.int64)         # panel-row indices behind ic_series
     arr = ic_row[keep].astype(np.float64)
     n_days = int(arr.size)
     n_obs = int(n[keep].sum())
     if n_days < 2:
         return CrossSectionalIC(arr, float("nan"), float("nan"), float("nan"),
-                                float("nan"), n_days, n_obs)
+                                float("nan"), n_days, n_obs, kept_idx)
     ic_mean = float(arr.mean())
     ic_std = float(arr.std(ddof=1))
     ic_ir = ic_mean / ic_std if ic_std > 0 else float("nan")
     ic_tstat = ic_ir * float(np.sqrt(n_days)) if np.isfinite(ic_ir) else float("nan")
-    return CrossSectionalIC(arr, ic_mean, ic_std, ic_ir, ic_tstat, n_days, n_obs)
+    return CrossSectionalIC(arr, ic_mean, ic_std, ic_ir, ic_tstat, n_days, n_obs, kept_idx)
 
 
 def one_sided_p(ic: float, se: float) -> float:
@@ -167,6 +172,110 @@ def bh_fdr(pvals: list[float]) -> list[float]:
         prev = min(prev, val)
         q[i] = prev
     return q.tolist()
+
+
+def bhy_fdr(pvals: list[float]) -> list[float]:
+    """Benjamini-Hochberg-Yekutieli FDR q-values — valid under ARBITRARY dependence (C2.3).
+
+    Plain BH (:func:`bh_fdr`) controls the false-discovery rate only under independence or
+    positive-regression dependence (PRDS). Yekutieli (2001) extends FDR control to *any*
+    dependence structure by inflating every threshold by the harmonic factor
+    ``c(m) = Σ_{i=1}^{m} 1/i`` (≈ ln m + γ_E):
+
+        q_(i) = min_{j ≥ i} [ p_(j) · m · c(m) / j ]
+
+    so ``bhy_fdr(p)[i] >= bh_fdr(p)[i]`` elementwise (strictly more conservative). This is
+    the Harvey-Liu-Zhu recommended multiple-testing control for the cross-section of
+    expected returns (the "HLZ haircut" hurdle, alongside the t>3 bar). Monotone, bounded
+    to [0, 1]. Returns ``[]`` for an empty input.
+    """
+    p = np.asarray(pvals, dtype=np.float64)
+    m = len(p)
+    if m == 0:
+        return []
+    c_m = float(np.sum(1.0 / np.arange(1, m + 1)))          # harmonic dependence penalty
+    order = np.argsort(p)
+    q = np.empty(m)
+    prev = 1.0
+    for rank_i in range(m - 1, -1, -1):                     # walk high→low rank, running min
+        i = order[rank_i]
+        val = p[i] * m * c_m / (rank_i + 1)
+        prev = min(prev, val)
+        q[i] = min(prev, 1.0)
+    return q.tolist()
+
+
+def effective_n_trials(
+    series_list: list[np.ndarray],
+    days_list: list[np.ndarray],
+    *,
+    n_periods: int | None = None,
+    min_overlap: int = 23,
+) -> float:
+    """Effective number of *independent* trials among correlated IC series (C2.1).
+
+    The Deflated Sharpe order statistic ``E[max SR over N trials]`` uses ``N`` = the number
+    of configurations searched. When the ``N`` candidates are correlated (e.g. a formulaic-
+    alpha library), the raw count over-states the *independent* breadth of the search,
+    inflating the deflation benchmark ``SR*`` and over-penalizing (Type-II — real alphas
+    killed). This returns the **participation ratio** (effective rank) of the trial
+    correlation matrix ``R``::
+
+        N_eff = (Σ λ_i)² / Σ λ_i²        (λ = eigenvalues of the K×K trial-corr matrix)
+
+    which equals ``K`` when the trials are mutually uncorrelated (λ ≡ 1) and tends to 1 when
+    all identical (one λ = K, the rest 0) — a continuous relaxation of "number of
+    correlation clusters" (López de Prado, *Detection of False Investment Strategies*).
+    Clamped to ``[1, K]``; ``K < 2`` returns ``K``.
+
+    The ``series_list[j]`` IC series is aligned on its ``days_list[j]`` panel-row indices
+    into a common ``[0, n_periods)`` grid. Each pairwise Pearson correlation uses only days
+    where BOTH series are present; a pair with fewer than ``min_overlap`` common days is
+    treated as uncorrelated (``r = 0``) — the conservative side, counting toward MORE
+    effective trials (a higher deflation bar). Pairwise-complete ``R`` may be slightly
+    non-PSD, so negative eigenvalues are clipped to 0 before the ratio (standard
+    regularization).
+    """
+    K = len(series_list)
+    if K != len(days_list):
+        raise ValueError("series_list and days_list must be equal length")
+    if K < 2:
+        return float(K)
+    if n_periods is None:
+        n_periods = 1 + max((int(np.asarray(d).max()) for d in days_list
+                             if np.asarray(d).size), default=0)
+    n_periods = max(int(n_periods), 1)
+
+    mat = np.full((n_periods, K), np.nan, dtype=np.float64)
+    for j, (s, d) in enumerate(zip(series_list, days_list)):
+        sv = np.asarray(s, dtype=np.float64).reshape(-1)
+        dv = np.asarray(d, dtype=np.int64).reshape(-1)
+        if dv.size != sv.size:                              # defensive: align on shorter prefix
+            mlen = min(dv.size, sv.size)
+            sv, dv = sv[:mlen], dv[:mlen]
+        ok = (dv >= 0) & (dv < n_periods) & np.isfinite(sv)
+        mat[dv[ok], j] = sv[ok]
+
+    corr = np.eye(K, dtype=np.float64)
+    for i in range(K):
+        xi = mat[:, i]
+        for jj in range(i + 1, K):
+            xj = mat[:, jj]
+            both = np.isfinite(xi) & np.isfinite(xj)
+            rij = 0.0
+            if int(both.sum()) >= min_overlap:
+                a, b = xi[both], xj[both]
+                if a.std() > 0 and b.std() > 0:
+                    r = float(np.corrcoef(a, b)[0, 1])
+                    rij = r if np.isfinite(r) else 0.0
+            corr[i, jj] = corr[jj, i] = rij
+
+    lam = np.clip(np.linalg.eigvalsh(corr), 0.0, None)      # clip tiny non-PSD negatives
+    denom = float((lam ** 2).sum())
+    if denom <= 0.0:
+        return float(K)
+    n_eff = float(lam.sum() ** 2 / denom)
+    return float(min(max(n_eff, 1.0), float(K)))
 
 
 def block_bootstrap_mean(
