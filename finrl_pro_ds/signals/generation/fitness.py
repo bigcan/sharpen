@@ -15,9 +15,15 @@ sleeve book* (the Synergistic-RL move) — not its standalone IC. Concretely, fo
     net of turnover·bps (done by the caller), and ``F`` further penalizes excess turnover and AST
     complexity.
 
-Redundancy earns ≈0 (the combiner won't weight a sleeve collinear with one it already holds);
-pure noise earns ≤0 after deflation. No thresholds are hardcoded here — every number arrives via
-:class:`FitnessConfig` (built from ``configs/signal_eval.gates.yaml::generation`` by the runner).
+Pure noise earns ≤0 after deflation. **CAVEAT (ADR-C1-5, deferred — Tier-2 GP4-01/GP6-02):** the
+SHIPPED C1 combiner is pure inverse-vol with no correlation term, so a candidate *collinear* with
+an existing sleeve is NOT zeroed — it concentrates the book and can earn ``ΔSharpe > 0``, i.e. a
+redundant *rediscovery* of an existing edge can pass the advisory gate. The "redundancy earns ≈0 /
+diversity-for-free" property requires the ADR-C1-5 recent-correlation down-weight (or a
+candidate-vs-base correlation hurdle here); until that ships, a survivor's correlation to the base
+sleeves MUST be hand-checked before any Tier-2 read. No thresholds are hardcoded here — every
+number arrives via :class:`FitnessConfig` (built from ``configs/signal_eval.gates.yaml::generation``
+by the runner).
 """
 from __future__ import annotations
 
