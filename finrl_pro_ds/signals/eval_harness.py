@@ -13,7 +13,7 @@ power is deliberately frictionless here ("find signals with high predictive powe
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -28,13 +28,22 @@ from finrl_pro_ds.crypto.eval.statistics import (
     skewness,
 )
 
-from ._ic import bh_fdr, block_bootstrap_mean, cross_sectional_ic, one_sided_p, spearman_ic
+from ._ic import (
+    bh_fdr,
+    bhy_fdr,
+    block_bootstrap_mean,
+    cross_sectional_ic,
+    effective_n_trials,
+    one_sided_p,
+    spearman_ic,
+)
 from .costs import max_drawdown, profit_factor
 from .features import Panel, neutralize, ohlc_violations
 
 TRADING_DAYS = 252
 
 if TYPE_CHECKING:
+    from .gates import Gates
     from .protocol import Signal
 
 
@@ -137,6 +146,8 @@ class GrossPower:
     breadth: float          # fraction of sectors with positive direction-adjusted IC
     decay_halflife: float   # horizon where |IC| falls to half its shortest-horizon value
     primary_ic_series: np.ndarray  # direction-adjusted daily IC at the primary horizon (for T4)
+    # panel-row indices behind primary_ic_series (date-aligns trials for N_eff, C2.1)
+    primary_ic_days: np.ndarray = field(default_factory=lambda: np.empty(0, dtype=np.int64))
 
 
 def _decile_spread(
@@ -231,6 +242,7 @@ def tier1_gross_power(
     by_h: dict[int, HorizonIC] = {}
     primary_eff: np.ndarray | None = None
     primary_series: np.ndarray | None = None
+    primary_days: np.ndarray | None = None
     for h in horizons:
         fwd = panel.forward_returns(h)
         eff = scores * sign
@@ -246,17 +258,19 @@ def tier1_gross_power(
         if h == primary_horizon:
             primary_eff = eff
             primary_series = r.ic_series
+            primary_days = r.kept_days
 
     if primary_eff is None:  # primary_horizon not in horizons -> compute its IC directly
         primary_eff = scores * sign
-        primary_series = cross_sectional_ic(
-            primary_eff, panel.forward_returns(primary_horizon),
-            active=panel.active, min_names=min_names).ic_series
+        pr = cross_sectional_ic(primary_eff, panel.forward_returns(primary_horizon),
+                                active=panel.active, min_names=min_names)
+        primary_series = pr.ic_series
+        primary_days = pr.kept_days
 
     breadth = _breadth(primary_eff, panel, primary_horizon)
     decay = _decay_halflife({h: by_h[h].ic_mean for h in horizons})
-    assert primary_series is not None
-    return GrossPower(by_h, primary_horizon, breadth, decay, primary_series)
+    assert primary_series is not None and primary_days is not None
+    return GrossPower(by_h, primary_horizon, breadth, decay, primary_series, primary_days)
 
 
 # --------------------------------------------------------------------- Tier 4 ----
@@ -278,18 +292,43 @@ class Deflation:
     fdr_q: float
     n_trials: int
     sr_star: float
+    n_eff: float = float("nan")        # effective independent trial count (C2.1)
+    fdr_q_bhy: float = float("nan")    # dependence-robust Yekutieli FDR q (C2.3)
+    hlz_pass: bool = False             # ic_tstat >= hlz_t_min AND fdr_q_bhy <= fdr_q_max (C2.3)
 
 
-def tier4_deflation(primary_results: dict[str, GrossPower]) -> dict[str, Deflation]:
+def tier4_deflation(primary_results: dict[str, GrossPower],
+                    gates: "Gates | None" = None) -> dict[str, Deflation]:
     """Batch-level deflation. The deflation pool = signals with a finite primary IC-IR;
     ``n_trials`` is its size (the honest multiple-comparison count). Signals outside the
     pool get a null Deflation.
+
+    Component 2 additions (all back-compat — defaults reproduce the raw-N behaviour):
+      * **N_eff (C2.1)** — when ``gates.use_effective_n`` is set, the DSR order statistic
+        deflates against the *effective* independent trial count (participation ratio of the
+        trial IC-correlation matrix) instead of the raw pool size, fixing the Type-II
+        over-penalty on a correlated candidate library. ``n_trials`` (raw) and ``n_eff`` are
+        both reported regardless; the substitution into DSR only happens under the flag.
+      * **BHY + HLZ (C2.3)** — the dependence-robust Yekutieli q-value and an ``hlz_pass``
+        flag (t ≥ ``hlz_t_min`` AND ``fdr_q_bhy`` ≤ ``fdr_q_max``) are always computed.
     """
     pool = [n for n, g in primary_results.items()
             if np.isfinite(g.by_horizon[g.primary_horizon].ic_ir)
             and g.primary_ic_series.size >= 3]
     irs = [primary_results[n].by_horizon[primary_results[n].primary_horizon].ic_ir for n in pool]
     n_trials = len(irs)
+
+    use_eff = bool(getattr(gates, "use_effective_n", False)) if gates is not None else False
+    hlz_t_min = float(getattr(gates, "hlz_t_min", 3.0)) if gates is not None else 3.0
+    q_max = float(getattr(gates, "fdr_q_max", 0.10)) if gates is not None else 0.10
+    min_overlap = int(getattr(gates, "effective_n_min_overlap", 23)) if gates is not None else 23
+
+    n_eff = float(effective_n_trials(
+        [primary_results[n].primary_ic_series for n in pool],
+        [primary_results[n].primary_ic_days for n in pool],
+        min_overlap=min_overlap)) if n_trials >= 2 else float(n_trials)
+    # the count fed to DSR's E[max] order statistic (raw N, or effective N under the flag)
+    n_dsr = max(2, int(round(n_eff))) if (use_eff and n_trials >= 2) else n_trials
 
     pvals: list[float] = []
     for n in pool:
@@ -302,6 +341,7 @@ def tier4_deflation(primary_results: dict[str, GrossPower]) -> dict[str, Deflati
             se = float(np.std(s, ddof=1) / np.sqrt(s.size)) if s.size > 1 else 0.0
             pvals.append(one_sided_p(hp.ic_mean, se))
     qs = bh_fdr(pvals)
+    qs_bhy = bhy_fdr(pvals)
 
     out: dict[str, Deflation] = {}
     for i, n in enumerate(pool):
@@ -310,11 +350,14 @@ def tier4_deflation(primary_results: dict[str, GrossPower]) -> dict[str, Deflati
         series = g.primary_ic_series
         d = (deflated_sharpe_ratio(
             hp.ic_ir, irs, n_obs=hp.n_days, skew=skewness(series.tolist()),
-            excess_kurt=excess_kurtosis(series.tolist()), n_trials=n_trials,
+            excess_kurt=excess_kurtosis(series.tolist()), n_trials=n_dsr,
             periods_per_year=1) if n_trials >= 2 else None)
         psr = float(probabilistic_sharpe_ratio(series, sr_benchmark=0.0, periods_per_year=1))
         mintrl = float(min_track_record_length(series, sr_benchmark=0.0, prob=0.95,
                                                periods_per_year=1))
+        q_bhy = float(qs_bhy[i])
+        hlz_pass = bool(np.isfinite(hp.ic_tstat) and hp.ic_tstat >= hlz_t_min
+                        and np.isfinite(q_bhy) and q_bhy <= q_max)
         out[n] = Deflation(
             dsr=d["dsr"] if d else float("nan"),
             psr=psr,
@@ -323,10 +366,14 @@ def tier4_deflation(primary_results: dict[str, GrossPower]) -> dict[str, Deflati
             fdr_q=float(qs[i]),
             n_trials=n_trials,
             sr_star=d["sr_star"] if d else float("nan"),
+            n_eff=n_eff,
+            fdr_q_bhy=q_bhy,
+            hlz_pass=hlz_pass,
         )
     for n in primary_results:
         out.setdefault(n, Deflation(float("nan"), float("nan"), float("inf"),
-                                    float("inf"), float("nan"), n_trials, float("nan")))
+                                    float("inf"), float("nan"), n_trials, float("nan"),
+                                    n_eff))
     return out
 
 
@@ -461,6 +508,98 @@ def tier3_robustness(sig: "Signal", panel: Panel, gates, *, neutralization, expe
         min(finite) if finite else float("nan"),
         float(np.mean(finite)) if finite else float("nan"),
         rr.ic_ir, recent_n)
+
+
+# ------------------------------------------------------- Tier 3.5 (CPCV) ----
+
+@dataclass(frozen=True, slots=True)
+class CPCVResult:
+    """Combinatorial Purged Cross-Validation — a *distribution* of OOS Sharpe (C2.2).
+
+    Replaces the single Tier-3 contiguous-subperiod point estimates with the spread of the
+    L/S book's annualized Sharpe across the ``C(n_groups, k_test)`` held-out test-group
+    unions, each purged + embargoed so no forward-return label window crosses a train gap.
+    """
+
+    n_groups: int
+    k_test: int
+    n_paths: int
+    oos_sharpe_mean: float
+    oos_sharpe_std: float
+    oos_sharpe_p05: float          # 5th-percentile OOS Sharpe across paths (fragility)
+    frac_paths_positive: float
+    embargo_days: int
+    purge_horizon: int
+
+
+def _contiguous_runs(mask: np.ndarray):
+    """Yield ``(start, stop)`` half-open bounds of each contiguous True run in ``mask``."""
+    idx = np.flatnonzero(mask)
+    if idx.size == 0:
+        return
+    brk = np.flatnonzero(np.diff(idx) > 1)
+    starts = np.concatenate(([0], brk + 1))
+    stops = np.concatenate((brk + 1, [idx.size]))
+    for a, b in zip(starts, stops):
+        yield int(idx[a]), int(idx[b - 1]) + 1
+
+
+def tier3_5_cpcv(sig: "Signal", panel: Panel, gates, *, neutralization, expected_sign,
+                 horizon: int, n_groups: int = 6, k_test: int = 2, embargo_days: int = 5,
+                 scores: np.ndarray | None = None) -> CPCVResult:
+    """Combinatorial Purged CV distribution of the rank-L/S book's OOS Sharpe.
+
+    Partition ``[0, T)`` into ``n_groups`` contiguous groups; for every combination of
+    ``k_test`` groups, the test set is their union. Inside each contiguous test run
+    ``[a, b)`` the run start is **embargoed** by ``embargo_days`` and non-overlapping
+    ``horizon``-day rebalances are taken while the label window ``(t, t+horizon]`` stays
+    fully inside the run (**purge** — a window never crosses into a train gap). One
+    annualized Sharpe per combination ⇒ a distribution over ``C(n_groups, k_test)`` paths.
+    Verdict-neutral (reported only); parameter-free signal ⇒ no model to refit per path
+    (ADR-C2-2), the value is the OOS *distribution* + standard error vs a single estimate.
+    """
+    from itertools import combinations
+
+    eff = _neutralized_eff(sig, panel, neutralization, expected_sign, horizon, scores)
+    fwd_h = panel.forward_returns(horizon)
+    T = panel.T
+    ppy = TRADING_DAYS / horizon
+    bounds = np.linspace(0, T, n_groups + 1).astype(int)
+    groups = [(int(bounds[i]), int(bounds[i + 1])) for i in range(n_groups)]
+    combos = list(combinations(range(n_groups), k_test))
+    n_paths = len(combos)
+
+    sharpes: list[float] = []
+    for combo in combos:
+        in_test = np.zeros(T, dtype=bool)
+        for gi in combo:
+            a, b = groups[gi]
+            in_test[a:b] = True
+        rets: list[float] = []
+        for a, b in _contiguous_runs(in_test):
+            t = a + embargo_days                      # embargo at run start
+            # purge: fwd_h[t] reads close[t+horizon], so require t+horizon <= b-1 (strictly
+            # inside [a, b)) — never read a train-region price across the run seam.
+            while t + horizon < b:
+                w = _ls_weights(eff[t], panel.active[t])
+                rets.append(float(np.nansum(w * fwd_h[t])))
+                t += horizon
+        if len(rets) >= 2:
+            sh = _ann_sharpe(np.asarray(rets), ppy)
+            if np.isfinite(sh):
+                sharpes.append(sh)
+
+    arr = np.asarray(sharpes, dtype=np.float64)
+    if arr.size == 0:
+        return CPCVResult(n_groups, k_test, n_paths, float("nan"), float("nan"),
+                          float("nan"), float("nan"), embargo_days, horizon)
+    return CPCVResult(
+        n_groups, k_test, n_paths,
+        float(arr.mean()),
+        float(arr.std(ddof=1)) if arr.size > 1 else 0.0,
+        float(np.quantile(arr, 0.05)),
+        float((arr > 0.0).mean()),
+        embargo_days, horizon)
 
 
 # --------------------------------------------------------------------- Tier 5 ----

@@ -21,6 +21,7 @@ import numpy as np
 from .eval_harness import (
     Capturability,
     compute_scores,
+    CPCVResult,
     Deflation,
     FactorBook,
     GrossPower,
@@ -32,6 +33,7 @@ from .eval_harness import (
     tier1_gross_power,
     tier2_capturability,
     tier3_robustness,
+    tier3_5_cpcv,
     tier4_deflation,
     tier5_orthogonality,
 )
@@ -56,6 +58,7 @@ class SignalScorecard:
     capturability: Capturability | None = None
     robustness: Robustness | None = None
     orthogonality: Orthogonality | None = None
+    cpcv: CPCVResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -83,7 +86,7 @@ def evaluate_signal(sig: "Signal", panel: Panel, gates: Gates,
     hy = tier0_hygiene(sig, panel, min_days=gates.min_days,
                        min_names_per_day=gates.min_names_per_day,
                        max_ohlc_violations=gates.max_ohlc_violations)
-    gross = cap = rob = orth = None
+    gross = cap = rob = orth = cpcv = None
     if hy.passed:
         ns, es, ph = sig.spec.neutralization, sig.spec.expected_sign, gates.primary_horizon
         mn = gates.min_names_per_day
@@ -95,13 +98,18 @@ def evaluate_signal(sig: "Signal", panel: Panel, gates: Gates,
                                   hold_horizon=ph, scores=scores)
         rob = tier3_robustness(sig, panel, gates, neutralization=ns, expected_sign=es,
                                horizon=ph, scores=scores, min_names=mn)
+        if gates.cpcv_enabled:
+            cpcv = tier3_5_cpcv(sig, panel, gates, neutralization=ns, expected_sign=es,
+                                horizon=ph, n_groups=gates.cpcv_n_groups,
+                                k_test=gates.cpcv_k_test, embargo_days=gates.cpcv_embargo_days,
+                                scores=scores)
         if factor_book is not None:
             orth = tier5_orthogonality(sig, panel, factor_book, neutralization=ns,
                                        expected_sign=es, horizon=ph, scores=scores)
     verdict = "GATE_FAIL" if not hy.passed else "PENDING"
     return SignalScorecard(sig.spec.name, sig.spec.family, sig.spec.content_hash(), hy,
                            gross, None, float("nan"), verdict, (), capturability=cap,
-                           robustness=rob, orthogonality=orth)
+                           robustness=rob, orthogonality=orth, cpcv=cpcv)
 
 
 def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
@@ -135,12 +143,23 @@ def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
         caveats.append(f"highly correlated to {fac} "
                        f"(|corr|={card.orthogonality.max_abs_corr:.2f})")
 
+    # HLZ / BHY hurdle (C2.3): reported + caveated; folded into PROMISING only under require_hlz.
+    hlz_pass = bool(defl is not None and defl.hlz_pass)
     promising = (
         defl is not None and np.isfinite(dsr) and dsr >= gates.promising_dsr
         and np.isfinite(hp.ic_ir) and hp.ic_ir >= gates.promising_ic_ir
         and np.isfinite(hp.ic_tstat) and hp.ic_tstat >= gates.promising_ic_tstat
         and np.isfinite(defl.fdr_q) and defl.fdr_q <= gates.fdr_q_max
+        and (hlz_pass or not gates.require_hlz)
     )
+    if promising and not hlz_pass:
+        caveats.append(f"fails HLZ hurdle (t>{gates.hlz_t_min:g} & BHY-FDR<={gates.fdr_q_max:g}) "
+                       "— promotion-blocking")
+    # CPCV fragility flag (C2.2): a negative 5th-percentile OOS path is a robustness caveat.
+    if (card.cpcv is not None and np.isfinite(card.cpcv.oos_sharpe_p05)
+            and card.cpcv.oos_sharpe_p05 < 0.0):
+        caveats.append(f"CPCV fragile: p05 OOS Sharpe {card.cpcv.oos_sharpe_p05:.2f}<0 "
+                       f"({card.cpcv.frac_paths_positive:.0%} of {card.cpcv.n_paths} paths +)")
     verdict = "PROMISING" if promising else "LOGGED"
     rank_key = float(dsr) if np.isfinite(dsr) else float("-inf")
     return replace(card, deflation=defl, rank_key=rank_key, verdict=verdict,
@@ -175,7 +194,7 @@ def evaluate_batch(signals: dict[str, "Signal"], panel: Panel, gates: Gates,
     partials = {name: evaluate_signal(sig, panel, gates, factor_book)
                 for name, sig in signals.items()}
     gp = {name: c.gross for name, c in partials.items() if c.gross is not None}
-    defl = tier4_deflation(gp) if gp else {}
+    defl = tier4_deflation(gp, gates) if gp else {}
     cards = [_finalize(c, defl.get(name), gates, panel) for name, c in partials.items()]
     return RankedScorecard(batch_name, gates.primary_horizon, len(gp), rank(cards),
                            dict(panel.meta), dict(gates.raw))
@@ -196,8 +215,8 @@ def _horizon_json(h: HorizonIC) -> dict:
 
 
 def _card_json(c: SignalScorecard) -> dict:
-    g, d, cap, rob, orth = (c.gross, c.deflation, c.capturability, c.robustness,
-                            c.orthogonality)
+    g, d, cap, rob, orth, cpcv = (c.gross, c.deflation, c.capturability, c.robustness,
+                                  c.orthogonality, c.cpcv)
     return {
         "name": c.name, "family": c.family, "spec_hash": c.spec_hash, "verdict": c.verdict,
         "rank_key": _f(c.rank_key),
@@ -210,7 +229,14 @@ def _card_json(c: SignalScorecard) -> dict:
             "by_horizon": {str(h): _horizon_json(hi) for h, hi in g.by_horizon.items()}},
         "deflation": None if d is None else {
             "dsr": _f(d.dsr), "psr": _f(d.psr), "mintrl_years": _f(d.mintrl_years),
-            "fdr_q": _f(d.fdr_q), "n_trials": int(d.n_trials), "sr_star": _f(d.sr_star)},
+            "fdr_q": _f(d.fdr_q), "n_trials": int(d.n_trials), "sr_star": _f(d.sr_star),
+            "n_eff": _f(d.n_eff), "fdr_q_bhy": _f(d.fdr_q_bhy), "hlz_pass": bool(d.hlz_pass)},
+        "cpcv": None if cpcv is None else {
+            "n_groups": cpcv.n_groups, "k_test": cpcv.k_test, "n_paths": cpcv.n_paths,
+            "oos_sharpe_mean": _f(cpcv.oos_sharpe_mean), "oos_sharpe_std": _f(cpcv.oos_sharpe_std),
+            "oos_sharpe_p05": _f(cpcv.oos_sharpe_p05),
+            "frac_paths_positive": _f(cpcv.frac_paths_positive),
+            "embargo_days": cpcv.embargo_days, "purge_horizon": cpcv.purge_horizon},
         "capturability": None if cap is None else {
             "frictionless_sharpe": _f(cap.frictionless_sharpe), "cost_wall": _f(cap.cost_wall),
             "by_cost": {k: {"net_sharpe": _f(v.net_sharpe), "net_pf": _f(v.net_pf),
@@ -242,8 +268,10 @@ def to_markdown(rs: RankedScorecard) -> str:
         f"# Signal Scorecard — {rs.batch_name}", "",
         f"- primary horizon: **{rs.primary_horizon}d**  ·  deflation n_trials: **{rs.n_trials}**",
         f"- survivorship-free data: **{sf}**  (False ⇒ all results are UPPER BOUNDS)", "",
-        "| # | signal | family | verdict | IC-IR | DSR | FDR-q | netSh@std | costWall | breadth |",
-        "|---|--------|--------|---------|-------|-----|-------|-----------|----------|---------|",
+        "| # | signal | family | verdict | IC-IR | DSR | Neff | FDR-q | BHY-q | HLZ "
+        "| cpcvOOS | netSh@std | costWall | breadth |",
+        "|---|--------|--------|---------|-------|-----|------|-------|-------|-----"
+        "|---------|-----------|----------|---------|",
     ]
     rnk = 0
     for c in rs.cards:
@@ -257,6 +285,14 @@ def to_markdown(rs: RankedScorecard) -> str:
                and np.isfinite(c.deflation.dsr) else "—")
         q = (f"{c.deflation.fdr_q:.3f}" if c.deflation is not None
              and np.isfinite(c.deflation.fdr_q) else "—")
+        neff = (f"{c.deflation.n_eff:.1f}" if c.deflation is not None
+                and np.isfinite(c.deflation.n_eff) else "—")
+        qb = (f"{c.deflation.fdr_q_bhy:.3f}" if c.deflation is not None
+              and np.isfinite(c.deflation.fdr_q_bhy) else "—")
+        hlz = ("✓" if (c.deflation is not None and c.deflation.hlz_pass) else "✗") \
+            if c.deflation is not None else "—"
+        cpcv = (f"{c.cpcv.oos_sharpe_mean:.2f}" if c.cpcv is not None
+                and np.isfinite(c.cpcv.oos_sharpe_mean) else "—")
         nsh = cw = "—"
         if c.capturability is not None:
             std = c.capturability.by_cost.get("standard")
@@ -269,8 +305,8 @@ def to_markdown(rs: RankedScorecard) -> str:
             num = str(rnk)
         else:
             num = "—"
-        lines.append(f"| {num} | {c.name} | {c.family} | {c.verdict} | {ir} | {dsr} | {q} "
-                     f"| {nsh} | {cw} | {br} |")
+        lines.append(f"| {num} | {c.name} | {c.family} | {c.verdict} | {ir} | {dsr} | {neff} "
+                     f"| {q} | {qb} | {hlz} | {cpcv} | {nsh} | {cw} | {br} |")
     if rs.cards and rs.cards[0].caveats:
         lines += ["", "**Caveats (top signal):** " + "; ".join(rs.cards[0].caveats)]
     return "\n".join(lines)

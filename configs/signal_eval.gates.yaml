@@ -16,6 +16,15 @@ gross_power:
 deflation:
   promising_dsr: 0.90            # P(true IC-IR>0 after deflation) floor (n_trials=batch size)
   fdr_q_max: 0.10                # Benjamini-Hochberg q ceiling across the batch
+  use_effective_n: false         # C2.1 — deflate DSR vs effective (clustered) N, not raw batch
+  effective_n_min_overlap: 23    # C2.1 — min common IC-days to correlate a trial pair (else r=0)
+  hlz_t_min: 3.0                 # C2.3 — Harvey-Liu-Zhu t-stat hurdle (alongside BHY-FDR)
+  require_hlz: false             # C2.3 — fold hlz_pass into PROMISING (default off: reported only)
+cpcv:                            # Tier 3.5 (C2.2) — combinatorial purged CV, OOS Sharpe dist
+  enabled: true
+  n_groups: 6                    # contiguous timeline groups
+  k_test: 2                      # held-out groups per path -> C(6,2)=15 OOS paths
+  embargo_days: 5                # days dropped after each train->test boundary (purge+embargo)
 robustness:                      # Tier 3 (P5) — reported, refines verdict
   min_subperiod_ic_ir: 0.0       # no negative subperiod
   recent_oos_years: 2
