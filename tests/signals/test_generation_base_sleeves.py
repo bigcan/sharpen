@@ -164,6 +164,38 @@ def test_forward_returns_wide_masks_inactive_endpoints() -> None:
     assert np.isnan(fwd[-1, 0])                              # last row always NaN
 
 
+def test_tsmom_current_bar_no_lookahead() -> None:
+    """GP8-09: perturbing a SINGLE current close bar leaves the tsmom sleeve return at EARLIER bars
+    unchanged — the weight at t reads close[≤t-skip], never the current bar (the X2 failure mode).
+    rets[cut-1] legitimately earns cut-1→cut via close[cut], so the invariant is on rets[≤cut-2]."""
+    panel = _panel()
+    cut = 350
+    c2 = panel.close.copy()
+    c2[cut] *= 1.5
+    panel2 = _panel(close=c2)
+    a = tsmom_sleeve_returns(panel, hold_horizon=_HOLD, cost_bps=_COST)
+    b = tsmom_sleeve_returns(panel2, hold_horizon=_HOLD, cost_bps=_COST)
+    md = float(np.nanmax(np.abs(np.nan_to_num(a[: cut - 1]) - np.nan_to_num(b[: cut - 1]))))
+    assert md < 1e-12, f"current-bar look-ahead in tsmom weight: {md:.3e}"
+
+
+def test_rates_current_bar_no_lookahead() -> None:
+    """GP2-05: perturbing a SINGLE current curve observation leaves the rates sleeve return at
+    earlier bars unchanged — the conviction reads the as-of curve ≤ t (decide-at-t), never future
+    curve. A future refactor that earned the same-day bond return would break this."""
+    panel = _panel()
+    rc_close = _rates_close()
+    curve = _curve(panel.dates)
+    cut = 350
+    curve2 = {k: v.copy() for k, v in curve.items()}
+    for s in curve2.values():
+        s.iloc[cut] *= 1.5                              # perturb exactly one current observation
+    a = rates_carry_sleeve_returns(panel, curve, hold_horizon=_HOLD, cost_bps=_COST, rates_close=rc_close)
+    b = rates_carry_sleeve_returns(panel, curve2, hold_horizon=_HOLD, cost_bps=_COST, rates_close=rc_close)
+    md = float(np.nanmax(np.abs(np.nan_to_num(a[:cut]) - np.nan_to_num(b[:cut]))))
+    assert md < 1e-12, f"rates weight reads non-past curve: {md:.3e}"
+
+
 def test_rates_vol_scaling_uses_momentum_constants() -> None:
     """The rates sleeve vol-scales with the SAME locked constants as the momentum baseline."""
     panel = _panel()
