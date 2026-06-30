@@ -2,14 +2,17 @@
 
 This document provides foundational mandates and technical specifications for Gemini CLI when working on the **DeepScalper** project.
 
+> **Last updated: 2026-06-30.** Canonical project state lives in `CLAUDE.md` (Project Brief) and `.agent/memory/core.md` — treat those as authoritative over this guide.
+
 ## 0. Prime Directive
 - **Primary Role**: Your prime directive is to **review, audit, and advise Claude Code's work**, and to help Claude accomplish its missions on this project.
 - **Code Edits**: You must **make NO code edits** unless you are given clear permissions.
 
 ## 1. Project Brief & Status
 - **Goal**: Profitable RL quant trading across asset classes (BTC, Gold, Crypto Perps, Funding Arb).
-- **Active Agent**: **SAC only** (Implicit Quantile Network (IQN), Branching Dueling Q-Network (BDQ), and PPO are falsified/legacy).
-- **Primary Workstreams**: GMGP1 SAC Gold 15m, Sync-1H crypto, Funding-Arb.
+- **Active Agent**: **SAC only** (Implicit Quantile Network (IQN), Branching Dueling Q-Network (BDQ), and PPO are present but none profitable yet).
+- **Live Direction**: Sole live edge = **cross-asset TSMOM** (linear time-series momentum across ~18 ETFs / 4 asset classes, net Sharpe ~0.60, low SPY correlation), currently gated at paper (DSR 0.918 < 0.95). Active R&D thrust = the **`finrl_pro_ds/signals/` alpha-mining funnel** (deflated 6-tier evaluation funnel + AlphaForge-style mine → deflate → combine).
+- **Other Workstreams**: GMGP1 SAC Gold 15m (FTMO/Velotrade contender, paper). **Retired/shelved** (do NOT present as active): Sync-1H crypto (pilot failure — retired), Funding-Arb (SHELVED, re-run only if funding > 8%/yr), MM-SAC / V8 (retired S442), PRISM (falsified), AlphaSeek (terminated NO-GO).
 - **Reference State**: `.agent/memory/core.md` (Read at boot for active decisions). R&D log: `randd_log.md`.
 
 ## 2. Technical Stack
@@ -64,7 +67,8 @@ Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never to
     - `continuous_swing_env.py` (V7): **ACTIVE** (Continuous positions).
     - `market_making_env.py` (V8): **RETIRED** (S442 - MM-SAC workstream closed).
     - `deep_scalper_env.py` (V5) / `swing_scalper_env.py` (V6): **LEGACY** (Discrete actions, do not modify action spaces).
-- **`finrl_pro_ds/crypto/`**: **ACTIVE** (Sync-1H, Funding Arb, Live Engine).
+- **`finrl_pro_ds/crypto/`**: Live Engine **ACTIVE**; Sync-1H **RETIRED** (pilot failure) and Funding-Arb **SHELVED** (re-run only if funding > 8%/yr).
+- **`finrl_pro_ds/signals/`**: **ACTIVE** (alpha-mining funnel — deflated 6-tier evaluation + AlphaForge-style mine → deflate → combine).
 - **`finrl_pro_ds/data/multiscale_handler.py`**: **ACTIVE** (SAC/GMGP1 scaling).
 
 ## 6. Env Contracts (ACTIVE)

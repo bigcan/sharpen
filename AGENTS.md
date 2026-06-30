@@ -1,9 +1,11 @@
 
 # AGENTS.md — FinRL Pro Repo Agent Guide
 
-Last updated: 2026-03-10
+Last updated: 2026-06-30
 
 This document instructs AI coding agents working in this repository. It defines persona, workflow, guardrails, quality gates, technique templates, and ready‑to‑run macros tailored to the FinRL Pro scaffold built atop FinRL Podracer.
+
+> **Canonical project state** lives in `CLAUDE.md` (Project Brief) and `.agent/memory/core.md`. Active direction: cross-asset TSMOM (sole live edge) and the `finrl_pro_ds/signals/` alpha-mining funnel. Sync-1H and Funding-Arb are **retired/shelved**, not active. Treat `CLAUDE.md` + `core.md` as authoritative over this guide.
 
 ## 0. Prime Directive
 

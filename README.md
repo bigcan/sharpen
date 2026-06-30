@@ -7,20 +7,22 @@ An institutional-grade research and deployment platform for reinforcement learni
 **Ultimate goal:** a diversified portfolio of live-deployed RL strategies — uncorrelated across asset classes and timeframes — each generating sustained risk-adjusted alpha net of fees.
 **Short-term milestone:** pass prop-firm challenges (FTMO, Velotrade, The5ers, HyroTrader, FundingPips, MFFU) as proof-of-capital.
 
+> **Canonical project state** lives in `CLAUDE.md` (Project Brief) and `.agent/memory/core.md`. This README is a dev-facing overview — when in doubt, those two are authoritative.
+
 ---
 
 ## Active Workstreams
 
 | Workstream | Env | Asset(s) | Timeframe | Status |
 |------------|-----|----------|-----------|--------|
+| **Cross-asset TSMOM** | linear (no RL) | ~18 ETFs / 4 asset classes | daily | **Sole live edge.** Linear time-series momentum, net Sharpe ~0.60, low SPY correlation. Gated at paper (DSR 0.918 < 0.95). |
+| **signals/ alpha-mining funnel** | `finrl_pro_ds/signals/` | research | — | **Active R&D thrust.** Deflated 6-tier evaluation funnel + AlphaForge-style mine → deflate → combine. |
 | **GMGP1** | V7 ContinuousSwing (SAC) | Gold / XAUUSD / BTC | 15 min | FTMO + Velotrade contender; paper trading live |
 | **SG-1** | V7 ContinuousSwing (SAC) | XAUUSD / BTC | 3 min | Intraday diversity strategy; Arm B ablation in progress |
-| **Sync-1H** | CryptoPerp (SAC) | 20 crypto perps | 1 hour | Multi-asset crypto; fix set F1–F5 integrated |
-| **Funding-Arb** | FundingArb (DSAC) | 10 crypto perps | Funding cycle | v3 DSAC implemented; HPO pending |
 
-> **Active agent: SAC only.** IQN / BDQ / PPO code is present but none are profitable yet. Other algorithms (DSAC, PPG, CQL) are researched per gated plans.
+> **Active agent: SAC only.** IQN / BDQ / PPO code is present but none are profitable yet. Other algorithms are researched per gated plans.
 
-**Retired:** DeepScalper (V5/V6), Market Making (V8), AlphaSeek HFT, PRISM ensemble — all archived with decision docs.
+**Retired / shelved:** Sync-1H crypto (pilot failure — retired), Funding-Arb (SHELVED, re-run only if funding > 8%/yr), DeepScalper (V5/V6), Market Making (V8, retired S442), AlphaSeek HFT (terminated NO-GO), PRISM ensemble (falsified, `prism.enabled: false`) — all archived with decision docs.
 
 ---
 

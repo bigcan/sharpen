@@ -215,7 +215,7 @@ def run_fold(fold_idx: int, missing_seeds: list[int]) -> bool:
         log(f"  PHASE 1: sleeping {WANDB_GRACE_S}s for wandb.init grace")
         time.sleep(WANDB_GRACE_S)
     else:
-        log(f"  single-seed work — skipping parallel phase")
+        log("  single-seed work — skipping parallel phase")
 
     # Phase 2: check wandb registration and identify gaps
     states = wandb_seed_states(fold_idx)

@@ -225,7 +225,7 @@ def main() -> int:
     for s in (s_rest, s_first):
         print(f"\n[{s['label']}]")
         print(f"  gross SR {s['gross_sharpe']:+.2f} | hit {s['hit_rate']:.3f} | mean {s['mean_daily_bps']:+.2f} bps/day")
-        print(f"  net SR: " + "  ".join(f"{c}bps={s[f'net_sharpe_{c}bps']:+.2f}" for c in COST_BPS_SWEEP))
+        print("  net SR: " + "  ".join(f"{c}bps={s[f'net_sharpe_{c}bps']:+.2f}" for c in COST_BPS_SWEEP))
         print(f"  recent-half net@2bps SR {s['recent_half_net_2bps_sharpe']:+.2f}")
         print(f"  perm-null: obs(gross) {s['obs_sharpe_gross']:+.2f}  p={s['null_p']:.4f}  null95 {s['null_p95']:+.2f}")
         print(f"  per-year gross SR: {s['per_year_gross_sharpe']}")

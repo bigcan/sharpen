@@ -1,6 +1,6 @@
 # UNSPECIFIED Strategy — Deep Lifecycle Audit
 
-**Date:** 2026-06-18 · **Workstream:** UNSPECIFIED · **Scope:** 11 pillars (data → live) + external SOTA benchmark · **Method:** finder + skeptic per pillar; severity = **skeptic-adjusted**. All listed findings are CONFIRMED (0 REFUTED, 0 NEEDS-DATA across the synthesis input).
+**Date:** 2026-06-18 · **Workstream:** cross-asset momentum allocator (+ V7/SAC fleet) · **Scope:** 11 pillars (data → live) + external SOTA benchmark · **Method:** finder + skeptic per pillar; severity = **skeptic-adjusted**. All listed findings are CONFIRMED (0 REFUTED, 0 NEEDS-DATA across the synthesis input).
 
 ---
 

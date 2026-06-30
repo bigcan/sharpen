@@ -102,11 +102,6 @@ def _compute_max_wait_h(total_timesteps: int,
     return max(floor_h, raw_h)
 
 
-def load_gates() -> dict:
-    with GATES_FILE.open("r", encoding="utf-8") as f:
-        return yaml.safe_load(f)
-
-
 def write_derived_config(base: dict, total_timesteps: int, label: str,
                          study_id: str, runtime_dir: Path,
                          filename_stem: str) -> Path:

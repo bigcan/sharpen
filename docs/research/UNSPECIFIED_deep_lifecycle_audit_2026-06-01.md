@@ -1,6 +1,6 @@
 # UNSPECIFIED — Deep Lifecycle Audit
 
-**Date:** 2026-06-01 · **Workstream:** UNSPECIFIED (fleet-wide multiscale path: GMGP1 BTC/Gold/XAUUSD, SG-1 BTC/EURUSD, CMGP1) · **Protocol:** v2.5.1 / v2.6 · **Scope:** 11 pillars (data → live) + external SOTA benchmark · **Method:** finder + skeptic per pillar; severity = skeptic-adjusted.
+**Date:** 2026-06-01 · **Workstream:** fleet-wide multiscale (path: GMGP1 BTC/Gold/XAUUSD, SG-1 BTC/EURUSD, CMGP1) · **Protocol:** v2.5.1 / v2.6 · **Scope:** 11 pillars (data → live) + external SOTA benchmark · **Method:** finder + skeptic per pillar; severity = skeptic-adjusted.
 
 > **⚠️ OPERATOR VERIFICATION ADDENDUM (2026-06-01, S553-cont-23) — P3-01 REFUTED.**
 > Triggered by a Tier-2 audit of the in-flight gmgp1-btc X2-de-leak WF. The audit's **P3-01 (S1, "V7 base-scale same-bar look-ahead") is a FALSE POSITIVE** and is downgraded to NOT-A-LEAK. Both the finder and skeptic mis-associated the *within-step* obs advance (`continuous_swing_env.py:292`, which is emitted for the **next** action) with the **current** step's action (fixed at line 266 *before* the advance). Verified two ways:
