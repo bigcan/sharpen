@@ -14,6 +14,7 @@ read of any survivor requires a Tier-2 deep lifecycle audit.
 """
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -24,6 +25,7 @@ from .dsl_signal import eval_on_panel
 from .fitness import FitnessConfig, FitnessResult, combination_fitness
 from .grammar import crossover, mutate, node_count, parse, to_formula
 
+log = logging.getLogger("alpha_evolve")
 _INFEASIBLE = float("-inf")
 
 
@@ -138,8 +140,12 @@ def evolve(
         n_nodes = node_count(parse(formula))
         if turnover_ann > cfg.turnover_soft_cap * 2.0 or n_nodes > cfg.max_ast_nodes:
             return Candidate(formula, _INFEASIBLE, None, "hard-infeasible (turnover/size)")
-        res = combination_fitness(cand_ret, base_tr, ts_tr, cfg, gen_n_eff=gen_n_eff,
-                                  turnover_ann=turnover_ann, n_nodes=n_nodes)
+        try:                                              # F3: fitness must not crash the run
+            res = combination_fitness(cand_ret, base_tr, ts_tr, cfg, gen_n_eff=gen_n_eff,
+                                      turnover_ann=turnover_ann, n_nodes=n_nodes)
+        except Exception as exc:                          # noqa: BLE001 - cull, don't crash a run
+            log.warning("genome culled — combination_fitness raised %r (formula=%.90s)", exc, formula)
+            return Candidate(formula, _INFEASIBLE, None, f"fitness raised: {exc!r}")
         if np.isfinite(res.aug_book_sharpe_pp):
             sharpe_pool.append(float(res.aug_book_sharpe_pp))
         return Candidate(formula, res.fitness, res)
@@ -191,9 +197,13 @@ def evolve(
         cand_ho = full[0][panel.T - n_hold:]              # holdout rows, warmed up from train
         # BINDING gate: deflate the held-out book Sharpe against the FULL search dispersion pool
         # (GP4-02/M1) at the full file-drawer count.
-        hv = combination_fitness(cand_ho, base_ho, ts_ho, cfg, gen_n_eff=final_n_eff,
-                                 turnover_ann=full[1], n_nodes=node_count(parse(c.formula)),
-                                 trial_sharpe_pool=sharpe_pool)
+        try:                                              # F3: fitness must not crash the run
+            hv = combination_fitness(cand_ho, base_ho, ts_ho, cfg, gen_n_eff=final_n_eff,
+                                     turnover_ann=full[1], n_nodes=node_count(parse(c.formula)),
+                                     trial_sharpe_pool=sharpe_pool)
+        except Exception:                                 # noqa: BLE001
+            holdout_validation.append({"formula": c.formula, "holdout": "fitness raised"})
+            continue
         holdout_validation.append({
             "formula": c.formula, "train_delta": c.result.delta_sr_oos,   # type: ignore[union-attr]
             "holdout_delta": hv.delta_sr_oos, "holdout_passes": hv.passes_gate})

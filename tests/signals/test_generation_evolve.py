@@ -78,6 +78,23 @@ def test_deterministic_under_seed() -> None:
     assert a.gen_n_total == b.gen_n_total
 
 
+def test_fitness_exception_culls_genome_not_crash_run(monkeypatch) -> None:
+    """F3 (regression): a genome that makes combination_fitness RAISE is culled (counts toward the
+    file-drawer N, fitness=-inf), it does NOT crash the whole evolve run. This guards the first
+    full --mode real run, where a real-data genome surfaced an exception the synthetic calibration
+    never produced — combination_fitness is called outside the per-genome try in score()."""
+    import finrl_pro_ds.signals.generation.evolve as ev
+
+    def _boom(*_a, **_k):
+        raise ValueError("synthetic fitness blow-up")
+
+    monkeypatch.setattr(ev, "combination_fitness", _boom)
+    rep = _run()                                          # must return, not raise
+    assert isinstance(rep.hall_of_fame, list)
+    assert rep.promising == []                            # all culled → nothing promising
+    assert rep.gen_n_total >= len(_SEEDS)                 # culled genomes still counted (file-drawer N)
+
+
 def test_holdout_validation_present_for_any_promising() -> None:
     rep = _run()
     # holdout covers train-gate pre-passers; PROMISING ⊆ those (requires the full-N holdout
