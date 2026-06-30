@@ -53,8 +53,9 @@ generation:                          # Component 3 — cost-aware automated gene
   lambda_turnover: 0.05
   lambda_complexity: 0.10
   min_combination_uplift: 0.10       # PROMISING needs ΔSR_oos ≥ this vs the base book
-  hlz_t_min: 3.0
+  hlz_t_min: 3.0                     # on the MARGINAL contribution b_aug-b_base (GP4-03), not standalone
   promising_dsr: 0.90
+  max_base_corr: 0.70                # GP4-01: reject a candidate collinear with a base sleeve
   holdout_frac: 0.25                 # embargoed held-out tail for FINAL validation (ADR-C3-3)
   holdout_embargo_days: 21
   cpcv_n_groups: 6

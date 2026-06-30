@@ -45,16 +45,16 @@ _CFG = FitnessConfig(embargo=10)   # K/6≈84-day groups → embargo 10 leaves a
 
 
 def test_collinear_candidate_cannot_earn_promotion() -> None:
-    # NOTE (finding, S553-cont-89): the SHIPPED C1 combiner is inverse-vol with the
-    # correlation penalty deferred (ADR-C1-5), so a duplicate sleeve is NOT weight-neutral —
-    # it double-counts and CONCENTRATES into the higher-Sharpe sleeve (Δ>0, not ≈0). The
-    # "redundancy earns ~0" Synergistic property needs that deferred penalty. The honest guard
-    # that holds today: redundancy still cannot earn PROMOTION (deflation + HLZ reject it).
+    # The combiner itself is still inverse-vol with the ADR-C1-5 penalty deferred (so a duplicate
+    # sleeve CONCENTRATES, Δ>0 not ≈0), but the fitness now carries an explicit collinearity hurdle
+    # (GP4-01): a candidate whose max |corr| to a base sleeve exceeds max_base_corr is rejected, so
+    # a redundant rediscovery cannot earn PROMOTION by concentration.
     base, ts = _base(), _timestamps()
     cand = base["tsmom"].copy()                          # exact duplicate of an existing sleeve
     r = combination_fitness(cand, base, ts, _CFG, gen_n_eff=50.0, turnover_ann=5.0, n_nodes=5)
     assert r.n_paths == 15
     assert np.isfinite(r.delta_sr_oos)                   # finite, no crash (concentration effect)
+    assert r.max_base_corr_obs > _CFG.max_base_corr      # collinearity detected
     assert not r.passes_gate                             # redundancy buys no promotion
 
 
@@ -106,3 +106,90 @@ def test_degenerate_candidate_does_not_crash() -> None:
     bad[0] = 0.01                                        # < 2 finite → undefined Sharpe
     r = combination_fitness(bad, base, ts, _CFG, gen_n_eff=50.0, turnover_ann=5.0, n_nodes=5)
     assert not r.passes_gate                             # no crash; cannot be promoted
+
+
+# --------------------------------------------------------------------------- #
+# POSITIVE CONTROL (GP4-04): the gate MUST be able to fire. Without this, "0 PROMISING" is
+# unfalsifiable — a gate that returns empty for everything passes every negative test. A genuine,
+# strong, LOW-CORRELATION diversifier must clear the SHIPPED gate; a collinear or noise candidate
+# in the SAME realistic regime must not. This is the discrimination proof the Tier-2 demanded.
+_T_LONG = 3000
+
+
+def _long_ts() -> np.ndarray:
+    idx = pd.date_range("2008-01-02", periods=_T_LONG, freq="B")
+    return idx.view("int64").astype(np.float64) / 1e9
+
+
+def _long_base() -> dict[str, np.ndarray]:
+    rng = np.random.default_rng(7)
+    tsmom = 0.30 / np.sqrt(252) * 0.010 + 0.010 * rng.standard_normal(_T_LONG)   # ann SR ~0.30
+    rates = 0.45 / np.sqrt(252) * 0.008 + 0.008 * rng.standard_normal(_T_LONG)   # ann SR ~0.45
+    return {"tsmom": tsmom, "rates_carry": rates}
+
+
+def _shipped_cfg() -> FitnessConfig:
+    from pathlib import Path
+
+    from finrl_pro_ds.signals.generation.config import load_generation_config
+    root = Path(__file__).resolve().parents[2]
+    cfg, _ = load_generation_config(root / "configs" / "signal_eval.gates.yaml")
+    return cfg
+
+
+def _search_pool() -> list[float]:
+    # A realistic file-drawer population of augmented-book per-period Sharpes: most scored genomes
+    # are weak, so the book stays near the base level (~0.02 per-period ≈ ann 0.32) with a modest
+    # spread — the dispersion a best-of-N winner must beat.
+    rng = np.random.default_rng(11)
+    return (0.020 + 0.006 * rng.standard_normal(200)).tolist()
+
+
+def test_genuine_diversifier_passes_gate_positive_control() -> None:
+    cfg, ts, base = _shipped_cfg(), _long_ts(), _long_base()
+    rng = np.random.default_rng(303)
+    # strong, INDEPENDENT (low-corr) diversifier — ann SR ~5, daily vol like the bases
+    cand = 5.0 / np.sqrt(252) * 0.009 + 0.009 * rng.standard_normal(_T_LONG)
+    r = combination_fitness(cand, base, ts, cfg, gen_n_eff=4495.0, turnover_ann=4.0, n_nodes=8,
+                            trial_sharpe_pool=_search_pool())
+    assert r.max_base_corr_obs <= cfg.max_base_corr      # genuinely diversifying
+    assert r.cand_hlz_pass                               # marginal contribution significant
+    assert r.dsr_aug >= cfg.promising_dsr                # clears deflation vs the search pool
+    assert r.delta_sr_oos >= cfg.min_combination_uplift  # economically meaningful uplift
+    assert r.passes_gate                                 # THE gate CAN fire (not dead)
+
+
+def test_span_collinear_rejected_where_max_single_corr_would_miss() -> None:
+    """Negative tripwire for the base-SPAN multiple-correlation upgrade (GP4-01 / Math MATH-CORR-01):
+    a candidate that is a mix of 3 near-orthogonal sleeves is collinear with the SPAN (R²≈1) yet has
+    only ~1/√3≈0.58 corr to each SINGLE sleeve — a max-over-single hurdle would NOT fire, but the
+    span guard does. Fails if the span guard is reverted to max-single."""
+    cfg, ts = _shipped_cfg(), _long_ts()
+    rng = np.random.default_rng(55)
+    a = 0.010 * rng.standard_normal(_T_LONG)
+    b = 0.010 * rng.standard_normal(_T_LONG)
+    c = 0.010 * rng.standard_normal(_T_LONG)
+    base = {"s_a": 0.0003 + a, "s_b": 0.0003 + b, "s_c": 0.0003 + c}
+    cand = a + b + c                                     # exactly in the 3-sleeve span
+    r = combination_fitness(cand, base, ts, cfg, gen_n_eff=4495.0, turnover_ann=4.0,
+                            n_nodes=8, trial_sharpe_pool=_search_pool())
+    max_single = max(abs(np.corrcoef(cand, base[k])[0, 1]) for k in base)
+    assert max_single < cfg.max_base_corr               # a max-single hurdle would MISS this
+    assert r.max_base_corr_obs > cfg.max_base_corr       # the span multiple-corr CATCHES it
+    assert not r.passes_gate
+
+
+def test_gate_discriminates_collinear_and_noise_in_same_regime() -> None:
+    cfg, ts, base = _shipped_cfg(), _long_ts(), _long_base()
+    pool = _search_pool()
+    # (a) a STRONG candidate collinear with tsmom (corr≈1) — must be rejected by the corr hurdle
+    collinear = base["tsmom"] * 3.0
+    rc = combination_fitness(collinear, base, ts, cfg, gen_n_eff=4495.0, turnover_ann=4.0,
+                             n_nodes=8, trial_sharpe_pool=pool)
+    assert rc.max_base_corr_obs > cfg.max_base_corr and not rc.passes_gate
+    # (b) pure noise — no marginal contribution → rejected
+    rng = np.random.default_rng(404)
+    noise = 0.009 * rng.standard_normal(_T_LONG)
+    rn = combination_fitness(noise, base, ts, cfg, gen_n_eff=4495.0, turnover_ann=4.0,
+                             n_nodes=8, trial_sharpe_pool=pool)
+    assert not rn.passes_gate
