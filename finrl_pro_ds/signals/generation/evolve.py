@@ -119,6 +119,10 @@ def evolve(
         raise ValueError("seed_formulas must be non-empty (warm-start)")
     gen_n_total = 0
     scored: dict[str, Candidate] = {}        # formula -> best Candidate seen (dedup)
+    # GP4-02/M1: the cross-search DISPERSION pool — every scored genome's augmented-book per-period
+    # Sharpe. Fed as the DSR ``trial_sharpes`` at the BINDING held-out gate so the deflation
+    # benchmark reflects the search's own spread, not one book's within-CPCV paths.
+    sharpe_pool: list[float] = []
 
     def score(formula: str, gen_n_eff: float) -> Candidate:
         nonlocal gen_n_total
@@ -136,6 +140,8 @@ def evolve(
             return Candidate(formula, _INFEASIBLE, None, "hard-infeasible (turnover/size)")
         res = combination_fitness(cand_ret, base_tr, ts_tr, cfg, gen_n_eff=gen_n_eff,
                                   turnover_ann=turnover_ann, n_nodes=n_nodes)
+        if np.isfinite(res.aug_book_sharpe_pp):
+            sharpe_pool.append(float(res.aug_book_sharpe_pp))
         return Candidate(formula, res.fitness, res)
 
     for _gen in range(n_generations):
@@ -183,8 +189,11 @@ def evolve(
             holdout_validation.append({"formula": c.formula, "holdout": "degenerate"})
             continue
         cand_ho = full[0][panel.T - n_hold:]              # holdout rows, warmed up from train
+        # BINDING gate: deflate the held-out book Sharpe against the FULL search dispersion pool
+        # (GP4-02/M1) at the full file-drawer count.
         hv = combination_fitness(cand_ho, base_ho, ts_ho, cfg, gen_n_eff=final_n_eff,
-                                 turnover_ann=full[1], n_nodes=node_count(parse(c.formula)))
+                                 turnover_ann=full[1], n_nodes=node_count(parse(c.formula)),
+                                 trial_sharpe_pool=sharpe_pool)
         holdout_validation.append({
             "formula": c.formula, "train_delta": c.result.delta_sr_oos,   # type: ignore[union-attr]
             "holdout_delta": hv.delta_sr_oos, "holdout_passes": hv.passes_gate})
