@@ -72,7 +72,11 @@ coverage.xml
 # Type checkers
 .pyre/
 .pytype/
+.mypy_cache/
 cython_debug/
+
+# Editor / tool backups
+*.bak
 
 # VS Code
 .vscode/

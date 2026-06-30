@@ -4,7 +4,8 @@ Eval-only, CPU. Replicates simulate_asset() from
 scripts/research/options_vrp_falsification.py with state tracking, verifies
 bit-for-bit parity, then runs adversarial stress analytics.
 """
-import sys, math, json
+import sys
+import math
 import importlib.util
 import numpy as np
 import pandas as pd
@@ -15,7 +16,7 @@ sys.path.insert(0, ROOT)
 from finrl_pro_ds.crypto.data import deribit_options_loader as dol
 from finrl_pro_ds.crypto.data import options_array_builder as oab
 from finrl_pro_ds.crypto.options_pricing import (
-    straddle_price, straddle_delta, straddle_vega, straddle_gamma, ncdf,
+    straddle_price, straddle_delta, straddle_vega, ncdf,
 )
 
 spec = importlib.util.spec_from_file_location(
@@ -315,9 +316,9 @@ grid_sh = np.array([-0.1507, 0.6405, 0.8081, 1.1554, -0.1513, 0.6499, 0.8171, 1.
 v_sr = grid_sh.var(ddof=1)
 gamma = 0.5772156649
 for N in (8, 16, 28):
-    sr_star = math.sqrt(v_sr) * ((1-gamma)*_q if False else 0)  # placeholder
+    sr_star = 0  # placeholder; real value computed in the loop below
 for N in (8, 16, 28):
-    from math import sqrt, e
+    from math import e
     def qnorm(p):
         # inverse normal via binary search on ncdf
         lo, hi = -10, 10

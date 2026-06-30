@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from fable_oracle import backtest_weights, block_bootstrap_sharpe_ci, metrics_from_returns
+from fable_oracle import backtest_weights, block_bootstrap_sharpe_ci
 
 ROOT = Path(__file__).resolve().parents[3]
 OUT = ROOT / "results" / "fable_verdict"

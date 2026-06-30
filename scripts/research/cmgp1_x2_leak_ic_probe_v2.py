@@ -151,7 +151,7 @@ def main() -> None:
         print(f"################ window {wname}  ({len(widx)} base bars) ################")
 
         # ---- (A)/(B) POOLED IC: stat x feature x scale, leaky vs causal, fwd-1h ----
-        print(f"\n[A] Pooled forward-1h IC  (leaky vs causal)  — the obs the policy sees")
+        print("\n[A] Pooled forward-1h IC  (leaky vs causal)  — the obs the policy sees")
         print(f"{'scale':>6} {'feat':>9} {'stat':>5} {'IC_leaky':>9} {'IC_causal':>10} {'|d|':>7}")
         for scale in SCALES:
             tag = "(base,1:1)" if scale == base_scale else ""
@@ -167,7 +167,7 @@ def main() -> None:
                           f"{abs(icl - icc):>7.4f} {tag}")
 
         # ---- (C) MULTI-HORIZON causal momentum (window-MEAN logret) ----
-        print(f"\n[C] Causal window-MEAN logret (momentum) — pooled IC by fwd horizon")
+        print("\n[C] Causal window-MEAN logret (momentum) — pooled IC by fwd horizon")
         print(f"{'scale':>6} " + " ".join(f"{'fwd'+str(hz)+'h':>9}" for hz in HORIZONS))
         for scale in SCALES:
             row = f"{scale:>5}h "
@@ -179,7 +179,7 @@ def main() -> None:
             print(row)
 
         # ---- (D) CROSS-SECTIONAL rank-IC (causal), momentum + close_z ----
-        print(f"\n[D] Cross-sectional rank-IC (causal)  mean_xs_ic [IC_IR]  by fwd horizon")
+        print("\n[D] Cross-sectional rank-IC (causal)  mean_xs_ic [IC_IR]  by fwd horizon")
         for fi, fname in ((FEAT_LOGRET, "MEAN-logret"), (FEAT_CLOSEZ, "last-close_z")):
             stat = "mean" if fi == FEAT_LOGRET else "last"
             print(f"  feature={fname} (stat={stat})")
