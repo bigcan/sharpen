@@ -138,10 +138,21 @@ def _run_single(
 
 
 def _evaluate_recent_oos_gates(metrics: dict, gates: dict) -> dict:
-    """Stage 4 gate checks: oos_pf_floor, trailing DD buffer, trade count sanity."""
-    pf_floor = float(gates.get("oos_pf_floor", 1.10))
-    trail_buf_min = float(gates.get("velotrade_trailing_dd_buffer_pp", 0.5))
-    trade_min = int(gates.get("oos_min_trade_count", 200))
+    """Stage 4 gate checks: oos_pf_floor, trailing DD buffer, trade count sanity.
+
+    Numeric gates are NEVER hardcoded (project invariant): the three keys below
+    are REQUIRED in the config `gates:` block and raise if absent — no silent
+    numeric fallback.
+    """
+    for key in ("oos_pf_floor", "velotrade_trailing_dd_buffer_pp",
+                "oos_min_trade_count"):
+        if key not in gates:
+            raise KeyError(
+                f"required gate '{key}' missing from config 'gates:' block"
+            )
+    pf_floor = float(gates["oos_pf_floor"])
+    trail_buf_min = float(gates["velotrade_trailing_dd_buffer_pp"])
+    trade_min = int(gates["oos_min_trade_count"])
 
     pf = metrics.get("pf_bar")
     trail_buf = metrics.get("trailing_dd_buffer_pp")
