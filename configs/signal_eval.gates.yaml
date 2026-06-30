@@ -37,3 +37,26 @@ neutralization:
 promotion:
   survivorship_free_required: true   # LEAK-EQ-1 GO-gate (yfinance/biased = UPPER BOUND)
   tier2_audit_required: true         # CLAUDE.md: no capital without a Tier-2 deep audit
+generation:                          # Component 3 — cost-aware automated generation (advisory)
+  enabled: false                     # opt-in; absent/false ⇒ generation never runs (back-compat)
+  panel: cross_asset                 # the FERTILE substrate (ADR-C3-1), NOT the equity X-section
+  base_sleeves: [tsmom, rates_carry] # the C1 book a candidate must improve
+  hold_horizon: 21                   # low-turnover rebalance (trading days)
+  pop_size: 200
+  n_generations: 40
+  rng_seed: 7                        # determinism (ADR-C3-6)
+  elite_frac: 0.30
+  cost_bps: 0.0010                   # one-way turnover cost baked into the candidate return
+  ls_min_names: 6                    # min active names for a rank-L/S book (18-asset panel)
+  max_ast_nodes: 24                  # complexity / dimensional bound (ADR-C3-4/5)
+  turnover_soft_cap: 12.0            # ann turnover where the penalty starts
+  lambda_turnover: 0.05
+  lambda_complexity: 0.10
+  min_combination_uplift: 0.10       # PROMISING needs ΔSR_oos ≥ this vs the base book
+  hlz_t_min: 3.0
+  promising_dsr: 0.90
+  holdout_frac: 0.25                 # embargoed held-out tail for FINAL validation (ADR-C3-3)
+  holdout_embargo_days: 21
+  cpcv_n_groups: 6
+  cpcv_k_test: 2
+  cpcv_embargo_days: 21

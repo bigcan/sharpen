@@ -1,0 +1,150 @@
+"""Component 3 runner — cost-aware automated alpha generation (ADVISORY).
+
+Evolves DSL alphas (warm-started from the 99-alpha library) against the C1 combined-book
+fitness on the FERTILE cross-asset cell, writes an advisory scorecard. The harness tops out at
+PROMISING; a deploy read of any survivor requires a Tier-2 deep lifecycle audit.
+
+Modes:
+  --mode synthetic   end-to-end CALIBRATION run on a synthetic panel (no network); the key
+                     property is that a NOISE panel yields 0 PROMISING (the cont-73 lesson).
+  --mode real        load the real cross-asset ETF panel; base sleeves are an inline TSMOM /
+                     rates-momentum PROXY (loudly flagged) until the production cross-asset
+                     pipeline's TSMOM + rates-carry streams are wired in (architecture open-item 2).
+
+Usage:
+  python scripts/research/generate_alphas.py --mode synthetic --planted
+  python scripts/research/generate_alphas.py --mode real --start 2008-01-01
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import logging
+import sys
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from finrl_pro_ds.signals.eval_harness import _ls_weights  # noqa: E402
+from finrl_pro_ds.signals.features import Panel  # noqa: E402
+from finrl_pro_ds.signals.generation.config import load_generation_config  # noqa: E402
+from finrl_pro_ds.signals.generation.evolve import evolve  # noqa: E402
+from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS  # noqa: E402
+from finrl_pro_ds.signals.library.alphas101 import SKIP  # noqa: E402
+
+log = logging.getLogger("generate_alphas")
+DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
+SEED_NUMS = (1, 3, 4, 6, 9, 12, 14, 19, 33, 53)   # a low-turnover-ish warm-start subset
+
+
+def _seed_formulas() -> list[str]:
+    return [FORMULAS[n] for n in SEED_NUMS if n not in SKIP]
+
+
+def _timestamps(n: int, start: str = "2010-01-04") -> np.ndarray:
+    idx = pd.date_range(start, periods=n, freq="B")
+    return idx.view("int64").astype(np.float64) / 1e9
+
+
+def _synthetic_panel(t: int, n: int, *, planted: bool, seed: int) -> Panel:
+    rng = np.random.default_rng(seed)
+    base = np.cumsum(0.01 * rng.standard_normal((t, n)), axis=0)
+    if planted:                               # weak cross-sectional momentum a DSL alpha can see
+        base += 0.0015 * np.cumsum(np.sign(np.diff(base, axis=0, prepend=0.0)), axis=0)
+    close = np.exp(base + rng.uniform(3.0, 5.0, size=n))
+    open_ = close * (1 + 0.001 * rng.standard_normal((t, n)))
+    high = np.maximum(open_, close) * 1.002
+    low = np.minimum(open_, close) * 0.998
+    vol = rng.uniform(1e6, 1e8, (t, n))
+    dates = (np.datetime64("2010-01-04") + np.arange(t) * np.timedelta64(1, "D")
+             ).astype("datetime64[ns]")
+    return Panel(dates, tuple(f"S{i:02d}" for i in range(n)), open_, high, low, close, vol,
+                 np.ones((t, n), bool), close * vol, rng.integers(0, 4, size=n),
+                 {"survivorship_free": True, "source": f"synthetic_{'planted' if planted else 'noise'}"})
+
+
+def _proxy_base_sleeves(panel: Panel, hold: int = 21) -> dict[str, np.ndarray]:
+    """Inline TSMOM (252-1) + short-momentum 'carry' PROXY rank-L/S books on the panel.
+
+    NOT the production sleeves — a stand-in so the loop runs end-to-end on real data. Flagged.
+    """
+    c = panel.close
+    fwd1 = panel.forward_returns(1)
+
+    def book(score: np.ndarray) -> np.ndarray:
+        out = np.full(panel.T, np.nan)
+        w = np.zeros(panel.N)
+        for t in range(panel.T - 1):
+            if t % hold == 0:
+                w = _ls_weights(score[t], panel.active[t], min_names=6)
+            out[t] = float(np.nansum(w * fwd1[t]))
+        return np.nan_to_num(out)
+
+    mom = np.full_like(c, np.nan)
+    mom[252:] = c[252:] / c[:-252] - 1.0      # 12-month momentum (causal)
+    rev = np.full_like(c, np.nan)
+    rev[21:] = -(c[21:] / c[:-21] - 1.0)      # 1-month reversal proxy ('carry'-ish, low corr)
+    return {"tsmom": book(mom), "rates_carry": book(rev)}
+
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
+    ap = argparse.ArgumentParser(description="Component 3 — advisory alpha generation")
+    ap.add_argument("--config", default=str(DEFAULT_GATES))
+    ap.add_argument("--mode", choices=("synthetic", "real"), default="synthetic")
+    ap.add_argument("--planted", action="store_true", help="synthetic: plant a weak signal")
+    ap.add_argument("--start", default="2008-01-01")
+    ap.add_argument("--end", default=None)
+    ap.add_argument("--t", type=int, default=900)
+    ap.add_argument("--n", type=int, default=18)
+    ap.add_argument("--out", default=str(ROOT / "results" / "signal_eval" / "generation"))
+    args = ap.parse_args()
+
+    cfg, ek = load_generation_config(args.config)
+    log.info("generation config loaded (advisory; harness caps at PROMISING). evolve kwargs=%s", ek)
+
+    if args.mode == "synthetic":
+        panel = _synthetic_panel(args.t, args.n, planted=args.planted, seed=0)
+        base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
+        ts = _timestamps(panel.T)
+    else:
+        from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
+        panel = load_cross_asset_panel(  # universe comes from the cross-asset config, not gates
+            args.start, args.end, config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
+        log.warning("PROXY base sleeves (inline TSMOM/reversal) — wire the production "
+                    "cross-asset TSMOM + rates-carry streams before trusting any survivor.")
+        base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
+        ts = _timestamps(panel.T, start=args.start)
+
+    rep = evolve(_seed_formulas(), panel, base, ts, cfg, **ek)
+
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "advisory": "harness caps at PROMISING; deploy read requires a Tier-2 deep audit",
+        "mode": args.mode, "panel_source": panel.meta.get("source"),
+        "gen_n_total": rep.gen_n_total, "gen_n_eff": rep.gen_n_eff,
+        "n_promising": len(rep.promising),
+        "hall_of_fame": [
+            {"formula": c.formula, "fitness": c.fitness,
+             "delta_sr_oos": None if c.result is None else c.result.delta_sr_oos,
+             "dsr_aug": None if c.result is None else c.result.dsr_aug,
+             "passes_gate": None if c.result is None else c.result.passes_gate}
+            for c in rep.hall_of_fame],
+        "holdout_validation": rep.holdout_validation,
+    }
+    (out / "generation_report.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    log.info("mode=%s  gen_n_total=%d  PROMISING=%d  -> %s",
+             args.mode, rep.gen_n_total, len(rep.promising), out / "generation_report.json")
+    if not rep.promising:
+        log.info("0 PROMISING (expected on noise / efficient cells — the filter is the point).")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
