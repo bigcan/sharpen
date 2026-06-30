@@ -7,9 +7,10 @@ PROMISING; a deploy read of any survivor requires a Tier-2 deep lifecycle audit.
 Modes:
   --mode synthetic   end-to-end CALIBRATION run on a synthetic panel (no network); the key
                      property is that a NOISE panel yields 0 PROMISING (the cont-73 lesson).
-  --mode real        load the real cross-asset ETF panel; base sleeves are an inline TSMOM /
-                     rates-momentum PROXY (loudly flagged) until the production cross-asset
-                     pipeline's TSMOM + rates-carry streams are wired in (architecture open-item 2).
+  --mode real        load the real cross-asset ETF panel; base sleeves are the PRODUCTION
+                     linear-core TSMOM + rates-carry streams (validated net SR 0.601 / 0.467),
+                     built on the panel clock by ``signals.generation.base_sleeves`` — the
+                     candidate must improve the REAL book (architecture open-item 2, now wired).
 
 Usage:
   python scripts/research/generate_alphas.py --mode synthetic --planted
@@ -114,11 +115,13 @@ def main() -> int:
         ts = _timestamps(panel.T)
     else:
         from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
+        from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
         panel = load_cross_asset_panel(  # universe comes from the cross-asset config, not gates
             args.start, args.end, config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
-        log.warning("PROXY base sleeves (inline TSMOM/reversal) — wire the production "
-                    "cross-asset TSMOM + rates-carry streams before trusting any survivor.")
-        base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
+        log.info("PRODUCTION base sleeves (linear-core TSMOM + rates-carry) on the panel clock.")
+        base = production_base_sleeves(
+            panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
+            start=args.start, end=args.end)
         ts = _timestamps(panel.T, start=args.start)
 
     rep = evolve(_seed_formulas(), panel, base, ts, cfg, **ek)
