@@ -296,6 +296,74 @@ def deflated_sharpe_ratio(
     }
 
 
+def probability_of_backtest_overfitting(perf, *, n_splits: int = 16) -> dict | None:
+    """Combinatorially-Symmetric Cross-Validation **Probability of Backtest Overfitting** (PBO,
+    Bailey, Borwein, López de Prado & Zhu 2017) — the canonical best-of-N selection-overfit control
+    that the deflated Sharpe does NOT estimate: P(the IN-SAMPLE-best config underperforms the
+    median config OUT-OF-SAMPLE).
+
+    ``perf`` is a ``(T, N)`` matrix of per-observation performance for ``N`` configs over ``T`` time
+    observations (e.g. each generated candidate's per-period return series). Partition the ``T`` rows
+    into ``n_splits`` contiguous blocks (``n_splits`` EVEN); for each of the ``C(n_splits,
+    n_splits/2)`` ways to assign half the blocks to IS (the rest OOS): rank the ``N`` configs by IS
+    mean performance, take the IS-best ``n*``, and record its OOS **relative rank**
+    ``ω = (rank+1)/(n+1) ∈ (0,1)`` (fraction of configs ``n*`` beats OOS) and its logit
+    ``λ = ln(ω/(1−ω))``. ``PBO = mean(λ < 0)`` — the fraction of splits where the IS-winner lands
+    BELOW the OOS median. A higher-is-better mean-performance metric per block (separable, fast).
+
+    Returns ``{"pbo", "n_combos", "n_strategies", "logit_mean"}`` or ``None`` when degenerate
+    (``N<2``, ``n_splits<2`` or odd, ``T<n_splits``, or no usable split). ``pbo → 0.5`` for a
+    skill-free population (the IS-winner is random OOS); ``pbo → 0`` when a genuinely-superior config
+    is consistently best IS and OOS.
+    """
+    import numpy as np
+    from itertools import combinations
+
+    M = np.asarray(perf, dtype=np.float64)
+    if M.ndim != 2:
+        raise ValueError("perf must be a (T, N) matrix")
+    T, N = M.shape
+    if N < 2 or n_splits < 2 or n_splits % 2 != 0 or T < n_splits:
+        return None
+    bounds = np.linspace(0, T, n_splits + 1).astype(int)
+    block_perf = np.full((n_splits, N), np.nan, dtype=np.float64)   # per-block per-config mean
+    for i in range(n_splits):
+        blk = M[bounds[i]:bounds[i + 1]]
+        with np.errstate(invalid="ignore"):
+            block_perf[i] = np.nanmean(blk, axis=0) if blk.size else np.nan
+
+    logits: list[float] = []
+    below = 0
+    for combo in combinations(range(n_splits), n_splits // 2):
+        is_mask = np.zeros(n_splits, dtype=bool)
+        is_mask[list(combo)] = True
+        with np.errstate(invalid="ignore"):
+            r_is = np.nanmean(block_perf[is_mask], axis=0)
+            r_oos = np.nanmean(block_perf[~is_mask], axis=0)
+        finite_oos = np.isfinite(r_oos)
+        if not np.isfinite(r_is).any() or int(finite_oos.sum()) < 2:
+            continue
+        n_star = int(np.nanargmax(r_is))                # IS-best config
+        if not finite_oos[n_star]:
+            continue
+        n_fin = int(finite_oos.sum())
+        rank = float((r_oos[finite_oos] < r_oos[n_star]).sum())   # configs n* beats OOS
+        omega = (rank + 1.0) / (n_fin + 1.0)
+        omega = min(1.0 - 1e-12, max(1e-12, omega))
+        lam = float(np.log(omega / (1.0 - omega)))
+        logits.append(lam)
+        if lam < 0.0:
+            below += 1
+    if not logits:
+        return None
+    return {
+        "pbo": float(below / len(logits)),
+        "n_combos": int(len(logits)),
+        "n_strategies": int(N),
+        "logit_mean": float(sum(logits) / len(logits)),
+    }
+
+
 def block_bootstrap_sharpe_ci(
     returns: Iterable[float],
     *,

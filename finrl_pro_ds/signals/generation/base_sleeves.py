@@ -31,6 +31,18 @@ NOT route through the env-rendered :class:`~finrl_pro_ds.paper.two_sleeve.TwoSle
 (fees / gross-cap / env vol-target overlay), which books on a different calendar and accounting
 basis — mixing that basis under the candidate would distort the marginal-contribution metric.
 The signals (hence the edge) are identical; only the per-bar accounting wrapper differs.
+
+PROVENANCE (GP3-01/GP6-04/GP8-03): the validated anchors (tsmom net SR **0.601**, rates **0.467**)
+are priced @**2bps / month-end** rebalance. C3 re-prices BOTH base AND candidate @ the gates
+``cost_bps`` (10bps, harsh) on the ``hold_horizon`` clock, so the observed ~0.275 / 0.449 is the
+**harsh-cost analog, not the anchor** — strictly MORE pessimistic (conservative), never inflated.
+
+EXPOSURE-STYLE caveat (GP3-03): the base sleeves are DIRECTIONAL vol-scaled books (gross unbounded
+beyond per-asset ``lev_cap``, beta-laden), whereas a generated candidate is a dollar-neutral rank-
+L/S book (gross 1). The C1 inverse-vol combiner is scale-invariant (consumes returns only), so a
+candidate's uplift is NOT standalone-Sharpe-inflated — but part of the uplift is diversification-vs-
+beta. A survivor's beta + exposure profile MUST be examined in the pre-capital Tier-2, not read off
+the ΔSharpe alone.
 """
 from __future__ import annotations
 
@@ -220,6 +232,7 @@ def production_base_sleeves(
     fetch_fn=None,
     clean_fn=None,
     verify_causal: bool = True,
+    curve_require_fresh: bool = False,
 ) -> dict[str, np.ndarray]:
     """``{"tsmom", "rates_carry"}`` production base sleeve returns aligned to ``panel.dates``.
 
@@ -227,14 +240,31 @@ def production_base_sleeves(
     against (gates ``generation.base_sleeves``). ``curve``/``rates_close`` are injectable for
     offline tests; by default the Treasury curve is loaded via ``treasury_curve_loader`` and the
     rates ETFs are fetched via ``cross_asset_loader``. ``verify_causal`` (default ON for the
-    real-data entry point) runs each sleeve signal's look-ahead tripwire before booking (GP2-04).
+    real-data entry point) runs each sleeve signal's look-ahead tripwire before booking (GP2-04);
+    ``curve_require_fresh`` forces a curve refetch if the cache is stale (GP1-03).
     """
-    from finrl_pro_ds.data.treasury_curve_loader import load_treasury_curve
+    from finrl_pro_ds.data.treasury_curve_loader import load_treasury_curve_with_manifest
+
+    # GP3-04: a held name going inactive is marked FLAT with no exit cost — surface it (de-minimis
+    # on the gap-free liquid-ETF universe, but a frictionless de-risk on any delisting-prone panel).
+    n_inactive = int((~panel.active).sum())
+    if n_inactive:
+        log.warning("production_base_sleeves: %d inactive (name,bar) cells — inactive held names are "
+                    "marked flat with NO exit cost (GP3-04).", n_inactive)
 
     tsmom = tsmom_sleeve_returns(
         panel, hold_horizon=hold_horizon, cost_bps=cost_bps, verify_causal=verify_causal)
     if curve is None:
-        curve = load_treasury_curve()
+        curve, cmani = load_treasury_curve_with_manifest(require_fresh=curve_require_fresh)
+        # GP1-03: surface a curve↔panel desync (the .asof ffill carries a stale yield across the
+        # tail). Bounded to <0.3% of bars in a reproducible replay, but report it.
+        cmax = cmani.get("date_max")
+        pmax = str(panel.dates[-1])[:10] if panel.T else None
+        if cmax and pmax:
+            desync = (pd.Timestamp(pmax) - pd.Timestamp(cmax)).days
+            if desync > 5:
+                log.warning("production_base_sleeves: Treasury curve date_max=%s lags panel "
+                            "date_max=%s by %d days (stale-curve tail, GP1-03).", cmax, pmax, desync)
     rates = rates_carry_sleeve_returns(
         panel, curve, hold_horizon=hold_horizon, cost_bps=cost_bps,
         rates_close=rates_close, start=start, end=end, fetch_fn=fetch_fn, clean_fn=clean_fn,

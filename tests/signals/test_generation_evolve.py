@@ -78,6 +78,26 @@ def test_deterministic_under_seed() -> None:
     assert a.gen_n_total == b.gen_n_total
 
 
+def test_seed_formulas_have_no_uneval_token() -> None:
+    """GP5-04: every warm-start seed parses + round-trips cleanly — none carries a token outside the
+    grammar's eval inputs (the `cap` class). Seed 56 (uses `cap`) is SKIP'd and not in SEED_NUMS, and
+    grammar.INPUTS excludes `cap`, so no genome can introduce it; this locks that."""
+    from finrl_pro_ds.signals.generation.grammar import parse, to_formula
+    from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS
+    from finrl_pro_ds.signals.library.alphas101 import SKIP
+    seed_nums = (1, 3, 4, 6, 9, 12, 14, 19, 33, 53)      # mirrors generate_alphas.SEED_NUMS
+    for n in seed_nums:
+        assert n not in SKIP
+        assert "cap" not in FORMULAS[n]
+        assert isinstance(to_formula(parse(FORMULAS[n])), str)   # parses + round-trips
+
+
+def test_pbo_reported_advisory(monkeypatch) -> None:
+    """GP7-03: evolve emits an advisory CSCV PBO over the candidate sample."""
+    rep = _run()
+    assert rep.pbo is None or (0.0 <= rep.pbo["pbo"] <= 1.0 and rep.pbo["n_strategies"] >= 2)
+
+
 def test_fitness_exception_culls_genome_not_crash_run(monkeypatch) -> None:
     """F3 (regression): a genome that makes combination_fitness RAISE is culled (counts toward the
     file-drawer N, fitness=-inf), it does NOT crash the whole evolve run. This guards the first

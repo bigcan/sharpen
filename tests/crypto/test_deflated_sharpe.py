@@ -137,3 +137,35 @@ def test_block_bootstrap_sortino_uses_downside_only():
 
 def test_block_bootstrap_sortino_none_on_short_series():
     assert block_bootstrap_sortino_ci([0.01] * 10, block=21, periods_per_year=ANN) is None
+
+
+# --------------------------------------------------------------------------- #
+# PBO / CSCV — Probability of Backtest Overfitting (GP7-03)
+# --------------------------------------------------------------------------- #
+def test_pbo_skill_free_population_near_half():
+    """A skill-free population (pure noise) ⇒ the IS-best is random OOS ⇒ PBO ≈ 0.5."""
+    import numpy as np
+    from finrl_pro_ds.crypto.eval.statistics import probability_of_backtest_overfitting
+    rng = np.random.default_rng(0)
+    out = probability_of_backtest_overfitting(rng.standard_normal((1200, 40)), n_splits=10)
+    assert out is not None and 0.30 <= out["pbo"] <= 0.70
+    assert out["n_strategies"] == 40 and out["n_combos"] == 252   # C(10,5)
+
+
+def test_pbo_dominant_config_is_low():
+    """One config consistently superior across all blocks ⇒ IS-best is also OOS-best ⇒ PBO low."""
+    import numpy as np
+    from finrl_pro_ds.crypto.eval.statistics import probability_of_backtest_overfitting
+    rng = np.random.default_rng(1)
+    m = rng.standard_normal((1200, 40))
+    m[:, 0] += 0.25                                       # a genuine, persistent edge
+    out = probability_of_backtest_overfitting(m, n_splits=10)
+    assert out is not None and out["pbo"] <= 0.15
+
+
+def test_pbo_degenerate_returns_none():
+    import numpy as np
+    from finrl_pro_ds.crypto.eval.statistics import probability_of_backtest_overfitting
+    assert probability_of_backtest_overfitting(np.zeros((100, 1)), n_splits=10) is None   # N<2
+    assert probability_of_backtest_overfitting(np.zeros((5, 10)), n_splits=10) is None     # T<n_splits
+    assert probability_of_backtest_overfitting(np.zeros((100, 10)), n_splits=7) is None    # odd

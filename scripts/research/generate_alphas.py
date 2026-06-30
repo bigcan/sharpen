@@ -25,7 +25,6 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 
 ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
@@ -33,7 +32,10 @@ if str(ROOT) not in sys.path:
 
 from finrl_pro_ds.signals.eval_harness import _ls_weights  # noqa: E402
 from finrl_pro_ds.signals.features import Panel  # noqa: E402
-from finrl_pro_ds.signals.generation.config import load_generation_config  # noqa: E402
+from finrl_pro_ds.signals.generation.config import (  # noqa: E402
+    load_generation_config,
+    load_generation_meta,
+)
 from finrl_pro_ds.signals.generation.evolve import evolve  # noqa: E402
 from finrl_pro_ds.signals.library._alpha_formulas import FORMULAS  # noqa: E402
 from finrl_pro_ds.signals.library.alphas101 import SKIP  # noqa: E402
@@ -47,9 +49,11 @@ def _seed_formulas() -> list[str]:
     return [FORMULAS[n] for n in SEED_NUMS if n not in SKIP]
 
 
-def _timestamps(n: int, start: str = "2010-01-04") -> np.ndarray:
-    idx = pd.date_range(start, periods=n, freq="B")
-    return idx.view("int64").astype(np.float64) / 1e9
+def _panel_ts(panel: Panel) -> np.ndarray:
+    """Per-bar epoch-second decision stamps from the panel's REAL calendar (GP6-01): the C1
+    combiner's monthly-meta cadence must rotate on true month-ends, not a synthetic B-day grid
+    that ignores holidays (a proxy↔serve calendar skew vs the paper executor)."""
+    return panel.dates.astype("datetime64[s]").astype(np.int64).astype(np.float64)
 
 
 def _synthetic_panel(t: int, n: int, *, planted: bool, seed: int) -> Panel:
@@ -104,15 +108,21 @@ def main() -> int:
     ap.add_argument("--t", type=int, default=900)
     ap.add_argument("--n", type=int, default=18)
     ap.add_argument("--out", default=str(ROOT / "results" / "signal_eval" / "generation"))
+    ap.add_argument("--force", action="store_true",
+                    help="run even when generation.enabled is false in the gates (explicit opt-in)")
     args = ap.parse_args()
 
     cfg, ek = load_generation_config(args.config)
+    meta = load_generation_meta(args.config)           # GP8-02: panel/base_sleeves validated here
+    if not meta["enabled"] and not args.force:         # GP8-01: the documented opt-in gate, now wired
+        log.warning("generation.enabled is false in %s — no-op. Pass --force to run anyway.",
+                    args.config)
+        return 0
     log.info("generation config loaded (advisory; harness caps at PROMISING). evolve kwargs=%s", ek)
 
     if args.mode == "synthetic":
         panel = _synthetic_panel(args.t, args.n, planted=args.planted, seed=0)
         base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
-        ts = _timestamps(panel.T)
     else:
         from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
         from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
@@ -122,7 +132,7 @@ def main() -> int:
         base = production_base_sleeves(
             panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
             start=args.start, end=args.end)
-        ts = _timestamps(panel.T, start=args.start)
+    ts = _panel_ts(panel)                              # GP6-01: real-calendar decision stamps
 
     rep = evolve(_seed_formulas(), panel, base, ts, cfg, **ek)
 
@@ -140,6 +150,7 @@ def main() -> int:
              "passes_gate": None if c.result is None else c.result.passes_gate}
             for c in rep.hall_of_fame],
         "holdout_validation": rep.holdout_validation,
+        "pbo": rep.pbo,        # advisory CSCV Probability of Backtest Overfitting (GP7-03)
     }
     (out / "generation_report.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
     log.info("mode=%s  gen_n_total=%d  PROMISING=%d  -> %s",

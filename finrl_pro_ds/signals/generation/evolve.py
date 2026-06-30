@@ -40,10 +40,11 @@ class Candidate:
 @dataclass(frozen=True, slots=True)
 class GenerationReport:
     hall_of_fame: list[Candidate]
-    gen_n_total: int                 # file-drawer N (every genome evaluated, incl. culled)
-    gen_n_eff: float                 # effective trial count fed to the deflation
+    gen_n_total: int                 # file-drawer N: every DISTINCT genome scored (dedup'd), incl. culled
+    gen_n_eff: float                 # effective trial count fed to the deflation (== gen_n_total)
     holdout_validation: list[dict]   # PROMISING survivors re-scored on the embargoed tail
     promising: list[Candidate] = field(default_factory=list)
+    pbo: dict | None = None          # CSCV Probability of Backtest Overfitting (advisory, GP7-03)
 
 
 def _candidate_returns(formula: str, panel: Panel, *, hold_horizon: int, cost_bps: float,
@@ -101,15 +102,18 @@ def evolve(
     holdout_frac: float = 0.25,
     holdout_embargo: int = 21,
     elite_frac: float = 0.3,
+    pbo_max_strategies: int = 128,
+    pbo_n_splits: int = 10,
 ) -> GenerationReport:
     """Evolve DSL alphas on the TRAIN split; re-validate PROMISING survivors on the held-out
     tail. ``base_returns``/``timestamps`` align to the train split's rows.
 
-    The deflation N (``gen_n_eff``) is the file-drawer count of every genome ever scored
-    (threaded into the fitness). Math finding M1 — feeding the *population* of book Sharpes as
-    the DSR dispersion pool (vs the per-candidate within-time proxy) — is a deferred refinement
-    (architecture open-item 5); the file-drawer N + held-out tail are the active anti-mirage
-    controls today."""
+    Anti-mirage controls: the deflation N (``gen_n_eff``) is the file-drawer count of every genome
+    ever scored; the DSR dispersion is the cross-search **population pool** of augmented-book
+    Sharpes (M1/GP4-02) fed at the binding held-out gate; and an advisory **CSCV PBO** (GP7-03) is
+    computed over the first ``pbo_max_strategies`` candidates' return series (memory-bounded sample)
+    and reported — P(the in-sample-best candidate underperforms OOS), the best-of-N overfit metric
+    the deflated Sharpe does not estimate. ``pbo_max_strategies=0`` disables it."""
     rng = np.random.default_rng(rng_seed)
     train, hold = _split(panel, holdout_frac, holdout_embargo)
     n_train = train.T
@@ -125,10 +129,15 @@ def evolve(
     # Sharpe. Fed as the DSR ``trial_sharpes`` at the BINDING held-out gate so the deflation
     # benchmark reflects the search's own spread, not one book's within-CPCV paths.
     sharpe_pool: list[float] = []
+    # GP7-03: memory-bounded sample of candidate return series for the CSCV PBO diagnostic.
+    cand_return_bank: list[np.ndarray] = []
 
     def score(formula: str, gen_n_eff: float) -> Candidate:
         nonlocal gen_n_total
-        gen_n_total += 1                                  # file-drawer N: every genome counts
+        # file-drawer N: counts every DISTINCT genome (score() is called once per formula via the
+        # `f not in scored` dedup in the loop) — a re-derived duplicate is the SAME hypothesis, not a
+        # new trial, so distinct is the correct multiplicity count (GP5-01: doc/code reconciled).
+        gen_n_total += 1
         try:
             cr = _candidate_returns(formula, train, hold_horizon=hold_horizon,
                                     cost_bps=cost_bps, min_names=ls_min_names)
@@ -137,6 +146,8 @@ def evolve(
         if cr is None:
             return Candidate(formula, _INFEASIBLE, None, "degenerate score (all-NaN)")
         cand_ret, turnover_ann = cr
+        if 0 < pbo_max_strategies and len(cand_return_bank) < pbo_max_strategies:
+            cand_return_bank.append(np.asarray(cand_ret, dtype=np.float64))   # PBO sample (GP7-03)
         n_nodes = node_count(parse(formula))
         if turnover_ann > cfg.turnover_soft_cap * 2.0 or n_nodes > cfg.max_ast_nodes:
             return Candidate(formula, _INFEASIBLE, None, "hard-infeasible (turnover/size)")
@@ -210,7 +221,18 @@ def evolve(
         if hv.passes_gate:
             promising.append(c)
 
+    # GP7-03: advisory CSCV PBO over the bounded candidate sample (the best-of-N overfit metric
+    # the deflated Sharpe doesn't estimate). Advisory only — reported, not a hard gate.
+    pbo = None
+    if pbo_max_strategies and len(cand_return_bank) >= 2:
+        from finrl_pro_ds.crypto.eval.statistics import probability_of_backtest_overfitting
+        try:
+            pbo = probability_of_backtest_overfitting(
+                np.column_stack(cand_return_bank), n_splits=pbo_n_splits)
+        except Exception as exc:                          # noqa: BLE001 - advisory, never fatal
+            log.warning("PBO computation skipped: %r", exc)
+
     return GenerationReport(
         hall_of_fame=ranked[:10],
         gen_n_total=gen_n_total, gen_n_eff=final_n_eff,
-        holdout_validation=holdout_validation, promising=promising)
+        holdout_validation=holdout_validation, promising=promising, pbo=pbo)

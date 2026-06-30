@@ -455,6 +455,40 @@ def _trailing_ann_perf(
     return perf.to_numpy(np.float64), ann_denom.to_numpy(np.float64)
 
 
+def _trailing_mean_abs_corr(
+    sleeve_returns: Mapping[str, np.ndarray], *, window: int, min_periods: int
+) -> dict[str, np.ndarray]:
+    """Causal trailing mean ``|pairwise correlation|`` of each sleeve to the OTHERS (1-D per
+    sleeve, indexed by decision bar k): row ``k`` uses returns ``[k-window, k-1]`` (``.shift(1)``,
+    excludes the not-yet-realized ``k→k+1`` move — LEAK-2). For sleeve ``s`` the value is the mean
+    over ``s'≠s`` of ``|corr(r_s, r_s')|`` on the trailing window; ``NaN`` until ``min_periods``
+    realized pairwise returns exist (warmup); a single-sleeve book → all 0 (no redundancy). The
+    redundancy down-weight (ADR-C1-5) consumes this."""
+    names = list(sleeve_returns)
+    K = len(np.asarray(next(iter(sleeve_returns.values())))) if names else 0
+    if len(names) < 2:
+        return {s: np.zeros(K, dtype=np.float64) for s in names}
+    ser = {s: pd.Series(np.asarray(sleeve_returns[s], dtype=np.float64)) for s in names}
+    sums = {s: np.zeros(K, dtype=np.float64) for s in names}
+    counts = {s: np.zeros(K, dtype=np.float64) for s in names}
+    for i in range(len(names)):
+        for j in range(i + 1, len(names)):
+            si, sj = names[i], names[j]
+            c = ser[si].rolling(window, min_periods=min_periods).corr(ser[sj]).shift(1).abs(
+                ).to_numpy(np.float64)
+            fin = np.isfinite(c)
+            for s in (si, sj):
+                sums[s] = sums[s] + np.where(fin, c, 0.0)
+                counts[s] = counts[s] + fin.astype(np.float64)
+    out: dict[str, np.ndarray] = {}
+    for s in names:
+        with np.errstate(divide="ignore", invalid="ignore"):
+            m = sums[s] / counts[s]
+        m[counts[s] == 0.0] = np.nan                       # warmup → NaN (neutral downstream)
+        out[s] = m
+    return out
+
+
 def risk_parity_alphas(
     sleeve_returns: Mapping[str, np.ndarray],
     timestamps: np.ndarray,
@@ -523,13 +557,19 @@ def dynamic_sleeve_alphas(
     perf_min_periods: int = 63,
     perf_metric: str = "sharpe",
     tilt_clip: float = 1.5,
+    # --- NEW: redundancy (correlation) down-weight (ADR-C1-5) ---
+    redundancy_strength: float = 0.0,
 ) -> dict[str, np.ndarray]:
     """Per-sleeve daily capital-allocation scalars ``α_s(k)`` = the convex inverse-vol prior
     **tilted** toward sleeves with stronger recent risk-adjusted performance (the AlphaForge
     rolling-performance mechanism). Component 1 of the alpha-mining loop
     (``.agent/artifacts/dynamic_sleeve_combiner_architecture.md``, C1.1).
 
-    ``α_s(k) = (p_s·tilt_s) / Σ_s'(p_s'·tilt_s')`` with ``tilt_s = exp(λ·clip(ŝ_s, −c, +c))``:
+    ``α_s(k) = (p_s·tilt_s·redund_s) / Σ_s'(p_s'·tilt_s'·redund_s')`` with
+    ``tilt_s = exp(λ·clip(ŝ_s, −c, +c))`` and ``redund_s = exp(−λ_r·clip(ρ̄_s, 0, 1))``
+    (ADR-C1-5: ``ρ̄_s`` = causal trailing mean ``|corr|`` of ``s`` to the OTHER sleeves, so a sleeve
+    collinear with the book is down-weighted; ``λ_r = redundancy_strength = 0`` ⇒ ``redund_s ≡ 1``
+    ⇒ no change, back-compat exact):
 
     - ``p_s(k)`` — the CONVEX inverse-vol prior ``(1/σ_s)/Σ(1/σ_s')``, computed by the SAME
       code path as :func:`risk_parity_alphas` (``_trailing_ann_vol`` + the usable-mask
@@ -575,6 +615,9 @@ def dynamic_sleeve_alphas(
         # this, but bound it here too so the function cannot silently emit exp(inf)→NaN α
         # before that wiring exists.
         raise ValueError(f"tilt_strength (λ) must be in [0, 5], got {tilt_strength}")
+    if not 0.0 <= redundancy_strength <= 5.0:
+        # ADR-C1-5: λ_r·1 ≤ 5 keeps exp() safe (ρ̄ clipped to [0,1]).
+        raise ValueError(f"redundancy_strength (λ_r) must be in [0, 5], got {redundancy_strength}")
     if tilt_clip <= 0:
         raise ValueError(f"tilt_clip (c) must be > 0, got {tilt_clip}")
     if perf_window < perf_min_periods:
@@ -598,9 +641,19 @@ def dynamic_sleeve_alphas(
         neutral = ~np.isfinite(v) | ~np.isfinite(denom) | (denom <= vol_floor)
         v[neutral] = 0.0
         shat[s] = v
-    if monthly_meta:  # M-4: hold BOTH σ and ŝ at month-ends (rotate only at month-ends).
+    # ρ̄_s: trailing mean |corr| of s to the OTHER sleeves (ADR-C1-5). Computed only when the
+    # down-weight is active (λ_r>0) — default OFF ⇒ ρ̄≡0 ⇒ redund≡1 ⇒ α unchanged (back-compat).
+    lam_r = float(redundancy_strength)
+    if lam_r > 0.0:
+        rho = _trailing_mean_abs_corr(
+            sleeve_returns, window=perf_window, min_periods=perf_min_periods)
+    else:
+        rho = {s: np.zeros(K, dtype=np.float64) for s in names}
+    if monthly_meta:  # M-4: hold σ, ŝ AND ρ̄ at month-ends (rotate only at month-ends).
         sigma = {s: _monthly_held(sigma[s], timestamps) for s in names}
         shat = {s: _monthly_held(shat[s], timestamps) for s in names}
+        if lam_r > 0.0:
+            rho = {s: _monthly_held(rho[s], timestamps) for s in names}
 
     alphas = {s: np.full(K, 1.0 / N, dtype=np.float64) for s in names}
     lam = float(tilt_strength)
@@ -613,7 +666,10 @@ def dynamic_sleeve_alphas(
         inv = 1.0 / sk                                  # convex inverse-vol prior (unnormalized)
         shk = np.array([shat[s][k] for s in names], dtype=np.float64)
         tilt = np.exp(lam * np.clip(shk, -c, c))        # =1 where ŝ=0 (warmup/degenerate/λ=0)
-        wk = inv * tilt
+        rhk = np.array([rho[s][k] for s in names], dtype=np.float64)
+        rhk = np.where(np.isfinite(rhk), np.clip(rhk, 0.0, 1.0), 0.0)   # NaN warmup → 0 (neutral)
+        redund = np.exp(-lam_r * rhk)                   # ≤1; a sleeve collinear with others is down-weighted
+        wk = inv * tilt * redund
         a = wk / wk.sum()                               # convex, Σα = 1
         for j, s in enumerate(names):
             alphas[s][k] = a[j]

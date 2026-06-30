@@ -179,6 +179,66 @@ def test_span_collinear_rejected_where_max_single_corr_would_miss() -> None:
     assert not r.passes_gate
 
 
+def test_p05_fragility_veto_wired() -> None:
+    """GP4-06: the 5th-percentile path ΔSR (delta_sr_p05) is wired into the gate. A candidate that
+    PASSES with the shipped floor is VETOED once delta_p05_min is raised above its own p05 —
+    confirming the fragility veto is load-bearing, not decorative."""
+    cfg, ts, base = _shipped_cfg(), _long_ts(), _long_base()
+    rng = np.random.default_rng(303)
+    cand = 5.0 / np.sqrt(252) * 0.009 + 0.009 * rng.standard_normal(_T_LONG)
+    r = combination_fitness(cand, base, ts, cfg, gen_n_eff=4495.0, turnover_ann=4.0, n_nodes=8,
+                            trial_sharpe_pool=_search_pool())
+    assert r.passes_gate and np.isfinite(r.delta_sr_p05)
+    from dataclasses import replace
+    strict = replace(cfg, delta_p05_min=r.delta_sr_p05 + 1.0)   # floor now above the candidate's p05
+    r2 = combination_fitness(cand, base, ts, strict, gen_n_eff=4495.0, turnover_ann=4.0, n_nodes=8,
+                             trial_sharpe_pool=_search_pool())
+    assert not r2.passes_gate                                   # vetoed purely on fragility
+
+
+def test_dsr_monotone_in_trials_and_observed() -> None:
+    """GP7-08: the deflated Sharpe is monotone — stricter with more trials, looser with a higher
+    observed Sharpe. Locks the DSR primitive's two key directions (a sign/inequality flip fails)."""
+    from finrl_pro_ds.crypto.eval.statistics import deflated_sharpe_ratio
+    pool = (0.02 + 0.01 * np.random.default_rng(1).standard_normal(300)).tolist()
+    kw = dict(n_obs=1000, skew=0.0, excess_kurt=0.0, periods_per_year=1)
+    d_few = deflated_sharpe_ratio(0.06, pool, n_trials=10, **kw)
+    d_many = deflated_sharpe_ratio(0.06, pool, n_trials=2000, **kw)
+    assert d_few["dsr"] >= d_many["dsr"]                        # more trials → stricter
+    d_lo = deflated_sharpe_ratio(0.04, pool, n_trials=100, **kw)
+    d_hi = deflated_sharpe_ratio(0.10, pool, n_trials=100, **kw)
+    assert d_hi["dsr"] >= d_lo["dsr"]                           # higher observed → higher DSR
+
+
+def test_dsr_aug_tightens_with_more_trials() -> None:
+    """GP5-02 N-bite tripwire at the generation wiring: the SAME candidate/book deflates HARDER
+    (lower dsr_aug) at a larger gen_n_eff. Fails if the file-drawer-N → deflation link is inverted
+    or hardcoded."""
+    cfg, ts, base = _shipped_cfg(), _long_ts(), _long_base()
+    rng = np.random.default_rng(303)
+    cand = 5.0 / np.sqrt(252) * 0.009 + 0.009 * rng.standard_normal(_T_LONG)
+    pool = _search_pool()
+    lo = combination_fitness(cand, base, ts, cfg, gen_n_eff=5.0, turnover_ann=4.0, n_nodes=8,
+                             trial_sharpe_pool=pool)
+    hi = combination_fitness(cand, base, ts, cfg, gen_n_eff=5000.0, turnover_ann=4.0, n_nodes=8,
+                             trial_sharpe_pool=pool)
+    assert lo.dsr_aug >= hi.dsr_aug                       # more trials → stricter deflation
+
+
+def test_cpcv_right_seam_purged() -> None:
+    """GP4-05: the right-seam purge (purge_horizon=1) drops boundary indices whose forward return
+    reaches into a train group. Each purged path is a strict subset of the un-purged path, and at
+    least one index is removed overall. Fails if the right purge is reverted to none."""
+    from finrl_pro_ds.signals.generation.fitness import _cpcv_index_paths
+    k_len, n_groups, k_test, embargo = 120, 6, 2, 5
+    no_purge = _cpcv_index_paths(k_len, n_groups, k_test, embargo, 0)
+    purged = _cpcv_index_paths(k_len, n_groups, k_test, embargo, 1)
+    assert len(no_purge) == len(purged)                        # same combinatorial path count
+    assert sum(len(a) - len(b) for a, b in zip(no_purge, purged)) > 0   # right-seam indices removed
+    for a, b in zip(no_purge, purged):
+        assert set(int(x) for x in b).issubset(set(int(x) for x in a))  # purge only ever removes
+
+
 def test_gate_discriminates_collinear_and_noise_in_same_regime() -> None:
     cfg, ts, base = _shipped_cfg(), _long_ts(), _long_base()
     pool = _search_pool()

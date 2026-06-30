@@ -46,7 +46,10 @@ generation:                          # Component 3 — cost-aware automated gene
   n_generations: 40
   rng_seed: 7                        # determinism (ADR-C3-6)
   elite_frac: 0.30
-  cost_bps: 0.0010                   # one-way turnover cost baked into the candidate return
+  cost_bps: 0.0010                   # one-way turnover cost in the candidate AND base returns; 10bps
+                                     # = 5x the 2bps GO anchor (conservative). The validated linear-core
+                                     # anchors (tsmom net SR 0.601 / rates 0.467) are @2bps/month-end;
+                                     # C3 re-prices both @10bps/hold_horizon -> obs 0.275/0.449 (GP3-01/GP8-03).
   ls_min_names: 6                    # min active names for a rank-L/S book (18-asset panel)
   max_ast_nodes: 24                  # complexity / dimensional bound (ADR-C3-4/5)
   turnover_soft_cap: 12.0            # ann turnover where the penalty starts
@@ -56,8 +59,10 @@ generation:                          # Component 3 — cost-aware automated gene
   hlz_t_min: 3.0                     # on the MARGINAL contribution b_aug-b_base (GP4-03), not standalone
   promising_dsr: 0.90
   max_base_corr: 0.70                # GP4-01: reject a candidate collinear with a base sleeve
+  delta_p05_min: -0.10              # GP4-06: fragility veto — 5th-pct CPCV path ΔSR must clear this
   holdout_frac: 0.25                 # embargoed held-out tail for FINAL validation (ADR-C3-3)
   holdout_embargo_days: 21
   cpcv_n_groups: 6
   cpcv_k_test: 2
   cpcv_embargo_days: 21
+  cpcv_purge_horizon: 1             # GP4-05: right-seam purge (book return at t reaches t+1)

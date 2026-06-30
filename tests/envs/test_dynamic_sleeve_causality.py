@@ -54,3 +54,16 @@ def test_dynamic_tilt_excludes_current_return():
     np.testing.assert_allclose(base["momentum"][: j + 1], after["momentum"][: j + 1], atol=1e-12)
     # but α at bar j+1 DOES use return[j] via the tilt → it must move.
     assert abs(after["momentum"][j + 1] - base["momentum"][j + 1]) > 1e-9
+
+
+def test_redundancy_downweight_is_causal_late_shock():
+    """ADR-C1-5: the redundancy (trailing |corr|) down-weight must also be causal — perturbing
+    LATE returns leaves the down-weighted α at EARLY steps unchanged (the ρ̄ uses .shift(1))."""
+    rets, ts = _two_return_series()
+    base = dynamic_sleeve_alphas(rets, ts, monthly_meta=True, redundancy_strength=3.0)
+    bumped = {k: v.copy() for k, v in rets.items()}
+    cut = len(ts) - 100
+    bumped["momentum"][cut:] *= 4.0
+    after = dynamic_sleeve_alphas(bumped, ts, monthly_meta=True, redundancy_strength=3.0)
+    for s in rets:
+        np.testing.assert_allclose(base[s][: cut - 1], after[s][: cut - 1], atol=1e-12)
