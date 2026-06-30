@@ -227,3 +227,40 @@ def test_monthly_meta_changes_only_at_month_ends():
     changed = {k for k in range(1, len(a)) if abs(a[k] - a[k - 1]) > 1e-15}
     assert changed.issubset(last_of_month), sorted(changed - last_of_month)[:5]
     assert len(changed) >= 6                             # genuinely rotates (not constant)
+
+
+# --------------------------------------------------------------------------- #
+# ADR-C1-5 — redundancy (correlation) down-weight
+# --------------------------------------------------------------------------- #
+def test_redundancy_strength_zero_is_identity():
+    """redundancy_strength=0 ⇒ redund ≡ 1 ⇒ α byte-identical to the no-arg call (back-compat)."""
+    R, ts = _two_return_series()
+    a0 = dynamic_sleeve_alphas(R, ts)
+    a1 = dynamic_sleeve_alphas(R, ts, redundancy_strength=0.0)
+    for s in R:
+        assert np.array_equal(a0[s], a1[s])
+
+
+def test_redundancy_downweights_collinear_sleeve():
+    """ADR-C1-5: with redundancy_strength>0 a sleeve collinear with another is DOWN-weighted and a
+    diversifying sleeve gains weight, vs the λ_r=0 inverse-vol weight. Still a convex combination."""
+    rng = np.random.default_rng(9)
+    T = 800
+    ts = (pd.bdate_range("2015-01-01", periods=T).asi8 // 10**9).astype(np.int64)[: T - 1]
+    a = rng.normal(0.0003, 0.010, T - 1)
+    a2 = a + rng.normal(0.0, 0.001, T - 1)              # near-duplicate of a (high corr)
+    b = rng.normal(0.0003, 0.010, T - 1)               # independent diversifier
+    R = {"a": a, "a2": a2, "b": b}
+    base = dynamic_sleeve_alphas(R, ts, redundancy_strength=0.0)
+    pen = dynamic_sleeve_alphas(R, ts, redundancy_strength=3.0)
+    k = T - 2                                           # last bar (warmed up)
+    assert pen["b"][k] > base["b"][k]                  # diversifier gains
+    assert pen["a"][k] < base["a"][k] and pen["a2"][k] < base["a2"][k]   # collinear pair loses
+    assert abs(pen["a"][k] + pen["a2"][k] + pen["b"][k] - 1.0) < 1e-9    # convex
+    assert all(pen[s][k] > 0 for s in R)
+
+
+def test_redundancy_strength_out_of_range_raises():
+    R, ts = _two_return_series()
+    with pytest.raises(ValueError, match="redundancy_strength"):
+        dynamic_sleeve_alphas(R, ts, redundancy_strength=6.0)

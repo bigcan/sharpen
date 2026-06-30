@@ -17,9 +17,9 @@ _GEN_DEFAULTS: dict = {
     "elite_frac": 0.30, "cost_bps": 0.0010, "ls_min_names": 6, "max_ast_nodes": 24,
     "turnover_soft_cap": 12.0, "lambda_turnover": 0.05, "lambda_complexity": 0.10,
     "min_combination_uplift": 0.10, "hlz_t_min": 3.0, "promising_dsr": 0.90,
-    "max_base_corr": 0.70,
+    "max_base_corr": 0.70, "delta_p05_min": -0.10,
     "holdout_frac": 0.25, "holdout_embargo_days": 21,
-    "cpcv_n_groups": 6, "cpcv_k_test": 2, "cpcv_embargo_days": 21,
+    "cpcv_n_groups": 6, "cpcv_k_test": 2, "cpcv_embargo_days": 21, "cpcv_purge_horizon": 1,
 }
 
 
@@ -38,6 +38,15 @@ def _validate(g: dict) -> None:
         raise ValueError("generation.hlz_t_min >= 0 and promising_dsr in [0,1] required")
     if not (0.0 <= float(g["max_base_corr"]) <= 1.0):
         raise ValueError("generation.max_base_corr must be in [0,1]")
+    # GP8-02: the previously-decorative substrate keys are now load-bearing — the runner hardcodes
+    # the cross-asset panel + the {tsmom, rates_carry} book, so a config that names anything else is
+    # a silent no-op; fail fast instead.
+    if str(g["panel"]) != "cross_asset":
+        raise ValueError(f"generation.panel must be 'cross_asset' (the only wired substrate), "
+                         f"got {g['panel']!r}")
+    if set(map(str, g["base_sleeves"])) != {"tsmom", "rates_carry"}:
+        raise ValueError("generation.base_sleeves must be exactly {tsmom, rates_carry} (the wired "
+                         f"book), got {g['base_sleeves']!r}")
 
 
 def load_generation_config(gates_path: str | Path) -> tuple[FitnessConfig, dict]:
@@ -54,12 +63,12 @@ def load_generation_config(gates_path: str | Path) -> tuple[FitnessConfig, dict]
 
     fit = FitnessConfig(
         n_groups=int(g["cpcv_n_groups"]), k_test=int(g["cpcv_k_test"]),
-        embargo=int(g["cpcv_embargo_days"]),
+        embargo=int(g["cpcv_embargo_days"]), purge_horizon=int(g["cpcv_purge_horizon"]),
         periods_per_year=252.0,        # the book is DAILY-marked (held between rebalances);
                                        # hold_horizon affects turnover only, not Sharpe annualization
         hlz_t_min=float(g["hlz_t_min"]), promising_dsr=float(g["promising_dsr"]),
         min_combination_uplift=float(g["min_combination_uplift"]),
-        max_base_corr=float(g["max_base_corr"]),
+        max_base_corr=float(g["max_base_corr"]), delta_p05_min=float(g["delta_p05_min"]),
         lambda_turnover=float(g["lambda_turnover"]),
         turnover_soft_cap=float(g["turnover_soft_cap"]),
         lambda_complexity=float(g["lambda_complexity"]),
@@ -71,3 +80,18 @@ def load_generation_config(gates_path: str | Path) -> tuple[FitnessConfig, dict]
         holdout_frac=float(g["holdout_frac"]), holdout_embargo=int(g["holdout_embargo_days"]),
         elite_frac=float(g["elite_frac"]))
     return fit, evolve_kwargs
+
+
+def load_generation_meta(gates_path: str | Path) -> dict:
+    """Return the generation substrate ``{enabled, panel, base_sleeves}`` from the gates YAML,
+    validated. ``enabled`` is the opt-in gate the standalone runner enforces (GP8-01); ``panel`` /
+    ``base_sleeves`` are bounds-checked against the wired book (GP8-02) so editing them to an
+    unsupported value fails fast rather than silently no-op-ing."""
+    import yaml
+
+    with open(gates_path, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh) or {}
+    g = {**_GEN_DEFAULTS, **dict(cfg.get("generation", {}))}
+    _validate(g)
+    return {"enabled": bool(g["enabled"]), "panel": str(g["panel"]),
+            "base_sleeves": [str(s) for s in g["base_sleeves"]]}

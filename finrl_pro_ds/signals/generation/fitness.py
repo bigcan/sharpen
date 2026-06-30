@@ -54,12 +54,14 @@ class FitnessConfig:
     n_groups: int = 6
     k_test: int = 2
     embargo: int = 21
+    purge_horizon: int = 1         # GP4-05: right-seam purge (book return at t reaches t+1)
     periods_per_year: float = 252.0
     # deflation / hurdles
     hlz_t_min: float = 3.0
     promising_dsr: float = 0.90
     min_combination_uplift: float = 0.10
     max_base_corr: float = 0.70    # GP4-01: reject a candidate collinear with a base sleeve
+    delta_p05_min: float = -0.10   # GP4-06: fragility veto — 5th-pct path ΔSR must clear this
     # selection penalties (implementation-shortfall + Occam)
     lambda_turnover: float = 0.05
     turnover_soft_cap: float = 12.0
@@ -73,6 +75,7 @@ class FitnessConfig:
     perf_window: int = 126
     perf_min_periods: int = 63
     tilt_clip: float = 1.5
+    combiner_redundancy_strength: float = 0.0   # ADR-C1-5 corr down-weight in the combiner (off)
 
 
 @dataclass(frozen=True, slots=True)
@@ -99,19 +102,27 @@ def _combined_book(returns: Mapping[str, np.ndarray], timestamps: np.ndarray,
         min_periods=cfg.combiner_min_periods, monthly_meta=cfg.combiner_monthly_meta,
         target_portfolio_vol=None, tilt_strength=cfg.tilt_strength,
         perf_window=cfg.perf_window, perf_min_periods=cfg.perf_min_periods,
-        tilt_clip=cfg.tilt_clip)
+        tilt_clip=cfg.tilt_clip, redundancy_strength=cfg.combiner_redundancy_strength)
     names = list(returns)
     a = np.stack([np.asarray(alphas[s], dtype=np.float64) for s in names], axis=1)   # (K,S)
     r = np.stack([np.asarray(returns[s], dtype=np.float64) for s in names], axis=1)   # (K,S)
     return np.nansum(a * r, axis=1)                                                   # (K,)
 
 
-def _cpcv_index_paths(k_len: int, n_groups: int, k_test: int, embargo: int) -> list[np.ndarray]:
-    """Purged+embargoed CPCV: indices of each C(n_groups,k_test) held-out test-group union,
-    dropping ``embargo`` indices at every contiguous-run start (no label-window to purge — the
-    book returns are already realized per step)."""
+def _cpcv_index_paths(
+    k_len: int, n_groups: int, k_test: int, embargo: int, purge_horizon: int = 1
+) -> list[np.ndarray]:
+    """Purged+embargoed CPCV: indices of each C(n_groups,k_test) held-out test-group union.
+
+    Embargo ``embargo`` indices at every contiguous-run START (left seam), AND purge the last
+    ``purge_horizon`` indices of every run END (right seam) when that run does not reach the very
+    end of the timeline (GP4-05): the book return at step ``t`` is earned over ``t→t+purge_horizon``,
+    so a test run whose successor is a train group would otherwise read a train-region price move.
+    This mirrors the project's own ``eval_harness.tier3_5_cpcv`` purge (``while t+horizon < b``).
+    """
     bounds = np.linspace(0, k_len, n_groups + 1).astype(int)
     groups = [(int(bounds[i]), int(bounds[i + 1])) for i in range(n_groups)]
+    h = max(0, int(purge_horizon))
     paths: list[np.ndarray] = []
     for combo in combinations(range(n_groups), k_test):
         mask = np.zeros(k_len, dtype=bool)
@@ -120,7 +131,8 @@ def _cpcv_index_paths(k_len: int, n_groups: int, k_test: int, embargo: int) -> l
             mask[a:b] = True
         idx: list[int] = []
         for a, b in _contiguous_runs(mask):
-            idx.extend(range(a + embargo, b))         # embargo at each run start
+            right = b if b >= k_len else max(a + embargo, b - h)   # right-seam purge unless at end
+            idx.extend(range(a + embargo, right))                  # embargo (left) + purge (right)
         if len(idx) >= 2:
             paths.append(np.asarray(idx, dtype=np.int64))
     return paths
@@ -133,6 +145,24 @@ def _per_period_sharpe(x: np.ndarray) -> float:
         return float("nan")
     sd = float(x.std(ddof=1))
     return float(x.mean() / sd) if sd > 0 else float("nan")
+
+
+def _ar1_effective_n(x: np.ndarray) -> float:
+    """Effective sample size of a (positively) autocorrelated stream via the AR(1) approximation
+    ``N_eff = N·(1−ρ₁)/(1+ρ₁)``, clamped to ``[2, N]`` (Math M-N2 / effective-N). Daily marks under
+    a multi-day hold are positively autocorrelated, so a naive ``√N`` t-stat overstates
+    significance; deflating N to the effectively-independent count corrects it. Only positive ρ₁
+    deflates (a negative ρ₁ is clamped to 0 — never inflate the t-stat)."""
+    x = np.asarray(x, dtype=np.float64)
+    x = x[np.isfinite(x)]
+    n = x.size
+    if n < 3 or x.std() <= 0.0:
+        return float(max(2, n))
+    xc = x - x.mean()
+    denom = float(np.dot(xc, xc))
+    rho1 = float(np.dot(xc[:-1], xc[1:]) / denom) if denom > 0 else 0.0
+    rho1 = min(0.999, max(0.0, rho1))
+    return float(min(float(n), max(2.0, n * (1.0 - rho1) / (1.0 + rho1))))
 
 
 def _base_span_corr(cand: np.ndarray, bases: Mapping[str, np.ndarray]) -> float:
@@ -211,7 +241,7 @@ def combination_fitness(
     b_base = _combined_book(base, timestamps, cfg)
     b_aug = _combined_book(aug, timestamps, cfg)
 
-    paths = _cpcv_index_paths(b_aug.size, cfg.n_groups, cfg.k_test, cfg.embargo)
+    paths = _cpcv_index_paths(b_aug.size, cfg.n_groups, cfg.k_test, cfg.embargo, cfg.purge_horizon)
     deltas: list[float] = []
     for idx in paths:
         sb = _ann_sharpe(b_base[idx], cfg.periods_per_year)
@@ -243,19 +273,21 @@ def combination_fitness(
     # HLZ on the MARGINAL contribution stream b_aug − b_base (GP4-03), not standalone strength:
     # an honest diversifier whose own Sharpe is modest but whose incremental book return is
     # significant now clears the hurdle; a strong-but-redundant standalone alpha does not earn a
-    # pass on standalone strength alone. NOTE (Math M-N2): the daily marks under a monthly hold are
-    # autocorrelated, so the naive sqrt(N) t overstates significance (effective N < N) — a known
-    # limitation (the old standalone t shared it); the binding gates (dsr_aug, delta_mean≥uplift)
-    # dominate, and an effective-N / Newey-West correction is the refinement.
+    # pass on standalone strength alone. The t-stat uses the AR(1) EFFECTIVE N (GP/Math M-N2): daily
+    # marks under a multi-day hold are autocorrelated, so √N would overstate significance.
     marg = (b_aug - b_base)
     marg = marg[np.isfinite(marg)]
     marg_sr = _per_period_sharpe(marg)
-    marginal_t = marg_sr * np.sqrt(marg.size) if (np.isfinite(marg_sr) and marg.size > 1) else float("nan")
+    marginal_t = (marg_sr * np.sqrt(_ar1_effective_n(marg))
+                  if (np.isfinite(marg_sr) and marg.size > 1) else float("nan"))
     cand_hlz_pass = bool(np.isfinite(marginal_t) and marginal_t >= cfg.hlz_t_min)
 
     # collinearity guard (GP4-01): multiple correlation of the candidate to the base SPAN.
     max_base_corr = _base_span_corr(np.asarray(cand_returns, dtype=np.float64), base)
     not_redundant = bool(max_base_corr <= cfg.max_base_corr)
+    # fragility veto (GP4-06): a strong-mean candidate with a deeply-negative 5th-percentile path
+    # (regime-concentrated) must not pass — wire delta_sr_p05 into the gate.
+    not_fragile = bool(np.isfinite(delta_p05) and delta_p05 >= cfg.delta_p05_min)
 
     fitness = (delta_mean
                - cfg.lambda_turnover * max(0.0, turnover_ann - cfg.turnover_soft_cap)
@@ -263,7 +295,7 @@ def combination_fitness(
     passes_gate = bool(
         np.isfinite(delta_mean) and delta_mean >= cfg.min_combination_uplift
         and np.isfinite(dsr_aug) and dsr_aug >= cfg.promising_dsr
-        and cand_hlz_pass and not_redundant)
+        and cand_hlz_pass and not_redundant and not_fragile)
 
     return FitnessResult(
         fitness=float(fitness) if np.isfinite(fitness) else float("-inf"),

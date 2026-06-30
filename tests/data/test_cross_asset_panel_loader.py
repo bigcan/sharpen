@@ -57,6 +57,31 @@ def test_loader_builds_panel_survivorship_free_with_class_sectors() -> None:
     assert panel.active.all()
 
 
+def test_loader_propagates_clean_status_into_meta() -> None:
+    """GP1-02: the EARNED DATA-CLEAN status + caveats are surfaced in panel.meta."""
+    panel = load_cross_asset_panel(
+        "2010-01-01", universe=(_TICKERS, _CLASSES),
+        fetch_fn=lambda *_a, **_k: _wide(), clean_fn=_identity_clean)
+    assert panel.meta["data_clean_status"] == "PASS"
+    assert panel.meta["max_stale_pnl_share"] == 0.0
+    assert "UPPER BOUND" in panel.meta["survivorship_note"]   # GP1-01 honest caveat
+
+
+def test_loader_refuses_stale_print_fail() -> None:
+    """GP1-02: a stale-print FAIL (gmgp1-gold class) REFUSES to build the panel, instead of silently
+    handing contaminated data to the generator."""
+    import pytest
+
+    def _fail_clean(wide):
+        rep = {tk: {"stale_flagged": False, "stale_pnl_share": 0.0} for tk in wide["close"].columns}
+        rep[_TICKERS[0]] = {"stale_flagged": True, "stale_pnl_share": 0.25}   # >2% → FAIL
+        return wide, rep
+
+    with pytest.raises(ValueError, match="status=FAIL"):
+        load_cross_asset_panel("2010-01-01", universe=(_TICKERS, _CLASSES),
+                               fetch_fn=lambda *_a, **_k: _wide(), clean_fn=_fail_clean)
+
+
 def test_seed_alpha_is_causal_on_cross_asset_panel() -> None:
     panel = load_cross_asset_panel(
         "2010-01-01", universe=(_TICKERS, _CLASSES),
