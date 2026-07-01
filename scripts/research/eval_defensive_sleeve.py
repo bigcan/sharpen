@@ -67,6 +67,71 @@ def _inverse_vol_combined(streams: dict[str, np.ndarray], *, vol_window: int = 6
     return comb.to_numpy(dtype=np.float64), valid
 
 
+def _contiguous_runs(mask: np.ndarray) -> list[tuple[int, int]]:
+    """``[a, b)`` runs of True in a boolean mask (adjacent test groups merge into one run)."""
+    runs: list[tuple[int, int]] = []
+    i, n = 0, len(mask)
+    while i < n:
+        if mask[i]:
+            j = i
+            while j < n and mask[j]:
+                j += 1
+            runs.append((i, j))
+            i = j
+        else:
+            i += 1
+    return runs
+
+
+def _cpcv_uplift_distribution(r2: np.ndarray, r3: np.ndarray, *, n_groups: int, k_test: int,
+                              embargo: int, purge_horizon: int) -> dict:
+    """Combinatorial Purged CV distribution of the combined-book ΔSharpe (book3 − book2).
+
+    The C2 ``tier3_5_cpcv`` structure applied to the PAIRED daily combined-book returns: partition
+    ``[0, n)`` into ``n_groups`` contiguous groups; for each combination of ``k_test`` groups the
+    test set is their union; inside each contiguous test run embargo the start and purge the last
+    ``purge_horizon`` bars (the 1-day book label reaches t+1). The inverse-vol combiner is
+    parameter-free ⇒ no refit per path (ADR-C2-2); we slice the realized paired returns and score
+    net Sharpe of each book on the SAME purged test bars ⇒ a distribution of uplift over the paths.
+    This turns 'was the +0.30 OOS-tail real or one lucky recent split?' into a 15-path answer.
+    """
+    from itertools import combinations
+
+    n = len(r2)
+    bounds = np.linspace(0, n, n_groups + 1).astype(int)
+    groups = [(int(bounds[i]), int(bounds[i + 1])) for i in range(n_groups)]
+    per_path: list[dict] = []
+    for combo in combinations(range(n_groups), k_test):
+        in_test = np.zeros(n, dtype=bool)
+        for gi in combo:
+            a, b = groups[gi]
+            in_test[a:b] = True
+        idx: list[int] = []
+        for a, b in _contiguous_runs(in_test):
+            lo, hi = a + embargo, b - purge_horizon
+            if hi > lo:
+                idx.extend(range(lo, hi))
+        if len(idx) >= 2:
+            ii = np.asarray(idx, dtype=int)
+            s2, s3 = _net_sharpe(r2[ii]), _net_sharpe(r3[ii])
+            per_path.append({"groups": list(combo), "sr_book2": round(s2, 4),
+                             "sr_book3": round(s3, 4), "uplift": round(s3 - s2, 4)})
+    ups = np.asarray([p["uplift"] for p in per_path], dtype=np.float64)
+    if ups.size == 0:
+        return {"n_paths": 0}
+    return {
+        "n_paths": int(ups.size), "n_groups": n_groups, "k_test": k_test,
+        "embargo_days": embargo, "purge_horizon": purge_horizon,
+        "uplift_mean": round(float(ups.mean()), 4),
+        "uplift_median": round(float(np.median(ups)), 4),
+        "uplift_std": round(float(ups.std(ddof=1)) if ups.size > 1 else 0.0, 4),
+        "uplift_p05": round(float(np.quantile(ups, 0.05)), 4),
+        "uplift_min": round(float(ups.min()), 4), "uplift_max": round(float(ups.max()), 4),
+        "frac_paths_positive": round(float((ups > 0).mean()), 4),
+        "per_path": per_path,
+    }
+
+
 def _block_bootstrap_p(r2: np.ndarray, r3: np.ndarray, *, block: int = 21,
                        n_boot: int = 2000, seed: int = 7) -> float:
     """Moving-block bootstrap p-value that Sharpe(book3) - Sharpe(book2) > 0 on the paired series
@@ -108,6 +173,11 @@ def main() -> int:
     min_uplift = float(gen.get("min_combination_uplift", 0.10))
     hold = int(gen.get("hold_horizon", 21))
     cost_bps = float(gen.get("cost_bps", 0.0010))
+    cpcv_n_groups = int(gen.get("cpcv_n_groups", 6))
+    cpcv_k_test = int(gen.get("cpcv_k_test", 2))
+    cpcv_embargo = int(gen.get("cpcv_embargo_days", 21))
+    cpcv_purge = int(gen.get("cpcv_purge_horizon", 1))
+    delta_p05_min = float(gen.get("delta_p05_min", -0.10))    # GP4-06 fragility floor on p05(ΔSR)
 
     panel = load_cross_asset_panel(
         args.start, args.end, config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
@@ -135,19 +205,29 @@ def main() -> int:
     uplift_full, uplift_oos = sr3_full - sr2_full, sr3_oos - sr2_oos
     p_boot = _block_bootstrap_p(r2, r3)
 
-    # Honest tri-state verdict. A large single-split OOS uplift is NOT proof — the full-sample
-    # bootstrap is the trustworthy stat (one 30% tail is high-variance / regime-concentrated). So:
-    #   ADD_CANDIDATE               — uncorrelated, OOS uplift clears the gate, AND the full-sample
-    #                                 uplift is bootstrap-significant.
-    #   UNCORRELATED_UPLIFT_UNPROVEN — a clean diversifier whose uplift is positive but not yet
-    #                                 significant (the recent-regime-concentrated case) → needs CPCV.
-    #   NO_ADD                       — fails correlation or shows no OOS uplift.
+    # C2 CPCV: the BINDING OOS evidence — distribution of ΔSharpe over the 15 combinatorial purged
+    # paths, which resolves 'was the +0.30 OOS-tail real or one lucky recent split?'.
+    cpcv = _cpcv_uplift_distribution(r2, r3, n_groups=cpcv_n_groups, k_test=cpcv_k_test,
+                                     embargo=cpcv_embargo, purge_horizon=cpcv_purge)
+
+    # Honest verdict, driven by the CPCV DISTRIBUTION (not the single high-variance OOS split):
+    #   ADD_CANDIDATE               — uncorrelated AND the uplift is robust across paths: median > 0,
+    #                                 a majority of paths positive, and the 5th-pct path clears the
+    #                                 gates fragility floor (delta_p05_min, GP4-06).
+    #   UNCORRELATED_UPLIFT_UNPROVEN — a clean diversifier whose uplift is positive somewhere but not
+    #                                 robust across paths (the recent-regime-concentrated case).
+    #   NO_ADD                       — fails correlation, or the CPCV distribution is not positive.
     corr_ok = max_abs_corr <= max_base_corr
-    uplift_ok = uplift_oos >= min_uplift
+    uplift_ok = uplift_oos >= min_uplift                     # single-split screen (secondary)
     boot_sig = np.isfinite(p_boot) and p_boot < args.boot_alpha
-    if corr_ok and uplift_ok and boot_sig:
+    cpcv_median = float(cpcv.get("uplift_median", float("nan")))
+    cpcv_p05 = float(cpcv.get("uplift_p05", float("nan")))
+    cpcv_frac_pos = float(cpcv.get("frac_paths_positive", float("nan")))
+    cpcv_robust = (np.isfinite(cpcv_median) and cpcv_median > 0.0 and cpcv_frac_pos > 0.5
+                   and cpcv_p05 >= delta_p05_min)
+    if corr_ok and cpcv_robust:
         verdict = "ADD_CANDIDATE"
-    elif corr_ok and (uplift_ok or uplift_full > 0):
+    elif corr_ok and (cpcv_median > 0.0 or uplift_oos >= min_uplift or uplift_full > 0):
         verdict = "UNCORRELATED_UPLIFT_UNPROVEN"
     else:
         verdict = "NO_ADD"
@@ -165,15 +245,18 @@ def main() -> int:
         "min_combination_uplift_gate": min_uplift, "uplift_gate_pass": bool(uplift_ok),
         "bootstrap_p_uplift_le_0": round(p_boot, 4), "boot_alpha": args.boot_alpha,
         "bootstrap_significant": bool(boot_sig),
+        "cpcv": cpcv, "delta_p05_min_gate": delta_p05_min, "cpcv_robust": bool(cpcv_robust),
         "verdict": verdict,
     }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     log.warning("ADVISORY verdict=%s | corr(tsmom)=%.3f corr(rates)=%.3f (gate<=%.2f) | "
-                "book2->book3 OOS SR %.3f->%.3f (uplift %.3f, gate>=%.2f) | boot p=%.3f",
-                verdict, corr_tsmom, corr_rates, max_base_corr, sr2_oos, sr3_oos,
-                uplift_oos, min_uplift, p_boot)
+                "single-split OOS uplift %.3f (boot p=%.3f) | CPCV %d paths: median=%.3f p05=%.3f "
+                "(floor %.2f) frac+=%.2f -> robust=%s",
+                verdict, corr_tsmom, corr_rates, max_base_corr, uplift_oos, p_boot,
+                int(cpcv.get("n_paths", 0)), cpcv_median, cpcv_p05, delta_p05_min,
+                cpcv_frac_pos, cpcv_robust)
     log.info("wrote %s", out)
     return 0
 
