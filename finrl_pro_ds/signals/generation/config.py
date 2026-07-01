@@ -11,6 +11,16 @@ from pathlib import Path
 
 from .fitness import FitnessConfig
 
+# GP8-02: the wired substrates. Each panel maps to the EXACT base book its runner builds — the
+# candidate is scored against that book, so a config naming a panel/sleeve set the runner does not
+# build is a silent no-op. Fail fast instead. `cross_asset` = US ETF panel + {tsmom, rates_carry}
+# (production_base_sleeves); `taiwan` = TAIEX ETF panel + TX/TE/TF TSMOM only (taiwan_base_sleeves,
+# S553-cont step 2 — there is no Taiwan rates-carry sleeve).
+_WIRED_SUBSTRATES: dict[str, frozenset[str]] = {
+    "cross_asset": frozenset({"tsmom", "rates_carry"}),
+    "taiwan": frozenset({"tsmom"}),
+}
+
 _GEN_DEFAULTS: dict = {
     "enabled": False, "panel": "cross_asset", "base_sleeves": ["tsmom", "rates_carry"],
     "hold_horizon": 21, "pop_size": 200, "n_generations": 40, "rng_seed": 7,
@@ -38,15 +48,16 @@ def _validate(g: dict) -> None:
         raise ValueError("generation.hlz_t_min >= 0 and promising_dsr in [0,1] required")
     if not (0.0 <= float(g["max_base_corr"]) <= 1.0):
         raise ValueError("generation.max_base_corr must be in [0,1]")
-    # GP8-02: the previously-decorative substrate keys are now load-bearing — the runner hardcodes
-    # the cross-asset panel + the {tsmom, rates_carry} book, so a config that names anything else is
-    # a silent no-op; fail fast instead.
-    if str(g["panel"]) != "cross_asset":
-        raise ValueError(f"generation.panel must be 'cross_asset' (the only wired substrate), "
-                         f"got {g['panel']!r}")
-    if set(map(str, g["base_sleeves"])) != {"tsmom", "rates_carry"}:
-        raise ValueError("generation.base_sleeves must be exactly {tsmom, rates_carry} (the wired "
-                         f"book), got {g['base_sleeves']!r}")
+    # GP8-02: the substrate keys are load-bearing — the runner builds the EXACT panel + base book a
+    # substrate names, so a config naming an unwired panel/sleeve set is a silent no-op; fail fast.
+    panel = str(g["panel"])
+    if panel not in _WIRED_SUBSTRATES:
+        raise ValueError(f"generation.panel must be one of {sorted(_WIRED_SUBSTRATES)} (the wired "
+                         f"substrates), got {panel!r}")
+    expected = _WIRED_SUBSTRATES[panel]
+    if set(map(str, g["base_sleeves"])) != set(expected):
+        raise ValueError(f"generation.base_sleeves for panel={panel!r} must be exactly "
+                         f"{set(expected)} (the wired book), got {g['base_sleeves']!r}")
 
 
 def load_generation_config(gates_path: str | Path) -> tuple[FitnessConfig, dict]:

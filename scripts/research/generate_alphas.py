@@ -7,14 +7,19 @@ PROMISING; a deploy read of any survivor requires a Tier-2 deep lifecycle audit.
 Modes:
   --mode synthetic   end-to-end CALIBRATION run on a synthetic panel (no network); the key
                      property is that a NOISE panel yields 0 PROMISING (the cont-73 lesson).
-  --mode real        load the real cross-asset ETF panel; base sleeves are the PRODUCTION
-                     linear-core TSMOM + rates-carry streams (validated net SR 0.601 / 0.467),
-                     built on the panel clock by ``signals.generation.base_sleeves`` — the
-                     candidate must improve the REAL book (architecture open-item 2, now wired).
+  --mode real        load a real panel + its PRODUCTION base book, dispatched on the gates'
+                     ``generation.panel`` (GP8-02, validated in ``config._validate``):
+                       * ``cross_asset`` → US ETF panel + linear-core TSMOM + rates-carry
+                         (validated net SR 0.601 / 0.467), ``production_base_sleeves``.
+                       * ``taiwan``      → TAIEX ETF panel (``taiwan_panel_loader``) + TX/TE/TF
+                         TSMOM-only book (``taiwan_base_sleeves``, S553-cont steps 1-2).
+                     The candidate must improve the REAL book on the panel clock.
 
 Usage:
   python scripts/research/generate_alphas.py --mode synthetic --planted
   python scripts/research/generate_alphas.py --mode real --start 2008-01-01
+  python scripts/research/generate_alphas.py --mode real --force \
+      --config configs/taiwan_signal_eval.gates.yaml --start 2010-01-01
 """
 from __future__ import annotations
 
@@ -123,7 +128,16 @@ def main() -> int:
     if args.mode == "synthetic":
         panel = _synthetic_panel(args.t, args.n, planted=args.planted, seed=0)
         base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
-    else:
+    elif meta["panel"] == "taiwan":
+        from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
+        from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
+        panel = load_taiwan_panel(  # 10-ETF cross-asset panel from taiwan_cross_asset.yaml
+            args.start, args.end)
+        log.info("TAIWAN base book (TX/TE/TF futures TSMOM, single-leg) on the panel clock.")
+        base = taiwan_base_sleeves(
+            panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
+            start=args.start, end=args.end)
+    else:                                # cross_asset (the default, validated substrate)
         from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
         from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
         panel = load_cross_asset_panel(  # universe comes from the cross-asset config, not gates
@@ -136,11 +150,11 @@ def main() -> int:
 
     rep = evolve(_seed_formulas(), panel, base, ts, cfg, **ek)
 
-    out = Path(args.out)
+    out = Path(args.out) / meta["panel"]               # per-substrate subdir: no cross_asset/taiwan collision
     out.mkdir(parents=True, exist_ok=True)
     payload = {
         "advisory": "harness caps at PROMISING; deploy read requires a Tier-2 deep audit",
-        "mode": args.mode, "panel_source": panel.meta.get("source"),
+        "mode": args.mode, "panel": meta["panel"], "panel_source": panel.meta.get("source"),
         "gen_n_total": rep.gen_n_total, "gen_n_eff": rep.gen_n_eff,
         "n_promising": len(rep.promising),
         "hall_of_fame": [

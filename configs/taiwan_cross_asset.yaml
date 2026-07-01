@@ -1,0 +1,41 @@
+# Taiwan cross-asset mining universe (S553-cont) — scope artifact:
+# .agent/artifacts/taiex_mining_universe_scope_s553.md
+#
+# `universe.assets`      = the ETF cross-section the C3 miner ranks (rank-L/S candidate cell).
+# `universe.asset_class` = the within-class neutralization bucket (sector_id analog). Grouped
+#                          into 3 broad classes so `indneutralize` demeans meaningful groups
+#                          (6 tw-equity vs 2 bond vs 2 commodity), not singletons.
+# `universe.futures`     = index/sector futures for the TSMOM BASE book a candidate must beat
+#                          (consumed by the Taiwan base sleeves, step 2 — NOT part of the panel).
+#
+# All ids QUOTED — YAML would otherwise parse leading-zero tickers (0050) as octal ints, and the
+# FinMind data_id contract is the string form. Dropped vs the initial candidate list (per the
+# live FinMind history/liquidity probe 2026-06-30): 0051/0053 (illiquid), 00892/00687B (near-dupe
+# of a more-liquid sibling), XIF (medvol 205 — untradeable), TMF (2024+ only), MTX (== TX underlying).
+universe:
+  assets:
+    - "0050"      # TW equity broad (TW50)          2010+, medvol 9.1M
+    - "006208"    # TW equity broad (FTSE TW)       2012+, 551k
+    - "0056"      # TW equity high-dividend         2010+, 3.7M
+    - "0055"      # TW financials sector            2010+, 264k
+    - "00878"     # TW equity ESG high-dividend     2020+, 41M
+    - "00891"     # TW semiconductors               2021+, 9.1M
+    - "00679B"    # US Treasury 20y (TWD-listed)    2017+, 2.4M
+    - "00751B"    # corporate bond                  2018+, 1.6M
+    - "00635U"    # gold futures ETF                2015+, 773k
+    - "00642U"    # WTI oil futures ETF             2015+, 5.0M
+  asset_class:
+    "0050": tw_equity
+    "006208": tw_equity
+    "0056": tw_equity
+    "0055": tw_equity
+    "00878": tw_equity
+    "00891": tw_equity
+    "00679B": bond
+    "00751B": bond
+    "00635U": commodity
+    "00642U": commodity
+  futures:            # base-sleeve substrate (step 2), NOT panel members
+    - "TX"            # TAIEX index      2010+, 94k contracts
+    - "TE"            # electronics sector futures
+    - "TF"            # finance sector futures

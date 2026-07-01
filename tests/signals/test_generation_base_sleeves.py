@@ -22,6 +22,8 @@ from finrl_pro_ds.signals.generation.base_sleeves import (
     _book_from_target_weights,
     production_base_sleeves,
     rates_carry_sleeve_returns,
+    taiwan_base_sleeves,
+    taiwan_tsmom_sleeve_returns,
     tsmom_sleeve_returns,
 )
 
@@ -29,6 +31,7 @@ T, N = 700, 18
 _TICKERS = ("SPY", "QQQ", "IWM", "EFA", "EEM", "TLT", "IEF", "LQD", "GLD", "SLV",
             "DBC", "USO", "DBA", "UUP", "FXE", "FXY", "FXB", "FXA")
 _BONDS = ("SHY", "IEF", "TLT", "LQD")
+_TW_FUTURES = ["TX", "TE", "TF"]
 _HOLD, _COST = 21, 0.0010
 
 
@@ -57,6 +60,13 @@ def _curve(dates: np.ndarray, seed: int = 1) -> dict:
 def _rates_close(seed: int = 2) -> np.ndarray:
     rng = np.random.default_rng(seed)
     return np.exp(np.cumsum(0.003 * rng.standard_normal((T, len(_BONDS))), axis=0) + 4.0)
+
+
+def _tw_futures_close(seed: int = 4) -> np.ndarray:
+    """(T, 3) synthetic TX/TE/TF close — the injected Taiwan futures base-book universe."""
+    rng = np.random.default_rng(seed)
+    return np.exp(np.cumsum(0.01 * rng.standard_normal((T, len(_TW_FUTURES))), axis=0)
+                  + rng.uniform(8.0, 9.0, len(_TW_FUTURES)))
 
 
 # --------------------------------------------------------------------------- #
@@ -204,3 +214,85 @@ def test_rates_vol_scaling_uses_momentum_constants() -> None:
     # sanity: a finite, non-degenerate stream once vol warms up (DEFAULT_VOL_WINDOW)
     assert np.isfinite(rcs[cas.DEFAULT_VOL_WINDOW + 1:-1]).all()
     assert np.nanstd(rcs) > 0
+
+
+# --------------------------------------------------------------------------- #
+# Taiwan base book (TX/TE/TF futures TSMOM) — S553-cont, step 2
+# --------------------------------------------------------------------------- #
+def test_taiwan_tsmom_sleeve_shape_and_basis() -> None:
+    """The TX/TE/TF sleeve shares the candidate basis: (T,) stream, last bar NaN, decision bars
+    realized. Futures close is injected (offline) on the panel clock."""
+    panel = _panel()
+    ts = taiwan_tsmom_sleeve_returns(
+        panel, hold_horizon=_HOLD, cost_bps=_COST,
+        futures=_TW_FUTURES, futures_close=_tw_futures_close())
+    assert ts.shape == (T,)
+    assert np.isnan(ts[-1])                      # candidate-basis last-bar NaN
+    assert np.isfinite(ts[:-1]).all()            # all decision bars realized
+    assert np.nanstd(ts) > 0                      # non-degenerate once the trend/vol warm up
+
+
+def test_taiwan_base_sleeves_keys_and_alignment() -> None:
+    """The Taiwan book is TSMOM-ONLY (no rates-carry sleeve), aligned to panel.dates."""
+    panel = _panel()
+    base = taiwan_base_sleeves(
+        panel, hold_horizon=_HOLD, cost_bps=_COST,
+        futures=_TW_FUTURES, futures_close=_tw_futures_close(), verify_causal=True)
+    assert set(base) == {"tsmom"}
+    v = base["tsmom"]
+    assert v.shape == (T,) and np.isnan(v[-1])
+
+
+def test_taiwan_tsmom_causality_future_bar_perturbation() -> None:
+    """LEAK-2: bumping every futures-close bar strictly after a cut leaves past returns identical."""
+    panel = _panel()
+    fc = _tw_futures_close()
+    cut = 350
+    fc2 = fc.copy()
+    fc2[cut + 1:] *= 1.5
+    a = taiwan_tsmom_sleeve_returns(
+        panel, hold_horizon=_HOLD, cost_bps=_COST, futures=_TW_FUTURES, futures_close=fc)
+    b = taiwan_tsmom_sleeve_returns(
+        panel, hold_horizon=_HOLD, cost_bps=_COST, futures=_TW_FUTURES, futures_close=fc2)
+    max_past_diff = float(np.nanmax(np.abs(np.nan_to_num(a[:cut]) - np.nan_to_num(b[:cut]))))
+    assert max_past_diff < 1e-12, f"TW-TSMOM look-ahead: past changed by {max_past_diff:.3e}"
+
+
+def test_taiwan_tsmom_current_bar_no_lookahead() -> None:
+    """GP8-09: perturbing a SINGLE current futures-close bar leaves the sleeve return at EARLIER
+    bars unchanged — the weight at t reads close[≤t-skip], never the current bar. rets[cut-1]
+    legitimately earns cut-1→cut via close[cut], so the invariant is on rets[≤cut-2]."""
+    panel = _panel()
+    fc = _tw_futures_close()
+    cut = 350
+    fc2 = fc.copy()
+    fc2[cut] *= 1.5
+    a = taiwan_tsmom_sleeve_returns(
+        panel, hold_horizon=_HOLD, cost_bps=_COST, futures=_TW_FUTURES, futures_close=fc)
+    b = taiwan_tsmom_sleeve_returns(
+        panel, hold_horizon=_HOLD, cost_bps=_COST, futures=_TW_FUTURES, futures_close=fc2)
+    md = float(np.nanmax(np.abs(np.nan_to_num(a[: cut - 1]) - np.nan_to_num(b[: cut - 1]))))
+    assert md < 1e-12, f"current-bar look-ahead in TW-TSMOM weight: {md:.3e}"
+
+
+def test_taiwan_futures_close_injected_fetch_and_reindex() -> None:
+    """`_load_taiwan_futures_close` fetches the futures on their own universe (injected fetch_fn)
+    and reindexes the close to the panel clock — the rates-sleeve alignment pattern for TX/TE/TF."""
+    from finrl_pro_ds.signals.generation.base_sleeves import _load_taiwan_futures_close
+
+    panel = _panel()
+    fc = _tw_futures_close()
+
+    def _fetch(ids, start, end):                  # yfinance-shaped wide, futures on the panel clock
+        idx = pd.DatetimeIndex(panel.dates)
+        close = pd.DataFrame(fc, index=idx, columns=list(ids))
+        return {"open": close, "high": close, "low": close, "close": close,
+                "volume": pd.DataFrame(1e4, index=idx, columns=list(ids))}
+
+    def _clean(wide):
+        return wide, {tk: {"stale_flagged": False} for tk in wide["close"].columns}
+
+    arr = _load_taiwan_futures_close(
+        panel.dates, "2010-01-04", None, futures=_TW_FUTURES, fetch_fn=_fetch, clean_fn=_clean)
+    assert arr.shape == (T, len(_TW_FUTURES))
+    assert np.allclose(arr, fc)
