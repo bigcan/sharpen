@@ -22,6 +22,7 @@ from finrl_pro_ds.features import cross_asset_signals as cas
 from finrl_pro_ds.signals.features import Panel
 from finrl_pro_ds.signals.generation.base_sleeves import (
     _book_from_target_weights,
+    commodity_carry_sleeve_returns,
     defensive_sleeve_returns,
     production_base_sleeves,
     rates_carry_sleeve_returns,
@@ -34,6 +35,7 @@ T, N = 700, 18
 _TICKERS = ("SPY", "QQQ", "IWM", "EFA", "EEM", "TLT", "IEF", "LQD", "GLD", "SLV",
             "DBC", "USO", "DBA", "UUP", "FXE", "FXY", "FXB", "FXA")
 _BONDS = ("SHY", "IEF", "TLT", "LQD")
+_COMMODITY_ETFS = ("USO", "USL", "UNG", "UNL")   # commodity-carry signal universe (front+laddered)
 _TW_FUTURES = ["TX", "TE", "TF"]
 _HOLD, _COST = 21, 0.0010
 
@@ -63,6 +65,19 @@ def _curve(dates: np.ndarray, seed: int = 1) -> dict:
 def _rates_close(seed: int = 2) -> np.ndarray:
     rng = np.random.default_rng(seed)
     return np.exp(np.cumsum(0.003 * rng.standard_normal((T, len(_BONDS))), axis=0) + 4.0)
+
+
+def _commodity_close(seed: int = 5) -> np.ndarray:
+    """(T, 4) synthetic front/laddered commodity-ETF close (USO,USL,UNG,UNL) — injected offline
+    signal universe. Front/laddered of each commodity share a spot factor (spot cancels in the roll
+    spread); a small constant front drift creates a persistent, non-degenerate carry sign."""
+    rng = np.random.default_rng(seed)
+    cols = []
+    for edge in (+0.001, -0.001):                # USO backwardated, UNG contangoed
+        spot = np.cumsum(0.01 * rng.standard_normal(T))
+        cols.append(np.exp(spot + edge * np.arange(T) + 4.0))   # front
+        cols.append(np.exp(spot + 4.0))                          # laddered
+    return np.column_stack(cols)                 # order: USO, USL, UNG, UNL
 
 
 def _tw_futures_close(seed: int = 4) -> np.ndarray:
@@ -262,6 +277,81 @@ def test_production_base_sleeves_include_defensive() -> None:
         panel, hold_horizon=_HOLD, cost_bps=_COST,
         curve=_curve(panel.dates), rates_close=_rates_close(), include_defensive=True)
     assert set(base) == {"tsmom", "rates_carry", "defensive"}
+    for v in base.values():
+        assert v.shape == (T,) and np.isnan(v[-1])
+
+
+# --------------------------------------------------------------------------- #
+# Commodity-carry sleeve (candidate 4th stream, ETF roll-spread) — S553-cont
+# --------------------------------------------------------------------------- #
+def test_commodity_carry_sleeve_shape_and_basis() -> None:
+    cc = commodity_carry_sleeve_returns(
+        _panel(), hold_horizon=_HOLD, cost_bps=_COST, etf_close=_commodity_close())
+    assert cc.shape == (T,)
+    assert np.isnan(cc[-1])                       # candidate-basis last-bar NaN
+    assert np.isfinite(cc[:-1]).all()            # decision bars realized (flat=0.0 through warmup)
+    assert np.nanstd(cc) > 0                      # non-degenerate once carry/vol warm up
+
+
+def test_commodity_carry_causality_future_bar_perturbation() -> None:
+    """LEAK-2: bumping every ETF-close bar strictly after a cut leaves past returns identical."""
+    panel = _panel()
+    ec = _commodity_close()
+    cut = 350
+    ec2 = ec.copy()
+    ec2[cut + 1:] *= 1.5
+    a = commodity_carry_sleeve_returns(panel, hold_horizon=_HOLD, cost_bps=_COST, etf_close=ec)
+    b = commodity_carry_sleeve_returns(panel, hold_horizon=_HOLD, cost_bps=_COST, etf_close=ec2)
+    md = float(np.nanmax(np.abs(np.nan_to_num(a[:cut]) - np.nan_to_num(b[:cut]))))
+    assert md < 1e-12, f"commodity-carry look-ahead: past changed by {md:.3e}"
+
+
+def test_commodity_carry_current_bar_no_lookahead() -> None:
+    """Perturbing a SINGLE current ETF-close bar leaves the sleeve return at EARLIER bars unchanged.
+    The conviction reads close ≤ t (decide-at-t) and rets[cut-1] legitimately earns cut-1→cut via
+    close[cut], so the invariant is on rets[≤cut-2] (mirrors the rates-carry current-bar test)."""
+    panel = _panel()
+    ec = _commodity_close()
+    cut = 350
+    ec2 = ec.copy()
+    ec2[cut] *= 1.5
+    a = commodity_carry_sleeve_returns(panel, hold_horizon=_HOLD, cost_bps=_COST, etf_close=ec)
+    b = commodity_carry_sleeve_returns(panel, hold_horizon=_HOLD, cost_bps=_COST, etf_close=ec2)
+    md = float(np.nanmax(np.abs(np.nan_to_num(a[: cut - 1]) - np.nan_to_num(b[: cut - 1]))))
+    assert md < 1e-12, f"current-bar look-ahead in commodity-carry weight: {md:.3e}"
+
+
+def test_commodity_carry_close_injected_fetch_and_reindex() -> None:
+    """`_load_commodity_carry_close` fetches the front+laddered ETFs on their own universe (injected
+    fetch_fn) and reindexes the close to the panel clock — the rates-sleeve alignment pattern."""
+    from finrl_pro_ds.signals.generation.base_sleeves import _load_commodity_carry_close
+
+    panel = _panel()
+    ec = _commodity_close()
+
+    def _fetch(ids, start, end):                  # yfinance-shaped wide, ETFs on the panel clock
+        idx = pd.DatetimeIndex(panel.dates)
+        close = pd.DataFrame(ec, index=idx, columns=list(ids))
+        return {"open": close, "high": close, "low": close, "close": close,
+                "volume": pd.DataFrame(1e6, index=idx, columns=list(ids))}
+
+    def _clean(wide):
+        return wide, {tk: {"stale_flagged": False} for tk in wide["close"].columns}
+
+    arr = _load_commodity_carry_close(
+        panel.dates, "2010-01-04", None, etfs=list(_COMMODITY_ETFS), fetch_fn=_fetch, clean_fn=_clean)
+    assert arr.shape == (T, len(_COMMODITY_ETFS))
+    assert np.allclose(arr, ec)
+
+
+def test_production_base_sleeves_include_commodity_carry() -> None:
+    """include_commodity_carry adds the 4th stream; default stays exactly {tsmom, rates_carry}."""
+    panel = _panel()
+    base = production_base_sleeves(
+        panel, hold_horizon=_HOLD, cost_bps=_COST,
+        curve=_curve(panel.dates), rates_close=_rates_close(),
+        include_commodity_carry=True, commodity_etf_close=_commodity_close())
+    assert set(base) == {"tsmom", "rates_carry", "commodity_carry"}
     for v in base.values():
         assert v.shape == (T,) and np.isnan(v[-1])
 

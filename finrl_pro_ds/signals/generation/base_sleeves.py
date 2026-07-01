@@ -63,6 +63,7 @@ import numpy as np
 import pandas as pd
 
 from finrl_pro_ds.data import cross_asset_loader as cal
+from finrl_pro_ds.features import commodity_carry as ccy
 from finrl_pro_ds.features import cross_asset_signals as cas
 from finrl_pro_ds.features import defensive_signals as dfs
 from finrl_pro_ds.features import rates_carry as rc
@@ -266,6 +267,100 @@ def defensive_sleeve_returns(
     )
 
 
+def _load_commodity_carry_close(
+    panel_dates: np.ndarray,
+    start: str,
+    end: str | None,
+    *,
+    etfs: list[str],
+    fetch_fn=None,
+    clean_fn=None,
+) -> np.ndarray:
+    """``(T, len(etfs))`` DATA-CLEAN'd commodity-ETF close reindexed to ``panel_dates``.
+
+    The commodity-carry analog of :func:`_load_rates_close`: the front/laddered ETF pairs
+    ({USO,USL,UNG,UNL}) are NOT panel members, so their OHLCV is fetched on their own universe via
+    ``cross_asset_loader`` (single source of truth + canonical DATA-CLEAN) and aligned to the panel
+    clock by date reindex. Injectable (``fetch_fn``/``clean_fn``) for offline tests.
+    """
+    fetch = fetch_fn or cal.fetch_ohlcv_wide
+    clean = clean_fn or cal._clean_wide
+    wide = fetch(etfs, start, end)
+    wide, _ = clean(wide)
+    close = wide["close"].reindex(columns=etfs).reindex(index=pd.DatetimeIndex(panel_dates))
+    arr = close.to_numpy(dtype=np.float64)
+    # Cross-calendar reindex: an INTERIOR NaN (within an ETF's valid span) marks it flat with no exit
+    # cost that bar (frictionless de-risk, GP3-09). These are NYSE-listed ETFs sharing the panel's
+    # trading calendar, so this should be ~0 — but the laddered legs (USL 2007 / UNL 2009) start
+    # LATER than the 2006/2008 panel: a LEADING NaN (before an ETF's inception) is expected and
+    # simply marks that commodity flat until its pair exists; warn only on INTERIOR gaps.
+    for j, tk in enumerate(etfs):
+        valid = np.flatnonzero(np.isfinite(arr[:, j]))
+        if valid.size:
+            span = arr[valid[0]: valid[-1] + 1, j]
+            n_interior = int(np.isnan(span).sum())
+            if n_interior:
+                log.warning("_load_commodity_carry_close: %s has %d interior NaN bar(s) after "
+                            "reindex to panel.dates (marked flat, no exit cost) — calendar "
+                            "mismatch?", tk, n_interior)
+    return arr
+
+
+def commodity_carry_sleeve_returns(
+    panel: Panel,
+    *,
+    hold_horizon: int,
+    cost_bps: float,
+    pairs: dict[str, tuple[str, str]] | None = None,
+    etf_close: np.ndarray | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    fetch_fn=None,
+    clean_fn=None,
+    verify_causal: bool = False,
+) -> np.ndarray:
+    """The commodity-carry (ETF roll-spread) linear-core sleeve return on the panel timeline.
+
+    Candidate 4th sleeve (the AQR **carry** premium). Structurally mirrors
+    :func:`rates_carry_sleeve_returns` — it trades a universe DISTINCT from the panel (front-month
+    commodity ETFs {USO, UNG}), so its close is fetched independently and its return stream aligned
+    to the panel clock. Reads the causal :func:`commodity_carry.commodity_carry_conviction` (front-
+    vs-laddered ETF roll spread → tanh carry) over the pair universe, vol-scales it into a
+    directional target weight on the TRADED front ETFs with the SAME locked constants as the
+    momentum baseline (``target_vol_asset``/``lev_cap``/``vol_window`` from :mod:`cross_asset_signals`),
+    and books it with the shared daily-marked loop on the front ETFs' OWN forward returns.
+
+    ``etf_close`` (``(T, len(signal_universe))``, columns in :func:`commodity_carry.signal_universe`
+    order) may be injected for offline tests. ``verify_causal`` runs the carry signal's future-bar
+    look-ahead tripwire on the real-data path (GP2-04).
+    """
+    pairs = pairs or ccy.DEFAULT_CARRY_PAIRS
+    traded = ccy.carry_universe(pairs)              # front ETFs actually held (e.g. USO, UNG)
+    sig_etfs = ccy.signal_universe(pairs)           # front + laddered (e.g. USO, USL, UNG, UNL)
+    dates = pd.DatetimeIndex(panel.dates)
+    if etf_close is None:
+        start = start or pd.Timestamp(panel.dates[0]).strftime("%Y-%m-%d")
+        etf_close = _load_commodity_carry_close(
+            panel.dates, start, end, etfs=sig_etfs, fetch_fn=fetch_fn, clean_fn=clean_fn)
+
+    close_df = pd.DataFrame(etf_close, index=dates, columns=sig_etfs)
+    if verify_causal:
+        ccy.assert_causal(close_df, pairs)
+    conv = ccy.commodity_carry_conviction(close_df, pairs).reindex(columns=traded)   # (T, n_traded)
+
+    traded_close = close_df[traded]                 # the tradeable front-ETF legs
+    rets = traded_close.pct_change()
+    vol = cas._realized_vol(rets, cas.DEFAULT_VOL_WINDOW, cas.ANN)              # causal (<= t-1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vol_scale = (cas.DEFAULT_TARGET_VOL_ASSET / vol).clip(upper=cas.DEFAULT_LEV_CAP)
+    weights = (conv * vol_scale).clip(-cas.DEFAULT_LEV_CAP, cas.DEFAULT_LEV_CAP)
+    weights = weights.where(conv.notna() & vol.notna(), 0.0)                    # flat until defined
+
+    fwd1 = _forward_returns_wide(traded_close.to_numpy(dtype=np.float64))
+    return _book_from_target_weights(
+        weights.to_numpy(dtype=np.float64), fwd1, hold_horizon=hold_horizon, cost_bps=cost_bps)
+
+
 def production_base_sleeves(
     panel: Panel,
     *,
@@ -280,6 +375,8 @@ def production_base_sleeves(
     verify_causal: bool = True,
     curve_require_fresh: bool = False,
     include_defensive: bool = False,
+    include_commodity_carry: bool = False,
+    commodity_etf_close: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """``{"tsmom", "rates_carry"}`` production base sleeve returns aligned to ``panel.dates``.
 
@@ -292,7 +389,9 @@ def production_base_sleeves(
 
     ``include_defensive`` (default OFF for back-compat — the C3 generation book stays exactly
     {tsmom, rates_carry}) adds the candidate ``"defensive"`` (BAB) stream, for the marginal-
-    contribution / add-uncorrelated-sleeve eval only.
+    contribution / add-uncorrelated-sleeve eval only. ``include_commodity_carry`` (also default OFF)
+    likewise adds the candidate ``"commodity_carry"`` (ETF roll-spread) stream;
+    ``commodity_etf_close`` is injectable for offline tests (else fetched via ``cross_asset_loader``).
     """
     from finrl_pro_ds.data.treasury_curve_loader import load_treasury_curve_with_manifest
 
@@ -325,6 +424,10 @@ def production_base_sleeves(
     if include_defensive:
         sleeves["defensive"] = defensive_sleeve_returns(
             panel, hold_horizon=hold_horizon, cost_bps=cost_bps, verify_causal=verify_causal)
+    if include_commodity_carry:
+        sleeves["commodity_carry"] = commodity_carry_sleeve_returns(
+            panel, hold_horizon=hold_horizon, cost_bps=cost_bps, etf_close=commodity_etf_close,
+            start=start, end=end, fetch_fn=fetch_fn, clean_fn=clean_fn, verify_causal=verify_causal)
     finite = {k: int(np.isfinite(v).sum()) for k, v in sleeves.items()}
     log.info("production_base_sleeves: T=%d  finite_bars=%s  (hold=%d, cost_bps=%.4f)",
              panel.T, finite, hold_horizon, cost_bps)
