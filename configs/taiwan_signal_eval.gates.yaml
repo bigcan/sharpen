@@ -3,6 +3,14 @@
 # Overrides only the keys that differ from configs/signal_eval.gates.yaml; the harness
 # deep-merges the rest from Gates._DEFAULTS. NEVER hardcode these in code/scripts.
 #
+# TWO DISJOINT CONSUMERS share this file (read by different loaders, no key overlap):
+#   - universe/coverage/.../promotion  → Gates.from_yaml() — the Tier-1..3.5 IC funnel over the
+#     ~45-name large-cap PoC universe below (the cont-85 effort; large-cap XS-momentum was NO-GO).
+#   - generation (appended at the bottom) → signals.generation.config — the Component-3 alpha
+#     miner over the SEPARATE 10-ETF cross-asset panel (taiwan_panel_loader / taiwan_cross_asset.yaml)
+#     scored against the TX/TE/TF TSMOM base book (taiwan_base_sleeves, S553-cont steps 1-2). The
+#     funnel `universe:` block does NOT define the generation substrate — that panel is its own config.
+#
 # Scope caveats baked into these numbers (read before trusting any verdict):
 #   - Universe is a CURRENT 0050-style large-cap list → SURVIVORSHIP-BIASED. Results are
 #     UPPER BOUNDS (the harness flags this via panel.meta.survivorship_free=False).
@@ -53,3 +61,39 @@ neutralization:
 promotion:
   survivorship_free_required: true   # PIT 0050 constituents required before any GO
   tier2_audit_required: true
+generation:                          # Component 3 — cost-aware automated generation (advisory).
+                                     # Read ONLY by signals.generation.config; substrate = the 10-ETF
+                                     # cross-asset panel (taiwan_cross_asset.yaml), NOT the `universe:`
+                                     # block above. NEVER hardcode these — the runner reads them here.
+  enabled: false                     # opt-in (GP8-01); the step-5 real run passes --force explicitly
+  panel: taiwan                      # TAIEX ETF cross-section (taiwan_panel_loader) — wired substrate
+  base_sleeves: [tsmom]              # TSMOM-only book: TX/TE/TF futures (taiwan_base_sleeves, step 2).
+                                     # No Taiwan rates-carry sleeve exists, so the book is single-leg.
+  hold_horizon: 21                   # low-turnover rebalance (trading days)
+  pop_size: 200
+  n_generations: 40
+  rng_seed: 7                        # determinism (ADR-C3-6)
+  elite_frac: 0.30
+  cost_bps: 0.0010                   # one-way turnover cost in the candidate AND base returns (10bps,
+                                     # harsh). Unlike the US cell there is NO validated Taiwan-TSMOM
+                                     # net-SR anchor — the base book is the honest TX/TE/TF TSMOM
+                                     # re-priced at this cost; a thin/marginal book is an EXPECTED,
+                                     # acceptable outcome (scope artifact), not a bug to tune away.
+  ls_min_names: 6                    # min active names for a rank-L/S book. The panel is 10 TW ETFs
+                                     # with staggered listing (balanced classes ~2017+), so early days
+                                     # with <6 active names correctly produce a flat candidate book.
+  max_ast_nodes: 24                  # complexity / dimensional bound (ADR-C3-4/5)
+  turnover_soft_cap: 12.0            # ann turnover where the penalty starts
+  lambda_turnover: 0.05
+  lambda_complexity: 0.10
+  min_combination_uplift: 0.10       # PROMISING needs ΔSR_oos ≥ this vs the TSMOM base book
+  hlz_t_min: 3.0                     # on the MARGINAL contribution b_aug-b_base (GP4-03), not standalone
+  promising_dsr: 0.90                # conservative; ~9yr of balanced history may yield PROMISING=0
+  max_base_corr: 0.70                # GP4-01: reject a candidate collinear with the TSMOM base sleeve
+  delta_p05_min: -0.10               # GP4-06: fragility veto — 5th-pct CPCV path ΔSR must clear this
+  holdout_frac: 0.25                 # embargoed held-out tail for FINAL validation (ADR-C3-3)
+  holdout_embargo_days: 21
+  cpcv_n_groups: 6
+  cpcv_k_test: 2
+  cpcv_embargo_days: 21
+  cpcv_purge_horizon: 1              # GP4-05: right-seam purge (book return at t reaches t+1)

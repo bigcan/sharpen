@@ -43,6 +43,16 @@ L/S book (gross 1). The C1 inverse-vol combiner is scale-invariant (consumes ret
 candidate's uplift is NOT standalone-Sharpe-inflated — but part of the uplift is diversification-vs-
 beta. A survivor's beta + exposure profile MUST be examined in the pre-capital Tier-2, not read off
 the ΔSharpe alone.
+
+TAIWAN substrate (S553-cont, step 2): :func:`taiwan_base_sleeves` is the TAIEX analog — the SAME
+validated linear-core TSMOM construction, but the base book trades the Taiwan index + sector
+futures {TX, TE, TF} rather than the US ETF panel, and there is no Taiwan rates-carry sleeve, so
+the Taiwan book is ``{"tsmom"}`` only (scope artifact ``taiex_mining_universe_scope_s553.md``).
+Structurally it mirrors :func:`rates_carry_sleeve_returns`, NOT :func:`tsmom_sleeve_returns`: the
+futures are a universe DISTINCT from the ETF cross-section the C3 miner ranks, so their close is
+fetched independently (FinMind ``TaiwanFuturesDaily``, near/front continuous) and its return stream
+aligned to the panel clock by date reindex. Same daily-marked / hold / ``cost_bps`` one-basis, so
+the C1 marginal-contribution ΔSharpe stays apples-to-apples with the candidate.
 """
 from __future__ import annotations
 
@@ -274,6 +284,150 @@ def production_base_sleeves(
     log.info("production_base_sleeves: T=%d  finite_bars=%s  (hold=%d, cost_bps=%.4f)",
              panel.T, finite, hold_horizon, cost_bps)
     return {"tsmom": tsmom, "rates_carry": rates}
+
+
+# --------------------------------------------------------------------------- #
+# Taiwan base book — TX/TE/TF index/sector-futures TSMOM (S553-cont, step 2)
+# --------------------------------------------------------------------------- #
+# Futures pay no distribution, so there is NO total-return add-back here (H1 is ETF-only in
+# taiwan_panel_loader); the DATA-CLEAN'd raw close IS the price series. The futures are the base
+# book a C3 candidate must beat, NOT panel members — hence fetched on their own universe and
+# aligned to the panel clock, exactly as the US rates sleeve treats {SHY,IEF,TLT,LQD}.
+
+
+def _load_taiwan_futures_close(
+    panel_dates: np.ndarray,
+    start: str,
+    end: str | None,
+    *,
+    futures: list[str],
+    token: str | None = None,
+    fetch_fn=None,
+    clean_fn=None,
+) -> np.ndarray:
+    """``(T, len(futures))`` DATA-CLEAN'd Taiwan-futures close reindexed to ``panel_dates``.
+
+    The TX/TE/TF analog of :func:`_load_rates_close`: the base-book futures are NOT panel members,
+    so their OHLCV is fetched on their own universe (FinMind ``TaiwanFuturesDaily`` via
+    :func:`taiwan_panel_loader.fetch_taiwan_wide`, near/front continuous) and DATA-CLEAN'd with the
+    SAME ``cross_asset_loader._clean_wide`` single source of truth, then aligned to the panel clock
+    by date reindex. Injectable (``fetch_fn``/``clean_fn``) for offline tests; the default fetch is
+    lazy-imported to keep this library module import-clean (matching the loader's lazy pattern).
+    """
+    if fetch_fn is None:
+        from finrl_pro_ds.data.taiwan_panel_loader import fetch_taiwan_wide  # noqa: PLC0415
+
+        def _fetch(ids, s, e):                       # (ids, start, end) -> wide, injectable contract
+            return fetch_taiwan_wide([], s, e, futures=list(ids), token=token)
+
+        fetch = _fetch
+    else:
+        fetch = fetch_fn
+    clean = clean_fn or cal._clean_wide
+
+    wide = fetch(futures, start, end)
+    wide, _ = clean(wide)
+    close = wide["close"].reindex(columns=futures).reindex(index=pd.DatetimeIndex(panel_dates))
+    arr = close.to_numpy(dtype=np.float64)
+    # Cross-calendar reindex: an INTERIOR NaN (within a future's valid span) marks it flat with no
+    # exit cost that bar (frictionless de-risk, GP3-09). TX/TE/TF share the panel's TAIFEX/TWSE
+    # calendar, so this should be ~0 — warn loudly if a real gap appears.
+    for j, tk in enumerate(futures):
+        valid = np.flatnonzero(np.isfinite(arr[:, j]))
+        if valid.size:
+            span = arr[valid[0]: valid[-1] + 1, j]
+            n_interior = int(np.isnan(span).sum())
+            if n_interior:
+                log.warning("_load_taiwan_futures_close: %s has %d interior NaN bar(s) after "
+                            "reindex to panel.dates (marked flat, no exit cost) — calendar "
+                            "mismatch?", tk, n_interior)
+    return arr
+
+
+def taiwan_tsmom_sleeve_returns(
+    panel: Panel,
+    *,
+    hold_horizon: int,
+    cost_bps: float,
+    futures: list[str] | None = None,
+    futures_close: np.ndarray | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    token: str | None = None,
+    fetch_fn=None,
+    clean_fn=None,
+    verify_causal: bool = False,
+) -> np.ndarray:
+    """The TX/TE/TF index/sector-futures TSMOM base-book sleeve return on the panel timeline.
+
+    Runs the validated linear-core TSMOM (:func:`cross_asset_signals.compute` — multi-look-back
+    mean-sign × causal vol-scale, leverage-capped, defaults LOCKED to the net-SR-0.601
+    falsification) on the Taiwan futures close, then books it with the shared daily-marked loop on
+    the futures' OWN forward returns. Like :func:`rates_carry_sleeve_returns` the universe is
+    distinct from the panel, so the close is fetched independently and aligned to ``panel.dates``;
+    ``futures_close`` may be injected for offline tests. ``asset_class`` is left default:
+    ``baseline_weight`` is a pure function of trend sign and own-asset vol (``xs_rank`` is unused
+    here), so the class map does not change this stream. ``verify_causal`` runs the momentum
+    library's own future-bar + current-bar look-ahead tripwire on the real-data path (GP2-04).
+    """
+    if futures is None:
+        from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_universe  # noqa: PLC0415
+
+        _etfs, _cls, futures = load_taiwan_universe()
+    dates = pd.DatetimeIndex(panel.dates)
+    if futures_close is None:
+        start = start or pd.Timestamp(panel.dates[0]).strftime("%Y-%m-%d")
+        futures_close = _load_taiwan_futures_close(
+            panel.dates, start, end, futures=futures, token=token,
+            fetch_fn=fetch_fn, clean_fn=clean_fn,
+        )
+
+    close_df = pd.DataFrame(futures_close, index=dates, columns=futures)
+    if verify_causal:
+        cas.assert_causal(close_df)
+    long = cas.compute(close_df)
+    w_wide = (
+        long.pivot(index="date", columns="ticker", values="baseline_weight")
+        .reindex(index=close_df.index, columns=close_df.columns)
+    )
+    weights = w_wide.to_numpy(dtype=np.float64)
+    fwd1 = _forward_returns_wide(futures_close)
+    return _book_from_target_weights(
+        weights, fwd1, hold_horizon=hold_horizon, cost_bps=cost_bps
+    )
+
+
+def taiwan_base_sleeves(
+    panel: Panel,
+    *,
+    hold_horizon: int,
+    cost_bps: float,
+    futures: list[str] | None = None,
+    futures_close: np.ndarray | None = None,
+    start: str | None = None,
+    end: str | None = None,
+    token: str | None = None,
+    fetch_fn=None,
+    clean_fn=None,
+    verify_causal: bool = True,
+) -> dict[str, np.ndarray]:
+    """``{"tsmom"}`` Taiwan base book (TX/TE/TF futures TSMOM) aligned to ``panel.dates``.
+
+    The single validated linear-core stream a C3 candidate's marginal contribution is scored
+    against on the TAIEX substrate — the Taiwan analog of :func:`production_base_sleeves` (whose US
+    book is {tsmom, rates_carry}; there is no Taiwan rates-carry sleeve, so the Taiwan book is
+    TSMOM-only per the scope artifact). ``futures_close`` is injectable for offline tests; by
+    default the futures are fetched via FinMind. ``verify_causal`` (default ON for the real-data
+    entry point) runs the momentum signal's look-ahead tripwire before booking (GP2-04).
+    """
+    tsmom = taiwan_tsmom_sleeve_returns(
+        panel, hold_horizon=hold_horizon, cost_bps=cost_bps, futures=futures,
+        futures_close=futures_close, start=start, end=end, token=token,
+        fetch_fn=fetch_fn, clean_fn=clean_fn, verify_causal=verify_causal,
+    )
+    log.info("taiwan_base_sleeves: T=%d  finite_bars=%d  (hold=%d, cost_bps=%.4f)",
+             panel.T, int(np.isfinite(tsmom).sum()), hold_horizon, cost_bps)
+    return {"tsmom": tsmom}
 
 
 # Path anchors kept for callers/tests that locate the gates/config relative to this module.
