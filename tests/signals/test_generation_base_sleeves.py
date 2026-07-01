@@ -13,6 +13,8 @@ built on the panel clock with the SAME daily-marked / hold / cost convention as 
 """
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pandas as pd
 
@@ -20,6 +22,7 @@ from finrl_pro_ds.features import cross_asset_signals as cas
 from finrl_pro_ds.signals.features import Panel
 from finrl_pro_ds.signals.generation.base_sleeves import (
     _book_from_target_weights,
+    defensive_sleeve_returns,
     production_base_sleeves,
     rates_carry_sleeve_returns,
     taiwan_base_sleeves,
@@ -214,6 +217,53 @@ def test_rates_vol_scaling_uses_momentum_constants() -> None:
     # sanity: a finite, non-degenerate stream once vol warms up (DEFAULT_VOL_WINDOW)
     assert np.isfinite(rcs[cas.DEFAULT_VOL_WINDOW + 1:-1]).all()
     assert np.nanstd(rcs) > 0
+
+
+# --------------------------------------------------------------------------- #
+# Defensive / BAB sleeve (candidate 3rd stream) — S553-cont-95
+# --------------------------------------------------------------------------- #
+def test_defensive_sleeve_shape_and_basis() -> None:
+    ds = defensive_sleeve_returns(_panel(), hold_horizon=_HOLD, cost_bps=_COST)
+    assert ds.shape == (T,)
+    assert np.isnan(ds[-1])                      # candidate-basis last-bar NaN
+    assert np.isfinite(ds[:-1]).all()            # decision bars realized (flat=0.0 through warmup)
+
+
+def test_defensive_causality_future_bar_perturbation() -> None:
+    """LEAK-2: bumping every panel-close bar strictly after a cut leaves past returns identical.
+    Perturb close ONLY (via replace) so the random sector_id class map is held fixed."""
+    panel = _panel()
+    cut = 350
+    c2 = panel.close.copy()
+    c2[cut + 1:] *= 1.5
+    a = defensive_sleeve_returns(panel, hold_horizon=_HOLD, cost_bps=_COST)
+    b = defensive_sleeve_returns(replace(panel, close=c2), hold_horizon=_HOLD, cost_bps=_COST)
+    md = float(np.nanmax(np.abs(np.nan_to_num(a[:cut]) - np.nan_to_num(b[:cut]))))
+    assert md < 1e-12, f"defensive look-ahead: past changed by {md:.3e}"
+
+
+def test_defensive_current_bar_no_lookahead() -> None:
+    """Perturbing a SINGLE current close bar leaves the sleeve return at earlier bars unchanged —
+    the BAB weight at t reads close[<=t-1]. rets[cut-1] earns cut-1->cut, so invariant is rets[<=cut-2]."""
+    panel = _panel()
+    cut = 350
+    c2 = panel.close.copy()
+    c2[cut] *= 1.5
+    a = defensive_sleeve_returns(panel, hold_horizon=_HOLD, cost_bps=_COST)
+    b = defensive_sleeve_returns(replace(panel, close=c2), hold_horizon=_HOLD, cost_bps=_COST)
+    md = float(np.nanmax(np.abs(np.nan_to_num(a[: cut - 1]) - np.nan_to_num(b[: cut - 1]))))
+    assert md < 1e-12, f"current-bar look-ahead in defensive weight: {md:.3e}"
+
+
+def test_production_base_sleeves_include_defensive() -> None:
+    """include_defensive adds the 3rd stream; default stays exactly {tsmom, rates_carry}."""
+    panel = _panel()
+    base = production_base_sleeves(
+        panel, hold_horizon=_HOLD, cost_bps=_COST,
+        curve=_curve(panel.dates), rates_close=_rates_close(), include_defensive=True)
+    assert set(base) == {"tsmom", "rates_carry", "defensive"}
+    for v in base.values():
+        assert v.shape == (T,) and np.isnan(v[-1])
 
 
 # --------------------------------------------------------------------------- #

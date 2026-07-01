@@ -64,6 +64,7 @@ import pandas as pd
 
 from finrl_pro_ds.data import cross_asset_loader as cal
 from finrl_pro_ds.features import cross_asset_signals as cas
+from finrl_pro_ds.features import defensive_signals as dfs
 from finrl_pro_ds.features import rates_carry as rc
 from finrl_pro_ds.signals.features import Panel
 
@@ -230,6 +231,41 @@ def rates_carry_sleeve_returns(
     )
 
 
+def defensive_sleeve_returns(
+    panel: Panel, *, hold_horizon: int, cost_bps: float, verify_causal: bool = False,
+    beta_window: int = dfs.DEFAULT_BETA_WINDOW, min_periods: int = dfs.DEFAULT_BETA_MIN_PERIODS,
+) -> np.ndarray:
+    """The defensive / betting-against-beta linear-core sleeve return on the panel timeline.
+
+    Candidate 3rd sleeve (the low-correlation diversifier of the add-uncorrelated-sleeves thesis).
+    Structurally mirrors :func:`tsmom_sleeve_returns` — it trades the panel's OWN universe (not a
+    separate one like rates), so it books on ``panel.forward_returns(1)``. Drives
+    :func:`defensive_signals.defensive_conviction` (within-class long-low-beta / short-high-beta,
+    causal) on the panel close, vol-scales it into a directional target weight with the SAME locked
+    constants as the momentum baseline (``target_vol_asset``/``lev_cap``/``vol_window`` from
+    :mod:`cross_asset_signals`), and books it with the shared daily-marked loop. The class buckets
+    come from ``panel.sector_id`` (the within-class BAB grouping). ``verify_causal`` runs the BAB
+    signal's future-bar + current-bar look-ahead tripwire on the real-data path (GP2-04).
+    """
+    dates = pd.DatetimeIndex(panel.dates)
+    close_df = pd.DataFrame(panel.close, index=dates, columns=list(panel.tickers))
+    asset_class = {tk: str(int(panel.sector_id[i])) for i, tk in enumerate(panel.tickers)}
+    if verify_causal:
+        dfs.assert_causal(close_df, asset_class, beta_window=beta_window, min_periods=min_periods)
+    conv = dfs.defensive_conviction(close_df, asset_class,
+                                    beta_window=beta_window, min_periods=min_periods)
+    rets = close_df.pct_change()
+    vol = cas._realized_vol(rets, cas.DEFAULT_VOL_WINDOW, cas.ANN)              # causal (<= t-1)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        vol_scale = (cas.DEFAULT_TARGET_VOL_ASSET / vol).clip(upper=cas.DEFAULT_LEV_CAP)
+    weights = (conv * vol_scale).clip(-cas.DEFAULT_LEV_CAP, cas.DEFAULT_LEV_CAP)
+    weights = weights.where(conv.notna() & vol.notna(), 0.0)                    # flat until defined
+    return _book_from_target_weights(
+        weights.to_numpy(dtype=np.float64), panel.forward_returns(1),
+        hold_horizon=hold_horizon, cost_bps=cost_bps,
+    )
+
+
 def production_base_sleeves(
     panel: Panel,
     *,
@@ -243,6 +279,7 @@ def production_base_sleeves(
     clean_fn=None,
     verify_causal: bool = True,
     curve_require_fresh: bool = False,
+    include_defensive: bool = False,
 ) -> dict[str, np.ndarray]:
     """``{"tsmom", "rates_carry"}`` production base sleeve returns aligned to ``panel.dates``.
 
@@ -252,6 +289,10 @@ def production_base_sleeves(
     rates ETFs are fetched via ``cross_asset_loader``. ``verify_causal`` (default ON for the
     real-data entry point) runs each sleeve signal's look-ahead tripwire before booking (GP2-04);
     ``curve_require_fresh`` forces a curve refetch if the cache is stale (GP1-03).
+
+    ``include_defensive`` (default OFF for back-compat — the C3 generation book stays exactly
+    {tsmom, rates_carry}) adds the candidate ``"defensive"`` (BAB) stream, for the marginal-
+    contribution / add-uncorrelated-sleeve eval only.
     """
     from finrl_pro_ds.data.treasury_curve_loader import load_treasury_curve_with_manifest
 
@@ -280,10 +321,14 @@ def production_base_sleeves(
         rates_close=rates_close, start=start, end=end, fetch_fn=fetch_fn, clean_fn=clean_fn,
         verify_causal=verify_causal,
     )
-    finite = {k: int(np.isfinite(v).sum()) for k, v in {"tsmom": tsmom, "rates_carry": rates}.items()}
+    sleeves = {"tsmom": tsmom, "rates_carry": rates}
+    if include_defensive:
+        sleeves["defensive"] = defensive_sleeve_returns(
+            panel, hold_horizon=hold_horizon, cost_bps=cost_bps, verify_causal=verify_causal)
+    finite = {k: int(np.isfinite(v).sum()) for k, v in sleeves.items()}
     log.info("production_base_sleeves: T=%d  finite_bars=%s  (hold=%d, cost_bps=%.4f)",
              panel.T, finite, hold_horizon, cost_bps)
-    return {"tsmom": tsmom, "rates_carry": rates}
+    return sleeves
 
 
 # --------------------------------------------------------------------------- #
