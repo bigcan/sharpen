@@ -43,6 +43,7 @@ import pandas as pd
 
 from finrl_pro_ds.data import treasury_curve_loader as tcl
 from finrl_pro_ds.features import cross_asset_signals as cas
+from finrl_pro_ds.features import defensive_signals as dfs
 from finrl_pro_ds.features import rates_carry as rc
 
 log = logging.getLogger("cross_asset_loader")
@@ -585,6 +586,60 @@ def build_rates_carry_arrays(
     }
 
 
+def build_defensive_arrays(
+    close_wide: pd.DataFrame,
+    volume_wide: pd.DataFrame,
+    defensive_assets: Sequence[str],
+    asset_class: Mapping[str, str],
+    start_ts: pd.Timestamp,
+    end_ts: pd.Timestamp,
+    *,
+    beta_window: int = dfs.DEFAULT_BETA_WINDOW,
+    min_periods: int = dfs.DEFAULT_BETA_MIN_PERIODS,
+    vol_window: int = cas.DEFAULT_VOL_WINDOW,
+) -> dict:
+    """Env arrays for the DEFENSIVE / betting-against-beta (BAB) sleeve drive
+    (``linear_core_trajectory`` over the defensive universe). ``conviction_ary`` is the
+    causal within-class long-low-beta / short-high-beta conviction
+    (:func:`defensive_signals.defensive_conviction`), NOT trend momentum; everything else
+    mirrors :func:`build_rates_carry_arrays` (dollar volume F1, causal vol, carry_ary=0).
+
+    The conviction is computed on the FULL series (causal → early-window rows legitimately
+    use pre-window past data for the trailing beta) then sliced to the window; warmup NaN →
+    0 (the env treats a flat/NaN conviction as no position). The market proxy is the
+    cross-sectional equal-weight of ``defensive_assets`` (the sleeve's OWN universe, matching
+    ``signals.generation.base_sleeves.defensive_sleeve_returns``). ``tech_ary`` is a minimal
+    placeholder (the conviction itself, ``tech_dim=1``): the frozen-linear-core drive reads
+    the conviction directly, so only its SHAPE must be valid for the env constructor.
+    """
+    defensive_assets = list(defensive_assets)
+    n = len(defensive_assets)
+    wdates = _window_mask(close_wide.index, start_ts, end_ts)
+
+    volume_ary, _price = _dollar_volume_and_price(close_wide, volume_wide, defensive_assets, wdates)
+    vol_ary = _causal_vol_ary(close_wide, defensive_assets, wdates, vol_window=vol_window)
+    sub_class = {a: asset_class.get(a, "all") for a in defensive_assets}
+    conv_full = dfs.defensive_conviction(
+        close_wide[defensive_assets], sub_class,
+        beta_window=beta_window, min_periods=min_periods)
+    conviction_ary = (conv_full.reindex(wdates)[defensive_assets]
+                      .fillna(0.0).to_numpy(np.float64))
+    carry_ary = np.zeros((len(wdates), n), dtype=np.float64)  # position-carry accrual = 0 (ADR-6)
+    timestamps = (wdates.asi8 // 10**9).astype(np.int64)
+
+    return {
+        "price_ary": _price,
+        "tech_ary": conviction_ary.astype(np.float32),   # placeholder (tech_dim=1); drive ignores obs
+        "vol_ary": vol_ary,
+        "carry_ary": carry_ary,
+        "volume_ary": volume_ary,
+        "timestamps": timestamps,
+        "conviction_ary": conviction_ary,
+        "tech_cols": ["defensive_conviction"],
+        "assets": defensive_assets,
+    }
+
+
 def build_union_arrays(
     close_wide: pd.DataFrame,
     volume_wide: pd.DataFrame,
@@ -608,38 +663,67 @@ def build_union_arrays(
     }
 
 
-def _sleeve_cfg(config: Mapping) -> tuple[dict, dict]:
+# Sleeve name → default signal kind when the sleeve spec omits an explicit ``signal:`` key
+# (back-compat: the pre-tailwind {momentum, rates_carry} configs carry no ``signal`` on the
+# rates sleeve). ``tsmom``/``rates_carry``/``defensive`` are the three wired allocator drives.
+_SIGNAL_BY_NAME = {"momentum": "tsmom", "rates_carry": "rates_carry", "defensive": "defensive"}
+_KNOWN_SIGNALS = frozenset({"tsmom", "rates_carry", "defensive"})
+
+
+def _sleeve_specs(config: Mapping) -> list[tuple[str, str, dict]]:
+    """Ordered ``(name, signal, spec)`` for the ALLOCATOR-family sleeves (weights over the
+    ETF union), signal-dispatched. ``return_stream`` sleeves (VRP) are excluded — the
+    portfolio executor combines those at the return level. The signal is ``spec['signal']``
+    if present, else inferred from the sleeve NAME (``_SIGNAL_BY_NAME``); ``momentum``/``mom``
+    normalize to ``tsmom``. Back-compat: a classic ``{momentum, rates_carry}`` config (or an
+    empty ``sleeves`` block) resolves to exactly ``[(momentum, tsmom), (rates_carry,
+    rates_carry)]`` — byte-identical to the pre-tailwind two-sleeve path."""
     sleeves = dict(config.get("sleeves", {}))
-    if "momentum" not in sleeves or "rates_carry" not in sleeves:
-        raise KeyError("two-sleeve config needs sleeves.{momentum,rates_carry}")
-    return dict(sleeves["momentum"]), dict(sleeves["rates_carry"])
+    if not sleeves:
+        return [("momentum", "tsmom", {}), ("rates_carry", "rates_carry", {})]
+    specs: list[tuple[str, str, dict]] = []
+    for name, raw in sleeves.items():
+        spec = dict(raw or {})
+        if str(spec.get("type", "allocator")) == "return_stream":
+            continue
+        signal = str(spec.get("signal") or _SIGNAL_BY_NAME.get(name, "")).lower()
+        if signal in ("momentum", "mom"):
+            signal = "tsmom"
+        if signal not in _KNOWN_SIGNALS:
+            raise ValueError(
+                f"sleeve {name!r}: unresolved signal {signal!r} — set sleeves.{name}.signal "
+                f"to one of {sorted(_KNOWN_SIGNALS)} (or name it momentum/rates_carry/defensive)")
+        specs.append((name, signal, spec))
+    if not specs:
+        raise KeyError("config.sleeves has no allocator sleeves (all return_stream?)")
+    return specs
 
 
 def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
                          require_fresh: bool = False) -> dict:
-    """Fetch+clean the UNION OHLCV once and prepare BOTH sleeves' inputs.
+    """Fetch+clean the UNION OHLCV once and prepare EVERY allocator sleeve's inputs.
 
-    Returns dict: ``close (wide), volume (wide), mom_signals (long), mom_assets,
-    rates_assets, union_assets, asset_class, curve, lookbacks, sleeve cfgs, manifest``.
-    Per-window env arrays are built lazily via :func:`build_two_sleeve_arrays`.
+    Signal-dispatched over :func:`_sleeve_specs` (``tsmom`` / ``rates_carry`` / ``defensive``),
+    so it wires the classic momentum+rates-carry book AND the TAILWIND momentum+defensive(BAB)
+    book (and a momentum-only challenge book) from one loader. The rates curve is loaded ONLY
+    if a ``rates_carry`` sleeve is present; each sleeve's signal stack gets a LEAK-2 causality
+    tripwire at load (``cas`` / ``rc`` / ``dfs`` ``assert_causal``).
 
-    Momentum signals are computed on the 18-asset SUBSET (so XS-rank-within-class and the
-    validated baseline are byte-identical to the single-sleeve path; SHY never enters the
-    momentum cross-section). The rates curve is loaded once and a LEAK-2 causality tripwire
-    is asserted on it at load (mirrors ``cas.assert_causal``).
+    Returns a payload consumed by :func:`build_two_sleeve_arrays`. Momentum signals are
+    computed on each tsmom sleeve's OWN asset subset (so XS-rank-within-class and the validated
+    baseline are byte-identical to the single-sleeve path). Back-compat aliases
+    (``mom_signals``/``mom_assets``/``rates_assets``/``curve``/``curve_manifest``) are populated
+    for the classic two-sleeve config; external callers read only ``close``/``union_assets``/
+    ``manifest``/``curve_manifest``.
     """
-    mom_cfg, rc_cfg = _sleeve_cfg(config)
+    specs = _sleeve_specs(config)
+    signals_present = {sig for _, sig, _ in specs}
     uni = config["universe"]
     data_cfg = config.get("data", {})
     feat_cfg = config.get("features", {})
 
     union_assets = list(uni["assets"])
     asset_class = dict(uni.get("asset_class", {a: "all" for a in union_assets}))
-    mom_assets = list(mom_cfg["assets"])
-    rates_assets = list(rc_cfg.get("assets", rc.rates_universe()))
-    tenor_map = dict(rc_cfg.get("tenor_map", rc.DEFAULT_RATES_TENOR))
-    financing_tenor = str(rc_cfg.get("financing_tenor", rc.DEFAULT_FINANCING_TENOR))
-    tanh_scale = float(rc_cfg.get("tanh_scale", rc.DEFAULT_TANH_SCALE))
 
     lookbacks = list(feat_cfg.get("lookbacks", cas.DEFAULT_LOOKBACKS))
     skip = int(feat_cfg.get("skip", cas.DEFAULT_SKIP))
@@ -647,9 +731,13 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
     target_vol = float(config.get("env", {}).get("target_vol_asset", cas.DEFAULT_TARGET_VOL_ASSET))
     lev_cap = float(config.get("env", {}).get("lev_cap", cas.DEFAULT_LEV_CAP))
 
-    missing = [a for a in mom_assets + rates_assets if a not in union_assets]
-    if missing:
-        raise ValueError(f"sleeve assets {missing} not in universe.assets (union must cover both sleeves)")
+    for name, sig, spec in specs:
+        s_assets = list(spec.get("assets", union_assets if sig != "rates_carry"
+                                  else rc.rates_universe()))
+        missing = [a for a in s_assets if a not in union_assets]
+        if missing:
+            raise ValueError(
+                f"sleeve {name!r} assets {missing} not in universe.assets (union must cover every sleeve)")
 
     wide, manifest = fetch_and_clean(
         union_assets,
@@ -661,80 +749,128 @@ def load_two_sleeve_data(config: Mapping, *, force_refetch: bool = False,
     )
     close = wide["close"]
 
-    mom_close = close[mom_assets]
-    mom_asset_class = {a: asset_class.get(a, "all") for a in mom_assets}
-    cas.assert_causal(
-        mom_close, lookbacks=lookbacks, skip=skip, vol_window=vol_window,
-        target_vol_asset=target_vol, lev_cap=lev_cap, asset_class=mom_asset_class,
-    )
-    mom_signals = cas.compute(
-        mom_close, lookbacks=lookbacks, skip=skip, vol_window=vol_window,
-        target_vol_asset=target_vol, lev_cap=lev_cap, asset_class=mom_asset_class,
-    )
-
-    curve, curve_manifest = tcl.load_treasury_curve_with_manifest(
-        cache_dir=data_cfg.get("cache_dir"),
-        force_refetch=force_refetch, require_fresh=require_fresh)
-    rc.assert_causal(curve, close.index, tenor_map=tenor_map,
-                     financing_tenor=financing_tenor, tanh_scale=tanh_scale)
-
-    # P1-05: the curve must reach (within tol) the ETF data's date_max, else the live book
-    # serves stale curve weights past the curve's end. Surface as a WARN on the curve manifest.
-    etf_date_max = close.index.max()
-    curve_dm = pd.Timestamp(curve_manifest["date_max"]) if curve_manifest.get("date_max") else None
-    if curve_dm is not None:
-        desync_days = int((etf_date_max - curve_dm).days)
-        if desync_days > _CURVE_ETF_DESYNC_TOL_DAYS:
-            curve_manifest["calendar_desync_days"] = desync_days
-            curve_manifest["etf_date_max"] = str(etf_date_max.date())
-            if curve_manifest["status"] == "PASS":
-                curve_manifest["status"] = "WARN"
-            log.warning("cross_asset_loader: curve date_max %s is %d days behind ETF date_max "
-                        "%s (stale curve weights past the curve end)",
-                        curve_manifest.get("date_max"), desync_days, etf_date_max.date())
-            # The desync is cross-dataset (only known here), so the curve loader's sidecar was
-            # written without it — keep it consistent so a sidecar reader can't see a stale PASS.
-            cdir = data_cfg.get("cache_dir")
-            if cdir:
-                (Path(cdir) / "treasury_curve.manifest.json").write_text(
-                    json.dumps(curve_manifest, indent=2))
-
-    return {
+    payload: dict = {
         "close": close,
         "volume": wide["volume"],
-        "mom_signals": mom_signals,
-        "mom_assets": mom_assets,
-        "rates_assets": rates_assets,
         "union_assets": union_assets,
         "asset_class": asset_class,
-        "curve": curve,
         "lookbacks": lookbacks,
         "vol_window": vol_window,
-        "tenor_map": tenor_map,
-        "financing_tenor": financing_tenor,
-        "tanh_scale": tanh_scale,
         "manifest": manifest,
-        "curve_manifest": curve_manifest,
+        "sleeve_specs": specs,
+        "sleeve_signals": {},
+        "curve_manifest": None,
     }
+
+    # --- tsmom sleeves: compute the validated TSMOM signal stack on each sleeve's subset ---
+    for name, sig, spec in specs:
+        if sig != "tsmom":
+            continue
+        s_assets = list(spec["assets"])
+        s_close = close[s_assets]
+        s_class = {a: asset_class.get(a, "all") for a in s_assets}
+        cas.assert_causal(
+            s_close, lookbacks=lookbacks, skip=skip, vol_window=vol_window,
+            target_vol_asset=target_vol, lev_cap=lev_cap, asset_class=s_class,
+        )
+        signals = cas.compute(
+            s_close, lookbacks=lookbacks, skip=skip, vol_window=vol_window,
+            target_vol_asset=target_vol, lev_cap=lev_cap, asset_class=s_class,
+        )
+        payload["sleeve_signals"][name] = signals
+        payload.setdefault("mom_signals", signals)     # back-compat alias (first tsmom sleeve)
+        payload.setdefault("mom_assets", s_assets)
+
+    # --- rates_carry sleeves: load the Treasury curve ONCE, assert causal per tenor map ---
+    if "rates_carry" in signals_present:
+        curve, curve_manifest = tcl.load_treasury_curve_with_manifest(
+            cache_dir=data_cfg.get("cache_dir"),
+            force_refetch=force_refetch, require_fresh=require_fresh)
+        for name, sig, spec in specs:
+            if sig != "rates_carry":
+                continue
+            rc.assert_causal(
+                curve, close.index,
+                tenor_map=dict(spec.get("tenor_map", rc.DEFAULT_RATES_TENOR)),
+                financing_tenor=str(spec.get("financing_tenor", rc.DEFAULT_FINANCING_TENOR)),
+                tanh_scale=float(spec.get("tanh_scale", rc.DEFAULT_TANH_SCALE)))
+            payload.setdefault("rates_assets",
+                               list(spec.get("assets", rc.rates_universe())))
+
+        # P1-05: the curve must reach (within tol) the ETF data's date_max, else the live book
+        # serves stale curve weights past the curve's end. Surface as a WARN on the manifest.
+        etf_date_max = close.index.max()
+        curve_dm = pd.Timestamp(curve_manifest["date_max"]) if curve_manifest.get("date_max") else None
+        if curve_dm is not None:
+            desync_days = int((etf_date_max - curve_dm).days)
+            if desync_days > _CURVE_ETF_DESYNC_TOL_DAYS:
+                curve_manifest["calendar_desync_days"] = desync_days
+                curve_manifest["etf_date_max"] = str(etf_date_max.date())
+                if curve_manifest["status"] == "PASS":
+                    curve_manifest["status"] = "WARN"
+                log.warning("cross_asset_loader: curve date_max %s is %d days behind ETF date_max "
+                            "%s (stale curve weights past the curve end)",
+                            curve_manifest.get("date_max"), desync_days, etf_date_max.date())
+                # The desync is cross-dataset (only known here), so the curve loader's sidecar was
+                # written without it — keep it consistent so a sidecar reader can't see a stale PASS.
+                cdir = data_cfg.get("cache_dir")
+                if cdir:
+                    (Path(cdir) / "treasury_curve.manifest.json").write_text(
+                        json.dumps(curve_manifest, indent=2))
+        payload["curve"] = curve
+        payload["curve_manifest"] = curve_manifest
+
+    # --- defensive (BAB) sleeves: LEAK-2 tripwire at load; conviction is built lazily in
+    #     build_defensive_arrays (a pure function of the sleeve's close, needs no curve). ---
+    for name, sig, spec in specs:
+        if sig != "defensive":
+            continue
+        s_assets = list(spec.get("assets", union_assets))
+        s_class = {a: asset_class.get(a, "all") for a in s_assets}
+        dfs.assert_causal(
+            close[s_assets], s_class,
+            beta_window=int(spec.get("beta_window", dfs.DEFAULT_BETA_WINDOW)),
+            min_periods=int(spec.get("min_periods", dfs.DEFAULT_BETA_MIN_PERIODS)))
+
+    return payload
 
 
 def build_two_sleeve_arrays(data: Mapping, start_ts, end_ts) -> dict:
     """Build the per-sleeve env arrays + the union accounting arrays for ``[start_ts,
-    end_ts]`` from a :func:`load_two_sleeve_data` payload. All three share one calendar
-    (single union fetch), so step index ``k`` aligns across sleeves and the union book.
+    end_ts]`` from a :func:`load_two_sleeve_data` payload, signal-dispatched over
+    ``data['sleeve_specs']``. All arrays share one calendar (single union fetch), so step
+    index ``k`` aligns across sleeves and the union book.
 
-    Returns ``{"momentum": mom_arrays, "rates_carry": rates_arrays, "union": union_arrays}``.
+    Returns ``{<sleeve_name>: arrays, ..., "union": union_arrays}`` — for a classic
+    ``{momentum, rates_carry}`` config this is byte-identical to the pre-tailwind
+    ``{"momentum", "rates_carry", "union"}``; for TAILWIND it is
+    ``{"momentum", "defensive", "union"}``.
     """
-    mom_arrays = build_allocator_arrays(
-        data["mom_signals"], data["close"], data["volume"], data["mom_assets"],
-        start_ts, end_ts, lookbacks=data["lookbacks"],
-    )
-    rates_arrays = build_rates_carry_arrays(
-        data["close"], data["volume"], data["curve"], data["rates_assets"],
-        start_ts, end_ts, tenor_map=data["tenor_map"],
-        financing_tenor=data["financing_tenor"], tanh_scale=data["tanh_scale"],
-        vol_window=data["vol_window"],
-    )
-    union_arrays = build_union_arrays(
-        data["close"], data["volume"], data["union_assets"], start_ts, end_ts)
-    return {"momentum": mom_arrays, "rates_carry": rates_arrays, "union": union_arrays}
+    close, volume, asset_class = data["close"], data["volume"], data["asset_class"]
+    out: dict = {}
+    for name, sig, spec in data["sleeve_specs"]:
+        if sig == "tsmom":
+            out[name] = build_allocator_arrays(
+                data["sleeve_signals"][name], close, volume, list(spec["assets"]),
+                start_ts, end_ts, lookbacks=data["lookbacks"],
+            )
+        elif sig == "rates_carry":
+            out[name] = build_rates_carry_arrays(
+                close, volume, data["curve"], list(spec.get("assets", rc.rates_universe())),
+                start_ts, end_ts,
+                tenor_map=dict(spec.get("tenor_map", rc.DEFAULT_RATES_TENOR)),
+                financing_tenor=str(spec.get("financing_tenor", rc.DEFAULT_FINANCING_TENOR)),
+                tanh_scale=float(spec.get("tanh_scale", rc.DEFAULT_TANH_SCALE)),
+                vol_window=data["vol_window"],
+            )
+        elif sig == "defensive":
+            out[name] = build_defensive_arrays(
+                close, volume, list(spec.get("assets", data["union_assets"])), asset_class,
+                start_ts, end_ts,
+                beta_window=int(spec.get("beta_window", dfs.DEFAULT_BETA_WINDOW)),
+                min_periods=int(spec.get("min_periods", dfs.DEFAULT_BETA_MIN_PERIODS)),
+                vol_window=data["vol_window"],
+            )
+    out["union"] = build_union_arrays(
+        close, volume, data["union_assets"], start_ts, end_ts)
+    return out
