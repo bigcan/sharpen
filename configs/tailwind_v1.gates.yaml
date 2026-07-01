@@ -1,0 +1,142 @@
+# ============================================================================
+# TAILWIND-v1 — decision gates + pre-registered paper_soak overlay (tailwind-v1)
+# ============================================================================
+# Gates for the TSMOM engine + BAB crash-hedge fund-of-funds (configs/tailwind_v1.yaml).
+# Structure mirrors configs/cross_asset_momentum.gates.yaml (shared rationale lives there);
+# this file records ONLY the tailwind-specific values + provenance. All thresholds live here,
+# never hardcoded in code/scripts.
+#
+# HONESTY NOTE: the paper_soak.risk kills below are UNCALIBRATED PLACEHOLDERS. They are copied
+# from the momentum+rates-carry render (25/7) purely so the block is well-formed; the TAILWIND
+# book (momentum + defensive) has a DIFFERENT tail and MUST have these re-derived from a real
+# tailwind forward-path render before any capital soak. `calibrated_for_sleeves` is set to the
+# tailwind composition so the soak cross-check does not silently trust a mis-scoped kill.
+gates:
+  # RL allocator must beat the FROZEN linear core OOS by >= min_uplift, else ship linear.
+  rl_beats_linear:
+    metric: "oos_net_sharpe"
+    min_uplift_vs_baseline: 0.10
+    else: "ship_linear_core"
+
+  # Dynamic sleeve combiner must beat the frozen static inverse-vol combiner OOS, else ship
+  # static. At N=2 sleeves this is EXPECTED to often say ship_static_rp (honest, not a failure).
+  combiner_beats_static:
+    metric: "oos_net_sharpe"
+    baseline: "static_inverse_vol"
+    min_uplift_vs_baseline: 0.10
+    else: "ship_static_rp"
+
+  # The book must stay uncorrelated to the existing live book (the north-star).
+  g_diversification:
+    max_corr_to_existing_sleeves: 0.30
+
+  # Guard against a frictionless artifact: net Sharpe must not collapse vs costless.
+  g_cost_gap:
+    max_frictionless_minus_net_sharpe: 0.15
+
+  # Survival sanity floor (NOT the deploy bar; deploy decision is rl_beats_linear).
+  wf_net_sharpe_floor: 0.40
+
+  # Fixed-lot stress sub-report sanity bounds.
+  stress_dd_buffer_pp: 1.0
+  stress_leverage_max: 6.0
+
+# ============================================================================
+# MULTIPLICITY / DEFLATED-SHARPE — pre-capital overfitting haircut (the honest capital BLOCK)
+# ============================================================================
+# Consumed by scripts/research/audit_two_sleeve_book.py (Tier-2 adversarial audit), NOT
+# validate_config or the paper soak. The momentum core's honest 0.601 is the best of a
+# multi-config search; DSR deflates the benchmark to the expected max Sharpe of n_trials draws.
+# TAILWIND adds the BAB sleeve to that search (a defensive/BAB selection among candidate
+# 3rd sleeves), so the honest trial count is >= the momentum+carry 21. The bracket carries the
+# defensive-search depth; the binding n_trials is confirmed by the tailwind Tier-2 audit.
+# Current status: the momentum core's live DSR(N=21) = 0.918 < 0.95 → capital BLOCKED. Adding a
+# non-return-premium hedge does NOT raise the return DSR; the review's sanctioned path to raise
+# it honestly is universe breadth expansion (item 2), NOT adding the hedge.
+overfitting:
+  dsr_n_trials: 24                         # 21 (momentum + rates-carry search) + 3 (BAB/defensive candidate search)
+  dsr_n_trials_bracket: [21, 24, 31]       # [momentum+carry, +BAB, conservative incl. combine]
+  min_dsr: 0.95                            # P(true SR>0 | multiplicity, skew, kurt) must clear 95%
+  block_bootstrap_block_days: 21           # ~1-month blocks preserve momentum autocorrelation
+
+# ============================================================================
+# PAPER-SOAK GATES — PRE-REGISTERED (commitment device; frozen while outcome unknown)
+# ============================================================================
+# Gate the live-paper -> capital promotion; consumed by the paper executor + live-monitor,
+# NOT validate_config. Shared calibration rationale: configs/cross_asset_momentum.gates.yaml.
+paper_soak:
+  status: pre_registered                   # NOT enforced until wired; risk kills UNCALIBRATED (see note above)
+  consumed_by: [paper_executor, live_monitor]
+  baseline_ref: results/tailwind_v1/summary.md
+
+  # --- promotion horizon ---
+  min_soak_calendar_days: 90
+  min_rebalances_observed: 3
+  rebalance_cadence: monthly
+
+  # --- PRIMARY gate: sim<->live execution parity (the real short-soak test) ---
+  parity:
+    max_daily_return_te_bps: 15
+    max_weight_l1_drift: 0.05
+    max_missed_rebalances: 0
+    max_cost_drift_ratio: 1.50
+    min_cost_drift_ratio: 0.50
+
+  # --- ALWAYS-ON risk kill-switches — UNCALIBRATED PLACEHOLDERS (see file header) ---
+  # These MUST be re-derived from a TAILWIND (momentum + defensive) forward-path render before
+  # capital. `calibrated_for_sleeves` pins the composition so soak_metrics.evaluate_paper_soak_gates
+  # FAILs if the executor runs a different sleeve set — but it does NOT prove these NUMBERS were
+  # fit to that render. Until the render calibration memo exists, treat the risk group as
+  # provisional and capital as BLOCKED (Tier-2 + DSR>=0.95).
+  risk:
+    max_drawdown_kill_pct: 25.0            # PLACEHOLDER (from momentum+rates render); re-derive for tailwind
+    max_gross_exposure: 3.3               # env caps gross at 3.0; ~10% margin
+    daily_loss_halt_pct: 7.0              # PLACEHOLDER (from momentum+rates render); re-derive for tailwind
+    calibrated_for_sleeves: [momentum, defensive]   # tailwind composition (cross-check); numbers NOT yet fit to it
+
+  # --- diversification / regime drift (the north-star: an uncorrelated book) ---
+  drift:
+    max_corr_to_spy: 0.40
+    corr_window_days: 252
+    max_single_class_pnl_share: 0.60
+    sleeve_attribution_required: true
+    max_corr_between_sleeves: 0.30
+
+  # --- BACKSTOP: long-horizon performance floor (NOT a short-soak trigger) ---
+  performance:
+    rolling_sharpe_floor: 0.30
+    rolling_sharpe_window_months: 12
+    min_months_for_sharpe: 12
+    honest_band: [0.40, 0.60]
+    psr_benchmark: 0.0
+    min_psr: 0.95
+    mintrl_confidence: 0.95
+
+paper_soak_provenance:
+  drafted_on: '2026-07-01'
+  drafted_by_session: S553-cont-96
+  strategy: tailwind-v1 (TSMOM engine + BAB crash-hedge)
+  review_ref: .agent/artifacts/tailwind_v1_fable_review.md
+  rationale: >-
+    Wires the TAILWIND fund-of-funds gates by mirroring the validated cross-asset momentum +
+    rates-carry gates. Decision gates + DSR block + parity/drift/performance are structurally
+    reused (same executor + soak machinery). The DSR block is the honest capital gate: the
+    momentum core's DSR(N=21)=0.918<0.95 already BLOCKS, and the BAB hedge is not a return
+    premium so it cannot lift the return DSR.
+  risk_calibration_pending: >-
+    The paper_soak.risk kills (max_drawdown_kill_pct / daily_loss_halt_pct) are UNCALIBRATED
+    placeholders copied from the momentum+rates-carry render. The tailwind book (momentum +
+    within-class BAB) has a different tail: BAB is dollar-neutral and env-gross-capped at 3.0
+    here (not the standalone ~8x), pays in crashes and bleeds in calm regimes, so the combined
+    DD/worst-day profile must be measured on a real tailwind forward-path render
+    (run_cross_asset_paper_validation on configs/tailwind_v1.yaml) and these numbers re-derived
+    in a dated memo BEFORE any capital soak. Do not treat the current values as fit-to-render.
+  challenge_mode_deferred: >-
+    The CHALLENGE profile (drop BAB, run hotter, bank-and-derisk for P(pass) not Sharpe; review
+    item 1) is intentionally NOT wired. Its vol multiplier / bank / de-risk thresholds must come
+    from the prop-firm challenge Monte-Carlo simulator (not yet built). Fabricating them now is
+    the review's flagged "fooling ourselves" trap.
+  capital_gate: >-
+    BLOCKED. Paper-capital promotion requires a Tier-2 deep-lifecycle audit (deep_strategy_audit
+    tailwind + audit_two_sleeve_book on the momentum+defensive book), the risk-calibration memo
+    above, and operator go-ahead. This file wires the gates; it does not promote the book.

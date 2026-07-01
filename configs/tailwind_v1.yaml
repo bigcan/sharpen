@@ -1,0 +1,167 @@
+# ============================================================================
+# TAILWIND-v1 — TSMOM engine + BAB crash-hedge (rung-1 paper-sim, OWN-CAPITAL mode)
+# ============================================================================
+# The combined book that survived the S553-cont-96 unmask/convexity investigation
+# ([[project_tailwind_strategy_s553]]). Two components, DISTINCT roles:
+#   sleeve 1 = momentum  — cross-asset TSMOM, the ONE genuine return premium in the
+#              free-data cross-asset cell (net SR ~0.60, corr-SPY ~0.08). The ENGINE.
+#   sleeve 2 = defensive — within-class betting-against-beta (BAB). NOT a return premium:
+#              the convexity re-classification found it is a CRASH HEDGE (beta_SPY -0.76;
+#              383% of P&L from worst-decile crash days; loses ~16 bps/day on 90% of days).
+#              Insurance that pays when trend whipsaws / equities crash. The 'tail' hedge.
+# Name = 'tail' (BAB tail hedge) + 'wind' (trend momentum). rates-carry (= duration beta)
+# and vol/commodity-carry (= risk-on beta / no edge) are EXCLUDED — do not add them here.
+#
+# Combined as a FUND-OF-FUNDS (mirrors the momentum + rates-carry wiring): each sleeve is
+# driven through the env independently (per-asset vol-target + gross cap on its OWN
+# universe), then risk-parity-combined (trailing-causal inverse-vol, monthly meta, LEAK-2
+# safe). Consumed by finrl_pro_ds.paper.TwoSleeveExecutor + the paper_soak gates.
+#
+# MODE AXIS (review item 1, .agent/artifacts/tailwind_v1_fable_review.md): this is the
+# OWN-CAPITAL profile (all-weather; carry the BAB insurance; ~10% per-asset vol). The
+# CHALLENGE profile (drop BAB, run hotter, bank-and-derisk) is DEFERRED — its vol/bank
+# thresholds must come from the prop-firm challenge Monte-Carlo simulator (not yet built),
+# NOT from a guess. Wiring fabricated hot-vol numbers now is the exact "fooling ourselves"
+# trap the review flags. See the review doc's "Wiring implications" section.
+#
+# CAPITAL GATE (do not skip): an actual paper-capital soak requires a Tier-2 deep-lifecycle
+# audit (deep_strategy_audit tailwind + audit_two_sleeve_book) + operator go-ahead. Capital
+# is currently BLOCKED (the momentum core's Deflated-Sharpe 0.918 < 0.95). This config WIRES
+# the book; it does NOT promote it. The paper_soak risk kills are UNCALIBRATED placeholders
+# pending a TAILWIND forward-path render (see configs/tailwind_v1.gates.yaml).
+# ============================================================================
+
+strategy:
+  id: "tailwind-v1"
+  name: "tailwind_tsmom_bab"
+  version: "0.1.0"
+  instrument: "multi_asset_allocator"
+  mode: own_capital                        # {own_capital (this file), challenge (deferred — needs simulator)}
+  tier: research
+  deploy_gating: false                     # NOT deploy-gating; capital requires Tier-2 + DSR>=0.95
+
+# ---------- UNIVERSE (the validated 18-ETF cross-section; 5 equity / 3 rates / 5 commodity
+# / 5 fx). Both sleeves trade this same union — momentum long/short by trend, defensive
+# within-class long-low-beta / short-high-beta. Every class has >= 2 names so BAB has a
+# cross-section in each (single-name classes would contribute 0). ----------
+universe:
+  assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",       # equity
+           "TLT", "IEF", "LQD",                      # rates
+           "GLD", "SLV", "DBC", "USO", "DBA",        # commodity
+           "UUP", "FXE", "FXY", "FXB", "FXA"]        # fx
+  asset_class:
+    SPY: equity
+    QQQ: equity
+    IWM: equity
+    EFA: equity
+    EEM: equity
+    TLT: rates
+    IEF: rates
+    LQD: rates
+    GLD: commodity
+    SLV: commodity
+    DBC: commodity
+    USO: commodity
+    DBA: commodity
+    UUP: fx
+    FXE: fx
+    FXY: fx
+    FXB: fx
+    FXA: fx
+  n_assets: 18
+
+# ---------- SLEEVES (the fund-of-funds definition; signal-dispatched by the loader) --------
+sleeves:
+  momentum:                                          # the return ENGINE (validated TSMOM core)
+    assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",
+             "TLT", "IEF", "LQD",
+             "GLD", "SLV", "DBC", "USO", "DBA",
+             "UUP", "FXE", "FXY", "FXB", "FXA"]
+    signal: tsmom
+  defensive:                                         # the crash HEDGE (within-class BAB)
+    assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",
+             "TLT", "IEF", "LQD",
+             "GLD", "SLV", "DBC", "USO", "DBA",
+             "UUP", "FXE", "FXY", "FXB", "FXA"]
+    signal: defensive
+    beta_window: 252                                 # standard BAB trailing-beta horizon (LOCKED)
+    min_periods: 126                                 # ~6m warmup floor before a beta is formed
+
+# ---------- RISK-PARITY META-LAYER (how engine + hedge are combined) ---------
+# Trailing-causal inverse-vol (convex Sigma-alpha=1; NO portfolio-vol overlay). Uses ONLY each
+# sleeve's realized returns < the decision bar, recomputed monthly and held (meta-turnover ~0).
+# NOTE (review item 4): inverse-vol weighting an INSURANCE overlay is a known category error —
+# it allocates MORE to the low-vol bleeding hedge. This ships the existing validated combine
+# (how BAB was measured as sleeve #3, CPCV uplift median +0.09); re-plumbing BAB as a
+# liability-sized CONTINGENT overlay is a documented follow-up, NOT wired here.
+risk_parity:
+  trailing_window: 252
+  min_periods: 63
+  monthly_meta: true
+  target_portfolio_vol: null                         # null = convex inverse-vol (no overlay)
+
+# ---------- SLEEVE COMBINER (C1.1/C1.2 — OPTIONAL; absent/inverse_vol ⇒ the risk_parity block
+# above). Ships STATIC inverse-vol; a dynamic tilt must beat static OOS
+# (gates.combiner_beats_static) before deploy. ----------
+sleeve_combiner:
+  mode: inverse_vol        # {inverse_vol (default), dynamic}
+  tilt_strength: 0.0       # λ ∈ [0,5]; 0.0 ⇒ exact inverse-vol
+  perf_window: 126
+  perf_min_periods: 63
+  perf_metric: sharpe
+  tilt_clip: 1.5
+
+# ---------- DATA (yfinance daily; SEPARATE cache so the tailwind fetch does not clobber the
+# momentum / two-sleeve caches) ----------
+data:
+  source: "yfinance_etf"
+  frequency: "1d"
+  start_date: "2006-01-01"
+  end_date: null
+  fields: ["open", "high", "low", "close", "volume"]
+  cache_dir: "results/tailwind_v1"
+
+# ---------- FEATURES (momentum sleeve causal signals; LOCKED to the validated core) ----
+features:
+  lookbacks: [63, 126, 252]
+  skip: 5
+  vol_window: 63
+  include_baseline_weight: true
+
+# ---------- ENV (MultiAssetAllocatorEnv — both sleeve drives + the union replay) -------
+# The frozen-linear-core drive forces the v1.1 execution levers OFF; the defensive sleeve's
+# gross is contained by the env's per-sleeve gross cap (max_gross_exposure), so the standalone
+# ~8x BAB gross the review flags is capped here to the same 3.0 as momentum.
+env:
+  type: "multi_asset_allocator"
+  initial_capital: 100000.0
+  taker_fee: 0.0002                      # 2 bps
+  slippage_base_bps: 1.0
+  slippage_impact_bps: 5.0
+  target_vol_asset: 0.10                 # per-asset annualized vol target (per sleeve)
+  lev_cap: 2.0
+  max_gross_exposure: 3.0                # per-sleeve gross cap AND combined-book cap
+  allow_short: true
+  reward_type: "dsr"
+  dsr_eta: 0.01
+  turnover_penalty: 0.001
+  min_trade_pct: 0.005
+  circuit_breaker_threshold: 0.1
+  random_start: false
+
+# ---------- EXECUTION (rung-1 paper-sim) ------------------------------
+execution:
+  shadow: linear_core_tailwind           # momentum + defensive fund-of-funds (NOT rl)
+  rung: paper_sim                        # {paper_sim, paper_ib}
+  venue: none                            # rung-1; "ib" for rung-2
+  rebalance_cadence: monthly             # MUST match gates.paper_soak.rebalance_cadence
+  fill_reference: close
+
+# ---------- GATES (pre-registered paper_soak + decision gates) --------------
+ensemble:
+  gates_file: configs/tailwind_v1.gates.yaml
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["tailwind", "tsmom", "bab", "defensive", "two-sleeve", "allocator", "paper", "s553"]
