@@ -33,6 +33,16 @@ def eval_on_panel(formula: str, panel: Panel) -> np.ndarray:
         "vwap": (panel.high + panel.low + panel.close) / 3.0,
         "sector": panel.sector_id,
     }
+    # CR-9 (Crucible P1a): register non-OHLCV feature slots as addressable terminals. A (T,)
+    # broadcast series (macro/positioning) is broadcast to (T,N) — CONSTANT across the cross-
+    # section, which is exactly why a cross-sectional rank() on it is identically zero and the
+    # overlay path (evolve._overlay_returns) is needed. Guarded so empty slots is a strict
+    # no-op → the P0 ctx (and thus scores) stay byte-identical. LEAK-2: slots are PIT-safe by
+    # construction (as-of-joined upstream); truncated() carries them so the causality tripwire holds.
+    for k, v in panel.feature_slots.items():
+        arr = np.asarray(v, dtype=np.float64)
+        ctx[k] = (np.broadcast_to(arr[:, None], (panel.T, panel.N)).astype(np.float64)
+                  if arr.ndim == 1 else arr)
     out = np.asarray(eval_formula(formula, ctx), dtype=np.float64)
     if out.ndim < 2:
         out = np.broadcast_to(out, (panel.T, panel.N)).astype(np.float64)
@@ -50,13 +60,17 @@ class DslSignal:
     def __init__(self, formula: str, *, name: str | None = None,
                  neutralization: tuple[str, ...] = ("winsor", "zscore", "sector"),
                  horizons: tuple[int, ...] = (1, 5, 10, 21, 63),
-                 expected_sign: int = 1, family: str = "101alpha") -> None:
+                 expected_sign: int = 1, family: str = "101alpha",
+                 candidate_type: str = "cross_sectional") -> None:
         self.formula = formula
+        # candidate_type tags the spec for downstream routing/ledger (CR-9). It is excluded
+        # from SignalSpec.content_hash, so the genome name (formula hash) is unchanged.
         self.spec = SignalSpec(
             name=name or _genome_name(formula),
             hypothesis=f"generated DSL alpha: {formula}",
             family=family, expected_sign=expected_sign,
-            horizons=horizons, neutralization=neutralization)
+            horizons=horizons, neutralization=neutralization,
+            candidate_type=candidate_type)
 
     def compute(self, panel: Panel) -> np.ndarray:
         return eval_on_panel(self.formula, panel)

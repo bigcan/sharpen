@@ -10,9 +10,17 @@ RETURN is never neutralized here — only the signal is.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+import re
+from dataclasses import dataclass, field, replace
 
 import numpy as np
+
+# Terminal names reserved by the OHLCV eval context / DSL resolver — a feature slot may not
+# shadow any of these (nor the ``adv{N}`` pattern), or it would silently override a base
+# terminal in eval_on_panel's ctx. Enforced in Panel.__post_init__ (CR-9 / Crucible P1a).
+_RESERVED_TERMINALS = frozenset(
+    {"open", "high", "low", "close", "volume", "returns", "vwap", "sector"})
+_ADV_RE = re.compile(r"adv\d+")
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,6 +40,18 @@ class Panel:
     adv_usd: np.ndarray        # (T, N) trailing dollar ADV (cost & size proxy)
     sector_id: np.ndarray      # (N,) int (v1 current GICS; PIT at GO-gate)
     meta: dict                 # {survivorship_free: bool, source, universe_def, ...}
+    # CR-9 (Crucible P1a): named non-OHLCV PIT-safe feature series addressable as DSL
+    # terminals (e.g. "fred:T10Y2Y", "cot:comm_net_z", "macro:regime"). Each value is a
+    # (T,) broadcast series OR a (T,N) matrix, float64, NaN for missing. Default-empty keeps
+    # every existing positional Panel(...) construction + the P0 eval ctx byte-identical.
+    feature_slots: dict[str, np.ndarray] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for k in self.feature_slots:
+            if k in _RESERVED_TERMINALS or _ADV_RE.fullmatch(k):
+                raise ValueError(
+                    f"feature_slot {k!r} collides with a reserved OHLCV terminal / adv pattern; "
+                    f"reserved={sorted(_RESERVED_TERMINALS)} + adv<N>")
 
     @property
     def T(self) -> int:
@@ -40,6 +60,12 @@ class Panel:
     @property
     def N(self) -> int:
         return len(self.tickers)
+
+    def _sliced_slots(self, s: slice) -> dict[str, np.ndarray]:
+        """Feature slots sliced on axis 0 (both (T,) and (T,N) slice as ``arr[s]``). Carried by
+        ``truncated`` and every row-slice so overlay terminals survive the Tier-0 truncation
+        tripwire and the train/holdout split (LEAK-2)."""
+        return {k: np.asarray(v)[s] for k, v in self.feature_slots.items()}
 
     def truncated(self, t: int) -> "Panel":
         """Return a Panel with rows ``[0..t]`` inclusive — used by the Tier-0 causality
@@ -51,6 +77,7 @@ class Panel:
             self, dates=self.dates[s], open=self.open[s], high=self.high[s],
             low=self.low[s], close=self.close[s], volume=self.volume[s],
             active=self.active[s], adv_usd=self.adv_usd[s],
+            feature_slots=self._sliced_slots(s),
         )
 
     def forward_returns(self, h: int) -> np.ndarray:
@@ -166,9 +193,13 @@ def make_synthetic_panel(
     N: int = 60,
     n_sectors: int = 6,
     seed: int = 0,
+    feature_slots: dict[str, np.ndarray] | None = None,
 ) -> Panel:
     """Construct a clean random-walk Panel for tests / smoke runs (OHLC-sane by
     construction, fully active, random sectors). Not for research — demo fixture only.
+
+    ``feature_slots`` (CR-9) injects named non-OHLCV series so a fixture can exercise the
+    overlay path; default empty preserves the byte-identical P0 codepath.
     """
     rng = np.random.default_rng(seed)
     rets = 0.01 * rng.standard_normal((T, N))
@@ -186,4 +217,4 @@ def make_synthetic_panel(
     tickers = tuple(f"SYN{i:03d}" for i in range(N))
     meta = {"survivorship_free": False, "source": "synthetic", "universe_def": "synthetic"}
     return Panel(dates, tickers, open_, high, low, close, volume, active,
-                 adv_usd, sector_id, meta)
+                 adv_usd, sector_id, meta, feature_slots=dict(feature_slots or {}))

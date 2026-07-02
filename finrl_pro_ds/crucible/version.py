@@ -10,6 +10,13 @@ version to fold in a *semantic* gate change — the ``delta_p05_min`` fragility-
 (median ∧ frac-positive; expert-review Test B) — so the frozen gates hash canonizes the FIXED gate,
 never the known-broken one (spec §5, "gate-repair-before-freeze").
 
+`crucible-v2.1` is the P1a **MINOR** bump: the CR-9 data-representation path (Panel feature slots +
+grammar terminal registry + ``candidate_type`` on SignalSpec + overlay/conditioner eval through
+``combination_fitness``). It ADDS terminals + a candidate type + an eval path that EXTENDS the funnel
+without changing any existing verdict. CRITICAL: this bump must NOT be conflated with a gates change —
+NO ``FitnessConfig`` default and NO gates YAML byte changed, so the frozen ``crucible-v2.0`` gates_hash
+(the moat) is IDENTICAL. Do not re-hash the gates for a MINOR system bump.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -21,7 +28,8 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-CRUCIBLE_VERSION = "crucible-v2.0"
+# v2.1 = P1a CR-9 overlay/terminal-registry path (MINOR; gates_hash UNCHANGED from v2.0).
+CRUCIBLE_VERSION = "crucible-v2.1"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
