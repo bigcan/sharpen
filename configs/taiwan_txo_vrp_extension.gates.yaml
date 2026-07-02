@@ -1,0 +1,156 @@
+# Pre-registered gates for the TXO VRP MONTHLY BACKWARD-EXTENSION confirmatory test.
+#
+# Frame (two-stage discovery -> replication):
+#   Stage 1 (DONE, cont-87/88): the delta-hedged TXO monthly VRP design was SELECTED from a
+#   ~50-trial family on 2019-2025 (n=83 cycles) and FAILED the capital bar there — net Sharpe
+#   +0.63 but bootstrap p=0.0501 and DSR 0.767 @N=50 (results/taiwan_txo_vrp_validation/).
+#   Binding failure = statistical power / multiplicity, not a dead edge (weekly-cadence rescue
+#   separately falsified: per-cycle edge fell faster than sqrt(n) rose).
+#   Stage 2 (THIS test): the EXACT frozen design is evaluated ONCE on monthly cycles
+#   2002-2018 — data that existed before the design search but was NEVER FETCHED OR TOUCHED
+#   by it (FinMind coverage probe 2026-07-02: availability/schema only, no P&L computed).
+#   Because no selection occurs on the extension sample, the honest multiplicity there is
+#   N_trials=1 and the confirmatory statistic is the skew/kurtosis-adjusted PSR at the same
+#   0.95 confidence bar (Bailey & Lopez de Prado 2012). The COMBINED 2002-2025 sample still
+#   carries the stage-1 search, so its DSR is deflated at the ORIGINAL N=50 (BLdP 2014) — the
+#   extension adds observations, not trials.
+#
+# SINGLE SHOT: no parameter, gate, or design change is permitted after the extension data is
+# first evaluated. Anything computed beyond this file's contract is exploratory and NOT gated.
+# NEVER hardcode these thresholds in code/scripts.
+
+prereg:
+  frozen_design_source: results/taiwan_txo_vrp_validation  # cont-88 corrected primary (entry_iv)
+  # Extension universe: TXO monthly contracts 200202..201901 inclusive. The prior evaluated
+  # sample starts at contract 201902 (first entry 2019-01-17) -> no overlap, no gap. 200202 is
+  # the first contract with a prior monthly settlement (200201, 2002-01-16) to anchor entry.
+  extension_first_contract: "200202"
+  extension_last_contract: "201901"
+  min_cycles_decision_grade: 100   # fewer clean cycles => DATA-INSUFFICIENT, not NO-GO
+  single_shot: true
+
+scout:
+  rv_window_trading_days: 252      # annualization factor for realized vol (no warmup needed)
+  oos_split_frac: 0.5              # chronological halves within the extension
+  cycles_per_year: 12.0
+
+# --------------------------------------------------------------------------------------------
+# FROZEN PRIMARY cost block — byte-identical numbers to configs/taiwan_txo_vrp_validation.gates
+# (comparability with stage 1). Option: entry half-spread x2 legs + fee x2 + tax on premium and
+# on settled intrinsic (intrinsic taxed at the premium rate = ~50x the actual exercise-
+# settlement tax -> conservative). Hedge: turnover x half-spread, TX tick-floored 1.0 pt.
+# --------------------------------------------------------------------------------------------
+costs:
+  half_spread_pts_per_leg: 1.0
+  fee_pts_per_leg: 0.4
+  tax_rate_on_premium: 0.001
+  hedge_half_spread_pts: 1.0
+  vol_floor: 0.0014
+  # Extension-specific DATA-QUALITY floors (pre-registered before fetch; uniform, not
+  # outcome-based). Rationale: 2002-2004 TXO infancy may carry stale prints / sparse strikes;
+  # a monthly cycle with a broken TX path or absurd DTE is a data defect, not evidence.
+  min_path_points: 15              # >=15 daily TX closes per ~20-trading-day cycle
+  min_atm_leg_volume: 10           # entry-day volume floor on EACH straddle leg (contracts)
+  dte_min: 20                      # guards settlement-calendar assembly errors (F-series class)
+  dte_max: 45
+
+# --------------------------------------------------------------------------------------------
+# PERIOD-CORRECT co-primary cost variant. The frozen block charges 2025-era frictions to
+# 2002-2013 cycles, understating the TX-hedge transaction tax by up to ~12x pre-2006. The
+# co-primary must ALSO clear the net-Sharpe floor or the verdict fails. Levied-rate schedule
+# (Futures Transaction Tax Act amendments 2005-12-14 / 2008-08-06; 2013-04-01 halving
+# verified via MOF; per SIDE of each trade):
+#   stock-index futures: 0.025% (through 2005) -> 0.01% (2006-01) -> 0.004% (2008-10-06)
+#                        -> 0.002% (2013-04-01)
+#   TXO premium tax:     0.125% (through 2005) -> 0.1% (2006-01)
+# Residual date/rate uncertainty is bounded by the hedge-cost sweep (0..4 pt/rebalance).
+# hedge_tax cost in pts/side = rate x F_t (contract value tax at NT$200/pt == rate x index pts).
+# --------------------------------------------------------------------------------------------
+period_correct:
+  option_tax_schedule:
+    - {through: "2005-12-31", rate: 0.00125}
+    - {through: "9999-12-31", rate: 0.001}
+  option_fee_pts_per_leg_schedule:      # pre-2010 retail commissions were materially higher
+    - {through: "2009-12-31", fee: 0.8}
+    - {through: "9999-12-31", fee: 0.4}
+  hedge_fee_pts_per_side: 0.3           # TX exchange+clearing+broker, flat all periods
+  hedge_tax_schedule:
+    - {through: "2005-12-31", rate: 0.00025}
+    - {through: "2008-10-05", rate: 0.0001}
+    - {through: "2013-03-31", rate: 0.00004}
+    - {through: "9999-12-31", rate: 0.00002}
+  early_tax_worstcase_rate: 0.0005      # diagnostic only: if the pre-2006 levied rate were
+                                        # actually 0.05% (pre-2000-05 statute), report the hit
+
+# --------------------------------------------------------------------------------------------
+# EXTENSION-ONLY gates (single pre-registered trial, N=1).
+# --------------------------------------------------------------------------------------------
+gate:
+  net_sharpe_floor: 0.5            # annualized NET Sharpe, frozen-primary costs, entry_iv delta
+  second_half_net_sharpe_min: 0.0  # chronological second half (~2011-2018) must stay positive
+  block_bootstrap_p_max: 0.05      # canonical circular block bootstrap p(SR<=0), block=3 cycles
+  psr_min: 0.95                    # skew/kurt-adjusted PSR vs SR*=0 — the N=1 confirmatory bar
+  max_equity_beta_abs: 0.15        # hedge must neutralize direction (anti-disguised-beta)
+  vrp_positive_frac_min: 0.50      # IV > RV in >=50% of cycles
+  primary_delta_mode_floor: 0.5    # entry_iv variant itself must clear the full floor
+  delta_robust_min_sharpe: 0.30    # PRE-REGISTERED DEVIATION from stage-1's 0.5: causal
+                                   # variants incl. +/-20% IV mis-specification must stay
+                                   # >=0.30. Rationale: cont-88 flagged the 0.5-under-stress
+                                   # gate as over-strict and non-load-bearing; a 20% vol
+                                   # mis-spec is a stress case, not the base case.
+  worst_cycle_net_ret_min: -0.10   # short-gamma tail: worst cycle on notional (2008 in-sample)
+  cvar5_net_ret_min: -0.05         # mean of worst 5% cycles
+  period_correct_net_sharpe_floor: 0.5   # co-primary (period-correct costs) must ALSO clear
+
+# --------------------------------------------------------------------------------------------
+# COMBINED 2002-2025 gates (frozen stage-1 cycles + extension cycles, pooled chronologically).
+# DSR deflated at the ORIGINAL stage-1 trial count. Verdict ladder:
+#   GO                 -> all extension gates AND combined dsr@N=50 >= dsr_n50_full_floor
+#   CONDITIONAL-GO     -> all extension gates AND combined dsr@N=50 >= dsr_n50_conditional_floor
+#                         (two-stage frame: replication carries the confirmatory weight;
+#                          Tier-2 must explicitly adjudicate the multiplicity frame)
+#   NO-GO-FINAL        -> anything else. Book closes permanently (no third look).
+# --------------------------------------------------------------------------------------------
+combined_gate:
+  net_sharpe_floor: 0.5
+  block_bootstrap_p_max: 0.05
+  dsr_n50_conditional_floor: 0.85
+  dsr_n50_full_floor: 0.95
+
+deflation:
+  n_trials_gate: 50                # stage-1 search family, unchanged by the extension
+  n_trials_report: [10, 20, 50, 100]
+
+null_model:
+  n_boot: 10000
+  block_cycles: 3                  # circular block length for monthly-cycle returns
+  nw_lags: 3                       # Newey-West lags for the reported t-stat
+
+data_quality:                      # prereg D7 — settlement hole-fill cross-check (fetch-time)
+  settle_xcheck_tol_pts: 1.0
+  settle_xcheck_min_match: 0.98
+
+# Engine-equivalence tripwire (NOT an edge gate): the extension engine re-run on the stage-1
+# period (2019-2025) but with TaiwanFuturesDaily per-contract 13:45 closes must reproduce the
+# known 13:45-mark result from the cont-88 audit note (net Sharpe ~0.54 before the 13:30
+# correction). Failure = engine bug or data mismatch -> HALT, not a verdict.
+reconciliation:
+  expected_net_sharpe_1345_mark: 0.54
+  tolerance: 0.10
+
+# Hedge-mark deviation (pre-registered, unavoidable): no 13:30-contemporaneous TX mark exists
+# before 2019 on free data; the extension marks the hedge at the TX regular-session close
+# (13:45). Measured effect of this deviation on 2019-2025 = -0.09 Sharpe (0.63 -> 0.54), i.e.
+# CONSERVATIVE (adds non-settlement-window variance). Extension results are therefore biased
+# AGAINST the strategy relative to the frozen 13:30 convention.
+
+stress:
+  settlement_gap_frac: 0.10        # +/-10% synthetic final-day gap, hedge frozen (REPORT-ONLY)
+
+verdict:
+  require_all_extension: [net_sharpe_above_floor, second_half_positive, beats_block_bootstrap,
+                          psr_above_bar, equity_beta_below_ceiling, vrp_premium_exists,
+                          primary_mode_above_floor, delta_models_robust, worst_cycle_ok,
+                          cvar5_ok, period_correct_above_floor]
+  require_all_combined_conditional: [combined_sharpe_above_floor, combined_beats_bootstrap,
+                                     combined_dsr_above_conditional_floor]
