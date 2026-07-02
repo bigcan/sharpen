@@ -23,6 +23,14 @@ the as-of-join reconstruction tripwire + the Panel-feature-slot bridge). It ADDS
 PIT-safe data path; it changes NO verdict semantics and NO gate byte, so the ``crucible-v2.0``
 gates_hash is again IDENTICAL.
 
+`crucible-v2.3` is the P2 **MINOR** bump: the agentic hypothesis loop (``crucible/agentic/`` — the
+Hypothesis Author that sees ONLY ``ledger_agent_view`` (CR-1), pre-registers overlay/CS specs (CR-2),
+the injectable ``Proposer`` seam + deterministic ``LibrarySeedProposer``, the ``DiscoveryCard`` schema,
+and the manual ``run_hypothesis_loop`` orchestrator). It ADDS an agent capability that FEEDS the
+UNCHANGED C3 ``evolve`` mine + T0–T5 funnel; it changes NO verdict semantics and NO gate byte, so the
+``crucible-v2.0`` gates_hash is again IDENTICAL. The harness still caps at PROMISING and every
+DiscoveryCard is ``incubation_status=PENDING_P4`` (the CR-8 lockbox is P4).
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -34,8 +42,8 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v2.2 = P1b free-data subsystem (connectors + quality gate + bridge); MINOR, gates_hash UNCHANGED.
-CRUCIBLE_VERSION = "crucible-v2.2"
+# v2.3 = P2 agentic hypothesis loop (Author + proposer seam + discovery cards); MINOR, gates_hash UNCHANGED.
+CRUCIBLE_VERSION = "crucible-v2.3"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
