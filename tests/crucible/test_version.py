@@ -14,10 +14,16 @@ GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
-    # v2.4 = P3 continuous orchestrator (MINOR over v2.3 P2; gates_hash still frozen at v2.0).
-    assert CRUCIBLE_VERSION == "crucible-v2.4"
+    # v2.5 = P4 forward-incubation lockbox (MINOR over v2.4 P3; funnel gates_hash still frozen at v2.0
+    # — the incubation criterion lives in its own file, configs/crucible_lockbox.gates.yaml).
+    assert CRUCIBLE_VERSION == "crucible-v2.5"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
+
+
+def test_funnel_gates_hash_still_frozen_at_v2_0() -> None:
+    """P4 must not perturb the funnel moat: the frozen crucible-v2.0 gates_hash is unchanged."""
+    assert gates_hash(GATES) == "519158fa1450"
 
 
 def test_gates_hash_is_stable_and_12_hex() -> None:

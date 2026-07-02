@@ -41,6 +41,16 @@ CROSS-run governance budget (it replaces the fatal global file-drawer N, Fable f
 not modify the within-run DSR/N_eff. Everything still caps at PROMISING; the CR-8 forward-incubation
 lockbox that makes a card human-gate-eligible is P4.
 
+`crucible-v2.5` is the P4 **MINOR** bump: the CR-8 forward-incubation lockbox (``crucible/lockbox/`` —
+the durable enrollment store + the forward marginal-contribution measurement on bars STRICTLY after a
+survivor's ``proposal_ts`` + the fixed-horizon verdict state machine). It ADDS a forward gate
+DOWNSTREAM of the funnel: a PROMISING survivor is enrolled and judged on data that did not exist when
+its hypothesis was written, and its card becomes eligible for the human Tier-2 gate ONLY once its
+lockbox track is CLEARED. It changes NO within-run verdict semantics and NO funnel gate byte — the
+incubation criterion lives in its OWN file (``configs/crucible_lockbox.gates.yaml``) precisely so the
+frozen ``crucible-v2.0`` funnel gates_hash (the moat) stays IDENTICAL. Still nothing promotes past a
+human + Tier-2 (CLAUDE.md); the lockbox only decides *eligibility* for that gate.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -52,8 +62,9 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v2.4 = P3 continuous orchestrator (substrate_dirty + online-FDR + cost budget + burst); MINOR, gates_hash UNCHANGED.
-CRUCIBLE_VERSION = "crucible-v2.4"
+# v2.5 = P4 forward-incubation lockbox (CR-8); MINOR, funnel gates_hash UNCHANGED (its criterion is a
+# separate file, configs/crucible_lockbox.gates.yaml).
+CRUCIBLE_VERSION = "crucible-v2.5"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
