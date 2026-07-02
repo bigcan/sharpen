@@ -90,8 +90,11 @@ def per_fund_row(px: pd.DataFrame, rf: pd.Series, fund: str, base: str, tag: str
         yrs=round(len(sub) / 252, 1),
         sh_fund=excess_sharpe(fe), sh_base=excess_sharpe(be),
         dsh=excess_sharpe(fe) - excess_sharpe(be),
-        cagr_f=(1 + rfn.add(rfx, fill_value=0)).prod() ** (252 / len(sub)) - 1,
-        cagr_b=(1 + rbn.add(rfx, fill_value=0)).prod() ** (252 / len(sub)) - 1,
+        # rfn/rbn are already TOTAL returns (auto_adjust=True) -- do NOT add rf back
+        # (pre-2026-07-02 the script double-counted the T-bill leg, inflating printed
+        # CAGRs ~3pp; display-only, Sharpe gaps/t-stats were always computed correctly)
+        cagr_f=(1 + rfn.fillna(0.0)).prod() ** (252 / len(sub)) - 1,
+        cagr_b=(1 + rbn.fillna(0.0)).prod() ** (252 / len(sub)) - 1,
         dd_f=max_drawdown(rfn), dd_b=max_drawdown(rbn),
         ir=(active.mean() / sd * np.sqrt(252)) if sd > 0 else np.nan,
         t=(active.mean() / sd * np.sqrt(len(active))) if sd > 0 else np.nan,
