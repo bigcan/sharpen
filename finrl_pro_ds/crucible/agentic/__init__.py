@@ -25,8 +25,10 @@ from .proposer import (
     ProposalContext,
     Proposer,
 )
+from .scout import DataScout, ScoutFinding, ScoutReport
 
 __all__ = [
+    "DataScout",
     "DiscoveryCard",
     "HypothesisAuthor",
     "HypothesisLoopResult",
@@ -35,5 +37,7 @@ __all__ = [
     "PreRegisteredSpec",
     "ProposalContext",
     "Proposer",
+    "ScoutFinding",
+    "ScoutReport",
     "run_hypothesis_loop",
 ]

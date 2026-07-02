@@ -24,7 +24,9 @@ from .connector import (
     SeriesData,
     SeriesRef,
 )
+from .edgar import EdgarConnector
 from .fred import FredConnector
+from .gdelt import GdeltConnector
 from .panel_bridge import (
     SlotRequest,
     build_feature_slots,
@@ -37,19 +39,24 @@ from .quality_gate import (
     assert_feature_causal,
     naive_reference_period_join,
     register_series,
+    snapshot_hash,
     validate_series,
 )
+from .stooq import StooqConnector
 
 __all__ = [
     "CftcCotConnector",
     "DataConnector",
+    "EdgarConnector",
     "FredConnector",
+    "GdeltConnector",
     "Observation",
     "Provenance",
     "QualityReport",
     "SeriesData",
     "SeriesRef",
     "SlotRequest",
+    "StooqConnector",
     "asof_join",
     "assert_asof_join_causal",
     "assert_feature_causal",
@@ -57,5 +64,6 @@ __all__ = [
     "is_valid_terminal",
     "naive_reference_period_join",
     "register_series",
+    "snapshot_hash",
     "validate_series",
 ]

@@ -51,6 +51,19 @@ incubation criterion lives in its OWN file (``configs/crucible_lockbox.gates.yam
 frozen ``crucible-v2.0`` funnel gates_hash (the moat) stays IDENTICAL. Still nothing promotes past a
 human + Tier-2 (CLAUDE.md); the lockbox only decides *eligibility* for that gate.
 
+`crucible-v2.6` is the P5 **MINOR** bump: breadth + governance polish + the reproduce payoff (spec §8
+P5 row). It ADDS (a) three free-data connectors — Stooq (market), GDELT (sentiment), SEC EDGAR
+(fundamentals, the cleanest true-PIT source: filing-acceptance ``filed`` timestamp as release) — plus
+the ``DataScout`` Stage-1 ACQUIRE driver (survey → quality gate → as-of-join tripwire → reviewable
+report; registration a separate reviewed step); (b) the ``crucible/governance/`` layer that turns a
+lockbox-CLEARED survivor into an operator notification + a Tier-2 handoff packet (verbatim verdict +
+forward evidence + the EXACT human-run ``deep_strategy_audit`` command), recorded once; and (c)
+``crucible reproduce`` — verify a past run re-derives its verdicts + pins bit-identically. Every piece
+sits AROUND the funnel: no connector, scout, notifier, handoff, or reproduce step reads a gate value or
+scores a candidate (CR-1), and NO gate byte changes — so the frozen ``crucible-v2.0`` funnel gates_hash
+is again IDENTICAL. The governance layer NEVER promotes or runs the audit; capital still requires a
+human-initiated Tier-2 (CLAUDE.md). This completes the spec's phased roadmap (P0–P5).
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -62,9 +75,9 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v2.5 = P4 forward-incubation lockbox (CR-8); MINOR, funnel gates_hash UNCHANGED (its criterion is a
-# separate file, configs/crucible_lockbox.gates.yaml).
-CRUCIBLE_VERSION = "crucible-v2.5"
+# v2.6 = P5 breadth (GDELT/EDGAR/Stooq + Data Scout) + governance handoff + reproduce; MINOR, funnel
+# gates_hash UNCHANGED (this layer sits around the funnel and touches no gate byte).
+CRUCIBLE_VERSION = "crucible-v2.6"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
