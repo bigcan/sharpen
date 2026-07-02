@@ -122,6 +122,12 @@ configs/_*_runtime/
 env.txt
 *.db
 
+# Crucible persistent state (SQLite trial ledger + data catalog; flat files stay authoritative)
+*.sqlite
+*.sqlite3
+.crucible/
+crucible_state/
+
 # Docker artifacts
 docker/*.log
 
