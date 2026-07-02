@@ -3,9 +3,11 @@
 A card bundles everything a human needs to decide whether to spend a Tier-2 deep audit: the
 pre-registered spec (CR-2), the **verbatim** scorer verdict (copied field-for-field — the Triage
 Analyst may add narrative but never edits a number, CR-1), the CPCV marginal-ΔSR distribution, the
-combiner marginal contribution, and the lockbox incubation status. In P2 the lockbox does not exist
-yet (P4), so every card is stamped ``incubation_status="PENDING_P4"`` and ``eligible_for_human_gate
-=False``: a survivor is PROMISING, never "discovered", until forward-data incubation clears (CR-8).
+combiner marginal contribution, and the lockbox incubation status. A freshly-minted card is stamped
+``incubation_status="PENDING_P4"`` and ``eligible_for_human_gate=False``: a survivor is PROMISING,
+never "discovered". Once the P4 lockbox (``crucible/lockbox/``) enrolls it, ``crucible.lockbox
+.updated_card`` transitions the status to INCUBATING → CLEARED/REJECTED and sets
+``eligible_for_human_gate`` ONLY on CLEARED — forward-data incubation is the arbiter (CR-8).
 """
 from __future__ import annotations
 

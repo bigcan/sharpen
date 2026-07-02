@@ -1,0 +1,22 @@
+# Pre-registered incubation criterion for the Crucible lockbox (CR-8, spec §6.2).
+#
+# This is a SEPARATE gates file from configs/signal_eval.gates.yaml ON PURPOSE. The lockbox is a
+# forward gate that sits DOWNSTREAM of the funnel; it is NOT part of the funnel's statistical verdict
+# semantics. Folding these thresholds into signal_eval.gates.yaml would change that file's raw bytes
+# and therefore its gates_hash — breaking the frozen `crucible-v2.0` moat hash (519158fa1450). Keeping
+# the incubation criterion here gives the lockbox its own provenance hash while the funnel's stays
+# frozen. NEVER hardcode these numbers in code (CLAUDE.md); the loader reads them via
+# load_incubation_criterion(), and enroll() copies the VALUES into each lockbox entry (CR-2: the
+# criterion is pinned per candidate at enrollment and never edited afterward).
+incubation:
+  # The pre-registered evaluation HORIZON: the number of forward (post-proposal) bars that must
+  # accrue before ANY verdict is rendered. Fixed in advance and outcome-independent, so the single
+  # evaluation at this horizon is NOT optional stopping / peeking (spec §9 "ledger-oracle" theme).
+  # ~63 trading days ≈ one calendar quarter of data that did not exist when the hypothesis was written.
+  min_forward_bars: 63
+  # The forward marginal-contribution annualized Sharpe a candidate must clear at the horizon to
+  # become eligible for the human Tier-2 gate. A conservative-positive floor: forward evidence must be
+  # an actual positive contribution, not merely "not a disaster". Below this at the horizon -> REJECTED
+  # (terminal, never human-eligible). No promotion to capital ever follows automatically (a human +
+  # Tier-2 deep audit remain non-negotiable, CLAUDE.md).
+  min_forward_sharpe: 0.30

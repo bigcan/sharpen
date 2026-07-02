@@ -31,6 +31,8 @@ from ...signals.features import Panel
 from ...signals.generation.fitness import FitnessConfig
 from ..agentic.proposer import LibrarySeedProposer, Proposer
 from ..ledger import TrialLedger
+from ..lockbox.incubation import IncubationCriterion
+from ..lockbox.lockbox import Lockbox
 from .fdr import OnlineFDR
 
 
@@ -69,6 +71,17 @@ class Substrate:
     fdr_alpha_floor: float = 0.0
     is_hpo: bool = False
     est_tokens_per_tick: int = 0     # proposer token estimate for the CR-7 budget (0 for offline)
+    # CR-8 forward-incubation lockbox (P4). OPT-IN: when both are set, PROMISING survivors are
+    # enrolled and accrued forward each tick; when ``lockbox`` is None the substrate does not incubate
+    # (byte-identical P3 behavior). ``incubation_criterion`` is the pre-registered CR-2 lock pinned at
+    # enrollment; require it whenever a lockbox is attached.
+    lockbox: Lockbox | None = None
+    incubation_criterion: IncubationCriterion | None = None
+
+    def __post_init__(self) -> None:
+        if self.lockbox is not None and self.incubation_criterion is None:
+            raise ValueError("a Substrate with a lockbox must also carry an incubation_criterion "
+                             "(the pre-registered CR-2 criterion pinned at enrollment)")
 
 
 def substrate_dirty(*, data_changed: bool, n_fresh_hypotheses: int) -> tuple[bool, str]:

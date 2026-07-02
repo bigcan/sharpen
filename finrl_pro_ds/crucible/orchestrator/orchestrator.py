@@ -34,12 +34,20 @@ from pathlib import Path
 from ..agentic.card import DiscoveryCard
 from ..agentic.hypothesis import HypothesisAuthor
 from ..agentic.loop import HypothesisLoopResult, run_hypothesis_loop
+from ..lockbox.incubation import forward_evidence
+from ..lockbox.lockbox import (
+    STATUS_CLEARED,
+    STATUS_INCUBATING,
+    STATUS_REJECTED,
+    LockboxEntry,
+    updated_card,
+)
 from ..version import CRUCIBLE_VERSION, gates_hash
 from ...signals.generation.grammar import available_terminals
 from .budget import TickBudget
 from .burst import route_burst
 from .fdr import OnlineFDR
-from .substrate import OrchestratorStore, Substrate, TickRecord, substrate_dirty
+from .substrate import OrchestratorStore, PreparedSubstrate, Substrate, TickRecord, substrate_dirty
 
 log = logging.getLogger("crucible.orchestrator")
 
@@ -62,6 +70,12 @@ class SubstrateTickOutcome:
     budget_breached: bool = False
     result: HypothesisLoopResult | None = None
     cards: list[DiscoveryCard] = field(default_factory=list)
+    # CR-8 lockbox (P4): survivors enrolled this tick + the forward-incubation pass results.
+    n_enrolled: int = 0               # PROMISING cards enrolled into the lockbox this tick
+    n_incubating: int = 0             # active entries still accruing (below the horizon)
+    n_cleared: int = 0               # entries that reached the horizon and passed -> human-eligible
+    n_rejected: int = 0               # entries that reached the horizon and failed (terminal-dead)
+    lockbox_entries: list[LockboxEntry] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +122,12 @@ def run_orchestrator_tick(
         data_changed = prev_snap != snap
         store.set_snapshot_hash(sub.substrate_id, snap)          # observed this tick (mined or not)
 
+        # --- CR-8 lockbox (P4): accrue forward evidence on every still-incubating survivor, EVERY
+        # visited tick (mined or not) — forward data can arrive without a fresh hypothesis. Enrollment
+        # of THIS tick's survivors happens after the mine below; a just-enrolled candidate has an empty
+        # forward window this tick, so accruing here first is correct and order-independent. -----------
+        incubated = _incubate_active(sub, prepared, tick_ts)
+
         # --- Stage 2 (agent, CR-1): ONE proposer call → fresh (deduped) hypotheses ----------------
         author = HypothesisAuthor(sub.proposer, sub.ledger, max_proposals=sub.max_proposals)
         terminals = available_terminals(prepared.panel)
@@ -124,7 +144,8 @@ def run_orchestrator_tick(
                 reason=reason, snapshot_hash=snap))
             outcomes.append(SubstrateTickOutcome(
                 substrate_id=sub.substrate_id, dirty=dirty, mined=False, reason=reason,
-                snapshot_hash=snap, fdr_num_tests=_fdr_tests(store, sub)))
+                snapshot_hash=snap, fdr_num_tests=_fdr_tests(store, sub),
+                **_lockbox_fields(sub, incubated, n_enrolled=0)))
             log.info("substrate %s: NO-OP (%s)", sub.substrate_id, reason)
             continue
 
@@ -142,7 +163,8 @@ def run_orchestrator_tick(
             outcomes.append(SubstrateTickOutcome(
                 substrate_id=sub.substrate_id, dirty=True, mined=False,
                 reason=f"{reason}; budget breach", snapshot_hash=snap, n_preregistered=n_fresh,
-                budget_breached=True, fdr_num_tests=_fdr_tests(store, sub)))
+                budget_breached=True, fdr_num_tests=_fdr_tests(store, sub),
+                **_lockbox_fields(sub, incubated, n_enrolled=0)))
             log.warning("substrate %s: %s", sub.substrate_id, breach)
             continue
 
@@ -171,6 +193,12 @@ def run_orchestrator_tick(
             fdr_total += charged
         store.save_fdr(sub.substrate_id, fdr)
 
+        # --- CR-8 lockbox: enroll every PROMISING survivor (idempotent). A fresh entry is INCUBATING
+        # with an empty forward window; its card reflects that state (not the P2 PENDING_P4 stub). ----
+        enrolled = _enroll_cards(sub, result.cards, tick_ts)
+        tick_cards = ([updated_card(c, e) for c, e in zip(result.cards, enrolled)]
+                      if enrolled else list(result.cards))
+
         n_scored = sum(len(r.hall_of_fame) for r in result.reports.values())
         store.record_tick(TickRecord(
             tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason,
@@ -182,17 +210,70 @@ def run_orchestrator_tick(
             substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason, snapshot_hash=snap,
             n_preregistered=n_fresh, n_scored=n_scored, n_promising=result.n_promising,
             fdr_charged_total=fdr_total, fdr_num_tests=fdr.num_tests, burst_target=burst.target,
-            result=result, cards=list(result.cards)))
+            result=result, cards=tick_cards,
+            **_lockbox_fields(sub, incubated + enrolled, n_enrolled=len(enrolled))))
 
         if out_dir is not None:
             sub_dir = Path(out_dir) / _safe(sub.substrate_id) / _safe(tick_ts)
-            for card in result.cards:
+            for card in tick_cards:
                 card.write(sub_dir / "cards")
             result.manifest.write(sub_dir)
 
     return OrchestratorTickResult(tick_ts=tick_ts, gates_hash=ghash,
                                   crucible_version=crucible_version, outcomes=outcomes,
                                   budget=budget)
+
+
+def _incubation_params(evolve_kwargs: dict) -> tuple[int, float, int]:
+    """The three candidate-book knobs the forward accrual needs, read from the substrate's evolve
+    kwargs (same values the funnel mined with) with the ``evolve`` defaults as fallback."""
+    return (int(evolve_kwargs.get("hold_horizon", 21)),
+            float(evolve_kwargs.get("cost_bps", 0.0010)),
+            int(evolve_kwargs.get("ls_min_names", 6)))
+
+
+def _incubate_active(sub: Substrate, prepared: PreparedSubstrate, tick_ts: str) -> list[LockboxEntry]:
+    """Refresh every still-INCUBATING lockbox entry for this substrate on the freshly-extended panel
+    (CR-8). No-op when the substrate has no lockbox (byte-identical P3 behavior)."""
+    if sub.lockbox is None:
+        return []
+    hold_horizon, cost_bps, ls_min_names = _incubation_params(sub.evolve_kwargs)
+    touched: list[LockboxEntry] = []
+    for entry in sub.lockbox.active_entries(sub.substrate_id):
+        ev = forward_evidence(
+            formula=entry.formula, candidate_type=entry.candidate_type, panel=prepared.panel,
+            base_returns=prepared.base_returns, timestamps=prepared.timestamps,
+            proposal_ts=entry.proposal_ts, cfg=sub.cfg, hold_horizon=hold_horizon,
+            cost_bps=cost_bps, ls_min_names=ls_min_names)
+        if ev is None:                       # candidate degenerate on the current panel — skip this pass
+            continue
+        updated = sub.lockbox.record_incubation(entry.candidate_hash, ev, tick_ts)
+        if updated is not None:
+            touched.append(updated)
+    return touched
+
+
+def _enroll_cards(sub: Substrate, cards: list[DiscoveryCard], tick_ts: str) -> list[LockboxEntry]:
+    """Enroll each PROMISING survivor card into the lockbox (idempotent). Returns one entry per card,
+    aligned by index so the caller can map cards to their incubation state."""
+    if sub.lockbox is None or sub.incubation_criterion is None or not cards:
+        return []
+    return [sub.lockbox.enroll(c, sub.incubation_criterion, substrate_id=sub.substrate_id,
+                               tick_ts=tick_ts) for c in cards]
+
+
+def _lockbox_fields(sub: Substrate, touched: list[LockboxEntry], *, n_enrolled: int) -> dict:
+    """The lockbox reporting kwargs for a SubstrateTickOutcome: this-substrate status counts (over ALL
+    of its entries) + the entries touched this tick. Empty when the substrate has no lockbox."""
+    if sub.lockbox is None:
+        return {}
+    entries = sub.lockbox.entries(sub.substrate_id)
+    return dict(
+        n_enrolled=n_enrolled,
+        n_incubating=sum(1 for e in entries if e.status == STATUS_INCUBATING),
+        n_cleared=sum(1 for e in entries if e.status == STATUS_CLEARED),
+        n_rejected=sum(1 for e in entries if e.status == STATUS_REJECTED),
+        lockbox_entries=list(touched))
 
 
 def _fdr_tests(store: OrchestratorStore, sub: Substrate) -> int:
