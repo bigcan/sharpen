@@ -17,6 +17,12 @@ without changing any existing verdict. CRITICAL: this bump must NOT be conflated
 NO ``FitnessConfig`` default and NO gates YAML byte changed, so the frozen ``crucible-v2.0`` gates_hash
 (the moat) is IDENTICAL. Do not re-hash the gates for a MINOR system bump.
 
+`crucible-v2.2` is the P1b **MINOR** bump: the free-data acquisition subsystem
+(``crucible/data/`` — ``DataConnector`` + FRED/ALFRED + CFTC COT + the non-OHLCV quality gate with
+the as-of-join reconstruction tripwire + the Panel-feature-slot bridge). It ADDS connectors and a
+PIT-safe data path; it changes NO verdict semantics and NO gate byte, so the ``crucible-v2.0``
+gates_hash is again IDENTICAL.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -28,8 +34,8 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v2.1 = P1a CR-9 overlay/terminal-registry path (MINOR; gates_hash UNCHANGED from v2.0).
-CRUCIBLE_VERSION = "crucible-v2.1"
+# v2.2 = P1b free-data subsystem (connectors + quality gate + bridge); MINOR, gates_hash UNCHANGED.
+CRUCIBLE_VERSION = "crucible-v2.2"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
