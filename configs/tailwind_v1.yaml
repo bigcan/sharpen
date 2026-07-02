@@ -17,12 +17,15 @@
 # universe), then risk-parity-combined (trailing-causal inverse-vol, monthly meta, LEAK-2
 # safe). Consumed by finrl_pro_ds.paper.TwoSleeveExecutor + the paper_soak gates.
 #
-# MODE AXIS (review item 1, .agent/artifacts/tailwind_v1_fable_review.md): this is the
-# OWN-CAPITAL profile (all-weather; carry the BAB insurance; ~10% per-asset vol). The
-# CHALLENGE profile (drop BAB, run hotter, bank-and-derisk) is DEFERRED — its vol/bank
-# thresholds must come from the prop-firm challenge Monte-Carlo simulator (not yet built),
-# NOT from a guess. Wiring fabricated hot-vol numbers now is the exact "fooling ourselves"
-# trap the review flags. See the review doc's "Wiring implications" section.
+# MODE AXIS (review item 1): this is the OWN-CAPITAL profile (~10% per-asset vol, BAB retained).
+# The CHALLENGE profile is now RESOLVED by the challenge simulator
+# (docs/research/tailwind_v1_challenge_simulator_2026-07-02.md, results/tailwind_v1/challenge_sim.json)
+# — and it OVERTURNED the review's prior. Under the CURRENT no-deadline FTMO/Velotrade rules the
+# P(pass)-optimal challenge config is NOT "drop BAB + run hot"; it is LOW vol (1.0-1.5×, 10-15%),
+# BAB RETAINED (it cuts DD, the binding constraint), NO bank-and-derisk. P(pass) ~0.75/0.87 FTMO
+# step1/step2, ~0.72 Velotrade. So challenge mode ≈ THIS own-capital book at 1.0-1.5× vol. (The
+# "run hot" advice only returns under a fixed short deadline — VERIFY each firm's current rules in
+# configs/prop_firm_rules.yaml before an attempt.)
 #
 # CAPITAL GATE (do not skip): an actual paper-capital soak requires a Tier-2 deep-lifecycle
 # audit (deep_strategy_audit tailwind + audit_two_sleeve_book) + operator go-ahead. Capital
