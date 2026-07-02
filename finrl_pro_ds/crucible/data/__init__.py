@@ -25,6 +25,11 @@ from .connector import (
     SeriesRef,
 )
 from .fred import FredConnector
+from .panel_bridge import (
+    SlotRequest,
+    build_feature_slots,
+    is_valid_terminal,
+)
 from .quality_gate import (
     QualityReport,
     asof_join,
@@ -44,9 +49,12 @@ __all__ = [
     "QualityReport",
     "SeriesData",
     "SeriesRef",
+    "SlotRequest",
     "asof_join",
     "assert_asof_join_causal",
     "assert_feature_causal",
+    "build_feature_slots",
+    "is_valid_terminal",
     "naive_reference_period_join",
     "register_series",
     "validate_series",
