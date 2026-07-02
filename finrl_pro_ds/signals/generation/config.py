@@ -27,7 +27,7 @@ _GEN_DEFAULTS: dict = {
     "elite_frac": 0.30, "cost_bps": 0.0010, "ls_min_names": 6, "max_ast_nodes": 24,
     "turnover_soft_cap": 12.0, "lambda_turnover": 0.05, "lambda_complexity": 0.10,
     "min_combination_uplift": 0.10, "hlz_t_min": 3.0, "promising_dsr": 0.90,
-    "max_base_corr": 0.70, "delta_p05_min": -0.10,
+    "max_base_corr": 0.70, "delta_median_min": 0.0, "frac_positive_min": 0.50,
     "holdout_frac": 0.25, "holdout_embargo_days": 21,
     "cpcv_n_groups": 6, "cpcv_k_test": 2, "cpcv_embargo_days": 21, "cpcv_purge_horizon": 1,
 }
@@ -48,6 +48,8 @@ def _validate(g: dict) -> None:
         raise ValueError("generation.hlz_t_min >= 0 and promising_dsr in [0,1] required")
     if not (0.0 <= float(g["max_base_corr"]) <= 1.0):
         raise ValueError("generation.max_base_corr must be in [0,1]")
+    if not (0.0 <= float(g["frac_positive_min"]) <= 1.0):
+        raise ValueError("generation.frac_positive_min must be in [0,1]")
     # GP8-02: the substrate keys are load-bearing — the runner builds the EXACT panel + base book a
     # substrate names, so a config naming an unwired panel/sleeve set is a silent no-op; fail fast.
     panel = str(g["panel"])
@@ -79,7 +81,9 @@ def load_generation_config(gates_path: str | Path) -> tuple[FitnessConfig, dict]
                                        # hold_horizon affects turnover only, not Sharpe annualization
         hlz_t_min=float(g["hlz_t_min"]), promising_dsr=float(g["promising_dsr"]),
         min_combination_uplift=float(g["min_combination_uplift"]),
-        max_base_corr=float(g["max_base_corr"]), delta_p05_min=float(g["delta_p05_min"]),
+        max_base_corr=float(g["max_base_corr"]),
+        delta_median_min=float(g["delta_median_min"]),
+        frac_positive_min=float(g["frac_positive_min"]),
         lambda_turnover=float(g["lambda_turnover"]),
         turnover_soft_cap=float(g["turnover_soft_cap"]),
         lambda_complexity=float(g["lambda_complexity"]),

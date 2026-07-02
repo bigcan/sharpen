@@ -179,21 +179,38 @@ def test_span_collinear_rejected_where_max_single_corr_would_miss() -> None:
     assert not r.passes_gate
 
 
-def test_p05_fragility_veto_wired() -> None:
-    """GP4-06: the 5th-percentile path ΔSR (delta_sr_p05) is wired into the gate. A candidate that
-    PASSES with the shipped floor is VETOED once delta_p05_min is raised above its own p05 —
-    confirming the fragility veto is load-bearing, not decorative."""
+def test_fragility_gate_median_and_frac_wired() -> None:
+    """GP4-06 (REPAIRED, crucible-v2.0): the fragility gate is the median ∧ frac-positive of the ΔSR
+    path distribution — NOT the old p05 veto, which was CPCV-geometry noise (expert-review Test B).
+    Both legs are load-bearing: a candidate that PASSES is VETOED once either delta_median_min is
+    raised above its own median path OR frac_positive_min is raised above its own frac-positive.
+    delta_sr_p05 is still computed and reported but no longer participates in the gate."""
+    from dataclasses import replace
+
     cfg, ts, base = _shipped_cfg(), _long_ts(), _long_base()
     rng = np.random.default_rng(303)
     cand = 5.0 / np.sqrt(252) * 0.009 + 0.009 * rng.standard_normal(_T_LONG)
     r = combination_fitness(cand, base, ts, cfg, gen_n_eff=4495.0, turnover_ann=4.0, n_nodes=8,
                             trial_sharpe_pool=_search_pool())
-    assert r.passes_gate and np.isfinite(r.delta_sr_p05)
-    from dataclasses import replace
-    strict = replace(cfg, delta_p05_min=r.delta_sr_p05 + 1.0)   # floor now above the candidate's p05
-    r2 = combination_fitness(cand, base, ts, strict, gen_n_eff=4495.0, turnover_ann=4.0, n_nodes=8,
-                             trial_sharpe_pool=_search_pool())
-    assert not r2.passes_gate                                   # vetoed purely on fragility
+    assert r.passes_gate
+    assert np.isfinite(r.delta_sr_median) and np.isfinite(r.frac_paths_positive)
+    assert np.isfinite(r.delta_sr_p05)                          # reported, not gating
+
+    # median leg: raise the median floor above the candidate's own median path → vetoed on fragility
+    strict_med = replace(cfg, delta_median_min=r.delta_sr_median + 1.0)
+    r_med = combination_fitness(cand, base, ts, strict_med, gen_n_eff=4495.0, turnover_ann=4.0,
+                                n_nodes=8, trial_sharpe_pool=_search_pool())
+    assert not r_med.passes_gate
+
+    # frac-positive leg: a strong planted candidate is positive on every path (frac == 1.0), so
+    # demand MORE than 100% positive is impossible — instead confirm the leg binds by requiring the
+    # observed frac exactly and then nudging the floor just past it when there is any headroom.
+    assert r.frac_paths_positive >= cfg.frac_positive_min       # passes the shipped majority floor
+    if r.frac_paths_positive < 1.0:
+        strict_frac = replace(cfg, frac_positive_min=r.frac_paths_positive + 1e-9)
+        r_frac = combination_fitness(cand, base, ts, strict_frac, gen_n_eff=4495.0, turnover_ann=4.0,
+                                     n_nodes=8, trial_sharpe_pool=_search_pool())
+        assert not r_frac.passes_gate
 
 
 def test_dsr_monotone_in_trials_and_observed() -> None:

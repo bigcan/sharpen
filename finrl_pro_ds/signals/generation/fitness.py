@@ -61,7 +61,14 @@ class FitnessConfig:
     promising_dsr: float = 0.90
     min_combination_uplift: float = 0.10
     max_base_corr: float = 0.70    # GP4-01: reject a candidate collinear with a base sleeve
-    delta_p05_min: float = -0.10   # GP4-06: fragility veto — 5th-pct path ΔSR must clear this
+    # Fragility gate (GP4-06, REPAIRED — crucible-v2.0). The former 5th-pct-path veto
+    # (delta_p05_min) was CPCV-GEOMETRY NOISE: expert-review Test B showed p05 swings −0.10..−0.49
+    # by n_groups/k on a FIXED candidate, wrongly vetoing BAB (median +0.089, frac+ 0.67, p05 −0.193).
+    # Replaced by a robust two-leg criterion on the CPCV ΔSR path DISTRIBUTION: the median path must
+    # not be a loss AND a majority of paths must be positive. delta_sr_p05 is still reported (below)
+    # but no longer gates. See docs/research/crucible_agentic_discovery_spec.md §5.
+    delta_median_min: float = 0.0      # median(ΔSR paths) floor — central path is not a loss
+    frac_positive_min: float = 0.50    # min fraction of CPCV paths with ΔSR > 0 (majority-positive)
     # selection penalties (implementation-shortfall + Occam)
     lambda_turnover: float = 0.05
     turnover_soft_cap: float = 12.0
@@ -82,7 +89,9 @@ class FitnessConfig:
 class FitnessResult:
     fitness: float                 # selection scalar (higher better)
     delta_sr_oos: float            # mean over CPCV paths of (SR[book⊕c] − SR[book])
-    delta_sr_p05: float            # 5th-percentile path (fragility)
+    delta_sr_median: float         # median CPCV path ΔSR (GP4-06 gate leg — crucible-v2.0)
+    frac_paths_positive: float     # fraction of CPCV paths with ΔSR > 0 (GP4-06 gate leg)
+    delta_sr_p05: float            # 5th-percentile path (REPORTED only; no longer gates — Test B)
     n_paths: int
     dsr_aug: float                 # deflated per-period Sharpe of the augmented book (gen-N)
     cand_hlz_pass: bool            # MARGINAL-contribution t-stat ≥ hlz_t_min (GP4-03; was standalone)
@@ -250,7 +259,9 @@ def combination_fitness(
             deltas.append(sa - sb)
     darr = np.asarray(deltas, dtype=np.float64)
     delta_mean = float(darr.mean()) if darr.size else float("nan")
-    delta_p05 = float(np.quantile(darr, 0.05)) if darr.size else float("nan")
+    delta_median = float(np.median(darr)) if darr.size else float("nan")
+    frac_pos = float((darr > 0.0).mean()) if darr.size else float("nan")
+    delta_p05 = float(np.quantile(darr, 0.05)) if darr.size else float("nan")   # reported only
 
     # deflate the augmented book's per-period Sharpe; trial_sharpes = the SEARCH dispersion pool
     # (GP4-02/M1) when supplied, else this book's within-CPCV paths (cheap train pre-filter).
@@ -285,9 +296,13 @@ def combination_fitness(
     # collinearity guard (GP4-01): multiple correlation of the candidate to the base SPAN.
     max_base_corr = _base_span_corr(np.asarray(cand_returns, dtype=np.float64), base)
     not_redundant = bool(max_base_corr <= cfg.max_base_corr)
-    # fragility veto (GP4-06): a strong-mean candidate with a deeply-negative 5th-percentile path
-    # (regime-concentrated) must not pass — wire delta_sr_p05 into the gate.
-    not_fragile = bool(np.isfinite(delta_p05) and delta_p05 >= cfg.delta_p05_min)
+    # fragility gate (GP4-06, REPAIRED — crucible-v2.0): a regime-concentrated candidate (uplift
+    # driven by a few paths) must not pass. The former p05 veto was CPCV-geometry noise (Test B);
+    # the robust replacement is a two-leg criterion on the ΔSR path distribution — the median path
+    # must not be a loss AND a majority of paths must be positive. p05 is reported, not gated.
+    not_fragile = bool(
+        np.isfinite(delta_median) and delta_median >= cfg.delta_median_min
+        and np.isfinite(frac_pos) and frac_pos >= cfg.frac_positive_min)
 
     fitness = (delta_mean
                - cfg.lambda_turnover * max(0.0, turnover_ann - cfg.turnover_soft_cap)
@@ -299,7 +314,8 @@ def combination_fitness(
 
     return FitnessResult(
         fitness=float(fitness) if np.isfinite(fitness) else float("-inf"),
-        delta_sr_oos=delta_mean, delta_sr_p05=delta_p05, n_paths=len(paths),
+        delta_sr_oos=delta_mean, delta_sr_median=delta_median,
+        frac_paths_positive=frac_pos, delta_sr_p05=delta_p05, n_paths=len(paths),
         dsr_aug=dsr_aug, cand_hlz_pass=cand_hlz_pass, turnover_ann=float(turnover_ann),
         n_nodes=int(n_nodes), passes_gate=passes_gate,
         aug_book_sharpe_pp=float(sr_pp) if np.isfinite(sr_pp) else float("nan"),

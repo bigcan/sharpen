@@ -1,0 +1,74 @@
+"""Run manifest — the reproducibility contract for a Crucible discovery run (spec §5).
+
+Every discovery iteration writes a ``run_manifest.json`` pinning the four versioned layers plus the
+run's own knobs, so ``crucible reproduce <run_id>`` can re-execute it bit-identically. In P0 the
+manifest is emitted alongside the C3 generation scorecard; the data/agent fields are nullable until
+the data (P1b) and agentic (P2) layers populate them.
+"""
+from __future__ import annotations
+
+import hashlib
+import json
+from dataclasses import asdict, dataclass, field
+from pathlib import Path
+
+from .version import CRUCIBLE_VERSION
+
+_MANIFEST_FILENAME = "run_manifest.json"
+
+
+@dataclass(frozen=True, slots=True)
+class RunManifest:
+    """Immutable provenance record for one versioned Crucible run (spec §5).
+
+    The four pinned layers are ``crucible_version`` (system), ``gates_hash`` (gates YAML bytes),
+    ``data_snapshot_hash`` (the catalog rows used), and ``rng_seeds`` (determinism). The file-drawer
+    counts, agent model id, token cost, and per-candidate verdicts complete the audit trail.
+    Nullable fields (``data_snapshot_hash``, ``agent_model_id``, ``token_cost``) are populated by
+    later phases; ``verdicts`` maps candidate_hash → verdict string.
+    """
+
+    run_id: str
+    crucible_version: str = CRUCIBLE_VERSION
+    gates_hash: str = ""
+    proposal_ts: str | None = None                 # ISO stamp; None until the agentic layer sets it
+    rng_seeds: dict[str, int] = field(default_factory=dict)
+    file_drawer_N_before: int = 0                  # cross-run trial count BEFORE this run
+    file_drawer_N_after: int = 0                   # ... and AFTER (this run's contribution)
+    data_snapshot_hash: str | None = None          # catalog snapshot (P1b); None in P0
+    agent_model_id: str | None = None              # LLM id (P2); None in P0
+    token_cost: int | None = None                  # LLM tokens spent (P2/CR-7); None in P0
+    verdicts: dict[str, str] = field(default_factory=dict)   # candidate_hash -> verdict
+    extra: dict = field(default_factory=dict)      # forward-compat sidecar for later-phase fields
+
+    def to_json(self) -> dict:
+        """Canonical dict (sorted on write) for stable, diff-friendly serialization."""
+        return asdict(self)
+
+    def content_hash(self) -> str:
+        """Deterministic 12-hex SHA-256 of the manifest — the run's identity for `reproduce`."""
+        payload = json.dumps(self.to_json(), sort_keys=True, default=str)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
+
+    def write(self, out_dir: str | Path) -> Path:
+        """Write ``run_manifest.json`` into ``out_dir`` (created if absent); return its path."""
+        out = Path(out_dir)
+        out.mkdir(parents=True, exist_ok=True)
+        path = out / _MANIFEST_FILENAME
+        path.write_text(json.dumps(self.to_json(), indent=2, sort_keys=True), encoding="utf-8")
+        return path
+
+    @classmethod
+    def from_json(cls, data: dict) -> "RunManifest":
+        """Rebuild a manifest from a parsed dict, ignoring unknown keys for forward-compat."""
+        fields = {f for f in cls.__dataclass_fields__}                       # type: ignore[attr-defined]
+        known = {k: v for k, v in data.items() if k in fields}
+        return cls(**known)
+
+    @classmethod
+    def read(cls, path: str | Path) -> "RunManifest":
+        """Read a ``run_manifest.json`` (or a directory containing one) back into a RunManifest."""
+        p = Path(path)
+        if p.is_dir():
+            p = p / _MANIFEST_FILENAME
+        return cls.from_json(json.loads(p.read_text(encoding="utf-8")))

@@ -15,8 +15,9 @@ Method (parameter-free combiner ⇒ no in-sample selection to overfit):
   * Report: corr(commodity_carry, each base sleeve), full-sample + held-out-OOS-tail net Sharpe of
     each book, the ΔSharpe, a moving-block-bootstrap p-value that ΔSharpe(full) > 0, and the BINDING
     C2 CPCV distribution of the uplift over the combinatorial-purged paths.
-  * Read the accept bars (``max_base_corr``, ``min_combination_uplift``, ``delta_p05_min``) from the
-    gates file — never hardcoded. Verdict is ADVISORY: a real add needs C2 CPCV + a Tier-2 audit.
+  * Read the accept bars (``max_base_corr``, ``min_combination_uplift``, ``delta_median_min``,
+    ``frac_positive_min``) from the gates file — never hardcoded. Verdict is ADVISORY: a real add
+    needs C2 CPCV + a Tier-2 audit.
 
 Usage:
   python scripts/research/eval_commodity_carry_sleeve.py --start 2008-01-01
@@ -180,7 +181,10 @@ def main() -> int:
     cpcv_k_test = int(gen.get("cpcv_k_test", 2))
     cpcv_embargo = int(gen.get("cpcv_embargo_days", 21))
     cpcv_purge = int(gen.get("cpcv_purge_horizon", 1))
-    delta_p05_min = float(gen.get("delta_p05_min", -0.10))    # GP4-06 fragility floor on p05(ΔSR)
+    # GP4-06 fragility gate (REPAIRED, crucible-v2.0): median ∧ frac-positive on the ΔSR paths.
+    # The former p05 veto was CPCV-geometry noise (Test B); p05 is still printed as a diagnostic.
+    delta_median_min = float(gen.get("delta_median_min", 0.0))
+    frac_positive_min = float(gen.get("frac_positive_min", 0.50))
 
     panel = load_cross_asset_panel(
         args.start, args.end, config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
@@ -214,9 +218,10 @@ def main() -> int:
                                      embargo=cpcv_embargo, purge_horizon=cpcv_purge)
 
     # Honest verdict, driven by the CPCV DISTRIBUTION (not the single high-variance OOS split):
-    #   ADD_CANDIDATE               — uncorrelated AND the uplift is robust across paths: median > 0,
-    #                                 majority of paths positive, and the 5th-pct path clears the
-    #                                 gates fragility floor (delta_p05_min, GP4-06).
+    #   ADD_CANDIDATE               — uncorrelated AND the uplift is robust across paths: median ≥
+    #                                 delta_median_min AND a majority of paths positive (frac+ ≥
+    #                                 frac_positive_min). GP4-06 REPAIRED — the p05 leg (CPCV-geometry
+    #                                 noise, Test B) was dropped; p05 is reported, not gated.
     #   UNCORRELATED_UPLIFT_UNPROVEN — a clean diversifier whose uplift is positive somewhere but not
     #                                 robust across paths (the recent-regime-concentrated case).
     #   NO_ADD                       — fails correlation, or the CPCV distribution is not positive.
@@ -226,8 +231,8 @@ def main() -> int:
     cpcv_median = float(cpcv.get("uplift_median", float("nan")))
     cpcv_p05 = float(cpcv.get("uplift_p05", float("nan")))
     cpcv_frac_pos = float(cpcv.get("frac_paths_positive", float("nan")))
-    cpcv_robust = (np.isfinite(cpcv_median) and cpcv_median > 0.0 and cpcv_frac_pos > 0.5
-                   and cpcv_p05 >= delta_p05_min)
+    cpcv_robust = (np.isfinite(cpcv_median) and cpcv_median >= delta_median_min
+                   and np.isfinite(cpcv_frac_pos) and cpcv_frac_pos >= frac_positive_min)
     if corr_ok and cpcv_robust:
         verdict = "ADD_CANDIDATE"
     elif corr_ok and (cpcv_median > 0.0 or uplift_oos >= min_uplift or uplift_full > 0):
@@ -248,18 +253,19 @@ def main() -> int:
         "min_combination_uplift_gate": min_uplift, "uplift_gate_pass": bool(uplift_ok),
         "bootstrap_p_uplift_le_0": round(p_boot, 4), "boot_alpha": args.boot_alpha,
         "bootstrap_significant": bool(boot_sig),
-        "cpcv": cpcv, "delta_p05_min_gate": delta_p05_min, "cpcv_robust": bool(cpcv_robust),
+        "cpcv": cpcv, "delta_median_min_gate": delta_median_min,
+        "frac_positive_min_gate": frac_positive_min, "cpcv_robust": bool(cpcv_robust),
         "verdict": verdict,
     }
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(payload, indent=2), encoding="utf-8")
     log.warning("ADVISORY verdict=%s | corr(tsmom)=%.3f corr(rates)=%.3f (gate<=%.2f) | "
-                "single-split OOS uplift %.3f (boot p=%.3f) | CPCV %d paths: median=%.3f p05=%.3f "
-                "(floor %.2f) frac+=%.2f -> robust=%s",
+                "single-split OOS uplift %.3f (boot p=%.3f) | CPCV %d paths: median=%.3f "
+                "(floor %.2f) frac+=%.2f (floor %.2f) p05=%.3f [diag] -> robust=%s",
                 verdict, corr_tsmom, corr_rates, max_base_corr, uplift_oos, p_boot,
-                int(cpcv.get("n_paths", 0)), cpcv_median, cpcv_p05, delta_p05_min,
-                cpcv_frac_pos, cpcv_robust)
+                int(cpcv.get("n_paths", 0)), cpcv_median, delta_median_min,
+                cpcv_frac_pos, frac_positive_min, cpcv_p05, cpcv_robust)
     log.info("wrote %s", out)
     return 0
 

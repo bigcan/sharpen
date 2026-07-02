@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import sys
@@ -35,6 +36,11 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from finrl_pro_ds.crucible import (  # noqa: E402
+    CRUCIBLE_VERSION,
+    RunManifest,
+    gates_hash,
+)
 from finrl_pro_ds.signals.eval_harness import _ls_weights  # noqa: E402
 from finrl_pro_ds.signals.features import Panel  # noqa: E402
 from finrl_pro_ds.signals.generation.config import (  # noqa: E402
@@ -167,8 +173,29 @@ def main() -> int:
         "pbo": rep.pbo,        # advisory CSCV Probability of Backtest Overfitting (GP7-03)
     }
     (out / "generation_report.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-    log.info("mode=%s  gen_n_total=%d  PROMISING=%d  -> %s",
-             args.mode, rep.gen_n_total, len(rep.promising), out / "generation_report.json")
+
+    # Crucible run manifest (spec §5) — the reproducibility contract. Deterministic given the same
+    # inputs: run_id + verdicts derive only from (gates, substrate, seeds, window), so a re-run over
+    # the same config reproduces the manifest bit-identically (P0 exit gate). data/agent fields are
+    # nullable until the data (P1b) and agentic (P2) layers exist.
+    ghash = gates_hash(args.config)
+    run_id_seed = "|".join(str(x) for x in (
+        CRUCIBLE_VERSION, ghash, meta["panel"], args.mode, int(args.planted),
+        ek["rng_seed"], args.start, args.end, args.t, args.n))
+    run_id = f"gen-{meta['panel']}-{hashlib.sha256(run_id_seed.encode()).hexdigest()[:12]}"
+    verdicts = {
+        hashlib.sha256(c.formula.encode("utf-8")).hexdigest()[:12]:
+            ("PROMISING" if (c.result is not None and c.result.passes_gate) else "LOGGED")
+        for c in rep.hall_of_fame}
+    manifest = RunManifest(
+        run_id=run_id, gates_hash=ghash,
+        rng_seeds={"generation": int(ek["rng_seed"])},
+        file_drawer_N_before=0, file_drawer_N_after=int(rep.gen_n_total),
+        verdicts=verdicts)
+    manifest.write(out)
+    log.info("mode=%s  gen_n_total=%d  PROMISING=%d  -> %s  (manifest %s, gates %s)",
+             args.mode, rep.gen_n_total, len(rep.promising), out / "generation_report.json",
+             manifest.content_hash(), ghash)
     if not rep.promising:
         log.info("0 PROMISING (expected on noise / efficient cells — the filter is the point).")
     return 0
