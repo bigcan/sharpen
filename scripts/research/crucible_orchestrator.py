@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -41,6 +42,7 @@ from finrl_pro_ds.crucible import (  # noqa: E402
     TrialLedger,
     run_orchestrator_tick,
 )
+from finrl_pro_ds.crucible.orchestrator.orchestrator import _safe  # noqa: E402
 from finrl_pro_ds.crucible.orchestrator.substrate import PreparedSubstrate  # noqa: E402
 from finrl_pro_ds.signals.features import Panel  # noqa: E402
 from finrl_pro_ds.signals.generation.config import (  # noqa: E402
@@ -132,6 +134,32 @@ def _build_substrate(args, cfg, ek, meta) -> tuple[Substrate, DataCatalog]:
     return sub, catalog
 
 
+def _write_recipe(out_dir: Path, substrate_id: str, tick_ts: str, args) -> None:
+    """Write ``reproduce_recipe.json`` beside a mined synthetic manifest — the deterministic argv to
+    re-run this single tick from scratch (``crucible reproduce`` consumes it; spec §5)."""
+    sub_dir = out_dir / _safe(substrate_id) / _safe(tick_ts)
+    gates_rel = os.path.relpath(args.config, ROOT)
+    recipe = {
+        "kind": "synthetic_orchestrator",
+        "script": "scripts/research/crucible_orchestrator.py",
+        # --force: reproduce re-runs a single tick deterministically regardless of generation.enabled
+        # (the eligibility flag gates scheduled discovery, not an explicit re-execution of a past run).
+        "argv": [
+            "--mode", "synthetic", "--t", str(args.t), "--n", str(args.n),
+            "--max-proposals", str(args.max_proposals), "--max-candidates", str(args.max_candidates),
+            "--start-ts", tick_ts, "--nights", "1", "--config", args.config, "--force",
+        ],
+        "tick_ts": tick_ts,
+        "substrate_id": substrate_id,
+        "gates_path": gates_rel,
+        "crucible_version": CRUCIBLE_VERSION,
+        "manifest_relpath": f"{args.mode}/{_safe(substrate_id)}/{_safe(tick_ts)}/run_manifest.json",
+    }
+    sub_dir.mkdir(parents=True, exist_ok=True)
+    (sub_dir / "reproduce_recipe.json").write_text(
+        json.dumps(recipe, indent=2, sort_keys=True), encoding="utf-8")
+
+
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     ap = argparse.ArgumentParser(description="Crucible P3 — continuous orchestrator")
@@ -180,6 +208,10 @@ def main() -> int:
         log.info("night %d/%d ts=%s dirty=%s mined=%s promising=%d fdr_tests=%d (%s)",
                  i + 1, args.nights, tick_ts, o.dirty, o.mined, o.n_promising, o.fdr_num_tests,
                  o.reason)
+        # Drop a deterministic reproduce recipe next to each mined synthetic manifest (spec §5, P5).
+        # Only synthetic mode is bit-reproducible offline; a live/networked substrate writes none.
+        if o.mined and args.mode == "synthetic":
+            _write_recipe(out_dir, sub.substrate_id, tick_ts, args)
 
     (out_dir / "orchestrator_summary.json").write_text(
         json.dumps({"advisory": "harness caps at PROMISING; deploy read requires a Tier-2 deep audit",
