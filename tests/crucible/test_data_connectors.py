@@ -103,22 +103,25 @@ _FRED_FIXTURE = {
 }
 
 
-def test_fred_fetch_from_fixture_stamps_release_from_realtime_start() -> None:
+def test_fred_fetch_from_fixture_stamps_release_from_reference_plus_lag() -> None:
     captured: dict[str, str] = {}
 
     def transport(url: str) -> dict:
         captured["url"] = url
         return _FRED_FIXTURE
 
-    conn = FredConnector(transport=transport)             # no key needed with injected transport
+    conn = FredConnector(transport=transport, release_lag_days=1)   # no key needed with transport
     ref = conn.discover()[0]
     data = conn.fetch(ref, "2020-01-01", "2020-12-31")
 
     assert data.n_obs == 2                                # the "." row dropped
     assert list(data.value) == [1.5, 1.75]
     assert data.reference_period[0] == np.datetime64("2020-01-01", "ns")
-    assert data.release_timestamp[0] == np.datetime64("2020-01-15", "ns")   # realtime_start
-    assert "output_type=2" in captured["url"]             # all-vintages request by default
+    # release = reference + lag (FRED's realtime_start is 'today' on the plain endpoint, useless as
+    # a release time; the all-vintages endpoint is pivoted + capped at 2000 vintages — see fred.py).
+    assert data.release_timestamp[0] == np.datetime64("2020-01-02", "ns")
+    assert "observation_start=2020-01-01" in captured["url"]
+    assert "output_type" not in captured["url"]           # plain endpoint, not the pivoted vintage one
 
 
 def test_fred_asof_sets_vintage_realtime_params() -> None:
