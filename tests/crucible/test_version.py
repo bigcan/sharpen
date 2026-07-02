@@ -14,8 +14,8 @@ GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
-    # v2.2 = P1b free-data subsystem (MINOR over v2.1 P1a; gates_hash still frozen at v2.0).
-    assert CRUCIBLE_VERSION == "crucible-v2.2"
+    # v2.3 = P2 agentic hypothesis loop (MINOR over v2.2 P1b; gates_hash still frozen at v2.0).
+    assert CRUCIBLE_VERSION == "crucible-v2.3"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
