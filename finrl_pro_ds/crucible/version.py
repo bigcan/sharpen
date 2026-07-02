@@ -31,6 +31,16 @@ UNCHANGED C3 ``evolve`` mine + T0–T5 funnel; it changes NO verdict semantics a
 ``crucible-v2.0`` gates_hash is again IDENTICAL. The harness still caps at PROMISING and every
 DiscoveryCard is ``incubation_status=PENDING_P4`` (the CR-8 lockbox is P4).
 
+`crucible-v2.4` is the P3 **MINOR** bump: the continuous orchestrator (``crucible/orchestrator/`` —
+the nightly ``run_orchestrator_tick`` loop, the ``substrate_dirty`` eligibility gate (§10.1), the
+per-substrate LORD++ online-FDR budget (§6.1, CR-3), the per-tick ``TickBudget`` cost cap (CR-7), and
+the advisory GPUHub burst router). It ADDS a scheduling/accounting layer AROUND the UNCHANGED P2 mine
++ T0–T5 funnel — it never touches Stage 4 or a gate value (CR-1). It changes NO verdict semantics and
+NO gate byte, so the ``crucible-v2.0`` gates_hash is again IDENTICAL. The online-FDR wealth is a
+CROSS-run governance budget (it replaces the fatal global file-drawer N, Fable finding #1); it does
+not modify the within-run DSR/N_eff. Everything still caps at PROMISING; the CR-8 forward-incubation
+lockbox that makes a card human-gate-eligible is P4.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -42,8 +52,8 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v2.3 = P2 agentic hypothesis loop (Author + proposer seam + discovery cards); MINOR, gates_hash UNCHANGED.
-CRUCIBLE_VERSION = "crucible-v2.3"
+# v2.4 = P3 continuous orchestrator (substrate_dirty + online-FDR + cost budget + burst); MINOR, gates_hash UNCHANGED.
+CRUCIBLE_VERSION = "crucible-v2.4"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

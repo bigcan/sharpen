@@ -122,6 +122,15 @@ class TrialLedger:
         """Total distinct candidates in the ledger (the cross-run file-drawer N)."""
         return int(self._conn.execute("SELECT COUNT(*) FROM trial_ledger").fetchone()[0])
 
+    def update_fdr_charge(self, candidate_hash: str, fdr_wealth_charged: float) -> None:
+        """Stamp the per-substrate online-FDR wealth spent on a scored trial (spec §6.1, P3). The
+        candidate must already exist (the orchestrator records it during mining, then charges FDR);
+        a missing hash is a no-op UPDATE, which the caller treats as a programming error upstream."""
+        self._conn.execute(
+            "UPDATE trial_ledger SET fdr_wealth_charged = ? WHERE candidate_hash = ?",
+            (float(fdr_wealth_charged), candidate_hash))
+        self._conn.commit()
+
     # --- read (agent-visible; CR-1) ---------------------------------------------------------------
     def is_duplicate(self, candidate_hash: str) -> bool:
         """True if this exact candidate was already scored (dedup before spending compute)."""

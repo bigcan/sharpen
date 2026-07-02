@@ -104,16 +104,25 @@ def run_hypothesis_loop(
     catalog_asset_classes: tuple[str, ...] = (),
     data_snapshot_hash: str | None = None,
     token_cost: int | None = 0,
+    pre_proposed: list[PreRegisteredSpec] | None = None,
 ) -> HypothesisLoopResult:
     """Run one manual pass. ``evolve_kwargs`` is the runner block from ``load_generation_config``
-    (rng_seed/pop_size/… — WITHOUT ``candidate_type``, which the loop sets per group)."""
+    (rng_seed/pop_size/… — WITHOUT ``candidate_type``, which the loop sets per group).
+
+    ``pre_proposed`` lets a caller (the P3 orchestrator) hand in specs it already obtained from
+    ``author.propose`` — so the substrate_dirty check and the mine share ONE proposer call rather
+    than paying an LLM proposer's tokens twice (CR-7). When None (the P2 default) the loop proposes
+    itself; either way ``author.last_proposal_stats`` carries the drop tally from that single call."""
     ledger = author.ledger
     n_before = ledger.count()
 
     # --- Stage 2: HYPOTHESIZE (agent, CR-1) -------------------------------------------------------
-    terminals = available_terminals(panel)
-    context = author.build_context(terminals, asset_classes=catalog_asset_classes)
-    specs = author.propose(context, proposal_ts=proposal_ts)
+    if pre_proposed is None:
+        terminals = available_terminals(panel)
+        context = author.build_context(terminals, asset_classes=catalog_asset_classes)
+        specs = author.propose(context, proposal_ts=proposal_ts)
+    else:
+        specs = pre_proposed
     dropped = author.last_proposal_stats["dropped"]              # recorded by propose(), no re-call
     author.preregister(specs, run_id=run_id, crucible_version=crucible_version,
                        data_snapshot_hash=data_snapshot_hash)

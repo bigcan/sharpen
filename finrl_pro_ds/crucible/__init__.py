@@ -17,6 +17,19 @@ from .ledger import (
     TrialRecord,
 )
 from .manifest import RunManifest
+from .orchestrator import (
+    OnlineFDR,
+    OrchestratorStore,
+    OrchestratorTickResult,
+    PreparedSubstrate,
+    Substrate,
+    SubstrateTickOutcome,
+    TickBudget,
+    TickRecord,
+    route_burst,
+    run_orchestrator_tick,
+    substrate_dirty,
+)
 from .version import (
     CRUCIBLE_BASELINE_VERSION,
     CRUCIBLE_VERSION,
@@ -30,9 +43,20 @@ __all__ = [
     "CatalogEntry",
     "DataCatalog",
     "KILLED_VERDICTS",
+    "OnlineFDR",
+    "OrchestratorStore",
+    "OrchestratorTickResult",
     "PROMISING_VERDICTS",
+    "PreparedSubstrate",
     "RunManifest",
+    "Substrate",
+    "SubstrateTickOutcome",
+    "TickBudget",
+    "TickRecord",
     "TrialLedger",
     "TrialRecord",
     "gates_hash",
+    "route_burst",
+    "run_orchestrator_tick",
+    "substrate_dirty",
 ]
