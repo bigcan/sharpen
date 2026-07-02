@@ -58,10 +58,18 @@ class FredConnector:
         *,
         transport: Callable[[str], dict] | None = None,
         series: tuple[tuple[str, str, str], ...] | None = None,
+        release_lag_days: int = 1,
     ) -> None:
         self._api_key: str = api_key if api_key is not None else os.environ.get("FRED_API_KEY", "")
         self._transport = transport
         self._series = series or _DEFAULT_SERIES
+        # Publication lag: FRED's plain endpoint stamps realtime_start = *today* (useless as a
+        # release time), and the all-vintages endpoint (output_type=2) is a pivoted format capped
+        # at 2000 vintages — so we model the release as reference_period + lag, exactly like COT.
+        # Default 1d suits the non-revised daily/weekly series (Treasury rates, spreads, VIX). For
+        # heavily-revised monthly series (GDP, payrolls) pass a larger lag or use the `as_of`
+        # vintage path — reference+lag never leaks (over-lagging is safe), it can only be stale.
+        self._release_lag = np.timedelta64(release_lag_days, "D")
 
     # -- interface -----------------------------------------------------------------
     def discover(self) -> list[SeriesRef]:
@@ -75,8 +83,10 @@ class FredConnector:
             source_id=self.source_id,
             url=f"https://fred.stlouisfed.org/series/{ref.series_id}",
             license=_LICENSE,
-            as_of_policy="vintage-api",       # ALFRED vintages → no revision look-ahead (CR-4)
-            release_lag_days=0,               # per-observation release stamped from realtime_start
+            # Default stamping is release-lag; a true ALFRED vintage snapshot is available via
+            # fetch(..., as_of=<date>), which pins realtime_start/end to that date (CR-4).
+            as_of_policy="release-lag",
+            release_lag_days=int(self._release_lag / np.timedelta64(1, "D")),
             revision_policy="revised",
         )
 
@@ -89,7 +99,7 @@ class FredConnector:
         as_of: np.datetime64 | str | None = None,
     ) -> SeriesData:
         payload = self._request(ref, start, end, as_of=as_of)
-        return self._parse(ref, payload)
+        return self._parse(ref, payload, as_of=as_of)
 
     # -- internals -----------------------------------------------------------------
     def _request(self, ref: SeriesRef, start, end, *, as_of) -> dict:
@@ -100,15 +110,10 @@ class FredConnector:
             "observation_end": str(np.datetime64(end, "D")),
         }
         if as_of is not None:
-            # ALFRED vintage snapshot: the series exactly as it stood on `as_of`.
+            # ALFRED vintage snapshot: the series values exactly as they stood on `as_of`.
             aod = str(np.datetime64(as_of, "D"))
             params["realtime_start"] = aod
             params["realtime_end"] = aod
-        else:
-            # All vintages → full release history (each row carries its own realtime_start).
-            params["realtime_start"] = "1776-07-04"
-            params["realtime_end"] = "9999-12-31"
-            params["output_type"] = "2"
         transport = self._transport or self._live_transport()
         query = dict(params)
         query["api_key"] = self._api_key
@@ -122,9 +127,9 @@ class FredConnector:
                 "For offline/test use, inject a `transport` callable instead.")
         return _default_transport
 
-    @staticmethod
-    def _parse(ref: SeriesRef, payload: dict) -> SeriesData:
+    def _parse(self, ref: SeriesRef, payload: dict, *, as_of) -> SeriesData:
         obs = payload.get("observations", [])
+        cutoff = np.datetime64(as_of, "ns") if as_of is not None else None
         refs: list[np.datetime64] = []
         vals: list[float] = []
         rels: list[np.datetime64] = []
@@ -136,21 +141,18 @@ class FredConnector:
                 v = float(raw)
             except (TypeError, ValueError):
                 continue
-            refs.append(np.datetime64(o["date"], "ns"))
+            reference = np.datetime64(o["date"], "ns")
+            release = reference + self._release_lag        # publication lag (see __init__)
+            if cutoff is not None and release > cutoff:    # vintage: only what was public by as_of
+                continue
+            refs.append(reference)
             vals.append(v)
-            # realtime_start = the date this reading became the published value (ALFRED release ts).
-            rels.append(np.datetime64(o.get("realtime_start", o["date"]), "ns"))
+            rels.append(release)
         return SeriesData(
             ref=ref,
             reference_period=np.array(refs, dtype="datetime64[ns]"),
             value=np.array(vals, dtype=np.float64),
             release_timestamp=np.array(rels, dtype="datetime64[ns]"),
-            provenance=Provenance(
-                source_id=ref.source_id,
-                url=f"https://fred.stlouisfed.org/series/{ref.series_id}",
-                license=_LICENSE,
-                as_of_policy="vintage-api",
-                revision_policy="revised",
-            ),
+            provenance=self.provenance(ref),
             meta={"n_raw": len(obs)},
         )
