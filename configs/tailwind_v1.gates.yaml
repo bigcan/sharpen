@@ -42,22 +42,39 @@ gates:
   stress_leverage_max: 6.0
 
 # ============================================================================
-# MULTIPLICITY / DEFLATED-SHARPE — pre-capital overfitting haircut (the honest capital BLOCK)
+# MULTIPLICITY / DEFLATED-SHARPE — pre-capital overfitting BLOCK (correct-book, computed)
 # ============================================================================
-# Consumed by scripts/research/audit_two_sleeve_book.py (Tier-2 adversarial audit), NOT
-# validate_config or the paper soak. The momentum core's honest 0.601 is the best of a
-# multi-config search; DSR deflates the benchmark to the expected max Sharpe of n_trials draws.
-# TAILWIND adds the BAB sleeve to that search (a defensive/BAB selection among candidate
-# 3rd sleeves), so the honest trial count is >= the momentum+carry 21. The bracket carries the
-# defensive-search depth; the binding n_trials is confirmed by the tailwind Tier-2 audit.
-# Current status: the momentum core's live DSR(N=21) = 0.918 < 0.95 → capital BLOCKED. Adding a
-# non-return-premium hedge does NOT raise the return DSR; the review's sanctioned path to raise
-# it honestly is universe breadth expansion (item 2), NOT adding the hedge.
+# ENFORCED by scripts/research/audit_tailwind_book.py (the tailwind FORK of
+# audit_two_sleeve_book.py) — it computes the DSR on the CORRECT book (momentum + BAB, NOT
+# momentum + rates-carry) and emits verdict.decision = BLOCK_multiplicity when DSR < min_dsr
+# (structural block, not a human reading JSON — deep-audit N2 / P11-02). DSR deflates the
+# observed combined Sharpe to the expected max Sharpe of n_trials draws (the momentum grid ×
+# 3rd-sleeve selection). Not consumed by validate_config or the paper soak.
+#
+# CORRECT-BOOK RESULT (R1, 2026-07-01, docs/research/tailwind_v1_R1_dsr_pbo_2026-07-01.md):
+#   18-ETF momentum+BAB: honest DSR(N=24) = 0.896 < 0.95 (curated basis 0.974); PBO = 0.0009.
+#   The swing factor is ENTIRELY the momentum sleeve's honest Sharpe (curated 0.601 clears,
+#   Fable-honest 0.389 fails); BAB is a clean uncorrelated diversifier that cannot lift a
+#   return-DSR alone. PBO≈0 ⇒ the momentum selection is NOT overfit.
+# BREADTH NO-GO (2026-07-01, docs/research/tailwind_v1_breadth_expansion_2026-07-01.md):
+#   Fable review item 2 tested — the FROZEN signal on a 32-instrument liquid cross-asset
+#   universe gives momentum Sharpe 0.563 (< 18-ETF 0.601) and combined DSR(N=23) = 0.920 < 0.95.
+#   Breadth does NOT raise the honest Sharpe (confirms the 18-ETF was mildly favorably selected);
+#   the wider grid's trial dispersion offsets the extra diversification. Capital stays BLOCKED on
+#   BOTH universes; breadth is not the missing lever.
 overfitting:
-  dsr_n_trials: 24                         # 21 (momentum + rates-carry search) + 3 (BAB/defensive candidate search)
-  dsr_n_trials_bracket: [21, 24, 31]       # [momentum+carry, +BAB, conservative incl. combine]
+  dsr_n_trials: 24                         # 18 momentum-grid books + 3 (3rd-sleeve/combine selection); 18-ETF book
+  dsr_n_trials_bracket: [21, 24, 31]       # un-enumerated search depth (18 momentum-only .. conservative incl. combine)
   min_dsr: 0.95                            # P(true SR>0 | multiplicity, skew, kurt) must clear 95%
   block_bootstrap_block_days: 21           # ~1-month blocks preserve momentum autocorrelation
+  correct_book_dsr:                        # COMPUTED (audit_tailwind_book.py) — the binding block
+    book: "momentum + BAB (defensive)"     # NOT momentum + rates-carry (that book is not traded)
+    honest_dsr_n24: 0.896                   # Fable-honest momentum haircut (0.389) → BLOCK
+    curated_dsr_n24: 0.974                  # curated momentum (0.601) → clears; band-dependent
+    pbo_cscv: 0.0009                        # selection NOT overfit (max 0.50)
+    wide_32etf_dsr_n23: 0.920               # breadth test — still BLOCK
+    enforcing_script: scripts/research/audit_tailwind_book.py
+    decision: BLOCK_multiplicity           # capital BLOCKED at honest multiplicity
 
 # ============================================================================
 # PAPER-SOAK GATES — PRE-REGISTERED (commitment device; frozen while outcome unknown)
