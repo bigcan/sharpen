@@ -1,3 +1,10 @@
+# ⚠️ SUPERSEDED / NON-BINDING (deep-audit P8-01, 2026-07-01). This config grades the RETIRED
+# WF-fold seed-456 checkpoint, NOT the deployed L1-multiseed seed-123 that ships live. The BINDING
+# Stage-4 artifact is now configs/gmgp1_btc_velotrade_recent_oos_seed123.yaml (the eval default).
+# Kept only for provenance/the seed-456 WF record. slippage_base_bps added below so that, if this
+# config is ever run, it is not the frictionless +5437% artifact (P8-03); its verdict is still
+# non-binding for deployment (wrong seed).
+#
 # GMGP1-BTC Velotrade — Stage 4 Recent-OOS (solo seed 456, fold 3 checkpoint)
 #
 # Stage 4 per Protocol v2: unseen-window backtest against the Stage 3 WF
@@ -52,6 +59,7 @@ env:
   window_size: 30
   features_per_scale: 8
   taker_fee: 0.0005                   # steady-state 5 bps Bitfinex perp
+  slippage_base_bps: 5.0              # P8-03: one-way marketable-limit cross ~4.58 bps (was unset=0). Verdict still NON-BINDING (wrong seed).
   deadband_threshold: 0.15            # trial #48
   atr_cap_percentile: 90
   atr_cap_max_position: 0.5

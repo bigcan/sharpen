@@ -1,0 +1,147 @@
+# ============================================================================
+# TAILWIND-v1 CHALLENGE — decision + survival gates (configs/tailwind_v1_challenge.yaml)
+# ============================================================================
+# The CHALLENGE-mode gates. Structure mirrors configs/tailwind_v1.gates.yaml but the
+# binding pre-attempt gate is DIFFERENT: for a prop challenge the objective is P(pass)
+# (survival to the profit target), NOT the own-capital Deflated-Sharpe >= 0.95 bar.
+#
+# IMPORTANT DISTINCTION FROM OWN-CAPITAL:
+#   * Own-capital tailwind_v1.gates.yaml BLOCKS on DSR >= 0.95 (honest DSR 0.896 < 0.95).
+#     That is the OWN-CAPITAL bar — it certifies a standalone edge worth your own money.
+#   * For the CHALLENGE, DSR is INFORMATIONAL, not blocking. A real ~0.73-Sharpe,
+#     uncorrelated, PBO~=0 book that sits just under the own-capital DSR bar is still a
+#     fit-for-purpose prop vehicle (small-operator reframe). The binding pre-attempt gate
+#     is the simulator P(pass) + a Tier-2 audit + operator go-ahead.
+#   * Unlike own-capital, the CHALLENGE risk kills are NOT uncalibrated placeholders: the
+#     HARD CEILINGS are the ✅-verified firm limits (configs/prop_firm_rules.yaml). The
+#     internal operational buffers below them are prudent defaults pending a forward-path
+#     render (which sets how tight the internal kill can sit above the book's normal 15%-vol
+#     drawdown without needless self-termination).
+gates:
+  # RL allocator must beat the FROZEN linear core OOS by >= min_uplift, else ship linear.
+  # (Unchanged from own-capital; the shadow is the linear core either way.)
+  rl_beats_linear:
+    metric: "oos_net_sharpe"
+    min_uplift_vs_baseline: 0.10
+    else: "ship_linear_core"
+
+  combiner_beats_static:
+    metric: "oos_net_sharpe"
+    baseline: "static_inverse_vol"
+    min_uplift_vs_baseline: 0.10
+    else: "ship_static_rp"
+
+  # Guard against a frictionless artifact: net Sharpe must not collapse vs costless.
+  g_cost_gap:
+    max_frictionless_minus_net_sharpe: 0.15
+
+# ============================================================================
+# CHALLENGE PASS GATE — the binding pre-attempt gate (P(pass), NOT DSR)
+# ============================================================================
+# Sourced from the P(pass) Monte-Carlo simulator (results/tailwind_v1/challenge_sim.json,
+# docs/research/tailwind_v1_challenge_simulator_2026-07-02.md) at this file's 1.5x sizing.
+# A live attempt is authorised only if the min_p_pass floor is met AND a Tier-2 audit of
+# THIS book clears AND the operator signs off. All thresholds live here, never in code.
+# NOTE: named `challenge_pass_gate` (not `challenge`) to avoid colliding with the reserved
+# live-path `challenge:` block (phase/advance_rule/enabled) that validate_config validates at
+# the paper-DEPLOY stage — that sanctioned block is added at deploy, not at this paper-sim rung.
+challenge_pass_gate:
+  sizing:
+    vol_multiplier: 1.5              # matches configs/tailwind_v1_challenge.yaml env levers
+    effective_vol_ann: 0.15
+    bank_and_derisk: false           # simulator: do NOT bank at low vol
+
+  # Verified firm HARD limits (breach = instant challenge failure) — the ceilings the
+  # internal kills must sit below. Mirror of configs/prop_firm_rules.yaml (✅ 2026-07-02).
+  firm_hard_limits:
+    max_total_loss_pct: 10.0         # FTMO + Velotrade 2-step "Maximum Loss" — STATIC from initial
+    daily_loss_limit_pct: 5.0        # FTMO + Velotrade 2-step "Maximum Daily Loss"
+    dd_mode: static
+    profit_target_step1_pct: 10.0
+    profit_target_step2_pct: 5.0
+    min_trading_days: 5              # max(FTMO 4, Velotrade 5) — non-binding at E[days]~150-196
+    time_limit: none                 # ✅ no deadline (the load-bearing assumption)
+
+  # Simulator-derived P(pass) at 1.5x sizing (mom+BAB, no bank). Model outputs, not
+  # guarantees. min_p_pass is the go/no-go floor a real attempt must clear.
+  p_pass_expected:
+    ftmo_step1: 0.711
+    ftmo_step2: 0.870
+    velotrade_step1: 0.711           # == FTMO after the static-DD correction
+    velotrade_step2: 0.870
+    two_phase_per_attempt: 0.60
+  min_p_pass_step1: 0.65             # go/no-go floor for a real attempt (below the 1.0x 0.746 optimum)
+  daily_breach_budget: 0.10          # frontier daily-breach at 1.5x is 0.090; alarm if a render exceeds this
+
+# ============================================================================
+# SURVIVAL RISK KILLS — internal halts BELOW the firm hard limits
+# ============================================================================
+# HARD CEILINGS are the verified firm limits above. The internal kills fire FIRST so the
+# book de-risks before a firm breach ends the challenge. Buffers (2pp under max-loss, 1pp
+# under daily) are prudent defaults; confirm against a forward-path render that the book's
+# normal 15%-vol drawdown stays comfortably inside them (else widen, or lower vol to 1.0x).
+paper_soak:
+  status: pre_registered
+  consumed_by: [paper_executor, live_monitor]
+  baseline_ref: results/tailwind_v1/challenge_sim.json
+
+  min_soak_calendar_days: 90
+  min_rebalances_observed: 3
+  rebalance_cadence: monthly
+
+  parity:
+    max_daily_return_te_bps: 15
+    max_weight_l1_drift: 0.05
+    max_missed_rebalances: 0
+    max_cost_drift_ratio: 1.50
+    min_cost_drift_ratio: 0.50
+
+  # ALWAYS-ON risk kills — GROUNDED in the verified firm hard limits (not placeholders).
+  risk:
+    max_drawdown_kill_pct: 8.0        # internal kill 2pp UNDER the 10% static firm max-loss
+    daily_loss_halt_pct: 4.0          # internal halt 1pp UNDER the 5% firm daily limit
+    max_gross_exposure: 4.7           # env caps combined gross at 4.5 (this file); ~5% margin
+    calibrated_for_sleeves: [momentum, defensive]
+    derivation: >-
+      Ceilings = ✅-verified FTMO/Velotrade 2-step hard limits (max-loss 10% static,
+      daily 5%; configs/prop_firm_rules.yaml). Internal kills sit a prudent buffer below
+      so the book de-risks before a firm breach fails the challenge. The buffer WIDTH
+      (2pp / 1pp) should be confirmed against a real tailwind forward-path render at 15%
+      vol so an internal kill does not trip on the book's normal drawdown.
+
+  drift:
+    max_corr_to_spy: 0.40
+    corr_window_days: 252
+    max_single_class_pnl_share: 0.60
+    sleeve_attribution_required: true
+    max_corr_between_sleeves: 0.30
+
+# ============================================================================
+# OVERFITTING / DSR — INFORMATIONAL in challenge mode (NOT blocking)
+# ============================================================================
+# Recorded for provenance. In CHALLENGE mode a sub-0.95 DSR does NOT block: the prop
+# objective is P(pass), and the honest ~0.73-Sharpe / PBO~=0 book is a valid prop vehicle
+# even though it does not clear the own-capital 0.95 DSR bar (R1 + breadth NO-GO both closed
+# the cheap routes to raise it). See configs/tailwind_v1.gates.yaml for the BLOCKING
+# own-capital version enforced by scripts/research/audit_tailwind_book.py.
+overfitting_informational:
+  honest_dsr_n24: 0.896              # < 0.95: blocks OWN-CAPITAL, not the challenge
+  pbo_cscv: 0.0009                   # selection NOT overfit
+  note: "DSR is the own-capital gate; the challenge gate is challenge_pass_gate.min_p_pass_step1."
+
+provenance:
+  drafted_on: '2026-07-02'
+  drafted_by_session: S553-cont-98
+  strategy: tailwind-v1-challenge (TSMOM engine + BAB crash-hedge, 1.5x)
+  simulator_ref: docs/research/tailwind_v1_challenge_simulator_2026-07-02.md
+  rules_ref: configs/prop_firm_rules.yaml
+  rationale: >-
+    Wires the challenge-mode gates for the 1.5x prop vehicle. The binding pre-attempt gate
+    is the simulator P(pass) (not the own-capital DSR>=0.95). Risk kills are grounded in
+    the verified FTMO/Velotrade hard limits. Sizing = the simulator's 1.5x cell (P(pass)
+    ~0.71 step1, timeout tail ~0).
+  capital_gate: >-
+    BLOCKED. A live challenge attempt (fee + funded account = capital) requires a Tier-2
+    deep-lifecycle audit of THIS book (the 2026-07-01 audit noted no tailwind Stage-4 OOS
+    artifact, P8-10), a forward-path render confirming the 15% effective vol + these risk
+    kills, and operator go-ahead. This file wires the gates; it does not authorise an attempt.

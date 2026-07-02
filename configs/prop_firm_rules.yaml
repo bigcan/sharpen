@@ -4,13 +4,24 @@
 # Rule sets for the prop-firm P(pass) Monte-Carlo simulator
 # (finrl_pro_ds/prop/challenge_simulator.py + scripts/research/run_challenge_simulator.py).
 #
-# ⚠️ VERIFY BEFORE ANY REAL ATTEMPT. These are best-known standard rules; prop firms change
-# them (FTMO removed its time limit + minimum trading days; Velotrade's DD basis/aggregate cap
-# are not fully public — see reference_ftmo_velotrade_account_caps memory). Re-scrape each
-# firm's CURRENT published rules and update this file before sizing a live attempt. All fractions.
+# ✅ VERIFIED 2026-07-02 against each firm's CURRENT official rules pages (re-verify before any
+# real attempt — prop firms change rules). Sources:
+#   FTMO  : https://ftmo.com/en/trading-objectives/  (2-step = FTMO Challenge + Verification)
+#   Velo  : https://velotrade.com/challenges  +  https://velotrade.com/blog/prop-firm-rules-explained
+# Key confirmations (the load-bearing simulator assumptions):
+#   * BOTH firms have NO TIME LIMIT / no deadline on any phase (unlimited) — the no-deadline
+#     optimum (low vol, keep BAB, no banking) therefore stands.
+#   * FTMO 2-step Maximum Loss is STATIC (10% from initial); daily 5%; targets 10%/5%; min 4 days.
+#   * Velotrade drawdown is STATIC on ALL plans (CORRECTION: the prior config guessed "trailing").
+#     CLASSIC 2-step: target 10%/5%, daily 5%, max-loss 10% STATIC, min 5 days. Static DD makes
+#     Velotrade ~= FTMO (the earlier "Velotrade harsher, P(pass) 0.72" was a trailing-DD artifact).
+# Residual uncertainties: FTMO 1-step (10% tgt, 3% daily, 10% TRAILING) not modeled here — the
+# prop path targets the 2-step. Velotrade per-day min-profit: the official challenges page states
+# NO per-day profit rule (a secondary blog claimed 0.5%/day — official page overrides). Aggregate
+# capital caps: see reference_ftmo_velotrade_account_caps memory (FTMO $400K/strategy).
 #
-# dd_mode: "static"  = equity floor at initial·(1 − max_total_dd) (FTMO "max loss" from initial)
-#          "trailing" = floor at running-peak·(1 − max_total_dd)
+# dd_mode: "static"  = equity floor at initial·(1 − max_total_dd) (FTMO/Velotrade 2-step "max loss")
+#          "trailing" = floor at running-peak·(1 − max_total_dd)  (FTMO 1-step only; not used here)
 # max_days: null = no deadline (simulator runs to a cap); an integer = a fixed challenge window.
 
 simulation:
@@ -23,30 +34,42 @@ simulation:
 firms:
   ftmo_step1:
     name: "FTMO Challenge (step 1)"
-    profit_target: 0.10
-    max_total_dd: 0.10        # FTMO "Maximum Loss" (static floor from initial)
-    daily_loss_limit: 0.05    # FTMO "Maximum Daily Loss"
-    max_days: null            # FTMO removed the 30-day limit (verify)
-    min_trading_days: 0       # FTMO removed the 4-day minimum (verify)
+    profit_target: 0.10       # ✅ verified 10%
+    max_total_dd: 0.10        # ✅ FTMO "Maximum Loss" — STATIC floor from initial
+    daily_loss_limit: 0.05    # ✅ FTMO "Maximum Daily Loss" 5%
+    max_days: null            # ✅ verified — no time limit (unlimited)
+    min_trading_days: 4       # ✅ verified — 4 trading days required per phase (was 0)
     dd_mode: static
 
   ftmo_step2:
     name: "FTMO Verification (step 2)"
-    profit_target: 0.05       # verification target is half of step 1
-    max_total_dd: 0.10
-    daily_loss_limit: 0.05
-    max_days: null
-    min_trading_days: 0
+    profit_target: 0.05       # ✅ verified — verification target 5%
+    max_total_dd: 0.10        # ✅ STATIC
+    daily_loss_limit: 0.05    # ✅ 5%
+    max_days: null            # ✅ no time limit
+    min_trading_days: 4       # ✅ 4 trading days
     dd_mode: static
 
-  velotrade:                  # ⚠️ PLACEHOLDER — Velotrade rules not fully public (verify all fields)
-    name: "Velotrade Challenge (PLACEHOLDER rules)"
-    profit_target: 0.09
-    max_total_dd: 0.10        # commonly TRAILING on futures/CFD props — verify
-    daily_loss_limit: 0.05
-    max_days: null
-    min_trading_days: 0
-    dd_mode: trailing
+  # Velotrade CLASSIC 2-step (✅ verified 2026-07-02). CORRECTION vs prior config: drawdown is
+  # STATIC on all Velotrade plans (not trailing), and phase-1 target is 10% (not 9%). With static
+  # DD the CLASSIC 2-step rule set is IDENTICAL to FTMO's aside from the 5-day (vs 4) minimum.
+  velotrade_step1:
+    name: "Velotrade CLASSIC 2-step (phase 1)"
+    profit_target: 0.10       # ✅ verified 10%
+    max_total_dd: 0.10        # ✅ 10% STATIC (fixed from starting balance, never trails)
+    daily_loss_limit: 0.05    # ✅ 5%
+    max_days: null            # ✅ no time limit
+    min_trading_days: 5       # ✅ 5 trading days per phase
+    dd_mode: static
+
+  velotrade_step2:
+    name: "Velotrade CLASSIC 2-step (phase 2)"
+    profit_target: 0.05       # ✅ verified — phase-2 target 5%
+    max_total_dd: 0.10        # ✅ 10% STATIC
+    daily_loss_limit: 0.05    # ✅ 5%
+    max_days: null            # ✅ no time limit
+    min_trading_days: 5       # ✅ 5 trading days
+    dd_mode: static
 
 policy_grid:
   vol_multipliers: [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]   # leverage on the 10% base vol (→ 10%..40% ann)

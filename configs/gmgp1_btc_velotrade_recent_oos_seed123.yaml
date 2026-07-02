@@ -1,0 +1,121 @@
+# GMGP1-BTC Velotrade — Stage 4 Recent-OOS on the DEPLOYED policy (L1-multiseed seed 123)
+# ============================================================================
+# BINDING Stage-4 artifact. Grades the checkpoint that actually ships live
+# (configs/live_gmgp1_btc_bybit.yaml:45 → checkpoints/gmgp1-btc-l1-multiseed_20260407_070227/
+# checkpoint_final.pth, tag l1-seed123), NOT the retired WF-fold seed-456 that the prior
+# gmgp1_btc_velotrade_recent_oos.yaml graded (deep-audit P8-01, S1 — "the gate tests what does
+# not ship"). This config replaces that one as the eval default.
+#
+# Env / network / agent HPs are copied VERBATIM from the seed-123 training config
+# (configs/gmgp1_btc_l1_multiseed.yaml, via configs/gmgp1_btc_l1_backtest_q1_2026.yaml which was
+# "copied verbatim except data block") so the graded book is byte-faithful to the deployed model
+# — no hand-picked HPs. Two things added on top: the marketable-cross SLIPPAGE and the Stage-4
+# gate block.
+#
+# WHY THE WINDOW IS CLEAN OOS (P8-06 does not apply to seed-123):
+#   seed-123 trained through 2025-10-31 (val 2025-11-01..11-30, its own test 2025-12-01..12-31).
+#   The recent-OOS window 2026-01-01 → 2026-04-12 is strictly AFTER all of that — no train/val/
+#   test overlap, EMA-Z norm cutoff frozen at val_end 2025-11-30. (The audit's "test_start ≥
+#   2026-03-06" recommendation was specific to seed-456's fold-3 val overlap; seed-123 has no such
+#   overlap, so the full Jan–Apr 2026 window is honest OOS and maximises unseen sample.)
+#
+# COST MODEL (P8-03 fix, S1 — the prior config modelled ZERO slippage → a +5437% fee-only PASS):
+#   taker_fee 0.0005 (5 bps Bitfinex perp) + slippage_base_bps 5.0 (one-way marketable-limit cross
+#   ~4.58 bps, the project-standard BTC cost-correction, continuous_swing_env.py:58). This is the
+#   same honest cost the sg1-btc-deployed verdict applies (which correctly lands RETRAIN). A
+#   frictionless run is now only reachable via the explicit `cost_off_oracle` stress variant.
+#
+# Run:
+#   python scripts/gmgp1_btc_recent_oos_eval.py --mode recent_oos \
+#     --config configs/gmgp1_btc_velotrade_recent_oos_seed123.yaml --device cpu
+#   (checkpoint + seed default to the deployed seed-123 bundle in the eval script.)
+# ============================================================================
+
+data:
+  file_path: "data/bitfinex/btc_usdt_perp_2025_2026q1_1min.parquet"
+  ticker: "BTC"
+  handler_type: "multiscale"
+  train_start_date: "2025-01-06"
+  train_end_date: "2025-10-31"
+  val_start_date: "2025-11-01"
+  val_end_date: "2025-11-30"            # norm cutoff = end of seed-123 validation (EMA-Z frozen here)
+  test_start_date: "2026-01-01"         # strictly after seed-123 test_end (2025-12-31) → clean OOS
+  test_end_date: "2026-04-12"
+
+features:
+  scales: [15, 60, 240]
+  window_size: 30
+  features_per_scale: 8
+  asset_class: "crypto"
+
+env:
+  mdp_version: "v7"
+  initial_balance: 100000.0
+  window_size: 30
+  features_per_scale: 8
+  taker_fee: 0.0005                   # 5 bps Bitfinex perp (matches deployed cost context)
+  slippage_base_bps: 5.0              # P8-03 FIX: one-way marketable-limit cross ~4.58 bps (was unset=0)
+  deadband_threshold: 0.25            # seed-123 training value (NOT seed-456's 0.15)
+  atr_cap_percentile: 90
+  atr_cap_max_position: 0.5
+  episode_length: 0                   # full-window (_prep_backtest_config also forces this)
+  random_start: false
+  max_drawdown_pct: 0.10
+  scales: [15, 60, 240]
+  reward:
+    mode: "dsr"
+    dsr_eta: 0.0095288
+    dsr_scale: 1.0
+    hindsight_weight: 0.0           # BUG-03 (no future prices in backtest)
+  fee_schedule:
+    - {step: 0, taker_fee: 0.0005}  # flat 5bps for backtest
+
+network:
+  scale_encoder:
+    input_size: 8
+    channels: [32, 64, 64, 64]
+    kernel_size: 3
+    output_dim: 64
+  private_dim: 5
+  fusion_dim: 256
+  window_size: 30
+
+agents:
+  sac:
+    lr_actor: 0.00050182
+    lr_critic: 0.000027779
+    lr_alpha: 0.0000035704
+    gamma: 0.97127
+    tau: 0.0038951
+    batch_size: 512
+    buffer_size: 500000
+    initial_alpha: 0.49701
+    learning_starts: 5000
+    update_interval: 4
+    actor_update_freq: 2
+    gradient_clip: 3.0198
+    checkpoint_interval: 250000
+
+training:
+  total_timesteps: 0                  # inference-only
+  log_interval: 1000
+  use_amp: true
+  amp_dtype: "bfloat16"
+  torch_compile: false
+  num_envs: 1
+
+hpo:
+  enabled: false
+
+# Stage-4 gates (Protocol v2) — all thresholds live here, never hardcoded (project invariant).
+gates:
+  oos_pf_floor: 1.1
+  velotrade_trailing_dd_buffer_pp: 0.5
+  oos_min_trade_count: 200
+
+wandb:
+  project: "FinRL-Pro-DS"
+  tags: ["gmgp1-btc", "BTC", "SAC", "15min", "crypto", "velotrade",
+         "velotrade-wrapped", "prop-firm", "recent_oos", "stage4",
+         "l1-multiseed", "seed-123", "deployed-ckpt", "bitfinex-perp",
+         "cost-corrected", "upstream:gmgp1_btc_l1_multiseed"]

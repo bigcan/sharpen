@@ -1,0 +1,193 @@
+# ============================================================================
+# TAILWIND-v1 CHALLENGE mode — TSMOM engine + BAB crash-hedge, sized for a
+# prop-firm evaluation (FTMO / Velotrade 2-step). Sibling of configs/tailwind_v1.yaml.
+# ============================================================================
+# This is the CHALLENGE profile that the prop-firm P(pass) Monte-Carlo simulator
+# resolved (docs/research/tailwind_v1_challenge_simulator_2026-07-02.md,
+# results/tailwind_v1/challenge_sim.json). It is the SAME book as the own-capital
+# tailwind_v1.yaml — both sleeves retained — LEVERED 1.5× and re-purposed from the
+# Sharpe objective to the P(pass) objective.
+#
+# WHY THIS SHAPE (and why it INVERTS the original Fable review priors):
+#   * Objective = P(hit the profit target BEFORE breaching max-DD OR the daily-loss
+#     limit), NOT long-run Sharpe. Path-dependent, finite-horizon, asymmetric.
+#   * FTMO and Velotrade BOTH have NO TIME LIMIT (✅ verified 2026-07-02,
+#     configs/prop_firm_rules.yaml). With no deadline there is no time pressure, so
+#     SURVIVAL dominates and P(pass) is MONOTONE-DECREASING in vol. The optimum is the
+#     vol FLOOR, not a hot ceiling.
+#   * KEEP BAB. max-DD is the binding constraint; the within-class BAB hedge cuts DD,
+#     so it RAISES P(pass) at every vol (mom+BAB 0.746 vs mom-only 0.690, FTMO step1).
+#     Dropping it (the review's original prior) only helps under a fixed short deadline.
+#   * DON'T bank-and-derisk. Banking only helps when running hot; at low vol it just
+#     adds timeouts.
+#
+# VOL CHOICE — 1.5× (this file). The P(pass)-MAXIMISER is 1.0× (10% vol, P(pass) 0.746
+# FTMO step1) but E[days]≈196 (~10 months) with a ~10% slow-drift timeout tail. 1.5×
+# (≈15% book vol) is the SENSIBLE COMPROMISE the simulator flags: P(pass) 0.711 with the
+# timeout tail collapsing to ~0 (resolves fast), and it hedges against a hidden
+# inactivity / deadline rule. Frontier (FTMO step1, mom+BAB, no bank):
+#     vol×   eff.vol  P(pass)  daily-breach  DD-breach  timeout
+#     1.0    10%      0.746    0.034         0.120      0.099
+#     1.5    15%      0.711    0.090         0.191      0.008   <-- THIS FILE
+#     2.0    20%      0.633    0.165         0.201      0.000
+#     3.0+   30%+     <0.55    0.267+        ...        daily-limit BINDS (do NOT run hot)
+#   Two-phase funded probability at 1.5× ≈ 0.711 × ~0.85 ≈ 0.60 per attempt (both firms;
+#   Velotrade == FTMO after the static-DD correction). At 1.0× it is ≈0.65.
+#
+# HOW 1.5× IS REALISED (composition-preserving leverage, NOT a re-combination):
+#   Every per-asset / gross lever below is EXACTLY 1.5× the own-capital tailwind_v1.yaml
+#   value; risk_parity.target_portfolio_vol stays null. The convex inverse-vol combine
+#   (weights sum to 1) is scale-invariant, so scaling each asset's vol target 1.5×
+#   scales every sleeve return 1.5× and therefore the combined book 1.5× with its
+#   composition byte-unchanged — the faithful realisation of the simulator's "1.5× the
+#   normalised book". lev_cap and max_gross are scaled 1.5× too so the cap does not clip
+#   (and thus under-lever) the intended 1.5×.
+#
+# ⚠️ NOT A GREEN LIGHT TO ATTEMPT. This wires the vehicle; it does NOT authorise a live
+# challenge. A real attempt spends the challenge fee + trades a funded account = capital,
+# so it requires: (1) a Tier-2 deep-lifecycle audit of THIS book (the 2026-07-01 audit
+# noted tailwind has no Stage-4 OOS artifact, P8-10), (2) a forward-path render to confirm
+# the realised 15% effective vol + the risk kills in the .gates file, (3) operator
+# go-ahead. deploy_gating stays false.
+# ============================================================================
+
+strategy:
+  id: "tailwind-v1-challenge"
+  name: "tailwind_tsmom_bab_challenge"
+  version: "0.1.0"
+  instrument: "multi_asset_allocator"
+  mode: challenge                          # {own_capital (tailwind_v1.yaml), challenge (this file)}
+  tier: research
+  deploy_gating: false                     # NOT deploy-gating; an attempt requires Tier-2 + operator go-ahead
+
+# ---------- UNIVERSE (identical to own-capital tailwind_v1.yaml; 5 equity / 3 rates /
+# 5 commodity / 5 fx). Both sleeves trade this union. ----------
+universe:
+  assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",       # equity
+           "TLT", "IEF", "LQD",                      # rates
+           "GLD", "SLV", "DBC", "USO", "DBA",        # commodity
+           "UUP", "FXE", "FXY", "FXB", "FXA"]        # fx
+  asset_class:
+    SPY: equity
+    QQQ: equity
+    IWM: equity
+    EFA: equity
+    EEM: equity
+    TLT: rates
+    IEF: rates
+    LQD: rates
+    GLD: commodity
+    SLV: commodity
+    DBC: commodity
+    USO: commodity
+    DBA: commodity
+    UUP: fx
+    FXE: fx
+    FXY: fx
+    FXB: fx
+    FXA: fx
+  n_assets: 18
+
+# ---------- SLEEVES (identical to own-capital; BAB RETAINED per the simulator) --------
+sleeves:
+  momentum:                                          # the return ENGINE (validated TSMOM core)
+    assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",
+             "TLT", "IEF", "LQD",
+             "GLD", "SLV", "DBC", "USO", "DBA",
+             "UUP", "FXE", "FXY", "FXB", "FXA"]
+    signal: tsmom
+  defensive:                                         # the crash HEDGE (within-class BAB) — KEPT
+    assets: ["SPY", "QQQ", "IWM", "EFA", "EEM",
+             "TLT", "IEF", "LQD",
+             "GLD", "SLV", "DBC", "USO", "DBA",
+             "UUP", "FXE", "FXY", "FXB", "FXA"]
+    signal: defensive
+    beta_window: 252                                 # standard BAB trailing-beta horizon (LOCKED)
+    min_periods: 126                                 # ~6m warmup floor before a beta is formed
+
+# ---------- RISK-PARITY META-LAYER (IDENTICAL to own-capital — convex inverse-vol,
+# target_portfolio_vol null. Kept null on purpose: the 1.5× lever is applied at the
+# per-asset vol target below so the combine's composition is byte-unchanged.) ---------
+risk_parity:
+  trailing_window: 252
+  min_periods: 63
+  monthly_meta: true
+  target_portfolio_vol: null                         # null = convex inverse-vol (leverage is applied per-asset)
+
+# ---------- SLEEVE COMBINER (STATIC inverse-vol, identical to own-capital) ----------
+sleeve_combiner:
+  mode: inverse_vol        # {inverse_vol (default), dynamic}
+  tilt_strength: 0.0       # 0.0 ⇒ exact inverse-vol
+  perf_window: 126
+  perf_min_periods: 63
+  perf_metric: sharpe
+  tilt_clip: 1.5
+
+# ---------- DATA (identical) ----------
+data:
+  source: "yfinance_etf"
+  frequency: "1d"
+  start_date: "2006-01-01"
+  end_date: null
+  fields: ["open", "high", "low", "close", "volume"]
+  cache_dir: "results/tailwind_v1"
+
+# ---------- FEATURES (identical; LOCKED to the validated momentum core) ----
+features:
+  lookbacks: [63, 126, 252]
+  skip: 5
+  vol_window: 63
+  include_baseline_weight: true
+
+# ---------- ENV — the ONLY difference vs own-capital: the three vol levers scaled 1.5×.
+# target_vol_asset 0.10->0.15, lev_cap 2.0->3.0, max_gross_exposure 3.0->4.5. Everything
+# else (fees, slippage, reward, penalties) is byte-identical to tailwind_v1.yaml so the
+# book composition + cost model are unchanged — this is pure leverage. ----------
+env:
+  type: "multi_asset_allocator"
+  initial_capital: 100000.0
+  taker_fee: 0.0002                      # 2 bps (unchanged)
+  slippage_base_bps: 1.0                 # (unchanged)
+  slippage_impact_bps: 5.0               # (unchanged)
+  target_vol_asset: 0.15                 # 1.5x the own-capital 0.10 (the challenge leverage)
+  lev_cap: 3.0                           # 1.5x the own-capital 2.0 (so the 1.5x is not clipped)
+  max_gross_exposure: 4.5                # 1.5x the own-capital 3.0 (per-sleeve AND combined-book cap)
+  allow_short: true
+  reward_type: "dsr"                     # reward shaping unchanged; the CHALLENGE objective is P(pass), enforced in .gates
+  dsr_eta: 0.01
+  turnover_penalty: 0.001
+  min_trade_pct: 0.005
+  circuit_breaker_threshold: 0.1
+  random_start: false
+
+# ---------- EXECUTION (rung-1 paper-sim; identical to own-capital) ------------------------------
+execution:
+  shadow: linear_core_tailwind           # momentum + defensive fund-of-funds (NOT rl)
+  rung: paper_sim                        # {paper_sim, paper_ib}
+  venue: none                            # rung-1; "ib" for rung-2
+  rebalance_cadence: monthly             # MUST match gates.paper_soak.rebalance_cadence
+  fill_reference: close
+
+# ---------- GATES (challenge-specific: P(pass) + firm-limit survival, NOT the own-capital
+# DSR>=0.95 bar). ----------
+ensemble:
+  gates_file: configs/tailwind_v1_challenge.gates.yaml
+
+# ---------- PROP-FIRM BINDING (the challenge is graded against these verified rule sets) ----
+prop_firm:
+  rules_file: configs/prop_firm_rules.yaml     # ✅ verified 2026-07-02 (FTMO + Velotrade 2-step, static DD, no deadline)
+  simulator_report: docs/research/tailwind_v1_challenge_simulator_2026-07-02.md
+  vol_multiplier: 1.5                          # this file's sizing = the simulator's 1.5x cell
+  bank_and_derisk: false                       # simulator: do NOT bank at low vol
+  expected_p_pass:                             # model outputs (results/tailwind_v1/challenge_sim.json), NOT guarantees
+    ftmo_step1: 0.711
+    ftmo_step2: 0.870
+    velotrade_step1: 0.711                     # == FTMO after the static-DD correction
+    velotrade_step2: 0.870
+    two_phase_per_attempt: 0.60                # ~0.65 at 1.0x vol; 1.5x trades a little P(pass) for speed
+
+wandb:
+  project: "FinRL-Pro-DS"
+  consolidate: true
+  tags: ["tailwind", "tsmom", "bab", "defensive", "two-sleeve", "allocator",
+         "challenge", "prop-firm", "paper", "s553"]
