@@ -13,6 +13,19 @@ from dataclasses import asdict, dataclass
 
 _FAMILIES = frozenset({"technical", "101alpha", "altdata", "lob"})
 _NEUTRALIZATION_STEPS = frozenset({"winsor", "zscore", "sector", "size", "beta"})
+# CR-9 governance discriminator (Crucible P1a). "cross_sectional" is the OHLCV rank-L/S
+# alpha; "overlay" is a timing/conditioning signal on the existing book, scored via
+# combination_fitness as a marginal contribution (spec §4.5). This field is DELIBERATELY
+# EXCLUDED from content_hash() so it never re-hashes the 101 library specs or DslSignal
+# genomes (would break the ledger candidate_hash dedup key + the P0 reproducibility gate).
+_CANDIDATE_TYPES = frozenset({"cross_sectional", "overlay"})
+# Fields that participate in the content hash — the ORIGINAL 9 spec fields, in an explicit
+# allow-list. INVARIANT (Crucible P1a): never add candidate_type here, nor change its default;
+# doing so shifts every pre-P1a spec's hash and breaks reproducibility. See spec §5 / §4.5.
+_HASH_FIELDS = (
+    "name", "hypothesis", "family", "expected_sign", "horizons",
+    "neutralization", "universe", "cost_profile", "sample_window",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -37,6 +50,10 @@ class SignalSpec:
         Universe id and cost-profile key (resolved against the gates config).
     sample_window : tuple[str | None, str | None]
         Optional (start, end) ISO date bounds; None = full available history.
+    candidate_type : str
+        CR-9 governance discriminator, one of {"cross_sectional", "overlay"}. The Hypothesis
+        Author sets it per substrate. Placed LAST (positional construction unaffected) and
+        EXCLUDED from content_hash() so it does not re-hash any pre-P1a spec (spec §4.5/§5).
     """
 
     name: str
@@ -48,6 +65,7 @@ class SignalSpec:
     universe: str = "sp500_pit"
     cost_profile: str = "equity_standard"
     sample_window: tuple[str | None, str | None] = (None, None)
+    candidate_type: str = "cross_sectional"
 
     def __post_init__(self) -> None:
         if self.expected_sign not in (-1, 0, 1):
@@ -60,8 +78,18 @@ class SignalSpec:
         if bad:
             raise ValueError(f"unknown neutralization steps {sorted(bad)}; "
                              f"allowed {sorted(_NEUTRALIZATION_STEPS)}")
+        if self.candidate_type not in _CANDIDATE_TYPES:
+            raise ValueError(f"candidate_type must be one of {sorted(_CANDIDATE_TYPES)}; "
+                             f"got {self.candidate_type!r}")
 
     def content_hash(self) -> str:
-        """Deterministic 12-hex SHA-256 of all spec fields (stable across runs)."""
-        payload = json.dumps(asdict(self), sort_keys=True, default=str)
+        """Deterministic 12-hex SHA-256 of the ORIGINAL 9 spec fields (stable across runs).
+
+        ``candidate_type`` is EXCLUDED via the explicit ``_HASH_FIELDS`` allow-list so a spec
+        typed ``overlay`` hashes identically to the same spec typed ``cross_sectional`` — this
+        keeps every pre-P1a library spec + DslSignal genome hash byte-identical (the ledger
+        candidate_hash dedup key and the P0 reproducibility gate depend on it; spec §4.5/§5).
+        """
+        d = asdict(self)
+        payload = json.dumps({k: d[k] for k in _HASH_FIELDS}, sort_keys=True, default=str)
         return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]

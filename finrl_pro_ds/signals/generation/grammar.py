@@ -18,8 +18,12 @@ type system is deliberately minimal (SERIES / BOOL / NUM) to avoid rejecting val
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from typing import TYPE_CHECKING
 
 from ..library._alpha_dsl import _lex
+
+if TYPE_CHECKING:
+    from ..features import Panel
 
 # --- kinds -----------------------------------------------------------------------
 SERIES = "SERIES"      # a (T,N) numeric series (prices, returns, ranks, arithmetic …)
@@ -61,6 +65,15 @@ _ARITH_SYM = {"add": "+", "sub": "-", "mul": "*", "div": "/"}
 INPUTS = ("open", "high", "low", "close", "volume", "returns", "vwap",
           "adv20", "adv30", "adv60")
 WINDOWS = (2, 3, 5, 10, 20, 30, 60, 120)
+
+
+def available_terminals(panel: "Panel") -> tuple[str, ...]:
+    """CR-9 terminal registry: the OHLCV base terminals PLUS every registered feature slot on
+    ``panel`` (e.g. ``fred:T10Y2Y``, ``macro:regime``). Threaded into ``grow``/``mutate``/
+    ``crossover`` as ``inputs=`` so the generator can address non-OHLCV series as value leaves
+    without mutating the module-level ``INPUTS`` (which keeps the default cross-sectional search
+    byte-identical). Returns ``INPUTS`` unchanged when the panel carries no feature slots."""
+    return INPUTS + tuple(panel.feature_slots.keys())
 EXPONENTS = (0.5, 1.0, 2.0)
 # value-producing ops the grower may pick for a "V" slot (no bool/struct-only here)
 _VALUE_OPS = ("rank", "scale", "abs", "log", "sign", "indneutralize", "delay", "delta",
@@ -252,43 +265,48 @@ def _slots(op: str) -> tuple[str, ...]:
 
 # --- grow / mutate / crossover ----------------------------------------------------
 
-def _leaf_for(slot: str, rng) -> AstNode:
+def _leaf_for(slot: str, rng, inputs: tuple[str, ...] = INPUTS) -> AstNode:
     if slot == "W":
         return AstNode("const", NUM, payload=float(rng.choice(WINDOWS)))
     if slot == "C":
         return AstNode("const", NUM, payload=float(rng.choice(EXPONENTS)))
     if slot == "IND":
         return AstNode("indclass", "IND", payload="IndClass.sector")
-    return AstNode("input", SERIES, payload=str(rng.choice(INPUTS)))   # value leaf
+    return AstNode("input", SERIES, payload=str(rng.choice(inputs)))   # value leaf
 
 
-def grow(rng, *, max_depth: int = 4, kind: str = SERIES) -> AstNode:
-    """Grow a random type-correct subtree of the requested return ``kind`` (depth-bounded)."""
+def grow(rng, *, max_depth: int = 4, kind: str = SERIES,
+         inputs: tuple[str, ...] = INPUTS) -> AstNode:
+    """Grow a random type-correct subtree of the requested return ``kind`` (depth-bounded).
+
+    ``inputs`` is the value-leaf terminal set (CR-9): the default is literally ``INPUTS`` so the
+    OHLCV-only cross-sectional search draws the same random sequence as before; an overlay search
+    threads ``available_terminals(panel)`` to admit feature-slot terminals."""
     if kind == NUM:
         return _leaf_for("C", rng)
     if kind == BOOL:
         # a comparison of two value subtrees (or, rarely, a logical of two comparisons)
         if max_depth > 2 and rng.random() < 0.3:
             op = str(rng.choice(("or", "and")))
-            return AstNode(op, BOOL, (grow(rng, max_depth=max_depth - 1, kind=BOOL),
-                                      grow(rng, max_depth=max_depth - 1, kind=BOOL)))
+            return AstNode(op, BOOL, (grow(rng, max_depth=max_depth - 1, kind=BOOL, inputs=inputs),
+                                      grow(rng, max_depth=max_depth - 1, kind=BOOL, inputs=inputs)))
         op = str(rng.choice(("lt", "gt", "le", "ge")))
-        return AstNode(op, BOOL, (grow(rng, max_depth=max_depth - 1, kind=SERIES),
-                                  grow(rng, max_depth=max_depth - 1, kind=SERIES)))
+        return AstNode(op, BOOL, (grow(rng, max_depth=max_depth - 1, kind=SERIES, inputs=inputs),
+                                  grow(rng, max_depth=max_depth - 1, kind=SERIES, inputs=inputs)))
     # SERIES: terminate at a leaf when shallow, else expand a value op
     if max_depth <= 1 or rng.random() < 0.35:
-        return _leaf_for("V", rng)
+        return _leaf_for("V", rng, inputs)
     op = str(rng.choice(_VALUE_OPS))
-    kids = tuple(_grow_slot(s, rng, max_depth - 1) for s in _slots(op))
+    kids = tuple(_grow_slot(s, rng, max_depth - 1, inputs) for s in _slots(op))
     return AstNode(op, _SIG[op][1], kids)
 
 
-def _grow_slot(slot: str, rng, max_depth: int) -> AstNode:
+def _grow_slot(slot: str, rng, max_depth: int, inputs: tuple[str, ...] = INPUTS) -> AstNode:
     if slot in ("W", "C", "IND"):
-        return _leaf_for(slot, rng)
+        return _leaf_for(slot, rng, inputs)
     if slot == "B":
-        return grow(rng, max_depth=max_depth, kind=BOOL)
-    return grow(rng, max_depth=max_depth, kind=SERIES)   # "V"
+        return grow(rng, max_depth=max_depth, kind=BOOL, inputs=inputs)
+    return grow(rng, max_depth=max_depth, kind=SERIES, inputs=inputs)   # "V"
 
 
 def _all_paths(node: AstNode, prefix=()):
@@ -313,13 +331,17 @@ def _slot_kind_of_child(parent: AstNode, idx: int) -> str:
     return slots[idx] if idx < len(slots) else "V"
 
 
-def mutate(node: AstNode, rng, *, max_nodes: int = 24, max_depth: int = 7) -> AstNode:
+def mutate(node: AstNode, rng, *, max_nodes: int = 24, max_depth: int = 7,
+           inputs: tuple[str, ...] = INPUTS) -> AstNode:
     """Return a type-correct mutation of ``node``. Picks a random subtree and either jitters a
     literal in place or regrows it with a same-kind subtree, never violating a W/C/IND slot or
-    the node/depth bounds (falls back to the original if a bound would be exceeded)."""
+    the node/depth bounds (falls back to the original if a bound would be exceeded).
+
+    ``inputs`` (CR-9) is the value-leaf terminal set; default ``INPUTS`` keeps the OHLCV search
+    byte-identical (same random draw), an overlay search passes ``available_terminals(panel)``."""
     paths = [(p, n) for p, n in _all_paths(node) if p]          # exclude the root path ()
     if not paths:
-        return _regrow_root(node, rng, max_depth)
+        return _regrow_root(node, rng, max_depth, inputs)
     path, sub = paths[rng.integers(len(paths))]
     parent_path, idx = path[:-1], path[-1]
     parent = node
@@ -328,31 +350,32 @@ def mutate(node: AstNode, rng, *, max_nodes: int = 24, max_depth: int = 7) -> As
     slot = _slot_kind_of_child(parent, idx)
 
     if slot in ("W", "C"):                                      # jitter the literal only
-        new = _leaf_for(slot, rng)
+        new = _leaf_for(slot, rng, inputs)
     elif slot == "IND":
         return node                                            # only one IndClass value
     elif sub.op == "input":                                    # swap a value leaf
-        new = AstNode("input", SERIES, payload=str(rng.choice(INPUTS)))
+        new = AstNode("input", SERIES, payload=str(rng.choice(inputs)))
     else:                                                       # regrow a same-kind subtree
         budget = max(2, max_depth - len(path))
-        new = grow(rng, max_depth=budget, kind=(BOOL if slot == "B" else sub.kind))
+        new = grow(rng, max_depth=budget, kind=(BOOL if slot == "B" else sub.kind), inputs=inputs)
     cand = _replace_at(node, path, new)
     if node_count(cand) > max_nodes or depth(cand) > max_depth:
         return node
     return cand
 
 
-def _regrow_root(node: AstNode, rng, max_depth: int) -> AstNode:
-    return grow(rng, max_depth=min(max_depth, 4), kind=SERIES)
+def _regrow_root(node: AstNode, rng, max_depth: int,
+                 inputs: tuple[str, ...] = INPUTS) -> AstNode:
+    return grow(rng, max_depth=min(max_depth, 4), kind=SERIES, inputs=inputs)
 
 
 def crossover(a: AstNode, b: AstNode, rng, *, max_nodes: int = 24,
-              max_depth: int = 7) -> AstNode:
+              max_depth: int = 7, inputs: tuple[str, ...] = INPUTS) -> AstNode:
     """Splice a same-kind subtree of ``b`` into ``a`` (type-safe), respecting bounds. Falls
     back to :func:`mutate` on ``a`` if no compatible pair fits within the bounds."""
     a_paths = [(p, n) for p, n in _all_paths(a) if p]
     if not a_paths:
-        return mutate(a, rng, max_nodes=max_nodes, max_depth=max_depth)
+        return mutate(a, rng, max_nodes=max_nodes, max_depth=max_depth, inputs=inputs)
     rng.shuffle(a_paths)
     b_nodes = [n for _, n in _all_paths(b)]
     for path, sub in a_paths:
@@ -374,4 +397,4 @@ def crossover(a: AstNode, b: AstNode, rng, *, max_nodes: int = 24,
         cand = _replace_at(a, path, donor)
         if node_count(cand) <= max_nodes and depth(cand) <= max_depth:
             return cand
-    return mutate(a, rng, max_nodes=max_nodes, max_depth=max_depth)
+    return mutate(a, rng, max_nodes=max_nodes, max_depth=max_depth, inputs=inputs)

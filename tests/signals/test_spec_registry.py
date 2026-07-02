@@ -14,6 +14,24 @@ def test_content_hash_deterministic_and_sensitive() -> None:
     assert a.content_hash() == b.content_hash()
     assert a.content_hash() != c.content_hash()
     assert len(a.content_hash()) == 12
+    # GOLDEN PIN (crucible P0/P1a reproducibility moat): a frozen literal so a future change to
+    # the hash payload / _HASH_FIELDS fails HERE — the run-to-run manifest gate can't catch a
+    # cross-version content_hash drift (both runs use the drifted code).
+    assert a.content_hash() == "47f98a86e056"
+
+
+def test_candidate_type_excluded_from_hash() -> None:
+    """Crucible P1a reproducibility invariant: candidate_type must NOT enter content_hash, or
+    it re-hashes every pre-P1a library spec + DslSignal genome and breaks the ledger dedup key
+    and the P0 byte-identical manifest gate."""
+    base = SignalSpec(name="x", hypothesis="h", family="technical", expected_sign=1)
+    overlay = SignalSpec(name="x", hypothesis="h", family="technical", expected_sign=1,
+                         candidate_type="overlay")
+    assert base.candidate_type == "cross_sectional"          # default is the OHLCV path
+    assert base.content_hash() == overlay.content_hash()     # field does NOT shift the hash
+    with pytest.raises(ValueError):
+        SignalSpec(name="x", hypothesis="h", family="technical", expected_sign=1,
+                   candidate_type="bogus")
 
 
 def test_spec_validation() -> None:

@@ -14,7 +14,8 @@ GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
-    assert CRUCIBLE_VERSION == "crucible-v2.0"
+    # v2.1 = P1a CR-9 overlay path (MINOR bump over the v2.0 gate-repair-freeze; gates_hash frozen).
+    assert CRUCIBLE_VERSION == "crucible-v2.1"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

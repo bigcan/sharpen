@@ -15,6 +15,7 @@ read of any survivor requires a Tier-2 deep lifecycle audit.
 from __future__ import annotations
 
 import logging
+import warnings
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -22,8 +23,8 @@ import numpy as np
 from ..eval_harness import _ls_weights
 from ..features import Panel
 from .dsl_signal import eval_on_panel
-from .fitness import FitnessConfig, FitnessResult, combination_fitness
-from .grammar import crossover, mutate, node_count, parse, to_formula
+from .fitness import FitnessConfig, FitnessResult, _combined_book, combination_fitness
+from .grammar import available_terminals, crossover, mutate, node_count, parse, to_formula
 
 log = logging.getLogger("alpha_evolve")
 _INFEASIBLE = float("-inf")
@@ -73,16 +74,80 @@ def _candidate_returns(formula: str, panel: Panel, *, hold_horizon: int, cost_bp
     return rets, turnover_ann
 
 
+_OVERLAY_MIN_OBS = 20            # expanding-window warmup before the overlay tilt is trusted (neutral before)
+
+
+def _overlay_returns(formula: str, panel: Panel, base_book: np.ndarray, *,
+                     cost_bps: float) -> tuple[np.ndarray, float] | None:
+    """CR-9 OVERLAY candidate returns: use ``formula`` (a timing signal, typically referencing a
+    non-OHLCV feature slot) as a TIME-varying multiplier on the existing combined ``base_book``.
+
+    A cross-sectional rank-L/S book on a broadcast (constant-across-N) series is identically zero
+    (``_ls_weights`` centered-rank of a constant row sums to zero). The overlay instead:
+
+      1. ``scores = eval_on_panel(formula, panel)`` → (T,N);
+      2. collapse the cross-section to a per-day timing scalar ``g[t] = nanmean_n(scores[t])``
+         (for a broadcast series this is just the series value); all-NaN → None (cull);
+      3. standardize ``g`` with a CAUSAL expanding-window z-score — at bar ``t`` the mean/std use
+         ONLY ``g[:t+1]`` (LEAK-1 safe: no train/holdout-boundary leak; passes the Tier-0
+         truncation-equivalence tripwire that a whole-sample z-score fails). Neutral (``m=0``)
+         until ``_OVERLAY_MIN_OBS`` finite observations have accrued;
+      4. bounded tilt ``m[t] = tanh(z_g[t]) ∈ [-1,1]``;
+      5. overlay marginal return ``cand[t] = m[t-1] * base_book[t]`` — LAGGED one bar (strict
+         causality, LEAK-2), NET of turnover cost ``cost_bps * |Δm|``.
+
+    Returns ``(cand, turnover_ann)`` or None if the timing series is degenerate (all-NaN/constant).
+    """
+    scores = eval_on_panel(formula, panel)
+    if not np.isfinite(scores).any():
+        return None
+    with warnings.catch_warnings():                          # all-NaN row → NaN g[t] (handled below)
+        warnings.simplefilter("ignore", RuntimeWarning)
+        g = np.nanmean(scores, axis=1)                       # (T,) per-day timing scalar
+    finite = np.isfinite(g)
+    if not finite.any():
+        return None
+    gf = g[finite]
+    if not np.isfinite(gf.std()) or gf.std() <= 0.0:         # globally constant → cull (no signal)
+        return None
+    # Causal expanding-window z-score: bar t uses ONLY g[:t+1]. cumsum over the identical prefix is
+    # bit-reproducible, so compute(truncated(t))[t] == compute(panel)[t] (Tier-0 tripwire holds) and
+    # the holdout tilt is never standardized with holdout-inclusive stats (LEAK-1).
+    g0 = np.where(finite, g, 0.0)
+    cnt = np.cumsum(finite.astype(np.float64))               # finite-obs count through t
+    safe_cnt = np.maximum(cnt, 1.0)
+    cmean = np.cumsum(g0) / safe_cnt
+    cvar = np.maximum(np.cumsum(g0 * g0) / safe_cnt - cmean * cmean, 0.0)
+    cstd = np.sqrt(cvar)
+    ready = finite & (cnt >= _OVERLAY_MIN_OBS) & (cstd > 0.0)   # neutral until warmed up
+    z = np.where(ready, (g - cmean) / np.where(cstd > 0.0, cstd, 1.0), 0.0)
+    m = np.tanh(z)                                           # bounded tilt in [-1, 1]
+    bb = np.asarray(base_book, dtype=np.float64)
+    T = bb.shape[0]
+    m_lag = np.empty(T, dtype=np.float64)                    # m[t-1], strictly causal
+    m_lag[0] = 0.0
+    m_lag[1:] = m[:T - 1]
+    dm = np.abs(np.diff(m_lag, prepend=0.0))                 # per-bar turnover of the tilt
+    cand = m_lag * bb - cost_bps * dm                        # net of turnover cost
+    turnover_ann = float(np.nanmean(dm) * 252.0)             # per-bar tilt turnover → annualized (daily)
+    if not np.isfinite(cand).any():
+        return None
+    return cand, turnover_ann
+
+
 def _split(panel: Panel, holdout_frac: float, embargo: int) -> tuple[Panel, Panel]:
     """(train, holdout) split by row; the train end is embargoed away from the holdout start."""
     cut = int(panel.T * (1.0 - holdout_frac))
     train = panel.truncated(max(1, cut - embargo) - 1)
-    # holdout keeps rows [cut, T): rebuild a Panel slice (truncated only trims the tail)
+    # holdout keeps rows [cut, T): rebuild a Panel slice (truncated only trims the tail).
+    # feature_slots MUST be sliced on axis 0 too (CR-9) or an overlay terminal would NaN-out /
+    # misalign on the holdout panel; _sliced_slots handles both (T,) and (T,N) shapes.
     from dataclasses import replace
     s = slice(cut, panel.T)
     hold = replace(panel, dates=panel.dates[s], open=panel.open[s], high=panel.high[s],
                    low=panel.low[s], close=panel.close[s], volume=panel.volume[s],
-                   active=panel.active[s], adv_usd=panel.adv_usd[s])
+                   active=panel.active[s], adv_usd=panel.adv_usd[s],
+                   feature_slots=panel._sliced_slots(s))
     return train, hold
 
 
@@ -104,9 +169,17 @@ def evolve(
     elite_frac: float = 0.3,
     pbo_max_strategies: int = 128,
     pbo_n_splits: int = 10,
+    candidate_type: str = "cross_sectional",
 ) -> GenerationReport:
     """Evolve DSL alphas on the TRAIN split; re-validate PROMISING survivors on the held-out
     tail. ``base_returns``/``timestamps`` align to the train split's rows.
+
+    ``candidate_type`` (CR-9): ``"cross_sectional"`` (default) is the OHLCV rank-L/S alpha path —
+    byte-identical to pre-P1a. ``"overlay"`` scores each genome as a TIMING signal on the existing
+    combined base book (``_overlay_returns``): a non-OHLCV broadcast series that a rank() path would
+    zero out becomes a non-constant-in-time exposure multiplier, so its marginal ΔSR through
+    ``combination_fitness`` is well-posed. Both types are scored by the SAME marginal-contribution
+    fitness (no gate change → frozen crucible-v2.0 gates_hash untouched).
 
     Anti-mirage controls: the deflation N (``gen_n_eff``) is the file-drawer count of every genome
     ever scored; the DSR dispersion is the cross-search **population pool** of augmented-book
@@ -114,11 +187,28 @@ def evolve(
     computed over the first ``pbo_max_strategies`` candidates' return series (memory-bounded sample)
     and reported — P(the in-sample-best candidate underperforms OOS), the best-of-N overfit metric
     the deflated Sharpe does not estimate. ``pbo_max_strategies=0`` disables it."""
+    if candidate_type not in ("cross_sectional", "overlay"):
+        raise ValueError(f"candidate_type must be 'cross_sectional' or 'overlay'; got {candidate_type!r}")
     rng = np.random.default_rng(rng_seed)
     train, hold = _split(panel, holdout_frac, holdout_embargo)
     n_train = train.T
     base_tr = {k: np.asarray(v)[:n_train] for k, v in base_returns.items()}
     ts_tr = np.asarray(timestamps)[:n_train]
+    # CR-9 terminal registry: the value-leaf set the generator may draw from. For the default
+    # cross_sectional path this is literally INPUTS (byte-identical draw sequence); for overlay it
+    # adds the panel's feature slots so genomes can reference the non-OHLCV series.
+    inputs = available_terminals(panel)
+    # OVERLAY dispatch: the combined base book (C1) is the multiplier target, computed ONCE per
+    # split. On the train split it is over the train rows; the holdout path rebuilds it on full rows.
+    is_overlay = candidate_type == "overlay"
+    base_book_tr = _combined_book(base_tr, ts_tr, cfg) if is_overlay else None
+
+    def _returns_for(formula: str, pnl: Panel, base_book: "np.ndarray | None"
+                     ) -> tuple[np.ndarray, float] | None:
+        if is_overlay:
+            return _overlay_returns(formula, pnl, base_book, cost_bps=cost_bps)   # type: ignore[arg-type]
+        return _candidate_returns(formula, pnl, hold_horizon=hold_horizon,
+                                  cost_bps=cost_bps, min_names=ls_min_names)
 
     pop = [parse(f) for f in seed_formulas]
     if not pop:
@@ -139,8 +229,7 @@ def evolve(
         # new trial, so distinct is the correct multiplicity count (GP5-01: doc/code reconciled).
         gen_n_total += 1
         try:
-            cr = _candidate_returns(formula, train, hold_horizon=hold_horizon,
-                                    cost_bps=cost_bps, min_names=ls_min_names)
+            cr = _returns_for(formula, train, base_book_tr)
         except Exception as exc:                          # noqa: BLE001 - cull, don't crash a run
             return Candidate(formula, _INFEASIBLE, None, f"eval raised: {exc!r}")
         if cr is None:
@@ -177,9 +266,9 @@ def evolve(
             a = elites[rng.integers(len(elites))]
             if rng.random() < 0.5 and len(elites) > 1:
                 b = elites[rng.integers(len(elites))]
-                nxt.append(crossover(a, b, rng, max_nodes=cfg.max_ast_nodes))
+                nxt.append(crossover(a, b, rng, max_nodes=cfg.max_ast_nodes, inputs=inputs))
             else:
-                nxt.append(mutate(a, rng, max_nodes=cfg.max_ast_nodes))
+                nxt.append(mutate(a, rng, max_nodes=cfg.max_ast_nodes, inputs=inputs))
         pop = nxt
 
     final_n_eff = float(max(2, gen_n_total))             # the FULL file-drawer N (every genome)
@@ -194,12 +283,15 @@ def evolve(
     n_hold = hold.T
     base_ho = {k: np.asarray(v)[panel.T - n_hold:] for k, v in base_returns.items()}
     ts_ho = np.asarray(timestamps)[panel.T - n_hold:]
+    # OVERLAY (CR-9): the base book on the FULL timeline is the multiplier target for the full-panel
+    # re-score; the holdout rows are sliced off it below, matching the cross_sectional warm-up path.
+    base_full = ({k: np.asarray(v) for k, v in base_returns.items()})
+    base_book_full = _combined_book(base_full, np.asarray(timestamps), cfg) if is_overlay else None
     holdout_validation: list[dict] = []
     promising: list[Candidate] = []
     for c in train_passers:
         try:
-            full = _candidate_returns(c.formula, panel, hold_horizon=hold_horizon,
-                                      cost_bps=cost_bps, min_names=ls_min_names)
+            full = _returns_for(c.formula, panel, base_book_full)
         except Exception:                                 # noqa: BLE001
             full = None
         if full is None:

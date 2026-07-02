@@ -22,7 +22,11 @@ from . import operators as op
 _TOK = re.compile(
     r"\s+"
     r"|(?P<num>\d+\.\d+|\.\d+|\d+\.|\d+)"
-    r"|(?P<name>[A-Za-z_]\w*(?:\.\w+)?)"
+    # ``name`` now admits a single ``source:series`` namespace segment (CR-9 feature-slot
+    # terminals like ``fred:T10Y2Y``) in addition to the existing ``IndClass.*`` dotted form.
+    # Tight pattern (one ``:`` segment, one ``.`` segment) — does not mis-tokenize existing
+    # formulas; the ``:`` in a ternary still lexes as an ``op`` because it is not name-adjacent.
+    r"|(?P<name>[A-Za-z_]\w*(?::[A-Za-z_]\w*)?(?:\.\w+)?)"
     r"|(?P<op><=|>=|==|\|\||&&|[-+*/^<>(),?:])"
 )
 
@@ -97,6 +101,12 @@ def _var(name: str, ctx: dict):
         return op.adv(ctx["close"], ctx["volume"], int(m.group(1)))
     if name.lower().startswith("indclass"):
         return None                                    # only ever indneutralize's 2nd arg (ignored)
+    # CR-9 (Crucible P1a) feature-slot fallback: a registered non-OHLCV terminal (e.g.
+    # "fred:T10Y2Y", "macro:regime") resolves from the eval context AFTER the reserved OHLCV
+    # and adv() branches, so no existing formula changes behavior. eval_on_panel populates
+    # ctx[name] with the (broadcast) (T,N) matrix; the resolver is otherwise unchanged.
+    if name in ctx:
+        return ctx[name]
     raise ValueError(f"unknown variable: {name}")
 
 
