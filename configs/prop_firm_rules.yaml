@@ -1,0 +1,55 @@
+# ============================================================================
+# PROP-FIRM CHALLENGE RULE SETS — consumed by the challenge simulator
+# ============================================================================
+# Rule sets for the prop-firm P(pass) Monte-Carlo simulator
+# (finrl_pro_ds/prop/challenge_simulator.py + scripts/research/run_challenge_simulator.py).
+#
+# ⚠️ VERIFY BEFORE ANY REAL ATTEMPT. These are best-known standard rules; prop firms change
+# them (FTMO removed its time limit + minimum trading days; Velotrade's DD basis/aggregate cap
+# are not fully public — see reference_ftmo_velotrade_account_caps memory). Re-scrape each
+# firm's CURRENT published rules and update this file before sizing a live attempt. All fractions.
+#
+# dd_mode: "static"  = equity floor at initial·(1 − max_total_dd) (FTMO "max loss" from initial)
+#          "trailing" = floor at running-peak·(1 − max_total_dd)
+# max_days: null = no deadline (simulator runs to a cap); an integer = a fixed challenge window.
+
+simulation:
+  base_vol_ann: 0.10          # book is normalized to this ann vol; policy vol_multiplier is leverage on it
+  n_paths: 20000
+  block_days: 10              # moving-block bootstrap block (~2 trading weeks; preserves autocorr)
+  no_deadline_cap: 504        # ~2y cap for no-deadline firms
+  seed: 7
+
+firms:
+  ftmo_step1:
+    name: "FTMO Challenge (step 1)"
+    profit_target: 0.10
+    max_total_dd: 0.10        # FTMO "Maximum Loss" (static floor from initial)
+    daily_loss_limit: 0.05    # FTMO "Maximum Daily Loss"
+    max_days: null            # FTMO removed the 30-day limit (verify)
+    min_trading_days: 0       # FTMO removed the 4-day minimum (verify)
+    dd_mode: static
+
+  ftmo_step2:
+    name: "FTMO Verification (step 2)"
+    profit_target: 0.05       # verification target is half of step 1
+    max_total_dd: 0.10
+    daily_loss_limit: 0.05
+    max_days: null
+    min_trading_days: 0
+    dd_mode: static
+
+  velotrade:                  # ⚠️ PLACEHOLDER — Velotrade rules not fully public (verify all fields)
+    name: "Velotrade Challenge (PLACEHOLDER rules)"
+    profit_target: 0.09
+    max_total_dd: 0.10        # commonly TRAILING on futures/CFD props — verify
+    daily_loss_limit: 0.05
+    max_days: null
+    min_trading_days: 0
+    dd_mode: trailing
+
+policy_grid:
+  vol_multipliers: [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0]   # leverage on the 10% base vol (→ 10%..40% ann)
+  bank_thresholds: [null, 0.05, 0.06, 0.07, 0.08]        # cumulative return to de-risk (null = never)
+  derisk_multiplier: 0.4                                  # cut vol to 40% after banking
+  intraday_mae_sensitivity: [1.0, 1.4]                   # close-to-close vs +40% intraday-MAE proxy
