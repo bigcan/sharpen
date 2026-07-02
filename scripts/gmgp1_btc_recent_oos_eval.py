@@ -73,17 +73,26 @@ logging.basicConfig(
 log = logging.getLogger("gmgp1-btc-recent-oos")
 
 
-DEFAULT_CHECKPOINT = "checkpoints/WF_seed456_fold_03_20260423_212007/checkpoint_final.pth"
-DEFAULT_SEED = 456
+# DEPLOYED policy (deep-audit P8-01 fix): the standalone Stage-4 verdict must grade the checkpoint
+# that ships live (configs/live_gmgp1_btc_bybit.yaml:45 → L1-multiseed seed 123), NOT the retired
+# WF-fold seed-456. Default config is the seed-123 binding artifact.
+DEFAULT_CHECKPOINT = "checkpoints/gmgp1-btc-l1-multiseed_20260407_070227/checkpoint_final.pth"
+DEFAULT_SEED = 123
+DEFAULT_CONFIG = "configs/gmgp1_btc_velotrade_recent_oos_seed123.yaml"
 
 # --- stress variants ---------------------------------------------------------
 # Each (label, overrides dict). Overrides are applied AFTER `_prep_backtest_config`
 # to env dict. Variants skipped (e.g., flag not wired end-to-end) should be
 # documented in the skipped_reason field of the summary.
+# NOTE: the baseline now models slippage_base_bps=5.0 (P8-03 fix), so a slippage-stress and a
+# TRUE frictionless bound (`cost_off_oracle`, zeroing BOTH taker and slippage) are included — the
+# old `fee_off_oracle` only zeroed taker while slippage was already 0, hiding the frictionless gap.
 STRESS_VARIANTS: list[tuple[str, dict]] = [
     ("fee_plus_50pct", {"taker_fee": 0.00075}),
     ("fee_plus_100pct", {"taker_fee": 0.00100}),
+    ("slippage_plus_2x", {"slippage_base_bps": 10.0}),
     ("fee_off_oracle", {"taker_fee": 0.0}),
+    ("cost_off_oracle", {"taker_fee": 0.0, "slippage_base_bps": 0.0}),
     ("gap_detection_off", {"gap_detection": False}),
     ("gap_atr_mult_2_0", {"gap_atr_mult": 2.0}),
 ]
@@ -266,7 +275,7 @@ def run_stress(config_path: str, checkpoint_path: str, seed: int,
         "checkpoint": checkpoint_path,
         "seed": seed,
         "window": f"{config['data']['test_start_date']} -> {config['data']['test_end_date']}",
-        "baseline_source": "results/gmgp1_btc_recent_oos/verdict.json",
+        "baseline_source": str(out_root.parent / "gmgp1_btc_recent_oos_seed123" / "verdict.json"),
         "variants": {},
         "skipped": skipped,
     }
@@ -304,19 +313,24 @@ def main():
     ap.add_argument("--mode", choices=["recent_oos", "stress", "both"], default="both")
     ap.add_argument(
         "--config",
-        default="configs/gmgp1_btc_velotrade_recent_oos.yaml",
-        help="Recent-OOS config (window + env). Used as base for stress variants too.",
+        default=DEFAULT_CONFIG,
+        help="Recent-OOS config (window + env). Used as base for stress variants too. "
+             "Default grades the DEPLOYED seed-123 bundle (P8-01 fix).",
     )
     ap.add_argument("--checkpoint", default=DEFAULT_CHECKPOINT)
     ap.add_argument("--seed", type=int, default=DEFAULT_SEED)
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    # Default output dirs are seed-123-specific so regenerating the DEPLOYED-seed verdict does
+    # NOT clobber results/gmgp1_btc_recent_oos/verdict.json — the RETIRED seed-456 artifact that
+    # aggregate_q1_2026_oos_blindspot.py still reads as the "seed456-fold3-alt" entry (rewiring
+    # that aggregate to the seed-123 path is deep-audit item N4, separate from this P8-01/P8-03 fix).
     ap.add_argument(
         "--recent_oos_out",
-        default="results/gmgp1_btc_recent_oos",
+        default="results/gmgp1_btc_recent_oos_seed123",
     )
     ap.add_argument(
         "--stress_out",
-        default="results/gmgp1_btc_stress",
+        default="results/gmgp1_btc_stress_seed123",
     )
     args = ap.parse_args()
 

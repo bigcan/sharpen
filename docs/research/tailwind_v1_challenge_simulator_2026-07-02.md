@@ -3,7 +3,7 @@
 **Date:** 2026-07-02 · **Engine:** `finrl_pro_ds/prop/challenge_simulator.py` (+ tests
 `tests/prop/test_challenge_simulator.py`, 11 green) · **Runner:**
 `scripts/research/run_challenge_simulator.py` · **Rules:** `configs/prop_firm_rules.yaml`
-(⚠️ verify vs each firm's current published rules) · **Artifact:**
+(✅ VERIFIED 2026-07-02 vs official pages — see "Rules verified" below) · **Artifact:**
 `results/tailwind_v1/challenge_sim.json` · **Method:** 20 000 moving-block-bootstrap paths
 (block 10d, preserves autocorrelation + fat tails), books normalized to 10% base vol, firm rules
 enforced per path. Books built on the R1 `mom`/`pf` basis (cached prices, no network).
@@ -35,11 +35,19 @@ inverts. It would be correct again under a fixed short window.
 | FTMO step1 (10% tgt, 10% static DD, 5% daily, no deadline) | momentum_only | 0.690 | 200 | max_dd | 0.03 / 0.17 / 0.10 |
 | | **momentum+BAB** | **0.746** | 196 | max_dd | 0.03 / 0.12 / 0.10 |
 | FTMO step2 (5% tgt) | momentum+BAB | **0.870** | 110 | max_dd | 0.01 / 0.10 / 0.02 |
-| Velotrade (9% tgt, 10% **trailing** DD, 5% daily) | momentum+BAB | **0.720** | 167 | max_dd | 0.03 / 0.23 / 0.02 |
+| Velotrade CLASSIC step1 (10% tgt, 10% **static** DD, 5% daily) | momentum+BAB | **0.746** | 196 | max_dd | 0.03 / 0.12 / 0.10 |
+| Velotrade CLASSIC step2 (5% tgt) | momentum+BAB | **0.870** | 110 | max_dd | 0.01 / 0.10 / 0.02 |
 
-**Two-phase FTMO funded probability ≈ 0.746 × 0.870 ≈ 0.65 per attempt** (mom+BAB, low vol) — a
-strong, serviceable number for the prop goal. Velotrade's *trailing* DD is harsher (DD-breach 0.23
-vs FTMO's static 0.12), so its P(pass) is lower on the same book.
+**Two-phase funded probability ≈ 0.746 × 0.870 ≈ 0.65 per attempt** (mom+BAB, low vol) — a strong,
+serviceable number for the prop goal, and it holds for **BOTH** firms.
+
+> **⚠️ CORRECTED 2026-07-02 after rule verification.** The first cut of this doc modeled Velotrade
+> with a *trailing* drawdown (a guessed placeholder), giving P(pass) 0.720 and the conclusion
+> "Velotrade is harsher than FTMO." **Velotrade's official rules use STATIC drawdown on all plans.**
+> Re-running with the verified static 10% DD (and the correct 10% phase-1 target, not 9%) makes the
+> Velotrade CLASSIC 2-step rule set **identical to FTMO's** (aside from a 5-day vs 4-day minimum,
+> both non-binding at E[days]≈196). Velotrade P(pass) rises to **0.746 / 0.870**, matching FTMO.
+> The cross-firm "Velotrade harsher" claim was a trailing-DD artifact and is **withdrawn**.
 
 ## The vol frontier (FTMO step1, momentum+BAB, no banking) — speed vs safety
 
@@ -69,12 +77,31 @@ vs FTMO's static 0.12), so its P(pass) is lower on the same book.
   survives crash-heavy regimes reasonably (trend + BAB both help in crashes) — a modest, not
   catastrophic, hit.
 
+## Rules verified (2026-07-02)
+
+Checked against each firm's current official rules pages ([FTMO Trading
+Objectives](https://ftmo.com/en/trading-objectives/), [Velotrade
+Challenges](https://velotrade.com/challenges) + [rules
+blog](https://velotrade.com/blog/prop-firm-rules-explained)) and reconciled into
+`configs/prop_firm_rules.yaml`:
+
+- **No time limit on any phase, both firms** — CONFIRMED. This is the single load-bearing
+  assumption; the entire "low vol, keep BAB, don't bank" optimum rests on it, and it holds.
+- **FTMO 2-step:** target 10%/5%, daily 5%, **max loss 10% STATIC**, **min 4 trading days/phase**.
+  (The config previously had min-days 0; corrected to 4 — non-binding at E[days]≈196.)
+- **Velotrade CLASSIC 2-step:** target 10%/5%, daily 5%, **max loss 10% STATIC** (all Velotrade
+  plans are static — the prior "trailing" was a guess), **min 5 trading days/phase**. With static
+  DD, Velotrade ≈ FTMO (P(pass) 0.746/0.870, not the earlier 0.720).
+- **Not modeled / residual:** FTMO 1-step (3% daily, 10% *trailing*) — the prop path targets the
+  2-step. Velotrade PRO 1-step is much tighter (3% static DD, 3% daily) → far lower P(pass); avoid.
+  The official Velotrade page states **no per-day min-profit rule** (a secondary blog claimed
+  0.5%/day; official overrides). Aggregate account caps: `reference_ftmo_velotrade_account_caps`.
+
 ## Caveats (this is a model, not a guarantee)
 
-1. **Rules must be verified.** Results are extremely sensitive to the no-deadline assumption. If any
-   firm imposes a real deadline, the optimum shifts toward higher vol and the review's "run hot"
-   advice returns. `configs/prop_firm_rules.yaml` carries best-known rules; Velotrade's DD basis and
-   caps are placeholders — re-scrape before any attempt.
+1. **Rules re-verified 2026-07-02 (above), but prop firms change them.** Results are extremely
+   sensitive to the no-deadline assumption — if any firm re-imposes a deadline, the optimum shifts
+   toward higher vol and the review's "run hot" advice returns. Re-scrape before any real attempt.
 2. **The 504-day cap understates low-vol P(pass).** With truly no deadline, most of the 10% timeout
    tail at 1.0× would convert to passes (the residual failure is the 12% DD-breach), so asymptotic
    FTMO-step1 P(pass) at low vol is likely ~0.83, not 0.75.

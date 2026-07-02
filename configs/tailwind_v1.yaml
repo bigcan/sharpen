@@ -24,8 +24,10 @@
 # P(pass)-optimal challenge config is NOT "drop BAB + run hot"; it is LOW vol (1.0-1.5×, 10-15%),
 # BAB RETAINED (it cuts DD, the binding constraint), NO bank-and-derisk. P(pass) ~0.75/0.87 FTMO
 # step1/step2, ~0.72 Velotrade. So challenge mode ≈ THIS own-capital book at 1.0-1.5× vol. (The
-# "run hot" advice only returns under a fixed short deadline — VERIFY each firm's current rules in
-# configs/prop_firm_rules.yaml before an attempt.)
+# "run hot" advice only returns under a fixed short deadline.) Rules were VERIFIED 2026-07-02
+# (configs/prop_firm_rules.yaml — FTMO + Velotrade 2-step, static DD, no deadline), and the
+# concrete challenge profile is now wired at configs/tailwind_v1_challenge.yaml (this book at 1.5×
+# vol, BAB retained). An attempt still requires a Tier-2 audit + operator go-ahead (deploy_gating false).
 #
 # CAPITAL GATE (do not skip): an actual paper-capital soak requires a Tier-2 deep-lifecycle
 # audit (deep_strategy_audit tailwind + audit_two_sleeve_book) + operator go-ahead. Capital
