@@ -111,6 +111,31 @@ def test_edgar_uses_filing_acceptance_as_release_and_replays_amendments() -> Non
     assert j[i_mar] == 205.0
 
 
+def _edgar_mixed_frames_payload() -> dict:
+    # The SAME concept reported under four overlapping frames: standalone Q1 (~90d), H1 cumulative
+    # (~181d), full-year (~365d), and standalone Q3 (~91d). Only the two standalone quarters are a
+    # consistent flow; the cumulative + annual are the sawtooth-inducing frames the filter must drop.
+    return {"units": {"USD": [
+        {"start": "2024-01-01", "end": "2024-03-31", "val": 90.0, "filed": "2024-05-01", "form": "10-Q"},
+        {"start": "2024-01-01", "end": "2024-06-30", "val": 190.0, "filed": "2024-08-01", "form": "10-Q"},
+        {"start": "2024-01-01", "end": "2024-12-31", "val": 400.0, "filed": "2025-02-01", "form": "10-K"},
+        {"start": "2024-07-01", "end": "2024-09-30", "val": 95.0, "filed": "2024-11-01", "form": "10-Q"},
+    ]}}
+
+
+def test_edgar_frame_filter_keeps_only_standalone_quarters() -> None:
+    ref = SeriesRef("edgar", "0000320193:RevenueFromContractWithCustomerExcludingAssessedTax",
+                    "fundamental")
+    # Default (period_days=(80,100)): only the two ~90d standalone quarters survive — a clean flow.
+    conn = EdgarConnector(transport=lambda url: _edgar_mixed_frames_payload())
+    data = conn.fetch(ref, "2024-01-01", "2025-12-31")
+    assert data.n_obs == 2
+    assert sorted(data.value.tolist()) == [90.0, 95.0]           # NOT the 190 YTD / 400 annual frames
+    # Negative tripwire: disabling the filter reintroduces the mixed-frame sawtooth (all 4 rows).
+    conn_all = EdgarConnector(transport=lambda url: _edgar_mixed_frames_payload(), period_days=None)
+    assert conn_all.fetch(ref, "2024-01-01", "2025-12-31").n_obs == 4
+
+
 def test_edgar_live_without_user_agent_fails_closed() -> None:
     conn = EdgarConnector(user_agent="")                           # no UA, no transport
     with pytest.raises(RuntimeError, match="User-Agent"):

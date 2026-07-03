@@ -22,6 +22,12 @@ Testability mirrors FRED/COT: inject a ``transport`` callable ``(url) -> dict`` 
 needed. The live path hits ``data.sec.gov`` over HTTPS (keyless) but SEC policy REQUIRES a descriptive
 ``User-Agent`` — supply one via ``user_agent=`` or the ``SEC_EDGAR_UA`` env var, else the live pull
 fails closed with a clear error (injected transports are exempt).
+
+Frame consistency (``period_days``, default standalone-quarter 80–100d): companyconcept returns a flow
+concept under overlapping frames for the SAME period ``end`` — standalone quarter (~90d), YTD cumulative
+(~180/270d), full year (~360d). Admitting all of them is not a leak but yields a sawtooth feature; the
+default filter keeps only the quarterly span so the bridged series is a clean quarterly flow (:meth:
+`_keep_period`). Instantaneous concepts (no ``start``) are unaffected; ``period_days=None`` disables it.
 """
 from __future__ import annotations
 
@@ -46,10 +52,17 @@ _PREFERRED_UNITS = ("USD", "USD/shares", "shares", "pure")
 # A small curated fundamentals starter set: (cik, concept, human name). discover() returns these unless
 # a custom list is supplied; the Data Scout (P5) proposes additions. CIKs are zero-padded to 10 digits
 # on request, so a bare integer string is accepted here.
+#
+# Revenue uses RevenueFromContractWithCustomerExcludingAssessedTax, NOT the legacy us-gaap:Revenues
+# concept: both AAPL and MSFT abandoned `Revenues` when they adopted ASC 606 (FY2018), so that tag is a
+# stale stub that dies ~2018 and returns EMPTY in any recent window (the "empty series" reject seen in
+# the first live scout). The ASC 606 tag is the concept both file under through 2026 (verified
+# 2026-07-03: AAPL 2017-09→2026-03 @113 obs, MSFT 2016-06→2026-03 @131 obs).
 _DEFAULT_CONCEPTS: tuple[tuple[str, str, str], ...] = (
-    ("0000320193", "Revenues", "Apple — Revenues"),
+    ("0000320193", "RevenueFromContractWithCustomerExcludingAssessedTax", "Apple — Revenue (ASC 606)"),
     ("0000320193", "NetIncomeLoss", "Apple — Net income"),
-    ("0000789019", "Revenues", "Microsoft — Revenues"),
+    ("0000789019", "RevenueFromContractWithCustomerExcludingAssessedTax", "Microsoft — Revenue (ASC 606)"),
+    ("0000789019", "NetIncomeLoss", "Microsoft — Net income"),
 )
 
 
@@ -75,11 +88,15 @@ class EdgarConnector:
         concepts: tuple[tuple[str, str, str], ...] | None = None,
         taxonomy: str = _DEFAULT_TAXONOMY,
         user_agent: str | None = None,
+        period_days: tuple[int, int] | None = (80, 100),
     ) -> None:
         self._transport = transport
         self._concepts = concepts or _DEFAULT_CONCEPTS
         self._taxonomy = taxonomy
         self._user_agent = user_agent if user_agent is not None else os.environ.get("SEC_EDGAR_UA", "")
+        # Period-consistency window (see _parse): keep only standalone-quarterly durations for FLOW
+        # concepts. None disables the filter (legacy all-frames behavior).
+        self._period_days = period_days
 
     # -- interface -----------------------------------------------------------------
     def discover(self) -> list[SeriesRef]:
@@ -158,6 +175,8 @@ class EdgarConnector:
                 continue
             if cutoff is not None and release > cutoff:          # vintage: only what was public by as_of
                 continue
+            if not self._keep_period(row.get("start"), reference):  # frame-consistency filter
+                continue
             refs.append(reference)
             vals.append(value)
             rels.append(release)
@@ -169,6 +188,25 @@ class EdgarConnector:
             provenance=self.provenance(ref),
             meta={"n_raw": len(rows), "unit": self._unit_key(units)},
         )
+
+    def _keep_period(self, start_p, reference: np.datetime64) -> bool:
+        """Frame-consistency gate. EDGAR's companyconcept endpoint returns a FLOW concept (revenue,
+        net income) under MULTIPLE overlapping frames for the same fiscal-period ``end``: the
+        standalone quarter (~90d), the year-to-date cumulatives (~180/270d) and the full year (~360d).
+        Admitting all of them builds a sawtooth feature (a $95B quarter joined next to a $416B year) —
+        not a leak (every value is correctly release-stamped) but a semantically incoherent series an
+        overlay would score as an artifact. So for a DURATION observation (one carrying a ``start``) we
+        keep only the standalone-quarter span, yielding a clean, comparable quarterly series. An
+        INSTANTANEOUS observation (balance-sheet item; no ``start``) has no duration and is always kept.
+        ``period_days=None`` disables the filter entirely (legacy all-frames behavior)."""
+        if self._period_days is None or start_p is None:
+            return True
+        try:
+            span = int((reference - np.datetime64(str(start_p)[:10], "ns")) / np.timedelta64(1, "D"))
+        except (TypeError, ValueError):
+            return True                                          # unparseable start -> don't drop
+        lo_d, hi_d = self._period_days
+        return lo_d <= span <= hi_d
 
     @staticmethod
     def _unit_key(units: dict) -> str | None:

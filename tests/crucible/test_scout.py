@@ -52,7 +52,9 @@ def _clean_connectors() -> list:
     return [
         StooqConnector(transport=lambda u: csv, symbols=(("^spx", "S&P 500"),)),
         GdeltConnector(transport=lambda u: gpay, themes=(("gold", "gold tone"),)),
-        EdgarConnector(transport=lambda u: eunits, concepts=(("320193", "Revenues", "AAPL rev"),)),
+        EdgarConnector(transport=lambda u: eunits,
+                       concepts=(("320193", "RevenueFromContractWithCustomerExcludingAssessedTax",
+                                  "AAPL rev"),)),
     ]
 
 
