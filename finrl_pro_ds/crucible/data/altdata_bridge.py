@@ -52,9 +52,12 @@ ALTDATA_ALIASES: dict[tuple[str, str], str] = {
     ("cot", "067651:comm_net"): "cot:gold_comm_net",
     ("cot", "067651:noncomm_net"): "cot:gold_noncomm_net",
     ("cot", "067651:comm_net_pct_oi"): "cot:gold_comm_pct_oi",
-    ("edgar", "0000320193:Revenues"): "edgar:aapl_revenue",
+    # EDGAR revenue is the ASC 606 tag, not legacy us-gaap:Revenues (which is empty post-2018 for both
+    # filers — see edgar._DEFAULT_CONCEPTS). NetIncomeLoss is the same across eras.
+    ("edgar", "0000320193:RevenueFromContractWithCustomerExcludingAssessedTax"): "edgar:aapl_revenue",
     ("edgar", "0000320193:NetIncomeLoss"): "edgar:aapl_netincome",
-    ("edgar", "0000789019:Revenues"): "edgar:msft_revenue",
+    ("edgar", "0000789019:RevenueFromContractWithCustomerExcludingAssessedTax"): "edgar:msft_revenue",
+    ("edgar", "0000789019:NetIncomeLoss"): "edgar:msft_netincome",
 }
 
 

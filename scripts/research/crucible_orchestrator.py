@@ -33,6 +33,16 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# Load .env (override=False: a real shell/system export always wins) so the real-mode alt-data bridge
+# picks up FRED_API_KEY / SEC_EDGAR_UA without the operator having to export them each session. A
+# missing credential still degrades to a per-source skip inside the bridge — it never aborts a tick.
+try:
+    from dotenv import load_dotenv  # noqa: E402
+
+    load_dotenv(ROOT / ".env", override=False)
+except ModuleNotFoundError:
+    pass
+
 from finrl_pro_ds.crucible import (  # noqa: E402
     CRUCIBLE_VERSION,
     DataCatalog,

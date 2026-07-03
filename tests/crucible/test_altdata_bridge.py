@@ -34,10 +34,12 @@ def _clean_fred() -> FredConnector:
 
 
 def _clean_edgar() -> EdgarConnector:
-    """A clean fundamentals series whose native id (0000320193:Revenues) is NOT DSL-legal → aliased."""
+    """A clean fundamentals series whose native id (the ASC 606 revenue tag) is NOT DSL-legal → aliased."""
     eunits = {"units": {"USD": [{"end": "2019-12-31", "val": 200.0, "filed": "2020-02-15",
                                  "form": "10-K"}]}}
-    return EdgarConnector(transport=lambda u: eunits, concepts=(("320193", "Revenues", "AAPL rev"),))
+    return EdgarConnector(
+        transport=lambda u: eunits,
+        concepts=(("320193", "RevenueFromContractWithCustomerExcludingAssessedTax", "AAPL rev"),))
 
 
 class _BrokenConnector:
@@ -82,7 +84,9 @@ def test_resolve_terminal_aliases_nonlegal_and_passes_legal() -> None:
     assert resolve_terminal(SeriesRef("fred", "T10Y2Y", "macro")) == "fred:T10Y2Y"
     # COT / EDGAR native ids are not legal → mapped to the registered alias.
     assert resolve_terminal(SeriesRef("cot", "067651:comm_net", "positioning")) == "cot:gold_comm_net"
-    assert resolve_terminal(SeriesRef("edgar", "0000320193:Revenues", "fundamental")) == "edgar:aapl_revenue"
+    assert resolve_terminal(SeriesRef(
+        "edgar", "0000320193:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "fundamental")) == "edgar:aapl_revenue"
     # every alias value is a distinct, DSL-legal terminal.
     from finrl_pro_ds.crucible.data import is_valid_terminal
     assert all(is_valid_terminal(v) for v in ALTDATA_ALIASES.values())
@@ -107,7 +111,7 @@ def test_bridge_builds_accepted_slots_and_registers(tmp_path) -> None:
     # Stage-1 ACQUIRE: accepted series were registered into the catalog (the 'dirty' signal source).
     registered = {(r["source_id"], r["series"]) for r in catalog.list_series()}
     assert ("fred", "DGS10") in registered
-    assert ("edgar", "0000320193:Revenues") in registered
+    assert ("edgar", "0000320193:RevenueFromContractWithCustomerExcludingAssessedTax") in registered
     catalog.close()
 
 
