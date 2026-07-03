@@ -131,6 +131,16 @@ def assert_asof_join_causal(series: SeriesData, bar_dates: np.ndarray) -> None:
                 f"as-of-join not truncation-stable at bar {t}: full={vt} truncated={vt_trunc}")
 
 
+# Asset classes whose fat tails are SIGNAL, not corruption. A genuine >12σ first-difference in VIX, a
+# high-yield credit spread, the Fed balance sheet (a real QE step), a COT positioning swing, or a
+# fundamental restatement is an economic EVENT, not a data glitch — so for these classes the outlier
+# count is ADVISORY (recorded in ``n_outliers``, never a reject reason). Before this, the gate mis-fired
+# on 2008/2020 crisis prints and starved the macro funnel down to only the smooth DGS10 over a long
+# window. Market OHLCV-style series keep the hard reject (a >12σ tick there is usually a bad print). The
+# PIT, gap, and as-of-join-causality checks stay hard for EVERY class — only the outlier reason relaxes.
+_ADVISORY_OUTLIER_CLASSES = frozenset({"macro", "positioning", "fundamental"})
+
+
 @dataclass(frozen=True, slots=True)
 class QualityReport:
     """Outcome of the non-OHLCV data-quality gate (spec §4.3 items 1-2)."""
@@ -140,6 +150,7 @@ class QualityReport:
     n_obs: int = 0
     max_gap_days: float = 0.0
     n_outliers: int = 0
+    outliers_advisory: bool = False    # True when n_outliers>0 was recorded but NOT treated as a reject
 
 
 def validate_series(
@@ -148,10 +159,15 @@ def validate_series(
     max_gap_days: float = 400.0,
     outlier_sigma: float = 12.0,
     require_release_after_reference: bool = True,
+    advisory_outlier_classes: frozenset[str] = _ADVISORY_OUTLIER_CLASSES,
 ) -> QualityReport:
     """The analogue of ``clean_ohlcv`` for a non-OHLCV series: gaps, staleness, outliers, unit
     shifts, and the PIT sanity that a release never predates the period it describes. Returns a
-    :class:`QualityReport`; the caller decides whether to admit the series to the catalog."""
+    :class:`QualityReport`; the caller decides whether to admit the series to the catalog.
+
+    Outlier handling is class-aware (``advisory_outlier_classes``): for fat-tailed alt-data classes a
+    >``outlier_sigma`` first-difference is a real economic event, so it is COUNTED but not a reject
+    reason (``outliers_advisory=True``); for all other classes it remains a hard reject."""
     reasons: list[str] = []
     ref = np.asarray(series.reference_period, dtype="datetime64[ns]")
     rel = np.asarray(series.release_timestamp, dtype="datetime64[ns]")
@@ -178,6 +194,7 @@ def validate_series(
 
     # Outliers on first differences (unit-shift / spike detection), robust sigma via MAD.
     n_outliers = 0
+    outliers_advisory = False
     finite = np.isfinite(val_s)
     if np.sum(finite) >= 4:
         d = np.diff(val_s[finite])
@@ -187,7 +204,12 @@ def validate_series(
             z = np.abs(d - med) / (1.4826 * mad)
             n_outliers = int(np.sum(z > outlier_sigma))
             if n_outliers:
-                reasons.append(f"{n_outliers} first-difference outlier(s) > {outlier_sigma}sigma")
+                # Fat-tailed alt-data (macro/positioning/fundamental): a crisis-sized move is signal,
+                # not corruption — count it but do not reject on it. Every other class hard-rejects.
+                if series.ref.asset_class in advisory_outlier_classes:
+                    outliers_advisory = True
+                else:
+                    reasons.append(f"{n_outliers} first-difference outlier(s) > {outlier_sigma}sigma")
 
     if not np.any(np.isfinite(val_s)):
         reasons.append("all values are non-finite")
@@ -198,6 +220,7 @@ def validate_series(
         n_obs=n,
         max_gap_days=max_gap,
         n_outliers=n_outliers,
+        outliers_advisory=outliers_advisory,
     )
 
 
