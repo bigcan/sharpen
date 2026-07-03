@@ -36,10 +36,12 @@ if str(ROOT) not in sys.path:
 from finrl_pro_ds.crucible import (  # noqa: E402
     CRUCIBLE_VERSION,
     DataCatalog,
+    Lockbox,
     OrchestratorStore,
     Substrate,
     TickBudget,
     TrialLedger,
+    load_incubation_criterion,
     run_orchestrator_tick,
 )
 from finrl_pro_ds.crucible.orchestrator.orchestrator import _safe  # noqa: E402
@@ -52,6 +54,7 @@ from finrl_pro_ds.signals.generation.config import (  # noqa: E402
 
 log = logging.getLogger("crucible_orchestrator")
 DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
+DEFAULT_LOCKBOX_GATES = ROOT / "configs" / "crucible_lockbox.gates.yaml"
 
 
 def _panel_ts(panel: Panel) -> np.ndarray:
@@ -101,7 +104,12 @@ def _proxy_base_sleeves(panel: Panel, hold: int = 21) -> dict[str, np.ndarray]:
 
 
 def _build_substrate(args, cfg, ek, meta) -> tuple[Substrate, DataCatalog]:
-    """Construct the single substrate for the chosen mode, plus its catalog (for asset classes)."""
+    """Construct the single substrate for the chosen mode, plus its catalog (for asset classes).
+
+    Wires the CR-8 forward-incubation lockbox (P4) by default, for both synthetic and real mode: a
+    PROMISING survivor is enrolled and accrues forward evidence every tick until CLEARED/REJECTED
+    (substrate.py Substrate.lockbox / .incubation_criterion — both opt-in, so ``--no-lockbox`` restores
+    the pure P3 byte-identical path used by ``crucible reproduce`` / testing)."""
     out_dir = Path(args.out) / args.mode
     out_dir.mkdir(parents=True, exist_ok=True)
     catalog = DataCatalog(out_dir / "catalog.db")
@@ -129,8 +137,12 @@ def _build_substrate(args, cfg, ek, meta) -> tuple[Substrate, DataCatalog]:
 
     ledger = TrialLedger(out_dir / "trial_ledger.db")
     substrate_id = "synthetic" if args.mode == "synthetic" else meta["panel"]
+    lockbox = None if args.no_lockbox else Lockbox(out_dir / "lockbox.db")
+    incubation_criterion = (None if args.no_lockbox
+                            else load_incubation_criterion(args.lockbox_config))
     sub = Substrate(substrate_id=substrate_id, prepare=prepare, ledger=ledger, cfg=cfg,
-                    evolve_kwargs=ek, max_proposals=args.max_proposals)
+                    evolve_kwargs=ek, max_proposals=args.max_proposals, lockbox=lockbox,
+                    incubation_criterion=incubation_criterion)
     return sub, catalog
 
 
@@ -139,16 +151,22 @@ def _write_recipe(out_dir: Path, substrate_id: str, tick_ts: str, args) -> None:
     re-run this single tick from scratch (``crucible reproduce`` consumes it; spec §5)."""
     sub_dir = out_dir / _safe(substrate_id) / _safe(tick_ts)
     gates_rel = os.path.relpath(args.config, ROOT)
+    # --force: reproduce re-runs a single tick deterministically regardless of generation.enabled
+    # (the eligibility flag gates scheduled discovery, not an explicit re-execution of a past run).
+    argv = [
+        "--mode", "synthetic", "--t", str(args.t), "--n", str(args.n),
+        "--max-proposals", str(args.max_proposals), "--max-candidates", str(args.max_candidates),
+        "--start-ts", tick_ts, "--nights", "1", "--config", args.config,
+        "--lockbox-config", args.lockbox_config, "--force",
+    ]
+    if args.no_lockbox:
+        # keep the recipe's argv faithful to how this run was actually invoked (lockbox enrollment
+        # does not affect the manifest/verdicts either way, but the recipe should still match argv).
+        argv.append("--no-lockbox")
     recipe = {
         "kind": "synthetic_orchestrator",
         "script": "scripts/research/crucible_orchestrator.py",
-        # --force: reproduce re-runs a single tick deterministically regardless of generation.enabled
-        # (the eligibility flag gates scheduled discovery, not an explicit re-execution of a past run).
-        "argv": [
-            "--mode", "synthetic", "--t", str(args.t), "--n", str(args.n),
-            "--max-proposals", str(args.max_proposals), "--max-candidates", str(args.max_candidates),
-            "--start-ts", tick_ts, "--nights", "1", "--config", args.config, "--force",
-        ],
+        "argv": argv,
         "tick_ts": tick_ts,
         "substrate_id": substrate_id,
         "gates_path": gates_rel,
@@ -164,6 +182,9 @@ def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     ap = argparse.ArgumentParser(description="Crucible P3 — continuous orchestrator")
     ap.add_argument("--config", default=str(DEFAULT_GATES))
+    ap.add_argument("--lockbox-config", default=str(DEFAULT_LOCKBOX_GATES),
+                    help="CR-8 incubation criterion gates YAML (kept separate from --config so the "
+                         "funnel's frozen gates_hash is untouched)")
     ap.add_argument("--mode", choices=("synthetic", "real"), default="synthetic")
     ap.add_argument("--nights", type=int, default=4, help="unattended ticks to run")
     ap.add_argument("--start", default="2008-01-01")
@@ -177,6 +198,9 @@ def main() -> int:
     ap.add_argument("--out", default=str(ROOT / "results" / "crucible_orchestrator"))
     ap.add_argument("--force", action="store_true",
                     help="run even when generation.enabled is false in the gates")
+    ap.add_argument("--no-lockbox", action="store_true",
+                    help="disable the CR-8 forward-incubation lockbox (pure P3 byte-identical mode; "
+                         "used by crucible reproduce / testing)")
     args = ap.parse_args()
 
     cfg, ek = load_generation_config(args.config)
@@ -204,10 +228,14 @@ def main() -> int:
             "reason": o.reason, "n_preregistered": o.n_preregistered, "n_scored": o.n_scored,
             "n_promising": o.n_promising, "fdr_num_tests": o.fdr_num_tests,
             "fdr_charged_total": round(o.fdr_charged_total, 8), "burst_target": o.burst_target,
-            "budget_breached": o.budget_breached})
-        log.info("night %d/%d ts=%s dirty=%s mined=%s promising=%d fdr_tests=%d (%s)",
+            "budget_breached": o.budget_breached,
+            # CR-8 lockbox (P4): empty/zero when the substrate has no lockbox (--no-lockbox).
+            "n_enrolled": o.n_enrolled, "n_incubating": o.n_incubating,
+            "n_cleared": o.n_cleared, "n_rejected": o.n_rejected})
+        log.info("night %d/%d ts=%s dirty=%s mined=%s promising=%d fdr_tests=%d lockbox(incub=%d "
+                 "cleared=%d rejected=%d) (%s)",
                  i + 1, args.nights, tick_ts, o.dirty, o.mined, o.n_promising, o.fdr_num_tests,
-                 o.reason)
+                 o.n_incubating, o.n_cleared, o.n_rejected, o.reason)
         # Drop a deterministic reproduce recipe next to each mined synthetic manifest (spec §5, P5).
         # Only synthetic mode is bit-reproducible offline; a live/networked substrate writes none.
         if o.mined and args.mode == "synthetic":
@@ -219,6 +247,8 @@ def main() -> int:
                     "substrate_id": sub.substrate_id, "ticks": summaries}, indent=2),
         encoding="utf-8")
     sub.ledger.close()
+    if sub.lockbox is not None:
+        sub.lockbox.close()
     catalog.close()
     store.close()
 
