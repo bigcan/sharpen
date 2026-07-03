@@ -126,14 +126,31 @@ def _build_substrate(args, cfg, ek, meta) -> tuple[Substrate, DataCatalog]:
             base = taiwan_base_sleeves(panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
                                        start=args.start, end=args.end)
         else:
+            import dataclasses
+
+            from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
             from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
             from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
             panel = load_cross_asset_panel(
                 args.start, args.end, config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
+            # Bridge accepted macro/positioning/fundamental series into feature slots so the overlay
+            # proposer (family 'altdata') can score them — otherwise real mode mines only the fixed
+            # cross-sectional bank. Registers accepted series into the catalog (the 'dirty' signal),
+            # and is PIT-gated: a look-ahead HARD-fails inside build_feature_slots (LEAK-2).
+            if not args.no_altdata_slots:
+                bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
+                slots = bridge_altdata_feature_slots(
+                    bar_dates=panel.dates, start=args.start, end=bar_end, catalog=catalog)
+                if slots:
+                    panel = dataclasses.replace(
+                        panel, feature_slots={**panel.feature_slots, **slots})
             base = production_base_sleeves(panel, hold_horizon=ek["hold_horizon"],
                                            cost_bps=ek["cost_bps"], start=args.start, end=args.end)
+        # Recompute asset classes AFTER the bridge registered its accepted series (informational —
+        # feeds the manifest + proposer context; overlay generation keys off feature_slots, not this).
+        prepared_classes = tuple(sorted({r["asset_class"] for r in catalog.list_series()})) or asset_classes
         return PreparedSubstrate(panel=panel, base_returns=base, timestamps=_panel_ts(panel),
-                                 asset_classes=asset_classes, snapshot_hash=catalog.snapshot_hash())
+                                 asset_classes=prepared_classes, snapshot_hash=catalog.snapshot_hash())
 
     ledger = TrialLedger(out_dir / "trial_ledger.db")
     substrate_id = "synthetic" if args.mode == "synthetic" else meta["panel"]
@@ -201,6 +218,9 @@ def main() -> int:
     ap.add_argument("--no-lockbox", action="store_true",
                     help="disable the CR-8 forward-incubation lockbox (pure P3 byte-identical mode; "
                          "used by crucible reproduce / testing)")
+    ap.add_argument("--no-altdata-slots", action="store_true",
+                    help="real mode only: skip bridging macro/positioning/fundamental connector "
+                         "series into Panel feature slots (mine the cross-sectional bank only)")
     args = ap.parse_args()
 
     cfg, ek = load_generation_config(args.config)
