@@ -212,11 +212,32 @@ def test_validate_series_flags_gap_outlier_and_pit_violation() -> None:
     weeks = np.arange(np.datetime64("2024-01-02"), np.datetime64("2024-03-26"),
                       np.timedelta64(7, "D")).astype("datetime64[ns]")
     vals = np.array([1.0, 1.1, 1.05, 0.95, 1.2, 1.0, 1000.0, 1.1, 1.05, 0.9, 1.15, 1.0])
-    spike = SeriesData(clean.ref, weeks, vals[: weeks.shape[0]],
-                       weeks + np.timedelta64(3, "D"))
-    report = validate_series(spike)
+    rel = weeks + np.timedelta64(3, "D")
+    # A MARKET-class series hard-rejects the spike (a >12σ tick there is usually a bad print).
+    market_spike = SeriesData(SeriesRef("stooq", "^spx", "market"), weeks,
+                              vals[: weeks.shape[0]], rel)
+    report = validate_series(market_spike)
     assert not report.passed
     assert report.n_outliers >= 1
+    assert not report.outliers_advisory
+
+
+def test_validate_series_outliers_advisory_for_fat_tailed_classes() -> None:
+    # Fat-tailed alt-data (macro/positioning/fundamental): a crisis-sized move is SIGNAL, not
+    # corruption, so the same spike is COUNTED but does NOT reject (advisory). Negative tripwire:
+    # dropping these classes from advisory_outlier_classes re-rejects the series.
+    weeks = np.arange(np.datetime64("2024-01-02"), np.datetime64("2024-03-26"),
+                      np.timedelta64(7, "D")).astype("datetime64[ns]")
+    vals = np.array([1.0, 1.1, 1.05, 0.95, 1.2, 1.0, 1000.0, 1.1, 1.05, 0.9, 1.15, 1.0])
+    rel = weeks + np.timedelta64(3, "D")
+    for cls in ("macro", "positioning", "fundamental"):
+        spike = SeriesData(SeriesRef("fred", "VIXCLS", cls), weeks, vals[: weeks.shape[0]], rel)
+        report = validate_series(spike)
+        assert report.passed, f"{cls} outlier should be advisory, not a reject"
+        assert report.n_outliers >= 1
+        assert report.outliers_advisory
+        # tripwire: with no advisory classes the spike hard-rejects again.
+        assert not validate_series(spike, advisory_outlier_classes=frozenset()).passed
 
 
 # ------------------------------------------------------------------ catalog + protocol ----
