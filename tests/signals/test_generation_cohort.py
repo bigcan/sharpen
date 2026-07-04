@@ -11,6 +11,9 @@ noise-admission bug is back.
 """
 from __future__ import annotations
 
+from math import sqrt
+from statistics import NormalDist
+
 import numpy as np
 import pytest
 
@@ -306,3 +309,129 @@ def test_analytic_floor_returns_none_when_pool_too_correlated() -> None:
     fcfg = FitnessConfig(combiner_window=63, combiner_min_periods=20)
     ev = evaluate_cohort_analytic(pool, base, ts, _ccfg(max_pairwise_corr=0.30), fcfg)
     assert ev is None
+
+
+# ------------------------------------------------------------------------------------------
+# TRIPWIRE COH-1 — rho_bar MUST stay SIGNED (not |.|). A net-negative-correlation cohort
+# legitimately raises the combined Sharpe, so the noise benchmark must be credited the SAME
+# diversification: signed rho_bar keeps SR*_cohort a conservative floor. This fails if anyone
+# "hardens" mean_offdiagonal_corr from `vals.mean()` to `np.abs(vals).mean()`.
+# ------------------------------------------------------------------------------------------
+def test_rho_bar_is_signed_not_abs_tripwire() -> None:
+    """NEGATIVE test pinning the SIGNED convention of ``mean_offdiagonal_corr`` and WHY it matters.
+
+    Mutation guarded: cohort.py ``mean_offdiagonal_corr`` return ``float(vals.mean())`` -->
+    ``float(np.abs(vals).mean())``.
+
+    (1) A corr matrix with net-negative off-diagonals must yield a NEGATIVE rho_bar; the abs
+        mutation returns +0.30 and this assertion flips.
+    (2) For that negative rho, the ensemble multiplier (the diversification credit the NOISE
+        benchmark receives) must be STRICTLY GREATER than at |rho| — signed anti-correlation
+        buys real Sharpe amplification, raising SR*_cohort into a stricter floor. Under the
+        mutation rho_bar == |rho_bar|, so the two multipliers are EQUAL and this flips too.
+    """
+    # net-negative off-diagonal correlation matrix (a genuinely diversifying cohort)
+    corr = np.array([
+        [1.0, -0.4, -0.3],
+        [-0.4, 1.0, -0.2],
+        [-0.3, -0.2, 1.0],
+    ])
+    rho = mean_offdiagonal_corr(corr)
+    # (1) signed mean is negative; np.abs(vals).mean() would return +0.30 -> assertion flips
+    assert rho == pytest.approx(-0.3), f"rho_bar must be the SIGNED mean, got {rho}"
+    assert rho < 0.0, "net-negative off-diagonals must give a NEGATIVE rho_bar (abs mutation -> positive)"
+
+    # (2) signed rho credits MORE diversification than |rho| -> higher SR*_cohort (stricter floor).
+    #     Under the abs mutation rho == abs(rho), so these become equal and the strict > flips.
+    m = corr.shape[0]
+    mult_signed = ensemble_multiplier(m, rho)
+    mult_abs = ensemble_multiplier(m, abs(rho))
+    assert mult_signed > mult_abs, (
+        "signed negative rho_bar must give MORE ensemble credit than |rho_bar| "
+        f"(signed={mult_signed:.4f} vs abs={mult_abs:.4f}); an abs-mutation makes them equal"
+    )
+    # sanity: negative-rho multiplier exceeds the uncorrelated sqrt(m) endpoint
+    assert mult_signed > np.sqrt(m)
+
+
+def test_rho_bar_signed_from_return_streams_tripwire() -> None:
+    """Same SIGNED-rho property driven end-to-end through ``pairwise_corr_matrix`` from anti-
+    correlated return streams (guards the mutation via the realized-cohort path the evaluator uses).
+
+    Streams b := -a + small noise and c := -a + small noise are each strongly anti-correlated with
+    a; their pairwise-corr matrix has net-negative off-diagonals, so ``mean_offdiagonal_corr`` must
+    be negative. ``np.abs(vals).mean()`` would return a large POSITIVE value -> assertion (1) flips.
+    """
+    rng = np.random.default_rng(20260704)
+    t = 4000
+    a = rng.normal(size=t)
+    b = -a + 0.05 * rng.normal(size=t)   # strongly anti-correlated with a
+    c = -a + 0.05 * rng.normal(size=t)   # strongly anti-correlated with a (=> b,c positively corr)
+    names, corr = pairwise_corr_matrix({"a": a, "b": b, "c": c})
+    rho = mean_offdiagonal_corr(corr)
+    # two of three off-diagonals are ~-1 and one (~b,c) is ~+1, net mean is negative
+    assert rho < 0.0, f"net-negative off-diagonals must give a NEGATIVE rho_bar, got {rho}"
+    m = len(names)
+    assert ensemble_multiplier(m, rho) > ensemble_multiplier(m, abs(rho))
+
+
+# ------------------------------------------------------------------------------------------
+# TRIPWIRE COH-3 — the z->Phi transform in cohort_dsr is INDEPENDENTLY pinned.
+# The m=1 anchor (test_m1_matches_audited_dsr_sr_star) only pins SR*_cohort at a LOOSE <2%
+# and shares deflated_sharpe_ratio's own z->Phi path, so a sub-2% or coordinated drift in the
+# Mertens variance bracket, the sqrt(n_obs-1) factor, or the erf-based Phi would pass silently.
+# These recompute z and Phi(z) from first principles with statistics.NormalDist().cdf (NOT
+# cohort.py's erf-based _phi) and assert equality to 1e-9.
+# ------------------------------------------------------------------------------------------
+def _independent_cohort_dsr(sr_book, sr_star, n_obs, skew, excess_kurt):
+    """Reference DSR_cohort computed with NormalDist().cdf (independent of cohort._phi)."""
+    bracket = 1.0 - skew * sr_book + ((excess_kurt + 2.0) / 4.0) * sr_book ** 2
+    z = (sr_book - sr_star) * sqrt(n_obs - 1) / sqrt(max(bracket, 1e-12))
+    return z, max(0.0, min(1.0, NormalDist().cdf(z)))
+
+
+def test_cohort_dsr_ztransform_pinned_full_mertens_bracket() -> None:
+    """Nonzero skew AND excess_kurt: pins the FULL Mertens bracket + sqrt(n_obs-1) + Phi.
+
+    Inputs chosen so every term is load-bearing: skew=-0.7 (skew term nonzero, sign matters),
+    excess_kurt=4.5 (kurtosis term != the +2/4 baseline), n_obs=260 (sqrt(n_obs-1) != trivial).
+    Verified against a real source mutation: flipping `1.0 - skew*sr_book` -> `1.0 + skew*sr_book`
+    yields 0.8774455809223674 and fails this assertion, while the zero-moment test below cannot
+    catch it (skew term vanishes) -- which is exactly why both cases exist.
+    """
+    sr_book, sr_star, n_obs, skew, ek = 0.12, 0.05, 260, -0.7, 4.5
+    z_ref, phi_ref = _independent_cohort_dsr(sr_book, sr_star, n_obs, skew, ek)
+    # Helper-regression guards (pin the reference helper so a refactor cannot mask drift):
+    assert z_ref == pytest.approx(1.070522161898129, abs=1e-9)
+    assert phi_ref == pytest.approx(0.857807830538484, abs=1e-12)
+    # Source-biting assertions (these flip under every mutation of cohort_dsr's z->Phi transform):
+    got = cohort_dsr(sr_book, sr_star, n_obs=n_obs, skew=skew, excess_kurt=ek)
+    assert got == pytest.approx(phi_ref, abs=1e-9)
+    assert got == pytest.approx(0.857807830538484, abs=1e-9)
+
+
+def test_cohort_dsr_ztransform_pinned_zero_higher_moments() -> None:
+    """Zero skew/kurt isolates sqrt(n_obs-1) and the erf-based Phi (bracket -> 1 + SR^2/2)."""
+    sr_book, sr_star, n_obs = 0.15, 0.05, 101
+    z_ref, phi_ref = _independent_cohort_dsr(sr_book, sr_star, n_obs, 0.0, 0.0)
+    assert z_ref == pytest.approx(0.9944220203272566, abs=1e-9)
+    got = cohort_dsr(sr_book, sr_star, n_obs=n_obs, skew=0.0, excess_kurt=0.0)
+    assert got == pytest.approx(phi_ref, abs=1e-9)
+    assert got == pytest.approx(0.8399912739840301, abs=1e-9)
+
+
+def test_cohort_dsr_nobs_below_3_is_nan() -> None:
+    """n_obs<3 -> NaN edge branch (sqrt(n_obs-1) undefined/degenerate).
+
+    Verified: weakening the `n_obs < 3` guard (e.g. to `n_obs < 0`) makes n_obs=2 return a real
+    0.5278... instead of NaN, flipping this assertion.
+    """
+    assert np.isnan(cohort_dsr(0.12, 0.05, n_obs=2, skew=0.0, excess_kurt=0.0))
+    assert np.isnan(cohort_dsr(0.12, 0.05, n_obs=0, skew=-0.7, excess_kurt=4.5))
+
+
+def test_cohort_dsr_nonfinite_input_is_nan() -> None:
+    """Non-finite sr_book or sr_star_cohort -> NaN edge branch."""
+    assert np.isnan(cohort_dsr(float("nan"), 0.05, n_obs=260, skew=0.0, excess_kurt=0.0))
+    assert np.isnan(cohort_dsr(0.12, float("inf"), n_obs=260, skew=0.0, excess_kurt=0.0))
+    assert np.isnan(cohort_dsr(float("inf"), 0.05, n_obs=260, skew=-0.7, excess_kurt=4.5))

@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from typing import Mapping
 
 import numpy as np
+import pandas as pd
 
 from finrl_pro_ds.envs.allocator_factory import dynamic_sleeve_alphas
 
@@ -113,7 +114,15 @@ def assemble_overlay_pool(
     admits from precisely the streams the pool-diversity instrument measured. Returns
     ``(returns, culled)``; ``culled`` are formulas :func:`_overlay_returns` rejected as degenerate
     (all-NaN / globally constant → None). Source/asset-class labelling is a diversity-REPORT concern
-    and stays caller-side (it would pull a crucible import into this pure signals module)."""
+    and stays caller-side (it would pull a crucible import into this pure signals module).
+
+    ``culled`` is the pre-registered "hard-infeasible / leak-culled" EXCLUSION (Doc 1 Algorithm step 1;
+    Doc 2 §3.1): the deflation N is "all scored candidates with a **finite, non-degenerate** return
+    stream" == ``len(returns)``, NOT ``len(returns) + len(culled)``. ``n_culled`` is recorded on the
+    verdict for provenance only; it must NEVER feed ``n_candidates_seen``/``SR*_cohort`` (that would
+    over-count N, break the m=1 BLdP calibration anchor, and desync from the MC null which re-admits
+    exactly these ``len(returns)`` columns). LOCKED BY
+    ``test_cohort_eval.py::test_n_candidates_seen_excludes_culled_not_all_scored``."""
     returns: dict[str, np.ndarray] = {}
     culled: list[str] = []
     for name, formula in overlay_formulas.items():
@@ -150,6 +159,35 @@ def _frozen_weight_book(returns_ho: Mapping[str, np.ndarray],
     return np.nansum(a[None, :] * r, axis=1)
 
 
+def _last_confirmed_month_end_idx(ts_train: np.ndarray) -> int:
+    """Index into ``ts_train`` of the LAST CONFIRMED month-end held under ``monthly_meta`` — the bar
+    whose combiner weights Doc 2 §4 requires the holdout guard to freeze. Derived from ``ts_train``
+    ALONE via the SAME convention the combiner's ``_monthly_held`` uses (pandas period ``'M'``,
+    groupby-max), so it lands on a bar the combiner actually rotated on.
+
+    The combiner flags each month's max-index bar as a rotation point; on a span truncated MID-month
+    the in-progress FINAL bar is falsely one of them (the P2-01 truncation caveat in
+    ``allocator_factory.monthly_rebal_conviction``). We accept the final bar as a confirmed month-end
+    ONLY when it is the true last calendar day of its month (``day == days_in_month`` — a property of
+    that timestamp alone, no look-ahead); otherwise we drop it and take the previous month's rotation
+    bar. Falls back to ``T-1`` (byte-identical to the old ``[-1]``) when no confirmed interior
+    month-end exists in the span (a single partial month), so short spans are unaffected. Causal:
+    reads only ``ts_train`` (train-span timestamps)."""
+    ts = np.asarray(ts_train, dtype=np.int64)
+    T = int(ts.size)
+    if T == 0:
+        return 0
+    dt = pd.to_datetime(ts, unit="s")
+    months = dt.to_period("M")
+    last_of_month = pd.Series(np.arange(T)).groupby(months.values).max().to_numpy()
+    final = dt[-1]
+    final_is_true_month_end = bool(final.day == final.days_in_month)
+    confirmed = [int(i) for i in last_of_month if (i < T - 1) or final_is_true_month_end]
+    if not confirmed:
+        return T - 1                      # single partial month → old [-1] behaviour (safe fallback)
+    return max(confirmed)
+
+
 def _cohort_holdout_guard(
     members: tuple[str, ...],
     base_train: Mapping[str, np.ndarray],
@@ -163,17 +201,21 @@ def _cohort_holdout_guard(
     """Doc 2 §4 guard: freeze the observed cohort's members AND combiner weights from the TRAIN
     pipeline, apply them (no re-estimation) to the embargoed holdout tail, and require the
     **annualized** ΔSR there ``≥ min_book_uplift``. Two frozen weight vectors — combine(base∪members)
-    (cohort book, redundancy ON) and combine(base) (base book) — both taken at the last train bar
-    (== the last month-end held α under ``monthly_meta``). Returns ``(annualized_delta_sr, passes)``;
-    ``(nan, False)`` if either book Sharpe is undefined."""
+    (cohort book, redundancy ON) and combine(base) (base book) — both frozen at the LAST CONFIRMED
+    month-end within ``ts_train`` (:func:`_last_confirmed_month_end_idx`; the in-progress final bar is
+    a partial-month α on a mid-month-truncated span — the P2-01 truncation caveat in
+    ``allocator_factory.monthly_rebal_conviction`` — so freezing ``[-1]`` would book the holdout under
+    a partial-month weight; byte-identical to ``[-1]`` when the span ends on a true month-end).
+    Returns ``(annualized_delta_sr, passes)``; ``(nan, False)`` if either book Sharpe is undefined."""
     member_train = {m: np.asarray(pool_train[m], dtype=np.float64) for m in members}
     member_ho = {m: np.asarray(pool_ho[m], dtype=np.float64) for m in members}
     aug_cfg = _with_redundancy(fcfg, ccfg.combiner_redundancy_strength)   # cohort book: redundancy ON
 
     a_aug = _alpha_paths({**dict(base_train), **member_train}, ts_train, aug_cfg)
     a_base = _alpha_paths(dict(base_train), ts_train, fcfg)
-    frozen_aug = {s: float(np.asarray(a_aug[s], dtype=np.float64)[-1]) for s in a_aug}
-    frozen_base = {s: float(np.asarray(a_base[s], dtype=np.float64)[-1]) for s in a_base}
+    me = _last_confirmed_month_end_idx(ts_train)   # last CONFIRMED month-end (P2-01: NOT the tail)
+    frozen_aug = {s: float(np.asarray(a_aug[s], dtype=np.float64)[me]) for s in a_aug}
+    frozen_base = {s: float(np.asarray(a_base[s], dtype=np.float64)[me]) for s in a_base}
 
     book_aug = _frozen_weight_book({**dict(base_ho), **member_ho}, frozen_aug)
     book_base = _frozen_weight_book(dict(base_ho), frozen_base)
