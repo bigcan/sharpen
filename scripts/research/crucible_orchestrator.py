@@ -74,8 +74,13 @@ def _panel_ts(panel: Panel) -> np.ndarray:
     return panel.dates.astype("datetime64[s]").astype(np.int64).astype(np.float64)
 
 
-def _synthetic_panel(t: int, n: int, *, seed: int = 0) -> Panel:
-    """A NOISE OHLCV panel carrying a ``macro:regime`` feature slot (drives the overlay path)."""
+def _synthetic_panel(t: int, n: int, *, seed: int = 0, n_feature_slots: int = 1) -> Panel:
+    """A NOISE OHLCV panel carrying ``n_feature_slots`` macro feature slots (drive the overlay path).
+
+    Default 1 (just ``macro:regime``) — byte-identical to the historic single-slot panel. Passing more
+    adds mutually-independent ``macro:X{i}`` random-walk slots so the overlay pool has de-correlated
+    breadth and the opt-in weak-signal COHORT gate can actually form a cohort. The extra draws happen
+    AFTER the regime draw, so the 1-slot default leaves the downstream RNG stream untouched."""
     rng = np.random.default_rng(seed)
     base = np.cumsum(0.01 * rng.standard_normal((t, n)), axis=0)
     close = np.exp(base + rng.uniform(3.0, 5.0, size=n))
@@ -87,10 +92,13 @@ def _synthetic_panel(t: int, n: int, *, seed: int = 0) -> Panel:
              ).astype("datetime64[ns]")
     regime = (np.sin(2.0 * np.pi * np.arange(t) / 80.0) + 0.2 * rng.standard_normal(t)
               ).astype(np.float64)
+    slots = {"macro:regime": regime}
+    for i in range(max(0, n_feature_slots - 1)):
+        slots[f"macro:X{i:02d}"] = np.cumsum(0.05 * rng.standard_normal(t)).astype(np.float64)
     return Panel(dates, tuple(f"S{i:02d}" for i in range(n)), open_, high, low, close, vol,
                  np.ones((t, n), bool), close * vol, rng.integers(0, 4, size=n),
                  {"survivorship_free": True, "source": "synthetic_noise"},
-                 feature_slots={"macro:regime": regime})
+                 feature_slots=slots)
 
 
 def _proxy_base_sleeves(panel: Panel, hold: int = 21) -> dict[str, np.ndarray]:
@@ -130,7 +138,7 @@ def _build_substrate(args, cfg, ek, meta) -> tuple[Substrate, DataCatalog]:
 
     def prepare() -> PreparedSubstrate:
         if args.mode == "synthetic":
-            panel = _synthetic_panel(args.t, args.n)
+            panel = _synthetic_panel(args.t, args.n, n_feature_slots=args.synthetic_slots)
             base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
         elif meta["panel"] == "taiwan":
             from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
@@ -195,6 +203,7 @@ def _write_recipe(out_dir: Path, substrate_id: str, tick_ts: str, args) -> None:
     # (the eligibility flag gates scheduled discovery, not an explicit re-execution of a past run).
     argv = [
         "--mode", "synthetic", "--t", str(args.t), "--n", str(args.n),
+        "--synthetic-slots", str(args.synthetic_slots),
         "--max-proposals", str(args.max_proposals), "--max-candidates", str(args.max_candidates),
         "--start-ts", tick_ts, "--nights", "1", "--config", args.config,
         "--lockbox-config", args.lockbox_config, "--force",
@@ -203,6 +212,13 @@ def _write_recipe(out_dir: Path, substrate_id: str, tick_ts: str, args) -> None:
         # keep the recipe's argv faithful to how this run was actually invoked (lockbox enrollment
         # does not affect the manifest/verdicts either way, but the recipe should still match argv).
         argv.append("--no-lockbox")
+    # The cohort gate DOES affect the manifest (pinned cohort verdicts + card hashes), so the recipe
+    # MUST re-run with the SAME cohort config — otherwise `crucible reproduce` would silently re-run
+    # with the disabled default and drop the cohort provenance it is supposed to be verifying.
+    if args.no_cohort:
+        argv.append("--no-cohort")
+    else:
+        argv += ["--cohort-config", args.cohort_config]
     recipe = {
         "kind": "synthetic_orchestrator",
         "script": "scripts/research/crucible_orchestrator.py",
@@ -231,6 +247,10 @@ def main() -> int:
     ap.add_argument("--end", default=None)
     ap.add_argument("--t", type=int, default=900)
     ap.add_argument("--n", type=int, default=18)
+    ap.add_argument("--synthetic-slots", type=int, default=1,
+                    help="synthetic mode only: number of macro feature slots (default 1 = the historic "
+                         "single-slot panel; use >=5 to give the overlay pool de-correlated breadth so "
+                         "the opt-in weak-signal cohort gate can form a cohort)")
     ap.add_argument("--max-proposals", type=int, default=32)
     ap.add_argument("--max-candidates", type=int, default=256, help="per-tick candidate cap (CR-7)")
     ap.add_argument("--start-ts", default=None,

@@ -86,9 +86,11 @@ def test_cohort_enabled_attaches_card_and_manifest_provenance(tmp_path) -> None:
     assert card.n_members >= _CCFG.min_cohort_size
     assert card.funnel_gates_hash == "ffff" and card.cohort_gates_hash == "dd563b4b4f7c"
     assert card.incubation_status == "PENDING_P4" and card.eligible_for_human_gate is False
-    # manifest provenance carried in the forward-compat sidecar
-    assert r.manifest.extra["cohort_gates_hash"] == "dd563b4b4f7c"
-    assert r.manifest.extra["cohort_verdicts"] == {card.cohort_hash: card.verdict}
+    # cohort provenance pinned into the reproduce contract (typed manifest fields, not `extra`)
+    assert r.manifest.extra == {}
+    assert r.manifest.cohort_gates_hash == "dd563b4b4f7c"
+    assert r.manifest.cohort_verdicts == {card.cohort_hash: card.verdict}
+    assert r.manifest.cohort_card_hashes == {card.cohort_hash: card.content_hash()}
 
 
 def test_cohort_enabled_is_deterministic_and_null_safe(tmp_path) -> None:
