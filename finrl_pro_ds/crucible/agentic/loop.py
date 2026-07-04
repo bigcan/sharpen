@@ -19,12 +19,19 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ...signals.features import Panel
+from ...signals.generation.cohort import CohortConfig
+from ...signals.generation.cohort_eval import (
+    derive_cohort_seed,
+    evaluate_cohort,
+    pool_content_hash,
+)
 from ...signals.generation.evolve import Candidate, GenerationReport, evolve
 from ...signals.generation.fitness import FitnessConfig
 from ...signals.generation.grammar import available_terminals
 from ..ledger import TrialRecord
 from ..manifest import RunManifest
 from .card import DiscoveryCard
+from .cohort_card import CohortCard, card_from_verdict
 from .hypothesis import HypothesisAuthor, PreRegisteredSpec, candidate_hash
 
 log = logging.getLogger("crucible.loop")
@@ -45,6 +52,7 @@ class HypothesisLoopResult:
     manifest: RunManifest
     n_promising: int = 0
     dropped: int = 0                              # proposals rejected pre-compute (dedup/killed/parse)
+    cohort_cards: list[CohortCard] = field(default_factory=list)   # Phase 4: opt-in cohort verdicts
     extra: dict = field(default_factory=dict)
 
 
@@ -105,6 +113,9 @@ def run_hypothesis_loop(
     data_snapshot_hash: str | None = None,
     token_cost: int | None = 0,
     pre_proposed: list[PreRegisteredSpec] | None = None,
+    cohort_cfg: CohortConfig | None = None,
+    cohort_mc_kwargs: dict | None = None,
+    cohort_gates_hash: str | None = None,
 ) -> HypothesisLoopResult:
     """Run one manual pass. ``evolve_kwargs`` is the runner block from ``load_generation_config``
     (rng_seed/pop_size/… — WITHOUT ``candidate_type``, which the loop sets per group).
@@ -165,14 +176,58 @@ def run_hypothesis_loop(
             cards.append(_card_for(c, ct, report, prereg_by_hash, crucible_version=crucible_version,
                                    gates_hash=gates_hash, data_snapshot_hash=data_snapshot_hash))
 
+    # --- Cohort gate (Phase 4, Doc 1/2): OPT-IN weak-signal ensemble over THIS tick's OVERLAY pool.
+    # Reads scored return streams only (post-moat, CR-1). Disabled ⇒ no-op AND manifest byte-identical
+    # (cohort_extra stays {} → RunManifest.extra default). Caps at PROMISING (Tier-2 for capital). ----
+    cohort_cards, cohort_extra = _evaluate_cohort_gate(
+        specs=specs, panel=panel, base_returns=base_returns, timestamps=timestamps, cfg=cfg, ek=ek,
+        run_id=run_id, crucible_version=crucible_version, gates_hash=gates_hash,
+        proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash, cohort_cfg=cohort_cfg,
+        cohort_mc_kwargs=cohort_mc_kwargs, cohort_gates_hash=cohort_gates_hash)
+
     n_after = ledger.count()
     manifest = RunManifest(
         run_id=run_id, crucible_version=crucible_version, gates_hash=gates_hash,
         proposal_ts=proposal_ts, rng_seeds={"generation": int(ek.get("rng_seed", 7))},
         file_drawer_N_before=n_before, file_drawer_N_after=n_after,
         data_snapshot_hash=data_snapshot_hash, agent_model_id=author.proposer.model_id,
-        token_cost=token_cost, verdicts=verdicts)
+        token_cost=token_cost, verdicts=verdicts, extra=cohort_extra)
 
     return HypothesisLoopResult(
         specs=specs, reports=reports, cards=cards, manifest=manifest,
-        n_promising=len(cards), dropped=dropped)
+        n_promising=len(cards), dropped=dropped, cohort_cards=cohort_cards)
+
+
+def _evaluate_cohort_gate(
+    *, specs: list[PreRegisteredSpec], panel: Panel, base_returns: dict[str, np.ndarray],
+    timestamps: np.ndarray, cfg: FitnessConfig, ek: dict, run_id: str, crucible_version: str,
+    gates_hash: str, proposal_ts: str, data_snapshot_hash: str | None,
+    cohort_cfg: CohortConfig | None, cohort_mc_kwargs: dict | None, cohort_gates_hash: str | None,
+) -> tuple[list[CohortCard], dict]:
+    """Run the opt-in cohort gate on the tick's OVERLAY specs; return ``(cohort_cards, manifest_extra)``.
+    A no-op (returns ``([], {})``, so the manifest stays byte-identical) when the gate is disabled, no
+    cohort config is attached, there are no overlay specs, or no cohort can form (Doc 2 §5)."""
+    if not (cohort_cfg is not None and cohort_mc_kwargs and cohort_mc_kwargs.get("enabled")):
+        return [], {}
+    overlay_formulas = {pr.candidate_hash: pr.formula
+                        for pr in specs if pr.spec.candidate_type == "overlay"}
+    if not overlay_formulas:
+        return [], {}
+    pch = pool_content_hash(overlay_formulas)
+    cgh = cohort_gates_hash or ""
+    seed = derive_cohort_seed(gates_hash, cgh, pch, run_id)
+    verdict = evaluate_cohort(
+        panel, base_returns, timestamps, overlay_formulas, cohort_cfg, cfg,
+        mc_kwargs=cohort_mc_kwargs, cost_bps=float(ek.get("cost_bps", 0.0010)),
+        holdout_frac=float(ek.get("holdout_frac", 0.25)),
+        holdout_embargo=int(ek.get("holdout_embargo", 21)), seed=seed)
+    if verdict is None:
+        return [], {}
+    card = card_from_verdict(
+        verdict, crucible_version=crucible_version, funnel_gates_hash=gates_hash,
+        cohort_gates_hash=cgh, proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash)
+    log.info("cohort gate: %s (p=%.4f, holdout ΔSR=%.3f, %d members of %d seen)",
+             verdict.verdict, verdict.mc_p_value, verdict.holdout_delta_sr,
+             verdict.n_members, verdict.n_candidates_seen)
+    extra = {"cohort_gates_hash": cgh, "cohort_verdicts": {card.cohort_hash: card.verdict}}
+    return [card], extra

@@ -51,6 +51,7 @@ from finrl_pro_ds.crucible import (  # noqa: E402
     Substrate,
     TickBudget,
     TrialLedger,
+    gates_hash,
     load_incubation_criterion,
     run_orchestrator_tick,
 )
@@ -58,6 +59,7 @@ from finrl_pro_ds.crucible.orchestrator.orchestrator import _safe  # noqa: E402
 from finrl_pro_ds.crucible.orchestrator.substrate import PreparedSubstrate  # noqa: E402
 from finrl_pro_ds.signals.features import Panel  # noqa: E402
 from finrl_pro_ds.signals.generation.config import (  # noqa: E402
+    load_cohort_config,
     load_generation_config,
     load_generation_meta,
 )
@@ -65,6 +67,7 @@ from finrl_pro_ds.signals.generation.config import (  # noqa: E402
 log = logging.getLogger("crucible_orchestrator")
 DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 DEFAULT_LOCKBOX_GATES = ROOT / "configs" / "crucible_lockbox.gates.yaml"
+DEFAULT_COHORT_GATES = ROOT / "configs" / "crucible_cohort.gates.yaml"
 
 
 def _panel_ts(panel: Panel) -> np.ndarray:
@@ -167,9 +170,19 @@ def _build_substrate(args, cfg, ek, meta) -> tuple[Substrate, DataCatalog]:
     lockbox = None if args.no_lockbox else Lockbox(out_dir / "lockbox.db")
     incubation_criterion = (None if args.no_lockbox
                             else load_incubation_criterion(args.lockbox_config))
+    # Phase 4 weak-signal COHORT gate (opt-in, disabled by default in the gates file). --no-cohort
+    # detaches it entirely (the pure byte-identical pre-cohort path for reproduce/testing). The reused
+    # funnel floors come from --config's generation block; the cohort knobs from --cohort-config, whose
+    # OWN hash is pinned so the frozen funnel gates_hash stays untouched.
+    if args.no_cohort:
+        cohort_cfg = cohort_mc = cohort_ghash = None
+    else:
+        cohort_cfg, cohort_mc = load_cohort_config(args.config, args.cohort_config)
+        cohort_ghash = gates_hash(args.cohort_config)
     sub = Substrate(substrate_id=substrate_id, prepare=prepare, ledger=ledger, cfg=cfg,
                     evolve_kwargs=ek, max_proposals=args.max_proposals, lockbox=lockbox,
-                    incubation_criterion=incubation_criterion)
+                    incubation_criterion=incubation_criterion, cohort_cfg=cohort_cfg,
+                    cohort_mc_kwargs=cohort_mc, cohort_gates_hash=cohort_ghash)
     return sub, catalog
 
 
@@ -228,6 +241,12 @@ def main() -> int:
     ap.add_argument("--no-lockbox", action="store_true",
                     help="disable the CR-8 forward-incubation lockbox (pure P3 byte-identical mode; "
                          "used by crucible reproduce / testing)")
+    ap.add_argument("--cohort-config", default=str(DEFAULT_COHORT_GATES),
+                    help="Phase-4 weak-signal cohort gates YAML (kept separate from --config so the "
+                         "frozen funnel gates_hash is untouched; disabled by default in the file)")
+    ap.add_argument("--no-cohort", action="store_true",
+                    help="detach the weak-signal cohort gate entirely (pure pre-cohort byte-identical "
+                         "path; used by crucible reproduce / testing)")
     ap.add_argument("--no-altdata-slots", action="store_true",
                     help="real mode only: skip bridging macro/positioning/fundamental connector "
                          "series into Panel feature slots (mine the cross-sectional bank only)")

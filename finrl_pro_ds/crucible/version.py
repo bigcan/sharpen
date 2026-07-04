@@ -64,6 +64,19 @@ scores a candidate (CR-1), and NO gate byte changes — so the frozen ``crucible
 is again IDENTICAL. The governance layer NEVER promotes or runs the audit; capital still requires a
 human-initiated Tier-2 (CLAUDE.md). This completes the spec's phased roadmap (P0–P5).
 
+`crucible-v2.7` is the Phase-4 **MINOR** bump: the weak-signal COHORT evaluator wired into the live
+loop (``signals/generation/cohort_eval.py`` — assemble overlay pool → analytic ``SR*_cohort``
+pre-filter (Doc 1) → selection-aware MC null (Doc 2 §3) → embargoed holdout guard (Doc 2 §4) — plus
+the ``CohortCard`` artifact and the orchestrator fold + online-FDR charge for a cohort test). It ADDS
+an OPT-IN downstream gate that emits a NEW verdict (cohort PROMISING) DOWNSTREAM of the funnel — it
+changes NO existing per-candidate verdict, and its gates live in their OWN file
+(``configs/crucible_cohort.gates.yaml``) precisely so the frozen ``crucible-v2.0`` funnel gates_hash
+(the moat, ``519158fa1450``) stays IDENTICAL — directly analogous to the v2.5 lockbox precedent. With
+``cohort.enabled: false`` (the default) the path never runs and the tick is byte-identical to v2.6.
+The cohort's within-selection multiplicity is controlled by the MC null; its across-tick repetition
+charges one online-FDR test (ADR-4). Everything still caps at PROMISING — a cleared cohort requires a
+human-initiated Tier-2 deep lifecycle audit before any capital (CLAUDE.md).
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -75,9 +88,9 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v2.6 = P5 breadth (GDELT/EDGAR/Stooq + Data Scout) + governance handoff + reproduce; MINOR, funnel
-# gates_hash UNCHANGED (this layer sits around the funnel and touches no gate byte).
-CRUCIBLE_VERSION = "crucible-v2.6"
+# v2.7 = Phase-4 weak-signal cohort evaluator (opt-in downstream gate, own gates file); MINOR, funnel
+# gates_hash UNCHANGED (519158fa1450) — no existing verdict changed, cohort disabled by default.
+CRUCIBLE_VERSION = "crucible-v2.7"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

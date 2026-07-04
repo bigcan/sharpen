@@ -32,6 +32,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..agentic.card import DiscoveryCard
+from ..agentic.cohort_card import CohortCard
 from ..agentic.hypothesis import HypothesisAuthor
 from ..agentic.loop import HypothesisLoopResult, run_hypothesis_loop
 from ..lockbox.incubation import forward_evidence
@@ -70,6 +71,9 @@ class SubstrateTickOutcome:
     budget_breached: bool = False
     result: HypothesisLoopResult | None = None
     cards: list[DiscoveryCard] = field(default_factory=list)
+    # Phase 4 cohort gate (opt-in; empty when the substrate has no cohort config or none formed).
+    n_cohort_promising: int = 0
+    cohort_cards: list[CohortCard] = field(default_factory=list)
     # CR-8 lockbox (P4): survivors enrolled this tick + the forward-incubation pass results.
     n_enrolled: int = 0               # PROMISING cards enrolled into the lockbox this tick
     n_incubating: int = 0             # active entries still accruing (below the horizon)
@@ -180,7 +184,9 @@ def run_orchestrator_tick(
             timestamps=prepared.timestamps, cfg=sub.cfg, evolve_kwargs=sub.evolve_kwargs,
             author=author, run_id=run_id, crucible_version=crucible_version, gates_hash=ghash,
             proposal_ts=tick_ts, catalog_asset_classes=prepared.asset_classes,
-            data_snapshot_hash=snap, token_cost=est_tokens, pre_proposed=fresh_specs)
+            data_snapshot_hash=snap, token_cost=est_tokens, pre_proposed=fresh_specs,
+            cohort_cfg=sub.cohort_cfg, cohort_mc_kwargs=sub.cohort_mc_kwargs,
+            cohort_gates_hash=sub.cohort_gates_hash)
 
         # --- online-FDR: charge one test per pre-registered spec (deterministic order) ------------
         promising_hashes = {c.candidate_hash for c in result.cards}
@@ -191,6 +197,14 @@ def run_orchestrator_tick(
             charged = fdr.observe(is_discovery=(pr.candidate_hash in promising_hashes))
             sub.ledger.update_fdr_charge(pr.candidate_hash, charged)
             fdr_total += charged
+        # ADR-4: a cohort EVALUATED this tick is ONE additional online-FDR test, charged
+        # deterministic-LAST so the per-candidate LORD++ order/charges are untouched. The within-cohort
+        # selection multiplicity is already handled by the MC null; this charge accounts for the
+        # across-tick repetition of attempting a cohort (the Fable finding #1 lesson). A cohort has no
+        # ledger row, so it is NOT recorded via ledger.update_fdr_charge (which is per-candidate).
+        n_cohort_promising = sum(1 for c in result.cohort_cards if c.verdict == "PROMISING")
+        if result.cohort_cards:
+            fdr_total += fdr.observe(is_discovery=(n_cohort_promising > 0))
         store.save_fdr(sub.substrate_id, fdr)
 
         # --- CR-8 lockbox: enroll every PROMISING survivor (idempotent). A fresh entry is INCUBATING
@@ -211,12 +225,15 @@ def run_orchestrator_tick(
             n_preregistered=n_fresh, n_scored=n_scored, n_promising=result.n_promising,
             fdr_charged_total=fdr_total, fdr_num_tests=fdr.num_tests, burst_target=burst.target,
             result=result, cards=tick_cards,
+            n_cohort_promising=n_cohort_promising, cohort_cards=list(result.cohort_cards),
             **_lockbox_fields(sub, incubated + enrolled, n_enrolled=len(enrolled))))
 
         if out_dir is not None:
             sub_dir = Path(out_dir) / _safe(sub.substrate_id) / _safe(tick_ts)
             for card in tick_cards:
                 card.write(sub_dir / "cards")
+            for cohort_card in result.cohort_cards:            # Phase 4: cohort verdicts beside cards
+                cohort_card.write(sub_dir / "cards")
             result.manifest.write(sub_dir)
 
     return OrchestratorTickResult(tick_ts=tick_ts, gates_hash=ghash,
