@@ -413,6 +413,15 @@ def evaluate_cohort_analytic(
     sr_cohort_only = _per_period_sharpe(bclean)
     disp = [float(s) for s in scores.values() if np.isfinite(s)]
     sigma_trials = float(np.std(disp, ddof=1)) if len(disp) >= 2 else float("nan")
+    # Deflation N = size of THIS pool = "all scored candidates with a finite, non-degenerate return
+    # stream, incl. LOGGED" (Doc 1 Algorithm step 1; Doc 2 §2 MEDIUM/pool + §3.1). Degenerate
+    # (all-NaN / globally-constant) streams are the pre-registered "hard-infeasible / leak-culled"
+    # EXCLUSION — the orchestrator drops them upstream (assemble_overlay_pool → n_culled) and they
+    # must NOT be added back here: doing so would (i) over-count N (over-conservative, spec-violating),
+    # (ii) break the m=1 reduction to the audited BLdP SR* (calibration anchor), and (iii) desync this
+    # analytic N from the MC null's effective N, which resamples/re-admits EXACTLY these len(pool)
+    # columns (cohort_mc.mc_null_pvalue) — the null-≡-observed identity the p-value's validity rests on.
+    # LOCKED BY: test_cohort_eval.py::test_n_candidates_seen_excludes_culled_not_all_scored.
     n = len(pool)
     sr_star = cohort_sr_star(sigma_trials, len(members), n, rho_bar)
     dsr_book = cohort_dsr(
