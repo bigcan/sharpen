@@ -97,6 +97,65 @@ def load_generation_config(gates_path: str | Path) -> tuple[FitnessConfig, dict]
     return fit, evolve_kwargs
 
 
+# Cohort-evaluator + MC-null gates (Doc 1/2). An ABSENT ``cohort:`` block ⇒ these defaults ⇒ the
+# funnel gates_hash is undisturbed (opt-in, exactly like ``generation.enabled``). The reused floors
+# (promising_dsr / hlz_t_min / min_combination_uplift) are read from the ``generation:`` block so a
+# single edit keeps the cohort and per-candidate gates in lock-step (Doc 1: no threshold loosened).
+_COHORT_DEFAULTS: dict = {
+    "enabled": False,               # opt-in; absent/false ⇒ the cohort path never runs
+    "min_cohort_size": 3,
+    "max_cohort_size": 12,
+    "max_pairwise_corr": 0.35,      # admission de-dup on realized return streams (#2a)
+    "combiner_redundancy_strength": 0.5,   # λ_r for the COHORT book only (live book stays 0.0)
+    "alpha_cohort": 0.05,           # MC-null gate (new pre-registered gate, Doc 2 §3.3)
+    "mc_n_replicates": 1000,        # B — binding gate wants ≥1000 (Doc 2 §3.3); 200 for dev
+    "mc_block_length": 21,          # ℓ pinned (Politis–White fallback; ℓ-sweep test guards it)
+}
+
+
+def _validate_cohort(c: dict, g: dict) -> None:
+    if not (2 <= int(c["min_cohort_size"]) <= int(c["max_cohort_size"])):
+        raise ValueError("cohort: require 2 <= min_cohort_size <= max_cohort_size")
+    if not (0.0 < float(c["max_pairwise_corr"]) <= 1.0):
+        raise ValueError("cohort.max_pairwise_corr must be in (0, 1]")
+    if float(c["combiner_redundancy_strength"]) < 0.0:
+        raise ValueError("cohort.combiner_redundancy_strength must be >= 0")
+    if not (0.0 < float(c["alpha_cohort"]) < 1.0):
+        raise ValueError("cohort.alpha_cohort must be in (0, 1)")
+    if int(c["mc_n_replicates"]) < 1 or int(c["mc_block_length"]) < 1:
+        raise ValueError("cohort.mc_n_replicates and mc_block_length must be >= 1")
+
+
+def load_cohort_config(gates_path: str | Path) -> tuple[object, dict]:
+    """Return (CohortConfig, mc_kwargs) from a gates YAML's ``cohort:`` block (absent ⇒ defaults).
+
+    ``mc_kwargs`` holds the MC-null knobs (``n_reps``, ``alpha_cohort``, ``block_length``, plus
+    ``enabled``). The reused floors are inherited from the ``generation:`` block so the cohort book
+    is judged at the SAME DSR/HLZ-t/uplift bars as each candidate (Doc 1 sequencing point 4)."""
+    import yaml
+
+    from .cohort import CohortConfig
+
+    with open(gates_path, encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh) or {}
+    g = {**_GEN_DEFAULTS, **dict(cfg.get("generation", {}))}
+    _validate(g)
+    c = {**_COHORT_DEFAULTS, **dict(cfg.get("cohort", {}))}
+    _validate_cohort(c, g)
+
+    cohort_cfg = CohortConfig(
+        max_cohort_size=int(c["max_cohort_size"]), min_cohort_size=int(c["min_cohort_size"]),
+        max_pairwise_corr=float(c["max_pairwise_corr"]),
+        promising_dsr=float(g["promising_dsr"]),          # REUSE the funnel floors
+        cohort_hlz_t_min=float(g["hlz_t_min"]),
+        min_book_uplift=float(g["min_combination_uplift"]),
+        combiner_redundancy_strength=float(c["combiner_redundancy_strength"]))
+    mc_kwargs = dict(
+        enabled=bool(c["enabled"]), n_reps=int(c["mc_n_replicates"]),
+        alpha_cohort=float(c["alpha_cohort"]), block_length=int(c["mc_block_length"]))
+    return cohort_cfg, mc_kwargs
+
+
 def load_generation_meta(gates_path: str | Path) -> dict:
     """Return the generation substrate ``{enabled, panel, base_sleeves}`` from the gates YAML,
     validated. ``enabled`` is the opt-in gate the standalone runner enforces (GP8-01); ``panel`` /
