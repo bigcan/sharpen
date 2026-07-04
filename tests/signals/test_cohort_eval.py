@@ -1,9 +1,11 @@
 """Phase 4 Step 1 — the cohort-evaluator ORCHESTRATION library (`cohort_eval.py`).
 
 Scope of THIS file: the wiring correctness (pool assembly parity, split/short-circuit order,
-determinism, the Doc 2 §4 holdout-guard math). The STATISTICAL size/power guarantees (calibration ≈
-α, m=9/N=100 tripwire, BLOCKER regressions, ℓ-sensitivity) live in ``test_generation_cohort_mc.py``
-(Doc 2 §7) and are not duplicated here.
+determinism, the Doc 2 §4 holdout-guard math). The STATISTICAL size/power guarantees are not
+duplicated here — they split across two files (Doc 2 §7): the MC-null calibration ≈ α, the
+BLOCKER-1/3 regressions, and the MC-path production-config noise rejection live in
+``test_generation_cohort_mc.py``; the ANALYTIC ``SR*_cohort`` m=9/N=100 noise tripwire lives in
+``test_generation_cohort.py``.
 """
 from __future__ import annotations
 

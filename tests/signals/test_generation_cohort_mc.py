@@ -4,10 +4,12 @@ Design + math audit: ``docs/research/crucible_mc_null_spec.md`` §7 (the validat
 acceptance criteria). Dims are kept small (the combiner runs inside every replicate); the tests pin
 the QUALITATIVE properties the audit established, with generous bounds:
 
-  * size ≈ α under the correct JOINT resample (BLOCKER 1 fixed);
-  * the base-fixed variant is anti-conservative (BLOCKER-1 regression stays caught);
+  * size ≈ α under the correct JOINT resample, and STRICTLY separated from the anti-conservative
+    base-fixed variant (BLOCKER-1 regression stays caught — a collapse of the two rates fails);
+  * the observed t_obs IS the documented per-period ΔSR functional, numerically pinned so a convention
+    drift (``_ann_sharpe`` / a different base-vs-cohort config) cannot silently rescale it (BLOCKER-3);
   * genuine weak diversifiers are DETECTED via the ΔSR statistic (the gate is not vacuous);
-  * pure-noise cohorts (the m=9/N=100 cell) are rejected;
+  * pure-noise cohorts are rejected — both a small pool and the production m≥9/N≥100 config;
   * the p-value is deterministic under a fixed seed (reproducibility invariant).
 """
 from __future__ import annotations
@@ -15,13 +17,23 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from finrl_pro_ds.signals.generation.cohort import CohortConfig
+from finrl_pro_ds.signals.eval_harness import _ann_sharpe
+from finrl_pro_ds.signals.generation.cohort import (
+    CohortConfig,
+    _with_redundancy,
+    greedy_decorrelated_admission,
+    standalone_sharpe_scores,
+)
 from finrl_pro_ds.signals.generation.cohort_mc import (
     auto_block_length,
     mc_null_pvalue,
     stationary_bootstrap_indices,
 )
-from finrl_pro_ds.signals.generation.fitness import FitnessConfig
+from finrl_pro_ds.signals.generation.fitness import (
+    FitnessConfig,
+    _combined_book,
+    _per_period_sharpe,
+)
 
 _ALPHA = 0.05
 
@@ -108,6 +120,64 @@ def test_pvalue_deterministic_under_seed() -> None:
 
 
 # ------------------------------------------------------------------------------------------
+# BLOCKER-3 numeric tripwire — t_obs IS the documented per-period ΔSR functional
+# ------------------------------------------------------------------------------------------
+def test_tobs_is_per_period_delta_sr_functional() -> None:
+    """MC-03: pin ``t_obs`` to the EXACT within-panel statistic the null replicates use, reconstructed
+    here from the same helpers — ``_per_period_sharpe(combine(base∪members, cohort_cfg))
+    − _per_period_sharpe(combine(base, fcfg))``. This locks three conventions that a refactor could
+    silently break while every OTHER test (all self-vs-self / rate-based) stayed green, which would
+    rescale ``T_obs`` against the null distribution and make ``p`` meaningless:
+
+      1. the observed statistic is the PER-PERIOD Sharpe, not ``_ann_sharpe`` (here ``periods_per_year
+         != 1`` so the two functionals differ numerically — the negative check below proves it);
+      2. the base book is combined with ``fcfg``; the augmented book with
+         ``cohort_cfg = _with_redundancy(fcfg, combiner_redundancy_strength)`` (redundancy set > 0 so
+         ``fcfg`` and ``cohort_cfg`` genuinely differ — an aug-book built on ``fcfg`` would mismatch);
+      3. admission is the standalone-Sharpe greedy de-dup (``members_obs`` is pinned too).
+    """
+    rng = np.random.default_rng(2024)
+    t = 260
+    base = _noise_base(rng, t)
+    # small, ~independent weak-drift pool ⇒ deterministic admission of all 5 (≥ min_cohort_size ⇒
+    # t_obs finite, not -inf).
+    pool = {f"c{i}": rng.normal(0.03, 1.0, t) for i in range(5)}
+    ts = _timestamps(t)
+    # periods_per_year != 1 ⇒ _ann_sharpe != _per_period_sharpe; redundancy != 0 ⇒ cohort_cfg != fcfg
+    fcfg = FitnessConfig(n_groups=5, k_test=2, embargo=3, periods_per_year=252.0,
+                         combiner_window=63, combiner_min_periods=20,
+                         perf_window=63, perf_min_periods=20)
+    ccfg = _ccfg(combiner_redundancy_strength=0.5)
+
+    r = mc_null_pvalue(pool, base, ts, ccfg, fcfg, n_reps=16, alpha_cohort=_ALPHA,
+                       seed=7, block_length=21)
+
+    # independent reconstruction of the observed statistic from the documented functional
+    base_np = {k: np.asarray(v, dtype=np.float64) for k, v in base.items()}
+    cand_np = {k: np.asarray(v, dtype=np.float64) for k, v in pool.items()}
+    members = greedy_decorrelated_admission(
+        cand_np, standalone_sharpe_scores(cand_np),
+        max_pairwise_corr=ccfg.max_pairwise_corr, max_cohort_size=ccfg.max_cohort_size)
+    assert len(members) >= ccfg.min_cohort_size
+    cohort_cfg = _with_redundancy(fcfg, ccfg.combiner_redundancy_strength)
+    sr_base = _per_period_sharpe(_combined_book(base_np, ts, fcfg))
+    aug = {**base_np, **{m: cand_np[m] for m in members}}
+    sr_aug = _per_period_sharpe(_combined_book(aug, ts, cohort_cfg))
+    expected = sr_aug - sr_base
+
+    assert np.isfinite(r.t_obs)
+    assert r.t_obs == pytest.approx(expected, rel=1e-12, abs=1e-12)
+    assert tuple(r.members_obs) == tuple(members)                 # admission convention pinned too
+
+    # the fixture genuinely distinguishes the two Sharpe conventions: the _ann_sharpe reconstruction
+    # is numerically different, so assertion (1) above has teeth (guards "per-period, NOT annualized").
+    ann_expected = (_ann_sharpe(_combined_book(aug, ts, cohort_cfg), fcfg.periods_per_year)
+                    - _ann_sharpe(_combined_book(base_np, ts, fcfg), fcfg.periods_per_year))
+    assert abs(ann_expected - expected) > 1e-6
+    assert r.t_obs != pytest.approx(ann_expected, rel=1e-6)
+
+
+# ------------------------------------------------------------------------------------------
 # Size calibration (joint resample) + BLOCKER-1 regression (base-fixed is anti-conservative)
 # ------------------------------------------------------------------------------------------
 @pytest.mark.slow
@@ -126,10 +196,19 @@ def test_size_calibration_joint_vs_base_fixed() -> None:
         joint_pass += rj.passes_mc
         fixed_pass += rf.passes_mc
     joint_rate, fixed_rate = joint_pass / meta, fixed_pass / meta
-    # joint size near α (generous upper bound for the small meta count)
-    assert joint_rate <= 0.15, f"joint size {joint_rate:.2f} should be ~α={_ALPHA}"
-    # BLOCKER-1: dropping joint base resampling inflates size
-    assert fixed_rate >= joint_rate, f"base-fixed {fixed_rate:.2f} should be ≥ joint {joint_rate:.2f}"
+    # joint size sits near α — a generous upper bound for the small meta count (measured 0.075 here).
+    # This ALSO catches the BLOCKER-1 mutation: if line-187's joint resample is dropped, joint_rate
+    # collapses onto the inflated base-fixed rate (~0.125) and breaches this ceiling.
+    assert joint_rate <= 0.10, f"joint size {joint_rate:.3f} should be ~α={_ALPHA}"
+    # BLOCKER-1 is anti-conservative: holding the base fixed inflates the false-pass rate above α.
+    assert fixed_rate >= 0.09, f"base-fixed size {fixed_rate:.3f} should inflate above α"
+    # STRICT separation (the load-bearing MC-01 tripwire). The joint and base-fixed paths MUST NOT
+    # collapse to the same rate. Mutating cohort_mc.py:187 to hold the base fixed (base_b = base) makes
+    # both branches identical ⇒ gap == 0, so this fails and the anti-conservative bug cannot ship
+    # green. The honest gap here is ~0.050; the 0.03 floor leaves headroom for MC noise.
+    assert fixed_rate - joint_rate >= 0.03, (
+        f"joint {joint_rate:.3f} and base-fixed {fixed_rate:.3f} collapsed — BLOCKER-1 "
+        f"separation lost (line-187 joint resample dropped?)")
 
 
 # ------------------------------------------------------------------------------------------
@@ -165,3 +244,31 @@ def test_noise_cohort_rejected() -> None:
                        seed=1, block_length=21)
     assert not r.passes_mc, f"pure-noise cohort must not pass (p={r.p_value:.3f})"
     assert 1.0 / 151 <= r.p_value <= 1.0
+
+
+# ------------------------------------------------------------------------------------------
+# MC-02 — noise rejection through the MC path at the PRODUCTION cohort config
+# ------------------------------------------------------------------------------------------
+@pytest.mark.slow
+def test_noise_cohort_rejected_at_production_config() -> None:
+    """MC-02: exercise the BINDING ``mc_null_pvalue`` path at the shipped PRODUCTION knobs
+    (``max_cohort_size=12``, ``combiner_redundancy_strength=0.5`` — configs/crucible_cohort.gates.yaml)
+    on the m≥9/N≥100 regime. The analytic tripwire
+    (``test_generation_cohort.py::test_noise_cohort_tripwire_m9_n100``) only proves ``SR*_cohort``
+    rejects that cell; this proves the MC null itself does too, at the config the gate ships with.
+    Over seeded pure-noise pools nothing passes and every p-value sits clearly above α (measured
+    p_min≈0.14)."""
+    meta, t, n, reps = 5, 300, 100, 100
+    ccfg = _ccfg(max_cohort_size=12, combiner_redundancy_strength=0.5)
+    passes = 0
+    p_min = 1.0
+    for mrep in range(meta):
+        rng = np.random.default_rng(20260704 + mrep)
+        base, pool, ts = _noise_base(rng, t), _noise_pool(rng, t, n), _timestamps(t)
+        r = mc_null_pvalue(pool, base, ts, ccfg, _fcfg(), n_reps=reps, alpha_cohort=_ALPHA,
+                           seed=700 + mrep, block_length=21)
+        passes += r.passes_mc
+        p_min = min(p_min, r.p_value)
+    assert passes == 0, f"production-config noise cohorts must not pass the MC null ({passes}/{meta})"
+    # p bounded well away from α (measured min 0.139; 0.10 floor keeps margin over α=0.05)
+    assert p_min >= 0.10, f"min MC p {p_min:.3f} should sit clearly above α={_ALPHA}"
