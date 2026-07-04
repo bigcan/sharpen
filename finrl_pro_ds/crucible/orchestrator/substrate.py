@@ -28,6 +28,7 @@ from typing import Callable
 import numpy as np
 
 from ...signals.features import Panel
+from ...signals.generation.cohort import CohortConfig
 from ...signals.generation.fitness import FitnessConfig
 from ..agentic.proposer import LibrarySeedProposer, Proposer
 from ..ledger import TrialLedger
@@ -77,6 +78,14 @@ class Substrate:
     # enrollment; require it whenever a lockbox is attached.
     lockbox: Lockbox | None = None
     incubation_criterion: IncubationCriterion | None = None
+    # Phase 4 weak-signal COHORT gate. OPT-IN: when cohort_cfg is set AND cohort_mc_kwargs['enabled'],
+    # the loop evaluates a cohort over this tick's overlay pool (Doc 1/2). None ⇒ no cohort path
+    # (byte-identical pre-cohort behavior). cohort_gates_hash is the cohort gate file's provenance hash
+    # (computed by the runner, symmetric with the funnel gates_hash) — pinned into the manifest + the
+    # deterministic MC seed.
+    cohort_cfg: CohortConfig | None = None
+    cohort_mc_kwargs: dict | None = None
+    cohort_gates_hash: str | None = None
 
     def __post_init__(self) -> None:
         if self.lockbox is not None and self.incubation_criterion is None:

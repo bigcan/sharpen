@@ -1,0 +1,36 @@
+# Pre-registered gates for the Crucible weak-signal COHORT evaluator (Doc 1/2:
+# docs/research/crucible_weak_signal_ensemble_spec.md + crucible_mc_null_spec.md).
+#
+# This is a SEPARATE gates file from configs/signal_eval.gates.yaml ON PURPOSE (ADR-1, mirroring the
+# lockbox precedent). The cohort evaluator is an OPT-IN downstream gate that emits a NEW verdict
+# (cohort PROMISING); it is not part of the funnel's per-candidate verdict semantics. Folding these
+# thresholds into signal_eval.gates.yaml would change that file's raw bytes and therefore its
+# gates_hash — breaking the frozen `crucible-v2.0` moat hash (519158fa1450). Keeping the cohort gates
+# here gives the cohort path its own provenance hash while the funnel's stays frozen and byte-identical.
+#
+# The REUSED funnel floors (promising_dsr / hlz_t_min / min_combination_uplift) are deliberately NOT
+# duplicated here — load_cohort_config() reads them from signal_eval.gates.yaml::generation so the
+# cohort book is judged at the SAME DSR / marginal-HLZ-t / uplift bars as each candidate (Doc 1: no
+# threshold is loosened; the reused floors apply to the √N-larger cohort quantity). NEVER hardcode
+# these numbers in code (CLAUDE.md); the loader reads them via load_cohort_config().
+#
+# Disabled by default: with enabled=false the cohort path never runs and the orchestrator behaves
+# byte-identically to the pre-cohort loop. Everything still caps at PROMISING — a cleared cohort
+# requires a human-initiated Tier-2 deep lifecycle audit before any capital (CLAUDE.md).
+cohort:
+  enabled: false            # OPT-IN; false => the cohort path never runs (default)
+
+  # Admission (Doc 1 #2a — the binding return-correlation guard).
+  min_cohort_size: 3        # below this many de-correlated admits, no cohort verdict is rendered
+  max_cohort_size: 12       # cap on admitted members (deflation + combiner cost)
+  max_pairwise_corr: 0.35   # |corr| to every already-admitted member must be <= this to admit
+
+  # Cohort combiner (Doc 1 Part 3): redundancy down-weight for the COHORT book ONLY; the live/funnel
+  # combiner stays at 0.0 (this does not touch any existing verdict).
+  combiner_redundancy_strength: 0.5
+
+  # Selection-aware Monte-Carlo null (Doc 2 §3 — the BINDING statistical gate).
+  alpha_cohort: 0.05        # new pre-registered gate: cohort passes iff MC p <= alpha_cohort
+  mc_n_replicates: 1000     # B; the binding gate wants >= 1000 (Doc 2 §3.3). Use 200 for dev speed.
+  mc_block_length: 21       # stationary-bootstrap mean block length l (Politis-White fallback; the
+                            # l-sensitivity test pins calibration stable across l in {5, 21, 63})

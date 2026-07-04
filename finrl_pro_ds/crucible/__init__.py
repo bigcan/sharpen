@@ -7,7 +7,9 @@ orchestration primitives: versioning, run manifests (reproducibility), the split
 orchestrator, the forward-incubation lockbox, and the governance handoff. Spec:
 ``docs/research/crucible_agentic_discovery_spec.md``.
 
-The spec's phased roadmap (P0–P5) is COMPLETE at ``crucible-v2.6``: P0 version baseline + gate repair +
+The spec's phased roadmap (P0–P5) is COMPLETE at ``crucible-v2.6``; ``crucible-v2.7`` adds the Phase-4
+weak-signal COHORT evaluator (opt-in downstream gate in its own gates file; no funnel byte changed).
+P0 version baseline + gate repair +
 split ledger + catalog; P1a data-representation (feature slots + overlay path); P1b free-data
 connectors (FRED/COT) + PIT quality gate; P2 agentic hypothesis loop; P3 continuous orchestrator
 (substrate_dirty + online-FDR + cost budget); P4 forward-incubation lockbox (CR-8); P5 breadth

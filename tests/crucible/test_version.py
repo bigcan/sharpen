@@ -14,9 +14,9 @@ GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
-    # v2.6 = P5 breadth (GDELT/EDGAR/Stooq + Data Scout) + governance handoff + reproduce (MINOR over
-    # v2.5 P4; this layer sits AROUND the funnel and touches no gate byte, so the moat stays frozen).
-    assert CRUCIBLE_VERSION == "crucible-v2.6"
+    # v2.7 = Phase-4 weak-signal cohort evaluator (opt-in downstream gate in its OWN gates file; MINOR
+    # over v2.6 — no existing verdict changed, cohort disabled by default, funnel moat byte untouched).
+    assert CRUCIBLE_VERSION == "crucible-v2.7"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

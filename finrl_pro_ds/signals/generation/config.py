@@ -126,21 +126,41 @@ def _validate_cohort(c: dict, g: dict) -> None:
         raise ValueError("cohort.mc_n_replicates and mc_block_length must be >= 1")
 
 
-def load_cohort_config(gates_path: str | Path) -> tuple[object, dict]:
-    """Return (CohortConfig, mc_kwargs) from a gates YAML's ``cohort:`` block (absent ⇒ defaults).
+def load_cohort_config(
+    gates_path: str | Path, cohort_gates_path: str | Path | None = None
+) -> tuple[object, dict]:
+    """Return (CohortConfig, mc_kwargs) for the weak-signal cohort evaluator (Doc 1/2).
 
-    ``mc_kwargs`` holds the MC-null knobs (``n_reps``, ``alpha_cohort``, ``block_length``, plus
-    ``enabled``). The reused floors are inherited from the ``generation:`` block so the cohort book
-    is judged at the SAME DSR/HLZ-t/uplift bars as each candidate (Doc 1 sequencing point 4)."""
+    The ``cohort:`` block is read from ``cohort_gates_path`` (default
+    ``configs/crucible_cohort.gates.yaml``) — a SEPARATE file from the funnel gates so adding/enabling
+    the cohort gate leaves ``signal_eval.gates.yaml``'s raw bytes (hence the frozen ``crucible-v2.0``
+    funnel ``gates_hash``, the moat) BYTE-IDENTICAL (ADR-1, lockbox precedent). The REUSED floors
+    (``promising_dsr`` / ``hlz_t_min`` / ``min_combination_uplift``) are always read from
+    ``gates_path``'s ``generation:`` block, so the cohort book is judged at the SAME
+    DSR/HLZ-t/uplift bars as each candidate (Doc 1 sequencing point 4) and a single edit keeps them in
+    lock-step. Back-compat: passing ``cohort_gates_path=gates_path`` (or leaving it None when the
+    ``cohort:`` block lives in the funnel file, e.g. legacy tests) reads the block from ``gates_path``.
+
+    ``mc_kwargs`` holds the MC-null knobs (``enabled``, ``n_reps``, ``alpha_cohort``, ``block_length``).
+    The provenance ``cohort_gates_hash`` is computed CALLER-side by the orchestrator (symmetric with the
+    funnel ``gates_hash``, which ``load_generation_config`` also does not compute) — this keeps the
+    ``signals`` layer free of any ``crucible`` import."""
     import yaml
 
     from .cohort import CohortConfig
 
     with open(gates_path, encoding="utf-8") as fh:
-        cfg = yaml.safe_load(fh) or {}
-    g = {**_GEN_DEFAULTS, **dict(cfg.get("generation", {}))}
+        gcfg = yaml.safe_load(fh) or {}
+    g = {**_GEN_DEFAULTS, **dict(gcfg.get("generation", {}))}
     _validate(g)
-    c = {**_COHORT_DEFAULTS, **dict(cfg.get("cohort", {}))}
+
+    # cohort block: from the dedicated file if given, else from the funnel file (back-compat).
+    if cohort_gates_path is None:
+        ccfg_raw = gcfg
+    else:
+        with open(cohort_gates_path, encoding="utf-8") as fh:
+            ccfg_raw = yaml.safe_load(fh) or {}
+    c = {**_COHORT_DEFAULTS, **dict(ccfg_raw.get("cohort", {}))}
     _validate_cohort(c, g)
 
     cohort_cfg = CohortConfig(
