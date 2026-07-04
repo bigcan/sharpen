@@ -29,6 +29,7 @@ from finrl_pro_ds.signals.generation.cohort import (
     expected_topm_order_stat_sum,
     greedy_decorrelated_admission,
     mean_offdiagonal_corr,
+    measure_pool_diversity,
     pairwise_corr_matrix,
 )
 from finrl_pro_ds.signals.generation.cohort import _with_redundancy
@@ -254,6 +255,44 @@ def test_analytic_floor_rejects_noise_cohort_with_base_present() -> None:
         if ev is not None and ev.passes_analytic_floor:
             passes += 1
     assert passes / reps <= 0.15, f"analytic floor over-admits noise cohorts ({passes}/{reps})"
+
+
+# ------------------------------------------------------------------------------------------
+# Pool-diversity measurement (Doc 3 Part C — "measure data breadth first")
+# ------------------------------------------------------------------------------------------
+def test_measure_pool_diversity_diverse_vs_concentrated() -> None:
+    """A diverse (independent) pool has low ρ̄_pool and many de-correlated admits; a concentrated
+    pool (one idea in many costumes — the cont-107 failure) has ρ̄≈1 and admits ≈1."""
+    rng = np.random.default_rng(0)
+    t = 1500
+    diverse = {f"x{i}": rng.normal(size=t) for i in range(10)}
+    rep = measure_pool_diversity(diverse, max_pairwise_corr=0.35)
+    assert rep.mean_abs_pairwise_corr < 0.15
+    assert rep.n_decorrelated_admits >= 8
+
+    seed = rng.normal(size=t)
+    concentrated = {f"dup{i}": seed + 0.02 * rng.normal(size=t) for i in range(10)}
+    rep2 = measure_pool_diversity(concentrated, max_pairwise_corr=0.35)
+    assert rep2.mean_abs_pairwise_corr > 0.9
+    assert rep2.n_decorrelated_admits == 1
+
+
+def test_measure_pool_diversity_within_vs_cross_source() -> None:
+    """With source labels, within-source |corr| (near-duplicate views of one asset — the COT-gold
+    concentration) exceeds cross-source |corr| (orthogonal underlyings — what breadth buys)."""
+    rng = np.random.default_rng(1)
+    t = 1500
+    g = rng.normal(size=t)
+    e = rng.normal(size=t)
+    returns = {
+        "cot:gold_comm_net": g, "cot:gold_noncomm_net": -g + 0.05 * rng.normal(size=t),  # same asset
+        "cot:corn_comm_net": e,                                                            # different asset
+        "fred:DGS10": rng.normal(size=t),
+    }
+    sources = {"cot:gold_comm_net": "cot:metal", "cot:gold_noncomm_net": "cot:metal",
+               "cot:corn_comm_net": "cot:ag", "fred:DGS10": "fred"}
+    rep = measure_pool_diversity(returns, max_pairwise_corr=0.35, sources=sources)
+    assert rep.mean_within_source_abs_corr > rep.mean_cross_source_abs_corr
 
 
 def test_analytic_floor_returns_none_when_pool_too_correlated() -> None:

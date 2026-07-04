@@ -82,8 +82,10 @@ class _LeakyConnector:
 def test_resolve_terminal_aliases_nonlegal_and_passes_legal() -> None:
     # FRED ids are already DSL-legal → passthrough to source:series.
     assert resolve_terminal(SeriesRef("fred", "T10Y2Y", "macro")) == "fred:T10Y2Y"
-    # COT / EDGAR native ids are not legal → mapped to the registered alias.
-    assert resolve_terminal(SeriesRef("cot", "067651:comm_net", "positioning")) == "cot:gold_comm_net"
+    # COT / EDGAR native ids are not legal → mapped to the registered alias. 067651 is WTI crude
+    # (was MISLABELED "gold"); real COMEX gold is 088691 (codes verified live 2026-06-23).
+    assert resolve_terminal(SeriesRef("cot", "067651:comm_net", "positioning")) == "cot:wti_comm_net"
+    assert resolve_terminal(SeriesRef("cot", "088691:comm_net", "positioning")) == "cot:gold_comm_net"
     assert resolve_terminal(SeriesRef(
         "edgar", "0000320193:RevenueFromContractWithCustomerExcludingAssessedTax",
         "fundamental")) == "edgar:aapl_revenue"
@@ -91,6 +93,38 @@ def test_resolve_terminal_aliases_nonlegal_and_passes_legal() -> None:
     from finrl_pro_ds.crucible.data import is_valid_terminal
     assert all(is_valid_terminal(v) for v in ALTDATA_ALIASES.values())
     assert len(set(ALTDATA_ALIASES.values())) == len(ALTDATA_ALIASES)
+
+
+def test_default_cot_markets_are_orthogonal_and_correctly_labelled() -> None:
+    """Doc 3 Part C: the default COT set spans economically-orthogonal underlyings (not one asset's
+    views), and 067651 is labelled WTI (not the old 'gold' mislabel)."""
+    from finrl_pro_ds.crucible.data.altdata_bridge import (
+        COT_TERMINAL_ASSET_CLASS,
+        DEFAULT_COT_MARKETS,
+        _COT_MARKET_SPEC,
+    )
+    codes = {c for c, _ in DEFAULT_COT_MARKETS}
+    assert {"088691", "067651", "099741", "002602", "043602", "13874A"} <= codes
+    # 067651 is WTI energy, 088691 is metal gold — the mislabel is gone.
+    assert COT_TERMINAL_ASSET_CLASS["cot:wti_comm_net"] == "energy"
+    assert COT_TERMINAL_ASSET_CLASS["cot:gold_comm_net"] == "metal"
+    # at least 5 distinct asset classes ⇒ genuinely orthogonal breadth.
+    assert len({cls for _c, _s, cls, _n in _COT_MARKET_SPEC}) >= 5
+
+
+def test_per_source_cap_limits_slots(tmp_path) -> None:
+    """max_slots_per_source caps how many slots one source contributes (Doc 3 Part C point 3)."""
+    days = np.arange(np.datetime64("2019-05-01"), np.datetime64("2020-06-01"), np.timedelta64(1, "D"))
+    obs = [{"date": str(d), "value": f"{4.0 + 0.001 * i:.4f}"} for i, d in enumerate(days)]
+    multi = FredConnector(
+        transport=lambda url: {"observations": obs}, release_lag_days=1,
+        series=(("DGS10", "a", "D"), ("T10Y2Y", "b", "D"), ("VIXCLS", "c", "D")))
+    catalog = DataCatalog(tmp_path / "catalog.db")
+    slots = bridge_altdata_feature_slots(
+        bar_dates=_BARS, start="2019-01-01", end="2020-12-31", catalog=catalog,
+        connectors=[multi], max_slots_per_source=2)
+    assert len(slots) == 2                       # capped from 3
+    catalog.close()
 
 
 def test_default_connectors_are_the_three_live_sources() -> None:
