@@ -15,6 +15,7 @@ lifecycle audit remains non-negotiable.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -64,6 +65,14 @@ class CohortCard:
         d = asdict(self)
         d["members"] = list(self.members)                 # JSON has no tuple; keep it a list
         return d
+
+    def content_hash(self) -> str:
+        """Deterministic 12-hex SHA-256 of the whole card — pins the full verdict (MC p-value,
+        holdout ΔSR, members, …) into the run manifest so ``crucible reproduce`` re-derives it
+        byte-identically (spec §5). A NaN field short-circuited by an early stage serializes to a
+        stable ``"NaN"`` token, so the hash stays byte-deterministic across runs (Doc 2 §6)."""
+        payload = json.dumps(self.to_json(), sort_keys=True, default=str)
+        return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
     def write(self, out_dir: str | Path) -> Path:
         """Write ``cohort_<cohort_hash>.json`` into ``out_dir``; return its path."""

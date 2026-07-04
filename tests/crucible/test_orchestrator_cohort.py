@@ -77,9 +77,11 @@ def test_cohort_tick_folds_outcome_charges_fdr_and_writes_card(tmp_path) -> None
     # ADR-4: exactly ONE extra online-FDR test beyond the per-candidate charges (the cohort test).
     assert o.fdr_num_tests == o.n_preregistered + 1
     assert o.n_cohort_promising == sum(1 for c in o.cohort_cards if c.verdict == "PROMISING")
-    # manifest provenance + card written to disk beside the discovery cards.
-    assert o.result.manifest.extra["cohort_gates_hash"] == "dd563b4b4f7c"
+    # manifest provenance (pinned typed fields) + card written to disk beside the discovery cards.
     card = o.cohort_cards[0]
+    assert o.result.manifest.cohort_gates_hash == "dd563b4b4f7c"
+    assert o.result.manifest.cohort_verdicts == {card.cohort_hash: card.verdict}
+    assert o.result.manifest.cohort_card_hashes == {card.cohort_hash: card.content_hash()}
     written = tmp_path / "out" / "syn_on" / "2026-07-04T00_00_00_00_00" / "cards" / f"cohort_{card.cohort_hash}.json"
     assert written.exists()
 

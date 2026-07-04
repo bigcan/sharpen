@@ -178,8 +178,10 @@ def run_hypothesis_loop(
 
     # --- Cohort gate (Phase 4, Doc 1/2): OPT-IN weak-signal ensemble over THIS tick's OVERLAY pool.
     # Reads scored return streams only (post-moat, CR-1). Disabled ⇒ no-op AND manifest byte-identical
-    # (cohort_extra stays {} → RunManifest.extra default). Caps at PROMISING (Tier-2 for capital). ----
-    cohort_cards, cohort_extra = _evaluate_cohort_gate(
+    # (cohort_prov stays {} → the cohort manifest fields keep their empty defaults). The provenance is
+    # PINNED into the reproduce contract (not the non-gated `extra`) because cohort verdicts + the MC
+    # p-value are decision-bearing. Caps at PROMISING (Tier-2 for capital). ------------------------
+    cohort_cards, cohort_prov = _evaluate_cohort_gate(
         specs=specs, panel=panel, base_returns=base_returns, timestamps=timestamps, cfg=cfg, ek=ek,
         run_id=run_id, crucible_version=crucible_version, gates_hash=gates_hash,
         proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash, cohort_cfg=cohort_cfg,
@@ -191,7 +193,10 @@ def run_hypothesis_loop(
         proposal_ts=proposal_ts, rng_seeds={"generation": int(ek.get("rng_seed", 7))},
         file_drawer_N_before=n_before, file_drawer_N_after=n_after,
         data_snapshot_hash=data_snapshot_hash, agent_model_id=author.proposer.model_id,
-        token_cost=token_cost, verdicts=verdicts, extra=cohort_extra)
+        token_cost=token_cost, verdicts=verdicts,
+        cohort_gates_hash=cohort_prov.get("cohort_gates_hash"),
+        cohort_verdicts=cohort_prov.get("cohort_verdicts", {}),
+        cohort_card_hashes=cohort_prov.get("cohort_card_hashes", {}))
 
     return HypothesisLoopResult(
         specs=specs, reports=reports, cards=cards, manifest=manifest,
@@ -204,9 +209,11 @@ def _evaluate_cohort_gate(
     gates_hash: str, proposal_ts: str, data_snapshot_hash: str | None,
     cohort_cfg: CohortConfig | None, cohort_mc_kwargs: dict | None, cohort_gates_hash: str | None,
 ) -> tuple[list[CohortCard], dict]:
-    """Run the opt-in cohort gate on the tick's OVERLAY specs; return ``(cohort_cards, manifest_extra)``.
-    A no-op (returns ``([], {})``, so the manifest stays byte-identical) when the gate is disabled, no
-    cohort config is attached, there are no overlay specs, or no cohort can form (Doc 2 §5)."""
+    """Run the opt-in cohort gate on the tick's OVERLAY specs; return ``(cohort_cards, provenance)``
+    where ``provenance`` carries the manifest's pinned cohort fields (``cohort_gates_hash`` /
+    ``cohort_verdicts`` / ``cohort_card_hashes``). A no-op (returns ``([], {})``, so the manifest stays
+    byte-identical to the pre-cohort path) when the gate is disabled, no cohort config is attached,
+    there are no overlay specs, or no cohort can form (Doc 2 §5)."""
     if not (cohort_cfg is not None and cohort_mc_kwargs and cohort_mc_kwargs.get("enabled")):
         return [], {}
     overlay_formulas = {pr.candidate_hash: pr.formula
@@ -229,5 +236,11 @@ def _evaluate_cohort_gate(
     log.info("cohort gate: %s (p=%.4f, holdout ΔSR=%.3f, %d members of %d seen)",
              verdict.verdict, verdict.mc_p_value, verdict.holdout_delta_sr,
              verdict.n_members, verdict.n_candidates_seen)
-    extra = {"cohort_gates_hash": cgh, "cohort_verdicts": {card.cohort_hash: card.verdict}}
-    return [card], extra
+    # Pin BOTH the verdict string and the full-card content hash (the latter pins the MC p-value +
+    # every other card field) so `crucible reproduce` re-derives them byte-identically (spec §5).
+    provenance = {
+        "cohort_gates_hash": cgh,
+        "cohort_verdicts": {card.cohort_hash: card.verdict},
+        "cohort_card_hashes": {card.cohort_hash: card.content_hash()},
+    }
+    return [card], provenance

@@ -25,7 +25,9 @@ class RunManifest:
     ``data_snapshot_hash`` (the catalog rows used), and ``rng_seeds`` (determinism). The file-drawer
     counts, agent model id, token cost, and per-candidate verdicts complete the audit trail.
     Nullable fields (``data_snapshot_hash``, ``agent_model_id``, ``token_cost``) are populated by
-    later phases; ``verdicts`` maps candidate_hash → verdict string.
+    later phases; ``verdicts`` maps candidate_hash → verdict string. The Phase-4 cohort fields
+    (``cohort_gates_hash`` / ``cohort_verdicts`` / ``cohort_card_hashes``) pin the opt-in weak-signal
+    cohort gate's decision-bearing output; they stay empty on a non-cohort run.
     """
 
     run_id: str
@@ -39,6 +41,15 @@ class RunManifest:
     agent_model_id: str | None = None              # LLM id (P2); None in P0
     token_cost: int | None = None                  # LLM tokens spent (P2/CR-7); None in P0
     verdicts: dict[str, str] = field(default_factory=dict)   # candidate_hash -> verdict
+    # Phase 4 weak-signal COHORT provenance (opt-in). Cohort verdicts are DECISION-bearing, so — unlike
+    # ``extra`` (a non-gated forward-compat scratch) — they are PINNED into the reproduce contract:
+    # ``cohort_verdicts`` maps cohort_hash -> verdict, and ``cohort_card_hashes`` maps cohort_hash ->
+    # the full CohortCard's content hash (which pins the MC p-value + every other card field, so
+    # ``crucible reproduce`` re-derives them byte-identically). All default-empty ⇒ a non-cohort run's
+    # manifest is byte-identical to the pre-cohort path.
+    cohort_gates_hash: str | None = None                     # cohort gate file bytes; None when disabled
+    cohort_verdicts: dict[str, str] = field(default_factory=dict)     # cohort_hash -> verdict
+    cohort_card_hashes: dict[str, str] = field(default_factory=dict)  # cohort_hash -> CohortCard hash
     extra: dict = field(default_factory=dict)      # forward-compat sidecar for later-phase fields
 
     def to_json(self) -> dict:
