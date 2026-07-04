@@ -136,6 +136,69 @@ def mean_offdiagonal_corr(corr: np.ndarray) -> float:
 
 
 # --------------------------------------------------------------------------------------------
+# Pool-diversity measurement (Doc 3 Part C success metric — "measure data breadth FIRST")
+# --------------------------------------------------------------------------------------------
+@dataclass(frozen=True, slots=True)
+class PoolDiversityReport:
+    """The instrument Doc 3 says to run BEFORE building the generative proposer (Parts A/B): is the
+    supply of return-stream diversity even the problem? Headline = ``mean_abs_pairwise_corr`` (ρ̄_pool)
+    and ``n_decorrelated_admits`` — cont-107's pool was ~1 within its two idea-clusters and would
+    admit ≈1–2; the target is a materially lower ρ̄ and ``>= min_cohort_size`` genuine admits."""
+
+    n_candidates: int
+    mean_abs_pairwise_corr: float       # ρ̄_pool — the headline breadth metric
+    median_abs_pairwise_corr: float
+    frac_pairs_below_cap: float         # fraction of pairs with |corr| <= max_pairwise_corr
+    n_decorrelated_admits: int          # greedy de-correlated admits at max_pairwise_corr
+    mean_within_source_abs_corr: float  # NaN if no source labels
+    mean_cross_source_abs_corr: float   # NaN if no source labels (this is what breadth should lower)
+
+
+def measure_pool_diversity(
+    returns: Mapping[str, np.ndarray],
+    *,
+    max_pairwise_corr: float,
+    sources: Mapping[str, str] | None = None,
+    min_overlap: int = 23,
+) -> PoolDiversityReport:
+    """Measure the return-stream diversity of a candidate pool (Doc 3 success metric). ``sources``
+    maps candidate id → source/asset-class (e.g. ``fred``/``cot:metal``/``edgar``) to split within-
+    vs cross-source correlation — the cross-source figure is the one economic breadth should push
+    down. Reuses the same pairwise-corr + greedy-admission the cohort evaluator uses, so the measured
+    admit count is exactly what the evaluator would see."""
+    names, corr = pairwise_corr_matrix(returns, min_overlap=min_overlap)
+    k = len(names)
+    if k < 2:
+        return PoolDiversityReport(k, float("nan"), float("nan"), float("nan"),
+                                   min(k, 1), float("nan"), float("nan"))
+    iu = np.triu_indices(k, k=1)
+    ab = np.abs(corr[iu])
+    ab = ab[np.isfinite(ab)]
+    admits = greedy_decorrelated_admission(
+        returns, standalone_sharpe_scores(returns),
+        max_pairwise_corr=max_pairwise_corr, max_cohort_size=k, min_overlap=min_overlap)
+    within = cross = float("nan")
+    if sources is not None:
+        wv, cv = [], []
+        for a in range(k):
+            for b in range(a + 1, k):
+                r = corr[a, b]
+                if not np.isfinite(r):
+                    continue
+                sa, sb = sources.get(names[a]), sources.get(names[b])
+                (wv if (sa is not None and sa == sb) else cv).append(abs(r))
+        within = float(np.mean(wv)) if wv else float("nan")
+        cross = float(np.mean(cv)) if cv else float("nan")
+    return PoolDiversityReport(
+        n_candidates=k,
+        mean_abs_pairwise_corr=float(ab.mean()) if ab.size else float("nan"),
+        median_abs_pairwise_corr=float(np.median(ab)) if ab.size else float("nan"),
+        frac_pairs_below_cap=float((ab <= max_pairwise_corr).mean()) if ab.size else float("nan"),
+        n_decorrelated_admits=len(admits),
+        mean_within_source_abs_corr=within, mean_cross_source_abs_corr=cross)
+
+
+# --------------------------------------------------------------------------------------------
 # Greedy de-correlated admission (#2a — the cheap, deterministic correctness guard)
 # --------------------------------------------------------------------------------------------
 def standalone_sharpe_scores(returns: Mapping[str, np.ndarray]) -> dict[str, float]:

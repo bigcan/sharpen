@@ -40,24 +40,55 @@ from .panel_bridge import SlotRequest, build_feature_slots
 
 log = logging.getLogger("crucible.altdata_bridge")
 
-# COT markets to pull (CFTC contract code, human name). The connector defaults to none — the operator
-# supplies contracts of interest. Gold (067651) is the positioning series with the deepest history.
-DEFAULT_COT_MARKETS: tuple[tuple[str, str], ...] = (("067651", "GOLD - COMMODITY EXCHANGE"),)
+# COT markets to pull, spanning ECONOMICALLY-ORTHOGONAL underlyings (Doc 3 Part C — breadth is the
+# strongest driver of return-stream de-correlation; the old single-market default gave 3 mutually
+# correlated views of ONE asset). One deep-open-interest contract per asset class. All codes VERIFIED
+# LIVE against publicreporting.cftc.gov (report 2026-06-23) — the previous default `067651` was
+# MISLABELED "GOLD": it is WTI crude (WTI-PHYSICAL, NYMEX). Real COMEX gold is `088691`.
+# (code, short_name, asset_class, official CFTC market_and_exchange_names).
+_COT_MARKET_SPEC: tuple[tuple[str, str, str, str], ...] = (
+    ("088691", "gold",   "metal",  "GOLD - COMMODITY EXCHANGE INC."),
+    ("067651", "wti",    "energy", "WTI-PHYSICAL - NEW YORK MERCANTILE EXCHANGE"),
+    ("099741", "eurofx", "fx",     "EURO FX - CHICAGO MERCANTILE EXCHANGE"),
+    ("002602", "corn",   "ag",     "CORN - CHICAGO BOARD OF TRADE"),
+    ("043602", "ust10y", "rate",   "UST 10Y NOTE - CHICAGO BOARD OF TRADE"),
+    ("13874A", "spx",    "equity", "E-MINI S&P 500 - CHICAGO MERCANTILE EXCHANGE"),
+)
+DEFAULT_COT_MARKETS: tuple[tuple[str, str], ...] = tuple(
+    (code, name) for code, _short, _cls, name in _COT_MARKET_SPEC)
+
+# COT field (cftc_cot._FIELDS key) → DSL-legal terminal suffix. Mirrors cftc_cot._FIELDS; kept here
+# because that map is private to the connector.
+_COT_FIELD_SUFFIX: dict[str, str] = {
+    "comm_net": "comm_net", "noncomm_net": "noncomm_net", "comm_net_pct_oi": "comm_pct_oi"}
 
 # DSL-legal terminal aliases for series whose native ``source:series_id`` is NOT a legal terminal
 # (digit-leading and/or two colons — e.g. ``cot:067651:comm_net``). FRED ids are already legal
 # (``fred:T10Y2Y``), so they need no alias and fall through to ``ref.terminal``. Grammar:
-# ``[A-Za-z_]\w*(?::[A-Za-z_]\w*)?`` (panel_bridge._TERMINAL_RE).
+# ``[A-Za-z_]\w*(?::[A-Za-z_]\w*)?`` (panel_bridge._TERMINAL_RE). COT aliases are generated across the
+# orthogonal market set × fields; EDGAR aliases are explicit (two filers × two concepts).
+_COT_ALIASES: dict[tuple[str, str], str] = {
+    ("cot", f"{code}:{field}"): f"cot:{short}_{suffix}"
+    for code, short, _cls, _name in _COT_MARKET_SPEC
+    for field, suffix in _COT_FIELD_SUFFIX.items()
+}
 ALTDATA_ALIASES: dict[tuple[str, str], str] = {
-    ("cot", "067651:comm_net"): "cot:gold_comm_net",
-    ("cot", "067651:noncomm_net"): "cot:gold_noncomm_net",
-    ("cot", "067651:comm_net_pct_oi"): "cot:gold_comm_pct_oi",
+    **_COT_ALIASES,
     # EDGAR revenue is the ASC 606 tag, not legacy us-gaap:Revenues (which is empty post-2018 for both
     # filers — see edgar._DEFAULT_CONCEPTS). NetIncomeLoss is the same across eras.
     ("edgar", "0000320193:RevenueFromContractWithCustomerExcludingAssessedTax"): "edgar:aapl_revenue",
     ("edgar", "0000320193:NetIncomeLoss"): "edgar:aapl_netincome",
     ("edgar", "0000789019:RevenueFromContractWithCustomerExcludingAssessedTax"): "edgar:msft_revenue",
     ("edgar", "0000789019:NetIncomeLoss"): "edgar:msft_netincome",
+}
+
+# Per-terminal asset class (for the pool-diversity report + future source-aware diversity, Doc 3
+# Part D.1). FRED = macro, EDGAR = fundamental; COT carries the underlying's class, not just
+# "positioning", so orthogonality logic sees gold-metal vs corn-ag vs ust10y-rate.
+COT_TERMINAL_ASSET_CLASS: dict[str, str] = {
+    f"cot:{short}_{suffix}": cls
+    for code, short, cls, _name in _COT_MARKET_SPEC
+    for field, suffix in _COT_FIELD_SUFFIX.items()
 }
 
 
@@ -87,6 +118,7 @@ def bridge_altdata_feature_slots(
     catalog: DataCatalog | None = None,
     connectors: list[DataConnector] | None = None,
     aliases: dict[tuple[str, str], str] | None = None,
+    max_slots_per_source: int | None = None,
 ) -> dict[str, np.ndarray]:
     """Survey ``connectors``, register accepted series into ``catalog``, and return the PIT-safe
     ``{terminal: (T,) array}`` feature slots for the ACCEPTED series only, joined onto ``bar_dates``.
@@ -94,6 +126,12 @@ def bridge_altdata_feature_slots(
     A transport failure on a single accepted series (rare — it fetched during the survey) is skipped
     with a warning; a PIT leak raises. Returns ``{}`` when nothing is accepted (e.g. all sources
     down / no credentials) — the caller then runs on the price-only panel unchanged.
+
+    ``max_slots_per_source`` (Doc 3 Part C point 3) caps how many feature slots any ONE source
+    contributes, so a prolific connector (e.g. dozens of FRED series or many COT market×field combos)
+    cannot dominate the pool and re-create the concentration problem breadth is meant to fix. Slots
+    are kept in each connector's ``discover()`` order until the cap; the rest are logged and skipped.
+    ``None`` (default) = no cap (back-compat).
     """
     connectors = default_connectors() if connectors is None else connectors
     aliases = ALTDATA_ALIASES if aliases is None else aliases
@@ -114,9 +152,14 @@ def bridge_altdata_feature_slots(
     # failure skips that series instead of aborting the whole batch.
     slots: dict[str, np.ndarray] = {}
     for connector in connectors:
+        n_from_source = 0
         for ref in connector.discover():
             if (ref.source_id, ref.series_id) not in accepted:
                 continue
+            if max_slots_per_source is not None and n_from_source >= max_slots_per_source:
+                log.info("altdata bridge: %s hit per-source cap %d — remaining slots skipped",
+                         connector.source_id, max_slots_per_source)
+                break
             terminal = resolve_terminal(ref, aliases)
             req = SlotRequest(connector=connector, ref=ref, terminal=terminal)
             try:
@@ -127,6 +170,7 @@ def bridge_altdata_feature_slots(
                 log.warning("altdata bridge: %s skipped on re-fetch (%r)", terminal, exc)
                 continue
             slots.update(built)
+            n_from_source += len(built)
 
     log.info("altdata bridge: %d feature slots bridged -> %s", len(slots), sorted(slots))
     return slots
