@@ -21,10 +21,12 @@ from pathlib import Path
 from .manifest import RunManifest
 from .version import CRUCIBLE_VERSION, gates_hash
 
-# Fields whose equality reproduces the discovery. Verdicts are binding; the four layers are the pins.
-# File-drawer counts / token cost are cross-run bookkeeping, not decision-bearing, so they are compared
-# only inside the strict content_hash, never gating `ok`.
-_PIN_FIELDS = ("crucible_version", "gates_hash", "data_snapshot_hash", "rng_seeds")
+# Fields whose equality reproduces the discovery. Verdicts (per-candidate AND cohort) are binding; the
+# pins are the reproducibility layers. File-drawer counts / token cost are cross-run bookkeeping, not
+# decision-bearing, so they are compared only inside the strict content_hash, never gating `ok`.
+# ``cohort_gates_hash`` is the Phase-4 cohort gate's own bytes-pin (None on a non-cohort run).
+_PIN_FIELDS = ("crucible_version", "gates_hash", "data_snapshot_hash", "rng_seeds",
+               "cohort_gates_hash")
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,17 +59,28 @@ def verify_environment(manifest: RunManifest, gates_path: str | Path) -> list[st
 
 
 def compare_manifests(original: RunManifest, reproduced: RunManifest) -> ReproduceReport:
-    """Compare two manifests: verdicts (binding), the four pins, and the strict content_hash. Collects
-    a field-level mismatch list. Does NOT check the environment — combine with :func:`verify_environment`
-    (or use :func:`reproduce`)."""
+    """Compare two manifests: verdicts (binding — per-candidate AND cohort, incl. the CohortCard hash
+    that pins the MC p-value), the pins (incl. ``cohort_gates_hash``), and the strict content_hash.
+    Collects a field-level mismatch list. Does NOT check the environment — combine with
+    :func:`verify_environment` (or use :func:`reproduce`)."""
     mismatches: list[str] = []
 
-    verdict_match = original.verdicts == reproduced.verdicts
-    if not verdict_match:
-        o, r = original.verdicts, reproduced.verdicts
-        for h in sorted(set(o) | set(r)):
-            if o.get(h) != r.get(h):
-                mismatches.append(f"verdict[{h}]: original={o.get(h)} reproduced={r.get(h)}")
+    # Verdict equality is binding — both the per-candidate genomes AND the Phase-4 cohort provenance
+    # (verdict strings + the CohortCard content hashes that pin the MC p-value). A cohort-verdict or
+    # p-value drift lives in these dicts, NOT in the four layer pins, so gating it here is what stops
+    # the silent pass a bare pin/verdict check would allow.
+    verdict_dicts = (
+        ("verdict", original.verdicts, reproduced.verdicts),
+        ("cohort_verdict", original.cohort_verdicts, reproduced.cohort_verdicts),
+        ("cohort_card", original.cohort_card_hashes, reproduced.cohort_card_hashes),
+    )
+    verdict_match = True
+    for label, o, r in verdict_dicts:
+        if o != r:
+            verdict_match = False
+            for h in sorted(set(o) | set(r)):
+                if o.get(h) != r.get(h):
+                    mismatches.append(f"{label}[{h}]: original={o.get(h)} reproduced={r.get(h)}")
 
     pins_match = True
     for fld in _PIN_FIELDS:
