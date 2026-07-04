@@ -4,8 +4,17 @@ Large-spec / commercial positioning is a classic uncrowded signal — big money'
 COT is public data (NO API key). The PIT crux (spec §4.2 gotcha, CR-4): the report describes
 **Tuesday** positions but only publishes the following **Friday** — a ~3-day release lag. Joining
 Tuesday's report to Tuesday's bar is look-ahead. This connector therefore stamps
-``release_timestamp = report_date + release_lag`` so :func:`quality_gate.asof_join` binds it to the
-first bar on/after the Friday release, never the Tuesday it describes.
+``release_timestamp`` at the true public release so :func:`quality_gate.asof_join` binds it to the
+first bar on/after the release, never the Tuesday it describes.
+
+Release model (COT-HOLIDAY-LAG-LOOKAHEAD fix, audit S553): the release is the report date rolled
+forward by ``release_lag`` **US-federal BUSINESS days** (CFTC follows the federal holiday schedule),
+NOT a fixed +3 CALENDAR days. On a normal week Tuesday + 3 business days == Friday (unchanged). On a
+week with a federal holiday in the Wed–Fri window (Thanksgiving, year-end, …) CFTC delays the publish
+to the next business day, so the business-day roll pushes the stamp to that true Monday+ release —
+closing the ~15–19%-of-weeks look-ahead a fixed calendar lag baked in (no downstream causality gate
+could catch it: they all take this stamp as ground truth). Business-day rolling is always ≥ the old
+calendar stamp, so it never leaks relative to prior behaviour; it only ever delays availability.
 
 Testability: inject a ``transport`` callable ``(url) -> list[dict]`` (parsed Socrata JSON) and it
 needs no network. Live path hits ``publicreporting.cftc.gov`` over HTTPS (keyless; an optional free
@@ -18,6 +27,7 @@ import logging
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from functools import lru_cache
 
 import numpy as np
 
@@ -28,7 +38,23 @@ logger = logging.getLogger(__name__)
 # Legacy futures-only report (Socrata resource id). publicreporting.cftc.gov is keyless.
 _RESOURCE = "https://publicreporting.cftc.gov/resource/6dca-aqww.json"
 _LICENSE = "CFTC Commitments of Traders — U.S. Government public data (no redistribution limit)"
-_RELEASE_LAG_DAYS = 3      # Tuesday report_date → Friday public release (spec §4.2)
+_RELEASE_LAG_DAYS = 3      # Tuesday report_date → Friday public release, in BUSINESS days (spec §4.2)
+
+
+@lru_cache(maxsize=1)
+def _us_federal_busdaycal() -> np.busdaycalendar:
+    """US federal holiday business-day calendar for rolling a COT report_date to its true release.
+
+    CFTC observes the US federal holiday schedule, so a federal holiday in the release window delays
+    the COT publish to the next business day. Built once from pandas' ``USFederalHolidayCalendar``
+    (which encodes the observed-date rules and Juneteenth-from-2021) over a wide static span so
+    :func:`numpy.busday_offset` can roll releases forward past holiday weeks. Pandas is a core project
+    dependency; a missing holiday only ever under-delays a release, so we fail loud rather than guess.
+    """
+    from pandas.tseries.holiday import USFederalHolidayCalendar
+
+    hols = USFederalHolidayCalendar().holidays(start="1990-01-01", end="2035-12-31")
+    return np.busdaycalendar(holidays=hols.values.astype("datetime64[D]"))
 
 # Derived positioning fields → the Socrata columns they combine. Keeps the mined terminal economic
 # (net positioning), not a raw column the DSL would have to recombine.
@@ -60,9 +86,11 @@ class CftcCotConnector:
     ) -> None:
         self._transport = transport
         # markets: (cftc_contract_market_code, human_name). Empty by default — the operator/Data
-        # Scout supplies the contracts of interest (e.g. ('067651','GOLD - COMMODITY EXCHANGE')).
+        # Scout supplies the contracts of interest (e.g. ('088691','GOLD - COMMODITY EXCHANGE INC.')).
         self._markets = markets
-        self._release_lag = np.timedelta64(release_lag_days, "D")
+        # release lag counted in US-federal BUSINESS days (holiday-aware — COT-HOLIDAY-LAG fix). The
+        # default 3 gives Tuesday→Friday on a normal week and rolls past holidays when present.
+        self._release_lag_bdays = int(release_lag_days)
 
     # -- interface -----------------------------------------------------------------
     def discover(self) -> list[SeriesRef]:
@@ -78,8 +106,8 @@ class CftcCotConnector:
             source_id=self.source_id,
             url=_RESOURCE,
             license=_LICENSE,
-            as_of_policy="release-lag",       # stamped report_date + lag (CR-4)
-            release_lag_days=int(self._release_lag / np.timedelta64(1, "D")),
+            as_of_policy="release-lag-busday",  # report_date rolled +lag US-federal business days (CR-4)
+            release_lag_days=self._release_lag_bdays,
             revision_policy="final",
         )
 
@@ -96,6 +124,18 @@ class CftcCotConnector:
         return self._parse(ref, field, rows, as_of=as_of)
 
     # -- internals -----------------------------------------------------------------
+    def _release_for(self, report: np.datetime64) -> np.datetime64:
+        """True public release = ``report`` rolled forward ``release_lag`` US-federal BUSINESS days.
+
+        Tuesday + 3 business days == Friday on a normal week (identical to the old calendar stamp); on
+        a holiday week the roll skips the closed day(s) to CFTC's actual next-business-day publish,
+        fixing COT-HOLIDAY-LAG-LOOKAHEAD. ``roll='forward'`` also guards a non-business report_date.
+        """
+        rd = np.datetime64(report, "D")
+        rel = np.busday_offset(
+            rd, self._release_lag_bdays, roll="forward", busdaycal=_us_federal_busdaycal())
+        return np.datetime64(rel, "ns")
+
     @staticmethod
     def _split(series_id: str) -> tuple[str, str]:
         code, _, field = series_id.partition(":")
@@ -129,7 +169,7 @@ class CftcCotConnector:
                 continue
             if value is None:
                 continue
-            release = report + self._release_lag        # Tuesday report → Friday public (CR-4)
+            release = self._release_for(report)          # report → true public release (busday, CR-4)
             if cutoff is not None and release > cutoff:  # vintage: only what was public by as_of
                 continue
             refs.append(report)

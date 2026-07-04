@@ -170,6 +170,27 @@ def test_cot_fetch_computes_net_and_release_lag() -> None:
     assert data.release_timestamp[0] == np.datetime64("2024-01-05", "ns")   # +3d Friday
 
 
+def test_cot_release_rolls_past_federal_holiday() -> None:
+    """COT-HOLIDAY-LAG-LOOKAHEAD tripwire (audit S553). Thanksgiving week: the report references
+    Tue 2024-11-26; a Thursday federal holiday (11-28) delays CFTC's publish from the nominal
+    Fri 11-29 to the next business day, Mon 12-02. The release stamp MUST be the true Monday, not the
+    fixed +3-CALENDAR-day Friday — else bars 11-29..12-01 read positioning that was not yet public.
+    Reverting the connector to ``report + timedelta64(3,'D')`` makes this FAIL (it stamps 11-29)."""
+    rows = [{"report_date_as_yyyy_mm_dd": "2024-11-26T00:00:00.000",
+             "cftc_contract_market_code": "088691",
+             "comm_positions_long_all": "100", "comm_positions_short_all": "40",
+             "noncomm_positions_long_all": "50", "noncomm_positions_short_all": "70",
+             "open_interest_all": "300"}]
+    conn = CftcCotConnector(transport=lambda url: rows,
+                            markets=(("088691", "GOLD - COMMODITY EXCHANGE INC."),))
+    data = conn.fetch(SeriesRef("cot", "088691:comm_net", "positioning"),
+                      "2024-11-01", "2024-12-31")
+    rel = data.release_timestamp[0]
+    assert rel == np.datetime64("2024-12-02", "ns")               # true next-business-day publish
+    assert rel != np.datetime64("2024-11-29", "ns")               # NOT the fixed calendar-lag Friday
+    assert rel >= data.reference_period[0] + np.timedelta64(3, "D")  # never earlier than the old stamp
+
+
 def test_cot_asof_excludes_unreleased_rows() -> None:
     conn = CftcCotConnector(transport=lambda url: _cot_rows(),
                             markets=(("067651", "x"),))
