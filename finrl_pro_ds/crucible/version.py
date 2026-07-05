@@ -77,6 +77,22 @@ The cohort's within-selection multiplicity is controlled by the MC null; its acr
 charges one online-FDR test (ADR-4). Everything still caps at PROMISING — a cleared cohort requires a
 human-initiated Tier-2 deep lifecycle audit before any capital (CLAUDE.md).
 
+`crucible-v2.8` is a **MINOR** bump: Taiwan data breadth (``crucible/data/twse_institutional.py`` +
+``taifex_positioning.py`` + the ``taiwan_altdata.py`` registry). It ADDS two connectors — TWSE
+three-institutional-investors daily net flow (T86, the Taiwan analog of COT) and TAIFEX large-trader
+open-interest concentration on the SAME TX/TE/TF contracts already in the Taiwan base book — wired
+into the existing ``taiwan`` substrate branch via the already-generic
+``altdata_bridge.bridge_altdata_feature_slots`` (no fork of that function; only a Taiwan-specific
+connector list + alias map). It changes NO verdict semantics and NO gate byte in either
+``configs/signal_eval.gates.yaml`` (the frozen cross-asset moat) or ``configs/taiwan_signal_eval.gates.yaml``
+(untouched — the Taiwan substrate's own `generation.enabled` stays `false`, opt-in via `--force`,
+per the architecture doc's ADR-A3). `TaifexPositioningConnector` is architecturally novel among the
+connector fleet — the live TAIFEX large-trader OI endpoint is poll-only (ignores any date parameter,
+live-verified), so it accumulates a local append-only store forward from first deployment rather than
+answering a stateless range query like every other connector; this is a data-acquisition detail, not
+a funnel/verdict change, so it does not affect the MINOR classification. Full design + live-verified
+wire-format findings: ``.agent/artifacts/crucible_taiwan_breadth_and_scheduling_architecture.md``.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -88,9 +104,9 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v2.7 = Phase-4 weak-signal cohort evaluator (opt-in downstream gate, own gates file); MINOR, funnel
-# gates_hash UNCHANGED (519158fa1450) — no existing verdict changed, cohort disabled by default.
-CRUCIBLE_VERSION = "crucible-v2.7"
+# v2.8 = Taiwan data breadth (TWSE T86 + TAIFEX large-trader OI connectors). MINOR, funnel gates_hash
+# UNCHANGED (519158fa1450) — no existing verdict changed, no gate file touched.
+CRUCIBLE_VERSION = "crucible-v2.8"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

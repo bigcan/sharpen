@@ -141,9 +141,29 @@ def _build_substrate(args, cfg, ek, meta) -> tuple[Substrate, DataCatalog]:
             panel = _synthetic_panel(args.t, args.n, n_feature_slots=args.synthetic_slots)
             base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
         elif meta["panel"] == "taiwan":
+            import dataclasses
+
+            from finrl_pro_ds.crucible.data.altdata_bridge import bridge_altdata_feature_slots
+            from finrl_pro_ds.crucible.data.taiwan_altdata import (
+                TAIWAN_ALTDATA_ALIASES,
+                taiwan_connectors,
+            )
             from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
             from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
             panel = load_taiwan_panel(args.start, args.end)
+            # Bridge TWSE/TAIFEX positioning series into feature slots, same shape as the cross_asset
+            # branch below (bridge_altdata_feature_slots is already generic — only the connector list
+            # + alias map differ). TaifexPositioningConnector is poll-and-accumulate (module docstring
+            # in taifex_positioning.py) so real history only grows once this branch is actually run on
+            # a schedule; that's expected, not a bug on any single tick.
+            if not args.no_altdata_slots:
+                bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
+                slots = bridge_altdata_feature_slots(
+                    bar_dates=panel.dates, start=args.start, end=bar_end, catalog=catalog,
+                    connectors=taiwan_connectors(), aliases=TAIWAN_ALTDATA_ALIASES)
+                if slots:
+                    panel = dataclasses.replace(
+                        panel, feature_slots={**panel.feature_slots, **slots})
             base = taiwan_base_sleeves(panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
                                        start=args.start, end=args.end)
         else:

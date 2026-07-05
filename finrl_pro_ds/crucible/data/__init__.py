@@ -43,6 +43,8 @@ from .quality_gate import (
     validate_series,
 )
 from .stooq import StooqConnector
+from .taifex_positioning import TaifexPositioningConnector
+from .twse_institutional import TwseInstitutionalConnector
 
 __all__ = [
     "CftcCotConnector",
@@ -57,6 +59,8 @@ __all__ = [
     "SeriesRef",
     "SlotRequest",
     "StooqConnector",
+    "TaifexPositioningConnector",
+    "TwseInstitutionalConnector",
     "asof_join",
     "assert_asof_join_causal",
     "assert_feature_causal",

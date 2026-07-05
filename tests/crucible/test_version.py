@@ -14,9 +14,10 @@ GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
-    # v2.7 = Phase-4 weak-signal cohort evaluator (opt-in downstream gate in its OWN gates file; MINOR
-    # over v2.6 — no existing verdict changed, cohort disabled by default, funnel moat byte untouched).
-    assert CRUCIBLE_VERSION == "crucible-v2.7"
+    # v2.8 = Taiwan data breadth (TWSE T86 + TAIFEX large-trader OI connectors, wired into the
+    # existing `taiwan` substrate branch via the already-generic altdata bridge). MINOR over v2.7 —
+    # no existing verdict changed, no gate byte touched in either gates file.
+    assert CRUCIBLE_VERSION == "crucible-v2.8"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
