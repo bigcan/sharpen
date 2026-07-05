@@ -22,6 +22,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,7 @@ from finrl_pro_ds.crucible import CRUCIBLE_VERSION, DataCatalog, TrialLedger, ga
 from finrl_pro_ds.crucible.agentic import (  # noqa: E402
     HypothesisAuthor,
     LibrarySeedProposer,
+    LlmProposer,
     run_hypothesis_loop,
 )
 from finrl_pro_ds.signals.features import Panel  # noqa: E402
@@ -43,6 +45,7 @@ from finrl_pro_ds.signals.generation.config import (  # noqa: E402
     load_generation_config,
     load_generation_meta,
 )
+from finrl_pro_ds.signals.generation.grammar import available_terminals  # noqa: E402
 
 log = logging.getLogger("crucible_hypothesis_loop")
 DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
@@ -105,12 +108,20 @@ def main() -> int:
     ap.add_argument("--t", type=int, default=900)
     ap.add_argument("--n", type=int, default=18)
     ap.add_argument("--max-proposals", type=int, default=32)
+    ap.add_argument("--proposer", choices=("library", "llm"), default="library",
+                    help="library = deterministic offline seed bank (default, no cost/network). "
+                         "llm = live LLM-backed proposer (spec Part A2); needs ANTHROPIC_API_KEY, "
+                         "opt-in only — never the default.")
     ap.add_argument("--proposal-ts", default=None,
                     help="ISO proposal timestamp (CR-2/CR-8); defaults to now (UTC).")
     ap.add_argument("--out", default=str(ROOT / "results" / "crucible"))
     ap.add_argument("--force", action="store_true",
                     help="run even when generation.enabled is false in the gates")
     args = ap.parse_args()
+    if args.proposer == "llm" and not os.environ.get("ANTHROPIC_API_KEY"):
+        log.error("--proposer llm requires ANTHROPIC_API_KEY in the environment (fails closed) — "
+                  "not set, aborting before the (possibly slow) panel load.")
+        return 1
 
     cfg, ek = load_generation_config(args.config)
     meta = load_generation_meta(args.config)
@@ -148,14 +159,26 @@ def main() -> int:
     ledger = TrialLedger(out_dir / "trial_ledger.db")
     catalog = DataCatalog(out_dir / "catalog.db")
     asset_classes = tuple(sorted({r["asset_class"] for r in catalog.list_series()}))
-    author = HypothesisAuthor(LibrarySeedProposer(), ledger, max_proposals=args.max_proposals)
+    proposer = LlmProposer() if args.proposer == "llm" else LibrarySeedProposer()
+    author = HypothesisAuthor(proposer, ledger, max_proposals=args.max_proposals)
+
+    # Propose OUTSIDE run_hypothesis_loop (mirrors the P3 orchestrator's own pattern) so (a) the
+    # proposer's real post-call token usage is available BEFORE we need to pass token_cost= — reading
+    # it any other way would race the call that populates it — and (b) pre_proposed= below stops the
+    # loop from calling propose() a second time, which would double an LLM proposer's real API cost
+    # (CR-7). Byte-identical to the previous behavior for the default `library` proposer: these are
+    # the exact same terminals/context/propose calls run_hypothesis_loop made internally.
+    terminals = available_terminals(panel)
+    context = author.build_context(terminals, asset_classes=asset_classes)
+    specs = author.propose(context, proposal_ts=proposal_ts)
 
     run_id = f"hyp-{panel_key}-{ghash}"
     result = run_hypothesis_loop(
         panel=panel, base_returns=base, timestamps=ts, cfg=cfg, evolve_kwargs=ek, author=author,
         run_id=run_id, crucible_version=CRUCIBLE_VERSION, gates_hash=ghash,
         proposal_ts=proposal_ts, catalog_asset_classes=asset_classes,
-        data_snapshot_hash=catalog.snapshot_hash())
+        data_snapshot_hash=catalog.snapshot_hash(), pre_proposed=specs,
+        token_cost=getattr(proposer, "last_usage", {}).get("total_tokens", 0))
 
     cards_dir = out_dir / "cards"
     for card in result.cards:
