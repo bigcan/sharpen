@@ -1,12 +1,13 @@
 # CLAUDE.md
 
-Detailed reference: `docs/claude_md_reference.md` (project map, env contracts, skill tables, Docker/PRISM internals). Read on demand.
+Detailed reference: `docs/claude_md_reference.md` (project map, env contracts, skill tables, Docker/PRISM internals, Crucible alpha-mining architecture). Read on demand.
 
 ## Project Brief
 
-RL Quant Strategy Development Platform. Active agent: **SAC only** — IQN/BDQ/PPO code present but none profitable yet; propose alternatives with evidence.
+RL Quant Strategy Development Platform + **Crucible** systematic alpha-mining platform (`crucible-v2.8`, `finrl_pro_ds/crucible/`). Active agent: **SAC only** — IQN/BDQ/PPO code present but none profitable yet; propose alternatives with evidence.
 **Ultimate goal:** a diversified portfolio of live-deployed RL strategies — uncorrelated across asset classes and timeframes — each generating sustained risk-adjusted alpha net of fees. Short-term milestone: pass FTMO + Velotrade prop-firm challenges as proof-of-capital.
-Workstreams: GMGP1 SAC Gold 15m, Sync-1H crypto, Funding-Arb, Market Making LOB.
+Workstreams: GMGP1 SAC Gold 15m (RL, paper). Crucible alpha-mining (agentic discovery funnel, continuous). Cross-asset TSMOM (linear, sole live edge, gated at paper). Sync-1H / Funding-Arb / Market Making are retired/shelved (see Env table).
+Prediction-market research (Polymarket) spun off 2026-07-05 to its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research) — no longer present here.
 State: `.agent/memory/core.md` (loaded at boot). R&D log: `randd_log.md`.
 
 ## Stack
@@ -44,6 +45,7 @@ python scripts/auto_collect_checkpoints.py [--hours N | --run_id ID | --all_inst
 
 ```
 finrl_pro_ds/{agents,envs,crypto,futures,cfd,data,training,analytics}/
+finrl_pro_ds/{signals,crucible}/   # alpha-mining: DSL/eval funnel + Crucible agentic discovery (crucible-v2.8)
 scripts/  configs/  tests/  docs/  docker/live/
 ```
 
@@ -61,6 +63,14 @@ Full tree + per-file notes: `docs/claude_md_reference.md`.
 | Legacy (V5/V6) | `envs/{deep_scalper,swing_scalper}_env.py` | `Discrete` | No active runs. Do NOT modify action spaces. |
 
 **All envs return raw numpy dicts, NOT Gymnasium wrappers — preserve this path.** Full contracts in `docs/claude_md_reference.md`.
+
+## Alpha-Mining Platform (Crucible)
+
+`finrl_pro_ds/crucible/` (`crucible-v2.8`) — continuous agentic alpha-discovery funnel sitting on top of `finrl_pro_ds/signals/` (DSL + T0-T5 deflated evaluation funnel). Falsification-first: ACQUIRE (free data connectors: FRED, CFTC COT, SEC EDGAR, GDELT, Stooq, TWSE, TAIFEX) → HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) → MINE → DEFLATE → COMBINE + forward-incubate in a lockbox before any human Tier-2 audit. P0–P5 roadmap shipped; zero PROMISING survivors have cleared the lockbox yet.
+
+Run: `python scripts/research/crucible_orchestrator.py --mode {synthetic|real} --nights N` (continuous nightly ticks) or `crucible_hypothesis_loop.py` (single manual cycle). Gates: `configs/crucible_cohort.gates.yaml`, `configs/crucible_lockbox.gates.yaml` (never hardcode thresholds — same rule as training gates). Design spec: `docs/research/crucible_agentic_discovery_spec.md`. Full architecture + CLI reference: `docs/claude_md_reference.md`.
+
+No dedicated skill exists yet for Crucible ops — use the scripts above directly.
 
 ## Config Schema
 
@@ -87,6 +97,8 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 | MARGIN-CFG | BTC `margin_requirement: 0.05` (20x). `1.0` = starvation. |
 | DATA-CLEAN | All OHLCV must pass `scripts/clean_ohlcv.py` before experiments. `.bak` mandatory. |
 | PF-XCHECK | Cross-check PF via `mid_price` AND `close`. >30% divergence = halt. |
+| CRU-1 | Crucible funnel `gates_hash` frozen at `crucible-v2.0` (`519158fa1450`). New connector/capability bumps are MINOR and must NOT change existing verdicts. |
+| CRU-2 | Crucible's agentic code (`crucible/agentic/`) may read ONLY `ledger_agent_view` (dedup keys + killed-family list) — never verdicts/DSR/holdout. This is the anti-oracle moat; do not widen the view. |
 
 ## Coding Standards
 

@@ -11,8 +11,8 @@ This document provides foundational mandates and technical specifications for Ge
 ## 1. Project Brief & Status
 - **Goal**: Profitable RL quant trading across asset classes (BTC, Gold, Crypto Perps, Funding Arb).
 - **Active Agent**: **SAC only** (Implicit Quantile Network (IQN), Branching Dueling Q-Network (BDQ), and PPO are present but none profitable yet).
-- **Live Direction**: Sole live edge = **cross-asset TSMOM** (linear time-series momentum across ~18 ETFs / 4 asset classes, net Sharpe ~0.60, low SPY correlation), currently gated at paper (DSR 0.918 < 0.95). Active R&D thrust = the **`finrl_pro_ds/signals/` alpha-mining funnel** (deflated 6-tier evaluation funnel + AlphaForge-style mine → deflate → combine).
-- **Other Workstreams**: GMGP1 SAC Gold 15m (FTMO/Velotrade contender, paper). **Retired/shelved** (do NOT present as active): Sync-1H crypto (pilot failure — retired), Funding-Arb (SHELVED, re-run only if funding > 8%/yr), MM-SAC / V8 (retired S442), PRISM (falsified), AlphaSeek (terminated NO-GO).
+- **Live Direction**: Sole live edge = **cross-asset TSMOM** (linear time-series momentum across ~18 ETFs / 4 asset classes, net Sharpe ~0.60, low SPY correlation), currently gated at paper (DSR 0.918 < 0.95). Active R&D thrust = **Crucible** (`finrl_pro_ds/crucible/`, `crucible-v2.8`) — continuous agentic alpha-mining funnel (free-data connectors → pre-registered hypotheses → deflated eval → forward lockbox), built on the `finrl_pro_ds/signals/` DSL/eval funnel.
+- **Other Workstreams**: GMGP1 SAC Gold 15m (FTMO/Velotrade contender, paper). **Retired/shelved** (do NOT present as active): Sync-1H crypto (pilot failure — retired), Funding-Arb (SHELVED, re-run only if funding > 8%/yr), MM-SAC / V8 (retired S442), PRISM (falsified), AlphaSeek (terminated NO-GO). The Polymarket prediction-market research thread has moved to its own repo, `Chiwin-Technology/polymarket-updown-research` — do not present it as present here.
 - **Reference State**: `.agent/memory/core.md` (Read at boot for active decisions). R&D log: `randd_log.md`.
 
 ## 2. Technical Stack
@@ -68,7 +68,8 @@ Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never to
     - `market_making_env.py` (V8): **RETIRED** (S442 - MM-SAC workstream closed).
     - `deep_scalper_env.py` (V5) / `swing_scalper_env.py` (V6): **LEGACY** (Discrete actions, do not modify action spaces).
 - **`finrl_pro_ds/crypto/`**: Live Engine **ACTIVE**; Sync-1H **RETIRED** (pilot failure) and Funding-Arb **SHELVED** (re-run only if funding > 8%/yr).
-- **`finrl_pro_ds/signals/`**: **ACTIVE** (alpha-mining funnel — deflated 6-tier evaluation + AlphaForge-style mine → deflate → combine).
+- **`finrl_pro_ds/signals/`**: **ACTIVE** (alpha-mining DSL + deflated 6-tier evaluation funnel — dependency layer under Crucible).
+- **`finrl_pro_ds/crucible/`**: **ACTIVE** (`crucible-v2.8` — continuous agentic alpha-mining: data connectors, agentic proposer/author, orchestrator, lockbox, governance. See `docs/claude_md_reference.md`).
 - **`finrl_pro_ds/data/multiscale_handler.py`**: **ACTIVE** (SAC/GMGP1 scaling).
 
 ## 6. Env Contracts (ACTIVE)

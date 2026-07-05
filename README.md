@@ -16,7 +16,7 @@ An institutional-grade research and deployment platform for reinforcement learni
 | Workstream | Env | Asset(s) | Timeframe | Status |
 |------------|-----|----------|-----------|--------|
 | **Cross-asset TSMOM** | linear (no RL) | ~18 ETFs / 4 asset classes | daily | **Sole live edge.** Linear time-series momentum, net Sharpe ~0.60, low SPY correlation. Gated at paper (DSR 0.918 < 0.95). |
-| **signals/ alpha-mining funnel** | `finrl_pro_ds/signals/` | research | — | **Active R&D thrust.** Deflated 6-tier evaluation funnel + AlphaForge-style mine → deflate → combine. |
+| **Crucible** (`crucible-v2.8`) | `finrl_pro_ds/crucible/` + `signals/` | research, multi-asset | — | **Active R&D thrust.** Continuous agentic alpha-mining: free-data connectors (FRED/COT/EDGAR/GDELT/Stooq/TWSE/TAIFEX) → pre-registered hypotheses → deflated funnel → forward lockbox. P0–P5 shipped; 0 survivors cleared lockbox yet. |
 | **GMGP1** | V7 ContinuousSwing (SAC) | Gold / XAUUSD / BTC | 15 min | FTMO + Velotrade contender; paper trading live |
 | **SG-1** | V7 ContinuousSwing (SAC) | XAUUSD / BTC | 3 min | Intraday diversity strategy; Arm B ablation in progress |
 
@@ -89,6 +89,25 @@ python scripts/auto_collect_checkpoints.py      # polls WandB, SFTPs from GPUHub
 
 ---
 
+## Alpha-Mining Platform (Crucible)
+
+`finrl_pro_ds/crucible/` (`crucible-v2.8`) is a continuous agentic alpha-discovery system built on top of the `finrl_pro_ds/signals/` DSL + deflated evaluation funnel: free-data connectors (FRED, CFTC COT, SEC EDGAR, GDELT, Stooq, TWSE, TAIFEX) feed an agent that proposes pre-registered hypotheses (blind to verdicts), which are mined, deflated, and forward-incubated in a lockbox before any human Tier-2 audit. Full architecture: `docs/claude_md_reference.md`.
+
+```bash
+# Continuous nightly-tick discovery loop
+python scripts/research/crucible_orchestrator.py --mode synthetic --nights 4
+python scripts/research/crucible_orchestrator.py --mode real --start 2008-01-01 --nights 4
+
+# Manual single-cycle loop / governance handoff / reproduce a past run
+python scripts/research/crucible_hypothesis_loop.py --mode synthetic
+python scripts/research/crucible_governance.py --lockbox <path> --gov <path> --out <dir> --cards <dir> --workstream crucible --scope overlay --now-ts <ISO8601>
+python scripts/research/crucible_reproduce.py results/crucible_orchestrator/<mode>/<tick_ts>
+```
+
+**Prediction-market research (Polymarket)** has moved to its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research) (spun off 2026-07-05 — it was always self-contained, zero `finrl_pro_ds` imports).
+
+---
+
 ## Project Layout
 
 ```
@@ -100,6 +119,8 @@ finrl_pro_ds/
 ├── cfd/           # cTrader CFD execution (XAUUSD)
 ├── data/          # Loaders, feature engineering, splitter, Parquet handler
 ├── training/      # Trainers, HPO runners, accumulators
+├── signals/       # Alpha-mining DSL + deflated (T0-T5) evaluation funnel
+├── crucible/      # Crucible agentic alpha-mining platform (crucible-v2.8)
 └── analytics/     # Pyfolio, WandB evaluator, gate evaluation
 configs/  scripts/  tests/  docs/  docker/live/
 ```

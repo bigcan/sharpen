@@ -5,7 +5,7 @@ Last updated: 2026-06-30
 
 This document instructs AI coding agents working in this repository. It defines persona, workflow, guardrails, quality gates, technique templates, and ready‑to‑run macros tailored to the FinRL Pro scaffold built atop FinRL Podracer.
 
-> **Canonical project state** lives in `CLAUDE.md` (Project Brief) and `.agent/memory/core.md`. Active direction: cross-asset TSMOM (sole live edge) and the `finrl_pro_ds/signals/` alpha-mining funnel. Sync-1H and Funding-Arb are **retired/shelved**, not active. Treat `CLAUDE.md` + `core.md` as authoritative over this guide.
+> **Canonical project state** lives in `CLAUDE.md` (Project Brief) and `.agent/memory/core.md`. Active direction: cross-asset TSMOM (sole live edge) and **Crucible** (`finrl_pro_ds/crucible/`, `crucible-v2.8` — continuous agentic alpha-mining, built on the `finrl_pro_ds/signals/` DSL/eval funnel). Sync-1H and Funding-Arb are **retired/shelved**, not active. (The Polymarket prediction-market research thread has moved to its own repo, `Chiwin-Technology/polymarket-updown-research`.) Treat `CLAUDE.md` + `core.md` as authoritative over this guide.
 
 ## 0. Prime Directive
 
