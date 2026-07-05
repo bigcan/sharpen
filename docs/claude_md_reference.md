@@ -2,7 +2,7 @@
 
 Full content moved here 2026-04-13. Root CLAUDE.md retains only load-bearing rules.
 Consult this file when: designing new envs, configuring PRISM, wiring Docker monitoring,
-or when invariants need deeper context than the table row provides.
+working on Crucible alpha-mining, or when invariants need deeper context than the table row provides.
 
 ## Full Project Map
 
@@ -47,6 +47,27 @@ finrl_pro_ds/
     parquet_handler.py            # Shared-memory data streaming
   training/sac_trainer.py         # SAC training loop (+ legacy deepscalper/ppo trainers)
   analytics/                      # pyfolio_analyzer, wandb_evaluator
+  signals/                         # Alpha-mining DSL + deflated (T0-T5) evaluation funnel -- dependency of crucible/
+    generation/cohort.py           # Weak-signal cohort construction (P2.7)
+    generation/cohort_eval.py      # Cohort evaluator: SR* pre-filter + selection-aware MC null
+    generation/cohort_mc.py        # Selection-aware Monte Carlo null (stationary bootstrap)
+    generation/evolve.py           # C3 genetic search (DSL alpha generation)
+    generation/dsl_signal.py       # DSL eval context + overlay path
+    generation/config.py           # Generation config schema
+    library/_alpha_dsl.py          # WQ101-style alpha DSL primitives
+    features.py                    # Panel (OHLCV + feature_slots for macro/positioning, added P1a)
+    spec.py                        # SignalSpec, content_hash
+  crucible/                        # Crucible agentic alpha-mining platform (crucible-v2.8) -- see dedicated section below
+    agentic/                       # Proposer/Author/DataScout -- agent proposes, statistics dispose (CR-1)
+    data/                          # Free-data connectors: FRED, CFTC COT, EDGAR, GDELT, Stooq, TWSE, TAIFEX
+    governance/                    # Survivor -> Tier-2 handoff pipeline (never runs the audit itself)
+    lockbox/                       # Forward-incubation on post-hypothesis data (CR-8, the anti-oracle keystone)
+    orchestrator/                  # Continuous nightly-tick loop, per-substrate online-FDR budget
+    catalog.py                     # Central data catalog (SQLite) -- what the agent can hypothesize over
+    ledger.py                      # Split trial ledger -- agent-blind verdicts, agent-visible dedup view
+    manifest.py                    # RunManifest -- version + gates_hash + data_snapshot_hash + rng_seeds
+    reproduce.py                   # `crucible reproduce <run_id>` -- re-executes, asserts bit-identical
+    version.py                     # Current: crucible-v2.8
 scripts/
 configs/
 tests/
@@ -108,6 +129,67 @@ docker/live/
 - **V5 DeepScalperEnv** (`deep_scalper_env.py`): `Discrete(6)` flat. Do NOT revert to MultiDiscrete.
 
 **All envs return raw numpy dicts, NOT Gymnasium wrappers.**
+
+## Crucible Alpha-Mining Architecture (full)
+
+**Purpose:** `finrl_pro_ds/crucible/` (current: `crucible-v2.8`, see `version.py`) is a continuous agentic alpha-discovery system built on top of the existing `finrl_pro_ds/signals/` DSL + T0-T5 deflated evaluation funnel (not a replacement). Falsification-first pipeline: ACQUIRE (free data connectors) -> HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) -> MINE (DSL/genetic search) -> DEFLATE (T0-T5 gates) -> COMBINE + forward-incubate in a **lockbox** on data that postdates the hypothesis timestamp, before any human-initiated Tier-2 audit. Value proposition is the *filter*, not idea supply: rigorous statistical gatekeeping (pre-registration, split-ledger anti-oracle, per-substrate online-FDR) across capacity-constrained free data domains (FRED/ALFRED macro, CFTC COT positioning, SEC EDGAR fundamentals, GDELT sentiment, Stooq global market, TWSE/TAIFEX Taiwan). P0-P5 roadmap shipped (see below); zero PROMISING survivors have cleared the lockbox as of `crucible-v2.8`.
+
+### Subpackages
+
+| Path | Responsibility |
+|------|----------------|
+| `agentic/` | Proposer/Author/DataScout seam. Shipped default `LibrarySeedProposer` (deterministic, offline, curated WQ101 + macro-overlay seed bank). `HypothesisAuthor` reads ONLY `ledger_agent_view` (dedup keys + killed-family list -- never verdicts/DSR/holdout) + data catalog; emits pre-registered `SignalSpec`s hashed per `proposal_ts`. `DiscoveryCard` records verdict + narrative, read-only after scoring. |
+| `data/` | Free-data connectors, uniform `DataConnector` protocol (`connector.py`) carrying `release_timestamp` (the PIT join-leak tripwire). Concrete: `fred.py`, `cftc_cot.py`, `edgar.py`, `gdelt.py`, `stooq.py`, `twse_institutional.py`, `taifex_positioning.py` (poll-only endpoint, local accumulation store). `quality_gate.py` enforces as-of-join reconstruction (fails on look-ahead). `panel_bridge.py`/`altdata_bridge.py` wire connectors into the live `Panel`. |
+| `governance/` | Survivor -> notification -> Tier-2-handoff pipeline, run *around* the funnel. `driver.py` scans lockbox for CLEARED entries, builds a `Tier2Handoff` packet (verdict + forward evidence + exact `deep_strategy_audit.js` command), notifies operator (`notify.py`), idempotency guard (`store.py`, SQLite). **Never runs the audit itself** -- human-initiated per root `CLAUDE.md`'s Anti-Patterns. |
+| `lockbox/` | Forward-incubation (CR-8, the keystone anti-oracle mechanism). `lockbox.py`: pre-registered criterion pinned at enrollment, mutable accrual state, status ∈ {INCUBATING, CLEARED, REJECTED}, verdict rendered EXACTLY ONCE. `incubation.py` computes forward evidence on bars strictly after `proposal_ts` via `finrl_pro_ds/paper/`. |
+| `orchestrator/` | Continuous nightly-tick loop. `orchestrator.py`: `substrate_dirty` gate (mine only on new data/fresh specs, conserves FDR wealth), runs the hypothesis loop within budget. `budget.py` hard per-tick LLM-token/candidate caps. `burst.py` routes expensive HPO to GPUHub. `fdr.py` per-substrate online-FDR (LORD++) wealth. `substrate.py` multi-substrate coordination + versioned tick log. |
+| `catalog.py` | Central SQLite data catalog -- what the agent can hypothesize over today (source, series, date_range, freshness, snapshot_hash). Pinned per run for reproducibility. |
+| `ledger.py` | Split trial ledger (anti-oracle moat, CR-1): full `trial_ledger` (verdict + DSR + OOS delta, agent-blind) + SQL VIEW `ledger_agent_view` (dedup keys + killed-family list only, agent-visible). |
+| `manifest.py` | `RunManifest` pins `crucible_version` + `gates_hash` + `data_snapshot_hash` + `rng_seeds`. Reproducible only if all four match. |
+| `reproduce.py` | `crucible reproduce <run_id>` -- re-executes from manifest + recipe, asserts verdicts bit-identical. |
+
+`finrl_pro_ds/signals/` is a **dependency**, not a sibling: Crucible reuses `spec.py`, `generation/grammar.py`, `generation/evolve.py` (C3 genetic search), `generation/dsl_signal.py`, `generation/fitness.py`, `base_sleeves.py`, `eval_harness.py` (T0-T5), `features.py` (`Panel.feature_slots` extension for non-OHLCV series, added P1a). `generation/cohort_eval.py` / `cohort.py` / `cohort_mc.py` (P2.7) add an opt-in weak-signal COHORT evaluator downstream of the main funnel.
+
+### Running it
+
+```bash
+# Continuous orchestrator (P3) -- main entry point for unattended discovery
+python scripts/research/crucible_orchestrator.py --mode synthetic --nights 4      # noise panel, reproducible, no data cost
+python scripts/research/crucible_orchestrator.py --mode real --start 2008-01-01 --nights 4   # real data, ticks only when substrate_dirty
+
+# Manual single-cycle loop (P2, no orchestrator)
+python scripts/research/crucible_hypothesis_loop.py --mode {synthetic|real} [--start YYYY-MM-DD]
+
+# Hand off a CLEARED lockbox survivor to a human Tier-2 audit (P5) -- never runs the audit itself
+python scripts/research/crucible_governance.py --lockbox <path> --gov <path> --out <dir> --cards <dir> --workstream crucible --scope overlay --now-ts <ISO8601>
+
+# Verify a past run reproduces bit-identical from its manifest
+python scripts/research/crucible_reproduce.py results/crucible_orchestrator/<mode>/<tick_ts>
+
+# Support scripts
+python scripts/research/generate_alphas.py                  # base sleeve generation
+python scripts/research/measure_altdata_pool_diversity.py    # data-breadth audit
+python scripts/backup_crucible_ledger.py                     # ledger snapshot
+```
+
+### Gates (never hardcode -- same rule as training gates)
+
+| File | Gates |
+|------|-------|
+| `configs/crucible_cohort.gates.yaml` | Opt-in (`enabled: false` by default). Admission: `min_cohort_size`, `max_cohort_size`, `max_pairwise_corr`. Selection-aware MC null: `alpha_cohort`, `mc_n_replicates`, `mc_block_length`. Separate file by design (ADR-1) -- keeps the main funnel `gates_hash` frozen. |
+| `configs/crucible_lockbox.gates.yaml` | Forward incubation: `incubation.min_forward_bars` (~63, one quarter), `incubation.min_forward_sharpe` (~0.30 floor). Separate file by design (ADR-2), same reason. |
+
+### Maturity (P0-P5 roadmap, all shipped)
+
+`crucible-v2.0` froze the funnel `gates_hash` (`519158fa1450`) -- every later bump is MINOR (new connectors/capability) and must NOT change existing verdicts. P1a (v2.1, data representation/overlay path) -> P1b (FRED/COT + quality gate) -> P2 (agentic loop, manual) -> P3 (v2.4, continuous orchestrator) -> P4 (v2.5, lockbox) -> P5 (v2.6, GDELT/EDGAR/Stooq breadth + governance + `reproduce`) -> Phase 4 (v2.7, weak-signal cohort) -> P2.8 (Taiwan TWSE/TAIFEX breadth, current).
+
+Design specs: `docs/research/crucible_agentic_discovery_spec.md` (canonical, §0-11), `crucible_weak_signal_ensemble_spec.md`, `crucible_diverse_proposer_spec.md`, `crucible_mc_null_spec.md`. Architecture notes: `.agent/artifacts/crucible_spec_fable_review.md`, `crucible_cohort_integration_architecture.md`, `crucible_taiwan_breadth_and_scheduling_architecture.md`.
+
+## Prediction-Market Research (Polymarket) -- moved out
+
+The Polymarket 5-min up/down maker-diagnostic + forward paper-test (`pm-updown-mm-v0`) that used to live at `scripts/data/*polymarket*` / `scripts/research/polymarket_updown_mm_diagnostic.py` / `configs/polymarket_updown_mm_paper.gates.yaml` was spun off 2026-07-05 into its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research). It was always self-contained (zero `finrl_pro_ds` imports, no fleet/Docker/skill integration), so nothing else in this repo depended on it. The Windows Scheduled Task that pulls the remote forward-collector's output now points at the new repo's checkout.
+
+Kalshi credentials remain in this repo (`.env` `KALSHI_API_KEY_ID`, gitignored `kalshi_private_key.pem`) but there is no active Kalshi code here or in the new repo -- a prior SecureFinAI-contest client was deleted post-contest 2026-05-02.
 
 ## Full Agent Skills Dispatch Tables
 
