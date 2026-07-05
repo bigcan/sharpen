@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from .card import DiscoveryCard
 from .hypothesis import HypothesisAuthor, PreRegisteredSpec
+from .llm_proposer import LlmProposer
 from .loop import HypothesisLoopResult, run_hypothesis_loop
 from .proposer import (
     HypothesisProposal,
@@ -34,6 +35,7 @@ __all__ = [
     "HypothesisLoopResult",
     "HypothesisProposal",
     "LibrarySeedProposer",
+    "LlmProposer",
     "PreRegisteredSpec",
     "ProposalContext",
     "Proposer",
