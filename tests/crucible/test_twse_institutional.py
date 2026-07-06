@@ -89,6 +89,43 @@ def test_parses_comma_and_negative_numbers() -> None:
     assert dealer.value[0] == -2_500.0
 
 
+def test_bare_numeric_value_is_kept_not_dropped() -> None:
+    """Regression (S553-cont-117): T86 occasionally returns a bare JSON number instead of a string
+    for a round value (live 2026-07-06: 00635U's trust_net came back as int 0). The old parser called
+    int.replace -> AttributeError, which escaped _extract's (TypeError, ValueError) guard and dropped
+    the ENTIRE series at the altdata bridge. A bare 0 is a real zero-flow observation — keep it."""
+    row = _row("00635U", "gold-etf", "1,000", "0", "-2,000", "-1,000")
+    row[10] = 0            # trust_net as a bare int, exactly as the live endpoint sent it
+    days = {"20260701": _t86_payload("20260701", [row])}
+    conn = TwseInstitutionalConnector(transport=_transport_for(days), tickers=("00635U",),
+                                      sleep_seconds=0)
+    refs = {r.series_id: r for r in conn.discover()}
+    trust = conn.fetch(refs["00635U:trust_net"], "2026-07-01", "2026-07-01")
+    assert trust.n_obs == 1          # not dropped
+    assert trust.value[0] == 0.0     # kept as a real zero-flow observation
+
+
+def test_null_value_cell_drops_row_not_the_whole_series() -> None:
+    """Sibling of the bare-int regression, found during the cont-117 audit: a JSON `null` value cell
+    (Python None) hits None.replace -> AttributeError, which — before the guard was widened — escaped
+    _extract's (TypeError, ValueError) except and killed the ENTIRE series at the altdata bridge.
+    Unlike a bare 0 (a real zero-flow observation, KEPT), a null means genuinely no data for that
+    cell, so the correct behavior is to DROP just that row. Tripwire: narrowing _extract's except back
+    to (TypeError, ValueError) makes this raise instead of returning an empty series."""
+    row = _row("00635U", "gold-etf", "1,000", "0", "-2,000", "-1,000")
+    row[10] = None         # trust_net as JSON null
+    days = {"20260701": _t86_payload("20260701", [row])}
+    conn = TwseInstitutionalConnector(transport=_transport_for(days), tickers=("00635U",),
+                                      sleep_seconds=0)
+    refs = {r.series_id: r for r in conn.discover()}
+    trust = conn.fetch(refs["00635U:trust_net"], "2026-07-01", "2026-07-01")
+    assert trust.n_obs == 0          # row dropped, series intact (no crash)
+    # a sibling field on the SAME row still parses — proves only the null cell was dropped
+    dealer = conn.fetch(refs["00635U:dealer_net"], "2026-07-01", "2026-07-01")
+    assert dealer.n_obs == 1
+    assert dealer.value[0] == -2_000.0
+
+
 def test_day_cache_shares_one_http_call_across_series() -> None:
     days = {"20260701": _t86_payload("20260701", [
         _row("0050", "x", "1", "2", "3", "6"),
