@@ -81,8 +81,15 @@ _TICKER_COLUMN = "證券代號"
 _DEFAULT_MAX_LOOKBACK_DAYS = 400
 
 
-def _parse_num(s: str) -> float:
-    """TWSE legacy numbers are comma-formatted strings (e.g. "52,683,779", "-445,000")."""
+def _parse_num(s: str | int | float) -> float:
+    """TWSE legacy numbers are USUALLY comma-formatted strings (e.g. "52,683,779", "-445,000"),
+    but the endpoint occasionally emits a bare JSON number instead of a string for a security with
+    a round value in a category (live-observed 2026-07-06: 00635U's `投信買賣超股數` came back as the
+    integer 0, not "0"). A bare number is a REAL zero-flow observation, not missing data — coerce it
+    rather than letting `int.replace` raise AttributeError (which, not being TypeError/ValueError,
+    escaped `_extract`'s guard and dropped the whole series at the altdata bridge)."""
+    if isinstance(s, (int, float)):
+        return float(s)
     return float(s.replace(",", ""))
 
 
@@ -231,6 +238,13 @@ class TwseInstitutionalConnector:
             if row[ticker_idx].strip() == ticker:
                 try:
                     return _parse_num(row[col_idx])
-                except (TypeError, ValueError):
+                except (TypeError, ValueError, AttributeError):
+                    # This guard's job is to turn an unparseable value cell into "no observation for
+                    # this row" rather than a hard error. AttributeError belongs here too: if the cell
+                    # is neither a number nor a comma-string but some other JSON type (e.g. a bare
+                    # `null` -> None, on which `.replace` raises AttributeError), drop THIS row — never
+                    # let one junk cell escape and kill the whole series at the altdata bridge (the
+                    # bare-int failure mode `_parse_num` now handles for real numbers). A bare number
+                    # is kept by `_parse_num`; only genuinely non-numeric cells reach here.
                     return None
         return None
