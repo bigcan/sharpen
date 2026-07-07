@@ -108,27 +108,71 @@ def assert_feature_causal(joined: np.ndarray, series: SeriesData, bar_dates: np.
                 f"released by then (latest release <= t = {rel[avail].max()})")
 
 
+def _canonical_asof_values(series: SeriesData, bar_dates: np.ndarray) -> np.ndarray:
+    """The GROUND-TRUTH release-time per-bar as-of value, computed as an INDEPENDENT reference for
+    :func:`assert_asof_join_causal` — deliberately a separate implementation from :func:`asof_join`
+    (do NOT DRY-merge them: the separation is the regression tripwire — if a future edit makes
+    ``asof_join`` peek ahead or bind by reference period, it diverges from this per-bar reference and
+    the gate fires).
+
+    Definition (identical contract to ``asof_join``): bar ``t`` ← the value of the observation with
+    the greatest ``reference_period`` among those whose ``release_timestamp <= bar_dates[t]`` (ties on
+    reference period → the later release); NaN before the first release. Manifestly PER-BAR — ``out[t]``
+    is a pure function of ``bar_dates[t]`` and the observation set, so it is truncation-stable and
+    order-invariant BY CONSTRUCTION, which is exactly the property the gate certifies ``asof_join``
+    still has. Vectorized: O(M log M + T log M)."""
+    bars = np.asarray(bar_dates, dtype="datetime64[ns]")
+    ref = np.asarray(series.reference_period, dtype="datetime64[ns]")
+    rel = np.asarray(series.release_timestamp, dtype="datetime64[ns]")
+    val = np.asarray(series.value, dtype=np.float64)
+    out = np.full(bars.shape[0], np.nan, dtype=np.float64)
+    if ref.shape[0] == 0:
+        return out
+    # Scan observations in release order; the reading "in effect" after the first j releases is the
+    # running max-reference-period value (a later release of an already-max reference supersedes,
+    # because it appears later in release order). Independent of `bars`, so it is computed ONCE.
+    order = np.lexsort((ref, rel))                    # sort by release, ties by reference
+    rel_s, ref_s, val_s = rel[order], ref[order], val[order]
+    running_max_ref = np.maximum.accumulate(ref_s)
+    advances = ref_s >= running_max_ref               # this release (re)sets the in-effect reading
+    src = np.maximum.accumulate(np.where(advances, np.arange(val_s.shape[0]), -1))
+    in_effect = np.where(src >= 0, val_s[np.clip(src, 0, None)], np.nan)
+    # Per bar: how many observations were released by then (rel_s ascending) → index the in-effect value.
+    n_released = np.searchsorted(rel_s, bars, side="right")
+    seen = n_released > 0
+    out[seen] = in_effect[n_released[seen] - 1]
+    return out
+
+
 def assert_asof_join_causal(series: SeriesData, bar_dates: np.ndarray) -> None:
-    """P1b EXIT-GATE (spec §8 P1b row). Rebuild the feature purely from (value, release_timestamp)
-    events and assert every feature value at bar ``t`` was *publicly available by t* — a fail means
-    look-ahead. Combines the data-availability check (:func:`assert_feature_causal`) with the
-    Tier-0 truncation property extended to the data-layer join: truncating the calendar at ``t``
-    yields the identical value at ``t``.
+    """P1b EXIT-GATE (spec §8 P1b row). Assert :func:`asof_join`'s output equals the ground-truth
+    release-time per-bar as-of value at EVERY bar — a mismatch means look-ahead (binding a bar to data
+    not yet published) or a wrong reading. This single vectorized comparison SUBSUMES both properties
+    the old exhaustive loop split: (1) data availability (the canonical value is release-gated by
+    construction, so a reference-period leak like :func:`naive_reference_period_join` diverges from it —
+    what :func:`assert_feature_causal` caught) and (2) truncation-stability (the canonical value is
+    per-bar, so a join that depends on other bars diverges from it — what the per-bar prefix sweep
+    caught).
+
+    This is O(M log M + T log M) — the exhaustive per-bar prefix re-join it replaced was O(T²) (a full
+    re-join per bar), which became the audit-path bottleneck once P0 deepened the panels ~10×. The
+    teeth are preserved: :func:`_canonical_asof_values` is an INDEPENDENT reference, so any future
+    ``asof_join`` regression (reference-period bind, look-ahead window, off-by-one) surfaces as a
+    mismatch here. Covered by the brute-force-oracle + simulated-leak tests.
 
     Raises AssertionError on any violation (the negative test asserts this does NOT raise for the
     release-time :func:`asof_join`, and DOES for :func:`naive_reference_period_join`).
     """
     bars = np.asarray(bar_dates, dtype="datetime64[ns]")
     joined = asof_join(series, bars)
-    assert_feature_causal(joined, series, bars)
-    for t in range(bars.shape[0]):
-        vt = joined[t]
-        vt_trunc = asof_join(series, bars[: t + 1])[t]
-        if np.isnan(vt) and np.isnan(vt_trunc):
-            continue
-        if not np.isclose(vt_trunc, vt, atol=1e-12):
-            raise AssertionError(
-                f"as-of-join not truncation-stable at bar {t}: full={vt} truncated={vt_trunc}")
+    canonical = _canonical_asof_values(series, bars)
+    both_nan = np.isnan(joined) & np.isnan(canonical)
+    bad = ~both_nan & ~np.isclose(joined, canonical, atol=1e-12, rtol=0.0)
+    if np.any(bad):
+        t = int(np.flatnonzero(bad)[0])
+        raise AssertionError(
+            f"as-of-join not causal at bar {t} ({bars[t]}): asof_join={joined[t]} but the release-time "
+            f"per-bar as-of value is {canonical[t]} (look-ahead or non-per-bar dependence)")
 
 
 # Asset classes whose fat tails are SIGNAL, not corruption. A genuine >12σ first-difference in VIX, a
