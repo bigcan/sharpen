@@ -324,24 +324,12 @@ def run_e1(cc: CalibConfig, *, quick: bool) -> dict:
 
 
 # ------------------------------------------------------------------ E2: planted-signal power
-def run_e2(cc: CalibConfig, *, quick: bool) -> dict:
-    """Planted-signal power via the DIRECT gate path: score the planted overlay ``macro:plant``
-    through the real ``combination_fitness`` (the exact PROMISING gate) at a declared file-drawer N.
-    This isolates the funnel's DETECTION POWER as a function of the realized marginal ΔSR — fast (no
-    search), fully diagnostic (every leg readable), and it uses the real gate, not a copy. It scores
-    on the FULL panel, so it is an UPPER bound on the deployed holdout-binding power (the holdout has
-    ~holdout_frac of the bars, hence less power) — i.e. any under-power finding is conservative."""
-    sub = cc.substrate
-    e2 = cc.raw["e2_power"]
-    n_seeds = 6 if quick else int(e2["n_seeds"])
-    betas = [0.0, 0.008, 0.02] if quick else [float(b) for b in e2["beta_grid"]]
-    gen_n_eff = float(e2["gate_probe_gen_n_eff"])
-    alpha = 0.05
-    t, n = int(sub["t"]), int(sub["n"])
-    cost_bps = float(cc.ek["cost_bps"])
-
-    log.info("E2 planted-power (direct gate, gen_n_eff=%.0f): %d betas x %d seeds",
-             gen_n_eff, len(betas), n_seeds)
+def _e2_power_curve(cc: CalibConfig, *, t: int, n: int, betas: list[float], n_seeds: int,
+                    gen_n_eff: float, cost_bps: float, alpha: float = 0.05) -> list[dict[str, Any]]:
+    """The E2 power curve at a FIXED panel length ``t``: for each plant strength ``beta``, score the
+    planted overlay ``macro:plant`` through the real ``combination_fitness`` gate over ``n_seeds``
+    panels and record power = P(passes_gate) + mean realized marginal ΔSR + per-leg pass-rates.
+    Shared by ``run_e2`` (single T) and ``run_mde_sweep`` (T grid)."""
     curve: list[dict[str, Any]] = []
     for beta in betas:
         detections = 0
@@ -371,15 +359,43 @@ def run_e2(cc: CalibConfig, *, quick: bool) -> dict:
             "mean_realized_delta_sr": mean_delta,
             "per_leg_pass_rate": legs.rates(),            # which leg blocks near the MDE
         })
-        log.info("  beta=%.4f: power=%.2f (%d/%d)  realized_dSR=%.3f",
-                 beta, power, detections, n_seeds, mean_delta)
+    return curve
+
+
+def _mde_from_curve(curve: list[dict[str, Any]], power_target: float) -> dict[str, Any] | None:
+    """The MDE entry = the first point (ascending beta) whose power reaches ``power_target``."""
+    return next((p for p in curve if float(p["power"]) >= power_target), None)
+
+
+def run_e2(cc: CalibConfig, *, quick: bool) -> dict:
+    """Planted-signal power via the DIRECT gate path: score the planted overlay ``macro:plant``
+    through the real ``combination_fitness`` (the exact PROMISING gate) at a declared file-drawer N.
+    This isolates the funnel's DETECTION POWER as a function of the realized marginal ΔSR — fast (no
+    search), fully diagnostic (every leg readable), and it uses the real gate, not a copy. It scores
+    on the FULL panel, so it is an UPPER bound on the deployed holdout-binding power (the holdout has
+    ~holdout_frac of the bars, hence less power) — i.e. any under-power finding is conservative."""
+    sub = cc.substrate
+    e2 = cc.raw["e2_power"]
+    n_seeds = 6 if quick else int(e2["n_seeds"])
+    betas = [0.0, 0.008, 0.02] if quick else [float(b) for b in e2["beta_grid"]]
+    gen_n_eff = float(e2["gate_probe_gen_n_eff"])
+    t, n = int(sub["t"]), int(sub["n"])
+    cost_bps = float(cc.ek["cost_bps"])
+
+    log.info("E2 planted-power (direct gate, T=%d, gen_n_eff=%.0f): %d betas x %d seeds",
+             t, gen_n_eff, len(betas), n_seeds)
+    curve = _e2_power_curve(cc, t=t, n=n, betas=betas, n_seeds=n_seeds, gen_n_eff=gen_n_eff,
+                            cost_bps=cost_bps)
+    for p in curve:
+        log.info("  beta=%.4f: power=%.2f (%d/%d)  realized_dSR=%.3f", p["beta"], p["power"],
+                 p["detections"], p["n_seeds"], p["mean_realized_delta_sr"])
 
     power_target = float(e2["power_target"])
     power_min = float(e2["power_min"])
     mde_delta_cap = float(e2["mde_delta_sr_max"])
     # MDE = first point (ascending beta) reaching power_target; its realized marginal ΔSR must be
     # <= the cap for GREEN (the funnel detects a plausibly-small edge, not only a huge one).
-    mde = next((p for p in curve if float(p["power"]) >= power_target), None)
+    mde = _mde_from_curve(curve, power_target)
     max_power = max((float(p["power"]) for p in curve), default=0.0)
     beta0 = next((p for p in curve if float(p["beta"]) == 0.0), None)
     mde_delta = float(mde["mean_realized_delta_sr"]) if mde is not None else float("nan")
@@ -387,7 +403,7 @@ def run_e2(cc: CalibConfig, *, quick: bool) -> dict:
         mde is not None and max_power >= power_min
         and np.isfinite(mde_delta) and mde_delta <= mde_delta_cap)
     return {
-        "n_seeds": n_seeds, "beta_grid": betas, "gate_probe_gen_n_eff": gen_n_eff,
+        "t": t, "n_seeds": n_seeds, "beta_grid": betas, "gate_probe_gen_n_eff": gen_n_eff,
         "power_curve": curve, "power_target": power_target, "power_min": power_min,
         "max_power": max_power,
         "mde_beta": (mde["beta"] if mde is not None else None),
@@ -400,11 +416,64 @@ def run_e2(cc: CalibConfig, *, quick: bool) -> dict:
     }
 
 
+def run_mde_sweep(cc: CalibConfig, *, quick: bool) -> dict:
+    """The MDE-vs-T curve: run the E2 power sweep at each substrate length in ``mde_sweep.t_grid``
+    and report the funnel's detection floor (MDE in realized marginal ΔSR at ``power_target``) as a
+    function of sample size. This is THE characterization of the funnel's power: because MDE scales
+    ~1/sqrt(T_holdout), it shows how small an edge the funnel can see on the ACTUAL real substrates
+    (cross_asset ~4044 bars, Taiwan ~2782) vs short ones — i.e. whether any past '0 PROMISING' was
+    a real absence or just low power at that substrate's length."""
+    sub = cc.substrate
+    e2 = cc.raw["e2_power"]
+    sw = cc.raw["mde_sweep"]
+    n = int(sub["n"])
+    gen_n_eff = float(e2["gate_probe_gen_n_eff"])
+    cost_bps = float(cc.ek["cost_bps"])
+    holdout_frac = float(cc.ek["holdout_frac"])
+    power_target = float(e2["power_target"])
+    n_seeds = 8 if quick else int(sw["n_seeds"])
+    betas = [0.0, 0.008, 0.02, 0.04] if quick else [float(b) for b in sw["beta_grid"]]
+    t_grid = [756, 2782] if quick else [int(x) for x in sw["t_grid"]]
+
+    log.info("MDE-vs-T sweep: T in %s x %d betas x %d seeds", t_grid, len(betas), n_seeds)
+    rows: list[dict[str, Any]] = []
+    for t in t_grid:
+        curve = _e2_power_curve(cc, t=t, n=n, betas=betas, n_seeds=n_seeds, gen_n_eff=gen_n_eff,
+                                cost_bps=cost_bps)
+        mde = _mde_from_curve(curve, power_target)
+        row = {
+            "t": t, "holdout_bars": int(round(t * holdout_frac)),
+            "mde_realized_delta_sr": (float(mde["mean_realized_delta_sr"]) if mde else None),
+            "mde_beta": (mde["beta"] if mde else None),
+            "mde_power": (float(mde["power"]) if mde else None),
+            "max_power": max((float(p["power"]) for p in curve), default=0.0),
+            "curve": [{"beta": p["beta"], "power": p["power"],
+                       "realized_delta_sr": p["mean_realized_delta_sr"]} for p in curve],
+        }
+        rows.append(row)
+        log.info("  T=%d (holdout ~%d bars): MDE realized_dSR=%s @ power=%s",
+                 t, row["holdout_bars"], row["mde_realized_delta_sr"], row["mde_power"])
+
+    # Physical expectation: MDE FALLS as T grows (more data -> smaller detectable edge, ~1/sqrt(T)).
+    mdes = [r["mde_realized_delta_sr"] for r in rows if r["mde_realized_delta_sr"] is not None]
+    monotone = all(mdes[i] >= mdes[i + 1] - 0.5 for i in range(len(mdes) - 1))  # slack for MC noise
+    return {
+        "t_grid": t_grid, "n_seeds": n_seeds, "beta_grid": betas,
+        "power_target": power_target, "gate_probe_gen_n_eff": gen_n_eff,
+        "holdout_frac": holdout_frac, "rows": rows,
+        "mde_falls_with_t": monotone,
+        "note": ("MDE = realized marginal ΔSR (annualized) at power_target, full-panel gate (UPPER "
+                 "bound on deployed holdout-binding power). Expect MDE ~ 1/sqrt(T_holdout)."),
+    }
+
+
 # ------------------------------------------------------------------ driver
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     ap = argparse.ArgumentParser(description="Crucible funnel calibration: E1 null-FPR + E2 power")
-    ap.add_argument("--exp", choices=("e1", "e2", "both"), default="both")
+    ap.add_argument("--exp", choices=("e1", "e2", "both", "mde_sweep"), default="both",
+                    help="e1/e2/both = calibration verdicts; mde_sweep = the MDE-vs-T detection "
+                         "floor across substrate lengths (the funnel's power characterization).")
     ap.add_argument("--calib-config", default=str(DEFAULT_CALIB_GATES))
     ap.add_argument("--config", default=str(DEFAULT_FUNNEL_GATES),
                     help="funnel gates YAML — its generation block supplies the REAL FitnessConfig "
@@ -430,8 +499,11 @@ def main() -> int:
         report["e1"] = run_e1(cc, quick=args.quick)
     if args.exp in ("e2", "both"):
         report["e2"] = run_e2(cc, quick=args.quick)
+    if args.exp == "mde_sweep":
+        report["mde_sweep"] = run_mde_sweep(cc, quick=args.quick)
 
-    # Joint verdict (M4): GREEN only if BOTH pass (when both ran).
+    # Joint verdict (M4): GREEN only if BOTH pass (when both ran). The sweep is a characterization,
+    # not a pass/fail, so it carries no joint verdict.
     verdicts = [report[e]["verdict"] for e in ("e1", "e2") if e in report]
     if cc.raw.get("joint", {}).get("require_both", True) and len(verdicts) == 2:
         report["joint_verdict"] = "GREEN" if all(v == "GREEN" for v in verdicts) else "RED"
@@ -458,6 +530,16 @@ def main() -> int:
         print(f"E2 power      : max_power={e['max_power']:.2f} | MDE beta={e['mde_beta']} "
               f"realized_dSR={e['mde_realized_delta_sr']} (cap {e['mde_delta_sr_cap']}) "
               f"| beta0 power={e['null_consistency_beta0_power']} -> {e['verdict']}")
+    if "mde_sweep" in report:
+        sw = report["mde_sweep"]
+        print(f"MDE-vs-T (detection floor @ power>={sw['power_target']}; realized marginal dSR):")
+        print(f"   {'T(bars)':>8} {'holdout':>8} {'MDE_dSR':>9} {'@power':>7}")
+        for r in sw["rows"]:
+            mde = r["mde_realized_delta_sr"]
+            print(f"   {r['t']:>8} {r['holdout_bars']:>8} "
+                  f"{('%.2f' % mde) if mde is not None else 'undetected':>9} "
+                  f"{('%.2f' % r['mde_power']) if r['mde_power'] is not None else '-':>7}")
+        print(f"   MDE falls with T (expected ~1/sqrt(T)): {sw['mde_falls_with_t']}")
     print(f"JOINT VERDICT : {report['joint_verdict']}")
     print(f"report -> {out_path}")
     print("==============================================================\n")

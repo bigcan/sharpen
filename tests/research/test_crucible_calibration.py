@@ -31,6 +31,8 @@ def _mini_cc(fit_cfg: FitnessConfig, *, n_panels: int = 3, n_seeds: int = 4,
                     "null_fpr_max": 0.01, "null_tick_fpr_max": 0.05},
         "e2_power": {"n_seeds": n_seeds, "beta_grid": list(betas), "gate_probe_gen_n_eff": 50,
                      "power_target": 0.80, "power_min": 0.80, "mde_delta_sr_max": 1.0},
+        "mde_sweep": {"t_grid": [756, 2782], "n_seeds": 6,
+                      "beta_grid": [0.0, 0.008, 0.02, 0.04]},
     }
     ek = dict(rng_seed=7, pop_size=10, n_generations=1, hold_horizon=21, cost_bps=0.001,
               ls_min_names=6, holdout_frac=0.25, holdout_embargo=21, elite_frac=0.3)
@@ -125,3 +127,26 @@ def test_planted_base_is_tunable_and_beta0_is_null() -> None:
     d0, d_hi = realized(0.0), realized(0.03)
     assert d0 < 0.5              # beta=0 -> ~no marginal edge (null)
     assert d_hi > d0 + 1.0       # a strong plant is a much larger realized edge
+
+
+# --------------------------------------------------------------- MDE-vs-T sweep
+def test_more_data_gives_more_power_at_fixed_edge() -> None:
+    """The physical core of the MDE-vs-T sweep: at a FIXED plant strength, a LONGER substrate detects
+    the same edge with higher power (MDE ~ 1/sqrt(T)). This is the robust, low-variance property."""
+    cc = _mini_cc(_STRICT)
+    short = calib._e2_power_curve(cc, t=756, n=12, betas=[0.008], n_seeds=10,
+                                  gen_n_eff=50.0, cost_bps=0.001)
+    long = calib._e2_power_curve(cc, t=2782, n=12, betas=[0.008], n_seeds=10,
+                                 gen_n_eff=50.0, cost_bps=0.001)
+    assert long[0]["power"] >= short[0]["power"]          # more data never hurts power
+    assert long[0]["power"] > 0.5                         # and the long substrate clearly detects it
+
+
+def test_mde_sweep_structure_and_ordering() -> None:
+    """run_mde_sweep returns one row per T with holdout bars scaling with T, and reports the MDE
+    detection floor. The larger substrate's holdout is longer (the axis of the 1/sqrt(T) story)."""
+    res = calib.run_mde_sweep(_mini_cc(_STRICT), quick=False)
+    assert [r["t"] for r in res["rows"]] == [756, 2782]
+    assert res["rows"][1]["holdout_bars"] > res["rows"][0]["holdout_bars"]
+    # both substrates detect the strong end of the grid (max_power high), so an MDE exists
+    assert res["rows"][1]["max_power"] > 0.5
