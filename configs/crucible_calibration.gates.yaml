@@ -1,0 +1,87 @@
+# Pre-registered criteria for the Crucible funnel CALIBRATION harness
+# (scripts/research/crucible_calibration.py). Design note + Math verification:
+# S553-cont-120. These are GATES (PASS/FAIL thresholds) so — per CLAUDE.md
+# "never hardcode gate thresholds" — they live here, not in code.
+#
+# This file is NOT part of the frozen funnel gates_hash (CRU-1 519158fa1450): the
+# calibration harness VALIDATES the funnel, it does not change any funnel verdict.
+#
+# WHAT THIS CALIBRATES
+#   The binding PROMISING gate = combination_fitness(...).passes_gate re-scored on the
+#   embargoed holdout inside evolve() — a 5-condition AND:
+#     delta_mean >= min_combination_uplift (0.10)   marginal uplift over the base book
+#     dsr_aug    >= promising_dsr          (0.90)    deflated-Sharpe posterior (absolute aug book)
+#     marginal_t >= hlz_t_min             (3.0)      HLZ marginal-contribution t-stat
+#     max_base_corr <= max_base_corr      (0.70)     not collinear with base sleeves
+#     delta_median >= 0 AND frac_pos >= 0.50         CPCV path distribution not fragile
+#
+#   MATH NOTE (M1, S553-cont-120): dsr_aug deflates the ABSOLUTE augmented-book Sharpe, which
+#   inherits the base book's real ~0.60 SR, so under a NOISE candidate the DSR leg is NOT the
+#   binding protection — the MARGINAL legs (uplift + marginal_t>=3sigma) are. A one-sided 3-sigma
+#   t-gate implies a per-test null rate ~= 1 - Phi(3) ~= 0.00135, and the 5-way AND is stricter.
+#   So the true null FPR is << 0.01, NOT ~0.10. null_fpr_max is set an order of magnitude below the
+#   loose "1 - promising_dsr = 0.10" ceiling accordingly.
+
+harness_version: crucible-calibration-v1
+
+# ---- Shared synthetic-substrate knobs -------------------------------------------------
+substrate:
+  t: 756                 # bars per panel (~3y daily); holdout tail = 25% -> ~189 bars
+  n: 12                  # cross-sectional names
+  n_feature_slots: 4     # macro:regime + 3 independent macro:Xnn slots (overlay breadth)
+  hold_horizon: 21       # rebalance cadence (trading days) for proxy base sleeves
+
+# Modest, CONSERVATIVE search budget (see M1): a smaller file-drawer N means LESS DSR deflation,
+# i.e. an EASIER gate -> a conservative (upper) estimate of the null FPR. If E1 is GREEN here, the
+# production budget (pop 200 / gen 40, more deflation) is strictly safer. Realized gen_n_eff is
+# reported so the multiplicity is transparent.
+evolve_budget:
+  rng_seed: 7
+  pop_size: 24
+  n_generations: 2
+  ls_min_names: 6
+  elite_frac: 0.30
+  cost_bps: 0.0010
+  holdout_frac: 0.25
+  holdout_embargo_days: 21
+
+# ---- E1: null calibration (false-positive rate) ---------------------------------------
+e1_null:
+  n_panels: 60           # K independent pure-noise panels (K*B candidate-evals >= 300 for a
+                         #   useful Clopper-Pearson upper bound via the rule of three)
+  ci_alpha: 0.05         # 95% one-sided upper bound
+  # GREEN iff Clopper-Pearson upper-95% of the per-candidate null FPR <= null_fpr_max.
+  null_fpr_max: 0.01     # M1: order-of-magnitude below the loose 1-promising_dsr=0.10 ceiling.
+  # Per-tick FPR (P a null tick emits >=1 PROMISING) is also reported; its ceiling is looser
+  # because a tick aggregates B candidates.
+  null_tick_fpr_max: 0.05
+
+# ---- E2: planted-signal power ---------------------------------------------------------
+e2_power:
+  n_seeds: 40            # K independent planted panels per beta (binomial power estimate/point)
+  # beta = strength of the base book's dependence on the lagged, standardized planted regime slot.
+  # beta=0 is a null internal-consistency check (power must ~match E1 FPR); the grid climbs through
+  # the detection transition. Calibrated from the S553-cont-120 probe: at T=756 (~189-bar holdout)
+  # realized marginal ΔSR is ~0 at beta 0, ~0.3 at 0.002, ~1.9 at 0.008, ~3.2 at 0.015, ~4.6 at 0.03;
+  # detection (passes_gate) turns on around beta 0.015 (ΔSR ~3), so the grid spans 0 -> strong.
+  beta_grid: [0.0, 0.002, 0.004, 0.008, 0.015, 0.025, 0.040]
+  gate_probe_gen_n_eff: 50   # declared file-drawer N for the direct-gate DSR deflation (transparent,
+                             #   representative of a modest search; not hardcoded in code)
+  power_target: 0.80     # power level defining the MDE crossing
+  # GREEN iff power >= power_min is REACHED at a realized marginal ΔSR <= mde_delta_sr_max (the funnel
+  # detects a plausibly-small real edge, not only a huge one). NOTE: the realized ΔSR here is in
+  # annualized-Sharpe units on short CPCV test folds; MDE scales ~1/sqrt(T_holdout), so this cap is
+  # evaluated at the T in `substrate:` and must be read at that sample size.
+  power_min: 0.80
+  mde_delta_sr_max: 1.00 # max realized marginal ΔSR at which power_target must be met (a strong but
+                         #   plausible edge). At T=756 the probe suggests the funnel needs ΔSR ~3 ->
+                         #   likely RED here, i.e. LOW POWER against realistic edges at short holdouts
+                         #   (the informative finding, not a harness bug).
+
+# ---- Joint verdict (M4) ---------------------------------------------------------------
+# The harness is GREEN only if BOTH hold. E1 alone is gamed by a reject-everything funnel
+# (FPR 0, useless); E2 alone by an accept-everything funnel (power 1, FPR 1). The trustworthy
+# statement is the joint operating point: "at null FPR <= null_fpr_max, power >= power_min at a
+# realized marginal ΔSR <= mde_delta_sr_max."
+joint:
+  require_both: true
