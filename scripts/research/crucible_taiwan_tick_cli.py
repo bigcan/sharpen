@@ -113,6 +113,56 @@ def _make_transport(model: str, timeout: int):
     return claude_cli_transport
 
 
+_BLIND_PROBE = (
+    "Do you have any preloaded context, memory, or CLAUDE.md about: a project named Crucible or "
+    "FinRL, TSMOM/BAB strategies, Taiwan TWSE/TAIFEX signals, or any trading-strategy backtest "
+    'verdicts or Sharpe ratios? Answer strictly as JSON {"has_context": true|false, "items": '
+    '[short strings]}. JSON only.'
+)
+
+
+def _looks_true(v) -> bool:
+    """Conservative truthiness for the probe's has_context field (tolerates a stringy "true")."""
+    if isinstance(v, str):
+        return v.strip().lower() in ("true", "1", "yes")
+    return bool(v)
+
+
+def _assert_blind(model: str, timeout: int = 120) -> None:
+    """Fail-closed moat guard (CRU-2): before mining, confirm the CLI child — under the SAME
+    isolation flags the proposer transport uses (``--setting-sources ""`` + neutral cwd) — cannot
+    see any project verdict/memory context. Abort the whole run (SystemExit) if it can, or if the
+    probe cannot be evaluated, rather than silently mining with a contaminated proposer. This wires
+    the blindness guarantee that was previously only asserted in a comment + a one-time manual probe
+    (audit finding M1), so a future CLI change to --setting-sources semantics fails loudly here."""
+    child_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    cmd = [
+        _CLI, "-p", "--output-format", "json", "--model", model,
+        "--setting-sources", "",
+        "--system-prompt", "You output only JSON.",
+        _BLIND_PROBE,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                              env=child_env, cwd=_CHILD_CWD, timeout=timeout)
+        if proc.returncode != 0:
+            raise RuntimeError(f"CLI exit {proc.returncode}: {(proc.stderr or '')[:300]}")
+        envelope = json.loads(proc.stdout)
+        if envelope.get("is_error"):
+            raise RuntimeError(f"CLI reported error: {envelope.get('result')!r}")
+        obj = _extract_json_obj(envelope.get("result", ""))
+    except Exception as exc:  # noqa: BLE001 - any probe failure must block, never silently pass
+        raise SystemExit(f"[blindness probe] ABORT — cannot verify the moat ({exc}). "
+                         "Refusing to mine with an unverified proposer (CRU-2).") from exc
+
+    items = obj.get("items") or []
+    if _looks_true(obj.get("has_context")) or items:
+        raise SystemExit(f"[blindness probe] ABORT — MOAT VIOLATION (CRU-2): the CLI child can see "
+                         f"project context (has_context={obj.get('has_context')!r}, items={items!r}). "
+                         "The proposer is NOT blind; refusing to mine.")
+    print("[driver] blindness probe PASS: child reports has_context=false, items=[]", file=sys.stderr)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description="Run a genuine Crucible LLM-proposer tick via the local claude CLI "
@@ -143,8 +193,8 @@ def main() -> int:
 
     print(f"[driver] transport=claude CLI  model={args.model}  child_cwd={_CHILD_CWD}",
           file=sys.stderr)
-    print("[driver] blindness: --setting-sources '' + neutral cwd (probe-verified has_context:false)",
-          file=sys.stderr)
+    # M1: runtime moat guard — abort before mining if the child can see project verdicts/memory.
+    _assert_blind(args.model)
 
     from scripts.research import crucible_orchestrator as orch
 

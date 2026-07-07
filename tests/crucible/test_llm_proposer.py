@@ -280,6 +280,30 @@ def test_reproduce_replays_recorded_specs_without_recalling_the_llm(tmp_path) ->
     assert replayed_names == ["cs-ok"]
 
 
+def test_default_transport_surfaces_http_error_body(monkeypatch) -> None:
+    """The live ``_default_transport`` must re-raise HTTP errors with the response BODY included,
+    so a depleted-credit 400 (or bad-model / rate-limit) is distinguishable in the log instead of
+    the bare "HTTP Error 400: Bad Request". Mutation tripwire: dropping the HTTPError handler makes
+    the raised message lose the body and this assertion fails."""
+    import io
+    import urllib.error
+
+    from finrl_pro_ds.crucible.agentic.llm_proposer import _default_transport
+
+    body_json = b'{"type":"error","error":{"message":"Your credit balance is too low"}}'
+
+    def _boom(_req, timeout=None):
+        raise urllib.error.HTTPError(
+            url="https://api.anthropic.com/v1/messages", code=400, msg="Bad Request",
+            hdrs=None, fp=io.BytesIO(body_json))
+
+    monkeypatch.setattr("urllib.request.urlopen", _boom)
+    with pytest.raises(RuntimeError) as ei:
+        _default_transport("https://api.anthropic.com/v1/messages", {}, {"model": "x"})
+    assert "400" in str(ei.value)
+    assert "credit balance is too low" in str(ei.value)
+
+
 def test_context_rendering_uses_only_context_fields() -> None:
     """`_render_context` cannot leak anything beyond ProposalContext by construction (its signature
     accepts only a context) — this test locks that signature so a future edit can't quietly widen it."""

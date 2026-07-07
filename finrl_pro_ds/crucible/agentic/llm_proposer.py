@@ -28,6 +28,7 @@ import hashlib
 import json
 import logging
 import os
+import urllib.error
 import urllib.request
 from collections.abc import Callable
 
@@ -154,8 +155,20 @@ def _default_transport(url: str, headers: dict, body: dict) -> dict:
     """Live HTTPS POST → parsed JSON. Only reached when no ``transport`` is injected."""
     data = json.dumps(body).encode("utf-8")
     req = urllib.request.Request(url, data=data, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=60) as resp:   # noqa: S310 - fixed https host
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=60) as resp:   # noqa: S310 - fixed https host
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        # Surface the API error BODY, which carries the ACTUAL reason (depleted credit balance,
+        # unknown model, rate limit, malformed request). Without this, ``propose``'s generic
+        # handler only ever sees ``str(exc)`` == "HTTP Error 400: Bad Request" — indistinguishable
+        # across all of those causes (a depleted balance returns 400, not 402). Re-raised so the
+        # fail-closed path is unchanged; only the logged message gets more informative.
+        try:
+            detail = exc.read().decode("utf-8", "replace")[:800]
+        except Exception:                                     # noqa: BLE001 - body already lost
+            detail = "(error body unavailable)"
+        raise RuntimeError(f"HTTP {exc.code} from Anthropic API: {detail}") from exc
 
 
 def _extract_tool_input(response: dict) -> list[dict] | None:
