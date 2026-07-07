@@ -78,6 +78,20 @@ e2_power:
                          #   likely RED here, i.e. LOW POWER against realistic edges at short holdouts
                          #   (the informative finding, not a harness bug).
 
+# ---- MDE-vs-T sweep (the funnel's power characterization) ------------------------------
+# Runs the E2 power sweep at several substrate LENGTHS and reports the detection floor (MDE in
+# realized marginal ΔSR at power_target) at each. Because MDE ~ 1/sqrt(T_holdout), this shows how
+# small an edge the funnel can see on the ACTUAL real substrates vs short ones -- i.e. whether any
+# past "0 PROMISING" was a real absence or just low power at that substrate's length.
+mde_sweep:
+  # Substrate bar counts to probe. Real lengths: cross_asset ~4044, Taiwan ~2782; 756 (~3y) and
+  # 1512 (~6y) anchor the short end. holdout = holdout_frac * T bars.
+  t_grid: [756, 1512, 2782, 4044]
+  n_seeds: 30
+  # The beta grid must BRACKET the detection transition across ALL T (it shifts to lower beta as T
+  # grows). Denser + spanning 0.002..0.030, from the S553-cont-121 probes.
+  beta_grid: [0.0, 0.002, 0.003, 0.004, 0.006, 0.008, 0.012, 0.018, 0.030]
+
 # ---- Joint verdict (M4) ---------------------------------------------------------------
 # The harness is GREEN only if BOTH hold. E1 alone is gamed by a reject-everything funnel
 # (FPR 0, useless); E2 alone by an accept-everything funnel (power 1, FPR 1). The trustworthy
