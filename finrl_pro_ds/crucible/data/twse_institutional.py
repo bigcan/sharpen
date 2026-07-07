@@ -35,9 +35,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import time
 import urllib.request
 from collections.abc import Callable
+from pathlib import Path
 
 import numpy as np
 
@@ -58,27 +60,52 @@ _DEFAULT_TICKERS: tuple[str, ...] = (
     "0050", "006208", "0056", "0055", "00878", "00891", "00679B", "00751B", "00635U", "00642U",
 )
 
-# field key -> the EXACT TWSE column name to look up in the response's own `fields` array (live-
-# verified 2026-07-04, see module docstring). Looking up BY NAME (not position) survives any future
-# TWSE column reordering. `dealer_net` is already the aggregate self+hedge dealer net (index 11 in
-# the live sample), not something this connector needs to sum from the self/hedge sub-columns.
-_FIELD_COLUMN: dict[str, str] = {
-    "foreign_net": "外陸資買賣超股數(不含外資自營商)",
-    "trust_net": "投信買賣超股數",
-    "dealer_net": "自營商買賣超股數",
-    "total_net": "三大法人買賣超股數",
+# field key -> an ORDERED tuple of candidate TWSE column names; `_extract_day` uses the FIRST one
+# present in the response's own `fields` array. Lookup is BY NAME (not position) to survive TWSE
+# column reordering. Most fields have ONE stable name across T86's whole history, but the T86 SCHEMA
+# CHANGED ~2018 (live-verified 2026-07-06 across 2015/2018/2020/2026 payloads): the pre-2018 report
+# had 16 columns with a SINGLE foreign column `外資買賣超股數`; the modern 19-column report SPLIT
+# foreign into `外陸資買賣超股數(不含外資自營商)` (foreign + mainland capital, EXCLUDING foreign
+# proprietary dealers) plus a separate foreign-dealer column. So `foreign_net` carries BOTH names,
+# modern-first with the pre-2018 name as fallback — stitching one continuous "foreign investor net"
+# overlay across a KNOWN DEFINITIONAL SEAM at ~2018 (the closest continuous series TWSE's own schema
+# change allows; the added-mainland / excluded-foreign-dealer delta is minor for this large-cap ETF
+# universe, but the seam is real and disclosed, not silently pretended away). trust/dealer/total
+# names are stable across both eras, so they carry a single name. `dealer_net` is the AGGREGATE
+# self+hedge dealer net, present in both schemas — not summed from the self/hedge sub-columns.
+_FIELD_COLUMNS: dict[str, tuple[str, ...]] = {
+    "foreign_net": ("外陸資買賣超股數(不含外資自營商)", "外資買賣超股數"),
+    "trust_net": ("投信買賣超股數",),
+    "dealer_net": ("自營商買賣超股數",),
+    "total_net": ("三大法人買賣超股數",),
 }
 _TICKER_COLUMN = "證券代號"
 
-# T86 has no server-side date-RANGE query (one HTTP call = one calendar day, ALL securities at
-# once) — a naive multi-year `start` would issue thousands of sequential calls per connector
-# instantiation. Cap the actual lookback so a real-mode tick stays bounded; this feature slot is
-# meant to widen BREADTH of information type, not replace the OHLCV panel's own 2010+ depth. A
-# persistent on-disk cache (mirroring taiwan_panel_loader's) would let real history accumulate across
-# repeated scheduled runs without re-fetching — a natural follow-up, not built here (disclosed in the
-# architecture doc rather than silently pretended away). 400d mirrors quality_gate's own
-# `max_gap_days` default — a deliberate, not arbitrary, choice of "recent regime" depth.
-_DEFAULT_MAX_LOOKBACK_DAYS = 400
+# --- Persistent accumulation store (S553-cont-117, P0) -------------------------------------------
+# T86 has no server-side date-RANGE query (one HTTP call = one calendar day, ALL securities at once)
+# but it IS range-queryable day-by-day arbitrarily far back (live-verified: full snapshots returned for
+# 2014-01-03 and 2018-01-05). So this connector persists each fetched day to an on-disk store — the
+# "natural follow-up" the old 400d-cap comment disclosed but did not build. The store is BOTH a cache
+# (a nightly tick re-fetches only genuinely new days, not the whole history) AND one-shot backfillable
+# (scripts/research/backfill_twse_t86.py fills 2015->today once, lifting overlay coverage from ~267 to
+# ~2750 bars). It mirrors TaifexPositioningConnector's _AccumulationStore, but is keyed by the FETCH
+# UNIT — a full calendar DAY — value = {ticker: {field: value}}; an EMPTY dict records a POLLED
+# non-trading day, and a day-key ABSENT from the store means "never polled" (so weekends/holidays and
+# T86-absent bond ETFs are not re-fetched every tick). The store is causally inert: it caches raw
+# reference-day values only; the +1-calendar-day release stamp and the as_of cutoff are applied at READ
+# time in fetch(), identically to before — a backfilled 2015 day is stamped release=2015..+1d and can
+# never be seen before then (LEAK-2 preserved; parity-tested against the direct-transport path).
+ROOT = Path(__file__).resolve().parents[3]
+_DEFAULT_STORE_PATH = ROOT / "data" / "raw" / "taiwan_t86_institutional" / "t86_institutional.json"
+
+# The store makes a deep read cheap, so the cap on the READ RANGE is raised to cover the panel's full
+# 2015+ history (was 400d — the ~9.5%-coverage cap that left every overlay power-starved at ~1yr). A
+# SEPARATE, modest per-instance LIVE-fetch budget bounds how many un-polled days a single connector
+# instance will pull over the network, so a COLD-store orchestrator tick fills the recent tail
+# (descending) in ~seconds rather than hanging on a ~4000-day inline crawl; the backfill script raises
+# that budget to fill everything in one run.
+_DEFAULT_MAX_LOOKBACK_DAYS = 4400        # ~12y read range (panel starts 2015-01-05); store-backed
+_DEFAULT_MAX_LIVE_DAYS_PER_FETCH = 90    # per-instance network budget; backfill overrides to fill all
 
 
 def _parse_num(s: str | int | float) -> float:
@@ -99,6 +126,36 @@ def _default_transport(url: str) -> dict:
         return json.loads(resp.read().decode("utf-8"))
 
 
+class _AccumulationStore:
+    """A tiny, idempotent JSON store — ``"YYYYMMDD" -> {ticker: {field: value}}`` — mirroring
+    :class:`~.taifex_positioning._AccumulationStore` but keyed by the T86 FETCH UNIT (a full calendar
+    day) rather than ``(contract, date)``. A day KEY present means "polled"; an EMPTY value dict means
+    "polled, non-trading / no configured ticker present"; a ticker absent from a present day's dict
+    means that ticker had no T86 row that day. Scoped to exactly this connector's needs, not a
+    general store (same spirit as the TAIFEX one)."""
+
+    def __init__(self, path: str | Path) -> None:
+        self.path = Path(path)
+
+    def load(self) -> dict[str, dict[str, dict[str, float]]]:
+        if not self.path.exists():
+            return {}
+        try:
+            return json.loads(self.path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            logger.warning("twse_inst: store at %s unreadable — treating as empty", self.path)
+            return {}
+
+    def save(self, data: dict[str, dict[str, dict[str, float]]]) -> None:
+        # Atomic write (tmp + os.replace on the same dir/volume): a checkpoint interrupted mid-write
+        # during a long backfill leaves the PREVIOUS complete store intact rather than a torn file that
+        # load() would treat as empty (losing all accumulated progress on resume).
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.path.with_suffix(self.path.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, indent=2, sort_keys=True), encoding="utf-8")
+        os.replace(tmp, self.path)
+
+
 class TwseInstitutionalConnector:
     """DataConnector for TWSE T86 (three-institutional-investors daily net flow).
     ``asset_class = 'positioning'``. series_id = ``<ticker>:<field>``."""
@@ -113,18 +170,32 @@ class TwseInstitutionalConnector:
         tickers: tuple[str, ...] | None = None,
         release_lag_days: int = 1,
         max_lookback_days: int = _DEFAULT_MAX_LOOKBACK_DAYS,
+        max_live_days_per_fetch: int = _DEFAULT_MAX_LIVE_DAYS_PER_FETCH,
         sleep_seconds: float = 0.3,
+        store_path: str | Path | None = None,
+        save_every_days: int = 200,
     ) -> None:
         self._transport = transport
         self._tickers = tickers or _DEFAULT_TICKERS
         self._release_lag = np.timedelta64(int(release_lag_days), "D")
         self._max_lookback_days = int(max_lookback_days)
+        # Per-instance network budget: at most this many un-polled days are fetched LIVE across the
+        # whole life of this connector instance (shared by every SeriesRef's fetch, like the old
+        # day-cache). Bounds a cold-store tick; the backfill script passes a huge value to fill all.
+        self._live_budget = int(max_live_days_per_fetch)
         # Politeness delay between LIVE per-day HTTP calls only (mirrors taiwan_panel_loader's own
         # `sleep=` convention) — never applied when a `transport` is injected (offline tests).
         self._sleep_seconds = float(sleep_seconds)
-        # Per-instance cache of already-fetched days (raw parsed JSON), so N (ticker, field) fetches
-        # against the same day cost exactly ONE HTTP call, not N. Keyed by "YYYYMMDD".
-        self._day_cache: dict[str, dict | None] = {}
+        # This connector's SECOND injectable seam (like TAIFEX's): the persistent day store. Tests
+        # SHOULD inject `store_path=` (a tmp file) so they never write the repo's default store.
+        self._store = _AccumulationStore(store_path if store_path is not None else _DEFAULT_STORE_PATH)
+        # In-memory copy of the store, loaded once per instance so 40 (ticker, field) fetch calls
+        # share one disk read; written back to disk at the end of a polling pass that changed it.
+        self._loaded: dict[str, dict[str, dict[str, float]]] | None = None
+        # Checkpoint cadence: save the store every N newly-fetched days so a long backfill survives
+        # interruption and is resumable (a re-run skips already-stored days). The orchestrator fetches
+        # far fewer than this per tick, so it still saves exactly once (at the end) — no behavior change.
+        self._save_every = int(save_every_days)
 
     # -- interface -----------------------------------------------------------------
     def discover(self) -> list[SeriesRef]:
@@ -132,7 +203,7 @@ class TwseInstitutionalConnector:
             SeriesRef(self.source_id, f"{ticker}:{field}", self.asset_class,
                       title=f"{ticker} — {field}", frequency="D")
             for ticker in self._tickers
-            for field in _FIELD_COLUMN
+            for field in _FIELD_COLUMNS
         ]
 
     def provenance(self, ref: SeriesRef) -> Provenance:
@@ -154,33 +225,34 @@ class TwseInstitutionalConnector:
         as_of: np.datetime64 | str | None = None,
     ) -> SeriesData:
         ticker, field = self._split(ref.series_id)
-        column = _FIELD_COLUMN[field]
         cutoff = np.datetime64(as_of, "ns") if as_of is not None else None
 
         lo = np.datetime64(start, "D")
         hi = np.datetime64(end, "D")
-        # Cap the lookback (module docstring) — never crawl further back than max_lookback_days
-        # regardless of what the caller's `start` requests.
+        # Cap the READ RANGE (module docstring) — never read/crawl further back than max_lookback_days
+        # regardless of what the caller's `start` requests. (Store-backed, so a deep range is cheap.)
         floor = hi - np.timedelta64(self._max_lookback_days, "D")
         if lo < floor:
             lo = floor
+
+        store = self._ensure_polled(lo, hi)       # fill un-polled days live (budget-bounded), persist
 
         refs: list[np.datetime64] = []
         vals: list[float] = []
         rels: list[np.datetime64] = []
         for day in np.arange(lo, hi + np.timedelta64(1, "D"), np.timedelta64(1, "D")):
-            payload = self._fetch_day(str(day))
-            if payload is None:
-                continue                          # non-trading day / no data — not an error
-            value = self._extract(payload, ticker, column)
-            if value is None:
+            day_rows = store.get(str(day).replace("-", ""))
+            if not day_rows:                      # never-polled OR polled non-trading day → no obs
+                continue
+            row = day_rows.get(ticker)
+            if row is None or field not in row:   # ticker absent from T86 that day / field unparseable
                 continue
             reference = np.datetime64(day, "ns")
             release = reference + self._release_lag
             if cutoff is not None and release > cutoff:
-                continue
+                continue                          # PIT: not yet released at the as_of point (LEAK-2)
             refs.append(reference)
-            vals.append(value)
+            vals.append(float(row[field]))
             rels.append(release)
 
         return SeriesData(
@@ -189,26 +261,51 @@ class TwseInstitutionalConnector:
             value=np.array(vals, dtype=np.float64),
             release_timestamp=np.array(rels, dtype="datetime64[ns]"),
             provenance=self.provenance(ref),
-            meta={"n_days_queried": int((hi - lo) / np.timedelta64(1, "D")) + 1},
+            meta={"n_days_queried": int((hi - lo) / np.timedelta64(1, "D")) + 1,
+                  "n_store_days_total": len(store),
+                  "live_budget_remaining": self._live_budget},
         )
 
     # -- internals -----------------------------------------------------------------
     @staticmethod
     def _split(series_id: str) -> tuple[str, str]:
         ticker, _, field = series_id.partition(":")
-        if field not in _FIELD_COLUMN:
+        if field not in _FIELD_COLUMNS:
             raise ValueError(f"unknown TWSE institutional field {field!r}; "
-                             f"supported: {sorted(_FIELD_COLUMN)}")
+                             f"supported: {sorted(_FIELD_COLUMNS)}")
         return ticker, field
 
-    def _fetch_day(self, day: str) -> dict | None:
-        """One HTTP call per calendar day, cached for the life of this connector instance — shared
-        across every (ticker, field) SeriesRef so a 10-ticker x 4-field discover() set costs exactly
-        one request per day, not 40. Returns None for a non-trading day / malformed response (treated
-        as "no observation", never an error — T86 simply has nothing to say on a closed day)."""
-        date_str = day.replace("-", "")
-        if date_str in self._day_cache:
-            return self._day_cache[date_str]
+    def _ensure_polled(self, lo: np.datetime64, hi: np.datetime64
+                       ) -> dict[str, dict[str, dict[str, float]]]:
+        """Fill any un-polled calendar day in ``[lo, hi]`` by fetching it LIVE (one T86 call per day,
+        every configured ticker extracted at once), up to this instance's remaining live-fetch budget,
+        then persist ONCE. Days already in the store are never re-fetched (idempotent). Iterates
+        most-recent-first so a budget-limited cold tick fills the useful tail first. Shared by all 40
+        (ticker, field) fetch calls via the in-memory ``self._loaded`` (one disk read per instance)."""
+        if self._loaded is None:
+            self._loaded = self._store.load()
+        store = self._loaded
+        fetched = 0
+        for day in np.arange(lo, hi + np.timedelta64(1, "D"), np.timedelta64(1, "D"))[::-1]:
+            if self._live_budget <= 0:
+                break                             # network budget spent — remaining gaps fill next run
+            date_str = str(day).replace("-", "")
+            if date_str in store:
+                continue                          # already polled (idempotent) — costs no budget
+            payload = self._fetch_day_live(date_str)
+            self._live_budget -= 1
+            store[date_str] = self._extract_day(payload) if payload is not None else {}
+            fetched += 1
+            if self._save_every > 0 and fetched % self._save_every == 0:
+                self._store.save(store)           # checkpoint: a long backfill survives interruption
+        if fetched:
+            self._store.save(store)
+        return store
+
+    def _fetch_day_live(self, date_str: str) -> dict | None:
+        """One live T86 HTTP call for one calendar day (all securities). Returns the parsed OK payload,
+        or None for a non-trading day / transport failure / malformed response (the caller records that
+        as a polled EMPTY day — never an error; T86 simply has nothing to say on a closed day)."""
         url = f"{_BASE}?response=json&date={date_str}&selectType=ALL"
         live = self._transport is None
         transport = self._transport or _default_transport
@@ -219,10 +316,51 @@ class TwseInstitutionalConnector:
             payload = None
         if not isinstance(payload, dict) or payload.get("stat") != "OK" or "fields" not in payload:
             payload = None
-        self._day_cache[date_str] = payload
         if live and self._sleep_seconds > 0:
             time.sleep(self._sleep_seconds)
         return payload
+
+    def _extract_day(self, payload: dict) -> dict[str, dict[str, float]]:
+        """Extract EVERY configured ticker's fields from one day's payload in a SINGLE pass (vs the old
+        per-(ticker, field) scan of ~8800 rows). Column lookup is BY NAME against the response's own
+        ``fields`` array (survives TWSE reordering). A ticker not present that day is simply absent from
+        the result; a value cell that will not parse is omitted for that FIELD ONLY (the widened guard —
+        bare numbers are kept by _parse_num, genuine junk like JSON null is dropped), and a non-string
+        ticker cell is skipped rather than crashing on ``.strip()``."""
+        fields = payload.get("fields", [])
+        try:
+            ticker_idx = fields.index(_TICKER_COLUMN)
+        except ValueError:
+            return {}
+        # Resolve each field to the FIRST of its candidate column names present in THIS payload's
+        # schema (T86 changed its columns ~2018 — see _FIELD_COLUMNS). A field whose column is absent
+        # in this era is simply omitted for these days, never a crash.
+        col_idx: dict[str, int] = {}
+        for f, candidates in _FIELD_COLUMNS.items():
+            for col in candidates:
+                if col in fields:
+                    col_idx[f] = fields.index(col)
+                    break
+        if not col_idx:
+            return {}
+        wanted = set(self._tickers)
+        max_idx = max(ticker_idx, max(col_idx.values()))
+        out: dict[str, dict[str, float]] = {}
+        for row in payload.get("data", []):
+            if len(row) <= max_idx:
+                continue
+            tk = row[ticker_idx]
+            if not isinstance(tk, str) or tk.strip() not in wanted:
+                continue
+            vals: dict[str, float] = {}
+            for f, ci in col_idx.items():
+                try:
+                    vals[f] = _parse_num(row[ci])
+                except (TypeError, ValueError, AttributeError):
+                    continue                      # unparseable cell → omit this field only, never crash
+            if vals:
+                out[tk.strip()] = vals
+        return out
 
     @staticmethod
     def _extract(payload: dict, ticker: str, column: str) -> float | None:
