@@ -118,17 +118,35 @@ _FAMILY_BY_CANDIDATE_TYPE = {"cross_sectional": "101alpha", "overlay": "altdata"
 
 def _render_context(context: ProposalContext) -> str:
     """The per-call user message — rendered ONLY from ``ProposalContext`` fields (CR-1: this function
-    has no other input it could reach for, by construction — it takes nothing but the context)."""
+    has no other input it could reach for, by construction — it takes nothing but the context).
+
+    The optional DATA-SHAPE hints (``panel_n`` / ``feature_slot_bars`` / ``mechanism_nonce``) are
+    rendered ONLY when populated, so a context built without them (every pre-existing / test call site)
+    yields the exact same message as before. None of them is a score/verdict (CR-1): a name count, per-
+    slot bar COUNTS, and a rotating entropy token."""
     slots = set(context.feature_slots())
     ohlcv = [t for t in context.available_terminals if t not in slots]
     lines = [
         f"Available OHLCV/derived terminals: {', '.join(ohlcv) or '(none)'}",
         f"Available non-OHLCV feature slots (overlay-eligible only): {', '.join(sorted(slots)) or '(none)'}",
+    ]
+    if context.feature_slot_bars:
+        depth = ", ".join(f"{name}({bars})" for name, bars in context.feature_slot_bars)
+        lines.append("Feature-slot history depth (bars available per slot; prefer deeper slots — they "
+                     f"have the statistical power to clear the gates): {depth}")
+    if context.panel_n > 0:
+        lines.append(f"Cross-section width: {context.panel_n} names. A narrow cross-section starves "
+                     "rank()/scale() cross-sectional operators of significance — when N is small, "
+                     "prefer OVERLAY hypotheses (book-timing on a feature slot) over cross_sectional.")
+    lines += [
         f"Asset classes registered: {', '.join(context.asset_classes) or '(none)'}",
         "KILLED families — do NOT propose anything in these (already falsified; spend nothing "
         f"re-litigating them): {', '.join(context.killed_families) or '(none)'}",
         f"Propose at most {context.max_proposals} hypotheses.",
     ]
+    if context.mechanism_nonce:
+        lines.append(f"Exploration nonce (not data — ignore its content; use it ONLY to ensure this "
+                     f"batch differs from prior sessions on an unchanged panel): {context.mechanism_nonce}")
     return "\n".join(lines)
 
 

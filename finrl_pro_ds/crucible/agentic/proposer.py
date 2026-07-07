@@ -92,6 +92,23 @@ class ProposalContext:
         Data domains registered in the catalog (informational; e.g. ``macro``, ``positioning``).
     max_proposals : int
         Hard cap on the batch size (cost-bound, CR-7).
+    panel_n : int
+        Number of names in the cross-section. CR-1-legal DATA SHAPE (not a score): a proposer needs
+        it to know cross-sectional ``rank`` operators are statistically starved on a narrow panel
+        (Taiwan N=10) and to steer toward the overlay path instead. 0 when unknown (the default the
+        pre-panel test callers get).
+    feature_slot_bars : tuple[tuple[str, int], ...]
+        ``(slot_name, n_finite_bars)`` per non-OHLCV feature slot, sorted by name. CR-1-legal DATA
+        SHAPE (bar COUNTS, never values/scores): tells a proposer which overlay slots now carry deep
+        history (post-backfill) versus a shallow just-added series, so it can prefer the slots with
+        the statistical power to clear the gates. Empty when unknown.
+    mechanism_nonce : str
+        A per-tick rotating token (derived deterministically from the tick timestamp upstream). Pure
+        entropy — carries NO score/verdict/data (CR-1). Its only job is to perturb a temperature-0
+        LLM proposer's input so successive ticks on an unchanged panel explore DIFFERENT hypotheses
+        instead of re-emitting a byte-identical batch; the deterministic offline
+        :class:`LibrarySeedProposer` ignores it entirely (so its output — and every existing
+        verdict/manifest — is unchanged, CRU-1).
     """
 
     available_terminals: tuple[str, ...] = ()
@@ -99,6 +116,9 @@ class ProposalContext:
     existing_candidate_hashes: frozenset[str] = frozenset()
     asset_classes: tuple[str, ...] = ()
     max_proposals: int = 32
+    panel_n: int = 0
+    feature_slot_bars: tuple[tuple[str, int], ...] = ()
+    mechanism_nonce: str = ""
 
     def feature_slots(self) -> tuple[str, ...]:
         """The non-OHLCV terminals — the overlay substrate (macro/positioning series)."""

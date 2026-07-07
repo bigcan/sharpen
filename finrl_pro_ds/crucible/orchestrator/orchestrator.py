@@ -27,9 +27,12 @@ or scores a candidate. Nothing promotes past PROMISING.
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
+
+import numpy as np
 
 from ..agentic.card import DiscoveryCard
 from ..agentic.cohort_card import CohortCard
@@ -44,6 +47,7 @@ from ..lockbox.lockbox import (
     updated_card,
 )
 from ..version import CRUCIBLE_VERSION, gates_hash
+from ...signals.features import Panel
 from ...signals.generation.grammar import available_terminals
 from .budget import TickBudget
 from .burst import route_burst
@@ -135,7 +139,13 @@ def run_orchestrator_tick(
         # --- Stage 2 (agent, CR-1): ONE proposer call → fresh (deduped) hypotheses ----------------
         author = HypothesisAuthor(sub.proposer, sub.ledger, max_proposals=sub.max_proposals)
         terminals = available_terminals(prepared.panel)
-        context = author.build_context(terminals, asset_classes=prepared.asset_classes)
+        # CR-1-legal data-shape hints + a per-tick nonce (all defaulted/ignored by the offline
+        # LibrarySeedProposer, so its output — and every existing verdict/manifest — is byte-identical;
+        # only an LLM proposer conditions on them). None is a score/verdict.
+        context = author.build_context(
+            terminals, asset_classes=prepared.asset_classes, panel_n=prepared.panel.N,
+            feature_slot_bars=_feature_slot_bars(prepared.panel),
+            mechanism_nonce=_mechanism_nonce(tick_ts))
         fresh_specs = author.propose(context, proposal_ts=tick_ts)
         n_fresh = len(fresh_specs)
         dirty, reason = substrate_dirty(data_changed=data_changed, n_fresh_hypotheses=n_fresh)
@@ -239,6 +249,23 @@ def run_orchestrator_tick(
     return OrchestratorTickResult(tick_ts=tick_ts, gates_hash=ghash,
                                   crucible_version=crucible_version, outcomes=outcomes,
                                   budget=budget)
+
+
+def _feature_slot_bars(panel: Panel) -> tuple[tuple[str, int], ...]:
+    """Per-feature-slot count of FINITE (non-NaN) bars, sorted by slot name — the CR-1-legal data
+    shape a proposer uses to prefer deep, statistically-powered overlay slots over a just-added
+    shallow one. A bar COUNT is data shape, never a value/score (CR-1)."""
+    return tuple(sorted(
+        (name, int(np.isfinite(np.asarray(series, dtype=float)).sum()))
+        for name, series in panel.feature_slots.items()))
+
+
+def _mechanism_nonce(tick_ts: str) -> str:
+    """A per-tick rotating entropy token derived DETERMINISTICALLY from the tick timestamp, so a
+    reproduce with the same ``tick_ts`` is stable. Pure entropy — carries no score/data (CR-1). It
+    perturbs a temperature-0 LLM proposer's input so successive ticks explore different hypotheses;
+    the offline LibrarySeedProposer ignores it (byte-identical output)."""
+    return hashlib.sha256(tick_ts.encode("utf-8")).hexdigest()[:12]
 
 
 def _incubation_params(evolve_kwargs: dict) -> tuple[int, float, int]:

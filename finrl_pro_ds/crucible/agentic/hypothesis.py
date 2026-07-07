@@ -66,10 +66,17 @@ class HypothesisAuthor:
 
     # --- CR-1: build the agent-VISIBLE context (no score/verdict field can enter) ------------------
     def build_context(self, available_terminals: tuple[str, ...], *, asset_classes: tuple[str, ...]
-                      = ()) -> ProposalContext:
+                      = (), panel_n: int = 0,
+                      feature_slot_bars: tuple[tuple[str, int], ...] = (),
+                      mechanism_nonce: str = "") -> ProposalContext:
         """Assemble the :class:`ProposalContext` from ``ledger.agent_view()`` (dedup keys + killed
         families ONLY) + the caller-supplied panel terminals and catalog asset classes. This method
-        is the concrete CR-1 boundary: it reads the agent view, never a scored column."""
+        is the concrete CR-1 boundary: it reads the agent view, never a scored column.
+
+        ``panel_n`` / ``feature_slot_bars`` / ``mechanism_nonce`` are optional CR-1-legal DATA-SHAPE
+        hints (cross-section width, per-slot bar COUNTS, a rotating entropy token) — never scores. All
+        default to empty, so the pre-existing single-arg call sites build a byte-identical context and
+        the offline :class:`LibrarySeedProposer` (which reads none of them) is unaffected (CRU-1)."""
         view = self.ledger.agent_view()          # {candidates, candidate_hashes, killed_families}
         return ProposalContext(
             available_terminals=tuple(available_terminals),
@@ -77,6 +84,9 @@ class HypothesisAuthor:
             existing_candidate_hashes=frozenset(view["candidate_hashes"]),
             asset_classes=tuple(asset_classes),
             max_proposals=self.max_proposals,
+            panel_n=int(panel_n),
+            feature_slot_bars=tuple(feature_slot_bars),
+            mechanism_nonce=str(mechanism_nonce),
         )
 
     # --- validate + dedup BEFORE compute (spec §7.1 guardrail) -------------------------------------

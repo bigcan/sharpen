@@ -55,6 +55,7 @@ from finrl_pro_ds.crucible import (  # noqa: E402
     load_incubation_criterion,
     run_orchestrator_tick,
 )
+from finrl_pro_ds.crucible.agentic import LibrarySeedProposer, LlmProposer  # noqa: E402
 from finrl_pro_ds.crucible.orchestrator.orchestrator import _safe  # noqa: E402
 from finrl_pro_ds.crucible.orchestrator.substrate import PreparedSubstrate  # noqa: E402
 from finrl_pro_ds.signals.features import Panel  # noqa: E402
@@ -207,8 +208,20 @@ def _build_substrate(args, cfg, ek, meta) -> tuple[Substrate, DataCatalog]:
     else:
         cohort_cfg, cohort_mc = load_cohort_config(args.config, args.cohort_config)
         cohort_ghash = gates_hash(args.cohort_config)
+    # Proposer seam (CR-1, spec Part A2): default deterministic offline library (0 tokens, no network,
+    # bit-reproducible); opt-in LLM proposer spends real tokens per tick, so it also carries the CR-7
+    # est_tokens_per_tick (feeds the tick budget + the manifest token_cost; the offline proposer's is
+    # 0). main()'s fail-closed guard already rejected --proposer llm without ANTHROPIC_API_KEY.
+    proposer: LibrarySeedProposer | LlmProposer
+    if args.proposer == "llm":
+        proposer = LlmProposer(model=args.llm_model)
+        est_tokens = int(args.est_tokens_per_tick)
+    else:
+        proposer = LibrarySeedProposer()
+        est_tokens = 0
     sub = Substrate(substrate_id=substrate_id, prepare=prepare, ledger=ledger, cfg=cfg,
-                    evolve_kwargs=ek, max_proposals=args.max_proposals, lockbox=lockbox,
+                    evolve_kwargs=ek, proposer=proposer, max_proposals=args.max_proposals,
+                    est_tokens_per_tick=est_tokens, lockbox=lockbox,
                     incubation_criterion=incubation_criterion, cohort_cfg=cohort_cfg,
                     cohort_mc_kwargs=cohort_mc, cohort_gates_hash=cohort_ghash)
     return sub, catalog
@@ -272,6 +285,15 @@ def main() -> int:
                          "single-slot panel; use >=5 to give the overlay pool de-correlated breadth so "
                          "the opt-in weak-signal cohort gate can form a cohort)")
     ap.add_argument("--max-proposals", type=int, default=32)
+    ap.add_argument("--proposer", choices=("library", "llm"), default="library",
+                    help="library = deterministic offline seed bank (default, no cost/network, "
+                         "bit-reproducible). llm = live LLM-backed proposer (spec Part A2); needs "
+                         "ANTHROPIC_API_KEY, opt-in only — never the default.")
+    ap.add_argument("--llm-model", default="claude-sonnet-5",
+                    help="model id for --proposer llm (stamped into the manifest agent_model_id).")
+    ap.add_argument("--est-tokens-per-tick", type=int, default=12000,
+                    help="CR-7 per-tick token estimate charged to the tick budget for --proposer llm "
+                         "(the offline library proposer always charges 0).")
     ap.add_argument("--max-candidates", type=int, default=256, help="per-tick candidate cap (CR-7)")
     ap.add_argument("--start-ts", default=None,
                     help="ISO timestamp for night 1 (CR-2/CR-8); defaults to now (UTC). Nights step +1d.")
@@ -291,6 +313,10 @@ def main() -> int:
                     help="real mode only: skip bridging macro/positioning/fundamental connector "
                          "series into Panel feature slots (mine the cross-sectional bank only)")
     args = ap.parse_args()
+    if args.proposer == "llm" and not os.environ.get("ANTHROPIC_API_KEY"):
+        log.error("--proposer llm requires ANTHROPIC_API_KEY in the environment (fails closed, like "
+                  "the FRED/EDGAR credentials) — not set, aborting before the (possibly slow) build.")
+        return 1
 
     cfg, ek = load_generation_config(args.config)
     meta = load_generation_meta(args.config)
@@ -326,8 +352,10 @@ def main() -> int:
                  i + 1, args.nights, tick_ts, o.dirty, o.mined, o.n_promising, o.fdr_num_tests,
                  o.n_incubating, o.n_cleared, o.n_rejected, o.reason)
         # Drop a deterministic reproduce recipe next to each mined synthetic manifest (spec §5, P5).
-        # Only synthetic mode is bit-reproducible offline; a live/networked substrate writes none.
-        if o.mined and args.mode == "synthetic":
+        # Only synthetic mode is bit-reproducible offline; a live/networked substrate writes none. An
+        # LLM proposer is non-bit-reproducible even on synthetic (its reproduce contract is "replay the
+        # recorded specs", not "re-call" — llm_proposer.py docstring), so no recipe is written for it.
+        if o.mined and args.mode == "synthetic" and args.proposer == "library":
             _write_recipe(out_dir, sub.substrate_id, tick_ts, args)
 
     (out_dir / "orchestrator_summary.json").write_text(
