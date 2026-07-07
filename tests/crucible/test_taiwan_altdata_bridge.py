@@ -52,7 +52,8 @@ def test_taiwan_connectors_bridge_and_are_dsl_addressable(tmp_path) -> None:
 
     connectors = [
         TwseInstitutionalConnector(transport=_t86_transport(ref_date.replace("-", ""), "0050"),
-                                   tickers=("0050",), sleep_seconds=0),
+                                   tickers=("0050",), sleep_seconds=0,
+                                   store_path=tmp_path / "t86.json"),
         TaifexPositioningConnector(transport=_taifex_transport(ref_date.replace("-", "")),
                                    contracts=("TX",), store_path=tmp_path / "store.json"),
     ]
@@ -83,7 +84,8 @@ def test_no_altdata_slots_degrades_gracefully_when_all_sources_fail(tmp_path) ->
         raise RuntimeError("network down")
 
     connectors = [
-        TwseInstitutionalConnector(transport=failing, tickers=("0050",), sleep_seconds=0),
+        TwseInstitutionalConnector(transport=failing, tickers=("0050",), sleep_seconds=0,
+                                   store_path=tmp_path / "t86.json"),
         TaifexPositioningConnector(transport=failing, contracts=("TX",),
                                    store_path=tmp_path / "store.json"),
     ]
