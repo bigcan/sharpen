@@ -24,7 +24,7 @@ import numpy as np
 
 from ..catalog import DataCatalog
 from .connector import DataConnector, SeriesRef
-from .quality_gate import asof_join, assert_feature_causal, register_series, validate_series
+from .quality_gate import asof_join, assert_asof_join_causal, register_series, validate_series
 
 logger = logging.getLogger(__name__)
 
@@ -67,14 +67,15 @@ def build_feature_slots(
     """Fetch → validate → as-of-join each request onto ``bar_dates`` → ``{terminal: (T,) array}``.
 
     For each series: (1) the terminal must be DSL-legal; (2) :func:`validate_series` runs (a failure
-    warns, or raises if ``require_valid``); (3) the PIT leak gate :func:`assert_feature_causal` runs
-    on the joined series and RAISES on any look-ahead — this is non-negotiable (CR-4/LEAK-2);
-    (4) the release-time :func:`asof_join` binds it to the calendar; (5) it is optionally registered
-    into ``catalog`` (Stage-1 ACQUIRE). Returns a dict directly usable as ``Panel(feature_slots=...)``.
+    warns, or raises if ``require_valid``); (3) the release-time :func:`asof_join` binds it to the
+    calendar; (4) the PIT leak gate :func:`assert_asof_join_causal` RAISES on any look-ahead — this is
+    non-negotiable (CR-4/LEAK-2); (5) it is optionally registered into ``catalog`` (Stage-1 ACQUIRE).
+    Returns a dict directly usable as ``Panel(feature_slots=...)``.
 
-    The as-of join is truncation-stable by construction (unit-tested), so the fast per-bar
-    availability check here is sufficient in the hot path; the exhaustive
-    :func:`quality_gate.assert_asof_join_causal` (O(T^2)) is reserved for CI/occasional audits.
+    :func:`quality_gate.assert_asof_join_causal` is the FULL causal+truncation gate (it certifies the
+    join equals the release-time per-bar as-of value at every bar, subsuming the weaker availability-
+    only check). It is O(M log M + T log M) — cheap enough to run in the hot path per slot (it was an
+    O(T²) prefix sweep, reserved for CI, until the per-bar-reference rewrite).
     """
     bars = np.asarray(bar_dates, dtype="datetime64[ns]")
     slots: dict[str, np.ndarray] = {}
@@ -97,7 +98,7 @@ def build_feature_slots(
             logger.warning(msg)
 
         joined = asof_join(data, bars)
-        assert_feature_causal(joined, data, bars)      # HARD PIT gate — raises on any look-ahead
+        assert_asof_join_causal(data, bars)            # HARD PIT gate (full causal+truncation, O(T log M))
         slots[terminal] = joined
         if catalog is not None:
             register_series(catalog, data, freshness=freshness)

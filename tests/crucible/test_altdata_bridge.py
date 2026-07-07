@@ -164,7 +164,7 @@ def test_bridge_rejects_pit_leaking_source(tmp_path) -> None:
     """LEAK-2 tripwire at the bridge boundary: a source whose data is released before its reference
     period is rejected by the accept filter and NEVER becomes a feature slot; the clean source still
     bridges and no exception escapes. Reintroducing a leak here can only be silently bridged if this
-    filter is removed AND build_feature_slots' assert_feature_causal is bypassed."""
+    filter is removed AND build_feature_slots' assert_asof_join_causal gate is bypassed."""
     catalog = DataCatalog(tmp_path / "catalog.db")
     slots = bridge_altdata_feature_slots(
         bar_dates=_BARS, start="2019-01-01", end="2020-12-31", catalog=catalog,
