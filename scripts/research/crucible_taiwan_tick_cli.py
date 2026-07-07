@@ -128,13 +128,41 @@ def _looks_true(v) -> bool:
     return bool(v)
 
 
-def _assert_blind(model: str, timeout: int = 120) -> None:
+def _pick_resolved_model(envelope: dict, alias: str) -> str | None:
+    """The concrete model id that actually served the request, from the CLI envelope's
+    ``modelUsage`` map (L1 provenance: ``--model sonnet`` resolves to e.g. ``claude-sonnet-4-6``,
+    and the CLI also bills an auxiliary ``haiku`` step — so prefer the key matching the requested
+    alias family, and among ties the one that generated the most output tokens)."""
+    usage = envelope.get("modelUsage") or {}
+    if not usage:
+        return None
+    base = alias.split("-", 2)[1] if alias.startswith("claude-") else alias
+    matches = [k for k in usage if base.lower() in k.lower()]
+    pool = matches or list(usage)
+    return max(pool, key=lambda k: (usage.get(k) or {}).get("outputTokens", 0))
+
+
+def _cli_version() -> str | None:
+    """Best-effort ``claude`` CLI version for the provenance stamp ("2.1.183 (Claude Code)" ->
+    "2.1.183"). Never fatal — provenance degrades to model-only if this can't be read."""
+    try:
+        out = subprocess.run([_CLI, "--version"], capture_output=True, text=True,
+                             encoding="utf-8", timeout=30).stdout.strip()
+        return out.split()[0] if out else None
+    except Exception:  # noqa: BLE001 - version is a nice-to-have, not a gate
+        return None
+
+
+def _assert_blind(model: str, timeout: int = 120) -> str | None:
     """Fail-closed moat guard (CRU-2): before mining, confirm the CLI child — under the SAME
     isolation flags the proposer transport uses (``--setting-sources ""`` + neutral cwd) — cannot
     see any project verdict/memory context. Abort the whole run (SystemExit) if it can, or if the
     probe cannot be evaluated, rather than silently mining with a contaminated proposer. This wires
     the blindness guarantee that was previously only asserted in a comment + a one-time manual probe
-    (audit finding M1), so a future CLI change to --setting-sources semantics fails loudly here."""
+    (audit finding M1), so a future CLI change to --setting-sources semantics fails loudly here.
+
+    Bonus (L1): this call already resolves the concrete model, so it returns the resolved model id
+    parsed from the same envelope for the provenance stamp (``None`` if it can't be determined)."""
     child_env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
     cmd = [
         _CLI, "-p", "--output-format", "json", "--model", model,
@@ -161,6 +189,7 @@ def _assert_blind(model: str, timeout: int = 120) -> None:
                          f"project context (has_context={obj.get('has_context')!r}, items={items!r}). "
                          "The proposer is NOT blind; refusing to mine.")
     print("[driver] blindness probe PASS: child reports has_context=false, items=[]", file=sys.stderr)
+    return _pick_resolved_model(envelope, model)
 
 
 def main() -> int:
@@ -194,7 +223,15 @@ def main() -> int:
     print(f"[driver] transport=claude CLI  model={args.model}  child_cwd={_CHILD_CWD}",
           file=sys.stderr)
     # M1: runtime moat guard — abort before mining if the child can see project verdicts/memory.
-    _assert_blind(args.model)
+    # It also returns the concrete resolved model id for the L1 provenance stamp.
+    resolved = _assert_blind(args.model)
+    version = _cli_version()
+    # agent_model_id becomes llm-<stamp>-prompt<hash>: record CLI version + the CONCRETE model that
+    # served the proposals (e.g. claude-sonnet-4-6), not just the rolling "sonnet" alias. Degrade to
+    # local-<alias> only if the resolve failed.
+    stamp = "-".join(["claude-cli", *([version] if version else []),
+                      resolved or f"local-{args.model}"])
+    print(f"[driver] provenance agent_model_id = llm-{stamp}-prompt<template-hash>", file=sys.stderr)
 
     from scripts.research import crucible_orchestrator as orch
 
@@ -205,7 +242,7 @@ def main() -> int:
         "--max-proposals", str(args.max_proposals),
         "--out", args.out,
         "--proposer", "llm",
-        "--llm-model", f"claude-cli-local-{args.model}",
+        "--llm-model", stamp,
         *args.extra,
     ]
     return orch.main()
