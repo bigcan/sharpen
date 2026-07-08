@@ -29,6 +29,21 @@ PROMISING_VERDICTS = frozenset({"PROMISING", "ADD_CANDIDATE"})
 # here by construction — the VIEW selects exactly these, and a test asserts nothing else leaks.
 _AGENT_VIEW_COLUMNS = ("candidate_hash", "candidate_type", "family")
 
+# --- upsert monotonicity policy (C7-04) -----------------------------------------------------------
+# Re-recording a candidate by hash must NEVER destroy provenance or downgrade a settled verdict. The
+# ledger is "append-only" in spirit, but two legitimate re-records used to CLOBBER it: (a) the loop
+# re-records a scored pre-registered seed WITHOUT its spec_json (erasing the CR-2 lock), and (b) an
+# evolved offspring can re-derive a formula that was already PROMISING (downgrading it to LOGGED and
+# nulling its provenance). The blanket ``SET col=excluded.col`` did both. The policy below fixes it:
+#   * a SETTLED verdict (PROMISING/killed) and its score columns are FROZEN against any later re-record;
+#   * CR-2 / provenance columns keep their FIRST non-null value (an immutable pre-registration lock);
+#   * every other column fills forward — a NULL in the incoming record never clobbers a stored value.
+_SETTLED_VERDICTS = PROMISING_VERDICTS | KILLED_VERDICTS
+_UPSERT_KEEP_FIRST = frozenset({"first_seen_run", "proposal_ts", "spec_json", "economic_rationale"})
+_UPSERT_SCORE = frozenset({"verdict", "dsr", "delta_sr_oos", "marginal_hlz_t", "data_snapshot_hash"})
+# ``fdr_wealth_charged`` is owned by :meth:`TrialLedger.update_fdr_charge`; a record() carrying None
+# must not wipe an already-charged value — it fills forward like provenance.
+
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS trial_ledger (
     candidate_hash      TEXT PRIMARY KEY,
@@ -100,9 +115,12 @@ class TrialLedger:
 
     # --- write (orchestrator / scorer side; agent-blind) ------------------------------------------
     def record(self, rec: TrialRecord) -> None:
-        """Upsert a candidate by its hash. Re-recording the same hash updates score fields (a
-        pre-registration row scored later) rather than duplicating — the ledger is keyed on the
-        immutable content hash, so a genuine re-proposal is a no-op, not a double-count."""
+        """Monotone upsert by candidate_hash (C7-04). Re-recording the same hash NEVER destroys
+        provenance or downgrades a settled verdict: a PROMISING/killed verdict and its score columns
+        are frozen; CR-2 columns (spec_json / proposal_ts / first_seen_run / economic_rationale) keep
+        their first non-null value; all other columns fill forward (a NULL in the incoming record can
+        never clobber a stored value). A genuine re-proposal of a scored candidate is therefore a
+        no-op, not a double-count and not a downgrade (see the ``_UPSERT_*`` policy above)."""
         cols = [
             "candidate_hash", "crucible_version", "family", "candidate_type", "spec_json",
             "formula", "economic_rationale", "first_seen_run", "proposal_ts", "verdict", "dsr",
@@ -110,10 +128,22 @@ class TrialLedger:
         ]
         vals = [getattr(rec, c) for c in cols]
         placeholders = ", ".join("?" for _ in cols)
-        updates = ", ".join(f"{c}=excluded.{c}" for c in cols if c != "candidate_hash")
+        settled = "(" + ", ".join(f"'{v}'" for v in sorted(_SETTLED_VERDICTS)) + ")"
+        set_parts: list[str] = []
+        for c in cols:
+            if c == "candidate_hash":
+                continue
+            if c in _UPSERT_KEEP_FIRST:                       # CR-2 / provenance: first non-null wins
+                set_parts.append(f"{c}=COALESCE(trial_ledger.{c}, excluded.{c})")
+            elif c in _UPSERT_SCORE:                          # frozen once settled, else fill-forward
+                set_parts.append(
+                    f"{c}=CASE WHEN trial_ledger.verdict IN {settled} THEN trial_ledger.{c} "
+                    f"ELSE COALESCE(excluded.{c}, trial_ledger.{c}) END")
+            else:                                             # provenance / fdr charge: never nulled
+                set_parts.append(f"{c}=COALESCE(excluded.{c}, trial_ledger.{c})")
         self._conn.execute(
             f"INSERT INTO trial_ledger ({', '.join(cols)}) VALUES ({placeholders}) "
-            f"ON CONFLICT(candidate_hash) DO UPDATE SET {updates}",
+            f"ON CONFLICT(candidate_hash) DO UPDATE SET {', '.join(set_parts)}",
             vals,
         )
         self._conn.commit()
@@ -124,12 +154,18 @@ class TrialLedger:
 
     def update_fdr_charge(self, candidate_hash: str, fdr_wealth_charged: float) -> None:
         """Stamp the per-substrate online-FDR wealth spent on a scored trial (spec §6.1, P3). The
-        candidate must already exist (the orchestrator records it during mining, then charges FDR);
-        a missing hash is a no-op UPDATE, which the caller treats as a programming error upstream."""
-        self._conn.execute(
+        candidate MUST already exist (the orchestrator records it during mining, then charges FDR).
+        A missing hash used to be a silent no-op UPDATE — which lets the FDR audit trail diverge
+        undetected (C7-08) — so it now RAISES: a charge with no ledger row is a programming error
+        upstream, not something to swallow."""
+        cur = self._conn.execute(
             "UPDATE trial_ledger SET fdr_wealth_charged = ? WHERE candidate_hash = ?",
             (float(fdr_wealth_charged), candidate_hash))
         self._conn.commit()
+        if cur.rowcount == 0:
+            raise KeyError(
+                f"update_fdr_charge: no trial_ledger row for candidate_hash {candidate_hash!r} — a "
+                "candidate must be recorded before its online-FDR wealth is charged")
 
     # --- read (agent-visible; CR-1) ---------------------------------------------------------------
     def is_duplicate(self, candidate_hash: str) -> bool:

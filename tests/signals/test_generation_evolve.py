@@ -121,3 +121,21 @@ def test_holdout_validation_present_for_any_promising() -> None:
     # gate too). On noise both are empty.
     assert isinstance(rep.holdout_validation, list)
     assert len(rep.holdout_validation) >= len(rep.promising)
+
+
+def test_cross_sectional_ignores_feature_slots() -> None:
+    """NOW-11A (C2-06): cross_sectional draws INPUTS only, so a panel's feature slots do NOT enter its
+    search — the hall of fame is IDENTICAL with and without the slot, and no genome references it. (An
+    OHLCV-only panel is unaffected; the change bites only where feature slots were leaking in.)"""
+    import dataclasses
+
+    base, ts = _base_and_ts()
+    panel = _noise_panel(0)
+    slot = np.sin(2 * np.pi * np.arange(T) / 50.0).astype(np.float64)
+    panel_with = dataclasses.replace(panel, feature_slots={"macro:x": slot})
+    kw = dict(candidate_type="cross_sectional", rng_seed=11, pop_size=16, n_generations=2,
+              hold_horizon=21, ls_min_names=6)
+    r_without = evolve(_SEEDS, panel, base, ts, _CFG, **kw)
+    r_with = evolve(_SEEDS, panel_with, base, ts, _CFG, **kw)
+    assert [c.formula for c in r_with.hall_of_fame] == [c.formula for c in r_without.hall_of_fame]
+    assert not any("macro:x" in c.formula for c in r_with.hall_of_fame)

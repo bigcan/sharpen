@@ -93,6 +93,21 @@ answering a stateless range query like every other connector; this is a data-acq
 a funnel/verdict change, so it does not affect the MINOR classification. Full design + live-verified
 wire-format findings: ``.agent/artifacts/crucible_taiwan_breadth_and_scheduling_architecture.md``.
 
+`crucible-v2.9` is a **MINOR** bump: audit-follow-up search-quality + provenance-coverage fixes
+(`docs/research/crucible_design_audit_2026-07-07.md`). It (a) draws the CROSS-SECTIONAL GP leaf set
+from ``INPUTS`` only, not ``available_terminals`` — broadcast feature slots no longer leak into
+cross_sectional genomes as constant/dead terminals that inflated ``gen_n`` and polluted the DSR
+dispersion pool (C2-06); (b) derives the per-tick generation RNG seed from the pinned ``proposal_ts``
+so successive nights explore fresh trajectories instead of re-walking ``rng_seed=7`` every tick (C3-03);
+(c) folds a panel content-hash into ``data_snapshot_hash`` so a price-bar arrival flips the substrate
+dirty (C2-07); (d) stamps real wall-clock ``tick_ts`` (capped at now) instead of future-dating a
+multi-night burst (C9-05). These change the SEARCH TRAJECTORY, the data-dirty signal, and reproduce
+hashes — so a pre-existing real/taiwan manifest honestly no longer reproduces byte-identically, and
+this bump is exactly that signal — but they change NO verdict FUNCTION: a given formula on a given
+panel still earns the identical verdict, so the frozen ``crucible-v2.0`` gates_hash (519158fa1450) is
+UNCHANGED. (The correctness/PIT fixes shipped alongside — ledger monotone upsert, tick resilience,
+lockbox seams, substrate-power guard, EDGAR/TWSE PIT — are non-semantic and do not alter the search.)
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -104,9 +119,10 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v2.8 = Taiwan data breadth (TWSE T86 + TAIFEX large-trader OI connectors). MINOR, funnel gates_hash
-# UNCHANGED (519158fa1450) — no existing verdict changed, no gate file touched.
-CRUCIBLE_VERSION = "crucible-v2.8"
+# v2.9 = audit-follow-up search-quality + provenance fixes (cross_sectional INPUTS-only, per-tick seed,
+# panel-content snapshot_hash, real tick_ts). MINOR, funnel gates_hash UNCHANGED (519158fa1450) — the
+# search trajectory + reproduce hashes change, but NO verdict function does.
+CRUCIBLE_VERSION = "crucible-v2.9"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

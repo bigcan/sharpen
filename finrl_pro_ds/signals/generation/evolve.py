@@ -24,7 +24,7 @@ from ..eval_harness import _ls_weights
 from ..features import Panel
 from .dsl_signal import eval_on_panel
 from .fitness import FitnessConfig, FitnessResult, _combined_book, combination_fitness
-from .grammar import available_terminals, crossover, mutate, node_count, parse, to_formula
+from .grammar import INPUTS, available_terminals, crossover, mutate, node_count, parse, to_formula
 
 log = logging.getLogger("alpha_evolve")
 _INFEASIBLE = float("-inf")
@@ -194,13 +194,17 @@ def evolve(
     n_train = train.T
     base_tr = {k: np.asarray(v)[:n_train] for k, v in base_returns.items()}
     ts_tr = np.asarray(timestamps)[:n_train]
-    # CR-9 terminal registry: the value-leaf set the generator may draw from. For the default
-    # cross_sectional path this is literally INPUTS (byte-identical draw sequence); for overlay it
-    # adds the panel's feature slots so genomes can reference the non-OHLCV series.
-    inputs = available_terminals(panel)
+    # CR-9 terminal registry: the value-leaf set the generator may draw from. The cross_sectional path
+    # draws INPUTS ONLY (the OHLCV-derived leaves); ONLY the overlay path also gets the panel's feature
+    # slots so its genomes can reference the non-OHLCV series. (C2-06 fix: drawing feature slots into
+    # cross_sectional made broadcast terminals rank() to constant/dead genomes that inflated gen_n and
+    # polluted the DSR dispersion pool — and contradicted this very "INPUTS-only" docstring. On an
+    # OHLCV-only panel available_terminals(panel) == INPUTS, so this is a NO-OP there; it changes the
+    # draw sequence only on a panel that carries feature slots. [crucible-v2.9 MINOR])
+    is_overlay = candidate_type == "overlay"
+    inputs = available_terminals(panel) if is_overlay else INPUTS
     # OVERLAY dispatch: the combined base book (C1) is the multiplier target, computed ONCE per
     # split. On the train split it is over the train rows; the holdout path rebuilds it on full rows.
-    is_overlay = candidate_type == "overlay"
     base_book_tr = _combined_book(base_tr, ts_tr, cfg) if is_overlay else None
 
     def _returns_for(formula: str, pnl: Panel, base_book: "np.ndarray | None"

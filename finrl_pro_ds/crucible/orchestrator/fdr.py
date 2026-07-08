@@ -23,13 +23,18 @@ spends (recorded per trial as ``fdr_wealth_charged``); it shrinks as tests accum
 discovery (spending down) and jumps back up right after a discovery (replenishment) — the literal
 "spent on each test and replenished on discoveries" of §6.1.
 
-**Integration (CR-1 preserved).** The Crucible funnel emits a binary PROMISING verdict, not a
-p-value, and the orchestrator/agent may NOT touch the funnel's thresholds. So this procedure does
-NOT gate the within-run T0–T5 test; α_t is purely the cross-run *wealth accounting*, and a funnel
-PROMISING plays the role of "reject" (a discovery, which replenishes the budget). Because the funnel
-is a conservative test — its false-PROMISING rate on the noise exit-gate is ~0 ≤ α_t — the LORD++
-FDR guarantee holds conservatively. ``substrate_dirty`` (§10.1) conserves this budget by not
-advancing ``t`` on an unchanged panel.
+**Integration (CR-1 preserved) — this is FDR ACCOUNTING, not enforced FDR CONTROL (C5-01/C9-12).**
+The Crucible funnel emits a binary PROMISING verdict, not a p-value, and the orchestrator/agent may
+NOT touch the funnel's thresholds. So this procedure does NOT gate the within-run T0–T5 test, and —
+as shipped — NOTHING consumes α_t as a rejection threshold (``next_level``/``is_starved`` have no
+production consumer and ``alpha_floor`` defaults 0.0). α_t is therefore a per-substrate *wealth
+ledger* recorded for audit (``fdr_wealth_charged``), and a funnel PROMISING plays the role of "reject"
+(a discovery that replenishes the budget). It does NOT currently deliver a proven FDR ≤ α guarantee:
+that would require α_t to actually threshold each test, and the premise (per-test FPR ≤ α_t) fails
+once α_t decays below the funnel's certifiable false-PROMISING rate (~1e-3 by the E1 calibration),
+which happens after only a handful of barren tests. Treat the "FDR" here as ACCOUNTED, not CONTROLLED,
+until a p-value-consuming procedure is wired (design roadmap: prereg-cashing + ADDIS/SAFFRON).
+``substrate_dirty`` (§10.1) conserves this budget by not advancing ``t`` on an unchanged panel.
 """
 from __future__ import annotations
 

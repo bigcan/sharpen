@@ -1,11 +1,15 @@
 """FRED / ALFRED connector (spec §4.2 Tier-A macro) — Crucible P1b.
 
-FRED is vast, reliable and free; **ALFRED** is the reason it is PIT-safe: it exposes true *vintage*
-series so a backtest never sees a revised value early (CR-4). This connector therefore reads the
-vintage-aware endpoint and stamps each observation's ``release_timestamp`` from ALFRED's
-``realtime_start`` (the date that reading first became the published value). Requesting all vintages
-(``output_type=2``) yields the full release history incl. revisions, which :func:`quality_gate.asof_join`
-replays correctly.
+FRED is vast, reliable and free. **PIT caveat (C1-03):** the DEFAULT fetch path is a RELEASE-LAG
+model, NOT a true vintage read — it pulls the latest published observations and stamps each
+``release_timestamp`` as ``reference_period + release_lag_days``. That is PIT-safe ONLY for series
+effectively never revised after first release (the curated default list is chosen to be such); for a
+genuinely revised series it would present today's revised value as if it were public at first release.
+True **ALFRED** vintages (``realtime_start`` per observation; ``output_type=2`` for the full revision
+history that :func:`quality_gate.asof_join` replays) are the correct fix for revised series and the
+``as_of`` param is plumbed for it — but that path is NOT the default and still has a known stamping gap
+for revised values (C1-05). Do not rely on FRED for a genuinely revised series until ALFRED vintages
+are wired end-to-end (roadmap NEXT-9); prefer non-revised series (rates, spreads) until then.
 
 Testability: pass a ``transport`` callable ``(url) -> dict`` (parsed JSON) and the connector needs
 NO network and NO key — fixtures drive it. The live path requires ``FRED_API_KEY`` (free) and

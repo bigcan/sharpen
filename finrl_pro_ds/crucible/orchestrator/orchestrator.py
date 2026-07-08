@@ -52,9 +52,26 @@ from ...signals.generation.grammar import available_terminals
 from .budget import TickBudget
 from .burst import route_burst
 from .fdr import OnlineFDR
-from .substrate import OrchestratorStore, PreparedSubstrate, Substrate, TickRecord, substrate_dirty
+from .substrate import (
+    OrchestratorStore,
+    PowerGuard,
+    PreparedSubstrate,
+    Substrate,
+    TickRecord,
+    substrate_dirty,
+)
 
 log = logging.getLogger("crucible.orchestrator")
+
+
+@dataclass(frozen=True, slots=True)
+class _IncubationPass:
+    """Result of accruing forward evidence over a substrate's active lockbox entries this tick (NOW-8):
+    the entries touched, plus counts of stalled (degenerate) and errored (raised) passes."""
+
+    touched: list[LockboxEntry] = field(default_factory=list)
+    n_stalled: int = 0
+    n_errors: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +101,13 @@ class SubstrateTickOutcome:
     n_cleared: int = 0               # entries that reached the horizon and passed -> human-eligible
     n_rejected: int = 0               # entries that reached the horizon and failed (terminal-dead)
     lockbox_entries: list[LockboxEntry] = field(default_factory=list)
+    # NOW-2 (C9-11): a crashed tick is recorded as an outcome (status="ERROR"), never aborting the
+    # night; "OK" on every normal path (mined / no-op / budget-breach).
+    status: str = "OK"
+    error: str | None = None
+    # NOW-8 (C8-04/05): forward-incubation health for this substrate this tick.
+    n_incubation_stalled: int = 0
+    n_incubation_errors: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -114,141 +138,212 @@ def run_orchestrator_tick(
     crucible_version: str = CRUCIBLE_VERSION,
     budget: TickBudget | None = None,
     out_dir: str | Path | None = None,
+    power_gate: PowerGuard | None = None,
 ) -> OrchestratorTickResult:
     """Run one nightly tick. ``tick_ts`` is the (deterministic, caller-supplied) proposal timestamp
     for CR-2/CR-8 — pass a fixed value for a reproducible run. ``budget`` defaults to a fresh
     :class:`TickBudget`; it is shared across the substrates this tick (CR-7). If ``out_dir`` is
-    given, per-substrate manifests + discovery cards are written under it."""
+    given, per-substrate manifests + discovery cards are written under it. ``power_gate`` (NOW-5) is
+    the optional substrate-power guard: it stamps each tick with the panel's implied MDE and, under
+    ``action='refuse'``, skips an underpowered mine (None ⇒ no stamp, byte-identical legacy behavior)."""
     ghash = gates_hash(gates_path)
     budget = budget or TickBudget()
     outcomes: list[SubstrateTickOutcome] = []
 
     for sub in substrates:
-        prepared = sub.prepare()
-        snap = prepared.snapshot_hash
+        # C9-01/C9-11: process each substrate in isolation. The snapshot pointer is advanced ONLY
+        # after the tick is fully processed (the `else` below), so a crash mid-tick rolls it back to
+        # prev_snap and the NEXT tick retries — it never permanently swallows the data-arrived signal.
+        # One substrate's failure records an ERROR tick and continues; it never aborts the night.
         prev_snap = store.last_snapshot_hash(sub.substrate_id)
-        data_changed = prev_snap != snap
-        store.set_snapshot_hash(sub.substrate_id, snap)          # observed this tick (mined or not)
-
-        # --- CR-8 lockbox (P4): accrue forward evidence on every still-incubating survivor, EVERY
-        # visited tick (mined or not) — forward data can arrive without a fresh hypothesis. Enrollment
-        # of THIS tick's survivors happens after the mine below; a just-enrolled candidate has an empty
-        # forward window this tick, so accruing here first is correct and order-independent. -----------
-        incubated = _incubate_active(sub, prepared, tick_ts)
-
-        # --- Stage 2 (agent, CR-1): ONE proposer call → fresh (deduped) hypotheses ----------------
-        author = HypothesisAuthor(sub.proposer, sub.ledger, max_proposals=sub.max_proposals)
-        terminals = available_terminals(prepared.panel)
-        # CR-1-legal data-shape hints + a per-tick nonce (all defaulted/ignored by the offline
-        # LibrarySeedProposer, so its output — and every existing verdict/manifest — is byte-identical;
-        # only an LLM proposer conditions on them). None is a score/verdict.
-        context = author.build_context(
-            terminals, asset_classes=prepared.asset_classes, panel_n=prepared.panel.N,
-            feature_slot_bars=_feature_slot_bars(prepared.panel),
-            mechanism_nonce=_mechanism_nonce(tick_ts))
-        fresh_specs = author.propose(context, proposal_ts=tick_ts)
-        n_fresh = len(fresh_specs)
-        dirty, reason = substrate_dirty(data_changed=data_changed, n_fresh_hypotheses=n_fresh)
-
-        # A substrate is only MINED if it has fresh specs to score; a data-only change with no new
-        # candidate is dirty-but-nothing-to-test (conserves FDR wealth — the §10.1 intent).
-        if not (dirty and fresh_specs):
-            store.record_tick(TickRecord(
-                tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=dirty, mined=False,
-                reason=reason, snapshot_hash=snap))
-            outcomes.append(SubstrateTickOutcome(
-                substrate_id=sub.substrate_id, dirty=dirty, mined=False, reason=reason,
-                snapshot_hash=snap, fdr_num_tests=_fdr_tests(store, sub),
-                **_lockbox_fields(sub, incubated, n_enrolled=0)))
-            log.info("substrate %s: NO-OP (%s)", sub.substrate_id, reason)
-            continue
-
-        # --- CR-7 cost budget: skip-and-report if this substrate no longer fits the tick ----------
-        est_tokens = int(sub.est_tokens_per_tick)
-        if not budget.can_afford(candidates=n_fresh, tokens=est_tokens):
-            breach = (f"{sub.substrate_id}: needs {n_fresh} candidates / {est_tokens} tokens; "
-                      f"tick budget exhausted (cand {budget.candidates_spent}/{budget.max_candidates},"
-                      f" tok {budget.tokens_spent}/{budget.max_tokens})")
-            budget.mark_breach(breach)
-            store.record_tick(TickRecord(
-                tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=True, mined=False,
-                reason=f"{reason}; BUDGET BREACH — skipped", snapshot_hash=snap,
-                n_preregistered=n_fresh, budget_breached=True))
-            outcomes.append(SubstrateTickOutcome(
-                substrate_id=sub.substrate_id, dirty=True, mined=False,
-                reason=f"{reason}; budget breach", snapshot_hash=snap, n_preregistered=n_fresh,
-                budget_breached=True, fdr_num_tests=_fdr_tests(store, sub),
-                **_lockbox_fields(sub, incubated, n_enrolled=0)))
-            log.warning("substrate %s: %s", sub.substrate_id, breach)
-            continue
-
-        budget.charge(candidates=n_fresh, tokens=est_tokens)
-        burst = route_burst(est_candidates=n_fresh, is_hpo=sub.is_hpo)
-        log.info("substrate %s: MINING %d fresh specs (%s) -> %s",
-                 sub.substrate_id, n_fresh, reason, burst.target)
-
-        # --- Stage 3+4: UNCHANGED mine + T0–T5 (reuse P2 loop; no 2nd proposer call) ---------------
-        run_id = f"tick-{sub.substrate_id}-{tick_ts}"
-        result = run_hypothesis_loop(
-            panel=prepared.panel, base_returns=prepared.base_returns,
-            timestamps=prepared.timestamps, cfg=sub.cfg, evolve_kwargs=sub.evolve_kwargs,
-            author=author, run_id=run_id, crucible_version=crucible_version, gates_hash=ghash,
-            proposal_ts=tick_ts, catalog_asset_classes=prepared.asset_classes,
-            data_snapshot_hash=snap, token_cost=est_tokens, pre_proposed=fresh_specs,
-            cohort_cfg=sub.cohort_cfg, cohort_mc_kwargs=sub.cohort_mc_kwargs,
-            cohort_gates_hash=sub.cohort_gates_hash)
-
-        # --- online-FDR: charge one test per pre-registered spec (deterministic order) ------------
-        promising_hashes = {c.candidate_hash for c in result.cards}
-        fdr = store.load_fdr(sub.substrate_id, alpha=sub.fdr_alpha, w0=sub.fdr_w0,
-                             alpha_floor=sub.fdr_alpha_floor)
-        fdr_total = 0.0
-        for pr in sorted(fresh_specs, key=lambda s: s.candidate_hash):
-            charged = fdr.observe(is_discovery=(pr.candidate_hash in promising_hashes))
-            sub.ledger.update_fdr_charge(pr.candidate_hash, charged)
-            fdr_total += charged
-        # ADR-4: a cohort EVALUATED this tick is ONE additional online-FDR test, charged
-        # deterministic-LAST so the per-candidate LORD++ order/charges are untouched. The within-cohort
-        # selection multiplicity is already handled by the MC null; this charge accounts for the
-        # across-tick repetition of attempting a cohort (the Fable finding #1 lesson). A cohort has no
-        # ledger row, so it is NOT recorded via ledger.update_fdr_charge (which is per-candidate).
-        n_cohort_promising = sum(1 for c in result.cohort_cards if c.verdict == "PROMISING")
-        if result.cohort_cards:
-            fdr_total += fdr.observe(is_discovery=(n_cohort_promising > 0))
-        store.save_fdr(sub.substrate_id, fdr)
-
-        # --- CR-8 lockbox: enroll every PROMISING survivor (idempotent). A fresh entry is INCUBATING
-        # with an empty forward window; its card reflects that state (not the P2 PENDING_P4 stub). ----
-        enrolled = _enroll_cards(sub, result.cards, tick_ts)
-        tick_cards = ([updated_card(c, e) for c, e in zip(result.cards, enrolled)]
-                      if enrolled else list(result.cards))
-
-        n_scored = sum(len(r.hall_of_fame) for r in result.reports.values())
-        store.record_tick(TickRecord(
-            tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason,
-            snapshot_hash=snap, n_preregistered=n_fresh, n_scored=n_scored,
-            n_promising=result.n_promising, fdr_charged_total=fdr_total,
-            budget_breached=False, burst_target=burst.target,
-            manifest_hash=result.manifest.content_hash()))
-        outcomes.append(SubstrateTickOutcome(
-            substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason, snapshot_hash=snap,
-            n_preregistered=n_fresh, n_scored=n_scored, n_promising=result.n_promising,
-            fdr_charged_total=fdr_total, fdr_num_tests=fdr.num_tests, burst_target=burst.target,
-            result=result, cards=tick_cards,
-            n_cohort_promising=n_cohort_promising, cohort_cards=list(result.cohort_cards),
-            **_lockbox_fields(sub, incubated + enrolled, n_enrolled=len(enrolled))))
-
-        if out_dir is not None:
-            sub_dir = Path(out_dir) / _safe(sub.substrate_id) / _safe(tick_ts)
-            for card in tick_cards:
-                card.write(sub_dir / "cards")
-            for cohort_card in result.cohort_cards:            # Phase 4: cohort verdicts beside cards
-                cohort_card.write(sub_dir / "cards")
-            result.manifest.write(sub_dir)
+        try:
+            record, outcome, snap = _process_substrate(
+                sub, store=store, budget=budget, ghash=ghash, tick_ts=tick_ts,
+                crucible_version=crucible_version, out_dir=out_dir, prev_snap=prev_snap,
+                power_gate=power_gate)
+        except Exception as exc:                        # noqa: BLE001 — resilience is the whole point
+            log.exception("substrate %s: tick FAILED — recording ERROR, other substrates continue",
+                          sub.substrate_id)
+            if prev_snap is None:
+                store.clear_snapshot(sub.substrate_id)   # never seen → keep unseen (retry next tick)
+            else:
+                store.set_snapshot_hash(sub.substrate_id, prev_snap)   # roll back → retry next tick
+            record = TickRecord(
+                tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=False, mined=False,
+                reason=f"tick ERROR: {exc}", snapshot_hash=(prev_snap or ""),
+                status="ERROR", error=repr(exc))
+            outcome = SubstrateTickOutcome(
+                substrate_id=sub.substrate_id, dirty=False, mined=False,
+                reason=f"tick ERROR: {exc}", snapshot_hash=(prev_snap or ""),
+                status="ERROR", error=repr(exc))
+        else:
+            store.set_snapshot_hash(sub.substrate_id, snap)    # observed successfully (mined or not)
+        store.record_tick(record)
+        outcomes.append(outcome)
 
     return OrchestratorTickResult(tick_ts=tick_ts, gates_hash=ghash,
                                   crucible_version=crucible_version, outcomes=outcomes,
                                   budget=budget)
+
+
+def _process_substrate(
+    sub: Substrate, *, store: OrchestratorStore, budget: TickBudget, ghash: str, tick_ts: str,
+    crucible_version: str, out_dir: str | Path | None, prev_snap: str | None,
+    power_gate: PowerGuard | None = None,
+) -> tuple[TickRecord, SubstrateTickOutcome, str]:
+    """Process ONE substrate for ONE tick and return ``(tick_record, outcome, observed_snapshot)``
+    WITHOUT touching the store's snapshot pointer or tick log — the caller advances the snapshot only
+    on success (C9-01) and records the tick exactly once (here on success, or on the caller's ERROR
+    path, C9-11). All mining/FDR/lockbox side effects happen here; they are per-substrate and safe to
+    leave partial on a raise, because the caller's snapshot rollback makes the next tick redo it."""
+    prepared = sub.prepare()
+    snap = prepared.snapshot_hash
+    data_changed = prev_snap != snap
+
+    # --- CR-8 lockbox (P4): accrue forward evidence on every still-incubating survivor, EVERY visited
+    # tick (mined or not) — forward data can arrive without a fresh hypothesis. Enrollment of THIS
+    # tick's survivors happens after the mine below; a just-enrolled candidate has an empty forward
+    # window this tick, so accruing here first is correct and order-independent. --------------------
+    incubation = _incubate_active(sub, prepared, tick_ts)
+
+    # --- NOW-5 substrate-power guard (C2-01/C6-07): before ANY propose/FDR spend, check whether the
+    # funnel can even detect a realistic alpha on this substrate. WARN always; under action='refuse'
+    # (and no --force-underpowered) SKIP the mine — conserving proposer tokens + FDR wealth — while
+    # still accruing forward incubation above. This is the guard that would have caught the 504-bar
+    # flagship. Byte-identical when no power stamp / no guard is configured. ------------------------
+    pw = prepared.power
+    if pw is not None and power_gate is not None and power_gate.enabled \
+            and pw.implied_mde_delta_sr > power_gate.ceiling:
+        log.warning("substrate %s UNDERPOWERED: implied MDE %.2f ΔSR > ceiling %.2f "
+                    "(T=%d, holdout=%d, %s)", sub.substrate_id, pw.implied_mde_delta_sr,
+                    power_gate.ceiling, pw.panel_T, pw.holdout_bars, pw.interp_mode)
+        if power_gate.action == "refuse" and not power_gate.force:
+            reason = (f"UNDERPOWERED — skipped (implied MDE {pw.implied_mde_delta_sr:.2f} ΔSR > "
+                      f"ceiling {power_gate.ceiling:.2f})")
+            record = TickRecord(
+                tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=False, mined=False,
+                reason=reason, snapshot_hash=snap, **_power_kwargs(prepared))
+            outcome = SubstrateTickOutcome(
+                substrate_id=sub.substrate_id, dirty=False, mined=False, reason=reason,
+                snapshot_hash=snap, fdr_num_tests=_fdr_tests(store, sub),
+                n_incubation_stalled=incubation.n_stalled, n_incubation_errors=incubation.n_errors,
+                **_lockbox_fields(sub, incubation.touched, n_enrolled=0))
+            return record, outcome, snap
+
+    # --- Stage 2 (agent, CR-1): ONE proposer call → fresh (deduped) hypotheses ---------------------
+    author = HypothesisAuthor(sub.proposer, sub.ledger, max_proposals=sub.max_proposals)
+    terminals = available_terminals(prepared.panel)
+    # CR-1-legal data-shape hints + a per-tick nonce (all defaulted/ignored by the offline
+    # LibrarySeedProposer, so its output — and every existing verdict/manifest — is byte-identical;
+    # only an LLM proposer conditions on them). None is a score/verdict.
+    context = author.build_context(
+        terminals, asset_classes=prepared.asset_classes, panel_n=prepared.panel.N,
+        feature_slot_bars=_feature_slot_bars(prepared.panel),
+        mechanism_nonce=_mechanism_nonce(tick_ts))
+    fresh_specs = author.propose(context, proposal_ts=tick_ts)
+    n_fresh = len(fresh_specs)
+    dirty, reason = substrate_dirty(data_changed=data_changed, n_fresh_hypotheses=n_fresh)
+
+    # A substrate is only MINED if it has fresh specs to score; a data-only change with no new
+    # candidate is dirty-but-nothing-to-test (conserves FDR wealth — the §10.1 intent).
+    if not (dirty and fresh_specs):
+        record = TickRecord(
+            tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=dirty, mined=False,
+            reason=reason, snapshot_hash=snap, **_power_kwargs(prepared))
+        outcome = SubstrateTickOutcome(
+            substrate_id=sub.substrate_id, dirty=dirty, mined=False, reason=reason,
+            snapshot_hash=snap, fdr_num_tests=_fdr_tests(store, sub),
+            n_incubation_stalled=incubation.n_stalled, n_incubation_errors=incubation.n_errors,
+            **_lockbox_fields(sub, incubation.touched, n_enrolled=0))
+        log.info("substrate %s: NO-OP (%s)", sub.substrate_id, reason)
+        return record, outcome, snap
+
+    # --- CR-7 cost budget: skip-and-report if this substrate no longer fits the tick --------------
+    est_tokens = int(sub.est_tokens_per_tick)
+    if not budget.can_afford(candidates=n_fresh, tokens=est_tokens):
+        breach = (f"{sub.substrate_id}: needs {n_fresh} candidates / {est_tokens} tokens; "
+                  f"tick budget exhausted (cand {budget.candidates_spent}/{budget.max_candidates},"
+                  f" tok {budget.tokens_spent}/{budget.max_tokens})")
+        budget.mark_breach(breach)
+        record = TickRecord(
+            tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=True, mined=False,
+            reason=f"{reason}; BUDGET BREACH — skipped", snapshot_hash=snap,
+            n_preregistered=n_fresh, budget_breached=True, **_power_kwargs(prepared))
+        outcome = SubstrateTickOutcome(
+            substrate_id=sub.substrate_id, dirty=True, mined=False,
+            reason=f"{reason}; budget breach", snapshot_hash=snap, n_preregistered=n_fresh,
+            budget_breached=True, fdr_num_tests=_fdr_tests(store, sub),
+            n_incubation_stalled=incubation.n_stalled, n_incubation_errors=incubation.n_errors,
+            **_lockbox_fields(sub, incubation.touched, n_enrolled=0))
+        log.warning("substrate %s: %s", sub.substrate_id, breach)
+        return record, outcome, snap
+
+    budget.charge(candidates=n_fresh, tokens=est_tokens)
+    burst = route_burst(est_candidates=n_fresh, is_hpo=sub.is_hpo)
+    log.info("substrate %s: MINING %d fresh specs (%s) -> %s",
+             sub.substrate_id, n_fresh, reason, burst.target)
+
+    # --- Stage 3+4: UNCHANGED mine + T0–T5 (reuse P2 loop; no 2nd proposer call) -------------------
+    run_id = f"tick-{sub.substrate_id}-{tick_ts}"
+    result = run_hypothesis_loop(
+        panel=prepared.panel, base_returns=prepared.base_returns,
+        timestamps=prepared.timestamps, cfg=sub.cfg, evolve_kwargs=sub.evolve_kwargs,
+        author=author, run_id=run_id, crucible_version=crucible_version, gates_hash=ghash,
+        proposal_ts=tick_ts, catalog_asset_classes=prepared.asset_classes,
+        data_snapshot_hash=snap, token_cost=est_tokens, pre_proposed=fresh_specs,
+        cohort_cfg=sub.cohort_cfg, cohort_mc_kwargs=sub.cohort_mc_kwargs,
+        cohort_gates_hash=sub.cohort_gates_hash)
+
+    # --- online-FDR: charge one test per pre-registered spec (deterministic order) -----------------
+    promising_hashes = {c.candidate_hash for c in result.cards}
+    fdr = store.load_fdr(sub.substrate_id, alpha=sub.fdr_alpha, w0=sub.fdr_w0,
+                         alpha_floor=sub.fdr_alpha_floor)
+    fdr_total = 0.0
+    for pr in sorted(fresh_specs, key=lambda s: s.candidate_hash):
+        charged = fdr.observe(is_discovery=(pr.candidate_hash in promising_hashes))
+        sub.ledger.update_fdr_charge(pr.candidate_hash, charged)
+        fdr_total += charged
+    # ADR-4: a cohort EVALUATED this tick is ONE additional online-FDR test, charged deterministic-LAST
+    # so the per-candidate LORD++ order/charges are untouched. The within-cohort selection multiplicity
+    # is already handled by the MC null; this charge accounts for the across-tick repetition of
+    # attempting a cohort (the Fable finding #1 lesson). A cohort has no ledger row, so it is NOT
+    # recorded via ledger.update_fdr_charge (which is per-candidate).
+    n_cohort_promising = sum(1 for c in result.cohort_cards if c.verdict == "PROMISING")
+    if result.cohort_cards:
+        fdr_total += fdr.observe(is_discovery=(n_cohort_promising > 0))
+    store.save_fdr(sub.substrate_id, fdr)
+
+    # --- CR-8 lockbox: enroll every PROMISING survivor (idempotent). A fresh entry is INCUBATING with
+    # an empty forward window; its card reflects that state (not the P2 PENDING_P4 stub). -----------
+    enrolled = _enroll_cards(sub, result.cards, tick_ts)
+    tick_cards = ([updated_card(c, e) for c, e in zip(result.cards, enrolled)]
+                  if enrolled else list(result.cards))
+
+    n_scored = sum(len(r.hall_of_fame) for r in result.reports.values())
+    record = TickRecord(
+        tick_ts=tick_ts, substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason,
+        snapshot_hash=snap, n_preregistered=n_fresh, n_scored=n_scored,
+        n_promising=result.n_promising, fdr_charged_total=fdr_total,
+        budget_breached=False, burst_target=burst.target,
+        manifest_hash=result.manifest.content_hash(), **_power_kwargs(prepared))
+    outcome = SubstrateTickOutcome(
+        substrate_id=sub.substrate_id, dirty=True, mined=True, reason=reason, snapshot_hash=snap,
+        n_preregistered=n_fresh, n_scored=n_scored, n_promising=result.n_promising,
+        fdr_charged_total=fdr_total, fdr_num_tests=fdr.num_tests, burst_target=burst.target,
+        result=result, cards=tick_cards,
+        n_cohort_promising=n_cohort_promising, cohort_cards=list(result.cohort_cards),
+        n_incubation_stalled=incubation.n_stalled, n_incubation_errors=incubation.n_errors,
+        **_lockbox_fields(sub, incubation.touched + enrolled, n_enrolled=len(enrolled)))
+
+    if out_dir is not None:                             # writes BEFORE the caller records the tick
+        sub_dir = Path(out_dir) / _safe(sub.substrate_id) / _safe(tick_ts)
+        for card in tick_cards:
+            card.write(sub_dir / "cards")
+        for cohort_card in result.cohort_cards:         # Phase 4: cohort verdicts beside cards
+            cohort_card.write(sub_dir / "cards")
+        result.manifest.write(sub_dir)
+
+    return record, outcome, snap
 
 
 def _feature_slot_bars(panel: Panel) -> tuple[tuple[str, int], ...]:
@@ -276,25 +371,40 @@ def _incubation_params(evolve_kwargs: dict) -> tuple[int, float, int]:
             int(evolve_kwargs.get("ls_min_names", 6)))
 
 
-def _incubate_active(sub: Substrate, prepared: PreparedSubstrate, tick_ts: str) -> list[LockboxEntry]:
+def _incubate_active(sub: Substrate, prepared: PreparedSubstrate, tick_ts: str) -> _IncubationPass:
     """Refresh every still-INCUBATING lockbox entry for this substrate on the freshly-extended panel
-    (CR-8). No-op when the substrate has no lockbox (byte-identical P3 behavior)."""
+    (CR-8), in ISOLATION (NOW-8): a poison-pill formula that throws on a drifted panel is counted and
+    skipped (C8-04) — never allowed to crash the whole tick, which runs incubation FIRST — and a
+    degenerate (None evidence) pass is counted as a stall (C8-05) instead of a silent `continue`. The
+    terminal forward Sharpe's snapshot is stamped for reproducibility (C8-06). No-op (byte-identical P3
+    behavior) when the substrate has no lockbox."""
     if sub.lockbox is None:
-        return []
+        return _IncubationPass()
     hold_horizon, cost_bps, ls_min_names = _incubation_params(sub.evolve_kwargs)
     touched: list[LockboxEntry] = []
+    n_stalled = n_errors = 0
     for entry in sub.lockbox.active_entries(sub.substrate_id):
-        ev = forward_evidence(
-            formula=entry.formula, candidate_type=entry.candidate_type, panel=prepared.panel,
-            base_returns=prepared.base_returns, timestamps=prepared.timestamps,
-            proposal_ts=entry.proposal_ts, cfg=sub.cfg, hold_horizon=hold_horizon,
-            cost_bps=cost_bps, ls_min_names=ls_min_names)
-        if ev is None:                       # candidate degenerate on the current panel — skip this pass
+        try:
+            ev = forward_evidence(
+                formula=entry.formula, candidate_type=entry.candidate_type, panel=prepared.panel,
+                base_returns=prepared.base_returns, timestamps=prepared.timestamps,
+                proposal_ts=entry.proposal_ts, cfg=sub.cfg, hold_horizon=hold_horizon,
+                cost_bps=cost_bps, ls_min_names=ls_min_names)
+        except Exception:                    # noqa: BLE001 — one poison entry must not crash the tick
+            log.exception("substrate %s: incubation FAILED for %s on snapshot %s",
+                          sub.substrate_id, entry.candidate_hash, prepared.snapshot_hash)
+            sub.lockbox.record_error(entry.candidate_hash, tick_ts)
+            n_errors += 1
             continue
-        updated = sub.lockbox.record_incubation(entry.candidate_hash, ev, tick_ts)
+        if ev is None:                       # candidate degenerate on the current panel — count a stall
+            sub.lockbox.record_stall(entry.candidate_hash, tick_ts)
+            n_stalled += 1
+            continue
+        updated = sub.lockbox.record_incubation(
+            entry.candidate_hash, ev, tick_ts, snapshot_hash=prepared.snapshot_hash)
         if updated is not None:
             touched.append(updated)
-    return touched
+    return _IncubationPass(touched=touched, n_stalled=n_stalled, n_errors=n_errors)
 
 
 def _enroll_cards(sub: Substrate, cards: list[DiscoveryCard], tick_ts: str) -> list[LockboxEntry]:
@@ -318,6 +428,16 @@ def _lockbox_fields(sub: Substrate, touched: list[LockboxEntry], *, n_enrolled: 
         n_cleared=sum(1 for e in entries if e.status == STATUS_CLEARED),
         n_rejected=sum(1 for e in entries if e.status == STATUS_REJECTED),
         lockbox_entries=list(touched))
+
+
+def _power_kwargs(prepared: PreparedSubstrate) -> dict:
+    """The four TickRecord substrate-power fields from a prepared substrate's NOW-5 stamp (empty when
+    the substrate is unstamped, so a legacy / no-power-gate tick record stays byte-identical)."""
+    p = prepared.power
+    if p is None:
+        return {}
+    return dict(panel_T=p.panel_T, holdout_bars=p.holdout_bars,
+                implied_mde_delta_sr=p.implied_mde_delta_sr, power_interp_mode=p.interp_mode)
 
 
 def _fdr_tests(store: OrchestratorStore, sub: Substrate) -> int:

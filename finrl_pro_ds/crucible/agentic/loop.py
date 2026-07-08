@@ -13,6 +13,7 @@ PROMISING; every card is ``incubation_status=PENDING_P4`` / not human-eligible (
 """
 from __future__ import annotations
 
+import hashlib
 import logging
 from dataclasses import dataclass, field
 
@@ -40,6 +41,10 @@ log = logging.getLogger("crucible.loop")
 # NOT a falsified named family, so it must not enter killed_families (which gates future proposals).
 _LOGGED = "LOGGED"
 _PROMISING = "PROMISING"
+# Terminal verdict for a PRE-REGISTERED spec that was mined but did NOT surface in its type's
+# hall-of-fame/promising set — "scored and lost", distinct from "never scored" (NOW-3, C3-05/C6-06/
+# C7-07). Like _LOGGED it is NON-killing: a non-survivor must never enter killed_families.
+_SCORED_NOT_SELECTED = "SCORED_NOT_SELECTED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,7 +93,10 @@ def _card_for(cand: Candidate, ct: str, report: GenerationReport,
         dsr_aug=(None if res is None else float(res.dsr_aug)),
         marginal_t=(None if res is None else float(res.marginal_t)),
         n_paths=(None if res is None else int(res.n_paths)),
-        combiner_marginal_delta_sr=(float(holdout_delta) if holdout_delta is not None else None),
+        # C7-10: there is no separate combiner pass yet, so this was a verbatim ALIAS of
+        # holdout_delta_sr — the SAME number surfaced twice reads to a Tier-2 auditor as two
+        # independent confirmations. None it until a real marginal-combiner delta is computed.
+        combiner_marginal_delta_sr=None,
     )
 
 
@@ -142,6 +150,14 @@ def run_hypothesis_loop(
 
     # --- Stage 3+4: MINE + DEFLATE, per candidate_type (evolve unchanged) -------------------------
     ek = {k: v for k, v in evolve_kwargs.items() if k != "candidate_type"}
+    # NOW-11B (C3-03): derive this tick's generation RNG seed from the pinned proposal_ts, so successive
+    # nights explore FRESH trajectories instead of re-walking the same rng_seed=7 every night. It is
+    # deterministic in proposal_ts, so `crucible reproduce` (same pinned ts) re-derives the identical
+    # seed; the base seed still comes from the gates YAML (not hardcoded). The manifest's
+    # rng_seeds["generation"] then records the DERIVED seed automatically. [crucible-v2.9 MINOR]
+    _base_seed = int(ek.get("rng_seed", 7))
+    ek["rng_seed"] = int(hashlib.sha256(
+        f"{_base_seed}|{proposal_ts}".encode("utf-8")).hexdigest(), 16) % (2**32)
     reports: dict[str, GenerationReport] = {}
     cards: list[DiscoveryCard] = []
     verdicts: dict[str, str] = {}
@@ -153,10 +169,15 @@ def run_hypothesis_loop(
         report = evolve(seeds, panel, base_returns, timestamps, cfg, candidate_type=ct, **ek)
         reports[ct] = report
         promising_hashes = {candidate_hash(c.formula) for c in report.promising}
-        # Record every surfaced genome to the ledger (file-drawer). Offspring carry family=None so a
-        # non-survivor never pollutes killed_families; the pre-registered seeds keep their family.
-        for c in report.hall_of_fame:
-            chash = candidate_hash(c.formula)
+        # Record every surfaced genome to the ledger (file-drawer): the hall-of-fame UNION the
+        # gate-passers. report.promising is NOT guaranteed a subset of hall_of_fame, so a PROMISING
+        # candidate ranked outside the top-K would otherwise get a card but no ledger verdict/manifest
+        # entry (the C3-05 latent break). Offspring carry family=None so a non-survivor never pollutes
+        # killed_families; the pre-registered seeds keep their family.
+        surfaced: dict[str, Candidate] = {}
+        for c in (*report.hall_of_fame, *report.promising):
+            surfaced.setdefault(candidate_hash(c.formula), c)
+        for chash, c in surfaced.items():
             verdict = _PROMISING if chash in promising_hashes else _LOGGED
             verdicts[chash] = verdict
             pr = prereg_by_hash.get(chash)
@@ -175,6 +196,22 @@ def run_hypothesis_loop(
         for c in report.promising:
             cards.append(_card_for(c, ct, report, prereg_by_hash, crucible_version=crucible_version,
                                    gates_hash=gates_hash, data_snapshot_hash=data_snapshot_hash))
+
+    # NOW-3 (C3-05/C6-06/C7-07): give EVERY pre-registered spec a terminal ledger verdict so "scored
+    # and lost" is distinguishable from "never scored" (124/184 taiwan_v2 rows were stuck verdict=None).
+    # A prereg seed mined but not surfaced in its type's hall-of-fame/promising set is a non-survivor:
+    # SCORED_NOT_SELECTED (NON-killing). LEDGER-ONLY — the run manifest's `verdicts` keeps documenting
+    # surfaced genomes, so a synthetic null run (0 promising) stays byte-identical (reproduce contract).
+    # The monotone upsert (C7-04) preserves each row's CR-2 spec_json / proposal_ts / family.
+    for pr in specs:
+        if pr.candidate_hash in verdicts:
+            continue
+        ledger.record(TrialRecord(
+            candidate_hash=pr.candidate_hash, crucible_version=crucible_version,
+            family=pr.spec.family, candidate_type=pr.spec.candidate_type, formula=pr.formula,
+            economic_rationale=pr.economic_rationale, first_seen_run=run_id,
+            proposal_ts=pr.proposal_ts, verdict=_SCORED_NOT_SELECTED,
+            data_snapshot_hash=data_snapshot_hash))
 
     # --- Cohort gate (Phase 4, Doc 1/2): OPT-IN weak-signal ensemble over THIS tick's OVERLAY pool.
     # Reads scored return streams only (post-moat, CR-1). Disabled ⇒ no-op AND manifest byte-identical

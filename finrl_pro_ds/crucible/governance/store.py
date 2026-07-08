@@ -2,9 +2,14 @@
 
 A survivor that clears incubation must be handed off to the operator EXACTLY ONCE — a nightly scan
 re-visiting the same CLEARED entry must not re-notify. This tiny SQLite store records which candidates
-have been handed off (and the audit command surfaced), so the driver is idempotent across ticks. Per
-repo convention the DB file is git-ignored; it holds governance bookkeeping only — never a score, a
-verdict, or a gate value (CR-1).
+have been handed off, the audit command surfaced, and the cleared survivor's forward Sharpe (a
+post-incubation, HUMAN-facing audit datum), so the driver is idempotent across ticks. Per repo
+convention the DB file is git-ignored.
+
+**CR-1 note (C7-09):** this store DOES hold a score (``forward_sharpe``) — the moat is NOT that the
+store is score-free but that it is STRUCTURALLY unreachable by the agent: ``crucible/agentic/`` never
+imports this module, so no proposer-facing path can read it. Keep that import boundary intact (a
+static import-graph test guards it); do not claim this store is score-free.
 """
 from __future__ import annotations
 

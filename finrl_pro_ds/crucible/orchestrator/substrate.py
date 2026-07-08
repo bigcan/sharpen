@@ -19,6 +19,7 @@ substrate) — the FDR budget and tick log are orchestration state, not scored t
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import sqlite3
 from dataclasses import dataclass, field
@@ -49,6 +50,103 @@ class PreparedSubstrate:
     timestamps: np.ndarray
     asset_classes: tuple[str, ...]
     snapshot_hash: str
+    power: "SubstratePower | None" = None    # NOW-5 statistical-power stamp (None ⇒ unstamped/legacy)
+
+
+@dataclass(frozen=True, slots=True)
+class SubstratePower:
+    """The statistical-power stamp for a prepared substrate (NOW-5, C2-01/C6-07): how deep the panel
+    is and the minimum marginal ΔSR the funnel could DETECT there, interpolated from the E1/E2
+    calibration sweep. A high ``implied_mde_delta_sr`` means the substrate is underpowered for realistic
+    alphas — mining it spends proposer tokens + FDR wealth at ~zero detection probability (this is the
+    stamp that would have flagged the flagship cross_asset run mined on a ~504-bar/holdout-126 panel,
+    implied MDE ≈ 4.45)."""
+
+    panel_T: int
+    holdout_bars: int
+    holdout_frac: float
+    implied_mde_delta_sr: float
+    interp_mode: str                 # 'grid' | 'interpolated' | 'extrapolated_low' | 'extrapolated_high'
+    calibration_sweep_hash: str
+
+
+@dataclass(frozen=True, slots=True)
+class PowerGuard:
+    """Substrate-power gate config (from configs/crucible_power.gates.yaml). ``ceiling`` is the
+    plausible true marginal ΔSR; a substrate whose implied MDE exceeds it is UNDERPOWERED. ``action``
+    is 'warn' (log, still mine) or 'refuse' (skip the mine unless ``force``)."""
+
+    enabled: bool
+    ceiling: float
+    action: str
+    force: bool = False              # --force-underpowered: mine anyway under action='refuse'
+
+
+def _power_holdout_bars(panel_T: int, holdout_frac: float) -> int:
+    """Bars in the binding held-out validation window — mirrors the generation split EXACTLY (the
+    funnel re-scores survivors on these bars), so the power stamp is measured against the gate's own N.
+    Verified against the calibration sweep: T={756,1512,2782,4044} ⇒ holdout={189,378,696,1011}."""
+    return int(panel_T) - int(int(panel_T) * (1.0 - float(holdout_frac)))
+
+
+def interp_mde(holdout_bars: int, sweep: dict) -> tuple[float, str]:
+    """Interpolate the minimum-detectable marginal ΔSR (at the sweep's target power) for a holdout of
+    ``holdout_bars`` from the E1/E2 MDE sweep. A t-statistic's SE ∝ 1/√N, so at fixed power the MDE
+    ∝ 1/√(holdout_bars); we interpolate LINEARLY in x = 1/√(holdout_bars) between grid points and
+    extrapolate off either end by that same 1/√N law from the nearest grid point. Returns (mde, mode)."""
+    rows = sorted(sweep["mde_sweep"]["rows"], key=lambda r: r["holdout_bars"])
+    pts = [(int(r["holdout_bars"]), float(r["mde_realized_delta_sr"])) for r in rows]
+    h = int(holdout_bars)
+    for hi, mi in pts:
+        if hi == h:
+            return mi, "grid"
+    h_lo, m_lo = pts[0]
+    h_hi, m_hi = pts[-1]
+    if h < h_lo:
+        return m_lo * (h_lo / h) ** 0.5, "extrapolated_low"     # fewer bars ⇒ larger MDE
+    if h > h_hi:
+        return m_hi * (h_hi / h) ** 0.5, "extrapolated_high"    # more bars ⇒ smaller MDE
+    for (a_h, a_m), (b_h, b_m) in zip(pts, pts[1:]):
+        if a_h <= h <= b_h:
+            x, xa, xb = h ** -0.5, a_h ** -0.5, b_h ** -0.5
+            return a_m + (b_m - a_m) * (x - xa) / (xb - xa), "interpolated"
+    return m_hi, "grid"                                          # unreachable (guarded above)
+
+
+def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: dict,
+                          sweep_hash: str) -> SubstratePower:
+    """Build the :class:`SubstratePower` stamp for a panel of ``panel_T`` bars against the sweep."""
+    hb = _power_holdout_bars(panel_T, holdout_frac)
+    mde, mode = interp_mde(hb, sweep)
+    return SubstratePower(panel_T=int(panel_T), holdout_bars=hb, holdout_frac=float(holdout_frac),
+                          implied_mde_delta_sr=float(mde), interp_mode=mode,
+                          calibration_sweep_hash=sweep_hash)
+
+
+def panel_content_hash(panel: Panel) -> str:
+    """12-hex SHA-256 over a Panel's window + OHLCV/membership/feature-slot content (NOW-6, C2-07).
+    Provenance ONLY — never read as a per-bar feature (no LEAK-2 surface) and never seeds any RNG. It
+    lets a snapshot_hash cover the PRIMARY mining surface (price bars), which the alt-data catalog hash
+    alone missed, so a price-bar arrival or a revision flips the substrate dirty."""
+    h = hashlib.sha256()
+    h.update(f"{panel.dates[0]}|{panel.dates[-1]}|{panel.T}x{panel.N}|".encode())
+    h.update("\x1f".join(panel.tickers).encode())
+    h.update(np.ascontiguousarray(panel.dates.view(np.int64)).tobytes())
+    for arr in (panel.open, panel.high, panel.low, panel.close, panel.volume, panel.adv_usd):
+        h.update(np.ascontiguousarray(arr, dtype=np.float64).tobytes())
+    h.update(np.ascontiguousarray(panel.active, dtype=bool).tobytes())
+    h.update(np.ascontiguousarray(panel.sector_id).tobytes())
+    for name in sorted(panel.feature_slots):
+        h.update(f"{name}=".encode())
+        h.update(np.ascontiguousarray(panel.feature_slots[name], dtype=np.float64).tobytes())
+    return h.hexdigest()[:12]
+
+
+def folded_snapshot_hash(catalog_hash: str, panel: Panel) -> str:
+    """Combine the alt-data catalog metadata hash with the panel content hash into the single
+    ``snapshot_hash`` consumed by ``substrate_dirty`` AND the manifest data pin (NOW-6/C2-07). Keeps
+    the catalog hash as an input (alt-data metadata still matters) while adding price-bar coverage."""
+    return hashlib.sha256(f"{catalog_hash}|{panel_content_hash(panel)}".encode()).hexdigest()[:12]
 
 
 @dataclass
@@ -123,6 +221,13 @@ class TickRecord:
     budget_breached: bool = False
     burst_target: str | None = None
     manifest_hash: str | None = None
+    status: str = "OK"                # "OK" | "ERROR" (C9-11: distinguish a crashed tick from a ran one)
+    error: str | None = None          # exception repr when status == "ERROR"
+    # NOW-5 substrate-power stamp (C2-01/C6-07): the panel depth + interpolated MDE this tick mined at.
+    panel_T: int | None = None
+    holdout_bars: int | None = None
+    implied_mde_delta_sr: float | None = None
+    power_interp_mode: str | None = None
 
 
 _SCHEMA = """
@@ -148,10 +253,27 @@ CREATE TABLE IF NOT EXISTS ticks (
     fdr_charged_total REAL,
     budget_breached   INTEGER,
     burst_target      TEXT,
-    manifest_hash     TEXT
+    manifest_hash     TEXT,
+    status            TEXT,
+    error             TEXT,
+    panel_T           INTEGER,
+    holdout_bars      INTEGER,
+    implied_mde_delta_sr REAL,
+    power_interp_mode TEXT
 );
 CREATE INDEX IF NOT EXISTS ix_ticks_substrate ON ticks(substrate_id);
 """
+
+
+def _ensure_columns(conn: sqlite3.Connection, table: str, columns: list[tuple[str, str]]) -> None:
+    """Idempotently ALTER TABLE to add any missing ``(name, ddl)`` columns. ``CREATE TABLE IF NOT
+    EXISTS`` never adds a column to an EXISTING table, so a schema that grew across versions needs
+    this to migrate on-disk DBs (the tick table persists across runs)."""
+    existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+    for name, ddl in columns:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}")
+    conn.commit()
 
 
 class OrchestratorStore:
@@ -165,6 +287,12 @@ class OrchestratorStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+        # Migrate on-disk tick tables written by an earlier schema (status/error for C9-11; the
+        # substrate-power columns for NOW-5) — CREATE-IF-NOT-EXISTS never alters an existing table.
+        _ensure_columns(self._conn, "ticks", [
+            ("status", "TEXT"), ("error", "TEXT"),
+            ("panel_T", "INTEGER"), ("holdout_bars", "INTEGER"),
+            ("implied_mde_delta_sr", "REAL"), ("power_interp_mode", "TEXT")])
 
     def close(self) -> None:
         self._conn.close()
@@ -211,15 +339,26 @@ class OrchestratorStore:
             (substrate_id, snapshot_hash))
         self._conn.commit()
 
+    def clear_snapshot(self, substrate_id: str) -> None:
+        """Forget the last observed snapshot for a substrate — roll back a tentative observation when
+        a tick crashes mid-work, so the NEXT tick re-detects the data as new and retries it (C9-01).
+        A no-op when the substrate was never seen."""
+        self._conn.execute("DELETE FROM last_seen WHERE substrate_id = ?", (substrate_id,))
+        self._conn.commit()
+
     # --- tick history ------------------------------------------------------------------------------
     def record_tick(self, rec: TickRecord) -> None:
         self._conn.execute(
             "INSERT INTO ticks (tick_ts, substrate_id, dirty, mined, reason, snapshot_hash, "
             "n_preregistered, n_scored, n_promising, fdr_charged_total, budget_breached, "
-            "burst_target, manifest_hash) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "burst_target, manifest_hash, status, error, panel_T, holdout_bars, "
+            "implied_mde_delta_sr, power_interp_mode) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (rec.tick_ts, rec.substrate_id, int(rec.dirty), int(rec.mined), rec.reason,
              rec.snapshot_hash, rec.n_preregistered, rec.n_scored, rec.n_promising,
-             rec.fdr_charged_total, int(rec.budget_breached), rec.burst_target, rec.manifest_hash))
+             rec.fdr_charged_total, int(rec.budget_breached), rec.burst_target, rec.manifest_hash,
+             rec.status, rec.error, rec.panel_T, rec.holdout_bars, rec.implied_mde_delta_sr,
+             rec.power_interp_mode))
         self._conn.commit()
 
     def ticks(self, substrate_id: str | None = None) -> list[dict]:

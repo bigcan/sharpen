@@ -14,10 +14,11 @@ GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
-    # v2.8 = Taiwan data breadth (TWSE T86 + TAIFEX large-trader OI connectors, wired into the
-    # existing `taiwan` substrate branch via the already-generic altdata bridge). MINOR over v2.7 —
-    # no existing verdict changed, no gate byte touched in either gates file.
-    assert CRUCIBLE_VERSION == "crucible-v2.8"
+    # v2.9 = audit-follow-up search-quality + provenance fixes (cross_sectional INPUTS-only draws,
+    # per-tick RNG seed from proposal_ts, panel-content snapshot_hash, real tick_ts). MINOR over v2.8 —
+    # it changes the search trajectory + reproduce hashes but NO verdict function, and touches no gate
+    # byte (the frozen gates_hash below is unchanged).
+    assert CRUCIBLE_VERSION == "crucible-v2.9"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
