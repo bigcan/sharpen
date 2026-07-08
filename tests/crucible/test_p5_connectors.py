@@ -97,10 +97,11 @@ def test_edgar_uses_filing_acceptance_as_release_and_replays_amendments() -> Non
     data = conn.fetch(ref, "2019-01-01", "2020-12-31")
     assert data.n_obs == 3
     assert data.meta["unit"] == "USD"
-    # release_timestamp is the actual `filed` date — NOT reference+lag (the true-PIT differentiator).
+    # release_timestamp is the `filed` date + 1 session (post-close availability) — NOT reference+lag
+    # (the true-PIT differentiator); the +1d closes the C1-02 same-day-close look-ahead.
     fy = data.reference_period == np.datetime64("2019-12-31", "ns")
     assert set(data.release_timestamp[fy].astype("datetime64[D]").astype(str)) == {
-        "2020-02-15", "2020-03-10"}
+        "2020-02-16", "2020-03-11"}
     assert_asof_join_causal(data, _BARS)
 
     # The FY value is 200 from its Feb filing, then 205 once the March amendment is public (revision).
@@ -109,6 +110,22 @@ def test_edgar_uses_filing_acceptance_as_release_and_replays_amendments() -> Non
     i_mar = int(np.where(_BARS == np.datetime64("2020-03-15T00:00:00", "ns"))[0][0])
     assert j[i_feb] == 200.0
     assert j[i_mar] == 205.0
+
+
+def test_edgar_after_close_filing_binds_next_session_not_same_day() -> None:
+    """C1-02 tripwire: a value FILED on day D must NOT be visible in D's as-of join — only D+1 (an
+    after-close filing is not actionable until the next session). Guards against reintroducing the
+    ``release = filed`` same-day-close look-ahead."""
+    payload = {"units": {"USD": [
+        {"end": "2024-03-31", "val": 500.0, "filed": "2024-05-01", "form": "10-Q"}]}}
+    conn = EdgarConnector(transport=lambda url: payload,
+                          concepts=(("320193", "Revenues", "AAPL revenue"),))
+    data = conn.fetch(conn.discover()[0], "2024-01-01", "2024-12-31")
+    assert data.release_timestamp[0] == np.datetime64("2024-05-02", "ns")   # filed 05-01 → +1d
+    bars = np.array(["2024-05-01T00:00:00", "2024-05-02T00:00:00"], dtype="datetime64[ns]")
+    j = asof_join(data, bars)
+    assert np.isnan(j[0])          # filing day D: not yet public (no same-day look-ahead)
+    assert j[1] == 500.0           # next session D+1: now available
 
 
 def _edgar_mixed_frames_payload() -> dict:

@@ -270,3 +270,43 @@ def test_gate_discriminates_collinear_and_noise_in_same_regime() -> None:
     rn = combination_fitness(noise, base, ts, cfg, gen_n_eff=4495.0, turnover_ann=4.0,
                              n_nodes=8, trial_sharpe_pool=pool)
     assert not rn.passes_gate
+
+
+# ============================================================ C3-01: book-clone uplift artifact ====
+# Diagnostic REQUIRED before any C3-01 fitness-selection change (audit NOW-11D). The finding was
+# marked interpretive ("?") in the audit; this test CONFIRMS it: an EXACT copy of the combined base
+# book adds no diversification (delta_sr_oos == 0, correct), but a WEAK (small-scale) copy earns a
+# spurious POSITIVE delta_sr_oos — which the GP ranks the hall-of-fame by (delta_mean, ignoring the
+# marginal-t/DSR gate legs), letting book-clones own the elite pool. The marginal-t GATE still rejects
+# them, so no verdict is wrong — but the SEARCH wastes its budget breeding clones. The gate-consistent
+# fitness / variance-floor fix is NEXT-2 (a CRU-1 gate-semantics change); this only documents the bug.
+from finrl_pro_ds.signals.generation.fitness import _combined_book  # noqa: E402
+import pytest  # noqa: E402
+
+
+def _two_sleeves() -> dict:
+    rng = np.random.default_rng(0)
+    return {"tsmom": 0.0004 + 0.01 * rng.standard_normal(K),
+            "carry": 0.0003 + 0.012 * rng.standard_normal(K)}
+
+
+def test_exact_book_copy_has_zero_uplift() -> None:
+    """An EXACT copy of the combined base book adds no diversification ⇒ delta_sr_oos == 0 (correct)."""
+    base, ts = _two_sleeves(), _timestamps()
+    bb = _combined_book(base, ts, FitnessConfig(embargo=10))
+    res = combination_fitness(bb, base, ts, FitnessConfig(embargo=10),
+                              gen_n_eff=2.0, turnover_ann=0.0, n_nodes=1)
+    assert abs(res.delta_sr_oos) < 1e-6
+
+
+@pytest.mark.xfail(strict=True, reason="C3-01 KNOWN ARTIFACT: a WEAK (0.05x) copy of the book earns a "
+                   "spurious positive delta_sr_oos (~+0.2), so book-clones win the fitness ranking that "
+                   "selects the hall of fame. Gate-consistent fitness / overlay variance floor is NEXT-2 "
+                   "(CRU-1). The marginal-t gate still rejects these, so no verdict is wrong. When NEXT-2 "
+                   "lands this xpasses — remove the marker.")
+def test_weak_book_copy_should_have_zero_uplift() -> None:
+    base, ts = _two_sleeves(), _timestamps()
+    bb = _combined_book(base, ts, FitnessConfig(embargo=10))
+    res = combination_fitness(0.05 * bb, base, ts, FitnessConfig(embargo=10),
+                              gen_n_eff=2.0, turnover_ann=0.0, n_nodes=1)
+    assert abs(res.delta_sr_oos) < 0.05          # SHOULD hold; currently ~+0.2 (the artifact)

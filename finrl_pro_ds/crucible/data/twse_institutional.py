@@ -292,9 +292,11 @@ class TwseInstitutionalConnector:
             date_str = str(day).replace("-", "")
             if date_str in store:
                 continue                          # already polled (idempotent) — costs no budget
-            payload = self._fetch_day_live(date_str)
-            self._live_budget -= 1
-            store[date_str] = self._extract_day(payload) if payload is not None else {}
+            result = self._fetch_day_live(date_str)   # OK-payload | {} (no data) | None (transport fail)
+            self._live_budget -= 1                    # a network call was made either way
+            if result is None:                        # C1-06: a transient TRANSPORT failure must NEVER be
+                continue                              # recorded as a holiday — leave it unpolled to retry
+            store[date_str] = self._extract_day(result) if result else {}
             fetched += 1
             if self._save_every > 0 and fetched % self._save_every == 0:
                 self._store.save(store)           # checkpoint: a long backfill survives interruption
@@ -303,21 +305,30 @@ class TwseInstitutionalConnector:
         return store
 
     def _fetch_day_live(self, date_str: str) -> dict | None:
-        """One live T86 HTTP call for one calendar day (all securities). Returns the parsed OK payload,
-        or None for a non-trading day / transport failure / malformed response (the caller records that
-        as a polled EMPTY day — never an error; T86 simply has nothing to say on a closed day)."""
+        """One live T86 HTTP call for one calendar day (all securities). THREE-state result (C1-06):
+          * the parsed OK payload (``dict`` with ``stat == 'OK'``) — a trading day WITH data;
+          * ``{}`` — a DEFINITIVE no-data reply (valid JSON dict, ``stat != 'OK'``): TWSE answered and
+            there is nothing for this day (a genuine non-trading day); the caller persists it as polled;
+          * ``None`` — a TRANSPORT failure (exception or non-dict/unparseable reply): the caller leaves
+            the day UNPOLLED so it is retried next run, instead of permanently recording a transient
+            rate-limit / network blip as a market holiday (the C1-06 silent-trading-day-deletion bug)."""
         url = f"{_BASE}?response=json&date={date_str}&selectType=ALL"
         live = self._transport is None
         transport = self._transport or _default_transport
         try:
             payload = transport(url)
-        except Exception as exc:                  # noqa: BLE001 - transport failed closed, not fatal
-            logger.info("twse_inst: fetch failed for %s (%r) — treated as no data", date_str, exc)
-            payload = None
-        if not isinstance(payload, dict) or payload.get("stat") != "OK" or "fields" not in payload:
-            payload = None
+        except Exception as exc:                  # noqa: BLE001 - transport failed: RETRY, not "no data"
+            logger.info("twse_inst: fetch FAILED for %s (%r) — leaving unpolled, will retry", date_str, exc)
+            if live and self._sleep_seconds > 0:
+                time.sleep(self._sleep_seconds)
+            return None
         if live and self._sleep_seconds > 0:
             time.sleep(self._sleep_seconds)
+        if not isinstance(payload, dict):         # unparseable/None reply ⇒ transport-level failure
+            logger.info("twse_inst: non-dict reply for %s — leaving unpolled, will retry", date_str)
+            return None
+        if payload.get("stat") != "OK" or "fields" not in payload:
+            return {}                             # valid reply, no data ⇒ a genuine non-trading day
         return payload
 
     def _extract_day(self, payload: dict) -> dict[str, dict[str, float]]:

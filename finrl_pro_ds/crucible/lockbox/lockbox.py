@@ -63,6 +63,10 @@ class LockboxEntry:
     forward_end_ts: str | None = None
     last_tick_ts: str | None = None
     verdict_tick_ts: str | None = None
+    # NOW-8 accrual diagnostics (C8-04/05/06):
+    verdict_snapshot_hash: str | None = None   # C8-06: the panel snapshot the TERMINAL forward Sharpe used
+    n_stalled_passes: int = 0                  # C8-05: passes skipped (degenerate forward_evidence == None)
+    n_error_passes: int = 0                    # C8-04: passes that raised (poison-pill on a drifted panel)
 
     @property
     def is_terminal(self) -> bool:
@@ -75,12 +79,16 @@ class LockboxEntry:
         return self.status == STATUS_CLEARED
 
 
-def advance(entry: LockboxEntry, evidence: ForwardEvidence, tick_ts: str) -> LockboxEntry:
+def advance(entry: LockboxEntry, evidence: ForwardEvidence, tick_ts: str,
+            snapshot_hash: str | None = None) -> LockboxEntry:
     """Pure state transition for one incubation pass (persistence-free, so it is unit-testable).
 
     Terminal entries are returned UNCHANGED (anti-peeking / anti-re-judge). Otherwise the accrual
     fields are refreshed from ``evidence``; the verdict is rendered iff the forward window has reached
-    the pre-registered horizon — CLEARED when forward Sharpe clears the floor, else REJECTED."""
+    the pre-registered horizon — CLEARED when forward Sharpe clears the floor, else REJECTED. At that
+    terminal transition the panel ``snapshot_hash`` the forward Sharpe was computed on is stamped
+    (C8-06), so a terminal verdict is later reproducible (the forward statistic is recomputed each pass
+    on the then-current, possibly revised, panel)."""
     if entry.is_terminal:
         return entry
     reached = evidence.n_forward_bars >= entry.min_forward_bars
@@ -89,13 +97,15 @@ def advance(entry: LockboxEntry, evidence: ForwardEvidence, tick_ts: str) -> Loc
         cleared = sharpe is not None and sharpe == sharpe and sharpe >= entry.min_forward_sharpe
         status = STATUS_CLEARED if cleared else STATUS_REJECTED
         verdict_ts: str | None = tick_ts
+        verdict_snap = snapshot_hash
     else:
         status = STATUS_INCUBATING
         verdict_ts = None
+        verdict_snap = entry.verdict_snapshot_hash   # unchanged below the horizon
     return replace(
         entry, status=status, forward_sharpe=sharpe, n_forward_bars=evidence.n_forward_bars,
         forward_start_ts=evidence.forward_start_ts, forward_end_ts=evidence.forward_end_ts,
-        last_tick_ts=tick_ts, verdict_tick_ts=verdict_ts)
+        last_tick_ts=tick_ts, verdict_tick_ts=verdict_ts, verdict_snapshot_hash=verdict_snap)
 
 
 def updated_card(card: DiscoveryCard, entry: LockboxEntry) -> DiscoveryCard:
@@ -110,7 +120,7 @@ _COLS = (
     "candidate_hash", "substrate_id", "formula", "candidate_type", "crucible_version", "gates_hash",
     "proposal_ts", "enrolled_tick_ts", "data_snapshot_hash", "min_forward_bars", "min_forward_sharpe",
     "status", "forward_sharpe", "n_forward_bars", "forward_start_ts", "forward_end_ts",
-    "last_tick_ts", "verdict_tick_ts",
+    "last_tick_ts", "verdict_tick_ts", "verdict_snapshot_hash", "n_stalled_passes", "n_error_passes",
 )
 
 _SCHEMA = """
@@ -132,7 +142,10 @@ CREATE TABLE IF NOT EXISTS lockbox_entries (
     forward_start_ts    TEXT,
     forward_end_ts      TEXT,
     last_tick_ts        TEXT,
-    verdict_tick_ts     TEXT
+    verdict_tick_ts     TEXT,
+    verdict_snapshot_hash TEXT,              -- C8-06: snapshot the terminal forward Sharpe used
+    n_stalled_passes    INTEGER NOT NULL DEFAULT 0,   -- C8-05
+    n_error_passes      INTEGER NOT NULL DEFAULT 0    -- C8-04
 );
 CREATE INDEX IF NOT EXISTS ix_lockbox_substrate ON lockbox_entries(substrate_id);
 CREATE INDEX IF NOT EXISTS ix_lockbox_status ON lockbox_entries(status);
@@ -150,6 +163,19 @@ class Lockbox:
         self._conn = sqlite3.connect(str(self.db_path))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        self._conn.commit()
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Idempotently add columns introduced after the original schema (NOW-8: verdict_snapshot_hash
+        + the stall/error pass counters). CREATE-IF-NOT-EXISTS never alters an EXISTING table, so an
+        on-disk lockbox written by an earlier version needs this to round-trip the new LockboxEntry."""
+        existing = {r["name"] for r in self._conn.execute("PRAGMA table_info(lockbox_entries)")}
+        for name, ddl in (("verdict_snapshot_hash", "TEXT"),
+                          ("n_stalled_passes", "INTEGER NOT NULL DEFAULT 0"),
+                          ("n_error_passes", "INTEGER NOT NULL DEFAULT 0")):
+            if name not in existing:
+                self._conn.execute(f"ALTER TABLE lockbox_entries ADD COLUMN {name} {ddl}")
         self._conn.commit()
 
     def close(self) -> None:
@@ -183,18 +209,40 @@ class Lockbox:
         self._write(entry)
         return entry
 
-    def record_incubation(self, candidate_hash: str, evidence: ForwardEvidence,
-                          tick_ts: str) -> LockboxEntry | None:
+    def record_incubation(self, candidate_hash: str, evidence: ForwardEvidence, tick_ts: str,
+                          *, snapshot_hash: str | None = None) -> LockboxEntry | None:
         """Apply one incubation pass to an enrolled candidate and persist the result. Returns the
         updated entry, or None if the candidate is not enrolled. A terminal entry is a no-op
-        (anti-re-judge) but still returned so the caller can refresh its card."""
+        (anti-re-judge) but still returned so the caller can refresh its card. ``snapshot_hash`` is the
+        panel this pass measured on — stamped onto a TERMINAL verdict for reproducibility (C8-06)."""
         entry = self.get(candidate_hash)
         if entry is None:
             return None
-        advanced = advance(entry, evidence, tick_ts)
+        advanced = advance(entry, evidence, tick_ts, snapshot_hash=snapshot_hash)
         if advanced != entry:
             self._write(advanced)
         return advanced
+
+    def record_stall(self, candidate_hash: str, tick_ts: str) -> LockboxEntry | None:
+        """Count a STALLED pass (C8-05): the candidate was degenerate on this panel so no forward
+        evidence accrued. A durable counter distinguishes a silently-stalled entry from healthy
+        accrual across nights. No-op on a terminal/absent entry."""
+        return self._bump(candidate_hash, tick_ts, "n_stalled_passes")
+
+    def record_error(self, candidate_hash: str, tick_ts: str) -> LockboxEntry | None:
+        """Count an ERRORED pass (C8-04): the forward measurement raised (a poison-pill formula on a
+        drifted panel). Durable so a persistently-throwing entry is visible rather than crashing the
+        tick. No-op on a terminal/absent entry."""
+        return self._bump(candidate_hash, tick_ts, "n_error_passes")
+
+    def _bump(self, candidate_hash: str, tick_ts: str, field_name: str) -> LockboxEntry | None:
+        entry = self.get(candidate_hash)
+        if entry is None or entry.is_terminal:
+            return entry
+        updated = replace(entry, last_tick_ts=tick_ts,
+                          **{field_name: getattr(entry, field_name) + 1})
+        self._write(updated)
+        return updated
 
     # --- reads -------------------------------------------------------------------------------------
     def get(self, candidate_hash: str) -> LockboxEntry | None:

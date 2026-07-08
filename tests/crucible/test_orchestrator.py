@@ -261,3 +261,88 @@ def test_four_nights_versioned_and_reproducible(tmp_path) -> None:
     cols = ("mined", "dirty", "n_preregistered", "n_scored", "n_promising", "fdr_charged_total",
             "manifest_hash", "reason")
     assert [{c: row[c] for c in cols} for row in a] == [{c: row[c] for c in cols} for row in b]
+
+
+# ============================================================ NOW-2: tick resilience (C9-01/C9-11) ====
+
+def _boom() -> PreparedSubstrate:
+    raise RuntimeError("prepare exploded")
+
+
+def test_tick_isolates_a_failing_substrate(tmp_path) -> None:
+    """A substrate whose prepare() raises does NOT abort the night: it records an ERROR tick, its
+    snapshot is NOT advanced (never observed → next tick retries), and later substrates still run."""
+    store = OrchestratorStore(tmp_path / "orch.db")
+    bad_a = Substrate(substrate_id="bad_a", prepare=_boom, ledger=TrialLedger(tmp_path / "a.db"),
+                      cfg=FitnessConfig(embargo=10), evolve_kwargs=dict(_EK))
+    bad_b = Substrate(substrate_id="bad_b", prepare=_boom, ledger=TrialLedger(tmp_path / "b.db"),
+                      cfg=FitnessConfig(embargo=10), evolve_kwargs=dict(_EK))
+
+    res = run_orchestrator_tick(substrates=[bad_a, bad_b], store=store, gates_path=GATES,
+                                tick_ts="2026-07-02T00:00:00+00:00")
+    # both substrates produced an outcome — the first failure did not abort the second
+    assert [o.substrate_id for o in res.outcomes] == ["bad_a", "bad_b"]
+    assert all(o.status == "ERROR" and not o.mined for o in res.outcomes)
+    # ERROR ticks recorded; snapshots NOT advanced (a failed observation must be retried next tick)
+    assert [row["status"] for row in store.ticks()] == ["ERROR", "ERROR"]
+    assert store.last_snapshot_hash("bad_a") is None and store.last_snapshot_hash("bad_b") is None
+
+
+def test_tick_error_rolls_back_snapshot_to_prev(tmp_path) -> None:
+    """A substrate that fails AFTER being observed once rolls its snapshot BACK to the last good
+    value (not a tentative new one), so the next tick still detects the pending change (C9-01)."""
+    store = OrchestratorStore(tmp_path / "orch.db")
+    store.set_snapshot_hash("s", "prev-good")               # a prior successful observation
+    sub = Substrate(substrate_id="s", prepare=_boom, ledger=TrialLedger(tmp_path / "s.db"),
+                    cfg=FitnessConfig(embargo=10), evolve_kwargs=dict(_EK))
+    run_orchestrator_tick(substrates=[sub], store=store, gates_path=GATES,
+                          tick_ts="2026-07-03T00:00:00+00:00")
+    assert store.last_snapshot_hash("s") == "prev-good"     # rolled back, not advanced
+
+
+def test_orchestrator_store_migrates_status_columns(tmp_path) -> None:
+    """C9-11: status/error are added by an idempotent migration to a pre-existing ticks table
+    (CREATE-IF-NOT-EXISTS never adds columns); opening twice does not error."""
+    import sqlite3
+    db = tmp_path / "orch.db"
+    conn = sqlite3.connect(str(db))                          # simulate an OLD schema without status/error
+    conn.execute("CREATE TABLE ticks (id INTEGER PRIMARY KEY AUTOINCREMENT, tick_ts TEXT, "
+                 "substrate_id TEXT, dirty INTEGER, mined INTEGER, reason TEXT, snapshot_hash TEXT)")
+    conn.commit()
+    conn.close()
+    store = OrchestratorStore(db)                            # migrates on open
+    cols = {r["name"] for r in store._conn.execute("PRAGMA table_info(ticks)")}
+    assert {"status", "error"} <= cols
+    store.close()
+    OrchestratorStore(db).close()                           # idempotent second open
+
+
+# ============================================================ NOW-5: substrate-power guard (C2-01) ====
+
+def test_power_guard_refuses_underpowered_mine(tmp_path) -> None:
+    """NOW-5: under action='refuse' an underpowered substrate (implied MDE > ceiling) is NOT mined —
+    zero ledger rows, zero FDR spend — but its tick row carries the power stamp. This is the guard that
+    would have caught the 504-bar flagship (mined at implied MDE ≈ 4.45)."""
+    from dataclasses import replace
+
+    from finrl_pro_ds.crucible.orchestrator.substrate import PowerGuard, stamp_substrate_power
+    sweep = {"mde_sweep": {"rows": [{"holdout_bars": 189, "mde_realized_delta_sr": 3.63},
+                                    {"holdout_bars": 1011, "mde_realized_delta_sr": 1.40}]}}
+    sub = _make_substrate(tmp_path, "syn", {"extra_slot": False})
+    base_prepare = sub.prepare
+
+    def prepare_underpowered() -> PreparedSubstrate:
+        p = base_prepare()
+        return replace(p, power=stamp_substrate_power(p.panel.T, 0.25, sweep, "h"))
+
+    sub.prepare = prepare_underpowered
+    store = OrchestratorStore(tmp_path / "orch.db")
+    r = run_orchestrator_tick(substrates=[sub], store=store, gates_path=GATES,
+                              tick_ts="2026-07-02T00:00:00+00:00",
+                              power_gate=PowerGuard(enabled=True, ceiling=0.5, action="refuse"))
+    o = r.outcomes[0]
+    assert not o.mined and "UNDERPOWERED" in o.reason
+    assert sub.ledger.count() == 0 and o.fdr_num_tests == 0    # no proposer/FDR spend on a dead substrate
+    row = store.ticks("syn")[0]                                # power stamp recorded on the tick row
+    assert row["panel_T"] == T and row["holdout_bars"] == T - int(T * 0.75)
+    assert row["implied_mde_delta_sr"] > 0.5 and row["mined"] == 0

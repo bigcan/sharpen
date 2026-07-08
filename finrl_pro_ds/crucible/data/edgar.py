@@ -5,11 +5,13 @@ connector reads EDGAR's XBRL **company-concept** API (``data.sec.gov/api/xbrl/co
 returns every reported value of one financial-statement concept for one filer, each carrying the two
 timestamps PIT correctness lives or dies by: the fiscal-period **end** and the **filed** date.
 
-This is the CLEANEST true-PIT source in the stack: unlike FRED/COT (which model release as
-``reference_period + lag``), EDGAR gives the *actual* publication timestamp per observation — the
-**filing-acceptance ``filed`` date** — so ``release_timestamp = filed`` directly (CR-4). The spec §4.2
-gotcha ("use the filing *acceptance* timestamp, not period-end") is therefore enforced structurally,
-not approximated. Amendments and later filings restate an earlier period: EDGAR returns them as extra
+This is the CLEANEST true-PIT source in the stack: unlike FRED (which models release as the latest
+vintage at ``reference_period + lag``), EDGAR gives the *actual* publication date per observation.
+The frames API exposes only the filing DATE (no intraday acceptance time), and an after-close filing
+is only actionable the next session — so ``release_timestamp = filed + 1 calendar day`` (C1-02, the
+same +1d convention every other connector uses; the old ``= filed`` stamped an after-close filing onto
+that day's close bar, a same-day look-ahead). Amendments and later filings restate an earlier period:
+EDGAR returns them as extra
 observations for the SAME ``end`` with a LATER ``filed``, which :func:`quality_gate.asof_join` replays
 as a revision (the newest-released reading in effect wins) — exactly the case the join was built for.
 
@@ -112,9 +114,12 @@ class EdgarConnector:
             source_id=self.source_id,
             url=f"{_BASE}/CIK{cik}/{self._taxonomy}/{concept}.json",
             license=_LICENSE,
-            # Not a lag model — the actual filing-acceptance timestamp IS the release (CR-4).
-            as_of_policy="filing-acceptance",
-            release_lag_days=0,
+            # The frames API exposes only the filing DATE (no intraday acceptance time). A filing
+            # accepted after the close binds to the NEXT session, so — like every other connector —
+            # the release is stamped filed + 1 calendar day (C1-02, closes a same-day look-ahead).
+            # Amendments carry their own later `filed` date, so revisions remain fully PIT via as_of.
+            as_of_policy="release-lag",
+            release_lag_days=1,
             revision_policy="revised",         # amendments/later filings restate a period
         )
 
@@ -167,7 +172,9 @@ class EdgarConnector:
                 continue
             try:
                 reference = np.datetime64(str(end_p)[:10], "ns")
-                release = np.datetime64(str(filed)[:10], "ns")   # filing-acceptance date (CR-4)
+                # filed DATE + 1 session: an after-close filing is only actionable the next day, and
+                # the frames API gives no intraday acceptance time (C1-02 — closes a same-day leak).
+                release = np.datetime64(str(filed)[:10], "ns") + np.timedelta64(1, "D")
                 value = float(val)
             except (TypeError, ValueError):
                 continue

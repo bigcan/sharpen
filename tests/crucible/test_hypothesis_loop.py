@@ -282,7 +282,10 @@ def test_card_links_survivor_to_preregistered_spec_verbatim() -> None:
     assert card.proposal_ts == _TS
     assert card.spec["spec_content_hash"] == spec.content_hash()
     # verbatim scorer numbers (CR-1) — copied, not paraphrased
-    assert card.holdout_delta_sr == 0.05 and card.combiner_marginal_delta_sr == 0.05
+    assert card.holdout_delta_sr == 0.05
+    # C7-10: combiner_marginal_delta_sr is None until a REAL combiner pass exists — it must NOT be a
+    # verbatim alias of holdout_delta_sr (two "independent" numbers that are one mislead a Tier-2 read).
+    assert card.combiner_marginal_delta_sr is None
     assert card.holdout_passes is True
     assert card.dsr_aug == 1.7 and card.marginal_t == 3.3 and card.n_paths == 15
     assert card.train_delta_sr_oos == 0.08 and card.delta_sr_median == 0.06

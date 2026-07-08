@@ -127,6 +127,26 @@ def test_bare_numeric_value_is_kept_not_dropped(tmp_path) -> None:
     assert trust.value[0] == 0.0     # kept as a real zero-flow observation
 
 
+def test_transport_failure_not_persisted_as_holiday(tmp_path) -> None:
+    """C1-06 tripwire: a TRANSPORT failure for a day must NOT be recorded as a non-trading day (it is
+    left unpolled so a later run retries it), whereas a genuine no-data reply (valid dict, stat != OK)
+    IS persisted as an empty polled day. Reverting _fetch_day_live to collapse both to None (→ stored
+    {}) silently deletes up to a full rate-limited backfill window from all future ticks."""
+    def transport(url: str) -> dict:
+        date = url.split("date=")[1].split("&")[0]
+        if date == "20260703":
+            raise RuntimeError("rate limited")            # transient transport failure
+        if date == "20260704":
+            return {"stat": "很抱歉，沒有符合條件的資料!"}   # valid reply: a genuine non-trading day
+        return _t86_payload(date, [_row("0050", "x", "1,000", "0", "0", "1,000")])
+    conn = TwseInstitutionalConnector(transport=transport, tickers=("0050",), sleep_seconds=0,
+                                      max_live_days_per_fetch=100, store_path=tmp_path / "t86.json")
+    conn.fetch(conn.discover()[0], "2026-07-03", "2026-07-04")
+    persisted = conn._store.load()
+    assert "20260703" not in persisted        # transport failure NOT recorded → retried next run
+    assert persisted.get("20260704") == {}    # genuine no-data recorded as an empty polled day
+
+
 def test_null_value_cell_drops_row_not_the_whole_series(tmp_path) -> None:
     """Sibling of the bare-int regression, found during the cont-117 audit: a JSON `null` value cell
     (Python None) hits None.replace -> AttributeError, which — before the guard was widened — escaped

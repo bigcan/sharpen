@@ -1,0 +1,35 @@
+# Pre-registered SUBSTRATE-POWER guard for the Crucible orchestrator (NOW-5, audit C2-01/C6-07).
+#
+# This is a SCHEDULING/accounting gate — a peer of the CR-7 tick budget and the substrate_dirty
+# eligibility gate — NOT a funnel gate. It is a SEPARATE file from configs/signal_eval.gates.yaml ON
+# PURPOSE (ADR-1, same rule as the lockbox/cohort gates): folding these thresholds into the funnel
+# gates file would change its raw bytes and therefore the frozen funnel gates_hash (crucible-v2.0,
+# 519158fa1450). Keeping them here leaves that moat hash byte-identical.
+#
+# What it does: before a substrate is mined, the orchestrator interpolates the minimum-detectable
+# marginal ΔSR (the MDE at the calibration's target power) from the substrate's holdout length, using
+# the E1/E2 calibration sweep. If that implied MDE exceeds a plausible true-alpha ceiling, the mine is
+# UNDERPOWERED — the funnel cannot detect any realistic alpha there, so spending proposer tokens + FDR
+# wealth on it is near-zero-yield. This is exactly the guard that would have caught the flagship
+# cross_asset run mined on a ~504-bar (holdout ~126) substrate, whose implied MDE ≈ 4.45 ΔSR.
+#
+# NEVER hardcode these numbers in code (CLAUDE.md) — the loader reads them from here.
+power_guard:
+  enabled: true
+
+  # The E1/E2 MDE-vs-substrate-length sweep the interpolation reads (holdout_bars -> mde_realized_delta_sr
+  # at the sweep's power_target). Its content hash is pinned into the tick stamp so a changed curve is
+  # detectable. Relative to the repo root.
+  calibration_sweep_path: results/crucible_calibration/calibration_mde_sweep.json
+
+  # Ceiling on the implied MDE (realized marginal ΔSR at target power). A realistic true single-signal
+  # marginal alpha is ΔSR ~ 0.3-0.5 (project memory); 0.50 flags a substrate whose funnel could not
+  # detect even a generous single-signal edge. NOTE: at current daily breadth this WARNS on essentially
+  # every substrate ever mined (cross_asset 1.40, taiwan 1.94, flagship 4.45) — that is the intended,
+  # damning signal (the funnel is underpowered everywhere), not a bug.
+  plausible_delta_sr_max: 0.50
+
+  # warn  -> log a loud UNDERPOWERED warning, still mine (default: purely additive, observational).
+  # refuse -> skip the mine (no proposer tokens, no FDR wealth) unless --force-underpowered is passed.
+  # Flip to `refuse` only after reviewing the warn-mode telemetry (an operator decision).
+  action: warn

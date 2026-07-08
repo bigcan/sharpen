@@ -211,6 +211,93 @@ def test_advance_terminal_entry_is_never_rejudged() -> None:
     assert advance(rejected, ForwardEvidence(500, 5.0, "a", "b"), "t50") == rejected
 
 
+# ============================================================ NOW-8: incubation seams (C8-04/05/06) ====
+
+def test_advance_stamps_verdict_snapshot_hash_at_terminal() -> None:
+    """C8-06: the panel snapshot the TERMINAL forward Sharpe used is stamped at the verdict; a pass
+    below the horizon does not stamp one (nothing terminal to reproduce yet)."""
+    cleared = advance(_entry(), ForwardEvidence(10, 0.40, "a", "b"), "t9", snapshot_hash="snap-term")
+    assert cleared.status == STATUS_CLEARED and cleared.verdict_snapshot_hash == "snap-term"
+    below = advance(_entry(), ForwardEvidence(4, 9.0, "a", "b"), "t2", snapshot_hash="snap-x")
+    assert below.status == STATUS_INCUBATING and below.verdict_snapshot_hash is None
+
+
+def test_advance_snapshot_hash_is_optional_backcompat() -> None:
+    """advance() without a snapshot_hash still works (default None) — keeps every existing caller valid."""
+    out = advance(_entry(), ForwardEvidence(10, 0.40, "a", "b"), "t9")
+    assert out.status == STATUS_CLEARED and out.verdict_snapshot_hash is None
+
+
+def test_lockbox_record_stall_and_error_counts(tmp_path) -> None:
+    """C8-04/05: durable per-entry stall/error counters distinguish a silently-stalled entry from
+    healthy accrual across nights; a terminal entry is a no-op."""
+    lb = Lockbox(tmp_path / "lb.db")
+    lb._write(_entry(candidate_hash="c1"))
+    lb.record_stall("c1", "t2")
+    lb.record_stall("c1", "t3")
+    lb.record_error("c1", "t4")
+    e = lb.get("c1")
+    assert e.n_stalled_passes == 2 and e.n_error_passes == 1 and e.last_tick_ts == "t4"
+    assert e.status == STATUS_INCUBATING                       # counting a stall/error never renders a verdict
+    lb._write(_entry(candidate_hash="done", status=STATUS_CLEARED, verdict_tick_ts="t1"))
+    lb.record_stall("done", "t9")                              # terminal → no-op
+    assert lb.get("done").n_stalled_passes == 0
+    lb.close()
+
+
+def test_lockbox_migrates_old_schema(tmp_path) -> None:
+    """C8-04/05/06: the new columns are added by an idempotent migration to a pre-existing lockbox
+    table (CREATE-IF-NOT-EXISTS never alters an existing table); a new-schema entry round-trips."""
+    import sqlite3
+    db = tmp_path / "lb.db"
+    conn = sqlite3.connect(str(db))                            # OLD schema: no NOW-8 columns
+    conn.execute("CREATE TABLE lockbox_entries (candidate_hash TEXT PRIMARY KEY, substrate_id TEXT, "
+                 "formula TEXT, candidate_type TEXT, crucible_version TEXT, gates_hash TEXT, "
+                 "proposal_ts TEXT, enrolled_tick_ts TEXT, data_snapshot_hash TEXT, "
+                 "min_forward_bars INTEGER, min_forward_sharpe REAL, status TEXT, forward_sharpe REAL, "
+                 "n_forward_bars INTEGER, forward_start_ts TEXT, forward_end_ts TEXT, "
+                 "last_tick_ts TEXT, verdict_tick_ts TEXT)")
+    conn.commit()
+    conn.close()
+    lb = Lockbox(db)                                           # migrates on open
+    cols = {r["name"] for r in lb._conn.execute("PRAGMA table_info(lockbox_entries)")}
+    assert {"verdict_snapshot_hash", "n_stalled_passes", "n_error_passes"} <= cols
+    lb._write(_entry(candidate_hash="c1"))                     # a full new-schema entry round-trips
+    assert lb.get("c1").n_stalled_passes == 0
+    lb.close()
+    Lockbox(db).close()                                        # idempotent second open
+
+
+def test_incubate_active_isolates_poison_and_counts(tmp_path, monkeypatch) -> None:
+    """C8-04/05: _incubate_active never propagates a forward_evidence failure — a raise is counted as
+    an error pass (entry stays INCUBATING), a None return is counted as a stall. The tick survives a
+    poison-pill formula on a drifted panel instead of crashing every future tick for the substrate."""
+    from types import SimpleNamespace
+
+    from finrl_pro_ds.crucible.orchestrator import orchestrator as orch
+    lb = Lockbox(tmp_path / "lb.db")
+    lb._write(_entry(candidate_hash="boom"))          # active_entries orders by hash: boom < stall
+    lb._write(_entry(candidate_hash="stall"))
+    sub = SimpleNamespace(lockbox=lb, substrate_id="syn", cfg=None,
+                          evolve_kwargs=dict(hold_horizon=21, cost_bps=0.001, ls_min_names=6))
+    prepared = SimpleNamespace(panel=None, base_returns=None, timestamps=None, snapshot_hash="snap-x")
+
+    calls = {"n": 0}
+
+    def fake_fe(**kw):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise RuntimeError("poison on a drifted panel")   # first (boom) → error
+        return None                                            # second (stall) → degenerate
+
+    monkeypatch.setattr(orch, "forward_evidence", fake_fe)
+    result = orch._incubate_active(sub, prepared, "t1")        # MUST NOT raise
+    assert result.n_errors == 1 and result.n_stalled == 1 and result.touched == []
+    assert lb.get("boom").n_error_passes == 1 and lb.get("boom").status == STATUS_INCUBATING
+    assert lb.get("stall").n_stalled_passes == 1
+    lb.close()
+
+
 # ============================================================ Lockbox store ====
 
 def test_lockbox_enroll_idempotent_and_pins_criterion(tmp_path) -> None:

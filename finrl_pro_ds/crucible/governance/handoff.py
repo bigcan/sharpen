@@ -42,6 +42,7 @@ class Tier2Handoff:
     gates_hash: str | None
     proposal_ts: str | None
     data_snapshot_hash: str | None
+    verdict_snapshot_hash: str | None = None   # C8-06: panel the terminal forward Sharpe was computed on
     # pre-registration + verbatim verdict (CR-1/CR-2)
     spec: dict = field(default_factory=dict)
     economic_rationale: str = ""
@@ -95,6 +96,7 @@ class Tier2Handoff:
             f"- formula: `{self.formula}`",
             f"- crucible: `{self.crucible_version}`  ·  gates: `{self.gates_hash}`  "
             f"·  data snapshot: `{self.data_snapshot_hash}`  ·  proposal_ts: `{self.proposal_ts}`",
+            f"- verdict snapshot (forward Sharpe basis): `{self.verdict_snapshot_hash}`",
             "",
             "## Forward-incubation evidence (the binding gate, CR-8)",
             f"- forward Sharpe **{_fmt(self.forward_sharpe)}** ≥ floor {_fmt(self.min_forward_sharpe)} "
@@ -153,6 +155,7 @@ def handoff_for(entry: LockboxEntry, *, workstream: str, scope: str,
         candidate_type=entry.candidate_type, crucible_version=entry.crucible_version,
         gates_hash=entry.gates_hash, proposal_ts=entry.proposal_ts,
         data_snapshot_hash=entry.data_snapshot_hash,
+        verdict_snapshot_hash=entry.verdict_snapshot_hash,
         incubation_status=entry.status, forward_sharpe=entry.forward_sharpe,
         min_forward_sharpe=entry.min_forward_sharpe, n_forward_bars=entry.n_forward_bars,
         min_forward_bars=entry.min_forward_bars, forward_start_ts=entry.forward_start_ts,
