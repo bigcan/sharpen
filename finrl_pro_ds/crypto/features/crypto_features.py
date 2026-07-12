@@ -372,9 +372,19 @@ def _fractional_diff(series: pd.Series, d: float = 0.4, window: int = 100) -> pd
     Simplified implementation for feature generation.
     Uses the same approach as Lopez de Prado's Advances in Financial ML.
     Vectorized via np.convolve (replaces Python loop).
+
+    Causal FIR filter: y[t] = sum_k w_k * x[t-k], w_0 = 1 on the CURRENT bar,
+    fractional tail on the past. np.convolve time-reverses its kernel
+    internally (conv[n] = sum_j a[j] v[n-j]), so it must receive the weights
+    in NATURAL order [w_0, w_1, ...]. _get_ffd_weights returns them REVERSED
+    (dot-with-window order for the loop implementation it replaced), hence
+    [::-1] here — feeding the reversed array straight into convolve applied
+    the filter mirror-imaged, putting the unit weight on the OLDEST bar of
+    the window (2026-07-08 FE audit FE-08; pinned by
+    tests/crypto/test_fractional_diff.py).
     """
     weights = _get_ffd_weights(d, window)
-    w = weights.flatten()
+    w = weights.flatten()[::-1]  # natural order [w_0=1, -d, ...]
 
     values = series.ffill().fillna(0.0).values
 

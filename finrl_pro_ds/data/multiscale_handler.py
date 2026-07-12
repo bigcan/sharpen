@@ -2,7 +2,7 @@
 Multi-Scale OHLCV Data Handler
 
 Reads 1-min OHLCV parquet, resamples to multiple timescales (configurable),
-computes 7 features per scale, and provides a stepping interface for the env.
+computes 8 features per scale, and provides a stepping interface for the env.
 
 Features per scale (8 dims, TC-aligned):
   1. log_return = log(close_t / close_{t-1})
@@ -212,6 +212,10 @@ class MultiScaleOHLCVHandler:
         self.scales = feature_config.get("scales", [3, 15, 60])
         self.window_size = feature_config.get("window_size", 30)
         self.norm_span = feature_config.get("norm_span", 120)
+        # FE-04 (2026-07-08 FE audit): features_per_scale was declared in every
+        # config but never consumed here — _compute_scale_features silently ran
+        # with its own default. Wire it so the config key is authoritative.
+        self.n_features = int(feature_config.get("features_per_scale", 8))
 
         # v6: Summary-stats observation mode (725→50 dims)
         self.obs_mode = feature_config.get("obs_mode", "window")
@@ -302,7 +306,9 @@ class MultiScaleOHLCVHandler:
                 if cutoff_mask.any():
                     norm_cutoff_idx = cutoff_mask.idxmax()
 
-            features = _compute_scale_features(resampled, norm_cutoff_idx, self.norm_span)
+            features = _compute_scale_features(
+                resampled, norm_cutoff_idx, self.norm_span, self.n_features,
+            )
 
             # FIX GMGP1-F1: Apply start_date AFTER feature computation
             # so EMAs are warm when the environment window begins
@@ -387,9 +393,9 @@ class MultiScaleOHLCVHandler:
 
         Returns:
             dict with keys:
-                scale_0: (window_size, 7) float32  (finest scale)
-                scale_1: (window_size, 7) float32
-                scale_2: (window_size, 7) float32  (coarsest scale)
+                scale_0: (window_size, n_features=8) float32  (finest scale)
+                scale_1: (window_size, n_features=8) float32
+                scale_2: (window_size, n_features=8) float32  (coarsest scale)
                 close: float
                 high: float    (N2 PF-XCHECK: base-scale bar high)
                 low: float     (N2 PF-XCHECK: base-scale bar low)

@@ -44,7 +44,16 @@ class ContinuousSwingEnv(gym.Env):
         # Core config
         self.initial_balance = float(config.get("initial_balance", 100000.0))
         self.window_size = int(config.get("window_size", 30))
-        features_per_scale = int(config.get("features_per_scale", 7))
+        # FE-04: fall back to the forwarded features: block so a config that
+        # only declares features.features_per_scale doesn't silently get the
+        # legacy 7 here while the handler emits 8.
+        features_per_scale = int(
+            config.get(
+                "features_per_scale",
+                config.get("features", {}).get("features_per_scale", 7),
+            ),
+        )
+        self._features_per_scale = features_per_scale
 
         # Fees (supports curriculum — can be updated at runtime)
         self.taker_fee = float(config.get("taker_fee", 0.0))
@@ -525,7 +534,7 @@ class ContinuousSwingEnv(gym.Env):
         """Build full observation dict."""
         obs = {}
         n_scales = len(self._scales)
-        features_per_scale = int(self.config.get("features_per_scale", 7))
+        features_per_scale = self._features_per_scale
 
         if self._current_obs:
             for i in range(n_scales):
@@ -549,9 +558,8 @@ class ContinuousSwingEnv(gym.Env):
         return np.zeros((self.window_size, features_per_scale), dtype=np.float32)
 
     def _empty_obs(self) -> dict[str, np.ndarray]:
-        features_per_scale = int(self.config.get("features_per_scale", 7))
         return {
-            f"scale_{i}": self._zero_scale(features_per_scale)
+            f"scale_{i}": self._zero_scale(self._features_per_scale)
             for i in range(len(self._scales))
         }
 
