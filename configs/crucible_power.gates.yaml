@@ -31,5 +31,11 @@ power_guard:
 
   # warn  -> log a loud UNDERPOWERED warning, still mine (default: purely additive, observational).
   # refuse -> skip the mine (no proposer tokens, no FDR wealth) unless --force-underpowered is passed.
-  # Flip to `refuse` only after reviewing the warn-mode telemetry (an operator decision).
-  action: warn
+  # Flipped to `refuse` 2026-07-12 (operator decision) after reviewing warn-mode telemetry: two real
+  # taiwan CLI-LLM ticks (2026-07-08) both WARNed at implied MDE 1.40 vs ceiling 0.50 and still mined,
+  # burning 27 fresh hypotheses' FDR wealth on a substrate proven (by the guard's own calibration) unable
+  # to detect realistic alpha. Extending history to close the gap was investigated and closed as a dead
+  # end (see project memory project_crucible_calibration_e1e2_s553 UPDATE cont-125) — refuse is now the
+  # correct default everywhere this gate applies (cross_asset is equally over-ceiling at 1.40; not
+  # taiwan-specific — this file has no per-substrate variant). Use --force-underpowered to mine anyway.
+  action: refuse
