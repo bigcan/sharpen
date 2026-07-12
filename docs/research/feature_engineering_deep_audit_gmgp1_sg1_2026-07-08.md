@@ -95,8 +95,8 @@ Deploy note: fixes 1–3 reach the live stacks at the **next image rebuild** (ba
 - Align `gap_detection` between `gmgp1_xauusd_sac_15min.yaml` and its live twin at next retrain (FE-20).
 
 **RESEARCH (obs-distribution changes → full protocol-v2 lifecycle; queue behind stronger evidence):**
-- FFD price channel (d≈0.3–0.5) as a 9th/replacement feature — FE-09 shows the current set already spans the memory spectrum, so expect marginal gain; pre-register before testing.
-- Per-timeframe `norm_span` study (FE-05): 6h vs 30h normalization horizons were never chosen deliberately.
+- FFD price channel (d≈0.3–0.5) as a 9th/replacement feature — FE-09 shows the current set already spans the memory spectrum, so expect marginal gain; pre-register before testing. **→ CLOSED 2026-07-12 (measured redundant): pre-registered + Stage-0 CPU probe ran same day (`docs/research/fe_obs_channel_preregistration_2026-07-12.md` §7). NO-GO — 0/24 primary passers; max ΔIC +0.0032 « MDE 0.010 on window-complete gold; median negative. FE-09 confirmed. Zero GPU spent.**
+- Per-timeframe `norm_span` study (FE-05): 6h vs 30h normalization horizons were never chosen deliberately. **→ CLOSED 2026-07-12 (measured redundant): same probe Part B — no `norm_span∈{60,240,480}` beats 120 by the MDE on any primary gold cell.**
 - Day-of-week encoding for session assets (time sin/cos is minute-of-day only).
 
 ## Verification log
