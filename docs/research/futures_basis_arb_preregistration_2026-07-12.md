@@ -82,3 +82,41 @@ Pass all ⇒ **VALID SIGNAL → Stage-1** (intraday 13:30-aligned confirmation +
 2. **TW-2 shuffled-null was mathematically void** (permuted the final PnL, but Sharpe is order-invariant) — replaced with a proper permutation test that breaks the position↔return *pairing* (perm_p=0.0000, decisive). *(The ETF probe shared this latent bug; its NO-GO was unaffected.)*
 
 **Interpretation:** real, statistically-decisive, OOS-stable 24-year basis-reversion structure with a genuine economic anchor — a VALID gross signal, NOT a proven deployable edge. **Stage-1 gates harvestability:** (a) intraday 13:30-aligned prices to pin the true magnitude, (b) `0050`/basket proxy tradeability (the cash leg is not directly tradeable; residual risk that part of the edge is cash-index staleness). No Crucible grammar change yet; a `basis`/`pairs` archetype is justified only after Stage-1 confirms harvestability.
+
+---
+
+## 8. STAGE-1 pre-registration (gates frozen 2026-07-12, S553-cont-128)
+
+Stage-0 returned VALID gross signal with two open caveats. Stage-1 falsifies them. **Sub-test 1a (this run): intraday 13:30 alignment.** Sub-test 1b (0050/basket proxy tradeability) is a separate follow-on.
+
+**1a — data:** futures at 13:30 = close of the `TX_15min` 13:15→13:30 bar (continuous ≈ most-active/front); cash TAIEX 13:30 close (`taiwan_options/TAIEX_spot`, 2018-2025). Overlap ≈ 1,584 daily (2019-2025). Traded return stays the Stage-0 roll-safe front-month `spread_ret` (TX_daily per-contract); ONLY the signal's basis timing changes. τ reused from the Stage-0 held contract.
+
+**1a — three signals, each z-reversion of `(lnF − lnS)/τ`, W∈{20,40,60}, on the same roll-safe return:**
+- `EOD`  = Stage-0 basis (TX_daily EOD close) — reproduces the Stage-0 subsample.
+- `1345` = intraday EOD basis (F@13:45) — should ≈ EOD.
+- `1330` = **aligned** basis (F@13:30, synchronized with cash) — artifact removed.
+
+**1a — GATES (frozen):**
+- **ART-1 (artifact real):** `EOD lag0 gross − 1330 lag0 gross > 1.0` (same-day inflation is large & driven by the 13:30/13:45 mismatch). Prior evidence: corr(15-min futures move, next-day cash ret)=+0.097.
+- **ALIGN-1 (real aligned edge):** `1330` median-W lag0 gross ≥ **0.50** AND block-bootstrap p05 > 0 AND permutation p < 0.05 — a properly-synchronized same-day basis still has real, significant reversion.
+- **CONSIST-1 (cross-validation):** `|1330 lag0 − EOD lag+1| ≤ 0.5` Sharpe — the aligned same-day estimate agrees with the Stage-0 artifact-free (lag+1) number, confirming +1.37 was the honest magnitude.
+
+**Verdict:** ART-1 ∧ ALIGN-1 ∧ CONSIST-1 ⇒ **1a CONFIRMED** (timing caveat resolved; true edge ≈ aligned number) → proceed to 1b (proxy tradeability). Else ⇒ the daily edge was timing/staleness ⇒ **downgrade**.
+
+---
+
+## 9. STAGE-1a VERDICT (run 2026-07-12, S553-cont-128) — NOT confirmed → signal DOWNGRADED
+
+`scripts/research/futures_basis_stage1_intraday_probe.py`, aligned overlap n=1,584 daily (2019-2025).
+
+| basis mark | median-W lag0 | lag+1 |
+|-----------|---------------|-------|
+| EOD (TX_daily) | +4.55 | +1.38 |
+| intraday 13:45 | +4.45 | +1.43 |
+| **intraday 13:30 (aligned)** | **+3.50** | +1.13 |
+
+- **ART-1 PASS (barely):** aligning the futures to 13:30 removed only ~1.06 Sharpe of same-day edge (4.55→3.50). The 13:30/13:45 mark mismatch is real but is NOT the main inflator.
+- **CONSIST-1 FAIL:** the aligned same-day edge (+3.50) does not collapse to the lag+1 (+1.38) — a large same-day reversion persists even with synchronized prices ⇒ prime suspect is **cash-index staleness** (TAIEX index built from constituent last-trades, stale at 13:30), which aligning the futures timestamp cannot fix. (Corroborated: corr(15-min futures move, next-day cash return)=+0.097.)
+- **Leg decomposition (decisive):** the aligned PnL `pos·(rF − rS)` splits — **futures leg `pos·rF` (the only liquid, tradeable leg) = +0.26 same-day, −0.07 delayed**; **cash leg `pos·(−rS)` (needs an untradeable index/proxy) = +0.55 / +0.29.** The edge is almost entirely the **stale cash index catching up to the future**, not the future converging.
+
+**Conclusion:** the TAIEX futures-basis reversion is **statistically real but NOT harvestable** — a "real ≠ tradeable" outcome (same class as the gamma-intraday and ETF-spread findings). It holds **independent of fees**: the tradeable futures leg has ~no standalone edge; capturing the reversion requires being long the (untradeable) cash index, and a liquid proxy would not carry the staleness. **Signal downgraded from "VALID → Stage-1" to real-but-unharvestable.** Stage-1b (0050 proxy) is not expected to rescue it (a liquid ETF lacks the staleness) and is not pursued unless a genuinely tradeable, non-stale spot proxy is sourced. No Crucible grammar change. gates_hash untouched.
