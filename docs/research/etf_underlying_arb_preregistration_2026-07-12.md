@@ -66,3 +66,17 @@ P2 is an approximate basket (no official weights ⇒ equal-weight proxy) and is 
 **Interpretation:** unlike the two prior arb books, this failed **not** on cost or staleness but on **efficiency** — both legs are liquid, directly tradeable, and synchronized (13:30 auction), so no artifact is available to blame; `0050` tracks its underlying (esp. TSMC) so tightly (the AP creation/redemption relationship is the most continuously arbitraged in markets) that there is **no gross reversion to harvest**. Cleanest possible NO-GO. True intraday premium/discount-to-iNAV arb stays data-blocked. No Crucible grammar change; gates_hash untouched.
 
 **Sweep complete (3 mechanisms, 3 failure modes):** ETF↔ETF same-index = cost/MM-gated (real gross); futures basis = staleness-unharvestable (real gross); ETF↔underlying = efficient/no-edge. Taiwan arbitrage on free daily data is exhausted; any revival needs MM-side execution, a tradeable non-stale spot proxy, or intraday iNAV/creation-redemption data — a data/execution problem, not an idea problem.
+
+---
+
+## 5. FOLLOW-UP (2026-07-12): proper cap-weighted basket NAV + intraday — both confirm NO-GO
+
+After the operator asked about iNAV sourcing, two refinements (scout code in scratchpad; verdicts here):
+
+**5a. Intraday variant** (FinMind 5-sec TAIEX + 1-min `0050`, 40-day window; TX 1-min): the daily 13:30 re-test is REDUNDANT (5-sec TAIEX @13:30:00 == the daily close already used). The intraday 1-min basis reversion shows huge gross SR (+15 to +25 ann) but is a **futures-lead-cash lead-lag microstructure NO-GO** — edge entirely in the lagging leg (TX-leg ≈0), turnover ~70-100×/day, annihilated by any intraday cost + µs-HFT-arbitraged.
+
+**5b. Proper cap-weighted basket NAV** (FinMind `TaiwanStockMarketValue` weights over the 45-stock Taiwan-50 basket; daily premium/discount reversion): the full 45-basket **passed every standard gate** (gross +0.59, bootstrap p05 +0.55, permutation p=0.0005, OOS +0.92) — a near-false-positive. The **liquidity-sensitivity test unmasked it**: top-10-liquid basket gross **−0.14** (no edge, matches `0050/2330`=−0.17), top-20 +0.49, all-45 +0.59 — the edge GROWS monotonically with the illiquid mid-cap tail (basket-leg +0.10→+0.73→+0.87). **Constituent-staleness signature**, net-NEGATIVE at every size. NOT real alpha, NOT harvestable.
+
+**Methodology lesson:** standard significance gates (permutation-null, bootstrap CI, OOS) do NOT distinguish real alpha from illiquidity/staleness — a reconstructed-basket premium/discount can be strongly "significant" and OOS-stable yet be pure stale-close catch-up. Liquidity-sensitivity (restrict to liquid names) + net-of-cost + per-leg decomposition are required to catch it.
+
+**Confirms the sweep:** the liquid/tradeable part of every Taiwan index-ETF-futures relationship is efficient; the only "edge" anywhere is the illiquid/lagging/stale leg, which is not retail-harvestable at any resolution. iNAV proper remains data-blocked (FinMind has no NAV feed; DIY reconstruction from stale closes just re-manufactures the artifact).
