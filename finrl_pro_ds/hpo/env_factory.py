@@ -125,6 +125,24 @@ def make_env(config, start_date=None, end_date=None, shm_config=None, norm_cutof
         from finrl_pro_ds.data.multiscale_handler import MultiScaleOHLCVHandler
         from finrl_pro_ds.envs.continuous_swing_env import ContinuousSwingEnv
         features_cfg = config.get("features", {})
+        # FE-04 (2026-07-08 FE audit): features_per_scale is declared in three
+        # places (features:, env:, network.scale_encoder.input_size) that only
+        # agreed by convention. Fail fast on divergence instead of silently
+        # training a network whose obs-space metadata disagrees with the
+        # handler's actual feature width.
+        _fps_declared = {
+            "features.features_per_scale": features_cfg.get("features_per_scale"),
+            "env.features_per_scale": env_config.get("features_per_scale"),
+            "network.scale_encoder.input_size":
+                config.get("network", {}).get("scale_encoder", {}).get("input_size"),
+        }
+        _fps_set = {k: int(v) for k, v in _fps_declared.items() if v is not None}
+        if len(set(_fps_set.values())) > 1:
+            raise ValueError(
+                f"features_per_scale declarations disagree: {_fps_set} "
+                f"(FE-04 — the handler emits features.features_per_scale; "
+                f"env obs-space and network input must match it)",
+            )
         ms_handler = MultiScaleOHLCVHandler(
             file_path=file_path,
             ticker=ticker,

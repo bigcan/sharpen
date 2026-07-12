@@ -143,6 +143,7 @@ class LiveObsBuilder:
         summary_feature_indices: Optional[list[int]] = None,
         norm_warmup_path: Optional[str] = None,
         asset_class: str = "crypto",
+        max_leverage: float = 1.0,
     ):
         """
         Args:
@@ -162,6 +163,14 @@ class LiveObsBuilder:
                 with closed sessions ("cfd_gold", "cfd_forex", "cme_futures";
                 see ``_CALENDAR_EXPANSION_FACTOR``).  Default "crypto" → 1.0×
                 (no expansion).
+            max_leverage: Training env's ``env.max_leverage``. The training
+                env reports position and pnl_proxy in the private state
+                DIVIDED by max_leverage (B1 fix,
+                ``ContinuousSwingEnv._get_private_state``); live must mirror
+                that or a leverage-trained agent sees out-of-distribution
+                private dims (FE-02, 2026-07-08 FE audit). At the default 1.0
+                the division is a no-op — identical to prior behavior for
+                every current live config.
         """
         self.scales = sorted(scales)
         self.window_size = window_size
@@ -171,6 +180,7 @@ class LiveObsBuilder:
         self.obs_mode = obs_mode
         self.summary_feature_indices = summary_feature_indices or [0, 1, 2, 6, 7]
         self.asset_class = asset_class
+        self.max_leverage = max(float(max_leverage), 1e-9)
         if asset_class not in self._CALENDAR_EXPANSION_FACTOR:
             logger.warning(
                 f"LiveObsBuilder: unknown asset_class={asset_class!r}; "
@@ -366,7 +376,14 @@ class LiveObsBuilder:
         df[['open', 'high', 'low', 'close', 'volume']] = (
             df[['open', 'high', 'low', 'close', 'volume']].ffill()
         )
-        df = df.sort_values('timestamp').reset_index(drop=True)
+        # FE-01: dedup on the bootstrap path too — loaders dedup internally,
+        # but the buffer invariant (unique, sorted 1-min timestamps) is
+        # enforced here so update()'s resample math can rely on it.
+        df = (
+            df.sort_values('timestamp', kind='stable')
+            .drop_duplicates(subset='timestamp', keep='last')
+            .reset_index(drop=True)
+        )
 
         # Store rolling buffer
         self._buffer_1min = df
@@ -715,9 +732,23 @@ class LiveObsBuilder:
             ts = ts.dt.tz_convert(None)
         new_df['timestamp'] = ts
 
-        # Append to buffer
-        self._buffer_1min = pd.concat(
-            [self._buffer_1min, new_df], ignore_index=True,
+        # Append to buffer.
+        # FE-01 (2026-07-08 FE audit): dedup by timestamp, keep='last'.
+        # _fetch_new_bars re-fetches from the last BASE-bar start (+1min), so
+        # every call overlaps the buffer by up to (base_scale-1) already-held
+        # minutes. Without dedup those rows accumulate and _resample_ohlcv
+        # SUMS their volume — every closed base bar except the newest carried
+        # ~2x volume while the decision bar stayed 1x, biasing volume_z (and
+        # the SG-1 signal gate) low on exactly the bar the agent acts on.
+        # keep='last' also lets a re-fetched (finalized/revised) candle
+        # replace its earlier partial version; the overlap now degrades into
+        # harmless gap-healing. Stable sort preserves fetch order for equal
+        # timestamps so 'last' == most recent fetch.
+        self._buffer_1min = (
+            pd.concat([self._buffer_1min, new_df], ignore_index=True)
+            .sort_values('timestamp', kind='stable')
+            .drop_duplicates(subset='timestamp', keep='last')
+            .reset_index(drop=True)
         )
 
         # Trim buffer to prevent unbounded growth
@@ -839,16 +870,20 @@ class LiveObsBuilder:
     ) -> np.ndarray:
         """Build 5-dim private state vector.
 
-        Replicates ContinuousSwingEnv._get_private_state() exactly.
+        Replicates ContinuousSwingEnv._get_private_state() exactly —
+        including the B1 leverage normalization: position and pnl_proxy are
+        reported as fraction-of-cap (divided by max_leverage) so the private
+        dims stay in the same range the agent trained on regardless of the
+        leverage knob (FE-02). No-op at max_leverage=1.0.
         """
-        # 1. Current position [-1, 1]
-        pos = float(current_position)
+        # 1. Current position normalized to [-1, 1] regardless of max_leverage.
+        pos = float(current_position) / self.max_leverage
 
-        # 2. Unrealized PnL proxy (recent return * position, clipped)
+        # 2. Unrealized PnL proxy (recent return * position-as-fraction-of-cap, clipped)
         pnl_proxy = 0.0
         if prev_close > 0 and current_close > 0:
             ret_bps = (current_close - prev_close) / prev_close * 10000.0
-            pnl_proxy = float(np.clip(current_position * ret_bps / 100.0, -1.0, 1.0))
+            pnl_proxy = float(np.clip(pos * ret_bps / 100.0, -1.0, 1.0))
 
         # 3-4. Time encoding (minutes since midnight → sin/cos)
         if isinstance(timestamp, datetime):

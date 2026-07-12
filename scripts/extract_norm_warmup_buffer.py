@@ -69,8 +69,15 @@ def build_warmup_buffer(parquet_path: Path, scales: list[int],
     out = {}
     for scale in scales:
         resampled = _resample_ohlcv(df, scale)
-        # Bars at or before train_end (training-time pre-cutoff slice)
-        pre_cutoff = resampled[resampled["timestamp"] <= train_end].reset_index(drop=True)
+        # Bars STRICTLY before train_end (training-time pre-cutoff slice).
+        # FE-03 (2026-07-08 FE audit): training computes norm_cutoff_idx as
+        # the FIRST bar with timestamp >= cutoff (multiscale_handler._load_data)
+        # and its warmup is arr[idx-200:idx] — strictly-before-cutoff. A bar
+        # stamped exactly AT the cutoff (midnight is a bar boundary on every
+        # scale grid) belongs to the POST-cutoff segment; `<=` here shifted
+        # the live warmup one bar late vs training, breaking the
+        # bit-equivalence contract with an O(1/span)-decaying EMA-Z transient.
+        pre_cutoff = resampled[resampled["timestamp"] < train_end].reset_index(drop=True)
         if len(pre_cutoff) < WARMUP_BUFFER:
             raise ValueError(
                 f"scale={scale}min: only {len(pre_cutoff)} pre-cutoff bars "

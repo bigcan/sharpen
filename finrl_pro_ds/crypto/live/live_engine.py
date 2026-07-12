@@ -355,6 +355,27 @@ class LiveTradingEngine:
         self._device = torch.device(config.get("agent", {}).get("device", "cpu"))
         self._dry_run = config.get("dry_run", False)
 
+        # FE-02 fail-closed guard (2026-07-08 FE audit): the live path is only
+        # correct for max_leverage == 1.0. Training scales actions by
+        # env.max_leverage and reports private-state position / max_leverage
+        # (B1/B5); live _predict() clips to [-1, 1] unscaled and position
+        # sizing is fraction-of-PV. Shipping a leverage-trained bundle through
+        # this engine would silently under-size every trade and feed the agent
+        # out-of-distribution private dims. Refuse to start rather than trade
+        # wrong; lifting this requires wiring max_leverage through _predict,
+        # position accounting, AND LiveObsBuilder(max_leverage=...).
+        _cfg_max_leverage = float(
+            config.get("env", {}).get(
+                "max_leverage", config.get("trading", {}).get("max_leverage", 1.0),
+            ),
+        )
+        if abs(_cfg_max_leverage - 1.0) > 1e-9:
+            raise RuntimeError(
+                f"max_leverage={_cfg_max_leverage} is not supported by the live "
+                f"engine (only 1.0): action scaling, position accounting and "
+                f"private-state normalization are not leverage-wired (FE-02).",
+            )
+
         # Position tracking
         self._current_position = 0.0
         self._prev_close = 0.0
@@ -470,8 +491,10 @@ class LiveTradingEngine:
         # Stores the UTC date of the last check so we run it once per day.
         self._last_roll_check_date: date | None = None
 
-        # FIX AUD-ENG-05: Track last 1-min timestamp for dedup in fetch
-        self._last_1min_ts_ms: int = 0
+        # AUD-ENG-05 note: fetch-overlap dedup now lives in
+        # LiveObsBuilder.update() (timestamp drop_duplicates, keep='last' —
+        # FE-01, 2026-07-08 FE audit). The former _last_1min_ts_ms tracker
+        # here was declared but never wired.
         # FIX LIVE-02: Prevent PV race between _inter_bar_metrics_loop and _trading_step
         self._trading_step_active: bool = False
         # XVal: Track last bar timestamp for inter-bar metrics (fixes timestamp bug)
