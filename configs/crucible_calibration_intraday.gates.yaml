@@ -1,0 +1,75 @@
+# Pre-registered grids for the Crucible INTRADAY power probe
+# (scripts/research/crucible_intraday_power.py). Design + gates:
+# docs/research/crucible_intraday_stage0_preregistration_2026-07-13.md (Part A).
+#
+# This file is NOT part of the frozen funnel gates_hash (CRU-1 519158fa1450): the intraday
+# probe VALIDATES the funnel's detection power under microstructure autocorrelation; it
+# changes NO funnel verdict. The funnel FitnessConfig thresholds are still loaded from the
+# real signal_eval.gates.yaml via load_calib() — only the synthetic-substrate SWEEP grids
+# below are intraday-specific.
+#
+# Model (Math-verified, cont-129): the planted base-sleeve PnL carries AR(1) persistence
+# phi = 1 - 1/H for holding period H bars. Sharpe-estimator variance inflates by
+# VIF = (1+phi)/(1-phi) = 2H-1, so N_eff = N/(2H-1) and MDE ~ sqrt((2H-1)/T). H=1 => phi=0
+# => the shipped IID harness EXACTLY (backward-compat tripwire TA-1).
+
+harness_version: crucible-intraday-power-v1
+
+# ---- Shared synthetic-substrate knobs (mirror the daily calib config) ------------------
+substrate:
+  t: 756                 # unused by the intraday sweep (it uses t_grid below); kept for load_calib
+  n: 12                  # cross-sectional names
+  n_feature_slots: 4
+  hold_horizon: 21       # rebalance cadence for the proxy base sleeves (load_calib requires it)
+
+evolve_budget:
+  rng_seed: 7
+  pop_size: 24
+  n_generations: 2
+  ls_min_names: 6
+  elite_frac: 0.30
+  cost_bps: 0.0010
+  holdout_frac: 0.25
+  holdout_embargo_days: 21
+
+# ---- E1/E2 blocks: unused by the intraday sweep, present so load_calib() parses cleanly --
+e1_null:
+  n_panels: 60
+  ci_alpha: 0.05
+  null_fpr_max: 0.01
+  null_tick_fpr_max: 0.05
+e2_power:
+  n_seeds: 40
+  beta_grid: [0.0, 0.002, 0.004, 0.008, 0.015, 0.025, 0.040]
+  gate_probe_gen_n_eff: 50
+  power_target: 0.80
+  power_min: 0.80
+  mde_delta_sr_max: 1.00
+
+# ---- INTRADAY power sweep (the Part-A gate) --------------------------------------------
+# DESIGN v2 (post-run-1): the first grid conflated effect-size with detection threshold and a
+# too-coarse beta grid pinned the power crossing, so MDE didn't resolve vs N_eff. Fixed design:
+# measure the funnel's MDE-vs-N_eff curve DIRECTLY at H=1 (no autocorrelation) with a FINE beta
+# grid, then read the frontier by INTERPOLATION — because at the full ~4.86M panel the tradeable
+# holdings land INSIDE the measured N_eff span (H=60 -> N_eff~10.2k, H=300 -> ~2.0k, both in
+# [500, 16000]). Autocorrelation enters purely via N_eff = holdout/(2H-1); validation cells at
+# H=12 confirm that collapse (they must land on the H=1 curve at matched N_eff).
+intraday_power:
+  # PRIMARY: MDE vs N_eff at H=1 (phi=0, IID). N_eff = holdout = 0.25*T -> spans 500..16000.
+  primary_h1_t_grid: [2000, 4000, 8000, 16000, 32000, 64000]
+  # VALIDATION: H>1 cells whose N_eff matches a primary point (holdout/(2H-1)); confirm the
+  # autocorrelation haircut acts PURELY through N_eff. Format [T_raw, H].
+  #   [46000,12] -> N_eff = 11500/23 = 500 ; [92000,12] -> 23000/23 = 1000
+  validation_cells: [[46000, 12], [92000, 12]]
+  # FINE, log-spaced beta grid to RESOLVE the 80%-power crossing (fixes the run-1 pin artifact).
+  beta_grid: [0.0, 0.0005, 0.0008, 0.0012, 0.002, 0.003, 0.005, 0.008, 0.013, 0.020]
+  n_seeds: 8
+  power_target: 0.80
+  gate_probe_gen_n_eff: 50
+  # Frontier ceiling: a realistic single-signal marginal alpha (same 0.50 as the daily guard).
+  mde_ceiling: 0.50
+  full_panel_bars: 4860000          # full achievable 2019+ panel for the frontier verdict
+  frontier_h_grid: [1, 12, 60, 300] # holdings to report the full-panel implied MDE for
+  # A1-PASS if the full-panel implied MDE (interpolated off the H=1 curve at N_eff=holdout/(2H-1))
+  # is <= mde_ceiling at a tradeable holding H <= this.
+  tradeable_hold_bars_max: 60

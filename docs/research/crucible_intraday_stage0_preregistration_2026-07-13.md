@@ -127,6 +127,12 @@ against a live broker schedule before any GO is acted on.
 
 ## 3. Decision
 
+> **RESOLVED 2026-07-13 (same session): A1 = FAIL → Stage-0 NO-GO.** Measured (30 seeds, real gate,
+> anchor-validated): MDE 0.86 at 5-min holding and 1.42 at 25-min — both fail the 0.50 ceiling; the funnel
+> MDE flattens to ~`N^-0.21`, so intraday's data abundance does not buy proportional power. Per the
+> execution order below, **Part B (FinMind pull) was NOT run.** Full result + audit:
+> `crucible_intraday_stage0_partA_result_2026-07-13.md`.
+
 | Outcome | Meaning | Next |
 |---|---|---|
 | **A-PASS ∧ B-PASS** | Intraday buys power AND ≥1 mechanism is tradeable | → full Architect build (scoping §4) |

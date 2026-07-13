@@ -93,9 +93,12 @@ Crucible-Taiwan discovery thread rather than expand it.
 
 - [x] **GO Stage-0** — pre-register + run the feasibility probe above (operator decision, 2026-07-13, cont-129).
       Pre-registration: `docs/research/crucible_intraday_stage0_preregistration_2026-07-13.md`.
+      **→ RAN 2026-07-13: Part A = FAIL** (funnel MDE flattens to ~N^-0.21; 5-min holding MDE 0.86 > 0.50).
+      Part B not run (A-FAIL gate). Result: `crucible_intraday_stage0_partA_result_2026-07-13.md`.
 - [ ] **Defer** — park until the daily TAIFEX accumulation store matures (unblocks the un-scoreable OI overlays)
       or a less-deflated-gate experiment is preferred instead.
-- [ ] **NO-GO** — accept daily power-bound as the terminal Crucible-Taiwan finding; redirect effort.
+- [x] **NO-GO (resolved)** — intraday does not escape the power-bound trap for tradeable holdings; the
+      higher-frequency lever is effectively closed. Redirect to the deployable TSMOM → paper path.
 
 **Related:** `project_crucible_calibration_e1e2_s553` (the power bottleneck), `project_crucible_llm_proposer_via_cli_s553`
 (cont-129 run), `reference_finmind_datasets_capability` (data), `project_futures_basis_arb_planned_s553` /
