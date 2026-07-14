@@ -1,0 +1,28 @@
+# Crucible Cross-Market Pooling — Stage-0 Part A frozen inputs (S553-cont-130, 2026-07-13).
+# VALIDATES the pooling-power feasibility probe; changes NO funnel verdict and is NOT part of the frozen
+# funnel gates_hash (519158fa1450) — same status as configs/crucible_calibration*.gates.yaml (CRU-1).
+# Pre-registration: docs/research/crucible_crossmarket_pooling_stage0_preregistration_2026-07-13.md
+# Consumed by: scripts/research/crucible_crossmarket_power.py (constants mirrored there, frozen).
+
+seed: 20260713
+
+power:
+  ceiling_delta_sr: 0.50          # E2 realistic-alpha ceiling (project_crucible_calibration_e1e2_s553)
+  anchor_holdout_bars: 1011       # deepest real daily substrate
+  anchor_mde: 1.403               # funnel per-market MDE at that holdout (TC-2 reproduction target)
+  rho_band: [0.0, 0.05, 0.10, 0.127]   # optimistic -> correlation floor f=(c/m)^2
+  m_single_sensitivity: [1.10, 1.20]   # decision aid: multiplicity-free single-test MDEs
+
+markets_available:                # independent markets with the SAME gold institutional-positioning
+  base: 2                         #   mechanism + accessible free connectors: US CFTC COT 088691 + TW T86 00635U
+  generous_upper_bound: 4         #   admitting related metals/venues as "independent"
+
+gate:
+  # A1-PASS iff k_needed(rho) <= markets_available at the realistic rho band. Verdict uses the measured
+  # m=1.403; the m_single columns are reported as an airtight-ness decision aid only.
+  a1_pass_requires_k_needed_le: base   # compare against markets_available.base (=2)
+
+tripwires:                        # all must pass before the verdict is read (pre-registration frozen)
+  tc1_mc_vs_closedform_rel_err_max: 0.01
+  tc2_anchor_abs_err_max: 0.001
+  tc3_degenerate_limits: true
