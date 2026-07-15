@@ -29,6 +29,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import pandas as pd
@@ -36,7 +37,15 @@ import pandas as pd
 from ...signals.eval_harness import _ann_sharpe
 from ...signals.features import Panel
 from ...signals.generation.evolve import _candidate_returns, _overlay_returns
-from ...signals.generation.fitness import _CAND, FitnessConfig, _combined_book
+from ...signals.generation.fitness import (
+    _CAND,
+    FitnessConfig,
+    _combined_book,
+    _combined_book_with_components,
+)
+
+if TYPE_CHECKING:
+    from ...signals.generation.base_sleeves import SleeveComponents
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,15 +136,24 @@ def _iso(epoch_seconds: float) -> str:
 def _candidate_book(formula: str, candidate_type: str, panel: Panel,
                     base_returns: dict[str, np.ndarray], timestamps: np.ndarray,
                     cfg: FitnessConfig, *, hold_horizon: int, cost_bps: float,
-                    ls_min_names: int) -> np.ndarray | None:
+                    ls_min_names: int,
+                    base_components: "dict[str, SleeveComponents] | None" = None,
+                    ) -> np.ndarray | None:
     """The candidate's net-of-cost return stream on the FULL panel, via the funnel's OWN builders
     (never reimplemented). Overlay tilts the combined base book; cross-sectional is the rank-L/S
-    sleeve. Returns None on a degenerate genome (all-NaN / constant), matching ``evolve``."""
+    sleeve. Returns None on a degenerate genome (all-NaN / constant), matching ``evolve``.
+
+    ``base_components`` (F14): overlay cost is charged against the base book's true gross / embedded
+    cost when supplied; else the unit-gross fallback (exact for synthetic/proxy books)."""
     if candidate_type == "overlay":
-        base_book = _combined_book(
-            {str(k): np.asarray(v, dtype=np.float64) for k, v in base_returns.items()},
-            timestamps, cfg)
-        cr = _overlay_returns(formula, panel, base_book, cost_bps=cost_bps)
+        base_net = {str(k): np.asarray(v, dtype=np.float64) for k, v in base_returns.items()}
+        if base_components is not None:
+            base_book, bg, bc, ge = _combined_book_with_components(
+                base_net, base_components, timestamps, cfg)
+        else:
+            base_book, bg, bc, ge = _combined_book(base_net, timestamps, cfg), None, None, None
+        cr = _overlay_returns(formula, panel, base_book, cost_bps=cost_bps,
+                              base_gross=bg, base_cost=bc, gross_exposure=ge)
     elif candidate_type == "cross_sectional":
         cr = _candidate_returns(formula, panel, hold_horizon=hold_horizon,
                                 cost_bps=cost_bps, min_names=ls_min_names)
@@ -147,7 +165,9 @@ def _candidate_book(formula: str, candidate_type: str, panel: Panel,
 def forward_evidence(*, formula: str, candidate_type: str, panel: Panel,
                      base_returns: dict[str, np.ndarray], timestamps: np.ndarray,
                      proposal_ts: str, cfg: FitnessConfig, hold_horizon: int, cost_bps: float,
-                     ls_min_names: int) -> ForwardEvidence | None:
+                     ls_min_names: int,
+                     base_components: "dict[str, SleeveComponents] | None" = None,
+                     ) -> ForwardEvidence | None:
     """Forward marginal-contribution evidence for a candidate (spec §6.2).
 
     Builds the candidate book and the C1 combined books CAUSALLY over the full panel (warmup may read
@@ -156,7 +176,8 @@ def forward_evidence(*, formula: str, candidate_type: str, panel: Panel,
     window's size + annualized Sharpe. Returns None if the candidate is degenerate or no forward bar
     exists yet (the panel has not extended past the proposal)."""
     cand_ret = _candidate_book(formula, candidate_type, panel, base_returns, timestamps, cfg,
-                               hold_horizon=hold_horizon, cost_bps=cost_bps, ls_min_names=ls_min_names)
+                               hold_horizon=hold_horizon, cost_bps=cost_bps, ls_min_names=ls_min_names,
+                               base_components=base_components)
     if cand_ret is None:
         return None
 

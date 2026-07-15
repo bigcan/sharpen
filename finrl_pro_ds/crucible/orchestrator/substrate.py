@@ -24,7 +24,7 @@ import json
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 import numpy as np
 
@@ -36,6 +36,9 @@ from ..ledger import TrialLedger
 from ..lockbox.incubation import IncubationCriterion
 from ..lockbox.lockbox import Lockbox
 from .fdr import OnlineFDR
+
+if TYPE_CHECKING:
+    from ...signals.generation.base_sleeves import SleeveComponents
 
 
 @dataclass(frozen=True, slots=True)
@@ -51,6 +54,9 @@ class PreparedSubstrate:
     asset_classes: tuple[str, ...]
     snapshot_hash: str
     power: "SubstratePower | None" = None    # NOW-5 statistical-power stamp (None ⇒ unstamped/legacy)
+    # F14 (Tier B): per-sleeve gross/cost/gross-exposure decomposition of base_returns for the
+    # overlay-cost correction. None ⇒ evolve's unit-gross fallback (exact for synthetic/proxy books).
+    base_components: "dict[str, SleeveComponents] | None" = None
 
 
 @dataclass(frozen=True, slots=True)

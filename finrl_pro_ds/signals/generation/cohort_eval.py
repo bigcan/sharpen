@@ -28,7 +28,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 import numpy as np
 import pandas as pd
@@ -45,7 +45,10 @@ from .cohort import (
 )
 from .cohort_mc import McNullResult, mc_null_pvalue
 from .evolve import _overlay_returns
-from .fitness import FitnessConfig, _combined_book
+from .fitness import FitnessConfig, _combined_book, _combined_book_with_components
+
+if TYPE_CHECKING:
+    from .base_sleeves import SleeveComponents
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +111,9 @@ def assemble_overlay_pool(
     overlay_formulas: Mapping[str, str],
     *,
     cost_bps: float,
+    base_gross: "np.ndarray | None" = None,
+    base_cost: "np.ndarray | None" = None,
+    gross_exposure: "np.ndarray | None" = None,
 ) -> tuple[dict[str, np.ndarray], list[str]]:
     """Recompute each overlay formula's return stream via :func:`evolve._overlay_returns` on ``panel``
     against the combined ``base_book`` — exactly the funnel's OVERLAY scoring path, so the cohort
@@ -126,7 +132,9 @@ def assemble_overlay_pool(
     returns: dict[str, np.ndarray] = {}
     culled: list[str] = []
     for name, formula in overlay_formulas.items():
-        out = _overlay_returns(str(formula), panel, base_book, cost_bps=cost_bps)
+        out = _overlay_returns(str(formula), panel, base_book, cost_bps=cost_bps,
+                               base_gross=base_gross, base_cost=base_cost,
+                               gross_exposure=gross_exposure)   # F14 overlay-cost fix (unit if None)
         if out is None:
             culled.append(str(name))
             continue
@@ -262,6 +270,7 @@ def evaluate_cohort(
     holdout_frac: float,
     holdout_embargo: int,
     seed: int,
+    base_components: "Mapping[str, SleeveComponents] | None" = None,
 ) -> CohortVerdict | None:
     """Run the full cohort gate. Returns ``None`` when no cohort can form (pool < ``min_cohort_size``
     de-correlated admits, or a degenerate split). Otherwise a :class:`CohortVerdict`; PROMISING iff
@@ -273,9 +282,20 @@ def evaluate_cohort(
     alpha_cohort, block_length}``. ``seed`` is the caller's :func:`derive_cohort_seed` value."""
     ts_full = np.asarray(timestamps)
     base_full = {str(k): np.asarray(v, dtype=np.float64) for k, v in base_returns.items()}
-    base_book_full = _combined_book(base_full, ts_full, fcfg)
+    # F14: with base_components, charge the overlay tilt against the base book's TRUE gross / embedded
+    # cost; without, the unit-gross fallback (byte-identical to the pre-fix cohort path).
+    bg_full: np.ndarray | None
+    bc_full: np.ndarray | None
+    ge_full: np.ndarray | None
+    if base_components is not None:
+        base_book_full, bg_full, bc_full, ge_full = _combined_book_with_components(
+            base_full, base_components, ts_full, fcfg)
+    else:
+        base_book_full = _combined_book(base_full, ts_full, fcfg)
+        bg_full = bc_full = ge_full = None
     pool_full, culled = assemble_overlay_pool(
-        panel, base_book_full, overlay_formulas, cost_bps=cost_bps)
+        panel, base_book_full, overlay_formulas, cost_bps=cost_bps,
+        base_gross=bg_full, base_cost=bc_full, gross_exposure=ge_full)
     n_culled = len(culled)
 
     T = int(panel.T)

@@ -292,7 +292,7 @@ def _process_substrate(
         proposal_ts=tick_ts, catalog_asset_classes=prepared.asset_classes,
         data_snapshot_hash=snap, token_cost=est_tokens, pre_proposed=fresh_specs,
         cohort_cfg=sub.cohort_cfg, cohort_mc_kwargs=sub.cohort_mc_kwargs,
-        cohort_gates_hash=sub.cohort_gates_hash)
+        cohort_gates_hash=sub.cohort_gates_hash, base_components=prepared.base_components)
 
     # --- online-FDR: charge one test per pre-registered spec (deterministic order) -----------------
     promising_hashes = {c.candidate_hash for c in result.cards}
@@ -389,7 +389,8 @@ def _incubate_active(sub: Substrate, prepared: PreparedSubstrate, tick_ts: str) 
                 formula=entry.formula, candidate_type=entry.candidate_type, panel=prepared.panel,
                 base_returns=prepared.base_returns, timestamps=prepared.timestamps,
                 proposal_ts=entry.proposal_ts, cfg=sub.cfg, hold_horizon=hold_horizon,
-                cost_bps=cost_bps, ls_min_names=ls_min_names)
+                cost_bps=cost_bps, ls_min_names=ls_min_names,
+                base_components=prepared.base_components)
         except Exception:                    # noqa: BLE001 — one poison entry must not crash the tick
             log.exception("substrate %s: incubation FAILED for %s on snapshot %s",
                           sub.substrate_id, entry.candidate_hash, prepared.snapshot_hash)

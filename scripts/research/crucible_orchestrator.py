@@ -171,8 +171,12 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
 
     def prepare() -> PreparedSubstrate:
         if args.mode == "synthetic":
+            from finrl_pro_ds.signals.generation.base_sleeves import unit_components
             panel = _synthetic_panel(args.t, args.n, n_feature_slots=args.synthetic_slots)
             base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
+            # F14: proxy sleeves are unit-gross cost-free return streams → the overlay-cost
+            # correction is an exact no-op (byte-identical synthetic/reproduce path).
+            base_components = {k: unit_components(v) for k, v in base.items()}
         elif meta["panel"] == "taiwan":
             import dataclasses
 
@@ -197,8 +201,9 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                 if slots:
                     panel = dataclasses.replace(
                         panel, feature_slots={**panel.feature_slots, **slots})
-            base = taiwan_base_sleeves(panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
-                                       start=args.start, end=args.end)
+            base, base_components = taiwan_base_sleeves(
+                panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
+                start=args.start, end=args.end, return_components=True)   # F14 overlay-cost fix
         else:
             import dataclasses
 
@@ -218,8 +223,9 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                 if slots:
                     panel = dataclasses.replace(
                         panel, feature_slots={**panel.feature_slots, **slots})
-            base = production_base_sleeves(panel, hold_horizon=ek["hold_horizon"],
-                                           cost_bps=ek["cost_bps"], start=args.start, end=args.end)
+            base, base_components = production_base_sleeves(
+                panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
+                start=args.start, end=args.end, return_components=True)   # F14 overlay-cost fix
         # Recompute asset classes AFTER the bridge registered its accepted series (informational —
         # feeds the manifest + proposer context; overlay generation keys off feature_slots, not this).
         prepared_classes = tuple(sorted({r["asset_class"] for r in catalog.list_series()})) or asset_classes
@@ -233,7 +239,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
         return PreparedSubstrate(
             panel=panel, base_returns=base, timestamps=_panel_ts(panel),
             asset_classes=prepared_classes,
-            snapshot_hash=folded_snapshot_hash(catalog.snapshot_hash(), panel), power=power)
+            snapshot_hash=folded_snapshot_hash(catalog.snapshot_hash(), panel), power=power,
+            base_components=base_components)
 
     ledger = TrialLedger(out_dir / "trial_ledger.db")
     substrate_id = "synthetic" if args.mode == "synthetic" else meta["panel"]
