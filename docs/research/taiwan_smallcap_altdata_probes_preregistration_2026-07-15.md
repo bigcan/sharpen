@@ -1,0 +1,218 @@
+# PRE-REGISTRATION — Taiwan Small/Mid-Cap Alt-Data Cross-Sectional Probes
+
+**Date:** 2026-07-15 · Session S553-cont · Branch `June2026`
+**Author sets this record BEFORE any of the three alt-data channels is fetched or looked at.**
+**Pathway:** parallel probe pathway with its own gates file — the frozen `signal_eval` funnel and
+its verdicts are untouched (**CRU-1 MINOR**, lockbox/cohort ADR precedent).
+
+> This is the §5 deliverable of `crucible_independent_audit_report_2026-07-14.md`:
+> *"run low-N, pre-registered, mechanism-driven single-hypothesis probes on the full sample …
+> implemented as a parallel pathway with its own gates file."* It is **not** a re-opening of the
+> GP mass-miner (the sealed discovery instrument) and **not** a mining campaign — it is exactly
+> **three** hypotheses, each with a stated mechanism and a pre-committed sign, fixed here in git
+> before results exist. Multiplicity is `n_trials = 3` and nothing more.
+
+---
+
+## 0. Why this, why now (the two corrections it makes)
+
+1. **Corrects the June mirage's WRONG SLICE.** The 2026-06-28 test (`taiwan_xsec_momentum_eval.py`)
+   ran 12-1/6-1/3-1 price momentum on the **45-name 0050 large-cap** universe. First pass IC-IR
+   **0.191 "PROMISING"** was a **size-confound mirage** — mandatory log-ADV size-neutralization
+   collapsed it to **0.039** (survivorship was the minor culprit, 0.039→0.042; SIZE was the
+   inflator — the "momentum" was the TSMC/semiconductor mega-cap trend). NO-GO. But that slice is
+   the **opposite** of what the "less-efficient Taiwan" thesis predicts: the thesis lives in the
+   **small/mid-cap** tier that big money and analyst coverage ignore, not in the most-liquid
+   large-caps. So the thesis was neither cleanly supported nor killed — it was tested in the wrong
+   place. This probe tests it **where it was actually predicted.**
+
+2. **Makes the FinMind subscription earn its keep on DATA BREADTH, not better statistics.** Audit
+   §5 honesty clause: *"the power problem is ultimately a **data problem** (breadth,
+   frequency-with-capacity, niche datasets)."* §6.3: *"target different data, not better
+   statistics … capacity-constrained niches per the small-operator reframe."* The three channels
+   below are **niche, retail-behaviour datasets** on a **wider cross-section** (N≈200 vs 45) — the
+   two axes (new mechanism × more names) the free daily price feed cannot supply.
+
+**Falsification framing (read before trusting any GO).** The pre-registered expectation is that
+NO-GO is a likely and fully informative outcome. Audit §5 MDE80 ≈ **0.7–0.9** on these substrates:
+even a *real* 0.3–0.5 alt-data edge may be **undetectable** on ~11–13 years of daily data. A null
+result here **closes** the "less-efficient Taiwan small-cap alt-data" thesis honestly; it does not
+mean the mechanism is absent, only that it is not extractable at this power/cost.
+
+---
+
+## 1. Instruments, data, scope
+
+- **Market universe (rank pool):** all TWSE **and** TPEx common stocks (`TaiwanStockInfo`, filtered
+  to common equity — 4-digit ids, ETFs/warrants/preferred/DR excluded). Prices via FinMind
+  `TaiwanStockPrice` (**RAW, unadjusted**, `adjusted:false`, LEAK-2). Dividends folded in causally
+  (forward add-back, as `taiwan_panel_loader._apply_causal_total_return`) for the return LABEL only.
+- **Delisting:** `TaiwanStockDelisting` — delisted names are included for their live window so a
+  name drops out of the cross-section when it dies, not before (survivorship handled by the same
+  PIT membership mask, **upper-bound caveat** below).
+- **The three alt-data channels (the niche datasets):**
+  | Channel | FinMind dataset | Native cadence | Public-availability lag (LEAK-2) |
+  |---|---|---|---|
+  | Month-revenue | `TaiwanStockMonthRevenue` | monthly | mandatory disclosure by the **10th of the following month** → signal becomes visible on **day 10 of month(revenue_month)+1**, never the revenue month-end |
+  | Margin / short-sale | `TaiwanStockMarginPurchaseShortSale` | daily (post-close) | **T+1 trading day** (published after the close of day T) |
+  | Shareholding distribution (集保 TDCC) | `TaiwanStockHoldingSharesPer` | weekly (per-Friday) | **as-of `date` + 6 calendar days** buffer (TDCC releases the following week) |
+- **Sample window:** full available FinMind history per channel, intersected. Month-revenue and
+  margin run to ~2005+; the 集保 distribution series is shorter (~2016+). Each probe uses its own
+  channel's full history (the harness reports the effective `min_days`); **no window is chosen to
+  flatter a result.**
+- **Currency / cost:** TWD notional; the **0.30% securities-transaction SELL tax** is baked into the
+  Taiwan cost trio (below). Prices RAW/unadjusted; the H1 causal-total-return add-back is applied to
+  the return label only, never to a feature.
+
+**Survivorship / PIT caveat (honest UPPER BOUND).** The free FinMind feed lists currently-trading
+tickers; `TaiwanStockDelisting` completeness is not independently verified, and the cap-rank uses
+best-available shares (below). Every IC reported is therefore an **upper bound**
+(`panel.meta.survivorship_free = False`, printed by the harness). A survivorship-free PIT
+reconstruction (TEJ-grade) is a **promotion gate**, not part of this probe.
+
+---
+
+## 2. Universe construction (LOCKED) — cap-rank 51–250 small/mid-cap band
+
+At each **month-end** rebalance `t`:
+
+1. Rank the common-stock pool by **market cap** = `close_t × shares_t`, where `shares_t` = total
+   registered shares from the `TaiwanStockHoldingSharesPer` **"total" (合計)** tier, forward-filled
+   from the last *available* weekly update (causal) and lagged per §1. (Shares from the 集保 total
+   are used **only** for the cap-rank cut; they are independent of the log-ADV size proxy the
+   harness neutralizes on, so membership and neutralization do not share a quantity.)
+2. **Exclude the top-50** (the 0050 large-cap tier — the slice the June mirage already killed).
+3. Take **ranks 51–250** → the small/mid-cap band (~200 names/month).
+4. **Liquidity floor:** trailing 60-day TWD ADV ≥ `min_adv_twd` (gates file) — a tradeable
+   cross-section.
+5. **History floor:** ≥ 250 trading days of prior bars (drops IPO-noise names).
+6. **Membership is a causal (T,N) mask**; a name is active only on days it satisfies 1–5 with data
+   stamped ≤ `t`. Delisted names go inactive when their series ends.
+
+`universe` id (locked, part of every spec hash): **`twse_smallcap_caprank_51_250`**.
+
+---
+
+## 3. The three probes (LOCKED — mechanism, construction, sign, hash)
+
+All three: `family = "altdata"`, `horizons = (1,5,10,21,63)`, `primary_horizon = 21` (monthly
+rebalance, **low turnover** — the only regime where the 0.30% sell tax does not dominate),
+`neutralization = ("winsor","zscore","sector","size")`. **`"size"` is MANDATORY and non-negotiable
+— it is the exact step that killed the June mirage** (`evaluate_signal` reads neutralization from
+the spec, so size cannot be silently dropped). Signs are pre-committed; a signal whose realized IC
+has the *opposite* sign is a FAIL, not a sign-flip opportunity.
+
+### P1 — Month-revenue momentum · `tw_smallcap_mom_rev` · sign **+1** · hash `60680e61ff85`
+- **Mechanism:** under thin analyst coverage, small/mid-cap monthly revenue announcements (mandatory
+  by the 10th) are **underreacted to** → post-announcement drift. High YoY revenue growth predicts
+  cross-sectional continuation.
+- **Signal (causal):** `yoy = revenue[m] / revenue[m-12] - 1`, stamped as available on **day 10 of
+  m+1**, forward-filled across the month, then aligned to trading days. Names with < 13 months of
+  revenue history or a non-positive base are NaN.
+- **Expected sign:** **+1** (long high YoY growth).
+
+### P2 — Margin / short-sale crowding · `tw_smallcap_margin_crowd` · sign **−1** · hash `e0a4c719bfe0`
+- **Mechanism:** rising **retail margin-financing balance** = leverage crowding into a name;
+  crowded, tax-disadvantaged retail longs subsequently **underperform** (deleveraging / fragility).
+  A contrarian crowding signal, not a momentum one.
+- **Signal (causal):** `Δ21d of (MarginPurchaseTodayBalance / shares_t)` — the 21-day change in
+  margin utilization (financing balance as a fraction of registered shares), stamped **T+1**. (Short
+  balance is carried in the panel for a pre-registered robustness read only — NOT a second trial.)
+- **Expected sign:** **−1** (long LOW / falling margin utilization; short the crowded).
+
+### P3 — Big-holder shareholding concentration · `tw_smallcap_holder_conc` · sign **+1** · hash `1be26f02ee6a`
+- **Mechanism:** the 集保 (TDCC) weekly distribution splits each name's register into holder-size
+  tiers. A **rising share held by big holders (>400 board lots)** = informed accumulation by
+  concentrated hands; **outperformance** follows. (The mirror, dispersion to many tiny retail
+  holders, is distribution.)
+- **Signal (causal):** `Δ4w of (percent of shares held in the >400-lot tiers)`, stamped as-of
+  `date + 6d`, forward-filled to trading days. Tier boundary (400 lots) is fixed here, not tuned.
+- **Expected sign:** **+1** (long rising big-holder concentration).
+
+> **Spec-drift tripwire.** `tests/research/test_taiwan_smallcap_altdata.py` asserts each constructed
+> `SignalSpec.content_hash()` equals the value above. Any post-hoc edit to a name/hypothesis/sign/
+> horizon/neutralization/universe/cost_profile changes the hash and **fails the test** — the
+> anti-p-hacking seal.
+
+---
+
+## 4. Metrics & Gates (FROZEN) — `configs/taiwan_smallcap_altdata.gates.yaml`
+
+Own gates file (CRU-1 MINOR). Scoring is the **existing cross-sectional IC funnel**
+(`evaluate_batch`: T0 causality tripwire → T1 gross rank-IC → T2 capturability → T3 robustness →
+T3.5 CPCV → deflation), the same instrument that killed the June mirage. Thresholds (never hardcoded
+in code):
+
+- **Gross (PROMISING floor):** IC-IR ≥ **0.05**, IC t-stat ≥ **3.0**, at `primary_horizon = 21`.
+- **Deflation:** DSR ≥ **0.90**, BH-FDR q ≤ **0.10** across the `n_trials = 3` batch, HLZ t ≥ 3.0
+  reported (not binding — `require_hlz: false`).
+- **CPCV:** 6 groups, k=2, embargo 5d.
+- **Robustness:** subperiod IC-IR ≥ 0.0; recent-OOS 2y reported.
+- **Capturability (Taiwan cost trio):** `frictionless` / `us_equiv_ref` 0.0010 (contrast only) /
+  **`standard` 0.0021** (e-broker commission + 0.30% sell tax ≈ 2× US) / `harsh` 0.0029; cost-wall
+  caution at 0.30. **A signal that is gross-PROMISING but net-negative at `standard` is a NO-GO.**
+- **Neutralization (read from the SPEC, echoed in gates for the record):** winsor [0.01,0.99] →
+  zscore → **sector + size** demean.
+- **Universe:** `min_names_per_day` ≥ **60**, `min_adv_twd` > 0 (a real tradeable cross-section).
+- **Promotion:** `survivorship_free_required: true` + `tier2_audit_required: true` — **no probe
+  result promotes to capital or reads a deploy verdict without a PIT rebuild + a Tier-2 deep
+  lifecycle audit.** A GO here earns only "PROMISING, forward-incubate", never a position.
+
+---
+
+## 5. Predictions (pre-committed)
+
+- **Base rate:** given MDE80 ≈ 0.7–0.9, the modal outcome is **0/3 clear the deflated funnel**.
+- **Most likely to survive, if any:** P1 (month-revenue drift) — the best-documented Taiwan retail
+  anomaly and the lowest-turnover of the three.
+- **Kill conditions (any one → that probe is NO-GO):** wrong IC sign vs the pre-committed sign;
+  gross IC-IR < 0.05 or t < 3.0; net Sharpe ≤ 0 at the `standard` cost; DSR < 0.90 or FDR q > 0.10;
+  CPCV subperiod IC-IR < 0 in a majority of folds.
+- **Stop rule (no expansion):** this is the whole campaign — 3 probes. If all 3 are NO-GO, the thesis
+  is closed and the follow-up is **not** "try more channels" (that is the mining campaign §5
+  forbids) but a data-quality/power post-mortem (would a survivorship-free PIT rebuild or a
+  capacity-constrained niche change the verdict?). Adding a 4th channel requires a *new*
+  pre-registration.
+
+---
+
+## 6. VERDICT (to be filled after the run — DO NOT pre-write)
+
+_Run pending FinMind fetch (`FINMIND_TOKEN` supplied by operator; kept out of repo/transcript)._
+
+| Probe | gross IC-IR @21 | IC t | net Sharpe @standard | DSR | FDR-q | verdict |
+|---|---|---|---|---|---|---|
+| P1 mom_rev | — | — | — | — | — | — |
+| P2 margin_crowd | — | — | — | — | — | — |
+| P3 holder_conc | — | — | — | — | — | — |
+
+**Synthesis:** _pending._
+
+---
+
+## 7. Run protocol (operator, with token)
+
+```bash
+# 0. token in env only — NEVER committed/logged
+export FINMIND_TOKEN=...            # Sponsor tier
+
+# 1. fetch the three alt-data channels + the common-stock pool prices (rate-limited; --resume safe)
+python scripts/data/fetch_taiwan_fundamentals_finmind.py \
+    --datasets month_revenue,margin_short,shareholding \
+    --pool auto --start 2005-01-01 --out data/taiwan_smallcap
+
+# 2. build the monthly cap-rank 51-250 PIT membership
+python scripts/research/taiwan_smallcap_universe.py \
+    --data data/taiwan_smallcap --lo-rank 51 --hi-rank 250 --out data/taiwan_smallcap/universe
+
+# 3. run the 3 pre-registered probes through the funnel (size-neutralization is in the specs)
+python scripts/research/taiwan_smallcap_altdata_eval.py \
+    --data data/taiwan_smallcap --gates configs/taiwan_smallcap_altdata.gates.yaml \
+    --out results/taiwan_smallcap_altdata
+
+# offline, no token — proves causality + spec-hash seal + lag-leak guards are green first
+python -m pytest tests/research/test_taiwan_smallcap_altdata.py -q
+```
+
+Then fill §6, append a `randd_log.md` entry, and run `/audit` (+ `/math` if any formula changed).
+Register this gates-file hash under **CRU-1** (audit §6.7).
