@@ -57,7 +57,9 @@ the C1 marginal-contribution ΔSharpe stays apples-to-apples with the candidate.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 import numpy as np
 import pandas as pd
@@ -72,9 +74,46 @@ from finrl_pro_ds.signals.features import Panel
 log = logging.getLogger("base_sleeves")
 
 
+@dataclass(frozen=True, slots=True)
+class SleeveComponents:
+    """Per-bar decomposition of a sleeve's daily-marked book — the extra state the overlay-cost
+    correction needs (Crucible independent-audit F14, Tier B). Four ``(T,)`` arrays:
+
+      * ``net``            — the exact stream the sleeve builder otherwise returns (``gross - cost``);
+      * ``gross``          — the pre-cost daily-marked return;
+      * ``cost``           — the per-bar embedded turnover cost (``>= 0``; nonzero only on rebalance
+        bars), so a tilt that shorts the base book still PAYS it rather than earning a rebate;
+      * ``gross_exposure`` — the held gross notional ``Σ_n |w_n(t)|``, i.e. the notional you trade to
+        rescale the WHOLE book by one unit, so the overlay's own turnover is charged at the book's
+        true gross (~11x for a vol-scaled directional base book) and not at unit gross.
+
+    Invariant (bit-exact by construction — ``gross`` is reconstructed as ``net + cost``):
+    ``net == gross - cost`` elementwise. For a return-stream-only sleeve (no underlying weights —
+    synthetic / planted / proxy books that ARE the sleeve return at gross 1 with no embedded cost)
+    use :func:`unit_components`, under which the overlay-cost correction is an exact no-op."""
+
+    net: np.ndarray
+    gross: np.ndarray
+    cost: np.ndarray
+    gross_exposure: np.ndarray
+
+
+def unit_components(net: np.ndarray) -> SleeveComponents:
+    """Components for a unit-gross, cost-free RETURN-STREAM sleeve (``gross == net``, ``cost == 0``,
+    ``gross_exposure == 1`` everywhere). Synthetic / planted / proxy base books ARE the sleeve
+    return at gross 1 with no embedded turnover cost, so this is their EXACT decomposition — and it
+    makes ``evolve._overlay_returns`` reduce bit-for-bit to the pre-fix formula, keeping the
+    synthetic / calibration / reproduce path byte-identical to the frozen funnel."""
+    net = np.asarray(net, dtype=np.float64)
+    return SleeveComponents(
+        net=net, gross=net.copy(), cost=np.zeros_like(net),
+        gross_exposure=np.ones_like(net))
+
+
 def _book_from_target_weights(
-    weights: np.ndarray, fwd1: np.ndarray, *, hold_horizon: int, cost_bps: float
-) -> np.ndarray:
+    weights: np.ndarray, fwd1: np.ndarray, *, hold_horizon: int, cost_bps: float,
+    with_components: bool = False,
+) -> "np.ndarray | SleeveComponents":
     """Daily-marked sleeve return for a ``(T, N)`` target-weight matrix, NET of turnover·bps.
 
     Transcribes the candidate's book convention (``evolve._candidate_returns``) so the base and
@@ -83,9 +122,18 @@ def _book_from_target_weights(
     ``cost_bps * one-way-turnover`` on each rebalance bar only. ``rets[t]`` is the realized return
     over ``t -> t+1`` (decide-at-``t`` / earn-``t->t+1``, no current-bar look-ahead); the final row
     stays NaN (no forward return). NaN weights/returns are treated as flat / zero P&L (``nansum``).
+
+    ``with_components`` (default off — byte-identical to the pre-F14 path) additionally returns the
+    gross / cost / gross-exposure decomposition (:class:`SleeveComponents`) the overlay-cost
+    correction consumes; ``net`` is the UNCHANGED line and ``gross`` is reconstructed as
+    ``net + cost`` so the ``net == gross - cost`` invariant is bit-exact.
     """
     T, N = weights.shape
     rets = np.full(T, np.nan)
+    if with_components:
+        gross = np.full(T, np.nan)
+        cost = np.zeros(T)
+        gexp = np.zeros(T)
     w = np.zeros(N)
     last_turn = 0.0
     for t in range(T - 1):
@@ -95,12 +143,21 @@ def _book_from_target_weights(
             last_turn = float(np.abs(w_new - w).sum())
             w = w_new
         rets[t] = float(np.nansum(w * fwd1[t]) - (cost_bps * last_turn if rebal else 0.0))
+        if with_components:
+            c = cost_bps * last_turn if rebal else 0.0
+            cost[t] = c
+            gross[t] = rets[t] + c                       # gross = net + cost (bit-exact, no re-sum)
+            gexp[t] = float(np.abs(w).sum())             # held gross notional Σ_n |w_n(t)|
+    if with_components:
+        gexp[T - 1] = float(np.abs(w).sum())             # final row: last held gross (net stays NaN)
+        return SleeveComponents(net=rets, gross=gross, cost=cost, gross_exposure=gexp)
     return rets
 
 
 def tsmom_sleeve_returns(
-    panel: Panel, *, hold_horizon: int, cost_bps: float, verify_causal: bool = False
-) -> np.ndarray:
+    panel: Panel, *, hold_horizon: int, cost_bps: float, verify_causal: bool = False,
+    with_components: bool = False,
+) -> "np.ndarray | SleeveComponents":
     """The production cross-asset TSMOM linear-core sleeve return on the panel timeline.
 
     Drives :func:`cross_asset_signals.compute` on the panel's close to get the validated
@@ -126,7 +183,8 @@ def tsmom_sleeve_returns(
     )
     weights = w_wide.to_numpy(dtype=np.float64)
     return _book_from_target_weights(
-        weights, panel.forward_returns(1), hold_horizon=hold_horizon, cost_bps=cost_bps
+        weights, panel.forward_returns(1), hold_horizon=hold_horizon, cost_bps=cost_bps,
+        with_components=with_components,
     )
 
 
@@ -196,7 +254,8 @@ def rates_carry_sleeve_returns(
     fetch_fn=None,
     clean_fn=None,
     verify_causal: bool = False,
-) -> np.ndarray:
+    with_components: bool = False,
+) -> "np.ndarray | SleeveComponents":
     """The production rates-carry linear-core sleeve return on the panel timeline.
 
     Reads the causal carry+roll conviction (:func:`rates_carry.rates_carry_conviction`, the
@@ -228,14 +287,16 @@ def rates_carry_sleeve_returns(
 
     fwd1 = _forward_returns_wide(rates_close)
     return _book_from_target_weights(
-        weights.to_numpy(dtype=np.float64), fwd1, hold_horizon=hold_horizon, cost_bps=cost_bps
+        weights.to_numpy(dtype=np.float64), fwd1, hold_horizon=hold_horizon, cost_bps=cost_bps,
+        with_components=with_components,
     )
 
 
 def defensive_sleeve_returns(
     panel: Panel, *, hold_horizon: int, cost_bps: float, verify_causal: bool = False,
     beta_window: int = dfs.DEFAULT_BETA_WINDOW, min_periods: int = dfs.DEFAULT_BETA_MIN_PERIODS,
-) -> np.ndarray:
+    with_components: bool = False,
+) -> "np.ndarray | SleeveComponents":
     """The defensive / betting-against-beta linear-core sleeve return on the panel timeline.
 
     Candidate 3rd sleeve (the low-correlation diversifier of the add-uncorrelated-sleeves thesis).
@@ -263,7 +324,7 @@ def defensive_sleeve_returns(
     weights = weights.where(conv.notna() & vol.notna(), 0.0)                    # flat until defined
     return _book_from_target_weights(
         weights.to_numpy(dtype=np.float64), panel.forward_returns(1),
-        hold_horizon=hold_horizon, cost_bps=cost_bps,
+        hold_horizon=hold_horizon, cost_bps=cost_bps, with_components=with_components,
     )
 
 
@@ -318,7 +379,8 @@ def commodity_carry_sleeve_returns(
     fetch_fn=None,
     clean_fn=None,
     verify_causal: bool = False,
-) -> np.ndarray:
+    with_components: bool = False,
+) -> "np.ndarray | SleeveComponents":
     """The commodity-carry (ETF roll-spread) linear-core sleeve return on the panel timeline.
 
     Candidate 4th sleeve (the AQR **carry** premium). Structurally mirrors
@@ -358,7 +420,8 @@ def commodity_carry_sleeve_returns(
 
     fwd1 = _forward_returns_wide(traded_close.to_numpy(dtype=np.float64))
     return _book_from_target_weights(
-        weights.to_numpy(dtype=np.float64), fwd1, hold_horizon=hold_horizon, cost_bps=cost_bps)
+        weights.to_numpy(dtype=np.float64), fwd1, hold_horizon=hold_horizon, cost_bps=cost_bps,
+        with_components=with_components)
 
 
 def production_base_sleeves(
@@ -377,8 +440,14 @@ def production_base_sleeves(
     include_defensive: bool = False,
     include_commodity_carry: bool = False,
     commodity_etf_close: np.ndarray | None = None,
-) -> dict[str, np.ndarray]:
+    return_components: bool = False,
+) -> "dict[str, np.ndarray] | tuple[dict[str, np.ndarray], dict[str, SleeveComponents]]":
     """``{"tsmom", "rates_carry"}`` production base sleeve returns aligned to ``panel.dates``.
+
+    ``return_components`` (default off — byte-identical to the pre-F14 path, returns the plain net
+    dict) instead returns ``(sleeves_net, sleeve_components)`` where the second dict carries each
+    sleeve's :class:`SleeveComponents` (gross / cost / gross-exposure) for the overlay-cost
+    correction. ``sleeves_net[k] is components[k].net`` (bit-identical to the pre-fix stream).
 
     The two validated linear-core streams a C3 candidate's marginal contribution is scored
     against (gates ``generation.base_sleeves``). ``curve``/``rates_close`` are injectable for
@@ -403,7 +472,8 @@ def production_base_sleeves(
                     "marked flat with NO exit cost (GP3-04).", n_inactive)
 
     tsmom = tsmom_sleeve_returns(
-        panel, hold_horizon=hold_horizon, cost_bps=cost_bps, verify_causal=verify_causal)
+        panel, hold_horizon=hold_horizon, cost_bps=cost_bps, verify_causal=verify_causal,
+        with_components=return_components)
     if curve is None:
         curve, cmani = load_treasury_curve_with_manifest(require_fresh=curve_require_fresh)
         # GP1-03: surface a curve↔panel desync (the .asof ffill carries a stale yield across the
@@ -418,19 +488,28 @@ def production_base_sleeves(
     rates = rates_carry_sleeve_returns(
         panel, curve, hold_horizon=hold_horizon, cost_bps=cost_bps,
         rates_close=rates_close, start=start, end=end, fetch_fn=fetch_fn, clean_fn=clean_fn,
-        verify_causal=verify_causal,
+        verify_causal=verify_causal, with_components=return_components,
     )
-    sleeves = {"tsmom": tsmom, "rates_carry": rates}
+    raw: dict = {"tsmom": tsmom, "rates_carry": rates}
     if include_defensive:
-        sleeves["defensive"] = defensive_sleeve_returns(
-            panel, hold_horizon=hold_horizon, cost_bps=cost_bps, verify_causal=verify_causal)
+        raw["defensive"] = defensive_sleeve_returns(
+            panel, hold_horizon=hold_horizon, cost_bps=cost_bps, verify_causal=verify_causal,
+            with_components=return_components)
     if include_commodity_carry:
-        sleeves["commodity_carry"] = commodity_carry_sleeve_returns(
+        raw["commodity_carry"] = commodity_carry_sleeve_returns(
             panel, hold_horizon=hold_horizon, cost_bps=cost_bps, etf_close=commodity_etf_close,
-            start=start, end=end, fetch_fn=fetch_fn, clean_fn=clean_fn, verify_causal=verify_causal)
+            start=start, end=end, fetch_fn=fetch_fn, clean_fn=clean_fn, verify_causal=verify_causal,
+            with_components=return_components)
+    comps: dict[str, SleeveComponents] | None = (
+        {k: cast("SleeveComponents", v) for k, v in raw.items()} if return_components else None)
+    sleeves: dict[str, np.ndarray] = (
+        {k: c.net for k, c in comps.items()} if comps is not None
+        else {k: cast("np.ndarray", v) for k, v in raw.items()})
     finite = {k: int(np.isfinite(v).sum()) for k, v in sleeves.items()}
     log.info("production_base_sleeves: T=%d  finite_bars=%s  (hold=%d, cost_bps=%.4f)",
              panel.T, finite, hold_horizon, cost_bps)
+    if comps is not None:
+        return sleeves, comps
     return sleeves
 
 
@@ -505,7 +584,8 @@ def taiwan_tsmom_sleeve_returns(
     fetch_fn=None,
     clean_fn=None,
     verify_causal: bool = False,
-) -> np.ndarray:
+    with_components: bool = False,
+) -> "np.ndarray | SleeveComponents":
     """The TX/TE/TF index/sector-futures TSMOM base-book sleeve return on the panel timeline.
 
     Runs the validated linear-core TSMOM (:func:`cross_asset_signals.compute` — multi-look-back
@@ -541,7 +621,8 @@ def taiwan_tsmom_sleeve_returns(
     weights = w_wide.to_numpy(dtype=np.float64)
     fwd1 = _forward_returns_wide(futures_close)
     return _book_from_target_weights(
-        weights, fwd1, hold_horizon=hold_horizon, cost_bps=cost_bps
+        weights, fwd1, hold_horizon=hold_horizon, cost_bps=cost_bps,
+        with_components=with_components,
     )
 
 
@@ -558,8 +639,13 @@ def taiwan_base_sleeves(
     fetch_fn=None,
     clean_fn=None,
     verify_causal: bool = True,
-) -> dict[str, np.ndarray]:
+    return_components: bool = False,
+) -> "dict[str, np.ndarray] | tuple[dict[str, np.ndarray], dict[str, SleeveComponents]]":
     """``{"tsmom"}`` Taiwan base book (TX/TE/TF futures TSMOM) aligned to ``panel.dates``.
+
+    ``return_components`` (default off — byte-identical net dict) instead returns
+    ``(sleeves_net, sleeve_components)`` for the overlay-cost correction; see
+    :func:`production_base_sleeves`.
 
     The single validated linear-core stream a C3 candidate's marginal contribution is scored
     against on the TAIEX substrate — the Taiwan analog of :func:`production_base_sleeves` (whose US
@@ -572,10 +658,14 @@ def taiwan_base_sleeves(
         panel, hold_horizon=hold_horizon, cost_bps=cost_bps, futures=futures,
         futures_close=futures_close, start=start, end=end, token=token,
         fetch_fn=fetch_fn, clean_fn=clean_fn, verify_causal=verify_causal,
+        with_components=return_components,
     )
+    tsmom_net = cast("SleeveComponents", tsmom).net if return_components else cast("np.ndarray", tsmom)
     log.info("taiwan_base_sleeves: T=%d  finite_bars=%d  (hold=%d, cost_bps=%.4f)",
-             panel.T, int(np.isfinite(tsmom).sum()), hold_horizon, cost_bps)
-    return {"tsmom": tsmom}
+             panel.T, int(np.isfinite(tsmom_net).sum()), hold_horizon, cost_bps)
+    if return_components:
+        return {"tsmom": tsmom_net}, {"tsmom": cast("SleeveComponents", tsmom)}
+    return {"tsmom": tsmom_net}
 
 
 # Path anchors kept for callers/tests that locate the gates/config relative to this module.

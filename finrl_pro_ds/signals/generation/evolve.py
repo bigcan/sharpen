@@ -17,14 +17,24 @@ from __future__ import annotations
 import logging
 import warnings
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 
 from ..eval_harness import _ls_weights
 from ..features import Panel
 from .dsl_signal import eval_on_panel
-from .fitness import FitnessConfig, FitnessResult, _combined_book, combination_fitness
+from .fitness import (
+    FitnessConfig,
+    FitnessResult,
+    _combined_book,
+    _combined_book_with_components,
+    combination_fitness,
+)
 from .grammar import INPUTS, available_terminals, crossover, mutate, node_count, parse, to_formula
+
+if TYPE_CHECKING:
+    from .base_sleeves import SleeveComponents
 
 log = logging.getLogger("alpha_evolve")
 _INFEASIBLE = float("-inf")
@@ -78,7 +88,11 @@ _OVERLAY_MIN_OBS = 20            # expanding-window warmup before the overlay ti
 
 
 def _overlay_returns(formula: str, panel: Panel, base_book: np.ndarray, *,
-                     cost_bps: float) -> tuple[np.ndarray, float] | None:
+                     cost_bps: float,
+                     base_gross: "np.ndarray | None" = None,
+                     base_cost: "np.ndarray | None" = None,
+                     gross_exposure: "np.ndarray | None" = None,
+                     ) -> tuple[np.ndarray, float] | None:
     """CR-9 OVERLAY candidate returns: use ``formula`` (a timing signal, typically referencing a
     non-OHLCV feature slot) as a TIME-varying multiplier on the existing combined ``base_book``.
 
@@ -93,8 +107,27 @@ def _overlay_returns(formula: str, panel: Panel, base_book: np.ndarray, *,
          truncation-equivalence tripwire that a whole-sample z-score fails). Neutral (``m=0``)
          until ``_OVERLAY_MIN_OBS`` finite observations have accrued;
       4. bounded tilt ``m[t] = tanh(z_g[t]) ∈ [-1,1]``;
-      5. overlay marginal return ``cand[t] = m[t-1] * base_book[t]`` — LAGGED one bar (strict
-         causality, LEAK-2), NET of turnover cost ``cost_bps * |Δm|``.
+      5. overlay marginal return (LAGGED one bar, strict causality LEAK-2):
+
+             cand[t] = m[t-1]·b_gross[t] − |m[t-1]|·c_base[t] − cost_bps·|Δm[t]|·G[t]
+
+         where ``b_gross`` / ``c_base`` / ``G`` are the base book's gross return, embedded per-bar
+         cost, and held gross exposure (:func:`fitness._combined_book_with_components`).
+
+    F14 cost fix (Crucible independent audit, Tier B). The pre-fix formula was
+    ``m[t-1]·base_book[t] − cost_bps·|Δm[t]|`` with ``base_book`` the NET book return, which
+    (a) charged the overlay's own rescaling turnover at UNIT gross while the tilted book runs gross
+    ≈ G (~11× for a vol-scaled directional base book) → a survivor's net Sharpe overstated ~10× in
+    cost terms, and (b) since ``net = gross − cost``, a SHORT tilt (m<0) turned the base book's
+    embedded cost into a spurious REBATE (``m·net = m·gross + |m|·cost``). The corrected form charges
+    the embedded cost as ``|m|·c_base`` (always paid) and the overlay turnover at the true gross
+    ``G``. When ``base_gross``/``base_cost``/``gross_exposure`` are omitted the book is treated as a
+    unit-gross cost-free RETURN STREAM (``b_gross=base_book``, ``c_base=0``, ``G=1``) — EXACTLY
+    correct for synthetic/planted/proxy sleeves and bit-identical to the pre-fix formula, so those
+    paths (calibration, reproduce, synthetic tests) are unchanged. Real weight-built sleeves pass
+    components (via :func:`base_sleeves.production_base_sleeves` ``return_components=True``), and
+    both corrections are monotone-stricter on such books (short-tilt rebate removed; ``G ≥ 1`` on a
+    leveraged book), preserving the 0-PROMISING record (CRU-1).
 
     Returns ``(cand, turnover_ann)`` or None if the timing series is degenerate (all-NaN/constant).
     """
@@ -124,11 +157,18 @@ def _overlay_returns(formula: str, panel: Panel, base_book: np.ndarray, *,
     m = np.tanh(z)                                           # bounded tilt in [-1, 1]
     bb = np.asarray(base_book, dtype=np.float64)
     T = bb.shape[0]
+    # F14: gross return / embedded cost / gross exposure of the base book. Omitted ⇒ unit-gross
+    # cost-free return stream (b_gross=bb, c_base=0, G=1) → bit-identical to the pre-fix formula.
+    b_gross = bb if base_gross is None else np.asarray(base_gross, dtype=np.float64)
+    c_base = np.zeros(T, dtype=np.float64) if base_cost is None else np.asarray(base_cost, np.float64)
+    gross_exp = np.ones(T, dtype=np.float64) if gross_exposure is None \
+        else np.asarray(gross_exposure, dtype=np.float64)
     m_lag = np.empty(T, dtype=np.float64)                    # m[t-1], strictly causal
     m_lag[0] = 0.0
     m_lag[1:] = m[:T - 1]
     dm = np.abs(np.diff(m_lag, prepend=0.0))                 # per-bar turnover of the tilt
-    cand = m_lag * bb - cost_bps * dm                        # net of turnover cost
+    # tilted gross − embedded base cost (ALWAYS paid, |m|) − overlay rescale cost at TRUE gross (·G)
+    cand = m_lag * b_gross - np.abs(m_lag) * c_base - cost_bps * dm * gross_exp
     turnover_ann = float(np.nanmean(dm) * 252.0)             # per-bar tilt turnover → annualized (daily)
     if not np.isfinite(cand).any():
         return None
@@ -151,6 +191,38 @@ def _split(panel: Panel, holdout_frac: float, embargo: int) -> tuple[Panel, Pane
     return train, hold
 
 
+# F14 overlay-cost context: (base_book_net, base_gross, base_cost, gross_exposure). The last three
+# are None on the unit-gross fallback (synthetic/planted/proxy sleeves), which reproduces the pre-fix
+# overlay formula bit-for-bit.
+_OverlayCtx = tuple[np.ndarray, "np.ndarray | None", "np.ndarray | None", "np.ndarray | None"]
+
+
+def _slice_components(
+    components: "dict[str, SleeveComponents] | None", n: int
+) -> "dict[str, SleeveComponents] | None":
+    """Slice each :class:`SleeveComponents` to the first ``n`` rows (train split), mirroring
+    ``base_tr = {k: v[:n_train] ...}``. ``None`` (unit-gross fallback) passes through unchanged."""
+    if components is None:
+        return None
+    from .base_sleeves import SleeveComponents
+    return {k: SleeveComponents(net=c.net[:n], gross=c.gross[:n], cost=c.cost[:n],
+                                gross_exposure=c.gross_exposure[:n])
+            for k, c in components.items()}
+
+
+def _overlay_ctx(
+    net_returns: dict[str, np.ndarray],
+    components: "dict[str, SleeveComponents] | None",
+    timestamps: np.ndarray, cfg: FitnessConfig,
+) -> _OverlayCtx:
+    """The overlay multiplier target + its F14 cost decomposition. With ``components`` the book is
+    ``_combined_book_with_components`` (gross / cost / gross-exposure); without, the unit-gross
+    fallback ``(_combined_book(...), None, None, None)`` — bit-identical to the pre-fix path."""
+    if components is not None:
+        return _combined_book_with_components(net_returns, components, timestamps, cfg)
+    return _combined_book(net_returns, timestamps, cfg), None, None, None
+
+
 def evolve(
     seed_formulas: list[str],
     panel: Panel,
@@ -170,6 +242,7 @@ def evolve(
     pbo_max_strategies: int = 128,
     pbo_n_splits: int = 10,
     candidate_type: str = "cross_sectional",
+    base_components: "dict[str, SleeveComponents] | None" = None,
 ) -> GenerationReport:
     """Evolve DSL alphas on the TRAIN split; re-validate PROMISING survivors on the held-out
     tail. ``base_returns``/``timestamps`` align to the train split's rows.
@@ -180,6 +253,12 @@ def evolve(
     zero out becomes a non-constant-in-time exposure multiplier, so its marginal ΔSR through
     ``combination_fitness`` is well-posed. Both types are scored by the SAME marginal-contribution
     fitness (no gate change → frozen crucible-v2.0 gates_hash untouched).
+
+    ``base_components`` (F14, Tier B): the per-sleeve gross / cost / gross-exposure decomposition
+    (from ``base_sleeves.*(return_components=True)``), used ONLY by the overlay path to charge the
+    overlay-tilt cost at the base book's TRUE gross and to stop a short tilt from rebating the base
+    book's embedded cost. When omitted the overlay treats each sleeve as a unit-gross cost-free
+    return stream (exact for synthetic/planted/proxy books; the correction is then a no-op).
 
     Anti-mirage controls: the deflation N (``gen_n_eff``) is the file-drawer count of every genome
     ever scored; the DSR dispersion is the cross-search **population pool** of augmented-book
@@ -205,12 +284,17 @@ def evolve(
     inputs = available_terminals(panel) if is_overlay else INPUTS
     # OVERLAY dispatch: the combined base book (C1) is the multiplier target, computed ONCE per
     # split. On the train split it is over the train rows; the holdout path rebuilds it on full rows.
-    base_book_tr = _combined_book(base_tr, ts_tr, cfg) if is_overlay else None
+    # F14: the context also carries the book's gross / embedded-cost / gross-exposure streams (from
+    # base_components, sliced to the same rows) so the overlay-tilt cost is charged correctly.
+    ctx_tr = _overlay_ctx(base_tr, _slice_components(base_components, n_train), ts_tr, cfg) \
+        if is_overlay else None
 
-    def _returns_for(formula: str, pnl: Panel, base_book: "np.ndarray | None"
+    def _returns_for(formula: str, pnl: Panel, ctx: "_OverlayCtx | None"
                      ) -> tuple[np.ndarray, float] | None:
         if is_overlay:
-            return _overlay_returns(formula, pnl, base_book, cost_bps=cost_bps)   # type: ignore[arg-type]
+            bb, bg, bc, ge = ctx                                          # type: ignore[misc]
+            return _overlay_returns(formula, pnl, bb, cost_bps=cost_bps,
+                                    base_gross=bg, base_cost=bc, gross_exposure=ge)
         return _candidate_returns(formula, pnl, hold_horizon=hold_horizon,
                                   cost_bps=cost_bps, min_names=ls_min_names)
 
@@ -233,7 +317,7 @@ def evolve(
         # new trial, so distinct is the correct multiplicity count (GP5-01: doc/code reconciled).
         gen_n_total += 1
         try:
-            cr = _returns_for(formula, train, base_book_tr)
+            cr = _returns_for(formula, train, ctx_tr)
         except Exception as exc:                          # noqa: BLE001 - cull, don't crash a run
             return Candidate(formula, _INFEASIBLE, None, f"eval raised: {exc!r}")
         if cr is None:
@@ -289,13 +373,15 @@ def evolve(
     ts_ho = np.asarray(timestamps)[panel.T - n_hold:]
     # OVERLAY (CR-9): the base book on the FULL timeline is the multiplier target for the full-panel
     # re-score; the holdout rows are sliced off it below, matching the cross_sectional warm-up path.
+    # F14: base_components is already on the full timeline, so no slicing here.
     base_full = ({k: np.asarray(v) for k, v in base_returns.items()})
-    base_book_full = _combined_book(base_full, np.asarray(timestamps), cfg) if is_overlay else None
+    ctx_full = _overlay_ctx(base_full, base_components, np.asarray(timestamps), cfg) \
+        if is_overlay else None
     holdout_validation: list[dict] = []
     promising: list[Candidate] = []
     for c in train_passers:
         try:
-            full = _returns_for(c.formula, panel, base_book_full)
+            full = _returns_for(c.formula, panel, ctx_full)
         except Exception:                                 # noqa: BLE001
             full = None
         if full is None:

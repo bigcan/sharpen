@@ -15,11 +15,11 @@ TAIWAN_GATES = ROOT / "configs" / "taiwan_signal_eval.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
-    # v2.9 = audit-follow-up search-quality + provenance fixes (cross_sectional INPUTS-only draws,
-    # per-tick RNG seed from proposal_ts, panel-content snapshot_hash, real tick_ts). MINOR over v2.8 —
-    # it changes the search trajectory + reproduce hashes but NO verdict function, and touches no gate
-    # byte (the frozen gates_hash below is unchanged).
-    assert CRUCIBLE_VERSION == "crucible-v2.9"
+    # v3.0 = the four F14 anti-conservative scoring fixes (overlay gross cost + short-tilt rebate,
+    # dsr AR(1) N_eff, degenerate-vol cull). MAJOR — the FIRST bump to change the verdict FUNCTION
+    # (stricter on real base books) — but touches NO gate byte (the frozen gates_hash below is
+    # unchanged) and is monotone-stricter, so every recorded 0-PROMISING verdict is preserved.
+    assert CRUCIBLE_VERSION == "crucible-v3.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

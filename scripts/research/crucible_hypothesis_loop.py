@@ -131,23 +131,27 @@ def main() -> int:
         return 0
 
     if args.mode == "synthetic":
+        from finrl_pro_ds.signals.generation.base_sleeves import unit_components
         panel = _synthetic_panel(args.t, args.n)
         base = _proxy_base_sleeves(panel, hold=ek["hold_horizon"])
+        base_components = {k: unit_components(v) for k, v in base.items()}   # F14 no-op on proxy
         panel_key = "synthetic"
     elif meta["panel"] == "taiwan":
         from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
         from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
         panel = load_taiwan_panel(args.start, args.end)
-        base = taiwan_base_sleeves(panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
-                                   start=args.start, end=args.end)
+        base, base_components = taiwan_base_sleeves(
+            panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
+            start=args.start, end=args.end, return_components=True)   # F14 overlay-cost fix
         panel_key = "taiwan"
     else:
         from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
         from finrl_pro_ds.signals.generation.base_sleeves import production_base_sleeves
         panel = load_cross_asset_panel(args.start, args.end,
                                        config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
-        base = production_base_sleeves(panel, hold_horizon=ek["hold_horizon"],
-                                       cost_bps=ek["cost_bps"], start=args.start, end=args.end)
+        base, base_components = production_base_sleeves(
+            panel, hold_horizon=ek["hold_horizon"], cost_bps=ek["cost_bps"],
+            start=args.start, end=args.end, return_components=True)   # F14 overlay-cost fix
         panel_key = meta["panel"]
     ts = _panel_ts(panel)
 
@@ -178,7 +182,8 @@ def main() -> int:
         run_id=run_id, crucible_version=CRUCIBLE_VERSION, gates_hash=ghash,
         proposal_ts=proposal_ts, catalog_asset_classes=asset_classes,
         data_snapshot_hash=catalog.snapshot_hash(), pre_proposed=specs,
-        token_cost=getattr(proposer, "last_usage", {}).get("total_tokens", 0))
+        token_cost=getattr(proposer, "last_usage", {}).get("total_tokens", 0),
+        base_components=base_components)
 
     cards_dir = out_dir / "cards"
     for card in result.cards:

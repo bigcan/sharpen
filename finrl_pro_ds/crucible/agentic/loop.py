@@ -16,6 +16,7 @@ from __future__ import annotations
 import hashlib
 import logging
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -34,6 +35,9 @@ from ..manifest import RunManifest
 from .card import DiscoveryCard
 from .cohort_card import CohortCard, card_from_verdict
 from .hypothesis import HypothesisAuthor, PreRegisteredSpec, candidate_hash
+
+if TYPE_CHECKING:
+    from ...signals.generation.base_sleeves import SleeveComponents
 
 log = logging.getLogger("crucible.loop")
 
@@ -124,6 +128,7 @@ def run_hypothesis_loop(
     cohort_cfg: CohortConfig | None = None,
     cohort_mc_kwargs: dict | None = None,
     cohort_gates_hash: str | None = None,
+    base_components: "dict[str, SleeveComponents] | None" = None,
 ) -> HypothesisLoopResult:
     """Run one manual pass. ``evolve_kwargs`` is the runner block from ``load_generation_config``
     (rng_seed/pop_size/… — WITHOUT ``candidate_type``, which the loop sets per group).
@@ -166,7 +171,8 @@ def run_hypothesis_loop(
         if not seeds:
             continue
         log.info("mining %d %s seeds", len(seeds), ct)
-        report = evolve(seeds, panel, base_returns, timestamps, cfg, candidate_type=ct, **ek)
+        report = evolve(seeds, panel, base_returns, timestamps, cfg, candidate_type=ct,
+                        base_components=base_components, **ek)
         reports[ct] = report
         promising_hashes = {candidate_hash(c.formula) for c in report.promising}
         # Record every surfaced genome to the ledger (file-drawer): the hall-of-fame UNION the
@@ -225,7 +231,8 @@ def run_hypothesis_loop(
         specs=specs, panel=panel, base_returns=base_returns, timestamps=timestamps, cfg=cfg, ek=ek,
         run_id=run_id, crucible_version=crucible_version, gates_hash=gates_hash,
         proposal_ts=proposal_ts, data_snapshot_hash=data_snapshot_hash, cohort_cfg=cohort_cfg,
-        cohort_mc_kwargs=cohort_mc_kwargs, cohort_gates_hash=cohort_gates_hash)
+        cohort_mc_kwargs=cohort_mc_kwargs, cohort_gates_hash=cohort_gates_hash,
+        base_components=base_components)
 
     n_after = ledger.count()
     manifest = RunManifest(
@@ -248,6 +255,7 @@ def _evaluate_cohort_gate(
     timestamps: np.ndarray, cfg: FitnessConfig, ek: dict, run_id: str, crucible_version: str,
     gates_hash: str, proposal_ts: str, data_snapshot_hash: str | None,
     cohort_cfg: CohortConfig | None, cohort_mc_kwargs: dict | None, cohort_gates_hash: str | None,
+    base_components: "dict[str, SleeveComponents] | None" = None,
 ) -> tuple[list[CohortCard], dict]:
     """Run the opt-in cohort gate on the tick's OVERLAY specs; return ``(cohort_cards, provenance)``
     where ``provenance`` carries the manifest's pinned cohort fields (``cohort_gates_hash`` /
@@ -267,7 +275,8 @@ def _evaluate_cohort_gate(
         panel, base_returns, timestamps, overlay_formulas, cohort_cfg, cfg,
         mc_kwargs=cohort_mc_kwargs, cost_bps=float(ek.get("cost_bps", 0.0010)),
         holdout_frac=float(ek.get("holdout_frac", 0.25)),
-        holdout_embargo=int(ek.get("holdout_embargo", 21)), seed=seed)
+        holdout_embargo=int(ek.get("holdout_embargo", 21)), seed=seed,
+        base_components=base_components)
     if verdict is None:
         return [], {}
     card = card_from_verdict(

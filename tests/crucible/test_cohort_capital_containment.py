@@ -108,7 +108,8 @@ def _cohort_lockbox_substrate(tmp_path, lockbox: Lockbox, criterion: IncubationC
 
 
 def _force_promising_verdict(panel, base_returns, timestamps, overlay_formulas, ccfg, fcfg, *,
-                             mc_kwargs, cost_bps, holdout_frac, holdout_embargo, seed):
+                             mc_kwargs, cost_bps, holdout_frac, holdout_embargo, seed,
+                             base_components=None):
     """Stand-in for ``evaluate_cohort`` that returns a fully-populated PROMISING verdict (analytic
     floor + MC null + holdout all "passed"), so the orchestrator builds a genuinely PROMISING
     CohortCard through the REAL ``card_from_verdict`` path. ``pool_content_hash`` is computed from the

@@ -30,9 +30,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Mapping
+from typing import TYPE_CHECKING, Mapping
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from .base_sleeves import SleeveComponents
 
 from finrl_pro_ds.crypto.eval.statistics import (
     deflated_sharpe_ratio,
@@ -83,6 +86,17 @@ class FitnessConfig:
     perf_min_periods: int = 63
     tilt_clip: float = 1.5
     combiner_redundancy_strength: float = 0.0   # ADR-C1-5 corr down-weight in the combiner (off)
+    # Anti-conservative correctness floor (Crucible independent-audit F14, Tier B) — NOT a tunable
+    # decision gate, so it lives here as a FitnessConfig default (NOT in signal_eval.gates.yaml) and
+    # the frozen funnel gates_hash 519158fa1450 is untouched. A candidate whose realized per-period
+    # vol is below this fraction of the SMALLEST base sleeve's vol is culled: the shared inverse-vol
+    # combiner (envs/allocator_factory.dynamic_sleeve_alphas) weights a stream ∝ 1/σ, so a near-zero-
+    # vol candidate hijacks the convex weights and the augmented book ≈ the candidate — inflating the
+    # uplift-leg NULL tail (audit F14: null ΔSR up to 3.3). Culling such candidates is strictly
+    # stricter (monotone: it only removes potential false-positives), so it preserves every 0-PROMISING
+    # verdict (CRU-1). The 0.10 default caps the candidate's combiner weight at ~10× a base sleeve's;
+    # revisit when E1 is re-run on a realistic null (audit F14 item 5, deferred).
+    degenerate_vol_frac: float = 0.10
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,6 +115,7 @@ class FitnessResult:
     aug_book_sharpe_pp: float = float("nan")   # augmented-book per-period Sharpe (M1 pool feed, GP4-02)
     max_base_corr_obs: float = float("nan")    # multiple corr sqrt(R²) to the base span (GP4-01)
     marginal_t: float = float("nan")           # marginal-contribution per-period t-stat (GP4-03)
+    not_degenerate: bool = True                # F14: candidate vol ≥ frac·min(base vol) (anti-hijack)
 
 
 def _combined_book(returns: Mapping[str, np.ndarray], timestamps: np.ndarray,
@@ -116,6 +131,45 @@ def _combined_book(returns: Mapping[str, np.ndarray], timestamps: np.ndarray,
     a = np.stack([np.asarray(alphas[s], dtype=np.float64) for s in names], axis=1)   # (K,S)
     r = np.stack([np.asarray(returns[s], dtype=np.float64) for s in names], axis=1)   # (K,S)
     return np.nansum(a * r, axis=1)                                                   # (K,)
+
+
+def _combined_book_with_components(
+    net_returns: Mapping[str, np.ndarray],
+    components: "Mapping[str, SleeveComponents]",
+    timestamps: np.ndarray, cfg: FitnessConfig,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """C1 combiner applied to the base book's gross / cost / gross-exposure ALONGSIDE its net
+    return, using the SAME inverse-vol α as :func:`_combined_book` (α is computed from the NET
+    streams, exactly as today — the overlay-cost correction must not perturb the allocation).
+
+    Returns ``(b_net, b_gross, c_base, gross_exposure)``:
+      * ``b_net``          — bit-identical to ``_combined_book(net_returns, ...)``;
+      * ``b_gross``        — combined pre-cost book return, with ``b_gross - c_base == b_net``
+        (the combiner is linear per-sleeve and each sleeve obeys ``net == gross - cost``);
+      * ``c_base``         — combined embedded per-bar cost ``Σ_s α_s·cost_s``;
+      * ``gross_exposure`` — combined held gross notional ``Σ_s α_s·|w_s|`` — the notional traded to
+        rescale the WHOLE combined book by one unit (≈ the α-weighted sleeve grosses, ~11× for a
+        vol-scaled directional base book).
+
+    Used ONLY by ``evolve._overlay_returns`` (F14 overlay-cost fix); every other combiner caller
+    keeps :func:`_combined_book`."""
+    names = list(net_returns)
+    alphas = dynamic_sleeve_alphas(
+        net_returns, timestamps, window=cfg.combiner_window,
+        min_periods=cfg.combiner_min_periods, monthly_meta=cfg.combiner_monthly_meta,
+        target_portfolio_vol=None, tilt_strength=cfg.tilt_strength,
+        perf_window=cfg.perf_window, perf_min_periods=cfg.perf_min_periods,
+        tilt_clip=cfg.tilt_clip, redundancy_strength=cfg.combiner_redundancy_strength)
+    a = np.stack([np.asarray(alphas[s], dtype=np.float64) for s in names], axis=1)          # (K,S)
+    r_net = np.stack([np.asarray(net_returns[s], dtype=np.float64) for s in names], axis=1)
+    r_gross = np.stack([np.asarray(components[s].gross, dtype=np.float64) for s in names], axis=1)
+    c = np.stack([np.asarray(components[s].cost, dtype=np.float64) for s in names], axis=1)
+    g = np.stack([np.asarray(components[s].gross_exposure, dtype=np.float64) for s in names], axis=1)
+    b_net = np.nansum(a * r_net, axis=1)
+    b_gross = np.nansum(a * r_gross, axis=1)
+    c_base = np.nansum(a * c, axis=1)
+    gross_exposure = np.nansum(a * g, axis=1)
+    return b_net, b_gross, c_base, gross_exposure
 
 
 def _cpcv_index_paths(
@@ -273,8 +327,16 @@ def combination_fitness(
     else:
         disp = path_srs
     if np.isfinite(sr_pp) and len(disp) >= 2:
+        # F14 (Tier B, anti-conservative): deflate against the AR(1)-EFFECTIVE observation count, NOT
+        # the raw bar count. Daily marks under a multi-day hold are positively autocorrelated, so the
+        # Sharpe's standard error is set by N_eff = N·(1−ρ₁)/(1+ρ₁), not N. Passing raw n_obs (larger)
+        # understates SE → OVER-states dsr → easier to pass — the exact defect the marginal_t leg
+        # already avoids via _ar1_effective_n (fitness.py). Using N_eff here makes the two significance
+        # legs consistent and is monotone-stricter (lower N ⇒ lower dsr on a passing candidate), so it
+        # cannot create a new PROMISING verdict (CRU-1). See crucible independent audit F14 item 3.
+        n_eff = max(2, int(round(_ar1_effective_n(bclean))))
         d = deflated_sharpe_ratio(
-            sr_pp, disp, n_obs=int(bclean.size),
+            sr_pp, disp, n_obs=n_eff,
             skew=skewness(bclean.tolist()), excess_kurt=excess_kurtosis(bclean.tolist()),
             n_trials=max(2, int(round(gen_n_eff))), periods_per_year=1)
         dsr_aug = float(d["dsr"]) if d is not None else float("nan")
@@ -286,6 +348,15 @@ def combination_fitness(
     # significant now clears the hurdle; a strong-but-redundant standalone alpha does not earn a
     # pass on standalone strength alone. The t-stat uses the AR(1) EFFECTIVE N (GP/Math M-N2): daily
     # marks under a multi-day hold are autocorrelated, so √N would overstate significance.
+    #
+    # TIER-C KNOWN SEAL (independent audit F1, NOT patched — see
+    # docs/research/crucible_tier_b_c_remediation_2026-07-15.md). Under the convex sum-to-1 inverse-vol
+    # combiner this stream is the IDENTITY marg == w_c·(r_c − b_base) — a substitution residual, so a
+    # genuine variance-reducing diversifier has E[marg] < 0 and marginal_t → −∞ as N → ∞ (sign-inverted;
+    # also candidate-scale-dependent). It is deliberately left as-is because fixing it is a verdict-
+    # function redesign of the retired mass-miner. **Do NOT execute roadmap NEXT-2 (promote marginal_t
+    # to the single binding leg) as written — it inherits this defect.** The sign-inversion is pinned as
+    # a KNOWN behavior by tests/signals/test_tier_c_seals_registered.py so an accidental "fix" trips red.
     marg = (b_aug - b_base)
     marg = marg[np.isfinite(marg)]
     marg_sr = _per_period_sharpe(marg)
@@ -304,13 +375,28 @@ def combination_fitness(
         np.isfinite(delta_median) and delta_median >= cfg.delta_median_min
         and np.isfinite(frac_pos) and frac_pos >= cfg.frac_positive_min)
 
+    # F14 (Tier B, anti-conservative): degenerate-vol cull. The shared inverse-vol combiner weights a
+    # stream ∝ 1/σ, so a near-zero-vol candidate hijacks the convex weights (aug book ≈ candidate) and
+    # inflates the uplift-leg NULL tail (audit: null ΔSR up to 3.3). Cull a candidate whose realized
+    # per-period vol is below `degenerate_vol_frac` of the SMALLEST base sleeve's vol — the funnel
+    # cannot reliably score such a stream anyway. Monotone-stricter (only removes potential
+    # false-positives) ⇒ preserves every 0-PROMISING verdict (CRU-1). See audit F14 item 4.
+    cand_arr = np.asarray(cand_returns, dtype=np.float64)
+    cand_arr = cand_arr[np.isfinite(cand_arr)]
+    cand_vol = float(cand_arr.std(ddof=1)) if cand_arr.size > 1 else 0.0
+    base_vols = [float(v[np.isfinite(v)].std(ddof=1))
+                 for v in base.values() if int(np.isfinite(v).sum()) > 1]
+    min_base_vol = min(base_vols) if base_vols else 0.0
+    not_degenerate = bool(cand_vol >= cfg.degenerate_vol_frac * min_base_vol) if min_base_vol > 0.0 \
+        else True
+
     fitness = (delta_mean
                - cfg.lambda_turnover * max(0.0, turnover_ann - cfg.turnover_soft_cap)
                - cfg.lambda_complexity * (n_nodes / max(1, cfg.max_ast_nodes)))
     passes_gate = bool(
         np.isfinite(delta_mean) and delta_mean >= cfg.min_combination_uplift
         and np.isfinite(dsr_aug) and dsr_aug >= cfg.promising_dsr
-        and cand_hlz_pass and not_redundant and not_fragile)
+        and cand_hlz_pass and not_redundant and not_fragile and not_degenerate)
 
     return FitnessResult(
         fitness=float(fitness) if np.isfinite(fitness) else float("-inf"),
@@ -319,4 +405,5 @@ def combination_fitness(
         dsr_aug=dsr_aug, cand_hlz_pass=cand_hlz_pass, turnover_ann=float(turnover_ann),
         n_nodes=int(n_nodes), passes_gate=passes_gate,
         aug_book_sharpe_pp=float(sr_pp) if np.isfinite(sr_pp) else float("nan"),
-        max_base_corr_obs=float(max_base_corr), marginal_t=float(marginal_t))
+        max_base_corr_obs=float(max_base_corr), marginal_t=float(marginal_t),
+        not_degenerate=not_degenerate)

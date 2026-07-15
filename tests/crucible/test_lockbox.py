@@ -280,7 +280,8 @@ def test_incubate_active_isolates_poison_and_counts(tmp_path, monkeypatch) -> No
     lb._write(_entry(candidate_hash="stall"))
     sub = SimpleNamespace(lockbox=lb, substrate_id="syn", cfg=None,
                           evolve_kwargs=dict(hold_horizon=21, cost_bps=0.001, ls_min_names=6))
-    prepared = SimpleNamespace(panel=None, base_returns=None, timestamps=None, snapshot_hash="snap-x")
+    prepared = SimpleNamespace(panel=None, base_returns=None, timestamps=None, snapshot_hash="snap-x",
+                               base_components=None)
 
     calls = {"n": 0}
 

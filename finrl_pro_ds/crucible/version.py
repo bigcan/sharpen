@@ -108,6 +108,29 @@ panel still earns the identical verdict, so the frozen ``crucible-v2.0`` gates_h
 UNCHANGED. (The correctness/PIT fixes shipped alongside — ledger monotone upsert, tick resilience,
 lockbox seams, substrate-power guard, EDGAR/TWSE PIT — are non-semantic and do not alter the search.)
 
+`crucible-v3.0` is a **MAJOR** bump: the four anti-conservative (false-positive-direction) scoring
+fixes from the Crucible INDEPENDENT AUDIT (``docs/research/crucible_independent_audit_report_2026-07-14.md``
+F14, "Tier B"). Unlike every v2.x bump, this changes the verdict FUNCTION — a given formula on a REAL
+weight-built base book now earns STRICTER scores — so it is honestly a MAJOR, even though it changes NO
+gate BYTE (the frozen ``crucible-v2.0`` funnel gates_hash ``519158fa1450`` and the Taiwan
+``22a18172be1a`` are UNCHANGED — the fixes live in scoring CODE + ``FitnessConfig`` defaults, never in a
+gates YAML) and preserves every RECORDED verdict (all fixes are monotone-STRICTER, so the 0-PROMISING
+record can only stay 0-PROMISING — CRU-1's "must not change existing verdicts" holds). The four fixes:
+(1) ``evolve._overlay_returns`` charges the overlay tilt's turnover at the base book's TRUE gross
+(≈11× for a vol-scaled directional book) instead of unit gross — a survivor's net Sharpe was overstated
+~10× in cost terms (F14-1); (2) the same path charges a SHORT tilt the base book's embedded cost
+instead of rebating it (``m·net = m·gross + |m|·cost`` for ``m<0``) (F14-2); (3) ``fitness`` deflates
+``dsr_aug`` against the AR(1)-EFFECTIVE observation count, consistent with the ``marginal_t`` leg,
+instead of raw ``n_obs`` (which understated the Sharpe SE → over-stated dsr) (F14-3); (4) a
+degenerate-vol candidate cull in ``combination_fitness`` — a near-zero-vol stream hijacks the shared
+inverse-vol combiner (aug book ≈ candidate), inflating the uplift-leg null tail (F14-4). The overlay
+fix is threaded via a per-sleeve gross/cost/gross-exposure decomposition (``base_sleeves.*
+(return_components=True)`` → ``PreparedSubstrate.base_components`` → ``evolve``/``cohort_eval``/
+``incubation``); it is an EXACT no-op on unit-gross cost-free (synthetic/planted/proxy) books, so the
+synthetic/calibration/reproduce path is byte-identical to v2.9. The E1 realistic-null re-calibration
+(audit F14 item 5) and the STRUCTURAL gate defects (audit F1/F2/F3/F5, "Tier C") are DEFERRED, not
+fixed — see ``docs/research/crucible_tier_b_c_remediation_2026-07-15.md``.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -119,10 +142,11 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v2.9 = audit-follow-up search-quality + provenance fixes (cross_sectional INPUTS-only, per-tick seed,
-# panel-content snapshot_hash, real tick_ts). MINOR, funnel gates_hash UNCHANGED (519158fa1450) — the
-# search trajectory + reproduce hashes change, but NO verdict function does.
-CRUCIBLE_VERSION = "crucible-v2.9"
+# v3.0 = the four F14 anti-conservative scoring fixes (overlay gross cost + short-tilt rebate, dsr AR(1)
+# N_eff, degenerate-vol cull). MAJOR — it changes the verdict FUNCTION (stricter on real base books) —
+# but touches NO gate byte (frozen gates_hash 519158fa1450 / taiwan 22a18172be1a UNCHANGED) and is
+# monotone-STRICTER, so every recorded 0-PROMISING verdict is preserved (CRU-1 holds).
+CRUCIBLE_VERSION = "crucible-v3.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
