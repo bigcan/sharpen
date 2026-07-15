@@ -14,9 +14,9 @@ measured falsification, not an unresolved gap.
 
 ## What was measured (30 seeds, fine betas, real `combination_fitness` gate)
 
-The funnel's MDE-vs-N_eff, measured at H=1 (autocorrelation enters purely via N_eff = holdout/(2H−1),
-validated by the main probe's TA-3 at N_eff=500, ratio 1.06). Full-panel operating points via
-N_eff = 0.25·4.86M/(2H−1):
+The funnel's MDE-vs-N_eff, measured at H=1 (autocorrelation enters purely via N_eff = holdout/(2H−1);
+the N_eff proxy passed TA-3 at N_eff=500 (ratio 1.06) but **failed** at N_eff=1000 — see caveat 4).
+Full-panel operating points via N_eff = 0.25·4.86M/(2H−1):
 
 | operating point (full panel) | N_eff | measured MDE | clears ≤ 0.50 |
 |---|---|---|---|
@@ -48,6 +48,21 @@ N_eff = 0.25·4.86M/(2H−1):
    verdict rests on the clear 5-min+ failure **and** 1-min holding being barely tradeable anyway (a
    1-min-turnover strategy faces brutal cost drag even on low-cost futures).
 3. The verdict's large margins (0.86, 1.42 vs 0.50) make it robust to the N_eff-proxy slack.
+4. **The N_eff-proxy tripwire (TA-3) FAILED on one of its two validation cells** — surfaced by the
+   S553-cont-131 independent audit; the original write-up cited only the passing cell. In
+   `results/crucible_intraday_power/intraday_power.json` the wide/shaping run recorded
+   `TA3_autocorr_via_neff = false` and `A1_verdict = INCONCLUSIVE`: cell [46000, H=12] N_eff=500 passed
+   (measured MDE 2.10 vs H1-curve 1.98, ratio 1.06, on-curve), but cell [92000, H=12] N_eff=1000
+   **failed** (measured MDE 1.22 vs H1-curve 2.06, ratio **0.59**, off-curve). The decisive 30-seed
+   confirm run then measured only H=1 cells (no H>1 re-validation) and returned `A1_verdict = FAIL`.
+   **Direction of the failure:** the measured intraday MDE came in *below* what the N_eff = holdout/(2H−1)
+   proxy predicts, i.e. the proxy may **overstate** intraday difficulty by up to ~1.7× at N_eff≈1000; if
+   that held at the 5-min operating point the true MDE could be ~0.86/1.7 ≈ 0.51 — *at* the 0.50 ceiling
+   rather than clearly above it. The Stage-0 NO-GO still stands, but on two *independent* grounds rather
+   than the clean margin claimed: (a) even the ~1.7×-corrected 5-min MDE only reaches the ceiling, not
+   below it, and (b) the cont-131 audit pinned a data-independent `marginal_t` floor (~0.4) that blocks
+   the 0.50 target regardless of frequency. The advertised "clear, clean falsification" overstated the
+   rigor; the *conclusion* is unchanged.
 
 ## Reproduce
 
