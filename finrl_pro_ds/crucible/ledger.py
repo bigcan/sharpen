@@ -57,7 +57,11 @@ CREATE TABLE IF NOT EXISTS trial_ledger (
     proposal_ts         TEXT,
     verdict             TEXT,            -- SCORE column: agent-blind
     dsr                 REAL,            -- SCORE column: agent-blind
-    delta_sr_oos        REAL,            -- SCORE column: agent-blind
+    delta_sr_oos        REAL,            -- SCORE column, agent-blind. TRAIN-split CPCV mean ΔSR at the
+                                         -- running gen_n_eff (the pre-filter result). Despite the `_oos`
+                                         -- name (kept for schema back-compat), this is NOT out-of-sample:
+                                         -- the certified holdout re-score is a separate pass that rarely/
+                                         -- never runs, so this column is a train-split value (S553-cont-131).
     marginal_hlz_t      REAL,            -- SCORE column: agent-blind
     data_snapshot_hash  TEXT,
     fdr_wealth_charged  REAL             -- online-FDR spend (P3); nullable in P0
@@ -87,7 +91,7 @@ class TrialRecord:
     proposal_ts: str | None = None
     verdict: str | None = None
     dsr: float | None = None
-    delta_sr_oos: float | None = None
+    delta_sr_oos: float | None = None    # TRAIN-split CPCV mean ΔSR (see schema note); not out-of-sample
     marginal_hlz_t: float | None = None
     data_snapshot_hash: str | None = None
     fdr_wealth_charged: float | None = None

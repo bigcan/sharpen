@@ -190,6 +190,9 @@ def run_hypothesis_loop(
                 first_seen_run=run_id, proposal_ts=(pr.proposal_ts if pr else proposal_ts),
                 verdict=verdict,
                 dsr=(None if res is None else float(res.dsr_aug)),
+                # `res` is the TRAIN pre-filter FitnessResult, so this is a train-split CPCV value, NOT
+                # out-of-sample — the certified holdout re-score is a separate pass that rarely/never
+                # runs (the card layer names the same value `train_delta_sr_oos`; S553-cont-131).
                 delta_sr_oos=(None if res is None else float(res.delta_sr_oos)),
                 marginal_hlz_t=(None if res is None else float(res.marginal_t)),
                 data_snapshot_hash=data_snapshot_hash))

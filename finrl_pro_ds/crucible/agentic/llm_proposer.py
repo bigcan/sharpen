@@ -141,6 +141,11 @@ def _render_context(context: ProposalContext) -> str:
                      "prefer OVERLAY hypotheses (book-timing on a feature slot) over cross_sectional.")
     lines += [
         f"Asset classes registered: {', '.join(context.asset_classes) or '(none)'}",
+        # NOTE (S553-cont-131 audit): `context.killed_families` is presently ALWAYS empty — no code
+        # path writes a KILLED_VERDICTS ({NO_GO,NO_ADD,GATE_FAIL}) row into the TrialLedger, so
+        # `TrialLedger.killed_families()` returns []. This line therefore renders "(none)" every tick;
+        # the anti-rediscovery half of the moat is designed-but-unwired (roadmap NEXT-6). It leaks
+        # exactly 0 bits today, but it also protects nothing.
         "KILLED families — do NOT propose anything in these (already falsified; spend nothing "
         f"re-litigating them): {', '.join(context.killed_families) or '(none)'}",
         f"Propose at most {context.max_proposals} hypotheses.",
