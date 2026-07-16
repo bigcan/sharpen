@@ -178,17 +178,91 @@ in code):
 
 ---
 
-## 6. VERDICT (to be filled after the run — DO NOT pre-write)
+## 6. VERDICT (filled 2026-07-15, S553-cont-133, from `results/taiwan_smallcap_altdata/scorecard.json`)
 
-_Run pending FinMind fetch (`FINMIND_TOKEN` supplied by operator; kept out of repo/transcript)._
+**Run record.** Full FinMind pull (Sponsor token, env-only, never committed): 2131-name TWSE+TPEx
+common-stock pool → prices 2130 ids / month-revenue 2126 / margin 1995 / 集保 2106 / dividends 2029.
+Panel: pool **N=612**, **T=5292** (2005-01-03..2026-07-15), **4017 liquid days**; membership
+**2010-02-26..2026-07-15**, **median 200 names/month** (the 集保 register starts 2010-01-29 — *earlier*
+than the ~2016 assumed in §1, so the band is longer than pre-registered, not shorter). Channel
+coverage of active cells: mrev_yoy 99.3%, margin_util 97.2%, holder_conc 100.0%. Hygiene **PASS** on
+all three (causal ✓, OHLC violations 0). All three spec content-hashes reproduced exactly
+(`60680e61ff85` / `e0a4c719bfe0` / `1be26f02ee6a`) and the gates file (`0ccf6dd584f0`) was not edited
+after seeing results — **the anti-p-hacking seal held.**
 
 | Probe | gross IC-IR @21 | IC t | net Sharpe @standard | DSR | FDR-q | verdict |
 |---|---|---|---|---|---|---|
-| P1 mom_rev | — | — | — | — | — | — |
-| P2 margin_crowd | — | — | — | — | — | — |
-| P3 holder_conc | — | — | — | — | — | — |
+| P1 mom_rev | **+0.255** | **+16.09** | **+0.53** | 1.000 | 0.000 | **PROMISING (gross)** — survivorship-suspect; forward-incubate ONLY, never capital |
+| P2 margin_crowd | −0.136 | −8.58 | −1.21 | 0.000 | 0.997 | **NO-GO** — realized sign **INVERTED** vs the pre-committed −1 |
+| P3 holder_conc | −0.117 | −7.31 | −0.82 | 0.000 | 0.997 | **NO-GO** — realized sign **INVERTED** vs the pre-committed +1 |
 
-**Synthesis:** _pending._
+**Synthesis — 1/3 PROMISING, 2/3 NO-GO; and the 1 is NOT an established edge.**
+
+*What is PROVEN (measured, on this substrate):*
+- **P2 and P3 are cleanly falsified.** Both realized the *opposite* of their pre-committed sign (§5
+  kill condition #1), with negative net Sharpe at every cost model, DSR 0.000 and FDR-q 0.997. The
+  contrarian margin-crowding mechanism and the informed-accumulation 集保 mechanism are both rejected
+  in the small/mid band. Rising margin utilization mildly predicts *continuation*, not reversal.
+- **P1 clears every pre-registered gate on the current-listing pool**: IC-IR 0.255 ≥ 0.05, t 16.09 ≥
+  3.0, DSR 1.000 ≥ 0.90, FDR-q 0.000 ≤ 0.10, net Sharpe +0.53 at the 0.30%-sell-tax `standard` cost
+  (still +0.34 at `harsh`), all **15/15 CPCV paths positive** (OOS mean 0.867, p05 0.547), IC rising
+  monotonically with horizon (0.129→0.255→0.490 at 1→21→63d) and deciles monotone — the shape a slow
+  fundamental drift *should* have. Turnover 6.8×/yr, max DD −7.1%.
+- **P1's IC DECAYS monotonically across the populated subperiods.** Subperiod IC-IR: P1
+  `[1.536, 0.347, 0.283, 0.109]`, P3 `[1.459, −0.231, −0.205, 0.059]`, P2 `[0.14, −0.094, −0.185,
+  −0.143]`. **The leading value in each list must be DISCARDED** — see the harness caveat below — so
+  P1's real trajectory is **0.347 → 0.283 → 0.109** with recent-2y **+0.173**. The full-sample 0.255
+  is *not* inflated by the discarded window (it is 1.2% of IC days) — it is a fair average of the
+  three populated subperiods — but the **forward-looking expectation is ~0.10–0.17, not 0.255.**
+- **⚠️ HARNESS CAVEAT found while auditing this result (latent, pre-existing, not introduced here).**
+  `eval_harness.tier3_robustness` splits subperiods by **row index** (`np.linspace(0, panel.T, 5)`)
+  over the panel's **full date range**, not over *valid/active* days. This panel spans 2005-01-03 but
+  membership only begins 2010-02-26, so **subperiod 1 contains just 48 valid days** (2010-02-26..
+  2010-05-05) versus **1323 each** for subperiods 2-4 (verified directly). P1's `1.536` and P3's
+  `1.459` are therefore **small-sample noise on a ~96%-empty window — NOT evidence of a shared
+  artifact, and NOT evidence of survivorship.** An earlier draft of this section read them as a
+  cross-probe survivorship signature; **that reading was wrong and is retracted here.**
+  *Verdict impact: NONE* — P1's binding `min_subperiod_ic_ir` (0.109) came from subperiod **4**, and
+  P2/P3 fail on inverted sign + DSR 0.000 regardless. But the defect can in principle inflate
+  `mean_subperiod_ic_ir` or spuriously trip the `min_subperiod_ic_ir >= 0.0` gate on any panel whose
+  active window is shorter than its date range. **Filed as a follow-up** (fix: split on valid days, or
+  require a minimum valid-day count per subperiod).
+
+- **⚠️ §1's "Delisting" clause was NEVER IMPLEMENTED — survivorship here is FULL, not partial.**
+  §1 states *"`TaiwanStockDelisting` — delisted names are included for their live window so a name
+  drops out of the cross-section when it dies, not before."* **The code does not do this.**
+  `TaiwanStockDelisting` appears only in the fetcher's module docstring; it is never called, it is not
+  in `_CHANNELS`, and `enumerate_common_stock_pool` queries **`TaiwanStockInfo` alone** (2131
+  currently-listed ids). Verified directly. §1 is left **unedited** (editing a pre-registration after
+  seeing results is exactly what the seal forbids) — the discrepancy is recorded here instead.
+  *Verdict impact: none on the gates* (the harness correctly reports `survivorship_free=False` and the
+  promotion gate binds), **but the survivorship exposure is WORSE than §1's prose implies**, which
+  makes the PIT rebuild below more decisive, not less.
+
+*What is SPECULATED (NOT established — no positive evidence from this run):*
+- **Survivorship remains the pre-registered structural caveat** (§1/§4): the pool is enumerated from
+  currently-listed tickers, so contamination is worst furthest back and decays toward the present, and
+  "high revenue growth" is partly a proxy for *having survived*. This is a reason the 0.255 is an
+  **UPPER BOUND** — but this run produced **no positive evidence** that the bias is what drives P1
+  (the subperiod pattern I initially read that way does not survive the 48-day correction above).
+- **The observed decay is not diagnostic on its own.** Genuine alpha decay (the tier being
+  arbitraged), a regime effect, and survivorship all predict a decline toward the present, and are
+  observationally similar on this data. **The pre-registered PIT rebuild is the experiment that
+  discriminates them** — a promotion gate (§4), not a rescue analysis.
+
+*Verdict actions (bound by §4/§5, no discretion taken):*
+1. **P1 → "PROMISING, forward-incubate" only.** `survivorship_free_required: true` and
+   `tier2_audit_required: true` both **BIND**: no capital, no paper sleeve, and no deploy-gating
+   verdict may be read off this number. Every IC above is an **UPPER BOUND**.
+2. **Decisive next test (not a new probe):** a survivorship-free PIT rebuild of the pool (augment with
+   `TaiwanStockDelisting` ids, or TEJ-grade), then re-run *this frozen spec, unchanged*. If P1's IC
+   survives at ~0.1-0.17 with the recent subperiod intact, it becomes a real (small) candidate for
+   Tier-2. If it collapses toward the June mirage's fate, the small-cap alt-data thesis closes.
+3. **Round 2 is NOT triggered.** Its trigger requires *structure without capture* (gross clears but
+   cost/deflation kills) or a clean 0/3. P1 cleared gross **and** cost **and** deflation, so neither
+   condition holds. Per §5's stop rule this campaign is complete at 3 probes; do not add channels.
+4. **P1's cost wall is 0.479** (caution 0.30) — over half the frictionless Sharpe (1.008) is eaten by
+   the 0.30% sell tax even at 21-day holding. Any future form must be *lower*-turnover, not richer.
 
 ---
 
