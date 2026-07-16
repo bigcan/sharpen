@@ -131,6 +131,47 @@ synthetic/calibration/reproduce path is byte-identical to v2.9. The E1 realistic
 (audit F14 item 5) and the STRUCTURAL gate defects (audit F1/F2/F3/F5, "Tier C") are DEFERRED, not
 fixed — see ``docs/research/crucible_tier_b_c_remediation_2026-07-15.md``.
 
+`crucible-v4.0` is a **MAJOR** bump: the ``robustness.min_subperiod_ic_ir`` gate is WIRED, and the
+subperiod estimator it reads is repaired first (S553-cont-133 F2b). Every gates YAML has declared
+``robustness: {min_subperiod_ic_ir: 0.0}`` ("no negative subperiod") since v2.0, and the small-cap
+probe pre-registration (``docs/research/taiwan_smallcap_altdata_probes_preregistration_2026-07-15.md``
+§4) froze it as a THRESHOLD — but no code path ever read it: ``Gates.from_dict`` never exposed it as
+a field (it survived only in ``Gates.raw``), and ``scorecard._finalize`` built ``promising`` from
+dsr / ic_ir / ic_tstat / fdr_q / hlz_pass alone. A signal that INVERTED in a subperiod still scored
+PROMISING. This is the audit's "declared seal that never runs" family (F1/F2/F3/F5-adjacent), and it
+is closed here rather than retired: the pre-registration is the frozen contract, so the harness is
+made to honor it — the opposite of goal-post moving. Two coupled changes, in this order:
+(1) the F2b REPAIR — ``tier3_robustness`` splits subperiods on raw ROW index, so a panel whose active
+window is shorter than its date range hands the leading subperiod a coverage HOLE (the small-cap
+probe panel: 48 valid IC days against ~1300 for its siblings, yielding a meaningless IC-IR of 1.536).
+A subperiod with fewer than ``_MIN_SUBPERIOD_VALID_DAYS`` (100) valid IC days is now NaN and excluded
+from the min/mean, and the per-subperiod valid-day counts are reported on the card. The flat count
+cannot false-kill a coverage-compliant panel: ``coverage.min_days`` (>=1000) floors TOTAL valid days,
+so a compliant panel averages >=250 per subperiod and can only fall under 100 via the uneven
+distribution this targets. (A populated-fraction rule was tried and rejected in audit — it also NaNs
+a uniformly sparse panel whose subperiods are perfectly good samples, manufacturing a 0-PROMISING
+artifact.) Repair PRECEDES wiring deliberately: the
+v2.0 precedent above ("gate-repair-before-freeze") forbids canonizing a known-broken gate, and the
+pre-registration's own §6 warns the raw-index defect "can in principle ... spuriously trip the
+``min_subperiod_ic_ir >= 0.0`` gate on any panel whose active window is shorter than its date range".
+(2) the WIRING — ``min_subperiod_ic_ir`` (and ``recent_oos_years``, a second dead key in the same
+block: ``tier3_robustness`` took ``recent_years=2`` as a hardcoded default and never read the YAML,
+so the value only "worked" by coinciding — a no-op today, all three YAMLs say 2) is exposed on
+``Gates`` and folded into ``_finalize``'s ``promising``. As with the DSR leg, an UNMEASURABLE min is
+NOT a pass — absence of evidence must not read as evidence of robustness.
+MAJOR because it changes the verdict FUNCTION, exactly as v3.0 was. It touches NO gate BYTE — the
+frozen moats ``519158fa1450`` (funnel) / ``22a18172be1a`` (Taiwan) / ``0ccf6dd584f0`` (small-cap
+probe) are UNCHANGED, which is why WIRING was chosen over RETIRING: retiring needs a YAML edit, and
+moving ``0ccf6dd584f0`` after results are known would retroactively falsify the pre-registration's
+own §6 record that the seal "was not edited after seeing results" — the exact optical signature of
+goal-post moving, for zero verdict benefit. The gate is monotone-STRICTER, so every recorded verdict
+is preserved and CRU-1 holds — VERIFIED against the recorded card, not assumed: the only PROMISING in
+the entire record (``tw_smallcap_mom_rev``) has min subperiod IC-IR **+0.109** (from subperiod 4, a
+~1300-day window) and still clears 0.0; its two NO-GO siblings have negative minima but were already
+LOGGED on inverted sign + DSR 0.000. The repair changes ``tw_smallcap_mom_rev``'s REPORTED
+``mean_subperiod_ic_ir`` (0.569 → 0.246) by dropping the 48-day window — which makes the harness
+agree with the pre-registration §6 finding that "the leading value in each list must be DISCARDED".
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -142,11 +183,12 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v3.0 = the four F14 anti-conservative scoring fixes (overlay gross cost + short-tilt rebate, dsr AR(1)
-# N_eff, degenerate-vol cull). MAJOR — it changes the verdict FUNCTION (stricter on real base books) —
-# but touches NO gate byte (frozen gates_hash 519158fa1450 / taiwan 22a18172be1a UNCHANGED) and is
-# monotone-STRICTER, so every recorded 0-PROMISING verdict is preserved (CRU-1 holds).
-CRUCIBLE_VERSION = "crucible-v3.0"
+# v4.0 = the F2b subperiod-estimator repair (min-valid-days floor) + WIRING the long-declared,
+# never-read `robustness.min_subperiod_ic_ir` gate into the verdict. MAJOR — it changes the verdict
+# FUNCTION — but touches NO gate byte (frozen gates_hash 519158fa1450 / taiwan 22a18172be1a /
+# smallcap 0ccf6dd584f0 UNCHANGED) and is monotone-STRICTER, so every recorded verdict is preserved
+# (CRU-1 holds; verified against the recorded small-cap card, min subperiod IC-IR +0.109 >= 0.0).
+CRUCIBLE_VERSION = "crucible-v4.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
