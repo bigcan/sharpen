@@ -1,7 +1,11 @@
 """Crucible versioning tripwires — the gates hash is the provenance anchor (spec §5)."""
 from __future__ import annotations
 
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 from finrl_pro_ds.crucible.version import (
     CRUCIBLE_BASELINE_VERSION,
@@ -25,6 +29,42 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     assert CRUCIBLE_VERSION == "crucible-v4.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
+
+
+def test_current_version_has_a_matching_git_tag() -> None:
+    """``version.py`` states its own rule — "keep a matching git tag (``crucible-vMAJOR.MINOR``) so
+    ``run_manifest.crucible_version`` is anchored to an immutable commit" — but nothing enforced it,
+    and it rotted: **v2.7, v2.8, v2.9 and v3.0 all shipped untagged**, so every manifest stamped with
+    those versions pointed at nothing. v3.0 was the costly one — a MAJOR verdict-function change
+    (the F14 audit fixes) whose runs could not be tied to the code that produced them. All four were
+    registered retroactively in S553-cont-134, on their bump commits per the v1.0–v2.6 convention.
+    This test makes the convention EXECUTABLE so the anchor cannot silently rot again — a declared
+    rule with no consumer is exactly the class of gap this session was opened to close.
+
+    NOTE (expected red): a bump commit is failing until its tag exists. That is the forcing function,
+    not a bug — bump ``CRUCIBLE_VERSION``, then ``git tag -a <version>`` on that commit.
+
+    SKIPs rather than fails when git or the tag list is unavailable (no git, shallow clone, exported
+    tree, Docker COPY). A tripwire that reds for environmental reasons is one someone silences —
+    which is precisely how the frozen gates hashes nearly got re-pinned (see the CRLF test below)."""
+    if shutil.which("git") is None:
+        pytest.skip("git unavailable — cannot verify the tag anchor")
+    try:
+        r = subprocess.run(["git", "tag", "-l", "crucible-*"], cwd=ROOT,
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:      # not a repo / git broken
+        pytest.skip(f"git tag failed ({e}) — cannot verify the tag anchor")
+    if r.returncode != 0:
+        pytest.skip(f"git tag returned {r.returncode} — not a usable repo here")
+    tags = set(r.stdout.split())
+    if not tags:
+        pytest.skip("no crucible-* tags in this checkout (shallow clone?) — nothing to verify")
+    assert CRUCIBLE_VERSION in tags, (
+        f"CRUCIBLE_VERSION is {CRUCIBLE_VERSION!r} but no matching git tag exists. A run_manifest "
+        f"stamped {CRUCIBLE_VERSION!r} would not resolve to an immutable commit — the exact gap that "
+        f"left v2.7-v3.0 unanchored. Create it on the bump commit: "
+        f"`git tag -a {CRUCIBLE_VERSION} -m '...'`. Do NOT delete this test to go green."
+    )
 
 
 def test_funnel_gates_hash_still_frozen_at_v2_0() -> None:
