@@ -12,6 +12,7 @@ from finrl_pro_ds.crucible.version import (
 ROOT = Path(__file__).resolve().parents[2]
 GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 TAIWAN_GATES = ROOT / "configs" / "taiwan_signal_eval.gates.yaml"
+SMALLCAP_ALTDATA_GATES = ROOT / "configs" / "taiwan_smallcap_altdata.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
@@ -39,6 +40,18 @@ def test_taiwan_gates_hash_frozen() -> None:
     cross-asset moat test does. A DELIBERATE Taiwan gate change must bump BOTH this hash and the
     version, per the CRU-1 MAJOR/MINOR protocol."""
     assert gates_hash(TAIWAN_GATES) == "22a18172be1a"
+
+
+def test_smallcap_altdata_probe_gates_hash_registered() -> None:
+    """CRU-1 registration of the small/mid-cap alt-data PROBE gates file (audit §5/§6.7).
+
+    The pre-registered probes run on their OWN gates file
+    (``configs/taiwan_smallcap_altdata.gates.yaml``) — a PARALLEL pathway (lockbox/cohort ADR
+    precedent), so it does NOT touch the frozen funnel moats (``519158fa1450`` / ``22a18172be1a``,
+    asserted above and unchanged). Pinning its hash here means any byte change to the probe gate —
+    including a threshold move after results are seen — trips a red, exactly as the funnel moats do:
+    the anti-goal-post-move seal for the probe pathway. A DELIBERATE change must bump this reference."""
+    assert gates_hash(SMALLCAP_ALTDATA_GATES) == "0ccf6dd584f0"
 
 
 def test_gates_hash_is_stable_and_12_hex() -> None:
