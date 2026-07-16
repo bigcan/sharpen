@@ -138,7 +138,9 @@ has the *opposite* sign is a FAIL, not a sign-flip opportunity.
 
 ## 4. Metrics & Gates (FROZEN) — `configs/taiwan_smallcap_altdata.gates.yaml`
 
-Own gates file (CRU-1 MINOR). Scoring is the **existing cross-sectional IC funnel**
+Own gates file, **CRU-1-registered** `gates_hash` = **`0ccf6dd584f0`** (pinned in
+`tests/crucible/test_version.py::test_smallcap_altdata_probe_gates_hash_registered`; the frozen
+funnel moats `519158fa1450` / `22a18172be1a` are untouched — CRU-1 MINOR). Scoring is the **existing cross-sectional IC funnel**
 (`evaluate_batch`: T0 causality tripwire → T1 gross rank-IC → T2 capturability → T3 robustness →
 T3.5 CPCV → deflation), the same instrument that killed the June mirage. Thresholds (never hardcoded
 in code):
@@ -215,4 +217,6 @@ python -m pytest tests/research/test_taiwan_smallcap_altdata.py -q
 ```
 
 Then fill §6, append a `randd_log.md` entry, and run `/audit` (+ `/math` if any formula changed).
-Register this gates-file hash under **CRU-1** (audit §6.7).
+The gates-file hash is already registered under **CRU-1** (audit §6.7) — `0ccf6dd584f0`, pinned in
+`tests/crucible/test_version.py`; if you edit the gate after seeing results, that test goes red (by
+design), and a *deliberate* change must bump the pinned reference.
