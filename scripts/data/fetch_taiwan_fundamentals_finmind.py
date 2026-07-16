@@ -26,9 +26,12 @@ so the lag lives in exactly one place and the panel builder cannot reintroduce a
     ``date + 6 calendar days`` (conservative).
 The panel builder then activates a signal only from the first trading day ``>= avail_date``.
 
-Schema robustness: FinMind dataset column names ARE the contract. Every channel asserts its expected
-columns and HALTS with a clear diff on drift (mirrors ``fetch_taiwan_finmind._normalize``) rather
-than silently mis-mapping. ``--selftest`` exercises the pure lag/parse helpers with NO token.
+Fail-loud, never silent: (a) every channel asserts its expected columns and HALTS with a clear diff
+on schema drift (mirrors ``fetch_taiwan_finmind._normalize``) rather than mis-mapping; (b) a FinMind
+account-TIER/permission block (HTTP 400 "level is register" — the free-tier lock seen on intraday in
+June) HALTS with an actionable "needs a higher tier" message on the FIRST ticker, instead of writing
+an empty parquet after 1000 identical skip-warnings; (c) HTTP 402 quota is surfaced explicitly.
+``--selftest`` exercises the pure lag/parse/tier-detect helpers with NO token.
 
 Usage:
     export FINMIND_TOKEN=...                       # Sponsor tier; env only, never committed
@@ -164,6 +167,21 @@ def _assert_cols(df: pd.DataFrame, need: set[str], dataset: str, sid: str) -> No
         raise RuntimeError(
             f"{dataset}/{sid}: FinMind frame missing {sorted(missing)} "
             f"(got {list(df.columns)}) — dataset contract drifted; fix the mapping, do not mis-map.")
+
+
+# FinMind account-tier / permission block markers. A tier block is SYSTEMATIC (it fails the whole
+# dataset, so it hits the very first ticker) — distinct from a transient timeout or a single-id
+# dataset miss. FinMind signals it as HTTP 400 "level is register" (the free-tier lock seen on
+# intraday in June) or a payload permission message. Detecting it lets the fetcher HALT loudly with
+# an actionable message instead of writing an empty parquet after 1000 identical skip-warnings.
+_TIER_BLOCK_MARKERS = ("level is register", "level is ", "permission", "upgrade", "sponsor", "backer",
+                       "無權限", "權限不足", "訂閱")
+
+
+def _is_tier_block(err: Exception) -> bool:
+    """True if a FinMind error looks like an account-tier/permission block (needs a higher tier)."""
+    s = str(err).lower()
+    return any(m in s for m in _TIER_BLOCK_MARKERS)
 
 
 # --------------------------------------------------------------------------- #
@@ -308,6 +326,11 @@ def _fetch_channel(name: str, pool: list[str], start: str, end: str | None, toke
         except RuntimeError as e:
             if "402" in str(e):
                 raise
+            if _is_tier_block(e):
+                raise RuntimeError(
+                    f"{name}: FinMind TIER/PERMISSION block ({str(e)[:200]}). This dataset needs a "
+                    f"higher FinMind membership than your key has — upgrade the tier, or drop "
+                    f"'{name}' from --datasets.") from e
             log.warning("%s/%s skipped: %s", name, sid, str(e)[:160])
             df = pd.DataFrame()
         if not df.empty:
@@ -341,6 +364,10 @@ def _fetch_prices(pool: list[str], start: str, end: str | None, token: str,
         except RuntimeError as e:
             if "402" in str(e):
                 raise
+            if _is_tier_block(e):
+                raise RuntimeError(
+                    f"prices: FinMind TIER/PERMISSION block ({str(e)[:200]}). TaiwanStockPrice needs a "
+                    f"higher FinMind membership than your key has — upgrade the tier.") from e
             log.warning("prices/%s skipped: %s", sid, str(e)[:160])
             raw = pd.DataFrame()
         if not raw.empty:
@@ -374,6 +401,10 @@ def _selftest() -> int:
         "percent": [10.0, 25.0, 15.0, 100.0], "unit": [0, 0, 0, 5_000_000]})
     assert abs(big_holder_percent(g) - 40.0) < 1e-9           # 25 + 15 (both > 400 lots)
     assert _holding_total_shares(g) == 5_000_000
+    assert _is_tier_block(RuntimeError("FinMind HTTP 400 on X/2330: level is register"))
+    assert _is_tier_block(RuntimeError("permission denied for this dataset"))
+    assert not _is_tier_block(RuntimeError("FinMind HTTP 500 on X/2330: timeout"))
+    assert not _is_tier_block(RuntimeError("data_id not exist"))
     print("selftest-ok")
     return 0
 

@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 from finrl_pro_ds.signals import Gates, evaluate_batch, make_synthetic_panel  # noqa: E402
 from finrl_pro_ds.signals.features import ohlc_violations  # noqa: E402
 from scripts.data.fetch_taiwan_fundamentals_finmind import (  # noqa: E402
+    _is_tier_block,
     big_holder_percent,
     month_revenue_avail_date,
     parse_holding_lower_bound,
@@ -70,6 +71,15 @@ def test_month_revenue_availability_is_tenth_of_next_month():
     assert month_revenue_avail_date(2020, 4) == pd.Timestamp("2020-05-10")
     assert month_revenue_avail_date(2020, 12) == pd.Timestamp("2021-01-10")   # year roll
     assert month_revenue_avail_date(2019, 1) == pd.Timestamp("2019-02-10")
+
+
+def test_tier_block_detection_halts_not_skips():
+    # systematic tier/permission block → must be detected (so the fetcher HALTS, not skips 1000×)
+    assert _is_tier_block(RuntimeError("FinMind HTTP 400 on TaiwanStockMonthRevenue/2330: level is register"))
+    assert _is_tier_block(RuntimeError("permission denied"))
+    # transient / single-id misses → NOT a tier block (skip-and-continue is correct)
+    assert not _is_tier_block(RuntimeError("FinMind HTTP 500 on X/2330: timeout"))
+    assert not _is_tier_block(RuntimeError("data_id not exist"))
 
 
 def test_holding_tier_parse():
