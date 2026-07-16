@@ -16,11 +16,13 @@ SMALLCAP_ALTDATA_GATES = ROOT / "configs" / "taiwan_smallcap_altdata.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
-    # v3.0 = the four F14 anti-conservative scoring fixes (overlay gross cost + short-tilt rebate,
-    # dsr AR(1) N_eff, degenerate-vol cull). MAJOR — the FIRST bump to change the verdict FUNCTION
-    # (stricter on real base books) — but touches NO gate byte (the frozen gates_hash below is
-    # unchanged) and is monotone-stricter, so every recorded 0-PROMISING verdict is preserved.
-    assert CRUCIBLE_VERSION == "crucible-v3.0"
+    # v4.0 = the F2b subperiod-estimator repair (min-valid-days floor) + WIRING the long-declared,
+    # never-read `robustness.min_subperiod_ic_ir` gate into `_finalize`'s PROMISING expression.
+    # MAJOR — it changes the verdict FUNCTION — but touches NO gate byte (all three frozen hashes
+    # below are unchanged, which is why the gate was WIRED rather than RETIRED: retiring needs a
+    # gates-YAML edit and would move `0ccf6dd584f0` after results are known) and is monotone-
+    # stricter, so every recorded verdict is preserved (CRU-1 holds).
+    assert CRUCIBLE_VERSION == "crucible-v4.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
@@ -52,6 +54,28 @@ def test_smallcap_altdata_probe_gates_hash_registered() -> None:
     including a threshold move after results are seen — trips a red, exactly as the funnel moats do:
     the anti-goal-post-move seal for the probe pathway. A DELIBERATE change must bump this reference."""
     assert gates_hash(SMALLCAP_ALTDATA_GATES) == "0ccf6dd584f0"
+
+
+def test_gates_files_are_lf_so_the_moat_is_portable() -> None:
+    """The three hashes above are over RAW BYTES, so they are line-ending-sensitive: a stock Windows
+    checkout (``core.autocrlf=true``) rewrites every gates YAML to CRLF and moves all three
+    (``519158fa1450`` -> ``d04d7e747b48``, etc.), reddening the CRU-1 tripwires for a reason that has
+    nothing to do with the gates. That failure mode is dangerous, not merely annoying: the obvious
+    way to "fix" three red hash assertions is to re-pin the constants, which would silently destroy
+    the anti-goal-post-move seal. It also means a ``gates_hash`` stamped into a run_manifest differs
+    by platform, so ``crucible reproduce`` cannot verify a run across OSes.
+
+    ``.gitattributes`` pins ``configs/*.gates.yaml text eol=lf`` to prevent it. This asserts the rule
+    actually took effect in THIS working tree (an editor can still save CRLF), and fails loudly with
+    the diagnosis instead of leaving three unexplained hash mismatches."""
+    for p in (GATES, TAIWAN_GATES, SMALLCAP_ALTDATA_GATES):
+        assert b"\r\n" not in p.read_bytes(), (
+            f"{p.name} has CRLF line endings. gates_hash() is a SHA-256 over raw bytes, so every "
+            f"frozen CRU-1 hash in this file will mismatch. This is a CHECKOUT ARTIFACT, not a gate "
+            f"change — do NOT 're-pin' the hashes to make them pass. Restore LF instead: "
+            f"`rm configs/*.gates.yaml && git checkout -- configs/` with the "
+            f"`configs/*.gates.yaml text eol=lf` rule present in .gitattributes."
+        )
 
 
 def test_gates_hash_is_stable_and_12_hex() -> None:
