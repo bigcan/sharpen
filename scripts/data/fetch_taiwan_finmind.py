@@ -79,9 +79,32 @@ _FUT_MAP = {"open": "open", "max": "high", "min": "low", "close": "close",
 # --------------------------------------------------------------------------- #
 # FinMind HTTP
 # --------------------------------------------------------------------------- #
+# Transient network failures worth retrying with capped exponential backoff. These are raised by
+# `requests.get()` BEFORE any HTTP status is returned (a WinError 10054 reset mid-run, a DNS blip, a
+# read timeout), so the status-code retry loop below can never see them. Without an explicit catch a
+# single transient reset propagates as a non-RuntimeError and crashes a multi-hour fetch — S553-cont-133
+# saw one ConnectionError after 4,262 clean calls discard an in-progress channel because callers only
+# `except RuntimeError`. A 402 quota block or a schema/tier error is NOT transient: those raise
+# RuntimeError immediately and are never retried here.
+_TRANSIENT_NET = (
+    requests.exceptions.ConnectionError,
+    requests.exceptions.Timeout,
+    requests.exceptions.ChunkedEncodingError,
+)
+
+
 def _finmind_get(dataset: str, data_id: str | None, start: str, end: str | None,
-                 token: str, *, max_retries: int = 3) -> pd.DataFrame:
-    """One FinMind dataset pull → DataFrame. Surfaces the 402 quota error explicitly."""
+                 token: str, *, max_retries: int = 3, net_retries: int = 5) -> pd.DataFrame:
+    """One FinMind dataset pull → DataFrame. Surfaces the 402 quota error explicitly.
+
+    Retries two disjoint classes of transient failure, each capped:
+      - retryable HTTP *status* codes (non-200, non-402) up to ``max_retries`` (linear backoff);
+      - requests-level network errors (``_TRANSIENT_NET``) up to ``net_retries`` (exponential backoff,
+        capped at 30 s) — raised before any status, so the status loop cannot catch them. On final
+        give-up they become a ``RuntimeError`` so callers that ``except RuntimeError`` (per-name skip
+        paths) degrade gracefully instead of crashing the whole run.
+    A 402 quota block or a schema/tier ``RuntimeError`` is NOT transient and propagates immediately.
+    """
     params = {"dataset": dataset, "start_date": start}
     if data_id:
         params["data_id"] = data_id
@@ -89,8 +112,23 @@ def _finmind_get(dataset: str, data_id: str | None, start: str, end: str | None,
         params["end_date"] = end
     headers = {"Authorization": f"Bearer {token}"} if token else {}
 
+    def _get_once() -> requests.Response:
+        """`requests.get`, retrying only TRANSIENT network errors with capped exponential backoff."""
+        for net_attempt in range(1, net_retries + 1):
+            try:
+                return requests.get(FINMIND_URL, headers=headers, params=params, timeout=60)
+            except _TRANSIENT_NET as e:
+                if net_attempt >= net_retries:
+                    raise RuntimeError(
+                        f"FinMind network error on {dataset}/{data_id} after {net_retries} "
+                        f"retries: {type(e).__name__}: {e}") from e
+                log.warning("%s/%s transient net error (attempt %d/%d): %s — backing off",
+                            dataset, data_id, net_attempt, net_retries, type(e).__name__)
+                time.sleep(min(2 ** net_attempt, 30))
+        raise RuntimeError(f"FinMind network: unreachable retry fallthrough on {dataset}/{data_id}")
+
     for attempt in range(1, max_retries + 1):
-        resp = requests.get(FINMIND_URL, headers=headers, params=params, timeout=60)
+        resp = _get_once()
         if resp.status_code == 402:
             raise RuntimeError(
                 f"FinMind quota exhausted (HTTP 402) on {dataset}/{data_id}. "
