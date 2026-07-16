@@ -2,7 +2,8 @@
 
 ``evaluate_batch`` runs every candidate through T0 (hygiene) + T1 (gross power) + T2
 (capturability) + T3 (robustness) [+ T5 (orthogonality) if a FactorBook is supplied], then
-T4 (batch deflation, ``n_trials`` = #candidates with a finite IC-IR), assigns a verdict,
+T4 (batch deflation, ``n_trials`` = #candidates with a finite IC-IR), assigns a verdict from
+deflation (DSR/FDR) + gross power (IC-IR/t) + subperiod robustness (crucible-v4.0),
 and ranks lexicographically: primary = deflated IC-IR (DSR), then raw IC-IR, then
 orthogonality (less correlated wins), then subperiod robustness. The scorecard ALWAYS
 reports gross IC even for cost-blocked signals (LOGGED, not dropped), and the verdict tops
@@ -97,7 +98,8 @@ def evaluate_signal(sig: "Signal", panel: Panel, gates: Gates,
         cap = tier2_capturability(sig, panel, gates, neutralization=ns, expected_sign=es,
                                   hold_horizon=ph, scores=scores)
         rob = tier3_robustness(sig, panel, gates, neutralization=ns, expected_sign=es,
-                               horizon=ph, scores=scores, min_names=mn)
+                               horizon=ph, scores=scores, min_names=mn,
+                               recent_years=gates.recent_oos_years)
         if gates.cpcv_enabled:
             cpcv = tier3_5_cpcv(sig, panel, gates, neutralization=ns, expected_sign=es,
                                 horizon=ph, n_groups=gates.cpcv_n_groups,
@@ -143,6 +145,19 @@ def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
         caveats.append(f"highly correlated to {fac} "
                        f"(|corr|={card.orthogonality.max_abs_corr:.2f})")
 
+    # F2b (v4.0) — the `robustness.min_subperiod_ic_ir` gate. Declared in every gates YAML
+    # ("no negative subperiod") and pre-registered as a threshold since v2.0, but never read: the
+    # verdict came from dsr/IC/FDR alone, so a signal that inverted in a subperiod still scored
+    # PROMISING. Starved windows are excluded upstream (tier3_robustness's min-valid-days floor),
+    # so this reads a measured estimate or none at all. As with the DSR leg, an UNMEASURABLE
+    # robustness is not a pass — absence of evidence must not read as evidence of robustness.
+    msi = card.robustness.min_subperiod_ic_ir if card.robustness is not None else float("nan")
+    if not np.isfinite(msi):
+        caveats.append("subperiod robustness undefined (no subperiod has enough valid days)")
+    elif msi < gates.min_subperiod_ic_ir:
+        caveats.append(f"regime-fragile: min subperiod IC-IR {msi:.3f} < "
+                       f"{gates.min_subperiod_ic_ir:g} (inverts in a sampled subperiod)")
+
     # HLZ / BHY hurdle (C2.3): reported + caveated; folded into PROMISING only under require_hlz.
     hlz_pass = bool(defl is not None and defl.hlz_pass)
     promising = (
@@ -151,6 +166,7 @@ def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
         and np.isfinite(hp.ic_tstat) and hp.ic_tstat >= gates.promising_ic_tstat
         and np.isfinite(defl.fdr_q) and defl.fdr_q <= gates.fdr_q_max
         and (hlz_pass or not gates.require_hlz)
+        and np.isfinite(msi) and msi >= gates.min_subperiod_ic_ir
     )
     if promising and not hlz_pass:
         caveats.append(f"fails HLZ hurdle (t>{gates.hlz_t_min:g} & BHY-FDR<={gates.fdr_q_max:g}) "
@@ -246,7 +262,8 @@ def _card_json(c: SignalScorecard) -> dict:
             "min_subperiod_ic_ir": _f(rob.min_subperiod_ic_ir),
             "mean_subperiod_ic_ir": _f(rob.mean_subperiod_ic_ir),
             "recent_ic_ir": _f(rob.recent_ic_ir),
-            "subperiod_ic_ir": [_f(x) for x in rob.subperiod_ic_ir]},
+            "subperiod_ic_ir": [_f(x) for x in rob.subperiod_ic_ir],
+            "subperiod_valid_days": [int(x) for x in rob.subperiod_valid_days]},
         "orthogonality": None if orth is None else {
             "max_abs_corr": _f(orth.max_abs_corr), "r2_explained": _f(orth.r2_explained),
             "residual_sharpe": _f(orth.residual_sharpe), "n_days": orth.n_days,

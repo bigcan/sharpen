@@ -475,30 +475,63 @@ def tier2_capturability(sig: "Signal", panel: Panel, gates, *, neutralization, e
 
 # --------------------------------------------------------------------- Tier 3 ----
 
+# Subperiods are equal spans of panel ROWS, so a panel whose active window is shorter than its date
+# range hands its leading subperiod a HOLE: the Taiwan small-cap probe panel starts 2005 but
+# membership starts 2010, so subperiod 1 held 48 valid IC days against ~1300 for its siblings and
+# returned a meaningless IC-IR of 1.536. Below this many valid days a subperiod is too small a sample
+# to be a regime observation at all, so it is excluded (NaN) rather than scored.
+#
+# Why a FLAT count is the right rule, and why it cannot false-kill. ``coverage.min_days`` (>=1000 on
+# every shipped gates file) already floors a panel's TOTAL valid days, so a compliant panel averages
+# >=250 per subperiod — a subperiod can only fall below 100 if the valid days are distributed
+# UNEVENLY, which is precisely the hole this targets. A populated-FRACTION rule (valid >= half the
+# row span) was tried and REJECTED: it also NaNs a UNIFORMLY sparse panel — 45% populated => 595
+# valid days per subperiod, a perfectly good IC-IR sample — leaving every subperiod "unmeasurable",
+# making PROMISING unreachable on that substrate and manufacturing a 0-PROMISING artifact, the exact
+# failure class the S553-cont-131 independent audit indicted. Sample size, not calendar coverage, is
+# what makes an IC-IR trustworthy.
+#
+# This is an ESTIMATOR VALIDITY floor, not a promotion threshold — a starved subperiod is DROPPED,
+# never failed — so it is a structural constant here alongside ``n_subperiods``, not a gates-YAML
+# value (a gates edit would move the frozen CRU-1 gates_hash moats).
+_MIN_SUBPERIOD_VALID_DAYS = 100
+
+
 @dataclass(frozen=True, slots=True)
 class Robustness:
     n_subperiods: int
-    subperiod_ic_ir: tuple[float, ...]
+    subperiod_ic_ir: tuple[float, ...]   # NaN where the window was too starved to estimate
     min_subperiod_ic_ir: float
     mean_subperiod_ic_ir: float
     recent_ic_ir: float
     recent_n_days: int
+    subperiod_valid_days: tuple[int, ...] = ()
 
 
 def tier3_robustness(sig: "Signal", panel: Panel, gates, *, neutralization, expected_sign,
                      horizon: int, n_subperiods: int = 4, recent_years: int = 2,
-                     scores: np.ndarray | None = None, min_names: int = 4) -> Robustness:
+                     scores: np.ndarray | None = None, min_names: int = 4,
+                     min_valid_days: int = _MIN_SUBPERIOD_VALID_DAYS) -> Robustness:
     """Subperiod stability of the primary-horizon IC (an alpha that only worked in one
     regime is fragile). Reports per-subperiod IC-IR, its min/mean, and a recent-window IC.
+
+    A subperiod with fewer than ``min_valid_days`` valid IC days is a coverage hole, not an
+    estimate: it is reported as NaN and excluded from the min/mean, so it can neither inflate
+    ``mean_subperiod_ic_ir`` nor spuriously trip the ``robustness.min_subperiod_ic_ir`` gate that
+    ``scorecard._finalize`` reads (S553-cont-133 F2b). This repair PRECEDES the gate going live in
+    crucible-v4.0, per the spec §5 gate-repair-before-freeze rule.
     """
     eff = _neutralized_eff(sig, panel, neutralization, expected_sign, horizon, scores)
     fwd = panel.forward_returns(horizon)
     bounds = np.linspace(0, panel.T, n_subperiods + 1).astype(int)
     irs: list[float] = []
+    valid_days: list[int] = []
     for i in range(n_subperiods):
         a, b = int(bounds[i]), int(bounds[i + 1])
-        irs.append(cross_sectional_ic(eff[a:b], fwd[a:b], active=panel.active[a:b],
-                                      min_names=min_names).ic_ir)
+        ic = cross_sectional_ic(eff[a:b], fwd[a:b], active=panel.active[a:b],
+                                min_names=min_names)
+        valid_days.append(int(ic.n_days))
+        irs.append(ic.ic_ir if ic.n_days >= min_valid_days else float("nan"))
     finite = [x for x in irs if np.isfinite(x)]
     recent_n = min(panel.T, int(recent_years * TRADING_DAYS))
     rr = cross_sectional_ic(eff[panel.T - recent_n:], fwd[panel.T - recent_n:],
@@ -507,7 +540,7 @@ def tier3_robustness(sig: "Signal", panel: Panel, gates, *, neutralization, expe
         n_subperiods, tuple(irs),
         min(finite) if finite else float("nan"),
         float(np.mean(finite)) if finite else float("nan"),
-        rr.ic_ir, recent_n)
+        rr.ic_ir, recent_n, tuple(valid_days))
 
 
 # ------------------------------------------------------- Tier 3.5 (CPCV) ----

@@ -59,6 +59,8 @@ class Gates:
     cpcv_n_groups: int
     cpcv_k_test: int
     cpcv_embargo_days: int
+    min_subperiod_ic_ir: float     # F2b — no adequately-sampled subperiod may invert (v4.0)
+    recent_oos_years: int          # F2b — recent-OOS reporting window (reported, never gating)
     neutralization: tuple[str, ...]
     winsor_pct: tuple[float, float]
     cost_models: dict
@@ -71,6 +73,7 @@ class Gates:
     def from_dict(cls, d: dict | None = None) -> "Gates":
         m = _merge(_DEFAULTS, d)
         gp, defl, neu, cpcv = m["gross_power"], m["deflation"], m["neutralization"], m["cpcv"]
+        rob = m["robustness"]
         n_groups, k_test = int(cpcv["n_groups"]), int(cpcv["k_test"])
         if n_groups < 2:
             raise ValueError(f"cpcv.n_groups must be >= 2, got {n_groups}")
@@ -82,6 +85,8 @@ class Gates:
             raise ValueError("deflation.hlz_t_min must be >= 0")
         if int(defl["effective_n_min_overlap"]) < 2:
             raise ValueError("deflation.effective_n_min_overlap must be >= 2")
+        if int(rob["recent_oos_years"]) < 1:
+            raise ValueError("robustness.recent_oos_years must be >= 1")
         return cls(
             horizons=tuple(int(h) for h in gp["horizons"]),
             primary_horizon=int(gp["primary_horizon"]),
@@ -100,6 +105,8 @@ class Gates:
             cpcv_n_groups=n_groups,
             cpcv_k_test=k_test,
             cpcv_embargo_days=int(cpcv["embargo_days"]),
+            min_subperiod_ic_ir=float(rob["min_subperiod_ic_ir"]),
+            recent_oos_years=int(rob["recent_oos_years"]),
             neutralization=tuple(["winsor", "zscore", *neu["controls"]]),
             winsor_pct=(float(neu["winsor_pct"][0]), float(neu["winsor_pct"][1])),
             cost_models=dict(m["capturability"]["cost_models"]),

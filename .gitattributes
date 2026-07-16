@@ -6,6 +6,18 @@ docker/live/*.sh text eol=lf
 scripts/*.sh text eol=lf
 *.sh text eol=lf
 
+# The Crucible CRU-1 moat: `crucible.version.gates_hash()` is a SHA-256 over the RAW BYTES of a
+# gates YAML (deliberately — so any edit, even a comment, is visible in a run's provenance). That
+# makes the hash line-ending-sensitive, so a stock Windows checkout (core.autocrlf=true) silently
+# moves EVERY frozen hash: signal_eval 519158fa1450 -> d04d7e747b48, and likewise for the Taiwan and
+# small-cap probe seals. Two consequences, both bad: the three CRU-1 tripwires in
+# tests/crucible/test_version.py go red for a reason that has nothing to do with the gates (inviting
+# someone to "fix" them by re-pinning the constants, which would destroy the anti-goal-post-move
+# seal outright), and the gates_hash stamped into a run_manifest/DiscoveryCard differs by platform,
+# so `crucible reproduce` cannot verify a run across OSes. Pin these to LF so the seal is a property
+# of the gate content, not of the checkout host. Same failure mode as the shell scripts above.
+configs/*.gates.yaml text eol=lf
+
 # Files copied verbatim into Linux containers (Dockerfile COPY, busybox crond)
 # must stay LF — busybox crond chokes on CRLF in /etc/crontabs/root and
 # `docker build` will silently bake CRLF shebangs into intermediate images.
