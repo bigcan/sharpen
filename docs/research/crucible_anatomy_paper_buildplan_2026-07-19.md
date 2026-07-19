@@ -152,8 +152,32 @@ prerequisite for both the paper and any future discovery work. Chain **Architect
 (t-standardization, GARCH(1,1) uncond-variance, factor/idio budget) symbolically correct; empirical moments
 consistent (vol<target = Jensen; ACF<pure-GARCH = mixture dilution); 2 LOW doc-precision notes applied
 (realized-vs-theoretical E[load²]; avg corr ≈0.33 not exactly factor_share). Zero training-signal impact (synthetic
-null, not a reward). (2) ⬜ sweep factor_share / df sensitivity (currently single default point). **Not committed** —
-working tree only.
+null, not a reward). (2) ✅ **factor_share / df sensitivity sweep DONE** (cont-139, see entry below) — both open
+gates now closed; F4 is a fully-hardened robustness panel.
 
 **Next:** F3 (marginal_t sign-inversion synthetic demo — no ledger needed) + F2 (oracle-injection mode) + F5 (matched-null
 HoF rebuild), then Tier 3 corrected-contract scorer (chain Architect).
+
+### 2026-07-19 (cont-139) — F4 sensitivity sweep: E1 GREEN across the whole null-shape space
+
+**The open ⬜ gate closed.** F4's "E1 stays GREEN under a realistic null" rested on ONE null-shape point
+(df=5, factor_share=0.35). New `--exp e1_sensitivity` mode re-runs E1 (realistic null) over a 10-point one-axis-at-a-time
+grid — **tail fatness** df ∈ {3,4,5,8,15} and **cross-sectional correlation** factor_share ∈ {0,0.2,0.35,0.5,0.7},
+plus a fattest×most-correlated **stress corner** (df=3, fs=0.7) — re-applying the UNCHANGED `e1_null` ceilings at each
+point (`configs/crucible_calibration.gates.yaml` → new `e1_sensitivity` block; no new threshold; CRU-1 gate bytes
+untouched, `test_version.py` 8/8).
+
+- **Result: ALL 10 shapes GREEN** (`results/crucible_calibration/calibration_e1_sensitivity.json`, 60 panels/point):
+  every point `0 promising`, per-candidate FPR CP-upper95 **≤0.0013**, per-tick CP-upper95 **≤0.049** (both ceilings).
+  The `default` point reproduces the committed F4 anchor **byte-for-byte** (0/2312, CP 0.0013). The audit-indicted
+  `marginal_t` + `dsr` legs carry the protection under EVERY shape (both ~0.000 pass at default AND the stress corner).
+- **Design bug caught mid-run:** first tried `n_panels=30`, which structurally forces RED on the per-tick leg
+  (`1−0.05^(1/30)=0.095 > 0.05` at k=0, shape-independent). Bumped to 60 (= `e1_null`, the floor where the tick bound
+  clears) so each shape is judged by the *identical dual-ceiling bar* as the main E1 — the strongest possible
+  robustness statement, no relaxed criterion for a reviewer to poke.
+- **No Math re-pass needed:** varies parameters of the already-Math-verified `_realistic_returns` DGP within its valid
+  domain (df>2, factor_share∈[0,1)); no new formula. 4 more regression tests added (sweep axes are real; panel honors
+  params; strict-gate FP protection holds under every shape; lax-gate teeth) → **17/17 pass, ruff clean**.
+- **Paper impact:** F4 upgrades from a single-point claim to a genuine robustness panel — "E1's false-positive
+  protection does not depend on the null's shape." Directly forecloses the reviewer objection that E1-GREEN was an
+  artifact of one convenient DGP. Committed (not working-tree-only).
