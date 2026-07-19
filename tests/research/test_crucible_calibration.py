@@ -150,3 +150,64 @@ def test_mde_sweep_structure_and_ordering() -> None:
     assert res["rows"][1]["holdout_bars"] > res["rows"][0]["holdout_bars"]
     # both substrates detect the strong end of the grid (max_power high), so an MDE exists
     assert res["rows"][1]["max_power"] > 0.5
+
+
+# --------------------------------------------------------------- F4 realistic null (audit F14 / cont-138)
+def _moments(r: np.ndarray) -> tuple[float, float, float, float]:
+    """(per-asset vol, excess kurtosis, mean ACF1 of squared demeaned returns, mean off-diag corr)."""
+    flat = r.reshape(-1)
+    sd = flat.std()
+    ex_kurt = ((flat - flat.mean()) ** 4).mean() / sd**4 - 3.0
+    sq = (r - r.mean(axis=0, keepdims=True)) ** 2
+    acf1 = float(np.mean([np.corrcoef(sq[1:, i], sq[:-1, i])[0, 1] for i in range(r.shape[1])]))
+    corr = np.corrcoef(r.T)
+    off = float(corr[~np.eye(corr.shape[0], dtype=bool)].mean())
+    return float(r.std(axis=0).mean()), float(ex_kurt), acf1, off
+
+
+def test_realistic_null_has_the_three_stylized_facts_and_iid_does_not() -> None:
+    """The realistic null must exhibit fat tails, vol clustering AND a common factor — the three
+    properties the audit (F14) said the IID-Gaussian null lacks — while matching the ~0.01 vol scale so
+    the ONLY change vs IID is shape. The same measurements on the IID null must show none of them, which
+    is what makes E1-under-realistic-null a meaningful test rather than a re-run of the easy case."""
+    t, n = 2000, 12
+    real = calib._realistic_returns(t, n, rng=np.random.default_rng(1))
+    iid = 0.01 * np.random.default_rng(1).standard_normal((t, n))
+    r_vol, r_kurt, r_acf, r_corr = _moments(real)
+    i_vol, i_kurt, i_acf, i_corr = _moments(iid)
+
+    assert 0.006 < r_vol < 0.014, r_vol           # same scale as the IID 0.01 increment
+    assert r_kurt > 1.5, r_kurt                   # fat tails (Student-t + GARCH); IID ~0
+    assert r_acf > 0.03, r_acf                    # vol clustering (GARCH); IID ~0
+    assert r_corr > 0.12, r_corr                  # common factor; IID ~0
+    # discrimination: IID has none of the three
+    assert i_kurt < 0.5 and i_acf < 0.03 and i_corr < 0.05, (i_kurt, i_acf, i_corr)
+
+
+def test_realistic_null_panel_prices_positive_and_finite() -> None:
+    """The compounded price path stays finite and strictly positive (no exp overflow / no non-positive
+    close), and carries null feature slots independent of returns."""
+    panel = calib._realistic_noise_panel(1000, 10, seed=3, n_feature_slots=4)
+    assert np.isfinite(panel.close).all() and (panel.close > 0).all()
+    assert "macro:regime" in panel.feature_slots
+    assert panel.meta["source"] == "synthetic_noise_realistic"
+
+
+def test_garch_t_series_rejects_nonstationary_and_thin_tails() -> None:
+    """The GARCH-t generator guards its validity preconditions: df>2 (finite variance) and alpha+beta<1
+    (covariance-stationary). Both are load-bearing for the moment-matching in the DGP."""
+    rng = np.random.default_rng(0)
+    with pytest.raises(ValueError):
+        calib._garch_t_series(100, 3, rng=rng, df=2.0, alpha=0.08, beta=0.90, uncond_var=1e-4)
+    with pytest.raises(ValueError):
+        calib._garch_t_series(100, 3, rng=rng, df=5.0, alpha=0.15, beta=0.90, uncond_var=1e-4)
+
+
+def test_run_e1_realistic_null_end_to_end_and_stamps_kind() -> None:
+    """run_e1 accepts null_kind='realistic', runs end-to-end on the strict gate, and records the null
+    kind in its report (provenance so the IID baseline and the realistic run are never conflated)."""
+    rep_real = calib.run_e1(_mini_cc(_STRICT, n_panels=2), quick=False, null_kind="realistic")
+    rep_iid = calib.run_e1(_mini_cc(_STRICT, n_panels=2), quick=False, null_kind="iid")
+    assert rep_real["null_kind"] == "realistic" and rep_iid["null_kind"] == "iid"
+    # the strict gate is null-safe under BOTH nulls (the paper's F4 finding: FP protection is robust)
+    assert rep_real["per_candidate_fpr"] == 0.0 and rep_iid["per_candidate_fpr"] == 0.0
