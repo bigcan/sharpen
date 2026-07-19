@@ -172,6 +172,45 @@ LOGGED on inverted sign + DSR 0.000. The repair changes ``tw_smallcap_mom_rev``'
 ``mean_subperiod_ic_ir`` (0.569 → 0.246) by dropping the 48-day window — which makes the harness
 agree with the pre-registration §6 finding that "the leading value in each list must be DISCARDED".
 
+`crucible-v5.0` is a **MAJOR** bump: the substrate-power guard's off-grid MDE extrapolation is repaired
+to fail CLOSED (S553-cont-135). ``substrate.interp_mde`` extrapolated ABOVE the calibration grid by a
+1/√N law — "a t-statistic's SE ∝ 1/√N, so at fixed power MDE ∝ 1/√(holdout_bars)" — which the project's
+OWN cont-129 intraday Stage-0 experiment then DIRECTLY MEASURED and FALSIFIED: above N_eff≈1000 the
+deflated funnel's MDE FLATTENS to ~N^-0.21, and the exponent is itself decaying (~N^-0.567 even across
+the sweep's own 189→1011 grid — 1/√N never described this curve at either end). Since 1/√N falls faster
+than the funnel really gains power, the branch UNDER-stated the MDE: the guard claimed MORE power than
+exists and FAILED OPEN. With the guard live at ``action: refuse`` since 2026-07-12, that is a gate
+waving through exactly the mines it was built to stop — at holdout 20000 it computed MDE 0.315 vs the
+measured law's 0.749, ALLOWing a mine the evidence refuses (fail-open crossover: holdout ≈7,955). The
+sweep grid tops out at holdout 1011, so EVERY substrate deeper than one daily panel took that branch.
+The repair returns ``(+inf, 'unmeasured_high')`` above the grid — off-grid is UNMEASURED, and the
+honest statement is not a smaller number but "not measured" — which flows through the caller's
+unchanged ``implied_mde_delta_sr > ceiling`` test to REFUSE. ``--force-underpowered`` remains the
+operator's explicit override, and the real unblock is to EXTEND the sweep so deep substrates
+INTERPOLATE between measured anchors. Re-fitting the branch to the measured -0.21 was considered and
+REJECTED (it is measured on a different substrate/axis and only to N_eff 10210; the exponent is still
+decaying; and cont-131's data-INDEPENDENT ``marginal_t`` floor ~0.4 means the true MDE never decays to
+zero, so ANY power law → 0 is asymptotically fail-open — just further out). Also fail-closed: a
+zero/negative holdout, which used to raise ZeroDivisionError or silently return a COMPLEX MDE.
+
+MAJOR follows the v3.0/v4.0 precedent — it changes a live gate's decision FUNCTION (allow → refuse for
+every substrate off the top of the grid). Note this does NOT contradict v2.9 classing the same guard as
+"non-semantic": there the guard was observational (``action: warn``); the 2026-07-12 flip to ``refuse``
+made this code load-bearing. It touches NO gate BYTE — the frozen moats ``519158fa1450`` (funnel) /
+``22a18172be1a`` (Taiwan) / ``0ccf6dd584f0`` (small-cap probe) are UNCHANGED, and
+``configs/crucible_power.gates.yaml`` is byte-identical (the repair is in the interpolation CODE, and
+that file's thresholds — ``plausible_delta_sr_max: 0.50``, ``action: refuse`` — are untouched; per
+ADR-1 it was always a separate file precisely so power work cannot perturb the funnel moat). The change
+is monotone-STRICTER at every holdout, so every recorded verdict is preserved and CRU-1 holds —
+VERIFIED, not assumed, on two legs: (1) a property test asserts the repaired MDE >= the pre-fix MDE
+across the whole domain, so nothing refused can become allowed; (2) the live orchestrator tick DBs were
+read (2026-07-16) — every power-stamped tick ever recorded sits at holdout=1011 / mode ``grid`` /
+MDE 1.4025, the exact top grid point, so NO recorded tick ever took the falsified branch and the
+fail-open was still LATENT. The ``extrapolated_low`` branch keeps 1/√N and is byte-stable (the
+flagship's ≈4.45 provenance figure is preserved): it is NOT conservative there either — at the measured
+-0.567 rate sqrt under-states by ~3-12% — but it is verdict-INVARIANT, bounded below by the largest
+MEASURED MDE (3.63), which exceeds any plausible ΔSR ceiling, so it refuses whatever the exponent.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -183,12 +222,16 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v4.0 = the F2b subperiod-estimator repair (min-valid-days floor) + WIRING the long-declared,
-# never-read `robustness.min_subperiod_ic_ir` gate into the verdict. MAJOR — it changes the verdict
-# FUNCTION — but touches NO gate byte (frozen gates_hash 519158fa1450 / taiwan 22a18172be1a /
-# smallcap 0ccf6dd584f0 UNCHANGED) and is monotone-STRICTER, so every recorded verdict is preserved
-# (CRU-1 holds; verified against the recorded small-cap card, min subperiod IC-IR +0.109 >= 0.0).
-CRUCIBLE_VERSION = "crucible-v4.0"
+# v5.0 = the substrate-power guard's off-grid MDE extrapolation fails CLOSED. The 1/√N law it
+# extrapolated by was falsified by the project's own cont-129 measurement (MDE flattens to ~N^-0.21
+# above N_eff≈1000), so the branch UNDER-stated MDE — the guard claimed more power than exists and
+# FAILED OPEN for every substrate deeper than the grid's top (holdout 1011). Off-grid now returns
+# +inf/'unmeasured_high' ⇒ REFUSE. MAJOR — it changes a live gate's decision FUNCTION — but touches NO
+# gate byte (frozen 519158fa1450 / taiwan 22a18172be1a / smallcap 0ccf6dd584f0 UNCHANGED;
+# crucible_power.gates.yaml byte-identical) and is monotone-STRICTER at every holdout, so every
+# recorded verdict is preserved (CRU-1 holds; verified two ways — a monotone-stricter property test,
+# and the live tick DBs: every power-stamped tick sits at holdout=1011/'grid', so the bug was LATENT).
+CRUCIBLE_VERSION = "crucible-v5.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
