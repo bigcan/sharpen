@@ -29,6 +29,8 @@ header + the design note).
 Usage (from repo root):
     python scripts/research/crucible_calibration.py --exp both
     python scripts/research/crucible_calibration.py --exp e1 --quick     # fast smoke test
+    python scripts/research/crucible_calibration.py --exp e1 --null realistic  # F4 realistic null (1 pt)
+    python scripts/research/crucible_calibration.py --exp e1_sensitivity # F4 robustness across null shapes
     python scripts/research/crucible_calibration.py --exp e2 --out results/crucible_calibration
 """
 from __future__ import annotations
@@ -186,13 +188,16 @@ def _realistic_returns(t: int, n: int, *, rng: np.random.Generator, df: float = 
     return loads[None, :] * f[:, None] + idio
 
 
-def _realistic_noise_panel(t: int, n: int, *, seed: int, n_feature_slots: int) -> Panel:
+def _realistic_noise_panel(t: int, n: int, *, seed: int, n_feature_slots: int,
+                           null_params: dict | None = None) -> Panel:
     """Realistic-null counterpart of ``_noise_panel``: identical OHLCV/vol/date/(null)-slot construction,
     but ``close`` compounds ``_realistic_returns`` (fat tails + vol clustering + common factor) instead of
     IID-Gaussian increments. Audit F14: today's E1 GREEN rides on the mis-specified marginal_t/dsr legs
-    under an IID-Gaussian null; this panel re-measures that FPR under a realistic null. No planted edge."""
+    under an IID-Gaussian null; this panel re-measures that FPR under a realistic null. No planted edge.
+    ``null_params`` (optional) overrides the ``_realistic_returns`` null-SHAPE knobs (``df``,
+    ``factor_share``, ...) — the axis the E1 sensitivity sweep varies (S553-cont-138)."""
     rng = np.random.default_rng(seed)
-    r = _realistic_returns(t, n, rng=rng)
+    r = _realistic_returns(t, n, rng=rng, **(null_params or {}))
     close = np.exp(np.cumsum(r, axis=0) + rng.uniform(3.0, 5.0, size=n))
     open_ = close * (1 + 0.001 * rng.standard_normal((t, n)))
     high = np.maximum(open_, close) * 1.002
@@ -336,7 +341,8 @@ class LegTally:
                 ("uplift", "dsr", "marginal_t", "not_redundant", "not_fragile", "all_pass")}
 
 
-def run_e1(cc: CalibConfig, *, quick: bool, null_kind: str = "iid") -> dict:
+def run_e1(cc: CalibConfig, *, quick: bool, null_kind: str = "iid",
+           null_params: dict | None = None) -> dict:
     sub = cc.substrate
     e1 = cc.raw["e1_null"]
     n_panels = 6 if quick else int(e1["n_panels"])
@@ -358,8 +364,10 @@ def run_e1(cc: CalibConfig, *, quick: bool, null_kind: str = "iid") -> dict:
 
     log.info("E1 null-calibration [%s null]: %d noise panels x {cross_sectional[%d] + overlay[%d]} seeds",
              null_kind, n_panels, len(cs_seeds), len(ov_seeds))
+    # null_params only reshapes the realistic generator; the IID generator ignores it (frozen baseline).
+    extra = {"null_params": null_params} if null_kind == "realistic" else {}
     for k in range(n_panels):
-        panel = panel_gen(t, n, seed=1000 + k, n_feature_slots=n_slots)
+        panel = panel_gen(t, n, seed=1000 + k, n_feature_slots=n_slots, **extra)
         base = _proxy_base_sleeves(panel, hold=cc.ek["hold_horizon"])
         ts = _panel_ts(panel)
         n_prom_this = 0
@@ -387,6 +395,7 @@ def run_e1(cc: CalibConfig, *, quick: bool, null_kind: str = "iid") -> dict:
     return {
         "n_panels": n_panels,
         "null_kind": null_kind,
+        "null_params": dict(null_params) if null_params else {},   # provenance for the shape sweep
         "seeds": {"cross_sectional": len(cs_seeds), "overlay": len(ov_seeds)},
         "promising_total": promising_total,
         "genomes_scored_total": genomes_total,
@@ -401,6 +410,80 @@ def run_e1(cc: CalibConfig, *, quick: bool, null_kind: str = "iid") -> dict:
         "per_leg_null_pass_rate": legs.rates(),   # M1 diagnostic: which leg binds under the null
         "per_leg_denom": legs.denom,
         "verdict": "GREEN" if e1_green else "RED",
+    }
+
+
+# ------------------------------------------------- E1 sensitivity sweep (F4 robustness, cont-138)
+# Null-shape knobs the sweep is allowed to vary (a subset of _realistic_returns' signature). Anything
+# else in a point row (label, comments) is ignored; unknown numeric keys would be a config typo, so
+# we whitelist explicitly rather than forward the whole row.
+_NULL_SHAPE_KEYS = ("df", "factor_share", "garch_alpha", "garch_beta", "target_vol",
+                    "load_mean", "load_sd")
+
+
+def _with_e1_panels(cc: CalibConfig, n_panels: int) -> CalibConfig:
+    """A shallow copy of ``cc`` whose ``e1_null.n_panels`` is overridden for a sweep sub-run — lets each
+    sensitivity point use the (smaller) sweep budget without mutating the shared config. Gate THRESHOLDS
+    (fit_cfg, ceilings) are untouched, so CRU-1 is safe."""
+    raw = dict(cc.raw)
+    raw["e1_null"] = {**cc.raw["e1_null"], "n_panels": int(n_panels)}
+    return CalibConfig(raw=raw, fit_cfg=cc.fit_cfg, ek=cc.ek)
+
+
+def run_e1_sensitivity(cc: CalibConfig, *, quick: bool) -> dict:
+    """Sensitivity of the F4 realistic-null E1 verdict to the null-SHAPE knobs (``df`` = Student-t tail
+    fatness; ``factor_share`` = cross-sectional common-factor share of variance). F4 measured E1 at ONE
+    default point (df=5, factor_share=0.35); this re-runs E1 (realistic null) over the ``e1_sensitivity``
+    grid and re-applies the UNCHANGED ``e1_null`` ceilings at each point. GREEN iff EVERY point clears
+    them — the funnel's false-positive protection is a property of the GATE, not of the particular null
+    shape. Introduces no new threshold (reuses ``null_fpr_max`` / ``null_tick_fpr_max``)."""
+    sens = cc.raw["e1_sensitivity"]
+    points = list(sens["points"])
+    n_panels = 6 if quick else int(sens["n_panels"])
+    cand_ceiling = float(cc.raw["e1_null"]["null_fpr_max"])
+    tick_ceiling = float(cc.raw["e1_null"]["null_tick_fpr_max"])
+    sub = _with_e1_panels(cc, n_panels)
+
+    log.info("E1 sensitivity sweep: %d null-shape points x %d panels (ceilings cand<=%.3g, tick<=%.3g)",
+             len(points), n_panels, cand_ceiling, tick_ceiling)
+    rows: list[dict[str, Any]] = []
+    for pt in points:
+        label = str(pt.get("label", ""))
+        null_params = {k: float(pt[k]) for k in _NULL_SHAPE_KEYS if k in pt}
+        e1 = run_e1(sub, quick=quick, null_kind="realistic", null_params=null_params)
+        rows.append({
+            "label": label,
+            "null_params": null_params,
+            "promising_total": e1["promising_total"],
+            "genomes_scored_total": e1["genomes_scored_total"],
+            "per_candidate_fpr": e1["per_candidate_fpr"],
+            "per_candidate_fpr_cp_upper95": e1["per_candidate_fpr_cp_upper95"],
+            "per_tick_fpr": e1["per_tick_fpr"],
+            "per_tick_fpr_cp_upper95": e1["per_tick_fpr_cp_upper95"],
+            "per_leg_null_pass_rate": e1["per_leg_null_pass_rate"],
+            "verdict": e1["verdict"],
+        })
+        log.info("  %-16s df=%.1f fs=%.2f: promising=%d, candFPR CP<=%.4f, tickFPR CP<=%.3f -> %s",
+                 label, null_params.get("df", float("nan")), null_params.get("factor_share", float("nan")),
+                 e1["promising_total"], e1["per_candidate_fpr_cp_upper95"],
+                 e1["per_tick_fpr_cp_upper95"], e1["verdict"])
+
+    all_green = all(r["verdict"] == "GREEN" for r in rows)
+    worst_cand = max((r["per_candidate_fpr_cp_upper95"] for r in rows), default=float("nan"))
+    worst_tick = max((r["per_tick_fpr_cp_upper95"] for r in rows), default=float("nan"))
+    return {
+        "n_panels": n_panels,
+        "n_points": len(points),
+        "cand_ceiling": cand_ceiling,
+        "tick_ceiling": tick_ceiling,
+        "rows": rows,
+        "worst_per_candidate_fpr_cp_upper95": worst_cand,
+        "worst_per_tick_fpr_cp_upper95": worst_tick,
+        "all_points_green": all_green,
+        "verdict": "GREEN" if all_green else "RED",
+        "note": ("F4 robustness panel: E1 re-run under realistic nulls of varying tail-fatness (df) and "
+                 "cross-sectional correlation (factor_share), reusing the frozen e1_null ceilings. GREEN "
+                 "iff FP protection holds across ALL null shapes, not only the default (df=5, fs=0.35)."),
     }
 
 
@@ -552,9 +635,11 @@ def run_mde_sweep(cc: CalibConfig, *, quick: bool) -> dict:
 def main() -> int:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(message)s")
     ap = argparse.ArgumentParser(description="Crucible funnel calibration: E1 null-FPR + E2 power")
-    ap.add_argument("--exp", choices=("e1", "e2", "both", "mde_sweep"), default="both",
+    ap.add_argument("--exp", choices=("e1", "e2", "both", "mde_sweep", "e1_sensitivity"),
+                    default="both",
                     help="e1/e2/both = calibration verdicts; mde_sweep = the MDE-vs-T detection "
-                         "floor across substrate lengths (the funnel's power characterization).")
+                         "floor across substrate lengths; e1_sensitivity = re-run E1 under realistic "
+                         "nulls of varying tail-fatness/correlation (F4 robustness sweep).")
     ap.add_argument("--calib-config", default=str(DEFAULT_CALIB_GATES))
     ap.add_argument("--config", default=str(DEFAULT_FUNNEL_GATES),
                     help="funnel gates YAML — its generation block supplies the REAL FitnessConfig "
@@ -586,12 +671,17 @@ def main() -> int:
         report["e2"] = run_e2(cc, quick=args.quick)
     if args.exp == "mde_sweep":
         report["mde_sweep"] = run_mde_sweep(cc, quick=args.quick)
+    if args.exp == "e1_sensitivity":
+        report["e1_sensitivity"] = run_e1_sensitivity(cc, quick=args.quick)
 
-    # Joint verdict (M4): GREEN only if BOTH pass (when both ran). The sweep is a characterization,
-    # not a pass/fail, so it carries no joint verdict.
+    # Joint verdict (M4): GREEN only if BOTH pass (when both ran). mde_sweep is a characterization (no
+    # pass/fail -> N/A); e1_sensitivity is itself a pass/fail so it becomes the run's verdict.
     verdicts = [report[e]["verdict"] for e in ("e1", "e2") if e in report]
     if cc.raw.get("joint", {}).get("require_both", True) and len(verdicts) == 2:
         report["joint_verdict"] = "GREEN" if all(v == "GREEN" for v in verdicts) else "RED"
+    elif "e1_sensitivity" in report:
+        # A self-contained pass/fail (F4 robustness across null shapes); it IS the run's verdict.
+        report["joint_verdict"] = report["e1_sensitivity"]["verdict"]
     else:
         report["joint_verdict"] = verdicts[0] if len(verdicts) == 1 else "N/A"
 
@@ -626,6 +716,20 @@ def main() -> int:
                   f"{('%.2f' % mde) if mde is not None else 'undetected':>9} "
                   f"{('%.2f' % r['mde_power']) if r['mde_power'] is not None else '-':>7}")
         print(f"   MDE falls with T (expected ~1/sqrt(T)): {sw['mde_falls_with_t']}")
+    if "e1_sensitivity" in report:
+        sw = report["e1_sensitivity"]
+        print(f"E1 SENSITIVITY (F4 robustness; ceilings candFPR<={sw['cand_ceiling']}, "
+              f"tickFPR<={sw['tick_ceiling']}; {sw['n_panels']} panels/point):")
+        print(f"   {'point':<16} {'df':>5} {'fac_sh':>7} {'prom':>5} {'candFPR_CP':>11} "
+              f"{'tickFPR_CP':>11} {'verdict':>8}")
+        for r in sw["rows"]:
+            p = r["null_params"]
+            print(f"   {r['label']:<16} {p.get('df', float('nan')):>5.1f} "
+                  f"{p.get('factor_share', float('nan')):>7.2f} {r['promising_total']:>5} "
+                  f"{r['per_candidate_fpr_cp_upper95']:>11.4f} {r['per_tick_fpr_cp_upper95']:>11.3f} "
+                  f"{r['verdict']:>8}")
+        print(f"   worst candFPR CP-upper95 = {sw['worst_per_candidate_fpr_cp_upper95']:.4f} | "
+              f"ALL-GREEN across {sw['n_points']} shapes = {sw['all_points_green']}")
     print(f"JOINT VERDICT : {report['joint_verdict']}")
     print(f"report -> {out_path}")
     print("==============================================================\n")
