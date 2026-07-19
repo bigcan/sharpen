@@ -56,7 +56,11 @@ def _resample_ohlcv(df_1min: pd.DataFrame, scale_minutes: int) -> pd.DataFrame:
     if 'timestamp' in df.columns:
         df = df.set_index('timestamp')
     freq = f'{scale_minutes}min'
-    resampled = df.resample(freq).agg({
+    # Explicit label/closed (audit P1-10): coarse bars are stamped at interval
+    # START and aggregate the left-closed [t, t+scale) window. This is the pandas
+    # default for fixed frequencies, made explicit here because the causal
+    # base->coarse index map (X2) depends on the start-stamp convention.
+    resampled = df.resample(freq, label='left', closed='left').agg({
         'open': 'first',
         'high': 'max',
         'low': 'min',
@@ -353,7 +357,15 @@ class MultiScaleOHLCVHandler:
                 # Map base timestamps to coarser scale indices
                 coarse_ts = self._scale_timestamps[scale].astype('int64')
                 base_ts = self._base_timestamps.astype('int64')
-                indices = np.searchsorted(coarse_ts, base_ts, side='right') - 1
+                # X2 / audit P2-01: map each base bar to the last COMPLETED coarse
+                # bar (no forward look-ahead). A coarse bar stamped t (label='left')
+                # closes at t + scale minutes, so it is only causal for a base bar at
+                # time b when t + scale <= b. Searching on (base_ts - scale_ns) selects
+                # that last-closed bar; the prior code searched on base_ts directly and
+                # returned the still-in-progress coarse bar, leaking up to
+                # (scale - base_scale) minutes of the base bar's own future into obs.
+                scale_ns = scale * 60 * 1_000_000_000
+                indices = np.searchsorted(coarse_ts, base_ts - scale_ns, side='right') - 1
                 indices = np.clip(indices, 0, len(coarse_ts) - 1)
                 self._scale_index_map[scale] = indices
 
