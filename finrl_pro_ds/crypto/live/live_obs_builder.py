@@ -557,6 +557,17 @@ class LiveObsBuilder:
             [self._buffer_1min, new_df], ignore_index=True,
         )
 
+        # audit F19: drop duplicate/overlapping 1-min bars (e.g. a re-fetch where
+        # the loader returns the candle containing `since`). Without this, a dup
+        # bar double-counts volume (resample sums volume while OHLC uses
+        # first/max/min/last), silently corrupting the volume_z feature. Keep the
+        # last occurrence (freshest fetch) and re-sort.
+        self._buffer_1min = (
+            self._buffer_1min.drop_duplicates(subset="timestamp", keep="last")
+            .sort_values("timestamp")
+            .reset_index(drop=True)
+        )
+
         # Trim buffer to prevent unbounded growth
         if len(self._buffer_1min) > _MAX_BUFFER_BARS:
             trim = len(self._buffer_1min) - _MAX_BUFFER_BARS

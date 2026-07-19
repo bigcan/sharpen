@@ -177,9 +177,14 @@ class RiskShapingWrapper(gym.Wrapper):
     def reset(self, **kwargs):
         obs, info = self.env.reset(**kwargs)
 
-        self._initial_capital = float(
-            info.get("portfolio_value", getattr(self.env, "initial_capital", 100_000.0))
-        )
+        # audit F8: V7 ContinuousSwingEnv exposes `initial_balance` (not the crypto
+        # env's `initial_capital`) and returns an empty info dict on reset, so the
+        # old fallback silently used the 100k default for any account != 100k,
+        # disabling the DD reference. Prefer reset info, then either env attr.
+        _env_initial = getattr(self.env, "initial_capital", None)
+        if _env_initial is None:
+            _env_initial = getattr(self.env, "initial_balance", 100_000.0)
+        self._initial_capital = float(info.get("portfolio_value", _env_initial))
         self._peak_eod_equity = self._initial_capital
         self._current_equity = self._initial_capital
         self._daily_start_equity = self._initial_capital
