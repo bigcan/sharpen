@@ -5,8 +5,9 @@ The context is the CONCRETE ENFORCEMENT of the anti-oracle moat (CR-1, Fable fin
 assembled by the :class:`~finrl_pro_ds.crucible.agentic.hypothesis.HypothesisAuthor` from the
 agent-VISIBLE ledger projection (``ledger_agent_view``) + the data catalog only, so a proposer —
 LLM-backed or not — *physically cannot* read a verdict, DSR, or holdout outcome. It sees dedup keys
-(to avoid re-proposing an exact duplicate) and the killed-family list (to avoid rediscovering the
-~20 NO-GOs), nothing more.
+(to avoid re-proposing an exact duplicate) and the killed-family list (to avoid rediscovering dead
+families; NOTE S553-cont-131: this list is presently always empty — no code writes a killing
+verdict), nothing more.
 
 The shipped default :class:`LibrarySeedProposer` is deterministic and offline (no LLM, no network):
 it draws from a small **economic-prior seed bank** — proven grammar-valid WQ101 cross-sectional

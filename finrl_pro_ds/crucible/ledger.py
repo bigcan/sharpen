@@ -8,8 +8,12 @@ columns it could sequentially hill-climb on a fixed, reused holdout, laundering 
   * ``trial_ledger``     — full, append-only, **agent-BLIND**. Scorer + orchestrator read/write.
   * ``ledger_agent_view``— a SQL VIEW exposing ONLY dedup keys (candidate_hash, candidate_type,
                            family). **No verdict, no DSR, no OOS delta, no holdout.** Plus the
-                           ``killed_families()`` aggregate (the ~20 NO-GOs) so the agent does not
-                           rediscover dead families. This is the concrete enforcement of CR-1.
+                           ``killed_families()`` aggregate so the agent does not rediscover dead
+                           families. **NOTE (S553-cont-131 audit):** this aggregate is presently
+                           ALWAYS empty — no code path writes a killing verdict, so
+                           ``killed_families()`` returns ``[]`` and the moat is wired-but-inert
+                           (see the matching note in ``agentic/llm_proposer.py``). This is the
+                           concrete enforcement of CR-1.
 
 SQLite backend per repo convention (``scripts/collect_run.py`` etc.); the DB file is git-ignored.
 P0 is the schema + the split; the online-FDR ``fdr_wealth_charged`` column is nullable until P3.
