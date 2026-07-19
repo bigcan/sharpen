@@ -155,8 +155,32 @@ consistent (vol<target = Jensen; ACF<pure-GARCH = mixture dilution); 2 LOW doc-p
 null, not a reward). (2) ✅ **factor_share / df sensitivity sweep DONE** (cont-139, see entry below) — both open
 gates now closed; F4 is a fully-hardened robustness panel.
 
-**Next:** F3 (marginal_t sign-inversion synthetic demo — no ledger needed) + F2 (oracle-injection mode) + F5 (matched-null
-HoF rebuild), then Tier 3 corrected-contract scorer (chain Architect).
+**Next:** ✅ F3 DONE (cont-139, entry below). Remaining: F2 (oracle-injection mode) + F5 (matched-null HoF rebuild),
+then Tier 3 corrected-contract scorer (chain Architect).
+
+### 2026-07-19 (cont-139) — F3 built: the marginal_t substitution-residual seal, reproduced synthetically
+
+**Figure F3 = independent-audit finding F1, rebuilt as a reproducible synthetic demo** (the auditor's `phase2/`
+scratchpad is gone; this replaces it). New standalone `scripts/research/crucible_marginal_seal.py` reads the SHIPPED
+`combination_fitness` / `_combined_book` / `dynamic_sleeve_alphas` (zero funnel/gate bytes touched, CRU-1 safe) and
+demonstrates all three prongs of the seal on synthetic data (K=900, no ledger):
+
+- **(1) Sign inversion** — a genuine diversifier (independent, mean 0.04/yr **below** the 0.128/yr base book, own
+  Sharpe 1.9) RAISES book Sharpe (`delta_sr_oos` = **+0.70**) yet earns `marginal_t` = **−1.68** (fails t≥3). Same
+  pathology + construction class as the pinned seal `test_tier_c_seals_registered.py::test_f1_...` (which stays green).
+- **(2) The identity** — `marg == w_c·(r_c − b_base)` verified to **max|dev| = 3.5e-18** over 900 bars, reproducing the
+  audit's stated **1.7e-18**. `w_c` (the candidate's inverse-vol combiner weight) is read from the same
+  `dynamic_sleeve_alphas` call `_combined_book` makes, so it is the real path, not a re-derivation.
+- **(3) Scale dependence** — the SAME signal at leverage λ∈{0.25…8}: `marginal_t` sweeps **−2.30 → +1.86** (crosses
+  zero near 4×), reproducing the audit's **−1.67 @ 0.25× → +1.81 @ 8×**, WHILE `delta_sr_oos` stays positive and even
+  RISES (+0.47 → +0.93) across every leverage. The book value is robustly positive; only the significance *verdict*
+  swings with position size — the incoherence, made visual.
+- **Construction note:** the diversifier's mean/own-Sharpe are CONTROLLED (noise demeaned) so the leverage axis is
+  legible and reproducible; the pathology itself is construction-independent (it is the combiner identity). Diagnostic
+  battery (§4) now has its second reusable recipe (planted-oracle is F2's).
+- **Verification:** 4 regression tests (sign inversion; identity exact <1e-10; leverage sign-flip with ΔSR>0 throughout;
+  controlled-construction targets) → **pass, ruff clean**; pinned F1 seal test still green. No Math re-pass (no new
+  formula; reads the already-verified gate). Artifact `results/crucible_marginal_seal/marginal_seal.json`.
 
 ### 2026-07-19 (cont-139) — F4 sensitivity sweep: E1 GREEN across the whole null-shape space
 
