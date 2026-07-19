@@ -211,3 +211,67 @@ def test_run_e1_realistic_null_end_to_end_and_stamps_kind() -> None:
     assert rep_real["null_kind"] == "realistic" and rep_iid["null_kind"] == "iid"
     # the strict gate is null-safe under BOTH nulls (the paper's F4 finding: FP protection is robust)
     assert rep_real["per_candidate_fpr"] == 0.0 and rep_iid["per_candidate_fpr"] == 0.0
+
+
+# ------------------------------------- F4 sensitivity sweep (S553-cont-138 follow-up: the open ⬜ gate)
+def test_realistic_null_params_move_the_shape() -> None:
+    """The sweep's axes are REAL: factor_share moves cross-sectional correlation and df moves tail
+    fatness in the DGP. If these were no-ops the whole sensitivity sweep would be vacuous."""
+    t, n = 2000, 12
+    lo_corr = calib._realistic_returns(t, n, rng=np.random.default_rng(2), factor_share=0.0)
+    hi_corr = calib._realistic_returns(t, n, rng=np.random.default_rng(2), factor_share=0.7)
+    _, _, _, corr_lo = _moments(lo_corr)
+    _, _, _, corr_hi = _moments(hi_corr)
+    assert corr_lo < 0.05, corr_lo                     # factor_share=0 -> ~no common factor
+    assert corr_hi > corr_lo + 0.2, (corr_lo, corr_hi)  # more factor share -> higher avg corr
+    fat = calib._realistic_returns(t, n, rng=np.random.default_rng(3), df=3.0)
+    thin = calib._realistic_returns(t, n, rng=np.random.default_rng(3), df=30.0)
+    _, k_fat, _, _ = _moments(fat)
+    _, k_thin, _, _ = _moments(thin)
+    assert k_fat > k_thin, (k_thin, k_fat)             # lower df -> fatter tails (higher excess kurt)
+
+
+def test_realistic_noise_panel_honors_null_params() -> None:
+    """_realistic_noise_panel forwards null_params into the DGP, so the compounded PRICE path inherits
+    the shape override (higher factor_share -> more correlated close-to-close returns)."""
+    hi = calib._realistic_noise_panel(1500, 10, seed=5, n_feature_slots=3,
+                                      null_params={"factor_share": 0.7})
+    lo = calib._realistic_noise_panel(1500, 10, seed=5, n_feature_slots=3,
+                                      null_params={"factor_share": 0.0})
+    rh = np.diff(np.log(hi.close), axis=0)
+    rl = np.diff(np.log(lo.close), axis=0)
+    ch, cl = np.corrcoef(rh.T), np.corrcoef(rl.T)
+    off_h = ch[~np.eye(ch.shape[0], dtype=bool)].mean()
+    off_l = cl[~np.eye(cl.shape[0], dtype=bool)].mean()
+    assert off_h > off_l + 0.1, (off_l, off_h)
+
+
+def test_run_e1_sensitivity_probes_each_shape_and_fp_protection_holds() -> None:
+    """The sweep runs each null-shape point through run_e1 on the STRICT gate and the substantive F4
+    claim holds under EVERY shape: zero false positives, no leg passing (verdict itself is CP-gated and
+    needs many panels, so we assert the robust property, mirroring test_e1_strict_gate_is_clean_null)."""
+    cc = _mini_cc(_STRICT)
+    cc.raw["e1_sensitivity"] = {"n_panels": 4, "points": [
+        {"label": "default", "df": 5.0, "factor_share": 0.35},
+        {"label": "fattail", "df": 3.0, "factor_share": 0.35},
+        {"label": "highcorr", "df": 5.0, "factor_share": 0.7}]}
+    res = calib.run_e1_sensitivity(cc, quick=False)
+    assert res["n_points"] == 3
+    assert [r["label"] for r in res["rows"]] == ["default", "fattail", "highcorr"]
+    assert all(r["promising_total"] == 0 for r in res["rows"])            # no FP under any null shape
+    assert all(r["per_leg_null_pass_rate"]["all_pass"] == 0.0 for r in res["rows"])
+    # provenance: each row records the exact null_params used
+    assert res["rows"][1]["null_params"]["df"] == 3.0
+    assert res["rows"][2]["null_params"]["factor_share"] == 0.7
+
+
+def test_run_e1_sensitivity_lax_gate_has_teeth() -> None:
+    """LOAD-BEARING: a deliberately-lax gate must make the sweep emit false positives under the null
+    shapes — so an all-GREEN sweep is a real property of the strict gate, not the harness ignoring FPs."""
+    cc = _mini_cc(_LAX)
+    cc.raw["e1_sensitivity"] = {"n_panels": 3, "points": [
+        {"label": "default", "df": 5.0, "factor_share": 0.35},
+        {"label": "highcorr", "df": 5.0, "factor_share": 0.7}]}
+    res = calib.run_e1_sensitivity(cc, quick=False)
+    assert sum(r["promising_total"] for r in res["rows"]) > 0
+    assert res["verdict"] == "RED"

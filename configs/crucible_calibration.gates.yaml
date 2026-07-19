@@ -92,6 +92,36 @@ mde_sweep:
   # grows). Denser + spanning 0.002..0.030, from the S553-cont-121 probes.
   beta_grid: [0.0, 0.002, 0.003, 0.004, 0.006, 0.008, 0.012, 0.018, 0.030]
 
+# ---- E1 sensitivity sweep (F4 realistic-null robustness) -------------------------------
+# The F4 finding "E1 stays GREEN under a realistic null" is measured at ONE null-shape point
+# (df=5, factor_share=0.35). For the anatomy paper that single point is too thin an empirical base:
+# it must hold across the plausible null-SHAPE space. This sweep re-runs E1 (realistic null) at a
+# one-axis-at-a-time grid around the default -- tail fatness (Student-t df) and cross-sectional
+# common-factor share (factor_share) -- plus a fattest+most-correlated stress corner, and re-applies
+# the UNCHANGED e1_null ceilings (null_fpr_max / null_tick_fpr_max) at each point. It introduces NO
+# new threshold; `points` is experimental-design (like e2 beta_grid / mde t_grid), not a gate. GREEN
+# iff EVERY point clears the ceilings -- i.e. the funnel's false-positive protection does not depend
+# on the particular null shape. df must stay > 2 (finite variance) and factor_share in [0, 1).
+e1_sensitivity:
+  n_panels: 60           # per point; MATCHES e1_null so each shape is judged by the identical dual-ceiling
+                         #   bar. 60 is the floor for the per-TICK bound: CP-upper(k=0)=1-0.05^(1/n) is
+                         #   0.095 at n=30 (> 0.05 tick ceiling, forced RED) but 0.0487 at n=60. The
+                         #   per-candidate bound (many genomes/panel) clears 0.01 far sooner.
+  points:
+    - {label: default,        df: 5.0,  factor_share: 0.35}   # the F4 anchor (appears once)
+    # --- tail-fatness axis (factor_share held at default) ---
+    - {label: df3_fattail,    df: 3.0,  factor_share: 0.35}   # very heavy tails (finite var, df>2)
+    - {label: df4,            df: 4.0,  factor_share: 0.35}
+    - {label: df8,            df: 8.0,  factor_share: 0.35}
+    - {label: df15_neargauss, df: 15.0, factor_share: 0.35}   # near-Gaussian tails
+    # --- common-factor axis (df held at default) ---
+    - {label: fs0_nofactor,   df: 5.0,  factor_share: 0.0}    # idiosyncratic only (~no cross-corr)
+    - {label: fs0p2,          df: 5.0,  factor_share: 0.2}
+    - {label: fs0p5,          df: 5.0,  factor_share: 0.5}
+    - {label: fs0p7_highcorr, df: 5.0,  factor_share: 0.7}    # strongly correlated cross-section
+    # --- joint stress corner ---
+    - {label: stress_corner,  df: 3.0,  factor_share: 0.7}    # fattest + most correlated
+
 # ---- Joint verdict (M4) ---------------------------------------------------------------
 # The harness is GREEN only if BOTH hold. E1 alone is gamed by a reject-everything funnel
 # (FPR 0, useless); E2 alone by an accept-everything funnel (power 1, FPR 1). The trustworthy
