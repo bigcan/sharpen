@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -66,13 +67,20 @@ class SubstratePower:
     calibration sweep. A high ``implied_mde_delta_sr`` means the substrate is underpowered for realistic
     alphas — mining it spends proposer tokens + FDR wealth at ~zero detection probability (this is the
     stamp that would have flagged the flagship cross_asset run mined on a ~504-bar/holdout-126 panel,
-    implied MDE ≈ 4.45)."""
+    implied MDE ≈ 4.45).
+
+    ``implied_mde_delta_sr`` is ``+inf`` exactly when ``interp_mode`` is an ``unmeasured_*`` mode: the
+    substrate sits off the calibration grid, so its power was never measured and the stamp claims none
+    (fail-closed — see :func:`interp_mde`). It is a sentinel, not an estimate; do not average, plot, or
+    regress it alongside the measured modes."""
 
     panel_T: int
     holdout_bars: int
     holdout_frac: float
-    implied_mde_delta_sr: float
-    interp_mode: str                 # 'grid' | 'interpolated' | 'extrapolated_low' | 'extrapolated_high'
+    implied_mde_delta_sr: float      # +inf ⇔ interp_mode is 'unmeasured_*' (sentinel, not an estimate)
+    # measured-estimate modes: 'grid' | 'interpolated' | 'extrapolated_low'
+    # fail-closed sentinel modes: 'unmeasured_high' (off the top of the grid) | 'unmeasured_degenerate'
+    interp_mode: str
     calibration_sweep_hash: str
 
 
@@ -96,22 +104,66 @@ def _power_holdout_bars(panel_T: int, holdout_frac: float) -> int:
 
 
 def interp_mde(holdout_bars: int, sweep: dict) -> tuple[float, str]:
-    """Interpolate the minimum-detectable marginal ΔSR (at the sweep's target power) for a holdout of
-    ``holdout_bars`` from the E1/E2 MDE sweep. A t-statistic's SE ∝ 1/√N, so at fixed power the MDE
-    ∝ 1/√(holdout_bars); we interpolate LINEARLY in x = 1/√(holdout_bars) between grid points and
-    extrapolate off either end by that same 1/√N law from the nearest grid point. Returns (mde, mode)."""
+    """Minimum-detectable marginal ΔSR (at the sweep's target power) for a holdout of ``holdout_bars``,
+    read off the E1/E2 MDE sweep. Returns ``(mde, mode)``.
+
+    BETWEEN grid points we interpolate linearly in x = 1/√(holdout_bars). The interpolant is ANCHORED
+    at two MEASURED neighbours, so 1/√N is only the basis it bends between them — never a claim about
+    the funnel's true scaling.
+
+    OFF THE TOP of the grid we REFUSE to answer: ``(+inf, 'unmeasured_high')``. Until S553-cont-135
+    this branch applied a 1/√N law ("more bars ⇒ smaller MDE ∝ 1/√N"), which the project's OWN
+    cont-129 intraday Stage-0 experiment then DIRECTLY MEASURED and FALSIFIED: above N_eff≈1000 the
+    deflated funnel's MDE FLATTENS to ~N^-0.21, and the exponent is itself DECAYING (it is already
+    ~N^-0.567 across this very grid, 189→1011 — so 1/√N never described this curve, at either end).
+    Because 1/√N falls FASTER than the funnel really gains power, that branch UNDER-stated the MDE:
+    it reported MORE power than exists and FAILED OPEN — the one direction a guard must never fail.
+    It was latent only because the grid's top (1011) is exactly where the daily substrates sit; the
+    first deeper or higher-frequency substrate — precisely where one goes LOOKING for power — would
+    have been waved through (at holdout 20000 it computed MDE 0.315 vs the measured law's 0.749,
+    ALLOWing a mine the evidence refuses; the fail-open crossover was holdout ≈7,955).
+
+    Re-fitting the branch to the measured -0.21 was considered and REJECTED. That exponent is measured
+    on a DIFFERENT substrate and axis (intraday N_eff at H=1) and only over 1011→10210, so past that it
+    is the same extrapolation wearing a better exponent; the exponent is still decaying, so -0.21 keeps
+    under-stating further out; and the cont-131 audit pinned a data-INDEPENDENT ``marginal_t`` floor
+    (~0.4), so the true MDE does not decay to zero at all — ANY power law → 0 is asymptotically
+    fail-open (the -0.21 law "clears" a 0.50 ceiling at holdout ≈1.4e5, which that floor says is
+    unreachable at ANY N). Off the grid the honest statement is not a smaller number; it is "not
+    measured". The unblock is to EXTEND the sweep so real substrates INTERPOLATE between measured
+    anchors — this branch is the forcing function for that, and ``--force-underpowered`` is the
+    operator's explicit, logged override.
+
+    The +inf is a fail-closed SENTINEL, not an estimate: it flows through the caller's
+    ``implied_mde_delta_sr > ceiling`` test to REFUSE, and reads in the tick log as "power never
+    measured here". Only the ``grid`` / ``interpolated`` / ``extrapolated_low`` modes carry a real MDE
+    estimate; consequently MDE is monotone non-increasing in ``holdout_bars`` only ACROSS the measured
+    domain (h ≤ h_hi), not across the sentinel.
+
+    The BOTTOM branch keeps 1/√N — NOT because it is conservative there (it is not: at the measured
+    -0.567 rate, sqrt under-states by ~3% at holdout 126 rising to ~12% at 30 — the SAME
+    anti-conservative direction as the bug above) but because it is verdict-INVARIANT: for h < h_lo it
+    is bounded below by ``m_lo`` = 3.63, the LARGEST measured MDE, which already exceeds any plausible
+    true-alpha ceiling (ΔSR ~0.3-0.5), so it refuses whatever the exponent. Its value is a provenance
+    figure (the flagship's ≈4.45), never a number the verdict turns on — so it is left byte-stable
+    rather than perturbed for a cosmetic gain.
+    """
     rows = sorted(sweep["mde_sweep"]["rows"], key=lambda r: r["holdout_bars"])
     pts = [(int(r["holdout_bars"]), float(r["mde_realized_delta_sr"])) for r in rows]
     h = int(holdout_bars)
+    if h <= 0:            # degenerate/empty holdout: nothing is tested, so nothing is detectable. Also
+        # guards the divisions below, which used to raise ZeroDivisionError at h=0 and — worse —
+        # silently return a COMPLEX mde at h<0, which would blow up the caller's `>` compare.
+        return math.inf, "unmeasured_degenerate"
     for hi, mi in pts:
         if hi == h:
             return mi, "grid"
     h_lo, m_lo = pts[0]
     h_hi, m_hi = pts[-1]
     if h < h_lo:
-        return m_lo * (h_lo / h) ** 0.5, "extrapolated_low"     # fewer bars ⇒ larger MDE
+        return m_lo * (h_lo / h) ** 0.5, "extrapolated_low"     # ≥ m_lo ⇒ refuses whatever the exponent
     if h > h_hi:
-        return m_hi * (h_hi / h) ** 0.5, "extrapolated_high"    # more bars ⇒ smaller MDE
+        return math.inf, "unmeasured_high"                      # off-grid ⇒ unmeasured ⇒ claim NO power
     for (a_h, a_m), (b_h, b_m) in zip(pts, pts[1:]):
         if a_h <= h <= b_h:
             x, xa, xb = h ** -0.5, a_h ** -0.5, b_h ** -0.5

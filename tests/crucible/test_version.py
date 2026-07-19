@@ -20,13 +20,14 @@ SMALLCAP_ALTDATA_GATES = ROOT / "configs" / "taiwan_smallcap_altdata.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
-    # v4.0 = the F2b subperiod-estimator repair (min-valid-days floor) + WIRING the long-declared,
-    # never-read `robustness.min_subperiod_ic_ir` gate into `_finalize`'s PROMISING expression.
-    # MAJOR — it changes the verdict FUNCTION — but touches NO gate byte (all three frozen hashes
-    # below are unchanged, which is why the gate was WIRED rather than RETIRED: retiring needs a
-    # gates-YAML edit and would move `0ccf6dd584f0` after results are known) and is monotone-
-    # stricter, so every recorded verdict is preserved (CRU-1 holds).
-    assert CRUCIBLE_VERSION == "crucible-v4.0"
+    # v5.0 = the substrate-power guard's off-grid MDE extrapolation fails CLOSED. The 1/√N law it
+    # extrapolated by was falsified by the project's own cont-129 measurement (MDE flattens to
+    # ~N^-0.21 above N_eff≈1000), so the branch UNDER-stated MDE: the guard claimed more power than
+    # exists and FAILED OPEN for every substrate deeper than the grid's top. MAJOR — it changes a live
+    # gate's decision FUNCTION — but touches NO gate byte (all three frozen hashes below are unchanged,
+    # and configs/crucible_power.gates.yaml is byte-identical) and is monotone-STRICTER at every
+    # holdout, so every recorded verdict is preserved (CRU-1 holds).
+    assert CRUCIBLE_VERSION == "crucible-v5.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
