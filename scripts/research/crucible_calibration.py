@@ -135,6 +135,82 @@ def _noise_panel(t: int, n: int, *, seed: int, n_feature_slots: int) -> Panel:
                  {"survivorship_free": True, "source": "synthetic_noise"}, feature_slots=slots)
 
 
+# ---------------------------------------------------------- realistic null (audit F14 / S553-cont-138)
+def _garch_t_series(t: int, k: int, *, rng: np.random.Generator, df: float, alpha: float,
+                    beta: float, uncond_var: float) -> np.ndarray:
+    """``(t, k)`` zero-mean returns with FAT TAILS + VOL CLUSTERING, vectorized across the ``k`` series
+    (sequential only in time). Innovations are standardized Student-t(``df``): ``z = T(df)·√((df−2)/df)``
+    has unit variance (Var[T(df)] = df/(df−2)). Conditional variance follows GARCH(1,1)
+    ``h_s = ω + α·a²_{s−1} + β·h_{s−1}`` with ``a_s = √h_s · z_s``; ``ω = uncond_var·(1−α−β)`` makes the
+    unconditional variance exactly ``uncond_var`` (E[h] = ω/(1−α−β)). Requires ``df>2`` (finite variance)
+    and ``α,β≥0, α+β<1`` (covariance-stationary)."""
+    if df <= 2.0:
+        raise ValueError(f"df must be > 2 for finite variance; got {df}")
+    if alpha < 0.0 or beta < 0.0 or alpha + beta >= 1.0:
+        raise ValueError(f"need alpha,beta>=0 and alpha+beta<1 (stationarity); got {alpha}, {beta}")
+    z = rng.standard_t(df, size=(t, k)) * np.sqrt((df - 2.0) / df)     # standardized -> Var = 1
+    omega = uncond_var * (1.0 - alpha - beta)
+    h = np.empty((t, k), dtype=np.float64)
+    a = np.empty((t, k), dtype=np.float64)
+    h[0] = uncond_var
+    a[0] = np.sqrt(h[0]) * z[0]
+    for s in range(1, t):
+        h[s] = omega + alpha * a[s - 1] ** 2 + beta * h[s - 1]
+        a[s] = np.sqrt(h[s]) * z[s]
+    return a
+
+
+def _realistic_returns(t: int, n: int, *, rng: np.random.Generator, df: float = 5.0,
+                       garch_alpha: float = 0.08, garch_beta: float = 0.90,
+                       target_vol: float = 0.01, factor_share: float = 0.35,
+                       load_mean: float = 1.0, load_sd: float = 0.3) -> np.ndarray:
+    """``(t, n)`` NULL returns = one shared market factor + idiosyncratic, each a GARCH-t series:
+    ``r[:, i] = load_i·f + idio[:, i]``. The shared ``f`` induces a positive average cross-sectional
+    correlation (COMMON FACTOR ≈ ``factor_share`` — exactly, ≈0.33 at defaults, since the factor explains
+    ``factor_share`` of AVERAGE variance but per-pair corr normalizes by per-asset σ). The variance budget
+    splits each asset's total ≈ ``target_vol``² so the factor explains ≈ ``factor_share`` of it:
+    ``mean_i(load_i²)·σ_f² = factor_share·target_vol²`` (using the REALIZED ``mean(loads²)``, which equals
+    the theoretical ``load_mean²+load_sd²`` in expectation), ``σ_idio² = (1−factor_share)·target_vol²`` —
+    so ``mean_i Var[r_i] = target_vol²`` exactly for the realized loads. Total vol matches the IID panel's
+    0.01 increment scale, so the ONLY change vs the IID null is SHAPE (fat tails, clustering, correlation).
+    There is NO planted edge — returns are independent of the overlay slots — so this stays a valid null."""
+    tv2 = target_vol ** 2
+    loads = rng.normal(load_mean, load_sd, size=n)
+    e_load2 = float(np.mean(loads ** 2))                      # realized E[load²] for this panel
+    fac_var = factor_share * tv2 / max(e_load2, 1e-12)
+    idio_var = (1.0 - factor_share) * tv2
+    f = _garch_t_series(t, 1, rng=rng, df=df, alpha=garch_alpha, beta=garch_beta,
+                        uncond_var=fac_var)[:, 0]
+    idio = _garch_t_series(t, n, rng=rng, df=df, alpha=garch_alpha, beta=garch_beta,
+                           uncond_var=idio_var)
+    return loads[None, :] * f[:, None] + idio
+
+
+def _realistic_noise_panel(t: int, n: int, *, seed: int, n_feature_slots: int) -> Panel:
+    """Realistic-null counterpart of ``_noise_panel``: identical OHLCV/vol/date/(null)-slot construction,
+    but ``close`` compounds ``_realistic_returns`` (fat tails + vol clustering + common factor) instead of
+    IID-Gaussian increments. Audit F14: today's E1 GREEN rides on the mis-specified marginal_t/dsr legs
+    under an IID-Gaussian null; this panel re-measures that FPR under a realistic null. No planted edge."""
+    rng = np.random.default_rng(seed)
+    r = _realistic_returns(t, n, rng=rng)
+    close = np.exp(np.cumsum(r, axis=0) + rng.uniform(3.0, 5.0, size=n))
+    open_ = close * (1 + 0.001 * rng.standard_normal((t, n)))
+    high = np.maximum(open_, close) * 1.002
+    low = np.minimum(open_, close) * 0.998
+    vol = rng.uniform(1e6, 1e8, (t, n))
+    dates = (np.datetime64("2010-01-04") + np.arange(t) * np.timedelta64(1, "D")
+             ).astype("datetime64[ns]")
+    regime = (np.sin(2.0 * np.pi * np.arange(t) / 80.0) + 0.2 * rng.standard_normal(t)
+              ).astype(np.float64)
+    slots = {"macro:regime": regime}
+    for i in range(max(0, n_feature_slots - 1)):
+        slots[f"macro:X{i:02d}"] = np.cumsum(0.05 * rng.standard_normal(t)).astype(np.float64)
+    return Panel(dates, tuple(f"S{i:02d}" for i in range(n)), open_, high, low, close, vol,
+                 np.ones((t, n), bool), close * vol, rng.integers(0, 4, size=n),
+                 {"survivorship_free": True, "source": "synthetic_noise_realistic"},
+                 feature_slots=slots)
+
+
 def _proxy_base_sleeves(panel: Panel, *, hold: int) -> dict[str, np.ndarray]:
     """Inline TSMOM (252-1) + short reversal PROXY rank-L/S books — a base book for the marginal gate
     to improve upon. Derived from PRICE only (independent of the regime slot)."""
@@ -260,7 +336,7 @@ class LegTally:
                 ("uplift", "dsr", "marginal_t", "not_redundant", "not_fragile", "all_pass")}
 
 
-def run_e1(cc: CalibConfig, *, quick: bool) -> dict:
+def run_e1(cc: CalibConfig, *, quick: bool, null_kind: str = "iid") -> dict:
     sub = cc.substrate
     e1 = cc.raw["e1_null"]
     n_panels = 6 if quick else int(e1["n_panels"])
@@ -268,6 +344,10 @@ def run_e1(cc: CalibConfig, *, quick: bool) -> dict:
     t, n, n_slots = int(sub["t"]), int(sub["n"]), int(sub["n_feature_slots"])
     cs_seeds = [FORMULAS[i] for i in _CS_SEED_NUMS]
     ov_seeds = list(_OVERLAY_NULL_SEEDS)
+    # F4 (audit F14): swap the IID-Gaussian null for a realistic one (fat tails + vol clustering +
+    # common factor) to re-measure the funnel's FPR when the mis-specified marginal_t/dsr legs face
+    # a null they were never calibrated against. OHLCV/slot construction is otherwise identical.
+    panel_gen = _realistic_noise_panel if null_kind == "realistic" else _noise_panel
 
     promising_total = 0
     genomes_total = 0
@@ -276,10 +356,10 @@ def run_e1(cc: CalibConfig, *, quick: bool) -> dict:
     gen_n_effs: list[float] = []
     legs = LegTally()
 
-    log.info("E1 null-calibration: %d noise panels x {cross_sectional[%d] + overlay[%d]} seeds",
-             n_panels, len(cs_seeds), len(ov_seeds))
+    log.info("E1 null-calibration [%s null]: %d noise panels x {cross_sectional[%d] + overlay[%d]} seeds",
+             null_kind, n_panels, len(cs_seeds), len(ov_seeds))
     for k in range(n_panels):
-        panel = _noise_panel(t, n, seed=1000 + k, n_feature_slots=n_slots)
+        panel = panel_gen(t, n, seed=1000 + k, n_feature_slots=n_slots)
         base = _proxy_base_sleeves(panel, hold=cc.ek["hold_horizon"])
         ts = _panel_ts(panel)
         n_prom_this = 0
@@ -306,6 +386,7 @@ def run_e1(cc: CalibConfig, *, quick: bool) -> dict:
     e1_green = bool(tick_upper <= tick_ceiling and cand_upper <= cand_ceiling)
     return {
         "n_panels": n_panels,
+        "null_kind": null_kind,
         "seeds": {"cross_sectional": len(cs_seeds), "overlay": len(ov_seeds)},
         "promising_total": promising_total,
         "genomes_scored_total": genomes_total,
@@ -481,13 +562,17 @@ def main() -> int:
     ap.add_argument("--out", default=str(ROOT / "results" / "crucible_calibration"))
     ap.add_argument("--quick", action="store_true",
                     help="tiny K / short beta grid — smoke test the harness end-to-end, NOT a verdict.")
+    ap.add_argument("--null", choices=("iid", "realistic"), default="iid",
+                    help="E1 null generator: iid = Gaussian random walk (default, the frozen baseline); "
+                         "realistic = fat tails + vol clustering + common factor (audit F4). E2/mde_sweep "
+                         "use planted panels and are unaffected.")
     args = ap.parse_args()
 
     cc = load_calib(Path(args.calib_config), Path(args.config))
     ts = datetime.now(timezone.utc).isoformat()
     report: dict = {
         "harness_version": cc.raw.get("harness_version"),
-        "ts": ts, "quick": args.quick, "exp": args.exp,
+        "ts": ts, "quick": args.quick, "exp": args.exp, "null_kind": args.null,
         "funnel_gates": str(args.config),
         "funnel_thresholds": {
             "promising_dsr": cc.fit_cfg.promising_dsr, "hlz_t_min": cc.fit_cfg.hlz_t_min,
@@ -496,7 +581,7 @@ def main() -> int:
         "search_budget": {k: cc.ek[k] for k in ("pop_size", "n_generations", "rng_seed")},
     }
     if args.exp in ("e1", "both"):
-        report["e1"] = run_e1(cc, quick=args.quick)
+        report["e1"] = run_e1(cc, quick=args.quick, null_kind=args.null)
     if args.exp in ("e2", "both"):
         report["e2"] = run_e2(cc, quick=args.quick)
     if args.exp == "mde_sweep":
@@ -513,7 +598,8 @@ def main() -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = "calibration_quick" if args.quick else "calibration"
-    out_path = out_dir / f"{stem}_{args.exp}.json"
+    null_sfx = "" if args.null == "iid" else f"_{args.null}"
+    out_path = out_dir / f"{stem}_{args.exp}{null_sfx}.json"
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
     print("\n==================== CRUCIBLE CALIBRATION ====================")
