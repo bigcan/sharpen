@@ -155,8 +155,35 @@ consistent (vol<target = Jensen; ACF<pure-GARCH = mixture dilution); 2 LOW doc-p
 null, not a reward). (2) ✅ **factor_share / df sensitivity sweep DONE** (cont-139, see entry below) — both open
 gates now closed; F4 is a fully-hardened robustness panel.
 
-**Next:** ✅ F3 DONE (cont-139, entry below). Remaining: F2 (oracle-injection mode) + F5 (matched-null HoF rebuild),
-then Tier 3 corrected-contract scorer (chain Architect).
+**Next:** ✅ F3 DONE + ✅ F5 DONE (cont-139, entries below). Remaining: **F2** (planted-oracle injection mode) + the
+**Tier-3 corrected-contract scorer** (chain Architect) — the last, Architect-scale piece. All self-contained figures
+(F3/F4/F5/F6) now done; Tier 1+2 complete → a full anatomy-of-failure paper is assemblable, F2+Tier-3 upgrade it to
+anatomy+correction.
+
+### 2026-07-19 (cont-139) — F5 built: the matched-null Hall-of-Fame ceiling (the record IS the noise ceiling)
+
+**Figure F5 = independent-audit finding F4, rebuilt as a reproducible experiment** (the auditor's
+`scratchpad/phase2/null_grid_sim.py` is gone). New standalone `scripts/research/crucible_matched_null.py` runs the
+SHIPPED `evolve`+gate on PURE NOISE at the real search budget (**pop 200 × gens 40**, gen_n ~3.9–4.7k/search), base
+book rescaled to ~0 train Sharpe (the un-sign-sealed regime, matching the real Taiwan train book SR ≈ −0.007),
+T=2782 (Taiwan-like; the t-ceiling scales √T), cross_sectional. Zero funnel/gate bytes touched (CRU-1 safe); writes
+incrementally per seed (the run is ~1h).
+
+- **Result (6 noise seeds, `results/crucible_matched_null/matched_null.json`):** per-search HoF **max ΔSR 1.04**
+  (p90 0.916, median 0.720) and **max marginal_t 2.79** (median 1.78), with **0 PROMISING across all 6 searches** —
+  nothing survives the binding gate. The real record's maxima (**ΔSR 0.99/0.71/0.66; t ≤ 2.12**) sit **at or below**
+  this pure-noise ceiling on BOTH axes (`record_at_or_below_ceiling`: dSR True, t True). Reproduces the audit's "HoF
+  ΔSR 0.80–0.94, t up to 2.93 ≥ real record."
+- **The point:** "best OOS ΔSR 0.66" (audit F3: actually a train-split GP mutation, holdout never ran) is exactly
+  what no-signal looks like *through this instrument* — a best-of-~4.5k-genomes extreme, not a discovery. Cost curve
+  confirmed the ceiling is √T-driven in t (probe: t 1.84 @ T=1200 → 2.79 @ T=2782) and near-saturated in ΔSR even at
+  small budgets, so the real-budget run is a faithful, not inflated, ceiling.
+- **Base-book choice matters (F1/F3 tie-in):** a ~0-Sharpe base is required — a positive-Sharpe base would sign-seal
+  marginal_t negative (the F3 seal) and the positive-t noise ceiling would vanish; the record's positive-t maxima came
+  from a ~0-Sharpe base era, so the comparison is apples-to-apples.
+- **Verification:** 3 tests (near-0-Sharpe base; noise search yields a positive ΔSR ceiling + 0 survivors at small
+  budget; record-vs-ceiling comparison logic both directions) → **pass, ruff clean**. Real-record numbers are
+  cross-check markers (ledger absent), flagged as not-reproduced. No Math re-pass (reads the shipped search/gate).
 
 ### 2026-07-19 (cont-139) — F3 built: the marginal_t substitution-residual seal, reproduced synthetically
 
