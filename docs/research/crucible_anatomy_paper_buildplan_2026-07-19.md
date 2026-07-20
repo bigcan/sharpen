@@ -155,10 +155,37 @@ consistent (vol<target = Jensen; ACF<pure-GARCH = mixture dilution); 2 LOW doc-p
 null, not a reward). (2) ✅ **factor_share / df sensitivity sweep DONE** (cont-139, see entry below) — both open
 gates now closed; F4 is a fully-hardened robustness panel.
 
-**Next:** ✅ F3 + ✅ F4-sensitivity + ✅ F5 + ✅ F2-oracle-half DONE (cont-139, entries below). Remaining: the
-**Tier-3 corrected-contract scorer** (chain Architect) — the last, Architect-scale piece (F2's second half + §5's
-measured power curve). ALL figures now have their empirical content except the corrected-contract curve; Tier 1+2
-complete → a full anatomy-of-failure paper is assemblable now, Tier-3 upgrades it to anatomy+correction.
+**Next:** ✅ F3 + ✅ F4-sensitivity + ✅ F5 + ✅ F2-oracle-half + ✅ **Tier-3 corrected-contract DONE** (cont-139,
+entries below). **ALL empirical figures complete — anatomy + correction paper is fully assemblable.** Remaining is
+pure write-up: assemble the 8pp draft, F1 schematic (drawn), double-blind anonymization, internal Tier-2 read, CMT
+submit by 2026-08-02.
+
+### 2026-07-20 (cont-139) — Tier-3 corrected-contract scorer BUILT + calibrated (F2 second half + §5 power curve)
+
+**Figure F2 second half + §5's measured power curve — the audit's remedy, implemented as a parallel pathway.**
+Architect design in `.agent/artifacts/corrected_contract_architecture.md`. New module
+`finrl_pro_ds/crucible/corrected_contract.py` scores a candidate by ONE significance statistic, promotes iff it
+clears `t_min` AND a **binding** LORD++ level (F13 fix — `fdr.py` used read-only) AND the 3 cheap guards
+(uplift/fragility/collinearity); the F1-sealed `marginal_t` and F2-sealed `dsr_aug` legs are DROPPED. Own gates file
+`configs/crucible_corrected_contract.gates.yaml` → zero funnel gate bytes, CRU-1 MINOR (`test_version` green).
+
+- **The statistic changed mid-build — E1 caught it (ADR-2 working as designed).** First design (a t-stat across the
+  ~15 C(6,2) CPCV paths) was **voided by the Step-2 E1 calibration**: overlapping paths carry ~1.3 effective obs →
+  null `std_z ≈ 3.35`, FPR **~14.5%** (not 1%), and would be powerless if forced to 1%. The audit's own wording is
+  **"full-panel"** (power from the thousands of bars). Shipped statistic = the **full-panel Jobson-Korkie-Memmel
+  Sharpe-difference z** (Memmel 2003; Math-verified PASS-with-2-LOW-notes), exploiting `corr(b_aug,b_base)≈0.80` so the
+  paired variance is small → power scales √T. **Re-calibrated: null `std_z = 0.98–1.01`** across T=2048/4044,
+  cost=0/0.001, ar1/raw — properly N(0,1); FPR ≤ 0.8% ≤ nominal 1%. CPCV paths retained only for the fragility guard.
+- **E1 (500 null candidates, ar1):** per-candidate FPR **0.0000** (CP-upper 0.0060 ≤ 1%) → calibrated + green.
+- **Power (T=4044), shipped vs corrected — the F2 contrast:** @ realized ΔSR **0.5 → shipped 0.00, corrected 0.81**;
+  @ 0.8 → corrected 0.99; the shipped gate needs ΔSR ~1.4 for 80% power (F1/F2 seals), the corrected contract reaches
+  it at ~0.5. My synthetic power (0.81@0.5) exceeds the audit's real-substrate 0.37 — the planted overlay is a cleaner
+  signal than a real candidate — but the CONTRAST (shipped ~0 → corrected materially positive) is decisive; the
+  audit's 0.37 stands as a cross-check marker (per the timebox rule, not chased).
+- **The F1 fix, pinned:** the exact sign-inverted diversifier the funnel rejects (`marginal_t<0`) earns corrected
+  `z>0` and passes (funnel −0.8 vs corrected +4.5 @ T=4044) — `tests/crucible/test_corrected_contract.py`.
+- **Verification:** 9 tests (7 unit + 2 integration) + Math PASS + Audit (ruff clean, 21/21 incl. CRU-1 `test_version`
+  + F1 seal registry still green). Two commits: Step 1 scorer `7a7f8008`, Step 2 calibration+JKM-redesign (this).
 
 ### 2026-07-20 (cont-139) — F2 oracle half built: the gate's promotion bar is an implausible realized-Sharpe wall
 
