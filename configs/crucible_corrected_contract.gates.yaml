@@ -1,0 +1,37 @@
+# §5 CORRECTED single-hypothesis contract — decision thresholds (audit 2026-07-14 §5).
+#
+# A PARALLEL discovery pathway (design: .agent/artifacts/corrected_contract_architecture.md). It is NOT
+# part of the frozen funnel gates_hash (CRU-1 519158fa1450): the funnel's `configs/signal_eval.gates.yaml`
+# and `fitness.py`/`evolve.py` are untouched. Replacing the funnel gate would be a verdict-changing MAJOR;
+# this parallel file is MINOR.
+#
+# WHAT IT DECIDES (per audit §5): promote a single pre-registered candidate iff
+#   corrected_t >= t_min                                     one marginal-effect t on the ΔSR/CPCV dist
+#   AND p_value <= OnlineFDR.next_level()   (if binding)     the LORD++ account actually thresholds (F13 fix)
+#   AND delta_mean       >= uplift_min                       cheap guard (retained from the funnel)
+#   AND delta_median     >= delta_median_min                 cheap guard
+#   AND frac_positive    >= frac_positive_min                cheap guard
+#   AND max_base_corr    <= max_base_corr                    cheap guard
+# It DROPS the F1-sealed marginal_t (substitution residual) and the F2-sealed book-level dsr_aug.
+#
+# MECHANICS (how the ΔSR/CPCV distribution is BUILT — combiner window, CPCV n_groups/k_test/embargo/purge,
+# periods_per_year) are read from the shared FitnessConfig, NOT here. Only the DECISION layer lives here.
+# Never hardcode these thresholds in code (CLAUDE.md gate rule).
+
+harness_version: crucible-corrected-contract-v1
+
+contract:
+  t_min: 2.33            # one-sided marginal-effect t floor (~1% per-candidate FPR — VERIFY via E1, ADR-2)
+  p_value_model: normal  # normal | student_t  (student_t uses df = n_eff - 1)
+  n_eff_mode: paths      # paths | groups — effective independent CPCV path count for the t-stat SE (ADR-2)
+
+guards:                  # the cheap guards retained from the funnel (NOT the F1/F2 seals)
+  uplift_min: 0.10       # delta_mean (mean ΔSR over CPCV paths) floor
+  delta_median_min: 0.0  # central CPCV path is not a loss
+  frac_positive_min: 0.50  # majority of CPCV paths have ΔSR > 0
+  max_base_corr: 0.70    # collinearity to the base span (multiple corr sqrt(R^2))
+
+online_fdr:              # binding LORD++ account (audit F13: make it actually threshold, currently gates nothing)
+  alpha: 0.10            # per-substrate target FDR
+  w0: null               # initial wealth; null -> alpha/2 (the LORD default)
+  binding: true          # promote iff p_value <= OnlineFDR.next_level()  — the correction
