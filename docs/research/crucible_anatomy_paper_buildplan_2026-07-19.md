@@ -155,10 +155,35 @@ consistent (vol<target = Jensen; ACF<pure-GARCH = mixture dilution); 2 LOW doc-p
 null, not a reward). (2) ✅ **factor_share / df sensitivity sweep DONE** (cont-139, see entry below) — both open
 gates now closed; F4 is a fully-hardened robustness panel.
 
-**Next:** ✅ F3 DONE + ✅ F5 DONE (cont-139, entries below). Remaining: **F2** (planted-oracle injection mode) + the
-**Tier-3 corrected-contract scorer** (chain Architect) — the last, Architect-scale piece. All self-contained figures
-(F3/F4/F5/F6) now done; Tier 1+2 complete → a full anatomy-of-failure paper is assemblable, F2+Tier-3 upgrade it to
-anatomy+correction.
+**Next:** ✅ F3 + ✅ F4-sensitivity + ✅ F5 + ✅ F2-oracle-half DONE (cont-139, entries below). Remaining: the
+**Tier-3 corrected-contract scorer** (chain Architect) — the last, Architect-scale piece (F2's second half + §5's
+measured power curve). ALL figures now have their empirical content except the corrected-contract curve; Tier 1+2
+complete → a full anatomy-of-failure paper is assemblable now, Tier-3 upgrades it to anatomy+correction.
+
+### 2026-07-20 (cont-139) — F2 oracle half built: the gate's promotion bar is an implausible realized-Sharpe wall
+
+**Figure F2 (oracle half) = independent-audit §2 "(A)" / F1+F2, rebuilt** (the auditor's `scratchpad/phase2/planted_sweep.py`
+is gone). New standalone `scripts/research/crucible_oracle_injection.py` plants a **perfect-foresight timing oracle**
+(skill p = directional accuracy; p=1.0 = perfect) on a synthetic market, scored through the SHIPPED `combination_fitness`
+against a ~0-Sharpe base (un-sign-sealed). Zero funnel/gate bytes touched (CRU-1 safe). Two sweeps:
+
+- **Hold sweep @ perfect skill:** the oracle's realized Sharpe falls with hold (daily 18 → semiannual 1.1); the gate
+  promotes only above a **realized-Sharpe WALL ≈ 4.2** (highest rejected perfect oracle SR 2.70 @ monthly; lowest
+  promoted SR 5.73 @ weekly). Every perfect oracle at monthly-or-slower (SR ≤ 2.7) is rejected — first on the
+  book-level `dsr_aug` seal (F2), then also on the `marginal_t` substitution-residual seal (F1).
+- **Skill sweep @ quarterly (realistic-edge, perfect-foresight realized SR ~1.5):** detection **0.00 at EVERY skill
+  0.52→1.00** — a perfect-foresight oracle at a realistic realized Sharpe is never promoted (the silver-platter
+  rejection). realized SR rises 0.01→1.53 with accuracy; the gate ignores it.
+- **Honest deviation from the audit:** the audit's WEEKLY oracle SR (1.80) is substrate-specific — a realistic market
+  caps weekly timing far below this idealized iid market (SR 5.7). Rather than force the exact number, the figure
+  isolates the substrate-**INVARIANT** wall (~4) from the substrate-**DEPENDENT** achievable oracle Sharpe — a *more*
+  rigorous claim (maps the whole detection-vs-realized-Sharpe curve). Audit markers stay consistent: their weekly
+  oracle SR 1.80 sits BELOW the wall → rejected (matches); their daily SR 12.6 ABOVE → passed.
+- **Verification:** 5 tests (oracle construction: perfect≫no-skill, SR falls with hold; ~0-Sharpe base; deterministic
+  wall logic; daily passes/slow-perfect fails; perfect foresight @ realistic Sharpe never promoted) → **pass, ruff
+  clean**. Fixed a real construction bug mid-build: `skill_p` must be directional ACCURACY (opposite sign when
+  unskilled), else p=0.5 → 75% accuracy. No Math re-pass (reads the shipped gate). Artifact
+  `results/crucible_oracle_injection/oracle_injection.json`.
 
 ### 2026-07-19 (cont-139) — F5 built: the matched-null Hall-of-Fame ceiling (the record IS the noise ceiling)
 
