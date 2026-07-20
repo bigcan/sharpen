@@ -49,9 +49,11 @@ def _diversifier(k: int, *, mean_ann: float, own_sharpe_ann: float, seed: int = 
 # --------------------------------------------------------------- the F1 fix (the headline)
 def test_f1_sign_inverted_diversifier_now_passes() -> None:
     """THE fix: a genuine variance-reducing diversifier that the SHIPPED funnel rejects with a NEGATIVE
-    marginal_t (the F1 substitution-residual seal, figure F3) earns a POSITIVE corrected_t on the ΔSR/CPCV
-    distribution and PASSES the corrected contract. Same candidate, opposite verdict — the seal removed."""
-    k = 900
+    marginal_t (the F1 substitution-residual seal, figure F3) earns a POSITIVE full-panel Sharpe-diff z and
+    PASSES the corrected contract. Same candidate, opposite verdict — the seal removed. (T=1500: the JKM
+    statistic is properly √T-scaled, so it needs a realistic sample to clear z>=2.33 — unlike the funnel
+    leg, whose sign is wrong at every T.)"""
+    k = 1500
     ts, base = _ts(k), _base(k)
     div = _diversifier(k, mean_ann=0.04, own_sharpe_ann=1.8)
     cc = _cc()
@@ -79,9 +81,9 @@ def test_noise_candidate_is_rejected() -> None:
 def test_binding_lord_pp_rejects_below_its_pvalue() -> None:
     """The LORD++ account is BINDING: a candidate that clears t>=t_min and every guard is still REJECTED
     when the account's level falls below its p-value (a barren stream), on the FDR gate alone."""
-    k = 600
+    k = 1500
     ts, base = _ts(k), _base(k)
-    div = _diversifier(k, mean_ann=0.04, own_sharpe_ann=1.2)
+    div = _diversifier(k, mean_ann=0.04, own_sharpe_ann=1.8)
     cc = _cc()
 
     loose = corrected_contract_fitness(div, base, ts, _CFG, cc, lord_level=1.0)   # level 1.0 -> never binds
@@ -123,14 +125,14 @@ def test_collinearity_guard_rejects_a_base_lookalike() -> None:
 def test_config_loads_from_yaml() -> None:
     cc = _cc()
     assert cc.t_min == 2.33 and cc.fdr_binding is True
-    assert cc.p_value_model == "normal" and cc.n_eff_mode == "paths"
+    assert cc.p_value_model == "normal" and cc.n_eff_mode == "ar1"
     assert cc.uplift_min == 0.10 and cc.max_base_corr == 0.70
     assert cc.fdr_w0 is None                               # null -> OnlineFDR default alpha/2
 
 
 def test_t_min_threshold_comes_from_config() -> None:
     """t_min is a config knob, not hardcoded: an impossibly high t_min rejects even the strong diversifier."""
-    k = 600
+    k = 1500
     ts, base = _ts(k), _base(k)
     div = _diversifier(k, mean_ann=0.04, own_sharpe_ann=1.8)
     cc_strict = replace(_cc(), t_min=1e9)
