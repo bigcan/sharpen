@@ -36,10 +36,12 @@ from scipy.stats import t as student_t  # type: ignore[import-untyped]
 from finrl_pro_ds.crucible.orchestrator.fdr import OnlineFDR
 from finrl_pro_ds.signals.eval_harness import _ann_sharpe
 from finrl_pro_ds.signals.generation.fitness import (
-    _CAND,
+    _ar1_effective_n,
     _base_span_corr,
+    _CAND,
     _combined_book,
     _cpcv_index_paths,
+    _per_period_sharpe,
     FitnessConfig,
 )
 
@@ -51,7 +53,7 @@ class CorrectedConfig:
     (combiner window, CPCV n_groups/k_test/embargo/purge, periods_per_year) come from ``FitnessConfig``."""
     t_min: float
     p_value_model: str      # "normal" | "student_t"
-    n_eff_mode: str         # "paths" | "groups"
+    n_eff_mode: str         # "ar1" | "raw"  — sample size for the full-panel Sharpe-diff SE
     uplift_min: float
     delta_median_min: float
     frac_positive_min: float
@@ -66,8 +68,8 @@ class CorrectedConfig:
         c, g, f = raw["contract"], raw["guards"], raw["online_fdr"]
         if str(c["p_value_model"]) not in ("normal", "student_t"):
             raise ValueError(f"p_value_model must be normal|student_t; got {c['p_value_model']!r}")
-        if str(c["n_eff_mode"]) not in ("paths", "groups"):
-            raise ValueError(f"n_eff_mode must be paths|groups; got {c['n_eff_mode']!r}")
+        if str(c["n_eff_mode"]) not in ("ar1", "raw"):
+            raise ValueError(f"n_eff_mode must be ar1|raw; got {c['n_eff_mode']!r}")
         return cls(
             t_min=float(c["t_min"]), p_value_model=str(c["p_value_model"]),
             n_eff_mode=str(c["n_eff_mode"]),
@@ -81,14 +83,16 @@ class CorrectedConfig:
 
 @dataclass(frozen=True, slots=True)
 class CorrectedResult:
-    corrected_t: float
+    corrected_t: float          # Jobson-Korkie-Memmel Sharpe-difference z (full panel)
     p_value: float
-    delta_mean: float
-    delta_median: float
-    frac_positive: float
+    delta_sr: float             # full-panel annualized ΔSR = ann_Sharpe(b_aug) − ann_Sharpe(b_base)
+    delta_median: float         # median of the per-CPCV-path ΔSR (fragility guard only)
+    frac_positive: float        # fraction of CPCV paths with ΔSR > 0 (fragility guard only)
     max_base_corr_obs: float
-    n_paths: int
+    rho: float                  # corr(b_aug, b_base) — the pairing that powers the marginal test
+    n_bars: int
     n_eff: float
+    n_paths: int
     t_pass: bool
     lord_pass: bool
     uplift_pass: bool
@@ -105,14 +109,37 @@ def fresh_lord_level(cc: CorrectedConfig) -> float:
     return OnlineFDR(alpha=cc.fdr_alpha, w0=cc.fdr_w0).next_level()
 
 
-def _effective_n(n_paths: int, cfg: FitnessConfig, mode: str) -> float:
-    """Effective independent-observation count for the t-stat SE (ADR-2). ``paths`` = naive path count;
-    ``groups`` = the conservative ``n_groups`` (CPCV paths overlap, so the independent information is
-    closer to the number of groups than the number of C(n_groups,k_test) path-unions). The E1 calibration
-    picks the mode that yields a ~1% null FPR."""
-    if mode == "groups":
-        return float(cfg.n_groups)
-    return float(n_paths)
+def _sharpe_diff_z(b_base: np.ndarray, b_aug: np.ndarray, *, n_eff_mode: str
+                   ) -> tuple[float, float, float, int, float]:
+    """The Jobson–Korkie–Memmel full-panel Sharpe-difference z (ADR-1, revised cont-139). Tests
+    H0: SR(b_aug) = SR(b_base) on the FULL panel — its power scales √N (thousands of bars), unlike a
+    t-stat across the ~15 heavily-overlapping CPCV paths (which carry ~1.3 effective observations and is
+    both miscalibrated and powerless — the E1 finding that voided the first design). Because ``b_aug`` and
+    ``b_base`` come from the convex combiner they are highly correlated (ρ≈0.99); the paired variance
+    (Memmel 2003) shrinks with ρ, so the MARGINAL comparison is precise. Returns
+    ``(z, sa_pp, sb_pp, n_used, n_eff)`` with per-period Sharpes; ``z=nan`` if degenerate.
+
+    ``n_eff_mode``: ``ar1`` deflates N by the AR(1)-effective count (daily marks under a multi-day hold are
+    autocorrelated — a raw-N SE would overstate significance); ``raw`` uses the bar count. E1-calibrated."""
+    mask = np.isfinite(b_base) & np.isfinite(b_aug)
+    a = np.asarray(b_aug, dtype=np.float64)[mask]
+    b = np.asarray(b_base, dtype=np.float64)[mask]
+    n = int(a.size)
+    if n < 8 or a.std() <= 0.0 or b.std() <= 0.0:
+        return float("nan"), float("nan"), float("nan"), n, float("nan")
+    sa = _per_period_sharpe(a)
+    sb = _per_period_sharpe(b)
+    if not (np.isfinite(sa) and np.isfinite(sb)):
+        return float("nan"), sa, sb, n, float("nan")
+    rho = float(np.corrcoef(a, b)[0, 1])
+    rho = float(np.clip(rho, -0.999999, 0.999999))
+    n_eff = _ar1_effective_n(a) if n_eff_mode == "ar1" else float(n)
+    # Memmel (2003) asymptotic variance of (sa − sb), per-period Sharpes:
+    var = (2.0 * (1.0 - rho) + 0.5 * (sa * sa + sb * sb - 2.0 * sa * sb * rho * rho)) / n_eff
+    if not np.isfinite(var) or var <= 0.0:
+        return float("nan"), sa, sb, n, n_eff
+    z = (sa - sb) / np.sqrt(var)
+    return float(z), sa, sb, n, n_eff
 
 
 # ---------------------------------------------------------------- the scorer
@@ -134,27 +161,12 @@ def corrected_contract_fitness(
 
     b_base = _combined_book(base, timestamps, cfg)
     b_aug = _combined_book(aug, timestamps, cfg)
-    paths = _cpcv_index_paths(b_aug.size, cfg.n_groups, cfg.k_test, cfg.embargo, cfg.purge_horizon)
 
-    deltas: list[float] = []
-    for idx in paths:
-        sb = _ann_sharpe(b_base[idx], cfg.periods_per_year)
-        sa = _ann_sharpe(b_aug[idx], cfg.periods_per_year)
-        if np.isfinite(sb) and np.isfinite(sa):
-            deltas.append(sa - sb)
-    darr = np.asarray(deltas, dtype=np.float64)
-    n = int(darr.size)
-
-    delta_mean = float(darr.mean()) if n else float("nan")
-    delta_median = float(np.median(darr)) if n else float("nan")
-    frac_pos = float((darr > 0.0).mean()) if n else float("nan")
-    sd = float(darr.std(ddof=1)) if n > 1 else float("nan")
-    n_eff = _effective_n(n, cfg, cc.n_eff_mode)
-
-    if n > 1 and np.isfinite(sd) and sd > 0.0 and n_eff > 1.0:
-        corrected_t = delta_mean / (sd / np.sqrt(n_eff))
-    else:
-        corrected_t = float("nan")
+    # SIGNIFICANCE — the full-panel Jobson-Korkie-Memmel Sharpe-difference z (ADR-1). NOT a t across CPCV
+    # paths (voided by E1: 15 overlapping paths ≈ 1.3 effective obs -> miscalibrated + powerless).
+    corrected_t, sa_pp, sb_pp, n_bars, n_eff = _sharpe_diff_z(b_base, b_aug, n_eff_mode=cc.n_eff_mode)
+    mask = np.isfinite(b_base) & np.isfinite(b_aug)
+    rho = float(np.corrcoef(b_aug[mask], b_base[mask])[0, 1]) if int(mask.sum()) >= 8 else float("nan")
 
     if not np.isfinite(corrected_t):
         p_value = float("nan")
@@ -163,19 +175,36 @@ def corrected_contract_fitness(
     else:
         p_value = float(norm.sf(corrected_t))
 
+    # UPLIFT guard — full-panel annualized ΔSR (the economic-size floor, reused convention _ann_sharpe).
+    delta_sr = (_ann_sharpe(b_aug[mask], cfg.periods_per_year)
+                - _ann_sharpe(b_base[mask], cfg.periods_per_year)) if int(mask.sum()) >= 8 else float("nan")
+
+    # FRAGILITY guard — the per-CPCV-path ΔSR distribution (not a loss on the median path; majority positive).
+    paths = _cpcv_index_paths(b_aug.size, cfg.n_groups, cfg.k_test, cfg.embargo, cfg.purge_horizon)
+    pdel: list[float] = []
+    for idx in paths:
+        sb = _ann_sharpe(b_base[idx], cfg.periods_per_year)
+        sa = _ann_sharpe(b_aug[idx], cfg.periods_per_year)
+        if np.isfinite(sb) and np.isfinite(sa):
+            pdel.append(sa - sb)
+    parr = np.asarray(pdel, dtype=np.float64)
+    delta_median = float(np.median(parr)) if parr.size else float("nan")
+    frac_pos = float((parr > 0.0).mean()) if parr.size else float("nan")
+
     max_base_corr = _base_span_corr(cand, base)
 
     # legs — one significance statistic (corrected_t), the binding LORD++ p-gate, and the 3 cheap guards.
     t_pass = bool(np.isfinite(corrected_t) and corrected_t >= cc.t_min)
     lord_pass = bool((not cc.fdr_binding) or (np.isfinite(p_value) and p_value <= lord_level))
-    uplift_pass = bool(np.isfinite(delta_mean) and delta_mean >= cc.uplift_min)
+    uplift_pass = bool(np.isfinite(delta_sr) and delta_sr >= cc.uplift_min)
     fragility_pass = bool(np.isfinite(delta_median) and delta_median >= cc.delta_median_min
                           and np.isfinite(frac_pos) and frac_pos >= cc.frac_positive_min)
     collinearity_pass = bool(np.isfinite(max_base_corr) and max_base_corr <= cc.max_base_corr)
     passes = bool(t_pass and lord_pass and uplift_pass and fragility_pass and collinearity_pass)
 
     return CorrectedResult(
-        corrected_t=corrected_t, p_value=p_value, delta_mean=delta_mean, delta_median=delta_median,
-        frac_positive=frac_pos, max_base_corr_obs=float(max_base_corr), n_paths=n, n_eff=n_eff,
+        corrected_t=corrected_t, p_value=p_value, delta_sr=delta_sr, delta_median=delta_median,
+        frac_positive=frac_pos, max_base_corr_obs=float(max_base_corr), rho=rho,
+        n_bars=int(n_bars), n_eff=n_eff, n_paths=int(parr.size),
         t_pass=t_pass, lord_pass=lord_pass, uplift_pass=uplift_pass, fragility_pass=fragility_pass,
         collinearity_pass=collinearity_pass, passes_corrected=passes)
