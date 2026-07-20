@@ -340,3 +340,55 @@ def test_trailing_peak_ratchets_on_eod():
 
     # Peak should have ratcheted up from 100K to 110K
     assert info["eod_peak_equity"] == pytest.approx(110_000.0)
+
+
+# ---------------------------------------------------------------------------
+# audit F8: the wrapper must read the account size from the V7 env's
+# `initial_balance` (empty reset info + no `initial_capital`), not silently
+# fall back to the hardcoded 100k. A pre-fix run returned 100_000.0 here.
+# ---------------------------------------------------------------------------
+
+class MockV7BalanceEnv(gym.Env):
+    """V7 ContinuousSwingEnv-faithful: exposes `initial_balance` (NOT
+    `initial_capital`) and returns an EMPTY info dict on reset."""
+
+    def __init__(self, initial_balance: float = 250_000.0):
+        super().__init__()
+        self.observation_space = gym.spaces.Box(
+            low=-np.inf, high=np.inf, shape=(10,), dtype=np.float32,
+        )
+        self.action_space = gym.spaces.Box(low=-1.0, high=1.0, shape=(1,), dtype=np.float32)
+        self.initial_balance = initial_balance  # V7 attribute name
+        base = int(np.datetime64("2025-06-01T00:00", "s").astype("int64"))
+        self.timestamps = np.array([base + i * 180 for i in range(1000)], dtype=np.int64)
+        self.step_idx = 0
+
+    def reset(self, **kwargs):
+        self.step_idx = 1
+        return np.zeros(10, dtype=np.float32), {}  # EMPTY info, like V7
+
+    def step(self, action):
+        self.step_idx += 1
+        return np.zeros(10, dtype=np.float32), 0.0, False, False, {}
+
+
+def test_f8_wrapper_reads_initial_balance_for_v7_env():
+    """Non-100k V7 account (empty reset info + initial_balance) must set the DD
+    reference to the real balance, not the hardcoded 100k. Tripwire: pre-fix = 100k."""
+    env = MockV7BalanceEnv(initial_balance=250_000.0)
+    wrapped = RiskShapingWrapper(env, augment_obs="off", max_trailing_drawdown_pct=0.08)
+    wrapped.reset()
+    assert wrapped._initial_capital == 250_000.0
+    assert wrapped._peak_eod_equity == 250_000.0
+
+
+def test_f8_wrapper_still_honors_crypto_initial_capital():
+    """Regression: a crypto-style env exposing `initial_capital` is still honored."""
+    class MockCryptoEnv(MockV7BalanceEnv):
+        def __init__(self):
+            super().__init__(initial_balance=1.0)  # decoy — must NOT win
+            self.initial_capital = 300_000.0       # crypto attribute name
+
+    wrapped = RiskShapingWrapper(MockCryptoEnv(), augment_obs="off")
+    wrapped.reset()
+    assert wrapped._initial_capital == 300_000.0
