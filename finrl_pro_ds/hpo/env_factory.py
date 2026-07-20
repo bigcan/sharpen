@@ -231,6 +231,17 @@ def create_vector_env(config, num_envs, start_date=None, end_date=None,
         shm_config=shm_config, norm_cutoff_date=norm_cutoff_date,
     )
 
+    # audit F17: the phantom-transition auto-reset filter (sac_trainer) assumes
+    # Gymnasium >=1.0 NEXT_STEP autoreset semantics. Under 0.29.x (SAME_STEP) it
+    # silently drops the first real transition of each episode and bootstraps from
+    # the reset obs -> quiet training corruption. Fail loudly instead of silently.
+    _parts = (gym.__version__.split(".") + ["0", "0"])[:2]
+    _gv = tuple(int(p) if p.isdigit() else 0 for p in _parts)
+    assert _gv >= (1, 0), (
+        f"Gymnasium >=1.0 required for correct vectorized auto-reset handling "
+        f"(got {gym.__version__}); see audit F17 / sac_trainer phantom-transition filter."
+    )
+
     if use_sync:
         # SyncVectorEnv: all envs run in main process. No pipes, no FD issues.
         # Slower but reliable on containers with restricted ulimits.

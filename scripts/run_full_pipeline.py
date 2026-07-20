@@ -43,7 +43,7 @@ def load_config(path):
         return yaml.safe_load(f)
 
 
-from finrl_pro_ds.config_utils import deep_merge as _deep_merge
+from finrl_pro_ds.config_utils import deep_merge as _deep_merge  # noqa: E402
 
 
 def merge_configs(base, overrides):
@@ -768,9 +768,40 @@ def main():
                         help="Path to checkpoint for warm-starting training (encoder weights)")
     parser.add_argument("--seed", type=int, default=None,
                         help="Global random seed for reproducibility (torch, numpy, random, env)")
+    parser.add_argument("--stage", type=str, default=None,
+                        help="Protocol v2 stage (data-prep|hpo|l1-multiseed|ensemble-confirm|"
+                             "wf|oos|paper-deploy). When set, the config is validated via "
+                             "scripts/validate_config.py before any training; a FAIL aborts.")
+    parser.add_argument("--skip_validate", action="store_true",
+                        help="Skip the protocol-v2 config-validation gate (NOT for CI/scheduled jobs).")
     args = parser.parse_args()
 
     base_config = load_config(args.config)
+
+    # audit F10: run the protocol-v2 config validator before any training so the
+    # fee-curriculum ban, XPARAM, hindsight, drift/safe-mode and health-key gates
+    # actually enforce. Previously run_full_pipeline never invoked validate_config,
+    # so a config could silently reproduce e.g. the frictionless-HPO artifact.
+    # --stage names the stage; omitting it warns (backward compatible).
+    if args.stage and not args.skip_validate:
+        import subprocess
+        _validator = str(Path(__file__).resolve().parent / "validate_config.py")
+        _vc = subprocess.run(
+            [sys.executable, _validator, "--config", args.config, "--stage", args.stage],
+        )
+        if _vc.returncode != 0:
+            logger.error(
+                "Config validation FAILED for stage '%s' (validate_config.py exit %d). "
+                "Aborting before training. Use --skip_validate to override (not for CI).",
+                args.stage, _vc.returncode,
+            )
+            sys.exit(_vc.returncode)
+        logger.info("Protocol v2 config validation PASSED for stage '%s'.", args.stage)
+    elif not args.stage:
+        logger.warning(
+            "No --stage given: Protocol v2 config validation SKIPPED. CI/scheduled "
+            "jobs MUST name the stage (see CLAUDE.md Training Protocol v2).",
+        )
 
     # Auto-detect agent type from config if --agent was not explicitly provided.
     # This prevents KeyError when deploying with e.g. deepscalper_ppo_dev.yaml
