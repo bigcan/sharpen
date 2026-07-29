@@ -286,6 +286,26 @@ the v6.0 "first ALLOW" at holdout ≥6000 holds for an overlay-only substrate, b
 both types is refused there because the cross-sectional surface stops at holdout 2016. Extending that
 surface is the unblock.
 
+`crucible-v7.1` is a **MINOR** bump: per-name ``(T, N)`` alt-data becomes reachable by the
+CROSS-SECTIONAL search (audit U3).
+
+
+The repair filters by SHAPE instead of by candidate type (``grammar.cross_sectional_terminals``):
+cross_sectional draws ``INPUTS`` plus ``(T,N)`` slots; ``(T,)`` slots stay excluded there, so the
+whole of C2-06's protection is retained. ``grammar.available_terminals`` (the overlay registry) is
+unchanged. On a panel with no ``(T,N)`` slot the cross-sectional draw is EXACTLY ``INPUTS``, so every
+existing search trajectory is byte-identical — the change is reachable only by a panel that actually
+carries per-name data.
+
+MINOR by the v2.1 precedent: it ADDS terminals and an eval reach that EXTEND the funnel. It changes NO
+verdict function — a given formula on a given panel earns the identical verdict — and NO gate byte.
+Also lands ``panel_bridge.build_panel_feature_slot``, which assembles per-ticker series into one
+``(T,N)`` slot (column order follows ``Panel.tickers``; an absent ticker is an ALL-NaN column, never a
+0.0, which would be a tradeable value; the per-series PIT gate ``assert_asof_join_causal`` runs PER
+COLUMN — a per-name panel is exactly where one late-reporting name could smuggle look-ahead into an
+otherwise clean matrix). Wiring a specific connector (TWSE T86 is the obvious first) to that assembler
+is data work that remains.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -313,7 +333,13 @@ from pathlib import Path
 # mines, claiming more power than they have. The stamp now takes the WORST MDE across the types a
 # substrate actually mines; a missing curve REFUSES instead of borrowing another type's. MAJOR (changes
 # a live gate's decision FUNCTION), monotone-STRICTER at every depth, and touches NO gate byte.
-CRUCIBLE_VERSION = "crucible-v7.0"
+# v7.1 = per-name (T,N) alt-data is reachable by the CROSS-SECTIONAL search. v2.9's C2-06 fix excluded
+# ALL feature slots from cross_sectional genomes to stop BROADCAST terminals rank()ing to dead
+# constants; that also closed the only route for PER-NAME data, confining every non-price dataset to a
+# per-day timing overlay (T obs instead of T×N). Now filtered by SHAPE: cross_sectional draws INPUTS +
+# (T,N) slots, (T,) slots stay excluded. MINOR (v2.1 precedent) — adds terminals/eval reach, changes no
+# verdict function and no gate byte; byte-identical on any panel without a (T,N) slot.
+CRUCIBLE_VERSION = "crucible-v7.1"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

@@ -37,7 +37,12 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # (holdout 1011: 1.833 vs overlay 1.281), so the guard was UNDER-stating MDE by ~35-40% on those
     # mines — the fail-OPEN direction v5.0 exists to close. MAJOR (a live gate's decision FUNCTION),
     # monotone-STRICTER at every depth, NO gate byte moved.
-    assert CRUCIBLE_VERSION == "crucible-v7.0"
+    # v7.1 = per-name (T,N) alt-data reachable by the CROSS-SECTIONAL search (audit U3). v2.9's C2-06
+    # fix excluded ALL slots to stop BROADCAST terminals rank()ing to dead constants; that also closed
+    # the only route for PER-NAME data, confining every non-price dataset to a per-day timing overlay
+    # (T obs instead of T×N). Now filtered by SHAPE. MINOR (v2.1 precedent): adds terminals + eval
+    # reach, changes no verdict function and no gate byte; byte-identical without a (T,N) slot.
+    assert CRUCIBLE_VERSION == "crucible-v7.1"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

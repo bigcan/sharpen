@@ -31,7 +31,15 @@ from .fitness import (
     _combined_book_with_components,
     combination_fitness,
 )
-from .grammar import INPUTS, available_terminals, crossover, mutate, node_count, parse, to_formula
+from .grammar import (
+    available_terminals,
+    cross_sectional_terminals,
+    crossover,
+    mutate,
+    node_count,
+    parse,
+    to_formula,
+)
 
 if TYPE_CHECKING:
     from ...crucible.corrected_contract import CorrectedConfig
@@ -352,7 +360,13 @@ def evolve(
     # OHLCV-only panel available_terminals(panel) == INPUTS, so this is a NO-OP there; it changes the
     # draw sequence only on a panel that carries feature slots. [crucible-v2.9 MINOR])
     is_overlay = candidate_type == "overlay"
-    inputs = available_terminals(panel) if is_overlay else INPUTS
+    # CR-9 terminal registry, selected by SLOT SHAPE rather than by candidate_type (audit U3).
+    # Overlay draws every slot (it collapses the cross-section to a per-day scalar, so a broadcast
+    # (T,) series is exactly its input). Cross_sectional draws INPUTS plus the PER-NAME (T,N) slots
+    # only — keeping v2.9's C2-06 protection against dead broadcast terminals while restoring the
+    # route by which per-name alt-data can be mined cross-sectionally at all. On an OHLCV-only panel
+    # cross_sectional_terminals(panel) == INPUTS, so that search is byte-identical to v2.9.
+    inputs = available_terminals(panel) if is_overlay else cross_sectional_terminals(panel)
     # OVERLAY dispatch: the combined base book (C1) is the multiplier target, computed ONCE per
     # split. On the train split it is over the train rows; the holdout path rebuilds it on full rows.
     # F14: the context also carries the book's gross / embedded-cost / gross-exposure streams (from
