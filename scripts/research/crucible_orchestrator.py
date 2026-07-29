@@ -220,7 +220,10 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             from finrl_pro_ds.crucible.data.taiwan_altdata import (
                 TAIWAN_ALTDATA_ALIASES,
                 taiwan_connectors,
+                taiwan_per_name_coverage,
+                taiwan_per_name_slots,
             )
+            from finrl_pro_ds.crucible.data.twse_institutional import TwseInstitutionalConnector
             from finrl_pro_ds.data.taiwan_panel_loader import load_taiwan_panel
             from finrl_pro_ds.signals.generation.base_sleeves import taiwan_base_sleeves
             panel = load_taiwan_panel(args.start, args.end)
@@ -231,9 +234,32 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             # a schedule; that's expected, not a bug on any single tick.
             if not args.no_altdata_slots:
                 bar_end = args.end or np.datetime_as_string(panel.dates.max(), unit="D")
+                conns = taiwan_connectors()           # ONE instance set, shared by both shapes below
                 slots = bridge_altdata_feature_slots(
                     bar_dates=panel.dates, start=args.start, end=bar_end, catalog=catalog,
-                    connectors=taiwan_connectors(), aliases=TAIWAN_ALTDATA_ALIASES)
+                    connectors=conns, aliases=TAIWAN_ALTDATA_ALIASES)
+                # U3a: the SAME T86 observations, assembled the other way up — one (T,N) matrix per
+                # field, columns aligned to panel.tickers — so a per-name institutional-flow
+                # characteristic is reachable by the CROSS-SECTIONAL search (crucible-v7.1), not only
+                # as a per-day timing overlay. Additive: the broadcast terminals above are untouched.
+                # The TWSE connector instance is shared so its per-day T86 payload cache is reused
+                # rather than re-polled; catalog=None because the broadcast path already registered
+                # every one of these series.
+                twse = next((c for c in conns if isinstance(c, TwseInstitutionalConnector)), None)
+                cov = taiwan_per_name_coverage(panel.tickers, connector=twse)
+                if cov and max(cov.values()) == 0:
+                    # Alignment fails SILENTLY (an unmatched ticker is an all-NaN column by design),
+                    # so a ticker-naming drift would hand the search well-formed empty matrices.
+                    log.error("T86 per-name coverage is ZERO for every field over panel tickers %s — "
+                              "ticker naming has drifted from the connector's <ticker>:<field> keys; "
+                              "SKIPPING per-name slots rather than shipping all-NaN matrices",
+                              list(panel.tickers))
+                else:
+                    log.info("T86 per-name coverage over %d panel tickers: %s",
+                             len(panel.tickers), cov)
+                    slots = {**slots, **taiwan_per_name_slots(
+                        panel.tickers, panel.dates, start=args.start, end=bar_end,
+                        connector=twse, catalog=None)}
                 if slots:
                     panel = dataclasses.replace(
                         panel, feature_slots={**panel.feature_slots, **slots})

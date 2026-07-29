@@ -48,7 +48,11 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # clone). MAJOR on both counts. Note it does not start any mining: every real substrate is still
     # refused (worst-across-types MDE 1.833 at holdout 1011 vs the 0.50 ceiling), and that ceiling was
     # not moved to manufacture an ALLOW.
-    assert CRUCIBLE_VERSION == "crucible-v8.0"
+    # v8.1 = TWSE T86 wired into PER-NAME (T,N) slots (audit U3a), so the Taiwan substrate carries data
+    # the cross-sectional search can use. v7.1 opened that channel but nothing produced a (T,N) slot.
+    # The data was already per-stock ("<ticker>:<field>"); the bridge was FLATTENING it into 40
+    # broadcast terminals. ADDITIVE (broadcast untouched, overlay unchanged); MINOR per v2.8.
+    assert CRUCIBLE_VERSION == "crucible-v8.1"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
