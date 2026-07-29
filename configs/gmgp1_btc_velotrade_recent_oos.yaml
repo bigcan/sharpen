@@ -28,17 +28,19 @@
 #     --device cpu
 
 data:
-  file_path: "data/bitfinex/btc_usdt_perp_2025_2026q1_1min.parquet"
+  # S513 clean re-baseline: canonical 2024→2026-07-18 perp file. Aligned to rolled WF
+  # fold-3 (train ends 2026-05-06); OOS test = 2026-05-06 → 2026-07-18 (most recent, <1d old).
+  file_path: "data/bitfinex/btc_usdt_perp_2024_2026_1min.parquet"
   ticker: "BTC"
   handler_type: "multiscale"
   # Single-window eval — test_start/end consumed directly by run_rule().
   # val_end_date is used as norm_cutoff by the eval script.
-  train_start_date: "2025-07-06"
-  train_end_date: "2026-01-06"
-  val_start_date: "2026-01-06"
-  val_end_date: "2026-01-06"            # norm cutoff = end of fold-3 training
-  test_start_date: "2026-01-06"
-  test_end_date: "2026-04-12"
+  train_start_date: "2025-11-06"
+  train_end_date: "2026-05-06"
+  val_start_date: "2026-05-06"
+  val_end_date: "2026-05-06"            # norm cutoff = end of fold-3 training
+  test_start_date: "2026-05-06"
+  test_end_date: "2026-07-18"
 
 features:
   scales: [15, 60, 240]
