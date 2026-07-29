@@ -42,7 +42,13 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # the only route for PER-NAME data, confining every non-price dataset to a per-day timing overlay
     # (T obs instead of T×N). Now filtered by SHAPE. MINOR (v2.1 precedent): adds terminals + eval
     # reach, changes no verdict function and no gate byte; byte-identical without a (T,N) slot.
-    assert CRUCIBLE_VERSION == "crucible-v7.1"
+    # v8.0 = the CORRECTED contract is the DEFAULT, and the power guard FAILS CLOSED when it cannot
+    # measure (a missing calibration curve used to SKIP the guard entirely and mine unguarded — acute
+    # once the default flipped, since `results/` is gitignored so curves are absent on every fresh
+    # clone). MAJOR on both counts. Note it does not start any mining: every real substrate is still
+    # refused (worst-across-types MDE 1.833 at holdout 1011 vs the 0.50 ceiling), and that ceiling was
+    # not moved to manufacture an ALLOW.
+    assert CRUCIBLE_VERSION == "crucible-v8.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

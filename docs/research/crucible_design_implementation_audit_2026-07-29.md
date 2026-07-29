@@ -742,8 +742,42 @@ the unpaid multiplicity — but it must be re-measured at that substrate's own s
 the gates file says so.
 
 **Recommendation:** `contract: corrected` with the default `prereg_only` is now calibrated for
-production use on a pre-registered hypothesis stream. The default contract remains `shipped`; nothing
-was auto-enabled.
+production use on a pre-registered hypothesis stream.
+
+### Turned ON — `crucible-v8.0`
+
+`--contract` now defaults to **`corrected`**. `shipped` remains selectable for reproducing a pre-v6.0
+run; its verdicts are not comparable to corrected ones and the two records must never be pooled.
+
+Flipping the default exposed a precondition that had to be fixed first, and it is worth stating plainly
+because it would have been the worst possible combination. `_load_power_guard` returned
+`(None, None, "")` when a calibration curve was missing, which made `_process_substrate` skip the guard
+**entirely** — the substrate mined unguarded. `results/` is gitignored, so the curves are absent on
+**every fresh clone**. "Contract on + curves missing" is therefore the newly-powered contract mining
+with no power gate at all. Verified directly before changing anything:
+
+```
+xsec curve MISSING  : guard= False sweeps= None
+  => power_gate is None -> _process_substrate skips the guard entirely -> MINES UNGUARDED
+```
+
+Now the loader returns the guard with an empty sweep map, and `stamp_substrate_power` reads an empty
+candidate-type set as unmeasured (`+inf`) ⇒ refuse:
+
+```
+curve MISSING -> guard present: True | sweeps: {}
+  stamp: mde=inf mode='unmeasured_empty' -> REFUSE
+```
+
+The same fix closes a latent fail-open in the v7.0 fold itself: it initialised the worst-across-types
+maximum at `-inf`, so an empty type set would have passed **any** ceiling. `--no-power-guard` and
+`--force-underpowered` remain the only ways through, and both are explicit.
+
+**What turning it on does today: nothing mines.** With both curves measured, every real substrate is
+refused — worst-across-types MDE 1.833 at holdout 1011 against a 0.50 ceiling, and still 0.64 at
+holdout 8064. The contract being live changes the verdict function that *would* apply; the power guard
+independently decides no current substrate is worth mining. Both statements hold at once, and the
+ceiling was not moved to manufacture an ALLOW.
 
 A reporting defect found while doing this and fixed: under `--contract corrected` the
 `per_leg_null_pass_rate` diagnostic still tallies the **shipped** legs off the train `FitnessResult`
