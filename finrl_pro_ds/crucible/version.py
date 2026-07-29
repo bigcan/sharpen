@@ -371,6 +371,40 @@ repair changes a live gate's decision function. Monotone-STRICTER on (2). Touche
 frozen moats ``519158fa1450`` / ``22a18172be1a`` / ``0ccf6dd584f0`` are UNCHANGED and
 ``plausible_delta_sr_max`` / ``action`` are untouched.
 
+`crucible-v8.1` is a **MINOR** bump: TWSE T86 is wired into PER-NAME ``(T, N)`` feature slots, so the
+Taiwan substrate finally carries data the cross-sectional search can use (audit U3a).
+
+v7.1 opened the cross-sectional channel to ``(T,N)`` slots but nothing produced one, so the capability
+was unreachable on any live substrate. The data was never the problem: ``TwseInstitutionalConnector``'s
+``series_id`` is already ``"<ticker>:<field>"``. What the bridge did was FLATTEN it — the alias map
+turns 10 tickers × 4 fields into **40 BROADCAST terminals**, each constant across the cross-section.
+``taiwan_altdata.taiwan_per_name_slots`` assembles the same observations the other way up: one
+``(T,N)`` matrix per FIELD, columns aligned to ``Panel.tickers``, so ``rank(twse_inst:foreign_net)``
+means "rank names by today's foreign institutional net flow".
+
+ADDITIVE: the 40 broadcast terminals are untouched, so the overlay search is unchanged, and the v7.1
+shape filter admits only the 4 new matrices to the cross-sectional draw. The TWSE connector instance is
+SHARED with the broadcast bridge (it caches per-day T86 payloads per instance, so the assembly is
+nearly free rather than a second full poll), and ``catalog=None`` avoids double-registering series the
+broadcast path already registered — double registration would distort pool-diversity reporting and the
+data snapshot hash.
+
+Alignment holds by construction (the Taiwan panel's tickers are the raw listing codes ``"0050"`` … ,
+exactly the connector's key) but it is a SILENT-failure surface: a naming drift yields a well-formed,
+entirely NaN matrix rather than an error, because an uncovered ticker must be NaN and not 0.0 (a zero
+is a tradeable value that would enter a ``rank()`` as a real observation). So
+``taiwan_per_name_coverage`` is a pre-flight the orchestrator calls and logs, and it SKIPS per-name
+slots entirely rather than shipping empty matrices if coverage is zero for every field.
+
+MINOR by the v2.8 precedent (that bump added these very connectors): it ADDS terminals, changes no
+verdict function and no gate byte. It does change the Taiwan substrate's ``data_snapshot_hash`` — new
+feature slots are part of the panel content hash — which correctly flips the substrate dirty.
+
+Two limits, neither hidden: the Taiwan panel is **N=10**, a thin cross-section for a rank-L/S book
+(``ls_min_names`` is 6, and the expert review already flagged WQ101 starving at N=18); and this is
+verified by TEST, not by a live run — no cached Taiwan panel exists locally, so the FinMind fetch has
+not been exercised end-to-end.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -412,7 +446,13 @@ from pathlib import Path
 # that also closes a latent fail-open in the v7.0 fold, which started its maximum at -inf.
 # Note what this does today: NOTHING MINES. Every real substrate is still refused (worst-across-types
 # MDE 1.833 at holdout 1011 vs a 0.50 ceiling). The ceiling was not moved to manufacture an ALLOW.
-CRUCIBLE_VERSION = "crucible-v8.0"
+# v8.1 = TWSE T86 wired into PER-NAME (T,N) slots, so the Taiwan substrate carries data the
+# cross-sectional search can actually use. v7.1 opened that channel but nothing produced a (T,N) slot,
+# leaving the capability unreachable live. The data was already per-stock ("<ticker>:<field>"); the
+# bridge was FLATTENING it into 40 broadcast terminals. Now also assembled as one (T,N) matrix per
+# field, columns aligned to Panel.tickers. ADDITIVE (broadcast terminals untouched, overlay unchanged);
+# MINOR per the v2.8 precedent. Coverage pre-flight guards the silent all-NaN alignment failure.
+CRUCIBLE_VERSION = "crucible-v8.1"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
