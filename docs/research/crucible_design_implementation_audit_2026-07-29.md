@@ -299,7 +299,7 @@ U2 yields zero discoveries just as surely as today.
 *Acceptance:* the cross-asset substrate stamps `implied_mde_delta_sr ≤ 0.50` in `interp_mode: grid`
 or `interpolated`, or the operator records an explicit logged override.
 
-### U3 — Open the cross-sectional channel to per-name alt-data
+### U3 — Open the cross-sectional channel to per-name alt-data *(IMPLEMENTED — `crucible-v7.1`)*
 
 Two coupled changes:
 
@@ -308,9 +308,34 @@ Two coupled changes:
 2. `evolve.py:284` selects terminals **by slot shape** rather than by `candidate_type`: a `(T,N)` slot
    joins the cross-sectional leaf set; only `(T,)` slots stay overlay-only.
 
-This restores what the v2.9 C2-06 fix over-corrected away, and moves alt-data from `T` observations to
-`T×N` — the only lever that materially changes MDE. It also points the miner at the one channel that
-has ever produced a PROMISING in this project.
+This restores what the v2.9 C2-06 fix over-corrected away, and points the miner at the one channel
+that has ever produced a PROMISING in this project.
+
+**Implemented 2026-07-29 as `crucible-v7.1` (MINOR).** `grammar.cross_sectional_terminals(panel)`
+returns `INPUTS` + the `(T,N)` slots only; `(T,)` slots stay excluded from cross-sectional genomes, so
+the whole of C2-06's protection against dead broadcast terminals is retained. `available_terminals`
+(the overlay registry) is unchanged. On a panel with no `(T,N)` slot the draw is *exactly* `INPUTS`, so
+no existing search trajectory moves — the change is reachable only by a panel that carries per-name
+data.
+
+The evaluation path needed nothing: `eval_on_panel` already broadcasts `(T,)` and passes `(T,N)`
+through, and `Panel._sliced_slots` already slices both on axis 0, so the Tier-0 truncation tripwire
+holds for a per-name slot (asserted). Verified end-to-end rather than by construction: a
+`rank(twse:inst_net)` genome is scored by the real cross-sectional search — not culled — returning a
+measured marginal ΔSR over 15 CPCV paths.
+
+`panel_bridge.build_panel_feature_slot` lands alongside it: per-ticker series assembled into one
+`(T,N)` slot, column order following `Panel.tickers`, an absent ticker becoming an **all-NaN column
+rather than a 0.0** (a zero is a tradeable value), and the `assert_asof_join_causal` PIT gate running
+**per column** — a per-name panel is exactly where one late-reporting name could smuggle look-ahead
+into an otherwise clean matrix. Wiring a concrete connector to it (TWSE T86 institutional net flow is
+the obvious first) is data work that remains.
+
+*Correction to this section's original framing:* it claimed the move buys `T×N` observations and that
+this is "the only lever that materially changes MDE". The V3 measurement says otherwise — MDE in ΔSR
+units is flat in breadth. What breadth buys is a larger ΔSR for the same per-name signal, which clears
+a fixed ceiling rather than lowering it. The change is still right; the mechanism is not the one
+originally stated.
 
 ### U4 — Give the search a memory
 

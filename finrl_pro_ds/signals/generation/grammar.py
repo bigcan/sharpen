@@ -72,8 +72,45 @@ def available_terminals(panel: "Panel") -> tuple[str, ...]:
     ``panel`` (e.g. ``fred:T10Y2Y``, ``macro:regime``). Threaded into ``grow``/``mutate``/
     ``crossover`` as ``inputs=`` so the generator can address non-OHLCV series as value leaves
     without mutating the module-level ``INPUTS`` (which keeps the default cross-sectional search
-    byte-identical). Returns ``INPUTS`` unchanged when the panel carries no feature slots."""
+    byte-identical). Returns ``INPUTS`` unchanged when the panel carries no feature slots.
+
+    This is the OVERLAY registry: the overlay path collapses the cross-section to a per-day scalar,
+    so a broadcast ``(T,)`` slot is exactly what it wants. For the cross-sectional path use
+    :func:`cross_sectional_terminals`."""
     return INPUTS + tuple(panel.feature_slots.keys())
+
+
+def per_name_slots(panel: "Panel") -> tuple[str, ...]:
+    """Feature slots carrying a PER-NAME ``(T, N)`` matrix, sorted — the slots that vary across the
+    cross-section and are therefore meaningful inside ``rank()``/``scale()``. A ``(T,)`` broadcast
+    slot is excluded: it is constant across names, so a centred cross-sectional rank on it is
+    identically zero."""
+    import numpy as np
+
+    return tuple(sorted(k for k, v in panel.feature_slots.items()
+                        if np.asarray(v).ndim == 2))
+
+
+def cross_sectional_terminals(panel: "Panel") -> tuple[str, ...]:
+    """CR-9 terminal registry for the CROSS-SECTIONAL path: ``INPUTS`` plus the per-name ``(T,N)``
+    feature slots only.
+
+    Why this exists (audit U3, 2026-07-29). ``crucible-v2.9`` fixed a real defect — drawing feature
+    slots into cross_sectional genomes made BROADCAST terminals ``rank()`` to constant/dead genomes
+    that inflated ``gen_n`` and polluted the DSR dispersion pool (C2-06) — but it fixed it by
+    excluding **all** slots, which also closed the only route by which a PER-NAME alt-data series
+    could ever be used cross-sectionally. That over-correction is why every non-price dataset the
+    project has connected could only ever act as a market-timing overlay: one scalar per day, ``T``
+    observations instead of ``T×N``, the lowest-information-density use of the data. It is the more
+    striking for the fact that the only PROMISING this project has ever recorded came through a
+    per-name cross-sectional path, not through the miner.
+
+    Filtering by SHAPE keeps the whole of the C2-06 protection (broadcast slots are still excluded
+    from cross_sectional genomes, so no dead terminal enters the draw) while restoring the per-name
+    route. On a panel with no ``(T,N)`` slots this returns ``INPUTS`` exactly, so the OHLCV-only
+    search is byte-identical to v2.9 — the change is a strict extension, reachable only by a panel
+    that actually carries per-name data."""
+    return INPUTS + per_name_slots(panel)
 EXPONENTS = (0.5, 1.0, 2.0)
 # value-producing ops the grower may pick for a "V" slot (no bool/struct-only here)
 _VALUE_OPS = ("rank", "scale", "abs", "log", "sign", "indneutralize", "delay", "delta",

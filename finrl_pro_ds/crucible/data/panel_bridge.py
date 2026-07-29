@@ -105,3 +105,65 @@ def build_feature_slots(
         logger.info("feature slot %s: %d/%d bars populated", terminal,
                     int(np.isfinite(joined).sum()), bars.shape[0])
     return slots
+
+
+def build_panel_feature_slot(
+    per_ticker: "dict[str, SlotRequest]",
+    tickers: Sequence[str],
+    bar_dates: np.ndarray,
+    *,
+    terminal: str,
+    start: np.datetime64 | str,
+    end: np.datetime64 | str,
+    catalog: DataCatalog | None = None,
+    require_valid: bool = False,
+    freshness: str | None = None,
+) -> dict[str, np.ndarray]:
+    """Assemble PER-TICKER series into ONE ``(T, N)`` feature slot (audit U3, 2026-07-29).
+
+    :func:`build_feature_slots` is single-series: each request as-of-joins to a ``(T,)`` vector, which
+    is the right shape for a macro series (FRED, COT, GDELT) and the only shape the bridge has ever
+    produced. A genuinely per-name dataset — TWSE T86 three-institutional net flow being the obvious
+    first case — is ``N`` series that belong in ONE terminal, so that ``rank(twse:inst_net)`` means
+    "rank names by today's institutional flow" rather than being unreachable.
+
+    Contract and guarantees:
+      * ``per_ticker`` maps ticker → its :class:`SlotRequest`; the column order follows ``tickers``,
+        so the slot aligns with ``Panel.tickers`` positionally (the same contract as OHLCV).
+      * A ticker with no entry becomes an ALL-NaN column, never a zero and never a forward-fill from a
+        neighbour. Absent data must read as absent — a zero is a tradeable value.
+      * Every column goes through the SAME per-series path as ``build_feature_slots``: quality gate,
+        release-time :func:`asof_join`, and the non-negotiable :func:`assert_asof_join_causal` PIT
+        gate (CR-4/LEAK-2). The gate is per-column on purpose — a per-name panel is exactly where one
+        late-reporting name could smuggle look-ahead into an otherwise clean matrix.
+
+    Returns ``{terminal: (T, N)}``, mergeable straight into ``Panel(feature_slots=...)``. From there
+    ``grammar.cross_sectional_terminals`` admits it to the cross-sectional search (a ``(T,)`` slot is
+    still excluded there — it would ``rank()`` to a constant)."""
+    if not is_valid_terminal(terminal):
+        raise ValueError(
+            f"feature-slot terminal {terminal!r} is not a DSL-legal name "
+            f"([A-Za-z_]\\w* with one optional ':segment'); pass an explicit `terminal` alias")
+    bars = np.asarray(bar_dates, dtype="datetime64[ns]")
+    cols = np.full((bars.shape[0], len(tickers)), np.nan, dtype=np.float64)
+    n_present = 0
+    for j, tkr in enumerate(tickers):
+        req = per_ticker.get(tkr)
+        if req is None:
+            continue                                   # absent name → all-NaN column (never 0.0)
+        data = req.connector.fetch(req.ref, start, end)
+        report = validate_series(data)
+        if not report.passed:
+            msg = (f"{terminal}[{tkr}]: data-quality gate flagged {report.reasons} "
+                   f"(n_obs={report.n_obs}, max_gap={report.max_gap_days:.0f}d)")
+            if require_valid:
+                raise ValueError(msg)
+            logger.warning(msg)
+        cols[:, j] = asof_join(data, bars)
+        assert_asof_join_causal(data, bars)            # HARD PIT gate, PER COLUMN
+        n_present += 1
+        if catalog is not None:
+            register_series(catalog, data, freshness=freshness)
+    logger.info("panel feature slot %s: %d/%d tickers populated, %d/%d cells finite",
+                terminal, n_present, len(tickers), int(np.isfinite(cols).sum()), cols.size)
+    return {terminal: cols}
