@@ -267,6 +267,45 @@ the shipped curve. Switching contracts without re-measuring leaves the loop refu
 reason that no longer applies. ``calibration_sweep_path`` therefore selects the sweep matching the
 active contract.
 
+`crucible-v7.0` is a **MAJOR** bump: the substrate-power stamp becomes CANDIDATE-TYPE aware, and is
+repaired from a fail-OPEN default (audit V3/V4).
+
+An MDE curve characterizes a GATE, not a dataset. A tick mines ``cross_sectional`` AND ``overlay``
+genomes through structurally different scoring paths — a cross-sectional rank-L/S book versus a
+per-day timing multiplier on the base book — and the measured curves differ. But EVERY curve written
+before 2026-07-29 was produced by ``_e2_power_curve``, which plants ``macro:plant`` and scores it
+through ``_overlay_returns``: they are all OVERLAY curves, and the guard applied them to every
+substrate regardless of type.
+
+The cross-sectional surface (``--exp xsec_mde_sweep``, a planted per-name characteristic scored through
+the oracle rank-L/S book, 24 seeds over bars × breadth) shows the cross-sectional path is
+EQUAL-OR-WORSE at matched depth — holdout 1011: overlay 1.281 vs cross-sectional 1.833; holdout 2016:
+0.862 vs 1.185. So the guard has been UNDER-stating MDE for cross-sectional mines by ~35-40%, i.e.
+claiming more power than those substrates have. That is the same fail-OPEN direction v5.0 was written
+to close, latent for the same reason: nothing had yet been mined where it bit.
+
+Three changes:
+  (1) ``stamp_substrate_power`` accepts ``{candidate_type: sweep}`` and reports the **WORST** MDE across
+      the types the substrate will actually mine;
+  (2) a type with no measured curve returns ``(+inf, 'unmeasured_candidate_type')`` — REFUSE — instead
+      of borrowing another type's curve, which is precisely how the overlay curve came to judge
+      cross-sectional mines;
+  (3) ``interp_mde`` POOLS a surface's extra axis by taking the worst MDE at each depth. The
+      measurement found no systematic breadth-dependence (N=12→100 flat within noise), which is what
+      theory says — ΔSR is risk-adjusted and the SE of a Sharpe DIFFERENCE is set by TIME observations,
+      not the cross-section — so indexing by ``n`` would claim a resolution the data does not support.
+      Null/non-finite MDE rows are DROPPED, never read as 0.0 ("undetected" is the opposite of
+      "detectable at zero effect").
+
+MAJOR because it changes a live gate's decision FUNCTION, and it is monotone-STRICTER at every depth
+(the worst-of-N is ≥ any single curve; an unmeasured type refuses). It touches NO gate byte — the
+frozen moats ``519158fa1450`` / ``22a18172be1a`` / ``0ccf6dd584f0`` are UNCHANGED and
+``plausible_delta_sr_max``/``action`` in ``crucible_power.gates.yaml`` are untouched; only new
+``calibration_sweep_path_*`` keys are added. Being strictly stricter, it WITHDRAWS rather than grants:
+the v6.0 "first ALLOW" at holdout ≥6000 holds for an overlay-only substrate, but a substrate mining
+both types is refused there because the cross-sectional surface stops at holdout 2016. Extending that
+surface is the unblock.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -287,7 +326,14 @@ from pathlib import Path
 # inherited. Moves NO gate byte (thresholds live in configs/crucible_corrected_contract.gates.yaml);
 # the manifest now pins `contract` + `corrected_gates_hash` so no verdict can be read without knowing
 # which gate produced it. Ships with the U2 power-guard re-calibration — see the module docstring.
-CRUCIBLE_VERSION = "crucible-v6.0"
+# v7.0 = the substrate-power stamp is CANDIDATE-TYPE aware and fails CLOSED on an unmeasured type.
+# Every MDE curve before 2026-07-29 was measured on the OVERLAY path yet applied to cross_sectional
+# substrates too, and the newly-measured cross-sectional surface is EQUAL-OR-WORSE at matched depth
+# (holdout 1011: 1.833 vs overlay 1.281) — so the guard was UNDER-stating MDE by ~35-40% for those
+# mines, claiming more power than they have. The stamp now takes the WORST MDE across the types a
+# substrate actually mines; a missing curve REFUSES instead of borrowing another type's. MAJOR (changes
+# a live gate's decision FUNCTION), monotone-STRICTER at every depth, and touches NO gate byte.
+CRUCIBLE_VERSION = "crucible-v7.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
