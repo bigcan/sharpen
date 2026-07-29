@@ -31,7 +31,13 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # with it. It still touches NO gate byte (all three frozen hashes below are unchanged; the corrected
     # thresholds live in configs/crucible_corrected_contract.gates.yaml), and the manifest now pins
     # `contract` + `corrected_gates_hash` so no verdict can be read without knowing which gate made it.
-    assert CRUCIBLE_VERSION == "crucible-v6.0"
+    # v7.0 = the substrate-power stamp is CANDIDATE-TYPE aware and fails CLOSED on an unmeasured type.
+    # Every MDE curve before 2026-07-29 was measured on the OVERLAY path yet applied to cross_sectional
+    # substrates too; the newly-measured cross-sectional surface is EQUAL-OR-WORSE at matched depth
+    # (holdout 1011: 1.833 vs overlay 1.281), so the guard was UNDER-stating MDE by ~35-40% on those
+    # mines — the fail-OPEN direction v5.0 exists to close. MAJOR (a live gate's decision FUNCTION),
+    # monotone-STRICTER at every depth, NO gate byte moved.
+    assert CRUCIBLE_VERSION == "crucible-v7.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

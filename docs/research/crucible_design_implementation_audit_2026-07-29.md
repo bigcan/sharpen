@@ -511,6 +511,11 @@ T=32256 (deep)               holdout=8064  MDE=0.393  mode=grid          -> ALLO
 The crossover sits at holdout ≈ 5,000–6,000 bars, and depths between measured anchors now
 `interpolate` rather than returning +inf — the structural unblock, demonstrated end-to-end.
 
+> ⚠️ **Qualified by V4 below.** That ALLOW is measured on the **overlay** curve. A substrate that mines
+> *both* candidate types is judged by the worse of the two curves, and the cross-sectional surface only
+> reaches holdout 2016 — so a mixed-type substrate is still REFUSED (`unmeasured_high`) at those
+> depths. The ALLOW stands for an overlay-only substrate; it does not yet stand for a general one.
+
 ### A limitation of the power stamp — and a correction to my own first reading of it
 
 **What is real:** the curve is measured on the **overlay path only**. `_e2_power_curve` plants
@@ -543,8 +548,46 @@ through the MDE curve.
 
 The residual, genuine issue is narrower than I first stated: the overlay and cross-sectional curves are
 numerically different even though both key on bars, so a cross-sectional substrate should be judged
-against a cross-sectional curve. V3 measures that surface; V4 makes the stamp select by
-`candidate_type` and refuse rather than silently substitute.
+against a cross-sectional curve.
+
+### V3/V4 — the cross-sectional surface, and what it changes
+
+Measured (24 seeds, 10-point beta grid, corrected contract, binding holdout window):
+
+| holdout | N=12 | N=25 | N=50 | N=100 | **overlay curve** |
+|---|---|---|---|---|---|
+| 378 | 2.15 | 2.66 | 2.43 | 1.93 | 1.73 |
+| 696 | 1.85 | 1.79 | 1.37 | 1.33 | 1.23 |
+| 1011 | 1.83 | 1.18 | 1.35 | 1.40 | 1.28 |
+| 2016 | 0.83 | 1.01 | 0.91 | 1.19 | 0.86 |
+
+Two readings:
+
+1. **MDE is flat in breadth**, within noise — confirming the correction above. It is *not* flat in
+   depth. So pooling over `n` (taking the worst value at each depth) is the honest consumer: indexing
+   by `n` would claim a resolution the measurement does not support.
+2. **The cross-sectional path is EQUAL-OR-WORSE than the overlay path at matched depth.** Since every
+   curve before this was measured on the overlay path and applied to both, the guard has been
+   **under-stating MDE for cross-sectional mines by ~35–40%** — claiming more power than those
+   substrates have. That is the fail-OPEN direction v5.0 exists to close, and it was latent for the
+   same reason v5.0's bug was: nothing had yet been mined where it mattered.
+
+V4 repairs it. `stamp_substrate_power` now takes the **worst MDE across the candidate types the
+substrate will actually mine**, and a type with no measured curve returns
+`(+inf, 'unmeasured_candidate_type')` — refuse — rather than borrowing another type's curve. Verified
+against the live curves:
+
+| T | holdout | overlay-only | xsec-only | **both (worst)** |
+|---|---|---|---|---|
+| 4044 | 1011 | 1.281 REFUSE | 1.833 REFUSE | 1.833 REFUSE |
+| 8064 | 2016 | 0.862 REFUSE | 1.185 REFUSE | 1.185 REFUSE |
+| 24000 | 6000 | **0.455 ALLOW** | `unmeasured_high` | **REFUSE** |
+| 32256 | 8064 | **0.393 ALLOW** | `unmeasured_high` | **REFUSE** |
+
+So V4 **tightens** the guard, and specifically withdraws the unqualified "first ALLOW" claim: the ALLOW
+holds for an overlay-only substrate, not for one mining both types, because the cross-sectional surface
+stops at holdout 2016. Extending it is the obvious follow-up (and expensive — the surface as measured
+took ~2h).
 
 **Two honest readings, and the second corrects a headline in §4.**
 

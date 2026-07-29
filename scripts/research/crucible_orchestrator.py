@@ -99,20 +99,34 @@ def _load_power_guard(path: str, *, force: bool, contract: str = "shipped"):
         log.warning("power-gates file %s absent — substrate-power stamp/guard disabled", path)
         return None, None, ""
     cfg = (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get("power_guard", {})
-    key = "calibration_sweep_path_corrected" if contract == "corrected" else "calibration_sweep_path"
-    sweep_path = ROOT / cfg.get(key, "")
-    if not sweep_path.exists():
-        log.warning("calibration sweep %s (contract=%s, key=%s) absent — substrate-power stamp/guard "
-                    "disabled. Measure it with: python scripts/research/crucible_calibration.py "
-                    "--exp mde_sweep --contract %s", sweep_path, contract, key, contract)
-        return None, None, ""
-    raw = sweep_path.read_bytes()
-    sweep = json.loads(raw)
-    sweep_hash = hashlib.sha256(raw).hexdigest()[:12]
+    # V4: one curve per (contract, candidate_type). The stamp takes the WORST MDE across the types the
+    # substrate mines, so BOTH must be present under the corrected contract; a missing one is not
+    # substituted, it disables the stamp (and would otherwise refuse).
+    if contract == "corrected":
+        keys = {"overlay": "calibration_sweep_path_corrected",
+                "cross_sectional": "calibration_sweep_path_corrected_xsec"}
+    else:
+        keys = {"overlay": "calibration_sweep_path"}
+    sweeps: dict[str, dict] = {}
+    digest = hashlib.sha256()
+    for ct, key in sorted(keys.items()):
+        sweep_path = ROOT / cfg.get(key, "")
+        if not sweep_path.exists():
+            exp = "xsec_mde_sweep" if ct == "cross_sectional" else "mde_sweep"
+            log.warning("calibration sweep %s (contract=%s, candidate_type=%s, key=%s) absent — "
+                        "substrate-power stamp/guard disabled. Measure it with: python "
+                        "scripts/research/crucible_calibration.py --exp %s --contract %s",
+                        sweep_path, contract, ct, key, exp, contract)
+            return None, None, ""
+        raw = sweep_path.read_bytes()
+        sweeps[ct] = json.loads(raw)
+        digest.update(f"{ct}=".encode())
+        digest.update(raw)
+    sweep_hash = digest.hexdigest()[:12]     # pins EVERY curve the stamp consulted
     guard = PowerGuard(enabled=bool(cfg.get("enabled", True)),
                        ceiling=float(cfg.get("plausible_delta_sr_max", 0.5)),
                        action=str(cfg.get("action", "warn")), force=bool(force))
-    return guard, sweep, sweep_hash
+    return guard, sweeps, sweep_hash
 
 
 def _panel_ts(panel: Panel) -> np.ndarray:
@@ -243,7 +257,11 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
         prepared_classes = tuple(sorted({r["asset_class"] for r in catalog.list_series()})) or asset_classes
         # NOW-5: stamp the substrate's statistical power (panel depth + interpolated MDE) so the tick log
         # records what the funnel could even detect here, and the guard can refuse an underpowered mine.
-        power = (stamp_substrate_power(panel.T, float(ek.get("holdout_frac", 0.25)), sweep, sweep_hash)
+        # V4: a tick mines BOTH candidate types, whose curves differ, so the stamp is taken across both
+        # and reports the WORST. `sweep` is now {candidate_type: sweep}; a type with no measured curve
+        # yields +inf -> refuse rather than borrowing the other's.
+        power = (stamp_substrate_power(panel.T, float(ek.get("holdout_frac", 0.25)), sweep, sweep_hash,
+                                       candidate_types=tuple(sorted(sweep)))
                  if sweep is not None else None)
         # NOW-6 (C2-07): fold the panel content-hash into snapshot_hash so a PRICE-bar arrival (or a
         # revision) flips the substrate dirty — the alt-data catalog hash alone missed the primary
