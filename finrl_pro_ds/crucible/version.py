@@ -211,6 +211,62 @@ flagship's ≈4.45 provenance figure is preserved): it is NOT conservative there
 -0.567 rate sqrt under-states by ~3-12% — but it is verdict-INVARIANT, bounded below by the largest
 MEASURED MDE (3.63), which exceeds any plausible ΔSR ceiling, so it refuses whatever the exponent.
 
+`crucible-v6.0` is a **MAJOR** bump, and the FIRST one that is **not monotone-stricter**: the audit §5
+CORRECTED CONTRACT becomes a selectable production decision layer (``evolve(contract="corrected")``,
+``Substrate.contract``, ``crucible_orchestrator.py --contract corrected``). It replaces the holdout
+decision with ONE marginal-effect statistic — the Jobson-Korkie-Memmel Sharpe-difference z on the
+full held-out book — thresholded at ``t_min`` AND against a **binding** LORD++ level, keeping the three
+cheap guards (uplift / fragility / collinearity) and **DROPPING** the two structurally sealed legs:
+
+  * ``marginal_t`` (independent audit F1). Under the convex sum-to-1 inverse-vol combiner the
+    "marginal contribution" stream is the IDENTITY ``b_aug − b_base == w_c·(r_c − b_base)``, so
+    ``marginal_t >= 3`` is a paired MEAN-DOMINANCE test — "does the candidate out-earn the whole base
+    book by 3 SE" — not a marginal-SHARPE test. It is negative in expectation for a variance-reducing
+    diversifier (worsening with N) and is not scale-invariant (``results/crucible_marginal_seal``: one
+    fixed signal re-levered moves t from −2.30 to +1.86 without ever passing).
+  * ``dsr_aug`` (F2). It deflates the ABSOLUTE augmented-book Sharpe, so a ~0-Sharpe base era seals it
+    shut for every candidate, while a strong base book makes it pass on the base's own merit. It never
+    measures the candidate.
+
+**The 2026-07-29 audit measured the consequence** (``docs/research/crucible_design_implementation_audit_2026-07-29.md``):
+across the entire 403-row lifetime record, of the 170 candidates carrying metrics the economic uplift
+leg passed **170/170** while ``dsr_aug >= 0.90`` passed **0/170** (median 0.000) and
+``marginal_t >= 3.0`` passed **0/170** (max 2.116). One inert leg ANDed with two absolute seals ⇒
+``P(PROMISING) = 0`` by construction, independent of what the market contains. The corrected contract
+is E1-calibrated (null FPR 0.000, Clopper-Pearson upper-95% 0.0060 ≤ the 0.01 ceiling) and E2-powered
+(**0.813 vs the shipped funnel's 0.000 at a realistic marginal ΔSR of 0.5**, T=4044).
+
+**CRU-1 is NOT claimed here, and that is deliberate.** Every prior MAJOR (v3.0/v4.0/v5.0) argued
+"monotone-stricter ⇒ every recorded verdict is preserved". That argument is unavailable — and would be
+dishonest — for v6.0: a candidate the shipped contract rejected CAN pass the corrected one, which is
+the entire point. So the correct statement is the opposite of verdict preservation: **the recorded
+0-PROMISING record was produced by a contract since measured to have zero power at realistic effect
+sizes, and it must be RE-SCORED under the corrected contract rather than inherited.** The two records
+are not comparable and must never be pooled. Three properties make that switch auditable rather than
+goal-post moving:
+  (1) it is OPT-IN and per-substrate — ``contract`` defaults to ``"shipped"``, so every existing call
+      path is byte-identical to v5.0, and choosing "corrected" is a logged operator decision (CR-1: the
+      agent never selects it);
+  (2) it moves NO gate byte — the frozen moats ``519158fa1450`` (funnel) / ``22a18172be1a`` (Taiwan) /
+      ``0ccf6dd584f0`` (small-cap probe) are UNCHANGED; the corrected thresholds live in their own
+      ``configs/crucible_corrected_contract.gates.yaml``, per the ADR-1 separation the lockbox, cohort
+      and power gates already use;
+  (3) the run manifest now PINS the verdict function — ``contract`` + ``corrected_gates_hash`` — so no
+      verdict can be read without knowing which gate produced it, and a shipped/corrected mix-up is
+      detectable in provenance rather than invisible.
+
+The train step changes with it: under the corrected contract it becomes the CHEAP pre-filter it was
+always documented to be (uplift / fragility / collinearity / non-degenerate only). Under the shipped
+contract the train step re-applied the SAME 6-way AND on MORE bars than the holdout, so the certified
+holdout stage was unreachable — the audit found it has never executed in production.
+
+**The substrate-power guard must be re-calibrated with this bump** (audit U2): the sweep in
+``results/crucible_calibration/calibration_mde_sweep.json`` measured the SHIPPED contract's MDE, and
+``crucible_power.gates.yaml`` refuses at ``implied MDE > 0.50`` — which every substrate exceeds under
+the shipped curve. Switching contracts without re-measuring leaves the loop refusing every mine for a
+reason that no longer applies. ``calibration_sweep_path`` therefore selects the sweep matching the
+active contract.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -222,16 +278,16 @@ from pathlib import Path
 
 # The current Crucible system version. Bump per the semantic rules above; keep a matching git tag
 # (`crucible-vMAJOR.MINOR`) so `run_manifest.crucible_version` is anchored to an immutable commit.
-# v5.0 = the substrate-power guard's off-grid MDE extrapolation fails CLOSED. The 1/√N law it
-# extrapolated by was falsified by the project's own cont-129 measurement (MDE flattens to ~N^-0.21
-# above N_eff≈1000), so the branch UNDER-stated MDE — the guard claimed more power than exists and
-# FAILED OPEN for every substrate deeper than the grid's top (holdout 1011). Off-grid now returns
-# +inf/'unmeasured_high' ⇒ REFUSE. MAJOR — it changes a live gate's decision FUNCTION — but touches NO
-# gate byte (frozen 519158fa1450 / taiwan 22a18172be1a / smallcap 0ccf6dd584f0 UNCHANGED;
-# crucible_power.gates.yaml byte-identical) and is monotone-STRICTER at every holdout, so every
-# recorded verdict is preserved (CRU-1 holds; verified two ways — a monotone-stricter property test,
-# and the live tick DBs: every power-stamped tick sits at holdout=1011/'grid', so the bug was LATENT).
-CRUCIBLE_VERSION = "crucible-v5.0"
+# v6.0 = the audit §5 CORRECTED CONTRACT becomes a selectable production decision layer (opt-in,
+# per-substrate, default "shipped"). One Jobson-Korkie-Memmel Sharpe-difference z + a BINDING LORD++
+# p-gate + the three cheap guards; the F1-sealed marginal_t and F2-sealed dsr_aug legs are DROPPED
+# (measured 0/170 lifetime pass each, against 170/170 for the uplift leg). Measured power 0.00 -> 0.81
+# at a realistic marginal ΔSR 0.5. MAJOR, and the FIRST bump that is NOT monotone-stricter: CRU-1
+# verdict-preservation is explicitly NOT claimed — the 0-PROMISING record must be RE-SCORED, not
+# inherited. Moves NO gate byte (thresholds live in configs/crucible_corrected_contract.gates.yaml);
+# the manifest now pins `contract` + `corrected_gates_hash` so no verdict can be read without knowing
+# which gate produced it. Ships with the U2 power-guard re-calibration — see the module docstring.
+CRUCIBLE_VERSION = "crucible-v6.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

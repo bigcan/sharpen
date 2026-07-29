@@ -27,7 +27,13 @@ from ...signals.generation.cohort_eval import (
     evaluate_cohort,
     pool_content_hash,
 )
-from ...signals.generation.evolve import Candidate, GenerationReport, evolve
+from ...signals.generation.evolve import (
+    CONTRACT_CORRECTED,
+    CONTRACT_SHIPPED,
+    Candidate,
+    GenerationReport,
+    evolve,
+)
 from ...signals.generation.fitness import FitnessConfig
 from ...signals.generation.grammar import available_terminals
 from ..ledger import TrialRecord
@@ -38,6 +44,7 @@ from .hypothesis import HypothesisAuthor, PreRegisteredSpec, candidate_hash
 
 if TYPE_CHECKING:
     from ...signals.generation.base_sleeves import SleeveComponents
+    from ..corrected_contract import CorrectedConfig
 
 log = logging.getLogger("crucible.loop")
 
@@ -129,6 +136,10 @@ def run_hypothesis_loop(
     cohort_mc_kwargs: dict | None = None,
     cohort_gates_hash: str | None = None,
     base_components: "dict[str, SleeveComponents] | None" = None,
+    contract: str = CONTRACT_SHIPPED,
+    corrected_cfg: "CorrectedConfig | None" = None,
+    corrected_gates_hash: str | None = None,
+    lord_level: float | None = None,
 ) -> HypothesisLoopResult:
     """Run one manual pass. ``evolve_kwargs`` is the runner block from ``load_generation_config``
     (rng_seed/pop_size/… — WITHOUT ``candidate_type``, which the loop sets per group).
@@ -136,7 +147,12 @@ def run_hypothesis_loop(
     ``pre_proposed`` lets a caller (the P3 orchestrator) hand in specs it already obtained from
     ``author.propose`` — so the substrate_dirty check and the mine share ONE proposer call rather
     than paying an LLM proposer's tokens twice (CR-7). When None (the P2 default) the loop proposes
-    itself; either way ``author.last_proposal_stats`` carries the drop tally from that single call."""
+    itself; either way ``author.last_proposal_stats`` carries the drop tally from that single call.
+
+    ``contract`` / ``corrected_cfg`` / ``lord_level`` (crucible-v6.0) select and parameterize the
+    decision layer ``evolve`` applies on the embargoed holdout; ``corrected_gates_hash`` is the
+    corrected thresholds file's byte hash, pinned into the manifest symmetrically with ``gates_hash``.
+    Defaults reproduce the shipped funnel exactly."""
     ledger = author.ledger
     n_before = ledger.count()
 
@@ -170,9 +186,10 @@ def run_hypothesis_loop(
         seeds = [pr.formula for pr in specs if pr.spec.candidate_type == ct]
         if not seeds:
             continue
-        log.info("mining %d %s seeds", len(seeds), ct)
+        log.info("mining %d %s seeds (contract=%s)", len(seeds), ct, contract)
         report = evolve(seeds, panel, base_returns, timestamps, cfg, candidate_type=ct,
-                        base_components=base_components, **ek)
+                        base_components=base_components, contract=contract,
+                        corrected_cfg=corrected_cfg, lord_level=lord_level, **ek)
         reports[ct] = report
         promising_hashes = {candidate_hash(c.formula) for c in report.promising}
         # Record every surfaced genome to the ledger (file-drawer): the hall-of-fame UNION the
@@ -195,10 +212,13 @@ def run_hypothesis_loop(
                 economic_rationale=(pr.economic_rationale if pr else None),
                 first_seen_run=run_id, proposal_ts=(pr.proposal_ts if pr else proposal_ts),
                 verdict=verdict,
+                # `res` is the TRAIN pre-filter FitnessResult, so all three of these are train-split
+                # CPCV values, NOT out-of-sample (the card layer names the same delta
+                # `train_delta_sr_oos`; S553-cont-131). Under contract="corrected" `dsr` and
+                # `marginal_hlz_t` are DIAGNOSTICS ONLY — the v6.0 decision drops both legs, and the
+                # binding statistic is the holdout JKM z recorded in `report.holdout_validation`
+                # (`corrected_t` / `p_value`). Read `manifest.contract` before interpreting them.
                 dsr=(None if res is None else float(res.dsr_aug)),
-                # `res` is the TRAIN pre-filter FitnessResult, so this is a train-split CPCV value, NOT
-                # out-of-sample — the certified holdout re-score is a separate pass that rarely/never
-                # runs (the card layer names the same value `train_delta_sr_oos`; S553-cont-131).
                 delta_sr_oos=(None if res is None else float(res.delta_sr_oos)),
                 marginal_hlz_t=(None if res is None else float(res.marginal_t)),
                 data_snapshot_hash=data_snapshot_hash))
@@ -243,7 +263,11 @@ def run_hypothesis_loop(
         token_cost=token_cost, verdicts=verdicts,
         cohort_gates_hash=cohort_prov.get("cohort_gates_hash"),
         cohort_verdicts=cohort_prov.get("cohort_verdicts", {}),
-        cohort_card_hashes=cohort_prov.get("cohort_card_hashes", {}))
+        cohort_card_hashes=cohort_prov.get("cohort_card_hashes", {}),
+        # v6.0: pin the verdict FUNCTION. `corrected_gates_hash` is only meaningful under the corrected
+        # contract, so a shipped run leaves it None and its manifest differs from a corrected run's.
+        contract=contract,
+        corrected_gates_hash=(corrected_gates_hash if contract == CONTRACT_CORRECTED else None))
 
     return HypothesisLoopResult(
         specs=specs, reports=reports, cards=cards, manifest=manifest,

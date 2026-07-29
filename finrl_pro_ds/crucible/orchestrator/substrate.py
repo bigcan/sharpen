@@ -40,6 +40,7 @@ from .fdr import OnlineFDR
 
 if TYPE_CHECKING:
     from ...signals.generation.base_sleeves import SleeveComponents
+    from ..corrected_contract import CorrectedConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -242,11 +243,26 @@ class Substrate:
     cohort_cfg: CohortConfig | None = None
     cohort_mc_kwargs: dict | None = None
     cohort_gates_hash: str | None = None
+    # crucible-v6.0 DECISION CONTRACT. "shipped" (default) = the historical 6-way AND re-scored on the
+    # holdout. "corrected" = the audit §5 contract (one JKM Sharpe-difference z + a BINDING LORD++
+    # p-gate + the three cheap guards; the F1-sealed marginal_t and F2-sealed dsr_aug legs dropped).
+    # Its thresholds live in their OWN file (configs/crucible_corrected_contract.gates.yaml), so the
+    # frozen funnel gates_hash moat is untouched — the same ADR-1 separation the lockbox/cohort/power
+    # gates use. Selecting "corrected" changes the verdict FUNCTION; it is a per-substrate operator
+    # decision, never an agent one (CR-1).
+    contract: str = "shipped"
+    corrected_cfg: "CorrectedConfig | None" = None
+    corrected_gates_hash: str | None = None
 
     def __post_init__(self) -> None:
         if self.lockbox is not None and self.incubation_criterion is None:
             raise ValueError("a Substrate with a lockbox must also carry an incubation_criterion "
                              "(the pre-registered CR-2 criterion pinned at enrollment)")
+        if self.contract not in ("shipped", "corrected"):
+            raise ValueError(f"contract must be 'shipped' or 'corrected'; got {self.contract!r}")
+        if self.contract == "corrected" and self.corrected_cfg is None:
+            raise ValueError("a Substrate with contract='corrected' must carry corrected_cfg "
+                             "(CorrectedConfig from configs/crucible_corrected_contract.gates.yaml)")
 
 
 def substrate_dirty(*, data_changed: bool, n_fresh_hypotheses: int) -> tuple[bool, str]:

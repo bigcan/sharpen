@@ -85,12 +85,65 @@ e2_power:
 # past "0 PROMISING" was a real absence or just low power at that substrate's length.
 mde_sweep:
   # Substrate bar counts to probe. Real lengths: cross_asset ~4044, Taiwan ~2782; 756 (~3y) and
-  # 1512 (~6y) anchor the short end. holdout = holdout_frac * T bars.
-  t_grid: [756, 1512, 2782, 4044]
+  # 1512 (~6y) anchor the short end. holdout = T - int(T*(1-holdout_frac)) bars.
+  #
+  # DEEP ANCHORS (U2, 2026-07-29). The grid used to stop at 4044 (holdout 1011), which is exactly where
+  # every daily substrate sits — so `substrate.interp_mde` took its off-grid branch for ANY deeper or
+  # higher-frequency substrate. Until crucible-v5.0 that branch extrapolated by a falsified 1/√N law and
+  # FAILED OPEN; v5.0 made it fail CLOSED (`unmeasured_high` -> +inf -> refuse), which is honest but
+  # means no deep substrate can ever be mined. The real unblock, named in v5.0's own docstring, is to
+  # EXTEND the sweep so deep substrates INTERPOLATE between MEASURED anchors instead of extrapolating.
+  # These anchors carry measured coverage out to holdout 8064 (was 1011).
+  #
+  # TWO CAVEATS, both material:
+  #  * COVERAGE IS STILL FINITE. Anything past the top anchor remains `unmeasured_high` -> +inf ->
+  #    refuse. That is correct (fail-closed), not a bug — but it means "deep substrates interpolate"
+  #    holds only up to the deepest MEASURED holdout, and a deeper one still needs a longer grid.
+  #  * THE AXIS IS BARS, NOT TIME. The generator is a daily-scale DGP and `periods_per_year=252` is
+  #    baked into the FitnessConfig, so a row is "MDE at N bars of THIS per-bar signal-to-noise".
+  #    Reading a high-N row as an intraday substrate's MDE additionally assumes intraday per-bar SNR
+  #    resembles daily — which is a modelling assumption, not something this sweep measures.
+  t_grid: [756, 1512, 2782, 4044, 6048, 8064, 16128, 32256]
   n_seeds: 30
   # The beta grid must BRACKET the detection transition across ALL T (it shifts to lower beta as T
   # grows). Denser + spanning 0.002..0.030, from the S553-cont-121 probes.
-  beta_grid: [0.0, 0.002, 0.003, 0.004, 0.006, 0.008, 0.012, 0.018, 0.030]
+  #
+  # LOW-END DENSIFICATION (U2, 2026-07-29). MDE is read as "the FIRST grid point reaching power_target",
+  # so it is only as sharp as the grid is dense AT the transition — and the transition marches to lower
+  # beta as T grows. On the deep anchors the old grid had already run out: at holdout 4032/8064 the
+  # corrected contract sat at power 0.20/0.43 at beta=0.002 and 0.97/1.00 at beta=0.003, with NOTHING in
+  # between, so the reported MDE pinned to beta=0.003's realized ΔSR (~0.55) at both depths. That looked
+  # like the curve FLATTENING into a floor; it was the grid running out. (The tell: power at the fixed
+  # beta=0.002 point kept CLIMBING with depth — 0.03 -> 0.20 -> 0.43 — which a real floor forbids.)
+  # A grid-pinned MDE over-states the detection limit, and an over-stated MDE makes the power guard
+  # refuse substrates that are in fact adequately powered — fail-safe, but wrong, and wrong in exactly
+  # the direction that keeps the loop switched off.
+  beta_grid: [0.0, 0.0005, 0.001, 0.0015, 0.002, 0.0025, 0.003, 0.004, 0.006, 0.008, 0.012, 0.018, 0.030]
+
+# ---- CROSS-SECTIONAL MDE surface (bars x BREADTH) --------------------------------------
+# V3, 2026-07-29. Every mde_sweep row above is measured on the OVERLAY path, whose only power axis is
+# BARS — and the substrate-power guard applied that single curve to cross_sectional substrates too. A
+# per-name (T,N) panel carries ~N x the effective observations of a broadcast one at the SAME
+# holdout_bars, so the guard was structurally blind to the payoff of per-name data (audit U3). This
+# block measures the missing axis. Experimental design, not gates: no threshold lives here (the ceiling
+# stays in crucible_power.gates.yaml).
+xsec_mde_sweep:
+  t_grid: [1512, 2782, 4044, 8064]     # holdout 378 / 696 / 1011 / 2016
+  n_grid: [12, 25, 50, 100]            # cross-sectional breadth — THE axis this sweep adds
+  n_seeds: 24
+  ls_min_names: 6                      # min names/day for the rank-L/S book (matches evolve's default)
+  # beta = per-name characteristic loading on the NEXT return, against a 0.010 daily noise floor.
+  # Calibrated by probe (2026-07-29) to bracket the transition across the whole (T,N) grid. Breadth
+  # pushes the transition to lower BETA — at holdout 1011 power reaches 1.0 by beta 0.001 at N=12 but
+  # already by beta 0.0005 at N=100 — so the low end must stay dense or every wide-N row is grid-pinned.
+  #
+  # READ THE MDE COLUMN CAREFULLY. The probe also showed breadth does NOT lower the MDE expressed in
+  # realized ΔSR: at holdout 1011 the transition sits near ΔSR ~0.7-1.8 at N=12 and ~0.9-2.7 at N=100.
+  # That is not a defect, it is what the statistic measures — ΔSR is already risk-adjusted, and the SE
+  # of the Sharpe-DIFFERENCE is set by the number of TIME observations, not by the cross-section. What
+  # breadth buys is a HIGHER ΔSR for the same underlying per-name signal (5.9 vs 2.4 at beta=0.001), so
+  # it moves a real alpha ABOVE a fixed ceiling rather than moving the ceiling down.
+  beta_grid: [0.0, 0.0001, 0.00015, 0.0002, 0.0003, 0.0004, 0.0005, 0.0007, 0.001, 0.0015]
 
 # ---- E1 sensitivity sweep (F4 realistic-null robustness) -------------------------------
 # The F4 finding "E1 stays GREEN under a realistic null" is measured at ONE null-shape point
