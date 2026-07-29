@@ -107,25 +107,35 @@ def _load_power_guard(path: str, *, force: bool, contract: str = "shipped"):
                 "cross_sectional": "calibration_sweep_path_corrected_xsec"}
     else:
         keys = {"overlay": "calibration_sweep_path"}
+    guard = PowerGuard(enabled=bool(cfg.get("enabled", True)),
+                       ceiling=float(cfg.get("plausible_delta_sr_max", 0.5)),
+                       action=str(cfg.get("action", "warn")), force=bool(force))
     sweeps: dict[str, dict] = {}
     digest = hashlib.sha256()
     for ct, key in sorted(keys.items()):
         sweep_path = ROOT / cfg.get(key, "")
         if not sweep_path.exists():
             exp = "xsec_mde_sweep" if ct == "cross_sectional" else "mde_sweep"
-            log.warning("calibration sweep %s (contract=%s, candidate_type=%s, key=%s) absent — "
-                        "substrate-power stamp/guard disabled. Measure it with: python "
-                        "scripts/research/crucible_calibration.py --exp %s --contract %s",
-                        sweep_path, contract, ct, key, exp, contract)
-            return None, None, ""
+            # FAIL CLOSED (crucible-v8.0). This used to return (None, None, "") — no stamp, no guard —
+            # so a missing curve SKIPPED the guard entirely and the substrate mined UNGUARDED. That is
+            # not a benign degradation: `results/` is gitignored, so the curves are absent on EVERY
+            # fresh clone, and the combination "contract on + curves missing" is exactly the newly
+            # powered contract mining with no power gate at all. A configured-and-enabled guard that
+            # cannot measure must REFUSE, not evaporate. Returning an EMPTY sweep map still produces a
+            # stamp, and `stamp_substrate_power` reads an empty type set as unmeasured (+inf) => refuse.
+            # The explicit escape hatches are unchanged: --no-power-guard detaches it, and
+            # --force-underpowered overrides the refusal.
+            log.error("calibration sweep %s (contract=%s, candidate_type=%s, key=%s) ABSENT — the "
+                      "substrate-power guard cannot measure this substrate and will REFUSE it. "
+                      "Measure it with: python scripts/research/crucible_calibration.py --exp %s "
+                      "--contract %s   (or pass --no-power-guard to detach the guard deliberately)",
+                      sweep_path, contract, ct, key, exp, contract)
+            return guard, {}, ""
         raw = sweep_path.read_bytes()
         sweeps[ct] = json.loads(raw)
         digest.update(f"{ct}=".encode())
         digest.update(raw)
     sweep_hash = digest.hexdigest()[:12]     # pins EVERY curve the stamp consulted
-    guard = PowerGuard(enabled=bool(cfg.get("enabled", True)),
-                       ceiling=float(cfg.get("plausible_delta_sr_max", 0.5)),
-                       action=str(cfg.get("action", "warn")), force=bool(force))
     return guard, sweeps, sweep_hash
 
 
@@ -485,13 +495,14 @@ def main() -> int:
                          "which bypasses generation.enabled)")
     ap.add_argument("--no-power-guard", action="store_true",
                     help="detach the substrate-power stamp/guard entirely (no tick power columns)")
-    ap.add_argument("--contract", choices=("shipped", "corrected"), default="shipped",
-                    help="crucible-v6.0 decision contract. shipped = the historical 6-way AND "
-                         "(default; verdict-preserving). corrected = the audit §5 contract — one "
-                         "Jobson-Korkie-Memmel Sharpe-difference z + a BINDING LORD++ p-gate + the "
-                         "three cheap guards, DROPPING the F1-sealed marginal_t and F2-sealed dsr_aug "
-                         "legs. Changes the verdict FUNCTION: measured power 0.00 -> 0.81 at a "
-                         "realistic marginal ΔSR 0.5.")
+    ap.add_argument("--contract", choices=("shipped", "corrected"), default="corrected",
+                    help="decision contract. corrected (DEFAULT since crucible-v8.0) = the audit §5 "
+                         "contract — one Jobson-Korkie-Memmel Sharpe-difference z + a BINDING LORD++ "
+                         "p-gate + the three cheap guards, DROPPING the F1-sealed marginal_t and "
+                         "F2-sealed dsr_aug legs (each measured 0/170 lifetime pass, against 170/170 "
+                         "for the uplift leg). shipped = the historical 6-way AND, retained for "
+                         "reproducing a pre-v6.0 run — its verdicts are NOT comparable to corrected "
+                         "ones and the two records must never be pooled.")
     ap.add_argument("--corrected-config", default=str(DEFAULT_CORRECTED_GATES),
                     help="--contract corrected only: its decision thresholds YAML (separate file so "
                          "the frozen funnel gates_hash is untouched); its hash is pinned into the "
