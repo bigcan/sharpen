@@ -144,8 +144,8 @@ Full tables + every chaining rule: `docs/claude_md_reference.md`.
 ## Memory Protocol
 
 Tier 1: `.agent/memory/core.md` (boot context). Tier 2: `randd_log.md` at project root (R&D write buffer, auto-rotated at 150 KB into `randd_archive/YYYY-MM.md`).
-Cloud: agent-memory MCP (LanceDB on GCS) — search index; flat files are authoritative.
-Full detail (commit flow, rotation, re-index, GCS env setup): `docs/claude_md_reference.md`.
+Index: agent-memory MCP — **local** LanceDB + Ollama embeddings (not GCS); search index, flat files are authoritative.
+Full detail (commit flow, rotation, backend config): `docs/claude_md_reference.md`.
 
 ## Live Trading / Docker / PRISM
 

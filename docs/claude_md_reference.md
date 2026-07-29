@@ -174,14 +174,14 @@ docker/live/
 Tier 1: .agent/memory/core.md   -- Project status (~100 lines, deterministic boot context)
 Tier 2: randd_log.md             -- R&D write buffer (~20 entries, auto-rotated at 150 KB)
         randd_archive/YYYY-MM.md -- Monthly archives (cold backup, grep-searchable)
-Cloud:  agent-memory MCP         -- LanceDB on GCS, search index over ALL R&D entries
+Index:  agent-memory MCP         -- LOCAL LanceDB + Ollama embeddings, search index over R&D entries
 ```
 
 **Boot:** `core.md` loaded via system prompt hook. `memory_search` for semantic retrieval -> grep `randd_log.md` for recent exact matches -> grep `randd_archive/` as fallback.
 **Commit:** Append `randd_log.md` -> `memory_store` new entry to LanceDB -> auto-rotate if >150 KB -> update `core.md` -> git commit.
 **Auto-rotate:** `python scripts/rotate_randd_log.py --keep-months 1 --max-entries 20` (triggered during `/sync` when >150 KB). `--max-entries` acts as both cap and floor at month boundaries.
-**Bulk re-index:** `python scripts/bulk_index_memory.py --force` after archive rotation or to rebuild the search index.
-**Cloud:** Requires `GOOGLE_SERVICE_ACCOUNT` env var in `.mcp.json` pointing to `~/.openclaw/gcs-service-account.json`. Flat files remain authoritative -- LanceDB is a search acceleration layer.
+**Bulk re-index:** NOT part of the live path. `scripts/bulk_index_memory.py` still hardcodes the retired GCS table (`gs://openclaw-memory-lance/v1`) and Gemini `embedding-001`; it targets a different table *and* a different vector space than the live index, and its `~/.openclaw/gcs-service-account.json` is absent, so it cannot run. Do not use it to rebuild the search index -- `memory_store` embeds and inserts directly (post-S517), so no separate reindex step exists.
+**Index backend:** Local, no cloud. `.mcp.json` runs the `agent-memory` server against `LANCEDB_URI=~/.openclaw/lancedb/v1` with `OLLAMA_URL=http://localhost:11434` and `EMBED_MODEL=nomic-embed-text`. Flat files remain authoritative -- LanceDB is a search acceleration layer.
 
 ## Docker Monitoring Architecture (full)
 
