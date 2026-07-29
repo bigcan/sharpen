@@ -39,3 +39,26 @@ online_fdr:              # binding LORD++ account (audit F13: make it actually t
   alpha: 0.10            # per-substrate target FDR
   w0: null               # initial wealth; null -> alpha/2 (the LORD default)
   binding: true          # promote iff p_value <= OnlineFDR.next_level()  — the correction
+
+# WHICH CANDIDATES MAY BE PROMOTED (search-multiplicity control, added 2026-07-29 after the U1e
+# measurement). Dropping `dsr_aug` also dropped the funnel's ONLY file-drawer deflation: the shipped
+# contract paid for search multiplicity by deflating the augmented-book Sharpe against `gen_n_eff`
+# (EVERY genome ever scored). The corrected contract has no such term, and its remaining control — the
+# LORD++ p-gate — charges ONE test per PRE-REGISTERED SPEC while a GP search evaluates hundreds of
+# evolved offspring that charge nothing. Measured consequence (E1 driven through the real `evolve`,
+# 240 null panels): per-tick FPR 0.025, CP-upper95 0.0487 against a 0.05 ceiling — it clears, with ~2%
+# headroom, and one more false positive would have flipped it.
+#
+#   prereg_only  (DEFAULT) — only PRE-REGISTERED seed formulas are eligible for the corrected holdout
+#                gate. Offspring are still generated, scored, ledgered and reported as search internals
+#                (that is what the file drawer is for) but can never be promoted. This makes the
+#                decision unit IDENTICAL to the LORD++ charging unit — one pre-registered hypothesis,
+#                one test, one charged level — so the multiplicity is accounted for by construction
+#                rather than bounded after the fact. It is also the audit §5 design: "pre-registered
+#                low-N single-hypothesis probes ... NOT more mass-mining ticks".
+#   all        — every train-survivor is eligible, including offspring. Retains the discovery upside of
+#                the search, but the search's multiplicity is then UNPAID: the E1 above is the only
+#                bound on it, and it is thin. Do not select this for a mass-mining substrate without
+#                re-measuring E1 at that substrate's search budget.
+eligibility:
+  offspring_policy: prereg_only   # prereg_only | all

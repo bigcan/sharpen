@@ -34,10 +34,21 @@ from .fitness import (
 from .grammar import INPUTS, available_terminals, crossover, mutate, node_count, parse, to_formula
 
 if TYPE_CHECKING:
+    from ...crucible.corrected_contract import CorrectedConfig
     from .base_sleeves import SleeveComponents
 
 log = logging.getLogger("alpha_evolve")
 _INFEASIBLE = float("-inf")
+
+# The two decision contracts ``evolve`` can run under (crucible-v6.0).
+#   "shipped"   — the historical 6-way AND re-scored on the holdout (``combination_fitness.passes_gate``).
+#   "corrected" — the audit §5 contract (``crucible.corrected_contract``): ONE marginal-effect
+#                 significance statistic (Jobson-Korkie-Memmel Sharpe-difference z) + a BINDING LORD++
+#                 p-gate + the three cheap guards, with the F1-sealed ``marginal_t`` and the F2-sealed
+#                 book-level ``dsr_aug`` DROPPED.
+CONTRACT_SHIPPED = "shipped"
+CONTRACT_CORRECTED = "corrected"
+_CONTRACTS = (CONTRACT_SHIPPED, CONTRACT_CORRECTED)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +67,7 @@ class GenerationReport:
     holdout_validation: list[dict]   # PROMISING survivors re-scored on the embargoed tail
     promising: list[Candidate] = field(default_factory=list)
     pbo: dict | None = None          # CSCV Probability of Backtest Overfitting (advisory, GP7-03)
+    contract: str = CONTRACT_SHIPPED  # which decision contract produced ``promising`` (v6.0)
 
 
 def _candidate_returns(formula: str, panel: Panel, *, hold_horizon: int, cost_bps: float,
@@ -210,6 +222,32 @@ def _slice_components(
             for k, c in components.items()}
 
 
+def _passes_cheap_prefilter(res: FitnessResult, cc: "CorrectedConfig") -> bool:
+    """The CORRECTED contract's TRAIN pre-filter: the three cheap guards ONLY (crucible-v6.0).
+
+    The shipped path pre-filters the train split with ``result.passes_gate`` — the SAME 6-way AND it
+    then re-applies on the holdout. That is not a pre-filter, it is the final gate run on MORE bars
+    (train is ``1 − holdout_frac`` of the panel), so a candidate the sealed legs reject can never reach
+    the certified holdout stage at all. The 2026-07-29 audit measured the consequence: across the whole
+    403-row lifetime record the holdout gate never executed in production, because ``marginal_t`` and
+    ``dsr_aug`` passed 0/170 on train.
+
+    So under the corrected contract the train step is what it was always documented to be — a CHEAP
+    screen that removes obviously-uninteresting genomes (no economic uplift, fragile across CPCV paths,
+    collinear with the base span, or degenerate-vol) — and the SIGNIFICANCE decision is taken exactly
+    once, on the embargoed holdout, by :func:`corrected_contract_fitness`. Every threshold read here
+    comes from ``cc`` (``configs/crucible_corrected_contract.gates.yaml``); none is hardcoded.
+
+    ``not_degenerate`` is the F14-4 anti-hijack cull; it is a correctness floor rather than a decision
+    threshold (it lives in ``FitnessConfig``), so it is carried through unchanged."""
+    return bool(
+        np.isfinite(res.delta_sr_oos) and res.delta_sr_oos >= cc.uplift_min
+        and np.isfinite(res.delta_sr_median) and res.delta_sr_median >= cc.delta_median_min
+        and np.isfinite(res.frac_paths_positive) and res.frac_paths_positive >= cc.frac_positive_min
+        and np.isfinite(res.max_base_corr_obs) and res.max_base_corr_obs <= cc.max_base_corr
+        and res.not_degenerate)
+
+
 def _overlay_ctx(
     net_returns: dict[str, np.ndarray],
     components: "dict[str, SleeveComponents] | None",
@@ -243,6 +281,9 @@ def evolve(
     pbo_n_splits: int = 10,
     candidate_type: str = "cross_sectional",
     base_components: "dict[str, SleeveComponents] | None" = None,
+    contract: str = CONTRACT_SHIPPED,
+    corrected_cfg: "CorrectedConfig | None" = None,
+    lord_level: float | None = None,
 ) -> GenerationReport:
     """Evolve DSL alphas on the TRAIN split; re-validate PROMISING survivors on the held-out
     tail. ``base_returns``/``timestamps`` align to the train split's rows.
@@ -265,9 +306,39 @@ def evolve(
     Sharpes (M1/GP4-02) fed at the binding held-out gate; and an advisory **CSCV PBO** (GP7-03) is
     computed over the first ``pbo_max_strategies`` candidates' return series (memory-bounded sample)
     and reported — P(the in-sample-best candidate underperforms OOS), the best-of-N overfit metric
-    the deflated Sharpe does not estimate. ``pbo_max_strategies=0`` disables it."""
+    the deflated Sharpe does not estimate. ``pbo_max_strategies=0`` disables it.
+
+    ``contract`` (crucible-v6.0) selects the DECISION layer:
+
+      * ``"shipped"`` (default) — unchanged, byte-identical to v5.0: the train pre-filter and the
+        holdout gate are both ``combination_fitness(...).passes_gate``.
+      * ``"corrected"`` — the audit §5 contract. Train pre-filters on the cheap guards only
+        (:func:`_passes_cheap_prefilter`); the holdout decision is
+        ``corrected_contract_fitness(...).passes_corrected`` — one Jobson-Korkie-Memmel Sharpe-difference
+        z against ``corrected_cfg.t_min`` plus a BINDING LORD++ p-gate at ``lord_level``, with the
+        F1-sealed ``marginal_t`` and F2-sealed ``dsr_aug`` legs dropped. Requires ``corrected_cfg``;
+        ``lord_level`` defaults to a FRESH account's first level (``fresh_lord_level``) — the
+        orchestrator passes the live per-substrate level instead.
+
+    NOTE this is the one bump that is NOT monotone-stricter: a candidate the shipped contract rejected
+    can pass the corrected one (that is the entire point). Recorded verdicts are therefore NOT preserved
+    across the switch and must be re-scored, not inherited — see ``version.py``."""
     if candidate_type not in ("cross_sectional", "overlay"):
         raise ValueError(f"candidate_type must be 'cross_sectional' or 'overlay'; got {candidate_type!r}")
+    if contract not in _CONTRACTS:
+        raise ValueError(f"contract must be one of {_CONTRACTS}; got {contract!r}")
+    is_corrected = contract == CONTRACT_CORRECTED
+    if is_corrected:
+        # Local import: ``crucible`` imports ``signals`` (substrate/loop), so a module-level import the
+        # other way would close a cycle. Deferring it also keeps the shipped path from paying for it.
+        from ...crucible.corrected_contract import corrected_contract_fitness, fresh_lord_level
+        if corrected_cfg is None:
+            raise ValueError("contract='corrected' requires corrected_cfg (CorrectedConfig from "
+                             "configs/crucible_corrected_contract.gates.yaml)")
+        if lord_level is None:
+            lord_level = fresh_lord_level(corrected_cfg)
+    elif corrected_cfg is not None or lord_level is not None:
+        raise ValueError("corrected_cfg / lord_level are only meaningful with contract='corrected'")
     rng = np.random.default_rng(rng_seed)
     train, hold = _split(panel, holdout_frac, holdout_embargo)
     n_train = train.T
@@ -361,9 +432,30 @@ def evolve(
 
     final_n_eff = float(max(2, gen_n_total))             # the FULL file-drawer N (every genome)
     ranked = sorted(scored.values(), key=lambda c: c.fitness, reverse=True)
-    # cheap pre-filter on the (under-counted) running-N train gate; the BINDING decision is the
-    # held-out gate at the full file-drawer N below (F1: the train gate alone under-deflates).
-    train_passers = [c for c in ranked if c.result is not None and c.result.passes_gate]
+    # TRAIN PRE-FILTER. Under the shipped contract this is the same 6-way AND the holdout re-applies
+    # (the historical behaviour, and the reason the holdout stage never ran — see
+    # _passes_cheap_prefilter). Under the corrected contract it is the cheap guards ONLY, so the single
+    # significance decision is taken once, on the holdout.
+    if is_corrected:
+        assert corrected_cfg is not None                      # narrowed above
+        train_passers = [c for c in ranked
+                         if c.result is not None and _passes_cheap_prefilter(c.result, corrected_cfg)]
+        # SEARCH-MULTIPLICITY CONTROL (U1e). Under `prereg_only` an evolved offspring may be scored,
+        # ledgered and reported — it is still part of the file drawer — but it may NOT be promoted,
+        # because it charges no LORD++ wealth. Restricting promotion to the pre-registered seeds makes
+        # the decision unit identical to the charging unit (one hypothesis, one test, one level), which
+        # is what the corrected contract's binding-FDR leg assumes. `seed_formulas` IS the
+        # pre-registration: the orchestrator passes exactly the tick's fresh specs.
+        if corrected_cfg.offspring_policy == "prereg_only":
+            prereg = set(seed_formulas)
+            n_before = len(train_passers)
+            train_passers = [c for c in train_passers if c.formula in prereg]
+            if n_before != len(train_passers):
+                log.info("prereg_only: %d of %d train-survivors are evolved offspring — scored and "
+                         "ledgered, but not promotion-eligible (they charge no LORD++ wealth)",
+                         n_before - len(train_passers), n_before)
+    else:
+        train_passers = [c for c in ranked if c.result is not None and c.result.passes_gate]
 
     # Held-out re-validation at the FULL file-drawer N, scoring on the FULL panel so trailing-
     # window operators warm up from the (causal, past) train history (F2: a fresh hold slice
@@ -388,19 +480,40 @@ def evolve(
             holdout_validation.append({"formula": c.formula, "holdout": "degenerate"})
             continue
         cand_ho = full[0][panel.T - n_hold:]              # holdout rows, warmed up from train
-        # BINDING gate: deflate the held-out book Sharpe against the FULL search dispersion pool
-        # (GP4-02/M1) at the full file-drawer count.
-        try:                                              # F3: fitness must not crash the run
-            hv = combination_fitness(cand_ho, base_ho, ts_ho, cfg, gen_n_eff=final_n_eff,
-                                     turnover_ann=full[1], n_nodes=node_count(parse(c.formula)),
-                                     trial_sharpe_pool=sharpe_pool)
+        # BINDING gate. Shipped: deflate the held-out book Sharpe against the FULL search dispersion
+        # pool (GP4-02/M1) at the full file-drawer count. Corrected: one JKM Sharpe-difference z + the
+        # binding LORD++ p-gate, on the same held-out bars (crucible-v6.0).
+        try:                                              # F3: scoring must not crash the run
+            if is_corrected:
+                assert corrected_cfg is not None and lord_level is not None
+                cr = corrected_contract_fitness(cand_ho, base_ho, ts_ho, cfg, corrected_cfg,
+                                                lord_level=lord_level)
+            else:
+                hv = combination_fitness(cand_ho, base_ho, ts_ho, cfg, gen_n_eff=final_n_eff,
+                                         turnover_ann=full[1], n_nodes=node_count(parse(c.formula)),
+                                         trial_sharpe_pool=sharpe_pool)
         except Exception:                                 # noqa: BLE001
             holdout_validation.append({"formula": c.formula, "holdout": "fitness raised"})
             continue
-        holdout_validation.append({
-            "formula": c.formula, "train_delta": c.result.delta_sr_oos,   # type: ignore[union-attr]
-            "holdout_delta": hv.delta_sr_oos, "holdout_passes": hv.passes_gate})
-        if hv.passes_gate:
+        train_delta = c.result.delta_sr_oos               # type: ignore[union-attr]
+        if is_corrected:
+            passed = cr.passes_corrected
+            # Same four keys the shipped path emits (the card/manifest layer reads them verbatim),
+            # plus the corrected statistic so a Tier-2 reader can see WHY it passed or failed.
+            holdout_validation.append({
+                "formula": c.formula, "train_delta": train_delta,
+                "holdout_delta": cr.delta_sr, "holdout_passes": passed,
+                "contract": CONTRACT_CORRECTED, "corrected_t": cr.corrected_t,
+                "p_value": cr.p_value, "lord_level": float(lord_level), "rho": cr.rho,
+                "n_eff": cr.n_eff, "n_bars": cr.n_bars,
+                "legs": {"t": cr.t_pass, "lord": cr.lord_pass, "uplift": cr.uplift_pass,
+                         "fragility": cr.fragility_pass, "collinearity": cr.collinearity_pass}})
+        else:
+            passed = hv.passes_gate
+            holdout_validation.append({
+                "formula": c.formula, "train_delta": train_delta,
+                "holdout_delta": hv.delta_sr_oos, "holdout_passes": passed})
+        if passed:
             promising.append(c)
 
     # GP7-03: advisory CSCV PBO over the bounded candidate sample (the best-of-N overfit metric
@@ -417,4 +530,5 @@ def evolve(
     return GenerationReport(
         hall_of_fame=ranked[:10],
         gen_n_total=gen_n_total, gen_n_eff=final_n_eff,
-        holdout_validation=holdout_validation, promising=promising, pbo=pbo)
+        holdout_validation=holdout_validation, promising=promising, pbo=pbo,
+        contract=contract)

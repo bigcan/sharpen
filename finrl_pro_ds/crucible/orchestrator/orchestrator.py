@@ -280,11 +280,12 @@ def _process_substrate(
 
     budget.charge(candidates=n_fresh, tokens=est_tokens)
     burst = route_burst(est_candidates=n_fresh, is_hpo=sub.is_hpo)
-    log.info("substrate %s: MINING %d fresh specs (%s) -> %s",
-             sub.substrate_id, n_fresh, reason, burst.target)
+    log.info("substrate %s: MINING %d fresh specs (%s) -> %s [contract=%s]",
+             sub.substrate_id, n_fresh, reason, burst.target, sub.contract)
 
     # --- Stage 3+4: UNCHANGED mine + T0–T5 (reuse P2 loop; no 2nd proposer call) -------------------
     run_id = f"tick-{sub.substrate_id}-{tick_ts}"
+    lord_level = _tick_lord_level(sub, store, n_tests=n_fresh) if sub.contract == "corrected" else None
     result = run_hypothesis_loop(
         panel=prepared.panel, base_returns=prepared.base_returns,
         timestamps=prepared.timestamps, cfg=sub.cfg, evolve_kwargs=sub.evolve_kwargs,
@@ -292,7 +293,9 @@ def _process_substrate(
         proposal_ts=tick_ts, catalog_asset_classes=prepared.asset_classes,
         data_snapshot_hash=snap, token_cost=est_tokens, pre_proposed=fresh_specs,
         cohort_cfg=sub.cohort_cfg, cohort_mc_kwargs=sub.cohort_mc_kwargs,
-        cohort_gates_hash=sub.cohort_gates_hash, base_components=prepared.base_components)
+        cohort_gates_hash=sub.cohort_gates_hash, base_components=prepared.base_components,
+        contract=sub.contract, corrected_cfg=sub.corrected_cfg,
+        corrected_gates_hash=sub.corrected_gates_hash, lord_level=lord_level)
 
     # --- online-FDR: charge one test per pre-registered spec (deterministic order) -----------------
     promising_hashes = {c.candidate_hash for c in result.cards}
@@ -429,6 +432,29 @@ def _lockbox_fields(sub: Substrate, touched: list[LockboxEntry], *, n_enrolled: 
         n_cleared=sum(1 for e in entries if e.status == STATUS_CLEARED),
         n_rejected=sum(1 for e in entries if e.status == STATUS_REJECTED),
         lockbox_entries=list(touched))
+
+
+def _tick_lord_level(sub: Substrate, store: OrchestratorStore, *, n_tests: int) -> float:
+    """The LORD++ level the corrected contract thresholds candidate p-values against THIS tick
+    (crucible-v6.0, audit F13 — "make the online-FDR account actually bind").
+
+    The account charges one test per pre-registered spec, and LORD++ levels DECAY across a barren
+    stream, so a tick with ``n_tests`` fresh specs spends a different α_t on each. Rather than promote
+    a candidate at the loosest level of the batch, take the TIGHTEST: simulate the whole tick on a COPY
+    of the account assuming NO discovery (the conservative branch — a real discovery only replenishes,
+    raising later levels) and use the minimum. So no candidate is ever promoted at a level looser than
+    one it could actually have been charged.
+
+    The account itself is NOT advanced here — this is a pure read. The real charging still happens
+    once, after the mine, in the unchanged per-spec ``fdr.observe`` loop."""
+    live = store.load_fdr(sub.substrate_id, alpha=sub.fdr_alpha, w0=sub.fdr_w0,
+                          alpha_floor=sub.fdr_alpha_floor)
+    probe = OnlineFDR.from_json(live.to_json())              # copy; never mutate the persisted account
+    levels: list[float] = []
+    for _ in range(max(1, int(n_tests))):
+        levels.append(probe.next_level())
+        probe.observe(is_discovery=False)
+    return float(min(levels))
 
 
 def _power_kwargs(prepared: PreparedSubstrate) -> dict:

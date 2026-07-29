@@ -20,7 +20,15 @@ power_guard:
   # The E1/E2 MDE-vs-substrate-length sweep the interpolation reads (holdout_bars -> mde_realized_delta_sr
   # at the sweep's power_target). Its content hash is pinned into the tick stamp so a changed curve is
   # detectable. Relative to the repo root.
+  #
+  # ONE CURVE PER DECISION CONTRACT (U2, crucible-v6.0). An MDE curve is a property of the GATE, not of
+  # the data: it answers "what is the smallest edge THIS contract can detect at this depth". The shipped
+  # curve below was measured on the shipped 6-way AND, whose two significance legs the 2026-07-29 audit
+  # measured at 0/170 lifetime pass — so it characterizes a gate with ~zero power, and reading it for a
+  # corrected-contract substrate would refuse mines for a reason that no longer applies. The loader
+  # selects by the substrate's `contract`; a missing file degrades to "no stamp, no guard" as before.
   calibration_sweep_path: results/crucible_calibration/calibration_mde_sweep.json
+  calibration_sweep_path_corrected: results/crucible_calibration/calibration_mde_sweep_corrected.json
 
   # Ceiling on the implied MDE (realized marginal ΔSR at target power). A realistic true single-signal
   # marginal alpha is ΔSR ~ 0.3-0.5 (project memory); 0.50 flags a substrate whose funnel could not

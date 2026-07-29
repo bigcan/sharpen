@@ -20,14 +20,18 @@ SMALLCAP_ALTDATA_GATES = ROOT / "configs" / "taiwan_smallcap_altdata.gates.yaml"
 
 
 def test_versions_are_distinct_and_tagged_form() -> None:
-    # v5.0 = the substrate-power guard's off-grid MDE extrapolation fails CLOSED. The 1/√N law it
-    # extrapolated by was falsified by the project's own cont-129 measurement (MDE flattens to
-    # ~N^-0.21 above N_eff≈1000), so the branch UNDER-stated MDE: the guard claimed more power than
-    # exists and FAILED OPEN for every substrate deeper than the grid's top. MAJOR — it changes a live
-    # gate's decision FUNCTION — but touches NO gate byte (all three frozen hashes below are unchanged,
-    # and configs/crucible_power.gates.yaml is byte-identical) and is monotone-STRICTER at every
-    # holdout, so every recorded verdict is preserved (CRU-1 holds).
-    assert CRUCIBLE_VERSION == "crucible-v5.0"
+    # v6.0 = the audit §5 CORRECTED CONTRACT becomes a selectable production decision layer (opt-in,
+    # per-substrate, default "shipped"): one Jobson-Korkie-Memmel Sharpe-difference z + a BINDING LORD++
+    # p-gate + the three cheap guards, DROPPING the F1-sealed marginal_t and F2-sealed dsr_aug legs
+    # (measured 0/170 lifetime pass each, vs 170/170 for the uplift leg — the 2026-07-29 audit).
+    #
+    # MAJOR, and the FIRST bump where CRU-1 verdict-preservation is deliberately NOT claimed: it is not
+    # monotone-stricter, which is the entire point — a candidate the shipped contract rejected can pass
+    # the corrected one. The 0-PROMISING record must be RE-SCORED under the new contract, never pooled
+    # with it. It still touches NO gate byte (all three frozen hashes below are unchanged; the corrected
+    # thresholds live in configs/crucible_corrected_contract.gates.yaml), and the manifest now pins
+    # `contract` + `corrected_gates_hash` so no verdict can be read without knowing which gate made it.
+    assert CRUCIBLE_VERSION == "crucible-v6.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

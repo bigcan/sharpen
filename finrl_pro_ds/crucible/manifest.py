@@ -50,6 +50,16 @@ class RunManifest:
     cohort_gates_hash: str | None = None                     # cohort gate file bytes; None when disabled
     cohort_verdicts: dict[str, str] = field(default_factory=dict)     # cohort_hash -> verdict
     cohort_card_hashes: dict[str, str] = field(default_factory=dict)  # cohort_hash -> CohortCard hash
+    # crucible-v6.0: WHICH decision contract produced ``verdicts`` — "shipped" (the historical 6-way
+    # AND) or "corrected" (the audit §5 single marginal-effect statistic + binding LORD++). This is the
+    # most decision-bearing pin in the manifest — it names the verdict FUNCTION — so it belongs in the
+    # reproduce contract, not in ``extra`` (same rule as the cohort fields above). ``corrected_gates_hash``
+    # pins the bytes of the corrected contract's own thresholds file, symmetric with ``gates_hash``.
+    # Adding these keys changes a v5.0-era manifest's bytes, which is correct and intended: v6.0 changes
+    # the verdict function, so an old manifest must NOT silently re-verify (it already fails the
+    # ``crucible_version`` environment check — this is the same honest signal, per the v2.9 precedent).
+    contract: str = "shipped"
+    corrected_gates_hash: str | None = None
     extra: dict = field(default_factory=dict)      # forward-compat sidecar for later-phase fields
 
     def to_json(self) -> dict:

@@ -61,15 +61,25 @@ class CorrectedConfig:
     fdr_alpha: float
     fdr_w0: float | None
     fdr_binding: bool
+    # Search-multiplicity control (U1e). "prereg_only" makes the promotion unit identical to the LORD++
+    # charging unit — one pre-registered hypothesis, one test, one charged level — so evolved offspring
+    # (which charge no FDR wealth) cannot be promoted. "all" restores offspring eligibility and leaves
+    # the search's multiplicity unpaid. Defaulted rather than required so an older gates file still
+    # loads, and it defaults to the SAFE value.
+    offspring_policy: str = "prereg_only"
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "CorrectedConfig":
         raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
         c, g, f = raw["contract"], raw["guards"], raw["online_fdr"]
+        elig = raw.get("eligibility", {}) or {}
+        policy = str(elig.get("offspring_policy", "prereg_only"))
         if str(c["p_value_model"]) not in ("normal", "student_t"):
             raise ValueError(f"p_value_model must be normal|student_t; got {c['p_value_model']!r}")
         if str(c["n_eff_mode"]) not in ("ar1", "raw"):
             raise ValueError(f"n_eff_mode must be ar1|raw; got {c['n_eff_mode']!r}")
+        if policy not in ("prereg_only", "all"):
+            raise ValueError(f"eligibility.offspring_policy must be prereg_only|all; got {policy!r}")
         return cls(
             t_min=float(c["t_min"]), p_value_model=str(c["p_value_model"]),
             n_eff_mode=str(c["n_eff_mode"]),
@@ -78,6 +88,7 @@ class CorrectedConfig:
             fdr_alpha=float(f["alpha"]),
             fdr_w0=(None if f.get("w0") is None else float(f["w0"])),
             fdr_binding=bool(f["binding"]),
+            offspring_policy=policy,
         )
 
 

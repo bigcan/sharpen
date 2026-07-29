@@ -85,9 +85,16 @@ def test_reproduce_combines_environment_and_comparison() -> None:
 def test_synthetic_orchestrator_run_reproduces_via_cli(tmp_path: Path) -> None:
     out = tmp_path / "orch"
     start_ts = "2020-01-04T00:00:00"
+    # --force-underpowered: see test_reproduce_cohort — the synthetic substrate is a MECHANICS fixture
+    # for the reproduce contract, not a discovery run. At --t 320 the holdout is 80 bars, so the power
+    # guard computes an `extrapolated_low` MDE of 5.58 ΔSR against a 0.50 ceiling and REFUSES the mine;
+    # the process still exits 0 (a refused tick is a successful tick), so the failure only surfaces as
+    # "expected one mined manifest, got []". `--force` overrides `generation.enabled`, not the power
+    # gate. (2026-07-29 audit RC-10.)
     argv = [sys.executable, str(ROOT / "scripts" / "research" / "crucible_orchestrator.py"),
             "--mode", "synthetic", "--nights", "1", "--t", "320", "--n", "6",
-            "--max-proposals", "8", "--start-ts", start_ts, "--out", str(out), "--force"]
+            "--max-proposals", "8", "--start-ts", start_ts, "--out", str(out),
+            "--force", "--force-underpowered"]
     proc = subprocess.run(argv, cwd=str(ROOT), capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr[-2000:]
 
