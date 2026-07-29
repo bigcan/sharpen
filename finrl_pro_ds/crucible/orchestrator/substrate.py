@@ -236,6 +236,13 @@ def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapp
     else:
         by_type = dict(sweep)                                             # type: ignore[arg-type]
     wanted = tuple(candidate_types) if candidate_types else tuple(by_type)
+    if not wanted:
+        # No curve was consulted, so no power is claimed. Initialising the fold at -inf and returning
+        # it would pass ANY ceiling — a fail-OPEN on the empty set, and precisely the shape of bug
+        # crucible-v5.0 was written to close. An empty type set is UNMEASURED.
+        return SubstratePower(panel_T=int(panel_T), holdout_bars=hb, holdout_frac=float(holdout_frac),
+                              implied_mde_delta_sr=math.inf, interp_mode="unmeasured_empty",
+                              calibration_sweep_hash=sweep_hash)
     worst_mde, worst_mode = -math.inf, "unmeasured_empty"
     for ct in wanted:
         sw = by_type.get(ct)
@@ -318,6 +325,14 @@ class Substrate:
     # frozen funnel gates_hash moat is untouched — the same ADR-1 separation the lockbox/cohort/power
     # gates use. Selecting "corrected" changes the verdict FUNCTION; it is a per-substrate operator
     # decision, never an agent one (CR-1).
+    #
+    # DELIBERATE ASYMMETRY WITH THE CLI (crucible-v8.0). `crucible_orchestrator.py --contract` defaults
+    # to "corrected" — that is the OPERATOR surface, and flipping it is the point of v8.0. This
+    # dataclass default stays "shipped" because it is the LIBRARY surface: a programmatic caller that
+    # builds a Substrate directly should state its contract, and a conservative default keeps every
+    # existing fixture and embedding byte-identical rather than silently re-gating it. If you are
+    # wiring a new programmatic path, pass `contract` EXPLICITLY — this default is a back-compat
+    # anchor, not a recommendation.
     contract: str = "shipped"
     corrected_cfg: "CorrectedConfig | None" = None
     corrected_gates_hash: str | None = None

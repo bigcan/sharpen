@@ -334,6 +334,43 @@ COLUMN — a per-name panel is exactly where one late-reporting name could smugg
 otherwise clean matrix). Wiring a specific connector (TWSE T86 is the obvious first) to that assembler
 is data work that remains.
 
+`crucible-v8.0` is a **MAJOR** bump, and the operative one: **the CORRECTED contract becomes the
+DEFAULT**, and the substrate-power guard is repaired to fail CLOSED when it cannot measure.
+
+**(1) `--contract` defaults to `corrected`.** Since v6.0 the corrected contract has been opt-in while
+`shipped` stayed the default, so a bare invocation still ran the sealed gate. It is now the other way
+round. The evidence for the switch is in the audit report: across the 403-row lifetime record the two
+shipped significance legs passed **0/170** while the economic uplift leg passed **170/170**, and the
+corrected contract measures null FPR 0.000 (Clopper-Pearson upper-95% 0.0120 per tick, 0.0003 per
+candidate, over 240 null panels driven through the real search) with `prereg_only` in force. `shipped`
+remains selectable, for reproducing a pre-v6.0 run — its verdicts are NOT comparable to corrected ones
+and the two records must never be pooled.
+
+**(2) A configured guard that cannot measure now REFUSES instead of evaporating.** ``_load_power_guard``
+used to return ``(None, None, "")`` when a calibration curve was missing, which made
+``_process_substrate`` skip the guard **entirely** — the substrate mined UNGUARDED. That is not a
+benign degradation, and switching the default made it acute: ``results/`` is gitignored, so the curves
+are absent on EVERY fresh clone, and "contract on + curves missing" is precisely the newly-powered
+contract mining with no power gate at all. The loader now returns the guard with an EMPTY sweep map,
+and ``stamp_substrate_power`` reads an empty candidate-type set as unmeasured (``+inf``) ⇒ refuse.
+The same fix closes a latent fail-open in the v7.0 fold itself: it initialised the worst-across-types
+maximum at ``-inf``, so an empty type set would have passed ANY ceiling.
+
+The explicit escape hatches are unchanged and are the only ways through: ``--no-power-guard`` detaches
+the guard deliberately, ``--force-underpowered`` overrides a refusal.
+
+**What turning it on actually does today: nothing mines.** With both curves measured, every real
+substrate is REFUSED — the worst-across-types MDE at holdout 1011 is 1.833 against a
+``plausible_delta_sr_max`` of 0.50, and even at holdout 8064 it is 0.64. The contract being live
+changes the verdict FUNCTION that *would* apply; the power guard independently decides that no current
+substrate is worth mining. Both statements are load-bearing and neither was softened: the ceiling was
+not moved to manufacture an ALLOW.
+
+MAJOR on both counts — the default flip changes what a bare invocation decides, and the fail-closed
+repair changes a live gate's decision function. Monotone-STRICTER on (2). Touches NO gate byte: the
+frozen moats ``519158fa1450`` / ``22a18172be1a`` / ``0ccf6dd584f0`` are UNCHANGED and
+``plausible_delta_sr_max`` / ``action`` are untouched.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -367,7 +404,15 @@ from pathlib import Path
 # per-day timing overlay (T obs instead of T×N). Now filtered by SHAPE: cross_sectional draws INPUTS +
 # (T,N) slots, (T,) slots stay excluded. MINOR (v2.1 precedent) — adds terminals/eval reach, changes no
 # verdict function and no gate byte; byte-identical on any panel without a (T,N) slot.
-CRUCIBLE_VERSION = "crucible-v7.1"
+# v8.0 = the CORRECTED contract is the DEFAULT (`--contract` flips shipped -> corrected), and the
+# substrate-power guard FAILS CLOSED when it cannot measure. The loader used to return (None, None, "")
+# on a missing calibration curve, which SKIPPED the guard entirely and mined unguarded — acute once the
+# default flipped, since `results/` is gitignored so the curves are absent on every fresh clone. It now
+# returns an empty sweep map, and an empty candidate-type set reads as unmeasured (+inf) => refuse;
+# that also closes a latent fail-open in the v7.0 fold, which started its maximum at -inf.
+# Note what this does today: NOTHING MINES. Every real substrate is still refused (worst-across-types
+# MDE 1.833 at holdout 1011 vs a 0.50 ceiling). The ceiling was not moved to manufacture an ALLOW.
+CRUCIBLE_VERSION = "crucible-v8.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

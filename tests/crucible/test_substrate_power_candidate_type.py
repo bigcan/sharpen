@@ -83,6 +83,17 @@ def test_unmeasured_candidate_type_fails_CLOSED():
     assert st.interp_mode == "unmeasured_candidate_type"
 
 
+def test_empty_type_set_is_UNMEASURED_not_a_free_pass():
+    """crucible-v8.0. The worst-across-types fold starts at -inf; returning that when NO type was
+    consulted would pass ANY ceiling — a fail-OPEN on the empty set. An empty set means no curve was
+    read, so no power is claimed. This is the stamp half of the missing-curve repair: the loader hands
+    back `{}` when a configured guard cannot find its curve, and it must land on REFUSE."""
+    st = stamp_substrate_power(3200, 0.25, {}, "", candidate_types=())
+    assert st.implied_mde_delta_sr == math.inf
+    assert st.interp_mode == "unmeasured_empty"
+    assert st.holdout_bars == 800          # still stamps the depth it could measure
+
+
 def test_legacy_single_sweep_positional_form_still_works():
     """Backward compatibility: the pre-V4 call passed ONE sweep dict and no candidate_types."""
     st = stamp_substrate_power(3200, 0.25, _OVERLAY, "h")
