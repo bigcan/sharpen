@@ -46,11 +46,18 @@ def _run_cohort_orchestrator(tmp_path: Path, funnel: Path, cohort: Path) -> Path
     """One cohort-enabled synthetic tick; return the mined run dir. ``--synthetic-slots 8`` gives the
     overlay pool the de-correlated breadth a cohort needs (a 1-slot panel forms no cohort)."""
     out = tmp_path / "orch"
+    # --force-underpowered: the synthetic substrate is a MECHANICS fixture, not a discovery run — this
+    # test asserts a manifest round-trips, not that an edge is detectable. At --t 480 the holdout is 120
+    # bars, below the calibration sweep's low anchor (189), so the power guard's `extrapolated_low` MDE
+    # (>= 3.63) exceeds the 0.50 ceiling and, since the guard flipped to action: refuse on 2026-07-12,
+    # the tick is SKIPPED and mines nothing. `--force` only overrides `generation.enabled`; the power
+    # gate has its own override. Without this the test fails at the manifest assert below while the
+    # process still exits 0 — a refused tick is a SUCCESSFUL tick. (2026-07-29 audit RC-10.)
     argv = [sys.executable, str(_ORCH), "--mode", "synthetic", "--nights", "1",
             "--t", "480", "--n", "12", "--synthetic-slots", "8", "--max-proposals", "24",
             "--start-ts", "2020-01-04T00:00:00", "--no-lockbox",
             "--config", str(funnel), "--cohort-config", str(cohort),
-            "--out", str(out), "--force"]
+            "--out", str(out), "--force", "--force-underpowered"]
     proc = subprocess.run(argv, cwd=str(ROOT), capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr[-2000:]
     manifests = list(out.rglob("run_manifest.json"))

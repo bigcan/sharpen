@@ -57,6 +57,7 @@ from finrl_pro_ds.crucible import (  # noqa: E402
     run_orchestrator_tick,
 )
 from finrl_pro_ds.crucible.agentic import LibrarySeedProposer, LlmProposer  # noqa: E402
+from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig  # noqa: E402
 from finrl_pro_ds.crucible.orchestrator.orchestrator import _safe  # noqa: E402
 from finrl_pro_ds.crucible.orchestrator.substrate import (  # noqa: E402
     PowerGuard,
@@ -76,13 +77,21 @@ DEFAULT_GATES = ROOT / "configs" / "signal_eval.gates.yaml"
 DEFAULT_LOCKBOX_GATES = ROOT / "configs" / "crucible_lockbox.gates.yaml"
 DEFAULT_COHORT_GATES = ROOT / "configs" / "crucible_cohort.gates.yaml"
 DEFAULT_POWER_GATES = ROOT / "configs" / "crucible_power.gates.yaml"
+DEFAULT_CORRECTED_GATES = ROOT / "configs" / "crucible_corrected_contract.gates.yaml"
 
 
-def _load_power_guard(path: str, *, force: bool):
+def _load_power_guard(path: str, *, force: bool, contract: str = "shipped"):
     """Load the NOW-5 substrate-power guard + its E1/E2 calibration sweep (audit C2-01/C6-07). Returns
     ``(PowerGuard | None, sweep_dict | None, sweep_hash)``. Degrades to ``(None, None, "")`` — no stamp,
     no guard — when the config or the sweep JSON is absent, so a fresh checkout (no calibration run yet)
-    still works. Kept OUT of signal_eval.gates.yaml so the frozen funnel gates_hash is untouched (CRU-1)."""
+    still works. Kept OUT of signal_eval.gates.yaml so the frozen funnel gates_hash is untouched (CRU-1).
+
+    ``contract`` (crucible-v6.0, U2) selects WHICH curve to read. An MDE curve characterizes a GATE, so
+    the shipped curve — measured on the 6-way AND whose two significance legs pass 0/170 lifetime — must
+    not be used to judge a corrected-contract substrate's power, and vice versa. If the curve for the
+    active contract has not been measured yet the guard degrades to disabled (fail-open on the STAMP,
+    not on a verdict) with a loud warning, rather than silently substituting the other contract's curve —
+    which would be exactly the "claims power it does not have" failure v5.0 was written to close."""
     import yaml
 
     p = Path(path)
@@ -90,9 +99,12 @@ def _load_power_guard(path: str, *, force: bool):
         log.warning("power-gates file %s absent — substrate-power stamp/guard disabled", path)
         return None, None, ""
     cfg = (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get("power_guard", {})
-    sweep_path = ROOT / cfg.get("calibration_sweep_path", "")
+    key = "calibration_sweep_path_corrected" if contract == "corrected" else "calibration_sweep_path"
+    sweep_path = ROOT / cfg.get(key, "")
     if not sweep_path.exists():
-        log.warning("calibration sweep %s absent — substrate-power stamp/guard disabled", sweep_path)
+        log.warning("calibration sweep %s (contract=%s, key=%s) absent — substrate-power stamp/guard "
+                    "disabled. Measure it with: python scripts/research/crucible_calibration.py "
+                    "--exp mde_sweep --contract %s", sweep_path, contract, key, contract)
         return None, None, ""
     raw = sweep_path.read_bytes()
     sweep = json.loads(raw)
@@ -267,11 +279,25 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
     else:
         proposer = LibrarySeedProposer()
         est_tokens = 0
+    # crucible-v6.0 DECISION CONTRACT (operator choice, never the agent's). "shipped" keeps the
+    # historical 6-way AND; "corrected" swaps the holdout decision for the audit §5 contract, whose
+    # thresholds live in their own file so the frozen funnel gates_hash is untouched (ADR-1).
+    if args.contract == "corrected":
+        corrected_cfg = CorrectedConfig.from_yaml(args.corrected_config)
+        corrected_ghash = gates_hash(args.corrected_config)
+        log.warning("DECISION CONTRACT = corrected (crucible-v6.0): the F1-sealed marginal_t and "
+                    "F2-sealed dsr_aug legs are DROPPED; significance is one JKM Sharpe-difference z "
+                    ">= %.2f with a binding LORD++ p-gate. Verdicts are NOT comparable to shipped-"
+                    "contract runs — corrected gates %s", corrected_cfg.t_min, corrected_ghash)
+    else:
+        corrected_cfg = corrected_ghash = None
     sub = Substrate(substrate_id=substrate_id, prepare=prepare, ledger=ledger, cfg=cfg,
                     evolve_kwargs=ek, proposer=proposer, max_proposals=args.max_proposals,
                     est_tokens_per_tick=est_tokens, lockbox=lockbox,
                     incubation_criterion=incubation_criterion, cohort_cfg=cohort_cfg,
-                    cohort_mc_kwargs=cohort_mc, cohort_gates_hash=cohort_ghash)
+                    cohort_mc_kwargs=cohort_mc, cohort_gates_hash=cohort_ghash,
+                    contract=args.contract, corrected_cfg=corrected_cfg,
+                    corrected_gates_hash=corrected_ghash)
     return sub, catalog
 
 
@@ -304,6 +330,12 @@ def _write_recipe(out_dir: Path, substrate_id: str, tick_ts: str, args) -> None:
         argv.append("--no-cohort")
     else:
         argv += ["--cohort-config", args.cohort_config]
+    # v6.0: the decision CONTRACT is the verdict function itself, so the recipe must re-run under the
+    # same one (and, when corrected, the same thresholds file) or reproduce would compare verdicts
+    # produced by two different gates and call the difference a reproducibility failure.
+    argv += ["--contract", args.contract]
+    if args.contract == "corrected":
+        argv += ["--corrected-config", args.corrected_config]
     recipe = {
         "kind": "synthetic_orchestrator",
         "script": "scripts/research/crucible_orchestrator.py",
@@ -435,6 +467,17 @@ def main() -> int:
                          "which bypasses generation.enabled)")
     ap.add_argument("--no-power-guard", action="store_true",
                     help="detach the substrate-power stamp/guard entirely (no tick power columns)")
+    ap.add_argument("--contract", choices=("shipped", "corrected"), default="shipped",
+                    help="crucible-v6.0 decision contract. shipped = the historical 6-way AND "
+                         "(default; verdict-preserving). corrected = the audit §5 contract — one "
+                         "Jobson-Korkie-Memmel Sharpe-difference z + a BINDING LORD++ p-gate + the "
+                         "three cheap guards, DROPPING the F1-sealed marginal_t and F2-sealed dsr_aug "
+                         "legs. Changes the verdict FUNCTION: measured power 0.00 -> 0.81 at a "
+                         "realistic marginal ΔSR 0.5.")
+    ap.add_argument("--corrected-config", default=str(DEFAULT_CORRECTED_GATES),
+                    help="--contract corrected only: its decision thresholds YAML (separate file so "
+                         "the frozen funnel gates_hash is untouched); its hash is pinned into the "
+                         "manifest as corrected_gates_hash.")
     ap.add_argument("--no-governance", action="store_true",
                     help="skip the NOW-9 CLEARED->human handoff epilogue (used by reproduce/testing so "
                          "no governance.db / notifications are written)")
@@ -454,7 +497,8 @@ def main() -> int:
     if args.no_power_guard:
         power_gate, sweep, sweep_hash = None, None, ""
     else:
-        power_gate, sweep, sweep_hash = _load_power_guard(args.power_gates, force=args.force_underpowered)
+        power_gate, sweep, sweep_hash = _load_power_guard(
+            args.power_gates, force=args.force_underpowered, contract=args.contract)
     sub, catalog = _build_substrate(args, cfg, ek, meta, sweep, sweep_hash)
     out_dir = Path(args.out) / args.mode
     store = OrchestratorStore(out_dir / "orchestrator.db")
