@@ -25,7 +25,7 @@ import math
 import sqlite3
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Callable, Mapping
 
 import numpy as np
 
@@ -104,6 +104,45 @@ def _power_holdout_bars(panel_T: int, holdout_frac: float) -> int:
     return int(panel_T) - int(int(panel_T) * (1.0 - float(holdout_frac)))
 
 
+#: What a sweep JSON is a curve FOR. Files written before the cross-sectional surface existed carry no
+#: ``candidate_type`` and are, in fact, overlay curves (they plant ``macro:plant`` and score it through
+#: ``_overlay_returns``), so that is the honest default for a legacy file — not a wildcard.
+_DEFAULT_SWEEP_CANDIDATE_TYPE = "overlay"
+
+
+def sweep_candidate_type(sweep: dict) -> str:
+    """The candidate type a sweep characterizes (``overlay`` for pre-surface files)."""
+    return str(sweep.get("mde_sweep", {}).get("candidate_type", _DEFAULT_SWEEP_CANDIDATE_TYPE))
+
+
+def _pooled_points(sweep: dict) -> list[tuple[int, float]]:
+    """``[(holdout_bars, mde)]`` ascending, POOLED over any extra sweep axis by taking the WORST
+    (largest) MDE at each depth.
+
+    The overlay sweep has one row per ``holdout_bars``, so pooling is a no-op there and every existing
+    interpolation property is preserved. The cross-sectional surface adds a breadth axis (``n``), giving
+    several rows per depth — and the measurement (2026-07-29, N=12→100) found **no systematic
+    N-dependence** in MDE, which is what theory says: ΔSR is already risk-adjusted and the standard
+    error of a Sharpe DIFFERENCE is set by the number of TIME observations, not by the cross-section.
+    Indexing the lookup by ``n`` would therefore claim a resolution the data does not support, so we
+    pool and keep the worst measured value at each depth — the fail-safe direction for a guard that
+    refuses when MDE is too high.
+
+    Rows with a null MDE (the sweep detected nothing at any beta) are DROPPED rather than read as 0:
+    "undetected" is the opposite of "detectable at zero effect"."""
+    by_h: dict[int, float] = {}
+    for r in sweep.get("mde_sweep", {}).get("rows", []):
+        m = r.get("mde_realized_delta_sr")
+        if m is None:
+            continue
+        mf = float(m)
+        if not math.isfinite(mf):
+            continue
+        hb = int(r["holdout_bars"])
+        by_h[hb] = max(by_h.get(hb, -math.inf), mf)
+    return sorted(by_h.items())
+
+
 def interp_mde(holdout_bars: int, sweep: dict) -> tuple[float, str]:
     """Minimum-detectable marginal ΔSR (at the sweep's target power) for a holdout of ``holdout_bars``,
     read off the E1/E2 MDE sweep. Returns ``(mde, mode)``.
@@ -149,8 +188,9 @@ def interp_mde(holdout_bars: int, sweep: dict) -> tuple[float, str]:
     figure (the flagship's ≈4.45), never a number the verdict turns on — so it is left byte-stable
     rather than perturbed for a cosmetic gain.
     """
-    rows = sorted(sweep["mde_sweep"]["rows"], key=lambda r: r["holdout_bars"])
-    pts = [(int(r["holdout_bars"]), float(r["mde_realized_delta_sr"])) for r in rows]
+    pts = _pooled_points(sweep)
+    if not pts:
+        return math.inf, "unmeasured_empty"
     h = int(holdout_bars)
     if h <= 0:            # degenerate/empty holdout: nothing is tested, so nothing is detectable. Also
         # guards the divisions below, which used to raise ZeroDivisionError at h=0 and — worse —
@@ -172,13 +212,41 @@ def interp_mde(holdout_bars: int, sweep: dict) -> tuple[float, str]:
     return m_hi, "grid"                                          # unreachable (guarded above)
 
 
-def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: dict,
-                          sweep_hash: str) -> SubstratePower:
-    """Build the :class:`SubstratePower` stamp for a panel of ``panel_T`` bars against the sweep."""
+def stamp_substrate_power(panel_T: int, holdout_frac: float, sweep: "dict | Mapping[str, dict]",
+                          sweep_hash: str,
+                          candidate_types: "tuple[str, ...] | None" = None) -> SubstratePower:
+    """Build the :class:`SubstratePower` stamp for a panel of ``panel_T`` bars.
+
+    ``sweep`` is either ONE sweep dict (the legacy form — treated as the curve for its own declared
+    ``candidate_type``, i.e. ``overlay`` for pre-surface files) or a mapping ``{candidate_type: sweep}``.
+
+    ``candidate_types`` names the paths this substrate will actually MINE. An MDE curve characterizes a
+    GATE, and a tick mines cross_sectional AND overlay genomes through structurally different scoring
+    paths whose curves are numerically different — at matched depth the cross-sectional path measures
+    EQUAL-OR-WORSE than the overlay one (holdout 696: overlay 1.23 vs cross-sectional 1.33–1.85). So
+    judging a cross-sectional mine by the overlay curve UNDER-states its MDE: the guard claims more
+    power than the substrate has, which is the fail-OPEN direction crucible-v5.0 exists to close.
+
+    The stamp therefore takes the WORST (largest) MDE across the types being mined, and a type with no
+    measured curve yields ``(+inf, 'unmeasured_candidate_type')`` — refuse — rather than silently
+    borrowing another type's curve. ``None`` keeps the historical single-curve behaviour."""
     hb = _power_holdout_bars(panel_T, holdout_frac)
-    mde, mode = interp_mde(hb, sweep)
+    if not isinstance(sweep, Mapping) or "mde_sweep" in sweep:
+        by_type: dict[str, dict] = {sweep_candidate_type(sweep): sweep}    # type: ignore[arg-type]
+    else:
+        by_type = dict(sweep)                                             # type: ignore[arg-type]
+    wanted = tuple(candidate_types) if candidate_types else tuple(by_type)
+    worst_mde, worst_mode = -math.inf, "unmeasured_empty"
+    for ct in wanted:
+        sw = by_type.get(ct)
+        if sw is None:
+            worst_mde, worst_mode = math.inf, "unmeasured_candidate_type"
+            break
+        mde, mode = interp_mde(hb, sw)
+        if mde > worst_mde:
+            worst_mde, worst_mode = mde, (mode if len(wanted) == 1 else f"{mode}:{ct}")
     return SubstratePower(panel_T=int(panel_T), holdout_bars=hb, holdout_frac=float(holdout_frac),
-                          implied_mde_delta_sr=float(mde), interp_mode=mode,
+                          implied_mde_delta_sr=float(worst_mde), interp_mode=worst_mode,
                           calibration_sweep_hash=sweep_hash)
 
 

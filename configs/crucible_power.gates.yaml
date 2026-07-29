@@ -27,8 +27,26 @@ power_guard:
   # measured at 0/170 lifetime pass — so it characterizes a gate with ~zero power, and reading it for a
   # corrected-contract substrate would refuse mines for a reason that no longer applies. The loader
   # selects by the substrate's `contract`; a missing file degrades to "no stamp, no guard" as before.
+  #
+  # ONE CURVE PER CANDIDATE TYPE, TOO (V4). A tick mines cross_sectional AND overlay genomes through
+  # structurally different scoring paths, and their curves differ numerically: at matched depth the
+  # cross-sectional path measures EQUAL-OR-WORSE than the overlay one (holdout 696: overlay 1.23 vs
+  # cross-sectional 1.33-1.85). Every curve before 2026-07-29 was measured on the OVERLAY path yet
+  # applied to both, so a cross-sectional mine was judged by a curve that UNDER-states its MDE — the
+  # guard claiming more power than the substrate has, the fail-OPEN direction v5.0 exists to close.
+  # The stamp now takes the WORST MDE across the types being mined, and a type with no measured curve
+  # REFUSES rather than borrowing another type's.
+  #
+  # DELIBERATE ASYMMETRY: the SHIPPED contract keeps its single (overlay) curve and therefore its
+  # type-blind stamp. That is the same defect described above, left in place on purpose — the shipped
+  # verdict function is the sealed one (dsr_aug and marginal_t pass 0/170 lifetime), so its power stamp
+  # is moot: the gate refuses every candidate regardless of what the stamp says. Measuring a
+  # cross-sectional curve for a known-dead gate would cost hours of compute to change no decision, and
+  # requiring one would refuse every legacy substrate — a behaviour change for a path whose whole point
+  # is to stay byte-identical to v5.0. Stated here so it reads as a decision, not an oversight.
   calibration_sweep_path: results/crucible_calibration/calibration_mde_sweep.json
   calibration_sweep_path_corrected: results/crucible_calibration/calibration_mde_sweep_corrected.json
+  calibration_sweep_path_corrected_xsec: results/crucible_calibration/calibration_xsec_mde_sweep_corrected.json
 
   # Ceiling on the implied MDE (realized marginal ΔSR at target power). A realistic true single-signal
   # marginal alpha is ΔSR ~ 0.3-0.5 (project memory); 0.50 flags a substrate whose funnel could not
