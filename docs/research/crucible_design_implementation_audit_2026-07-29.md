@@ -610,9 +610,34 @@ against the live curves:
 | 32256 | 8064 | **0.393 ALLOW** | `unmeasured_high` | **REFUSE** |
 
 So V4 **tightens** the guard, and specifically withdraws the unqualified "first ALLOW" claim: the ALLOW
-holds for an overlay-only substrate, not for one mining both types, because the cross-sectional surface
-stops at holdout 2016. Extending it is the obvious follow-up (and expensive — the surface as measured
-took ~2h).
+holds for an overlay-only substrate, not for one mining both types.
+
+### The extended surface — and the deep ALLOW does not survive
+
+The cross-sectional surface was re-measured out to holdout 8064 to close that gap. It does not close
+the way I expected:
+
+| holdout | N=12 | N=25 | N=50 | N=100 | **pooled (worst)** | overlay | **worst-across-types** | |
+|---|---|---|---|---|---|---|---|---|
+| 1011 | 1.83 | 1.18 | 1.35 | 1.40 | 1.83 | 1.28 | **1.83** | REFUSE |
+| 2016 | 0.83 | 1.01 | 0.91 | 1.19 | 1.19 | 0.86 | **1.19** | REFUSE |
+| 4032 | 0.66 | 0.60 | 0.83 | 0.73 | 0.83 | 0.55 | **0.84** | REFUSE |
+| 8064 | 0.42 | 0.64 | 0.54 | 0.64 | 0.64 | 0.39 | **0.64** | REFUSE |
+
+**A substrate mining both candidate types is refused at every measured depth.** The cross-sectional
+path still needs ΔSR ≈ 0.64 at holdout 8064 against a 0.50 ceiling, so the overlay curve's 0.393 ALLOW
+is overridden. Extending the surface therefore did not unlock the deep mine — it converted an
+*unmeasured* refusal (`unmeasured_high`) into a *measured* one. That is a strictly better state, and a
+less exciting one than the interim result suggested.
+
+These deep rows are **not** grid-limited — checked explicitly, having made that mistake once already.
+Each has several sub-0.80 power points beneath the reported beta (N=50 at holdout 8064: power 0.083 →
+0.750 → 1.000 across beta 0.0001 → 0.00015 → 0.0002), so the transition is properly bracketed.
+
+One honest cost to note: pooling by the worst N spends real headroom. At holdout 8064 the four
+breadths give 0.42 / 0.64 / 0.54 / 0.64 — a spread that is MC noise at 24 seeds if MDE is truly
+N-independent, and pooling reports 0.64 against a mean of ~0.56. The right fix is more seeds, not a
+looser pooling rule; and it would not change this verdict either way, since even the mean exceeds 0.50.
 
 **Two honest readings, and the second corrects a headline in §4.**
 
