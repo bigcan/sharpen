@@ -962,11 +962,233 @@ STAGE_CHECKS = {
 }
 
 
+# ── XPARAM: cross-parameter structural invariants (XPARAM-01..12) ───────────
+# Ported 2026-07-29 from the /audit skill addendum (FINRL.md Phase 3.5), where
+# they existed only as a checklist an auditor had to remember. A declared-but-
+# unwired invariant is false assurance — the audit skill's own rule — so they
+# execute here instead.
+#
+# These are STRUCTURAL invariants: a config violating one cannot train
+# correctly regardless of strategy. They are deliberately NOT in
+# `configs/<workstream>.gates.yaml`, which holds *decision* thresholds (PF
+# floors, DD buffers, retrain triggers) that vary per workstream. These do not
+# vary. Kept as named constants so they remain greppable and single-source.
+_XPARAM_MIN_LEARN_STEPS = {"sac": 200_000, "iqn": 100_000, "bdq": 100_000}  # XPARAM-01
+_XPARAM_MAX_DEADBAND = 0.5  # XPARAM-05
+_XPARAM_DSR_ETA_RANGE = (0.0001, 0.01)  # XPARAM-06
+_XPARAM_DSR_SCALE_RANGE = (0.1, 10.0)  # XPARAM-07
+_XPARAM_MAX_UPDATE_X_ENVS = 200  # XPARAM-08 (OPT-10)
+_XPARAM_MIN_N_STEP = 3  # XPARAM-12
+_XPARAM_PRIVATE_DIM_BY_MDP = {"v6": 4, "v7": 5}  # XPARAM-11
+# Below this, a config is a backtest (total_timesteps: 0), smoke, or dev run;
+# production budget invariants do not apply. Real runs are 3M-5M steps.
+_XPARAM_MIN_PRODUCTION_STEPS = 100_000
+
+
+def _dig(cfg: dict, path: str) -> Any:
+    """Fetch a dotted config path, returning None if any level is absent."""
+    node: Any = cfg
+    for part in path.split("."):
+        if not isinstance(node, dict) or part not in node:
+            return None
+        node = node[part]
+    return node
+
+
+def _is_live_inference_config(cfg: dict) -> bool:
+    """Live/paper trading configs use a different schema entirely.
+
+    They carry `exchange`/`bar_clock` and no `training` block; their `network`
+    values describe the loaded checkpoint, not a run to be trained. Applying
+    training invariants to them produces only false positives (e.g. a live
+    config's vestigial `buffer_size: 100` is not an XPARAM-03 violation).
+    """
+    return "training" not in cfg and ("bar_clock" in cfg or "exchange" in cfg)
+
+
+def _is_production_training(cfg: dict) -> bool:
+    """True only for real training runs, not backtest/smoke/dev configs.
+
+    Backtest and eval-only configs set `training.total_timesteps: 0`; smoke and
+    dev configs use deliberately tiny budgets (1K-50K). The budget invariants
+    (XPARAM-01/02/03/04/08) describe production training and are meaningless
+    below that scale — firing CRITICAL on a 1,000-step smoke config would make
+    the gate something operators route around.
+    """
+    total = _dig(cfg, "training.total_timesteps")
+    return isinstance(total, (int, float)) and total >= _XPARAM_MIN_PRODUCTION_STEPS
+
+
+def check_xparam(cfg: dict, r: ValidationResult) -> None:
+    """Cross-parameter structural invariants (XPARAM-01..12).
+
+    Every check is guarded: an absent block is SKIPPED, never assumed. Silence
+    means "not applicable to this config", not "passed". CRITICAL/HIGH findings
+    call fail(); MEDIUM call warn().
+
+    Scope: training configs only. Budget checks additionally require production
+    scale — see `_is_live_inference_config` / `_is_production_training`. The
+    dimensional checks (05/06/07/09/10/11/12) still run on backtest configs,
+    because a backtest with the wrong `private_dim` is genuinely broken.
+    """
+    if _is_live_inference_config(cfg):
+        return
+
+    is_production = _is_production_training(cfg)
+    agents = cfg.get("agents") or {}
+    agent_name = next((a for a in ("sac", "iqn", "bdq") if a in agents), None)
+    agent_cfg = (agents.get(agent_name) or {}) if agent_name else {}
+
+    learning_starts = agent_cfg.get("learning_starts")
+    buffer_size = agent_cfg.get("buffer_size")
+    total_timesteps = _dig(cfg, "training.total_timesteps")
+    checked: list[str] = []
+
+    # XPARAM-01 (CRITICAL) — HPO trial must leave enough post-warmup budget.
+    hpo = cfg.get("hpo") or {}
+    steps_per_trial = hpo.get("steps_per_trial")
+    if hpo.get("enabled") is False or not is_production:
+        pass  # explicitly disabled, or not a production training run
+    elif agent_name and steps_per_trial is not None and learning_starts is not None:
+        floor = _XPARAM_MIN_LEARN_STEPS[agent_name]
+        usable = steps_per_trial - learning_starts
+        if usable < floor:
+            r.fail(
+                f"XPARAM-01: hpo.steps_per_trial - agents.{agent_name}.learning_starts "
+                f"= {usable:,} < {floor:,} required for {agent_name.upper()}"
+            )
+        else:
+            checked.append("01")
+
+    # XPARAM-02 (CRITICAL) — warmup must fit inside the run.
+    if is_production and learning_starts is not None and total_timesteps is not None:
+        if learning_starts >= total_timesteps:
+            r.fail(
+                f"XPARAM-02: agents.{agent_name}.learning_starts ({learning_starts:,}) "
+                f">= training.total_timesteps ({total_timesteps:,}) — agent never learns"
+            )
+        else:
+            checked.append("02")
+
+    # XPARAM-03 (HIGH) — warmup must fit inside the replay buffer.
+    if is_production and learning_starts is not None and buffer_size is not None:
+        if learning_starts >= buffer_size:
+            r.fail(
+                f"XPARAM-03: agents.{agent_name}.learning_starts ({learning_starts:,}) "
+                f">= buffer_size ({buffer_size:,})"
+            )
+        else:
+            checked.append("03")
+
+    # XPARAM-04 (HIGH) — fee ramp must complete within the run.
+    fee_schedule = _dig(cfg, "env.fee_schedule")
+    if is_production and isinstance(fee_schedule, list) and total_timesteps is not None:
+        for entry in fee_schedule:
+            if not isinstance(entry, dict):
+                continue
+            ramp_end = entry.get("ramp_end_step")
+            if ramp_end is not None and ramp_end > total_timesteps:
+                r.fail(
+                    f"XPARAM-04: env.fee_schedule ramp_end_step ({ramp_end:,}) > "
+                    f"training.total_timesteps ({total_timesteps:,}) — fees never reach full rate"
+                )
+                break
+        else:
+            checked.append("04")
+
+    # XPARAM-05 (CRITICAL) — deadband above this suppresses most trades.
+    deadband = _dig(cfg, "env.deadband_threshold")
+    if deadband is not None:
+        if deadband > _XPARAM_MAX_DEADBAND:
+            r.fail(
+                f"XPARAM-05: env.deadband_threshold ({deadband}) > {_XPARAM_MAX_DEADBAND}"
+            )
+        else:
+            checked.append("05")
+
+    # XPARAM-06 / -07 (MEDIUM) — DSR reward params inside sane ranges.
+    for xid, key, (lo, hi) in (
+        ("06", "dsr_eta", _XPARAM_DSR_ETA_RANGE),
+        ("07", "dsr_scale", _XPARAM_DSR_SCALE_RANGE),
+    ):
+        val = _dig(cfg, f"env.reward.{key}")
+        if val is None:
+            val = _dig(cfg, f"env.{key}")
+        if val is None:
+            continue
+        if not (lo <= val <= hi):
+            r.warn(f"XPARAM-{xid}: env.reward.{key} ({val}) outside [{lo}, {hi}]")
+        else:
+            checked.append(xid)
+
+    # XPARAM-08 (MEDIUM) — effective update batching ceiling (OPT-10).
+    update_interval = agent_cfg.get("update_interval")
+    num_envs = _dig(cfg, "training.num_envs")
+    if is_production and update_interval is not None and num_envs is not None:
+        product = update_interval * num_envs
+        if product > _XPARAM_MAX_UPDATE_X_ENVS:
+            r.warn(
+                f"XPARAM-08: update_interval x num_envs = {product} > "
+                f"{_XPARAM_MAX_UPDATE_X_ENVS} (OPT-10)"
+            )
+        else:
+            checked.append("08")
+
+    # XPARAM-09 (HIGH) — features-per-scale must triple-match.
+    fps = {
+        "features.features_per_scale": _dig(cfg, "features.features_per_scale"),
+        "env.features_per_scale": _dig(cfg, "env.features_per_scale"),
+        "network.scale_encoder.input_size": _dig(cfg, "network.scale_encoder.input_size"),
+    }
+    present = {k: v for k, v in fps.items() if v is not None}
+    if len(present) >= 2:
+        if len(set(present.values())) > 1:
+            detail = ", ".join(f"{k}={v}" for k, v in present.items())
+            r.fail(f"XPARAM-09: features-per-scale mismatch ({detail})")
+        else:
+            checked.append("09")
+
+    # XPARAM-10 (HIGH) — scale lists must match between features and env.
+    f_scales, e_scales = _dig(cfg, "features.scales"), _dig(cfg, "env.scales")
+    if f_scales is not None and e_scales is not None:
+        if list(f_scales) != list(e_scales):
+            r.fail(f"XPARAM-10: features.scales {f_scales} != env.scales {e_scales}")
+        else:
+            checked.append("10")
+
+    # XPARAM-11 (HIGH) — private_dim is fixed by MDP version.
+    mdp = _dig(cfg, "env.mdp_version")
+    private_dim = _dig(cfg, "network.private_dim")
+    if mdp is not None and private_dim is not None:
+        expected = _XPARAM_PRIVATE_DIM_BY_MDP.get(str(mdp).lower())
+        if expected is None:
+            pass  # unknown MDP version — not this check's business
+        elif private_dim != expected:
+            r.fail(
+                f"XPARAM-11: network.private_dim ({private_dim}) != {expected} "
+                f"required for env.mdp_version={mdp}"
+            )
+        else:
+            checked.append("11")
+
+    # XPARAM-12 (HIGH) — IQN multi-step return depth.
+    n_step = _dig(cfg, "agents.iqn.n_step")
+    if n_step is not None:
+        if n_step < _XPARAM_MIN_N_STEP:
+            r.fail(f"XPARAM-12: agents.iqn.n_step ({n_step}) < {_XPARAM_MIN_N_STEP}")
+        else:
+            checked.append("12")
+
+    if checked:
+        r.ok(f"XPARAM {'/'.join(sorted(checked))} pass ({len(checked)} applicable)")
+
+
 def validate(config_path: Path, stage: str) -> ValidationResult:
     cfg = load_yaml(config_path)
     r = ValidationResult()
 
     check_no_fee_curriculum(cfg, r)
+    check_xparam(cfg, r)
     check_no_hindsight_outside_hpo(cfg, stage, r)
     check_max_leverage_bounds(cfg, r)
     check_legacy_prop_firm_block(cfg, stage, r, config_path=config_path)
