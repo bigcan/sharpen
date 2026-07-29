@@ -328,8 +328,32 @@ measured marginal ΔSR over 15 CPCV paths.
 `(T,N)` slot, column order following `Panel.tickers`, an absent ticker becoming an **all-NaN column
 rather than a 0.0** (a zero is a tradeable value), and the `assert_asof_join_causal` PIT gate running
 **per column** — a per-name panel is exactly where one late-reporting name could smuggle look-ahead
-into an otherwise clean matrix. Wiring a concrete connector to it (TWSE T86 institutional net flow is
-the obvious first) is data work that remains.
+into an otherwise clean matrix.
+
+**U3a — TWSE T86 wired (2026-07-30).** The data was already per-stock: `TwseInstitutionalConnector`'s
+`series_id` is `"<ticker>:<field>"`. What the bridge did was *flatten* it — the alias map turns 10
+tickers × 4 fields into **40 broadcast terminals** (`twse_inst:tw50_foreign_net`, …), each constant
+across the cross-section. `taiwan_altdata.taiwan_per_name_slots` assembles the same observations the
+other way up: **one `(T,N)` matrix per field**, columns aligned to `Panel.tickers`, so
+`rank(twse_inst:foreign_net)` means "rank names by today's foreign institutional net flow".
+
+Additive by design — the 40 broadcast terminals are untouched, so the overlay search is unchanged and
+the shape filter admits only the 4 new matrices to the cross-sectional draw. The TWSE connector
+instance is shared with the broadcast bridge (it caches per-day T86 payloads per instance, so the
+assembly is nearly free rather than a second full poll), and `catalog=None` avoids double-registering
+series the broadcast path already registered.
+
+Alignment holds by construction — the Taiwan panel's tickers are the raw listing codes (`"0050"`,
+`"006208"`, …; `taiwan_panel_loader` sets `cols = list(close_df.columns)  # == etfs`), which is exactly
+the key the connector uses. But that is a **silent-failure surface**: a naming drift yields a
+well-formed, entirely NaN matrix, not an error. So `taiwan_per_name_coverage` is a pre-flight the
+orchestrator calls and logs, and it **skips per-name slots entirely** rather than shipping empty
+matrices if coverage is zero for every field.
+
+Two limits worth stating: the Taiwan panel is **N=10**, which is a thin cross-section for a rank-L/S
+book (`ls_min_names` is 6, and the expert review already flagged that WQ101 starves at N=18); and this
+was verified by test, not by a live run — no cached Taiwan panel exists locally, so the FinMind fetch
+has not been exercised end-to-end.
 
 *Correction to this section's original framing:* it claimed the move buys `T×N` observations and that
 this is "the only lever that materially changes MDE". The V3 measurement says otherwise — MDE in ΔSR
