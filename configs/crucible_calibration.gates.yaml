@@ -128,7 +128,11 @@ mde_sweep:
 # block measures the missing axis. Experimental design, not gates: no threshold lives here (the ceiling
 # stays in crucible_power.gates.yaml).
 xsec_mde_sweep:
-  t_grid: [1512, 2782, 4044, 8064]     # holdout 378 / 696 / 1011 / 2016
+  # holdout 378 / 696 / 1011 / 2016 / 4032 / 8064. The deep anchors were added 2026-07-29 so this
+  # surface reaches the same depth as the overlay curve: until it did, a substrate mining BOTH types
+  # was refused past holdout 2016 as `unmeasured_high` even where the overlay curve said ALLOW, because
+  # the v7.0 stamp takes the WORST MDE across the types being mined and will not borrow a curve.
+  t_grid: [1512, 2782, 4044, 8064, 16128, 32256]
   n_grid: [12, 25, 50, 100]            # cross-sectional breadth — THE axis this sweep adds
   n_seeds: 24
   ls_min_names: 6                      # min names/day for the rank-L/S book (matches evolve's default)
