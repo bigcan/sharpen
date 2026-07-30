@@ -223,6 +223,42 @@ def _realistic_noise_panel(t: int, n: int, *, seed: int, n_feature_slots: int,
                  feature_slots=slots)
 
 
+def randomize_feature_slots(panel: Panel, *, seed: int) -> Panel:
+    """Give a null panel its OWN timing-slot shapes (NULL-DEGEN-01, 2026-07-31).
+
+    Every generator above builds ``macro:regime`` as ``sin(2*pi*t/80) + 0.2*noise`` — FIXED period, FIXED
+    phase, identical on every seed. The overlay null seeds are deterministic transforms of that one
+    signal, so each produces nearly the same tilt on every "independent" panel and the overlay half of any
+    null measured on these substrates has an effective sample size near the SEED count rather than the
+    panel count. Measured on the U7 uplift null: between-formula variance of the draw means was 11.8x the
+    within-formula variance across 150 panels, i.e. 600 draws carried an effective n of about 4 — which is
+    how the withdrawn RC-11 finding was manufactured
+    (``docs/research/crucible_rc11_resolved_degenerate_null_2026-07-31.md``).
+
+    This replaces each slot with a per-panel random period / phase / trend / noise mix, so the draws
+    actually sample the space of plausible timing signals.
+
+    **OPT-IN ONLY.** The generators' defaults feed E1/E2, the MDE sweeps and hence the substrate-power
+    guard's curves; changing them silently would move measurements a live gate depends on. Callers pass
+    ``randomize_slots=True`` deliberately, and the flag is recorded in the report."""
+    import dataclasses
+
+    rng = np.random.default_rng(seed)
+    T = panel.T
+    t = np.arange(T, dtype=np.float64)
+    slots = {}
+    for name in sorted(panel.feature_slots):
+        period = float(rng.uniform(20.0, 400.0))
+        phase = float(rng.uniform(0.0, 2.0 * np.pi))
+        w = rng.dirichlet(np.ones(3))            # cycle / random-walk / white-noise mix
+        cyc = np.sin(2.0 * np.pi * t / period + phase)
+        walk = np.cumsum(rng.standard_normal(T)) / np.sqrt(T)
+        wn = rng.standard_normal(T)
+        sig = w[0] * cyc + w[1] * walk + w[2] * wn
+        slots[name] = ((sig - sig.mean()) / (sig.std() or 1.0)).astype(np.float64)
+    return dataclasses.replace(panel, feature_slots=slots)
+
+
 def _proxy_base_sleeves(panel: Panel, *, hold: int) -> dict[str, np.ndarray]:
     """Inline TSMOM (252-1) + short reversal PROXY rank-L/S books — a base book for the marginal gate
     to improve upon. Derived from PRICE only (independent of the regime slot)."""
@@ -427,7 +463,7 @@ class LegTally:
 
 def run_e1(cc: CalibConfig, *, quick: bool, null_kind: str = "iid",
            null_params: dict | None = None, corrected: CorrectedConfig | None = None,
-           n_panels_override: int | None = None) -> dict:
+           n_panels_override: int | None = None, randomize_slots: bool = False) -> dict:
     """Null false-positive rate driven THROUGH the real search (``evolve``), not through a single-shot
     scorer — which is the only way the FILE-DRAWER effect enters.
 
@@ -465,6 +501,11 @@ def run_e1(cc: CalibConfig, *, quick: bool, null_kind: str = "iid",
     extra = {"null_params": null_params} if null_kind == "realistic" else {}
     for k in range(n_panels):
         panel = panel_gen(t, n, seed=1000 + k, n_feature_slots=n_slots, **extra)
+        if randomize_slots:
+            # NULL-DEGEN-01: without this the overlay half of this null is ~len(ov_seeds) effective
+            # draws no matter how large n_panels is, and the Clopper-Pearson bound below — which assumes
+            # independent Bernoulli trials — is tighter than the evidence supports.
+            panel = randomize_feature_slots(panel, seed=500_000 + k)
         base = _proxy_base_sleeves(panel, hold=cc.ek["hold_horizon"])
         ts = _panel_ts(panel)
         n_prom_this = 0
@@ -493,6 +534,7 @@ def run_e1(cc: CalibConfig, *, quick: bool, null_kind: str = "iid",
     return {
         "n_panels": n_panels,
         "null_kind": null_kind,
+        "randomized_slots": bool(randomize_slots),
         "contract": ("corrected" if corrected is not None else "shipped"),
         "null_params": dict(null_params) if null_params else {},   # provenance for the shape sweep
         "seeds": {"cross_sectional": len(cs_seeds), "overlay": len(ov_seeds)},
@@ -936,6 +978,12 @@ def main() -> int:
                          "in both directions, so it can only make a true over-ceiling FPR easier to "
                          "detect; at n=60 the per-tick bound is 0.0487 even at k=0, leaving almost no "
                          "headroom under the 0.05 ceiling for a single false positive.")
+    ap.add_argument("--randomize-slots", action="store_true",
+                    help="NULL-DEGEN-01 (e1 only): give each null panel its own timing-slot shape "
+                         "instead of the generators' one fixed sin(2*pi*t/80). Without it the overlay "
+                         "half of the null has an effective n near the SEED count, not the panel count, "
+                         "so the Clopper-Pearson bound assumes an independence it does not have. OFF by "
+                         "default — the generators' output feeds the MDE curves the power guard reads.")
     args = ap.parse_args()
 
     cc = load_calib(Path(args.calib_config), Path(args.config))
@@ -954,7 +1002,8 @@ def main() -> int:
     }
     if args.exp in ("e1", "both"):
         report["e1"] = run_e1(cc, quick=args.quick, null_kind=args.null, corrected=corrected,
-                              n_panels_override=args.e1_panels)
+                              n_panels_override=args.e1_panels,
+                              randomize_slots=args.randomize_slots)
     if args.exp in ("e2", "both"):
         report["e2"] = run_e2(cc, quick=args.quick)
     if args.exp == "mde_sweep":

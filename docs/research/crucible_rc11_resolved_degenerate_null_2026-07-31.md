@@ -2,8 +2,10 @@
 
 **Verdict: RC-11 as filed is WITHDRAWN.** The uplift leg is not substrate-dependent, the Taiwan overlay
 path is not un-calibrated, and no threshold needs changing. The finding was an artifact of the null I
-built to test it. What replaces it is a smaller but real defect in the shared calibration substrates
-(NULL-DEGEN-01, below), which reaches further than RC-11 did.
+built to test it. What replaces it is NULL-DEGEN-01 — a latent trap in the shared calibration
+substrates. **E1 was re-run both ways and is unaffected** (identical FPR), so NULL-DEGEN-01 lands at LOW:
+it bites only a measurement that holds the base book fixed, which is what a "measure the null on the real
+base book" harness does by construction.
 
 Harness: `scripts/research/crucible_uplift_null.py` (new `--randomize-regime`, `--base-sharpe`,
 `--cost-bps`). Reports in `results/crucible_uplift_null/`.
@@ -87,7 +89,7 @@ substrate identity (i.e. with which phase of the one sinusoid happened to fit th
 Note the +0.49 at base SR 0.0: the effect does not need a good base book at all, because a location shift
 does not change the return *path* the sine aligns with.
 
-## NULL-DEGEN-01 (NEW, MEDIUM-HIGH) — the degenerate slot is shared, and E1 consumes it
+## NULL-DEGEN-01 (NEW — filed MEDIUM-HIGH, **measured and DOWNGRADED to LOW**) — the shared degenerate slot
 
 The same fixed sinusoid is built in **three** places:
 
@@ -105,10 +107,44 @@ already close to its ceiling — the corrected-contract gates file records per-t
 **CP-upper95 0.0487 against a 0.05 ceiling, ~2% headroom, "one more false positive would have flipped
 it."**
 
-**Scope discipline — what is NOT claimed.** I have not re-run E1, so I am *not* claiming E1 is actually
-RED. The claim is narrower and checkable: the independence assumption behind its confidence bound is
-violated on the overlay half, so the stated headroom is overstated by an unknown amount. The check is to
-re-run E1 with randomized slots and compare.
+**Scope discipline — what was NOT claimed.** I did not claim E1 was RED, only that the independence
+assumption behind its bound was violated on the overlay half by an unknown amount, and that the check was
+to re-run E1 with randomized slots.
+
+### That check is now DONE (2026-07-31) — E1 is unaffected, and the reason is precise
+
+240 panels, corrected contract, realistic null, both arms:
+
+| regime | slots | promising | holdout evals | per-tick FPR | CP-upper95 (ceil 0.05) | verdict |
+|---|---|---|---|---|---|---|
+| `offspring_policy: all` | fixed | **7** | 1597 | 0.0208 | 0.0433 | GREEN |
+| `offspring_policy: all` | randomized | **7** | 1449 | 0.0208 | 0.0433 | GREEN |
+| `prereg_only` (SHIPPED) | fixed | 0 | 27 | 0.0000 | 0.0124 | GREEN |
+| `prereg_only` (SHIPPED) | randomized | 0 | 10 | 0.0000 | 0.0124 | GREEN |
+
+**Identical FPR in the regime that has any.** The `all` arm also reproduces the quoted historical result
+closely (0.021/0.0433 vs the recorded 0.025/0.0487 — a one-tick difference, consistent with the v10.0
+changes since).
+
+**Why E1 is immune where the uplift null was not — the mechanism, measured not argued.** Degeneracy needs
+BOTH the timing signal *and its target* to be fixed. E1 rebuilds its proxy base sleeves from **each
+panel's own prices**, so even with one fixed sinusoid the tilt's target varies panel to panel and the
+draws stay independent through the base book. The U7 uplift null pointed the same fixed sinusoid at **one
+fixed real substrate** — both halves frozen — which is why its variance ratio hit 11.8 while E1's FPR does
+not move at all.
+
+**NULL-DEGEN-01 is therefore DOWNGRADED to LOW**, and re-scoped: it is a latent trap in the shared
+generators, not a live defect in any current measurement. It bites only a measurement that holds the base
+book fixed — which is exactly what a "measure the null on the REAL base book" harness does, so the trap is
+aimed squarely at the next person who writes one. `--randomize-slots` (E1) and `--randomize-regime`
+(uplift null) exist as the opt-in defence, and the harness's between/within diagnostic is the detector.
+
+**One thing worth correcting in passing.** The corrected-contract gates file's "~2% headroom, one more
+false positive would have flipped it" describes the `offspring_policy: all` regime — which is the point of
+the paragraph it sits in (it justifies adding `prereg_only`), but is no longer the shipped default. Under
+the shipped `prereg_only`, E1's measured headroom is **CP-upper95 0.0124 against a 0.05 ceiling — a ~4×
+margin, not 2%**. The gates comment is correct in context and was deliberately left unedited rather than
+move its provenance hash a third time for a clarification.
 
 Separately, the **planted** panel (`_planted_panel:265`, feeding E2 and the MDE sweeps) uses the same
 sinusoid, but there it is the signal *by design* — the base book is built to depend on its lag, and
