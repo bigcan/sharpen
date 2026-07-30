@@ -38,7 +38,7 @@ python scripts/auto_collect_checkpoints.py [--hours N | --run_id ID | --all_inst
 ./scripts/manage_strategies.sh {build|up|ps|logs} <target>
 ```
 
-**WandB:** entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Helpers at `.claude/skills/wandb-primary/scripts/wandb_helpers.py`.
+**WandB:** entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Helpers at `.agents/skills/wandb-primary/scripts/wandb_helpers.py` (tracked; also mirrored at `skills/wandb-primary/`. Do **not** point this at `.claude/skills/` — `.claude/` is gitignored, so that path exists only in the main checkout and breaks in worktrees).
 **Always pass `metric_keys=` explicitly.** HPO: `_debug/eval_profit_factor`, `_research/sharpe_minute`. Backtest: `Profit_Factor_Daily`, `Sharpe_Ratio`, `Sortino_Ratio`, `Total_Return`, `Max_Drawdown`.
 
 ## Project Layout (top-level)
