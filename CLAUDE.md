@@ -4,10 +4,11 @@ Detailed reference: `docs/claude_md_reference.md` (project map, env contracts, s
 
 ## Project Brief
 
-RL Quant Strategy Development Platform. Active agent: **SAC only** — IQN/BDQ/PPO code present but none profitable yet; propose alternatives with evidence.
-**Ultimate goal:** a diversified portfolio of live-deployed RL strategies — uncorrelated across asset classes and timeframes — each generating sustained risk-adjusted alpha net of fees. Short-term milestone: pass FTMO + Velotrade prop-firm challenges as proof-of-capital.
-Workstreams: GMGP1 SAC Gold 15m, Sync-1H crypto, Funding-Arb, Market Making LOB.
-State: `.agent/memory/core.md` (loaded at boot). R&D log: `randd_log.md`.
+Quant strategy R&D platform. **Direction: linear core first; RL only as a thin overlay behind a beat-linear-OOS gate.** Single-asset directional RL is falsified (GMGP1-BTC clean de-leaked re-baseline, 2026-07-20). The only validated edge is cross-asset **TSMOM**, net SR ~0.60. If RL is used, **SAC only** — IQN/BDQ/PPO code is present but none is profitable; propose alternatives with evidence.
+**Ultimate goal:** sustained risk-adjusted alpha net of fees from capacity-constrained niches a small operator can actually hold — not an institution-shaped portfolio of premia. Milestone: pass FTMO + Velotrade prop-firm challenges as proof-of-capital.
+**Active:** TAILWIND (`tailwind-v1` — TSMOM + BAB as crash hedge) · CRUCIBLE falsification filter (`finrl_pro_ds/crucible/`, `finrl_pro_ds/signals/`) · Crucible ICAIF paper (deadline **2026-08-02**) · gmgp1-gold/xauusd ensembles on paper.
+**Closed — do not re-propose without new evidence:** Market Making LOB (S442) · Sync-1H · Funding-Arb standalone · PRISM · AlphaSeek · options-as-alpha · liquid large-cap X-sec.
+State: `.agent/memory/core.md` (loaded at boot). R&D log: `randd_log.md`. Full NO-GO ledger: auto-memory `MEMORY.md` — **check it before proposing any strategy.**
 
 ## Stack
 
@@ -37,7 +38,7 @@ python scripts/auto_collect_checkpoints.py [--hours N | --run_id ID | --all_inst
 ./scripts/manage_strategies.sh {build|up|ps|logs} <target>
 ```
 
-**WandB:** entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Helpers at `.agents/skills/wandb-primary/scripts/wandb_helpers.py`.
+**WandB:** entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Helpers at `.claude/skills/wandb-primary/scripts/wandb_helpers.py`.
 **Always pass `metric_keys=` explicitly.** HPO: `_debug/eval_profit_factor`, `_research/sharpe_minute`. Backtest: `Profit_Factor_Daily`, `Sharpe_Ratio`, `Sortino_Ratio`, `Total_Return`, `Max_Drawdown`.
 
 ## Project Layout (top-level)
@@ -96,6 +97,15 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 - All `Linear` hidden dims must be **multiples of 8** (Tensor Core alignment)
 - Use `logging` or `MLOpsLogger` — never raw `print()` in production code
 
+## Working Style
+
+- **Response length:** keep responses focused and brief. Keep disclaimers and caveats short and spend most of the response on the main answer. When asked to explain something, give a high-level summary unless an in-depth one is requested.
+- **Written deliverables:** match the length of files you write — `randd_log.md` entries, memory files, audit and run reports — to what the task needs. Cover the substance; do not pad with filler sections, redundant summaries, or boilerplate.
+- **Scope:** deliver what was asked, at the scope intended. Make routine judgment calls yourself; check in only when different readings would lead to materially different work. If the request looks mistaken, say so in a sentence and continue with it as asked rather than quietly narrowing, widening, or transforming it. Finish the whole task and report completion only when it is actually done.
+- **Verification:** the deterministic gates in this file (`validate_config.py`, `clean_ohlcv.py`, pytest, ruff, PF-XCHECK) are mandatory — they are tool executions, not self-review. Do **not** stack extra self-review passes or subagent verifiers on top of them; that is redundant and costs tokens without improving results.
+- **Subagents:** delegate only for large, genuinely independent, parallelizable work such as a wide multi-file investigation. Never delegate what you can finish in a handful of tool calls, and never use a subagent to verify your own work. Keep spawn counts low.
+- **Corrections:** correct an earlier statement only when the error would change the code, conclusions, or decisions. State it plainly and continue; for slips that change nothing, fix it and move on.
+
 ## Anti-Patterns (NEVER DO)
 
 - Never import from `FinRLPodracer/` or `Podracer/`
@@ -124,14 +134,14 @@ Skill chain extension: code change to training pipeline → **validate_config** 
 
 ## Skills (auto-dispatch)
 
-Project skills at `.claude/skills/` (Deploy, Monitor, Dashboard, Docker, Live-Trading, Live-Monitor, Collect-Run).
-User skills at `~/.claude/skills/` (Audit, Memory, Optimization, Math, WandB, Researcher, Architect, Skill-Evolve, Randy).
+Project skills at `.claude/skills/` (Deploy, Monitor, Dashboard, Docker, Live-Trading, Live-Monitor, Collect-Run, WandB-Primary).
+User skills at `~/.claude/skills/` (Audit, Memory, Optimization, Math, WandB, Researcher, Architect, Skill-Evolve).
 Both `SKILL.md` and (if present) `FINRL.md` must be read when triggered.
 
 **Core chains:**
 - Code change → **Audit** (mandatory). + **Math** if formulas. + **Optimization** if perf.
 - Deploy → Monitor → Optimization → Deploy → Monitor → Dashboard
-- Session start → Memory boot. `/sync` → Memory → Randy (if gateway) → Skill-Evolve (staleness) → git commit
+- Session start → Memory boot. `/sync` → Memory → Skill-Evolve (staleness) → git commit
 - HPO complete → WandB → Memory → Dashboard → git commit
 - Run finished → **Collect-Run** (fetch metrics + checkpoint + report) → Dashboard → (Audit if reward/formula changed)
 - Research question → Researcher (query NotebookLM KB `4aef5475-7fec-4d1f-96a7-efb3cafbb371` before web search — see `reference_notebooklm_knowledge_base` memory) → (GO) → Architect → implement → Audit
@@ -154,7 +164,9 @@ Live trading containers run on remote desktop (`<TAILSCALE_HOST>`) via Docker co
 Observability (Prometheus :9090 / Grafana :3000 / Watchdog Telegram, per-strategy metrics 9101-9107): see reference.
 **PRISM: falsified (S413+), `prism.enabled: false` in all configs.** Containers still deployed; see reference for archive.
 
-## Gotchas (last verified 2026-04-16)
+## Gotchas (script paths verified 2026-07-30 · operational items last verified 2026-04-16)
+
+Operational items below are unverified since April. **Re-test a blocker before obeying it** — a stale "X doesn't work" costs more than the re-test.
 
 - HPO uses NopPruner, no early-kill, 500K steps/trial
 - RTX 5090 + CUDA 13.0: run `scripts/patch_torch_compile.py` on fresh deployments
@@ -165,3 +177,7 @@ Observability (Prometheus :9090 / Grafana :3000 / Watchdog Telegram, per-strateg
 - Docker Desktop Windows: file bind mounts fail silently — use baked Dockerfiles (COPY at build)
 - Prometheus/Grafana configs: edit source in `docker/live/` then rebuild (`--profile monitoring build`)
 - IB strategies share `ibgateway` network namespace — Prometheus scrapes via `ibgateway:<port>`
+
+<tone_preference>
+Keep outputs reasonably concise. Don't pad written deliverables.
+</tone_preference>
