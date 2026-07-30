@@ -35,7 +35,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from finrl_pro_ds.data.equity_panel_loader import load_sp500_panel  # noqa: E402
-from finrl_pro_ds.signals import Gates, SignalSpec, evaluate_batch, write_scorecard  # noqa: E402
+from finrl_pro_ds.signals import (  # noqa: E402
+    Gates,
+    Multiplicity,
+    SignalSpec,
+    evaluate_batch,
+    load_multiplicity_gates,
+    write_scorecard,
+)
 from finrl_pro_ds.signals.eval_harness import (  # noqa: E402
     compute_scores,
     tier1_gross_power,
@@ -84,9 +91,14 @@ def subset_cols(p: Panel, k: int) -> Panel:
                                    "universe_def": f"top-{k} S&P500 by market cap"})
 
 
-def tier1_sweep(panel: Panel, gates: Gates) -> dict:
+def tier1_sweep(panel: Panel, gates: Gates, multiplicity: Multiplicity | None = None) -> dict:
     """Tier-1 gross IC + Tier-4 deflation for ALL alphas on this universe (bootstrap off
-    for speed; FDR falls back to the normal-approx one-sided p)."""
+    for speed; FDR falls back to the normal-approx one-sided p).
+
+    ``multiplicity`` (U5) carries the count for the WHOLE sweep. This function is called once
+    per nested universe with the identical alpha list, so deflating each call against
+    ``len(ALPHAS)`` counted the same search four times over as four independent searches.
+    """
     gp = {}
     for s in ALPHAS:
         sc = compute_scores(s, panel, s.spec.neutralization)
@@ -94,7 +106,7 @@ def tier1_sweep(panel: Panel, gates: Gates) -> dict:
             s, panel, gates.horizons, primary_horizon=gates.primary_horizon,
             neutralization=s.spec.neutralization, expected_sign=s.spec.expected_sign,
             scores=sc, min_names=gates.min_names_per_day, bootstrap=False)
-    defl = tier4_deflation(gp)
+    defl = tier4_deflation(gp, None, multiplicity)
     ph = gates.primary_horizon
     rows = []
     for n, g in gp.items():
@@ -143,6 +155,21 @@ def main() -> None:
     summary = {"meta": {"big_n": big_n, "T": big.T, "span": [str(big.dates[0]), str(big.dates[-1])],
                         "survivorship_free": False, "start": START}}
 
+    # U5 multiplicity. Every ALPHA is tested on EVERY nested universe, so one invocation of
+    # this script runs len(ALPHAS) x len(universes) hypotheses, not len(ALPHAS). Deflating each
+    # universe against len(ALPHAS) alone was the batch-shape leak in its clearest form: a
+    # for-loop silently dividing the multiple-comparison correction by four.
+    n_hyp = len(ALPHAS) * len(universes)
+    mult = Multiplicity.preregistered(n_hyp, substrate="xlg_megacap",
+                                      provenance=f"{len(ALPHAS)} alphas x "
+                                                 f"{len(universes)} nested universes "
+                                                 f"({', '.join(universes)}), one script run",
+                                      gates=load_multiplicity_gates())
+    summary["meta"]["multiplicity"] = {"n_hypotheses": n_hyp, "source": mult.source,
+                                       "provenance": mult.provenance}
+    print(f"[multiplicity] deflating against {n_hyp} hypotheses "
+          f"({len(ALPHAS)} alphas x {len(universes)} universes)")
+
     # ---- 1) nested gross-IC + capturability curve -------------------------------------
     print("\n=== 1) NESTED GROSS-IC CURVE (does IC collapse toward the mega-cap tier?) ===")
     print(f"{'universe':9} {'N':>4} {'minNm':>5} {'#FDRsig':>7} {'medIC-IR':>9} {'maxIC-IR':>9}")
@@ -150,7 +177,7 @@ def main() -> None:
     for name, (p, mn) in universes.items():
         g = Gates.from_yaml(ROOT / "configs" / "signal_eval.gates.yaml")
         g = replace(g, min_names_per_day=mn)
-        sw = tier1_sweep(p, g)
+        sw = tier1_sweep(p, g, mult)
         curve[name] = {k: sw[k] for k in ("n_fdr_sig", "median_ic_ir", "max_ic_ir", "ranked_names")}
         print(f"{name:9} {p.N:>4} {mn:>5} {sw['n_fdr_sig']:>7} "
               f"{sw['median_ic_ir']:>9.4f} {sw['max_ic_ir']:>9.4f}")
@@ -165,7 +192,8 @@ def main() -> None:
         p, mn = universes[name]
         g = replace(Gates.from_yaml(ROOT / "configs" / "signal_eval.gates.yaml"),
                     min_names_per_day=mn)
-        rs = evaluate_batch({s.spec.name: s for s in ALPHAS}, p, g, batch_name=f"xlg_{name}")
+        rs = evaluate_batch({s.spec.name: s for s in ALPHAS}, p, g, batch_name=f"xlg_{name}",
+                            multiplicity=mult)
         write_scorecard(rs, OUT / name)
         n_prom = sum(1 for c in rs.cards if c.verdict == "PROMISING")
         n_sig = sum(1 for c in rs.cards if c.deflation and np.isfinite(c.deflation.fdr_q)

@@ -39,7 +39,15 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from finrl_pro_ds.signals import Gates, Panel, evaluate_batch, to_markdown, write_scorecard
+from finrl_pro_ds.signals import (
+    Gates,
+    HypothesisLedger,
+    Panel,
+    evaluate_batch,
+    load_multiplicity_gates,
+    to_markdown,
+    write_scorecard,
+)
 from finrl_pro_ds.signals.spec import SignalSpec
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -185,7 +193,21 @@ def main() -> int:
         "mom_6_1": TrailingMomentum(126, 21, universe=args.universe_def),
         "mom_3_1": TrailingMomentum(63, 21, universe=args.universe_def),
     }
-    rs = evaluate_batch(signals, panel, gates, f"taiwan_xsec_mom_{args.universe_def}")
+    # U5 multiplicity: this script is re-run per --universe_def, and `universe` participates in
+    # SignalSpec.content_hash, so each definition is three GENUINELY new hypotheses on the same
+    # substrate. Pre-U5 every run deflated against 3 regardless of how many definitions had
+    # already been swept. The ledger accumulates them; with no ledger configured the behaviour
+    # is unchanged and the card says so.
+    mgates = load_multiplicity_gates()
+    mult = None
+    if mgates.get("ledger_path"):
+        lp = Path(mgates["ledger_path"])
+        mult = HypothesisLedger(lp if lp.is_absolute() else ROOT / lp).declare(
+            "taiwan_xsec_momentum", signals, gates=mgates)
+        log.info("Multiplicity: %d cumulative hypotheses on substrate 'taiwan_xsec_momentum' "
+                 "(ledger %s)", mult.n_hypotheses, mult.provenance)
+    rs = evaluate_batch(signals, panel, gates, f"taiwan_xsec_mom_{args.universe_def}",
+                        multiplicity=mult)
     jp, mp = write_scorecard(rs, out_dir)
     print("\n" + to_markdown(rs) + "\n")
     log.info("Scorecard written: %s | %s", mp, jp)

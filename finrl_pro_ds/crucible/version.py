@@ -405,6 +405,62 @@ Two limits, neither hidden: the Taiwan panel is **N=10**, a thin cross-section f
 verified by TEST, not by a live run — no cached Taiwan panel exists locally, so the FinMind fetch has
 not been exercised end-to-end.
 
+`crucible-v9.0` is a **MAJOR** bump: multiplicity accounting stops being a function of SUBMISSION
+SHAPE (audit 2026-07-29 RC-7 / U5).
+
+``tier4_deflation`` derived ``n_trials`` from ``len(primary_results)`` — the size of the batch handed
+to one ``evaluate_batch`` call — and nothing tied that number to how many hypotheses were actually
+tested. The multiple-comparison correction was measuring the caller's for-loop: 100 candidates
+submitted as ten batches of ten deflated against 10, not 100, and each batch's DSR was computed as
+though only ten things had ever been tried. This is the LIVE scorecard path, not the refused miner —
+``scripts/research/{eval_signals, taiwan_smallcap_altdata_eval, taiwan_xsec_momentum_eval,
+xlg_megacap_ic_gate}.py`` all run through it. ``xlg_megacap_ic_gate`` is the defect in its clearest
+form: it sweeps ONE alpha list across FOUR nested universes, so a for-loop silently divided the
+correction by four.
+
+The count fed to DSR's E[max] order statistic becomes ``max(batch_pool, declared_hypotheses)``, where
+the declaration is either a PRE-REGISTERED count (a doc that froze the hypothesis set before results
+were seen) or a persistent per-substrate ``HypothesisLedger`` that accumulates distinct candidates
+across runs, deduplicated by ``SignalSpec.content_hash`` — so a replay re-records the same hashes and
+lands on the same count, and reproducibility survives. ``finrl_pro_ds/signals/multiplicity.py``.
+
+**The obvious wrong fix was NOT taken.** ``gates.use_effective_n`` (C2.1) substitutes the
+participation-ratio ``n_eff`` for the raw pool; since ``n_eff <= n_trials`` it is monotone-LOOSER, and
+it was added as a Type-II over-penalty fix for a correlated candidate library, never as a multiplicity
+control. U5 needs the STRICTER direction. The two now compose: the declared count sets the MAGNITUDE
+and ``n_eff`` applies the correlation haircut as a RATIO (``n_mult · n_eff/n_trials``), so the composed
+count is >= the pre-U5 value under EITHER flag setting.
+
+MAJOR because it changes the verdict FUNCTION, per the v3.0/v4.0/v5.0/v7.0 precedent. Unlike v6.0,
+**CRU-1 verdict-preservation IS claimed, and it holds**: ``max()`` means this path can only ever
+deflate against MORE trials, DSR is monotone non-increasing in the trial count, so no recorded verdict
+can flip LOGGED -> PROMISING. Verified by property test across declared counts 0/1/2/3/10/100, not
+asserted. Two deliberate non-changes protect that claim: (1) DSR COMPUTABILITY still keys off the batch
+pool (``n_trials >= 2``), because the order statistic needs the dispersion of observed trial IC-IRs — a
+declared count raises the deflation magnitude but must not conjure a DSR where there is no dispersion
+to measure, since a NaN reads as LOGGED today and manufacturing a number there would be LOOSER;
+(2) an UNDER-declaration falls back to the batch size rather than lowering the count, and reports
+source ``"<src>+batch"`` so the mismatch is visible instead of smoothed over.
+
+The only PROMISING in the entire record is unaffected, VERIFIED not assumed: ``tw_smallcap_mom_rev``
+came from ``taiwan_smallcap_altdata_eval.py``, which submits exactly the 3 signals its pre-registration
+(``docs/research/taiwan_smallcap_altdata_probes_preregistration_2026-07-15.md``) froze, so batch and
+hypothesis count coincide at 3. That call site now DECLARES the 3 rather than arriving at it by
+accident. Its real blockers remain decay and the 0.48 cost wall.
+
+Touches NO gate byte — the frozen moats ``519158fa1450`` (funnel) / ``22a18172be1a`` (Taiwan) /
+``0ccf6dd584f0`` (small-cap probe) are UNCHANGED. The one policy knob (``require_declared``: may an
+undeclared, batch-shaped count still score PROMISING?) lives in its OWN
+``configs/crucible_multiplicity.gates.yaml``, per the ADR-1 separation the lockbox / cohort / power /
+corrected-contract gates already use. It ships FALSE: an undeclared batch keeps today's count and gains
+a "multiplicity is batch-shaped" caveat on the card, rather than being demoted. Demoting every legacy
+path by default would REWRITE the record instead of describing it; turning the flag on is itself
+monotone-stricter (PROMISING -> LOGGED only) and is the right setting for any pathway gating capital.
+
+What this does NOT fix: LORD++ still accounts for cross-run multiplicity without binding on this path
+(the corrected contract's ``lord_pass`` binds on the miner, which the power guard still refuses), and
+the dominating constraint remains BREADTH — N=8 effective on the only per-name substrate.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -452,7 +508,17 @@ from pathlib import Path
 # bridge was FLATTENING it into 40 broadcast terminals. Now also assembled as one (T,N) matrix per
 # field, columns aligned to Panel.tickers. ADDITIVE (broadcast terminals untouched, overlay unchanged);
 # MINOR per the v2.8 precedent. Coverage pre-flight guards the silent all-NaN alignment failure.
-CRUCIBLE_VERSION = "crucible-v8.1"
+# v9.0 = multiplicity accounting stops being a function of SUBMISSION SHAPE (audit RC-7 / U5). DSR's
+# trial count was len(batch), so 100 candidates sent as ten batches of ten deflated against 10 — the
+# correction measured the caller's for-loop. It is now max(batch_pool, declared_hypotheses), declared
+# via a pre-registration or a per-substrate HypothesisLedger (dedup by spec hash => replays reproduce).
+# NOT fixed by flipping use_effective_n, which is monotone-LOOSER; n_eff now composes as a correlation
+# RATIO on the declared count. MAJOR (verdict function), and CRU-1 HOLDS — max() only ever adds trials
+# and DSR is monotone non-increasing in them, so nothing can flip LOGGED -> PROMISING (property-tested).
+# The sole recorded PROMISING (tw_smallcap_mom_rev) is unaffected: 3 pre-registered == its batch of 3.
+# NO gate byte moved; the require_declared policy lives in configs/crucible_multiplicity.gates.yaml and
+# ships false (undeclared batches are caveated, not demoted).
+CRUCIBLE_VERSION = "crucible-v9.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
