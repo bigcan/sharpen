@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from ...signals.generation.grammar import parse, to_formula
 from ...signals.spec import SignalSpec
 from ..ledger import TrialLedger, TrialRecord
+from ..search_memory import semantic_hash
 from .proposer import HypothesisProposal, ProposalContext, Proposer
 
 log = logging.getLogger("crucible.hypothesis")
@@ -77,11 +78,12 @@ class HypothesisAuthor:
         hints (cross-section width, per-slot bar COUNTS, a rotating entropy token) — never scores. All
         default to empty, so the pre-existing single-arg call sites build a byte-identical context and
         the offline :class:`LibrarySeedProposer` (which reads none of them) is unaffected (CRU-1)."""
-        view = self.ledger.agent_view()          # {candidates, candidate_hashes, killed_families}
+        view = self.ledger.agent_view()          # dedup keys + killed_families ONLY
         return ProposalContext(
             available_terminals=tuple(available_terminals),
             killed_families=tuple(view["killed_families"]),
             existing_candidate_hashes=frozenset(view["candidate_hashes"]),
+            existing_semantic_hashes=frozenset(view.get("semantic_hashes", ())),
             asset_classes=tuple(asset_classes),
             max_proposals=self.max_proposals,
             panel_n=int(panel_n),
@@ -97,6 +99,7 @@ class HypothesisAuthor:
         here and nothing is written — :meth:`preregister` performs the CR-2 ledger lock."""
         killed = set(context.killed_families)
         seen_here: set[str] = set()
+        sem_seen_here: set[str] = set()
         out: list[PreRegisteredSpec] = []
         raw = self.proposer.propose(context)                  # single proposer call (CR-7 token cost)
         for p in raw:
@@ -115,12 +118,23 @@ class HypothesisAuthor:
             if chash in seen_here:
                 log.info("drop %s — duplicate within batch (hash %s)", p.name, chash)
                 continue
+            # U4 SEMANTIC dedup: the exact-canonical hash above still treats `add(a,b)` and `add(b,a)`
+            # as two hypotheses. Checked after the exact hash so the log names the cheaper reason first,
+            # and against BOTH the ledger and this batch.
+            shash = semantic_hash(canonical)
+            if shash in context.existing_semantic_hashes:
+                log.info("drop %s — semantically already scored (U4 dedup, sem %s)", p.name, shash)
+                continue
+            if shash in sem_seen_here:
+                log.info("drop %s — semantic duplicate within batch (sem %s)", p.name, shash)
+                continue
             try:
                 spec = self._to_spec(p)
             except ValueError as exc:                         # SignalSpec rejected a field
                 log.warning("drop %s — invalid SignalSpec (%s)", p.name, exc)
                 continue
             seen_here.add(chash)
+            sem_seen_here.add(shash)
             out.append(PreRegisteredSpec(spec=spec, formula=canonical, candidate_hash=chash,
                                          economic_rationale=p.economic_rationale,
                                          proposal_ts=proposal_ts))

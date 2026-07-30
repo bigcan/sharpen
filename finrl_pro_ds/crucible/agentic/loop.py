@@ -38,6 +38,7 @@ from ...signals.generation.fitness import FitnessConfig
 from ...signals.generation.grammar import available_terminals
 from ..ledger import TrialRecord
 from ..manifest import RunManifest
+from ..search_memory import classify_rejection
 from .card import DiscoveryCard
 from .cohort_card import CohortCard, card_from_verdict
 from .hypothesis import HypothesisAuthor, PreRegisteredSpec, candidate_hash
@@ -45,6 +46,7 @@ from .hypothesis import HypothesisAuthor, PreRegisteredSpec, candidate_hash
 if TYPE_CHECKING:
     from ...signals.generation.base_sleeves import SleeveComponents
     from ..corrected_contract import CorrectedConfig
+    from ..search_memory import SearchMemoryConfig
 
 log = logging.getLogger("crucible.loop")
 
@@ -111,6 +113,15 @@ def _card_for(cand: Candidate, ct: str, report: GenerationReport,
     )
 
 
+def _economic_floor(cfg: FitnessConfig, corrected_cfg: "CorrectedConfig | None") -> float:
+    """The smallest marginal ΔSR the ACTIVE decision contract would call a discovery — the yardstick U4
+    measures a rejection's decisiveness against. Under the corrected contract that is
+    ``guards.uplift_min`` (calibrated against its own null by U7); under the shipped funnel it is the
+    equivalent ``min_combination_uplift`` leg. Read from the live config, never hardcoded."""
+    return float(corrected_cfg.uplift_min if corrected_cfg is not None
+                 else cfg.min_combination_uplift)
+
+
 def _spec_json(pr: PreRegisteredSpec) -> dict:
     from .hypothesis import _spec_dict
     return {"spec": _spec_dict(pr.spec), "spec_content_hash": pr.spec.content_hash()}
@@ -140,6 +151,8 @@ def run_hypothesis_loop(
     corrected_cfg: "CorrectedConfig | None" = None,
     corrected_gates_hash: str | None = None,
     lord_level: float | None = None,
+    search_memory_cfg: "SearchMemoryConfig | None" = None,
+    substrate_mde: float | None = None,
 ) -> HypothesisLoopResult:
     """Run one manual pass. ``evolve_kwargs`` is the runner block from ``load_generation_config``
     (rng_seed/pop_size/… — WITHOUT ``candidate_type``, which the loop sets per group).
@@ -152,7 +165,15 @@ def run_hypothesis_loop(
     ``contract`` / ``corrected_cfg`` / ``lord_level`` (crucible-v6.0) select and parameterize the
     decision layer ``evolve`` applies on the embargoed holdout; ``corrected_gates_hash`` is the
     corrected thresholds file's byte hash, pinned into the manifest symmetrically with ``gates_hash``.
-    Defaults reproduce the shipped funnel exactly."""
+    Defaults reproduce the shipped funnel exactly.
+
+    ``search_memory_cfg`` / ``substrate_mde`` (U4, crucible-v10.0) enable the REJECTION CLASSIFICATION
+    that makes ``ledger.killed_families()`` able to fire at all: a rejected candidate is stamped
+    ``DECISIVE`` (the substrate had the power to resolve an economically interesting edge and the answer
+    was no ⇒ terminal, the family dies) or ``UNDERPOWERED`` (it did not ⇒ parked, re-testable when the
+    substrate deepens). Both default to None ⇒ no classification, byte-identical to pre-U4: the
+    ``verdict`` column and the manifest are untouched either way, since the class lives in its own
+    nullable ledger column (:mod:`crucible.search_memory`)."""
     ledger = author.ledger
     n_before = ledger.count()
 
@@ -205,6 +226,17 @@ def run_hypothesis_loop(
             verdicts[chash] = verdict
             pr = prereg_by_hash.get(chash)
             res = c.result
+            # U4: classify only a candidate that ACTUALLY REACHED the holdout gate and failed it. A
+            # train-pre-filter cull (or an offspring blocked by `prereg_only`) was never tested
+            # out-of-sample, so calling it a "rejection" — decisive or otherwise — would invent a
+            # negative result that no test produced. `_holdout_entry` returns None for those.
+            rej_class = None
+            if verdict != _PROMISING and search_memory_cfg is not None:
+                hv_e = _holdout_entry(report, c.formula)
+                if hv_e is not None and hv_e.get("holdout_passes") is False:
+                    rej_class = classify_rejection(
+                        implied_mde=substrate_mde, economic_floor=_economic_floor(cfg, corrected_cfg),
+                        cfg=search_memory_cfg)
             ledger.record(TrialRecord(
                 candidate_hash=chash, crucible_version=crucible_version,
                 family=(pr.spec.family if pr else None), candidate_type=ct,
@@ -221,7 +253,9 @@ def run_hypothesis_loop(
                 dsr=(None if res is None else float(res.dsr_aug)),
                 delta_sr_oos=(None if res is None else float(res.delta_sr_oos)),
                 marginal_hlz_t=(None if res is None else float(res.marginal_t)),
-                data_snapshot_hash=data_snapshot_hash))
+                data_snapshot_hash=data_snapshot_hash,
+                rejection_class=rej_class,
+                implied_mde_at_test=(substrate_mde if rej_class is not None else None)))
         for c in report.promising:
             cards.append(_card_for(c, ct, report, prereg_by_hash, crucible_version=crucible_version,
                                    gates_hash=gates_hash, data_snapshot_hash=data_snapshot_hash))

@@ -30,7 +30,24 @@ contract:
   n_eff_mode: ar1        # ar1 | raw
 
 guards:                  # the cheap guards retained from the funnel (NOT the F1/F2 seals)
-  uplift_min: 0.10       # delta_mean (mean ΔSR over CPCV paths) floor
+  # CALIBRATED 2026-07-30 (U7 / RC-9) — value CONFIRMED, not changed. Full report:
+  # docs/research/crucible_u7_uplift_null_calibration_2026-07-30.md; harness
+  # scripts/research/crucible_uplift_null.py; raw draws in results/crucible_uplift_null/.
+  #   * The guarded quantity is CorrectedResult.delta_sr = FULL-PANEL annualized ΔSR on the embargoed
+  #     holdout — NOT the "mean ΔSR over CPCV paths" this comment used to claim (read the code).
+  #   * Null q95 on the real cross_asset base book, cross_sectional path (n=1200 no-edge draws through
+  #     the production scorer): 0.0799, bootstrap CI95 [0.0521, 0.1177]. 0.10 lies INSIDE that CI, so
+  #     the calibrated floor and the shipped floor are not distinguishable — editing it would re-hash
+  #     this file and void verdict comparability for a change inside its own error bar.
+  #   * RC-9's "passes 170/170" was a TRAIN-split ledger statistic from a search that maximizes exactly
+  #     that delta. On the holdout this leg rejects ~97% of null draws; it is not inert.
+  #   * This leg is NOT the FPR control: under every null measured, t_pass = 0.000 and lord_pass <= 0.018,
+  #     and the JOINT null pass rate is 0/2600 (cross_asset) and 0/2100 (taiwan) at this floor.
+  #   * RC-11 (OPEN, HIGH): the null is SUBSTRATE-dependent by ~200x. On taiwan the OVERLAY path's null
+  #     q95 is +0.831 and 37.6% of pure-noise overlays clear this floor. Sleeve count is falsified as the
+  #     cause. Treat the taiwan overlay path as UN-CALIBRATED until RC-11 is resolved — it may be a seal
+  #     (a statistic that is wrong on a high-Sharpe base book), in which case no threshold fixes it.
+  uplift_min: 0.10       # full-panel holdout ΔSR floor (economic size, not significance)
   delta_median_min: 0.0  # central CPCV path is not a loss
   frac_positive_min: 0.50  # majority of CPCV paths have ΔSR > 0
   max_base_corr: 0.70    # collinearity to the base span (multiple corr sqrt(R^2))

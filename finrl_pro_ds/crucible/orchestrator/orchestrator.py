@@ -36,7 +36,7 @@ import numpy as np
 
 from ..agentic.card import DiscoveryCard
 from ..agentic.cohort_card import CohortCard
-from ..agentic.hypothesis import HypothesisAuthor
+from ..agentic.hypothesis import HypothesisAuthor, PreRegisteredSpec
 from ..agentic.loop import HypothesisLoopResult, run_hypothesis_loop
 from ..lockbox.incubation import forward_evidence
 from ..lockbox.lockbox import (
@@ -49,6 +49,7 @@ from ..lockbox.lockbox import (
 from ..version import CRUCIBLE_VERSION, gates_hash
 from ...signals.features import Panel
 from ...signals.generation.grammar import available_terminals
+from ...signals.spec import SignalSpec
 from .budget import TickBudget
 from .burst import route_burst
 from .fdr import OnlineFDR
@@ -241,8 +242,17 @@ def _process_substrate(
         feature_slot_bars=_feature_slot_bars(prepared.panel),
         mechanism_nonce=_mechanism_nonce(tick_ts))
     fresh_specs = author.propose(context, proposal_ts=tick_ts)
+    # --- U4 power-aware RE-ADMISSION: candidates parked as UNDERPOWERED whose original test ran at a
+    # materially worse MDE than this substrate now has. Injected on the SCORER side (the orchestrator is
+    # agent-blind by design) rather than through the proposer, so the agent view is not widened with
+    # candidate-level "this was not decisively killed" information (CRU-2). A re-admitted candidate is a
+    # real test that spends real budget, so it counts toward n_fresh and the CR-7 charge below.
+    readmitted = _readmit_parked(sub, prepared, author, tick_ts)
+    fresh_specs = fresh_specs + readmitted
     n_fresh = len(fresh_specs)
     dirty, reason = substrate_dirty(data_changed=data_changed, n_fresh_hypotheses=n_fresh)
+    if readmitted:
+        reason = f"{reason}; {len(readmitted)} re-admitted (U4 power-aware)"
 
     # A substrate is only MINED if it has fresh specs to score; a data-only change with no new
     # candidate is dirty-but-nothing-to-test (conserves FDR wealth — the §10.1 intent).
@@ -295,7 +305,9 @@ def _process_substrate(
         cohort_cfg=sub.cohort_cfg, cohort_mc_kwargs=sub.cohort_mc_kwargs,
         cohort_gates_hash=sub.cohort_gates_hash, base_components=prepared.base_components,
         contract=sub.contract, corrected_cfg=sub.corrected_cfg,
-        corrected_gates_hash=sub.corrected_gates_hash, lord_level=lord_level)
+        corrected_gates_hash=sub.corrected_gates_hash, lord_level=lord_level,
+        search_memory_cfg=sub.search_memory_cfg,
+        substrate_mde=(None if prepared.power is None else prepared.power.implied_mde_delta_sr))
 
     # --- online-FDR: charge one test per pre-registered spec (deterministic order) -----------------
     promising_hashes = {c.candidate_hash for c in result.cards}
@@ -364,6 +376,48 @@ def _mechanism_nonce(tick_ts: str) -> str:
     perturbs a temperature-0 LLM proposer's input so successive ticks explore different hypotheses;
     the offline LibrarySeedProposer ignores it (byte-identical output)."""
     return hashlib.sha256(tick_ts.encode("utf-8")).hexdigest()[:12]
+
+
+def _readmit_parked(sub: Substrate, prepared: PreparedSubstrate, author: HypothesisAuthor,
+                    tick_ts: str) -> list[PreRegisteredSpec]:
+    """U4: rebuild :class:`PreRegisteredSpec` objects for parked (UNDERPOWERED) candidates this substrate
+    is now powerful enough to re-test (``ledger.readmissible``).
+
+    The re-admitted spec keeps its ORIGINAL ``proposal_ts`` — that is the CR-2/CR-8 pre-registration lock,
+    and re-stamping it with today's timestamp would silently reset the lockbox's forward-evidence clock
+    and make an old hypothesis look freshly pre-registered. Its family/rationale/candidate_type come from
+    the stored row, so a re-admission is the SAME hypothesis re-tested, not a new one.
+
+    Returns [] when the search memory is off, the substrate carries no power stamp, or nothing qualifies.
+    A row whose stored ``spec_json`` cannot be rebuilt into a SignalSpec is skipped with a warning rather
+    than fabricated — an unreconstructable pre-registration must not be re-tested as if it were intact."""
+    cfg = sub.search_memory_cfg
+    if cfg is None or not cfg.enabled or prepared.power is None:
+        return []
+    rows = sub.ledger.readmissible(current_mde=prepared.power.implied_mde_delta_sr, cfg=cfg,
+                                   limit=int(sub.max_readmissions))
+    out: list[PreRegisteredSpec] = []
+    for r in rows:
+        try:
+            spec = SignalSpec(
+                name=f"readmit-{r['candidate_hash']}",
+                hypothesis=(r["economic_rationale"] or "re-admitted parked hypothesis (U4)"),
+                family=(r["family"] or "readmitted"),
+                expected_sign=1,
+                candidate_type=(r["candidate_type"] or "cross_sectional"))
+        except ValueError as exc:
+            log.warning("re-admission skipped for %s — SignalSpec rebuild failed (%s)",
+                        r["candidate_hash"], exc)
+            continue
+        out.append(PreRegisteredSpec(
+            spec=spec, formula=r["formula"], candidate_hash=r["candidate_hash"],
+            economic_rationale=(r["economic_rationale"] or "re-admitted parked hypothesis (U4)"),
+            proposal_ts=(r["proposal_ts"] or tick_ts)))
+    if out:
+        log.info("substrate %s: RE-ADMITTED %d parked candidates at MDE %.3f (min ratio %.2f)",
+                 sub.substrate_id, len(out), prepared.power.implied_mde_delta_sr,
+                 cfg.readmit_min_mde_ratio)
+    return out
 
 
 def _incubation_params(evolve_kwargs: dict) -> tuple[int, float, int]:

@@ -1,0 +1,48 @@
+# U4 SEARCH MEMORY — when is a NEGATIVE result terminal? (design audit 2026-07-29 §5 U4 / RC-5)
+#
+# Owns the criteria that decide whether a rejected candidate KILLS its family (so the proposer stops
+# re-deriving it) or is merely PARKED as untested-for-lack-of-power and re-admitted later. Those are
+# PASS/FAIL decisions, so per the CLAUDE.md gate rule they live here rather than in code.
+#
+# This file is NOT part of the frozen funnel gates_hash (CRU-1 519158fa1450): it changes no funnel
+# verdict and no scoring byte. It only decides what the LEDGER remembers about a rejection and what the
+# agent-visible killed-family list therefore contains. Its own hash is pinned into the tick record
+# alongside the other parallel gates files (power / cohort / corrected-contract / lockbox).
+#
+# READ THIS BEFORE TUNING: at the substrate power Crucible actually has (implied MDE ~1.4 ΔSR at the
+# deepest measured anchor, >=3 on short panels — configs/crucible_power.gates.yaml) versus the corrected
+# contract's economic floor (guards.uplift_min, ~0.1), EVERY rejection classifies UNDERPOWERED and
+# killed_families() stays EMPTY. That is the correct, measured answer, not a misconfiguration: a test
+# that cannot detect the smallest edge we would accept cannot falsify anything. Do not "fix" it by
+# raising decisive_mde_multiple until a family dies — that manufactures NO-GOs out of low power, which
+# is the file-drawer error running backwards. The real unblock is substrate depth/breadth (audit U8).
+
+harness_version: crucible-search-memory-v1
+
+enabled: true
+
+decisiveness:
+  # A rejection is DECISIVE iff  implied_mde <= decisive_mde_multiple * economic_floor,
+  # where economic_floor is the corrected contract's guards.uplift_min (the smallest ΔSR the machine
+  # would call a discovery, calibrated against its own null by U7). 1.0 states the honest condition:
+  # "the test could resolve the smallest edge we would have accepted, and it did not."
+  #
+  # Values > 1.0 let a test that could only see a LARGER edge than we require still kill a family —
+  # i.e. they trade false NO-GOs for faster pruning. 2.0 is already saying "a test with half the
+  # resolution we need is good enough to condemn a mechanism"; treat anything above ~1.5 as a
+  # deliberate, documented risk decision, not a tuning knob.
+  decisive_mde_multiple: 1.0
+
+readmission:
+  # An UNDERPOWERED rejection becomes re-testable once the substrate's MDE has improved by at least
+  # this factor (mde_at_test / current_mde >= min_mde_ratio). 1.25 requires a REAL 25% power gain, so a
+  # substrate that merely drifts (a few new bars, a re-interpolation on the same grid anchor) does not
+  # churn the whole file drawer back through the mine. Never below 1.0 — that would re-admit on a power
+  # LOSS. Raise it if re-admissions crowd out fresh hypotheses in the per-tick candidate budget (CR-7).
+  min_mde_ratio: 1.25
+
+dedup:
+  # Dedup on the commutative-canonicalized AST (semantic_hash) in ADDITION to the exact canonical
+  # formula hash. Off ⇒ exact-hash behaviour only, i.e. pre-U4. The primary key stays candidate_hash
+  # either way, so turning this off never orphans a historical row.
+  semantic: true

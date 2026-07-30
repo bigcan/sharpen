@@ -39,7 +39,11 @@ _CFG = FitnessConfig(embargo=10)
 _TS = "2026-07-02T00:00:00+00:00"
 # Score-derived fields that must NEVER appear in anything the agent can read (CR-1).
 _FORBIDDEN = {"verdict", "dsr", "delta_sr_oos", "marginal_hlz_t", "holdout", "passes_gate",
-              "fdr_wealth_charged", "spec_json", "economic_rationale", "formula"}
+              "fdr_wealth_charged", "spec_json", "economic_rationale", "formula",
+              # U4 score columns: a rejection class states that the holdout gate rejected AND how
+              # powerful that test was — score-derived, so agent-blind (only the family-level
+              # killed_families aggregate crosses the CR-2 boundary).
+              "rejection_class", "implied_mde_at_test"}
 
 
 # --------------------------------------------------------------------- fixtures ----
@@ -91,7 +95,11 @@ class RecordingProposer:
 def test_agent_view_exposes_no_score_columns(tmp_path) -> None:
     """The ledger agent-view columns are exactly the dedup keys — no score/verdict column."""
     assert set(TrialLedger.agent_view_columns()).isdisjoint(_FORBIDDEN)
-    assert set(TrialLedger.agent_view_columns()) == {"candidate_hash", "candidate_type", "family"}
+    # ``semantic_hash`` (U4) is a dedup key: a hash of the commutative-canonical AST, derived from the
+    # formula text alone. The U4 SCORE columns (rejection_class / implied_mde_at_test) are asserted
+    # absent by the _FORBIDDEN check above and by tests/crucible/test_search_memory_u4.py.
+    assert set(TrialLedger.agent_view_columns()) == {"candidate_hash", "semantic_hash",
+                                                     "candidate_type", "family"}
 
 
 def test_proposal_context_carries_no_scores_even_with_scored_ledger(tmp_path) -> None:

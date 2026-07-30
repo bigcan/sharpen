@@ -21,9 +21,12 @@ def _raw(db: Path, h: str, *cols: str):
         conn.close()
 
 # Score columns the agent must NEVER be able to read (CR-1). A leak of any of these turns the ledger
-# into a fitness oracle the Hypothesis Author can hill-climb.
+# into a fitness oracle the Hypothesis Author can hill-climb. ``rejection_class`` /
+# ``implied_mde_at_test`` are the U4 additions: a rejection class is score-derived (it says the holdout
+# gate rejected AND how powerful that test was), so it stays agent-blind — only the family-level
+# ``killed_families()`` aggregate crosses the boundary, exactly as before U4 (CRU-2).
 _FORBIDDEN = ("verdict", "dsr", "delta_sr_oos", "marginal_hlz_t", "economic_rationale",
-              "fdr_wealth_charged", "spec_json")
+              "fdr_wealth_charged", "spec_json", "rejection_class", "implied_mde_at_test")
 
 
 def _rec(h: str, family: str, verdict: str) -> TrialRecord:
@@ -49,8 +52,9 @@ def test_agent_view_exposes_no_score_columns(tmp_path: Path) -> None:
     with TrialLedger(db) as led:
         led.record(_rec("h1", "momentum", "LOGGED"))
         view = led.agent_view()
-        # the projection carries only dedup keys + the killed-family list
-        assert set(view) == {"candidates", "candidate_hashes", "killed_families"}
+        # the projection carries only dedup keys + the killed-family list. ``semantic_hashes`` (U4) is a
+        # dedup key like ``candidate_hashes`` — derived from the formula TEXT, carrying no score.
+        assert set(view) == {"candidates", "candidate_hashes", "semantic_hashes", "killed_families"}
         for row in view["candidates"]:
             assert set(row) == set(TrialLedger.agent_view_columns())
             for f in _FORBIDDEN:

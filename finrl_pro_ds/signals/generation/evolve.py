@@ -58,6 +58,35 @@ CONTRACT_SHIPPED = "shipped"
 CONTRACT_CORRECTED = "corrected"
 _CONTRACTS = (CONTRACT_SHIPPED, CONTRACT_CORRECTED)
 
+# --- Tier-0 causality enforcement on GENERATED genomes (audit U6 / RC-8, crucible-v10.0) ----------
+# Before U6 the only thing standing between a look-ahead genome and a verdict was a docstring: the
+# ``dsl_signal`` module asserts a generated formula is "causal-by-construction and re-verified per
+# candidate by the Tier-0 truncation tripwire", but ``assert_causal`` was never called on a genome
+# anywhere in the search — the re-verification simply did not exist (RC-8). It does now: every
+# DISTINCT genome is truncation-probed before its fitness is computed, and a failure CULLS it.
+#
+# PROBE COUNT. 3, not ``assert_causal``'s default 8. The probe is per-genome and each probe re-evaluates
+# the formula on a truncated panel, so the cost is ``n_probes`` extra DSL evaluations against ONE CPCV
+# fitness evaluation — negligible at 3, and 3 independent random rows already catch any operator that
+# reads forward (a leak shows up at EVERY row, not at a lucky one; the leaky-delay tripwire in
+# ``tests/signals/test_generation_causality_u6.py`` fails at the first probe). This is a cost/robustness
+# knob, NOT a gate threshold, so it lives here rather than in a gates YAML — and it MUST NOT go into
+# ``signal_eval.gates.yaml``, whose bytes are the frozen CRU-1 funnel hash.
+_CAUSALITY_PROBES = 3
+
+
+def _genome_is_causal(formula: str, panel: Panel, *, n_probes: int = _CAUSALITY_PROBES,
+                      seed: int = 0) -> tuple[bool, str]:
+    """Truncation-equivalence probe on ONE generated genome: ``eval(truncated(t))[t] == eval(panel)[t]``
+    for ``n_probes`` random rows. Delegates to the shipped :func:`eval_harness.assert_causal` rather than
+    re-implementing the check (one causality definition in the codebase, per LEAK-2). The genome is
+    wrapped in the same :class:`DslSignal` the scorecard path uses, so the probe tests the SAME
+    evaluation the search scores. Import is local: ``eval_harness`` is a heavier module and only this
+    path needs it."""
+    from ..eval_harness import assert_causal
+    from .dsl_signal import DslSignal
+    return assert_causal(DslSignal(formula), panel, n_probes=n_probes, seed=seed)
+
 
 @dataclass(frozen=True, slots=True)
 class Candidate:
@@ -292,6 +321,7 @@ def evolve(
     contract: str = CONTRACT_SHIPPED,
     corrected_cfg: "CorrectedConfig | None" = None,
     lord_level: float | None = None,
+    enforce_causality: bool = True,
 ) -> GenerationReport:
     """Evolve DSL alphas on the TRAIN split; re-validate PROMISING survivors on the held-out
     tail. ``base_returns``/``timestamps`` align to the train split's rows.
@@ -330,7 +360,14 @@ def evolve(
 
     NOTE this is the one bump that is NOT monotone-stricter: a candidate the shipped contract rejected
     can pass the corrected one (that is the entire point). Recorded verdicts are therefore NOT preserved
-    across the switch and must be re-scored, not inherited — see ``version.py``."""
+    across the switch and must be re-scored, not inherited — see ``version.py``.
+
+    ``enforce_causality`` (audit U6 / RC-8, default ON): truncation-probe every DISTINCT genome
+    (:func:`_genome_is_causal`) BEFORE fitness and CULL a leaky one. On a causal DSL nothing fires, so the
+    search is byte-identical (a cull still increments ``gen_n_total``, so even a firing leaves the
+    file-drawer count honest — but it does remove the genome from the elite pool and hence changes the
+    trajectory downstream, which is the correct response to a leak, not a regression). Set False ONLY to
+    demonstrate the guard (the tripwire test does)."""
     if candidate_type not in ("cross_sectional", "overlay"):
         raise ValueError(f"candidate_type must be 'cross_sectional' or 'overlay'; got {candidate_type!r}")
     if contract not in _CONTRACTS:
@@ -401,6 +438,16 @@ def evolve(
         # `f not in scored` dedup in the loop) — a re-derived duplicate is the SAME hypothesis, not a
         # new trial, so distinct is the correct multiplicity count (GP5-01: doc/code reconciled).
         gen_n_total += 1
+        # U6 (RC-8): Tier-0 causality is ENFORCED here, not asserted in a docstring. Probing on the
+        # TRAIN panel is the right surface — that is the panel this genome is scored on, and the
+        # holdout re-score runs the same formula through the same evaluator. Culled BEFORE fitness so a
+        # leaky genome can never reach the deflation, the DSR dispersion pool, or the PBO bank.
+        if enforce_causality:
+            ok, why = _genome_is_causal(formula, train)
+            if not ok:
+                log.warning("genome CULLED by Tier-0 causality probe (%s) — formula=%.120s", why,
+                            formula)
+                return Candidate(formula, _INFEASIBLE, None, f"tier0 causality: {why}")
         try:
             cr = _returns_for(formula, train, ctx_tr)
         except Exception as exc:                          # noqa: BLE001 - cull, don't crash a run
