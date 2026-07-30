@@ -44,7 +44,27 @@ noise substrate until a pre-registered seed reached the holdout gate and failed 
 That table is the whole U4 story: the plumbing is fixed, and at the power we actually have, the
 right answer is still "this rejection tells us nothing".
 
-## Three blockers to a real discovery run, in the order they bite
+## Blockers to a real discovery run, in the order they bite
+
+Verified by running a real-mode tick, not inferred:
+
+```
+python scripts/research/crucible_orchestrator.py --mode real --nights 1 --force \
+  --start 2007-01-01 --start-ts 2026-07-30T00:00:00 --out <tmp> --no-altdata-slots --max-proposals 6
+```
+→ real cross_asset panel builds (`T=4652, holdout=1163`) → `UNDERPOWERED: implied MDE inf > ceiling 0.50
+(unmeasured_empty)` → `mined=False, 0 PROMISING`.
+
+### 0. `generation.enabled: false` — and `--force` is the ONLY correct way past it
+
+Without `--force` a real-mode tick exits immediately: *"generation.enabled is false in
+`configs/signal_eval.gates.yaml` — no-op"* (the GP8-01 operator opt-in). This is the first thing that
+stops a run and the least obvious.
+
+**Do not "fix" it by editing the YAML.** `configs/signal_eval.gates.yaml` **is** the frozen CRU-1 moat —
+`gates_hash` is a SHA over its raw bytes, so flipping that one flag moves `519158fa1450`, breaks the three
+CRU-1 tripwires in `tests/crucible/test_version.py`, and makes every future manifest incomparable to the
+entire recorded history. The CLI flag is the intended door; the config flag is a seal.
 
 ### 1. The corrected-contract MDE curves are absent on this machine (fixable by compute)
 
