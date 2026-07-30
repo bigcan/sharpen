@@ -1,0 +1,26 @@
+# Crucible multiplicity-accounting policy (crucible-v9.0, audit 2026-07-29 RC-7 / U5).
+#
+# ADR-1 separation: this is its OWN file, exactly as the lockbox / cohort / power /
+# corrected-contract gates are, so multiplicity work cannot move a byte of the frozen funnel
+# moat (configs/signal_eval.gates.yaml, 519158fa1450) or the Taiwan / small-cap probe seals.
+# Never hardcode these values in code — finrl_pro_ds/signals/multiplicity.py reads them here.
+#
+# The DEFLATION MAGNITUDE itself is not a threshold in this file: the count fed to DSR is
+# max(batch_pool, declared_hypotheses), which is data, not a tunable. What lives here is
+# POLICY — whether an undeclared (batch-shaped) count may still score PROMISING, and where
+# the cumulative per-substrate ledger is kept.
+
+multiplicity:
+
+  # false (default) => an undeclared batch keeps today's behaviour: n_multiplicity falls back
+  # to the batch pool size and the card carries a "multiplicity is batch-shaped" caveat.
+  # true  => an undeclared batch cannot score PROMISING. Turn this on for any pathway whose
+  # verdicts gate capital; leave it off for exploratory sweeps, where the caveat is enough.
+  # Flipping it to true is monotone-STRICTER (it can only demote PROMISING -> LOGGED).
+  require_declared: false
+
+  # Persistent per-substrate hypothesis ledger (JSON, deduplicated by SignalSpec.content_hash).
+  # null => no ledger; callers declare a pre-registered count directly instead. Note results/
+  # is gitignored, so a ledger placed there is machine-local: a shared substrate should use a
+  # tracked path if the cumulative count is meant to survive a fresh clone.
+  ledger_path: null

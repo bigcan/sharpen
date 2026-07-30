@@ -37,7 +37,15 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from finrl_pro_ds.signals import Gates, Panel, evaluate_batch, to_markdown, write_scorecard  # noqa: E402
+from finrl_pro_ds.signals import (  # noqa: E402
+    Gates,
+    Multiplicity,
+    Panel,
+    evaluate_batch,
+    load_multiplicity_gates,
+    to_markdown,
+    write_scorecard,
+)
 from finrl_pro_ds.signals.spec import SignalSpec  # noqa: E402
 
 log = logging.getLogger("taiwan_smallcap_altdata")
@@ -337,7 +345,15 @@ def main() -> int:
 
     gates = Gates.from_yaml(gates_path)
     signals = build_signals()
-    rs = evaluate_batch(signals, panel, gates, "taiwan_smallcap_altdata")
+    # U5 multiplicity: this probe's hypothesis set was FROZEN at three (P1/P2/P3) before any
+    # result was seen, so the batch pool and the honest hypothesis count coincide here — the
+    # declaration records WHY they coincide instead of leaving it to look like the pre-U5
+    # accident of submitting three signals in one call.
+    mult = Multiplicity.preregistered(
+        3, substrate="taiwan_smallcap_altdata",
+        provenance="docs/research/taiwan_smallcap_altdata_probes_preregistration_2026-07-15.md",
+        gates=load_multiplicity_gates())
+    rs = evaluate_batch(signals, panel, gates, "taiwan_smallcap_altdata", multiplicity=mult)
     jp, mp = write_scorecard(rs, out_dir)
     print("\n" + to_markdown(rs) + "\n")
     log.info("Scorecard: %s | %s", mp, jp)

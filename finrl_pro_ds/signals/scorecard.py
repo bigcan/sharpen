@@ -40,6 +40,7 @@ from .eval_harness import (
 )
 from .features import Panel
 from .gates import Gates
+from .multiplicity import Multiplicity
 
 if TYPE_CHECKING:
     from .protocol import Signal
@@ -70,6 +71,9 @@ class RankedScorecard:
     cards: list[SignalScorecard]
     panel_meta: dict
     gates: dict
+    n_multiplicity: int = 0             # count DSR deflated against (U5); 0 == not recorded
+    multiplicity_source: str = "batch"  # batch | preregistered | ledger (U5)
+    multiplicity_provenance: str = ""   # pre-registration doc, or the ledger path
 
 
 def evaluate_signal(sig: "Signal", panel: Panel, gates: Gates,
@@ -115,7 +119,7 @@ def evaluate_signal(sig: "Signal", panel: Panel, gates: Gates,
 
 
 def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
-              panel: Panel) -> SignalScorecard:
+              panel: Panel, multiplicity: Multiplicity | None = None) -> SignalScorecard:
     caveats: list[str] = []
     if not panel.meta.get("survivorship_free", False):
         caveats.append("survivorship-biased data — results are UPPER BOUNDS")
@@ -158,6 +162,21 @@ def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
         caveats.append(f"regime-fragile: min subperiod IC-IR {msi:.3f} < "
                        f"{gates.min_subperiod_ic_ir:g} (inverts in a sampled subperiod)")
 
+    # Multiplicity provenance (U5, crucible-v9.0). A batch-shaped count means the deflation
+    # measured the caller's submission size, not a hypothesis count — a verdict that can be
+    # diluted by splitting a sweep into smaller batches. Always caveated so the weakness is
+    # visible on the card; PROMISING-blocking only under the opt-in policy flag, since the
+    # count itself is still the pre-U5 number and demoting every legacy path by default would
+    # rewrite the record rather than describe it.
+    declared = (defl is not None and defl.multiplicity_source != "batch"
+                and not defl.multiplicity_source.endswith("+batch"))
+    if defl is not None and not declared:
+        caveats.append(
+            f"multiplicity is batch-shaped (n={defl.n_multiplicity} = submitted batch, not a "
+            f"pre-registered or cumulative hypothesis count) — DSR is diluted by submitting "
+            f"in small batches")
+    require_declared = bool(multiplicity is not None and multiplicity.require_declared)
+
     # HLZ / BHY hurdle (C2.3): reported + caveated; folded into PROMISING only under require_hlz.
     hlz_pass = bool(defl is not None and defl.hlz_pass)
     promising = (
@@ -167,6 +186,7 @@ def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
         and np.isfinite(defl.fdr_q) and defl.fdr_q <= gates.fdr_q_max
         and (hlz_pass or not gates.require_hlz)
         and np.isfinite(msi) and msi >= gates.min_subperiod_ic_ir
+        and (declared or not require_declared)
     )
     if promising and not hlz_pass:
         caveats.append(f"fails HLZ hurdle (t>{gates.hlz_t_min:g} & BHY-FDR<={gates.fdr_q_max:g}) "
@@ -206,14 +226,25 @@ def rank(cards: list[SignalScorecard]) -> list[SignalScorecard]:
 
 
 def evaluate_batch(signals: dict[str, "Signal"], panel: Panel, gates: Gates,
-                   batch_name: str, factor_book: FactorBook | None = None) -> RankedScorecard:
+                   batch_name: str, factor_book: FactorBook | None = None,
+                   multiplicity: Multiplicity | None = None) -> RankedScorecard:
+    """``multiplicity`` (U5) declares how many hypotheses this batch is one slice of — a
+    pre-registered count or a :class:`HypothesisLedger` cumulative count. Omitting it keeps
+    the pre-U5 behaviour (deflate against the batch pool) and adds a caveat saying so."""
     partials = {name: evaluate_signal(sig, panel, gates, factor_book)
                 for name, sig in signals.items()}
     gp = {name: c.gross for name, c in partials.items() if c.gross is not None}
-    defl = tier4_deflation(gp, gates) if gp else {}
-    cards = [_finalize(c, defl.get(name), gates, panel) for name, c in partials.items()]
+    defl = tier4_deflation(gp, gates, multiplicity) if gp else {}
+    cards = [_finalize(c, defl.get(name), gates, panel, multiplicity)
+             for name, c in partials.items()]
+    any_defl = next(iter(defl.values()), None)
     return RankedScorecard(batch_name, gates.primary_horizon, len(gp), rank(cards),
-                           dict(panel.meta), dict(gates.raw))
+                           dict(panel.meta), dict(gates.raw),
+                           n_multiplicity=(any_defl.n_multiplicity if any_defl else len(gp)),
+                           multiplicity_source=(any_defl.multiplicity_source
+                                                if any_defl else "batch"),
+                           multiplicity_provenance=(multiplicity.provenance
+                                                    if multiplicity else ""))
 
 
 # ---- serialization ----------------------------------------------------------
@@ -246,7 +277,9 @@ def _card_json(c: SignalScorecard) -> dict:
         "deflation": None if d is None else {
             "dsr": _f(d.dsr), "psr": _f(d.psr), "mintrl_years": _f(d.mintrl_years),
             "fdr_q": _f(d.fdr_q), "n_trials": int(d.n_trials), "sr_star": _f(d.sr_star),
-            "n_eff": _f(d.n_eff), "fdr_q_bhy": _f(d.fdr_q_bhy), "hlz_pass": bool(d.hlz_pass)},
+            "n_eff": _f(d.n_eff), "fdr_q_bhy": _f(d.fdr_q_bhy), "hlz_pass": bool(d.hlz_pass),
+            "n_multiplicity": int(d.n_multiplicity),
+            "multiplicity_source": str(d.multiplicity_source)},
         "cpcv": None if cpcv is None else {
             "n_groups": cpcv.n_groups, "k_test": cpcv.k_test, "n_paths": cpcv.n_paths,
             "oos_sharpe_mean": _f(cpcv.oos_sharpe_mean), "oos_sharpe_std": _f(cpcv.oos_sharpe_std),
@@ -275,7 +308,9 @@ def _card_json(c: SignalScorecard) -> dict:
 def to_json(rs: RankedScorecard) -> dict:
     meta = {k: (bool(v) if isinstance(v, (bool, np.bool_)) else v) for k, v in rs.panel_meta.items()}
     return {"batch_name": rs.batch_name, "primary_horizon": rs.primary_horizon,
-            "n_trials": rs.n_trials, "panel_meta": meta,
+            "n_trials": rs.n_trials, "n_multiplicity": int(rs.n_multiplicity),
+            "multiplicity_source": rs.multiplicity_source,
+            "multiplicity_provenance": rs.multiplicity_provenance, "panel_meta": meta,
             "cards": [_card_json(c) for c in rs.cards]}
 
 
@@ -283,7 +318,9 @@ def to_markdown(rs: RankedScorecard) -> str:
     sf = rs.panel_meta.get("survivorship_free")
     lines = [
         f"# Signal Scorecard — {rs.batch_name}", "",
-        f"- primary horizon: **{rs.primary_horizon}d**  ·  deflation n_trials: **{rs.n_trials}**",
+        f"- primary horizon: **{rs.primary_horizon}d**  ·  batch pool: **{rs.n_trials}**"
+        f"  ·  deflation multiplicity: **{rs.n_multiplicity}** "
+        f"({rs.multiplicity_source}{'; ' + rs.multiplicity_provenance if rs.multiplicity_provenance else ''})",
         f"- survivorship-free data: **{sf}**  (False ⇒ all results are UPPER BOUNDS)", "",
         "| # | signal | family | verdict | IC-IR | DSR | Neff | FDR-q | BHY-q | HLZ "
         "| cpcvOOS | netSh@std | costWall | breadth |",

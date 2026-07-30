@@ -52,7 +52,17 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # the cross-sectional search can use. v7.1 opened that channel but nothing produced a (T,N) slot.
     # The data was already per-stock ("<ticker>:<field>"); the bridge was FLATTENING it into 40
     # broadcast terminals. ADDITIVE (broadcast untouched, overlay unchanged); MINOR per v2.8.
-    assert CRUCIBLE_VERSION == "crucible-v8.1"
+    # v9.0 = multiplicity accounting stops depending on SUBMISSION SHAPE (audit RC-7 / U5). DSR's
+    # trial count was the BATCH size, so ten batches of ten deflated against 10 rather than 100 —
+    # the multiple-comparison correction was measuring the caller's for-loop, on the LIVE scorecard
+    # path (xlg_megacap_ic_gate sweeps one alpha list over four universes: a silent divide-by-four).
+    # Now max(batch_pool, declared), declared by pre-registration or a per-substrate HypothesisLedger.
+    # Deliberately NOT fixed via use_effective_n, which is monotone-LOOSER (n_eff <= n_trials) and is
+    # a correlation adjustment, not a multiplicity control; it now composes as a RATIO on the declared
+    # count. MAJOR (verdict function) but CRU-1 HOLDS — unlike v6.0 — because max() can only add
+    # trials and DSR is monotone non-increasing in them. NO gate byte moved (the require_declared
+    # policy lives in configs/crucible_multiplicity.gates.yaml, shipped false).
+    assert CRUCIBLE_VERSION == "crucible-v9.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
