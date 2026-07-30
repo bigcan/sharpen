@@ -151,41 +151,6 @@ def _holdout_geometry(panel: Panel, ek: dict) -> tuple[int, int]:
     return hold.T, panel.T - hold.T
 
 
-def _randomize_regime_slots(panel: Panel, *, seed: int) -> Panel:
-    """RC-11 fix: give each null panel its OWN timing-slot shape.
-
-    ``cal._noise_panel`` / ``_realistic_noise_panel`` build ``macro:regime`` as
-    ``sin(2πt/80) + 0.2·noise`` with the SAME period and phase on every seed. An overlay genome is a
-    deterministic transform of that slot, so its tilt — and hence its ΔSR against a fixed base book — is
-    nearly the same on every "independent" panel. Measured on the taiwan overlay null: between-formula
-    variance of the draw means is 11.8x the within-formula variance across 150 panels, i.e. 600 draws
-    carry an effective n of about 4. A q95 read off that is not a null quantile, it is "the second best of
-    four fixed sine patterns".
-
-    This replaces each slot with a per-panel random period, phase, trend and noise mix, so the draws
-    actually sample the space of plausible timing signals. Deliberately kept LOCAL to this harness rather
-    than fixed in ``crucible_calibration`` — those generators feed the E1/E2 gate calibrations, and
-    changing them would silently move measurements the power guard depends on."""
-    import dataclasses
-    rng = np.random.default_rng(seed)
-    T = panel.T
-    t = np.arange(T, dtype=np.float64)
-    slots = {}
-    for i, name in enumerate(sorted(panel.feature_slots)):
-        period = float(rng.uniform(20.0, 400.0))          # cycle length, days
-        phase = float(rng.uniform(0.0, 2.0 * np.pi))
-        # mix a cycle, a random walk and white noise in random proportion — the shapes a real macro or
-        # positioning series plausibly takes, instead of one fixed sinusoid.
-        w = rng.dirichlet(np.ones(3))
-        cyc = np.sin(2.0 * np.pi * t / period + phase)
-        walk = np.cumsum(rng.standard_normal(T)) / np.sqrt(T)
-        wn = rng.standard_normal(T)
-        s = w[0] * cyc + w[1] * walk + w[2] * wn
-        slots[name] = ((s - s.mean()) / (s.std() or 1.0)).astype(np.float64)
-        del i
-    return dataclasses.replace(panel, feature_slots=slots)
-
-
 def _rescale_base_sharpe(base: dict[str, np.ndarray], comps: dict, cfg,
                          target_sr: float) -> tuple[dict[str, np.ndarray], dict]:
     """H1 probe: shift each base sleeve's MEAN so the book runs at ``target_sr`` annualized, holding its
@@ -225,7 +190,7 @@ def _streams_noise_dsl(real_panel: Panel, real_base: dict[str, np.ndarray],
         npanel = cal._realistic_noise_panel(real_panel.T, real_panel.N, seed=seed0 + k,
                                             n_feature_slots=4)
         if randomize_regime:
-            npanel = _randomize_regime_slots(npanel, seed=seed0 + 90000 + k)
+            npanel = cal.randomize_feature_slots(npanel, seed=seed0 + 90000 + k)
         for f in _CS_SEEDS:
             cr = _candidate_returns(f, npanel, hold_horizon=int(ek["hold_horizon"]),
                                     cost_bps=float(ek["cost_bps"]),
