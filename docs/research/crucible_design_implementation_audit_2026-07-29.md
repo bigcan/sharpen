@@ -263,6 +263,39 @@ decision**, not new research.
 
 ## 5. Ranked roadmap
 
+> **ROADMAP CLOSED 2026-07-30 (`crucible-v10.0`).** Status of every item, with the shipping version:
+>
+> | Item | Status | Where |
+> |---|---|---|
+> | U1 — promote the corrected contract | ✅ SHIPPED | `crucible-v6.0`, made DEFAULT in `v8.0` |
+> | U2 — re-calibrate the power guard | ✅ SHIPPED | `crucible-v6.0` (§8 below) |
+> | U3 — per-name alt-data cross-sectional channel | ✅ SHIPPED | `crucible-v7.1` + `v8.1` (TWSE T86) |
+> | U4 — give the search a memory | ✅ SHIPPED | `crucible-v10.0` — `crucible/search_memory.py`, `configs/crucible_search_memory.gates.yaml`, `tests/crucible/test_search_memory_u4.py` |
+> | U5 — fix the shape of multiplicity accounting | ✅ SHIPPED | `crucible-v9.0` |
+> | U6 — enforce Tier-0 on genomes | ✅ SHIPPED | `crucible-v10.0` — `evolve._genome_is_causal`, `tests/signals/test_generation_causality_u6.py` |
+> | U7 — re-calibrate the uplift floor against its own null | ✅ MEASURED, value CONFIRMED at 0.10 | `docs/research/crucible_u7_uplift_null_calibration_2026-07-30.md`, `scripts/research/crucible_uplift_null.py` |
+> | U8 — the honest ceiling | ⛔ STANDING CONSTRAINT (not a task) | breadth/forward accumulation; see §5 U8 and the note below |
+> | RC-10 — reproduce tests cannot run | ✅ FIXED | `--force-underpowered` in both reproduce tests |
+>
+> Two corrections to this document, both from measurement rather than re-reading:
+>
+> 1. **RC-9's direction was wrong.** The "uplift 170/170" in §1.1 is a **train-split** statistic
+>    (`delta_sr_oos` is documented in `ledger.py` as train-split), produced by a search that maximizes
+>    that very delta — a selection artifact, not an inert gate. Measured against a real null on the
+>    holdout, `uplift_min = 0.10` rejects ~97% of null draws and sits INSIDE the bootstrap CI of the
+>    calibrated q95 floor. It also is not, and never was, the FPR control: `t_pass` = 0.000 and
+>    `lord_pass` ≤ 0.018 under every null measured, with joint null pass 0/2600 (cross_asset) and
+>    0/2100 (taiwan).
+> 2. **New finding RC-11 (HIGH, OPEN)** — the uplift null is substrate-dependent by ~200×, and on the
+>    Taiwan **overlay** path 37.6% of pure-noise candidates clear the floor (null q95 +0.831). Sleeve
+>    count is falsified as the cause; the mechanism is unresolved and may be a SEAL, not a threshold
+>    error. Added to the findings table in §6.
+>
+> **What closing the roadmap does NOT do.** RC-3 stands: the power guard still refuses every real
+> substrate, so every rejection U4 classifies is `UNDERPOWERED` and `killed_families()` remains empty —
+> now for a measured reason the tick log states, rather than the wiring gap RC-5 described. U4/U6 make
+> the machine correct; U8 is what would make it productive.
+
 ### U1 — Promote the corrected contract to the production decision layer *(do first)*
 
 Wire `corrected_contract_fitness` into `evolve()` as the binding holdout gate, behind a
@@ -405,7 +438,18 @@ units is flat in breadth. What breadth buys is a larger ΔSR for the same per-na
 a fixed ceiling rather than lowering it. The change is still right; the mechanism is not the one
 originally stated.
 
-### U4 — Give the search a memory
+### U4 — Give the search a memory  *(SHIPPED — `crucible-v10.0`, 2026-07-30)*
+
+*Implemented as `finrl_pro_ds/crucible/search_memory.py`. The first bullet below was implemented in a
+DIFFERENT form than proposed, deliberately: writing `NO_GO` on any decisive rejection would kill families
+off tests that had no power to falsify anything (at MDE 1.4 vs a 0.10 floor, that is every test today).
+Instead a rejection is classified `DECISIVE` / `UNDERPOWERED` in its own nullable ledger column — the
+`verdict` vocabulary is untouched, so no historical row changes meaning — and `killed_families()` counts
+DECISIVE rejections. The third bullet (power-aware re-admission) falls out of the same classification and
+is wired through `TrialLedger.readmissible` → `orchestrator._readmit_parked`. The second bullet's
+IC-correlation option was rejected: an IC is score-derived and dedup keys are agent-visible, so it would
+have widened the CRU-2 moat. Commutative-AST canonicalization is used instead.*
+
 
 - Write a terminal verdict (`NO_GO`) when a candidate is decisively rejected — or redefine
   `killed_families()` over `LOGGED` plus a decisiveness criterion — so the proposer prompt stops
@@ -421,13 +465,29 @@ Replace batch-size `n_trials` with a per-substrate cumulative hypothesis count, 
 bind in the funnel (the corrected contract already does this via `lord_pass`). This closes the
 "submit in small batches" loophole in RC-7.
 
-### U6 — Enforce Tier-0 on genomes
+### U6 — Enforce Tier-0 on genomes  *(SHIPPED — `crucible-v10.0`, 2026-07-30)*
+
+*`evolve.score()` calls `_genome_is_causal` (3-probe truncation equivalence via the shipped
+`eval_harness.assert_causal`, on a `DslSignal` wrapper) before fitness and culls a leaky genome. Cost
+measured at +25% on a small-panel search and negligible against CPCV fitness at production depth. The
+mutation tripwire asked for is `tests/signals/test_generation_causality_u6.py`: a forward-reading `delay`
+must make the run cull every genome, plus a guard-attribution test proving the cull comes from the probe
+and not from something else.*
+
 
 Call `assert_causal` (or a 2–3-row truncation probe) inside `evolve.score()` before fitness — the cost
 is negligible next to the CPCV fitness evaluation. Add a mutation tripwire: a deliberately leaky DSL
 operator must make the test fail.
 
-### U7 — Re-calibrate the uplift floor against its own null *(gate on this before U1 goes live)*
+### U7 — Re-calibrate the uplift floor against its own null  *(MEASURED 2026-07-30 — value CONFIRMED at 0.10; premise below was wrong in direction)*
+
+*Full report: `docs/research/crucible_u7_uplift_null_calibration_2026-07-30.md`. The paragraph below
+mis-stated two things, both corrected by measurement: (a) the leg does NOT pass 100% of candidates on the
+holdout — the 170/170 was a train-split selection artifact, and the real null pass rate is 2.65%; (b) the
+leg is not "the only remaining economic leg" carrying FPR — `t_pass`/`lord_pass` reject 100% of nulls, and
+the joint null pass rate is 0/2600. The calibrated q95 floor (0.0799, CI95 [0.0521, 0.1177]) contains the
+shipped 0.10, so nothing was changed. The measurement did surface RC-11, which matters more.*
+
 
 Once the seals drop, `uplift_min` is the *only* remaining economic leg, and it currently passes 100%
 of candidates. Measure the ΔSR null distribution on the real base books (the machinery already exists:
@@ -457,7 +517,8 @@ substrate class where its statistics can actually work.
 | RC-7 | MEDIUM | `signals/eval_harness.py:315`, `crucible/orchestrator/fdr.py:26` | `n_trials` = batch size (verdict depends on submission shape); LORD++ accounts but does not control. |
 | RC-8 | MEDIUM | `signals/generation/evolve.py:320` | `assert_causal` never runs on a generated genome; causality asserted by docstring. |
 | RC-9 | MEDIUM | `configs/crucible_calibration.gates.yaml:14` | `uplift_min = 0.10` passes 170/170 — never calibrated against its own null; becomes the sole economic leg after U1. |
-| RC-10 | HIGH | `tests/crucible/test_reproduce_p5.py:90`, `test_reproduce_cohort.py:57` | Both end-to-end reproducibility tests are RED: the power guard refuses the synthetic substrate, so no manifest is ever mined. `--force` forces the *dirty* gate, not the *power* gate. |
+| RC-10 | HIGH | `tests/crucible/test_reproduce_p5.py:90`, `test_reproduce_cohort.py:57` | Both end-to-end reproducibility tests are RED: the power guard refuses the synthetic substrate, so no manifest is ever mined. `--force` forces the *dirty* gate, not the *power* gate. **FIXED** — both tests now pass `--force-underpowered`. |
+| RC-11 | HIGH | `configs/crucible_corrected_contract.gates.yaml:33` (`guards.uplift_min`), `signals/generation/evolve.py:_overlay_returns` | **NEW 2026-07-30 (U7 measurement).** The uplift leg's null distribution is SUBSTRATE-dependent by ~200× in its 95th percentile: cross_asset overlay q95 −0.004 (2.7% of nulls clear 0.10) vs taiwan overlay q95 **+0.831** (**37.6%** clear 0.10, null centred at +0.45). A single global floor cannot carry a stated null rate on both, and the value that would make taiwan's overlay leg a 5% test exceeds every real edge ever measured in this project. Base-sleeve COUNT is falsified as the cause (cross_asset restricted to one sleeve moves overlay q95 only to +0.061); cross-section width is ruled out (broadcast slots collapse N-independently). Mechanism unresolved — possibly the combiner re-levering a correlated near-copy of a high-Sharpe base book, i.e. a SEAL of the same shape as F2's `dsr_aug`, in which case no threshold fixes it. Report: `docs/research/crucible_u7_uplift_null_calibration_2026-07-30.md`. |
 
 ---
 

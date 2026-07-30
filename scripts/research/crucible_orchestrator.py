@@ -58,6 +58,7 @@ from finrl_pro_ds.crucible import (  # noqa: E402
 )
 from finrl_pro_ds.crucible.agentic import LibrarySeedProposer, LlmProposer  # noqa: E402
 from finrl_pro_ds.crucible.corrected_contract import CorrectedConfig  # noqa: E402
+from finrl_pro_ds.crucible.search_memory import SearchMemoryConfig  # noqa: E402
 from finrl_pro_ds.crucible.orchestrator.orchestrator import _safe  # noqa: E402
 from finrl_pro_ds.crucible.orchestrator.substrate import (  # noqa: E402
     PowerGuard,
@@ -78,6 +79,7 @@ DEFAULT_LOCKBOX_GATES = ROOT / "configs" / "crucible_lockbox.gates.yaml"
 DEFAULT_COHORT_GATES = ROOT / "configs" / "crucible_cohort.gates.yaml"
 DEFAULT_POWER_GATES = ROOT / "configs" / "crucible_power.gates.yaml"
 DEFAULT_CORRECTED_GATES = ROOT / "configs" / "crucible_corrected_contract.gates.yaml"
+DEFAULT_SEARCH_MEMORY_GATES = ROOT / "configs" / "crucible_search_memory.gates.yaml"
 
 
 def _load_power_guard(path: str, *, force: bool, contract: str = "shipped"):
@@ -336,6 +338,12 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
     # crucible-v6.0 DECISION CONTRACT (operator choice, never the agent's). "shipped" keeps the
     # historical 6-way AND; "corrected" swaps the holdout decision for the audit §5 contract, whose
     # thresholds live in their own file so the frozen funnel gates_hash is untouched (ADR-1).
+    # U4 search memory (own gates file, own hash — the frozen funnel hash is untouched).
+    if args.no_search_memory:
+        sm_cfg = sm_ghash = None
+    else:
+        sm_cfg = SearchMemoryConfig.from_yaml(args.search_memory_config)
+        sm_ghash = gates_hash(args.search_memory_config)
     if args.contract == "corrected":
         corrected_cfg = CorrectedConfig.from_yaml(args.corrected_config)
         corrected_ghash = gates_hash(args.corrected_config)
@@ -351,7 +359,8 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
                     incubation_criterion=incubation_criterion, cohort_cfg=cohort_cfg,
                     cohort_mc_kwargs=cohort_mc, cohort_gates_hash=cohort_ghash,
                     contract=args.contract, corrected_cfg=corrected_cfg,
-                    corrected_gates_hash=corrected_ghash)
+                    corrected_gates_hash=corrected_ghash,
+                    search_memory_cfg=sm_cfg, search_memory_gates_hash=sm_ghash)
     return sub, catalog
 
 
@@ -390,6 +399,13 @@ def _write_recipe(out_dir: Path, substrate_id: str, tick_ts: str, args) -> None:
     argv += ["--contract", args.contract]
     if args.contract == "corrected":
         argv += ["--corrected-config", args.corrected_config]
+    # U4: the search memory decides which rejections are terminal and which parked candidates a tick
+    # re-admits, and a re-admission CHANGES the candidate set a tick scores — so the recipe must pin it
+    # for the same reason the cohort config is pinned.
+    if args.no_search_memory:
+        argv.append("--no-search-memory")
+    else:
+        argv += ["--search-memory-config", args.search_memory_config]
     recipe = {
         "kind": "synthetic_orchestrator",
         "script": "scripts/research/crucible_orchestrator.py",
@@ -533,6 +549,14 @@ def main() -> int:
                     help="--contract corrected only: its decision thresholds YAML (separate file so "
                          "the frozen funnel gates_hash is untouched); its hash is pinned into the "
                          "manifest as corrected_gates_hash.")
+    ap.add_argument("--search-memory-config", default=str(DEFAULT_SEARCH_MEMORY_GATES),
+                    help="U4 search-memory gates YAML: when a holdout rejection is DECISIVE (kills the "
+                         "family) vs UNDERPOWERED (parked, re-admitted once the substrate gains power), "
+                         "plus semantic dedup. Separate file so the frozen funnel gates_hash is "
+                         "untouched; its hash is pinned into the reproduce recipe.")
+    ap.add_argument("--no-search-memory", action="store_true",
+                    help="detach U4 entirely: no rejection classification, no re-admission, exact-hash "
+                         "dedup only (the pre-U4 byte-identical path)")
     ap.add_argument("--no-governance", action="store_true",
                     help="skip the NOW-9 CLEARED->human handoff epilogue (used by reproduce/testing so "
                          "no governance.db / notifications are written)")

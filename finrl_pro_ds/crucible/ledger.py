@@ -6,23 +6,44 @@ columns it could sequentially hill-climb on a fixed, reused holdout, laundering 
 "economic priors". So access is SPLIT (CR-1):
 
   * ``trial_ledger``     — full, append-only, **agent-BLIND**. Scorer + orchestrator read/write.
-  * ``ledger_agent_view``— a SQL VIEW exposing ONLY dedup keys (candidate_hash, candidate_type,
-                           family). **No verdict, no DSR, no OOS delta, no holdout.** Plus the
-                           ``killed_families()`` aggregate so the agent does not rediscover dead
-                           families. **NOTE (S553-cont-131 audit):** this aggregate is presently
-                           ALWAYS empty — no code path writes a killing verdict, so
-                           ``killed_families()`` returns ``[]`` and the moat is wired-but-inert
-                           (see the matching note in ``agentic/llm_proposer.py``). This is the
-                           concrete enforcement of CR-1.
+  * ``ledger_agent_view``— a SQL VIEW exposing ONLY dedup keys (candidate_hash, semantic_hash,
+                           candidate_type, family). **No verdict, no DSR, no OOS delta, no holdout.**
+                           Plus the ``killed_families()`` aggregate so the agent does not rediscover
+                           dead families. This is the concrete enforcement of CR-1.
+
+**U4 (``crucible-v10.0``) — the moat is no longer inert.** Until U4 no code path wrote a killing
+verdict, so ``killed_families()`` returned ``[]`` unconditionally and the proposer prompt always read
+"(none)" (audit RC-5). A rejection now carries a ``rejection_class`` — ``DECISIVE`` (the test could
+resolve the smallest edge the contract would accept and did not) or ``UNDERPOWERED`` (it could not, so
+the negative is uninformative) — computed by :mod:`crucible.search_memory` from the substrate's power
+stamp. ``killed_families()`` counts DECISIVE rejections alongside the legacy ``KILLED_VERDICTS``, and
+``readmissible()`` hands the orchestrator back the parked ones once the substrate has gained real power.
+The three columns this needs (``semantic_hash``, ``rejection_class``, ``implied_mde_at_test``) are all
+NULLABLE and back-filled by migration, and the ``verdict`` vocabulary is UNCHANGED — so every historical
+row, manifest byte and reproduce verdict is preserved (CRU-1).
 
 SQLite backend per repo convention (``scripts/collect_run.py`` etc.); the DB file is git-ignored.
 P0 is the schema + the split; the online-FDR ``fdr_wealth_charged`` column is nullable until P3.
 """
 from __future__ import annotations
 
+import logging
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from .search_memory import (
+    REJECTION_DECISIVE,
+    REJECTION_UNDERPOWERED,
+    is_readmissible,
+    semantic_hash,
+)
+
+if TYPE_CHECKING:
+    from .search_memory import SearchMemoryConfig
+
+log = logging.getLogger("crucible.ledger")
 
 # Verdict vocabulary. Terminal-kill verdicts mark a candidate as dead; a family all of whose members
 # are killed (and none promising) is a "killed family" the agent must not re-propose.
@@ -31,7 +52,11 @@ PROMISING_VERDICTS = frozenset({"PROMISING", "ADD_CANDIDATE"})
 
 # Columns the agent-visible view is allowed to expose. Anything score/holdout-derived is FORBIDDEN
 # here by construction — the VIEW selects exactly these, and a test asserts nothing else leaks.
-_AGENT_VIEW_COLUMNS = ("candidate_hash", "candidate_type", "family")
+# ``semantic_hash`` (U4) is a DEDUP KEY like ``candidate_hash`` — a hash of the commutative-canonical
+# AST. It is computed from the formula TEXT alone and carries no score/verdict information, so adding it
+# does not widen the anti-oracle moat (CRU-2); ``rejection_class`` / ``implied_mde_at_test`` are
+# score-adjacent and stay OUT of the view.
+_AGENT_VIEW_COLUMNS = ("candidate_hash", "semantic_hash", "candidate_type", "family")
 
 # --- upsert monotonicity policy (C7-04) -----------------------------------------------------------
 # Re-recording a candidate by hash must NEVER destroy provenance or downgrade a settled verdict. The
@@ -44,7 +69,22 @@ _AGENT_VIEW_COLUMNS = ("candidate_hash", "candidate_type", "family")
 #   * every other column fills forward — a NULL in the incoming record never clobbers a stored value.
 _SETTLED_VERDICTS = PROMISING_VERDICTS | KILLED_VERDICTS
 _UPSERT_KEEP_FIRST = frozenset({"first_seen_run", "proposal_ts", "spec_json", "economic_rationale"})
-_UPSERT_SCORE = frozenset({"verdict", "dsr", "delta_sr_oos", "marginal_hlz_t", "data_snapshot_hash"})
+# U4: ``rejection_class`` / ``implied_mde_at_test`` are SCORE columns — they are derived from the
+# holdout decision plus the substrate's power stamp, so they freeze with the verdict. Freezing them is
+# what makes a DECISIVE kill terminal and keeps the MDE-at-test honest (a later, deeper tick must not
+# silently rewrite the power a past test actually had).
+_UPSERT_SCORE = frozenset({"verdict", "dsr", "delta_sr_oos", "marginal_hlz_t", "data_snapshot_hash",
+                           "implied_mde_at_test"})
+# ``rejection_class`` needs its OWN rule (not the generic score one): a DECISIVE kill is TERMINAL, so it
+# must survive any later re-record even though the carrying verdict (``LOGGED``) is not in
+# ``_SETTLED_VERDICTS``. Without this a re-scored genome that came back UNDERPOWERED on a different
+# substrate would resurrect a family the funnel had already decisively falsified. ``implied_mde_at_test``
+# deliberately does NOT get this treatment — it tracks the LATEST test's power, which is what
+# power-aware re-admission compares against.
+_UPSERT_REJECTION_SQL = (
+    "rejection_class=CASE "
+    f"WHEN trial_ledger.rejection_class = '{REJECTION_DECISIVE}' THEN '{REJECTION_DECISIVE}' "
+    "ELSE COALESCE(excluded.rejection_class, trial_ledger.rejection_class) END")
 # ``fdr_wealth_charged`` is owned by :meth:`TrialLedger.update_fdr_charge`; a record() carrying None
 # must not wipe an already-charged value — it fills forward like provenance.
 
@@ -68,14 +108,30 @@ CREATE TABLE IF NOT EXISTS trial_ledger (
                                          -- never runs, so this column is a train-split value (S553-cont-131).
     marginal_hlz_t      REAL,            -- SCORE column: agent-blind
     data_snapshot_hash  TEXT,
-    fdr_wealth_charged  REAL             -- online-FDR spend (P3); nullable in P0
+    fdr_wealth_charged  REAL,            -- online-FDR spend (P3); nullable in P0
+    semantic_hash       TEXT,            -- U4 DEDUP KEY: hash of the commutative-canonical AST
+    rejection_class     TEXT,            -- U4 SCORE column: 'DECISIVE' | 'UNDERPOWERED' | NULL
+    implied_mde_at_test REAL             -- U4 SCORE column: substrate MDE when this test ran
 );
 CREATE INDEX IF NOT EXISTS ix_trial_family ON trial_ledger(family);
 CREATE INDEX IF NOT EXISTS ix_trial_verdict ON trial_ledger(verdict);
+"""
 
--- Agent-VISIBLE projection: dedup keys only. No verdict/dsr/delta/holdout columns — CR-1.
-CREATE VIEW IF NOT EXISTS ledger_agent_view AS
-    SELECT candidate_hash, candidate_type, family FROM trial_ledger;
+# Indexes on the U4 columns are created AFTER the ALTER TABLE migration, not inside _SCHEMA: on a pre-U4
+# database the columns do not exist yet when _SCHEMA runs, and `CREATE INDEX IF NOT EXISTS` on a missing
+# column is a hard OperationalError — which would make every historical ledger un-openable.
+_U4_INDEX_SQL = """
+CREATE INDEX IF NOT EXISTS ix_trial_semantic ON trial_ledger(semantic_hash);
+CREATE INDEX IF NOT EXISTS ix_trial_rejection ON trial_ledger(rejection_class);
+"""
+
+# The agent view is created SEPARATELY from _SCHEMA and DROPPED first: `CREATE VIEW IF NOT EXISTS` on an
+# existing DB would silently keep the OLD column list, so a migrated ledger would expose the pre-U4
+# projection while the code believed otherwise. A view carries no data, so dropping it is free.
+_AGENT_VIEW_SQL = f"""
+DROP VIEW IF EXISTS ledger_agent_view;
+CREATE VIEW ledger_agent_view AS
+    SELECT {', '.join(_AGENT_VIEW_COLUMNS)} FROM trial_ledger;
 """
 
 
@@ -99,6 +155,12 @@ class TrialRecord:
     marginal_hlz_t: float | None = None
     data_snapshot_hash: str | None = None
     fdr_wealth_charged: float | None = None
+    # U4. ``semantic_hash`` defaults to None so every existing construction site keeps working; the
+    # ledger derives it from ``formula`` when it is absent, so a caller cannot accidentally write a row
+    # that is invisible to semantic dedup.
+    semantic_hash: str | None = None
+    rejection_class: str | None = None
+    implied_mde_at_test: float | None = None
 
 
 class TrialLedger:
@@ -110,7 +172,22 @@ class TrialLedger:
         self._conn = sqlite3.connect(str(self.db_path))
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_SCHEMA)
+        # U4 migration: CREATE TABLE IF NOT EXISTS never alters an existing table, so a ledger written by
+        # a pre-U4 build needs the three new columns added (same pattern as OrchestratorStore's
+        # ``_ensure_columns``). All three are NULLABLE, so historical rows migrate without back-fill and
+        # keep their exact verdicts. ``semantic_hash`` IS back-filled for rows that carry a formula —
+        # without it, every historical genome would be invisible to semantic dedup and the search would
+        # cheerfully re-derive all 403 of them.
+        have = {r["name"] for r in self._conn.execute("PRAGMA table_info(trial_ledger)")}
+        for col, decl in (("semantic_hash", "TEXT"), ("rejection_class", "TEXT"),
+                          ("implied_mde_at_test", "REAL")):
+            if col not in have:
+                self._conn.execute(f"ALTER TABLE trial_ledger ADD COLUMN {col} {decl}")
+        self._conn.executescript(_U4_INDEX_SQL)
+        self._conn.executescript(_AGENT_VIEW_SQL)
         self._conn.commit()
+        if "semantic_hash" not in have:
+            self._backfill_semantic_hashes()
 
     def close(self) -> None:
         self._conn.close()
@@ -133,15 +210,26 @@ class TrialLedger:
             "candidate_hash", "crucible_version", "family", "candidate_type", "spec_json",
             "formula", "economic_rationale", "first_seen_run", "proposal_ts", "verdict", "dsr",
             "delta_sr_oos", "marginal_hlz_t", "data_snapshot_hash", "fdr_wealth_charged",
+            "semantic_hash", "rejection_class", "implied_mde_at_test",
         ]
         vals = [getattr(rec, c) for c in cols]
+        if rec.semantic_hash is None and rec.formula:
+            # Derive the U4 dedup key here rather than trusting every call site to remember it. An
+            # unparseable formula (should not reach the ledger) leaves it NULL rather than raising —
+            # recording the trial matters more than indexing it.
+            try:
+                vals[cols.index("semantic_hash")] = semantic_hash(rec.formula)
+            except Exception:                                 # noqa: BLE001
+                pass
         placeholders = ", ".join("?" for _ in cols)
         settled = "(" + ", ".join(f"'{v}'" for v in sorted(_SETTLED_VERDICTS)) + ")"
         set_parts: list[str] = []
         for c in cols:
             if c == "candidate_hash":
                 continue
-            if c in _UPSERT_KEEP_FIRST:                       # CR-2 / provenance: first non-null wins
+            if c == "rejection_class":                        # U4: DECISIVE is terminal (see above)
+                set_parts.append(_UPSERT_REJECTION_SQL)
+            elif c in _UPSERT_KEEP_FIRST:                     # CR-2 / provenance: first non-null wins
                 set_parts.append(f"{c}=COALESCE(trial_ledger.{c}, excluded.{c})")
             elif c in _UPSERT_SCORE:                          # frozen once settled, else fill-forward
                 set_parts.append(
@@ -155,6 +243,28 @@ class TrialLedger:
             vals,
         )
         self._conn.commit()
+
+    def _backfill_semantic_hashes(self) -> None:
+        """One-shot U4 migration: compute ``semantic_hash`` for pre-U4 rows that carry a formula. Rows
+        whose formula does not parse are left NULL and counted in the log — they simply stay outside
+        semantic dedup (exact-hash dedup still covers them)."""
+        rows = self._conn.execute(
+            "SELECT candidate_hash, formula FROM trial_ledger "
+            "WHERE semantic_hash IS NULL AND formula IS NOT NULL").fetchall()
+        done = bad = 0
+        for r in rows:
+            try:
+                sh = semantic_hash(r["formula"])
+            except Exception:                                 # noqa: BLE001 — unparseable legacy row
+                bad += 1
+                continue
+            self._conn.execute("UPDATE trial_ledger SET semantic_hash = ? WHERE candidate_hash = ?",
+                               (sh, r["candidate_hash"]))
+            done += 1
+        self._conn.commit()
+        if rows:
+            log.info("U4 ledger migration: back-filled semantic_hash for %d/%d rows (%d unparseable)",
+                     done, len(rows), bad)
 
     def count(self) -> int:
         """Total distinct candidates in the ledger (the cross-run file-drawer N)."""
@@ -183,28 +293,80 @@ class TrialLedger:
         ).fetchone()
         return row is not None
 
+    def is_semantic_duplicate(self, formula: str) -> bool:
+        """U4: True if a genome SEMANTICALLY equal to ``formula`` (same commutative-canonical AST) was
+        already scored, even if its exact canonical string differs. ``is_duplicate`` remains the exact
+        check; this is the wider one."""
+        try:
+            sh = semantic_hash(formula)
+        except Exception:                                     # noqa: BLE001 — unparseable ⇒ not a dup
+            return False
+        return self._conn.execute(
+            "SELECT 1 FROM trial_ledger WHERE semantic_hash = ? LIMIT 1", (sh,)).fetchone() is not None
+
     def killed_families(self) -> list[str]:
-        """Families that are dead (≥1 terminal-kill verdict, none ever PROMISING) — the ~20 NO-GOs
-        the agent must not rediscover (spec §6). Family NAMES only; no scores leak."""
+        """Families that are dead — the NO-GOs the agent must not rediscover (spec §6). Family NAMES
+        only; no scores leak.
+
+        A family is dead when it has ≥1 terminal rejection and NEVER a PROMISING member. Terminal means
+        either a legacy ``KILLED_VERDICTS`` verdict (kept for compatibility; the funnel never wrote one)
+        or, since U4, a ``rejection_class = 'DECISIVE'`` row — a rejection the substrate had the power to
+        make meaningful (:mod:`crucible.search_memory`). An ``UNDERPOWERED`` rejection is deliberately
+        NOT terminal: at Crucible's measured MDE that is every rejection, and killing families off
+        underpowered tests would manufacture NO-GOs out of low power."""
         killed = ", ".join("?" for _ in KILLED_VERDICTS)
         promising = ", ".join("?" for _ in PROMISING_VERDICTS)
         rows = self._conn.execute(
             f"SELECT DISTINCT family FROM trial_ledger "
-            f"WHERE family IS NOT NULL AND verdict IN ({killed}) "
+            f"WHERE family IS NOT NULL AND (verdict IN ({killed}) OR rejection_class = ?) "
             f"AND family NOT IN (SELECT family FROM trial_ledger WHERE verdict IN ({promising}))",
-            (*KILLED_VERDICTS, *PROMISING_VERDICTS),
+            (*KILLED_VERDICTS, REJECTION_DECISIVE, *PROMISING_VERDICTS),
         ).fetchall()
         return sorted(r[0] for r in rows)
 
+    def readmissible(self, *, current_mde: float, cfg: "SearchMemoryConfig",
+                     limit: int = 32) -> list[dict]:
+        """U4 power-aware re-admission: parked (``UNDERPOWERED``) candidates whose original test ran at
+        a materially WORSE MDE than the substrate now has, so re-testing them can produce information
+        the first test could not (:func:`search_memory.is_readmissible`).
+
+        Returned rows carry ``formula`` / ``family`` / ``candidate_type`` / ``spec_json`` — enough for the
+        ORCHESTRATOR to re-inject them as seeds. This is a SCORER-side read (the orchestrator is
+        agent-blind by design), deliberately NOT surfaced through ``agent_view``: exposing "this exact
+        candidate is eligible again" would tell the proposer, at candidate granularity, that the genome
+        was not decisively killed — a score-derived bit, and precisely the widening CRU-2 forbids.
+
+        Ordered oldest-MDE-first (the most badly-underpowered original tests, i.e. the ones with the most
+        to gain) then by hash for determinism, and capped at ``limit`` so re-admissions cannot crowd the
+        per-tick candidate budget (CR-7)."""
+        rows = self._conn.execute(
+            "SELECT candidate_hash, semantic_hash, family, candidate_type, formula, spec_json, "
+            "       economic_rationale, proposal_ts, rejection_class, implied_mde_at_test "
+            "FROM trial_ledger WHERE rejection_class = ? AND formula IS NOT NULL "
+            "ORDER BY implied_mde_at_test DESC, candidate_hash ASC",
+            (REJECTION_UNDERPOWERED,)).fetchall()
+        cap = max(0, int(limit))
+        out: list[dict] = []
+        for r in rows:
+            if len(out) >= cap:                               # checked BEFORE appending, so limit=0 → []
+                break
+            if is_readmissible(rejection_class=r["rejection_class"],
+                               mde_at_test=r["implied_mde_at_test"],
+                               current_mde=current_mde, cfg=cfg):
+                out.append(dict(r))
+        return out
+
     def agent_view(self) -> dict:
-        """The complete agent-VISIBLE projection (CR-1): dedup rows (candidate_hash / type / family)
-        + the killed-family list. Contains NO verdict / DSR / OOS-delta / holdout field."""
+        """The complete agent-VISIBLE projection (CR-1): dedup rows (candidate_hash / semantic_hash /
+        type / family) + the killed-family list. Contains NO verdict / DSR / OOS-delta / holdout /
+        rejection-class field."""
         rows = self._conn.execute(
             f"SELECT {', '.join(_AGENT_VIEW_COLUMNS)} FROM ledger_agent_view"
         ).fetchall()
         return {
             "candidates": [dict(r) for r in rows],
             "candidate_hashes": sorted(r["candidate_hash"] for r in rows),
+            "semantic_hashes": sorted({r["semantic_hash"] for r in rows if r["semantic_hash"]}),
             "killed_families": self.killed_families(),
         }
 

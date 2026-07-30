@@ -89,6 +89,10 @@ class ProposalContext:
         Dead families (spec §6) — a proposal in one of these is dropped before it costs compute.
     existing_candidate_hashes : frozenset[str]
         Formula content-hashes already in the ledger — dedup before scoring (CR-1 guardrail).
+    existing_semantic_hashes : frozenset[str]
+        U4: the same dedup set keyed on the COMMUTATIVE-CANONICAL AST, so a commuted re-derivation
+        (``add(a,b)`` vs ``add(b,a)``) is recognised as the same hypothesis instead of being re-scored
+        and re-proposed forever. Also a hash of the formula text only — no score enters (CR-1).
     asset_classes : tuple[str, ...]
         Data domains registered in the catalog (informational; e.g. ``macro``, ``positioning``).
     max_proposals : int
@@ -115,6 +119,7 @@ class ProposalContext:
     available_terminals: tuple[str, ...] = ()
     killed_families: tuple[str, ...] = ()
     existing_candidate_hashes: frozenset[str] = frozenset()
+    existing_semantic_hashes: frozenset[str] = frozenset()
     asset_classes: tuple[str, ...] = ()
     max_proposals: int = 32
     panel_n: int = 0

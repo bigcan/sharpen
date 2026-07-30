@@ -41,6 +41,7 @@ from .fdr import OnlineFDR
 if TYPE_CHECKING:
     from ...signals.generation.base_sleeves import SleeveComponents
     from ..corrected_contract import CorrectedConfig
+    from ..search_memory import SearchMemoryConfig
 
 
 @dataclass(frozen=True, slots=True)
@@ -336,6 +337,16 @@ class Substrate:
     contract: str = "shipped"
     corrected_cfg: "CorrectedConfig | None" = None
     corrected_gates_hash: str | None = None
+    # U4 SEARCH MEMORY (crucible-v10.0). Classifies each holdout rejection as DECISIVE (terminal — the
+    # family enters killed_families and the proposer stops re-deriving it) or UNDERPOWERED (parked,
+    # re-admitted once the substrate gains real power). Thresholds live in their own file
+    # (configs/crucible_search_memory.gates.yaml), whose hash is pinned into the tick alongside the other
+    # parallel gates. None ⇒ no classification, byte-identical to pre-U4.
+    search_memory_cfg: "SearchMemoryConfig | None" = None
+    search_memory_gates_hash: str | None = None
+    # Cap on how many PARKED candidates a single tick may re-admit (CR-7: re-admissions consume the same
+    # per-tick candidate budget as fresh hypotheses, so they must not be able to starve discovery).
+    max_readmissions: int = 8
 
     def __post_init__(self) -> None:
         if self.lockbox is not None and self.incubation_criterion is None:
