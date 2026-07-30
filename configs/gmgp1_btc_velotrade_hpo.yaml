@@ -32,15 +32,18 @@
 # augment_obs: false — live_obs_builder.py hard-codes private_dim=5.
 
 data:
-  file_path: "data/bitfinex/btc_usdt_perp_2025_1min.parquet"
+  # S513 clean re-baseline (2026-07-19): refreshed Bitfinex perp through 2026-07-18,
+  # rolled to a recent ~23mo train window (decision_calendar_anchored_training_window);
+  # test now lands on the most recent quarter. Prior 2025-only 8mo window was pre-X2-fix.
+  file_path: "data/bitfinex/btc_usdt_perp_2024_2026_1min.parquet"
   ticker: "BTC"
   handler_type: "multiscale"
-  train_start_date: "2025-01-06"
-  train_end_date: "2025-08-31"
-  val_start_date: "2025-09-01"
-  val_end_date: "2025-10-31"
-  test_start_date: "2025-11-01"
-  test_end_date: "2025-12-31"
+  train_start_date: "2024-05-06"
+  train_end_date: "2026-03-31"
+  val_start_date: "2026-04-01"
+  val_end_date: "2026-05-31"
+  test_start_date: "2026-06-01"
+  test_end_date: "2026-07-15"
 
 features:
   scales: [15, 60, 240]              # 15-min decision, 1h trend, 4h regime
