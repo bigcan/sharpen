@@ -461,6 +461,78 @@ What this does NOT fix: LORD++ still accounts for cross-run multiplicity without
 (the corrected contract's ``lord_pass`` binds on the miner, which the power guard still refuses), and
 the dominating constraint remains BREADTH — N=8 effective on the only per-name substrate.
 
+`crucible-v10.0` is a **MAJOR** bump and the one that CLOSES the 2026-07-29 audit roadmap: the search
+gains a MEMORY (U4 / RC-5) and Tier-0 causality becomes ENFORCED on generated genomes (U6 / RC-8). It
+ships alongside the U7 calibration, which changed no threshold — see below.
+
+**U4 — the anti-oracle moat's negative feedback was wired to nothing.** ``killed_families()`` selects
+rows whose ``verdict`` is in ``KILLED_VERDICTS``, and no code path in the funnel ever wrote one: the loop
+emits ``PROMISING`` / ``LOGGED`` / ``SCORED_NOT_SELECTED`` only. So for the system's entire lifetime the
+proposer prompt read "killed families: (none)" while 403 trials went past, and the search had no way to
+learn from a failure. The naive repair (write ``NO_GO`` on any holdout rejection) would have been WORSE
+than the bug: at a measured implied MDE ≈ 1.4 ΔSR against an economic floor of 0.10, a rejection carries
+no information about the edge we care about, so burning a family on one is the file-drawer error running
+BACKWARDS. A rejection is therefore CLASSIFIED (``crucible/search_memory.py``):
+
+  * ``DECISIVE`` — ``implied_mde <= decisive_mde_multiple × economic_floor``: the test could resolve the
+    smallest edge the ACTIVE contract would accept and the answer was no. Terminal; the family dies.
+  * ``UNDERPOWERED`` — it could not. Parked with the MDE it was tested at, and RE-ADMITTED by the
+    orchestrator once the substrate's MDE improves by ``readmit_min_mde_ratio`` (the audit's
+    "power-aware re-admission"). Re-admissions are capped (CR-7) and keep their ORIGINAL
+    ``proposal_ts``, so a re-test cannot masquerade as a fresh pre-registration or reset the lockbox clock.
+
+Dedup also stops being exact-string: ``semantic_hash`` canonicalizes commutative operator order, so
+``add(a,b)`` and ``add(b,a)`` are one hypothesis. The audit's alternative (IC-correlation to an
+already-scored genome) was deliberately NOT built — an IC is score-derived, and dedup keys are the one
+thing the agent may read, so routing it into ``ledger_agent_view`` would widen the anti-oracle moat that
+CRU-2 forbids. AST canonicalization is structural and leaks nothing.
+
+**U6 — Tier-0 causality was asserted by docstring.** ``dsl_signal`` claims a generated genome is
+"causal-by-construction and re-verified per candidate by the Tier-0 truncation tripwire"; ``assert_causal``
+was never called on a genome anywhere in the search. ``evolve`` now truncation-probes every DISTINCT
+genome BEFORE fitness and CULLS a leaky one, so a look-ahead operator can no longer reach the deflation,
+the DSR dispersion pool, the PBO bank or a verdict. Guarded by a leaky-``delay`` tripwire test that fails
+if the probe is removed.
+
+MAJOR, not MINOR, and for one specific reason: semantic dedup and re-admission change WHICH hypotheses a
+tick tests. That is a decision-layer change even though no gate value moved. **CRU-1 verdict-preservation
+IS claimed for the existing record and was VERIFIED, not assumed:** (a) semantic dedup drops NOTHING from
+the offline ``LibrarySeedProposer`` bank (11 proposals → 11 distinct exact hashes → 11 distinct semantic
+hashes, measured); (b) the U6 probe passes on every shipped DSL operator, so the search is byte-identical
+— same ``gen_n_total``, same hall-of-fame order, same fitness values (asserted by test); (c) the three new
+ledger columns are NULLABLE and the ``verdict`` vocabulary is untouched, so every historical row keeps its
+exact verdict, and the manifest is unchanged (``rejection_class`` lives in the ledger, not the manifest).
+A pre-U4 ledger is migrated by ``ALTER TABLE`` with ``semantic_hash`` back-filled — without the back-fill
+all 403 historical genomes would be invisible to semantic dedup and the search would re-derive them.
+
+The frozen funnel moat ``519158fa1450`` is UNCHANGED, as are ``22a18172be1a`` (Taiwan) and
+``0ccf6dd584f0`` (small-cap probe). The U4 knobs live in their own
+``configs/crucible_search_memory.gates.yaml`` per the ADR-1 separation.
+
+**One provenance hash DID move, and it is a comment-only change:**
+``crucible_corrected_contract.gates.yaml`` went ``2f4639a48415`` → ``e60079a1d94b`` because the U7
+calibration provenance was written into it. ``uplift_min`` is STILL 0.10 — no threshold changed. This is
+``gates_hash``'s documented behaviour (it hashes raw bytes precisely so any edit is visible); it is
+recorded here so a future reader does not misread a moved hash as a moved goal post. No committed
+artifact or test pinned the old value (checked), and no corrected-contract run has ever mined.
+
+**U7 — ``uplift_min`` calibrated, value CONFIRMED (report:
+``docs/research/crucible_u7_uplift_null_calibration_2026-07-30.md``).** RC-9's premise was wrong in
+direction: the "170/170 pass" was a TRAIN-split ledger statistic from a search that maximizes exactly
+that delta, and on the holdout the leg rejects ~97% of null draws. Measured null q95 on the real
+cross_asset base book (cross_sectional, n=1200) is 0.0799 with bootstrap CI95 [0.0521, 0.1177] — 0.10 is
+INSIDE it, so the calibrated and shipped floors are indistinguishable. The leg is also not the FPR
+control: ``t_pass`` = 0.000 and ``lord_pass`` ≤ 0.018 under every null, joint null pass 0/2600 and
+0/2100. **New finding RC-11 (HIGH, OPEN):** the uplift null is substrate-dependent by ~200× — on Taiwan
+the OVERLAY path's null q95 is +0.831 and 37.6% of pure-noise overlays clear 0.10, so that path is
+UN-CALIBRATED. Base-sleeve count is falsified as the cause (isolation run); the mechanism is unresolved
+and may be a SEAL rather than a threshold error, the same shape as the F2 ``dsr_aug`` finding.
+
+What v10.0 does NOT change: nothing mines yet. The power guard still refuses every real substrate, so
+every rejection classifies UNDERPOWERED and ``killed_families()`` is still empty — now for a MEASURED
+reason the tick log states, rather than a wiring gap. That is audit U8's problem (breadth and forward
+accumulation), and it is the binding constraint on this system.
+
 Semantic bump rules (spec §5): MAJOR = changes the statistical verdict semantics; MINOR = new data
 connectors / agent capabilities / DSL operators that extend without changing existing verdicts;
 PATCH = bug fixes / reporting / non-semantic.
@@ -518,7 +590,23 @@ from pathlib import Path
 # The sole recorded PROMISING (tw_smallcap_mom_rev) is unaffected: 3 pre-registered == its batch of 3.
 # NO gate byte moved; the require_declared policy lives in configs/crucible_multiplicity.gates.yaml and
 # ships false (undeclared batches are caveated, not demoted).
-CRUCIBLE_VERSION = "crucible-v9.0"
+# v10.0 = the search gets a MEMORY (U4/RC-5) + Tier-0 causality is ENFORCED on genomes (U6/RC-8) — the
+# bump that closes the 2026-07-29 audit roadmap. killed_families() was structurally empty (no code path
+# ever wrote a killing verdict), so the proposer never learned from a failure; rejections are now
+# classified DECISIVE (the substrate could resolve the smallest edge the contract accepts => terminal,
+# family dies) or UNDERPOWERED (parked, re-admitted when the substrate's MDE materially improves), and
+# dedup canonicalizes commutative order. evolve() now truncation-probes every distinct genome before
+# fitness and culls a leaky one — previously causality was asserted only in a docstring. MAJOR because
+# dedup + re-admission change WHICH hypotheses a tick tests; CRU-1 verdict-preservation is claimed and
+# VERIFIED (semantic dedup drops nothing from the offline seed bank; the U6 probe passes on every shipped
+# operator => byte-identical search; new ledger columns nullable, verdict vocabulary untouched, manifest
+# unchanged). Frozen moats 519158fa1450 / 22a18172be1a / 0ccf6dd584f0 UNCHANGED; U4 knobs live in
+# configs/crucible_search_memory.gates.yaml. Ships with the U7 calibration, which CONFIRMED uplift_min at
+# 0.10 (no threshold change; the corrected-contract file's hash moved on a COMMENT only, 2f4639a48415 ->
+# e60079a1d94b) and surfaced RC-11 (the uplift null is substrate-dependent by ~200x; the Taiwan overlay
+# path is un-calibrated). Still nothing mines: every rejection classifies UNDERPOWERED because the power
+# guard refuses every real substrate — audit U8, the binding constraint.
+CRUCIBLE_VERSION = "crucible-v10.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
