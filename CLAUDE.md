@@ -4,15 +4,11 @@ Detailed reference: `docs/claude_md_reference.md` (project map, env contracts, s
 
 ## Project Brief
 
-RL Quant Strategy Development Platform + **Crucible** systematic alpha-mining platform (`crucible-v2.8`, `finrl_pro_ds/crucible/`). Active agent: **SAC only** — IQN/BDQ/PPO code present but none profitable yet; propose alternatives with evidence.
+RL Quant Strategy Development Platform + **Crucible** systematic alpha-mining platform (`crucible-v8.1`, `finrl_pro_ds/crucible/`). Active agent: **SAC only** — IQN/BDQ/PPO code present but none profitable yet; propose alternatives with evidence.
 **Ultimate goal:** sustained risk-adjusted alpha net of fees from capacity-constrained niches a small operator can actually hold — **not** an institution-shaped portfolio of premia, and not RL-first: RL only earns a slot behind a beat-linear-OOS gate. Short-term milestone: pass FTMO + Velotrade prop-firm challenges as proof-of-capital.
 Workstreams: GMGP1 SAC Gold 15m (RL, paper). Crucible alpha-mining (agentic discovery funnel, continuous). Cross-asset TSMOM (linear, sole live edge, gated at paper). Sync-1H / Funding-Arb / Market Making are retired/shelved (see Env table).
 Prediction-market research (Polymarket) spun off 2026-07-05 to its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research) — no longer present here.
 State: `.agent/memory/core.md` (loaded at boot). R&D log: `randd_log.md`.
-
-## Stack
-
-Python 3.11+ · PyTorch 2.8+ · Gymnasium · Optuna · WandB · Parquet · Prometheus · Grafana · Docker · Ruff · Mypy · Pytest
 
 ## Commands
 
@@ -41,16 +37,8 @@ python scripts/auto_collect_checkpoints.py [--hours N | --run_id ID | --all_inst
 **WandB:** entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Helpers at `.agents/skills/wandb-primary/scripts/wandb_helpers.py` (tracked; also mirrored at `skills/wandb-primary/`. Do **not** point this at `.claude/skills/` — `.claude/` is gitignored, so that path exists only in the main checkout and breaks in worktrees).
 **Always pass `metric_keys=` explicitly.** HPO: `_debug/eval_profit_factor`, `_research/sharpe_minute`. Backtest: `Profit_Factor_Daily`, `Sharpe_Ratio`, `Sortino_Ratio`, `Total_Return`, `Max_Drawdown`.
 
-## Project Layout (top-level)
-
-```
-finrl_pro_ds/{agents,envs,crypto,futures,cfd,data,training,analytics}/
-finrl_pro_ds/{signals,crucible}/   # alpha-mining: DSL/eval funnel + Crucible agentic discovery (crucible-v2.8)
-scripts/  configs/  tests/  docs/  docker/live/
-```
-
 **Boundary:** Only modify `finrl_pro_ds/`, `scripts/`, `configs/`, `tests/`, `docs/`. Never touch `FinRLPodracer/` or `Podracer/`.
-Full tree + per-file notes: `docs/claude_md_reference.md`.
+Project tree, stack versions, and per-file notes: `docs/claude_md_reference.md` (read on demand — do not restate here).
 
 ## Envs (summary)
 
@@ -66,7 +54,7 @@ Full tree + per-file notes: `docs/claude_md_reference.md`.
 
 ## Alpha-Mining Platform (Crucible)
 
-`finrl_pro_ds/crucible/` (`crucible-v2.8`) — continuous agentic alpha-discovery funnel sitting on top of `finrl_pro_ds/signals/` (DSL + T0-T5 deflated evaluation funnel). Falsification-first: ACQUIRE (free data connectors: FRED, CFTC COT, SEC EDGAR, GDELT, Stooq, TWSE, TAIFEX) → HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) → MINE → DEFLATE → COMBINE + forward-incubate in a lockbox before any human Tier-2 audit. P0–P5 roadmap shipped; zero PROMISING survivors have cleared the lockbox yet.
+`finrl_pro_ds/crucible/` (`crucible-v8.1`) — continuous agentic alpha-discovery funnel sitting on top of `finrl_pro_ds/signals/` (DSL + T0-T5 deflated evaluation funnel). Falsification-first: ACQUIRE (free data connectors; see reference doc) → HYPOTHESIZE (agent proposes pre-registered specs, blind to verdicts) → MINE → DEFLATE → COMBINE + forward-incubate in a lockbox before any human Tier-2 audit. P0–P5 roadmap shipped; zero PROMISING survivors have cleared the lockbox yet.
 
 Run: `python scripts/research/crucible_orchestrator.py --mode {synthetic|real} --nights N` (continuous nightly ticks) or `crucible_hypothesis_loop.py` (single manual cycle). Gates: `configs/crucible_cohort.gates.yaml`, `configs/crucible_lockbox.gates.yaml` (never hardcode thresholds — same rule as training gates). Design spec: `docs/research/crucible_agentic_discovery_spec.md`. Full architecture + CLI reference: `docs/claude_md_reference.md`.
 
