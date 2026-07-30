@@ -350,10 +350,54 @@ well-formed, entirely NaN matrix, not an error. So `taiwan_per_name_coverage` is
 orchestrator calls and logs, and it **skips per-name slots entirely** rather than shipping empty
 matrices if coverage is zero for every field.
 
-Two limits worth stating: the Taiwan panel is **N=10**, which is a thin cross-section for a rank-L/S
-book (`ls_min_names` is 6, and the expert review already flagged that WQ101 starves at N=18); and this
-was verified by test, not by a live run — no cached Taiwan panel exists locally, so the FinMind fetch
-has not been exercised end-to-end.
+### U3a validated on a real offline tick (2026-07-30)
+
+The earlier caveat "verified by test, not by a live run" is discharged. A cached Taiwan panel **does**
+exist (`data/raw/taiwan_panel/`, 10 assets / 4044 rows / 2010-01-04→2026-07-06, status PASS) and so
+does a T86 accumulation store (4408 day-keys, 2014-06-19→2026-07-13) — I had looked under `results/`
+and wrongly concluded there was no cache. FinMind's token being expired turned out not to matter: it
+feeds only the OHLCV panel, and T86/TAIFEX are keyless. One tick ran with no network at all.
+
+Everything the tests could not reach is now confirmed on real data:
+
+| check | result |
+|---|---|
+| ticker alignment (the silent-failure surface) | **10/10 every field** |
+| four `(T,N)` matrices built | 10/10 tickers populated, **21,632 / 40,440 cells finite** |
+| per-column `assert_asof_join_causal` on real T86 release stamps | **passed** (it raises otherwise) |
+| Tier-0 truncation-equivalence on the real panel | **PASS** |
+| cross-sectional registry reach | all 4 terminals drawable; `rank()` dispersion **0.277** (non-degenerate) |
+| power stamp | `T=4044, holdout=1011, MDE 1.83, mode grid:`**`cross_sectional`** → REFUSE |
+
+That last row is v7.0 doing its job on live data: the stamp selected the **cross-sectional** curve as the
+binding one, exactly the case that used to be judged by the overlay curve and under-stated.
+
+**New finding — the effective cross-section is N=8, not N=10.** The two bond ETFs, `00679B` (US
+Treasury 20y) and `00751B` (corporate bond), have **zero** T86 coverage on all four fields — T86 is the
+three-institutional-investors report for TWSE *equities*. The data-quality gate caught it and warned
+eight times (2 tickers × 4 fields) rather than accepting silently, and the columns are correctly NaN
+rather than 0.0. Per-ticker finite fraction on `foreign_net`:
+
+```
+0050 72.5%   006208 72.5%   0056 72.5%   0055 72.5%
+00878 56.0%  00891 56.0%    00635U 67.7% 00642U 65.2%
+00679B 0.0%  00751B 0.0%    <- no T86 coverage at all
+```
+
+(The 56–72.5% ceiling is honest: the panel starts 2010 while T86 starts 2014-06-19, and the 2020/2021
+listings have no history before they existed. Note the loader serves the whole cached parquet — `start`
+drives the fetch, not a trim — so the pre-2014 NaN region is real and present.)
+
+**This makes the thin-cross-section limit worse than first stated, and it is now the binding constraint
+on the channel U3 opened.** `ls_min_names` is 6, so N=8 barely clears the floor; the V3 MDE surface's
+smallest *measured* breadth was N=12; and the expert review already flagged WQ101 starving at N=18. A
+rank-L/S book over 8 names is not a serious cross-section. Widening the panel is therefore no longer a
+nice-to-have — it is the precondition for U3 buying anything.
+
+Also observed, and **not** attributable to this change: only **3** of the 40 broadcast terminals were
+built on this tick (the quality gate rejected the rest), against the "32/46 bridged" recorded at v2.8.
+`bridge_altdata_feature_slots` is untouched by U3a, so this is a pre-existing broadcast-path question
+worth its own look, not a regression.
 
 *Correction to this section's original framing:* it claimed the move buys `T×N` observations and that
 this is "the only lever that materially changes MDE". The V3 measurement says otherwise — MDE in ΔSR
