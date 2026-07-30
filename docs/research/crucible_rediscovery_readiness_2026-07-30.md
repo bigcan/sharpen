@@ -52,8 +52,12 @@ Verified by running a real-mode tick, not inferred:
 python scripts/research/crucible_orchestrator.py --mode real --nights 1 --force \
   --start 2007-01-01 --start-ts 2026-07-30T00:00:00 --out <tmp> --no-altdata-slots --max-proposals 6
 ```
-→ real cross_asset panel builds (`T=4652, holdout=1163`) → `UNDERPOWERED: implied MDE inf > ceiling 0.50
-(unmeasured_empty)` → `mined=False, 0 PROMISING`.
+Before the curves were measured: `UNDERPOWERED: implied MDE inf > ceiling 0.50 (unmeasured_empty)`.
+**After** (the state as of this document): real cross_asset panel builds (`T=4652, holdout=1163`) →
+`UNDERPOWERED: implied MDE 1.68 ΔSR > ceiling 0.50 (interpolated:cross_sectional)` → `mined=False,
+0 PROMISING`, with the tick log's power columns populated (`implied_mde_delta_sr=1.6827`,
+`power_interp_mode=interpolated:cross_sectional`). That is the difference blocker 1 made: the refusal is
+now a **measured** statement about this substrate rather than "power was never measured here".
 
 ### 0. `generation.enabled: false` — and `--force` is the ONLY correct way past it
 
