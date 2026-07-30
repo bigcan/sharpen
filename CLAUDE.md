@@ -5,7 +5,7 @@ Detailed reference: `docs/claude_md_reference.md` (project map, env contracts, s
 ## Project Brief
 
 RL Quant Strategy Development Platform + **Crucible** systematic alpha-mining platform (`crucible-v2.8`, `finrl_pro_ds/crucible/`). Active agent: **SAC only** — IQN/BDQ/PPO code present but none profitable yet; propose alternatives with evidence.
-**Ultimate goal:** a diversified portfolio of live-deployed RL strategies — uncorrelated across asset classes and timeframes — each generating sustained risk-adjusted alpha net of fees. Short-term milestone: pass FTMO + Velotrade prop-firm challenges as proof-of-capital.
+**Ultimate goal:** sustained risk-adjusted alpha net of fees from capacity-constrained niches a small operator can actually hold — **not** an institution-shaped portfolio of premia, and not RL-first: RL only earns a slot behind a beat-linear-OOS gate. Short-term milestone: pass FTMO + Velotrade prop-firm challenges as proof-of-capital.
 Workstreams: GMGP1 SAC Gold 15m (RL, paper). Crucible alpha-mining (agentic discovery funnel, continuous). Cross-asset TSMOM (linear, sole live edge, gated at paper). Sync-1H / Funding-Arb / Market Making are retired/shelved (see Env table).
 Prediction-market research (Polymarket) spun off 2026-07-05 to its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research) — no longer present here.
 State: `.agent/memory/core.md` (loaded at boot). R&D log: `randd_log.md`.
@@ -38,7 +38,7 @@ python scripts/auto_collect_checkpoints.py [--hours N | --run_id ID | --all_inst
 ./scripts/manage_strategies.sh {build|up|ps|logs} <target>
 ```
 
-**WandB:** entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Helpers at `.agents/skills/wandb-primary/scripts/wandb_helpers.py`.
+**WandB:** entity=`bigcan-chiwin-technology`, project=`FinRL-Pro-DS`. Helpers at `.agents/skills/wandb-primary/scripts/wandb_helpers.py` (tracked; also mirrored at `skills/wandb-primary/`. Do **not** point this at `.claude/skills/` — `.claude/` is gitignored, so that path exists only in the main checkout and breaks in worktrees).
 **Always pass `metric_keys=` explicitly.** HPO: `_debug/eval_profit_factor`, `_research/sharpe_minute`. Backtest: `Profit_Factor_Daily`, `Sharpe_Ratio`, `Sortino_Ratio`, `Total_Return`, `Max_Drawdown`.
 
 ## Project Layout (top-level)
@@ -109,6 +109,15 @@ Configs vary by pipeline. **Do NOT invent keys — read a reference config first
 - All `Linear` hidden dims must be **multiples of 8** (Tensor Core alignment)
 - Use `logging` or `MLOpsLogger` — never raw `print()` in production code
 
+## Working Style
+
+- **Response length:** keep responses focused and brief. Keep disclaimers and caveats short and spend most of the response on the main answer. When asked to explain something, give a high-level summary unless an in-depth one is requested.
+- **Written deliverables:** match the length of files you write — `randd_log.md` entries, memory files, audit and run reports, Crucible cards — to what the task needs. Cover the substance; do not pad with filler sections, redundant summaries, or boilerplate.
+- **Scope:** deliver what was asked, at the scope intended. Make routine judgment calls yourself; check in only when different readings would lead to materially different work. If the request looks mistaken, say so in a sentence and continue with it as asked rather than quietly narrowing, widening, or transforming it. Finish the whole task and report completion only when it is actually done.
+- **Verification:** the deterministic gates in this file (`validate_config.py`, `clean_ohlcv.py`, pytest, ruff, PF-XCHECK) and the stakes-triggered **Tier-2 deep lifecycle audit** are mandatory — they are tool executions and stakes gates, not self-review. Do **not** stack extra ad-hoc self-review passes or subagent verifiers on top of them; that is redundant and costs tokens without improving results.
+- **Subagents:** delegate only for large, genuinely independent, parallelizable work such as a wide multi-file investigation or a Tier-2 finder/skeptic pillar. Never delegate what you can finish in a handful of tool calls, and never spawn a subagent merely to double-check your own work. Keep spawn counts low.
+- **Corrections:** correct an earlier statement only when the error would change the code, conclusions, or decisions. State it plainly and continue; for slips that change nothing, fix it and move on.
+
 ## Anti-Patterns (NEVER DO)
 
 - Never import from `FinRLPodracer/` or `Podracer/`
@@ -169,7 +178,9 @@ Live trading containers run on remote desktop (`<TAILSCALE_HOST>`) via Docker co
 Observability (Prometheus :9090 / Grafana :3000 / Watchdog Telegram, per-strategy metrics 9101-9107): see reference.
 **PRISM: falsified (S413+), `prism.enabled: false` in all configs.** Containers still deployed; see reference for archive.
 
-## Gotchas (last verified 2026-04-16)
+## Gotchas (script paths verified 2026-07-30 · operational items last verified 2026-04-16)
+
+Operational items below are unverified since April. **Re-test a blocker before obeying it** — a stale "X doesn't work" costs more than the re-test.
 
 - HPO uses NopPruner, no early-kill, 500K steps/trial
 - RTX 5090 + CUDA 13.0: run `scripts/patch_torch_compile.py` on fresh deployments
@@ -180,3 +191,7 @@ Observability (Prometheus :9090 / Grafana :3000 / Watchdog Telegram, per-strateg
 - Docker Desktop Windows: file bind mounts fail silently — use baked Dockerfiles (COPY at build)
 - Prometheus/Grafana configs: edit source in `docker/live/` then rebuild (`--profile monitoring build`)
 - IB strategies share `ibgateway` network namespace — Prometheus scrapes via `ibgateway:<port>`
+
+<tone_preference>
+Keep outputs reasonably concise. Don't pad written deliverables.
+</tone_preference>
