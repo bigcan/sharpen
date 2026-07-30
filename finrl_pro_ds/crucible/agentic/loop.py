@@ -152,6 +152,7 @@ def run_hypothesis_loop(
     corrected_gates_hash: str | None = None,
     lord_level: float | None = None,
     search_memory_cfg: "SearchMemoryConfig | None" = None,
+    search_memory_gates_hash: str | None = None,
     substrate_mde: float | None = None,
 ) -> HypothesisLoopResult:
     """Run one manual pass. ``evolve_kwargs`` is the runner block from ``load_generation_config``
@@ -301,7 +302,10 @@ def run_hypothesis_loop(
         # v6.0: pin the verdict FUNCTION. `corrected_gates_hash` is only meaningful under the corrected
         # contract, so a shipped run leaves it None and its manifest differs from a corrected run's.
         contract=contract,
-        corrected_gates_hash=(corrected_gates_hash if contract == CONTRACT_CORRECTED else None))
+        corrected_gates_hash=(corrected_gates_hash if contract == CONTRACT_CORRECTED else None),
+        # U4: pin the search-memory gates ONLY when the search memory is actually active, so a run with
+        # U4 detached keeps its pre-v10.0 manifest bytes (same rule as corrected_gates_hash above).
+        search_memory_gates_hash=(search_memory_gates_hash if search_memory_cfg is not None else None))
 
     return HypothesisLoopResult(
         specs=specs, reports=reports, cards=cards, manifest=manifest,

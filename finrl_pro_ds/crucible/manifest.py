@@ -60,6 +60,11 @@ class RunManifest:
     # ``crucible_version`` environment check — this is the same honest signal, per the v2.9 precedent).
     contract: str = "shipped"
     corrected_gates_hash: str | None = None
+    # crucible-v10.0 (U4): the search-memory gate file's bytes. Decision-bearing for the same reason the
+    # cohort/corrected hashes are — it sets which rejections are TERMINAL (a family the proposer may never
+    # revisit) and which parked candidates a tick RE-ADMITS, i.e. it changes the candidate set a tick
+    # scores. None when U4 is detached (``--no-search-memory``), so a pre-U4 run's manifest keeps its bytes.
+    search_memory_gates_hash: str | None = None
     extra: dict = field(default_factory=dict)      # forward-compat sidecar for later-phase fields
 
     def to_json(self) -> dict:

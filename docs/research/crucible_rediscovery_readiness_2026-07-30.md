@@ -65,17 +65,40 @@ python scripts/research/crucible_calibration.py --exp xsec_mde_sweep --contract 
 python scripts/research/crucible_calibration.py --exp mde_sweep --contract corrected
 ```
 
-### 2. Even with the curves, every real substrate is still refused (NOT fixable by compute — audit U8)
+### 2. Every real substrate is still refused — but the curve now shows exactly where the guard opens
 
-First measured cells from the sweep now running: MDE **2.15** at holdout 378, **1.85** at holdout 696,
-against a ceiling of **0.50**. Consistent with the audit's own numbers (1.28–1.83 across depths). Real
-substrate depths — cross_asset holdout 1163, Taiwan 1011 — sit squarely in that range. So:
+The corrected-contract **overlay** sweep **completed** (`calibration_mde_sweep_corrected.json`), and it
+is the most useful number in this whole pass:
 
-> Measuring the curves converts "refused because unmeasured" into "refused because underpowered". It
-> does not produce a mine.
+| T (bars) | holdout bars | measured MDE ΔSR | vs 0.50 ceiling |
+|---|---|---|---|
+| 756 | 189 | 1.789 | refuse |
+| 1512 | 378 | 1.735 | refuse |
+| 2782 | 696 | 1.234 | refuse |
+| 4044 | **1011** | **1.281** | refuse ← *Taiwan sits here* |
+| 6048 | 1512 | 0.789 | refuse |
+| 8064 | 2016 | 0.862 | refuse |
+| 16128 | 4032 | 0.554 | refuse (just) |
+| 32256 | **8064** | **0.393** | **ALLOW** |
 
-The lever is **breadth × forward accumulation (T×N)**, not more ticks on the same panels — U8. The
-ceiling must not be raised to manufacture an ALLOW; that was explicitly refused at `v8.0` and the same
+So the guard is not unconditionally shut: **it opens at holdout ≳ 8064 bars** on the overlay path, and it
+is within ~10% of opening at 4032. That converts U8 from "get more breadth somehow" into a **measured
+target**. Both real substrates (cross_asset holdout 1163, Taiwan 1011) sit at MDE ≈ 1.28 — a factor of
+~2.6 away.
+
+**8064 holdout bars is ~32 years of daily data, so it is unreachable on a daily panel** — but it is
+routine intraday (15-min bars over ~3 years ≈ 25k bars; hourly over ~13 years). **Read that with the
+caveat the calibration file itself states:** the sweep's generator is a *daily-scale* DGP with
+`periods_per_year=252` baked into the `FitnessConfig`, so a high-`T` row means "MDE at N bars of THIS
+per-bar signal-to-noise". Applying it to an intraday substrate additionally assumes intraday per-bar SNR
+resembles daily — a modelling assumption this sweep does not measure. Validating that assumption is the
+precondition on treating "go intraday" as the U8 answer.
+
+The cross-sectional curve is still measuring; at matched depth it runs equal-or-worse than the overlay one
+(the `v7.0` finding), and the stamp takes the WORST across the types a substrate mines — so the ALLOW
+depth for a tick mining both types will be at least this deep.
+
+The ceiling must not be raised to manufacture an ALLOW; that was explicitly refused at `v8.0` and the same
 refusal holds.
 
 ### 3. RC-11 — the Taiwan overlay path's economic guard is un-calibrated (NEW, from the U7 measurement)
@@ -101,12 +124,20 @@ frozen moat intact.
 **Not ready:** it cannot yet *discover*, and the reason is not a defect anyone can patch. Ranked next
 actions:
 
-1. **Finish the two corrected-contract MDE curves** (running) so the power stamp is measurable and U4's
-   classifier has a finite MDE to reason about. Cheap, mechanical, unblocks honest tick logs.
-2. **Resolve RC-11's mechanism** before the overlay path is allowed to promote anywhere. If the combiner
-   is re-levering a correlated near-copy of a high-Sharpe base book, this is a seal of the same shape as
-   F2's `dsr_aug`, and finding it now is worth more than any number of ticks.
-3. **Attack U8 — breadth.** The only measured route to an ALLOW is deeper/wider substrates (T×N) and
-   forward accumulation. Per-name `(T,N)` data is now reachable (`v7.1`/`v8.1`) with TWSE T86 wired at
-   32/46 names bridged; N=8 effective is the binding number on the only per-name substrate.
-4. Leave the ceiling alone.
+1. **Finish the cross-sectional corrected curve** (overlay one is done; xsec still running) so the power
+   stamp is measurable for a tick mining both types, and U4's classifier has a finite MDE to reason about.
+   Cheap, mechanical, unblocks honest tick logs.
+2. **Test the depth hypothesis the overlay curve just handed us.** The guard opens at holdout ≳ 8064
+   bars, which is intraday-reachable. Before committing to that, validate the per-bar-SNR assumption the
+   sweep does not measure — i.e. re-measure the MDE curve on an intraday-scale DGP (or a real intraday
+   panel) rather than extrapolating a daily-scale one. This is now the highest-value U8 experiment
+   because it is the first one with a measured target instead of a direction.
+3. **Resolve RC-11's mechanism** before the overlay path is allowed to promote anywhere — note this is
+   the *same path* item 2 would open up, so the two are coupled: going deeper on the overlay path without
+   resolving RC-11 would unlock a mine whose economic guard is un-calibrated on at least one substrate.
+4. **Breadth (T×N) as the parallel lever.** Per-name `(T,N)` data is reachable (`v7.1`/`v8.1`) with TWSE
+   T86 wired at 32/46 names bridged; N=8 effective is the binding number on the only per-name substrate.
+   Note the measured caveat: breadth does NOT lower the MDE expressed in ΔSR (the SE of a Sharpe
+   *difference* is set by time observations); what it buys is a larger ΔSR for the same per-name signal.
+   So breadth moves a real alpha above a fixed ceiling; only depth moves the ceiling down.
+5. Leave the ceiling alone.
