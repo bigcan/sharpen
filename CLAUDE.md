@@ -4,11 +4,12 @@ Detailed reference: `docs/claude_md_reference.md` (project map, env contracts, s
 
 ## Project Brief
 
-RL Quant Strategy Development Platform + **Crucible** systematic alpha-mining platform (`crucible-v8.1`, `finrl_pro_ds/crucible/`). Active agent: **SAC only** — IQN/BDQ/PPO code present but none profitable yet; propose alternatives with evidence.
-**Ultimate goal:** sustained risk-adjusted alpha net of fees from capacity-constrained niches a small operator can actually hold — **not** an institution-shaped portfolio of premia, and not RL-first: RL only earns a slot behind a beat-linear-OOS gate. Short-term milestone: pass FTMO + Velotrade prop-firm challenges as proof-of-capital.
-Workstreams: GMGP1 SAC Gold 15m (RL, paper). Crucible alpha-mining (agentic discovery funnel, continuous). Cross-asset TSMOM (linear, sole live edge, gated at paper). Sync-1H / Funding-Arb / Market Making are retired/shelved (see Env table).
+Quant strategy R&D platform + **Crucible** systematic alpha-mining platform (`crucible-v8.1`, `finrl_pro_ds/crucible/`). **Direction: linear core first; RL only as a thin overlay behind a beat-linear-OOS gate.** Single-asset directional RL is falsified (GMGP1-BTC clean de-leaked re-baseline, 2026-07-20). The only validated edge is cross-asset **TSMOM**, net SR ~0.60. If RL is used, **SAC only** — IQN/BDQ/PPO code is present but none is profitable; propose alternatives with evidence.
+**Ultimate goal:** sustained risk-adjusted alpha net of fees from capacity-constrained niches a small operator can actually hold — not an institution-shaped portfolio of premia. Milestone: pass FTMO + Velotrade prop-firm challenges as proof-of-capital.
+**Active:** TAILWIND (`tailwind-v1` — TSMOM + BAB as crash hedge) · CRUCIBLE falsification filter (`finrl_pro_ds/crucible/`, `finrl_pro_ds/signals/`) · Crucible ICAIF paper (deadline **2026-08-02**) · gmgp1-gold/xauusd ensembles on paper · GMGP1 SAC Gold 15m (RL, paper).
+**Closed — do not re-propose without new evidence:** Market Making LOB (S442) · Sync-1H · Funding-Arb standalone · PRISM · AlphaSeek · options-as-alpha · liquid large-cap X-sec.
 Prediction-market research (Polymarket) spun off 2026-07-05 to its own repo: [`Chiwin-Technology/polymarket-updown-research`](https://github.com/Chiwin-Technology/polymarket-updown-research) — no longer present here.
-State: `.agent/memory/core.md` (loaded at boot). R&D log: `randd_log.md`.
+State: `.agent/memory/core.md` (loaded at boot). R&D log: `randd_log.md`. Full NO-GO ledger: auto-memory `MEMORY.md` — **check it before proposing any strategy.**
 
 ## Commands
 
@@ -136,7 +137,7 @@ Skill chain extension: code change to training pipeline → **validate_config** 
 
 ## Skills (auto-dispatch)
 
-Project skills at `.claude/skills/` (Deploy, Monitor, Dashboard, Docker, Live-Trading, Live-Monitor, Collect-Run).
+Project skills at `.claude/skills/` (Deploy, Monitor, Dashboard, Docker, Live-Trading, Live-Monitor, Collect-Run, WandB-Primary).
 User skills at `~/.claude/skills/` (Audit, Memory, Optimization, Math, WandB, Researcher, Architect, Skill-Evolve).
 Both `SKILL.md` and (if present) `FINRL.md` must be read when triggered.
 
