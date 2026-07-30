@@ -51,12 +51,14 @@ data:
   # Manifest generated 2026-04-23 (max_gap_bars=497 = ~8h Feb 2026 gap, clean OK).
   # L1 multiseed trained on the 2025-only file; Stage 3 WF uses the extended
   # file so fold 3 test can cover 2026-02 (first live-unseen OOS slice).
-  file_path: "data/bitfinex/btc_usdt_perp_2025_2026q1_1min.parquet"
+  # S513 clean re-baseline: canonical 2024→2026-07-18 perp file. Envelope rolled forward
+  # 14mo so the 4 folds (6/1/1, step 2mo) land fold-3 test on 2026-06→07 (recent quarter).
+  file_path: "data/bitfinex/btc_usdt_perp_2024_2026_1min.parquet"
   ticker: "BTC"
   handler_type: "multiscale"
   # Splitter-driven windowing; splitter: below emits 4 folds inside envelope.
-  start_date: "2025-01-06"
-  end_date: "2026-03-06"
+  start_date: "2025-05-06"
+  end_date: "2026-07-06"
 
 splitter:
   train_months: 6
