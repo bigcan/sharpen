@@ -62,7 +62,21 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # count. MAJOR (verdict function) but CRU-1 HOLDS — unlike v6.0 — because max() can only add
     # trials and DSR is monotone non-increasing in them. NO gate byte moved (the require_declared
     # policy lives in configs/crucible_multiplicity.gates.yaml, shipped false).
-    assert CRUCIBLE_VERSION == "crucible-v9.0"
+    # v10.0 = the search gets a MEMORY (audit U4 / RC-5) + Tier-0 causality is ENFORCED on generated
+    # genomes (U6 / RC-8) — the bump that CLOSES the 2026-07-29 audit roadmap. killed_families() was
+    # structurally empty (no funnel path ever wrote a KILLED_VERDICTS value), so the proposer prompt read
+    # "(none)" across 403 trials. Rejections are now classified DECISIVE (implied_mde <= multiple x the
+    # active contract's economic floor ⇒ the "no" is informative ⇒ family dies) or UNDERPOWERED (parked
+    # with its MDE, re-admitted when the substrate gains real power); dedup canonicalizes commutative AST
+    # order. evolve() truncation-probes every distinct genome before fitness and culls a leaky one.
+    # MAJOR because dedup + re-admission change WHICH hypotheses a tick tests — but CRU-1
+    # verdict-preservation is claimed and VERIFIED (semantic dedup drops nothing from the offline seed
+    # bank; the U6 probe leaves a causal search byte-identical; new ledger columns nullable and the
+    # verdict vocabulary untouched, so no historical row changes meaning). Ships with the U7 calibration,
+    # which CONFIRMED uplift_min at 0.10 (comment-only hash move on the corrected-contract file,
+    # 2f4639a48415 -> e60079a1d94b) and surfaced RC-11: the uplift null is substrate-dependent by ~200x
+    # and the Taiwan overlay path is un-calibrated. Still nothing mines — audit U8 binds.
+    assert CRUCIBLE_VERSION == "crucible-v10.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
