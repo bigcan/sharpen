@@ -496,18 +496,21 @@ uplift leg would swap a zero-power machine for a poorly-controlled one.
 
 ### U8 — The honest ceiling  *(now has a MEASURED target — 2026-07-30)*
 
-*The corrected-contract overlay MDE curve was measured end-to-end on 2026-07-30
-(`results/crucible_calibration/calibration_mde_sweep_corrected.json`), and it turns this section from a
-direction into a number. MDE vs the 0.50 ceiling: holdout 1011 → **1.281** (both real substrates sit here)
-· 1512 → 0.789 · 2016 → 0.862 · 4032 → 0.554 · **8064 → 0.393 ⇒ ALLOW**. The guard is not unconditionally
-shut: it opens at holdout ≳ 8064 bars, and is within ~10% of opening at 4032. 8064 daily bars is ~32 years
-(unreachable), but it is routine intraday — subject to the caveat the calibration file states itself, that
-its DGP is daily-scale (`periods_per_year=252`), so applying a high-`T` row to an intraday substrate
-assumes comparable per-bar SNR, which the sweep does not measure. Validating that assumption is now the
-highest-value U8 experiment. Note also the paragraph below is right about breadth and worth re-reading in
-this light: breadth does not lower the MDE in ΔSR units, so **only depth moves the ceiling down**; breadth
-moves a real alpha above it. Readiness write-up:
-`docs/research/crucible_rediscovery_readiness_2026-07-30.md`.*
+*BOTH corrected-contract MDE curves were measured end-to-end on 2026-07-30
+(`calibration_mde_sweep_corrected.json` 8 cells, `calibration_xsec_mde_sweep_corrected.json` 24 cells), so
+this section can be stated as numbers. Running the PRODUCTION stamp (worst MDE across the types a tick
+mines) against the 0.50 ceiling: cross_asset holdout 1163 → **1.683** · taiwan holdout 1011 → **1.833** ·
+holdout 4032 → 0.835 · holdout 8064 → **0.644** · deeper → `unmeasured_high` (+inf, fail-closed). **No
+depth on the measured grid opens the guard for a normal both-types tick**, and the binding curve is
+cross-sectional at every depth, exactly as `v7.0` predicted. The one measured opening is **overlay-only at
+≥32k bars** (0.393) — which is the path RC-11 shows to have an un-calibrated economic guard, so the two
+findings are coupled. This section's claim about breadth is confirmed twice over: cross-sectional MDE at
+holdout 8064 is 0.420 at N=12 but 0.644 at N=100, i.e. breadth does not lower it — **only depth lowers the
+ceiling**; breadth raises a real alpha above it. 32k bars is ~128 years daily (unreachable) but routine
+intraday, subject to the caveat the calibration file states itself: its DGP is daily-scale
+(`periods_per_year=252`), so applying a high-`T` row to an intraday substrate assumes comparable per-bar
+SNR, which the sweep does not measure. Validating that is now the highest-value U8 experiment. Readiness
+write-up: `docs/research/crucible_rediscovery_readiness_2026-07-30.md`.*
 
 
 Even corrected, the contract needs ΔSR ≈ 0.3–0.5 at T ≈ 4000 to reach 0.8 power. The lever that moves
