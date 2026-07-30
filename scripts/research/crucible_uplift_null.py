@@ -151,9 +151,71 @@ def _holdout_geometry(panel: Panel, ek: dict) -> tuple[int, int]:
     return hold.T, panel.T - hold.T
 
 
+def _randomize_regime_slots(panel: Panel, *, seed: int) -> Panel:
+    """RC-11 fix: give each null panel its OWN timing-slot shape.
+
+    ``cal._noise_panel`` / ``_realistic_noise_panel`` build ``macro:regime`` as
+    ``sin(2πt/80) + 0.2·noise`` with the SAME period and phase on every seed. An overlay genome is a
+    deterministic transform of that slot, so its tilt — and hence its ΔSR against a fixed base book — is
+    nearly the same on every "independent" panel. Measured on the taiwan overlay null: between-formula
+    variance of the draw means is 11.8x the within-formula variance across 150 panels, i.e. 600 draws
+    carry an effective n of about 4. A q95 read off that is not a null quantile, it is "the second best of
+    four fixed sine patterns".
+
+    This replaces each slot with a per-panel random period, phase, trend and noise mix, so the draws
+    actually sample the space of plausible timing signals. Deliberately kept LOCAL to this harness rather
+    than fixed in ``crucible_calibration`` — those generators feed the E1/E2 gate calibrations, and
+    changing them would silently move measurements the power guard depends on."""
+    import dataclasses
+    rng = np.random.default_rng(seed)
+    T = panel.T
+    t = np.arange(T, dtype=np.float64)
+    slots = {}
+    for i, name in enumerate(sorted(panel.feature_slots)):
+        period = float(rng.uniform(20.0, 400.0))          # cycle length, days
+        phase = float(rng.uniform(0.0, 2.0 * np.pi))
+        # mix a cycle, a random walk and white noise in random proportion — the shapes a real macro or
+        # positioning series plausibly takes, instead of one fixed sinusoid.
+        w = rng.dirichlet(np.ones(3))
+        cyc = np.sin(2.0 * np.pi * t / period + phase)
+        walk = np.cumsum(rng.standard_normal(T)) / np.sqrt(T)
+        wn = rng.standard_normal(T)
+        s = w[0] * cyc + w[1] * walk + w[2] * wn
+        slots[name] = ((s - s.mean()) / (s.std() or 1.0)).astype(np.float64)
+        del i
+    return dataclasses.replace(panel, feature_slots=slots)
+
+
+def _rescale_base_sharpe(base: dict[str, np.ndarray], comps: dict, cfg,
+                         target_sr: float) -> tuple[dict[str, np.ndarray], dict]:
+    """H1 probe: shift each base sleeve's MEAN so the book runs at ``target_sr`` annualized, holding its
+    volatility, serial structure and every other feature fixed. A pure location shift is the cleanest way
+    to vary "how good is the base book" without varying anything else — the confound that made the three
+    observed cells (base SR 0.045 / 0.496 / 1.364) uninterpretable, since substrate, sleeve count and
+    panel all moved with it.
+
+    The F14 components are shifted on the GROSS leg by the same amount, so ``net == gross - cost`` still
+    holds exactly and the overlay path stays self-consistent."""
+    import dataclasses
+    out_base, out_comps = {}, {}
+    for k, v in base.items():
+        r = np.asarray(v, dtype=np.float64)
+        m = np.isfinite(r)
+        sd = float(r[m].std(ddof=1))
+        want_mu = target_sr * sd / np.sqrt(cfg.periods_per_year)     # per-period mean for target ann SR
+        shift = want_mu - float(r[m].mean())
+        out_base[k] = r + shift
+        c = comps.get(k)
+        out_comps[k] = (c if c is None
+                        else dataclasses.replace(c, gross=np.asarray(c.gross, dtype=np.float64) + shift,
+                                                 net=out_base[k]))
+    return out_base, out_comps
+
+
 def _streams_noise_dsl(real_panel: Panel, real_base: dict[str, np.ndarray],
                        real_comps: dict, ts: np.ndarray, cfg, ek: dict, *,
-                       n_panels: int, seed0: int) -> list[dict[str, Any]]:
+                       n_panels: int, seed0: int, randomize_regime: bool = False
+                       ) -> list[dict[str, Any]]:
     """Null-A streams: DSL candidates mined on a realistic NOISE panel of the real panel's shape,
     scored against the REAL base book. The overlay path tilts the REAL base book (that is what an
     overlay candidate is), so its null is "a timing signal built from noise"."""
@@ -162,20 +224,23 @@ def _streams_noise_dsl(real_panel: Panel, real_base: dict[str, np.ndarray],
     for k in range(n_panels):
         npanel = cal._realistic_noise_panel(real_panel.T, real_panel.N, seed=seed0 + k,
                                             n_feature_slots=4)
+        if randomize_regime:
+            npanel = _randomize_regime_slots(npanel, seed=seed0 + 90000 + k)
         for f in _CS_SEEDS:
             cr = _candidate_returns(f, npanel, hold_horizon=int(ek["hold_horizon"]),
                                     cost_bps=float(ek["cost_bps"]),
                                     min_names=int(ek["ls_min_names"]))
             if cr is not None:
                 out.append({"stream": cr[0], "candidate_type": "cross_sectional",
-                            "formula": f, "draw": k})
+                            "formula": f, "draw": k, "turnover_ann": float(cr[1])})
         bb, bg, bc, ge = ctx_full
         for f in _OVERLAY_SEEDS:
             # The timing signal comes from the NOISE panel's slots; the tilted book is the REAL one.
             cr = _overlay_returns(f, npanel, bb, cost_bps=float(ek["cost_bps"]),
                                   base_gross=bg, base_cost=bc, gross_exposure=ge)
             if cr is not None:
-                out.append({"stream": cr[0], "candidate_type": "overlay", "formula": f, "draw": k})
+                out.append({"stream": cr[0], "candidate_type": "overlay", "formula": f, "draw": k,
+                            "turnover_ann": float(cr[1])})
     return out
 
 
@@ -260,6 +325,7 @@ def _score(streams: list[dict[str, Any]], *, base_ho: dict[str, np.ndarray], ts_
             continue
         rows.append({
             "candidate_type": s["candidate_type"], "formula": s["formula"],
+            "turnover_ann": float(s.get("turnover_ann", float("nan"))),
             "delta_sr": float(r.delta_sr), "corrected_t": float(r.corrected_t),
             "p_value": float(r.p_value), "delta_median": float(r.delta_median),
             "frac_positive": float(r.frac_positive), "max_base_corr": float(r.max_base_corr_obs),
@@ -331,6 +397,44 @@ def _summarize(rows: list[dict[str, Any]], label: str, *, cc: CorrectedConfig,
     }
 
 
+def _independence_diagnostic(rows: list[dict[str, Any]], n_formulas: int) -> dict[str, Any]:
+    """Is this null actually SAMPLING, or are its draws a few fixed patterns repeated?
+
+    Compares the between-formula variance of the draw means against the mean within-formula variance
+    across panels. A healthy null is dominated by panel-to-panel variation (ratio well under 1); a ratio
+    >> 1 says the draws cluster by formula, i.e. the panel seed barely moves the statistic and the
+    effective sample size is closer to the FORMULA count than the draw count.
+
+    This exists because that is exactly how RC-11 was manufactured: both null-panel generators build the
+    timing slot as a FIXED-period, FIXED-phase sinusoid, so four overlay seeds produced four tight
+    clusters across 150 panels (ratio 11.8) and a q95 read off them looked like a null quantile but was
+    "the second best of four fixed patterns". Nothing in the pipeline checked whether the null could vary
+    — every guard checks a measurement's RESULT against a threshold, never the measurement's own
+    dispersion. Reported for every null now, so a degenerate one is visible at a glance instead of after
+    a HIGH-severity finding has propagated into six documents."""
+    out: dict[str, Any] = {}
+    for ct in sorted({r["candidate_type"] for r in rows}):
+        d = np.asarray([r["delta_sr"] for r in rows if r["candidate_type"] == ct], dtype=float)
+        d = d[np.isfinite(d)]
+        k = max(1, int(n_formulas))
+        if d.size < 2 * k:
+            continue
+        m = d[:(d.size // k) * k].reshape(-1, k)
+        if m.shape[0] < 2:
+            continue
+        between = float(m.mean(axis=0).var(ddof=1))
+        within = float(m.var(axis=0, ddof=1).mean())
+        ratio = (between / within) if within > 0 else float("inf")
+        out[ct] = {"n_draws": int(d.size), "n_formula_slots": k, "n_panels": int(m.shape[0]),
+                   "between_formula_var": between, "within_formula_var": within,
+                   "between_over_within": ratio,
+                   "verdict": ("DEGENERATE — draws cluster by formula; the panel seed barely moves the "
+                               "statistic, so the effective n is near the formula count, NOT the draw "
+                               "count. Do not read a quantile off this." if ratio > 1.0 else
+                               "healthy — panel-to-panel variation dominates")}
+    return out
+
+
 def _by_type(rows: list[dict[str, Any]], *, target_fpr: float) -> dict[str, Any]:
     """Per candidate_type quantiles — the two paths build ΔSR differently (a rank-L/S sleeve vs a tilt
     on the base book itself), so a single pooled floor must be read against the WORSE of the two."""
@@ -341,7 +445,11 @@ def _by_type(rows: list[dict[str, Any]], *, target_fpr: float) -> dict[str, Any]
         if d.size == 0:
             continue
         lo, hi = _quantile_ci(d, 1.0 - target_fpr)
+        tv = np.asarray([r.get("turnover_ann", np.nan) for r in rows
+                         if r["candidate_type"] == ct], dtype=float)
+        tv = tv[np.isfinite(tv)]
         out[ct] = {"n": int(d.size), "mean": float(d.mean()),
+                   "turnover_ann_mean": (float(tv.mean()) if tv.size else None),
                    "q0950": float(np.quantile(d, 0.95)),
                    "calibrated_floor": float(np.quantile(d, 1.0 - target_fpr)),
                    "calibrated_floor_ci95": [lo, hi],
@@ -360,6 +468,17 @@ def main() -> int:
     ap.add_argument("--corrected-config", default=str(DEFAULT_CORRECTED_GATES))
     ap.add_argument("--start", default=None)
     ap.add_argument("--end", default=None)
+    ap.add_argument("--cost-bps", type=float, default=None,
+                    help="override the funnel's cost_bps for this measurement. --cost-bps 0 isolates "
+                         "the ALIGNMENT channel from the TURNOVER/COST channel in the overlay null.")
+    ap.add_argument("--randomize-regime", action="store_true",
+                    help="RC-11: give every null panel its own timing-slot shape (random period/phase/"
+                         "trend/noise mix) instead of the generators' ONE fixed sin(2*pi*t/80). Without "
+                         "this the overlay draws are ~4 clusters, not n independent samples.")
+    ap.add_argument("--base-sharpe", type=float, default=None,
+                    help="H1 probe: shift the base sleeves' means so the book runs at this annualized "
+                         "Sharpe, holding vol/shape fixed. Isolates 'base-book quality' from substrate, "
+                         "sleeve count and panel, which were all confounded in the observed cells.")
     ap.add_argument("--keep-sleeves", default=None,
                     help="comma-separated base-sleeve names to KEEP (e.g. 'tsmom'). Isolation knob for "
                          "the RC-11 mechanism test: the overlay null's spread differs ~200x between the "
@@ -384,6 +503,10 @@ def main() -> int:
         args.noise_panels, args.rotations = 3, 4
 
     cfg, ek = load_generation_config(args.config)
+    if args.cost_bps is not None:
+        log.warning("COST OVERRIDE: cost_bps %.6f -> %.6f (mechanism probe, not a gate measurement)",
+                    ek["cost_bps"], args.cost_bps)
+        ek = {**ek, "cost_bps": float(args.cost_bps)}
     meta = load_generation_meta(args.config)
     cc = CorrectedConfig.from_yaml(args.corrected_config)
     lord_level = fresh_lord_level(cc)
@@ -401,6 +524,11 @@ def main() -> int:
         comps = {k: v for k, v in comps.items() if k in keep}
         log.warning("ISOLATION RUN: base book restricted to %s — this is a mechanism experiment, NOT the "
                     "production base book; do not read its floor as a gate recommendation", sorted(base))
+    if args.base_sharpe is not None:
+        base, comps = _rescale_base_sharpe(base, comps, cfg, args.base_sharpe)
+        log.warning("H1 PROBE: base book mean-shifted to annualized SR %.3f — a mechanism experiment, "
+                    "NOT the production base book; its floor is not a gate recommendation",
+                    args.base_sharpe)
     n_hold, first_row = _holdout_geometry(panel, ek)
     base_ho = {k: np.asarray(v)[first_row:first_row + n_hold] for k, v in base.items()}
     ts_ho = np.asarray(ts)[first_row:first_row + n_hold]
@@ -411,7 +539,8 @@ def main() -> int:
     log.info("Null-A (noise_dsl): %d noise panels x %d seeds", args.noise_panels,
              len(_CS_SEEDS) + len(_OVERLAY_SEEDS))
     a_streams = _streams_noise_dsl(panel, base, comps, ts, cfg, ek,
-                                   n_panels=args.noise_panels, seed0=args.seed)
+                                   n_panels=args.noise_panels, seed0=args.seed,
+                                   randomize_regime=args.randomize_regime)
     rows_a = _score(a_streams, base_ho=base_ho, ts_ho=ts_ho, cfg=cfg, cc=cc,
                     lord_level=lord_level, n_hold=n_hold, first_row=first_row)
     log.info("Null-A scored %d draws", len(rows_a))
@@ -456,6 +585,9 @@ def main() -> int:
                    "seed": args.seed, "quick": bool(args.quick)},
         "nulls": summaries,
         "calibration_grade_nulls": list(calibration_nulls),
+        # RC-11 guard: a null that cannot vary produces a confident-looking quantile that is wrong.
+        "independence_diagnostic": {k: _independence_diagnostic(v, len(_OVERLAY_SEEDS))
+                                    for k, v in rows_by_null.items()},
         "by_candidate_type": {k: _by_type(v, target_fpr=args.target_fpr)
                               for k, v in rows_by_null.items()},
         # RECOMMENDATION = the STRICTEST calibrated floor across the CALIBRATION-GRADE nulls (the two
@@ -472,8 +604,12 @@ def main() -> int:
     }
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
+    sr_tag = ("" if args.base_sharpe is None
+              else "_sr" + str(args.base_sharpe).replace(".", "p").replace("-", "neg"))
     tag = (f"{args.panel}{'_quick' if args.quick else ''}"
-           f"{'_keep-' + args.keep_sleeves.replace(',', '-') if args.keep_sleeves else ''}")
+           f"{'_keep-' + args.keep_sleeves.replace(',', '-') if args.keep_sleeves else ''}"
+           f"{'_randregime' if args.randomize_regime else ''}{sr_tag}"
+           f"{'_cost' + str(args.cost_bps).replace('.', 'p') if args.cost_bps is not None else ''}")
     (out_dir / f"uplift_null_{tag}.json").write_text(
         json.dumps(report, indent=2), encoding="utf-8")
 
