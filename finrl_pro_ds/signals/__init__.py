@@ -25,6 +25,12 @@ from ._ic import (
 from .costs import COST_MODELS, max_drawdown, profit_factor
 from .features import Panel, make_synthetic_panel, neutralize, ohlc_violations
 from .gates import Gates
+from .multiplicity import (
+    HypothesisLedger,
+    Multiplicity,
+    load_multiplicity_gates,
+    resolve_multiplicity,
+)
 from .protocol import Signal
 from .registry import clear_registry, get_registry, register
 from .scorecard import (
@@ -60,6 +66,10 @@ __all__ = [
     "max_drawdown",
     "profit_factor",
     "Gates",
+    "Multiplicity",
+    "HypothesisLedger",
+    "load_multiplicity_gates",
+    "resolve_multiplicity",
     "evaluate_signal",
     "evaluate_batch",
     "SignalScorecard",

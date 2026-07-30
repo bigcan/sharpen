@@ -38,6 +38,7 @@ from ._ic import (
     spearman_ic,
 )
 from .costs import max_drawdown, profit_factor
+from .multiplicity import Multiplicity, resolve_multiplicity  # noqa: F401  (Multiplicity: type hint)
 from .features import Panel, neutralize, ohlc_violations
 
 TRADING_DAYS = 252
@@ -279,10 +280,14 @@ def tier1_gross_power(
 class Deflation:
     """Multiple-testing deflation of a signal's primary-horizon IC-IR.
 
-    ``dsr`` is the probability the true IC-IR > 0 AFTER deflating for ``n_trials`` (the
-    candidate-batch size) and the non-normal IC-series shape — the antidote to ranking
-    hundreds of indicators by gross IC. All stats use ``periods_per_year=1`` (per-period;
-    252 saturates the CDF — cont-57 Math-gate finding).
+    ``dsr`` is the probability the true IC-IR > 0 AFTER deflating for ``n_multiplicity``
+    hypotheses and the non-normal IC-series shape — the antidote to ranking hundreds of
+    indicators by gross IC. All stats use ``periods_per_year=1`` (per-period; 252 saturates
+    the CDF — cont-57 Math-gate finding).
+
+    ``n_trials`` is the BATCH pool size; ``n_multiplicity`` is the count DSR actually
+    deflated against (crucible-v9.0 / U5). They differ whenever a caller declares a
+    pre-registered or cumulative hypothesis count larger than the batch it submitted.
     """
 
     dsr: float
@@ -295,13 +300,22 @@ class Deflation:
     n_eff: float = float("nan")        # effective independent trial count (C2.1)
     fdr_q_bhy: float = float("nan")    # dependence-robust Yekutieli FDR q (C2.3)
     hlz_pass: bool = False             # ic_tstat >= hlz_t_min AND fdr_q_bhy <= fdr_q_max (C2.3)
+    n_multiplicity: int = 0            # count fed to DSR's E[max] order statistic (U5)
+    multiplicity_source: str = "batch"  # batch | preregistered | ledger (U5)
 
 
 def tier4_deflation(primary_results: dict[str, GrossPower],
-                    gates: "Gates | None" = None) -> dict[str, Deflation]:
+                    gates: "Gates | None" = None,
+                    multiplicity: "Multiplicity | None" = None) -> dict[str, Deflation]:
     """Batch-level deflation. The deflation pool = signals with a finite primary IC-IR;
-    ``n_trials`` is its size (the honest multiple-comparison count). Signals outside the
-    pool get a null Deflation.
+    ``n_trials`` is its size. Signals outside the pool get a null Deflation.
+
+    **Multiplicity (U5, crucible-v9.0).** The count fed to DSR is
+    ``max(n_trials, multiplicity.n_hypotheses)`` — see
+    :mod:`finrl_pro_ds.signals.multiplicity`. Before U5 it was ``n_trials`` alone, which made
+    the multiple-comparison correction a function of SUBMISSION SHAPE: 100 candidates sent as
+    ten batches of ten deflated against 10. Declaring a pre-registered or cumulative count
+    restores the honest number. ``multiplicity=None`` reproduces the pre-U5 value exactly.
 
     Component 2 additions (all back-compat — defaults reproduce the raw-N behaviour):
       * **N_eff (C2.1)** — when ``gates.use_effective_n`` is set, the DSR order statistic
@@ -309,6 +323,8 @@ def tier4_deflation(primary_results: dict[str, GrossPower],
         trial IC-correlation matrix) instead of the raw pool size, fixing the Type-II
         over-penalty on a correlated candidate library. ``n_trials`` (raw) and ``n_eff`` are
         both reported regardless; the substitution into DSR only happens under the flag.
+        It composes with U5 as a RATIO (declared count sets the magnitude, ``n_eff`` applies
+        the correlation haircut), so the composed count is never below today's value.
       * **BHY + HLZ (C2.3)** — the dependence-robust Yekutieli q-value and an ``hlz_pass``
         flag (t ≥ ``hlz_t_min`` AND ``fdr_q_bhy`` ≤ ``fdr_q_max``) are always computed.
     """
@@ -317,6 +333,7 @@ def tier4_deflation(primary_results: dict[str, GrossPower],
             and g.primary_ic_series.size >= 3]
     irs = [primary_results[n].by_horizon[primary_results[n].primary_horizon].ic_ir for n in pool]
     n_trials = len(irs)
+    n_mult, mult_source = resolve_multiplicity(n_trials, multiplicity)
 
     use_eff = bool(getattr(gates, "use_effective_n", False)) if gates is not None else False
     hlz_t_min = float(getattr(gates, "hlz_t_min", 3.0)) if gates is not None else 3.0
@@ -327,8 +344,14 @@ def tier4_deflation(primary_results: dict[str, GrossPower],
         [primary_results[n].primary_ic_series for n in pool],
         [primary_results[n].primary_ic_days for n in pool],
         min_overlap=min_overlap)) if n_trials >= 2 else float(n_trials)
-    # the count fed to DSR's E[max] order statistic (raw N, or effective N under the flag)
-    n_dsr = max(2, int(round(n_eff))) if (use_eff and n_trials >= 2) else n_trials
+    # The count fed to DSR's E[max] order statistic. Under the C2.1 flag the correlation
+    # haircut is applied as the RATIO n_eff/n_trials measured on the batch, scaled onto the
+    # declared count -- so it stays a correlation adjustment and can never undo U5's floor
+    # (n_mult >= n_trials => the scaled value >= round(n_eff), the pre-U5 flagged number).
+    if use_eff and n_trials >= 2:
+        n_dsr = max(2, int(round(n_mult * (n_eff / n_trials))))
+    else:
+        n_dsr = n_mult
 
     pvals: list[float] = []
     for n in pool:
@@ -348,6 +371,11 @@ def tier4_deflation(primary_results: dict[str, GrossPower],
         g = primary_results[n]
         hp = g.by_horizon[g.primary_horizon]
         series = g.primary_ic_series
+        # Computability is gated on the BATCH pool, not on n_mult: the DSR order statistic
+        # needs the dispersion of observed trial IC-IRs, which a 1-element pool cannot
+        # estimate. Declaring a larger count raises the deflation MAGNITUDE; it cannot
+        # conjure a DSR where there is no dispersion to measure (that would be looser, not
+        # stricter -- a NaN today reads as LOGGED).
         d = (deflated_sharpe_ratio(
             hp.ic_ir, irs, n_obs=hp.n_days, skew=skewness(series.tolist()),
             excess_kurt=excess_kurtosis(series.tolist()), n_trials=n_dsr,
@@ -369,11 +397,14 @@ def tier4_deflation(primary_results: dict[str, GrossPower],
             n_eff=n_eff,
             fdr_q_bhy=q_bhy,
             hlz_pass=hlz_pass,
+            n_multiplicity=n_dsr,
+            multiplicity_source=mult_source,
         )
     for n in primary_results:
         out.setdefault(n, Deflation(float("nan"), float("nan"), float("inf"),
                                     float("inf"), float("nan"), n_trials, float("nan"),
-                                    n_eff))
+                                    n_eff, n_multiplicity=n_dsr,
+                                    multiplicity_source=mult_source))
     return out
 
 
