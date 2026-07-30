@@ -43,10 +43,15 @@ guards:                  # the cheap guards retained from the funnel (NOT the F1
   #     that delta. On the holdout this leg rejects ~97% of null draws; it is not inert.
   #   * This leg is NOT the FPR control: under every null measured, t_pass = 0.000 and lord_pass <= 0.018,
   #     and the JOINT null pass rate is 0/2600 (cross_asset) and 0/2100 (taiwan) at this floor.
-  #   * RC-11 (OPEN, HIGH): the null is SUBSTRATE-dependent by ~200x. On taiwan the OVERLAY path's null
-  #     q95 is +0.831 and 37.6% of pure-noise overlays clear this floor. Sleeve count is falsified as the
-  #     cause. Treat the taiwan overlay path as UN-CALIBRATED until RC-11 is resolved — it may be a seal
-  #     (a statistic that is wrong on a high-Sharpe base book), in which case no threshold fixes it.
+  #   * RC-11 was filed here as OPEN/HIGH ("the null is substrate-dependent by ~200x; the taiwan overlay
+  #     path is un-calibrated") and is **WITHDRAWN 2026-07-31**. It was an artifact of the null used to
+  #     measure it: both calibration generators build the timing slot as a fixed-period/fixed-phase
+  #     sinusoid, so four overlay seeds gave four tight clusters across 150 "independent" panels
+  #     (between/within variance 11.8, effective n ~4). Under randomized slot shapes taiwan's overlay null
+  #     goes from q95 +0.831 / 91.5% passing to q95 -0.007 / 2.33% passing, matching cross_asset. No path
+  #     is un-calibrated and this floor needs no change. Base-book Sharpe was falsified as the driver and
+  #     runs the OPPOSITE way (-0.21 dSR per unit SR when isolated).
+  #     See docs/research/crucible_rc11_resolved_degenerate_null_2026-07-31.md.
   uplift_min: 0.10       # full-panel holdout ΔSR floor (economic size, not significance)
   delta_median_min: 0.0  # central CPCV path is not a loss
   frac_positive_min: 0.50  # majority of CPCV paths have ΔSR > 0

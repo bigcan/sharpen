@@ -115,10 +115,9 @@ types a tick mines — the `v7.0` rule) against the 0.50 ceiling:
 Two real consequences:
 
 1. **The one door that does open is overlay-only at extreme depth.** A tick restricted to the overlay path
-   on a ≥32k-bar substrate would stamp 0.393 and be ALLOWED. That is a genuine opening — and it is the
-   path RC-11 says has an un-calibrated economic guard, so the two findings are coupled: taking that door
-   without resolving RC-11 unlocks a mine whose uplift leg admits >1-in-3 of pure noise on at least one
-   substrate.
+   on a ≥32k-bar substrate would stamp 0.393 and be ALLOWED. That is a genuine opening. *(This originally
+   read "and RC-11 gates it, so the two findings are coupled" — RC-11 was WITHDRAWN 2026-07-31 as an
+   artifact of a degenerate null, so nothing gates this door on calibration grounds.)*
 2. **Breadth does not help here, and the measurement says so twice.** Cross-sectional MDE at holdout 8064
    is 0.420 at N=12 but 0.644 at N=100 — it does not improve with breadth, consistent with the
    calibration file's own note that ΔSR is already risk-adjusted so the SE of a Sharpe *difference* is set
@@ -135,7 +134,15 @@ answer.
 The ceiling must not be raised to manufacture an ALLOW; that was explicitly refused at `v8.0` and the same
 refusal holds.
 
-### 3. RC-11 — the Taiwan overlay path's economic guard is un-calibrated (NEW, from the U7 measurement)
+### 3. ~~RC-11 — the Taiwan overlay path's economic guard is un-calibrated~~ — **WITHDRAWN 2026-07-31**
+
+> **This blocker does not exist.** RC-11 was an artifact of a degenerate null (fixed-phase sinusoidal
+> timing slot ⇒ effective n ≈ 4). Under a proper null the Taiwan overlay path admits **2.33%** of noise,
+> not 37.6%, in line with cross_asset. `uplift_min = 0.10` is fine and the overlay path is not
+> un-calibrated. See `docs/research/crucible_rc11_resolved_degenerate_null_2026-07-31.md`. What replaces
+> it is **NULL-DEGEN-01**: the same fixed slot is shared by E1's null panels, so E1's FPR confidence
+> bound assumes independence it does not have — worth re-measuring, but it is not a blocker on mining.
+> Original text follows for the record.
 
 The uplift leg's null distribution is substrate-dependent by ~200× in its 95th percentile. On the
 Taiwan **overlay** path the null is *centred at +0.45* with q95 **+0.831**, so **37.6% of pure-noise
@@ -165,9 +172,9 @@ actions:
    ≥32k bars, which is intraday-reachable — but the curve is a daily-scale DGP. Re-measure the MDE curve
    on an intraday-scale generator (or a real intraday panel) rather than extrapolating. This is the
    highest-value U8 experiment because it is the first with a measured target instead of a direction.
-3. **Resolve RC-11's mechanism** — coupled to (2), because the door depth opens is precisely the overlay
-   path whose economic guard RC-11 shows to be un-calibrated. Doing (2) first would unlock a mine whose
-   uplift leg admits >1-in-3 of pure noise on at least one substrate.
+3. ~~Resolve RC-11's mechanism~~ — **DONE 2026-07-31, finding withdrawn.** The overlay path is NOT
+   un-calibrated, so it no longer gates (2). Its replacement, NULL-DEGEN-01, is a measurement-quality
+   item: re-run E1 with randomized timing slots to get an FPR bound whose independence assumption holds.
 4. **Do NOT reach for breadth to fix the ceiling.** Measured twice now: cross-sectional MDE at holdout
    8064 is 0.420 at N=12 and 0.644 at N=100 — breadth does not lower it. Per-name `(T,N)` data is
    reachable (`v7.1`/`v8.1`, TWSE T86 at 32/46 names) and remains worth having, but as a way to raise a

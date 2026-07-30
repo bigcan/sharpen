@@ -10,8 +10,11 @@ RC-9's charge: `guards.uplift_min = 0.10` "passes 170/170 — never calibrated a
 becomes the sole economic leg after U1", and U7 was made a precondition on the corrected contract going
 live. It went live anyway at `crucible-v8.0`, so this measurement was overdue.
 
-**Verdict: the floor is calibrated, and the shipped value survives — but RC-9's premise was wrong in
-direction, and the measurement surfaced a new defect (RC-11) that matters more than the number.**
+**Verdict: the floor is calibrated and the shipped value survives; RC-9's premise was wrong in
+direction.** (This report originally also filed RC-11, a substrate-dependence finding — **that was
+WITHDRAWN 2026-07-31** as an artifact of the overlay null's own construction; see the marked section
+below and `docs/research/crucible_rc11_resolved_degenerate_null_2026-07-31.md`. The U7 calibration
+itself is unaffected.)
 
 ### 1. The "170/170 pass" was a train-split selection artifact, not a loose gate
 
@@ -47,7 +50,10 @@ production `corrected_contract_fitness` on the **real** base books:
 | **taiwan** | **overlay** | 600 | **+0.448** | **+0.831** | [+0.806, +0.842] | +0.992 |
 
 The two independent nulls agree on cross_asset (q95 +0.080 / +0.019 — same order, same sign), which is
-what makes them usable. They disagree on Taiwan, for the reason RC-11 records below.
+what makes them usable. They disagree on Taiwan's OVERLAY row — and that disagreement was the tell: the
+overlay half of `noise_dsl` was degenerate (fixed-phase sinusoidal slot, effective n ≈ 4). The Taiwan
+overlay row above is therefore **not a valid null quantile**; corrected value q95 −0.007. The
+cross_sectional rows, which drive the calibration decision, are unaffected.
 
 ### 3. Decision: keep `uplift_min = 0.10`
 
@@ -73,7 +79,20 @@ running SR +1.36; nothing there is close to promotable, which is consistent with
 
 ---
 
-## RC-11 (NEW, HIGH) — the uplift null is substrate-dependent by ~200×, and the Taiwan overlay path is not gate-ready
+## ~~RC-11~~ — WITHDRAWN 2026-07-31: this section was wrong
+
+> **Everything below this line about substrate dependence is an artifact of the null used to produce it,
+> not a property of the gate.** Both calibration generators build the timing slot as a fixed-period,
+> fixed-phase sinusoid, so the four overlay seeds yielded four tight clusters across 150 "independent"
+> panels (between/within variance ratio 11.8) — effective n ≈ 4. With randomized slot shapes the Taiwan
+> overlay null moves from q95 +0.831 / 91.5% passing to q95 −0.007 / **2.33%** passing, matching
+> cross_asset. Base-book Sharpe was falsified as the driver and runs the opposite way. `uplift_min = 0.10`
+> needs no change and the Taiwan overlay path is not un-calibrated. Full investigation:
+> `docs/research/crucible_rc11_resolved_degenerate_null_2026-07-31.md`. **The rest of this report — the
+> U7 calibration itself — stands**: the cross-sectional measurements use real DSL genomes on real OHLCV
+> noise and never touched the degenerate slot. Retained unedited below for the record.
+
+### RC-11 as originally filed (superseded)
 
 | substrate | base sleeves | base-book holdout SR | overlay null q95 | null draws clearing `uplift_min=0.10` |
 |---|---|---|---|---|
