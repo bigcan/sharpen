@@ -511,7 +511,9 @@ The frozen funnel moat ``519158fa1450`` is UNCHANGED, as are ``22a18172be1a`` (T
 
 **One provenance hash DID move, and it is a comment-only change:**
 ``crucible_corrected_contract.gates.yaml`` went ``2f4639a48415`` → ``e60079a1d94b`` because the U7
-calibration provenance was written into it. ``uplift_min`` is STILL 0.10 — no threshold changed. This is
+calibration provenance was written into it, then → ``7fc2a73be779`` on 2026-07-31 when the RC-11 warning
+in that provenance block was corrected to a withdrawal. ``uplift_min`` is STILL 0.10 through all three —
+no threshold ever changed. This is
 ``gates_hash``'s documented behaviour (it hashes raw bytes precisely so any edit is visible); it is
 recorded here so a future reader does not misread a moved hash as a moved goal post. No committed
 artifact or test pinned the old value (checked), and no corrected-contract run has ever mined.
@@ -523,10 +525,17 @@ that delta, and on the holdout the leg rejects ~97% of null draws. Measured null
 cross_asset base book (cross_sectional, n=1200) is 0.0799 with bootstrap CI95 [0.0521, 0.1177] — 0.10 is
 INSIDE it, so the calibrated and shipped floors are indistinguishable. The leg is also not the FPR
 control: ``t_pass`` = 0.000 and ``lord_pass`` ≤ 0.018 under every null, joint null pass 0/2600 and
-0/2100. **New finding RC-11 (HIGH, OPEN):** the uplift null is substrate-dependent by ~200× — on Taiwan
-the OVERLAY path's null q95 is +0.831 and 37.6% of pure-noise overlays clear 0.10, so that path is
-UN-CALIBRATED. Base-sleeve count is falsified as the cause (isolation run); the mechanism is unresolved
-and may be a SEAL rather than a threshold error, the same shape as the F2 ``dsr_aug`` finding.
+0/2100. **RC-11 was filed here as a HIGH finding and is WITHDRAWN (2026-07-31)** — it was an artifact of the
+overlay null's own construction, not a property of the gate. Both calibration generators build the timing
+slot as a FIXED-period/FIXED-phase sinusoid, so four overlay seeds produced four tight clusters across 150
+"independent" panels (between/within variance 11.8, effective n ≈ 4). With randomized slot shapes the
+Taiwan overlay null goes from q95 +0.831 / 91.5% passing to q95 −0.007 / **2.33%** passing, matching
+cross_asset — the "~200×" collapses to ~2 pp, and no path is un-calibrated. Base-book Sharpe was
+FALSIFIED as the driver and runs the opposite way (−0.21 ΔSR per unit SR, isolated). Replaced by
+**NULL-DEGEN-01**: the same fixed slot feeds ``run_e1``'s overlay seeds, so E1's per-candidate FPR
+confidence bound assumes an independence its overlay half does not have — not re-run, so NOT a claim that
+E1 is red, but its ~2% headroom is overstated by an unknown amount. See
+``docs/research/crucible_rc11_resolved_degenerate_null_2026-07-31.md``.
 
 What v10.0 does NOT change: nothing mines yet. The power guard still refuses every real substrate, so
 every rejection classifies UNDERPOWERED and ``killed_families()`` is still empty — now for a MEASURED
@@ -603,9 +612,12 @@ from pathlib import Path
 # unchanged). Frozen moats 519158fa1450 / 22a18172be1a / 0ccf6dd584f0 UNCHANGED; U4 knobs live in
 # configs/crucible_search_memory.gates.yaml. Ships with the U7 calibration, which CONFIRMED uplift_min at
 # 0.10 (no threshold change; the corrected-contract file's hash moved on a COMMENT only, 2f4639a48415 ->
-# e60079a1d94b) and surfaced RC-11 (the uplift null is substrate-dependent by ~200x; the Taiwan overlay
-# path is un-calibrated). Still nothing mines: every rejection classifies UNDERPOWERED because the power
-# guard refuses every real substrate — audit U8, the binding constraint.
+# e60079a1d94b). It also filed RC-11 (uplift null substrate-dependent ~200x), which was WITHDRAWN
+# 2026-07-31 as an artifact of a degenerate null — fixed-phase sinusoidal timing slot => effective n ~4;
+# under randomized slots Taiwan's overlay null goes 91.5% -> 2.33% passing and no path is un-calibrated.
+# Replaced by NULL-DEGEN-01 (the same slot feeds E1's overlay seeds, so its FPR bound assumes independence
+# it lacks). Still nothing mines: every rejection classifies UNDERPOWERED because the power guard refuses
+# every real substrate — audit U8, the binding constraint.
 CRUCIBLE_VERSION = "crucible-v10.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.

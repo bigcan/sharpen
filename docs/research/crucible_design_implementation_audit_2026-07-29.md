@@ -286,10 +286,12 @@ decision**, not new research.
 >    calibrated q95 floor. It also is not, and never was, the FPR control: `t_pass` = 0.000 and
 >    `lord_pass` ≤ 0.018 under every null measured, with joint null pass 0/2600 (cross_asset) and
 >    0/2100 (taiwan).
-> 2. **New finding RC-11 (HIGH, OPEN)** — the uplift null is substrate-dependent by ~200×, and on the
->    Taiwan **overlay** path 37.6% of pure-noise candidates clear the floor (null q95 +0.831). Sleeve
->    count is falsified as the cause; the mechanism is unresolved and may be a SEAL, not a threshold
->    error. Added to the findings table in §6.
+> 2. ~~**New finding RC-11 (HIGH, OPEN)**~~ — **WITHDRAWN 2026-07-31.** It was an artifact of the null
+>    used to test it: the calibration generators' timing slot is a fixed-phase sinusoid, so the overlay
+>    draws were four clusters (between/within variance 11.8) with an effective n of ~4. Under randomized
+>    slot shapes the Taiwan overlay null goes from 91.5% to 2.33% passing and the substrate dependence
+>    collapses. Replaced by **NULL-DEGEN-01** (§6), which reaches E1's own FPR bound. See
+>    `docs/research/crucible_rc11_resolved_degenerate_null_2026-07-31.md`.
 >
 > **What closing the roadmap does NOT do.** RC-3 stands: the power guard still refuses every real
 > substrate, so every rejection U4 classifies is `UNDERPOWERED` and `killed_families()` remains empty —
@@ -503,8 +505,8 @@ mines) against the 0.50 ceiling: cross_asset holdout 1163 → **1.683** · taiwa
 holdout 4032 → 0.835 · holdout 8064 → **0.644** · deeper → `unmeasured_high` (+inf, fail-closed). **No
 depth on the measured grid opens the guard for a normal both-types tick**, and the binding curve is
 cross-sectional at every depth, exactly as `v7.0` predicted. The one measured opening is **overlay-only at
-≥32k bars** (0.393) — which is the path RC-11 shows to have an un-calibrated economic guard, so the two
-findings are coupled. This section's claim about breadth is confirmed twice over: cross-sectional MDE at
+≥32k bars** (0.393). (An earlier version of this note said that door was gated by RC-11's un-calibrated
+overlay guard — RC-11 was WITHDRAWN 2026-07-31, so it is not.) This section's claim about breadth is confirmed twice over: cross-sectional MDE at
 holdout 8064 is 0.420 at N=12 but 0.644 at N=100, i.e. breadth does not lower it — **only depth lowers the
 ceiling**; breadth raises a real alpha above it. 32k bars is ~128 years daily (unreachable) but routine
 intraday, subject to the caveat the calibration file states itself: its DGP is daily-scale
@@ -535,7 +537,9 @@ substrate class where its statistics can actually work.
 | RC-8 | MEDIUM | `signals/generation/evolve.py:320` | `assert_causal` never runs on a generated genome; causality asserted by docstring. |
 | RC-9 | MEDIUM | `configs/crucible_calibration.gates.yaml:14` | `uplift_min = 0.10` passes 170/170 — never calibrated against its own null; becomes the sole economic leg after U1. |
 | RC-10 | HIGH | `tests/crucible/test_reproduce_p5.py:90`, `test_reproduce_cohort.py:57` | Both end-to-end reproducibility tests are RED: the power guard refuses the synthetic substrate, so no manifest is ever mined. `--force` forces the *dirty* gate, not the *power* gate. **FIXED** — both tests now pass `--force-underpowered`. |
-| RC-11 | HIGH | `configs/crucible_corrected_contract.gates.yaml:33` (`guards.uplift_min`), `signals/generation/evolve.py:_overlay_returns` | **NEW 2026-07-30 (U7 measurement).** The uplift leg's null distribution is SUBSTRATE-dependent by ~200× in its 95th percentile: cross_asset overlay q95 −0.004 (2.7% of nulls clear 0.10) vs taiwan overlay q95 **+0.831** (**37.6%** clear 0.10, null centred at +0.45). A single global floor cannot carry a stated null rate on both, and the value that would make taiwan's overlay leg a 5% test exceeds every real edge ever measured in this project. Base-sleeve COUNT is falsified as the cause (cross_asset restricted to one sleeve moves overlay q95 only to +0.061); cross-section width is ruled out (broadcast slots collapse N-independently). Mechanism unresolved — possibly the combiner re-levering a correlated near-copy of a high-Sharpe base book, i.e. a SEAL of the same shape as F2's `dsr_aug`, in which case no threshold fixes it. Report: `docs/research/crucible_u7_uplift_null_calibration_2026-07-30.md`. |
+| RC-11 | ~~HIGH~~ **WITHDRAWN 2026-07-31** | — | **The finding was an artifact of the null used to test it, not a property of the gate.** Both null-panel generators build the timing slot as a FIXED-period/FIXED-phase sinusoid, so the four overlay seeds produced four tight clusters across 150 "independent" panels (between/within variance ratio **11.8**) — an effective n of ~4, and a q95 that was one chance alignment replicated, not a null quantile. With randomized slot shapes the Taiwan overlay null moves from q95 +0.831 / 91.5% passing to **q95 −0.007 / 2.33% passing**, in line with cross_asset's 0.33%; the "~200×" collapses to ~2 pp. Base-book Sharpe was FALSIFIED as the driver and runs the *opposite* way (−0.21 ΔSR per unit SR, isolated). `uplift_min = 0.10` needs no change. Replaced by **NULL-DEGEN-01** below. Full investigation: `docs/research/crucible_rc11_resolved_degenerate_null_2026-07-31.md`. Original claim, for the record: |
+| ~~RC-11 (original text)~~ | — | `configs/crucible_corrected_contract.gates.yaml:33` (`guards.uplift_min`), `signals/generation/evolve.py:_overlay_returns` | The uplift leg's null distribution is SUBSTRATE-dependent by ~200× in its 95th percentile: cross_asset overlay q95 −0.004 (2.7% of nulls clear 0.10) vs taiwan overlay q95 **+0.831** (**37.6%** clear 0.10, null centred at +0.45). A single global floor cannot carry a stated null rate on both, and the value that would make taiwan's overlay leg a 5% test exceeds every real edge ever measured in this project. Base-sleeve COUNT is falsified as the cause (cross_asset restricted to one sleeve moves overlay q95 only to +0.061); cross-section width is ruled out (broadcast slots collapse N-independently). Mechanism unresolved — possibly the combiner re-levering a correlated near-copy of a high-Sharpe base book, i.e. a SEAL of the same shape as F2's `dsr_aug`, in which case no threshold fixes it. Report: `docs/research/crucible_u7_uplift_null_calibration_2026-07-30.md`. |
+| NULL-DEGEN-01 | MEDIUM-HIGH | `scripts/research/crucible_calibration.py:137,215`; `scripts/research/crucible_orchestrator.py:164` | **NEW 2026-07-31, and it reaches further than RC-11 did.** All three null/synthetic panel generators build the timing slot as `sin(2π·t/80) + 0.2·noise` — fixed period, fixed phase, identical on every seed. Any statistic computed over OVERLAY null draws on those substrates has an effective n near the *formula* count rather than the draw count. **`run_e1` (line 467/472) scores `_OVERLAY_NULL_SEEDS` on exactly these panels**, so E1's per-candidate null FPR inherits it: its Clopper-Pearson bound assumes independent Bernoulli trials that the overlay half does not supply, and the recorded result sits ~2% from its ceiling (per-tick 0.025, CP-upper95 0.0487 vs 0.05 — "one more false positive would have flipped it"). **NOT claiming E1 is red — it has not been re-run.** The claim is that the bound is tighter than the evidence supports; the check is re-running E1 with randomized slots. The *planted* panel (`:265`) shares the sinusoid but there it is the signal by design — that is a generalization caveat on the MDE curves ("MDE for a slow-sinusoidal timing signal"), not a degeneracy. |
 
 ---
 
