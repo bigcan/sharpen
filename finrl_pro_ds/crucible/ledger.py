@@ -271,13 +271,22 @@ class TrialLedger:
         return int(self._conn.execute("SELECT COUNT(*) FROM trial_ledger").fetchone()[0])
 
     def update_fdr_charge(self, candidate_hash: str, fdr_wealth_charged: float) -> None:
-        """Stamp the per-substrate online-FDR wealth spent on a scored trial (spec §6.1, P3). The
+        """ACCUMULATE the per-substrate online-FDR wealth spent on a scored trial (spec §6.1, P3). The
         candidate MUST already exist (the orchestrator records it during mining, then charges FDR).
         A missing hash used to be a silent no-op UPDATE — which lets the FDR audit trail diverge
         undetected (C7-08) — so it now RAISES: a charge with no ledger row is a programming error
-        upstream, not something to swallow."""
+        upstream, not something to swallow.
+
+        **Accumulates, does not overwrite (U4 follow-up).** This was a blind ``SET``, which was correct
+        while every candidate was tested exactly once. U4's power-aware re-admission breaks that
+        assumption: a re-admitted candidate is charged a SECOND LORD++ level, and a blind SET would erase
+        the first — the per-candidate trail would under-count the wealth actually spent on that
+        hypothesis, which is the same class of silent divergence C7-08 exists to prevent, arriving through
+        a different door. ``COALESCE(...,0) + ?`` is byte-identical for a first charge (NULL → 0 + x = x),
+        so no historical row or manifest changes."""
         cur = self._conn.execute(
-            "UPDATE trial_ledger SET fdr_wealth_charged = ? WHERE candidate_hash = ?",
+            "UPDATE trial_ledger "
+            "SET fdr_wealth_charged = COALESCE(fdr_wealth_charged, 0.0) + ? WHERE candidate_hash = ?",
             (float(fdr_wealth_charged), candidate_hash))
         self._conn.commit()
         if cur.rowcount == 0:

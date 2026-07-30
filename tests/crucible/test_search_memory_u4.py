@@ -172,6 +172,71 @@ def test_semantic_duplicate_detection(tmp_path: Path) -> None:
         assert not led.is_semantic_duplicate("sub(close, volume)")
 
 
+# ---------------------------------------------------- audit follow-ups (FDR trail + CR-2 laundering)
+def test_fdr_charge_accumulates_across_a_re_admission(tmp_path: Path) -> None:
+    """AUDIT FINDING (HIGH). ``update_fdr_charge`` was a blind SET, correct only while every candidate was
+    tested exactly once. A re-admitted candidate is charged a SECOND LORD++ level, and the overwrite
+    silently erased the first — the per-candidate trail under-counting the wealth actually spent, i.e. the
+    same divergence C7-08 exists to prevent, through a different door."""
+    with TrialLedger(tmp_path / "l.db") as led:
+        led.record(_rec("u1", "altdata", rejection_class=REJECTION_UNDERPOWERED, mde=3.6))
+        led.update_fdr_charge("u1", 0.05)                    # first test
+        led.update_fdr_charge("u1", 0.03)                    # re-admitted, second test
+        got = led._conn.execute(                             # noqa: SLF001 — audit-trail probe
+            "SELECT fdr_wealth_charged FROM trial_ledger WHERE candidate_hash='u1'").fetchone()[0]
+        assert got == pytest.approx(0.08), f"FDR trail lost a charge: {got}"
+        # unchanged for a first charge (NULL -> 0 + x), so no historical row shifts
+        led.record(_rec("u2", "altdata"))
+        led.update_fdr_charge("u2", 0.05)
+        assert led._conn.execute(                            # noqa: SLF001
+            "SELECT fdr_wealth_charged FROM trial_ledger WHERE candidate_hash='u2'"
+        ).fetchone()[0] == pytest.approx(0.05)
+
+
+def test_readmit_parked_rebuilds_specs_and_refuses_un_preregistered_rows(tmp_path: Path) -> None:
+    """AUDIT FINDINGS (MEDIUM ×2): the orchestrator-side re-admission path had NO test, and it would have
+    laundered a search-derived offspring into a pre-registration.
+
+    ``_readmit_parked`` must (a) rebuild a spec for a parked row that HAS a stored pre-registration,
+    preserving its ORIGINAL ``proposal_ts`` (re-stamping it would reset the CR-8 lockbox clock and make an
+    old hypothesis look fresh), (b) REFUSE a parked row with no ``spec_json`` — that genome was never
+    pre-registered, and handing it to ``author.preregister`` would write one (CR-2 laundering), and
+    (c) honour ``max_readmissions`` and short-circuit when the substrate carries no power stamp."""
+    from finrl_pro_ds.crucible.orchestrator.orchestrator import _readmit_parked
+    from finrl_pro_ds.crucible.orchestrator.substrate import PreparedSubstrate, SubstratePower
+
+    class _Sub:                                              # minimal stand-in for the Substrate fields
+        def __init__(self, ledger):
+            self.substrate_id, self.ledger = "t", ledger
+            self.search_memory_cfg, self.max_readmissions = _CFG, 8
+
+    with TrialLedger(tmp_path / "l.db") as led:
+        led.record(TrialRecord(                              # pre-registered ⇒ re-admissible
+            candidate_hash="p1", crucible_version=_V, family="altdata",
+            candidate_type="overlay", formula="rank(close)", spec_json='{"spec": 1}',
+            economic_rationale="prior", proposal_ts="2026-01-01T00:00:00", verdict="LOGGED",
+            rejection_class=REJECTION_UNDERPOWERED, implied_mde_at_test=3.6))
+        led.record(TrialRecord(                              # offspring, NO spec_json ⇒ must be refused
+            candidate_hash="o1", crucible_version=_V, family=None,
+            candidate_type="cross_sectional", formula="rank(volume)", verdict="LOGGED",
+            rejection_class=REJECTION_UNDERPOWERED, implied_mde_at_test=3.6))
+
+        power = SubstratePower(panel_T=4000, holdout_bars=1000, holdout_frac=0.25,
+                              implied_mde_delta_sr=1.0, interp_mode="grid",
+                              calibration_sweep_hash="h")
+        prepared = PreparedSubstrate(panel=None, base_returns={}, timestamps=None,  # type: ignore[arg-type]
+                                     asset_classes=(), snapshot_hash="s", power=power)
+        got = _readmit_parked(_Sub(led), prepared, None, "2026-07-30T00:00:00")  # type: ignore[arg-type]
+        assert [s.candidate_hash for s in got] == ["p1"], [s.candidate_hash for s in got]
+        assert got[0].proposal_ts == "2026-01-01T00:00:00", "re-admission must not re-stamp proposal_ts"
+        assert got[0].spec.candidate_type == "overlay" and got[0].spec.family == "altdata"
+
+        # no power stamp ⇒ nothing to compare against ⇒ no re-admission
+        unstamped = PreparedSubstrate(panel=None, base_returns={}, timestamps=None,  # type: ignore[arg-type]
+                                      asset_classes=(), snapshot_hash="s", power=None)
+        assert _readmit_parked(_Sub(led), unstamped, None, "x") == []  # type: ignore[arg-type]
+
+
 # --------------------------------------------------------------------------- CR-2 moat + migration
 def test_new_score_columns_stay_agent_blind(tmp_path: Path) -> None:
     """CRU-2: a rejection class says the holdout gate rejected AND how powerful that test was — that is
