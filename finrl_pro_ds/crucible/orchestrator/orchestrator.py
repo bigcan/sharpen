@@ -307,6 +307,7 @@ def _process_substrate(
         contract=sub.contract, corrected_cfg=sub.corrected_cfg,
         corrected_gates_hash=sub.corrected_gates_hash, lord_level=lord_level,
         search_memory_cfg=sub.search_memory_cfg,
+        search_memory_gates_hash=sub.search_memory_gates_hash,
         substrate_mde=(None if prepared.power is None else prepared.power.implied_mde_delta_sr))
 
     # --- online-FDR: charge one test per pre-registered spec (deterministic order) -----------------
@@ -398,6 +399,17 @@ def _readmit_parked(sub: Substrate, prepared: PreparedSubstrate, author: Hypothe
                                    limit=int(sub.max_readmissions))
     out: list[PreRegisteredSpec] = []
     for r in rows:
+        if not r["spec_json"]:
+            # CR-2 GUARD. A parked row with no stored pre-registration was never a pre-registered
+            # hypothesis — it is a search-derived offspring (reachable only under
+            # `eligibility.offspring_policy: all`, since `prereg_only` keeps offspring off the holdout
+            # entirely). Re-admitting it here would hand it to `author.preregister`, which writes a
+            # spec_json and a proposal_ts — laundering a genome the SEARCH found into a hypothesis that
+            # looks pre-registered. That is exactly the p-hacking the CR-2 lock exists to prevent, so
+            # refuse rather than fabricate. Such a genome can still be re-derived by the search itself.
+            log.info("re-admission skipped for %s — no stored pre-registration (offspring); CR-2 "
+                     "forbids re-admitting it as a pre-registered hypothesis", r["candidate_hash"])
+            continue
         try:
             spec = SignalSpec(
                 name=f"readmit-{r['candidate_hash']}",
