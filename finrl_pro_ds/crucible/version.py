@@ -618,7 +618,30 @@ from pathlib import Path
 # Replaced by NULL-DEGEN-01 (the same slot feeds E1's overlay seeds, so its FPR bound assumes independence
 # it lacks). Still nothing mines: every rejection classifies UNDERPOWERED because the power guard refuses
 # every real substrate — audit U8, the binding constraint.
-CRUCIBLE_VERSION = "crucible-v10.0"
+# v11.0 = PROMISING now requires a TRADED BOOK THAT MAKES MONEY (F3). `scorecard._finalize` built the
+# verdict from DSR, IC-IR, IC-t, FDR-q, optional HLZ, min_subperiod_ic_ir and multiplicity provenance
+# and NEVER consulted card.capturability — stated in the source as deliberate ("they flag, not gate"),
+# and it held only because gross rank-IC and traded-book P&L had never been observed to disagree in
+# SIGN. On 2026-07-31 they did: tw_smallcap_ivol (results/taiwan_smallcap_price, spec 27d38ce84ff5)
+# scored PROMISING with a FRICTIONLESS Sharpe of -0.627 — a long-short book that loses money at ZERO
+# cost — reconciled by decile_monotonic: False, i.e. the rank-IC lives in cells the book does not
+# weight. Frictionless is now a GATE (`capturability.min_frictionless_sharpe`, ships ACTIVE at 0.0,
+# STRICT >); net@standard stays a CAVEAT behind the opt-in `require_positive_net_standard`, because a
+# cost model is venue-specific (Taiwan's 0.30% sell tax is not Nasdaq's 10bps) while a negative
+# frictionless book is unconditional. An UNMEASURED capturability fails CLOSED, per the DSR/subperiod
+# precedent. MAJOR (verdict function), same class as the v4.0 F2b wiring. Monotone-STRICTER, so it can
+# only demote: VERIFIED by re-running both small/mid-cap campaigns on the real panel — the sole
+# PROMISING in the record (tw_smallcap_mom_rev, frictionless 1.008/1.045) SURVIVES, and the only
+# recorded verdict that moves is tw_smallcap_ivol PROMISING -> LOGGED, which is the defect itself.
+# Wiring a gate after results are known is legitimate here in the anti-goal-post-move DIRECTION: the
+# candidate that motivated the change is the one it demotes. NO gate byte moved — the three sealed
+# moats 519158fa1450 / 22a18172be1a / 0ccf6dd584f0 (and the unsealed probe file) predate the key and
+# inherit it by deep-merge from Gates._DEFAULTS; a test asserts their bytes still do NOT contain it.
+# E1/E2 and the Tier-C F1/F2 seals gate on `combination_fitness`, which is untouched — no E1 re-run
+# is owed (verified: scripts/research/crucible_calibration.py imports no scorecard symbol).
+# to_markdown gained a `fricSh` column: the 2026-07-31 miss was partly a REPORTING failure, since the
+# table that carried the PROMISING showed netSh@std and costWall but never the frictionless Sharpe.
+CRUCIBLE_VERSION = "crucible-v11.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"

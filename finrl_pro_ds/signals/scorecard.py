@@ -3,11 +3,13 @@
 ``evaluate_batch`` runs every candidate through T0 (hygiene) + T1 (gross power) + T2
 (capturability) + T3 (robustness) [+ T5 (orthogonality) if a FactorBook is supplied], then
 T4 (batch deflation, ``n_trials`` = #candidates with a finite IC-IR), assigns a verdict from
-deflation (DSR/FDR) + gross power (IC-IR/t) + subperiod robustness (crucible-v4.0),
-and ranks lexicographically: primary = deflated IC-IR (DSR), then raw IC-IR, then
-orthogonality (less correlated wins), then subperiod robustness. The scorecard ALWAYS
-reports gross IC even for cost-blocked signals (LOGGED, not dropped), and the verdict tops
-out at PROMISING — never GO (promotion needs survivorship-free re-validation + a Tier-2
+deflation (DSR/FDR) + gross power (IC-IR/t) + subperiod robustness (crucible-v4.0) +
+frictionless capturability (crucible-v11.0), and ranks lexicographically: primary = deflated
+IC-IR (DSR), then raw IC-IR, then orthogonality (less correlated wins), then subperiod
+robustness. The scorecard ALWAYS reports gross IC even for cost-blocked signals (LOGGED, not
+dropped) — but since v11.0 a signal whose long-short book loses money at ZERO cost cannot be
+PROMISING, because that is not a cost verdict at all (see ``_finalize``'s F3 block). The verdict
+tops out at PROMISING — never GO (promotion needs survivorship-free re-validation + a Tier-2
 audit; ADR-3 / CLAUDE.md).
 """
 from __future__ import annotations
@@ -133,10 +135,37 @@ def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
     if defl is None or not np.isfinite(dsr):
         caveats.append("deflation undefined (batch too small for DSR)")
 
-    # capturability caveats (do not change the gross-IC verdict — they flag, not gate)
+    # F3 (v11.0) — Tier-2 capturability. This block used to read "capturability caveats (do not
+    # change the gross-IC verdict — they flag, not gate)". That was deliberate, and it held only
+    # because gross rank-IC and traded-book P&L had never been seen to disagree in SIGN. On
+    # 2026-07-31 they did: `tw_smallcap_ivol` scored PROMISING with frictionless Sharpe -0.627 and
+    # net@standard -0.837 — a book that loses money before a single basis point is charged
+    # (results/taiwan_smallcap_price, spec 27d38ce84ff5; pre-registration §6.2). The reconciliation
+    # is `decile_monotonic: False`: a real rank-IC can live in cells a long-short book does not
+    # weight, so "detectable ranking" and "makes money" are different claims. Two legs, and the
+    # asymmetry between them is the whole design:
+    #   * FRICTIONLESS is a GATE. No cost model, no venue, no assumption enters it, so a
+    #     non-positive value says unconditionally that the structure never becomes a position that
+    #     makes money. No reading of "promising" survives that.
+    #   * NET@standard stays a CAVEAT, gating only under `require_positive_net_standard`, because a
+    #     cost model IS venue-specific (Taiwan's 0.30% sell-side tax is not Nasdaq's 10bps) and a
+    #     cost-blocked signal can still be a real research object on another venue.
+    # As with the DSR and subperiod legs, an UNMEASURED capturability is NOT a pass.
+    fric = (card.capturability.frictionless_sharpe if card.capturability is not None
+            else float("nan"))
+    fric_ok = bool(np.isfinite(fric) and fric > gates.min_frictionless_sharpe)
+    std = card.capturability.by_cost.get("standard") if card.capturability is not None else None
+    net_std = float(std.net_sharpe) if std is not None else float("nan")
+    net_ok = bool(np.isfinite(net_std) and net_std > 0.0)
+    if not np.isfinite(fric):
+        caveats.append("capturability unmeasured (no frictionless Sharpe) — cannot confirm the "
+                       "traded book makes money before costs")
+    elif not fric_ok:
+        caveats.append(f"NOT CAPTURABLE: frictionless Sharpe {fric:.3f} <= "
+                       f"{gates.min_frictionless_sharpe:g} — the long-short book loses money at "
+                       f"ZERO cost (gross IC without traded-book P&L)")
     if card.capturability is not None:
-        std = card.capturability.by_cost.get("standard")
-        if std is not None and np.isfinite(std.net_sharpe) and std.net_sharpe <= 0:
+        if np.isfinite(net_std) and not net_ok:
             caveats.append("cost-blocked: net Sharpe <= 0 at standard cost "
                            "(structure without capture)")
         elif (np.isfinite(card.capturability.cost_wall)
@@ -186,6 +215,8 @@ def _finalize(card: SignalScorecard, defl: Deflation | None, gates: Gates,
         and np.isfinite(defl.fdr_q) and defl.fdr_q <= gates.fdr_q_max
         and (hlz_pass or not gates.require_hlz)
         and np.isfinite(msi) and msi >= gates.min_subperiod_ic_ir
+        and fric_ok                                    # F3 — the traded book must make money
+        and (net_ok or not gates.require_positive_net_standard)
         and (declared or not require_declared)
     )
     if promising and not hlz_pass:
@@ -322,10 +353,14 @@ def to_markdown(rs: RankedScorecard) -> str:
         f"  ·  deflation multiplicity: **{rs.n_multiplicity}** "
         f"({rs.multiplicity_source}{'; ' + rs.multiplicity_provenance if rs.multiplicity_provenance else ''})",
         f"- survivorship-free data: **{sf}**  (False ⇒ all results are UPPER BOUNDS)", "",
+        # fricSh sits next to the verdict-bearing columns deliberately: it is a GATE leg since
+        # v11.0, and the 2026-07-31 finding was partly a reporting failure — the table that carried
+        # `tw_smallcap_ivol`'s PROMISING showed netSh@std and costWall but never the frictionless
+        # Sharpe that made it not a signal at all.
         "| # | signal | family | verdict | IC-IR | DSR | Neff | FDR-q | BHY-q | HLZ "
-        "| cpcvOOS | netSh@std | costWall | breadth |",
+        "| cpcvOOS | fricSh | netSh@std | costWall | breadth |",
         "|---|--------|--------|---------|-------|-----|------|-------|-------|-----"
-        "|---------|-----------|----------|---------|",
+        "|---------|--------|-----------|----------|---------|",
     ]
     rnk = 0
     for c in rs.cards:
@@ -347,8 +382,10 @@ def to_markdown(rs: RankedScorecard) -> str:
             if c.deflation is not None else "—"
         cpcv = (f"{c.cpcv.oos_sharpe_mean:.2f}" if c.cpcv is not None
                 and np.isfinite(c.cpcv.oos_sharpe_mean) else "—")
-        nsh = cw = "—"
+        nsh = cw = fsh = "—"
         if c.capturability is not None:
+            if np.isfinite(c.capturability.frictionless_sharpe):
+                fsh = f"{c.capturability.frictionless_sharpe:.2f}"
             std = c.capturability.by_cost.get("standard")
             if std is not None and np.isfinite(std.net_sharpe):
                 nsh = f"{std.net_sharpe:.2f}"
@@ -360,7 +397,7 @@ def to_markdown(rs: RankedScorecard) -> str:
         else:
             num = "—"
         lines.append(f"| {num} | {c.name} | {c.family} | {c.verdict} | {ir} | {dsr} | {neff} "
-                     f"| {q} | {qb} | {hlz} | {cpcv} | {nsh} | {cw} | {br} |")
+                     f"| {q} | {qb} | {hlz} | {cpcv} | {fsh} | {nsh} | {cw} | {br} |")
     if rs.cards and rs.cards[0].caveats:
         lines += ["", "**Caveats (top signal):** " + "; ".join(rs.cards[0].caveats)]
     return "\n".join(lines)

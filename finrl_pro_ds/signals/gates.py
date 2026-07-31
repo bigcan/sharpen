@@ -25,6 +25,18 @@ _DEFAULTS: dict = {
     "capturability": {
         "cost_models": {"frictionless": 0.0, "standard": 0.0010, "harsh": 0.0025},
         "cost_wall_caution": 0.30,
+        # F3 (crucible-v11.0) — the TRADED-BOOK floor. PROMISING requires the long-short book to
+        # make money at ZERO cost: frictionless_sharpe STRICTLY greater than this. Strict, because
+        # the claim being blocked is "non-positive", and a book that merely fails to lose money has
+        # not shown it makes any. Ships ACTIVE at 0.0; a substrate may pre-register a different
+        # floor in its own gates YAML (the three CRU-1-sealed files predate the key and inherit it
+        # by deep-merge, so no sealed byte moves).
+        "min_frictionless_sharpe": 0.0,
+        # Whether net-of-cost Sharpe at the `standard` model must ALSO be positive. Ships FALSE:
+        # a cost model is venue-specific (Taiwan's 0.30% sell-side tax is not Nasdaq's 10bps), so a
+        # cost-blocked signal stays a real research object and is caveated, not demoted. Turn on for
+        # any pathway whose verdicts gate capital. Monotone-STRICTER either way.
+        "require_positive_net_standard": False,
     },
     "neutralization": {"winsor_pct": [0.01, 0.99], "controls": ["sector", "size"]},
     "promotion": {"survivorship_free_required": True, "tier2_audit_required": True},
@@ -65,6 +77,9 @@ class Gates:
     winsor_pct: tuple[float, float]
     cost_models: dict
     cost_wall_caution: float
+    min_frictionless_sharpe: float       # F3 — traded-book floor; PROMISING needs a book that
+                                         # makes money at ZERO cost (STRICT >, see _DEFAULTS)
+    require_positive_net_standard: bool  # F3 — opt-in: also require net@standard > 0
     survivorship_free_required: bool
     tier2_audit_required: bool
     raw: dict
@@ -111,6 +126,9 @@ class Gates:
             winsor_pct=(float(neu["winsor_pct"][0]), float(neu["winsor_pct"][1])),
             cost_models=dict(m["capturability"]["cost_models"]),
             cost_wall_caution=float(m["capturability"]["cost_wall_caution"]),
+            min_frictionless_sharpe=float(m["capturability"]["min_frictionless_sharpe"]),
+            require_positive_net_standard=bool(
+                m["capturability"]["require_positive_net_standard"]),
             survivorship_free_required=bool(m["promotion"]["survivorship_free_required"]),
             tier2_audit_required=bool(m["promotion"]["tier2_audit_required"]),
             raw=m,

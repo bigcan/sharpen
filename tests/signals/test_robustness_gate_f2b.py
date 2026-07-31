@@ -16,6 +16,8 @@ import numpy as np
 
 from finrl_pro_ds.signals import Gates, SignalSpec
 from finrl_pro_ds.signals.eval_harness import (
+    Capturability,
+    CostResult,
     Deflation,
     GrossPower,
     HorizonIC,
@@ -137,8 +139,13 @@ def _card(min_sub: float, *, subperiods: tuple[float, ...] = ()) -> SignalScorec
     gross = GrossPower(by_horizon={1: hp}, primary_horizon=1, breadth=0.5, decay_halflife=5.0,
                        primary_ic_series=np.zeros(3), primary_ic_days=np.zeros(3, dtype=np.int64))
     rob = Robustness(4, subperiods or (min_sub,) * 4, min_sub, min_sub, 0.2, 504, (1000,) * 4)
+    # A capturable book, so the v11.0 F3 leg is satisfied and ROBUSTNESS alone decides the verdict
+    # (before v11.0 `_finalize` ignored capturability entirely and this argument was absent).
+    cap = Capturability({"frictionless": CostResult("frictionless", 1.0, 1.3, 4.0, -0.1),
+                         "standard": CostResult("standard", 0.6, 1.1, 4.0, -0.2)}, 1.0, 0.4)
     return SignalScorecard("s", "technical", "hash", HygieneResult(True, True, 0, 1000, True, ()),
-                           gross, None, float("nan"), "PENDING", (), robustness=rob)
+                           gross, None, float("nan"), "PENDING", (), capturability=cap,
+                           robustness=rob)
 
 
 def _defl() -> Deflation:
