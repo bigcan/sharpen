@@ -76,7 +76,7 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # which CONFIRMED uplift_min at 0.10 (comment-only hash move on the corrected-contract file,
     # 2f4639a48415 -> e60079a1d94b) and surfaced RC-11: the uplift null is substrate-dependent by ~200x
     # and the Taiwan overlay path is un-calibrated. Still nothing mines — audit U8 binds.
-    assert CRUCIBLE_VERSION == "crucible-v10.0"
+    assert CRUCIBLE_VERSION == "crucible-v11.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 

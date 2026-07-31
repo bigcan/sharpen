@@ -575,7 +575,7 @@ from pathlib import Path
 # Replaced by NULL-DEGEN-01 (the same slot feeds E1's overlay seeds, so its FPR bound assumes independence
 # it lacks). Still nothing mines: every rejection classifies UNDERPOWERED because the power guard refuses
 # every real substrate — audit U8, the binding constraint.
-CRUCIBLE_VERSION = "crucible-v10.0"
+CRUCIBLE_VERSION = "crucible-v11.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
