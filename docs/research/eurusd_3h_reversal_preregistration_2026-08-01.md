@@ -81,6 +81,66 @@ cell is recorded as tested for **both** major directional mechanisms — continu
 and closed for directional signals. It is not re-probed with other z-windows, other bounding
 functions, session filters, or spread conditioners.
 
-## 7. Results
+## 7. Results — **NO-GO**. Faint gross signature, not significant, destroyed by turnover.
 
-*(Empty at commit time on purpose — verifiable from git history.)*
+Run 2026-08-01, `results/eurusd_3h/eurusd_3h_reversal.json`. 47,433 bars, 2004-2026.
+
+| | G1 reversal | G2 control |
+|---|---|---|
+| **GROSS Sharpe** | **+0.2718** | −0.0119 |
+| gross CI95 | **[−0.109, +0.660]** — straddles zero | [−0.434, +0.358] — straddles zero ✓ |
+| net @0.256 bp | **−0.4565** | −0.6666 |
+| net @0.5 bp | −1.1615 | −1.2904 |
+| turnover | **1,875/yr** | 2,344/yr |
+| subperiods (net) | [−0.479, −0.419, −0.340, −0.593] → **0/4** | 0/4 |
+
+| pre-committed bar | result |
+|---|---|
+| net Sharpe ≥ 0.30 | ✗ FAIL (−0.457) |
+| net CI excludes zero | ✓ pass (but excludes zero on the **negative** side) |
+| ≥3 of 4 subperiods positive | ✗ FAIL (0/4) |
+| positive at 0.5 bp | ✗ FAIL |
+| control gross CI includes zero | ✓ **PASS** |
+
+**NO-GO.**
+
+### 7.1 The corrected control worked
+
+G2's **gross** Sharpe is −0.0119 with CI [−0.434, +0.358] — a clean null. Under F1's mis-specified
+*net*-based condition this same control would again have read "significant" (net CI
+[−1.099, −0.287]) and falsely flagged the run as invalid. The correction recorded yesterday
+demonstrably does its job.
+
+### 7.2 What the gross +0.272 is, and is not
+
+G1's gross Sharpe is the **largest gross signature found on this cell**, and it points in the
+direction the literature predicted — reversal, not continuation. That is a coherent finding rather
+than noise-shaped nothing.
+
+**It is not an edge, on three independent grounds:**
+1. **Not significant** — the gross CI [−0.109, +0.660] straddles zero.
+2. **Below the detection floor** — the cell's MDE is ≈0.45; +0.272 sits under it, so even the
+   arithmetic says this cannot be reliably distinguished from zero here.
+3. **Economically dead** — one-bar holding is maximum turnover for this cell (1,875/yr), and at the
+   *measured* 0.256 bp spread that converts +0.272 gross into **−0.457 net**, negative in all four
+   subperiods.
+
+The §4 prior held exactly: *"one-bar holding means maximum turnover for this cell, so the cost
+budget is at its tightest."*
+
+**Recorded as an observation for a possible FUTURE pre-registration, explicitly not claimed here:**
+a lower-turnover expression of the same reversal mechanism would face a smaller cost drag. That is
+*not* pursued — §6's stop rule bars re-probing with other z-windows or bounding functions, and
+chasing a sub-MDE, statistically-insignificant gross number by re-parameterising it is precisely
+the N-grab this campaign exists to refuse.
+
+### 7.3 Ledger (durable)
+
+- **EURUSD 3-hour one-bar reversal (2004-2026, free Dukascopy): FALSIFIED.** Gross +0.272 (CI
+  straddles zero, below the 0.45 MDE), net −0.457, 0/4 subperiods.
+- **The EURUSD 3-hour cell is now CLOSED for directional signals.** Both major mechanisms have been
+  pre-registered and tested on it: continuation (F1, gross −0.020) and reversal (G1, gross +0.272,
+  insignificant). Per §6 there are no further variants.
+- **The infrastructure remains.** 47,433 verified bars of free 22.5-year tick-derived data, a
+  measured MDE curve, and a working fetcher persist for any future non-directional hypothesis
+  (e.g. volatility or spread-state conditioning), which would need its own pre-registration.
