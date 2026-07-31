@@ -79,6 +79,43 @@ BTC/ETH-only subset.
 Not survivorship-free. A pass earns **forward-incubate + Tier-2 before any capital**, and does not
 by itself authorise changing TAILWIND.
 
-## 7. Results
+## 7. Results — **NO-GO** (correlation axis confirmed; no return to contribute)
 
-*(Empty at commit time on purpose — verifiable from git history.)*
+Run 2026-07-31, `results/crypto_xsec/crypto_tsmom_sleeve.json`. 10 coins, 1,579 days, **42 monthly
+rebalances** after warmup, turnover 8.52/yr, 1,083 overlapping days with the cross-asset sleeve.
+
+| pre-committed bar (§3) | measured | |
+|---|---|---|
+| standalone net SR ≥ 0.30 @10bp | **−0.067** | ✗ **FAIL** |
+| correlation to cross-asset TSMOM ≤ 0.60 | **−0.063** | ✓ **PASS** |
+| combined risk-parity SR > 0.66 | **0.425** | ✗ **FAIL** |
+
+Standalone by cost: frictionless −0.054 · 5bp −0.060 · 10bp −0.067 · 20bp −0.080. Ann vol 44.4%,
+max DD −74.8%. On the overlap: cross-asset TSMOM 0.833, T2 −0.252, combined 0.425 (DD −10.7%).
+
+### What this establishes
+
+**The diagnosis from T1 was correct, and it was not enough.** T1 failed purely on correlation
+(ρ +0.693); T2 was chosen to fix exactly that axis, and it did — **ρ −0.063, essentially
+uncorrelated**, the best diversification property of any sleeve tested today. But a sleeve needs
+*both* low correlation and positive return, and T2 has none of the second: crypto trend-following
+**loses money** across 2022-2026 at every cost level, including frictionless.
+
+An uncorrelated sleeve with a negative Sharpe does not diversify a book, it dilutes it — the
+combined 0.425 is well below the 0.601 the cross-asset sleeve earns alone.
+
+**Weight this negative as §4 committed in advance:** 42 monthly rebalances over ~3.5 post-warmup
+years is a thin decision count, the window is roughly one crypto cycle, BTC/ETH dominate the common
+variance, and the panel is not survivorship-free. This is scouting-grade evidence that this
+*parameterisation* of crypto trend does not work on this window — not a general claim that crypto
+trend-following is dead.
+
+### Ledger (durable)
+
+- **Crypto time-series momentum (house TSMOM parameterisation, 10 perps, 2022-2026): NO-GO.**
+  Negative standalone Sharpe at every cost level. Per §5 there is no T3 and no re-probe with
+  different lookbacks, a vol target, a funding overlay, or a BTC/ETH-only subset.
+- **The two-condition lesson, now measured from both sides.** T1: high return (0.409), high
+  correlation (0.693) ⇒ dilutes. T2: ideal correlation (−0.063), no return (−0.067) ⇒ dilutes. A
+  diversifying sleeve needs both, and this session found neither combination. Any future sleeve
+  proposal should state **both** bars before measuring, as T1 and T2 did.
