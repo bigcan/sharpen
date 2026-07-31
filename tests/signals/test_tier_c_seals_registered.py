@@ -17,6 +17,8 @@ import pandas as pd
 
 from finrl_pro_ds.signals import Gates
 from finrl_pro_ds.signals.eval_harness import (
+    Capturability,
+    CostResult,
     CPCVResult,
     Deflation,
     GrossPower,
@@ -108,8 +110,14 @@ def _promising_card(frac_paths_positive: float, oos_p05: float) -> SignalScoreca
                       oos_sharpe_p05=oos_p05, frac_paths_positive=frac_paths_positive,
                       embargo_days=5, purge_horizon=1)
     rob = Robustness(4, (0.2,) * 4, 0.2, 0.2, 0.2, 504, (1000,) * 4)   # robustness gate satisfied
+    # ...and a capturable book, so the v11.0 F3 leg is satisfied too and the CPCV distribution is
+    # the only thing left that could move this verdict — which is exactly what C1 below asserts it
+    # does not do (before v11.0 `_finalize` ignored capturability, so this argument was absent).
+    cap = Capturability({"frictionless": CostResult("frictionless", 1.0, 1.3, 4.0, -0.1),
+                         "standard": CostResult("standard", 0.6, 1.1, 4.0, -0.2)}, 1.0, 0.4)
     return SignalScorecard("s", "technical", "h", HygieneResult(True, True, 0, 1000, True, ()),
-                           gross, None, float("nan"), "PENDING", (), robustness=rob, cpcv=cpcv)
+                           gross, None, float("nan"), "PENDING", (), capturability=cap,
+                           robustness=rob, cpcv=cpcv)
 
 
 def _defl_pass() -> Deflation:

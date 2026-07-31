@@ -110,7 +110,7 @@ days — identical to the P1 campaign. Coverage 99.9% / 100.0% of active cells.
 | CPCV paths positive | 20% | 7% |
 | recent-2y IC-IR | −0.069 | −0.151 |
 | subperiod IC-IR | [−0.017, 0.32, −0.066] | [0.14, 0.009, 0.108] |
-| harness verdict | LOGGED | "PROMISING" (see §6.2) |
+| harness verdict | LOGGED | "PROMISING" as run; **LOGGED** since `crucible-v11.0` (see §6.2) |
 
 ### 6.1 Why both fail: structure without capture
 
@@ -143,6 +143,39 @@ detectable gross rank-IC", not "tradeable."** P1 happened to be genuinely captur
 1.008, net 0.529), so the distinction never bit — but nothing in the verdict logic enforced that,
 and R2 is a live demonstration that a money-losing book can carry the label. Any future citation of
 a PROMISING result should quote the frictionless and net Sharpe alongside it.
+
+#### 6.2.1 CLOSED — `crucible-v11.0` (2026-07-31)
+
+The gap is fixed. `capturability.min_frictionless_sharpe` (ships **active at 0.0**, strict `>`) is
+now a leg of the `promising` predicate, so a signal whose long-short book loses money at zero cost
+cannot carry the label. `net@standard` stays a **caveat**, gating only under the opt-in
+`capturability.require_positive_net_standard` — a cost model is venue-specific (Taiwan's 0.30%
+sell-side tax is not Nasdaq's 10bps), whereas a negative frictionless book is unconditional. An
+unmeasured capturability fails **closed**, per the DSR / min-subperiod precedent.
+
+Verified by re-running both campaigns on the real panel, not by argument:
+
+| | frictionless | verdict before | verdict after |
+|---|---|---|---|
+| `tw_smallcap_mom_rev` (P1) | +1.045 | PROMISING | **PROMISING** (unchanged) |
+| `tw_smallcap_ivol` (R2) | −0.627 | PROMISING | **LOGGED** |
+| `tw_smallcap_st_reversal` (R1) | −0.182 | LOGGED | LOGGED |
+
+The change is monotone-stricter, so it can only demote; **R2 is the only recorded verdict that
+moves**. Wiring a gate after results are known is legitimate in this direction — the candidate that
+motivated the change is the one it demotes. No gates-YAML byte was edited: the three CRU-1-sealed
+files and this campaign's own sibling file predate the key and inherit it by deep-merge, and a test
+asserts their bytes still do not contain it, so `0ccf6dd584f0` and the funnel moats are untouched.
+`to_markdown` also gained a `fricSh` column — the miss was partly a reporting failure, since the
+table that carried R2's PROMISING showed `netSh@std` and `costWall` but never the frictionless
+Sharpe that made it not a signal at all.
+
+Note for anyone re-running P1: its frictionless Sharpe reads **1.045** today against the **1.008**
+recorded on 2026-07-16, on an identical panel (same spec hashes, same 4017 liquid days). That drift
+is **pre-existing and unrelated to this gate** — a control run on the pre-v11.0 source reproduces
+1.045 exactly. It is not explained by any commit to `tier2_capturability`, which is unchanged; the
+likeliest source is the v7.1 per-name `(T,N)` alt-data bridge changing how the alt-data slots are
+assembled. Worth its own reproducibility check; the verdict is unaffected either way.
 
 ### 6.3 Ledger entries (durable — do not re-test)
 

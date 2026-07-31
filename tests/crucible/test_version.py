@@ -76,7 +76,14 @@ def test_versions_are_distinct_and_tagged_form() -> None:
     # which CONFIRMED uplift_min at 0.10 (comment-only hash move on the corrected-contract file,
     # 2f4639a48415 -> e60079a1d94b) and surfaced RC-11: the uplift null is substrate-dependent by ~200x
     # and the Taiwan overlay path is un-calibrated. Still nothing mines — audit U8 binds.
-    assert CRUCIBLE_VERSION == "crucible-v10.0"
+    # v11.0 (F3) closes the last "declared but unread" gap in the SCORECARD verdict: capturability was
+    # computed on every card and consulted by nothing, so tw_smallcap_ivol scored PROMISING on
+    # 2026-07-31 with a frictionless Sharpe of -0.627 (a book that loses money at ZERO cost). The
+    # frictionless leg is now a gate; net@standard stays a caveat behind an opt-in flag, since cost
+    # models are venue-specific while a negative frictionless book is unconditional. MAJOR (verdict
+    # function) and monotone-STRICTER — verified on the real panel: the sole recorded PROMISING
+    # (tw_smallcap_mom_rev) survives, and ivol is the only recorded verdict that moves.
+    assert CRUCIBLE_VERSION == "crucible-v11.0"
     assert CRUCIBLE_BASELINE_VERSION == "crucible-v1.0"
     assert CRUCIBLE_VERSION != CRUCIBLE_BASELINE_VERSION
 
