@@ -55,11 +55,16 @@ DIVISOR = {"JPY": 1e3}
 
 
 def _divisor(instr: str) -> float:
+    """Scaled-int divisor. Getting this wrong is SILENT — it yields prices off by 10^3 with no
+    error (S&P decoded as 2,114,349 instead of 2114.3 before this was corrected). Always sanity
+    -check a decoded price against a known level for any NEW instrument family."""
     if instr.endswith("JPY"):
-        return DIVISOR["JPY"]
-    if len(instr) == 6 and instr.isalpha():        # FX pair
+        return 1e3
+    if len(instr) == 6 and instr.isalpha():        # 5-decimal FX pair
         return 1e5
-    return 1.0                                      # index / metal / energy CFD
+    if instr.startswith(("XAU", "XAG")):
+        return 1e2                                  # metals (verified: XAUUSD -> ~1188 in Jun-2015)
+    return 1e3                                      # index / energy CFD (verified S&P, DAX)
 
 
 def fetch_hour(instr: str, when: dt.datetime, session: requests.Session,
