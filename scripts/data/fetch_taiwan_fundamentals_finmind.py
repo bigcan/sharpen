@@ -249,6 +249,51 @@ def fetch_margin_short(sid: str, start: str, end: str | None, token: str) -> pd.
     return out.sort_values("date").reset_index(drop=True)
 
 
+def fetch_institutional(sid: str, start: str, end: str | None, token: str) -> pd.DataFrame:
+    """``TaiwanStockInstitutionalInvestorsBuySell`` → per-name daily institutional NET flow.
+
+    Long format in (one row per date x investor type), wide out:
+    ``[date, stock_id, foreign_net, trust_net, dealer_net, total_net, avail_date]``.
+
+    Investor-type labels are grouped rather than matched exactly because FinMind carries several
+    dealer sub-types (``Dealer_self``, ``Dealer_Hedging``) and has renamed ``Foreign_Investor`` /
+    ``Foreign_Dealer_Self`` over time; an exact-match map silently drops a category and would
+    understate the flow.
+
+    ``avail_date = date + 1 business day``: TWSE publishes T86 AFTER the close, so the first
+    session it can be traded on is the next one (same T+1 convention as margin/short, LEAK-2).
+    """
+    df = _finmind_get("TaiwanStockInstitutionalInvestorsBuySell", sid, start, end, token)
+    if df.empty:
+        return df
+    _assert_cols(df, {"date", "name", "buy", "sell"},
+                 "TaiwanStockInstitutionalInvestorsBuySell", sid)
+    d = df.copy()
+    d["net"] = pd.to_numeric(d["buy"], errors="coerce") - pd.to_numeric(d["sell"], errors="coerce")
+    lab = d["name"].astype(str).str.lower()
+    # group -> boolean mask over the long rows
+    groups = {
+        "foreign_net": lab.str.contains("foreign"),
+        "trust_net": lab.str.contains("trust"),
+        "dealer_net": lab.str.contains("dealer"),
+    }
+    # a "foreign dealer" row is foreign AND dealer; count it once, as foreign (it is foreign flow)
+    groups["dealer_net"] = groups["dealer_net"] & ~groups["foreign_net"]
+    d["date"] = pd.to_datetime(d["date"])
+    parts = {}
+    for col, mask in groups.items():
+        parts[col] = d.loc[mask].groupby("date")["net"].sum()
+    out = pd.DataFrame(parts).sort_index()
+    if out.empty:
+        return pd.DataFrame()
+    out = out.fillna(0.0)
+    out["total_net"] = out.sum(axis=1)
+    out = out.reset_index().rename(columns={"index": "date"})
+    out.insert(1, "stock_id", str(sid))
+    out["avail_date"] = _avail_plus_bdays(out["date"], 1)   # T86 published after the close
+    return out.sort_values("date").reset_index(drop=True)
+
+
 def fetch_dividends(sid: str, start: str, end: str | None, token: str) -> pd.DataFrame:
     """``TaiwanStockDividendResult`` → ``[ex_date, stock_id, amount]`` (realized ex-dividend cash drop).
 
@@ -304,6 +349,7 @@ _CHANNELS = {
     "margin_short": ("margin_short.parquet", fetch_margin_short),
     "shareholding": ("shareholding.parquet", fetch_shareholding),
     "dividends": ("dividends.parquet", fetch_dividends),
+    "institutional": ("institutional.parquet", fetch_institutional),
 }
 
 
