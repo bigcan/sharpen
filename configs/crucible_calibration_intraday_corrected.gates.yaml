@@ -1,0 +1,89 @@
+# Pre-registered grids for the Crucible INTRADAY power probe under the CORRECTED contract
+# (scripts/research/crucible_intraday_power.py --contract corrected).
+#
+# WHY A SEPARATE FILE. `configs/crucible_calibration_intraday.gates.yaml` is the pre-registration
+# the 2026-07-13 Stage-0 Part A NO-GO was measured against, under the SHIPPED contract. That file
+# must stay byte-stable so that verdict reproduces (it already does — the shipped arm re-runs
+# bit-for-bit after the v6.0-contract wiring). This file re-registers the grids for the corrected
+# contract, whose power is materially different and whose crossing therefore lands in a different
+# region of beta.
+#
+# Neither file is part of the frozen funnel gates_hash (CRU-1 519158fa1450): these are synthetic
+# SWEEP grids. The funnel FitnessConfig mechanics still load from signal_eval.gates.yaml, and the
+# corrected contract's DECISION thresholds still load from crucible_corrected_contract.gates.yaml.
+#
+# WHAT THE FIRST CORRECTED RUN SHOWED (2026-07-31, the reason this file exists):
+#   N_eff:   500     1000    2000    4000    8000
+#   MDE:     1.149   1.160   1.143   0.562   0.569
+#   @beta:   0.005   0.005   0.005   0.003   0.003
+# MDE is a STAIRCASE on the beta ladder, not a curve: it can only take the realized-ΔSR value of
+# whichever grid beta the 80%-power crossing lands on. The apparent "plateau then cliff then
+# plateau" is therefore a quantization artifact, NOT a measured shape — the true MDE at N_eff=8000
+# lies in (ΔSR(0.002), ΔSR(0.003)] ≈ (0.38, 0.57]. Since the 0.50 ceiling sits INSIDE that
+# interval, the coarse grid literally cannot decide the gate. Hence the refinement below.
+
+harness_version: crucible-intraday-power-corrected-v1
+
+# ---- Shared synthetic-substrate knobs (identical to the shipped-contract file) ----------
+substrate:
+  t: 756                 # unused by the sweep; kept for load_calib
+  n: 12
+  n_feature_slots: 4
+  hold_horizon: 21
+
+evolve_budget:
+  rng_seed: 7
+  pop_size: 24
+  n_generations: 2
+  ls_min_names: 6
+  elite_frac: 0.30
+  cost_bps: 0.0010
+  holdout_frac: 0.25
+  holdout_embargo_days: 21
+
+# ---- E1/E2 blocks: unused here, present so load_calib() parses cleanly -------------------
+e1_null:
+  n_panels: 60
+  ci_alpha: 0.05
+  null_fpr_max: 0.01
+  null_tick_fpr_max: 0.05
+e2_power:
+  n_seeds: 40
+  beta_grid: [0.0, 0.002, 0.004, 0.008, 0.015, 0.025, 0.040]
+  gate_probe_gen_n_eff: 50
+  power_target: 0.80
+  power_min: 0.80
+  mde_delta_sr_max: 1.00
+
+intraday_power:
+  # DEEPER than the shipped file's top anchor. Justified by real data on disk: TX futures carry
+  # 1.86M 1-min / 626k 3-min / 125k 15-min bars (2019-01→2026-06), so holdout N_eff at tradeable
+  # holdings reaches the 10^4–10^5 range. T=128000 keeps the frontier an INTERPOLATION rather than
+  # the fragile extrapolation the shipped run had to use at its top anchor.
+  # Sized to make TX's REAL operating points INTERPOLATE rather than refuse. Holdout = 0.25*T and
+  # N_eff = holdout/(2H-1), so with TX 1-min (1,859,954 bars -> holdout 464,988):
+  #     15-min holding -> N_eff 16,034   |   5-min holding -> N_eff 51,665
+  # The first corrected run topped out at N_eff 16,000, so BOTH of those landed in `unmeasured_high`
+  # and the production guard refuses them (correctly — fail-closed). T=256000 -> N_eff 64,000 puts
+  # both inside the measured span. This is the "extend the sweep" unblock interp_mde's own docstring
+  # names; it is NOT raising the ceiling, which stays 0.50.
+  primary_h1_t_grid: [16000, 32000, 64000, 128000, 256000]
+  # Validation cells: H>1 must land on the H=1 curve at matched N_eff (holdout/(2H-1)).
+  #   [46000,12] -> 11500/23 = 500 ; [92000,12] -> 23000/23 = 1000 ; [368000,12] -> 92000/23 = 4000
+  # The third cell is NEW and deliberate: the shipped run only validated at N_eff 500/1000, i.e.
+  # entirely inside the flat low-N region, and one of those two cells FAILED (the cont-131 audit's
+  # TA-3 finding). The corrected contract's crossing moves at N_eff>=4000, so the proxy must be
+  # validated THERE — validating only where nothing happens is what made TA-3 uninformative.
+  validation_cells: [[46000, 12], [92000, 12], [368000, 12]]
+  # REFINED beta grid. Dense through [0.0012, 0.005] where the corrected crossing lives, so the
+  # staircase step is small relative to the 0.50 ceiling instead of straddling it.
+  beta_grid: [0.0, 0.0005, 0.0008, 0.0010, 0.0012, 0.0014, 0.0016, 0.0018, 0.0020,
+              0.0023, 0.0026, 0.0030, 0.0035, 0.0040, 0.0050, 0.0080, 0.0130]
+  n_seeds: 12            # up from 8: an 80%-power crossing read off 8 seeds has +-1 detection slop
+  power_target: 0.80
+  gate_probe_gen_n_eff: 50
+  mde_ceiling: 0.50      # UNCHANGED — the ceiling is never moved to manufacture an ALLOW (v8.0)
+  full_panel_bars: 1859954   # REAL: TX 1-min bars on disk, not the 4.86M 5-sec aspiration
+  # Holdings in 1-MINUTE bars (the substrate's native unit), so H maps directly to minutes held.
+  frontier_h_grid: [3, 5, 15, 30, 60]
+  tradeable_hold_bars_max: 60

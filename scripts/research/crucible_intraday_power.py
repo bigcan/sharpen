@@ -47,6 +47,7 @@ if str(ROOT) not in sys.path:
 
 # Reuse the REAL harness gate path — nothing re-implemented.
 from scripts.research.crucible_calibration import (  # noqa: E402
+    DEFAULT_CORRECTED_GATES,
     DEFAULT_FUNNEL_GATES,
     _mde_from_curve,
     _panel_ts,
@@ -54,6 +55,12 @@ from scripts.research.crucible_calibration import (  # noqa: E402
     _planted_panel,
     load_calib,
 )
+from finrl_pro_ds.crucible.corrected_contract import (  # noqa: E402
+    CorrectedConfig,
+    corrected_contract_fitness,
+    fresh_lord_level,
+)
+from finrl_pro_ds.crucible.orchestrator.substrate import _power_holdout_bars  # noqa: E402
 from finrl_pro_ds.signals.generation.evolve import _overlay_returns  # noqa: E402
 from finrl_pro_ds.signals.generation.fitness import _combined_book, combination_fitness  # noqa: E402
 
@@ -102,16 +109,69 @@ def _assert_ta1_iid_reduction() -> None:
     log.info("[TA-1] IID reduction PASS: AR(H=1) == shipped IID generator bit-for-bit")
 
 
+# ------------------------------------------------------------------ corrected-contract leg tally
+class _CorrectedLegTally:
+    """Per-leg pass rates for the corrected contract.
+
+    Exists because "MDE is flat in N" is uninterpretable without knowing WHICH leg binds. Three of
+    the corrected contract's five legs — ``uplift`` (economic ΔSR floor), ``fragility`` (CPCV path
+    consistency) and ``collinearity`` — are N-INDEPENDENT, so if one of them binds above where the
+    two significance legs (``t``, ``lord``) bind, the MDE is FLOORED and no amount of extra data
+    moves it. That distinction is the whole question, so measure it rather than infer it.
+    """
+
+    __slots__ = ("t", "lord", "uplift", "fragility", "collinearity", "all_pass", "denom")
+
+    def __init__(self) -> None:
+        self.t = self.lord = self.uplift = self.fragility = self.collinearity = 0
+        self.all_pass = self.denom = 0
+
+    def observe(self, cr) -> None:
+        if cr is None:
+            return
+        self.denom += 1
+        self.t += bool(cr.t_pass)
+        self.lord += bool(cr.lord_pass)
+        self.uplift += bool(cr.uplift_pass)
+        self.fragility += bool(cr.fragility_pass)
+        self.collinearity += bool(cr.collinearity_pass)
+        self.all_pass += bool(cr.passes_corrected)
+
+    def rates(self) -> dict[str, float]:
+        d = max(1, self.denom)
+        return {k: getattr(self, k) / d for k in
+                ("t", "lord", "uplift", "fragility", "collinearity", "all_pass")}
+
+
 # ------------------------------------------------------------------ power curve (real gate)
 def _power_curve(cc, *, t: int, n: int, hold_bars: int, betas: list[float], n_seeds: int,
-                 gen_n_eff: float, cost_bps: float) -> list[dict[str, Any]]:
+                 gen_n_eff: float, cost_bps: float,
+                 corrected: CorrectedConfig | None = None,
+                 holdout_frac: float = 0.25) -> list[dict[str, Any]]:
     """The E2 power curve at (T=t, holding=hold_bars): for each beta, score the planted overlay through
-    the REAL combination_fitness gate over n_seeds AR-persistent panels. Mirrors the harness's
-    _e2_power_curve exactly, but with the AR base sleeves."""
+    the REAL gate over n_seeds AR-persistent panels. Mirrors the harness's _e2_power_curve exactly,
+    but with the AR base sleeves.
+
+    Two contracts, scored on DIFFERENT WINDOWS — mirroring `crucible_calibration._e2_power_curve`
+    exactly, because the whole point is comparability with the daily curves:
+
+    * ``corrected is None`` — the SHIPPED gate on the FULL panel. This is the frozen convention the
+      2026-07-13 Stage-0 Part A verdict was measured under; kept byte-stable so that run reproduces.
+    * ``corrected is not None`` — the crucible-v6.0 contract on the LAST ``_power_holdout_bars`` rows,
+      the window ``evolve`` actually decides on. NOTE this is a strictly HARDER test than the shipped
+      arm: the full-panel convention over-states power (documented in the calibration harness), so the
+      corrected arm must overcome BOTH the window correction AND the contract change. It gains the two
+      dropped legs — ``marginal_t`` (whose ~0.4 data-independent floor the cont-131 audit pinned as
+      blocking 0.50 REGARDLESS of frequency) and ``dsr_aug``. Net direction is genuinely unknown a
+      priori, which is why this is worth measuring rather than arguing about.
+    """
+    lord = fresh_lord_level(corrected) if corrected is not None else float("nan")
+    hb_score = (_power_holdout_bars(t, float(holdout_frac)) if corrected is not None else t)
     curve: list[dict[str, Any]] = []
     for beta in betas:
         detections = 0
         realized: list[float] = []
+        legs = _CorrectedLegTally()
         for k in range(n_seeds):
             panel, s = _planted_panel(t, n, seed=5000 + k)
             base = _planted_base_sleeves_ar(s, beta=beta, seed=5000 + k, hold_bars=hold_bars)
@@ -121,25 +181,44 @@ def _power_curve(cc, *, t: int, n: int, hold_bars: int, betas: list[float], n_se
             if out is None:
                 continue
             cand, turnover = out
+            if corrected is not None:
+                # slice to the binding holdout window (candidate warmed up on the full panel above)
+                cand_ho = cand[t - hb_score:]
+                base_ho = {k2: np.asarray(v)[t - hb_score:] for k2, v in base.items()}
+                cr = corrected_contract_fitness(cand_ho, base_ho, ts[t - hb_score:], cc.fit_cfg,
+                                                corrected, lord_level=lord)
+                legs.observe(cr)
+                if cr.passes_corrected:
+                    detections += 1
+                if np.isfinite(cr.delta_sr):
+                    realized.append(float(cr.delta_sr))
+                continue
             res = combination_fitness(cand, base, ts, cc.fit_cfg, gen_n_eff=gen_n_eff,
                                       turnover_ann=turnover, n_nodes=1)
             if res.passes_gate:
                 detections += 1
             if np.isfinite(res.delta_sr_oos):
                 realized.append(float(res.delta_sr_oos))
-        curve.append({
+        row: dict[str, Any] = {
             "beta": beta, "power": detections / max(1, n_seeds), "detections": detections,
             "n_seeds": n_seeds,
             "mean_realized_delta_sr": float(np.mean(realized)) if realized else float("nan"),
-        })
+        }
+        if corrected is not None:
+            row["scored_bars"] = int(hb_score)
+            row["lord_level"] = float(lord)
+            row["per_leg_pass_rate"] = legs.rates()   # WHICH leg binds — see _CorrectedLegTally
+        curve.append(row)
     return curve
 
 
 def _eval_cell(cc, *, t: int, hb: int, n: int, betas: list[float], n_seeds: int, gen_n_eff: float,
-               cost_bps: float, holdout_frac: float, power_target: float) -> dict[str, Any]:
+               cost_bps: float, holdout_frac: float, power_target: float,
+               corrected: CorrectedConfig | None = None) -> dict[str, Any]:
     """Score one (T_raw, H) cell -> its MDE (realized marginal ΔSR at power_target) and N_eff."""
     curve = _power_curve(cc, t=t, n=n, hold_bars=hb, betas=betas, n_seeds=n_seeds,
-                         gen_n_eff=gen_n_eff, cost_bps=cost_bps)
+                         gen_n_eff=gen_n_eff, cost_bps=cost_bps, corrected=corrected,
+                         holdout_frac=holdout_frac)
     mde = _mde_from_curve(curve, power_target)
     holdout = int(round(t * holdout_frac))
     return {
@@ -183,6 +262,15 @@ def main() -> int:
                     help="funnel gates YAML supplying the REAL FitnessConfig thresholds.")
     ap.add_argument("--out", default=str(ROOT / "results" / "crucible_intraday_power"))
     ap.add_argument("--quick", action="store_true", help="tiny grid smoke test, NOT a verdict.")
+    ap.add_argument("--contract", choices=("shipped", "corrected"), default="shipped",
+                    help="which DECISION contract to characterize. shipped = the frozen v5.0 legs the "
+                         "2026-07-13 Stage-0 Part A NO-GO was measured under (default; keeps that run "
+                         "reproducible). corrected = the crucible-v6.0 contract, which DROPS the two "
+                         "sealed legs — including the marginal_t floor the cont-131 audit pinned as "
+                         "blocking the 0.50 target regardless of frequency. That floor is the reason "
+                         "the old intraday verdict may be stale.")
+    ap.add_argument("--corrected-config", default=str(DEFAULT_CORRECTED_GATES),
+                    help="--contract corrected only: the corrected contract's thresholds YAML.")
     args = ap.parse_args()
 
     _assert_ta1_iid_reduction()  # tripwire before any sweep (fatal SystemExit on failure)
@@ -211,9 +299,14 @@ def main() -> int:
         betas = [float(b) for b in ip["beta_grid"]]
         n_seeds = int(ip["n_seeds"])
 
+    corrected = (CorrectedConfig.from_yaml(args.corrected_config)
+                 if args.contract == "corrected" else None)
+    log.info("CONTRACT: %s%s", args.contract,
+             "" if corrected is None else f"  (gates {args.corrected_config})")
+
     common: dict[str, Any] = dict(n=n, betas=betas, n_seeds=n_seeds, gen_n_eff=gen_n_eff,
                                   cost_bps=cost_bps, holdout_frac=holdout_frac,
-                                  power_target=power_target)
+                                  power_target=power_target, corrected=corrected)
 
     log.info("PRIMARY H=1 MDE-vs-N_eff: T in %s (%d betas x %d seeds)", primary_t, len(betas), n_seeds)
     primary: list[dict[str, Any]] = []
@@ -273,6 +366,11 @@ def main() -> int:
 
     report = {
         "harness_version": raw.get("harness_version"), "quick": args.quick,
+        "contract": args.contract,
+        "contract_note": (
+            "shipped = the frozen v5.0 legs, scored on the FULL panel (the 2026-07-13 convention). "
+            "corrected = crucible-v6.0, scored on the binding holdout window — a strictly harder "
+            "window, offset by dropping the sealed marginal_t/dsr_aug legs."),
         "ts": datetime.now(timezone.utc).isoformat(), "design": "v2-measured-curve",
         "funnel_gates": str(args.config), "gate_probe_gen_n_eff": gen_n_eff,
         "power_target": power_target, "holdout_frac": holdout_frac, "cost_bps": cost_bps,
@@ -286,6 +384,8 @@ def main() -> int:
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = "intraday_power_quick" if args.quick else "intraday_power"
+    if args.contract == "corrected":
+        stem += "_corrected"      # never clobber the shipped-contract provenance
     out_path = out_dir / f"{stem}.json"
     out_path.write_text(json.dumps(report, indent=2), encoding="utf-8")
 
