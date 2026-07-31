@@ -77,6 +77,52 @@ a vol-of-vol term, or a downside-only variance estimate.
 A pass earns a **recommendation to test in the TAILWIND re-sizing work**, not an automatic change.
 It would still require the forward-path render and Tier-2 gates that bind every capital decision.
 
-## 6. Results
+## 6. Results — **NO-GO**: the gain is one subperiod
 
-*(Empty at commit time on purpose — verifiable from git history.)*
+Run 2026-07-31, `results/vol_managed_overlay/vol_managed_overlay.json`. Base cross-asset TSMOM:
+5,133 days (2006-01→2026-05), Sharpe **0.601** (matches the known headline — sanity check passed).
+
+| variant | base | managed | gain | exposure turnover/yr |
+|---|---|---|---|---|
+| w=21 @2bp | 0.602 | 0.679 | +0.077 | 19.6 |
+| **w=21 @5bp** | 0.602 | 0.673 | **+0.071** | 19.6 |
+| w=63 @2bp | 0.605 | 0.629 | +0.025 | 7.6 |
+| **w=63 @5bp** | 0.605 | 0.627 | **+0.022** | 7.6 |
+
+Subperiod gains (managed − base):
+
+| window | 2006-09 | 2010-15 | 2016-20 | 2021-26 | positive |
+|---|---|---|---|---|---|
+| w=21 | **−0.223** | **−0.053** | **+0.599** | **−0.150** | 1/4 |
+| w=63 | **−0.110** | **−0.192** | **+0.526** | **−0.159** | 1/4 |
+
+### Verdict against the pre-committed bars
+
+| bar (§2) | w=21 | w=63 | |
+|---|---|---|---|
+| net gain ≥ +0.10 @5bp | +0.071 | +0.022 | ✗ **FAIL** |
+| gain positive in ≥3 of 4 subperiods | 1/4 | 1/4 | ✗ **FAIL** |
+| both windows positive | +0.071 | +0.022 | ✓ pass |
+
+**NO-GO.** The headline gain is small, and condition 2 shows *why* it exists at all: **the entire
+effect is one subperiod (2016-20, which contains the 2020 crash). The overlay LOSES in the other
+three, in both windows.** On the headline alone this would have read as "small but promising"; the
+subperiod split shows a single-episode timing artifact, not an overlay that works.
+
+This is a direct empirical confirmation of the prior recorded in §3 — Cederburg, O'Doherty, Wang and
+Yan's finding that vol-managed gains are fragile. The §3 prediction ("most likely a small gross gain
+that dies on costs") was close but not quite right: the gain survives costs at w=21 and dies on
+**regime instability** instead.
+
+### Ledger (durable)
+
+- **Portfolio-level volatility management on the cross-asset TSMOM book: NO-GO.** Gain +0.071 (w21)
+  / +0.022 (w63) at 5bp, and positive in only 1 of 4 subperiods for both windows. Per §4 there is no
+  V2 — no other windows, caps, vol-of-vol terms, or downside-only variance.
+- **Actionable for the TAILWIND re-sizing work: do NOT add a portfolio vol-timing overlay.**
+  `target_portfolio_vol: null` should stay null. This closes a question the re-sizing work would
+  otherwise have had to ask.
+- **Method note that generalises beyond this probe:** a headline improvement of +0.07 on a 20-year
+  sample looked plausible and was entirely one regime. **Any overlay or timing result must be shown
+  per-subperiod before it is believed** — the aggregate number cannot distinguish "works" from
+  "worked once".
