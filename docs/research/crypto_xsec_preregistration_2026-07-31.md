@@ -84,10 +84,6 @@ Not survivorship-free (the 10 names are current survivors; delisted/failed perps
 **material** bias in crypto, where failure is common). Results are UPPER BOUNDS. A pass earns
 forward-incubate only.
 
-## 6. Results
-
-*(Empty at commit time on purpose — verifiable from git history.)*
-
 ## 6. Results — **BOTH HYPOTHESES FAIL; control clean (2nd validation)**
 
 Run 2026-07-31, `results/crypto_xsec/scorecard.json`. Panel N=10, T=1,579 (2022-01-01→2026-04-28),
