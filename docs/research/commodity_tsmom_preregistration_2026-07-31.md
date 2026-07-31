@@ -83,6 +83,55 @@ proxies, or a hand-picked sub-basket.
 Not survivorship-free (delisted commodity ETFs absent). A pass earns **forward-incubate + Tier-2
 before any capital**, and does not by itself authorise changing TAILWIND.
 
-## 7. Results
+## 7. Results — **NO-GO**, but the closest of the three sleeves
 
-*(Empty at commit time on purpose — verifiable from git history.)*
+Run 2026-07-31, `results/commodity_tsmom/commodity_tsmom_sleeve.json`. 17 tickers, 5,037 days
+(2006-07-21→2026-07-30), 226 monthly rebalances, turnover 32.2/yr, 4,995 overlapping days.
+
+| pre-committed bar (§3) | measured | |
+|---|---|---|
+| standalone net SR ≥ 0.30 @5bp | **0.356** | ✓ **PASS** |
+| correlation to cross-asset TSMOM ≤ 0.60 | **+0.485** | ✓ **PASS** |
+| combined risk-parity SR > 0.66 | **0.568** | ✗ **FAIL** |
+
+Standalone by cost: frictionless 0.381 · 2bp 0.371 · 5bp 0.356 · 10bp 0.330 — barely cost-sensitive,
+like T1. On the overlap: existing sleeve 0.609, T3 0.370, ρ +0.485, combined 0.568 (DD −19.3%).
+
+**T3 is the first sleeve of the session to clear BOTH the return and the correlation bars** — the two
+conditions T1 and T2 each failed one of. And it still does not help.
+
+### The failure is not an artifact of equal weighting — checked analytically
+
+The obvious objection is that `pf.risk_parity` equal-weights risk, so perhaps a smarter allocation
+would rescue it. It would not. For two sleeves the closed forms are:
+
+- equal-risk: `(s1+s2)/√(2+2ρ)` = (0.609+0.370)/√2.970 = **0.568** — reproduces the measured value
+  exactly, confirming the combine did what it should;
+- max-Sharpe (the theoretical ceiling): `√((s1²−2ρ·s1·s2+s2²)/(1−ρ²))` = **0.615**.
+
+**Even optimally weighted the book gains +0.006 over the 0.609 it already earns.** And the general
+bar: at ρ = 0.485 a sleeve must carry standalone SR > **0.441** to improve an equal-risk combine at
+all. T3 carries 0.370 — a real trend premium, but not enough to overcome its correlation.
+
+So the NO-GO is structural, not a weighting choice.
+
+### Ledger (durable)
+
+- **Commodity-breadth TSMOM (17 ETFs excluding the 5 already held, 2006-2026): REAL but
+  INSUFFICIENT — NO-GO as a diversifying sleeve.** Standalone 0.356 at 5bp with ρ 0.485; adds
+  +0.006 at best. Per §5 there is no T4 and no re-probe with different lookbacks, a vol target,
+  roll-adjusted proxies, or a hand-picked sub-basket.
+- **The sleeve-admission rule, now closed-form.** Stop asking "is this signal real?" and ask
+  "does it beat the bar its own correlation sets?" For an equal-risk combine against an existing
+  sleeve of Sharpe `s1`, a candidate must satisfy **`s2 > s1·(√(2+2ρ) − 1)`**. Against the 0.60
+  book that is SR > 0.36 at ρ=0.3, > 0.44 at ρ=0.485, > 0.55 at ρ=0.7. **Compute this before
+  running anything** — it would have predicted all three of today's sleeve failures from their
+  correlations alone.
+
+### The three sleeves, side by side
+
+| | standalone | ρ | combined | verdict |
+|---|---|---|---|---|
+| T1 country TSMOM | 0.409 | +0.693 | 0.498 | return, no independence |
+| T2 crypto TSMOM | −0.067 | −0.063 | 0.425 | independence, no return |
+| **T3 commodity TSMOM** | **0.356** | **+0.485** | **0.568** | **both — still short of the bar** |
