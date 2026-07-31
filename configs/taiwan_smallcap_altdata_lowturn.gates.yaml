@@ -1,0 +1,67 @@
+# Pre-registered gates for the Taiwan SMALL/MID-CAP alt-data cross-sectional probes.
+# Pre-registration: docs/research/taiwan_smallcap_altdata_probes_preregistration_2026-07-15.md
+#
+# PARALLEL PROBE PATHWAY with its OWN gates file (audit §5; lockbox/cohort ADR precedent) —
+# the frozen configs/signal_eval.gates.yaml funnel and its verdicts are UNTOUCHED. Bumping or
+# reading this file is CRU-1 MINOR: it cannot change any existing recorded verdict. Register
+# this file's hash under CRU-1 (audit §6.7) once committed.
+#
+# The harness deep-merges every unspecified key from Gates._DEFAULTS; only overrides live here.
+# NEVER hardcode any of these numbers in code or scripts — the runner reads them from this file.
+#
+# Scope caveats baked into these numbers (read before trusting any verdict):
+#   - Universe = cap-rank 51-250 small/mid band, monthly PIT membership. NOT survivorship-free
+#     (free FinMind feed lists current tickers; delisting-table completeness unverified) ⇒ every
+#     IC is an UPPER BOUND. panel.meta.survivorship_free=False (harness prints it).
+#   - This corrects the June large-cap mirage's WRONG SLICE and tests the "less-efficient Taiwan"
+#     thesis in the small/mid tier it actually predicted. Size-neutralization is MANDATORY (it is
+#     what killed the mirage) and is carried in each SignalSpec.neutralization, not just here.
+#   - Audit §5 honesty clause: MDE80 ~= 0.7-0.9 on this substrate. 0/3 clearing the funnel is the
+#     modal, fully-informative outcome; a null CLOSES the thesis, it does not hide an edge.
+universe:
+  id: twse_smallcap_caprank_51_250
+  min_names_per_day: 60            # a real cross-section (~200-name band); days below are excluded
+  min_adv_usd: 0.0                 # ADV FLOOR is enforced upstream in the universe builder (TWD),
+                                   # not by Gates; kept 0 here so the funnel does not double-cut.
+coverage:
+  min_days: 1000                   # ~4y; the 集保 shareholding channel is the binding short one (~2016+)
+  max_nan_frac: 0.60               # alt-data (monthly/weekly, forward-filled) is sparser than price;
+                                   # early bars before 13m revenue / first 集保 print are legitimately NaN
+  max_ohlc_violations: 0           # DATA-CLEAN: any OHLC violation halts (PF-XCHECK)
+gross_power:
+  horizons: [1, 5, 10, 21, 63]
+  primary_horizon: 63              # QUARTERLY rebalance — the LOWER-turnover form the 2026-07-15
+                                   # result prescribed ("any future form must be *lower*-turnover,
+                                   # not richer", prereg §7.4, cost wall 0.479 at 21d).
+  promising_ic_ir: 0.05
+  promising_ic_tstat: 3.0
+deflation:
+  promising_dsr: 0.90
+  fdr_q_max: 0.10
+  use_effective_n: false           # n_trials=3, essentially uncorrelated mechanisms → raw N is honest
+  hlz_t_min: 3.0
+  require_hlz: false
+cpcv:
+  enabled: true
+  n_groups: 6
+  k_test: 2
+  embargo_days: 5
+robustness:
+  min_subperiod_ic_ir: 0.0
+  recent_oos_years: 2
+capturability:
+  # Taiwan cost trio — 0.30% securities-transaction TAX is SELL-side only, converted to the
+  # harness's symmetric one-way model (~half buys / half sells per rebalance):
+  #   standard ≈ 0.5·(buy comm ~0.06%) + 0.5·(sell comm ~0.06% + 0.30% tax) ≈ 0.0021 (~2× US).
+  cost_models:
+    frictionless: 0.0
+    us_equiv_ref: 0.0010           # US equity standard — CONTRAST ONLY, not the Taiwan reality
+    standard: 0.0021               # Taiwan e-broker discounted commission + 0.30% sell tax
+    harsh: 0.0029                  # Taiwan full 0.1425% commission (undiscounted) + sell tax
+  cost_wall_caution: 0.30
+neutralization:
+  winsor_pct: [0.01, 0.99]
+  controls: [sector, size]         # size = log trailing TWD ADV; sector = FinMind industry_category
+promotion:
+  survivorship_free_required: true # a GO earns only "PROMISING, forward-incubate" — never a position
+  tier2_audit_required: true       # PIT rebuild + Tier-2 deep lifecycle audit before ANY capital
