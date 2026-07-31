@@ -250,3 +250,65 @@ def test_build_panel_ohlc_clean_with_dividend_adjustment(tmp_path):
     assert panel.meta["return_basis"] == "causal_total_return_forward"
     assert ohlc_violations(panel)["total"] == 0            # would be ~1 per active bar if close-only
     assert panel.active.any()
+
+
+# --------------------------------------------------------------------------- #
+# 6. Sector-map provenance — the 2026-07-31 silent-restatement regression
+# --------------------------------------------------------------------------- #
+
+def _sectorise(d: Path, mapping: dict[str, str], *, name: str = "pool.parquet") -> None:
+    """Rewrite a pool file with an explicit ticker -> sector mapping."""
+    pool = pd.read_parquet(d / "pool.parquet")
+    pool["sector"] = pool["stock_id"].astype(str).map(mapping).fillna("Electronics")
+    pool.to_parquet(d / name, index=False)
+
+
+def test_sector_map_sha_tracks_the_partition_not_the_file(tmp_path):
+    """The 2026-07-31 defect: re-enumerating `pool.parquet` silently restated a SEALED scorecard.
+
+    `sector` is a mandatory neutralization control, so its partition is load-bearing on every
+    downstream number — yet `spec_hash`, `liquid_days_ge25` and `n_names_pool` are all blind to it,
+    which is exactly why the drift read as a code regression. `sector_map_sha` closes that hole.
+
+    It must key on the PANEL'S OWN (ticker, sector) pairs: a pool that merely gains unrelated
+    listings (FinMind re-enumerates on every fetch) must NOT trip it, or the stamp would cry wolf on
+    every data pull and get ignored — but any genuine change to this panel's partition must.
+    """
+    _write_synth_dataset(tmp_path)
+    base = build_panel(tmp_path, adv_window=20).meta["sector_map"]
+    assert base["n_unknown"] == 0 and base["n_sectors"] == 1      # fixture is single-sector
+
+    # (a) unrelated listings appended to the pool -> same panel partition -> SAME sha
+    pool = pd.read_parquet(tmp_path / "pool.parquet")
+    extra = pd.DataFrame({"stock_id": ["9001", "9002"], "name": ["x", "y"],
+                          "sector": ["Finance", "Steel"], "type": ["twse", "twse"]})
+    pd.concat([pool, extra], ignore_index=True).to_parquet(tmp_path / "pool.parquet", index=False)
+    assert build_panel(tmp_path, adv_window=20).meta["sector_map"]["sector_map_sha"] == \
+        base["sector_map_sha"]
+
+    # (b) one panel name re-classified -> partition really changed -> DIFFERENT sha
+    _sectorise(tmp_path, {"2001": "Finance"})
+    moved = build_panel(tmp_path, adv_window=20).meta["sector_map"]
+    assert moved["sector_map_sha"] != base["sector_map_sha"]
+    assert moved["n_sectors"] == 2
+
+
+def test_frozen_pool_wins_over_a_rewritten_live_pool(tmp_path):
+    """The fetcher only ever writes `pool.parquet`; the evaluation must read the frozen snapshot so
+    an unrelated data pull cannot move a recorded result out from under it."""
+    _write_synth_dataset(tmp_path)
+    _sectorise(tmp_path, {"2001": "Finance", "2002": "Steel"}, name="pool.frozen.parquet")
+    frozen = build_panel(tmp_path, adv_window=20).meta["sector_map"]
+    assert frozen["source"] == "pool.frozen.parquet" and frozen["frozen"] is True
+    assert frozen["n_sectors"] == 3
+
+    # rewriting the LIVE pool (what the fetcher does) must not perturb the pinned result
+    _sectorise(tmp_path, {t: f"S{i}" for i, t in enumerate(
+        pd.read_parquet(tmp_path / "pool.parquet")["stock_id"].astype(str))})
+    after = build_panel(tmp_path, adv_window=20).meta["sector_map"]
+    assert after["sector_map_sha"] == frozen["sector_map_sha"]
+
+    # ...and with the freeze removed, that same rewrite DOES move it (proves the test has teeth)
+    (tmp_path / "pool.frozen.parquet").unlink()
+    thawed = build_panel(tmp_path, adv_window=20).meta["sector_map"]
+    assert thawed["frozen"] is False and thawed["sector_map_sha"] != frozen["sector_map_sha"]

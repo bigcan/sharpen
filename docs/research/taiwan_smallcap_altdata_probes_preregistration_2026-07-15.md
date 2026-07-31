@@ -180,6 +180,50 @@ in code):
 
 ## 6. VERDICT (filled 2026-07-15, S553-cont-133, from `results/taiwan_smallcap_altdata/scorecard.json`)
 
+> ### ⚠️ RESTATED 2026-07-31 — the numbers moved; **every verdict is unchanged**
+>
+> The digits first recorded here (2026-07-16 14:03) **do not reproduce**. Cause is **not code**: all 5
+> commits touching `finrl_pro_ds/signals/` since the run — `92278fe4` (v4.0), `1b8df680` (v6.0),
+> `406654ed` (v7.1), `34caacef` (v9.0), `4a231bee` (v10.0) — **plus the exact HEAD at record time
+> (`4be2e6b3`)** were bisected: all 7 code states return a **bit-identical** frictionless Sharpe of
+> `1.044701045608392`.
+>
+> Cause is **`data/taiwan_smallcap/pool.parquet`**, re-enumerated 2026-07-31 11:41 as a side effect of
+> a fetcher run for an unrelated probe. Its `sector` column (FinMind `industry_category`) is a
+> **mandatory neutralization control** — scores are residualized on sector dummies daily
+> (`finrl_pro_ds/signals/features.py:164-168`) — so re-classified names move every downstream number.
+> Eligible (non-singleton) sectors went **33 → 31**. Controlled check: collapsing sectors to one
+> bucket gives frictionless 1.0512, the same order as the drift.
+>
+> **`spec_hash`, `liquid_days_ge25` and `n_names_pool` are all blind to the sector partition** — they
+> matched exactly while the numbers moved, which is what made this look like a code regression. Only
+> `gross.breadth` exposed it (its denominator counts sectors). The anti-p-hacking seal is intact: the
+> three spec hashes and the gates hash are unchanged and were never touched after seeing results.
+>
+> **This is neither a stale record nor a repair.** `sector_id` is documented as a *current* snapshot
+> applied retroactively (`features.py:41`, "v1 current GICS; PIT at GO-gate"), so the 07-16 and 07-31
+> runs carry the same class of lookahead from different download dates — **today's number is not more
+> correct than the original.** The 07-16 pool snapshot is unrecoverable (gitignored, no history, no
+> backup), so the original digits can only be superseded, not reconstructed.
+>
+> **Remediation shipped with this restatement:** the sector map is pinned to `pool.frozen.parquet`
+> (the fetcher only ever writes `pool.parquet`), and `panel_meta.sector_map` now stamps
+> `sector_map_sha` — a digest over the `(ticker, sector)` pairs *for this panel's own names*, so an
+> unrelated listing added to the pool does not trip it but any genuine change to this partition does.
+> This run: `sector_map_sha=d835f37083ba`, 39 labels / 0 unknown, `frozen=True`.
+>
+> One further change is real and is an **improvement, not drift**: subperiod-1 now reports `—` instead
+> of a spurious `1.536`. `crucible-v4.0` fixed the row-index subperiod split that gave subperiod 1 only
+> 48 valid days against ~1323 for the others (documented as trap #1 in the S553-cont-133 audit).
+>
+> Both affected artifacts were regenerated against the frozen pool:
+> `results/taiwan_smallcap_altdata/` and `results/taiwan_smallcap_altdata_lowturn/` (frictionless
+> 0.7057 → 0.6848; `crucible_substrate_eligibility.py:98` consumes the latter). Campaigns recorded from
+> 2026-07-31 12:00 onward were already on the new pool and reproduce exactly. Pre-restatement copies of
+> both scorecards were archived before regeneration.
+>
+> Original values are preserved in the table below for the audit trail.
+
 **Run record.** Full FinMind pull (Sponsor token, env-only, never committed): 2131-name TWSE+TPEx
 common-stock pool → prices 2130 ids / month-revenue 2126 / margin 1995 / 集保 2106 / dividends 2029.
 Panel: pool **N=612**, **T=5292** (2005-01-03..2026-07-15), **4017 liquid days**; membership
@@ -190,11 +234,14 @@ all three (causal ✓, OHLC violations 0). All three spec content-hashes reprodu
 (`60680e61ff85` / `e0a4c719bfe0` / `1be26f02ee6a`) and the gates file (`0ccf6dd584f0`) was not edited
 after seeing results — **the anti-p-hacking seal held.**
 
+Values are **RESTATED (2026-07-31, frozen sector map)**, with the *as-first-recorded* 2026-07-16
+figures in parentheses. Verdicts are identical in both.
+
 | Probe | gross IC-IR @21 | IC t | net Sharpe @standard | DSR | FDR-q | verdict |
 |---|---|---|---|---|---|---|
-| P1 mom_rev | **+0.255** | **+16.09** | **+0.53** | 1.000 | 0.000 | **PROMISING (gross)** — survivorship-suspect; forward-incubate ONLY, never capital |
-| P2 margin_crowd | −0.136 | −8.58 | −1.21 | 0.000 | 0.997 | **NO-GO** — realized sign **INVERTED** vs the pre-committed −1 |
-| P3 holder_conc | −0.117 | −7.31 | −0.82 | 0.000 | 0.997 | **NO-GO** — realized sign **INVERTED** vs the pre-committed +1 |
+| P1 mom_rev | **+0.288** (+0.255) | **+18.23** (+16.09) | **+0.56** (+0.53) | 1.000 | 0.000 | **PROMISING (gross)** — survivorship-suspect; forward-incubate ONLY, never capital |
+| P2 margin_crowd | −0.104 (−0.136) | −6.56 (−8.58) | −1.21 | 0.000 | 0.984 (0.997) | **NO-GO** — realized sign **INVERTED** vs the pre-committed −1 |
+| P3 holder_conc | −0.098 (−0.117) | −6.13 (−7.31) | −0.82 | 0.000 | 0.984 (0.997) | **NO-GO** — realized sign **INVERTED** vs the pre-committed +1 |
 
 **Synthesis — 1/3 PROMISING, 2/3 NO-GO; and the 1 is NOT an established edge.**
 
@@ -203,17 +250,22 @@ after seeing results — **the anti-p-hacking seal held.**
   kill condition #1), with negative net Sharpe at every cost model, DSR 0.000 and FDR-q 0.997. The
   contrarian margin-crowding mechanism and the informed-accumulation 集保 mechanism are both rejected
   in the small/mid band. Rising margin utilization mildly predicts *continuation*, not reversal.
-- **P1 clears every pre-registered gate on the current-listing pool**: IC-IR 0.255 ≥ 0.05, t 16.09 ≥
-  3.0, DSR 1.000 ≥ 0.90, FDR-q 0.000 ≤ 0.10, net Sharpe +0.53 at the 0.30%-sell-tax `standard` cost
-  (still +0.34 at `harsh`), all **15/15 CPCV paths positive** (OOS mean 0.867, p05 0.547), IC rising
-  monotonically with horizon (0.129→0.255→0.490 at 1→21→63d) and deciles monotone — the shape a slow
-  fundamental drift *should* have. Turnover 6.8×/yr, max DD −7.1%.
-- **P1's IC DECAYS monotonically across the populated subperiods.** Subperiod IC-IR: P1
-  `[1.536, 0.347, 0.283, 0.109]`, P3 `[1.459, −0.231, −0.205, 0.059]`, P2 `[0.14, −0.094, −0.185,
-  −0.143]`. **The leading value in each list must be DISCARDED** — see the harness caveat below — so
-  P1's real trajectory is **0.347 → 0.283 → 0.109** with recent-2y **+0.173**. The full-sample 0.255
-  is *not* inflated by the discarded window (it is 1.2% of IC days) — it is a fair average of the
-  three populated subperiods — but the **forward-looking expectation is ~0.10–0.17, not 0.255.**
+- **P1 clears every pre-registered gate on the current-listing pool**: IC-IR 0.288 ≥ 0.05, t 18.23 ≥
+  3.0, DSR 1.000 ≥ 0.90, FDR-q 0.000 ≤ 0.10, net Sharpe +0.56 at the 0.30%-sell-tax `standard` cost
+  (still +0.37 at `harsh`), all **15/15 CPCV paths positive** (OOS mean 0.916, p05 0.542), IC rising
+  monotonically with horizon (0.135→0.288→0.532 at 1→21→63d) and deciles monotone — the shape a slow
+  fundamental drift *should* have. Turnover 6.8×/yr, max DD −6.1%.
+  *(as first recorded 07-16: IC-IR 0.255, t 16.09, netSh +0.53/+0.34, CPCV 0.867/0.547,
+  0.129→0.255→0.490, max DD −7.1%.)*
+- **P1's IC DECAYS monotonically across the populated subperiods.** Restated subperiod IC-IR: P1
+  `[—, 0.413, 0.300, 0.137]`, P3 `[—, −0.212, −0.171, 0.067]`, P2 `[—, −0.078, −0.131, −0.116]`.
+  **The leading slot is now reported as `—` by the harness itself**: `crucible-v4.0` fixed the
+  row-index split described in the caveat below, so the 48-valid-day window no longer produces a
+  number to discard by hand. (As first recorded 07-16, before that fix, it emitted the spurious
+  P1 `1.536` / P3 `1.459` / P2 `0.14`.) P1's real trajectory is **0.413 → 0.300 → 0.137** with
+  recent-2y **+0.188**. The full-sample 0.288 is *not* inflated by the excluded window (1.2% of IC
+  days) — it is a fair average of the three populated subperiods — but the **forward-looking
+  expectation is ~0.14–0.19, not 0.288.**
 - **⚠️ HARNESS CAVEAT found while auditing this result (latent, pre-existing, not introduced here).**
   `eval_harness.tier3_robustness` splits subperiods by **row index** (`np.linspace(0, panel.T, 5)`)
   over the panel's **full date range**, not over *valid/active* days. This panel spans 2005-01-03 but
@@ -222,11 +274,13 @@ after seeing results — **the anti-p-hacking seal held.**
   `1.459` are therefore **small-sample noise on a ~96%-empty window — NOT evidence of a shared
   artifact, and NOT evidence of survivorship.** An earlier draft of this section read them as a
   cross-probe survivorship signature; **that reading was wrong and is retracted here.**
-  *Verdict impact: NONE* — P1's binding `min_subperiod_ic_ir` (0.109) came from subperiod **4**, and
-  P2/P3 fail on inverted sign + DSR 0.000 regardless. But the defect can in principle inflate
-  `mean_subperiod_ic_ir` or spuriously trip the `min_subperiod_ic_ir >= 0.0` gate on any panel whose
-  active window is shorter than its date range. **Filed as a follow-up** (fix: split on valid days, or
-  require a minimum valid-day count per subperiod).
+  *Verdict impact: NONE* — P1's binding `min_subperiod_ic_ir` (restated 0.137; 0.109 as first
+  recorded) came from subperiod **4**, and P2/P3 fail on inverted sign + DSR 0.000 regardless. But the
+  defect can in principle inflate `mean_subperiod_ic_ir` or spuriously trip the
+  `min_subperiod_ic_ir >= 0.0` gate on any panel whose active window is shorter than its date range.
+  **RESOLVED 2026-07-16 (S553-cont-134)** — fixed alongside wiring the `robustness.min_subperiod_ic_ir`
+  gate, which had itself been unwired since v2.0; shipped as `crucible-v4.0` (`92278fe4`). The restated
+  subperiod lists above show the repair: slot 1 is now `—` rather than a spurious spike.
 
 - **⚠️ §1's "Delisting" clause was NEVER IMPLEMENTED — survivorship here is FULL, not partial.**
   §1 states *"`TaiwanStockDelisting` — delisted names are included for their live window so a name

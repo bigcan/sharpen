@@ -26,6 +26,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import logging
 import sys
 from pathlib import Path
@@ -252,6 +253,58 @@ def _daily_membership(members: pd.DataFrame, dates: np.ndarray,
     return mask
 
 
+_FROZEN_POOL = "pool.frozen.parquet"
+
+
+def _sector_map(data: Path, tickers: tuple[str, ...]) -> tuple[np.ndarray, dict]:
+    """Sector partition for ``tickers`` + its provenance stamp.
+
+    The pool's ``sector`` column (FinMind ``industry_category``) is a MANDATORY neutralization
+    control — ``neutralize`` residualizes every score on sector dummies daily — so the partition is
+    load-bearing on every downstream number. It is also NOT point-in-time: FinMind re-classifies
+    names over time, so re-enumerating the pool silently restates results recorded earlier. That is
+    exactly what happened on 2026-07-31 11:41, when a fetcher run for an unrelated probe rewrote
+    ``pool.parquet`` and moved the sealed 2026-07-16 P1 frictionless Sharpe 1.0084 -> 1.0447 with
+    ``spec_hash``, ``liquid_days_ge25`` and ``n_names_pool`` all unchanged (they are blind to it).
+
+    Two defences, because freezing alone can be undone by hand:
+      * read ``pool.frozen.parquet`` in preference to ``pool.parquet`` — the fetcher only ever writes
+        the latter, so the evaluation input stops moving under unrelated data pulls;
+      * stamp ``sector_map_sha`` into ``panel_meta``. The digest covers only the ``(ticker, sector)``
+        pairs FOR THE PANEL'S OWN NAMES, sorted — so a pool that merely gains unrelated listings does
+        NOT trip it, while any genuine change to this panel's partition does.
+    """
+    frozen, live = data / _FROZEN_POOL, data / "pool.parquet"
+    path = frozen if frozen.exists() else live
+    if not path.exists():
+        log.warning("no pool file at %s — sector neutralization COLLAPSES to a single bucket", data)
+        return np.zeros(len(tickers), dtype=np.int64), {
+            "source": None, "frozen": False, "sector_map_sha": None,
+            "n_sectors": 1, "n_unknown": len(tickers),
+        }
+
+    pool = pd.read_parquet(path)
+    cat = dict(zip(pool["stock_id"].astype(str), pool["sector"].astype(str)))
+    labels = [cat.get(t, "__unk__") for t in tickers]
+    codes = {s: i for i, s in enumerate(sorted(set(labels)))}
+    sector_id = np.array([codes[s] for s in labels], dtype=np.int64)
+
+    payload = "\n".join(f"{t}\t{s}" for t, s in sorted(zip(tickers, labels)))
+    prov = {
+        "source": path.name,
+        "frozen": path == frozen,
+        "sector_map_sha": hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12],
+        "n_sectors": len(codes),
+        "n_unknown": sum(1 for s in labels if s == "__unk__"),
+    }
+    if not prov["frozen"]:
+        log.warning("sector map read from UNFROZEN %s — results are not reproducible across fetcher "
+                    "runs; freeze it to %s to pin them", live.name, _FROZEN_POOL)
+    log.info("sector map: %s (frozen=%s) sha=%s | %d sectors, %d unknown",
+             prov["source"], prov["frozen"], prov["sector_map_sha"], prov["n_sectors"], prov["n_unknown"])
+    return sector_id, prov
+
+
 def build_panel(data: Path, *, adv_window: int = 20) -> Panel:
     prices = pd.read_parquet(data / "prices.parquet")
     members = pd.read_parquet(data / "universe" / "membership.parquet")
@@ -285,14 +338,7 @@ def build_panel(data: Path, *, adv_window: int = 20) -> Panel:
         arr[~tradeable] = np.nan
 
     # sectors from the enumerated pool (FinMind industry_category); unknown → own bucket
-    pool_path = data / "pool.parquet"
-    if pool_path.exists():
-        pool = pd.read_parquet(pool_path)
-        cat = dict(zip(pool["stock_id"].astype(str), pool["sector"].astype(str)))
-        codes = {s: i for i, s in enumerate(sorted({cat.get(t, "__unk__") for t in tickers}))}
-        sector_id = np.array([codes[cat.get(t, "__unk__")] for t in tickers], dtype=np.int64)
-    else:
-        sector_id = np.zeros(len(tickers), dtype=np.int64)
+    sector_id, sector_prov = _sector_map(data, tickers)
 
     # --- the three causally-aligned alt-data channels → feature_slots ---
     def _pq(name: str) -> pd.DataFrame:
@@ -314,6 +360,7 @@ def build_panel(data: Path, *, adv_window: int = 20) -> Panel:
         "return_basis": "causal_total_return_forward" if dividend_adjusted else "raw_close_unadjusted",
         "n_names_pool": len(tickers),
         "liquid_days_ge25": liq_days,
+        "sector_map": sector_prov,
         "note": ("cap-rank 51-250 monthly PIT membership; RAW unadjusted prices; current-listing pool "
                  "⇒ survivorship UPPER BOUND"),
     }
