@@ -401,15 +401,44 @@ def check_no_hindsight_outside_hpo(cfg: dict, stage: str, r: ValidationResult) -
 
 
 def check_gates_block(cfg: dict, r: ValidationResult) -> None:
-    """All numeric gates must come from a `gates` block, not be hardcoded."""
-    gates = cfg.get("gates")
-    if not isinstance(gates, dict) or not gates:
+    """All numeric gates must come from a `gates` block, not be hardcoded.
+
+    A workstream may declare gates inline (`gates:`) *or* delegate them to a
+    standalone `<ws>.gates.yaml` referenced by `ensemble.gates_file` — the
+    documented per-workstream pattern. Resolve the same overlay the runtime
+    eval helpers read (:func:`_load_ensemble_gates_overlay`) before concluding
+    the block is absent, matching the other call sites of that helper.
+    """
+    inline = cfg.get("gates")
+    if inline is not None and not isinstance(inline, dict):
         r.fail(
-            "Missing `gates:` block. Per-workstream gates required by Protocol v2 §4. "
-            f"See {PROTOCOL_DOC}."
+            f"`gates:` must be a mapping, got {type(inline).__name__}. "
+            f"Per-workstream gates required by Protocol v2 §4. See {PROTOCOL_DOC}."
         )
         return
-    r.ok(f"gates block present ({len(gates)} keys)")
+
+    gates = _load_ensemble_gates_overlay(cfg)
+    gates_file = (cfg.get("ensemble") or {}).get("gates_file")
+    if not gates:
+        detail = (
+            f" `ensemble.gates_file: {gates_file}` is declared but resolved to no "
+            "`gates:` keys (file missing, unreadable, or empty)."
+            if gates_file
+            else ""
+        )
+        r.fail(
+            "Missing `gates:` block. Per-workstream gates required by Protocol v2 §4."
+            f"{detail} See {PROTOCOL_DOC}."
+        )
+        return
+
+    if inline and gates_file:
+        source = f"inline + {gates_file}"
+    elif gates_file:
+        source = gates_file
+    else:
+        source = "inline"
+    r.ok(f"gates block present ({len(gates)} keys, from {source})")
 
 
 def check_data_manifest(cfg: dict, stage: str, r: ValidationResult) -> None:
