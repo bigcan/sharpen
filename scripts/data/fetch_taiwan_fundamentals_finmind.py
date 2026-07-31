@@ -366,23 +366,41 @@ def _fetch_channel(name: str, pool: list[str], start: str, end: str | None, toke
         log.info("%s: resume — %d ids already present", name, len(done))
     frames = list(prior)
     todo = [s for s in pool if s not in done]
+
+    def _checkpoint(reason: str) -> None:
+        """Persist what has been fetched so far. Without this a quota 402 mid-loop discards EVERY
+        id already paid for — on a 600-req/hour key that is up to an hour of quota thrown away, and
+        `--resume` has nothing to resume from because the file was never written."""
+        if len(frames) <= len(prior):
+            return
+        merged = pd.concat(frames, ignore_index=True)
+        merged.to_parquet(dest, index=False)
+        log.warning("%s: CHECKPOINT (%s) — wrote %s with %d ids; re-run with --resume to continue",
+                    name, reason, dest, merged["stock_id"].nunique())
+
     for i, sid in enumerate(todo, 1):
         try:
             df = fn(sid, start, end, token)
         except RuntimeError as e:
             if "402" in str(e):
+                _checkpoint("quota exhausted")
                 raise
             if _is_tier_block(e):
+                _checkpoint("tier block")
                 raise RuntimeError(
                     f"{name}: FinMind TIER/PERMISSION block ({str(e)[:200]}). This dataset needs a "
                     f"higher FinMind membership than your key has — upgrade the tier, or drop "
                     f"'{name}' from --datasets.") from e
             log.warning("%s/%s skipped: %s", name, sid, str(e)[:160])
             df = pd.DataFrame()
+        except KeyboardInterrupt:
+            _checkpoint("interrupted")
+            raise
         if not df.empty:
             frames.append(df)
         if i % 50 == 0:
             log.info("%s: %d/%d fetched", name, i, len(todo))
+            _checkpoint("periodic")     # survive a kill/timeout, not just a clean 402
         time.sleep(sleep)
     if not frames:
         log.warning("%s: no data collected", name)
