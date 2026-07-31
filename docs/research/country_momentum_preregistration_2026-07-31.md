@@ -156,3 +156,30 @@ this pre-registration's bars were written to prevent.
 - **The negative control is now a validated instrument on this harness** and should be standard in
   future probe batches. It cost one slot and converted "is this IC real?" from an argument into a
   measurement. Five earlier probes today lacked it.
+
+## 7. Follow-up — is 0.081 the SIGNAL or the BOOK? (answered: the signal)
+
+C1's net SR 0.081 came from the funnel's naive equal-weighted decile book. This project's own TSMOM
+edge reaches 0.60 only via per-asset vol scaling, so the fair question was whether a competent
+construction extracts more. §4's stop rule bars re-probing **"if C1 fails"** — C1 did not fail, it
+cleared every pre-committed bar — so this is a portfolio-construction question on a fixed,
+already-measured signal, not a re-specification. **One** construction was tried: the house's own
+validated `xsec_momentum_falsification.xsmom_weights` (rank 12-1, long top third / short bottom
+third, vol-scaled). No sweep.
+
+`scripts/research/country_momentum_book.py` → `results/country_momentum/country_momentum_book.json`:
+
+| construction | turnover/yr | Sharpe @5bp | ann vol | max DD |
+|---|---|---|---|---|
+| funnel naive decile | 5.07 | **+0.081** | — | −37.4% |
+| house vol-scaled `xsmom_weights` | **47.40** | **+0.003** | 39.3% | **−99.7%** |
+
+Frictionless 0.064 · 2bp 0.039 · 5bp 0.003 · 10bp −0.057. At a common 10% vol: **+0.03%/yr**.
+
+**The better-engineered book is WORSE** — 9x the turnover and a −99.7% drawdown. So the answer is
+unambiguous: **the small Sharpe is the signal, not the book.** C1 is closed as non-deployable from
+both directions, and no further construction will be tried (that would be the sweep this note
+explicitly avoided).
+
+Ledger, final: **cross-sectional country-equity momentum — REAL (IC-IR 0.101, CI excludes zero,
+negative control clean) and NOT DEPLOYABLE under either the naive or the house-validated book.**
