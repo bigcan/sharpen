@@ -87,3 +87,45 @@ forward-incubate only.
 ## 6. Results
 
 *(Empty at commit time on purpose — verifiable from git history.)*
+
+## 6. Results — **BOTH HYPOTHESES FAIL; control clean (2nd validation)**
+
+Run 2026-07-31, `results/crypto_xsec/scorecard.json`. Panel N=10, T=1,579 (2022-01-01→2026-04-28),
+1,574 usable days. Tickers ARB, BNB, BTC, DOGE, ETH, FIL, LINK, LTC, OP, UNI.
+
+| @5d primary | K1 reversal | K2 momentum | K3 control |
+|---|---|---|---|
+| IC-IR | +0.067 | **−0.029** | −0.019 |
+| IC t | +2.65 | −1.14 | −0.76 |
+| bootstrap CI | [−0.0095, +0.0640] | [−0.0487, +0.0271] | [−0.0240, +0.0110] |
+| p_le_0 | 0.070 | 0.718 | 0.778 |
+| DSR | 0.807 | 0.0018 | **0.0054** |
+| frictionless SR | +0.161 | −0.128 | −0.406 |
+| net @ standard | **+0.035** | −0.192 | −0.586 |
+| turnover/yr | 39.6 | 20.3 | 47.0 |
+| recent-2y IC-IR | −0.022 | −0.034 | −0.070 |
+
+**K3 control clean for the second time today** (DSR 0.0054, CI straddling zero). The instrument is
+now validated on two independent substrates, so these negatives are measurements, not artefacts.
+
+**K1 fails three pre-committed bars** (§2): |t| 2.65 < 3.0; the **CI straddles zero** (p_le_0 0.070);
+and net SR **+0.035** is an order of magnitude under the **≥0.30** economic bar committed before the
+run. Turnover 39.6/yr also makes it the most cost-exposed signal tested today — it survives 5bp only
+barely and dies at 10bp (−0.090).
+
+**K2 fails on SIGN** — committed +1, realized −0.029. Note the ladder turns positive at 21d (+0.014)
+and 63d (+0.057), consistent with crypto momentum being a longer-horizon effect. **That is not a
+rescue and is not claimed as one:** the primary horizon was pre-registered at 5d, and re-designating
+it after seeing the ladder is exactly the horizon-fishing the P1@63d work established as
+illegitimate. Recorded as an observation for any future pre-registration, not as a result.
+
+### Ledger (durable)
+
+**The crypto cross-section is EMPTY on free data at the tested horizons.** 7-day reversal is not
+significant and not economic; 30-day momentum has the wrong sign at the pre-registered horizon. Per
+§4 the campaign is complete at 2 + control — no K4, no re-probe with different lookbacks, vol
+scaling, or funding-rate conditioning.
+
+**Weight this negative appropriately** (as §0 committed in advance): N=10 over 4.3 years is thin and
+short, and the panel is not survivorship-free in a market where failure is common. This is a
+scouting-grade negative, weaker than today's Taiwan and country-ETF results.
