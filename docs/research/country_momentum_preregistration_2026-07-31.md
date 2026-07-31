@@ -87,6 +87,72 @@ A pass earns **"PROMISING, forward-incubate"** only. Survivorship: country ETFs 
 not in the current yfinance query, so this panel is **not survivorship-free** and results are
 UPPER BOUNDS — flagged in advance, same status as every Taiwan probe.
 
-## 6. Results
+## 6. Results — C1 **statistically real, economically negligible**; C2 control **clean**
 
-*(Empty at commit time on purpose — the sign commitment is verifiable from git history.)*
+Run 2026-07-31, `results/country_momentum/scorecard.json`. Panel **N=30, T=7,641**
+(1996-03-18 → 2026-07-30), 7,636 usable days. C1 coverage 96.2%, C2 100.0%.
+
+### 6.1 The control passed — and that is the load-bearing result
+
+| C2 `ctry_null_control` (21d) | |
+|---|---|
+| IC-IR | −0.0027 |
+| IC t | −0.23 |
+| bootstrap CI | [−0.0053, +0.0041] — **straddles zero** |
+| p_le_0 | 0.596 |
+| DSR | **0.0002** |
+| FDR-q / BHY-q | 0.596 / 0.893 |
+
+A signal containing **no price information** scores a clean null on every axis. **The harness does
+not manufacture significance on this substrate**, so C1's result means what it says — and,
+retrospectively, the five Taiwan probes' significant ICs were genuine rank correlations that simply
+were not capturable, not artefacts of the measurement.
+
+This is the first probe today that could distinguish those two explanations, which is why the
+control was worth a slot.
+
+### 6.2 C1 clears every pre-committed bar
+
+| bar (from §2, committed before the run) | measured | |
+|---|---|---|
+| realized sign == +1 | +1 | ✓ |
+| IC-IR ≥ 0.05 · \|t\| ≥ 3.0 | 0.1005 · 8.63 | ✓ |
+| **bootstrap CI excludes zero** | **[+0.0046, +0.0584]**, p_le_0 0.0104 | ✓ |
+| **frictionless > 0 AND net@standard > 0** | **+0.121 / +0.081** | ✓ |
+| **decile spread shares the IC sign** | +0.00006 … +0.00135, positive at all 5 horizons | ✓ |
+| control must FAIL | C2 DSR 0.0002 | ✓ |
+
+IC ladder: 1d +0.048 · 5d +0.067 · 10d +0.075 · **21d +0.101** · 63d +0.064 — a coherent hump
+peaking at the pre-registered primary horizon. DSR 1.0000, FDR-q 0.021, BHY-q 0.031, **HLZ True**.
+Cost wall **0.040** (no transaction tax, unlike Taiwan). Recent-2y IC-IR **+0.391** — stronger in the
+live window, not inverted.
+
+**This is the first signal in six probes today to clear the capture bar.**
+
+### 6.3 Why it is still NOT an alpha
+
+**Net Sharpe at standard cost is +0.081, against a max drawdown of −0.374.**
+
+That is a real effect of negligible economic size. For scale, the validated house edge — cross-asset
+TSMOM — is net SR **0.60** on a book with far shallower drawdowns. A 0.08 Sharpe is not a deployable
+strategy; it is a measurement that the effect exists.
+
+The harness independently declines it, on its own gates rather than mine: verdict **LOGGED**, not
+PROMISING, because `min_subperiod_ic_ir = −0.024 < 0` (it inverts in one of four sampled
+subperiods) and CPCV p05 = −0.12 with 73% of 15 paths positive.
+
+So the honest verdict is: **cross-sectional country-equity momentum is REAL on 30 years of free
+data, and too small to trade.** Reporting it as a discovered alpha would be exactly the overclaim
+this pre-registration's bars were written to prevent.
+
+### 6.4 Ledger entry (durable)
+
+- **Cross-sectional country-equity momentum: CONFIRMED REAL, NOT DEPLOYABLE.** IC-IR 0.101 with a
+  CI excluding zero and positive net Sharpe at both cost models — but net SR 0.081 and DD −0.374.
+  Do **not** re-probe for a bigger version by changing the lookback, the skip, or adding a vol
+  scale (§4 stop rule). If it is ever revisited, the live question is whether the recent-2y
+  strengthening (+0.391 vs 0.101 full-sample) is regime or noise — which needs forward data, not
+  another backtest.
+- **The negative control is now a validated instrument on this harness** and should be standard in
+  future probe batches. It cost one slot and converted "is this IC real?" from an argument into a
+  measurement. Five earlier probes today lacked it.
