@@ -1,0 +1,53 @@
+# Gates for the international country-ETF probes (C1 momentum + C2 negative control).
+# Pre-reg: docs/research/country_momentum_preregistration_2026-07-31.md
+# Thresholds mirror the Taiwan alt-data gates so results are directly comparable; the ONLY
+# differences are the cost models (US-listed ETFs, no 0.30% Taiwan transaction tax) and the
+# omission of a sector control (every name is a country equity ETF, so it would be degenerate).
+
+universe:
+  id: crypto_perp_10
+  min_names_per_day: 6             # floor for a meaningful rank IC across countries
+  min_adv_usd: 0.0                 # ADV floor enforced in the panel builder (active mask)
+
+coverage:
+  min_days: 900
+  max_nan_frac: 0.60
+  max_ohlc_violations: 0
+
+gross_power:
+  horizons: [1, 5, 10, 21, 63]
+  primary_horizon: 5              # pre-registered: crypto X-sec effects live at days-to-weeks
+  promising_ic_ir: 0.05
+  promising_ic_tstat: 3.0
+
+deflation:
+  promising_dsr: 0.90
+  fdr_q_max: 0.10
+  use_effective_n: false
+  hlz_t_min: 3.0
+  require_hlz: false
+
+cpcv:
+  enabled: true
+  n_groups: 6
+  k_test: 2
+  embargo_days: 5
+
+robustness:
+  min_subperiod_ic_ir: 0.0
+  recent_oos_years: 2
+
+capturability:
+  cost_models:
+    frictionless: 0.0
+    standard: 0.0005               # ~5bp round trip: major perp taker, no transaction tax
+    harsh: 0.0010                  # 10bp — pessimistic for the thinner country ETFs
+  cost_wall_caution: 0.30
+
+neutralization:
+  winsor_pct: [0.01, 0.99]
+  controls: []                   # N=10 makes a size regression degenerate (pre-registered)
+
+promotion:
+  survivorship_free_required: true # delisted country ETFs are absent from the yfinance query
+  tier2_audit_required: true
