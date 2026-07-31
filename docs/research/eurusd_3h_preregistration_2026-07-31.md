@@ -81,6 +81,63 @@ A pass earns **forward-incubate + Tier-2 before any capital**, and does not by i
 changing TAILWIND. The panel is a single instrument, so a pass would also owe a breadth check across
 other FX majors before it could be called a strategy rather than a curiosity.
 
-## 6. Results
+## 6. Results — **NO-GO**. No edge, gross or net.
 
-*(Empty at commit time on purpose — verifiable from git history, and the data was still downloading.)*
+Run 2026-08-01, `results/eurusd_3h/eurusd_3h.json`. **47,433 three-hour bars, 2004-01-01 → 2026-07-31**
+(140,991 hourly bars, verified uniform at ~6,225-6,290/yr across every complete year after the
+retry fix).
+
+| F1 TSMOM | @0.256 bp | @0.5 bp | @1.0 bp |
+|---|---|---|---|
+| Sharpe | **−0.0923** | −0.1609 | −0.3015 |
+| ann. return | −0.781% | −1.362% | −2.552% |
+| turnover | 238/yr | | |
+
+- bootstrap CI95 **[−0.485, +0.355]** — straddles zero
+- subperiod Sharpes **[−0.055, +0.223, −0.457, −0.099]** → **1/4 positive**
+- **GROSS (zero-cost) Sharpe −0.0203**, CI [−0.412, +0.426] — *no edge before costs either*
+
+**All five pre-committed bars fail.** This is not a cost story: EURUSD 3-hour trend has no gross
+edge to begin with.
+
+### 6.1 The control validated the run — but condition 5 was MIS-SPECIFIED
+
+F2 scored net Sharpe −0.667 with a CI excluding zero, which my condition 5 reads as "control
+significant ⇒ INVALIDATE". **That reading is wrong and the run is valid.** The control rebalances a
+random position every bar: **2,344 turnover/yr**, so at 0.256 bp it mechanically bleeds ~6%/yr.
+That is arithmetic, not manufactured signal.
+
+Checked directly: **F2 GROSS Sharpe = −0.0119, CI95 [−0.434, +0.358], does not exclude zero** — a
+clean null, consistent with the same instrument's behaviour on the two cross-sectional substrates
+earlier (DSR 0.0002 and 0.0054).
+
+**The defect is mine, in the pre-registration.** Condition 5 was imported from the cross-sectional
+probes, where the control is scored by cost-free IC. When the primary metric is a *net* Sharpe, a
+high-turnover null loses money by construction and its "significance" says nothing about the
+harness. **A control must be scored on the same cost basis at which it is being used as a null —
+here, gross.** Recorded as the mis-specification it is rather than quietly re-reading the condition.
+
+### 6.2 Why this negative is worth more than the earlier ones
+
+This is the only probe of the campaign that ran on a substrate where **power and economics both
+cleared** (N_eff 7,050, MDE ≈0.45 ≤ 0.50 ceiling, drag 0.31 < MDE). The previous fourteen ran on
+cells where the funnel could not have detected a tradeable edge even had one existed, so their
+negatives were partly foreordained. **This one is informative:** on 22.5 years of the most liquid
+instrument in the world, at the one holding period where the arithmetic permits detection, there is
+no 3-hour trend edge — gross Sharpe −0.02, indistinguishable from the random control's −0.01.
+
+The §3 prior held: *"A negative is the more likely outcome and would not be surprising."* FX
+momentum is a monthly-horizon phenomenon; the sub-daily literature leans to mean reversion and
+order flow. That was written before the run.
+
+### 6.3 Ledger (durable)
+
+- **EURUSD 3-hour TSMOM (2004-2026, free Dukascopy): FALSIFIED.** Gross Sharpe −0.020, net −0.092
+  at the measured 0.256 bp spread, CI straddles zero, 1/4 subperiods positive. Per §4 there is no
+  F3 — no other lookbacks, bar sizes, session filters, or vol conditioners.
+- **Method rule (new):** score a negative control on the **same cost basis** as the metric it is
+  controlling. A zero-information position with high turnover produces a *significantly negative*
+  net Sharpe that is pure arithmetic and can be misread as an invalidated run.
+- **The substrate remains viable and unexhausted.** The cell (EURUSD 3h, 22.5y) is now built,
+  verified, and free. F1 tested one signal family on it. A different pre-registered hypothesis
+  there is a legitimate future experiment — this result closes the *trend* hypothesis, not the cell.
