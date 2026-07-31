@@ -32,6 +32,7 @@ import datetime as dt
 import logging
 import lzma
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -68,12 +69,27 @@ def _divisor(instr: str) -> float:
 
 
 def fetch_hour(instr: str, when: dt.datetime, session: requests.Session,
-               timeout: int = 25) -> pd.DataFrame | None:
+               timeout: int = 25, retries: int = 4) -> pd.DataFrame | None:
+    """Returns a tick frame, an EMPTY frame for a legitimately closed hour, or None if every
+    retry failed.
+
+    RETRIES ARE LOAD-BEARING, not politeness. The first version of this function returned None on
+    the first RequestException with a comment saying the caller "may retry" — and no caller ever
+    did. Transient failures were then silently indistinguishable from weekends, and a full
+    2004-2026 pull came back with 71,467 of ~140,000 bars: whole years at ~1,400 bars instead of
+    ~6,200, with NO error surfaced. Five sampled missing hours all returned data on a plain retry,
+    proving the loss was transient rather than absent history.
+    """
     url = f"{BASE}/{instr}/{when.year}/{when.month - 1:02d}/{when.day:02d}/{when.hour:02d}h_ticks.bi5"
-    try:
-        r = session.get(url, timeout=timeout, headers=UA)
-    except requests.RequestException:
-        return None                                  # transient; caller may retry
+    r = None
+    for attempt in range(retries):
+        try:
+            r = session.get(url, timeout=timeout, headers=UA)
+            break
+        except requests.RequestException:
+            if attempt == retries - 1:
+                return None                          # exhausted — caller COUNTS this, never silently drops
+            time.sleep(0.4 * (2 ** attempt))
     if r.status_code != 200 or not r.content:
         return pd.DataFrame()                        # weekend / holiday — legitimately empty
     try:
@@ -147,18 +163,23 @@ def main() -> int:
 
     frames: list[pd.DataFrame] = []
     done = 0
+    failed = 0
     session_local = requests.Session()
     with ThreadPoolExecutor(max_workers=args.workers) as ex:
         futs = {ex.submit(fetch_hour, args.instrument, h.to_pydatetime(), session_local): h
                 for h in todo}
         for fut in as_completed(futs):
             df = fut.result()
-            if df is not None and not df.empty:
+            if df is None:
+                failed += 1                          # exhausted retries — surfaced below, never silent
+            elif not df.empty:
                 frames.append(df)
             done += 1
             if done % 2000 == 0:
                 log.info("  %d/%d hours (%.1f%%)", done, len(todo), 100 * done / len(todo))
 
+    if failed:
+        log.warning("%d/%d hours FAILED after retries — re-run to fill (resumable)", failed, len(todo))
     if not frames:
         log.warning("no ticks retrieved")
         return 0
