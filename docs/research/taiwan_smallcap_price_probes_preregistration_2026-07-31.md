@@ -89,6 +89,69 @@ frictionless Sharpe of 1.008 — the 0.30% sell tax takes about half. Any R1/R2 
 net, not gross; a high gross IC-IR that dies at `standard` cost is a **NO-GO**, not a "promising
 signal with an execution problem."
 
-## 6. Results
+## 6. Results — **BOTH PROBES NO-GO**
 
-*(Empty at commit time on purpose — the sign commitment is verifiable from git history.)*
+Run 2026-07-31, `results/taiwan_smallcap_price/scorecard.json`. Panel N=612, T=5292, 4017 liquid
+days — identical to the P1 campaign. Coverage 99.9% / 100.0% of active cells.
+
+| | R1 `st_reversal` | R2 `ivol` |
+|---|---|---|
+| spec hash | `19c28bf743d3` | `27d38ce84ff5` |
+| IC-IR @21d | +0.066 | +0.086 |
+| IC t | +4.20 | +5.43 |
+| realized sign | −1 ✓ (as committed) | −1 ✓ (as committed) |
+| decile spread | −0.0054 | −0.0120 |
+| **decile monotonic** | **False** | **False** |
+| **frictionless Sharpe** | **−0.182** | **−0.627** |
+| net Sharpe @ standard | −0.835 | −0.837 |
+| cost wall | 0.654 | 0.210 |
+| turnover / yr | 11.90 | 4.39 |
+| CPCV OOS mean / p05 | −0.295 / −0.791 | −0.554 / −1.091 |
+| CPCV paths positive | 20% | 7% |
+| recent-2y IC-IR | −0.069 | −0.151 |
+| subperiod IC-IR | [−0.017, 0.32, −0.066] | [0.14, 0.009, 0.108] |
+| harness verdict | LOGGED | "PROMISING" (see §6.2) |
+
+### 6.1 Why both fail: structure without capture
+
+Both realized the **committed sign** and both have a nominally significant rank-IC (t 4.2 / 5.4).
+Neither is tradeable, and the decisive number is not the cost model — it is that **frictionless
+Sharpe is NEGATIVE for both** (−0.182, −0.627). The book loses money at **zero** cost.
+
+The reconciliation is `decile_monotonic: False` on both. A positive rank-IC with a non-monotonic
+decile profile means the correlation lives in cells that carry no weight in a long-short book — the
+extremes, which the book actually trades, do not line up with the ranking. So the "signal" never
+becomes a position that makes money, before costs are discussed at all.
+
+This is exactly the failure mode the pre-registration's §5 cost-reality clause anticipated, one
+level worse: not "gross edge killed by the 0.30% tax" but **no gross edge in the traded book to
+begin with**.
+
+Both also invert recently (recent-2y IC-IR −0.069 / −0.151, i.e. the *opposite* of the committed
+sign in the live window) and both are CPCV-fragile (7-20% of 15 paths positive).
+
+### 6.2 A harness finding: `PROMISING` does not mean capturable
+
+R2 is labelled **PROMISING** while having a frictionless Sharpe of −0.627. That is not a bug in the
+sense of a mistake — `scorecard.py:136` states it deliberately: *"capturability caveats (do not
+change the gross-IC verdict — they flag, not gate)"*. The `promising` predicate reads DSR, IC-IR,
+IC-t, FDR-q, optional HLZ, min-subperiod IC-IR and multiplicity provenance, and **never consults
+`capturability`**. Verified: zero references to the capturability result inside the predicate.
+
+The consequence matters for how the record reads: **"PROMISING" in this funnel means "statistically
+detectable gross rank-IC", not "tradeable."** P1 happened to be genuinely capturable (frictionless
+1.008, net 0.529), so the distinction never bit — but nothing in the verdict logic enforced that,
+and R2 is a live demonstration that a money-losing book can carry the label. Any future citation of
+a PROMISING result should quote the frictionless and net Sharpe alongside it.
+
+### 6.3 Ledger entries (durable — do not re-test)
+
+- **Taiwan small/mid-cap 21-day short-term reversal is FALSIFIED.** Right sign, no capture,
+  inverts recently, regime-fragile. The liquidity-provision premium is not harvestable in this band
+  at monthly rebalance.
+- **Taiwan small/mid-cap volatility (IVOL proxy) is FALSIFIED.** Right sign, negative gross book
+  Sharpe, 7% of CPCV paths positive, inverts recently.
+- Per §4 the campaign is **complete at 2 probes**. No R3, and neither mechanism is to be re-probed
+  with a different lookback, vol window, or conditioning filter. The retail-microstructure thesis
+  on this band is recorded as tested and dead.
+- The R2 residual-vol follow-up flagged in §1 is **not owed** — it was conditional on R2 passing.
