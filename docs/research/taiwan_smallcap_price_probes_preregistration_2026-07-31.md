@@ -170,12 +170,26 @@ asserts their bytes still do not contain it, so `0ccf6dd584f0` and the funnel mo
 table that carried R2's PROMISING showed `netSh@std` and `costWall` but never the frictionless
 Sharpe that made it not a signal at all.
 
-Note for anyone re-running P1: its frictionless Sharpe reads **1.045** today against the **1.008**
-recorded on 2026-07-16, on an identical panel (same spec hashes, same 4017 liquid days). That drift
-is **pre-existing and unrelated to this gate** — a control run on the pre-v11.0 source reproduces
-1.045 exactly. It is not explained by any commit to `tier2_capturability`, which is unchanged; the
-likeliest source is the v7.1 per-name `(T,N)` alt-data bridge changing how the alt-data slots are
-assembled. Worth its own reproducibility check; the verdict is unaffected either way.
+Note for anyone re-running P1: its frictionless Sharpe reads **1.0447** today against the **1.008**
+recorded on 2026-07-16, on an apparently identical panel (same spec hashes, same 4017 liquid days).
+That drift is unrelated to this gate — a control run on the pre-v11.0 source reproduces 1.0447
+exactly.
+
+**RESOLVED 2026-07-31 — and the guess in the first version of this paragraph was WRONG.** It named the
+v7.1 per-name `(T,N)` alt-data bridge as the likeliest source. A bisect **falsified** that: all five
+post-07-16 `finrl_pro_ds/signals/` commits *plus the exact HEAD at record time* (`4be2e6b3`) — seven
+code states — return a bit-identical `1.044701045608392`. The cause is **data**:
+`data/taiwan_smallcap/pool.parquet` was re-enumerated 2026-07-31 11:41 by an unrelated probe's fetcher
+run, and its `sector` column is a **mandatory neutralization control** (scores are residualized on
+sector dummies daily, `finrl_pro_ds/signals/features.py:164-168`), so re-classified names move every
+downstream number — eligible sectors went 33 → 31. **All verdicts are unchanged in both readings.**
+The sector map is now pinned to `pool.frozen.parquet` with a `sector_map_sha` stamp. Full restatement
+and audit trail: `taiwan_smallcap_altdata_probes_preregistration_2026-07-15.md` §6.
+
+Worth carrying forward: `spec_hash`, `liquid_days_ge25` and `n_names_pool` are all **blind to the
+sector partition** and matched exactly — which is precisely what made a data change look like a code
+regression. A gitignored data file is an unpinned input to every "reproducible" verdict; hash what you
+neutralize on, not just the spec.
 
 ### 6.3 Ledger entries (durable — do not re-test)
 
