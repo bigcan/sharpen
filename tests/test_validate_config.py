@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import yaml
+
 # Ensure scripts/ is importable
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
@@ -13,6 +15,7 @@ from scripts.validate_config import (  # noqa: E402
     ValidationResult,
     check_challenge_block,
     check_drift_baseline_manifest_schema,
+    check_gates_block,
     check_legacy_prop_firm_block,
     check_retrain_gate,
     check_static_peak_consistency,
@@ -635,3 +638,95 @@ def test_retrain_gate_bad_last_trained_date_fails():
     cfg = _retrain_cfg(last_trained_date="not-a-date")
     check_retrain_gate(cfg, r)
     assert any("last_trained_date not ISO-parseable" in f for f in r.failures)
+
+
+# ---------------------------------------------------------------------------
+# check_gates_block — gates may be inline OR delegated to ensemble.gates_file
+#
+# Pre-existing bug: check_gates_block read only the inline `gates:` key and
+# FAILed "Missing `gates:` block" for configs using the documented
+# `ensemble.gates_file` indirection (e.g. configs/tailwind_v1_challenge.yaml),
+# even though five other call sites already resolve it via
+# _load_ensemble_gates_overlay. Both shapes are pinned below.
+# ---------------------------------------------------------------------------
+
+def _write_gates_file(tmp_path: Path, gates: dict) -> Path:
+    cfg_dir = tmp_path / "configs"
+    cfg_dir.mkdir(exist_ok=True)
+    path = cfg_dir / "ws_challenge.gates.yaml"
+    path.write_text(yaml.safe_dump({"gates": gates}, sort_keys=False))
+    return path
+
+
+def test_gates_block_inline_passes():
+    r = ValidationResult()
+    check_gates_block({"gates": {"rl_beats_linear": 1.10}}, r)
+    assert r.failures == []
+    assert any("gates block present (1 keys, from inline)" in p for p in r.passed)
+
+
+def test_gates_block_from_ensemble_gates_file_passes(tmp_path, monkeypatch):
+    """The reported repro shape: no inline `gates:`, only ensemble.gates_file."""
+    monkeypatch.chdir(tmp_path)
+    _write_gates_file(tmp_path, {"rl_beats_linear": 1.10, "g_cost_gap": 0.5})
+    cfg = {"ensemble": {"gates_file": "configs/ws_challenge.gates.yaml"}}
+    r = ValidationResult()
+    check_gates_block(cfg, r)
+    assert r.failures == [], f"unexpected failures: {r.failures}"
+    assert any("gates block present (2 keys" in p for p in r.passed)
+
+
+def test_gates_block_inline_and_file_merge(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    _write_gates_file(tmp_path, {"g_cost_gap": 0.5})
+    cfg = {
+        "gates": {"rl_beats_linear": 1.10},
+        "ensemble": {"gates_file": "configs/ws_challenge.gates.yaml"},
+    }
+    r = ValidationResult()
+    check_gates_block(cfg, r)
+    assert r.failures == []
+    assert any("gates block present (2 keys, from inline + " in p for p in r.passed)
+
+
+def test_gates_block_absent_entirely_still_fails():
+    """Negative tripwire — the check must not become a no-op."""
+    r = ValidationResult()
+    check_gates_block({"env": {}}, r)
+    assert any("Missing `gates:` block" in f for f in r.failures)
+
+
+def test_gates_block_empty_inline_still_fails():
+    r = ValidationResult()
+    check_gates_block({"gates": {}}, r)
+    assert any("Missing `gates:` block" in f for f in r.failures)
+
+
+def test_gates_block_unresolvable_gates_file_fails_with_path(tmp_path, monkeypatch):
+    """A dangling gates_file must FAIL and name the path, not silently pass."""
+    monkeypatch.chdir(tmp_path)
+    cfg = {"ensemble": {"gates_file": "configs/does_not_exist.yaml"}}
+    r = ValidationResult()
+    check_gates_block(cfg, r)
+    assert any(
+        "Missing `gates:` block" in f and "configs/does_not_exist.yaml" in f
+        for f in r.failures
+    )
+
+
+def test_gates_file_present_but_no_gates_key_fails(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    cfg_dir = tmp_path / "configs"
+    cfg_dir.mkdir()
+    (cfg_dir / "empty.gates.yaml").write_text(yaml.safe_dump({"provenance": {"x": 1}}))
+    cfg = {"ensemble": {"gates_file": "configs/empty.gates.yaml"}}
+    r = ValidationResult()
+    check_gates_block(cfg, r)
+    assert any("Missing `gates:` block" in f for f in r.failures)
+
+
+def test_gates_block_non_mapping_fails_without_crashing():
+    """`gates:` as a list must FAIL cleanly, not raise out of the overlay."""
+    r = ValidationResult()
+    check_gates_block({"gates": ["rl_beats_linear"]}, r)
+    assert any("must be a mapping" in f for f in r.failures)
