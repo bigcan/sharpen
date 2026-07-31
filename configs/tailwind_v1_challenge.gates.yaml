@@ -74,6 +74,30 @@ challenge_pass_gate:
   daily_breach_budget: 0.10          # frontier daily-breach at 1.5x is 0.090; alarm if a render exceeds this
 
 # ============================================================================
+# FORWARD-PATH RENDER — thresholds for the render this file's capital_gate demands
+# ============================================================================
+# Consumed by scripts/research/tailwind_forward_path_render.py. Declared HERE rather than in
+# the script because every numeric gate in this project lives in a gates file (CLAUDE.md
+# anti-pattern: "Never hardcode gate thresholds in code or scripts").
+#
+# The render answers paper_soak.risk.derivation's open question: does the 8%/4% internal buffer
+# trip on the book's NORMAL drawdown? It measures that as the "needless-termination share" — the
+# fraction of challenges that the firm's own limits would have let PASS but an internal kill
+# ended. The bootstrap P(pass) simulator cannot answer this: it destroys drawdown ORDERING, and
+# ordering is the whole question.
+forward_path_render:
+  max_needless_share: 0.05           # >5% of otherwise-winning challenges thrown away ⇒ buffer too tight
+  render_horizon_days: 756           # 3y cap per challenge window (no-deadline firms need a finite render)
+  # Effective annualised vol grid for the remedy sweep the derivation names ("else widen, or
+  # lower vol to 1.0x"). Scored on max_needless_share + daily_breach_budget + max_gross_exposure.
+  vol_frontier_grid: [0.06, 0.08, 0.10, 0.12, 0.15, 0.20]
+  # Trailing-vol targeting for the CAUSAL arm — what a live book can actually size off. Mirrors
+  # risk_parity.{trailing_window,min_periods} in configs/tailwind_v1_challenge.yaml.
+  causal_vol_window_days: 252
+  causal_vol_min_periods: 63
+  causal_vol_lev_cap: 3.0            # mirrors env.lev_cap in the challenge config
+
+# ============================================================================
 # SURVIVAL RISK KILLS — internal halts BELOW the firm hard limits
 # ============================================================================
 # HARD CEILINGS are the verified firm limits above. The internal kills fire FIRST so the

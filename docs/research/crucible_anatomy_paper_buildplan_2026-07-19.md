@@ -8,6 +8,41 @@
 
 ---
 
+## ⛔ STATUS 2026-07-31 (S553-cont-146) — ICAIF DEADLINE DROPPED (operator decision)
+
+**The ICAIF '26 submission is abandoned. The paper survives as a self-paced arXiv preprint with no
+deadline.** Do not resume work against 2026-08-02.
+
+**Why.** On 2026-07-31 (day ~12 of a ~14-day plan) the readiness audit found the plan's own progress
+log materially optimistic. It claimed *"ALL empirical figures complete — remaining is pure write-up"*;
+what actually existed on disk was:
+
+| Needed | Actual state 2026-07-31 |
+|---|---|
+| any `.tex` or draft | **none anywhere in the repo** |
+| F6 + F2-corrected power curve data | ✅ present (`results/crucible_calibration/calibration_mde_sweep*.json`, `xsec_*`) |
+| F4 realistic-null, F2 oracle, F3 marginal-seal, F5 matched-null HoF data | ❌ **JSON outputs absent** — `results/` is gitignored. Harnesses are tracked, so re-runnable, but that is compute, not zero |
+| rendered figures (any PNG/PDF) | **zero** — raw JSON only, no plotting layer exists |
+| LaTeX toolchain + `acmart` template | **neither installed nor present** |
+
+So the remaining work was never "pure write-up": regenerate 4 figure datasets → build a plotting
+layer → draw F1 → write 8pp → install/verify LaTeX + ACM template → double-blind anonymization (R1)
+→ Tier-2 adversarial read → CMT submit, in ~2 days. §7 **R4** already stated the paper is justified
+*only* by external-credibility value against the standing #1 direction (TSMOM → paper trading), and
+§6's cut line could not save it — the surviving Tier-3 data is the *opposite* half of what the cut
+line proposed shipping.
+
+**What is preserved.** Every empirical asset and harness stays in the repo; nothing is deleted. The
+arXiv route keeps the full external-credibility payoff, drops the double-blind anonymization burden
+(R1), and removes the deadline risk entirely. The strongest on-topic material — a verdict-generating
+machine emitting a confident, internally consistent, HIGH-severity finding that turned out to be an
+artifact of its own instrument (RC-11, `crucible_rc11_resolved_degenerate_null_2026-07-31.md`) — is
+fully measured and is exactly the paper's thesis.
+
+**Effort redirected to** the trading path (`docs/research/tailwind_v1_forward_path_render_2026-07-31.md`).
+
+---
+
 ## 1. Why reframe — and why the reframe is the *stronger* paper
 
 The cont-118 artifact recommended the paper *"disciplined filter → honest 0-PROMISING null → power curves."* The
