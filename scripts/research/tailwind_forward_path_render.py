@@ -509,7 +509,7 @@ def main() -> dict:
         "composition": ["momentum_tsmom", "defensive_bab"],
         "native_ann_vol_pct": round(native_vol * 100, 2),
         "native_sharpe": round(mom.sharpe(combined), 3),
-        "vol_scalar_to_15pct": round(float(vol_scalar), 4),
+        "vol_scalar_to_target": round(float(vol_scalar), 4),
         "momentum_ann_vol_pct": round(pf.ann_vol(m_al) * 100, 2),
         "bab_ann_vol_pct": round(pf.ann_vol(d_al) * 100, 2),
         "corr_momentum_bab": round(float(m_al.corr(d_al)), 3),
@@ -537,7 +537,7 @@ def main() -> dict:
     }
 
     # ---- CHECK 2: the rendered path ----
-    print("[3/5] rendering the realised path at 15% effective vol ...")
+    print(f"[3/5] rendering the realised path at {target_vol*100:.0f}% effective vol ...")
     stats_full = path_stats(rendered, dd_kill, daily_halt, firm_dd, firm_daily)
     stats_causal = path_stats(rendered_causal, dd_kill, daily_halt, firm_dd, firm_daily)
     dd_ok = abs(stats_full["max_dd_pct"]) < dd_kill * 100
@@ -662,14 +662,14 @@ def main() -> dict:
 
     # ---- report ----
     print("=" * 80)
-    print("TAILWIND-v1 CHALLENGE — FORWARD-PATH RENDER @ 15% effective vol")
+    print(f"TAILWIND-v1 CHALLENGE — FORWARD-PATH RENDER @ {target_vol*100:.0f}% effective vol")
     print("=" * 80)
     a = out["checks"]["A_lever_scale_invariance"]
     print(f"[A] config's 1.5x env levers -> series identical: {a['series_identical']}"
           f"  (max dev {a['max_abs_daily_deviation']:.2e})")
     print(f"    base vol {a['base_ann_vol_pct']}%  vs  1.5x-levers vol {a['levered_1p5x_ann_vol_pct']}%")
     print(f"[book] native vol {out['book']['native_ann_vol_pct']}%  Sharpe {out['book']['native_sharpe']}"
-          f"  -> scalar {out['book']['vol_scalar_to_15pct']} to reach 15%")
+          f"  -> scalar {out['book']['vol_scalar_to_target']} to reach {target_vol*100:.0f}%")
     for tag, s in (("full-sample", stats_full), ("causal", stats_causal)):
         print(f"[B/{tag}] vol {s['realised_ann_vol_pct']}%  ret {s['ann_ret_pct']}%  "
               f"maxDD {s['max_dd_pct']}%  worst day {s['worst_day_pct']}%  "
