@@ -154,6 +154,23 @@ def main() -> int:
     # weekends are empty by construction — skip them rather than paying a request each
     hours = hours[(hours.dayofweek < 5) | ((hours.dayofweek == 6) & (hours.hour >= 21))]
 
+    # RESUME PROVENANCE GUARD. The resume path merges new bars into an existing file, so if the
+    # decoding divisor changes between runs the two halves land on DIFFERENT PRICE SCALES and the
+    # merge is silent -- no exception, monotone timestamps, plausible bars. That happened on
+    # 2026-08-01: a XAUUSD pull begun under the buggy 1e5 divisor was resumed after the fix to
+    # 1e3, producing a file whose early years were 100x low. Record the divisor beside the data
+    # and refuse to resume across a change.
+    sidecar = dest.with_suffix(".manifest.json")
+    divisor_now = _divisor(args.instrument)
+    if dest.exists() and sidecar.exists():
+        import json as _json
+        prev_div = _json.loads(sidecar.read_text(encoding="utf-8")).get("divisor")
+        if prev_div is not None and float(prev_div) != float(divisor_now):
+            log.error("REFUSING TO RESUME: %s was written with divisor %s, this run uses %s. "
+                      "Delete %s and re-fetch -- merging would mix price scales silently.",
+                      dest.name, prev_div, divisor_now, dest.name)
+            return 2
+
     have: set[pd.Timestamp] = set()
     prior = None
     if dest.exists():
@@ -196,8 +213,15 @@ def main() -> int:
         bars = (pd.concat([prior, bars], ignore_index=True)
                 .drop_duplicates(subset=["timestamp"]).sort_values("timestamp"))
     bars.to_parquet(dest, index=False)
-    log.info("wrote %s: %d bars (%s..%s)", dest, len(bars),
-             bars["timestamp"].min(), bars["timestamp"].max())
+    import json as _json
+    sidecar.write_text(_json.dumps({"instrument": args.instrument, "bar": args.bar,
+                                    "divisor": divisor_now, "n_bars": int(len(bars)),
+                                    "px_min": float(bars["close"].min()),
+                                    "px_max": float(bars["close"].max())}, indent=1),
+                       encoding="utf-8")
+    log.info("wrote %s: %d bars (%s..%s) px %.4f-%.4f divisor %g", dest, len(bars),
+             bars["timestamp"].min(), bars["timestamp"].max(),
+             bars["close"].min(), bars["close"].max(), divisor_now)
     return 0
 
 
