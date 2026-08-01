@@ -92,12 +92,26 @@ def fetch_hour(instr: str, when: dt.datetime, session: requests.Session,
     for attempt in range(retries):
         try:
             r = session.get(url, timeout=timeout, headers=UA)
-            break
         except requests.RequestException:
-            if attempt == retries - 1:
-                return None                          # exhausted — caller COUNTS this, never silently drops
-            time.sleep(0.4 * (2 ** attempt))
-    if r.status_code != 200 or not r.content:
+            r = None
+        # STATUS CODES ARE NOT INTERCHANGEABLE. 200 is usable (possibly a legitimately empty
+        # closed hour); 404 means this hour genuinely has no file. ANY OTHER status — 429 throttle,
+        # 5xx — is TRANSIENT and must be retried, never booked as "market closed".
+        #
+        # The previous line `if r.status_code != 200 or not r.content: return DataFrame()` made a
+        # throttled response indistinguishable from a weekend, silently and without incrementing
+        # the failure counter. It surfaced on 2026-08-01 when five fetch blocks were run in
+        # parallel (40 concurrent requests): the FIRST year of every block came back ~43% short
+        # (3,286-3,614 bars against 5,890-6,288 for every other year) with ZERO failures logged.
+        # One thin year per block, always the block's first — a pattern, not noise. Caught by the
+        # per-year uniformity check, which is the same check that caught the 2004-2026 FX pull
+        # losing half its history to an unimplemented retry.
+        if r is not None and r.status_code in (200, 404):
+            break
+        if attempt == retries - 1:
+            return None                          # exhausted — caller COUNTS this, never silently drops
+        time.sleep(0.4 * (2 ** attempt) + 0.1 * attempt)
+    if r is None or r.status_code == 404 or not r.content:
         return pd.DataFrame()                        # weekend / holiday — legitimately empty
     try:
         raw = lzma.LZMADecompressor().decompress(r.content)
