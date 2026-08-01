@@ -76,3 +76,68 @@ N5 — a much larger raw effect — failed it.
 
 **One draw.** No other speed set, weighting, universe, or cost assumption. If N6 fails, the trend
 construction question is closed and the search stands at 23 probes.
+
+## 5. Results — **NO-GO** (fails the two statistical gates), and my power argument was wrong
+
+Run 2026-08-01, `results/multispeed_tsmom/multispeed_tsmom.json`. 4,652 days x 18 assets.
+
+| | baseline (252d) | blend (63/126/252) |
+|---|---|---|
+| net Sharpe @2bp | +0.2350 | **+0.3691** |
+| turnover | 14.1x/yr | 18.8x/yr |
+| max drawdown | -16.8% | **-13.2%** |
+| net Sharpe @6bp | +0.1298 | +0.2110 |
+
+| pre-committed bar | result |
+|---|---|
+| 1. paired CI excludes zero | **FAIL — +0.1449, CI95 [-0.3246, +0.5935]**, P(<=0)=0.27 |
+| 2. DSR >= 0.95 (n_trials=23) | **FAIL — DSR 0.0902**, hurdle SR* +0.4565 vs observed +0.1449 |
+| 3. blend net SR > baseline | PASS — +0.369 vs +0.235 |
+| 4. >=3 of 4 subperiods positive | PASS — 3/4 (+1.58%, +0.41%, +0.87%, **-1.48%**/yr) |
+| 5. DD not worse than 1.1x | PASS — -13.2% vs -16.8%, blend is *better* |
+| 6. gain survives 3x cost | PASS — +0.0812 at 6bp |
+
+**VERDICT: NO-GO.**
+
+### 5.1 The power argument in section 0 was wrong, and that is the finding
+
+I claimed a paired test would have "far more statistical power" because the two books are "highly
+correlated", so the difference would have low variance. **Measured correlation is 0.778, not the
+~0.95 that argument implicitly assumed.** At rho = 0.78 the difference series carries substantial
+variance, and the paired design bought much less power than advertised: the difference Sharpe is
++0.1449 with a CI spanning [-0.32, +0.59].
+
+**The paired-test advantage is real but it scales with correlation.** At rho = 0.95 the difference
+variance is ~10% of the average book variance; at rho = 0.78 it is ~44%. I asserted the mechanism
+without measuring the input it depends on — the same error class as reading GLD/IAU/SGOL agreement
+as independent evidence in N2.
+
+### 5.2 What the numbers do and do not support
+
+**Descriptively the blend looks better on every practical axis:** higher net Sharpe (+0.369 vs
++0.235), *lower* drawdown (-13.2% vs -16.8%), and the gain survives 3x cost (+0.081 at 6bp). If a
+speed set had to be chosen on judgement, the blend is the better default.
+
+**Statistically it is not distinguishable from the baseline.** CI spans zero, DSR = 0.09, and the
+most recent subperiod (2023-2026) is **negative** at -1.48%/yr, SR -0.50 — the one window that
+matters most for a forward deployment decision.
+
+### 5.3 A caveat that limits what this probe could ever have shown
+
+The reconstructed baseline scores **+0.235**, well below the deployed book's documented net
+**~0.60**. So this compares two *proxies* of the deployed construction, not the deployed book
+itself, and the deployed book's construction differs in ways this reconstruction does not capture.
+A blend improvement measured against a weaker baseline does not transfer automatically. Testing
+this properly requires the deployed book's own return series, which is not stored (`results/` is
+gitignored).
+
+### 5.4 Ledger (durable)
+
+- **Multi-speed TSMOM blend (63/126/252) vs single-speed 252: NO-GO.** Paired difference +0.145,
+  CI [-0.325, +0.594], **DSR 0.090**. Descriptively better (SR +0.369 vs +0.235, DD -13.2% vs
+  -16.8%, survives 3x cost) but not statistically separable, and **negative in 2023-2026**.
+- **A paired test's power gain scales with the correlation between the two arms — measure it, do
+  not assume it.** Here rho = 0.778, not ~0.95, and the difference was noisy.
+- **The reconstructed TSMOM baseline is +0.235, not the deployed ~0.60.** Any future construction
+  comparison needs the deployed book's stored returns, not a reconstruction.
+- Family **CLOSED** per section 4. Free-data search stands at **23 probes, zero deployable alpha**.
