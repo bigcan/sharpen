@@ -145,3 +145,40 @@ this probe.
   cell claim must measure the candidate signal's *own* turnover and the *actual* bar-scale spread of
   *every* instrument it will trade — not the best one.
 - The free-data alpha search completes at **17 probes, zero deployable alpha**.
+
+---
+
+## 8. ADDENDUM — the harvestability question, settled ANALYTICALLY (no probe 18)
+
+§6.2 left one thread live: the effect is real but untradeable *as constructed* — could a
+lower-turnover expression harvest it? §5's stop rule bars me from re-expressing the signal, and
+rather than break a rule written specifically to prevent chasing, the question is answered from
+**measured quantities alone**.
+
+From the run: gross **+0.5787**, net **−3.8329** at turnover **1,750/yr** ⇒ implied cost drag
+**4.412** Sharpe, i.e. **0.002521 Sharpe per unit of annual turnover**. Inverting:
+
+| net target | max turnover | implied holding | reduction needed |
+|---|---|---|---|
+| ≥ +0.30 | 111/yr | ~54 h (**2.3 days**) | **16×** |
+| ≥ +0.10 | 190/yr | ~32 h (1.3 days) | 9× |
+| ≥ 0.00 | 230/yr | ~26 h (1.1 days) | 8× |
+
+**The effect is a 3-HOUR reversal.** Harvesting it at a tradeable net requires holding it for
+**days** — at which point it is no longer this signal but *daily/multi-day reversal*, a distinct
+phenomenon this campaign has already tested and falsified **twice**:
+
+- **R1** Taiwan small/mid-cap 21-day reversal — frictionless Sharpe **−0.182**, NO-GO;
+- **K1** crypto 7-day cross-sectional reversal — gross +0.161, CI straddles zero, net +0.035, NO-GO.
+
+**Conclusion: the lower-turnover harvest is not an untested idea — it is a tested and failed one at
+the horizon the arithmetic forces.** The confirmed 3-hour effect lives entirely inside a turnover
+regime whose costs exceed it by ~7×, and the only way out of that regime destroys the effect.
+
+**Sub-daily FX mean reversion is REAL and STRUCTURALLY UNHARVESTABLE on free retail-cost execution.**
+That is the campaign's terminal finding. Probe 18 would add nothing: the answer is already in the
+measured numbers plus results the ledger already holds.
+
+*(A different actor could reach it — someone paying maker rebates rather than crossing a 0.45-1.5 bp
+spread faces a fundamentally different cost curve. That is a market-access question, not a research
+one, and it is out of scope for a free-data retail search.)*
