@@ -307,7 +307,10 @@ def run(
             solo_pf_per_fold.append({})
             ens_pf_per_fold.append(None)
             ens_metrics_per_fold.append({})
-            del agents
+            # Drop the reference (frees VRAM) without unbinding the name — a
+            # bare `del` here makes `agents` undefined for the `del` at the end
+            # of the loop body, which static analysis flags as a NameError path.
+            agents = None
             continue
 
         # Pull fold summary
