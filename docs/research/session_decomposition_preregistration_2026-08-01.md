@@ -136,3 +136,76 @@ outcome.**
 re-cuts by holding window, no conditioning variables, no subset re-selection, no intraday-bar
 version on the same instruments. A different construction would need its own pre-registration and
 would have to state what new information justifies it.
+
+## 8. Results — **NO-GO** (6 of 7 bars fail), and the dividend discriminator earned its place
+
+Run 2026-08-01, `results/session_decomposition/session_decomposition.json`.
+Decomposition reconstructs close-to-close to **2.2e-16** (machine precision); 0 non-positive opens,
+2 flat-OHLC bars in 83,736; unadjusted prices and 1,305 dividend events pulled independently from
+yfinance.
+
+**Primary — pooled OOS equity (QQQ, IWM, EFA, EEM), 4,651 days:**
+gross Sharpe **+0.0834**, CI95 **[-0.2919, +0.4576]**, P(SR<=0) = 0.33. Book vol 21.3%/yr,
+mean +1.78%/yr. Net@1bp **-0.153**, net@2bp -0.389. Cost wall: SR=0 at **0.353 bp** round trip.
+
+| pre-committed bar | result |
+|---|---|
+| 1. pooled gross CI excludes zero | FAIL (includes zero) |
+| 2. >=3 of 4 individually gross-positive | FAIL (2/4 — QQQ +0.23, IWM +0.46, EFA -0.45, EEM -0.00) |
+| 3. survives the dividend discriminator | FAIL — see below |
+| 4. pooled net >= 0.30 at 1 bp | FAIL (-0.153) |
+| 5. net >= 0 at 2x cost | FAIL (-0.389) |
+| 6. >=3 of 4 subperiods gross-positive | FAIL (2/4; only 2018-2022 is strong, +0.44) |
+| 7. control CI includes zero | PASS (-0.115, CI [-0.550, +0.325]) |
+
+**VERDICT: NO-GO.** The US-equity overnight premium of the 2008-2019 literature is **not present**
+in this panel over 2008-2026 at any strength that survives its own confidence interval.
+
+### 8.1 The dividend discriminator was the right call and it fired
+
+Adjusted (total-return) gross **+0.0834** vs price-only gross **-0.0026**. The dividend
+contribution to the overnight leg is **1.81%/yr** — larger than the entire book's +1.78%/yr mean.
+
+**The whole adjusted signature is dividends.** An overnight-only holder does own the shares across
+the ex-dividend open, so that 1.8%/yr is a *real* cash flow — but it is payment for holding, not
+evidence of a time-of-day risk premium, and it is available to any long holder. Had section 3 not
+been pre-committed this would have read as a small positive effect rather than an accounting
+identity. It is the cheapest check in the file and it decided the verdict.
+
+### 8.2 What the beta check confirmed
+
+corr(book, SPY) **-0.138**, beta **-0.149** — the construction is beta-neutral as designed, so the
+null is a real null and not beta in disguise. The design worked; there was simply nothing to find.
+
+### 8.3 Ledger (durable)
+
+- **US-equity overnight-vs-intraday session premium, 2008-2026, ETF panel: NO-GO.** Gross +0.083
+  with a CI spanning zero, 2/4 instruments, 2/4 subperiods, point estimate fully explained by
+  dividends. Do not re-propose for US equity ETFs.
+- **A total-return series silently credits every dividend to the overnight leg.** Any future
+  session or time-of-day study on adjusted data must difference against price-only or it will
+  rediscover the dividend yield and call it alpha.
+- Per section 7 the equity session-decomposition family is **CLOSED for this panel**.
+
+### 8.4 One pre-registered SECONDARY did not behave like the others
+
+Section 2 committed a sign for the three non-equity classes and required them to be reported
+separately. Three of four are nulls consistent with the primary (equity +0.097, bond +0.082,
+currency -0.423 — all CIs spanning zero or negative). **The commodity class is not:**
+
+| class | gross | CI95 | net@1bp | vol | cost wall (SR=0.30) |
+|---|---|---|---|---|---|
+| equity | +0.0971 | [-0.289, +0.486] | -0.146 | 20.7% | — |
+| bond | +0.0821 | [-0.415, +0.566] | -0.473 | 9.1% | — |
+| **commodity** | **+0.5008** | **[+0.1024, +0.9248]** | **+0.2151** | 17.6% | **0.70 bp** |
+| currency | -0.4232 | [-0.901, +0.037] | -1.516 | 4.6% | — |
+
+Per-instrument: GLD **+0.569**, SLV **+0.559**, DBA **+0.666**, DBC **+0.351**, USO -0.035 —
+**4 of 5 positive**. GLD is the extreme case: **+9.73%/yr overnight against -0.17%/yr intraday**,
+i.e. essentially the whole of gold's 2008-2026 return accrues while the US ETF is closed.
+
+**This is NOT a GO and is not scored as one here.** It is a pre-registered secondary, its pass
+conditions were never written, and it has had no dividend discriminator, no subperiod test, and no
+realistic per-instrument cost. Section 7 forbids re-cutting N1 to chase it. Under section 7's own
+escape clause it is carried forward as **new information justifying a separate pre-registration
+(N2)**, which must be written and committed before any confirmatory statistic on it is computed.
