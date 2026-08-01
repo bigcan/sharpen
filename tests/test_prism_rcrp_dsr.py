@@ -50,8 +50,7 @@ class TestRegimeBalancedReplay:
         buf = _make_buffer()
         batch_size = 300
 
-        # Sample many batches and count vol-regime distribution
-        vol_counts = np.zeros(3, dtype=int)
+        # Sample many batches to exercise the balanced-draw path
         for _ in range(50):
             states, actions, rewards, next_states, dones, aux = \
                 buf.sample_regime_balanced(batch_size, mode="balanced")

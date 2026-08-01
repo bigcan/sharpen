@@ -80,8 +80,8 @@ def test_smoothed_target_hit_triggers(tmp_path: Path):
     )
     sm, _ = _make_machine(tmp_path, phase)
     # Fill buffer with bars well above target
-    s1 = sm.observe(110_100, now_utc=_now())
-    s2 = sm.observe(110_200, now_utc=_now())
+    sm.observe(110_100, now_utc=_now())
+    sm.observe(110_200, now_utc=_now())
     s3 = sm.observe(110_300, now_utc=_now())
     assert s3.phase_complete
     assert s3.trip_source == "smoothed"
