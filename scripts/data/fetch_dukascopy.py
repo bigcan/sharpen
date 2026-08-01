@@ -59,12 +59,19 @@ def _divisor(instr: str) -> float:
     """Scaled-int divisor. Getting this wrong is SILENT — it yields prices off by 10^3 with no
     error (S&P decoded as 2,114,349 instead of 2114.3 before this was corrected). Always sanity
     -check a decoded price against a known level for any NEW instrument family."""
+    # ORDER IS LOAD-BEARING. Metals must be tested BEFORE the generic 6-letter FX rule: "XAUUSD"
+    # is six alpha characters, so it used to fall into the 1e5 FX branch and the metals branch
+    # below was unreachable dead code. Gold then decoded to 6.89-10.27 for 2008 (true range
+    # ~$688-1027) — a silent 100x error that raised nothing, exactly the failure mode this
+    # docstring warns about. The dead branch's own value (1e2) was ALSO wrong; measured against
+    # known levels the correct metals divisor is 1e3: raw 688564 -> $688.56 (gold's Oct-2008 low)
+    # and raw 1026945 -> $1026.9 (its Mar-2008 high). Verified again at Jun-2015 -> ~$1180.
+    if instr.startswith(("XAU", "XAG")):
+        return 1e3                                  # metals (verified 2008 lows/highs + Jun-2015)
     if instr.endswith("JPY"):
         return 1e3
     if len(instr) == 6 and instr.isalpha():        # 5-decimal FX pair
         return 1e5
-    if instr.startswith(("XAU", "XAG")):
-        return 1e2                                  # metals (verified: XAUUSD -> ~1188 in Jun-2015)
     return 1e3                                      # index / energy CFD (verified S&P, DAX)
 
 
