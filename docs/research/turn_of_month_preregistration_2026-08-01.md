@@ -114,3 +114,67 @@ decades to front-run; (e) **19 consecutive falsifications** is the strongest pri
 **One draw.** The window is fixed at the canonical 4 days: **no alternative width, offset, month-end
 convention, subset of instruments, or conditioning variable will be tried.** If N3 fails, calendar
 / turn-of-month is closed for this project and the free-data search stands at 20 probes.
+
+## 8. Results — **NO-GO** (5 of 6 bars fail). The canonical window is unremarkable.
+
+Run 2026-08-01, `results/turn_of_month/turn_of_month.json`. 4,651 days x 18 tickers; 888 TOM days
+(19.1%).
+
+| pre-committed bar | result |
+|---|---|
+| 1. pooled gross CI excludes zero | FAIL — +0.1001, CI95 [-0.3241, +0.5440], P(SR<=0)=0.31 |
+| 2. >=3 of 4 classes gross-positive | PASS — 3/4 (equity +0.089, commodity +0.085, currency +0.042, bond -0.006) |
+| 3. net >= 0.30 at 5bp and >= 0 at 20bp | FAIL — net@5bp -0.171, net@20bp -0.985 |
+| 4. >=3 of 4 subperiods positive | FAIL — 2/4 (+0.33, -0.42, +0.44, -0.31) |
+| **5. beats random-window q95** | **FAIL — observed sits at the 78th percentile** |
+| 6. country-ETF OOS CI excludes zero | FAIL — +0.1703, CI95 [-0.2469, +0.6115] |
+
+**VERDICT: NO-GO.**
+
+### 8.1 Condition 5 is the finding: the turn-of-month window is not special
+
+The random-window null (300 draws, each picking a random block of 4 *consecutive* trading days per
+month and rebuilding the identical dollar-neutral book) has mean **-0.0612**, sd **0.2250**, q95
+**+0.3374**. The canonical McConnell-Xu window scores **+0.1001** — the **78th percentile**.
+
+**Roughly one random 4-day window in five beats the turn-of-month window.** The calendar position
+carries no information on this panel. This is a much stronger statement than a wide confidence
+interval: it says the specific window the literature identifies is not distinguishable from an
+arbitrary one, which is the exact failure mode a calendar study must rule out.
+
+### 8.2 The specificity check points the same way
+
+The flow mechanism is equity-specific and predicts nothing in gold or FX. Measured: spot gold
+**+0.115**, FX majors **+0.149** — both *at or above* the 18-ETF panel's **+0.100**. A supposed
+US-equity-flow effect that is no stronger in equities than in spot gold is not a flow effect. It is
+the same small positive noise everywhere, consistent with the null.
+
+### 8.3 Cost did not decide this one, by design — and it still lost
+
+The probe was chosen so cost could not be the executioner: 24 round trips/yr instead of N1/N2's
+504. It worked as intended — the cost wall for SR=0 is **1.8 bp**, comfortably above realistic ETF
+costs, so the verdict rests on signal, not friction. **There was simply no signal.** Removing the
+cost constraint did not reveal an edge underneath it; it revealed that the edge was never there.
+
+That is worth recording precisely, because "everything dies on cost" had become the campaign's
+working explanation. On the one probe built to be cost-immune, the result is still a null.
+
+### 8.4 Why the XLG prior turned out to be right for the wrong reason
+
+Section 1 argued the XLG NO-GO could not settle this, because it was long-or-cash and lost to cash
+drag rather than to the calendar. **That reasoning was sound and the conclusion still holds** — but
+the dollar-neutral version, which has no cash drag, is *also* a null. So the XLG verdict was
+correct about turn-of-month even though its stated mechanism (cash drag) was not the whole story:
+the window is unremarkable on its own terms.
+
+### 8.5 Ledger (durable)
+
+- **Cross-asset turn-of-month, dollar-neutral, 2008-2026: NO-GO.** Gross +0.100 with a CI spanning
+  zero, 2/4 subperiods, country-ETF OOS also spanning zero.
+- **The canonical 4-day window sits at the 78th percentile of random 4-day windows** — the calendar
+  position carries no information. Do not re-propose any turn-of-month variant.
+- **Equity-flow specificity is absent**: the effect is no larger in equities than in spot gold or
+  FX, which falsifies the mechanism independently of the significance test.
+- **A cost-immune probe still returned a null** — friction was not hiding an edge.
+- Per section 7 the calendar/turn-of-month family is **CLOSED**. The free-data search stands at
+  **20 probes, zero deployable alpha**.
