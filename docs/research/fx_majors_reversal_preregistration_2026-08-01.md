@@ -69,6 +69,79 @@ room. **A null result is the most likely outcome and would close the campaign cl
 holding periods, no pooled-subset re-cuts. If it fails, sub-daily FX reversal is closed and the
 free-data alpha search is complete at 17 probes.
 
-## 6. Results
+## 6. Results — **NO-GO**, but the gross effect is REAL and replicates out-of-sample
 
-*(Empty at commit time on purpose — verifiable from git history, and the data was not yet downloaded.)*
+Run 2026-08-01, `results/fx_majors/fx_majors_reversal.json`. Four out-of-sample majors downloaded
+after this file was committed; ~140,000 hourly bars each, verified uniform (no thin years), one
+hour of 6,444 failed on USDCHF (0.016%) and was **surfaced by the retry accounting**, not dropped.
+
+| instrument | 3h bars | spread | **gross** | net | net@2× | turnover/yr |
+|---|---|---|---|---|---|---|
+| USDJPY | 47,326 | 0.605 bp | **+0.2955** | −1.3225 | −2.9954 | 1,825 |
+| GBPUSD | 47,414 | 0.870 bp | **+0.3991** | −1.9870 | −4.4990 | 1,792 |
+| AUDUSD | 47,235 | 1.536 bp | **+0.4993** | −3.2422 | −7.2943 | 1,511 |
+| USDCHF | 47,430 | 1.377 bp | **+0.3131** | −3.4100 | −7.4234 | 1,759 |
+| *EURUSD (in-sample)* | 47,433 | 0.453 bp | *+0.2718* | *−1.0251* | *−2.3589* | *1,875* |
+
+**Pooled out-of-sample** (47,090 common bars): gross **+0.5787**, CI95 **[0.2332, 1.0186]** —
+**excludes zero**. Net **−3.8329**. Net@2× **−8.5059**. Gross-positive **4/4**.
+**Control** pooled gross **−0.0010**, CI [−0.4444, +0.4231] — clean null.
+
+| pre-committed bar | result |
+|---|---|
+| pooled gross CI excludes zero | ✅ **PASS** |
+| pooled net ≥ 0.30 | ❌ **FAIL** (−3.83) |
+| ≥3 of 4 individually gross-positive | ✅ **PASS** (4/4) |
+| pooled net positive at 2× spread | ❌ **FAIL** |
+| control gross CI includes zero | ✅ **PASS** |
+
+**VERDICT: NO-GO.**
+
+### 6.1 The effect is real — this is the campaign's one genuine positive
+
+G1's +0.272 on EURUSD was **not noise**. The same frozen signal, on four instruments never used to
+form the hypothesis, produces **positive gross Sharpe on every one** and pools to **+0.579 with a
+confidence interval that excludes zero**, against a control that is a clean null on the identical
+pooling. The power argument in §0 worked exactly as designed: pooling took the effective detection
+floor below the effect size, and the effect survived.
+
+**Sub-daily FX mean reversion exists.** That is a real, out-of-sample-replicated finding and it is
+the direction the microstructure literature predicts.
+
+### 6.2 And it is untradeable by roughly sevenfold
+
+Gross +0.58 against net **−3.83**. The signal turns over ~1,750×/yr and pays 0.45-1.54 bp each time.
+No part of that is recoverable by the constructions this pre-registration permits.
+
+### 6.3 My cell-viability analysis was OPTIMISTIC — a correction
+
+`free_data_unblock_2026-07-31.md` declared this cell viable with drag **0.31**. Measured reality is
+**0.66 for EURUSD alone**, and ~2.1+ for the OOS basket. Two compounding errors, both mine:
+
+1. **Wrong bar-scale spread.** I used EURUSD's *hourly-bar* median spread (0.256 bp) to size a
+   strategy that trades **3-hour** bars, where the effective spread is **0.453 bp** — 1.8× higher.
+2. **Generalised from the tightest instrument on earth.** EURUSD is the spread floor; USDJPY,
+   GBPUSD, AUDUSD and USDCHF run 0.6-1.5 bp, 1.3-3.4× wider. The cell was derived on the best case
+   and presented as the general case.
+
+Turnover was the *smaller* error (assumed ~1,452/yr, measured ~1,750 — only 1.2× off).
+
+**The honest restatement: the cell was viable for a signal with modest turnover on EURUSD
+specifically, not for this signal, and not across majors.** Viability is a property of a
+(substrate, holding, *signal*) triple — not of a substrate and holding alone. That is the single
+most useful correction of the campaign and it invalidates the "one viable cell" framing, not just
+this probe.
+
+### 6.4 Ledger (durable)
+
+- **Sub-daily FX cross-instrument mean reversion: REAL (pooled gross +0.579, CI [0.233, 1.019],
+  4/4 OOS instruments, clean control) and NOT TRADEABLE (net −3.83).** Recorded as a confirmed
+  *phenomenon*, explicitly **not** an alpha.
+- **The §5 stop rule is TERMINAL and is honoured.** No lower-turnover re-expression, no other
+  instruments, no other holding periods. A tradeable form would need a fundamentally different
+  construction *and* its own pre-registration — and would have to clear a cost bar this one missed
+  by ~7×, which is not a near miss.
+- **Viability is a property of (substrate, holding, signal), not (substrate, holding).** Any future
+  cell claim must measure the candidate signal's *own* turnover and the *actual* bar-scale spread of
+  *every* instrument it will trade — not the best one.
+- The free-data alpha search completes at **17 probes, zero deployable alpha**.
