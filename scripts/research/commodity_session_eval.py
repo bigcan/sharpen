@@ -171,6 +171,14 @@ def gold_sessions() -> tuple[pd.DataFrame, float] | tuple[None, None]:
     g = g.dropna(subset=["us", "nonus"])
     wk = d[d["is_wknd_gap"]].groupby("sess_day")["r"].sum()
     g["wknd_gap"] = wk.reindex(g.index).fillna(0.0)
+    # PER-HOUR NORMALISATION. The non-US bucket spans ~18 clock hours against the US bucket's 6,
+    # so a raw return-share comparison is not a fair one — a uniform-return world already hands
+    # the longer window 3x the return. Count the bars actually observed in each bucket and report
+    # return and variance PER BAR, which is the comparison that has to hold for the effect to be
+    # about time-of-day rather than about window length.
+    nb = d.dropna(subset=["r"]).groupby("bucket").size()
+    g.attrs["bars_us"] = int(nb.get("us", 0))
+    g.attrs["bars_nonus"] = int(nb.get("nonus", 0))
     return g, float(d["spread"].median())
 
 
@@ -263,6 +271,21 @@ def main() -> int:
         print(f"  n={len(book):,} session-days  {gs.index.min().date()} -> {gs.index.max().date()}")
         print(f"  non-US session {gs['nonus'].mean()*ANN*100:+.2f}%/yr   "
               f"US session {gs['us'].mean()*ANN*100:+.2f}%/yr")
+        bu, bn = gs.attrs.get("bars_us", 0), gs.attrs.get("bars_nonus", 0)
+        nd = max(1, len(gs))
+        hu, hn = bu / nd, bn / nd
+        if hu > 0 and hn > 0:
+            print(f"  PER-HOUR (window lengths {hn:.1f}h non-US vs {hu:.1f}h US):")
+            print(f"    return/hr  non-US {gs['nonus'].mean()*ANN*100/hn:+.3f}  "
+                  f"US {gs['us'].mean()*ANN*100/hu:+.3f} %/yr per hour")
+            print(f"    var/hr     non-US {gs['nonus'].var()/hn*1e6:.2f}  "
+                  f"US {gs['us'].var()/hu*1e6:.2f} (x1e-6)")
+            rep.setdefault("gold_perhour", {})
+            rep["gold_perhour"] = {"hours_nonus": hn, "hours_us": hu,
+                                   "ret_per_hr_nonus": float(gs["nonus"].mean() * ANN / hn),
+                                   "ret_per_hr_us": float(gs["us"].mean() * ANN / hu),
+                                   "var_per_hr_nonus": float(gs["nonus"].var() / hn),
+                                   "var_per_hr_us": float(gs["us"].var() / hu)}
         print(f"  gross {gg:+.4f}  CI95 [{glo:+.4f}, {ghi:+.4f}]  "
               f"measured spread {gspread*1e4:.2f} bp  net {gnet:+.4f}")
         print(f"  ex-weekend-gap gross {nw:+.4f}  (weekend gap contributes "
