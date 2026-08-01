@@ -92,3 +92,90 @@ falsifications**. **A null or a tail-gate failure is the most likely outcome.**
 **One draw.** No alternative hedge ratio, signal threshold, holding rule, instrument substitution,
 or subperiod re-cut. If N4 fails, the VIX term-structure family is closed for this project and the
 free-data search stands at 21 probes.
+
+## 7. Results — **NO-GO** (fails 2 of 6), but it fails differently from every prior probe
+
+Run 2026-08-01, `results/vix_term_structure/vix_term_structure.json`. 3,894 days 2011-01-04 to
+2026-06-30. Contango on **92.3%** of days; 193 switches (**12.5/yr**).
+
+| pre-committed bar | result |
+|---|---|
+| 1. gross CI excludes zero | PASS — **+0.7338**, CI95 [+0.2823, +1.2075] |
+| 2. net >= 0.30 @3% borrow and >= 0 @10% | PASS — **+0.5907** and **+0.4149** |
+| 3. >=3 of 4 subperiods positive | PASS — **4/4** (+0.56, +0.59, +0.99, +0.75) |
+| **4. max DD <= 35% and worst day <= 15%** | **FAIL — max DD -50.1%, worst day -19.9%** |
+| 5. 2018-02-05 survivable | PASS — book **-0.2%** (see 7.2, my prediction was wrong) |
+| **6. control CI includes zero** | **FAIL — +0.6398, CI95 [+0.5125, +0.7825]** |
+
+**VERDICT: NO-GO.**
+
+### 7.1 What is actually true here — the premium is real, the signal is not
+
+This is the first probe in 21 that fails on **neither existence nor cost**. Gross +0.73 with a CI
+excluding zero, positive in **all four** subperiods, and a **borrow wall of 14.6%/yr** for a 0.30
+net Sharpe — five times the primary assumption. The front-vs-mid VIX roll differential is a real,
+large, persistent premium, now measured for this project rather than assumed.
+
+**But the term-structure signal is nearly inert.** The block-shuffled control earns **+0.6398**
+against the real signal's +0.7338 — the timing rule adds roughly **0.09 Sharpe**. Because contango
+holds 92.3% of days, the book is in the market 92.2% of the time, and essentially all of the return
+is *being exposed to the roll*, not *choosing when*.
+
+**Honest decomposition: ~0.64 of premium (beta) + ~0.09 of signal (alpha), minus a disqualifying
+tail.**
+
+### 7.2 CORRECTION — my stated fact about the XIV event was wrong
+
+Section 4 asserted, as a fact and in advance: *"the term structure **was in contango** going into
+[2018-02-05], so the signal does **not** filter the XIV event and this is a live risk."*
+
+**That is false.** At the 2018-02-02 close `VIX3M > VIX` was **False** — the curve had already
+inverted — so the book was **flat** on 2018-02-05 and lost **-0.2%** while VIXY rose **+34.2%** and
+VIXM **+13.5%**. The signal *did* filter the event, and condition 5 passes for the opposite reason
+to the one I gave.
+
+This matters beyond bookkeeping: I chose the spread construction "on tail grounds" partly to
+survive an event the signal already avoided, and I wrote a confident factual claim about a specific
+date without checking it. **The gate passed despite my reasoning, not because of it.**
+
+### 7.3 And the tail still disqualifies it — from a different direction
+
+Avoiding February 2018 did not make this safe. The worst days are **2021-11-26 (-19.9%)**,
+2020-06-11 (-19.8%), 2024-08-02 (-15.1%), 2016-06-24 (-14.4%), 2021-01-27 (-13.9%) — Omicron, a
+mid-COVID vol spike, the yen-carry unwind, Brexit, and the meme squeeze. **Max drawdown -50.1%**,
+and every subperiod carries a 29-39% drawdown.
+
+Under this project's stated objective — prop-firm challenges where a single day can disqualify — a
+-19.9% day and a -50% drawdown are not deployable at any Sharpe. Gate 4 was written in advance
+precisely so this could not be argued away after seeing a 0.73.
+
+### 7.4 Condition 6 was MIS-SPECIFIED, and that is my error, not a result
+
+Requiring the control's CI to *include zero* was wrong for a signal that is on 92% of the time. A
+block-shuffled control inherits nearly the full exposure, so it inherits the premium and **cannot**
+be centred on zero however inert the signal is. Condition 6 therefore tested *"does the premium
+exist"* (it does) rather than *"does the signal add value"* (it barely does).
+
+The correct control for signal value is the **always-on** book, not zero. Reading the numbers that
+way — +0.7338 signalled against +0.6398 shuffled — gives the right answer anyway, so the NO-GO
+stands on gate 4 regardless. But the condition as written was not the test I intended.
+
+**Durable rule: a control must be able to come out negative. If a control inherits the exposure
+whose premium is under test, its null is not zero, and comparing it to zero measures nothing.**
+Same family as this project's NULL-DEGEN-01 finding — a null that could not vary.
+
+### 7.5 Ledger (durable)
+
+- **VIX front-vs-mid term-structure carry: NO-GO on TAIL.** Gross +0.734 (CI [+0.282, +1.208]),
+  net +0.591 at 3% borrow, 4/4 subperiods, borrow wall 14.6%/yr — **the premium is REAL and
+  survives cost**. It fails on **max DD -50.1% / worst day -19.9%**, both beyond the pre-committed
+  gates.
+- **The term-structure timing signal is nearly inert**: shuffled control +0.640 vs +0.734. Contango
+  holds 92.3% of days, so this is ~88% beta and ~12% timing. Do not call it a timing strategy.
+- **2018-02-05 was avoided because the curve had already inverted** — contrary to what this
+  pre-registration asserted. Do not repeat the claim that the contango filter fails to catch XIV.
+- **A control that cannot come out negative measures nothing** (7.4).
+- Family **CLOSED** per section 6. Free-data search stands at **21 probes, zero deployable alpha**.
+- WARNING for any revisit: the live question is **not** whether the premium exists — it does — but
+  whether a tail-controlled expression can bring DD inside 35% **without fitting the hedge ratio to
+  the observed crashes**. That needs its own pre-registration and is **not** implied by this result.
