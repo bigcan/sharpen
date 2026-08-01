@@ -6,6 +6,7 @@ and skipped by default (run with: pytest -m integration).
 
 import numpy as np
 import pytest
+import pytest_asyncio
 
 from finrl_pro_ds.crypto.execution.exchange_perp_broker import (
     _FEE_TABLE,
@@ -103,7 +104,7 @@ class TestExchangePerpBrokerIntegration:
     Run with: pytest -m integration tests/crypto/test_exchange_broker.py
     """
 
-    @pytest.fixture
+    @pytest_asyncio.fixture
     async def bybit_broker(self):
         broker = ExchangePerpBroker(exchange="bybit", testnet=True)
         await broker.connect()

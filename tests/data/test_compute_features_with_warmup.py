@@ -27,7 +27,8 @@ def _synthetic_ohlcv(n: int, seed: int = 42, start_price: float = 4000.0) -> pd.
     spread = close * 0.0005
     high = close + rng.uniform(0, 1, n) * spread
     low = close - rng.uniform(0, 1, n) * spread
-    open_ = np.roll(close, 1); open_[0] = close[0]
+    open_ = np.roll(close, 1)
+    open_[0] = close[0]
     high = np.maximum(high, np.maximum(open_, close))
     low = np.minimum(low, np.minimum(open_, close))
     volume = rng.lognormal(10, 1, n)

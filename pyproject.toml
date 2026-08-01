@@ -72,7 +72,13 @@ where = ["."]
 include = ["finrl_pro_ds*"]
 
 [tool.pytest.ini_options]
-addopts = "-q"
+# `-m "not integration"` keeps bare `pytest` off the network: the integration
+# tests talk to live exchange testnets. Run them explicitly with `-m integration`.
+addopts = "-q -m 'not integration'"
+# pytest-asyncio is a hard requirement — without it the `asyncio`-marked
+# coroutine tests are collected but never executed (silently, via a warning).
+asyncio_mode = "strict"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = [
     "tests",
 ]
