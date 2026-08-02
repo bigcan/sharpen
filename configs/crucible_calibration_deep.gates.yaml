@@ -103,7 +103,10 @@ mde_sweep:
   #    baked into the FitnessConfig, so a row is "MDE at N bars of THIS per-bar signal-to-noise".
   #    Reading a high-N row as an intraday substrate's MDE additionally assumes intraday per-bar SNR
   #    resembles daily — which is a modelling assumption, not something this sweep measures.
-  t_grid: [756, 1512, 2782, 4044, 6048, 8064, 16128, 32256]
+  # DEEP EXTENSION 2026-08-02: mde_sweep (OVERLAY) has its OWN t_grid, separate from
+  # xsec_mde_sweep's — extending only the xsec one leaves overlay topped out at holdout 8064,
+  # and since the guard takes the WORST across both mined types a normal tick still REFUSES.
+  t_grid: [8064, 16128, 32256, 64512, 129024]
   n_seeds: 30
   # The beta grid must BRACKET the detection transition across ALL T (it shifts to lower beta as T
   # grows). Denser + spanning 0.002..0.030, from the S553-cont-121 probes.
