@@ -44,9 +44,18 @@ power_guard:
   # cross-sectional curve for a known-dead gate would cost hours of compute to change no decision, and
   # requiring one would refuse every legacy substrate — a behaviour change for a path whose whole point
   # is to stay byte-identical to v5.0. Stated here so it reads as a decision, not an oversight.
+  #
+  # UNION CURVES (S553-cont-151). The corrected-contract paths point at
+  # results/crucible_calibration_union/, the row-wise union of the original sweep with the deep grid
+  # (crucible_merge_mde_sweeps.py). Neither input alone is correct: the original tops out at holdout
+  # 8,064 so any deeper substrate reads `unmeasured_high` and is refused out of IGNORANCE, while the
+  # deep run starts at 2,016 so every daily substrate falls off the BOTTOM into `extrapolated_low`,
+  # discarding four measured anchors. The union keeps both ends; the 15 overlapping points were
+  # verified bit-identical at merge time (the merger aborts if they are not), so no daily substrate's
+  # stamp moves. Depths now measured: overlay 189..32,256, cross-sectional 378..32,256.
   calibration_sweep_path: results/crucible_calibration/calibration_mde_sweep.json
-  calibration_sweep_path_corrected: results/crucible_calibration/calibration_mde_sweep_corrected.json
-  calibration_sweep_path_corrected_xsec: results/crucible_calibration/calibration_xsec_mde_sweep_corrected.json
+  calibration_sweep_path_corrected: results/crucible_calibration_union/calibration_mde_sweep_corrected.json
+  calibration_sweep_path_corrected_xsec: results/crucible_calibration_union/calibration_xsec_mde_sweep_corrected.json
 
   # Ceiling on the implied MDE (realized marginal ΔSR at target power). A realistic true single-signal
   # marginal alpha is ΔSR ~ 0.3-0.5 (project memory); 0.50 flags a substrate whose funnel could not

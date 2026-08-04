@@ -1,0 +1,86 @@
+# Pre-registered gates for the FX-MAJORS Crucible substrate — the DERIVED-optimal configuration
+# (S553-cont-151). Substrate = 9 Dukascopy FX majors, 2008-01-01 -> 2026-07-31, union grid + active
+# mask (crucible/data/intraday_panel.py::build_fx_majors_panel), scored against the intraday TSMOM
+# base book. Separate FILE per ADR-1/CRU-1: configs/signal_eval.gates.yaml keeps its exact bytes and
+# the frozen funnel gates_hash 519158fa1450.
+#
+# ---------------------------------------------------------------------------------------------
+# WHY THIS UNIVERSE — derived from the constraint, not chosen by search.
+#
+# Detection needs n_obs = n_eff * R * Y >= (3.17/IC)^2. Profitability caps R, because the cost term
+# 2c(bars_per_yr/H)/vol must leave the just-detectable gross IR — which is 3.17/sqrt(Y) and CONSTANT
+# in H — above the economic floor. Solving for R_max and substituting ranks everything on disk
+# (vol 0.10, floor 0.50, IC 0.025 => 16,078 observations needed):
+#
+#     11 instr 2014+     cost 1.23bp  Y 3.14  R_max 524  n_obs  9,413   fails
+#     11 instr 2008-13   cost 3.17bp  Y 1.50  R_max 329  n_obs  2,159   fails
+#     9 FX majors 2008+  cost 0.54bp  Y 4.65  R_max 898  n_obs 16,706   clears
+#
+# The mixed panels fail because XAGUSD (7.54bp) and LIGHTCMDUSD (4.51bp) are 8-14x the majors and
+# dominate the cost term. The majors are the only tight-spread AND long-history subset available.
+#
+# HONEST CAVEAT: measured n_eff on this universe is 3.80 against the ~3.85 the inequality wants, so
+# it clears on paper and misses by 1.3% in fact. This is the best-conditioned substrate the free data
+# admits — NOT a well-powered one. A survivor here is a hypothesis to incubate, never a result.
+#
+# WHAT ALREADY FAILED HERE (do not re-propose): 5 hand-picked signals (R1/R2/M1/V1/C1) x 4 horizons
+# on exactly this universe returned 0 PROMISING, with OOS gross Sharpes spanning only -0.37..+0.42
+# against a just-detectable floor of 1.47 (crucible_fx_majors_round.py). This config exists to let
+# the MINER search a DSL space those five points do not cover — that is the only untested thing left.
+# ---------------------------------------------------------------------------------------------
+generation:
+  enabled: false                     # opt-in (GP8-01); the real run passes --force explicitly
+  panel: intraday_fx
+  base_sleeves: [tsmom]
+
+  # Measured bars/calendar-year on this panel (T=115,985 over 18.58y).
+  periods_per_year: 6243.0
+
+  # H* ~ 7 bars is the derived optimum: it is the largest rebalance rate whose cost still leaves the
+  # just-detectable gross IR above the 0.50 floor. Faster is cost-dominated, slower throws away the
+  # observations detection needs. Note this DEPARTS from the hold-21 clock the cross-sectional MDE
+  # curve was measured on, so the curve-based power stamp is not strictly applicable here; the
+  # substrate is stamped and force-run anyway, and the honest power statement is the n_obs
+  # calculation above rather than the interpolated stamp.
+  hold_horizon: 7
+
+  # Base book on its own cadence. Measured TSMOM SR by hold on THIS panel @0.65bp: 7 -> -0.447,
+  # 21 -> -0.418, 63 -> -0.238, 252 -> -0.466, 504 -> -0.056, 1008 -> +0.172. Only 1008 is non-losing,
+  # so it is the only fair comparator: a bleeding baseline lets a zero-alpha candidate clear the
+  # marginal-uplift gate by dilution (measured 15.3% null pass rate on the 12-instrument panel).
+  base_hold_horizon: 1008
+
+  pop_size: 60
+  n_generations: 12
+  rng_seed: 7
+  elite_frac: 0.30
+
+  # MEASURED mean one-way half-spread on this universe (Dukascopy `mean_spread`, the venue's own
+  # recorded spread — never a range-based estimator). Per-instrument the majors span 0.17-1.00bp,
+  # roughly 6x, versus 44x across the mixed panel — which is precisely why a SCALAR cost is a
+  # defensible model here and is not on a mixed-venue panel, where a flat rate misallocates friction
+  # across the cross-section instead of merely mis-levelling it.
+  cost_bps: 0.000065
+  ls_min_names: 6
+
+  max_ast_nodes: 24
+  turnover_soft_cap: 12.0
+  lambda_turnover: 0.05
+  lambda_complexity: 0.10
+
+  # Decision thresholds IDENTICAL to the frozen funnel's. Not re-tuned for this substrate.
+  min_combination_uplift: 0.10
+  hlz_t_min: 3.0
+  promising_dsr: 0.90
+  max_base_corr: 0.70
+  delta_median_min: 0.0
+  frac_positive_min: 0.50
+
+  holdout_frac: 0.25                 # 28,997 bars = 4.64 calendar years
+  # Embargo/purge in BARS. 126 bars (~1 week) is 18x the 7-bar hold, comfortably longer than any
+  # position lifetime, so a CPCV boundary genuinely decorrelates.
+  holdout_embargo_days: 126
+  cpcv_n_groups: 6
+  cpcv_k_test: 2
+  cpcv_embargo_days: 126
+  cpcv_purge_horizon: 1
