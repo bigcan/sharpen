@@ -1,0 +1,117 @@
+# Pre-registered gates for the INTRADAY Crucible mining substrate (S553-cont-151).
+# Substrate = the 12 uniformity-verified Dukascopy 1h instruments (FX / metals / energy),
+# T=77,298 common bars over 2013-01-01 -> 2026-07-31, built by
+# finrl_pro_ds/crucible/data/intraday_panel.py and scored against the intraday TSMOM base book
+# (base_sleeves.intraday_base_sleeves).
+#
+# Only the `generation:` block is read (by signals.generation.config); the funnel `universe:`/
+# `coverage:` blocks that the Taiwan file also carries do not apply — there is no IC-funnel PoC on
+# this substrate. Separate FILE, per ADR-1 / CRU-1: configs/signal_eval.gates.yaml keeps its exact
+# bytes and therefore the frozen funnel gates_hash 519158fa1450.
+#
+# ---------------------------------------------------------------------------------------------
+# POWER: READ THIS BEFORE INTERPRETING ANY VERDICT FROM THIS SUBSTRATE.
+#
+# This panel was built (S553-cont-150) on the reading that its 19,325-bar holdout implies a
+# cross-sectional MDE of 0.401 — under the 0.50 ceiling, hence the first substrate ever to clear the
+# power guard. That reading is a UNIT ARTIFACT and this file does not rely on it.
+#
+# The calibration curve's MDEs are ΔSR per 252-BAR year (its synthetic panel is one bar per calendar
+# day). This panel puts 5,694 bars in a calendar year, so its 19,325-bar holdout is 3.39 CALENDAR
+# years and 0.401 curve-units is ~1.9 calendar-annualized ΔSR — roughly 4x the ceiling, and about the
+# same as the daily cross_asset panel's 1.40. Measured, not argued:
+# scripts/research/crucible_frequency_invariance_probe.py holds the calendar span fixed and finds the
+# shipped Sharpe-difference z detects a matched calendar ΔSR at the SAME rate at 252 and 5,694
+# bars/yr (calendar MDE ratio 0.944, i.e. no gain). SE of an annualized Sharpe is 1/√(calendar years)
+# whatever the bar spacing; sampling finer relabels the axis.
+#
+# So this substrate IS underpowered for a 0.3-0.5 ΔSR alpha, the guard correctly REFUSES it once the
+# stamp is unit-corrected, and mining it requires an explicit, logged --force-underpowered. It is
+# mined anyway for one narrow reason worth stating: every prior Crucible mine was refused or run on a
+# daily panel, so the funnel's behaviour on a genuinely different bar clock and a genuinely different
+# instrument set has never been observed. Any survivor here is a hypothesis to incubate, never a
+# result — at a ~1.9 calendar detection floor, a candidate that clears the gates is more likely a
+# false positive than an edge, which is precisely what the forward-incubation lockbox is for.
+# ---------------------------------------------------------------------------------------------
+generation:
+  enabled: false                     # opt-in (GP8-01); the real run passes --force explicitly
+  panel: intraday                    # 12-instrument Dukascopy 1h panel — wired substrate
+  base_sleeves: [tsmom]              # TSMOM-only book (intraday_base_sleeves); no intraday carry leg
+
+  # Bars per CALENDAR year on this substrate's clock (measured: 77,298 bars / 13.58y = 5,694).
+  # This is what makes every annualized number below mean what it says. At the 252 default, the
+  # uplift floor would silently demand 4.75x more than it states and the power stamp would compare a
+  # 252-bar-year MDE against a calendar-year ceiling.
+  periods_per_year: 5694.0
+
+  # 21 BARS (~1 trading day), not 21 days. Deliberate: the cross-sectional calibration curve the
+  # power guard interpolates was measured at hold_horizon 21, so mining at a different hold would
+  # stamp this substrate from a curve measured on a different gate. See the CLOCK TRANSLATION note in
+  # base_sleeves.py — the cost is that this is a ~1-day-hold trend book, not the monthly TSMOM whose
+  # net SR 0.601 earned the GO, and it carries none of that falsification's authority.
+  hold_horizon: 21
+
+  # BASE-BOOK cadence, decoupled from the candidate's (see config.py's base_hold_horizon note).
+  # At hold 21 the base book is a friction bleed — calendar SR -0.78 on a frictionless SR of -0.15,
+  # i.e. 30.6%/yr of cost — and a losing comparator breaks the marginal-uplift gate: ZERO-ALPHA nulls
+  # measured a median DSR of +0.367 against it and cleared the FULL corrected contract 15.3% of the
+  # time (nominal ~1%), because blending a lower-turnover stream into a bleeding book raises the
+  # combined Sharpe. Mining against that would have produced this system's first-ever PROMISING
+  # verdicts, all artifacts of the baseline.
+  #
+  # 1008 bars (~59 trading days) is chosen as the SHALLOWEST horizon on the measured hold scan at
+  # which the base stops being a big loser: SR by hold is 21 -> -0.78, 63 -> -0.44, 126 -> -0.26,
+  # 252 -> -0.63, 504 -> -0.28, 1008 -> +0.03 (@2bp). It is picked for being ~cash, not for being
+  # good — a ~0 baseline makes the marginal test reduce to "does the candidate have its OWN edge",
+  # which is the question worth asking, and it removes the dilution channel entirely.
+  #
+  # Standing finding in its own right: intraday TSMOM on these 12 instruments is NEGATIVE at every
+  # hold from ~1 to ~30 days, frictionlessly as well as net. There is no intraday trend edge here to
+  # use as a baseline; the only non-losing horizon is the slow one the daily research already found.
+  base_hold_horizon: 1008
+
+  # Search budget CUT from the production 200x40. The book loop is O(T) per candidate and T=77,298 is
+  # 19x the daily panel's, measured at 0.40 s/candidate-book => 200x40 would be ~1 h of book loops
+  # alone before CPCV re-scoring. 60x12 = 720 candidates keeps a first tick to a few hours. Smaller N
+  # also means LESS DSR deflation, i.e. a strictly EASIER gate — conservative in the direction that
+  # matters here (it cannot manufacture a refusal, only a survivor that must then clear the lockbox).
+  pop_size: 60
+  n_generations: 12
+  rng_seed: 7
+  elite_frac: 0.30
+
+  # 2 bps one-way. Dukascopy hourly FX majors quote ~0.2-1.0 bp effective spread and the metals/energy
+  # CFDs ~2-5 bp; 2 bps one-way on |Δw| is above the FX-majors reality and below the CFD tail. It is
+  # NOT the 10 bps used on the daily equity-ETF panel — that number is calibrated to a monthly
+  # rebalance, and applying it to a ~daily hold would charge ~21x the annual friction and reject every
+  # candidate for a cost that is not real on these instruments. Friction is a per-turnover price, so
+  # it must be re-derived per venue; carrying the daily figure over would be the same units error this
+  # file exists to correct.
+  cost_bps: 0.0002
+  ls_min_names: 6                    # min active names for a rank-L/S book (12-instrument panel)
+
+  max_ast_nodes: 24
+  turnover_soft_cap: 12.0
+  lambda_turnover: 0.05
+  lambda_complexity: 0.10
+
+  # DECISION THRESHOLDS — identical to the frozen funnel's. Not re-tuned for this substrate: a gate
+  # loosened to admit a candidate on the substrate that motivated the loosening is the file-drawer
+  # failure the whole funnel exists to prevent.
+  min_combination_uplift: 0.10       # now a real calendar ΔSR floor, thanks to periods_per_year
+  hlz_t_min: 3.0
+  promising_dsr: 0.90
+  max_base_corr: 0.70
+  delta_median_min: 0.0
+  frac_positive_min: 0.50
+
+  holdout_frac: 0.25                 # embargoed held-out tail = 19,325 bars = 3.39 calendar years
+  # Embargo/purge in BARS, scaled to the bar clock: 21 bars ~ 1 day was too short to decorrelate a
+  # 21-bar hold across a CPCV boundary (the hold itself spans the embargo). 126 bars ~ 1 week > 6x the
+  # hold horizon, matching the daily panel's 21-day embargo vs 21-day hold ratio in spirit while
+  # staying comfortably longer than the position lifetime.
+  holdout_embargo_days: 126
+  cpcv_n_groups: 6
+  cpcv_k_test: 2
+  cpcv_embargo_days: 126
+  cpcv_purge_horizon: 1

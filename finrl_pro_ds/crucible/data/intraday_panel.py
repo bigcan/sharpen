@@ -1,25 +1,36 @@
-"""Build a Crucible `Panel` from the Dukascopy hourly cells — the substrate that finally clears
-BOTH power requirements.
+"""Build a Crucible `Panel` from the Dukascopy hourly cells — the intraday mining substrate.
 
-WHY THIS EXISTS. Crucible's power guard refused every substrate for the system's whole life. As of
-2026-08-02 that is measured, not asserted, and it is TWO separate constraints:
+WHY THIS EXISTS. Crucible's power guard refused every substrate for the system's whole life, and the
+binding cross-sectional MDE curve had never been measured past holdout 8,064 — so deeper substrates
+were refused out of `unmeasured_high` IGNORANCE rather than measurement. These 12 uniformity-clean
+hourly instruments give T=77,298 common bars (holdout 19,325, N=12), deep enough to interpolate
+between measured anchors instead of falling off the top of the grid.
 
-  * DEPTH — the binding cross-sectional MDE curve had never been measured past holdout 8,064
-    (MDE 0.644, above the 0.50 ceiling). Extending the grid gives 0.405 at 16,128 and 0.392 at
-    32,256, so depth DOES open the guard; it had been refusing out of `unmeasured_high` IGNORANCE.
-  * BREADTH — the measured n_grid floor is 12, and the consumer picks the largest measured n NOT
-    EXCEEDING the substrate's. A 1-instrument gold cell or a 5-instrument FX cell cannot be stamped
-    at all, however deep.
+CORRECTION, S553-cont-151 — READ BEFORE QUOTING ANY POWER NUMBER FROM THIS PANEL. This module was
+written on 2026-08-02 claiming the panel was "the first substrate to clear BOTH power constraints",
+on the strength of an interpolated cross-sectional MDE of 0.401 against the guard's 0.50 ceiling.
+That was a UNIT ERROR and it is now falsified:
 
-The 12 uniformity-clean Dukascopy 1h instruments give T=77,298 common bars, holdout 19,325, N=12
-=> interpolated cross-sectional MDE 0.401 => ALLOW. That is the first substrate on disk to satisfy
-both.
+  * The calibration curve's MDEs are ΔSR per **252-BAR year** (its synthetic panel stamps one bar per
+    calendar day). This panel puts **5,694 bars in a calendar year**, so its 19,325-bar holdout is
+    **3.39 CALENDAR years**, and 0.401 curve-units is **~1.91 calendar-annualized ΔSR** — nearly 4x
+    the ceiling, and no better than the daily cross_asset panel's 1.40 over its 4.01 holdout years.
+  * The deeper reason no "sample faster / go deeper" move can help:
+    `scripts/research/crucible_frequency_invariance_probe.py` holds the calendar span FIXED and finds
+    the shipped Sharpe-difference z detects a matched calendar ΔSR at the SAME rate at 252 and 5,694
+    bars/yr (calendar MDE ratio 0.944). SE of an annualized Sharpe is 1/√(calendar years) whatever
+    the bar spacing. Finer sampling relabels the axis; it buys no detection power.
 
-THIS MODULE IS ADDITIVE AND NOT WIRED INTO THE LIVE TICK. It builds and self-checks a Panel; the
-orchestrator still loads `load_cross_asset_panel`. Wiring is a separate, deliberate change, because
-a panel feeding the mining surface is the highest leak-risk edit in this workstream (LEAK-2) — the
-sg1-btc coarse-bar leak lived in `multiscale_handler.py` from Session 121 to S553 through hundreds
-of green audits and erased that strategy's entire apparent edge.
+So this panel is NOT a powered substrate. It is a genuinely different bar clock and instrument set,
+which is worth mining for what it reveals about the funnel's behaviour, and the guard correctly
+refuses it — mining requires an explicit, logged `--force-underpowered`.
+
+WIRED as of S553-cont-151 (`meta["panel"] == "intraday"` in `crucible_orchestrator._build_substrate`,
+base book `base_sleeves.intraday_base_sleeves`). A panel feeding the mining surface is the
+highest-leak-risk edit in this workstream (LEAK-2) — the sg1-btc coarse-bar leak lived in
+`multiscale_handler.py` from Session 121 to S553 through hundreds of green audits and erased that
+strategy's entire apparent edge — so `_self_check` below is a tripwire, not a formality; run it
+(`python -m finrl_pro_ds.crucible.data.intraday_panel`) whenever this builder is touched.
 
 Usage (self-check):
     python -m finrl_pro_ds.crucible.data.intraday_panel
@@ -39,6 +50,18 @@ log = logging.getLogger("crucible.intraday_panel")
 ROOT = Path(__file__).resolve().parents[3]
 DUKA = ROOT / "data" / "dukascopy"
 
+# BREADTH CAVEAT (measured S553-cont-151). This list was selected purely on bar-count UNIFORMITY,
+# never on independence, and it is not 12 independent instruments:
+#   * EURGBP = EURUSD - GBPUSD and EURJPY = EURUSD + USDJPY in log space (triangular identities).
+#     Measured on the panel's own returns: rho 0.9986 / 0.9993, residual std ~5% of own std. The
+#     return correlation matrix has TWO exactly-zero eigenvalues, which is these two columns.
+#   * Nine of the twelve are USD crosses, so one USD factor carries 36.7% of total variance
+#     (top-3 = 65.0%). Participation ratio = 5.01 effective factors out of 12.
+# This matters because the fundamental law makes true IR proportional to sqrt(BREADTH), and breadth
+# here is ~5, not 12 — so the panel supplies ~1.55x less than the instrument count implies. Any future
+# widening of this substrate should add DECORRELATED instruments; adding more USD crosses adds columns
+# and almost no breadth.
+#
 # The 12 instruments whose per-year bar counts verified UNIFORM (no thin years) on 2026-08-02.
 # The three index CFDs are deliberately EXCLUDED: they were flagged thin, and while that is very
 # likely a false positive of an FX-calibrated 4,500 bars/yr threshold (index CFDs trade ~15h/day,
@@ -102,6 +125,84 @@ def build_intraday_panel(tickers: tuple[str, ...] = CLEAN_12) -> Panel:
         meta={"survivorship_free": True, "source": "dukascopy_1h",
               "universe_def": "12 uniformity-verified hourly cells (2026-08-02)",
               "bar": "1h", "volume_is_tick_count": True},
+    )
+
+
+# --------------------------------------------------------------------------- #
+# FX-MAJORS panel — the DERIVED-optimal configuration (S553-cont-151)
+# --------------------------------------------------------------------------- #
+# Not another guess at a universe. Detection needs n_obs = n_eff*R*Y >= (3.17/IC)^2, while
+# profitability caps R because cost_IR = 2c(bpy/H)/vol must leave the just-detectable gross IR
+# (3.17/sqrt(Y), CONSTANT in H) above the economic floor. Solving the second for R_max and
+# substituting ranks every configuration on disk (vol 0.10, floor 0.50, IC 0.025 => 16,078 obs):
+#
+#   11 instr 2014+      cost 1.23bp  Y 3.14  R_max  524  n_obs  9,413   fails
+#   11 instr 2008-13    cost 3.17bp  Y 1.50  R_max  329  n_obs  2,159   fails
+#   9 FX majors 2008+   cost 0.54bp  Y 4.65  R_max  898  n_obs 16,706   clears (by 4%)
+#
+# The mixed panels fail because XAGUSD (7.54bp) and LIGHTCMDUSD (4.51bp) are 8-14x the majors and
+# dominate the cost term, collapsing R_max. The majors are the only subset on disk that is BOTH
+# tight-spread and long-history. A second, quieter benefit: the majors span only 0.17-1.00bp, ~6x,
+# against 44x across the mixed panel — so a SCALAR cost_bps (which the funnel's book loop takes) is a
+# defensible model here in a way it is not on a mixed-venue panel, where a flat rate misallocates
+# friction across the cross-section rather than merely mis-levelling it.
+#
+# HONEST CAVEAT, measured not assumed: n_eff on this universe comes in at 3.80 against the ~3.85 the
+# inequality wants, so it clears on paper and misses by 1.3% in fact. It is the best-conditioned
+# substrate the free data admits, not a well-powered one.
+FX_MAJORS = ("AUDUSD", "EURUSD", "GBPUSD", "USDCHF", "USDJPY",
+             "EURGBP", "EURJPY", "NZDUSD", "USDCAD")
+FX_MAJORS_START = "2008-01-01"
+
+
+def build_fx_majors_panel(tickers: tuple[str, ...] = FX_MAJORS,
+                          start: str = FX_MAJORS_START) -> Panel:
+    """UNION-grid hourly Panel over the FX majors, with an ``active`` mask instead of an inner join.
+
+    The inner join used by :func:`build_intraday_panel` is measured to be self-defeating: going 12 ->
+    15 instruments there raised n_eff 5.01 -> 5.63 while cutting rebalances/yr 271 -> 241, for a net
+    breadth change of exactly zero, because every added instrument shrinks the shared grid. Building
+    on the UNION and marking non-trading bars INACTIVE keeps T while letting N grow.
+
+    Still no forward-fill anywhere — a name with no bar at t is inactive at t, which is the honest
+    encoding of "it did not trade". ``_ls_weights`` already excludes inactive names, and
+    ``Panel.forward_returns`` yields NaN across an inactive endpoint, which books as flat.
+    """
+    frames: dict[str, pd.DataFrame] = {}
+    for t in tickers:
+        f = DUKA / f"{t}_1h.parquet"
+        if not f.exists():
+            raise FileNotFoundError(f"missing cell: {f}")
+        d = pd.read_parquet(f)
+        d["timestamp"] = pd.to_datetime(d["timestamp"], utc=True)
+        d = d.drop_duplicates(subset=["timestamp"]).set_index("timestamp").sort_index()
+        frames[t] = d[d.index >= pd.Timestamp(start, tz="UTC")]
+
+    idx = None
+    for d in frames.values():
+        idx = d.index if idx is None else idx.union(d.index)
+    idx = idx.sort_values()
+    T, N = len(idx), len(tickers)
+    log.info("fx-majors panel: T=%d union bars x N=%d  %s -> %s", T, N, idx.min(), idx.max())
+
+    def wide(col: str) -> np.ndarray:
+        return pd.DataFrame({t: frames[t][col].reindex(idx) for t in tickers}).to_numpy(np.float64)
+
+    o, h, lo, c, v = (wide(k) for k in ("open", "high", "low", "close", "n_ticks"))
+    active = np.isfinite(c) & np.isfinite(o)
+    dollar = np.abs(np.nan_to_num(c)) * np.nan_to_num(v)
+    adv = pd.DataFrame(dollar).rolling(500, min_periods=50).mean().shift(1).to_numpy()
+
+    return Panel(
+        dates=idx.tz_convert(None).to_numpy().astype("datetime64[ns]"),
+        tickers=tuple(tickers), open=o, high=h, low=lo, close=c, volume=v,
+        active=active, adv_usd=adv,
+        # One sector: these are all USD-bloc FX crosses. Claiming finer sector structure would hand
+        # the neutralisation control a distinction the universe does not contain.
+        sector_id=np.zeros(N, dtype=int),
+        meta={"survivorship_free": True, "source": "dukascopy_1h",
+              "universe_def": "9 FX majors, union grid + active mask (derived-optimal, cont-151)",
+              "bar": "1h", "volume_is_tick_count": True, "start": start},
     )
 
 

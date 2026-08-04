@@ -668,5 +668,96 @@ def taiwan_base_sleeves(
     return {"tsmom": tsmom_net}
 
 
+# --------------------------------------------------------------------------- #
+# Intraday base book — 12-instrument Dukascopy hourly TSMOM (S553-cont-151)
+# --------------------------------------------------------------------------- #
+# The intraday analog of :func:`taiwan_base_sleeves`: one TSMOM sleeve, no carry leg (there is no
+# intraday rates-carry construction). Unlike Taiwan's, the base book trades the PANEL'S OWN
+# instruments — FX/metals/energy hourly bars are the tradable universe AND the mining cross-section —
+# so it routes through :func:`tsmom_sleeve_returns` rather than fetching a separate universe.
+#
+# CLOCK TRANSLATION (the part that is a decision, not a transcription). The validated daily constants
+# are lookbacks (63, 126, 252) / skip 5 / vol_window 63 TRADING DAYS against a hold of 21 days —
+# lookback:hold ratios of 3 / 6 / 12. Two translations were available and they are not equivalent:
+#
+#   (a) preserve CALENDAR horizon — 63 trading days ~ 1,426 hourly bars, hold ~475 bars;
+#   (b) preserve the BAR COUNTS and hence the lookback:hold RATIOS, on the hourly clock.
+#
+# (b) is used, and the reason is the power stamp rather than taste. The cross-sectional calibration
+# curve the guard interpolates was measured at ``hold_horizon: 21`` (see the sweep JSON's own
+# metadata). A substrate that mines at hold 475 while being stamped from a hold-21 curve is judged by
+# a curve measured on a different gate — the same "similar name, different object" error class that
+# produced the deep-grid correction, and it fails OPEN. Holding 21 BARS keeps the substrate on the
+# clock its own power stamp was measured on. The consequence is stated plainly: this is a ~1-day-hold
+# intraday trend book (21 hourly bars), NOT the monthly TSMOM whose net SR 0.601 earned the GO, so it
+# carries none of that falsification's authority and is a BASELINE here, never a validated sleeve.
+_INTRADAY_ANN_DEFAULT: float = 5694.0     # measured bars/calendar-year on the 12-instrument panel
+
+
+def intraday_tsmom_sleeve_returns(
+    panel: Panel,
+    *,
+    hold_horizon: int,
+    cost_bps: float,
+    periods_per_year: float = _INTRADAY_ANN_DEFAULT,
+    verify_causal: bool = False,
+    with_components: bool = False,
+) -> "np.ndarray | SleeveComponents":
+    """TSMOM on the hourly panel's own instruments, booked with the shared bar-marked loop.
+
+    Identical construction to :func:`tsmom_sleeve_returns` — the SAME
+    :func:`cross_asset_signals.compute` (multi-look-back mean-sign x causal vol-scale, leverage-
+    capped) and the SAME ``_book_from_target_weights`` basis — with the bar counts kept and the
+    annualization moved onto the substrate's clock. ``periods_per_year`` reaches ``compute`` as its
+    ``ann`` argument, which sets ONLY the realized-vol annualization feeding the vol-scale; leaving it
+    at 252 on an hourly panel would understate vol by √22.6 and hand every name a ~4.75x oversized
+    weight, silently clipped at ``lev_cap`` — i.e. a constant-max-leverage book, not a vol-scaled one.
+
+    ``verify_causal`` runs the momentum library's own future-bar + current-bar look-ahead tripwire on
+    the real-data path (GP2-04, LEAK-2).
+    """
+    close_df = pd.DataFrame(
+        panel.close, index=pd.DatetimeIndex(panel.dates), columns=list(panel.tickers)
+    )
+    if verify_causal:
+        cas.assert_causal(close_df)
+    long = cas.compute(close_df, ann=int(round(periods_per_year)))
+    w_wide = (
+        long.pivot(index="date", columns="ticker", values="baseline_weight")
+        .reindex(index=close_df.index, columns=close_df.columns)
+    )
+    return _book_from_target_weights(
+        w_wide.to_numpy(dtype=np.float64), panel.forward_returns(1),
+        hold_horizon=hold_horizon, cost_bps=cost_bps, with_components=with_components,
+    )
+
+
+def intraday_base_sleeves(
+    panel: Panel,
+    *,
+    hold_horizon: int,
+    cost_bps: float,
+    periods_per_year: float = _INTRADAY_ANN_DEFAULT,
+    verify_causal: bool = True,
+    return_components: bool = False,
+) -> "dict[str, np.ndarray] | tuple[dict[str, np.ndarray], dict[str, SleeveComponents]]":
+    """``{"tsmom"}`` intraday base book aligned to ``panel.dates`` (the hourly substrate's book).
+
+    ``return_components`` (default off — byte-identical net dict) instead returns
+    ``(sleeves_net, sleeve_components)`` for the overlay-cost correction; see
+    :func:`production_base_sleeves`. ``verify_causal`` defaults ON, as on every real-data entry point.
+    """
+    tsmom = intraday_tsmom_sleeve_returns(
+        panel, hold_horizon=hold_horizon, cost_bps=cost_bps, periods_per_year=periods_per_year,
+        verify_causal=verify_causal, with_components=return_components)
+    tsmom_net = cast("SleeveComponents", tsmom).net if return_components else cast("np.ndarray", tsmom)
+    finite = int(np.isfinite(tsmom_net).sum())
+    log.info("intraday_base_sleeves: T=%d  finite_bars=%d  (hold=%d bars, cost_bps=%.4f, ann=%.0f)",
+             panel.T, finite, hold_horizon, cost_bps, periods_per_year)
+    if return_components:
+        return {"tsmom": tsmom_net}, {"tsmom": cast("SleeveComponents", tsmom)}
+    return {"tsmom": tsmom_net}
+
+
 # Path anchors kept for callers/tests that locate the gates/config relative to this module.
 ROOT = Path(__file__).resolve().parents[3]
