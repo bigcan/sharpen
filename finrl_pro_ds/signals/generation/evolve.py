@@ -298,6 +298,36 @@ def _overlay_ctx(
     return _combined_book(net_returns, timestamps, cfg), None, None, None
 
 
+def _panel_market_returns(panel: Panel) -> "np.ndarray | None":
+    """Equal-weight bar-over-bar return of the ACTIVE universe — the panel's own market factor.
+
+    Feeds ONLY the corrected contract's `max_market_beta` exposure leg, which short-circuits to pass
+    when that threshold is unset. Supplying this is therefore INERT on every substrate whose gates
+    leave `max_market_beta: null`, so no existing verdict moves and CRU-1 holds; it becomes binding
+    only where a config opts in.
+
+    Why it is needed at all: the best candidate the funnel has ever surfaced decomposed to a market
+    beta of +0.548 (R² 57.2%) with a residual timing Sharpe of −0.0000, and it cleared 3 of the 5
+    corrected legs — `max_base_corr` compares against the BASE SLEEVES, not the market, so a pure
+    beta tilt walks straight through uplift, fragility and collinearity.
+
+    LEAK-2: bar t's market return is realized AT t, the same bar as the candidate's own return, so
+    the regression is contemporaneous — a beta measurement, not a forecast.
+    """
+    close = getattr(panel, "close", None)
+    active = getattr(panel, "active", None)
+    if close is None or active is None:
+        return None
+    with np.errstate(invalid="ignore", divide="ignore"):
+        r = np.diff(np.log(close), axis=0, prepend=np.nan)
+    r = np.where(np.asarray(active, dtype=bool) & np.isfinite(r), r, np.nan)
+    empty = ~np.any(np.isfinite(r), axis=1)
+    out = np.full(r.shape[0], np.nan)
+    if (~empty).any():
+        out[~empty] = np.nanmean(r[~empty], axis=1)
+    return out
+
+
 def evolve(
     seed_formulas: list[str],
     panel: Panel,
@@ -524,6 +554,10 @@ def evolve(
     n_hold = hold.T
     base_ho = {k: np.asarray(v)[panel.T - n_hold:] for k, v in base_returns.items()}
     ts_ho = np.asarray(timestamps)[panel.T - n_hold:]
+    # EXPOSURE leg (guards.max_market_beta). Inert wherever that threshold is null — see
+    # _panel_market_returns for why it exists and why it moves no existing verdict.
+    _mkt_full = _panel_market_returns(panel)
+    mkt_ho = None if _mkt_full is None else _mkt_full[panel.T - n_hold:]
     # OVERLAY (CR-9): the base book on the FULL timeline is the multiplier target for the full-panel
     # re-score; the holdout rows are sliced off it below, matching the cross_sectional warm-up path.
     # F14: base_components is already on the full timeline, so no slicing here.
@@ -548,7 +582,7 @@ def evolve(
             if is_corrected:
                 assert corrected_cfg is not None and lord_level is not None
                 cr = corrected_contract_fitness(cand_ho, base_ho, ts_ho, cfg, corrected_cfg,
-                                                lord_level=lord_level)
+                                                lord_level=lord_level, market_returns=mkt_ho)
             else:
                 hv = combination_fitness(cand_ho, base_ho, ts_ho, cfg, gen_n_eff=final_n_eff,
                                          turnover_ann=full[1], n_nodes=node_count(parse(c.formula)),
