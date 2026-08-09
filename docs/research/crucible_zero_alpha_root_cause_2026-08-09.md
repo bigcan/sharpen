@@ -24,6 +24,14 @@ This is a **machine artifact, not a market verdict**. That conclusion agrees wit
 audit; what this investigation adds is the exact mechanism, derived from the code and confirmed
 empirically, plus the finding that the gate's two economic legs are calibrated **~1,000 years apart**.
 
+> ⭐ **A follow-up sweep (§5b) changes the outlook.** A gate with genuinely useful power — the
+> selection-aware cohort MC null — **already exists in-tree and is unreachable**, sitting behind a
+> "cheap pre-filter" built from the two seals that have never passed. Measured at a realistic 15% hit
+> rate it reaches **25% power at IR 0.30 and 50% at IR 0.50**, versus ~0% for the per-candidate path.
+> The decisive quantity is then the **hit rate of the hypothesis bank**, in which power is *linear* —
+> not panel depth, in which it is only √. Crucible is not out of road; it has been driving with the
+> handbrake on.
+
 ---
 
 ## 1. The record, measured
@@ -236,14 +244,132 @@ Worth stating, because each has been proposed at some point:
 
 ---
 
+## 5b. Follow-up: can the cohort path rescue it? — MEASURED
+
+After the above, the obvious lever was the built-but-disabled cohort/ensemble path
+(`configs/crucible_cohort.gates.yaml`, `enabled: false`), which amplifies a weak signal by
+`ensemble_multiplier(m, ρ̄) = √(m/(1+(m−1)ρ̄))`. Two sweeps were run through the real
+`greedy_decorrelated_admission` and the real scorer.
+
+### Finding 1 — routing a *selected* cohort through the corrected contract is invalid
+
+**Measured null FPR = 1.000.** Selecting the top-30 of a 100-candidate pool by standalone Sharpe and
+scoring the combination through `corrected_contract_fitness` passes on **pure noise**, with mean
+`corrected_t` **4.88**. The corrected contract is a *single-hypothesis* test with no file-drawer
+deflation (it dropped `dsr_aug`, the funnel's only such term), so select-then-combine is pure
+multiplicity laundering.
+
+> This **falsifies my own prior recommendation** to "route the cohort through the corrected contract."
+> It is exactly what the cohort's order-statistic `SR*_cohort` benchmark and selection-aware MC null
+> exist to prevent, and why `offspring_policy: prereg_only` is the shipped default.
+
+### Finding 2 — with pre-registered members and no selection, the null is clean
+
+FPR **0.000** at K = 1, 12, 30 on both panel lengths. The defensible configuration is: declare the
+members in advance, combine all of them, test once.
+
+### Finding 3 — the decisive quantity is the HIT RATE, not the panel or the gate
+
+For K pre-registered members of which `n_true` carry a real edge of IR δ:
+
+> **IR_cohort = δ · n_true / √K** — so combining *dilutes* below a single signal when the hit rate is low.
+
+P(pass), K=30, measured (30 seeds/cell):
+
+| panel | per-signal IR | 3/30 | 6/30 | 10/30 | 15/30 | 30/30 |
+|---|---|---|---|---|---|---|
+| holdout 6.85y | 0.30 | 0.00 | 0.00 | 0.03 | 0.10 | 0.73 |
+| **FULL 19.56y** | 0.20 | 0.00 | 0.03 | 0.07 | 0.10 | **0.83** |
+| **FULL 19.56y** | 0.30 | 0.00 | 0.03 | 0.10 | 0.60 | **1.00** |
+| **FULL 19.56y** | 0.50 | 0.03 | 0.13 | 0.70 | 1.00 | 1.00 |
+
+Head-to-head at δ=0.30 on the full panel: **single signal 0.00 · cohort 6/30 0.00 · cohort 30/30 1.00.**
+
+**Break-even hit rate is ~40–50%.** Above it the cohort is transformative; below it, it is worse than
+useless. The one real measurement available — the 8 `us_equity` WQ101 seeds, 7 of 8 with negative
+holdout ΔSR — implies a hit rate near 0.1 on that bank, so **the cohort does not rescue WQ101.**
+
+### The strategic inversion this implies
+
+Since `IR_cohort = δ · √K · (hit rate)`, power is **linear in hit rate** and only **√** in everything
+else. Doubling the hit rate is worth as much as quadrupling the data. The binding constraint was never
+statistics or panel depth — it is **the quality of the hypothesis bank**. That inverts the framing that
+has driven the last several sessions of Crucible work.
+
+### Finding 4 — the selection-aware MC null DOES work, and it is the one path with real power
+
+Selection is not the enemy; *unpriced* selection is. `cohort_mc.mc_null_pvalue` re-runs the identical
+admission inside every bootstrap replicate (H0 by demeaning candidates only, base resampled jointly),
+so selection is paid for. Size is already green in-repo
+(`tests/signals/test_generation_cohort_mc.py`, 9/9, incl. the BLOCKER-1 anti-conservative regression),
+so all compute went to power.
+
+Measured — pool 40, K≤20, ρ≤0.10, 10y panel, B=49, α=0.05, 8 seeds:
+
+| scenario | hit rate | **pass rate** | med p | real signals admitted |
+|---|---|---|---|---|
+| NULL (0 real) | 0.00 | **0.00** | 0.450 | 0.0 |
+| 6/40 real, IR 0.30 | 0.15 | **0.25** | 0.120 | 5.0 of 6 |
+| 6/40 real, IR 0.50 | 0.15 | **0.50** | 0.050 | 6.0 of 6 |
+| 20/40 real, IR 0.30 | 0.50 | **0.75** | 0.020 | 14 of 20 |
+
+**At a realistic 15% hit rate the MC null reaches 25% power at IR 0.30 and 50% at IR 0.50** — against
+~0.00 for the per-candidate path and 0.03 for the no-selection prereg cohort at the same hit rate. The
+mechanism is visible in the last column: the admission actually *finds* the planted signals (5 of 6,
+then 6 of 6). Selection recovers most of what a low hit rate costs, precisely because the MC null lets
+you select without invalidating the test.
+
+Caveats: B=49 (the config wants ≥1000), 8 seeds so ±0.15-ish, and planted candidates are mutually
+independent Gaussians — real alphas correlate with each other and with the base, which will reduce
+effective K. Indicative, not precise.
+
+### ⭐ Finding 5 — that gate is UNREACHABLE: a third instance of the project's signature defect
+
+[`cohort_eval.py:320`](finrl_pro_ds/signals/generation/cohort_eval.py:320):
+
+```python
+if not ev.passes_analytic_floor:
+    return _verdict(ev, None, (float("nan"), False), pch, n_culled, "LOGGED")   # hard early return
+mc = mc_null_pvalue(...)                                                        # line 327 — never reached
+```
+
+`passes_analytic_floor` ([`cohort.py:441-444`](finrl_pro_ds/signals/generation/cohort.py:441)) requires
+`dsr_book >= promising_dsr (0.90)` **and** `cohort_hlz_t >= cohort_hlz_t_min (3.0)` — **the same two
+seals that pass 0/170 across the lifetime record.** It is documented as a "CHEAP PRE-FILTER — NOT the
+binding gate" in three separate places, but structurally it is an absolute gate.
+
+This is the **third occurrence of one architectural bug**: *a cheap pre-filter that is stricter than
+the gate it protects.*
+
+| # | where | consequence |
+|---|---|---|
+| 1 | train re-applied the final 6-way gate (pre-v6.0) | holdout gate never executed across 403 trials |
+| 2 | train cheap pre-filter culled 8/8 pre-registrations | `us_equity` holdout adjudicated zero (fixed in v12.0) |
+| 3 | **analytic floor gates the MC null** | **the only high-power gate in the system is unreachable** |
+
+The cohort path was never dead. It was **never reachable.** Nothing has ever been measured through it,
+because `enabled: false` and, had it been enabled, the floor would have returned `LOGGED` first.
+
+---
+
 ## 6. What follows
 
-Ordered by effect on the binding constraint. These are findings, not a mandate — gate changes are
-operator calls under the CLAUDE.md rule.
+Ordered by measured effect. These are findings, not a mandate — every gate change below is an operator
+call under the CLAUDE.md rule.
 
-1. **Accept that power scales as √T and cannot be fixed by threshold tuning.** Loosening `t_min` trades
-   power for false positives one-for-one; the LORD++ leg is right behind it. The only real levers are
-   **breadth** (ΔSR = IC·√BR) and **forward accumulation**.
+**The headline changed during the investigation.** The per-candidate path is unfixable by threshold
+tuning, but a gate with real power exists in-tree, unreachable behind a dead pre-filter. The single
+highest-value action is no longer "get more data" — it is **make the MC null reachable and feed it a
+better hypothesis bank.**
+
+0. **Unblock the MC null (highest value, smallest diff).** Make `passes_analytic_floor` advisory —
+   which is what it is documented to be in three places — or rebuild it from legs that are not the two
+   0/170 seals. Without this, nothing else about the cohort path matters. Pairs with `enabled: true`.
+   ⚠ Do **not** substitute the corrected contract here: measured null FPR 1.000 (§5b Finding 1).
+1. **Hit rate is the lever, not depth.** `IR_cohort = δ·√K·(hit rate)` — power is **linear** in hit rate
+   and only **√** in data, K, and years. Doubling hit rate ≈ quadrupling the panel. Spend effort on
+   economically-motivated hypotheses over less-crowded data, not on more WQ101 permutations. This
+   inverts the framing that has driven recent Crucible work.
 2. **`us_equity` is the only substrate where the arithmetic closes — and only barely.** Measured breadth
    gives IC 0.020 → IR 1.457 against an MDE of 1.312. Every other substrate is closed for power reasons
    no threshold change can repair. A second `us_equity` round is *not* power-blocked, but it needs a new
