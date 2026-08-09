@@ -41,22 +41,19 @@ from __future__ import annotations
 
 import argparse
 import json
-import pickle
 import sys
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 from scipy.stats import spearmanr
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
+from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel  # noqa: E402
 from finrl_pro_ds.signals.eval_harness import _ls_weights, compute_scores  # noqa: E402
-from finrl_pro_ds.signals.features import Panel  # noqa: E402
 from finrl_pro_ds.signals.library.alphas101 import SIGNALS as ALPHAS  # noqa: E402
 
-PANEL = ROOT / "data" / "raw" / "equity_panel" / "_pit_union.pkl"
 MEMBERS = Path(r"C:\tmp\sp500_pit_members.csv")
 OUT = ROOT / "results" / "signal_eval" / "crucible_equity_breadth"
 
@@ -64,39 +61,6 @@ NEU = ("winsor", "zscore")     # sector unknown for former members; size omitted
 MIN_ABS_IC = 0.004             # below this the (IR/IC)^2 inversion is numerically meaningless
 N_EFF_RAW = 9.41
 N_EFF_DEMEANED = 30.09
-
-
-def pit_universe(panel, k: int) -> np.ndarray:
-    mem = pd.read_csv(MEMBERS)
-    mem["date"] = pd.to_datetime(mem["date"])
-    mem = mem.sort_values("date").reset_index(drop=True)
-    idx = {t: i for i, t in enumerate(panel.tickers)}
-    pos = np.searchsorted(mem["date"].values, panel.dates, side="right") - 1
-    member = np.zeros((panel.T, panel.N), dtype=bool)
-    cache: dict[int, np.ndarray] = {}
-    for t_i, s_i in enumerate(pos):
-        if s_i < 0:
-            continue
-        if s_i not in cache:
-            row = np.zeros(panel.N, dtype=bool)
-            for tk in str(mem["tickers"].iloc[s_i]).split(","):
-                j = idx.get(tk.strip().replace(".", "-"))
-                if j is not None:
-                    row[j] = True
-            cache[s_i] = row
-        member[t_i] = cache[s_i]
-
-    priced = np.isfinite(panel.close) & (panel.close > 0)
-    adv_m = np.where(member & priced, panel.adv_usd, np.nan)
-    univ = np.zeros_like(member)
-    for t_i in range(panel.T):
-        row = adv_m[t_i]
-        n_ok = int(np.sum(np.isfinite(row)))
-        if n_ok == 0:
-            continue
-        kk = min(k, n_ok)
-        univ[t_i, np.argpartition(-np.nan_to_num(row, nan=-np.inf), kk - 1)[:kk]] = True
-    return univ & priced
 
 
 def evaluate(scores: np.ndarray, rets: np.ndarray, univ: np.ndarray, hold: int) -> dict | None:
@@ -139,13 +103,11 @@ def main() -> int:
     ap.add_argument("--hold", type=int, default=1)
     args = ap.parse_args()
 
-    panel0 = pickle.loads(PANEL.read_bytes())
-    univ = pit_universe(panel0, args.k)
-    # NB: the cached pickle predates the `feature_slots` field and Panel is slots=True, so the
-    # unpickled object has no such slot and `dataclasses.replace` raises. Rebuild positionally.
-    panel = Panel(panel0.dates, panel0.tickers, panel0.open, panel0.high, panel0.low,
-                  panel0.close, panel0.volume, univ, panel0.adv_usd, panel0.sector_id,
-                  panel0.meta)
+    # Measure on the SHIPPED builder, not a local reconstruction: breadth is the number the whole
+    # substrate is justified by, so it must come from the exact panel the miner will see (shifted
+    # ADV, PIT membership, top-K mask) rather than a lookalike built here.
+    panel = build_us_equity_panel(top_k=args.k)
+    univ = panel.active.astype(bool)
     with np.errstate(invalid="ignore", divide="ignore"):
         rets = np.diff(np.log(panel.close), axis=0, prepend=np.nan)
     rpy = 252.0 / args.hold

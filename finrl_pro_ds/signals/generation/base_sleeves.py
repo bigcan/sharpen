@@ -759,5 +759,84 @@ def intraday_base_sleeves(
     return {"tsmom": tsmom_net}
 
 
+def us_equity_base_sleeves(
+    panel: Panel,
+    *,
+    hold_horizon: int,
+    cost_bps: float,
+    etf_panel: "Panel | None" = None,
+    verify_causal: bool = True,
+    return_components: bool = False,
+) -> "dict[str, np.ndarray] | tuple[dict[str, np.ndarray], dict[str, SleeveComponents]]":
+    """``{"tsmom", "rates_carry"}`` — the VALIDATED ETF linear core, aligned onto the US-equity clock.
+
+    The comparator for the `us_equity` substrate is deliberately NOT computed on the equity panel.
+    Two reasons, and the second is a hard gate:
+
+      * ECONOMICS. The uplift question that matters is "does this equity signal add anything to the
+        book I would actually run?", and the only validated edge this project owns is cross-asset
+        ETF TSMOM at net SR ~0.60. Scoring marginal contribution against that is the real question.
+      * THE COMPARATOR MUST NOT BLEED. A base book losing to friction lets a ZERO-ALPHA candidate
+        clear the marginal-uplift gate purely by diluting the bleed — measured at a 15.3% null pass
+        rate against a nominal ~1% on the intraday substrate. The obvious equity-native base
+        (cross-sectional momentum) is a RECORDED NO-GO on liquid large caps, i.e. exactly such a
+        losing book. The ETF core is a winning one.
+
+    `hold_horizon` is the BASE book's own cadence (`generation.base_hold_horizon`), decoupled from
+    the candidate's — the 0.601/0.467 net-Sharpe anchors were earned at a monthly rebalance and
+    re-pricing them daily would destroy the comparator.
+
+    Sleeve streams are computed on the ETF panel and joined to `panel.dates` BY DATE (never
+    forward-filled into a bar the ETF book did not mark): a date the base book did not trade
+    contributes zero marked P&L, while `gross_exposure` carries forward because the position is
+    still held and the overlay's turnover must be charged at the book's true gross.
+    """
+    from finrl_pro_ds.data.cross_asset_panel_loader import load_cross_asset_panel
+
+    if etf_panel is None:
+        etf_panel = load_cross_asset_panel(
+            "2007-01-01", config_path=ROOT / "configs" / "cross_asset_momentum.yaml")
+
+    base, comps = cast(
+        "tuple[dict[str, np.ndarray], dict[str, SleeveComponents]]",
+        production_base_sleeves(etf_panel, hold_horizon=hold_horizon, cost_bps=cost_bps,
+                                verify_causal=verify_causal, return_components=True))
+
+    src_days = etf_panel.dates.astype("datetime64[D]")
+    dst_days = panel.dates.astype("datetime64[D]")
+    pos = np.searchsorted(src_days, dst_days)
+    hit = (pos < src_days.shape[0]) & (src_days[np.clip(pos, 0, src_days.shape[0] - 1)] == dst_days)
+    src_ix = np.clip(pos, 0, src_days.shape[0] - 1)
+
+    def _align(v: np.ndarray, *, carry: bool) -> np.ndarray:
+        out = np.where(hit, np.asarray(v, dtype=np.float64)[src_ix], 0.0)
+        if carry:
+            # last held gross before this bar; ffill over unmarked days, 0 before the book starts
+            prev = np.maximum.accumulate(np.where(hit, np.arange(hit.size), -1))
+            out = np.where(prev >= 0, out[np.clip(prev, 0, None)], 0.0)
+        return out
+
+    aligned_net: dict[str, np.ndarray] = {}
+    aligned_comps: dict[str, SleeveComponents] = {}
+    for k, c in comps.items():
+        net = _align(c.net, carry=False)
+        cost = _align(c.cost, carry=False)
+        aligned_net[k] = net
+        aligned_comps[k] = SleeveComponents(
+            net=net, gross=net + cost, cost=cost,
+            gross_exposure=_align(c.gross_exposure, carry=True))
+
+    log.info("us_equity_base_sleeves: %d/%d equity bars matched an ETF bar (%.2f%%); "
+             "sleeves=%s hold=%d cost_bps=%.6f",
+             int(hit.sum()), hit.size, 100.0 * hit.mean(), sorted(aligned_net), hold_horizon,
+             cost_bps)
+    if hit.mean() < 0.95:
+        log.warning("us_equity_base_sleeves: only %.1f%% of equity bars matched an ETF bar — the "
+                    "comparator is sparse on this clock", 100.0 * hit.mean())
+    if return_components:
+        return aligned_net, aligned_comps
+    return aligned_net
+
+
 # Path anchors kept for callers/tests that locate the gates/config relative to this module.
 ROOT = Path(__file__).resolve().parents[3]

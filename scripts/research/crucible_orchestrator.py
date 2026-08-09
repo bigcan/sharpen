@@ -215,6 +215,19 @@ def _build_substrate(args, cfg, ek, meta, sweep, sweep_hash) -> tuple[Substrate,
             # F14: proxy sleeves are unit-gross cost-free return streams → the overlay-cost
             # correction is an exact no-op (byte-identical synthetic/reproduce path).
             base_components = {k: unit_components(v) for k, v in base.items()}
+        elif meta["panel"] == "us_equity":
+            # S553-cont-152: top-300 PIT S&P 500 names, daily — the first substrate whose MEASURED
+            # realized breadth (n_eff 21.5 at H=1 / 43.7 at H=2, crucible_real_alpha_breadth.py)
+            # clears its own detection floor. The base book is deliberately the ETF linear core, not
+            # an equity-native one: see us_equity_base_sleeves for why a losing comparator is the
+            # failure mode this substrate is most exposed to.
+            from finrl_pro_ds.crucible.data.us_equity_panel import build_us_equity_panel
+            from finrl_pro_ds.signals.generation.base_sleeves import us_equity_base_sleeves
+            panel = build_us_equity_panel()
+            base_hold = meta.get("base_hold_horizon") or ek["hold_horizon"]
+            base, base_components = us_equity_base_sleeves(
+                panel, hold_horizon=int(base_hold), cost_bps=ek["cost_bps"],
+                return_components=True)
         elif meta["panel"] == "intraday_fx":
             # cont-151 derived-optimal substrate. Same shape as the `intraday` branch below (no
             # alt-data bridge — every connector publishes daily-or-slower, which on an hourly clock

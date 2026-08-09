@@ -19,6 +19,12 @@ from .fitness import FitnessConfig
 _WIRED_SUBSTRATES: dict[str, frozenset[str]] = {
     "cross_asset": frozenset({"tsmom", "rates_carry"}),
     "taiwan": frozenset({"tsmom"}),
+    # S553-cont-152: top-300 PIT S&P 500 names, daily (crucible/data/us_equity_panel.py). The book is
+    # the SAME validated {tsmom, rates_carry} ETF core as `cross_asset`, computed on the ETF panel and
+    # joined onto the equity clock by `us_equity_base_sleeves` — deliberately NOT an equity-native
+    # book, because the obvious one (large-cap cross-sectional momentum) is a recorded NO-GO and a
+    # losing comparator is what lets zero-alpha candidates clear the uplift gate by dilution.
+    "us_equity": frozenset({"tsmom", "rates_carry"}),
     # S553-cont-151: the 12-instrument Dukascopy hourly panel + its own TSMOM book
     # (intraday_base_sleeves). There is no intraday rates-carry sleeve, so the book is TSMOM-only —
     # same shape as the Taiwan substrate.
