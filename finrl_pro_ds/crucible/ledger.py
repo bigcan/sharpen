@@ -128,10 +128,22 @@ CREATE INDEX IF NOT EXISTS ix_trial_rejection ON trial_ledger(rejection_class);
 # The agent view is created SEPARATELY from _SCHEMA and DROPPED first: `CREATE VIEW IF NOT EXISTS` on an
 # existing DB would silently keep the OLD column list, so a migrated ledger would expose the pre-U4
 # projection while the code believed otherwise. A view carries no data, so dropping it is free.
+# `WHERE verdict IS NOT NULL` — the dedup keys must describe candidates that were actually SCORED.
+# A pre-registration writes its row BEFORE the holdout runs (the CR-2 lock on proposal_ts) and the
+# verdict is upserted only at scoring, so without this filter an unscored pre-registration becomes a
+# permanent self-block: author pre-registers -> row written -> the tick NO-OPs before scoring -> every
+# later tick reads the hash out of this view and drops the proposal as a duplicate -> NO-OP -> forever.
+# Measured (S553-cont-152): eight WQ101 seeds pre-registered on a cross_asset tick on 2026-07-02 sat
+# with verdict/rejection_class/implied_mde_at_test all NULL and blocked themselves on EVERY substrate
+# for five weeks; the first adequately-powered substrate this project has built accepted 0/8 proposals
+# and mined nothing, which in the logs is almost indistinguishable from "found no alpha".
+#
+# CRU-2 IS NOT WIDENED: the projected COLUMNS are unchanged and no verdict, DSR, OOS delta or holdout
+# value crosses the boundary. This REMOVES rows from the agent's view, it does not add information.
 _AGENT_VIEW_SQL = f"""
 DROP VIEW IF EXISTS ledger_agent_view;
 CREATE VIEW ledger_agent_view AS
-    SELECT {', '.join(_AGENT_VIEW_COLUMNS)} FROM trial_ledger;
+    SELECT {', '.join(_AGENT_VIEW_COLUMNS)} FROM trial_ledger WHERE verdict IS NOT NULL;
 """
 
 
@@ -296,10 +308,33 @@ class TrialLedger:
 
     # --- read (agent-visible; CR-1) ---------------------------------------------------------------
     def is_duplicate(self, candidate_hash: str) -> bool:
-        """True if this exact candidate was already scored (dedup before spending compute)."""
+        """True if this exact candidate was already SCORED (dedup before spending compute).
+
+        ``verdict IS NOT NULL`` is the scored test, and it is load-bearing rather than cosmetic. A
+        pre-registration writes its ledger row BEFORE the holdout runs (that is the CR-2 lock on
+        ``proposal_ts``), and the verdict is upserted only when the candidate is actually scored. The
+        query used to match on ``candidate_hash`` alone, which made an unscored pre-registration
+        permanently self-blocking:
+
+            author pre-registers -> row written (verdict NULL) -> tick NO-OPs before scoring
+            -> next tick sees the row and drops the proposal as a duplicate -> NO-OP -> forever.
+
+        Measured consequence (S553-cont-152): eight WorldQuant-101 seed specs pre-registered on a
+        `cross_asset` tick on 2026-07-02 under crucible-v2.6 carried verdict/rejection_class/
+        implied_mde_at_test all NULL, and blocked themselves on EVERY substrate for five weeks. The
+        first adequately-powered substrate this project has ever built accepted 0/8 proposals and
+        mined nothing at all as a direct result — the failure looks exactly like "found no alpha".
+
+        Nothing is laundered by re-testing them: no LORD++ wealth was ever charged for a trial that
+        did not run, and the row keeps its ORIGINAL ``proposal_ts``, so re-admission is the same
+        pre-registered hypothesis finally being tested rather than a fresh one.
+
+        CRU-2: still returns one bool about ledger membership and leaks no verdict, DSR, OOS delta or
+        holdout value. This narrows which rows count as duplicates; it does not widen the agent view.
+        """
         row = self._conn.execute(
-            "SELECT 1 FROM trial_ledger WHERE candidate_hash = ? LIMIT 1", (candidate_hash,)
-        ).fetchone()
+            "SELECT 1 FROM trial_ledger WHERE candidate_hash = ? AND verdict IS NOT NULL LIMIT 1",
+            (candidate_hash,)).fetchone()
         return row is not None
 
     def is_semantic_duplicate(self, formula: str) -> bool:
@@ -311,7 +346,8 @@ class TrialLedger:
         except Exception:                                     # noqa: BLE001 — unparseable ⇒ not a dup
             return False
         return self._conn.execute(
-            "SELECT 1 FROM trial_ledger WHERE semantic_hash = ? LIMIT 1", (sh,)).fetchone() is not None
+            "SELECT 1 FROM trial_ledger WHERE semantic_hash = ? AND verdict IS NOT NULL LIMIT 1",
+            (sh,)).fetchone() is not None
 
     def killed_families(self) -> list[str]:
         """Families that are dead — the NO-GOs the agent must not rediscover (spec §6). Family NAMES
