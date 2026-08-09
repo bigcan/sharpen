@@ -317,6 +317,43 @@ def test_orchestrator_store_migrates_status_columns(tmp_path) -> None:
     OrchestratorStore(db).close()                           # idempotent second open
 
 
+def test_tick_record_persists_the_holdout_denominator(tmp_path) -> None:
+    """crucible-v12.0: `n_promising` is unreadable without the number of candidates the BINDING
+    holdout gate adjudicated. The column must migrate onto a pre-v12 ticks table (as NULL — UNKNOWN,
+    never 0) and must round-trip on a fresh write."""
+    import sqlite3
+
+    from finrl_pro_ds.crucible.orchestrator.substrate import TickRecord
+
+    db = tmp_path / "orch.db"
+    conn = sqlite3.connect(str(db))       # the REAL pre-v12 schema, minus n_holdout_tested only
+    conn.execute("CREATE TABLE ticks (id INTEGER PRIMARY KEY AUTOINCREMENT, tick_ts TEXT NOT NULL, "
+                 "substrate_id TEXT NOT NULL, dirty INTEGER NOT NULL, mined INTEGER NOT NULL, "
+                 "reason TEXT, snapshot_hash TEXT, n_preregistered INTEGER, n_scored INTEGER, "
+                 "n_promising INTEGER, fdr_charged_total REAL, budget_breached INTEGER, "
+                 "burst_target TEXT, manifest_hash TEXT, status TEXT, error TEXT, panel_T INTEGER, "
+                 "holdout_bars INTEGER, implied_mde_delta_sr REAL, power_interp_mode TEXT)")
+    conn.execute("INSERT INTO ticks (tick_ts, substrate_id, dirty, mined, reason, snapshot_hash, "
+                 "n_preregistered, n_scored, n_promising) VALUES "
+                 "('t0', 's', 1, 1, 'legacy', 'h0', 8, 10, 0)")
+    conn.commit()
+    conn.close()
+
+    store = OrchestratorStore(db)
+    assert "n_holdout_tested" in {r["name"] for r in store._conn.execute("PRAGMA table_info(ticks)")}
+    legacy = store.ticks("s")[0]
+    assert legacy["n_holdout_tested"] is None, (
+        "a pre-v12 tick must read UNKNOWN, not 0 — back-filling a zero would assert that a run we "
+        "cannot inspect tested nothing")
+
+    store.record_tick(TickRecord(tick_ts="t1", substrate_id="s", dirty=True, mined=True,
+                                 reason="mined", snapshot_hash="h1", n_preregistered=8, n_scored=10,
+                                 n_holdout_tested=8, n_promising=0))
+    fresh = store.ticks("s")[-1]
+    assert fresh["n_holdout_tested"] == 8 and fresh["n_promising"] == 0
+    store.close()
+
+
 # ============================================================ NOW-5: substrate-power guard (C2-01) ====
 
 def test_power_guard_refuses_underpowered_mine(tmp_path) -> None:

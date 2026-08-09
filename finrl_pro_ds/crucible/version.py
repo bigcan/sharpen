@@ -641,7 +641,43 @@ from pathlib import Path
 # is owed (verified: scripts/research/crucible_calibration.py imports no scorecard symbol).
 # to_markdown gained a `fricSh` column: the 2026-07-31 miss was partly a REPORTING failure, since the
 # table that carried the PROMISING showed netSh@std and costWall but never the frictionless Sharpe.
-CRUCIBLE_VERSION = "crucible-v11.0"
+# v12.0 = A PRE-REGISTERED SPEC IS TESTED, NOT SCREENED. Under `eligibility.offspring_policy:
+# prereg_only` (the default) the cheap TRAIN pre-filter no longer applies to pre-registered seeds; the
+# eligible set IS the pre-registration, and every spec that produced a FitnessResult reaches the
+# binding holdout gate. MEASURED motivation (S553-cont-153, on the first adequately-powered substrate):
+# `us_equity` culled 8 of 8 pre-registered seeds on train — all on the `uplift` leg, train ΔSR
+# -0.19..-1.03 against a +0.10 floor — so `train_passers` was EMPTY, the holdout loop never iterated,
+# and `corrected_contract_fitness` never executed on one pre-registered hypothesis. The tick reported
+# `mined=True fdr_tests=8 promising=0` and CHARGED eight LORD++ tests for tests that never ran. Same
+# shape as the defect v6.0 was built to remove (train re-applying the final gate ⇒ the holdout stage
+# never runs), through a different door: an ECONOMIC-SIZE screen rather than a significance one, with
+# the identical consequence — `promising=0` carrying no evidence and being indistinguishable from a
+# run where the test did execute. It is also selection in the wrong direction (keep the
+# pre-registrations that already look good IN-sample, then test those out-of-sample), which is what
+# pre-registration exists to prevent. No guard is lost: uplift/fragility/collinearity are all
+# re-applied on the HOLDOUT inside `corrected_contract_fitness`, where they judge out-of-sample
+# evidence. `offspring_policy: all` is untouched — with an unbounded search feeding it the pre-filter
+# is a compute bound, not a screen on pre-registrations.
+#
+# MAJOR because it changes WHICH hypotheses a tick tests — the v10.0 precedent exactly (semantic dedup
+# / re-admission), a decision-layer change with no gate value moved. NO gate byte changes; the three
+# sealed moats 519158fa1450 / 22a18172be1a / 0ccf6dd584f0 are UNCHANGED, and no threshold is retuned.
+#
+# CRU-1 verdict-preservation IS claimed for the existing record and was VERIFIED, not assumed: the
+# eight `us_equity` seeds — the only pre-registrations this change would have routed differently —
+# were re-scored through the SHIPPED `corrected_contract_fitness` on the embargoed holdout
+# (scripts/research/crucible_prereg_prefilter_forensics.py, results/crucible_prereg_forensics/).
+# 0 of 8 pass, and not marginally: best corrected_t = 0.44 against t_min 2.33, seven of eight with a
+# NEGATIVE holdout ΔSR. So the recorded `promising=0` stands unchanged — what changes is that it is
+# now a result rather than a vacuity, and the ledger's `rejection_class` stops being NULL.
+#
+# Ships with the REPORTING half, which is the durable part: `GenerationReport.n_holdout_tested` ->
+# `TickRecord.n_holdout_tested` (nullable, migrated by _ensure_columns; NULL on pre-v12 rows means
+# UNKNOWN, never zero) records the DENOMINATOR of `n_promising`, and the orchestrator warns loudly
+# when it is zero. Two consecutive sessions lost real time to a `promising=0` whose denominator was
+# unreadable — the cont-152 dedup livelock, then this pre-filter. The count now travels with the
+# verdict instead of living in a log line.
+CRUCIBLE_VERSION = "crucible-v12.0"
 
 # The baseline (pre-gate-repair) system, preserved as a git tag for reproducibility comparisons.
 CRUCIBLE_BASELINE_VERSION = "crucible-v1.0"
